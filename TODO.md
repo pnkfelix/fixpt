@@ -4565,6 +4565,14 @@ once for each comparison of a `.fasl`'s uses and of its abbreviations
 load is printing types (`core::fmt`, `String`), std's SipHash and
 allocation: 2 and 3.
 
+**2 done (2026-10-31).** A `.fasl`'s `use` line keeps the type's digest
+(`Checker::fasl_use_digest`: `ty_digest`, a module's abstract type taken
+by the `select` naming it, as two files of one name name theirs alike)
+before its text (`#fasl(fixpt-fasl 3)`); a load compares the digest of
+each global's type once a file, and prints only where they differ. On
+s7st every one of its 664 uses matched by digest; its warm start 0.67 s
+to 0.56 s. What prints types now is each definition checked again (3).
+
 Walks of a whole environment found besides (2026-10-31), for later:
 `uses_of`, `users_of` and `direct_users_of` walk the definitions (an
 index by the names each defines and uses; `k-users-of`,

@@ -161,6 +161,33 @@ fn a_program_fasl_is_stale_when_what_it_uses_changed() {
     assert!(err.contains("`prog.fasl` is stale (`twice` uses `scale`, which is not here at the type it was)"), "{out}{err}");
 }
 
+/// A use's type compared by its digest first (`Checker::fasl_use_digest`):
+/// an abstract type by the `select` that names it, so that one of another
+/// module of the same name is not taken for it.
+#[test]
+fn a_program_fasl_tells_apart_abstract_types_of_the_same_name() {
+    let dir = scratch("selects");
+    // Two files of the same name, whose abstract types are named alike.
+    let module = "(define-generative t int)\n(define zero t (up-t 0))\n(define value (subr pure (t) int) (lambda (v) (down-t v)))\n";
+    for m in ["a", "c"] {
+        std::fs::create_dir_all(dir.join(m)).expect("made");
+        std::fs::write(dir.join(format!("{m}/m.fx")), module).expect("written");
+    }
+    let base = |m: &str| format!("(define a (load-module \"a/m.fx\"))\n(define c (load-module \"c/m.fx\"))\n(define use-t (subr pure ((select {m} t)) int) (lambda (v) 0))\n");
+    std::fs::write(dir.join("base-a.fx"), base("a")).expect("written");
+    std::fs::write(dir.join("base-c.fx"), base("c")).expect("written");
+    std::fs::write(dir.join("prog.fx"), "(define* get (subr (read (globals use-t a c)) () int) (lambda () (use-t (with a zero))))\n(write-out \"ran\\n\")\n").expect("written");
+    std::fs::write(dir.join("make.fx"), "(compile-file \"prog.fx\" program)\n").expect("written");
+    let (ok, out, err) = fixpt(&dir, &["run", "base-a.fx", "make.fx"], &[]);
+    assert!(ok && out.contains("; compiled `prog.fx` to `"), "{out}{err}");
+    let (ok, out, err) = fixpt(&dir, &["run", "base-a.fx", "prog.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ok && out == "ran\n" && err.contains("`prog.fx` is read from `prog.fasl`"), "{out}{err}");
+    // `use-t` of `c`'s `t`, named as `a`'s is, but another type: only
+    // that differs (its effect is the same, as its body reads neither).
+    let (_, out, err) = fixpt(&dir, &["run", "base-c.fx", "prog.fx"], &[]);
+    assert!(err.contains("`prog.fasl` is stale"), "{out}{err}");
+}
+
 /// A program's `.fasl`'s image is linked before its definitions run, each
 /// global its code names made ahead (`Fx26Session::splice_program`): one
 /// defined again since, so not the one code after was linked to, has those

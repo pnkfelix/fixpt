@@ -383,7 +383,13 @@ impl Checker {
             Ty::Base(s) => name(*s).hash(&mut h),
             Ty::Void | Ty::Nil | Ty::False | Ty::Link(_) => {}
             Ty::Union(ms) => ms.len().hash(&mut h),
-            Ty::Var(v) => var(*v).hash(&mut h),
+            // An abstract type of a module a global holds, as a `.fasl`'s
+            // use names it (`fasl_use_digest`): by its `select`, not by
+            // its name, which another module's may have.
+            Ty::Var(v) => match self.fasl_selects.borrow().as_ref().and_then(|m| m.get(v)) {
+                Some(select) => (true, select).hash(&mut h),
+                None => var(*v).hash(&mut h),
+            },
             Ty::Subr { conv, effect, params, spec, .. } => {
                 (self.show_conv(*conv), self.show_effect(effect), params.len()).hash(&mut h);
                 if let Some(spec) = spec {

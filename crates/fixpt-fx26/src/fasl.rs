@@ -12,7 +12,7 @@
 //! (`src/Asm/Shared/makefasl.sch`), and each value of a file it loads by
 //! that load.
 //!
-//! The file: a line `#fasl(fixpt-fasl 2)`, a header of lines `word value`,
+//! The file: a line `#fasl(fixpt-fasl 3)`, a header of lines `word value`,
 //! then `image N` and the image's `N` bytes (`fixpt_heap::image`). The
 //! globals its value links to are named in the header (`global`), so that
 //! the image can be spliced into the loader's heap with its links known
@@ -29,7 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 /// A `.fasl`'s first line.
-pub const MARK: &str = "#fasl(fixpt-fasl 2)";
+pub const MARK: &str = "#fasl(fixpt-fasl 3)";
 
 /// What a `.fasl` says of itself before its image.
 #[derive(Clone, Debug, PartialEq)]
@@ -102,7 +102,9 @@ pub struct Def {
     pub ty: String,
     /// The expression its declaration has the type by ([`fasl_value_at`]).
     pub init: String,
-    pub uses: Vec<(String, String)>,
+    /// Each global it uses: its name, its type then as text, and that
+    /// type's digest (`Checker::fasl_use_digest`), compared first.
+    pub uses: Vec<(String, String, u64)>,
     /// What its definition said as it was made, a line each (that the
     /// native compiler declined it, say), said again where it is loaded.
     pub said: Vec<String>,
@@ -225,8 +227,8 @@ impl Header {
         }
         for d in &self.defs {
             out.push_str(&format!("{} {} {} {}\ninit {}\n", if d.rec { "rec" } else { "def" }, d.form, d.name, d.ty, d.init));
-            for (n, t) in &d.uses {
-                out.push_str(&format!("use {n} {t}\n"));
+            for (n, t, digest) in &d.uses {
+                out.push_str(&format!("use {n} {digest:016x} {t}\n"));
             }
             for l in &d.said {
                 out.push_str(&format!("said {l}\n"));
@@ -299,8 +301,11 @@ impl Header {
                 }
                 "global" => h.globals.push(value.to_string()),
                 "use" => {
-                    let (name, ty) = value.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
-                    h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.uses.push((name.to_string(), ty.to_string()));
+                    let bad = || format!("a header line `{l}`");
+                    let (name, rest) = value.split_once(' ').ok_or_else(bad)?;
+                    let (digest, ty) = rest.split_once(' ').ok_or_else(bad)?;
+                    let digest = u64::from_str_radix(digest, 16).map_err(|_| bad())?;
+                    h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.uses.push((name.to_string(), ty.to_string(), digest));
                 }
                 "image" => {
                     let n: usize = value.parse().map_err(|_| format!("a header line `{l}`"))?;
@@ -1013,6 +1018,22 @@ impl crate::check::Checker {
     /// compared (`Fx26Session::program_fasl`).
     pub fn fasl_program_type(&self, t: crate::ast::TyId) -> Result<String, String> {
         self.fasl_type_text(t, false)
+    }
+
+    /// A digest of type `t` (`ty_digest`), each abstract type of a module a
+    /// global holds taken as the `select` that names it, as
+    /// [`fasl_program_type`](Self::fasl_program_type) prints it: what a
+    /// `.fasl` keeps of the type of a global its code uses, compared before
+    /// the text, which is printed only if the digests differ.
+    pub fn fasl_use_digest(&self, t: crate::ast::TyId) -> u64 {
+        if self.fasl_selects.borrow().is_some() {
+            return self.ty_digest(t);
+        }
+        let names = self.select_names();
+        let outer = self.fasl_selects.replace(Some(names));
+        let d = self.ty_digest(t);
+        *self.fasl_selects.borrow_mut() = outer;
+        d
     }
 
     /// [`fasl_program_type`](Self::fasl_program_type), or with `body` what

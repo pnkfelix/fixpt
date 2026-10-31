@@ -2352,20 +2352,27 @@ impl Fx26Session {
 
     /// Why `defs`' code is not right here, if it is not: a global it uses,
     /// not one the file defines (`defined`), not here, or not at the type
-    /// it had (printed as `fasl_program_type` prints it).
+    /// it had: its digest first (`fasl_use_digest`), each global's once;
+    /// where that differs, printed as `fasl_program_type` prints it.
     fn stale_use(&mut self, defs: &[crate::fasl::Def], defined: &std::collections::HashSet<String>) -> Option<String> {
         self.checker.with_fasl_selects(|c| Self::stale_use_in(c, defs, defined))
     }
 
     fn stale_use_in(checker: &mut Checker, defs: &[crate::fasl::Def], defined: &std::collections::HashSet<String>) -> Option<String> {
+        let mut digests: std::collections::HashMap<crate::ast::TyId, u64> = std::collections::HashMap::new();
         for d in defs {
-            for (u, t) in &d.uses {
+            for (u, t, digest) in &d.uses {
                 if defined.contains(u) {
                     continue;
                 }
                 let un = checker.interner.intern(u);
-                let now = checker.global_type(un).map(|g| checker.fasl_program_type(g));
-                if now.as_ref().is_none_or(|n| n.as_deref() != Ok(t.as_str())) {
+                let Some(g) = checker.global_type(un) else {
+                    return Some(format!("`{}` uses `{u}`, which is not here", d.name));
+                };
+                if *digests.entry(g).or_insert_with(|| checker.fasl_use_digest(g)) == *digest {
+                    continue;
+                }
+                if checker.fasl_program_type(g).as_deref() != Ok(t.as_str()) {
                     return Some(format!("`{}` uses `{u}`, which is not here at the type it was", d.name));
                 }
             }
@@ -2415,7 +2422,7 @@ impl Fx26Session {
         let kept = std::rc::Rc::new(form.clone());
         for (d, _) in group {
             let name = self.checker.interner.intern(&d.name);
-            let uses = d.uses.iter().map(|(u, _)| self.checker.interner.intern(u)).collect();
+            let uses = d.uses.iter().map(|(u, _, _)| self.checker.interner.intern(u)).collect();
             self.checker.fasl_defined(name, kept.clone(), uses);
         }
         let top = done.run.into_iter().next().map(|(t, _)| t).ok_or_else(|| fail("a definition".into()))?;
@@ -2690,7 +2697,7 @@ impl Fx26Session {
     /// than once (`counts`), of a type that does not read back as itself,
     /// or that uses a load's hidden global, which the forms that load it
     /// make as they are checked.
-    fn kept_binding(&mut self, b: (Sym, crate::ast::TyId, crate::ast::ExpId), counts: &std::collections::HashMap<Sym, usize>, rec: bool, value: Option<&[Sym]>) -> Option<(String, String, String, Vec<(String, String)>)> {
+    fn kept_binding(&mut self, b: (Sym, crate::ast::TyId, crate::ast::ExpId), counts: &std::collections::HashMap<Sym, usize>, rec: bool, value: Option<&[Sym]>) -> Option<(String, String, String, Vec<(String, String, u64)>)> {
         let (name, tid, exp) = b;
         if counts.get(&name) != Some(&1) || !(value.is_some() || Self::names_its_word(&self.checker, exp)) {
             return None;
@@ -2703,7 +2710,14 @@ impl Fx26Session {
         if used.iter().any(|u| self.checker.interner.name(*u).starts_with("%shared:")) {
             return None;
         }
-        let uses = used.into_iter().filter_map(|u| Some((self.checker.interner.name(u).to_string(), self.checker.fasl_program_type(self.checker.global_type(u)?).ok()?))).collect();
+        let uses = self.checker.with_fasl_selects(|c| {
+            used.into_iter()
+                .filter_map(|u| {
+                    let g = c.global_type(u)?;
+                    Some((c.interner.name(u).to_string(), c.fasl_program_type(g).ok()?, c.fasl_use_digest(g)))
+                })
+                .collect()
+        });
         // The type, its `poly`s and procedures taken apart: as printed, if
         // that shows them, else written out (an abbreviation of a `poly`,
         // say), which can be much longer.
