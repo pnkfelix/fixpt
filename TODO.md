@@ -4343,3 +4343,71 @@ state its setup leaves (its libraries loaded, its prelude run), not by
 running that setup again for each test. For speeding up *testing*; first
 measure what each Heist test spends before its own code runs (front end,
 loading, the suite's setup), against the pinned snapshot only.
+
+## 190. Q: why is `(define-datatype var (union symbol pat))` accepted? (the user's, 2026-10-31)
+
+Find out why this checks as a datatype definition, and whether it
+should: `define-type` would be the right form for it.
+
+```
+(define-datatype var (union symbol pat))
+```
+
+## 191. Q: `tagcase` binds a named product's fields by position (the user's, 2026-10-31)
+
+Why is a product with named fields taken apart by position, the arm's
+names unrelated to the fields'?
+
+```
+(tagcase (sum rect (product (w 1) (h 2))) (rect (x y) x))
+```
+
+Either (1) require a positional product for it, numeric fields
+(`(product (0 …) (1 …))`), or (2) allow names but require them to be the
+fields'; though (2) sits badly with the plan to make every label, of sums
+and products alike, the keyword syntax (§183).
+
+## 192. Q: `(the tree-loc '(1 2))` refused, `(the tree-loc (list 1 2))` accepted (the user's, 2026-10-31)
+
+With `(define-type tree-loc (listof nat acyclic))`, why is `(the tree-loc
+'(1 2))` refused (it is a `datum`, the checker says) when `(the tree-loc
+(list 1 2))` is accepted?
+
+## 193. `union` to tell sums apart by their tags (the user's, 2026-10-31)
+
+Make the `(union …)` system treat sums with distinct tags as distinct
+shapes, so that a union may hold two sum types whose tags differ.
+
+## 194. Pending type definitions and `union` (the user's, 2026-10-31)
+
+The pending type definitions (which the user relies on to define
+mutually recursive types one at a time at the REPL) do not work with
+`union`: a union refuses a type not yet defined at once.
+
+```
+(define-type a (sumof (#:a c)))
+(define-type b (sumof (#:b c)))
+(define-type c (union a b))
+=> <fx26:113>:1:23: `a` is not a type
+```
+
+## 195. Consider renaming `(union …)` (the user's, 2026-10-31)
+
+Consider renaming the `(union …)` type form `(disjoint-union …)`, or just
+`(disjoint …)`, so that `(union …)` is kept for a true union, one that
+does not care whether its members overlap.
+
+## 196. `(bool (then (shape …)))` of more than the core shapes (the user's, 2026-10-31)
+
+See whether `(bool (then (shape …)))` can be extended to prove that a
+value is of a type that is nearly arbitrary; now it is limited to a fixed
+set of core shapes (probably those `typecase` tells apart).
+
+## 197. A truthy `and` (the user's, 2026-10-31)
+
+Add `(and e1 e2 …)` that gives false or the last expression's value.
+
+## 198. `(listof T)` short for `(listof T acyclic)` (the user's, 2026-10-31)
+
+Make `(listof T)` short for `(listof T acyclic)`, as that is almost always
+what is wanted.
