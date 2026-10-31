@@ -4365,7 +4365,7 @@ every file of the checker is given (`check-types-sig`); the copies, their
 signatures' entries (`check-sub-env-sig`, `check-subtype-sig`) and two
 aliases of them gone. `check-rules.fx`'s debt 1014 to 1013.
 
-## 189. Heap dumps for FX-26 (the user's, 2026-10-31; started)
+## 189. Heap dumps for FX-26 (the user's, 2026-10-31)
 
 Measured (`TODO.md` §189): a warm s7st test is Fixpt's warm start, not
 s7st's setup; the FX-26 checker alone checks and runs Heist's programs as
@@ -4382,4 +4382,14 @@ without compiling, each step's forms given the evaluator as text, a
 commit's runs named by the checker (`checked-run-names`), their texts
 kept in the session's own vector (a fourth field); its session primitives
 run code too (`prim::reenters`).
+
+Then the dumps: `fixpt dump IMAGE FILE…`, `fixpt resume IMAGE [FILE…]
+[-- ARG…]` and `(dump-heap! path start)` (`%fx26-dump-heap`, the
+session's `Runtime::dump_heap`), on every machine whose front end is
+native code and whose program the compilers written in FX-26 compile;
+the others say they cannot. The heap as the load left it, the program's
+state with it; more files checked and run after a resume by the FX-26
+checker alone, `main` defined again among them; a dump of changed sources
+refused. s7st's tests from a dump: 0.58 s, against 46.9 s
+(`fixpt-cli/tests/dumps.rs`; `docs/fx26.md`, "Heap dumps").
 

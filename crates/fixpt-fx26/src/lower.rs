@@ -513,6 +513,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("%syscall4", "%fx26-syscall", true),
     ("%syscall5", "%fx26-syscall", true),
     ("%syscall6", "%fx26-syscall", true),
+    ("dump-heap!", "%fx26-dump-heap", false),
 ];
 
 /// The FX-26 copy of what [`STANDARD`] says the compiler written in FX-26

@@ -760,6 +760,121 @@ pub fn compile_files(backend: Backend, files: &[String]) -> i32 {
     0
 }
 
+/// `fixpt dump IMAGE FILE…` (`TODO.md` §189): the files, one program,
+/// checked and compiled by the front end written in FX-26 alone, its
+/// top-level forms run, and the heap dumped to IMAGE, `main` its start
+/// (`Fx26Session::dump_image`). Files from one directory: the program's
+/// loads are from the first's.
+pub fn dump_files(backend: Backend, image: &str, files: &[String], machine: &str) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    if crate::STEP_LIMIT.get().is_none() {
+        session.set_step_limit(None);
+    }
+    let mut sources = Vec::new();
+    for f in files {
+        match std::fs::read_to_string(f) {
+            Ok(t) => sources.push((canonical(f), t)),
+            Err(e) => {
+                eprintln!("fixpt: cannot read {f}: {e}");
+                return 1;
+            }
+        }
+    }
+    let joined: String = sources.iter().map(|(_, t)| format!("{t}\n")).collect();
+    session.checker.base_dir = files.first().and_then(|f| std::path::Path::new(f).parent().map(|d| d.to_path_buf()));
+    match session.compile_with_own_compiler_showing(&joined, false) {
+        Ok((out, _)) if out.starts_with("!!") => {
+            eprintln!("fixpt: {}", out.trim_start_matches("!! "));
+            return 1;
+        }
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("fixpt: {}", e.message);
+            return 1;
+        }
+    }
+    match session.dump_image(std::path::Path::new(image), "main", machine, &sources) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("fixpt dump: {e}");
+            1
+        }
+    }
+}
+
+/// File `f`'s path, made absolute, as a dump keeps it.
+fn canonical(f: &str) -> String {
+    std::fs::canonicalize(f).map_or_else(|_| f.to_string(), |p| p.display().to_string())
+}
+
+/// `fixpt resume IMAGE [FILE…] -- ARG…` (`TODO.md` §189): the program
+/// dumped to IMAGE (`dump_files`, or its own `dump-heap!`), the files
+/// checked and run as more of it, and its start called with the
+/// arguments, as `fixpt run` calls `main`; refused if IMAGE was dumped by
+/// another build, on another machine, or of sources that have changed
+/// since.
+
+pub fn resume(backend: Backend, image: &str, files: &[String], args: &[String], machine: &str) -> i32 {
+    let bytes = match fixpt_heap::Mapped::open(std::path::Path::new(image)) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("fixpt resume: cannot read {image}: {e}");
+            return 1;
+        }
+    };
+    let (key, paths) = match fixpt_fx26::session::dump_header(bytes.get(..).unwrap_or(&[])) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("fixpt resume: {image}: {e}");
+            return 1;
+        }
+    };
+    let mut sources = Vec::new();
+    for p in &paths {
+        match std::fs::read_to_string(p) {
+            Ok(t) => sources.push((p.clone(), t)),
+            Err(e) => {
+                eprintln!("fixpt resume: {image}: cannot read its source {p}: {e}");
+                return 1;
+            }
+        }
+    }
+    if fixpt_fx26::session::dump_key(machine, &sources) != key {
+        eprintln!("fixpt resume: {image} is stale (its sources changed, or it was dumped on another machine): dump it again");
+        return 1;
+    }
+    drop(bytes);
+    fixpt_fx26::session::resume_from(std::path::Path::new(image));
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    session.scheme.runtime_unrooted().world.args = args.to_vec();
+    if crate::STEP_LIMIT.get().is_none() {
+        session.set_step_limit(None);
+    }
+    let mut more = Vec::new();
+    for f in files {
+        match std::fs::read_to_string(f) {
+            Ok(t) => more.push((f.clone(), t)),
+            Err(e) => {
+                eprintln!("fixpt resume: cannot read {f}: {e}");
+                return 1;
+            }
+        }
+    }
+    match session.resumed_start(&more) {
+        Ok(v) => v.trim().parse::<i128>().map_or(0, |n| n.rem_euclid(256) as i32),
+        Err(e) => exited(&mut session).unwrap_or_else(|| {
+            eprintln!("fixpt resume: {e}");
+            1
+        }),
+    }
+}
+
 /// `run_files`, in `session`: the files, then `main`.
 fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) -> i32 {
     session.scheme.runtime_unrooted().world.args = args.to_vec();
@@ -768,6 +883,10 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
     if crate::STEP_LIMIT.get().is_none() {
         session.set_step_limit(None);
     }
+    // What a dump the program makes of itself (`dump-heap!`) is keyed by,
+    // as `fixpt dump`'s is.
+    let sources = files.iter().filter_map(|f| Some((canonical(f), std::fs::read_to_string(f).ok()?))).collect();
+    session.dump_sources(crate::FX26_MACHINE_NAME.get().map_or("", String::as_str), sources);
     for f in files {
         let text = match std::fs::read_to_string(f) {
             Ok(t) => t,
@@ -789,7 +908,7 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
         // `fixpt eval`'s and `,load`'s are.
         let dir = std::path::Path::new(f).parent().map(|d| d.to_path_buf());
         let outer = std::mem::replace(&mut session.checker.base_dir, dir);
-        let path = std::fs::canonicalize(f).map_or_else(|_| f.to_string(), |p| p.display().to_string());
+        let path = canonical(f);
         session.source_file = Some(std::rc::Rc::new((path, text.clone())));
         session.program_file = Some(std::path::PathBuf::from(f));
         let ran = session.run_forms(&forms);

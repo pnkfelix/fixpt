@@ -3144,3 +3144,27 @@ of `TODO.md` §141, working on my own.
   at the top level of a session's checker, as `sessions.rs` does in the
   Rust checker's description scope, is not yet in the FX-26 checker; a
   session whose first step names one stays on the Rust checker.
+
+## Heap dumps (`TODO.md` §189, 2026-10-31)
+
+- **The front end's cache, with a start**: a dump is written as the
+  front end's cache is (`native_image`), its pieces taken from the
+  `fx26-native:` globals as the program left them, and the start after
+  the standard environment; so it is read back by the same code, and
+  holds the program because the FX-26 checker and compilers do.
+- **A start that is a name, or a procedure**: `fixpt dump`'s start is the
+  name `main`, looked up at the resume, after the files it is given, so
+  that one of them may define `main` again; `dump-heap!`'s is the
+  procedure it is given.
+- **`dump-heap!` does not call its start**: its effect is the write, its
+  start's effect polymorphic (`(poly ((e effect)) …)`) and not its own,
+  as a resumed run is a run of its own; the program goes on after it.
+- **Keyed by the files given**: the build, the machine, the files'
+  paths (made absolute) and digests; checked before anything is read.
+  A file they load is not in the key (left, `TODO.md` §189).
+- **Refused where it would not be the machine's**: `fixpt dump` loads with
+  the compilers written in FX-26, so a machine that lowers or evaluates
+  refuses, rather than dumping a program run otherwise than it says; the
+  evaluator's `dump-heap!` fails as an I/O failure.
+- **The primitive last**: `%fx26-dump-heap` is registered after every
+  other, so that the generated layouts number the others as before.

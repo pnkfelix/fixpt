@@ -3120,6 +3120,18 @@ prims! {
     // A bound made of exact evidence (`effect-bound`, `type-bound`): the
     // same text.
     "%fx26-evidence-bound", 1, Some(1), simple!(|_rt, a| Ok(a[0]));
+    // The heap dumped to file `a[0]` (`TODO.md` §189): the program as it
+    // now is, which a resumed run (`fixpt resume`) starts by calling `a[1]`,
+    // a procedure of no arguments. Where the session installed no way to,
+    // a failure.
+    "%fx26-dump-heap", 2, Some(2), simple!(|rt, a| {
+        let path = get_string(rt, a[0])?;
+        let r = match rt.dump_heap {
+            Some(dump) => dump(rt, &path, a[1]).map_err(std::io::Error::other),
+            None => Err(std::io::Error::other("this machine cannot dump its heap")),
+        };
+        Ok(fx26_io_result(rt, r))
+    });
 }
 
 /// Promise states. `[state, payload]`.

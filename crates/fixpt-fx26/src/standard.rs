@@ -329,6 +329,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("file-info", "(subr (io fs-read) (string) (sumof (info (productof (kind (sumof (file unit) (directory unit) (symlink unit) (other unit))) (size int) (modified int) (mode int))) (failed io-error)))"),
     ("read-symlink", "(subr (io fs-read) (string) (sumof (target string) (failed io-error)))"),
     ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
+    // The heap dumped, and the procedure a resumed run starts by calling
+    // (`fixpt resume`, `TODO.md` §189). It is not called here, so its
+    // effect is none of this one's.
+    ("dump-heap!", "(poly ((e effect)) (subr (io fs-write) (string (subr e () int)) (sumof (done unit) (failed io-error))))"),
     // Bytevectors (`TODO.md` §84): made, read and written at a region, as
     // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,
     // `bytevector-copy!` R7RS's `to at from start end`.

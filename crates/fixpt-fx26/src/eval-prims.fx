@@ -535,6 +535,15 @@
       (prim! 'write-file
              (lambda (xs)
                (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1))))))
+      ;; The evaluator's heap is no program's a resumed run could start
+      ;; (`TODO.md` §189): a dump fails here.
+      (prim! 'dump-heap!
+             (lambda (xs)
+               (the val
+                 (o-sum 'failed
+                        (o-product (list (cons 'kind (the val (o-sum 'other the-unit)))
+                                         (cons 'detail
+                                               (the val "this machine cannot dump its heap"))))))))
       ;; Heist's (`FIXPT-CHANGES.md` F4).
       (prim! 'process-start
              (lambda (xs)

@@ -76,6 +76,13 @@ usage:
                                  `,load`) reads while it is fresh; its native
                                  code kept, or with --cellular its cellular
                                  words alone, compiled natively at load
+  fixpt dump IMAGE FILE...       FX-26: the program in FILE... loaded, and its
+                                 heap dumped to IMAGE (`main` not called)
+  fixpt resume IMAGE [FILE...] [-- ARG...]
+                                 the program dumped to IMAGE, by `fixpt dump`
+                                 or its own `dump-heap!`, as its load left it:
+                                 FILE... run as more of it, then its start
+                                 (`main`, or what it gave `dump-heap!`)
   fixpt machines                 the machines FX-26 runs on, and which run here
   fixpt prewarm                  make the caches of the FX-26 front end, both
                                  kinds, before they are wanted
@@ -140,8 +147,8 @@ made with rather than being told.
 
 /// The commands, as the first word: a word that is none of them but names
 /// a file runs it (`fixpt FILE`).
-const COMMANDS: [&str; 22] = [
-    "repl", "fx26", "scheme", "run", "eval", "check", "query", "test", "verify", "compile", "compile-file", "machines", "prewarm", "bench", "dump-heap", "build", "run-image", "image",
+const COMMANDS: [&str; 24] = [
+    "repl", "fx26", "scheme", "run", "eval", "check", "query", "test", "verify", "compile", "compile-file", "machines", "prewarm", "bench", "dump-heap", "build", "run-image", "image", "dump", "resume",
     "front-end-files", "help", "regcode-survey", "--help",
 ];
 
@@ -394,6 +401,23 @@ fn run(args: &[String]) -> i32 {
                         1
                     }
                 },
+            }
+        }
+        // A program's heap dumped, and resumed (`TODO.md` §189).
+        Some(cmd @ ("dump" | "resume")) => {
+            if rest.len() < 3 && cmd == "dump" || rest.len() < 2 {
+                eprintln!("fixpt {cmd}: `fixpt dump IMAGE FILE…` or `fixpt resume IMAGE [FILE…] [-- ARG…]`");
+                return 2;
+            }
+            let machine = FX26_MACHINE_NAME.get().cloned().unwrap_or_default();
+            if cmd == "dump" {
+                fx26::dump_files(backend, &rest[1], &rest[2..], &machine)
+            } else {
+                // Files to run as more of the program, then the program's
+                // arguments, after a `--`.
+                let files: Vec<String> = rest[2..].iter().take_while(|a| *a != "--").cloned().collect();
+                let args: Vec<String> = rest[2..].iter().skip_while(|a| *a != "--").skip(1).cloned().collect();
+                fx26::resume(backend, &rest[1], &files, &args, &machine)
             }
         }
         Some("compile-file") => {

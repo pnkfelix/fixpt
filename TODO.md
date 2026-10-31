@@ -4425,6 +4425,24 @@ a session's region of its own (evidence), which the FX-26 checker cannot
 bind at a session's top level yet, so that such a session keeps the Rust
 checker; and `rs-scheme-vm`, which has no FX-26 front end.
 
+**(3) done (2026-10-31).** `fixpt dump IMAGE FILE…` (the files loaded by
+the front end written in FX-26 alone, `main` not called), `fixpt resume
+IMAGE [FILE…] [-- ARG…]` (the files checked and run after the forms the
+FX-26 checker holds, then `main` as it then is) and `(dump-heap! path
+start)`: the front end's pieces, the standard environment and the start
+written as the front end's cache is, after a header (the build, the
+machine and the sources' digests, their paths). On s7st (a copy of
+Heist's files, release build): the dump 2.9 s, 105 MB; a resume 0.02 s,
+against 0.72 s warm; its 13 tests 0.58 s against 46.9 s, the same
+results. Left: what a dump is keyed by is the files given, not those
+they load (`load-input`, `include`), whose change does not make it
+stale; a dump on `fx-regs-fxjit-nativecc`, whose front end is cellular
+(its native code is the program's, not kept); `,dump` in the REPL;
+Heist's runners on dumps (Heist's to decide; its tree is not ours); and
+the Rust checker's view after a resume, which knows nothing of the
+program, so that what needs it (sessions on the Rust checker, `stage`
+lowered) does not see the program's names.
+
 ## 190. Q: why is `(define-datatype var (union symbol pat))` accepted? (the user's, 2026-10-31)
 
 Find out why this checks as a datatype definition, and whether it
