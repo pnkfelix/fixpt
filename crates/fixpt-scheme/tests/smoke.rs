@@ -129,3 +129,17 @@ fn integer_division() {
     assert_eq!(both("(exact-integer-sqrt (+ (expt 10 40) 7))"), "(100000000000000000000 7)");
     assert!(ev("(exact-integer-sqrt -1)").starts_with("!! "));
 }
+
+#[test]
+fn length_and_append_count_without_copying_but_refuse_what_is_no_list() {
+    // Counted by `Heap::list_len` (Heist's F7), as `reverse` is: an improper
+    // list and a cyclic one refused as before.
+    assert_eq!(ev("(length '(1 2 3))"), "3");
+    assert_eq!(ev("(length '())"), "0");
+    assert_eq!(ev("(append '(1 2) '() '(3) '(4 . 5))"), "(1 2 3 4 . 5)");
+    let cyclic = "(define l (list 1 2 3)) (set-cdr! (cddr l) l)";
+    for e in ["(length '(1 . 2))", &format!("{cyclic} (length l)"), "(append '(1 . 2) '(3))", &format!("{cyclic} (append l '())")] {
+        let got = ev(e);
+        assert!(got.starts_with("!! ") && got.contains("a proper list"), "{e}: {got}");
+    }
+}

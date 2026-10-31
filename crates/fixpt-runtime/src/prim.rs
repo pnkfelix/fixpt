@@ -900,6 +900,25 @@ fn session_op(rt: &mut Runtime, op: &str, a: &[Value]) -> Outcome<Value> {
     })
 }
 
+/// The elements of `lists`, each a proper list, in order, in one vector
+/// made at its size: what `append` puts before its last argument. Or the
+/// first that is not a proper list.
+fn fronts(rt: &Runtime, lists: &[Value]) -> Result<Vec<Value>, Value> {
+    let mut n = 0;
+    for &v in lists {
+        n += rt.heap.list_len(v).ok_or(v)?;
+    }
+    let mut out = Vec::with_capacity(n);
+    for &v in lists {
+        let mut l = v;
+        while l.is_pair() {
+            out.push(rt.heap.car(l));
+            l = rt.heap.cdr(l);
+        }
+    }
+    Ok(out)
+}
+
 fn stage_refused(rt: &mut Runtime, why: &str) -> Value {
     stage_failed(rt, "refused", why, 0, 0)
 }
@@ -1143,22 +1162,20 @@ prims! {
         rt.heap.set_cdr(a[0], a[1]); Ok(Value::UNSPECIFIED)
     });
     "list", 0, None, simple!(|rt, a| Ok(rt.heap.list_from(a)));
+    // Counted, no vector made (Heist's F7: s7st asks at each call).
     "length", 1, Some(1), simple!(|rt, a| {
-        match rt.heap.list_to_vec(a[0]) {
-            Some(v) => Ok(Value::fixnum(v.len() as i64)),
+        match rt.heap.list_len(a[0]) {
+            Some(n) => Ok(Value::fixnum(n as i64)),
             None => rt.type_error("a proper list", a[0]),
         }
     });
     "append", 0, None, simple!(|rt, a| {
         if a.is_empty() { return Ok(Value::NULL); }
         let last = a[a.len() - 1];
-        let mut front: Vec<Value> = Vec::new();
-        for v in a[..a.len() - 1].iter().copied() {
-            match rt.heap.list_to_vec(v) {
-                Some(mut items) => front.append(&mut items),
-                None => return rt.type_error("a proper list", v),
-            }
-        }
+        let front = match fronts(rt, &a[..a.len() - 1]) {
+            Ok(f) => f,
+            Err(v) => return rt.type_error("a proper list", v),
+        };
         let mut acc = last;
         for v in front.into_iter().rev() { acc = rt.heap.cons(v, acc); }
         Ok(acc)
@@ -2147,13 +2164,10 @@ prims! {
     "%fx26-append-list", 1, Some(1), simple!(|rt, a| {
         let Some(lists) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a proper list", a[0]) };
         let Some((&last, front)) = lists.split_last() else { return Ok(Value::NULL) };
-        let mut items = Vec::new();
-        for v in front.iter().copied() {
-            match rt.heap.list_to_vec(v) {
-                Some(mut xs) => items.append(&mut xs),
-                None => return rt.type_error("a proper list", v),
-            }
-        }
+        let items = match fronts(rt, front) {
+            Ok(f) => f,
+            Err(v) => return rt.type_error("a proper list", v),
+        };
         let mut acc = last;
         for v in items.into_iter().rev() { acc = rt.heap.cons(v, acc); }
         Ok(acc)
@@ -2175,9 +2189,14 @@ prims! {
         Ok(acc)
     });
     "%fx26-list->array", 1, Some(1), simple!(|rt, a| {
-        let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a proper list", a[0]) };
-        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, items.len(), 0, true);
-        for (i, x) in items.into_iter().enumerate() { rt.heap.set_bloblet_slot(b, i + 2, x); }
+        let Some(n) = rt.heap.list_len(a[0]) else { return rt.type_error("a proper list", a[0]) };
+        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, n, 0, true);
+        let mut l = a[0];
+        for i in 0..n {
+            let x = rt.heap.car(l);
+            rt.heap.set_bloblet_slot(b, i + 2, x);
+            l = rt.heap.cdr(l);
+        }
         Ok(b)
     });
     // FX-26's `parse-number`: the number `a[0]` spells in radix `a[1]`
@@ -2200,9 +2219,11 @@ prims! {
         Ok(match n { Some(v) if v.is_fixnum() && v.as_fixnum() >= 0 => v, _ => Value::fixnum(-1) })
     });
     "%fx26-bytevector", 1, Some(1), simple!(|rt, a| {
-        let Some(items) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a list", a[0]) };
-        let mut bytes = Vec::with_capacity(items.len());
-        for x in items {
+        let Some(n) = rt.heap.list_len(a[0]) else { return rt.type_error("a list", a[0]) };
+        let (mut bytes, mut l) = (Vec::with_capacity(n), a[0]);
+        while l.is_pair() {
+            let x = rt.heap.car(l);
+            l = rt.heap.cdr(l);
             let b = int(rt, x)?;
             if !(0..=255).contains(&b) { return rt.fail("byte out of range", &[x]); }
             bytes.push(b as u8);
@@ -2388,11 +2409,11 @@ prims! {
     // The first of two: `certify-length`, which only retypes its value.
     "%fx26-first", 2, Some(2), simple!(|_rt, a| Ok(a[0]));
     // A proper list of exactly `n` elements: what FX-26's `confirm-length`
-    // asks. A cyclic list is none (`list_to_vec` stops on a cycle).
+    // asks. A cyclic list is none (`list_len` stops on a cycle).
     "%fx26-length-is?", 2, Some(2), simple!(|rt, a| {
         if !a[1].is_fixnum() { return rt.type_error("a fixnum", a[1]); }
         let n = a[1].as_fixnum();
-        Ok(Value::boolean(rt.heap.list_to_vec(a[0]).is_some_and(|items| items.len() as i64 == n)))
+        Ok(Value::boolean(rt.heap.list_len(a[0]).is_some_and(|len| len as i64 == n)))
     });
     // A proper list: ends in `()`, and has no cycle (tortoise and hare).
     "%fx26-list?", 1, Some(1), simple!(|rt, a| {
