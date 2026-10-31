@@ -4173,3 +4173,16 @@ Test: `fixpt-cli/tests/stage.rs`'s `a_process_stages_while_another_runs`
 (`programs/stage/in-a-process.fx`: one process stages five times while
 another loops, slices of 7 polls), on every machine that stages; without
 the fix, the native one fails, `no such task`.
+
+## 188. Scheme's `eval` (the user's, 2026-10-30)
+
+For `stage` on `rs-scheme-vm` (§186), where staged code is lowered Scheme
+the VM runs. `(eval expr [(interaction-environment)])`, in the prelude, is
+`((%host 'eval expr))`: the `%host` of procedural macros pauses the machine,
+and the session (`session/eval.rs`, `Session::answered`, at every run it
+makes) takes the datum as syntax, expands it as a top-level form, compiles
+it (`Prepared::thunk_for`) and answers with the procedure that runs it, or a
+message the prelude raises. No primitive runs the expander, and the engine
+is never entered twice. What differs from R7RS: `docs/divergences.md`,
+"`eval` has one environment, and no procedural macros". Test:
+`fixpt-scheme/tests/eval.rs`, on both engines.

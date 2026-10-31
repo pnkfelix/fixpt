@@ -122,6 +122,7 @@ pub struct Session {
     pub bare_failures: bool,
 }
 
+mod eval;
 mod handles;
 pub use handles::{Handle, Local, Maker, View};
 
@@ -283,6 +284,7 @@ impl Session {
             return Err(SessionError::Compile(e.to_string()));
         }
         let outcome = self.run_prepared();
+        let outcome = self.answered(outcome);
         match outcome {
             Ok(v) if self.is_hole(v) => {
                 self.rt.heap.set_root_at(self.hole_root, v);
@@ -358,7 +360,8 @@ impl Session {
     /// The engine's call, its arguments Values from this moment (the engine
     /// roots them on its stack at once), its result rooted as it returns.
     fn call_raw(&mut self, f: Value, args: &[Value]) -> Result<Handle, SessionError> {
-        match self.engine.call(&mut self.rt, &mut self.prepared, f, args) {
+        let outcome = self.engine.call(&mut self.rt, &mut self.prepared, f, args);
+        match self.answered(outcome) {
             Ok(v) => Ok(self.root_value(v)),
             Err(t) => Err(SessionError::Raised(self.condition_message(t.obj))),
         }

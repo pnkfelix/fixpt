@@ -203,6 +203,19 @@
         ((vector? x) (list->vector (strip-syntax (vector->list x))))
         (else x)))
 
+;;; ------------------------------------------------------------------ eval
+
+;; R7RS's `eval`: data `expr` run as a top-level form, in the one
+;; environment a session has, which `interaction-environment` names. The
+;; session expands and compiles it (`session/eval.rs`) and gives back the
+;; procedure that runs it, or a string saying why it could not.
+(define (interaction-environment) '%interaction-environment)
+(define (eval expr . env)
+  (if (and (pair? env) (not (eq? (car env) '%interaction-environment)))
+      (error "eval: the one environment is (interaction-environment)" (car env)))
+  (let ((run (%host 'eval expr)))
+    (if (string? run) (error run) (run))))
+
 ;;; ------------------------------------------------------------ utilities
 
 (define (void . ignored) (if #f #f))

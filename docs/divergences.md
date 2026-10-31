@@ -318,3 +318,17 @@ difference — and no corpus in `tests/conformance/` exercises the shape. Making
 it properly tail-recursive means giving the consumer call the *enclosing*
 frame's continuation, which both engines are structured to allow; it is
 unfinished work, not a design decision.
+
+### `eval` has one environment, and no procedural macros
+
+R7RS's `(eval expr env)` takes an environment specifier. A session has one
+environment, its top level, which `(interaction-environment)` names; `eval`
+refuses any other, and there is no `environment` (no libraries to name).
+`expr` is expanded as a top-level form of the session, sees its globals and
+its `syntax-rules` macros, and may define globals that outlast it.
+
+The machine is paused while the session expands and compiles `expr`
+(`session/eval.rs`), so no Scheme can run then: a procedural macro (`er-` or
+`ir-macro-transformer`) used inside `expr` is refused. A refusal, or a datum
+that is not code (a procedure, a cycle), is an error object the program
+catches; its message places the error in `expr` as written.
