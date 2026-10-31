@@ -1,6 +1,7 @@
 ;; Bounds (`docs/research/eval.md`, "Evidence"): evidence of at most an effect,
 ;; made of exact evidence (`effect-bound`), standing for a larger one where
-;; less is safe; exact evidence where the variable is also taken.
+;; less is safe, in the effect and in a frozen list; exact evidence where
+;; the variable is also taken.
 (define api (module (define x 41)))
 (define line (subr (io stdout) (string) unit)
   (lambda (s) (begin (write-out (string-append s "\n")) #u)))
@@ -24,8 +25,17 @@
         (p (line (int->string ((p) f))))
         (why (line (string-append "refused: " (extract why message))))
         (given er)))))
+;; A frozen list of at most `t`: `t` given there, so a bound may stand.
+(define listing
+  (poly ((t type)) (subr (maxeff said) ((typebound t) datum) unit))
+  (plambda ((t type))
+    (lambda (tb code)
+      (stage api pure (listof t acyclic) code
+        (p (line (int->string (length (p)))))
+        (why (line (string-append "refused: " (extract why message))))
+        (given tb)))))
 (define main
-  (subr (maxeff said (read (globals within taking line))) () int)
+  (subr (maxeff said (read (globals within taking listing line))) () int)
   (lambda ()
     (begin
       ((proj within (io stdout)) ((proj effect-bound pure) (reify-effect pure)) '(+ x 1))
@@ -35,4 +45,5 @@
                                  '(begin (write-out "out\n") x))
       ((proj taking (io stdout)) (reify-effect (io stdout)) '(lambda (g) (begin (g) x))
                                  (lambda () (begin (write-out "called\n") #u)))
+      ((proj listing int) ((proj type-bound int) (reify-type int)) '(list x x x))
       0)))

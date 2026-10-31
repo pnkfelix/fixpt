@@ -3097,10 +3097,14 @@ of `TODO.md` §141, working on my own.
   instantiation, which the staging form, unable to see its callers, could
   then allow only where less is safe: exact evidence would lose its use
   where the variable is taken. Two types keep both, the `plambda`'s
-  signature saying which it asks for. Polarity is walked structurally,
-  conservatively: a procedure's parameters flip it; products, sums,
-  unions, a module's values (one with no abstract types) keep it;
-  anything else, references, arrays, pairs and generative types included,
-  counts as both.
+  signature saying which it asks for.
+- **Where a bound may stand, by subtyping** (the user's): first a walk of
+  the types of its own, which knew fewer variances than subtyping and so
+  refused more; replaced by asking subtyping itself whether the checked
+  type is a supertype of itself with the variable at its least (`pure`,
+  `void`). Sound as the variable is rigid: an occurrence where it is taken
+  or compared exactly asks it to be within the least. Every variance
+  subtyping has, frozen regions and generative types' declared ones
+  included, and none it has not.
 - **No bound in a `reify-…`**: its result is exact evidence, which a
   bound cannot make; composing bounds would want a `reify-…-bound`, left.

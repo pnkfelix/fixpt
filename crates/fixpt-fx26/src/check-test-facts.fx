@@ -16,7 +16,8 @@
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-calls-types (load-module "fx26:check-calls-types.fx"))
        (check-logic-types (load-module "fx26:check-logic-types.fx"))
-       (check-resolve-types (load-module "fx26:check-resolve-types.fx")))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+       (check-subtype-types (load-module "fx26:check-subtype-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-infer (select check-infer-types check-infer-sig))
            (check-types (select check-types-types check-types-sig))
@@ -28,7 +29,11 @@
            (check-binders (select check-binders-types check-binders-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
            (check-logic (select check-logic-types check-logic-sig))
-           (check-resolve (select check-resolve-types check-resolve-sig)))
+           (check-resolve (select check-resolve-types check-resolve-sig))
+           ;; Subtyping, and substitution, for where a bound may stand
+           ;; (`k-monotone-in?`).
+           (check-subtype (select check-subtype-types check-subtype-sig))
+           (check-subst (select check-subst-types check-subst-sig)))
     (module
 (hide (include check-test-facts-types) (include check-types-types) (include check-subst-types))
 ;; The types it uses of the files before it.
@@ -36,6 +41,8 @@
 (hide (include check-binders) (include check-types) (include check-env) (include check-sc-graphs)
       (include check-print-parts) (include check-calls) (include check-logic))
 (import check-resolve k-at-of k-start k-end)
+(import check-subtype k-subtype)
+(import check-subst k-subst)
 (import check-env-types n-staged)
 
 (define k-branch-facts-of (->* (k-fact-list k-fact-list) k-branch-facts)
@@ -187,9 +194,10 @@
                      (on (set k-show-marks #t))
                      (free (k-free-shown (list (show mt) (k-show-effect e) (show r))))
                      (off (set k-show-marks #f))
-                     ;; As the code is checked, `(subr pure (M) (subr E () R))`.
-                     (stands (k-stands-in r 1 (k-stands-in-effect e 1 (k-stands-in mt -1 nil))))
-                     (names (k-given-names given free stands #t form))
+                     ;; What the code is checked as, `(subr pure (M) (subr E () R))`.
+                     (checked (k-ty-new (ty-subr nil (list mt) (k-ty-new (ty-subr e nil r cv nil))
+                                                 cv nil)))
+                     (names (k-given-names given free checked #t form))
                      (n (n-staged (show mt) (k-show-effect e) (show r) names)))
                 (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
             (else y #u))))))
@@ -211,7 +219,7 @@
                    (off (set k-show-marks #f))
                    (region (string=? op "%reify-region"))
                    (form (substring op 1 (string-length op)))
-                   (names (k-given-names given free nil (not region) form))
+                   (names (k-given-names given free -1 (not region) form))
                    (fresh (if (and region (string=? names "")
                                    (or (not (null? free))
                                        (tagcase d
@@ -229,97 +237,48 @@
 ;; The names, as printed, of the variables of which `given`, `(product (1
 ;; g) …)`, each `g` a variable, is the evidence, in order, apart by spaces;
 ;; each of `free` one of them, if `needed`, or `form` refused. A bound may
-;; be of less than its variable, which then stands only where `stands` says
-;; it is given, not taken; and a `reify-…`, which makes exact evidence, is
-;; given none (`Checker::evidence`).
-(define k-given-names (->* (kx k-ids k-stands bool string) string)
-  (lambda (given free stands needed form)
+;; be of less than its variable, so `checked`, the type the code is checked
+;; as (-1 for none), must be monotone in it; and a `reify-…`, which makes
+;; exact evidence, is given none (`Checker::evidence`).
+(define k-given-names (->* (kx k-ids int bool string) string)
+  (lambda (given free checked needed form)
     (let ((of (tagcase given
                 (x-product (fs a b abk) (k-given-vars fs form))
                 (else y (the k-given nil)))))
       (begin (if needed (k-given-all free of form given) #u)
-             (k-given-bounds of stands form given)
+             (k-given-bounds of checked form given)
              (k-given-text of "")))))
 ;; What each piece of evidence is of: a variable, its name, and whether it
 ;; is a bound; or a region a `letregion` makes (-1) and its.
 (define-type k-given (listof (productof (1 int) (2 string) (3 bool)) acyclic))
-;; Each bound of `of` where it may stand, as `stands` says, in a form that
-;; takes one; else `form` refused, at `given`.
-(define k-given-bounds (->* (k-given k-stands string kx) unit)
-  (lambda (of stands form given)
+;; Each bound of `of` where it may stand in `checked`, in a form that takes
+;; one; else `form` refused, at `given`.
+(define k-given-bounds (->* (k-given int string kx) unit)
+  (lambda (of checked form given)
     (if (null? of)
         #u
         (let ((v (extract (car of) 1)) (n (extract (car of) 2)))
-          (cond ((not (extract (car of) 3)) (k-given-bounds (cdr of) stands form given))
+          (cond ((not (extract (car of) 3)) (k-given-bounds (cdr of) checked form given))
                 ((and (>= (string-length form) 6) (string=? (substring form 0 6) "reify-"))
                  (k-fail (string-append "`" form "` makes exact evidence, so it is given exact "
                                         "evidence, and this is a bound of `" n "`")
                          (k-start given) (k-end given)))
-                ((k-stands-only-given? v stands) (k-given-bounds (cdr of) stands form given))
+                ((or (< checked 0) (k-monotone-in? checked v))
+                 (k-given-bounds (cdr of) checked form given))
                 (else
                  (k-fail (string-append "`" form "` is given a bound of `" n "`, which may be of "
                                         "less than `" n "` is: `" n "` may stand only where less "
                                         "is safe, in the effect, and in what is given, not taken; "
                                         "or give its exact evidence")
                          (k-start given) (k-end given))))))))
-;; Whether `v` stands only where it is given among `ss`.
-(define k-stands-only-given? (->* (int k-stands) bool)
-  (lambda (v ss)
-    (or (null? ss)
-        (and (or (not (= (extract (car ss) 1) v)) (= (extract (car ss) 2) 1))
-             (k-stands-only-given? v (cdr ss))))))
-;; Where each variable stands in a type: given (1), taken (-1), or both (0,
-;; in what is changed or compared exactly), as `Checker::stands_in`.
-(define-type k-stands (listof (productof (1 int) (2 int)) acyclic))
-;; Where each variable stands in type `t`, standing at `at`, before `acc`.
-(define k-stands-in (->* (int int k-stands) k-stands)
-  (lambda (t at acc)
-    (tagcase (k-get (k-resolve t))
-      (ty-var (v) (cons (product (1 v) (2 at)) acc))
-      (ty-base (n) acc) (ty-void () acc) (ty-nat (z) acc) (ty-nil () acc) (ty-false () acc)
-      (ty-subr (e ps r cv spc)
-        (k-stands-in r at (k-stands-in-all ps (- 0 at) (k-stands-in-effect e at acc))))
-      (ty-product (fs) (k-stands-in-parts fs at acc))
-      (ty-sum (fs) (k-stands-in-parts fs at acc))
-      (ty-union (ms) (k-stands-in-all ms at acc))
-      (ty-poly (bs body) (k-stands-in body at acc))
-      (ty-module (abs ds vs)
-        (if (and (null? abs) (null? ds)) (k-stands-in-parts vs at acc) (k-stands-both t acc)))
-      (else y (k-stands-both t acc)))))
-(define k-stands-in-all (->* (k-ids int k-stands) k-stands)
-  (lambda (ts at acc)
-    (if (null? ts) acc (k-stands-in-all (cdr ts) at (k-stands-in (car ts) at acc)))))
-(define k-stands-in-parts (->* (k-parts int k-stands) k-stands)
-  (lambda (ps at acc)
-    (if (null? ps) acc (k-stands-in-parts (cdr ps) at (k-stands-in (extract (car ps) 2) at acc)))))
-;; The same of effect `e`: a variable stands where `e` does; an effect
-;; function's, both.
-(define k-stands-in-effect (->* (k-eff int k-stands) k-stands)
-  (lambda (e at acc)
-    (if (null? e)
-        acc
-        (k-stands-in-effect
-         (cdr e) at
-         (tagcase (car e)
-           (a-var (v) (cons (product (1 v) (2 at)) acc))
-           (a-app (f ds) (k-stands-each (k-marked-effect (list (car e))) acc))
-           (else y acc))))))
-;; Each variable free in `t`, standing both ways.
-(define k-stands-both (->* (int k-stands) k-stands)
-  (lambda (t acc) (k-stands-each (k-marked-type t) acc)))
-;; The variables free in type `t`, and in effect `e`, as printed.
-(define k-marked-type (->* (int) k-ids)
-  (lambda (t)
-    (let* ((on (set k-show-marks #t)) (s ((with check-print k-show-ty-whole) t))
-           (off (set k-show-marks #f)))
-      (k-free-shown (list s)))))
-(define k-marked-effect (->* (k-eff) k-ids)
-  (lambda (e)
-    (let* ((on (set k-show-marks #t)) (s (k-show-effect e)) (off (set k-show-marks #f)))
-      (k-free-shown (list s)))))
-(define k-stands-each (->* (k-ids k-stands) k-stands)
-  (lambda (vs acc)
-    (if (null? vs) acc (k-stands-each (cdr vs) (cons (product (1 (car vs)) (2 0)) acc)))))
+;; Whether type `t` is monotone in `v`, an effect's or a type's variable,
+;; rigid: a supertype of itself with `v` the least there is, `pure` or
+;; `void` (`Checker::monotone_in`). Each place `v` is taken, or compared
+;; exactly, then asks `v` to be within the least, which it is not.
+(define k-monotone-in? (->* (int int) bool)
+  (lambda (t v)
+    (let ((least (if (= (k-dvar-kind v) 1) (de nil) (dt (k-ty-new (ty-void))))))
+      (k-subtype (k-subst t (list (cons v least))) t))))
 ;; The variable of which each of fields `fs` is the evidence.
 (define k-given-vars (->* ((listof (productof (1 symbol) (2 kx)) acyclic) string) k-given)
   (lambda (fs form)

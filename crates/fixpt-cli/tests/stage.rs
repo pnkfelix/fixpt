@@ -146,15 +146,16 @@ fn staged_code_is_checked_against_what_a_variable_was_given() {
     }
 }
 
-/// Evidence missing, a bound where its variable is taken, and exact
-/// evidence made of a bound: each refused as the program is checked, by
-/// either checker.
+/// Evidence missing, a bound where its variable is taken, or in a list a
+/// region variable names, and exact evidence made of a bound: each refused
+/// as the program is checked, by either checker.
 #[test]
 fn staging_without_evidence_is_refused() {
     let refusals = [
         ("evidence-missing.fx", "a variable: give it its evidence, a `(effectrep e)`"),
         ("evidence-bound-taken.fx", "may stand only where less is safe"),
         ("evidence-bound-reify.fx", "makes exact evidence, so it is given exact evidence"),
+        ("evidence-bound-region.fx", "a bound of `t`, which may be of less than `t` is"),
     ];
     for (program, said) in refusals {
         for m in ["rs-scheme-vm", "fx-cells-rsinterp"] {
@@ -192,6 +193,7 @@ out
 41
 called
 41
+3
 ";
 
 const EVIDENCE_SESSION: &str = "defined a

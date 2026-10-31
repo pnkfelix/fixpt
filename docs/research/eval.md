@@ -362,10 +362,14 @@ which is safe where `e` is only the code's effect (the user's, the same
 day). So a second kind: a bound, `(effectbound e)` or `(typebound t)`,
 covariant, made of exact evidence (`effect-bound`, `type-bound`), which a
 `plambda` asks for to say "anything at most `e`, and I use it only where
-less is safe". Where a variable given a bound stands is checked at the
-staging form: only where what is checked is given, not taken, as the code
-is checked as `(subr pure (M) (subr E () R))` (`Checker::stands_in`,
-`k-stands-in`). Exact evidence stands anywhere. Which a form is given is
+less is safe". That is checked at the staging form by subtyping itself:
+what the code is checked as, `(subr pure (M) (subr E () R))`, must be
+monotone in the variable, which, the variable rigid, is that it is a
+supertype of itself with the variable the least there is, `pure` or
+`void` (each place it is taken, or compared exactly, then asks that the
+variable be within the least; `Checker::monotone_in`, `k-monotone-in?`).
+So every rule of subtyping's, and only those, says where less is safe.
+Exact evidence stands anywhere. Which a form is given is
 known as the program is checked; at run time both are the text.
 
 Regions have no text of their own: a region's evidence is a name. `@a`

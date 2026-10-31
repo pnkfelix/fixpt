@@ -636,15 +636,13 @@ impl Checker {
         };
         let Some(ok) = part(self, t, "ok") else { return Ok(()) };
         let ok = if op == "%session-check" { part(self, ok, "expression") } else { Some(ok) };
-        let Some(Ty::Subr { effect, result, .. }) = ok.map(|ok| self.arena.get(self.arena.resolve(ok)).clone()) else { return Ok(()) };
+        let Some(Ty::Subr { conv, effect, result, .. }) = ok.map(|ok| self.arena.get(self.arena.resolve(ok)).clone()) else { return Ok(()) };
         if let Some(code) = code {
             let free = self.free_in_shown(|c| vec![c.show_ty(mt), c.show_effect(&effect), c.show_ty(result)]);
-            // As the code is checked, `(subr pure (M) (subr E () R))`.
-            let mut stands = Vec::new();
-            self.stands_in(mt, Stand::Neg, &mut stands);
-            self.stands_in_effect(&effect, Stand::Pos, &mut stands);
-            self.stands_in(result, Stand::Pos, &mut stands);
-            let evidence = self.evidence(&free, &stands, given, true, op.trim_start_matches('%'), span)?;
+            // What the code is checked as, `(subr pure (M) (subr E () R))`.
+            let inner = self.arena.ty(Ty::Subr { conv, effect: effect.clone(), params: Vec::new(), result, spec: None });
+            let checked = self.arena.ty(Ty::Subr { conv, effect: Effect::pure(), params: vec![mt], result: inner, spec: None });
+            let evidence = self.evidence(&free, Some(checked), given, true, op.trim_start_matches('%'), span)?;
             let staged = crate::check::Staged { m: self.staged_text(mt), e: self.staged_effect_text(&effect), r: self.staged_text(result), evidence };
             self.facts.staged.insert(code, staged);
         }
@@ -660,16 +658,13 @@ impl Checker {
         let span = self.arena.span_of(arg);
         let Ty::Named { args, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return Ok(()) };
         let mut staged = crate::check::Staged::default();
-        let mut stands = Vec::new();
         let free = match (op, args.first()) {
             ("%reify-effect", Some(D::Effect(e))) => {
                 staged.e = self.staged_effect_text(e);
-                self.stands_in_effect(e, Stand::Pos, &mut stands);
                 self.free_in_shown(|c| vec![c.show_effect(e)])
             }
             ("%reify-type", Some(D::Type(x))) => {
                 staged.r = self.staged_text(*x);
-                self.stands_in(*x, Stand::Pos, &mut stands);
                 self.free_in_shown(|c| vec![c.show_ty(*x)])
             }
             ("%reify-region", Some(D::Region(r))) => {
@@ -680,7 +675,7 @@ impl Checker {
             }
             _ => return Ok(()),
         };
-        staged.evidence = self.evidence(&free, &stands, Some(arg), op != "%reify-region", op.trim_start_matches('%'), span)?;
+        staged.evidence = self.evidence(&free, None, Some(arg), op != "%reify-region", op.trim_start_matches('%'), span)?;
         // A region a variable names, of no evidence: one of its own.
         if op == "%reify-region" && !free.is_empty() && staged.evidence.is_empty() {
             staged.m = "fresh".to_string();
@@ -696,10 +691,13 @@ impl Checker {
     /// at `span` is refused, saying what to give it. Two of one name are
     /// refused, as the staged check could not tell them apart. A bound,
     /// `(effectbound v)` or `(typebound v)`, may be of less than `v` (its
-    /// type is covariant), so a variable given one must stand only where
-    /// less is more cautious, as `stands` says where each stands: where
-    /// what is checked is given, not taken.
-    fn evidence(&mut self, free: &[DVar], stands: &[(DVar, Stand)], given: Option<ExpId>, needed: bool, form: &str, span: fixpt_read::Span) -> R<Vec<String>> {
+    /// type is covariant), so a variable given one must stand in `checked`,
+    /// the type the code is checked as, only where less is more cautious:
+    /// `checked` must be monotone in `v`, which, `v` rigid, is that it is
+    /// a supertype of itself with `v` the least there is, `pure` or `void`
+    /// (each place `v` is taken, or compared exactly, then asks `v ≤
+    /// least`). So each rule of subtyping's says where less is safe.
+    fn evidence(&mut self, free: &[DVar], checked: Option<TyId>, given: Option<ExpId>, needed: bool, form: &str, span: fixpt_read::Span) -> R<Vec<String>> {
         let fields = match given {
             Some(g) => {
                 let (t, _) = self.synth(g)?;
@@ -744,7 +742,7 @@ impl Checker {
             if bounded && form.starts_with("reify-") {
                 return Err(FxError::at(at, format!("`{form}` makes exact evidence, so it is given exact evidence, and this is a bound of `{name}`")));
             }
-            if bounded && stands.iter().any(|&(w, s)| w == v && s != Stand::Pos) {
+            if bounded && let Some(t) = checked && !self.monotone_in(t, v) {
                 return Err(FxError::at(
                     span,
                     format!("`{form}` is given a bound of `{name}`, which may be of less than `{name}` is: `{name}` may stand only where less is safe, in the effect, and in what is given, not taken; or give its exact evidence"),
@@ -770,40 +768,15 @@ impl Checker {
         Ok(names)
     }
 
-    /// Where each variable stands in `t`, which stands at `at`: given
-    /// (`Pos`), taken (`Neg`), or both (`Inv`, in what is changed or
-    /// compared exactly). A procedure takes its parameters, gives its
-    /// result and its effect; a product, a sum or a union gives its parts,
-    /// a module its values. Anything else, as `Inv`.
-    fn stands_in(&self, t: TyId, at: Stand, out: &mut Vec<(DVar, Stand)>) {
-        match self.arena.get(self.arena.resolve(t)).clone() {
-            Ty::Var(v) => out.push((v, at)),
-            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Nat(_) => {}
-            Ty::Subr { effect, params, result, .. } => {
-                self.stands_in_effect(&effect, at, out);
-                for p in params {
-                    self.stands_in(p, at.flipped(), out);
-                }
-                self.stands_in(result, at, out);
-            }
-            Ty::Union(ms) => ms.into_iter().for_each(|m| self.stands_in(m, at, out)),
-            Ty::Product(fs) | Ty::Sum(fs) => fs.into_iter().for_each(|(_, f)| self.stands_in(f, at, out)),
-            Ty::Poly { body, .. } => self.stands_in(body, at, out),
-            Ty::Module { abs, descs, vals } if abs.is_empty() && descs.is_empty() => vals.into_iter().for_each(|(_, v)| self.stands_in(v, at, out)),
-            _ => out.extend(self.free_in_shown(|c| vec![c.show_ty(t)]).into_iter().map(|v| (v, Stand::Inv))),
-        }
-    }
-
-    /// The same of effect `e`: a variable stands where `e` does; an
-    /// effect function's, as `Inv`.
-    fn stands_in_effect(&self, e: &Effect, at: Stand, out: &mut Vec<(DVar, Stand)>) {
-        for a in &e.0 {
-            match *a {
-                Atom::Var(v) => out.push((v, at)),
-                Atom::App(_) => out.extend(self.free_in_shown(|c| vec![c.show_atom(*a)]).into_iter().map(|v| (v, Stand::Inv))),
-                _ => {}
-            }
-        }
+    /// Whether type `t` is monotone in variable `v`, an effect's or a
+    /// type's, rigid: a supertype of itself with `v` the least there is.
+    fn monotone_in(&mut self, t: TyId, v: DVar) -> bool {
+        let least = match self.arena.dvar_kind_known(v) {
+            Some(Kind::Effect) => D::Effect(Effect::pure()),
+            _ => D::Type(self.arena.ty(Ty::Void)),
+        };
+        let lower = self.subst(t, &HashMap::from([(v, least)]));
+        self.subtype(lower, t)
     }
 
     fn made_native(&mut self, e: ExpId, t: TyId) -> R<TyId> {
@@ -2444,24 +2417,6 @@ impl Checker {
                     }
                 }
             }
-        }
-    }
-}
-
-/// Where a variable stands in a type (`Checker::stands_in`).
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) enum Stand {
-    Pos,
-    Neg,
-    Inv,
-}
-
-impl Stand {
-    fn flipped(self) -> Stand {
-        match self {
-            Stand::Pos => Stand::Neg,
-            Stand::Neg => Stand::Pos,
-            Stand::Inv => Stand::Inv,
         }
     }
 }

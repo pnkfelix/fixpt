@@ -4215,11 +4215,15 @@ and `staging_without_evidence_is_refused`, alike on every machine.
 
 Bounds, the same day: `(effectbound e)` and `(typebound t)`, covariant,
 made of exact evidence by `effect-bound` and `type-bound`, may be given
-where the variable stands only where less is safe; where it stands is
-found by a walk of `M`, `E` and `R` in each checker (`stands_in`,
-`k-stands-in`), and a `reify-…` refuses a bound. Tests: `evidence-bound.fx`
-(a `pure` bound for `(io stdout)`, exact evidence where `e` is taken) and
-the refusals `evidence-bound-taken.fx`, `evidence-bound-reify.fx`.
+where the variable stands only where less is safe: the type the code is
+checked as must be a supertype of itself with the variable `pure` or
+`void`, as each checker's subtyping says (`monotone_in`, `k-monotone-in?`;
+at first a walk of the types, of its own, conservative, replaced the same
+day at the user's asking); a `reify-…` refuses a bound. Tests:
+`evidence-bound.fx` (a `pure` bound for `(io stdout)`, a bound in a frozen
+list, exact evidence where `e` is taken) and the refusals
+`evidence-bound-taken.fx`, `evidence-bound-reify.fx`,
+`evidence-bound-region.fx` (a list at a region a variable names).
 
 **Sessions in the condition-raising style (2026-10-31).** A library built
 in, `fx26:session-conditions.fx`, of one procedure over the forms:
