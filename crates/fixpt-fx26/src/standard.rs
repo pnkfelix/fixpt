@@ -263,7 +263,18 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // On the evaluator written in FX-26, which runs what it is given:
     // `stage`'s code checked by the checker written in Rust, the text as
     // checked or why not (`stage.rs`'s `check_staged`).
-    ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string) (sumof (checked string) (failed stage-failure)))"),
+    // Evidence of an effect, a region and a type (`docs/research/eval.md`,
+    // "Evidence"): the forms `reify-effect`, `reify-region` and
+    // `reify-type`, each called with the evidence `given` it, a product,
+    // where what it is of is noted.
+    ("%reify-effect", "(poly ((e effect)) (poly ((g type)) (subr pure (g) (effectrep e))))"),
+    ("%reify-region", "(poly ((r region)) (poly ((g type)) (subr pure (g) (regionrep r))))"),
+    ("%reify-type", "(poly ((t type)) (poly ((g type)) (subr pure (g) (typerep t))))"),
+    // The same on the evaluator written in FX-26, which keeps evidence as
+    // the text it is: what is noted (`fresh` or not, and what it is of),
+    // given the names and their evidence.
+    ("%reify-text", "(subr pure (string string string (listof string acyclic)) string)"),
+    ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string string (listof string acyclic)) (sumof (checked string) (failed stage-failure)))"),
     // Sessions on the evaluator written in FX-26 (`fx-ast-eval`), which
     // keeps a session as an array of its own values and runs each step's
     // forms, given as text (`fixpt-fx26`'s `sessions.rs`, "evaluated"): a
@@ -271,7 +282,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // and the code, written out; a pending definition readied, given the
     // decision's tag; whether one redefines. A session, made, and a
     // pending definition are the runtime's, never looked in.
-    ("%session-eval-check", "(poly ((r region)) (poly ((t type)) (subr (maxeff spin (io fs-read) (read r) (write r)) ((arrayof t r) string string string string) (sumof (run (listof string acyclic)) (ok (sumof (definition (arrayof t r)))) (failed stage-failure)))))"),
+    ("%session-eval-check", "(poly ((r region) (t type)) (subr (maxeff spin (io fs-read)) ((arrayof t r) string string string string string (listof string acyclic)) (sumof (run (listof string acyclic)) (ok (sumof (definition (arrayof t r)))) (failed stage-failure))))"),
     ("%session-eval-ready", "(poly ((r region)) (poly ((t type)) (subr (maxeff spin (io fs-read) (read r) (write r)) ((arrayof t r) (arrayof t r) string) (sumof (run (listof (productof (text string) (keeps bool)) acyclic)) (failed stage-failure)))))"),
     ("%session-eval-make", "(poly ((r region)) (poly ((t type)) (subr (alloc r) (t) (arrayof t r))))"),
     ("%session-eval-committed!", "(poly ((r region)) (poly ((t type)) (subr (maxeff (read r) (write r)) ((arrayof t r) (arrayof t r)) (sumof (defined string) (failed stage-failure)))))"),
@@ -283,11 +294,11 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // `session-commit!` one over `%session-ready`, the initializer the
     // program runs, then `%session-committed!`.
     ("make-session", "(poly ((r region)) (poly ((m type)) (subr (alloc r) (m) (sessionof m r))))"),
-    ("%session-check", "(poly ((e effect) (t type)) (poly ((m type) (r region)) (subr (maxeff stage spin (read r)) ((sessionof m r) datum) (sumof (ok (sumof (expression (subr e () t)) (definition (pending e r)))) (failed stage-failure)))))"),
+    ("%session-check", "(poly ((e effect) (t type)) (poly ((m type) (r region) (g type)) (subr (maxeff stage spin (read r)) ((sessionof m r) datum g) (sumof (ok (sumof (expression (subr e () t)) (definition (pending e r)))) (failed stage-failure)))))"),
     ("session-redefines", "(poly ((m type) (r region) (e effect)) (subr (read r) ((sessionof m r) (pending e r)) (sumof (fresh unit) (redefines session-redefinition))))"),
     ("%session-ready", "(poly ((m type) (r region) (e effect)) (subr (read r) ((sessionof m r) (pending e r) session-decision) (sumof (go (subr (maxeff e (write r)) () unit)) (failed stage-failure))))"),
     ("%session-committed!", "(poly ((m type) (r region) (e effect)) (subr (maxeff (read r) (write r)) ((sessionof m r) (pending e r)) (sumof (defined string) (failed stage-failure))))"),
-    ("%stage", "(poly ((e effect) (r type)) (poly ((m type)) (subr (maxeff stage spin) (m datum) (sumof (ok (subr e () r)) (failed stage-failure)))))"),
+    ("%stage", "(poly ((e effect) (r type)) (poly ((m type) (g type)) (subr (maxeff stage spin) (m datum g) (sumof (ok (subr e () r)) (failed stage-failure)))))"),
     // Heist's (`FIXPT-CHANGES.md` F4): programs run beside this one, by
     // number. Started by name and arguments, in a directory (\"\": this
     // one's), standard output and error one stream; what it wrote since last
@@ -768,6 +779,9 @@ pub fn standard_text() -> String {
         crate::check::STRINGOF,
         crate::check::SESSIONOF,
         crate::check::PENDING,
+        crate::check::EFFECTREP,
+        crate::check::REGIONREP,
+        crate::check::TYPEREP,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

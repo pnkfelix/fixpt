@@ -232,7 +232,9 @@
           (the rargs
             (cons (a-v (wcell-int 37))
                   (cons (str (extract s 2))
-                        (r-args-3 (str (extract s 3)) (str (extract s 4)) (a-as-is x)))))))))
+                        (cons (str (extract s 3))
+                              (r-args-3 (str (extract s 4)) (a-as-is x)
+                                        (str (extract s 5)))))))))))
 (define r-args-3 (->* (rarg rarg rarg) rargs)
   ;; cons-chain: in `@k`, as `r-args-2`'s
   (lambda (a b c) (the rargs (cons a (cons b (cons c nil))))))

@@ -34,6 +34,7 @@ pub mod eqtable;
 pub mod equal;
 pub mod literal;
 pub mod error;
+pub mod evidence;
 pub mod num;
 pub mod port;
 pub mod prim;

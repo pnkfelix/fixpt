@@ -130,6 +130,62 @@ defined a
 refused: `g` is broken, since `a` was redefined (a int is expected here, and this is a string): define it again to use it
 ";
 
+/// Evidence (`docs/research/eval.md`, "Evidence"): `stage` within a
+/// `plambda`, checked against its effect, type and region parameters as
+/// they were instantiated, given their evidence; a session's steps too.
+/// Alike on every machine.
+#[test]
+fn staged_code_is_checked_against_what_a_variable_was_given() {
+    for (program, want) in [("evidence.fx", EVIDENCE), ("evidence-region.fx", EVIDENCE_REGION), ("evidence-session.fx", EVIDENCE_SESSION)] {
+        let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, program)))).collect();
+        for (m, t) in runs {
+            let (status, out, err) = t.join().expect("ran");
+            assert_eq!((status, out.as_str()), (Some(0), want), "{program} on {m}: {err}");
+        }
+    }
+}
+
+/// Evidence missing: refused as the program is checked, by either checker.
+#[test]
+fn staging_without_evidence_is_refused() {
+    for m in ["rs-scheme-vm", "fx-cells-rsinterp"] {
+        let (status, _, err) = run(m, "evidence-missing.fx");
+        assert_ne!(status, Some(0), "{m}");
+        assert!(err.contains("a variable: give it its evidence, a `(effectrep e)`"), "{m}: {err}");
+    }
+}
+
+const EVIDENCE: &str = "42
+refused: a (subr pure () int) is expected here, and this is a (subr (io stdout) () int)
+  beyond what is expected, it has (io stdout)
+out
+41
+joined
+41
+82
+text
+refused: a string is expected here, and this is a int
+";
+
+const EVIDENCE_REGION: &str = "5
+refused: a (subr (read %region-1) () int) is expected here, and this is a (subr (maxeff (read %region-1) (write %region-1)) () int)
+  beyond what is expected, it has (write %region-1)
+7
+refused: a (subr (read @a) () int) is expected here, and this is a (subr (maxeff (read @a) (write @a)) () int)
+  beyond what is expected, it has (write @a)
+";
+
+const EVIDENCE_SESSION: &str = "defined a
+12
+refused: a (subr pure () int) is expected here, and this is a (subr (io stdout) () int)
+  beyond what is expected, it has (io stdout)
+out
+11
+b
+defined b
+13
+";
+
 /// Sessions in the condition-raising style (`fx26:session-conditions.fx`):
 /// a redefinition raised to the handler, which answers, refuses or
 /// escapes; a fresh definition raising nothing. Alike on every machine.

@@ -40,8 +40,8 @@
 ;; `eval`, or a definition, pending, given back as it is; one committed,
 ;; the datum that defines it given `eval` when the program runs the
 ;; initializer (`session-commit!`), and nothing more to record after.
-(define (%fx26-session-check-lowered s staged)
-  (let ((made (%fx26-session-lower s staged)))
+(define (%fx26-session-check-lowered s staged given)
+  (let ((made (%fx26-session-lower s staged given)))
     (if (pair? made) (%fx26-sum 'ok (%fx26-sum 'expression (eval (car made)))) made)))
 (define (%fx26-session-ready-lowered s d decision)
   (let ((made (%fx26-session-commit-lower s d decision)))
@@ -49,8 +49,8 @@
         (%fx26-sum 'go (lambda () (eval (car made)) %fx26-unit))
         made)))
 (define (%fx26-session-committed-lowered s d) (%fx26-sum 'defined (vector-ref d 2)))
-(define (%fx26-stage-lowered m staged)
-  (let ((made (%fx26-stage-lower staged)))
+(define (%fx26-stage-lowered m staged given)
+  (let ((made (%fx26-stage-lower staged given)))
     (if (pair? made)
         (%fx26-sum 'ok ((eval (car made)) m))
         made)))

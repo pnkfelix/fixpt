@@ -35,7 +35,7 @@
 (hide (include eval-types) (include parser-types) (include check-env-types)
       (include check-resolve-types) (include check-types-types) (include check-subst-types))
 ;; What it uses of the modules it is given.
-(import values apply-val apply1 ev-poll as-bool as-fields as-other as-tag efail
+(import values apply-val apply1 ev-poll as-bool as-fields as-other as-str as-tag efail
         efail-expected ev-eq? eval-tag show-val the-unit)
 (import prims ev-bloblet ev-bref ev-blobref ev-flat-tag ev-label-is? prim! standard)
 ;; What it uses of the modules it is given: all of each, hidden.
@@ -54,14 +54,16 @@
 ;; standard one, and the procedure it makes given the module (`ev-stage`).
 
 ;; What the checker noted at the code at `a` `b` `k`: the module's type,
-;; the effect and the result type, in a list of one; none if nothing.
+;; the effect and the result type, and the names of the variables whose
+;; evidence it is given, in a list of one; none if nothing.
 (define ev-staged-in
-  (->* (k-facts int int int) (listof (productof (1 string) (2 string) (3 string)) acyclic))
+  (->* (k-facts int int int)
+       (listof (productof (1 string) (2 string) (3 string) (4 string)) acyclic))
   (lambda (fs a b k)
     (cond ((null? fs) nil)
           ((ev-at-is? (extract (car fs) 1) a b k)
            (tagcase (extract (car fs) 2)
-             (n-staged (m eff r) (cons (product (1 m) (2 eff) (3 r)) nil))
+             (n-staged (m eff r ns) (cons (product (1 m) (2 eff) (3 r) (4 ns)) nil))
              (else y (ev-staged-in (cdr fs) a b k))))
           (else (ev-staged-in (cdr fs) a b k)))))
 
@@ -371,6 +373,9 @@
         (e-app (f args a b abk)
           (cond ((ev-stage-op? f e '%stage) (ev-stage args e))
                 ((ev-stage-op? f e '%session-check) (ev-session-check args e))
+                ((ev-stage-op? f e '%reify-effect) (ev-reify #t args e))
+                ((ev-stage-op? f e '%reify-region) (ev-reify #t args e))
+                ((ev-stage-op? f e '%reify-type) (ev-reify #f args e))
                 (else (let* ((fv (eval f e)) (xs (eval-all args e)))
                         (begin (ev-poll) (apply-val fv xs))))))
         (e-plambda (d body a b abk) (eval body e))
@@ -418,15 +423,34 @@
   (ev-stage (->* ((listof exp acyclic) env) val)
     (lambda (args e)
       (ev-staged args e
-                 (lambda ((m val) (mt string) (eff string) (r string) (text string))
-                   (tagcase (%stage-check mt eff r text)
+                 (lambda ((m val) (mt string) (eff string) (r string) (text string) (ns string)
+                          (g (listof string acyclic)))
+                   (tagcase (%stage-check mt eff r text ns g)
                      (failed f (ev-stage-failure f))
                      (checked w (ev-stage-run w m)))))))
+  ;; A `reify-…`'s call, of the evidence it is given: what the checker
+  ;; noted at it, the effect (or a region), or the type, given the evidence.
+  (ev-reify (->* (bool (listof exp acyclic) env) val)
+    (lambda (effect args e)
+      (let* ((x (car args))
+             (noted (ev-staged-in (get ev-facts) (exp-start x) (exp-end x) (exp-kth x))))
+        (if (null? noted)
+            (efail "evidence: what it is of is not known")
+            (let ((n (car noted)))
+              (the val (%reify-text (extract n 1) (if effect (extract n 2) (extract n 3))
+                                    (extract n 4) (ev-given (eval x e)))))))))
+  ;; Evidence given, a product of texts, as their list.
+  (ev-given (->* (val) (listof string acyclic))
+    (lambda (v)
+      (letrec ((go (subr (maxeff evals spin) (vfields) (listof string acyclic))
+                 (lambda (fs) (if (null? fs) nil (cons (as-str (cdr (car fs))) (go (cdr fs)))))))
+        (go (as-fields v "evidence")))))
   ;; `stage`'s or `session-check`'s call, `(op m code)`: what `k` makes of
   ;; `m`'s value, what the checker noted at the code (`ev-staged-in`) and
   ;; the code, written out; or the refusal.
   (ev-staged (->* ((listof exp acyclic) env
-                   (subr (maxeff evals spin) (val string string string string) val))
+                   (subr (maxeff evals spin)
+                         (val string string string string string (listof string acyclic)) val))
                   val)
     (lambda (args e k)
       (let* ((m (eval (car args) e))
@@ -440,15 +464,17 @@
               (not-code u (ev-stage-refused "the code is not a datum"))
               (text rev
                 (let ((n (car noted)))
-                  (k m (extract n 1) (extract n 2) (extract n 3) (ev-joined rev "")))))))))
+                  (k m (extract n 1) (extract n 2) (extract n 3) (ev-joined rev "") (extract n 4)
+                     (ev-given (eval (car (cdr (cdr args))) e))))))))))
   ;; `session-check`'s call: checked by the session's checker
   ;; (`%session-eval-check`); an expression's forms run in the session,
   ;; the last's value its procedure; a definition, pending.
   (ev-session-check (->* ((listof exp acyclic) env) val)
     (lambda (args e)
       (ev-staged args e
-                 (lambda ((s val) (mt string) (eff string) (r string) (text string))
-                   (tagcase (%session-eval-check (ev-host s) mt eff r text)
+                 (lambda ((s val) (mt string) (eff string) (r string) (text string) (ns string)
+                          (g (listof string acyclic)))
+                   (tagcase (%session-eval-check (ev-host s) mt eff r text ns g)
                      (run ts (ev-sum2 'ok 'expression (ev-session-run s ts)))
                      (ok d (tagcase d
                              (definition p (ev-sum2 'ok 'definition (the val (o-host p))))))

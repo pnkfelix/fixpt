@@ -169,7 +169,8 @@
       (mk-list (list listof t acyclic) a b))))
 (define vlambda-usage string "`(vlambda name body …)` or `(vlambda (name type) body …)`")
 (define stage-usage string
-  "`(stage module effect type code (procedure body …) (failure else …))`")
+  (string-append "`(stage module effect type code (procedure body …) (failure else …) "
+                 "(given g …))`, the last if any"))
 ;; A `vlambda`'s parameter: `xs`, or `(xs T)`, whose type is then
 ;; `(listof T acyclic)`.
 (define parse-vparam (->* (syn int int) (productof (1 symbol) (2 syns-a)))

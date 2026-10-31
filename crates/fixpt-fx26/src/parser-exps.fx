@@ -18,7 +18,7 @@
 ;; what this file uses of them.
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
-(import forms-module process-form processes input-items item-form? run-item run-count)
+(import forms-module process-form given-form processes input-items item-form? run-item run-count)
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type data syn))
 (define syn->datum (with parser-module syn->datum))
@@ -275,11 +275,19 @@
         ;; E R text (p body …) (why else …))` is `(tagcase ((proj %stage E R)
         ;; m text) (ok p body …) (failed why else …))`, as `parse.rs`.
         ;; So is a session's: `(session-check s E R code (c …) (why …))` over
-        ;; `%session-check`.
+        ;; `%session-check`. Each given `(given g …)`, the evidence, last.
         ((stage session-check)
-         (begin (arity items 7 stage-usage a b)
+         (begin (if (= (len items) 8) #u (arity items 7 stage-usage a b))
                 (stage-form (if (symbol=? head 'stage) '%stage '%session-check)
                             (keep (list (nth items 2) (nth items 3))) items 4 a b)))
+        ;; Evidence (`docs/research/eval.md`): `(reify-effect E (given g …))` is
+        ;; `((proj %reify-effect E) (product (1 g) …))`, as `parse.rs`.
+        ((reify-effect reify-region reify-type)
+         (begin (at-least items 2 "`(reify-… description (given g …))`, the last if any" a b)
+                (e-app (e-proj (e-var (string->symbol (string-append "%" (symbol->string head)))
+                                      a b 0)
+                               (keep (list (nth items 1))) a b 0)
+                       (list (parse-exp (given-form pfail-at items 2 a b))) a b 0)))
         ;; `(session-commit! s d decision)`: the initializer, which the
         ;; program runs, then what it made recorded, or why not, as
         ;; `parse.rs`.
@@ -736,7 +744,9 @@
   (stage-form (->* (symbol syns-a syns-a int int int) exp)
     (lambda (op descs items k a b)
       (e-tagcase (e-app (e-proj (e-var op a b 0) descs a b 0)
-                        (list (parse-nth items 1) (parse-nth items k)) a b 0)
+                        (list (parse-nth items 1) (parse-nth items k)
+                              (parse-exp (given-form pfail-at items (+ k 3) a b)))
+                        a b 0)
                  (list (stage-arm 'ok (nth items (+ k 1))) (stage-arm 'failed (nth items (+ k 2))))
                  nil nil a b 0)))
   ;; An arm of `stage`, `(name body …)`, as `tagcase`'s `(tag name body …)`.

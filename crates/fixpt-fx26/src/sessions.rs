@@ -34,7 +34,7 @@
 use crate::check::Checker;
 use crate::lower::Globals;
 use crate::rust_facts::FormFacts;
-use crate::stage::{staged_parts, sx_value, Wrapped};
+use crate::stage::{staged_parts, sx_value, Parts, Wrapped};
 use crate::sx::Code;
 use crate::top::Top;
 use fixpt_heap::Value;
@@ -94,9 +94,9 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
     }
     let base = rt.heap.push_root(a[0]);
     let out = match op {
-        "lower" => lower(rt, base, a[1]),
+        "lower" => lower(rt, base, a[1], a[2]),
         "commit-lower" => commit_lower(rt, base, a[1], a[2]),
-        "check" => check(rt, base, a[1]),
+        "check" => check(rt, base, a[1], a[2]),
         "eval-check" => eval_check(rt, base, &a[1..]),
         "eval-ready" => eval_ready(rt, base, a[1], a[2]),
         "ready" => ready(rt, base, a[1], a[2]),
@@ -134,7 +134,12 @@ fn failed(rt: &mut Runtime, kind: &str, why: &str) -> Value {
 /// compiled, a compiler is made for the session, `m` put in its global,
 /// and theirs compiled and run now; or, evaluated, their texts run before
 /// the first step's (`State::seed_texts`), the evaluator binding `m`.
-fn seeded<T>(rt: &mut Runtime, base: usize, mt: &str, mode: Mode, f: impl FnOnce(&mut Runtime, &mut State) -> T) -> Result<T, String> {
+///
+/// Each region of its own `parts` name (`docs/research/eval.md`,
+/// "Evidence") is bound in the session's checker the first time a step
+/// names it, as a region it can know nothing of, and stays.
+fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl FnOnce(&mut Runtime, &mut State) -> T) -> Result<T, String> {
+    let mt = parts.mt.as_str();
     let index = rt.heap.obj_ref(rt.heap.root_at(base), S_INDEX).as_fixnum();
     let index = if index >= 0 {
         index as usize
@@ -191,8 +196,21 @@ fn seeded<T>(rt: &mut Runtime, base: usize, mt: &str, mode: Mode, f: impl FnOnce
     Ok(SESSIONS.with(|ss| {
         let mut ss = ss.borrow_mut();
         let state = &mut ss[index];
+        bind_regions(&mut state.checker, &parts.regions);
         f(rt, state)
     }))
+}
+
+/// Each of `regions` that checker `c` has not bound, bound, for good.
+fn bind_regions(c: &mut Checker, regions: &[String]) {
+    for r in regions {
+        let name = c.interner.intern(r);
+        if c.dscope.iter().any(|(n, _)| *n == name) {
+            continue;
+        }
+        let v = c.arena.dvar_of(name, crate::ast::Kind::Region);
+        c.dscope.push((name, crate::parse::DScope::Var(v, crate::ast::Kind::Region)));
+    }
 }
 
 /// `text`, read in a file of the session's own, kept: its forms.
@@ -239,14 +257,14 @@ fn expression(e: &str, r: &str, text: &str) -> Wrapped {
 /// the product a form's code is: an expression, the datum whose value is the
 /// procedure that evaluates it, in a list of one; a definition, `(sum ok
 /// (sum definition d))`, `d` pending; or the refusal.
-fn lower(rt: &mut Runtime, base: usize, staged: Value) -> Result<Value, String> {
-    let (mt, e, r, code) = staged_parts(rt, staged).ok_or("this machine cannot stage code")?;
+fn lower(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<Value, String> {
+    let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
     if is_definition(rt, code) {
-        return check_define(rt, base, &mt, &e, code, &text, Mode::Lowered);
+        return check_define(rt, base, &parts, code, &text, Mode::Lowered);
     }
-    let w = expression(&e, &r, &text);
-    let made = seeded(rt, base, &mt, Mode::Lowered, |rt, state| {
+    let w = expression(&parts.e, &parts.r, &text);
+    let made = seeded(rt, base, &parts, Mode::Lowered, |rt, state| {
         let made = tried(rt, state, &w, |c, g, top, _| crate::session::lower_top(c, g, &top));
         made.map(|c| {
             let mut code = std::mem::take(&mut state.seeds);
@@ -263,14 +281,14 @@ fn lower(rt: &mut Runtime, base: usize, staged: Value) -> Result<Value, String> 
 /// Compiled, what `%fx26-session-check` does: an expression, the procedure
 /// that evaluates it, `(sum ok (sum expression p))`; a definition, pending;
 /// or the refusal.
-fn check(rt: &mut Runtime, base: usize, staged: Value) -> Result<Value, String> {
-    let (mt, e, r, code) = staged_parts(rt, staged).ok_or("this machine cannot stage code")?;
+fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<Value, String> {
+    let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
     if is_definition(rt, code) {
-        return check_define(rt, base, &mt, &e, code, &text, Mode::Compiled);
+        return check_define(rt, base, &parts, code, &text, Mode::Compiled);
     }
-    let w = expression(&e, &r, &text);
-    let found = seeded(rt, base, &mt, Mode::Compiled, |rt, state| tried(rt, state, &w, |c, _, top, file| FormFacts::of(c, &[&top], file, &w.whole, true)))?;
+    let w = expression(&parts.e, &parts.r, &text);
+    let found = seeded(rt, base, &parts, Mode::Compiled, |rt, state| tried(rt, state, &w, |c, _, top, file| FormFacts::of(c, &[&top], file, &w.whole, true)))?;
     let facts = match found {
         Ok(facts) => facts,
         Err(refused) => return Ok(refused),
@@ -296,7 +314,8 @@ fn datum(rt: &mut Runtime, code: &Code) -> Value {
 /// written, and its initializer, unless a `lambda`, checked within `E`;
 /// the pending definition, `(sum ok (sum definition d))`, the checker as
 /// it was.
-fn check_define(rt: &mut Runtime, base: usize, mt: &str, e: &str, code: Value, text: &str, mode: Mode) -> Result<Value, String> {
+fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, text: &str, mode: Mode) -> Result<Value, String> {
+    let e = against.e.as_str();
     let len = text.chars().count() as i64;
     let usage = "a definition is `(define name init)` or `(define name type init)`";
     let parts = rt.heap.list_to_vec(code).unwrap_or_default();
@@ -316,7 +335,7 @@ fn check_define(rt: &mut Runtime, base: usize, mt: &str, e: &str, code: Value, t
     // initializer within `E` (a `lambda`'s making does nothing).
     let whole = Wrapped::of(String::new(), text, "\n", text, 0);
     let ty_text = ty.map(|t| write(rt, t));
-    let found = seeded(rt, base, mt, mode, |rt, state| {
+    let found = seeded(rt, base, against, mode, |rt, state| {
         let ty = match &ty_text {
             Some(t) => t.clone(),
             None => match tried(rt, state, &whole, |c, _, top, _| match top {
@@ -522,11 +541,13 @@ fn keeps(c: &Checker, top: &Top) -> Vec<String> {
 
 /// Evaluated, what `%fx26-session-eval-check` does with the session at
 /// `base`, the module's type, the effect, the result type and the code as
-/// text (`a`): an expression, `(sum run texts)`, the forms to run, the
+/// text, and the names of the variables those name and their evidence
+/// (`a`): an expression, `(sum run texts)`, the forms to run, the
 /// last's value the procedure that evaluates it; a definition, pending;
 /// or the refusal.
 fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, String> {
     let [mt, e, r, text] = [a[0], a[1], a[2], a[3]].map(|v| self::text(rt, v));
+    let parts = Parts::of(&mt, &e, &r, &fixpt_runtime::evidence::Given::of(rt, a[4], a[5]));
     let mut interner = std::mem::take(&mut rt.interner);
     let read = fixpt_read::Reader::new(&text, FileId(0), fixpt_read::SyntaxProfile::FX91, &mut interner).read_all();
     rt.interner = interner;
@@ -536,10 +557,10 @@ fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, Strin
         Err(e) => return Ok(failed(rt, "unread", &e.message)),
     };
     if is_definition(rt, code) {
-        return check_define(rt, base, &mt, &e, code, &text, Mode::Evaluated);
+        return check_define(rt, base, &parts, code, &text, Mode::Evaluated);
     }
-    let w = expression(&e, &r, &text);
-    let made = seeded(rt, base, &mt, Mode::Evaluated, |rt, state| {
+    let w = expression(&parts.e, &parts.r, &text);
+    let made = seeded(rt, base, &parts, Mode::Evaluated, |rt, state| {
         tried(rt, state, &w, |_, _, _, _| ()).map(|()| {
             let mut texts = std::mem::take(&mut state.seed_texts);
             texts.push(w.whole.clone());

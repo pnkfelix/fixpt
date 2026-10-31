@@ -14,7 +14,7 @@
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define reader-types (with parser-module reader-types))
-(import reader-types atom (type syn))
+(import reader-types atom lst (type syn))
 (import parser-module syn-symbol? syn-head syn-start syn-end len nth drop (type syns-a exp)
         (effect parses))
 
@@ -30,6 +30,32 @@
 (define fail-at-syn (->* (fails string syn) void)
   (lambda (fail message s) (fail message (syn-start s) (syn-end s))))
 (import parser-module mk-symbol mk-list mk-int form-of?)
+
+;; Evidence (`docs/research/eval.md`, "Evidence"): item `i` of `items`,
+;; `(given g …)`, each a variable, as `(product (1 g) …)`, what a staging
+;; form's operator is given; with no item `i`, `(product)`.
+(define given-usage string "evidence is given as `(given variable …)`")
+(define given-form (->* (fails syns-a int int int) syn)
+  (lambda (fail items i a b)
+    (let ((product (mk-symbol "product" a b)))
+      (if (<= (len items) i)
+          (mk-list (list product) a b)
+          (let ((g (nth items i)))
+            (tagcase g
+              (lst (gs d c e)
+                (if (and (not (null? gs)) (form-of? g 'given))
+                    (mk-list (cons product (given-fields fail (cdr gs) 1)) c e)
+                    (fail-at-syn fail given-usage g)))
+              (else y (fail-at-syn fail given-usage g))))))))
+;; Each of `gs`, a variable, as the field `(k g)`, from `k`.
+(define given-fields (->* (fails syns-a int) syns-a)
+  (lambda (fail gs k)
+    (cond ((null? gs) nil)
+          ((syn-symbol? (car gs))
+           (let ((a (syn-start (car gs))) (b (syn-end (car gs))))
+             (cons (mk-list (list (mk-int k a b) (car gs)) a b)
+                   (given-fields fail (cdr gs) (+ k 1)))))
+          (else (fail-at-syn fail given-usage (car gs))))))
 
 ;; The scheduler's module file, which each form loads.
 (define processes string "fx26:processes.fx")

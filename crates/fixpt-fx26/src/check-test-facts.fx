@@ -125,11 +125,13 @@
                 (else (k-array-sized op args te)))))
       (else y te))))
 ;; Which of `stage`'s operators `f` is, `(proj %stage E R)` or a session's:
-;; `%stage` or `%session-check`; or "".
+;; `%stage` or `%session-check`; or evidence's, `%reify-effect`,
+;; `%reify-region` or `%reify-type`; or "".
 (define k-stage-op (->* (kx) string)
   (lambda (f)
     (let ((op (tagcase f (x-proj (body ds a b abk) (k-std-op body)) (else y (k-std-op f)))))
-      (if (or (string=? op "%stage") (string=? op "%session-check"))
+      (if (or (string=? op "%stage") (string=? op "%session-check") (string=? op "%reify-effect")
+              (string=? op "%reify-region") (string=? op "%reify-type"))
           op
           ""))))
 ;; `stage` (`docs/research/eval.md`): `((proj %stage E R) m code)`, `m` a
@@ -140,7 +142,12 @@
 ;; compilers to give the checker that runs then (`n-staged`).
 (define k-staged (->* (string kxs k-te) k-te)
   (lambda (op args te)
-    (let* ((m (car args)) (code (car (cdr args)))
+    (if (string=? (substring op 0 2) "%r")
+        (k-reified op (car args) te)
+        (k-staged-code op args te))))
+(define k-staged-code (->* (string kxs k-te) k-te)
+  (lambda (op args te)
+    (let* ((m (car args)) (code (car (cdr args))) (given (car (cdr (cdr args))))
            (form (substring op 1 (string-length op)))
            (what (if (string=? op "%stage") "a module" "a session")))
       (tagcase m
@@ -153,12 +160,14 @@
             (tagcase (k-get mt)
               (ty-module (abs ds vs)
                 (if (string=? op "%stage")
-                    (begin (k-note-staged (k-at-of code) mt (extract te 1)) te)
+                    (begin (k-note-staged (k-at-of code) mt (extract te 1) given form) te)
                     (wrong)))
               (ty-named (g ds)
                 (cond ((or (string=? op "%stage") (not (= g 15)) (null? ds)) (wrong))
                       (else (tagcase (car ds)
-                              (dt (t) (begin (k-note-staged (k-at-of code) t (extract te 1)) te))
+                              (dt (t) (begin (k-note-staged (k-at-of code) t (extract te 1) given
+                                                            form)
+                                             te))
                               (else z (wrong))))))
               (else y (wrong)))))
         (else y (k-fail (string-append "`" form "` takes " what " by its name")
@@ -166,8 +175,8 @@
 ;; `M`, `E` and `R` of `stage`'s call of type `t`, noted at the code: `(sumof
 ;; (ok X) …)`, `X` `(subr E () R)`, or a session's `(sumof (expression (subr E
 ;; () R)) …)`.
-(define k-note-staged (->* (k-at int int) unit)
-  (lambda (at mt t)
+(define k-note-staged (->* (k-at int int kx string) unit)
+  (lambda (at mt t given form)
     (let* ((ok (k-staged-part t 'ok))
            (x (if (< ok 0) -1 (let ((e (k-staged-part ok 'expression))) (if (< e 0) ok e)))))
       (if (< x 0)
@@ -175,9 +184,116 @@
           (tagcase (k-get (k-resolve x))
             (ty-subr (e ps r cv spc)
               (let* ((show (with check-print k-show-ty-whole))
-                     (n (n-staged (show mt) (k-show-effect e) (show r))))
+                     (on (set k-show-marks #t))
+                     (free (k-free-shown (list (show mt) (k-show-effect e) (show r))))
+                     (off (set k-show-marks #f))
+                     (names (k-given-names given free #t form))
+                     (n (n-staged (show mt) (k-show-effect e) (show r) names)))
                 (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
             (else y #u))))))
+;; A `reify-…`'s call, `op`, of `given`, the evidence it is given, of type
+;; `te`, its `(effectrep E)`, `(regionrep r)` or `(typerep T)`: what it is
+;; of, printed whole, noted at `given`, as the effect, or a region's, or the
+;; type; a region a variable names, of no evidence, one of its own (`fresh`).
+(define k-reified (->* (string kx k-te) k-te)
+  (lambda (op given te)
+    (tagcase (k-get (k-resolve (extract te 1)))
+      (ty-named (g ds)
+        (if (null? ds)
+            te
+            (let* ((show (with check-print k-show-ty-whole)) (d (car ds))
+                   (text (lambda ()
+                           (tagcase d (dt (t) (show t)) (de (e) (k-show-effect e))
+                             (dr (r) (k-region-show r)) (else z ""))))
+                   (on (set k-show-marks #t)) (free (k-free-shown (list (text))))
+                   (off (set k-show-marks #f))
+                   (region (string=? op "%reify-region"))
+                   (form (substring op 1 (string-length op)))
+                   (names (k-given-names given free (not region) form))
+                   (fresh (if (and region (string=? names "")
+                                   (or (not (null? free))
+                                       (tagcase d
+                                         (dr (r) (tagcase r (r-fresh (i n) #t) (else z #f)))
+                                         (else z #f))))
+                              "fresh"
+                              ""))
+                   (shown (text))
+                   (n (if (string=? op "%reify-type")
+                          (n-staged fresh "" shown names)
+                          (n-staged fresh shown "" names))))
+              (begin (set k-extracts (cons (product (1 (k-at-of given)) (2 n)) (get k-extracts)))
+                     te))))
+      (else y te))))
+;; The names, as printed, of the variables of which `given`, `(product (1
+;; g) …)`, each `g` a variable, is the evidence, in order, apart by spaces;
+;; each of `free` one of them, if `needed`, or `form` refused.
+(define k-given-names (->* (kx k-ids bool string) string)
+  (lambda (given free needed form)
+    (let ((of (tagcase given
+                (x-product (fs a b abk) (k-given-vars fs form))
+                (else y (the k-given nil)))))
+      (begin (if needed (k-given-all free of form given) #u) (k-given-text of "")))))
+;; What each piece of evidence is of: a variable and its name; or a region
+;; a `letregion` makes (-1) and its.
+(define-type k-given (listof (productof (1 int) (2 string)) acyclic))
+;; The variable of which each of fields `fs` is the evidence.
+(define k-given-vars (->* ((listof (productof (1 symbol) (2 kx)) acyclic) string) k-given)
+  (lambda (fs form)
+    (if (null? fs)
+        nil
+        (let* ((x (extract (car fs) 2))
+               (v (tagcase x
+                    (x-var (n a b abk) (k-rep-var (k-lookup n)))
+                    (else y nil))))
+          (if (null? v)
+              (k-fail (string-append "`" form "` is given evidence of a variable, an `(effectrep "
+                                     "e)`, a `(regionrep r)` or a `(typerep t)`")
+                      (k-start x) (k-end x))
+              (cons (car v) (k-given-vars (cdr fs) form)))))))
+;; The variable type `t` is the evidence of, and its name, in a list of one;
+;; none if none.
+(define k-rep-var (->* (int) k-given)
+  (lambda (t)
+    (let ((var (lambda ((v int)) (list (product (1 v) (2 (symbol->string (k-dvar-name v))))))))
+      (tagcase (k-get (k-resolve t))
+        (ty-named (g ds)
+          (if (or (null? ds) (< g 17) (> g 19))
+              nil
+              (tagcase (car ds)
+                (dt (x) (tagcase (k-get (k-resolve x)) (ty-var (v) (var v)) (else y nil)))
+                (de (e) (if (= (k-length e) 1) (tagcase (car e) (a-var (v) (var v)) (else y nil))
+                            nil))
+                (dr (r) (tagcase r
+                          (r-var (v) (var v))
+                          (r-fresh (i n) (list (product (1 -1) (2 n))))
+                          (else y nil)))
+                (else y nil))))
+        (else y nil)))))
+;; Each of `free` among `of`, or `form` refused, at `given`.
+(define k-given-all (->* (k-ids k-given string kx) unit)
+  (lambda (free of form given)
+    (cond ((null? free) #u)
+          ((k-given-member? (car free) of) (k-given-all (cdr free) of form given))
+          (else
+           (let* ((v (car free)) (n (symbol->string (k-dvar-name v)))
+                  (k (k-dvar-kind v))
+                  (rep (cond ((= k 0) "regionrep") ((= k 1) "effectrep") (else "typerep")))
+                  (make (cond ((= k 0) "reify-region") ((= k 1) "reify-effect")
+                              (else "reify-type"))))
+             (k-fail (string-append "`" form "`'s code is checked, as the program runs, against `"
+                                    n "`, a variable: give it its evidence, a `(" rep " " n
+                                    ")` (`" make "`), in `(given …)`")
+                     (k-start given) (k-end given)))))))
+;; The names of `vs`, apart by spaces, after `acc`.
+(define k-given-text (->* (k-given string) string)
+  (lambda (vs acc)
+    (if (null? vs)
+        acc
+        (k-given-text (cdr vs) (string-append acc (if (string=? acc "") "" " ")
+                                              (extract (car vs) 2))))))
+(define k-given-member? (->* (int k-given) bool)
+  (lambda (v vs)
+    (and (not (null? vs)) (or (= (extract (car vs) 1) v) (k-given-member? v (cdr vs))))))
 ;; Sum type `t`'s part labelled `l`, or -1.
 (define k-staged-part (->* (int symbol) int)
   (lambda (t l)

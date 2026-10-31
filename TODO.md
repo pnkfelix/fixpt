@@ -4268,8 +4268,13 @@ FX-26; `code` a datum. Left, in order:
 2. Interruptible and cancellable checking: the front end's call made from
    the program's task, not inside a primitive.
 3. Types `M`, `E` or `R` that name the program's own: generative types,
-   `(select m t)`, regions it declares; the refusal of an effect beyond
-   `E` said of the code, not of the wrapping `(subr E () R)`.
+   `(select m t)`; the refusal of an effect beyond `E` said of the code,
+   not of the wrapping `(subr E () R)`. Variables, and `letregion`'s
+   regions, done: evidence (`DONE.md` §186, "Evidence"). Left of it:
+   evidence of a description function, a size or a convention; and, in
+   the checker written in FX-26, a `letregion`'s region named at `stage`
+   with no evidence refused as the program is checked (it is refused as
+   it runs, now).
 4. Sessions (`docs/research/eval.md`, "Sessions"): done on every
    machine, with the condition-raising style as a library (`DONE.md`
    §186).
@@ -4277,3 +4282,26 @@ FX-26; `code` a datum. Left, in order:
    checks staged code (step 2, `DONE.md` §186); the one written in FX-26
    there too, when checking is interruptible (2.), and blobrefs in it on
    the evaluator.
+
+## 188. Files over 900 lines: refactoring candidates (the user's, 2026-10-31)
+
+Survey the files over 900 lines for seams to split along, before each
+reaches its limit (`fixpt_tidy::fx_size`: 1000 lines for an `.fx`, or its
+debt). Found pressing while adding evidence (§186): `compile.fx`, at 999,
+had no room for a line in `c-free`. On 2026-10-31, the `.fx` files:
+
+- `regcode-core.fx`, 1122
+- `check-rules.fx`, 1014
+- `check-read-helpers.fx`, 1000
+- `compile.fx`, 999
+- `check-types.fx`, 995
+- `check-read-descs.fx`, 989
+- `parser-exps.fx`, 985
+- `parser.fx`, 984
+- `check-program.fx`, 979
+- `eval-prims.fx`, 960
+- `check-synth.fx`, 960
+- `check-print-parts.fx`, 947
+- `native-direct-x64-prims.fx`, 943
+
+and 36 `.rs` files, which have no limit, the largest `fixpt-native/src/direct.rs`, at 6635 lines.

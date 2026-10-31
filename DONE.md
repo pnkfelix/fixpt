@@ -4196,6 +4196,23 @@ procedure of nothing is gone. Test: `stage.rs`'s
 `a_commit_runs_as_the_program_calls_it` (`programs/stage/commit.fx`), alike
 on every machine.
 
+**Evidence (2026-10-31).** `stage` and `session-check` within a
+`plambda` over their `M`, `E` or `R`, checked against what each variable
+was instantiated as (`docs/research/eval.md`, "Evidence"; `docs/fx26.md`,
+"Evidence"). The forms take `(given g …)`; `reify-effect`, `reify-region`
+and `reify-type` make the evidence, generative types 17 to 19, invariant,
+at run time their text. Both checkers find the variables free in what
+they print (the printers' marks, as `show_apart` uses them: `free_in_shown`,
+`k-free-shown`), refuse one with no evidence given, and note the names
+with the texts (`Staged`, `n-staged`'s fourth field); every machine puts
+them in the staged product, and the check that runs substitutes the
+evidence (`fixpt_runtime::evidence`), binding a region named afresh (in a
+session, in its checker, for good). `reify-…` notes what it is of at its
+operand, as `stage` notes at its code. Tests: `stage.rs`'s
+`staged_code_is_checked_against_what_a_variable_was_given` (effect, type,
+composed evidence, regions of a `letregion` and `@a`, a session's steps)
+and `staging_without_evidence_is_refused`, alike on every machine.
+
 **Sessions in the condition-raising style (2026-10-31).** A library built
 in, `fx26:session-conditions.fx`, of one procedure over the forms:
 `commit!`, a pending definition committed as `session-commit!` commits it,

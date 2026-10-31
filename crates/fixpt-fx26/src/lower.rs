@@ -226,6 +226,10 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("type-at", "%fx26-type-at", true),
     ("%stage", "%fx26-stage", false),
     ("%stage-check", "%fx26-stage-check", false),
+    ("%reify-effect", "%fx26-reify-effect", false),
+    ("%reify-region", "%fx26-reify-region", false),
+    ("%reify-type", "%fx26-reify-type", false),
+    ("%reify-text", "%fx26-reify-text", false),
     ("%session-eval-check", "%fx26-session-eval-check", false),
     ("%session-eval-ready", "%fx26-session-eval-ready", false),
     ("%session-eval-redefines", "%fx26-session-redefines", false),
@@ -958,9 +962,10 @@ impl Lowerer<'_> {
             None => code,
         };
         // A `stage`'s code, with what it is checked against, as the
-        // compilers written in FX-26 give it (`n-staged`).
+        // compilers written in FX-26 give it (`n-staged`), and the names of
+        // the variables whose evidence the form is given.
         let code = match self.c.facts.staged.get(&e) {
-            Some((m, eff, r)) => Sx::call("%fx26-product", [Sx::Str(m.clone()), Sx::Str(eff.clone()), Sx::Str(r.clone()), code]),
+            Some(s) => Sx::call("%fx26-product", [Sx::Str(s.m.clone()), Sx::Str(s.e.clone()), Sx::Str(s.r.clone()), code, Sx::Str(s.evidence.join(" "))]),
             None => code,
         };
         // A module reshaped: a product of the values the type wanted has.

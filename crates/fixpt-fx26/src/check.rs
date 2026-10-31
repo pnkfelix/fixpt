@@ -210,6 +210,18 @@ pub(crate) const SESSIONOF_INDEX: u32 = 15;
 /// A definition checked against a session at `r`, not yet made, generative
 /// type 16: its initializer does `e` when it is (`session-commit!`).
 pub const PENDING: &str = "(pending (e effect +) (r region)) (subr (maxeff e (read r)) () unit)";
+/// Evidence of an effect, a region and a type, as a program runs
+/// (`docs/research/eval.md`, "Evidence"), generative types 17, 18 and 19:
+/// what `reify-effect`, `reify-region` and `reify-type` make of the one
+/// each is given, for `stage` and `session-check` to check code against
+/// where a variable names it. At run time its text; invariant, as only the
+/// one it was made of is what it says.
+pub const EFFECTREP: &str = "(effectrep (e effect)) string";
+pub(crate) const EFFECTREP_INDEX: u32 = 17;
+pub const REGIONREP: &str = "(regionrep (r region)) string";
+pub(crate) const REGIONREP_INDEX: u32 = 18;
+pub const TYPEREP: &str = "(typerep (t type)) string";
+pub(crate) const TYPEREP_INDEX: u32 = 19;
 /// The scheduler of processes and `par`, a module file built in, which the
 /// forms `spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!`
 /// call through the hidden global of its load (`Checker::library_type`).
@@ -739,8 +751,9 @@ pub struct NodeFacts {
     pub with_vals: HashMap<ExpId, Vec<(Sym, usize)>>,
     /// Each `stage`'s code: the module's type, the effect and the type it
     /// is checked at, printed whole (`Checker::staged_text`), which the
-    /// lowering gives `%fx26-stage-lowered` with it.
-    pub staged: HashMap<ExpId, (String, String, String)>,
+    /// lowering gives `%fx26-stage-lowered` with it, and the evidence of the
+    /// variables they name; a `reify-…`'s, what it is of.
+    pub staged: HashMap<ExpId, Staged>,
     /// Modules given where a type with fewer values, or the same in
     /// another order, is wanted: for each value the wanted type has, its
     /// position in the module given. Made into a module of that layout.
@@ -1046,7 +1059,7 @@ impl Checker {
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
         c.arena.string_sym = Some(c.interner.intern("string"));
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING, EFFECTREP, REGIONREP, TYPEREP] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
@@ -5164,6 +5177,21 @@ impl BinderEnv {
                 .collect(),
         )
     }
+}
+
+/// What a `stage`'s code is checked against (`Facts::staged`), as the
+/// checker that runs then reads it: the module's type, the effect and the
+/// result type, printed whole; and the names, as printed, of the variables
+/// whose evidence it is given, in order (`docs/research/eval.md`,
+/// "Evidence"). A `reify-effect`'s is its effect, a `reify-type`'s its type
+/// (as `r`), a `reify-region`'s its region (as `e`), `m` saying `fresh` for
+/// a region a variable names, of no evidence.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Staged {
+    pub m: String,
+    pub e: String,
+    pub r: String,
+    pub evidence: Vec<String>,
 }
 
 /// Value variables in scope, innermost last: read as a slice, each name's

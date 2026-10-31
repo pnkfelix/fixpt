@@ -874,6 +874,10 @@
         (let ((v (cdr (car rest))))
           (k-free-marks (cdr rest) ms
                         (if (or (k-id-in? v acc) (k-mark-bound? v ms)) acc (cons v acc)))))))
+;; The variables free in `ss`, printed with `k-show-marks` on, in order: what
+;; a staged check is given the evidence of (`docs/research/eval.md`).
+(define k-free-shown (->* (k-strings) k-ids)
+  (lambda (ss) (let ((ms (k-marks-all ss))) (k-free-marks ms ms nil))))
 ;; Those of `vs` named `n`.
 (define k-named-like (->* (k-ids symbol) k-ids)
   (lambda (vs n)

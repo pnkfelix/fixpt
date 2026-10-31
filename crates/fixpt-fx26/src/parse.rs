@@ -538,6 +538,26 @@ impl Checker {
         Ok(t)
     }
 
+    /// The evidence a staging form is given, `(given g …)`, as the product
+    /// its operator takes, `(product (1 g) …)`; none given, the empty one.
+    fn given(&mut self, given: Option<&Syntax>, span: fixpt_read::Span, usage: &str) -> R<Syntax> {
+        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+        let mut fields = vec![sym(self, "product")];
+        if let Some(g) = given {
+            let items = match g.as_proper_list() {
+                Some([head, items @ ..]) if head.as_symbol().is_some_and(|h| self.name(h) == "given") => items.to_vec(),
+                _ => return Err(FxError::at(g.span, format!("evidence is given as `(given variable …)`: {usage}"))),
+            };
+            for (i, x) in items.iter().enumerate() {
+                if x.as_symbol().is_none() {
+                    return Err(FxError::at(x.span, "evidence is given as `(given variable …)`"));
+                }
+                fields.push(Syntax::list(x.span, vec![sym(self, &(i + 1).to_string()), x.clone()]));
+            }
+        }
+        Ok(Syntax::list(span, fields))
+    }
+
     /// Whether signature `s` is `(->* …)`, under any `poly`s.
     pub(crate) fn written_arrow_star(&self, s: &Syntax) -> bool {
         let items = s.as_proper_list().unwrap_or(&[]);
@@ -1573,12 +1593,17 @@ impl Checker {
             // definition.
             head @ ("stage" | "session-check") => {
                 let (op, usage) = match head {
-                    "stage" => ("%stage", "`(stage module effect type code (procedure body …) (failure else …))`"),
-                    _ => ("%session-check", "`(session-check session effect type code (checked body …) (failure else …))`"),
+                    "stage" => ("%stage", "`(stage module effect type code (procedure body …) (failure else …) (given evidence …))`, the last if any"),
+                    _ => ("%session-check", "`(session-check session effect type code (checked body …) (failure else …) (given evidence …))`, the last if any"),
                 };
-                let [_, target, e, r, code, ok, failed] = &items[..] else {
+                let (rest, given) = match &items[..] {
+                    [rest @ .., last] if items.len() == 8 => (rest, Some(last)),
+                    all => (all, None),
+                };
+                let [_, target, e, r, code, ok, failed] = rest else {
                     return Err(FxError::at(span, usage));
                 };
+                let given = self.given(given, span, usage)?;
                 let descs = vec![e.clone(), r.clone()];
                 let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
                 let arm = |p: &mut Self, tag: &str, a: &Syntax| -> R<Syntax> {
@@ -1594,9 +1619,27 @@ impl Checker {
                 let (ok, failed) = (arm(self, "ok", ok)?, arm(self, "failed", failed)?);
                 let mut proj = vec![sym(self, "proj"), sym(self, op)];
                 proj.extend(descs);
-                let call = Syntax::list(span, vec![Syntax::list(span, proj), target.clone(), code.clone()]);
+                let call = Syntax::list(span, vec![Syntax::list(span, proj), target.clone(), code.clone(), given]);
                 let form = Syntax::list(span, vec![sym(self, "tagcase"), call, ok, failed]);
                 self.parse_exp(&form)
+            }
+            // Evidence (`docs/research/eval.md`, "Evidence"): `(reify-effect
+            // E (given g …))` is `((proj %reify-effect E) (product (1 g)
+            // …))`, the operand where what it is of is noted; `reify-region`
+            // and `reify-type` alike.
+            head @ ("reify-effect" | "reify-region" | "reify-type") => {
+                let op = format!("%{head}");
+                let usage = format!("`({} description (given evidence …))`, the last if any", &op[1..]);
+                let (d, given) = match &items[..] {
+                    [_, d] => (d, None),
+                    [_, d, g] => (d, Some(g)),
+                    _ => return Err(FxError::at(span, usage)),
+                };
+                let given = self.given(given, span, &usage)?;
+                let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+                let proj = Syntax::list(span, vec![sym(self, "proj"), sym(self, &op), d.clone()]);
+                let call = Syntax::list(span, vec![proj, given]);
+                self.parse_exp(&call)
             }
             // `(session-commit! s d decision)`: the initializer, which the
             // program runs, then what it made recorded, or why not (`(let

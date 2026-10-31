@@ -35,6 +35,8 @@
             (val k-show-marks (ref bool @t))
             (val k-show-apart
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-strings) k-strings))
+            (val k-free-shown
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-strings) k-ids))
             (val k-conv=? (subr (read @globals) (k-conv k-conv) bool))
             (val k-kind-text
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))

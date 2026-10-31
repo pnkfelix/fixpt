@@ -3063,3 +3063,32 @@ of `TODO.md` §141, working on my own.
   them, with the key it chooses.
 - **Its own file**, beside `conditions.fx` and `processes.fx` in
   `STANDARD_MODULES`, which it loads; nothing in the language changed.
+
+## Evidence (2026-10-31)
+
+- **Given at the form, not found by type**: the design shown the user had
+  `stage` find each variable's evidence in scope by its type. Built so,
+  the evidence would be variables no tree mentions: the compilers written
+  in FX-26 capture what a lambda's body mentions (`c-free`), and
+  `compile.fx`, at its line limit, had no room to change that. `(given g
+  …)` makes the evidence expressions every machine compiles and captures;
+  the checker still finds what needs evidence and refuses a form missing
+  any. Each `g` a variable, so the checker written in FX-26 reads its type
+  (`k-lookup`) where it notes the form.
+- **Exact evidence, invariant types**: a smaller effect's evidence in a
+  larger one's place is unsound where the variable stands contravariantly
+  (`docs/research/eval.md`, "Evidence").
+- **Text as the representation**: what the checker that runs reads; the
+  printed `M`, `E` and `R` are substituted token by token (labels print
+  `#:name`, so a bare token that is a variable's name is it).
+- **Free variables from the printers' marks**: both printers already mark
+  each variable free or bound to tell two of one name apart; the same
+  marks say which a staged check needs, with no walker of every type.
+- **A `letregion`'s region in the checker written in FX-26** is a region
+  of its own kind (`r-fresh`), which its printer does not mark: its
+  evidence is taken in `(given …)`, and `reify-region` of one is named
+  afresh, but one named at `stage` with none given is refused only as the
+  program runs (`TODO.md` §186, 3.).
+- **Evaluator**: `reify-…` intercepted at the form, as `stage` is, and
+  substituted by the runtime (`%reify-text`), so that every machine names
+  fresh regions alike.

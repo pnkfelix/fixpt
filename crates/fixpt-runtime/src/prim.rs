@@ -3044,13 +3044,15 @@ prims! {
     // `stage` (`docs/research/eval.md`): module `a[0]`, and what the
     // compilers made of the form's text, `a[1]`, a product of the module's
     // type, the effect and the type it is checked at, and the text. A
-    // `(sumof (ok (subr E () R)) (failed stage-failure))`. The checker is
+    // `(sumof (ok (subr E () R)) (failed stage-failure))`; `a[2]`, the
+    // evidence of the variables those name (`docs/research/eval.md`,
+    // "Evidence"), a product, in the order the text names them. The checker is
     // above this crate; the session installs it (`stage`). Where none is,
     // or the text came as it was written (a machine that does not compile
     // with the compilers written in FX-26), a refusal.
-    "%fx26-stage", 2, Some(2), simple!(|rt, a| {
+    "%fx26-stage", 3, Some(3), simple!(|rt, a| {
         let made = match rt.stage {
-            Some(stage) => stage(rt, a[0], a[1]),
+            Some(stage) => stage(rt, a[0], a[1], a[2]),
             None => Err("this machine cannot stage code".to_string()),
         };
         Ok(match made {
@@ -3063,9 +3065,9 @@ prims! {
     // Rust (the session installs it, `stage_lower`): a list of the datum
     // that makes the procedure of the module, which the runtime's
     // `%fx26-stage-lowered` gives `eval`; or the sum `(failed why)`.
-    "%fx26-stage-lower", 1, Some(1), simple!(|rt, a| {
+    "%fx26-stage-lower", 2, Some(2), simple!(|rt, a| {
         let made = match rt.stage_lower {
-            Some(lower) => lower(rt, a[0]),
+            Some(lower) => lower(rt, a[0], a[1]),
             None => Err("this machine cannot stage code".to_string()),
         };
         Ok(match made {
@@ -3087,17 +3089,18 @@ prims! {
     // given the decision, recorded; and, lowered (`rs-scheme-vm`), the
     // Scheme each makes, for `eval`.
     "%fx26-make-session", 1, Some(1), simple!(|rt, a| Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE])));
-    "%fx26-session-check", 2, Some(2), simple!(|rt, a| session_op(rt, "check", a));
+    "%fx26-session-check", 3, Some(3), simple!(|rt, a| session_op(rt, "check", a));
     "%fx26-session-redefines", 2, Some(2), simple!(|rt, a| session_op(rt, "redefines", a));
     "%fx26-session-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "ready", a));
     "%fx26-session-committed!", 2, Some(2), simple!(|rt, a| session_op(rt, "committed", a));
-    "%fx26-session-lower", 2, Some(2), simple!(|rt, a| session_op(rt, "lower", a));
+    "%fx26-session-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "lower", a));
     "%fx26-session-commit-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "commit-lower", a));
-    "%fx26-stage-check", 4, Some(4), simple!(|rt, a| {
+    "%fx26-stage-check", 6, Some(6), simple!(|rt, a| {
         let [mt, e, r, text] = [a[0], a[1], a[2], a[3]].map(|x| get_string(rt, x));
         let (mt, e, r, text) = (mt?, e?, r?, text?);
+        let given = crate::evidence::Given::of(rt, a[4], a[5]);
         Ok(match rt.stage_check {
-            Some(check) => check(rt, &mt, &e, &r, &text),
+            Some(check) => check(rt, &mt, &e, &r, &text, &given),
             None => stage_refused(rt, "this machine cannot stage code"),
         })
     });
@@ -3105,8 +3108,15 @@ prims! {
     // evaluator to run: a form checked, given the module's type, the
     // effect, the result type and the code as text; and readied, given the
     // decision's tag as text.
-    "%fx26-session-eval-check", 5, Some(5), simple!(|rt, a| session_op(rt, "eval-check", a));
+    "%fx26-session-eval-check", 7, Some(7), simple!(|rt, a| session_op(rt, "eval-check", a));
     "%fx26-session-eval-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "eval-ready", a));
+    // Evidence (`docs/research/eval.md`, "Evidence"): what a `reify-…`
+    // makes of the product the compilers make of its operand
+    // (`evidence::reified`).
+    "%fx26-reify-effect", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0], 1)));
+    "%fx26-reify-region", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0], 1)));
+    "%fx26-reify-type", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0], 2)));
+    "%fx26-reify-text", 4, Some(4), simple!(|rt, a| Ok(crate::evidence::reified_text(rt, a[0], a[1], a[2], a[3])));
 }
 
 /// Promise states. `[state, payload]`.

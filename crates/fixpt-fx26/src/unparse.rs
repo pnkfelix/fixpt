@@ -33,6 +33,25 @@ impl Checker {
         }
     }
 
+    /// The variables free in what `make` shows, in the order shown, as a
+    /// `.fasl` shows it (`staged_text`): those a staged check must be given
+    /// the evidence of.
+    pub(crate) fn free_in_shown(&self, make: impl FnOnce(&Self) -> Vec<String>) -> Vec<crate::ast::DVar> {
+        *self.print_for_fasl.borrow_mut() = Some(HashMap::new());
+        self.show_marks.set(true);
+        let texts = make(self);
+        self.show_marks.set(false);
+        *self.print_for_fasl.borrow_mut() = None;
+        let marks: Vec<(char, u32)> = texts.iter().flat_map(|t| marks_in(t)).collect();
+        let mut free = Vec::new();
+        for &(how, v) in &marks {
+            if how == 'f' && !marks.iter().any(|&(h, w)| w == v && h != 'f') && !free.contains(&crate::ast::DVar(v)) {
+                free.push(crate::ast::DVar(v));
+            }
+        }
+        free
+    }
+
     /// What `make` shows, with two free variables of one name told apart:
     /// the first, in the order the texts are read, keeps its name, the next
     /// is primed, `a'`, and so on; and a line for each such name saying so,

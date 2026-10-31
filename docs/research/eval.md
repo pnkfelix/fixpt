@@ -339,6 +339,35 @@ a definition to commit.)
   redefinition, which may answer, escape, or capture) is a library
   procedure over these forms, not a form of its own.
 
+### Evidence (the user's, 2026-10-31)
+
+`stage` within a `plambda` over `M`, `E` or `R` could not be checked as
+it runs: the instantiation is erased, so the checker that runs then sees
+only the variable's name. The user chose explicit evidence: a value that
+describes an effect, a region or a type, threaded by the caller as the
+`plambda`'s instantiation is, and given at the staging form, `(given g
+…)`. Its type, `(effectrep e)`, `(regionrep r)` or `(typerep t)`, is
+generative and invariant, and only `reify-effect`, `reify-region` and
+`reify-type` make one, of what is written (with the evidence of what that
+names), so the evidence of `e` says what `e` is, exactly. Not a smaller
+effect in a larger one's place: a variable may stand where checking
+within less is not more cautious (an `R` of `(subr pure ((subr e () unit))
+unit)`, the code then taking `e`'s callback for a pure one). Any program
+can make evidence of `pure`, but it is evidence of `e` only where `e` is
+instantiated `pure`. A variable `M`, `E` or `R` names with none given is
+refused as the program is checked.
+
+Regions have no text of their own: a region's evidence is a name. `@a`
+is itself; a region a variable names, given no evidence of it, is named
+afresh, and the staged check binds the name as a region it knows nothing
+of. Two names for one region are only more cautious than the program
+(the code cannot mix them), never less.
+
+Found implicitly, by type, the evidence would be variables no tree
+mentions, which the compilers written in FX-26 would not capture in
+closures; given explicitly, it is ordinary expressions every machine
+compiles, and the staging operators take it as one more argument.
+
 ### The program's own top level as `m`?
 
 `TODO.md` §105 offered two ways: (a) the editor is the session, as Emacs

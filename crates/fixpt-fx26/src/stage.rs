@@ -88,22 +88,61 @@ impl Wrapped {
 }
 
 /// `stage`'s: `(the (subr pure (M) (subr E () R)) (lambda ((stage-module
-/// M)) (lambda () (with stage-module code))))`.
-fn stage_wrapped(mt: &str, e: &str, r: &str, code: &str) -> Wrapped {
-    let prefix = format!("(the (subr pure ({mt}) (subr {e} () {r}))\n(lambda ((stage-module {mt}))\n(lambda () (with stage-module\n");
-    Wrapped::of(prefix, code, "\n))))\n", code, 0)
+/// M)) (lambda () (with stage-module code))))`, of `parts`, each region
+/// of its own they name bound around it (`bound`).
+fn stage_wrapped(parts: &Parts, code: &str) -> Wrapped {
+    let Parts { mt, e, r, .. } = parts;
+    let prefix = format!("{}(the (subr pure ({mt}) (subr {e} () {r}))\n(lambda ((stage-module {mt}))\n(lambda () (with stage-module\n", parts.bound());
+    Wrapped::of(prefix, code, &format!("\n)))){}\n", ")".repeat(parts.closing())), code, 0)
+}
+
+/// What a form's code is checked against, as the checker that runs then
+/// reads it: the module's type, the effect and the result type, each
+/// variable they name given its evidence (`fixpt_runtime::evidence`), and
+/// the regions of their own they name.
+pub(crate) struct Parts {
+    pub mt: String,
+    pub e: String,
+    pub r: String,
+    pub regions: Vec<String>,
+}
+
+impl Parts {
+    /// Of the texts as printed, given `given`.
+    pub(crate) fn of(mt: &str, e: &str, r: &str, given: &fixpt_runtime::evidence::Given) -> Parts {
+        let [mt, e, r] = [mt, e, r].map(|t| given.substituted(t));
+        let regions = fixpt_runtime::evidence::regions_in(&[&mt, &e, &r]);
+        Parts { mt, e, r, regions }
+    }
+
+    /// The `plambda` that binds the regions, open; none if none.
+    pub(crate) fn bound(&self) -> String {
+        if self.regions.is_empty() {
+            return String::new();
+        }
+        let binders: Vec<String> = self.regions.iter().map(|r| format!("({r} region)")).collect();
+        format!("(plambda ({})\n", binders.join(" "))
+    }
+
+    /// How many parentheses close what `bound` opens.
+    pub(crate) fn closing(&self) -> usize {
+        usize::from(!self.regions.is_empty())
+    }
 }
 
 /// The product the compilers make of a form's code (`n-staged`): the
-/// module's type, the effect and the result type, and the code.
-pub(crate) fn staged_parts(rt: &Runtime, staged: Value) -> Option<(String, String, String, Value)> {
-    let is_product = staged.is_bloblet() && rt.heap.bloblet_kind(staged) == PRODUCT && rt.heap.bloblet_head(staged).fields == 5;
+/// module's type, the effect and the result type, the code, and the names
+/// of the variables those name, of which `given` is the evidence, in
+/// order: what the code is checked against, and the code.
+pub(crate) fn staged_parts(rt: &Runtime, staged: Value, given: Value) -> Option<(Parts, Value)> {
+    let is_product = staged.is_bloblet() && rt.heap.bloblet_kind(staged) == PRODUCT && rt.heap.bloblet_head(staged).fields == 6;
     if !is_product {
         return None;
     }
     let field = |i: usize| rt.heap.bloblet_slot(staged, i + 1);
     let [mt, e, r] = [1, 2, 3].map(|i| rt.heap.string_to_rust(field(i)));
-    Some((mt, e, r, field(4)))
+    let given = fixpt_runtime::evidence::Given::of(rt, field(5), given);
+    Some((Parts::of(&mt, &e, &r, &given), field(4)))
 }
 
 /// The front end that stages, made at the first `stage` and kept.
@@ -168,13 +207,13 @@ pub(crate) fn ok(rt: &mut Runtime, v: Value) -> Value {
 /// What `%fx26-stage` does with module `m` and `staged`, the product of the
 /// module's type, the effect, the result type and the code: the code
 /// checked and compiled, the procedure it makes given `m`, the thunk.
-fn stage(rt: &mut Runtime, m: Value, staged: Value) -> Result<Value, String> {
-    let (mt, e, r, code) = staged_parts(rt, staged).ok_or("this machine cannot stage code")?;
+fn stage(rt: &mut Runtime, m: Value, staged: Value, given: Value) -> Result<Value, String> {
+    let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
     // The code, a datum, as the checker reads it: written out. A refusal is
     // placed in what is written.
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
     let base = rt.heap.push_root(m);
-    let out = made(rt, &stage_wrapped(&mt, &e, &r, &text), base, 1);
+    let out = made(rt, &stage_wrapped(&parts, &text), base, 1);
     rt.heap.pop_roots_to(base);
     match out? {
         Ok(thunk) => Ok(ok(rt, thunk)),
@@ -187,10 +226,10 @@ fn stage(rt: &mut Runtime, m: Value, staged: Value) -> Result<Value, String> {
 /// that the lowering makes (`facts.staged`): the code checked ([`checked`])
 /// and lowered: the datum that makes the procedure of the module, in a list
 /// of one, which the runtime gives `eval`; or the refusal.
-pub fn lower_staged(rt: &mut Runtime, staged: Value) -> Result<Value, String> {
-    let (mt, e, r, code) = staged_parts(rt, staged).ok_or("this machine cannot stage code")?;
+pub fn lower_staged(rt: &mut Runtime, staged: Value, given: Value) -> Result<Value, String> {
+    let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
-    let (c, top) = match checked(rt, &stage_wrapped(&mt, &e, &r, &text)) {
+    let (c, top) = match checked(rt, &stage_wrapped(&parts, &text)) {
         Ok(done) => done,
         Err(refused) => return Ok(refused),
     };
@@ -202,11 +241,12 @@ pub fn lower_staged(rt: &mut Runtime, staged: Value) -> Result<Value, String> {
 
 /// `stage` on the evaluator written in FX-26 (`fx-ast-eval`), what
 /// `%fx26-stage-check` does with the module's type, the effect, the result
-/// type and the code, written out: the code checked ([`checked`]), and the
-/// text that was, for the evaluator to parse and run, `(sum checked
+/// type and the code, written out, and the names of the variables those
+/// name and their evidence (`given`): the code checked ([`checked`]), and
+/// the text that was, for the evaluator to parse and run, `(sum checked
 /// text)`; or the refusal.
-pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str) -> Value {
-    let w = stage_wrapped(mt, e, r, text);
+pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str, given: &fixpt_runtime::evidence::Given) -> Value {
+    let w = stage_wrapped(&Parts::of(mt, e, r, given), text);
     match checked(rt, &w) {
         Ok(_) => {
             let tag = rt.heap.intern("checked");

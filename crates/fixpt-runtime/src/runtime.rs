@@ -117,15 +117,15 @@ pub type TypeAt = fn(&str, i64) -> String;
 /// How FX-26's `stage` makes code (`docs/research/eval.md`): of module `m`
 /// and what the compilers made of the form's text, the sum the form takes
 /// apart; or why it could not try, which the program sees as a refusal.
-pub type Stage = fn(&mut Runtime, Value, Value) -> Result<Value, String>;
+pub type Stage = fn(&mut Runtime, Value, Value, Value) -> Result<Value, String>;
 /// How `stage` lowered makes code: of what the lowering made of the form's
 /// code (the product `Stage` is given), a list of the Scheme datum that
 /// makes the procedure of the module, or the sum `(failed why)`.
-pub type StageLower = fn(&mut Runtime, Value) -> Result<Value, String>;
+pub type StageLower = fn(&mut Runtime, Value, Value) -> Result<Value, String>;
 /// How `stage` on the evaluator written in FX-26 checks code: of the
 /// module's type, the effect, the result type and the code, as text, the
 /// sum `(checked text)`, the code as checked, or `(failed why)`.
-pub type StageCheck = fn(&mut Runtime, &str, &str, &str, &str) -> Value;
+pub type StageCheck = fn(&mut Runtime, &str, &str, &str, &str, &crate::evidence::Given) -> Value;
 /// A session's operation, by name, on its arguments: what the primitive
 /// gives, or why it could not try, which the program sees as a refusal.
 pub type Sessions = fn(&mut Runtime, &str, &[Value]) -> Result<Value, String>;

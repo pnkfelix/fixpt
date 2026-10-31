@@ -36,8 +36,9 @@
 ;; And what each operation takes (`k-datum`), likewise.
 (define-type c-datum-noted (productof (1 k-at) (2 k-datum)))
 (define-type c-datums-at (table int (listof c-datum-noted acyclic) @k))
-;; And each `stage`'s text, with what it is checked against (`n-staged`).
-(define-type c-staged (productof (1 k-at) (2 string) (3 string) (4 string)))
+;; And each `stage`'s text, with what it is checked against (`n-staged`), and
+;; the names of the variables whose evidence it is given.
+(define-type c-staged (productof (1 k-at) (2 string) (3 string) (4 string) (5 string)))
 (define-type c-staged-list (listof c-staged acyclic))
 ;; A `letrec`-bound procedure lambda-lifted, as Twobit's pass 2 lifts
 ;; (`pass2p2.sch`): its closure, over nothing, made while compiling; the

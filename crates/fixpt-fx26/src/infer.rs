@@ -592,7 +592,17 @@ impl Checker {
             && matches!(op.as_str(), "%stage" | "%session-check")
             && let Some(&target) = args.first()
         {
-            self.note_staged(&op, target, args.get(1).copied(), t)?;
+            self.note_staged(&op, target, args.get(1).copied(), args.get(2).copied(), t)?;
+        }
+        // Evidence (`docs/research/eval.md`, "Evidence"): what it is of,
+        // printed whole, noted at its operand, with the evidence of what
+        // that names.
+        if let Exp::Proj { body, .. } = self.arena.exp_at(fun).clone()
+            && let Some(op) = self.standard_ref(body).map(|op| self.interner.name(op).to_string())
+            && matches!(op.as_str(), "%reify-effect" | "%reify-region" | "%reify-type")
+            && let Some(&arg) = args.first()
+        {
+            self.note_reified(&op, arg, t)?;
         }
         // A path a fact in force narrows (`(car x)` …), its type there.
         let t = self.path_typed(e, t);
@@ -602,7 +612,7 @@ impl Checker {
     /// `stage`'s call, or a session's (`op`), of module or session
     /// `target` and code `code`, of type `t`: `M`, `E` and `R` noted at the
     /// code, printed whole, for the lowering (`facts.staged`).
-    fn note_staged(&mut self, op: &str, target: ExpId, code: Option<ExpId>, t: TyId) -> R<()> {
+    fn note_staged(&mut self, op: &str, target: ExpId, code: Option<ExpId>, given: Option<ExpId>, t: TyId) -> R<()> {
         let span = self.arena.span_of(target);
         let what = if op == "%stage" { "a module" } else { "a session" };
         let Exp::Var(_) = self.arena.exp_at(target) else {
@@ -628,10 +638,110 @@ impl Checker {
         let ok = if op == "%session-check" { part(self, ok, "expression") } else { Some(ok) };
         let Some(Ty::Subr { effect, result, .. }) = ok.map(|ok| self.arena.get(self.arena.resolve(ok)).clone()) else { return Ok(()) };
         if let Some(code) = code {
-            let staged = (self.staged_text(mt), self.staged_effect_text(&effect), self.staged_text(result));
+            let free = self.free_in_shown(|c| vec![c.show_ty(mt), c.show_effect(&effect), c.show_ty(result)]);
+            let evidence = self.evidence(&free, given, true, op.trim_start_matches('%'), span)?;
+            let staged = crate::check::Staged { m: self.staged_text(mt), e: self.staged_effect_text(&effect), r: self.staged_text(result), evidence };
             self.facts.staged.insert(code, staged);
         }
         Ok(())
+    }
+
+    /// A `reify-…`'s call (`op`), of operand `arg` and type `t`, its
+    /// `(effectrep E)`, `(regionrep r)` or `(typerep T)`: what it is of,
+    /// printed whole, noted at the operand, with the evidence of each
+    /// variable it names. A region's needs none: one of none is a region of
+    /// its own (`stage.rs`, "Evidence").
+    fn note_reified(&mut self, op: &str, arg: ExpId, t: TyId) -> R<()> {
+        let span = self.arena.span_of(arg);
+        let Ty::Named { args, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return Ok(()) };
+        let mut staged = crate::check::Staged::default();
+        let free = match (op, args.first()) {
+            ("%reify-effect", Some(D::Effect(e))) => {
+                staged.e = self.staged_effect_text(e);
+                self.free_in_shown(|c| vec![c.show_effect(e)])
+            }
+            ("%reify-type", Some(D::Type(x))) => {
+                staged.r = self.staged_text(*x);
+                self.free_in_shown(|c| vec![c.show_ty(*x)])
+            }
+            ("%reify-region", Some(D::Region(r))) => {
+                *self.print_for_fasl.borrow_mut() = Some(HashMap::new());
+                staged.e = self.show_region(*r);
+                *self.print_for_fasl.borrow_mut() = None;
+                self.free_in_shown(|c| vec![c.show_region(*r)])
+            }
+            _ => return Ok(()),
+        };
+        staged.evidence = self.evidence(&free, Some(arg), op != "%reify-region", op.trim_start_matches('%'), span)?;
+        // A region a variable names, of no evidence: one of its own.
+        if op == "%reify-region" && !free.is_empty() && staged.evidence.is_empty() {
+            staged.m = "fresh".to_string();
+        }
+        self.facts.staged.insert(arg, staged);
+        Ok(())
+    }
+
+    /// The names, as printed, of the variables of which the evidence
+    /// `given`, a product (`(given g …)`), is, in its order: each of
+    /// `(effectrep v)`, `(regionrep v)` or `(typerep v)`, `v` a variable.
+    /// Each of variables `free` must be one, if `needed`: else the `form`
+    /// at `span` is refused, saying what to give it. Two of one name are
+    /// refused, as the staged check could not tell them apart.
+    fn evidence(&mut self, free: &[DVar], given: Option<ExpId>, needed: bool, form: &str, span: fixpt_read::Span) -> R<Vec<String>> {
+        let fields = match given {
+            Some(g) => {
+                let (t, _) = self.synth(g)?;
+                match self.arena.get(self.arena.resolve(t)).clone() {
+                    Ty::Product(fs) => fs.into_iter().map(|(_, t)| t).collect(),
+                    _ => Vec::new(),
+                }
+            }
+            None => Vec::new(),
+        };
+        let at = given.map_or(span, |g| self.arena.span_of(g));
+        let mut names: Vec<String> = Vec::new();
+        let mut of: Vec<DVar> = Vec::new();
+        for t in fields {
+            let v = match self.arena.get(self.arena.resolve(t)).clone() {
+                Ty::Named { which, args } if [crate::check::EFFECTREP_INDEX, crate::check::REGIONREP_INDEX, crate::check::TYPEREP_INDEX].contains(&which) => match args.first() {
+                    Some(D::Effect(e)) if e.0.len() == 1 => match e.0.iter().next() {
+                        Some(Atom::Var(v)) => Some(*v),
+                        _ => None,
+                    },
+                    Some(D::Region(Region::Var(v))) => Some(*v),
+                    Some(D::Type(x)) => match self.arena.get(self.arena.resolve(*x)) {
+                        Ty::Var(v) => Some(*v),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(v) = v else {
+                return Err(FxError::at(at, format!("`{form}` is given evidence of a variable, an `(effectrep e)`, a `(regionrep r)` or a `(typerep t)`, and this is a {}", self.show_ty(t))));
+            };
+            let name = self.interner.name(self.arena.dvar_name(v)).to_string();
+            if names.contains(&name) && !of.contains(&v) {
+                return Err(FxError::at(at, format!("`{form}` is given evidence of two variables `{name}`: rename one, so that the code can be checked against each")));
+            }
+            names.push(name);
+            of.push(v);
+        }
+        for &v in free {
+            if needed && !of.contains(&v) {
+                let name = self.interner.name(self.arena.dvar_name(v)).to_string();
+                let (kind, maker) = match self.arena.dvar_kind_known(v) {
+                    Some(Kind::Effect) => ("effectrep", "reify-effect"),
+                    Some(Kind::Region) => ("regionrep", "reify-region"),
+                    _ => ("typerep", "reify-type"),
+                };
+                return Err(FxError::at(
+                    span,
+                    format!("`{form}`'s code is checked, as the program runs, against `{name}`, a variable: give it its evidence, a `({kind} {name})` (`{maker}`), in `(given …)`"),
+                ));
+            }
+        }
+        Ok(names)
     }
 
     fn made_native(&mut self, e: ExpId, t: TyId) -> R<TyId> {
