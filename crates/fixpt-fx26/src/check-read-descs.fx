@@ -40,7 +40,14 @@
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
            (check-specs (select check-specs-types check-specs-sig))
            (check-read-made (select check-read-made-types check-read-made-sig)))
-    (module
+    ;; Part of it in a file of its own (`check-read-ahead.fx`), made of what it is
+    ;; given.
+    (let ((check-read-ahead
+           ((load-input "fx26:check-read-ahead.fx")
+            check-types check-read-helpers check-syntax check-read check-subst check-env
+            check-print check-holds check-proving check-effects check-unions parser
+            check-print-parts check-specs check-read-made)))
+      (module
 
 ;; The types it uses of the files before it.
 (hide (include check-types-types) (include eager-reader-types) (include parser-types)
@@ -383,86 +390,11 @@
         (k-shape (= (k-length items) 2) usage s)
         (let* ((saved (get k-dscope)) (t (k-parse-proves (k-nth items 1) usage)))
           (begin (set k-dscope saved) t))))))
-;; Whether top-level `form` is a `define-type` that names a file, its type
-;; `(%type-made …)` or `(%input-made …)` (`load-moduleof`): read in order,
-;; not ahead, as its file's hidden global is defined before it
-;; (`declare_each`).
-(define k-read-in-order? (->* (top) bool)
-  (lambda (form)
-    (tagcase form (t-define-type (name def a b) (k-names-a-file? def)) (else y #f))))
-(define k-names-a-file? (->* (syn) bool)
-  (lambda (s)
-    (tagcase s
-      (lst (items d a b)
-        (let ((h (if (and (not (null? items)) (syn-symbol? (car items)))
-                     (syn-name (car items))
-                     "")))
-          (or (string=? h "%type-made") (string=? h "%input-made") (string=? h "restrict")
-              (k-any-names-a-file? items))))
-      (else y #f))))
-(define k-any-names-a-file? (->* (k-syns) bool)
-  (lambda (xs)
-    (and (not (null? xs)) (or (k-names-a-file? (car xs)) (k-any-names-a-file? (cdr xs))))))
-;; A program's forms, and lines said of them (`check-program-types.fx`'s).
-(define-type k-tops (listof top acyclic))
-(define-type k-out (listof string acyclic))
-;; The names simple `define-type`s give, in order, each as often as given;
-;; if `stop?`, those before a top-level `include` (`k-included?`).
-(define k-ahead-names-of (->* (k-tops k-names bool) k-names)
-  (lambda (forms acc stop?)
-    (if (or (null? forms) (and stop? (k-included? (car forms))))
-        (the k-names (reverse acc))
-        (k-ahead-names-of
-         (cdr forms)
-         (tagcase (car forms)
-           (t-define-type (name def a b)
-             (if (and (syn-symbol? name) (not (string=? (k-list-head def) "dlambda"))
-                      (not (k-names-a-file? def)))
-                 (cons (string->symbol (syn-name name)) acc)
-                 acc))
-           (else y acc))
-         stop?))))
-;; The names `ns` gives more than once, each once, in the order each is
-;; given a second time.
-(define k-given-again (->* (k-names k-names k-names) k-names)
-  (lambda (ns seen again)
-    (cond ((null? ns) (the k-names (reverse again)))
-          ((not (k-has-name? seen (car ns))) (k-given-again (cdr ns) (cons (car ns) seen) again))
-          ((k-has-name? again (car ns)) (k-given-again (cdr ns) seen again))
-          (else (k-given-again (cdr ns) seen (cons (car ns) again))))))
-;; A warning for each type a whole program defines more than once
-;; (`TODO.md` §34): not an error, but its values see only the last.
-(define k-again-lines (->* (k-names) k-out)
-  (lambda (ns)
-    (if (null? ns)
-        nil
-        (cons (k-cat3 "warning: `" (symbol->string (car ns))
-                      "` is defined as a type more than once; every value sees the last")
-              (k-again-lines (cdr ns))))))
-;; Where a top-level `include` ended what is declared ahead (`k-included?`),
-;; or -1: a type or effect defined after it is read in order.
-(define k-ahead-stop (ref int @t) (new -1))
-;; Whether `form` is where a top-level `include` was (`included-mark`).
-(define k-included? (->* (top) bool)
-  (lambda (form)
-    (tagcase form
-      (t-define-effect (name def a b)
-        (and (syn-symbol? name) (string=? (syn-name name) "%included")))
-      (else y #f))))
-;; Where a type's or an effect's definition starts; -1 for any other form.
-(define k-type-top-start (->* (top) int)
-  (lambda (form)
-    (tagcase form
-      (t-define-type (n d a b) a) (t-define-effect (n d a b) a) (t-define-generative (h r a b) a)
-      (t-define-convention (n f a b) a) (else y -1))))
-;; Whether `form`, a type's or an effect's definition, is declared where it
-;; is, not ahead: it names a file (`k-read-in-order?`), or is after a
-;; top-level `include` (`declare_each`).
-(define k-declared-later? (->* (top) bool)
-  (lambda (form)
-    (or (k-read-in-order? form)
-        (let ((a (k-type-top-start form)))
-          (and (>= a 0) (>= (get k-ahead-stop) 0) (>= a (get k-ahead-stop)))))))
+;; Given on, all `check-read-ahead.fx` defines.
+(import check-read-ahead k-read-in-order? k-names-a-file? k-any-names-a-file? k-ahead-names-of
+        k-given-again k-again-lines k-ahead-stop k-included? k-type-top-start k-declared-later?
+        (type k-tops k-out))
+
 ;; A type written as a form, `(hd …)`, `hd` no family's name.
 (define k-parse-type-form (->* (syn k-syns symbol) int)
   (lambda (s items hd)
@@ -986,4 +918,4 @@
                                          (the k-ids (append tys (cons t nil))) cs)))
           (cons t rest)))))
 (define k-read-params (->* (k-syns syn k-syns) k-ids)
-  (lambda (ps r cs) (k-read-params-from ps r nil nil cs))))))
+  (lambda (ps r cs) (k-read-params-from ps r nil nil cs)))))))

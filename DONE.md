@@ -4352,3 +4352,9 @@ force say of them) into `check-sizes.fx`, 951 lines to 718; and
 branches, a body against its specification, what tests certify and
 narrow) into `check-synth-parts.fx`, 960 lines to 476.
 
+And `native-direct-x64-prims.fx`'s primitives of strings and characters
+into `native-direct-x64-strings.fx`, 943 lines to 834; and
+`check-read-descs.fx`'s reading of what is declared ahead into
+`check-read-ahead.fx`, 989 lines to 921 (the rest one recursive group,
+nothing more of it apart).
+
