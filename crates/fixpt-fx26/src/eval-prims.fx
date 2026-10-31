@@ -399,9 +399,6 @@
                               (cons 'message (the val message))
                               (cons 'start (the val 0))
                               (cons 'end (the val 0)))))))
-;; A session's step, refused: this machine keeps none yet.
-(define ev-session-refused (->* () val)
-  (lambda () (the val (o-sum 'failed (ev-stage-refused "this machine cannot keep sessions yet")))))
 ;; Strings `ns`, as the evaluator's list of them.
 (define ev-strings (->* ((listof string @v)) val)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (ev-strings (cdr ns))))))
@@ -507,13 +504,12 @@
       (prim! '%stage
              (lambda (xs)
                (the val (o-sum 'failed (ev-stage-refused "`%stage` is called only as `stage`")))))
-;; Sessions (`docs/research/eval.md`, "Sessions"): not yet here; each
-      ;; step refuses, saying so.
-      (prim! 'make-session (lambda (xs) the-unit))
-      (prim! '%session-check (lambda (xs) (ev-session-refused)))
-      (prim! 'session-redefines (lambda (xs) (the val (o-sum 'fresh the-unit))))
-      (prim! '%session-ready (lambda (xs) (ev-session-refused)))
-      (prim! '%session-committed! (lambda (xs) (ev-session-refused)))
+      ;; Sessions: `eval-core.fx`'s, but `%session-check`, named only as
+      ;; `session-check`'s operator (`ev-session-check`).
+      (prim! '%session-check
+             (lambda (xs)
+               (the val (o-sum 'failed (ev-stage-refused
+                                        "`%session-check` is called only as `session-check`")))))
       (prim! 'clock (lambda (xs) (clock)))
       (prim! 'sleep-until
              (lambda (xs) (begin (sleep-until (int->i64 (as-int (ev-arg xs 0)))) the-unit)))

@@ -3011,3 +3011,20 @@ of `TODO.md` §141, working on my own.
 - **`k-naming!`**: the FX-26 printer was naming types by the standard
   environment's names (`api-type`), which the session's source cannot read
   back; a switch turns naming off while a session's types are printed.
+
+## Sessions on the evaluator (2026-10-31)
+
+- **Text, as `stage` there**: the session's checker hands the evaluator
+  each step's forms written out, which it parses and runs, as
+  `%stage-check` does for `stage`; no facts go with them, as none go with
+  staged code.
+- **The session's globals are the evaluator's**: an environment per
+  session, kept beside the session (a list keyed by identity), with the top
+  level's own procedures, now given the globals they define in. A shadowing
+  definition is a new cell, what was made before keeping the old; one kept
+  (it assigns) reuses the cell.
+- **`o-host`**: a session and a pending definition are the runtime's
+  vectors; FX-26's arrays are bloblets on the cellular machines, so the
+  evaluator cannot make or read one as an array. They cross as a new
+  `other`, passed back to the runtime's primitives, never looked in.
+- **`go` runs the commit here**, the program's code, as on `rs-scheme-vm`.

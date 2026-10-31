@@ -456,12 +456,15 @@
          (else "")))
       ((18)
        (case n
+         (("%session-eval-make") "%fx26-make-session")
          (("bytevector-u8-set!") "%fx26-bytevector-u8-set!")
          (("datum-list->vector") "list->vector")
          (("datum-proper-list?") "%fx26-list?")
          (else "")))
       ((19)
        (case n
+         (("%session-eval-check") "%fx26-session-eval-check")
+         (("%session-eval-ready") "%fx26-session-eval-ready")
          (("%session-committed!") "%fx26-session-committed!")
          (("process-close-input") "%fx26-process-close-input")
          (("%string-append-list") "%fx26-string-append-list")
@@ -477,6 +480,11 @@
          (else "")))
       ((23)
        (case n
+         (("%session-eval-redefines") "%fx26-session-redefines")
          (("runtime-primitive-arity") "%runtime-primitive-arity")
+         (else "")))
+      ((24)
+       (case n
+         (("%session-eval-committed!") "%fx26-session-committed!")
          (else "")))
       (else "")))))

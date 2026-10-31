@@ -4171,6 +4171,18 @@ gives doing nothing. The FX-26 printer names no types when told not to
 (`k-naming!`), as a session's types are written back as its source.
 `a_session_keeps_definitions` passes on every machine but `fx-ast-eval`.
 
+**Sessions on the evaluator (2026-10-31).** The checker written in Rust
+gives back each step's forms as text (`sessions.rs`, "evaluated":
+`%fx26-session-eval-check`, `-eval-ready`): an expression's, after what
+defines `m`'s values the first time, the last's value its procedure; a
+commit's, each with whether it keeps its globals' cells. The evaluator
+(`eval-core.fx`, "sessions") reads, parses and runs them in the session's
+globals, an environment kept beside it (`eval-top-in`, the top level's
+procedures given the globals they define in), `stage-module` bound to
+`m`; a commit's run by the `go` it gives, the program's. A session and a
+pending definition are the runtime's, an `o-host` to the evaluator, never
+looked in. `a_session_keeps_definitions` passes on every machine.
+
 **Step 2 (2026-10-30): `rs-scheme-vm` and `fx-ast-eval`.** Both check the
 code with the checker written in Rust, of the standard environment alone
 (`stage.rs`'s `checked`), the wrapper as on every machine; the Rust checker

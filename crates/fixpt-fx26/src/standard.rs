@@ -264,6 +264,18 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // `stage`'s code checked by the checker written in Rust, the text as
     // checked or why not (`stage.rs`'s `check_staged`).
     ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string) (sumof (checked string) (failed stage-failure)))"),
+    // Sessions on the evaluator written in FX-26 (`fx-ast-eval`), which
+    // keeps a session as an array of its own values and runs each step's
+    // forms, given as text (`fixpt-fx26`'s `sessions.rs`, "evaluated"): a
+    // form checked, given the module's type, the effect, the result type
+    // and the code, written out; a pending definition readied, given the
+    // decision's tag; whether one redefines. A session, made, and a
+    // pending definition are the runtime's, never looked in.
+    ("%session-eval-check", "(poly ((r region)) (poly ((t type)) (subr (maxeff spin (io fs-read) (read r) (write r)) ((arrayof t r) string string string string) (sumof (run (listof string acyclic)) (ok (sumof (definition (arrayof t r)))) (failed stage-failure)))))"),
+    ("%session-eval-ready", "(poly ((r region)) (poly ((t type)) (subr (maxeff spin (io fs-read) (read r) (write r)) ((arrayof t r) (arrayof t r) string) (sumof (run (listof (productof (text string) (keeps bool)) acyclic)) (failed stage-failure)))))"),
+    ("%session-eval-make", "(poly ((r region)) (poly ((t type)) (subr (alloc r) (t) (arrayof t r))))"),
+    ("%session-eval-committed!", "(poly ((r region)) (poly ((t type)) (subr (maxeff (read r) (write r)) ((arrayof t r) (arrayof t r)) (sumof (defined string) (failed stage-failure)))))"),
+    ("%session-eval-redefines", "(poly ((r region)) (poly ((t type)) (subr (read r) ((arrayof t r) (arrayof t r)) (sumof (fresh unit) (redefines session-redefinition)))))"),
     // Sessions (`docs/research/eval.md`, "Sessions"): a module's code's
     // definitions, which last. `session-check` is a form over
     // `%session-check`, checked at each call as `stage` is: an expression,

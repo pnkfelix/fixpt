@@ -78,7 +78,10 @@
   (o-once (oneshot val val (maxeff runs spin) @x) (ref bool @v))
   ;; A `cwcc` escape.
   (o-esc (subr (goto @x) (val) void))
-  (o-key (mark-key val @x)))
+  (o-key (mark-key val @x))
+  ;; One of the runtime's, never looked in: a session, or a pending
+  ;; definition (`eval-core.fx`, "sessions").
+  (o-host (arrayof val @v)))
 
 (define-type vals (listof val @v))
 
@@ -155,4 +158,5 @@
    (val ev-blobref (subr (maxeff evals spin) (symbol int vals) val))
    (val ev-flat-tag (subr (maxeff evals spin) (val int) val))
    (val ev-label-is? (subr (read @globals) (val symbol int) bool))
+   (val prim! (subr (maxeff stores spin) (symbol vproc) unit))
    (val standard (subr (maxeff evals spin) (symbol) val))))

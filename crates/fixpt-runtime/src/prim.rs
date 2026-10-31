@@ -3101,6 +3101,12 @@ prims! {
             None => stage_refused(rt, "this machine cannot stage code"),
         })
     });
+    // Evaluated (`fx-ast-eval`), each step's forms as text, for the
+    // evaluator to run: a form checked, given the module's type, the
+    // effect, the result type and the code as text; and readied, given the
+    // decision's tag as text.
+    "%fx26-session-eval-check", 5, Some(5), simple!(|rt, a| session_op(rt, "eval-check", a));
+    "%fx26-session-eval-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "eval-ready", a));
 }
 
 /// Promise states. `[state, payload]`.

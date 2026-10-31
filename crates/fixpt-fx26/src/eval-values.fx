@@ -194,6 +194,7 @@
       (o-bref (o i) (tagcase b (o-bref (p j) (and (= i j) (ev-same-blob? o p))) (else y #f)))
       (o-bytes (x) (tagcase b (o-bytes (y) (eq? x y)) (else y #f)))
       (o-mstr (x) (tagcase b (o-mstr (y) (eq? x y)) (else y #f)))
+      (o-host (x) (tagcase b (o-host (y) (eq? x y)) (else y #f)))
       (else y #f))))
 
 ;; `eq?` of two values, as the machines have it: the same mutable object;
@@ -294,7 +295,8 @@
       (o-cont (k) "#<continuation>")
       (o-once (k s) "#<continuation>")
       (o-esc (k) "#<continuation>")
-      (o-key (k) "#<mark-key>"))))
+      (o-key (k) "#<mark-key>")
+      (o-host (h) "#<session>"))))
 
 ;; A value as Scheme would write it. A list may be cyclic (built with
 ;; `set-cdr!`), so the walk has fuel: past it, `…`. The car of a pair gets
