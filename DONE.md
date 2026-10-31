@@ -4196,6 +4196,17 @@ procedure of nothing is gone. Test: `stage.rs`'s
 `a_commit_runs_as_the_program_calls_it` (`programs/stage/commit.fx`), alike
 on every machine.
 
+**Sessions in the condition-raising style (2026-10-31).** A library built
+in, `fx26:session-conditions.fx`, of one procedure over the forms:
+`commit!`, a pending definition committed as `session-commit!` commits it,
+but a redefinition `raise`d (`fx26:conditions.fx`) to the handler a key's
+mark holds, whose answer is the decision; a fresh one committed without.
+The handler runs in the program's code, so it may escape to a `handle`
+outside (a restart, nothing committed) or capture a continuation. Test:
+`stage.rs`'s `a_redefinition_is_raised_to_the_handler`
+(`programs/stage/session-conditions.fx`: answered, refused, escaped, and
+fresh), alike on every machine.
+
 **Step 2 (2026-10-30): `rs-scheme-vm` and `fx-ast-eval`.** Both check the
 code with the checker written in Rust, of the standard environment alone
 (`stage.rs`'s `checked`), the wrapper as on every machine; the Rust checker

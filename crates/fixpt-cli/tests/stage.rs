@@ -130,6 +130,32 @@ defined a
 refused: `g` is broken, since `a` was redefined (a int is expected here, and this is a string): define it again to use it
 ";
 
+/// Sessions in the condition-raising style (`fx26:session-conditions.fx`):
+/// a redefinition raised to the handler, which answers, refuses or
+/// escapes; a fresh definition raising nothing. Alike on every machine.
+#[test]
+fn a_redefinition_is_raised_to_the_handler() {
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "session-conditions.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), RAISED), "{m}: {err}");
+    }
+}
+
+const RAISED: &str = "defined a
+11
+redefines a: int to int
+not defined: `a` is defined already, and the redefinition was refused
+11
+redefines a: int to int
+defined a
+30
+escaped, redefining a
+30
+defined b
+32
+";
+
 /// A commit's initializer runs as the program calls `go`, the procedure
 /// readying it gives, not as it is readied: alike on every machine.
 #[test]

@@ -827,9 +827,13 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 
 /// Libraries written in FX-26 that a program loads by name, `(load-module
 /// "fx26:conditions.fx")`: raising and handling conditions (`TODO.md` §89,
-/// `docs/research/conditions.md`).
-pub const STANDARD_MODULES: [(&str, &str); 2] =
-    [("conditions.fx", include_str!("conditions.fx")), ("processes.fx", include_str!("processes.fx"))];
+/// `docs/research/conditions.md`); the scheduler; sessions in the
+/// condition-raising style (`docs/research/eval.md`, "Sessions").
+pub const STANDARD_MODULES: [(&str, &str); 3] = [
+    ("conditions.fx", include_str!("conditions.fx")),
+    ("processes.fx", include_str!("processes.fx")),
+    ("session-conditions.fx", include_str!("session-conditions.fx")),
+];
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files

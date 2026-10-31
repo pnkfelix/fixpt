@@ -4270,9 +4270,9 @@ FX-26; `code` a datum. Left, in order:
 3. Types `M`, `E` or `R` that name the program's own: generative types,
    `(select m t)`, regions it declares; the refusal of an effect beyond
    `E` said of the code, not of the wrapping `(subr E () R)`.
-4. Sessions (`docs/research/eval.md`, "Sessions"): done on every machine
-   (`DONE.md` §186). Left: the condition-raising style, a library over
-   the forms.
+4. Sessions (`docs/research/eval.md`, "Sessions"): done on every
+   machine, with the condition-raising style as a library (`DONE.md`
+   §186).
 5. On `rs-scheme-vm` and `fx-ast-eval` the checker written in Rust
    checks staged code (step 2, `DONE.md` §186); the one written in FX-26
    there too, when checking is interruptible (2.), and blobrefs in it on

@@ -3045,3 +3045,21 @@ of `TODO.md` §141, working on my own.
 - **Between ready and `go`** a new global holds the undefined value; code
   that reads it then sees that, as a top-level forward use does. Calling
   `go` twice runs the initializers twice; affine types may later forbid it.
+
+## Sessions in the condition-raising style (2026-10-31)
+
+- **Only the commit raises**: `session-check` cannot be wrapped by a
+  library procedure, since its `E` and `R` are written where it is called
+  and printed there for the check at run time; a polymorphic procedure
+  would print its type variables. So the library takes a pending
+  definition, which the program's own `session-check` gives, and commits
+  it: `commit!`, polymorphic in the session, the effect, the handler's key
+  and its effect.
+- **A redefinition is the condition**: the `session-redefinition` itself,
+  raised with `fx26:conditions.fx`'s `raise`, and the handler answers a
+  `session-decision`. A fresh definition raises nothing and is committed
+  as `shadow` (any decision does the same there). Failures stay values, as
+  `session-commit!` gives them: a program that wants them raised raises
+  them, with the key it chooses.
+- **Its own file**, beside `conditions.fx` and `processes.fx` in
+  `STANDARD_MODULES`, which it loads; nothing in the language changed.
