@@ -209,6 +209,10 @@ pub const CHECK_PROOFS_TYPES: &str = include_str!("check-proofs-types.fx");
 /// `check-program.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_PROGRAM: &str = include_str!("check-program.fx");
 
+/// `check-program-defs.fx`: what a program's top-level forms define, made by
+/// [`CHECK_PROGRAM`] of the modules it is given (`TODO.md` §188).
+pub const CHECK_PROGRAM_DEFS: &str = include_str!("check-program-defs.fx");
+
 /// `check-effects-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_EFFECTS_TYPES: &str = include_str!("check-effects-types.fx");
 
@@ -413,6 +417,10 @@ pub const CHECK_EFFECTS: &str = include_str!("check-effects.fx");
 
 /// `check-types.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_TYPES: &str = include_str!("check-types.fx");
+
+/// `check-types-arena.fx`: the arena of type nodes and their interning, made by
+/// [`CHECK_TYPES`] of the tables it is given (`TODO.md` §188).
+pub const CHECK_TYPES_ARENA: &str = include_str!("check-types-arena.fx");
 
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
@@ -654,7 +662,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 176] = [
+pub const FRONT_END_MODULES: [(&str, &str); 178] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -768,6 +776,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 176] = [
     ("check-errors-types.fx", CHECK_ERRORS_TYPES),
     ("check-effects-types.fx", CHECK_EFFECTS_TYPES),
     ("check-program.fx", CHECK_PROGRAM),
+    ("check-program-defs.fx", CHECK_PROGRAM_DEFS),
     ("check-proofs.fx", CHECK_PROOFS),
     ("check-proving-types.fx", CHECK_PROVING_TYPES),
     ("check-logic-types.fx", CHECK_LOGIC_TYPES),
@@ -831,6 +840,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 176] = [
     ("check-env.fx", CHECK_ENV),
     ("check-effects.fx", CHECK_EFFECTS),
     ("check-types.fx", CHECK_TYPES),
+    ("check-types-arena.fx", CHECK_TYPES_ARENA),
 ];
 
 /// A `load-module` path naming a module file built in, in

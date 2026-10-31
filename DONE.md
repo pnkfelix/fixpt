@@ -4339,3 +4339,10 @@ summaries), into `compile-facts.fx`, which `compile.fx` makes itself, by
 `module` and given on by `import`: no signature of its own, the module's
 type found; 1000 lines to 808.
 
+By the same way, a module a file makes of what it is given:
+`check-program.fx`'s machinery of what a program's forms define (clauses,
+warnings and lines, the globals they bind, `define-rec` groups, `define*`
+and `->*`, what a redefinition reaches) into `check-program-defs.fx`, 979
+lines to 421; and `check-types.fx`'s arena of type nodes and their
+interning into `check-types-arena.fx`, 995 lines to 801.
+
