@@ -4346,3 +4346,9 @@ and `->*`, what a redefinition reaches) into `check-program-defs.fx`, 979
 lines to 421; and `check-types.fx`'s arena of type nodes and their
 interning into `check-types-arena.fx`, 995 lines to 801.
 
+And `check-print-parts.fx`'s sizes (linear sizes and what the facts in
+force say of them) into `check-sizes.fx`, 951 lines to 718; and
+`check-synth.fx`'s parts of the rules (notes for the compilers, joins of
+branches, a body against its specification, what tests certify and
+narrow) into `check-synth-parts.fx`, 960 lines to 476.
+

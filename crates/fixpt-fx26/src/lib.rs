@@ -269,6 +269,10 @@ pub const CHECK_MODORDER: &str = include_str!("check-modorder.fx");
 /// `check-synth.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_SYNTH: &str = include_str!("check-synth.fx");
 
+/// `check-synth-parts.fx`: parts of the rules, made by
+/// [`CHECK_SYNTH`] of the modules it is given (`TODO.md` §188).
+pub const CHECK_SYNTH_PARTS: &str = include_str!("check-synth-parts.fx");
+
 /// `check-blobrefs-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_BLOBREFS_TYPES: &str = include_str!("check-blobrefs-types.fx");
 
@@ -408,6 +412,10 @@ pub const CHECK_PRINT: &str = include_str!("check-print.fx");
 
 /// `check-print-parts.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_PRINT_PARTS: &str = include_str!("check-print-parts.fx");
+
+/// `check-sizes.fx`: sizes, linear, and what the facts in force say of them, made by
+/// [`CHECK_PRINT_PARTS`] of the modules it is given (`TODO.md` §188).
+pub const CHECK_SIZES: &str = include_str!("check-sizes.fx");
 
 /// `check-env.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_ENV: &str = include_str!("check-env.fx");
@@ -662,7 +670,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 178] = [
+pub const FRONT_END_MODULES: [(&str, &str); 180] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -792,6 +800,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 178] = [
     ("check-facts-types.fx", CHECK_FACTS_TYPES),
     ("check-blobrefs-types.fx", CHECK_BLOBREFS_TYPES),
     ("check-synth.fx", CHECK_SYNTH),
+    ("check-synth-parts.fx", CHECK_SYNTH_PARTS),
     ("check-facts.fx", CHECK_FACTS),
     ("check-blobrefs.fx", CHECK_BLOBREFS),
     ("check-letrec.fx", CHECK_LETREC),
@@ -837,6 +846,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 178] = [
     ("check-print-parts-types.fx", CHECK_PRINT_PARTS_TYPES),
     ("check-print.fx", CHECK_PRINT),
     ("check-print-parts.fx", CHECK_PRINT_PARTS),
+    ("check-sizes.fx", CHECK_SIZES),
     ("check-env.fx", CHECK_ENV),
     ("check-effects.fx", CHECK_EFFECTS),
     ("check-types.fx", CHECK_TYPES),
