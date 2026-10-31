@@ -4418,10 +4418,12 @@ checker is its own front end's (`sessions26.rs`): the conductor's
 `session-step` (checked first, kept and compiled, or tried), the FX-26
 checker's `check-try` (a trial, undone: the trail unbound to its mark, its
 lists put back) and `check-redefines`, and `compile-checked-deferred` for
-a commit's `go`. Left: `fx-ast-eval`'s sessions, on the Rust checker
-still; and a session's region of its own (evidence), which the FX-26
-checker cannot bind at a session's top level yet, so that such a session
-keeps the Rust checker.
+a commit's `go`; and on `fx-ast-eval`, checking alone, the evaluator
+given each step's texts, a commit's runs named by the checker
+(`checked-run-names`) and their texts kept in the session's vector. Left:
+a session's region of its own (evidence), which the FX-26 checker cannot
+bind at a session's top level yet, so that such a session keeps the Rust
+checker; and `rs-scheme-vm`, which has no FX-26 front end.
 
 ## 190. Q: why is `(define-datatype var (union symbol pat))` accepted? (the user's, 2026-10-31)
 

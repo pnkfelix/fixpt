@@ -15,7 +15,7 @@
 //! commit, into the procedure `go` calls), or tried and not kept (a
 //! pending definition, its type found).
 
-use crate::sessions::{expression, failed, is_definition, is_pending, sum, text};
+use crate::sessions::{expression, failed, is_definition, is_pending, strings, sum, text};
 use crate::stage::{staged_parts, Parts, Wrapped};
 use fixpt_heap::Value;
 use fixpt_runtime::Runtime;
@@ -24,6 +24,10 @@ const PRODUCT: u8 = fixpt_heap::layout::kind("product");
 const S_MODULE: usize = 0;
 const S_INDEX: usize = 1;
 const S_COMPILER: usize = 2;
+/// On the evaluator, what is run of the session as text: a pair of the
+/// texts that define `m`'s values, not yet run, and each definition
+/// committed, by name, its form's text, newest first.
+const S_TEXTS: usize = 3;
 
 /// The conductor's entry that makes a session's front end, and the fields
 /// of what it makes, from 1: a global made, a step, whether re-runs wait,
@@ -34,6 +38,7 @@ const E_STEP: usize = 4;
 const E_DEFER: usize = 5;
 const E_GLOBALS_EFFECTS: usize = 6;
 const E_REDEFINES: usize = 7;
+const E_RUNS: usize = 8;
 
 /// How `session-step` checks: the first step, checked alone; more, kept;
 /// tried, not kept.
@@ -68,7 +73,11 @@ fn set_generation(rt: &mut Runtime, base: usize, g: i64) {
 /// globals not an effect of a step's code (each step's type says it reads
 /// the session); re-runs waiting; then `M`'s values each a global of its
 /// name, which the session's own may shadow.
-fn front_end(rt: &mut Runtime, base: usize, parts: &Parts) -> Result<Result<Value, Value>, String> {
+///
+/// On the evaluator (`evaluated`), nothing is compiled: the texts of `m`'s
+/// values' definitions are kept, for the evaluator to run before the next
+/// step's (`S_TEXTS`).
+fn front_end(rt: &mut Runtime, base: usize, parts: &Parts, evaluated: bool) -> Result<Result<Value, Value>, String> {
     let s = rt.heap.root_at(base);
     let made = rt.heap.obj_ref(s, S_COMPILER);
     if rt.heap.obj_ref(s, S_INDEX).as_fixnum() <= -2 && made != Value::FALSE {
@@ -89,15 +98,25 @@ fn front_end(rt: &mut Runtime, base: usize, parts: &Parts) -> Result<Result<Valu
     if let Err(refused) = step(rt, base, &Wrapped::of(String::new(), &seed, "", &seed, 0), FIRST, "", false)? {
         return Ok(Err(refused));
     }
-    let values: String = module_values(mt).iter().map(|n| format!("(define {n} (with stage-module {n}))\n")).collect();
+    let defines: Vec<String> = module_values(mt).iter().map(|n| format!("(define {n} (with stage-module {n}))\n")).collect();
+    let values: String = defines.concat();
     if !values.is_empty() {
-        match step(rt, base, &Wrapped::of(String::new(), &values, "", &values, 0), MORE, "", false)? {
-            Ok(word) => {
+        let w = Wrapped::of(String::new(), &values, "", &values, 0);
+        let made = if evaluated { step_checked(rt, base, &w)? } else { step(rt, base, &w, MORE, "", false)? };
+        match made {
+            Ok(word) if !evaluated => {
                 let run = rt.run_word.ok_or("no cellular machine is installed")?;
                 run(rt, word, &[])?;
             }
+            Ok(_) => {}
             Err(refused) => return Ok(Err(refused)),
         }
+    }
+    if evaluated {
+        let seeds = crate::sessions::strings(rt, defines.iter().map(|t| (t.as_str(), None)));
+        let texts = rt.heap.cons(seeds, Value::NULL);
+        let s = rt.heap.root_at(base);
+        rt.heap.obj_set(s, S_TEXTS, texts);
     }
     set_generation(rt, base, 0);
     Ok(Ok(rt.heap.obj_ref(rt.heap.root_at(base), S_COMPILER)))
@@ -133,6 +152,16 @@ fn call(rt: &mut Runtime, base: usize, i: usize, args: &[Value]) -> Result<Value
 /// procedure that runs it if `deferred`: the word (or that procedure's
 /// word), or, tried, the type; or the refusal, `(sum failed why)`.
 fn step(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str, deferred: bool) -> Result<Result<Value, Value>, String> {
+    step_making(rt, base, w, how, name, deferred, how != TRY)
+}
+
+/// `w` checked and kept, not compiled (a session on the evaluator):
+/// `(sum checked #u)`'s payload; or the refusal.
+fn step_checked(rt: &mut Runtime, base: usize, w: &Wrapped) -> Result<Result<Value, Value>, String> {
+    step_making(rt, base, w, MORE, "", false, false)
+}
+
+fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str, deferred: bool, made: bool) -> Result<Result<Value, Value>, String> {
     let (native, registers) = crate::stage::flags(rt).ok_or("this machine cannot keep sessions")?;
     let standard = crate::stage::standard(rt).ok_or("this machine cannot keep sessions")?;
     let mark = rt.heap.push_root(standard);
@@ -141,7 +170,6 @@ fn step(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str, deferr
     let name = rt.heap.intern(if name.is_empty() { "%none" } else { name });
     let [standard, whole] = [0, 1].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
-    let made = how != TRY;
     let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers)];
     let out = call(rt, base, E_STEP, &args)?;
     let tag = rt.heap.symbol_name(rt.heap.bloblet_slot(out, 2));
@@ -163,7 +191,7 @@ pub(crate) fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) 
     let code_text = fixpt_runtime::print::write_value(&rt.heap, code);
     // Rooted while the session's front end is made, which collects.
     let mark = rt.heap.push_root(code);
-    let made = front_end(rt, base, &parts);
+    let made = front_end(rt, base, &parts, false);
     let code = rt.heap.root_at(mark);
     rt.heap.pop_roots_to(mark);
     if let Err(refused) = made? {
@@ -257,7 +285,11 @@ pub(crate) fn redefines(rt: &mut Runtime, base: usize, d: Value) -> Result<Value
 /// waiting (`shadow`) or not (`rerun`), and it and what runs again compiled
 /// into the procedure that runs them, `(sum go p)`, for the program to
 /// call; or the refusal.
-pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Result<Value, String> {
+///
+/// On the evaluator (`evaluated`), nothing is compiled: `(sum run forms)`,
+/// each form's text and whether it keeps its globals, what defines `m`'s
+/// values first if not yet run, for the evaluator to run in the session.
+pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: &str, evaluated: bool) -> Result<Value, String> {
     let s = rt.heap.root_at(base);
     if !is_pending(rt, d) || rt.heap.obj_ref(d, crate::sessions::P_SESSION) != s {
         return Ok(failed(rt, "stale", "this definition was checked against another session"));
@@ -268,7 +300,6 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) ->
     if rt.heap.obj_ref(d, crate::sessions::P_GENERATION).as_fixnum() != generation(rt, base) {
         return Ok(failed(rt, "stale", "the session changed since this definition was checked: check it again"));
     }
-    let decision = crate::sessions::decided(rt, decision);
     let mark = rt.heap.push_root(d);
     let name = text(rt, rt.heap.obj_ref(d, crate::sessions::P_NAME));
     let form = text(rt, rt.heap.obj_ref(d, crate::sessions::P_FORM));
@@ -282,12 +313,24 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) ->
     if rerun {
         call(rt, base, E_DEFER, &[Value::FALSE])?;
     }
-    let made = step(rt, base, &Wrapped::of(String::new(), &form, "\n", &form, 0), MORE, "", true);
+    let w = Wrapped::of(String::new(), &form, "\n", &form, 0);
+    let made = if evaluated { step_checked(rt, base, &w) } else { step(rt, base, &w, MORE, "", true) };
     if rerun {
         call(rt, base, E_DEFER, &[Value::TRUE])?;
     }
     let d = rt.heap.root_at(mark);
     rt.heap.pop_roots_to(mark);
+    if evaluated {
+        return match made? {
+            Ok(_) => {
+                rt.heap.obj_set(d, crate::sessions::P_USED, Value::TRUE);
+                let g = generation(rt, base);
+                set_generation(rt, base, g + 1);
+                run_texts(rt, base, &name, &form)
+            }
+            Err(refused) => Ok(refused),
+        };
+    }
     match made? {
         Ok(word) => {
             rt.heap.obj_set(d, crate::sessions::P_USED, Value::TRUE);
@@ -296,6 +339,105 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) ->
             let run = rt.run_word.ok_or("no cellular machine is installed")?;
             let p = run(rt, word, &[])?;
             Ok(sum(rt, "go", p))
+        }
+        Err(refused) => Ok(refused),
+    }
+}
+
+/// The seeds not yet run, taken: the texts that define `m`'s values.
+fn take_seeds(rt: &mut Runtime, base: usize) -> Vec<String> {
+    let texts = rt.heap.obj_ref(rt.heap.root_at(base), S_TEXTS);
+    if !texts.is_pair() {
+        return Vec::new();
+    }
+    let seeds: Vec<String> = rt.heap.list_to_vec(rt.heap.car(texts)).unwrap_or_default().iter().map(|v| text(rt, *v)).collect();
+    rt.heap.set_car(texts, Value::NULL);
+    seeds
+}
+
+/// Each definition committed, by name, its form's text.
+fn committed_texts(rt: &Runtime, base: usize) -> Vec<(String, String)> {
+    let texts = rt.heap.obj_ref(rt.heap.root_at(base), S_TEXTS);
+    if !texts.is_pair() {
+        return Vec::new();
+    }
+    let entries = rt.heap.list_to_vec(rt.heap.cdr(texts)).unwrap_or_default();
+    entries.iter().filter(|e| e.is_pair()).map(|e| (text(rt, rt.heap.car(*e)), text(rt, rt.heap.cdr(*e)))).collect()
+}
+
+/// After a commit of `name`, its form `form`, on the evaluator: `form`
+/// recorded as `name`'s; then `(sum run forms)`, what defines `m`'s values
+/// if not yet run, and each run the checker says the commit makes (it, and
+/// each definition run again), its text, and whether it keeps its globals.
+fn run_texts(rt: &mut Runtime, base: usize, name: &str, form: &str) -> Result<Value, String> {
+    let runs = call(rt, base, E_RUNS, &[])?;
+    let runs: Vec<(String, bool)> = rt.heap.list_to_vec(runs).unwrap_or_default().iter().map(|r| (text(rt, rt.heap.bloblet_slot(*r, 2)), rt.heap.bloblet_slot(*r, 3) != Value::FALSE)).collect();
+    let known = committed_texts(rt, base);
+    let mut forms: Vec<(String, bool)> = take_seeds(rt, base).into_iter().map(|t| (t, false)).collect();
+    for (n, keeps) in runs {
+        let t = if n == name { Some(form.to_string()) } else { known.iter().find(|(k, _)| *k == n).map(|(_, t)| t.clone()) };
+        if let Some(t) = t {
+            forms.push((t, keeps));
+        }
+    }
+    // `name`'s form recorded, before those of other names.
+    let mark = rt.heap.push_root(Value::NULL);
+    for t in [name, form] {
+        let v = rt.heap.make_string(t);
+        rt.heap.push_root(v);
+    }
+    let (n, f) = (rt.heap.root_at(mark + 1), rt.heap.root_at(mark + 2));
+    let entry = rt.heap.cons(n, f);
+    rt.heap.set_root_at(mark, entry);
+    let texts = rt.heap.obj_ref(rt.heap.root_at(base), S_TEXTS);
+    let rest = if texts.is_pair() { rt.heap.cdr(texts) } else { Value::NULL };
+    let entry = rt.heap.root_at(mark);
+    let rest = rt.heap.cons(entry, rest);
+    let texts = rt.heap.obj_ref(rt.heap.root_at(base), S_TEXTS);
+    if texts.is_pair() {
+        rt.heap.set_cdr(texts, rest);
+    } else {
+        let t = rt.heap.cons(Value::NULL, rest);
+        let s = rt.heap.root_at(base);
+        rt.heap.obj_set(s, S_TEXTS, t);
+    }
+    rt.heap.pop_roots_to(mark);
+    let list = strings(rt, forms.iter().map(|(t, k)| (t.as_str(), Some(*k))));
+    Ok(sum(rt, "run", list))
+}
+
+/// What `%fx26-session-eval-check` does on this checker: the module's
+/// type, the effect, the result type and the code as text, and the names
+/// of the variables those name and their evidence (`a`): an expression,
+/// `(sum run texts)`, the forms to run, the last's value the procedure
+/// that evaluates it; a definition, pending; or the refusal.
+pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, String> {
+    let [mt, e, r, code_text] = [a[0], a[1], a[2], a[3]].map(|v| text(rt, v));
+    let parts = Parts::of(&mt, &e, &r, &fixpt_runtime::evidence::Given::of(rt, a[4], a[5]));
+    if !parts.regions.is_empty() {
+        return Ok(failed(rt, "refused", "a session's code is not checked against a region of its own on this machine yet"));
+    }
+    if let Err(refused) = front_end(rt, base, &parts, true)? {
+        return Ok(refused);
+    }
+    let mut interner = std::mem::take(&mut rt.interner);
+    let read = fixpt_read::Reader::new(&code_text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX91, &mut interner).read_all();
+    rt.interner = interner;
+    let code = match read.as_deref() {
+        Ok([one]) => fixpt_runtime::port::syntax_to_value(rt, one),
+        Ok(_) => return Ok(failed(rt, "unread", "the code is not one whole expression")),
+        Err(e) => return Ok(failed(rt, "unread", &e.message)),
+    };
+    if is_definition(rt, code) {
+        return check_define(rt, base, &parts, code, &code_text);
+    }
+    let w = expression(&parts.e, &parts.r, &code_text);
+    match step_checked(rt, base, &w)? {
+        Ok(_) => {
+            let mut texts = take_seeds(rt, base);
+            texts.push(w.whole.clone());
+            let list = strings(rt, texts.iter().map(|t| (t.as_str(), None)));
+            Ok(sum(rt, "run", list))
         }
         Err(refused) => Ok(refused),
     }

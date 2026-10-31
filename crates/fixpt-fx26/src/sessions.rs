@@ -9,7 +9,7 @@
 //! program's: so a redefinition is the REPL's (`Checker::top_defining`),
 //! re-runs waiting or not as the decision says, and a pending definition is
 //! a check that leaves the checker as it was (`try_top`). The session, a
-//! vector `#(m index compiler)`, names its state by its index here,
+//! vector `#(m index front-end texts)`, names its state by its index here,
 //! made at its first use, when the module's type is known (`seeded`): a
 //! global holding `m`, and one for each of `m`'s values, which the
 //! session's own may shadow. Each text it reads is a file of its own, kept,
@@ -106,9 +106,17 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
         "commit-lower" => commit_lower(rt, base, a[1], a[2]),
         "check" if on26(rt) => crate::sessions26::check(rt, base, a[1], a[2]),
         "check" => check(rt, base, a[1], a[2]),
+        "eval-check" if crate::sessions26::takes(rt, a[0], None) => crate::sessions26::eval_check(rt, base, &a[1..]),
         "eval-check" => eval_check(rt, base, &a[1..]),
+        "eval-ready" if rt.heap.obj_ref(a[0], S_INDEX).as_fixnum() <= -2 => {
+            let decision = text(rt, a[2]);
+            crate::sessions26::ready(rt, base, a[1], &decision, true)
+        }
         "eval-ready" => eval_ready(rt, base, a[1], a[2]),
-        "ready" if crate::sessions26::takes(rt, a[0], None) && rt.heap.obj_ref(a[0], S_INDEX).as_fixnum() <= -2 => crate::sessions26::ready(rt, base, a[1], a[2]),
+        "ready" if rt.heap.obj_ref(a[0], S_INDEX).as_fixnum() <= -2 => {
+            let decision = decided(rt, a[2]);
+            crate::sessions26::ready(rt, base, a[1], &decision, false)
+        }
         "ready" => ready(rt, base, a[1], a[2]),
         "redefines" if rt.heap.obj_ref(a[0], S_INDEX).as_fixnum() <= -2 => crate::sessions26::redefines(rt, base, a[1]),
         "committed" => {
@@ -123,7 +131,7 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
 }
 
 fn is_session(rt: &Runtime, s: Value) -> bool {
-    rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 3
+    rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 4
 }
 
 pub(crate) fn sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
@@ -602,7 +610,7 @@ fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, Strin
 
 /// `texts` as a list of strings; each given a flag, of the product of it
 /// and its flag.
-fn strings<'a>(rt: &mut Runtime, texts: impl DoubleEndedIterator<Item = (&'a str, Option<bool>)>) -> Value {
+pub(crate) fn strings<'a>(rt: &mut Runtime, texts: impl DoubleEndedIterator<Item = (&'a str, Option<bool>)>) -> Value {
     let base = rt.heap.push_root(Value::NULL);
     for (t, flag) in texts.rev() {
         let mut v = rt.heap.make_string(t);

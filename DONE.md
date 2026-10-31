@@ -4377,4 +4377,9 @@ session's own front end checks (`session-step`; a pending definition by
 its generation in the session's own vector, so that nothing of a session
 is outside the heap. `%fx26-session-redefines` now runs code
 (`prim::reenters`). The stage tests pass on every machine, unchanged.
+And on `fx-ast-eval`: its sessions' checker the FX-26 one too, checking
+without compiling, each step's forms given the evaluator as text, a
+commit's runs named by the checker (`checked-run-names`), their texts
+kept in the session's own vector (a fourth field); its session primitives
+run code too (`prim::reenters`).
 

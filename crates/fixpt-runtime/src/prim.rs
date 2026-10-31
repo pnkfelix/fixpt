@@ -215,7 +215,7 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
 /// code calls it as it calls what is not native code, its frames' values
 /// kept where a collection finds them (`call_foreign`).
 pub fn reenters(name: &str) -> bool {
-    matches!(name, "%fx26-stage" | "%fx26-session-check" | "%fx26-session-ready" | "%fx26-session-redefines")
+    matches!(name, "%fx26-stage" | "%fx26-session-check" | "%fx26-session-ready" | "%fx26-session-redefines" | "%fx26-session-eval-check" | "%fx26-session-eval-ready")
 }
 
 fn is_closure(rt: &Runtime, f: Value) -> bool {
@@ -3083,12 +3083,12 @@ prims! {
     // Sessions (`docs/research/eval.md`, "Sessions"): one made, of module
     // `a[0]`, a vector of it, the number of its state, kept by the checker's
     // side (`fixpt-fx26`'s `sessions.rs`), none yet, and that side's own
-    // compiler, none yet. The rest
+    // front end, none yet, and its texts, none yet. The rest
     // ask that side (`sessions`), by name: a form checked in one, an
     // expression or a definition; whether a pending one redefines, readied
     // given the decision, recorded; and, lowered (`rs-scheme-vm`), the
     // Scheme each makes, for `eval`.
-    "%fx26-make-session", 1, Some(1), simple!(|rt, a| Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE])));
+    "%fx26-make-session", 1, Some(1), simple!(|rt, a| Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE, Value::FALSE])));
     "%fx26-session-check", 3, Some(3), simple!(|rt, a| session_op(rt, "check", a));
     "%fx26-session-redefines", 2, Some(2), simple!(|rt, a| session_op(rt, "redefines", a));
     "%fx26-session-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "ready", a));

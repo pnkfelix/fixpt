@@ -437,6 +437,22 @@
              (set k-last-uses uses) (set k-defer-reruns deferring)
              (product (1 r) (2 t))))))
 
+;; For a driver (a session on the evaluator, `sessions26.rs`): what the
+;; last check runs (`checked-tops`), each by the first name it defines
+;; ("" for none), and whether it assigns its names' globals.
+(define checked-run-names (->* () (listof (productof (1 string) (2 bool)) acyclic))
+  (lambda ()
+    (letrec ((go (subr kreads ((listof k-run acyclic))
+                       (listof (productof (1 string) (2 bool)) acyclic))
+                   (lambda (rs)
+                     (if (null? rs)
+                         nil
+                         (let ((ns (k-top-names (extract (car rs) 1))))
+                           (cons (product (1 (if (null? ns) "" (symbol->string (car ns))))
+                                          (2 (extract (car rs) 2)))
+                                 (go (cdr rs))))))))
+      (go (checked-tops)))))
+
 ;; For a driver (`session-redefines`): global `n`'s type now, printed whole
 ;; (no `define-type` named), and the definitions that use it, their names;
 ;; none if `n` is no global.

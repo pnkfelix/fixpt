@@ -560,6 +560,7 @@
              (compile-conv-native! (with compile compile-conv-native!))
              (check-defer-reruns! (with check-program check-defer-reruns!))
              (check-redefines (with check-program check-redefines))
+             (checked-run-names (with check-program checked-run-names))
              (check-hold-breaks! (with check-program check-hold-breaks!))
              (check-lines! (with check-program check-lines!))
              (check-more (with check-program check-more))
@@ -599,7 +600,10 @@
                ;; type and users.
                (step (extract fe session-step)) (defer (extract fe check-defer-reruns!))
                (globals-effects (extract fe check-globals-effects!))
-               (redefines (extract fe check-redefines))))))
+               (redefines (extract fe check-redefines))
+               ;; And what the last step runs, by name (a session on the
+               ;; evaluator, which runs their texts).
+               (runs (extract fe checked-run-names))))))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-checked-more (extract front-end-entries run-checked-more))
