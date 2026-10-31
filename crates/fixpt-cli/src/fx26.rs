@@ -74,7 +74,7 @@ fn report(c: &Checker, top: &Top) -> String {
 /// running it failed.
 fn show(session: &Fx26Session, out: &Outcome, show_code: bool) {
     if show_code && !out.code.is_empty() {
-        for line in out.code.lines() {
+        for line in out.code.to_string().lines() {
             println!("; {line}");
         }
     }

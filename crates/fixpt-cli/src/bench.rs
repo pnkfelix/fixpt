@@ -305,13 +305,17 @@ fn time(runs: usize, mut f: impl FnMut()) -> f64 {
 /// bytecode engine in a session of its own each time, only that timed.
 fn lowered_run(text: &str, runs: usize) -> Result<(String, f64), String> {
     let compiled = fixpt_fx26::session::compile_program(text).map_err(|e| e.message)?;
-    let code = compiled.code.join("\n");
+    let mut code = fixpt_fx26::sx::Code::default();
+    for c in compiled.code {
+        code.extend(c);
+    }
     Ok(best_of(runs, || {
         let Ok(mut s) = Fx26Session::with_backend(Backend::Bytecode) else { return ("!! no session".into(), f64::INFINITY) };
         s.scheme.engine.set_step_limit(None);
         s.scheme.scope(|sc| {
             let start = Instant::now();
-            let (_, r) = sc.eval_capturing("<fx26>", &code);
+            let forms = code.syntax(sc.runtime_unrooted(), "<fx26>");
+            let (_, r) = sc.eval_forms_capturing(&forms);
             let t = start.elapsed().as_secs_f64();
             (r.map_or_else(|e| format!("!! {e}"), |v| sc.write(v)), t)
         })

@@ -33,6 +33,7 @@
 
 use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::{Checker, Datum};
+use crate::sx::Sx;
 use fixpt_read::Sym;
 use std::collections::HashMap;
 
@@ -576,7 +577,7 @@ impl Globals {
         }
         let n = self.defined.entry(name).or_insert(0);
         *n += 1;
-        let base = format!("{}{}", self.prefix, fixpt_read::escape_symbol(c.interner.name(name)));
+        let base = format!("{}{}", self.prefix, c.interner.name(name));
         let global = if *n == 1 { base } else { format!("{base}:{n}") };
         self.current.insert(name, global.clone());
         global
@@ -595,38 +596,45 @@ pub struct Lowerer<'a> {
 }
 
 /// Lower one checked expression.
-pub fn lower(c: &Checker, globals: &Globals, e: ExpId) -> String {
+pub fn lower(c: &Checker, globals: &Globals, e: ExpId) -> Sx {
     Lowerer { c, globals, locals: Vec::new() }.go(e)
 }
 
+/// `(binding init)`, a `let`'s.
+fn binding(name: Sx, init: Sx) -> Sx {
+    Sx::List(vec![name, init])
+}
+
 impl Lowerer<'_> {
-    fn local(&self, s: Sym) -> String {
-        format!("fx:{}", fixpt_read::escape_symbol(self.c.interner.name(s)))
+    fn local(&self, s: Sym) -> Sx {
+        Sx::sym(format!("fx:{}", self.c.interner.name(s)))
     }
 
-    fn var(&self, s: Sym) -> String {
+    fn var(&self, s: Sym) -> Sx {
         if self.locals.contains(&s) {
             return self.local(s);
         }
         if let Some(g) = self.globals.get(s) {
-            return g.to_string();
+            return Sx::sym(g);
         }
         self.standard_var(s)
     }
 
     /// The standard binding of `s`, whatever binds `s` here.
-    fn standard_var(&self, s: Sym) -> String {
+    fn standard_var(&self, s: Sym) -> Sx {
         let name = self.c.interner.name(s);
         match STANDARD.iter().find(|(n, _, _)| *n == name) {
-            Some((_, scheme, _)) => scheme.to_string(),
+            // The empty list is the one that is not a name.
+            Some((_, "'()", _)) => Sx::quote(Sx::List(Vec::new())),
+            Some((_, scheme, _)) => Sx::sym(*scheme),
             // Checked code names nothing else; keep it visible if it does.
-            None => format!("{}{}", self.globals.prefix, fixpt_read::escape_symbol(name)),
+            None => Sx::sym(format!("{}{name}", self.globals.prefix)),
         }
     }
 
     /// A module's items, a `letrec*` of them all (`crate::modorder`), then
     /// the product of its values, `vals` gathering their names.
-    fn module_items(&mut self, items: &[crate::ast::ModItem], vals: &mut Vec<Sym>) -> String {
+    fn module_items(&mut self, items: &[crate::ast::ModItem], vals: &mut Vec<Sym>) -> Sx {
         use crate::ast::ModItem;
         for item in items {
             match item {
@@ -642,35 +650,36 @@ impl Lowerer<'_> {
                 }
             }
         }
+        let identity = || Sx::call("lambda", [Sx::List(vec![Sx::sym("x")]), Sx::sym("x")]);
         let mut bs = Vec::new();
         for item in items {
             match item {
                 ModItem::Desc { .. } => {}
                 ModItem::Abs { up, down, .. } => {
-                    bs.push(format!("({} (lambda (x) x))", self.local(*up)));
-                    bs.push(format!("({} (lambda (x) x))", self.local(*down)));
+                    bs.push(binding(self.local(*up), identity()));
+                    bs.push(binding(self.local(*down), identity()));
                 }
                 ModItem::Val { name, init, .. } => {
                     let init = self.go(*init);
-                    bs.push(format!("({} {init})", self.local(*name)));
+                    bs.push(binding(self.local(*name), init));
                 }
                 ModItem::Rec(group) => {
                     for (n, _, init) in group {
                         let init = self.go(*init);
-                        bs.push(format!("({} {init})", self.local(*n)));
+                        bs.push(binding(self.local(*n), init));
                     }
                 }
             }
         }
-        let fields: Vec<String> = vals.iter().map(|n| self.var(*n)).collect();
-        format!("(letrec* ({}) (%fx26-product {}))", bs.join(" "), fields.join(" "))
+        let fields: Vec<Sx> = vals.iter().map(|n| self.var(*n)).collect();
+        Sx::call("letrec*", [Sx::List(bs), Sx::call("%fx26-product", fields)])
     }
 
-    /// The datum a quote builds (`%quote`'s argument, the rewrite's), written
-    /// as Scheme data, where it is made of integers, booleans, characters,
+    /// The datum a quote builds (`%quote`'s argument, the rewrite's), as
+    /// Scheme data, where it is made of integers, booleans, characters,
     /// symbols, `nil` and `cons`: what the compilers make once
     /// (`quoted_value`, `c-quoted-cell`).
-    fn quoted_text(&self, e: ExpId) -> Option<String> {
+    fn quoted_datum(&self, e: ExpId) -> Option<Sx> {
         let named = |x: ExpId, n: &str| match self.c.arena.exp_at(x) {
             Exp::Var(s) => self.c.interner.name(*s) == n,
             Exp::With { module, body } if self.c.is_fx_module(*module) => {
@@ -679,21 +688,31 @@ impl Lowerer<'_> {
             _ => false,
         };
         match self.c.arena.exp_at(e).clone() {
-            Exp::Int(n) => Some(n.to_string()),
-            Exp::Bool(b) => Some((if b { "#t" } else { "#f" }).into()),
-            Exp::Char(c) if c.is_ascii_alphanumeric() => Some(format!("#\\{c}")),
-            Exp::Char(c) => Some(format!("#\\x{:x}", c as u32)),
-            Exp::Symbol(s) => Some(fixpt_read::escape_symbol(self.c.interner.name(s)).to_string()),
-            Exp::The { exp, .. } => self.quoted_text(exp),
-            _ if named(e, "nil") => Some("()".into()),
+            Exp::Int(n) => Some(Sx::int(n)),
+            Exp::Bool(b) => Some(Sx::Bool(b)),
+            Exp::Char(c) => Some(Sx::Char(c)),
+            Exp::Symbol(s) => Some(Sx::sym(self.c.interner.name(s))),
+            Exp::The { exp, .. } => self.quoted_datum(exp),
+            _ if named(e, "nil") => Some(Sx::List(Vec::new())),
             Exp::App { fun, args } if args.len() == 2 && named(fun, "cons") => {
-                Some(format!("({} . {})", self.quoted_text(args[0])?, self.quoted_text(args[1])?))
+                let (a, d) = (self.quoted_datum(args[0])?, self.quoted_datum(args[1])?);
+                Some(match d {
+                    Sx::List(mut items) => {
+                        items.insert(0, a);
+                        Sx::List(items)
+                    }
+                    Sx::Dotted(mut items, tail) => {
+                        items.insert(0, a);
+                        Sx::Dotted(items, tail)
+                    }
+                    d => Sx::Dotted(vec![a], Box::new(d)),
+                })
             }
             _ => None,
         }
     }
 
-    fn body(&mut self, bound: &[Sym], e: ExpId) -> String {
+    fn body(&mut self, bound: &[Sym], e: ExpId) -> Sx {
         let depth = self.locals.len();
         self.locals.extend_from_slice(bound);
         let out = self.go(e);
@@ -701,21 +720,20 @@ impl Lowerer<'_> {
         out
     }
 
-    fn go(&mut self, e: ExpId) -> String {
+    fn go(&mut self, e: ExpId) -> Sx {
         let code = match self.c.arena.exp_at(e).clone() {
             Exp::Var(s) => self.var(s),
-            Exp::Int(n) => n.to_string(),
-            Exp::Bool(b) => (if b { "#t" } else { "#f" }).into(),
-            Exp::Str(s) => scheme_string(&s),
-            Exp::Symbol(s) => format!("'{}", fixpt_read::escape_symbol(self.c.interner.name(s))),
-            Exp::Float(x) => fixpt_runtime::num::format_flonum(x),
-            Exp::Char(c) if c.is_ascii_alphanumeric() => format!("#\\{c}"),
-            Exp::Char(c) => format!("#\\x{:x}", c as u32),
-            Exp::Unit => "%fx26-unit".into(),
+            Exp::Int(n) => Sx::int(n),
+            Exp::Bool(b) => Sx::Bool(b),
+            Exp::Str(s) => Sx::Str(s.to_string()),
+            Exp::Symbol(s) => Sx::quote(Sx::sym(self.c.interner.name(s))),
+            Exp::Float(x) => Sx::Float(x),
+            Exp::Char(c) => Sx::Char(c),
+            Exp::Unit => Sx::sym("%fx26-unit"),
             Exp::Lambda { params, body } => {
                 let names: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-                let ps: Vec<String> = names.iter().map(|n| self.local(*n)).collect();
-                format!("(lambda ({}) {})", ps.join(" "), self.body(&names, body))
+                let ps: Vec<Sx> = names.iter().map(|n| self.local(*n)).collect();
+                Sx::call("lambda", [Sx::List(ps), self.body(&names, body)])
             }
             // A quoted datum (TODO §51), made of literals and symbols: a
             // Scheme constant, interned as each compiler interns it
@@ -723,14 +741,14 @@ impl Lowerer<'_> {
             Exp::App { fun, args }
                 if args.len() == 1
                     && self.c.standard_ref(fun).is_some_and(|s| self.c.interner.name(s) == "%quote")
-                    && let Some(text) = self.quoted_text(args[0]) =>
+                    && let Some(d) = self.quoted_datum(args[0]) =>
             {
-                format!("(%fx26-intern-datum '{text})")
+                Sx::call("%fx26-intern-datum", [Sx::quote(d)])
             }
             Exp::App { fun, args } => {
                 let mut parts = vec![self.go(fun)];
                 parts.extend(args.iter().map(|a| self.go(*a)));
-                format!("({})", parts.join(" "))
+                Sx::List(parts)
             }
             // Regions are erased: a `letrena`'s or `letreap`'s allocation is the heap's.
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.go(body),
@@ -748,78 +766,83 @@ impl Lowerer<'_> {
                 };
                 let l = self.local(n);
                 let b = self.body(&[n], body);
-                format!("(let (({l} ({enter}))) (dynamic-wind (lambda () #f) (lambda () {b}) (lambda () (%region-exit {l} #f))))")
+                let thunk = |x: Sx| Sx::call("lambda", [Sx::List(Vec::new()), x]);
+                Sx::call(
+                    "let",
+                    [
+                        Sx::List(vec![binding(l.clone(), Sx::call(enter, []))]),
+                        Sx::call("dynamic-wind", [thunk(Sx::Bool(false)), thunk(b), thunk(Sx::call("%region-exit", [l, Sx::Bool(false)]))]),
+                    ],
+                )
             }
             Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.go(exp),
-            Exp::If { test, then, els } => {
-                format!("(if {} {} {})", self.go(test), self.go(then), self.go(els))
-            }
+            Exp::If { test, then, els } => Sx::call("if", [self.go(test), self.go(then), self.go(els)]),
             Exp::Letrec { bindings, body } => {
                 let names: Vec<Sym> = bindings.iter().map(|(n, _, _)| *n).collect();
                 let depth = self.locals.len();
                 self.locals.extend_from_slice(&names);
-                let bs: Vec<String> =
-                    bindings.iter().map(|(n, _, init)| format!("({} {})", self.local(*n), self.go(*init))).collect();
+                let bs: Vec<Sx> = bindings.iter().map(|(n, _, init)| binding(self.local(*n), self.go(*init))).collect();
                 let b = self.go(body);
                 self.locals.truncate(depth);
-                format!("(letrec* ({}) {b})", bs.join(" "))
+                Sx::call("letrec*", [Sx::List(bs), b])
             }
             Exp::Let { bindings, body } => {
-                let bs: Vec<String> =
-                    bindings.iter().map(|(n, init)| format!("({} {})", self.local(*n), self.go(*init))).collect();
+                let bs: Vec<Sx> = bindings.iter().map(|(n, init)| binding(self.local(*n), self.go(*init))).collect();
                 let names: Vec<Sym> = bindings.iter().map(|(n, _)| *n).collect();
-                format!("(let ({}) {})", bs.join(" "), self.body(&names, body))
+                Sx::call("let", [Sx::List(bs), self.body(&names, body)])
             }
-            Exp::Begin(items) => {
-                let parts: Vec<String> = items.iter().map(|i| self.go(*i)).collect();
-                format!("(begin {})", parts.join(" "))
-            }
+            Exp::Begin(items) => Sx::call("begin", items.iter().map(|i| self.go(*i)).collect::<Vec<_>>()),
             Exp::Bloblet { op, args } => {
-                let a: Vec<String> = args.iter().map(|x| self.go(*x)).collect();
+                let mut a: Vec<Sx> = args.iter().map(|x| self.go(*x)).collect();
+                let mut take = || a.remove(0);
+                let operand = |l: &Self| Sx::int(l.c.facts.operand(e).expect("checked") as i64);
                 // Field `i` is the object model's field `i + 2`, after the
                 // trailer.
                 match op {
-                    BlobletOp::Make => format!("(%make-bloblet {})", a.join(" ")),
-                    BlobletOp::RMake => format!("(%region-make-bloblet {})", a.join(" ")),
-                    BlobletOp::Ref(i) => format!("(%bloblet-ref {} {})", a[0], i + 2),
-                    BlobletOp::Set(i) => format!("(%fx26-bloblet-set! {} {} {})", a[0], i + 2, a[1]),
-                    BlobletOp::Freeze => format!("(%fx26-bloblet-freeze {})", a[0]),
-                    BlobletOp::Byte => format!("(%bloblet-byte {} {})", a[0], a[1]),
-                    BlobletOp::SetByte => format!("(%fx26-bloblet-set-byte! {} {} {})", a[0], a[1], a[2]),
-                    BlobletOp::Bytes => format!("(%bloblet-bytes {})", a[0]),
+                    BlobletOp::Make => Sx::call("%make-bloblet", std::mem::take(&mut a)),
+                    BlobletOp::RMake => Sx::call("%region-make-bloblet", std::mem::take(&mut a)),
+                    BlobletOp::Ref(i) => Sx::call("%bloblet-ref", [take(), Sx::int(i as i64 + 2)]),
+                    BlobletOp::Set(i) => {
+                        let (x, v) = (take(), take());
+                        Sx::call("%fx26-bloblet-set!", [x, Sx::int(i as i64 + 2), v])
+                    }
+                    BlobletOp::Freeze => Sx::call("%fx26-bloblet-freeze", [take()]),
+                    BlobletOp::Byte => Sx::call("%bloblet-byte", std::mem::take(&mut a)),
+                    BlobletOp::SetByte => Sx::call("%fx26-bloblet-set-byte!", std::mem::take(&mut a)),
+                    BlobletOp::Bytes => Sx::call("%bloblet-bytes", [take()]),
                     // A new blobref, its flat's bytes checked in the suffix
                     // (`Checker::blobref_rule`): one byte already is.
                     BlobletOp::RefAt | BlobletOp::RefAdd => {
                         let name = if op == BlobletOp::RefAt { "%suffix-ref" } else { "%suffix-ref+" };
-                        let r = format!("({name} {} {})", a[0], a[1]);
+                        let r = Sx::call(name, std::mem::take(&mut a));
                         match self.c.facts.datum.get(&e) {
-                            Some(&Datum::Fits(size)) if size > 1 => format!("(%fx26-suffix-fits {r} {size})"),
+                            Some(&Datum::Fits(size)) if size > 1 => Sx::call("%fx26-suffix-fits", [r, Sx::int(size as i64)]),
                             _ => r,
                         }
                     }
-                    BlobletOp::RefOwner => format!("(%suffix-ref-owner {})", a[0]),
-                    BlobletOp::RefOffset => format!("(%suffix-ref-offset {})", a[0]),
+                    BlobletOp::RefOwner => Sx::call("%suffix-ref-owner", [take()]),
+                    BlobletOp::RefOffset => Sx::call("%suffix-ref-offset", [take()]),
                     // The scalar's layout, as the checker found it.
-                    BlobletOp::RefGet => format!("(%fx26-suffix-ref-get {} {})", a[0], self.c.facts.operand(e).expect("checked")),
-                    BlobletOp::RefLength => format!("(%fx26-suffix-ref-length {} {})", a[0], self.c.facts.operand(e).expect("checked")),
+                    BlobletOp::RefGet => Sx::call("%fx26-suffix-ref-get", [take(), operand(self)]),
+                    BlobletOp::RefLength => Sx::call("%fx26-suffix-ref-length", [take(), operand(self)]),
                     BlobletOp::RefIndex => {
-                        format!("(%fx26-suffix-ref-index {} {} {})", a[0], a[1], self.c.facts.operand(e).expect("checked"))
+                        let (x, i) = (take(), take());
+                        Sx::call("%fx26-suffix-ref-index", [x, i, operand(self)])
                     }
                     // The flat sum's layout, as the checker found it.
                     BlobletOp::RefVariant => {
-                        format!("(%fx26-flat-variant! {} {} {})", a[0], self.c.facts.operand(e).expect("checked"), a[1])
+                        let (x, v) = (take(), take());
+                        Sx::call("%fx26-flat-variant!", [x, operand(self), v])
                     }
                     BlobletOp::RefSet => {
-                        format!("(%fx26-suffix-ref-set! {} {} {})", a[0], self.c.facts.operand(e).expect("checked"), a[1])
+                        let (x, v) = (take(), take());
+                        Sx::call("%fx26-suffix-ref-set!", [x, operand(self), v])
                     }
                 }
             }
             // Immutable data is a frozen bloblet: a product's fields in
             // order; a sum's tag, as a symbol, and its value.
-            Exp::Product(fields) => {
-                let a: Vec<String> = fields.iter().map(|(_, x)| self.go(*x)).collect();
-                format!("(%fx26-product {})", a.join(" "))
-            }
+            Exp::Product(fields) => Sx::call("%fx26-product", fields.iter().map(|(_, x)| self.go(*x)).collect::<Vec<_>>()),
             // A module is a product of its values, in order; its own
             // conversions the identity (`docs/research/first-class-modules.md`).
             Exp::Module(items) => {
@@ -838,89 +861,98 @@ impl Lowerer<'_> {
             Exp::With { module, body } => {
                 let used = self.c.facts.with_vals.get(&e).cloned().unwrap_or_default();
                 let m = self.var(module);
-                let bs: Vec<String> = used.iter().map(|(n, i)| format!("({} (%bloblet-ref {m} {}))", self.local(*n), i + 2)).collect();
+                let bs: Vec<Sx> =
+                    used.iter().map(|(n, i)| binding(self.local(*n), Sx::call("%bloblet-ref", [m.clone(), Sx::int(*i as i64 + 2)]))).collect();
                 let names: Vec<Sym> = used.iter().map(|(n, _)| *n).collect();
-                format!("(let ({}) {})", bs.join(" "), self.body(&names, body))
+                Sx::call("let", [Sx::List(bs), self.body(&names, body)])
             }
             Exp::Extract(x, _) => match self.c.facts.datum[&e] {
                 // A blobref's field: one at its offset.
-                Datum::BlobrefField(at) => format!("(%suffix-ref+ {} {at})", self.go(x)),
-                Datum::Field(i) => format!("(%bloblet-ref {} {})", self.go(x), i + 2),
+                Datum::BlobrefField(at) => Sx::call("%suffix-ref+", [self.go(x), Sx::int(at as i64)]),
+                Datum::Field(i) => Sx::call("%bloblet-ref", [self.go(x), Sx::int(i as i64 + 2)]),
                 d => unreachable!("an extract's datum is a field: {d:?}"),
             },
-            Exp::Sum(tag, x) => {
-                format!("(%fx26-sum '{} {})", fixpt_read::escape_symbol(self.c.interner.name(tag)), self.go(x))
-            }
+            Exp::Sum(tag, x) => Sx::call("%fx26-sum", [Sx::quote(Sx::sym(self.c.interner.name(tag))), self.go(x)]),
             // A blobref to a flat sum: its tag read once, as a label; each
             // arm given a blobref to the variant (`TODO.md` §77).
             Exp::TagCase { scrutinee, arms, els } if let Some(&Datum::Layout(code)) = self.c.facts.datum.get(&e) => {
                 let s = self.go(scrutinee);
+                let (tc, tag) = (Sx::sym("%fx26-tc"), Sx::sym("%fx26-tag"));
                 let mut out = match els {
-                    Some((y, body)) => format!("(let (({} %fx26-tc)) {})", self.local(y), self.body(&[y], body)),
-                    None => "(%fx26-flat-no-arm %fx26-tag)".to_string(),
+                    Some((y, body)) => Sx::call("let", [Sx::List(vec![binding(self.local(y), tc.clone())]), self.body(&[y], body)]),
+                    None => Sx::call("%fx26-flat-no-arm", [tag.clone()]),
                 };
                 for arm in arms.iter().rev() {
                     let ArmBind::Value(x) = &arm.bind else { unreachable!("checked") };
                     let body = self.body(&[*x], arm.body);
-                    out = format!(
-                        "(if (eq? %fx26-tag {}) (let (({} (%suffix-ref+ %fx26-tc {}))) {body}) {out})",
-                        flat_label(self.c.interner.name(arm.tag), code),
-                        self.local(*x),
-                        code >> 8
+                    let variant = Sx::call("%suffix-ref+", [tc.clone(), Sx::int((code >> 8) as i64)]);
+                    out = Sx::call(
+                        "if",
+                        [
+                            Sx::call("eq?", [tag.clone(), flat_label(self.c.interner.name(arm.tag), code)]),
+                            Sx::call("let", [Sx::List(vec![binding(self.local(*x), variant)]), body]),
+                            out,
+                        ],
                     );
                 }
-                format!("(let* ((%fx26-tc {s}) (%fx26-tag (%fx26-flat-tag %fx26-tc {code}))) {out})")
+                let read = Sx::call("%fx26-flat-tag", [tc.clone(), Sx::int(code as i64)]);
+                Sx::call("let*", [Sx::List(vec![binding(tc, s), binding(tag, read)]), out])
             }
             Exp::TagCase { scrutinee, arms, els } => {
                 let s = self.go(scrutinee);
+                let tc = Sx::sym("%fx26-tc");
                 let mut out = match els {
-                    Some((y, body)) => format!("(let (({} %fx26-tc)) {})", self.local(y), self.body(&[y], body)),
-                    None => "(%fx26-no-arm %fx26-tc)".to_string(),
+                    Some((y, body)) => Sx::call("let", [Sx::List(vec![binding(self.local(y), tc.clone())]), self.body(&[y], body)]),
+                    None => Sx::call("%fx26-no-arm", [tc.clone()]),
                 };
+                let payload = || Sx::call("%bloblet-ref", [Sx::sym("%fx26-tc"), Sx::int(3)]);
                 for arm in arms.iter().rev() {
                     let names = arm.names();
-                    let binds: Vec<String> = match &arm.bind {
-                        ArmBind::Value(x) => vec![format!("({} (%bloblet-ref %fx26-tc 3))", self.local(*x))],
+                    let binds: Vec<Sx> = match &arm.bind {
+                        ArmBind::Value(x) => vec![binding(self.local(*x), payload())],
                         ArmBind::Fields(xs) => xs
                             .iter()
                             .enumerate()
-                            .map(|(i, x)| format!("({} (%bloblet-ref (%bloblet-ref %fx26-tc 3) {}))", self.local(*x), i + 2))
+                            .map(|(i, x)| binding(self.local(*x), Sx::call("%bloblet-ref", [payload(), Sx::int(i as i64 + 2)])))
                             .collect(),
                     };
                     let body = self.body(&names, arm.body);
-                    out = format!(
-                        "(if (eq? (%bloblet-ref %fx26-tc 2) '{}) (let ({}) {body}) {out})",
-                        fixpt_read::escape_symbol(self.c.interner.name(arm.tag)),
-                        binds.join(" ")
+                    let tag = Sx::call("%bloblet-ref", [tc.clone(), Sx::int(2)]);
+                    out = Sx::call(
+                        "if",
+                        [
+                            Sx::call("eq?", [tag, Sx::quote(Sx::sym(self.c.interner.name(arm.tag)))]),
+                            Sx::call("let", [Sx::List(binds), body]),
+                            out,
+                        ],
                     );
                 }
-                format!("(let ((%fx26-tc {s})) {out})")
+                Sx::call("let", [Sx::List(vec![binding(tc, s)]), out])
             }
-            Exp::Prompt { tag, body, handler } => format!(
-                "(call-with-continuation-prompt (lambda () {}) {} {})",
-                self.go(body),
-                self.go(tag),
-                self.go(handler)
-            ),
+            Exp::Prompt { tag, body, handler } => {
+                let thunk = Sx::call("lambda", [Sx::List(Vec::new()), self.go(body)]);
+                Sx::call("call-with-continuation-prompt", [thunk, self.go(tag), self.go(handler)])
+            }
         };
         // A conversion shows where it went; a Scheme procedure is of
         // neither convention, so it gives the procedure back.
         let code = match self.c.facts.conversion_code(e) {
-            Some(k) => format!("(%fx26-convert {code} {k})"),
+            Some(k) => Sx::call("%fx26-convert", [code, Sx::int(k as i64)]),
             None => code,
         };
         // A module reshaped: a product of the values the type wanted has.
         let code = match self.c.facts.reshaped.get(&e) {
             Some(at) => {
-                let fields: Vec<String> = at
+                let m = || Sx::sym("fx:%reshaped");
+                let fields: Vec<Sx> = at
                     .iter()
                     .map(|i| match i.steps() {
-                        (k, None) => format!("(%bloblet-ref fx:%reshaped {})", k + 2),
+                        (k, None) => Sx::call("%bloblet-ref", [m(), Sx::int(k as i64 + 2)]),
                         // A path: a value of the module that is one of its values.
-                        (k, Some(j)) => format!("(%bloblet-ref (%bloblet-ref fx:%reshaped {}) {})", k + 2, j + 2),
+                        (k, Some(j)) => Sx::call("%bloblet-ref", [Sx::call("%bloblet-ref", [m(), Sx::int(k as i64 + 2)]), Sx::int(j as i64 + 2)]),
                     })
                     .collect();
-                format!("(let ((fx:%reshaped {code})) (%fx26-product {}))", fields.join(" "))
+                Sx::call("let", [Sx::List(vec![binding(m(), code)]), Sx::call("%fx26-product", fields)])
             }
             None => code,
         };
@@ -946,7 +978,7 @@ impl Lowerer<'_> {
     }
 
     /// Wrap `code` in the claims the checker proved about `e`, if any.
-    fn annotate(&self, e: ExpId, code: String) -> String {
+    fn annotate(&self, e: ExpId, code: Sx) -> Sx {
         let facts = &self.c.facts;
         let mut claims = Vec::new();
         let is_app = matches!(self.c.arena.exp_at(e), Exp::App { .. });
@@ -955,7 +987,7 @@ impl Lowerer<'_> {
         {
             let name = self.c.interner.name(*s);
             if let Some((_, scheme, true)) = STANDARD.iter().find(|(n, _, _)| *n == name) {
-                claims.push(format!("(integrable {scheme})"));
+                claims.push(Sx::call("integrable", [Sx::sym(*scheme)]));
             }
         }
         let effect = facts.effects.get(&e);
@@ -964,36 +996,23 @@ impl Lowerer<'_> {
         // that fails into one that does not (`DONE.md` §85). So only an
         // application that cannot fail, its arguments included, is claimed.
         if is_app && effect.is_some_and(|x| x.is_pure()) && self.cannot_fail(e) {
-            claims.push("(pure)".into());
+            claims.push(Sx::call("pure", []));
         }
         if facts.no_escape.contains(&e) {
-            claims.push("(no-escape)".into());
+            claims.push(Sx::call("no-escape", []));
         }
         if claims.is_empty() {
             return code;
         }
         let because = effect.map(|x| self.c.show_effect(x)).unwrap_or_default();
-        format!("(begin '(%fx-note {} (basis checked) (because {because:?})) {code})", claims.join(" "))
+        claims.insert(0, Sx::sym("%fx-note"));
+        claims.extend([Sx::call("basis", [Sx::sym("checked")]), Sx::call("because", [Sx::Str(because)])]);
+        Sx::call("begin", [Sx::quote(Sx::List(claims)), code])
     }
-}
-
-/// A string literal in Scheme's syntax.
-fn scheme_string(s: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 /// A flat sum's label as the lowering writes it: a number as it is, where
 /// the sum's key is numeric (`code`'s bit 3), else a quoted symbol.
-fn flat_label(name: &str, code: usize) -> String {
-    if code & 8 != 0 { name.to_string() } else { format!("'{}", fixpt_read::escape_symbol(name)) }
+fn flat_label(name: &str, code: usize) -> Sx {
+    if code & 8 != 0 { Sx::int(name.parse::<i64>().expect("a numeric label")) } else { Sx::quote(Sx::sym(name)) }
 }

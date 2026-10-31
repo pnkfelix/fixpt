@@ -4186,3 +4186,15 @@ message the prelude raises. No primitive runs the expander, and the engine
 is never entered twice. What differs from R7RS: `docs/divergences.md`,
 "`eval` has one environment, and no procedural macros". Test:
 `fixpt-scheme/tests/eval.rs`, on both engines.
+
+## 189. The lowering builds syntax, not text (the user's, 2026-10-30)
+
+`lower.rs` made Scheme text with `format!`, which the session read back
+(`eval_str`): because the checker's interner and the Scheme session's are
+apart, and so that `,code` could show it. Neither needs text. The lowering
+builds s-expressions (`sx::Sx`), symbols by name; a form's lowering is a
+`sx::Code`, made syntax for the session (`Code::syntax`, its symbols
+interned there) and given to `Session::eval_forms_capturing`. It is
+written out only when shown: `Outcome::code` is a `Made`, the `Code` or
+the words, which `,code` writes as the text was. `Globals` keeps names unescaped,
+escaped only when written. FX-87's and FX-91's lowerings still make text.

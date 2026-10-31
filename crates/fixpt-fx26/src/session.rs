@@ -2,17 +2,19 @@
 //!
 //! One top-level form at a time, in one environment: a definition stays
 //! defined, for the checker (`Checker::top`) and for the Scheme session
-//! (`lower::Globals`) alike. The lowered code goes across as text and is
-//! re-read, as FX-87's and FX-91's does, because the checker and the Scheme
-//! session intern symbols separately — and so that `,code` can show it.
+//! (`lower::Globals`) alike. The lowered code goes across as syntax
+//! (`sx::Code`), its symbols by name, since the checker and the Scheme
+//! session intern symbols separately; it is written out only for `,code`.
 //!
-//! Running goes through `Session::eval_capturing`, which is the whole of what
-//! the three FX front ends' sessions had in common: evaluate, and keep what the
-//! program printed apart from its value.
+//! Running goes through `Session::eval_forms_capturing`, the syntax-given
+//! `eval_capturing`, which is the whole of what the three FX front ends'
+//! sessions had in common: evaluate, and keep what the program printed apart
+//! from its value.
 
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::lower::{Globals, lower};
+use crate::sx::{Code, Sx};
 use crate::top::Top;
 use fixpt_read::{FileId, Span, Sym, Syntax};
 use fixpt_scheme::Session;
@@ -220,24 +222,24 @@ pub enum Consider {
 
 /// Check and lower one top-level form, keeping what it defines, alone: not
 /// under redefinition (`compile_form_defining` is).
-pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(Top, String)> {
+pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(Top, Code)> {
     let before = std::mem::take(&mut checker.hoisted);
     let top = checker.top(form);
     // The hidden globals of the files it loads first, defined before it.
     let hoisted = std::mem::replace(&mut checker.hoisted, before);
     let top = top?;
-    let mut code: String = hoisted.iter().map(|(t, _)| lower_top(checker, globals, t)).collect::<Vec<_>>().join("\n");
-    if !code.is_empty() {
-        code.push('\n');
+    let mut code = Code::default();
+    for (t, _) in &hoisted {
+        code.extend(lower_top(checker, globals, t));
     }
-    code.push_str(&lower_top(checker, globals, &top));
+    code.extend(lower_top(checker, globals, &top));
     Ok((top, code))
 }
 
 /// Check and lower one top-level form, under redefinition
 /// (`Checker::top_defining`): the Scheme for everything it makes run, in
 /// order, and what it broke.
-pub fn compile_form_defining(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(crate::top::Defining, Vec<String>)> {
+pub fn compile_form_defining(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(crate::top::Defining, Vec<Code>)> {
     let done = checker.top_defining(form)?;
     let code = done.hoisted.iter().chain(&done.run).map(|(top, _)| lower_top(checker, globals, top)).collect();
     Ok((done, code))
@@ -245,7 +247,7 @@ pub fn compile_form_defining(checker: &mut Checker, globals: &mut Globals, form:
 
 /// A checked top-level form, lowered: a definition that assigns keeps the
 /// global its name has (`Globals::keep_next`).
-pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> String {
+pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> Code {
     match top {
         Top::Define { name, assigns: true, .. } => globals.keep_next(*name),
         Top::DefineRec { bindings, assigns: true } => bindings.iter().for_each(|(n, _, _)| globals.keep_next(*n)),
@@ -253,7 +255,7 @@ pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> String 
     }
     match top {
         Top::DefineType { .. } | Top::DefineTypeFamily { .. } | Top::DefineGenerative { .. } | Top::DefineEffect { .. } | Top::DefineConvention { .. } => {
-            String::new()
+            Code::default()
         }
         Top::Define { name, exp, recursive, .. } => {
             // A recursive definition refers to itself; a plain one to
@@ -265,16 +267,16 @@ pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> String 
                 let body = lower(checker, globals, *exp);
                 (globals.define(checker, *name), body)
             };
-            format!("(define {global} {body})")
+            Sx::call("define", [Sx::sym(global), body]).into()
         }
         Top::DefineRec { bindings, .. } => {
             // Every name first: each lambda refers to the group's globals.
             let names: Vec<String> = bindings.iter().map(|(n, _, _)| globals.define(checker, *n)).collect();
-            let defs: Vec<String> =
-                bindings.iter().zip(&names).map(|((_, _, e), g)| format!("(define {g} {})", lower(checker, globals, *e))).collect();
-            format!("(begin {})", defs.join(" "))
+            let defs: Vec<Sx> =
+                bindings.iter().zip(&names).map(|((_, _, e), g)| Sx::call("define", [Sx::sym(g.as_str()), lower(checker, globals, *e)])).collect();
+            Sx::call("begin", defs).into()
         }
-        Top::Exp(k) => lower(checker, globals, k.exp),
+        Top::Exp(k) => lower(checker, globals, k.exp).into(),
     }
 }
 
@@ -282,7 +284,7 @@ pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> String 
 /// checked it, and the Scheme for each form, in order.
 pub struct Compiled {
     pub checker: Checker,
-    pub code: Vec<String>,
+    pub code: Vec<Code>,
 }
 
 /// Check and lower the program `text`, whose definitions may come in any
@@ -630,9 +632,44 @@ impl Compiled {
         // All in one evaluation: each recompiles the whole of the session's
         // program so far (`Prepared::update`), so one per form made loading
         // the front end quadratic in its forms.
-        let all: String = self.code.iter().flat_map(|c| [c.as_str(), "\n"]).collect();
-        scheme.eval_str("<fx26>", &all).map_err(|e| e.to_string())?;
+        let mut all = Code::default();
+        for c in &self.code {
+            all.extend(c.clone());
+        }
+        let forms = all.syntax(scheme.runtime_unrooted(), "<fx26>");
+        scheme.eval_forms(&forms).map_err(|e| e.to_string())?;
         Ok(())
+    }
+}
+
+/// What a form became, written out only when it is shown (`,code`): the
+/// Scheme it was lowered to, or the words the compiler written in FX-26
+/// made of it, disassembled, those not shown before.
+#[derive(Clone, Debug, Default)]
+pub enum Made {
+    #[default]
+    Nothing,
+    Scheme(Code),
+    Words(String),
+}
+
+impl Made {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Made::Nothing => true,
+            Made::Scheme(c) => c.is_empty(),
+            Made::Words(w) => w.is_empty(),
+        }
+    }
+}
+
+impl std::fmt::Display for Made {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Made::Nothing => Ok(()),
+            Made::Scheme(c) => write!(f, "{c}"),
+            Made::Words(w) => f.write_str(w),
+        }
     }
 }
 
@@ -640,8 +677,8 @@ impl Compiled {
 pub struct Outcome {
     /// What checking found, as the REPL prints it after the value.
     pub top: Top,
-    /// The Scheme it was lowered to, empty for a `define-type`.
-    pub code: String,
+    /// What it became, as `,code` shows it: none for a `define-type`.
+    pub code: Made,
     /// What it printed while it ran.
     pub printed: String,
     /// Its value, written; `None` for a definition. An error when running
@@ -833,7 +870,7 @@ impl Fx26Session {
 
     /// Check one top-level form and lower it, without running it.
     pub fn compile(&mut self, form: &Syntax) -> R<(Top, String)> {
-        compile_form(&mut self.checker, &mut self.globals, form)
+        compile_form(&mut self.checker, &mut self.globals, form).map(|(top, code)| (top, code.to_string()))
     }
 
     /// Run `form` early, if the licence allows: check it without keeping
@@ -863,7 +900,8 @@ impl Fx26Session {
         self.whole_prelude();
         self.scheme.engine.set_step_limit(self.speculation_limit);
         let result = self.scheme.scope(|s| {
-            let (_, result) = s.eval_capturing("<fx26-speculative>", &code);
+            let forms = Code::from(code).syntax(s.runtime_unrooted(), "<fx26-speculative>");
+            let (_, result) = s.eval_forms_capturing(&forms);
             result.map(|v| s.write(v))
         });
         self.scheme.engine.set_step_limit(self.step_limit);
@@ -1079,7 +1117,7 @@ impl Fx26Session {
             let printed = format!("; compiled `{path}` to `{}`\n", made.display());
             let exp = self.checker.arena.exp(form.span, crate::ast::Exp::Unit);
             let top = Top::Exp(crate::check::Checked { ty: self.checker.unit, effect: crate::ast::Effect::pure(), exp });
-            return Ok(Outcome { top, code: String::new(), printed, value: Ok(None) });
+            return Ok(Outcome { top, code: Made::Nothing, printed, value: Ok(None) });
         }
         // A top-level `include`: its forms' outcomes, the last shown.
         if self.checker.include_forms(form)?.is_some() {
@@ -1388,14 +1426,14 @@ impl Fx26Session {
             // checked, neither run (`compile_program_file`).
             if self.program_record.is_some() && !again {
                 match &top {
-                    Top::Exp(_) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) }),
+                    Top::Exp(_) => return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: Ok(None) }),
                     // One that only reads globals whose definitions ran runs
                     // too: making it does nothing else (a module of
                     // procedures, say).
                     Top::Define { name, exp, effect, .. } if !Self::names_its_word(&self.checker, *exp) && !self.checker.interner.name(*name).starts_with('%') => {
                         if !self.only_reads_ran(effect) {
                             self.declare_only(form)?;
-                            return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) });
+                            return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: Ok(None) });
                         }
                     }
                     _ => {}
@@ -1409,7 +1447,7 @@ impl Fx26Session {
             {
                 let name = *name;
                 let value = self.fasl_define(name, form, &fasl)?;
-                return Ok(Outcome { top, code: String::new(), printed: String::new(), value });
+                return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value });
             }
             if self.own_made {
                 // What the native compiler declines runs as cellular code,
@@ -1421,10 +1459,10 @@ impl Fx26Session {
                     let name = self.checker.interner.name(*name);
                     printed = format!("; `{name}` is not in the native convention yet, so it runs as cellular code: {why}\n");
                 }
-                return Ok(Outcome { top, code: String::new(), printed, value: Ok(None) });
+                return Ok(Outcome { top, code: Made::Nothing, printed, value: Ok(None) });
             }
             if again && self.native_runner.is_none() {
-                return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) });
+                return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: Ok(None) });
             }
             let form_text = if crate::sources::wanted() {
                 let (text, map) = fixpt_read::write_syntax_mapped(form, &self.checker.interner);
@@ -1452,7 +1490,7 @@ impl Fx26Session {
                 };
                 match self.with_native_thunk(&form_text, written)? {
                     Ok(Ok(value)) => {
-                        return Ok(Outcome { top, code: String::new(), printed: String::new(), value: value.map(Some) });
+                        return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: value.map(Some) });
                     }
                     Ok(Err(why)) => note = format!("; not in the native convention yet, so run as cellular code: {why}\n"),
                     Err(why) => note = format!("; not compiled as a procedure: {why}\n"),
@@ -1485,8 +1523,8 @@ impl Fx26Session {
                     self.check_built_in(false)?;
                 }
                 match defined? {
-                    Ok(()) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) }),
-                    Err(NativeRun::Ran(Err(e))) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Err(e) }),
+                    Ok(()) => return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: Ok(None) }),
+                    Err(NativeRun::Ran(Err(e))) => return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: Err(e) }),
                     Err(NativeRun::Declined(why)) => note = format!("; not in the native convention yet, so `{name}` runs as cellular code: {why}\n"),
                     Err(NativeRun::Ran(Ok(_))) => unreachable!("a value is stored"),
                 }
@@ -1503,21 +1541,23 @@ impl Fx26Session {
             // A form is compiled with every definition before it, so only
             // the words not shown before are this form's.
             let code = match words {
-                Some(w) => w
-                    .split_inclusive('\n')
-                    .fold(Vec::<String>::new(), |mut blocks, line| {
-                        match blocks.last_mut() {
-                            Some(b) if !line.starts_with("word ") => b.push_str(line),
-                            _ => blocks.push(line.to_string()),
-                        }
-                        blocks
-                    })
-                    .into_iter()
-                    .filter(|b| self.words_shown.insert(b.clone()))
-                    .collect::<String>()
-                    .trim_matches('\n')
-                    .to_string(),
-                None => code,
+                Some(w) => Made::Words(
+                        w
+                        .split_inclusive('\n')
+                        .fold(Vec::<String>::new(), |mut blocks, line| {
+                            match blocks.last_mut() {
+                                Some(b) if !line.starts_with("word ") => b.push_str(line),
+                                _ => blocks.push(line.to_string()),
+                            }
+                            blocks
+                        })
+                        .into_iter()
+                        .filter(|b| self.words_shown.insert(b.clone()))
+                        .collect::<String>()
+                        .trim_matches('\n')
+                        .to_string(),
+                ),
+                None => Made::Scheme(code),
             };
             let value = match out.strip_prefix("!! ") {
                 Some(e) => Err(e.to_string()),
@@ -1553,14 +1593,15 @@ impl Fx26Session {
             return Ok(Outcome { top, code, printed: note, value });
         }
         if code.is_empty() {
-            return Ok(Outcome { top, code, printed: String::new(), value: Ok(None) });
+            return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: Ok(None) });
         }
         let is_define = matches!(top, Top::Define { .. } | Top::DefineRec { .. });
         let (printed, value) = self.scheme.scope(|s| {
             // The lowered Scheme's own compiling, quick, is counted as run.
             let start = std::time::Instant::now();
             s.bare_failures = true;
-            let (printed, result) = s.eval_capturing("<fx26>", &code);
+            let forms = code.syntax(s.runtime_unrooted(), "<fx26>");
+            let (printed, result) = s.eval_forms_capturing(&forms);
             s.bare_failures = false;
             s.runtime_unrooted().run_nanos += start.elapsed().as_nanos() as u64;
             let value = match result {
@@ -1571,7 +1612,7 @@ impl Fx26Session {
             };
             (printed, value)
         });
-        Ok(Outcome { top, code, printed, value })
+        Ok(Outcome { top, code: Made::Scheme(code), printed, value })
     }
 
     /// Whether a load reads a fresh `.fasl` (`fasls`): only compiled code
@@ -2301,7 +2342,7 @@ impl Fx26Session {
             Ok(said)
         });
         let printed = value?;
-        Ok(Outcome { top, code: String::new(), printed, value: Ok(None) })
+        Ok(Outcome { top, code: Made::Nothing, printed, value: Ok(None) })
     }
 
     /// Program file `path` (from the program's directory) compiled to a

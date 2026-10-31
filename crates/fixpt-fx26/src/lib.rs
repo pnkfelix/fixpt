@@ -923,6 +923,7 @@ pub mod cellular;
 pub mod debts;
 pub mod fasl;
 pub mod stage;
+pub mod sx;
 pub mod typeat;
 pub mod query;
 pub mod standard;

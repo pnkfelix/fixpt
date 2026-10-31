@@ -22,7 +22,7 @@ fn code(program: &str) -> String {
     let forms = s.checker.read_in(fixpt_read::FileId(0), program).expect("reads");
     let mut last = String::new();
     for f in &forms {
-        last = s.run(f).expect("checks").code;
+        last = s.run(f).expect("checks").code.to_string();
     }
     last
 }
@@ -215,7 +215,7 @@ fn cellular_forms_show_their_new_words() {
     s.show_words = true;
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/run/sq.fx")).unwrap();
     let forms = s.checker.read_in(fixpt_read::FileId(0), &text).expect("reads");
-    let codes: Vec<String> = forms.iter().map(|f| s.run(f).expect("runs").code).collect();
+    let codes: Vec<String> = forms.iter().map(|f| s.run(f).expect("runs").code.to_string()).collect();
     let words = |c: &str| c.lines().filter(|l| l.starts_with("word ")).map(|l| l.split(' ').nth(1).unwrap().to_string()).collect::<Vec<_>>();
     assert_eq!(words(&codes[0]), ["program", "sq"], "{}", codes[0]);
     assert_eq!(words(&codes[1]), ["program"], "{}", codes[1]);

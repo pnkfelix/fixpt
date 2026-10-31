@@ -489,6 +489,15 @@ impl Session {
         (printed, result)
     }
 
+    /// [`eval_capturing`](Self::eval_capturing) of forms already read, or
+    /// made: what a front end lowered to Scheme gives, with no text between.
+    pub fn eval_forms_capturing(&mut self, forms: &[fixpt_read::Syntax]) -> (String, Result<Handle, SessionError>) {
+        let saved = self.rt.capture();
+        let result = self.eval_forms(forms);
+        let printed = self.rt.restore(saved);
+        (printed, result)
+    }
+
     pub fn debug_node_count(&self) -> usize {
         self.program.nodes.len()
     }
