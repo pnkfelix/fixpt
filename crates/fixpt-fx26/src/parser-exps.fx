@@ -274,16 +274,12 @@
         ;; Code a running program gives (`docs/research/eval.md`): `(stage m
         ;; E R text (p body …) (why else …))` is `(tagcase ((proj %stage E R)
         ;; m text) (ok p body …) (failed why else …))`, as `parse.rs`.
-        ;; So are a session's: `(session-stage s E R code …)` over
-        ;; `%session-stage`, `(session-define s E code (d …) (why …))` over
-        ;; `%session-define`.
-        ((stage session-stage)
+        ;; So is a session's: `(session-check s E R code (c …) (why …))` over
+        ;; `%session-check`.
+        ((stage session-check)
          (begin (arity items 7 stage-usage a b)
-                (stage-form (if (symbol=? head 'stage) '%stage '%session-stage)
+                (stage-form (if (symbol=? head 'stage) '%stage '%session-check)
                             (keep (list (nth items 2) (nth items 3))) items 4 a b)))
-        ((session-define)
-         (begin (arity items 6 stage-usage a b)
-                (stage-form '%session-define (keep (list (nth items 2))) items 3 a b)))
         ;; `(session-commit! s d decision)`: the initializer, which the
         ;; program runs, then what it made recorded, or why not, as
         ;; `parse.rs`.

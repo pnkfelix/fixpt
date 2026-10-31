@@ -4141,10 +4141,12 @@ is `(maxeff stage spin)`, `stage` a new effect atom, in both checkers.
   list).
 
 **Sessions, step 1 (2026-10-31): on `rs-scheme-vm`.** `make-session`,
-`session-stage`, `session-define` (a pending definition), `session-redefines`
-and `session-commit!` (`docs/fx26.md`, "Sessions"; decided with the user:
-two steps, `E` written, types found, the decision the program's, anywhere,
-so a continuation may be captured before it). A session's state is a
+`session-check` (a top-level form: an expression's procedure, or a
+definition, pending), `session-redefines` and `session-commit!`
+(`docs/fx26.md`, "Sessions"; decided with the user: one form whose answer
+says which, each delayed with its own protocol; `E` written, types found,
+the decision the program's, anywhere, so a continuation may be captured
+before it). A session's state is a
 checker written in Rust, the REPL's own top level made one per session
 (`sessions.rs`): a pending definition is `try_top`, a commit
 `top_defining`, re-runs waiting for `shadow` and not for `rerun`, and the

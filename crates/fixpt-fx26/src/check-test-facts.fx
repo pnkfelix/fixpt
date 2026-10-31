@@ -36,7 +36,7 @@
 (hide (include check-binders) (include check-types) (include check-env) (include check-sc-graphs)
       (include check-print-parts) (include check-calls) (include check-logic))
 (import check-resolve k-at-of k-start k-end)
-(import check-env-types n-staged (type k-noted))
+(import check-env-types n-staged)
 
 (define k-branch-facts-of (->* (k-fact-list k-fact-list) k-branch-facts)
   (lambda (yes no) (the k-branch-facts (cons yes no))))
@@ -125,11 +125,11 @@
                 (else (k-array-sized op args te)))))
       (else y te))))
 ;; Which of `stage`'s operators `f` is, `(proj %stage E R)` or a session's:
-;; `%stage`, `%session-stage` or `%session-define`; or "".
+;; `%stage` or `%session-check`; or "".
 (define k-stage-op (->* (kx) string)
   (lambda (f)
     (let ((op (tagcase f (x-proj (body ds a b abk) (k-std-op body)) (else y (k-std-op f)))))
-      (if (or (string=? op "%stage") (string=? op "%session-stage") (string=? op "%session-define"))
+      (if (or (string=? op "%stage") (string=? op "%session-check"))
           op
           ""))))
 ;; `stage` (`docs/research/eval.md`): `((proj %stage E R) m code)`, `m` a
@@ -163,31 +163,33 @@
               (else y (wrong)))))
         (else y (k-fail (string-append "`" form "` takes " what " by its name")
                         (k-start m) (k-end m)))))))
+;; `M`, `E` and `R` of `stage`'s call of type `t`, noted at the code: `(sumof
+;; (ok X) …)`, `X` `(subr E () R)`, or a session's `(sumof (expression (subr E
+;; () R)) …)`.
 (define k-note-staged (->* (k-at int int) unit)
   (lambda (at mt t)
+    (let* ((ok (k-staged-part t 'ok))
+           (x (if (< ok 0) -1 (let ((e (k-staged-part ok 'expression))) (if (< e 0) ok e)))))
+      (if (< x 0)
+          #u
+          (tagcase (k-get (k-resolve x))
+            (ty-subr (e ps r cv spc)
+              (let* ((show (with check-print k-show-ty-whole))
+                     (n (n-staged (show mt) (k-show-effect e) (show r))))
+                (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
+            (else y #u))))))
+;; Sum type `t`'s part labelled `l`, or -1.
+(define k-staged-part (->* (int symbol) int)
+  (lambda (t l)
     (tagcase (k-get (k-resolve t))
-      (ty-sum (parts)
-        (let* ((ok (k-get (k-resolve (k-staged-ok parts))))
-               (show (with check-print k-show-ty-whole))
-               (note (lambda ((n k-noted))
-                       (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts))))))
-          (tagcase ok
-            (ty-subr (e ps r cv spc) (note (n-staged (show mt) (k-show-effect e) (show r))))
-            ;; A definition's, `(pending E r)`.
-            (ty-named (g ds)
-              (if (and (= g 16) (not (null? ds)))
-                  (tagcase (car ds)
-                    (de (e) (note (n-staged (show mt) (k-show-effect e) "")))
-                    (else z #u))
-                  #u))
-            (else y #u))))
-      (else y #u))))
-;; The type of the `ok` of `stage`'s sum.
-(define k-staged-ok (->* (k-parts) int)
-  (lambda (ps)
+      (ty-sum (parts) (k-staged-find parts l))
+      (else y -1))))
+;; The part labelled `l` of parts `ps`, or -1.
+(define k-staged-find (->* (k-parts symbol) int)
+  (lambda (ps l)
     (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) 'ok) (extract (car ps) 2))
-          (else (k-staged-ok (cdr ps))))))
+          ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2))
+          (else (k-staged-find (cdr ps) l)))))
 (define k-made-native (->* (k-te int int) k-te)
   (lambda (te a b)
     (tagcase (k-get (extract te 1))

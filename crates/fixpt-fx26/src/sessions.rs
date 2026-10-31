@@ -14,6 +14,10 @@
 //! `m`, and one for each of `m`'s values, which the session's own may
 //! shadow.
 //!
+//! A form checked in a session (`session-check`) is either: an expression,
+//! given back as the procedure that evaluates it, or a definition, pending,
+//! for `session-commit!`.
+//!
 //! Lowered (`rs-scheme-vm`): each step's Scheme is given back as a datum,
 //! for the runtime to give `eval`, each session's globals named by a prefix
 //! of its own. Elsewhere, not yet: a refusal says so.
@@ -61,7 +65,7 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
         return Err("not a session".to_string());
     }
     match op {
-        "lower" => lower(rt, a[0], a[1], a[2] != Value::FALSE),
+        "lower" => lower(rt, a[0], a[1]),
         "redefines" => Ok(redefines(rt, a[0], a[1])),
         "commit-lower" => commit_lower(rt, a[0], a[1], a[2]),
         _ => Err("this machine cannot keep sessions yet".to_string()),
@@ -151,13 +155,14 @@ fn tried<T>(rt: &mut Runtime, state: &mut State, w: &Wrapped, then: impl FnOnce(
 }
 
 /// Lowered, what `%fx26-session-lower` does with session `s` and the
-/// product a form's code is: code staged in it, the datum whose value is
-/// the thunk, in a list of one; or, `define`, the pending definition,
-/// `(sum ok d)`; or the refusal.
-fn lower(rt: &mut Runtime, s: Value, staged: Value, define: bool) -> Result<Value, String> {
+/// product a form's code is: an expression, the datum whose value is the
+/// procedure that evaluates it, in a list of one; a definition (`(define
+/// …)`), `(sum ok (sum definition d))`, `d` pending; or the refusal.
+fn lower(rt: &mut Runtime, s: Value, staged: Value) -> Result<Value, String> {
     let (mt, e, r, code) = staged_parts(rt, staged).ok_or("this machine cannot stage code")?;
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
-    if define {
+    let head = if code.is_pair() { rt.heap.car(code) } else { Value::NULL };
+    if rt.heap.is_a(head, fixpt_heap::ObjType::Symbol) && rt.heap.symbol_name(head) == "define" {
         return lower_define(rt, s, &mt, &e, code, &text);
     }
     let w = Wrapped::of(format!("(the (subr {e} () {r})\n(lambda ()\n"), &text, "\n))\n", &text, 0);
@@ -236,6 +241,7 @@ fn lower_define(rt: &mut Runtime, s: Value, mt: &str, e: &str, code: Value, text
     };
     let [name, ty, form] = [&name, &ty, &form].map(|t| rt.heap.make_string(t));
     let d = rt.heap.vector_from(&[s, Value::fixnum(generation), name, ty, form, Value::FALSE]);
+    let d = sum(rt, "definition", d);
     Ok(sum(rt, "ok", d))
 }
 

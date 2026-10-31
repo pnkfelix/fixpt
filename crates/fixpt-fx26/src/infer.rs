@@ -589,7 +589,7 @@ impl Checker {
         // by its name, `M` from the session's type.
         if let Exp::Proj { body, .. } = self.arena.exp_at(fun).clone()
             && let Some(op) = self.standard_ref(body).map(|op| self.interner.name(op).to_string())
-            && matches!(op.as_str(), "%stage" | "%session-stage" | "%session-define")
+            && matches!(op.as_str(), "%stage" | "%session-check")
             && let Some(&target) = args.first()
         {
             self.note_staged(&op, target, args.get(1).copied(), t)?;
@@ -601,8 +601,7 @@ impl Checker {
 
     /// `stage`'s call, or a session's (`op`), of module or session
     /// `target` and code `code`, of type `t`: `M`, `E` and `R` noted at the
-    /// code, printed whole, for the lowering (`facts.staged`; `R` empty for
-    /// a definition, whose type is found as it is checked).
+    /// code, printed whole, for the lowering (`facts.staged`).
     fn note_staged(&mut self, op: &str, target: ExpId, code: Option<ExpId>, t: TyId) -> R<()> {
         let span = self.arena.span_of(target);
         let what = if op == "%stage" { "a module" } else { "a session" };
@@ -619,20 +618,17 @@ impl Checker {
             },
             _ => return Err(FxError::at(span, format!("`{}` takes {what}, not a {}", op.trim_start_matches('%'), self.show_ty(tt)))),
         };
-        // `(sumof (ok X) …)`: `X` `(subr E () R)`, or a definition's
-        // `(pending E r)`.
-        let Ty::Sum(parts) = self.arena.get(self.arena.resolve(t)).clone() else { return Ok(()) };
-        let Some(&(_, ok)) = parts.iter().find(|(l, _)| self.interner.name(*l) == "ok") else { return Ok(()) };
-        let (effect, result) = match self.arena.get(self.arena.resolve(ok)).clone() {
-            Ty::Subr { effect, result, .. } => (effect, Some(result)),
-            Ty::Named { which: crate::check::PENDING_INDEX, args } => match args.first() {
-                Some(D::Effect(e)) => (e.clone(), None),
-                _ => return Ok(()),
-            },
-            _ => return Ok(()),
+        // `(sumof (ok X) …)`: `X` `(subr E () R)`; a session's, `(sumof
+        // (expression (subr E () R)) (definition …))`.
+        let part = |c: &Self, t: TyId, l: &str| match c.arena.get(c.arena.resolve(t)) {
+            Ty::Sum(parts) => parts.iter().find(|(n, _)| c.interner.name(*n) == l).map(|(_, t)| *t),
+            _ => None,
         };
+        let Some(ok) = part(self, t, "ok") else { return Ok(()) };
+        let ok = if op == "%session-check" { part(self, ok, "expression") } else { Some(ok) };
+        let Some(Ty::Subr { effect, result, .. }) = ok.map(|ok| self.arena.get(self.arena.resolve(ok)).clone()) else { return Ok(()) };
         if let Some(code) = code {
-            let staged = (self.staged_text(mt), self.staged_effect_text(&effect), result.map(|r| self.staged_text(r)).unwrap_or_default());
+            let staged = (self.staged_text(mt), self.staged_effect_text(&effect), self.staged_text(result));
             self.facts.staged.insert(code, staged);
         }
         Ok(())

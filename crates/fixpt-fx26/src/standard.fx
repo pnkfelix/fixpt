@@ -407,7 +407,7 @@
        (case n
          (("make-flatarray") "%fx26-make-flatarray")
          (("flatarray-set!") "%fx26-flatarray-set!")
-         (("%session-stage") "%fx26-session-stage")
+         (("%session-check") "%fx26-session-check")
          (("%session-ready") "%fx26-session-ready")
          (("process-output") "%fx26-process-output")
          (("process-status") "%fx26-process-status")
@@ -424,7 +424,6 @@
          (else "")))
       ((15)
        (case n
-         (("%session-define") "%fx26-session-define")
          (("make-bytevector") "make-bytevector")
          (("bytevector-copy") "%fx26-bytevector-copy")
          (("string-downcase") "%fx26-string-downcase")

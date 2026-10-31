@@ -305,11 +305,18 @@ made in two steps, as `certify` and `install` are, and the program
 decides between them, anywhere it likes:
 
 ```
-(session-define s E code (d body) (why else))  ; d : (pending E r); checks, changes nothing
+(session-check s E R code (c body) (why else))
+    ; any top-level form: c : (sumof (expression (subr E () R)) (definition (pending E r)))
+    ; checks, changes nothing
 (session-redefines s d)    ; (sumof (fresh unit) (redefines session-redefinition))
 (session-commit! s d decision)   ; runs the initializer within E, defines;
-                                 ; (sumof (defined unit) (failed stage-failure))
+                                 ; (sumof (defined string) (failed stage-failure))
 ```
+
+(The user's, 2026-10-31: the code itself is a definition or an
+expression, and the answer says which: one form, not one for each, each
+answer delayed, with its own protocol: an expression's procedure to call,
+a definition to commit.)
 
 - **`E` is written**, as at `stage`: the initializer's effect, known only
   at run time, is checked within it, and `session-commit!`'s effect has

@@ -318,10 +318,10 @@
       ((521) "%fx26-process-signal") ((522) "%fx26-symbol->keyword") ((523) "%fx26-keyword->symbol")
       ((524) "%fx26-keyword?") ((525) "%fx26-file-info") ((526) "%fx26-read-symlink")
       ((527) "%fx26-process-news") ((528) "%fx26-process-exit") ((529) "%fx26-stage")
-      ((530) "%fx26-stage-lower") ((531) "%fx26-make-session") ((532) "%fx26-session-stage")
-      ((533) "%fx26-session-define") ((534) "%fx26-session-redefines") ((535) "%fx26-session-ready")
-      ((536) "%fx26-session-committed!") ((537) "%fx26-session-lower")
-      ((538) "%fx26-session-commit-lower") ((539) "%fx26-stage-check")
+      ((530) "%fx26-stage-lower") ((531) "%fx26-make-session") ((532) "%fx26-session-check")
+      ((533) "%fx26-session-redefines") ((534) "%fx26-session-ready")
+      ((535) "%fx26-session-committed!") ((536) "%fx26-session-lower")
+      ((537) "%fx26-session-commit-lower") ((538) "%fx26-stage-check")
       (else "?"))))
 
 ;; Whether runtime primitive `n` never collects (`fixpt_runtime::never_collects`).
@@ -419,7 +419,7 @@
       ((505) 2) ((506) 2) ((507) 1) ((508) 2) ((509) 1) ((510) 1) ((511) 1) ((512) 3) ((513) 2)
       ((514) 3) ((515) 2) ((516) 2) ((517) 1) ((518) 1) ((519) 2) ((520) 1) ((521) 2) ((522) 1)
       ((523) 1) ((524) 1) ((525) 1) ((526) 1) ((527) 0) ((528) 1) ((529) 2) ((530) 1) ((531) 1)
-      ((532) 2) ((533) 2) ((534) 2) ((535) 3) ((536) 2) ((537) 3) ((538) 3) ((539) 4)
+      ((532) 2) ((533) 2) ((534) 3) ((535) 2) ((536) 2) ((537) 3) ((538) 4)
       (else -1))))
 
 ;; The most arguments runtime primitive `n` takes, -1 for any number.
@@ -484,7 +484,7 @@
       ((505) -1) ((506) -1) ((507) 1) ((508) 3) ((509) 1) ((510) 1) ((511) 1) ((512) 3) ((513) 2)
       ((514) 9) ((515) 2) ((516) 2) ((517) 1) ((518) 1) ((519) 2) ((520) 1) ((521) 2) ((522) 1)
       ((523) 1) ((524) 1) ((525) 1) ((526) 1) ((527) 0) ((528) 1) ((529) 2) ((530) 1) ((531) 1)
-      ((532) 2) ((533) 2) ((534) 2) ((535) 3) ((536) 2) ((537) 3) ((538) 3) ((539) 4)
+      ((532) 2) ((533) 2) ((534) 3) ((535) 2) ((536) 2) ((537) 3) ((538) 4)
       (else -1))))
 
 ;; Routine `n`'s name, "?" past them.

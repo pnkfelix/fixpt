@@ -510,8 +510,7 @@
 ;; Sessions (`docs/research/eval.md`, "Sessions"): not yet here; each
       ;; step refuses, saying so.
       (prim! 'make-session (lambda (xs) the-unit))
-      (prim! '%session-stage (lambda (xs) (ev-session-refused)))
-      (prim! '%session-define (lambda (xs) (ev-session-refused)))
+      (prim! '%session-check (lambda (xs) (ev-session-refused)))
       (prim! 'session-redefines (lambda (xs) (the val (o-sum 'fresh the-unit))))
       (prim! '%session-ready (lambda (xs) (ev-session-refused)))
       (prim! '%session-committed! (lambda (xs) (ev-session-refused)))

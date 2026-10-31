@@ -110,28 +110,29 @@ fn a_module_is_named() {
 }
 
 /// The output of `programs/stage/session.fx` where a session is kept.
-const SESSION: &str = "defined
+const SESSION: &str = "defined a
 33
-defined
+defined f
 120
-defined
+defined g
 a: int to string, used by g
 fresh
 not defined: `a` is defined already, and the redefinition was refused
 12
-defined
+defined a
 101
-defined
+defined twice
 3
 not defined: the session changed since this definition was checked: check it again
 refused: a int is expected here, and this is a string
 refused: argument 1 is a int, where a (union nil (pairof ? ? r)) is expected
-defined
+defined a
 refused: `g` is broken, since `a` was redefined (a int is expected here, and this is a string): define it again to use it
 ";
 
-/// A session (`docs/research/eval.md`, "Sessions"): definitions that last,
-/// each checked, then committed as the program decides; redefinitions
+/// A session (`docs/research/eval.md`, "Sessions"): forms checked in it, an
+/// expression's procedure called, a definition committed as the program
+/// decides; redefinitions
 /// reported, refused, assigned, shadowing a host's name, and one whose
 /// users run again, one broken; a pending one gone stale. Kept on `rs-scheme-vm`; every other machine refuses each step, as
 /// a value, for now.

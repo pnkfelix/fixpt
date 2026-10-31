@@ -210,7 +210,6 @@ pub(crate) const SESSIONOF_INDEX: u32 = 15;
 /// A definition checked against a session at `r`, not yet made, generative
 /// type 16: its initializer does `e` when it is (`session-commit!`).
 pub const PENDING: &str = "(pending (e effect +) (r region)) (subr (maxeff e (read r)) () unit)";
-pub(crate) const PENDING_INDEX: u32 = 16;
 /// The scheduler of processes and `par`, a module file built in, which the
 /// forms `spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!`
 /// call through the hidden global of its load (`Checker::library_type`).

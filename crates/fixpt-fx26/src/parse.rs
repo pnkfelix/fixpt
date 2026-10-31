@@ -1567,21 +1567,19 @@ impl Checker {
             // Code a running program gives (`docs/research/eval.md`):
             // `(stage m E R code (p body …) (why else …))` is `(tagcase
             // ((proj %stage E R) m code) (ok p body …) (failed why else
-            // …))`, `%stage` checked at its call as `m`'s type says; so are
-            // a session's, `(session-stage s E R code (p …) (why …))` over
-            // `%session-stage`, and `(session-define s E code (d …) (why
-            // …))` over `%session-define`, `d` a pending definition.
-            head @ ("stage" | "session-stage" | "session-define") => {
+            // …))`, `%stage` checked at its call as `m`'s type says; so is a
+            // session's, `(session-check s E R code (c …) (why …))` over
+            // `%session-check`, `c` an expression's procedure or a pending
+            // definition.
+            head @ ("stage" | "session-check") => {
                 let (op, usage) = match head {
                     "stage" => ("%stage", "`(stage module effect type code (procedure body …) (failure else …))`"),
-                    "session-stage" => ("%session-stage", "`(session-stage session effect type code (procedure body …) (failure else …))`"),
-                    _ => ("%session-define", "`(session-define session effect code (pending body …) (failure else …))`"),
+                    _ => ("%session-check", "`(session-check session effect type code (checked body …) (failure else …))`"),
                 };
-                let (target, descs, code, ok, failed) = match (&items[..], op) {
-                    ([_, t, e, code, ok, failed], "%session-define") => (t, vec![e.clone()], code, ok, failed),
-                    ([_, t, e, r, code, ok, failed], o) if o != "%session-define" => (t, vec![e.clone(), r.clone()], code, ok, failed),
-                    _ => return Err(FxError::at(span, usage)),
+                let [_, target, e, r, code, ok, failed] = &items[..] else {
+                    return Err(FxError::at(span, usage));
                 };
+                let descs = vec![e.clone(), r.clone()];
                 let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
                 let arm = |p: &mut Self, tag: &str, a: &Syntax| -> R<Syntax> {
                     match a.as_proper_list() {
