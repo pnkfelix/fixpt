@@ -59,12 +59,18 @@
           ((load-input "fx26:check-proving.fx")
            check-types check-env check-read check-syntax
            parser-module))
+         ;; Flat data, which reading types uses.
+         (check-flat
+          ((load-input "fx26:check-flat.fx")
+           check-types check-read check-env check-subst
+           check-print check-syntax check-effects parser-module
+           check-print-parts))
          ;; What reading types uses that reads none of them.
          (check-read-helpers
           ((load-input "fx26:check-read-helpers.fx")
            check-types check-read check-env check-subst
            check-print check-syntax check-effects parser-module
-           check-print-parts))
+           check-print-parts check-flat))
          ;; Specifications in procedure types, read.
          (check-specs
           ((load-input "fx26:check-specs.fx")

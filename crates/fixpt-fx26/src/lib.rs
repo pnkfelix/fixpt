@@ -364,6 +364,12 @@ pub const CHECK_READ_DESCS: &str = include_str!("check-read-descs.fx");
 /// `check-read-helpers.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_READ_HELPERS: &str = include_str!("check-read-helpers.fx");
 
+/// `check-flat-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const CHECK_FLAT_TYPES: &str = include_str!("check-flat-types.fx");
+
+/// `check-flat.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const CHECK_FLAT: &str = include_str!("check-flat.fx");
+
 /// `check-proving.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_PROVING: &str = include_str!("check-proving.fx");
 
@@ -438,6 +444,10 @@ pub const PARSER_TOP: &str = include_str!("parser-top.fx");
 /// Each expression's identity, numbered after the parse (`ids.rs` the
 /// Rust front end's alike). After [`PARSER_EXPS`], before [`PARSER_TOP`].
 pub const PARSER_IDS: &str = include_str!("parser-ids.fx");
+
+/// The parser's record of the files a program loads, its `include`s and its
+/// shared loads: loaded by [`PARSER`], which gives on what it defines.
+pub const PARSER_LOADS: &str = include_str!("parser-loads.fx");
 
 /// The parser's expressions, and its `load-module`
 /// (`docs/research/first-class-modules.md`, M7): the files a program names,
@@ -640,7 +650,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 172] = [
+pub const FRONT_END_MODULES: [(&str, &str); 175] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -689,6 +699,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 172] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser-types.fx", PARSER_TYPES),
     ("parser.fx", PARSER),
+    ("parser-loads.fx", PARSER_LOADS),
     ("parser-forms.fx", PARSER_FORMS),
     ("parser-exps.fx", PARSER_EXPS),
     ("parser-ids.fx", PARSER_IDS),
@@ -796,6 +807,8 @@ pub const FRONT_END_MODULES: [(&str, &str); 172] = [
     ("check-resolve.fx", CHECK_RESOLVE),
     ("check-generative.fx", CHECK_GENERATIVE),
     ("check-read-helpers-types.fx", CHECK_READ_HELPERS_TYPES),
+    ("check-flat-types.fx", CHECK_FLAT_TYPES),
+    ("check-flat.fx", CHECK_FLAT),
     ("check-read-descs.fx", CHECK_READ_DESCS),
     ("check-read-helpers.fx", CHECK_READ_HELPERS),
     ("check-proving.fx", CHECK_PROVING),

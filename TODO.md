@@ -4335,6 +4335,32 @@ a signature: every name of the module moved that another uses, typed. Not
 `regcode-core.fx` and `check-rules.fx`, one recursive group each by
 choice (§41, §68).
 
+**Repeated code (2026-10-31, the user's asking).** A second survey by
+script: each top-level definition of the front end with its own name and
+its parameters' renamed, the rest compared as text. 38 groups are the same
+definition twice or more, under different names; the most:
+
+- a part of a `k-parts` by its label, eight times (`k-variant-find`,
+  `k-part-find`, `k-made-part`, `k-staged-find`, `k-part-of`,
+  `k-part-of-types`, `k-comp-find`, `k-sc-part-ty`), and its position,
+  three (`k-ext-index`, `k-val-position`, `k-part-index`): all of one type,
+  so one each, in a module every checker file is given;
+- the native layouts' tables of what never collects and of operands, each
+  twice (`native-x64-regs-layout.fx`, `native-direct-x64-layout.fx`), as
+  generated: one table, generated once;
+- a dozen list walks of two or three lines (appending, `onto`, counting,
+  rebinding, `nth`), the same but for the type of what is in the list:
+  one each would want polymorphic lists the front end does not use now,
+  or, better, generic programming (the user's: polytypic programming,
+  scrap-your-boilerplate, macros), which would also take the walks of
+  types that differ only in what each does at a node (substitution,
+  free variables, polarity, printing).
+
+Not counted, as written another way: the same walk with its parameters in
+another order, or `cond` for `and`/`or` (`k-has-id?` in `check-types.fx`,
+`k-id-in?` in `check-print-parts.fx`: one membership of an id, twice; and
+`k-given-member?`, of a field of each).
+
 ## 189. Heap dumps for FX-26, for faster testing (the user's, 2026-10-31; urgent)
 
 Add heap dumping to FX-26: a running program's heap written to a file

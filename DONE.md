@@ -4323,3 +4323,12 @@ nothing else in it used and which used nothing else of it, are
 `eval-bloblets.fx`, a module of their own the conductor gives
 `eval-core.fx` (`eval-bloblets-sig`); `eval-prims.fx` 964 lines to 770.
 
+Then `parser.fx`'s record of the files a program loads (what a driver
+says it read, where an error in one is placed, each `include`'s names,
+the loads shared between files), which nothing else there used, into
+`parser-loads.fx`, a module file of the same regions that `parser.fx`
+loads and gives on by `import` (its users unchanged), 985 lines to 832;
+and `check-read-helpers.fx`'s flat data (flat types, layouts, views,
+blobrefs) into `check-flat.fx`, given to it by the conductor and given on
+(`check-flat-sig`, its 18 names its clients use), 1000 lines to 535.
+
