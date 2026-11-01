@@ -319,14 +319,38 @@
   (lambda (hay needle i)
     (and (<= (+ i (string-length needle)) (string-length hay))
          (or (k-text-at? hay needle i) (k-text-has? hay needle (+ i 1))))))
-;; Error `m` where `n`, declared `t`, is defined: saying so, and, if about `spin`, why.
+;; Where `needle` is in `hay`, from `i`, or -1.
+(define k-text-find (->* (string string int) int)
+  (lambda (hay needle i)
+    (cond ((> (+ i (string-length needle)) (string-length hay)) -1)
+          ((k-text-at? hay needle i) i)
+          (else (k-text-find hay needle (+ i 1))))))
+;; Where line `i` of `m` ends: its newline, or the end.
+(define k-line-end (->* (string int) int)
+  (lambda (m i)
+    (cond ((>= i (string-length m)) i)
+          ((char=? (string-ref m i) #\newline) i)
+          (else (k-line-end m (+ i 1))))))
+;; Whether error `m` is about `spin`: its effect beyond what is expected, if
+;; it says one, names it; else the message does (`check.rs`'s `about_spin`).
+(define k-about-spin? (->* (string) bool)
+  (lambda (m)
+    (let ((i (k-text-find m "beyond what is expected, it has " 0)))
+      (if (< i 0)
+          (k-text-has? m "spin" 0)
+          (k-text-has? (substring m i (k-line-end m i)) "spin" 0)))))
+;; Error `m` where `n`, declared `t`, is defined: saying so, and, if about
+;; `spin`, why, on the line it is about, before why control was not masked.
 (define k-declared-error (->* (string symbol int) string)
   (lambda (m n t)
     (let* ((why (k-why-of (get k-spin-why) n t))
-           (spins (and (not (string=? why "")) (k-text-has? m "spin" 0)))
+           (spins (and (not (string=? why "")) (k-about-spin? m)))
            (tail (if spins (string-append "; it may not end: " why) ""))
+           (at (k-text-find m (string-append k-newline "  " k-undelimited) 0))
            (declared (k-cat4 (k-quote (symbol->string n)) " is declared a " (k-show-ty t) ": ")))
-      (k-cat4 declared m tail ""))))
+      (if (< at 0)
+          (k-cat4 declared m tail "")
+          (k-cat4 declared (substring m 0 at) tail (substring m at (string-length m)))))))
 ;; `f`, checking what `n` is declared `t`; an error at `a`..`b` itself says
 ;; so, and, if it is about `spin` and `n`'s group may not end, why not.
 (define k-declaring (->* (k-thunk int int symbol int) k-te)

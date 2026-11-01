@@ -152,6 +152,19 @@ fn the_body_must_stay_within_the_tags_effect() {
 // ------------------------------------------------- composable continuations
 
 /// Captured and resumed inside its prompt: all the control is delimited.
+/// A handler declared without the control a resumed continuation leaves: the
+/// refusal says why its prompts did not mask it, and what would; and, the
+/// control not being `spin`, nothing about ending (`TODO.md` §211).
+#[test]
+fn control_not_masked_is_explained() {
+    let mut c = checker();
+    let err = rejects(&mut c, include_str!("programs/control/resume-undelimited.fx"));
+    let beyond = err.lines().find(|l| l.contains("beyond what is expected, it has")).unwrap_or_else(|| panic!("{err}"));
+    assert!(beyond.contains("(goto @ev)") && beyond.contains("(comefrom @ev)"), "{err}");
+    assert!(err.contains(fixpt_fx26::check::UNDELIMITED), "{err}");
+    assert!(!err.contains("it may not end"), "{err}");
+}
+
 #[test]
 fn a_continuation_resumed_inside_its_prompt_is_delimited() {
     let mut c = checker();

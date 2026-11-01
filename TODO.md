@@ -5049,6 +5049,11 @@ the way:
   `(f d …)` as an effect where `f` names a description function to one
   (`names_effect_fun`, `k-names-effect-fun?`). Tests:
   `higher-kinds/effect-family-given*.fx`.
-- **A better message would have saved Heist the trip**: where a prompt
-  does not delimit, the refusal could say why (a free variable whose type
-  names the region), and that the enclosing `letregion` masks the rest.
+- ~~**A better message would have saved Heist the trip**~~ (done
+  2026-11-01): where control is beyond what a procedure's type expects,
+  the refusal says when a `prompt` masks it and that a `letregion` making
+  the region does (`check::UNDELIMITED`, both checkers). And "it may not
+  end" is said only where the effect beyond what is expected is `spin`,
+  not wherever the types say `spin` (Heist's refusal said it of control).
+  **Left**: naming the prompt, and the free variable, that kept it from
+  delimiting.

@@ -1946,7 +1946,14 @@ impl Checker {
     pub(crate) fn effect_delta(&self, got: TyId, want: TyId) -> String {
         let (Some(g), Some(w)) = (self.latent_of(got), self.latent_of(want)) else { return String::new() };
         let beyond = Effect(g.0.into_iter().filter(|a| !Effect::atom(*a).within(&w)).collect());
-        if beyond.is_pure() { self.spec_delta(got, want).to_string() } else { format!("\n  beyond what is expected, it has {}", self.show_effect(&beyond)) }
+        if beyond.is_pure() {
+            return self.spec_delta(got, want).to_string();
+        }
+        // Control beyond it: what a `prompt` would have taken away, which it
+        // does only where it delimits (`docs/fx26.md`, "Control, typed").
+        let control = beyond.0.iter().any(|a| matches!(a, Atom::Goto(_) | Atom::Comefrom(_)));
+        let why = if control { format!("\n  {UNDELIMITED}") } else { String::new() };
+        format!("\n  beyond what is expected, it has {}{why}", self.show_effect(&beyond))
     }
 
     /// `eff` with what it does to data frozen in the heap taken out, since
@@ -2489,10 +2496,15 @@ impl Checker {
             return err;
         }
         let mut msg = format!("`{}` is declared a {}: {}", self.interner.name(n), self.show_ty(t), err.message);
-        if err.message.contains("spin")
+        if about_spin(&err.message)
             && let Some((_, why)) = self.spin_why.iter().rev().find(|(k, _)| *k == (n, t))
         {
-            msg.push_str(&format!("; it may not end: {why}"));
+            // On the line it is about: before why control was not masked.
+            let tail = format!("; it may not end: {why}");
+            match msg.find(&format!("\n  {UNDELIMITED}")) {
+                Some(i) => msg.insert_str(i, &tail),
+                None => msg.push_str(&tail),
+            }
         }
         FxError::at(err.span, msg)
     }
@@ -5137,6 +5149,23 @@ pub(crate) fn expected_and_found(message: &str) -> Option<(&str, &str, &str)> {
 pub fn region_escapes(form: &str, r: &str, t: &str) -> String {
     format!("the value of `{form} {r}` would outlive its region: its type is {t}")
 }
+
+/// Whether error `m` is about `spin`: its effect beyond what is expected, if
+/// it says one, names it; else the message does. (Types that say `spin` are
+/// not what it is about.)
+fn about_spin(m: &str) -> bool {
+    match m.find(BEYOND) {
+        Some(i) => m[i..].lines().next().unwrap_or("").contains("spin"),
+        None => m.contains("spin"),
+    }
+}
+
+/// How an error says what effect is beyond what is expected.
+const BEYOND: &str = "beyond what is expected, it has ";
+
+/// What a message adds where control is beyond what is expected (Heist's,
+/// `TODO.md` §211): why a `prompt` may not have taken it away.
+pub const UNDELIMITED: &str = "a `prompt` masks the control on its tag's region only where no free variable of its body names that region but the tag (a continuation resumed under it does); a `letregion` that makes the region masks it";
 
 /// What one whose body may capture a continuation is told.
 pub fn region_captured(form: &str, r: &str, eff: &str) -> String {

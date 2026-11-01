@@ -137,7 +137,20 @@
           (let ((beyond (k-uncovered (car g) (car w))))
             (if (null? beyond)
                 (k-spec-delta got want)
-                (k-cat3 k-newline "  beyond what is expected, it has " (k-show-effect beyond))))))))
+                (string-append
+                  (k-cat3 k-newline "  beyond what is expected, it has " (k-show-effect beyond))
+                  (if (k-has-control? beyond) (k-cat3 k-newline "  " k-undelimited) ""))))))))
+;; Whether `e` transfers control: what a `prompt` takes away where it
+;; delimits (`check.rs`'s `UNDELIMITED`, which says so).
+(define k-has-control? (->* (k-eff) bool)
+  (lambda (e)
+    (and (not (null? e))
+         (or (tagcase (car e) (a-goto (r) #t) (a-comefrom (r) #t) (else y #f))
+             (k-has-control? (cdr e))))))
+(define k-undelimited string
+  (string-append "a `prompt` masks the control on its tag's region only where no free variable "
+                 "of its body names that region but the tag (a continuation resumed under it "
+                 "does); a `letregion` that makes the region masks it"))
 ;; `got ≤ want`, or an error at `x` saying so.
 (define k-expect (->* (kx int int) unit)
   (lambda (x got want)

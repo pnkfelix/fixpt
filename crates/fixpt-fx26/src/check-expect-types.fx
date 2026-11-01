@@ -26,6 +26,10 @@
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 (define-type check-expect-sig
   (moduleof (val k-lambda? (subr (maxeff (read @globals) spin) (kx) bool))
+            ;; Why a `prompt` may not have masked control (`check.rs`'s
+            ;; `UNDELIMITED`), and the newline it follows.
+            (val k-newline string)
+            (val k-undelimited string)
             (val k-rewriting
                  (subr (maxeff (alloc @t)
                                (goto @z)
