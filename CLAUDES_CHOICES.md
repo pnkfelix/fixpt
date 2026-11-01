@@ -3168,3 +3168,20 @@ of `TODO.md` §141, working on my own.
   evaluator's `dump-heap!` fails as an I/O failure.
 - **The primitive last**: `%fx26-dump-heap` is registered after every
   other, so that the generated layouts number the others as before.
+
+## Knots through what a global holds (2026-10-31)
+
+- **At the type, as the store's rule is**: a procedure kept in what
+  global `g` holds (product and sum fields, unions, lists, pairs,
+  bloblets, refs, arrays, a module's values, a generative's
+  representation and arguments, through `poly`s; not what a procedure
+  takes or gives) that reads `(globals g)` says `spin`. A first definition
+  whose type permits the knot is refused whatever its value, as a ref's is.
+- **`@globals` on a redefinition only**: as for a procedure global itself,
+  the first definition's exemption kept (`docs/fx26.md`, "Globals as a
+  region"); the user would drop it, a question left open (`TODO.md` §200).
+- **A walk of its own, not `knot_in`'s**: `knot_in` assumes no procedure
+  is kept in globals' bindings and has no flag for a redefinition; the
+  walk for globals (`kept_reading`, `k-kept-reading`) also enters a
+  module's values, which `knot_in` does not.
+

@@ -158,8 +158,89 @@
                        (if (k-type-spins? t)
                            (each (cdr ms))
                            (begin (k-not-reaching form (symbol->string n) t ns redefining)
-                                  (each (cdr ms)))))))))
-      (each ns))))
+                                  (each (cdr ms))))))))
+             ;; What a global that is no procedure holds (`no_reaching_itself`).
+             (kept (subr (maxeff checks spin) (k-names) unit)
+               (lambda (ms)
+                 (if (null? ms)
+                     #u
+                     (let* ((n (car ms)) (t (k-lookup-raw n))
+                            (found (if (k-procedure? t) nil (k-kept-reading t ns redefining nil))))
+                       (if (null? found)
+                           (kept (cdr ms))
+                           (k-fail (k-kept-message (symbol->string n) (extract (car found) 2)
+                                                   (k-show-ty (extract (car found) 1)))
+                                   (k-top-start form) (k-top-end form))))))))
+      (begin (each ns) (kept ns)))))
+;; Whether `t` is a procedure, under any `poly`.
+(define k-procedure? (->* (int) bool)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-poly (bs body) (k-procedure? body))
+      (ty-subr (e ps r cv spc) #t)
+      (else y #f))))
+;; Why global `name`, keeping a procedure of type `t` that reads `read`,
+;; may reach itself.
+(define k-kept-message (->* (string string string) string)
+  (lambda (name read t)
+    (k-cat5 "`" name "` keeps a procedure that reads `" read
+            (string-append "`, so it could reach itself through a global: "
+                           (string-append "it must say `spin`, and it is a " t)))))
+;; What reaches itself through a global and says nothing of it.
+(define-type k-kept-found (listof (productof (1 int) (2 string)) acyclic))
+;; A procedure a value of type `t` keeps, kept in a global (a product's field,
+;; a list's element, a module's value, what a ref holds, …), whose calls read
+;; one of `ns`, or, if `any`, `@globals`, and that does not say `spin`: its
+;; type and what it reads; none or one. Not what a procedure takes or gives,
+;; kept nowhere yet. `path`, the types walked to here (`kept_reading`).
+(define-rec
+  (k-kept-reading (->* (int k-names bool k-ids) k-kept-found)
+    (lambda (t ns any path)
+      (let ((t (k-resolve t)))
+        (if (k-has-id? path t)
+            (the k-kept-found nil)
+            (let ((path (the k-ids (cons t path)))
+                  (one (lambda ((x int)) (the k-ids (cons x nil)))))
+              (tagcase (k-get t)
+                (ty-subr (e ps r cv spc) (k-kept-read t e ns any))
+                (ty-poly (bs body) (k-kept-reading body ns any path))
+                (ty-ref (a r) (k-kept-reading a ns any path))
+                (ty-array (a z r) (k-kept-reading a ns any path))
+                (ty-icell (a r) (k-kept-reading a ns any path))
+                (ty-markkey (a r) (k-kept-reading a ns any path))
+                (ty-nlist (a z r) (k-kept-reading a ns any path))
+                (ty-pair (a b r nl) (k-kept-in (the k-ids (cons a (one b))) ns any path))
+                (ty-bloblet (fs z r) (k-kept-in fs ns any path))
+                (ty-product (ps) (k-kept-in (k-parts-types ps) ns any path))
+                (ty-sum (ps) (k-kept-in (k-parts-types ps) ns any path))
+                (ty-union (ms) (k-kept-in ms ns any path))
+                (ty-module (abs ds vs) (k-kept-in (k-parts-types vs) ns any path))
+                (ty-named (g ds)
+                  (k-kept-in (the k-ids (cons (extract (k-gen-of g) 4) (k-desc-types ds)))
+                             ns any path))
+                (ty-app (f ds) (k-kept-in (k-desc-types ds) ns any path))
+                (else y (the k-kept-found nil))))))))
+  (k-kept-in (->* (k-ids k-names bool k-ids) k-kept-found)
+    (lambda (ts ns any path)
+      (if (null? ts)
+          (the k-kept-found nil)
+          (let ((x (k-kept-reading (car ts) ns any path)))
+            (if (null? x) (k-kept-in (cdr ts) ns any path) x))))))
+;; Procedure type `t`, of effect `e`, kept in a global: what of `ns` it reads,
+;; or `@globals`, if `any`, unless it says `spin`.
+(define k-kept-read (->* (int k-eff k-names bool) k-kept-found)
+  (lambda (t e ns any)
+    (if (k-has-spin? e)
+        (the k-kept-found nil)
+        (let* ((reads (k-atoms-globals e)) (m (k-first-read reads ns)))
+          (cond ((not (null? m)) (list (product (1 t) (2 (symbol->string (car m))))))
+                ((and any (k-has-region-in? reads (r-globals)))
+                 (list (product (1 t) (2 "@globals"))))
+                (else (the k-kept-found nil)))))))
+;; The types of parts `ps`, in order.
+(define k-parts-types (->* (k-parts) k-ids)
+  (lambda (ps)
+    (if (null? ps) nil (the k-ids (cons (extract (car ps) 2) (k-parts-types (cdr ps)))))))
 ;; Note that `form` runs, assigning the globals it defines (`assigns`) or
 ;; making them new.
 (define k-note-run (->* (top bool) unit)

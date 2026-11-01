@@ -4621,3 +4621,9 @@ index by the names each defines and uses; `k-users-of`,
 table of stacks a name, as `Bindings` is). Indexes kept as names are
 bound, not a namespace partitioned: a module global and a value shadow
 each other by name.
+
+## 201. Heist's request: `stage` on native machines (the user's, 2026-10-31)
+
+Heist's team reports `docs/requests/fixpt-stage-native.md` (in Heist's
+repository, `~/Dev/LangPlay/heist`; read it there, not changed). After
+the knot through what a global holds was closed (2026-10-31).

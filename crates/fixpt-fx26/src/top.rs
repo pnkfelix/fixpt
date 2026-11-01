@@ -355,7 +355,71 @@ impl Checker {
                 ));
             }
         }
+        // What a global holds, not being a procedure: a procedure kept in
+        // it (a product's field, say) that reads it is a knot tied by
+        // defining the global again to hold one that calls through it,
+        // which no read shows, as a procedure kept in a ref that reads the
+        // ref's region is (`no_knot`).
+        let names: Vec<Sym> = group.iter().map(|(n, _)| *n).collect();
+        for (n, t) in &group {
+            if !self.is_procedure(*t) {
+                if let Some((p, read)) = self.kept_reading(*t, &names, redefining, &mut Default::default()) {
+                    let name = self.interner.name(*n);
+                    return Err(FxError::at(
+                        span,
+                        format!("`{name}` keeps a procedure that reads `{read}`, so it could reach itself through a global: it must say `spin`, and it is a {}", self.show_ty(p)),
+                    ));
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// Whether `t` is a procedure, under any `poly`: what `no_reaching_itself`
+    /// checks itself, not what it keeps.
+    fn is_procedure(&self, t: TyId) -> bool {
+        let mut t = self.arena.resolve(t);
+        while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
+            t = self.arena.resolve(*body);
+        }
+        self.arena.get(t).as_subr().is_some()
+    }
+
+    /// A procedure a value of type `t` keeps, kept in a global (a product's
+    /// field, a list's element, a module's value, what a ref holds, …),
+    /// whose calls read one of `names`, or, if `any`, `@globals`, and that
+    /// does not say `spin`: its type and what it reads. Not what a procedure
+    /// takes or gives, which is kept nowhere yet.
+    fn kept_reading(&self, t: TyId, names: &[Sym], any: bool, seen: &mut crate::ast::TySet) -> Option<(TyId, String)> {
+        use crate::ast::{Atom, Ty};
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return None;
+        }
+        let each = |ts: Vec<TyId>, seen: &mut crate::ast::TySet| ts.into_iter().find_map(|x| self.kept_reading(x, names, any, seen));
+        match self.arena.get(t).clone() {
+            Ty::Subr { effect, .. } => {
+                if effect.contains(Atom::Spin) {
+                    return None;
+                }
+                // The first of `names` it reads, as `k-kept-read` finds it.
+                let read = names.iter().find(|g| effect.contains(Atom::Read(Region::Global(**g)))).map(|g| self.interner.name(*g).to_string());
+                read.or_else(|| (any && effect.contains(Atom::Read(Region::Globals))).then(|| "@globals".to_string())).map(|r| (t, r))
+            }
+            Ty::Poly { body, .. } => each(vec![body], seen),
+            Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) | Ty::NList { elem: a, .. } => each(vec![a], seen),
+            Ty::Pair(a, b, _, _) => each(vec![a, b], seen),
+            Ty::Bloblet { fields, .. } => each(fields, seen),
+            Ty::Product(ps) | Ty::Sum(ps) => each(ps.iter().map(|(_, x)| *x).collect(), seen),
+            Ty::Union(ms) => each(ms, seen),
+            Ty::Module { vals, .. } => each(vals.iter().map(|(_, x)| *x).collect(), seen),
+            Ty::Named { which, args } => {
+                let rep = self.generatives[which as usize].rep;
+                each(std::iter::once(rep).chain(args.iter().flat_map(|d| self.d_types(d))).collect(), seen)
+            }
+            Ty::App { args, .. } => each(args.iter().flat_map(|d| self.d_types(d)).collect(), seen),
+            _ => None,
+        }
     }
 
     /// The globals calling a value of type `t` reads: its latent effect's,

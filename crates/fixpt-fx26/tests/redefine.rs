@@ -86,6 +86,22 @@ fn a_knot_through_a_kept_procedure_is_refused() {
     assert!(out[2].contains("calling `f` reads `f`, so `f` may reach itself through a global"), "{out:?}");
 }
 
+/// Landin's knot through a global that holds a procedure without being one
+/// (a product's field, a module's value): refused where a procedure kept in
+/// the global may read it, unless it says `spin`.
+#[test]
+fn a_knot_through_a_procedure_a_global_holds_is_refused() {
+    let held = "keeps a procedure that reads";
+    let out = run(&mut session(), include_str!("programs/redefine/knot-held.fx"));
+    assert!(out[..3].iter().all(|o| !o.starts_with("error:")) && out[3].contains(&format!("`tbl` {held} `@globals`")), "{out:?}");
+    let out = run(&mut session(), include_str!("programs/redefine/knot-held-precise.fx"));
+    assert!(out[1].contains(&format!("`tbl` {held} `tbl`")), "{out:?}");
+    let out = run(&mut session(), include_str!("programs/redefine/knot-held-module.fx"));
+    assert!(out[1].contains(&format!("`m` {held} `m`")), "{out:?}");
+    let out = run(&mut session(), include_str!("programs/redefine/knot-held-spin.fx"));
+    assert!(out.iter().all(|o| !o.starts_with("error:")), "{out:?}");
+}
+
 /// Redefining a procedure over and over at the REPL, as reloading a file
 /// does, compiled to native code as `fixpt --machine
 /// fx-regs-rsjit-nativecc` runs it:
