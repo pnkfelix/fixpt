@@ -2133,6 +2133,12 @@ Size: about five times `native.fx`, and `direct.rs` is still moving
 (blobrefs, flat sums, raw `f64`s in §77's follow-ups), so a port is best
 started once it settles.
 
+Register code to arm64 is done (2026-10-31): `native-arm64-regs.fx`, the
+port of `cellular/regcode.rs` over `native.fx`'s assembler, every register
+word of the front end the same instructions as Rust's (CLAUDES_CHOICES.md
+"Register code compiled by FX-26 on arm64"), so `fx-regs-fxjit-cellcc`
+runs on arm64. Left: the native convention, `direct.rs`, above.
+
 ## 83. GADTs: constructors that refine their type's parameters (the user's, 2026-10-11)
 
 Planned in `docs/research/gadts.md` (stages N1–N6) and listed in
@@ -2686,7 +2692,9 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    convention. Register code is done (`native-x64-regs.fx`, CLAUDES_CHOICES.md
    "Register code compiled by FX-26 on x86_64"; every register word of the
    front end, about 4,000 of them, the same bytes as Rust's;
-   `fx-regs-fxjit-cellcc`). So is the native convention
+   `fx-regs-fxjit-cellcc`), and for arm64 too (`native-arm64-regs.fx`,
+   CLAUDES_CHOICES.md "Register code compiled by FX-26 on arm64"; 5,678
+   words, the same instructions as Rust's). So is the native convention
    (`native-direct-x64.fx` and the files beside it, CLAUDES_CHOICES.md
    "The native convention compiled by FX-26 on x86_64";
    `fx-regs-fxjit-nativecc`; every test program's procedures the same as
