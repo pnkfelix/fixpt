@@ -2391,13 +2391,18 @@ impl Checker {
     /// a closure makes no mutable data a type could be generalized over: it
     /// holds only variables bound outside.
     pub(crate) fn generalizable(&self, mut x: ExpId, eff: &Effect) -> bool {
-        if eff.is_pure() {
+        // A global read: the same whatever the binders, as the body is run
+        // once (a `plambda` is erased), so its value is every instance's;
+        // a global of a `poly` type given where one is wanted, say (Heist's,
+        // `TODO.md` §211, 5).
+        let reads_global = |a: &Atom| matches!(a, Atom::Read(Region::Global(_) | Region::Globals));
+        if eff.0.iter().all(reads_global) {
             return true;
         }
         loop {
             match self.arena.exp_at(x) {
                 Exp::PLambda { body, .. } | Exp::The { exp: body, .. } => x = *body,
-                Exp::RLambda { .. } => return eff.0.iter().all(|a| matches!(a, Atom::Alloc(_))),
+                Exp::RLambda { .. } => return eff.0.iter().all(|a| matches!(a, Atom::Alloc(_)) || reads_global(a)),
                 _ => return false,
             }
         }
@@ -4206,6 +4211,17 @@ impl Checker {
                 let params = params.iter().map(|p| self.subst_memo(*p, map, memo)).collect();
                 let result = self.subst_memo(result, map, memo);
                 Ty::Subr { conv, effect, params, result, spec }
+            }
+            // Its binders shadow the map's: a `poly` in an equi-recursive
+            // type, met again within itself, binds the same variables, and
+            // its body is not the instance's (Heist's, `TODO.md` §211, 4).
+            Ty::Poly { binders, body } if binders.iter().any(|(b, _)| map.contains_key(b)) => {
+                let inner: HashMap<DVar, D> = map.iter().filter(|(v, _)| !binders.iter().any(|(b, _)| b == *v)).map(|(v, d)| (*v, d.clone())).collect();
+                if inner.is_empty() {
+                    self.arena.set_link(slot, t);
+                    return slot;
+                }
+                Ty::Poly { binders, body: self.subst_memo(body, &inner, &mut Default::default()) }
             }
             Ty::Poly { binders, body } => Ty::Poly { binders, body: self.subst_memo(body, map, memo) },
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),

@@ -4491,3 +4491,15 @@ collects it, a copy and an image carry it, and the machine keeps nothing
 of a word. Register code 38 to 34 ms on fib 32; compiled cells' calls
 some 10% dearer (the entry's tag tested). The arm64 machine compiles
 nothing until it is ported.
+
+## 2026-11-01: four of Heist's R4 findings (§211, 2–5)
+
+From Heist's editor's `eval`: a `stage`'s or a session's effect may be a
+module's, named by a `with`, a module parameter or a `select` (it was
+read as a type); a session's steps name its module's types, effects and
+abstract types (they saw only its values; an abstract one's alias also
+panicked); a `poly` in an equi-recursive type keeps its own binders
+under a substitution (instantiated, it went into its own nested copy, and
+found a knot where there is none); and a global read is generalizable, so
+a global of a `poly` type is given where one is wanted (it was "a
+polymorphic value must be pure"). Each in both checkers, with tests.

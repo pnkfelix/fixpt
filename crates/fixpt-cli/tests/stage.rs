@@ -72,6 +72,33 @@ fn code_is_staged_or_refused() {
     }
 }
 
+/// A stage's and a session step's effect named: a `with`'s name, and a
+/// `select` of a module's effect, each the module's effect (Heist's,
+/// `TODO.md` §211, 2), held to as one written out is.
+#[test]
+fn a_stages_effect_may_be_a_modules() {
+    let want = "11\n12\nrefused: a (subr (maxeff (read @heap) spin) () int) is expected here, and this is a (subr (io stdout) () int)\n  beyond what is expected, it has (io stdout)\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "named-effect.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
+/// A session's steps name its module's types and effects (Heist's,
+/// `TODO.md` §211, 3): a type it describes, a description function, an
+/// effect, and a type it keeps abstract, which stays so.
+#[test]
+fn a_sessions_steps_name_its_modules_types() {
+    let want = "4\ndefined g\n7\n2\ndefined h\nrefused: a (subr pure () int) is expected here, and this is a (subr (maxeff (read @heap) spin) () int)\n  \
+                beyond what is expected, it has (maxeff (read @heap) spin)\n7\ndefined z\n7\nrefused: a stage-module..t is expected here, and this is a int\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "session-types.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
 /// What a stage binds, refused or made, is gone for the next, though the
 /// front end that checks them keeps the standard environment between
 /// them (`check-staged`).

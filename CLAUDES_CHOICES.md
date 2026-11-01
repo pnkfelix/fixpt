@@ -3497,3 +3497,29 @@ procedure, x86_64 now and arm64 later, its slots broken if need be.
   left to measure.
 - **arm64 compiles nothing meanwhile**, rather than install code its
   machine would jump to by a number: correct, slower, until it is ported.
+
+## Heist's R4 findings (2026-11-01; `TODO.md` §211, 2–5)
+
+- **`(maxeff E)` at the desugaring, not kinds at `proj`**: the stage
+  forms know their first description is an effect; a `proj` in general
+  does not, and both parsers would need a description of unknown kind
+  carried to the check. The desugaring fixes Heist's case in both
+  checkers alike; the general case is noted, with its way round.
+- **The seed defines the module's types as `import` does**, from the
+  module type's rep (`module_descs`), so that both session checkers get
+  the same names; and links them at once, as a module's aliases are
+  linked when it is bound.
+- **Shadowing in substitution, not a different representation**: the
+  binders of a `poly` met again within itself are the same variables;
+  dropping them from the map is ordinary capture-avoidance, and every
+  other `poly`'s binders are fresh, so nothing else changes.
+- **Global reads generalizable, not a variable special-cased**: comparing
+  a `poly` variable by subtyping lost instantiation (a `(poly ((r
+  region) (t type)) …)` given for a `(poly ((k type)) …)`; two tests).
+  The value restriction is there because a `plambda` is erased and its
+  body run once: an effect that depends on no binder is safe, and a
+  global read is one. Only reads: an allocation or a write depends on
+  when.
+- **The verifier's gap recorded, not fixed**: renaming a `poly` value's
+  binders to the generalization's broke a word that verified; the gap was
+  there for a local variable already.

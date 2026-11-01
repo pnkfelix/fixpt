@@ -31,7 +31,7 @@
         p-ok p-err sym-true sym-false sym-unit at-least vlambda-usage stage-usage parse-vparam
         region-form? confirm-length-k bloblet-form? syn-string? syn-string parse-params freeze-pair
         region-kind region-name-error one-let call-tmp standard-ref field-index bloblet-untagged?
-        arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol quoted
+        arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol mk-list quoted
         rec-names rec-types rec-inits module-usage loaded loaded-next-at in-loaded loaded-mark
         loaded-error loaded-params loaded-made
         (type syns-a exp top exp-list mod-item mod-items letrec-list let-list arm-list loaded-file)
@@ -275,11 +275,14 @@
         ;; E R text (p body …) (why else …))` is `(tagcase ((proj %stage E R)
         ;; m text) (ok p body …) (failed why else …))`, as `parse.rs`.
         ;; So is a session's: `(session-check s E R code (c …) (why …))` over
-        ;; `%session-check`. Each given `(given g …)`, the evidence, last.
+        ;; `%session-check`. Each given `(given g …)`, the evidence, last. `E`
+        ;; as `(maxeff E)`, read as an effect, so that a name a `with` or a
+        ;; module's parameter gives, or a `select`, is its effect, not a type.
         ((stage session-check)
          (begin (if (= (len items) 8) #u (arity items 7 stage-usage a b))
-                (stage-form (if (symbol=? head 'stage) '%stage '%session-check)
-                            (keep (list (nth items 2) (nth items 3))) items 4 a b)))
+                (let ((e (mk-list (list (mk-symbol "maxeff" a b) (nth items 2)) a b)))
+                  (stage-form (if (symbol=? head 'stage) '%stage '%session-check)
+                              (keep (list e (nth items 3))) items 4 a b))))
         ;; Evidence (`docs/research/eval.md`): `(reify-effect E (given g …))` is
         ;; `((proj %reify-effect E) (product (1 g) …))`, as `parse.rs`.
         ((reify-effect reify-region reify-type)

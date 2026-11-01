@@ -1604,8 +1604,12 @@ impl Checker {
                     return Err(FxError::at(span, usage));
                 };
                 let given = self.given(given, span, usage)?;
-                let descs = vec![e.clone(), r.clone()];
                 let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+                // `E` as `(maxeff E)`, read as an effect: a name a `with` or a
+                // module's parameter gives, or a `select`, is its effect, not
+                // a type (as `parser-exps.fx`).
+                let e = Syntax::list(e.span, vec![sym(self, "maxeff"), e.clone()]);
+                let descs = vec![e, r.clone()];
                 let arm = |p: &mut Self, tag: &str, a: &Syntax| -> R<Syntax> {
                     match a.as_proper_list() {
                         Some([name, body @ ..]) if name.as_symbol().is_some() && !body.is_empty() => {

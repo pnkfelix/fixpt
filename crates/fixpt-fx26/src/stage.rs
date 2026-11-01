@@ -344,6 +344,9 @@ pub(crate) fn sx_value(rt: &mut Runtime, x: &crate::sx::Sx) -> Value {
 pub(crate) struct StepReps {
     pub named: Vec<(String, Vec<u8>)>,
     pub values: Vec<String>,
+    /// And its types' and effects' names, each with whether it is an
+    /// effect, as written in text (`module_descs`).
+    pub descs: Vec<(String, bool)>,
 }
 
 /// The names a step's text gives its types (`StepReps`).
@@ -392,13 +395,44 @@ fn step_reps_of(bytes: &[u8]) -> Option<StepReps> {
     let e = child(r.args.get(1))?;
     let module = part(&rep, m, false).ok()?;
     let values = module_values(&module)?;
+    let descs = module_descs(&module);
     let enc = fixpt_reps::binary::encode;
     let named = vec![
         (MODULE_TYPE.to_string(), enc(&module)),
         (RESULT_TYPE.to_string(), enc(&part(&rep, result, false).ok()?)),
         (EFFECT.to_string(), enc(&part(&rep, e, true).ok()?)),
     ];
-    Some(StepReps { named, values })
+    Some(StepReps { named, values, descs })
+}
+
+/// The names of module type `module`'s abstract types and descriptions,
+/// from its rep (`moduleof`'s binders, and its `descs`, a label then a
+/// description each), each with whether it is an effect (a `dlambda` of an
+/// effect, `define-effect`'s), as written in text: for a session's steps to
+/// name, as staged code does through `with` (Heist's, `TODO.md` §211, 3).
+fn module_descs(module: &fixpt_reps::Rep) -> Vec<(String, bool)> {
+    let root = &module.nodes[module.root() as usize];
+    let mut out: Vec<(String, bool)> = root.binders.iter().map(|b| (fixpt_read::escape_symbol(module.name(*b)), false)).collect();
+    let node = |a: &fixpt_reps::Arg| match a {
+        fixpt_reps::Arg::Node(k) => Some(&module.nodes[*k as usize]),
+        _ => None,
+    };
+    let Some(descs) = root.args.iter().filter_map(node).find(|n| module.name(n.head) == "descs") else { return out };
+    for p in descs.args.chunks(2) {
+        let (fixpt_reps::Arg::Sym(s), Some(d)) = (p[0], p.get(1).and_then(node)) else { continue };
+        let effect = module.name(d.head) == "dlambda" && d.args.last().and_then(node).is_some_and(|b| module.name(b.head) == "d-effect");
+        out.push((fixpt_read::escape_symbol(module.name(s)), effect));
+    }
+    out
+}
+
+/// What defines, in a session's text, each of `descs`' names as the
+/// session's module's (`stage-module`'s): as an `import` of them would.
+pub(crate) fn desc_defines(descs: &[(String, bool)]) -> String {
+    descs
+        .iter()
+        .map(|(n, effect)| format!("({} {n} (select stage-module {n}))\n", if *effect { "define-effect" } else { "define-type" }))
+        .collect()
 }
 
 /// The names of module type `module`'s values, from its rep (`moduleof`'s

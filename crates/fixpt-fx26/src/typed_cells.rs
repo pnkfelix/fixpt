@@ -1053,11 +1053,15 @@ impl Verifier<'_> {
                 self.out.failed.push(format!("{at}: a `plambda` body ends that did not start"));
                 return Err(());
             };
-            // Pure, as the value restriction has it; or an `rlambda`'s
-            // closure, made by allocating only: it holds nothing mutable.
+            // Pure, as the value restriction has it, but for reading globals,
+            // the same whatever the binders (`Checker::generalizable`); or an
+            // `rlambda`'s closure, made by allocating only: it holds nothing
+            // mutable.
+            use crate::ast::{Atom, Region};
+            let reads_global = |a: &Atom| matches!(a, Atom::Read(Region::Global(_) | Region::Globals));
             let rlambda = s.stack.last().is_some_and(|v| self.region_closures.contains(&v.term))
-                && self.effect.0.iter().all(|a| matches!(a, crate::ast::Atom::Alloc(_)));
-            if !self.effect.0.is_empty() && !rlambda {
+                && self.effect.0.iter().all(|a| matches!(a, Atom::Alloc(_)) || reads_global(a));
+            if !self.effect.0.iter().all(reads_global) && !rlambda {
                 let msg = format!("{at}: a `plambda` body with effect {}", self.c.show_effect(&self.effect));
                 self.out.failed.push(msg);
                 return Err(());

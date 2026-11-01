@@ -48,10 +48,11 @@ const TRY: i64 = 2;
 
 thread_local! {
     /// The names a session's check's steps give its types, each a rep in its
-    /// binary form (`stage::step_reps`), and its module's values' names; for
-    /// the check, none outside it (`StepNamed`).
+    /// binary form (`stage::step_reps`), and its module's values' names and
+    /// its types' and effects'; for the check, none outside it
+    /// (`StepNamed`).
     static STEP_NAMED: std::cell::RefCell<Vec<(String, Vec<u8>)>> = const { std::cell::RefCell::new(Vec::new()) };
-    static STEP_VALUES: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+    static STEP_VALUES: std::cell::RefCell<Option<(Vec<String>, Vec<(String, bool)>)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The step names set for a check, unset as it ends.
@@ -60,7 +61,7 @@ struct StepNamed;
 impl StepNamed {
     fn set(reps: Option<crate::stage::StepReps>) -> StepNamed {
         let (named, values) = match reps {
-            Some(r) => (r.named, Some(r.values)),
+            Some(r) => (r.named, Some((r.values, r.descs))),
             None => (Vec::new(), None),
         };
         STEP_NAMED.with(|n| *n.borrow_mut() = named);
@@ -126,8 +127,9 @@ fn set_generation(rt: &mut Runtime, base: usize, g: i64) {
 /// The session at `base`'s front end, made at its first use: given the
 /// module, `stage-module` a global of the module itself; reading its
 /// globals not an effect of a step's code (each step's type says it reads
-/// the session); re-runs waiting; then `M`'s values each a global of its
-/// name, which the session's own may shadow.
+/// the session); re-runs waiting; then `M`'s types and effects each named
+/// as an `import` names them, and its values each a global of its name,
+/// which the session's own may shadow.
 ///
 /// On the evaluator (`evaluated`), nothing is compiled: the texts of `m`'s
 /// values' definitions are kept, for the evaluator to run before the next
@@ -154,9 +156,11 @@ fn front_end(rt: &mut Runtime, base: usize, evaluated: bool) -> Result<Result<Va
     if let Err(refused) = step(rt, base, &Wrapped::of(String::new(), &seed, "", &seed, 0), FIRST, "", false)? {
         return Ok(Err(refused));
     }
-    let names = STEP_VALUES.with(|v| v.borrow().clone()).unwrap_or_default();
+    let (names, descs) = STEP_VALUES.with(|v| v.borrow().clone()).unwrap_or_default();
     let defines: Vec<String> = names.iter().map(|n| format!("(define {n} (with stage-module {n}))\n")).collect();
-    let values: String = defines.concat();
+    // Its types and effects first, which make no code, for the evaluator
+    // to run none of them.
+    let values: String = crate::stage::desc_defines(&descs) + &defines.concat();
     if !values.is_empty() {
         let w = Wrapped::of(String::new(), &values, "", &values, 0);
         let made = if evaluated { step_checked(rt, base, &w)? } else { step(rt, base, &w, MORE, "", false)? };

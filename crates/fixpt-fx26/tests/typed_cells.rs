@@ -357,8 +357,12 @@ fn every_directory_surveyed() {
 /// control that the checker drops where nothing but its tag's variable
 /// reaches the tag (`given`); a global redefined at another type, which
 /// the certificate gives one type (`f` and `h`, and the program's own
-/// word).
+/// word); a variable of a `poly` type given where one is wanted, the
+/// checker instantiating it at the binders it generalizes over, which the
+/// verifier wraps in another `poly` instead (`go`; a local's as well, and a
+/// global's since `TODO.md` §211, 5, let one be read there).
 const KNOWN_GAPS: &[&str] = &[
+    "higher-kinds/poly-global-read.fx `go`",
     "native/raw-args.fx `given`",
     "redefine/knot-spin.fx `f`",
     "redefine/knot-spin.fx `h`",

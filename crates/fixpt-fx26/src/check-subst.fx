@@ -403,12 +403,35 @@
                   (table-set! memo t slot)
                   (let* ((g2 (k-subst-memo g m memo)) (ds2 (k-subst-descs ds m memo)))
                     (begin (k-set-link slot (k-applied-type (k-apply-fun g2 ds2) t)) slot)))))
-            (else y
-              (let ((slot (k-slot)))
-                (begin
-                  (table-set! memo t slot)
-                  (let ((id (k-ty-new (k-subst-node t m memo))))
-                    (begin (k-set-link slot id) slot))))))))))
+            ;; Its binders shadow the map's: a `poly` in an equi-recursive
+            ;; type, met again within itself, binds the same variables, and
+            ;; its body is not the instance's (Heist's, `TODO.md` §211, 4).
+            (ty-poly (bs body)
+              (if (k-shadows? m bs)
+                  (let ((inner (k-map-unbound m bs)))
+                    (if (null? inner) t (k-subst-made t inner (k-new-smemo))))
+                  (k-subst-made t m memo)))
+            (else y (k-subst-made t m memo)))))))
+;; Node `t` made again with `m` for its binders, its slot in `memo` first.
+(define k-subst-made (->* (int k-map k-smemo) int)
+  (lambda (t m memo)
+    (let ((slot (k-slot)))
+      (begin
+        (table-set! memo t slot)
+        (let ((id (k-ty-new (k-subst-node t m memo))))
+          (begin (k-set-link slot id) slot))))))
+;; Whether `m` binds a variable of binders `bs`.
+(define k-shadows? (->* (k-map k-binders) bool)
+  (lambda (m bs)
+    (cond ((null? bs) #f)
+          ((not (null? (k-map-find m (extract (car bs) 1)))) #t)
+          (else (k-shadows? m (cdr bs))))))
+;; Map `m` but for the variables of binders `bs`.
+(define k-map-unbound (->* (k-map k-binders) k-map)
+  (lambda (m bs)
+    (cond ((null? m) nil)
+          ((k-shadows? (cons (car m) nil) bs) (k-map-unbound (cdr m) bs))
+          (else (cons (car m) (k-map-unbound (cdr m) bs))))))
 ;; Node `t`, of a type other than a variable, with its parts substituted.
 (define k-subst-node (->* (int k-map k-smemo) k-ty)
   (lambda (t m memo)

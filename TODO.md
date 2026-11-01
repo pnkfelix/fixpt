@@ -4953,3 +4953,30 @@ what it found in Fixpt, to look at:
 Done when R4's own test passes: `(define (f x) (host-insert! x))` then `(f
 "hi")` in one environment, the host keeping `f` and calling it later, a
 refusal and a fault each a value.
+
+**2–5 done (2026-11-01)**, each with a test (`stage.rs`'s
+`a_stages_effect_may_be_a_modules` and `a_sessions_steps_name_its_modules_types`;
+`programs/higher-kinds/poly-in-itself.fx` and `poly-global-read.fx`):
+- 2: `stage`'s and `session-check`'s effect is read as `(maxeff E)`, an
+  effect, in both parsers: a `with`'s name, a module parameter's, and a
+  `select`, each the module's effect. **Left**: a `proj` of any other
+  `poly` whose effect binder is given such a name still reads it as a
+  type (`parse_d` cannot know the kind); `(maxeff e)` there is the way.
+- 3: a session's seed names its module's types, effects and abstract
+  types as an `import` would (`stage::module_descs`, from the rep), and
+  links them at once (`link_aliases`): linked first by a step's trial, an
+  abstract type's alias held a node the trial's end took back (a panic).
+  **Left**: a step that itself writes `(define-type x (select
+  stage-module t))` of an abstract `t` may meet the same, unlinked.
+- 4: a `poly`'s own binders shadow a substitution's (both checkers): in an
+  equi-recursive type the `poly` met again within itself binds the same
+  variables. The knot that was found where none is goes with it.
+- 5: an effect of only global reads is generalizable (both checkers, and
+  the typed-cells verifier): a `plambda` is erased, its body run once, and
+  a global's read is the same whatever the binders. So a global of a
+  `poly` type is given where one is wanted, and `(plambda ((r region))
+  (proj base r))` is a `poly`. **Left**: the verifier does not verify a
+  variable of a `poly` type generalized (a local's, before, as a global's
+  now): `KNOWN_GAPS`. And a procedure whose result type is a `poly`,
+  `(subr … () code)`, returning one is refused ("a (subr …) is expected
+  here, and this is a code"): not looked at.

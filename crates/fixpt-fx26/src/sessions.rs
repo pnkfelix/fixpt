@@ -195,6 +195,15 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
             Some(crate::ast::Ty::Module { vals, .. }) => vals.iter().map(|(n, _)| state.checker.interner.name(*n).to_string()).collect::<Vec<_>>(),
             _ => return Err("a session's module is not a module".to_string()),
         };
+        // Its types and effects, each named as an `import` names them; they
+        // make no code.
+        for d in reps.as_ref().map(|r| r.descs.clone()).unwrap_or_default() {
+            define(&mut state, &crate::stage::desc_defines(&[d]))?;
+        }
+        // Each linked now to what it names, as a module's aliases are when it
+        // is bound: else a step's trial would link one to an abstract type's
+        // node of its own, which the trial's end takes back.
+        state.checker.link_aliases(module);
         let mut made = Vec::new();
         for n in vals {
             let n = fixpt_read::escape_symbol(&n);
