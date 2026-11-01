@@ -72,6 +72,20 @@ fn code_is_staged_or_refused() {
     }
 }
 
+/// What a stage binds, refused or made, is gone for the next, though the
+/// front end that checks them keeps the standard environment between
+/// them (`check-staged`).
+#[test]
+fn a_stage_leaves_nothing_bound_for_the_next() {
+    let want = "refused: a int is expected here, and this is a string\nrefused: unbound variable `y`\n3\nrefused: unbound variable `y`\n\
+                refused: a int is expected here, and this is a (moduleof (val x int) (val bump (subr pure (int) int)))\n42\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "kept.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
 /// A process stages code while another runs, at tiny time slices: the
 /// checker is not the program, and no poll in it switches to the program's
 /// tasks (`TODO.md` §187: on native code, it ran them on a machine that

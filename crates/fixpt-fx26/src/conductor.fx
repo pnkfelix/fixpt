@@ -431,15 +431,20 @@
                       ((with check-print-parts check-conv-native!) native)
                       ((with compile compile-conv-native!) native)
                       ((with regcode-entry compile-registers!) registers)
-                      (tagcase ((with check-program check-staged-program) standard tops rep)
-                        (k-err (m a b) (fail (sum refused #u) m (clamp a k len) (clamp b k len)))
-                        (k-done (t) (fail (sum refused #u) "not an expression" 0 len))
-                        (k-ok (ls)
-                          (tagcase ((with compile-programs compile-checked)
-                                    ((with check-program checked-tops))
-                                    ((with check-env checked-extracts)))
-                            (c-ok (w) (sum made w))
-                            (c-err (m) (fail (sum refused #u) m 0 len)))))))))
+                      (let ((out
+                             (tagcase ((with check-program check-staged) standard tops rep)
+                               (k-err (m a b)
+                                 (fail (sum refused #u) m (clamp a k len) (clamp b k len)))
+                               (k-done (t) (fail (sum refused #u) "not an expression" 0 len))
+                               (k-ok (ls)
+                                 (tagcase ((with compile-programs compile-checked)
+                                           ((with check-program checked-tops))
+                                           ((with check-env checked-extracts)))
+                                   (c-ok (w) (sum made w))
+                                   (c-err (m) (fail (sum refused #u) m 0 len)))))))
+                        ;; The stage's bindings undone, the standard
+                        ;; environment kept for the next (`check-staged`).
+                        (begin ((with check-program check-staged-undo!)) out))))))
             ;; The code wrapped (`stage.rs`'s `wrapped`), `whole`, the code
             ;; `len` characters at `k` of it; and the type it is checked as,
             ;; as a rep, which `whole` names `%stage-type`, if not empty

@@ -235,19 +235,33 @@ Measured, release build, warm:
 | s7st: its prelude, 64 KB of code | 97 ms | 91 ms |
 | `'1` against a module of one procedure | 3.0 ms | 3.0 ms |
 
-What is left of a stage is the standard environment entered again
-(`k-standard`, each stage a fresh check) and the code's own checking and
-compiling: 3 ms of floor. (Heist's 49 ms was against s7st's runtime
-before it sealed its value type; 8 ms sealed, with their Fixpt.)
+What was left of a stage was the standard environment entered again
+(`k-standard`, each stage a fresh check), 3 ms of floor. Now the stage's
+front end enters it once and keeps it (`check-staged`): each stage is
+checked as `check-more` checks a form, compiled, and what it bound undone
+(`check-staged-undo!`), as `check-try` undoes a try's; the types a stage
+makes stay in the store, so once the stages have made it four times what
+the standard environment made, the next stage enters it again. (Run with
+that at one, every stage entering it again, the stage tests pass; 3000
+stages of `'1` never reach four.)
+
+| | text | rep | rep, the standard kept |
+| --- | --- | --- | --- |
+| `'1` against the large module | 250 ms | 3.9 ms | 1.6 ms |
+| s7st, `(define x 1)` | 12.3 ms | 5.7 ms | 1.15 ms |
+| s7st, a batch of 9 KB | 22 ms | 14.8 ms | 12 ms |
+| `'1` against a module of one procedure | 3.0 ms | 3.0 ms | 0.16 ms |
+
+(Heist's 49 ms was against s7st's runtime before it sealed its value
+type; 8 ms sealed, with their Fixpt.)
 
 Found on the way: `fixpt-reps`'s heap form read a bloblet's field 1, the
 trailer, for its first value (the values start at field 2), untested till
 now (a test added); the same off-by-one as `stage_native_fx`'s (§201).
 
 Left of step 3: evidence by rep (holes filled by a graph substitution,
-`reify-*` making reps), generative types' stable keys, the Rust checker's
-stage paths, and a stage front end that keeps the standard environment
-between stages (the 3 ms).
+`reify-*` making reps), generative types' stable keys, and the Rust
+checker's stage paths.
 
 ## Decided (the user's, 2026-11-01)
 

@@ -3255,3 +3255,15 @@ of `TODO.md` §141, working on my own.
   field `n` is the instruction set's numbering; changing it changes every
   machine.
 
+## The standard environment kept between stages (2026-11-01)
+
+- **A try's undoing, not a snapshot**: each stage checked as `check-more`
+  checks a form and undone as `check-try` undoes one (bindings to a mark,
+  the definitions, breaks, runs, last uses, the description scope); the
+  compile comes between, while the stage's bindings stand.
+- **The store of types not rolled back**: its interned types and memos
+  would point past a mark. Instead a bound: entered again once the stages
+  have made it four times what the standard environment made, so a
+  program that stages for ever stays bounded, and the cost is a stage in
+  many paying the old 3 ms.
+

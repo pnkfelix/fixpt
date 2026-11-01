@@ -4660,9 +4660,10 @@ the knot through what a global holds was closed (2026-10-31).
 (5) in part (2026-11-01, `docs/research/heap-types.md`, step 3's first
 part): a stage's type kept as a rep at its call site and imported, not
 printed and read: `'1` against a module of 60 alternatives and 40
-procedures 250 to 3.9 ms; s7st's `(define x 1)` 12.3 to 5.7 ms. Left of
-it: the text where evidence is given (holes by rep), the standard
-environment entered again each stage (3 ms).
+procedures 250 to 3.9 ms; s7st's `(define x 1)` 12.3 to 5.7 ms. And the
+standard environment kept between stages (`check-staged`): 1.6 ms and
+1.15 ms; a stage of `'1` against a small module 3 to 0.16 ms. Left of it:
+the text where evidence is given (holes by rep).
 
 Left: staged code on the register-code machines of the cellular
 convention (`fx-regs-*-cellcc`), which runs as cellular words (649 ms
@@ -4759,3 +4760,22 @@ cells by `GLOBAL_VALUE`, code bloblets' `CODE_SELF`, new), the rest
 marked. Left: the FX-26 side, where the compilers make a product's field
 `n` the machine's field `n + 1` (`%bloblet-ref`, `field`), a numbering
 of the instruction set's, not of the heap's API.
+
+## 206. Staging against a module whose type names a program's generative type (found 2026-11-01)
+
+`(define-generative id int)`, a module whose procedures take and give an
+`id`, and `(stage rt … '(get (make 41)) …)`: refused on both checkers'
+paths, "`id` is not a type", since the stage is checked in the standard
+environment alone, where the program's generative types are not; the rep
+path declines a type with a constant and falls back to that text. To
+stage against such a module, a rep must carry each generative type it
+names, as the design says ("A type constant … with the representation too
+for a generative type", `docs/research/heap-types.md`): its name, its
+parameters and their variances, its representation (the checker sees
+through it for shapes and a native convention's registers, so an opaque
+one would not do); and the stage's checker must make it, once, under the
+key the program's checker gave it, so that every stage against the module
+takes it as the same type. A rep format change (`fixpt-reps`'s `Const`),
+the export (`rp-ty`'s `ty-named`) and the import (`ri-gen-names`,
+`rep-nodes`). The standard generative types (`vsubr`) need none of it:
+both checkers enter them alike, under the same keys.

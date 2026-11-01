@@ -488,9 +488,7 @@
       (begin (k-reset) (set k-broken-began (get k-broken)) (set k-syscall-expanding 0)
              (k-standard standard)
              (set k-std-dscope (get k-dscope))
-             (if (= (bytevector-length rep) 0)
-                 #u
-                 (k-push-desc '%stage-type (ds-rec ((with check-reps k-rep-ty) rep nil))))
+             (k-stage-type! rep)
              (k-ahead forms)
              (k-ok (k-forms forms (k-types-again forms))))
       (lambda (r) r))))
@@ -500,7 +498,11 @@
 ;; `check-program` began. The facts for the compiler are only the new
 ;; forms', whose positions are in their own text.
 (define check-more (->* (k-tops) k-result)
-  (lambda (forms)
+  (lambda (forms) (check-more-with forms (the (bytevectorof @t) (make-bytevector 0 0)))))
+;; The same, the name `%stage-type` first the type of rep `rep` imported
+;; (`k-rep-ty`), if not empty: as `check-staged-program` binds it.
+(define check-more-with (->* (k-tops (bytevectorof @t)) k-result)
+  (lambda (forms rep)
     (prompt k-tag
       (begin (set k-extracts nil)
              (set k-syscall-expanding 0)
@@ -509,9 +511,16 @@
              (k-forget-withs)
              (set k-reshapes nil)
              (set k-runs nil)
+             (k-stage-type! rep)
              (k-ahead forms)
              (k-ok (k-forms forms nil)))
       (lambda (r) r))))
+;; `%stage-type` bound to rep `rep` imported, if it is not empty.
+(define k-stage-type! (->* ((bytevectorof @t)) unit)
+  (lambda (rep)
+    (if (= (bytevector-length rep) 0)
+        #u
+        (k-push-desc '%stage-type (ds-rec ((with check-reps k-rep-ty) rep nil))))))
 
 ;; For a driver (a session's pending definition, `sessions26.rs`): `forms`
 ;; checked as `check-more` checks them, and the type global `n` then has,
@@ -529,6 +538,38 @@
       (begin (k-unbind-to mark) (set k-defs defs) (set k-broken broken) (set k-runs runs)
              (set k-last-uses uses) (set k-defer-reruns deferring)
              (product (1 r) (2 t))))))
+
+;; `stage`'s (`stage.rs`; `docs/research/heap-types.md`, step 3): the
+;; standard environment entered once, by the first stage, and kept; each
+;; stage's forms checked as `check-more-with` checks them, then, once
+;; compiled, what they bound undone (`check-staged-undo!`), as `check-try`
+;; undoes a try's. The types a stage makes stay in the store, so once the
+;; stages have made it `k-stage-growth` times what the standard environment
+;; made, the next stage enters it again: the store stays bounded.
+(define k-stage-base (ref int @t) (new 0))
+(define k-stage-growth int 4)
+(define k-stage-mark (ref int @t) (new 0))
+(define k-stage-defs (ref (listof k-def acyclic) @t) (new nil))
+(define k-stage-broken (ref (listof k-break acyclic) @t) (new nil))
+(define k-stage-uses (ref k-names @t) (new nil))
+(define k-stage-dscope (ref k-scope @t) (new nil))
+(define check-staged (->* (syns-a k-tops (bytevectorof @t)) k-result)
+  (lambda (standard forms rep)
+    (begin
+      (if (and (> (get k-stage-base) 0) (< (get k-ntys) (* k-stage-growth (get k-stage-base))))
+          #u
+          (begin (check-staged-program standard nil (the (bytevectorof @t) (make-bytevector 0 0)))
+                 (set k-stage-base (get k-ntys))))
+      (set k-stage-mark (k-mark)) (set k-stage-defs (get k-defs))
+      (set k-stage-broken (get k-broken)) (set k-stage-uses (get k-last-uses))
+      (set k-stage-dscope (get k-dscope))
+      (check-more-with forms rep))))
+;; What the stage `check-staged` checked last bound, undone.
+(define check-staged-undo! (->* () unit)
+  (lambda ()
+    (begin (k-unbind-to (get k-stage-mark)) (set k-defs (get k-stage-defs))
+           (set k-broken (get k-stage-broken)) (set k-runs nil)
+           (set k-last-uses (get k-stage-uses)) (set k-dscope (get k-stage-dscope)))))
 
 ;; For a driver (a session on the evaluator, `sessions26.rs`): what the
 ;; last check runs (`checked-tops`), each by the first name it defines
