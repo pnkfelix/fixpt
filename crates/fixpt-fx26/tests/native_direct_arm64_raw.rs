@@ -12,10 +12,7 @@ mod harness;
 
 use harness::{ints, Case, Wrapper, A};
 
-const MODULES: &str = "(define arm64 (load-input \"fx26:arm64.fx\"))\n\
-     (define dl (load-module \"fx26:native-direct-arm64-layout.fx\"))\n\
-     (define asm ((load-input \"fx26:native-direct-arm64-asm.fx\") arm64 dl))\n\
-     (define raw ((load-input \"fx26:native-direct-arm64-raw.fx\") arm64 dl asm))\n";
+const MODULES: &str = include_str!("native-direct-arm64/raw-modules.fx");
 
 const WRAPPERS: &[Wrapper] = &[
     ("box-reg", &[("r", "int"), ("s", "bool")], 0, "(adr-box-reg r s)"),

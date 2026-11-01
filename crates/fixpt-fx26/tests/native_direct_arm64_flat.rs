@@ -10,10 +10,7 @@ mod harness;
 
 use harness::{Case, Wrapper, A};
 
-const MODULES: &str = "(define arm64 (load-input \"fx26:arm64.fx\"))\n\
-     (define dl (load-module \"fx26:native-direct-arm64-layout.fx\"))\n\
-     (define asm ((load-input \"fx26:native-direct-arm64-asm.fx\") arm64 dl))\n\
-     (define flat ((load-input \"fx26:native-direct-arm64-flat.fx\") arm64 dl asm))\n";
+const MODULES: &str = include_str!("native-direct-arm64/flat-modules.fx");
 
 /// Each piece given `slow` (`l0`) and `done` (`l1`), as the oracle's are.
 const WRAPPERS: &[Wrapper] = &[
@@ -39,13 +36,7 @@ const WRAPPERS: &[Wrapper] = &[
 ];
 
 /// `shape-fast`, which answers whether it knew the shape (`pre`).
-const EXTRA: &str = "
-(define t-shape-fast (subr {EFF} (string) (listof int @k))
-  (lambda (name)
-    (begin (ada-reset 10)
-      (let* ((l0 (ada-label)) (known (adf-shape-fast name l0)))
-        (t-out (cons (t-bit known) nil) (cons l0 nil))))))
-";
+const EXTRA: &str = include_str!("native-direct-arm64/flat-extra.fx");
 
 const PIECES: [&str; 20] = [
     "flat-count",

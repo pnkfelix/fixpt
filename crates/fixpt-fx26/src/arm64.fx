@@ -221,8 +221,8 @@
 (define arm-and-bits arm-op4
   (lambda (d n lsb width)
     (arm-check (and (>= lsb 0) (>= width 1) (<= (+ lsb width) 64) (< width 64))
-               (arm-n-t #x92400000 (arm-sum (arm-f (modulo (- 64 lsb) 64) 16) (arm-f (- width 1) 10))
-                        n d))))
+               (arm-n-t #x92400000
+                        (arm-sum (arm-f (modulo (- 64 lsb) 64) 16) (arm-f (- width 1) 10)) n d))))
 (define arm-lsl-imm arm-op3
   (lambda (d n s)
     (arm-check (arm-in? s 0 64)
@@ -243,6 +243,7 @@
 (define arm-card-mark
   (subr (maxeff (alloc @k) (read @globals) spin) (int int int int int int) arm-code)
   (lambda (obj off state cards t1 t2)
+    ;; cons-chain: in `@k`, the caller's region, which `list` would not be
     (cons (if (< off 0) (arm-sub-imm t1 obj (- 0 off)) (arm-add-imm t1 obj off))
           (cons (arm-lsr-imm t1 t1 9)
                 (cons (arm-ldr t2 state cards)

@@ -150,4 +150,5 @@
             (val arm-fmov-to-s arm-op2)
             (val arm-fmov-from-s arm-op2)
             (val arm-card-mark
-                 (subr (maxeff (alloc @k) (read @globals) spin) (int int int int int int) arm-code))))
+                 (subr (maxeff (alloc @k) (read @globals) spin) (int int int int int int)
+                       arm-code))))

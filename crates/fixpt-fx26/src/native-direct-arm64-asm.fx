@@ -172,7 +172,8 @@
   (lambda ()
     (string-append "its code, "
                    (string-append (int->string (get ada-len))
-                                  " instructions, is too long for a branch or load to reach across"))))
+                                  (string-append " instructions, is too long for a branch"
+                                                 " or load to reach across")))))
 ;; The first fixup of `fs` (oldest first) out of reach or to no place, said.
 (define ada-reach (subr da-assembles (da-pairs) unit)
   (lambda (fs)
@@ -364,7 +365,8 @@
       (ada-mov 0 d-st)
       (if (< n d-own-callouts)
           (ada-imm 1 n)
-          (begin (set ada-callout-loads (cons (product (1 (get ada-len)) (2 n)) (get ada-callout-loads)))
+          (begin (set ada-callout-loads
+                      (cons (product (1 (get ada-len)) (2 n)) (get ada-callout-loads)))
                  (ada-e arm-nop)
                  (ada-e (arm-lsr-imm 1 1 d-callout-shift))))
       (ada-ld d-x16 d-st d-st-callout)
@@ -428,7 +430,8 @@
                  (lambda (rs j)
                    (if (null? rs)
                        #u
-                       (begin (ada-sto (car rs) d-st (+ d-st-args (* 8 j))) (put (cdr rs) (+ j 1)))))))
+                       (begin (ada-sto (car rs) d-st (+ d-st-args (* 8 j)))
+                              (put (cdr rs) (+ j 1)))))))
         (begin
           (put args 0)
           (ada-kept-pairs #f)
@@ -477,4 +480,16 @@
           (ada-sto d-fuel d-st d-st-fuel)
           (ada-leave)
           (ada-finish))))))
+
+;; The labels a branch so far goes to (`a.fixups`' labels), by label.
+(define ada-targets (subr da-assembles () da-bools)
+  (lambda ()
+    (let ((to (the da-bools (make-array (+ 1 (get ada-nlabels)) #f))))
+      (letrec ((mark (subr da-assembles (da-pairs) unit)
+                 (lambda (fs)
+                   (if (null? fs)
+                       #u
+                       (begin (array-set! to (ada-fix-label (extract (car fs) 2)) #t)
+                              (mark (cdr fs)))))))
+        (begin (mark (get ada-fixups)) to)))))
 )))

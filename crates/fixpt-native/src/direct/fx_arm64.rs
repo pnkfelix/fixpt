@@ -61,9 +61,10 @@ fn layout() -> (String, String) {
 /// know.
 #[doc(hidden)]
 pub fn oracle(name: &str, args: &[i64]) -> Option<(Vec<u8>, Vec<i64>)> {
-    oracle_asm::oracle(name, args).or_else(|| oracle_raw::oracle(name, args)).or_else(|| oracle_flat::oracle(name, args))
+    oracle_asm::oracle(name, args).or_else(|| oracle_raw::oracle(name, args)).or_else(|| oracle_flat::oracle(name, args)).or_else(|| oracle_prims::oracle(name, args))
 }
 
 mod oracle_asm;
 mod oracle_flat;
+mod oracle_prims;
 mod oracle_raw;
