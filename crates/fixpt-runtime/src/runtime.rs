@@ -76,6 +76,13 @@ pub struct Runtime {
     /// How sessions' primitives (`%fx26-session-…`) do what needs a
     /// checker (`fixpt-fx26` installs it): by the operation's name.
     pub sessions: Option<Sessions>,
+    /// How the procedure staged code makes is compiled as the program's
+    /// own procedures are, where they are native code (`stage`, Heist's
+    /// request, `TODO.md` §201; the CLI installs it, by the machine's
+    /// native compiler, Rust's or FX-26's): a native closure, or why not,
+    /// when it stays cellular. None: staged code runs as the cellular code
+    /// it is compiled to, as the program's does.
+    pub stage_native: Option<StageNative>,
     /// How `%fx26-dump-heap` dumps the heap to a file, with the procedure a
     /// resumed run starts at (`TODO.md` §189; `fixpt-fx26` installs it,
     /// where its front end is native code). None: it says it cannot.
@@ -133,6 +140,9 @@ pub type StageCheck = fn(&mut Runtime, &str, &str, &str, &str, &crate::evidence:
 /// A session's operation, by name, on its arguments: what the primitive
 /// gives, or why it could not try, which the program sees as a refusal.
 pub type Sessions = fn(&mut Runtime, &str, &[Value]) -> Result<Value, String>;
+
+/// See [`Runtime::stage_native`]: the cellular closure, compiled.
+pub type StageNative = fn(&mut Runtime, Value) -> Result<Value, String>;
 
 /// See [`Runtime::dump_heap`]: the file's path, and the start.
 pub type DumpHeap = fn(&mut Runtime, &str, Value) -> Result<(), String>;
@@ -214,6 +224,7 @@ impl Runtime {
             stage_check: None,
             sessions: None,
             dump_heap: None,
+            stage_native: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,
@@ -309,6 +320,7 @@ impl Runtime {
             stage_check: None,
             sessions: None,
             dump_heap: None,
+            stage_native: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,

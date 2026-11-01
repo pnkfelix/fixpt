@@ -458,6 +458,11 @@ pub struct Checker {
     /// what `print_for_fasl` starts from, each abstract type of a module a
     /// global holds named, made once rather than at each type printed.
     pub(crate) fasl_selects: std::cell::RefCell<Option<HashMap<DVar, String>>>,
+    /// While a module type's components are printed: each of its abstract
+    /// types by its label, as its binder says, not the variable's own name
+    /// (`m..t`, once a variable's module is opened), so that the type reads
+    /// back (`stage`'s, `TODO.md` §201; `k-var-shown`, the FX-26 checker's).
+    pub(crate) print_abs: std::cell::RefCell<HashMap<DVar, String>>,
     /// A digest of `fasl_selects`, while it is set: what the digests made
     /// under it (`fasl_digests`) are kept by, with their types.
     pub(crate) fasl_selects_key: std::cell::Cell<u64>,
@@ -1022,6 +1027,7 @@ impl Checker {
             print_expanded: std::cell::Cell::new(false),
             print_for_fasl: std::cell::RefCell::new(None),
             fasl_selects: std::cell::RefCell::new(None),
+            print_abs: std::cell::RefCell::new(HashMap::new()),
             fasl_selects_key: std::cell::Cell::new(0),
             fasl_digests: std::cell::RefCell::new(HashMap::new()),
             print_canon: std::cell::RefCell::new(None),

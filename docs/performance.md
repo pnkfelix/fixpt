@@ -3027,3 +3027,22 @@ Heist's `region-alloc.fx`, 10 million of each (ms), on
 The same on `fx-regs-fxjit-nativecc`. Its `@sc` is a region variable, not
 a place: what it measures is the heap's two, which is what s7st uses too.
 arm64's back end (`direct.rs`) is not done: nothing here runs arm64 code.
+
+## A closure of many free values (2026-10-31, Heist's)
+
+Heist's s7st found closures made slowly (`docs/requests/fixpt-stage-native.md`
+in Heist's repository): each constant its lowered code named was a free
+value of its own, and R7RS's `lazy` test made 16 closures an element. On
+the default machine (x86_64), a procedure making a closure of 10⁶ steps:
+
+| free values | per closure |
+| ----------: | ----------: |
+|         5–7 |  8.5–11 ns  |
+|        8, 9 |    1.5 µs   |
+
+Up to 7, the closure is made inline (from REG1…REGn, `n <= 8` in
+`direct/x64.rs`). From 8, the procedure making it has no register code
+(register code takes at most 8 operands, the code with the free values),
+so it runs as cellular code, called through an adapter: some 150 times
+slower. Heist reported the step at 7; it is at 8 here. Pass one table of
+the values rather than many; or, to do, more operands in register code.

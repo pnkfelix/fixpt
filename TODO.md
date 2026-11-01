@@ -4625,3 +4625,34 @@ each other by name.
 Heist's team reports `docs/requests/fixpt-stage-native.md` (in Heist's
 repository, `~/Dev/LangPlay/heist`; read it there, not changed). After
 the knot through what a global holds was closed (2026-10-31).
+
+**(1)–(4) done (2026-10-31)**, Heist's F8 taken upstream and made safe:
+
+- (1) Staged code compiled as the program's procedures are, where those
+  are native code (`Runtime::stage_native`, the CLI's: Rust's compiler,
+  or, on `fx-regs-fxjit-nativecc`, FX-26's, driven on the runtime alone,
+  `stage_native_fx`). Heist's 10⁷-step loop staged: 1423 to 55 ms on the
+  default machine, 1445 to 54 ms on `fx-regs-fxjit-nativecc`, as the
+  program's own (55, 63).
+- (2) Tail calls between them: a staged loop of 10⁶ steps through the
+  program's `apply1` runs on every machine (`tail-across.fx`; at HEAD a
+  stack overflow on the native ones).
+- (3) Compiling while native code runs, without aliasing: what a compile
+  changes (its call-outs, the slot facts) is the compiler's
+  (`direct::Compiler`, `with_compiler`), apart from the machine, whose
+  own call-outs' table is made once and never moved; each FX-26 compile
+  keeps its own call-outs (`FxCompile`), so that one made between its
+  steps neither sees nor truncates them; the FX-26 driver's steps free
+  functions (`fx_begin`, …), needing no machine.
+- (4) A sealed module: its abstract types printed, within the module
+  type, by their labels, as their binders say, in both printers
+  (`k-var-shown`, `print_abs`), so that the type reads back; the Rust
+  checker had the same flaw, unseen (`modules/nested.fx`'s type).
+
+Left: (5), a stage of a module's type printed and checked again each
+time; and staged code on the register-code machines of the cellular
+convention (`fx-regs-*-cellcc`), which runs as cellular words (649 ms
+against the program's 55: the program's words' register code is not the
+staged words'), as it did before; and Heist's note on closures of many
+free values, measured and noted (`docs/performance.md`: the step is at 8
+here, where the procedure making one has no register code).

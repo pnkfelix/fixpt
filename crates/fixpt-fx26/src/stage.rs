@@ -198,7 +198,21 @@ fn made(rt: &mut Runtime, w: &Wrapped, base: usize, args: usize) -> Result<Resul
         Err(refused) => return Ok(Err(refused)),
     };
     let run = rt.run_word.ok_or("no cellular machine is installed")?;
-    let maker = run(rt, word, &[])?;
+    let mut maker = run(rt, word, &[])?;
+    // Compiled as the program's own procedures are, where they are native
+    // code (`Runtime::stage_native`), so that it runs as fast and calls
+    // between it and the program's code are native calls, in tail position
+    // too (Heist's request, `TODO.md` §201); what the compiler declines
+    // stays cellular, called through an adapter.
+    if let Some(compile) = rt.stage_native {
+        let at = rt.heap.push_root(maker);
+        let native = compile(rt, maker);
+        maker = rt.heap.root_at(at);
+        rt.heap.pop_roots_to(at);
+        if let Ok(n) = native {
+            maker = n;
+        }
+    }
     let given: Vec<Value> = (0..args).map(|i| rt.heap.root_at(base + i)).collect();
     fixpt_runtime::prim::call_closure(rt, maker, &given).map(Ok)
 }

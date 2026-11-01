@@ -244,6 +244,31 @@ fn a_commit_runs_as_the_program_calls_it() {
     }
 }
 
+/// Staged code and the program's call each other in tail position on every
+/// machine (Heist's request, `TODO.md` §201): a staged loop of a million
+/// steps through a procedure of the program runs in constant space. On the
+/// native-convention machines only if staged code is native code, as the
+/// program's is: a call between native and cellular code is no tail call.
+#[test]
+fn a_staged_loop_through_the_programs_procedure_runs_in_constant_space() {
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "tail-across.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), "42\n"), "{m}: {err}");
+    }
+}
+
+/// A stage against a module a global seals, its abstract type read back by
+/// the staged checker, on every machine (Heist's request, `TODO.md` §201).
+#[test]
+fn a_stage_against_a_sealed_module_is_checked() {
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "sealed.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), "2\n"), "{m}: {err}");
+    }
+}
+
 /// Knots through a session's own globals refused as at the top level, at
 /// their first definitions: a procedure kept in what a global holds that
 /// reads any global, and a procedure that does (`Checker::no_reaching_itself`).

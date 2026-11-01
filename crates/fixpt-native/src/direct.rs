@@ -56,7 +56,7 @@ mod declare;
 pub use declare::{closures_before_stubs, native_convention, native_convention_of};
 mod x64;
 mod fx;
-pub use fx::{describe, fx_abandon, Each, FxCompile, FxEmitted, FxRequest};
+pub use fx::{describe, fx_abandon, fx_begin, fx_emitted, fx_finish, fx_next, fx_park, fx_unpark, Each, FxCompile, FxEmitted, FxRequest};
 pub use x64::{fx26_direct_module, fx26_direct_module_sig, oracle as oracle_x64};
 pub use reps::oracle as reps_oracle;
 use reps::{Convert, RawOp, Rep};
@@ -603,7 +603,9 @@ pub fn compile_closure(heap: &mut Heap, closure: Value) -> Result<Value, String>
     if DirectMachine::compiled_of(heap, closure).is_some() && heap.adapted(closure).is_none() {
         return Ok(closure);
     }
-    with_machine(|m| m.compile(heap, closure).map(|procs| procs[0].1.closure))?
+    // Not the machine: a compile changes only the compiler's state, so
+    // that native code running (a `stage` in it) may compile.
+    compile(heap, closure).map(|procs| procs[0].1.closure)
 }
 
 /// A runtime's `adapt` (`%fx26-convert`, `nclosure`): an adapter of `f`,
@@ -717,7 +719,9 @@ fn native_code_of(heap: &mut Heap, f: Value) -> Option<Value> {
         Some(_) => forget_word(heap, word.raw()),
         None => {}
     }
-    let busy = MACHINE.with(|m| m.try_borrow_mut().is_err());
+    // A compile within a compile (the compiler's state in use) makes
+    // nothing, and remembers nothing of it.
+    let busy = COMPILER.with(|c| c.try_borrow_mut().is_err());
     if busy {
         return None;
     }
@@ -1059,14 +1063,67 @@ pub struct DirectMachine {
     cache_words: u64,
     max_words: u64,
     /// The machine's own call-outs (`OWN_CALLOUTS`), which its code calls
-    /// by number, then, while a compile goes on, the others its code makes
-    /// by place: each site its own number, as both compilers number them,
-    /// written into the site's field as the call-out itself, encoded, when
-    /// the code is installed, and let go (`install`).
+    /// by number from the table here (`Runner::table`): made once, and
+    /// never changed, so that code running finds it where it was. What a
+    /// compile changes is its own (`Compiler`).
+    own: Box<[Callout]>,
+    /// The call-outs of the last compile the oracle made on this machine
+    /// (`compile_each`, `fx_each`), for `callout_codes`; its own at first.
+    last: Vec<Callout>,
+}
+
+/// What a compile changes, apart from the machine its code runs on, so
+/// that code may be compiled while native code runs (a `stage` within
+/// native code, Heist's request, `TODO.md` §201): the call-outs, the
+/// machine's own (`OWN_CALLOUTS`), then, while a compile goes on, the
+/// others its code makes by place, each site its own number, as both
+/// compilers number them, written into the site's field as the call-out
+/// itself, encoded, when the code is installed, and let go (`install`); and
+/// what each register word's slots come to (`slot_facts`), by its cells:
+/// once, not at every compile that calls it.
+pub struct Compiler {
     callouts: Vec<Callout>,
-    /// What each register word's slots come to (`slot_facts`), by its
-    /// cells: once, not at every compile that calls it.
     slot_facts: SlotMemo,
+}
+
+thread_local! {
+    /// This thread's compiler state (`with_compiler`).
+    static COMPILER: std::cell::RefCell<Compiler> = std::cell::RefCell::new(Compiler { callouts: own_callouts().to_vec(), slot_facts: HashMap::new() });
+}
+
+/// `f` of this thread's compiler state, apart from its machine: whether or
+/// not native code runs; or why not, a compile within a compile.
+pub fn with_compiler<T>(f: impl FnOnce(&mut Compiler) -> T) -> Result<T, String> {
+    if !crate::NATIVE_CONVENTION_AVAILABLE {
+        return Err(crate::UNAVAILABLE.into());
+    }
+    COMPILER.with(|c| {
+        let mut c = c.try_borrow_mut().map_err(|_| "a compile within a compile".to_string())?;
+        Ok(f(&mut c))
+    })
+}
+
+/// The machine's own call-outs, in their order (`DirectMachine::new`):
+/// 0, what is not native code, called (`common_foreign`); 1, a closure
+/// made (`common_closure`); 2 and 3, the stack cache's underflow and
+/// overflow (`common_underflow`, `common_overflow`); 4 and 5, a time
+/// slice's end at a poll, and its call of `preempt` returned (`POLL`,
+/// `POLL_DONE`); 6, a trap (`FAILED`); 7, a continuation given a value
+/// (`REINSTATE`); 8, a pair made, for code a program made (`common_cons`,
+/// `CONS`); 9, a bloblet made, for it too (`common_bloblet`, `BLOBLET`).
+const fn own_callouts() -> [Callout; OWN_CALLOUTS] {
+    [
+        Callout::Foreign,
+        Callout::ClosureAny,
+        Callout::Underflow,
+        Callout::Overflow,
+        Callout::Poll,
+        Callout::PollDone,
+        Callout::Failed,
+        Callout::Reinstate,
+        Callout::Cons,
+        Callout::Bloblet,
+    ]
 }
 
 /// A run that trapped: what, and where: the address of the stub its site
@@ -1101,26 +1158,8 @@ impl DirectMachine {
         let mut space = CodeSpace::new(8 << 20).map_err(|e| e.to_string())?;
         // The machine's own code, in bytes, for this instruction set.
         let a64 = |w: Vec<u32>| crate::arm64::bytes(&w);
-        // Call-out 0: what is not native code, called (`common_foreign`);
-        // 1: a closure made (`common_closure`); 2 and 3: the stack cache's
-        // underflow and overflow (`common_underflow`, `common_overflow`);
-        // 4 and 5: a time slice's end at a poll, and its call of `preempt`
-        // returned (`POLL`, `POLL_DONE`); 6: a trap (`FAILED`); 7: a
-        // continuation given a value (`REINSTATE`); 8: a pair made, for
-        // code a program made (`common_cons`, `CONS`); 9: a bloblet made,
-        // for it too (`common_bloblet`, `BLOBLET`).
-        let callouts: Vec<Callout> = vec![
-            Callout::Foreign,
-            Callout::ClosureAny,
-            Callout::Underflow,
-            Callout::Overflow,
-            Callout::Poll,
-            Callout::PollDone,
-            Callout::Failed,
-            Callout::Reinstate,
-            Callout::Cons,
-            Callout::Bloblet,
-        ];
+        // Its own call-outs, in their order (`own_callouts`).
+        let own: Box<[Callout]> = Box::new(own_callouts());
         let pieces: [(Vec<u8>, &str); 10] = if X86 {
             [
                 (x64::trampoline(), "trampoline"),
@@ -1171,8 +1210,8 @@ impl DirectMachine {
             bloblet,
             cache_words,
             max_words,
-            callouts,
-            slot_facts: HashMap::new(),
+            own,
+            last: own_callouts().to_vec(),
         })
     }
 
@@ -1188,39 +1227,50 @@ impl DirectMachine {
     /// bloblet of its own: what it compiled, the first first; or why it
     /// could not.
     pub fn compile(&mut self, heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
-        // Native already (`adapt` made it so): itself.
-        if let Some(c) = Self::compiled_of(heap, closure)
-            && heap.adapted(closure).is_none()
-        {
-            return Ok(vec![(String::new(), c)]);
-        }
-        // A global's procedure that cannot be compiled is called as what is
-        // not native code, and the rest compiled again without it.
-        let mut refused = std::collections::HashSet::new();
-        let (procs, first, free) = loop {
-            let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused, native_masks: HashMap::new(), slot_facts: &mut self.slot_facts };
-            let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
-            let first = c.proc_of(word)?;
-            let mut failed = None;
-            while let Some(p) = c.queue.pop() {
-                if let Err(e) = c.procedure(p) {
-                    failed = Some((p, e));
-                    break;
-                }
-            }
-            match failed {
-                None => break (std::mem::take(&mut c.procs), first, free),
-                Some((p, e)) if p == first || !c.procs[p].global => return Err(e),
-                Some((p, _)) => {
-                    refused = std::mem::take(&mut c.refused);
-                    refused.insert(c.procs[p].word.raw());
-                }
-            }
-        };
-        let done = install(heap, &procs, first, &free, &self.callouts);
-        self.callouts.truncate(OWN_CALLOUTS);
-        done
+        compile(heap, closure)
     }
+}
+
+/// `closure`'s procedure compiled, and every procedure it calls or makes
+/// closures of (`DirectMachine::compile`), with this thread's compiler
+/// state (`with_compiler`), not its machine: so while native code runs too.
+pub fn compile(heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
+    with_compiler(|cs| compile_with(cs, heap, closure))?
+}
+
+fn compile_with(cs: &mut Compiler, heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
+    // Native already (`adapt` made it so): itself.
+    if let Some(c) = DirectMachine::compiled_of(heap, closure)
+        && heap.adapted(closure).is_none()
+    {
+        return Ok(vec![(String::new(), c)]);
+    }
+    // A global's procedure that cannot be compiled is called as what is
+    // not native code, and the rest compiled again without it.
+    let mut refused = std::collections::HashSet::new();
+    let (procs, first, free) = loop {
+        let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut cs.callouts, resume: None, refused, native_masks: HashMap::new(), slot_facts: &mut cs.slot_facts };
+        let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
+        let first = c.proc_of(word)?;
+        let mut failed = None;
+        while let Some(p) = c.queue.pop() {
+            if let Err(e) = c.procedure(p) {
+                failed = Some((p, e));
+                break;
+            }
+        }
+        match failed {
+            None => break (std::mem::take(&mut c.procs), first, free),
+            Some((p, e)) if p == first || !c.procs[p].global => return Err(e),
+            Some((p, _)) => {
+                refused = std::mem::take(&mut c.refused);
+                refused.insert(c.procs[p].word.raw());
+            }
+        }
+    };
+    let done = install(heap, &procs, first, &free, &cs.callouts);
+    cs.callouts.truncate(OWN_CALLOUTS);
+    done
 }
 
 /// `procs`, compiled, each in a code bloblet of its own: what they are,
@@ -1290,7 +1340,7 @@ impl DirectMachine {
             poll: self.space.exec_addr(self.poll) as u64,
             cons: self.space.exec_addr(self.cons) as u64,
             bloblet: self.space.exec_addr(self.bloblet) as u64,
-            table: self.callouts.as_ptr() as u64,
+            table: self.own.as_ptr() as u64,
             cache_words: self.cache_words,
             max_words: self.max_words,
         }

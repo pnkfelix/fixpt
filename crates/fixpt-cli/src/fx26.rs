@@ -135,6 +135,9 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
             s.native_fx = Some(compile_by_fx26);
             s.native_runner = Some(run_native_fx);
         }
+        // Staged code compiled as the program's procedures are (`TODO.md`
+        // §201).
+        s.scheme.runtime_unrooted().stage_native = Some(if by_fx26 { stage_native_fx } else { stage_native_rust });
         // What the native convention's compiler starts from.
         s.register_code = true;
         s.scheme.runtime_unrooted().native_code = Some(fixpt_native::direct::code_text);
@@ -2152,7 +2155,7 @@ fn oracle_compile(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle) 
 }
 
 fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle, described: Option<&mut Held>) -> Result<fixpt_scheme::Handle, String> {
-    use fixpt_native::direct::{with_machine, DirectMachine, FxEmitted};
+    use fixpt_native::direct::{fx_begin, fx_emitted, fx_finish, fx_next, fx_park, fx_unpark, DirectMachine, FxEmitted};
     let mut begun = None;
     let mut native = false;
     s.make(|m| {
@@ -2161,14 +2164,14 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
         if DirectMachine::compiled_of(heap, v).is_some() && heap.adapted(v).is_none() {
             native = true;
         } else {
-            begun = Some(with_machine(|dm| dm.fx_begin(heap, v)));
+            begun = Some(fx_begin(heap, v));
         }
         fixpt_heap::Value::NULL
     });
     if native {
         return Ok(closure);
     }
-    let mut c = begun.expect("begun").and_then(|r| r)?;
+    let mut c = begun.expect("begun")?;
     let abandon = |s: &mut fixpt_scheme::Session, c: fixpt_native::direct::FxCompile| {
         s.make(|m| {
             fixpt_native::direct::fx_abandon(m.heap(), c);
@@ -2179,7 +2182,7 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
         let mut next = Ok(None);
         s.make(|m| {
             let heap = m.heap();
-            next = with_machine(|dm| dm.fx_next(heap, &mut c)).and_then(|r| r);
+            next = fx_next(heap, &mut c);
             fixpt_heap::Value::NULL
         });
         let req = match next {
@@ -2211,13 +2214,13 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
         // FX-26 runs with collection allowed, the driver's values rooted.
         s.make(|m| {
             let heap = m.heap();
-            let _ = with_machine(|dm| dm.fx_park(heap, &mut c));
+            fx_park(heap, &mut c);
             fixpt_heap::Value::NULL
         });
         let made = s.call_global(&format!("{}native-compile-x64-proc", fixpt_fx26::session::READER_PREFIX), &[name, lists, errors]);
         s.make(|m| {
             let heap = m.heap();
-            let _ = with_machine(|dm| dm.fx_unpark(heap, &mut c));
+            fx_unpark(heap, &mut c);
             fixpt_heap::Value::NULL
         });
         let made = match made {
@@ -2243,7 +2246,7 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
         let mut taken = Ok(());
         s.make(|m| {
             let heap = m.heap();
-            taken = with_machine(|dm| dm.fx_emitted(heap, &mut c, out)).and_then(|r| r);
+            taken = fx_emitted(heap, &mut c, out);
             fixpt_heap::Value::NULL
         });
         if let Err(why) = taken {
@@ -2254,7 +2257,7 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
     let mut finished = Err(String::new());
     let h = s.make(|m| {
         let heap = m.heap();
-        finished = with_machine(|dm| dm.fx_finish(heap, c)).and_then(|r| r);
+        finished = fx_finish(heap, c);
         match &finished {
             Ok(procs) => procs[0].1.closure,
             Err(_) => fixpt_heap::Value::FALSE,
@@ -2264,6 +2267,108 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
         *d = hold(s, procs);
     }
     finished.map(|_| h)
+}
+
+/// Staged code's procedure compiled as a program's is on a machine whose
+/// native compiler is Rust's (`Runtime::stage_native`).
+fn stage_native_rust(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
+    fixpt_native::direct::compile_closure(&mut rt.heap, closure)
+}
+
+/// The same where it is FX-26's (`fx-regs-fxjit-nativecc`): the driver of
+/// [`compile_by_fx26_in`], within a `stage`, on the runtime alone, its
+/// values rooted by hand rather than by a session's handles. FX-26 runs as
+/// the front end does, within the call (`call_front_end`).
+fn stage_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
+    use fixpt_heap::Value;
+    use fixpt_native::direct::{fx_abandon, fx_begin, fx_emitted, fx_finish, fx_next, fx_park, fx_unpark, DirectMachine, FxEmitted};
+    if DirectMachine::compiled_of(&rt.heap, closure).is_some() && rt.heap.adapted(closure).is_none() {
+        return Ok(closure);
+    }
+    // The compiler's entry, the FX-26 procedure (`fx26-native:`, not the
+    // Scheme that calls it, `READER_PREFIX`), by its global's slot, read at
+    // each call: a collection while FX-26 runs may move what it holds.
+    let sym = rt.heap.intern("fx26-native:native-compile-x64-proc");
+    let slot = rt.heap.symbol_global_slot(sym);
+    if rt.heap.global(slot).is_unbound() {
+        return Err("the compiler written in FX-26 is not loaded".into());
+    }
+    // Collection held off from here to the end but while FX-26 runs, when
+    // the compile's values are rooted (`fx_park`): what is made between is
+    // not moved.
+    let mut c = fx_begin(&mut rt.heap, closure)?;
+    loop {
+        let req = match fx_next(&rt.heap, &mut c) {
+            Ok(Some(r)) => r,
+            Ok(None) => break,
+            Err(why) => {
+                fx_abandon(&mut rt.heap, c);
+                return Err(why);
+            }
+        };
+        let heap = &mut rt.heap;
+        let name = heap.make_string(&req.name);
+        let lists: Vec<Value> = [&req.head, &req.hi, &req.lo, &req.ids, &req.kind, &req.a, &req.b, &req.c_hi, &req.c_lo]
+            .iter()
+            .map(|l| {
+                let items: Vec<Value> = l.iter().map(|&x| Value::fixnum(x)).collect();
+                heap.list_from(&items)
+            })
+            .collect();
+        let lists = heap.list_from(&lists);
+        let errors: Vec<Value> = req.errors.iter().map(|e| heap.make_string(e)).collect();
+        let errors = heap.list_from(&errors);
+        let base = heap.push_root(name);
+        heap.push_root(lists);
+        heap.push_root(errors);
+        fx_park(heap, &mut c);
+        let args = [rt.heap.root_at(base), rt.heap.root_at(base + 1), rt.heap.root_at(base + 2)];
+        let make = rt.heap.global(slot);
+        let made = fixpt_runtime::prim::call_front_end(rt, make, &args);
+        // Read before the compile takes its values back, which allocates
+        // nothing, but before anything else does; then the roots let go,
+        // its (`fx_park`'s, above these) too.
+        // Product field `k` in the bloblet's slot `k + 1`: here, as in
+        // `compile_by_fx26_in`, by slot.
+        let out = made.map(|r| {
+            let heap = &rt.heap;
+            let ints = |k: usize| {
+                let mut out = Vec::new();
+                let mut l = heap.bloblet_slot(r, k);
+                while l.is_pair() {
+                    let x = heap.car(l);
+                    if x.is_fixnum() {
+                        out.push(x.as_fixnum());
+                    }
+                    l = heap.cdr(l);
+                }
+                out
+            };
+            let len = heap.bloblet_slot(r, 3);
+            FxEmitted {
+                code: ints(2).into_iter().map(|b| b as u8).collect(),
+                len: if len.is_fixnum() { len.as_fixnum() as usize } else { 0 },
+                fields: ints(4),
+                callouts: ints(5),
+                err: heap.string_to_rust(heap.bloblet_slot(r, 6)),
+                starts: ints(7),
+            }
+        });
+        fx_unpark(&mut rt.heap, &mut c);
+        rt.heap.pop_roots_to(base);
+        let out = match out {
+            Ok(o) => o,
+            Err(e) => {
+                fx_abandon(&mut rt.heap, c);
+                return Err(format!("native-direct-x64.fx: {e}"));
+            }
+        };
+        if let Err(why) = fx_emitted(&rt.heap, &mut c, out) {
+            fx_abandon(&mut rt.heap, c);
+            return Err(why);
+        }
+    }
+    fx_finish(&mut rt.heap, c).map(|procs| procs[0].1.closure)
 }
 
 /// How `fx-regs-fxjit-nativecc` runs an expression: the thunk, compiled by

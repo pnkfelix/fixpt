@@ -176,6 +176,25 @@
   (lambda (l)
     (let ((n (symbol->string l)))
       (if (and (> (string-length n) 0) (k-digits-only? n 0)) n (string-append "#:" n)))))
+;; Variable `v`, printed where `ids` are the nodes from it to the root: an
+;; abstract type of a module type among them by its label, as its binder
+;; says, not by the variable's own name (`m..t`, once a variable's module is
+;; opened), so that the type reads back (`stage`'s, `TODO.md` §201); else as
+;; any variable.
+(define k-var-shown (->* (int k-ids) string)
+  (lambda (v ids)
+    (if (null? ids)
+        (k-dvar-string v)
+        (let ((label (tagcase (k-get (car ids))
+                       (ty-module (abs ds vs) (k-abs-label abs v))
+                       (else y nil))))
+          (if (null? label) (k-var-shown v (cdr ids)) (symbol->string (car label)))))))
+;; The label of abstract type `v` among `abs`, in a list; none if none.
+(define k-abs-label (->* (k-parts int) (listof symbol acyclic))
+  (lambda (abs v)
+    (cond ((null? abs) nil)
+          ((= (extract (car abs) 2) v) (list (extract (car abs) 1)))
+          (else (k-abs-label (cdr abs) v)))))
 (define-rec
   (k-show-on (->* (int k-printing k-shown) k-shown)
     (lambda (t path st)
@@ -296,7 +315,8 @@
         (ty-nil () (k-put "nil" st))
         (ty-false () (k-put "false" st))
         (ty-union (ms) (k-put ")" (k-show-seq ms p " " (k-put "(union " st))))
-        (ty-var (v) (k-put (k-dvar-string v) st))
+        (ty-var (v)
+          (k-put (if (get k-show-marks) (k-dvar-string v) (k-var-shown v (extract p 1))) st))
         (ty-link (x) (k-put "?" st))
         (ty-subr (e ps r cv spc) (k-show-subr e ps r cv spc p st))
         (ty-poly (bs body)

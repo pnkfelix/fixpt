@@ -26,6 +26,8 @@ impl Checker {
         }
         if self.show_marks.get() {
             format!("{MARK}{how}{}{MARK}", v.0)
+        } else if let Some(label) = self.print_abs.borrow().get(&v).filter(|_| how == 'f') {
+            label.clone()
         } else if how == 'h' {
             String::new()
         } else {
@@ -782,6 +784,7 @@ impl Checker {
                     Some(m) => abs.iter().map(|(n, v)| (*v, m.insert(*v, self.interner.name(*n).to_string()))).collect(),
                     None => Vec::new(),
                 };
+                let shown_as: Vec<_> = abs.iter().map(|(n, v)| (*v, self.print_abs.borrow_mut().insert(*v, self.interner.name(*n).to_string()))).collect();
                 let mut out = String::from("(moduleof");
                 for (n, v) in &abs {
                     // Bound here, as a `poly`'s binders are.
@@ -818,6 +821,12 @@ impl Checker {
                     out.push_str(&format!(" (val {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
                 }
                 self.print_names.borrow_mut().truncate(mark);
+                for (v, was) in shown_as {
+                    match was {
+                        Some(w) => self.print_abs.borrow_mut().insert(v, w),
+                        None => self.print_abs.borrow_mut().remove(&v),
+                    };
+                }
                 if let Some(m) = self.print_for_fasl.borrow_mut().as_mut() {
                     for (v, was) in renamed {
                         match was {
