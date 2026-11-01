@@ -39,7 +39,7 @@ fn machines() -> Vec<(&'static str, bool)> {
     .into_iter()
     .filter(|(m, _)| stencils || !m.contains("stencils"))
     .filter(|(m, _)| fixpt_native::NATIVE_CONVENTION_AVAILABLE || !m.ends_with("nativecc"))
-    .filter(|(m, _)| x86 || !m.starts_with("fx-regs-fxjit"))
+    .filter(|(m, _)| x86 || *m != "fx-regs-fxjit-nativecc")
     .map(|(m, native)| (m, native && fixpt_native::NATIVE_CONVENTION_AVAILABLE))
     .collect()
 }

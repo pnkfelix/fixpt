@@ -229,9 +229,9 @@ pub fn cell_words_reachable(heap: &fixpt_heap::Heap, word: Value) -> Vec<Value> 
 /// this runs on by the compiler written in FX-26 (`native.fx`'s
 /// `native-assemble` for arm64, `native-x64.fx`'s `native-assemble-x64`
 /// for x86_64) and given to `place` with the heap: its bytes, and where
-/// each cell's code starts in them. On x86_64, a word with register code
-/// (its twin, `layout::regcode`) has that compiled instead
-/// (`native-x64-regs.fx`), and its entry is the adapter into it, as
+/// each cell's code starts in them. A word with register code (its twin,
+/// `layout::regcode`) has that compiled instead (`native-arm64-regs.fx`,
+/// `native-x64-regs.fx`), and its entry is the adapter into it, as
 /// `fixpt_native`'s `compile_register_word` does them.
 pub fn assemble_reachable_by_fx26(
     s: &mut Session,
@@ -252,7 +252,7 @@ pub fn assemble_reachable_by_fx26(
     let far = s.make(|_| Value::fixnum(0));
     let x64 = cfg!(target_arch = "x86_64");
     for w in words {
-        if x64 && assemble_twin_by_fx26(s, w, place)? {
+        if assemble_twin_by_fx26(s, w, place)? {
             continue;
         }
         let assembled = if x64 {
@@ -265,15 +265,22 @@ pub fn assemble_reachable_by_fx26(
             let r = v.get(assembled);
             (ints_of(r.product_field(1)), ints_of(r.product_field(2)))
         });
-        // arm64's instructions are words of 4 bytes, little-endian.
-        let (code, starts): (Vec<u8>, Vec<i64>) = if x64 {
-            (code.into_iter().map(|x| x as u8).collect(), starts)
-        } else {
-            (code.into_iter().flat_map(|x| (x as u32).to_le_bytes()).collect(), starts.into_iter().map(|s| if s < 0 { s } else { 4 * s }).collect())
-        };
+        let (code, starts) = machine_bytes(code, starts);
         place_in(s, w, &code, &starts, place)?;
     }
     Ok(())
+}
+
+/// Code as the compiler written in FX-26 gives it, ints, as bytes, and
+/// where its cells start in them: x86_64's are bytes already; arm64's
+/// instructions are words of 4 bytes, little-endian, and the starts count
+/// instructions.
+fn machine_bytes(code: Vec<i64>, starts: Vec<i64>) -> (Vec<u8>, Vec<i64>) {
+    if cfg!(target_arch = "x86_64") {
+        (code.into_iter().map(|x| x as u8).collect(), starts)
+    } else {
+        (code.into_iter().flat_map(|x| (x as u32).to_le_bytes()).collect(), starts.into_iter().map(|s| if s < 0 { s } else { 4 * s }).collect())
+    }
 }
 
 /// A list of ints, or none.
@@ -299,8 +306,9 @@ fn place_in(
 }
 
 /// Word `w`'s register code, if it has some not yet compiled, compiled
-/// to x86_64 by `native-x64-regs.fx` and placed, and the adapter into it
-/// as `w`'s entry: whether it was. Not a variadic procedure's, which is
+/// for the machine this runs on by `native-arm64-regs.fx` or
+/// `native-x64-regs.fx` and placed, and the adapter into it as `w`'s
+/// entry: whether it was. Not a variadic procedure's, which is
 /// for native code, nor, past `REGS` arguments, the adapter, which would
 /// have to make a list of the rest: `w` stays stack code then.
 fn assemble_twin_by_fx26(
@@ -324,7 +332,17 @@ fn assemble_twin_by_fx26(
     });
     let Some(rw) = twin else { return Ok(false) };
     let rw = s.make(|_| rw);
-    let assembled = s.call_global(&format!("{READER_PREFIX}native-assemble-x64-regs"), &[rw]).map_err(|e| e.to_string())?;
+    let x64 = cfg!(target_arch = "x86_64");
+    let assembled = if x64 {
+        s.call_global(&format!("{READER_PREFIX}native-assemble-x64-regs"), &[rw])
+    } else {
+        // As `native-assemble`, of a place it need not know; and the time
+        // slice, which arm64's register code has as a constant.
+        let far = s.make(|_| Value::fixnum(0));
+        let slice = s.make(|_| Value::fixnum(fixpt_runtime::sched::slice() as i64));
+        s.call_global(&format!("{READER_PREFIX}native-assemble-arm64-regs"), &[rw, far, far, slice])
+    };
+    let assembled = assembled.map_err(|e| e.to_string())?;
     let (code, resume, err) = s.view(|v| {
         let r = v.get(assembled);
         (ints_of(r.product_field(1)), ints_of(r.product_field(2)), r.product_field(3).and_then(|e| e.string()).unwrap_or_default())
@@ -332,7 +350,7 @@ fn assemble_twin_by_fx26(
     if !err.is_empty() {
         return Err(format!("register code: {err}"));
     }
-    let code: Vec<u8> = code.into_iter().map(|x| x as u8).collect();
+    let (code, resume) = machine_bytes(code, resume);
     place_in(s, rw, &code, &resume, place)?;
     let (mut slot, mut n, mut cells) = (0, 0, 0);
     s.make(|m| {
@@ -347,8 +365,8 @@ fn assemble_twin_by_fx26(
         return Ok(false);
     }
     let (n, slot) = (s.make(|_| Value::fixnum(n)), s.make(|_| Value::fixnum(slot)));
-    let adapter = s.call_global(&format!("{READER_PREFIX}native-adapter-x64"), &[n, slot]).map_err(|e| e.to_string())?;
-    let adapter: Vec<u8> = s.view(|v| ints_of(Some(v.get(adapter)))).into_iter().map(|x| x as u8).collect();
+    let adapter = s.call_global(&format!("{READER_PREFIX}{}", if x64 { "native-adapter-x64" } else { "native-adapter-arm64" }), &[n, slot]).map_err(|e| e.to_string())?;
+    let (adapter, _) = machine_bytes(s.view(|v| ints_of(Some(v.get(adapter)))), Vec::new());
     let mut starts = vec![-1i64; cells];
     starts[0] = 0;
     place_in(s, w, &adapter, &starts, place)?;

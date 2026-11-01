@@ -101,8 +101,9 @@ fn every_program_compiled() {
 /// or by `native.fx`, or run as register code; and the stencils at -O2.
 /// Control, and everything else a native machine has no code for, runs
 /// there through the Rust machine (the round trip). The stencils only where
-/// the build made them (a nightly compiler, arm64 or x86_64 Linux); and on
-/// x86_64, register code compiled by `native-x64-regs.fx`. A test for each
+/// the build made them (a nightly compiler, arm64 or x86_64 Linux); and
+/// register code compiled by FX-26 (`native-arm64-regs.fx`,
+/// `native-x64-regs.fx`). A test for each
 /// machine, so that they run at once (`TODO.md` §167).
 macro_rules! every_program_on {
     ($($test:ident: $machine:expr;)*) => {$(
@@ -120,7 +121,7 @@ every_program_on! {
     every_program_on_native_words_compiled_by_native_fx: "native, words compiled by native.fx";
     every_program_on_register_code: "register code";
     every_program_on_stencils: "stencils";
-    every_program_on_register_code_by_native_x64_regs_fx: "register code compiled by native-x64-regs.fx";
+    every_program_on_register_code_by_fx26: "register code compiled by FX-26";
 }
 
 /// [`every_program_on`]'s machine `machine`, by its name; nothing where
@@ -136,12 +137,11 @@ fn every_program_on(machine: &str) {
         ("native, words compiled by native.fx", fixpt_native::cellular::run_word_as_is, false, Some(fixpt_native::cellular::place_word)),
         ("register code", fixpt_native::cellular::run_word_registers, true, None),
         ("stencils", fixpt_native::stencil::run_word, false, None),
-        ("register code compiled by native-x64-regs.fx", fixpt_native::cellular::run_word_as_is, true, Some(fixpt_native::cellular::place_word)),
+        ("register code compiled by FX-26", fixpt_native::cellular::run_word_as_is, true, Some(fixpt_native::cellular::place_word)),
     ];
     let (name, run, registers, place) = machines.into_iter().find(|(n, ..)| *n == machine).expect("a machine of the list");
-    // The stencils where the build made them; FX-26's register code for
-    // x86_64 only.
-    if (name == "stencils" && fixpt_native::stencil::opt_levels().is_empty()) || (name.contains("native-x64-regs") && !cfg!(target_arch = "x86_64")) {
+    // The stencils where the build made them.
+    if name == "stencils" && fixpt_native::stencil::opt_levels().is_empty() {
         return;
     }
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
