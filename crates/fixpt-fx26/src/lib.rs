@@ -612,6 +612,45 @@ pub const NATIVE_DIRECT_X64_STRINGS: &str = include_str!("native-direct-x64-stri
 /// entry Rust calls.
 pub const NATIVE_DIRECT_X64: &str = include_str!("native-direct-x64.fx");
 
+/// The native convention's procedures compiled to arm64, in FX-26:
+/// `fixpt-native/src/direct.rs`'s `procedure`, in the files below, as
+/// [`NATIVE_DIRECT_X64`] and the files beside it are for x86_64, whose
+/// types they share. The signatures of their modules as each other use
+/// them.
+pub const NATIVE_DIRECT_ARM64_TYPES: &str = include_str!("native-direct-arm64-types.fx");
+
+/// What they know of the native convention on arm64, generated from it,
+/// and its signature, generated beside it.
+pub const NATIVE_DIRECT_ARM64_LAYOUT: &str = include_str!("native-direct-arm64-layout.fx");
+pub const NATIVE_DIRECT_ARM64_LAYOUT_TYPES: &str = include_str!("native-direct-arm64-layout-types.fx");
+
+/// Their assembler, and the machine sequences they share.
+pub const NATIVE_DIRECT_ARM64_ASM: &str = include_str!("native-direct-arm64-asm.fx");
+
+/// Raw values, and the operations on them native code does in line.
+pub const NATIVE_DIRECT_ARM64_RAW: &str = include_str!("native-direct-arm64-raw.fx");
+
+/// Flat arrays, suffix refs, bytevectors and shapes, in line.
+pub const NATIVE_DIRECT_ARM64_FLAT: &str = include_str!("native-direct-arm64-flat.fx");
+
+/// The procedure being compiled: what Rust gave of it, its analysis, its
+/// fields and the version being made.
+pub const NATIVE_DIRECT_ARM64_PROC: &str = include_str!("native-direct-arm64-proc.fx");
+
+/// Its instructions: moves, frames, globals, `int` operations, calls and
+/// branches; and primitives, control and call-outs.
+pub const NATIVE_DIRECT_ARM64_OPS: &str = include_str!("native-direct-arm64-ops.fx");
+pub const NATIVE_DIRECT_ARM64_PRIMS: &str = include_str!("native-direct-arm64-prims.fx");
+
+/// `native-direct-arm64-strings.fx`: the primitives of strings and
+/// characters, made by [`NATIVE_DIRECT_ARM64_PRIMS`] of the modules it is
+/// given.
+pub const NATIVE_DIRECT_ARM64_STRINGS: &str = include_str!("native-direct-arm64-strings.fx");
+
+/// The loop over the instructions, what is placed after them, and the
+/// entry Rust calls.
+pub const NATIVE_DIRECT_ARM64: &str = include_str!("native-direct-arm64.fx");
+
 /// What the compiler to machine code written in FX-26 knows of the
 /// hand-encoded machine, generated from it: a module file, which the
 /// conductor loads.
@@ -700,7 +739,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 188] = [
+pub const FRONT_END_MODULES: [(&str, &str); 199] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -781,6 +820,17 @@ pub const FRONT_END_MODULES: [(&str, &str); 188] = [
     ("native-direct-x64-prims.fx", NATIVE_DIRECT_X64_PRIMS),
     ("native-direct-x64-strings.fx", NATIVE_DIRECT_X64_STRINGS),
     ("native-direct-x64.fx", NATIVE_DIRECT_X64),
+    ("native-direct-arm64-types.fx", NATIVE_DIRECT_ARM64_TYPES),
+    ("native-direct-arm64-layout.fx", NATIVE_DIRECT_ARM64_LAYOUT),
+    ("native-direct-arm64-layout-types.fx", NATIVE_DIRECT_ARM64_LAYOUT_TYPES),
+    ("native-direct-arm64-asm.fx", NATIVE_DIRECT_ARM64_ASM),
+    ("native-direct-arm64-raw.fx", NATIVE_DIRECT_ARM64_RAW),
+    ("native-direct-arm64-flat.fx", NATIVE_DIRECT_ARM64_FLAT),
+    ("native-direct-arm64-proc.fx", NATIVE_DIRECT_ARM64_PROC),
+    ("native-direct-arm64-ops.fx", NATIVE_DIRECT_ARM64_OPS),
+    ("native-direct-arm64-prims.fx", NATIVE_DIRECT_ARM64_PRIMS),
+    ("native-direct-arm64-strings.fx", NATIVE_DIRECT_ARM64_STRINGS),
+    ("native-direct-arm64.fx", NATIVE_DIRECT_ARM64),
     ("native-x64-regs-ops.fx", NATIVE_X64_REGS_OPS),
     ("native-x64-regs.fx", NATIVE_X64_REGS),
     ("native.fx", NATIVE),
