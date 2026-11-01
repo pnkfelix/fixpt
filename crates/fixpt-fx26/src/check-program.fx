@@ -503,24 +503,36 @@
 ;; (`k-rep-ty`), if not empty: as `check-staged-program` binds it.
 (define check-more-with (->* (k-tops (bytevectorof @t)) k-result)
   (lambda (forms rep)
-    (prompt k-tag
-      (begin (set k-extracts nil)
-             (set k-syscall-expanding 0)
-             (set k-broken-began (get k-broken))
-             (set k-effect-notes nil)
-             (k-forget-withs)
-             (set k-reshapes nil)
-             (set k-runs nil)
-             (k-stage-type! rep)
-             (k-ahead forms)
-             (k-ok (k-forms forms nil)))
-      (lambda (r) r))))
+    (let ((r (prompt k-tag
+               (begin (set k-extracts nil)
+                      (set k-syscall-expanding 0)
+                      (set k-broken-began (get k-broken))
+                      (set k-effect-notes nil)
+                      (k-forget-withs)
+                      (set k-reshapes nil)
+                      (set k-runs nil)
+                      (k-stage-type! rep)
+                      (k-ahead forms)
+                      (k-ok (k-forms forms nil)))
+               (lambda (r) r))))
+      ;; Kept or not, the name gone after: a session's next step binds its own.
+      (begin (k-stage-type-gone! rep) r))))
 ;; `%stage-type` bound to rep `rep` imported, if it is not empty.
 (define k-stage-type! (->* ((bytevectorof @t)) unit)
   (lambda (rep)
     (if (= (bytevector-length rep) 0)
         #u
         (k-push-desc '%stage-type (ds-rec ((with check-reps k-rep-ty) rep nil))))))
+;; And unbound again, its innermost binding taken out of the description
+;; scope (what a session's definition bound after it stays).
+(define k-stage-type-gone! (->* ((bytevectorof @t)) unit)
+  (lambda (rep)
+    (letrec ((drop (->* (k-scope) k-scope)
+                   (lambda (ds)
+                     (cond ((null? ds) nil)
+                           ((symbol=? (car (car ds)) '%stage-type) (cdr ds))
+                           (else (cons (car ds) (drop (cdr ds))))))))
+      (if (= (bytevector-length rep) 0) #u (set k-dscope (drop (get k-dscope)))))))
 
 ;; For a driver (a session's pending definition, `sessions26.rs`): `forms`
 ;; checked as `check-more` checks them, and the type global `n` then has,
@@ -528,16 +540,28 @@
 ;; left as it was: the bindings they made undone, and the definitions and
 ;; breaks they noted let go, as the Rust checker's `try_top`. Re-runs wait
 ;; meanwhile, so that nothing but their own names is bound.
-(define check-try (->* (k-tops symbol) (productof (1 k-result) (2 string)))
-  (lambda (forms n)
+(define check-try
+  (->* (k-tops symbol (bytevectorof @t)) (productof (1 k-result) (2 string) (3 (bytevectorof @t))))
+  (lambda (forms n rep)
     (let* ((mark (k-mark)) (defs (get k-defs)) (broken (get k-broken)) (runs (get k-runs))
            (uses (get k-last-uses)) (deferring (get k-defer-reruns))
-           (r (begin (set k-defer-reruns #t) (check-more forms)))
-           (t (tagcase r (k-ok (ls) (let ((t (k-lookup n))) (if (< t 0) "" (k-show-ty-whole t))))
-                (else y ""))))
+           (r (begin (set k-defer-reruns #t) (check-more-with forms rep)))
+           (found (tagcase r (k-ok (ls) (k-lookup n)) (else y -1)))
+           (t (if (< found 0) "" (k-show-ty-whole found)))
+           ;; And as a rep, for the steps after to name, not read
+           ;; (`docs/research/heap-types.md`, step 4); empty if none.
+           (tr (if (< found 0) (the (bytevectorof @t) (make-bytevector 0 0)) (k-try-rep found))))
       (begin (k-unbind-to mark) (set k-defs defs) (set k-broken broken) (set k-runs runs)
              (set k-last-uses uses) (set k-defer-reruns deferring)
-             (product (1 r) (2 t))))))
+             (product (1 r) (2 t) (3 tr))))))
+;; Type `t` as a rep, if a rep takes it and it names no variable; else
+;; empty.
+(define k-try-rep (->* (int) (bytevectorof @t))
+  (lambda (t)
+    (let ((bytes ((with check-reps k-ty-rep) t)))
+      (if (or ((with check-reps k-rep-declined?)) (not (null? ((with check-reps k-rep-holes)))))
+          (the (bytevectorof @t) (make-bytevector 0 0))
+          bytes))))
 
 ;; `stage`'s (`stage.rs`; `docs/research/heap-types.md`, step 3): the
 ;; standard environment entered once, by the first stage, and kept; each

@@ -1,7 +1,7 @@
 # Types as heap data
 
 Status: design, reviewed with the user (2026-11-01; "Decided", below).
-Steps 1 and 2 done, and the first part of step 3.
+Steps 1 to 4 done.
 Asked for by the user after Heist's request (`TODO.md` §201, item 5): a
 `stage` checks its module's type again each time because the type crosses
 to the staged checker as text. The user's direction: types as heap data,
@@ -297,6 +297,38 @@ The binary form is unchanged; the two checkers' reps still agree.
 
 Step 3 is done (`generative.fx`, `kept.fx` and the evidence tests of
 `fixpt-cli/tests/stage.rs`).
+
+## Step 4, done (2026-11-01)
+
+A session's definitions by rep. The trial that finds a definition's type
+(`check-try`) gives it as a rep beside its text; the steps after it (its
+initializer checked within `E`, the form tried, and, steps later, its
+commit) name it `%stage-type`, the session's checker importing the rep
+for the step and taking the name out of its description scope after
+(`check-more-with`, `k-stage-type-gone!`), instead of reading the type
+written out. The pending definition keeps the rep, and the form that names
+it, for its commit (`P_REP`, `P_REP_FORM`); on the evaluator, what runs
+is the form without its type, checked already. A type the code writes is
+text, as written.
+
+Measured, a session against a module whose type names a value type of 60
+alternatives, 20 definitions `(define dK f0)`, each of a type naming it,
+checked and committed:
+
+| machine | text | rep |
+| --- | --- | --- |
+| the default machine; `fx-cells-rsinterp` alike | 219 ms | 63 ms |
+| `fx-ast-eval` | 185 ms | 62 ms |
+| `rs-scheme-vm` (the Rust checker's sessions) | 61 ms | 61 ms |
+
+The Rust checker's sessions keep their checker between steps, and read
+type text fast; their commit compiles the form's text, whose type the
+compiler reads, so it stays text.
+
+Found on the way, and fixed: a session saw none of its module's values
+when the module's type, printed, had a sum or a recursive type (its labels
+`#:k0`, `%3`): `module_values` read the text as FX-91 code, which has
+neither, and found no values.
 
 ## Decided (the user's, 2026-11-01)
 

@@ -468,11 +468,14 @@
          ;; first, in the standard environment `standard`, checked alone; 1,
          ;; more, kept, and compiled (if `make`), into the procedure that
          ;; runs it (if `deferred`, a commit's) or the word; 2, tried, not
-         ;; kept, the type `name` then has given. What each gives, or why
-         ;; not, placed in the code.
+         ;; kept, the type `name` then has given, as text and as a rep. And
+         ;; `rep`, if not empty, the type the code names `%stage-type`
+         ;; (`check-more-with`). What each gives, or why not, placed in the
+         ;; code.
          (session-step
           (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int) (how int)
-                   (name symbol) (make bool) (deferred bool) (native bool) (registers bool))
+                   (name symbol) (make bool) (deferred bool) (native bool) (registers bool)
+                   (rep (bytevectorof @t)))
             (let ((read (read-text-at whole 0))
                   (refused (lambda ((m string) (a int) (b int))
                              (fail (sum refused #u) m (clamp a k len) (clamp b k len)))))
@@ -491,16 +494,16 @@
                       (p-ok (tops)
                         (cond
                           ((= how 2)
-                           (let ((r ((with check-program check-try) tops name)))
+                           (let ((r ((with check-program check-try) tops name rep)))
                              (tagcase (extract r 1)
                                (k-err (m a b) (refused m a b))
-                               (else y (sum typed (extract r 2))))))
+                               (else y (sum typed (product (1 (extract r 2)) (2 (extract r 3))))))))
                           ((= how 0)
                            (tagcase ((with check-program check-program) standard tops)
                              (k-err (m a b) (refused m a b))
                              (else y (sum checked #u))))
                           (else
-                           (tagcase ((with check-program check-more) tops)
+                           (tagcase ((with check-program check-more-with) tops rep)
                              (k-err (m a b) (refused m a b))
                              (k-done (t) (refused "not a form" 0 len))
                              (k-ok (ls)

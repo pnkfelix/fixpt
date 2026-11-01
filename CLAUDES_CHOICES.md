@@ -3305,3 +3305,20 @@ of `TODO.md` §141, working on my own.
   nothing staged outlives its stage's check, and the store's bound covers
   the table.
 
+## A session's definitions by rep (2026-11-01; `heap-types.md`, step 4)
+
+- **The rep, not the type's index**: the session's checker keeps its store
+  between steps, so an index would do for a step; but a pending
+  definition is a heap value the program holds, committed steps later, so
+  it carries what is the type anywhere, as everything that crosses does.
+- **The text kept beside it**: `session-redefines` gives the program the
+  old and new types as strings, and the evaluator's re-runs and the Rust
+  checker's sessions read text.
+- **`%stage-type` taken out after a kept step**: a session's next step
+  binds its own; the definitions a step keeps stay.
+- **The evaluator runs the form untyped**: checked already, by the
+  session's checker; the evaluator checks no types, and reading a type it
+  does not use was a third of its step.
+- **The Rust checker's sessions as they were**: at parity already (61
+  ms), and their commit compiles the form's text, type included.
+

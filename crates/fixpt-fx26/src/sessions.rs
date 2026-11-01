@@ -82,6 +82,12 @@ pub(crate) const P_NAME: usize = 2;
 pub(crate) const P_TYPE: usize = 3;
 pub(crate) const P_FORM: usize = 4;
 pub(crate) const P_USED: usize = 5;
+/// The type's rep (a bytevector of its binary form), where the session's
+/// checker made one, and the form naming it `%stage-type`, which its
+/// commit checks (`sessions26.rs`; `docs/research/heap-types.md`, step 4);
+/// `#f` and `#f` if not.
+pub(crate) const P_REP: usize = 6;
+pub(crate) const P_REP_FORM: usize = 7;
 
 /// The conductor's entry that makes a session's compiler.
 const MAKE_COMPILER: &str = "fx26-native:make-session-compiler";
@@ -382,28 +388,39 @@ fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, tex
         Ok(f) => f,
         Err(refused) => return Ok(refused),
     };
-    let d = pending(rt, base, generation, &name, &ty, &form);
+    let d = pending(rt, base, generation, &name, &ty, &form, None);
     let d = sum(rt, "definition", d);
     Ok(sum(rt, "ok", d))
 }
 
 /// A pending definition of the session at `base`, checked at `generation`:
-/// `#(session generation name type form used)`, its strings made rooted.
-pub(crate) fn pending(rt: &mut Runtime, base: usize, generation: i64, name: &str, ty: &str, form: &str) -> Value {
+/// `#(session generation name type form used rep rep-form)`, its strings
+/// made rooted; `by_rep`, its type's rep and the form that names it.
+pub(crate) fn pending(rt: &mut Runtime, base: usize, generation: i64, name: &str, ty: &str, form: &str, by_rep: Option<(&[u8], &str)>) -> Value {
     let mark = rt.heap.push_root(Value::FALSE);
     for t in [name, ty, form] {
         let v = rt.heap.make_string(t);
         rt.heap.push_root(v);
     }
+    let (rep, rep_form) = match by_rep {
+        Some((bytes, checked)) => {
+            let b = rt.heap.make_bytevector(bytes);
+            rt.heap.push_root(b);
+            let f = rt.heap.make_string(checked);
+            rt.heap.push_root(f);
+            (rt.heap.root_at(mark + 4), rt.heap.root_at(mark + 5))
+        }
+        None => (Value::FALSE, Value::FALSE),
+    };
     let [name, ty, form] = [1, 2, 3].map(|i| rt.heap.root_at(mark + i));
     let s = rt.heap.root_at(base);
-    let d = rt.heap.vector_from(&[s, Value::fixnum(generation), name, ty, form, Value::FALSE]);
+    let d = rt.heap.vector_from(&[s, Value::fixnum(generation), name, ty, form, Value::FALSE, rep, rep_form]);
     rt.heap.pop_roots_to(mark);
     d
 }
 
 pub(crate) fn is_pending(rt: &Runtime, d: Value) -> bool {
-    rt.heap.is_a(d, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(d) == 6
+    rt.heap.is_a(d, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(d) == 8
 }
 
 pub(crate) fn text(rt: &Runtime, v: Value) -> String {

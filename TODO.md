@@ -4683,7 +4683,10 @@ binary form for serialization, a readable one for debugging. The design,
 for review before any code: `docs/research/heap-types.md` (reps: frozen
 node tables, binders by position, abstract and generative types as keyed
 constant objects; each checker's export and import; digests; the
-migration in six steps; four open questions).
+migration in six steps; four open questions). Steps 1 to 4 done
+(2026-11-01): reps, both checkers' export and import, `stage` and evidence
+by rep, sessions' definitions by rep. Left: 5, `.fasl`s by rep; 6, the
+text paths removed.
 
 ## 203. Abstract types whose identity depends on what they declare (the user's, 2026-11-01)
 

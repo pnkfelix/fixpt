@@ -4437,3 +4437,12 @@ parameters, their variances, its representation) in a `gendef` node, and
 each checker's import makes the type from it where it has not got it.
 With it, heap types' step 3 is done.
 
+## 2026-11-01: heap types, step 4: a session's definitions by rep (§202)
+
+A definition's type found by its trial is a rep the steps after name
+(`%stage-type`) and its commit imports, not text read again: 20
+definitions against a module of a large value type 219 to 63 ms, 185 to
+62 ms on the evaluator. And a session now sees its module's values when
+the module's type has a sum or a recursive type (`module_values` read the
+printed type as FX-91 code, and found none).
+

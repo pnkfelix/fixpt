@@ -126,7 +126,7 @@ fn front_end(rt: &mut Runtime, base: usize, parts: &Parts, evaluated: bool) -> R
 /// name T)` of it, as written there.
 fn module_values(mt: &str) -> Vec<String> {
     let mut interner = fixpt_read::Interner::new();
-    let Ok(forms) = fixpt_read::Reader::new(mt, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX91, &mut interner).read_all() else { return Vec::new() };
+    let Ok(forms) = fixpt_read::Reader::new(mt, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() else { return Vec::new() };
     let Some(items) = forms.first().and_then(|f| f.as_proper_list()) else { return Vec::new() };
     items
         .iter()
@@ -152,25 +152,35 @@ fn call(rt: &mut Runtime, base: usize, i: usize, args: &[Value]) -> Result<Value
 /// procedure that runs it if `deferred`: the word (or that procedure's
 /// word), or, tried, the type; or the refusal, `(sum failed why)`.
 fn step(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str, deferred: bool) -> Result<Result<Value, Value>, String> {
-    step_making(rt, base, w, how, name, deferred, how != TRY)
+    step_making(rt, base, w, how, name, deferred, how != TRY, &[])
+}
+
+/// The same, the type of `rep` (a rep's binary form) the name `w` gives
+/// `%stage-type` (`check-more-with`), not read again from text
+/// (`docs/research/heap-types.md`, step 4).
+fn step_by_rep(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str, deferred: bool, rep: &[u8]) -> Result<Result<Value, Value>, String> {
+    step_making(rt, base, w, how, name, deferred, how != TRY, rep)
 }
 
 /// `w` checked and kept, not compiled (a session on the evaluator):
 /// `(sum checked #u)`'s payload; or the refusal.
 fn step_checked(rt: &mut Runtime, base: usize, w: &Wrapped) -> Result<Result<Value, Value>, String> {
-    step_making(rt, base, w, MORE, "", false, false)
+    step_making(rt, base, w, MORE, "", false, false, &[])
 }
 
-fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str, deferred: bool, made: bool) -> Result<Result<Value, Value>, String> {
+#[allow(clippy::too_many_arguments)]
+fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str, deferred: bool, made: bool, rep: &[u8]) -> Result<Result<Value, Value>, String> {
     let (native, registers) = crate::stage::flags(rt).ok_or("this machine cannot keep sessions")?;
     let standard = crate::stage::standard(rt).ok_or("this machine cannot keep sessions")?;
     let mark = rt.heap.push_root(standard);
     let whole = rt.heap.make_string(&w.whole);
     rt.heap.push_root(whole);
     let name = rt.heap.intern(if name.is_empty() { "%none" } else { name });
-    let [standard, whole] = [0, 1].map(|i| rt.heap.root_at(mark + i));
+    rt.heap.push_root(name);
+    let rep = rt.heap.make_bytevector(rep);
+    let [standard, whole, name] = [0, 1, 2].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
-    let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers)];
+    let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers), rep];
     let out = call(rt, base, E_STEP, &args)?;
     let tag = rt.heap.symbol_name(rt.heap.sum_tag(out));
     let payload = rt.heap.sum_payload(out);
@@ -232,26 +242,37 @@ fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, tex
     let shown = fixpt_read::escape_symbol(&name);
     let init_text = write(rt, init);
     let lambda = rt.heap.list_to_vec(init).and_then(|l| l.first().copied()).is_some_and(|h| is(h, "lambda"));
-    let ty = match ty.map(|t| write(rt, t)) {
-        Some(t) => t,
+    // The type, written, or found by a trial: its text, and its rep where
+    // the trial made one, which the steps after name, not read again.
+    let (ty, rep) = match ty.map(|t| write(rt, t)) {
+        Some(t) => (t, Vec::new()),
         None => match step(rt, base, &Wrapped::of(String::new(), text, "\n", text, 0), TRY, &name, false)? {
-            Ok(t) if rt.heap.string_to_rust(t).is_empty() => return Ok(fixpt_runtime::prim::stage_failed(rt, "malformed", usage, 0, len)),
-            Ok(t) => rt.heap.string_to_rust(t),
+            Ok(found) => {
+                let t = rt.heap.string_to_rust(rt.heap.product_field(found, 1));
+                if t.is_empty() {
+                    return Ok(fixpt_runtime::prim::stage_failed(rt, "malformed", usage, 0, len));
+                }
+                let r = rt.heap.product_field(found, 2);
+                (t, (0..rt.heap.bytevector_len(r)).map(|i| rt.heap.bytevector_ref(r, i)).collect())
+            }
             Err(refused) => return Ok(refused),
         },
     };
+    let named = if rep.is_empty() { ty.as_str() } else { "%stage-type" };
     let e = &against.e;
     let at = text.find(&init_text).map_or(0, |i| text[..i].chars().count());
-    let bounded = Wrapped::of(format!("(the (subr {e} () {ty})\n(lambda ()\n"), &init_text, "\n))\n", text, at);
-    if !lambda && let Err(refused) = step(rt, base, &bounded, TRY, "", false)? {
+    let bounded = Wrapped::of(format!("(the (subr {e} () {named})\n(lambda ()\n"), &init_text, "\n))\n", text, at);
+    if !lambda && let Err(refused) = step_by_rep(rt, base, &bounded, TRY, "", false, &rep)? {
+        return Ok(refused);
+    }
+    let checked = format!("(define {shown} {named} {init_text})");
+    if let Err(refused) = step_by_rep(rt, base, &Wrapped::of(String::new(), &checked, "\n", &checked, 0), TRY, &name, false, &rep)? {
         return Ok(refused);
     }
     let form = format!("(define {shown} {ty} {init_text})");
-    if let Err(refused) = step(rt, base, &Wrapped::of(String::new(), &form, "\n", &form, 0), TRY, &name, false)? {
-        return Ok(refused);
-    }
     let generation = generation(rt, base);
-    let d = crate::sessions::pending(rt, base, generation, &name, &ty, &form);
+    let by_rep = (!rep.is_empty()).then_some((rep.as_slice(), checked.as_str()));
+    let d = crate::sessions::pending(rt, base, generation, &name, &ty, &form, by_rep);
     let d = sum(rt, "definition", d);
     Ok(sum(rt, "ok", d))
 }
@@ -314,7 +335,26 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: &str, eva
         call(rt, base, E_DEFER, &[Value::FALSE])?;
     }
     let w = Wrapped::of(String::new(), &form, "\n", &form, 0);
-    let made = if evaluated { step_checked(rt, base, &w) } else { step(rt, base, &w, MORE, "", true) };
+    // Compiled, by its type's rep where it has one (the form naming it).
+    let rep = rt.heap.obj_ref(rt.heap.root_at(mark), crate::sessions::P_REP);
+    let by_rep = (rep != Value::FALSE).then(|| {
+        let d = rt.heap.root_at(mark);
+        let bytes: Vec<u8> = (0..rt.heap.bytevector_len(rep)).map(|i| rt.heap.bytevector_ref(rep, i)).collect();
+        (bytes, text(rt, rt.heap.obj_ref(d, crate::sessions::P_REP_FORM)))
+    });
+    // What the evaluator runs: the form; by rep, the form without its type,
+    // checked already, which the evaluator does not check (nor read again).
+    let run_form = match &by_rep {
+        Some((_, checked)) => checked.replacen(" %stage-type ", " ", 1),
+        None => form.clone(),
+    };
+    let made = match (evaluated, by_rep) {
+        // Checked and kept; the evaluator runs the form's text after.
+        (true, Some((bytes, checked))) => step_making(rt, base, &Wrapped::of(String::new(), &checked, "\n", &checked, 0), MORE, "", false, false, &bytes),
+        (true, None) => step_checked(rt, base, &w),
+        (false, Some((bytes, checked))) => step_by_rep(rt, base, &Wrapped::of(String::new(), &checked, "\n", &checked, 0), MORE, "", true, &bytes),
+        (false, None) => step(rt, base, &w, MORE, "", true),
+    };
     if rerun {
         call(rt, base, E_DEFER, &[Value::TRUE])?;
     }
@@ -326,7 +366,7 @@ pub(crate) fn ready(rt: &mut Runtime, base: usize, d: Value, decision: &str, eva
                 rt.heap.obj_set(d, crate::sessions::P_USED, Value::TRUE);
                 let g = generation(rt, base);
                 set_generation(rt, base, g + 1);
-                run_texts(rt, base, &name, &form)
+                run_texts(rt, base, &name, &run_form)
             }
             Err(refused) => Ok(refused),
         };
@@ -440,5 +480,18 @@ pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<V
             Ok(sum(rt, "run", list))
         }
         Err(refused) => Ok(refused),
+    }
+}
+#[cfg(test)]
+mod tests {
+    /// A module type's values found in its text as the checker prints it,
+    /// a sum's labels (`#:k0`) and a recursive type (`%3`) too: read as
+    /// the FX-26 checker writes, not as FX-91 code (where none was found,
+    /// and the session saw none of the module's values).
+    #[test]
+    fn a_module_types_values_are_found_in_its_printed_text() {
+        let plain = super::module_values("(moduleof (val f0 (subr pure (int) int)))");
+        let labels = super::module_values("(moduleof (val f0 (subr pure ((mu %3 (sumof (#:k0 int) (#:k1 %3)))) int)))");
+        assert_eq!((plain, labels), (vec!["f0".to_string()], vec!["f0".to_string()]));
     }
 }
