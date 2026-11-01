@@ -244,6 +244,22 @@ fn a_commit_runs_as_the_program_calls_it() {
     }
 }
 
+/// Knots through a session's own globals refused as at the top level: a
+/// procedure kept in what a global holds that reads it, and a procedure
+/// reading any global defined again (`Checker::no_reaching_itself`).
+#[test]
+fn a_session_refuses_knots_through_its_globals() {
+    const WANT: &str = "defined tbl\ndefined f\nrefused: `tbl` keeps a procedure that reads `@globals`, so it could reach itself \
+                        through a global: it must say `spin`, and it is a (subr (read @globals) () int)\ndefined g\ndefined h\n\
+                        refused: calling `g` may read any global, `g` too, so `g` may reach itself through a global: its type \
+                        must say `spin`\nrunning\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "session-knot.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), WANT), "{m}: {err}");
+    }
+}
+
 /// A session (`docs/research/eval.md`, "Sessions"): forms checked in it, an
 /// expression's procedure called, a definition committed as the program
 /// decides; redefinitions
