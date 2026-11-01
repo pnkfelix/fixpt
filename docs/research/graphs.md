@@ -302,14 +302,33 @@ What this view explains:
   fixpoint inside the greatest one that counting left.
 - **Acyclic data.** §2.4 says that on a DAG the equations have one
   solution. So the least and greatest fixpoints coincide there, and
-  counting is complete on acyclic data. In FX-26 the caution is that
-  `acyclic` describes a value's own frozen structure. A frozen list may
-  still hold a `ref`, and a later write to that `ref` can close a cycle
-  through the list. But data of the `data` kind at `acyclic` has no
-  writable part, so nothing reachable from it can be on a cycle. Such
-  data could be reference-counted with no cycle collector. Koka's
-  Perceus claims to be garbage-free only for programs without cycles
-  (`sets-and-maps.md` §2.3), for this reason.
+  counting is complete on acyclic data. In FX-26, `acyclic` describes a
+  value's own frozen structure, and a frozen list may hold writable
+  storage. Whether a cycle can pass through it depends on the types, in
+  two ways (the user's observation, then checked):
+  - *Through data, a cycle needs a recursive type through writable
+    storage.* In `cycle-through-ref.fx`, `cell` is `(ref (listof cell
+    acyclic) @r)`. The list holding `c` is frozen, but writing it into
+    `c` closes `c → l → c`, and `(eq? c (car (get (car (get c)))))` is
+    `#t`. Without the recursion, the write is a type error: a `(ref
+    (listof int acyclic) @r)` cannot hold a list of such refs.
+  - *Through a procedure, it needs none.* In `cycle-through-closure.fx`,
+    no type is recursive: a list of thunks, and a `ref` holding such a
+    list. A thunk that captures the `ref` closes `c → l → f → c`
+    through its environment, which a procedure's type does not show.
+    The only trace is Landin's-knot rule: a procedure kept in a region
+    that it reads must say `spin` (`regions/knot-through-a-ref.fx`).
+    That trace needs the procedure to read the region. Whether a
+    procedure that captures a `ref` without using it keeps it in its
+    environment is a matter of closure conversion, and was not tested.
+
+  So a value can be on no cycle if its type has no recursive type that
+  runs through writable storage (a `ref`, an array, a pair at a writable
+  region, an I-cell) and contains no procedure. The `data` kind at
+  `acyclic` meets this, more strictly, since it has no writable part at
+  all. Such data could be reference-counted with no cycle collector.
+  Koka's Perceus claims to be garbage-free only for programs without
+  cycles (`sets-and-maps.md` §2.3), for this reason.
 
 The other models illuminate parts:
 - **Erwig's decomposition is counting's cascade.** Freeing an object is
@@ -491,10 +510,11 @@ that is one design for all of them, not four.
    show what the kernel types need?
 4. Are Mokhov's laws worth stating as specifications, as a test case for
    `assert` on algebraic laws?
-5. Is §2.7's observation worth pursuing: that data of the `data` kind
-   at `acyclic`, with no writable part, could be reference-counted with
-   no cycle collector, for instance in a place whose objects are all of
-   that kind?
+5. Is §2.7's observation worth pursuing: that a value whose type has no
+   recursion through writable storage and no procedures can be on no
+   cycle, so it could be reference-counted with no cycle collector? The
+   `data` kind at `acyclic` is the simple case. Procedures are the gap,
+   since their types hide their environments.
 
 ## The toy programs
 
@@ -504,6 +524,8 @@ that is one design for all of them, not four.
 | `lattice-fixpoint.fx`   | a least-fixpoint solver over a lattice dictionary; which nodes reach 3                         | yes          | `(#t #t #t #t #t #f)`                       |
 | `semiring-closure.fx`   | one closure, two semirings: shortest paths and reachability                                    | yes          | `((0 2 5) (1 3 0) (1))`                     |
 | `gc-fixpoints.fx`       | one heap, both fixpoints: tracing (least) and reference counting (greatest)                    | yes          | `((0 1 2) (0 1 2 5 6))`                     |
+| `cycle-through-ref.fx`  | a cycle through frozen data, which needs a recursive type through a `ref`                     | yes          | `#t`                                        |
+| `cycle-through-closure.fx` | a cycle through a closure's environment, with no recursive type; the knot rule asks for `spin` | yes       | `1`, effect includes `spin`                 |
 
 ## Sources
 
