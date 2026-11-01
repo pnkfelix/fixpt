@@ -1,12 +1,13 @@
-//! `fx-regs-fxjit-nativecc`: the native convention on x86_64, each
-//! procedure's code made by the compiler written in FX-26
-//! (`native-direct-x64.fx`). Each test program runs on it as on
-//! `fx-regs-rsjit-nativecc`, whose procedures Rust compiles: the same
-//! output and errors; and with `FIXPT_FX_NATIVE_ORACLE`, every closure
-//! either compiles is compiled by both, the same bytes, fields and
-//! call-outs (`fixpt_native::direct::describe`), or both decline it.
+//! `fx-regs-fxjit-nativecc`: the native convention on x86_64 and arm64,
+//! each procedure's code made by the compiler written in FX-26 for the
+//! machine (`native-direct-x64.fx`, `native-direct-arm64.fx`). Each test
+//! program runs on it as on `fx-regs-rsjit-nativecc`, whose procedures
+//! Rust compiles: the same output and errors; and with
+//! `FIXPT_FX_NATIVE_ORACLE`, every closure either compiles is compiled by
+//! both, the same bytes, fields and call-outs
+//! (`fixpt_native::direct::describe`), or both decline it.
 
-#![cfg(target_arch = "x86_64")]
+#![cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 
 use std::process::Command;
 

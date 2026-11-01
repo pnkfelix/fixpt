@@ -644,7 +644,7 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
         "cellular",
         Some("registers"),
         Some("fx-native"),
-        "register code, compiled to x86_64 by native-direct-x64.fx (FX-26), native calls",
+        "register code, compiled to machine code by FX-26 (native-direct-x64.fx, native-direct-arm64.fx), native calls",
     ),
     (
         "fx-regs-rsjit-nativecc",
@@ -713,9 +713,9 @@ fn unavailable(machine: Option<&str>, convention: Option<&str>) -> Option<String
     {
         return Some(fixpt_native::UNAVAILABLE.to_string());
     }
-    // FX-26 compiles register code and the native convention for x86_64
-    // only (`TODO.md` §81 for arm64).
-    if (machine == Some("fx-registers") || convention == Some("fx-native")) && !cfg!(target_arch = "x86_64") {
+    // FX-26 compiles register code for x86_64 only (`TODO.md` §81 for
+    // arm64); the native convention wherever it runs.
+    if machine == Some("fx-registers") && !cfg!(target_arch = "x86_64") {
         return Some("FX-26 compiles it for x86_64 only (TODO.md §81)".into());
     }
     if machine == Some("stencils") && fixpt_native::stencil::opt_levels().is_empty() {
