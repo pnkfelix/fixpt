@@ -5013,3 +5013,10 @@ types, and whether each fix is right, not only whether the suite passes.
    before); a renaming of the value's binders that broke a verified word;
    and a procedure returning a `poly`, `(subr … () code)`, refused with "a
    (subr …) is expected here, and this is a code".
+
+**1 done (2026-11-01), drop only**: `(attempt-within ms e on-failure
+on-timeout)` (`docs/fx26.md`, "`attempt-within`"): `attempt`, `e`
+cancelled once its budget is seen spent, at a wait or a time slice's end.
+**Left**: giving back what is left to resume (a preempted task is parked
+already, so a handle to it could be); and the step limit, which is still
+the form's.

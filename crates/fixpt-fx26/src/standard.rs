@@ -746,6 +746,12 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // `attempt`'s (`synth_attempt`): its body cancellable, as a `race`
     // branch is.
     ("%processes:attempt1", "(poly ((a type) (e1 effect) (e2 effect)) (subr (maxeff e1 e2 nondet) ((subr e1 () a) (subr e2 (string) a)) a))"),
+    // `attempt-within`'s (`TODO.md` §211, 1): as `attempt1`'s, a budget in
+    // milliseconds first, and what to give should it be spent last.
+    (
+        "%processes:attempt-within1",
+        "(poly ((a type) (e1 effect) (e2 effect) (e3 effect)) (subr (maxeff e1 e2 e3 nondet) (int (subr e1 () a) (subr e2 (string) a) (subr e3 () a)) a))",
+    ),
     // `pselect`'s (`docs/fx26.md`, "`pselect`"): which of its events is
     // ready, waiting for one, a choice when more than one is.
     ("%processes:cell-event", "(poly ((r region)) (poly ((t type)) (subr pure ((icell t r)) (event (await r)))))"),

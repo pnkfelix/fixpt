@@ -80,6 +80,7 @@
                         ((and (string=? s "par2") (= k 2)) s)
                         ((and (string=? s "race2") (= k 2)) s)
                         ((and (string=? s "attempt1") (= k 2)) s)
+                        ((and (string=? s "attempt-within1") (= k 4)) s)
                         (else ""))))
               (else y ""))))
       (else y ""))))
@@ -300,6 +301,7 @@
   (lambda (lop x op args synth)
     (cond ((string=? lop "par2") (k-par-te x op args synth))
           ((string=? lop "attempt1") (k-attempt-te x op args synth))
+          ((string=? lop "attempt-within1") (k-attempt-within-te x op args synth))
           (else (k-race-te x op args synth)))))
 ;; `((with … race2) f g)`, operator `op`, `f` and `g` thunks, synthesized
 ;; by `synth`: a branch's value, both of one type, and every effect and
@@ -381,6 +383,41 @@
                       (not-string)))
                 (else y (not-string)))))
         (else y (k-fail usage a b))))))
+;; `((with … attempt-within1) ms f h t)`: `attempt`'s, `ms` an `int` and `t`
+;; taking nothing, its value the wider of all three (`synth_attempt`;
+;; `TODO.md` §211, 1).
+(define k-attempt-within-te (->* (kx kx kxs k-synth-fn) k-te)
+  (lambda (x op args synth)
+    (let* ((fh (cdr args)) (out (car (cdr (cdr fh))))
+           (core (k-attempt-te x op (the kxs (list (car fh) (car (cdr fh)))) synth))
+           (ms (synth (car args))) (ot (synth out))
+           (a (k-start x)) (b (k-end x))
+           (int (k-ty-new (ty-base 'int)))
+           (takes (lambda ()
+                    (k-fail (string-append "`attempt-within`'s on-timeout takes nothing, but is "
+                                           (k-show-ty (extract ot 1)))
+                            (k-start out) (k-end out)))))
+      (begin
+        (if (k-subtype (extract ms 1) int)
+            #u
+            (k-fail (string-append "a int is expected here, and this is a "
+                                   (k-show-ty (extract ms 1)))
+                    (k-start (car args)) (k-end (car args))))
+        (tagcase (k-get (extract ot 1))
+          (ty-subr (e3 ps3 r3 c3 spc3)
+            (if (null? ps3)
+                (k-te (k-within-type (extract core 1) r3 a b)
+                      (k-union (extract core 2)
+                               (k-union (extract ms 2) (k-union (extract ot 2) e3))))
+                (takes)))
+          (else y (takes)))))))
+(define k-within-type (->* (int int int int) int)
+  (lambda (t c a b)
+    (cond ((k-subtype c t) t)
+          ((k-subtype t c) c)
+          (else (k-fail (k-cat5 "`attempt-within`'s on-timeout gives " (k-show-ty c)
+                                " where " (k-show-ty t) " is wanted")
+                        a b)))))
 ;; The one type of an `attempt`'s body, `ra`, and its on-failure, `rb`.
 (define k-attempt-type (->* (int int int int) int)
   (lambda (ra rb a b)

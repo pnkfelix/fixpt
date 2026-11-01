@@ -3523,3 +3523,21 @@ procedure, x86_64 now and arm64 later, its slots broken if need be.
 - **The verifier's gap recorded, not fixed**: renaming a `poly` value's
   binders to the generalization's broke a word that verified; the gap was
   there for a local variable already.
+
+## `attempt-within` (2026-11-01; `TODO.md` §211, 1)
+
+The user's direction: a best effort by fuel-driven interrupts, dropping
+first, resuming later if Yank needs it.
+- **Wall clock, looked at at slice ends, not a count of polls**: the
+  slice's end is where the runtime already decides to preempt; a poll's
+  cost differs between machines by tens of times, so a count would not be
+  Heist's 100 ms on any of them.
+- **In the library, as `attempt1` is**: a race branch, and a `sync` on its
+  outcome's cell or the deadline's clock event; the waiting task sees the
+  deadline whenever the body is preempted. One `%sched` operation more,
+  the deadline from now, since the library may not read the clock itself.
+- **`nondet`, not `(io clock)`**: the program never sees the clock, only
+  which way the form went, which differs from run to run.
+- **The step limit stays the form's**, as `attempt` leaves it: a budget is
+  not a way round it. The tests' spinning bodies take 1 ms, as native code
+  spends the default limit in about 20.

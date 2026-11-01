@@ -84,6 +84,7 @@
         ((pselect) (select-form fail items lib a b))
         ((race) (race-form fail items lib a b))
         ((attempt) (attempt-form fail items call a b))
+        ((attempt-within) (attempt-within-form fail items call a b))
         (else (par-form fail items lib a b))))))
 
 ;; How `process-form` makes a call of the scheduler's procedure, by name.
@@ -229,6 +230,16 @@
       (let ((e (nth items 1)))
         (call "attempt1"
               (the syns-a (list (thunk-syn e (syn-start e) (syn-end e)) (nth items 2))))))))
+;; `(attempt-within ms e h t)`: `((with lib attempt-within1) ms (lambda () e)
+;; h t)`, as the Rust parser's (`TODO.md` §211, 1).
+(define attempt-within-form (->* (fails syns-a calls int int) syn)
+  (lambda (fail items call a b)
+    (begin
+      (arity fail items 5 "`(attempt-within milliseconds expression on-failure on-timeout)`" a b)
+      (let ((e (nth items 2)))
+        (call "attempt-within1"
+              (the syns-a (list (nth items 1) (thunk-syn e (syn-start e) (syn-end e))
+                                (nth items 3) (nth items 4))))))))
 ;;; ----------------------------------------------------------- pselect
 
 ;; `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get c)`,

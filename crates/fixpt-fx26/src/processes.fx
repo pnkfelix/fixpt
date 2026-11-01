@@ -427,3 +427,26 @@
           (tagcase ((proj (proj await @par) (outcome a)) res)
             (won v v)
             (lost m (h m))))))))
+;; The same, unless `ms` milliseconds pass first, as the scheduler sees at a
+;; wait or a time slice's end: then `f` is cancelled and `(t)` is the value
+;; (`attempt-within`; Heist's, `TODO.md` §211, 1). Best effort: what `f`
+;; does between polls (a primitive, a collection, a stage's check) runs to
+;; its end. Should `f` have ended by then, its outcome is taken.
+(define attempt-within1
+  (poly ((a type)) (subr any (int (subr any () a) (subr any (string) a) (subr any () a)) a))
+  (plambda ((a type))
+    (lambda (ms f h t)
+      (let* ((res (the (icell (outcome a) @par) (make-icell)))
+             (offer (lambda ((o (outcome a))) ((proj (proj offer-outcome @par) a) res o)))
+             (done (the (ref bool @sched) (new #f)))
+             (deadline ((proj %sched int unit i64) 55 ms #u))
+             (task (fork-race-branch
+                     (lambda () (let ((v (f))) (begin (set done #t) (offer (sum won v)))))
+                     (lambda ((m string)) (begin (set done #t) (offer (sum lost m))))))
+             (first (sync (or-event ((proj (proj cell-event @par) (outcome a)) res)
+                                    (clock-event deadline)))))
+        (if (or (= first 0) (get done))
+            (tagcase ((proj (proj await @par) (outcome a)) res)
+              (won v v)
+              (lost m (h m)))
+            (begin (cancel task) (t)))))))

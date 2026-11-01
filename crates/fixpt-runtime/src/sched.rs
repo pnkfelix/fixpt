@@ -146,6 +146,9 @@ pub mod op {
     pub const NEWS_READY: i64 = 52;
     pub const NEWS_WAIT: i64 = 53;
     pub const NEWS_UNWAIT: i64 = 54;
+    /// The clock (`clock_ns`) `a` milliseconds from now: `attempt-within`'s
+    /// deadline (`TODO.md` §211, 1).
+    pub const DEADLINE_AFTER: i64 = 55;
 }
 
 /// The state's vector, made if there is none yet.
@@ -288,6 +291,11 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         op::TIMER_ADD | op::TIMER_DUE => {
             let t = crate::prim::fixed_in(rt, a, crate::prim::Width::I64)? as i64;
             return Ok(if n == op::TIMER_DUE { Value::boolean(crate::world::clock_ns() >= t) } else { timer_add(rt, t, b) });
+        }
+        op::DEADLINE_AFTER => {
+            let ms = crate::prim::fixed_in(rt, a, crate::prim::Width::I64)? as i64;
+            let t = crate::world::clock_ns().saturating_add(ms.max(0).saturating_mul(1_000_000));
+            return Ok(crate::num::N::big(num_bigint::BigInt::from(t)).store(&mut rt.heap));
         }
         op::TIMERS_WAIT => return Ok(timers_wait(rt, true)),
         op::TIMERS_FIRE => return Ok(timers_wait(rt, false)),

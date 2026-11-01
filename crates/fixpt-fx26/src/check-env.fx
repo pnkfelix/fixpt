@@ -123,6 +123,7 @@
          '%processes:icell-get '%processes:icell-put! '%processes:par2 '%processes:cell-event
          '%processes:mailbox-event '%processes:or-event '%processes:sync
          '%processes:clock-event '%processes:stdin-event '%processes:race2 '%processes:attempt1
+         '%processes:attempt-within1
          '%processes:process-output-event '%processes:process-exit-event
          '%processes:process-news-event
          '%processes:self

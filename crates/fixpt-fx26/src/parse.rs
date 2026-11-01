@@ -1758,7 +1758,7 @@ impl Checker {
                 self.parse_exp(&asked)
             }
             // Processes and `par` (`processes.rs`).
-            head @ ("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "attempt" | "pselect" | "icell-get" | "icell-put!") => {
+            head @ ("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "attempt" | "attempt-within" | "pselect" | "icell-get" | "icell-put!") => {
                 let head = head.to_string();
                 self.parse_process_form(span, &head, &items)
             }

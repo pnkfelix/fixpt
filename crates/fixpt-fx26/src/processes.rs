@@ -32,6 +32,8 @@ impl Checker {
     /// - `(race e1 … en)`: `race2` of the first branch and the `race` of the
     ///   rest, as thunks;
     /// - `(attempt e h)`: `((with lib attempt1) (lambda () e) h)`.
+    /// - `(attempt-within ms e h t)`: `((with lib attempt-within1) ms
+    ///   (lambda () e) h t)`.
     pub(crate) fn parse_process_form(&mut self, span: fixpt_read::Span, head: &str, items: &[Syntax]) -> R<ExpId> {
         let lib = self.parse_load(span, crate::check::PROCESSES, false)?;
         let Exp::Var(lib) = *self.arena.exp_at(lib) else { unreachable!("a load is its hidden global") };
@@ -94,6 +96,12 @@ impl Checker {
                 call(self, "attempt1", &[thunk, on_failure.clone()])
             }
             ("attempt", _) => return Err(usage("(attempt expression on-failure)")),
+            ("attempt-within", [_, ms, body, on_failure, on_timeout]) => {
+                let lambda = Syntax::symbol(body.span, self.interner.intern("lambda"));
+                let thunk = Syntax::list(body.span, vec![lambda, Syntax::new(body.span, fixpt_read::Datum::Nil), body.clone()]);
+                call(self, "attempt-within1", &[ms.clone(), thunk, on_failure.clone(), on_timeout.clone()])
+            }
+            ("attempt-within", _) => return Err(usage("(attempt-within milliseconds expression on-failure on-timeout)")),
             ("pselect", [_, arms @ ..]) if !arms.is_empty() => self.select_expansion(span, lib, arms)?,
             ("pselect", _) => {
                 return Err(usage(
@@ -650,7 +658,13 @@ impl Checker {
     /// both theirs and `nondet`: what a failure says is the machine's.
     pub(crate) fn synth_attempt(&mut self, e: ExpId, fun: ExpId, args: &[ExpId]) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
-        let usage = "`(attempt expression on-failure)`";
+        // `attempt-within`'s: its milliseconds, an `int`, first, and its
+        // on-timeout, taking nothing, last (`TODO.md` §211, 1).
+        let (within, args) = match args {
+            [ms, rest @ .., t] if rest.len() == 2 => (Some((*ms, *t)), rest),
+            _ => (None, args),
+        };
+        let usage = if within.is_some() { "`(attempt-within milliseconds expression on-failure on-timeout)`" } else { "`(attempt expression on-failure)`" };
         let [f, h] = args else { return Err(FxError::at(span, usage)) };
         let (ft, fe) = self.synth(*f)?;
         let (ht, he) = self.synth(*h)?;
@@ -683,11 +697,38 @@ impl Checker {
                 format!("`attempt`'s body gives {} and its on-failure {}", self.show_ty(a), self.show_ty(b)),
             ));
         };
+        let mut eff = fe.union(&he).union(&e1).union(&e2).union(&Effect::atom(Atom::Nondet));
+        let mut descs = vec![D::Type(t), D::Effect(e1.clone()), D::Effect(e2.clone())];
+        let t = match within {
+            None => t,
+            Some((ms, out)) => {
+                let int = self.int;
+                eff = eff.union(&self.check(ms, int)?);
+                let (ot, oe) = self.synth(out)?;
+                let Ty::Subr { effect: e3, params, result: c, .. } = self.arena.get(self.arena.resolve(ot)).clone() else {
+                    return Err(FxError::at(self.arena.span_of(out), format!("`attempt-within`'s on-timeout takes nothing, but is {}", self.show_ty(ot))));
+                };
+                if !params.is_empty() {
+                    return Err(FxError::at(self.arena.span_of(out), format!("`attempt-within`'s on-timeout takes nothing, but is {}", self.show_ty(ot))));
+                }
+                eff = eff.union(&oe).union(&e3);
+                descs.push(D::Effect(e3));
+                let wider = if self.subtype(c, t) {
+                    t
+                } else if self.subtype(t, c) {
+                    c
+                } else {
+                    return Err(FxError::at(span, format!("`attempt-within`'s on-timeout gives {} where {} is wanted", self.show_ty(c), self.show_ty(t))));
+                };
+                descs[0] = D::Type(wider);
+                wider
+            }
+        };
         if let Exp::With { module, body } = *self.arena.exp_at(fun) {
             self.with_as(fun, module, body, None)?;
         }
-        self.note_library_inst(e, vec![D::Type(t), D::Effect(e1.clone()), D::Effect(e2.clone())]);
-        Ok((t, fe.union(&he).union(&e1).union(&e2).union(&Effect::atom(Atom::Nondet))))
+        self.note_library_inst(e, descs);
+        Ok((t, eff))
     }
 
     /// The first pair of atoms, one of each effect, that interfere: on

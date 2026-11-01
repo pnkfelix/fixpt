@@ -4503,3 +4503,12 @@ under a substitution (instantiated, it went into its own nested copy, and
 found a knot where there is none); and a global read is generalizable, so
 a global of a `poly` type is given where one is wanted (it was "a
 polymorphic value must be pure"). Each in both checkers, with tests.
+
+## 2026-11-01: `attempt-within`, a budget for a cancellable body (§211, 1)
+
+For Heist's editor, where a form that does not end hung it: `(attempt-within
+ms e on-failure on-timeout)` is `attempt`, but `e` is cancelled once `ms`
+milliseconds are seen to have passed, at a wait or a time slice's end, and
+`(on-timeout)` is the value. In the scheduler written in FX-26, its
+deadline a clock event; on every machine; effect `nondet`, not
+`(io clock)`. Drop only: resuming what is left is not done.
