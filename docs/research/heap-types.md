@@ -1,6 +1,7 @@
 # Types as heap data
 
-Status: design, for the user's review (2026-11-01). Nothing implemented.
+Status: design, reviewed with the user (2026-11-01; "Decided", below).
+Nothing implemented.
 Asked for by the user after Heist's request (`TODO.md` §201, item 5): a
 `stage` checks its module's type again each time because the type crosses
 to the staged checker as text. The user's direction: types as heap data,
@@ -160,16 +161,105 @@ go only when nothing uses them.
    cheap). Measure s7st's warm start.
 6. **Text paths removed**, where nothing is left on them.
 
-## Open questions, for the user
+## Decided (the user's, 2026-11-01)
 
-1. **The keys of sealed abstract types.** Keyed by the sealing definition's
-   stamp, a sealing is one type however often its definition runs. A
-   sealing inside a procedure, made at each call (first-class modules),
-   would need a key of each run's. Is a static key per sealing site the
-   intended meaning, as the checker treats it now?
-2. **Trust of reps read from disk.** Validated before import (above), or
-   trusted as a `.fasl`'s machine code is, until proof-carrying code?
-3. **Where the binary form lives**: in the heap crate, so that the
-   runtime, the CLI and both checkers share it; or a crate of its own.
-4. **Order of work**: steps 1 to 3 settle Heist's item 5; 5 settles
-   §200's step 3. Stop after 3 and measure, or go on?
+- **Measure after step 3**, before going on to sessions and `.fasl`s.
+- **A crate of its own** for reps, their binary form and their readable
+  form, shared by the runtime, the CLI and both checkers.
+- **Validation by a toggle**: reps from the trusted pieces are imported as
+  they are, and an environment variable (`FIXPT_VALIDATE_REPS`, say) makes
+  every import validate, trusted or not, for debugging and for tests.
+- **The keys of abstract types**: below.
+
+## Abstract types, and what their identity depends on
+
+### What the checker does now
+
+Probed on both checkers (2026-11-01; both agree on each):
+
+| Program | Refused as |
+| --- | --- |
+| a procedure that seals one of two representations, chosen at run time; two calls' results mixed | ``argument 1 is a b..t, where a a..t is expected`` |
+| the same procedure, the same argument, called twice, the results mixed | the same: `a..t` and `b..t` are two types |
+| a sealed global defined again at the same declared type, another representation; a value of the old given to the new | ``argument 1 is a rt..t', where a rt..t is expected`` |
+
+So each binding of a sealed module has abstract types of its own, and each
+definition of a global new ones: types are generative per binding. No two
+bindings' abstract types are ever taken as one, even from the same call of
+the same procedure. That is sound, and as strict as generative types are;
+it is more strict than reasons 1 to 3 below need.
+
+### Why a program seals a type, and what that asks of identity
+
+1. **Representation invariants** (Hoare): what every value of the type
+   satisfies, kept by the module's operations alone.
+2. **Abstraction functions**: what each value stands for, mathematically.
+3. **Replaceable implementations** (Parnas): an implementation swapped
+   without its users seeing it.
+4. **Distinct instances**: an invariant that ties a value to one instance:
+   an index valid in this table, a symbol interned in this interner, a
+   handle into this session (as `ST`'s `s`, or Rust's branded lifetimes).
+
+Reasons 1 to 3 are the implementation's: they hold of every value the
+implementation makes, whichever instance made it. For them, two instances of
+one implementation could share their abstract types (applicative sharing:
+`Set` of `int` made twice, one set type). Reason 4 is the instance's: two
+instances of one implementation, with one representation and the same
+code, must not share, though nothing in their representations tells them
+apart. So sharing is sound only where the invariant depends on nothing the
+instance makes, and the checker cannot see an invariant.
+
+### Identity as a function of declared dependencies (the user's)
+
+As a build system keys a build step by its inputs (Nix's derivation hash,
+Bazel's action key), an abstract type's identity is a function of what it
+depends on, and the program says what that is. The forms above are each a
+set of dependencies:
+
+| Dependencies | Two sealings share their abstract type when |
+| --- | --- |
+| none (static) | always: the same sealing |
+| the paths of the module's arguments (applicative) | the paths are equal |
+| a fresh nonce, one per evaluation (generative) | never |
+| what the program names: this table, this interner | what they name is the same |
+
+The last is reason 4 stated, not approximated: indices into one table share
+a type, indices into two do not. What the checker does now is a default
+in this scheme: a sealing that declares nothing depends on its binding.
+
+**In types**, an abstract type that depends on something is a constructor
+applied to it: `(t tbl)`, not `t`; equal when the constructor (the sealing)
+is one and the dependencies are equal. The checker has the pieces already:
+a dependent procedure names a module's types through its argument's path
+(`(select c t)`), and regions are the store's dependencies (`(ref int r)`
+depends on region `r`; a `letregion` makes a fresh one, which is a nonce).
+An index into a table could be a type of the table's region.
+
+**Checking**, as a build system sandboxes a step (Bazel's worth is that the
+declared inputs are enforced): the sealed implementation may depend only on
+what it declares. Its free variables are declared or static; its making
+effect allocates fresh state only through a declared dependency or a
+declared `fresh`. The effect system computes both already: the free
+variables, and the `(alloc r)` and `(read r)` atoms. An undeclared
+dependency is an error, as an undeclared input is.
+
+**Input-addressed, not content-addressed.** Nix keys a derivation by its
+inputs or by its output. The analogue of the second, identity by
+representation, is what reason 4 rules out: two tables' indices are both
+`int`. Abstract types are input-addressed.
+
+**Keys** (for the reps above): a digest of the sealing's site and its
+dependencies' keys, as a derivation's hash is of its inputs' hashes; a
+`fresh` dependency is a nonce minted when the sealing runs. A key is as
+stable, across `.fasl`s and processes, as its dependencies' keys are. Now,
+before anything is declared: a global's sealing is keyed by its
+definition's stamp; a sealing or a binding inside a procedure, by its
+evaluation (a nonce), since two calls' modules are two types, and staged
+code given both through evidence must see two.
+
+**What changes for programs**: nothing, until a sealing declares its
+dependencies; declaring them only lets more programs share types. The
+syntax, and whether applicative sharing is a dependency set of its own
+or what declaring the arguments means, are left for the design of the
+language change (`TODO.md` §203); the reps need only keys that can be
+input-addressed, of which keying by binding is the first case.

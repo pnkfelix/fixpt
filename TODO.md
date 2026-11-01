@@ -4668,3 +4668,16 @@ for review before any code: `docs/research/heap-types.md` (reps: frozen
 node tables, binders by position, abstract and generative types as keyed
 constant objects; each checker's export and import; digests; the
 migration in six steps; four open questions).
+
+## 203. Abstract types whose identity depends on what they declare (the user's, 2026-11-01)
+
+An abstract type's identity as a function of its declared dependencies, as
+a build system keys a step by its inputs: none (static), the arguments'
+paths (applicative), a fresh nonce (generative), or what the program
+names (this table), enforced as a sandbox enforces declared inputs, by the
+free variables and the making effect of the sealed implementation. Today's
+behaviour, generative per binding, is the default. The reasoning and what
+the checker does now: `docs/research/heap-types.md`, "Abstract types, and
+what their identity depends on". Left to design: the syntax, and how
+applicative sharing is said. After §202's reps, whose keys this needs only
+to be able to address.
