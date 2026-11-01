@@ -100,19 +100,14 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
     }
     let base = rt.heap.push_root(a[0]);
     // On the machines of the compilers written in FX-26, a session is the
-    // checker written in FX-26's (`sessions26.rs`), unless its first step
-    // names a region of its own, which that checker cannot bind for a
-    // session's top level yet: then the Rust checker's, as before.
-    let on26 = |rt: &mut Runtime| {
-        let parts = staged_parts(rt, a[1], a[2]).map(|(p, _)| p);
-        crate::sessions26::takes(rt, a[0], parts.as_ref())
-    };
+    // checker written in FX-26's (`sessions26.rs`).
+    let on26 = |rt: &mut Runtime| crate::sessions26::takes(rt, a[0]);
     let out = match op {
         "lower" => lower(rt, base, a[1], a[2]),
         "commit-lower" => commit_lower(rt, base, a[1], a[2]),
         "check" if on26(rt) => crate::sessions26::check(rt, base, a[1], a[2]),
         "check" => check(rt, base, a[1], a[2]),
-        "eval-check" if crate::sessions26::takes(rt, a[0], None) => crate::sessions26::eval_check(rt, base, &a[1..]),
+        "eval-check" if crate::sessions26::takes(rt, a[0]) => crate::sessions26::eval_check(rt, base, &a[1..]),
         "eval-check" => eval_check(rt, base, &a[1..]),
         "eval-ready" if rt.heap.obj_ref(a[0], S_INDEX).as_fixnum() <= -2 => {
             let decision = text(rt, a[2]);
@@ -159,15 +154,12 @@ pub(crate) fn failed(rt: &mut Runtime, kind: &str, why: &str) -> Value {
 /// compiled, a compiler is made for the session, `m` put in its global,
 /// and theirs compiled and run now; or, evaluated, their texts run before
 /// the first step's (`State::seed_texts`), the evaluator binding `m`.
-///
-/// Each region of its own `parts` name (`docs/research/eval.md`,
-/// "Evidence") is bound in the session's checker the first time a step
-/// names it, as a region it can know nothing of, and stays.
 fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl FnOnce(&mut Runtime, &mut State) -> T) -> Result<T, String> {
-    // Its types by rep, where it has one, each named for the step
-    // (`stage::step_reps`; `docs/research/heap-types.md`, step 6).
+    // Its types by rep, each named for the step (`stage::step_reps`;
+    // `docs/research/heap-types.md`, step 6); its callers refuse a step
+    // with none (`step_reps_of`).
     let reps = parts.rep.as_deref().and_then(crate::stage::step_reps);
-    let mt = if reps.is_some() { crate::stage::MODULE_TYPE } else { parts.mt.as_str() };
+    let mt = crate::stage::MODULE_TYPE;
     let index = rt.heap.obj_ref(rt.heap.root_at(base), S_INDEX).as_fixnum();
     let index = if index >= 0 {
         index as usize
@@ -227,7 +219,6 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
     Ok(SESSIONS.with(|ss| {
         let mut ss = ss.borrow_mut();
         let state = &mut ss[index];
-        bind_regions(&mut state.checker, &parts.regions);
         let depth = bind_step_names(&mut state.checker, reps.as_ref());
         let out = f(rt, state);
         state.checker.dscope.truncate(depth);
@@ -253,28 +244,19 @@ fn bind_step_names(c: &mut Checker, reps: Option<&crate::stage::StepReps>) -> us
     depth
 }
 
-/// An expression step's code wrapped: by its types' names where it has
-/// them by rep (`%stage-result-type`, `(subr E () R)`), else as
-/// `expression` writes it out.
-pub(crate) fn step_expression(parts: &Parts, text: &str) -> Wrapped {
-    if parts.rep.as_deref().and_then(crate::stage::step_reps).is_none() {
-        return expression(&parts.e, &parts.r, text);
-    }
+/// Whether `parts` has its types by rep, as a step's (`stage::step_reps`):
+/// a step without is refused (`stage::no_rep`).
+fn has_step_reps(parts: &Parts) -> bool {
+    parts.rep.as_deref().and_then(crate::stage::step_reps).is_some()
+}
+
+/// An expression step's code wrapped, its type named (`%stage-result-type`,
+/// `(subr E () R)`).
+pub(crate) fn step_expression(text: &str) -> Wrapped {
     let r = crate::stage::RESULT_TYPE;
     Wrapped::of(format!("(the {r}\n(lambda ()\n"), text, "\n))\n", text, 0)
 }
 
-/// Each of `regions` that checker `c` has not bound, bound, for good.
-fn bind_regions(c: &mut Checker, regions: &[String]) {
-    for r in regions {
-        let name = c.interner.intern(r);
-        if c.dscope.iter().any(|(n, _)| *n == name) {
-            continue;
-        }
-        let v = c.arena.dvar_of(name, crate::ast::Kind::Region);
-        c.dscope.push((name, crate::parse::DScope::Var(v, crate::ast::Kind::Region)));
-    }
-}
 
 /// `text`, read in a file of the session's own, kept: its forms.
 fn read(state: &mut State, text: &str) -> Result<(FileId, Vec<Syntax>), crate::FxError> {
@@ -311,10 +293,6 @@ pub(crate) fn is_definition(rt: &Runtime, code: Value) -> bool {
     rt.heap.is_a(head, fixpt_heap::ObjType::Symbol) && rt.heap.symbol_name(head) == "define"
 }
 
-/// An expression, `text`, as it is checked: within `E`, of type `R`.
-pub(crate) fn expression(e: &str, r: &str, text: &str) -> Wrapped {
-    Wrapped::of(format!("(the (subr {e} () {r})\n(lambda ()\n"), text, "\n))\n", text, 0)
-}
 
 /// Lowered, what `%fx26-session-lower` does with the session at `base` and
 /// the product a form's code is: an expression, the datum whose value is the
@@ -322,11 +300,14 @@ pub(crate) fn expression(e: &str, r: &str, text: &str) -> Wrapped {
 /// (sum definition d))`, `d` pending; or the refusal.
 fn lower(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<Value, String> {
     let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
+    if !has_step_reps(&parts) {
+        return Ok(crate::stage::no_rep(rt));
+    }
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Lowered);
     }
-    let w = step_expression(&parts, &text);
+    let w = step_expression(&text);
     let made = seeded(rt, base, &parts, Mode::Lowered, |rt, state| {
         let made = tried(rt, state, &w, |c, g, top, _| crate::session::lower_top(c, g, &top));
         made.map(|c| {
@@ -346,11 +327,14 @@ fn lower(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<V
 /// or the refusal.
 fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<Value, String> {
     let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
+    if !has_step_reps(&parts) {
+        return Ok(crate::stage::no_rep(rt));
+    }
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Compiled);
     }
-    let w = step_expression(&parts, &text);
+    let w = step_expression(&text);
     let found = seeded(rt, base, &parts, Mode::Compiled, |rt, state| tried(rt, state, &w, |c, _, top, file| FormFacts::of(c, &[&top], file, &w.whole, true)))?;
     let facts = match found {
         Ok(facts) => facts,
@@ -378,7 +362,7 @@ fn datum(rt: &mut Runtime, code: &Code) -> Value {
 /// the pending definition, `(sum ok (sum definition d))`, the checker as
 /// it was.
 fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, text: &str, mode: Mode) -> Result<Value, String> {
-    let e = if against.rep.as_deref().and_then(crate::stage::step_reps).is_some() { crate::stage::EFFECT } else { against.e.as_str() };
+    let e = crate::stage::EFFECT;
     let len = text.chars().count() as i64;
     let usage = "a definition is `(define name init)` or `(define name type init)`";
     let parts = rt.heap.list_to_vec(code).unwrap_or_default();
@@ -633,11 +617,13 @@ fn keeps(c: &Checker, top: &Top) -> Vec<String> {
 /// last's value the procedure that evaluates it; a definition, pending;
 /// or the refusal.
 fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, String> {
-    let [mt, e, r, text] = [a[0], a[1], a[2], a[3]].map(|v| self::text(rt, v));
+    let text = self::text(rt, a[3]);
     let mut given = fixpt_runtime::evidence::Given::of(rt, a[4], a[5]);
     given.with_reps(rt, a[7]);
-    let mut parts = Parts::of(&mt, &e, &r, &given);
-    parts.rep = crate::stage::given_rep(rt, a[6], &given);
+    let parts = Parts { rep: crate::stage::given_rep(rt, a[6], &given) };
+    if !has_step_reps(&parts) {
+        return Ok(crate::stage::no_rep(rt));
+    }
     let mut interner = std::mem::take(&mut rt.interner);
     let read = fixpt_read::Reader::new(&text, FileId(0), fixpt_read::SyntaxProfile::FX91, &mut interner).read_all();
     rt.interner = interner;
@@ -649,7 +635,7 @@ fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, Strin
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Evaluated);
     }
-    let w = step_expression(&parts, &text);
+    let w = step_expression(&text);
     let made = seeded(rt, base, &parts, Mode::Evaluated, |rt, state| {
         tried(rt, state, &w, |_, _, _, _| ()).map(|()| {
             let mut texts = std::mem::take(&mut state.seed_texts);

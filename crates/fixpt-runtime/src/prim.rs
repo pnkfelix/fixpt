@@ -3117,15 +3117,14 @@ prims! {
     "%fx26-session-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "lower", a));
     "%fx26-session-commit-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "commit-lower", a));
     "%fx26-stage-check", 8, Some(8), simple!(|rt, a| {
-        let [mt, e, r, text] = [a[0], a[1], a[2], a[3]].map(|x| get_string(rt, x));
-        let (mt, e, r, text) = (mt?, e?, r?, text?);
+        let text = get_string(rt, a[3])?;
         let mut given = crate::evidence::Given::of(rt, a[4], a[5]);
         // And the evidence's reps, where they are (the evaluator's).
         given.with_reps(rt, a[7]);
         // And what the code is checked as, as a rep, if the checker made one.
         let rep = fixpt_reps::heap::from_heap(&rt.heap, a[6], true).ok();
         Ok(match rt.stage_check {
-            Some(check) => check(rt, &mt, &e, &r, &text, &given, rep),
+            Some(check) => check(rt, &text, &given, rep),
             None => stage_refused(rt, "this machine cannot stage code"),
         })
     });

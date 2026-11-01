@@ -15,8 +15,8 @@
 //! commit, into the procedure `go` calls), or tried and not kept (a
 //! pending definition, its type found).
 
-use crate::sessions::{expression, failed, is_definition, is_pending, strings, sum, text};
-use crate::stage::{staged_parts, Parts, Wrapped};
+use crate::sessions::{failed, is_definition, is_pending, strings, sum, text};
+use crate::stage::{staged_parts, Wrapped};
 use fixpt_heap::Value;
 use fixpt_runtime::Runtime;
 
@@ -96,25 +96,19 @@ fn named_list(rt: &mut Runtime, named: &[(String, Vec<u8>)]) -> Value {
     l
 }
 
-/// An expression step's code wrapped: by its types' names where the check
-/// has them (`%stage-result-type`, `(subr E () R)`), else as `expression`
-/// writes it out.
-fn step_expression(parts: &Parts, code: &str) -> Wrapped {
-    if STEP_NAMED.with(|n| n.borrow().is_empty()) {
-        return expression(&parts.e, &parts.r, code);
-    }
+/// An expression step's code wrapped, its type named (`%stage-result-type`,
+/// `(subr E () R)`).
+fn step_expression(code: &str) -> Wrapped {
     let r = crate::stage::RESULT_TYPE;
     Wrapped::of(format!("(the {r}\n(lambda ()\n"), code, "\n))\n", code, 0)
 }
 
 /// Whether the session `s` is on this checker, or new where this
-/// checker can be its (a front end that is compiled, and a module's type
-/// that names no region of its own: those this checker cannot bind for a
-/// session's top level yet).
-pub(crate) fn takes(rt: &mut Runtime, s: Value, parts: Option<&Parts>) -> bool {
+/// checker can be its (a front end that is compiled).
+pub(crate) fn takes(rt: &mut Runtime, s: Value) -> bool {
     match rt.heap.obj_ref(s, S_INDEX).as_fixnum() {
         i if i <= -2 => true,
-        -1 => crate::stage::global(rt, MAKE_COMPILER).is_some() && parts.is_none_or(|p| p.regions.is_empty()),
+        -1 => crate::stage::global(rt, MAKE_COMPILER).is_some(),
         _ => false,
     }
 }
@@ -138,7 +132,7 @@ fn set_generation(rt: &mut Runtime, base: usize, g: i64) {
 /// On the evaluator (`evaluated`), nothing is compiled: the texts of `m`'s
 /// values' definitions are kept, for the evaluator to run before the next
 /// step's (`S_TEXTS`).
-fn front_end(rt: &mut Runtime, base: usize, parts: &Parts, evaluated: bool) -> Result<Result<Value, Value>, String> {
+fn front_end(rt: &mut Runtime, base: usize, evaluated: bool) -> Result<Result<Value, Value>, String> {
     let s = rt.heap.root_at(base);
     let made = rt.heap.obj_ref(s, S_COMPILER);
     if rt.heap.obj_ref(s, S_INDEX).as_fixnum() <= -2 && made != Value::FALSE {
@@ -154,14 +148,13 @@ fn front_end(rt: &mut Runtime, base: usize, parts: &Parts, evaluated: bool) -> R
     let cell = call(rt, base, E_GLOBAL, &[name])?;
     let m = rt.heap.obj_ref(rt.heap.root_at(base), S_MODULE);
     rt.heap.set_bloblet_slot(cell, fixpt_heap::layout::cellular::GLOBAL_VALUE, m);
-    // By its rep where it has one (the module's type named, not written).
-    let by_rep = STEP_NAMED.with(|n| !n.borrow().is_empty());
-    let mt = if by_rep { crate::stage::MODULE_TYPE } else { parts.mt.as_str() };
+    // The module's type named, not written (`StepNamed`).
+    let mt = crate::stage::MODULE_TYPE;
     let seed = format!("(define stage-module (the {mt} %fasl-value))\n");
     if let Err(refused) = step(rt, base, &Wrapped::of(String::new(), &seed, "", &seed, 0), FIRST, "", false)? {
         return Ok(Err(refused));
     }
-    let names = STEP_VALUES.with(|v| v.borrow().clone()).unwrap_or_else(|| module_values(&parts.mt));
+    let names = STEP_VALUES.with(|v| v.borrow().clone()).unwrap_or_default();
     let defines: Vec<String> = names.iter().map(|n| format!("(define {n} (with stage-module {n}))\n")).collect();
     let values: String = defines.concat();
     if !values.is_empty() {
@@ -184,21 +177,6 @@ fn front_end(rt: &mut Runtime, base: usize, parts: &Parts, evaluated: bool) -> R
     }
     set_generation(rt, base, 0);
     Ok(Ok(rt.heap.obj_ref(rt.heap.root_at(base), S_COMPILER)))
-}
-
-/// The names of the values of module type `mt`, printed whole: each `(val
-/// name T)` of it, as written there.
-fn module_values(mt: &str) -> Vec<String> {
-    let mut interner = fixpt_read::Interner::new();
-    let Ok(forms) = fixpt_read::Reader::new(mt, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() else { return Vec::new() };
-    let Some(items) = forms.first().and_then(|f| f.as_proper_list()) else { return Vec::new() };
-    items
-        .iter()
-        .filter_map(|i| match i.as_proper_list() {
-            Some([head, name, _]) if head.as_symbol().is_some_and(|h| interner.name(h) == "val") => name.as_symbol().map(|n| fixpt_read::escape_symbol(interner.name(n))),
-            _ => None,
-        })
-        .collect()
 }
 
 /// Entry `i` of the session at `base`'s front end, called with `args`.
@@ -263,25 +241,23 @@ fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str,
 /// definition, pending, `(sum ok (sum definition d))`; or the refusal.
 pub(crate) fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<Value, String> {
     let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
-    // Its types by rep, where it has one, for each of its steps
-    // (`docs/research/heap-types.md`, step 6).
-    let _named = StepNamed::set(parts.rep.as_deref().and_then(crate::stage::step_reps));
-    if !parts.regions.is_empty() {
-        return Ok(failed(rt, "refused", "a session's code is not checked against a region of its own on this machine yet"));
-    }
+    // Its types by rep, for each of its steps (`docs/research/heap-types.md`,
+    // step 6).
+    let Some(reps) = parts.rep.as_deref().and_then(crate::stage::step_reps) else { return Ok(crate::stage::no_rep(rt)) };
+    let _named = StepNamed::set(Some(reps));
     let code_text = fixpt_runtime::print::write_value(&rt.heap, code);
     // Rooted while the session's front end is made, which collects.
     let mark = rt.heap.push_root(code);
-    let made = front_end(rt, base, &parts, false);
+    let made = front_end(rt, base, false);
     let code = rt.heap.root_at(mark);
     rt.heap.pop_roots_to(mark);
     if let Err(refused) = made? {
         return Ok(refused);
     }
     if is_definition(rt, code) {
-        return check_define(rt, base, &parts, code, &code_text);
+        return check_define(rt, base, code, &code_text);
     }
-    let w = step_expression(&parts, &code_text);
+    let w = step_expression(&code_text);
     match step(rt, base, &w, MORE, "", false)? {
         Ok(word) => {
             let run = rt.run_word.ok_or("no cellular machine is installed")?;
@@ -297,7 +273,7 @@ pub(crate) fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) 
 /// name init)` or `(define name type init)`; its type found if not
 /// written, and its initializer, unless a `lambda`, tried within `E`; the
 /// form, its type written, tried too; the pending definition. Nothing kept.
-fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, text: &str) -> Result<Value, String> {
+fn check_define(rt: &mut Runtime, base: usize, code: Value, text: &str) -> Result<Value, String> {
     let len = text.chars().count() as i64;
     let usage = "a definition is `(define name init)` or `(define name type init)`";
     let parts = rt.heap.list_to_vec(code).unwrap_or_default();
@@ -330,7 +306,7 @@ fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, tex
         },
     };
     let named = if rep.is_empty() { ty.as_str() } else { "%stage-type" };
-    let e = if STEP_NAMED.with(|n| n.borrow().is_empty()) { against.e.as_str() } else { crate::stage::EFFECT };
+    let e = crate::stage::EFFECT;
     let at = text.find(&init_text).map_or(0, |i| text[..i].chars().count());
     let bounded = Wrapped::of(format!("(the (subr {e} () {named})\n(lambda ()\n"), &init_text, "\n))\n", text, at);
     if !lambda && let Err(refused) = step_by_rep(rt, base, &bounded, TRY, "", false, &rep)? {
@@ -523,17 +499,14 @@ fn run_texts(rt: &mut Runtime, base: usize, name: &str, form: &str) -> Result<Va
 /// `(sum run texts)`, the forms to run, the last's value the procedure
 /// that evaluates it; a definition, pending; or the refusal.
 pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, String> {
-    let [mt, e, r, code_text] = [a[0], a[1], a[2], a[3]].map(|v| text(rt, v));
+    let code_text = text(rt, a[3]);
     let mut given = fixpt_runtime::evidence::Given::of(rt, a[4], a[5]);
     given.with_reps(rt, a[7]);
-    let mut parts = Parts::of(&mt, &e, &r, &given);
-    // By rep where the checker made one (`a[6]`), for each step.
-    parts.rep = crate::stage::given_rep(rt, a[6], &given);
-    let _named = StepNamed::set(parts.rep.as_deref().and_then(crate::stage::step_reps));
-    if !parts.regions.is_empty() {
-        return Ok(failed(rt, "refused", "a session's code is not checked against a region of its own on this machine yet"));
-    }
-    if let Err(refused) = front_end(rt, base, &parts, true)? {
+    // By the rep the checker made (`a[6]`), for each step.
+    let rep = crate::stage::given_rep(rt, a[6], &given);
+    let Some(reps) = rep.as_deref().and_then(crate::stage::step_reps) else { return Ok(crate::stage::no_rep(rt)) };
+    let _named = StepNamed::set(Some(reps));
+    if let Err(refused) = front_end(rt, base, true)? {
         return Ok(refused);
     }
     let mut interner = std::mem::take(&mut rt.interner);
@@ -545,9 +518,9 @@ pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<V
         Err(e) => return Ok(failed(rt, "unread", &e.message)),
     };
     if is_definition(rt, code) {
-        return check_define(rt, base, &parts, code, &code_text);
+        return check_define(rt, base, code, &code_text);
     }
-    let w = step_expression(&parts, &code_text);
+    let w = step_expression(&code_text);
     match step_checked(rt, base, &w)? {
         Ok(_) => {
             let mut texts = take_seeds(rt, base);
@@ -556,18 +529,5 @@ pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<V
             Ok(sum(rt, "run", list))
         }
         Err(refused) => Ok(refused),
-    }
-}
-#[cfg(test)]
-mod tests {
-    /// A module type's values found in its text as the checker prints it,
-    /// a sum's labels (`#:k0`) and a recursive type (`%3`) too: read as
-    /// the FX-26 checker writes, not as FX-91 code (where none was found,
-    /// and the session saw none of the module's values).
-    #[test]
-    fn a_module_types_values_are_found_in_its_printed_text() {
-        let plain = super::module_values("(moduleof (val f0 (subr pure (int) int)))");
-        let labels = super::module_values("(moduleof (val f0 (subr pure ((mu %3 (sumof (#:k0 int) (#:k1 %3)))) int)))");
-        assert_eq!((plain, labels), (vec!["f0".to_string()], vec!["f0".to_string()]));
     }
 }
