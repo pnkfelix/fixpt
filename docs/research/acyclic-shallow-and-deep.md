@@ -169,8 +169,8 @@ records (`obj_ref`). So a cycle through either gets no label, and `put`
 recurses until the stack ends. `find_shared`'s work budget does not
 help, since the recursion is in `put`.
 
-The fix is to make `find_shared` visit what `put` visits. This is
-independent of `acyclic`. The printer has no fast path that trusts
+The fix is to make `find_shared` visit what `put` visits (issue #6).
+This is independent of `acyclic`. The printer has no fast path that trusts
 `acyclic`, and it should not get one unless `acyclic` becomes deep.
 
 ## 4. The options
@@ -268,7 +268,7 @@ risk in §0.
 1. Reword the three descriptions (§4.1), so that no one else reads
    `acyclic` as deep.
 2. Add `walk-needs-spin.fx` and `icell-knot.fx` as tests.
-3. Fix the printer (§3).
+3. Fix the printer (§3, issue #6).
 4. When the first consumer that needs depth arrives, add `(deep T)`, or
    use `data` directly, rather than a second region.
 
