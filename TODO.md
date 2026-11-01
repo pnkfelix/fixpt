@@ -4859,3 +4859,13 @@ whole run, not a span.
    together, so that a benchmark written the easy way reports them out of
    the box; the benchmarks in use (the scratch `s201` ones, Heist's
    s7st timings) moved to it.
+
+## 209. The FX-26 checker's base types after its interning table is begun again (found 2026-11-01)
+
+`k-intern-reset` (`check-types.fx`, past `k-intern-budget` entries) lets
+the interning table go, the base types with it, so a `ty-base` made after
+it (a rep's import, `ri-ty-of`) is a new id, not `k-int`'s: a comparison
+by id (`check-specs.fx`'s `(= r k-int)`) would then fail, as the Rust
+checker's did before Heist's report (`fixpt-nat-int-from-fasl.md`). Not
+seen to happen. Either the reset enters the base types again, or the
+import finds them in `k-base` (which `check-reps.fx` does not see now).

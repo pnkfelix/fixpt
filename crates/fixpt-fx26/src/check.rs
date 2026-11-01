@@ -3810,7 +3810,7 @@ impl Checker {
             (Ty::Nil, Ty::Nil) | (Ty::Nil, Ty::Pair(_, _, _, true)) => true,
             // `false` is `#f`, a `bool`.
             (Ty::False, Ty::False) => true,
-            (Ty::False, Ty::Base(_)) => b == self.bool_,
+            (Ty::False, Ty::Base(y)) => self.interner.name(y) == "bool",
             (Ty::Nil, Ty::NList { size, .. }) => self.size_le(&Size::lit(0), &size),
             // An `i32` or `u32` is the fixnum it stands for, an `i64` or
             // `u64` the exact integer (a bignum past a fixnum): an `int`
@@ -3820,7 +3820,7 @@ impl Checker {
                 x == y || (matches!(self.interner.name(x), "i8" | "u8" | "i32" | "u32" | "i64" | "u64") && self.interner.name(y) == "int")
             }
             // A natural is an integer; one of a known size, a natural.
-            (Ty::Nat(_), Ty::Base(_)) => b == self.int,
+            (Ty::Nat(_), Ty::Base(y)) => self.interner.name(y) == "int",
             (Ty::Nat(m), Ty::Nat(n)) => self.size_le(&m, &n),
             (Ty::Var(x), Ty::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
             (

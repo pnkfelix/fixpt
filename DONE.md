@@ -4469,3 +4469,13 @@ name their types for the step. The evaluator's evidence stages, 20 of
 them, 128 to 47 ms. Left as text: the Rust checker's session's own
 definitions' types, and a module `.fasl`'s type lines, which cross to
 nothing else.
+
+## 2026-11-01: a `nat` an `int` of a type read from a `.fasl` (Heist's report)
+
+`fixpt-nat-int-from-fasl.md`: a `nat` was refused where an `int` read
+from a `.fasl`'s rep was expected, the Rust checker's rule knowing `int`
+by its id and its import making a base type anew. Its import now gives a
+base type the standard environment's own, as its name read does, and the
+rules for a `nat` and `#f` know `int` and `bool` by name, as their
+neighbour does. Test: both of the report's repros
+(`a_nat_is_an_int_of_a_type_read_from_a_fasl`).

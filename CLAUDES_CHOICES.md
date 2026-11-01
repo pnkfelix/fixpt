@@ -3452,3 +3452,17 @@ the arm64 twin: `direct.rs`'s `procedure` ported step for step.
    makes all 47 `native` programs differ).
 6. **The machine**: the CLI calls this machine's compiler (`DIRECT_FX`);
    `fx-native` is refused only where the native convention does not run.
+
+## A base type imported is the standard one (2026-11-01; Heist's `fixpt-nat-int-from-fasl.md`)
+
+- **Both the import and the rule**: the Rust checker's rep import gives a
+  base type the standard environment's id (`Checker::base`), which every
+  comparison by id (`== self.int`, in `specs.rs` and `smt_theory.rs` too)
+  then takes, the root of it; and the rules for `nat ≤ int` and `#f ≤
+  bool` compare names, as Heist asked and as the FX-26 checker's do, so
+  that a base type made anew elsewhere is not refused there either.
+- **The FX-26 checker's import left alone**: its store interns a base
+  type (`k-internable?`), so the import gives the standard id already;
+  only after `k-intern-reset` (past 400,000 entries) would it make one
+  anew, which `TODO.md` §209 keeps, as `check-reps.fx` cannot see the
+  base table (`k-base`, `check-env`) without new wiring.

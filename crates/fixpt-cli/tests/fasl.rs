@@ -432,3 +432,26 @@ fn a_definition_changed_at_the_same_type_is_seen_through_a_fasl() {
         assert!(ok && err.contains("`b.fx` is read from `b.fasl`") && out == "45", "{flags:?}: {out}{err}");
     }
 }
+
+/// A type read from a `.fasl`'s rep is the standard environment's own where
+/// it is a base type, so that a `nat` is an `int` of one (Heist's report,
+/// `fixpt-nat-int-from-fasl.md`): a form the `.fasl` keeps as its source
+/// (`g`, defined twice), and a file run from source after it.
+#[test]
+fn a_nat_is_an_int_of_a_type_read_from_a_fasl() {
+    let dir = scratch("nat-int");
+    let f = "(define f (subr pure (int) int) (lambda (n) (+ n 1)))\n";
+    let g = "(define g (subr (maxeff (read @globals) spin) () int) (lambda () (f (length (list 1 2 3)))))\n";
+    let first = "(define g (subr (maxeff (read @globals) spin) () int) (lambda () 0))\n";
+    std::fs::write(dir.join("a.fx"), format!("{f}{first}{g}(g)\n")).expect("written");
+    std::fs::write(dir.join("f.fx"), f).expect("written");
+    std::fs::write(dir.join("g.fx"), format!("{g}(write-out (int->string (g)))\n")).expect("written");
+    for file in ["a.fx", "f.fx"] {
+        let (ok, out, err) = fixpt(&dir, &["compile-file", "--program", file], &[]);
+        assert!(ok, "{file}: {out}{err}");
+    }
+    let (ok, out, err) = fixpt(&dir, &["eval", "a.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ok && err.contains("`a.fx` is read from `a.fasl`") && out.contains("4 : int"), "{out}{err}");
+    let (ok, out, err) = fixpt(&dir, &["run", "f.fx", "g.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ok && err.contains("`f.fx` is read from `f.fasl`") && out == "4", "{out}{err}");
+}

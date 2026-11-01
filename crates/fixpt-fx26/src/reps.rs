@@ -1097,7 +1097,13 @@ impl Im<'_, '_> {
             }
             other => return Err(format!("no type `{other}`")),
         };
-        let t = self.c.arena.ty(ty);
+        // A base type is the standard environment's own, as its name read
+        // makes it: rules that know one by its id (`self.int`) take it.
+        let standard = match &ty {
+            Ty::Base(s) => self.c.base.get(s).copied(),
+            _ => None,
+        };
+        let t = standard.unwrap_or_else(|| self.c.arena.ty(ty));
         let t = match self.links[k as usize] {
             Some(link) => {
                 self.c.arena.set_link(link, t);
