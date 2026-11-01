@@ -1372,10 +1372,12 @@ impl Checker {
     }
 
     /// Every type abbreviation in scope.
+    /// Not a name the machinery gives a type for a step (`%stage-type` and its
+    /// kin, `stage.rs`), which no type is shown by.
     pub fn type_names(&self) -> Vec<Sym> {
         self.dscope
             .iter()
-            .filter(|(_, d)| matches!(d, crate::parse::DScope::Rec(_)))
+            .filter(|(n, d)| matches!(d, crate::parse::DScope::Rec(_)) && !self.interner.name(*n).starts_with('%'))
             .map(|(n, _)| *n)
             .collect()
     }

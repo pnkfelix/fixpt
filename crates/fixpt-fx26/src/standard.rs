@@ -294,7 +294,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // and the code, written out; a pending definition readied, given the
     // decision's tag; whether one redefines. A session, made, and a
     // pending definition are the runtime's, never looked in.
-    ("%session-eval-check", "(poly ((r region) (t type)) (subr (maxeff spin (io fs-read)) ((arrayof t r) string string string string string (listof string acyclic)) (sumof (run (listof string acyclic)) (ok (sumof (definition (arrayof t r)))) (failed stage-failure))))"),
+    (
+        "%session-eval-check",
+        concat!(
+            "(poly ((r region) (t type) (s region)) (subr (maxeff spin (io fs-read) (read s)) ((arrayof t r) string string string string string (listof string acyclic) ",
+            "wcell (listof (bytevectorof s) acyclic)) (sumof (run (listof string acyclic)) (ok (sumof (definition (arrayof t r)))) (failed stage-failure))))",
+        ),
+    ),
     ("%session-eval-ready", "(poly ((r region)) (poly ((t type)) (subr (maxeff spin (io fs-read) (read r) (write r)) ((arrayof t r) (arrayof t r) string) (sumof (run (listof (productof (text string) (keeps bool)) acyclic)) (failed stage-failure)))))"),
     ("%session-eval-make", "(poly ((r region)) (poly ((t type)) (subr (alloc r) (t) (arrayof t r))))"),
     ("%session-eval-committed!", "(poly ((r region)) (poly ((t type)) (subr (maxeff (read r) (write r)) ((arrayof t r) (arrayof t r)) (sumof (defined string) (failed stage-failure)))))"),

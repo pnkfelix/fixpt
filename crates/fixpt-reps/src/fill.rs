@@ -170,6 +170,26 @@ pub fn combine(head: &str, reps: &[&Rep]) -> Result<Rep, String> {
     Ok(b.finish(root)?.rep)
 }
 
+/// The part of `rep` at node `node`, as a rep of its own; a piece of
+/// evidence of it (its root an [`EVIDENCE`] node) if `as_evidence` (an
+/// effect, which no type is). Or why not: a part naming a variable bound
+/// outside it.
+pub fn part(rep: &Rep, node: u32, as_evidence: bool) -> Result<Rep, String> {
+    let mut b = Builder::new();
+    let base = copy_nodes(&mut b, rep);
+    let at = map_arg(&mut b, rep, base, Arg::Node(node), &mut Vec::new(), true);
+    let Arg::Node(root) = at else { return Err("no part".into()) };
+    let root = if as_evidence { b.add(EVIDENCE, &[], vec![Arg::Node(root)]) } else { root };
+    // The rep's nodes the part does not reach, left out: filled with what
+    // they are, as nothing there names them.
+    for k in 0..rep.nodes.len() as u32 {
+        if !b.is_filled(base + k) {
+            b.fill(base + k, EVIDENCE, &[], Vec::new());
+        }
+    }
+    Ok(b.finish(root)?.rep)
+}
+
 /// `rep` with each set's members each there once, made canonical again,
 /// until none is there twice: two members equal once canonical (a member
 /// the evidence brought and one the set had) are one.
@@ -258,6 +278,16 @@ mod tests {
         let b = rep("(ref (pairof (base int) (base string) (frozen #t) #t) (rconst r))");
         let both = combine("fasl-types", &[&a, &b]).expect("combines");
         assert_eq!(both, rep("(fasl-types #1=(pairof (base int) (base string) (frozen #t) #t) (ref #1# (rconst r)))"), "{}", text::write(&both));
+    }
+
+    /// A part of a rep is a rep of its own; an effect's, as evidence.
+    #[test]
+    fn a_part_is_a_rep() {
+        let r = rep("(subr (native) (&effect (io stdout)) (params (base int)) (base string))");
+        let params = match r.nodes[0].args[2] { Arg::Node(k) => k, _ => panic!("params") };
+        let effect = match r.nodes[0].args[1] { Arg::Node(k) => k, _ => panic!("effect") };
+        assert_eq!(part(&r, params, false).expect("a part"), rep("(params (base int))"));
+        assert_eq!(part(&r, effect, true).expect("a part"), rep("(evidence (&effect (io stdout)))"));
     }
 
     #[test]

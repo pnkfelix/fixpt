@@ -171,6 +171,16 @@ pub(crate) fn staged_parts(rt: &Runtime, staged: Value, given: Value) -> Option<
     Some((parts, field(4)))
 }
 
+/// What code given `given` is checked as, by rep (`rep`, a rep in the heap,
+/// or `#f`), its holes filled by the evidence's reps: its binary form;
+/// none where it has no rep, or a hole is left (the evaluator's sessions,
+/// `%fx26-session-eval-check`).
+pub(crate) fn given_rep(rt: &Runtime, rep: Value, given: &fixpt_runtime::evidence::Given) -> Option<Vec<u8>> {
+    let r = fixpt_reps::heap::from_heap(&rt.heap, rep, true).ok()?;
+    let r = if r.holes.is_empty() { Some(r) } else { given.filled(&r) }?;
+    Some(fixpt_reps::binary::encode(&r))
+}
+
 /// The front end that stages, made at the first `stage` and kept.
 fn stage_front_end(rt: &mut Runtime) -> Result<Value, String> {
     if let Some(c) = global(rt, CHECK) {
@@ -362,4 +372,88 @@ pub(crate) fn sx_value(rt: &mut Runtime, x: &crate::sx::Sx) -> Value {
             out
         }
     }
+}
+
+/// What a session's step is checked against, as reps
+/// (`docs/research/heap-types.md`, step 6): of the rep of what its code is
+/// checked as, `(subr pure (M) (subr E () R))`, `M`'s, `(subr E () R)`'s and
+/// `E`'s (an effect, as evidence), each with the name the step's text gives
+/// it, in their binary forms; and `M`'s values' names.
+#[derive(Clone)]
+pub(crate) struct StepReps {
+    pub named: Vec<(String, Vec<u8>)>,
+    pub values: Vec<String>,
+}
+
+/// The names a step's text gives its types (`StepReps`).
+pub(crate) const MODULE_TYPE: &str = "%stage-module-type";
+pub(crate) const RESULT_TYPE: &str = "%stage-result-type";
+pub(crate) const EFFECT: &str = "%stage-effect";
+
+/// [`StepReps`] of `bytes`, a rep's binary form; none if it is not of that
+/// shape. Kept by the rep, which a session's every step has alike, a few.
+pub(crate) fn step_reps(bytes: &[u8]) -> Option<StepReps> {
+    thread_local! {
+        static KEPT: std::cell::RefCell<Vec<(Vec<u8>, Option<StepReps>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    if let Some(r) = KEPT.with(|k| k.borrow().iter().find(|(b, _)| b == bytes).map(|(_, r)| r.clone())) {
+        return r;
+    }
+    let made = step_reps_of(bytes);
+    KEPT.with(|k| {
+        let mut k = k.borrow_mut();
+        if k.len() >= 8 {
+            k.remove(0);
+        }
+        k.push((bytes.to_vec(), made.clone()));
+    });
+    made
+}
+
+fn step_reps_of(bytes: &[u8]) -> Option<StepReps> {
+    use fixpt_reps::{fill::part, Arg};
+    let rep = fixpt_reps::binary::decode(bytes, fixpt_reps::heap::validate_all()).ok()?;
+    let node = |k: u32| rep.nodes.get(k as usize);
+    let child = |a: Option<&Arg>| match a {
+        Some(Arg::Node(k)) => Some(*k),
+        _ => None,
+    };
+    let root = node(rep.root())?;
+    if rep.name(root.head) != "subr" {
+        return None;
+    }
+    let m = child(node(child(root.args.get(2))?)?.args.first())?;
+    let result = child(root.args.get(3))?;
+    let r = node(result)?;
+    if rep.name(r.head) != "subr" {
+        return None;
+    }
+    let e = child(r.args.get(1))?;
+    let module = part(&rep, m, false).ok()?;
+    let values = module_values(&module)?;
+    let enc = fixpt_reps::binary::encode;
+    let named = vec![
+        (MODULE_TYPE.to_string(), enc(&module)),
+        (RESULT_TYPE.to_string(), enc(&part(&rep, result, false).ok()?)),
+        (EFFECT.to_string(), enc(&part(&rep, e, true).ok()?)),
+    ];
+    Some(StepReps { named, values })
+}
+
+/// The names of module type `module`'s values, from its rep (`moduleof`'s
+/// `vals`, a label then a type each), as written in text.
+fn module_values(module: &fixpt_reps::Rep) -> Option<Vec<String>> {
+    let root = &module.nodes[module.root() as usize];
+    if module.name(root.head) != "moduleof" {
+        return None;
+    }
+    let vals = root.args.iter().find_map(|a| match a {
+        fixpt_reps::Arg::Node(k) if module.name(module.nodes[*k as usize].head) == "vals" => Some(*k),
+        _ => None,
+    })?;
+    let args = &module.nodes[vals as usize].args;
+    Some(args.chunks(2).filter_map(|p| match p[0] {
+        fixpt_reps::Arg::Sym(s) => Some(fixpt_read::escape_symbol(module.name(s))),
+        _ => None,
+    }).collect())
 }

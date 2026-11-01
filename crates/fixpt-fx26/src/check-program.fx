@@ -478,20 +478,51 @@
 (define check-program (->* (syns-a k-tops) k-result)
   (lambda (standard forms)
     (check-staged-program standard forms (the (bytevectorof @t) (make-bytevector 0 0)))))
+;; Names, each with a rep, in its binary form.
+(define-type k-named-reps (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
+;; A session's step's names, each its type or effect as a rep (`stage.rs`'s
+;; `step_reps`; `docs/research/heap-types.md`, step 6), bound for its check
+;; (`k-stage-type!`), as `session-step` sets them.
+(define k-step-named (ref k-named-reps @t) (new nil))
+(define set-step-named! (->* (k-named-reps) unit) (lambda (ns) (set k-step-named ns)))
+(define k-bind-step-named! (->* (k-named-reps) unit)
+  (lambda (ns)
+    (if (null? ns)
+        #u
+        (let ((d ((with check-reps k-rep-desc) (extract (car ns) 2))))
+          (begin (k-push-desc (extract (car ns) 1)
+                              (tagcase d
+                                (de (e) (ds-eff e))
+                                (dt (t) (ds-rec t))
+                                (else y (ds-rec 0))))
+                 (k-bind-step-named! (cdr ns)))))))
+(define k-unbind-step-named! (->* (k-named-reps) unit)
+  (lambda (ns)
+    (letrec ((named? (->* (symbol k-named-reps) bool)
+                     (lambda (s ns)
+                       (and (not (null? ns))
+                            (or (symbol=? s (extract (car ns) 1)) (named? s (cdr ns))))))
+             (drop (->* (k-scope) k-scope)
+                   (lambda (ds)
+                     (cond ((null? ds) nil)
+                           ((named? (car (car ds)) ns) (drop (cdr ds)))
+                           (else (cons (car ds) (drop (cdr ds))))))))
+      (if (null? ns) #u (set k-dscope (drop (get k-dscope)))))))
 ;; For `stage` (`stage.rs`, `docs/research/heap-types.md`, step 3): `forms`
 ;; checked as `check-program` checks them, the name `%stage-type` the type of
 ;; `rep` imported (`k-rep-ty`), what the code is checked as, which the text
 ;; then names, not spells out; nothing bound if `rep` is empty.
 (define check-staged-program (->* (syns-a k-tops (bytevectorof @t)) k-result)
   (lambda (standard forms rep)
-    (prompt k-tag
-      (begin (k-reset) (set k-broken-began (get k-broken)) (set k-syscall-expanding 0)
-             (k-standard standard)
-             (set k-std-dscope (get k-dscope))
-             (k-stage-type! rep)
-             (k-ahead forms)
-             (k-ok (k-forms forms (k-types-again forms))))
-      (lambda (r) r))))
+    (let ((r (prompt k-tag
+               (begin (k-reset) (set k-broken-began (get k-broken)) (set k-syscall-expanding 0)
+                      (k-standard standard)
+                      (set k-std-dscope (get k-dscope))
+                      (k-stage-type! rep)
+                      (k-ahead forms)
+                      (k-ok (k-forms forms (k-types-again forms))))
+               (lambda (r) r))))
+      (begin (k-stage-type-gone! rep) r))))
 
 ;; The entry point for more of a program, form by form, as the REPL gives
 ;; them: checked in the environment the forms before left, which
@@ -560,11 +591,14 @@
 ;; `%stage-type` bound to rep `rep` imported, if it is not empty.
 (define k-stage-type! (->* ((bytevectorof @t)) unit)
   (lambda (rep)
-    (if (= (bytevector-length rep) 0)
-        #u
-        (k-push-desc '%stage-type (ds-rec ((with check-reps k-rep-ty) rep nil))))))
+    (begin
+      (if (= (bytevector-length rep) 0)
+          #u
+          (k-push-desc '%stage-type (ds-rec ((with check-reps k-rep-ty) rep nil))))
+      (k-bind-step-named! (get k-step-named)))))
 ;; And unbound again, its innermost binding taken out of the description
-;; scope (what a session's definition bound after it stays).
+;; scope (what a session's definition bound after it stays); and the
+;; step's names (`set-step-named!`).
 (define k-stage-type-gone! (->* ((bytevectorof @t)) unit)
   (lambda (rep)
     (letrec ((drop (->* (k-scope) k-scope)
@@ -572,7 +606,8 @@
                      (cond ((null? ds) nil)
                            ((symbol=? (car (car ds)) '%stage-type) (cdr ds))
                            (else (cons (car ds) (drop (cdr ds))))))))
-      (if (= (bytevector-length rep) 0) #u (set k-dscope (drop (get k-dscope)))))))
+      (begin (if (= (bytevector-length rep) 0) #u (set k-dscope (drop (get k-dscope))))
+             (k-unbind-step-named! (get k-step-named))))))
 
 ;; For a driver (a session's pending definition, `sessions26.rs`): `forms`
 ;; checked as `check-more` checks them, and the type global `n` then has,

@@ -3133,7 +3133,7 @@ prims! {
     // evaluator to run: a form checked, given the module's type, the
     // effect, the result type and the code as text; and readied, given the
     // decision's tag as text.
-    "%fx26-session-eval-check", 7, Some(7), simple!(|rt, a| session_op(rt, "eval-check", a));
+    "%fx26-session-eval-check", 9, Some(9), simple!(|rt, a| session_op(rt, "eval-check", a));
     "%fx26-session-eval-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "eval-ready", a));
     // Evidence (`docs/research/eval.md`, "Evidence"): what a `reify-…`
     // makes of the product the compilers make of its operand

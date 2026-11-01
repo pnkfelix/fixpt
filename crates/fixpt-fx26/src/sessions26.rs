@@ -46,6 +46,67 @@ const FIRST: i64 = 0;
 const MORE: i64 = 1;
 const TRY: i64 = 2;
 
+thread_local! {
+    /// The names a session's check's steps give its types, each a rep in its
+    /// binary form (`stage::step_reps`), and its module's values' names; for
+    /// the check, none outside it (`StepNamed`).
+    static STEP_NAMED: std::cell::RefCell<Vec<(String, Vec<u8>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static STEP_VALUES: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The step names set for a check, unset as it ends.
+struct StepNamed;
+
+impl StepNamed {
+    fn set(reps: Option<crate::stage::StepReps>) -> StepNamed {
+        let (named, values) = match reps {
+            Some(r) => (r.named, Some(r.values)),
+            None => (Vec::new(), None),
+        };
+        STEP_NAMED.with(|n| *n.borrow_mut() = named);
+        STEP_VALUES.with(|v| *v.borrow_mut() = values);
+        StepNamed
+    }
+}
+
+impl Drop for StepNamed {
+    fn drop(&mut self) {
+        STEP_NAMED.with(|n| n.borrow_mut().clear());
+        STEP_VALUES.with(|v| *v.borrow_mut() = None);
+    }
+}
+
+/// `named` as `session-step` takes it: a list of products of a symbol and a
+/// bytevector.
+fn named_list(rt: &mut Runtime, named: &[(String, Vec<u8>)]) -> Value {
+    let mut l = Value::NULL;
+    for (n, bytes) in named.iter().rev() {
+        let base = rt.heap.push_root(l);
+        let sym = rt.heap.intern(n);
+        rt.heap.push_root(sym);
+        let b = rt.heap.make_bytevector(bytes);
+        rt.heap.push_root(b);
+        let (sym, b) = (rt.heap.root_at(base + 1), rt.heap.root_at(base + 2));
+        let p = rt.heap.make_frozen(PRODUCT, &[sym, b]);
+        rt.heap.push_root(p);
+        let (l0, p) = (rt.heap.root_at(base), rt.heap.root_at(base + 3));
+        l = rt.heap.cons(p, l0);
+        rt.heap.pop_roots_to(base);
+    }
+    l
+}
+
+/// An expression step's code wrapped: by its types' names where the check
+/// has them (`%stage-result-type`, `(subr E () R)`), else as `expression`
+/// writes it out.
+fn step_expression(parts: &Parts, code: &str) -> Wrapped {
+    if STEP_NAMED.with(|n| n.borrow().is_empty()) {
+        return expression(&parts.e, &parts.r, code);
+    }
+    let r = crate::stage::RESULT_TYPE;
+    Wrapped::of(format!("(the {r}\n(lambda ()\n"), code, "\n))\n", code, 0)
+}
+
 /// Whether the session `s` is on this checker, or new where this
 /// checker can be its (a front end that is compiled, and a module's type
 /// that names no region of its own: those this checker cannot bind for a
@@ -93,12 +154,15 @@ fn front_end(rt: &mut Runtime, base: usize, parts: &Parts, evaluated: bool) -> R
     let cell = call(rt, base, E_GLOBAL, &[name])?;
     let m = rt.heap.obj_ref(rt.heap.root_at(base), S_MODULE);
     rt.heap.set_bloblet_slot(cell, fixpt_heap::layout::cellular::GLOBAL_VALUE, m);
-    let mt = &parts.mt;
+    // By its rep where it has one (the module's type named, not written).
+    let by_rep = STEP_NAMED.with(|n| !n.borrow().is_empty());
+    let mt = if by_rep { crate::stage::MODULE_TYPE } else { parts.mt.as_str() };
     let seed = format!("(define stage-module (the {mt} %fasl-value))\n");
     if let Err(refused) = step(rt, base, &Wrapped::of(String::new(), &seed, "", &seed, 0), FIRST, "", false)? {
         return Ok(Err(refused));
     }
-    let defines: Vec<String> = module_values(mt).iter().map(|n| format!("(define {n} (with stage-module {n}))\n")).collect();
+    let names = STEP_VALUES.with(|v| v.borrow().clone()).unwrap_or_else(|| module_values(&parts.mt));
+    let defines: Vec<String> = names.iter().map(|n| format!("(define {n} (with stage-module {n}))\n")).collect();
     let values: String = defines.concat();
     if !values.is_empty() {
         let w = Wrapped::of(String::new(), &values, "", &values, 0);
@@ -178,9 +242,13 @@ fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str,
     let name = rt.heap.intern(if name.is_empty() { "%none" } else { name });
     rt.heap.push_root(name);
     let rep = rt.heap.make_bytevector(rep);
-    let [standard, whole, name] = [0, 1, 2].map(|i| rt.heap.root_at(mark + i));
+    rt.heap.push_root(rep);
+    // Only the names this step's text gives its types, each imported for it.
+    let named: Vec<(String, Vec<u8>)> = STEP_NAMED.with(|n| n.borrow().iter().filter(|(name, _)| w.whole.contains(name.as_str())).cloned().collect());
+    let named = named_list(rt, &named);
+    let [standard, whole, name, rep] = [0, 1, 2, 3].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
-    let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers), rep];
+    let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers), rep, named];
     let out = call(rt, base, E_STEP, &args)?;
     let tag = rt.heap.symbol_name(rt.heap.sum_tag(out));
     let payload = rt.heap.sum_payload(out);
@@ -195,6 +263,9 @@ fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str,
 /// definition, pending, `(sum ok (sum definition d))`; or the refusal.
 pub(crate) fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<Value, String> {
     let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
+    // Its types by rep, where it has one, for each of its steps
+    // (`docs/research/heap-types.md`, step 6).
+    let _named = StepNamed::set(parts.rep.as_deref().and_then(crate::stage::step_reps));
     if !parts.regions.is_empty() {
         return Ok(failed(rt, "refused", "a session's code is not checked against a region of its own on this machine yet"));
     }
@@ -210,7 +281,7 @@ pub(crate) fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) 
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &code_text);
     }
-    let w = expression(&parts.e, &parts.r, &code_text);
+    let w = step_expression(&parts, &code_text);
     match step(rt, base, &w, MORE, "", false)? {
         Ok(word) => {
             let run = rt.run_word.ok_or("no cellular machine is installed")?;
@@ -259,7 +330,7 @@ fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, tex
         },
     };
     let named = if rep.is_empty() { ty.as_str() } else { "%stage-type" };
-    let e = &against.e;
+    let e = if STEP_NAMED.with(|n| n.borrow().is_empty()) { against.e.as_str() } else { crate::stage::EFFECT };
     let at = text.find(&init_text).map_or(0, |i| text[..i].chars().count());
     let bounded = Wrapped::of(format!("(the (subr {e} () {named})\n(lambda ()\n"), &init_text, "\n))\n", text, at);
     if !lambda && let Err(refused) = step_by_rep(rt, base, &bounded, TRY, "", false, &rep)? {
@@ -453,7 +524,12 @@ fn run_texts(rt: &mut Runtime, base: usize, name: &str, form: &str) -> Result<Va
 /// that evaluates it; a definition, pending; or the refusal.
 pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, String> {
     let [mt, e, r, code_text] = [a[0], a[1], a[2], a[3]].map(|v| text(rt, v));
-    let parts = Parts::of(&mt, &e, &r, &fixpt_runtime::evidence::Given::of(rt, a[4], a[5]));
+    let mut given = fixpt_runtime::evidence::Given::of(rt, a[4], a[5]);
+    given.with_reps(rt, a[7]);
+    let mut parts = Parts::of(&mt, &e, &r, &given);
+    // By rep where the checker made one (`a[6]`), for each step.
+    parts.rep = crate::stage::given_rep(rt, a[6], &given);
+    let _named = StepNamed::set(parts.rep.as_deref().and_then(crate::stage::step_reps));
     if !parts.regions.is_empty() {
         return Ok(failed(rt, "refused", "a session's code is not checked against a region of its own on this machine yet"));
     }
@@ -471,7 +547,7 @@ pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<V
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &code_text);
     }
-    let w = expression(&parts.e, &parts.r, &code_text);
+    let w = step_expression(&parts, &code_text);
     match step_checked(rt, base, &w)? {
         Ok(_) => {
             let mut texts = take_seeds(rt, base);

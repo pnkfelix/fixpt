@@ -17,6 +17,10 @@
                        (k-desc) (bytevectorof @t)))
             (val k-rep-declined? (subr (maxeff (read @globals) (read @t) spin) () bool))
             (val k-rep-making! (subr (maxeff (read @globals) (write @t) spin) (bool) unit))
+            (val k-rep-desc
+                 (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) (write @t)
+                               (goto @z) spin)
+                       ((bytevectorof @t)) k-desc))
             (val k-rep-tys
                  (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) (write @t)
                                (goto @z) spin)

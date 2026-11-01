@@ -489,9 +489,10 @@
          ;; runs it (if `deferred`, a commit's) or the word; 2, tried, not
          ;; kept, the type `name` then has given, as text and as a rep. And
          ;; `rep`, if not empty, the type the code names `%stage-type`
-         ;; (`check-more-with`). What each gives, or why not, placed in the
-         ;; code.
-         (session-step
+         ;; (`check-more-with`); and `named`, the names its text gives its
+         ;; types, each a rep (`set-step-named!`). What each gives, or why
+         ;; not, placed in the code.
+         (session-step-of
           (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int) (how int)
                    (name symbol) (make bool) (deferred bool) (native bool) (registers bool)
                    (rep (bytevectorof @t)))
@@ -537,6 +538,16 @@
                                                    runs facts))
                                        (c-ok (w) (sum made w))
                                        (c-err (m) (refused m k (+ k len)))))))))))))))))
+         (session-step
+          (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int) (how int)
+                   (name symbol) (make bool) (deferred bool) (native bool) (registers bool)
+                   (rep (bytevectorof @t))
+                   (named (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic)))
+            (begin
+             ((with check-program set-step-named!) named)
+             (let ((out (session-step-of standard whole k len how name make deferred native
+                                         registers rep)))
+               (begin ((with check-program set-step-named!) nil) out)))))
          ;; The types of what the checker tells the compiler.
          (stage-env-types (load-module "fx26:check-env-types.fx"))
          ;; A session's code (`sessions.rs`), checked by the checker written

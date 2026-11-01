@@ -143,6 +143,26 @@ impl Checker {
         t
     }
 
+    /// A rep, its holes none, as a description: an effect if it is evidence
+    /// of one (`fixpt_reps::fill::part`), else the type it is or is evidence
+    /// of; as the checker written in FX-26's `k-rep-desc`.
+    pub fn import_desc(&mut self, rep: &Rep) -> Result<crate::ast::D, String> {
+        use crate::ast::D;
+        let root = &rep.nodes[rep.root() as usize];
+        if rep.name(root.head) != fixpt_reps::fill::EVIDENCE {
+            return self.import_rep(rep, &[]).map(D::Type);
+        }
+        let gens: HashMap<u64, u32> = (0..self.generatives.len() as u32).map(|w| (generative_key(self, w), w)).collect();
+        let a = *root.args.first().ok_or("evidence of nothing")?;
+        let mut im = Im { c: self, rep, holes: &[], gens, done: vec![None; rep.nodes.len()], links: vec![None; rep.nodes.len()], busy: vec![false; rep.nodes.len()], bound: HashMap::new() };
+        let k = Im::child(a)?;
+        if rep.name(rep.nodes[k as usize].head) == "effect" {
+            im.effect(a).map(D::Effect)
+        } else {
+            im.ty(k).map(D::Type)
+        }
+    }
+
     pub fn import_rep(&mut self, rep: &Rep, holes: &[DVar]) -> Result<TyId, String> {
         if holes.len() != rep.holes.len() {
             return Err(format!("{} holes, {} variables given", rep.holes.len(), holes.len()));

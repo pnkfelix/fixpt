@@ -390,6 +390,13 @@
               (ty-named (g xs) (mix 15 g))
               (ty-union (ms) (mix 16 (k-length ms)))
               (else y (mix 17 t))))))))
+;; Whether `n` is a name the machinery gives a type for a step, not one a
+;; program wrote (`%stage-type` and its kin, `stage.rs`): no type is shown
+;; by it.
+(define k-own-name? (->* (symbol) bool)
+  (lambda (n)
+    (let ((s (symbol->string n)))
+      (and (> (string-length s) 0) (char=? (string-ref s 0) #\%)))))
 (define k-abbrev-in (->* (k-scope k-scope int int) k-strings)
   (lambda (all ds i t)
     (if (null? ds)
@@ -397,7 +404,7 @@
         (let ((n (car (car ds))))
           (tagcase (cdr (car ds))
             (ds-rec (d)
-              (if (and (k-fits? d t) (not (k-rec-named-within? all i n)))
+              (if (and (not (k-own-name? n)) (k-fits? d t) (not (k-rec-named-within? all i n)))
                   (cons (symbol->string n) nil)
                   (k-abbrev-in all (cdr ds) (+ i 1) t)))
             (else y (k-abbrev-in all (cdr ds) (+ i 1) t)))))))
@@ -431,7 +438,7 @@
           (ds-rec (d)
             (let ((t (k-resolve d)))
               (k-atree-of (cdr ds) (+ i 1)
-                          (if (k-abbreviates? t)
+                          (if (and (k-abbreviates? t) (not (k-own-name? (car (car ds)))))
                               (k-atree-put tr (k-shape-hash t 2) t (car (car ds)) i)
                               tr))))
           (else y (k-atree-of (cdr ds) (+ i 1) tr))))))

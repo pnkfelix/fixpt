@@ -508,7 +508,7 @@
                  (lambda ((s val) (mt string) (eff string) (r string) (text string) (ns string)
                           (g (listof string acyclic)) (gr (listof (bytevectorof @v) acyclic))
                           (rp wcell))
-                   (tagcase (%session-eval-check (ev-host s) mt eff r text ns g)
+                   (tagcase (%session-eval-check (ev-host s) mt eff r text ns g rp gr)
                      (run ts (ev-sum2 'ok 'expression (ev-session-run s ts)))
                      (ok d (tagcase d
                              (definition p (ev-sum2 'ok 'definition (the val (o-host p))))))

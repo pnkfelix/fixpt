@@ -787,6 +787,18 @@
 (define k-rep-ty (->* ((bytevectorof @t) k-ids) int)
   (lambda (bytes holes)
     (let ((n (ri-begin! bytes holes))) (if (= n 0) (k-ty-new (ty-void)) (ri-ty 0)))))
+;; A rep, its holes none, as a description: an effect, if it is evidence of
+;; one (`fixpt-reps`'s `part`), else the type it is or is evidence of.
+(define k-rep-desc (->* ((bytevectorof @t)) k-desc)
+  (lambda (bytes)
+    (let ((n (ri-begin! bytes nil)))
+      (cond ((= n 0) (dt (k-ty-new (ty-void))))
+            ((string=? (ri-head 0) "evidence")
+             (let ((a (car (ri-args 0))))
+               (if (string=? (ri-head (ri-child a)) "effect")
+                   (de (ri-effect a))
+                   (dt (ri-ty (ri-child a))))))
+            (else (dt (ri-ty 0)))))))
 ;; Each type of a rep of several (`reps.rs`'s `export_tys`, its root a
 ;; `fasl-types` node), in order, its holes none: a `.fasl`'s definitions'.
 (define k-rep-tys (->* ((bytevectorof @t)) k-ids)

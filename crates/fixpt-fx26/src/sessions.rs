@@ -164,7 +164,10 @@ pub(crate) fn failed(rt: &mut Runtime, kind: &str, why: &str) -> Value {
 /// "Evidence") is bound in the session's checker the first time a step
 /// names it, as a region it can know nothing of, and stays.
 fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl FnOnce(&mut Runtime, &mut State) -> T) -> Result<T, String> {
-    let mt = parts.mt.as_str();
+    // Its types by rep, where it has one, each named for the step
+    // (`stage::step_reps`; `docs/research/heap-types.md`, step 6).
+    let reps = parts.rep.as_deref().and_then(crate::stage::step_reps);
+    let mt = if reps.is_some() { crate::stage::MODULE_TYPE } else { parts.mt.as_str() };
     let index = rt.heap.obj_ref(rt.heap.root_at(base), S_INDEX).as_fixnum();
     let index = if index >= 0 {
         index as usize
@@ -179,7 +182,10 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
         checker.globals_effects = false;
         let mut state = State { checker, globals: Globals::with_prefix(&format!("fx26-session-{i}:")), generation: 0, seeds: Code::default(), seed_texts: Vec::new(), texts: HashMap::new() };
         let module = state.checker.interner.intern("stage-module");
-        define(&mut state, &format!("(define stage-module (the {mt} %fasl-value))"))?;
+        let depth = bind_step_names(&mut state.checker, reps.as_ref());
+        let seed = define(&mut state, &format!("(define stage-module (the {mt} %fasl-value))"));
+        state.checker.dscope.truncate(depth);
+        seed?;
         // The module's own global holds `m` itself, given here, not made.
         let m = rt.heap.obj_ref(rt.heap.root_at(base), S_MODULE);
         if compiled {
@@ -222,8 +228,40 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
         let mut ss = ss.borrow_mut();
         let state = &mut ss[index];
         bind_regions(&mut state.checker, &parts.regions);
-        f(rt, state)
+        let depth = bind_step_names(&mut state.checker, reps.as_ref());
+        let out = f(rt, state);
+        state.checker.dscope.truncate(depth);
+        out
     }))
+}
+
+/// The names a step's text gives its types (`stage::StepReps`), each bound
+/// in checker `c` to its rep imported; how deep its description scope was
+/// before, to which the caller cuts it back after the step.
+fn bind_step_names(c: &mut Checker, reps: Option<&crate::stage::StepReps>) -> usize {
+    let depth = c.dscope.len();
+    for (n, bytes) in reps.map(|r| r.named.as_slice()).unwrap_or_default() {
+        let Ok(rep) = fixpt_reps::binary::decode(bytes, fixpt_reps::heap::validate_all()) else { continue };
+        let d = match c.import_desc(&rep) {
+            Ok(crate::ast::D::Effect(e)) => crate::parse::DScope::Eff(e),
+            Ok(crate::ast::D::Type(t)) => crate::parse::DScope::Rec(t),
+            _ => continue,
+        };
+        let n = c.interner.intern(n);
+        c.dscope.push((n, d));
+    }
+    depth
+}
+
+/// An expression step's code wrapped: by its types' names where it has
+/// them by rep (`%stage-result-type`, `(subr E () R)`), else as
+/// `expression` writes it out.
+pub(crate) fn step_expression(parts: &Parts, text: &str) -> Wrapped {
+    if parts.rep.as_deref().and_then(crate::stage::step_reps).is_none() {
+        return expression(&parts.e, &parts.r, text);
+    }
+    let r = crate::stage::RESULT_TYPE;
+    Wrapped::of(format!("(the {r}\n(lambda ()\n"), text, "\n))\n", text, 0)
 }
 
 /// Each of `regions` that checker `c` has not bound, bound, for good.
@@ -288,7 +326,7 @@ fn lower(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<V
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Lowered);
     }
-    let w = expression(&parts.e, &parts.r, &text);
+    let w = step_expression(&parts, &text);
     let made = seeded(rt, base, &parts, Mode::Lowered, |rt, state| {
         let made = tried(rt, state, &w, |c, g, top, _| crate::session::lower_top(c, g, &top));
         made.map(|c| {
@@ -312,7 +350,7 @@ fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<V
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Compiled);
     }
-    let w = expression(&parts.e, &parts.r, &text);
+    let w = step_expression(&parts, &text);
     let found = seeded(rt, base, &parts, Mode::Compiled, |rt, state| tried(rt, state, &w, |c, _, top, file| FormFacts::of(c, &[&top], file, &w.whole, true)))?;
     let facts = match found {
         Ok(facts) => facts,
@@ -340,7 +378,7 @@ fn datum(rt: &mut Runtime, code: &Code) -> Value {
 /// the pending definition, `(sum ok (sum definition d))`, the checker as
 /// it was.
 fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, text: &str, mode: Mode) -> Result<Value, String> {
-    let e = against.e.as_str();
+    let e = if against.rep.as_deref().and_then(crate::stage::step_reps).is_some() { crate::stage::EFFECT } else { against.e.as_str() };
     let len = text.chars().count() as i64;
     let usage = "a definition is `(define name init)` or `(define name type init)`";
     let parts = rt.heap.list_to_vec(code).unwrap_or_default();
@@ -596,7 +634,10 @@ fn keeps(c: &Checker, top: &Top) -> Vec<String> {
 /// or the refusal.
 fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, String> {
     let [mt, e, r, text] = [a[0], a[1], a[2], a[3]].map(|v| self::text(rt, v));
-    let parts = Parts::of(&mt, &e, &r, &fixpt_runtime::evidence::Given::of(rt, a[4], a[5]));
+    let mut given = fixpt_runtime::evidence::Given::of(rt, a[4], a[5]);
+    given.with_reps(rt, a[7]);
+    let mut parts = Parts::of(&mt, &e, &r, &given);
+    parts.rep = crate::stage::given_rep(rt, a[6], &given);
     let mut interner = std::mem::take(&mut rt.interner);
     let read = fixpt_read::Reader::new(&text, FileId(0), fixpt_read::SyntaxProfile::FX91, &mut interner).read_all();
     rt.interner = interner;
@@ -608,7 +649,7 @@ fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, Strin
     if is_definition(rt, code) {
         return check_define(rt, base, &parts, code, &text, Mode::Evaluated);
     }
-    let w = expression(&parts.e, &parts.r, &text);
+    let w = step_expression(&parts, &text);
     let made = seeded(rt, base, &parts, Mode::Evaluated, |rt, state| {
         tried(rt, state, &w, |_, _, _, _| ()).map(|()| {
             let mut texts = std::mem::take(&mut state.seed_texts);
