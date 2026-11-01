@@ -193,6 +193,8 @@
       ;; Owner and offset, as the machines' one word.
       (o-bref (o i) (tagcase b (o-bref (p j) (and (= i j) (ev-same-blob? o p))) (else y #f)))
       (o-bytes (x) (tagcase b (o-bytes (y) (eq? x y)) (else y #f)))
+      (o-vec (x) (tagcase b (o-vec (y) (eq? x y)) (else y #f)))
+      (o-eqt (x) (tagcase b (o-eqt (y) (eq? x y)) (else y #f)))
       (o-mstr (x) (tagcase b (o-mstr (y) (eq? x y)) (else y #f)))
       (o-host (x) (tagcase b (o-host (y) (eq? x y)) (else y #f)))
       (else y #f))))
@@ -276,6 +278,14 @@
         (let ((x (int->string (bytevector-u8-ref b i))))
           (show-bytes b (- i 1) (if (string=? acc "") x (k-cat3 x " " acc)))))))
 
+;; A vector's elements up to `i`, space-separated, before `acc`, those after.
+(define show-vec (->* ((arrayof val @v) int string) string)
+  (lambda (xs i acc)
+    (if (< i 0)
+        acc
+        (let ((x (show-val (array-ref xs i))))
+          (show-vec xs (- i 1) (if (string=? acc "") x (k-cat3 x " " acc)))))))
+
 ;; How Scheme writes a bloblet of `n` fields and `m` bytes.
 (define show-bloblet (->* (int int) string)
   (lambda (n m) (k-cat5 "#<bloblet " (int->string n) " fields " (int->string m) " bytes>")))
@@ -290,6 +300,8 @@
       (o-blob (fs bs) (show-bloblet (+ 1 (array-length fs)) (array-length bs)))
       (o-bref (o i) (k-cat3 "#<suffix-ref bloblet +" (int->string i) ">"))
       (o-bytes (b) (k-cat3 "#u8(" (show-bytes b (- (bytevector-length b) 1) "") ")"))
+      (o-vec (xs) (k-cat3 "#(" (show-vec xs (- (array-length xs) 1) "") ")"))
+      (o-eqt (es) "#<eqtable>")
       (o-mstr (m) (k-cat3 "\"" (list->string (string->list m)) "\""))
       (o-tag (t) "#<prompt-tag>")
       (o-cont (k) "#<continuation>")

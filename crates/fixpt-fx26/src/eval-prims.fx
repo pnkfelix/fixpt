@@ -762,10 +762,189 @@
       (prim! 'marks-of
              (lambda (xs) (list->val (marks-of (as-cont (ev-arg xs 0)) (as-key (ev-arg xs 1)))))))))
 
+;;; The standard procedures found missing here (Heist's R4, `TODO.md` §211):
+;;; characters and strings, lists and arrays, data as read, and tables by
+;;; identity, each as the machines have it.
+
+;; List `v` reversed onto `acc`.
+(define ev-reverse (->* (val val) val)
+  (lambda (v acc)
+    (if (null? v) acc (ev-reverse (cdr (as-pair v)) (cons (car (as-pair v)) acc)))))
+;; Array `a`'s elements up to `i`, in order, in front of `acc`.
+(define ev-array-list (->* ((arrayof val @v) int val) val)
+  (lambda (a i acc) (if (< i 0) acc (ev-array-list a (- i 1) (cons (array-ref a i) acc)))))
+;; List `v`'s elements, from place `i` of `a`.
+(define ev-fill (->* ((arrayof val @v) val int) unit)
+  (lambda (a v i)
+    (if (null? v)
+        #u
+        (begin (array-set! a i (car (as-pair v))) (ev-fill a (cdr (as-pair v)) (+ i 1))))))
+(define ev-list-array (->* (val) (arrayof val @v))
+  (lambda (v)
+    (let ((a (the (arrayof val @v) (make-array (ev-list-length v 0) nil))))
+      (begin (ev-fill a v 0) a))))
+;; Whether `v` is a list of exactly `n` elements.
+(define ev-length-is? (->* (val int) bool)
+  (lambda (v n)
+    (cond ((null? v) (= n 0))
+          ((pair? v) (and (> n 0) (ev-length-is? (cdr v) (- n 1))))
+          (else #f))))
+(define ev-proper? (->* (val) bool)
+  (lambda (v) (cond ((null? v) #t) ((pair? v) (ev-proper? (cdr v))) (else #f))))
+;; Whether `v` reaches no part of itself, the parts on `path` its own way
+;; there, as `%fx26-acyclic?` walks pairs, arrays and vectors.
+(define-rec
+  (ev-acyclic? (->* (val vals) bool)
+    (lambda (v path)
+      (if (ev-on-path? v path)
+          #f
+          (typecase v
+            (pair p (let ((in (the vals (cons v path))))
+                      (and (ev-acyclic? (car p) in) (ev-acyclic? (cdr p) in))))
+            (bloblet a (ev-all-acyclic? a 0 (cons v path)))
+            (sum o (tagcase o
+                     (o-vec (xs) (ev-all-acyclic? xs 0 (cons v path)))
+                     (else y #t)))
+            (else #t)))))
+  (ev-all-acyclic? (->* ((arrayof val @v) int vals) bool)
+    (lambda (a i path)
+      (or (>= i (array-length a))
+          (and (ev-acyclic? (array-ref a i) path) (ev-all-acyclic? a (+ i 1) path)))))
+  (ev-on-path? (->* (val vals) bool)
+    (lambda (v path)
+      (and (not (null? path)) (or (ev-eq? v (car path)) (ev-on-path? v (cdr path)))))))
+;; A list of bytes, `datum-list->bytevector`'s, from place `i`.
+(define ev-fill-bytes (->* ((bytevectorof @v) val int) unit)
+  (lambda (b v i)
+    (if (null? v)
+        #u
+        (begin (bytevector-u8-set! b i (int->u8 (as-int (car (as-pair v)))))
+               (ev-fill-bytes b (cdr (as-pair v)) (+ i 1))))))
+;; The numbers `parse-number` read, as values.
+(define ev-numbers (->* ((listof datum @v)) val)
+  (lambda (ds)
+    (if (null? ds)
+        nil
+        (cons (typecase (car ds) (int n n) (f64 x x) (else (efail "not a number")))
+              (ev-numbers (cdr ds))))))
+;; A table by identity's entries, and the one of key `k`, or none.
+(define-type entries (listof (pairof val val @v) @v))
+(define as-eqt (->* (val) (ref entries @v))
+  (lambda (v)
+    (tagcase (as-other v "an eqtable") (o-eqt (es) es) (else y (efail-expected "an eqtable")))))
+(define ev-entry (->* (entries val) entries)
+  (lambda (es k)
+    (cond ((null? es) nil) ((ev-eq? (car (car es)) k) es) (else (ev-entry (cdr es) k)))))
+;; How many entries `es` has, `n` so far.
+(define ev-count-entries (->* (entries int) int)
+  (lambda (es n) (if (null? es) n (ev-count-entries (cdr es) (+ n 1)))))
+(define ev-without (->* (entries val) entries)
+  (lambda (es k)
+    (cond ((null? es) nil)
+          ((ev-eq? (car (car es)) k) (cdr es))
+          (else (cons (car es) (ev-without (cdr es) k))))))
+(define ev-eqt-set! (->* (val val val) val)
+  (lambda (t k v)
+    (let* ((es (as-eqt t)) (e (ev-entry (get es) k)))
+      (begin (if (null? e) (set es (cons (cons k v) (get es))) (set-cdr! (car e) v))
+             the-unit))))
+
+(define* ev-more-prims! (subr (maxeff stores spin) () unit)
+  (lambda ()
+    (let ((char1 (lambda ((f (subr pure (char) bool)))
+                   (lambda ((xs vals)) (f (as-char (ev-arg xs 0)))))))
+      (begin
+        (prim! 'char-alphabetic? (char1 (lambda ((c char)) (char-alphabetic? c))))
+        (prim! 'char-whitespace? (char1 (lambda ((c char)) (char-whitespace? c))))
+        (prim! 'char-downcase (lambda (xs) (char-downcase (as-char (ev-arg xs 0)))))
+        (prim! 'char-in? (lambda (xs) (char-in? (as-char (ev-arg xs 0)) (as-str (ev-arg xs 1)))))
+        (prim! 'string-downcase (lambda (xs) (string-downcase (as-str (ev-arg xs 0)))))
+        (prim! 'string-ci=?
+               (lambda (xs) (string-ci=? (as-str (ev-arg xs 0)) (as-str (ev-arg xs 1)))))
+        (prim! 'string-compare
+               (lambda (xs) (string-compare (as-str (ev-arg xs 0)) (as-str (ev-arg xs 1)))))
+        (prim! 'string-search
+               (lambda (xs)
+                 (string-search (as-str (ev-arg xs 0)) (as-str (ev-arg xs 1))
+                                (as-int (ev-arg xs 2)))))
+        (prim! 'symbol-compare
+               (lambda (xs) (symbol-compare (as-sym (ev-arg xs 0)) (as-sym (ev-arg xs 1)))))
+        (prim! 'nat? (lambda (xs) (nat? (as-int (ev-arg xs 0)))))
+        (prim! 'parse-nat
+               (lambda (xs) (parse-nat (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
+        (prim! 'parse-number
+               (lambda (xs)
+                 (ev-numbers ((proj parse-number @v) (as-str (ev-arg xs 0))
+                                                     (as-int (ev-arg xs 1))))))
+        (prim! 'reverse (lambda (xs) (ev-reverse (ev-arg xs 0) nil)))
+        (prim! 'array->list
+               (lambda (xs)
+                 (let ((a (as-array (ev-arg xs 0)))) (ev-array-list a (- (array-length a) 1) nil))))
+        (prim! 'list->array (lambda (xs) (ev-list-array (ev-arg xs 0))))
+        (prim! 'length-is? (lambda (xs) (ev-length-is? (ev-arg xs 0) (as-int (ev-arg xs 1)))))
+        (prim! 'acyclic? (lambda (xs) (ev-acyclic? (ev-arg xs 0) nil)))
+        (prim! 'vector?
+               (lambda (xs)
+                 (typecase (ev-arg xs 0)
+                   (sum o (tagcase o (o-vec (v) #t) (else y #f)))
+                   (else #f))))
+        (prim! 'bytevector?
+               (lambda (xs)
+                 (typecase (ev-arg xs 0)
+                   (sum o (tagcase o (o-bytes (b) #t) (else y #f)))
+                   (else #f))))
+        (prim! 'datum-int? (lambda (xs) (int? (ev-arg xs 0))))
+        (prim! 'datum-byte?
+               (lambda (xs) (typecase (ev-arg xs 0) (int n (and (>= n 0) (<= n 255))) (else #f))))
+        (prim! 'datum-proper-list? (lambda (xs) (ev-proper? (ev-arg xs 0))))
+        (prim! 'datum-list (lambda (xs) (ev-onto (ev-arg xs 0) nil)))
+        (prim! 'datum-dotted (lambda (xs) (ev-onto (ev-arg xs 0) (ev-arg xs 1))))
+        (prim! 'datum-list->vector
+               (lambda (xs) (the val (o-vec (ev-list-array (ev-arg xs 0))))))
+        (prim! 'datum-list->bytevector
+               (lambda (xs)
+                 (let* ((v (ev-arg xs 0))
+                        (b (the (bytevectorof @v)
+                                (make-bytevector (ev-list-length v 0) (int->u8 0)))))
+                   (begin (ev-fill-bytes b v 0) (the val (o-bytes b))))))
+        ;; Tables by identity: each an association list here, by `eq?`.
+        (prim! 'make-eqtable (lambda (xs) (the val (o-eqt (the (ref entries @v) (new nil))))))
+        (prim! 'eqtable-ref
+               (lambda (xs)
+                 (let ((e (ev-entry (get (as-eqt (ev-arg xs 0))) (ev-arg xs 1))))
+                   (if (null? e) (ev-arg xs 2) (cdr (car e))))))
+        (prim! 'eqtable-has?
+               (lambda (xs) (not (null? (ev-entry (get (as-eqt (ev-arg xs 0))) (ev-arg xs 1))))))
+        (prim! 'eqtable-set! (lambda (xs) (ev-eqt-set! (ev-arg xs 0) (ev-arg xs 1) (ev-arg xs 2))))
+        (prim! 'eqtable-delete!
+               (lambda (xs)
+                 (let ((es (as-eqt (ev-arg xs 0))))
+                   (begin (set es (ev-without (get es) (ev-arg xs 1))) the-unit))))
+        (prim! 'eqtable-count
+               (lambda (xs) (ev-count-entries (get (as-eqt (ev-arg xs 0))) 0)))
+        ;; What `make-eqtable` is given, which says its keys are compared by
+        ;; identity: nothing to look at here.
+        (prim! 'pair-identity (lambda (xs) the-unit))
+        (prim! 'ref-identity (lambda (xs) the-unit))
+        (prim! 'array-identity (lambda (xs) the-unit))
+        (prim! 'icell-identity (lambda (xs) the-unit))))))
+
+;; The standard names the compilers written in FX-26 use, of machine code
+;; and words, which the evaluator has none of.
+(define ev-compilers-own? (->* (string) bool)
+  (lambda (n)
+    (let ((starts (lambda ((p string))
+                    (and (>= (string-length n) (string-length p))
+                         (string=? (substring n 0 (string-length p)) p)))))
+      (or (starts "tword-") (starts "wcell-") (starts "wglobal") (starts "rep-")
+          (starts "runtime-primitive") (starts "set-register-twin")
+          (string=? n "make-word") (string=? n "make-global") (string=? n "close-over-word!")
+          (string=? n "disassemble")))))
+
 (define ev-prims-made unit
   (begin (ev-int-prims!) (ev-text-prims!) (ev-shape-prims!) (ev-data-prims!) (ev-f64-prims!)
          (ev-f32-prims!) (ev-control-prims!) (ev-bytes-prims!) (ev-mstring-prims!)
-         (ev-io-prims!)
+         (ev-io-prims!) (ev-more-prims!)
          (ev-width-prims! "i8" 8 #t) (ev-width-prims! "u8" 8 #f)
          (ev-width-prims! "i32" 32 #t) (ev-width-prims! "u32" 32 #f)
          (ev-width-prims! "i64" 64 #t) (ev-width-prims! "u64" 64 #f)))
@@ -775,5 +954,9 @@
   (lambda (name)
     (if (std-nil-name? (symbol->string name))
         nil
-        (let ((p (table-ref ev-prims name nil)))
-          (if (null? p) (efail (k-cat3 "unbound variable `" (symbol->string name) "`")) p))))))))
+        (let ((p (table-ref ev-prims name nil)) (n (symbol->string name)))
+          (cond ((not (null? p)) p)
+                ((ev-compilers-own? n)
+                 (efail (k-cat3 "`" n (string-append "` is the compilers', of machine code and "
+                                                     "words, which the evaluator has none of"))))
+                (else (efail (k-cat3 "unbound variable `" n "`")))))))))))

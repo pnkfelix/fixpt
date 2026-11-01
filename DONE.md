@@ -4520,3 +4520,12 @@ by Fixpt: in a region of the turn's own, the `letregion` masks the control
 the non-delimiting prompts leave, and the probe, its handler's type saying
 that control, runs on every machine. A deep handler test on every machine
 keeps it so (`programs/run/deep-handler.fx`).
+
+## 2026-11-01: the evaluator's standard environment complete (§211)
+
+Found on the way to Heist's handler probe: some seventy standard names the
+checkers accept were "unbound variable" on the evaluator written in FX-26,
+`reverse` among them. Each is now the evaluator's, as the machines have
+it, but the compilers' own (machine code and words), which it refuses as
+theirs, and two forms' names as values. A test runs every standard name
+there, and the new ones against the machines' answers.

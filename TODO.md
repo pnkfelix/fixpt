@@ -5032,12 +5032,16 @@ without `(goto r)` and `(comefrom r)`; with them it gives its requests on
 every machine but the evaluator (below). Test: `programs/run/deep-handler.fx`
 (`fixpt-cli/tests/handlers.rs`, every machine, in an `attempt`). Found on
 the way:
-- **The evaluator lacks standard procedures** the checkers accept:
-  `reverse`, `char-alphabetic?`, `char-whitespace?`, `string-downcase`,
-  `string-ci=?`, `string-compare`, `nat?`, `acyclic?`, `vector?`,
-  `array->list`, `length-is?`, `datum-int?`, and more ("unbound
-  variable" as it runs, `eval-prims.fx`'s `standard`). A test that every
-  standard name runs on every machine would find them all.
+- ~~**The evaluator lacks standard procedures**~~ (done 2026-11-01):
+  some seventy the checkers accept were "unbound variable" there. Now
+  each is the evaluator's (`eval-prims.fx`'s `ev-more-prims!`: characters
+  and strings, lists and arrays, data as read, vectors as `o-vec`, tables
+  by identity as association lists by `eq?`), or, the compilers' own (of
+  machine code and words: `tword-*`, `wcell-*`, `make-word`, `rep-*`,
+  `disassemble` …), refused as theirs. Tests: `evaluator_standard.rs`,
+  every standard name, and each found missing against the machines'
+  answers. **Left**: `icell-get` and `icell-put!` as values (their forms
+  run).
 - **An effect family applied in a `maxeff`**, `(maxeff (asks r) (read
   …))`, `asks` a `dlambda` to an effect, is refused: "gives a description
   of kind effect, not a type". Applied as a `subr`'s whole effect it works

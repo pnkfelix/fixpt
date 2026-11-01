@@ -68,6 +68,12 @@
   (o-bref val int)
   ;; A bytevector (`TODO.md` §84), as the machines have one.
   (o-bytes (bytevectorof @v))
+  ;; A vector, as a reader makes one in a datum (`datum-list->vector`): its
+  ;; elements, in order.
+  (o-vec (arrayof val @v))
+  ;; A table by identity (`make-eqtable`): its entries, each a key and its
+  ;; value, the keys told apart by `eq?`.
+  (o-eqt (ref (listof (pairof val val @v) @v) @v))
   ;; A string made at a region (`(stringof r)`), which may be written; a
   ;; `string` once frozen, as the machines have one object for both.
   (o-mstr (stringof @v))
