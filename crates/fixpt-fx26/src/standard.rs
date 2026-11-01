@@ -335,6 +335,15 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // A type's rep, in its binary form, from the nodes the checker written
     // in FX-26 makes of it (`check-reps.fx`; `docs/research/heap-types.md`).
     (
+        "rep-nodes",
+        concat!(
+            "(poly ((s region)) (subr (read s) ((bytevectorof s) (listof string acyclic)) (productof (1 (listof (productof (1 int) ",
+            "(2 symbol) (3 bool) (4 (listof symbol acyclic)) (5 (listof (sumof (node int) (bound (productof (1 int) (2 int))) ",
+            "(hole int) (const (productof (1 string) (2 int) (3 string))) (sym symbol) (int int) (flag bool)) acyclic))) ",
+            "acyclic)) (2 (listof symbol acyclic)))))",
+        ),
+    ),
+    (
         "rep-of-nodes",
         concat!(
             "(poly ((r region)) (subr (alloc r) ((listof (productof (1 int) (2 symbol) (3 bool) (4 (listof symbol acyclic)) ",

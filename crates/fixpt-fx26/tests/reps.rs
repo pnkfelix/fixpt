@@ -131,3 +131,41 @@ fn both_checkers_export_each_type_as_one_rep() {
     assert!(wrong.is_empty(), "{} of {} differ:\n{}", wrong.len(), agreed + wrong.len(), wrong.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
     assert!(agreed >= 850, "only {agreed} compared");
 }
+
+/// The FX-26 checker's import gives back the rep it took: each type a test
+/// program defines, exported, imported and exported again, the same rep.
+#[test]
+fn the_fx26_checker_imports_each_rep_as_its_type() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let (mut wrong, mut same) = (Vec::new(), 0);
+    common::with_own(|s| {
+        for sub in DIRS {
+            let mut paths: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
+            paths.sort();
+            for path in paths {
+                let name = format!("{sub}/{}", path.file_name().unwrap().to_string_lossy());
+                let program = std::fs::read_to_string(&path).unwrap();
+                let outer = std::mem::replace(&mut s.checker.base_dir, path.parent().map(|d| d.to_path_buf()));
+                let ok = s.check_with_own_checker(&program).ok().and_then(|r| r.ok()).is_some();
+                let again = if ok { s.own_checked_reps_again() } else { Ok(Vec::new()) };
+                s.checker.base_dir = outer;
+                match again {
+                    Ok(reps) => {
+                        for (n, r, back) in reps {
+                            if r == back {
+                                same += 1;
+                            } else {
+                                let show = |b: &[u8]| fixpt_reps::binary::decode(b, true).map(|r| fixpt_reps::text::write(&r)).unwrap_or_else(|e| e);
+                                wrong.push(format!("{name}: `{n}`:\n  was   {}\n  again {}", show(&r), show(&back)));
+                            }
+                        }
+                    }
+                    Err(e) => wrong.push(format!("{name}: {}", e.message)),
+                }
+            }
+        }
+    });
+    println!("{same} types through the FX-26 checker's reps and back; {} not", wrong.len());
+    assert!(wrong.is_empty(), "{} wrong:\n{}", wrong.len(), wrong.iter().take(30).cloned().collect::<Vec<_>>().join("\n"));
+    assert!(same >= 850, "only {same}");
+}

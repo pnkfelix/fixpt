@@ -67,7 +67,7 @@
             check-subst check-synth check-module-rules check-subtype parser check-modules-read
             check-print-parts))
           ;; Its types as reps (`check-reps.fx`), made of what it is given.
-          (check-reps ((load-input "fx26:check-reps.fx") check-types)))
+          (check-reps ((load-input "fx26:check-reps.fx") check-types check-effects)))
       (module
 (hide (include check-program-types) (include check-types-types) (include parser-types)
       (include eager-reader-types) (include check-env-types) (include check-resolve-types)
@@ -546,6 +546,25 @@
                          acc
                          (defs (cdr ds) (names (reverse (extract (car ds) 1)) acc))))))
       (defs (get k-defs) nil))))
+;; The same, each rep imported (`k-rep-ty`) and exported again: what the
+;; FX-26 checker's import is tested by (it gives back the rep it took).
+(define checked-reps-again
+  (->* () (listof (productof (1 symbol) (2 (bytevectorof @t)) (3 (bytevectorof @t))) acyclic))
+  (lambda ()
+    (letrec ((go (->* ((listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
+                      (listof (productof (1 symbol) (2 (bytevectorof @t)) (3 (bytevectorof @t)))
+                              acyclic))
+                   (lambda (xs)
+                     (if (null? xs)
+                         nil
+                         (let* ((n (extract (car xs) 1))
+                                (t (k-lookup-raw n))
+                                (r ((with check-reps k-ty-rep) t))
+                                (holes ((with check-reps k-rep-holes)))
+                                (back ((with check-reps k-rep-ty) r holes))
+                                (again ((with check-reps k-ty-rep) back)))
+                           (cons (product (1 n) (2 r) (3 again)) (go (cdr xs))))))))
+      (go (checked-reps)))))
 (define checked-run-names (->* () (listof (productof (1 string) (2 bool)) acyclic))
   (lambda ()
     (letrec ((go (subr kreads ((listof k-run acyclic))

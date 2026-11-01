@@ -2962,13 +2962,13 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 41] = [
+    pub const FRONT_ENTRIES: [&'static str; 42] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "includes-given!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-adopt-globals!", "compile-adopt-broken?", "compile-name-word!", "compile-defining!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
         "check-built-in!", "check-syscalls!", "make-stage-check", "make-session-compiler",
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
-        "checked-reps",
+        "checked-reps", "checked-reps-again",
     ];
 
     /// The front end's checker and compilers run as register code, not as
@@ -3599,6 +3599,25 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
                 let name = heap.symbol_name(heap.bloblet_slot(p, 2));
                 let b = heap.bloblet_slot(p, 3);
                 out.push((name, (0..heap.bytevector_len(b)).map(|i| heap.bytevector_ref(b, i)).collect()));
+            }
+            fixpt_heap::Value::NULL
+        });
+        Ok(out)
+    }
+
+    /// The same, each rep imported by the checker written in FX-26 and
+    /// exported again (`checked-reps-again`): each name, the rep, and the
+    /// rep again.
+    pub fn own_checked_reps_again(&mut self) -> R<Vec<(String, Vec<u8>, Vec<u8>)>> {
+        let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
+        let reps = self.scheme.call_global(&format!("{READER_PREFIX}checked-reps-again"), &[]).map_err(fail)?;
+        let mut out = Vec::new();
+        self.scheme.make(|m| {
+            let l = m.get(reps);
+            let heap = m.heap();
+            let bytes = |b: fixpt_heap::Value| (0..heap.bytevector_len(b)).map(|i| heap.bytevector_ref(b, i)).collect::<Vec<u8>>();
+            for p in heap.list_to_vec(l).unwrap_or_default() {
+                out.push((heap.symbol_name(heap.bloblet_slot(p, 2)), bytes(heap.bloblet_slot(p, 3)), bytes(heap.bloblet_slot(p, 4))));
             }
             fixpt_heap::Value::NULL
         });

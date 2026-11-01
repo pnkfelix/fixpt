@@ -281,6 +281,7 @@
          (("%syscall4") "%fx26-syscall")
          (("%syscall5") "%fx26-syscall")
          (("%syscall6") "%fx26-syscall")
+         (("rep-nodes") "%fx26-rep-nodes")
          (else "")))
       ((10)
        (case n

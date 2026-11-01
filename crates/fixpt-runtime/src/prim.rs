@@ -3157,6 +3157,22 @@ prims! {
         };
         Ok(rt.heap.make_bytevector(&fixpt_reps::binary::encode(&rep)))
     });
+    // A rep's nodes, for the checker written in FX-26 to import
+    // (`check-reps.fx`): its binary form `a[0]`, and the names of that
+    // checker's generative types, in its table's order, `a[1]`, by which
+    // each constant is found; as `%fx26-rep-of-nodes` takes them, each
+    // node's slot its place, the root 0, and the holes' names.
+    "%fx26-rep-nodes", 2, Some(2), simple!(|rt, a| {
+        let n = bytevector_in(rt, a[0])?;
+        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[0], i)).collect();
+        let validate = fixpt_reps::heap::validate_all();
+        let rep = match fixpt_reps::binary::decode(&bytes, validate) {
+            Ok(r) => r,
+            Err(why) => return rt.fail(&format!("rep-nodes: {why}"), &[]),
+        };
+        let gens: Vec<String> = rt.heap.list_to_vec(a[1]).unwrap_or_default().into_iter().map(|g| rt.heap.string_to_rust(g)).collect();
+        Ok(rep_nodes(rt, &rep, &gens))
+    });
     "%fx26-dump-heap", 2, Some(2), simple!(|rt, a| {
         let path = get_string(rt, a[0])?;
         let r = match rt.dump_heap {
@@ -3280,4 +3296,103 @@ fn rep_of_nodes(rt: &Runtime, nodes: Value, holes: Value, root: Value) -> Result
         }
     }
     b.finish(int(root)? as u32).map(|f| f.rep)
+}
+
+/// What `%fx26-rep-nodes` gives of `rep`: a product of its nodes and its
+/// holes' names, each constant the place of a generative type of `gens` of
+/// its key (-1 if none).
+fn rep_nodes(rt: &mut Runtime, rep: &fixpt_reps::Rep, gens: &[String]) -> Value {
+    use fixpt_reps::Arg;
+    // Made in the heap from the leaves up, each made value rooted until
+    // what holds it is made: a list's pairs, a product's fields.
+    let base = rt.heap.root_count();
+    let sum = |rt: &mut Runtime, tag: &str, v: Value| {
+        let at = rt.heap.push_root(v);
+        let t = rt.heap.intern(tag);
+        let v = rt.heap.root_at(at);
+        rt.heap.pop_roots_to(at);
+        rt.heap.make_frozen(SUM_KIND, &[t, v])
+    };
+    let product = |rt: &mut Runtime, fields: &[Value]| {
+        let at = rt.heap.root_count();
+        for f in fields {
+            rt.heap.push_root(*f);
+        }
+        let fs: Vec<Value> = (0..fields.len()).map(|i| rt.heap.root_at(at + i)).collect();
+        let v = rt.heap.make_frozen(PRODUCT_KIND, &fs);
+        rt.heap.pop_roots_to(at);
+        v
+    };
+    let list = |rt: &mut Runtime, items: &[Value]| {
+        let at = rt.heap.root_count();
+        for v in items {
+            rt.heap.push_root(*v);
+        }
+        let mut l = Value::NULL;
+        for i in (0..items.len()).rev() {
+            let v = rt.heap.root_at(at + i);
+            l = rt.heap.cons(v, l);
+            rt.heap.set_root_at(at + i, l);
+        }
+        rt.heap.pop_roots_to(at);
+        l
+    };
+    let keys: Vec<u64> = gens.iter().enumerate().map(|(w, g)| fixpt_reps::generative_key(g, w as u32)).collect();
+    let mut nodes = Vec::new();
+    for (k, node) in rep.nodes.iter().enumerate() {
+        let mut args = Vec::new();
+        for a in &node.args {
+            let v = match *a {
+                Arg::Node(i) => sum(rt, "node", Value::fixnum(i as i64)),
+                Arg::Bound { binder, pos } => {
+                    let p = product(rt, &[Value::fixnum(binder as i64), Value::fixnum(pos as i64)]);
+                    sum(rt, "bound", p)
+                }
+                Arg::Hole(i) => sum(rt, "hole", Value::fixnum(i as i64)),
+                Arg::Const(i) => {
+                    let c = &rep.consts[i as usize];
+                    let which = keys.iter().position(|k| *k == c.key).map_or(-1, |w| w as i64);
+                    let name = rt.heap.make_string(&c.name);
+                    let at = rt.heap.push_root(name);
+                    let kind = rt.heap.make_string(&c.kind);
+                    let name = rt.heap.root_at(at);
+                    rt.heap.pop_roots_to(at);
+                    let p = product(rt, &[name, Value::fixnum(which), kind]);
+                    sum(rt, "const", p)
+                }
+                Arg::Sym(i) => {
+                    let s = rt.heap.intern(rep.name(i));
+                    sum(rt, "sym", s)
+                }
+                Arg::Int(v) => sum(rt, "int", Value::fixnum(v)),
+                Arg::Flag(b) => sum(rt, "flag", Value::boolean(b)),
+            };
+            rt.heap.push_root(v);
+            args.push(rt.heap.root_count() - 1);
+        }
+        let held: Vec<Value> = args.iter().map(|&i| rt.heap.root_at(i)).collect();
+        let args_list = list(rt, &held);
+        if let Some(&first) = args.first() {
+            rt.heap.pop_roots_to(first);
+        }
+        let at = rt.heap.push_root(args_list);
+        let binders: Vec<Value> = node.binders.iter().map(|&b| rt.heap.intern(rep.name(b))).collect();
+        let binders = list(rt, &binders);
+        rt.heap.push_root(binders);
+        let head = rt.heap.intern(rep.name(node.head));
+        let (args_list, binders) = (rt.heap.root_at(at), rt.heap.root_at(at + 1));
+        rt.heap.pop_roots_to(at);
+        let p = product(rt, &[Value::fixnum(k as i64), head, Value::boolean(node.set), binders, args_list]);
+        rt.heap.push_root(p);
+        nodes.push(rt.heap.root_count() - 1);
+    }
+    let held: Vec<Value> = nodes.iter().map(|&i| rt.heap.root_at(i)).collect();
+    let nodes_list = list(rt, &held);
+    rt.heap.pop_roots_to(base);
+    let at = rt.heap.push_root(nodes_list);
+    let holes: Vec<Value> = rep.holes.iter().map(|h| rt.heap.intern(h)).collect();
+    let holes = list(rt, &holes);
+    let nodes_list = rt.heap.root_at(at);
+    rt.heap.pop_roots_to(at);
+    product(rt, &[nodes_list, holes])
 }

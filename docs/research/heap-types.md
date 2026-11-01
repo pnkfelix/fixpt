@@ -187,6 +187,28 @@ session; its definition's stamp is step 3's), and constants have no heap
 objects of their own yet; the readable form is the rep's, not the type
 syntax (each checker prints an imported type so).
 
+## Step 2, done (2026-11-01)
+
+The FX-26 checker's export and import (`check-reps.fx`, made by
+`check-program.fx`): a type's nodes, by the heads of the Rust checker's
+table, made canonical by the runtime (`rep-of-nodes`, which builds the rep
+with `fixpt-reps`); and a rep's nodes back (`rep-nodes`, its constants
+found among the checker's generative types by their keys), made types of
+the checker's own store (`k-ty-new`, a link for a cycle, new variables for
+binders). Two front end entries give each definition's rep
+(`checked-reps`), and the rep of its import exported again
+(`checked-reps-again`).
+
+For the two checkers' reps to agree, the crate's **sets**: a node whose
+operands' order is none of it (an effect's atoms, a size's terms), put in
+order in the canonical form by a structural digest (Weisfeiler and Leman's
+refinement) of neither exporter's numbering. A union's members stay in the
+order written (a cache missed between two orders of one union, never a
+wrong answer). Measured (`fixpt-fx26/tests/reps.rs`): of the test
+programs both checkers take, every one of the 895 types defined is one
+rep in both; every one of 963 goes through the FX-26 checker's import and
+back as itself.
+
 ## Decided (the user's, 2026-11-01)
 
 - **Measure after step 3**, before going on to sessions and `.fasl`s.
