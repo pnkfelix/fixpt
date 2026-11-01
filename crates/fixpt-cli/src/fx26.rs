@@ -2294,7 +2294,7 @@ fn stage_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value) 
     // The compiler's entry, the FX-26 procedure (`fx26-native:`, not the
     // Scheme that calls it, `READER_PREFIX`), by its global's slot, read at
     // each call: a collection while FX-26 runs may move what it holds.
-    let sym = rt.heap.intern("fx26-native:native-compile-x64-proc");
+    let sym = rt.heap.intern(&format!("fx26-native:{}", DIRECT_FX.1));
     let slot = rt.heap.symbol_global_slot(sym);
     if rt.heap.global(slot).is_unbound() {
         return Err("the compiler written in FX-26 is not loaded".into());
@@ -2366,7 +2366,7 @@ fn stage_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value) 
             Ok(o) => o,
             Err(e) => {
                 fx_abandon(&mut rt.heap, c);
-                return Err(format!("native-direct-x64.fx: {e}"));
+                return Err(format!("{}: {e}", DIRECT_FX.0));
             }
         };
         if let Err(why) = fx_emitted(&rt.heap, &mut c, out) {

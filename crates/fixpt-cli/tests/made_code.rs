@@ -17,12 +17,11 @@ const DIR: &str = if cfg!(target_arch = "x86_64") { "made-code-x86_64" } else { 
 const TARGET: &str = if cfg!(target_arch = "x86_64") { "\"(target x86_64)\"" } else { "\"(target arm64)\"" };
 
 /// The machines, the stencils only where this build found a nightly
-/// compiler, and x86_64's own; and whether each runs the native code a
+/// compiler; and whether each runs the native code a
 /// program makes, which is arm64's or x86_64's: elsewhere none does, and
 /// each takes the program's fallback.
 fn machines() -> Vec<(&'static str, bool)> {
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
-    let x86 = cfg!(target_arch = "x86_64");
     [
         ("rs-scheme-vm", true),
         ("fx-ast-eval", false),
@@ -39,7 +38,6 @@ fn machines() -> Vec<(&'static str, bool)> {
     .into_iter()
     .filter(|(m, _)| stencils || !m.contains("stencils"))
     .filter(|(m, _)| fixpt_native::NATIVE_CONVENTION_AVAILABLE || !m.ends_with("nativecc"))
-    .filter(|(m, _)| x86 || *m != "fx-regs-fxjit-nativecc")
     .map(|(m, native)| (m, native && fixpt_native::NATIVE_CONVENTION_AVAILABLE))
     .collect()
 }

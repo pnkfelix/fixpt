@@ -136,8 +136,8 @@ fn compare_registers(limit: usize) {
                 one.view(|v| {
                     let r = v.get(r);
                     let ints = |l: fixpt_scheme::Local| l.list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>();
-                    let err = r.field(4).and_then(|e| e.string()).unwrap_or_default();
-                    if err.is_empty() { Ok((ints(r.field(2).expect("code")), ints(r.field(3).expect("resume")))) } else { Err(err) }
+                    let err = r.product_field(3).and_then(|e| e.string()).unwrap_or_default();
+                    if err.is_empty() { Ok((ints(r.product_field(1).expect("code")), ints(r.product_field(2).expect("resume")))) } else { Err(err) }
                 })
             });
             compared += 1;
