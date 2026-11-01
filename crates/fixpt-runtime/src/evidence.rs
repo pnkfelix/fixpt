@@ -117,7 +117,7 @@ pub fn reified_text(rt: &mut Runtime, fresh: Value, text: Value, names: Value, g
 /// field says `fresh` (a region a variable names, with no evidence), a
 /// fresh one.
 pub fn reified(rt: &mut Runtime, staged: Value, field: usize) -> Value {
-    let product = staged.is_bloblet() && rt.heap.bloblet_head(staged).fields == 6;
+    let product = staged.is_bloblet() && rt.heap.bloblet_head(staged).fields == 7;
     let text = |rt: &Runtime, i: usize| if product { rt.heap.string_to_rust(rt.heap.bloblet_slot(staged, i + 1)) } else { String::new() };
     let shown = if text(rt, 1) == "fresh" {
         fresh_region()

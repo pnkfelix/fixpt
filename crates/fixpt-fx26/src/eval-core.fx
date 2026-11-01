@@ -65,7 +65,7 @@
     (cond ((null? fs) nil)
           ((ev-at-is? (extract (car fs) 1) a b k)
            (tagcase (extract (car fs) 2)
-             (n-staged (m eff r ns) (cons (product (1 m) (2 eff) (3 r) (4 ns)) nil))
+             (n-staged (m eff r ns rp) (cons (product (1 m) (2 eff) (3 r) (4 ns)) nil))
              (else y (ev-staged-in (cdr fs) a b k))))
           (else (ev-staged-in (cdr fs) a b k)))))
 

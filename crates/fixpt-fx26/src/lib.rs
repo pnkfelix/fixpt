@@ -216,6 +216,8 @@ pub const CHECK_PROGRAM_DEFS: &str = include_str!("check-program-defs.fx");
 /// `check-reps.fx`: the checker's types as reps (`docs/research/heap-types.md`),
 /// made by [`CHECK_PROGRAM`] of the modules it is given.
 pub const CHECK_REPS: &str = include_str!("check-reps.fx");
+/// The types of `check-reps.fx`: its signature.
+pub const CHECK_REPS_TYPES: &str = include_str!("check-reps-types.fx");
 
 /// `check-effects-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_EFFECTS_TYPES: &str = include_str!("check-effects-types.fx");
@@ -682,7 +684,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 183] = [
+pub const FRONT_END_MODULES: [(&str, &str); 184] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -799,6 +801,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 183] = [
     ("check-program.fx", CHECK_PROGRAM),
     ("check-program-defs.fx", CHECK_PROGRAM_DEFS),
     ("check-reps.fx", CHECK_REPS),
+    ("check-reps-types.fx", CHECK_REPS_TYPES),
     ("check-proofs.fx", CHECK_PROOFS),
     ("check-proving-types.fx", CHECK_PROVING_TYPES),
     ("check-logic-types.fx", CHECK_LOGIC_TYPES),

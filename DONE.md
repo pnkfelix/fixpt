@@ -4393,3 +4393,16 @@ checker alone, `main` defined again among them; a dump of changed sources
 refused. s7st's tests from a dump: 0.58 s, against 46.9 s
 (`fixpt-cli/tests/dumps.rs`; `docs/fx26.md`, "Heap dumps").
 
+## 2026-11-01: a `stage`'s type by rep (`TODO.md` §201 item 5, §202 step 3's first part)
+
+The type a `stage`'s code is checked as, exported as a rep where the FX-26
+checker notes the `stage`, kept as a constant of the compiled code, and
+imported by the stage's front end, which names it in the wrapping instead
+of reading it written out (`docs/research/heap-types.md`, "Step 3, its
+first part"). `'1` against a module of 60 alternatives and 40 procedures:
+250 to 3.9 ms a stage (332 KB of text, 1013 bytes of rep); Heist's s7st,
+`(define x 1)` against its sealed runtime, 12.3 to 5.7 ms. The text path
+stays where evidence is given, and on the machines whose checker is the
+Rust one. Found on the way: `fixpt-reps`'s heap form read the trailer as
+its first value (§205).
+

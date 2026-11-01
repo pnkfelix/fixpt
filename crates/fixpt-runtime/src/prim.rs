@@ -3181,6 +3181,18 @@ prims! {
         };
         Ok(fx26_io_result(rt, r))
     });
+    // A rep in its binary form `a[0]` (`%fx26-rep-of-nodes`'s) as the heap
+    // holds it (`fixpt_reps::heap`), for compiled code to hold as a
+    // constant: what a `stage` is checked as (`docs/research/heap-types.md`,
+    // step 3).
+    "%fx26-rep-cell", 1, Some(1), simple!(|rt, a| {
+        let n = bytevector_in(rt, a[0])?;
+        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[0], i)).collect();
+        match fixpt_reps::binary::decode(&bytes, fixpt_reps::heap::validate_all()) {
+            Ok(rep) => Ok(fixpt_reps::heap::to_heap(&mut rt.heap, &rep)),
+            Err(why) => rt.fail(&format!("rep-cell: {why}"), &[]),
+        }
+    });
 }
 
 /// Promise states. `[state, payload]`.

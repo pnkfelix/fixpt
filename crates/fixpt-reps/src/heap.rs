@@ -37,9 +37,9 @@ pub fn to_heap(heap: &mut Heap, rep: &Rep) -> Value {
 pub fn is_rep(heap: &Heap, v: Value) -> bool {
     v.is_bloblet()
         && heap.bloblet_kind(v) == fixpt_heap::layout::kind("product")
-        && heap.bloblet_head(v).fields == 2
-        && heap.is_a(heap.bloblet_slot(v, 1), fixpt_heap::ObjType::Symbol)
-        && heap.symbol_name(heap.bloblet_slot(v, 1)) == TAG
+        && heap.bloblet_head(v).fields == 3
+        && heap.is_a(heap.bloblet_slot(v, 2), fixpt_heap::ObjType::Symbol)
+        && heap.symbol_name(heap.bloblet_slot(v, 2)) == TAG
 }
 
 /// The rep `v` holds; or why not. Validated if `trusted` is false, or if
@@ -48,7 +48,27 @@ pub fn from_heap(heap: &Heap, v: Value, trusted: bool) -> Result<Rep, String> {
     if !is_rep(heap, v) {
         return Err("not a rep".into());
     }
-    let b = heap.bloblet_slot(v, 2);
+    // Field 1 is the trailer; the values follow it.
+    let b = heap.bloblet_slot(v, 3);
     let bytes: Vec<u8> = (0..heap.bytevector_len(b)).map(|i| heap.bytevector_ref(b, i)).collect();
     binary::decode(&bytes, !trusted || validate_all())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Arg, Builder};
+
+    #[test]
+    fn a_rep_in_the_heap_is_itself() {
+        let mut b = Builder::new();
+        let int = b.name("int");
+        let base = b.add("base", &[], vec![Arg::Sym(int)]);
+        let rep = b.finish(base).expect("finishes").rep;
+        let mut heap = Heap::new();
+        let v = to_heap(&mut heap, &rep);
+        assert!(is_rep(&heap, v));
+        assert_eq!(from_heap(&heap, v, false).expect("reads"), rep);
+        assert!(!is_rep(&heap, Value::FALSE));
+    }
 }

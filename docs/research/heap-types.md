@@ -1,7 +1,7 @@
 # Types as heap data
 
 Status: design, reviewed with the user (2026-11-01; "Decided", below).
-Nothing implemented.
+Steps 1 and 2 done, and the first part of step 3.
 Asked for by the user after Heist's request (`TODO.md` §201, item 5): a
 `stage` checks its module's type again each time because the type crosses
 to the staged checker as text. The user's direction: types as heap data,
@@ -208,6 +208,46 @@ wrong answer). Measured (`fixpt-fx26/tests/reps.rs`): of the test
 programs both checkers take, every one of the 895 types defined is one
 rep in both; every one of 963 goes through the FX-26 checker's import and
 back as itself.
+
+## Step 3, its first part, done (2026-11-01)
+
+A `stage`'s call site keeps the type its code is checked as, `(subr pure
+(M) (subr E () R))`, as a rep: the FX-26 checker exports it where it notes
+the `stage` (`k-staged-rep`, `check-test-facts.fx`), the compilers put it
+in the product they make of the code, a seventh field (`rep-cell`, a
+constant of the code's), and the stage's front end imports it
+(`check-staged-program`) and binds it to the name `%stage-type`, which the
+wrapping names (`stage.rs`): `(the %stage-type (lambda (stage-module) …))`.
+`M` is neither written out nor read again. Where that does not hold, the
+text, as before: a type naming a variable (evidence given), a region of
+its own, a generative type (a constant: no stable key yet), a part a rep
+does not take (an unresolved `select`: the export declines,
+`k-rep-declined?`); and on the machines whose checker is the Rust one
+(`rs-scheme-vm`, `fx-ast-eval`), and in sessions.
+
+Measured, release build, warm:
+
+| | text | rep |
+| --- | --- | --- |
+| `'1` against a module of 60 alternatives and 40 procedures (`M` 332 KB as text, 1013 bytes as a rep) | 250 ms | 3.9 ms |
+| s7st (Heist, current): `(define x 1)` against its sealed runtime (`M` 12.6 KB, 1.7 KB) | 12.3 ms | 5.7 ms |
+| s7st: a batch of 9 KB of code | 22 ms | 14.8 ms |
+| s7st: its prelude, 64 KB of code | 97 ms | 91 ms |
+| `'1` against a module of one procedure | 3.0 ms | 3.0 ms |
+
+What is left of a stage is the standard environment entered again
+(`k-standard`, each stage a fresh check) and the code's own checking and
+compiling: 3 ms of floor. (Heist's 49 ms was against s7st's runtime
+before it sealed its value type; 8 ms sealed, with their Fixpt.)
+
+Found on the way: `fixpt-reps`'s heap form read a bloblet's field 1, the
+trailer, for its first value (the values start at field 2), untested till
+now (a test added); the same off-by-one as `stage_native_fx`'s (§201).
+
+Left of step 3: evidence by rep (holes filled by a graph substitution,
+`reify-*` making reps), generative types' stable keys, the Rust checker's
+stage paths, and a stage front end that keeps the standard environment
+between stages (the 3 ms).
 
 ## Decided (the user's, 2026-11-01)
 

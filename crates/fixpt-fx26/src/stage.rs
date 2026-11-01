@@ -96,8 +96,15 @@ impl Wrapped {
 
 /// `stage`'s: `(the (subr pure (M) (subr E () R)) (lambda ((stage-module
 /// M)) (lambda () (with stage-module code))))`, of `parts`, each region
-/// of its own they name bound around it (`bound`).
-fn stage_wrapped(parts: &Parts, code: &str) -> Wrapped {
+/// of its own they name bound around it (`bound`). Or, `by_rep`, where
+/// `parts` has the rep of that type, `(the %stage-type (lambda
+/// (stage-module) …))`, the name the rep imported is given
+/// (`check-staged-program`): the type not written out, nor read again.
+fn stage_wrapped(parts: &Parts, code: &str, by_rep: bool) -> Wrapped {
+    if by_rep && parts.rep.is_some() {
+        let prefix = "(the %stage-type\n(lambda (stage-module)\n(lambda () (with stage-module\n".to_string();
+        return Wrapped::of(prefix, code, "\n))))\n", code, 0);
+    }
     let Parts { mt, e, r, .. } = parts;
     let prefix = format!("{}(the (subr pure ({mt}) (subr {e} () {r}))\n(lambda ((stage-module {mt}))\n(lambda () (with stage-module\n", parts.bound());
     Wrapped::of(prefix, code, &format!("\n)))){}\n", ")".repeat(parts.closing())), code, 0)
@@ -106,12 +113,17 @@ fn stage_wrapped(parts: &Parts, code: &str) -> Wrapped {
 /// What a form's code is checked against, as the checker that runs then
 /// reads it: the module's type, the effect and the result type, each
 /// variable they name given its evidence (`fixpt_runtime::evidence`), and
-/// the regions of their own they name.
+/// the regions of their own they name. And the type the code is checked
+/// as, as a rep in its binary form, where the checker that noted it made
+/// one that the stage's front end can import as it is (`k-staged-rep`;
+/// `docs/research/heap-types.md`, step 3): no hole, no constant, no region
+/// of its own.
 pub(crate) struct Parts {
     pub mt: String,
     pub e: String,
     pub r: String,
     pub regions: Vec<String>,
+    pub rep: Option<Vec<u8>>,
 }
 
 impl Parts {
@@ -119,7 +131,7 @@ impl Parts {
     pub(crate) fn of(mt: &str, e: &str, r: &str, given: &fixpt_runtime::evidence::Given) -> Parts {
         let [mt, e, r] = [mt, e, r].map(|t| given.substituted(t));
         let regions = fixpt_runtime::evidence::regions_in(&[&mt, &e, &r]);
-        Parts { mt, e, r, regions }
+        Parts { mt, e, r, regions, rep: None }
     }
 
     /// The `plambda` that binds the regions, open; none if none.
@@ -138,18 +150,24 @@ impl Parts {
 }
 
 /// The product the compilers make of a form's code (`n-staged`): the
-/// module's type, the effect and the result type, the code, and the names
-/// of the variables those name, of which `given` is the evidence, in
-/// order: what the code is checked against, and the code.
+/// module's type, the effect and the result type, the code, the names of
+/// the variables those name, of which `given` is the evidence, in order,
+/// and the type the code is checked as, as a rep, or `#f`: what the code is
+/// checked against, and the code.
 pub(crate) fn staged_parts(rt: &Runtime, staged: Value, given: Value) -> Option<(Parts, Value)> {
-    let is_product = staged.is_bloblet() && rt.heap.bloblet_kind(staged) == PRODUCT && rt.heap.bloblet_head(staged).fields == 6;
+    let is_product = staged.is_bloblet() && rt.heap.bloblet_kind(staged) == PRODUCT && rt.heap.bloblet_head(staged).fields == 7;
     if !is_product {
         return None;
     }
     let field = |i: usize| rt.heap.bloblet_slot(staged, i + 1);
     let [mt, e, r] = [1, 2, 3].map(|i| rt.heap.string_to_rust(field(i)));
     let given = fixpt_runtime::evidence::Given::of(rt, field(5), given);
-    Some((Parts::of(&mt, &e, &r, &given), field(4)))
+    let mut parts = Parts::of(&mt, &e, &r, &given);
+    if parts.regions.is_empty() {
+        let rep = fixpt_reps::heap::from_heap(&rt.heap, field(6), true).ok();
+        parts.rep = rep.filter(|r| r.holes.is_empty() && r.consts.is_empty()).map(|r| fixpt_reps::binary::encode(&r));
+    }
+    Some((parts, field(4)))
 }
 
 /// The front end that stages, made at the first `stage` and kept.
@@ -163,9 +181,10 @@ fn stage_front_end(rt: &mut Runtime) -> Result<Value, String> {
     Ok(global(rt, CHECK).expect("set"))
 }
 
-/// `w` checked and compiled by that front end: the word that makes the
-/// procedure the wrapping is; or the refusal, `(sum failed why)`.
-fn compiled(rt: &mut Runtime, w: &Wrapped) -> Result<Result<Value, Value>, String> {
+/// `w` checked and compiled by that front end, `rep` the type `w` names
+/// `%stage-type` (empty if none): the word that makes the procedure the
+/// wrapping is; or the refusal, `(sum failed why)`.
+fn compiled(rt: &mut Runtime, w: &Wrapped, rep: &[u8]) -> Result<Result<Value, Value>, String> {
     let settings = global(rt, SETTINGS).ok_or("this machine cannot stage code")?;
     let base = rt.heap.push_root(settings);
     let check = stage_front_end(rt);
@@ -173,11 +192,14 @@ fn compiled(rt: &mut Runtime, w: &Wrapped) -> Result<Result<Value, Value>, Strin
     rt.heap.pop_roots_to(base);
     let check = check?;
     let base = rt.heap.push_root(check);
+    rt.heap.push_root(settings);
     let whole = rt.heap.make_string(&w.whole);
-    let check = rt.heap.root_at(base);
+    rt.heap.push_root(whole);
+    let rep = rt.heap.make_bytevector(rep);
+    let (check, settings, whole) = (rt.heap.root_at(base), rt.heap.root_at(base + 1), rt.heap.root_at(base + 2));
     rt.heap.pop_roots_to(base);
     let field = |rt: &Runtime, i: usize| rt.heap.bloblet_slot(settings, i + 1);
-    let args = [field(rt, 1), whole, Value::fixnum(w.skip), Value::fixnum(w.len), field(rt, 2), field(rt, 3)];
+    let args = [field(rt, 1), whole, Value::fixnum(w.skip), Value::fixnum(w.len), field(rt, 2), field(rt, 3), rep];
     // The front end is licensed code, which ends: no step limit of the
     // program's is its.
     let fuel = std::mem::replace(&mut rt.word_fuel, u64::MAX);
@@ -192,8 +214,8 @@ fn compiled(rt: &mut Runtime, w: &Wrapped) -> Result<Result<Value, Value>, Strin
 
 /// `w` compiled, its word run, and the procedure it makes given `args`:
 /// what that gives; or the refusal. `args` are rooted from `base`.
-fn made(rt: &mut Runtime, w: &Wrapped, base: usize, args: usize) -> Result<Result<Value, Value>, String> {
-    let word = match compiled(rt, w)? {
+fn made(rt: &mut Runtime, w: &Wrapped, rep: &[u8], base: usize, args: usize) -> Result<Result<Value, Value>, String> {
+    let word = match compiled(rt, w, rep)? {
         Ok(word) => word,
         Err(refused) => return Ok(Err(refused)),
     };
@@ -234,7 +256,8 @@ fn stage(rt: &mut Runtime, m: Value, staged: Value, given: Value) -> Result<Valu
     // placed in what is written.
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
     let base = rt.heap.push_root(m);
-    let out = made(rt, &stage_wrapped(&parts, &text), base, 1);
+    let rep = parts.rep.clone().unwrap_or_default();
+    let out = made(rt, &stage_wrapped(&parts, &text, true), &rep, base, 1);
     rt.heap.pop_roots_to(base);
     match out? {
         Ok(thunk) => Ok(ok(rt, thunk)),
@@ -250,7 +273,7 @@ fn stage(rt: &mut Runtime, m: Value, staged: Value, given: Value) -> Result<Valu
 pub fn lower_staged(rt: &mut Runtime, staged: Value, given: Value) -> Result<Value, String> {
     let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
-    let (c, top) = match checked(rt, &stage_wrapped(&parts, &text)) {
+    let (c, top) = match checked(rt, &stage_wrapped(&parts, &text, false)) {
         Ok(done) => done,
         Err(refused) => return Ok(refused),
     };
@@ -267,7 +290,7 @@ pub fn lower_staged(rt: &mut Runtime, staged: Value, given: Value) -> Result<Val
 /// the text that was, for the evaluator to parse and run, `(sum checked
 /// text)`; or the refusal.
 pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str, given: &fixpt_runtime::evidence::Given) -> Value {
-    let w = stage_wrapped(&Parts::of(mt, e, r, given), text);
+    let w = stage_wrapped(&Parts::of(mt, e, r, given), text, false);
     match checked(rt, &w) {
         Ok(_) => {
             let tag = rt.heap.intern("checked");

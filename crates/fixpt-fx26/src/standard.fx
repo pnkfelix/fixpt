@@ -242,6 +242,7 @@
          (("string>?") "%fx26-string>?")
          (("acyclic?") "%fx26-acyclic?")
          (("symbol=?") "eq?")
+         (("rep-cell") "%fx26-rep-cell")
          (else "")))
       ((9)
        (case n

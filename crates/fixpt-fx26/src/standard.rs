@@ -352,6 +352,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
             "(listof symbol acyclic) int) (bytevectorof r)))",
         ),
     ),
+    // A rep, as compiled code holds it: a `stage`'s (`k-staged-rep`).
+    ("rep-cell", "(poly ((r region)) (subr (read r) ((bytevectorof r)) wcell))"),
     ("dump-heap!", "(poly ((e effect)) (subr (io fs-write) (string (subr e () int)) (sumof (done unit) (failed io-error))))"),
     // Bytevectors (`TODO.md` §84): made, read and written at a region, as
     // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,

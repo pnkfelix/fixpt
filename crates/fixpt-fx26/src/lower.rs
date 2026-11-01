@@ -516,6 +516,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("dump-heap!", "%fx26-dump-heap", false),
     ("rep-of-nodes", "%fx26-rep-of-nodes", false),
     ("rep-nodes", "%fx26-rep-nodes", false),
+    ("rep-cell", "%fx26-rep-cell", false),
 ];
 
 /// The FX-26 copy of what [`STANDARD`] says the compiler written in FX-26
@@ -970,7 +971,7 @@ impl Lowerer<'_> {
         // compilers written in FX-26 give it (`n-staged`), and the names of
         // the variables whose evidence the form is given.
         let code = match self.c.facts.staged.get(&e) {
-            Some(s) => Sx::call("%fx26-product", [Sx::Str(s.m.clone()), Sx::Str(s.e.clone()), Sx::Str(s.r.clone()), code, Sx::Str(s.evidence.join(" "))]),
+            Some(s) => Sx::call("%fx26-product", [Sx::Str(s.m.clone()), Sx::Str(s.e.clone()), Sx::Str(s.r.clone()), code, Sx::Str(s.evidence.join(" ")), Sx::Bool(false)]),
             None => code,
         };
         // A module reshaped: a product of the values the type wanted has.

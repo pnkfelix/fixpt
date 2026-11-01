@@ -31,7 +31,8 @@
        (check-synth-types (load-module "fx26:check-synth-types.fx"))
        (check-module-rules-types (load-module "fx26:check-module-rules-types.fx"))
        (check-subtype-types (load-module "fx26:check-subtype-types.fx"))
-       (reader-types (load-module "fx26:reader-types.fx")))
+       (reader-types (load-module "fx26:reader-types.fx"))
+       (check-reps-types (load-module "fx26:check-reps-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-syntax (select check-syntax-types check-syntax-sig))
@@ -56,7 +57,9 @@
            (check-subtype (select check-subtype-types check-subtype-sig))
            (parser (select reader-types parser-sig))
            (check-modules-read (select check-modules-read-types check-modules-read-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           ;; Its types as reps (`check-reps.fx`).
+           (check-reps (select check-reps-types check-reps-sig)))
     ;; Part of it in a file of its own (`check-program-defs.fx`), made of what
     ;; it is given.
     (let ((check-program-defs
@@ -65,9 +68,7 @@
             check-generative check-read-descs check-resolve check-errors check-terminate
             check-print check-letrec check-read check-expect check-modules check-modorder
             check-subst check-synth check-module-rules check-subtype parser check-modules-read
-            check-print-parts))
-          ;; Its types as reps (`check-reps.fx`), made of what it is given.
-          (check-reps ((load-input "fx26:check-reps.fx") check-types check-effects)))
+            check-print-parts)))
       (module
 (hide (include check-program-types) (include check-types-types) (include parser-types)
       (include eager-reader-types) (include check-env-types) (include check-resolve-types)
@@ -476,10 +477,20 @@
 ;; or the first error.
 (define check-program (->* (syns-a k-tops) k-result)
   (lambda (standard forms)
+    (check-staged-program standard forms (the (bytevectorof @t) (make-bytevector 0 0)))))
+;; For `stage` (`stage.rs`, `docs/research/heap-types.md`, step 3): `forms`
+;; checked as `check-program` checks them, the name `%stage-type` the type of
+;; `rep` imported (`k-rep-ty`), what the code is checked as, which the text
+;; then names, not spells out; nothing bound if `rep` is empty.
+(define check-staged-program (->* (syns-a k-tops (bytevectorof @t)) k-result)
+  (lambda (standard forms rep)
     (prompt k-tag
       (begin (k-reset) (set k-broken-began (get k-broken)) (set k-syscall-expanding 0)
              (k-standard standard)
              (set k-std-dscope (get k-dscope))
+             (if (= (bytevector-length rep) 0)
+                 #u
+                 (k-push-desc '%stage-type (ds-rec ((with check-reps k-rep-ty) rep nil))))
              (k-ahead forms)
              (k-ok (k-forms forms (k-types-again forms))))
       (lambda (r) r))))
@@ -532,13 +543,14 @@
                    (lambda (ns acc)
                      (if (null? ns)
                          acc
-                         (let ((t (k-lookup-raw (car ns))))
+                         (let* ((t (k-lookup-raw (car ns)))
+                                (r (if (< t 0)
+                                       (the (bytevectorof @t) (make-bytevector 0 0))
+                                       ((with check-reps k-ty-rep) t))))
                            (names (cdr ns)
-                                  (if (< t 0)
+                                  (if (or (< t 0) ((with check-reps k-rep-declined?)))
                                       acc
-                                      (cons (product (1 (car ns))
-                                                     (2 ((with check-reps k-ty-rep) t)))
-                                            acc)))))))
+                                      (cons (product (1 (car ns)) (2 r)) acc)))))))
              (defs (->* (k-def-list (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
                         (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
                    (lambda (ds acc)

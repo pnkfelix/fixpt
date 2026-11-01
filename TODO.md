@@ -4657,8 +4657,14 @@ the knot through what a global holds was closed (2026-10-31).
   (`k-var-shown`, `print_abs`), so that the type reads back; the Rust
   checker had the same flaw, unseen (`modules/nested.fx`'s type).
 
-Left: (5), a stage of a module's type printed and checked again each
-time; and staged code on the register-code machines of the cellular
+(5) in part (2026-11-01, `docs/research/heap-types.md`, step 3's first
+part): a stage's type kept as a rep at its call site and imported, not
+printed and read: `'1` against a module of 60 alternatives and 40
+procedures 250 to 3.9 ms; s7st's `(define x 1)` 12.3 to 5.7 ms. Left of
+it: the text where evidence is given (holes by rep), the standard
+environment entered again each stage (3 ms).
+
+Left: staged code on the register-code machines of the cellular
 convention (`fx-regs-*-cellcc`), which runs as cellular words (649 ms
 against the program's 55: the program's words' register code is not the
 staged words'), as it did before; and Heist's note on closures of many
@@ -4700,3 +4706,41 @@ known statically leaving the diagram unreduced, generative, which is safe.
 A way to state path-sensitive applicative sharing, near dependent types
 (the checker must know the conditions). Ordered by keys, so the same in
 every process; a DAG of nodes, so a rep. For this design to weigh.
+
+## 204. `sexp-edit`: definitions inside a module file, and edits of many places (the user's, 2026-11-01)
+
+The user asked why edits were made by scripts of text replacement, not by
+`sexp-edit`, Lisp being made for tree edits; and that there be a paved
+path. Two things kept them to text:
+
+- **Where a definition is.** Most FX-26 files are one form, `(let* (…)
+  (lambda (…) (module …)))`, so `sexp-edit edit FILE NAME` finds no
+  definition in them (2026-11-01: `regcode-helpers.fx`'s
+  `r-changed-args`); nor a binding of the conductor's `let*`
+  (`stage-check`). Names should be found inside a module file's module,
+  and a path should name a binding within a definition
+  (`front-end-entries/stage-check`).
+- **One change in many places.** A field added to a variant (`n-staged`:
+  its type, three constructions, two `tagcase` patterns), a parameter
+  added to a procedure and an argument to each call. Structural commands
+  for those, over several files, applied all or none and re-read, as
+  `edit` is.
+
+A text edit that `check` would have refused (a list opened and not
+closed) was made by a script that day.
+
+## 205. A bloblet's values by their index, in the heap's API (the user's, 2026-11-01)
+
+`make_frozen(kind, &[a, b])` takes a bloblet's values from 0;
+`bloblet_slot(v, k)` counts fields from 1, field 1 the trailer, so value
+`i` is field `i + 2`, and `bloblet_head(v).fields` counts the trailer. The
+gap has been crossed wrongly at least twice (§201's `stage_native_fx`, a
+product's fields read one off; `fixpt-reps`'s heap form, the trailer read
+as the tag, 2026-11-01). The user: procedural abstractions that make it
+plain. A first cut: `Heap::value(v, i)` and `set_value`, `values_len(v)`,
+indexed as `make_frozen` takes them, and a product's and a sum's
+(`sum_tag`, `sum_payload`, `product_field(v, label)`, labels from 1 as
+FX-26 writes them); `bloblet_slot` kept for the runtime's own layouts,
+and a tidy lint against arithmetic on its index outside `fixpt-heap`.
+528 calls of `bloblet_slot` (15 of the form `k + 1`), most in
+`fixpt-native`, `fixpt-engine`, `fixpt-runtime`: moved file by file.

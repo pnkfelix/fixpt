@@ -35,6 +35,9 @@
 (define rp-holes (ref (listof (pairof int int @t) acyclic) @t) (new nil))
 (define rp-hole-names (ref k-names @t) (new nil))
 (define rp-nholes (ref int @t) (new 0))
+;; Whether the type exported last has a part a rep does not take (an
+;; unresolved `select`), its rep then no type's.
+(define rp-declined (ref bool @t) (new #f))
 
 (define rp-reserve (->* () int)
   (lambda () (let ((n (get rp-next))) (begin (set rp-next (+ n 1)) n))))
@@ -325,7 +328,7 @@
             (begin (set rp-scope saved)
                    (rp-fill slot 'dlambda #f (rp-binder-names bs) (append nodes (list b))))))
         (ty-app (g ds) (rp-fill slot 'app #f nil (cons (rp-ty g) (rp-descs ds))))
-        (else y (k-fail "a type a rep does not take (an unresolved `select`)" 0 0))))))
+        (else y (begin (set rp-declined #t) (rp-fill slot 'declined #f nil nil)))))))
 
 ;; Type `t` as a rep, in its binary form: its nodes given the runtime, which
 ;; makes it canonical (`rep-of-nodes`).
@@ -333,11 +336,14 @@
   (lambda (t)
     (begin
       (set rp-nodes nil) (set rp-next 0) (set rp-memo nil) (set rp-scope nil)
-      (set rp-holes nil) (set rp-hole-names nil) (set rp-nholes 0)
+      (set rp-holes nil) (set rp-hole-names nil) (set rp-nholes 0) (set rp-declined #f)
       (let ((root (rp-ty t)))
         (tagcase root
           (node slot (rep-of-nodes (get rp-nodes) (reverse (get rp-hole-names)) slot))
           (else y (rep-of-nodes (get rp-nodes) nil 0)))))))
+;; Whether the type `k-ty-rep` exported last has a part a rep does not
+;; take (an unresolved `select`): its rep is then no type's.
+(define k-rep-declined? (->* () bool) (lambda () (get rp-declined)))
 ;; The holes of the type `k-ty-rep` exported last, in order: the variables
 ;; each stands for.
 (define k-rep-holes (->* () k-ids)

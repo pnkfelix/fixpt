@@ -190,12 +190,14 @@
           ((load-input "fx26:check-terminate.fx")
            check-types check-resolve check-holds check-env
            check-expect check-sc-graphs check-print tables))
+         ;; The checker, its types as reps (`check-reps.fx`).
+         (check-reps ((load-input "fx26:check-reps.fx") check-types check-effects))
          ;; The checker, what tests prove: facts in the type of a test.
          (check-test-facts
           ((load-input "fx26:check-test-facts.fx")
            check-infer check-types check-env check-terminate
            check-print check-calls check-sc-graphs check-binders check-print-parts
-           check-logic check-resolve check-subtype check-subst))
+           check-logic check-resolve check-subtype check-subst check-reps))
          ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
@@ -268,7 +270,7 @@
            check-terminate check-print check-letrec check-read
            check-expect check-modules check-modorder check-subst
            check-synth check-module-rules check-subtype parser-module check-modules-read
-           check-print-parts))
+           check-print-parts check-reps))
          ;; The object layout, generated from the heap's table.
          (layout (load-module "fx26:layout.fx"))
          ;; The standard operations, generated from the lowering's table.
@@ -422,13 +424,14 @@
           (let* (;; The text checked, its trees `tops`.
                  (checked
                   (lambda ((standard (listof syn acyclic)) (tops (listof top acyclic))
-                           (k int) (len int) (native bool) (registers bool))
+                           (k int) (len int) (native bool) (registers bool)
+                           (rep (bytevectorof @t)))
                     (begin
                       ((with check-program check-lines!) #f)
                       ((with check-print-parts check-conv-native!) native)
                       ((with compile compile-conv-native!) native)
                       ((with regcode-entry compile-registers!) registers)
-                      (tagcase ((with check-program check-program) standard tops)
+                      (tagcase ((with check-program check-staged-program) standard tops rep)
                         (k-err (m a b) (fail (sum refused #u) m (clamp a k len) (clamp b k len)))
                         (k-done (t) (fail (sum refused #u) "not an expression" 0 len))
                         (k-ok (ls)
@@ -438,9 +441,11 @@
                             (c-ok (w) (sum made w))
                             (c-err (m) (fail (sum refused #u) m 0 len)))))))))
             ;; The code wrapped (`stage.rs`'s `wrapped`), `whole`, the code
-            ;; `len` characters at `k` of it.
+            ;; `len` characters at `k` of it; and the type it is checked as,
+            ;; as a rep, which `whole` names `%stage-type`, if not empty
+            ;; (`check-staged-program`).
             (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int)
-                     (native bool) (registers bool))
+                     (native bool) (registers bool) (rep (bytevectorof @t)))
               (let ((read (read-text-at whole 0)))
                 (if (null? read)
                     (fail (sum unread #u) "the code is not one whole expression" 0 len)
@@ -450,7 +455,7 @@
                       (tagcase (parse-program (car read))
                         (p-err (m a b)
                           (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
-                        (p-ok (tops) (checked standard tops k len native registers)))))))))
+                        (p-ok (tops) (checked standard tops k len native registers rep)))))))))
          ;; A session's step (`sessions26.rs`), checked by this instance's
          ;; checker, which holds the session's definitions, and compiled by
          ;; its compiler, whose globals are the session's: `whole`, the code

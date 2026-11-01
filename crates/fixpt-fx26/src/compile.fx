@@ -322,9 +322,9 @@
               (n-frozen-define () (c-note! (get c-frozen-table) at 0))
               (n-plain-fx () (c-note! (get c-plain-table) at 0))
               (n-conversion (code) (c-note! (get c-convert-table) at code))
-              (n-staged (m e r ns)
+              (n-staged (m e r ns rp)
                 (set c-staged-texts
-                     (cons (product (1 at) (2 m) (3 e) (4 r) (5 ns)) (get c-staged-texts))))
+                     (cons (product (1 at) (2 m) (3 e) (4 r) (5 ns) (6 rp)) (get c-staged-texts))))
               (n-call (cv)
                 (let ((a (extract at 1)))
                   (table-set! (get c-call-table) a

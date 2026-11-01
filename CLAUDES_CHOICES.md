@@ -3207,3 +3207,30 @@ of `TODO.md` §141, working on my own.
   than the single globals' reads would of reaching itself, so they are
   dropped with or without `spin`.
 
+
+## A stage's type by rep (2026-11-01; `heap-types.md`, step 3's first part)
+
+- **One rep, the type the code is checked as**: `(subr pure (M) (subr E
+  () R))`, the type the checker builds at the call already, not `M`, `E`
+  and `R` apart; the wrapping then names it once and leaves the lambda's
+  parameter unannotated, which bidirectional checking types from it.
+- **The rep a constant of the code**, made at compile time
+  (`rep-cell`: the rep's heap form, a `wcell` as every constant is), so
+  the fact the checker gives the compilers holds it, a fifth field of
+  `n-staged`, and the staged product a seventh; `#f` where there is none,
+  and every machine reads the product as before but for that.
+- **Text where the rep could not stand alone yet**: evidence given (a
+  hole), a region of its own, a generative type (no stable key: a
+  constant found by its place in the checker's table, which the stage's
+  own checker does not share), a part a rep does not take. The export
+  declines such a part instead of failing (`k-rep-declined?`), since
+  failing there would refuse a program the text path takes.
+- **The stage's checker binds the name**, `%stage-type`, after the
+  standard environment and before the code (`check-staged-program`,
+  `check-program` its case of no rep); a `%` name no program writes.
+- **`check-reps` made by the conductor**, before `check-test-facts`,
+  which it is given with a signature (`check-reps-types.fx`), and then
+  given `check-program` too (one instance, not two).
+- **No cache across stages yet**: the import is cheap (1.7 KB for s7st's
+  runtime) beside the standard environment entered again each stage,
+  which a stage front end that kept it would save; left for later.

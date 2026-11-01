@@ -57,8 +57,9 @@
   ;; the effect and the type it is checked at, printed, which `%fx26-stage`
   ;; is given with it, for the checker that runs then; and the names of the
   ;; variables whose evidence it is given (`(given …)`), in order. A
-  ;; `reify-…`'s: what it is of (`k-reified`).
-  (n-staged string string string string))
+  ;; `reify-…`'s: what it is of (`k-reified`). And for a `stage`, the
+  ;; type it is checked as, as a rep (`k-staged-rep`), or `#f`.
+  (n-staged string string string string wcell))
 ;; Each keyed by the expression (its identity, `k-at`).
 (define-type k-fact (productof (1 k-at) (2 k-noted)))
 (define-type k-facts (listof k-fact acyclic))

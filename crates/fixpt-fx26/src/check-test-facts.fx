@@ -17,7 +17,8 @@
        (check-calls-types (load-module "fx26:check-calls-types.fx"))
        (check-logic-types (load-module "fx26:check-logic-types.fx"))
        (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
-       (check-subtype-types (load-module "fx26:check-subtype-types.fx")))
+       (check-subtype-types (load-module "fx26:check-subtype-types.fx"))
+       (check-reps-types (load-module "fx26:check-reps-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-infer (select check-infer-types check-infer-sig))
            (check-types (select check-types-types check-types-sig))
@@ -33,7 +34,9 @@
            ;; Subtyping, and substitution, for where a bound may stand
            ;; (`k-monotone-in?`).
            (check-subtype (select check-subtype-types check-subtype-sig))
-           (check-subst (select check-subst-types check-subst-sig)))
+           (check-subst (select check-subst-types check-subst-sig))
+           ;; Types as reps, for what a `stage` is checked against.
+           (check-reps (select check-reps-types check-reps-sig)))
     (module
 (hide (include check-test-facts-types) (include check-types-types) (include check-subst-types))
 ;; The types it uses of the files before it.
@@ -198,9 +201,22 @@
                      (checked (k-ty-new (ty-subr nil (list mt) (k-ty-new (ty-subr e nil r cv nil))
                                                  cv nil)))
                      (names (k-given-names given free checked #t form))
-                     (n (n-staged (show mt) (k-show-effect e) (show r) names)))
+                     (n (n-staged (show mt) (k-show-effect e) (show r) names
+                                  (k-staged-rep checked (string=? names "")))))
                 (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
             (else y #u))))))
+;; What a `stage`'s code is checked as, type `checked`, as a rep, for the
+;; checker that runs then to import, not read (`docs/research/heap-types.md`,
+;; step 3): if it names no variable (`closed`, the code given no evidence)
+;; and a rep takes all of it; else `#f`, and that checker reads the text.
+(define k-staged-rep (->* (int bool) wcell)
+  (lambda (checked closed)
+    (if closed
+        (let ((bytes ((with check-reps k-ty-rep) checked)))
+          (if (or ((with check-reps k-rep-declined?)) (not (null? ((with check-reps k-rep-holes)))))
+              (wcell-bool #f)
+              (rep-cell bytes)))
+        (wcell-bool #f))))
 ;; A `reify-…`'s call, `op`, of `given`, the evidence it is given, of type
 ;; `te`, its `(effectrep E)`, `(regionrep r)` or `(typerep T)`: what it is
 ;; of, printed whole, noted at `given`, as the effect, or a region's, or the
@@ -229,8 +245,8 @@
                               ""))
                    (shown (text))
                    (n (if (string=? op "%reify-type")
-                          (n-staged fresh "" shown names)
-                          (n-staged fresh shown "" names))))
+                          (n-staged fresh "" shown names (wcell-bool #f))
+                          (n-staged fresh shown "" names (wcell-bool #f)))))
               (begin (set k-extracts (cons (product (1 (k-at-of given)) (2 n)) (get k-extracts)))
                      te))))
       (else y te))))
