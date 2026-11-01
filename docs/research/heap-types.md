@@ -161,6 +161,32 @@ go only when nothing uses them.
    cheap). Measure s7st's warm start.
 6. **Text paths removed**, where nothing is left on them.
 
+## Step 1, done (2026-11-01)
+
+The crate `fixpt-reps`: a rep's model and [`Builder`], its canonical form
+(the minimal graph by partition refinement, numbered from the root; holes
+and constants by first use), its digest (FNV-1a, the same in every
+process), its validation (indices in range; every bound variable's binder
+on every path to it), its binary form (`binary.rs`), its readable form
+(`text.rs`: datum labels for sharing and cycles, `#n.p` for a bound
+variable, `?i:name` a hole, `<name kind key>` a constant), and its place
+in the heap (`heap.rs`: a frozen product `(type-rep bytes)`;
+`FIXPT_VALIDATE_REPS` validates every rep read, trusted or not).
+
+The Rust checker's export and import (`fixpt-fx26/src/reps.rs`), with
+the heads of the type language in a table there, specifications included
+(the user's: not left for later). Every one of the 1123 types the test
+programs define is exported, imported and exported again as the same rep,
+prints as it did (written whole: an abbreviation is found by node for
+some types, `same_ty`), and reads back from both forms
+(`fixpt-fx26/tests/reps.rs`); none is declined.
+
+Left for the steps after: a constant's key is, for now, a generative
+type's name and place in its checker's table (stable only within a
+session; its definition's stamp is step 3's), and constants have no heap
+objects of their own yet; the readable form is the rep's, not the type
+syntax (each checker prints an imported type so).
+
 ## Decided (the user's, 2026-11-01)
 
 - **Measure after step 3**, before going on to sessions and `.fasl`s.

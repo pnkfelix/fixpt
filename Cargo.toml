@@ -16,6 +16,7 @@ members = [
     "crates/fixpt-tidy",
     "crates/fixpt-tools",
     "crates/fixpt-native",
+    "crates/fixpt-reps",
 ]
 # All but the tools' binaries, which have no tests: so that `cargo run`
 # finds one binary, `fixpt`, and starts the FX-26 REPL. The tools are
@@ -35,6 +36,7 @@ default-members = [
     "crates/fixpt-fx26",
     "crates/fixpt-tidy",
     "crates/fixpt-native",
+    "crates/fixpt-reps",
 ]
 
 [workspace.package]

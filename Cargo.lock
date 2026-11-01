@@ -55,6 +55,7 @@ dependencies = [
  "fixpt-heap",
  "fixpt-native",
  "fixpt-read",
+ "fixpt-reps",
  "fixpt-runtime",
  "fixpt-scheme",
 ]
@@ -112,6 +113,13 @@ dependencies = [
 [[package]]
 name = "fixpt-read"
 version = "0.1.0"
+
+[[package]]
+name = "fixpt-reps"
+version = "0.1.0"
+dependencies = [
+ "fixpt-heap",
+]
 
 [[package]]
 name = "fixpt-runtime"

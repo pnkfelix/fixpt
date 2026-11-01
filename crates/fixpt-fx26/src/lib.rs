@@ -983,6 +983,7 @@ pub mod stage;
 pub mod sx;
 pub mod typeat;
 pub mod query;
+pub mod reps;
 pub mod standard;
 pub mod top;
 pub mod unparse;

@@ -1,0 +1,11 @@
+[package]
+name = "fixpt-reps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fixpt-heap = { path = "../fixpt-heap" }
+
+[lints]
+workspace = true

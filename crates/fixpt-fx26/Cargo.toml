@@ -11,6 +11,7 @@ fixpt-runtime = { path = "../fixpt-runtime" }
 fixpt-engine = { path = "../fixpt-engine" }
 fixpt-scheme = { path = "../fixpt-scheme" }
 fixpt-native = { path = "../fixpt-native" }
+fixpt-reps = { path = "../fixpt-reps" }
 
 [features]
 default = []
