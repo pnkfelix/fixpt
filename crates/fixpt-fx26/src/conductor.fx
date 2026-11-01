@@ -362,6 +362,16 @@
          (native
           ((load-input "fx26:native.fx")
            (load-input "fx26:arm64.fx") layout (load-module "fx26:native-layout.fx")))
+         ;; And register code to arm64, over that assembler: its fast
+         ;; paths, then the rest.
+         (native-arm64-regs-ops
+          ((load-input "fx26:native-arm64-regs-ops.fx")
+           (load-input "fx26:arm64.fx") layout (load-module "fx26:native-layout.fx")
+           (load-module "fx26:native-arm64-regs-layout.fx") native))
+         (native-arm64-regs
+          ((load-input "fx26:native-arm64-regs.fx")
+           (load-input "fx26:arm64.fx") layout (load-module "fx26:native-layout.fx")
+           (load-module "fx26:native-arm64-regs-layout.fx") native native-arm64-regs-ops))
          ;; The same for x86_64.
          (native-x64
           ((load-input "fx26:native-x64.fx")
@@ -587,6 +597,8 @@
              (native-assemble-x64 (with native-x64 native-assemble-x64))
              (native-assemble-x64-regs (with native-x64-regs native-assemble-x64-regs))
              (native-adapter-x64 (with native-x64-regs native-adapter-x64))
+             (native-assemble-arm64-regs (with native-arm64-regs native-assemble-arm64-regs))
+             (native-adapter-arm64 (with native-arm64-regs native-adapter-arm64))
              (native-compile-x64-proc (with native-direct native-compile-x64-proc))
              (compile-forget-globals! (with compile-programs compile-forget-globals!))
              (compile-keep-global! (with compile-programs compile-keep-global!))
@@ -660,6 +672,8 @@
 (define native-assemble-x64 (extract front-end-entries native-assemble-x64))
 (define native-assemble-x64-regs (extract front-end-entries native-assemble-x64-regs))
 (define native-adapter-x64 (extract front-end-entries native-adapter-x64))
+(define native-assemble-arm64-regs (extract front-end-entries native-assemble-arm64-regs))
+(define native-adapter-arm64 (extract front-end-entries native-adapter-arm64))
 (define native-compile-x64-proc (extract front-end-entries native-compile-x64-proc))
 (define compile-forget-globals! (extract front-end-entries compile-forget-globals!))
 (define compile-keep-global! (extract front-end-entries compile-keep-global!))

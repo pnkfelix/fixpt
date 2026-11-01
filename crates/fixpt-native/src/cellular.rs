@@ -63,7 +63,7 @@ mod state {
 }
 pub(crate) mod regcode;
 pub mod x64;
-pub use regcode::{assemble_adapter, assemble_register_word};
+pub use regcode::{assemble_adapter, assemble_register_word, fx26_regs_module};
 pub(crate) use state::{ROUTINE_SLOTS, State};
 
 // The registers the machine lives in: all callee-saved, so they survive a

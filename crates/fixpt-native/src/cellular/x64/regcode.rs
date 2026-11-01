@@ -1377,7 +1377,7 @@ pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u8> {
 /// The primitives register code names (`prim_named`, `shape_test`,
 /// `int_fast`, the slow paths of `op2`), which the compiler written in FX-26
 /// knows by name (`fx26_regs_module`).
-const NAMED_PRIMITIVES: &[&str] = &[
+pub(crate) const NAMED_PRIMITIVES: &[&str] = &[
     "string-length", "string-ref", "%region-cons", "%bloblet-fields", "%bloblet-set!", "char-whitespace?", "char-numeric?",
     "%symbol-hash", "%fx26-fixnum?", "char?", "boolean?", "symbol?", "string?", "pair?", "null?", "%fx26-bitwise-and",
     "%fx26-bitwise-ior", "%fx26-bitwise-xor", "%fx26-bitwise-not", "exact-integer?", "%fx26-array?", "%fx26-f32?",
@@ -1422,8 +1422,19 @@ pub fn fx26_regs_module() -> String {
     c("r-region-slots", fixpt_heap::heap::REGION_SLOTS as i64, "regions with a slot in the heap's table");
     c("r-regs", REGS as i64, "registers of register code");
     c("r-trap-prim", Trap::Prim(String::new()).code().0 as i64, "a trap's code");
+    out.push_str(&fx26_regs_tables("r-"));
+    out
+}
+
+/// The tables a compiler of register code written in FX-26 is given, its
+/// names after `p`: each instruction's operand count, the primitives
+/// register code names, by number and by name, which never collect, and
+/// the kinds a shape test takes. For `fx26_regs_module`, and arm64's
+/// (`cellular::regcode::fx26_regs_module`).
+pub(crate) fn fx26_regs_tables(p: &str) -> String {
+    let mut out = String::new();
     out.push_str("\n;; How many operand cells follow register-code instruction `n`.\n");
-    out.push_str("(define r-operands (subr pure (int) int)\n  (lambda (n)\n    (case n\n");
+    out.push_str(&format!("(define {p}operands (subr pure (int) int)\n  (lambda (n)\n    (case n\n"));
     for (i, (name, n, _)) in OPS.iter().enumerate() {
         if *n > 0 {
             out.push_str(&format!("      (({i}) {n})  ; {name}\n"));
@@ -1431,7 +1442,7 @@ pub fn fx26_regs_module() -> String {
     }
     out.push_str("      (else 0))))\n\n");
     out.push_str(";; The name of runtime primitive `p`, if register code names it; else \"\".\n");
-    out.push_str("(define r-prim-name (subr pure (int) string)\n  (lambda (p)\n    (case p\n");
+    out.push_str(&format!("(define {p}prim-name (subr pure (int) string)\n  (lambda (p)\n    (case p\n"));
     for (i, d) in fixpt_runtime::PRIMITIVES.iter().enumerate() {
         if NAMED_PRIMITIVES.contains(&d.name) {
             out.push_str(&format!("      (({i}) {:?})\n", d.name));
@@ -1439,14 +1450,14 @@ pub fn fx26_regs_module() -> String {
     }
     out.push_str("      (else \"\"))))\n\n");
     out.push_str(";; The number of the runtime primitive register code names `name`.\n");
-    out.push_str("(define r-prim-number (subr pure (string) int)\n  (lambda (name)\n    (case name\n");
+    out.push_str(&format!("(define {p}prim-number (subr pure (string) int)\n  (lambda (name)\n    (case name\n"));
     for name in NAMED_PRIMITIVES {
         let i = fixpt_runtime::PRIMITIVES.iter().position(|d| d.name == *name).unwrap_or_else(|| panic!("no primitive {name}"));
         out.push_str(&format!("      (({name:?}) {i})\n"));
     }
     out.push_str("      (else -1))))\n\n");
     out.push_str(";; Whether runtime primitive `p` never collects (`fixpt_runtime::never_collects`).\n");
-    out.push_str("(define r-never-collects? (subr pure (int) bool)\n  (lambda (p)\n    (case p\n");
+    out.push_str(&format!("(define {p}never-collects? (subr pure (int) bool)\n  (lambda (p)\n    (case p\n"));
     for (i, d) in fixpt_runtime::PRIMITIVES.iter().enumerate() {
         if fixpt_runtime::never_collects(d.name) {
             out.push_str(&format!("      (({i}) #t)  ; {}\n", d.name));
@@ -1454,7 +1465,7 @@ pub fn fx26_regs_module() -> String {
     }
     out.push_str("      (else #f))))\n\n");
     out.push_str(";; The `i`th kind shape test `name` takes a bloblet of (`shape_test`), or -1.\n");
-    out.push_str("(define r-shape-kind (subr pure (string int) int)\n  (lambda (name i)\n    (case name\n");
+    out.push_str(&format!("(define {p}shape-kind (subr pure (string int) int)\n  (lambda (name i)\n    (case name\n"));
     let shapes: [(&str, &[&str]); 8] = [
         ("symbol?", &["symbol"]), ("string?", &["string"]), ("exact-integer?", &["bignum"]), ("%fx26-array?", &["bloblet"]),
         ("%fx26-box?", &["box"]), ("%fx26-sum?", &["sum"]), ("%fx26-product?", &["product"]),
