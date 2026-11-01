@@ -104,3 +104,12 @@ fn the_assemblers_pieces_as_the_rust_compiler_makes_them() {
     let wrong = harness::compare(&mut s, &cases);
     assert!(wrong.is_empty(), "{}", wrong.iter().take(20).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+/// The whole compiler's modules, applied as the conductor applies them:
+/// that they check.
+#[test]
+fn the_compiler_checks() {
+    if let Err(e) = fixpt_fx26::session::compile_program(include_str!("native-direct-arm64/compiler.fx")) {
+        panic!("checks: {e}");
+    }
+}
