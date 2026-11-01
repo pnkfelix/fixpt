@@ -4833,3 +4833,29 @@ growing with what is defined already. In order:
    safety. The first measure (2026-11-01) skipped only the Rust checker's
    check of the stand-in body, the cheapest part, and saved 10 ms of 0.40
    s: it does not say what trusting both checkers' whole check would save.
+
+## 208. Benchmarks that say what the collector did while they ran (the user's, 2026-11-01)
+
+A timing that does not say how many collections fell inside it can
+mislead: step 6's last part (`heap-types.md`) timed a session's first step
+1.5 ms slower on the evaluator, while the whole run was 10% faster and
+allocated less; the cause looked like a minor collection that now landed
+inside the timed span, found only by `FIXPT_GC_SUMMARY`, which counts a
+whole run, not a span.
+
+1. **The benchmark strategy**: each timing reads the collector's counts,
+   major and minor (and words allocated, and time paused, where cheap),
+   before and after what it times, and reports their difference beside the
+   time; a comparison of two builds says when the counts differ, so that a
+   difference of time is not taken for a difference of work.
+2. **A paved path in Fixpt**: the counts given to FX-26 programs. The
+   heap keeps them apart (`gc_count`, major, and `minor_count`), and the
+   runtime has `%gc-count`, their sum, and `%gc-words-copied`, for Scheme
+   and the tests; but FX-26's standard environment has neither (`clock`
+   is all a benchmark has), and an eqtable needs none, its operations
+   reading `Heap::collections` in Rust (`eqtable.rs`). So: the counts,
+   major and minor apart, in the standard environment, and a library
+   procedure that times a thunk and gives its time and those counts
+   together, so that a benchmark written the easy way reports them out of
+   the box; the benchmarks in use (the scratch `s201` ones, Heist's
+   s7st timings) moved to it.
