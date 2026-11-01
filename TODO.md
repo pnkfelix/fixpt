@@ -5020,3 +5020,28 @@ cancelled once its budget is seen spent, at a wait or a time slice's end.
 **Left**: giving back what is left to resume (a preempted task is parked
 already, so a handle to it could be); and the step limit, which is still
 the form's.
+
+**6 (2026-11-01): no change needed, found by Heist's own probe**
+(`docs/requests/bench/eval/handler-local-tag.fx` in Heist's repository):
+a handler that resumes works today, in a region of the turn's own.
+The prompts around a resumed continuation do not delimit (it is free, its
+type names the region), but the `letregion` that made the region and the
+tag masks the control on it, so the turn does nothing another could see.
+The probe was refused only because its `handled` declared `turn-eff`
+without `(goto r)` and `(comefrom r)`; with them it gives its requests on
+every machine but the evaluator (below). Test: `programs/run/deep-handler.fx`
+(`fixpt-cli/tests/handlers.rs`, every machine, in an `attempt`). Found on
+the way:
+- **The evaluator lacks standard procedures** the checkers accept:
+  `reverse`, `char-alphabetic?`, `char-whitespace?`, `string-downcase`,
+  `string-ci=?`, `string-compare`, `nat?`, `acyclic?`, `vector?`,
+  `array->list`, `length-is?`, `datum-int?`, and more ("unbound
+  variable" as it runs, `eval-prims.fx`'s `standard`). A test that every
+  standard name runs on every machine would find them all.
+- **An effect family applied in a `maxeff`**, `(maxeff (asks r) (read
+  …))`, `asks` a `dlambda` to an effect, is refused: "gives a description
+  of kind effect, not a type". Applied as a `subr`'s whole effect it works
+  (`higher-kinds/effect-family.fx`).
+- **A better message would have saved Heist the trip**: where a prompt
+  does not delimit, the refusal could say why (a free variable whose type
+  names the region), and that the enclosing `letregion` masks the rest.

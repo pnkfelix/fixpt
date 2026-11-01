@@ -4512,3 +4512,11 @@ milliseconds are seen to have passed, at a wait or a time slice's end, and
 `(on-timeout)` is the value. In the scheduler written in FX-26, its
 deadline a clock event; on every machine; effect `nondet`, not
 `(io clock)`. Drop only: resuming what is left is not done.
+
+## 2026-11-01: resumable handlers already work (§211, 6)
+
+Heist's handler that resumes was refused by its own declared effect, not
+by Fixpt: in a region of the turn's own, the `letregion` masks the control
+the non-delimiting prompts leave, and the probe, its handler's type saying
+that control, runs on every machine. A deep handler test on every machine
+keeps it so (`programs/run/deep-handler.fx`).
