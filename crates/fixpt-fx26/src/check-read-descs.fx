@@ -673,11 +673,20 @@
            (dz (k-parse-size s)))
           ((syn-symbol? s) (k-parse-d-name s))
           (else
-           (let ((hd (k-head (k-items s "a description"))))
+           (let* ((items (k-items s "a description")) (hd (k-head items)))
              (cond ((string=? hd "dlambda") (k-fun-d s))
                    ((or (k-atom-head? hd) (string=? hd "maxeff")) (de (k-parse-effect s)))
                    ((or (string=? hd "+") (string=? hd "-")) (dz (k-parse-size s)))
+                   ;; `(e d …)`, `e` a description function to an effect,
+                   ;; applied: an effect, not a type (`parse.rs`'s).
+                   ((k-names-effect-fun? items) (de (k-parse-effect s)))
                    (else (dt (k-parse-type s)))))))))
+;; Whether `items`' head names a description function to an effect.
+(define k-names-effect-fun? (->* (k-syns) bool)
+  (lambda (items)
+    (and (not (null? items)) (syn-symbol? (car items)) (k-fun-bound? (syn-name (car items)))
+         (let ((parts (k-arrow-parts (k-fun-kind (k-fun-named (car items))))))
+           (and (not (null? parts)) (= (cdr (car parts)) 1))))))
 ;; A description of kind `k`, as written.
 (define k-parse-desc-at (->* (syn int) k-desc)
   (lambda (s k)

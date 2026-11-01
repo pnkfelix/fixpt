@@ -5042,10 +5042,13 @@ the way:
   every standard name, and each found missing against the machines'
   answers. **Left**: `icell-get` and `icell-put!` as values (their forms
   run).
-- **An effect family applied in a `maxeff`**, `(maxeff (asks r) (read
-  …))`, `asks` a `dlambda` to an effect, is refused: "gives a description
-  of kind effect, not a type". Applied as a `subr`'s whole effect it works
-  (`higher-kinds/effect-family.fx`).
+- ~~**An effect family applied as a description**~~ (done 2026-11-01;
+  first noted, wrongly, as "in a `maxeff`", which works): `(proj run (rw
+  @h))`, `rw` a `dlambda` to an effect, was read as a type and refused,
+  "gives a description of kind effect, not a type". Both parsers now read
+  `(f d …)` as an effect where `f` names a description function to one
+  (`names_effect_fun`, `k-names-effect-fun?`). Tests:
+  `higher-kinds/effect-family-given*.fx`.
 - **A better message would have saved Heist the trip**: where a prompt
   does not delimit, the refusal could say why (a free variable whose type
   names the region), and that the enclosing `letregion` masks the rest.

@@ -784,6 +784,17 @@ impl Checker {
         }
     }
 
+    /// Whether `items`' head names a description function to an effect.
+    pub(crate) fn names_effect_fun(&mut self, items: &[Syntax]) -> bool {
+        let Some(h) = items.first().and_then(|h| h.as_symbol()) else { return false };
+        let f = match self.lookup_desc(h) {
+            Some(DScope::Var(v, Kind::Arrow(_))) => self.arena.ty(Ty::Var(v)),
+            Some(DScope::Fun(f)) => f,
+            _ => return false,
+        };
+        self.fun_kind(f).and_then(|k| self.arena.arrow_parts(k).map(|(_, r)| r)) == Some(Kind::Effect)
+    }
+
     /// Whether `sym` is bound to a description function.
     fn fun_sym(&self, sym: Sym) -> bool {
         matches!(self.lookup_desc(sym), Some(DScope::Var(_, Kind::Arrow(_)) | DScope::Fun(_)))

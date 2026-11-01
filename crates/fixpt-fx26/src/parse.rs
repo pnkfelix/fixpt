@@ -1453,7 +1453,8 @@ impl Checker {
             };
         }
         let items = self.items(s, "a description")?;
-        match self.head(items).unwrap_or("") {
+        let head = self.head(items).unwrap_or("").to_string();
+        match head.as_str() {
             "dlambda" => Ok(D::Fun(self.parse_fun(s, None)?)),
             "const" | "acyclic" => Ok(D::Region(self.parse_region(s)?)),
             "+" | "-" => Ok(D::Size(self.parse_size(s)?)),
@@ -1462,6 +1463,9 @@ impl Checker {
             "read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "init" | "send" | "receive" | "io" | "maxeff" => {
                 Ok(D::Effect(self.parse_effect(s)?))
             }
+            // `(e d …)`, `e` a description function to an effect, applied:
+            // an effect, as in an effect (`effect_app`), not a type.
+            _ if self.names_effect_fun(&items) => Ok(D::Effect(self.parse_effect(s)?)),
             _ => Ok(D::Type(self.parse_type(s)?)),
         }
     }
