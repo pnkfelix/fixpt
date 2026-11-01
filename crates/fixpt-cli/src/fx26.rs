@@ -2232,15 +2232,15 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
         };
         let out = s.view(|v| {
             let r = v.get(made);
-            let ints = |k: usize| r.field(k).and_then(|l| l.list()).unwrap_or_default().iter().filter_map(|x| x.fixnum()).collect::<Vec<i64>>();
-            // Product field `k` is the bloblet's `k + 1` (as `syn.rs` reads them).
+            let ints = |n: usize| r.product_field(n).and_then(|l| l.list()).unwrap_or_default().iter().filter_map(|x| x.fixnum()).collect::<Vec<i64>>();
+            // The product's fields by their numbers, as FX-26 writes them.
             FxEmitted {
-                code: ints(2).into_iter().map(|b| b as u8).collect(),
-                len: r.field(3).and_then(|l| l.fixnum()).unwrap_or(0) as usize,
-                fields: ints(4),
-                callouts: ints(5),
-                err: r.field(6).and_then(|e| e.string()).unwrap_or_default(),
-                starts: ints(7),
+                code: ints(1).into_iter().map(|b| b as u8).collect(),
+                len: r.product_field(2).and_then(|l| l.fixnum()).unwrap_or(0) as usize,
+                fields: ints(3),
+                callouts: ints(4),
+                err: r.product_field(5).and_then(|e| e.string()).unwrap_or_default(),
+                starts: ints(6),
             }
         });
         let mut taken = Ok(());
@@ -2328,13 +2328,13 @@ fn stage_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value) 
         // Read before the compile takes its values back, which allocates
         // nothing, but before anything else does; then the roots let go,
         // its (`fx_park`'s, above these) too.
-        // Product field `k` in the bloblet's slot `k + 1`: here, as in
-        // `compile_by_fx26_in`, by slot.
+        // By its fields, as a product's (`compile_by_fx26_in` reads it
+        // so too).
         let out = made.map(|r| {
             let heap = &rt.heap;
-            let ints = |k: usize| {
+            let ints = |n: usize| {
                 let mut out = Vec::new();
-                let mut l = heap.bloblet_slot(r, k);
+                let mut l = heap.product_field(r, n);
                 while l.is_pair() {
                     let x = heap.car(l);
                     if x.is_fixnum() {
@@ -2344,14 +2344,14 @@ fn stage_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value) 
                 }
                 out
             };
-            let len = heap.bloblet_slot(r, 3);
+            let len = heap.product_field(r, 2);
             FxEmitted {
-                code: ints(2).into_iter().map(|b| b as u8).collect(),
+                code: ints(1).into_iter().map(|b| b as u8).collect(),
                 len: if len.is_fixnum() { len.as_fixnum() as usize } else { 0 },
-                fields: ints(4),
-                callouts: ints(5),
-                err: heap.string_to_rust(heap.bloblet_slot(r, 6)),
-                starts: ints(7),
+                fields: ints(3),
+                callouts: ints(4),
+                err: heap.string_to_rust(heap.product_field(r, 5)),
+                starts: ints(6),
             }
         });
         fx_unpark(&mut rt.heap, &mut c);

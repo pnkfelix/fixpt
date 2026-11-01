@@ -918,7 +918,7 @@ pub(crate) fn liveness(cells: &[Value], starts: &[bool]) -> Vec<u16> {
 /// branch's ±1 MB cannot reach (PLAN.md B1, `mllang-bench/fx/ocaml/boyer.fx`).
 fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) -> Result<(Vec<u32>, Vec<i64>), String> {
     let fields = heap.bloblet_head(rw).fields;
-    let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(rw, k)).collect();
+    let cells: Vec<Value> = heap.bloblet_fields_from(rw, WORD_CELL0);
     let mut starts = vec![false; cells.len() + 1];
     let mut i = 0;
     while i < cells.len() {
@@ -1511,7 +1511,7 @@ impl NativeMachine {
             self.compile_word(heap, word)?;
             return Ok(true);
         }
-        let cells = heap.bloblet_head(word).fields + 1 - WORD_CELL0;
+        let cells = heap.bloblet_count_from(word, WORD_CELL0);
         let mut starts = vec![-1i64; cells];
         starts[0] = 0;
         if x86 {

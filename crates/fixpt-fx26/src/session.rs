@@ -17,6 +17,7 @@ use crate::lower::{Globals, lower};
 use crate::sx::{Code, Sx};
 use crate::top::Top;
 use fixpt_read::{FileId, Span, Sym, Syntax};
+use fixpt_heap::layout::cellular::{GLOBAL_VALUE, GLOBAL_WRITES};
 use fixpt_scheme::Session;
 
 /// The FX-26 run-time environment, as Scheme.
@@ -767,11 +768,11 @@ fn sweep_cache(dir: &std::path::Path) {
     }
 }
 
-/// Each entry point in the product `pieces` (field `i + 1` its `i`th, in
-/// slot `i + 2`) in a global of its own, `{native}{name}`.
+/// Each entry point in the product `pieces` (its field `i + 1` the `i`th
+/// entry) in a global of its own, `{native}{name}`.
 fn set_entries(heap: &mut fixpt_heap::Heap, pieces: fixpt_heap::Value, entries: &[&str], native: &str) {
     for (i, name) in entries.iter().enumerate() {
-        let piece = heap.bloblet_slot(pieces, 2 + i);
+        let piece = heap.product_field(pieces, i + 1);
         let sym = heap.intern(&format!("{native}{name}"));
         let slot = heap.symbol_global_slot(sym);
         heap.set_global(slot, piece);
@@ -1869,7 +1870,7 @@ impl Fx26Session {
                 }
             };
             let Some(cell) = self.global_cell(&global)? else { return Ok(Err(fail(format!("it names `{global}`, which is not defined here")).message)) };
-            let h = if value { self.scheme.make(|m| { let c = m.get(cell); m.heap().bloblet_slot(c, 2) }) } else { cell };
+            let h = if value { self.scheme.make(|m| { let c = m.get(cell); m.heap().bloblet_slot(c, GLOBAL_VALUE) }) } else { cell };
             found.push((p, h));
         }
         let stamp = self.checker.shared_files.get(&name).map_or(0, |f| stamp_fixnum(f.stamp));
@@ -1922,7 +1923,7 @@ impl Fx26Session {
                 Some(c) if !natives.is_empty() => crate::fasl::native_procedures(heap, copy, c, &natives),
                 _ => copy,
             };
-            heap.set_bloblet_slot(g, 2, copy);
+            heap.set_bloblet_slot(g, GLOBAL_VALUE, copy);
             // Its definition's stamp, as its load from source leaves it
             // (`definition_stamps`), which the guards test.
             heap.set_bloblet_slot(g, fixpt_heap::layout::cellular::GLOBAL_WRITES, fixpt_heap::Value::fixnum(stamp));
@@ -2455,7 +2456,7 @@ impl Fx26Session {
                         let heap = m.heap();
                         for (((_, at), g), stamp) in group.iter().zip(gs).zip(&stamps) {
                             let v = heap.obj_ref(vs, *at);
-                            heap.set_bloblet_slot(g, 2, v);
+                            heap.set_bloblet_slot(g, GLOBAL_VALUE, v);
                             heap.set_bloblet_slot(g, fixpt_heap::layout::cellular::GLOBAL_WRITES, fixpt_heap::Value::fixnum(*stamp));
                         }
                         fixpt_heap::Value::FALSE
@@ -2492,8 +2493,7 @@ impl Fx26Session {
                 if v.is_pair() {
                     todo.extend([from.car(v), from.cdr(v)]);
                 } else if from.obj_type(v) != Some(fixpt_heap::ObjType::Symbol) {
-                    let trailer = from.bloblet_has_trailer(v) as usize;
-                    todo.extend(((1 + trailer)..=from.bloblet_head(v).fields).map(|k| from.bloblet_slot(v, k)));
+                    todo.extend(from.bloblet_values(v));
                 }
             }
             // Its native code as it was kept: nothing compiled here; of
@@ -2527,7 +2527,7 @@ impl Fx26Session {
                     };
                     // What the group's definitions share, copied once.
                     given.extend(made);
-                    heap.set_bloblet_slot(g, 2, copy);
+                    heap.set_bloblet_slot(g, GLOBAL_VALUE, copy);
                     heap.set_bloblet_slot(g, fixpt_heap::layout::cellular::GLOBAL_WRITES, fixpt_heap::Value::fixnum(*stamp));
                 }
                 fixpt_heap::Value::FALSE
@@ -2760,7 +2760,7 @@ impl Fx26Session {
         let mut r = Err(String::new());
         let cellular = self.fasl_cellular;
         self.scheme.make(|m| {
-            let values: Vec<fixpt_heap::Value> = cells.iter().map(|c| { let c = m.get(*c); m.heap().bloblet_slot(c, 2) }).collect();
+            let values: Vec<fixpt_heap::Value> = cells.iter().map(|c| { let c = m.get(*c); m.heap().bloblet_slot(c, GLOBAL_VALUE) }).collect();
             let heap = m.heap();
             let mut list = fixpt_heap::Value::NULL;
             for v in values.iter().rev() {
@@ -2787,8 +2787,8 @@ impl Fx26Session {
         let mut r = Err(String::new());
         let cellular = self.fasl_cellular;
         self.scheme.make(|m| {
-            let value = { let c = m.get(cell); m.heap().bloblet_slot(c, 2) };
-            let deps: Vec<(String, fixpt_heap::Value)> = deps.iter().zip(&cells).map(|(d, c)| { let c = m.get(*c); (d.clone(), m.heap().bloblet_slot(c, 2)) }).collect();
+            let value = { let c = m.get(cell); m.heap().bloblet_slot(c, GLOBAL_VALUE) };
+            let deps: Vec<(String, fixpt_heap::Value)> = deps.iter().zip(&cells).map(|(d, c)| { let c = m.get(*c); (d.clone(), m.heap().bloblet_slot(c, GLOBAL_VALUE)) }).collect();
             let heap = m.heap();
             let adapter = adapter.and_then(|a| a(heap).ok());
             r = crate::fasl::image(heap, value, &deps, adapter, cellular);
@@ -3399,12 +3399,11 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         } {
             NativeRun::Ran(Ok(v)) => {
                 let g = rt.heap.root_at(at);
-                rt.heap.set_bloblet_slot(g, 2, v);
+                rt.heap.set_bloblet_slot(g, GLOBAL_VALUE, v);
                 // A write, as `global!`'s, which the guards count: the
                 // global may be one kept, defined again.
-                let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
-                let n = rt.heap.bloblet_slot(g, w).as_fixnum();
-                rt.heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(n + 1));
+                let n = rt.heap.bloblet_slot(g, GLOBAL_WRITES).as_fixnum();
+                rt.heap.set_bloblet_slot(g, GLOBAL_WRITES, fixpt_heap::Value::fixnum(n + 1));
                 Ok(())
             }
             other => Err(other),
@@ -3458,7 +3457,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             self.scheme.make(|m| {
                 let (g, t) = (m.get(g), m.get(target));
                 let heap = m.heap();
-                inlines = fixpt_runtime::disasm::inlines_global(heap, heap.bloblet_slot(g, 2), t);
+                inlines = fixpt_runtime::disasm::inlines_global(heap, heap.bloblet_slot(g, GLOBAL_VALUE), t);
                 fixpt_heap::Value::FALSE
             });
             if inlines {
@@ -3487,7 +3486,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             }
             let heap = m.heap();
             let g = heap.car(cells);
-            let v = heap.bloblet_slot(g, 2);
+            let v = heap.bloblet_slot(g, GLOBAL_VALUE);
             // A cellular closure; or, in the native convention, what
             // cellular code makes, a native closure that adapts one
             // (`nclosure`), which the compiler sees through (any other
@@ -3507,7 +3506,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
                 // holds it still holds (`global-guard`).
                 match compiled {
                     Ok(native) => {
-                        heap.set_bloblet_slot(g, 2, native);
+                        heap.set_bloblet_slot(g, GLOBAL_VALUE, native);
                         r = Ok(true);
                     }
                     Err(why) => r = Err(why),
@@ -3524,7 +3523,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
                 Ok(native) => {
                     s.scheme.make(|m| {
                         let (g, native) = (m.get(g), m.get(native));
-                        m.heap().set_bloblet_slot(g, 2, native);
+                        m.heap().set_bloblet_slot(g, GLOBAL_VALUE, native);
                         fixpt_heap::Value::FALSE
                     });
                     r = Ok(true);
@@ -3596,8 +3595,8 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             let l = m.get(reps);
             let heap = m.heap();
             for p in heap.list_to_vec(l).unwrap_or_default() {
-                let name = heap.symbol_name(heap.bloblet_slot(p, 2));
-                let b = heap.bloblet_slot(p, 3);
+                let name = heap.symbol_name(heap.product_field(p, 1));
+                let b = heap.product_field(p, 2);
                 out.push((name, (0..heap.bytevector_len(b)).map(|i| heap.bytevector_ref(b, i)).collect()));
             }
             fixpt_heap::Value::NULL
@@ -3617,7 +3616,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             let heap = m.heap();
             let bytes = |b: fixpt_heap::Value| (0..heap.bytevector_len(b)).map(|i| heap.bytevector_ref(b, i)).collect::<Vec<u8>>();
             for p in heap.list_to_vec(l).unwrap_or_default() {
-                out.push((heap.symbol_name(heap.bloblet_slot(p, 2)), bytes(heap.bloblet_slot(p, 3)), bytes(heap.bloblet_slot(p, 4))));
+                out.push((heap.symbol_name(heap.product_field(p, 1)), bytes(heap.product_field(p, 2)), bytes(heap.product_field(p, 3))));
             }
             fixpt_heap::Value::NULL
         });
@@ -3639,9 +3638,9 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
                 let p = heap.car(l);
                 // Its expression's identity (`k-at`), and the summary
                 // (`n-summary`, a sum, its value a product of one field).
-                let (at, noted) = (heap.bloblet_slot(p, 2), heap.bloblet_slot(p, 3));
-                let summary = heap.bloblet_slot(heap.bloblet_slot(noted, 3), 2).as_fixnum();
-                out.push((heap.bloblet_slot(at, 2).as_fixnum(), heap.bloblet_slot(at, 3).as_fixnum(), summary));
+                let (at, noted) = (heap.product_field(p, 1), heap.product_field(p, 2));
+                let summary = heap.product_field(heap.sum_payload(noted), 1).as_fixnum();
+                out.push((heap.product_field(at, 1).as_fixnum(), heap.product_field(at, 2).as_fixnum(), summary));
                 l = heap.cdr(l);
             }
             fixpt_heap::Value::FALSE

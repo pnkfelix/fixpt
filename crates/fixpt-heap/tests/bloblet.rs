@@ -42,6 +42,32 @@ fn fields_are_named_from_the_suffix() {
     h.verify().expect("sound");
 }
 
+/// A bloblet's values are counted from 0 in the order it was made with
+/// them, the trailer not among them, with a trailer or without one; and a
+/// sum's and a product's by what FX-26 calls them (`TODO.md` §205).
+#[test]
+fn values_are_counted_past_the_trailer() {
+    let mut h = Heap::new();
+    let (a, b, c) = (Value::fixnum(10), Value::fixnum(20), Value::fixnum(30));
+    let frozen = h.make_frozen(KIND, &[a, b, c]);
+    assert_eq!(h.bloblet_len(frozen), 3);
+    assert_eq!(h.bloblet_values(frozen), [a, b, c]);
+    assert_eq!(h.bloblet_slot(frozen, 2), a, "value 0 is field 2, after the trailer");
+    let bare = h.make_bloblet(KIND, 2, 0, false);
+    h.set_bloblet_value(bare, 0, a);
+    h.set_bloblet_value(bare, 1, b);
+    assert_eq!((h.bloblet_len(bare), h.bloblet_slot(bare, 1)), (2, a), "value 0 is field 1, with no trailer");
+    let empty = h.make_frozen(KIND, &[]);
+    assert_eq!(h.bloblet_len(empty), 0);
+    let tag = h.intern("ok");
+    let sum = h.make_frozen(fixpt_heap::layout::kind("sum"), &[tag, c]);
+    assert!(h.is_sum(sum) && !h.is_product(sum));
+    assert_eq!((h.sum_tag(sum), h.sum_payload(sum)), (tag, c));
+    let product = h.make_frozen(fixpt_heap::layout::kind("product"), &[a, b]);
+    assert!(h.is_product(product));
+    assert_eq!((h.product_field(product, 1), h.product_field(product, 2)), (a, b));
+}
+
 #[test]
 fn a_bloblet_survives_being_moved() {
     let mut h = Heap::new();

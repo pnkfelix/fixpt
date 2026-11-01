@@ -45,7 +45,7 @@
 
 use crate::arm64::*;
 use crate::codespace::{CodeSpace, Offset};
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE, GLOBAL_FIELDS, GLOBAL_WRITES, ROUTINES, WORD_CELL0, WORD_TWIN};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SELF, CODE_SOURCE, GLOBAL_FIELDS, GLOBAL_VALUE, GLOBAL_WRITES, ROUTINES, WORD_CELL0, WORD_TWIN};
 use fixpt_heap::layout::regcode::OPS;
 use fixpt_heap::{Heap, Value};
 use std::collections::HashMap;
@@ -640,8 +640,7 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
         && heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("cellular-closure") }
         && let Some(code) = native_code_of(heap, f)
     {
-        let fields = heap.bloblet_head(f).fields;
-        let free: Vec<Value> = (CLOSURE_FREE0..=fields).map(|k| heap.bloblet_slot(f, k)).collect();
+        let free: Vec<Value> = heap.bloblet_fields_from(f, CLOSURE_FREE0);
         return Ok(native_closure(heap, code, &free));
     }
     let blob = native_adapter_code(heap)?;
@@ -657,7 +656,7 @@ pub fn native_adapter_code(heap: &mut Heap) -> Result<Value, String> {
     }
     let bytes = if X86 { x64::adapter() } else { crate::arm64::bytes(&adapter_code()) };
     let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 1, bytes.len(), false);
-    heap.set_bloblet_slot(blob, 1, blob);
+    heap.set_bloblet_slot(blob, CODE_SELF, blob);
     heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
     heap.flush_code(blob);
     crate::symbols::note(heap.code_exec_address(blob), bytes.len(), "native convention: an adapter");
@@ -1289,7 +1288,7 @@ fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value], callou
                 Field::Closure(q, free) => native_closure(heap, blobs[*q], free),
                 Field::Callout(n) => callout_field(callouts[*n]),
             };
-            heap.set_bloblet_slot(blob, k + 1, v);
+            heap.set_bloblet_value(blob, k, v);
         }
         let bytes = &p.code;
         heap.set_bloblet_bytes(blob, 0, bytes).map_err(|e| format!("{e:?}"))?;
@@ -1828,8 +1827,8 @@ fn continuation_bytes(n: usize) -> Vec<u8> {
 fn continuation_bloblet(heap: &mut Heap) -> Value {
     let bytes = continuation_bytes(REINSTATE);
     let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 2, bytes.len(), false);
-    heap.set_bloblet_slot(blob, 1, blob);
-    heap.set_bloblet_slot(blob, 2, Value::FALSE);
+    heap.set_bloblet_slot(blob, CODE_SELF, blob);
+    heap.set_bloblet_slot(blob, CODE_SOURCE, Value::FALSE);
     heap.set_bloblet_bytes(blob, 0, &bytes).expect("room for its code");
     heap.flush_code(blob);
     blob
@@ -1927,8 +1926,7 @@ impl Compiling<'_> {
         if !v.is_bloblet() || h.bloblet_kind(v) != const { fixpt_heap::layout::kind("cellular-closure") } {
             return None;
         }
-        let fields = h.bloblet_head(v).fields;
-        Some((h.bloblet_slot(v, CLOSURE_WORD), (CLOSURE_FREE0..=fields).map(|k| h.bloblet_slot(v, k)).collect()))
+        Some((h.bloblet_slot(v, CLOSURE_WORD), h.bloblet_fields_from(v, CLOSURE_FREE0)))
     }
 
     /// Procedure `p`'s field holding `f`: an index from 1, shared with an
@@ -1953,7 +1951,7 @@ impl Compiling<'_> {
     /// the code may outlive a later definition. A cell with no count of its
     /// writes is read when the code runs.
     fn global_value(&mut self, cell: Value) -> Result<Field, String> {
-        let v = self.heap.bloblet_slot(cell, 2);
+        let v = self.heap.bloblet_slot(cell, GLOBAL_VALUE);
         // Not defined yet (a definition of itself, being compiled): what its
         // cell holds when the code runs.
         // A cellular closure of no register code (an adapter) cannot be
@@ -2018,7 +2016,7 @@ impl Compiling<'_> {
 
     /// `native_params` of code bloblet `code`.
     fn code_params(memo: &mut SlotMemo, h: &Heap, code: Value) -> Option<u8> {
-        if !h.is_code_bloblet(code) || h.bloblet_head(code).suffix_frozen || h.bloblet_head(code).fields < CODE_SOURCE || h.bloblet_slot(code, 1) != code {
+        if !h.is_code_bloblet(code) || h.bloblet_head(code).suffix_frozen || h.bloblet_head(code).fields < CODE_SOURCE || h.bloblet_slot(code, CODE_SELF) != code {
             return None;
         }
         let word = h.bloblet_slot(code, CODE_SOURCE);
@@ -4687,7 +4685,7 @@ fn bytes_set(a: &mut Asm, slow: Label, done: Label) {
 /// Register word `rw`'s cells, as they are compiled: a frame slot that
 /// holds an `f64` and something else in turn split (`reps::split_slots`).
 fn register_cells(h: &Heap, rw: Value) -> Vec<Value> {
-    let cells: Vec<Value> = (WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
+    let cells: Vec<Value> = h.bloblet_fields_from(rw, WORD_CELL0);
     let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
     reps::split_slots(cells, &prim_name)
 }
@@ -4709,7 +4707,7 @@ pub(super) type SlotMemo = HashMap<Vec<u64>, std::rc::Rc<SlotFacts>>;
 
 /// Register word `rw`'s `SlotFacts`, from `memo` or found and kept there.
 pub(super) fn slot_facts(memo: &mut SlotMemo, h: &Heap, rw: Value) -> std::rc::Rc<SlotFacts> {
-    let cells: Vec<Value> = (WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
+    let cells: Vec<Value> = h.bloblet_fields_from(rw, WORD_CELL0);
     let key: Vec<u64> = cells.iter().map(|c| c.raw()).collect();
     if let Some(f) = memo.get(&key) {
         return f.clone();
@@ -5495,7 +5493,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
         Callout::FieldRef => {
             let k = if args[1].is_fixnum() { usize::try_from(args[1].as_fixnum()).ok() } else { None };
-            match k.and_then(|k| rt.heap.bloblet_field(args[0], k).ok()) {
+            match k.and_then(|k| rt.heap.bloblet_field(args[0], k).ok()) { // fields: the program's field number
                 Some(v) => v.raw(),
                 None => {
                     let m = format!("field@: no field {} of {}", fixpt_engine::cellular::describe(rt, args[1]), fixpt_engine::cellular::describe(rt, args[0]));
@@ -6640,7 +6638,7 @@ pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
         return None;
     }
     let mut out = String::new();
-    let free = (heap.bloblet_head(closure).fields + 1).saturating_sub(CLOSURE_FREE0);
+    let free = heap.bloblet_count_from(closure, CLOSURE_FREE0);
     let _ = writeln!(out, "a native closure over {free} value(s):");
     for i in 0..free {
         let _ = writeln!(out, "  free {i}: {}", fixpt_runtime::write_value(heap, heap.bloblet_slot(closure, CLOSURE_FREE0 + i)));
@@ -6658,8 +6656,7 @@ pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
         }
         // What it calls, and makes closures of: code in its fields, and
         // in the closures there.
-        for k in 1..=heap.bloblet_head(code).fields {
-            let f = heap.bloblet_slot(code, k);
+        for f in heap.bloblet_fields_from(code, 1) {
             if heap.is_code_bloblet(f) {
                 todo.push(f);
             } else if f.is_bloblet() && heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("native-closure") } {

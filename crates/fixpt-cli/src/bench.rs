@@ -572,7 +572,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         fixpt_fx26::syn::lines(sc, lines).map_err(|e| e.to_string())?;
         let (fx_check, ()) = fx_phase(sc, r("fx check"), |sc| {
             let r = sc.call_global(&reader("check-program"), &[standard, tops]).map_err(|e| e.to_string())?;
-            let tag = sc.view(|v| v.get(r).field(2).and_then(|t| t.symbol_name()).unwrap_or_default());
+            let tag = sc.view(|v| v.get(r).sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default());
             if tag == "k-ok" { Ok(()) } else { Err("the checker written in FX-26 finds it wrong".to_string()) }
         })?;
         let facts = fixpt_fx26::syn::rust_facts(sc, file, text).map_err(msg)?;
@@ -632,8 +632,7 @@ fn assemble_registers(heap: &fixpt_heap::Heap, word: Value) -> Result<(), String
         if entry != ROUTINE_DOCOL && entry < PRIMITIVES as u64 {
             continue;
         }
-        for k in WORD_CELL0..=heap.bloblet_head(w).fields {
-            let v = heap.bloblet_slot(w, k);
+        for v in heap.bloblet_fields_from(w, WORD_CELL0) {
             if heap.is_cellular_word(v) {
                 todo.push(v);
             } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
@@ -648,8 +647,7 @@ fn assemble_registers(heap: &fixpt_heap::Heap, word: Value) -> Result<(), String
             assemble_word(heap, w, [0, 0])?;
             continue;
         }
-        for k in WORD_CELL0..=heap.bloblet_head(twin).fields {
-            let v = heap.bloblet_slot(twin, k);
+        for v in heap.bloblet_fields_from(twin, WORD_CELL0) {
             if heap.is_cellular_word(v) {
                 todo.push(v);
             }

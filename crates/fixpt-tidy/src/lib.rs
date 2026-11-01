@@ -1,6 +1,7 @@
 //! Checks on the repository itself, run as ordinary tests (`tests/`).
 //!
-//! Two checks. **FX program files stay small** ([`fx_size`]). And **a Scheme or FX program longer than a few lines does not
+//! Among the checks: **a bloblet's fields are named by their layout**, its
+//! values by what they are ([`fields`]). **FX program files stay small** ([`fx_size`]). And **a Scheme or FX program longer than a few lines does not
 //! live inside a Rust string literal.** A short snippet inline is the clearest
 //! way to write a test — the program and what it should do side by side — but
 //! past a few lines the string loses everything a source file has: an editor
@@ -20,6 +21,7 @@
 //! `#<closure …>` counts too, which is intended.
 
 pub mod cons_chain;
+pub mod fields;
 pub mod fx_size;
 pub mod recursion;
 pub mod sexp_edit;

@@ -4,7 +4,7 @@
 
 use crate::print::write_value;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_NAME, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
 use fixpt_heap::{Heap, Value};
 use std::fmt::Write as _;
 
@@ -28,7 +28,7 @@ pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
     if !heap.is_cellular_word(word) {
         return None;
     }
-    let free = (heap.bloblet_head(v).fields + 1).saturating_sub(CLOSURE_FREE0);
+    let free = heap.bloblet_count_from(v, CLOSURE_FREE0);
     let mut out = format!("a native closure over {free} value(s), compiled from the register code below (`,disassemble-asm` shows its machine code):\n");
     for i in 0..free {
         let _ = writeln!(out, "  free {i}: {}", short(heap, heap.bloblet_slot(v, CLOSURE_FREE0 + i)));
@@ -75,14 +75,14 @@ pub fn inlines_global(heap: &Heap, v: Value, cell: Value) -> bool {
             continue;
         }
         let fields = heap.bloblet_head(twin).fields;
-        let op = |k: usize| OPS[heap.bloblet_slot(twin, k).as_fixnum() as usize];
+        let op = |k: usize| OPS[heap.bloblet_slot(twin, k).as_fixnum() as usize]; // fields: the twin's cells, walked by their operands
         let mut k = WORD_CELL0;
         while k <= fields {
             let (name, n, _) = op(k);
             let next = k + 1 + n;
             match name {
-                "global-guard" if heap.bloblet_slot(twin, k + 1) == cell => return true,
-                "lambda" => todo.push(heap.bloblet_slot(twin, k + 1)),
+                "global-guard" if heap.bloblet_slot(twin, k + 1) == cell => return true, // fields: the cell's operand
+                "lambda" => todo.push(heap.bloblet_slot(twin, k + 1)), // fields: the cell's operand
                 _ => {}
             }
             k = next;
@@ -144,7 +144,7 @@ fn listing(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>, show
         return out;
     }
     let start = if v.is_bloblet() && heap.bloblet_kind(v) == closure {
-        let free = (heap.bloblet_head(v).fields + 1).saturating_sub(CLOSURE_FREE0);
+        let free = heap.bloblet_count_from(v, CLOSURE_FREE0);
         let _ = writeln!(out, "a closure over {free} value(s):");
         for i in 0..free {
             let _ = writeln!(out, "  free {i}: {}", shown.show(heap, heap.bloblet_slot(v, CLOSURE_FREE0 + i)));
@@ -241,7 +241,7 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Opt
     let _ = writeln!(out, "\nword {} ({} cells, {how}):", name_of(heap, w), fields + 1 - WORD_CELL0);
     let mut k = WORD_CELL0;
     while k <= fields {
-        let cell = heap.bloblet_slot(w, k);
+        let cell = heap.bloblet_slot(w, k); // fields: the word's cells, walked by their operands
         let at = k - WORD_CELL0;
         if !cell.is_fixnum() {
             if heap.is_cellular_word(cell) {
@@ -255,7 +255,7 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Opt
         }
         let n = cell.as_fixnum() as usize;
         let name = ROUTINES.get(n).map_or("?", |r| r.0);
-        let ops: Vec<Value> = (1..=operands(name)).filter(|i| k + i <= fields).map(|i| heap.bloblet_slot(w, k + i)).collect();
+        let ops: Vec<Value> = (1..=operands(name)).filter(|i| k + i <= fields).map(|i| heap.bloblet_slot(w, k + i)).collect(); // fields: the cell's operands
         let shown: Vec<String> = match name {
             "branch" | "0branch" => vec![format!("→ {}", at as i64 + 2 + ops[0].as_fixnum())],
             "global" | "global!" => vec![global(heap, ops[0])],
@@ -321,8 +321,8 @@ fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>
     let mut k = WORD_CELL0;
     while k <= fields {
         let at = k - WORD_CELL0;
-        let (name, n, _) = OPS[heap.bloblet_slot(w, k).as_fixnum() as usize];
-        let ops: Vec<Value> = (1..=n).map(|i| heap.bloblet_slot(w, k + i)).collect();
+        let (name, n, _) = OPS[heap.bloblet_slot(w, k).as_fixnum() as usize]; // fields: the word's cells, walked by their operands
+        let ops: Vec<Value> = (1..=n).map(|i| heap.bloblet_slot(w, k + i)).collect(); // fields: the cell's operands
         let routine = |v: Value| ROUTINES.get(v.as_fixnum() as usize).map_or("?", |r| r.0).to_string();
         let shown: Vec<String> = match name {
             "branch" | "branchf" | "brancht" => vec![format!("→ {}", at as i64 + 2 + ops[0].as_fixnum())],
@@ -349,10 +349,10 @@ fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>
     }
 }
 
-/// A global's cell: its name, if it carries one (field 3).
+/// A global's cell: its name, if it carries one (`GLOBAL_NAME`).
 fn global(heap: &Heap, g: Value) -> String {
-    if g.is_bloblet() && heap.bloblet_head(g).fields >= 3 {
-        let n = heap.bloblet_slot(g, 3);
+    if g.is_bloblet() && heap.bloblet_head(g).fields >= GLOBAL_NAME {
+        let n = heap.bloblet_slot(g, GLOBAL_NAME);
         if n.is_bloblet() && heap.bloblet_kind(n) == const { kind("symbol") } {
             return heap.symbol_name(n);
         }

@@ -223,7 +223,7 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
         (CONT_SHOTS, Shots::Many.value()),
     ];
     for (f, v) in fields {
-        heap.set_bloblet_slot(k, f, v);
+        heap.set_bloblet_slot(k, f, v); // fields: each a CONT_ constant, above
     }
     k
 }
@@ -341,7 +341,7 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
     match name {
         "call" | "tailcall" | "tcall" | "ttailcall" => {
             let k = (st.d / 8) as usize;
-            let n = heap.bloblet_slot(Value::from_raw(st.cur), k).as_fixnum() as usize;
+            let n = heap.bloblet_slot(Value::from_raw(st.cur), k).as_fixnum() as usize; // fields: the cell at the machine's cursor
             st.d += 8;
             call(&mut Stacks { st }, heap, n, name.ends_with("tailcall"), name)
         }

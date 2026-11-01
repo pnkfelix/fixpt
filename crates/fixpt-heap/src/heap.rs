@@ -1474,6 +1474,101 @@ impl Heap {
         self.bloblet_head(v).fields > 0 && self.word(self.ix(v) - 1) & TAG_MASK == TAG_TRAILER
     }
 
+    // ------------------------------------------------------- a bloblet's values
+    //
+    // A bloblet's *values* are its fields but the trailer, counted from 0 in
+    // the order the bloblet was made with them (`make_frozen`'s `fields`):
+    // value `i` is field `i + 1`, or `i + 2` after a trailer. Code over
+    // values (an FX-26 sum or product, a record of the runtime's) names them
+    // so; a field by number is for the fixed layouts, each named by a
+    // constant of its layout (`TODO.md` §205; `fixpt_tidy::fields`).
+
+    /// The field value `i` of bloblet `v` is: one load, field 1's tag.
+    #[inline]
+    fn value_field(&self, v: Value, i: usize) -> usize {
+        let trailer = self.word(self.ix(v) - 1) & TAG_MASK == TAG_TRAILER;
+        i + 1 + usize::from(trailer)
+    }
+
+    /// How many values bloblet `v` holds: its fields less its trailer.
+    pub fn bloblet_len(&self, v: Value) -> usize {
+        let fields = self.bloblet_head(v).fields;
+        fields - usize::from(fields > 0 && self.word(self.ix(v) - 1) & TAG_MASK == TAG_TRAILER)
+    }
+
+    /// Value `i` of bloblet `v`, from 0. Unchecked but for debug builds, as
+    /// [`bloblet_slot`](Heap::bloblet_slot) is.
+    #[inline]
+    pub fn bloblet_value(&self, v: Value, i: usize) -> Value {
+        debug_assert!(i < self.bloblet_len(v), "{v:?} has no value {i}");
+        self.slot(self.ix(v) - self.value_field(v, i))
+    }
+
+    /// Value `i` of bloblet `v`, checked: none if it has no value `i`.
+    pub fn bloblet_value_checked(&self, v: Value, i: usize) -> Option<Value> {
+        (v.is_bloblet() && i < self.bloblet_len(v)).then(|| self.bloblet_value(v, i))
+    }
+
+    /// Set value `i` of bloblet `v`, from 0, in one store. For the runtime's
+    /// own bloblets, and for making one: it does not look at the frozen
+    /// flags, as [`set_bloblet_slot`](Heap::set_bloblet_slot) does not.
+    #[inline]
+    pub fn set_bloblet_value(&mut self, v: Value, i: usize, x: Value) {
+        debug_assert!(i < self.bloblet_len(v), "{v:?} has no value {i}");
+        let k = self.value_field(v, i);
+        self.set_slot(self.ix(v) - k, x);
+    }
+
+    /// Bloblet `v`'s values, in order.
+    pub fn bloblet_values(&self, v: Value) -> Vec<Value> {
+        (0..self.bloblet_len(v)).map(|i| self.bloblet_value(v, i)).collect()
+    }
+
+    /// Fields `first` to the last, in order: a fixed layout's run of them,
+    /// from the constant that starts it (a word's cells from `WORD_CELL0`,
+    /// a closure's free values from `CLOSURE_FREE0`); none if `first` is
+    /// past the last.
+    pub fn bloblet_fields_from(&self, v: Value, first: usize) -> Vec<Value> {
+        (first..=self.bloblet_head(v).fields).map(|k| self.bloblet_slot(v, k)).collect()
+    }
+
+    /// How many fields [`bloblet_fields_from`](Heap::bloblet_fields_from)
+    /// gives.
+    pub fn bloblet_count_from(&self, v: Value, first: usize) -> usize {
+        (self.bloblet_head(v).fields + 1).saturating_sub(first)
+    }
+
+    /// Whether `v` is an FX-26 product (`productof`).
+    pub fn is_product(&self, v: Value) -> bool {
+        v.is_bloblet() && self.bloblet_kind(v) == const { layout::kind("product") }
+    }
+
+    /// Whether `v` is an FX-26 sum (`sumof`): a tag and a payload.
+    pub fn is_sum(&self, v: Value) -> bool {
+        v.is_bloblet() && self.bloblet_kind(v) == const { layout::kind("sum") }
+    }
+
+    /// Product `v`'s field at position `n`, counted from 1 as FX-26 writes
+    /// a product's fields, `(productof (1 a) (2 b))`, and as `(extract p
+    /// n)` takes them: its value `n - 1`.
+    #[inline]
+    pub fn product_field(&self, v: Value, n: usize) -> Value {
+        debug_assert!(n >= 1, "a product's fields are counted from 1");
+        self.bloblet_value(v, n - 1)
+    }
+
+    /// Sum `v`'s tag, a symbol.
+    #[inline]
+    pub fn sum_tag(&self, v: Value) -> Value {
+        self.bloblet_value(v, 0)
+    }
+
+    /// Sum `v`'s payload.
+    #[inline]
+    pub fn sum_payload(&self, v: Value) -> Value {
+        self.bloblet_value(v, 1)
+    }
+
     fn field_slot(&self, v: Value, k: usize) -> Result<usize, BlobletError> {
         let head = self.bloblet_head(v);
         if k == 0 || k > head.fields {

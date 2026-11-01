@@ -1776,7 +1776,7 @@ prims! {
         let n = a.len() - 1;
         let b = rt.heap.make_bloblet(PLAIN_BLOBLET, n, bytes as usize, true);
         for (i, v) in a[1..].iter().enumerate() {
-            rt.heap.set_bloblet_slot(b, i + 2, *v);
+            rt.heap.set_bloblet_value(b, i, *v);
         }
         Ok(b)
     });
@@ -1786,8 +1786,8 @@ prims! {
         if !(0..=u32::MAX as i64).contains(&bytes) { return rt.fail("a bloblet's suffix is 0 to 4 GiB", &[a[0]]); }
         if !(0..1 << 40).contains(&n) { return rt.fail("a bloblet's field count must be non-negative", &[a[1]]); }
         let b = rt.heap.make_bloblet(PLAIN_BLOBLET, n as usize, bytes as usize, true);
-        for k in 2..n as usize + 2 {
-            rt.heap.set_bloblet_slot(b, k, a[2]);
+        for i in 0..n as usize {
+            rt.heap.set_bloblet_value(b, i, a[2]);
         }
         Ok(b)
     });
@@ -2180,12 +2180,12 @@ prims! {
         Ok(rt.heap.string_append(&strings))
     });
     // An array's elements as a list, and a list's as an array (`runtime.scm`'s
-    // layout: a plain bloblet, element `i` in field `i + 2`).
+    // layout: a plain bloblet, element `i` its value `i`).
     "%fx26-array->list", 1, Some(1), simple!(|rt, a| {
         let b = bloblet(rt, a[0])?;
-        let n = rt.heap.bloblet_head(b).fields - 1;
+        let n = rt.heap.bloblet_len(b);
         let mut acc = Value::NULL;
-        for i in (0..n).rev() { let x = rt.heap.bloblet_slot(b, i + 2); acc = rt.heap.cons(x, acc); }
+        for i in (0..n).rev() { let x = rt.heap.bloblet_value(b, i); acc = rt.heap.cons(x, acc); }
         Ok(acc)
     });
     "%fx26-list->array", 1, Some(1), simple!(|rt, a| {
@@ -2194,7 +2194,7 @@ prims! {
         let mut l = a[0];
         for i in 0..n {
             let x = rt.heap.car(l);
-            rt.heap.set_bloblet_slot(b, i + 2, x);
+            rt.heap.set_bloblet_value(b, i, x);
             l = rt.heap.cdr(l);
         }
         Ok(b)
@@ -2376,7 +2376,7 @@ prims! {
             if v.is_pair() {
                 vec![h.car(v), h.cdr(v)]
             } else if v.is_bloblet() {
-                (1..=h.bloblet_head(v).fields).filter_map(|k| h.bloblet_field(v, k).ok()).collect()
+                h.bloblet_values(v)
             } else if h.is_a(v, ObjType::Vector) {
                 (0..h.obj_len(v)).map(|i| h.obj_ref(v, i)).collect()
             } else {
@@ -2439,13 +2439,13 @@ prims! {
         if !is_tword(rt, a[0]) { return rt.type_error("a cellular word", a[0]); }
         let k = int(rt, a[1])?;
         let fields = rt.heap.bloblet_head(a[0]).fields as i64;
-        Ok(Value::boolean((1..=fields).contains(&k) && rt.heap.bloblet_slot(a[0], k as usize).is_fixnum()))
+        Ok(Value::boolean((1..=fields).contains(&k) && rt.heap.bloblet_slot(a[0], k as usize).is_fixnum())) // fields: the program's field number
     });
     "%tword-int", 2, Some(2), simple!(|rt, a| {
         if !is_tword(rt, a[0]) { return rt.type_error("a cellular word", a[0]); }
         let k = int(rt, a[1])?;
         let fields = rt.heap.bloblet_head(a[0]).fields as i64;
-        let v = if (1..=fields).contains(&k) { rt.heap.bloblet_slot(a[0], k as usize) } else { Value::fixnum(0) };
+        let v = if (1..=fields).contains(&k) { rt.heap.bloblet_slot(a[0], k as usize) } else { Value::fixnum(0) }; // fields: the program's field number
         Ok(if v.is_fixnum() { v } else { Value::fixnum(0) })
     });
     // Field k's bits, as an unsigned 64-bit integer (0 past the fields):
@@ -2454,7 +2454,7 @@ prims! {
         if !is_tword(rt, a[0]) { return rt.type_error("a cellular word", a[0]); }
         let k = int(rt, a[1])?;
         let fields = rt.heap.bloblet_head(a[0]).fields as i64;
-        let bits = if (1..=fields).contains(&k) { rt.heap.bloblet_slot(a[0], k as usize).raw() } else { 0 };
+        let bits = if (1..=fields).contains(&k) { rt.heap.bloblet_slot(a[0], k as usize).raw() } else { 0 }; // fields: the program's field number
         Ok(integer_value(rt, bits as i128))
     });
     "%string-hash", 1, Some(1), simple!(|rt, a| {
@@ -2542,7 +2542,7 @@ prims! {
     "%bloblet-ref", 2, Some(2), simple!(|rt, a| {
         let b = bloblet(rt, a[0])?;
         let k = int(rt, a[1])?;
-        match usize::try_from(k).ok().map(|k| rt.heap.bloblet_field(b, k)) {
+        match usize::try_from(k).ok().map(|k| rt.heap.bloblet_field(b, k)) { // fields: the program's field number
             Some(Ok(v)) => Ok(v),
             Some(Err(e)) => rt.fail(&format!("bloblet field: {e}"), &[a[0], a[1]]),
             None => rt.fail("bloblet field: no such field", &[a[0], a[1]]),
@@ -2551,7 +2551,7 @@ prims! {
     "%bloblet-set!", 3, Some(3), simple!(|rt, a| {
         let b = plain_bloblet(rt, a[0])?;
         let k = int(rt, a[1])?;
-        match usize::try_from(k).ok().map(|k| rt.heap.set_bloblet_field(b, k, a[2])) {
+        match usize::try_from(k).ok().map(|k| rt.heap.set_bloblet_field(b, k, a[2])) { // fields: the program's field number
             Some(Ok(())) => Ok(Value::UNSPECIFIED),
             Some(Err(e)) => rt.fail(&format!("bloblet field: {e}"), &[a[0], a[1]]),
             None => rt.fail("bloblet field: no such field", &[a[0], a[1]]),
@@ -2704,9 +2704,9 @@ prims! {
             return Ok(Value::fixnum(bits as i64));
         }
         let o = rt.heap.suffix_ref_owner(a[0]);
-        match rt.heap.bloblet_field(o, bits as usize + 2) {
-            Ok(l) => Ok(l),
-            Err(_) => rt.fail("flat sum: its tag names no field of its owner", &[a[0]]),
+        match rt.heap.bloblet_value_checked(o, bits as usize) {
+            Some(l) => Ok(l),
+            None => rt.fail("flat sum: its tag names no field of its owner", &[a[0]]),
         }
     });
     // `blobref-variant!`: the tag made label `a[2]`'s, a number as it is, or
@@ -2722,10 +2722,10 @@ prims! {
             let o = rt.heap.suffix_ref_owner(r);
             let mut i = 0;
             loop {
-                match rt.heap.bloblet_field(o, i + 2) {
-                    Ok(l) if l == a[2] => break i as u64,
-                    Ok(_) => i += 1,
-                    Err(_) => return rt.fail("blobref-variant!: no field of the owner holds the label", &[a[0], a[2]]),
+                match rt.heap.bloblet_value_checked(o, i) {
+                    Some(l) if l == a[2] => break i as u64,
+                    Some(_) => i += 1,
+                    None => return rt.fail("blobref-variant!: no field of the owner holds the label", &[a[0], a[2]]),
                 }
             }
         };
@@ -2842,8 +2842,8 @@ prims! {
         if !(0..1 << 40).contains(&n) { return rt.fail("a bloblet's field count must be non-negative", &[a[1]]); }
         Ok(rt.heap.in_region(h, |heap| {
             let b = heap.make_bloblet(PLAIN_BLOBLET, n as usize, 0, true);
-            for k in 2..n as usize + 2 {
-                heap.set_bloblet_slot(b, k, a[2]);
+            for i in 0..n as usize {
+                heap.set_bloblet_value(b, i, a[2]);
             }
             b
         }))
@@ -2886,7 +2886,7 @@ prims! {
         Ok(rt.heap.in_region(h, |heap| {
             let b = heap.make_bloblet(PLAIN_BLOBLET, a.len() - 2, bytes as usize, true);
             for (i, v) in a[2..].iter().enumerate() {
-                heap.set_bloblet_slot(b, i + 2, *v);
+                heap.set_bloblet_value(b, i, *v);
             }
             b
         }))
@@ -3261,7 +3261,7 @@ fn rep_of_nodes(rt: &Runtime, nodes: Value, holes: Value, root: Value) -> Result
     use fixpt_reps::{Arg, Builder, Const};
     let heap = &rt.heap;
     let list = |l: Value| heap.list_to_vec(l).ok_or("not a list".to_string());
-    let field = |v: Value, k: usize| heap.bloblet_slot(v, k + 1);
+    let field = |v: Value, k: usize| heap.product_field(v, k);
     let int = |v: Value| if v.is_fixnum() { Ok(v.as_fixnum()) } else { Err("not an integer".to_string()) };
     let name = |v: Value| if heap.is_a(v, ObjType::Symbol) { Ok(heap.symbol_name(v)) } else { Err("not a symbol".to_string()) };
     let nodes = list(nodes)?;
@@ -3280,7 +3280,7 @@ fn rep_of_nodes(rt: &Runtime, nodes: Value, holes: Value, root: Value) -> Result
         let binders: Vec<String> = list(field(*node, 4))?.into_iter().map(name).collect::<Result<_, _>>()?;
         let mut args = Vec::new();
         for arg in list(field(*node, 5))? {
-            let (tag, v) = (name(heap.bloblet_slot(arg, 2))?, heap.bloblet_slot(arg, 3));
+            let (tag, v) = (name(heap.sum_tag(arg))?, heap.sum_payload(arg));
             args.push(match tag.as_str() {
                 "node" => Arg::Node(int(v)? as u32),
                 "bound" => Arg::Bound { binder: int(field(v, 1))? as u32, pos: int(field(v, 2))? as u32 },

@@ -407,8 +407,7 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         if heap.obj_type(v) == Some(ObjType::Symbol) {
             continue;
         }
-        let trailer = heap.bloblet_has_trailer(v) as usize;
-        todo.extend(((1 + trailer)..=heap.bloblet_head(v).fields).map(|k| heap.bloblet_slot(v, k)));
+        todo.extend(heap.bloblet_values(v));
     }
     let mut alone = Heap::new();
     let (given, placeholders, globals) = placeholders(&mut alone, &links);
@@ -541,10 +540,9 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
         if heap.code_part(v) == Some(CodePart::Native) {
             continue;
         }
-        let fields = heap.bloblet_head(v).fields;
         if heap.obj_type(v).is_none() && heap.bloblet_kind(v) == closure_kind {
             let code = heap.bloblet_slot(v, CLOSURE_WORD);
-            let free: Vec<Value> = (CLOSURE_FREE0..=fields).map(|k| heap.bloblet_slot(v, k)).collect();
+            let free: Vec<Value> = heap.bloblet_fields_from(v, CLOSURE_FREE0);
             todo.extend(free.iter().copied());
             if Some(code) == adapter {
                 adapted.push((v, free[0]));
@@ -558,8 +556,7 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
             compiled.push((v, word, free));
             continue;
         }
-        let trailer = heap.bloblet_has_trailer(v) as usize;
-        todo.extend(((1 + trailer)..=fields).map(|k| heap.bloblet_slot(v, k)));
+        todo.extend(heap.bloblet_values(v));
     }
     let mut redirect: HashMap<u64, Value> = adapted.iter().map(|(c, f)| (c.raw(), *f)).collect();
     let cellular_kind = const { fixpt_heap::layout::kind("cellular-closure") };
@@ -648,10 +645,9 @@ pub fn native_procedures(heap: &mut Heap, value: Value, compile: crate::session:
                 heap.set_cdr(v, *n);
             }
         } else if inside(heap, v) && heap.obj_type(v) != Some(ObjType::Symbol) {
-            let trailer = heap.bloblet_has_trailer(v) as usize;
-            for k in (1 + trailer)..=heap.bloblet_head(v).fields {
-                if let Some(n) = made.get(&heap.bloblet_slot(v, k).raw()) {
-                    heap.set_bloblet_slot(v, k, *n);
+            for i in 0..heap.bloblet_len(v) {
+                if let Some(n) = made.get(&heap.bloblet_value(v, i).raw()) {
+                    heap.set_bloblet_value(v, i, *n);
                 }
             }
         }
@@ -675,8 +671,7 @@ fn walk(heap: &Heap, root: Value, mut visit: impl FnMut(&Heap, Value) -> Result<
         if v.is_pair() {
             todo.extend([heap.car(v), heap.cdr(v)]);
         } else if heap.obj_type(v) != Some(ObjType::Symbol) {
-            let trailer = heap.bloblet_has_trailer(v) as usize;
-            todo.extend(((1 + trailer)..=heap.bloblet_head(v).fields).map(|k| heap.bloblet_slot(v, k)));
+            todo.extend(heap.bloblet_values(v));
         }
     }
     Ok(())

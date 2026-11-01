@@ -21,8 +21,7 @@ fn reachable(heap: &Heap, word: Value) -> Vec<Value> {
             continue;
         }
         out.push(w);
-        for k in WORD_CELL0..=heap.bloblet_head(w).fields {
-            let v = heap.bloblet_slot(w, k);
+        for v in heap.bloblet_fields_from(w, WORD_CELL0) {
             if heap.is_cellular_word(v) {
                 todo.push(v);
             } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
@@ -65,7 +64,7 @@ fn compare(limit: usize) {
                 one.view(|v| {
                     let r = v.get(r);
                     let ints = |l: fixpt_scheme::Local| l.list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>();
-                    (ints(r.field(2).expect("code")), ints(r.field(3).expect("starts")))
+                    (ints(r.product_field(1).expect("code")), ints(r.product_field(2).expect("starts")))
                 })
             });
             compared += 1;

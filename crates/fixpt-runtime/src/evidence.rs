@@ -30,7 +30,7 @@ impl Given {
     pub fn of(rt: &Runtime, names: Value, given: Value) -> Given {
         let names = if rt.heap.is_a(names, fixpt_heap::ObjType::String) { rt.heap.string_to_rust(names) } else { String::new() };
         let reps = if given.is_bloblet() {
-            (2..=rt.heap.bloblet_head(given).fields).map(|k| rt.heap.bloblet_slot(given, k)).collect()
+            rt.heap.bloblet_values(given)
         } else {
             rt.heap.list_to_vec(given).unwrap_or_default()
         };
@@ -117,12 +117,12 @@ pub fn reified_text(rt: &mut Runtime, fresh: Value, text: Value, names: Value, g
 /// field says `fresh` (a region a variable names, with no evidence), a
 /// fresh one.
 pub fn reified(rt: &mut Runtime, staged: Value, field: usize) -> Value {
-    let product = staged.is_bloblet() && rt.heap.bloblet_head(staged).fields == 7;
-    let text = |rt: &Runtime, i: usize| if product { rt.heap.string_to_rust(rt.heap.bloblet_slot(staged, i + 1)) } else { String::new() };
+    let product = rt.heap.is_product(staged) && rt.heap.bloblet_len(staged) == 6;
+    let text = |rt: &Runtime, i: usize| if product { rt.heap.string_to_rust(rt.heap.product_field(staged, i)) } else { String::new() };
     let shown = if text(rt, 1) == "fresh" {
         fresh_region()
     } else {
-        let given = if product { Given::of(rt, rt.heap.bloblet_slot(staged, 6), rt.heap.bloblet_slot(staged, 5)) } else { Given::default() };
+        let given = if product { Given::of(rt, rt.heap.product_field(staged, 5), rt.heap.product_field(staged, 4)) } else { Given::default() };
         given.substituted(&text(rt, field + 1))
     };
     rt.heap.make_string(&shown)

@@ -828,8 +828,7 @@ impl Asm {
 /// then an instruction's code after another; and where each cell's resume
 /// point is (`-1` for none), for [`NativeMachine::install_bytes`].
 pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i64>), String> {
-    let fields = heap.bloblet_head(rw).fields;
-    let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(rw, k)).collect();
+    let cells: Vec<Value> = heap.bloblet_fields_from(rw, WORD_CELL0);
     let mut a = Asm::new();
     a.in_regcode = true;
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();

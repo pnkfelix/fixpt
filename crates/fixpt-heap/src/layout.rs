@@ -507,7 +507,8 @@ pub mod cellular {
     pub const CLOSURE_FREE0: usize = 3;
     /// A native procedure's code bloblet's field 2: the cellular word it
     /// was compiled from (`#f` if none), kept for showing it
-    /// (`%disassemble`); field 1 is the bloblet itself.
+    /// (`%disassemble`); field 1, `CODE_SELF`, is the bloblet itself.
+    pub const CODE_SELF: usize = 1;
     pub const CODE_SOURCE: usize = 2;
     /// A global's cell, a plain bloblet: its value, its name (for showing),
     /// and how many times it has been written, a fixnum that every

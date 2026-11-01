@@ -37,9 +37,9 @@ pub fn to_heap(heap: &mut Heap, rep: &Rep) -> Value {
 pub fn is_rep(heap: &Heap, v: Value) -> bool {
     v.is_bloblet()
         && heap.bloblet_kind(v) == fixpt_heap::layout::kind("product")
-        && heap.bloblet_head(v).fields == 3
-        && heap.is_a(heap.bloblet_slot(v, 2), fixpt_heap::ObjType::Symbol)
-        && heap.symbol_name(heap.bloblet_slot(v, 2)) == TAG
+        && heap.bloblet_len(v) == 2
+        && heap.is_a(heap.product_field(v, 1), fixpt_heap::ObjType::Symbol)
+        && heap.symbol_name(heap.product_field(v, 1)) == TAG
 }
 
 /// The rep `v` holds; or why not. Validated if `trusted` is false, or if
@@ -48,8 +48,7 @@ pub fn from_heap(heap: &Heap, v: Value, trusted: bool) -> Result<Rep, String> {
     if !is_rep(heap, v) {
         return Err("not a rep".into());
     }
-    // Field 1 is the trailer; the values follow it.
-    let b = heap.bloblet_slot(v, 3);
+    let b = heap.product_field(v, 2);
     let bytes: Vec<u8> = (0..heap.bytevector_len(b)).map(|i| heap.bytevector_ref(b, i)).collect();
     binary::decode(&bytes, !trusted || validate_all())
 }

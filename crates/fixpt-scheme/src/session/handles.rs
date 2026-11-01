@@ -276,12 +276,42 @@ impl<'v> Local<'v> {
     pub fn bloblet_kind(self) -> Option<u8> {
         self.v.is_bloblet().then(|| self.heap().bloblet_kind(self.v))
     }
-    /// Field `k` of a bloblet (`layout`), checked.
-    pub fn field(self, k: usize) -> Option<Local<'v>> {
+    /// Field `k` of a bloblet, by its layout's number (`layout`), checked:
+    /// for a fixed layout's field. A value, as the bloblet was made with
+    /// it, is [`value`](Local::value)'s; a product's field, a sum's tag and
+    /// payload, by what FX-26 calls them (`TODO.md` §205).
+    pub fn raw_field(self, k: usize) -> Option<Local<'v>> {
         if !self.v.is_bloblet() {
             return None;
         }
-        self.heap().bloblet_field(self.v, k).ok().map(|x| self.at(x))
+        self.heap().bloblet_field(self.v, k).ok().map(|x| self.at(x)) // fields: the caller's field number
+    }
+    /// Value `i` of a bloblet, from 0, as it was made with them
+    /// (`Heap::bloblet_value`), checked.
+    pub fn value(self, i: usize) -> Option<Local<'v>> {
+        self.heap().bloblet_value_checked(self.v, i).map(|x| self.at(x))
+    }
+    /// A product's field at position `n`, from 1, as FX-26 writes them
+    /// (`Heap::product_field`), checked.
+    pub fn product_field(self, n: usize) -> Option<Local<'v>> {
+        if n == 0 || !self.heap().is_product(self.v) {
+            return None;
+        }
+        self.value(n - 1)
+    }
+    /// A sum's tag, checked.
+    pub fn sum_tag(self) -> Option<Local<'v>> {
+        if !self.heap().is_sum(self.v) {
+            return None;
+        }
+        self.value(0)
+    }
+    /// A sum's payload, checked.
+    pub fn sum_payload(self) -> Option<Local<'v>> {
+        if !self.heap().is_sum(self.v) {
+            return None;
+        }
+        self.value(1)
     }
     pub fn write(self) -> String {
         fixpt_runtime::write_value(self.heap(), self.v)

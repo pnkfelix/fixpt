@@ -3234,3 +3234,24 @@ of `TODO.md` §141, working on my own.
 - **No cache across stages yet**: the import is cheap (1.7 KB for s7st's
   runtime) beside the standard environment entered again each stage,
   which a stage front end that kept it would save; left for later.
+
+## A bloblet's values by their index (2026-11-01; `TODO.md` §205)
+
+- **Values counted from 0, past the trailer**, as `make_frozen` takes
+  them, the trailer found by field 1's tag (one load), since a trailer is
+  not an invariant; an FX-26 product's from 1, as FX-26 writes them.
+- **Fields kept for the fixed layouts**, by their constants: the engines
+  read code bloblets at fixed offsets on hot paths, and that is what
+  fields are for. The lint asks that a field's index start with a
+  constant, not that fields go.
+- **A mark per line, not a file allowed**: `// fields:` and why, where a
+  field's number comes from an instruction or a program; a file allowed
+  whole would hide the next mistake in it. Only the heap's own files, the
+  test of code that reads its own fields by offset, and the lint's
+  examples are allowed whole (`raw-fields-allowed.txt`).
+- **`Local::field` renamed `raw_field`**, so that a raw read says so
+  where it is written and the lint sees it.
+- **The FX-26 side left**: the compilers' `field n + 1` for a product's
+  field `n` is the instruction set's numbering; changing it changes every
+  machine.
+

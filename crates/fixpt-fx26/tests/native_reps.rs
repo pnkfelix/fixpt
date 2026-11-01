@@ -35,12 +35,11 @@ fn twins(heap: &Heap, word: Value) -> Vec<Value> {
         // end's modules made in one word of some 320,000 fields (the next
         // longest has 18,000), longer than the pass as this test runs it
         // recurses for.
-        let long = heap.is_register_word(t) && heap.bloblet_head(t).fields > 100_000;
+        let long = heap.is_register_word(t) && heap.bloblet_len(t) > 100_000;
         if heap.is_register_word(t) && !long {
             out.push(t);
         }
-        for k in WORD_CELL0..=heap.bloblet_head(w).fields {
-            let v = heap.bloblet_slot(w, k);
+        for v in heap.bloblet_fields_from(w, WORD_CELL0) {
             if heap.is_cellular_word(v) {
                 todo.push(v);
             } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
@@ -95,7 +94,7 @@ fn compare(limit: usize) {
             sc.make(|m| {
                 let v = m.get(rw);
                 let heap = m.heap();
-                raw_cells = (WORD_CELL0..=heap.bloblet_head(v).fields).map(|k| heap.bloblet_slot(v, k)).collect();
+                raw_cells = heap.bloblet_fields_from(v, WORD_CELL0);
                 f = Some(oracle::facts(heap, v));
                 Value::NULL
             });

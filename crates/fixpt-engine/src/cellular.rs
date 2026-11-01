@@ -24,7 +24,7 @@
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{
     CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_STUB, CONT_FP, CONT_INNER, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_SHOTS, CONT_WHOLE,
-    KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
+    GLOBAL_NAME, GLOBAL_VALUE, GLOBAL_WRITES, KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
 };
 use fixpt_heap::{Heap, Shots, Value};
 use fixpt_runtime::crossing::{self, Crossed, Crossing};
@@ -534,7 +534,7 @@ impl Machine {
             (self.fuel, self.reserve) = (slice, self.fuel - slice);
         }
         loop {
-            let cell = cx.heap().bloblet_slot(r.cur, r.k);
+            let cell = cx.heap().bloblet_slot(r.cur, r.k); // fields: the word's next cell
             r.k += 1;
             self.steps += 1;
             if let Some(p) = &mut self.profile {
@@ -785,7 +785,7 @@ impl Machine {
 
     /// The operand in the next cell.
     fn operand(heap: &Heap, r: &mut Regs) -> Value {
-        let v = heap.bloblet_slot(r.cur, r.k);
+        let v = heap.bloblet_slot(r.cur, r.k); // fields: the word's next cell
         r.k += 1;
         v
     }
@@ -1088,7 +1088,7 @@ impl Machine {
                     return Err(Trap::Type { routine: name });
                 }
                 let kf = usize::try_from(kf.as_fixnum()).map_err(|_| Trap::Field { routine: name })?;
-                let v = cx.heap().bloblet_field(obj, kf).map_err(|_| Trap::Field { routine: name })?;
+                let v = cx.heap().bloblet_field(obj, kf).map_err(|_| Trap::Field { routine: name })?; // fields: the program's field number
                 self.ds.push(v);
             }
             FIELD_SET => {
@@ -1099,7 +1099,7 @@ impl Machine {
                     return Err(Trap::Type { routine: name });
                 }
                 let kf = usize::try_from(kf.as_fixnum()).map_err(|_| Trap::Field { routine: name })?;
-                cx.heap().set_bloblet_field(obj, kf, x).map_err(|_| Trap::Field { routine: name })?;
+                cx.heap().set_bloblet_field(obj, kf, x).map_err(|_| Trap::Field { routine: name })?; // fields: the program's field number
             }
             CONS => {
                 if self.ds.len() < 2 {
@@ -1125,7 +1125,7 @@ impl Machine {
                 if !obj.is_bloblet() {
                     return Err(Trap::Type { routine: name });
                 }
-                let v = cx.heap().bloblet_field(obj, k).map_err(|_| Trap::Field { routine: name })?;
+                let v = cx.heap().bloblet_field(obj, k).map_err(|_| Trap::Field { routine: name })?; // fields: the instruction's field number
                 self.ds.push(v);
             }
             SLOT => {
@@ -1165,9 +1165,9 @@ impl Machine {
             GLOBAL => {
                 let heap = cx.heap();
                 let g = Self::operand(heap, r);
-                let v = heap.bloblet_slot(g, 2);
+                let v = heap.bloblet_slot(g, GLOBAL_VALUE);
                 if let Some(p) = &mut self.profile {
-                    *p.globals.entry(heap.symbol_name(heap.bloblet_slot(g, 3))).or_insert(0) += 1;
+                    *p.globals.entry(heap.symbol_name(heap.bloblet_slot(g, GLOBAL_NAME))).or_insert(0) += 1;
                 }
                 self.ds.push(v);
             }
@@ -1175,11 +1175,10 @@ impl Machine {
                 let g = Self::operand(cx.heap(), r);
                 let x = self.pop(name)?;
                 let heap = cx.heap();
-                heap.set_bloblet_slot(g, 2, x);
+                heap.set_bloblet_slot(g, GLOBAL_VALUE, x);
                 // One more write, for the guards (`global-guard`).
-                let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
-                let n = heap.bloblet_slot(g, w).as_fixnum();
-                heap.set_bloblet_slot(g, w, Value::fixnum(n + 1));
+                let n = heap.bloblet_slot(g, GLOBAL_WRITES).as_fixnum();
+                heap.set_bloblet_slot(g, GLOBAL_WRITES, Value::fixnum(n + 1));
             }
             CLOSURE | NCLOSURE => {
                 self.safepoint(cx.heap(), r);
@@ -1523,7 +1522,7 @@ pub const ABORTED: &str = "an abort past native code";
 fn nested_floor(heap: &Heap, rs: &[Value], floor: usize) -> usize {
     let exits = rs.len() >= floor + 4 && {
         let (w, k) = (rs[floor], rs[floor + 1]);
-        w.is_bloblet() && k.is_fixnum() && heap.bloblet_slot(w, k.as_fixnum() as usize) == Value::fixnum(const { routine("exit") } as i64)
+        w.is_bloblet() && k.is_fixnum() && heap.bloblet_slot(w, k.as_fixnum() as usize) == Value::fixnum(const { routine("exit") } as i64) // fields: a return entry's word and cell
     };
     if exits { floor + 4 } else { floor }
 }
@@ -1559,7 +1558,7 @@ fn continuation(heap: &mut Heap, ds: &[Value], rs: &[Value], r: &Regs, base: usi
         (CONT_SHOTS, Shots::Many.value()),
     ];
     for (f, v) in fields {
-        heap.set_bloblet_slot(k, f, v);
+        heap.set_bloblet_slot(k, f, v); // fields: each a CONT_ constant, above
     }
     k
 }

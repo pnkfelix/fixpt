@@ -140,7 +140,7 @@ fn module_values(mt: &str) -> Vec<String> {
 /// Entry `i` of the session at `base`'s front end, called with `args`.
 fn call(rt: &mut Runtime, base: usize, i: usize, args: &[Value]) -> Result<Value, String> {
     let fe = rt.heap.obj_ref(rt.heap.root_at(base), S_COMPILER);
-    let f = rt.heap.bloblet_slot(fe, i + 1);
+    let f = rt.heap.product_field(fe, i);
     let fuel = std::mem::replace(&mut rt.word_fuel, u64::MAX);
     let out = fixpt_runtime::prim::call_front_end(rt, f, args);
     rt.word_fuel = fuel;
@@ -172,8 +172,8 @@ fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str,
     rt.heap.pop_roots_to(mark);
     let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers)];
     let out = call(rt, base, E_STEP, &args)?;
-    let tag = rt.heap.symbol_name(rt.heap.bloblet_slot(out, 2));
-    let payload = rt.heap.bloblet_slot(out, 3);
+    let tag = rt.heap.symbol_name(rt.heap.sum_tag(out));
+    let payload = rt.heap.sum_payload(out);
     Ok(match tag.as_str() {
         "made" | "typed" | "checked" => Ok(payload),
         _ => Err(out),
@@ -273,7 +273,7 @@ pub(crate) fn redefines(rt: &mut Runtime, base: usize, d: Value) -> Result<Value
     }
     let found = rt.heap.car(found);
     rt.heap.push_root(found);
-    let (old, users) = (rt.heap.bloblet_slot(found, 2), rt.heap.bloblet_slot(found, 3));
+    let (old, users) = (rt.heap.product_field(found, 1), rt.heap.product_field(found, 2));
     let [name, new] = [crate::sessions::P_NAME, crate::sessions::P_TYPE].map(|i| rt.heap.obj_ref(d, i));
     let r = rt.heap.make_frozen(PRODUCT, &[name, old, new, users]);
     rt.heap.pop_roots_to(mark);
@@ -371,7 +371,7 @@ fn committed_texts(rt: &Runtime, base: usize) -> Vec<(String, String)> {
 /// each definition run again), its text, and whether it keeps its globals.
 fn run_texts(rt: &mut Runtime, base: usize, name: &str, form: &str) -> Result<Value, String> {
     let runs = call(rt, base, E_RUNS, &[])?;
-    let runs: Vec<(String, bool)> = rt.heap.list_to_vec(runs).unwrap_or_default().iter().map(|r| (text(rt, rt.heap.bloblet_slot(*r, 2)), rt.heap.bloblet_slot(*r, 3) != Value::FALSE)).collect();
+    let runs: Vec<(String, bool)> = rt.heap.list_to_vec(runs).unwrap_or_default().iter().map(|r| (text(rt, rt.heap.product_field(*r, 1)), rt.heap.product_field(*r, 2) != Value::FALSE)).collect();
     let known = committed_texts(rt, base);
     let mut forms: Vec<(String, bool)> = take_seeds(rt, base).into_iter().map(|t| (t, false)).collect();
     for (n, keeps) in runs {

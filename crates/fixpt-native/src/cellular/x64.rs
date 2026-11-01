@@ -970,8 +970,7 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
 /// code, and where each cell's code starts, in bytes, or -1 for a cell
 /// that is an operand.
 pub fn assemble_word(heap: &Heap, word: Value) -> Result<(Vec<u8>, Vec<i64>), String> {
-    let fields = heap.bloblet_head(word).fields;
-    let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(word, k)).collect();
+    let cells: Vec<Value> = heap.bloblet_fields_from(word, WORD_CELL0);
     // Where each instruction starts.
     let mut starts = vec![false; cells.len() + 1];
     let mut i = 0;

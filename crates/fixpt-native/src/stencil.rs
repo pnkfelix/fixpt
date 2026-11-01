@@ -247,7 +247,7 @@ pub fn stencil_source_text(heap: &Heap, word: Value) -> Option<String> {
     let mut routines: Vec<&str> = Vec::new();
     let mut k = WORD_CELL0;
     while k <= fields {
-        let cell = heap.bloblet_slot(word, k);
+        let cell = heap.bloblet_slot(word, k); // fields: the word's cells, stepped over by their operands
         let name = if cell.is_fixnum() { ROUTINES.get(cell.as_fixnum() as usize).map_or("?", |r| r.0) } else { "docol" };
         if !routines.contains(&name) {
             routines.push(name);

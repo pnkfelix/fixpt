@@ -557,7 +557,7 @@ fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Result<Val
 
 /// A `session-decision`'s tag, as text; none if it is not one.
 pub(crate) fn decided(rt: &Runtime, decision: Value) -> String {
-    let tag = if decision.is_bloblet() { rt.heap.bloblet_slot(decision, 2) } else { Value::FALSE };
+    let tag = if decision.is_bloblet() { rt.heap.sum_tag(decision) } else { Value::FALSE };
     if tag.is_false() { String::new() } else { rt.heap.symbol_name(tag) }
 }
 
@@ -660,7 +660,7 @@ fn compiler(rt: &mut Runtime, base: usize) -> Result<Value, String> {
 /// Entry `i` (from 1) of the session's compiler, `compiler`, called with
 /// `args`: its value.
 fn call(rt: &mut Runtime, compiler: Value, i: usize, args: &[Value]) -> Result<Value, String> {
-    let f = rt.heap.bloblet_slot(compiler, i + 1);
+    let f = rt.heap.product_field(compiler, i);
     let fuel = std::mem::replace(&mut rt.word_fuel, u64::MAX);
     let out = fixpt_runtime::prim::call_front_end(rt, f, args);
     rt.word_fuel = fuel;
@@ -685,8 +685,8 @@ fn compile_run(rt: &mut Runtime, base: usize, text: &str, facts: &FormFacts, def
     let [compiler, t, f, w] = [0, 1, 2, 3].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
     let made = call(rt, compiler, 1, &[t, f, w, r, Value::boolean(native), Value::boolean(registers), Value::boolean(deferred)])?;
-    let tag = rt.heap.bloblet_slot(made, 2);
-    let payload = rt.heap.bloblet_slot(made, 3);
+    let tag = rt.heap.sum_tag(made);
+    let payload = rt.heap.sum_payload(made);
     if tag != rt.heap.intern("made") {
         return Ok(Err(rt.heap.string_to_rust(payload)));
     }

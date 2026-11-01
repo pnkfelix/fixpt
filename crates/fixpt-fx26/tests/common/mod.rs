@@ -50,7 +50,7 @@ pub fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, wh
     // cells either way; a register word's, 0 or a machine's number. A word's
     // twin, its register code, is compared as code, as the word is.
     let entry = |w: Value, i: usize| {
-        let v = h.bloblet_slot(w, i);
+        let v = h.bloblet_slot(w, i); // fields: compared field by field, by its layout
         let word = ka == Some(fixpt_heap::layout::kind("cellular-code"));
         let register = ka == Some(fixpt_heap::layout::kind("register-code"));
         let native = i == fixpt_heap::layout::cellular::WORD_ENTRY
@@ -71,7 +71,7 @@ pub fn register_words(h: &Heap, w: Value, seen: &mut std::collections::HashSet<u
     if k != fixpt_heap::layout::kind("cellular-code") && k != fixpt_heap::layout::kind("register-code") {
         return 0;
     }
-    own + (2..=h.bloblet_head(w).fields).map(|i| register_words(h, h.bloblet_slot(w, i), seen)).sum::<usize>()
+    own + h.bloblet_values(w).into_iter().map(|v| register_words(h, v, seen)).sum::<usize>()
 }
 
 /// How far a long sweep has got, said on the terminal as it goes: at most

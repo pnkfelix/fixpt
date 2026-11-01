@@ -111,6 +111,16 @@ The canonical name of a field is its **negative offset from the suffix**: −1
 is the trailer, −2 the field before it, and so on. Header-relative indices
 exist, and the collector uses them, but programs should not.
 
+**Values, in the runtime's Rust.** A bloblet's *values* are its fields but
+the trailer, counted from 0 in the order it was made with them
+(`Heap::make_frozen`'s): value `i` is field `i + 2` after a trailer, `i + 1`
+without one. Code over values says so, by `Heap::bloblet_value`,
+`bloblet_len` and `bloblet_values`, and an FX-26 product's and sum's by what
+FX-26 calls them, `product_field(v, n)` (`n` from 1, as `(productof (1 a)
+…)` writes it) and `sum_tag`, `sum_payload`; a field by number is for a
+fixed layout, named by a constant of it (`CLOSURE_WORD`, `GLOBAL_VALUE`).
+A lint holds the Rust to that (`fixpt_tidy::fields`; `TODO.md` §205).
+
 That is what makes **extension by prepending** work. A bloblet cannot grow in
 place under a copying collector, so extending one means building a new bloblet
 with the same suffix and more fields *in front*. Every existing field keeps

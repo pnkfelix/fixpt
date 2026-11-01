@@ -1,0 +1,5 @@
+# Files that may name a bloblet's fields by number (`fixpt_tidy::fields`):
+# each a path from the repository's root, ` — `, and why.
+crates/fixpt-heap/ — the heap's own: fields are what it is made of, and its tests test them
+crates/fixpt-native/tests/code_exec.rs — code reading its own fields by offset, which the test sets by number
+crates/fixpt-tidy/src/fields.rs — the lint's own examples

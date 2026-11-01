@@ -471,7 +471,7 @@ impl Compiling<'_> {
     pub(super) fn prepare_x64(&mut self, p: usize, id: &mut dyn FnMut(Value) -> i64, free_id: &mut dyn FnMut(Vec<Value>) -> i64) -> Result<FxRequest, String> {
         let h = self.heap;
         let (word, rw) = (self.procs[p].word, self.procs[p].rw);
-        let raw_cells: Vec<Value> = (fixpt_heap::layout::cellular::WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
+        let raw_cells: Vec<Value> = h.bloblet_fields_from(rw, fixpt_heap::layout::cellular::WORD_CELL0);
         let cells = super::register_cells(h, rw);
         let name = self.name(word);
         let n = cells.len();
@@ -614,15 +614,14 @@ pub fn describe(heap: &Heap, procs: &[(String, Compiled)]) -> Vec<String> {
         .iter()
         .map(|(name, c)| {
             let bytes: String = (0..heap.bloblet_head(c.code).bytes).map(|k| format!("{:02x}", heap.bloblet_byte(c.code, k).unwrap_or(0))).collect();
-            let fields: Vec<String> = (1..=heap.bloblet_head(c.code).fields)
-                .map(|k| {
-                    let v = heap.bloblet_slot(c.code, k);
+            let fields: Vec<String> = heap.bloblet_fields_from(c.code, 1)
+                .into_iter().map(|v| {
                     if let Some(j) = code_of(v) {
                         return format!("code {j}");
                     }
                     if v.is_bloblet() && heap.bloblet_kind(v) == const { fixpt_heap::layout::kind("native-closure") } {
                         if let Some(j) = code_of(heap.bloblet_slot(v, CLOSURE_WORD)) {
-                            let free: Vec<String> = (CLOSURE_FREE0..=heap.bloblet_head(v).fields).map(|f| format!("{:#x}", heap.bloblet_slot(v, f).raw())).collect();
+                            let free: Vec<String> = heap.bloblet_fields_from(v, CLOSURE_FREE0).iter().map(|f| format!("{:#x}", f.raw())).collect();
                             return format!("closure of {j} over [{}]", free.join(" "));
                         }
                     }

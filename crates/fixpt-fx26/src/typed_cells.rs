@@ -648,14 +648,14 @@ impl Verifier<'_> {
         let mut out = Vec::new();
         let mut k = WORD_CELL0;
         while k <= n {
-            let cell = self.heap.bloblet_slot(word, k);
+            let cell = self.heap.bloblet_slot(word, k); // fields: the word's cells, walked by their operands
             let (name, m) = if cell.is_fixnum() && (cell.as_fixnum() as usize) < PRIMITIVES {
                 let name = ROUTINES[cell.as_fixnum() as usize].0;
                 (Some(name), operands(name))
             } else {
                 (None, 0)
             };
-            let ops = (1..=m).map(|j| self.heap.bloblet_slot(word, k + j)).collect();
+            let ops = (1..=m).map(|j| self.heap.bloblet_slot(word, k + j)).collect(); // fields: the cell's operands
             out.push(Ins { at: k - WORD_CELL0, name, ops });
             k += 1 + m;
         }

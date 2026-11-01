@@ -4406,3 +4406,14 @@ stays where evidence is given, and on the machines whose checker is the
 Rust one. Found on the way: `fixpt-reps`'s heap form read the trailer as
 its first value (§205).
 
+## 2026-11-01: a bloblet's values by their index (`TODO.md` §205, the user's)
+
+The heap names a bloblet's values as it was made with them, from 0, past
+the trailer (`bloblet_value`, `bloblet_len`), and an FX-26 product's and
+sum's by what FX-26 calls them (`product_field`, `sum_tag`,
+`sum_payload`); the session's handles likewise. A lint keeps a field by
+number to the fixed layouts, by their constants, or marked `// fields:`
+with why (`fixpt_tidy::fields`). Every Rust reader of an FX-26 product or
+sum moved to them: `stage.rs`, the sessions, `syn.rs`, the CLI's FX-26
+driver, the tests; global cells read by `GLOBAL_VALUE` everywhere.
+

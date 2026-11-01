@@ -45,14 +45,14 @@ pub fn settings(rt: &mut Runtime, standard: Value, native: bool, registers: bool
 /// it (`settings`); none where it did not.
 pub(crate) fn standard(rt: &mut Runtime) -> Option<Value> {
     let settings = global(rt, SETTINGS)?;
-    Some(rt.heap.bloblet_slot(settings, 2))
+    Some(rt.heap.product_field(settings, 1))
 }
 
 /// Whether the program's convention is native and its words have register
 /// code, as the session set them (`settings`); none where it did not.
 pub(crate) fn flags(rt: &mut Runtime) -> Option<(bool, bool)> {
     let settings = global(rt, SETTINGS)?;
-    let field = |i: usize| rt.heap.bloblet_slot(settings, i + 1) != Value::FALSE;
+    let field = |i: usize| rt.heap.product_field(settings, i) != Value::FALSE;
     Some((field(2), field(3)))
 }
 
@@ -155,11 +155,11 @@ impl Parts {
 /// and the type the code is checked as, as a rep, or `#f`: what the code is
 /// checked against, and the code.
 pub(crate) fn staged_parts(rt: &Runtime, staged: Value, given: Value) -> Option<(Parts, Value)> {
-    let is_product = staged.is_bloblet() && rt.heap.bloblet_kind(staged) == PRODUCT && rt.heap.bloblet_head(staged).fields == 7;
+    let is_product = rt.heap.is_product(staged) && rt.heap.bloblet_len(staged) == 6;
     if !is_product {
         return None;
     }
-    let field = |i: usize| rt.heap.bloblet_slot(staged, i + 1);
+    let field = |i: usize| rt.heap.product_field(staged, i);
     let [mt, e, r] = [1, 2, 3].map(|i| rt.heap.string_to_rust(field(i)));
     let given = fixpt_runtime::evidence::Given::of(rt, field(5), given);
     let mut parts = Parts::of(&mt, &e, &r, &given);
@@ -198,7 +198,7 @@ fn compiled(rt: &mut Runtime, w: &Wrapped, rep: &[u8]) -> Result<Result<Value, V
     let rep = rt.heap.make_bytevector(rep);
     let (check, settings, whole) = (rt.heap.root_at(base), rt.heap.root_at(base + 1), rt.heap.root_at(base + 2));
     rt.heap.pop_roots_to(base);
-    let field = |rt: &Runtime, i: usize| rt.heap.bloblet_slot(settings, i + 1);
+    let field = |rt: &Runtime, i: usize| rt.heap.product_field(settings, i);
     let args = [field(rt, 1), whole, Value::fixnum(w.skip), Value::fixnum(w.len), field(rt, 2), field(rt, 3), rep];
     // The front end is licensed code, which ends: no step limit of the
     // program's is its.
@@ -206,10 +206,10 @@ fn compiled(rt: &mut Runtime, w: &Wrapped, rep: &[u8]) -> Result<Result<Value, V
     let checked = fixpt_runtime::prim::call_front_end(rt, check, &args);
     rt.word_fuel = fuel;
     let checked = checked?;
-    if rt.heap.bloblet_slot(checked, 2) != rt.heap.intern("made") {
+    if rt.heap.sum_tag(checked) != rt.heap.intern("made") {
         return Ok(Err(checked));
     }
-    Ok(Ok(rt.heap.bloblet_slot(checked, 3)))
+    Ok(Ok(rt.heap.sum_payload(checked)))
 }
 
 /// `w` compiled, its word run, and the procedure it makes given `args`:

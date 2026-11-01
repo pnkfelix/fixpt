@@ -133,7 +133,7 @@ impl Literals {
                     if k > 1 {
                         out.push(' ');
                     }
-                    let f = heap.bloblet_slot(v, k);
+                    let f = heap.bloblet_slot(v, k); // fields: every field, the trailer shown as one
                     if f.tag() == fixpt_heap::value::TAG_TRAILER {
                         let _ = write!(out, "#trailer {}", f.raw() >> 3);
                     } else {
@@ -173,10 +173,7 @@ fn children(heap: &Heap, v: Value) -> Vec<Value> {
     match heap.obj_type(v) {
         Some(ObjType::Vector) => (0..heap.obj_len(v)).map(|i| heap.obj_ref(v, i)).collect(),
         Some(_) => Vec::new(),
-        None if v.is_bloblet() => (1..=heap.bloblet_head(v).fields)
-            .map(|k| heap.bloblet_slot(v, k))
-            .filter(|f| f.tag() != fixpt_heap::value::TAG_TRAILER)
-            .collect(),
+        None if v.is_bloblet() => heap.bloblet_values(v),
         None => Vec::new(),
     }
 }

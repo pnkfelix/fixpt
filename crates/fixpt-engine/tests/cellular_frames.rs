@@ -15,7 +15,7 @@ fn fx(n: i64) -> Value {
 fn cell(rt: &mut Runtime, v: Value) -> Value {
     use fixpt_heap::layout::cellular::{GLOBAL_FIELDS, GLOBAL_WRITES};
     let c = rt.heap.make_bloblet(fixpt_heap::layout::kind("bloblet"), GLOBAL_FIELDS, 0, true);
-    rt.heap.set_bloblet_slot(c, 2, v);
+    rt.heap.set_bloblet_slot(c, fixpt_heap::layout::cellular::GLOBAL_VALUE, v);
     rt.heap.set_bloblet_slot(c, GLOBAL_WRITES, Value::fixnum(0));
     c
 }

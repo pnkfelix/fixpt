@@ -129,17 +129,17 @@ fn mutants(s: &mut Fx26Session, name: &str, text: &str, swaps: &[(&str, &str)], 
                 let n = m.heap().bloblet_head(w).fields;
                 let mut k = WORD_CELL0;
                 while k <= n {
-                    let cell = m.heap().bloblet_slot(w, k);
+                    let cell = m.heap().bloblet_slot(w, k); // fields: the word's cells, walked by their operands
                     let r = cell.is_fixnum().then(|| cell.as_fixnum() as usize).filter(|r| *r < PRIMITIVES).map(|r| ROUTINES[r].0);
                     let swap = swaps.iter().find(|(from, _)| r == Some(*from)).map(|(_, to)| *to);
                     if let Some(to) = swap {
-                        m.heap().set_bloblet_slot(w, k, Value::fixnum(routine(to) as i64));
+                        m.heap().set_bloblet_slot(w, k, Value::fixnum(routine(to) as i64)); // fields: that cell, swapped
                         made += 1;
                         let o = verify(&mut c, m.heap(), &certs, w);
                         if o.verified() || o.failed.is_empty() && o.stopped.is_none() && !(open && !o.open.is_empty()) {
                             kept.push(format!("{name}: {} at cell {} made {to}", r.unwrap_or("?"), k - WORD_CELL0));
                         }
-                        m.heap().set_bloblet_slot(w, k, cell);
+                        m.heap().set_bloblet_slot(w, k, cell); // fields: and swapped back
                     }
                     k += 1 + r.map_or(0, operands);
                 }

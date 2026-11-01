@@ -1018,8 +1018,7 @@ pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32
 
 /// [`assemble_word`], with every conditional branch long if `long`.
 fn assemble_word_as(heap: &Heap, word: Value, far: [i64; 2], long: bool) -> Result<(Vec<u32>, Vec<i64>), String> {
-    let fields = heap.bloblet_head(word).fields;
-    let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(word, k)).collect();
+    let cells: Vec<Value> = heap.bloblet_fields_from(word, WORD_CELL0);
     // Where each instruction starts.
     let mut starts = vec![false; cells.len() + 1];
     let mut i = 0;
@@ -1437,8 +1436,8 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     // SAFETY: the runtime `run_in_runtime` holds exclusively.
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let k = (st.d / 8) as usize;
-    let p = rt.heap.bloblet_slot(Value::from_raw(st.cur), k).as_fixnum() as usize;
-    let count = rt.heap.bloblet_slot(Value::from_raw(st.cur), k + 1).as_fixnum() as usize;
+    let p = rt.heap.bloblet_slot(Value::from_raw(st.cur), k).as_fixnum() as usize; // fields: the cell at the machine's cursor
+    let count = rt.heap.bloblet_slot(Value::from_raw(st.cur), k + 1).as_fixnum() as usize; // fields: and the one after it
     let depth = (st.ds_base - st.dsp) as usize / 8;
     if depth < count {
         return Err(Trap::Underflow { routine: name });
@@ -1527,8 +1526,8 @@ fn closure(st: &mut State) -> Result<(), Trap> {
     let heap = unsafe { heap_of(st) };
     safepoint(st, heap);
     let k = (st.d / 8) as usize;
-    let w = heap.bloblet_slot(Value::from_raw(st.cur), k);
-    let count = heap.bloblet_slot(Value::from_raw(st.cur), k + 1).as_fixnum() as usize;
+    let w = heap.bloblet_slot(Value::from_raw(st.cur), k); // fields: the cell at the machine's cursor
+    let count = heap.bloblet_slot(Value::from_raw(st.cur), k + 1).as_fixnum() as usize; // fields: and the one after it
     let depth = (st.ds_base - st.dsp) as usize / 8;
     if depth < st.fp as usize / 8 + count {
         return Err(Trap::Underflow { routine: "closure" });
@@ -1563,7 +1562,7 @@ fn callout_routine(heap: &mut Heap, st: &mut State, ds: &mut [Value], rs: &mut [
             let [k, obj, ..] = *ds else { return Err(underflow) };
             // The fast path has checked the types.
             let k = usize::try_from(k.as_fixnum()).map_err(|_| field.clone())?;
-            ds[1] = heap.bloblet_field(obj, k).map_err(|_| field)?;
+            ds[1] = heap.bloblet_field(obj, k).map_err(|_| field)?; // fields: the program's field number
             Ok(1)
         }
         "field!" => {
@@ -1572,7 +1571,7 @@ fn callout_routine(heap: &mut Heap, st: &mut State, ds: &mut [Value], rs: &mut [
                 return Err(Trap::Type { routine: name });
             }
             let k = usize::try_from(k.as_fixnum()).map_err(|_| field.clone())?;
-            heap.set_bloblet_field(obj, k, x).map_err(|_| field)?;
+            heap.set_bloblet_field(obj, k, x).map_err(|_| field)?; // fields: the program's field number
             Ok(3)
         }
         "cons" => {
@@ -2179,14 +2178,13 @@ impl NativeMachine {
             if w == word && heap.symbol_name(heap.bloblet_slot(w, WORD_NAME)) == fixpt_runtime::prim::CALL_CLOSURE {
                 // `… lit closure call n exit`; a native closure's code is
                 // made already (the front end's, `TODO.md` §126).
-                let c = heap.bloblet_slot(w, fields - 3);
+                let c = heap.bloblet_slot(w, fields - 3); // fields: the word's cell three before its last
                 if heap.bloblet_kind(c) == closure {
                     todo.push(heap.bloblet_slot(c, CLOSURE_WORD));
                 }
                 continue;
             }
-            for k in WORD_CELL0..=fields {
-                let v = heap.bloblet_slot(w, k);
+            for v in heap.bloblet_fields_from(w, WORD_CELL0) {
                 if heap.is_cellular_word(v) {
                     todo.push(v);
                 } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
@@ -2196,8 +2194,7 @@ impl NativeMachine {
             if entry == ROUTINE_DOCOL {
                 let twin = heap.bloblet_slot(w, fixpt_heap::layout::cellular::WORD_TWIN);
                 if registers && heap.is_register_word(twin) && crate::CELLULAR_AVAILABLE {
-                    for k in WORD_CELL0..=heap.bloblet_head(twin).fields {
-                        let v = heap.bloblet_slot(twin, k);
+                    for v in heap.bloblet_fields_from(twin, WORD_CELL0) {
                         if heap.is_cellular_word(v) {
                             todo.push(v);
                         }

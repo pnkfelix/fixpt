@@ -39,12 +39,12 @@ pub fn show_value(v: Local<'_>) -> String {
         return format!("{s:?}");
     }
     if v.bloblet_kind() == Some(const { kind("sum") }) {
-        let tag = v.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();
+        let tag = v.sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default();
         if matches!(tag.as_str(), "atom" | "lst" | "dotted" | "vec") {
             return "_".into();
         }
         let mut out = format!("({tag}");
-        for f in fields(v.field(3).expect("a sum's value")) {
+        for f in fields(v.sum_payload().expect("a sum's value")) {
             out.push(' ');
             out.push_str(&show_value(f));
         }
@@ -60,7 +60,7 @@ pub fn show_value(v: Local<'_>) -> String {
 
 /// A product's fields, in order.
 fn fields(p: Local<'_>) -> Vec<Local<'_>> {
-    (2..).map_while(|k| p.field(k)).collect()
+    (0..).map_while(|i| p.value(i)).collect()
 }
 
 /// Byte offset to character position, for text with non-ASCII in it.

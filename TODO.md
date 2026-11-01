@@ -4744,3 +4744,18 @@ FX-26 writes them); `bloblet_slot` kept for the runtime's own layouts,
 and a tidy lint against arithmetic on its index outside `fixpt-heap`.
 528 calls of `bloblet_slot` (15 of the form `k + 1`), most in
 `fixpt-native`, `fixpt-engine`, `fixpt-runtime`: moved file by file.
+
+**Done (2026-11-01).** `Heap::bloblet_value`, `set_bloblet_value`,
+`bloblet_value_checked`, `bloblet_len`, `bloblet_values`; `is_product`,
+`product_field`, `is_sum`, `sum_tag`, `sum_payload`; a fixed layout's run
+of fields, `bloblet_fields_from` and `bloblet_count_from`; and on the
+session's handles, `value`, `product_field`, `sum_tag`, `sum_payload`,
+`Local::field` renamed `raw_field`. The lint (`fixpt_tidy::fields`): a
+field accessor's index starts with a layout's constant, or the line says
+`// fields:` and why (an instruction's operand, a program's field
+number, a word's cells walked by a cursor). 208 findings at first: some
+130 moved to values (every FX-26 sum and product read in Rust, global
+cells by `GLOBAL_VALUE`, code bloblets' `CODE_SELF`, new), the rest
+marked. Left: the FX-26 side, where the compilers make a product's field
+`n` the machine's field `n + 1` (`%bloblet-ref`, `field`), a numbering
+of the instruction set's, not of the heap's API.

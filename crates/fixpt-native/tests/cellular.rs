@@ -133,7 +133,7 @@ fn execute_and_fields() {
 
     // `field@` on a bloblet with no trailer takes the Rust path.
     let bare = heap.make_bloblet(32, 3, 8, false);
-    heap.set_bloblet_slot(bare, 2, fx(77));
+    heap.set_bloblet_slot(bare, 2, fx(77)); // fields: a bloblet with no trailer, by field
     let mut b = WordBuilder::new();
     b.lit(bare).lit(fx(2)).prim("field@").prim("exit");
     let w = b.build(&mut heap, "bare");

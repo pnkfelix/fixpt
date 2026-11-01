@@ -158,14 +158,14 @@ fn words_of(heap: &Heap, start: Value) -> Vec<Value> {
         if !seen.insert(w.raw()) || !heap.is_cellular_word(w) {
             continue;
         }
-        for k in WORD_CELL0..=heap.bloblet_head(w).fields {
-            push(heap.bloblet_slot(w, k), &mut todo);
+        for v in heap.bloblet_fields_from(w, WORD_CELL0) {
+            push(v, &mut todo);
         }
         let rw = heap.bloblet_slot(w, WORD_TWIN);
         if heap.is_register_word(rw) {
             out.push(rw);
-            for k in WORD_CELL0..=heap.bloblet_head(rw).fields {
-                push(heap.bloblet_slot(rw, k), &mut todo);
+            for v in heap.bloblet_fields_from(rw, WORD_CELL0) {
+                push(v, &mut todo);
             }
         }
     }
@@ -175,7 +175,7 @@ fn words_of(heap: &Heap, start: Value) -> Vec<Value> {
 /// One word's register code, surveyed into `found`.
 fn survey_word(heap: &Heap, rw: Value, found: &mut Found) {
     let fields = heap.bloblet_head(rw).fields;
-    let cell = |k: usize| heap.bloblet_slot(rw, k);
+    let cell = |k: usize| heap.bloblet_slot(rw, k); // fields: the word's cells, walked by their operands
     // Where each instruction starts, where branches arrive, and what is in
     // a loop.
     let mut starts = Vec::new();
@@ -244,10 +244,10 @@ fn survey_word(heap: &Heap, rw: Value, found: &mut Found) {
                 if let Some(g) = was_global {
                     let m = heap.bloblet_slot(g, GLOBAL_VALUE);
                     let k = o(0).as_fixnum() as usize;
-                    if m.is_bloblet() && heap.bloblet_kind(m) != const { fixpt_heap::layout::kind("cellular-closure") } && k <= heap.bloblet_head(m).fields && immediate(heap.bloblet_slot(m, k)) {
+                    if m.is_bloblet() && heap.bloblet_kind(m) != const { fixpt_heap::layout::kind("cellular-closure") } && k <= heap.bloblet_head(m).fields && immediate(heap.bloblet_slot(m, k)) { // fields: the instruction's field number
                         found.note("global module's literal member read", lp, None);
                         if found.propagate {
-                            p.result = Some(Known::Const(heap.bloblet_slot(m, k).raw(), true));
+                            p.result = Some(Known::Const(heap.bloblet_slot(m, k).raw(), true)); // fields: the instruction's field number
                             continue;
                         }
                     }

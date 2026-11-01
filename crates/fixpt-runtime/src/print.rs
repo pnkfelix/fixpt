@@ -245,7 +245,7 @@ fn put(
                 out.push_str("#:");
                 put(heap, heap.keyword_symbol(v), write, labels, out);
             } else if kind == "sum" {
-                let tag = heap.bloblet_slot(v, 2);
+                let tag = heap.sum_tag(v);
                 out.push_str(&format!("#<sum {}>", write_value(heap, tag)));
             } else if kind == "eqtable" {
                 out.push_str(&format!("#<eqtable of {}>", crate::eqtable::count(heap, v)));
