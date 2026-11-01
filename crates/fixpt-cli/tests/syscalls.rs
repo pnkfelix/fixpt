@@ -9,10 +9,9 @@ use std::process::Command;
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
 /// The machines: the stencils only where this build found a nightly
-/// compiler, the native convention's where it is, and x86_64's own.
+/// compiler and the native convention's where it is.
 fn machines() -> Vec<&'static str> {
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
-    let x86 = cfg!(target_arch = "x86_64");
     [
         "rs-scheme-vm",
         "fx-ast-eval",
@@ -29,7 +28,6 @@ fn machines() -> Vec<&'static str> {
     .into_iter()
     .filter(|m| stencils || !m.contains("stencils"))
     .filter(|m| fixpt_native::NATIVE_CONVENTION_AVAILABLE || !m.ends_with("nativecc"))
-    .filter(|m| x86 || *m != "fx-regs-fxjit-nativecc")
     .collect()
 }
 

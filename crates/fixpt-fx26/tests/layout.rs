@@ -117,3 +117,29 @@ fn native_direct_x64_layout_types_fx_is_generated_from_the_machine() {
     let have = std::fs::read_to_string(path).unwrap_or_default();
     assert!(have == want, "src/native-direct-x64-layout-types.fx is not what the machine generates; run `FIXPT_BLESS=1 cargo test -p fixpt-fx26 --test layout`");
 }
+
+/// And what the native convention's compiler to arm64 written in FX-26,
+/// `native-direct-arm64.fx`, knows of that convention on arm64:
+/// `src/native-direct-arm64-layout.fx`.
+#[test]
+fn native_direct_arm64_layout_fx_is_generated_from_the_machine() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/native-direct-arm64-layout.fx");
+    let want = fixpt_native::direct::fx26_direct_arm64_module();
+    if std::env::var_os("FIXPT_BLESS").is_some() {
+        std::fs::write(path, &want).expect("writes native-direct-arm64-layout.fx");
+    }
+    let have = std::fs::read_to_string(path).unwrap_or_default();
+    assert!(have == want, "src/native-direct-arm64-layout.fx is not what the machine generates; run `FIXPT_BLESS=1 cargo test -p fixpt-fx26 --test layout`");
+}
+
+/// And that module's signature: `src/native-direct-arm64-layout-types.fx`.
+#[test]
+fn native_direct_arm64_layout_types_fx_is_generated_from_the_machine() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/native-direct-arm64-layout-types.fx");
+    let want = fixpt_native::direct::fx26_direct_arm64_module_sig();
+    if std::env::var_os("FIXPT_BLESS").is_some() {
+        std::fs::write(path, &want).expect("writes native-direct-arm64-layout-types.fx");
+    }
+    let have = std::fs::read_to_string(path).unwrap_or_default();
+    assert!(have == want, "src/native-direct-arm64-layout-types.fx is not what the machine generates; run `FIXPT_BLESS=1 cargo test -p fixpt-fx26 --test layout`");
+}
