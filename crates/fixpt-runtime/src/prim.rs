@@ -3116,34 +3116,34 @@ prims! {
     "%fx26-session-committed!", 2, Some(2), simple!(|rt, a| session_op(rt, "committed", a));
     "%fx26-session-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "lower", a));
     "%fx26-session-commit-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "commit-lower", a));
-    "%fx26-stage-check", 8, Some(8), simple!(|rt, a| {
-        let text = get_string(rt, a[3])?;
-        let mut given = crate::evidence::Given::of(rt, a[4], a[5]);
-        // And the evidence's reps, where they are (the evaluator's).
-        given.with_reps(rt, a[7]);
-        // And what the code is checked as, as a rep, if the checker made one.
-        let rep = fixpt_reps::heap::from_heap(&rt.heap, a[6], true).ok();
+    // The evaluator's `stage` (`fx-ast-eval`): its code as text, the names of
+    // the variables its type names, what it is checked as, as a rep (or
+    // `#f`), and the evidence's reps' binary forms.
+    "%fx26-stage-check", 4, Some(4), simple!(|rt, a| {
+        let text = get_string(rt, a[0])?;
+        let given = crate::evidence::Given::of_bytes(rt, a[1], a[3]);
+        let rep = fixpt_reps::heap::from_heap(&rt.heap, a[2], true).ok();
         Ok(match rt.stage_check {
             Some(check) => check(rt, &text, &given, rep),
             None => stage_refused(rt, "this machine cannot stage code"),
         })
     });
     // Evaluated (`fx-ast-eval`), each step's forms as text, for the
-    // evaluator to run: a form checked, given the module's type, the
-    // effect, the result type and the code as text; and readied, given the
-    // decision's tag as text.
-    "%fx26-session-eval-check", 9, Some(9), simple!(|rt, a| session_op(rt, "eval-check", a));
+    // evaluator to run: a form checked, given the code as text, the names
+    // of the variables its type names, what it is checked as, as a rep, and
+    // the evidence's reps; and readied, given the decision's tag as text.
+    "%fx26-session-eval-check", 5, Some(5), simple!(|rt, a| session_op(rt, "eval-check", a));
     "%fx26-session-eval-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "eval-ready", a));
     // Evidence (`docs/research/eval.md`, "Evidence"): what a `reify-…`
     // makes of the product the compilers make of its operand
     // (`evidence::reified`).
-    "%fx26-reify-effect", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0], 1)));
-    "%fx26-reify-region", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0], 1)));
-    "%fx26-reify-type", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0], 2)));
-    "%fx26-reify-text", 4, Some(4), simple!(|rt, a| Ok(crate::evidence::reified_text(rt, a[0], a[1], a[2], a[3])));
-    // And its rep, filled by the evidence's reps (`given` its binary
-    // forms), in its binary form; empty if none (`evidence::reified_rep`).
-    "%fx26-reify-rep", 5, Some(5), simple!(|rt, a| Ok(crate::evidence::reified_rep(rt, a[0], a[1], a[2], a[3], a[4])));
+    "%fx26-reify-effect", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0])));
+    "%fx26-reify-region", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0])));
+    "%fx26-reify-type", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0])));
+    // The evaluator's: its rep, filled by the evidence's reps (`given` its
+    // binary forms), in its binary form; empty if none
+    // (`evidence::reified_rep`).
+    "%fx26-reify-rep", 4, Some(4), simple!(|rt, a| Ok(crate::evidence::reified_rep(rt, a[0], a[1], a[2], a[3])));
     // A bound made of exact evidence (`effect-bound`, `type-bound`): the
     // same text.
     "%fx26-evidence-bound", 1, Some(1), simple!(|_rt, a| Ok(a[0]));

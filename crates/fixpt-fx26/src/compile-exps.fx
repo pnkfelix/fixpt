@@ -62,17 +62,16 @@
         (cond ((>= k 0)
                (begin (c-exp-as-is x e depth c #f) (c-int c k)
                       (c-prim c "%fx26-convert" 2) (c-done c tail)))
-              ;; A `stage`'s text, given with what it is checked against,
-              ;; the names of the variables whose evidence it is given, and
-              ;; the type it is checked as, as a rep.
+              ;; A `stage`'s code, given with what it is checked against:
+              ;; `fresh` or "", the code, the names of the variables whose
+              ;; evidence it is given, and the type it is checked as, as a
+              ;; rep (`stage.rs`'s `staged_parts`).
               ((not (null? st))
                (begin (c-int c 37) (c-lit c (wcell-string (extract (car st) 2)))
+                      (c-exp-as-is x e (+ depth 2) c #f)
                       (c-lit c (wcell-string (extract (car st) 3)))
-                      (c-lit c (wcell-string (extract (car st) 4)))
-                      (c-exp-as-is x e (+ depth 4) c #f)
-                      (c-lit c (wcell-string (extract (car st) 5)))
-                      (c-lit c (extract (car st) 6))
-                      (c-prim c "%make-frozen" 7) (c-done c tail)))
+                      (c-lit c (extract (car st) 4))
+                      (c-prim c "%make-frozen" 5) (c-done c tail)))
               ((not (null? r)) (c-reshape x (car r) e depth c tail))
               (else (c-exp-as-is x e depth c tail))))))
   ;; A module reshaped (`k-reshape-at`): made, then a product of the values

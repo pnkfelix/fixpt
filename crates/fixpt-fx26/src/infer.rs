@@ -610,8 +610,8 @@ impl Checker {
     }
 
     /// `stage`'s call, or a session's (`op`), of module or session
-    /// `target` and code `code`, of type `t`: `M`, `E` and `R` noted at the
-    /// code, printed whole, for the lowering (`facts.staged`).
+    /// `target` and code `code`, of type `t`: what the code is checked as,
+    /// as a rep, noted at the code for the lowering (`facts.staged`).
     fn note_staged(&mut self, op: &str, target: ExpId, code: Option<ExpId>, given: Option<ExpId>, t: TyId) -> R<()> {
         let span = self.arena.span_of(target);
         let what = if op == "%stage" { "a module" } else { "a session" };
@@ -638,13 +638,19 @@ impl Checker {
         let ok = if op == "%session-check" { part(self, ok, "expression") } else { Some(ok) };
         let Some(Ty::Subr { conv, effect, result, .. }) = ok.map(|ok| self.arena.get(self.arena.resolve(ok)).clone()) else { return Ok(()) };
         if let Some(code) = code {
-            let free = self.free_in_shown(|c| vec![c.show_ty(mt), c.show_effect(&effect), c.show_ty(result)]);
             // What the code is checked as, `(subr pure (M) (subr E () R))`.
             let inner = self.arena.ty(Ty::Subr { conv, effect: effect.clone(), params: Vec::new(), result, spec: None });
             let checked = self.arena.ty(Ty::Subr { conv, effect: Effect::pure(), params: vec![mt], result: inner, spec: None });
+            let exported = self.export_ty(checked).ok();
+            // The variables it names, its rep's holes; where no rep takes
+            // it (refused as it runs), as it prints, to say what is missing.
+            let free = match &exported {
+                Some(ex) => ex.holes.clone(),
+                None => self.free_in_shown(|c| vec![c.show_ty(mt), c.show_effect(&effect), c.show_ty(result)]),
+            };
             let evidence = self.evidence(&free, Some(checked), given, true, op.trim_start_matches('%'), span)?;
-            let rep = self.export_ty(checked).ok().map(|ex| fixpt_reps::binary::encode(&ex.rep));
-            let staged = crate::check::Staged { m: self.staged_text(mt), e: self.staged_effect_text(&effect), r: self.staged_text(result), evidence, rep };
+            let rep = exported.map(|ex| fixpt_reps::binary::encode(&ex.rep));
+            let staged = crate::check::Staged { fresh: false, evidence, rep };
             self.facts.staged.insert(code, staged);
         }
         Ok(())
@@ -652,36 +658,28 @@ impl Checker {
 
     /// A `reify-…`'s call (`op`), of operand `arg` and type `t`, its
     /// `(effectrep E)`, `(regionrep r)` or `(typerep T)`: what it is of,
-    /// printed whole, noted at the operand, with the evidence of each
-    /// variable it names. A region's needs none: one of none is a region of
+    /// as a rep, noted at the operand, with the evidence of each variable
+    /// it names. A region's needs none: one of none is a region of
     /// its own (`stage.rs`, "Evidence").
     fn note_reified(&mut self, op: &str, arg: ExpId, t: TyId) -> R<()> {
         let span = self.arena.span_of(arg);
         let Ty::Named { args, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return Ok(()) };
         let mut staged = crate::check::Staged::default();
-        let free = match (op, args.first()) {
-            ("%reify-effect", Some(D::Effect(e))) => {
-                staged.e = self.staged_effect_text(e);
-                self.free_in_shown(|c| vec![c.show_effect(e)])
-            }
-            ("%reify-type", Some(D::Type(x))) => {
-                staged.r = self.staged_text(*x);
-                self.free_in_shown(|c| vec![c.show_ty(*x)])
-            }
-            ("%reify-region", Some(D::Region(r))) => {
-                *self.print_for_fasl.borrow_mut() = Some(HashMap::new());
-                staged.e = self.show_region(*r);
-                *self.print_for_fasl.borrow_mut() = None;
-                self.free_in_shown(|c| vec![c.show_region(*r)])
-            }
+        let shown = match (op, args.first()) {
+            ("%reify-effect", Some(D::Effect(e))) => self.free_in_shown(|c| vec![c.show_effect(e)]),
+            ("%reify-type", Some(D::Type(x))) => self.free_in_shown(|c| vec![c.show_ty(*x)]),
+            ("%reify-region", Some(D::Region(r))) => self.free_in_shown(|c| vec![c.show_region(*r)]),
             _ => return Ok(()),
         };
+        let exported = args.first().and_then(|d| self.export_evidence(d).ok());
+        // The variables it names, its rep's holes (as with `note_staged`).
+        let free = exported.as_ref().map_or(shown, |ex| ex.holes.clone());
         staged.evidence = self.evidence(&free, None, Some(arg), op != "%reify-region", op.trim_start_matches('%'), span)?;
         // A region a variable names, of no evidence: one of its own.
         if op == "%reify-region" && !free.is_empty() && staged.evidence.is_empty() {
-            staged.m = "fresh".to_string();
-        } else if let Some(d) = args.first() {
-            staged.rep = self.export_evidence(d).ok().map(|ex| fixpt_reps::binary::encode(&ex.rep));
+            staged.fresh = true;
+        } else {
+            staged.rep = exported.map(|ex| fixpt_reps::binary::encode(&ex.rep));
         }
         self.facts.staged.insert(arg, staged);
         Ok(())

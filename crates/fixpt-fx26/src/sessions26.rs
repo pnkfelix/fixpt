@@ -493,17 +493,16 @@ fn run_texts(rt: &mut Runtime, base: usize, name: &str, form: &str) -> Result<Va
     Ok(sum(rt, "run", list))
 }
 
-/// What `%fx26-session-eval-check` does on this checker: the module's
-/// type, the effect, the result type and the code as text, and the names
-/// of the variables those name and their evidence (`a`): an expression,
+/// What `%fx26-session-eval-check` does on this checker: the code as
+/// text, the names of the variables its type names, that type as a rep and
+/// the evidence's reps' binary forms (`a`): an expression,
 /// `(sum run texts)`, the forms to run, the last's value the procedure
 /// that evaluates it; a definition, pending; or the refusal.
 pub(crate) fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, String> {
-    let code_text = text(rt, a[3]);
-    let mut given = fixpt_runtime::evidence::Given::of(rt, a[4], a[5]);
-    given.with_reps(rt, a[7]);
-    // By the rep the checker made (`a[6]`), for each step.
-    let rep = crate::stage::given_rep(rt, a[6], &given);
+    let code_text = text(rt, a[0]);
+    let given = fixpt_runtime::evidence::Given::of_bytes(rt, a[1], a[3]);
+    // By the rep the checker made (`a[2]`), for each step.
+    let rep = crate::stage::given_rep(rt, a[2], &given);
     let Some(reps) = rep.as_deref().and_then(crate::stage::step_reps) else { return Ok(crate::stage::no_rep(rt)) };
     let _named = StepNamed::set(Some(reps));
     if let Err(refused) = front_end(rt, base, true)? {

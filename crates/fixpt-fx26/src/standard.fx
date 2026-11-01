@@ -321,7 +321,6 @@
          (("f32->string") "%fx26-f32->string")
          (("sleep-until") "%fx26-sleep-until")
          (("%reify-type") "%fx26-reify-type")
-         (("%reify-text") "%fx26-reify-text")
          (("make-string") "%fx26-make-string")
          (("string-set!") "%fx26-string-set!")
          (("string-copy") "%fx26-string-copy")

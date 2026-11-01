@@ -193,52 +193,42 @@
           #u
           (tagcase (k-get (k-resolve x))
             (ty-subr (e ps r cv spc)
-              (let* ((show (with check-print k-show-ty-whole))
-                     (on (set k-show-marks #t))
-                     (free (k-free-shown (list (show mt) (k-show-effect e) (show r))))
-                     (off (set k-show-marks #f))
-                     ;; What the code is checked as, `(subr pure (M) (subr E () R))`.
+              (let* (;; What the code is checked as, `(subr pure (M) (subr E () R))`,
+                     ;; as a rep, its holes the variables it names.
                      (checked (k-ty-new (ty-subr nil (list mt) (k-ty-new (ty-subr e nil r cv nil))
                                                  cv nil)))
+                     (rep (k-staged-rep checked))
+                     (free ((with check-reps k-rep-holes)))
                      (names (k-given-names given free checked #t form))
-                     (n (n-staged (show mt) (k-show-effect e) (show r) names
-                                  (k-staged-rep checked))))
+                     (n (n-staged "" names rep)))
                 (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
             (else y #u))))))
 ;; What a `stage`'s code is checked as, type `checked`, as a rep, for the
 ;; checker that runs then to import, not read (`docs/research/heap-types.md`,
 ;; step 3), its holes the variables it names, which the evidence fills as
 ;; the program runs (`fixpt-reps`'s `fill`); `#f` if a rep does not take
-;; all of it, and that checker reads the text.
+;; all of it, and that checker refuses the code.
 (define k-staged-rep (->* (int) wcell)
   (lambda (checked)
     (let ((bytes ((with check-reps k-ty-rep) checked)))
       (if ((with check-reps k-rep-declined?)) (wcell-bool #f) (rep-cell bytes)))))
-;; What a `reify-…` makes evidence of, `d`, as a piece of evidence's rep
-;; (`k-evidence-rep`), filled as the program runs by the evidence it is
-;; given; `#f` for a region of its own (`fresh`), which only text names.
-(define k-reified-rep (->* (k-desc string) wcell)
-  (lambda (d fresh)
-    (if (string=? fresh "")
-        (let ((bytes ((with check-reps k-evidence-rep) d)))
-          (if ((with check-reps k-rep-declined?)) (wcell-bool #f) (rep-cell bytes)))
-        (wcell-bool #f))))
 ;; A `reify-…`'s call, `op`, of `given`, the evidence it is given, of type
 ;; `te`, its `(effectrep E)`, `(regionrep r)` or `(typerep T)`: what it is
-;; of, printed whole, noted at `given`, as the effect, or a region's, or the
-;; type; a region a variable names, of no evidence, one of its own (`fresh`).
+;; of, as evidence's rep (`k-evidence-rep`), noted at `given`, filled as the
+;; program runs by the evidence it is given; a region a variable names, of
+;; no evidence, one of its own (`fresh`), its rep made then.
 (define k-reified (->* (string kx k-te) k-te)
   (lambda (op given te)
     (tagcase (k-get (k-resolve (extract te 1)))
       (ty-named (g ds)
         (if (null? ds)
             te
-            (let* ((show (with check-print k-show-ty-whole)) (d (car ds))
-                   (text (lambda ()
-                           (tagcase d (dt (t) (show t)) (de (e) (k-show-effect e))
-                             (dr (r) (k-region-show r)) (else z ""))))
-                   (on (set k-show-marks #t)) (free (k-free-shown (list (text))))
-                   (off (set k-show-marks #f))
+            (let* ((d (car ds))
+                   ;; What it is of, as evidence's rep, its holes the
+                   ;; variables it names.
+                   (bytes ((with check-reps k-evidence-rep) d))
+                   (declined ((with check-reps k-rep-declined?)))
+                   (free ((with check-reps k-rep-holes)))
                    (region (string=? op "%reify-region"))
                    (form (substring op 1 (string-length op)))
                    (names (k-given-names given free -1 (not region) form))
@@ -249,10 +239,10 @@
                                          (else z #f))))
                               "fresh"
                               ""))
-                   (shown (text))
-                   (n (if (string=? op "%reify-type")
-                          (n-staged fresh "" shown names (k-reified-rep d fresh))
-                          (n-staged fresh shown "" names (k-reified-rep d fresh)))))
+                   (rep (if (or declined (string=? fresh "fresh"))
+                            (wcell-bool #f)
+                            (rep-cell bytes)))
+                   (n (n-staged fresh names rep)))
               (begin (set k-extracts (cons (product (1 (k-at-of given)) (2 n)) (get k-extracts)))
                      te))))
       (else y te))))

@@ -3342,3 +3342,19 @@ of `TODO.md` §141, working on my own.
   found, not made anew under a key that could differ; a file whose rep
   names one not yet defined falls back to text.
 
+
+## The text paths removed (2026-11-01; `heap-types.md`, step 6)
+
+- **Free variables from a rep's holes**: the variables whose evidence a
+  staged form needs are its rep's holes (`Exported::holes`), not found by
+  printing its type with marks; where no rep takes the type (refused as it
+  runs), the printing is kept, so that the refusal at check time still
+  says which evidence is missing rather than becoming a refusal at run
+  time.
+- **A removed primitive taken out of the middle of the list**
+  (`%fx26-reify-text`): the layouts are regenerated (`FIXPT_BLESS`), and
+  the caches `prewarm` makes were remade and the suite passed on them; a
+  `.fasl` or dump made before is stale anyway, as after any rebuild.
+- **The Rust checker's session definitions' text kept**: it is read back
+  by the same checker only, never another or a stage; by rep it would
+  be one more import a definition, for nothing measured.

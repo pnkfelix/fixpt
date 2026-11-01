@@ -277,13 +277,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // of, covariant.
     ("effect-bound", "(poly ((e effect)) (subr pure ((effectrep e)) (effectbound e)))"),
     ("type-bound", "(poly ((t type)) (subr pure ((typerep t)) (typebound t)))"),
-    ("%reify-text", "(subr pure (string string string (listof string acyclic)) string)"),
-    // And its rep (`fixpt_runtime::evidence::reified_rep`), empty if none.
-    ("%reify-rep", "(poly ((r region)) (subr (maxeff (alloc r) (read r)) (string wcell string (listof (bytevectorof r) acyclic) string) (bytevectorof r)))"),
+    // A `reify-…`'s rep, on the evaluator (`fixpt_runtime::evidence::reified_rep`),
+    // empty if none.
+    ("%reify-rep", "(poly ((r region)) (subr (maxeff (alloc r) (read r)) (string wcell string (listof (bytevectorof r) acyclic)) (bytevectorof r)))"),
     (
         "%stage-check",
         concat!(
-            "(poly ((r region)) (subr (maxeff spin (io fs-read) (read r)) (string string string string string (listof string acyclic) wcell ",
+            "(poly ((r region)) (subr (maxeff spin (io fs-read) (read r)) (string string wcell ",
             "(listof (bytevectorof r) acyclic)) (sumof (checked string) (failed stage-failure))))",
         ),
     ),
@@ -297,7 +297,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     (
         "%session-eval-check",
         concat!(
-            "(poly ((r region) (t type) (s region)) (subr (maxeff spin (io fs-read) (read s)) ((arrayof t r) string string string string string (listof string acyclic) ",
+            "(poly ((r region) (t type) (s region)) (subr (maxeff spin (io fs-read) (read s)) ((arrayof t r) string string ",
             "wcell (listof (bytevectorof s) acyclic)) (sumof (run (listof string acyclic)) (ok (sumof (definition (arrayof t r)))) (failed stage-failure))))",
         ),
     ),

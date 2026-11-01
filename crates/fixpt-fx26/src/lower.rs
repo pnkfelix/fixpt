@@ -229,7 +229,6 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("%reify-effect", "%fx26-reify-effect", false),
     ("%reify-region", "%fx26-reify-region", false),
     ("%reify-type", "%fx26-reify-type", false),
-    ("%reify-text", "%fx26-reify-text", false),
     ("effect-bound", "%fx26-evidence-bound", false),
     ("type-bound", "%fx26-evidence-bound", false),
     ("%session-eval-check", "%fx26-session-eval-check", false),
@@ -972,7 +971,10 @@ impl Lowerer<'_> {
         // compilers written in FX-26 give it (`n-staged`), and the names of
         // the variables whose evidence the form is given.
         let code = match self.c.facts.staged.get(&e) {
-            Some(s) => Sx::call("%fx26-product", [Sx::Str(s.m.clone()), Sx::Str(s.e.clone()), Sx::Str(s.r.clone()), code, Sx::Str(s.evidence.join(" ")), staged_rep(s)]),
+            Some(s) => {
+                let fresh = Sx::Str(if s.fresh { "fresh" } else { "" }.to_string());
+                Sx::call("%fx26-product", [fresh, code, Sx::Str(s.evidence.join(" ")), staged_rep(s)])
+            }
             None => code,
         };
         // A module reshaped: a product of the values the type wanted has.

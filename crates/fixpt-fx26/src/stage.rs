@@ -120,22 +120,22 @@ pub(crate) fn no_rep(rt: &mut Runtime) -> Value {
     fixpt_runtime::prim::stage_failed(rt, "refused", NO_REP, 0, 0)
 }
 
-/// The product the compilers make of a form's code (`n-staged`): the
-/// module's type, the effect and the result type printed (no longer read),
-/// the code, the names of the variables the type names, of which `given`
-/// is the evidence, in order, and the type the code is checked as, as a
-/// rep, or `#f`: what the code is checked against, and the code.
+/// The product the compilers make of a form's code (`n-staged`): a region
+/// of its own's mark (a `reify-…`'s, unused here), the code, the names of
+/// the variables the type names, of which `given` is the evidence, in
+/// order, and the type the code is checked as, as a rep, or `#f`: what the
+/// code is checked against, and the code.
 pub(crate) fn staged_parts(rt: &Runtime, staged: Value, given: Value) -> Option<(Parts, Value)> {
-    let is_product = rt.heap.is_product(staged) && rt.heap.bloblet_len(staged) == 6;
+    let is_product = rt.heap.is_product(staged) && rt.heap.bloblet_len(staged) == 4;
     if !is_product {
         return None;
     }
     let field = |i: usize| rt.heap.product_field(staged, i);
-    let given = fixpt_runtime::evidence::Given::of(rt, field(5), given);
+    let given = fixpt_runtime::evidence::Given::of(rt, field(3), given);
     // Its holes, the variables it names, filled by their evidence's reps (a
     // region of its own's too).
-    let parts = Parts { rep: given_rep(rt, field(6), &given) };
-    Some((parts, field(4)))
+    let parts = Parts { rep: given_rep(rt, field(4), &given) };
+    Some((parts, field(2)))
 }
 
 /// What code given `given` is checked as, by rep (`rep`, a rep in the heap,

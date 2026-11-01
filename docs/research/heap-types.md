@@ -378,6 +378,35 @@ s7st's warm start 0.45 s to 0.42 s; verified, 0.47 s. What is left of it
 is not types: the forms run from source each start, and the prelude's
 stage.
 
+## Step 6, done (2026-11-01)
+
+The text paths, where nothing is left on them, removed:
+
+- **A stage's and a session step's types are their rep alone**
+  (`stage::Parts`): no wrapping writes `M`, `E` and `R` out, nor binds a
+  region of its own around them; a session's seed, its expression steps
+  and its definitions' `E` name their types (`%stage-module-type`,
+  `%stage-result-type`, `%stage-effect`, `stage::step_reps`), bound for
+  the step only, each of the names its text uses. A type no rep takes (an
+  unresolved `select`) is refused, saying so (`stage::NO_REP`).
+- **Evidence is a rep alone**: a `reify-…` makes a rep in the heap (on
+  the evaluator, its binary form, `o-bytes`), a region of its own a
+  region constant of a name no program's (`evidence::fresh_region`).
+- **The facts slimmed**: a staged form's product (`n-staged`, `c-staged`,
+  `Staged`) is a region of its own's mark, the code, the names its
+  evidence is of, and its rep: the printed `M`, `E` and `R` gone, and
+  `%reify-text`. The variables a form's type names are its rep's holes,
+  not found by printing it (the Rust checker prints it only where no rep
+  takes it, to say what evidence is missing).
+
+What is left as text: the Rust checker's session commits a definition's
+type found by its trial as printed text (`check_define`, and a
+redefinition's old type to compare), read back by the same checker, and a
+module `.fasl`'s type lines. Neither crosses to the other checker or to a
+stage.
+
+Measured, the evaluator's evidence stages: 20 of them 128 to 47 ms.
+
 ## Decided (the user's, 2026-11-01)
 
 - **Measure after step 3**, before going on to sessions and `.fasl`s.

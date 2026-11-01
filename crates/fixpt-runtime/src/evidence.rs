@@ -2,77 +2,66 @@
 //! or a type a variable names is, as a program runs, for `stage` and a
 //! session's steps to check code against.
 //!
-//! The checker that checked the program printed what the code is checked
-//! against whole, each variable by its name, and found, for each, the local
-//! holding its evidence: `(effectrep e)`, `(regionrep r)` or `(typerep t)`,
-//! at run time the text of what it is of. Given here are the names, as one
-//! text, and the evidence, a list; each name is replaced by its evidence in
-//! the texts ([`Given::substituted`]). A region's evidence made of no other
-//! is a region of its own, a fresh name ([`fresh_region`]), which the
-//! staged check binds ([`regions_in`]): two regions so named are never the
-//! one, which is only more cautious than the program, never less.
+//! The checker that checked the program noted what the code is checked as,
+//! as a rep whose holes are the variables it names, and found, for each,
+//! the local holding its evidence: `(effectrep e)`, `(regionrep r)` or
+//! `(typerep t)`, at run time a rep of what it is of, its root an
+//! `evidence` node (`fixpt_reps::fill`; `docs/research/heap-types.md`,
+//! steps 3 and 6). Given here are the names, as one text, and the
+//! evidence; the holes are filled by it ([`Given::filled`]). A region's
+//! evidence made of no other is a region of its own: a region constant by
+//! a name no other has ([`fresh_region`]), opaque and distinct from every
+//! other, which is only more cautious than the program, never less.
 
 use crate::runtime::Runtime;
 use fixpt_heap::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The names of the variables given evidence, and their evidence, in order:
-/// its text, and its rep, where it has one (`heap-types.md`, step 3; a
-/// rep `fixpt_reps::fill` takes).
+/// The names of the variables given evidence, and their evidence, in order,
+/// each its rep, where it has one.
 #[derive(Clone, Debug, Default)]
 pub struct Given {
     pub names: Vec<String>,
-    pub reps: Vec<String>,
-    pub as_reps: Vec<Option<fixpt_reps::Rep>>,
+    pub reps: Vec<Option<fixpt_reps::Rep>>,
 }
 
 impl Given {
     /// The names, `names` a text of them apart by spaces, and the evidence,
-    /// `given` a product of pieces of it (the compilers'), or a list of them
-    /// (the evaluator's), each its text or the product of its text and its
-    /// rep ([`evidence`]); none, if not those.
+    /// `given` a product of pieces of it (the compilers'), each a rep in the
+    /// heap (`#f` for none); none, if not that.
     pub fn of(rt: &Runtime, names: Value, given: Value) -> Given {
+        let pieces = if given.is_bloblet() { rt.heap.bloblet_values(given) } else { Vec::new() };
+        let reps = pieces.iter().map(|v| fixpt_reps::heap::from_heap(&rt.heap, *v, true).ok()).collect();
+        Given::named(rt, names, reps)
+    }
+
+    /// The same, `reps` a list of the pieces' reps' binary forms, each empty
+    /// for none (the evaluator's, `ev-given-reps`).
+    pub fn of_bytes(rt: &Runtime, names: Value, reps: Value) -> Given {
+        let reps = rt.heap.list_to_vec(reps).unwrap_or_default();
+        let reps = reps.iter().map(|b| bytes_of(rt, *b).and_then(|b| fixpt_reps::binary::decode(&b, fixpt_reps::heap::validate_all()).ok())).collect();
+        Given::named(rt, names, reps)
+    }
+
+    fn named(rt: &Runtime, names: Value, reps: Vec<Option<fixpt_reps::Rep>>) -> Given {
         let names = if rt.heap.is_a(names, fixpt_heap::ObjType::String) { rt.heap.string_to_rust(names) } else { String::new() };
-        let pieces = if given.is_bloblet() {
-            rt.heap.bloblet_values(given)
-        } else {
-            rt.heap.list_to_vec(given).unwrap_or_default()
-        };
-        let string = |v: Value| rt.heap.is_a(v, fixpt_heap::ObjType::String);
-        let (mut reps, mut as_reps) = (Vec::new(), Vec::new());
-        for v in pieces {
-            if string(v) {
-                reps.push(rt.heap.string_to_rust(v));
-                as_reps.push(None);
-            } else if rt.heap.is_product(v) && rt.heap.bloblet_len(v) == 2 && string(rt.heap.product_field(v, 1)) {
-                reps.push(rt.heap.string_to_rust(rt.heap.product_field(v, 1)));
-                as_reps.push(fixpt_reps::heap::from_heap(&rt.heap, rt.heap.product_field(v, 2), true).ok());
-            }
-        }
         let names: Vec<String> = names.split_whitespace().map(str::to_string).collect();
         if names.len() == reps.len() {
-            Given { names, reps, as_reps }
+            Given { names, reps }
         } else {
             Given::default()
         }
-    }
-
-    /// The evidence's reps from `reps`, a list of their binary forms (the
-    /// evaluator's, `ev-given-reps`), each empty for none.
-    pub fn with_reps(&mut self, rt: &Runtime, reps: Value) {
-        let reps = rt.heap.list_to_vec(reps).unwrap_or_default();
-        if reps.len() != self.names.len() {
-            return;
-        }
-        self.as_reps = reps.iter().map(|b| bytes_of(rt, *b).and_then(|b| fixpt_reps::binary::decode(&b, fixpt_reps::heap::validate_all()).ok())).collect();
     }
 
     /// `rep` with each hole the evidence's variables name filled with its
     /// rep (`fixpt_reps::fill`); none where a hole is left, or a piece of
     /// evidence it names has no rep.
     pub fn filled(&self, rep: &fixpt_reps::Rep) -> Option<fixpt_reps::Rep> {
+        if rep.holes.is_empty() {
+            return Some(rep.clone());
+        }
         let mut given = Vec::new();
-        for (n, r) in self.names.iter().zip(&self.as_reps) {
+        for (n, r) in self.names.iter().zip(&self.reps) {
             if rep.holes.contains(n) {
                 given.push((n.as_str(), r.as_ref()?));
             }
@@ -81,57 +70,20 @@ impl Given {
         let filled = fixpt_reps::fill::fill(rep, &given, "var").ok()?;
         filled.holes.is_empty().then_some(filled)
     }
-
-    /// `text` with each name it holds, a whole token, replaced by its
-    /// evidence.
-    pub fn substituted(&self, text: &str) -> String {
-        if self.names.is_empty() {
-            return text.to_string();
-        }
-        let mut out = String::with_capacity(text.len());
-        let mut token = String::new();
-        let flush = |token: &mut String, out: &mut String| {
-            match self.names.iter().position(|n| n == token) {
-                Some(i) => out.push_str(&self.reps[i]),
-                None => out.push_str(token),
-            }
-            token.clear();
-        };
-        for c in text.chars() {
-            if c == '(' || c == ')' || c.is_whitespace() {
-                flush(&mut token, &mut out);
-                out.push(c);
-            } else {
-                token.push(c);
-            }
-        }
-        flush(&mut token, &mut out);
-        out
-    }
 }
-
-/// What a fresh region's name begins with.
-const FRESH: &str = "%region-";
 
 static MADE: AtomicU64 = AtomicU64::new(0);
 
-/// A region of its own, by a name no other has.
-pub fn fresh_region() -> String {
-    format!("{FRESH}{}", MADE.fetch_add(1, Ordering::Relaxed))
-}
-
-/// The fresh regions `texts` name, each once, in order: what a staged check
-/// binds.
-pub fn regions_in(texts: &[&str]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for t in texts {
-        for token in t.split(|c: char| c == '(' || c == ')' || c.is_whitespace()) {
-            if token.starts_with(FRESH) && !out.iter().any(|o| o == token) {
-                out.push(token.to_string());
-            }
-        }
-    }
-    out
+/// A region of its own: the evidence of a region constant by a name no
+/// other has (`%region-N`; a program's begin `@`), as both checkers' reps
+/// write one (`rconst`).
+pub fn fresh_region() -> fixpt_reps::Rep {
+    let name = format!("%region-{}", MADE.fetch_add(1, Ordering::Relaxed));
+    let mut b = fixpt_reps::Builder::new();
+    let s = b.name(&name);
+    let r = b.add("rconst", &[], vec![fixpt_reps::Arg::Sym(s)]);
+    let root = b.add(fixpt_reps::fill::EVIDENCE, &[], vec![fixpt_reps::Arg::Node(r)]);
+    b.finish(root).expect("a region's evidence").rep
 }
 
 /// A bytevector's bytes; none if it is empty or none.
@@ -142,92 +94,43 @@ fn bytes_of(rt: &Runtime, b: Value) -> Option<Vec<u8>> {
     Some((0..rt.heap.bytevector_len(b)).map(|i| rt.heap.bytevector_ref(b, i)).collect())
 }
 
-/// What the evaluator written in FX-26 makes of a `reify-…`'s rep
-/// (`%fx26-reify-rep`): `rep`, the rep the checker noted (or `#f`), its
-/// holes filled by the evidence `given` (their reps' binary forms) of the
-/// variables `names`, in its binary form; if `fresh` says so, a region of
-/// its own's, by the name its text, `text`, gives it; empty if none.
-pub fn reified_rep(rt: &mut Runtime, fresh: Value, rep: Value, names: Value, given: Value, text: Value) -> Value {
-    let fresh = rt.heap.string_to_rust(fresh) == "fresh";
-    let made = if fresh {
-        fresh_region_rep(&rt.heap.string_to_rust(text))
-    } else {
-        let names = rt.heap.string_to_rust(names);
-        let mut g = Given { names: names.split_whitespace().map(str::to_string).collect(), reps: Vec::new(), as_reps: Vec::new() };
-        g.reps = vec![String::new(); g.names.len()];
-        g.with_reps(rt, given);
-        let r = fixpt_reps::heap::from_heap(&rt.heap, rep, true).ok();
-        r.and_then(|r| if r.holes.is_empty() { Some(r) } else { g.filled(&r) })
-    };
-    let bytes = made.map(|r| fixpt_reps::binary::encode(&r)).unwrap_or_default();
-    rt.heap.make_bytevector(&bytes)
+/// What a `reify-…` makes of `rep`, the rep the checker noted of what it
+/// is of (or none), its holes filled by the evidence `given`; a region of
+/// its own's, if `fresh`; none if neither.
+fn reify(rep: Option<fixpt_reps::Rep>, given: &Given, fresh: bool) -> Option<fixpt_reps::Rep> {
+    if fresh {
+        return Some(fresh_region());
+    }
+    given.filled(&rep?)
 }
 
 /// What the evaluator written in FX-26 makes of a `reify-…`
-/// (`%fx26-reify-text`): `text`, given the evidence `names` and `given`;
-/// or, `fresh` saying `fresh`, a region of its own.
-pub fn reified_text(rt: &mut Runtime, fresh: Value, text: Value, names: Value, given: Value) -> Value {
-    let shown = if rt.heap.string_to_rust(fresh) == "fresh" {
-        fresh_region()
-    } else {
-        Given::of(rt, names, given).substituted(&rt.heap.string_to_rust(text))
-    };
-    rt.heap.make_string(&shown)
+/// (`%fx26-reify-rep`): `rep`, the rep the checker noted (or `#f`), its
+/// holes filled by the evidence `given` (their reps' binary forms) of the
+/// variables `names`, in its binary form; a region of its own's if `fresh`
+/// says so; empty if none.
+pub fn reified_rep(rt: &mut Runtime, fresh: Value, rep: Value, names: Value, given: Value) -> Value {
+    let fresh = rt.heap.string_to_rust(fresh) == "fresh";
+    let given = Given::of_bytes(rt, names, given);
+    let rep = fixpt_reps::heap::from_heap(&rt.heap, rep, true).ok();
+    let bytes = reify(rep, &given, fresh).map(|r| fixpt_reps::binary::encode(&r)).unwrap_or_default();
+    rt.heap.make_bytevector(&bytes)
 }
 
 /// What a `reify-…` makes (`%fx26-reify-effect` and the others): of
-/// `staged`, the product the compilers make of its operand (the module's
-/// type, the effect and the result type, the operand, which is the
-/// evidence given it, and the names it is evidence of),
-/// the text of what follows its `field` (1, the effect, or a region's; 2,
-/// the type), the evidence
-/// given it in place; a region's, that, or, where the module's type's
-/// field says `fresh` (a region a variable names, with no evidence), a
-/// fresh one.
-/// And its rep too, where the checker noted one and the evidence given has
-/// them: [`evidence`].
-pub fn reified(rt: &mut Runtime, staged: Value, field: usize) -> Value {
-    let product = rt.heap.is_product(staged) && rt.heap.bloblet_len(staged) == 6;
-    let text = |rt: &Runtime, i: usize| if product { rt.heap.string_to_rust(rt.heap.product_field(staged, i)) } else { String::new() };
-    if text(rt, 1) == "fresh" {
-        // A region of its own: by its rep, a region constant by a name no
-        // other has, opaque and distinct from every other, as the text
-        // path's `plambda` binds it.
-        let name = fresh_region();
-        let rep = fresh_region_rep(&name);
-        return evidence(rt, &name, rep.as_ref());
+/// `staged`, the product the compilers make of its operand (`fresh` or "",
+/// the operand, which is the evidence given it, the names it is evidence
+/// of, and the rep of what it is of), the rep of what it is of, in the
+/// heap, its holes filled by that evidence; or `#f`.
+pub fn reified(rt: &mut Runtime, staged: Value) -> Value {
+    if !(rt.heap.is_product(staged) && rt.heap.bloblet_len(staged) == 4) {
+        return Value::FALSE;
     }
-    let given = if product { Given::of(rt, rt.heap.product_field(staged, 5), rt.heap.product_field(staged, 4)) } else { Given::default() };
-    let shown = given.substituted(&text(rt, field + 1));
-    let rep = if product { fixpt_reps::heap::from_heap(&rt.heap, rt.heap.product_field(staged, 6), true).ok() } else { None };
-    let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
-    evidence(rt, &shown, rep.as_ref())
-}
-
-/// The rep of a region of its own named `name` (`fresh_region`): a region
-/// constant of that name, as both checkers' reps write one (`rconst`); its
-/// name no program's (which begin `@`), printed as the text path's region
-/// variable is.
-fn fresh_region_rep(name: &str) -> Option<fixpt_reps::Rep> {
-    let mut b = fixpt_reps::Builder::new();
-    let s = b.name(name);
-    let r = b.add("rconst", &[], vec![fixpt_reps::Arg::Sym(s)]);
-    let root = b.add(fixpt_reps::fill::EVIDENCE, &[], vec![fixpt_reps::Arg::Node(r)]);
-    b.finish(root).ok().map(|f| f.rep)
-}
-
-/// A piece of evidence, as the program holds it: its text, and its rep if
-/// it has one, a product of the two (`#f` for none).
-pub fn evidence(rt: &mut Runtime, text: &str, rep: Option<&fixpt_reps::Rep>) -> Value {
-    let base = rt.heap.push_root(Value::FALSE);
-    if let Some(r) = rep {
-        let v = fixpt_reps::heap::to_heap(&mut rt.heap, r);
-        rt.heap.set_root_at(base, v);
+    let fresh = rt.heap.string_to_rust(rt.heap.product_field(staged, 1)) == "fresh";
+    let given = Given::of(rt, rt.heap.product_field(staged, 3), rt.heap.product_field(staged, 2));
+    let rep = fixpt_reps::heap::from_heap(&rt.heap, rt.heap.product_field(staged, 4), true).ok();
+    match reify(rep, &given, fresh) {
+        Some(r) => fixpt_reps::heap::to_heap(&mut rt.heap, &r),
+        None => Value::FALSE,
     }
-    let text = rt.heap.make_string(text);
-    rt.heap.push_root(text);
-    let (rep, text) = (rt.heap.root_at(base), rt.heap.root_at(base + 1));
-    let v = rt.heap.make_frozen(fixpt_heap::layout::kind("product"), &[text, rep]);
-    rt.heap.pop_roots_to(base);
-    v
 }

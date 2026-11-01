@@ -611,16 +611,15 @@ fn keeps(c: &Checker, top: &Top) -> Vec<String> {
 }
 
 /// Evaluated, what `%fx26-session-eval-check` does with the session at
-/// `base`, the module's type, the effect, the result type and the code as
-/// text, and the names of the variables those name and their evidence
-/// (`a`): an expression, `(sum run texts)`, the forms to run, the
+/// `base`, the code as text, the names of the variables its type names,
+/// that type as a rep and the evidence's reps' binary forms (`a`): an
+/// expression, `(sum run texts)`, the forms to run, the
 /// last's value the procedure that evaluates it; a definition, pending;
 /// or the refusal.
 fn eval_check(rt: &mut Runtime, base: usize, a: &[Value]) -> Result<Value, String> {
-    let text = self::text(rt, a[3]);
-    let mut given = fixpt_runtime::evidence::Given::of(rt, a[4], a[5]);
-    given.with_reps(rt, a[7]);
-    let parts = Parts { rep: crate::stage::given_rep(rt, a[6], &given) };
+    let text = self::text(rt, a[0]);
+    let given = fixpt_runtime::evidence::Given::of_bytes(rt, a[1], a[3]);
+    let parts = Parts { rep: crate::stage::given_rep(rt, a[2], &given) };
     if !has_step_reps(&parts) {
         return Ok(crate::stage::no_rep(rt));
     }

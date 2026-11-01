@@ -4459,3 +4459,13 @@ everything as before and refuses a stamp that differs. s7st's warm start
 text (abbreviations are text's sharing); and entering a definition
 unchecked would have saved 10 ms more, so it is checked.
 
+
+## 2026-11-01: heap types, step 6: the text paths removed
+
+What a `stage` or a session's step is checked against, and a `reify-…`'s
+evidence, is a rep alone, on every machine: no wrapping writes the types
+out, no evidence or staged fact carries their text, and a session's steps
+name their types for the step. The evaluator's evidence stages, 20 of
+them, 128 to 47 ms. Left as text: the Rust checker's session's own
+definitions' types, and a module `.fasl`'s type lines, which cross to
+nothing else.

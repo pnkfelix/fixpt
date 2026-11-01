@@ -5213,17 +5213,13 @@ impl BinderEnv {
 }
 
 /// What a `stage`'s code is checked against (`Facts::staged`), as the
-/// checker that runs then reads it: the module's type, the effect and the
-/// result type, printed whole; and the names, as printed, of the variables
-/// whose evidence it is given, in order (`docs/research/eval.md`,
-/// "Evidence"). A `reify-effect`'s is its effect, a `reify-type`'s its type
-/// (as `r`), a `reify-region`'s its region (as `e`), `m` saying `fresh` for
-/// a region a variable names, of no evidence.
+/// checker that runs then reads it: the names, as printed, of the
+/// variables whose evidence it is given, in order (`docs/research/eval.md`,
+/// "Evidence"), and its rep. A `reify-…`'s is of what it makes evidence of,
+/// `fresh` for a region a variable names, of no evidence: one of its own.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Staged {
-    pub m: String,
-    pub e: String,
-    pub r: String,
+    pub fresh: bool,
     pub evidence: Vec<String>,
     /// And what the code is checked as, or what a `reify-…` makes evidence
     /// of, as a rep in its binary form (`docs/research/heap-types.md`,

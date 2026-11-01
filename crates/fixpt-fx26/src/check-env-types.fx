@@ -53,13 +53,13 @@
   (n-plain-fx)
   ;; A call: its callee's convention, which it is compiled in.
   (n-call k-conv)
-  ;; The text a `stage` checks (`docs/research/eval.md`): the module's type,
-  ;; the effect and the type it is checked at, printed, which `%fx26-stage`
-  ;; is given with it, for the checker that runs then; and the names of the
-  ;; variables whose evidence it is given (`(given …)`), in order. A
-  ;; `reify-…`'s: what it is of (`k-reified`). And for a `stage`, the
-  ;; type it is checked as, as a rep (`k-staged-rep`), or `#f`.
-  (n-staged string string string string wcell))
+  ;; What a `stage` is checked against (`docs/research/eval.md`), which
+  ;; `%fx26-stage` is given with its code, for the checker that runs then:
+  ;; `fresh` or "" (a `reify-region`'s of a region of its own); the names
+  ;; of the variables whose evidence it is given (`(given …)`), in order;
+  ;; and the type it is checked as, as a rep (`k-staged-rep`), or `#f`. A
+  ;; `reify-…`'s: what it is of, as evidence's rep (`k-reified`).
+  (n-staged string string wcell))
 ;; Each keyed by the expression (its identity, `k-at`).
 (define-type k-fact (productof (1 k-at) (2 k-noted)))
 (define-type k-facts (listof k-fact acyclic))
