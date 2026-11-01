@@ -4656,3 +4656,15 @@ against the program's 55: the program's words' register code is not the
 staged words'), as it did before; and Heist's note on closures of many
 free values, measured and noted (`docs/performance.md`: the step is at 8
 here, where the procedure making one has no register code).
+
+## 202. Types as heap data (the user's, 2026-11-01)
+
+Types cross every boundary between type stores (a `stage`'s checker, run-
+time evidence, a `.fasl`, a session) as printed text, read and checked
+again where they arrive: identity by name (§201 item 4), time (§201 item
+5, §200), size. The user's direction: types as heap data, an efficient
+binary form for serialization, a readable one for debugging. The design,
+for review before any code: `docs/research/heap-types.md` (reps: frozen
+node tables, binders by position, abstract and generative types as keyed
+constant objects; each checker's export and import; digests; the
+migration in six steps; four open questions).
