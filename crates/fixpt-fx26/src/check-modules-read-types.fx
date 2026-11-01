@@ -15,7 +15,7 @@
 (define-type kx (select check-types-types kx))
 (define-type check-modules-read-sig
   (moduleof (val k-push-binders
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-binders)
                        unit))
             (val k-in-loaded

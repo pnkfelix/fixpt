@@ -93,7 +93,7 @@ fn a_knot_through_a_kept_procedure_is_refused() {
 fn a_knot_through_a_procedure_a_global_holds_is_refused() {
     let held = "keeps a procedure that reads";
     let out = run(&mut session(), include_str!("programs/redefine/knot-held.fx"));
-    assert!(out[..3].iter().all(|o| !o.starts_with("error:")) && out[3].contains(&format!("`tbl` {held} `@globals`")), "{out:?}");
+    assert!(out[1].contains(&format!("`tbl` {held} `@globals`")), "{out:?}");
     let out = run(&mut session(), include_str!("programs/redefine/knot-held-precise.fx"));
     assert!(out[1].contains(&format!("`tbl` {held} `tbl`")), "{out:?}");
     let out = run(&mut session(), include_str!("programs/redefine/knot-held-module.fx"));
@@ -109,7 +109,7 @@ fn a_knot_through_an_effect_variable_is_refused() {
     let out = run(&mut session(), include_str!("programs/redefine/knot-effect-var.fx"));
     assert!(out[3].contains("calling `f` reads `f`, so `f` may reach itself through a global"), "{out:?}");
     let out = run(&mut session(), include_str!("programs/redefine/knot-effect-var-any.fx"));
-    assert!(out[4].contains("calling `g` may read any global, `g` too"), "{out:?}");
+    assert!(out[2].contains("calling `g` may read any global, `g` too"), "{out:?}");
 }
 
 /// Redefining a procedure over and over at the REPL, as reloading a file

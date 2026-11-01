@@ -88,7 +88,7 @@
         (begin (array-set! to i (array-ref from i))
                (x-copy-bools from to (+ i 1))))))
 
-(define x-here (subr (maxeff (read @globals) (read @k)) () int) (lambda () (get x-len)))
+(define x-here (subr (maxeff (read @globals) spin (read @k)) () int) (lambda () (get x-len)))
 
 ;; One byte, the array grown if it is full.
 (define x-byte (subr (maxeff x-assembles spin) (int) unit)
@@ -121,7 +121,7 @@
         (set x-nlabels (+ n 1))
         n))))
 ;; Whether the newest fixup is the jump just before here, to `l`.
-(define x-jump-to-here? (subr (maxeff (read @globals) (read @k)) (int) bool)
+(define x-jump-to-here? (subr (maxeff (read @globals) spin (read @k)) (int) bool)
   (lambda (l)
     (let ((fs (get x-fixups)) (at (get x-last-jump)))
       (and (>= at 0)
@@ -153,7 +153,7 @@
   (lambda (c l) (x-to l (x86-jcc c 0))))
 
 ;; Where label `l` is bound, in bytes from the code's start.
-(define x-label-at (subr (maxeff (read @globals) (read @k)) (int) int)
+(define x-label-at (subr (maxeff (read @globals) spin (read @k)) (int) int)
   (lambda (l) (array-ref (get x-labels) l)))
 
 ;; To the common trap with `code` and `detail`.
@@ -805,7 +805,7 @@
           (x-starts-at (- i 1) starts labels (cons start acc))))))
 
 ;; The cell after `i` where an instruction starts, or `n`.
-(define x-next-start (subr (maxeff (read @globals) (read @k)) (int int (arrayof bool @k)) int)
+(define x-next-start (subr (maxeff (read @globals) spin (read @k)) (int int (arrayof bool @k)) int)
   (lambda (i n starts) (if (or (>= i n) (array-ref starts i)) i (x-next-start (+ i 1) n starts))))
 
 (define x-cells (subr (maxeff x-assembles spin) (tword int int x-bools x-ints) unit)

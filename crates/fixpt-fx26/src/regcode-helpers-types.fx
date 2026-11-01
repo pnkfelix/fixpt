@@ -66,11 +66,11 @@
 (define-type regcode-helpers-sig
   (moduleof (val r-const-list? (subr pure (rconst) bool))
             (val r-op2imm
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (rgen int wcell)
                        unit))
             (val r-negate
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) unit))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k)) (rgen) unit))
             (val r-known-slow
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp rconst) rarg))
             (val r-known-arg
@@ -105,10 +105,10 @@
             (val r-args-2 (subr (alloc @k) (rarg rarg) rargs))
             (val r-args-3 (subr (alloc @k) (rarg rarg rarg) rargs))
             (val r-changed-args
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (exp int) rargs))
-            (val r-make-array-ops (subr (maxeff (alloc @k) (read @globals)) (exps) rargs))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k)) (exp int) rargs))
+            (val r-make-array-ops (subr (maxeff (alloc @k) (read @globals) spin) (exps) rargs))
             (val r-const-value
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (rgen wcell bool)
                        unit))
             (val r-bloblet
@@ -137,20 +137,21 @@
                        (rgen int rargs renv cenv bool r-primer)
                        unit))
             (val r-datum-operand
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (k-datums int int int) int))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k))
+                       (k-datums int int int) int))
             (val r-flat-tagcase
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
                                spin)
                        (rgen int exp exp-arms exp-let-bs renv cenv bool r-exper r-primer)
                        unit))
             (val r-unit
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) unit))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k)) (rgen) unit))
             (val r-add-imm
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (rgen int)
                        unit))
             (val r-index-field
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) unit))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k)) (rgen) unit))
             (val r-restore (subr (maxeff (read @k) (write @k)) (rgen int int) unit))
             (val r-var-value
                  (subr (maxeff (alloc @k)
@@ -176,11 +177,11 @@
             (val r-free-operand?
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (renv exp) bool))
             (val r-deeper?
-                 (subr (maxeff (read @globals) (read @k)) (maybe-exp exp exp) bool))
+                 (subr (maxeff (read @globals) spin (read @k)) (maybe-exp exp exp) bool))
             (val r-lifted-closure
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (int) wcell))
             (val r-unknowing
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (rgen) rgen))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k)) (rgen) rgen))
             (val r-spec-of
                  (subr (maxeff (alloc @k)
                                (goto @y)

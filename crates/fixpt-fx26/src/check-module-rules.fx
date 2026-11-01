@@ -187,7 +187,7 @@
           (product (1 bs) (2 gs))
           (let* ((rsaved (get k-recursive))
                  (noted (k-note-star-groups gs nil))
-                 (found (k-arrow-star-found synth bs))
+                 (found (k-found-spinning bs (k-arrow-star-found synth bs)))
                  (back (set k-recursive rsaved))
                  (rebound (k-rebind-all found)))
             (product (1 found) (2 (k-mod-groups es found found))))))))
@@ -466,7 +466,7 @@
 ;; values `%include-0`, … only.
 (define k-bucket-items? (->* (k-items) bool)
   (lambda (items)
-    (letrec ((all (subr (read @globals) (k-items) bool)
+    (letrec ((all (subr (maxeff (read @globals) spin) (k-items) bool)
                 (lambda (its)
                   (or (null? its)
                       (let ((s (symbol->string (car (extract (car its) 2)))))

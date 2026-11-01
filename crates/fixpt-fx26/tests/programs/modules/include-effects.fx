@@ -1,7 +1,7 @@
 ;; => 42
 ;; An `include`'s effects are in scope in the module's items, as its types
 ;; are (`TODO.md` §69): `touches` is `effects`'s, in `get`'s type.
-(define effects (module (define-effect touches (read @globals))
+(define effects (module (define-effect touches (maxeff (read @globals) spin))
                         (define-type n int)))
 (define m
   (module

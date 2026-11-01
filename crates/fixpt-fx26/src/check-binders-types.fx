@@ -21,14 +21,14 @@
                        (int)
                        k-bound-body))
             (val k-default-regions
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-binders k-solved k-ids)
                        unit))
             (val k-not-only-data
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int)
                        k-ids))
-            (val k-fin-region (subr (read @globals) (k-region) k-region))
+            (val k-fin-region (subr (maxeff (read @globals) spin) (k-region) k-region))
             (val k-finitized
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int)
@@ -36,7 +36,7 @@
             (val k-binding-depth
                  (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
             (val k-certified-has?
-                 (subr (maxeff (read @globals) (read @t)) (k-named symbol int) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-named symbol int) bool))
             (val k-sc-one-arg? (subr (read @t) (kxs) bool))
             (val k-regions-distinct?
                  (subr (maxeff (read @globals) (read @t) spin) (k-region k-region) bool))
@@ -71,11 +71,11 @@
                                spin)
                        (k-ids int int int)
                        int))
-            (val k-unknown? (subr (maxeff (read @globals) (read @t)) (k-binders int) bool))
+            (val k-unknown? (subr (maxeff (read @globals) spin (read @t)) (k-binders int) bool))
             (val k-open?
-                 (subr (maxeff (read @globals) (read @t)) (k-binders k-solved int) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-binders k-solved int) bool))
             (val k-solve
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-solved int k-desc)
                        unit))
             (val k-one-var? (subr pure (k-terms) bool))

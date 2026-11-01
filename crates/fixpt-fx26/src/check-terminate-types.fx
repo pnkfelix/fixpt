@@ -45,13 +45,13 @@
                        (k-letrec-bs)
                        string))
             (val k-note-why
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-letrec-bs string)
                        unit))
             (val k-fail-not-lambda
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -72,7 +72,7 @@
             (val k-letrec-lambdas
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))

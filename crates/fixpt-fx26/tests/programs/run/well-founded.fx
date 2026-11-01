@@ -19,8 +19,12 @@
   (letrec ((total (subr pure (tree) int)
              (lambda (t) (tagcase t (leaf n n) (node (a b) (+ (total a) (total b)))))))
     total))
-(define-rec (ev (subr (read @globals) (int) bool) (lambda (n) (if (<= n 0) #t (od (- n 1)))))
-            (od (subr (read @globals) (int) bool) (lambda (n) (if (<= n 0) #f (ev (- n 1))))))
+;; Mutual recursion too, in a local `letrec`: through globals it would
+;; read them, and so say `spin`.
+(define ev (subr pure (int) bool)
+  (letrec ((ev (subr pure (int) bool) (lambda (n) (if (<= n 0) #t (od (- n 1)))))
+           (od (subr pure (int) bool) (lambda (n) (if (<= n 0) #f (ev (- n 1))))))
+    ev))
 (define ack (subr pure (int int) int)
   (letrec ((ack (subr pure (int int) int)
              (lambda (m n)

@@ -19,7 +19,7 @@
 (define-type check-sub-env-sig
   (moduleof (val k-data-place (subr pure (k-region) k-region))
             (val k-data-var-place
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (int) k-region))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (int) k-region))
             (val k-is-data?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int)
@@ -32,20 +32,20 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-region bool)
                        bool))
-            (val k-base-below? (subr (read @globals) (symbol symbol) bool))
+            (val k-base-below? (subr (maxeff (read @globals) spin) (symbol symbol) bool))
             (val k-bool=? (subr pure (bool bool) bool))
             (val k-benv-var=?
-                 (subr (maxeff (read @globals) (read @t)) (int int k-benv k-benv) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (int int k-benv k-benv) bool))
             (val k-conv-sub?
-                 (subr (maxeff (read @globals) (read @t))
+                 (subr (maxeff (read @globals) spin (read @t))
                        (k-conv k-conv k-benv k-benv)
                        bool))
             (val k-conv-same?
-                 (subr (maxeff (read @globals) (read @t))
+                 (subr (maxeff (read @globals) spin (read @t))
                        (k-conv k-conv k-benv k-benv)
                        bool))
             (val k-benv-set
-                 (subr (maxeff (alloc @t) (read @globals) (read @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t))
                        (k-benv int int)
                        k-benv))
             (val k-benv-region=?
@@ -65,7 +65,7 @@
                        (k-benv k-eff)
                        k-eff))
             (val k-strail-push
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-strail int int k-benv k-benv)
                        unit))
             (val k-strail-drop
@@ -85,15 +85,15 @@
                        (int int)
                        unit))
             (val k-question-begin!
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) () unit))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) () unit))
             (val k-question-end!
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) () unit))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) () unit))
             (val k-restore
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-strail k-labels k-assumed k-label-list)
                        unit))
             (val k-label-of? (subr pure (k-label-entry int int int) bool))
             (val k-label
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-labels int int int)
                        int))))

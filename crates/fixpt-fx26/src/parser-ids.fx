@@ -22,7 +22,7 @@
 (define-type seen-ends (listof (productof (1 int) (2 int)) acyclic))
 ;; By where they start.
 (define-type seen (table int seen-ends rs))
-(define-effect counts (maxeff (read @globals) (read rs) (write rs) (alloc rs)))
+(define-effect counts (maxeff (read @globals) spin (read rs) (write rs) (alloc rs)))
 
 ;; How many at `es` end at `b`.
 (define seen-count (->* (seen-ends int) int)

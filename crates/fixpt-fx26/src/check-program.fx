@@ -130,26 +130,25 @@
     (let ((so (k-cat5 "calling `" name "` may read any global, `" name "` too, so `")))
       (k-cat3 so name k-must-spin))))
 ;; An error at `form` if calling the procedure `name`, of type `t`, may
-;; reach itself through a global: if it reads one of `ns`, or, if
-;; `redefining`, any global.
-(define k-not-reaching (->* (top string int k-names bool) unit)
-  (lambda (form name t ns redefining)
+;; reach itself through a global: if it reads one of `ns`, or any global.
+(define k-not-reaching (->* (top string int k-names) unit)
+  (lambda (form name t ns)
     (let* ((reads (k-latent-globals t))
            (m (k-first-read reads ns))
            (a (k-top-start form))
            (b (k-top-end form)))
       (cond ((not (null? m)) (k-fail (k-reads-itself name (symbol->string (car m))) a b))
-            ((and redefining (k-has-region-in? reads (r-globals))) (k-fail (k-reads-any name) a b))
+            ((k-has-region-in? reads (r-globals)) (k-fail (k-reads-any name) a b))
             (else #u)))))
 ;; Defining a global writes it: a procedure stored in global `f` whose calls
 ;; read `f` may reach itself through the global, which termination checking,
 ;; trusting every procedure of a type without `spin` to end, has not seen.
 ;; So it must say `spin`, as a procedure kept in a ref must, however it
 ;; reads `f`; one that stays `pure` binds itself with a local `letrec`. A
-;; group's members read each other so. Reading `@globals` may read `f` only
-;; once `f` is a global (`top.rs`, `no_reaching_itself`).
-(define k-no-reaching-itself (->* (top k-names bool) unit)
-  (lambda (form ns redefining)
+;; group's members read each other so. Reading `@globals` reads `f` too, at
+;; its first definition as at any other (`top.rs`, `no_reaching_itself`).
+(define k-no-reaching-itself (->* (top k-names) unit)
+  (lambda (form ns)
     (letrec ((each (subr (maxeff checks spin) (k-names) unit)
                (lambda (ms)
                  (if (null? ms)
@@ -157,7 +156,7 @@
                      (let* ((n (car ms)) (t (k-lookup-raw n)))
                        (if (k-type-spins? t)
                            (each (cdr ms))
-                           (begin (k-not-reaching form (symbol->string n) t ns redefining)
+                           (begin (k-not-reaching form (symbol->string n) t ns)
                                   (each (cdr ms))))))))
              ;; What a global that is no procedure holds (`no_reaching_itself`).
              (kept (subr (maxeff checks spin) (k-names) unit)
@@ -165,7 +164,7 @@
                  (if (null? ms)
                      #u
                      (let* ((n (car ms)) (t (k-lookup-raw n))
-                            (found (if (k-procedure? t) nil (k-kept-reading t ns redefining nil))))
+                            (found (if (k-procedure? t) nil (k-kept-reading t ns nil))))
                        (if (null? found)
                            (kept (cdr ms))
                            (k-fail (k-kept-message (symbol->string n) (extract (car found) 2)
@@ -190,51 +189,51 @@
 (define-type k-kept-found (listof (productof (1 int) (2 string)) acyclic))
 ;; A procedure a value of type `t` keeps, kept in a global (a product's field,
 ;; a list's element, a module's value, what a ref holds, …), whose calls read
-;; one of `ns`, or, if `any`, `@globals`, and that does not say `spin`: its
+;; one of `ns`, or `@globals`, and that does not say `spin`: its
 ;; type and what it reads; none or one. Not what a procedure takes or gives,
 ;; kept nowhere yet. `path`, the types walked to here (`kept_reading`).
 (define-rec
-  (k-kept-reading (->* (int k-names bool k-ids) k-kept-found)
-    (lambda (t ns any path)
+  (k-kept-reading (->* (int k-names k-ids) k-kept-found)
+    (lambda (t ns path)
       (let ((t (k-resolve t)))
         (if (k-has-id? path t)
             (the k-kept-found nil)
             (let ((path (the k-ids (cons t path)))
                   (one (lambda ((x int)) (the k-ids (cons x nil)))))
               (tagcase (k-get t)
-                (ty-subr (e ps r cv spc) (k-kept-read t e ns any))
-                (ty-poly (bs body) (k-kept-reading body ns any path))
-                (ty-ref (a r) (k-kept-reading a ns any path))
-                (ty-array (a z r) (k-kept-reading a ns any path))
-                (ty-icell (a r) (k-kept-reading a ns any path))
-                (ty-markkey (a r) (k-kept-reading a ns any path))
-                (ty-nlist (a z r) (k-kept-reading a ns any path))
-                (ty-pair (a b r nl) (k-kept-in (the k-ids (cons a (one b))) ns any path))
-                (ty-bloblet (fs z r) (k-kept-in fs ns any path))
-                (ty-product (ps) (k-kept-in (k-parts-types ps) ns any path))
-                (ty-sum (ps) (k-kept-in (k-parts-types ps) ns any path))
-                (ty-union (ms) (k-kept-in ms ns any path))
-                (ty-module (abs ds vs) (k-kept-in (k-parts-types vs) ns any path))
+                (ty-subr (e ps r cv spc) (k-kept-read t e ns))
+                (ty-poly (bs body) (k-kept-reading body ns path))
+                (ty-ref (a r) (k-kept-reading a ns path))
+                (ty-array (a z r) (k-kept-reading a ns path))
+                (ty-icell (a r) (k-kept-reading a ns path))
+                (ty-markkey (a r) (k-kept-reading a ns path))
+                (ty-nlist (a z r) (k-kept-reading a ns path))
+                (ty-pair (a b r nl) (k-kept-in (the k-ids (cons a (one b))) ns path))
+                (ty-bloblet (fs z r) (k-kept-in fs ns path))
+                (ty-product (ps) (k-kept-in (k-parts-types ps) ns path))
+                (ty-sum (ps) (k-kept-in (k-parts-types ps) ns path))
+                (ty-union (ms) (k-kept-in ms ns path))
+                (ty-module (abs ds vs) (k-kept-in (k-parts-types vs) ns path))
                 (ty-named (g ds)
                   (k-kept-in (the k-ids (cons (extract (k-gen-of g) 4) (k-desc-types ds)))
-                             ns any path))
-                (ty-app (f ds) (k-kept-in (k-desc-types ds) ns any path))
+                             ns path))
+                (ty-app (f ds) (k-kept-in (k-desc-types ds) ns path))
                 (else y (the k-kept-found nil))))))))
-  (k-kept-in (->* (k-ids k-names bool k-ids) k-kept-found)
-    (lambda (ts ns any path)
+  (k-kept-in (->* (k-ids k-names k-ids) k-kept-found)
+    (lambda (ts ns path)
       (if (null? ts)
           (the k-kept-found nil)
-          (let ((x (k-kept-reading (car ts) ns any path)))
-            (if (null? x) (k-kept-in (cdr ts) ns any path) x))))))
+          (let ((x (k-kept-reading (car ts) ns path)))
+            (if (null? x) (k-kept-in (cdr ts) ns path) x))))))
 ;; Procedure type `t`, of effect `e`, kept in a global: what of `ns` it reads,
-;; or `@globals`, if `any`, unless it says `spin`.
-(define k-kept-read (->* (int k-eff k-names bool) k-kept-found)
-  (lambda (t e ns any)
+;; or `@globals`, unless it says `spin`.
+(define k-kept-read (->* (int k-eff k-names) k-kept-found)
+  (lambda (t e ns)
     (if (k-has-spin? e)
         (the k-kept-found nil)
         (let* ((reads (k-atoms-globals e)) (m (k-first-read reads ns)))
           (cond ((not (null? m)) (list (product (1 t) (2 (symbol->string (car m))))))
-                ((and any (k-has-region-in? reads (r-globals)))
+                ((k-has-region-in? reads (r-globals))
                  (list (product (1 t) (2 "@globals"))))
                 (else (the k-kept-found nil)))))))
 ;; The types of parts `ps`, in order.
@@ -258,7 +257,7 @@
                (reset (set k-last-uses nil))
                (r (prompt k-tag
                     (let ((ls (k-top-lines (extract u 2))))
-                      (begin (k-no-reaching-itself (extract u 2) (extract u 1) #t) (k-ok ls)))
+                      (begin (k-no-reaching-itself (extract u 2) (extract u 1)) (k-ok ls)))
                     (lambda (r) r))))
           (tagcase r
             (k-ok (ls)
@@ -339,7 +338,7 @@
            (reset (set k-last-uses nil))
            (kept (if (get k-show-lines) (k-keep-atree!) #u))
            (lines (k-top-lines form))
-           (knot (k-no-reaching-itself form ns (not (null? olds))))
+           (knot (k-no-reaching-itself form ns))
            (assigns (and (not (null? olds)) (k-fits-old? olds)))
            (recorded (k-record form ns))
            (ran (k-note-run form assigns)))

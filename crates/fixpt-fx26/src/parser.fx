@@ -130,7 +130,7 @@
   (lambda (ps)
     (if (syn-nil? ps)
         nil
-        (letrec ((each (subr (maxeff (read @globals) parses) (syns-a) param-list)
+        (letrec ((each (subr (maxeff (read @globals) spin parses) (syns-a) param-list)
                    (lambda (xs)
                      (if (null? xs)
                          nil

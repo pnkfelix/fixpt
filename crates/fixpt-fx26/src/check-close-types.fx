@@ -19,13 +19,13 @@
                        (kx string int int k-eff int int)
                        k-te))
             (val k-note-effect
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (kx k-eff)
                        unit))
             (val k-frozen
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))

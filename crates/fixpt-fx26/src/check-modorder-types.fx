@@ -10,7 +10,7 @@
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Reading the checker's tables and making lists.
-(define-effect kallocs (maxeff (read @globals) (alloc @t)))
+(define-effect kallocs (maxeff (read @globals) spin (alloc @t)))
 ;; A module's typed lambda: its name, written type, value, the item it is
 ;; written in, whether that is a `define-rec`, and whether a `define*`.
 (define-type k-mlam (productof (1 symbol) (2 int) (3 kx) (4 int) (5 bool) (6 bool)))
@@ -45,17 +45,17 @@
 (import check-types-types (type k-item k-items))
 (define-type check-modorder-sig
   (moduleof (val k-names-onto
-                 (subr (maxeff (alloc @t) (read @globals)) (k-names k-names) k-names))
+                 (subr (maxeff (alloc @t) (read @globals) spin) (k-names k-names) k-names))
             (val k-mod-places
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-items) k-places))
             (val k-mod-names-in
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx k-places) k-names))
-            (val k-lambda-item? (subr (read @globals) (k-item) bool))
-            (val k-mod-lambdas (subr (maxeff (alloc @t) (read @globals)) (k-items) k-mlams))
+            (val k-lambda-item? (subr (maxeff (read @globals) spin) (k-item) bool))
+            (val k-mod-lambdas (subr (maxeff (alloc @t) (read @globals) spin) (k-items) k-mlams))
             (val k-mod-recs-lambdas
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -64,7 +64,7 @@
             (val k-mod-star-lambdas
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -83,7 +83,7 @@
                        (k-items k-mlams k-hazard-list)
                        unit))
             (val k-mod-edges
-                 (subr (maxeff (alloc @t) (read @globals) (read @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t))
                        (k-mlams k-mlams)
                        k-edges))
             (val k-mod-groups

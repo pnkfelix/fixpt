@@ -120,8 +120,9 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-ends k-letrec-bs)
                        k-ends))
-            (val k-group-end (subr (read @globals) (k-ends k-letrec-bs) string))
-            (val k-other-member (subr (read @globals) (k-letrec-bs symbol) k-letrec-bs))
+            (val k-group-end (subr (maxeff (read @globals) spin) (k-ends k-letrec-bs) string))
+            (val k-other-member (subr (maxeff (read @globals) spin)
+                                      (k-letrec-bs symbol) k-letrec-bs))
             (val k-run-does (subr (maxeff checks spin) (symbol k-eff kx) k-eff))
             (val k-stars-written
                  (subr (maxeff checks spin)
@@ -143,7 +144,7 @@
                                spin)
                        (k-parts k-ids int int)
                        unit))
-            (val k-comp-names (subr (maxeff (alloc @t) (read @globals)) (k-parts) k-names))
+            (val k-comp-names (subr (maxeff (alloc @t) (read @globals) spin) (k-parts) k-names))
             (val k-bind-parts
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-parts)

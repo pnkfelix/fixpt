@@ -17,7 +17,7 @@
 (define-type check-sc-graphs-sig
   (moduleof (val k-op-either? (subr pure (string string string) bool))
             (val k-sc-one? (subr (read @t) (kxs) bool))
-            (val k-sc-two? (subr (maxeff (read @globals) (read @t)) (kxs) bool))
+            (val k-sc-two? (subr (maxeff (read @globals) spin (read @t)) (kxs) bool))
             (val k-sc-members (ref k-names @t))
             (val k-sc-current (ref int @t))
             (val k-sc-calls (ref k-calls @t))
@@ -27,18 +27,18 @@
             (val k-sc-passed (ref k-passed @t))
             (val k-sc-invariant (ref k-guards @t))
             (val k-sc-guarded?
-                 (subr (maxeff (read @globals) (read @t)) (k-guards int int) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-guards int int) bool))
             (val k-sc-naturals (ref k-ids @t))
             (val k-sc-with
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (int k-ids k-guards)
                        k-guards))
             (val k-sc-add
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-graph int int bool)
                        k-graph))
             (val k-sc-bind
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (symbol k-trs k-tscope)
                        k-tscope))
             (val k-sc-walk

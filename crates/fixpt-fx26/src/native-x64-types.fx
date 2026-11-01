@@ -2,7 +2,7 @@
 ;;; x86_64 machine (`native-x64-layout.fx`, generated), and its own as its
 ;;; clients use it: a module file of no state (`TODO.md` §68).
 
-(define-effect x-assembles (maxeff (read @globals) (read @k) (write @k) (alloc @k)))
+(define-effect x-assembles (maxeff (read @globals) spin (read @k) (write @k) (alloc @k)))
 ;; Writing the assembler's arrays, and looping; reading them to make lists.
 (define-effect x-writes (maxeff (read @globals) (read @k) (write @k) spin))
 (define-effect x-lists (maxeff (read @globals) (read @k) (alloc @k) spin))
@@ -114,7 +114,7 @@
             (val x-sar int)
             (val x-trap-common (ref int @k))
             (val x-exit-common (ref int @k))
-            (val x-here (subr (maxeff (read @globals) (read @k)) () int))
+            (val x-here (subr (maxeff (read @globals) spin (read @k)) () int))
             (val x-e (subr (maxeff x-assembles spin) (x-out) unit))
             (val x-label (subr (maxeff x-assembles spin) () int))
             (val x-bind (subr (maxeff x-assembles spin) (int) unit))
@@ -123,7 +123,7 @@
             (val x-jcc (subr (maxeff x-assembles spin) (int int) unit))
             (val x-trap (subr (maxeff x-assembles spin) (int int) unit))
             (val x-trap-if (subr (maxeff x-assembles spin) (int int int) unit))
-            (val x-label-at (subr (maxeff (read @globals) (read @k)) (int) int))
+            (val x-label-at (subr (maxeff (read @globals) spin (read @k)) (int) int))
             (val x-flush-stubs (subr (maxeff x-assembles spin) () unit))
             (val x-finish (subr (maxeff x-assembles spin) () x-out))
             (val x-reset (subr (maxeff x-assembles spin) () unit))

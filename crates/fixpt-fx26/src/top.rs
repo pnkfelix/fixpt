@@ -137,11 +137,11 @@ fn every_field_placed(c: &Checker) {
 }
 
 /// The effect `->*` finds for `name`, from its body's `latent`: with `spin`
-/// if it reads `name` itself, as a procedure that may reach itself through
-/// a global must say (`no_reaching_itself`).
+/// if it reads `name` itself, or any global, as a procedure that may reach
+/// itself through a global must say (`no_reaching_itself`).
 fn arrow_star_spins(name: Sym, latent: Effect) -> Effect {
     use crate::ast::Atom;
-    match latent.contains(Atom::Read(Region::Global(name))) {
+    match latent.contains(Atom::Read(Region::Global(name))) || latent.contains(Atom::Read(Region::Globals)) {
         true => latent.union(&Effect::atom(Atom::Spin)),
         false => latent,
     }
@@ -326,10 +326,11 @@ impl Checker {
     /// calling itself, or something that calls it, or a procedure kept as
     /// it was, `(let ((h h)) …)`. One that stays `pure` binds itself with a
     /// local `letrec`. A `define-rec`'s members read each other so. Reading
-    /// `@globals` may read `f` only once `f` is a global: at its first
-    /// definition nothing defined before refers to it, and what later does
-    /// is a write checked in its turn (`docs/fx26.md`, "Redefinition").
-    fn no_reaching_itself(&self, top: &Top, redefining: bool, span: fixpt_read::Span) -> R<()> {
+    /// `@globals` reads `f` too, at its first definition as at any other
+    /// (the user's, 2026-10-31: an exemption for a first definition held
+    /// only while every write that could tie a knot to it was checked, and
+    /// one was not, `kept_reading`'s).
+    fn no_reaching_itself(&self, top: &Top, span: fixpt_read::Span) -> R<()> {
         let group: Vec<(Sym, TyId)> = match top {
             Top::Define { name, ty, .. } => vec![(*name, *ty)],
             Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, t, _)| (*n, *t)).collect(),
@@ -348,7 +349,7 @@ impl Checker {
                     format!("calling `{name}` reads `{m}`, so `{name}` may reach itself through a global: its type must say `spin` (or, to call itself directly, it binds itself with a local `letrec`)"),
                 ));
             }
-            if redefining && reads.contains(&Region::Globals) {
+            if reads.contains(&Region::Globals) {
                 return Err(FxError::at(
                     span,
                     format!("calling `{name}` may read any global, `{name}` too, so `{name}` may reach itself through a global: its type must say `spin`"),
@@ -356,14 +357,14 @@ impl Checker {
             }
         }
         // What a global holds, not being a procedure: a procedure kept in
-        // it (a product's field, say) that reads it is a knot tied by
-        // defining the global again to hold one that calls through it,
-        // which no read shows, as a procedure kept in a ref that reads the
-        // ref's region is (`no_knot`).
+        // it (a product's field, say) that reads it, or any global, is a
+        // knot tied by defining the global again to hold one that calls
+        // through it, which no read shows, as a procedure kept in a ref
+        // that reads the ref's region is (`no_knot`).
         let names: Vec<Sym> = group.iter().map(|(n, _)| *n).collect();
         for (n, t) in &group {
             if !self.is_procedure(*t) {
-                if let Some((p, read)) = self.kept_reading(*t, &names, redefining, &mut Default::default()) {
+                if let Some((p, read)) = self.kept_reading(*t, &names, &mut Default::default()) {
                     let name = self.interner.name(*n);
                     return Err(FxError::at(
                         span,
@@ -387,16 +388,16 @@ impl Checker {
 
     /// A procedure a value of type `t` keeps, kept in a global (a product's
     /// field, a list's element, a module's value, what a ref holds, …),
-    /// whose calls read one of `names`, or, if `any`, `@globals`, and that
+    /// whose calls read one of `names`, or `@globals`, and that
     /// does not say `spin`: its type and what it reads. Not what a procedure
     /// takes or gives, which is kept nowhere yet.
-    fn kept_reading(&self, t: TyId, names: &[Sym], any: bool, seen: &mut crate::ast::TySet) -> Option<(TyId, String)> {
+    fn kept_reading(&self, t: TyId, names: &[Sym], seen: &mut crate::ast::TySet) -> Option<(TyId, String)> {
         use crate::ast::{Atom, Ty};
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return None;
         }
-        let each = |ts: Vec<TyId>, seen: &mut crate::ast::TySet| ts.into_iter().find_map(|x| self.kept_reading(x, names, any, seen));
+        let each = |ts: Vec<TyId>, seen: &mut crate::ast::TySet| ts.into_iter().find_map(|x| self.kept_reading(x, names, seen));
         match self.arena.get(t).clone() {
             Ty::Subr { effect, .. } => {
                 if effect.contains(Atom::Spin) {
@@ -404,7 +405,7 @@ impl Checker {
                 }
                 // The first of `names` it reads, as `k-kept-read` finds it.
                 let read = names.iter().find(|g| effect.contains(Atom::Read(Region::Global(**g)))).map(|g| self.interner.name(*g).to_string());
-                read.or_else(|| (any && effect.contains(Atom::Read(Region::Globals))).then(|| "@globals".to_string())).map(|r| (t, r))
+                read.or_else(|| effect.contains(Atom::Read(Region::Globals)).then(|| "@globals".to_string())).map(|r| (t, r))
             }
             Ty::Poly { body, .. } => each(vec![body], seen),
             Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) | Ty::NList { elem: a, .. } => each(vec![a], seen),
@@ -782,14 +783,13 @@ impl Checker {
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
         match head {
             Some("define" | "define*" | "define-rec") => {
-                let redefining = self.defined_names(form).iter().any(|n| self.global_type(*n).is_some());
                 let mark = self.mark();
                 let top = match head {
                     Some("define") => self.sharing(items, |c| c.define(form.span, items, false)),
                     Some("define*") => self.sharing(items, |c| c.define(form.span, items, true)),
                     _ => self.define_rec(form.span, items),
                 }?;
-                if let Err(e) = self.no_reaching_itself(&top, redefining, form.span) {
+                if let Err(e) = self.no_reaching_itself(&top, form.span) {
                     self.rollback(mark);
                     return Err(e);
                 }
@@ -1144,7 +1144,7 @@ impl Checker {
             // With `->*`, the group at the types found.
             let mut settled = Vec::new();
             if marked.contains(&true) {
-                (bindings, settled) = self.arrow_star_group(&bindings, &marked, depth)?;
+                (bindings, settled) = self.arrow_star_group(&bindings, &marked, depth, true)?;
                 for (i, (_, t, _)) in bindings.iter().enumerate() {
                     self.env.set_ty(depth + i, *t);
                 }

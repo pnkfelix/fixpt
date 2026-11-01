@@ -28,7 +28,7 @@
         k-te))
 (define-type k-size (select check-types-types k-size))
 (define-type check-flat-sig
-  (moduleof (val k-flat-not-type (subr (read @globals) (string) string))
+  (moduleof (val k-flat-not-type (subr (maxeff (read @globals) spin) (string) string))
             (val k-flat-var-type? (subr (maxeff (read @globals) (read @t) spin) (int) bool))
             (val k-is-flat? (subr (maxeff (read @globals) (read @t) spin) (int) bool))
             (val k-parse-flat
@@ -41,7 +41,7 @@
                                spin)
                        (syn)
                        int))
-            (val k-flat-code (subr (read @globals) (symbol) int))
+            (val k-flat-code (subr (maxeff (read @globals) spin) (symbol) int))
             (val k-flat-layout
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-int-pair))
             (val k-flat-field

@@ -54,13 +54,13 @@
   (moduleof (val c-inline-limit int)
             (val c-inlines (ref c-inlinables @k))
             (val c-inlines-of
-                 (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables))
+                 (subr (maxeff (read @globals) spin (read @k)) (symbol) c-inlinables))
             (val c-note-inline!
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (c-inline)
                        unit))
             (val c-forget-inline!
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (symbol)
                        unit))
             (val c-unrolls
@@ -74,7 +74,7 @@
                       @k))
             (val c-specials (ref c-specializables @k))
             (val c-drop-special
-                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k))
                        (c-specializables symbol)
                        c-specializables))
             (val c-inline-room (subr (maxeff (read @globals) spin) (exp int) int))
@@ -89,9 +89,9 @@
                        (exp)
                        unit))
             (val c-unrolls-of
-                 (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables))
+                 (subr (maxeff (read @globals) spin (read @k)) (symbol) c-inlinables))
             (val c-special-limit int)
-            (val c-nth (subr (read @globals) (exps int) exp))
+            (val c-nth (subr (maxeff (read @globals) spin) (exps int) exp))
             (val c-plan-copy-order (ref (listof c-copy-at @k) @k))
             (val c-make-copies
                  (subr (maxeff (alloc @k)
@@ -115,6 +115,6 @@
                        c-spec-copies))
             (val c-sees? (subr pure (int int) bool))
             (val c-planned-call
-                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k))
                        (int int int)
                        (listof c-called @k)))))

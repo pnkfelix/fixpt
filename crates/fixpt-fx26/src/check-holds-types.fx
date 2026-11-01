@@ -39,9 +39,9 @@
             (val k-id=? (subr pure (int int) bool))
             (val k-ds-types
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-descs) k-ids))
-            (val k-new-seen (subr (maxeff (alloc @t) (read @globals)) () k-seen))
+            (val k-new-seen (subr (maxeff (alloc @t) (read @globals) spin) () k-seen))
             (val k-seen?
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-seen int)
                        bool))
             (val k-fun-kind
@@ -52,9 +52,9 @@
             (val k-frozen? (subr pure (k-region) bool))
             (val k-flip (subr pure (int) int))
             (val k-reg-is? (subr pure (k-region int) bool))
-            (val k-eff-var? (subr (maxeff (read @globals) (read @t)) (k-eff int) bool))
+            (val k-eff-var? (subr (maxeff (read @globals) spin (read @t)) (k-eff int) bool))
             (val k-eff-region-var?
-                 (subr (maxeff (read @globals) (read @t)) (k-eff int) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-eff int) bool))
             (val k-d-regions
                  (subr (maxeff (read @globals) (read @t) spin) (k-desc) k-regions))
             (val k-d-effects
@@ -63,6 +63,6 @@
                        (listof k-eff acyclic)))
             (val k-eff-app-var?
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff int) bool))
-            (val k-regions-name? (subr (read @globals) (k-regions int) bool))
+            (val k-regions-name? (subr (maxeff (read @globals) spin) (k-regions int) bool))
             (val k-effs-name?
-                 (subr (maxeff (read @globals) (read @t)) ((listof k-eff acyclic) int) bool))))
+                 (subr (maxeff (read @globals) spin (read @t)) ((listof k-eff acyclic) int) bool))))

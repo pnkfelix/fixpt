@@ -13,7 +13,7 @@
   (moduleof (val k-fail-at
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -72,7 +72,7 @@
             (val k-fail-arity
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -81,13 +81,13 @@
             (val k-fail-arg-count
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
                        (int int int int)
                        void))
-            (val k-argument-error (subr (read @globals) (int string string) string))
+            (val k-argument-error (subr (maxeff (read @globals) spin) (int string string) string))
             (val k-fail-not-known
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -139,9 +139,9 @@
                        (kx k-eff k-eff)
                        void))
             (val k-proj-count-error
-                 (subr (read @globals) (k-binders (listof k-desc acyclic)) string))
-            (val k-prompt-body-error (subr (read @globals) (string string) string))
-            (val k-with-not-module (subr (read @globals) (string string) string))
+                 (subr (maxeff (read @globals) spin) (k-binders (listof k-desc acyclic)) string))
+            (val k-prompt-body-error (subr (maxeff (read @globals) spin) (string string) string))
+            (val k-with-not-module (subr (maxeff (read @globals) spin) (string string) string))
             (val k-handler-gives
                  (subr (maxeff (write @t) (alloc @t) (read @globals) (read @t) spin)
                        (int int string)

@@ -12,7 +12,7 @@
 (define-type syns-a (select parser-types syns-a))
 (define-type check-proofs-sig
   (moduleof (val k-syms=?
-                 (subr (read @globals)
+                 (subr (maxeff (read @globals) spin)
                        ((listof symbol acyclic) (listof symbol acyclic))
                        bool))
             (val k-standard
@@ -30,7 +30,7 @@
                        (int)
                        unit))
             (val k-names-meet?
-                 (subr (maxeff (read @globals) (read @t)) (k-names k-names) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-names k-names) bool))
             (val k-check-proof
                  (subr (maxeff (alloc @t)
                                (goto @z)

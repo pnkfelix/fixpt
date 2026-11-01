@@ -536,7 +536,7 @@ impl Checker {
                 }
             }
             let all: Vec<(Sym, TyId, ExpId)> = lambdas.iter().map(|l| (l.0, l.1, l.2)).collect();
-            let found = self.arrow_star_group(&all, &marked, base);
+            let found = self.arrow_star_group(&all, &marked, base, true);
             self.recursive.truncate(rdepth);
             let (found, s) = found?;
             settled = s;

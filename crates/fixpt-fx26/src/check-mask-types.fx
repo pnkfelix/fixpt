@@ -14,4 +14,4 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (kx k-eff int)
                        k-eff))
-            (val k-frozen-atom? (subr (read @globals) (k-atom) bool))))
+            (val k-frozen-atom? (subr (maxeff (read @globals) spin) (k-atom) bool))))

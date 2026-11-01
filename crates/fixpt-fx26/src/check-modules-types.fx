@@ -74,7 +74,7 @@
                                spin)
                        (k-letrec-bs int int)
                        k-letrec-bs))
-            (val k-module-var? (subr (maxeff (read @globals) (read @t)) (int) bool))
+            (val k-module-var? (subr (maxeff (read @globals) spin (read @t)) (int) bool))
             (val k-first-mentioned
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-ids)
@@ -110,7 +110,7 @@
                        (int k-names int int)
                        int))
             (val k-binding-names
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-bindings) k-names))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-bindings) k-names))
             (val k-subst-each
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-parts k-map)

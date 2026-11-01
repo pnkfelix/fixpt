@@ -244,15 +244,15 @@ fn a_commit_runs_as_the_program_calls_it() {
     }
 }
 
-/// Knots through a session's own globals refused as at the top level: a
-/// procedure kept in what a global holds that reads it, and a procedure
-/// reading any global defined again (`Checker::no_reaching_itself`).
+/// Knots through a session's own globals refused as at the top level, at
+/// their first definitions: a procedure kept in what a global holds that
+/// reads any global, and a procedure that does (`Checker::no_reaching_itself`).
 #[test]
 fn a_session_refuses_knots_through_its_globals() {
-    const WANT: &str = "defined tbl\ndefined f\nrefused: `tbl` keeps a procedure that reads `@globals`, so it could reach itself \
-                        through a global: it must say `spin`, and it is a (subr (read @globals) () int)\ndefined g\ndefined h\n\
-                        refused: calling `g` may read any global, `g` too, so `g` may reach itself through a global: its type \
-                        must say `spin`\nrunning\n";
+    const WANT: &str = "refused: `tbl` keeps a procedure that reads `@globals`, so it could reach itself through a \
+                        global: it must say `spin`, and it is a (subr (read @globals) () int)\nrefused: calling `g` may \
+                        read any global, `g` too, so `g` may reach itself through a global: its type must say `spin`\n\
+                        defined g\nrunning\n";
     let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "session-knot.fx")))).collect();
     for (m, t) in runs {
         let (status, out, err) = t.join().expect("ran");

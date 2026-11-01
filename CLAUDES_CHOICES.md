@@ -3177,11 +3177,33 @@ of `TODO.md` §141, working on my own.
   representation and arguments, through `poly`s; not what a procedure
   takes or gives) that reads `(globals g)` says `spin`. A first definition
   whose type permits the knot is refused whatever its value, as a ref's is.
-- **`@globals` on a redefinition only**: as for a procedure global itself,
-  the first definition's exemption kept (`docs/fx26.md`, "Globals as a
-  region"); the user would drop it, a question left open (`TODO.md` §200).
+- **`@globals` too**: at first, on a redefinition only, as for a
+  procedure global itself; then the first definition's exemption dropped
+  (below).
 - **A walk of its own, not `knot_in`'s**: `knot_in` assumes no procedure
   is kept in globals' bindings and has no flag for a redefinition; the
   walk for globals (`kept_reading`, `k-kept-reading`) also enters a
   module's values, which `knot_in` does not.
+
+## The first definition's exemption dropped (2026-10-31, the user's)
+
+- **`@globals` says `spin` everywhere a global may reach itself**: a
+  procedure global, a procedure kept in what a global holds, at its first
+  definition as at any other. The exemption was sound only while every
+  write that could tie a knot to a new global was checked, and the
+  holder's write was not; with it gone, nothing depends on finding every
+  such write.
+- **`->*` finds it**: as it finds `spin` for a procedure that reads
+  itself, it finds `spin` for one reading `@globals`: a global's, a
+  top-level `define-rec`'s, a module's group (a global may hold the
+  module); not a local `letrec`'s, which no global reaches, and which is
+  how recursion keeps its claim to end.
+- **The front end said `spin` mechanically**: each effect it writes that
+  reads `@globals` (444, in 63 files, by a script that skips comments,
+  strings and characters), not rewritten to bind globals eagerly or
+  recurse through local `letrec`s (the user's suggestion), which would
+  keep some procedures' claims to end, a refactor for where one matters.
+- **Absorption unconditional**: reading `@globals` now says nothing less
+  than the single globals' reads would of reaching itself, so they are
+  dropped with or without `spin`.
 

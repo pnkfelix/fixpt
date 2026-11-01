@@ -17,9 +17,9 @@
 ;; it (`inspects`).
 (define-effect own-data (maxeff (alloc rs) (read rs) (write rs)))
 (define-effect marks (maxeff (write rm) (read rm)))
-(define-effect parsing (maxeff (read @globals) own-data marks))
+(define-effect parsing (maxeff (read @globals) spin own-data marks))
 (define-effect reads (maxeff parsing (goto re) (comefrom re)))
-(define-effect inspects (maxeff (read @globals) (read rs)))
+(define-effect inspects (maxeff (read @globals) spin (read rs)))
 ;; What most of its procedures do: that, perhaps without end.
 (define-effect reading (maxeff reads spin))
 

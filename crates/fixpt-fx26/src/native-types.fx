@@ -2,7 +2,7 @@
 ;;; module file of no state, which it loads, and so may its clients
 ;;; (`TODO.md` §68).
 
-(define-effect assembles (maxeff (read @globals) (read @k) (write @k) (alloc @k)))
+(define-effect assembles (maxeff (read @globals) spin (read @k) (write @k) (alloc @k)))
 ;; Writing the assembler's arrays, and looping; reading them to make lists.
 (define-effect n-writes (maxeff (read @globals) (read @k) (write @k) spin))
 (define-effect n-lists (maxeff (read @globals) (read @k) (alloc @k) spin))

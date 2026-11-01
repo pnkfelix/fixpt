@@ -54,7 +54,7 @@
 (define rg-resume-at (ref x-fix-list @k) (new nil))
 (define rg-live (ref x-ints @k) (new (make-array 1 0)))
 
-(define rg-fail (subr (maxeff (read @globals) (read @k) (write @k)) (string) unit)
+(define rg-fail (subr (maxeff (read @globals) spin (read @k) (write @k)) (string) unit)
   (lambda (m) (if (string=? (get rg-err) "") (set rg-err m) #u)))
 
 ;;; ------------------------------------------------------------ helpers
@@ -310,7 +310,7 @@
                (rg-l-note i (bitwise-ior 1 (rg-upto (rg-k rw i 0))) 0 fall jump))
               (else (rg-l-note i 0 0 fall jump)))
             (rg-l-info rw next n))))))
-(define rg-l-at (subr (maxeff (read @globals) (read @k)) (int) int)
+(define rg-l-at (subr (maxeff (read @globals) spin (read @k)) (int) int)
   (lambda (s) (if (< s 0) 0 (array-ref (get rg-live) s))))
 ;; One pass, the instructions last first: whether any changed.
 (define rg-l-pass (subr (maxeff x-assembles spin) (x-out bool) bool)

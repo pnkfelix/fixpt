@@ -36,7 +36,7 @@
             (val r-place-value
                  (subr (maxeff (alloc @k)
                                (goto @y)
-                               (read @globals)
+                               (read @globals) spin
                                (read @k)
                                (read @t)
                                (write @k))
@@ -45,7 +45,7 @@
             (val r-get
                  (subr (maxeff (alloc @k)
                                (goto @y)
-                               (read @globals)
+                               (read @globals) spin
                                (read @k)
                                (read @t)
                                (write @k))

@@ -10,9 +10,10 @@
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type kx (select check-types-types kx))
 (define-type check-facts-sig
-  (moduleof (val k-bool-lit? (subr (read @globals) (kx bool) bool))
+  (moduleof (val k-bool-lit? (subr (maxeff (read @globals) spin) (kx bool) bool))
             (val k-test-facts
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (kx)
                        k-branch-facts))
-            (val k-with-facts (subr (read @globals) (k-fact-list k-fact-list) k-fact-list))))
+            (val k-with-facts (subr (maxeff (read @globals) spin)
+                                    (k-fact-list k-fact-list) k-fact-list))))

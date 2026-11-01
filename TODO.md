@@ -4606,12 +4606,10 @@ printer: s7st's types are what its source says (`s7-serve`'s 300 names
 gone), its `.fasl`s 6.7 to 6.5 MB, its warm start 0.40 s to 0.37 s. Only
 under `spin`: `->*` finds that a procedure reaches itself by the single
 global it reads (`arrow_star_spins`); `define*`'s termination check sees a
-call of itself whatever the effect. Without `spin`, a first definition
-reading `@globals` keeps them; a redefinition that reads `@globals`
-must say `spin` already (`no_reaching_itself`). Left, for the user: the
-first definition's exemption (`docs/fx26.md`, "Globals as a region"),
-which the user would drop, making `@globals` in any global's latent
-effect say `spin`, and absorption unconditional.
+call of itself whatever the effect. Then (the user's) the first
+definition's exemption dropped, so that reading `@globals` says `spin`
+wherever a global may reach itself, and absorption unconditional
+(`CLAUDES_CHOICES.md`, "The first definition's exemption dropped").
 
 Walks of a whole environment found besides (2026-10-31), for later:
 `uses_of`, `users_of` and `direct_users_of` walk the definitions (an

@@ -65,7 +65,7 @@
                        (rgen c-waits int mod-items r-scopes)
                        r-scopes))
             (val r-with-places
-                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k))
                        (int int int)
                        (listof k-ids @k)))
             (val r-with-fields

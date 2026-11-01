@@ -50,5 +50,5 @@
             (val k-inbox-index int)
             (val k-process-index int)
             (val k-untransmissible (subr (maxeff kstate spin) (int k-ids k-ids) string))
-            (val k-crossing-atom? (subr (read @globals) (k-atom) bool))
+            (val k-crossing-atom? (subr (maxeff (read @globals) spin) (k-atom) bool))
             (val k-check-sendable (subr (maxeff checks spin) (int k-map int int) unit))))

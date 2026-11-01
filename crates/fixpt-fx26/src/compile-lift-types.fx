@@ -49,7 +49,7 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-recs (listof int @k) cenv)
                        cenv))
-            (val c-lift-added (subr (maxeff (read @globals) (read @k)) (int) syms))
+            (val c-lift-added (subr (maxeff (read @globals) spin (read @k)) (int) syms))
             (val c-lambda-captured
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-params exp cenv)
@@ -83,12 +83,12 @@
                        (c-recs c-added int)
                        (listof int @k)))
             (val c-param-env
-                 (subr (maxeff (alloc @k) (read @globals)) (c-params int cenv) cenv))
+                 (subr (maxeff (alloc @k) (read @globals) spin) (c-params int cenv) cenv))
             (val c-inner-env
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (syms cenv cenv int)
                        cenv))
-            (val c-lift-of (subr (maxeff (read @globals) (read @k)) (int) c-lift))
+            (val c-lift-of (subr (maxeff (read @globals) spin (read @k)) (int) c-lift))
             (val c-planned-lift
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (int int int)
@@ -106,7 +106,7 @@
             (val c-standard-on
                  (subr (maxeff (alloc @k)
                                (goto @y)
-                               (read @globals)
+                               (read @globals) spin
                                (read @k)
                                (read @t)
                                (write @k))
@@ -122,11 +122,11 @@
                                spin)
                        (string code)
                        unit))
-            (val c-count-names (subr (read @globals) (names) int))
+            (val c-count-names (subr (maxeff (read @globals) spin) (names) int))
             (val c-members
                  (subr (maxeff (alloc @k)
                                (goto @y)
-                               (read @globals)
+                               (read @globals) spin
                                (read @k)
                                (read @t)
                                (write @k))

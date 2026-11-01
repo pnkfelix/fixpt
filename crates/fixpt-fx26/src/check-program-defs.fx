@@ -76,7 +76,7 @@
       (include check-print) (include check-letrec) (include check-expect) (include check-modules)
       (include check-modules-read) (include check-subst) (include check-synth)
       (include check-module-rules) (include check-subtype) (include parser))
-(import check-effects k-atom-region k-one k-insert)
+(import check-effects k-atom-region k-one k-insert k-contains?)
 (import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs)
 (import check-read k-items k-name-of k-sfail k-symbol-head)
 (define k-names-onto (with check-modorder k-names-onto))
@@ -348,7 +348,7 @@
 ;; so and noted again.
 (define k-rec-found (->* (k-letrec-bs k-named) k-letrec-bs)
   (lambda (g rsaved)
-    (let ((found (k-arrow-star-found k-synth-lambda-as g)))
+    (let ((found (k-found-spinning g (k-arrow-star-found k-synth-lambda-as g))))
       (begin (k-rebind-each found) (set k-recursive rsaved) (k-note-rec-ending found) found))))
 ;; `(define-rec (name type lambda) …)`: every name in scope first, then each
 ;; lambda checked against its type. A line for each.
@@ -394,7 +394,7 @@
 ;; Whether `n` is a global a definition made.
 (define k-defined? (->* (symbol) bool)
   (lambda (n)
-    (letrec ((go (subr (maxeff (read @globals) (read @t)) (k-def-list) bool)
+    (letrec ((go (subr (maxeff (read @globals) spin (read @t)) (k-def-list) bool)
                (lambda (ds)
                  (and (not (null? ds)) (or (k-has-name? (extract (car ds) 1) n) (go (cdr ds)))))))
       (go (get k-defs)))))
@@ -443,7 +443,7 @@
 ;; Names as a message shows them: `a`, `b`.
 (define k-shown (->* (k-names) string)
   (lambda (ns)
-    (letrec ((go (subr (maxeff (read @globals) (alloc @t)) (k-names) k-texts)
+    (letrec ((go (subr (maxeff (read @globals) spin (alloc @t)) (k-names) k-texts)
                (lambda (xs)
                  (if (null? xs)
                      nil
@@ -509,7 +509,10 @@
 ;; reads `name` itself, as a procedure that may reach itself through a
 ;; global must say (`k-no-reaching-itself`).
 (define k-arrow-star-spins (->* (symbol k-eff) k-eff)
-  (lambda (name e) (if (k-reads-one-of? (cons name nil) e) (k-insert (a-spin) e) e)))
+  (lambda (name e)
+    (if (or (k-reads-one-of? (cons name nil) e) (k-contains? e (a-read (r-globals))))
+        (k-insert (a-spin) e)
+        e)))
 ;; `(define name type init)`, or, if `star` is not empty,
 ;; `(define* name type init)`: its line.
 (define k-define-typed (->* (symbol syn syns-a exp) k-out)

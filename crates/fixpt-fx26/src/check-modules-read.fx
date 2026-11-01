@@ -111,7 +111,7 @@
 ;; would depend on the path that ran it. A value may have a type's name.
 (define k-defined-twice (->* (mod-items k-names k-names) k-names)
   (lambda (items seen vseen)
-    (letrec ((first (subr (maxeff (read @globals) (read @t)) (k-names k-names) k-names)
+    (letrec ((first (subr (maxeff (read @globals) spin (read @t)) (k-names k-names) k-names)
                (lambda (ns seen)
                  (cond ((null? ns) nil)
                        ((k-has-name? seen (car ns)) (the k-names (list (car ns))))

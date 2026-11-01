@@ -81,7 +81,7 @@
 ;; The definitions not yet placed, in order, now placed: none left.
 (define shared-taken (->* () top-list)
   (lambda ()
-    (letrec ((onto (subr (read @globals) (top-list top-list) top-list)
+    (letrec ((onto (subr (maxeff (read @globals) spin) (top-list top-list) top-list)
                 (lambda (xs ys) (if (null? xs) ys (onto (cdr xs) (cons (car xs) ys))))))
       (let ((ts (get shared-pending))) (begin (set shared-pending nil) (onto ts nil))))))
 (define shared-key? (->* (string (listof string acyclic)) bool)

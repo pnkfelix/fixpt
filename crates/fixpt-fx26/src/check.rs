@@ -1745,7 +1745,7 @@ impl Checker {
         let mut settled = Vec::new();
         let (bindings, infer) = match marked.contains(&true) {
             false => (bindings, infer),
-            true => match self.arrow_star_group(bindings, marked, depth) {
+            true => match self.arrow_star_group(bindings, marked, depth, false) {
                 Ok((f, s)) => {
                     for (i, (_, t, _)) in f.iter().enumerate() {
                         self.env.set_ty(depth + i, *t);
@@ -1860,6 +1860,7 @@ impl Checker {
         bindings: &[(Sym, TyId, ExpId)],
         marked: &[bool],
         base: usize,
+        globals: bool,
     ) -> R<(Vec<(Sym, TyId, ExpId)>, Vec<Option<TyId>>)> {
         if let Some((_, _, x)) = bindings.iter().zip(marked).find(|((_, _, x), m)| **m && !matches!(self.arena.exp_at(*x), Exp::Lambda { .. })).map(|(b, _)| b) {
             return Err(FxError::at(self.arena.span_of(*x), "`->*` finds a procedure's effect from its `lambda`: define it as one"));
@@ -1902,7 +1903,9 @@ impl Checker {
                         eff = eff.union(&own[l]);
                     }
                 }
-                if names.iter().any(|m| eff.contains(Atom::Read(Region::Global(*m)))) {
+                // A group of globals (or a module's, which a global may
+                // hold) that reads any global may reach itself (`no_reaching_itself`).
+                if names.iter().any(|m| eff.contains(Atom::Read(Region::Global(*m)))) || (globals && eff.contains(Atom::Read(Region::Globals))) {
                     eff = eff.union(&Effect::atom(Atom::Spin));
                 }
                 let (old, found) = (out[i].1, self.with_latent(out[i].1, &eff).expect("`->*` reads as a `subr`"));

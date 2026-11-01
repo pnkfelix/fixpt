@@ -16,7 +16,7 @@
 ;; Rehashing: moving the entries of an `a` into new buckets, as `b` says,
 ;; reading, writing and consing in the table's region.
 (define-type (rehashing (k type) (v type) (r region) (a type) (b type))
-  (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) a b) unit))
+  (subr (maxeff (read @globals) spin (read r) (write r) (alloc r)) ((table k v r) a b) unit))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -31,16 +31,17 @@
           (subr (alloc r) ((key-hash k) (key-same k)) (table k v r)))))
    (val table-ref
         (poly ((r region)) (poly ((k type) (v type))
-          (subr (maxeff (read @globals) (read r)) ((table k v r) k v) v))))
+          (subr (maxeff (read @globals) spin (read r)) ((table k v r) k v) v))))
    (val table-set!
         (poly ((r region)) (poly ((k type) (v type))
-          (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) k v) unit))))
+          (subr (maxeff (read @globals) spin (read r) (write r) (alloc r))
+                ((table k v r) k v) unit))))
    (val table-count
         (poly ((r region)) (poly ((k type) (v type)) (subr (read r) ((table k v r)) int))))
    (val table-has?
         (poly ((r region))
               (poly ((k type) (v type))
-                    (subr (maxeff (read @globals) (read r))
+                    (subr (maxeff (read @globals) spin (read r))
                           ((bloblet (fields (subr pure (k) int)
                                             (subr pure (k k) bool)
                                             (arrayof (listof (pairof k v r) acyclic) r)

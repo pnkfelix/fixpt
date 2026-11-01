@@ -236,15 +236,13 @@
 (define k-union (->* (k-eff k-eff) k-eff)
   (lambda (x y) (k-absorbed (if (k-sorted? x) (k-merge x y) (k-union-each x y)))))
 ;; Effect `e`, its reads (writes) of single globals left out if it reads
-;; (writes) `@globals` and says `spin`: they say nothing more, within
-;; `@globals`, and with `spin` nothing of whether it reaches itself
+;; (writes) `@globals`: they say nothing more, within `@globals`, nor of
+;; whether it reaches itself, as reading `@globals` may
 ;; (`Effect::absorbed`, the Rust checker's; the user's, 2026-10-31).
 (define k-absorbed (->* (k-eff) k-eff)
   (lambda (e)
-    (let ((r (k-absorbs? e (a-read (r-globals)))) (w (k-absorbs? e (a-write (r-globals)))))
+    (let ((r (k-contains? e (a-read (r-globals)))) (w (k-contains? e (a-write (r-globals)))))
       (if (or r w) (k-absorb-drop e r w) e))))
-(define k-absorbs? (->* (k-eff k-atom) bool)
-  (lambda (e a) (and (k-contains? e (a-spin)) (k-contains? e a))))
 (define k-absorb-drop (->* (k-eff bool bool) k-eff)
   (lambda (e r w)
     (cond ((null? e) nil)

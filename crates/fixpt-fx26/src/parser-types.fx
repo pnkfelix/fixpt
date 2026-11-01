@@ -11,7 +11,7 @@
 
 ;; What a parse may do: read what was read and build a tree
 ;; (`tree-builds`), keep what the files it loads define, and give up.
-(define-effect tree-builds (maxeff (read @globals) (read rs) (alloc rs)))
+(define-effect tree-builds (maxeff (read @globals) spin (read rs) (alloc rs)))
 (define-effect parses (maxeff tree-builds (write rs) (goto rp)))
 
 (define-type syns-a (listof syn acyclic))

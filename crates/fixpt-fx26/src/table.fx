@@ -33,7 +33,7 @@
 ;;; The entry for `key` in a bucket, or nil.
 (define bucket-find
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r)) ((bucket k v r) k (key-same k)) (entry k v r))))
+    (subr (maxeff (read @globals) spin (read r)) ((bucket k v r) k (key-same k)) (entry k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((b (bucket k v r)) (key k) (same (key-same k)))
       (cond ((null? b) no-pair)
@@ -50,7 +50,7 @@
 ;;; The entry for `key` in `t`, or nil.
 (define table-entry
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r)) ((table k v r) k) (entry k v r))))
+    (subr (maxeff (read @globals) spin (read r)) ((table k v r) k) (entry k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k))
       (let* ((buckets (bloblet-ref t 2))
@@ -59,7 +59,7 @@
 
 (define table-ref
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r)) ((table k v r) k v) v)))
+    (subr (maxeff (read @globals) spin (read r)) ((table k v r) k v) v)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k) (default v))
       (let ((e (table-entry t key)))
@@ -67,7 +67,7 @@
 
 (define table-has?
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r)) ((table k v r) k) bool)))
+    (subr (maxeff (read @globals) spin (read r)) ((table k v r) k) bool)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k))
       (not (null? (table-entry t key)))))))
@@ -103,7 +103,7 @@
 ;;; Double the buckets once there are more entries than buckets.
 (define table-grow
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r)) unit)))
+    (subr (maxeff (read @globals) spin (read r) (write r) (alloc r)) ((table k v r)) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)))
       (let ((old (bloblet-ref t 2)))
@@ -115,7 +115,7 @@
 
 (define table-set!
   (poly ((r region)) (poly ((k type) (v type))
-    (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) k v) unit)))
+    (subr (maxeff (read @globals) spin (read r) (write r) (alloc r)) ((table k v r) k v) unit)))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((t (table k v r)) (key k) (value v))
       (let* ((buckets (bloblet-ref t 2))

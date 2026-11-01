@@ -41,12 +41,16 @@
 (define-type k-done (select check-synth-types k-done))
 (import check-types-types (type k-named k-names))
 (define-type check-letrec-sig
-  (moduleof (val k-with-latent
+  (moduleof (val k-found-spinning
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-letrec-bs k-letrec-bs)
+                       k-letrec-bs))
+            (val k-with-latent
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-eff)
                        int))
             (val k-globals-of
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-eff) k-eff))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-eff) k-eff))
             (val k-note-ending
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-letrec-bs string)
@@ -107,8 +111,10 @@
                                spin)
                        (k-lambda-synth k-letrec-bs)
                        k-letrec-bs))
-            (val k-reads-one-of? (subr (maxeff (read @globals) (read @t)) (k-names k-eff) bool))
-            (val k-any-arrow-star? (subr (maxeff (read @globals) (read @t)) (k-letrec-bs) bool))
+            (val k-reads-one-of? (subr (maxeff (read @globals) spin (read @t))
+                                       (k-names k-eff) bool))
+            (val k-any-arrow-star? (subr (maxeff (read @globals) spin (read @t))
+                                         (k-letrec-bs) bool))
             (val k-arrow-star-settle
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int kx) unit))
             (val k-settled-thunk (subr pure (kx int k-checker) k-thunk))

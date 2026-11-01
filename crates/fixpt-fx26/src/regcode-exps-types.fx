@@ -71,13 +71,13 @@
                        (wglobal)
                        unit))
             (val r-inline-named
-                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k))
                        ((listof c-inline acyclic) symbol int int)
                        (listof c-inline acyclic)))
             (val r-spec-at (ref rlocs @k))
             (val r-spec-start (ref int @k))
             (val r-keep-in-slot
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) int))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k)) (rgen) int))
             (val r-own-now (ref (listof rown @k) @k))
             (val r-assuming (ref bool @k))
             (val r-tail-calls-leave (ref bool @k))
@@ -123,22 +123,22 @@
                        (rgen wglobal int)
                        unit))
             (val r-invoke
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (rgen int bool int)
                        unit))
-            (val r-conv-of (subr (maxeff (read @globals) (read @k)) (exp) int))
+            (val r-conv-of (subr (maxeff (read @globals) spin (read @k)) (exp) int))
             (val r-keep-in-reg
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) int))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k)) (rgen) int))
             (val r-keep
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (rgen bool)
                        rloc))
             (val r-const-into
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (rgen wcell int)
                        unit))
             (val r-lexical-into
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (rgen int int)
                        unit))
             (val r-spec-param?
@@ -148,12 +148,12 @@
                        (renv exp exps)
                        bool))
             (val r-local-names
-                 (subr (maxeff (alloc @k) (read @globals)) (cenv exp-let-bs) cenv))
+                 (subr (maxeff (alloc @k) (read @globals) spin) (cenv exp-let-bs) cenv))
             (val r-let-inits
                  (subr (maxeff (alloc @k) (read @globals) spin) (exp-let-bs) exps))
             (val r-local-params
-                 (subr (maxeff (alloc @k) (read @globals)) (cenv exp-params) cenv))
-            (val r-drop-bools (subr (maxeff (read @globals) (read @k)) (bools int) bools))
+                 (subr (maxeff (alloc @k) (read @globals) spin) (cenv exp-params) cenv))
+            (val r-drop-bools (subr (maxeff (read @globals) spin (read @k)) (bools int) bools))
             (val r-own-self
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (renv exp exps)
@@ -162,7 +162,7 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
                        (exp-letrec-bs exp bool)
                        bools))
-            (val r-all? (subr (maxeff (read @globals) (read @k)) (bools) bool))
+            (val r-all? (subr (maxeff (read @globals) spin (read @k)) (bools) bool))
             (val r-join-of
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (renv exp) rlocs))
             (val c-length-locs (subr (maxeff (read @globals) (read @k) spin) (rlocs) int))
@@ -179,7 +179,7 @@
                        (rgen bools)
                        (listof int @k)))
             (val r-assume
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (wglobal)
                        bool))
             (val r-self-moves
@@ -194,9 +194,9 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (int int int renv exp exps)
                        (listof rspecial @k)))
-            (val r-nth-param (subr (read @globals) (exp-params int) symbol))
+            (val r-nth-param (subr (maxeff (read @globals) spin) (exp-params int) symbol))
             (val r-local-syms
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (cenv syms) cenv))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k)) (cenv syms) cenv))
             (val r-standard-value
                  (subr (maxeff (alloc @k)
                                (goto @y)
@@ -212,15 +212,15 @@
                        (int int int renv exp int)
                        (listof rinline @k)))
             (val r-slot-move
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (rgen int int)
                        unit))
             (val r-repeat
                  (subr (maxeff (alloc @k) (read @globals) spin) (bool int bools) bools))
             (val r-half-regs int)
             (val r-budget
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (bools int) bools))
-            (val r-local-loop (subr (maxeff (alloc @k) (read @globals)) (cenv symbol) cenv))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k)) (bools int) bools))
+            (val r-local-loop (subr (maxeff (alloc @k) (read @globals) spin) (cenv symbol) cenv))
             (val r-param-places
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
                        (rgen exp-params bool)

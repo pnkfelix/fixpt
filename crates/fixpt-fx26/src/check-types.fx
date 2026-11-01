@@ -68,17 +68,19 @@
 
 (define k-cat3 (subr pure (string string string) string)
   (lambda (a b c) (string-append a b c)))
-(define k-cat4 (subr (read @globals) (string string string string) string)
+(define k-cat4 (subr (maxeff (read @globals) spin) (string string string string) string)
   (lambda (a b c d) (string-append a (k-cat3 b c d))))
-(define k-cat5 (subr (read @globals) (string string string string string) string)
+(define k-cat5 (subr (maxeff (read @globals) spin) (string string string string string) string)
   (lambda (a b c d e) (string-append a (k-cat4 b c d e))))
-(define k-quote (subr (read @globals) (string) string) (lambda (n) (k-cat3 "`" n "`")))
+(define k-quote (subr (maxeff (read @globals) spin) (string) string)
+  (lambda (n) (k-cat3 "`" n "`")))
 
 ;; `xs` joined, `sep` between each two: their characters gathered, last to
 ;; first, into one list in an arena of its own, made a string once; so a long
 ;; list costs its length, not its length squared, as appending each to the
 ;; rest did (a module type's components, printed: `docs/performance.md`).
-(define k-join (subr (maxeff (read @globals) (read @t)) ((listof string acyclic) string) string)
+(define k-join (subr (maxeff (read @globals) spin (read @t))
+                     ((listof string acyclic) string) string)
   (lambda (xs sep)
     (letrena r
       (letrec ((chars (subr (alloc r) (string int (listof char r)) (listof char r))
@@ -106,14 +108,14 @@
 
 ;; Over finite lists, which every list here is: so they end.
 (define k-length
-  (poly ((t type)) (subr (read @globals) ((listof t acyclic)) int))
+  (poly ((t type)) (subr (maxeff (read @globals) spin) ((listof t acyclic)) int))
   (plambda ((t type))
     (lambda ((xs (listof t acyclic))) (if (null? xs) 0 (+ 1 (k-length (cdr xs)))))))
 (define k-nth
-  (poly ((t type)) (subr (read @globals) ((listof t acyclic) int) t))
+  (poly ((t type)) (subr (maxeff (read @globals) spin) ((listof t acyclic) int) t))
   (plambda ((t type))
     (lambda ((xs (listof t acyclic)) (i int)) (if (= i 0) (car xs) (k-nth (cdr xs) (- i 1))))))
-(define k-has-name? (subr (maxeff (read @globals) (read @t)) (k-names symbol) bool)
+(define k-has-name? (subr (maxeff (read @globals) spin (read @t)) (k-names symbol) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((symbol=? (car xs) s) #t) (else (k-has-name? (cdr xs) s)))))
 ;; The I/O effects' kinds (`TODO.md` §84), by number, as the Rust
 ;; checker's `IoKind`; a name's number, -1 if none.
@@ -145,13 +147,13 @@
     (cond ((null? ps) -1)
           ((symbol=? (extract (car ps) 1) l) i)
           (else (k-part-position (cdr ps) l (+ i 1))))))
-(define k-has-id? (subr (maxeff (read @globals) (read @t)) (k-ids int) bool)
+(define k-has-id? (subr (maxeff (read @globals) spin (read @t)) (k-ids int) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((= (car xs) s) #t) (else (k-has-id? (cdr xs) s)))))
 
 ;;; ------------------------------------------------------------ the arena
 
 ;; Whether `t` was read from `->*`.
-(define k-arrow-star-ty? (subr (maxeff (read @globals) (read @t)) (int) bool)
+(define k-arrow-star-ty? (subr (maxeff (read @globals) spin (read @t)) (int) bool)
   (lambda (t) (k-has-id? (get k-arrow-star-tys) t)))
 ;; `to`, made from `from` (its `select`s resolved, say), read from `->*` if
 ;; `from` was: then as a node of its own, since the mark is on its id.
@@ -183,11 +185,12 @@
            (set k-cyclic (make-table k-cyc-hash k-cyc-same?))
            (set k-applied (make-table k-ty-hash k-ty-same?))
            (set k-arena-gen (+ (get k-arena-gen) 1)))))
-(define k-applied-has? (subr (maxeff (read @globals) (read @t)) (k-ty) bool)
+(define k-applied-has? (subr (maxeff (read @globals) spin (read @t)) (k-ty) bool)
   (lambda (key) (table-has? (get k-applied) key)))
-(define k-applied-get (subr (maxeff (read @globals) (read @t)) (k-ty) k-desc)
+(define k-applied-get (subr (maxeff (read @globals) spin (read @t)) (k-ty) k-desc)
   (lambda (key) (table-ref (get k-applied) key (de nil))))
-(define k-applied-put! (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (k-ty k-desc)
+(define k-applied-put! (subr (maxeff (read @globals) spin (read @t) (write @t) (alloc @t))
+                             (k-ty k-desc)
                               unit)
   (lambda (key d) (table-set! (get k-applied) key d)))
 ;; `stringof`'s number among the generative types (`check::STRINGOF`).
@@ -635,7 +638,7 @@
 (define k-certified-lengths (ref (listof k-cert-len acyclic) @t) (new nil))
 (define k-arrows (ref (listof k-arrow-kind acyclic) @t) (new nil))
 (define k-narrows (ref int @t) (new 0))
-(define k-ids=? (subr (read @globals) (k-ids k-ids) bool)
+(define k-ids=? (subr (maxeff (read @globals) spin) (k-ids k-ids) bool)
   (lambda (xs ys)
     (cond ((null? xs) (null? ys))
           ((null? ys) #f)
@@ -673,7 +676,7 @@
 (define k-arrow-params (subr kreads (int) k-ids)
   (lambda (k) (let ((a (k-arrow-parts k))) (if (null? a) nil (car (car a))))))
 ;; Binders' kinds.
-(define k-binder-kinds (subr (read @globals) (k-binders) k-ids)
+(define k-binder-kinds (subr (maxeff (read @globals) spin) (k-binders) k-ids)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 2) (k-binder-kinds (cdr bs))))))
 ;; Each description variable of an arrow kind, or of kind `sendable`, with
 ;; its kind (`check-kinds.fx`).
@@ -693,11 +696,11 @@
                  #u)
              v))))
 ;; Which description variables are of kind `data`.
-(define k-data-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
+(define k-data-var? (subr (maxeff (read @globals) spin (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-datas) v)))
-(define k-place-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
+(define k-place-var? (subr (maxeff (read @globals) spin (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-places) v)))
-(define k-flat-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
+(define k-flat-var? (subr (maxeff (read @globals) spin (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-flats) v)))
 ;; Each description variable of an arrow kind, with its kind
 ;; (`k-new-dvar-of` notes them).
@@ -717,7 +720,7 @@
 ;; marked `distinct`, and `letregion`'s fresh regions (`Arena::set_distinct`;
 ;; `docs/research/region-anti-aliasing.md`, (C)).
 (define k-distincts (ref k-ids @t) (new nil))
-(define k-distinct-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
+(define k-distinct-var? (subr (maxeff (read @globals) spin (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-distincts) v)))
 (define k-set-distinct (subr kstate (int) unit)
   (lambda (v) (set k-distincts (cons v (get k-distincts)))))
@@ -733,10 +736,10 @@
 ;; The same, a table: each standard name's binding, newest (`k-bind-std`).
 (define k-std-table (ref (table symbol int @t) @t) (new (make-table symbol-hash symbol=?)))
 ;; The standard binding of `s`, -1 if none.
-(define k-std-type (subr (maxeff (read @globals) (read @t)) (symbol) int)
+(define k-std-type (subr (maxeff (read @globals) spin (read @t)) (symbol) int)
   (lambda (s) (table-ref (get k-std-table) s -1)))
 ;; Whether binding `t` of `s` is the standard one.
-(define k-std-binding? (subr (maxeff (read @globals) (read @t)) (symbol int) bool)
+(define k-std-binding? (subr (maxeff (read @globals) spin (read @t)) (symbol int) bool)
   (lambda (s t) (and (>= t 0) (= (k-std-type s) t))))
 (define k-gens (ref (listof k-gen acyclic) @t) (new nil))
 (define k-ngens (ref int @t) (new 0))
@@ -769,7 +772,7 @@
 (define k-gen-param? (subr kreads (int) bool)
   (lambda (v) (k-gens-bind? (get k-gens) v)))
 ;; The types among descriptions, and the regions.
-(define k-desc-types (subr (maxeff (read @globals) (alloc @t)) (k-descs) k-ids)
+(define k-desc-types (subr (maxeff (read @globals) spin (alloc @t)) (k-descs) k-ids)
   (lambda (ds)
     (if (null? ds)
         nil
@@ -778,7 +781,7 @@
 (define k-path-narrowed (ref k-path-facts @t) (new nil))
 ;; How many closures' bodies are being checked.
 (define k-closure-depth (ref int @t) (new 0))
-(define k-desc-regions (subr (maxeff (read @globals) (alloc @t)) (k-descs) k-regions)
+(define k-desc-regions (subr (maxeff (read @globals) spin (alloc @t)) (k-descs) k-regions)
   (lambda (ds)
     (if (null? ds)
         nil
@@ -811,5 +814,5 @@
   (lambda (v) (k-outer-in (get k-outers) v)))
 (define k-set-outer (subr kstate (int k-ids) unit)
   (lambda (v outer) (set k-outers (cons (cons v outer) (get k-outers)))))
-(define k-dvar-name (subr (maxeff (read @globals) (read @t)) (int) symbol)
+(define k-dvar-name (subr (maxeff (read @globals) spin (read @t)) (int) symbol)
   (lambda (v) (k-nth (get k-dvars) (- (- (get k-ndvars) 1) v))))))))

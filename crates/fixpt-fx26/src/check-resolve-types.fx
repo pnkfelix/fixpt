@@ -68,7 +68,7 @@
    (val k-reset
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) () unit))
    (val k-free-into
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (kx k-names k-names) k-names))
+        (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (kx k-names k-names) k-names))
    (val k-unfold
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (int k-descs)
@@ -87,26 +87,26 @@
         (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
               (int int)
               (listof k-callable acyclic)))
-   (val k-conversion-name (subr (read @globals) (string symbol) symbol))
-   (val k-free-vars (subr (maxeff (alloc @t) (read @globals) (read @t)) (kx) k-names))
+   (val k-conversion-name (subr (maxeff (read @globals) spin) (string symbol) symbol))
+   (val k-free-vars (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (kx) k-names))
    (val k-rename
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (k-binders k-binders)
               k-map))
    (val k-items-bound
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-items k-names) k-names))
+        (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-items k-names) k-names))
    (val k-regions-in
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) k-regions))
    (val k-ty-rank (subr (maxeff (read @globals) (read @t) spin) (int) int))
-   (val k-pair-seen? (subr (maxeff (read @globals) (read @t)) (k-pairs int int) bool))
-   (val k-same-kinds? (subr (maxeff (read @globals) (read @t)) (k-binders k-binders) bool))
+   (val k-pair-seen? (subr (maxeff (read @globals) spin (read @t)) (k-pairs int int) bool))
+   (val k-same-kinds? (subr (maxeff (read @globals) spin (read @t)) (k-binders k-binders) bool))
    (val k-let-names
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-let-bs k-names) k-names))
+        (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-let-bs k-names) k-names))
    (val k-lemma-may-apply?
         (subr (maxeff (read @globals) (read @t) spin)
               ((listof k-lemma acyclic) int int)
               bool))
-   (val k-all-bound? (subr (maxeff (read @globals) (read @t)) (k-binders k-map) bool))
+   (val k-all-bound? (subr (maxeff (read @globals) spin (read @t)) (k-binders k-map) bool))
    (val k-subst-hyps
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (k-hyps k-map)
@@ -131,26 +131,26 @@
                       spin)
               (syns-a)
               k-descs))
-   (val k-copy-names (subr (maxeff (alloc @t) (read @globals)) (names) k-names))
+   (val k-copy-names (subr (maxeff (alloc @t) (read @globals) spin) (names) k-names))
    (val k-order-binders
-        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+        (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
               (k-binders k-ids)
               unit))
    (val k-resolve-place
-        (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t))
+        (subr (maxeff (alloc @t) (goto @z) (read @globals) spin (read @s) (read @t) (write @t))
               (symbol int int)
               k-region))
    (val k-freeze-into (subr (read (globals r-frozen)) (k-region) k-region))
-   (val k-place-lives (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-region) k-ids))
+   (val k-place-lives (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-region) k-ids))
    (val k-names-onto
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-names k-names) k-names))
+        (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-names k-names) k-names))
    (val k-add-region
         (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
               (k-regions k-region)
               k-regions))
    (val k-param-names
-        (subr (maxeff (alloc @t) (read @globals) (read @t))
+        (subr (maxeff (alloc @t) (read @globals) spin (read @t))
               (k-typed-params k-names)
               k-names))
    (val k-letrec-names
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-letrec-bs k-names) k-names))))
+        (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-letrec-bs k-names) k-names))))

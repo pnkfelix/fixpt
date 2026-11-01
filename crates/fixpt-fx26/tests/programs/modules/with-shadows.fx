@@ -4,7 +4,7 @@
 ;; and a name bound inside the body is that binding's.
 (define-type n bool)
 (define-effect touches pure)
-(define a (module (define-type n int) (define-effect touches (read @globals))))
+(define a (module (define-type n int) (define-effect touches (maxeff (read @globals) spin))))
 (define b (module (define-type n bool)))
 (define one (with a (the n 1)))
 (define yes (with a (with b (the n #t))))

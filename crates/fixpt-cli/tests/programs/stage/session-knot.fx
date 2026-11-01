@@ -1,7 +1,7 @@
 ;; Knots through a session's own globals, refused as at the top level
-;; (`Checker::no_reaching_itself`): `tbl` holds a procedure, `f` calls what
-;; it holds, and `tbl` is defined again to hold `f`; `h` calls `g`, and `g`,
-;; reading any global, is defined again to call `h`. `(f)` then ends.
+;; (`Checker::no_reaching_itself`), at their first definitions: a global
+;; holding a procedure that reads any global, and a procedure that does.
+;; One that says `spin` is defined, and `(g)` runs.
 (define api (module (define base 10)))
 (define-type api-type (moduleof (val base int)))
 (define s (sessionof api-type @heap) (make-session api))
@@ -11,7 +11,7 @@
   (subr (maxeff stage spin (io stdout) (read @heap) (write @heap) (read @globals))
         (datum) int)
   (lambda (code)
-    (session-check s (maxeff (read @globals) (io stdout)) int code
+    (session-check s (maxeff (read @globals) (io stdout) spin) int code
       (c (tagcase c
            (expression p (begin (line "running") (p)))
            (definition d
@@ -29,9 +29,6 @@
     (begin
       (step '(define tbl (productof (p (subr (read @globals) () int)))
                  (product (p (lambda () 0)))))
-      (step '(define f (subr (read @globals) () int) (lambda () ((extract tbl p)))))
-      (step '(define tbl (productof (p (subr (read @globals) () int))) (product (p f))))
       (step '(define g (subr (read @globals) () int) (lambda () 0)))
-      (step '(define h (subr (read @globals) () int) (lambda () (g))))
-      (step '(define g (subr (read @globals) () int) (lambda () (h))))
-      (step '(f)))))
+      (step '(define g (subr (maxeff (read @globals) spin) () int) (lambda () 0)))
+      (step '(g)))))

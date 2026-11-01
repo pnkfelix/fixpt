@@ -35,7 +35,7 @@
 ;; depth of the shallowest type still being walked that it met again.
 (define-type k-fv (productof (1 k-ids) (2 int) (3 int)))
 (define-type check-subst-sig
-  (moduleof (val k-fv-forget (subr (maxeff (alloc @t) (read @globals) (write @t)) () unit))
+  (moduleof (val k-fv-forget (subr (maxeff (alloc @t) (read @globals) spin (write @t)) () unit))
             (val k-note-closed-filled
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        ((listof (productof (1 int) (2 int) (3 int)) acyclic))
@@ -49,7 +49,7 @@
                        (k-parts k-map)
                        k-parts))
             (val k-subst-region
-                 (subr (maxeff (read @globals) (read @t)) (k-region k-map) k-region))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-region k-map) k-region))
             (val k-new-smemo
                  (subr (maxeff (alloc @t) (read (globals make-table))) () k-smemo))
             (val k-subst-memo
@@ -57,9 +57,9 @@
                        (int k-map k-smemo)
                        int))
             (val k-gen-map
-                 (subr (maxeff (alloc @t) (read @globals)) (k-binders k-descs) k-map))
+                 (subr (maxeff (alloc @t) (read @globals) spin) (k-binders k-descs) k-map))
             (val k-forget-closed-named
-                 (subr (maxeff (alloc @t) (write @t) (read @globals)) () unit))
+                 (subr (maxeff (alloc @t) (write @t) (read @globals) spin) () unit))
             (val k-binder-desc
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int)

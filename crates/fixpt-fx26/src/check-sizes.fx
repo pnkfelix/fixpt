@@ -115,7 +115,7 @@
 ;; fact first.
 (define k-reduced (->* (k-size) k-size)
   (lambda (s)
-    (letrec ((go (subr (read @globals) (k-size (listof k-size-fact acyclic)) k-size)
+    (letrec ((go (subr (maxeff (read @globals) spin) (k-size (listof k-size-fact acyclic)) k-size)
                    (lambda (s fs) (if (null? fs) s (go (k-apply-fact s (car fs)) (cdr fs))))))
       (go s (the (listof k-size-fact acyclic) (reverse (get k-size-facts)))))))
 ;; Whether no term's coefficient is negative.

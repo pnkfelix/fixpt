@@ -10,7 +10,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-conv (select check-types-types k-conv))
 (define-type check-effects-sig
-  (moduleof (val k-atom-region (subr (read @globals) (k-atom) k-region))
+  (moduleof (val k-atom-region (subr (maxeff (read @globals) spin) (k-atom) k-region))
             (val k-one (subr (alloc @t) (k-atom) k-eff))
             (val k-insert
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
@@ -32,7 +32,7 @@
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool))
             (val k-within?
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool))
-            (val k-has-region? (subr (read @globals) (k-atom) bool))
-            (val k-atom-with (subr (read @globals) (k-atom k-region) k-atom))
+            (val k-has-region? (subr (maxeff (read @globals) spin) (k-atom) bool))
+            (val k-atom-with (subr (maxeff (read @globals) spin) (k-atom k-region) k-atom))
             (val k-atom-var (subr pure (k-atom) int))
             (val k-conv-code (subr pure (k-conv) int))))

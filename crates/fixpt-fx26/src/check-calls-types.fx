@@ -24,9 +24,9 @@
 ;; The types it names, from the files that define them.
 (import check-types-types (type k-eff k-map k-region))
 (define-type check-calls-sig
-  (moduleof (val k-under (subr (read @globals) (kx) kx))
+  (moduleof (val k-under (subr (maxeff (read @globals) spin) (kx) kx))
             (val k-callee-name
-                 (subr (maxeff (alloc @t) (read @globals)) (kx) (listof symbol acyclic)))
+                 (subr (maxeff (alloc @t) (read @globals) spin) (kx) (listof symbol acyclic)))
             (val k-std-op (subr (maxeff (read @globals) (read @t) spin) (kx) string))
             (val k-may-spin?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -38,4 +38,4 @@
                        int))
             (val k-tag-parts
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-tag-parts))
-            (val k-has-comefrom? (subr (maxeff (read @globals) (read @t)) (k-eff) bool))))
+            (val k-has-comefrom? (subr (maxeff (read @globals) spin (read @t)) (k-eff) bool))))

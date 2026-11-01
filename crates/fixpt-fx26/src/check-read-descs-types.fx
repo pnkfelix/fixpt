@@ -113,6 +113,6 @@
             (val k-again-lines (subr (maxeff (alloc @t) (read @globals) spin) (k-names) k-out))
             (val k-ahead-stop (ref int @t))
             (val k-included? (subr (maxeff (read @globals) (read @s) spin) (top) bool))
-            (val k-type-top-start (subr (read @globals) (top) int))
+            (val k-type-top-start (subr (maxeff (read @globals) spin) (top) int))
             (val k-declared-later?
                  (subr (maxeff (read @globals) (read @s) (read @t) spin) (top) bool))))

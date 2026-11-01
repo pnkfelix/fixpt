@@ -12,7 +12,7 @@
 (define-type parser-sig
   (moduleof (val syn-symbol? (subr pure (syn) bool))
             (val syn-name (subr pure (syn) string))
-            (val drop (subr (maxeff (read @globals) (read @s)) (syns-a int) syns-a))
+            (val drop (subr (maxeff (read @globals) spin (read @s)) (syns-a int) syns-a))
             (val syn-start (subr pure (syn) int))
             (val syn-end (subr pure (syn) int))
             (val loaded (ref loaded-files @s))
@@ -27,4 +27,4 @@
                        (productof (1 string) (2 int))))
             (val syn-head (subr pure (syn) symbol))
             (val syn-int (subr pure (syn) int))
-            (val keep (subr (maxeff (read @globals) (read @s)) (syns-a) syns-a))))
+            (val keep (subr (maxeff (read @globals) spin (read @s)) (syns-a) syns-a))))

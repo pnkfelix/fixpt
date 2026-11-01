@@ -76,7 +76,7 @@
 (define k-broken-why (->* (symbol) k-strings)
   (lambda (s)
     (let ((d (k-name-depth s)))
-      (letrec ((go (subr (read @globals) ((listof k-break acyclic)) k-strings)
+      (letrec ((go (subr (maxeff (read @globals) spin) ((listof k-break acyclic)) k-strings)
                  (lambda (bs)
                    (cond ((null? bs) nil)
                          ((k-breaks? (car bs) s d) (the k-strings (cons (extract (car bs) 3) nil)))
@@ -111,7 +111,8 @@
 ;; every lookup of a name asks (`k-hidden-standard?`).
 (define k-built-in-only-table (table symbol bool @t) (make-table symbol-hash symbol=?))
 (define k-built-in-only-fill!
-  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) ((listof symbol acyclic)) unit)
+  (subr (maxeff (read @globals) spin (read @t) (write @t) (alloc @t))
+        ((listof symbol acyclic)) unit)
   (lambda (ns)
     (if (null? ns)
         #u

@@ -131,7 +131,7 @@
             ": it is applied, " (k-quote (k-cat3 "(" n " …)")))))
 (define k-ctor-params (->* (string) (listof k-params acyclic))
   (lambda (n)
-    (letrec ((one (subr (read @globals) (symbol int) k-params)
+    (letrec ((one (subr (maxeff (read @globals) spin) (symbol int) k-params)
                   (lambda (x k) (the k-params (cons (product (1 x) (2 k)) nil)))))
       ;; Type `x` and region `r`.
       (let ((typed (lambda ((x symbol)) (the k-params (cons (product (1 x) (2 2)) (one 'r 0))))))

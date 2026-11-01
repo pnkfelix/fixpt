@@ -27,20 +27,20 @@
   (moduleof (val c-defining (ref (listof symbol @k) @k))
             (val c-defining-named (ref (listof symbol @k) @k))
             (val c-take-defining
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        ((listof string @k))
                        (listof symbol @k)))
             (val c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k))
             (val c-word-name (ref (listof string @k) @k))
             (val c-take-name
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        ()
                        (listof string @k)))
             (val c-last-word (ref (listof tword @k) @k))
             (val c-prev-word (ref (listof tword @k) @k))
             (val c-module-members (ref (listof c-inlinables @k) @k))
             (val c-module-values
-                 (subr (maxeff (alloc @k) (read @globals)) (mod-items) c-mvals))
+                 (subr (maxeff (alloc @k) (read @globals) spin) (mod-items) c-mvals))
             (val c-module-slots
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-mvals int)
@@ -61,7 +61,7 @@
             (val c-made-reuse (ref (listof c-made @k) @k))
             (val c-form-made (ref (listof c-made @k) @k))
             (val c-own-of
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (c-params syms) syms))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k)) (c-params syms) syms))
             (val c-made-word
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-params exp cenv syms)
@@ -74,10 +74,10 @@
             (val c-r-plan-ctx (ref (listof int @k) @k))
             (val c-twins (ref (listof c-twin @k) @k))
             (val c-copy-twin
-                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k))
                        (c-twin c-spec int int)
                        c-twin))
-            (val c-fx-name (subr (read @globals) (symbol exp) string))
+            (val c-fx-name (subr (maxeff (read @globals) spin) (symbol exp) string))
             (val c-standard-name
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp cenv) string))
             (val c-quote-now
@@ -99,11 +99,11 @@
                        (exp exps cenv bool)
                        bool))
             (val c-loop-stores
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (code int int)
                        unit))
             (val c-drops
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (code int)
                        unit))
             (val c-scope-name (ref (listof string @k) @k))
@@ -129,10 +129,10 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (syms cenv int int)
                        (listof c-this @k)))
-            (val c-this-saved (subr (maxeff (read @globals) (read @k)) () c-this))
-            (val c-this-enter! (subr (maxeff (read @globals) (write @k)) (c-this int) unit))
+            (val c-this-saved (subr (maxeff (read @globals) spin (read @k)) () c-this))
+            (val c-this-enter! (subr (maxeff (read @globals) spin (write @k)) (c-this int) unit))
             (val c-word-base
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        ((listof string @k) syms (listof symbol @k))
                        string))
             (val c-word-symbol
@@ -150,11 +150,11 @@
                        (tword c-params exp cenv (listof c-this @k) (listof symbol @k))
                        unit))
             (val c-typed-call
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (code int bool)
                        unit))
             (val c-call-in
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (code int bool k-conv)
                        unit))
             (val c-reshape-fields

@@ -462,7 +462,7 @@
 (define k-scc-cyclic? (->* (symbol k-letrec-bs) bool)
   (lambda (a bs)
     (or (k-has-name? (table-ref (get k-scc-edges) a (the k-names nil)) a)
-        (letrec ((other (subr (maxeff (read @globals) (read @t)) (k-letrec-bs) bool)
+        (letrec ((other (subr (maxeff (read @globals) spin (read @t)) (k-letrec-bs) bool)
                    (lambda (bs)
                      (and (not (null? bs))
                           (let ((b (extract (car bs) 1)))

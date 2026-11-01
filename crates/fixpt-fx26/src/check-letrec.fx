@@ -406,6 +406,29 @@
         (begin (k-comps-found synth bs (k-bs-marks bs) (k-bs-polys bs) ns ts refs
                               (k-components refs))
                (k-bs-at bs ts 0))))))
+;; Group `found`, as `k-arrow-star-found` found `bs`: each member typed
+;; `->*` that reads any global saying `spin`, as a group of globals', or of
+;; a module's, which a global may hold, must (`arrow_star_group`'s
+;; `globals`, `no_reaching_itself`). Not a local `letrec`'s.
+(define k-found-spinning (->* (k-letrec-bs k-letrec-bs) k-letrec-bs)
+  (lambda (bs found)
+    (if (or (null? bs) (null? found))
+        found
+        (let* ((b (car found)) (t (extract b 2))
+               (spins (and (k-arrow-star-ty? (extract (car bs) 2))
+                           (k-reads-any-global? t)))
+               (t (if spins (k-with-latent t (k-one (a-spin))) t)))
+          (cons (product (1 (extract b 1)) (2 t) (3 (extract b 3)))
+                (k-found-spinning (cdr bs) (cdr found)))))))
+;; Whether calling a value of type `t` reads `@globals`, and does not say
+;; `spin`.
+(define k-reads-any-global? (->* (int) bool)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-poly (bs body) (k-reads-any-global? body))
+      (ty-subr (e ps r cv spc)
+        (and (k-contains? e (a-read (r-globals))) (not (k-contains? e (a-spin)))))
+      (else y #f))))
 (define k-any-arrow-star? (->* (k-letrec-bs) bool)
   (lambda (bs)
     (and (not (null? bs))

@@ -37,10 +37,10 @@
                        (k-binders)
                        k-descs))
             (val k-parts-reversed
-                 (subr (maxeff (alloc @t) (read @globals)) (k-parts k-parts) k-parts))
+                 (subr (maxeff (alloc @t) (read @globals) spin) (k-parts k-parts) k-parts))
             (val k-part-onto (subr (alloc @t) (symbol int k-parts) k-parts))
-            (val k-ids-then (subr (maxeff (alloc @t) (read @globals)) (k-ids int) k-ids))
-            (val k-desc-kids (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-ids))
+            (val k-ids-then (subr (maxeff (alloc @t) (read @globals) spin) (k-ids int) k-ids))
+            (val k-desc-kids (subr (maxeff (alloc @t) (read @globals) spin) (k-descs) k-ids))
             (val k-ty-kids
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-ids))
             (val k-dlambda-empty string)
@@ -48,8 +48,8 @@
             (val k-abs-usage string)
             (val k-abs-ctor-usage string)
             (val k-arrow-star-only string)
-            (val k-not-type-list (subr (read @globals) (symbol) string))
-            (val k-type-form? (subr (maxeff (read @globals) (read @t)) (symbol) bool))
+            (val k-not-type-list (subr (maxeff (read @globals) spin) (symbol) string))
+            (val k-type-form? (subr (maxeff (read @globals) spin (read @t)) (symbol) bool))
             (val k-no-name symbol)
             (val k-fresh-named
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -59,10 +59,10 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-binders)
                        k-scope))
-            (val k-params-names (subr (read @globals) (k-params) k-names))
-            (val k-params-kinds (subr (read @globals) (k-params) k-ids))
+            (val k-params-names (subr (maxeff (read @globals) spin) (k-params) k-names))
+            (val k-params-kinds (subr (maxeff (read @globals) spin) (k-params) k-ids))
             (val k-fun-bound?
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (string) bool))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (string) bool))
             (val k-parse-select
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -143,7 +143,7 @@
                                spin)
                        (syn)
                        int))
-            (val k-flat-not-type (subr (read @globals) (string) string))
+            (val k-flat-not-type (subr (maxeff (read @globals) spin) (string) string))
             (val k-flat-var-type? (subr (maxeff (read @globals) (read @t) spin) (int) bool))
             (val k-is-flat? (subr (maxeff (read @globals) (read @t) spin) (int) bool))
             (val k-blobref-parts
@@ -152,7 +152,7 @@
                        (listof (pairof int int @t) acyclic)))
             (val k-blobref-of
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int int) int))
-            (val k-flat-code (subr (read @globals) (symbol) int))
+            (val k-flat-code (subr (maxeff (read @globals) spin) (symbol) int))
             (val k-flat-layout
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-int-pair))
             (val k-unsized-length
@@ -262,7 +262,7 @@
                        (syn)
                        bool))
             (val k-selects-reversed
-                 (subr (maxeff (alloc @t) (read @globals)) (k-selects k-selects) k-selects))
+                 (subr (maxeff (alloc @t) (read @globals) spin) (k-selects k-selects) k-selects))
             (val k-param-name
                  (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin)
                        (syn)
@@ -272,7 +272,7 @@
                                spin)
                        (syn k-syns)
                        unit))
-            (val k-name-last (subr (read @globals) (k-names symbol int) int))
+            (val k-name-last (subr (maxeff (read @globals) spin) (k-names symbol int) int))
             (val k-param-selects
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-selects k-names)

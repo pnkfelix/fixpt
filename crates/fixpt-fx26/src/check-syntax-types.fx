@@ -44,7 +44,7 @@
                                spin)
                        (symbol k-syns syn)
                        unit))
-            (val k-list-head (subr (maxeff (read @globals) (read @s)) (syn) string))
+            (val k-list-head (subr (maxeff (read @globals) spin (read @s)) (syn) string))
             (val k-ahead-names (ref k-ahead-slots @t))
             (val k-ahead-filled (ref k-filled @t))
             (val k-ahead-declare
@@ -58,7 +58,8 @@
                                spin)
                        (k-names k-names)
                        unit))
-            (val k-filled-reversed (subr (read @globals) (k-filled k-filled) k-filled))
+            (val k-filled-reversed (subr (maxeff (read @globals) spin)
+                                         (k-filled k-filled) k-filled))
             (val k-ground-filled
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -93,18 +94,18 @@
             (val k-syn-label
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
                        (syn)
                        symbol))
             (val k-has-label?
-                 (subr (maxeff (read @globals) (read @t)) (k-parts symbol) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-parts symbol) bool))
             (val k-shape
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -151,7 +152,7 @@
                        (k-slots syn)
                        unit))
             (val k-push-all
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-scope)
                        unit))
             (val k-parse-conv-form
@@ -168,14 +169,14 @@
                  (subr (maxeff (read @globals) (read @t) spin)
                        ((listof k-family-knot acyclic) symbol k-scope)
                        int))
-            (val k-twice (subr (read @globals) (string) string))
+            (val k-twice (subr (maxeff (read @globals) spin) (string) string))
             (val k-storage-head? (subr pure (string) bool))
             (val k-type-kind? (subr pure (int) bool))
             (val k-stated-lemma
-                 (subr (maxeff (read @globals) (read @t))
+                 (subr (maxeff (read @globals) spin (read @t))
                        (k-binders (pairof int int @t) k-hyps)
                        k-lemma))
-            (val k-arity-message (subr (read @globals) (symbol int int) string))
+            (val k-arity-message (subr (maxeff (read @globals) spin) (symbol int int) string))
             (val k-ds-applied? (subr pure (k-ds) bool))
             (val k-select-alias
                  (subr (maxeff (read @globals) (read @t) spin) ((listof k-ds acyclic)) int))
@@ -211,6 +212,6 @@
                        (k-hyps k-eff k-ids)
                        k-ids))
             (val k-ahead-take
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (symbol)
                        int))))

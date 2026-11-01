@@ -32,18 +32,18 @@
                        (kx kx)
                        k-cert-lens))
             (val k-cert-len-has?
-                 (subr (maxeff (read @globals) (read @t)) (k-cert-lens k-cert-len) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-cert-lens k-cert-len) bool))
             (val k-natural-by-itself?
                  (subr (maxeff (read @globals) (read @t) spin) (kx) bool))
             (val k-operand-size
                  (subr (maxeff (read @globals) (read @t) spin) (kx int) k-maybe-size))
             (val k-nat-arith-size
-                 (subr (maxeff (read @globals) (read @t))
+                 (subr (maxeff (read @globals) spin (read @t))
                        (string k-maybe-size k-maybe-size)
                        k-maybe-size))
             (val k-latent-props
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx) k-latent))
-            (val k-arg-at (subr (read @globals) (kxs int) kxs))
+            (val k-arg-at (subr (maxeff (read @globals) spin) (kxs int) kxs))
             (val k-sized
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) (read @s) (goto @z)
                                spin)

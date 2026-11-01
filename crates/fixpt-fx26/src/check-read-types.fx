@@ -39,7 +39,7 @@
   (moduleof (val k-sfail
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -48,7 +48,7 @@
             (val k-items
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -57,7 +57,7 @@
             (val k-name-of
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
@@ -67,7 +67,7 @@
             (val k-with-effect-falls (ref k-effect-falls @t))
             (val k-one (subr (alloc @t) (k-atom) k-eff))
             (val k-with-effect-fall
-                 (subr (maxeff (read @globals) (read @t)) (int) k-effect-falls))
+                 (subr (maxeff (read @globals) spin (read @t)) (int) k-effect-falls))
             (val k-union
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-eff k-eff)
@@ -115,19 +115,19 @@
                                spin)
                        (syn)
                        int))
-            (val k-head (subr (maxeff (read @globals) (read @s)) (k-syns) string))
-            (val k-symbol-head (subr (maxeff (read @globals) (read @s)) (k-syns) string))
+            (val k-head (subr (maxeff (read @globals) spin (read @s)) (k-syns) string))
+            (val k-symbol-head (subr (maxeff (read @globals) spin (read @s)) (k-syns) string))
             (val k-at-name? (subr pure (string) bool))
             (val k-items-or-nil
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
                        (syn string)
                        k-syns))
-            (val k-any-typed-kind? (subr (read @globals) (k-ids) bool))
+            (val k-any-typed-kind? (subr (maxeff (read @globals) spin) (k-ids) bool))
             (val k-arrow-syntax
                  (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin)
                        (syn)
@@ -136,10 +136,11 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (string int)
                        string))
-            (val k-ctor-params (subr (read @globals) (string) (listof k-params acyclic)))
+            (val k-ctor-params (subr (maxeff (read @globals) spin)
+                                     (string) (listof k-params acyclic)))
             (val k-region-constant
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (symbol) k-region))
-            (val k-frozen-into (subr (read @globals) (k-region bool) k-region))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (symbol) k-region))
+            (val k-frozen-into (subr (maxeff (read @globals) spin) (k-region bool) k-region))
             (val k-parse-region
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -195,4 +196,4 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (bool k-regions)
                        k-eff))
-            (val k-atom-of (subr (read @globals) (string k-region) k-atom))))
+            (val k-atom-of (subr (maxeff (read @globals) spin) (string k-region) k-atom))))

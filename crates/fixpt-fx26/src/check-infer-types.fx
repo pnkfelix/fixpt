@@ -29,7 +29,7 @@
 (define-type k-trail (select check-subtype-types k-trail))
 (define-type check-infer-sig
   (moduleof (val k-same-labels?
-                 (subr (maxeff (read @globals) (read @t)) (k-let-bs k-parts) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-let-bs k-parts) bool))
             (val k-inst-shapes
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -51,7 +51,7 @@
                        (int int k-binders k-solved int int)
                        unit))
             (val k-push-ids
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-ids k-ids) k-ids))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-ids k-ids) k-ids))
             (val k-mentions-any-unknown?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-binders k-solved)
@@ -75,9 +75,9 @@
                        (int int int int)
                        int))
             (val k-plambda-matches?
-                 (subr (maxeff (read @globals) (read @t)) (kx k-ty) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (kx k-ty) bool))
             (val k-variants-not-named
-                 (subr (maxeff (alloc @t) (read @globals) (read @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t))
                        (k-parts k-arms)
                        k-parts))
             (val k-cannot-take-apart
@@ -91,7 +91,7 @@
                        (symbol int k-names kx)
                        k-bindings))
             (val k-zip-fields
-                 (subr (maxeff (alloc @t) (read @globals) (read @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t))
                        (k-names k-parts)
                        k-bindings))
             (val k-beyond
@@ -135,6 +135,6 @@
                        (k-ids k-ids)
                        int))
             (val k-part-names
-                 (subr (maxeff (alloc @t) (read @globals) (read @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t))
                        (k-parts)
                        (listof string acyclic)))))

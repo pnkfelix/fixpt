@@ -16,7 +16,7 @@
 ;; perhaps without end: what it is given is a module of procedures over
 ;; `val`, which a procedure may be given itself in, so a call of one is
 ;; not known to end (`TODO.md` §68).
-(define-effect stores (maxeff (read @globals) (read @v) (write @v) (alloc @v)))
+(define-effect stores (maxeff (read @globals) spin (read @v) (write @v) (alloc @v)))
 
 ;; And the world the program's I/O touches (`TODO.md` §84): every kind,
 ;; since the program it runs may do any.
@@ -143,7 +143,7 @@
    (val ev-arg (subr (maxeff evals spin) (vals int) val))
    (val ev-eq? (subr pure (val val) bool))
    (val ev-poll (subr (maxeff evals spin) () unit))
-   (val ev-preempt-set! (subr (maxeff (write @v) (read @globals)) (val) unit))
+   (val ev-preempt-set! (subr (maxeff (write @v) (read @globals) spin) (val) unit))
    (val ev-intern (subr (maxeff stores spin) (val) val))
    (val eval-tag (prompt-tag eresult eresult (maxeff runs spin) @x))
    (val list->val (subr (maxeff (read @globals) (read @x) (alloc @v) spin) ((listof val @x)) val))
@@ -158,7 +158,7 @@
    (val ev-bref (subr (maxeff evals spin) (val int) val))
    (val ev-blobref (subr (maxeff evals spin) (symbol int vals) val))
    (val ev-flat-tag (subr (maxeff evals spin) (val int) val))
-   (val ev-label-is? (subr (read @globals) (val symbol int) bool))))
+   (val ev-label-is? (subr (maxeff (read @globals) spin) (val symbol int) bool))))
 ;; The primitives' module as `eval-core.fx` uses it.
 (define-type eval-prims-sig
   (moduleof

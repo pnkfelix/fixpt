@@ -25,7 +25,7 @@
 (define-type k-effs (select check-subtype-types k-effs))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 (define-type check-expect-sig
-  (moduleof (val k-lambda? (subr (read @globals) (kx) bool))
+  (moduleof (val k-lambda? (subr (maxeff (read @globals) spin) (kx) bool))
             (val k-rewriting
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -86,21 +86,21 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-let-bs)
                        k-names))
-            (val k-generalizable? (subr (maxeff (read @globals) (read @t)) (kx k-eff) bool))
+            (val k-generalizable? (subr (maxeff (read @globals) spin (read @t)) (kx k-eff) bool))
             (val k-param-types
                  (subr (maxeff (alloc @t)
                                (goto @z)
-                               (read @globals)
+                               (read @globals) spin
                                (read @s)
                                (read @t)
                                (write @t))
                        (k-typed-params k-ids int int)
                        k-bindings))
             (val k-binding-types
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-bindings) k-ids))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (k-bindings) k-ids))
             (val k-some-untyped?
-                 (subr (maxeff (read @globals) (read @t)) (k-typed-params) bool))
-            (val k-needs-telling? (subr (maxeff (read @globals) (read @t)) (kx) bool))
+                 (subr (maxeff (read @globals) spin (read @t)) (k-typed-params) bool))
+            (val k-needs-telling? (subr (maxeff (read @globals) spin (read @t)) (kx) bool))
             (val k-proj-map
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -123,5 +123,5 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-letrec-bs)
                        unit))
-            (val k-letrec-not-lambda (subr (read @globals) (symbol) string))
-            (val k-quote-dvar (subr (maxeff (read @globals) (read @t)) (int) string))))
+            (val k-letrec-not-lambda (subr (maxeff (read @globals) spin) (symbol) string))
+            (val k-quote-dvar (subr (maxeff (read @globals) spin (read @t)) (int) string))))

@@ -10,7 +10,7 @@
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 (define-type check-specs-sig
-  (moduleof (val k-spec-clause? (subr (read @globals) (syn) bool))
+  (moduleof (val k-spec-clause? (subr (maxeff (read @globals) spin) (syn) bool))
             (val k-spec-pnames (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin)
                                      (k-syns)
                                      (listof symbol acyclic)))

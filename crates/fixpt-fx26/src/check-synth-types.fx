@@ -172,11 +172,12 @@
                        unit))
             (val k-region-form (subr pure (int) string))
             (val k-note-extract
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-at k-datum)
                        unit))
             (val k-note-field
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (k-at int) unit))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
+                       (k-at int) unit))
             (val k-projected
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -208,11 +209,11 @@
                        (kx)
                        k-tested))
             (val k-enter-else
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-tested)
                        unit))
             (val k-leave-test
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-tested)
                        unit))
             (val k-certified-arg?
@@ -222,9 +223,9 @@
                                spin)
                        (kx kxs k-synther)
                        k-te))
-            (val k-thunk-lambda? (subr (read @globals) (kx) bool))
+            (val k-thunk-lambda? (subr (maxeff (read @globals) spin) (kx) bool))
             (val k-arg-found
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-done int int k-eff)
                        unit))
             (val k-arg-unified
@@ -309,7 +310,7 @@
                        (kx int int int k-binders k-solved k-done)
                        unit))
             (val k-with-used
-                 (subr (maxeff (alloc @t) (read @globals) (read @t))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t))
                        (k-parts k-names int)
                        (productof (1 k-parts) (2 k-ids))))
             (val k-widen-nil-tail
@@ -336,7 +337,7 @@
                                spin)
                        (k-ty int kx)
                        bool))
-            (val k-may-be-empty? (subr (maxeff (read @globals) (read @t)) (k-ty) bool))
+            (val k-may-be-empty? (subr (maxeff (read @globals) spin (read @t)) (k-ty) bool))
             (val k-arms-type
                  (subr (maxeff (alloc @t)
                                (goto @z)
