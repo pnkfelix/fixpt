@@ -31,6 +31,8 @@
 (define rp-nodes (ref k-rnodes @t) (new nil))
 (define rp-next (ref int @t) (new 0))
 (define rp-memo (ref (listof (pairof int int @t) acyclic) @t) (new nil))
+;; Each generative type's definition's slot, once made (`rp-gendef`).
+(define rp-gendefs (ref (listof (pairof int int @t) acyclic) @t) (new nil))
 (define rp-scope (ref (listof (productof (1 int) (2 int) (3 int)) acyclic) @t) (new nil))
 (define rp-holes (ref (listof (pairof int int @t) acyclic) @t) (new nil))
 (define rp-hole-names (ref k-names @t) (new nil))
@@ -237,6 +239,12 @@
         nil
         (let* ((v (extract (car ps) 2)) (k (k-dvar-kind v)))
           (cons (product (1 v) (2 (if (< k 0) 2 k))) (rp-abs-binders (cdr ps)))))))
+;; Variances as `reps.rs` writes them: `+`, `-`, `=` (0, 1, 2).
+(define rp-variances (->* (k-ids) k-rargs)
+  (lambda (vs)
+    (if (null? vs)
+        nil
+        (cons (rp-sym (case (car vs) ((0) "+") ((1) "-") (else "="))) (rp-variances (cdr vs))))))
 (define rp-labels (->* (k-parts) k-names)
   (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 1) (rp-labels (cdr ps))))))
 
@@ -253,6 +261,24 @@
                      (sum node slot)))))))
   (rp-tys (->* (k-ids) k-rargs)
     (lambda (ts) (if (null? ts) nil (cons (rp-ty (car ts)) (rp-tys (cdr ts))))))
+  ;; Generative type `g`'s definition, for a checker that has not got it to
+  ;; make it (`reps.rs`'s `gendef`): `(gendef {params} binder… (variances
+  ;; v…) rep)`; once for each, so a recursive one's representation names
+  ;; it again.
+  (rp-gendef (->* (int) k-rarg)
+    (lambda (g)
+      (let ((had (rp-assoc (get rp-gendefs) g)))
+        (if (>= had 0)
+            (sum node had)
+            (let* ((gen (k-gen-of g)) (slot (rp-reserve))
+                   (u (set rp-gendefs (cons (cons g slot) (get rp-gendefs))))
+                   (saved (get rp-scope)) (bs (extract gen 2)) (b (rp-bind bs slot 0))
+                   (nodes (rp-binder-nodes bs))
+                   (vs (rp-node "variances" (rp-variances (extract gen 3))))
+                   (r (rp-ty (extract gen 4))))
+              (begin (set rp-scope saved)
+                     (rp-fill slot 'gendef #f (rp-binder-names bs) (append nodes (list vs r)))
+                     (sum node slot)))))))
   (rp-parts (->* (k-parts) k-rargs)
     (lambda (ps)
       (if (null? ps)
@@ -312,7 +338,7 @@
                  (n (k-length (extract gen 2)))
                  (kind (if (= n 0) "type" (string-append "generative/" (int->string n))))
                  (c (sum const (product (1 (symbol->string (extract gen 1))) (2 g) (3 kind)))))
-            (rp-fill slot 'named #f nil (cons c (rp-descs ds)))))
+            (rp-fill slot 'named #f nil (cons c (cons (rp-gendef g) (rp-descs ds))))))
         (ty-nlist (a z r) (rp-fill slot 'nlist #f nil (list (rp-ty a) (rp-size z) (rp-region r))))
         (ty-module (abs ds vs)
           (let* ((saved (get rp-scope)) (bs (rp-abs-binders abs)) (u (rp-bind bs slot 0))
@@ -344,7 +370,7 @@
 (define rp-begin! (->* () unit)
   (lambda ()
     (begin
-      (set rp-nodes nil) (set rp-next 0) (set rp-memo nil) (set rp-scope nil)
+      (set rp-nodes nil) (set rp-next 0) (set rp-memo nil) (set rp-gendefs nil) (set rp-scope nil)
       (set rp-holes nil) (set rp-hole-names nil) (set rp-nholes 0) (set rp-declined #f))))
 ;; A piece of evidence as a rep (`fixpt-reps`'s `fill`): its root an
 ;; `evidence` node of one operand, what `d` is, a type, an effect or a
@@ -391,6 +417,9 @@
 (define ri-links (ref (arrayof int @t) @t) (new (make-array 0 -1)))
 (define ri-bound (ref (listof (productof (1 int) (2 int) (3 int)) acyclic) @t) (new nil))
 (define ri-holes (ref k-ids @t) (new nil))
+;; Each generative type made in this import from its definition
+;; (`ri-generative`), by the definition's node: one type for every use.
+(define ri-gendefs (ref (listof (pairof int int @t) acyclic) @t) (new nil))
 
 (define ri-node (->* (int) k-rnode) (lambda (k) (array-ref (get ri-nodes) k)))
 (define ri-head (->* (int) string) (lambda (k) (symbol->string (extract (ri-node k) 2))))
@@ -411,6 +440,14 @@
   (lambda (a) (tagcase a (flag b b) (else y (begin (ri-fail "a flag expected") #f)))))
 (define ri-sym (->* (k-rarg) symbol)
   (lambda (a) (tagcase a (sym s s) (else y (begin (ri-fail "a name expected") 'none)))))
+;; Variances as `rp-variances` writes them, back: 0, 1, 2.
+(define ri-variances (->* (k-rargs) k-ids)
+  (lambda (xs)
+    (if (null? xs)
+        nil
+        (let ((v (symbol->string (ri-sym (car xs)))))
+          (cons (cond ((string=? v "+") 0) ((string=? v "-") 1) (else 2))
+                (ri-variances (cdr xs)))))))
 (define ri-var (->* (k-rarg) int)
   (lambda (a)
     (tagcase a
@@ -592,6 +629,24 @@
 
 (define-rec
   ;; Node `k`'s type.
+  ;; A generative type this checker has not got, `name`, made from its
+  ;; definition, node `def` (`rp-gendef`): its parameters, their variances
+  ;; and its representation; once for each.
+  (ri-generative (->* (string int) int)
+    (lambda (name def)
+      (let ((had (rp-assoc (get ri-gendefs) def)))
+        (if (>= had 0)
+            had
+            (let* ((bs (ri-binders def)) (n (k-length bs)) (args (ri-args def))
+                   (vs (ri-variances (ri-args (ri-child (ri-nth args n)))))
+                   (g (get k-ngens)) (slot (k-slot)))
+              (begin
+                (set k-gens (cons (product (1 (string->symbol name)) (2 bs) (3 vs) (4 slot))
+                                  (get k-gens)))
+                (set k-ngens (+ g 1))
+                (set ri-gendefs (cons (cons def g) (get ri-gendefs)))
+                (k-set-link slot (ri-ty (ri-child (ri-nth args (+ n 1)))))
+                g))))))
   (ri-ty (->* (int) int)
     (lambda (k)
       (let ((done (array-ref (get ri-done) k)))
@@ -673,9 +728,10 @@
           ((string=? h "named")
            (tagcase (ri-nth args 0)
              (const c
-               (if (< (extract c 2) 0)
-                   (begin (ri-fail (string-append "no generative type " (extract c 1))) (ty-void))
-                   (ty-named (extract c 2) (ri-descs (cdr args)))))
+               (ty-named (if (< (extract c 2) 0)
+                             (ri-generative (extract c 1) (ri-child (ri-nth args 1)))
+                             (extract c 2))
+                         (ri-descs (cdr (cdr args)))))
              (else y (begin (ri-fail "a generative type expected") (ty-void)))))
           ((string=? h "nlist")
            (ty-nlist (ri-ty-in args 0) (ri-size (ri-nth args 1)) (ri-region-in args 2)))
@@ -733,7 +789,7 @@
         (set ri-done (make-array n -1))
         (set ri-busy (make-array n #f))
         (set ri-links (make-array n -1))
-        (set ri-bound nil)
+        (set ri-bound nil) (set ri-gendefs nil)
         (set ri-holes holes)
         (if (= n 0) (k-ty-new (ty-void)) (ri-ty 0))))))
 )))

@@ -81,7 +81,7 @@ impl Checker {
     }
 
     fn export_with(&self, root: impl FnOnce(&mut Ex) -> Result<u32, String>) -> Result<Exported, String> {
-        let mut ex = Ex { c: self, b: Builder::new(), memo: HashMap::new(), scope: Vec::new(), holes: HashMap::new(), hole_vars: Vec::new() };
+        let mut ex = Ex { c: self, b: Builder::new(), memo: HashMap::new(), gendefs: HashMap::new(), scope: Vec::new(), holes: HashMap::new(), hole_vars: Vec::new() };
         let root = root(&mut ex)?;
         let Ex { b, hole_vars, .. } = ex;
         let finished = b.finish(root)?;
@@ -146,6 +146,8 @@ struct Ex<'c> {
     c: &'c Checker,
     b: Builder,
     memo: HashMap<TyId, u32>,
+    /// Each generative type's definition's slot, once made (`gendef`).
+    gendefs: HashMap<u32, u32>,
     /// The variables bound where the walk is, outermost first: each its
     /// binder's slot and place.
     scope: Vec<(DVar, u32, u32)>,
@@ -204,6 +206,41 @@ impl Ex<'_> {
                 self.node("binder", args)
             })
             .collect()
+    }
+
+    /// Generative type `which`'s definition, for a checker that has not
+    /// got it to make it (`heap-types.md`, §206): `(gendef {params}
+    /// binder… (variances v…) rep)`, its parameters bound as a `poly`'s,
+    /// each variance `+`, `-` or `=`, and its representation; once for
+    /// each, so a recursive one's representation names it again.
+    fn gendef(&mut self, which: u32) -> Result<u32, String> {
+        if let Some(&slot) = self.gendefs.get(&which) {
+            return Ok(slot);
+        }
+        let slot = self.b.reserve();
+        self.gendefs.insert(which, slot);
+        let g = &self.c.generatives[which as usize];
+        let (params, variance, rep) = (g.params.clone(), g.variance.clone(), g.rep);
+        let names = self.names_of(&params);
+        let mark = self.scope.len();
+        let mut args = self.binders(slot, &params);
+        let vs = variance
+            .iter()
+            .map(|v| {
+                let s = match v {
+                    crate::ast::Variance::Co => "+",
+                    crate::ast::Variance::Contra => "-",
+                    crate::ast::Variance::Inv => "=",
+                };
+                Arg::Sym(self.b.name(s))
+            })
+            .collect();
+        args.push(self.node("variances", vs));
+        args.push(Arg::Node(self.ty(rep)?));
+        self.scope.truncate(mark);
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        self.b.fill(slot, "gendef", &names, args);
+        Ok(slot)
     }
 
     fn names_of(&self, bs: &[(DVar, Kind)]) -> Vec<String> {
@@ -507,7 +544,8 @@ impl Ex<'_> {
                 let g = &self.c.generatives[which as usize];
                 let kind = if g.params.is_empty() { "type".to_string() } else { format!("generative/{}", g.params.len()) };
                 let c = self.b.konst(Const { key: generative_key(self.c, which), name: self.c.interner.name(g.name).to_string(), kind });
-                let mut out = vec![c];
+                let def = self.gendef(which)?;
+                let mut out = vec![c, Arg::Node(def)];
                 for d in &args {
                     out.push(self.d(d)?);
                 }
@@ -631,6 +669,37 @@ impl Im<'_, '_> {
     }
 
     /// Node `k`'s binders made variables, bound; their kinds.
+    /// A generative type this checker has not got, made from its
+    /// definition, node `def` (`Ex::gendef`), under constant `c`'s key, so
+    /// that every use of it in the rep is the one type.
+    fn generative(&mut self, c: u32, def: u32) -> Result<u32, String> {
+        let node = self.node(def).clone();
+        let n = node.binders.len();
+        let params = self.binders(def, n)?;
+        let variances = self.node(Self::child(*node.args.get(n).ok_or("a generative type of no variances")?)?).args.clone();
+        let variance = variances
+            .iter()
+            .map(|v| match *v {
+                Arg::Sym(s) => match self.rep.name(s) {
+                    "+" => Ok(crate::ast::Variance::Co),
+                    "-" => Ok(crate::ast::Variance::Contra),
+                    "=" => Ok(crate::ast::Variance::Inv),
+                    other => Err(format!("a variance `{other}`")),
+                },
+                other => Err(format!("a variance expected, {other:?}")),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let k = &self.rep.consts[c as usize];
+        let (key, name) = (k.key, self.c.interner.intern(&k.name));
+        let which = self.c.generatives.len() as u32;
+        let slot = self.c.arena.ty(Ty::Link(None));
+        self.c.generatives.push(crate::check::Generative { name, params, variance, rep: slot });
+        self.gens.insert(key, which);
+        let rep = self.ty(Self::child(*node.args.get(n + 1).ok_or("a generative type of no representation")?)?)?;
+        self.c.arena.set_link(slot, rep);
+        Ok(which)
+    }
+
     fn binders(&mut self, k: u32, n: usize) -> Result<Vec<(DVar, Kind)>, String> {
         let node = self.node(k).clone();
         if node.binders.len() != n || node.args.len() < n {
@@ -930,8 +999,11 @@ impl Im<'_, '_> {
             "named" => {
                 let Arg::Const(c) = arg(0)? else { return Err("a generative type expected".into()) };
                 let key = self.rep.consts[c as usize].key;
-                let which = *self.gens.get(&key).ok_or_else(|| format!("no generative type `{}` here", self.rep.consts[c as usize].name))?;
-                let ds = args[1..].iter().map(|x| self.d(*x)).collect::<Result<_, _>>()?;
+                let which = match self.gens.get(&key) {
+                    Some(&w) => w,
+                    None => self.generative(c, Self::child(arg(1)?)?)?,
+                };
+                let ds = args[2..].iter().map(|x| self.d(*x)).collect::<Result<_, _>>()?;
                 Ty::Named { which, args: ds }
             }
             "nlist" => Ty::NList { elem: self.ty(Self::child(arg(0)?)?)?, size: self.size(arg(1)?)?, region: self.region(arg(2)?)? },

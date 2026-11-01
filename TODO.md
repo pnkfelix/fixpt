@@ -4663,8 +4663,8 @@ printed and read: `'1` against a module of 60 alternatives and 40
 procedures 250 to 3.9 ms; s7st's `(define x 1)` 12.3 to 5.7 ms. And the
 standard environment kept between stages (`check-staged`): 1.6 ms and
 1.15 ms; a stage of `'1` against a small module 3 to 0.16 ms. Evidence by
-rep too, and the Rust checker's stage paths (`heap-types.md`, step 3).
-Left of it: §206, generative types.
+rep too, the Rust checker's stage paths, and §206's generative types
+(`heap-types.md`, step 3, done).
 
 Left: staged code on the register-code machines of the cellular
 convention (`fx-regs-*-cellcc`), which runs as cellular words (649 ms
@@ -4780,3 +4780,8 @@ takes it as the same type. A rep format change (`fixpt-reps`'s `Const`),
 the export (`rp-ty`'s `ty-named`) and the import (`ri-gen-names`,
 `rep-nodes`). The standard generative types (`vsubr`) need none of it:
 both checkers enter them alike, under the same keys.
+
+**Done (2026-11-01).** A rep's `named` node carries the definition,
+`(gendef {params} binder… (variances v…) rep)`, shared and, for a
+recursive type, cyclic; each checker's import makes a generative type it
+has not got from it, once per import. On every machine (`generative.fx`).

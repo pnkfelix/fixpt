@@ -281,10 +281,22 @@ checkers' reps are one, step 2). Every stage of the stage tests takes the
 rep on `rs-scheme-vm`, evidence's included; on `fx-ast-eval`, those given
 no evidence (the evaluator's `reify-…` makes text alone).
 
-Left of step 3: generative types (`TODO.md` §206: today a stage against
-a module whose type names a program's generative type is refused on both
-paths; a rep must carry each generative type's parameters and
-representation).
+And generative types (`TODO.md` §206). A stage against a module whose type
+names the program's own generative type was refused on every path, the
+stage being checked in the standard environment alone, where the type is
+not. Now a rep carries each generative type it names: a `named` node is
+`(named CONST GENDEF D…)`, the definition `(gendef {params} binder…
+(variances v…) rep)`, its parameters bound as a `poly`'s, each variance
+`+`, `-` or `=`, its representation (the checker sees through it for
+shapes and a native convention's registers), shared by every use and, for
+a recursive one, named again within. A checker that has not got the
+constant makes it from its definition, once in the import (`ri-generative`,
+`Im::generative`): code staged takes a value of it from the module and
+gives it back, and is refused where it gives the representation for it.
+The binary form is unchanged; the two checkers' reps still agree.
+
+Step 3 is done (`generative.fx`, `kept.fx` and the evidence tests of
+`fixpt-cli/tests/stage.rs`).
 
 ## Decided (the user's, 2026-11-01)
 

@@ -3289,3 +3289,19 @@ of `TODO.md` §141, working on my own.
 - **Lowered code makes a rep from hex** (`%fx26-rep-of-hex`): a string
   literal survives any way the lowering's code is written and read.
 
+## Generative types in reps (2026-11-01; `TODO.md` §206)
+
+- **The definition as nodes, not a format change**: `(gendef {params}
+  binder… (variances v…) rep)`, an operand of each `named` node, shared by
+  the rep's minimal graph; the binary form and `Const` stay as they were.
+- **The representation carried**, not an opaque type: the checker sees
+  through a generative type for shapes and a native convention's
+  registers, so staged code calling the module must agree with it.
+- **Every rep carries it**, standard generative types' too: simpler than
+  telling which a checker has, at the cost of a larger rep where one is
+  named.
+- **Made once per import, not kept across stages**: the stage's checker
+  makes the type again at each stage (its key is its own index's there);
+  nothing staged outlives its stage's check, and the store's bound covers
+  the table.
+

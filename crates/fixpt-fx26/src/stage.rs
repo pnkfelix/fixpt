@@ -117,7 +117,7 @@ fn stage_wrapped(parts: &Parts, code: &str, by_rep: bool) -> Wrapped {
 /// as, as a rep in its binary form, where the checker that noted it made
 /// one that the stage's front end can import as it is (`k-staged-rep`;
 /// `docs/research/heap-types.md`, step 3): its holes filled by the
-/// evidence's reps, no constant, no region of its own.
+/// evidence's reps, no region of its own.
 pub(crate) struct Parts {
     pub mt: String,
     pub e: String,
@@ -167,7 +167,7 @@ pub(crate) fn staged_parts(rt: &Runtime, staged: Value, given: Value) -> Option<
         // Its holes, the variables it names, filled by their evidence's reps.
         let rep = fixpt_reps::heap::from_heap(&rt.heap, field(6), true).ok();
         let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
-        parts.rep = rep.filter(|r| r.consts.is_empty()).map(|r| fixpt_reps::binary::encode(&r));
+        parts.rep = rep.map(|r| fixpt_reps::binary::encode(&r));
     }
     Some((parts, field(4)))
 }
@@ -300,7 +300,7 @@ pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str, gi
     let mut parts = Parts::of(mt, e, r, given);
     if parts.regions.is_empty() {
         let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
-        parts.rep = rep.filter(|r| r.consts.is_empty()).map(|r| fixpt_reps::binary::encode(&r));
+        parts.rep = rep.map(|r| fixpt_reps::binary::encode(&r));
     }
     let w = stage_wrapped(&parts, text, true);
     match checked(rt, &w, parts.rep.as_deref()) {

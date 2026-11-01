@@ -4429,3 +4429,11 @@ evidence, an effect's joins the effect it is in). The Rust checker's
 stage paths by rep (`rs-scheme-vm`, `fx-ast-eval`). Left: generative
 types (§206).
 
+## 2026-11-01: staging against a module that names the program's generative types (§206)
+
+Refused on every path before, the stage checked in the standard
+environment alone. A rep carries each generative type's definition (its
+parameters, their variances, its representation) in a `gendef` node, and
+each checker's import makes the type from it where it has not got it.
+With it, heap types' step 3 is done.
+

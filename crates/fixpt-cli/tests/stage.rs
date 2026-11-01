@@ -86,6 +86,19 @@ fn a_stage_leaves_nothing_bound_for_the_next() {
     }
 }
 
+/// A stage against a module whose type names the program's own generative
+/// types: the stage's checker makes each from the definition its rep
+/// carries (`TODO.md` §206); refused, by text, before.
+#[test]
+fn a_stage_takes_the_programs_generative_types() {
+    let want = "41\n6\nrefused: argument 1 is a int, where a id is expected\n10\n";
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "generative.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
 /// A process stages code while another runs, at tiny time slices: the
 /// checker is not the program, and no poll in it switches to the program's
 /// tasks (`TODO.md` §187: on native code, it ran them on a machine that
