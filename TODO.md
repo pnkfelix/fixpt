@@ -2118,6 +2118,14 @@ do, or refused.
 
 ## 81. Register code to machine code, in FX-26: `fx-regs-fxjit-nativecc` (found 2026-10-11)
 
+Done for the native convention (2026-10-31, CLAUDES_CHOICES.md "The
+native convention compiled by FX-26 on arm64"): `native-direct-arm64.fx`
+and the files beside it, `procedure` step for step, every procedure of
+the front end and of every test program the same as Rust's;
+`fx-regs-fxjit-nativecc` runs on arm64. Left: register code to arm64 in
+FX-26 (`fx-regs-fxjit-cellcc`, x86_64 only); the driver, Rust's on both.
+What follows is the section as found.
+
 Naming the machines by who generates code, what code, and what runs it
 (§78) showed a gap: there is no `fx-regs-fxjit-nativecc`. `native.fx` ports only
 the cellular words' assembler (`fixpt-native/src/cellular.rs`'s
@@ -2698,10 +2706,10 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    (`native-direct-x64.fx` and the files beside it, CLAUDES_CHOICES.md
    "The native convention compiled by FX-26 on x86_64";
    `fx-regs-fxjit-nativecc`; every test program's procedures the same as
-   Rust's). Left of it: the driver (`compile`'s finding of procedures and
-   binding of globals) is still Rust's, as `syn.rs`'s is for register
-   code; and arm64's `direct.rs` has no FX-26 twin (§81), though
-   `native-reps.fx` is of no machine's and would serve it.
+   Rust's). ~~arm64's `direct.rs` has no FX-26 twin~~ (done, §81:
+   `native-direct-arm64.fx`, over `native-reps.fx`). Left of it: the
+   driver (`compile`'s finding of procedures and binding of globals) is
+   still Rust's, as `syn.rs`'s is for register code.
 5. **Smaller:** a 32-bit jump that could be 8 (relaxation) would shrink
    compiled words by about a fifth; `,disassemble-asm` for x86_64 shows
    bytes with the disassembler's text, which knows only the forms the

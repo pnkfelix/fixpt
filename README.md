@@ -532,6 +532,9 @@ REPL.
 | `fx-regs-fxjit-cellcc`              | FX-26          | FX-26 (`native-arm64-regs.fx`) | the hand machine, as arm64 |
 | `fx-regs-fxjit-nativecc`            | FX-26          | FX-26 (`native-direct-x64.fx`) | x86_64 only, the native convention |
 
+| `fx-regs-fxjit-cellcc`              | FX-26          | FX-26 (`native-x64-regs.fx`) | the hand machine, as x86_64 only |
+| `fx-regs-fxjit-nativecc`            | FX-26          | FX-26 (`native-direct-x64.fx`, `native-direct-arm64.fx`) | the native convention |
+
 And the other commands:
 
 | invocation                                  | stage A        | stage B                | runs on                    |
