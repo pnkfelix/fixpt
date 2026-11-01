@@ -13,9 +13,7 @@ mod harness;
 
 use harness::{ints, Case, Wrapper, A};
 
-const MODULES: &str = "(define arm64 (load-input \"fx26:arm64.fx\"))\n\
-     (define dl (load-module \"fx26:native-direct-arm64-layout.fx\"))\n\
-     (define asm ((load-input \"fx26:native-direct-arm64-asm.fx\") arm64 dl))\n";
+const MODULES: &str = include_str!("native-direct-arm64/asm-modules.fx");
 
 const WRAPPERS: &[Wrapper] = &[
     ("push-frame", &[("r", "int"), ("size", "int")], 0, "(ada-push-frame r size)"),
@@ -34,32 +32,7 @@ const WRAPPERS: &[Wrapper] = &[
 ];
 
 /// Wrappers of their own shapes.
-const EXTRA: &str = "
-(define t-do-traps (subr {EFF} ((listof int @k)) unit)
-  (lambda (cs)
-    (if (null? cs) #u (begin (ada-trap (car cs) (car (cdr cs))) (t-do-traps (cdr (cdr cs)))))))
-(define t-do-branches (subr {EFF} (int (listof int @k)) unit)
-  (lambda (n fs)
-    (let ((ls (the (arrayof int @k) (make-array (+ n 1) 0))))
-      (letrec ((make (subr {EFF} (int) unit)
-                 (lambda (k) (if (= k n) #u (begin (array-set! ls k (ada-label)) (make (+ k 1))))))
-               (go (subr {EFF} ((listof int @k)) unit)
-                 (lambda (fs)
-                   (if (null? fs)
-                       #u
-                       (let* ((f (car fs)) (l (car (cdr fs))) (nops (car (cdr (cdr fs)))))
-                         (begin (ada-to (array-ref ls l) f) (t-nops nops) (go (cdr (cdr (cdr fs)))))))))
-               (bind (subr {EFF} (int) unit)
-                 (lambda (k)
-                   (if (= k n)
-                       #u
-                       (begin (ada-bind (array-ref ls k))
-                              (if (= (modulo k 2) 1) (ada-e 3596551104) #u)
-                              (bind (+ k 1)))))))
-        (begin (make 0) (go fs) (bind 0))))))
-(define t-continuation-code (subr {EFF} (int) (listof int @k))
-  (lambda (n) (cons 0 (ada-continuation-code n))))
-";
+const EXTRA: &str = include_str!("native-direct-arm64/asm-extra.fx");
 
 fn names() -> Vec<(&'static str, &'static str)> {
     let mut v: Vec<(&str, &str)> = [

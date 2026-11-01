@@ -9,7 +9,7 @@
 (import direct-types (effect da-assembles da-reads))
 (import direct-types (type da-bytes da-ints da-bools da-strings da-pairs da-mark da-on-reg))
 (import direct-types (type nr-cells nr-in-out nr-stepped nr-raw-op))
-(import direct-types (type dr-int-slow dp-edge dp-poll))
+(import direct-types (type dr-int-slow dp-edge dp-poll dx-made))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -88,7 +88,8 @@
             (val ada-header (subr pure (int int int) int))
             (val ada-trailer (subr pure (int) int))
             (val ada-fixnum (subr pure (int) int))
-            (val ada-continuation-code (subr da-assembles (int) da-bytes))))
+            (val ada-continuation-code (subr da-assembles (int) da-bytes))
+            (val ada-targets (subr da-assembles () da-bools))))
 
 ;;; ------------------------------------------------------------ raw values
 
@@ -256,3 +257,46 @@
             (val adq-prim12 (subr da-assembles (int int) unit))
             (val adq-prim3 (subr da-assembles (int) unit))
             (val adq-callouts (subr da-assembles (int int) unit))))
+
+;;; ------------------------------------------------------------ the instructions
+
+;; The instructions that are not primitives' or call-outs'
+;; (`native-direct-arm64-ops.fx`), each of its cell (and its `op`, for
+;; those of more than one); what `RESULT` and REG1…REG8 hold of the frame
+;; (`held`), as a version begins and before each instruction.
+(define-type native-direct-arm64-ops-sig
+  (moduleof (val ado-slot (subr da-reads (int) int))
+            (val ado-vargs (subr da-assembles (int) unit))
+            (val ado-const (subr da-assembles (int) unit))
+            (val ado-global (subr da-assembles (int) unit))
+            (val ado-global-guard (subr da-assembles (int) unit))
+            (val ado-setglbl (subr da-assembles (int) unit))
+            (val ado-lexical (subr da-assembles (int) unit))
+            (val ado-reg (subr da-assembles (int) unit))
+            (val ado-setreg (subr da-assembles (int) unit))
+            (val ado-movereg (subr da-assembles (int) unit))
+            (val ado-save (subr da-assembles (int) unit))
+            (val ado-pop (subr da-assembles (int) unit))
+            (val ado-stack (subr da-assembles (int) unit))
+            (val ado-setstk (subr da-assembles (int) unit))
+            (val ado-load (subr da-assembles (int) unit))
+            (val ado-store (subr da-assembles (int) unit))
+            (val ado-op1 (subr da-assembles (int) unit))
+            (val ado-op2 (subr da-assembles (int int) unit))
+            (val ado-field (subr da-assembles (int) unit))
+            (val ado-setfield (subr da-assembles (int) unit))
+            (val ado-invoke (subr da-assembles (int int) unit))
+            (val ado-invokeself (subr da-assembles (int) unit))
+            (val ado-return (subr da-assembles (int) unit))
+            (val ado-branch (subr da-assembles (int int) unit))
+            (val ado-held-version (subr da-assembles (bool) unit))
+            (val ado-held-step (subr da-assembles (int int int) unit))))
+
+;;; ------------------------------------------------------------ the compiler
+
+;; What the conductor names of the compiler, for Rust
+;; (`native-direct-arm64.fx`): a procedure's code, as x86_64's
+;; `native-compile-x64-proc` gives it (`dx-made`).
+(define-type native-direct-arm64-sig
+  (moduleof (val native-compile-arm64-proc
+                 (subr da-assembles (string (listof da-bytes @k) da-strings) dx-made))))
