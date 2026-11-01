@@ -4980,3 +4980,36 @@ refusal and a fault each a value.
   now): `KNOWN_GAPS`. And a procedure whose result type is a `poly`,
   `(subr … () code)`, returning one is refused ("a (subr …) is expected
   here, and this is a code"): not looked at.
+
+## 212. Review the `poly` changes of §211 (the user's, 2026-11-01)
+
+For the user to go over with care: what `d144eeb5` changed about `poly`
+types, and whether each fix is right, not only whether the suite passes.
+
+1. **Substitution and a `poly`'s own binders** (§211, 4): `subst_memo`
+   (`check.rs`) and `k-subst-memo` (`check-subst.fx`) now drop from the
+   map the variables a `poly` binds, leaving the `poly` as it is if none
+   are left. The claim: only a `poly` met again within an equi-recursive
+   type binds variables already in the map, every other binder being
+   fresh. Is that so everywhere a map is made (renaming, `proj`,
+   `plambda` against a `poly`, a module's abstract types)? And is the
+   knot refusal that went away (`poly-in-itself.fx`) truly spurious: a
+   command in a list in `r`, each `poly` in its own region?
+2. **Global reads generalizable** (§211, 5): `generalizable` (`check.rs`),
+   `k-generalizable?` and `k-only-alloc?` (`check-expect.fx`), and the
+   typed-cells verifier (`typed_cells.rs`'s `generalize`) let an effect of
+   only `(read (globals …))` or `(read @globals)` through where a value is
+   generalized, `plambda` bodies included. The argument: a `plambda` is
+   erased and its body run once, and a global read depends on no binder.
+   Does it hold for a global redefined, at another type or in a session,
+   after the `poly` value was made; for `(read @globals)`; and for a
+   global whose own type is not a `poly`?
+3. **The first attempt, abandoned**: a `poly` variable compared by
+   subtyping, not generalized, lost instantiation
+   (`distinct_region_binders`, a `.fasl` test). Whether subtyping between
+   `poly`s should take instantiation into account is a question of its own.
+4. **What was left**: the verifier's gap for a `poly` variable
+   generalized (`KNOWN_GAPS`, `poly-global-read.fx` `go`; a local's
+   before); a renaming of the value's binders that broke a verified word;
+   and a procedure returning a `poly`, `(subr … () code)`, refused with "a
+   (subr …) is expected here, and this is a code".
