@@ -529,7 +529,7 @@ REPL.
 | `fx-cells-rsjit-cellcc`             | FX-26          | Rust (`assemble_word`) | the hand machine, as arm64      |
 | `fx-cells-fxjit-cellcc`             | FX-26          | FX-26 (`native.fx`)    | the hand machine, as arm64      |
 | `fx-regs-rsjit-cellcc`              | FX-26          | Rust (register code)   | the hand machine, as arm64      |
-| `fx-regs-fxjit-cellcc`              | FX-26          | FX-26 (`native-x64-regs.fx`) | the hand machine, as x86_64 only |
+| `fx-regs-fxjit-cellcc`              | FX-26          | FX-26 (`native-arm64-regs.fx`) | the hand machine, as arm64 |
 | `fx-regs-fxjit-nativecc`            | FX-26          | FX-26 (`native-direct-x64.fx`) | x86_64 only, the native convention |
 
 And the other commands:
@@ -541,9 +541,10 @@ And the other commands:
 | `fixpt check INPUT`                          | none           | none                   | both checkers, compared    |
 | `fixpt compile INPUT`                        | both, compared | none                   | nothing: the code is shown |
 
-On arm64 there is no `fx-regs-fxjit-…`: register code to arm64 has no
+On arm64 there is `fx-regs-fxjit-cellcc` (`native-arm64-regs.fx`), not
+yet `fx-regs-fxjit-nativecc`: the native convention to arm64 has no
 compiler written in FX-26 (TODO §81). On x86_64 there are both:
-`fx-regs-fxjit-cellcc`, inside the cellular machine, and
+`fx-regs-fxjit-cellcc` (`native-x64-regs.fx`), inside the cellular machine, and
 `fx-regs-fxjit-nativecc`, native procedures, FX all the way down to the
 machine code the REPL runs (Rust keeps finding what to compile and placing
 it, as for the others).

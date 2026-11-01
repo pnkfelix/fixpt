@@ -351,7 +351,8 @@
 (define ar-save (subr (maxeff ar-assembles spin) (int) unit)
   (lambda (m)
     (letrec ((fill (subr (maxeff ar-assembles spin) (int) unit)
-               (lambda (s) (if (> s m) #u (begin (n-e (arm-str n-x15 n-dsp (* 8 s))) (fill (+ s 1)))))))
+               (lambda (s)
+                 (if (> s m) #u (begin (n-e (arm-str n-x15 n-dsp (* 8 s))) (fill (+ s 1)))))))
       (begin
         (set ar-link m)
         (ar-sub-const n-dsp n-dsp (* 8 (+ m 1)))
@@ -383,7 +384,9 @@
               (n-b-cond ar-ne slow)))
         (cond ((or (= r routine-int-add) (= r routine-int-sub))
                (begin
-                 (n-e (if (= r routine-int-add) (arm-adds n-x15 a-result other) (arm-subs n-x15 a-result other)))
+                 (n-e (if (= r routine-int-add)
+                          (arm-adds n-x15 a-result other)
+                          (arm-subs n-x15 a-result other)))
                  (n-b-cond ar-vs slow)
                  (n-e (arm-mov a-result n-x15))))
               ((or (= r routine-int-less) (= r routine-eq) (= r routine-int-eq))
@@ -744,7 +747,8 @@
 ;; the machine's through the state); `slice` is the time slice its next
 ;; slices are, which Rust's code has as a constant
 ;; (`fixpt_runtime::sched::slice`).
-(define native-assemble-arm64-regs (subr (maxeff ar-assembles spin) (tword int int int) ar-regs-assembled)
+(define native-assemble-arm64-regs
+  (subr (maxeff ar-assembles spin) (tword int int int) ar-regs-assembled)
   (lambda (rw far-trap far-exit slice)
     (begin (set ar-slice slice) (ar-assemble rw #f))))
 

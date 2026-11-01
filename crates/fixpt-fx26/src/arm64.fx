@@ -158,7 +158,8 @@
 (define arm-lsl-imm arm-op3
   (lambda (d n s)
     (arm-check (arm-in? s 0 64)
-               (arm-n-t #xD3400000 (arm-sum (arm-f (modulo (- 64 s) 64) 16) (arm-f (- 63 s) 10)) n d))))
+               (arm-n-t #xD3400000 (arm-sum (arm-f (modulo (- 64 s) 64) 16) (arm-f (- 63 s) 10))
+                        n d))))
 ;; `strb wt, [xn]`.
 (define arm-strb arm-op2 (lambda (t n) (arm-sum3 #x39000000 (arm-reg-at n 5) (arm-reg t))))
 (define arm-csel arm-op4

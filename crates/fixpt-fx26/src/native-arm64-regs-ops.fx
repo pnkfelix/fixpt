@@ -42,7 +42,8 @@
 ;; A header of `kind` and `fields` fields, no suffix (`make_header`).
 (define ar-header (subr (maxeff (read @globals) spin) (int int) int)
   (lambda (kind fields)
-    (+ a-tag-header (+ (arithmetic-shift kind header-kind-lo) (arithmetic-shift fields header-fields-lo)))))
+    (+ a-tag-header
+       (+ (arithmetic-shift kind header-kind-lo) (arithmetic-shift fields header-fields-lo)))))
 
 ;;; ------------------------------------------------------------ helpers
 
@@ -69,7 +70,10 @@
     (let ((off (* 8 (- fields f))))
       (if (< off 32768)
           (n-e (arm-ldr dst n-ip off))
-          (begin (n-value n-x16 off) (n-e (arm-add n-x16 n-ip n-x16)) (n-e (arm-ldr dst n-x16 0)))))))
+          (begin
+            (n-value n-x16 off)
+            (n-e (arm-add n-x16 n-ip n-x16))
+            (n-e (arm-ldr dst n-x16 0)))))))
 ;; `dst` := the operand in field `f`: in the instruction if it is
 ;; immediate, else from the word.
 (define ar-constant (subr (maxeff ar-assembles spin) (int tword int int) unit)
@@ -271,7 +275,8 @@
                (else
                 (begin
                   (n-e (arm-and-low n-x13 src 8))
-                  (n-e (arm-cmp-imm n-x13 (modulo (if (string=? name "char?") a-char0 a-f32-0) 256))))))
+                  (n-e (arm-cmp-imm n-x13
+                                    (modulo (if (string=? name "char?") a-char0 a-f32-0) 256))))))
          (ar-boolean ar-eq)
          #t))
       ((string=? name "boolean?")
@@ -358,13 +363,17 @@
 ;; `REGj` as field `j`, for `j` from `j` to `count` (`frozen`, `bloblet`).
 (define ar-reg-fields (subr (maxeff ar-assembles spin) (int int int) unit)
   (lambda (j count total)
-    (if (> j count) #u (begin (ar-field-at (ar-reg j) j total) (ar-reg-fields (+ j 1) count total)))))
+    (if (> j count)
+        #u
+        (begin (ar-field-at (ar-reg j) j total) (ar-reg-fields (+ j 1) count total)))))
 ;; The free values `REGj`… as a closure's, the `i`th first.
 (define ar-frees (subr (maxeff ar-assembles spin) (int int int int) unit)
   (lambda (j last i total)
     (if (> j last)
         #u
-        (begin (ar-field-at (ar-reg j) (+ n-closure-free0 i) total) (ar-frees (+ j 1) last (+ i 1) total)))))
+        (begin
+          (ar-field-at (ar-reg j) (+ n-closure-free0 i) total)
+          (ar-frees (+ j 1) last (+ i 1) total)))))
 ;; The bloblet in `REG1` has a trailer, in `x16` less its tag, and `REG2`
 ;; (8k) is one of its fields, 2 ≤ k ≤ F: else `slow`.
 (define ar-field-check (subr (maxeff ar-assembles spin) (int) unit)

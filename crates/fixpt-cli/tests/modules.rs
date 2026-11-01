@@ -37,13 +37,10 @@ const MODES: [&[&str]; 11] = [
 ];
 
 /// Whether a mode's machine runs here: every one on arm64 and x86_64 (the
-/// stencils where the build made them, `stencils_built`; FX-26's register
-/// code on x86_64 only); elsewhere only those of no machine code.
+/// stencils where the build made them, `stencils_built`); elsewhere only
+/// those of no machine code.
 fn runs_here(mode: &[&str]) -> bool {
     let name = mode.last().copied().unwrap_or("fast");
-    if name == "fx-regs-fxjit-cellcc" {
-        return cfg!(target_arch = "x86_64");
-    }
     if fixpt_native::AVAILABLE || matches!(name, "fast" | "fx-ast-eval" | "fx-cells-rsinterp") {
         return true;
     }
