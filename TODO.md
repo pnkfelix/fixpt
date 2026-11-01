@@ -4869,3 +4869,32 @@ by id (`check-specs.fx`'s `(= r k-int)`) would then fail, as the Rust
 checker's did before Heist's report (`fixpt-nat-int-from-fasl.md`). Not
 seen to happen. Either the reset enters the base types again, or the
 import finds them in `k-base` (which `check-reps.fx` does not see now).
+
+## 210. The cellular machine's code in its words' bloblets, as the native convention's is (the user's, 2026-11-01)
+
+The intention all along (PLAN.md, Phase A′: "a code bloblet's suffix is
+machine code, even for cellular code, where it is the inner
+interpreter"), which history left half done: a cellular word is a code
+bloblet in the heap's code area (`docs/research/code-stubs.md`), but its
+suffix is a stub that enters `foreign`; what the cellular machine
+compiles of it, and the interpretive loops themselves (`docol`, the
+routines), are in the machine's own `CodeSpace` (`cellular.rs`'s
+`NativeMachine`), reached through its table by slot, kept by weak
+references and collected by copying into a space as large, of a fixed
+256 MB. The interpretive loop is meant to be attached to the bloblet, as a
+Forth word's code field is.
+
+Found by its cost: `processes`' `an_attempts_failure_is_its_on_failures_value`
+fills the space (2026-11-01, after the arm64 modules joined the front
+end), a thread's machine keeping each live session's front end, some 74 MB
+each, three kept sessions' and a fourth's past 256 MB; the code space has
+no way to grow, and `install_bytes` takes a word's resume table with no
+collection first. In the code area, a word's code would be its heap's,
+marked and swept with it, the area sized as the heap is.
+
+What it asks, to be worked out: what the dispatch by slot becomes (a
+word's code reached from its bloblet, as a native call reaches a
+procedure's); the resume tables (by `k`, now beside the code); the
+machine's own code, once a heap's or shared; register code's adapters; and
+what the code area's growth and the minors' scans of it (`TODO.md`'s
+"Left: the minors") then cost.
