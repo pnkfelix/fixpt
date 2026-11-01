@@ -161,6 +161,24 @@ fn a_program_fasl_is_stale_when_what_it_uses_changed() {
     assert!(err.contains("`prog.fasl` is stale (`twice` uses `scale`, which is not here at the type it was)"), "{out}{err}");
 }
 
+/// An abbreviation a program's `.fasl` names, compared by its type's digest
+/// first (`Checker::fasl_alias_is`): one defined otherwise where it is
+/// loaded makes it stale.
+#[test]
+fn a_program_fasl_is_stale_when_an_abbreviation_it_names_changed() {
+    let dir = scratch("alias");
+    std::fs::write(dir.join("base.fx"), "(define-type pt (productof (x int) (y int)))\n").expect("written");
+    std::fs::write(dir.join("other.fx"), "(define-type pt (productof (x int) (y bool)))\n").expect("written");
+    std::fs::write(dir.join("prog.fx"), "(define* get-x (subr pure (pt) int) (lambda (p) (extract p x)))\n(write-out \"ran\\n\")\n").expect("written");
+    std::fs::write(dir.join("make.fx"), "(compile-file \"prog.fx\" program)\n").expect("written");
+    let (ok, out, err) = fixpt(&dir, &["run", "base.fx", "make.fx"], &[]);
+    assert!(ok && out.contains("; compiled `prog.fx` to `"), "{out}{err}");
+    let (ok, out, err) = fixpt(&dir, &["run", "base.fx", "prog.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ok && out == "ran\n" && err.contains("`prog.fx` is read from `prog.fasl`"), "{out}{err}");
+    let (ok, out, err) = fixpt(&dir, &["run", "other.fx", "prog.fx"], &[]);
+    assert!(ok && out == "ran\n" && err.contains("`prog.fasl` is stale (the type `pt` is not what it was)"), "{out}{err}");
+}
+
 /// A use's type compared by its digest first (`Checker::fasl_use_digest`):
 /// an abstract type by the `select` that names it, so that one of another
 /// module of the same name is not taken for it.

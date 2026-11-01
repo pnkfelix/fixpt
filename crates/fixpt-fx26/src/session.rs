@@ -2148,9 +2148,9 @@ impl Fx26Session {
         let mut later = std::collections::HashMap::new();
         let names = self.checker.fasl_alias_names(&header.aliases);
         let changed = self.checker.with_fasl_selects(|c| {
-            for (n, t) in &header.aliases {
+            for (n, t, digest) in &header.aliases {
                 let a = c.interner.intern(n);
-                if c.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() == Some(t.as_str()) {
+                if c.fasl_alias_is(a, *digest) || c.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() == Some(t.as_str()) {
                     continue;
                 }
                 if !own.contains(&a) {
@@ -2650,7 +2650,7 @@ impl Fx26Session {
         // Each definition notes those its type names, and those they name.
         let used = self.checker.fasl_aliases_end();
         let aliases = self.checker.fasl_alias_closure(used, &self.checker.fasl_allowed_aliases(&forms));
-        let kept: std::collections::HashMap<&str, &str> = aliases.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+        let kept: std::collections::HashMap<&str, &str> = aliases.iter().map(|(n, t, _)| (n.as_str(), t.as_str())).collect();
         for d in &mut defs {
             let mut types: Vec<String> = crate::fasl::symbols_in(&d.ty).into_iter().filter(|w| kept.contains_key(w.as_str())).collect();
             let mut i = 0;

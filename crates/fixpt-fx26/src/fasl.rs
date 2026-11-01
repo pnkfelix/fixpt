@@ -61,8 +61,9 @@ pub struct Header {
     /// A program's file's definitions kept, each a procedure's, the `i`th
     /// the image's value `i`.
     pub defs: Vec<Def>,
-    /// The type abbreviations its types name, each with what it is.
-    pub aliases: Vec<(String, String)>,
+    /// The type abbreviations its types name, each with what it is and
+    /// that type's digest (`Checker::fasl_use_digest`), compared first.
+    pub aliases: Vec<(String, String, u64)>,
     /// The globals its image's value links to by name ([`Link::Global`]),
     /// the `i`th named by the image's placeholder `(0 . i)`; and the names
     /// of the keywords it holds ([`Link::Keyword`]), placeholders `(4 . i)`.
@@ -219,8 +220,8 @@ impl Header {
         if !self.made.is_empty() {
             out.push_str(&format!("made {}\n", self.made));
         }
-        for (n, t) in &self.aliases {
-            out.push_str(&format!("alias {n} {t}\n"));
+        for (n, t, digest) in &self.aliases {
+            out.push_str(&format!("alias {n} {digest:016x} {t}\n"));
         }
         for g in &self.globals {
             out.push_str(&format!("global {g}\n"));
@@ -296,8 +297,11 @@ impl Header {
                 "said" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.said.push(value.to_string()),
                 "init" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.init = value.to_string(),
                 "alias" => {
-                    let (name, ty) = value.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
-                    h.aliases.push((name.to_string(), ty.to_string()));
+                    let bad = || format!("a header line `{l}`");
+                    let (name, rest) = value.split_once(' ').ok_or_else(bad)?;
+                    let (digest, ty) = rest.split_once(' ').ok_or_else(bad)?;
+                    let digest = u64::from_str_radix(digest, 16).map_err(|_| bad())?;
+                    h.aliases.push((name.to_string(), ty.to_string(), digest));
                 }
                 "global" => h.globals.push(value.to_string()),
                 "use" => {
@@ -766,12 +770,12 @@ impl crate::check::Checker {
         // defined one of their names again).
         let names = self.fasl_alias_names(&header.aliases);
         let changed = self.with_fasl_selects(|c| {
-            header.aliases.iter().find(|(n, t)| {
+            header.aliases.iter().find(|(n, t, digest)| {
                 let a = c.interner.intern(n);
-                c.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() != Some(t.as_str())
+                !c.fasl_alias_is(a, *digest) && c.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() != Some(t.as_str())
             })
         });
-        if let Some((n, _)) = changed {
+        if let Some((n, _, _)) = changed {
             return stale(self, &format!("the type `{n}` is not what it was"));
         }
         // The files it loads, each loaded as the file loads it, from its
@@ -1005,10 +1009,22 @@ impl crate::check::Checker {
     /// not at each type: for many printed where nothing is bound between.
     pub fn with_fasl_selects<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
         let names = self.select_names();
-        let outer = self.fasl_selects.replace(Some(names));
+        let (outer, key) = self.selects_set(names);
         let r = f(self);
         *self.fasl_selects.borrow_mut() = outer;
+        self.fasl_selects_key.set(key);
         r
+    }
+
+    /// `names` the `select`s printing and digests take, and their digest
+    /// the key of the digests made under them; what were before.
+    fn selects_set(&self, names: HashMap<crate::ast::DVar, String>) -> (Option<HashMap<crate::ast::DVar, String>>, u64) {
+        let mut sorted: Vec<(&crate::ast::DVar, &String)> = names.iter().collect();
+        sorted.sort_unstable_by_key(|(v, _)| v.0);
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        sorted.iter().for_each(|(v, s)| (v.0, s).hash(&mut h));
+        let key = self.fasl_selects_key.replace(h.finish());
+        (self.fasl_selects.replace(Some(names)), key)
     }
 
     /// Type `t` as a program's `.fasl` keeps it, to be read back where the
@@ -1026,13 +1042,19 @@ impl crate::check::Checker {
     /// `.fasl` keeps of the type of a global its code uses, compared before
     /// the text, which is printed only if the digests differ.
     pub fn fasl_use_digest(&self, t: crate::ast::TyId) -> u64 {
-        if self.fasl_selects.borrow().is_some() {
-            return self.ty_digest(t);
+        if self.fasl_selects.borrow().is_none() {
+            let (outer, key) = self.selects_set(self.select_names());
+            let d = self.fasl_use_digest(t);
+            *self.fasl_selects.borrow_mut() = outer;
+            self.fasl_selects_key.set(key);
+            return d;
         }
-        let names = self.select_names();
-        let outer = self.fasl_selects.replace(Some(names));
+        let at = (t, self.fasl_selects_key.get());
+        if let Some(d) = self.fasl_digests.borrow().get(&at) {
+            return *d;
+        }
         let d = self.ty_digest(t);
-        *self.fasl_selects.borrow_mut() = outer;
+        self.fasl_digests.borrow_mut().insert(at, d);
         d
     }
 
@@ -1185,7 +1207,7 @@ impl crate::check::Checker {
     /// The abbreviations `used` and those their definitions name, of
     /// `scope`, each as [`fasl_alias_expansion`](Self::fasl_alias_expansion)
     /// writes it with all of them allowed: what a `.fasl` keeps of them.
-    pub fn fasl_alias_closure(&self, used: Vec<fixpt_read::Sym>, scope: &[fixpt_read::Sym]) -> Vec<(String, String)> {
+    pub fn fasl_alias_closure(&self, used: Vec<fixpt_read::Sym>, scope: &[fixpt_read::Sym]) -> Vec<(String, String, u64)> {
         let mut names = used;
         let mut i = 0;
         while i < names.len() {
@@ -1198,14 +1220,27 @@ impl crate::check::Checker {
             }
             i += 1;
         }
-        names.iter().filter_map(|n| self.fasl_alias_expansion(*n, &names).map(|(t, _)| (self.interner.name(*n).to_string(), t))).collect()
+        names
+            .iter()
+            .filter_map(|n| {
+                let (t, _) = self.fasl_alias_expansion(*n, &names)?;
+                Some((self.interner.name(*n).to_string(), t, self.fasl_use_digest(self.type_named(*n)?)))
+            })
+            .collect()
+    }
+
+    /// Whether abbreviation `n` is here the type of digest `digest`
+    /// ([`fasl_use_digest`](Self::fasl_use_digest)): as a `.fasl` kept it,
+    /// compared before its text is printed.
+    pub fn fasl_alias_is(&self, n: fixpt_read::Sym, digest: u64) -> bool {
+        self.type_named(n).is_some_and(|t| self.fasl_use_digest(t) == digest)
     }
 
     /// The names of the abbreviations a `.fasl` keeps (`aliases`, as
     /// [`fasl_alias_closure`](Self::fasl_alias_closure) wrote them): what
     /// each is printed with where the `.fasl` is read, to compare.
-    pub fn fasl_alias_names(&mut self, aliases: &[(String, String)]) -> Vec<fixpt_read::Sym> {
-        aliases.iter().map(|(n, _)| self.interner.intern(n)).collect()
+    pub fn fasl_alias_names(&mut self, aliases: &[(String, String, u64)]) -> Vec<fixpt_read::Sym> {
+        aliases.iter().map(|(n, _, _)| self.interner.intern(n)).collect()
     }
 }
 

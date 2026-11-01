@@ -458,6 +458,14 @@ pub struct Checker {
     /// what `print_for_fasl` starts from, each abstract type of a module a
     /// global holds named, made once rather than at each type printed.
     pub(crate) fasl_selects: std::cell::RefCell<Option<HashMap<DVar, String>>>,
+    /// A digest of `fasl_selects`, while it is set: what the digests made
+    /// under it (`fasl_digests`) are kept by, with their types.
+    pub(crate) fasl_selects_key: std::cell::Cell<u64>,
+    /// The digests of types `fasl_use_digest` made, by type and the
+    /// `select`s they were made under: a type a global or an abbreviation
+    /// has, its definition checked, is not changed after, and every file a
+    /// program loads asks again of the same ones.
+    pub(crate) fasl_digests: std::cell::RefCell<HashMap<(TyId, u64), u64>>,
     /// While a type with a cycle is printed: each node it reaches printed as
     /// its class's first, the classes those of the type's minimal graph, so
     /// that a type prints as itself however it was written or made (the
@@ -1014,6 +1022,8 @@ impl Checker {
             print_expanded: std::cell::Cell::new(false),
             print_for_fasl: std::cell::RefCell::new(None),
             fasl_selects: std::cell::RefCell::new(None),
+            fasl_selects_key: std::cell::Cell::new(0),
+            fasl_digests: std::cell::RefCell::new(HashMap::new()),
             print_canon: std::cell::RefCell::new(None),
             print_shallow: std::cell::Cell::new(false),
             print_subrs: std::cell::Cell::new(0),

@@ -4573,6 +4573,32 @@ each global's type once a file, and prints only where they differ. On
 s7st every one of its 664 uses matched by digest; its warm start 0.67 s
 to 0.56 s. What prints types now is each definition checked again (3).
 
+**Toward 3 (2026-10-31).** Measured first, on s7st (0.56 s): of the
+526 ms its 13 files take to load, 182 ms was each `.fasl`'s preamble,
+nearly all of it its ~50 type abbreviations printed to compare (0.23 ms
+each); 178 ms its 391 definitions (the FX-26 checker's check of each
+declaration 90 ms, the definitions' stamps 41 ms, the Rust checker 38 ms);
+152 ms its 373 forms run from source. So an `alias` line keeps its type's
+digest too (`Checker::fasl_alias_is`), and the digests are kept by type
+and `select`s across the files of a run (`Checker::fasl_digests`): every
+one of its 636 matched, the preamble 0.3 ms a file but the first's 5 ms,
+the warm start 0.40 s.
+
+What is left of a definition is not its check but its type, read by both
+checkers to enter it: the FX-26 check costs with the text's length (33 µs
+of each call is the call; a 25 KB declaration takes 8.6 ms), and s7st's
+types are 3 to 4 KB each, nearly all of it its transitive `(read (globals
+…))`, hundreds of names (`s7-serve`'s 300 and more): what each checker
+reads, sorts, digests and prints of every definition grows with how many
+globals came before it. Trusting the stamps would save little of that.
+Ways ahead, for the user to choose (2026-10-31): a set of globals named
+once and shared (by the definition it is that of, say) rather than
+written out in each type; the types kept in a form each checker loads
+without reading text (the binary encoding above, or the FX-26 checker's
+own entries as heap data); or `ty_digest` without printing each node's
+effect and region (`show_effect` in `ty_label`), which the stamps' 41 ms
+is.
+
 Walks of a whole environment found besides (2026-10-31), for later:
 `uses_of`, `users_of` and `direct_users_of` walk the definitions (an
 index by the names each defines and uses; `k-users-of`,
