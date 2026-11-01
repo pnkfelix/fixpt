@@ -48,6 +48,13 @@ host Erwig's and Mokhov's papers, are outside this session's network.
      DAG, with memoization, and a fixpoint on a cyclic graph.
   5. *Closure over a semiring* (Carré, Dolan, GraphBLAS): one algorithm,
      and the semiring chooses the problem.
+- **For garbage collection, answer 4 explains the most** (§2.7), once
+  it includes greatest fixpoints as well as least. In Bacon, Cheng and
+  Rajan's unified theory, tracing and reference counting solve one
+  equation: tracing finds its least solution, and reference counting
+  its greatest. The two differ by the garbage cycles. Hybrid collectors
+  split the equations and hold the terms that cross the split fixed.
+  `gc-fixpoints.fx` solves one heap both ways.
 - **In FX-26, the types show the move from cyclic to finite** (§3).
   - In `dfs-forest.fx` the graph is a frozen array of successor lists
     at `const`, which may hold cycles. The search must say `spin`. Its
@@ -232,6 +239,109 @@ All four are *memory*. They need either higher-rank types or nested
 datatypes, which FX-26 has only partly (`docs/fx26.md`, "Higher kinds";
 non-regular generative types). They are not pursued here.
 
+### 2.7 The same equations, solved twice: garbage collection
+
+The user's question: which of these models best explains garbage
+collectors, in the sense of David F. Bacon's unified theory? Answer 4,
+with one addition. §2.4 asks only for the *least* solution, and a
+collector needs the greatest as well.
+
+Bacon, Cheng and Rajan ("A unified theory of garbage collection", OOPSLA
+2004, IBM T. J. Watson; *record*: the abstract and course write-ups, not
+the paper) treat reference counts as a fixpoint of one equation over the
+object graph. Roughly, for each object `x`:
+
+    ρ(x) = |{ root references to x }| + |{ w → x : ρ(w) > 0 }|
+
+(the formula from memory, in the spirit of the paper's). When there is
+cyclic garbage, the equation has more than one solution, and any object
+whose count is zero in a solution may be freed (*record*). The two
+families of collector compute different solutions:
+- **Tracing computes the least.** Counts start at zero, and grow only
+  along edges from what the roots have reached. Its work is proportional
+  to the live objects.
+- **Reference counting computes the greatest.** It starts from the
+  counts as they stand, and frees what reaches zero, decrementing its
+  successors. Its work is proportional to the dead objects.
+
+The difference between the two solutions is the cyclic garbage. A cycle
+that no root reaches satisfies the equation with every count positive,
+since each member supports another (*record*). That is why reference
+counting without a cycle collector leaks cycles. It also explains the
+paper's "matter" and "anti-matter" for the live and the dead (*memory*).
+
+Counts are more than needed to see the shape. The boolean form is
+
+    live(x) = root(x) ∨ ∃ w. (w → x ∧ live(w))
+
+whose least fixpoint is what tracing keeps, and whose greatest is "not
+proven dead", which is what counting keeps. `gc-fixpoints.fx` computes
+both on one heap: root 0; 0 → 1 → 2 live; 3 → 4 → 1, garbage pointing
+into the live part; and 5 ⇄ 6, a garbage cycle. Tracing keeps `(0 1 2)`.
+Counting frees 3, then 4, the cascade stopping at 1, whose count stays
+positive, and keeps `(0 1 2 5 6)`.
+
+What this view explains:
+- **Hybrid collectors.** The paper's main point is that real collectors
+  partition the heap and use different methods on different parts
+  (*record*). In equation terms, the system is split into blocks, and
+  the terms that cross blocks are held at a conservative value instead
+  of being solved. A generational collector traces the nursery and takes
+  the remembered set (references from old objects to young ones) as
+  extra roots. That is a count of cross-block references, held fixed
+  through a minor collection. Deferred reference counting does the
+  reverse, tracing the stack and counting the heap (*memory*). fixpt's
+  own heap is of the first kind: a card table and remembered set filled
+  by a write barrier (`crates/fixpt-heap/src/heap.rs`). This is also how
+  modular dataflow analysis works: a callee's summary is held fixed
+  while its caller is solved.
+- **Cycle collection.** Trial deletion (Bacon and Rajan, ECOOP 2001,
+  *memory*) takes candidate roots of garbage cycles, subtracts the counts
+  their subgraph contributes to itself, and restores those still
+  supported from outside. That amounts to computing a local least
+  fixpoint inside the greatest one that counting left.
+- **Acyclic data.** §2.4 says that on a DAG the equations have one
+  solution. So the least and greatest fixpoints coincide there, and
+  counting is complete on acyclic data. In FX-26 the caution is that
+  `acyclic` describes a value's own frozen structure. A frozen list may
+  still hold a `ref`, and a later write to that `ref` can close a cycle
+  through the list. But data of the `data` kind at `acyclic` has no
+  writable part, so nothing reachable from it can be on a cycle. Such
+  data could be reference-counted with no cycle collector. Koka's
+  Perceus claims to be garbage-free only for programs without cycles
+  (`sets-and-maps.md` §2.3), for this reason.
+
+The other models illuminate parts:
+- **Erwig's decomposition is counting's cascade.** Freeing an object is
+  matching it and dropping its context, which decrements its
+  successors. Repeatedly removing objects whose count is zero is Kahn's
+  topological-sort algorithm, which stops where a cycle remains (the
+  comment at `free` in `gc-fixpoints.fx`). The order of frees does not
+  change the result, so `ufold`'s freedom of order (§2.1) is harmless
+  here.
+- **King and Launchbury's tree is tracing's order.** Marking is a
+  traversal, and a copying collector's forwarding pointers record a
+  spanning tree of the live heap. Cheney's algorithm visits breadth
+  first, and a mark stack depth first. Hierarchical and approximately
+  depth-first copying exist for locality (*memory*). The order matters
+  for performance, but says nothing about how tracing and counting
+  relate.
+- **Semiring closure captures tracing, not counting.** Reachability from
+  the roots is a boolean closure. But a reference count is not a count
+  of paths. It is an in-degree from objects that are live, and the
+  threshold `ρ(w) > 0` makes the equation nonlinear, so it is not a
+  closure over any semiring. The threshold is exactly what separates the
+  two collectors.
+- **Mokhov's algebra** is about building graphs, and a collector's work
+  is about how a graph is reached. It has little to say here.
+
+A name to keep apart: the unified theory's David F. Bacon (PhD
+Berkeley 1997, advised by Susan L. Graham; later IBM Research) and the
+David Bacon of GNU SETL (PhD NYU 2000, *SETL for Internet Data
+Processing*, advised by J. T. Schwartz) appear to be two people. Their
+degrees, years, institutions and advisors differ (*record*, for both
+dissertations; neither front matter was reached).
+
 ## 3. In FX-26
 
 ### 3.1 The search's tree: `dfs-forest.fx`
@@ -381,6 +491,10 @@ that is one design for all of them, not four.
    show what the kernel types need?
 4. Are Mokhov's laws worth stating as specifications, as a test case for
    `assert` on algebraic laws?
+5. Is §2.7's observation worth pursuing: that data of the `data` kind
+   at `acyclic`, with no writable part, could be reference-counted with
+   no cycle collector, for instance in a place whose objects are all of
+   that kind?
 
 ## The toy programs
 
@@ -389,6 +503,7 @@ that is one design for all of them, not four.
 | `dfs-forest.fx`         | a search from a cyclic `const` graph to an `acyclic` forest, then a `pure` fold over it        | yes          | `(5 4 0 1 3 2)`                             |
 | `lattice-fixpoint.fx`   | a least-fixpoint solver over a lattice dictionary; which nodes reach 3                         | yes          | `(#t #t #t #t #t #f)`                       |
 | `semiring-closure.fx`   | one closure, two semirings: shortest paths and reachability                                    | yes          | `((0 2 5) (1 3 0) (1))`                     |
+| `gc-fixpoints.fx`       | one heap, both fixpoints: tracing (least) and reference counting (greatest)                    | yes          | `((0 1 2) (0 1 2 5 6))`                     |
 
 ## Sources
 
@@ -406,6 +521,10 @@ otherwise from memory. "Memory" means nothing was reached.
 | Plump, "The design of GP 2", WRS 2011; Campbell, Courtehoute, Plump, CALCO 2019                                                 | https://arxiv.org/pdf/1204.5541; https://eprints.whiterose.ac.uk/195068/; https://eprints.whiterose.ac.uk/195047/                                                                        | record                                 |
 | Liu, Stoller, "From Datalog rules to efficient programs with time and space guarantees", TOPLAS 31(6), 2009; PPDP 2003          | https://www3.cs.stonybrook.edu/~stoller/rules-TOPLAS.html                                                                                                                                | record                                 |
 | Dolan, "Fun with semirings: a functional pearl on the abuse of linear algebra", ICFP 2013                                       | described in https://arxiv.org/pdf/2202.07577                                                                                                                                            | record                                 |
+| Bacon, Cheng, Rajan, "A unified theory of garbage collection", OOPSLA 2004                                                     | https://www.oopsla.org.splashcon.hosting.acm.org/2004/ShowEventa9bc.html; https://www.cs.cornell.edu/courses/cs6120/2019fa/blog/unified-theory-gc; https://www.cs.cornell.edu/courses/cs6120/2022sp/blog/unified-gc/ (the paper at web.eecs.umich.edu was not reachable) | record                                 |
+| Bacon, Rajan, "Concurrent cycle collection in reference counted systems", ECOOP 2001                                           | —                                                                                                                                                                                        | memory                                 |
+| D. F. Bacon, *Fast and effective optimization of statically typed object-oriented languages*, PhD, UC Berkeley, 1997            | https://en.wikipedia.org/wiki/David_F._Bacon; https://www.mathgenealogy.org/id.php?id=120396; https://www2.eecs.berkeley.edu/Pubs/TechRpts/1998/5791.html                              | record                                 |
+| D. Bacon, *SETL for Internet Data Processing*, PhD, NYU, 2000                                                                  | https://cs.nyu.edu/media/publications/bacon_david.pdf (not reachable; described by search results)                                                                                      | record                                 |
 | Carré, *Graphs and Networks*, 1979; Backhouse, Carré, "Regular algebra applied to path-finding problems", 1975                  | —                                                                                                                                                                                        | memory                                 |
 | Kildall, "A unified approach to global program optimization", POPL 1973                                                         | —                                                                                                                                                                                        | memory                                 |
 | Magnusson, Hedin, circular reference attributed grammars (JastAdd)                                                              | —                                                                                                                                                                                        | memory                                 |
