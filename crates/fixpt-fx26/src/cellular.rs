@@ -2768,17 +2768,35 @@ impl<'a> Compiler<'a> {
         // Else as a reference to it in the body was checked: the binding the
         // body saw (a parameter that hides it is found first, above).
         let span = c.arena.span_of(body);
+        // The first such reference, by where it is: the facts are a map, and
+        // two references may have been checked at types that differ.
         let referred = |n: &Sym| {
-            c.facts.types.iter().find_map(|(e, t)| {
-                let at = c.arena.span_of(*e);
-                (at.file == span.file && at.start >= span.start && at.end <= span.end && matches!(c.arena.exp_at(*e), Exp::Var(m) if m == n)).then_some(*t)
-            })
+            c.facts
+                .types
+                .iter()
+                .filter_map(|(e, t)| {
+                    let at = c.arena.span_of(*e);
+                    (at.file == span.file && at.start >= span.start && at.end <= span.end && matches!(c.arena.exp_at(*e), Exp::Var(m) if m == n))
+                        .then_some(((at.start, e.0), *t))
+                })
+                .min_by_key(|(k, _)| *k)
+                .map(|(_, t)| t)
         };
-        let elsewhere = |n: &Sym| {
-            referred(n)
-                .or_else(|| c.facts.lambdas.values().flat_map(|s| s.params.iter().chain(&s.frees)).find(|(m, _)| m == n).map(|(_, t)| *t))
-                .or_else(|| c.global_type(*n))
+        // Else as the innermost lambda around this one that binds it has it:
+        // another lambda's of the name (another `tag`, say) is not this one's.
+        let around = |n: &Sym| {
+            c.facts
+                .lambdas
+                .iter()
+                .filter(|(e, _)| {
+                    let at = c.arena.span_of(**e);
+                    at.file == span.file && at.start <= span.start && at.end >= span.end
+                })
+                .filter_map(|(e, s)| s.params.iter().chain(&s.frees).find(|(m, _)| m == n).map(|(_, t)| ((c.arena.span_of(*e).start, e.0), *t)))
+                .max_by_key(|(k, _)| *k)
+                .map(|(_, t)| t)
         };
+        let elsewhere = |n: &Sym| referred(n).or_else(|| around(n)).or_else(|| c.global_type(*n));
         let by_name = |n: &Sym| sig.params.iter().rev().chain(sig.frees.iter()).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| included(n)).or_else(|| elsewhere(n));
         let (Some(ps), Some(fs)) = (params.iter().map(by_name).collect::<Option<Vec<_>>>(), fv.iter().map(by_name).collect::<Option<Vec<_>>>()) else { return };
         let poly = self.c.facts.generalized.get(&body).cloned().unwrap_or_default();

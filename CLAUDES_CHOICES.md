@@ -3541,3 +3541,14 @@ first, resuming later if Yank needs it.
 - **The step limit stays the form's**, as `attempt` leaves it: a budget is
   not a way round it. The tests' spinning bodies take 1 ms, as native code
   spends the default limit in about 20.
+
+## A closure's certificate takes its free variables' types by scope (2026-11-01)
+
+Found by `deep-handler.fx` verifying in five runs of eight: the guess of a
+closure's free variable's type (`cellular.rs`, as the certificate is made)
+took the first match from hash maps, a reference's type and then any
+lambda's binding of the name. Two references may be checked at types that
+differ, and another lambda's `tag` is not this one's. Now the earliest
+reference by place, then the innermost lambda around this one that binds
+it. The certificate is not trusted either way; this makes it the same
+from run to run, and right where the name is shadowed.
