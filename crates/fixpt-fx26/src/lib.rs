@@ -616,6 +616,22 @@ pub const NATIVE_LAYOUT: &str = include_str!("native-layout.fx");
 /// conductor.
 pub const NATIVE: &str = include_str!("native.fx");
 
+/// Register code compiled to arm64 machine code, in FX-26: the arm64
+/// machine's `assemble_register_word`, over [`NATIVE`]'s assembler, as
+/// [`NATIVE_X64_REGS`] is for x86_64.
+pub const NATIVE_ARM64_REGS: &str = include_str!("native-arm64-regs.fx");
+
+/// Its fast paths and what it does inline, and the helpers they share.
+pub const NATIVE_ARM64_REGS_OPS: &str = include_str!("native-arm64-regs-ops.fx");
+
+/// What [`NATIVE_ARM64_REGS`] knows of the arm64 machine's register code
+/// beyond [`NATIVE_LAYOUT`], generated from it.
+pub const NATIVE_ARM64_REGS_LAYOUT: &str = include_str!("native-arm64-regs-layout.fx");
+
+/// Their types, and the signatures of what they are given: a module file
+/// of no state (`TODO.md` §68).
+pub const NATIVE_ARM64_REGS_TYPES: &str = include_str!("native-arm64-regs-types.fx");
+
 /// The checker written in FX-26, over the parser's trees, in files of its
 /// parts, in order: types, effects, the environment, printing, unions, reading
 /// descriptions, resolving them, errors, modules' descriptions, subtyping,
@@ -678,7 +694,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 182] = [
+pub const FRONT_END_MODULES: [(&str, &str); 186] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -709,6 +725,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 182] = [
     ("compile-types.fx", COMPILE_TYPES),
     ("native-types.fx", NATIVE_TYPES),
     ("arm64-types.fx", ARM64_TYPES),
+    ("native-arm64-regs-types.fx", NATIVE_ARM64_REGS_TYPES),
     ("convention-types.fx", CONVENTION_TYPES),
     ("x86_64-types.fx", X86_64_TYPES),
     ("native-x64-types.fx", NATIVE_X64_TYPES),
@@ -738,6 +755,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 182] = [
     ("eval-bloblets.fx", EVAL_BLOBLETS),
     ("eval-core.fx", EVAL_CORE),
     ("native-layout.fx", NATIVE_LAYOUT),
+    ("native-arm64-regs-layout.fx", NATIVE_ARM64_REGS_LAYOUT),
     ("arm64.fx", ARM64),
     ("convention.fx", CONVENTION),
     ("x86_64.fx", X86_64),
@@ -760,6 +778,8 @@ pub const FRONT_END_MODULES: [(&str, &str); 182] = [
     ("native-x64-regs-ops.fx", NATIVE_X64_REGS_OPS),
     ("native-x64-regs.fx", NATIVE_X64_REGS),
     ("native.fx", NATIVE),
+    ("native-arm64-regs-ops.fx", NATIVE_ARM64_REGS_OPS),
+    ("native-arm64-regs.fx", NATIVE_ARM64_REGS),
     ("compile-twins-types.fx", COMPILE_TWINS_TYPES),
     ("compile-inline-types.fx", COMPILE_INLINE_TYPES),
     ("compile-programs.fx", COMPILE_PROGRAMS),

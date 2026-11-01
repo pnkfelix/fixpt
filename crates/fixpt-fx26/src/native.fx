@@ -105,12 +105,23 @@
 (define n-fixup (->* (n-fix) unit)
   (lambda (f) (begin (set n-fixups (cons f (get n-fixups))) (n-e 0))))
 (define n-b (->* (int) unit) (lambda (l) (n-fixup (fix-b (n-here) l))))
+(define n-bl (->* (int) unit) (lambda (l) (n-fixup (fix-bl (n-here) l))))
+;; Every conditional branch as the opposite condition over a `b`
+;; (`long_branches`): for code too long for their 19 bits, which
+;; `n-branches-fit?` finds after a first assembly. Register code's
+;; (`native-arm64-regs.fx`); never a word's here.
+(define n-long (ref bool @k) (new #f))
 (define n-b-cond (->* (int int) unit)
-  (lambda (c l) (n-fixup (fix-bcond (n-here) l c))))
+  (lambda (c l)
+    (if (get n-long)
+        (begin (n-e (bitwise-xor (arm-b-cond c 2) 1)) (n-b l))
+        (n-fixup (fix-bcond (n-here) l c)))))
 (define n-cbz (->* (int int) unit)
-  (lambda (r l) (n-fixup (fix-cbz (n-here) l r))))
+  (lambda (r l)
+    (if (get n-long) (begin (n-e (arm-cbnz r 2)) (n-b l)) (n-fixup (fix-cbz (n-here) l r)))))
 (define n-cbnz (->* (int int) unit)
-  (lambda (r l) (n-fixup (fix-cbnz (n-here) l r))))
+  (lambda (r l)
+    (if (get n-long) (begin (n-e (arm-cbz r 2)) (n-b l)) (n-fixup (fix-cbnz (n-here) l r)))))
 
 ;; Trap with `code` and `detail` if condition `c` holds.
 (define n-trap-if (->* (int int int) unit)
@@ -145,12 +156,35 @@
         (begin
           (tagcase (car fs)
             (fix-b (at l) (array-set! (get n-code) at (arm-b (n-dist at l))))
+            (fix-bl (at l) (array-set! (get n-code) at (arm-bl (n-dist at l))))
             (fix-bcond (at l c) (array-set! (get n-code) at (arm-b-cond c (n-dist at l))))
             (fix-cbz (at l r) (array-set! (get n-code) at (arm-cbz r (n-dist at l))))
             (fix-cbnz (at l r) (array-set! (get n-code) at (arm-cbnz r (n-dist at l)))))
           (n-patch (cdr fs))))))
 (define n-code-list (->* (int n-instrs) n-instrs)
   (lambda (i acc) (if (< i 0) acc (n-code-list (- i 1) (cons (array-ref (get n-code) i) acc)))))
+
+;; Where label `l` is, in instructions from the start.
+(define n-label-at (->* (int) int) (lambda (l) (array-ref (get n-labels) l)))
+;; Whether every branch reaches its label (`branches_fit`): a `b` or a
+;; `bl` has 26 bits, a conditional one 19.
+(define n-reaches? (->* (int int int) bool)
+  (lambda (at l bits)
+    (let ((d (if (array-ref (get n-bound) l) (- (array-ref (get n-labels) l) at) 0))
+          (half (arithmetic-shift 1 (- bits 1))))
+      (and (>= d (- 0 half)) (< d half)))))
+(define n-fits? (->* ((listof n-fix @k)) bool)
+  (lambda (fs)
+    (cond ((null? fs) #t)
+          ((tagcase (car fs)
+             (fix-b (at l) (n-reaches? at l 26))
+             (fix-bl (at l) (n-reaches? at l 26))
+             (fix-bcond (at l c) (n-reaches? at l 19))
+             (fix-cbz (at l r) (n-reaches? at l 19))
+             (fix-cbnz (at l r) (n-reaches? at l 19)))
+           (n-fits? (cdr fs)))
+          (else #f))))
+(define n-branches-fit? (->* () bool) (lambda () (n-fits? (get n-fixups))))
 
 ;; The code, every branch patched.
 (define n-finish (->* () (listof int @k))
@@ -162,7 +196,7 @@
 (define n-reset (->* () unit)
   (lambda ()
     (begin
-      (set n-len 0) (set n-nlabels 0) (set n-fixups nil) (set n-stubs nil)
+      (set n-len 0) (set n-nlabels 0) (set n-fixups nil) (set n-stubs nil) (set n-long #f)
       (set n-cont -1) (set n-target -1) (set n-target-cell -1)
       (set n-trap-common (n-label))
       (set n-exit-common (n-label)))))

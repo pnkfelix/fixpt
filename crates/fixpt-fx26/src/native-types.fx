@@ -16,6 +16,7 @@
 ;; its condition or register.
 (define-datatype n-fix
   (fix-b int int)
+  (fix-bl int int)
   (fix-bcond int int int)
   (fix-cbz int int int)
   (fix-cbnz int int int))

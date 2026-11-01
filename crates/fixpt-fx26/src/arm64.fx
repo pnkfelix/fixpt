@@ -69,6 +69,7 @@
 (define arm-ldr-pre arm-op3 (lambda (t n imm) (arm-mem9 #xF8400C00 t n imm)))
 (define arm-str-post arm-op3 (lambda (t n imm) (arm-mem9 #xF8000400 t n imm)))
 (define arm-str-pre arm-op3 (lambda (t n imm) (arm-mem9 #xF8000C00 t n imm)))
+(define arm-ldur-w arm-op3 (lambda (t n imm) (arm-mem9 #xB8400000 t n imm)))
 (define arm-ldur arm-op3 (lambda (t n imm) (arm-mem9 #xF8400000 t n imm)))
 (define arm-stur arm-op3 (lambda (t n imm) (arm-mem9 #xF8000000 t n imm)))
 
@@ -118,6 +119,22 @@
 (define arm-cmp arm-op2 (lambda (n m) (arm-reg3 #xEB000000 31 n m)))
 (define arm-mov arm-op2 (lambda (d m) (arm-reg3 #xAA000000 d 31 m)))
 
+;; The same of register code (`regcode.rs`): `add xd, xn, xm, lsl #s`;
+;; `sdiv`, `eor`, `mul`, `smulh`, `and`, `lslv`, `asrv`; and `msub xd, xn,
+;; xm, xa`, `a − n × m`.
+(define arm-add-lsl arm-op4
+  (lambda (d n m s)
+    (arm-check (arm-in? s 0 64) (arm-n-t #x8B000000 (arm-sum (arm-reg-at m 16) (arm-f s 10)) n d))))
+(define arm-sdiv arm-op3 (lambda (d n m) (arm-reg3 #x9AC00C00 d n m)))
+(define arm-eor arm-op3 (lambda (d n m) (arm-reg3 #xCA000000 d n m)))
+(define arm-mul arm-op3 (lambda (d n m) (arm-reg3 #x9B007C00 d n m)))
+(define arm-smulh arm-op3 (lambda (d n m) (arm-reg3 #x9B407C00 d n m)))
+(define arm-and arm-op3 (lambda (d n m) (arm-reg3 #x8A000000 d n m)))
+(define arm-lslv arm-op3 (lambda (d n m) (arm-reg3 #x9AC02000 d n m)))
+(define arm-asrv arm-op3 (lambda (d n m) (arm-reg3 #x9AC02800 d n m)))
+(define arm-msub arm-op4
+  (lambda (d n m a) (arm-n-t #x9B008000 (arm-sum (arm-reg-at m 16) (arm-reg-at a 10)) n d)))
+
 ;; The low `bits` bits: 1 ≤ bits < 64. The mask's field is its width less
 ;; one at 10.
 (define arm-low-mask (->* (int) int)
@@ -137,6 +154,11 @@
   (lambda (op d n s) (arm-check (arm-in? s 0 64) (arm-n-t op (arm-f s 16) n d))))
 (define arm-asr-imm arm-op3 (lambda (d n s) (arm-shift-imm #x9340FC00 d n s)))
 (define arm-lsr-imm arm-op3 (lambda (d n s) (arm-shift-imm #xD340FC00 d n s)))
+;; `lsl xd, xn, #s`, 0 ≤ s < 64: a `ubfm` of 64 − s and 63 − s.
+(define arm-lsl-imm arm-op3
+  (lambda (d n s)
+    (arm-check (arm-in? s 0 64)
+               (arm-n-t #xD3400000 (arm-sum (arm-f (modulo (- 64 s) 64) 16) (arm-f (- 63 s) 10)) n d))))
 ;; `strb wt, [xn]`.
 (define arm-strb arm-op2 (lambda (t n) (arm-sum3 #x39000000 (arm-reg-at n 5) (arm-reg t))))
 (define arm-csel arm-op4
@@ -175,4 +197,5 @@
   (lambda (t words) (arm-sum3 #xB5000000 (arm-simm-at words 19 5) (arm-reg t))))
 (define arm-br (->* (int) int) (lambda (n) (arm-sum #xD61F0000 (arm-reg-at n 5))))
 (define arm-blr (->* (int) int) (lambda (n) (arm-sum #xD63F0000 (arm-reg-at n 5))))
-(define arm-ret int #xD65F03C0)))
+(define arm-ret int #xD65F03C0)
+(define arm-nop int #xD503201F)))

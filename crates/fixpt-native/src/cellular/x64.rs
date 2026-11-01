@@ -37,7 +37,7 @@
 
 mod regcode;
 pub use regcode::{assemble_adapter, assemble_register_word, fx26_regs_module};
-pub(crate) use regcode::dump;
+pub(crate) use regcode::{dump, fx26_regs_tables};
 
 use super::State;
 use crate::x86_64::*;

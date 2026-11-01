@@ -53,6 +53,7 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
                 add("arm-str-pre", vec![t as i64, n as i64, imm], oracle(|| a::str_pre(t, n, imm)));
                 add("arm-ldur", vec![t as i64, n as i64, imm], oracle(|| a::ldur(t, n, imm)));
                 add("arm-stur", vec![t as i64, n as i64, imm], oracle(|| a::stur(t, n, imm)));
+                add("arm-ldur-w", vec![t as i64, n as i64, imm], oracle(|| a::ldur_w(t, n, imm)));
             }
             for off in OFF12 {
                 add("arm-ldr", vec![t as i64, n as i64, off as i64], oracle(|| a::ldr(t, n, off)));
@@ -75,6 +76,7 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
             }
             for sh in [0u32, 3, 63, 64] {
                 add("arm-asr-imm", vec![t as i64, n as i64, sh as i64], oracle(|| a::asr_imm(t, n, sh)));
+                add("arm-lsl-imm", vec![t as i64, n as i64, sh as i64], oracle(|| a::lsl_imm(t, n, sh)));
             }
             add("arm-ldr-reg", vec![t as i64, n as i64, 13], oracle(|| a::ldr_reg(t, n, 13)));
             for m in [0u32, 16, 31] {
@@ -83,6 +85,17 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
                 add("arm-adds", vec![t as i64, n as i64, m as i64], oracle(|| a::adds(t, n, m)));
                 add("arm-subs", vec![t as i64, n as i64, m as i64], oracle(|| a::subs(t, n, m)));
                 add("arm-orr", vec![t as i64, n as i64, m as i64], oracle(|| a::orr(t, n, m)));
+                add("arm-sdiv", vec![t as i64, n as i64, m as i64], oracle(|| a::sdiv(t, n, m)));
+                add("arm-eor", vec![t as i64, n as i64, m as i64], oracle(|| a::eor(t, n, m)));
+                add("arm-mul", vec![t as i64, n as i64, m as i64], oracle(|| a::mul(t, n, m)));
+                add("arm-smulh", vec![t as i64, n as i64, m as i64], oracle(|| a::smulh(t, n, m)));
+                add("arm-and", vec![t as i64, n as i64, m as i64], oracle(|| a::and(t, n, m)));
+                add("arm-lslv", vec![t as i64, n as i64, m as i64], oracle(|| a::lslv(t, n, m)));
+                add("arm-asrv", vec![t as i64, n as i64, m as i64], oracle(|| a::asrv(t, n, m)));
+                add("arm-msub", vec![t as i64, n as i64, m as i64, 19], oracle(|| a::msub(t, n, m, 19)));
+                for sh in [0u32, 1, 3, 63, 64] {
+                    add("arm-add-lsl", vec![t as i64, n as i64, m as i64, sh as i64], oracle(|| a::add_lsl(t, n, m, sh)));
+                }
             }
             for imm in PAIR {
                 add("arm-stp-pre", vec![t as i64, 30, n as i64, imm], oracle(|| a::stp_pre(t, 30, n, imm)));
@@ -133,6 +146,11 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
         sc.view(|v| v.get(r).fixnum())
     });
     assert_eq!(ret, Some(a::ret() as i64));
+    let nop = s.scope(|sc| {
+        let r = sc.global(&"fx:arm-nop").expect("bound");
+        sc.view(|v| v.get(r).fixnum())
+    });
+    assert_eq!(nop, Some(a::NOP as i64));
     eprintln!("{} encodings agree", cases.len());
 }
 
