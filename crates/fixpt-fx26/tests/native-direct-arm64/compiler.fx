@@ -10,7 +10,7 @@
 (define asm ((load-input "fx26:native-direct-arm64-asm.fx") arm64 dl))
 (define reps ((load-input "fx26:native-reps.fx") xl layout))
 (define raw ((load-input "fx26:native-direct-arm64-raw.fx") arm64 dl asm))
-(define flat ((load-input "fx26:native-direct-arm64-flat.fx") arm64 dl asm raw))
+(define flat ((load-input "fx26:native-direct-arm64-flat.fx") arm64 dl asm))
 (define proc ((load-input "fx26:native-direct-arm64-proc.fx") dl layout asm reps))
 (define ops
   ((load-input "fx26:native-direct-arm64-ops.fx") arm64 dl layout asm reps raw proc))
