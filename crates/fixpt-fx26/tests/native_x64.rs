@@ -188,19 +188,22 @@ fn every_register_word_of_the_front_end_as_the_rust_compiler_compiles_it() {
     compare_registers(usize::MAX);
 }
 
-/// The native convention's procedures compiled to x86_64 by the compiler
-/// written in FX-26 (`src/native-direct-x64.fx`) against the Rust one
-/// (`fixpt_native::direct`'s `procedure_x64`), its oracle: every register
-/// word of the front end compiled with register code, each as a closure
-/// of its own, its procedure the same bytes, the same fields and the same
-/// call-outs as Rust makes it, or both refusing it (`compile_each`,
-/// `fx_begin_each`, its own procedure only). `limit` words, or all of
-/// them. Each machine compiles only these, in order, so their call-outs
-/// are numbered alike.
+/// The native convention's procedures compiled to this machine by the
+/// compiler written in FX-26 (`src/native-direct-x64.fx` for x86_64,
+/// `src/native-direct-arm64.fx` for arm64) against the Rust one
+/// (`fixpt_native::direct`'s `procedure_x64`, `procedure`), its oracle:
+/// every register word of the front end compiled with register code, each
+/// as a closure of its own, its procedure the same bytes, the same fields
+/// and the same call-outs as Rust makes it, or both refusing it
+/// (`compile_each`, `fx_begin_each`, its own procedure only). `limit`
+/// words, or all of them. Each machine compiles only these, in order, so
+/// their call-outs are numbered alike. The Rust compiler compiles for the
+/// machine it runs on only, so this compares that machine's.
 fn compare_direct(limit: usize) {
     use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_TWIN};
     use fixpt_native::direct::DirectMachine;
     let mut s = common::front_end_session();
+    let entry = direct_entry(&mut s);
     let (mut wrong, mut compared, mut refused, mut bytes) = (Vec::new(), 0, 0, 0);
     s.scheme.scope(|sc| {
         // Compiled once for all these tests (`common::bootstrap_compiled`).
@@ -224,7 +227,7 @@ fn compare_direct(limit: usize) {
                 h.set_bloblet_slot(c, CLOSURE_WORD, w);
                 c
             });
-            match compare_one(sc, clo, &mut rust, &mut fx) {
+            match compare_one(sc, &entry, clo, &mut rust, &mut fx) {
                 Ok(None) => refused += 1,
                 Ok(Some(n)) => bytes += n,
                 Err(e) => wrong.push(e),
@@ -242,7 +245,7 @@ fn compare_direct(limit: usize) {
 
 /// Closure `clo`'s own procedure, compiled by both: its bytes' count if
 /// they agree, none if both refuse it, or what differs.
-fn compare_one(sc: &mut fixpt_scheme::Session, clo: Handle, rust: &mut fixpt_native::direct::DirectMachine, fx: &mut fixpt_native::direct::DirectMachine) -> Result<Option<usize>, String> {
+fn compare_one(sc: &mut fixpt_scheme::Session, entry: &str, clo: Handle, rust: &mut fixpt_native::direct::DirectMachine, fx: &mut fixpt_native::direct::DirectMachine) -> Result<Option<usize>, String> {
     use fixpt_native::direct::{Each, FxEmitted};
     let mut want: Vec<Each> = Vec::new();
     sc.make(|m| {
@@ -290,7 +293,7 @@ fn compare_one(sc: &mut fixpt_scheme::Session, clo: Handle, rust: &mut fixpt_nat
             fx.fx_park(m.heap(), &mut c);
             Value::NULL
         });
-        let made = sc.call_global(&format!("{READER_PREFIX}native-compile-x64-proc"), &[name, lists, errors]).expect("runs");
+        let made = sc.call_global(entry, &[name, lists, errors]).expect("runs");
         sc.make(|m| {
             fx.fx_unpark(m.heap(), &mut c);
             Value::NULL
@@ -344,15 +347,34 @@ fn compare_one(sc: &mut fixpt_scheme::Session, clo: Handle, rust: &mut fixpt_nat
     }
 }
 
+/// The global that compiles a procedure in this machine's native
+/// convention (`native-compile-x64-proc`, `native-compile-arm64-proc`): the
+/// front end's (the conductor's); or, with `FIXPT_FX_DIRECT_ALONE` set, on
+/// arm64, its modules' own, compiled alone (`native-direct-arm64/compiler.fx`)
+/// and loaded beside the front end, run lowered: for its files as they are
+/// written, before the front end's are rebuilt.
+fn direct_entry(s: &mut fixpt_fx26::session::Fx26Session) -> String {
+    if cfg!(target_arch = "x86_64") {
+        return format!("{READER_PREFIX}native-compile-x64-proc");
+    }
+    if std::env::var_os("FIXPT_FX_DIRECT_ALONE").is_some() {
+        let program = include_str!("native-direct-arm64/compiler.fx");
+        let compiled = fixpt_fx26::session::compile_program(program).unwrap_or_else(|e| panic!("checks: {e}"));
+        compiled.load_into(&mut s.scheme).expect("loads");
+        return "fx:native-compile-arm64-proc".into();
+    }
+    format!("{READER_PREFIX}native-compile-arm64-proc")
+}
+
 #[test]
-#[cfg_attr(not(target_arch = "x86_64"), ignore = "the Rust oracle's native convention compiles for this machine only")]
+#[cfg_attr(not(any(target_arch = "x86_64", target_arch = "aarch64")), ignore = "the Rust oracle's native convention compiles for x86_64 and arm64 only")]
 fn some_procedures_as_the_rust_compiler_compiles_them() {
     compare_direct(60);
 }
 
 #[test]
-#[cfg_attr(not(target_arch = "x86_64"), ignore = "the Rust oracle's native convention compiles for this machine only")]
-#[cfg_attr(all(not(optimized), target_arch = "x86_64"), ignore = "every procedure of the front end: run with --release")]
+#[cfg_attr(not(any(target_arch = "x86_64", target_arch = "aarch64")), ignore = "the Rust oracle's native convention compiles for x86_64 and arm64 only")]
+#[cfg_attr(not(optimized), ignore = "every procedure of the front end: run with --release")]
 fn every_procedure_of_the_front_end_as_the_rust_compiler_compiles_it() {
     compare_direct(usize::MAX);
 }
