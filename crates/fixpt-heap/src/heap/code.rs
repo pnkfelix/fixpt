@@ -121,11 +121,34 @@ impl Heap {
 
     /// The same, in `part`.
     pub fn make_code_bloblet_in(&mut self, part: CodePart, kind: u8, fields: usize, bytes: usize, trailer: bool) -> Value {
+        self.make_code_bloblet_aligned(part, kind, fields, bytes, trailer, 8)
+    }
+
+    /// The same, its suffix at an address that is a multiple of `align`
+    /// bytes (a power of two, 8 or more): for machine code that aligns its
+    /// branch targets from where it starts. The words before and after it
+    /// that the alignment leaves are free blocks, which the next sweep
+    /// gives back.
+    pub fn make_code_bloblet_aligned(&mut self, part: CodePart, kind: u8, fields: usize, bytes: usize, trailer: bool, align: usize) -> Value {
+        assert!(align.is_power_of_two() && align >= 8, "an alignment of whole words");
         let total = fields + trailer as usize;
         assert!(total as u64 <= layout::H_FIELDS.max(), "a code bloblet has an ordinary header");
         assert!(bytes as u64 <= layout::H_BYTES.max(), "a bloblet's suffix is limited to 4 GiB");
         let size = 1 + total + bytes.div_ceil(8);
-        let at = self.code_alloc(part, size);
+        let words = align / 8;
+        let block = self.code_alloc(part, size + words - 1);
+        let pad = (words - (block + 1 + total) % words) % words;
+        let tail = words - 1 - pad;
+        if pad > 0 {
+            put_free(self.mem.words_mut(), block, pad);
+            let p = &mut self.code.parts[part as usize];
+            let k = p.starts.binary_search(&block).expect("the block just taken is an object's start");
+            p.starts[k] = block + pad;
+        }
+        if tail > 0 {
+            put_free(self.mem.words_mut(), block + pad + size, tail);
+        }
+        let at = block + pad;
         self.set_word(at, make_header(kind, total, bytes));
         for i in 1..size {
             self.set_word(at + i, 0);
@@ -245,6 +268,14 @@ impl Heap {
         assert!(self.is_code_bloblet(v), "{v:?} is not in the code area");
         let view = self.code_exec.as_ref().unwrap_or_else(|e| panic!("the code area has no execute view: {e}"));
         view.exec_address(v.index() * 8)
+    }
+
+    /// What machine code adds to a code bloblet's suffix's address, a
+    /// reference's less its tag, for where it runs
+    /// ([`code_exec_address`](Heap::code_exec_address)), modulo 2^64; 0 if
+    /// the code area has no execute view yet (nothing in it to run).
+    pub fn code_exec_distance(&self) -> u64 {
+        self.code_exec.as_ref().map_or(0, |view| view.distance())
     }
 
     /// After a code bloblet's suffix is written with instructions: make them

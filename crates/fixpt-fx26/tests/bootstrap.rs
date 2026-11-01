@@ -525,25 +525,18 @@ fn fixpoint_with_words_compiled_by_fx26() {
                 instructions += bytes.len();
                 sc.make(|m| {
                     let v = m.get(*w);
-                    fixpt_native::cellular::with_machine(|n| {
-                        let at = n.reserve_bytes(bytes.len())?;
-                        n.install_bytes(m.heap(), v, at, &bytes, &starts)
-                    })
-                    .expect("installs");
+                    fixpt_native::cellular::with_machine(|n| n.install_bytes(m.heap(), v, &bytes, &starts)).expect("installs");
                     Value::NULL
                 });
                 continue;
             }
-            // Once for the size, then for the place it goes.
-            let (sized, _) = code(sc, [0, 0]);
-            let (at, far) = fixpt_native::cellular::with_machine(|m| m.reserve(sized.len())).expect("room");
-            let (words32, starts) = code(sc, far);
+            let (words32, starts) = code(sc, [0, 0]);
             assert!(words32.iter().all(|x| (0..1 << 32).contains(x)), "an instruction that could not be encoded");
             let words32: Vec<u32> = words32.into_iter().map(|x| x as u32).collect();
             instructions += words32.len();
             sc.make(|m| {
                 let v = m.get(*w);
-                fixpt_native::cellular::with_machine(|n| n.install(m.heap(), v, at, &words32, &starts)).expect("installs");
+                fixpt_native::cellular::with_machine(|n| n.install(m.heap(), v, &words32, &starts)).expect("installs");
                 Value::NULL
             });
         }

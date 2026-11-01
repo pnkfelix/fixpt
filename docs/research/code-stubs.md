@@ -257,3 +257,58 @@ interleaved, on a quiet machine: before, 19.02–20.22G cycles, 44.84–44.94G
 instructions; after, 18.91–19.29G cycles, 44.82–44.91G instructions; loads
 and stores alike; the output the same. Making words in the code area, and
 the calls without the test, cost nothing measurable here.
+
+## A compiled word's code in the code area too (2026-11-01, `TODO.md` §210)
+
+What this left: a cellular word was a code bloblet, but what the cellular
+machine compiled of it was not. Its code was in the machine's own code
+space, 256 MB a thread, reached by a slot number in the word's entry
+through the machine's table, its table of where to resume beside it, kept
+by a weak reference to the word and collected by copying into a space as
+large. A thread's machine outlived the sessions that compiled into it and
+kept the code of every heap still alive: three of a test's kept sessions,
+each with its front end compiled (some 74 MB), and a fourth's, filled it,
+with no way to grow (`processes`' `attempt` tests, once the arm64 modules
+joined the front end).
+
+Now, on x86_64, a compiled word's entry is its code, as a native
+procedure's code field is (`layout::cellular`, `Heap::make_word_code`):
+
+- **A code bloblet in the native part**, its suffix the code, from a
+  32-byte boundary (the compiler aligns where calls return from the
+  code's start; `make_code_bloblet_aligned`), then the table of where it
+  resumes, by `8k`: 0, or 1 more than the byte it resumes at, an offset,
+  so no address is in it. Its one field, `COMPILED_RESUME`, says where the
+  table begins, in words, so that its bits are the bytes.
+- **Run at its reference plus `State::code_delta`**, the code area's
+  execute view's distance less a reference's tag, the same for every code
+  bloblet of a heap. `NEXT`, `execute` and the machine's entry dispatch on
+  the entry's tag: a fixnum is a routine's, `docol`'s for a word of cells,
+  by the table; a code bloblet is jumped to. Resuming at a cell reads the
+  word's own table. Register code calls a twin's entry so, and an
+  adapter jumps to its twin's: neither names a slot.
+- **The word keeps its code alive**, and the heap marks and sweeps it as
+  any code; a copy of the word copies it, and an image carries it. The
+  machine keeps nothing of a word: no slots, no table entries for words,
+  no list of what it compiled, no collection of its own; its code space
+  holds its own code only.
+- **What leaves the process lets compiled code go**: a `.fasl` and the
+  front end's caches keep the words with their entries `docol` (or, a
+  register word's, 0), to be compiled again where they run. A cache that
+  kept the code was 142 MB against 59, and the default machine's start
+  3 ms slower for mapping it; whether a cellular machine's start would
+  gain from keeping it is not measured.
+
+The arm64 machine is not ported: it compiles nothing (`compile_word` and
+the rest decline there) and runs every word's cells, until its `NEXT`,
+`enter_cur`, register code's calls and adapter, and `native.fx` and
+`native-arm64-regs.fx`, take the entry as x86_64's do.
+
+Measured (x86_64, release, both builds alternated): `cellular_bench`'s
+fib 27 1.21 to 1.24 ns a cell run as cells, 0.77 to 0.85 compiled (its
+calls and returns: the tag's test, and the resume table read from the
+word's code); its loop and its list as they were. Through the CLI, fib 32
+on register code (`fx-regs-rsjit-cellcc`, `fx-regs-fxjit-cellcc`) 38 to
+34 ms, a call now `call reg` to the twin's code; compiled cells
+(`fx-cells-rsjit-cellcc`) 75–83 to 76–77 ms; the default machine and its
+start as they were.

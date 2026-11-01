@@ -431,7 +431,8 @@ fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)
 /// cache.
 fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::path::Path, key: u64) {
     let mut alone = fixpt_heap::Heap::new();
-    let copy = alone.copy_graph_from(heap, w);
+    // Its words, not the code a machine compiled of them (`TODO.md` §210).
+    let (copy, _) = alone.copy_graph_with(heap, w, |_| false, &heap.word_codes_let_go(&[w]));
     alone.push_root(copy);
     save_image(&alone, path, key);
 }
@@ -461,7 +462,10 @@ fn native_image(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, standard: fi
     // The shared stub first, where a session's heap has it when the image
     // is read, so that the image can go where it was made (`TODO.md` §160).
     alone.foreign_stub();
-    let (copy, mut made) = alone.copy_graph_with(heap, pieces, |_| false, &Default::default());
+    // Its native code, and its words, but not the code a cellular machine
+    // compiled of them (`TODO.md` §210): it is not what runs.
+    let let_go = heap.word_codes_let_go(&[pieces, start, standard]);
+    let (copy, mut made) = alone.copy_graph_with(heap, pieces, |_| false, &let_go);
     // The start, with the pieces' objects it shares, which `made` maps.
     let start = if start == Value::FALSE {
         start
@@ -474,14 +478,14 @@ fn native_image(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, standard: fi
     let mut codes = Value::NULL;
     for (&k, &c) in &made {
         let v = Value::from_raw(k);
-        if heap.code_part(v) == Some(fixpt_heap::CodePart::Native) && Some(v) != adapter {
+        if heap.code_part(v) == Some(fixpt_heap::CodePart::Native) && Some(v) != adapter && !let_go.contains_key(&k) {
             codes = alone.cons(c, codes);
         }
     }
     let adapter = adapter.map_or(Value::FALSE, |a| made[&a.raw()]);
     // The standard environment as the reader written in FX-26 reads it
     // (`standard26`): the same at every start, read once (`TODO.md` §177).
-    let standard = alone.copy_graph_from(heap, standard);
+    let (standard, _) = alone.copy_graph_with(heap, standard, |_| false, &let_go);
     let mut rest = Value::NULL;
     if start != Value::FALSE {
         rest = alone.cons(start, rest);

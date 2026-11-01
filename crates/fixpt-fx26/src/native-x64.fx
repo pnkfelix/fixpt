@@ -234,13 +234,20 @@
   (lambda (d base disp) (x-e (x86-lea d base disp))))
 
 ;; Dispatch on the word in W: the tail of `NEXT`. Leaves the word in X11
-;; too, where `docol` takes it.
+;; too, where `docol` takes it. Its entry is a routine's number, or its
+;; compiled code, a code bloblet, run at its reference plus `code_delta`.
 (define x-run-word-in-w (subr (maxeff x-assembles spin) () unit)
   (lambda ()
-    (begin
-      (x-mov n-x11 n-w)
-      (x-load n-x10 n-w (x-field n-word-entry))
-      (x-e (x86-jmp-m n-table n-x10 1 0)))))
+    (let ((compiled (x-label)))
+      (begin
+        (x-mov n-x11 n-w)
+        (x-load n-x10 n-w (x-field n-word-entry))
+        (x-e (x86-test-imm n-x10 7))
+        (x-jcc x-c-ne compiled)
+        (x-e (x86-jmp-m n-table n-x10 1 0))
+        (x-bind compiled)
+        (x-e (x86-alu-rm x-add n-x10 n-st n-st-code-delta))
+        (x-e (x86-jmp-r n-x10))))))
 
 (define x-next (subr (maxeff x-assembles spin) () unit)
   (lambda ()
@@ -258,21 +265,22 @@
 (define x-cont-code (subr (maxeff x-assembles spin) () unit)
   (lambda () (if (< (get x-cont) 0) (x-next) (x-jmp (get x-cont)))))
 
-;; On from where CUR and the ip now are, `d` in `dreg`.
+;; On from where CUR and the ip now are, `d` in `dreg`: by the table of
+;; where its code resumes, in its code bloblet's suffix, if it has some.
 (define x-enter-cur (subr (maxeff x-assembles spin) (int) unit)
   (lambda (dreg)
     (let ((cellular (x-label)))
       (begin
         (x-load n-x10 n-cur (x-field n-word-entry))
-        (x-e (x86-test n-x10 n-x10))
+        (x-e (x86-test-imm n-x10 7))
         (x-jcc x-c-e cellular)
-        (x-load n-x16 n-st n-st-resume)
-        (x-e (x86-load-ix n-x16 n-x16 n-x10 1 0))
+        (x-load n-x16 n-x10 (x-field n-compiled-resume))
+        (x-alu x-add n-x16 n-x10)
+        (x-e (x86-load-ix n-x16 n-x16 dreg 1 -4))
         (x-e (x86-test n-x16 n-x16))
         (x-jcc x-c-e cellular)
-        (x-e (x86-load-ix n-x16 n-x16 dreg 1 0))
-        (x-e (x86-test n-x16 n-x16))
-        (x-jcc x-c-e cellular)
+        (x-e (x86-lea-ix n-x16 n-x10 n-x16 1 -1))
+        (x-e (x86-alu-rm x-add n-x16 n-st n-st-code-delta))
         (x-e (x86-jmp-r n-x16))
         (x-bind cellular)
         (x-next)))))

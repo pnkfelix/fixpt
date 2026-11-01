@@ -36,8 +36,11 @@ pub struct State {
     /// runs on a bare heap, in which case the routines it has no machine
     /// code for cannot call the runtime's primitives.
     pub rt: u64,
-    /// For each entry number, a word's table of where its machine code
-    /// resumes at each cell, by `8k`, or 0 (`NativeMachine::compile_word`).
+    /// The arm64 machine's, from when a compiled word's entry was a number:
+    /// each number's table of where its code resumes. Always 0 now; a
+    /// compiled word's table is in its code (`Heap::make_word_code`), and
+    /// the arm64 machine compiles nothing until it reads it there
+    /// (`TODO.md` §210).
     pub resume: u64,
     /// Where the heap's `top` is, in words from the base, and how far
     /// machine code may take it before calling in to allocate
@@ -90,4 +93,9 @@ pub struct State {
     /// it as a constant, so that the compiler written in FX-26 makes the
     /// same code whatever `FIXPT_SLICE` says.
     pub slice: u64,
+    /// What the machine adds to a compiled word's entry, a reference to its
+    /// code bloblet, for where the code runs: the distance of the code
+    /// area's execute view, less a reference's tag
+    /// (`Heap::code_exec_distance`).
+    pub code_delta: u64,
 }

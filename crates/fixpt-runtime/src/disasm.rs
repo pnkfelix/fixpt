@@ -4,7 +4,7 @@
 
 use crate::print::write_value;
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_NAME, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_NAME, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
 use fixpt_heap::{Heap, Value};
 use std::fmt::Write as _;
 
@@ -232,11 +232,11 @@ fn name_of(heap: &Heap, w: Value) -> String {
 fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Option<crate::runtime::MachineCode>, shown: &mut Shown) {
     let closure = const { kind("cellular-closure") };
     let fields = heap.bloblet_head(w).fields;
-    let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
-    let how = match entry {
-        0 => "cellular".to_string(),
-        n if n >= PRIMITIVES as i64 => format!("compiled to machine code, native slot {n}"),
-        n => format!("the routine {}", ROUTINES.get(n as usize).map_or("?", |r| r.0)),
+    let entry = heap.bloblet_slot(w, WORD_ENTRY);
+    let how = match heap.word_code(w) {
+        Some(c) => format!("compiled to machine code, {} bytes", heap.bloblet_head(c).bytes),
+        None if entry.as_fixnum() == 0 => "cellular".to_string(),
+        None => format!("the routine {}", ROUTINES.get(entry.as_fixnum() as usize).map_or("?", |r| r.0)),
     };
     let _ = writeln!(out, "\nword {} ({} cells, {how}):", name_of(heap, w), fields + 1 - WORD_CELL0);
     let mut k = WORD_CELL0;
@@ -308,8 +308,10 @@ fn machine_code(out: &mut String, text: &str) {
 /// A word's register code (PLAN.md 13h′): a line per instruction.
 fn register_word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, shown: &mut Shown) {
     let fields = heap.bloblet_head(w).fields;
-    let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
-    let how = if entry == 0 { "not compiled".to_string() } else { format!("native slot {entry}") };
+    let how = match heap.word_code(w) {
+        Some(c) => format!("compiled, {} bytes", heap.bloblet_head(c).bytes),
+        None => "not compiled".to_string(),
+    };
     let _ = writeln!(out, "  its register code ({} cells, {how}):", fields + 1 - WORD_CELL0);
     register_lines(heap, w, out, todo, shown);
 }

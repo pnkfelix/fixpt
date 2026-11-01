@@ -46,15 +46,14 @@ pub fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, wh
         return false;
     }
     // Field 1 is the trailer; the rest are values. A word's entry is
-    // `docol`, or a native machine's number for its compiled code: the same
-    // cells either way; a register word's, 0 or a machine's number. A word's
-    // twin, its register code, is compared as code, as the word is.
+    // `docol`, or its compiled code: the same cells either way; a register
+    // word's, 0 or its compiled code. A word's twin, its register code, is
+    // compared as code, as the word is.
     let entry = |w: Value, i: usize| {
         let v = h.bloblet_slot(w, i); // fields: compared field by field, by its layout
         let word = ka == Some(fixpt_heap::layout::kind("cellular-code"));
         let register = ka == Some(fixpt_heap::layout::kind("register-code"));
-        let native = i == fixpt_heap::layout::cellular::WORD_ENTRY
-            && (word && v.as_fixnum() >= fixpt_heap::layout::cellular::PRIMITIVES as i64 || register);
+        let native = i == fixpt_heap::layout::cellular::WORD_ENTRY && (word || register) && v.is_bloblet();
         if native { Value::fixnum(0) } else { v }
     };
     (2..=na).all(|i| same_code(h, entry(a, i), entry(b, i), pairs, why))

@@ -4479,3 +4479,15 @@ base type the standard environment's own, as its name read does, and the
 rules for a `nat` and `#f` know `int` and `bool` by name, as their
 neighbour does. Test: both of the report's repros
 (`a_nat_is_an_int_of_a_type_read_from_a_fasl`).
+
+## 2026-11-01: a compiled word's code is its entry, in the heap's code area (§210, x86_64)
+
+The cellular machine kept what it compiled in a code space of its own,
+256 MB a thread, by slot number, and filled it with the front ends of a
+test's kept sessions (`processes`' `attempt` tests). Now, on x86_64, a
+compiled word's entry is a code bloblet whose suffix is its code, as a
+native procedure's code field is: the word keeps it alive, the heap
+collects it, a copy and an image carry it, and the machine keeps nothing
+of a word. Register code 38 to 34 ms on fib 32; compiled cells' calls
+some 10% dearer (the entry's tag tested). The arm64 machine compiles
+nothing until it is ported.

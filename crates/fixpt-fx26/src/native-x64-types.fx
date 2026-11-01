@@ -57,6 +57,7 @@
             (val n-st-fp int)
             (val n-st-clo int)
             (val n-st-resume int)
+            (val n-st-code-delta int)
             (val n-st-trap int)
             (val n-st-exit int)
             (val n-st-cards int)
@@ -73,6 +74,7 @@
             (val n-closure-word int)
             (val n-closure-free0 int)
             (val n-word-entry int)
+            (val n-compiled-resume int)
             (val n-word-cell0 int)
             (val n-primitives int)
             (val n-trap-type int)
@@ -191,7 +193,7 @@
 ;; What the conductor names of the register code's compiler, for Rust.
 (define-type native-x64-regs-sig
   (moduleof (val native-assemble-x64-regs (subr (maxeff x-assembles spin) (tword) x-regs-assembled))
-            (val native-adapter-x64 (subr (maxeff x-assembles spin) (int int) x-out))))
+            (val native-adapter-x64 (subr (maxeff x-assembles spin) (int) x-out))))
 
 ;; What `native-x64-regs.fx` uses of `native-x64-regs-ops.fx`: the helpers
 ;; the two share, register code's fast paths, and what it does inline.

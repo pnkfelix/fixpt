@@ -542,14 +542,16 @@
               (x-load r-rdx r-t (x-field word-twin))
               (x-cmp-value r-rdx n-false)
               (x-jcc x-c-e cellular)
+              ;; Its code, if compiled: its entry, a code bloblet.
               (x-load n-x16 r-rdx (x-field n-word-entry))
-              (x-e (x86-test n-x16 n-x16))
+              (x-e (x86-test-imm n-x16 7))
               (x-jcc x-c-e cellular)
               (x-mov n-clo r-result)
               (x-mov n-cur r-rdx)
+              (x-e (x86-alu-rm x-add n-x16 n-st n-st-code-delta))
               (if tail
-                  (x-e (x86-jmp-m n-table n-x16 1 0))
-                  (let ((call (x86-call-m-ix n-table n-x16 1 0)))
+                  (x-e (x86-jmp-r n-x16))
+                  (let ((call (x86-call-r n-x16)))
                     (begin (rg-align-return (rg-length call)) (x-e call) (x-jmp back))))
               ;; A native closure: the arguments and it on the data stack, and
               ;; the call's routine, returning the stack's way.
@@ -808,9 +810,10 @@
             (rg-adapter-args (+ i 1) n))))))
 
 ;; The entry a stack-code caller takes into a word with register code
-;; (`assemble_adapter`): on to native slot `slot`, a link of 0 pushed.
-(define native-adapter-x64 (subr (maxeff x-assembles spin) (int int) x-out)
-  (lambda (n slot)
+;; (`assemble_adapter`): on to the register word's code, its entry, a link
+;; of 0 pushed.
+(define native-adapter-x64 (subr (maxeff x-assembles spin) (int) x-out)
+  (lambda (n)
     (begin
       (x-reset)
       (rg-adapter-args 0 n)
@@ -818,6 +821,8 @@
       (x-load n-cur n-cur (x-field word-twin))
       (x-e (x86-mov-imm n-x16 0))
       (x-e (x86-push n-x16))
-      (x-e (x86-jmp-m n-table -1 1 (* 8 slot)))
+      (x-load n-x16 n-cur (x-field n-word-entry))
+      (x-e (x86-alu-rm x-add n-x16 n-st n-st-code-delta))
+      (x-e (x86-jmp-r n-x16))
       (x-finish))))
 )))

@@ -1176,17 +1176,19 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                 a.e(load(RDX, field(T, WORD_TWIN)));
                 a.cmp_value(RDX, Value::FALSE);
                 a.jcc(Cond::E, cellular);
+                // Its code, if compiled (its entry a code bloblet, which
+                // runs at its reference plus `code_delta`).
                 a.e(load(X16, field(RDX, WORD_ENTRY)));
-                a.e(test(X16, X16));
+                a.e(test_imm(X16, 7));
                 a.jcc(Cond::E, cellular);
                 a.e(mov(CLO, RESULT));
                 a.e(mov(CUR, RDX));
+                a.e(alu_rm(Alu::Add, X16, st(offset_of!(State, code_delta))));
                 let back = a.label();
-                let target = mi(TABLE, X16, 1, 0);
                 if tail {
-                    a.e(jmp_m(target));
+                    a.e(jmp_r(X16));
                 } else {
-                    let call = call_m(target);
+                    let call = call_r(X16);
                     a.align_return(call.len());
                     a.e(call);
                     a.jmp(back);
@@ -1352,9 +1354,9 @@ pub(crate) fn dump(heap: &Heap, rw: Value, at: usize, code: &[u8]) {
 
 /// The entry a stack-code caller takes into a word with register code: the
 /// `n` arguments from its frame into registers, the frame dropped, and on
-/// to the register word's entry, native slot `slot`, with a link of 0 on
-/// the machine stack, as no `call` made.
-pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u8> {
+/// to the register word's code, its entry, with a link of 0 on the
+/// machine stack, as no `call` made.
+pub fn assemble_adapter(n: usize) -> Vec<u8> {
     let mut a = Asm::new();
     for i in 0..n {
         let slot_mem = m(FP, -8 * i as i32);
@@ -1370,7 +1372,9 @@ pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u8> {
     a.e(load(CUR, field(CUR, WORD_TWIN)));
     a.e(mov_imm(X16, 0));
     a.e(push(X16));
-    a.e(jmp_m(m(TABLE, 8 * slot as i32)));
+    a.e(load(X16, field(CUR, WORD_ENTRY)));
+    a.e(alu_rm(Alu::Add, X16, st(offset_of!(State, code_delta))));
+    a.e(jmp_r(X16));
     a.finish()
 }
 

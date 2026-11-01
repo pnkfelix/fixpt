@@ -619,7 +619,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
 /// (and its cells too, where stack code cannot enter the register code),
 /// else its cells.
 fn assemble_registers(heap: &fixpt_heap::Heap, word: Value) -> Result<(), String> {
-    use fixpt_heap::layout::cellular::{CLOSURE_WORD, PRIMITIVES, ROUTINE_DOCOL, WORD_CELL0, WORD_ENTRY, WORD_TWIN};
+    use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0, WORD_TWIN};
     use fixpt_native::cellular::{assemble_register_word, assemble_word};
     let closure = const { fixpt_heap::layout::kind("cellular-closure") };
     let vargs = const { fixpt_heap::layout::regcode::op("vargs") };
@@ -628,8 +628,7 @@ fn assemble_registers(heap: &fixpt_heap::Heap, word: Value) -> Result<(), String
         if !seen.insert(w.raw()) {
             continue;
         }
-        let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum() as u64;
-        if entry != ROUTINE_DOCOL && entry < PRIMITIVES as u64 {
+        if !heap.word_runs_cells(w) {
             continue;
         }
         for v in heap.bloblet_fields_from(w, WORD_CELL0) {
@@ -639,7 +638,7 @@ fn assemble_registers(heap: &fixpt_heap::Heap, word: Value) -> Result<(), String
                 todo.push(heap.bloblet_slot(v, CLOSURE_WORD));
             }
         }
-        if entry != ROUTINE_DOCOL {
+        if heap.word_code(w).is_some() {
             continue;
         }
         let twin = heap.bloblet_slot(w, WORD_TWIN);

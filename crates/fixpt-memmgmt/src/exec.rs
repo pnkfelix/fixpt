@@ -187,6 +187,13 @@ impl ExecView {
         rw - self.rw + self.rx
     }
 
+    /// What [`exec_address`](Self::exec_address) adds to an address in the
+    /// heap's view, modulo 2^64: for machine code that finds code's
+    /// executable address from a reference to it.
+    pub fn distance(&self) -> u64 {
+        (self.rx as u64).wrapping_sub(self.rw as u64)
+    }
+
     /// The read+execute view of the bytes from `rw` (a heap address, on a
     /// page) made `file`'s bytes `part`, mapped privately from the file, as
     /// [`Words::map_from`] maps the heap's own view: for code that is never

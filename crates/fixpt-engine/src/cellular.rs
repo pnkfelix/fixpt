@@ -747,10 +747,9 @@ impl Machine {
     /// Run word `w` as a call from `r`: push the return entry and enter it
     /// if it is made of cells (and say so), or run its routine.
     fn enter(&mut self, cx: &mut Ctx, w: Value, r: &mut Regs) -> Result<bool, Trap> {
-        let entry = cx.heap().bloblet_slot(w, WORD_ENTRY).as_fixnum();
         // A word compiled to machine code for a native machine is still its
         // cells here.
-        if entry as u64 == ROUTINE_DOCOL || entry >= PRIMITIVES as i64 {
+        if cx.heap().word_runs_cells(w) {
             self.check_limits()?;
             if r.cur.is_bloblet() {
                 self.push_return(r);
@@ -758,6 +757,7 @@ impl Machine {
             (r.cur, r.k) = (w, WORD_CELL0);
             return Ok(true);
         }
+        let entry = cx.heap().bloblet_slot(w, WORD_ENTRY).as_fixnum();
         match self.prim(cx, entry, r)? {
             Flow::Next => Ok(false),
             Flow::Exit | Flow::Halt => Err(Trap::NoRoutine(entry)),

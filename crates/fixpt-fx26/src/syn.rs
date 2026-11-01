@@ -199,15 +199,14 @@ fn assemble_by_fx26(s: &mut Session, word: Handle) -> Result<(), String> {
 /// its cells and operands, `word` too if it is one: what `fixpt_native`'s
 /// `compile_reachable` compiles.
 pub fn cell_words_reachable(heap: &fixpt_heap::Heap, word: Value) -> Vec<Value> {
-    use fixpt_heap::layout::cellular::{CLOSURE_WORD, PRIMITIVES, ROUTINE_DOCOL, WORD_CELL0, WORD_ENTRY};
+    use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0};
     let closure = const { fixpt_heap::layout::kind("cellular-closure") };
     let (mut todo, mut seen, mut found) = (vec![word], std::collections::HashSet::new(), Vec::new());
     while let Some(w) = todo.pop() {
         if !seen.insert(w.raw()) {
             continue;
         }
-        let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum() as u64;
-        if entry != ROUTINE_DOCOL && entry < PRIMITIVES as u64 {
+        if !heap.word_runs_cells(w) {
             continue;
         }
         for v in heap.bloblet_fields_from(w, WORD_CELL0) {
@@ -217,7 +216,7 @@ pub fn cell_words_reachable(heap: &fixpt_heap::Heap, word: Value) -> Vec<Value> 
                 todo.push(heap.bloblet_slot(v, CLOSURE_WORD));
             }
         }
-        if entry == ROUTINE_DOCOL {
+        if heap.word_code(w).is_none() {
             found.push(w);
         }
     }
@@ -316,14 +315,20 @@ fn assemble_twin_by_fx26(
     w: Handle,
     place: &mut dyn FnMut(&mut fixpt_heap::Heap, Value, &[u8], &[i64]) -> Result<(), String>,
 ) -> Result<bool, String> {
-    use fixpt_heap::layout::cellular::{WORD_CELL0, WORD_ENTRY, WORD_TWIN};
+    use fixpt_heap::layout::cellular::{WORD_CELL0, WORD_TWIN};
+    let x64 = cfg!(target_arch = "x86_64");
+    // Only on x86_64 for now: the arm64 machine is yet to take a word's code
+    // from its entry (`TODO.md` §210).
+    if !x64 {
+        return Ok(false);
+    }
     let mut twin = None;
     s.make(|m| {
         let w = m.get(w);
         let heap = m.heap();
         let rw = heap.bloblet_slot(w, WORD_TWIN);
         if heap.is_register_word(rw)
-            && heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum() == 0
+            && heap.word_code(rw).is_none()
             && heap.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize != const { fixpt_heap::layout::regcode::op("vargs") }
         {
             twin = Some(rw);
@@ -332,7 +337,6 @@ fn assemble_twin_by_fx26(
     });
     let Some(rw) = twin else { return Ok(false) };
     let rw = s.make(|_| rw);
-    let x64 = cfg!(target_arch = "x86_64");
     let assembled = if x64 {
         s.call_global(&format!("{READER_PREFIX}native-assemble-x64-regs"), &[rw])
     } else {
@@ -352,11 +356,10 @@ fn assemble_twin_by_fx26(
     }
     let (code, resume) = machine_bytes(code, resume);
     place_in(s, rw, &code, &resume, place)?;
-    let (mut slot, mut n, mut cells) = (0, 0, 0);
+    let (mut n, mut cells) = (0, 0);
     s.make(|m| {
         let (rw, w) = (m.get(rw), m.get(w));
         let heap = m.heap();
-        slot = heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum();
         n = heap.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum();
         cells = heap.bloblet_count_from(w, WORD_CELL0);
         Value::NULL
@@ -364,8 +367,8 @@ fn assemble_twin_by_fx26(
     if n as usize > fixpt_heap::layout::regcode::REGS {
         return Ok(false);
     }
-    let (n, slot) = (s.make(|_| Value::fixnum(n)), s.make(|_| Value::fixnum(slot)));
-    let adapter = s.call_global(&format!("{READER_PREFIX}{}", if x64 { "native-adapter-x64" } else { "native-adapter-arm64" }), &[n, slot]).map_err(|e| e.to_string())?;
+    let n = s.make(|_| Value::fixnum(n));
+    let adapter = s.call_global(&format!("{READER_PREFIX}native-adapter-x64"), &[n]).map_err(|e| e.to_string())?;
     let (adapter, _) = machine_bytes(s.view(|v| ints_of(Some(v.get(adapter)))), Vec::new());
     let mut starts = vec![-1i64; cells];
     starts[0] = 0;

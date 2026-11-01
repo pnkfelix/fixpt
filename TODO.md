@@ -4898,3 +4898,58 @@ procedure's); the resume tables (by `k`, now beside the code); the
 machine's own code, once a heap's or shared; register code's adapters; and
 what the code area's growth and the minors' scans of it (`TODO.md`'s
 "Left: the minors") then cost.
+
+**Done on x86_64 (2026-11-01)**: a compiled word's entry is its code, a
+code bloblet in the heap's native part (`Heap::make_word_code`), run at
+its reference plus `State::code_delta`, its resume table in its suffix as
+offsets; register code calls a twin's entry, and an adapter jumps to it;
+the machine keeps nothing of a word (no slots, no copying collection), its
+code space its own code alone. `.fasl`s and the front end's caches let the
+code go. `docs/research/code-stubs.md`, "A compiled word's code in the code
+area too", with what it measured. **Left**:
+- **arm64** (the user's): its machine compiles nothing meanwhile and runs
+  every word's cells. `generate`'s `NEXT` and `enter_cur`, `regcode.rs`'s
+  calls and `assemble_adapter`, `native.fx` and `native-arm64-regs.fx`,
+  as x86_64's (`cellular/x64.rs`, `x64/regcode.rs`, `native-x64.fx`,
+  `native-x64-regs.fx`); then `compile_word`, `compile_register_word`,
+  `install_bytes` and `syn.rs`'s register code there, which decline now.
+- **`docol` a code bloblet too**, so that every word's entry is code and
+  `NEXT` need not test the tag (what compiled fib's calls pay, 0.77 to
+  0.85 ns a cell); and, the user's further aim, one entry for native and
+  cellular procedures alike.
+- **Caches keeping compiled code**, measured: whether a cellular
+  machine's start gains what mapping a larger image costs (142 MB to 59
+  for the default machine's, 3 ms of its start).
+
+## 211. Heist's R4: evaluating FX-26 inside the running editor (Heist's, 2026-11-01)
+
+Heist's `docs/fx26-for-yank.md`, "R4. Evaluating FX-26 inside the running
+editor", for Yank's `M-:`, `C-x C-e` and init file: a persistent
+environment, the host's modules imported with their types, every failure
+as a value, `io` redirected, time slices, and macros. Heist's first slice
+(`editor/eval.fx`) runs on `stage` and sessions (`docs/research/eval.md`);
+what it found in Fixpt, to look at:
+
+1. **Time slices** (their 5): a form that does not end hangs the editor.
+   Run for N ms and give back what is left, to resume or drop; perhaps a
+   process raced against a deadline, if an evaluation may run in one.
+2. **`session-check`'s effect imported from a module is refused** ("`e` is
+   bound as a Effect, and the description given is not one"): `eval.fx`
+   writes the effect out.
+3. **Staged code sees the module's values but not its types**, though it is
+   checked "as `(with m code)` would be": `(desc t T)` in the module's type,
+   and `t` is "not a type" to the code.
+4. **A `poly` in an equi-recursive type**, instantiated, substitutes into
+   the nested copy of itself too (a log holding commands of user code).
+5. **A `poly` value must be pure, so reading a global of one is refused**;
+   wrapped in a product it is not.
+6. **A handler that resumes cannot be seen to delimit**: a global tag's
+   region is named by user code's type; a tag made in a `letregion` has
+   the resumed continuation free under a prompt whose type names the
+   region. They work around it with a log passed as a capability.
+7. And their 6, **macros** (`define-command` and the rest), which they try
+   to do with procedures over tables first.
+
+Done when R4's own test passes: `(define (f x) (host-insert! x))` then `(f
+"hi")` in one environment, the host keeping `f` and calling it later, a
+refusal and a fault each a value.

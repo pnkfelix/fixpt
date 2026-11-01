@@ -3466,3 +3466,34 @@ the arm64 twin: `direct.rs`'s `procedure` ported step for step.
   only after `k-intern-reset` (past 400,000 entries) would it make one
   anew, which `TODO.md` §209 keeps, as `check-reps.fx` cannot see the
   base table (`k-base`, `check-env`) without new wiring.
+
+## A compiled word's code as its entry (2026-11-01; `TODO.md` §210)
+
+The user's direction: code in the code area, the entry as for a native
+procedure, x86_64 now and arm64 later, its slots broken if need be.
+- **The entry a code bloblet, `docol` still a fixnum**: every word is
+  made with `docol`'s number, in many places, the Rust interpreter's
+  among them; a code bloblet for `docol` too is the next step (`NEXT`
+  would test no tag), not this one.
+- **The resume table in the suffix, not the fields**: a front-end
+  register word has 365,682 fields, past a header's 2^18. Offsets, not
+  addresses, so that a copy or an image carries the code as it is; the
+  field's fixnum counts words, so that its bits are the bytes (no shift
+  in `enter_cur`).
+- **Aligned at 32**: the x86_64 compiler aligns where calls return from
+  the code's start, which the machine's code space gave it; a code
+  bloblet's suffix is only word-aligned (`make_code_bloblet_aligned`, the
+  slack free blocks the next sweep takes). It measured nothing either way
+  on fib, but keeps the compiler's alignment true.
+- **`add reg, [st + code_delta]`**: one instruction, in both encoders
+  already (`alu_rm`, `x86-alu-rm`), and no scratch register at a call.
+- **Placed in the native part**: it is machine code; what took the native
+  part for native procedures alone was told apart (`note_cached_code`
+  names those whose field 1 is themselves; the caches' list skips what
+  they let go).
+- **`.fasl`s and caches let the code go**, as they let slot numbers go:
+  the default machine's cache kept 80 MB of cellular code it never runs,
+  and started 3 ms slower for it. Keeping it for the cellular machines is
+  left to measure.
+- **arm64 compiles nothing meanwhile**, rather than install code its
+  machine would jump to by a number: correct, slower, until it is ported.

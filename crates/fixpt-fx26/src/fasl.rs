@@ -22,7 +22,7 @@
 //! change anywhere below makes it stale; and by the executable, the
 //! architecture and the program's convention.
 
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE, GLOBAL_FIELDS, GLOBAL_NAME, PRIMITIVES, ROUTINE_DOCOL, WORD_ENTRY};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE, GLOBAL_FIELDS, GLOBAL_NAME, ROUTINE_DOCOL};
 use fixpt_heap::{CodePart, Heap, ObjType, Value};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -410,15 +410,16 @@ fn global_name(heap: &Heap, v: Value) -> Option<String> {
 /// as the front end's cache keeps it: what it names of the session is in
 /// its code bloblets' fields (cells, constants, other code), linked or
 /// copied as any other object's; its call-outs are in fields too, each the
-/// call-out itself, encoded, the same in every machine. Each word's compiled entry (a machine's
-/// slot number, this process's) is let go, so that the loader's machine
-/// compiles it again if it runs it. Or, `cellular`, cellular words alone
+/// call-out itself, encoded, the same in every machine. Each word's compiled
+/// entry, its code, is let go, so that the loader's machine compiles it
+/// again if it runs it. Or, `cellular`, cellular words alone
 /// ([`cellular_image`]).
 pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: Option<Value>, cellular: bool) -> Result<Image, String> {
     if cellular {
         return cellular_image(heap, value, deps, adapter);
     }
     let mut links: Vec<(Value, Link)> = Vec::new();
+    let mut codes: Vec<Value> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut todo = vec![value];
     while let Some(v) = todo.pop() {
@@ -428,6 +429,9 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         let v = if v.is_suffix_ref() { heap.suffix_ref_owner(v) } else { v };
         if !seen.insert(v.raw()) {
             continue;
+        }
+        if let Some(c) = word_code(heap, v) {
+            codes.push(c);
         }
         if Some(v) == adapter {
             links.push((v, Link::Adapter));
@@ -459,19 +463,9 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         todo.extend(heap.bloblet_values(v));
     }
     let mut alone = Heap::new();
-    let (given, placeholders, globals) = placeholders(&mut alone, &links);
-    let (copy, made) = alone.copy_graph_with(heap, value, |_| false, &given);
-    // Each word's compiled entry let go: a stack word runs its cells again;
-    // a register word is compiled again.
-    let words: Vec<Value> = made.values().copied().filter(|w| w.is_bloblet() && (alone.is_cellular_word(*w) || alone.is_register_word(*w))).collect();
-    for w in words {
-        let entry = alone.bloblet_slot(w, WORD_ENTRY).as_fixnum();
-        if alone.is_register_word(w) {
-            alone.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(0));
-        } else if entry >= PRIMITIVES as i64 {
-            alone.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(ROUTINE_DOCOL as i64));
-        }
-    }
+    let (mut given, placeholders, globals) = placeholders(&mut alone, &links);
+    let_go_of_code(&mut given, &codes);
+    let (copy, _) = alone.copy_graph_with(heap, value, |_| false, &given);
     let rest = alone.cons(placeholders, Value::NULL);
     let root = alone.cons(copy, rest);
     alone.push_root(root);
@@ -539,9 +533,8 @@ pub fn read_links(l: Value, car: impl Fn(Value) -> Value, cdr: impl Fn(Value) ->
 /// native closure is kept as the cellular one it was made from, which the code area runs in either convention
 /// (`docs/research/code-stubs.md`): an adapter (`adapter`'s code) as the
 /// closure it adapts; one compiled, as a cellular closure of its code's
-/// word over the same values. Each word's compiled entry (a machine's slot
-/// number, this process's) is let go, so that the loader's machine
-/// compiles it again. Any other native code is refused: it calls by
+/// word over the same values. Each word's compiled entry, its code, is let
+/// go, so that the loader's machine compiles it again. Any other native code is refused: it calls by
 /// numbers and addresses that are this process's.
 fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: Option<Value>) -> Result<Image, String> {
     let closure_kind = const { fixpt_heap::layout::kind("native-closure") };
@@ -550,6 +543,7 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
     // adapts, or a cellular closure to make of a word over values.
     let mut adapted: Vec<(Value, Value)> = Vec::new();
     let mut compiled: Vec<(Value, Value, Vec<Value>)> = Vec::new();
+    let mut codes: Vec<Value> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut todo = vec![value];
     while let Some(v) = todo.pop() {
@@ -559,6 +553,9 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
         let v = if v.is_suffix_ref() { heap.suffix_ref_owner(v) } else { v };
         if !seen.insert(v.raw()) {
             continue;
+        }
+        if let Some(c) = word_code(heap, v) {
+            codes.push(c);
         }
         if heap.is_keyword(v) {
             links.push((v, Link::Keyword(heap.symbol_name(heap.keyword_symbol(v)))));
@@ -618,7 +615,8 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
         redirect.insert(c.raw(), k);
     }
     let mut alone = Heap::new();
-    let (given, placeholders, globals) = placeholders(&mut alone, &links);
+    let (mut given, placeholders, globals) = placeholders(&mut alone, &links);
+    let_go_of_code(&mut given, &codes);
     // Native code reached, but for the closures kept as cellular ones.
     let mut native = false;
     let (copy, made) = alone.copy_graph_redirected(heap, value, |_| false, &given, &redirect);
@@ -630,17 +628,6 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
     }
     if native {
         return Err("it holds native code that is not a procedure's".into());
-    }
-    // Each word's compiled entry let go: a stack word runs its cells again;
-    // a register word is compiled again.
-    let words: Vec<Value> = made.values().copied().filter(|w| w.is_bloblet() && (alone.is_cellular_word(*w) || alone.is_register_word(*w))).collect();
-    for w in words {
-        let entry = alone.bloblet_slot(w, WORD_ENTRY).as_fixnum();
-        if alone.is_register_word(w) {
-            alone.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(0));
-        } else if entry >= PRIMITIVES as i64 {
-            alone.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(ROUTINE_DOCOL as i64));
-        }
     }
     // The closures that were native, now cellular: for the loader to make
     // native again, and no other (one of `(conv cellular)` stays so).
@@ -702,6 +689,22 @@ pub fn native_procedures(heap: &mut Heap, value: Value, compile: crate::session:
         }
     }
     made.get(&value.raw()).copied().unwrap_or(value)
+}
+
+/// Word `v`'s compiled code, if `v` is a word (a register word too) that has
+/// some (`Heap::word_code`).
+fn word_code(heap: &Heap, v: Value) -> Option<Value> {
+    (heap.is_cellular_word(v) || heap.is_register_word(v)).then(|| heap.word_code(v)).flatten()
+}
+
+/// Each word's compiled code, `codes`, given as 0 to a copy: the word's
+/// entry let go, `docol` (0) for a stack word, which runs its cells again,
+/// and 0 for a register word, which is compiled again.
+fn let_go_of_code(given: &mut HashMap<u64, Value>, codes: &[Value]) {
+    const { assert!(ROUTINE_DOCOL == 0) };
+    for c in codes {
+        given.insert(c.raw(), Value::fixnum(0));
+    }
 }
 
 /// What `v` reaches, each object once, by `visit`, which says whether to go

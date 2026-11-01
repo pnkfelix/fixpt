@@ -3,7 +3,7 @@
 //! because the native machines run a word's cells without looking at them
 //! twice, so every word must be checked as it is made.
 
-use crate::layout::cellular::{KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
+use crate::layout::cellular::{COMPILED_RESUME, KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, WORD_TWIN, operands};
 use crate::{Heap, Value};
 
 impl Heap {
@@ -247,6 +247,82 @@ impl Heap {
 
     pub fn is_cellular_word(&self, v: Value) -> bool {
         v.is_bloblet() && self.bloblet_kind(v) == KIND
+    }
+
+    /// Word `w`'s machine code, if a native machine compiled it: its entry,
+    /// a code bloblet (`layout::cellular`'s `COMPILED_RESUME`). A register
+    /// word's too.
+    pub fn word_code(&self, w: Value) -> Option<Value> {
+        let e = self.bloblet_slot(w, WORD_ENTRY);
+        e.is_bloblet().then_some(e)
+    }
+
+    /// Whether word `w` runs its cells, as `docol` does or as machine code
+    /// compiled from them does: not a routine's word.
+    pub fn word_runs_cells(&self, w: Value) -> bool {
+        let e = self.bloblet_slot(w, WORD_ENTRY);
+        e.is_bloblet() || e.as_fixnum() as u64 == ROUTINE_DOCOL
+    }
+
+    /// The compiled code of each word `roots` reach (a register word's
+    /// too), each given 0, `docol` or a register word's "not compiled": for
+    /// a copy that keeps the words but not their code
+    /// (`copy_graph_with`'s `given`), as the front end's caches do, to be
+    /// compiled again where they run.
+    pub fn word_codes_let_go(&self, roots: &[Value]) -> std::collections::HashMap<u64, Value> {
+        const { assert!(ROUTINE_DOCOL == 0) };
+        let mut codes = std::collections::HashMap::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut todo = roots.to_vec();
+        while let Some(v) = todo.pop() {
+            if !v.is_ref() {
+                continue;
+            }
+            let v = if v.is_suffix_ref() { self.suffix_ref_owner(v) } else { v };
+            if !seen.insert(v.raw()) {
+                continue;
+            }
+            if v.is_pair() {
+                todo.extend([self.car(v), self.cdr(v)]);
+                continue;
+            }
+            if self.obj_type(v) == Some(crate::ObjType::Symbol) {
+                continue;
+            }
+            if (self.is_cellular_word(v) || self.is_register_word(v))
+                && let Some(c) = self.word_code(v)
+            {
+                codes.insert(c.raw(), Value::fixnum(0));
+                seen.insert(c.raw());
+            }
+            todo.extend(self.bloblet_values(v));
+        }
+        codes
+    }
+
+    /// Word `w` given machine code `code` as its entry: a code bloblet in
+    /// the code area's native part, `code` its suffix, then the table of
+    /// where it resumes, by `k`, from `starts`, where cell `i`'s code
+    /// begins, in bytes (-1 for none). Made runnable, and returned.
+    pub fn make_word_code(&mut self, w: Value, code: &[u8], starts: &[i64]) -> Value {
+        let fields = self.bloblet_head(w).fields;
+        let table = code.len().next_multiple_of(8);
+        let ks = fields + 2;
+        // At 32 bytes, as x86_64's compiler aligns the places calls return
+        // to from the code's start.
+        let c = self.make_code_bloblet_aligned(crate::CodePart::Native, const { crate::layout::kind("bloblet") }, COMPILED_RESUME, table + 8 * ks, false, 32);
+        let mut bytes = code.to_vec();
+        bytes.resize(table, 0);
+        for k in 0..ks {
+            let at = k.checked_sub(WORD_CELL0).and_then(|i| starts.get(i)).copied().unwrap_or(-1);
+            bytes.extend_from_slice(&(if at < 0 { 0 } else { at as u64 + 1 }).to_le_bytes());
+        }
+        self.set_bloblet_bytes(c, 0, &bytes).expect("a new bloblet's suffix");
+        self.set_bloblet_slot(c, COMPILED_RESUME, Value::fixnum(table as i64 / 8));
+        self.freeze_bloblet(c, true, true);
+        self.flush_code(c);
+        self.set_bloblet_slot(w, WORD_ENTRY, c);
+        c
     }
 }
 

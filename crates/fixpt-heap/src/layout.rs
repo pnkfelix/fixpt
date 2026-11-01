@@ -364,9 +364,15 @@ pub mod code {
 /// bloblet. Laid out `[cell…][twin][name][entry][trailer]`. `twin` is the
 /// word's register code (PLAN.md, 13h′), or `#f`. `entry` is the fixnum
 /// number of the routine that runs the word: `ROUTINE_DOCOL` for a word made
-/// of cells, which runs them in increasing `k` from `WORD_CELL0`. It is a
-/// number, not an address, so a heap image does not hold machine addresses.
-/// A compiled word gets a routine of its own and a new number.
+/// of cells, which runs them in increasing `k` from `WORD_CELL0`. A word
+/// compiled to machine code has its code as its entry instead, as a
+/// native procedure has (`docs/research/code-stubs.md`): a code bloblet in
+/// the code area's native part, whose suffix is the code, run at the
+/// bloblet's address in the area's execute view, and after it, at the
+/// byte its field `COMPILED_RESUME` says, where the code resumes at each
+/// cell (`Heap::make_word_code`). The word keeps its code alive; the
+/// heap's collections keep it or let it go, as any code bloblet; and no
+/// machine address is in either, so an image carries both as they are.
 ///
 /// A cell is a fixnum, which names a primitive routine directly (token
 /// threading, no word object needed), or a pointer to another word, which
@@ -383,6 +389,12 @@ pub mod cellular {
     pub const WORD_TWIN: usize = 4;
     /// Cell `i` is at `WORD_CELL0 + i`.
     pub const WORD_CELL0: usize = 5;
+    /// A compiled word's code bloblet's one field: where in its suffix its
+    /// table of where to resume begins, in words, so that the fixnum's bits
+    /// are the bytes (the table is word-aligned). The table has a word
+    /// for each `k` of the word's fields, `8k` bytes in: 0 where its code
+    /// does not resume, else 1 more than the byte of its code where it does.
+    pub const COMPILED_RESUME: usize = 1;
 
     /// The routines, by number, with their stack effects. The first
     /// `PRIMITIVES` of them may appear as cells.

@@ -91,7 +91,6 @@ fn placed_code_past_the_heaps_budget_collects_once() {
         assert_eq!(fixpt_native::cellular::run_word_as_is(&mut rt, w, &[]), Ok(Value::fixnum(7)));
     }
     assert_eq!(rt.heap.gc_count - before, 1, "major collections in 100 runs");
-    assert!(!fixpt_native::cellular::with_machine(|m| m.code_collection_due(&rt.heap)));
 }
 
 /// Place word `w`'s code, assembled apart, in the machine `run_word` uses,
@@ -100,16 +99,11 @@ fn place(rt: &mut Runtime, w: Value) -> usize {
     if cfg!(target_arch = "x86_64") {
         let (code, starts) = fixpt_native::cellular::x64::assemble_word(&rt.heap, w).expect("assembles");
         return fixpt_native::cellular::with_machine(|m| {
-            let at = m.reserve_bytes(code.len()).expect("room");
-            m.install_bytes(&mut rt.heap, w, at, &code, &starts).expect("installs");
+            m.install_bytes(&mut rt.heap, w, &code, &starts).expect("installs");
             code.len()
         });
     }
-    let (code, _) = fixpt_native::cellular::assemble_word(&rt.heap, w, [0, 0]).expect("assembles");
-    fixpt_native::cellular::with_machine(|m| {
-        let (at, far) = m.reserve(code.len()).expect("room");
-        let (code, starts) = fixpt_native::cellular::assemble_word(&rt.heap, w, far).expect("assembles");
-        m.install(&mut rt.heap, w, at, &code, &starts).expect("installs");
-    });
+    let (code, starts) = fixpt_native::cellular::assemble_word(&rt.heap, w, [0, 0]).expect("assembles");
+    fixpt_native::cellular::with_machine(|m| m.install(&mut rt.heap, w, &code, &starts).expect("installs"));
     4 * code.len()
 }

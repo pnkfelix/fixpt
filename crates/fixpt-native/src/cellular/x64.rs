@@ -42,7 +42,7 @@ pub(crate) use regcode::{dump, fx26_regs_tables};
 use super::State;
 use crate::x86_64::*;
 use fixpt_engine::cellular::{MARK_MARK, PROMPT_MARK, Trap};
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, KIND, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, COMPILED_RESUME, KIND, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_ENTRY};
 use fixpt_heap::layout::kind;
 use fixpt_heap::value::{TAG_BLOBLET, TAG_PAIR, TAG_TRAILER};
 use fixpt_heap::{Heap, Value};
@@ -241,11 +241,19 @@ impl Asm {
 
     /// Dispatch on the word in `W`: the tail of `NEXT`, and how a word
     /// given to `execute` or to the machine is run. Leaves the word in
-    /// `X11` too, where `docol` takes it.
+    /// `X11` too, where `docol` takes it. Its entry is a routine's number
+    /// (`docol`'s, for a word of cells), or its compiled code, a code
+    /// bloblet, which runs at its reference plus `code_delta`.
     fn run_word_in_w(&mut self) {
+        let compiled = self.label();
         self.e(mov(X11, W));
         self.e(load(X10, field(W, WORD_ENTRY)));
+        self.e(test_imm(X10, 7));
+        self.jcc(Cond::Ne, compiled);
         self.e(jmp_m(mi(TABLE, X10, 1, 0)));
+        self.bind(compiled);
+        self.e(alu_rm(Alu::Add, X10, st(offset_of!(State, code_delta))));
+        self.e(jmp_r(X10));
     }
 
     /// On to the next cell of this word: `NEXT`, or, in a word compiled to
@@ -258,19 +266,22 @@ impl Asm {
     }
 
     /// On from where `CUR` and the ip now are, `d` (8k) in `dreg`: into the
-    /// word's machine code there, if it has some, else `NEXT`.
+    /// word's machine code there, if it has some, else `NEXT`. Its code's
+    /// table of where it resumes is in its suffix, after the code, at the
+    /// byte its field `COMPILED_RESUME`'s bits are: by `8k`, 0, or 1 more
+    /// than the byte of the code where it resumes (`Heap::make_word_code`).
     fn enter_cur(&mut self, dreg: Reg) {
         let cellular = self.label();
         self.e(load(X10, field(CUR, WORD_ENTRY)));
-        self.e(test(X10, X10));
+        self.e(test_imm(X10, 7));
         self.jcc(Cond::E, cellular);
-        self.e(load(X16, st(offset_of!(State, resume))));
-        self.e(load(X16, mi(X16, X10, 1, 0)));
+        self.e(load(X16, field(X10, COMPILED_RESUME)));
+        self.e(add(X16, X10));
+        self.e(load(X16, mi(X16, dreg, 1, -4)));
         self.e(test(X16, X16));
         self.jcc(Cond::E, cellular);
-        self.e(load(X16, mi(X16, dreg, 1, 0)));
-        self.e(test(X16, X16));
-        self.jcc(Cond::E, cellular);
+        self.e(lea(X16, mi(X10, X16, 1, -1)));
+        self.e(alu_rm(Alu::Add, X16, st(offset_of!(State, code_delta))));
         self.e(jmp_r(X16));
         self.bind(cellular);
         self.next();
