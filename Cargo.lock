@@ -128,6 +128,7 @@ dependencies = [
  "fixpt-heap",
  "fixpt-memmgmt",
  "fixpt-read",
+ "fixpt-reps",
  "libc",
  "num-bigint",
  "num-integer",

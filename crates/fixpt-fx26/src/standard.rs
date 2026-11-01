@@ -332,6 +332,17 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // The heap dumped, and the procedure a resumed run starts by calling
     // (`fixpt resume`, `TODO.md` §189). It is not called here, so its
     // effect is none of this one's.
+    // A type's rep, in its binary form, from the nodes the checker written
+    // in FX-26 makes of it (`check-reps.fx`; `docs/research/heap-types.md`).
+    (
+        "rep-of-nodes",
+        concat!(
+            "(poly ((r region)) (subr (alloc r) ((listof (productof (1 int) (2 symbol) (3 bool) (4 (listof symbol acyclic)) ",
+            "(5 (listof (sumof (node int) (bound (productof (1 int) (2 int))) (hole int) ",
+            "(const (productof (1 string) (2 int) (3 string))) (sym symbol) (int int) (flag bool)) acyclic))) acyclic) ",
+            "(listof symbol acyclic) int) (bytevectorof r)))",
+        ),
+    ),
     ("dump-heap!", "(poly ((e effect)) (subr (io fs-write) (string (subr e () int)) (sumof (done unit) (failed io-error))))"),
     // Bytevectors (`TODO.md` §84): made, read and written at a region, as
     // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,

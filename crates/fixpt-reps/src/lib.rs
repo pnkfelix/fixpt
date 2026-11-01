@@ -56,6 +56,10 @@ pub struct Node {
     /// [`Rep::names`]); a variable is known by its place here.
     pub binders: Vec<u32>,
     pub args: Vec<Arg>,
+    /// Whether its operands are a set, their order no part of what it is
+    /// (an effect's atoms, a union's members): in a canonical rep, in an
+    /// order of their own (`canonical`), whatever order they were given in.
+    pub set: bool,
 }
 
 /// An operand.
@@ -103,6 +107,7 @@ impl Rep {
         h.u64(self.nodes.len() as u64);
         for n in &self.nodes {
             h.str(self.name(n.head));
+            h.byte(n.set as u8);
             h.u64(n.binders.len() as u64);
             h.u64(n.args.len() as u64);
             for a in &n.args {
@@ -226,6 +231,14 @@ pub fn digest_bytes(bytes: &[u8]) -> u64 {
     h.finish()
 }
 
+/// A generative type's key, for now (`heap-types.md`, "Step 1, done"): its
+/// name and its place in its checker's table, which both checkers number
+/// alike; so within a session. Both checkers' exports use it, so that their
+/// reps of one type agree.
+pub fn generative_key(name: &str, which: u32) -> u64 {
+    digest_bytes(format!("generative {name} {which}").as_bytes())
+}
+
 /// How a rep is made: nodes added, a slot reserved for a node not yet made
 /// (a recursive type's, which its own operands name) and filled later; then
 /// [`finish`](Builder::finish)ed, canonical.
@@ -288,8 +301,21 @@ impl Builder {
     }
 
     pub fn fill(&mut self, slot: u32, head: &str, binders: &[&str], args: Vec<Arg>) {
-        let node = Node { head: self.name(head), binders: binders.iter().map(|b| self.name(b)).collect(), args };
+        let node = Node { head: self.name(head), binders: binders.iter().map(|b| self.name(b)).collect(), args, set: false };
         self.nodes[slot as usize] = Some(node);
+    }
+
+    /// The same, a set node: its operands' order no part of it.
+    pub fn fill_set(&mut self, slot: u32, head: &str, args: Vec<Arg>) {
+        let node = Node { head: self.name(head), binders: Vec::new(), args, set: true };
+        self.nodes[slot as usize] = Some(node);
+    }
+
+    /// A set node, its slot.
+    pub fn add_set(&mut self, head: &str, args: Vec<Arg>) -> u32 {
+        let slot = self.reserve();
+        self.fill_set(slot, head, args);
+        slot
     }
 
     /// A node, its slot.
@@ -329,28 +355,38 @@ fn canonical(nodes: Vec<Node>, root: u32, names: Vec<String>, holes: Vec<String>
             return Err("an operand names no node".into());
         }
     }
-    // The minimal graph: nodes in one class are equal, by their own parts
-    // (not their binders' names), then their operands' classes, refined to
-    // a fixed point.
-    let own = |node: &Node| -> Vec<u64> {
-        let mut key = vec![node.head as u64, node.binders.len() as u64, node.args.len() as u64];
-        for a in &node.args {
-            match *a {
-                Arg::Node(_) => key.push(0),
-                Arg::Bound { pos, .. } => key.extend([1, pos as u64]),
-                Arg::Hole(i) => key.extend([2, i as u64]),
-                Arg::Const(i) => key.extend([3, consts[i as usize].key]),
-                Arg::Sym(i) => key.extend([4, i as u64]),
-                Arg::Int(k) => key.extend([5, k as u64]),
-                Arg::Flag(b) => key.extend([6, b as u64]),
-            }
+    // An operand's key, given what each node's is (`of`): a node's and a
+    // binder's by theirs; the rest by what they are, a hole by its number
+    // if `holes` (within this rep, two holes are two variables) else by
+    // none (for an order that is the same whatever the holes' numbers).
+    let arg_key = |a: &Arg, of: &dyn Fn(u32) -> u64, holes_by_number: bool| -> Vec<u64> {
+        match *a {
+            Arg::Node(i) => vec![0, of(i)],
+            Arg::Bound { binder, pos } => vec![1, of(binder), pos as u64],
+            Arg::Hole(i) => vec![2, if holes_by_number { i as u64 } else { 0 }],
+            Arg::Const(i) => vec![3, consts[i as usize].key],
+            Arg::Sym(i) => vec![4, digest_bytes(names[i as usize].as_bytes())],
+            Arg::Int(k) => vec![5, k as u64],
+            Arg::Flag(b) => vec![6, b as u64],
         }
+    };
+    // A node's key: its own parts (not its binders' names), then its
+    // operands' keys, sorted if it is a set.
+    let node_key = |node: &Node, of: &dyn Fn(u32) -> u64, holes_by_number: bool| -> Vec<u64> {
+        let mut key = vec![digest_bytes(names[node.head as usize].as_bytes()), node.binders.len() as u64, node.args.len() as u64, node.set as u64];
+        let mut args: Vec<Vec<u64>> = node.args.iter().map(|a| arg_key(a, of, holes_by_number)).collect();
+        if node.set {
+            args.sort();
+        }
+        args.into_iter().for_each(|a| key.extend(a));
         key
     };
-    let mut class: Vec<usize> = numbered(nodes.iter().map(own));
-    let mut count = distinct(&class);
+    // The minimal graph: nodes in one class are equal, refined from one
+    // class by their keys to a fixed point.
+    let mut class: Vec<usize> = vec![0; n];
+    let mut count = 1;
     loop {
-        let keys: Vec<(usize, Vec<usize>)> = nodes.iter().enumerate().map(|(k, node)| (class[k], edges(node).iter().map(|&i| class[i as usize]).collect())).collect();
+        let keys: Vec<Vec<u64>> = nodes.iter().map(|node| node_key(node, &|i| class[i as usize] as u64, true)).collect();
         let next = numbered(keys.into_iter());
         let c = distinct(&next);
         class = next;
@@ -359,8 +395,31 @@ fn canonical(nodes: Vec<Node>, root: u32, names: Vec<String>, holes: Vec<String>
         }
         count = c;
     }
+    // What orders a set's operands: a digest of each class's structure,
+    // refined round by round (as Weisfeiler and Leman's test), which does
+    // not depend on how the nodes were numbered, nor the holes; ties, the
+    // operands' given order.
+    let mut hash: Vec<u64> = vec![0; n];
+    let mut seen_classes = 0;
+    for _ in 0..=n {
+        let next: Vec<u64> = nodes.iter().map(|node| digest_words(&node_key(node, &|i| hash[i as usize], false))).collect();
+        let classes = distinct(&numbered(next.iter()));
+        hash = next;
+        if classes == seen_classes {
+            break;
+        }
+        seen_classes = classes;
+    }
+    let order_args = |node: &Node| -> Vec<Arg> {
+        let mut args = node.args.clone();
+        if node.set {
+            args.sort_by_cached_key(|a| arg_key(a, &|i| hash[i as usize], false));
+        }
+        args
+    };
     // Numbered as a walk from the root first meets each class, operands in
-    // order; holes and constants as it first meets them.
+    // order (a set's in its order above); holes and constants as it first
+    // meets them.
     let mut first: HashMap<usize, u32> = HashMap::new();
     let mut order: Vec<usize> = Vec::new();
     let mut stack = vec![root as usize];
@@ -371,7 +430,8 @@ fn canonical(nodes: Vec<Node>, root: u32, names: Vec<String>, holes: Vec<String>
         }
         first.insert(c, order.len() as u32);
         order.push(k);
-        stack.extend(edges(&nodes[k]).iter().rev().map(|&i| i as usize));
+        let ordered = Node { args: order_args(&nodes[k]), ..nodes[k].clone() };
+        stack.extend(edges(&ordered).iter().rev().map(|&i| i as usize));
     }
     let mut new_names: Vec<String> = Vec::new();
     let mut name_of: HashMap<u32, u32> = HashMap::new();
@@ -386,8 +446,7 @@ fn canonical(nodes: Vec<Node>, root: u32, names: Vec<String>, holes: Vec<String>
         let node = &nodes[k];
         let head = rename(node.head);
         let binders = node.binders.iter().map(|&b| rename(b)).collect();
-        let args = node
-            .args
+        let args = order_args(node)
             .iter()
             .map(|a| match *a {
                 Arg::Node(i) => Arg::Node(first[&class[i as usize]]),
@@ -404,11 +463,18 @@ fn canonical(nodes: Vec<Node>, root: u32, names: Vec<String>, holes: Vec<String>
                 other => other,
             })
             .collect();
-        out.push(Node { head, binders, args });
+        out.push(Node { head, binders, args, set: node.set });
     }
     let rep = Rep { nodes: out, names: new_names, holes: new_holes, consts: new_consts };
     rep.validate()?;
     Ok(Finished { rep, holes: hole_of, consts: const_of })
+}
+
+/// A digest of `words` (FNV-1a).
+fn digest_words(words: &[u64]) -> u64 {
+    let mut h = Fnv::new();
+    words.iter().for_each(|w| h.u64(*w));
+    h.finish()
 }
 
 /// Each of `keys` numbered by its first occurrence among them.
@@ -471,10 +537,23 @@ mod tests {
     }
 
     #[test]
+    fn a_sets_operands_in_any_order_are_one_rep() {
+        let build = |order: [&str; 3]| {
+            let mut b = Builder::new();
+            let atoms: Vec<Arg> = order.iter().map(|h| Arg::Node(b.add(h, &[], vec![]))).collect();
+            let set = b.add_set("effect", atoms);
+            b.finish(set).expect("finishes").rep
+        };
+        let (a, c) = (build(["spin", "stage", "nondet"]), build(["nondet", "spin", "stage"]));
+        assert_eq!(a, c);
+        assert_eq!(a.digest(), c.digest());
+    }
+
+    #[test]
     fn a_variable_outside_its_binder_is_not_well_formed() {
         // `(pairof (poly {r} int) r)`: `r` used outside the `poly`.
         let names = ["pairof", "poly", "base", "r"].map(String::from).to_vec();
-        let node = |head, binders: Vec<u32>, args| Node { head, binders, args };
+        let node = |head, binders: Vec<u32>, args| Node { head, binders, args, set: false };
         let rep = Rep {
             nodes: vec![
                 node(0, vec![], vec![Arg::Node(1), Arg::Bound { binder: 1, pos: 0 }]),

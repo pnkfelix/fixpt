@@ -6,6 +6,8 @@
 use fixpt_fx26::{Checker, Top};
 use fixpt_read::FileId;
 
+mod common;
+
 const DIRS: &[&str] = &[
     "bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate", "generative", "lemmas", "sizes",
     "conventions", "redefine", "modules", "higher-kinds", "unions", "io", "processes", "arrows", "specs", "globals",
@@ -72,4 +74,60 @@ fn round_trip(c: &mut Checker, t: fixpt_fx26::ast::TyId) -> Result<bool, String>
         return Err(format!("its readable form reads back otherwise: {text}"));
     }
     Ok(true)
+}
+
+/// The two checkers' reps of each type a test program defines are one rep
+/// (`docs/research/heap-types.md`, step 2): the agreement, by reps, not by
+/// printed lines. Each program both checkers take.
+#[test]
+fn both_checkers_export_each_type_as_one_rep() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let (mut wrong, mut agreed) = (Vec::new(), 0);
+    common::with_own(|s| {
+        for sub in DIRS {
+            let mut paths: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
+            paths.sort();
+            for path in paths {
+                let name = format!("{sub}/{}", path.file_name().unwrap().to_string_lossy());
+                let program = std::fs::read_to_string(&path).unwrap();
+                let base = path.parent().map(|d| d.to_path_buf());
+                // The FX-26 checker's, if it takes the whole program.
+                let outer = std::mem::replace(&mut s.checker.base_dir, base.clone());
+                let ours = s.check_with_own_checker(&program).ok().and_then(|r| r.ok()).and_then(|_| s.own_checked_reps().ok());
+                s.checker.base_dir = outer;
+                let Some(ours) = ours else { continue };
+                // The Rust checker's, of each form it takes.
+                let mut c = Checker::new();
+                c.base_dir = base;
+                let Ok(forms) = c.read_in(FileId(0), &program) else { continue };
+                let mut rust: Vec<(String, Vec<u8>)> = Vec::new();
+                for f in &forms {
+                    let tys = match c.top(f) {
+                        Ok(Top::Define { name: n, ty, .. }) => vec![(n, ty)],
+                        Ok(Top::DefineRec { bindings, .. }) => bindings.iter().map(|(n, t, _)| (*n, *t)).collect(),
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    };
+                    for (n, t) in tys {
+                        if let Ok(ex) = c.export_ty(t) {
+                            rust.push((c.interner.name(n).to_string(), fixpt_reps::binary::encode(&ex.rep)));
+                        }
+                    }
+                }
+                for (n, bytes) in &ours {
+                    // The latest of the name's, as a redefinition leaves it.
+                    let Some((_, theirs)) = rust.iter().rev().find(|(m, _)| m == n) else { continue };
+                    if theirs == bytes {
+                        agreed += 1;
+                    } else {
+                        let show = |b: &[u8]| fixpt_reps::binary::decode(b, true).map(|r| fixpt_reps::text::write(&r)).unwrap_or_else(|e| e);
+                        wrong.push(format!("{name}: `{n}`:\n  FX-26 {}\n  Rust  {}", show(bytes), show(theirs)));
+                    }
+                }
+            }
+        }
+    });
+    println!("{agreed} types one rep in both checkers; {} not", wrong.len());
+    assert!(wrong.is_empty(), "{} of {} differ:\n{}", wrong.len(), agreed + wrong.len(), wrong.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
+    assert!(agreed >= 850, "only {agreed} compared");
 }

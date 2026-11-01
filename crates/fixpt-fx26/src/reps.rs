@@ -28,10 +28,11 @@
 //! | `(dlambda ((x k) …) d)` | `(dlambda {x …} (binder k …) … d)` |
 //! | `(f d …)` | `(app f d …)` |
 //!
-//! Effects are `(effect atom …)`, in an order of their own (not of this
-//! process's numbers), so that equal effects have one rep; regions,
+//! Effects are `(&effect atom …)`, a set node, so that equal effects have
+//! one rep whatever order this checker keeps them in (a union's members
+//! are in the order written); regions,
 //! `(heap)`, `(rconst a)`, `(frozen acyclic? [place])`, `(global g)`,
-//! `(globals)`, or a variable; sizes, `(finite)` or `(lin k v c …)`;
+//! `(globals)`, or a variable; sizes, `(finite)` or `(lin k (&terms (term v c) …))`;
 //! descriptions, `(d-region R)`, `(d-effect E)`, `(d-type T)`, `(d-size N)`,
 //! `(d-conv C)`, `(d-fun F)`; a specification, `(spec {p … r} requires
 //! ensures)`, its names its binders', each formula a tree of `(true)`,
@@ -102,9 +103,7 @@ impl Checker {
 
 /// A generative type's key (`reps.rs`, "Not yet"): its name and its place.
 fn generative_key(c: &Checker, which: u32) -> u64 {
-    let g = &c.generatives[which as usize];
-    let text = format!("generative {} {which}", c.interner.name(g.name));
-    fixpt_reps::digest_bytes(text.as_bytes())
+    fixpt_reps::generative_key(c.interner.name(c.generatives[which as usize].name), which)
 }
 
 fn kind_name(k: Kind) -> &'static str {
@@ -155,20 +154,6 @@ impl Ex<'_> {
         self.holes.insert(v, h);
         self.hole_vars.push(v);
         h
-    }
-
-    /// What orders a variable among a set's (an effect's atoms, a size's
-    /// terms): a bound one by its binder's depth and place, a hole by its
-    /// number, so that equal sets have one order whatever this process
-    /// numbered their variables.
-    fn var_key(&mut self, v: DVar) -> Vec<u64> {
-        if let Some(depth) = self.scope.iter().rposition(|(w, _, _)| *w == v) {
-            return vec![0, depth as u64, self.scope[depth].2 as u64];
-        }
-        match self.var(v) {
-            Arg::Hole(i) => vec![1, i as u64],
-            _ => vec![2],
-        }
     }
 
     fn kind(&mut self, k: Kind) -> Arg {
@@ -227,21 +212,12 @@ impl Ex<'_> {
         }
     }
 
-    fn region_key(&mut self, r: Region) -> Vec<u64> {
-        match r {
-            Region::Var(v) => [vec![0], self.var_key(v)].concat(),
-            Region::Const(s) => [vec![1], name_key(self.c.interner.name(s))].concat(),
-            Region::Frozen(p, f) => [vec![2, f as u64], p.map_or(vec![], |p| self.var_key(p))].concat(),
-            Region::Heap => vec![3],
-            Region::Global(g) => [vec![4], name_key(self.c.interner.name(g))].concat(),
-            Region::Globals => vec![5],
-        }
-    }
-
+    /// Effect `e`: a set node of its atoms, whose order the rep's canonical
+    /// form makes (`fixpt_reps`'s sets), not this process's numbers.
     fn effect(&mut self, e: &Effect) -> Result<Arg, String> {
-        let mut atoms: Vec<(Vec<u64>, Arg)> = Vec::new();
+        let mut atoms = Vec::new();
         for a in &e.0 {
-            let key_and_arg = match *a {
+            let arg = match *a {
                 Atom::Read(r) | Atom::Write(r) | Atom::Alloc(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) | Atom::Init(r) | Atom::Send(r) | Atom::Receive(r) => {
                     let head = match a {
                         Atom::Read(_) => "read",
@@ -254,55 +230,48 @@ impl Ex<'_> {
                         Atom::Send(_) => "send",
                         _ => "receive",
                     };
-                    let key = [name_key(head), self.region_key(r)].concat();
                     let region = self.region(r);
-                    (key, self.node(head, vec![region]))
+                    self.node(head, vec![region])
                 }
-                Atom::Spin => (name_key("spin"), self.node("spin", vec![])),
+                Atom::Spin => self.node("spin", vec![]),
                 Atom::Io(k) => {
                     let n = self.b.name(k.name());
-                    ([name_key("io"), name_key(k.name())].concat(), self.node("io", vec![Arg::Sym(n)]))
+                    self.node("io", vec![Arg::Sym(n)])
                 }
-                Atom::Nondet => (name_key("nondet"), self.node("nondet", vec![])),
-                Atom::Stage => (name_key("stage"), self.node("stage", vec![])),
-                Atom::Var(v) => ([name_key("var"), self.var_key(v)].concat(), self.var(v)),
+                Atom::Nondet => self.node("nondet", vec![]),
+                Atom::Stage => self.node("stage", vec![]),
+                Atom::Var(v) => self.var(v),
                 Atom::App(n) => {
                     let (head, args) = self.c.arena.effect_apps.parts(n);
-                    let mut key = [name_key("eapp"), self.var_key(head)].concat();
                     let mut out = vec![self.var(head)];
                     for x in &args {
-                        let (k, arg) = self.earg(x)?;
-                        key.extend(k);
-                        out.push(arg);
+                        out.push(self.earg(x)?);
                     }
-                    (key, self.node("eapp", out))
+                    self.node("eapp", out)
                 }
             };
-            atoms.push(key_and_arg);
+            atoms.push(arg);
         }
-        atoms.sort_by(|a, b| a.0.cmp(&b.0));
-        let args = atoms.into_iter().map(|(_, a)| a).collect();
-        Ok(self.node("effect", args))
+        Ok(Arg::Node(self.b.add_set("effect", atoms)))
     }
 
-    fn earg(&mut self, x: &EArg) -> Result<(Vec<u64>, Arg), String> {
+    fn earg(&mut self, x: &EArg) -> Result<Arg, String> {
         Ok(match x {
             EArg::Region(r) => {
-                let k = self.region_key(*r);
                 let r = self.region(*r);
-                ([vec![0], k].concat(), self.node("e-region", vec![r]))
+                self.node("e-region", vec![r])
             }
             EArg::Effect(e) => {
                 let e = self.effect(e)?;
-                (vec![1], self.node("e-effect", vec![e]))
+                self.node("e-effect", vec![e])
             }
             EArg::Size(s) => {
                 let s = self.size(s);
-                (vec![2], self.node("e-size", vec![s]))
+                self.node("e-size", vec![s])
             }
             EArg::Conv(c) => {
                 let c = self.conv(*c);
-                (vec![3], self.node("e-conv", vec![c]))
+                self.node("e-conv", vec![c])
             }
         })
     }
@@ -311,14 +280,15 @@ impl Ex<'_> {
         match s {
             Size::Finite => self.node("finite", vec![]),
             Size::Lin { k, terms } => {
-                let mut ts: Vec<(Vec<u64>, DVar, i64)> = terms.iter().map(|(v, c)| (self.var_key(*v), *v, *c)).collect();
-                ts.sort_by(|a, b| a.0.cmp(&b.0));
-                let mut args = vec![Arg::Int(*k)];
-                for (_, v, c) in ts {
-                    args.push(self.var(v));
-                    args.push(Arg::Int(c));
-                }
-                self.node("lin", args)
+                let ts: Vec<Arg> = terms
+                    .iter()
+                    .map(|(v, c)| {
+                        let v = self.var(*v);
+                        self.node("term", vec![v, Arg::Int(*c)])
+                    })
+                    .collect();
+                let ts = Arg::Node(self.b.add_set("terms", ts));
+                self.node("lin", vec![Arg::Int(*k), ts])
             }
         }
     }
@@ -554,14 +524,12 @@ impl Ex<'_> {
             }
         };
         let refs: Vec<&str> = binders.iter().map(String::as_str).collect();
+        // A union's members in the order written (`union_of` keeps it), not
+        // a set: two orders of one union are two reps, which costs a cache
+        // missed, never an answer, and prints as the program wrote it.
         self.b.fill(slot, head, &refs, args);
         Ok(slot)
     }
-}
-
-/// A name's order among others: its bytes.
-fn name_key(s: &str) -> Vec<u64> {
-    s.bytes().map(u64::from).chain([u64::MAX]).collect()
 }
 
 struct Im<'c, 'r> {
@@ -749,10 +717,13 @@ impl Im<'_, '_> {
             "finite" => Size::Finite,
             "lin" => {
                 let c0 = Self::int(args[0])?;
+                let ts = Self::child(*args.get(1).ok_or("a size of no terms")?)?;
                 let mut terms = Vec::new();
-                for pair in args[1..].chunks(2) {
-                    terms.push((self.var(pair[0])?, Self::int(*pair.get(1).ok_or("a term of no coefficient")?)?));
+                for t in self.node(ts).args.clone() {
+                    let parts = self.node(Self::child(t)?).args.clone();
+                    terms.push((self.var(parts[0])?, Self::int(*parts.get(1).ok_or("a term of no coefficient")?)?));
                 }
+                terms.sort_by_key(|(v, _)| *v);
                 Size::Lin { k: c0, terms }
             }
             other => return Err(format!("no size `{other}`")),

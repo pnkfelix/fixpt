@@ -3145,6 +3145,18 @@ prims! {
     // now is, which a resumed run (`fixpt resume`) starts by calling `a[1]`,
     // a procedure of no arguments. Where the session installed no way to,
     // a failure.
+    // A type as a rep (`docs/research/heap-types.md`, step 2), from the
+    // nodes the checker written in FX-26 made of it (`check-reps.fx`): a
+    // list of nodes, each its slot, its head, whether it is a set, its
+    // binders' names and its operands; the holes' names; the root's slot.
+    // Made canonical (`fixpt_reps::Builder`); its binary form.
+    "%fx26-rep-of-nodes", 3, Some(3), simple!(|rt, a| {
+        let rep = match rep_of_nodes(rt, a[0], a[1], a[2]) {
+            Ok(r) => r,
+            Err(why) => return rt.fail(&format!("rep-of-nodes: {why}"), &[]),
+        };
+        Ok(rt.heap.make_bytevector(&fixpt_reps::binary::encode(&rep)))
+    });
     "%fx26-dump-heap", 2, Some(2), simple!(|rt, a| {
         let path = get_string(rt, a[0])?;
         let r = match rt.dump_heap {
@@ -3214,4 +3226,58 @@ pub fn lookup(name: &str) -> Option<u16> {
 
 pub fn def(index: u16) -> &'static PrimDef {
     &PRIMITIVES[index as usize]
+}
+
+/// The rep `%fx26-rep-of-nodes` makes of `nodes`, `holes` and `root`.
+fn rep_of_nodes(rt: &Runtime, nodes: Value, holes: Value, root: Value) -> Result<fixpt_reps::Rep, String> {
+    use fixpt_reps::{Arg, Builder, Const};
+    let heap = &rt.heap;
+    let list = |l: Value| heap.list_to_vec(l).ok_or("not a list".to_string());
+    let field = |v: Value, k: usize| heap.bloblet_slot(v, k + 1);
+    let int = |v: Value| if v.is_fixnum() { Ok(v.as_fixnum()) } else { Err("not an integer".to_string()) };
+    let name = |v: Value| if heap.is_a(v, ObjType::Symbol) { Ok(heap.symbol_name(v)) } else { Err("not a symbol".to_string()) };
+    let nodes = list(nodes)?;
+    let slots = nodes.iter().map(|n| int(field(*n, 1))).collect::<Result<Vec<i64>, _>>()?;
+    let mut b = Builder::new();
+    for _ in 0..=slots.iter().copied().max().unwrap_or(0) {
+        b.reserve();
+    }
+    let mut hole_args = Vec::new();
+    for h in list(holes)? {
+        hole_args.push(b.hole(&name(h)?));
+    }
+    for (node, slot) in nodes.iter().zip(&slots) {
+        let head = name(field(*node, 2))?;
+        let set = field(*node, 3) != Value::FALSE;
+        let binders: Vec<String> = list(field(*node, 4))?.into_iter().map(name).collect::<Result<_, _>>()?;
+        let mut args = Vec::new();
+        for arg in list(field(*node, 5))? {
+            let (tag, v) = (name(heap.bloblet_slot(arg, 2))?, heap.bloblet_slot(arg, 3));
+            args.push(match tag.as_str() {
+                "node" => Arg::Node(int(v)? as u32),
+                "bound" => Arg::Bound { binder: int(field(v, 1))? as u32, pos: int(field(v, 2))? as u32 },
+                "hole" => *hole_args.get(int(v)? as usize).ok_or("a hole not named")?,
+                "const" => {
+                    let generative = heap.string_to_rust(field(v, 1));
+                    let which = int(field(v, 2))? as u32;
+                    let kind = heap.string_to_rust(field(v, 3));
+                    b.konst(Const { key: fixpt_reps::generative_key(&generative, which), name: generative, kind })
+                }
+                "sym" => {
+                    let s = name(v)?;
+                    Arg::Sym(b.name(&s))
+                }
+                "int" => Arg::Int(int(v)?),
+                "flag" => Arg::Flag(v != Value::FALSE),
+                other => return Err(format!("an operand tagged `{other}`")),
+            });
+        }
+        let refs: Vec<&str> = binders.iter().map(String::as_str).collect();
+        if set {
+            b.fill_set(*slot as u32, &head, args);
+        } else {
+            b.fill(*slot as u32, &head, &refs, args);
+        }
+    }
+    b.finish(int(root)? as u32).map(|f| f.rep)
 }

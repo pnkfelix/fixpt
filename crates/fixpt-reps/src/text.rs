@@ -8,6 +8,7 @@
 //! ```
 //!
 //! - `(head {b …} operand …)`: a node; `{…}`, its binders' names, if any.
+//!   `(&head operand …)`: a set node, its operands' order none of it.
 //! - `#n=` before a node: its label, its index; `#n#`, that node again (a
 //!   node used twice, or a cycle). A node a bound variable names is
 //!   labelled too.
@@ -56,6 +57,9 @@ fn node(rep: &Rep, k: usize, labelled: &[bool], done: &mut [bool], out: &mut Str
     }
     let nd = &rep.nodes[k];
     out.push('(');
+    if nd.set {
+        out.push('&');
+    }
     out.push_str(&quoted(rep.name(nd.head)));
     if !nd.binders.is_empty() {
         let names: Vec<String> = nd.binders.iter().map(|&b| quoted(rep.name(b))).collect();
@@ -89,6 +93,7 @@ fn node(rep: &Rep, k: usize, labelled: &[bool], done: &mut [bool], out: &mut Str
 fn quoted(s: &str) -> String {
     let plain = !s.is_empty()
         && !s.chars().any(|c| c.is_whitespace() || "(){}<>|#?\"".contains(c))
+        && !s.starts_with('&')
         && s.parse::<i64>().is_err();
     if plain {
         s.to_string()
@@ -186,6 +191,10 @@ impl Parser<'_> {
             self.labels.insert(n, slot);
         }
         self.expect(b'(')?;
+        let set = self.peek() == Some(b'&');
+        if set {
+            self.at += 1;
+        }
         let head = self.name()?;
         self.space();
         let mut binders = Vec::new();
@@ -213,7 +222,11 @@ impl Parser<'_> {
             }
         }
         let refs: Vec<&str> = binders.iter().map(String::as_str).collect();
-        self.b.fill(slot, &head, &refs, args);
+        if set {
+            self.b.fill_set(slot, &head, args);
+        } else {
+            self.b.fill(slot, &head, &refs, args);
+        }
         Ok(slot)
     }
     fn arg(&mut self) -> Result<Arg, String> {

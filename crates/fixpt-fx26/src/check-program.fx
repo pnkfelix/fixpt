@@ -65,7 +65,9 @@
             check-generative check-read-descs check-resolve check-errors check-terminate
             check-print check-letrec check-read check-expect check-modules check-modorder
             check-subst check-synth check-module-rules check-subtype parser check-modules-read
-            check-print-parts)))
+            check-print-parts))
+          ;; Its types as reps (`check-reps.fx`), made of what it is given.
+          (check-reps ((load-input "fx26:check-reps.fx") check-types)))
       (module
 (hide (include check-program-types) (include check-types-types) (include parser-types)
       (include eager-reader-types) (include check-env-types) (include check-resolve-types)
@@ -520,6 +522,30 @@
 ;; For a driver (a session on the evaluator, `sessions26.rs`): what the
 ;; last check runs (`checked-tops`), each by the first name it defines
 ;; ("" for none), and whether it assigns its names' globals.
+;; Each name the program checked last defines, in order, and its type as a
+;; rep, in its binary form (`check-reps.fx`): for the two checkers to be
+;; compared by reps (`docs/research/heap-types.md`, step 2).
+(define checked-reps (->* () (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
+  (lambda ()
+    (letrec ((names (->* (k-names (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
+                         (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
+                   (lambda (ns acc)
+                     (if (null? ns)
+                         acc
+                         (let ((t (k-lookup-raw (car ns))))
+                           (names (cdr ns)
+                                  (if (< t 0)
+                                      acc
+                                      (cons (product (1 (car ns))
+                                                     (2 ((with check-reps k-ty-rep) t)))
+                                            acc)))))))
+             (defs (->* (k-def-list (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
+                        (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
+                   (lambda (ds acc)
+                     (if (null? ds)
+                         acc
+                         (defs (cdr ds) (names (reverse (extract (car ds) 1)) acc))))))
+      (defs (get k-defs) nil))))
 (define checked-run-names (->* () (listof (productof (1 string) (2 bool)) acyclic))
   (lambda ()
     (letrec ((go (subr kreads ((listof k-run acyclic))

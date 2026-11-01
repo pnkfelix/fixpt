@@ -381,6 +381,7 @@
          (("wcell-symbol") "%fx26-identity")
          (("wcell-global") "%fx26-identity")
          (("wglobal-name") "%fx26-global-name")
+         (("rep-of-nodes") "%fx26-rep-of-nodes")
          (else "")))
       ((13)
        (case n

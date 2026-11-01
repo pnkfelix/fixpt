@@ -9,8 +9,9 @@
 //!         the constants'), each its length and bytes (UTF-8)
 //! holes:  count, each a name's index
 //! consts: count, each its key (8 bytes, little-endian), a name's index, a kind's index
-//! nodes:  count, each its head's index; its binders: count, each a name's index;
-//!         its operands: count, each a tag byte and its value
+//! nodes:  count, each its head's index; a byte, 1 if it is a set; its
+//!         binders: count, each a name's index; its operands: count, each a
+//!         tag byte and its value
 //! ```
 //!
 //! The operands' tags: 0 a node, 1 a bound variable (binder, place), 2 a
@@ -66,6 +67,7 @@ pub fn encode(rep: &Rep) -> Vec<u8> {
     uint(&mut out, rep.nodes.len() as u64);
     for node in &rep.nodes {
         uint(&mut out, node.head as u64);
+        out.push(node.set as u8);
         uint(&mut out, node.binders.len() as u64);
         node.binders.iter().for_each(|&b| uint(&mut out, b as u64));
         uint(&mut out, node.args.len() as u64);
@@ -132,6 +134,11 @@ pub fn decode(bytes: &[u8], validate: bool) -> Result<Rep, String> {
     let mut nodes = Vec::with_capacity(nnodes);
     for _ in 0..nnodes {
         let head = r.uint()? as u32;
+        let set = match r.take(1)?[0] {
+            0 => false,
+            1 => true,
+            b => return Err(format!("a node's set byte {b}")),
+        };
         let nb = count(&mut r)?;
         let binders = (0..nb).map(|_| r.uint().map(|b| b as u32)).collect::<Result<_, _>>()?;
         let na = count(&mut r)?;
@@ -150,7 +157,7 @@ pub fn decode(bytes: &[u8], validate: bool) -> Result<Rep, String> {
                 t => return Err(format!("an operand's tag {t}")),
             });
         }
-        nodes.push(Node { head, binders, args });
+        nodes.push(Node { head, binders, args, set });
     }
     if r.at != bytes.len() {
         return Err("bytes past the rep".into());
