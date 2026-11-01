@@ -2058,10 +2058,11 @@ thread_local! {
 }
 
 /// A cellular closure compiled in the native convention, each procedure's
-/// code made by the compiler written in FX-26 (`native-direct-x64.fx`):
+/// code made by the compiler written in FX-26 for this machine
+/// (`native-direct-x64.fx`, `native-direct-arm64.fx`: `DIRECT_FX`):
 /// `fixpt_native::direct`'s driver asks for each procedure
 /// (`DirectMachine::fx_next`), FX-26 makes its code
-/// (`native-compile-x64-proc`), and the driver takes it
+/// (`native-compile-x64-proc`, `native-compile-arm64-proc`), and the driver takes it
 /// (`fx_emitted`) and places the lot (`fx_finish`). A native closure
 /// already (not an adapter) is itself. Why not, if not, kept for the
 /// runner too.
@@ -2154,6 +2155,11 @@ fn oracle_compile(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle) 
     r.map(|(procs, codes)| (hold(s, &procs), codes))
 }
 
+/// The compiler of this machine's native convention written in FX-26: its
+/// file, and the front end's entry that compiles a procedure.
+const DIRECT_FX: (&str, &str) =
+    if cfg!(target_arch = "x86_64") { ("native-direct-x64.fx", "native-compile-x64-proc") } else { ("native-direct-arm64.fx", "native-compile-arm64-proc") };
+
 fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle, described: Option<&mut Held>) -> Result<fixpt_scheme::Handle, String> {
     use fixpt_native::direct::{fx_begin, fx_emitted, fx_finish, fx_next, fx_park, fx_unpark, DirectMachine, FxEmitted};
     let mut begun = None;
@@ -2217,7 +2223,7 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
             fx_park(heap, &mut c);
             fixpt_heap::Value::NULL
         });
-        let made = s.call_global(&format!("{}native-compile-x64-proc", fixpt_fx26::session::READER_PREFIX), &[name, lists, errors]);
+        let made = s.call_global(&format!("{}{}", fixpt_fx26::session::READER_PREFIX, DIRECT_FX.1), &[name, lists, errors]);
         s.make(|m| {
             let heap = m.heap();
             fx_unpark(heap, &mut c);
@@ -2227,7 +2233,7 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
             Ok(h) => h,
             Err(e) => {
                 abandon(s, c);
-                return Err(format!("native-direct-x64.fx: {e}"));
+                return Err(format!("{}: {e}", DIRECT_FX.0));
             }
         };
         let out = s.view(|v| {
@@ -2379,7 +2385,7 @@ fn run_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fu
     // which is a native closure that runs it as cellular code.
     let compiled = fixpt_native::direct::DirectMachine::compiled_of(&rt.heap, closure).filter(|_| rt.heap.adapted(closure).is_none());
     let Some(p) = compiled else {
-        let why = FX_DECLINED.with(|d| d.borrow_mut().take()).unwrap_or_else(|| "not compiled by native-direct-x64.fx".into());
+        let why = FX_DECLINED.with(|d| d.borrow_mut().take()).unwrap_or_else(|| format!("not compiled by {}", DIRECT_FX.0));
         return NativeRun::Declined(why);
     };
     fixpt_native::direct::with_machine(|m| NativeRun::Ran(m.call(rt, p, &[], fuel).map_err(|t| t.what))).unwrap_or_else(|e| NativeRun::Ran(Err(e)))
