@@ -3358,3 +3358,49 @@ of `TODO.md` §141, working on my own.
 - **The Rust checker's session definitions' text kept**: it is read back
   by the same checker only, never another or a stage; by rep it would
   be one more import a definition, for nothing measured.
+
+## Register code compiled by FX-26 on arm64 (`TODO.md` §81, 2026-10-31)
+
+1. **`native-arm64-regs.fx`, over `native.fx`'s assembler**, as
+   `native-x64-regs.fx` is over `native-x64.fx`'s (through
+   `native-arm64-asm-sig`), and two files for the same reason:
+   `native-arm64-regs-ops.fx`, of no state (`pure_call`, `int_fast`,
+   `shape_test`, `bump_words`, `inline_op` and `inline`), and
+   `native-arm64-regs.fx`, the rest, with the compile's state. Its steps
+   are `regcode.rs`'s, named `ar-` and the Rust name; their types and the
+   signatures in `native-arm64-regs-types.fx`, its own file, not
+   `native-types.fx`.
+2. **What `native.fx` gains is the Rust `Asm`'s, its words' code
+   unchanged**: `bl` (`fix-bl`), long branches (`n-long`, the opposite
+   condition over a `b`, as `long_branches`; `n-branches-fit?`), and
+   where a label is. Only register code sets `n-long`: `native.fx`'s
+   words have no long form yet, as they had none before.
+3. **What it knows of the machine, generated**
+   (`native-arm64-regs-layout.fx`, `cellular::fx26_regs_module`, kept by
+   `tests/layout.rs`): its registers and State fields, beyond
+   `native-layout.fx`'s; the tables (operand counts, the primitives it
+   names, which never collect, the shape tests' kinds) are x86_64's
+   generator's, its names' prefix given (`x64::fx26_regs_tables`), so the
+   two cannot drift.
+4. **The time slice an argument** (`native-assemble-arm64-regs`'s last):
+   arm64's register code takes its next slice as a constant, where
+   x86_64's reads it from the state (`State::slice`, "The x86_64 back end
+   rebased onto main" 3), and `FIXPT_SLICE` sets it at run time; `syn.rs`
+   passes `sched::slice()`, so the bytes are Rust's whatever it says,
+   without changing arm64's Rust code. `far`, vestigial, is taken as
+   `native-assemble` takes it, and not used.
+5. **Placed where `fx-compiled` places words** (`syn::assemble_twin_by_fx26`,
+   now of both machines): the instructions as 4-byte words, the starts and
+   resume points scaled, as the cellular path's are. The CLI no longer
+   refuses `fx-regs-fxjit-cellcc` on arm64; it still refuses
+   `fx-regs-fxjit-nativecc` there, the native convention having no FX-26
+   compiler for arm64 yet.
+6. **Checked instruction for instruction** (`tests/native.rs`): every
+   register word of the front end, 5,678 words and 9,913,060 instructions,
+   the same instructions and resume points as `assemble_register_word`;
+   the adapters for every count, at slots in and past one `ldr`'s reach;
+   and once with every branch long on both sides, agreeing too. The new
+   encodings (`add_lsl`, `sdiv`, `msub`, `eor`, `mul`, `smulh`, `and`,
+   `lslv`, `asrv`, `lsl_imm`, `ldur_w`, `nop`) each against the Rust
+   encoder (`tests/arm64.rs`). Every test program runs alike on the
+   machine (`tests/compiler.rs`), as do the CLI's tests of it.
