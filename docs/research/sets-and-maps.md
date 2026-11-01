@@ -312,7 +312,8 @@ statically what they check at run time.
 Running them here needed a local change not in this note: the heap's
 reservation of address space (`fixpt_memmgmt::Words::new`) was refused
 on a Linux machine with `vm.overcommit_memory = 0` and 15 GB of memory,
-until it was mapped with `MAP_NORESERVE`.
+until it was mapped with `MAP_NORESERVE` (issue #4: the reservation
+is about 81 GiB, which heuristic overcommit refuses as one mapping).
 
 ## Sources
 
