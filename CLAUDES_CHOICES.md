@@ -3168,3 +3168,51 @@ of `TODO.md` §141, working on my own.
   evaluator's `dump-heap!` fails as an I/O failure.
 - **The primitive last**: `%fx26-dump-heap` is registered after every
   other, so that the generated layouts number the others as before.
+
+## The native convention compiled by FX-26 on arm64 (`TODO.md` §81, 2026-10-31)
+
+The user's: make `fx-regs-fxjit-nativecc` work on arm64, as on x86_64
+("The native convention compiled by FX-26 on x86_64"). The same design,
+the arm64 twin: `direct.rs`'s `procedure` ported step for step.
+
+1. **The driver is x86_64's**: `direct/fx.rs` unchanged. `procedure` asks
+   the driver what `prepare_x64` asks, in the same order (the frame too
+   large first, the callees, then `const`, `global`, `lambda` and the
+   captures' continuation), so the requests and their numbering serve
+   both; its `head`'s SSE4.1 is read and not used.
+2. **Eleven files, `native-direct-arm64*.fx`**, split by x86_64's lines,
+   each `direct.rs`'s functions under its own prefix: the assembler and
+   shared sequences (`-asm`, `ada-`; instructions, not bytes, and `Fix`'s
+   kinds, a branch to a `ret` that `ret`), raw values (`-raw`, `adr-`),
+   the heap's fast paths (`-flat`, `adf-`, given no raw module: they call
+   none), the procedure (`-proc`, `adp-`), its instructions (`-ops`,
+   `ado-`), the primitives', control's and call-outs' (`-prims`, `adq-`;
+   `pure_fast` and `string_eq` in `-strings`) and the loop
+   (`native-direct-arm64.fx`, `adx-`, the entry
+   `native-compile-arm64-proc`). The types shared with x86_64's
+   (`da-assembles`, `dr-int-slow`, `dp-edge`, `nr-…`) are its, imported;
+   `native-reps.fx` is of no machine's and given x86_64's layout.
+3. **The layout generated** (`native-direct-arm64-layout.fx`,
+   `fx26_direct_arm64_module`): x86_64's generator made one of a
+   machine's registers (`x64::fx26_direct_layout_of`), the rest by the
+   same names, so the two files differ only in registers. The encoder
+   (`arm64.fx`) gained what `direct.rs` uses (narrow and indexed memory,
+   `adr`, pages, division, shifts by a register, floating point,
+   `card_mark`), each against `arm64.rs`.
+4. **Ported in parallel, each piece against its Rust one by name**
+   (`direct::oracle_arm64`, `direct/fx_arm64/oracle_*.rs`; the tests
+   `native_direct_arm64*.rs`, over one harness): the assembler's pieces,
+   3,347 raw values' pieces, 6,356 of the heap's, 560 of the primitives'.
+   A piece runs in an assembler of its own, its call-outs numbered after
+   the machine's own (`OWN_CALLOUTS`), so that their loads from fields are
+   compared too.
+5. **Checked byte for byte**: `tests/native_x64.rs`'s `compare_direct`
+   compares the machine it runs on (`FIXPT_FX_DIRECT_ALONE` runs the
+   modules compiled alone, before the front end is rebuilt): every
+   register word of the front end, each as a closure, 6,014 procedures,
+   19.2 MB, the same (2 refused by both). `fixpt-cli`'s `fx_native.rs`
+   runs on arm64: every test program (859) on both machines, the oracle
+   on, the same and no difference (a byte changed in every instruction
+   makes all 47 `native` programs differ).
+6. **The machine**: the CLI calls this machine's compiler (`DIRECT_FX`);
+   `fx-native` is refused only where the native convention does not run.

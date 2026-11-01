@@ -530,7 +530,7 @@ REPL.
 | `fx-cells-fxjit-cellcc`             | FX-26          | FX-26 (`native.fx`)    | the hand machine, as arm64      |
 | `fx-regs-rsjit-cellcc`              | FX-26          | Rust (register code)   | the hand machine, as arm64      |
 | `fx-regs-fxjit-cellcc`              | FX-26          | FX-26 (`native-x64-regs.fx`) | the hand machine, as x86_64 only |
-| `fx-regs-fxjit-nativecc`            | FX-26          | FX-26 (`native-direct-x64.fx`) | x86_64 only, the native convention |
+| `fx-regs-fxjit-nativecc`            | FX-26          | FX-26 (`native-direct-x64.fx`, `native-direct-arm64.fx`) | the native convention |
 
 And the other commands:
 
