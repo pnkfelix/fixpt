@@ -55,3 +55,10 @@ fn globals_are_a_region_only_in_effects() {
     assert!(out[0].contains("only in effects"), "{out:?}");
     assert!(out[1].contains("only read and written"), "{out:?}");
 }
+
+#[test]
+fn reading_globals_with_spin_absorbs_the_single_globals_read() {
+    let out = check("absorbed");
+    assert_eq!(out[2], "busy : (subr (maxeff (read @globals) spin) (int) int)", "{out:?}");
+    assert_eq!(out[3], "calm : (subr (maxeff (read @globals) (read (globals below limit))) (int) int)", "{out:?}");
+}

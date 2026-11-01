@@ -231,9 +231,29 @@
                    ((= c 0) (cons (car x) (k-merge (cdr x) (cdr y))))
                    (else (cons (car y) (k-merge x (cdr y))))))))))
 ;; `x` and `y` together, sorted as `k-insert` keeps an effect: a merge, when
-;; `x` is sorted too (as effects made here are), else one atom at a time.
+;; `x` is sorted too (as effects made here are), else one atom at a time;
+;; absorbed (`k-absorbed`).
 (define k-union (->* (k-eff k-eff) k-eff)
-  (lambda (x y) (if (k-sorted? x) (k-merge x y) (k-union-each x y))))
+  (lambda (x y) (k-absorbed (if (k-sorted? x) (k-merge x y) (k-union-each x y)))))
+;; Effect `e`, its reads (writes) of single globals left out if it reads
+;; (writes) `@globals` and says `spin`: they say nothing more, within
+;; `@globals`, and with `spin` nothing of whether it reaches itself
+;; (`Effect::absorbed`, the Rust checker's; the user's, 2026-10-31).
+(define k-absorbed (->* (k-eff) k-eff)
+  (lambda (e)
+    (let ((r (k-absorbs? e (a-read (r-globals)))) (w (k-absorbs? e (a-write (r-globals)))))
+      (if (or r w) (k-absorb-drop e r w) e))))
+(define k-absorbs? (->* (k-eff k-atom) bool)
+  (lambda (e a) (and (k-contains? e (a-spin)) (k-contains? e a))))
+(define k-absorb-drop (->* (k-eff bool bool) k-eff)
+  (lambda (e r w)
+    (cond ((null? e) nil)
+          ((tagcase (car e)
+             (a-read (x) (and r (tagcase x (r-global (g) #t) (else y #f))))
+             (a-write (x) (and w (tagcase x (r-global (g) #t) (else y #f))))
+             (else y #f))
+           (k-absorb-drop (cdr e) r w))
+          (else (cons (car e) (k-absorb-drop (cdr e) r w))))))
 (define k-contains? (->* (k-eff k-atom) bool)
   (lambda (e a) (cond ((null? e) #f) ((k-atom=? (car e) a) #t) (else (k-contains? (cdr e) a)))))
 ;; Whether `a` is in `e`, or, reading or writing one global, `e` does so to

@@ -20,6 +20,8 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-eff k-eff)
                        k-eff))
+            (val k-absorbed
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-eff) k-eff))
             (val k-region=? (subr (maxeff (read @globals) spin) (k-region k-region) bool))
             (val k-atom=? (subr (maxeff (read @globals) spin) (k-atom k-atom) bool))
             (val k-eff=? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool))

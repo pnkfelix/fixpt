@@ -248,8 +248,12 @@ impl Checker {
     pub fn show_effect(&self, e: &Effect) -> String {
         let mut atoms: Vec<String> = Vec::new();
         let (mut reads, mut writes) = (Vec::new(), Vec::new());
+        // Printed as absorbed, however it was made (`Effect::absorbed`).
+        let (r, w) = e.absorbs();
         for a in &e.0 {
             match a {
+                Atom::Read(Region::Global(_)) if r => {}
+                Atom::Write(Region::Global(_)) if w => {}
                 Atom::Read(Region::Global(g)) => reads.push(self.interner.name(*g).to_string()),
                 Atom::Write(Region::Global(g)) => writes.push(self.interner.name(*g).to_string()),
                 _ => atoms.push(self.show_atom(*a)),
