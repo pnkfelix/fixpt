@@ -349,7 +349,8 @@ fn compare_one(sc: &mut fixpt_scheme::Session, entry: &str, clo: Handle, rust: &
 
 /// The global that compiles a procedure in this machine's native
 /// convention (`native-compile-x64-proc`, `native-compile-arm64-proc`): the
-/// front end's (the conductor's); or, with `FIXPT_FX_DIRECT_ALONE` set, on
+/// front end's (the conductor's); or, with `FIXPT_FX_DIRECT_ALONE` set (to `1`, or
+/// the path of another such program), on
 /// arm64, its modules' own, compiled alone (`native-direct-arm64/compiler.fx`)
 /// and loaded beside the front end, run lowered: for its files as they are
 /// written, before the front end's are rebuilt.
@@ -357,9 +358,13 @@ fn direct_entry(s: &mut fixpt_fx26::session::Fx26Session) -> String {
     if cfg!(target_arch = "x86_64") {
         return format!("{READER_PREFIX}native-compile-x64-proc");
     }
-    if std::env::var_os("FIXPT_FX_DIRECT_ALONE").is_some() {
-        let program = include_str!("native-direct-arm64/compiler.fx");
-        let compiled = fixpt_fx26::session::compile_program(program).unwrap_or_else(|e| panic!("checks: {e}"));
+    if let Some(alone) = std::env::var_os("FIXPT_FX_DIRECT_ALONE") {
+        // `1`, or the path of another such program.
+        let program = match alone.to_str() {
+            Some("1") => include_str!("native-direct-arm64/compiler.fx").to_string(),
+            _ => std::fs::read_to_string(&alone).expect("a program"),
+        };
+        let compiled = fixpt_fx26::session::compile_program(&program).unwrap_or_else(|e| panic!("checks: {e}"));
         compiled.load_into(&mut s.scheme).expect("loads");
         return "fx:native-compile-arm64-proc".into();
     }
