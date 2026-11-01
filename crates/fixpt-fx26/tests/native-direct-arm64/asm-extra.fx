@@ -12,7 +12,8 @@
                    (if (null? fs)
                        #u
                        (let* ((f (car fs)) (l (car (cdr fs))) (nops (car (cdr (cdr fs)))))
-                         (begin (ada-to (array-ref ls l) f) (t-nops nops) (go (cdr (cdr (cdr fs)))))))))
+                         (begin (ada-to (array-ref ls l) f) (t-nops nops)
+                                (go (cdr (cdr (cdr fs)))))))))
                (bind (subr {EFF} (int) unit)
                  (lambda (k)
                    (if (= k n)

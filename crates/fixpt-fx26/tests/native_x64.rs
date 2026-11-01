@@ -348,11 +348,10 @@ fn compare_one(sc: &mut fixpt_scheme::Session, entry: &str, clo: Handle, rust: &
 
 /// The global that compiles a procedure in this machine's native
 /// convention (`native-compile-x64-proc`, `native-compile-arm64-proc`): the
-/// front end's (the conductor's); or, with `FIXPT_FX_DIRECT_ALONE` set (to `1`, or
-/// the path of another such program), on
-/// arm64, its modules' own, compiled alone (`native-direct-arm64/compiler.fx`)
-/// and loaded beside the front end, run lowered: for its files as they are
-/// written, before the front end's are rebuilt.
+/// front end's (the conductor's); or, with `FIXPT_FX_DIRECT_ALONE` set (to
+/// `1`, or the path of another such program), on arm64, its modules' own,
+/// compiled alone (`native-direct-arm64/compiler.fx`) and loaded beside the
+/// front end, run lowered: for its files as they are written.
 fn direct_entry(s: &mut fixpt_fx26::session::Fx26Session) -> String {
     if cfg!(target_arch = "x86_64") {
         return format!("{READER_PREFIX}native-compile-x64-proc");
