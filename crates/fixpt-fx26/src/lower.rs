@@ -517,6 +517,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("rep-of-nodes", "%fx26-rep-of-nodes", false),
     ("rep-nodes", "%fx26-rep-nodes", false),
     ("rep-cell", "%fx26-rep-cell", false),
+    ("%reify-rep", "%fx26-reify-rep", false),
 ];
 
 /// The FX-26 copy of what [`STANDARD`] says the compiler written in FX-26

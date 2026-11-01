@@ -163,12 +163,11 @@ pub(crate) fn staged_parts(rt: &Runtime, staged: Value, given: Value) -> Option<
     let [mt, e, r] = [1, 2, 3].map(|i| rt.heap.string_to_rust(field(i)));
     let given = fixpt_runtime::evidence::Given::of(rt, field(5), given);
     let mut parts = Parts::of(&mt, &e, &r, &given);
-    if parts.regions.is_empty() {
-        // Its holes, the variables it names, filled by their evidence's reps.
-        let rep = fixpt_reps::heap::from_heap(&rt.heap, field(6), true).ok();
-        let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
-        parts.rep = rep.map(|r| fixpt_reps::binary::encode(&r));
-    }
+    // Its holes, the variables it names, filled by their evidence's reps (a
+    // region of its own's too).
+    let rep = fixpt_reps::heap::from_heap(&rt.heap, field(6), true).ok();
+    let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
+    parts.rep = rep.map(|r| fixpt_reps::binary::encode(&r));
     Some((parts, field(4)))
 }
 
@@ -298,10 +297,8 @@ pub fn lower_staged(rt: &mut Runtime, staged: Value, given: Value) -> Result<Val
 /// filled (an evaluator's evidence is text, so a stage given any is read).
 pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str, given: &fixpt_runtime::evidence::Given, rep: Option<fixpt_reps::Rep>) -> Value {
     let mut parts = Parts::of(mt, e, r, given);
-    if parts.regions.is_empty() {
-        let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
-        parts.rep = rep.map(|r| fixpt_reps::binary::encode(&r));
-    }
+    let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
+    parts.rep = rep.map(|r| fixpt_reps::binary::encode(&r));
     let w = stage_wrapped(&parts, text, true);
     match checked(rt, &w, parts.rep.as_deref()) {
         Ok(_) => {

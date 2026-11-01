@@ -427,8 +427,9 @@
     (lambda (args e)
       (ev-staged args e
                  (lambda ((m val) (mt string) (eff string) (r string) (text string) (ns string)
-                          (g (listof string acyclic)) (rp wcell))
-                   (tagcase (%stage-check mt eff r text ns g rp)
+                          (g (listof string acyclic)) (gr (listof (bytevectorof @v) acyclic))
+                          (rp wcell))
+                   (tagcase (%stage-check mt eff r text ns g rp gr)
                      (failed f (ev-stage-failure f))
                      (checked w (ev-stage-run w m)))))))
   ;; A `reify-…`'s call, of the evidence it is given: what the checker
@@ -439,21 +440,48 @@
              (noted (ev-staged-in (get ev-facts) (exp-start x) (exp-end x) (exp-kth x))))
         (if (null? noted)
             (efail "evidence: what it is of is not known")
-            (let ((n (car noted)))
-              (the val (%reify-text (extract n 1) (if effect (extract n 2) (extract n 3))
-                                    (extract n 4) (ev-given (eval x e)))))))))
-  ;; Evidence given, a product of texts, as their list.
+            (let* ((n (car noted)) (given (eval x e))
+                   (text (%reify-text (extract n 1) (if effect (extract n 2) (extract n 3))
+                                      (extract n 4) (ev-given given)))
+                   ;; And its rep, filled by the reps of the evidence given
+                   ;; (`docs/research/heap-types.md`, step 6), if it has one.
+                   (rep (%reify-rep (extract n 1) (extract n 5) (extract n 4)
+                                    (ev-given-reps given) text)))
+              (if (= (bytevector-length rep) 0)
+                  (the val text)
+                  (the val (o-product (list (cons 'text (the val text))
+                                            (cons 'rep (the val (o-bytes rep))))))))))))
+  ;; Evidence given, a product of pieces of it, as their texts: each a
+  ;; text, or a product of its text and its rep.
   (ev-given (->* (val) (listof string acyclic))
     (lambda (v)
       (letrec ((go (subr (maxeff evals spin) (vfields) (listof string acyclic))
-                 (lambda (fs) (if (null? fs) nil (cons (as-str (cdr (car fs))) (go (cdr fs)))))))
+                 (lambda (fs)
+                   (if (null? fs) nil (cons (ev-piece-text (cdr (car fs))) (go (cdr fs)))))))
         (go (as-fields v "evidence")))))
+  ;; And as their reps: each its rep's binary form, empty if it has none.
+  (ev-given-reps (->* (val) (listof (bytevectorof @v) acyclic))
+    (lambda (v)
+      (letrec ((go (subr (maxeff evals spin) (vfields) (listof (bytevectorof @v) acyclic))
+                 (lambda (fs)
+                   (if (null? fs) nil (cons (ev-piece-rep (cdr (car fs))) (go (cdr fs)))))))
+        (go (as-fields v "evidence")))))
+  (ev-piece-text (->* (val) string)
+    (lambda (v) (if (string? v) v (as-str (field-of v 'text)))))
+  (ev-piece-rep (->* (val) (bytevectorof @v))
+    (lambda (v)
+      (if (string? v)
+          (the (bytevectorof @v) (make-bytevector 0 0))
+          (tagcase (as-other (field-of v 'rep) "evidence")
+            (o-bytes (b) b)
+            (else y (the (bytevectorof @v) (make-bytevector 0 0)))))))
   ;; `stage`'s or `session-check`'s call, `(op m code)`: what `k` makes of
   ;; `m`'s value, what the checker noted at the code (`ev-staged-in`) and
   ;; the code, written out; or the refusal.
   (ev-staged (->* ((listof exp acyclic) env
                    (subr (maxeff evals spin)
-                         (val string string string string string (listof string acyclic) wcell)
+                         (val string string string string string (listof string acyclic)
+                              (listof (bytevectorof @v) acyclic) wcell)
                          val))
                   val)
     (lambda (args e k)
@@ -468,8 +496,9 @@
               (not-code u (ev-stage-refused "the code is not a datum"))
               (text rev
                 (let ((n (car noted)))
-                  (k m (extract n 1) (extract n 2) (extract n 3) (ev-joined rev "") (extract n 4)
-                     (ev-given (eval (car (cdr (cdr args))) e)) (extract n 5)))))))))
+                  (let ((given (eval (car (cdr (cdr args))) e)))
+                    (k m (extract n 1) (extract n 2) (extract n 3) (ev-joined rev "") (extract n 4)
+                       (ev-given given) (ev-given-reps given) (extract n 5))))))))))
   ;; `session-check`'s call: checked by the session's checker
   ;; (`%session-eval-check`); an expression's forms run in the session,
   ;; the last's value its procedure; a definition, pending.
@@ -477,7 +506,8 @@
     (lambda (args e)
       (ev-staged args e
                  (lambda ((s val) (mt string) (eff string) (r string) (text string) (ns string)
-                          (g (listof string acyclic)) (rp wcell))
+                          (g (listof string acyclic)) (gr (listof (bytevectorof @v) acyclic))
+                          (rp wcell))
                    (tagcase (%session-eval-check (ev-host s) mt eff r text ns g)
                      (run ts (ev-sum2 'ok 'expression (ev-session-run s ts)))
                      (ok d (tagcase d

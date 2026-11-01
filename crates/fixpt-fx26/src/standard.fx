@@ -305,6 +305,7 @@
          (("wcell-self") "%default-object")
          (("wcell-pair") "%fx26-pair-cell")
          (("dump-heap!") "%fx26-dump-heap")
+         (("%reify-rep") "%fx26-reify-rep")
          (else "")))
       ((11)
        (case n

@@ -57,6 +57,16 @@ impl Given {
         }
     }
 
+    /// The evidence's reps from `reps`, a list of their binary forms (the
+    /// evaluator's, `ev-given-reps`), each empty for none.
+    pub fn with_reps(&mut self, rt: &Runtime, reps: Value) {
+        let reps = rt.heap.list_to_vec(reps).unwrap_or_default();
+        if reps.len() != self.names.len() {
+            return;
+        }
+        self.as_reps = reps.iter().map(|b| bytes_of(rt, *b).and_then(|b| fixpt_reps::binary::decode(&b, fixpt_reps::heap::validate_all()).ok())).collect();
+    }
+
     /// `rep` with each hole the evidence's variables name filled with its
     /// rep (`fixpt_reps::fill`); none where a hole is left, or a piece of
     /// evidence it names has no rep.
@@ -124,6 +134,35 @@ pub fn regions_in(texts: &[&str]) -> Vec<String> {
     out
 }
 
+/// A bytevector's bytes; none if it is empty or none.
+fn bytes_of(rt: &Runtime, b: Value) -> Option<Vec<u8>> {
+    if !rt.heap.is_a(b, fixpt_heap::ObjType::Bytevector) || rt.heap.bytevector_len(b) == 0 {
+        return None;
+    }
+    Some((0..rt.heap.bytevector_len(b)).map(|i| rt.heap.bytevector_ref(b, i)).collect())
+}
+
+/// What the evaluator written in FX-26 makes of a `reify-…`'s rep
+/// (`%fx26-reify-rep`): `rep`, the rep the checker noted (or `#f`), its
+/// holes filled by the evidence `given` (their reps' binary forms) of the
+/// variables `names`, in its binary form; if `fresh` says so, a region of
+/// its own's, by the name its text, `text`, gives it; empty if none.
+pub fn reified_rep(rt: &mut Runtime, fresh: Value, rep: Value, names: Value, given: Value, text: Value) -> Value {
+    let fresh = rt.heap.string_to_rust(fresh) == "fresh";
+    let made = if fresh {
+        fresh_region_rep(&rt.heap.string_to_rust(text))
+    } else {
+        let names = rt.heap.string_to_rust(names);
+        let mut g = Given { names: names.split_whitespace().map(str::to_string).collect(), reps: Vec::new(), as_reps: Vec::new() };
+        g.reps = vec![String::new(); g.names.len()];
+        g.with_reps(rt, given);
+        let r = fixpt_reps::heap::from_heap(&rt.heap, rep, true).ok();
+        r.and_then(|r| if r.holes.is_empty() { Some(r) } else { g.filled(&r) })
+    };
+    let bytes = made.map(|r| fixpt_reps::binary::encode(&r)).unwrap_or_default();
+    rt.heap.make_bytevector(&bytes)
+}
+
 /// What the evaluator written in FX-26 makes of a `reify-…`
 /// (`%fx26-reify-text`): `text`, given the evidence `names` and `given`;
 /// or, `fresh` saying `fresh`, a region of its own.
@@ -151,13 +190,30 @@ pub fn reified(rt: &mut Runtime, staged: Value, field: usize) -> Value {
     let product = rt.heap.is_product(staged) && rt.heap.bloblet_len(staged) == 6;
     let text = |rt: &Runtime, i: usize| if product { rt.heap.string_to_rust(rt.heap.product_field(staged, i)) } else { String::new() };
     if text(rt, 1) == "fresh" {
-        return rt.heap.make_string(&fresh_region());
+        // A region of its own: by its rep, a region constant by a name no
+        // other has, opaque and distinct from every other, as the text
+        // path's `plambda` binds it.
+        let name = fresh_region();
+        let rep = fresh_region_rep(&name);
+        return evidence(rt, &name, rep.as_ref());
     }
     let given = if product { Given::of(rt, rt.heap.product_field(staged, 5), rt.heap.product_field(staged, 4)) } else { Given::default() };
     let shown = given.substituted(&text(rt, field + 1));
     let rep = if product { fixpt_reps::heap::from_heap(&rt.heap, rt.heap.product_field(staged, 6), true).ok() } else { None };
     let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
     evidence(rt, &shown, rep.as_ref())
+}
+
+/// The rep of a region of its own named `name` (`fresh_region`): a region
+/// constant of that name, as both checkers' reps write one (`rconst`); its
+/// name no program's (which begin `@`), printed as the text path's region
+/// variable is.
+fn fresh_region_rep(name: &str) -> Option<fixpt_reps::Rep> {
+    let mut b = fixpt_reps::Builder::new();
+    let s = b.name(name);
+    let r = b.add("rconst", &[], vec![fixpt_reps::Arg::Sym(s)]);
+    let root = b.add(fixpt_reps::fill::EVIDENCE, &[], vec![fixpt_reps::Arg::Node(r)]);
+    b.finish(root).ok().map(|f| f.rep)
 }
 
 /// A piece of evidence, as the program holds it: its text, and its rep if

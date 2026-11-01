@@ -278,7 +278,15 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("effect-bound", "(poly ((e effect)) (subr pure ((effectrep e)) (effectbound e)))"),
     ("type-bound", "(poly ((t type)) (subr pure ((typerep t)) (typebound t)))"),
     ("%reify-text", "(subr pure (string string string (listof string acyclic)) string)"),
-    ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string string (listof string acyclic) wcell) (sumof (checked string) (failed stage-failure)))"),
+    // And its rep (`fixpt_runtime::evidence::reified_rep`), empty if none.
+    ("%reify-rep", "(poly ((r region)) (subr (maxeff (alloc r) (read r)) (string wcell string (listof (bytevectorof r) acyclic) string) (bytevectorof r)))"),
+    (
+        "%stage-check",
+        concat!(
+            "(poly ((r region)) (subr (maxeff spin (io fs-read) (read r)) (string string string string string (listof string acyclic) wcell ",
+            "(listof (bytevectorof r) acyclic)) (sumof (checked string) (failed stage-failure))))",
+        ),
+    ),
     // Sessions on the evaluator written in FX-26 (`fx-ast-eval`), which
     // keeps a session as an array of its own values and runs each step's
     // forms, given as text (`fixpt-fx26`'s `sessions.rs`, "evaluated"): a

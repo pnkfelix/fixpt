@@ -4792,3 +4792,28 @@ both checkers enter them alike, under the same keys.
 `(gendef {params} binder… (variances v…) rep)`, shared and, for a
 recursive type, cyclic; each checker's import makes a generative type it
 has not got from it, once per import. On every machine (`generative.fx`).
+
+## 207. A top-level definition's cost, and a `.fasl`'s definitions trusted (the user's, 2026-11-01)
+
+What a `.fasl`'s definition costs at load now (`heap-types.md`, step 5) is
+not its type but the path every top-level definition takes, parts of it
+growing with what is defined already. In order:
+
+1. **The shared path made cheaper**, for source runs too: indexes in place
+   of walks of lists, in both checkers. `k-defs-without` walks every
+   definition at each one (quadratic over a file; `defs.retain` in the
+   Rust checker's `record` likewise); `k-find-desc` walks `k-dscope` at
+   each type name looked up (a table of stacks a name, as `Bindings` is);
+   the knot checks (`k-no-reaching-itself`, `k-kept-reading`) walk the
+   globals. Measured on s7st's warm start: its 406 definitions from
+   `.fasl`s (FX-26 checker 49 ms, Rust 24 ms at 2026-11-01) and its 359
+   forms from source (221 ms).
+2. **Then trusting measured properly**, in both checkers: a `.fasl`'s
+   definition entered without its check, through a narrow entry each
+   (binding, what is known of it, its record), not a second path that
+   redoes a check's bookkeeping; `FIXPT_FASL_VERIFY` and a differential
+   test (the checkers' state after a trusted load against a checked one,
+   every global's type by rep, its known and fixed facts, its users) its
+   safety. The first measure (2026-11-01) skipped only the Rust checker's
+   check of the stand-in body, the cheapest part, and saved 10 ms of 0.40
+   s: it does not say what trusting both checkers' whole check would save.
