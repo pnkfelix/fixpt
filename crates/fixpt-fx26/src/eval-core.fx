@@ -56,16 +56,17 @@
 ;; standard one, and the procedure it makes given the module (`ev-stage`).
 
 ;; What the checker noted at the code at `a` `b` `k`: the module's type,
-;; the effect and the result type, and the names of the variables whose
-;; evidence it is given, in a list of one; none if nothing.
+;; the effect and the result type, the names of the variables whose
+;; evidence it is given, and what the code is checked as, as a rep (or
+;; `#f`), in a list of one; none if nothing.
 (define ev-staged-in
   (->* (k-facts int int int)
-       (listof (productof (1 string) (2 string) (3 string) (4 string)) acyclic))
+       (listof (productof (1 string) (2 string) (3 string) (4 string) (5 wcell)) acyclic))
   (lambda (fs a b k)
     (cond ((null? fs) nil)
           ((ev-at-is? (extract (car fs) 1) a b k)
            (tagcase (extract (car fs) 2)
-             (n-staged (m eff r ns rp) (cons (product (1 m) (2 eff) (3 r) (4 ns)) nil))
+             (n-staged (m eff r ns rp) (cons (product (1 m) (2 eff) (3 r) (4 ns) (5 rp)) nil))
              (else y (ev-staged-in (cdr fs) a b k))))
           (else (ev-staged-in (cdr fs) a b k)))))
 
@@ -426,8 +427,8 @@
     (lambda (args e)
       (ev-staged args e
                  (lambda ((m val) (mt string) (eff string) (r string) (text string) (ns string)
-                          (g (listof string acyclic)))
-                   (tagcase (%stage-check mt eff r text ns g)
+                          (g (listof string acyclic)) (rp wcell))
+                   (tagcase (%stage-check mt eff r text ns g rp)
                      (failed f (ev-stage-failure f))
                      (checked w (ev-stage-run w m)))))))
   ;; A `reify-…`'s call, of the evidence it is given: what the checker
@@ -452,7 +453,8 @@
   ;; the code, written out; or the refusal.
   (ev-staged (->* ((listof exp acyclic) env
                    (subr (maxeff evals spin)
-                         (val string string string string string (listof string acyclic)) val))
+                         (val string string string string string (listof string acyclic) wcell)
+                         val))
                   val)
     (lambda (args e k)
       (let* ((m (eval (car args) e))
@@ -467,7 +469,7 @@
               (text rev
                 (let ((n (car noted)))
                   (k m (extract n 1) (extract n 2) (extract n 3) (ev-joined rev "") (extract n 4)
-                     (ev-given (eval (car (cdr (cdr args))) e))))))))))
+                     (ev-given (eval (car (cdr (cdr args))) e)) (extract n 5)))))))))
   ;; `session-check`'s call: checked by the session's checker
   ;; (`%session-eval-check`); an expression's forms run in the session,
   ;; the last's value its procedure; a definition, pending.
@@ -475,7 +477,7 @@
     (lambda (args e)
       (ev-staged args e
                  (lambda ((s val) (mt string) (eff string) (r string) (text string) (ns string)
-                          (g (listof string acyclic)))
+                          (g (listof string acyclic)) (rp wcell))
                    (tagcase (%session-eval-check (ev-host s) mt eff r text ns g)
                      (run ts (ev-sum2 'ok 'expression (ev-session-run s ts)))
                      (ok d (tagcase d

@@ -4662,8 +4662,9 @@ part): a stage's type kept as a rep at its call site and imported, not
 printed and read: `'1` against a module of 60 alternatives and 40
 procedures 250 to 3.9 ms; s7st's `(define x 1)` 12.3 to 5.7 ms. And the
 standard environment kept between stages (`check-staged`): 1.6 ms and
-1.15 ms; a stage of `'1` against a small module 3 to 0.16 ms. Left of it:
-the text where evidence is given (holes by rep).
+1.15 ms; a stage of `'1` against a small module 3 to 0.16 ms. Evidence by
+rep too, and the Rust checker's stage paths (`heap-types.md`, step 3).
+Left of it: §206, generative types.
 
 Left: staged code on the register-code machines of the cellular
 convention (`fx-regs-*-cellcc`), which runs as cellular words (649 ms

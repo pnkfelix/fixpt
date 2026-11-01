@@ -5225,6 +5225,10 @@ pub struct Staged {
     pub e: String,
     pub r: String,
     pub evidence: Vec<String>,
+    /// And what the code is checked as, or what a `reify-…` makes evidence
+    /// of, as a rep in its binary form (`docs/research/heap-types.md`,
+    /// step 3), if a rep takes it.
+    pub rep: Option<Vec<u8>>,
 }
 
 /// Value variables in scope, innermost last: read as a slice, each name's

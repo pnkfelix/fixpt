@@ -30,6 +30,7 @@
 use std::collections::HashMap;
 
 pub mod binary;
+pub mod fill;
 pub mod heap;
 pub mod text;
 
@@ -316,6 +317,21 @@ impl Builder {
         let slot = self.reserve();
         self.fill_set(slot, head, args);
         slot
+    }
+
+    /// Whether slot `slot` is filled.
+    pub(crate) fn is_filled(&self, slot: u32) -> bool {
+        self.nodes.get(slot as usize).is_some_and(Option::is_some)
+    }
+
+    /// The node in slot `slot`, if filled.
+    pub(crate) fn node(&self, slot: u32) -> Option<&Node> {
+        self.nodes.get(slot as usize)?.as_ref()
+    }
+
+    /// Name `i`.
+    pub(crate) fn name_of(&self, i: u32) -> &str {
+        &self.names[i as usize]
     }
 
     /// A node, its slot.

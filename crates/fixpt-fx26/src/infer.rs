@@ -643,7 +643,8 @@ impl Checker {
             let inner = self.arena.ty(Ty::Subr { conv, effect: effect.clone(), params: Vec::new(), result, spec: None });
             let checked = self.arena.ty(Ty::Subr { conv, effect: Effect::pure(), params: vec![mt], result: inner, spec: None });
             let evidence = self.evidence(&free, Some(checked), given, true, op.trim_start_matches('%'), span)?;
-            let staged = crate::check::Staged { m: self.staged_text(mt), e: self.staged_effect_text(&effect), r: self.staged_text(result), evidence };
+            let rep = self.export_ty(checked).ok().map(|ex| fixpt_reps::binary::encode(&ex.rep));
+            let staged = crate::check::Staged { m: self.staged_text(mt), e: self.staged_effect_text(&effect), r: self.staged_text(result), evidence, rep };
             self.facts.staged.insert(code, staged);
         }
         Ok(())
@@ -679,6 +680,8 @@ impl Checker {
         // A region a variable names, of no evidence: one of its own.
         if op == "%reify-region" && !free.is_empty() && staged.evidence.is_empty() {
             staged.m = "fresh".to_string();
+        } else if let Some(d) = args.first() {
+            staged.rep = self.export_evidence(d).ok().map(|ex| fixpt_reps::binary::encode(&ex.rep));
         }
         self.facts.staged.insert(arg, staged);
         Ok(())

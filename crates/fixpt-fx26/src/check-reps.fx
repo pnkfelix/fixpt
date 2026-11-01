@@ -335,12 +335,32 @@
 (define k-ty-rep (->* (int) (bytevectorof @t))
   (lambda (t)
     (begin
-      (set rp-nodes nil) (set rp-next 0) (set rp-memo nil) (set rp-scope nil)
-      (set rp-holes nil) (set rp-hole-names nil) (set rp-nholes 0) (set rp-declined #f)
+      (rp-begin!)
       (let ((root (rp-ty t)))
         (tagcase root
           (node slot (rep-of-nodes (get rp-nodes) (reverse (get rp-hole-names)) slot))
           (else y (rep-of-nodes (get rp-nodes) nil 0)))))))
+;; The export's state, as an export begins.
+(define rp-begin! (->* () unit)
+  (lambda ()
+    (begin
+      (set rp-nodes nil) (set rp-next 0) (set rp-memo nil) (set rp-scope nil)
+      (set rp-holes nil) (set rp-hole-names nil) (set rp-nholes 0) (set rp-declined #f))))
+;; A piece of evidence as a rep (`fixpt-reps`'s `fill`): its root an
+;; `evidence` node of one operand, what `d` is, a type, an effect or a
+;; region; its holes the variables it names, as `k-rep-holes` gives them.
+(define k-evidence-rep (->* (k-desc) (bytevectorof @t))
+  (lambda (d)
+    (begin
+      (rp-begin!)
+      (let* ((of (tagcase d
+                   (dt (t) (rp-ty t))
+                   (de (e) (rp-effect e))
+                   (dr (r) (rp-region r))
+                   (else z (begin (set rp-declined #t) (rp-sym "none")))))
+             (slot (rp-reserve)))
+        (begin (rp-fill slot 'evidence #f nil (list of))
+               (rep-of-nodes (get rp-nodes) (reverse (get rp-hole-names)) slot))))))
 ;; Whether the type `k-ty-rep` exported last has a part a rep does not
 ;; take (an unresolved `select`): its rep is then no type's.
 (define k-rep-declined? (->* () bool) (lambda () (get rp-declined)))

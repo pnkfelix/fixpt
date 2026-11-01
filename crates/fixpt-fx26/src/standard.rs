@@ -278,7 +278,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("effect-bound", "(poly ((e effect)) (subr pure ((effectrep e)) (effectbound e)))"),
     ("type-bound", "(poly ((t type)) (subr pure ((typerep t)) (typebound t)))"),
     ("%reify-text", "(subr pure (string string string (listof string acyclic)) string)"),
-    ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string string (listof string acyclic)) (sumof (checked string) (failed stage-failure)))"),
+    ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string string (listof string acyclic) wcell) (sumof (checked string) (failed stage-failure)))"),
     // Sessions on the evaluator written in FX-26 (`fx-ast-eval`), which
     // keeps a session as an array of its own values and runs each step's
     // forms, given as text (`fixpt-fx26`'s `sessions.rs`, "evaluated"): a

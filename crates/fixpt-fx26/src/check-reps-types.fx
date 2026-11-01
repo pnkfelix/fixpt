@@ -3,7 +3,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-ids))
+(import check-types-types (type k-ids k-desc))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -12,6 +12,9 @@
   (moduleof (val k-ty-rep
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int) (bytevectorof @t)))
+            (val k-evidence-rep
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-desc) (bytevectorof @t)))
             (val k-rep-declined? (subr (maxeff (read @globals) (read @t) spin) () bool))
             (val k-rep-holes
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) () k-ids))

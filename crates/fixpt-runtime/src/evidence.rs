@@ -16,31 +16,60 @@ use crate::runtime::Runtime;
 use fixpt_heap::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// The names of the variables given evidence, and their evidence, in order.
+/// The names of the variables given evidence, and their evidence, in order:
+/// its text, and its rep, where it has one (`heap-types.md`, step 3; a
+/// rep `fixpt_reps::fill` takes).
 #[derive(Clone, Debug, Default)]
 pub struct Given {
     pub names: Vec<String>,
     pub reps: Vec<String>,
+    pub as_reps: Vec<Option<fixpt_reps::Rep>>,
 }
 
 impl Given {
     /// The names, `names` a text of them apart by spaces, and the evidence,
-    /// `given` a product of strings (the compilers'), or a list of them (the
-    /// evaluator's); none, if not those.
+    /// `given` a product of pieces of it (the compilers'), or a list of them
+    /// (the evaluator's), each its text or the product of its text and its
+    /// rep ([`evidence`]); none, if not those.
     pub fn of(rt: &Runtime, names: Value, given: Value) -> Given {
         let names = if rt.heap.is_a(names, fixpt_heap::ObjType::String) { rt.heap.string_to_rust(names) } else { String::new() };
-        let reps = if given.is_bloblet() {
+        let pieces = if given.is_bloblet() {
             rt.heap.bloblet_values(given)
         } else {
             rt.heap.list_to_vec(given).unwrap_or_default()
         };
-        let reps: Vec<String> = reps.iter().filter(|v| rt.heap.is_a(**v, fixpt_heap::ObjType::String)).map(|v| rt.heap.string_to_rust(*v)).collect();
+        let string = |v: Value| rt.heap.is_a(v, fixpt_heap::ObjType::String);
+        let (mut reps, mut as_reps) = (Vec::new(), Vec::new());
+        for v in pieces {
+            if string(v) {
+                reps.push(rt.heap.string_to_rust(v));
+                as_reps.push(None);
+            } else if rt.heap.is_product(v) && rt.heap.bloblet_len(v) == 2 && string(rt.heap.product_field(v, 1)) {
+                reps.push(rt.heap.string_to_rust(rt.heap.product_field(v, 1)));
+                as_reps.push(fixpt_reps::heap::from_heap(&rt.heap, rt.heap.product_field(v, 2), true).ok());
+            }
+        }
         let names: Vec<String> = names.split_whitespace().map(str::to_string).collect();
         if names.len() == reps.len() {
-            Given { names, reps }
+            Given { names, reps, as_reps }
         } else {
             Given::default()
         }
+    }
+
+    /// `rep` with each hole the evidence's variables name filled with its
+    /// rep (`fixpt_reps::fill`); none where a hole is left, or a piece of
+    /// evidence it names has no rep.
+    pub fn filled(&self, rep: &fixpt_reps::Rep) -> Option<fixpt_reps::Rep> {
+        let mut given = Vec::new();
+        for (n, r) in self.names.iter().zip(&self.as_reps) {
+            if rep.holes.contains(n) {
+                given.push((n.as_str(), r.as_ref()?));
+            }
+        }
+        // A type variable's occurrence is a `var` node (`fixpt-fx26`'s `reps.rs`).
+        let filled = fixpt_reps::fill::fill(rep, &given, "var").ok()?;
+        filled.holes.is_empty().then_some(filled)
     }
 
     /// `text` with each name it holds, a whole token, replaced by its
@@ -116,14 +145,33 @@ pub fn reified_text(rt: &mut Runtime, fresh: Value, text: Value, names: Value, g
 /// given it in place; a region's, that, or, where the module's type's
 /// field says `fresh` (a region a variable names, with no evidence), a
 /// fresh one.
+/// And its rep too, where the checker noted one and the evidence given has
+/// them: [`evidence`].
 pub fn reified(rt: &mut Runtime, staged: Value, field: usize) -> Value {
     let product = rt.heap.is_product(staged) && rt.heap.bloblet_len(staged) == 6;
     let text = |rt: &Runtime, i: usize| if product { rt.heap.string_to_rust(rt.heap.product_field(staged, i)) } else { String::new() };
-    let shown = if text(rt, 1) == "fresh" {
-        fresh_region()
-    } else {
-        let given = if product { Given::of(rt, rt.heap.product_field(staged, 5), rt.heap.product_field(staged, 4)) } else { Given::default() };
-        given.substituted(&text(rt, field + 1))
-    };
-    rt.heap.make_string(&shown)
+    if text(rt, 1) == "fresh" {
+        return rt.heap.make_string(&fresh_region());
+    }
+    let given = if product { Given::of(rt, rt.heap.product_field(staged, 5), rt.heap.product_field(staged, 4)) } else { Given::default() };
+    let shown = given.substituted(&text(rt, field + 1));
+    let rep = if product { fixpt_reps::heap::from_heap(&rt.heap, rt.heap.product_field(staged, 6), true).ok() } else { None };
+    let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
+    evidence(rt, &shown, rep.as_ref())
+}
+
+/// A piece of evidence, as the program holds it: its text, and its rep if
+/// it has one, a product of the two (`#f` for none).
+pub fn evidence(rt: &mut Runtime, text: &str, rep: Option<&fixpt_reps::Rep>) -> Value {
+    let base = rt.heap.push_root(Value::FALSE);
+    if let Some(r) = rep {
+        let v = fixpt_reps::heap::to_heap(&mut rt.heap, r);
+        rt.heap.set_root_at(base, v);
+    }
+    let text = rt.heap.make_string(text);
+    rt.heap.push_root(text);
+    let (rep, text) = (rt.heap.root_at(base), rt.heap.root_at(base + 1));
+    let v = rt.heap.make_frozen(fixpt_heap::layout::kind("product"), &[text, rep]);
+    rt.heap.pop_roots_to(base);
+    v
 }

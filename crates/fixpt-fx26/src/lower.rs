@@ -971,7 +971,7 @@ impl Lowerer<'_> {
         // compilers written in FX-26 give it (`n-staged`), and the names of
         // the variables whose evidence the form is given.
         let code = match self.c.facts.staged.get(&e) {
-            Some(s) => Sx::call("%fx26-product", [Sx::Str(s.m.clone()), Sx::Str(s.e.clone()), Sx::Str(s.r.clone()), code, Sx::Str(s.evidence.join(" ")), Sx::Bool(false)]),
+            Some(s) => Sx::call("%fx26-product", [Sx::Str(s.m.clone()), Sx::Str(s.e.clone()), Sx::Str(s.r.clone()), code, Sx::Str(s.evidence.join(" ")), staged_rep(s)]),
             None => code,
         };
         // A module reshaped: a product of the values the type wanted has.
@@ -1050,3 +1050,13 @@ impl Lowerer<'_> {
 fn flat_label(name: &str, code: usize) -> Sx {
     if code & 8 != 0 { Sx::int(name.parse::<i64>().expect("a numeric label")) } else { Sx::quote(Sx::sym(name)) }
 }
+
+/// A `stage`'s or a `reify-…`'s rep (`Staged::rep`), as lowered code makes
+/// it: from its binary form in hex (`%fx26-rep-of-hex`); `#f` if none.
+fn staged_rep(s: &crate::check::Staged) -> Sx {
+    match &s.rep {
+        Some(bytes) => Sx::call("%fx26-rep-of-hex", [Sx::Str(bytes.iter().map(|b| format!("{b:02x}")).collect())]),
+        None => Sx::Bool(false),
+    }
+}
+

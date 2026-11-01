@@ -202,20 +202,26 @@
                                                  cv nil)))
                      (names (k-given-names given free checked #t form))
                      (n (n-staged (show mt) (k-show-effect e) (show r) names
-                                  (k-staged-rep checked (string=? names "")))))
+                                  (k-staged-rep checked))))
                 (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
             (else y #u))))))
 ;; What a `stage`'s code is checked as, type `checked`, as a rep, for the
 ;; checker that runs then to import, not read (`docs/research/heap-types.md`,
-;; step 3): if it names no variable (`closed`, the code given no evidence)
-;; and a rep takes all of it; else `#f`, and that checker reads the text.
-(define k-staged-rep (->* (int bool) wcell)
-  (lambda (checked closed)
-    (if closed
-        (let ((bytes ((with check-reps k-ty-rep) checked)))
-          (if (or ((with check-reps k-rep-declined?)) (not (null? ((with check-reps k-rep-holes)))))
-              (wcell-bool #f)
-              (rep-cell bytes)))
+;; step 3), its holes the variables it names, which the evidence fills as
+;; the program runs (`fixpt-reps`'s `fill`); `#f` if a rep does not take
+;; all of it, and that checker reads the text.
+(define k-staged-rep (->* (int) wcell)
+  (lambda (checked)
+    (let ((bytes ((with check-reps k-ty-rep) checked)))
+      (if ((with check-reps k-rep-declined?)) (wcell-bool #f) (rep-cell bytes)))))
+;; What a `reify-…` makes evidence of, `d`, as a piece of evidence's rep
+;; (`k-evidence-rep`), filled as the program runs by the evidence it is
+;; given; `#f` for a region of its own (`fresh`), which only text names.
+(define k-reified-rep (->* (k-desc string) wcell)
+  (lambda (d fresh)
+    (if (string=? fresh "")
+        (let ((bytes ((with check-reps k-evidence-rep) d)))
+          (if ((with check-reps k-rep-declined?)) (wcell-bool #f) (rep-cell bytes)))
         (wcell-bool #f))))
 ;; A `reify-…`'s call, `op`, of `given`, the evidence it is given, of type
 ;; `te`, its `(effectrep E)`, `(regionrep r)` or `(typerep T)`: what it is
@@ -245,8 +251,8 @@
                               ""))
                    (shown (text))
                    (n (if (string=? op "%reify-type")
-                          (n-staged fresh "" shown names (wcell-bool #f))
-                          (n-staged fresh shown "" names (wcell-bool #f)))))
+                          (n-staged fresh "" shown names (k-reified-rep d fresh))
+                          (n-staged fresh shown "" names (k-reified-rep d fresh)))))
               (begin (set k-extracts (cons (product (1 (k-at-of given)) (2 n)) (get k-extracts)))
                      te))))
       (else y te))))

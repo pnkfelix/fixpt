@@ -136,7 +136,7 @@ pub type StageLower = fn(&mut Runtime, Value, Value) -> Result<Value, String>;
 /// How `stage` on the evaluator written in FX-26 checks code: of the
 /// module's type, the effect, the result type and the code, as text, the
 /// sum `(checked text)`, the code as checked, or `(failed why)`.
-pub type StageCheck = fn(&mut Runtime, &str, &str, &str, &str, &crate::evidence::Given) -> Value;
+pub type StageCheck = fn(&mut Runtime, &str, &str, &str, &str, &crate::evidence::Given, Option<fixpt_reps::Rep>) -> Value;
 /// A session's operation, by name, on its arguments: what the primitive
 /// gives, or why it could not try, which the program sees as a refusal.
 pub type Sessions = fn(&mut Runtime, &str, &[Value]) -> Result<Value, String>;

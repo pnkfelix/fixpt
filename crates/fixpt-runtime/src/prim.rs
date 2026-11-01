@@ -3116,12 +3116,14 @@ prims! {
     "%fx26-session-committed!", 2, Some(2), simple!(|rt, a| session_op(rt, "committed", a));
     "%fx26-session-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "lower", a));
     "%fx26-session-commit-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "commit-lower", a));
-    "%fx26-stage-check", 6, Some(6), simple!(|rt, a| {
+    "%fx26-stage-check", 7, Some(7), simple!(|rt, a| {
         let [mt, e, r, text] = [a[0], a[1], a[2], a[3]].map(|x| get_string(rt, x));
         let (mt, e, r, text) = (mt?, e?, r?, text?);
         let given = crate::evidence::Given::of(rt, a[4], a[5]);
+        // And what the code is checked as, as a rep, if the checker made one.
+        let rep = fixpt_reps::heap::from_heap(&rt.heap, a[6], true).ok();
         Ok(match rt.stage_check {
-            Some(check) => check(rt, &mt, &e, &r, &text, &given),
+            Some(check) => check(rt, &mt, &e, &r, &text, &given, rep),
             None => stage_refused(rt, "this machine cannot stage code"),
         })
     });
@@ -3191,6 +3193,16 @@ prims! {
         match fixpt_reps::binary::decode(&bytes, fixpt_reps::heap::validate_all()) {
             Ok(rep) => Ok(fixpt_reps::heap::to_heap(&mut rt.heap, &rep)),
             Err(why) => rt.fail(&format!("rep-cell: {why}"), &[]),
+        }
+    });
+    // The same, from the binary form in hex, `a[0]`: as code the lowering
+    // makes holds a rep (`lower.rs`'s `staged_rep`).
+    "%fx26-rep-of-hex", 1, Some(1), simple!(|rt, a| {
+        let hex = get_string(rt, a[0])?;
+        let bytes: Option<Vec<u8>> = (0..hex.len() / 2).map(|i| hex.get(2 * i..2 * i + 2).and_then(|h| u8::from_str_radix(h, 16).ok())).collect();
+        match bytes.ok_or("not hex".to_string()).and_then(|b| fixpt_reps::binary::decode(&b, fixpt_reps::heap::validate_all())) {
+            Ok(rep) => Ok(fixpt_reps::heap::to_heap(&mut rt.heap, &rep)),
+            Err(why) => rt.fail(&format!("rep-of-hex: {why}"), &[]),
         }
     });
 }

@@ -4417,3 +4417,15 @@ with why (`fixpt_tidy::fields`). Every Rust reader of an FX-26 product or
 sum moved to them: `stage.rs`, the sessions, `syn.rs`, the CLI's FX-26
 driver, the tests; global cells read by `GLOBAL_VALUE` everywhere.
 
+## 2026-11-01: heap types, step 3 finished but for generative types (§202)
+
+A stage's front end keeps the standard environment between stages
+(`check-staged`, each stage undone after its compile, the store of types
+bounded by entering it again at four times its size): a stage of `'1` 3
+to 0.16 ms; s7st's `(define x 1)` 1.15 ms (12.3 ms by text). Evidence by
+rep: a piece of evidence a rep beside its text, holes filled by a graph
+substitution (`fixpt_reps::fill`: a type variable's occurrence is its
+evidence, an effect's joins the effect it is in). The Rust checker's
+stage paths by rep (`rs-scheme-vm`, `fx-ast-eval`). Left: generative
+types (§206).
+

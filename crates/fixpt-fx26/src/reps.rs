@@ -60,8 +60,29 @@ pub struct Exported {
 impl Checker {
     /// Type `t` as a rep; or why not (`reps.rs`, "Not yet").
     pub fn export_ty(&self, t: TyId) -> Result<Exported, String> {
+        self.export_with(|ex| ex.ty(t))
+    }
+
+    /// A piece of evidence as a rep (`fixpt_reps::fill`): its root an
+    /// `evidence` node of one operand, what `d` is, a type, an effect or a
+    /// region, as the checker written in FX-26 makes one
+    /// (`k-evidence-rep`).
+    pub fn export_evidence(&self, d: &crate::ast::D) -> Result<Exported, String> {
+        use crate::ast::D;
+        self.export_with(|ex| {
+            let of = match d {
+                D::Type(t) => Arg::Node(ex.ty(*t)?),
+                D::Effect(e) => ex.effect(e)?,
+                D::Region(r) => ex.region(*r),
+                _ => return Err("evidence of neither a type, an effect nor a region".into()),
+            };
+            Ok(ex.b.add(fixpt_reps::fill::EVIDENCE, &[], vec![of]))
+        })
+    }
+
+    fn export_with(&self, root: impl FnOnce(&mut Ex) -> Result<u32, String>) -> Result<Exported, String> {
         let mut ex = Ex { c: self, b: Builder::new(), memo: HashMap::new(), scope: Vec::new(), holes: HashMap::new(), hole_vars: Vec::new() };
-        let root = ex.ty(t)?;
+        let root = root(&mut ex)?;
         let Ex { b, hole_vars, .. } = ex;
         let finished = b.finish(root)?;
         let mut holes = vec![DVar(0); finished.rep.holes.len()];

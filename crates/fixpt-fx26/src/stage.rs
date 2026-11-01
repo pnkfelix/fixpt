@@ -116,8 +116,8 @@ fn stage_wrapped(parts: &Parts, code: &str, by_rep: bool) -> Wrapped {
 /// the regions of their own they name. And the type the code is checked
 /// as, as a rep in its binary form, where the checker that noted it made
 /// one that the stage's front end can import as it is (`k-staged-rep`;
-/// `docs/research/heap-types.md`, step 3): no hole, no constant, no region
-/// of its own.
+/// `docs/research/heap-types.md`, step 3): its holes filled by the
+/// evidence's reps, no constant, no region of its own.
 pub(crate) struct Parts {
     pub mt: String,
     pub e: String,
@@ -164,8 +164,10 @@ pub(crate) fn staged_parts(rt: &Runtime, staged: Value, given: Value) -> Option<
     let given = fixpt_runtime::evidence::Given::of(rt, field(5), given);
     let mut parts = Parts::of(&mt, &e, &r, &given);
     if parts.regions.is_empty() {
+        // Its holes, the variables it names, filled by their evidence's reps.
         let rep = fixpt_reps::heap::from_heap(&rt.heap, field(6), true).ok();
-        parts.rep = rep.filter(|r| r.holes.is_empty() && r.consts.is_empty()).map(|r| fixpt_reps::binary::encode(&r));
+        let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
+        parts.rep = rep.filter(|r| r.consts.is_empty()).map(|r| fixpt_reps::binary::encode(&r));
     }
     Some((parts, field(4)))
 }
@@ -273,7 +275,7 @@ fn stage(rt: &mut Runtime, m: Value, staged: Value, given: Value) -> Result<Valu
 pub fn lower_staged(rt: &mut Runtime, staged: Value, given: Value) -> Result<Value, String> {
     let (parts, code) = staged_parts(rt, staged, given).ok_or("this machine cannot stage code")?;
     let text = fixpt_runtime::print::write_value(&rt.heap, code);
-    let (c, top) = match checked(rt, &stage_wrapped(&parts, &text, false)) {
+    let (c, top) = match checked(rt, &stage_wrapped(&parts, &text, true), parts.rep.as_deref()) {
         Ok(done) => done,
         Err(refused) => return Ok(refused),
     };
@@ -289,9 +291,19 @@ pub fn lower_staged(rt: &mut Runtime, staged: Value, given: Value) -> Result<Val
 /// name and their evidence (`given`): the code checked ([`checked`]), and
 /// the text that was, for the evaluator to parse and run, `(sum checked
 /// text)`; or the refusal.
-pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str, given: &fixpt_runtime::evidence::Given) -> Value {
-    let w = stage_wrapped(&Parts::of(mt, e, r, given), text, false);
-    match checked(rt, &w) {
+///
+/// And what the code is checked as, as a rep (`rep`, the checker's that
+/// checked the program, the FX-26 one's, which the Rust one's import
+/// takes: `docs/research/heap-types.md`, step 2), where its holes are
+/// filled (an evaluator's evidence is text, so a stage given any is read).
+pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str, given: &fixpt_runtime::evidence::Given, rep: Option<fixpt_reps::Rep>) -> Value {
+    let mut parts = Parts::of(mt, e, r, given);
+    if parts.regions.is_empty() {
+        let rep = rep.and_then(|r| if r.holes.is_empty() { Some(r) } else { given.filled(&r) });
+        parts.rep = rep.filter(|r| r.consts.is_empty()).map(|r| fixpt_reps::binary::encode(&r));
+    }
+    let w = stage_wrapped(&parts, text, true);
+    match checked(rt, &w, parts.rep.as_deref()) {
         Ok(_) => {
             let tag = rt.heap.intern("checked");
             let whole = rt.heap.make_string(&w.whole);
@@ -302,11 +314,23 @@ pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str, gi
 }
 
 /// `w` checked by a checker written in Rust of the standard environment
-/// alone: the checker and the form; or the refusal, `(sum failed why)`,
-/// placed in the code.
-pub(crate) fn checked(rt: &mut Runtime, w: &Wrapped) -> Result<(crate::check::Checker, crate::top::Top), Value> {
+/// alone, the name `%stage-type` the type of `rep` (a rep's binary form)
+/// imported, if given, as the wrapping by rep names it (`stage_wrapped`):
+/// the checker and the form; or the refusal, `(sum failed why)`, placed in
+/// the code.
+pub(crate) fn checked(rt: &mut Runtime, w: &Wrapped, rep: Option<&[u8]>) -> Result<(crate::check::Checker, crate::top::Top), Value> {
     let failed = fixpt_runtime::prim::stage_failed;
     let mut c = crate::check::Checker::new();
+    if let Some(bytes) = rep {
+        let t = fixpt_reps::binary::decode(bytes, fixpt_reps::heap::validate_all()).and_then(|r| c.import_rep(&r, &[]));
+        match t {
+            Ok(t) => {
+                let name = c.interner.intern("%stage-type");
+                c.dscope.push((name, crate::parse::DScope::Rec(t)));
+            }
+            Err(why) => return Err(failed(rt, "refused", &format!("a rep: {why}"), 0, w.len)),
+        }
+    }
     let forms = match c.read_in(fixpt_read::FileId(0), &w.whole) {
         Ok(f) if f.len() == 1 => f,
         Ok(_) => return Err(failed(rt, "unread", "the code is not one whole expression", 0, w.len)),

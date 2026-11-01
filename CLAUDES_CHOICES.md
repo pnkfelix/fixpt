@@ -3267,3 +3267,25 @@ of `TODO.md` §141, working on my own.
   program that stages for ever stays bounded, and the cost is a stage in
   many paying the old 3 ms.
 
+## Evidence by rep (2026-11-01; `heap-types.md`, step 3)
+
+- **A piece of evidence carries both**, its text and its rep, a product of
+  the two: every reader of evidence takes it (`Given::of`), the text path
+  stays whole beside the rep one, and a stage takes the rep only where
+  every hole it names is filled.
+- **Evidence a rep of its own, rooted at `evidence`**: what it is of may be
+  a hole (a type variable given evidence), which no rep's root can be.
+- **Holes matched by name**: as the text path substitutes, by the names the
+  evidence is given for; both checkers refuse two variables of one name.
+- **`fill` is told the occurrence head (`var`)**, not taught it: the crate
+  knows no heads; a type variable's occurrence is a node of its own in
+  both checkers' reps, and the evidence takes the node's place.
+- **Sets deduplicated by a second canonical pass**, not inside `canonical`:
+  a member joined from evidence and one the set had are equal only once
+  their classes are, which the pass that orders them finds.
+- **The evaluator's evidence stays text**: its `reify-…` makes text
+  (`%reify-text`), its evidence list typed so; a stage given none takes the
+  rep there too.
+- **Lowered code makes a rep from hex** (`%fx26-rep-of-hex`): a string
+  literal survives any way the lowering's code is written and read.
+

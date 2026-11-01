@@ -259,9 +259,32 @@ Found on the way: `fixpt-reps`'s heap form read a bloblet's field 1, the
 trailer, for its first value (the values start at field 2), untested till
 now (a test added); the same off-by-one as `stage_native_fx`'s (§201).
 
-Left of step 3: evidence by rep (holes filled by a graph substitution,
-`reify-*` making reps), generative types' stable keys, and the Rust
-checker's stage paths.
+Then evidence by rep. A piece of evidence is a rep whose root is an
+`evidence` node of what it is evidence of (`k-evidence-rep`,
+`Checker::export_evidence`), held by the program beside its text (a
+product of the two, `evidence::evidence`); a `reify-…` makes it by filling
+its own holes from the evidence it is given, and a stage fills the type it
+is checked as so (`fixpt_reps::fill`): a hole takes its evidence's place; a
+type variable's occurrence, a `var` node around its hole, is the evidence
+itself; and an effect's evidence among an effect's atoms joins them, a set
+in a set of its kind being no type's, each member there once
+(`fill::dedup`), so that a type filled and the same type exported are one
+rep. A hole the evidence leaves, or a piece of evidence with no rep (a
+region of its own, which only text names), and the stage reads the text.
+
+And the Rust checker's paths: on `rs-scheme-vm` it exports what it notes
+(`Staged::rep`, the lowered code making the rep from its binary form in
+hex, `%fx26-rep-of-hex`), and its stage check imports the rep and binds
+`%stage-type` as the FX-26 one does; on `fx-ast-eval` the FX-26 checker's
+rep is given to `%stage-check` and imported by the Rust checker (the two
+checkers' reps are one, step 2). Every stage of the stage tests takes the
+rep on `rs-scheme-vm`, evidence's included; on `fx-ast-eval`, those given
+no evidence (the evaluator's `reify-…` makes text alone).
+
+Left of step 3: generative types (`TODO.md` §206: today a stage against
+a module whose type names a program's generative type is refused on both
+paths; a rep must carry each generative type's parameters and
+representation).
 
 ## Decided (the user's, 2026-11-01)
 
