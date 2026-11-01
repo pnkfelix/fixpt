@@ -4611,6 +4611,14 @@ definition's exemption dropped, so that reading `@globals` says `spin`
 wherever a global may reach itself, and absorption unconditional
 (`CLAUDES_CHOICES.md`, "The first definition's exemption dropped").
 
+A note (the user's question, 2026-11-01: decision diagrams): effects as
+sets of atoms, which with precise effects are large and overlap (s7st's
+300 globals, the same set in each type), are what ZDDs are for: shared
+across a program's effects, equality by node, the subset test that
+subeffecting is and union polynomial in the diagram's size, not the set's.
+Absorption took s7st's away; a program that wants precise effects would
+still pay for them. To measure when one shows the cost.
+
 Walks of a whole environment found besides (2026-10-31), for later:
 `uses_of`, `users_of` and `direct_users_of` walk the definitions (an
 index by the names each defines and uses; `k-users-of`,
@@ -4681,3 +4689,14 @@ the checker does now: `docs/research/heap-types.md`, "Abstract types, and
 what their identity depends on". Left to design: the syntax, and how
 applicative sharing is said. After §202's reps, whose keys this needs only
 to be able to address.
+
+A note (the user's question, 2026-11-01: decision diagrams): identity that
+depends on *conditions*, not only on inputs, is a function from conditions
+to representations, which a multi-terminal BDD is: its variables the
+conditions, its leaves the representations' keys, canonical, so that two
+sealings are one type exactly when their diagrams are one node; `(make #t)`
+twice sharing `t`, `(make #t)` and `(make #f)` not, and a condition not
+known statically leaving the diagram unreduced, generative, which is safe.
+A way to state path-sensitive applicative sharing, near dependent types
+(the checker must know the conditions). Ordered by keys, so the same in
+every process; a DAG of nodes, so a rep. For this design to weigh.
