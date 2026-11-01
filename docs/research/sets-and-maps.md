@@ -49,9 +49,13 @@ all: `clojure.org` is outside this session's network.
   derived equality and hash (`polytypic.md`'s `derive`; the editor's
   request, `TODO.md` §110). A built-in `setof` would have to choose
   between dictionaries passed explicitly and a kind of types with
-  equality (SML's `''a`, which `docs/fx26.md` lists as "not done"). That
-  choice comes first, and set formers last: they can be macros over a
-  walk (`former.fx`).
+  equality (SML's `''a`, which `docs/fx26.md` lists as "not done").
+  Recommended (§5.1): no kind. One dictionary carries equality and hash
+  together, and `derive` makes it. A type whose equality cannot be
+  hashed usefully passes a constant hash, which is correct, only slow.
+  An ordered shape, equality and comparison, is the better fallback.
+  Iterating a hash-ordered set is `nondet`. That choice comes first, and
+  set formers last: they can be macros over a walk (`former.fx`).
 - **Found on the way** (§3.2). Both checkers accept an `eqtable` frozen
   by `letfreeze`, at `const` (`frozen-eqtable.fx`). Its lookups still
   rehash it after a collection, so the runtime writes memory the types
@@ -262,11 +266,10 @@ itself, which then owns the address-dependent state.
 
 B, then D, with C kept possible:
 
-1. **Decide how keys are compared.** Explicit dictionaries, as
-   `identity` is now and as `polytypic.md` recommends for `derive`, fit
-   what exists. A kind of types with equality would be shorter to write,
-   but it is a new kind for both checkers. Recommended: dictionaries,
-   with `derive` making them.
+1. **Decide how keys are compared.** Recommended: dictionaries in two
+   shapes, equality with hash and equality with comparison, made by
+   `derive` or given. No kind for "types with equality". §5.1 has the
+   reasons and the consequences for purity.
 2. **Kernel `setof` and `mapof`, as values.** At a frozen region, every
    query `pure` but for the dictionary's effect. Built from a mutable
    form at a region `r`, then frozen by `letfreeze`, and so checked
@@ -281,6 +284,65 @@ B, then D, with C kept possible:
    provide (D). Move to forms (C) only if fusion or finite differencing
    is wanted.
 
+### 5.1 Keys: a dictionary, not a kind
+
+**Why no kind.** A kind of types with equality, as SML's `''a`, either
+gives an abstract type its representation's equality or cannot give it
+any. A set kept as an unsorted list is the example: equality of the
+lists is the wrong equality of the sets. That is the usual complaint
+about SML's equality types. Haskell's per-type `Eq` and `Hashable`
+instances have held up better (*memory*). FX-26 has no type classes, so
+the equivalent is a dictionary. That is what `identity` already is, and
+what `polytypic.md`'s `derive` would make. Most of what a kind would say
+is already there anyway. The `data` kind (frozen products, sums, pairs
+and bloblets, with no procedures, no writable storage and no generative
+types) is roughly the types where structural equality is well defined.
+So deriving over `data` gives built-in equality without a new kind,
+with one caveat. Data at `const` may be cyclic: its equality needs a
+walk that notices cycles, and its hash a budget, as Larceny's
+`equal-hash` has (32, copied by `scheme-bench/set.fx`). Data at
+`acyclic` needs neither.
+
+**The slow path is a constant hash.** The contract runs one way: `a ≡ b`
+implies `h(a) = h(b)`. A hash that is always 0 meets it, and a table
+using it is correct but scans linearly. So a type whose equality cannot
+be hashed usefully needs no special case in the language. Examples are
+recursive types up to unfolding (the checker's own problem, where a
+hash needs a canonical form), exact real numbers, and equality by
+mutual inclusion with no canonical form. Such a type passes a constant
+hash. Often there is a better answer: an ordering. A dictionary of
+equality and comparison gives sets as balanced trees, O(log n) a query.
+So the dictionaries come in two shapes, `(eq, hash)` and `(eq,
+compare)`, and a set type says which one it takes.
+
+**Iteration order is an effect.** Walking a hash set shows its hash
+order. A seeded hash (SipHash and its kind, against hash flooding;
+*memory*) varies from run to run. An address hash varies after every
+collection. FX-26's documented `eqtable` operations include no walk,
+which keeps this hidden today. A `pure` `setof` must therefore choose,
+per operation:
+- results that cannot depend on order (membership, count, union, a fold
+  whose function is commutative and associative, which the type cannot
+  check, so a promise);
+- a canonical order, which needs `(eq, compare)`;
+- or a walk typed `nondet`, the atom FX-26 already has for answers that
+  may differ between runs.
+
+SETL accepted the nondeterminism untyped (`arb`, `x from s`). FX-26 can
+type it. Recommended: hash-ordered walks are `nondet`, and ordered
+sets' walks are not.
+
+**Two more rules.**
+- *A dictionary that lies is a wrong answer, never unsoundness.* If a
+  given hash breaks the contract, lookups may miss, but the kernel's
+  table must stay memory-safe. It may not rely on the contract for
+  bounds, termination of its own loops, or layout. A derived dictionary
+  meets the contract by construction.
+- *The dictionary's effect is the set's.* A query is `pure` only when
+  its dictionary's procedures are: the `e` of `polytypic.md`. This is
+  §1's problem seen from the other side. `set.fx`'s comparators share
+  the large `cmps` effect, so every set operation has it.
+
 On "Clojure or SETL": both, for different things. Clojure for the data
 structures and transients, the nearest existing design to `letfreeze`.
 SETL for notation (formers, maps as relations, `f{x}`) and for the
@@ -290,14 +352,21 @@ statically what they check at run time.
 
 ## 6. Open questions for the user
 
-1. Dictionaries or a kind with equality, for keys (§5.1)?
-2. Should a frozen identity table be refused, or rehashed by the
+1. Keys by dictionaries in two shapes, `(eq, hash)` and `(eq,
+   compare)`, with a constant hash as the slow path and no kind for
+   types with equality (§5.1): agreed?
+2. Should a walk of a hash-ordered set be `nondet`, with order-free
+   operations (membership, count, union) staying `pure` (§5.1)? And
+   should a hash be seeded per run, given that a seed makes every
+   hash-ordered walk `nondet`, where an unseeded hash would only make
+   it depend on the hash function?
+3. Should a frozen identity table be refused, or rehashed by the
    collector (§3.2)? And should the present acceptance be recorded in
    `soundness-findings.md` as a latent hazard?
-3. Should the first step be option A (§4), a persistent map written in
+4. Should the first step be option A (§4), a persistent map written in
    FX-26 with a `letfreeze` per node (§3.3), as a trial of the types
    and a benchmark for a kernel version?
-4. Should `exists` bind its witness, as SETL's does, or give a sum
+5. Should `exists` bind its witness, as SETL's does, or give a sum
    (`former.fx`)?
 
 ## The toy programs
@@ -331,5 +400,7 @@ record or an abstract was seen, and content is given from memory.
 | Clojure reference, "Transients"                                                                                                                | https://clojure.org/reference/transients (not reachable from this session)                                                                                                 | memory                       |
 | Thread-ownership check relaxed in Clojure 1.7                                                                                                  | https://clojurians-log.clojureverse.org/clojure-dev/2019-08-01; https://ask.clojure.org/index.php/3298/partition-partition-transducers-should-visibility-changes            | record (search results)      |
 | Reinking, Xie, de Moura, Leijen, "Perceus: garbage free reference counting with reuse", PLDI 2021; MSR-TR-2020-42                              | https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/                                                                   | record                       |
+| SML equality types (`''a`); Haskell's `Eq` and `Hashable` (the `hashable` package)                                                              | —                                                                                                                                                                          | memory                       |
+| SipHash and hash-flooding attacks, as the reason for seeded hashes                                                                             | —                                                                                                                                                                          | memory                       |
 | Swift collections' copy-on-write                                                                                                               | —                                                                                                                                                                          | memory                       |
 | FX-26: `docs/fx26.md` ("Identity", "Regions that end", "Freezing", "What a process may hold", "`par`"); `TODO.md` §19, §59, §110; `scheme-bench/set.fx`; `docs/research/polytypic.md` | this repository at `71de5b8`                                                                                                                       | read                         |
