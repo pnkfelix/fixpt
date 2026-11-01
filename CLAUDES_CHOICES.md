@@ -3322,3 +3322,23 @@ of `TODO.md` §141, working on my own.
 - **The Rust checker's sessions as they were**: at parity already (61
   ms), and their commit compiles the form's text, type included.
 
+## A program's `.fasl` by rep (2026-11-01; `heap-types.md`, step 5)
+
+- **One rep a file, not one a definition**: a rep has no abbreviations, so
+  alone each repeats every type it names (twelve times the text for
+  s7st); together, minimization shares them, as text's abbreviations do.
+- **The abbreviations' types in the rep too, and given at load**: a part
+  that is one's is the loader's type of it, where its digest says it means
+  the same; so the printer names it (it finds some kinds only by node).
+- **Each definition imported alone, with its own abbreviations**: two
+  equal abbreviations are one node; seeding it with one name would print
+  a definition written with the other wrongly.
+- **The stamps trusted, the check not**: the user chose to trust (and
+  enter unchecked); measured, an unchecked entry saved 10 ms more of 0.40
+  s, at the cost of a second place doing all a check does, so it was left
+  out, and said so; the stamps, 33 ms, are trusted, verified by
+  `FIXPT_FASL_VERIFY` across the `.fasl` tests.
+- **`import-types` makes no generative type**: the file's own must be
+  found, not made anew under a key that could differ; a file whose rep
+  names one not yet defined falls back to text.
+

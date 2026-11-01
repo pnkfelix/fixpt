@@ -52,6 +52,10 @@ use fixpt_reps::{Arg, Builder, Const, Node, Rep};
 use std::collections::HashMap;
 
 /// A type exported: its rep, and the variables its holes are, in order.
+/// The head of a `.fasl`'s definitions' types' rep's root
+/// ([`Checker::export_tys`]).
+pub const FASL_TYPES: &str = "fasl-types";
+
 pub struct Exported {
     pub rep: Rep,
     pub holes: Vec<DVar>,
@@ -80,6 +84,16 @@ impl Checker {
         })
     }
 
+    /// Types `ts` as one rep, its root a `fasl-types` node of each, in order:
+    /// what they share there once (a `.fasl`'s definitions' types,
+    /// `docs/research/heap-types.md`, step 5).
+    pub fn export_tys(&self, ts: &[TyId]) -> Result<Exported, String> {
+        self.export_with(|ex| {
+            let args = ts.iter().map(|t| ex.ty(*t).map(Arg::Node)).collect::<Result<Vec<_>, _>>()?;
+            Ok(ex.b.add(FASL_TYPES, &[], args))
+        })
+    }
+
     fn export_with(&self, root: impl FnOnce(&mut Ex) -> Result<u32, String>) -> Result<Exported, String> {
         let mut ex = Ex { c: self, b: Builder::new(), memo: HashMap::new(), gendefs: HashMap::new(), scope: Vec::new(), holes: HashMap::new(), hole_vars: Vec::new() };
         let root = root(&mut ex)?;
@@ -97,6 +111,38 @@ impl Checker {
     /// Rep `rep` as a type of this checker's arena, its holes the variables
     /// `holes`; or why not: a head or an operand it does not know, or a
     /// constant not of this checker.
+    /// Each type of a rep [`export_tys`](Checker::export_tys) made, in order:
+    /// its holes none, the generative types it names this checker's (none
+    /// made).
+    pub fn import_reps(&mut self, rep: &Rep) -> Result<Vec<TyId>, String> {
+        let n = rep.nodes.first().map_or(0, |r| r.args.len());
+        (0..n).map(|i| self.import_rep_part(rep, i, &[])).collect()
+    }
+
+    /// The root's operand `i` of a rep [`export_tys`](Checker::export_tys)
+    /// made, the type of each `(j, t)` of `seeds` given: the root's operand
+    /// `j` is `t` (an abbreviation's own type, where the rep has it), so that
+    /// what has it is that type, as a type written naming it is.
+    pub fn import_rep_part(&mut self, rep: &Rep, i: usize, seeds: &[(usize, TyId)]) -> Result<TyId, String> {
+        let root = &rep.nodes[rep.root() as usize];
+        if rep.name(root.head) != FASL_TYPES || !rep.holes.is_empty() {
+            return Err("not a `.fasl`'s types".into());
+        }
+        let gens: HashMap<u64, u32> = (0..self.generatives.len() as u32).map(|w| (generative_key(self, w), w)).collect();
+        let before = self.generatives.len();
+        let mut im = Im { c: self, rep, holes: &[], gens, done: vec![None; rep.nodes.len()], links: vec![None; rep.nodes.len()], busy: vec![false; rep.nodes.len()], bound: HashMap::new() };
+        for (j, t) in seeds {
+            let k = Im::child(*root.args.get(*j).ok_or("a seed past the rep's types")?)?;
+            im.done[k as usize] = Some(*t);
+        }
+        let t = Im::child(*root.args.get(i).ok_or("no such type in the rep")?).and_then(|k| im.ty(k));
+        if self.generatives.len() != before {
+            self.generatives.truncate(before);
+            return Err("it names a generative type not here".into());
+        }
+        t
+    }
+
     pub fn import_rep(&mut self, rep: &Rep, holes: &[DVar]) -> Result<TyId, String> {
         if holes.len() != rep.holes.len() {
             return Err(format!("{} holes, {} variables given", rep.holes.len(), holes.len()));

@@ -420,6 +420,11 @@
 ;; Each generative type made in this import from its definition
 ;; (`ri-generative`), by the definition's node: one type for every use.
 (define ri-gendefs (ref (listof (pairof int int @t) acyclic) @t) (new nil))
+;; Whether an import may make a generative type this checker has not got:
+;; not where the rep is of this program's own types, which must find theirs
+;; (a `.fasl`'s, `k-rep-making!`).
+(define ri-making (ref bool @t) (new #t))
+(define k-rep-making! (->* (bool) unit) (lambda (on) (set ri-making on)))
 
 (define ri-node (->* (int) k-rnode) (lambda (k) (array-ref (get ri-nodes) k)))
 (define ri-head (->* (int) string) (lambda (k) (symbol->string (extract (ri-node k) 2))))
@@ -635,8 +640,11 @@
   (ri-generative (->* (string int) int)
     (lambda (name def)
       (let ((had (rp-assoc (get ri-gendefs) def)))
-        (if (>= had 0)
-            had
+        (cond
+          ((>= had 0) had)
+          ((not (get ri-making))
+           (begin (ri-fail (string-append "no generative type " name " here")) 0))
+          (else
             (let* ((bs (ri-binders def)) (n (k-length bs)) (args (ri-args def))
                    (vs (ri-variances (ri-args (ri-child (ri-nth args n)))))
                    (g (get k-ngens)) (slot (k-slot)))
@@ -646,7 +654,7 @@
                 (set k-ngens (+ g 1))
                 (set ri-gendefs (cons (cons def g) (get ri-gendefs)))
                 (k-set-link slot (ri-ty (ri-child (ri-nth args (+ n 1)))))
-                g))))))
+                g)))))))
   (ri-ty (->* (int) int)
     (lambda (k)
       (let ((done (array-ref (get ri-done) k)))
@@ -778,6 +786,20 @@
 ;; variables `holes`.
 (define k-rep-ty (->* ((bytevectorof @t) k-ids) int)
   (lambda (bytes holes)
+    (let ((n (ri-begin! bytes holes))) (if (= n 0) (k-ty-new (ty-void)) (ri-ty 0)))))
+;; Each type of a rep of several (`reps.rs`'s `export_tys`, its root a
+;; `fasl-types` node), in order, its holes none: a `.fasl`'s definitions'.
+(define k-rep-tys (->* ((bytevectorof @t)) k-ids)
+  (lambda (bytes)
+    (let ((n (ri-begin! bytes nil)))
+      (letrec ((each (->* (k-rargs) k-ids)
+                     (lambda (xs)
+                       (if (null? xs) nil (cons (ri-ty (ri-child (car xs))) (each (cdr xs)))))))
+        (if (= n 0) nil (each (ri-args 0)))))))
+;; The import's state, for the nodes of rep `bytes`, its holes the variables
+;; `holes`: how many nodes.
+(define ri-begin! (->* ((bytevectorof @t) k-ids) int)
+  (lambda (bytes holes)
     (let* ((got (rep-nodes bytes (ri-gen-names)))
            (nodes (extract got 1))
            (n (k-length nodes))
@@ -791,5 +813,5 @@
         (set ri-links (make-array n -1))
         (set ri-bound nil) (set ri-gendefs nil)
         (set ri-holes holes)
-        (if (= n 0) (k-ty-new (ty-void)) (ri-ty 0))))))
+        n))))
 )))

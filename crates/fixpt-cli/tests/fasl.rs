@@ -129,6 +129,13 @@ fn programs_give_the_same_from_fasls() {
                     if (out.as_str(), err.as_str()) != (fout.as_str(), ferr.as_str()) {
                         wrong.push(format!("{name}:\n  from sources: {out}{err}\n  from fasls:   {fout}{ferr}"));
                     }
+                    // Verified: its definitions checked by their text, and
+                    // the stamps it keeps the ones a run from source makes
+                    // (`FIXPT_FASL_VERIFY`, `heap-types.md`, step 5).
+                    let (_, vout, verr) = fixpt(&dir, &["eval", &name], &[("FIXPT_FASL_VERIFY", "1")]);
+                    if (out.as_str(), err.as_str()) != (vout.as_str(), verr.as_str()) {
+                        wrong.push(format!("{name}:\n  from sources:        {out}{err}\n  from fasls, verified: {vout}{verr}"));
+                    }
                 }
                 (wrong, read)
             })
@@ -142,6 +149,39 @@ fn programs_give_the_same_from_fasls() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     assert!(read >= 150, "only {read} programs read their `.fasl`");
+}
+
+/// A program's `.fasl` keeps its definitions' types as one rep, what they
+/// share there once (an abbreviation's type, here), each definition its
+/// place in it and what its stamp is made of; loaded, they are entered by
+/// it, and verified, as a run from source enters them
+/// (`docs/research/heap-types.md`, step 5).
+#[test]
+fn a_program_fasl_keeps_its_types_as_one_rep() {
+    let dir = scratch("reps");
+    let prog = concat!(
+        "(define-type pt (productof (x int) (y int)))\n",
+        "(define* get-x (subr pure (pt) int) (lambda (p) (extract p x)))\n",
+        "(define* get-y (subr pure (pt) int) (lambda (p) (extract p y)))\n",
+        "(define-rec (ev? (subr (maxeff spin (read (globals ev? od?))) (int) bool) (lambda (n) (if (= n 0) #t (od? (- n 1)))))\n",
+        "            (od? (subr (maxeff spin (read (globals ev? od?))) (int) bool) (lambda (n) (if (= n 0) #f (ev? (- n 1))))))\n",
+        "(define same (poly ((t type)) (subr pure (t) t)) (plambda ((t type)) (lambda (v) v)))\n",
+        "(write-out (int->string (+ (get-x (product (x 1) (y 2))) ((proj same int) (get-y (product (x 3) (y 4)))))))\n",
+        "(write-out (if (ev? 10) \" even\\n\" \" odd\\n\"))\n",
+    );
+    std::fs::write(dir.join("prog.fx"), prog).expect("written");
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "--program", "prog.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    let fasl = std::fs::read(dir.join("prog.fasl")).expect("made");
+    let header = String::from_utf8_lossy(&fasl[..fasl.windows(7).position(|w| w == b"\nimage ").expect("an image")]).into_owned();
+    let count = |w: &str| header.lines().filter(|l| l.starts_with(w)).count();
+    assert_eq!((count("reps "), count("repof "), count("stampof ")), (1, 5, 5), "{header}");
+    for envs in [&[("FIXPT_FASL_SAY", "1")][..], &[("FIXPT_FASL_SAY", "1"), ("FIXPT_FASL_VERIFY", "1")][..]] {
+        let (ok, out, err) = fixpt(&dir, &["eval", "prog.fx"], envs);
+        // The abbreviation named as a run from source names it.
+        let named = out.contains("get-x : (subr pure (pt) int)") && out.contains("same : (poly ((t type)) (subr pure (t) t))");
+        assert!(ok && out.starts_with("5 even\n") && named && err.contains("`prog.fx` is read from `prog.fasl`"), "{envs:?}: {out}{err}");
+    }
 }
 
 #[test]

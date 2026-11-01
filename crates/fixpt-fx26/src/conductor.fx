@@ -461,6 +461,25 @@
                         (p-err (m a b)
                           (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
                         (p-ok (tops) (checked standard tops k len native registers rep)))))))))
+         ;; A `.fasl`'s definition (`session.rs`'s `run_program_def`), its
+         ;; text `whole`, which loads nothing, read, parsed and checked as
+         ;; `check-more-typed` checks it, in one call: its message if refused,
+         ;; else "" (`docs/research/heap-types.md`, step 5).
+         (check-text-typed
+          (lambda ((whole string) (named (listof (productof (1 symbol) (2 int)) acyclic)))
+            (let ((read (read-text-at whole 0)))
+              (if (null? read)
+                  "the definition is not one whole form"
+                  (begin
+                    (loaded-files! nil)
+                    (includes-given! nil)
+                    ((with check-program check-lines!) #f)
+                    (tagcase (parse-program (car read))
+                      (p-err (m a b) m)
+                      (p-ok (tops)
+                        (tagcase ((with check-program check-more-typed) tops named)
+                          (k-err (m a b) m)
+                          (else y "")))))))))
          ;; A session's step (`sessions26.rs`), checked by this instance's
          ;; checker, which holds the session's definitions, and compiled by
          ;; its compiler, whose globals are the session's: `whole`, the code
@@ -579,6 +598,9 @@
              (check-hold-breaks! (with check-program check-hold-breaks!))
              (check-lines! (with check-program check-lines!))
              (check-more (with check-program check-more))
+             (check-more-typed (with check-program check-more-typed))
+             (check-text-typed check-text-typed)
+             (import-types (with check-program import-types))
              (check-program (with check-program check-program))
              (checked-tops (with check-program checked-tops))
              (check-conv-native! (with check-print-parts check-conv-native!))
@@ -645,6 +667,9 @@
 (define check-hold-breaks! (extract front-end-entries check-hold-breaks!))
 (define check-lines! (extract front-end-entries check-lines!))
 (define check-more (extract front-end-entries check-more))
+(define check-more-typed (extract front-end-entries check-more-typed))
+(define check-text-typed (extract front-end-entries check-text-typed))
+(define import-types (extract front-end-entries import-types))
 (define check-program (extract front-end-entries check-program))
 (define checked-tops (extract front-end-entries checked-tops))
 (define checked-reps (extract front-end-entries checked-reps))

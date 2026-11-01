@@ -517,6 +517,46 @@
                (lambda (r) r))))
       ;; Kept or not, the name gone after: a session's next step binds its own.
       (begin (k-stage-type-gone! rep) r))))
+;; For a load of a `.fasl` (`session.rs`'s `run_program_def`,
+;; `docs/research/heap-types.md`, step 5): the types of a rep of several,
+;; the file's definitions', imported once, in order, each finding the
+;; generative types it names here (none made); or none, if it cannot be.
+;; What `import-types` imported last; none if it could not.
+(define k-imported (ref k-ids @t) (new nil))
+(define import-types (->* ((bytevectorof @t)) k-ids)
+  (lambda (bytes)
+    (begin
+      (set k-imported nil)
+      (prompt k-tag
+        (begin ((with check-reps k-rep-making!) #f)
+               (set k-imported ((with check-reps k-rep-tys) bytes))
+               (k-ok nil))
+        (lambda (r) r))
+      ((with check-reps k-rep-making!) #t)
+      (get k-imported))))
+;; `forms` checked as `check-more` checks them, each of `named` its name
+;; bound to a type of this checker's, by its id (`import-types`); the
+;; names unbound after.
+(define-type k-named-ids (listof (productof (1 symbol) (2 int)) acyclic))
+(define check-more-typed (->* (k-tops k-named-ids) k-result)
+  (lambda (forms named)
+    (letrec ((bind (->* (k-named-ids) unit)
+                   (lambda (ns)
+                     (if (null? ns)
+                         #u
+                         (begin (k-push-desc (extract (car ns) 1) (ds-rec (extract (car ns) 2)))
+                                (bind (cdr ns))))))
+             (named? (->* (symbol k-named-ids) bool)
+                     (lambda (s ns)
+                       (and (not (null? ns))
+                            (or (symbol=? s (extract (car ns) 1)) (named? s (cdr ns))))))
+             (gone (->* (k-scope) k-scope)
+                   (lambda (ds)
+                     (cond ((null? ds) nil)
+                           ((named? (car (car ds)) named) (gone (cdr ds)))
+                           (else (cons (car ds) (gone (cdr ds))))))))
+      (let ((r (begin (bind named) (check-more forms))))
+        (begin (set k-dscope (gone (get k-dscope))) r)))))
 ;; `%stage-type` bound to rep `rep` imported, if it is not empty.
 (define k-stage-type! (->* ((bytevectorof @t)) unit)
   (lambda (rep)

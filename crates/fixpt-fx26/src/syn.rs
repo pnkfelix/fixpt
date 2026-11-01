@@ -423,6 +423,44 @@ pub fn check_only(scheme: &mut Session, standard: Option<Handle>, file: FileId, 
     })
 }
 
+/// The types of rep `bytes` (a rep of several, `reps.rs`'s `export_tys`)
+/// in the checker written in FX-26, by id, in order (`import-types`); none
+/// if it could not import them.
+pub fn import_types(scheme: &mut Session, bytes: &[u8]) -> Result<Vec<i64>, String> {
+    let b = scheme.make(|m| m.heap().make_bytevector(bytes));
+    let ids = scheme.call_global(&format!("{READER_PREFIX}import-types"), &[b]).map_err(|e| e.to_string())?;
+    Ok(scheme.view(|v| v.get(ids).list().unwrap_or_default().iter().filter_map(|x| x.fixnum()).collect()))
+}
+
+/// `check_only` of a definition that loads nothing, given more forms (no
+/// `standard`), each of `typed` a name the text gives a type by, bound to
+/// that type, by its id (`import_types`): read, parsed and checked in one
+/// call (`check-text-typed`); a `.fasl`'s definitions,
+/// `docs/research/heap-types.md`, step 5.
+pub fn check_only_typed(scheme: &mut Session, file: FileId, text: &str, typed: &[(String, i64)]) -> R<Result<(), String>> {
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    scheme.scope(|s| {
+        let whole = s.make(|m| m.heap().make_string(text));
+        let list = s.make(|m| {
+            let mut l = fixpt_heap::Value::NULL;
+            for (n, id) in typed.iter().rev() {
+                let h = m.heap();
+                let base = h.push_root(l);
+                let sym = h.intern(n);
+                let p = h.make_frozen(fixpt_heap::layout::kind("product"), &[sym, fixpt_heap::Value::fixnum(*id)]);
+                h.push_root(p);
+                let (l0, p) = (h.root_at(base), h.root_at(base + 1));
+                l = h.cons(p, l0);
+                h.pop_roots_to(base);
+            }
+            l
+        });
+        let said = s.call_global(&format!("{READER_PREFIX}check-text-typed"), &[whole, list]).map_err(|e| fail(e.to_string()))?;
+        let said = s.view(|v| v.get(said).string().unwrap_or_default());
+        Ok(if said.is_empty() { Ok(()) } else { Err(said) })
+    })
+}
+
 /// The checker written in FX-26 on `tops`: a program, in the initial
 /// environment `standard`; or, without it, more forms after those checked
 /// before.

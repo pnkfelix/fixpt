@@ -64,6 +64,14 @@ pub struct Header {
     /// The type abbreviations its types name, each with what it is and
     /// that type's digest (`Checker::fasl_use_digest`), compared first.
     pub aliases: Vec<(String, String, u64)>,
+    /// A program's file's definitions' types, as one rep in its binary form
+    /// (`reps.rs`'s `FASL_TYPES` its root, each [`Def::rep_at`] a place of
+    /// it): what they share there once, as the text's abbreviations are.
+    pub reps: Option<Vec<u8>>,
+    /// Each abbreviation of `aliases` whose type is among `reps`' too, and
+    /// its place: what a load gives that part, the abbreviation's own type
+    /// where it reads (`session.rs`'s `run_program_def`).
+    pub rep_aliases: Vec<(String, usize)>,
     /// The globals its image's value links to by name ([`Link::Global`]),
     /// the `i`th named by the image's placeholder `(0 . i)`; and the names
     /// of the keywords it holds ([`Link::Keyword`]), placeholders `(4 . i)`.
@@ -111,6 +119,25 @@ pub struct Def {
     pub said: Vec<String>,
     /// The type abbreviations its type names (`Header::aliases`).
     pub types: Vec<String>,
+    /// Its type's place among [`Header::reps`]' (`docs/research/heap-types.md`,
+    /// step 5): what a load enters, not `ty` read again; none where it names
+    /// a variable.
+    pub rep_at: Option<usize>,
+    /// What its stamp is made of but the write counts of the globals its
+    /// making reads (`session.rs`'s `stamp_of`): its form's text's digest
+    /// and its type's, kept so that a load need not print either again.
+    pub stamp_parts: Option<(u64, u64)>,
+}
+
+/// `bytes` in hex, two digits a byte.
+fn hex_bytes(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The bytes hex `s` is, two digits a byte; none if it is not.
+fn bytes_of_hex(s: &str) -> Option<Vec<u8>> {
+    (s.len() % 2 == 0).then_some(())?;
+    (0..s.len() / 2).map(|i| u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()).collect()
 }
 
 /// A file a `.fasl`'s file loads: as its load wrote it, and the stamp it had.
@@ -226,6 +253,12 @@ impl Header {
         for g in &self.globals {
             out.push_str(&format!("global {g}\n"));
         }
+        if let Some(r) = &self.reps {
+            out.push_str(&format!("reps {}\n", hex_bytes(r)));
+        }
+        for (n, i) in &self.rep_aliases {
+            out.push_str(&format!("repalias {i} {n}\n"));
+        }
         for d in &self.defs {
             out.push_str(&format!("{} {} {} {}\ninit {}\n", if d.rec { "rec" } else { "def" }, d.form, d.name, d.ty, d.init));
             for (n, t, digest) in &d.uses {
@@ -236,6 +269,12 @@ impl Header {
             }
             if !d.types.is_empty() {
                 out.push_str(&format!("types {}\n", d.types.join(" ")));
+            }
+            if let Some(i) = d.rep_at {
+                out.push_str(&format!("repof {i}\n"));
+            }
+            if let Some((text, ty)) = d.stamp_parts {
+                out.push_str(&format!("stampof {text:016x} {ty:016x}\n"));
             }
         }
         out.push_str(&format!("image {}\n", image.len()));
@@ -257,7 +296,7 @@ impl Header {
             return Err(format!("it does not begin `{MARK}`"));
         }
         let hex = |s: &str| u64::from_str_radix(s, 16).map_err(|_| format!("`{s}` is not a digest"));
-        let mut h = Header { build: 0, arch: String::new(), native: false, cellular: false, kind: Kind::Module, source: 0, stamp: 0, deps: Vec::new(), ty: String::new(), made: String::new(), defs: Vec::new(), aliases: Vec::new(), globals: Vec::new() };
+        let mut h = Header { build: 0, arch: String::new(), native: false, cellular: false, kind: Kind::Module, source: 0, stamp: 0, deps: Vec::new(), ty: String::new(), made: String::new(), defs: Vec::new(), aliases: Vec::new(), reps: None, rep_aliases: Vec::new(), globals: Vec::new() };
         loop {
             let l = line()?;
             let (word, value) = l.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
@@ -291,11 +330,21 @@ impl Header {
                     };
                     let form = form.parse().map_err(|_| format!("a header line `{l}`"))?;
                     let rec = word == "rec";
-                    h.defs.push(Def { form, rec, name: name.to_string(), ty: ty.to_string(), init: String::new(), uses: Vec::new(), said: Vec::new(), types: Vec::new() });
+                    h.defs.push(Def { form, rec, name: name.to_string(), ty: ty.to_string(), init: String::new(), uses: Vec::new(), said: Vec::new(), types: Vec::new(), rep_at: None, stamp_parts: None });
                 }
                 "types" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.types = value.split(' ').map(str::to_string).collect(),
                 "said" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.said.push(value.to_string()),
                 "init" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.init = value.to_string(),
+                "repof" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.rep_at = Some(value.parse().map_err(|_| format!("a header line `{l}`"))?),
+                "stampof" => {
+                    let (a, b) = value.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
+                    h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.stamp_parts = Some((hex(a)?, hex(b)?));
+                }
+                "repalias" => {
+                    let (i, n) = value.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
+                    h.rep_aliases.push((n.to_string(), i.parse().map_err(|_| format!("a header line `{l}`"))?));
+                }
+                "reps" => h.reps = Some(bytes_of_hex(value).ok_or_else(|| format!("a header line `{l}`"))?),
                 "alias" => {
                     let bad = || format!("a header line `{l}`");
                     let (name, rest) = value.split_once(' ').ok_or_else(bad)?;

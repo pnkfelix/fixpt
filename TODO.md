@@ -4551,7 +4551,9 @@ s7st's warm start (0.77 s, 13 `.fasl`s) after each:
    variables renamed, effects in order, abstract types named as the
    printer names them), memoised until the global is defined again: one
    walk a global a load, no text.
-3. Trusting the stamps: where the build's and sources' stamps match, each
+3. (Done as far as it pays, 2026-11-01, `heap-types.md`, step 5: the
+   stamps kept and trusted, the types entered by rep, each definition
+   still checked; `FIXPT_FASL_VERIFY` as below.) Trusting the stamps: where the build's and sources' stamps match, each
    definition's name and type entered in the environments, not checked
    again as `(define name T %fasl-value)` (`run_program_def`);
    `FIXPT_FASL_VERIFY=1` checks them as now. The types it must enter then
@@ -4685,8 +4687,10 @@ node tables, binders by position, abstract and generative types as keyed
 constant objects; each checker's export and import; digests; the
 migration in six steps; four open questions). Steps 1 to 4 done
 (2026-11-01): reps, both checkers' export and import, `stage` and evidence
-by rep, sessions' definitions by rep. Left: 5, `.fasl`s by rep; 6, the
-text paths removed.
+by rep, sessions' definitions by rep, a program's `.fasl`'s definitions by
+rep and its stamps trusted (s7st's warm start 0.45 s to 0.42 s). Left: 6,
+the text paths removed; and of s7st's start, the 359 forms run from source
+each time (221 ms with its prelude's stage), which are not types.
 
 ## 203. Abstract types whose identity depends on what they declare (the user's, 2026-11-01)
 

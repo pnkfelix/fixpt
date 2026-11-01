@@ -4446,3 +4446,16 @@ definitions against a module of a large value type 219 to 63 ms, 185 to
 the module's type has a sum or a recursive type (`module_values` read the
 printed type as FX-91 code, and found none).
 
+## 2026-11-01: heap types, step 5: a program's `.fasl` by rep, its stamps trusted (§200, §202)
+
+A program's `.fasl` keeps its definitions' types and its abbreviations'
+as one rep, what they share there once; a load imports each definition's
+type, given the abbreviations its type names (as its text would be read),
+in the Rust checker, and the file's types once in the FX-26 one, each
+definition checked by its types' ids in one call; and each definition's
+stamp made of digests the `.fasl` keeps. `FIXPT_FASL_VERIFY=1` checks
+everything as before and refuses a stamp that differs. s7st's warm start
+0.45 s to 0.42 s. Found: a rep for each definition was twelve times its
+text (abbreviations are text's sharing); and entering a definition
+unchecked would have saved 10 ms more, so it is checked.
+

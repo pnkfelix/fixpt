@@ -156,6 +156,20 @@ fn spliced(b: &Builder, set: bool, head: &str, filler: Arg) -> Option<Vec<Arg>> 
     (set && node.set && b.name_of(node.head) == head).then(|| node.args.clone())
 }
 
+/// Reps `reps` as one, its root a node of head `head` whose operands are
+/// their roots, in order: what they share there once, as its canonical form
+/// finds it (a `.fasl`'s definitions' types, `heap-types.md`, step 5).
+pub fn combine(head: &str, reps: &[&Rep]) -> Result<Rep, String> {
+    let mut b = Builder::new();
+    let mut roots = Vec::with_capacity(reps.len());
+    for r in reps {
+        let base = copy_nodes(&mut b, r);
+        roots.push(map_arg(&mut b, r, base, Arg::Node(r.root()), &mut Vec::new(), true));
+    }
+    let root = b.add(head, &[], roots);
+    Ok(b.finish(root)?.rep)
+}
+
 /// `rep` with each set's members each there once, made canonical again,
 /// until none is there twice: two members equal once canonical (a member
 /// the evidence brought and one the set had) are one.
@@ -235,6 +249,15 @@ mod tests {
         let given = rep("(evidence (base int))");
         let filled = fill(&checked, &[("t", &given)], "var").expect("fills");
         assert_eq!(filled, rep("(subr (native) (&effect) (params (base int)) (base int))"), "{}", text::write(&filled));
+    }
+
+    /// What reps combined share is there once.
+    #[test]
+    fn reps_combined_share_what_they_share() {
+        let a = rep("(pairof (base int) (base string) (frozen #t) #t)");
+        let b = rep("(ref (pairof (base int) (base string) (frozen #t) #t) (rconst r))");
+        let both = combine("fasl-types", &[&a, &b]).expect("combines");
+        assert_eq!(both, rep("(fasl-types #1=(pairof (base int) (base string) (frozen #t) #t) (ref #1# (rconst r)))"), "{}", text::write(&both));
     }
 
     #[test]

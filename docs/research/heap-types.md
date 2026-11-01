@@ -1,7 +1,7 @@
 # Types as heap data
 
 Status: design, reviewed with the user (2026-11-01; "Decided", below).
-Steps 1 to 4 done.
+Steps 1 to 5 done.
 Asked for by the user after Heist's request (`TODO.md` §201, item 5): a
 `stage` checks its module's type again each time because the type crosses
 to the staged checker as text. The user's direction: types as heap data,
@@ -329,6 +329,54 @@ Found on the way, and fixed: a session saw none of its module's values
 when the module's type, printed, had a sum or a recursive type (its labels
 `#:k0`, `%3`): `module_values` read the text as FX-91 code, which has
 neither, and found no values.
+
+## Step 5, done (2026-11-01)
+
+A program's `.fasl`'s definitions by rep, and its stamps trusted. Measured
+first, on Heist's s7st (current; its 13 `.fasl`s): a warm start of 0.45
+s, of which its 406 definitions taken from `.fasl`s 157 ms (the FX-26
+checker's check of each 74 ms, the Rust checker's 35 ms, each one's stamp
+33 ms), its 359 forms run from source 221 ms (with its prelude's stage,
+some 100 ms), its preambles 35 ms.
+
+What was found on the way:
+
+- **A rep for each definition is twelve times its text** (2087 bytes
+  against 170 on average), and slower to enter than the text (0.57 s):
+  text names an abbreviation, `s7-value`, where a rep has its whole type;
+  abbreviations are what sharing is in text.
+- So **one rep a file** (`Header::reps`, `fixpt_reps::fill::combine`, its
+  root `fasl-types`): the definitions' types and the abbreviations' the
+  header names, what they share there once (50 KB for s7st against 75 KB
+  of text); each definition its place (`repof`), each abbreviation its
+  (`repalias`).
+- A definition's type is **imported alone, given the abbreviations its
+  type names** (`Def::types`), each that means what it meant (its digest):
+  where its type has an abbreviation's part, that part is the
+  abbreviation's own type, as its text read would make it, so that the
+  printer names it as a run from source does. (Imported all at once, two
+  equal abbreviations, `p1` and `p2`, were one node, and printed so.)
+- The checker written in FX-26 imports the file's types **once**
+  (`import-types`), and checks each definition by its types' ids
+  (`check-text-typed`, in one call).
+- **The stamps trusted**: each definition's stamp is made of its form's
+  text's digest and its type's (`stamp_of`), which the `.fasl` keeps
+  (`stampof`), with the write counts of the globals it reads, found as it
+  loads: 33 ms of printing and digesting gone.
+- **The check itself not trusted**: entering a definition unchecked saves
+  little more (its body is a stand-in, `%fasl-value`, checked at once; a
+  definition's cost is its bookkeeping, which an entry unchecked must do
+  too), measured at 0.40 s to 0.39 s, and would make a second place that
+  must do all a check does. So each definition is checked, by its rep.
+
+`FIXPT_FASL_VERIFY=1`: nothing kept trusted, each definition checked by its
+text and each stamp made as a run from source makes it, a load refused
+where one is not what the `.fasl` keeps; every program of
+`programs_give_the_same_from_fasls` gives the same so.
+
+s7st's warm start 0.45 s to 0.42 s; verified, 0.47 s. What is left of it
+is not types: the forms run from source each start, and the prelude's
+stage.
 
 ## Decided (the user's, 2026-11-01)
 
