@@ -58,6 +58,8 @@ mod x64;
 mod fx;
 pub use fx::{describe, fx_abandon, Each, FxCompile, FxEmitted, FxRequest};
 pub use x64::{fx26_direct_module, fx26_direct_module_sig, oracle as oracle_x64};
+mod fx_arm64;
+pub use fx_arm64::{fx26_direct_arm64_module, fx26_direct_arm64_module_sig, oracle as oracle_arm64};
 pub use reps::oracle as reps_oracle;
 use reps::{Convert, RawOp, Rep};
 

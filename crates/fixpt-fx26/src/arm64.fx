@@ -175,4 +175,103 @@
   (lambda (t words) (arm-sum3 #xB5000000 (arm-simm-at words 19 5) (arm-reg t))))
 (define arm-br (->* (int) int) (lambda (n) (arm-sum #xD61F0000 (arm-reg-at n 5))))
 (define arm-blr (->* (int) int) (lambda (n) (arm-sum #xD63F0000 (arm-reg-at n 5))))
-(define arm-ret int #xD65F03C0)))
+(define arm-ret int #xD65F03C0)
+
+;;; ------------------------------------------------------ the native convention's
+;;; What the native convention's compiler (`native-direct-arm64*.fx`, the
+;;; Rust `direct.rs`) uses besides: narrow and indexed memory, wide
+;;; immediates, division, shifts by a register, and floating point.
+
+;; The unscaled loads and stores of 32, 16 and 8 bits.
+(define arm-ldur-w arm-op3 (lambda (t n imm) (arm-mem9 #xB8400000 t n imm)))
+(define arm-ldurh arm-op3 (lambda (t n imm) (arm-mem9 #x78400000 t n imm)))
+(define arm-ldurb arm-op3 (lambda (t n imm) (arm-mem9 #x38400000 t n imm)))
+(define arm-sturh arm-op3 (lambda (t n imm) (arm-mem9 #x78000000 t n imm)))
+(define arm-sturb arm-op3 (lambda (t n imm) (arm-mem9 #x38000000 t n imm)))
+(define arm-stur-w arm-op3 (lambda (t n imm) (arm-mem9 #xB8000000 t n imm)))
+;; Indexed by `m`, scaled by the width.
+(define arm-ldr-x8 arm-op3 (lambda (t n m) (arm-n-t #xF8607800 (arm-reg-at m 16) n t)))
+(define arm-ldr-w4 arm-op3 (lambda (t n m) (arm-n-t #xB8607800 (arm-reg-at m 16) n t)))
+(define arm-ldrsw-4 arm-op3 (lambda (t n m) (arm-n-t #xB8A07800 (arm-reg-at m 16) n t)))
+(define arm-str-x8 arm-op3 (lambda (t n m) (arm-n-t #xF8207800 (arm-reg-at m 16) n t)))
+(define arm-str-w4 arm-op3 (lambda (t n m) (arm-n-t #xB8207800 (arm-reg-at m 16) n t)))
+
+;; By 4 KB pages; `adds`.
+(define arm-add-imm-pages arm-op3 (lambda (d n imm) (arm-imm12 #x91400000 d n imm)))
+(define arm-sub-imm-pages arm-op3 (lambda (d n imm) (arm-imm12 #xD1400000 d n imm)))
+(define arm-adds-imm arm-op3 (lambda (d n imm) (arm-imm12 #xB1000000 d n imm)))
+;; `add xd, xn, xm, lsl #s`.
+(define arm-add-lsl arm-op4
+  (lambda (d n m s)
+    (arm-check (arm-in? s 0 64) (arm-n-t #x8B000000 (arm-sum (arm-reg-at m 16) (arm-f s 10)) n d))))
+;; `cmp sp, xm`.
+(define arm-cmp-sp (->* (int) int) (lambda (m) (arm-sum #xEB2063FF (arm-reg-at m 16))))
+(define arm-eor arm-op3 (lambda (d n m) (arm-reg3 #xCA000000 d n m)))
+(define arm-and arm-op3 (lambda (d n m) (arm-reg3 #x8A000000 d n m)))
+(define arm-sdiv arm-op3 (lambda (d n m) (arm-reg3 #x9AC00C00 d n m)))
+(define arm-udiv arm-op3 (lambda (d n m) (arm-reg3 #x9AC00800 d n m)))
+(define arm-mul arm-op3 (lambda (d n m) (arm-reg3 #x9B007C00 d n m)))
+(define arm-smulh arm-op3 (lambda (d n m) (arm-reg3 #x9B407C00 d n m)))
+(define arm-lslv arm-op3 (lambda (d n m) (arm-reg3 #x9AC02000 d n m)))
+(define arm-lsrv arm-op3 (lambda (d n m) (arm-reg3 #x9AC02400 d n m)))
+(define arm-asrv arm-op3 (lambda (d n m) (arm-reg3 #x9AC02800 d n m)))
+(define arm-msub arm-op4
+  (lambda (d n m a) (arm-n-t #x9B008000 (arm-sum (arm-reg-at m 16) (arm-reg-at a 10)) n d)))
+;; `and xd, xn, #mask` of `width` ones from `lsb`, `width` < 64.
+(define arm-and-bits arm-op4
+  (lambda (d n lsb width)
+    (arm-check (and (>= lsb 0) (>= width 1) (<= (+ lsb width) 64) (< width 64))
+               (arm-n-t #x92400000 (arm-sum (arm-f (modulo (- 64 lsb) 64) 16) (arm-f (- width 1) 10))
+                        n d))))
+(define arm-lsl-imm arm-op3
+  (lambda (d n s)
+    (arm-check (arm-in? s 0 64)
+               (arm-n-t #xD3400000 (arm-sum (arm-f (modulo (- 64 s) 64) 16) (arm-f (- 63 s) 10))
+                        n d))))
+;; `adr xd, words` (as instructions), in reach of 21 bits of bytes.
+(define arm-adr arm-op2
+  (lambda (d words)
+    (let ((bytes (arm-simm (* 4 words) 21)))
+      (if (< bytes 0)
+          -1
+          (arm-sum3 (+ #x10000000 (arithmetic-shift (modulo bytes 4) 29))
+                    (arm-f (quotient bytes 4) 5) (arm-reg d))))))
+(define arm-nop int #xD503201F)
+
+;; The card of the word at `obj + off` marked (`arm64::card_mark`): `off`
+;; in reach of one `add` or `sub`.
+(define arm-card-mark
+  (subr (maxeff (alloc @k) (read @globals) spin) (int int int int int int) arm-code)
+  (lambda (obj off state cards t1 t2)
+    (cons (if (< off 0) (arm-sub-imm t1 obj (- 0 off)) (arm-add-imm t1 obj off))
+          (cons (arm-lsr-imm t1 t1 9)
+                (cons (arm-ldr t2 state cards)
+                      (cons (arm-add t2 t2 t1)
+                            (cons (arm-movz t1 1 0) (cons (arm-strb t1 t2) nil))))))))
+
+;; Floating point: `d` registers numbered as `x` ones, each a double.
+(define arm-fmov-to-d arm-op2 (lambda (d n) (arm-n-t #x9E670000 0 n d)))
+(define arm-fmov-from-d arm-op2 (lambda (d n) (arm-n-t #x9E660000 0 n d)))
+(define arm-fp2 (->* (int int int int) int)
+  (lambda (op d n m) (arm-n-t (+ #x1E600800 (arithmetic-shift op 12)) (arm-reg-at m 16) n d)))
+(define arm-fadd arm-op3 (lambda (d n m) (arm-fp2 2 d n m)))
+(define arm-fsub arm-op3 (lambda (d n m) (arm-fp2 3 d n m)))
+(define arm-fmul arm-op3 (lambda (d n m) (arm-fp2 0 d n m)))
+(define arm-fdiv arm-op3 (lambda (d n m) (arm-fp2 1 d n m)))
+(define arm-fp1 (->* (int int int) int)
+  (lambda (op d n) (arm-n-t (+ #x1E604000 (arithmetic-shift op 15)) 0 n d)))
+(define arm-fabs arm-op2 (lambda (d n) (arm-fp1 1 d n)))
+(define arm-fneg arm-op2 (lambda (d n) (arm-fp1 2 d n)))
+(define arm-fsqrt arm-op2 (lambda (d n) (arm-fp1 3 d n)))
+(define arm-frintn arm-op2 (lambda (d n) (arm-fp1 8 d n)))
+(define arm-frintp arm-op2 (lambda (d n) (arm-fp1 9 d n)))
+(define arm-frintm arm-op2 (lambda (d n) (arm-fp1 10 d n)))
+(define arm-frintz arm-op2 (lambda (d n) (arm-fp1 11 d n)))
+(define arm-fcmp arm-op2 (lambda (n m) (arm-sum3 #x1E602000 (arm-reg-at m 16) (arm-reg-at n 5))))
+(define arm-scvtf arm-op2 (lambda (d n) (arm-n-t #x9E620000 0 n d)))
+(define arm-fcvtzs arm-op2 (lambda (d n) (arm-n-t #x9E780000 0 n d)))
+;; A double's instruction as a single's: its type bit cleared.
+(define arm-single (->* (int) int)
+  (lambda (w) (if (< w 0) -1 (if (= (bitwise-and w #x400000) 0) w (- w #x400000)))))
+(define arm-fmov-to-s arm-op2 (lambda (d n) (arm-n-t #x1E270000 0 n d)))
+(define arm-fmov-from-s arm-op2 (lambda (d n) (arm-n-t #x1E260000 0 n d)))))
