@@ -1258,8 +1258,11 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 a.e(cmp(X10, X15));
                 a.b_cond(Cond::Eq, cellular);
                 a.e(mov(X11, X10));
+                // Its code, if compiled (its entry a code bloblet, which
+                // runs at its reference plus `code_delta`).
                 a.e(ldur(X15, X11, field_off(WORD_ENTRY)));
-                a.cbz(X15, cellular);
+                a.e(tst_low(X15, 3));
+                a.b_cond(Cond::Eq, cellular);
                 // Register code: the arguments stay where they are. A call
                 // pushes a return entry marked as one `blr` made (its `8k`
                 // negated), so that the callee returns by `ret`, with the
@@ -1270,7 +1273,8 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     a.ip_at(WORD_CELL0 + next);
                     a.push_return_marked();
                 }
-                a.e(ldr_reg(X16, TABLE, X15));
+                a.e(ldr(X16, ST, off(offset_of!(State, code_delta))));
+                a.e(add(X16, X15, X16));
                 a.e(mov(CLO, W));
                 a.e(mov(CUR, X10));
                 if tail {
@@ -1434,9 +1438,7 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
 /// With `FIXPT_REGCODE_DUMP=file`, each register word's machine code is
 /// appended to `file`, for looking at: a line of its name and where it
 /// starts in the code space, then its instructions, one to a line, as
-/// `.inst` directives an assembler takes back. Unused until the arm64
-/// machine takes a word's code from its entry (`TODO.md` §210).
-#[allow(dead_code)]
+/// `.inst` directives an assembler takes back.
 fn dump(heap: &Heap, rw: Value, at: usize, code: &[u32]) {
     let Ok(file) = std::env::var("FIXPT_REGCODE_DUMP") else { return };
     let name = heap.symbol_name(heap.bloblet_slot(rw, WORD_NAME));
@@ -1452,8 +1454,8 @@ fn dump(heap: &Heap, rw: Value, at: usize, code: &[u32]) {
 
 /// The entry a stack-code caller takes into a word with register code: the
 /// `n` arguments from its frame into registers, the frame dropped, and on
-/// to the register word's entry, native slot `slot`.
-pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u32> {
+/// to the register word's code, its entry.
+pub fn assemble_adapter(n: usize) -> Vec<u32> {
     let mut a = Asm::new();
     a.in_regcode = true;
     for i in 0..n {
@@ -1462,14 +1464,9 @@ pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u32> {
     a.e(add_imm(DSP, FP, 8));
     a.e(mov(X11, CUR));
     a.e(ldur(CUR, X11, field_off(WORD_TWIN)));
-    // Past 4096 slots, the offset is too far for one `ldr`.
-    let off = 8 * slot as u64;
-    if off < 32768 {
-        a.e(ldr(X16, TABLE, off as u32));
-    } else {
-        a.es(&mov_imm64(X16, off));
-        a.e(ldr_reg(X16, TABLE, X16));
-    }
+    a.e(ldur(X16, CUR, field_off(WORD_ENTRY)));
+    a.e(ldr(X10, ST, off(offset_of!(State, code_delta))));
+    a.e(add(X16, X16, X10));
     // No `blr` made this call: the link the callee keeps is a fixnum, 0.
     a.e(mov(LR, XZR));
     a.e(br(X16));
@@ -1520,11 +1517,10 @@ pub fn fx26_regs_module() -> String {
 impl NativeMachine {
     /// Compile `word`'s register code, if it has some and it is not yet
     /// compiled: the register word's code its entry, and `word` entered
-    /// through an adapter to it. Whether it did. Only on x86_64 for now, as
-    /// [`compile_word`](NativeMachine::compile_word).
+    /// through an adapter to it. Whether it did.
     pub fn compile_register_word(&mut self, heap: &mut Heap, word: Value) -> Result<bool, String> {
         let rw = heap.bloblet_slot(word, WORD_TWIN);
-        if !heap.is_register_word(rw) || heap.word_code(rw).is_some() || !cfg!(target_arch = "x86_64") {
+        if !heap.is_register_word(rw) || heap.word_code(rw).is_some() {
             return Ok(false);
         }
         // A variadic procedure's register code (`vargs`) is for native code,
@@ -1534,10 +1530,19 @@ impl NativeMachine {
             self.compile_word(heap, word)?;
             return Ok(true);
         }
-        let (code, resume) = super::x64::assemble_register_word(heap, rw)?;
-        self.install_bytes(heap, rw, &code, &resume)?;
-        if let Some(c) = heap.word_code(rw) {
-            super::x64::dump(heap, rw, heap.code_exec_address(c), &code);
+        let x86 = cfg!(target_arch = "x86_64");
+        if x86 {
+            let (code, resume) = super::x64::assemble_register_word(heap, rw)?;
+            self.install_bytes(heap, rw, &code, &resume)?;
+            if let Some(c) = heap.word_code(rw) {
+                super::x64::dump(heap, rw, heap.code_exec_address(c), &code);
+            }
+        } else {
+            let (code, resume) = assemble_register_word(heap, rw, [0, 0])?;
+            self.install(heap, rw, &code, &resume)?;
+            if let Some(c) = heap.word_code(rw) {
+                dump(heap, rw, heap.code_exec_address(c), &code);
+            }
         }
         let n = heap.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;
         // Past `REGS` arguments stack code runs the word as stack code:
@@ -1549,8 +1554,11 @@ impl NativeMachine {
         let cells = heap.bloblet_count_from(word, WORD_CELL0);
         let mut starts = vec![-1i64; cells];
         starts[0] = 0;
-        let adapter = super::x64::assemble_adapter(n);
-        self.install_bytes(heap, word, &adapter, &starts)?;
+        if x86 {
+            self.install_bytes(heap, word, &super::x64::assemble_adapter(n), &starts)?;
+        } else {
+            self.install(heap, word, &assemble_adapter(n), &starts)?;
+        }
         Ok(true)
     }
 }

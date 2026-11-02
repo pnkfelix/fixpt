@@ -23,8 +23,13 @@
 //!        ldr  x10, [table, x9]   ; n<<3 is already the byte offset
 //!        br   x10
 //!    1:  add  x11, base, x9      ; a word: suffix + 4
-//!        ldur x10, [x11, #-20]   ; its entry, a fixnum routine number
+//!        ldur x10, [x11, #-20]   ; its entry
+//!        tst  x10, #7            ; a fixnum is a routine's number
+//!        b.ne 2f
 //!        ldr  x10, [table, x10]
+//!        br   x10
+//!    2:  ldr  x16, [st, #code_delta] ; else its code, a code bloblet
+//!        add  x10, x10, x16
 //!        br   x10
 //! ```
 //!
@@ -51,7 +56,7 @@ use crate::arm64::*;
 use crate::codespace::{CodeSpace, Offset};
 use fixpt_engine::cellular::{DS_LIMIT, MARK_MARK, PROMPT_MARK, RS_LIMIT, Trap};
 use fixpt_heap::layout::kind;
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, COMPILED_RESUME, KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME};
 use fixpt_heap::layout::{H_FIELDS, T_DISTANCE};
 use fixpt_heap::value::{TAG_BLOBLET, TAG_PAIR, TAG_TRAILER};
 use fixpt_heap::{Heap, Value};
@@ -306,11 +311,22 @@ impl Asm {
     // --------------------------------------------------- machine sequences
 
     /// Dispatch on the cell in `x9`: the tail of `NEXT`, and how a word
-    /// given to `execute` or to the machine is run.
+    /// given to `execute` or to the machine is run. Leaves its suffix + 4
+    /// in `x11`, where `docol` and a compiled word's code take it. Its
+    /// entry is a routine's number (`docol`'s, for a word of cells), or its
+    /// compiled code, a code bloblet, which runs at its reference plus
+    /// `code_delta`.
     fn run_word_in_w(&mut self) {
+        let compiled = self.label();
         self.e(add(X11, BASE, W));
         self.e(ldur(X10, X11, field_off(WORD_ENTRY)));
+        self.e(tst_low(X10, 3));
+        self.b_cond(Cond::Ne, compiled);
         self.e(ldr_reg(X10, TABLE, X10));
+        self.e(br(X10));
+        self.bind(compiled);
+        self.e(ldr(X16, ST, off(offset_of!(State, code_delta))));
+        self.e(add(X10, X10, X16));
         self.e(br(X10));
     }
 
@@ -325,17 +341,27 @@ impl Asm {
 
     /// On from where `CUR` and the ip now are, `d` (8k) in `dreg`: into the
     /// word's machine code there, if it has some, else `NEXT`. Where
-    /// control lands in another word: a call, a return.
+    /// control lands in another word: a call, a return. Its code's table
+    /// of where it resumes is in its suffix, after the code, at the byte
+    /// its field `COMPILED_RESUME`'s bits are: by `8k`, 0, or 1 more than
+    /// the byte of the code where it resumes (`Heap::make_word_code`).
     fn enter_cur(&mut self, dreg: Reg) {
         let cellular = self.label();
         self.e(add(X11, BASE, CUR));
         self.e(ldur(X10, X11, field_off(WORD_ENTRY)));
-        self.cbz(X10, cellular);
-        self.e(ldr(X16, ST, off(offset_of!(State, resume))));
-        self.e(ldr_reg(X16, X16, X10));
+        self.e(tst_low(X10, 3));
+        self.b_cond(Cond::Eq, cellular);
+        // The entry is the suffix + 4: the table's entry for `8k` is at
+        // `entry + table + 8k - 4`.
+        self.e(ldur(X16, X10, field_off(COMPILED_RESUME)));
+        self.e(add(X16, X16, dreg));
+        self.e(sub_imm(X16, X16, 4));
+        self.e(ldr_reg(X16, X10, X16));
         self.cbz(X16, cellular);
-        self.e(ldr_reg(X16, X16, dreg));
-        self.cbz(X16, cellular);
+        self.e(add(X16, X10, X16));
+        self.e(ldr(X10, ST, off(offset_of!(State, code_delta))));
+        self.e(add(X16, X16, X10));
+        self.e(sub_imm(X16, X16, 1));
         self.e(br(X16));
         self.bind(cellular);
         self.next();
@@ -1734,7 +1760,12 @@ pub fn machine_code_text(heap: &Heap, word: Value) -> Option<String> {
     if cfg!(target_arch = "x86_64") {
         return Some(format!("machine code, {} bytes at {at:#x}:\n{}", code.len(), crate::x86_64::disasm::listing(&code)));
     }
-    let words: Vec<u32> = code.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().expect("four bytes"))).collect();
+    let mut words: Vec<u32> = code.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().expect("four bytes"))).collect();
+    // The table is word-aligned: an odd count of instructions is padded
+    // with a zero, which no encoder makes.
+    if words.len() % 2 == 0 && words.last() == Some(&0) {
+        words.pop();
+    }
     let mut out = format!("machine code, {} instructions at {at:#x}:\n", words.len());
     for (i, w) in words.iter().enumerate() {
         out.push_str(&format!("  {i:>5}: {w:08x}  {}\n", crate::arm64::disasm::disassemble(*w, i as i64)));
@@ -1809,10 +1840,7 @@ impl NativeMachine {
     /// that code (step 11a). The code does what the cells do, routine for
     /// routine, with the ip kept in step, so that it and cellular code mix
     /// freely; branches become jumps, and the dispatch between cells goes.
-    /// A word already compiled is left alone. Only on x86_64 for now: the
-    /// arm64 machine, which dispatched by a number in a table of its own,
-    /// is yet to take a word's code from its entry (`TODO.md` §210), and
-    /// runs every word's cells.
+    /// A word already compiled is left alone.
     pub fn compile_word(&mut self, heap: &mut Heap, word: Value) -> Result<(), String> {
         if heap.word_code(word).is_some() {
             return Ok(());
@@ -1820,11 +1848,12 @@ impl NativeMachine {
         if !heap.word_runs_cells(word) {
             return Err("not a word made of cells".into());
         }
-        if !cfg!(target_arch = "x86_64") {
-            return Ok(());
+        if cfg!(target_arch = "x86_64") {
+            let (code, starts) = x64::assemble_word(heap, word)?;
+            return self.install_bytes(heap, word, &code, &starts);
         }
-        let (code, starts) = x64::assemble_word(heap, word)?;
-        self.install_bytes(heap, word, &code, &starts)
+        let (code, starts) = assemble_word(heap, word, [0, 0])?;
+        self.install(heap, word, &code, &starts)
     }
 
     /// Make `code`, arm64 instructions, `word`'s entry, as

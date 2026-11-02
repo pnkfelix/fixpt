@@ -226,14 +226,23 @@
       (n-e (arm-add-imm n-x16 n-x16 8))
       (n-e (arm-stur n-x16 n-x11 (n-field-off global-writes))))))
 
-;; Dispatch on the cell in x9: the tail of `NEXT`.
+;; Dispatch on the cell in x9: the tail of `NEXT`. Its entry is a
+;; routine's number, or its compiled code, a code bloblet, run at its
+;; reference plus `code_delta`.
 (define n-run-word-in-w (->* () unit)
   (lambda ()
-    (begin
-      (n-e (arm-add n-x11 n-base n-w))
-      (n-e (arm-ldur n-x10 n-x11 (n-field-off n-word-entry)))
-      (n-e (arm-ldr-reg n-x10 n-table n-x10))
-      (n-e (arm-br n-x10)))))
+    (let ((compiled (n-label)))
+      (begin
+        (n-e (arm-add n-x11 n-base n-w))
+        (n-e (arm-ldur n-x10 n-x11 (n-field-off n-word-entry)))
+        (n-e (arm-tst-low n-x10 3))
+        (n-b-cond 1 compiled)
+        (n-e (arm-ldr-reg n-x10 n-table n-x10))
+        (n-e (arm-br n-x10))
+        (n-bind compiled)
+        (n-e (arm-ldr n-x16 n-st n-st-code-delta))
+        (n-e (arm-add n-x10 n-x10 n-x16))
+        (n-e (arm-br n-x10))))))
 
 (define n-next (->* () unit)
   (lambda ()
@@ -249,19 +258,25 @@
 (define n-cont-code (->* () unit)
   (lambda () (if (< (get n-cont) 0) (n-next) (n-b (get n-cont)))))
 
-;; On from where CUR and the ip now are, `d` in `dreg`.
+;; On from where CUR and the ip now are, `d` in `dreg`: by the table of
+;; where its code resumes, in its code bloblet's suffix, if it has some.
 (define n-enter-cur (->* (int) unit)
   (lambda (dreg)
     (let ((cellular (n-label)))
       (begin
         (n-e (arm-add n-x11 n-base n-cur))
         (n-e (arm-ldur n-x10 n-x11 (n-field-off n-word-entry)))
-        (n-cbz n-x10 cellular)
-        (n-e (arm-ldr n-x16 n-st n-st-resume))
-        (n-e (arm-ldr-reg n-x16 n-x16 n-x10))
+        (n-e (arm-tst-low n-x10 3))
+        (n-b-cond 0 cellular)
+        (n-e (arm-ldur n-x16 n-x10 (n-field-off n-compiled-resume)))
+        (n-e (arm-add n-x16 n-x16 dreg))
+        (n-e (arm-sub-imm n-x16 n-x16 4))
+        (n-e (arm-ldr-reg n-x16 n-x10 n-x16))
         (n-cbz n-x16 cellular)
-        (n-e (arm-ldr-reg n-x16 n-x16 dreg))
-        (n-cbz n-x16 cellular)
+        (n-e (arm-add n-x16 n-x10 n-x16))
+        (n-e (arm-ldr n-x10 n-st n-st-code-delta))
+        (n-e (arm-add n-x16 n-x16 n-x10))
+        (n-e (arm-sub-imm n-x16 n-x16 1))
         (n-e (arm-br n-x16))
         (n-bind cellular)
         (n-next)))))

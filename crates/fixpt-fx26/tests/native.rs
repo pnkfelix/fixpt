@@ -101,8 +101,8 @@ fn every_word_of_the_front_end_as_the_rust_compiler_compiles_it() {
 /// (`fixpt_native::cellular::assemble_register_word`), its oracle: for
 /// every register word of the front end compiled with register code, the
 /// same instructions and the same resume points, or both refusing it; and
-/// the adapters, for every count of arguments, and slots past the reach of
-/// one `ldr`. Any machine compiles for arm64.
+/// the adapters, for every count of arguments. Any machine compiles for
+/// arm64.
 fn compare_registers(limit: usize) {
     use fixpt_heap::layout::cellular::WORD_TWIN;
     let mut s = common::front_end_session();
@@ -157,18 +157,16 @@ fn compare_registers(limit: usize) {
                 (g, w) => wrong.push(format!("FX-26 {:?}, Rust {:?}", g.as_ref().err(), w.as_ref().err())),
             }
         }
-        // The adapters: slot 4096 and past need more than one `ldr`.
+        // The adapters.
         for n in 0..=fixpt_heap::layout::regcode::REGS {
-            for slot in [0usize, 1, 37, 300, 4095, 4096, 70000] {
-                let want: Vec<i64> = fixpt_native::cellular::assemble_adapter(n, slot).into_iter().map(i64::from).collect();
-                let got = sc.scope(|one| {
-                    let (a, b) = (one.make(|_| Value::fixnum(n as i64)), one.make(|_| Value::fixnum(slot as i64)));
-                    let r = one.call_global(&format!("{READER_PREFIX}native-adapter-arm64"), &[a, b]).expect("runs");
-                    one.view(|v| v.get(r).list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>())
-                });
-                if got != want {
-                    wrong.push(format!("the adapter of {n} for slot {slot}: FX-26 {got:x?}, Rust {want:x?}"));
-                }
+            let want: Vec<i64> = fixpt_native::cellular::assemble_adapter(n).into_iter().map(i64::from).collect();
+            let got = sc.scope(|one| {
+                let a = one.make(|_| Value::fixnum(n as i64));
+                let r = one.call_global(&format!("{READER_PREFIX}native-adapter-arm64"), &[a]).expect("runs");
+                one.view(|v| v.get(r).list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>())
+            });
+            if got != want {
+                wrong.push(format!("the adapter of {n}: FX-26 {got:x?}, Rust {want:x?}"));
             }
         }
     });

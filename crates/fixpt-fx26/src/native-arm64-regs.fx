@@ -477,12 +477,15 @@
         (n-e (arm-cmp n-x10 n-x15))
         (n-b-cond ar-eq cellular)
         (n-e (arm-mov n-x11 n-x10))
+        ;; Its code, if compiled: its entry, a code bloblet.
         (n-e (arm-ldur n-x15 n-x11 (n-field-off n-word-entry)))
-        (n-cbz n-x15 cellular)
+        (n-e (arm-tst-low n-x15 3))
+        (n-b-cond ar-eq cellular)
         ;; Register code: the arguments stay where they are; a call pushes
         ;; a return entry marked as one `blr` made.
         (if tail #u (begin (ar-ip-at (+ n-word-cell0 next)) (ar-push-return-marked)))
-        (n-e (arm-ldr-reg n-x16 n-table n-x15))
+        (n-e (arm-ldr n-x16 n-st n-st-code-delta))
+        (n-e (arm-add n-x16 n-x15 n-x16))
         (n-e (arm-mov n-clo n-w))
         (n-e (arm-mov n-cur n-x10))
         (if tail
@@ -754,27 +757,26 @@
 
 ;; The entry a stack-code caller takes into a word with register code
 ;; (`assemble_adapter`): the `n` arguments from its frame into registers,
-;; the frame dropped, and on to native slot `slot`, a link of 0.
+;; the frame dropped, and on to the register word's code, its entry, a
+;; link of 0.
 (define ar-adapter-args (subr (maxeff ar-assembles spin) (int int) unit)
   (lambda (i n)
     (if (= i n)
         #u
         (begin (n-e (arm-ldur (ar-reg (+ i 1)) n-fp (- 0 (* 8 i)))) (ar-adapter-args (+ i 1) n)))))
-(define native-adapter-arm64 (subr (maxeff ar-assembles spin) (int int) ar-out)
-  (lambda (n slot)
-    (let ((off (* 8 slot)))
-      (begin
-        (n-reset)
-        (ar-adapter-args 0 n)
-        (n-e (arm-add-imm n-dsp n-fp 8))
-        (n-e (arm-mov n-x11 n-cur))
-        (n-e (arm-ldur n-cur n-x11 (n-field-off word-twin)))
-        ;; Past 4096 slots, the offset is too far for one `ldr`.
-        (if (< off 32768)
-            (n-e (arm-ldr n-x16 n-table off))
-            (begin (n-value n-x16 off) (n-e (arm-ldr-reg n-x16 n-table n-x16))))
-        ;; No `blr` made this call: the link the callee keeps is a fixnum, 0.
-        (n-e (arm-mov a-lr a-xzr))
-        (n-e (arm-br n-x16))
-        (n-finish)))))
+(define native-adapter-arm64 (subr (maxeff ar-assembles spin) (int) ar-out)
+  (lambda (n)
+    (begin
+      (n-reset)
+      (ar-adapter-args 0 n)
+      (n-e (arm-add-imm n-dsp n-fp 8))
+      (n-e (arm-mov n-x11 n-cur))
+      (n-e (arm-ldur n-cur n-x11 (n-field-off word-twin)))
+      (n-e (arm-ldur n-x16 n-cur (n-field-off n-word-entry)))
+      (n-e (arm-ldr n-x10 n-st n-st-code-delta))
+      (n-e (arm-add n-x16 n-x16 n-x10))
+      ;; No `blr` made this call: the link the callee keeps is a fixnum, 0.
+      (n-e (arm-mov a-lr a-xzr))
+      (n-e (arm-br n-x16))
+      (n-finish))))
 )))

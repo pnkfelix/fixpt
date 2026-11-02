@@ -36,11 +36,11 @@ pub struct State {
     /// runs on a bare heap, in which case the routines it has no machine
     /// code for cannot call the runtime's primitives.
     pub rt: u64,
-    /// The arm64 machine's, from when a compiled word's entry was a number:
-    /// each number's table of where its code resumes. Always 0 now; a
-    /// compiled word's table is in its code (`Heap::make_word_code`), and
-    /// the arm64 machine compiles nothing until it reads it there
-    /// (`TODO.md` §210).
+    /// From when a compiled word's entry was a number: each number's table
+    /// of where its code resumes. Unused, always 0: a compiled word's
+    /// table is in its code (`Heap::make_word_code`), on either machine
+    /// (`TODO.md` §210). Kept so that the fields after it stay where the
+    /// FX-26 compilers' layouts say.
     pub resume: u64,
     /// Where the heap's `top` is, in words from the base, and how far
     /// machine code may take it before calling in to allocate

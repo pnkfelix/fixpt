@@ -317,11 +317,6 @@ fn assemble_twin_by_fx26(
 ) -> Result<bool, String> {
     use fixpt_heap::layout::cellular::{WORD_CELL0, WORD_TWIN};
     let x64 = cfg!(target_arch = "x86_64");
-    // Only on x86_64 for now: the arm64 machine is yet to take a word's code
-    // from its entry (`TODO.md` §210).
-    if !x64 {
-        return Ok(false);
-    }
     let mut twin = None;
     s.make(|m| {
         let w = m.get(w);
@@ -368,7 +363,7 @@ fn assemble_twin_by_fx26(
         return Ok(false);
     }
     let n = s.make(|_| Value::fixnum(n));
-    let adapter = s.call_global(&format!("{READER_PREFIX}native-adapter-x64"), &[n]).map_err(|e| e.to_string())?;
+    let adapter = s.call_global(&format!("{READER_PREFIX}{}", if x64 { "native-adapter-x64" } else { "native-adapter-arm64" }), &[n]).map_err(|e| e.to_string())?;
     let (adapter, _) = machine_bytes(s.view(|v| ints_of(Some(v.get(adapter)))), Vec::new());
     let mut starts = vec![-1i64; cells];
     starts[0] = 0;

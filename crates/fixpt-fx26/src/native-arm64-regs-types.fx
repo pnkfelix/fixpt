@@ -97,7 +97,7 @@
 (define-type native-arm64-regs-sig
   (moduleof (val native-assemble-arm64-regs
                  (subr (maxeff ar-assembles spin) (tword int int int) ar-regs-assembled))
-            (val native-adapter-arm64 (subr (maxeff ar-assembles spin) (int int) ar-out))))
+            (val native-adapter-arm64 (subr (maxeff ar-assembles spin) (int) ar-out))))
 
 ;; What `native-arm64-regs.fx` uses of `native-arm64-regs-ops.fx`: the
 ;; helpers the two share, register code's fast paths, and what it does
