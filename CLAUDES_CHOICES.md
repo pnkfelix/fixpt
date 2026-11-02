@@ -3498,6 +3498,27 @@ procedure, x86_64 now and arm64 later, its slots broken if need be.
 - **arm64 compiles nothing meanwhile**, rather than install code its
   machine would jump to by a number: correct, slower, until it is ported.
 
+Ported to arm64 the same day:
+- **`ldr x16, [st, #code_delta]; add; br`**: arm64 adds no memory
+  operand, so a scratch register more. At a register-code call it is
+  `x16`, the target's register, loaded after the return entry is pushed
+  (which may need `x16`); in `enter_cur`, `x10` once the entry is spent,
+  leaving `x11` as it was (the word's suffix + 4); in the adapter, `x10`,
+  no argument's.
+- **The table read as `ldr [entry, T + 8k - 4]`**: the register-offset
+  load has no displacement, so the 4 of the entry's tag is taken from the
+  offset (`sub`), and the 1 the table adds from the target, as x86_64's
+  `-4` and `-1` displacements do; the table's format is the heap's, one
+  for both machines.
+- **`far` left in place**: the code reaches the trap and exit through
+  the state already, and the parameter of `assemble_word`,
+  `assemble_register_word` and their FX-26 twins is unused; taking it out
+  is a change of their signatures, the conductor's and the tests', and of
+  no bytes.
+- **`machine_code_text` drops a trailing zero word**: the code's length
+  is not kept, only the table's word-aligned start, and arm64 code of an
+  odd count of instructions is padded with a 0, which no encoder makes.
+
 ## Heist's R4 findings (2026-11-01; `TODO.md` §211, 2–5)
 
 - **`(maxeff E)` at the desugaring, not kinds at `proj`**: the stage

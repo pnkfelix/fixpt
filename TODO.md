@@ -4906,13 +4906,12 @@ offsets; register code calls a twin's entry, and an adapter jumps to it;
 the machine keeps nothing of a word (no slots, no copying collection), its
 code space its own code alone. `.fasl`s and the front end's caches let the
 code go. `docs/research/code-stubs.md`, "A compiled word's code in the code
-area too", with what it measured. **Left**:
-- **arm64** (the user's): its machine compiles nothing meanwhile and runs
-  every word's cells. `generate`'s `NEXT` and `enter_cur`, `regcode.rs`'s
-  calls and `assemble_adapter`, `native.fx` and `native-arm64-regs.fx`,
-  as x86_64's (`cellular/x64.rs`, `x64/regcode.rs`, `native-x64.fx`,
-  `native-x64-regs.fx`); then `compile_word`, `compile_register_word`,
-  `install_bytes` and `syn.rs`'s register code there, which decline now.
+area too", with what it measured. **Done on arm64 (2026-11-01)**, the
+same way: `generate`'s `NEXT`, `execute` and `enter_cur`, register code's
+calls and `assemble_adapter`, in Rust and in `native.fx` and
+`native-arm64-regs.fx`, the oracles agreeing; it compiles again. The
+`far` that `assemble_word`, `assemble_register_word` and their FX-26
+twins take is still there, unused. **Left**:
 - **`docol` a code bloblet too**, so that every word's entry is code and
   `NEXT` need not test the tag (what compiled fib's calls pay, 0.77 to
   0.85 ns a cell); and, the user's further aim, one entry for native and

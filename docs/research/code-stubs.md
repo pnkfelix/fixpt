@@ -299,10 +299,11 @@ procedure's code field is (`layout::cellular`, `Heap::make_word_code`):
   3 ms slower for mapping it; whether a cellular machine's start would
   gain from keeping it is not measured.
 
-The arm64 machine is not ported: it compiles nothing (`compile_word` and
-the rest decline there) and runs every word's cells, until its `NEXT`,
-`enter_cur`, register code's calls and adapter, and `native.fx` and
-`native-arm64-regs.fx`, take the entry as x86_64's do.
+The arm64 machine, ported the same day, does the same: its `NEXT`,
+`execute`, `enter_cur`, register code's calls and adapter, and
+`native.fx` and `native-arm64-regs.fx`, take the entry as x86_64's do,
+`code_delta` loaded into a scratch register (arm64 adds no memory
+operand). Until then it compiled nothing and ran every word's cells.
 
 Measured (x86_64, release, both builds alternated): `cellular_bench`'s
 fib 27 1.21 to 1.24 ns a cell run as cells, 0.77 to 0.85 compiled (its
@@ -312,3 +313,9 @@ on register code (`fx-regs-rsjit-cellcc`, `fx-regs-fxjit-cellcc`) 38 to
 34 ms, a call now `call reg` to the twin's code; compiled cells
 (`fx-cells-rsjit-cellcc`) 75–83 to 76–77 ms; the default machine and its
 start as they were.
+
+Measured on arm64 (the Mac, release, the two builds alternated six
+rounds; wall time through the CLI, some 25 ms of it the start, the same
+in both): fib 32 on register code (`fx-regs-rsjit-cellcc`) 67–69 to
+41–42 ms, compiled cells (`fx-cells-rsjit-cellcc`) 67–70 to 61–64 ms,
+against the cells the unported machine ran.

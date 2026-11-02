@@ -4492,6 +4492,15 @@ of a word. Register code 38 to 34 ms on fib 32; compiled cells' calls
 some 10% dearer (the entry's tag tested). The arm64 machine compiles
 nothing until it is ported.
 
+## 2026-11-01: the same on arm64 (§210, the user's)
+
+The arm64 machine takes a compiled word's code from its entry too:
+`NEXT`, `execute`, `enter_cur`, register code's calls and its adapter, in
+Rust and in `native.fx` and `native-arm64-regs.fx`, whose oracles agree
+on every word (6335) and register word (6332) of the front end. So it
+compiles again, which it had stopped doing: fib 32 through the CLI 67 to
+41 ms on register code, 68 to 62 on compiled cells, start included.
+
 ## 2026-11-01: four of Heist's R4 findings (§211, 2–5)
 
 From Heist's editor's `eval`: a `stage`'s or a session's effect may be a
