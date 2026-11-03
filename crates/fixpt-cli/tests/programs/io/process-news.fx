@@ -12,11 +12,14 @@
   ;; News taken until `left` processes have ended, or the deadline passes.
   (lambda (st left deadline)
     (if (= left 0) st
+        ;; Its status asked first: it has ended once its output is all read, not taken, so
+        ;; the rest is taken after.
         (pselect ((process-news) p
-                   (let* ((text (process-output p))
+                   (let* ((now (process-status p))
+                          (text (process-output p))
                           (st (product (texts (nth-set (extract st texts) p text))
                                        (ended (extract st ended)))))
-                     (tagcase (process-status p)
+                     (tagcase now
                        (running u (until-ended st left deadline))
                        (else y (until-ended (product (texts (extract st texts))
                                                      (ended (cons p (extract st ended))))

@@ -3,10 +3,12 @@
 ;; given input, their output (standard output and error, one stream) read
 ;; until they end; and one that cannot start.
 (define* wait-for (subr (maxeff (io process) (io clock) spin) (int string) string)
-  ;; What process `p` writes, after `acc`, until it ends; and how it ended.
+  ;; What process `p` writes, after `acc`, until it ends; and how it ended. Its status is
+  ;; asked first: it has ended once its output is all read, not taken, so the rest is taken
+  ;; after.
   (lambda (p acc)
-    (let ((more (string-append acc (process-output p))))
-      (tagcase (process-status p)
+    (let* ((now (process-status p)) (more (string-append acc (process-output p))))
+      (tagcase now
         (exited c (string-append more "exited " (int->string c)))
         (signalled s (string-append more "signalled " (int->string s)))
         (unknown u (string-append more "unknown"))
