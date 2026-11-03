@@ -1,4 +1,4 @@
-;; ! a int is expected here, and this is a counter..t
+;; ! argument 1 is a counter..t, where a int is expected
 ;; Outside the module its type is abstract: not an `int`.
 (define counter
   (module

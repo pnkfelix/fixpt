@@ -44,7 +44,7 @@ fn the_front_end_is_kept_native() {
     let kept: Vec<_> = std::fs::read_dir(cache.join("fixpt")).map(|d| d.flatten().map(|e| e.file_name()).collect()).unwrap_or_default();
     assert!(!kept.is_empty(), "nothing kept in {}", cache.display());
     assert!(first.0.0 && first.0.1.contains("10 : int"), "{}", first.0.1);
-    assert!(!first.1.0 && first.1.1.contains("a int is expected here"), "{}", first.1.1);
+    assert!(!first.1.0 && first.1.1.contains("argument 2 is a string, where a int is expected"), "{}", first.1.1);
     let register_words = |names: &str| names.lines().filter(|l| l.contains(" register word ")).count();
     assert!(register_words(&first.0.2) > 1000, "the first run ran no front end: {}", register_words(&first.0.2));
     for _ in 0..2 {

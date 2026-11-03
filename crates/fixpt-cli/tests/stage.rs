@@ -104,7 +104,7 @@ fn a_sessions_steps_name_its_modules_types() {
 /// them (`check-staged`).
 #[test]
 fn a_stage_leaves_nothing_bound_for_the_next() {
-    let want = "refused: a int is expected here, and this is a string\nrefused: unbound variable `y`\n3\nrefused: unbound variable `y`\n\
+    let want = "refused: argument 2 is a string, where a int is expected\nrefused: unbound variable `y`\n3\nrefused: unbound variable `y`\n\
                 refused: a int is expected here, and this is a (moduleof (val x int) (val bump (subr pure (int) int)))\n42\n";
     let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "kept.fx")))).collect();
     for (m, t) in runs {
@@ -178,10 +178,10 @@ defined a
 defined twice
 3
 not defined: the session changed since this definition was checked: check it again
-refused: a int is expected here, and this is a string
+refused: argument 2 is a string, where a int is expected
 refused: argument 1 is a int, where a (union nil (pairof ? ? r)) is expected
 defined a
-refused: `g` is broken, since `a` was redefined (a int is expected here, and this is a string): define it again to use it
+refused: `g` is broken, since `a` was redefined (argument 2 is a string, where a int is expected): define it again to use it
 ";
 
 /// Evidence (`docs/research/eval.md`, "Evidence"): `stage` within a

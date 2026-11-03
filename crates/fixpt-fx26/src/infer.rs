@@ -853,16 +853,16 @@ impl Checker {
             self.facts.standard_operator.insert(e, op);
             let mut eff = Effect::pure();
             let mut sizes = Vec::new();
-            for x in [*a, *b] {
+            for (i, x) in [*a, *b].into_iter().enumerate() {
                 // Only what has a type of its own is asked for it; anything
                 // else is told it is an int, as for any call.
                 if !self.natural_by_itself(x) {
-                    eff = eff.union(&self.check(x, self.int)?);
+                    eff = eff.union(&self.check(x, self.int).map_err(|err| self.as_argument(err, x, i))?);
                     sizes.push(None);
                     continue;
                 }
                 let (t, xe) = self.synth(x)?;
-                self.expect(x, t, self.int)?;
+                self.expect(x, t, self.int).map_err(|err| self.as_argument(err, x, i))?;
                 eff = eff.union(&xe);
                 sizes.push(match (self.arena.exp_at(x), self.arena.get(self.arena.resolve(t))) {
                     (Exp::Int(k), _) if *k >= 0 => Some(Size::lit(*k)),

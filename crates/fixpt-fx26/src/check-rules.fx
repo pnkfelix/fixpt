@@ -296,23 +296,22 @@
            (let ((r (k-nlist-cons x args expected)))
              (if (null? r) (k-synth-app-plain x f args expected) (car r))))
           (else (k-path-te x (k-sized x (k-synth-app-plain x f args expected))))))))))
-  ;; `+` and `-` of naturals: a natural, of a size when both are known. Only
-  ;; what has a type of its own is asked for it; anything else is told it
-  ;; is an int, as for any call.
+  ;; `+` and `-` of naturals: a natural, of a size when both are known. Only what has a type of its
+  ;; own is asked for it; anything else is told it is an int, a wrong one named, as for any call.
   (k-nat-arith (->* (kx string kxs) k-te)
     (lambda (x op args)
-      (let* ((ra (k-nat-operand (car args)))
-             (rb (k-nat-operand (car (cdr args))))
+      (let* ((ra (k-nat-operand (car args) 0)) (rb (k-nat-operand (car (cdr args)) 1))
              (za (extract ra 2)) (zb (extract rb 2))
              (sz (k-nat-arith-size op za zb))
              (t (if (null? sz) k-int (k-ty-new (ty-nat (car sz))))))
         (k-te t (k-union (extract ra 1) (extract rb 1))))))
-  (k-nat-operand (->* (kx) (productof (1 k-eff) (2 k-maybe-size)))
-    (lambda (x)
+  (k-nat-operand (->* (kx int) (productof (1 k-eff) (2 k-maybe-size)))
+    (lambda (x i)
       (if (not (k-natural-by-itself? x))
-          (product (1 (k-check x k-int)) (2 (the k-maybe-size nil)))
+          (product (1 (k-check-argument x k-int i)) (2 (the k-maybe-size nil)))
           (let* ((r (k-synth x)) (t (extract r 1)))
-            (begin (k-expect x t k-int) (product (1 (extract r 2)) (2 (k-operand-size x t))))))))
+            (begin (k-as-argument (lambda () (begin (k-expect x t k-int) r)) x i)
+                   (product (1 (extract r 2)) (2 (k-operand-size x t))))))))
   ;; `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where `length-is?`
   ;; has just found it so; nowhere else.
   (k-certify-length (->* (kx kxs) k-te)
@@ -446,10 +445,11 @@
           (k-vapp-args (cdr args) t (+ i 1) (k-union e (k-check-argument (car args) t i))))))
   ;; An argument that failed to check is reported as that argument.
   (k-check-argument (->* (kx int int) k-eff)
-    (lambda (arg p i)
-      (let ((r (k-rewriting (lambda () (k-te p (k-check arg p))) (k-start arg) (k-end arg)
-                            (lambda (m want got) (k-argument-error i got want)))))
-        (extract r 2))))
+    (lambda (arg p i) (extract (k-as-argument (lambda () (k-te p (k-check arg p))) arg i) 2)))
+  ;; What `f` finds of argument `i` (from 0), `a`; an error at it, reported as that argument.
+  (k-as-argument (->* (k-checking kx int) k-te)
+    (lambda (f a i)
+      (k-rewriting f (k-start a) (k-end a) (lambda (m want got) (k-argument-error i got want)))))
   (k-instantiate (->* (int kxs int int int k-done kx) int)
     (lambda (ft args expected a b done f)
       (let* ((bo (k-binders-of ft)) (kinds (extract bo 1)) (inner (extract bo 2))

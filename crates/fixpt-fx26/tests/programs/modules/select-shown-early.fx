@@ -1,4 +1,4 @@
-;; ! a int is expected here, and this is a cell
+;; ! argument 1 is a cell, where a int is expected
 ;; A re-exported value's type names a re-exported type by its name even when
 ;; nothing has named that type since: the alias, declared ahead of the
 ;; module, is linked to it as soon as the module is bound.
