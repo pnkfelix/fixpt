@@ -82,6 +82,9 @@
 (define-type k-picks (listof k-pick acyclic))
 (define-type k-reshaped (productof (1 k-at) (2 k-picks)))
 (define-type k-reshape-list (listof k-reshaped acyclic))
+;; What `k-reshapes` held for each module before `k-reshape-at` first reshaped it (an `extend`'s
+;; positions, or none, `nil`): what a reshape of it checked again is made onto.
+(define-type k-reshape-base-list (listof (productof (1 k-at) (2 (listof k-picks acyclic))) acyclic))
 ;; `with`'s `select` nodes and what each falls back to (`k-with-fallbacks`).
 (define-type k-fallbacks (listof (productof (1 int) (2 int)) acyclic))
 ;; While a type's `select`s are resolved (`k-resolve-selects`): what each
@@ -105,6 +108,7 @@
   (moduleof
    (val k-fx-module? (subr pure (symbol) bool))
    (val k-reshapes (ref k-reshape-list @t))
+   (val k-reshape-bases (ref k-reshape-base-list @t))
    (val k-with-vals (ref k-with-list @t))
    (val k-last-latent (ref k-eff @t))
    (val k-broken (ref (listof k-break acyclic) @t))

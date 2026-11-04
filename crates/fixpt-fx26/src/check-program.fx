@@ -541,6 +541,7 @@
                       (set k-effect-notes nil)
                       (k-forget-withs)
                       (set k-reshapes nil)
+                      (set k-reshape-bases nil)
                       (set k-runs nil)
                       (k-stage-type! rep)
                       (k-ahead forms)

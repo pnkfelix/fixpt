@@ -787,6 +787,10 @@ pub struct NodeFacts {
     /// that is value `k` of the one given, as `(extend e0 e1)` takes its
     /// values from the two it holds (`TODO.md` §69).
     pub reshaped: HashMap<ExpId, Vec<Pick>>,
+    /// What `reshaped` held for an expression before `Checker::expect`
+    /// first reshaped it (an `extend`'s positions, or none): what a
+    /// reshape of it checked again is made onto, not the reshape itself.
+    pub reshape_bases: HashMap<ExpId, Option<Vec<Pick>>>,
 }
 
 /// Where a reshaped module's value is taken from (`NodeFacts::reshaped`;

@@ -797,13 +797,32 @@
       (else z nil))))
 ;; The positions `at` of a module made already of another's (`rs`'s first,
 ;; if it is `x`'s, an `extend`'s): theirs, the two at once; and the rest of
-;; `rs`. As Rust's `Checker::expect`.
+;; `rs`. Checked again (a call's arguments are, as its operator is
+;; instantiated and then called), onto what it was made of then
+;; (`k-reshape-bases`). As Rust's `Checker::expect`.
 (define k-reshape-onto
   (->* (kx k-ids k-reshape-list) k-reshape-list)
   (lambda (x at rs)
-    (if (and (not (null? rs)) (k-at-is? (extract (car rs) 1) (k-start x) (k-end x) (k-kth x)))
-        (cons (product (1 (k-at-of x)) (2 (k-vals-picked (extract (car rs) 2) at))) (cdr rs))
-        (cons (product (1 (k-at-of x)) (2 (k-picks-of at))) rs))))
+    (let* ((own (and (not (null? rs)) (k-at-x? (extract (car rs) 1) x)))
+           (found (k-base-of x (get k-reshape-bases)))
+           (base (cond ((not (null? found)) (car found))
+                       (own (list (extract (car rs) 2)))
+                       (else nil)))
+           (noted (if (null? found)
+                      (set k-reshape-bases
+                           (cons (product (1 (k-at-of x)) (2 base)) (get k-reshape-bases)))
+                      #u))
+           (picks (if (null? base) (k-picks-of at) (k-vals-picked (car base) at))))
+      (cons (product (1 (k-at-of x)) (2 picks)) (if own (cdr rs) rs)))))
+;; What `k-reshape-bases` holds for `x`, if anything.
+(define k-base-of (->* (kx k-reshape-base-list) (listof (listof k-picks acyclic) acyclic))
+  (lambda (x bs)
+    (cond ((null? bs) nil)
+          ((k-at-x? (extract (car bs) 1) x) (list (extract (car bs) 2)))
+          (else (k-base-of x (cdr bs))))))
+;; Whether `at` is `x`'s.
+(define k-at-x? (->* (k-at kx) bool)
+  (lambda (at x) (k-at-is? at (k-start x) (k-end x) (k-kth x))))
 ;; Positions `at` of the values `inner` takes.
 (define k-vals-picked (->* (k-picks k-ids) k-picks)
   (lambda (inner at)

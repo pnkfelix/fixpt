@@ -501,6 +501,7 @@
           ((symbol=? (extract (car hs) 1) m) (extract (car hs) 2))
           (else (k-hazard-names-in (cdr hs) m)))))
 (define k-reshapes (ref k-reshape-list @t) (new nil))
+(define k-reshape-bases (ref k-reshape-base-list @t) (new nil))
 ;; For a driver: the same as another checker found them.
 (define checked-reshapes! (->* (k-reshape-list) unit)
   (lambda (rs) (set k-reshapes rs)))

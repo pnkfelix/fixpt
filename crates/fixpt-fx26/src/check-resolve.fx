@@ -343,6 +343,7 @@
       (set k-conversions nil) (k-reset-facts)
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
       (k-forget-withs) (set k-module-vars nil) (set k-select-map nil) (set k-reshapes nil)
+      (set k-reshape-bases nil)
       (set k-hide-mark -1) (set k-param-map nil) (set k-effect-selects nil)
       (set k-with-effect-falls nil)
       (set k-operator k-no-operator)

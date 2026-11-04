@@ -416,7 +416,14 @@ impl Checker {
                 self.facts.reshape_chosen.insert(e, chosen);
             }
             // Made already of another's values (`extend`): the two at once.
-            let at = match self.facts.reshaped.get(&e) {
+            // Checked again (a call's arguments are, as its operator is
+            // instantiated and then called), onto what it was made of then.
+            let base = match self.facts.reshape_bases.get(&e) {
+                Some(base) => base.clone(),
+                None => self.facts.reshaped.get(&e).cloned(),
+            };
+            self.facts.reshape_bases.insert(e, base.clone());
+            let at = match base {
                 Some(inner) => at.iter().map(|i| inner[*i]).collect(),
                 None => at.into_iter().map(crate::check::Pick::Value).collect(),
             };
