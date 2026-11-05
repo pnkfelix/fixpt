@@ -923,6 +923,32 @@ by the revision (9.2), question 4 answered yes by it.
    shapes. The name `union` goes: today's becomes `oneof` (U0), the
    true one is `anyof` (U2), `overload` is `allof` (U1). Free as names:
    nothing is called any of the three today.
+   *Also settled 2026-11-05, in discussing the names:*
+   - **`oneof` and `anyof` of the same members are one type** whenever
+     the `oneof` is well-formed: the same values, each below the other.
+     `oneof` is a true union whose members are checked where it is
+     written. One node in each checker; the former only decides the
+     check. Printed as `oneof` when its members are disjoint, `anyof`
+     when not. Type variables stay out of `oneof` (question 3), where
+     the equivalence would need a bound.
+   - **`oneof`'s well-formedness is a run-time test separating every two
+     members**, not distinct shapes alone: by shape (the word's tag, a
+     bloblet's kind), or, for two sums, by tag, their tag sets disjoint
+     (the user's). `(oneof (sumof (a A) (b B)) (sumof (c C)))` is
+     well-formed, the same type as the sum merged; `(oneof (sumof (a A))
+     (sumof (a B)))` is refused, and `anyof` of the two is `(sumof (a
+     (anyof A B)))`. A `typecase` arm for a sum member tests the shape,
+     then the tag among the member's. At U0, with the renaming.
+   - **Future** (not in U0 to U5): further tests, as programs ask.
+     Singleton types (the user's: `'a` is told from `'b` by `eq?`; as
+     `false` is today, and `nil` and `unit` in effect): `(oneof 'a 'b
+     'c)` an enumeration free at run time, `(oneof 'a symbol)` refused.
+     Then a discriminant at a path (TypeScript's discriminated unions):
+     `(pairof 'lambda …)` from `(pairof 'app …)` by their `car`s, the
+     test on a part, narrowing following the path (`docs/fx26.md`, "A
+     test narrows a path too"); what would let λm be written as plain
+     S-expressions rather than sums. Products of different lengths, by
+     the header's length, likewise if wanted.
 10. **Rule 4, the meet at calls.** Every fitting member and the meet of
     their results, refused where there is none (proposed); or ordered
     selection (the design of 2026-09-29), or the most precise member,
