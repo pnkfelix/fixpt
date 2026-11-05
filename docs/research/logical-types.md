@@ -923,6 +923,23 @@ now takes one only if it alone has it. Tests: `tests/programs/anyof/`
 `oneof` and an `anyof` as one type, a recursive one, and three refusals:
 two cells, two writable lists; the sums' shared tag shown).
 
+**U3, as built (2026-11-05).** Rule 5 in both checkers
+(`synth_app_split` in `infer.rs`, `k-split-app` in `check-allof.fx`):
+where a call fails whole, an argument that is a variable whose type is a
+union is narrowed to each member in turn and the call checked again; if
+every member checks, the call's type is the `anyof` of theirs, its effect
+theirs together, and the facts the compilers read must be alike under
+every member, as an `allof`'s body's (CLAUDES_CHOICES.md, "U3"). The
+first such argument that works is taken; one argument at a time, so the
+cost is the members', never their product. Not tried where the error is
+inside an argument that is not a variable (a nested call's, a `lambda`'s
+body's): no member of another argument changes it. Not covered: an
+argument that is not a variable (bind it with `let`); `extract`, which is
+a form, not a call; and `swap` of an `(anyof expr op)`, which is one sum
+once normalized (U0's merging), so there is no union left to take apart:
+it fits `swap`'s `sexp` member, and gives an `sexp`. Tests:
+`anyof/car-split.fx`, `car-split-misfit.fx`, `allof-split.fx`.
+
 Each stage in both checkers, agreeing, as L0 to L3 were. U1 before U2
 because swap needs only it: `sexp` is written as the sum it is. U0 to U3
 before macros (`TODO.md` §182), U4 and U5 after (question 15).

@@ -3689,3 +3689,28 @@ from run to run, and right where the name is shadowed.
    pairs on the trail, and the budget bounds the rest.
 6. **`check-subtype.fx` is at 989 lines** of its 1000; the next addition
    there moves the splitting to a file of its own.
+
+## U3: rule 5, a call's union argument taken apart (2026-11-05; `logical-types.md` §8.5)
+
+1. **Only an argument that is a variable.** Its type is narrowed to each
+   member as a test narrows it (`narrowed`, `k-narrowed`); the call is
+   checked again, nothing else. A computed argument would need a binding
+   of its own to be narrowed; `let` does that in the program.
+2. **Only where the call fails whole, and not for an error inside another
+   argument** (one that is not a variable). Without that second test, an
+   inner call's failure made every enclosing call retry by members.
+3. **The first argument that works**, in order; an argument with a member
+   the call does not fit is passed over, and with none left the call's own
+   error stands, not a member's.
+4. **The facts as the failed try left them, but within the call**, are
+   what each member's check starts from: taken only when there is a union
+   argument to try, so no call that checks pays for it. Copying every
+   call's facts before trying it made checking the front end quadratic.
+5. **Facts compared whole, each member's against the first's**, as an
+   `allof`'s; what all found kept together, effects of the call's
+   expressions joined.
+6. **`extract` not covered**: it is a form, not a call, in both checkers.
+7. **The λm example of §8.5 does not come out as designed.** `(anyof expr
+   op)` is one sum once U0's merging normalizes it, so `swap` of one fits
+   only the `sexp` member. Kept as it is for the user to decide (keep the
+   written members beside the merged sum, or leave it).

@@ -101,7 +101,7 @@
 (import check-resolve k-as-subr k-callee-of k-conversion-name k-end k-free-vars k-rename k-start
         k-at-of k-vsubr-parts)
 (import check-logic k-spec-of k-spec-delta)
-(import check-allof k-allof-type? k-allof-lambda k-allof-call k-arm-dead? k-as-argument)
+(import check-allof k-allof-type? k-allof-lambda k-allof-call k-arm-dead? k-as-argument k-split-app)
 (import check-modorder k-early-modules k-lambda-item? k-mod-edges k-mod-groups k-mod-hazards
         k-mod-lambdas k-mod-recs-lambdas k-mod-star-lambdas)
 (import check-effects k-insert k-one k-union)
@@ -123,7 +123,7 @@
                 (if (< t 0) (k-fail (k-unbound s) a b) (k-te t (k-naming-effect s t))))))
         (x-const (t v a b abk) (k-te t nil))
         (x-lambda (ps body a b abk) (k-synth-lambda-as x nil -1 nil))
-        (x-app (f args a b abk) (k-synth-app x f args -1))
+        (x-app (f args a b abk) (k-split-app x f args -1 k-synth-app))
         (x-the (t0 e a b abk)
           (let ((t (k-resolve-selects t0 a b))) (k-sized e (k-te t (k-check e t)))))
         (x-convention (c e a b abk)
@@ -589,7 +589,7 @@
                   (k-as-expected x (k-synth-rlambda-by x r l expected sp k-synth k-synth-lambda-as)
                                  expected))))
           (x-app (f args xa xb xaxbk)
-            (k-as-expected-call x (k-synth-app x f args expected) expected))
+            (k-as-expected-call x (k-split-app x f args expected k-synth-app) expected))
           (x-bloblet (op i args xa xb xaxbk)
             (k-as-expected x (k-synth-bloblet x op i args expected) expected))
           (x-tagcase (s arms els xa xb xaxbk) (extract (k-synth-tagcase x s arms els expected) 2))

@@ -5,7 +5,9 @@
 ;;; arm a member's type rules out is skipped there (`k-arm-dead?`), and is
 ;;; an error only if every member skips it; what the compilers read of its
 ;;; body must be found alike under every member, since it is compiled once.
-;;; A call takes every member it fits, its result the meet of theirs.
+;;; A call takes every member it fits, its result the meet of theirs. And
+;;; a call taking a union argument apart member by member (rule 5, U3), the
+;;; Rust checker's `synth_app_split`, by the same means.
 
 ;; Its types, those it uses of the files before it, and the signatures of
 ;; what it is given.
@@ -19,7 +21,8 @@
        (check-synth-types (load-module "fx26:check-synth-types.fx"))
        (check-expect-types (load-module "fx26:check-expect-types.fx"))
        (check-errors-types (load-module "fx26:check-errors-types.fx"))
-       (check-allof-types (load-module "fx26:check-allof-types.fx")))
+       (check-allof-types (load-module "fx26:check-allof-types.fx"))
+       (check-unions-types (load-module "fx26:check-unions-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-env (select check-env-types check-env-sig))
@@ -30,7 +33,8 @@
            (check-subtype (select check-subtype-types check-subtype-sig))
            (check-synth (select check-synth-types check-synth-sig))
            (check-expect (select check-expect-types check-expect-sig))
-           (check-errors (select check-errors-types check-errors-sig)))
+           (check-errors (select check-errors-types check-errors-sig))
+           (check-unions (select check-unions-types check-unions-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -44,6 +48,7 @@
 (import check-synth k-note-call)
 (import check-expect k-rewriting)
 (import check-errors k-argument-error k-fail-no-part)
+(import check-unions k-anyof-of)
 
 ;;; ------------------------------------------------------------ the type
 
@@ -385,6 +390,135 @@
                  (noted (k-note-call x f m0 (k-subr-params m0)))
                  (res (k-results-met x m0 (cdr fits) (k-subr-result m0))))
             (result x f ft args (k-tes-effect ts fe) (k-least-latent fits fits) res))))))
+
+;;; ------------------------------------------------------------ rule 5
+
+;; A call `x` of `f` to `args`, by `app` (`k-synth-app`), or, where it fails
+;; whole, union elimination at an argument (`logical-types.md` §8.5, rule
+;; 5; U3): the first argument that is a variable of a union, and with which
+;; each member makes the call check, is taken as each member in turn. The
+;; call's type is the `anyof` of what each gives, its effect theirs
+;; together; what the compilers read of it alike under every member. As
+;; Rust's `synth_app_split`.
+(define k-split-app (->* (kx kx kxs int k-app-fn) k-te)
+  (lambda (x f args expected app)
+    (let ((r (prompt k-tag (k-done (app x f args expected)) (lambda (r) r))))
+      (tagcase r
+        (k-done (te) te)
+        (k-err (m a b)
+          (let ((tried (k-split-candidates args)))
+            ;; An error inside an argument that is not a variable is that
+            ;; argument's, which no member of another makes go away.
+            (if (or (k-err-in-arg? args a b) (null? tried))
+                (k-fail m a b)
+                (k-split-tries x f args expected app (k-code-but (k-start x) (k-end x)) tried
+                               m a b))))
+        (k-ok (xs) (k-fail "k-ok inside" (k-start x) (k-end x)))))))
+(define k-err-in-arg? (->* (kxs int int) bool)
+  (lambda (args a b)
+    (and (not (null? args))
+         (or (and (tagcase (car args) (x-var (v xa xb abk) #f) (else y #t))
+                  (>= a (k-start (car args))) (<= b (k-end (car args))))
+             (k-err-in-arg? (cdr args) a b)))))
+;; Each of `args` that is a variable whose type is a union: its name, its
+;; binding, its members.
+(define-type k-split (productof (1 symbol) (2 int) (3 k-ids)))
+(define k-split-candidates (->* (kxs) (listof k-split acyclic))
+  (lambda (args)
+    (if (null? args)
+        nil
+        (let ((rest (k-split-candidates (cdr args))))
+          (tagcase (car args)
+            (x-var (v xa xb abk)
+              (let ((t (k-lookup v)))
+                (if (< t 0)
+                    rest
+                    (tagcase (k-get (k-resolve t))
+                      (ty-union (ms)
+                        (cons (product (1 v) (2 (k-name-depth v)) (3 ms))
+                              rest))
+                      (else y rest)))))
+            (else y rest))))))
+;; What the compilers read now, but of what is at `a`..`b`: the failed
+;; try's.
+(define k-code-but (->* (int int) k-code)
+  (lambda (a b)
+    (letrec ((in? (->* (k-at) bool) (lambda (at) (and (>= (extract at 1) a) (<= (extract at 2) b))))
+             (facts (->* (k-facts) k-facts)
+               (lambda (l) (cond ((null? l) nil) ((in? (extract (car l) 1)) (facts (cdr l)))
+                                 (else (cons (car l) (facts (cdr l)))))))
+             (withs (->* (k-with-list) k-with-list)
+               (lambda (l) (cond ((null? l) nil) ((in? (extract (car l) 1)) (withs (cdr l)))
+                                 (else (cons (car l) (withs (cdr l)))))))
+             (reshapes (->* (k-reshape-list) k-reshape-list)
+               (lambda (l) (cond ((null? l) nil) ((in? (extract (car l) 1)) (reshapes (cdr l)))
+                                 (else (cons (car l) (reshapes (cdr l)))))))
+             (bases (->* (k-reshape-base-list) k-reshape-base-list)
+               (lambda (l) (cond ((null? l) nil) ((in? (extract (car l) 1)) (bases (cdr l)))
+                                 (else (cons (car l) (bases (cdr l))))))))
+      (product (1 (facts (get k-extracts))) (2 (withs (get k-with-vals)))
+               (3 (reshapes (get k-reshapes))) (4 (bases (get k-reshape-bases)))))))
+;; Each of `tried` in turn, until one whose every member checks; none, the
+;; error `m` at `a`..`b`.
+(define k-split-tries
+  (->* (kx kx kxs int k-app-fn k-code (listof k-split acyclic) string int int) k-te)
+  (lambda (x f args expected app saved tried m a b)
+    (if (null? tried)
+        (k-fail m a b)
+        (let ((runs (k-split-runs x f args expected app saved (car tried) (extract (car tried) 3))))
+          (if (null? runs)
+              (k-split-tries x f args expected app saved (cdr tried) m a b)
+              (k-split-joined x saved (car tried) (car runs)))))))
+;; One member's: what it found, and the call's type and effect with it.
+(define-type k-run (productof (1 k-found) (2 k-te)))
+;; The call with the variable of `s` each of `ms`: what each found, as a
+;; list of one; none, if one does not check.
+(define k-split-runs (->* (kx kx kxs int k-app-fn k-code k-split k-ids)
+                          (listof (listof k-run acyclic) acyclic))
+  (lambda (x f args expected app saved s ms)
+    (if (null? ms)
+        (list nil)
+        (let* ((reset (k-code-put-back saved))
+               (outer (get k-narrowed))
+               (narrow (product (1 (extract s 1)) (2 (extract s 2)) (3 (car ms))))
+               (pushed (set k-narrowed (cons narrow outer)))
+               (r (prompt k-tag (k-done (app x f args expected)) (lambda (r) r)))
+               (popped (set k-narrowed outer)))
+          (tagcase r
+            (k-done (te)
+              (let ((run (product (1 (k-found-since saved nil)) (2 te)))
+                    (rest (k-split-runs x f args expected app saved s (cdr ms))))
+                (if (null? rest) nil (list (cons run (car rest))))))
+            (else y nil))))))
+;; The runs alike, put together: the `anyof` of their types.
+(define k-split-joined (->* (kx k-code k-split (listof k-run acyclic)) k-te)
+  (lambda (x saved s runs)
+    (begin
+      (k-runs-agree x s runs (cdr runs) 1)
+      (k-code-put-back saved)
+      (k-found-onto (k-runs-found runs))
+      (k-te (k-anyof-of (k-runs-types runs) (k-start x) (k-end x)) (k-runs-effect runs)))))
+(define k-runs-agree (->* (kx k-split (listof k-run acyclic) (listof k-run acyclic) int) unit)
+  (lambda (x s runs rest j)
+    (cond ((null? rest) #u)
+          ((k-found-alike? (extract (car runs) 1) (extract (car rest) 1))
+           (k-runs-agree x s runs (cdr rest) (+ j 1)))
+          (else
+           (k-fail (k-cat5 (k-cat3 "this call, taken apart by `" (symbol->string (extract s 1))
+                                   "`'s members, would be compiled differently with a ")
+                           (k-show-ty (car (extract s 3))) " and with a "
+                           (k-show-ty (k-nth-id (extract s 3) j)) "")
+                   (k-start x) (k-end x))))))
+(define k-runs-found (->* ((listof k-run acyclic)) (listof k-found acyclic))
+  (lambda (rs) (if (null? rs) nil (cons (extract (car rs) 1) (k-runs-found (cdr rs))))))
+(define k-runs-types (->* ((listof k-run acyclic)) k-ids)
+  (lambda (rs)
+    (if (null? rs)
+        nil
+        (the k-ids (cons (extract (extract (car rs) 2) 1) (k-runs-types (cdr rs)))))))
+(define k-runs-effect (->* ((listof k-run acyclic)) k-eff)
+  (lambda (rs)
+    (if (null? rs) nil (k-union (extract (extract (car rs) 2) 2) (k-runs-effect (cdr rs))))))
 
 ;;; ------------------------------------------------------------ the meet
 

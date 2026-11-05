@@ -244,7 +244,7 @@
          (check-allof
           ((load-input "fx26:check-allof.fx")
            check-types check-env check-resolve check-print check-print-parts
-           check-effects check-subtype check-synth check-expect check-errors))
+           check-effects check-subtype check-synth check-expect check-errors check-unions))
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
           ((load-input "fx26:check-rules.fx")

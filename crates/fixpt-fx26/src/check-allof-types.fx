@@ -16,6 +16,7 @@
 (define-type k-check-fn (subr (maxeff checks spin) (kx int) k-eff))
 (define-type k-synth-fn (subr (maxeff checks spin) (kx) k-te))
 (define-type k-result-fn (subr (maxeff checks spin) (kx kx int kxs k-eff k-eff int) k-te))
+(define-type k-app-fn (subr (maxeff checks spin) (kx kx kxs int) k-te))
 ;; What its clients use of it (`check-rules.fx`).
 (define-type check-allof-sig
   (moduleof (val k-allof-type? (subr (maxeff checks spin) (int) bool))
@@ -24,5 +25,6 @@
                  (subr (maxeff checks spin)
                        (kx kx int kxs k-done k-eff k-synth-fn k-result-fn) k-te))
             (val k-arm-dead? (subr (maxeff checks spin) (int symbol int int) bool))
+            (val k-split-app (subr (maxeff checks spin) (kx kx kxs int k-app-fn) k-te))
             (val k-as-argument (subr (maxeff checks spin) (k-checking kx int) k-te))
             (val k-meet (subr (maxeff checks spin) (int int) int))))

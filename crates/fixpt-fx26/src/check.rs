@@ -847,6 +847,21 @@ impl NodeFacts {
         }
     }
 
+    /// The same, but the facts of expressions `inside` holds of.
+    pub(crate) fn code_saved_but(&self, inside: impl Fn(ExpId) -> bool) -> CodeSaved {
+        let mut s = self.code_saved();
+        s.datum.retain(|x, _| !inside(*x));
+        s.converted.retain(|x, _| !inside(*x));
+        s.apply_shares.retain(|x| !inside(*x));
+        s.frozen_defines.retain(|x| !inside(*x));
+        s.fx_plain.retain(|x, _| !inside(*x));
+        s.call_convs.retain(|x, _| !inside(*x));
+        s.with_vals.retain(|x, _| !inside(*x));
+        s.reshaped.retain(|x, _| !inside(*x));
+        s.reshape_bases.retain(|x, _| !inside(*x));
+        s
+    }
+
     pub(crate) fn code_put_back(&mut self, saved: &CodeSaved) {
         let s = saved.clone();
         (self.datum, self.converted, self.apply_shares, self.frozen_defines) = (s.datum, s.converted, s.apply_shares, s.frozen_defines);

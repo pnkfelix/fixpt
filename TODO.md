@@ -2208,6 +2208,12 @@ Built already (2026-11-05): the greatest member of a shape, for inference
 (piece 2), so `car` of an `anyof` of a `nat` list and an `int` list
 checks; and splitting products, sums and frozen pairs at a field (pieces
 1, 3, 4; the user's answer to question 18), with a budget of 64.
+U3 done (2026-11-05): rule 5 for a call's argument that is a variable of a
+union (`logical-types.md`, "U3, as built"). Left of it: arguments that are
+not variables; `extract`; the verifier of typed cellular code, which has
+no rule for a call split by members (three known gaps, as `allof`'s); and `swap` of an `(anyof expr op)`, one sum
+once normalized, which gives an `sexp`: the user's to decide (keep the
+written members beside the merged sum?).
 Left of U2b: questions 16, 17, 19 and 20 (built on the proposals,
 provisional); a message of its own past the budget; head forms and
 greatest members kept on the node, and the answer cache, once measured

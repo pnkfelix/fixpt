@@ -714,7 +714,7 @@ impl Checker {
     /// polymorphic. `expected` is the type the application should have, when
     /// that is known; it helps solve the operator's binders.
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
-        let (t, eff) = self.synth_app_of(e, fun, args, expected)?;
+        let (t, eff) = self.synth_app_split(e, fun, args, expected)?;
         let t = self.array_sized(e, fun, args, t);
         // `native-procedure` (`TODO.md` §97) makes a native closure: the
         // type stated is of the native convention, or `fx`.
@@ -746,6 +746,108 @@ impl Checker {
         // A path a fact in force narrows (`(car x)` …), its type there.
         let t = self.path_typed(e, t);
         Ok((t, eff))
+    }
+
+    /// A call, or, where it fails whole, union elimination at an argument
+    /// (`docs/research/logical-types.md` §8.5, rule 5; U3): the first
+    /// argument that is a variable of a union, and with which each member
+    /// makes the call check, is taken as each member in turn. Its value is
+    /// one of them, found once, before the call. The call's type is the
+    /// `anyof` of what each gives, its effect theirs together; what the
+    /// compilers read of it must be alike under every member, as of an
+    /// `allof`'s body, since it is compiled once.
+    fn synth_app_split(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
+        let err = match self.synth_app_of(e, fun, args, expected) {
+            Ok(r) => return Ok(r),
+            Err(err) => err,
+        };
+        // An error inside an argument that is not a variable is that
+        // argument's, which no member of another makes go away.
+        let span = self.arena.span_of(e);
+        let within = |x: fixpt_read::Span, outer: fixpt_read::Span| x.file == outer.file && x.start >= outer.start && x.end <= outer.end;
+        if args.iter().any(|a| !matches!(self.arena.exp_at(*a), Exp::Var(_)) && within(err.span, self.arena.span_of(*a))) {
+            return Err(err);
+        }
+        let mut tried = Vec::new();
+        for &a in args {
+            let Some((v, at, steps)) = self.path_of(a) else { continue };
+            let Some(t) = self.lookup(v) else { continue };
+            if let (true, Ty::Union(ms)) = (steps.is_empty(), self.arena.get(self.arena.resolve(t)).clone()) {
+                tried.push((v, at, ms));
+            }
+        }
+        if tried.is_empty() {
+            return Err(err);
+        }
+        // What was found before, but in this call: the failed try's.
+        let inside = |c: &Self, x: ExpId| within(c.arena.span_of(x), span);
+        let saved = self.facts.code_saved_but(|x| inside(self, x));
+        let mut effects_before = self.facts.effects.clone();
+        effects_before.retain(|x, _| !inside(self, *x));
+        for (v, at, ms) in tried {
+            if let Some(r) = self.app_by_members(e, fun, args, expected, (v, at), &ms, &saved, &effects_before)? {
+                return Ok(r);
+            }
+        }
+        Err(err)
+    }
+
+    /// Call `e` with variable `v`, at binding `at`, each of `ms` in turn
+    /// (`synth_app_split`), from the facts `saved` and effects
+    /// `effects_before`: none if one of them does not check.
+    #[allow(clippy::too_many_arguments)]
+    fn app_by_members(
+        &mut self,
+        e: ExpId,
+        fun: ExpId,
+        args: &[ExpId],
+        expected: Option<TyId>,
+        (v, at): (Sym, usize),
+        ms: &[TyId],
+        saved: &crate::check::CodeSaved,
+        effects_before: &HashMap<ExpId, Effect>,
+    ) -> R<Option<(TyId, Effect)>> {
+        let (mut found, mut tys, mut eff) = (Vec::new(), Vec::new(), Effect::pure());
+        let mut effects: HashMap<ExpId, Effect> = HashMap::new();
+        for m in ms {
+            self.facts.code_put_back(saved);
+            self.facts.effects = effects_before.clone();
+            self.narrowed.push((v, at, *m));
+            let r = self.synth_app_of(e, fun, args, expected);
+            self.narrowed.pop();
+            let Ok((t, x)) = r else { return Ok(None) };
+            found.push(self.facts.code_facts());
+            for (y, ye) in &self.facts.effects {
+                if !effects_before.contains_key(y) {
+                    let joined = effects.get(y).map_or_else(|| ye.clone(), |j| j.union(ye));
+                    effects.insert(*y, joined);
+                }
+            }
+            tys.push(t);
+            eff = eff.union(&x);
+        }
+        let span = self.arena.span_of(e);
+        if let Some(j) = (1..found.len()).find(|j| found[*j] != found[0]) {
+            let name = self.interner.name(v).to_string();
+            return Err(FxError::at(
+                span,
+                format!(
+                    "this call, taken apart by `{name}`'s members, would be compiled differently with a {} and with a {}",
+                    self.show_ty(ms[0]),
+                    self.show_ty(ms[j])
+                ),
+            ));
+        }
+        // What every member found, together.
+        self.facts.code_put_back(saved);
+        for facts in found {
+            for (k, fact) in facts {
+                self.facts.code_insert(k, fact);
+            }
+        }
+        self.facts.effects = effects_before.clone();
+        self.facts.effects.extend(effects);
+        Ok(Some((self.anyof_of(&tys, span)?, eff)))
     }
 
     /// `stage`'s call, or a session's (`op`), of module or session

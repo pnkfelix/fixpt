@@ -367,6 +367,11 @@ const KNOWN_GAPS: &[&str] = &[
     "allof/meet.fx `program`",
     "allof/swap.fx `program`",
     "allof/swap.fx `swap@1194`",
+    // Nor for a call taking a union argument apart by its members (U3): a
+    // call whose argument is each member in turn.
+    "anyof/allof-split.fx `go`",
+    "anyof/allof-split.fx `program`",
+    "anyof/car-split.fx `first`",
     "higher-kinds/poly-global-read.fx `go`",
     "native/raw-args.fx `given`",
     "redefine/knot-spin.fx `f`",
