@@ -90,6 +90,24 @@ impl Checker {
     /// lambdas) ends, so that calls within it need not say `spin`; if not,
     /// why not, in words for an error.
     pub(crate) fn termination(&self, bindings: &[(Sym, TyId, ExpId)]) -> Result<(), String> {
+        // An `allof`'s body is one: it ends if it does at each member's
+        // types, the `k`th of each `allof` taken together (`logical-types.md`
+        // §8.5).
+        let members = |t: TyId| match self.arena.get(self.arena.resolve(t)) {
+            Ty::AllOf(ms) => Some(ms.clone()),
+            _ => None,
+        };
+        let most = bindings.iter().filter_map(|(_, t, _)| members(*t)).map(|ms| ms.len()).max();
+        if let Some(most) = most {
+            for k in 0..most {
+                let at: Vec<(Sym, TyId, ExpId)> = bindings
+                    .iter()
+                    .map(|(n, t, e)| (*n, members(*t).map_or(*t, |ms| ms[k.min(ms.len() - 1)]), *e))
+                    .collect();
+                self.termination(&at)?;
+            }
+            return Ok(());
+        }
         let name = |i: usize| self.interner.name(bindings[i].0).to_string();
         let mut w = self.size_change_walk(bindings);
         let Some(w) = w.as_mut() else {

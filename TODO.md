@@ -2177,7 +2177,21 @@ before macros (§182), U4 and U5 after.
 U0 done (2026-11-05): `oneof` in both checkers, its sums told apart by
 tags and made one; every `(union …)` renamed. Left of it: `union`, read
 as `oneof` for now (CLAUDES_CHOICES.md, "U0"), to remove once Heist and
-kayak have moved. Next: U1, `allof`.
+kayak have moved.
+
+U1 done (2026-11-05): `allof` of monomorphic `subr` members, in both
+checkers (`logical-types.md`, "U1, as built"). Left of it:
+- `spin` judged per member: a call of the group inside the body says
+  `spin` unless the group ends under every member, so `len` with a `pure`
+  member on `acyclic` lists and a `spin` one on `@heap` lists is refused;
+  `may_spin` (and `k-may-spin?`) would need the member being checked.
+- The verifier of typed cellular code (`typed_cells.rs`) has no rule for
+  `allof`: a word whose body is checked against each member, and a call
+  taking every member it fits; the three such words are known gaps.
+- A call's arguments must each have a type of their own and be below a
+  member's parameters as they are: no conversion or reshape at an
+  `allof` call, and no `lambda` without parameter types as an argument.
+Next: U2, `anyof`.
 
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 

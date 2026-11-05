@@ -240,6 +240,11 @@
            check-types check-env check-resolve check-binders check-data
            check-print check-print-parts check-calls check-effects
            check-synth check-subtype check-module-rules))
+         ;; The checker, the rules for `allof`.
+         (check-allof
+          ((load-input "fx26:check-allof.fx")
+           check-types check-env check-resolve check-print check-print-parts
+           check-effects check-subtype check-synth check-expect check-errors))
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
           ((load-input "fx26:check-rules.fx")
@@ -252,7 +257,7 @@
            check-calls check-bounds check-holds check-subtype
            check-subst check-sc-graphs check-binders check-sub-env
            check-modules-read check-read-helpers check-print-parts check-processes
-           check-logic))
+           check-allof check-logic))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")

@@ -892,6 +892,21 @@ member is a recursive type's own name, not yet defined: refused); every
 and type representations say `oneof`. Tests: `unions/oneof-sums.fx`,
 `oneof-sums-share.fx`, `union-still-read.fx`.
 
+**U1, as built (2026-11-05).** `(allof (subr …) …)` in both checkers
+(Rust's `Ty::AllOf`, `check_allof_lambda`, `synth_allof_call`, `meet`;
+FX-26's `ty-allof` and `check-allof.fx`), rules 1 to 4 as above, with
+these choices (CLAUDES_CHOICES.md, "U1"): a call's arguments are
+synthesized once and a member fits by subtyping alone (no conversion or
+reshape at an `allof` call); two members' facts are compared only where
+both checked (outside the arms either skipped), and kept together; each
+expression's effect summary is the greatest under any member; a call's
+latent effect is the least of the fitting members' if one is, else the
+first's; recursion ends if it does at each member's types. Not yet:
+`spin` judged per member (`len`'s `pure` on `acyclic`), so `len` of the
+table is U1's one test not built; the verifier of typed cellular code
+knows no `allof` (`typed_cells.rs`'s known gaps). Tests:
+`tests/programs/allof/` (swap, the meet, and four refusals).
+
 Each stage in both checkers, agreeing, as L0 to L3 were. U1 before U2
 because swap needs only it: `sexp` is written as the sum it is. U0 to U3
 before macros (`TODO.md` §182), U4 and U5 after (question 15).

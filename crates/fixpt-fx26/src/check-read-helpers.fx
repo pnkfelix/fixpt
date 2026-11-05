@@ -67,7 +67,7 @@
 (define k-type-forms k-names
   (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
         'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
-        'sumof 'bool 'oneof 'union '-> '->* 'restrict))
+        'sumof 'bool 'oneof 'union 'allof '-> '->* 'restrict))
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (->* (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))
@@ -325,6 +325,7 @@
       (ty-sum (ps) (k-parts-onto ps nil))
       (ty-bloblet (fs z r) fs)
       (ty-union (ms) ms)
+      (ty-allof (ms) ms)
       (ty-named (g ds) (k-desc-kids ds))
       (ty-app (f ds) (the k-ids (cons f (k-desc-kids ds))))
       (ty-lam (bs x) (k-desc-kids (the k-descs (cons x nil))))

@@ -42,6 +42,7 @@
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
        (check-subst-types (load-module "fx26:check-subst-types.fx"))
        (check-processes-types (load-module "fx26:check-processes-types.fx"))
+       (check-allof-types (load-module "fx26:check-allof-types.fx"))
        (check-logic-types (load-module "fx26:check-logic-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
@@ -79,6 +80,7 @@
            (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
            (check-processes (select check-processes-types check-processes-sig))
+           (check-allof (select check-allof-types check-allof-sig))
            (check-logic (select check-logic-types check-logic-sig)))
     (module
 
@@ -99,6 +101,7 @@
 (import check-resolve k-as-subr k-callee-of k-conversion-name k-end k-free-vars k-rename k-start
         k-at-of k-vsubr-parts)
 (import check-logic k-spec-of k-spec-delta)
+(import check-allof k-allof-type? k-allof-lambda k-allof-call k-arm-dead? k-as-argument)
 (import check-modorder k-early-modules k-lambda-item? k-mod-edges k-mod-groups k-mod-hazards
         k-mod-lambdas k-mod-recs-lambdas k-mod-star-lambdas)
 (import check-effects k-insert k-one k-union)
@@ -247,8 +250,7 @@
                  (e (if (k-lambda? init) (k-check-declared n t init) (k-fail-not-lambda n init)))
                  (rest (k-check-letrec (cdr bs))))
             (k-union e rest)))))
-  ;; Check `init` against `t`, the type `n` is declared; an error at `init`
-  ;; itself says so.
+  ;; Check `init` against `t`, the type `n` is declared; an error at `init` itself says so.
   (k-check-declared (->* (symbol int kx) k-eff)
     (lambda (n t init)
       (let ((r (k-declaring (k-settled-thunk init t k-check) (k-start init) (k-end init) n t)))
@@ -400,6 +402,7 @@
            (let ((v (car variadic)))
              (k-app-result x f ft args (k-vapp-args args (extract v 2) 0 (extract rf 2))
                            (extract v 1) (extract v 3))))
+          ((k-allof-type? ft) (k-allof-call x f ft args done (extract rf 2) k-synth k-app-result))
           ((null? callee) (k-fail-ty "not a subroutine: " ft a b))
           ((not (= (k-length (extract (car callee) 2)) n))
            (k-fail-arg-count (k-length (extract (car callee) 2)) n a b))
@@ -446,10 +449,6 @@
   ;; An argument that failed to check is reported as that argument.
   (k-check-argument (->* (kx int int) k-eff)
     (lambda (arg p i) (extract (k-as-argument (lambda () (k-te p (k-check arg p))) arg i) 2)))
-  ;; What `f` finds of argument `i` (from 0), `a`; an error at it, reported as that argument.
-  (k-as-argument (->* (k-checking kx int) k-te)
-    (lambda (f a i)
-      (k-rewriting f (k-start a) (k-end a) (lambda (m want got) (k-argument-error i got want)))))
   (k-instantiate (->* (int kxs int int int k-done kx) int)
     (lambda (ft args expected a b done f)
       (let* ((bo (k-binders-of ft)) (kinds (extract bo 1)) (inner (extract bo 2))
@@ -573,6 +572,7 @@
           (x-lambda (ps body xa xb xaxbk)
             (let ((c (k-as-subr expected)))
               (cond
+                ((k-allof-type? expected) (k-allof-lambda x expected k-check))
                 ((not (null? c))
                  (let ((want (extract (car c) 2)))
                    (if (not (= (k-length want) (k-length ps)))
@@ -708,8 +708,8 @@
           (product (1 nil) (2 nil))
           (let* ((arm (car arms)) (tag (extract arm 1)) (body (extract arm 4))
                  (t (k-part-find variants tag)))
-            (if (< t 0)
-                (k-fail-no-part st " has no tag " tag (k-start body) (k-end body))
+            (if (and (< t 0) (k-arm-dead? st tag (k-start body) (k-end body)))
+                (k-tagcase-arms (cdr arms) variants st expected)
                 (let* ((bound (if (extract arm 2)
                                   (tagcase (k-get t)
                                     (ty-product (fs)

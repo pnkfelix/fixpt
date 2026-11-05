@@ -334,7 +334,7 @@ impl Checker {
             Ty::Var(v) if self.arena.is_data_var(v) && self.arena.bound(v).is_none_or(|p| p == Region::Heap) => None,
             Ty::Var(v) => Some(format!("a `{}`, which could be anything", self.interner.name(self.arena.dvar_name(v)))),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().find_map(|(_, x)| self.untransmissible_in(*x, seen, bound)),
-            Ty::Union(ms) => ms.iter().find_map(|x| self.untransmissible_in(*x, seen, bound)),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().find_map(|x| self.untransmissible_in(*x, seen, bound)),
             Ty::Pair(a, b, r, _) => data_at(self, r, bound, "pair")
                 .or_else(|| self.untransmissible_in(a, seen, bound))
                 .or_else(|| self.untransmissible_in(b, seen, bound)),

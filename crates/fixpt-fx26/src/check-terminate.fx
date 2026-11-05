@@ -271,9 +271,38 @@
             (else (k-sc-shrinks-why))))))
 ;; Whether every run of the group `bs` ends, so that calls within it need
 ;; not say `spin`: "" if so, and otherwise why not, in words for an error.
+;; An `allof`'s body is one: it ends if it does at each member's types, the
+;; `k`th of each `allof` taken together (`logical-types.md` §8.5).
+(define k-termination (->* (k-letrec-bs) string)
+  (lambda (bs)
+    (let ((most (k-sc-most-members bs 0)))
+      (if (= most 0) (k-termination-one bs) (k-termination-each bs 0 most)))))
+(define k-sc-members-of (->* (int) k-ids)
+  (lambda (t) (tagcase (k-get (k-resolve t)) (ty-allof (ms) ms) (else y nil))))
+(define k-sc-most-members (->* (k-letrec-bs int) int)
+  (lambda (bs most)
+    (if (null? bs)
+        most
+        (k-sc-most-members (cdr bs) (max most (k-length (k-sc-members-of (extract (car bs) 2))))))))
+(define k-termination-each (->* (k-letrec-bs int int) string)
+  (lambda (bs k most)
+    (if (= k most)
+        ""
+        (let ((why (k-termination-one (k-sc-at-member bs k))))
+          (if (string=? why "") (k-termination-each bs (+ k 1) most) why)))))
+;; `bs`, each `allof` its `k`th member (its last, if it has fewer).
+(define k-sc-at-member (->* (k-letrec-bs int) k-letrec-bs)
+  (lambda (bs k)
+    (if (null? bs)
+        nil
+        (let* ((b (car bs)) (ms (k-sc-members-of (extract b 2)))
+               (t (if (null? ms) (extract b 2) (k-nth-member ms (min k (- (k-length ms) 1))))))
+          (cons (product (1 (extract b 1)) (2 t) (3 (extract b 3))) (k-sc-at-member (cdr bs) k))))))
+(define k-nth-member (->* (k-ids int) int)
+  (lambda (l i) (if (= i 0) (car l) (k-nth-member (cdr l) (- i 1)))))
 ;; Walked twice: first to learn which parameters every call passes on
 ;; unchanged, then with them as bounds.
-(define k-termination (->* (k-letrec-bs) string)
+(define k-termination-one (->* (k-letrec-bs) string)
   (lambda (bs)
     (begin
       (set k-sc-members (k-sc-names bs))

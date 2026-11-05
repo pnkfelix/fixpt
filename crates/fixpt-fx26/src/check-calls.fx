@@ -70,6 +70,7 @@
                    (ty-product (ps) (k-cyclic-parts? ps p d))
                    (ty-sum (ps) (k-cyclic-parts? ps p d))
                    (ty-union (ms) (k-cyclic-list? ms #f p d))
+                   (ty-allof (ms) (k-cyclic-list? ms #f p d))
                    ;; Through its representation; what it was given,
                    ;; cautiously, as if taken as a parameter.
                    (ty-named (g ds)

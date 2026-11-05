@@ -1429,7 +1429,7 @@ impl Tree {
 
 /// The heads of the types a `define-type` may abbreviate where a `.fasl`'s
 /// type is factored, and `maxeff`, an effect: not expressions.
-const TYPE_HEADS: &[&str] = &["subr", "poly", "productof", "sumof", "oneof", "union", "listof", "pairof", "ref", "arrayof", "narrayof", "mu", "bloblet", "icell", "nlist", "mark-key", "prompt-tag", "maxeff"];
+const TYPE_HEADS: &[&str] = &["subr", "poly", "productof", "sumof", "oneof", "union", "allof", "listof", "pairof", "ref", "arrayof", "narrayof", "mu", "bloblet", "icell", "nlist", "mark-key", "prompt-tag", "maxeff"];
 
 /// What a place in a type's text holds, by its form: where a name bound
 /// outside a subterm stands, the kind of the parameter it is made
@@ -1459,7 +1459,7 @@ fn place_of(head: Option<&str>, i: usize) -> Place {
         (_, 0) => Place::Unknown,
         (Some("subr"), 1) => Place::Effect,
         (Some("subr"), 3) => Place::Type,
-        (Some("oneof" | "union"), _) => Place::Type,
+        (Some("oneof" | "union" | "allof"), _) => Place::Type,
         (Some("listof" | "ref" | "arrayof" | "icell"), 1) | (Some("pairof"), 1 | 2) | (Some("mu" | "poly"), 2) => Place::Type,
         (Some("listof" | "ref" | "arrayof" | "icell"), 2) | (Some("pairof"), 3) => Place::Region,
         (Some("read" | "write" | "alloc" | "goto" | "comefrom" | "await"), 1) => Place::Region,

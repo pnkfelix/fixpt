@@ -266,6 +266,10 @@
               (tagcase tt
                 (ty-union (ys) (and (= (k-length xs) (k-length ys)) (k-match-list l xs ys m seen)))
                 (else z (same))))
+            (ty-allof (xs)
+              (tagcase tt
+                (ty-allof (ys) (and (= (k-length xs) (k-length ys)) (k-match-list l xs ys m seen)))
+                (else z (same))))
             (ty-ref (x r) (tagcase tt (ty-ref (y q) (and (mr r q) (mt x y))) (else z (same))))
             (ty-array (x nz r)
               (tagcase tt (ty-array (y nz q) (and (mr r q) (mt x y))) (else z (same))))
@@ -356,25 +360,42 @@
           ((and (not closed) (k-open-named? tb))
            (tagcase tb (ty-named (g ys) (k-sub a (k-unfold g ys) ea eb trail labels)) (else z #f)))
           (else (k-sub-shapes a b ta tb ea eb trail labels))))))
-  ;; `a ≤ b`, their nodes `ta` and `tb`, by their shapes. A union is below
-  ;; what each of its members is; a type is below a union if below a
-  ;; member, or, a pair that may be `nil`, if `nil` and the pair that is
-  ;; not are each below one.
+  ;; `a ≤ b`, their nodes `ta` and `tb`, by their shapes. A type is below
+  ;; an `allof` if below each member; an `allof` is below what one of its
+  ;; members is (`logical-types.md` §8.5). A union is below what each of
+  ;; its members is; a type is below a union if below a member, or, a pair
+  ;; that may be `nil`, if `nil` and the pair that is not are each below one.
   (k-sub-shapes (->* (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool)
     (lambda (a b ta tb ea eb trail labels)
-      (tagcase ta
-        (ty-void () #t)
-        (ty-union (ms) (k-sub-all ms b ea eb trail labels))
-        (else z
-          (tagcase tb
-            (ty-union (ns)
-              (or (k-below-one a ns ea eb trail labels)
-                  (tagcase ta
-                    (ty-pair (x y r nl)
-                      (and nl (k-below-one (k-ty-new (ty-nil)) ns ea eb trail labels)
-                           (k-below-one (k-ty-new (ty-pair x y r #f)) ns ea eb trail labels)))
-                    (else w #f))))
-            (else w (k-sub-plain a b ta tb ea eb trail labels)))))))
+      (tagcase tb
+        (ty-allof (ns) (k-sub-each a ns ea eb trail labels))
+        (else w0
+          (tagcase ta
+            (ty-allof (ms) (k-one-below ms b ea eb trail labels))
+            (ty-void () #t)
+            (ty-union (ms) (k-sub-all ms b ea eb trail labels))
+            (else z
+              (tagcase tb
+                (ty-union (ns)
+                  (or (k-below-one a ns ea eb trail labels)
+                      (tagcase ta
+                        (ty-pair (x y r nl)
+                          (and nl (k-below-one (k-ty-new (ty-nil)) ns ea eb trail labels)
+                               (k-below-one (k-ty-new (ty-pair x y r #f)) ns ea eb trail labels)))
+                        (else w #f))))
+                (else w (k-sub-plain a b ta tb ea eb trail labels)))))))))
+  (k-sub-each (->* (int k-ids k-benv k-benv k-strail k-labels) bool)
+    (lambda (a ns ea eb trail labels)
+      (or (null? ns)
+          (and (k-sub a (car ns) ea eb trail labels) (k-sub-each a (cdr ns) ea eb trail labels)))))
+  ;; Whether one of `ms` is below `b`, what a failed try learnt forgotten.
+  (k-one-below (->* (k-ids int k-benv k-benv k-strail k-labels) bool)
+    (lambda (ms b ea eb trail labels)
+      (and (not (null? ms))
+           (let ((st (get trail)) (sl (get labels)))
+             (or (k-sub (car ms) b ea eb trail labels)
+                 (begin (k-restore trail labels st sl)
+                        (k-one-below (cdr ms) b ea eb trail labels)))))))
   (k-sub-all (->* (k-ids int k-benv k-benv k-strail k-labels) bool)
     (lambda (ms b ea eb trail labels)
       (or (null? ms)

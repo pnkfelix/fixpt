@@ -406,6 +406,10 @@ pub struct Checker {
     /// Unions read with a member not yet known, a recursive type's own
     /// name, and where: checked once it is (`Checker::union_of`).
     pub(crate) pending_unions: Vec<(TyId, fixpt_read::Span)>,
+    /// While a `lambda` is checked against each member of an `allof`, one
+    /// per `allof`, innermost last: the `tagcase` arms a member's type
+    /// rules out, skipped (`logical-types.md` §8.5, rule 2).
+    pub(crate) dead_arms: Vec<DeadArms>,
     /// Whether `unify` is inside a pair's contents, which are invariant: a
     /// binder solved already takes what it meets there, if the two are
     /// related, since nothing else will check (`infer.rs`, `unify`).
@@ -793,6 +797,103 @@ pub struct NodeFacts {
     pub reshape_bases: HashMap<ExpId, Option<Vec<Pick>>>,
 }
 
+/// The facts the compilers read of each expression (`rust_facts.rs`), but
+/// its effect: what one body checked against each member of an `allof`
+/// must be found alike under every member, to be compiled once
+/// (`docs/research/logical-types.md` §8.5, rule 3).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum CodeFact {
+    Datum(Datum),
+    Converted(Conv, usize),
+    ApplyShares,
+    FrozenDefine,
+    FxPlain(ExpId),
+    CallConv(Conv),
+    WithVals(Vec<(Sym, usize)>),
+    Reshaped(Vec<Pick>),
+}
+
+impl NodeFacts {
+    /// Each code fact, by its expression and kind.
+    pub(crate) fn code_facts(&self) -> HashMap<(ExpId, u8), CodeFact> {
+        let mut out = HashMap::new();
+        out.extend(self.datum.iter().map(|(e, d)| ((*e, 0), CodeFact::Datum(*d))));
+        out.extend(self.converted.iter().map(|(e, (c, n))| ((*e, 1), CodeFact::Converted(*c, *n))));
+        out.extend(self.apply_shares.iter().map(|e| ((*e, 2), CodeFact::ApplyShares)));
+        out.extend(self.frozen_defines.iter().map(|e| ((*e, 3), CodeFact::FrozenDefine)));
+        out.extend(self.fx_plain.iter().map(|(e, x)| ((*e, 4), CodeFact::FxPlain(*x))));
+        out.extend(self.call_convs.iter().map(|(e, c)| ((*e, 5), CodeFact::CallConv(*c))));
+        out.extend(self.with_vals.iter().map(|(e, v)| ((*e, 6), CodeFact::WithVals(v.clone()))));
+        out.extend(self.reshaped.iter().map(|(e, v)| ((*e, 7), CodeFact::Reshaped(v.clone()))));
+        out
+    }
+
+    /// The code facts as they were (`CodeSaved`), those since forgotten.
+    pub(crate) fn code_saved(&self) -> CodeSaved {
+        CodeSaved {
+            datum: self.datum.clone(),
+            converted: self.converted.clone(),
+            apply_shares: self.apply_shares.clone(),
+            frozen_defines: self.frozen_defines.clone(),
+            fx_plain: self.fx_plain.clone(),
+            call_convs: self.call_convs.clone(),
+            with_vals: self.with_vals.clone(),
+            reshaped: self.reshaped.clone(),
+            reshape_bases: self.reshape_bases.clone(),
+        }
+    }
+
+    pub(crate) fn code_put_back(&mut self, saved: &CodeSaved) {
+        let s = saved.clone();
+        (self.datum, self.converted, self.apply_shares, self.frozen_defines) = (s.datum, s.converted, s.apply_shares, s.frozen_defines);
+        (self.fx_plain, self.call_convs, self.with_vals, self.reshaped) = (s.fx_plain, s.call_convs, s.with_vals, s.reshaped);
+        self.reshape_bases = s.reshape_bases;
+    }
+}
+
+/// The `tagcase` arms skipped while one `lambda` is checked against each
+/// member of an `allof` (`Checker::dead_arms`).
+#[derive(Default)]
+pub(crate) struct DeadArms {
+    /// Each, by its `tagcase` and place, with how many members skipped it
+    /// and the error it would have been: one skipped under every member is
+    /// that error.
+    pub(crate) counts: HashMap<(ExpId, usize), (usize, FxError)>,
+    /// Where those of the member being checked are: what it did not check,
+    /// so has no facts of.
+    pub(crate) now: Vec<fixpt_read::Span>,
+}
+
+impl NodeFacts {
+    /// A code fact put in its table (`code_facts`'s).
+    pub(crate) fn code_insert(&mut self, (e, _): (ExpId, u8), fact: CodeFact) {
+        match fact {
+            CodeFact::Datum(d) => _ = self.datum.insert(e, d),
+            CodeFact::Converted(c, n) => _ = self.converted.insert(e, (c, n)),
+            CodeFact::ApplyShares => _ = self.apply_shares.insert(e),
+            CodeFact::FrozenDefine => _ = self.frozen_defines.insert(e),
+            CodeFact::FxPlain(x) => _ = self.fx_plain.insert(e, x),
+            CodeFact::CallConv(c) => _ = self.call_convs.insert(e, c),
+            CodeFact::WithVals(v) => _ = self.with_vals.insert(e, v),
+            CodeFact::Reshaped(v) => _ = self.reshaped.insert(e, v),
+        }
+    }
+}
+
+/// The code facts of `NodeFacts`, kept to be put back.
+#[derive(Clone)]
+pub(crate) struct CodeSaved {
+    datum: HashMap<ExpId, Datum>,
+    converted: HashMap<ExpId, (Conv, usize)>,
+    apply_shares: HashSet<ExpId>,
+    frozen_defines: HashSet<ExpId>,
+    fx_plain: HashMap<ExpId, ExpId>,
+    call_convs: HashMap<ExpId, Conv>,
+    with_vals: HashMap<ExpId, Vec<(Sym, usize)>>,
+    reshaped: HashMap<ExpId, Vec<Pick>>,
+    reshape_bases: HashMap<ExpId, Option<Vec<Pick>>>,
+}
+
 /// Where a reshaped module's value is taken from (`NodeFacts::reshaped`;
 /// the front end written in FX-26's `k-pick`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1017,6 +1118,7 @@ impl Checker {
             path_narrowed: Vec::new(),
             closure_depth: 0,
             pending_unions: Vec::new(),
+            dead_arms: Vec::new(),
             unify_exact: false,
             unify_upper: false,
             checked_call: None,
@@ -1277,7 +1379,7 @@ impl Checker {
             Ty::False => bit("bool"),
             Ty::Pair(_, _, _, nil) => Some(bit("pair")? | if *nil { bit("nil")? } else { 0 }),
             Ty::NList { .. } => Some(bit("pair")? | bit("nil")?),
-            Ty::Subr { .. } | Ty::Composable { .. } => bit("procedure"),
+            Ty::Subr { .. } | Ty::Composable { .. } | Ty::AllOf(_) => bit("procedure"),
             // An array is a bloblet as `(bloblet …)` is, of the same kind.
             Ty::Array(..) | Ty::Bloblet { .. } => bit("bloblet"),
             Ty::Ref(..) => bit("box"),
@@ -1397,6 +1499,57 @@ impl Checker {
         ms[first] = self.arena.ty(Ty::Sum(parts));
         for &i in rest.iter().rev() {
             ms.remove(i);
+        }
+    }
+
+    /// The meet of `a` and `b`: the values both are, where that is a type
+    /// exactly and soundly (`docs/research/logical-types.md` §8.5, rule 4):
+    /// the lesser of two related; of two sums, their tags in common (none,
+    /// `void`), payloads met; of two products of the same labels, field by
+    /// field; of two procedure types of one convention, their `allof`.
+    /// Nothing else meets: in particular no two cells, arrays, writable
+    /// pairs or regions that differ, whose meet would be unsound.
+    pub(crate) fn meet(&mut self, a: TyId, b: TyId) -> Option<TyId> {
+        let (a, b) = (self.arena.resolve(a), self.arena.resolve(b));
+        if self.subtype(a, b) {
+            return Some(a);
+        }
+        if self.subtype(b, a) {
+            return Some(b);
+        }
+        let procs = |c: &Self, t: TyId| match c.arena.get(t) {
+            Ty::Subr { conv, .. } => Some((*conv, vec![t])),
+            Ty::AllOf(ms) => match c.arena.get(ms[0]) {
+                Ty::Subr { conv, .. } => Some((*conv, ms.clone())),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let (Some((c1, mut ms)), Some((c2, ns))) = (procs(self, a), procs(self, b)) {
+            if c1 != c2 {
+                return None;
+            }
+            ms.extend(ns);
+            return Some(self.arena.ty(Ty::AllOf(ms)));
+        }
+        match (self.arena.get(a).clone(), self.arena.get(b).clone()) {
+            (Ty::Sum(xs), Ty::Sum(ys)) => {
+                let mut parts = Vec::new();
+                for (l, t) in xs {
+                    if let Some((_, u)) = ys.iter().find(|(m, _)| *m == l) {
+                        parts.push((l, self.meet(t, *u)?));
+                    }
+                }
+                Some(if parts.is_empty() { self.void } else { self.arena.ty(Ty::Sum(parts)) })
+            }
+            (Ty::Product(xs), Ty::Product(ys)) if xs.len() == ys.len() && xs.iter().zip(&ys).all(|((l, _), (m, _))| l == m) => {
+                let mut fields = Vec::new();
+                for ((l, t), (_, u)) in xs.iter().zip(&ys) {
+                    fields.push((*l, self.meet(*t, *u)?));
+                }
+                Some(self.arena.ty(Ty::Product(fields)))
+            }
+            _ => None,
         }
     }
 
@@ -2650,7 +2803,7 @@ impl Checker {
                 Ty::NList { elem: a, .. } | Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) => stack.push(*a),
                 Ty::Bloblet { fields, .. } => stack.extend(fields),
                 Ty::Product(ps) | Ty::Sum(ps) => stack.extend(ps.iter().map(|(_, x)| *x)),
-                Ty::Union(ms) => stack.extend(ms.iter().copied()),
+                Ty::Union(ms) | Ty::AllOf(ms) => stack.extend(ms.iter().copied()),
                 _ => return false,
             }
         }
@@ -2897,7 +3050,7 @@ impl Checker {
         match self.arena.get(t).clone() {
             Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Select(..) | Ty::ParamSel(..) => {}
             Ty::Link(None) => self.regions_open.set(true),
-            Ty::Union(ms) => {
+            Ty::Union(ms) | Ty::AllOf(ms) => {
                 for m in ms {
                     self.regions_walk(m, seen, out);
                 }
@@ -3030,7 +3183,7 @@ impl Checker {
             Ty::NList { elem, .. } => vec![elem],
             Ty::Poly { body, .. } => vec![body],
             Ty::Product(ps) | Ty::Sum(ps) => ps.into_iter().map(|(_, x)| x).collect(),
-            Ty::Union(ms) => ms,
+            Ty::Union(ms) | Ty::AllOf(ms) => ms,
             Ty::PromptTag { answer: a, payload: b, .. } | Ty::Composable { arg: a, answer: b, .. } => vec![a, b],
             Ty::Named { which, args } => [self.generatives[which as usize].rep]
                 .into_iter()
@@ -3083,7 +3236,7 @@ impl Checker {
             Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil => true,
             Ty::Var(v) => self.arena.is_data_var(v) && here(self.data_var_place(v)),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.data_walk(*x, seen, place)),
-            Ty::Union(ms) => ms.iter().all(|x| self.data_walk(*x, seen, place)),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().all(|x| self.data_walk(*x, seen, place)),
             Ty::Pair(a, b, r, _) => {
                 r.is_frozen() && here(Self::data_place(r)) && self.data_walk(a, seen, place) && self.data_walk(b, seen, place)
             }
@@ -3133,7 +3286,7 @@ impl Checker {
                 (if frozen { near(q) } else { q == r }) && fields.iter().all(|f| self.forget_walk(*f, r, seen))
             }
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.forget_walk(*x, r, seen)),
-            Ty::Union(ms) => ms.iter().all(|x| self.forget_walk(*x, r, seen)),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().all(|x| self.forget_walk(*x, r, seen)),
             Ty::NList { elem, region: q, .. } => near(q) && self.forget_walk(elem, r, seen),
             _ => false,
         }
@@ -3153,7 +3306,7 @@ impl Checker {
         match self.arena.get(t).clone() {
             Ty::Var(v) if self.arena.is_data_var(v) => note(self.data_var_place(v)),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().for_each(|(_, x)| self.data_places(*x, seen, out)),
-            Ty::Union(ms) => ms.iter().for_each(|x| self.data_places(*x, seen, out)),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().for_each(|x| self.data_places(*x, seen, out)),
             Ty::Pair(a, b, r, _) => {
                 note(Self::data_place(r));
                 self.data_places(a, seen, out);
@@ -3385,7 +3538,7 @@ impl Checker {
                 }
             }
             // Immutable, as a sum: covariant in its members.
-            Ty::Union(ms) => {
+            Ty::Union(ms) | Ty::AllOf(ms) => {
                 for x in ms {
                     self.polarity(x, v, at, seen, found);
                 }
@@ -3475,7 +3628,7 @@ impl Checker {
             Ty::Pair(a, b, _, _) => vec![*a, *b],
             Ty::Bloblet { fields, .. } => fields.clone(),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, x)| *x).collect(),
-            Ty::Union(ms) => ms.clone(),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.clone(),
             Ty::NList { elem, .. } => vec![*elem],
             Ty::PromptTag { answer, payload, .. } => vec![*answer, *payload],
             Ty::Named { which, args } => [self.generatives[*which as usize].rep].into_iter().chain(args.iter().flat_map(|d| self.d_types(d))).collect(),
@@ -3571,7 +3724,7 @@ impl Checker {
                 fields.iter().find_map(|f| self.knot_in(*f, &k, seen))
             }
             Ty::Product(parts) | Ty::Sum(parts) => parts.iter().find_map(|(_, x)| self.knot_in(*x, kept, seen)),
-            Ty::Union(ms) => ms.iter().find_map(|x| self.knot_in(*x, kept, seen)),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().find_map(|x| self.knot_in(*x, kept, seen)),
             Ty::NList { elem, .. } => self.knot_in(elem, kept, seen),
             Ty::Poly { body, .. } => self.knot_in(body, kept, seen),
             // A procedure: kept where it is, it may not read there unsaid;
@@ -3636,7 +3789,7 @@ impl Checker {
                 Ty::NList { elem, .. } => (vec![], vec![*elem]),
                 Ty::Bloblet { fields, .. } => (vec![], fields.clone()),
                 Ty::Product(parts) | Ty::Sum(parts) => (vec![], parts.iter().map(|(_, t)| *t).collect()),
-                Ty::Union(ms) => (vec![], ms.clone()),
+                Ty::Union(ms) | Ty::AllOf(ms) => (vec![], ms.clone()),
                 Ty::Named { which, args } => {
                     let mut kids = vec![self.generatives[*which as usize].rep];
                     for d in args {
@@ -3836,6 +3989,21 @@ impl Checker {
                 && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
                 && self.sub(qa, qb, env, st)
                 && crate::logic::spec_within(None, spec.as_deref());
+        }
+        // A type is below an `allof` if below each member; an `allof` is
+        // below what one of its members is (`logical-types.md` §8.5).
+        if let Ty::AllOf(ns) = &tb {
+            return ns.clone().iter().all(|n| self.sub(a, *n, env, st));
+        }
+        if let Ty::AllOf(ms) = &ta {
+            return ms.clone().iter().any(|m| {
+                let saved = st.clone();
+                let ok = self.sub(*m, b, env, st);
+                if !ok {
+                    *st = saved;
+                }
+                ok
+            });
         }
         // A union is below what each of its members is; a type is below a
         // union if below a member, or, a pair that may be `nil`, if `nil`
@@ -4175,7 +4343,7 @@ impl Checker {
         let region = |r: &Region| !matches!(r, Region::Var(_) | Region::Frozen(Some(_), _));
         match self.arena.get(t).clone() {
             Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False => true,
-            Ty::Union(ms) => ms.iter().all(|m| self.closed_data(*m, seen)),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().all(|m| self.closed_data(*m, seen)),
             Ty::Sum(ps) | Ty::Product(ps) => ps.iter().all(|(_, p)| self.closed_data(*p, seen)),
             Ty::Pair(a, b, r, _) => region(&r) && self.closed_data(a, seen) && self.closed_data(b, seen),
             Ty::Ref(a, r) | Ty::Array(a, _, r) => region(&r) && self.closed_data(a, seen),
@@ -4304,6 +4472,7 @@ impl Checker {
             Ty::Product(parts) => Ty::Product(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),
             Ty::Sum(parts) => Ty::Sum(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),
             Ty::Union(ms) => Ty::Union(ms.iter().map(|t| self.subst_memo(*t, map, memo)).collect()),
+            Ty::AllOf(ms) => Ty::AllOf(ms.iter().map(|t| self.subst_memo(*t, map, memo)).collect()),
             Ty::Module { abs, descs, vals } => Ty::Module {
                 abs,
                 descs: descs.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect(),
@@ -4435,7 +4604,7 @@ impl Checker {
                 region(&r, &mut vs);
             }
             Ty::Product(ps) | Ty::Sum(ps) => tys.extend(ps.iter().map(|(_, t)| *t)),
-            Ty::Union(ms) => tys.extend(ms),
+            Ty::Union(ms) | Ty::AllOf(ms) => tys.extend(ms),
             Ty::Module { descs, vals, .. } => tys.extend(descs.iter().chain(&vals).map(|(_, t)| *t)),
             Ty::Bloblet { fields, region: r, .. } => {
                 tys.extend(fields);
@@ -4661,9 +4830,19 @@ impl Checker {
         // A flat sum's shown as the sum of blobrefs its arms see.
         let shown = if flat.is_some() { self.arena.ty(Ty::Sum(variants.clone())) } else { st };
         let mut types = Vec::new();
-        for arm in arms {
+        for (i, arm) in arms.iter().enumerate() {
             let Some((_, t)) = variants.iter().find(|(l, _)| *l == arm.tag) else {
-                return Err(FxError::at(self.arena.span_of(arm.body), format!("a {} has no tag `{}`", self.show_ty(shown), self.interner.name(arm.tag))));
+                let err = FxError::at(self.arena.span_of(arm.body), format!("a {} has no tag `{}`", self.show_ty(shown), self.interner.name(arm.tag)));
+                // Checked against one member of an `allof`, an arm its type
+                // rules out cannot run: skipped.
+                if let Some(dead) = self.dead_arms.last_mut() {
+                    let at = dead.counts.entry((e, i)).or_insert((0, err.clone()));
+                    at.0 += 1;
+                    at.1 = err;
+                    dead.now.push(self.arena.span_of(arm.body));
+                    continue;
+                }
+                return Err(err);
             };
             let bound: Vec<(Sym, TyId)> = match &arm.bind {
                 ArmBind::Value(x) => vec![(*x, *t)],

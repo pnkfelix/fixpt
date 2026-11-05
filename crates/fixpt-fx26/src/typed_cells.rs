@@ -581,6 +581,7 @@ impl Verifier<'_> {
             Ty::False => x.is_false(),
             Ty::Nil => x.is_null(),
             Ty::Union(ms) => ms.iter().any(|m| self.inhabits(x, *m)),
+            Ty::AllOf(ms) => ms.iter().all(|m| self.inhabits(x, *m)),
             Ty::Pair(a, b, _, nil) => (nil && x.is_null()) || (x.is_pair() && self.inhabits(self.heap.car(x), a) && self.inhabits(self.heap.cdr(x), b)),
             _ if t == self.c.int => x.is_fixnum(),
             // `string`, by name: `(stringof const)` is made as one too.

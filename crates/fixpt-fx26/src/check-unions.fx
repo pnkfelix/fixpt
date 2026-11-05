@@ -81,6 +81,8 @@
         (ty-product (ps) 8192)
         (ty-union (ms)
           (if (k-has-id? seen t) -1 (k-run-shapes ms (the k-ids (cons t seen)))))
+        (ty-allof (ms)
+          (if (k-has-id? seen t) -1 (k-run-shapes ms (the k-ids (cons t seen)))))
         (ty-void () 0)
         (else y -1)))))
   (k-run-shapes (->* (k-ids k-ids) int)

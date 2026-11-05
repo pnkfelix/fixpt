@@ -362,6 +362,11 @@ fn every_directory_surveyed() {
 /// verifier wraps in another `poly` instead (`go`; a local's as well, and a
 /// global's since `TODO.md` §211, 5, let one be read there).
 const KNOWN_GAPS: &[&str] = &[
+    // The verifier has no rule for `allof` yet (`TODO.md` §79, U1): a body
+    // checked against each member, a call taking every member it fits.
+    "allof/meet.fx `program`",
+    "allof/swap.fx `program`",
+    "allof/swap.fx `swap@1194`",
     "higher-kinds/poly-global-read.fx `go`",
     "native/raw-args.fx `given`",
     "redefine/knot-spin.fx `f`",

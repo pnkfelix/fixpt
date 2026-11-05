@@ -388,7 +388,7 @@ impl Checker {
         match ty {
             Ty::Base(s) => name(*s).hash(&mut h),
             Ty::Void | Ty::Nil | Ty::False | Ty::Link(_) => {}
-            Ty::Union(ms) => ms.len().hash(&mut h),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.len().hash(&mut h),
             // An abstract type of a module a global holds, as a `.fasl`'s
             // use names it (`fasl_use_digest`): by its `select`, not by
             // its name, which another module's may have.
@@ -660,7 +660,7 @@ impl Checker {
                         _ => false,
                     })
             }
-            (Ty::Union(ms), Ty::Union(ns)) => all(&ms, &ns, trail),
+            (Ty::Union(ms), Ty::Union(ns)) | (Ty::AllOf(ms), Ty::AllOf(ns)) => all(&ms, &ns, trail),
             // The same abstract types (binders), descriptions and values, as
             // the FX-26 checker interns a module's type (`k-ty-same?`).
             (Ty::Module { abs: aa, descs: ad, vals: av }, Ty::Module { abs: ba, descs: bd, vals: bv }) => aa == ba && parts(&ad, &bd, trail) && parts(&av, &bv, trail),
@@ -719,6 +719,10 @@ impl Checker {
             Ty::Union(ms) => {
                 let ms: Vec<String> = ms.iter().map(|m| self.show_ty_on(*m, path)).collect();
                 format!("(oneof {})", ms.join(" "))
+            }
+            Ty::AllOf(ms) => {
+                let ms: Vec<String> = ms.iter().map(|m| self.show_ty_on(*m, path)).collect();
+                format!("(allof {})", ms.join(" "))
             }
             Ty::Var(v) => self.dvar_text(v, 'f'),
             Ty::Link(None) => "?".into(),

@@ -316,7 +316,7 @@ impl Checker {
                 g == h && xs.iter().zip(&ys).all(|(x, y)| self.match_d(l, x, y, map, seen))
             }
             (Ty::Nil, Ty::Nil) | (Ty::False, Ty::False) => true,
-            (Ty::Union(xs), Ty::Union(ys)) => {
+            (Ty::Union(xs), Ty::Union(ys)) | (Ty::AllOf(xs), Ty::AllOf(ys)) => {
                 xs.len() == ys.len() && xs.iter().zip(&ys).all(|(x, y)| self.match_ty(l, *x, *y, map, seen))
             }
             (Ty::Pair(a1, b1, r1, n1), Ty::Pair(a2, b2, r2, n2)) => {

@@ -389,6 +389,7 @@
               (ty-nlist (x m r) (mix 14 (h x)))
               (ty-named (g xs) (mix 15 g))
               (ty-union (ms) (mix 16 (k-length ms)))
+              (ty-allof (ms) (mix 19 (k-length ms)))
               (else y (mix 17 t))))))))
 ;; Whether `n` is a name the machinery gives a type for a step, not one a
 ;; program wrote (`%stage-type` and its kin, `stage.rs`): no type is shown

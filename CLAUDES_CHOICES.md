@@ -3594,3 +3594,39 @@ from run to run, and right where the name is shadowed.
    procedure (`native-reps-webs.fx`, the Knuth–Bendix ports, `conform.fx`'s
    set union) nor in prose, where "a union" still describes the type; the
    research notes keep the name of their date.
+
+## U1: `allof` (2026-11-05; `TODO.md` §79, `logical-types.md` §8.5)
+
+1. **A call synthesizes its arguments once, and a member fits by subtyping
+   alone.** Trying each member by checking the arguments against its
+   parameters would mean undoing what each try records; with
+   monomorphic members a type of the argument's own decides fitting. So
+   no conversion or reshape at an `allof` call, and an argument that needs
+   an expected type (a `lambda` without parameter types) is refused.
+2. **Facts compared where both members checked.** A member skips the arms
+   its type rules out, so it has no facts there; two members must agree
+   on every other expression (by place: within an arm either skipped is
+   out), and what every member found is kept together. The comparison is
+   of the facts the compilers read (`rust_facts.rs`'s, and FX-26's
+   `k-extracts`, `with`s and reshapes); a `stage`'s are not compared, as
+   Rust's list has none. The message names the two members, not the
+   expression: the two checkers order their facts differently.
+3. **Effect summaries joined, not compared.** They differ between members
+   by design (`pure` and `spin`); the greatest is safe for one code, and
+   both compilers already take the greatest noted per expression.
+4. **A call's latent effect**: the least of the fitting members' if one is
+   within every other's, else the first's. Any one member's typing is
+   sound alone; a meet of effects is not needed for that.
+5. **Termination at every member's types.** The size-change walk takes
+   parameter types from the declared type; for a group with an `allof`, it
+   is walked with the `k`th member of each, and the group ends if it ends
+   each time. `spin` per member waits (`TODO.md` §79).
+6. **A recursive global `allof` says `spin` or binds itself locally**, as
+   a `subr` must: `no_reaching_itself` treats an `allof` as a procedure,
+   reading what its members that do not say `spin` read.
+7. **A module of its own, `check-allof.fx`.** `check-rules.fx` is at its
+   size debt; the rules take `k-check`, `k-synth` and `k-app-result` as
+   arguments, as `check-processes.fx` does. `k-as-argument` moved there
+   too, which `check-rules.fx` imports.
+8. **The verifier's gap recorded, not filled**: three words in
+   `typed_cells.rs`'s known gaps, the work in `TODO.md` §79.

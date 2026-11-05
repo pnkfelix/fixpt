@@ -216,6 +216,7 @@
                 (ty-product (ps) (k-kept-in (k-parts-types ps) ns path))
                 (ty-sum (ps) (k-kept-in (k-parts-types ps) ns path))
                 (ty-union (ms) (k-kept-in ms ns path))
+                (ty-allof (ms) (k-kept-in ms ns path))
                 (ty-module (abs ds vs) (k-kept-in (k-parts-types vs) ns path))
                 (ty-named (g ds)
                   (k-kept-in (the k-ids (cons (extract (k-gen-of g) 4) (k-desc-types ds)))

@@ -1169,7 +1169,7 @@ impl Checker {
         let arg = |d: &D| if let D::Type(x) | D::Fun(x) = d { Some(*x) } else { None };
         match self.arena.get(self.arena.resolve(t)) {
             Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::Link(_) => {}
-            Ty::Union(ms) | Ty::Bloblet { fields: ms, .. } => ms.iter().copied().for_each(f),
+            Ty::Union(ms) | Ty::AllOf(ms) | Ty::Bloblet { fields: ms, .. } => ms.iter().copied().for_each(f),
             Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).for_each(f),
             Ty::Poly { body, .. } => f(*body),
             Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => f(*a),

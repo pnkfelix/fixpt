@@ -23,7 +23,8 @@
         cv-native cv-fx cv-var sz-finite sz-lin dr de dt dz dc df ty-base ty-void ty-var ty-subr
         ty-poly ty-ref ty-pair ty-tag ty-comp ty-markkey ty-product ty-sum ty-array ty-icell
         ty-place ty-bloblet ty-link ty-named ty-nlist ty-nat ty-module ty-select ty-param ty-lam
-        ty-app ty-nil ty-union ty-false ds-gen ds-size ds-var ds-rec ds-abbrev ds-region ds-eff
+        ty-app ty-nil ty-union ty-allof ty-false
+        ds-gen ds-size ds-var ds-rec ds-abbrev ds-region ds-eff
         ds-conv ds-fun x-var x-const x-lambda x-app x-plambda x-letregion x-rlambda x-proj x-if
         x-letrec x-let x-begin x-prompt x-the x-convention x-bloblet x-product x-extract x-sum
         x-tagcase x-module x-with k-ok k-err k-done st-car st-cdr st-field (type k-region k-atom
@@ -100,6 +101,7 @@
         (ty-app (g ds) (k-mix 28 g))
         (ty-nlist (x z r) (region (k-mix 18 x) r))
         (ty-union (ms) (ids 26 ms))
+        (ty-allof (ms) (ids 29 ms))
         (ty-module (abs ds vs) (parts (parts (parts 27 abs) ds) vs))
         (else y 0)))))
 ;; Whether two nodes are made of the same parts, each id the same.
@@ -217,6 +219,7 @@
         (ty-nlist (x m r)
           (tagcase b (ty-nlist (y n s) (and (= x y) (size m n) (region r s))) (else z #f)))
         (ty-union (ms) (tagcase b (ty-union (ns) (ids ms ns)) (else z #f)))
+        (ty-allof (ms) (tagcase b (ty-allof (ns) (ids ms ns)) (else z #f)))
         (ty-module (abs ds vs)
           (tagcase b
             (ty-module (abs2 ds2 vs2) (and (parts abs abs2) (parts ds ds2) (parts vs vs2)))
@@ -229,6 +232,7 @@
       (ty-base (s) #t) (ty-var (v) #t) (ty-subr (e ps r cv spc) (null? spc)) (ty-poly (bs x) #t)
       (ty-ref (x r) #t) (ty-pair (x y r nl) #t) (ty-product (ps) #t) (ty-sum (ps) #t)
       (ty-array (x m r) #t) (ty-named (g ds) #t) (ty-nlist (x m r) #t) (ty-union (ms) #t)
+      (ty-allof (ms) #t)
       (ty-module (abs ds vs) #t)
       (else y #f))))
 ;; A cycle's canonical form (`k-cz-cyclic`): its nodes from one, in the order

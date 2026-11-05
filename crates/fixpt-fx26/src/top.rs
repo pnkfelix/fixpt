@@ -122,7 +122,7 @@ fn every_field_placed(c: &Checker) {
         // Printing's, set and cleared around each print.
         print_names: _, print_expanded: _, print_cycles: _, print_for_fasl: _, fasl_selects: _, print_abs: _, fasl_selects_key: _, fasl_digests: _, print_canon: _, print_shallow: _, print_subrs: _, print_params: _, print_tys: _, print_aliases: _, print_selects: _, print_self: _, show_marks: _,
         // Set around a single unification or check, and put back there.
-        unify_exact: _, unify_upper: _, arrow_star: _, holes: _, hole_hint: _,
+        unify_exact: _, unify_upper: _, arrow_star: _, holes: _, hole_hint: _, dead_arms: _,
         // A count of regions made, which only grows: a name made once is
         // never made again, put back or not.
         fresh_regions: _,
@@ -383,7 +383,7 @@ impl Checker {
         while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
             t = self.arena.resolve(*body);
         }
-        self.arena.get(t).as_subr().is_some()
+        self.arena.get(t).as_subr().is_some() || matches!(self.arena.get(t), crate::ast::Ty::AllOf(_))
     }
 
     /// A procedure a value of type `t` keeps, kept in a global (a product's
@@ -412,7 +412,7 @@ impl Checker {
             Ty::Pair(a, b, _, _) => each(vec![a, b], seen),
             Ty::Bloblet { fields, .. } => each(fields, seen),
             Ty::Product(ps) | Ty::Sum(ps) => each(ps.iter().map(|(_, x)| *x).collect(), seen),
-            Ty::Union(ms) => each(ms, seen),
+            Ty::Union(ms) | Ty::AllOf(ms) => each(ms, seen),
             Ty::Module { vals, .. } => each(vals.iter().map(|(_, x)| *x).collect(), seen),
             Ty::Named { which, args } => {
                 let rep = self.generatives[which as usize].rep;
@@ -430,6 +430,10 @@ impl Checker {
         while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
             t = self.arena.resolve(*body);
         }
+        // An `allof`'s: those of its members that do not say `spin`.
+        if let crate::ast::Ty::AllOf(ms) = self.arena.get(t) {
+            return ms.iter().filter(|m| !self.spins(**m)).flat_map(|m| self.latent_globals(*m)).collect();
+        }
         self.arena.get(t).as_subr().map_or(Vec::new(), |(e, _, _)| e.0.iter().filter_map(|a| a.region().filter(|r| r.is_globals())).collect())
     }
 
@@ -439,6 +443,9 @@ impl Checker {
         let mut t = self.arena.resolve(t);
         while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
             t = self.arena.resolve(*body);
+        }
+        if let crate::ast::Ty::AllOf(ms) = self.arena.get(t) {
+            return ms.iter().all(|m| self.spins(*m));
         }
         self.arena.get(t).as_subr().is_some_and(|(e, _, _)| e.0.contains(&crate::ast::Atom::Spin))
     }
@@ -1081,6 +1088,11 @@ impl Checker {
             }
             crate::ast::Ty::Subr { conv, effect, params, result, spec } => {
                 Some(self.arena.ty(crate::ast::Ty::Subr { conv, effect: effect.union(extra), params, result, spec }))
+            }
+            // Each member's, the one body's under each.
+            crate::ast::Ty::AllOf(ms) => {
+                let ms = ms.iter().map(|m| self.with_latent(*m, extra)).collect::<Option<Vec<_>>>()?;
+                Some(self.arena.ty(crate::ast::Ty::AllOf(ms)))
             }
             _ => None,
         }

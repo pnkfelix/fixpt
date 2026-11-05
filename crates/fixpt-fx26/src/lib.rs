@@ -202,6 +202,8 @@ pub const CHECK_MODORDER_TYPES: &str = include_str!("check-modorder-types.fx");
 pub const CHECK_MODULE_RULES_TYPES: &str = include_str!("check-module-rules-types.fx");
 /// The types of `check-processes.fx`: a module file of no state (`TODO.md` §68).
 pub const CHECK_PROCESSES_TYPES: &str = include_str!("check-processes-types.fx");
+/// The types of `check-allof.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_ALLOF_TYPES: &str = include_str!("check-allof-types.fx");
 
 /// `check-proofs-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_PROOFS_TYPES: &str = include_str!("check-proofs-types.fx");
@@ -268,6 +270,9 @@ pub const CHECK_MODULE_RULES: &str = include_str!("check-module-rules.fx");
 /// The checker's rules for processes and `par`: a `load-input` file, which
 /// the conductor applies (`TODO.md` §68).
 pub const CHECK_PROCESSES: &str = include_str!("check-processes.fx");
+/// The checker's rules for `allof`: a `load-input` file, which the
+/// conductor applies (`TODO.md` §68).
+pub const CHECK_ALLOF: &str = include_str!("check-allof.fx");
 
 /// `check-modorder.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_MODORDER: &str = include_str!("check-modorder.fx");
@@ -739,7 +744,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 199] = [
+pub const FRONT_END_MODULES: [(&str, &str); 201] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -747,6 +752,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 199] = [
     ("table.fx", TABLE),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
     ("check-processes-types.fx", CHECK_PROCESSES_TYPES),
+    ("check-allof-types.fx", CHECK_ALLOF_TYPES),
     ("check-modorder-types.fx", CHECK_MODORDER_TYPES),
     ("check-synth-types.fx", CHECK_SYNTH_TYPES),
     ("check-letrec-types.fx", CHECK_LETREC_TYPES),
@@ -883,6 +889,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 199] = [
     ("check-rules.fx", CHECK_RULES),
     ("check-module-rules.fx", CHECK_MODULE_RULES),
     ("check-processes.fx", CHECK_PROCESSES),
+    ("check-allof.fx", CHECK_ALLOF),
     ("check-modorder.fx", CHECK_MODORDER),
     ("check-facts-types.fx", CHECK_FACTS_TYPES),
     ("check-blobrefs-types.fx", CHECK_BLOBREFS_TYPES),

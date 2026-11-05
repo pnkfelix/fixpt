@@ -165,6 +165,9 @@
   ;; that differ at run time (`k-shape`; `logical-types.md`, L1).
   (ty-nil)
   (ty-union k-ids)
+  ;; `(allof (subr …) …)`: one procedure with each member's type
+  ;; (`docs/research/logical-types.md` §8.5, U1). As Rust's `Ty::AllOf`.
+  (ty-allof k-ids)
   ;; `false`: `#f` alone, below `bool`, of `bool`'s shape.
   (ty-false))
 (define-type k-map (listof (pairof int k-desc @t) acyclic))

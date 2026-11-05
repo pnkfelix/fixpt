@@ -343,7 +343,7 @@
       (set k-conversions nil) (k-reset-facts)
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
       (k-forget-withs) (set k-module-vars nil) (set k-select-map nil) (set k-reshapes nil)
-      (set k-reshape-bases nil)
+      (set k-reshape-bases nil) (set k-dead-arms nil)
       (set k-hide-mark -1) (set k-param-map nil) (set k-effect-selects nil)
       (set k-with-effect-falls nil)
       (set k-operator k-no-operator)
@@ -412,6 +412,7 @@
                   (ty-product (ps) (k-regions-parts ps seen out))
                   (ty-sum (ps) (k-regions-parts ps seen out))
                   (ty-union (ms) (walks ms))
+                  (ty-allof (ms) (walks ms))
                   (ty-nlist (e z r) (begin (add r) (walk e)))
                   (ty-module (abs ds vs)
                     (begin (k-regions-parts ds seen out) (k-regions-parts vs seen out)))
@@ -699,6 +700,7 @@
       (ty-named (g ds) 17) (ty-nlist (e z r) 18) (ty-nat (z) 19)
       (ty-module (abs ds vs) 20) (ty-select (m n) 21) (ty-param (k n) 22)
       (ty-lam (bs x) 23) (ty-app (f ds) 24) (ty-nil () 25) (ty-union (ms) 26)
+      (ty-allof (ms) 29)
       (ty-false () 28))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.

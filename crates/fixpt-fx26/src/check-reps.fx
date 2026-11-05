@@ -305,6 +305,7 @@
         (ty-nil () (rp-fill slot 'nil #f nil nil))
         (ty-false () (rp-fill slot 'false #f nil nil))
         (ty-union (ms) (rp-fill slot 'oneof #f nil (rp-tys ms)))
+        (ty-allof (ms) (rp-fill slot 'allof #f nil (rp-tys ms)))
         (ty-var (v) (rp-fill slot 'var #f nil (list (rp-var v))))
         (ty-subr (e ps r cv spc)
           (rp-fill slot 'subr #f nil
@@ -705,6 +706,7 @@
           ((string=? h "nil") (ty-nil))
           ((string=? h "false") (ty-false))
           ((or (string=? h "oneof") (string=? h "union")) (ty-union (ri-tys args)))
+          ((string=? h "allof") (ty-allof (ri-tys args)))
           ((string=? h "var") (ty-var (ri-var (ri-nth args 0))))
           ((string=? h "subr")
            (ty-subr (ri-effect (ri-nth args 1)) (ri-tys (ri-args (ri-child (ri-nth args 2))))

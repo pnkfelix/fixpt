@@ -440,6 +440,7 @@
                   (r (k-parse-region (k-nth items 3))))
              (k-ty-new (ty-pair a b r #f)))))
         ((oneof union) (k-parse-union s items))
+        ((allof) (k-parse-allof s items))
         ((dletrec) (k-parse-dletrec s items))
         ((mu) (k-parse-mu s items))
         ((listof)
@@ -540,6 +541,35 @@
     (begin
       (k-shape (>= (k-length items) 3) "`(oneof type type …)`" s)
       (k-union-of (k-parse-types (cdr items)) (syn-start s) (syn-end s)))))
+;; One procedure with each member's type, `(allof (subr …) …)`
+;; (`docs/research/logical-types.md` §8.5, U1): monomorphic `subr` types of
+;; one convention. As Rust's.
+(define k-parse-allof (->* (syn k-syns) int)
+  (lambda (s items)
+    (begin
+      (k-shape (>= (k-length items) 3) "`(allof (subr …) (subr …) …)`" s)
+      (let ((ms (k-allof-members (cdr items))))
+        (begin (k-allof-one-conv ms (car ms) s) (k-ty-new (ty-allof ms)))))))
+(define k-allof-members (->* (k-syns) k-ids)
+  (lambda (xs)
+    (if (null? xs)
+        nil
+        (let ((t (k-resolve (k-parse-type (car xs)))))
+          (tagcase (k-get t)
+            (ty-allof (ms) (append ms (k-allof-members (cdr xs))))
+            (ty-subr (e ps r cv spc) (the k-ids (cons t (k-allof-members (cdr xs)))))
+            (else y (k-sfail (string-append "a member of an `allof` is a `subr` type, "
+                                            "and this is a " (k-show-ty t))
+                             (car xs))))))))
+(define k-subr-conv (->* (int) k-conv)
+  (lambda (t) (tagcase (k-get t) (ty-subr (e ps r cv spc) cv) (else y (get k-conv-default)))))
+(define k-allof-one-conv (->* (k-ids int syn) unit)
+  (lambda (ms m0 s)
+    (cond ((null? ms) #u)
+          ((k-conv=? (k-subr-conv (car ms)) (k-subr-conv m0)) (k-allof-one-conv (cdr ms) m0 s))
+          (else (k-sfail (k-cat5 "an `allof`'s members have one convention: a " (k-show-ty m0)
+                                 " and a " (k-show-ty (car ms)) " do not")
+                         s)))))
 (define k-parse-mu (->* (syn k-syns) int)
   (lambda (s items)
     (begin

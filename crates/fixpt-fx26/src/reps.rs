@@ -557,6 +557,7 @@ impl Ex<'_> {
             Ty::Nil => ("nil", vec![], vec![]),
             Ty::False => ("false", vec![], vec![]),
             Ty::Union(ms) => ("oneof", vec![], ms.iter().map(|m| self.ty(*m).map(Arg::Node)).collect::<Result<_, _>>()?),
+            Ty::AllOf(ms) => ("allof", vec![], ms.iter().map(|m| self.ty(*m).map(Arg::Node)).collect::<Result<_, _>>()?),
             Ty::Var(v) => {
                 // A variable standing as a type: as the `var` node over it.
                 let v = self.var(v);
@@ -1015,6 +1016,7 @@ impl Im<'_, '_> {
             "nil" => Ty::Nil,
             "false" => Ty::False,
             "oneof" | "union" => Ty::Union(args.iter().map(|x| self.ty(Self::child(*x)?)).collect::<Result<_, _>>()?),
+            "allof" => Ty::AllOf(args.iter().map(|x| self.ty(Self::child(*x)?)).collect::<Result<_, _>>()?),
             "var" => Ty::Var(self.var(arg(0)?)?),
             "subr" => {
                 let conv = self.conv(arg(0)?)?;

@@ -470,6 +470,11 @@ pub enum Ty {
     /// Kept normalized: no member a union, and `nil` with a pair that is not
     /// `nil` made the pair that may be (`Checker::union_of`).
     Union(Vec<TyId>),
+    /// `(allof (subr …) …)`: one procedure with each member's type, its body
+    /// checked against each; a call takes every member it fits, its result
+    /// their meet (`docs/research/logical-types.md`, §8.5, U1). Members
+    /// are monomorphic `subr` types of one convention, two or more.
+    AllOf(Vec<TyId>),
     Var(DVar),
     /// `(subr E (P …) Q (requires p) (ensures r q))`: with a specification
     /// (`spec`), Hoare logic's for procedures, which the cells' verifier

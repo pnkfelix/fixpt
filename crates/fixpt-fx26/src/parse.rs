@@ -65,7 +65,7 @@ const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a def
 
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "oneof", "union", "->", "->*", "restrict",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "oneof", "union", "allof", "->", "->*", "restrict",
 ];
 
 impl Checker {
@@ -800,6 +800,39 @@ impl Checker {
                     members.push(self.parse_type(m)?);
                 }
                 self.union_of(&members, s.span)
+            }
+            // One procedure with each member's type (`logical-types.md`
+            // §8.5, U1): monomorphic `subr` types of one convention.
+            "allof" => {
+                if items.len() < 3 {
+                    return Err(FxError::at(s.span, "`(allof (subr …) (subr …) …)`"));
+                }
+                let mut members = Vec::new();
+                for m in &items[1..] {
+                    let t = self.parse_type(m)?;
+                    let t = self.arena.resolve(t);
+                    match self.arena.get(t).clone() {
+                        Ty::AllOf(ms) => members.extend(ms),
+                        Ty::Subr { .. } => members.push(t),
+                        _ => {
+                            return Err(FxError::at(
+                                m.span,
+                                format!("a member of an `allof` is a `subr` type, and this is a {}", self.show_ty(t)),
+                            ));
+                        }
+                    }
+                }
+                let conv = |c: &Self, m: TyId| match c.arena.get(m) {
+                    Ty::Subr { conv, .. } => *conv,
+                    _ => unreachable!("a subr"),
+                };
+                if let Some(m) = members.iter().find(|m| conv(self, **m) != conv(self, members[0])) {
+                    return Err(FxError::at(
+                        s.span,
+                        format!("an `allof`'s members have one convention: a {} and a {} do not", self.show_ty(members[0]), self.show_ty(*m)),
+                    ));
+                }
+                Ok(self.arena.ty(Ty::AllOf(members)))
             }
             "dletrec" => self.parse_dletrec(s, &items),
             // `(mu name type)`: a recursive type, anonymous; the same as

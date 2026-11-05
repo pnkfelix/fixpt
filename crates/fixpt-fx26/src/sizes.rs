@@ -486,7 +486,7 @@ impl Checker {
                     self.size_walk(x, pol, v, bad, seen);
                 }
             }
-            Ty::Union(ms) => {
+            Ty::Union(ms) | Ty::AllOf(ms) => {
                 for x in ms {
                     self.size_walk(x, pol, v, bad, seen);
                 }

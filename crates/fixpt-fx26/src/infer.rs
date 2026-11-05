@@ -23,7 +23,7 @@
 
 use crate::ast::{Atom, Conv, D, DVar, Effect, Exp, ExpId, Kind, Region, Size, Ty, TyId};
 use fixpt_read::Sym;
-use crate::check::Checker;
+use crate::check::{Checker, CodeFact};
 use crate::error::{FxError, R};
 use std::collections::{HashMap, HashSet};
 
@@ -209,6 +209,10 @@ impl Checker {
                     return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
                 }
                 Ok(eff)
+            }
+            Exp::Lambda { .. } if matches!(expected_ty, Ty::AllOf(_)) => {
+                let Ty::AllOf(members) = expected_ty else { unreachable!() };
+                self.check_allof_lambda(e, &members)
             }
             Exp::Lambda { params, .. } if expected_ty.as_subr().is_some() => {
                 let (_, want, result) = expected_ty.as_subr().expect("a subroutine");
@@ -400,6 +404,134 @@ impl Checker {
                 Ok(eff)
             }
         }
+    }
+
+    /// `lambda` `e` checked against each of `members`, an `allof`'s
+    /// (`docs/research/logical-types.md` §8.5): a `tagcase` arm a member's
+    /// type rules out is skipped while it is checked against that one, and
+    /// is an error only if every member skips it (rule 2); the facts the
+    /// compilers read must be found alike under every member, since the
+    /// body is compiled once (rule 3); each expression's effect is what it
+    /// is under any member, so the greatest of them is kept.
+    fn check_allof_lambda(&mut self, e: ExpId, members: &[TyId]) -> R<Effect> {
+        let saved = self.facts.code_saved();
+        let effects_before = self.facts.effects.clone();
+        let mut effects: HashMap<ExpId, Effect> = HashMap::new();
+        // Each member's code facts, and where it checked nothing.
+        let mut found: Vec<(HashMap<(ExpId, u8), CodeFact>, Vec<fixpt_read::Span>)> = Vec::new();
+        let mut eff = Effect::pure();
+        self.dead_arms.push(crate::check::DeadArms::default());
+        let mut checked = || -> R<()> {
+            for m in members {
+                self.facts.code_put_back(&saved);
+                self.dead_arms.last_mut().expect("pushed").now.clear();
+                eff = self.check(e, *m)?;
+                let skipped = std::mem::take(&mut self.dead_arms.last_mut().expect("pushed").now);
+                found.push((self.facts.code_facts(), skipped));
+                for (x, xe) in &self.facts.effects {
+                    if effects_before.get(x).is_none_or(|b| b.0 != xe.0) {
+                        let joined = effects.get(x).map_or_else(|| xe.clone(), |j| j.union(xe));
+                        effects.insert(*x, joined);
+                    }
+                }
+            }
+            Ok(())
+        };
+        let r = checked();
+        let dead = self.dead_arms.pop().expect("pushed");
+        r?;
+        if let Some((_, err)) = dead.counts.into_values().filter(|(n, _)| *n == members.len()).min_by_key(|(_, err)| (err.span.start, err.span.end)) {
+            return Err(err);
+        }
+        // Two members' facts compared where both checked.
+        let within = |x: fixpt_read::Span, outer: &fixpt_read::Span| x.file == outer.file && x.start >= outer.start && x.end <= outer.end;
+        for j in 1..found.len() {
+            for i in 0..j {
+                let ((fi, si), (fj, sj)) = (&found[i], &found[j]);
+                let both = |k: &(ExpId, u8)| {
+                    let at = self.arena.span_of(k.0);
+                    !si.iter().chain(sj).any(|s| within(at, s))
+                };
+                let differs = fi.keys().chain(fj.keys()).any(|k| both(k) && fi.get(k) != fj.get(k));
+                if differs {
+                    return Err(FxError::at(
+                        self.arena.span_of(e),
+                        format!(
+                            "one body cannot be each member of this `allof`: checked as a {} and as a {}, it would be compiled differently",
+                            self.show_ty(members[i]),
+                            self.show_ty(members[j])
+                        ),
+                    ));
+                }
+            }
+        }
+        // What every member found, together.
+        self.facts.code_put_back(&saved);
+        for (facts, _) in found {
+            for (k, fact) in facts {
+                self.facts.code_insert(k, fact);
+            }
+        }
+        self.facts.effects.extend(effects);
+        Ok(eff)
+    }
+
+    /// A call of `fun`, of type `ft`, an `allof` of `members` (`docs/research/logical-types.md`
+    /// §8.5, rule 4): each argument synthesized once, and every member
+    /// whose parameters take them fits; the call's result is the meet of
+    /// theirs, its latent effect the least of theirs if one is, else the
+    /// first's (any one member's typing is sound alone).
+    #[allow(clippy::too_many_arguments)]
+    fn synth_allof_call(
+        &mut self,
+        e: ExpId,
+        fun: ExpId,
+        args: &[ExpId],
+        ft: TyId,
+        members: &[TyId],
+        fe: Effect,
+        mut done: Vec<Synthesised>,
+    ) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let mut effect = fe;
+        let mut tys = Vec::new();
+        for (i, a) in args.iter().enumerate() {
+            let (t, eff) = match done[i].take() {
+                Some(x) => x,
+                None => self.synth(*a).map_err(|err| self.as_argument(err, *a, i))?,
+            };
+            effect = effect.union(&eff);
+            tys.push(t);
+        }
+        let mut fits: Vec<(TyId, Effect, TyId, Conv)> = Vec::new();
+        for m in members {
+            let Ty::Subr { conv, effect: latent, params, result, .. } = self.arena.get(*m).clone() else { continue };
+            if params.len() == tys.len() && tys.iter().zip(&params).all(|(t, p)| self.subtype(*t, *p)) {
+                fits.push((*m, latent, result, conv));
+            }
+        }
+        let Some(&(m0, ref latent0, result0, conv)) = fits.first() else {
+            let shown: Vec<String> = tys.iter().map(|t| format!("a {}", self.show_ty(*t))).collect();
+            return Err(FxError::at(span, format!("this call fits no member of a {}: its arguments are {}", self.show_ty(ft), shown.join(", "))));
+        };
+        self.facts.call_convs.insert(fun, conv);
+        let mut result = result0;
+        for &(m, _, r, _) in &fits[1..] {
+            let Some(met) = self.meet(result, r) else {
+                return Err(FxError::at(
+                    span,
+                    format!("this call fits a {} and a {}, whose results have no meet", self.show_ty(m0), self.show_ty(m)),
+                ));
+            };
+            result = met;
+        }
+        let latent = fits.iter().map(|(_, l, _, _)| l).find(|l| fits.iter().all(|(_, o, _, _)| l.within(o))).unwrap_or(latent0).clone();
+        let mut effect = effect.union(&latent);
+        if self.may_spin(fun, ft, args) {
+            effect.0.insert(Atom::Spin);
+        }
+        let effect = self.mask(e, &effect, result);
+        Ok((result, effect))
     }
 
     /// `got ≤ want`, or an error at `e` saying so.
@@ -976,6 +1108,9 @@ impl Checker {
             done = cached;
         }
         let callee = self.arena.get(ft).clone();
+        if let Ty::AllOf(members) = &callee {
+            return self.synth_allof_call(e, fun, args, ft, members, fe, done);
+        }
         // A `vsubr` (generative type 0): any number of arguments, each of
         // its element type.
         if let Ty::Named { which: 0, args: ds } = &callee
@@ -1191,7 +1326,7 @@ impl Checker {
                 Ty::Pair(a, b, _, _) => [*a, *b].into_iter().for_each(|k| go(k, false)),
                 Ty::Bloblet { fields, .. } => fields.iter().for_each(|f| go(*f, false)),
                 Ty::Product(ps) | Ty::Sum(ps) => ps.iter().for_each(|(_, t)| go(*t, false)),
-                Ty::Union(ms) => ms.iter().for_each(|t| go(*t, false)),
+                Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().for_each(|t| go(*t, false)),
                 Ty::NList { elem, .. } => go(*elem, false),
                 // Through its representation; what it was given, cautiously,
                 // as if taken as a parameter.
@@ -1894,7 +2029,7 @@ impl Checker {
                     stack.extend(parts.iter().map(|(_, t)| *t));
                     false
                 }
-                Ty::Union(ms) => {
+                Ty::Union(ms) | Ty::AllOf(ms) => {
                     stack.extend(ms);
                     false
                 }
@@ -2065,7 +2200,7 @@ impl Checker {
                     fields.iter().for_each(|f| walk(c, *f, seen, out))
                 }
                 Ty::Product(parts) | Ty::Sum(parts) => parts.iter().for_each(|(_, t)| walk(c, *t, seen, out)),
-                Ty::Union(ms) => ms.iter().for_each(|t| walk(c, *t, seen, out)),
+                Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().for_each(|t| walk(c, *t, seen, out)),
                 Ty::Pair(a, b, _, _) => {
                     walk(c, a, seen, out);
                     walk(c, b, seen, out)
@@ -2117,7 +2252,7 @@ impl Checker {
             Ty::Ref(a, _) | Ty::MarkKey(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) => self.walk_vars(a, seen, hit),
             Ty::Bloblet { fields, .. } => fields.iter().any(|f| self.walk_vars(*f, seen, hit)),
             Ty::Product(parts) | Ty::Sum(parts) => parts.iter().any(|(_, t)| self.walk_vars(*t, seen, hit)),
-            Ty::Union(ms) => ms.iter().any(|t| self.walk_vars(*t, seen, hit)),
+            Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().any(|t| self.walk_vars(*t, seen, hit)),
             Ty::Pair(a, b, _, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),

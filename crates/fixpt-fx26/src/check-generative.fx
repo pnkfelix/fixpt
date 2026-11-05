@@ -79,6 +79,7 @@
                   (ty-sum (ps) (k-polarity-parts ps v at seen found))
                   ;; Immutable, as a sum: covariant in its members.
                   (ty-union (ms) (gos ms at))
+                  (ty-allof (ms) (gos ms at))
                   (ty-tag (a h e r) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
                   (ty-comp (a h e r once) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
                   (ty-place (r) (reg r))

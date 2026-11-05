@@ -85,6 +85,15 @@
 ;; What `k-reshapes` held for each module before `k-reshape-at` first reshaped it (an `extend`'s
 ;; positions, or none, `nil`): what a reshape of it checked again is made onto.
 (define-type k-reshape-base-list (listof (productof (1 k-at) (2 (listof k-picks acyclic))) acyclic))
+;; While a `lambda` is checked against each member of an `allof`, one frame
+;; per `allof`, innermost first (`check-allof.fx`): each `tagcase` arm a
+;; member's type rules out, skipped, by its body's place, with how many
+;; members skipped it and what its error names (the subject's type, the
+;; tag); and where the member being checked skipped one. Rust's `DeadArms`.
+(define-type k-dead-arm (productof (1 int) (2 int) (3 int) (4 int) (5 symbol)))
+(define-type k-spans (listof (productof (1 int) (2 int)) acyclic))
+(define-type k-dead-frame (productof (1 (listof k-dead-arm acyclic)) (2 k-spans)))
+(define-type k-dead-frames (listof k-dead-frame acyclic))
 ;; `with`'s `select` nodes and what each falls back to (`k-with-fallbacks`).
 (define-type k-fallbacks (listof (productof (1 int) (2 int)) acyclic))
 ;; While a type's `select`s are resolved (`k-resolve-selects`): what each
@@ -109,6 +118,7 @@
    (val k-fx-module? (subr pure (symbol) bool))
    (val k-reshapes (ref k-reshape-list @t))
    (val k-reshape-bases (ref k-reshape-base-list @t))
+   (val k-dead-arms (ref k-dead-frames @t))
    (val k-with-vals (ref k-with-list @t))
    (val k-last-latent (ref k-eff @t))
    (val k-broken (ref (listof k-break acyclic) @t))

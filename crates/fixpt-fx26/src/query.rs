@@ -775,7 +775,7 @@ fn children(ty: &Ty) -> Vec<(TyId, Side)> {
             .collect()
     };
     match ty {
-        Ty::Union(ms) => ms.iter().map(|m| (*m, Same)).collect(),
+        Ty::Union(ms) | Ty::AllOf(ms) => ms.iter().map(|m| (*m, Same)).collect(),
         Ty::Subr { params, result, .. } => params.iter().map(|p| (*p, Flip)).chain([(*result, Same)]).collect(),
         Ty::Poly { body, .. } => vec![(*body, Same)],
         Ty::Ref(t, _) | Ty::MarkKey(t, _) | Ty::ICell(t, _) | Ty::Array(t, _, _) => vec![(*t, Both)],
