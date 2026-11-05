@@ -2195,11 +2195,18 @@ checkers (`logical-types.md`, "U1, as built"). Left of it:
 U2 done (2026-11-05): `anyof` in both checkers (`logical-types.md`, "U2,
 as built"). Left of it:
 - A member below another is not dropped, only one the same as another
-  (CLAUDES_CHOICES.md, "U2"): `(anyof int nat)` keeps both. Dropping needs
-  subtyping where FX-26 reads types, or normalizing later.
+  (CLAUDES_CHOICES.md, "U2"): `(anyof int nat)` keeps both, and `car` of
+  an `anyof` of a `nat` list and an `int` list is refused.
+- An immutable pair of a union is not below the union of the pairs, which
+  a lemma cannot state yet either.
 - Cells, and writable pairs and lists, that share a shape: refused until
   a program needs them (question 14).
-Next: U3, rule 5 (union elimination at a call's arguments).
+
+U2b proposed (2026-11-05, the user's direction: normalize lazily, on
+demand): `logical-types.md` §8.8, head forms by shape, a shape's greatest
+member for inference, splitting an immutable field only when a whole
+comparison fails, a budget on splits, caches whose answers never change a
+verdict. Questions 16 to 20 there, for the user. Then U3.
 
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 

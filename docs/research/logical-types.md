@@ -800,7 +800,8 @@ later breaks nothing).
   they are calls); by narrowing on a shape test, which keeps the
   members of that shape, a union still if several share it.
 - *Normal form*: flattened; `void` dropped; a member below another
-  dropped; **sums merged**, `(anyof (sumof (a A) (b B)) (sumof (a C) (c
+  dropped (as built, only one the same as another: the rest is §8.8's,
+  on demand); **sums merged**, `(anyof (sumof (a A) (b B)) (sumof (a C) (c
   D)))` is `(sumof (a (anyof A C)) (b B) (c D))`, exactly the same set of
   values, since a sum's representation names its tag, not its type's
   tags. So `(anyof expr op)` is a sub-sum of `sexp` as written. Products
@@ -880,6 +881,7 @@ compares them like any fact.
 | U0    | S–M  | `union` renamed `oneof`; sums with disjoint tags well-formed members                                          | every existing program, renamed; two sums of disjoint tags; both checkers agree          |
 | U1    | M–L  | `allof` of monomorphic `subr` members: rules 1 to 4, `⊓` on base types, sums, products, immutable lists        | the user's λm swap over `expr`, `op`, `sexp`; `len`'s `pure`/`spin`; a `ref` meet refused |
 | U2    | M    | `anyof`: overlapping immutable members, sums merged, disjunctive subtyping with rollback, narrowing that leaves unions | `(anyof expr op)` a sub-sum of `sexp`; two cells, or two writable lists, refused          |
+| U2b   | M–L  | lazy normalization (§8.8): head forms by shape, greatest members, splits on failure with a budget, caches     | `car` of an `anyof` of `nat` and `int` lists; a pair of a union below a union of pairs; a mixed list refused    |
 | U3    | M    | rule 5, ∪E at arguments                                                                                       | `swap` of an `(anyof expr op)`; `car` of an `anyof` of two `acyclic` lists               |
 | U4    | M    | members that are `poly` (`TODO.md` §79's `length` over `nlist` and `listof`)                                 | `length` of an `nlist` gives its size, of a `@heap` list `(read r)`                      |
 | U5    | L    | research: Ξ's arrow rules between procedure types; shape-directed conversion's σ-indexed arms                  | only if a program needs it                                                               |
@@ -924,6 +926,146 @@ two cells, two writable lists; the sums' shared tag shown).
 Each stage in both checkers, agreeing, as L0 to L3 were. U1 before U2
 because swap needs only it: `sexp` is written as the sum it is. U0 to U3
 before macros (`TODO.md` §182), U4 and U5 after (question 15).
+
+### 8.8 Lazy normalization (U2b, proposed 2026-11-05)
+
+The user's concern (2026-11-05): without normalizing, the checker either
+refuses programs it should take, or makes their authors write
+boilerplate to get past it, or blows up while checking. U2 drops only a
+member the same as one before it (CLAUDES_CHOICES.md, "U2"); both
+failures are real today:
+
+```
+(define-type ns (anyof (listof nat acyclic) (listof int acyclic)))
+(define f (subr pure (ns) int) (lambda (l) (if (null? l) 0 (car l))))
+;; refused: argument 1 is a (anyof (pairof nat …) (pairof int …)), where a
+;; (oneof nil (pairof int ? r)) is expected
+
+(define p (pairof (oneof int bool) nil acyclic) (cons 1 nil))
+(define q (anyof (pairof int nil acyclic) (pairof bool nil acyclic)) p)
+;; refused, though every value of p's type is one of q's
+```
+
+The first is a missing normal form: `(listof nat acyclic)` is below
+`(listof int acyclic)`, so the union is that list, and `car` would take
+it apart. The second is missing distributivity: an immutable pair of a
+union is the union of the pairs. Section 6.1 left the second to lemmas;
+a lemma cannot take a union apart yet (section 6.3), so the boilerplate
+is a `typecase` rebuilding the pair in each arm.
+
+**Not eager.** Distribution as a normal form multiplies out: a product
+of n fields, each a union of k, is a union of kⁿ products, and products
+of such products multiply again. Nothing is stored that way. Deciding
+it is hard in general (a product of unions covered by a union of
+products is box covering; with recursion, subtyping of this kind is
+inclusion of regular tree languages, EXPTIME-complete, as Hosoya and
+Pierce note for XDuce), so the work must follow the question asked, not
+the size of the types. The user's direction: normalize lazily, on
+demand, only as far as a comparison needs.
+
+**The proposal.** Types stay as written (and print so). Four pieces:
+
+1. **A union's head form, on demand.** Its members grouped by run-time
+   shape, sums made one (as U0 and U2 already do where it is written),
+   each group in a fixed order. Linear in its members, computed when a
+   comparison or an inference first needs it, kept on the node. Its
+   fields are not looked into.
+2. **A shape's greatest member, on demand.** Where inference needs one
+   member of a shape (`cons` where a union is expected, `car` of a union
+   with pairs, the termination walk, the verifier), it asks whether one
+   member of that shape is above every other member of it, by
+   subtyping, and takes that one; with none, nothing is inferred, as
+   now. The first program above checks: `(listof int acyclic)` is the
+   greatest pair member. Kept on the node.
+3. **`τ ≤ σ₁ ∪ … ∪ σₘ`, split only on failure.**
+   - The candidates are the members of `τ`'s own shapes (the head form);
+     a `τ` of several shapes (a pair that may be `nil`, a union) is
+     taken shape by shape. Today's `nil` and pair rule is the case of
+     two shapes.
+   - Each candidate is tried whole, in order, the trail rolled back
+     after a failure, as now. Most questions end here, at today's cost.
+   - If none takes `τ` whole, and `τ` is an immutable product, sum or
+     frozen pair, it is split at one field: the first, in field order,
+     whose type has a union in its head form and on which the
+     candidates left differ. A candidate whose field shares no shape
+     with `τ`'s is dropped first. `τ` with that field put to each member
+     in turn must each be below the union. A field that may be written
+     is never split (its types are invariant, as section 5 says).
+   - This is distribution, one field at a time and only where a
+     candidate is told from another by it. Exact for immutable fields:
+     a value of `(pairof (anyof A B) C acyclic)` is a value of
+     `(pairof A C acyclic)` or of `(pairof B C acyclic)`. The second
+     program above checks by one split.
+4. **A budget on splits.** Each top-level question may split at most a
+   fixed number of times (counted in the proof, not in the work done:
+   see the caches below). Past it, the question fails with a message
+   that says so and names the two types: "deciding whether a … is a …
+   needs more than N case splits: take it apart with `typecase`, or
+   state it as a lemma".
+
+**Termination with recursion.** Splitting along a recursive type makes
+new pieces; the coinductive trail stops the search only if a piece met
+again is known as the same. So a piece is named by where it came from
+(the node, and the member chosen at each field split), never by a fresh
+node, and the trail compares those names. Finitely many: a regular type
+has finitely many subterms, and a union finitely many members. It
+remains exactly the antichain setting: building only the subsets of
+members a proof needs, skipping one covered by another already seen (De
+Wulf, Doyen, Henzinger and Raskin, CAV 2006, for word automata;
+Bouajjani, Habermehl, Holík, Touili and Vojnar, CIAA 2008, for tree
+automata). A recursive list is not split along its tail: `(listof
+(oneof int bool) acyclic)` is not below `(anyof (listof int acyclic)
+(listof bool acyclic))`, and splitting the first pair leaves its tail,
+of mixed elements, to fail, correctly.
+
+**Caches.** A cached answer must be the answer recomputing gives, so
+that dropping it is always safe and the two checkers agree whatever
+their caches hold.
+- *Head forms and greatest members*: on the node, kept. Linear in the
+  union's own members, no more than the type itself.
+- *Answers to subtype questions*: only of questions with no unsolved
+  inference variables. A failure at any time (if it fails assuming
+  more, it fails assuming less); a success only when its whole question
+  ends, since until then it may rest on the trail's assumptions.
+  Bounded by a count, then dropped and begun again, in both checkers,
+  as FX-26's interning already is (`k-intern-budget`), and invalidated
+  with it, as `k-proven` is. Not a weak table: when entries go would
+  depend on the collector, a case would be hard to reproduce, and the
+  Rust checker has no collector to match.
+- *The budget counts splits in the proof*, so a cached answer is
+  charged what it cost when found (kept with it): a cache hit never
+  changes whether a question runs out.
+- *Measured first*: the front end checking itself (some 200 modules)
+  says whether the answer cache earns its keep, or the head forms are
+  enough.
+
+**Inference variables.** A question with unsolved variables is not
+split (a split would solve them per piece, and the pieces disagree);
+it is decided as now, and refused if that fails.
+
+**Both checkers alike.** The order of candidates, of fields, of members,
+the budget and the caches' bound are part of the rule: with a budget, a
+different order can give a different answer.
+
+**What this changes.** Distribution over immutable fields becomes the
+checker's, where section 6.1 left it to lemmas. Lemmas stay for what is
+not structural (non-regular and generative families, `gadts.md`) and
+for invariant positions; a union's lemma (a `typecase` in a lemma's
+body, members matched as a set rather than in order) still waits for a
+program to need it. Rule 5 (U3) is the same idea on terms: an
+argument's union split only when the whole fails, one member at a time.
+
+**Soundness note.** §2.3 gains the split as a derived rule, its premise
+that the field split is immutable, with the lemma `⟦P[f ↦ A ∪ B]⟧ =
+⟦P[f ↦ A]⟧ ∪ ⟦P[f ↦ B]⟧` for immutable `P`; coinductive soundness with
+pieces named by their origin; the greatest-member rule is subsumption.
+
+**Tests.** The two programs above, accepted; the recursive list above,
+refused; a product of four fields of two-member unions against a union
+of fifteen of the sixteen products, refused by the budget or by the
+missing piece, whichever the budget allows, the same in both checkers;
+every program checked once with the answer cache off and once on, the
+verdicts compared.
 
 ## 9. Open questions for you
 
@@ -1047,6 +1189,22 @@ by the revision (9.2), question 4 answered yes by it.
 15. **Order**: U0 to U3 before macros (`TODO.md` §182), U4 and U5 after
     (proposed)?
     *Answered 2026-11-05: yes.*
+
+16. **Distribution over immutable fields, by the checker** (§8.8)? It
+    reverses section 6.1's line for these (a lemma for each missing case)
+    and makes the second program of §8.8 check. Or keep it to lemmas,
+    with §8.8's head forms and greatest members only (which fix the
+    first)?
+17. **The budget**: how many splits per question (proposed: 64, which no
+    program in the tests comes near; to measure), and is refusing past
+    it, naming `typecase` and lemmas, the message you want?
+18. **What may be split**: products, sums and frozen pairs (proposed); also
+    frozen bloblets? An `nlist`'s first pair, as a pair's?
+19. **The answer cache**: measured before it is built (proposed), or
+    built with the head forms? Its bound, if built: as the interning
+    table's, 400,000 entries?
+20. **Messages**: types as written (proposed, which laziness keeps), or a
+    union's head form where it differs?
 
 ## Sources
 
