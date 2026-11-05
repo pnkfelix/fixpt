@@ -912,12 +912,16 @@ by the revision (9.2), question 4 answered yes by it.
    Or one former, `union`, with disjointness checked only where a program
    relies on it (a `typecase` without `else`): fewer formers, but the
    promise "a test splits it" no longer written in the type.
+   *Answered 2026-11-04: `parts`.* `(parts T …)` is the disjoint
+   former, `(union T …)` the true one.
 10. **Rule 4, the meet at calls.** Every fitting member and the meet of
     their results, refused where there is none (proposed); or ordered
     selection (the design of 2026-09-29), or the most precise member,
     refused where none is. The meet is distributivity under conditions:
     is excluding invariant positions enough for you, before the
     soundness note's lemma is written?
+    *Answered 2026-11-04: the meet of results, as rule 4 has it
+    ("sounds plausible"); the lemma still to be written.*
 11. **Rule 5, union elimination at arguments**: wanted at U3, or later?
     Without it, a `(union expr op)` given to `swap` takes the `sexp`
     member, and its result is an `sexp`.
