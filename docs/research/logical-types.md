@@ -672,7 +672,13 @@ are read from its name any more, only from its type.
   products have exact structural meets, and the refs that make them
   unsound are refused a meet unless equal.
 
-### 8.5 Revision (2026-11-04): true unions, intersections that meet
+### 8.5 Revision (2026-11-04, settled 2026-11-05): `anyof`, `oneof`, `allof`
+
+Three formers, the user's names (question 9): `(anyof T …)` a true
+union, `(oneof T …)` a union whose members a run-time test separates
+(today's `union`, renamed), `(allof (subr …) …)` an intersection of
+procedure types (designed as `overload`). The name `union` goes. What
+follows is the design as the user settled it in section 9.2.
 
 **The case.** The user encoded λm (Herman and Wand, "A Theory of
 Hygienic Macros", ESOP 2008) with structural types, each syntactic sort a
@@ -689,9 +695,9 @@ swapping, one definition over every sort. Proposed syntax:
                          (app (productof (1 expr) (2 expr)))
                          (mac macro) (seq (listof sexp acyclic))))
 
-(define-type swapper (overload (subr pure (symbol symbol expr) expr)
-                               (subr pure (symbol symbol op) op)
-                               (subr pure (symbol symbol sexp) sexp)))
+(define-type swapper (allof (subr pure (symbol symbol expr) expr)
+                            (subr pure (symbol symbol op) op)
+                            (subr pure (symbol symbol sexp) sexp)))
 (define* swap swapper
   (lambda (a b s)
     (tagcase s
@@ -724,13 +730,14 @@ FX-26 takes from Ξ only what the rules below need, each where its
 condition holds: section 3.1's reason for dropping distributivity is
 refs, and the conditions are what keep refs out.
 
-**Five rules.** Each a proposal, for section 9.2.
+**Five rules**, as the user settled them (questions 10 to 13).
 
 1. **Intersection introduction, per member** (as section 6.1): the
    `lambda` is checked once per member, each with that member's
    parameters, result and latent effect; a recursive reference sees the
    whole intersection. Errors name the member.
-2. **Dead arms.** Checked against one member, a `tagcase` arm whose tag
+2. **Dead arms** (question 12). Only while checking an `allof`'s
+   members: checked against one member, a `tagcase` arm whose tag
    that member's subject type lacks cannot run: it is skipped, neither
    checked nor refused (today: "has no tag", `k-tagcase-arms`). An arm
    skipped under *every* member is refused as now, so a misspelt tag is
@@ -741,7 +748,9 @@ refs, and the conditions are what keep refs out.
    per node (conversions, reshapes, standard operators, operand types,
    sizes). Checked once per member, a node gets them once per member;
    where they differ, the one body cannot be compiled for all, and the
-   overload is refused at that node ("uniform representation", made
+   `allof` is refused at that node (question 13; taking the more general
+   of two ordered facts, a checked `car`, is a later relaxation by an
+   explicit list) ("uniform representation", made
    precise: not a property of the types but of the facts). Re-checking a
    node is a hazard already: a module reshaped twice over composed its
    reshape with itself until `8616f2fe`; each fact must be recorded so
@@ -763,60 +772,74 @@ refs, and the conditions are what keep refs out.
      sizes by `nat_join`'s dual), sums (the tags in common, their
      payloads' meets; none in common, `void`), products (field by field),
      immutable pairs and lists (`acyclic`, `const`: part by part),
-     `subr` types (an intersection: their `overload`). A cell, an array, a
+     `subr` types (an intersection: their `allof`). A cell, an array, a
      writable pair, a region, a type variable or a generative type meets
      another only if equal. Where the results of the fitting members have
      no meet, the call is refused, naming them (the caller `proj`s or
      annotates).
-5. **Union elimination at a call's arguments.** A call's argument is
+5. **Union elimination at a call's arguments** (question 11: at U3). A
+   call's argument is
    evaluated once, before the call: Dunfield and Pfenning's condition for
    ∪E in call by value (section 3.1). So where an argument's type is a
    union and the call does not fit it whole, it is checked per member,
    and its type is the union over the members of what rule 4 gives:
-   `swap` of a `(union expr op)` is a `(union expr op)`. One argument
+   `swap` of an `(anyof expr op)` is an `(anyof expr op)`. One argument
    split at a time, only when the whole fails, so the cost is the
    members', not their product. This is Ξ's `(σ→ρ) ∩ (τ→ρ) ≤ (σ∪τ) →
    ρ` at calls only, not between procedure types (passing `swap` where a
-   `(subr pure (symbol symbol (union expr op)) …)` is expected stays
+   `(subr pure (symbol symbol (anyof expr op)) …)` is expected stays
    refused: later, if a program needs it).
 
-**True unions.** `(union T …)` of any members: a value of one of them,
-no test required to tell which.
+**True unions.** `(anyof T …)`: a value of one of them, no test
+required to tell which. At U2 its members are immutable: two that are
+cells, arrays or writable pairs are refused (question 14; lifting it
+later breaks nothing).
 - *Introduction* by subsumption, as now; never synthesized (section 6.1).
 - *Elimination*: by subsumption to a type above every member; by rule 5
   at calls (which takes `car`, `extract`, `with` and the rest, since
   they are calls); by narrowing on a shape test, which keeps the
   members of that shape, a union still if several share it.
 - *Normal form*: flattened; `void` dropped; a member below another
-  dropped; **sums merged**, `(union (sumof (a A) (b B)) (sumof (a C) (c
-  D)))` is `(sumof (a (union A C)) (b B) (c D))`, exactly the same set of
+  dropped; **sums merged**, `(anyof (sumof (a A) (b B)) (sumof (a C) (c
+  D)))` is `(sumof (a (anyof A C)) (b B) (c D))`, exactly the same set of
   values, since a sum's representation names its tag, not its type's
-  tags. So `(union expr op)` is a sub-sum of `sexp` as written. Products
-  are not merged: `(union (productof A B) (productof C D))` keeps the
-  correlation that `(productof (union A C) (union B D))` loses.
+  tags. So `(anyof expr op)` is a sub-sum of `sexp` as written. Products
+  are not merged: `(anyof (productof A B) (productof C D))` keeps the
+  correlation that `(productof (anyof A C) (anyof B D))` loses.
 - *Subtyping*: as section 6.1, but `τ ≤ ∪σ̄` may now hold through
   several members, so it tries each with the trail rolled back, as the
   lemma rule does (`check.rs`, the lemma rule). Not complete (section
   6.1's example stands); a lemma states a missing case.
 - *Cells* (refused at U2, question 14; what lifting it would mean): a
   union of cells is not a cell of a union (section 5). Reading
-  through `(union (ref A r₁) (ref B r₂))` gives `(union A B)` with effect
+  through `(anyof (ref A r₁) (ref B r₂))` gives `(anyof A B)` with effect
   `(read r₁) ∪ (read r₂)`; writing needs a value of `A ⊓ B` (rule 4's
   meet, so equal cells' contents, or immutable ones that meet), effect
-  both writes. Regions: `(union (listof T r₁) (listof T r₂))` is now a
+  both writes. Regions: `(anyof (listof T r₁) (listof T r₂))` would be a
   type; section 5's message suggesting a region variable stays as a hint.
 - *Representation*: none; a union is what its members are. A compiler
   may not assume a member it was not told by a narrowing.
 
-**Disjoint unions, renamed.** Today's `union` is the disjoint kind by
+**Disjoint unions: `oneof`.** Today's `union` is the disjoint kind by
 construction (L1): members of pairwise distinct shapes, so a shape test
-splits it, and `typecase` without `else` is exhaustive by shapes. Kept,
-as a second former, its name to choose (question 9). Its subtyping is
-the true union's restricted to disjoint members, so `(disjoint …) ≤
-(union …)` of the same members, and the renaming is mechanical: both
-checkers, the front end, the ports, the docs.
+splits it, and `typecase` without `else` is exhaustive. Renamed `oneof`
+(U0), with two settlements (question 9):
+- *Well-formed* when a run-time test separates every two members: by
+  shape (the word's tag, a bloblet's kind) or, for two sums, by tag, their
+  tag sets disjoint. `(oneof (sumof (a A) (b B)) (sumof (c C)))` is
+  well-formed; `(oneof (sumof (a A)) (sumof (a B)))` is not. A
+  `typecase` arm for a sum member tests the shape, then the tag.
+- *The same type as `anyof`* of its members: the same values, each
+  below the other. `oneof` is an `anyof` whose members are checked where
+  it is written: one node in each checker, printed `oneof` when its
+  members are disjoint. Type variables stay out of `oneof` (question 3).
 
-**Intersections, written.** Only `(overload (subr …) …)` is written.
+The renaming is mechanical: both checkers, the front end, the ports, the
+docs; every `(union nil (pairof …))` becomes `(oneof nil (pairof …))`.
+Further tests, singleton types and discriminants at a path, are future
+work (question 9's notes).
+
+**Intersections, written.** Only `(allof (subr …) …)` is written.
 The meets of rule 4 are computed and print as the sum or product they
 normalize to; one that does not normalize (two type variables) is not
 formed (no meet: refused). No `inter` of data types is proposed.
@@ -829,7 +852,8 @@ compares them like any fact.
 ### 8.6 Additions to the soundness note, for the revision
 
 - **§1.4 types**: `∪` without the disjointness side condition; the
-  disjoint former as `∪` with it; `∧(σ₁ … σₙ)` of `subr`s; a partial
+  disjoint former (`oneof`) as `∪` with it, its side condition the
+  separating tests; `∧(σ₁ … σₙ)` of `subr`s (`allof`); a partial
   `⊓` on types, defined as rule 4 lists, undefined at every invariant
   position whose two sides differ.
 - **§2.3 subtyping**: Lemma 2.1's inversion becomes disjunctive for
@@ -853,15 +877,16 @@ compares them like any fact.
 
 | Stage | Size | What                                                                                                          | Test                                                                                     |
 | ----- | ---- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| U0    | S–M  | the disjoint former renamed (question 9); `union` its alias for one release, or not                           | every existing program, renamed; both checkers agree                                     |
-| U1    | M–L  | `overload` of monomorphic `subr` members: rules 1 to 4, `⊓` on base types, sums, products, immutable lists     | the user's λm swap over `expr`, `op`, `sexp`; `len`'s `pure`/`spin`; a `ref` meet refused |
-| U2    | M    | true `union`: overlapping members, sums merged, disjunctive subtyping with rollback, narrowing that leaves unions | `(union expr op)` a sub-sum of `sexp`; two cells, or two writable lists, refused          |
-| U3    | M    | rule 5, ∪E at arguments                                                                                       | `swap` of a `(union expr op)`; `car` of a union of two `acyclic` lists                   |
+| U0    | S–M  | `union` renamed `oneof`; sums with disjoint tags well-formed members                                          | every existing program, renamed; two sums of disjoint tags; both checkers agree          |
+| U1    | M–L  | `allof` of monomorphic `subr` members: rules 1 to 4, `⊓` on base types, sums, products, immutable lists        | the user's λm swap over `expr`, `op`, `sexp`; `len`'s `pure`/`spin`; a `ref` meet refused |
+| U2    | M    | `anyof`: overlapping immutable members, sums merged, disjunctive subtyping with rollback, narrowing that leaves unions | `(anyof expr op)` a sub-sum of `sexp`; two cells, or two writable lists, refused          |
+| U3    | M    | rule 5, ∪E at arguments                                                                                       | `swap` of an `(anyof expr op)`; `car` of an `anyof` of two `acyclic` lists               |
 | U4    | M    | members that are `poly` (`TODO.md` §79's `length` over `nlist` and `listof`)                                 | `length` of an `nlist` gives its size, of a `@heap` list `(read r)`                      |
 | U5    | L    | research: Ξ's arrow rules between procedure types; shape-directed conversion's σ-indexed arms                  | only if a program needs it                                                               |
 
 Each stage in both checkers, agreeing, as L0 to L3 were. U1 before U2
-because swap needs only it: `sexp` is written as the sum it is.
+because swap needs only it: `sexp` is written as the sum it is. U0 to U3
+before macros (`TODO.md` §182), U4 and U5 after (question 15).
 
 ## 9. Open questions for you
 
@@ -984,6 +1009,7 @@ by the revision (9.2), question 4 answered yes by it.
     `const` lists) are allowed. Lifting it later breaks nothing.
 15. **Order**: U0 to U3 before macros (`TODO.md` §182), U4 and U5 after
     (proposed)?
+    *Answered 2026-11-05: yes.*
 
 ## Sources
 

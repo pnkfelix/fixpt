@@ -2167,6 +2167,13 @@ fitting member and the meet of results, defined only where exact and
 sound; ∪E at a call's arguments), §8.6 (soundness note), §8.7 (stages U0
 to U5), §9.2 (the user's questions 9 to 15).
 
+Settled with the user (2026-11-05, `logical-types.md` §9.2): the formers
+are `anyof` (true union), `oneof` (today's `union`, renamed; members
+separated by shape or, for sums, by disjoint tags; the same type as
+`anyof` of its members) and `allof` (was `overload`); rules 2 to 5 as
+proposed, rule 3 strict; no mutable members of an `anyof` yet; U0 to U3
+before macros (§182), U4 and U5 after. Next: U0, the renaming.
+
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 
 Since `fb86975` an integer literal checks as any fixed-width integer type
