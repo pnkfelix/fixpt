@@ -1,7 +1,7 @@
 ; Accepted: the shapes of an `f32`, a reference, a sum and a product, each
 ; with its predicate and its `typecase` arm, which narrow a union of them.
 (define-datatype shape (circle int) (square int))
-(define-type v (union int f32 (ref int @r) shape (productof (w int) (h int))))
+(define-type v (oneof int f32 (ref int @r) shape (productof (w int) (h int))))
 (define* size (subr (read @r) (v) int)
   (lambda (x)
     (typecase x

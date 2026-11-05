@@ -33,7 +33,7 @@ fn small_programs() {
     assert_eq!(both("(if (and (bool=? #t #t) (char<? #\\a #\\b) (string>=? \"b\" \"a\")) 1 0)"), "1");
     // Shape predicates and bits (TODO.md §55).
     assert_eq!(both("(list (bitwise-and 12 10) (bitwise-ior 12 10) (bitwise-xor 12 10) (bitwise-not 5) (arithmetic-shift -17 -2))"), "(8 14 6 -6 -5)");
-    assert_eq!(both("(let ((f (the (subr pure ((union int string)) int) (lambda (x) (if (int? x) x (string-length x)))))) (+ (f 3) (f \"ab\")))"), "5");
+    assert_eq!(both("(let ((f (the (subr pure ((oneof int string)) int) (lambda (x) (if (int? x) x (string-length x)))))) (+ (f 3) (f \"ab\")))"), "5");
 }
 
 #[test]

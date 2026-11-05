@@ -182,22 +182,69 @@
     (cond ((null? ms) -1)
           ((k-shape-known? (car ms)) (k-unknown-member (cdr ms)))
           (else (car ms)))))
-;; A member after the first of `ms` that shares a shape with `m`, or -1.
+;; `m`'s tags, if it is a sum, as a list of one.
+(define k-sum-parts-of (->* (int) (listof k-parts acyclic))
+  (lambda (m) (tagcase (k-get (k-resolve m)) (ty-sum (ps) (list ps)) (else y nil))))
+(define k-both-sums? (->* (int int) bool)
+  (lambda (m o) (and (not (null? (k-sum-parts-of m))) (not (null? (k-sum-parts-of o))))))
+;; A tag of `a`'s that `b` has too, as a list of one.
+(define k-shared-tag (->* (k-parts k-parts) (listof symbol acyclic))
+  (lambda (a b)
+    (cond ((null? a) nil)
+          ((>= (k-part-find b (extract (car a) 1)) 0) (list (extract (car a) 1)))
+          (else (k-shared-tag (cdr a) b)))))
+(define k-sums-share (->* (int int) (listof symbol acyclic))
+  (lambda (m o) (k-shared-tag (car (k-sum-parts-of m)) (car (k-sum-parts-of o)))))
+;; A member after the first of `ms` that a run-time test does not tell from
+;; `m`, or -1: one sharing a shape, but for two sums with no tag in common.
 (define k-overlap-with (->* (int k-ids) int)
   (lambda (m ms)
     (cond ((null? ms) -1)
+          ((k-both-sums? m (car ms))
+           (if (null? (k-sums-share m (car ms))) (k-overlap-with m (cdr ms)) (car ms)))
           ((k-shapes-meet? (k-run-shape m) (k-run-shape (car ms))) (car ms))
           (else (k-overlap-with m (cdr ms))))))
 (define k-union-overlap (->* (k-ids int int) unit)
   (lambda (ms start end)
     (if (null? ms)
         #u
-        (let ((o (k-overlap-with (car ms) (cdr ms))))
-          (if (< o 0)
-              (k-union-overlap (cdr ms) start end)
-              (k-fail (k-cat5 "a union's members must differ in shape at run time: a "
-                              (k-show-ty (car ms)) " and a " (k-show-ty o) " do not")
-                      start end))))))
+        (let* ((m (car ms)) (o (k-overlap-with m (cdr ms))))
+          (cond ((< o 0) (k-union-overlap (cdr ms) start end))
+                ((k-both-sums? m o)
+                 (k-fail (k-cat5 "a `oneof`'s sums must have no tag in common: a " (k-show-ty m)
+                                 " and a " (k-show-ty o)
+                                 (k-cat3 " both have `" (symbol->string (car (k-sums-share m o)))
+                                         "`"))
+                         start end))
+                (else
+                 (k-fail (k-cat5 "a `oneof`'s members must be told apart at run time: a "
+                                 (k-show-ty m) " and a " (k-show-ty o) " cannot be")
+                         start end)))))))
+(define k-count-sums (->* (k-ids) int)
+  (lambda (ms)
+    (if (null? ms) 0 (+ (if (null? (k-sum-parts-of (car ms))) 0 1) (k-count-sums (cdr ms))))))
+;; The tags of `ms`'s sums, in order.
+(define k-all-sum-parts (->* (k-ids) k-parts)
+  (lambda (ms)
+    (if (null? ms)
+        nil
+        (let ((p (k-sum-parts-of (car ms))) (rest (k-all-sum-parts (cdr ms))))
+          (if (null? p) rest (append (car p) rest))))))
+;; `ms` with its first sum `sum`, its other sums gone.
+(define k-sums-replaced (->* (k-ids int bool) k-ids)
+  (lambda (ms sum done)
+    (cond ((null? ms) nil)
+          ((null? (k-sum-parts-of (car ms)))
+           (the k-ids (cons (car ms) (k-sums-replaced (cdr ms) sum done))))
+          (done (k-sums-replaced (cdr ms) sum done))
+          (else (the k-ids (cons sum (k-sums-replaced (cdr ms) sum #t)))))))
+;; `ms`'s sums, whose tags `k-union-overlap` found apart, made one: the
+;; same values, which `tagcase` takes apart. As Rust's `union_sums_merged`.
+(define k-union-sums-merged (->* (k-ids) k-ids)
+  (lambda (ms)
+    (if (< (k-count-sums ms) 2)
+        ms
+        (k-sums-replaced ms (k-ty-new (ty-sum (k-all-sum-parts ms))) #f))))
 (define k-pendings-append
   (->* (k-pendings k-pending) k-pendings)
   (lambda (ps p)
@@ -209,7 +256,7 @@
     (let ((unknown (k-unknown-member ms)))
       (if (>= unknown 0)
           (k-fail (k-cat3 "a " (k-show-ty unknown)
-                          " cannot be in a union: its shape at run time is not known")
+                          " cannot be in a `oneof`: its shape at run time is not known")
                   start end)
           #u))))
 ;; Whether a member is not yet known: a recursive type's own name, read
@@ -234,7 +281,8 @@
                             (k-pendings-append (get k-pending-unions)
                                                (product (1 u) (2 start) (3 end))))
                        u))
-              (begin (k-union-overlap merged start end) (k-union-build merged))))))))
+              (begin (k-union-overlap merged start end)
+                     (k-union-build (k-union-sums-merged merged)))))))))
 ;; The unions read before what they name was, each whose members are all
 ;; known now checked as `k-union-of` would have.
 (define k-check-pending-unions (->* () unit)
@@ -249,6 +297,12 @@
               (the k-pendings (cons p (k-check-pendings (cdr ps))))
               (begin (k-union-known ms (extract p 2) (extract p 3))
                      (k-union-overlap ms (extract p 2) (extract p 3))
+                     ;; Made already, its sums cannot be made one now.
+                     (if (> (k-count-sums ms) 1)
+                         (k-fail (string-append "a `oneof` of sums with a member not yet defined: "
+                                                "write the sums as one `sumof`")
+                                 (extract p 2) (extract p 3))
+                         #u)
                      (k-check-pendings (cdr ps))))))))
 
 ;; A pair that may be `nil`, tested for either, is two members here.

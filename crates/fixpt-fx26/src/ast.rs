@@ -457,15 +457,15 @@ pub enum Ty {
     /// continuation, here — and a subtype of every type.
     Void,
     /// `nil`'s own type: the empty list alone, a member of unions
-    /// (`(union nil int)`), and below every pair that may be `nil`
+    /// (`(oneof nil int)`), and below every pair that may be `nil`
     /// (`docs/research/logical-types.md`, L1).
     Nil,
     /// `false`: `#f` alone, below `bool`, of `bool`'s shape (a member of
-    /// unions, `(union false int)`; `docs/research/logical-types.md`, L1's
+    /// unions, `(oneof false int)`; `docs/research/logical-types.md`, L1's
     /// stage 3). `#f` is a `bool`, and checks as a `false` where one is
     /// expected.
     False,
-    /// `(union T …)`: a value of one of the members, whose shapes at run
+    /// `(oneof T …)`: a value of one of the members, whose shapes at run
     /// time (`Checker::shape`) are disjoint, so that the shape says which.
     /// Kept normalized: no member a union, and `nil` with a pair that is not
     /// `nil` made the pair that may be (`Checker::union_of`).
@@ -479,7 +479,7 @@ pub enum Ty {
     Poly { binders: Vec<(DVar, Kind)>, body: TyId },
     Ref(TyId, Region),
     /// `(pairof A B R)`, a pair, when the last is false; when it is true,
-    /// a pair or `nil` (`(union nil (pairof A B R))`), as `listof`'s pairs
+    /// a pair or `nil` (`(oneof nil (pairof A B R))`), as `listof`'s pairs
     /// are (`docs/research/logical-types.md`, L0).
     Pair(TyId, TyId, Region, bool),
     /// `(prompt-tag A H D R)`: a tag in region `R` whose prompts deliver an

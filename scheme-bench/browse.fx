@@ -16,7 +16,7 @@
 ;;; input file writes |837| |177| ….
 ;;;
 ;;; The patterns and the data are lists of symbols and of such lists: an
-;;; `item` is a symbol or a list of items, `(union symbol (listof item
+;;; `item` is a symbol or a list of items, `(oneof symbol (listof item
 ;;; @heap))`, as in Larceny, `typecase` telling them apart (2026-10-07;
 ;;; until then a `define-datatype`, a sum made per item); the lists stay
 ;;; mutable lists, since `init` makes the list of patterns circular and
@@ -38,7 +38,7 @@
 ;;; original's, at two types. `assq` is written out. The inputs are built
 ;;; in the file.
 
-(define-type item (union symbol (listof item @heap)))
+(define-type item (oneof symbol (listof item @heap)))
 (define-type items (listof item @heap))
 ;; A unit's properties: `pattern` to a list of data, and made-up names
 ;; to `#f` (`nil`).
@@ -47,10 +47,10 @@
 
 (define lookup
   (poly ((v type))
-    (subr (maxeff (read @heap) spin) (symbol (listof (pairof symbol v @heap) @heap)) (union nil (pairof symbol v @heap))))
+    (subr (maxeff (read @heap) spin) (symbol (listof (pairof symbol v @heap) @heap)) (oneof nil (pairof symbol v @heap))))
   (plambda ((v type))
     (lambda (key table)
-      (letrec ((loop (subr (maxeff (read @heap) spin) ((listof (pairof symbol v @heap) @heap)) (union nil (pairof symbol v @heap)))
+      (letrec ((loop (subr (maxeff (read @heap) spin) ((listof (pairof symbol v @heap) @heap)) (oneof nil (pairof symbol v @heap)))
                  (lambda (x)
                    (if (null? x)
                        no-pair
@@ -208,7 +208,7 @@
 
 (define-type alist (listof (pairof symbol item @heap) @heap))
 
-(define* assq (subr (maxeff (read @heap) spin) (symbol alist) (union nil (pairof symbol item @heap)))
+(define* assq (subr (maxeff (read @heap) spin) (symbol alist) (oneof nil (pairof symbol item @heap)))
   (lambda (key l)
     (cond ((null? l) no-pair)
           ((eq? (car (car l)) key) (car l))

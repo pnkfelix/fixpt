@@ -46,7 +46,7 @@
 
 ;; A value: as itself, or an `other`, the one sum among them.
 (define-type val
-  (union int f64 f32 char bool string symbol keyword nil
+  (oneof int f64 f32 char bool string symbol keyword nil
          (pairof val val @v) (arrayof val @v)
          (subr (maxeff evals spin) ((listof val @v)) val)
          (ref val @v)

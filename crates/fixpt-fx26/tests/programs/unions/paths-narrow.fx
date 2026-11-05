@@ -2,7 +2,7 @@
 ; as it does a variable, while nothing may have changed what the path reads
 ; (`TODO.md` §54): a write to another region leaves it; frozen data, and a
 ; product's fields, nothing writes.
-(define-type v (union int string))
+(define-type v (oneof int string))
 (define-type cell (pairof v int @r))
 (define-type frozen (pairof v int (const heap)))
 (define* plus (subr (read @r) (cell) int)

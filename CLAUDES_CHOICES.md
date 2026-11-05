@@ -3573,3 +3573,24 @@ differ, and another lambda's `tag` is not this one's. Now the earliest
 reference by place, then the innermost lambda around this one that binds
 it. The certificate is not trusted either way; this makes it the same
 from run to run, and right where the name is shadowed.
+
+## U0: `union` renamed `oneof` (2026-11-05; `TODO.md` §79, `logical-types.md` §8.7)
+
+1. **`union` still read, as `oneof`.** The design says the name goes;
+   removing it outright would break Heist's and kayak's programs on their
+   next pin, with nothing gained in the meantime. Both parsers read
+   either; everything printed (types in messages, type representations)
+   says `oneof`. To remove once both have moved (`TODO.md` §79).
+2. **Two sums made one where they are written.** The well-formed `oneof`
+   of two sums with no tag in common is normalized to one sum (tags in the
+   members' order), so `tagcase` takes it apart with nothing new, and the
+   type prints as that `sumof`. Kept apart they would need narrowing by
+   tag sets, which nothing asks for yet.
+3. **Not when a member is a recursive type's own name, not yet defined.**
+   Such a union is built before its members are known and checked later;
+   making its sums one then would mean rewriting a node already shared.
+   Refused instead, naming the fix (write the sums as one `sumof`).
+4. **Renamed everywhere syntax is**, but not where `union` names a
+   procedure (`native-reps-webs.fx`, the Knuth–Bendix ports, `conform.fx`'s
+   set union) nor in prose, where "a union" still describes the type; the
+   research notes keep the name of their date.

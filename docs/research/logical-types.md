@@ -884,6 +884,14 @@ compares them like any fact.
 | U4    | M    | members that are `poly` (`TODO.md` §79's `length` over `nlist` and `listof`)                                 | `length` of an `nlist` gives its size, of a `@heap` list `(read r)`                      |
 | U5    | L    | research: Ξ's arrow rules between procedure types; shape-directed conversion's σ-indexed arms                  | only if a program needs it                                                               |
 
+**U0, as built (2026-11-05).** `oneof` in both checkers (`union` still
+read as it, for Heist's and kayak's programs); two sums with no tag in
+common well-formed members, made one sum where written (not where a
+member is a recursive type's own name, not yet defined: refused); every
+`(union …)` in the sources, tests, ports and `fx26.md` renamed; messages
+and type representations say `oneof`. Tests: `unions/oneof-sums.fx`,
+`oneof-sums-share.fx`, `union-still-read.fx`.
+
 Each stage in both checkers, agreeing, as L0 to L3 were. U1 before U2
 because swap needs only it: `sexp` is written as the sum it is. U0 to U3
 before macros (`TODO.md` §182), U4 and U5 after (question 15).

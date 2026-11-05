@@ -52,7 +52,7 @@ pub(crate) fn fixed_range(name: &str) -> Option<(i128, i128)> {
 /// A datum, what a reader reads: an atom, or a pair of datums, frozen and
 /// acyclic, or a vector or bytevector (TODO §51). The same text defines it
 /// in the checker written in FX-26 (`standard::standard_text`).
-pub const DATUM: &str = "(union int f64 char bool string symbol keyword nil (pairof datum datum acyclic) vector bytevector)";
+pub const DATUM: &str = "(oneof int f64 char bool string symbol keyword nil (pairof datum datum acyclic) vector bytevector)";
 /// What an I/O primitive gives when it fails (`TODO.md` §84): its kind, one
 /// of a fixed few as `tagcase` can check, and the system's description. A
 /// value the program sees, not a failure of the run.
@@ -1297,10 +1297,11 @@ impl Checker {
         }
     }
 
-    /// The union of `members`, normalized: unions in it flattened, `nil` and
-    /// a pair that is not `nil` made the pair that may be, and one member
-    /// itself. Each member must have a known shape, and no two the same
-    /// (`docs/research/logical-types.md`, L1).
+    /// The union of `members`, `(oneof …)`, normalized: unions in it
+    /// flattened, `nil` and a pair that is not `nil` made the pair that may
+    /// be, sums made one, and one member itself. Each member must have a
+    /// known shape, and no two the same but sums with no tag in common
+    /// (`docs/research/logical-types.md`, L1 and §8.5).
     pub(crate) fn union_of(&mut self, members: &[TyId], span: fixpt_read::Span) -> R<TyId> {
         let mut flat: Vec<TyId> = Vec::new();
         for &m in members {
@@ -1333,6 +1334,7 @@ impl Checker {
             return Ok(u);
         }
         self.union_members_differ(&flat, span)?;
+        self.union_sums_merged(&mut flat);
         match flat[..] {
             [] => Ok(self.arena.ty(Ty::Void)),
             [m] => Ok(m),
@@ -1343,7 +1345,7 @@ impl Checker {
     fn union_members_known(&mut self, ms: &[TyId], span: fixpt_read::Span) -> R<()> {
         for &m in ms {
             if self.shape(m).is_none() {
-                return Err(FxError::at(span, format!("a {} cannot be in a union: its shape at run time is not known", self.show_ty(m))));
+                return Err(FxError::at(span, format!("a {} cannot be in a `oneof`: its shape at run time is not known", self.show_ty(m))));
             }
         }
         Ok(())
@@ -1352,15 +1354,50 @@ impl Checker {
     fn union_members_differ(&mut self, ms: &[TyId], span: fixpt_read::Span) -> R<()> {
         for i in 0..ms.len() {
             for j in i + 1..ms.len() {
+                // Two sums: told apart by their tags, if none is in both.
+                let (x, y) = (self.arena.resolve(ms[i]), self.arena.resolve(ms[j]));
+                if let (Ty::Sum(a), Ty::Sum(b)) = (self.arena.get(x), self.arena.get(y)) {
+                    if let Some((l, _)) = a.iter().find(|(l, _)| b.iter().any(|(m, _)| m == l)) {
+                        let l = self.interner.name(*l).to_string();
+                        return Err(FxError::at(
+                            span,
+                            format!(
+                                "a `oneof`'s sums must have no tag in common: a {} and a {} both have `{l}`",
+                                self.show_ty(ms[i]),
+                                self.show_ty(ms[j])
+                            ),
+                        ));
+                    }
+                    continue;
+                }
                 if self.shape(ms[i]).unwrap_or(0) & self.shape(ms[j]).unwrap_or(0) != 0 {
                     return Err(FxError::at(
                         span,
-                        format!("a union's members must differ in shape at run time: a {} and a {} do not", self.show_ty(ms[i]), self.show_ty(ms[j])),
+                        format!("a `oneof`'s members must be told apart at run time: a {} and a {} cannot be", self.show_ty(ms[i]), self.show_ty(ms[j])),
                     ));
                 }
             }
         }
         Ok(())
+    }
+
+    /// `ms`'s sums, whose tags `union_members_differ` found apart, made
+    /// one: the same values, which `tagcase` takes apart.
+    fn union_sums_merged(&mut self, ms: &mut Vec<TyId>) {
+        let sums: Vec<usize> = (0..ms.len()).filter(|&i| matches!(self.arena.get(ms[i]), Ty::Sum(_))).collect();
+        let [first, ref rest @ ..] = sums[..] else { return };
+        if rest.is_empty() {
+            return;
+        }
+        let mut parts = Vec::new();
+        for &i in &sums {
+            let Ty::Sum(ps) = self.arena.get(ms[i]).clone() else { unreachable!("a sum") };
+            parts.extend(ps);
+        }
+        ms[first] = self.arena.ty(Ty::Sum(parts));
+        for &i in rest.iter().rev() {
+            ms.remove(i);
+        }
     }
 
     /// The unions read before what they name was (`pending_unions`), each
@@ -1378,6 +1415,11 @@ impl Checker {
             self.pending_unions.remove(i);
             self.union_members_known(&ms, span)?;
             self.union_members_differ(&ms, span)?;
+            // Made already, its sums cannot be made one now.
+            let sum = |c: &Self, m: &TyId| matches!(c.arena.get(c.arena.resolve(*m)), Ty::Sum(_));
+            if ms.iter().filter(|m| sum(self, m)).count() > 1 {
+                return Err(FxError::at(span, "a `oneof` of sums with a member not yet defined: write the sums as one `sumof`"));
+            }
         }
         Ok(())
     }

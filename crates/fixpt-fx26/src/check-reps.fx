@@ -304,7 +304,7 @@
         (ty-void () (rp-fill slot 'void #f nil nil))
         (ty-nil () (rp-fill slot 'nil #f nil nil))
         (ty-false () (rp-fill slot 'false #f nil nil))
-        (ty-union (ms) (rp-fill slot 'union #f nil (rp-tys ms)))
+        (ty-union (ms) (rp-fill slot 'oneof #f nil (rp-tys ms)))
         (ty-var (v) (rp-fill slot 'var #f nil (list (rp-var v))))
         (ty-subr (e ps r cv spc)
           (rp-fill slot 'subr #f nil
@@ -704,7 +704,7 @@
           ((string=? h "void") (ty-void))
           ((string=? h "nil") (ty-nil))
           ((string=? h "false") (ty-false))
-          ((string=? h "union") (ty-union (ri-tys args)))
+          ((or (string=? h "oneof") (string=? h "union")) (ty-union (ri-tys args)))
           ((string=? h "var") (ty-var (ri-var (ri-nth args 0))))
           ((string=? h "subr")
            (ty-subr (ri-effect (ri-nth args 1)) (ri-tys (ri-args (ri-child (ri-nth args 2))))

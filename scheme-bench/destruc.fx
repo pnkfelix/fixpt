@@ -7,13 +7,13 @@
 ;;;          (1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 3)).
 ;;;
 ;;; The inner lists hold '() or integers, so their elements are an `item`,
-;;; `(union nil int)`, as Larceny's are (2026-10-07; until then a datatype,
+;;; `(oneof nil int)`, as Larceny's are (2026-10-07; until then a datatype,
 ;;; `(num i)` allocating where Larceny's fixnum does not). The `do` loops
 ;;; are local `letrec` loops. `length` wants a list the checker knows is
 ;;; finite, and these are written, so it is `list-length`, written here.
 ;;; The result is shown as a datum, by `result->datum`, after the benchmark.
 
-(define-type item (union nil int))
+(define-type item (oneof nil int))
 
 (define-type items (listof item @heap))
 (define-type rows (listof items @heap))

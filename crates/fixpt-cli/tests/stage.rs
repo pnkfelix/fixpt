@@ -179,7 +179,7 @@ defined twice
 3
 not defined: the session changed since this definition was checked: check it again
 refused: argument 2 is a string, where a int is expected
-refused: argument 1 is a int, where a (union nil (pairof ? ? r)) is expected
+refused: argument 1 is a int, where a (oneof nil (pairof ? ? r)) is expected
 defined a
 refused: `g` is broken, since `a` was redefined (argument 2 is a string, where a int is expected): define it again to use it
 ";

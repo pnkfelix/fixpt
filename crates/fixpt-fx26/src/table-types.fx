@@ -6,7 +6,7 @@
 (define-type (bucket (k type) (v type) (r region)) (listof (pairof k v r) acyclic))
 (define-type (bucket-array (k type) (v type) (r region)) (arrayof (bucket k v r) r))
 ;; A key's entry, or none: `nil`.
-(define-type (entry (k type) (v type) (r region)) (union nil (pairof k v r)))
+(define-type (entry (k type) (v type) (r region)) (oneof nil (pairof k v r)))
 ;; A key's hash, and whether two keys are the same.
 (define-type (key-hash (k type)) (subr pure (k) int))
 (define-type (key-same (k type)) (subr pure (k k) bool))

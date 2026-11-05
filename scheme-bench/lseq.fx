@@ -14,7 +14,7 @@
 ;;; a pair whose cdr, until `lseq-cdr` realizes it, is the generator. What
 ;;; differs, and why:
 ;;; - An lseq's cdr is a list or a procedure, which `procedure?` tells
-;;;   apart: a union, `(union lseq gen)`, which `typecase` takes apart
+;;;   apart: a union, `(oneof lseq gen)`, which `typecase` takes apart
 ;;;   (2026-10-07; until then a sum, `(seq rest)` or `(gen g)`, one made as
 ;;;   well as each pair realized: 4.0 s natively, the union 2.0 s once
 ;;;   `procedure?` was in line, `TODO.md` §56).
@@ -32,8 +32,8 @@
 (define-type ints (listof int @heap))
 ;; An lseq: nil, or a pair whose cdr is the rest, realized, or the
 ;; generator of the rest.
-(define-type lseq (union nil (pairof int tail @heap)))
-(define-type tail (union lseq gen))
+(define-type lseq (oneof nil (pairof int tail @heap)))
+(define-type tail (oneof lseq gen))
 
 (define eof int (- -1152921504606846975 1))   ; the least fixnum
 (define greatest-fixnum int 1152921504606846975)

@@ -65,7 +65,7 @@ const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a def
 
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union", "->", "->*", "restrict",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "oneof", "union", "->", "->*", "restrict",
 ];
 
 impl Checker {
@@ -532,7 +532,7 @@ impl Checker {
         };
         // Storage written: a procedure kept there may not reach itself
         // unsaid (`spin`).
-        if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "union" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
+        if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "oneof" | "union" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
             self.no_knot(t, s.span)?;
         }
         Ok(t)
@@ -788,11 +788,12 @@ impl Checker {
                 let r = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::Pair(a, b, r, false)))
             }
-            // A union of members of disjoint shapes at run time
-            // (`docs/research/logical-types.md`, L1), normalized.
-            "union" => {
+            // A union of members a run-time test tells apart
+            // (`docs/research/logical-types.md`, L1 and §8.5), normalized.
+            // `union`, its name until 2026-11-05, read as it for now.
+            "oneof" | "union" => {
                 if items.len() < 3 {
-                    return Err(FxError::at(s.span, "`(union type type …)`"));
+                    return Err(FxError::at(s.span, "`(oneof type type …)`"));
                 }
                 let mut members = Vec::new();
                 for m in &items[1..] {

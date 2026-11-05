@@ -26,7 +26,7 @@
   ;; A monitored group's failure handler (a process's, a `race` branch's),
   ;; and a failure, as the runtime keeps it: its message, and the handler.
   (define-type handler (subr any (string) unit))
-  (define-type failure (union false (pairof string handler @sched)))
+  (define-type failure (oneof false (pairof string handler @sched)))
   (define task-new (subr sched () int) (lambda () ((proj %sched unit unit int) 0 #u #u)))
   (define task-switch (subr sched (int) int) (lambda (t) ((proj %sched int unit int) 1 t #u)))
   (define task-end (subr sched (int) unit) (lambda (t) ((proj %sched int unit unit) 2 t #u)))
@@ -57,8 +57,8 @@
   (define cancelled? (subr sched (int) bool) (lambda (t) ((proj %sched int unit bool) 25 t #u)))
   (define main? (subr sched () bool) (lambda () (= (task-current) 0)))
   (define push (subr sched (thunk) unit) (lambda (t) ((proj %sched thunk unit unit) 4 t #u)))
-  (define pop (subr sched () (union false thunk))
-    (lambda () ((proj %sched unit unit (union false thunk)) 5 #u #u)))
+  (define pop (subr sched () (oneof false thunk))
+    (lambda () ((proj %sched unit unit (oneof false thunk)) 5 #u #u)))
   ;; The scheduler's prompt tag, made the first time.
   (define the-tag (subr sched () tag)
     (lambda ()
@@ -124,8 +124,8 @@
             tag)
           ((proj %sched unit unit unit) 32 #u #u)))))
   ;; The next task to run, or, with none, the oldest parked.
-  (define pop-any (subr sched () (union false thunk))
-    (lambda () ((proj %sched unit unit (union false thunk)) 28 #u #u)))
+  (define pop-any (subr sched () (oneof false thunk))
+    (lambda () ((proj %sched unit unit (oneof false thunk)) 28 #u #u)))
   ;; What a machine calls at a poll whose time slice is spent, when another
   ;; task could run (`preempt_due`): a task parks itself, resumable, and the
   ;; scheduler goes on; the first task fires the deadlines due and runs one

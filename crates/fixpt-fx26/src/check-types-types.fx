@@ -117,7 +117,7 @@
   (ty-subr k-eff k-ids int k-conv k-specs)
   (ty-poly k-binders int)
   (ty-ref int k-region)
-  ;; head, tail, region, and whether it may be `nil` (`(union nil (pairof
+  ;; head, tail, region, and whether it may be `nil` (`(oneof nil (pairof
   ;; …))`, as a list's pairs are; `docs/research/logical-types.md`, L0)
   (ty-pair int int k-region bool)
   ;; answer, payload, bound, region
@@ -161,7 +161,7 @@
   ;; (`check-kinds.fx`).
   (ty-lam k-binders k-desc)
   (ty-app int (listof k-desc acyclic))
-  ;; `nil`, the empty list only; and `(union T …)`, its members of shapes
+  ;; `nil`, the empty list only; and `(oneof T …)`, its members of shapes
   ;; that differ at run time (`k-shape`; `logical-types.md`, L1).
   (ty-nil)
   (ty-union k-ids)

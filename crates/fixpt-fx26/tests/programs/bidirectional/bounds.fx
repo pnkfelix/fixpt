@@ -3,7 +3,7 @@
 ; int @r)`, the expected type bounds `array-ref`'s element type from above
 ; and `a` fixes it, invariant inside the array: `int`, which the union then
 ; takes. The same of a reference's `get`, and of a pair's `car`.
-(define-type v (union int string))
+(define-type v (oneof int string))
 (define a (arrayof int @r) (make-array 3 7))
 (define c (ref int @r) (new 5))
 (define p (pairof int nil @r) (cons 30 nil))

@@ -34,7 +34,7 @@
 ;;;
 ;;; - Nodes. The original's node is a record of four mutable fields, left,
 ;;;   right, i and j, whose left and right are 0 in an empty node: here a
-;;;   bloblet of four fields, its children `(union int node)`, 0 in an empty
+;;;   bloblet of four fields, its children `(oneof int node)`, 0 in an empty
 ;;;   node, one object as Larceny's record is (2026-10-07; until then three
 ;;;   pairs, ((left . right) . (i . j)), an empty node's children nil, since
 ;;;   FX-26 had no union of an int and a node: 1.18 s natively, the record
@@ -56,7 +56,7 @@
 ;;; - The displays (progress lines, "Failed") are left out: FX-26 has no
 ;;;   output. The result of the check is the value instead.
 
-(define-type node (bloblet (fields (union int node) (union int node) int int) @heap))
+(define-type node (bloblet (fields (oneof int node) (oneof int node) int int) @heap))
 
 (define make-empty-node (subr (alloc @heap) () node)
   (lambda () (make-bloblet 0 0 0 0 0)))

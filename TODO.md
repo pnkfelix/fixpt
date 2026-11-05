@@ -2172,7 +2172,12 @@ are `anyof` (true union), `oneof` (today's `union`, renamed; members
 separated by shape or, for sums, by disjoint tags; the same type as
 `anyof` of its members) and `allof` (was `overload`); rules 2 to 5 as
 proposed, rule 3 strict; no mutable members of an `anyof` yet; U0 to U3
-before macros (§182), U4 and U5 after. Next: U0, the renaming.
+before macros (§182), U4 and U5 after.
+
+U0 done (2026-11-05): `oneof` in both checkers, its sums told apart by
+tags and made one; every `(union …)` renamed. Left of it: `union`, read
+as `oneof` for now (CLAUDES_CHOICES.md, "U0"), to remove once Heist and
+kayak have moved. Next: U1, `allof`.
 
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 

@@ -8,7 +8,7 @@
 //! | --- | --- |
 //! | `int` | `(base int)` |
 //! | `void`, `nil`, `false` | `(void)`, `(nil)`, `(false)` |
-//! | `(union T …)` | `(union T …)` |
+//! | `(oneof T …)` | `(oneof T …)` |
 //! | a variable | bound (`#n.p`), or a hole |
 //! | `(subr C E (P …) Q spec)` | `(subr C E (params P …) Q)`, a spec after if it has one |
 //! | `(poly ((x k) …) T)` | `(poly {x …} (binder k distinct [bound]) … T)` |
@@ -556,7 +556,7 @@ impl Ex<'_> {
             Ty::Void => ("void", vec![], vec![]),
             Ty::Nil => ("nil", vec![], vec![]),
             Ty::False => ("false", vec![], vec![]),
-            Ty::Union(ms) => ("union", vec![], ms.iter().map(|m| self.ty(*m).map(Arg::Node)).collect::<Result<_, _>>()?),
+            Ty::Union(ms) => ("oneof", vec![], ms.iter().map(|m| self.ty(*m).map(Arg::Node)).collect::<Result<_, _>>()?),
             Ty::Var(v) => {
                 // A variable standing as a type: as the `var` node over it.
                 let v = self.var(v);
@@ -1014,7 +1014,7 @@ impl Im<'_, '_> {
             "void" => Ty::Void,
             "nil" => Ty::Nil,
             "false" => Ty::False,
-            "union" => Ty::Union(args.iter().map(|x| self.ty(Self::child(*x)?)).collect::<Result<_, _>>()?),
+            "oneof" | "union" => Ty::Union(args.iter().map(|x| self.ty(Self::child(*x)?)).collect::<Result<_, _>>()?),
             "var" => Ty::Var(self.var(arg(0)?)?),
             "subr" => {
                 let conv = self.conv(arg(0)?)?;

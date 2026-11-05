@@ -718,7 +718,7 @@ impl Checker {
             Ty::False => "false".into(),
             Ty::Union(ms) => {
                 let ms: Vec<String> = ms.iter().map(|m| self.show_ty_on(*m, path)).collect();
-                format!("(union {})", ms.join(" "))
+                format!("(oneof {})", ms.join(" "))
             }
             Ty::Var(v) => self.dvar_text(v, 'f'),
             Ty::Link(None) => "?".into(),
@@ -916,7 +916,7 @@ impl Checker {
             }
             Ty::Pair(a, b, r, nil) => {
                 let pair = format!("(pairof {} {} {})", self.show_ty_on(a, path), self.show_ty_on(b, path), self.show_region(r));
-                if nil { format!("(union nil {pair})") } else { pair }
+                if nil { format!("(oneof nil {pair})") } else { pair }
             }
         };
         path.pop();

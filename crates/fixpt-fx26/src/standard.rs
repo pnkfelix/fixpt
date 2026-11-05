@@ -7,7 +7,7 @@
 //! FX-87's parenthesised style.
 //!
 //! Lists are FX-87's: `(listof t r)` is `nil` or a pair whose tail is the
-//! list again. `(pairof a b r)` is a pair, never `nil`; `(union nil (pairof a
+//! list again. `(pairof a b r)` is a pair, never `nil`; `(oneof nil (pairof a
 //! b r))` is one that may be, which `null?` tests for, and the type the pair
 //! operations take (`docs/fx26.md`, "Lists are FX-87's").
 //!
@@ -39,13 +39,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("rmake-array", "(poly ((p place) (r region p)) (poly ((t type)) (subr (maxeff (alloc r) (alloc p)) ((place p) int t) (arrayof t r))))"),
     ("rmake-string", "(poly ((p place) (r region p)) (subr (maxeff (alloc r) (alloc p)) ((place p) int char) (stringof r)))"),
     ("rmake-icell", "(poly ((p place) (r region p)) (poly ((t type)) (subr (maxeff (alloc r) (alloc p)) ((place p)) (icell t r))))"),
-    ("car", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((union nil (pairof t1 t2 r))) t1)))"),
-    ("cdr", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((union nil (pairof t1 t2 r))) t2)))"),
+    ("car", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((oneof nil (pairof t1 t2 r))) t1)))"),
+    ("cdr", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((oneof nil (pairof t1 t2 r))) t2)))"),
     // The identity, which the native convention's compiler declines: a
     // procedure calling it runs as cellular code.
     ("stay-cellular", "(poly ((t type)) (subr pure (t) t))"),
-    ("set-car!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((union nil (pairof t1 t2 r)) t1) unit)))"),
-    ("set-cdr!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((union nil (pairof t1 t2 r)) t2) unit)))"),
+    ("set-car!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((oneof nil (pairof t1 t2 r)) t1) unit)))"),
+    ("set-cdr!", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (write r) ((oneof nil (pairof t1 t2 r)) t2) unit)))"),
     // The empty list, of any element type at any region: `(proj nil @r
     // int)`. (It was any pair type, FX-87's `null ≤ pairof`, which `proj`
     // needed the tail's type for, the list's own; until PLAN Q7's `null`
@@ -53,7 +53,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("nil", "(poly ((r region) (t type)) (listof t r))"),
     // The absent pair: `nil`, at any pair type, for "a pair, or none" (a
     // table's entry, say). `nil`'s type until 2026-09-29.
-    ("no-pair", "(poly ((r region) (t1 type) (t2 type)) (union nil (pairof t1 t2 r)))"),
+    ("no-pair", "(poly ((r region) (t1 type) (t2 type)) (oneof nil (pairof t1 t2 r)))"),
     // The shape predicates (`check::SHAPES`): of any value, whether it has
     // the shape, which narrows a union (`docs/research/logical-types.md`).
     ("null?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 nil) (= (length 0) (lit 0))) (else (not (shape 0 nil)) (<= (lit 1) (length 0))))))"),

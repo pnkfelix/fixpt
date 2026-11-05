@@ -439,7 +439,7 @@
            (let* ((a (k-parse-type (k-nth items 1))) (b (k-parse-type (k-nth items 2)))
                   (r (k-parse-region (k-nth items 3))))
              (k-ty-new (ty-pair a b r #f)))))
-        ((union) (k-parse-union s items))
+        ((oneof union) (k-parse-union s items))
         ((dletrec) (k-parse-dletrec s items))
         ((mu) (k-parse-mu s items))
         ((listof)
@@ -532,12 +532,13 @@
         (begin (set k-dscope saved) body)))))
 ;; `(mu name type)`: a recursive type, anonymous; the same as `(dletrec
 ;; ((name type)) name)`.
-;; A union of members of disjoint shapes at run time
-;; (`docs/research/logical-types.md`, L1), normalized.
+;; A union of members a run-time test tells apart, `(oneof …)`
+;; (`docs/research/logical-types.md`, L1 and §8.5), normalized. `union`,
+;; its name until 2026-11-05, read as it for now.
 (define k-parse-union (->* (syn k-syns) int)
   (lambda (s items)
     (begin
-      (k-shape (>= (k-length items) 3) "`(union type type …)`" s)
+      (k-shape (>= (k-length items) 3) "`(oneof type type …)`" s)
       (k-union-of (k-parse-types (cdr items)) (syn-start s) (syn-end s)))))
 (define k-parse-mu (->* (syn k-syns) int)
   (lambda (s items)
