@@ -798,7 +798,8 @@ no test required to tell which.
   several members, so it tries each with the trail rolled back, as the
   lemma rule does (`check.rs`, the lemma rule). Not complete (section
   6.1's example stands); a lemma states a missing case.
-- *Cells*: a union of cells is not a cell of a union (section 5). Reading
+- *Cells* (refused at U2, question 14; what lifting it would mean): a
+  union of cells is not a cell of a union (section 5). Reading
   through `(union (ref A r₁) (ref B r₂))` gives `(union A B)` with effect
   `(read r₁) ∪ (read r₂)`; writing needs a value of `A ⊓ B` (rule 4's
   meet, so equal cells' contents, or immutable ones that meet), effect
@@ -854,8 +855,8 @@ compares them like any fact.
 | ----- | ---- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | U0    | S–M  | the disjoint former renamed (question 9); `union` its alias for one release, or not                           | every existing program, renamed; both checkers agree                                     |
 | U1    | M–L  | `overload` of monomorphic `subr` members: rules 1 to 4, `⊓` on base types, sums, products, immutable lists     | the user's λm swap over `expr`, `op`, `sexp`; `len`'s `pure`/`spin`; a `ref` meet refused |
-| U2    | M    | true `union`: overlapping members, sums merged, disjunctive subtyping with rollback, narrowing that leaves unions | `(union expr op)` a sub-sum of `sexp`; two lists at two regions read                     |
-| U3    | M    | rule 5, ∪E at arguments                                                                                       | `swap` of a `(union expr op)`; `car` of a union of two lists                             |
+| U2    | M    | true `union`: overlapping members, sums merged, disjunctive subtyping with rollback, narrowing that leaves unions | `(union expr op)` a sub-sum of `sexp`; two cells, or two writable lists, refused          |
+| U3    | M    | rule 5, ∪E at arguments                                                                                       | `swap` of a `(union expr op)`; `car` of a union of two `acyclic` lists                   |
 | U4    | M    | members that are `poly` (`TODO.md` §79's `length` over `nlist` and `listof`)                                 | `length` of an `nlist` gives its size, of a `@heap` list `(read r)`                      |
 | U5    | L    | research: Ξ's arrow rules between procedure types; shape-directed conversion's σ-indexed arms                  | only if a program needs it                                                               |
 
@@ -943,6 +944,10 @@ by the revision (9.2), question 4 answered yes by it.
 14. **True unions of cells and regions.** Reading through a union of
     cells, writing only a meet: wanted now (U2), or refused until a
     program needs it?
+    *Answered 2026-11-05: refused until a program needs it.* At U2 a true
+    union of two members that are cells, arrays or writable pairs is
+    refused; immutable members (base types, sums, products, `acyclic` and
+    `const` lists) are allowed. Lifting it later breaks nothing.
 15. **Order**: U0 to U3 before macros (`TODO.md` §182), U4 and U5 after
     (proposed)?
 
