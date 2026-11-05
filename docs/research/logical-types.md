@@ -925,6 +925,7 @@ by the revision (9.2), question 4 answered yes by it.
 11. **Rule 5, union elimination at arguments**: wanted at U3, or later?
     Without it, a `(union expr op)` given to `swap` takes the `sexp`
     member, and its result is an `sexp`.
+    *Answered 2026-11-05: at U3.*
 12. **Rule 2's scope.** Dead arms skipped only while checking an
     overload's member (proposed), or wherever a subject's type rules a
     tag out (with "has no tag" kept as an error only for a tag no type
