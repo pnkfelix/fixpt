@@ -913,8 +913,12 @@ by the revision (9.2), question 4 answered yes by it.
    Or one former, `union`, with disjointness checked only where a program
    relies on it (a `typecase` without `else`): fewer formers, but the
    promise "a test splits it" no longer written in the type.
-   *Answered 2026-11-04: `parts`.* `(parts T …)` is the disjoint
-   former, `(union T …)` the true one.
+   *Answered 2026-11-04: `parts`; changed 2026-11-05 to `cases`.*
+   `(cases T …)` is the disjoint former, `(union T …)` the true one. The
+   user's reason: the type is the basis of a proof or correctness
+   argument by cases, each member one, a shape test telling which; it
+   reads with `typecase` and `tagcase`. Free as a name: no form,
+   former or standard binding is called `cases`.
 10. **Rule 4, the meet at calls.** Every fitting member and the meet of
     their results, refused where there is none (proposed); or ordered
     selection (the design of 2026-09-29), or the most precise member,
