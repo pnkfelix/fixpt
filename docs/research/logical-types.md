@@ -1048,6 +1048,34 @@ member only if one alone is a pair, having no subtyping there, which
 costs a descent it might have seen, never an answer. Tests:
 `anyof/greatest-pair.fx`, `anyof/no-greatest.fx`.
 
+**Built (2026-11-05): splitting, pieces 1, 3 and 4**, on the user's
+answer to question 18 (products, sums and frozen pairs only) and,
+provisionally, the proposals for 16 (by the checker), 17 (64 splits, a
+plain refusal past them) and 19 (no answer cache yet). In both checkers
+(`shaped_like`, `split_below` in `check.rs`; `k-shaped-like`,
+`k-split-below` in `check-subtype.fx`):
+- *Candidates by shape*: `τ ≤ ∪σ` tries only the members sharing a
+  shape with `τ` (or of a shape not known), computed each time, not
+  kept on the node (a union is small; to measure).
+- *The split*: as piece 3, the field the first, in order, whose type is
+  a union and on which two candidates of `τ`'s kind (a product of the
+  same labels, a sum with each of its tags, a pair) differ; with fewer
+  than two such candidates no split can help, and none is made.
+- *The budget*: 64 splits per top-level question, counted as they are
+  made (failed tries included), set again for a question asked inside
+  one. Past it, `τ` is not shown below: the usual "is expected here"
+  refusal, without a message of its own yet (question 17).
+- *Termination*: a piece is a new node only at the top of a split; its
+  fields are the original type's, so recursion reaches original pairs,
+  which the trail already knows, and the budget bounds the rest. Naming
+  pieces by origin waits for a case that needs it.
+- *Not split*: a nullable pair's tail as `nil` and a pair (only at the
+  top, as before), `nlist`s, bloblets, anything that may be written.
+- Tests: `anyof/distribute.fx`, `distribute-product.fx`,
+  `distribute-missing.fx`, `mixed-list.fx`, `budget-within.fx` (6
+  fields, 63 splits), `budget-past.fx` (7 fields, 127: refused alike).
+  Taking such a union apart (`car`, `extract` of it) is U3's.
+
 **Inference variables.** A question with unsolved variables is not
 split (a split would solve them per piece, and the pieces disagree);
 it is decided as now, and refused if that fails.

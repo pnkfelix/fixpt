@@ -3667,3 +3667,25 @@ from run to run, and right where the name is shadowed.
 7. **Tests in `tests/programs/anyof/`, run** (`logical_types.rs`, formerly
    `allof.rs`); `allof` and `anyof` added to the sweeps comparing the
    checkers and the type representations.
+
+## U2b: splitting at a field (2026-11-05; `logical-types.md` §8.8)
+
+1. **What may be split**: products, sums and frozen pairs not `nil`, the
+   user's answer to question 18. Questions 16, 17 and 19 unanswered: built
+   on the proposals (the checker distributes; 64 splits; no answer cache)
+   and recorded as provisional.
+2. **No split without two candidates that differ at the field.** With one
+   candidate, or all agreeing there, every piece goes where the whole
+   would have: a split could only spend the budget.
+3. **The budget counts splits made, failed tries included**, not splits in
+   the proof as §8.8 proposed: with no cache there is nothing for a count
+   to be independent of, and counting all bounds the work. To revisit with
+   a cache (question 19).
+4. **No message of its own past the budget yet**: the question is answered
+   "no", and the refusal is the usual one. A message naming the budget
+   needs the answer carried out of `sub`; question 17 asks what it says.
+5. **Pieces are fresh nodes, not named by origin.** Only the top of a split
+   is new; its fields are the type's own, so recursion meets original
+   pairs on the trail, and the budget bounds the rest.
+6. **`check-subtype.fx` is at 989 lines** of its 1000; the next addition
+   there moves the splitting to a file of its own.

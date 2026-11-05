@@ -126,6 +126,101 @@
         -1)))
 
 ;; Whether effects `d` and `e` are the same, each by its side's environment.
+;; How many more times the subtype question being asked may split a type
+;; at a field to show it below a union (`k-split-below`; as Rust's
+;; `SPLIT_BUDGET`, `logical-types.md` §8.8, question 17).
+(define k-split-budget int 64)
+(define k-splits-left (ref int @t) (new 64))
+(define-type k-idss (listof k-ids acyclic))
+;; Of union members `ns`, those that may hold an `a`: of its shapes, or
+;; either's not known.
+(define k-shaped-like (->* (int k-ids) k-ids)
+  (lambda (a ns)
+    (let ((s (k-run-shape a)))
+      (cond ((null? ns) nil)
+            ((let ((n (k-run-shape (car ns))))
+               (or (< s 0) (< n 0) (not (= (bitwise-and s n) 0))))
+             (the k-ids (cons (car ns) (k-shaped-like a (cdr ns)))))
+            (else (k-shaped-like a (cdr ns)))))))
+;; The fields of `a` that `k-split-below` may split, in order, as a list of
+;; one: a product's or a sum's, a frozen pair's head and tail.
+(define k-split-fields (->* (int) k-idss)
+  (lambda (a)
+    (tagcase (k-get (k-resolve a))
+      (ty-product (ps) (list (k-part-tys ps)))
+      (ty-sum (ps) (list (k-part-tys ps)))
+      (ty-pair (x y r nl)
+        (if (and (not nl) (tagcase r (r-frozen (p f) #t) (else z #f)))
+            (list (the k-ids (cons x (k-one-ty y))))
+            nil))
+      (else z nil))))
+(define k-one-ty (->* (int) k-ids) (lambda (t) (the k-ids (cons t nil))))
+(define k-part-tys (->* (k-parts) k-ids)
+  (lambda (ps) (if (null? ps) nil (the k-ids (cons (extract (car ps) 2) (k-part-tys (cdr ps)))))))
+;; The fields of each of `ns` of `a`'s kind matching `a`'s: of a product of
+;; the same labels, of a sum with each of `a`'s tags, of a pair.
+(define k-kin-fields (->* (int k-ids) k-idss)
+  (lambda (a ns)
+    (if (null? ns)
+        nil
+        (let ((k (k-kin-of (k-get (k-resolve a)) (k-get (k-resolve (car ns)))))
+              (rest (k-kin-fields a (cdr ns))))
+          (if (null? k) rest (the k-idss (cons (car k) rest)))))))
+(define k-kin-of (->* (k-ty k-ty) k-idss)
+  (lambda (ta tn)
+    (tagcase ta
+      (ty-product (ps)
+        (tagcase tn
+          (ty-product (qs) (if (k-same-labels-in-order? ps qs) (list (k-part-tys qs)) nil))
+          (else z nil)))
+      (ty-sum (ps)
+        (tagcase tn (ty-sum (qs) (k-tags-payloads ps qs)) (else z nil)))
+      (ty-pair (x y r nl)
+        (tagcase tn (ty-pair (u v s m) (list (the k-ids (cons u (k-one-ty v))))) (else z nil)))
+      (else z nil))))
+(define k-same-labels-in-order? (->* (k-parts k-parts) bool)
+  (lambda (ps qs)
+    (cond ((null? ps) (null? qs))
+          ((null? qs) #f)
+          (else (and (symbol=? (extract (car ps) 1) (extract (car qs) 1))
+                     (k-same-labels-in-order? (cdr ps) (cdr qs)))))))
+;; `qs`'s payloads for each of `ps`'s tags, as a list of one; none if one
+;; is missing.
+(define k-tags-payloads (->* (k-parts k-parts) k-idss)
+  (lambda (ps qs)
+    (if (null? ps)
+        (list (the k-ids nil))
+        (let ((t (k-part-find qs (extract (car ps) 1))) (rest (k-tags-payloads (cdr ps) qs)))
+          (if (or (< t 0) (null? rest)) nil (list (the k-ids (cons t (car rest)))))))))
+(define k-union-ty? (->* (int) bool)
+  (lambda (t) (tagcase (k-get (k-resolve t)) (ty-union (ms) #t) (else z #f))))
+(define k-members-of (->* (int) k-ids)
+  (lambda (t) (tagcase (k-get (k-resolve t)) (ty-union (ms) ms) (else z (k-one-ty t)))))
+;; Whether every field list of `kin` has the same type at `i`.
+(define k-kin-agree? (->* (k-idss int) bool)
+  (lambda (kin i)
+    (let ((first (k-nth-id (car kin) i)))
+      (letrec ((all? (->* (k-idss) bool)
+                 (lambda (ks)
+                   (or (null? ks)
+                       (and (k-same-type? (k-nth-id (car ks) i) first) (all? (cdr ks)))))))
+        (all? (cdr kin))))))
+(define k-nth-id (->* (k-ids int) int)
+  (lambda (xs i) (if (= i 0) (car xs) (k-nth-id (cdr xs) (- i 1)))))
+;; `a` with its `i`th field (`k-split-fields`) of type `m`.
+(define k-with-field (->* (int int int) int)
+  (lambda (a i m)
+    (tagcase (k-get (k-resolve a))
+      (ty-product (ps) (k-ty-new (ty-product (k-part-at ps i m))))
+      (ty-sum (ps) (k-ty-new (ty-sum (k-part-at ps i m))))
+      (ty-pair (x y r nl)
+        (k-ty-new (if (= i 0) (ty-pair m y r nl) (ty-pair x m r nl))))
+      (else z a))))
+(define k-part-at (->* (k-parts int int) k-parts)
+  (lambda (ps i m)
+    (if (= i 0)
+        (the k-parts (cons (product (1 (extract (car ps) 1)) (2 m)) (cdr ps)))
+        (the k-parts (cons (car ps) (k-part-at (cdr ps) (- i 1) m))))))
 (define k-benv-eff=? (->* (k-eff k-eff k-benv k-benv) bool)
   (lambda (d e ea eb) (k-eff=? (k-benv-effect ea d) (k-benv-effect eb e))))
 (define-rec
@@ -200,8 +295,10 @@
             #t
             (let* ((trail (the k-strail (new nil)))
                    (begun (k-question-begin!))
+                   (outer (get k-splits-left))
+                   (budget (set k-splits-left k-split-budget))
                    (r (k-sub a b (the k-benv nil) (the k-benv nil) trail (the k-labels (new nil)))))
-              (begin (k-strail-drop (get trail) nil) (k-question-end!)
+              (begin (k-strail-drop (get trail) nil) (k-question-end!) (set k-splits-left outer)
                      (if (and r kept) (k-prove! ra rb) #u)
                      r))))))
   (k-module-ty? (->* (int) bool)
@@ -376,13 +473,18 @@
             (ty-union (ms) (k-sub-all ms b ea eb trail labels))
             (else z
               (tagcase tb
-                (ty-union (ns)
-                  (or (k-below-one a ns ea eb trail labels)
-                      (tagcase ta
-                        (ty-pair (x y r nl)
-                          (and nl (k-below-one (k-ty-new (ty-nil)) ns ea eb trail labels)
-                               (k-below-one (k-ty-new (ty-pair x y r #f)) ns ea eb trail labels)))
-                        (else w #f))))
+                (ty-union (ns0)
+                  ;; Only the members of `a`'s own shapes may hold it.
+                  (let ((ns (k-shaped-like a ns0)))
+                    (or (k-below-one a ns ea eb trail labels)
+                        (tagcase ta
+                          (ty-pair (x y r nl)
+                            (if nl
+                                (let ((pair (k-ty-new (ty-pair x y r #f))))
+                                  (and (k-below-one (k-ty-new (ty-nil)) ns ea eb trail labels)
+                                       (k-below-one pair ns ea eb trail labels)))
+                                (k-split-below a ns b ea eb trail labels)))
+                          (else w (k-split-below a ns b ea eb trail labels))))))
                 (else w (k-sub-plain a b ta tb ea eb trail labels)))))))))
   (k-sub-each (->* (int k-ids k-benv k-benv k-strail k-labels) bool)
     (lambda (a ns ea eb trail labels)
@@ -396,6 +498,29 @@
              (or (k-sub (car ms) b ea eb trail labels)
                  (begin (k-restore trail labels st sl)
                         (k-one-below (cdr ms) b ea eb trail labels)))))))
+;; `a` below union `b`, of candidates `ns`, none of which takes it whole
+  ;; (`logical-types.md` §8.8): `a`, a product, a sum or a frozen pair that
+  ;; is not `nil`, split at its first field whose type is a union and on
+  ;; which two candidates of its kind differ, each piece below `b`. Each
+  ;; split spends one of the question's `k-splits-left`. As Rust's
+  ;; `split_below`.
+  (k-split-below (->* (int k-ids int k-benv k-benv k-strail k-labels) bool)
+    (lambda (a ns b ea eb trail labels)
+      (let ((fs (k-split-fields a)) (kin (k-kin-fields a ns)))
+        (and (> (get k-splits-left) 0) (not (null? fs)) (not (null? kin)) (not (null? (cdr kin)))
+             (k-split-at a (car fs) kin 0 b ea eb trail labels)))))
+  (k-split-at (->* (int k-ids k-idss int int k-benv k-benv k-strail k-labels) bool)
+    (lambda (a fs kin i b ea eb trail labels)
+      (cond ((null? fs) #f)
+            ((and (k-union-ty? (car fs)) (not (k-kin-agree? kin i)))
+             (begin (set k-splits-left (- (get k-splits-left) 1))
+                    (k-pieces-below a i (k-members-of (car fs)) b ea eb trail labels)))
+            (else (k-split-at a (cdr fs) kin (+ i 1) b ea eb trail labels)))))
+  (k-pieces-below (->* (int int k-ids int k-benv k-benv k-strail k-labels) bool)
+    (lambda (a i ms b ea eb trail labels)
+      (or (null? ms)
+          (and (k-sub (k-with-field a i (car ms)) b ea eb trail labels)
+               (k-pieces-below a i (cdr ms) b ea eb trail labels)))))
   (k-sub-all (->* (k-ids int k-benv k-benv k-strail k-labels) bool)
     (lambda (ms b ea eb trail labels)
       (or (null? ms)

@@ -407,6 +407,9 @@ pub struct Checker {
     /// name, and where: checked once it is (`Checker::union_of`).
     /// Whether each is an `anyof`.
     pub(crate) pending_unions: Vec<(TyId, fixpt_read::Span, bool)>,
+    /// How many more times the subtype question being asked may split a
+    /// type at a field to show it below a union (`SPLIT_BUDGET`).
+    pub(crate) splits_left: usize,
     /// While a `lambda` is checked against each member of an `allof`, one
     /// per `allof`, innermost last: the `tagcase` arms a member's type
     /// rules out, skipped (`logical-types.md` §8.5, rule 2).
@@ -1119,6 +1122,7 @@ impl Checker {
             path_narrowed: Vec::new(),
             closure_depth: 0,
             pending_unions: Vec::new(),
+            splits_left: SPLIT_BUDGET,
             dead_arms: Vec::new(),
             unify_exact: false,
             unify_upper: false,
@@ -3998,6 +4002,90 @@ impl Checker {
         }
     }
 
+    /// Of union members `ns`, those that may hold an `a`: of its shapes, or
+    /// either's not known.
+    fn shaped_like(&self, a: TyId, ns: &[TyId]) -> Vec<TyId> {
+        let s = self.shape(a);
+        ns.iter().copied().filter(|n| matches!((s, self.shape(*n)), (Some(x), Some(y)) if x & y != 0) || s.is_none() || self.shape(*n).is_none()).collect()
+    }
+
+    /// `a` below union `b`, of candidates `ns`, none of which takes it
+    /// whole (`logical-types.md` §8.8): `a`, a product, a sum or a frozen
+    /// pair that is not `nil`, split at its first field whose type is a
+    /// union and on which two candidates of its kind differ, each piece
+    /// below `b`. Exact, as those are never written: a value of `(pairof
+    /// (anyof A B) C acyclic)` is one of `(pairof A C acyclic)` or of
+    /// `(pairof B C acyclic)`. Each split spends one of the question's
+    /// `splits_left`; none left, `a` is not shown below.
+    fn split_below(&mut self, a: TyId, ns: &[TyId], b: TyId, env: &BinderEnv, st: &mut SubState) -> bool {
+        if self.splits_left == 0 {
+            return false;
+        }
+        let Some(fields) = self.split_fields(a) else { return false };
+        let kin: Vec<Vec<TyId>> = ns.iter().filter_map(|n| self.kin_fields(a, *n)).collect();
+        if kin.len() < 2 {
+            return false;
+        }
+        for (i, f) in fields.iter().enumerate() {
+            let Ty::Union(ms) = self.arena.get(self.arena.resolve(*f)).clone() else { continue };
+            if kin.iter().all(|k| self.same_ty(k[i], kin[0][i], &mut Vec::new())) {
+                continue;
+            }
+            self.splits_left -= 1;
+            return ms.iter().all(|m| {
+                let piece = self.with_field(a, i, *m);
+                self.sub(piece, b, env, st)
+            });
+        }
+        false
+    }
+
+    /// The fields of `a` that `split_below` may split, in order: a product's
+    /// or a sum's, a frozen pair's head and tail.
+    fn split_fields(&self, a: TyId) -> Option<Vec<TyId>> {
+        match self.arena.get(self.arena.resolve(a)) {
+            Ty::Product(ps) | Ty::Sum(ps) => Some(ps.iter().map(|(_, t)| *t).collect()),
+            Ty::Pair(x, y, Region::Frozen(..), false) => Some(vec![*x, *y]),
+            _ => None,
+        }
+    }
+
+    /// The fields of candidate `n` matching `a`'s, if `n` is of `a`'s kind:
+    /// a product of the same labels, a sum with each of `a`'s tags, a pair.
+    fn kin_fields(&self, a: TyId, n: TyId) -> Option<Vec<TyId>> {
+        match (self.arena.get(self.arena.resolve(a)), self.arena.get(self.arena.resolve(n))) {
+            (Ty::Product(ps), Ty::Product(qs)) if ps.len() == qs.len() && ps.iter().zip(qs).all(|((l, _), (m, _))| l == m) => {
+                Some(qs.iter().map(|(_, t)| *t).collect())
+            }
+            (Ty::Sum(ps), Ty::Sum(qs)) => ps.iter().map(|(l, _)| qs.iter().find(|(m, _)| m == l).map(|(_, t)| *t)).collect(),
+            (Ty::Pair(..), Ty::Pair(x, y, _, _)) => Some(vec![*x, *y]),
+            _ => None,
+        }
+    }
+
+    /// `a` with its `i`th field (`split_fields`) of type `m`.
+    fn with_field(&mut self, a: TyId, i: usize, m: TyId) -> TyId {
+        let t = match self.arena.get(self.arena.resolve(a)).clone() {
+            Ty::Product(mut ps) => {
+                ps[i].1 = m;
+                Ty::Product(ps)
+            }
+            Ty::Sum(mut ps) => {
+                ps[i].1 = m;
+                Ty::Sum(ps)
+            }
+            Ty::Pair(x, y, r, n) => {
+                if i == 0 {
+                    Ty::Pair(m, y, r, n)
+                } else {
+                    Ty::Pair(x, m, r, n)
+                }
+            }
+            _ => unreachable!("split_fields"),
+        };
+        self.arena.ty(t)
+    }
+
     /// `a ≤ b`. Recursive types are compared coinductively: a pair already
     /// being compared is assumed to hold, which is what makes comparing two
     /// cycles terminate — FX-87's `trail`, Amadio and Cardelli's assumption
@@ -4005,7 +4093,10 @@ impl Checker {
     /// comparison that failed is never relied on: the failure is the answer.
     pub fn subtype(&mut self, a: TyId, b: TyId) -> bool {
         let mut st = SubState::default();
-        self.sub(a, b, &BinderEnv::default(), &mut st)
+        let outer = std::mem::replace(&mut self.splits_left, SPLIT_BUDGET);
+        let r = self.sub(a, b, &BinderEnv::default(), &mut st);
+        self.splits_left = outer;
+        r
     }
 
     /// `a ≤ b` under `env`, which names each `poly` binder in scope on either
@@ -4140,7 +4231,8 @@ impl Checker {
                 return ms.clone().iter().all(|m| self.sub(*m, b, env, st));
             }
             if let Ty::Union(ns) = &tb {
-                let ns = ns.clone();
+                // Only the members of `a`'s own shapes may hold it.
+                let ns = self.shaped_like(a, ns);
                 let below_one = |c: &mut Self, x: TyId, st: &mut SubState| {
                     ns.iter().any(|n| {
                         let saved = st.clone();
@@ -4158,7 +4250,7 @@ impl Checker {
                     let (nil, pair) = (self.arena.ty(Ty::Nil), self.arena.ty(Ty::Pair(x, y, r, false)));
                     return below_one(self, nil, st) && below_one(self, pair, st);
                 }
-                return false;
+                return self.split_below(a, &ns, b, env, st);
             }
         }
         match (ta, tb) {
@@ -5527,6 +5619,10 @@ pub fn region_captured(form: &str, r: &str, eff: &str) -> String {
 /// What one subtype question remembers: the pairs assumed (FX-87's trail),
 /// each with the binder environment it was asked under, and the names given
 /// to pairs of `poly` binders.
+/// How many times one subtype question may split a type at a field
+/// (`Checker::split_below`; `logical-types.md` §8.8, question 17).
+const SPLIT_BUDGET: usize = 64;
+
 #[derive(Clone, Default)]
 struct SubState {
     trail: HashSet<(TyId, TyId, BinderEnv)>,

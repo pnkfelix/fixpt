@@ -24,7 +24,8 @@ fn programs_do_as_they_say(sub: &str, least: usize) {
         };
         let ok = match (first.strip_prefix(";; => "), first.strip_prefix(";; ! "), &got) {
             (Some(want), _, Ok(v)) => v == want,
-            (_, Some(want), Err(e)) => e.contains(want),
+            // Refused by both alike, not by one of them.
+            (_, Some(want), Err(e)) => e.contains(want) && !e.contains("checkers disagree"),
             _ => false,
         };
         if !ok {

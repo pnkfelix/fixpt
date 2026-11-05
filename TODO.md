@@ -2196,8 +2196,6 @@ U2 done (2026-11-05): `anyof` in both checkers (`logical-types.md`, "U2,
 as built"). Left of it:
 - A member below another is not dropped, only one the same as another
   (CLAUDES_CHOICES.md, "U2"): `(anyof int nat)` keeps both.
-- An immutable pair of a union is not below the union of the pairs, which
-  a lemma cannot state yet either.
 - Cells, and writable pairs and lists, that share a shape: refused until
   a program needs them (question 14).
 
@@ -2208,7 +2206,12 @@ comparison fails, a budget on splits, caches whose answers never change a
 verdict. Questions 16 to 20 there, for the user. Then U3.
 Built already (2026-11-05): the greatest member of a shape, for inference
 (piece 2), so `car` of an `anyof` of a `nat` list and an `int` list
-checks.
+checks; and splitting products, sums and frozen pairs at a field (pieces
+1, 3, 4; the user's answer to question 18), with a budget of 64.
+Left of U2b: questions 16, 17, 19 and 20 (built on the proposals,
+provisional); a message of its own past the budget; head forms and
+greatest members kept on the node, and the answer cache, once measured
+on programs that use `anyof` (the front end has none yet).
 
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 
