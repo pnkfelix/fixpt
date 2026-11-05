@@ -3740,3 +3740,20 @@ from run to run, and right where the name is shadowed.
    one sum** where it takes a sum apart or checks one made where the union
    is expected (`typed_cells.rs`), so those words verify; an `allof`'s body
    and a call split by members stay its known gaps.
+
+## `fixpt check --reps` (2026-11-05; kayak's request, `docs/fx26.md`)
+
+1. **The forms as `fixpt check` takes them**: `declare_ahead`, then
+   `top_defining` on each (`compare::rust_reps`), not kayak's scratch
+   program's `Checker::new` and `top`. So the lines are the `define` lines
+   `fixpt check` lists, with the session's convention, an `include`'s
+   names, and a redefinition's definitions run again, each a line.
+2. **The Rust checker's rep**, and `NAME differs REP` with the FX-26
+   checker's only where it takes the whole program and has a rep of the
+   name: its `checked-reps` gives each name's latest type and leaves out
+   what it declines, so it is compared at the name's last line only.
+3. **A refusal goes to the standard error**, with exit 1, so the standard
+   output is the `NAME …` lines alone. `--reps=hex` is the default's other
+   name; any other `--reps=…` is a usage error (2).
+4. On the test programs of `tests/reps.rs`'s directories: 1923 lines, none
+   declined, none differing.

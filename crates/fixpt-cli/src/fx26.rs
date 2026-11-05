@@ -1158,6 +1158,57 @@ pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
     }
 }
 
+/// `fixpt check --reps`: each name the program defines, in order, with its
+/// type's rep as the Rust checker exports it (`NAME HEX`, the binary form
+/// in lowercase hexadecimal, or with `text` the readable form), or `NAME
+/// declined`; then, where the FX-26 checker's rep of the name's latest
+/// definition is another, `NAME differs REP` (kayak's request,
+/// `docs/fx26.md`). A form refused ends them, said on the standard error,
+/// and then 1.
+pub fn check_reps(backend: Backend, name: &str, text: &str, readable: bool) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
+    let mut c = session.fresh_checker();
+    let (rust, refused) = fixpt_fx26::compare::rust_reps(&mut c, text);
+    // The FX-26 checker's, if it takes the whole program, told of the
+    // `include`s as `both_checkers` tells it.
+    fixpt_fx26::syn::set_includes(fixpt_fx26::compare::includes_given(&mut c, text));
+    let ours = match session.check_with_own_checker(text) {
+        Ok(Ok(_)) => session.own_checked_reps().unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let show = |b: &[u8]| {
+        if readable {
+            fixpt_reps::binary::decode(b, true).map(|r| fixpt_reps::text::write(&r)).unwrap_or_else(|e| format!("unreadable: {e}"))
+        } else {
+            b.iter().map(|x| format!("{x:02x}")).collect()
+        }
+    };
+    for (i, (n, rep)) in rust.iter().enumerate() {
+        match rep {
+            Some(b) => println!("{n} {}", show(b)),
+            None => println!("{n} declined"),
+        }
+        // The FX-26 checker's is of the name's latest definition only.
+        let latest = !rust[i + 1..].iter().any(|(m, _)| m == n);
+        if let Some((_, theirs)) = ours.iter().rev().find(|(m, _)| m == n).filter(|_| latest) {
+            if rep.as_ref() != Some(theirs) {
+                println!("{n} differs {}", show(theirs));
+            }
+        }
+    }
+    match refused {
+        Some(e) => {
+            eprintln!("fixpt: {}", located(name, text, &e));
+            1
+        }
+        None => 0,
+    }
+}
+
 /// `fixpt compile`: both compilers on a program, with register code; the
 /// code the FX-26 one made, and whether the Rust one made the same (both,
 /// if not, and then 1). With `full` (`--full-literals`), every literal in

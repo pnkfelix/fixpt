@@ -21,6 +21,7 @@ dependencies = [
  "fixpt-memmgmt",
  "fixpt-native",
  "fixpt-read",
+ "fixpt-reps",
  "fixpt-runtime",
  "fixpt-scheme",
 ]

@@ -44,6 +44,44 @@ pub fn check_with_rust_checker(c: &mut Checker, text: &str) -> Checked26 {
     Ok(out)
 }
 
+/// Each name the Rust checker defines of `text`, in order, a `define-rec`'s
+/// each, and its type's rep in its binary form (`Checker::export_ty`,
+/// `docs/research/heap-types.md`), or `None` where export declines it; and
+/// the error of the form refused, which ends them (`fixpt check --reps`).
+/// The forms as [`check_with_rust_checker`] takes them.
+pub fn rust_reps(c: &mut Checker, text: &str) -> (Vec<(String, Option<Vec<u8>>)>, Option<crate::error::FxError>) {
+    let mut out = Vec::new();
+    let forms = match c.read_in(FileId(0), text) {
+        Ok(forms) => forms,
+        Err(e) => return (out, Some(e)),
+    };
+    let done = match c.declare_ahead(&forms) {
+        Ok(done) => done,
+        Err(e) => return (out, Some(e)),
+    };
+    for (f, done) in forms.iter().zip(done) {
+        if done {
+            continue;
+        }
+        let run = match c.top_defining(f) {
+            Ok(d) => d.run,
+            Err(e) => return (out, Some(e)),
+        };
+        for (top, _) in run {
+            let tys = match top {
+                Top::Define { name, ty, .. } => vec![(name, ty)],
+                Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, t, _)| (*n, *t)).collect(),
+                _ => continue,
+            };
+            for (n, t) in tys {
+                let rep = c.export_ty(t).ok().map(|ex| fixpt_reps::binary::encode(&ex.rep));
+                out.push((c.interner.name(n).to_string(), rep));
+            }
+        }
+    }
+    (out, None)
+}
+
 /// `s` with each `(maxeff …)`'s atoms sorted, as the two checkers may list
 /// them in different orders.
 pub fn canonical(s: &str) -> String {

@@ -41,6 +41,11 @@ usage:
   fixpt check INPUT              FX-26: both checkers (Rust and FX-26) on a
                                  file, `-` or program text; each form's type
                                  and effect, and where the checkers disagree
+  fixpt check --reps[=text] INPUT
+                                 each name defined, with its type's rep as
+                                 the Rust checker exports it, in hexadecimal
+                                 (or readable), `declined`, and `NAME differs
+                                 REP` where the FX-26 checker's is another
   fixpt query FILE QUERY…        FX-26: the program's definitions that answer
   fixpt query FILE… -- QUERY…    QUERY, each with its type and place (the
                                  files run in order, as `fixpt run` does):
@@ -442,8 +447,26 @@ fn run(args: &[String]) -> i32 {
             }
             // `compile --full-literals`: every literal in full, read back exactly.
             let full = cmd == "compile" && rest[1] == "--full-literals";
-            match fx26::input(&rest[1 + full as usize..]) {
-                Ok((name, text)) if cmd == "check" => fx26::check(backend, &name, &text),
+            // `check --reps`: each definition's type as a rep (`--reps=text`, readable).
+            let reps = match rest[1].as_str() {
+                "--reps" | "--reps=hex" if cmd == "check" => Some(false),
+                "--reps=text" if cmd == "check" => Some(true),
+                r if r.starts_with("--reps") => {
+                    eprintln!("fixpt {cmd}: `--reps`, `--reps=hex` or `--reps=text`, of `check`");
+                    return 2;
+                }
+                _ => None,
+            };
+            let skip = 1 + (full || reps.is_some()) as usize;
+            if rest.len() <= skip {
+                eprintln!("fixpt {cmd}: needs a file, `-` or a program");
+                return 2;
+            }
+            match fx26::input(&rest[skip..]) {
+                Ok((name, text)) if cmd == "check" => match reps {
+                    Some(readable) => fx26::check_reps(backend, &name, &text, readable),
+                    None => fx26::check(backend, &name, &text),
+                },
                 Ok((name, text)) => fx26::compile(backend, &name, &text, full),
                 Err(e) => {
                     eprintln!("fixpt: {e}");
@@ -852,7 +875,7 @@ pub(crate) fn apply_gc_policy(session: &mut Session) {
 }
 
 /// The options a command takes after it, left for it to read.
-const COMMAND_OPTIONS: [&str; 9] = ["--raw", "--full-literals", "--program", "--cellular", "--eval", "--check", "--compile", "--help", "-h"];
+const COMMAND_OPTIONS: [&str; 10] = ["--raw", "--full-literals", "--reps", "--program", "--cellular", "--eval", "--check", "--compile", "--help", "-h"];
 
 /// The options, read from anywhere before a `--`; the rest of the words,
 /// in order, with the `--` and all after it. Or why not: an unknown option.

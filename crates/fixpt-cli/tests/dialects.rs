@@ -347,6 +347,29 @@ fn fx26_checks_compiles_and_evaluates_a_file_or_text() {
     assert!(ok && out.contains("3 : "), "{out}");
 }
 
+/// `check --reps` (kayak's request): a line for each name defined, a
+/// `define-rec`'s each, with its type's rep in hexadecimal, read back as
+/// the rep `--reps=text` writes; none for an expression; and a form
+/// refused ends them, and then 1.
+#[test]
+fn check_reps_gives_each_definitions_rep() {
+    let program = include_str!("programs/check-reps.fx");
+    let (ok, out) = fixpt(&["check", "--reps", "-"], program);
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(!ok && lines.len() == 3, "{out}");
+    let (ok, text) = fixpt(&["check", "--reps=text", "-"], program);
+    let texts: Vec<&str> = text.lines().collect();
+    assert!(!ok && texts.len() == 3 && texts[0] == "n (base int)", "{text}");
+    for ((line, readable), name) in lines.iter().zip(&texts).zip(["n", "even?", "odd?"]) {
+        let hex = line.strip_prefix(&format!("{name} ")).unwrap_or_else(|| panic!("{line}"));
+        let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
+        let rep = fixpt_reps::binary::decode(&bytes, true).unwrap();
+        assert_eq!(format!("{name} {}", fixpt_reps::text::write(&rep)), *readable);
+    }
+    let (ok, out) = fixpt(&["check", "--reps=binary", "-"], program);
+    assert!(!ok && out.is_empty(), "{out}");
+}
+
 /// `car` of `nil`, whose type (a list) allows it, traps on every machine
 /// instead of reading below address 0: machine code used to load from the
 /// pair without a look at it, and crashed.
