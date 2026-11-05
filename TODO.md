@@ -2080,7 +2080,7 @@ owner<<3 + offset.
 encoding), the direct-address variant with owner hints, segment tables, a
 boxed fallback for owners of 128 MiB or more.
 
-## 79. Intersections of procedure types, `overload` (the user's, 2026-10-11)
+## 79. Intersections of procedure types, `overload`; true unions (the user's, 2026-10-11, 2026-11-04)
 
 Designed, not built: `docs/research/logical-types.md` (decision 4 and
 §8, "Proposed syntax") proposes `(overload (subr …) …)`, intersections of
@@ -2102,6 +2102,64 @@ shown in messages, principal types, inference's interaction with the
 choice; both checkers must choose alike. The compilers need nothing for
 `length`, whose arms are one list walk at run time; arms with different
 code would.
+
+**A second use, and the user's direction (2026-11-04).** In encoding Herman
+and Wand's λm ("A Theory of Hygienic Macros", ESOP 2008; §182's source)
+with structural types, the user made its sorts sub-sums of one another:
+`expr`'s variants are among `sexp`'s, under the same tags, as the grammar
+`s ::= e | op | (s̄)` reads, so an `expr` is an `sexp` with no injection.
+The paper's α-equivalence (§3) is Gabbay and Pitts' swapping, one
+definition over every sort: `swap : (sym sym D) → D` for each D of `v`,
+`expr`, `op`, `macro`, `pat`, `sexp`. Defined at `sexp` alone, its callers
+lose the proof that the sort is kept; as a `poly` over D it is wrong
+(parametricity forbids taking a D apart, and a bound D ≤ sexp still gives
+no way to build one) unless D's constructors are passed in. What fits is
+§79's intersection with one body: `(overload (subr pure (sym sym expr)
+expr) … (subr pure (sym sym sexp) sexp))`, the body checked against each
+member, its recursive calls seeing the whole intersection. Uniform
+representation throughout. Davies and Pfenning's refinement types are
+this case. What it adds to the design (proposals, not decisions; the
+questions are the user's, `logical-types.md` §9):
+
+- **Dead arms while checking a member.** Checked against the `expr`
+  member, the body's `tagcase` arms for `sexp`'s other tags cannot run;
+  they are skipped, not refused as "has no tag" (`k-tagcase-arms`) nor
+  checked. The only new rule the swap body needs; a node rebuilt from
+  swapped parts is then an `expr` as it stands.
+- **A call takes every member it fits; its result their meet.** With
+  sub-sums several members fit and none need be best: an `expr` fits
+  `expr`'s and `sexp`'s; a variable fits `expr`'s, `op`'s and `sexp`'s, of
+  which `expr` and `op` are apart. Ordered selection (above) is fragile
+  there. ∩-elimination at every member that fits gives the call each of
+  their results: their meet, which structural sums and products always
+  have (the tags in common, their payloads' meets); swapping in a
+  variable gives `expr ⊓ op`, the variables. No choice to show in
+  messages. Needs results with meets; `subr` results, to think about.
+- **Shape-directed conversion** (`(Z X)^σ · s`, the paper's §3.1) is the
+  same intersection over sorts, its arm chosen by the shape σ as well.
+
+The paper the user brought for the theory: Liquori and Stolze, "A
+Decidable Subtyping Logic for Intersection and Union Types" (Inria
+hal-01488428, 2017): ∩ as one term's several typings (its typed
+calculus' ∩I asks both sides' erasures β-equal), ∪ dual, and a decision
+procedure for subtyping in BCD's theory Ξ, distributivity and (σ→ρ) ∩
+(τ→ρ) ≤ (σ∪τ) → ρ included, which §79's restricted design leaves out.
+
+**The user's direction:** proper intersection *and* union types in FX-26
+first, before macros (§182). Part of it: telling a union from a disjoint
+union. What FX-26 calls `union` today is the disjoint kind by
+construction (`logical-types.md` L1: members of distinct run-time shapes,
+so a shape test splits it; §8.4 rules out overlapping members as "hidden
+tags; write a sum"); the user thinks it is the disjoint variant and
+should be named as one (a name to choose: "partition", "parts"), beside a
+true union. To settle: what a true union of overlapping members admits
+(only what holds of every member: no test splits it), and how it relates
+to sums, whose width subtyping already makes the union of two sub-sums
+their join (`(union expr op)` would be the sum of both's tags, refused
+today as two sums of one shape); the meet above is an intersection of
+non-procedure types, which §8.4 also rules out (refs unsound; products
+positional), so which types may meet; and the renaming of today's
+`union` in both checkers, the front end and the ports.
 
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 
