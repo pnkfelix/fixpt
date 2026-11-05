@@ -1463,7 +1463,9 @@ impl Checker {
             return Ok(u);
         }
         if any {
-            self.anyof_sums_merged(&mut flat, span)?;
+            // Its sums kept as written: their head form made where one sum is
+            // needed (`sum_head`), which must be one, checked now.
+            self.sums_joined_of(&flat, span)?;
             self.anyof_written_apart(&flat, span)?;
         } else {
             self.union_members_differ(&flat, span)?;
@@ -1507,18 +1509,15 @@ impl Checker {
         *ms = kept;
     }
 
-    /// `ms`'s sums made one: each tag once, its payload the `anyof` of its
+    /// `sums` made one: each tag once, its payload the `anyof` of its
     /// payloads in them (`logical-types.md` §8.5: the same values, since a
-    /// sum's representation names its tag, not its type's tags).
-    fn anyof_sums_merged(&mut self, ms: &mut Vec<TyId>, span: fixpt_read::Span) -> R<()> {
-        let sums: Vec<usize> = (0..ms.len()).filter(|&i| matches!(self.arena.get(ms[i]), Ty::Sum(_))).collect();
-        let [first, ref rest @ ..] = sums[..] else { return Ok(()) };
-        if rest.is_empty() {
-            return Ok(());
-        }
+    /// sum's representation names its tag, not its type's tags). An
+    /// `anyof`'s sums are kept as written; this is their head form
+    /// (§8.8), made where one sum is needed.
+    pub(crate) fn sums_joined(&mut self, sums: &[TyId], span: fixpt_read::Span) -> R<TyId> {
         let mut tags: Vec<(Sym, Vec<TyId>)> = Vec::new();
-        for &i in &sums {
-            let Ty::Sum(ps) = self.arena.get(ms[i]).clone() else { unreachable!("a sum") };
+        for &m in sums {
+            let Ty::Sum(ps) = self.arena.get(self.arena.resolve(m)).clone() else { unreachable!("a sum") };
             for (l, t) in ps {
                 match tags.iter_mut().find(|(m, _)| *m == l) {
                     Some((_, ts)) => ts.push(t),
@@ -1531,11 +1530,58 @@ impl Checker {
             let t = if let [t] = ts[..] { t } else { self.anyof_of(&ts, span)? };
             parts.push((l, t));
         }
-        ms[first] = self.arena.ty(Ty::Sum(parts));
-        for &i in rest.iter().rev() {
-            ms.remove(i);
+        Ok(self.arena.ty(Ty::Sum(parts)))
+    }
+
+    /// The sums of `ms`, if two or more, made one (`sums_joined`).
+    fn sums_joined_of(&mut self, ms: &[TyId], span: fixpt_read::Span) -> R<Option<TyId>> {
+        let sums: Vec<TyId> = ms.iter().copied().filter(|m| matches!(self.arena.get(self.arena.resolve(*m)), Ty::Sum(_))).collect();
+        if sums.len() < 2 {
+            return Ok(None);
         }
-        Ok(())
+        Ok(Some(self.sums_joined(&sums, span)?))
+    }
+
+    /// The sums of `ms`, if two or more, made one as `sums_joined` makes
+    /// them, but each payload of several the union of those not the same,
+    /// unchecked: what subtyping compares with, which may not fail.
+    pub(crate) fn sums_joined_raw(&mut self, ms: &[TyId]) -> Option<TyId> {
+        let sums: Vec<TyId> = ms.iter().copied().filter(|m| matches!(self.arena.get(self.arena.resolve(*m)), Ty::Sum(_))).collect();
+        if sums.len() < 2 {
+            return None;
+        }
+        let mut tags: Vec<(Sym, Vec<TyId>)> = Vec::new();
+        for &m in &sums {
+            let Ty::Sum(ps) = self.arena.get(self.arena.resolve(m)).clone() else { unreachable!("a sum") };
+            for (l, t) in ps {
+                match tags.iter_mut().find(|(m, _)| *m == l) {
+                    Some((_, ts)) => ts.push(t),
+                    None => tags.push((l, vec![t])),
+                }
+            }
+        }
+        let mut parts = Vec::new();
+        for (l, mut ts) in tags {
+            let t = if let [t] = ts[..] {
+                t
+            } else {
+                self.anyof_trimmed(&mut ts);
+                self.union_built(ts)
+            };
+            parts.push((l, t));
+        }
+        Some(self.arena.ty(Ty::Sum(parts)))
+    }
+
+    /// Of a union whose members are all sums, its head form: the one sum
+    /// they are together (`tagcase` takes that apart).
+    pub(crate) fn sum_head(&mut self, t: TyId) -> Option<TyId> {
+        let Ty::Union(ms) = self.arena.get(self.arena.resolve(t)).clone() else { return None };
+        if !ms.iter().all(|m| matches!(self.arena.get(self.arena.resolve(*m)), Ty::Sum(_))) {
+            return None;
+        }
+        let span = fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0);
+        self.sums_joined(&ms, span).ok()
     }
 
     /// Whether a value of `t` may be written: a cell, an array, a bloblet, or
@@ -1709,14 +1755,14 @@ impl Checker {
             self.union_members_known(&ms, span, any)?;
             if any {
                 self.anyof_written_apart(&ms, span)?;
-            } else {
-                self.union_members_differ(&ms, span)?;
+                self.sums_joined_of(&ms, span)?;
+                continue;
             }
+            self.union_members_differ(&ms, span)?;
             // Made already, its sums cannot be made one now.
             let sum = |c: &Self, m: &TyId| matches!(c.arena.get(c.arena.resolve(*m)), Ty::Sum(_));
             if ms.iter().filter(|m| sum(self, m)).count() > 1 {
-                let former = if any { "anyof" } else { "oneof" };
-                return Err(FxError::at(span, format!("a `{former}` of sums with a member not yet defined: write the sums as one `sumof`")));
+                return Err(FxError::at(span, "a `oneof` of sums with a member not yet defined: write the sums as one `sumof`"));
             }
         }
         Ok(())
@@ -4265,6 +4311,17 @@ impl Checker {
                     let (nil, pair) = (self.arena.ty(Ty::Nil), self.arena.ty(Ty::Pair(x, y, r, false)));
                     return below_one(self, nil, st) && below_one(self, pair, st);
                 }
+                // A sum below the union's sums made one (their head form):
+                // its tags may be some of one member's, some of another's.
+                if matches!(ta, Ty::Sum(_)) {
+                    if let Some(joined) = self.sums_joined_raw(&ns) {
+                        let saved = st.clone();
+                        if self.sub(a, joined, env, st) {
+                            return true;
+                        }
+                        *st = saved;
+                    }
+                }
                 return self.split_below(a, &ns, b, env, st);
             }
         }
@@ -5043,6 +5100,8 @@ impl Checker {
     ) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let (st, mut eff) = self.synth(scrutinee)?;
+        // A union of sums: its head form, the one sum they are together.
+        let st = self.sum_head(st).unwrap_or(st);
         // A blobref to a flat sum (`TODO.md` §77): each arm given a blobref
         // to its variant, the `else` the blobref as it is; the tag read from
         // the owner's region, by the layout's code told the compilers.

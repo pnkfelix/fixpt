@@ -7,6 +7,7 @@
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-pending (productof (1 int) (2 int) (3 int) (4 bool)))
 (define-type k-sides (pairof k-ids k-ids @t))
+(define-type k-idss (listof k-ids acyclic))
 ;; Type `t` where a value of it is found of shape `k`, and where not, -1
 ;; for no narrowing: a union's members of that shape, and the rest; a pair
 ;; that may be `nil`, the pair that is not, where `null?` does not hold or
@@ -49,6 +50,34 @@
                                (write @t)
                                spin)
                        (k-ids int int)
+                       int))
+            (val k-sum-head
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (int)
+                       int))
+            (val k-sums-joined-raw
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-ids) int))
+            (val k-sums-joined-of
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (k-ids int int)
+                       int))
+            (val k-shaped-like
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) k-ids))
+            (val k-split-fields
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-idss))
+            (val k-kin-fields
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) k-idss))
+            (val k-union-ty?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) bool))
+            (val k-members-of
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-ids))
+            (val k-kin-agree?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-idss int) bool))
+            (val k-with-field
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int int)
                        int))
             (val k-check-pending-unions
                  (subr (maxeff (alloc @t)

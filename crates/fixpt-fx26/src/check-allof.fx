@@ -404,7 +404,14 @@
   (lambda (x f args expected app)
     (let ((r (prompt k-tag (k-done (app x f args expected)) (lambda (r) r))))
       (tagcase r
-        (k-done (te) te)
+        ;; Checks, but not as what is expected: as its members, if their
+        ;; union is (`swap` of an `(anyof expr op)` an `(anyof expr op)`);
+        ;; else as it is, for the expectation to refuse.
+        (k-done (te)
+          (let ((tried (k-split-candidates args)))
+            (if (or (< expected 0) (k-subtype (extract te 1) expected) (null? tried))
+                te
+                (k-split-or-whole x f args expected app tried te))))
         (k-err (m a b)
           (let ((tried (k-split-candidates args)))
             ;; An error inside an argument that is not a variable is that
@@ -458,6 +465,17 @@
                                  (else (cons (car l) (bases (cdr l))))))))
       (product (1 (facts (get k-extracts))) (2 (withs (get k-with-vals)))
                (3 (reshapes (get k-reshapes))) (4 (bases (get k-reshape-bases)))))))
+;; The call taken apart by `tried` if that checks and is as `expected` is,
+;; else `te`, what the call found whole, and its facts.
+(define k-split-or-whole (->* (kx kx kxs int k-app-fn (listof k-split acyclic) k-te) k-te)
+  (lambda (x f args expected app tried te)
+    (let* ((whole (k-code-now))
+           (inside (k-code-but (k-start x) (k-end x)))
+           (r (prompt k-tag (k-done (k-split-tries x f args expected app inside tried "" 0 0))
+                      (lambda (r) r))))
+      (tagcase r
+        (k-done (u) (if (k-subtype (extract u 1) expected) u (begin (k-code-put-back whole) te)))
+        (else y (begin (k-code-put-back whole) te))))))
 ;; Each of `tried` in turn, until one whose every member checks; none, the
 ;; error `m` at `a`..`b`.
 (define k-split-tries

@@ -678,7 +678,7 @@
       (if (>= expected 0) (k-te expected (k-check body expected)) (k-synth body))))
   (k-synth-tagcase (->* (kx kx k-arms k-let-bs int) k-te)
     (lambda (x s arms els expected)
-      (let* ((r0 (k-synth s)) (rs (k-flat-view (k-at-of x) r0)) (st (extract rs 1)))
+      (let* ((r0 (k-synth s)) (rs (k-flat-view (k-at-of x) r0)) (st (k-sum-head (extract rs 1))))
         (tagcase (k-get st)
           (ty-sum (variants)
             (let* ((arm-results (k-tagcase-arms arms variants st expected))

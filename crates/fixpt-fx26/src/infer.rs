@@ -758,16 +758,38 @@ impl Checker {
     /// `allof`'s body, since it is compiled once.
     fn synth_app_split(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         let err = match self.synth_app_of(e, fun, args, expected) {
-            Ok(r) => return Ok(r),
+            // Checks, but not as what is expected: as its members, if
+            // their union is (`swap` of an `(anyof expr op)` an `(anyof
+            // expr op)`); else as it is, for the expectation to refuse.
+            Ok((t, eff)) => match expected {
+                Some(want) if !self.subtype(t, want) && !self.union_arguments(args).is_empty() => {
+                    let (whole, effects) = (self.facts.code_saved(), self.facts.effects.clone());
+                    let err = FxError::at(self.arena.span_of(e), "");
+                    match self.split_tries(e, fun, args, expected, err) {
+                        Ok((u, ueff)) if self.subtype(u, want) => return Ok((u, ueff)),
+                        _ => {
+                            self.facts.code_put_back(&whole);
+                            self.facts.effects = effects;
+                            return Ok((t, eff));
+                        }
+                    }
+                }
+                _ => return Ok((t, eff)),
+            },
             Err(err) => err,
         };
         // An error inside an argument that is not a variable is that
         // argument's, which no member of another makes go away.
-        let span = self.arena.span_of(e);
         let within = |x: fixpt_read::Span, outer: fixpt_read::Span| x.file == outer.file && x.start >= outer.start && x.end <= outer.end;
         if args.iter().any(|a| !matches!(self.arena.exp_at(*a), Exp::Var(_)) && within(err.span, self.arena.span_of(*a))) {
             return Err(err);
         }
+        self.split_tries(e, fun, args, expected, err)
+    }
+
+    /// Each argument of `args` that is a variable whose type is a union: its
+    /// name, its binding, its members.
+    fn union_arguments(&self, args: &[ExpId]) -> Vec<(Sym, usize, Vec<TyId>)> {
         let mut tried = Vec::new();
         for &a in args {
             let Some((v, at, steps)) = self.path_of(a) else { continue };
@@ -776,10 +798,19 @@ impl Checker {
                 tried.push((v, at, ms));
             }
         }
+        tried
+    }
+
+    /// Call `e` taken apart by each of its union arguments in turn
+    /// (`synth_app_split`), until one whose every member checks; none, `err`.
+    fn split_tries(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>, err: FxError) -> R<(TyId, Effect)> {
+        let tried = self.union_arguments(args);
         if tried.is_empty() {
             return Err(err);
         }
         // What was found before, but in this call: the failed try's.
+        let span = self.arena.span_of(e);
+        let within = |x: fixpt_read::Span, outer: fixpt_read::Span| x.file == outer.file && x.start >= outer.start && x.end <= outer.end;
         let inside = |c: &Self, x: ExpId| within(c.arena.span_of(x), span);
         let saved = self.facts.code_saved_but(|x| inside(self, x));
         let mut effects_before = self.facts.effects.clone();

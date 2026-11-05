@@ -1745,13 +1745,13 @@ impl Verifier<'_> {
         v.ty.map(|t| self.c.arena.get(self.c.arena.resolve(t)).clone())
     }
 
-    /// The effect of reading region `r`, unless it is frozen.
     /// Of union members `ms`, the pair every other pair is below, if one is.
     fn greatest_pair(&mut self, ms: &[TyId]) -> Option<TyId> {
         let pairs: Vec<TyId> = ms.iter().copied().filter(|m| matches!(self.c.arena.get(self.c.arena.resolve(*m)), Ty::Pair(..))).collect();
         self.c.greatest_of(&pairs)
     }
 
+    /// The effect of reading region `r`, unless it is frozen.
     fn reads(&mut self, r: crate::ast::Region) {
         if !matches!(r, crate::ast::Region::Frozen(..)) {
             self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Read(r)));
@@ -2288,7 +2288,12 @@ impl Verifier<'_> {
                             _ => false,
                         };
                         let found: Vec<TyId> = ms.iter().copied().filter(|m| shaped(self, m)).collect();
-                        if let [m] = found[..] { m } else { own }
+                        // Of several sums, their one sum (`Checker::sum_head`).
+                        match found[..] {
+                            [m] => m,
+                            [_, _, ..] if matches!(self.c.arena.get(self.c.arena.resolve(found[0])), Ty::Sum(_)) => self.c.sums_joined_raw(&found).unwrap_or(own),
+                            _ => own,
+                        }
                     }
                     _ => own,
                 };
@@ -2832,6 +2837,11 @@ impl Verifier<'_> {
             let msg = format!("{at}: field {k} of {}", me.show(o.ty.expect("known")));
             me.out.failed.push(msg);
         };
+        // A union of sums: their one sum (`Checker::sum_head`).
+        let t = match o.ty.and_then(|x| self.c.sum_head(x)) {
+            Some(h) => self.c.arena.get(h).clone(),
+            None => t,
+        };
         match t {
             Ty::Sum(arms) if k == 2 => {
                 let _ = arms;
@@ -3043,6 +3053,7 @@ impl Verifier<'_> {
                 let name = self.heap.symbol_name(*tag);
                 for v in s.stack.iter_mut().filter(|v| v.term == *scrutinee) {
                     let Some(ty) = v.ty else { continue };
+                    let ty = self.c.sum_head(ty).unwrap_or(ty);
                     if let Ty::Sum(arms) = self.c.arena.get(self.c.arena.resolve(ty)).clone() {
                         let arm: Vec<_> = arms.into_iter().filter(|(l, _)| (self.c.interner.name(*l) == name) == yes).collect();
                         v.ty = Some(self.c.arena.ty(Ty::Sum(arm)));

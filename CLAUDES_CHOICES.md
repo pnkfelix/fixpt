@@ -3710,7 +3710,33 @@ from run to run, and right where the name is shadowed.
    `allof`'s; what all found kept together, effects of the call's
    expressions joined.
 6. **`extract` not covered**: it is a form, not a call, in both checkers.
-7. **The λm example of §8.5 does not come out as designed.** `(anyof expr
-   op)` is one sum once U0's merging normalizes it, so `swap` of one fits
-   only the `sexp` member. Kept as it is for the user to decide (keep the
-   written members beside the merged sum, or leave it).
+7. **The λm example of §8.5**: `(anyof expr op)` was one sum once U2's
+   merging normalized it, so `swap` of one fit only the `sexp` member. The
+   user's choice (2026-11-05): keep the written members. Below, "U3b".
+
+## U3b: an `anyof`'s sums kept as written (2026-11-05; the user's)
+
+1. **Kept as written; one sum made where one is needed.** `tagcase` of a
+   union whose members are all sums takes their one sum (`sum_head`); a
+   union with other members too is narrowed first, as before. Writing the
+   union checks the sums can be made one (a shared tag's payloads must
+   form an `anyof`), so a later merge does not fail.
+2. **Subtyping's merge is unchecked** (`sums_joined_raw`): a payload of
+   several is the union of those not the same, flattened no further and
+   not refused, since the FX-26 subtype test may not escape. The same
+   values as the checked merge, so the same answers.
+3. **Tried after every member alone**, before splitting at a field.
+4. **A recursive `anyof` of sums is taken**: nothing is made one when it
+   is written, so a member not yet defined no longer matters. A `oneof`'s
+   sums are still made one where written, and that refusal stays for it.
+5. **Rule 5 where a call checks but not as expected**: taken apart, and
+   kept if its union is as expected; else the whole call's facts put back
+   and its type kept, for the expectation to refuse. Without it, `swap` of
+   an `(anyof expr op)` checks whole, as the `sexp` member, and only the
+   expectation fails.
+6. **Helpers moved** from `check-subtype.fx` (then past its 1000 lines) to
+   `check-unions.fx`: candidates by shape, the fields to split, how.
+7. **The verifier of typed cellular code takes a union of sums as their
+   one sum** where it takes a sum apart or checks one made where the union
+   is expected (`typed_cells.rs`), so those words verify; an `allof`'s body
+   and a call split by members stay its known gaps.

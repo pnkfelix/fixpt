@@ -801,7 +801,8 @@ later breaks nothing).
   members of that shape, a union still if several share it.
 - *Normal form*: flattened; `void` dropped; a member below another
   dropped (as built, only one the same as another: the rest is §8.8's,
-  on demand); **sums merged**, `(anyof (sumof (a A) (b B)) (sumof (a C) (c
+  on demand); **sums merged** (as built since U3, on demand: kept as
+  written, made one where one sum is needed), `(anyof (sumof (a A) (b B)) (sumof (a C) (c
   D)))` is `(sumof (a (anyof A C)) (b B) (c D))`, exactly the same set of
   values, since a sum's representation names its tag, not its type's
   tags. So `(anyof expr op)` is a sub-sum of `sexp` as written. Products
@@ -934,11 +935,26 @@ first such argument that works is taken; one argument at a time, so the
 cost is the members', never their product. Not tried where the error is
 inside an argument that is not a variable (a nested call's, a `lambda`'s
 body's): no member of another argument changes it. Not covered: an
-argument that is not a variable (bind it with `let`); `extract`, which is
-a form, not a call; and `swap` of an `(anyof expr op)`, which is one sum
-once normalized (U0's merging), so there is no union left to take apart:
-it fits `swap`'s `sexp` member, and gives an `sexp`. Tests:
-`anyof/car-split.fx`, `car-split-misfit.fx`, `allof-split.fx`.
+argument that is not a variable (bind it with `let`); and `extract`, which
+is a form, not a call. Tests: `anyof/car-split.fx`, `car-split-misfit.fx`,
+`allof-split.fx`.
+
+*Then, the same day, the user's*: `swap` of an `(anyof expr op)` gave an
+`sexp`, since U2 made the two sums one where the union was written and
+left nothing to take apart ("normalizing the type there causes the
+subsequent application to fail … not my intention nor expectation"). So an
+`anyof`'s sums are kept as written (`logical-types.md` §8.8's direction),
+their one sum a head form made where one is needed: `tagcase` of the union
+(`sum_head`, `k-sum-head`), and a sum shown below the union when no member
+takes it whole (`sums_joined_raw`, `k-sums-joined-raw`: each payload the
+union of the distinct ones, unchecked, since a subtype test may not fail).
+Writing one still checks that its sums can be made one. A recursive
+`anyof` of sums, refused before, is taken. And rule 5 applies also where a
+call checks but not as what is expected: taken apart, it is kept if its
+union is; else the whole call as it was, for the expectation to refuse. So
+`swap` of an `(anyof expr op)` is an `(anyof expr op)`
+(`anyof/swap-anyof.fx`). A `oneof`'s sums are still made one where it is
+written (U0).
 
 Each stage in both checkers, agreeing, as L0 to L3 were. U1 before U2
 because swap needs only it: `sexp` is written as the sum it is. U0 to U3

@@ -246,9 +246,11 @@
                                (k-pendings-append (get k-pending-unions)
                                                   (product (1 u) (2 start) (3 end) (4 any))))
                           u)))
-                (any
-                 (let ((ms (k-anyof-sums-merged merged start end)))
-                   (begin (k-anyof-written-apart ms start end) (k-union-build ms))))
+                ;; Its sums kept as written: their head form made where one
+                ;; sum is needed (`k-sum-head`), which must be one, checked now.
+                (any (begin (k-sums-joined-of merged start end)
+                            (k-anyof-written-apart merged start end)
+                            (k-union-build merged)))
                 (else (begin (k-union-overlap merged start end)
                              (k-union-build (k-union-sums-merged merged))))))))))
 ;; `ms` without `void`, and without a member the same as one before it
@@ -261,15 +263,58 @@
           (else (k-anyof-trimmed (cdr ms) (the k-ids (cons (car ms) kept)))))))
 (define k-same-in? (->* (int k-ids) bool)
   (lambda (m ks) (and (not (null? ks)) (or (k-same-type? (car ks) m) (k-same-in? m (cdr ks))))))
-;; `ms`'s sums made one: each tag once, its payload the `anyof` of its
-;; payloads in them (the same values: a sum's representation names its
-;; tag, not its type's tags).
-(define k-anyof-sums-merged (->* (k-ids int int) k-ids)
+;; `sums` made one: each tag once, its payload the `anyof` of its payloads
+;; in them (the same values: a sum's representation names its tag, not its
+;; type's tags). An `anyof`'s sums are kept as written; this is their head
+;; form (`logical-types.md` §8.8), made where one sum is needed. As Rust's
+;; `sums_joined`.
+(define k-sums-joined (->* (k-ids int int) int)
+  (lambda (sums start end)
+    (let ((all (k-all-sum-parts sums))) (k-ty-new (ty-sum (k-tags-joined all all nil start end))))))
+;; The sums of `ms`, if two or more, made one; -1 if not.
+(define k-sums-joined-of (->* (k-ids int int) int)
   (lambda (ms start end)
-    (if (< (k-count-sums ms) 2)
-        ms
-        (let ((all (k-all-sum-parts ms)))
-          (k-sums-replaced ms (k-ty-new (ty-sum (k-tags-joined all all nil start end))) #f)))))
+    (let ((sums (k-sums-among ms)))
+      (if (or (null? sums) (null? (cdr sums))) -1 (k-sums-joined sums start end)))))
+(define k-sums-among (->* (k-ids) k-ids)
+  (lambda (ms)
+    (cond ((null? ms) nil)
+          ((null? (k-sum-parts-of (car ms))) (k-sums-among (cdr ms)))
+          (else (the k-ids (cons (car ms) (k-sums-among (cdr ms))))))))
+;; The sums of `ms`, if two or more, made one as `k-sums-joined` makes them,
+;; but each payload of several the union of those not the same, unchecked:
+;; what subtyping compares with, which may not fail; -1 if not. As Rust's
+;; `sums_joined_raw`.
+(define k-sums-joined-raw (->* (k-ids) int)
+  (lambda (ms)
+    (let ((sums (k-sums-among ms)))
+      (if (or (null? sums) (null? (cdr sums)))
+          -1
+          (let ((all (k-all-sum-parts sums))) (k-ty-new (ty-sum (k-tags-raw all all nil))))))))
+(define k-tags-raw (->* (k-parts k-parts (listof symbol acyclic)) k-parts)
+  (lambda (ps all seen)
+    (cond ((null? ps) nil)
+          ((k-symbol-in? (extract (car ps) 1) seen) (k-tags-raw (cdr ps) all seen))
+          (else
+           (let* ((l (extract (car ps) 1)) (ts (k-payloads-of l all))
+                  (t (if (null? (cdr ts)) (car ts) (k-union-build (k-anyof-trimmed ts nil)))))
+             (the k-parts
+                  (cons (product (1 l) (2 t))
+                        (k-tags-raw (cdr ps) all (the (listof symbol acyclic) (cons l seen))))))))))
+;; Of a union whose members are all sums, its head form: the one sum they
+;; are together (`tagcase` takes that apart); else `t`. As Rust's
+;; `sum_head`.
+(define k-sum-head (->* (int) int)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-union (ms)
+        (if (= (k-length (k-sums-among ms)) (k-length ms)) (k-sums-joined-or ms t) t))
+      (else y t))))
+;; `sums` made one, or `t` if they cannot be.
+(define k-sums-joined-or (->* (k-ids int) int)
+  (lambda (sums t)
+    (let ((r (prompt k-tag (k-done (k-te (k-sums-joined sums 0 0) nil)) (lambda (r) r))))
+      (tagcase r (k-done (te) (extract te 1)) (else y t)))))
 ;; Each tag of `ps` once, at its first place, its payload the `anyof` of
 ;; every payload `ps` has for it (`all`, the whole; `seen`, tags placed).
 (define k-tags-joined (->* (k-parts k-parts (listof symbol acyclic) int int) k-parts)
@@ -340,17 +385,110 @@
               (the k-pendings (cons p (k-check-pendings (cdr ps))))
               (begin (k-union-known ms (extract p 2) (extract p 3) (extract p 4))
                      (if (extract p 4)
-                         (k-anyof-written-apart ms (extract p 2) (extract p 3))
-                         (k-union-overlap ms (extract p 2) (extract p 3)))
-                     ;; Made already, its sums cannot be made one now.
-                     (if (> (k-count-sums ms) 1)
-                         (k-fail (k-cat3 "a `" (k-former (extract p 4))
-                                         (string-append "` of sums with a member not yet defined: "
-                                                        "write the sums as one `sumof`"))
-                                 (extract p 2) (extract p 3))
-                         #u)
+                         (begin (k-anyof-written-apart ms (extract p 2) (extract p 3))
+                                (k-sums-joined-of ms (extract p 2) (extract p 3))
+                                #u)
+                         (begin (k-union-overlap ms (extract p 2) (extract p 3))
+                                ;; Made already, its sums cannot be made one now.
+                                (if (> (k-count-sums ms) 1)
+                                    (k-fail (string-append
+                                             "a `oneof` of sums with a member not yet "
+                                             "defined: write the sums as one `sumof`")
+                                            (extract p 2) (extract p 3))
+                                    #u)))
                      (k-check-pendings (cdr ps))))))))
 
+;; What `k-split-below` (`check-subtype.fx`) splits, and how: a type below
+;; a union that no member takes whole, at a field (`logical-types.md` §8.8).
+;; Of union members `ns`, those that may hold an `a`: of its shapes, or
+;; either's not known.
+(define k-shaped-like (->* (int k-ids) k-ids)
+  (lambda (a ns)
+    (let ((s (k-run-shape a)))
+      (cond ((null? ns) nil)
+            ((let ((n (k-run-shape (car ns))))
+               (or (< s 0) (< n 0) (not (= (bitwise-and s n) 0))))
+             (the k-ids (cons (car ns) (k-shaped-like a (cdr ns)))))
+            (else (k-shaped-like a (cdr ns)))))))
+;; The fields of `a` that `k-split-below` may split, in order, as a list of
+;; one: a product's or a sum's, a frozen pair's head and tail.
+(define k-split-fields (->* (int) k-idss)
+  (lambda (a)
+    (tagcase (k-get (k-resolve a))
+      (ty-product (ps) (list (k-part-tys ps)))
+      (ty-sum (ps) (list (k-part-tys ps)))
+      (ty-pair (x y r nl)
+        (if (and (not nl) (tagcase r (r-frozen (p f) #t) (else z #f)))
+            (list (the k-ids (cons x (k-one-ty y))))
+            nil))
+      (else z nil))))
+(define k-one-ty (->* (int) k-ids) (lambda (t) (the k-ids (cons t nil))))
+(define k-part-tys (->* (k-parts) k-ids)
+  (lambda (ps) (if (null? ps) nil (the k-ids (cons (extract (car ps) 2) (k-part-tys (cdr ps)))))))
+;; The fields of each of `ns` of `a`'s kind matching `a`'s: of a product of
+;; the same labels, of a sum with each of `a`'s tags, of a pair.
+(define k-kin-fields (->* (int k-ids) k-idss)
+  (lambda (a ns)
+    (if (null? ns)
+        nil
+        (let ((k (k-kin-of (k-get (k-resolve a)) (k-get (k-resolve (car ns)))))
+              (rest (k-kin-fields a (cdr ns))))
+          (if (null? k) rest (the k-idss (cons (car k) rest)))))))
+(define k-kin-of (->* (k-ty k-ty) k-idss)
+  (lambda (ta tn)
+    (tagcase ta
+      (ty-product (ps)
+        (tagcase tn
+          (ty-product (qs) (if (k-same-labels-in-order? ps qs) (list (k-part-tys qs)) nil))
+          (else z nil)))
+      (ty-sum (ps)
+        (tagcase tn (ty-sum (qs) (k-tags-payloads ps qs)) (else z nil)))
+      (ty-pair (x y r nl)
+        (tagcase tn (ty-pair (u v s m) (list (the k-ids (cons u (k-one-ty v))))) (else z nil)))
+      (else z nil))))
+(define k-same-labels-in-order? (->* (k-parts k-parts) bool)
+  (lambda (ps qs)
+    (cond ((null? ps) (null? qs))
+          ((null? qs) #f)
+          (else (and (symbol=? (extract (car ps) 1) (extract (car qs) 1))
+                     (k-same-labels-in-order? (cdr ps) (cdr qs)))))))
+;; `qs`'s payloads for each of `ps`'s tags, as a list of one; none if one
+;; is missing.
+(define k-tags-payloads (->* (k-parts k-parts) k-idss)
+  (lambda (ps qs)
+    (if (null? ps)
+        (list (the k-ids nil))
+        (let ((t (k-part-find qs (extract (car ps) 1))) (rest (k-tags-payloads (cdr ps) qs)))
+          (if (or (< t 0) (null? rest)) nil (list (the k-ids (cons t (car rest)))))))))
+(define k-union-ty? (->* (int) bool)
+  (lambda (t) (tagcase (k-get (k-resolve t)) (ty-union (ms) #t) (else z #f))))
+(define k-members-of (->* (int) k-ids)
+  (lambda (t) (tagcase (k-get (k-resolve t)) (ty-union (ms) ms) (else z (k-one-ty t)))))
+;; Whether every field list of `kin` has the same type at `i`.
+(define k-kin-agree? (->* (k-idss int) bool)
+  (lambda (kin i)
+    (let ((first (k-nth-id (car kin) i)))
+      (letrec ((all? (->* (k-idss) bool)
+                 (lambda (ks)
+                   (or (null? ks)
+                       (and (k-same-type? (k-nth-id (car ks) i) first) (all? (cdr ks)))))))
+        (all? (cdr kin))))))
+(define k-nth-id (->* (k-ids int) int)
+  (lambda (xs i) (if (= i 0) (car xs) (k-nth-id (cdr xs) (- i 1)))))
+;; `a` with its `i`th field (`k-split-fields`) of type `m`.
+(define k-with-field (->* (int int int) int)
+  (lambda (a i m)
+    (tagcase (k-get (k-resolve a))
+      (ty-product (ps) (k-ty-new (ty-product (k-part-at ps i m))))
+      (ty-sum (ps) (k-ty-new (ty-sum (k-part-at ps i m))))
+      (ty-pair (x y r nl)
+        (k-ty-new (if (= i 0) (ty-pair m y r nl) (ty-pair x m r nl))))
+      (else z a))))
+(define k-part-at (->* (k-parts int int) k-parts)
+  (lambda (ps i m)
+    (if (= i 0)
+        (the k-parts (cons (product (1 (extract (car ps) 1)) (2 m)) (cdr ps)))
+        (the k-parts (cons (car ps) (k-part-at (cdr ps) (- i 1) m))))))
 ;; A pair that may be `nil`, tested for either, is two members here.
 (define k-member-parts (->* (int int) k-ids)
   (lambda (m k)
