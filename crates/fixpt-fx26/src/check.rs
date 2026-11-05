@@ -1551,6 +1551,13 @@ impl Checker {
         Ok(())
     }
 
+    /// Of `ms`, the first that every other is below, if one is: a union's
+    /// greatest member of a shape, which inference takes for the union
+    /// (`logical-types.md` §8.8).
+    pub(crate) fn greatest_of(&mut self, ms: &[TyId]) -> Option<TyId> {
+        ms.iter().copied().find(|&m| ms.iter().all(|&o| o == m || self.subtype(o, m)))
+    }
+
     /// Whether no two of `ms` share a shape: a union printed `oneof`.
     pub(crate) fn members_apart(&self, ms: &[TyId]) -> bool {
         let shapes: Vec<u32> = ms.iter().map(|m| self.shape(*m).unwrap_or(0)).collect();

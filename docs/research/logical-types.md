@@ -1039,6 +1039,15 @@ their caches hold.
   says whether the answer cache earns its keep, or the head forms are
   enough.
 
+**Built first (2026-11-05): greatest members, piece 2**, which needs no
+answer to questions 16 to 20. In both checkers (`greatest_of`,
+`k-greatest-of` and `k-upper-bound`): where inference matched a union's
+member of a shape, it takes the greatest of those, if one is. Not yet
+kept on the node (to measure); the termination walk still takes a pair
+member only if one alone is a pair, having no subtyping there, which
+costs a descent it might have seen, never an answer. Tests:
+`anyof/greatest-pair.fx`, `anyof/no-greatest.fx`.
+
 **Inference variables.** A question with unsolved variables is not
 split (a split would solve them per piece, and the pieces disagree);
 it is decided as now, and refused if that fails.

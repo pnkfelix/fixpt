@@ -1653,8 +1653,9 @@ impl Checker {
     }
 
     /// `car` or `cdr` of a union with a pair member (a `datum`, say) takes
-    /// that member apart: every machine's `car` checks its argument is a
-    /// pair, and traps if not, as it does on `nil` (TODO §51).
+    /// that member apart, of several the greatest (`greatest_of`): every
+    /// machine's `car` checks its argument is a pair, and traps if not, as
+    /// it does on `nil` (TODO §51).
     fn partial_pair_argument(&mut self, e: ExpId, params: &[TyId], done: &mut [Synthesised], u: &mut Unknowns) {
         let car = |c: &Self| matches!(c.facts.standard_operator.get(&e), Some(s) if matches!(c.interner.name(*s), "car" | "cdr"));
         if !car(self) {
@@ -1663,7 +1664,7 @@ impl Checker {
         let Some(Some((t, eff))) = done.first().cloned() else { return };
         let Ty::Union(ms) = self.arena.get(self.arena.resolve(t)).clone() else { return };
         let pairs: Vec<TyId> = ms.iter().copied().filter(|m| matches!(self.arena.get(self.arena.resolve(*m)), Ty::Pair(..))).collect();
-        if let [m] = pairs[..] {
+        if let Some(m) = self.greatest_of(&pairs) {
             self.unify(params[0], m, u, &mut HashSet::new());
             done[0] = Some((m, eff));
         }
@@ -2320,12 +2321,12 @@ impl Checker {
                 u.bounds.insert(v, b);
             }
             // A union expected: the member whose shapes hold the pattern's
-            // (a `cons` where a list or an `int` is wanted, its pair), if
-            // one alone does (an `anyof`'s may overlap).
+            // (a `cons` where a list or an `int` is wanted, its pair); of
+            // several (an `anyof`'s may overlap), the greatest, if one is.
             (ref q, Ty::Union(aa)) if !matches!(q, Ty::Union(_)) => {
                 let Some(ps) = self.shape(p).filter(|s| *s != 0) else { return };
                 let holding: Vec<TyId> = aa.iter().copied().filter(|y| self.shape(*y).is_some_and(|s| s & ps == ps)).collect();
-                if let [y] = holding[..] {
+                if let Some(y) = self.greatest_of(&holding) {
                     self.unify(p, y, u, trail);
                 }
             }
@@ -2364,7 +2365,8 @@ impl Checker {
                 self.unify(x2, y2, u, trail);
                 self.unify_exact = outer;
             }
-            // Members by shape, where one alone has a member's shape.
+            // Members by shape: of those with a member's shape, the
+            // greatest, if one is.
             (Ty::Union(pp), at) => {
                 let actual: Vec<TyId> = match at {
                     Ty::Union(aa) => aa,
@@ -2372,7 +2374,7 @@ impl Checker {
                 };
                 for x in &pp {
                     let same: Vec<TyId> = actual.iter().copied().filter(|y| self.shape(*y).is_some() && self.shape(*y) == self.shape(*x)).collect();
-                    if let [y] = same[..] {
+                    if let Some(y) = self.greatest_of(&same) {
                         self.unify(*x, y, u, trail);
                     }
                 }

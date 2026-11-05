@@ -477,7 +477,9 @@
                       ;; wanted, its pair).
                       ((and (tagcase at (ty-union (aa) #t) (else y #f))
                             (tagcase pt (ty-union (pp) #f) (ty-var (v) #f) (else y #t)))
-                       (let ((y (tagcase at (ty-union (aa) (k-member-holding p aa)) (else w -1))))
+                       (let ((y (tagcase at
+                                  (ty-union (aa) (k-greatest-of (k-member-holding p aa)))
+                                  (else w -1))))
                          (if (< y 0) #u (k-unify p y kinds solved trail))))
                       (else (k-unify-node a pt at kinds solved trail)))))))))
   ;; Node `pt` matched against `a`, whose node is `at`, by their shapes.
@@ -614,7 +616,7 @@
     (lambda (pp actual kinds solved trail)
       (if (null? pp)
           #u
-          (let ((y (k-same-shape-in (car pp) actual)))
+          (let ((y (k-greatest-of (k-same-shape-in (car pp) actual))))
             (begin (if (>= y 0) (k-unify (car pp) y kinds solved trail) #u)
                    (k-unify-members (cdr pp) actual kinds solved trail))))))
   (k-unify-parts (->* (k-parts k-parts k-binders k-solved k-trail) unit)
@@ -704,6 +706,11 @@
     (cond ((null? candidates) -1)
           ((k-all-fit? types (car candidates)) (car candidates))
           (else (k-upper-bound (cdr candidates) types)))))
+;; Of `ms`, the first every other is below, if one is, or -1: a union's
+;; greatest member of a shape, which inference takes for the union
+;; (`logical-types.md` §8.8). As Rust's `greatest_of`.
+(define k-greatest-of (->* (k-ids) int)
+  (lambda (ms) (k-upper-bound ms ms)))
 (define k-part-names (->* (k-parts) (listof string acyclic))
   (lambda (ps)
     (if (null? ps) nil (cons (symbol->string (extract (car ps) 1)) (k-part-names (cdr ps))))))

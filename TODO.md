@@ -2195,8 +2195,7 @@ checkers (`logical-types.md`, "U1, as built"). Left of it:
 U2 done (2026-11-05): `anyof` in both checkers (`logical-types.md`, "U2,
 as built"). Left of it:
 - A member below another is not dropped, only one the same as another
-  (CLAUDES_CHOICES.md, "U2"): `(anyof int nat)` keeps both, and `car` of
-  an `anyof` of a `nat` list and an `int` list is refused.
+  (CLAUDES_CHOICES.md, "U2"): `(anyof int nat)` keeps both.
 - An immutable pair of a union is not below the union of the pairs, which
   a lemma cannot state yet either.
 - Cells, and writable pairs and lists, that share a shape: refused until
@@ -2207,6 +2206,9 @@ demand): `logical-types.md` §8.8, head forms by shape, a shape's greatest
 member for inference, splitting an immutable field only when a whole
 comparison fails, a budget on splits, caches whose answers never change a
 verdict. Questions 16 to 20 there, for the user. Then U3.
+Built already (2026-11-05): the greatest member of a shape, for inference
+(piece 2), so `car` of an `anyof` of a `nat` list and an `int` list
+checks.
 
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 

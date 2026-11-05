@@ -121,8 +121,8 @@
           (set k-extracts (cons (product (1 (k-at-of x)) (2 (n-apply-shares))) (get k-extracts)))
           #u))))
 ;; `car` or `cdr` of a union with a pair member (a `datum`, say) takes that
-;; member apart: every machine's `car` checks its argument is a pair, and
-;; traps if not, as it does on `nil` (TODO §51).
+;; member apart, of several the greatest: every machine's `car` checks its
+;; argument is a pair, and traps if not, as it does on `nil` (TODO §51).
 (define k-partial-pair-arg
   (->* (kx (arrayof int @t) k-ids k-binders k-solved) unit)
   (lambda (f types ps kinds solved)
@@ -130,23 +130,19 @@
       (if (and (or (string=? op "car") (string=? op "cdr")) (>= t 0))
           (tagcase (k-get (k-resolve t))
             (ty-union (ms)
-              (let ((m (k-union-pair-member ms)))
+              (let* ((pairs (k-union-pairs ms)) (m (k-upper-bound pairs pairs)))
                 (if (>= m 0)
                     (begin (k-unify (car ps) m kinds solved (k-new-trail)) (array-set! types 0 m))
                     #u)))
             (else y #u))
           #u))))
-;; A union's one member that is a pair, of members `ms`; or below 0 (-2
-;; for several, an `anyof`'s).
-(define k-union-pair-member (->* (k-ids) int)
+;; A union's members that are pairs, of members `ms`.
+(define k-union-pairs (->* (k-ids) k-ids)
   (lambda (ms)
-    (if (null? ms)
-        -1
-        (let ((rest (k-union-pair-member (cdr ms))))
-          (cond ((not (tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f)))
-                 rest)
-                ((= rest -1) (car ms))
-                (else -2))))))
+    (cond ((null? ms) nil)
+          ((tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f))
+           (the k-ids (cons (car ms) (k-union-pairs (cdr ms)))))
+          (else (k-union-pairs (cdr ms))))))
 ;; Type `t` and effect `e` of `x`, or `r`, both, with what `x` masks masked.
 (define k-te-masked (->* (kx int k-eff) k-te)
   (lambda (x t e) (k-te t (k-mask x e t))))

@@ -60,27 +60,24 @@
   (lambda (t u)
     (let ((s (k-run-shape t))) (and (>= s 0) (= s (k-run-shape u))))))
 
-;; The one of `ys` with `x`'s shapes, known: -1 for none, -2 for several
-;; (an `anyof`'s members may share a shape). The same of shapes holding `s`.
-(define k-same-shape-in (->* (int k-ids) int)
+;; Those of `ys` with `x`'s shapes, known (an `anyof`'s members may share
+;; one; `k-greatest-of` chooses).
+(define k-same-shape-in (->* (int k-ids) k-ids)
   (lambda (x ys)
-    (if (null? ys)
-        -1
-        (let ((rest (k-same-shape-in x (cdr ys))))
-          (cond ((not (k-same-shape? (car ys) x)) rest) ((= rest -1) (car ys)) (else -2))))))
-(define k-holding-in (->* (int k-ids) int)
+    (cond ((null? ys) nil)
+          ((k-same-shape? (car ys) x) (the k-ids (cons (car ys) (k-same-shape-in x (cdr ys)))))
+          (else (k-same-shape-in x (cdr ys))))))
+(define k-holding-in (->* (int k-ids) k-ids)
   (lambda (s ys)
-    (if (null? ys)
-        -1
-        (let ((rest (k-holding-in s (cdr ys))))
-          (cond ((not (k-shapes-within? s (k-run-shape (car ys)))) rest)
-                ((= rest -1) (car ys))
-                (else -2))))))
-;; The one of `ys` whose shapes hold `x`'s, known and some, or below 0.
-(define k-member-holding (->* (int k-ids) int)
+    (cond ((null? ys) nil)
+          ((k-shapes-within? s (k-run-shape (car ys)))
+           (the k-ids (cons (car ys) (k-holding-in s (cdr ys)))))
+          (else (k-holding-in s (cdr ys))))))
+;; Those of `ys` whose shapes hold `x`'s, known and some.
+(define k-member-holding (->* (int k-ids) k-ids)
   (lambda (x ys)
     (let ((s (k-run-shape x)))
-      (if (<= s 0) -1 (k-holding-in s ys)))))
+      (if (<= s 0) nil (k-holding-in s ys)))))
 
 ;; Whether `t` is `false`, or a union with it.
 (define k-false-member? (->* (k-ids) bool)

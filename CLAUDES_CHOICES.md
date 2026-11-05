@@ -3658,6 +3658,9 @@ from run to run, and right where the name is shadowed.
    now do so only if one member has it; with several, nothing is
    inferred from the union. The same in the termination walk and the
    verifier. Unchanged for every `oneof`, whose members' shapes differ.
+   *Revised the same day (§8.8, piece 2)*: of several, the greatest, if
+   one is above every other, in inference and the verifier; the
+   termination walk, which has no subtyping, keeps "one alone".
 6. **Narrowing builds its parts directly** in both checkers (`nil` beside
    one pair merged, nothing else), as the FX-26 checker did: the parts of
    a normal union are normal.

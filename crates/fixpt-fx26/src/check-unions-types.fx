@@ -27,9 +27,9 @@
             (val k-shapes-miss?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) bool))
             (val k-same-shape-in
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) int))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) k-ids))
             (val k-member-holding
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) int))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) k-ids))
             (val k-union-of
                  (subr (maxeff (alloc @t)
                                (goto @z)

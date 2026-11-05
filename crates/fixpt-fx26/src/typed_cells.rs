@@ -1746,6 +1746,12 @@ impl Verifier<'_> {
     }
 
     /// The effect of reading region `r`, unless it is frozen.
+    /// Of union members `ms`, the pair every other pair is below, if one is.
+    fn greatest_pair(&mut self, ms: &[TyId]) -> Option<TyId> {
+        let pairs: Vec<TyId> = ms.iter().copied().filter(|m| matches!(self.c.arena.get(self.c.arena.resolve(*m)), Ty::Pair(..))).collect();
+        self.c.greatest_of(&pairs)
+    }
+
     fn reads(&mut self, r: crate::ast::Region) {
         if !matches!(r, crate::ast::Region::Frozen(..)) {
             self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Read(r)));
@@ -1916,13 +1922,14 @@ impl Verifier<'_> {
                         self.push_made(s, Some(ty), Some(Term::App(f, vec![p.term])));
                     }
                     // A union with a pair in it (a `datum`): that pair's
-                    // parts, the pair a debt, as the machine checks it.
-                    Some(Ty::Union(ms)) if ms.iter().filter(|m| matches!(self.c.arena.get(self.c.arena.resolve(**m)), Ty::Pair(..))).count() == 1 => {
-                        let pair = ms.iter().find_map(|m| match self.c.arena.get(self.c.arena.resolve(*m)) {
-                            Ty::Pair(a, b, r, _) => Some((*a, *b, *r)),
-                            _ => None,
+                    // parts, the pair a debt, as the machine checks it; of
+                    // several pairs, the greatest (`Checker::greatest_of`).
+                    Some(Ty::Union(ms)) if self.greatest_pair(&ms).is_some() => {
+                        let pair = self.greatest_pair(&ms).map(|m| match self.c.arena.get(self.c.arena.resolve(m)) {
+                            Ty::Pair(a, b, r, _) => (*a, *b, *r),
+                            _ => unreachable!("a pair"),
                         });
-                        let (a, b, r) = pair.expect("one pair");
+                        let (a, b, r) = pair.expect("a greatest pair");
                         self.out.debts.push(format!("{at}: (shape {:?} pair)", p.term));
                         self.reads(r);
                         let f = if name == "pair-car" { "car" } else { "cdr" };
