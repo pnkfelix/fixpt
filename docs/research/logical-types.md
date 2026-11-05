@@ -913,12 +913,16 @@ by the revision (9.2), question 4 answered yes by it.
    Or one former, `union`, with disjointness checked only where a program
    relies on it (a `typecase` without `else`): fewer formers, but the
    promise "a test splits it" no longer written in the type.
-   *Answered 2026-11-04: `parts`; changed 2026-11-05 to `cases`.*
-   `(cases T …)` is the disjoint former, `(union T …)` the true one. The
-   user's reason: the type is the basis of a proof or correctness
-   argument by cases, each member one, a shape test telling which; it
-   reads with `typecase` and `tagcase`. Free as a name: no form,
-   former or standard binding is called `cases`.
+   *Answered 2026-11-04: `parts`; changed 2026-11-05 to `cases`, then
+   the same day to the user's `oneof`, with `anyof` for the true union
+   and `allof` for the intersection (for `overload`, which the user did
+   not like).* The three read as FX-26's `-of` formers do (`listof`,
+   `sumof`, `productof`), and as JSON Schema's `oneOf`, `anyOf` and
+   `allOf`, with the same meanings: exactly one, any, all. FX-87's
+   `oneof` (section 4) was a disjoint union too, by tags; this one is by
+   shapes. The name `union` goes: today's becomes `oneof` (U0), the
+   true one is `anyof` (U2), `overload` is `allof` (U1). Free as names:
+   nothing is called any of the three today.
 10. **Rule 4, the meet at calls.** Every fitting member and the meet of
     their results, refused where there is none (proposed); or ordered
     selection (the design of 2026-09-29), or the most precise member,
