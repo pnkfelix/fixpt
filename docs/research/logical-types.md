@@ -930,6 +930,8 @@ by the revision (9.2), question 4 answered yes by it.
     overload's member (proposed), or wherever a subject's type rules a
     tag out (with "has no tag" kept as an error only for a tag no type
     reachable there has)?
+    *Answered 2026-11-05: only while checking an overload's members; an
+    arm skipped under every member refused, as today's "has no tag".*
 13. **Rule 3's strictness.** Refuse an overload whose members' checks
     record different facts at a node (proposed), or let the compilers
     take the most general fact (a checked `car` where one member needs
