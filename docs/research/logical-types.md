@@ -1,7 +1,7 @@
 # Logical type constructors: union, intersection, difference
 
-Design note, 2026-09-29. Research only: no code was changed. The
-question: what intersection, union and negation (or set-difference) types
+Design note, 2026-09-29; revised 2026-11-04 (sections 0, 8.4, 8.5 to
+8.7, 9). Research only: no code was changed. The question: what intersection, union and negation (or set-difference) types
 would mean in FX-26, which of them are sound with its refs, regions and
 effects, what they cost the two checkers and the compilers, and whether to
 add any.
@@ -12,6 +12,18 @@ source. FX-26 facts cite files in this repository; FX-87 and FX-91 facts
 cite `~/Dev/LangPlay/GiffordHistory`.
 
 ## 0. The recommendation, in brief
+
+**Revised 2026-11-04, the user's direction.** Proper intersection *and*
+union types, before macros (`TODO.md` §79, §182). What drove it: Herman
+and Wand's swap, `(sym sym D) → D` for every syntactic sort D of λm,
+over sorts encoded as sub-sums of one another, wants one body with
+several types, and its callers the sort kept (section 8.5). Two rules of
+the first recommendation (below; §8.4) are lifted, each under a
+condition: unions of overlapping members (a *true* union, beside today's
+disjoint one, renamed), and intersections beyond procedure types, as the
+meets a call's result takes. Sections 8.5 to 8.7 are the revised design,
+section 9.2 its questions. The first recommendation follows as it was;
+its stages L0 to L3 are built.
 
 - **Add unions, restricted to members of disjoint run-time shapes.** A
   *shape* is what a word's tag and, for a bloblet, its header's kind tell
@@ -42,7 +54,8 @@ cite `~/Dev/LangPlay/GiffordHistory`.
 - **Do not add** general negation, a top type, semantic subtyping,
   unions inferred at joins, unions of overlapping shapes (two lists at
   different regions, `int` and a generative type over `int`), or
-  intersections of non-procedure types.
+  intersections of non-procedure types. (The last two lifted 2026-11-04,
+  with conditions: section 8.5.)
 
 Section 8 has the proposed syntax (marked as proposed), the soundness
 additions, the checker changes and the stages; section 9 the questions for
@@ -223,6 +236,7 @@ where two answer types share a shape (`terms` and `subst`, both lists).
   the joins and meets of inferred types, in positive and negative
   positions respectively: principal types, but not types a programmer
   writes to state a disjoint union.
+- **Liquori and Stolze** (Inria hal-01488428, 2017): see section 8.5.
 - **Elixir** (Castagna, Duboc and Valim, ‹Programming› 8(2), 2024) is the
   closest precedent: set-theoretic types over a VM whose values are all
   tagged, narrowing from guards (`is_integer`, pp. 4:12 and on), negated
@@ -648,10 +662,213 @@ are read from its name any more, only from its type.
 - **Inferred unions**: errors move away from their cause, and the
   checkers' messages are their product.
 - **Unions of overlapping shapes**: they are hidden tags; write a sum.
+  *Lifted 2026-11-04* (section 8.5): a true union is not a hidden tag,
+  since nothing at run time is asked to tell its members apart; what
+  holds of it is only what holds of every member. The disjoint union,
+  which a shape test does split, stays, under another name.
 - **Intersections of non-procedure types**: with refs they are unsound,
-  and products are positional, so nothing gains.
+  and products are positional, so nothing gains. *Lifted 2026-11-04 for
+  meets that are computed, never written* (section 8.5): sums and
+  products have exact structural meets, and the refs that make them
+  unsound are refused a meet unless equal.
+
+### 8.5 Revision (2026-11-04): true unions, intersections that meet
+
+**The case.** The user encoded λm (Herman and Wand, "A Theory of
+Hygienic Macros", ESOP 2008) with structural types, each syntactic sort a
+sub-sum of the next: `expr`'s variants are among `sexp`'s under the same
+tags, as `s ::= e | op | (s̄)` reads, and a variable is an `expr` and an
+`op` alike. The paper's α-equivalence (its §3) is Gabbay and Pitts'
+swapping, one definition over every sort. Proposed syntax:
+
+```
+(define-type expr (sumof (var symbol) (lam (productof (1 symbol) (2 expr)))
+                         (app (productof (1 expr) (2 expr)))))
+(define-type op (sumof (var symbol) (mac macro)))
+(define-type sexp (sumof (var symbol) (lam (productof (1 symbol) (2 expr)))
+                         (app (productof (1 expr) (2 expr)))
+                         (mac macro) (seq (listof sexp acyclic))))
+
+(define-type swapper (overload (subr pure (symbol symbol expr) expr)
+                               (subr pure (symbol symbol op) op)
+                               (subr pure (symbol symbol sexp) sexp)))
+(define* swap swapper
+  (lambda (a b s)
+    (tagcase s
+      (var x (sum var (swap-name a b x)))
+      (lam p (sum lam (product (1 (swap-name a b (extract p 1)))
+                               (2 (swap a b (extract p 2))))))  ; the expr member
+      (app p (sum app (product (1 (swap a b (extract p 1)))
+                               (2 (swap a b (extract p 2))))))
+      (mac m (sum mac (swap-macro a b m)))        ; not an expr's: skipped there
+      (seq l (sum seq (swap-each a b l))))))      ; only an sexp's
+```
+
+Defined at `sexp` alone, `swap` loses for its callers that an `expr`
+swapped is an `expr`. As a `poly` over D it cannot be written:
+parametricity forbids taking a D apart, and a bound `D ≤ sexp` still
+gives no way to build one, unless D's constructors are passed in. One
+body with several typings is an intersection: Davies and Pfenning's
+refinement types (section 3.1), Liquori and Stolze's strong conjunction
+(below). Every member shares one representation; nothing here asks for
+code per member (that is `case-lambda`, `TODO.md` §111).
+
+**Liquori and Stolze** ("A Decidable Subtyping Logic for Intersection
+and Union Types", Inria hal-01488428, 2017; the user's): ∩ as one term's
+several typings (their typed calculus' ∩I asks the two derivations'
+erasures β-equal: one program), ∪ its dual, and a sound decision
+procedure for subtyping in BCD's theory Ξ, the first, they say, with
+unions. Ξ has distributivity, `σ ∩ (τ ∪ ρ) ≤ (σ∩τ) ∪ (σ∩ρ)`, `(σ→τ) ∩
+(σ→ρ) ≤ σ → (τ∩ρ)` and `(σ→ρ) ∩ (τ→ρ) ≤ (σ∪τ) → ρ`, over pure λ-terms.
+FX-26 takes from Ξ only what the rules below need, each where its
+condition holds: section 3.1's reason for dropping distributivity is
+refs, and the conditions are what keep refs out.
+
+**Five rules.** Each a proposal, for section 9.2.
+
+1. **Intersection introduction, per member** (as section 6.1): the
+   `lambda` is checked once per member, each with that member's
+   parameters, result and latent effect; a recursive reference sees the
+   whole intersection. Errors name the member.
+2. **Dead arms.** Checked against one member, a `tagcase` arm whose tag
+   that member's subject type lacks cannot run: it is skipped, neither
+   checked nor refused (today: "has no tag", `k-tagcase-arms`). An arm
+   skipped under *every* member is refused as now, so a misspelt tag is
+   still an error. Davies' refinement checking has the same rule. With
+   it, the swap above checks: under `expr`, `mac` and `seq` are skipped,
+   and a `lam` rebuilt from a symbol and a swapped `expr` is an `expr`.
+3. **One body, one code.** The compilers read facts the checker records
+   per node (conversions, reshapes, standard operators, operand types,
+   sizes). Checked once per member, a node gets them once per member;
+   where they differ, the one body cannot be compiled for all, and the
+   overload is refused at that node ("uniform representation", made
+   precise: not a property of the types but of the facts). Re-checking a
+   node is a hazard already: a module reshaped twice over composed its
+   reshape with itself until `8616f2fe`; each fact must be recorded so
+   that a second check replaces, never compounds, the first.
+4. **Intersection elimination: every member a call fits; the result their
+   meet.** With sub-sums several members fit, and none need be best: an
+   `expr` fits `expr`'s and `sexp`'s; a variable fits all three, `expr`
+   and `op` apart. Ordered selection (section 6.1, TypeScript's) is
+   fragile there. Each fitting member is a typing of the one call (∩E),
+   so the call has them all: its result the meet of their results, its
+   effect the *intersection* of their latent effects (the body runs once,
+   inside each), the `length` case's `pure` where the list is
+   `acyclic`. Swapping in a `(sum var x)` gives `expr ⊓ op ⊓ sexp`, which
+   is `(sumof (var symbol))`.
+   - *This is distributivity*, `(A→B) ∩ (A→C) ≤ A → (B ∩ C)`, which
+     Davies and Pfenning drop because `(λx. ref 1)` would have `(ref nat)
+     ∩ (ref pos)`. So the meet is defined only where it is exact and
+     sound: base types (a type with itself; `nat` and `int` give `nat`;
+     sizes by `nat_join`'s dual), sums (the tags in common, their
+     payloads' meets; none in common, `void`), products (field by field),
+     immutable pairs and lists (`acyclic`, `const`: part by part),
+     `subr` types (an intersection: their `overload`). A cell, an array, a
+     writable pair, a region, a type variable or a generative type meets
+     another only if equal. Where the results of the fitting members have
+     no meet, the call is refused, naming them (the caller `proj`s or
+     annotates).
+5. **Union elimination at a call's arguments.** A call's argument is
+   evaluated once, before the call: Dunfield and Pfenning's condition for
+   ∪E in call by value (section 3.1). So where an argument's type is a
+   union and the call does not fit it whole, it is checked per member,
+   and its type is the union over the members of what rule 4 gives:
+   `swap` of a `(union expr op)` is a `(union expr op)`. One argument
+   split at a time, only when the whole fails, so the cost is the
+   members', not their product. This is Ξ's `(σ→ρ) ∩ (τ→ρ) ≤ (σ∪τ) →
+   ρ` at calls only, not between procedure types (passing `swap` where a
+   `(subr pure (symbol symbol (union expr op)) …)` is expected stays
+   refused: later, if a program needs it).
+
+**True unions.** `(union T …)` of any members: a value of one of them,
+no test required to tell which.
+- *Introduction* by subsumption, as now; never synthesized (section 6.1).
+- *Elimination*: by subsumption to a type above every member; by rule 5
+  at calls (which takes `car`, `extract`, `with` and the rest, since
+  they are calls); by narrowing on a shape test, which keeps the
+  members of that shape, a union still if several share it.
+- *Normal form*: flattened; `void` dropped; a member below another
+  dropped; **sums merged**, `(union (sumof (a A) (b B)) (sumof (a C) (c
+  D)))` is `(sumof (a (union A C)) (b B) (c D))`, exactly the same set of
+  values, since a sum's representation names its tag, not its type's
+  tags. So `(union expr op)` is a sub-sum of `sexp` as written. Products
+  are not merged: `(union (productof A B) (productof C D))` keeps the
+  correlation that `(productof (union A C) (union B D))` loses.
+- *Subtyping*: as section 6.1, but `τ ≤ ∪σ̄` may now hold through
+  several members, so it tries each with the trail rolled back, as the
+  lemma rule does (`check.rs`, the lemma rule). Not complete (section
+  6.1's example stands); a lemma states a missing case.
+- *Cells*: a union of cells is not a cell of a union (section 5). Reading
+  through `(union (ref A r₁) (ref B r₂))` gives `(union A B)` with effect
+  `(read r₁) ∪ (read r₂)`; writing needs a value of `A ⊓ B` (rule 4's
+  meet, so equal cells' contents, or immutable ones that meet), effect
+  both writes. Regions: `(union (listof T r₁) (listof T r₂))` is now a
+  type; section 5's message suggesting a region variable stays as a hint.
+- *Representation*: none; a union is what its members are. A compiler
+  may not assume a member it was not told by a narrowing.
+
+**Disjoint unions, renamed.** Today's `union` is the disjoint kind by
+construction (L1): members of pairwise distinct shapes, so a shape test
+splits it, and `typecase` without `else` is exhaustive by shapes. Kept,
+as a second former, its name to choose (question 9). Its subtyping is
+the true union's restricted to disjoint members, so `(disjoint …) ≤
+(union …)` of the same members, and the renaming is mechanical: both
+checkers, the front end, the ports, the docs.
+
+**Intersections, written.** Only `(overload (subr …) …)` is written.
+The meets of rule 4 are computed and print as the sum or product they
+normalize to; one that does not normalize (two type variables) is not
+formed (no meet: refused). No `inter` of data types is proposed.
+
+**Effects, sizes, termination.** Per member, as section 5 says; a
+`spin` judged per member (`len`'s `acyclic` member ends, its `@heap` one
+spins). Size facts from a narrowing are per member check, and rule 3
+compares them like any fact.
+
+### 8.6 Additions to the soundness note, for the revision
+
+- **§1.4 types**: `∪` without the disjointness side condition; the
+  disjoint former as `∪` with it; `∧(σ₁ … σₙ)` of `subr`s; a partial
+  `⊓` on types, defined as rule 4 lists, undefined at every invariant
+  position whose two sides differ.
+- **§2.3 subtyping**: Lemma 2.1's inversion becomes disjunctive for
+  `τ ≤ ∪σ̄`; transitivity must be re-proved with it (Muehlboeck and Tate,
+  OOPSLA 2018, is the model for a syntactic, decidable version).
+- **§2.4 typing**: (Overload-I) per member, with the dead-arm rule as
+  (Tagcase) whose arm for an absent tag is unconstrained when the
+  subject's type rules the tag out (the arm cannot be reached: the
+  progress case for `tagcase` needs only the arms of the tags the type
+  has); (Overload-E) by ∩E at each fitting member and the meet,
+  sound because `⊓` is defined only where `⟦A ⊓ B⟧ = ⟦A⟧ ∩ ⟦B⟧`
+  holds of immutable values (the lemma to prove; refs excluded
+  by construction); (Union-E-arg), ∪E in argument position.
+- **§3, §4**: preservation through ∪E-arg (the argument is a value of
+  one member when the call steps); canonical forms for `∪`
+  without disjointness (a value of `∪τ̄` is a value of *some* `τᵢ`);
+  rule 3's obligation for the compilers: the code made from a body's
+  facts is the same under every member's check.
+
+### 8.7 Stages, for the revision
+
+| Stage | Size | What                                                                                                          | Test                                                                                     |
+| ----- | ---- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| U0    | S–M  | the disjoint former renamed (question 9); `union` its alias for one release, or not                           | every existing program, renamed; both checkers agree                                     |
+| U1    | M–L  | `overload` of monomorphic `subr` members: rules 1 to 4, `⊓` on base types, sums, products, immutable lists     | the user's λm swap over `expr`, `op`, `sexp`; `len`'s `pure`/`spin`; a `ref` meet refused |
+| U2    | M    | true `union`: overlapping members, sums merged, disjunctive subtyping with rollback, narrowing that leaves unions | `(union expr op)` a sub-sum of `sexp`; two lists at two regions read                     |
+| U3    | M    | rule 5, ∪E at arguments                                                                                       | `swap` of a `(union expr op)`; `car` of a union of two lists                             |
+| U4    | M    | members that are `poly` (`TODO.md` §79's `length` over `nlist` and `listof`)                                 | `length` of an `nlist` gives its size, of a `@heap` list `(read r)`                      |
+| U5    | L    | research: Ξ's arrow rules between procedure types; shape-directed conversion's σ-indexed arms                  | only if a program needs it                                                               |
+
+Each stage in both checkers, agreeing, as L0 to L3 were. U1 before U2
+because swap needs only it: `sexp` is written as the sum it is.
 
 ## 9. Open questions for you
+
+### 9.1 For the first recommendation (2026-09-29)
+
+Answers recorded where known: questions 2, 3 and 6 in "L0, as built" and
+"L1's stage 3, as built" (section 8.3), 8 below; question 1 revisited
+by the revision (9.2), question 4 answered yes by it.
 
 1. **Is the disjoint-shape rule the right line?** It forbids `(union
    (listof A r) (listof B r))` and `(union int ty-id)`, and makes every
@@ -686,6 +903,38 @@ are read from its name any more, only from its type.
    front end acceptable? (Done 2026-10-08, the user's go-ahead. `car` of a
    union with a pair member stays a checked error, as `car` of a pair
    that may be `nil` is: Scheme ports take apart data they never test.)
+
+### 9.2 For the revision (2026-11-04)
+
+9. **The disjoint former's name.** A true `union` and a disjoint one
+   (the user's direction). Candidates: `parts`, `partition` (the user's),
+   `disjoint`; not `oneof` (FX-87's, tagged) nor `either` (two only).
+   Or one former, `union`, with disjointness checked only where a program
+   relies on it (a `typecase` without `else`): fewer formers, but the
+   promise "a test splits it" no longer written in the type.
+10. **Rule 4, the meet at calls.** Every fitting member and the meet of
+    their results, refused where there is none (proposed); or ordered
+    selection (the design of 2026-09-29), or the most precise member,
+    refused where none is. The meet is distributivity under conditions:
+    is excluding invariant positions enough for you, before the
+    soundness note's lemma is written?
+11. **Rule 5, union elimination at arguments**: wanted at U3, or later?
+    Without it, a `(union expr op)` given to `swap` takes the `sexp`
+    member, and its result is an `sexp`.
+12. **Rule 2's scope.** Dead arms skipped only while checking an
+    overload's member (proposed), or wherever a subject's type rules a
+    tag out (with "has no tag" kept as an error only for a tag no type
+    reachable there has)?
+13. **Rule 3's strictness.** Refuse an overload whose members' checks
+    record different facts at a node (proposed), or let the compilers
+    take the most general fact (a checked `car` where one member needs
+    it)? The second compiles more programs, slower for the precise
+    members.
+14. **True unions of cells and regions.** Reading through a union of
+    cells, writing only a meet: wanted now (U2), or refused until a
+    program needs it?
+15. **Order**: U0 to U3 before macros (`TODO.md` §182), U4 and U5 after
+    (proposed)?
 
 ## Sources
 

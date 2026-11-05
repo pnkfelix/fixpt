@@ -2516,7 +2516,9 @@ natively, `DONE.md` §56; `lseq`, `destruc`, `browse` converted, as
 `logical-types.md` records, and `gcbench` once bloblets were made in
 line natively, `DONE.md` §57);
 intersections of procedure types (`overload`) later. Its open questions
-are the user's.
+are the user's. Revised 2026-11-04, the user's direction: true unions
+and intersections next, before macros (`logical-types.md` §8.5 to §8.7,
+questions §9.2; `TODO.md` §79).
 
 **Q8. Generic operations by dictionary** (`docs/research/polytypic.md`,
 revised by decision 4): first the standard environment's gaps (`bool=?`,

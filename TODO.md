@@ -2161,6 +2161,12 @@ non-procedure types, which §8.4 also rules out (refs unsound; products
 positional), so which types may meet; and the renaming of today's
 `union` in both checkers, the front end and the ports.
 
+Designed (2026-11-04): `logical-types.md` §8.5 (five rules: per-member
+introduction; dead arms; one body, one code, as agreeing facts; every
+fitting member and the meet of results, defined only where exact and
+sound; ∪E at a call's arguments), §8.6 (soundness note), §8.7 (stages U0
+to U5), §9.2 (the user's questions 9 to 15).
+
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 
 Since `fb86975` an integer literal checks as any fixed-width integer type
