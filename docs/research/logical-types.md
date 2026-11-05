@@ -937,6 +937,9 @@ by the revision (9.2), question 4 answered yes by it.
     take the most general fact (a checked `car` where one member needs
     it)? The second compiles more programs, slower for the precise
     members.
+    *Answered 2026-11-05: refuse (at U1); taking the more general of
+    two ordered facts, such as a checked `car`, a later relaxation by an
+    explicit list.*
 14. **True unions of cells and regions.** Reading through a union of
     cells, writing only a meet: wanted now (U2), or refused until a
     program needs it?
