@@ -93,12 +93,17 @@
 ;; generative type's conversion.
 (define k-ty-known (->* (int) k-ty)
   (lambda (t) (if (< t 0) (ty-void) (k-get t))))
-;; A union's member that is a pair, of members `ms`; or -1.
+;; A union's one member that is a pair, of members `ms`; or below 0 (-2
+;; for several, an `anyof`'s).
 (define k-union-pair (->* (k-ids) int)
   (lambda (ms)
-    (cond ((null? ms) -1)
-          ((tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f)) (car ms))
-          (else (k-union-pair (cdr ms))))))
+    (if (null? ms)
+        -1
+        (let ((rest (k-union-pair (cdr ms))))
+          (cond ((not (tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f)))
+                 rest)
+                ((= rest -1) (car ms))
+                (else -2))))))
 ;; The same of a value taken apart as a pair: of a union, its pair member,
 ;; which any value `car` or `cdr` returns from is.
 (define k-ty-known-pair (->* (int) k-ty)

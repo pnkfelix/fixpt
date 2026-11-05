@@ -1662,7 +1662,8 @@ impl Checker {
         }
         let Some(Some((t, eff))) = done.first().cloned() else { return };
         let Ty::Union(ms) = self.arena.get(self.arena.resolve(t)).clone() else { return };
-        if let Some(&m) = ms.iter().find(|m| matches!(self.arena.get(self.arena.resolve(**m)), Ty::Pair(..))) {
+        let pairs: Vec<TyId> = ms.iter().copied().filter(|m| matches!(self.arena.get(self.arena.resolve(*m)), Ty::Pair(..))).collect();
+        if let [m] = pairs[..] {
             self.unify(params[0], m, u, &mut HashSet::new());
             done[0] = Some((m, eff));
         }
@@ -2319,11 +2320,13 @@ impl Checker {
                 u.bounds.insert(v, b);
             }
             // A union expected: the member whose shapes hold the pattern's
-            // (a `cons` where a list or an `int` is wanted, its pair).
+            // (a `cons` where a list or an `int` is wanted, its pair), if
+            // one alone does (an `anyof`'s may overlap).
             (ref q, Ty::Union(aa)) if !matches!(q, Ty::Union(_)) => {
                 let Some(ps) = self.shape(p).filter(|s| *s != 0) else { return };
-                if let Some(y) = aa.iter().find(|y| self.shape(**y).is_some_and(|s| s & ps == ps)) {
-                    self.unify(p, *y, u, trail);
+                let holding: Vec<TyId> = aa.iter().copied().filter(|y| self.shape(*y).is_some_and(|s| s & ps == ps)).collect();
+                if let [y] = holding[..] {
+                    self.unify(p, y, u, trail);
                 }
             }
             (Ty::Subr { conv: pc, effect: pe, params: pp, result: pr, .. }, at) => {
@@ -2361,15 +2364,16 @@ impl Checker {
                 self.unify(x2, y2, u, trail);
                 self.unify_exact = outer;
             }
-            // Members by shape, which no two in a union share.
+            // Members by shape, where one alone has a member's shape.
             (Ty::Union(pp), at) => {
                 let actual: Vec<TyId> = match at {
                     Ty::Union(aa) => aa,
                     _ => vec![a],
                 };
                 for x in &pp {
-                    if let Some(y) = actual.iter().find(|y| self.shape(**y).is_some() && self.shape(**y) == self.shape(*x)) {
-                        self.unify(*x, *y, u, trail);
+                    let same: Vec<TyId> = actual.iter().copied().filter(|y| self.shape(*y).is_some() && self.shape(*y) == self.shape(*x)).collect();
+                    if let [y] = same[..] {
+                        self.unify(*x, y, u, trail);
                     }
                 }
             }

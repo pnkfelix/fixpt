@@ -32,7 +32,7 @@
          ;; Unions.
          (check-unions
           ((load-input "fx26:check-unions.fx")
-           check-types check-print check-env))
+           check-types check-print check-env check-print-parts))
          ;; What a type holds.
          (check-holds
           ((load-input "fx26:check-holds.fx")

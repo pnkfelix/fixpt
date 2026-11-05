@@ -11,22 +11,23 @@
 (let* ((check-unions-types (load-module "fx26:check-unions-types.fx"))
        (check-types-types (load-module "fx26:check-types-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
-       (check-env-types (load-module "fx26:check-env-types.fx")))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-print (select check-print-types check-print-sig))
-           (check-env (select check-env-types check-env-sig)))
+           (check-env (select check-env-types check-env-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 (hide (include check-unions-types) (include check-types-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-print) (include check-env))
+(import check-print-parts k-same-type? k-shape-bit k-run-shape)
 
-;; The shapes, by number in `check.rs`'s `SHAPES` order: 0 int, 1 f64,
-;; 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol, 9 procedure,
-;; 10 bloblet, 11 box, 12 sum, 13 product, 14 vector, 15 bytevector, 16
-;; keyword. A type's shapes are a mask, bit `k` shape `k`'s, or -1 if they
-;; are not known.
+;; The shapes, by number in `check.rs`'s `SHAPES` order (`k-run-shape`,
+;; `check-print-parts.fx`): a mask, bit `k` shape `k`'s, or -1 if they are
+;; not known.
 (define k-shape-count int 17)
 (define k-shape-nil int 5)
 (define k-shape-pair int 6)
@@ -38,62 +39,10 @@
       ((6) "pair?") ((7) "string?") ((8) "symbol?") ((9) "procedure?") ((10) "array?")
       ((11) "ref?") ((12) "sum?") ((13) "product?") ((14) "vector?") ((15) "bytevector?")
       (else "keyword?"))))
-(define k-base-shape (->* (symbol) int)
-  (lambda (s)
-    (case (symbol->string s)
-      (("int" "i8" "u8" "i32" "u32" "i64" "u64") 0)
-      (("f64") 1) (("f32") 2) (("char") 3) (("bool") 4)
-      (("string") 7)
-      ;; `unit` is the symbol `#u` at run time.
-      (("symbol" "unit") 8)
-      (("vector") 14) (("bytevector") 15) (("keyword") 16)
-      (else -1))))
-;; Shape `k`'s bit, or -1 for none known.
-(define k-shape-bit (->* (int) int)
-  (lambda (k) (if (< k 0) -1 (arithmetic-shift 1 k))))
 (define k-one-id (->* (int) k-ids)
   (lambda (m) (the k-ids (cons m nil))))
 (define k-ids-append (->* (k-ids k-ids) k-ids)
   (lambda (xs ys) (if (null? xs) ys (the k-ids (cons (car xs) (k-ids-append (cdr xs) ys))))))
-(define-rec
-  ;; The shapes a value of type `t` may have at run time: what its tag
-  ;; says, and for a bloblet its kind. Not known for a variable, or an
-  ;; abstract or generative type: no union may have a member of one.
-  ;; `seen`, the unions met on the way down: one met again is its own
-  ;; member, whose shape is not known.
-  (k-run-shape-in (->* (int k-ids) int)
-    (lambda (t0 seen)
-      (let ((t (k-resolve t0)))
-      (tagcase (k-get t)
-        (ty-base (s) (k-shape-bit (k-base-shape s)))
-        (ty-nat (z) 1)
-        (ty-nil () 32)
-        (ty-false () 16)
-        (ty-pair (a b r nl) (if nl 96 64))
-        (ty-nlist (e z r) 96)
-        (ty-subr (e ps r cv spc) 512)
-        (ty-comp (a h e r once) 512)
-        ;; An array is a bloblet as `(bloblet …)` is, of the same kind.
-        (ty-array (a nz r) 1024)
-        (ty-bloblet (fs z r) 1024)
-        (ty-ref (a r) 2048)
-        (ty-sum (ps) 4096)
-        (ty-product (ps) 8192)
-        (ty-union (ms)
-          (if (k-has-id? seen t) -1 (k-run-shapes ms (the k-ids (cons t seen)))))
-        (ty-allof (ms)
-          (if (k-has-id? seen t) -1 (k-run-shapes ms (the k-ids (cons t seen)))))
-        (ty-void () 0)
-        (else y -1)))))
-  (k-run-shapes (->* (k-ids k-ids) int)
-    (lambda (ms seen)
-      (if (null? ms)
-          0
-          (let ((s (k-run-shape-in (car ms) seen)) (rest (k-run-shapes (cdr ms) seen)))
-            (if (or (< s 0) (< rest 0)) -1 (bitwise-ior s rest)))))))
-;; The same, from the top.
-(define k-run-shape (->* (int) int)
-  (lambda (t) (k-run-shape-in t nil)))
 (define k-shape-known? (->* (int) bool)
   (lambda (t) (>= (k-run-shape t) 0)))
 ;; Whether two masks share a shape; whether all of `s`'s are `u`'s.
@@ -111,19 +60,23 @@
   (lambda (t u)
     (let ((s (k-run-shape t))) (and (>= s 0) (= s (k-run-shape u))))))
 
-;; The first of `ys` with `x`'s shapes, known, or -1.
+;; The one of `ys` with `x`'s shapes, known: -1 for none, -2 for several
+;; (an `anyof`'s members may share a shape). The same of shapes holding `s`.
 (define k-same-shape-in (->* (int k-ids) int)
   (lambda (x ys)
-    (cond ((null? ys) -1)
-          ((k-same-shape? (car ys) x) (car ys))
-          (else (k-same-shape-in x (cdr ys))))))
-
+    (if (null? ys)
+        -1
+        (let ((rest (k-same-shape-in x (cdr ys))))
+          (cond ((not (k-same-shape? (car ys) x)) rest) ((= rest -1) (car ys)) (else -2))))))
 (define k-holding-in (->* (int k-ids) int)
   (lambda (s ys)
-    (cond ((null? ys) -1)
-          ((k-shapes-within? s (k-run-shape (car ys))) (car ys))
-          (else (k-holding-in s (cdr ys))))))
-;; The first of `ys` whose shapes hold `x`'s, known and some, or -1.
+    (if (null? ys)
+        -1
+        (let ((rest (k-holding-in s (cdr ys))))
+          (cond ((not (k-shapes-within? s (k-run-shape (car ys)))) rest)
+                ((= rest -1) (car ys))
+                (else -2))))))
+;; The one of `ys` whose shapes hold `x`'s, known and some, or below 0.
 (define k-member-holding (->* (int k-ids) int)
   (lambda (x ys)
     (let ((s (k-run-shape x)))
@@ -253,12 +206,13 @@
     (if (null? ps)
         (the k-pendings (cons p nil))
         (the k-pendings (cons (car ps) (k-pendings-append (cdr ps) p))))))
-(define k-union-known (->* (k-ids int int) unit)
-  (lambda (ms start end)
+(define k-former (->* (bool) string) (lambda (any) (if any "anyof" "oneof")))
+(define k-union-known (->* (k-ids int int bool) unit)
+  (lambda (ms start end any)
     (let ((unknown (k-unknown-member ms)))
       (if (>= unknown 0)
-          (k-fail (k-cat3 "a " (k-show-ty unknown)
-                          " cannot be in a `oneof`: its shape at run time is not known")
+          (k-fail (k-cat5 "a " (k-show-ty unknown) " cannot be in a `" (k-former any)
+                          "`: its shape at run time is not known")
                   start end)
           #u))))
 ;; Whether a member is not yet known: a recursive type's own name, read
@@ -267,24 +221,114 @@
   (lambda (m) (tagcase (k-get m) (ty-link (x) (null? x)) (else y #f))))
 (define k-any-open? (->* (k-ids) bool)
   (lambda (ms) (and (not (null? ms)) (or (k-open-member? (car ms)) (k-any-open? (cdr ms))))))
-;; The union of `members`, normalized: unions in it flattened, `nil` and a
-;; pair that is not `nil` made the pair that may be, and one member
-;; itself. Each member must have a known shape, and no two the same; one
-;; not yet known, the union checked once it is (`k-check-pending-unions`).
+;; The union of `members`, `(oneof …)`, normalized: unions in it
+;; flattened, `nil` and a pair that is not `nil` made the pair that may be,
+;; sums made one, and one member itself. Each member must have a known
+;; shape, and no two the same but sums with no tag in common; one not yet
+;; known, the union checked once it is (`k-check-pending-unions`).
 (define k-union-of (->* (k-ids int int) int)
-  (lambda (members start end)
-    (let* ((flat (k-union-flat members)) (pending (k-any-open? flat)))
+  (lambda (members start end) (k-union-formed members start end #f)))
+;; The true union of `members`, `(anyof …)` (`logical-types.md` §8.5, U2),
+;; normalized as `k-union-of` does, but members may overlap: `void` and a
+;; member the same as one before it dropped, and sums made one with a tag
+;; in several the union of its payloads. Only a member that may be written
+;; must still be told apart from every other. As Rust's `anyof_of`.
+(define k-anyof-of (->* (k-ids int int) int)
+  (lambda (members start end) (k-union-formed members start end #t)))
+(define k-union-formed (->* (k-ids int int bool) int)
+  (lambda (members start end any)
+    (let* ((flat0 (k-union-flat members))
+           (flat (if any (k-anyof-trimmed flat0 nil) flat0))
+           (pending (k-any-open? flat)))
       (begin
-        (if pending #u (k-union-known flat start end))
+        (if pending #u (k-union-known flat start end any))
         (let ((merged (k-union-merged flat)))
-          (if pending
-              (let ((u (k-ty-new (ty-union merged))))
-                (begin (set k-pending-unions
-                            (k-pendings-append (get k-pending-unions)
-                                               (product (1 u) (2 start) (3 end))))
-                       u))
-              (begin (k-union-overlap merged start end)
-                     (k-union-build (k-union-sums-merged merged)))))))))
+          (cond (pending
+                 (let ((u (k-ty-new (ty-union merged))))
+                   (begin (set k-pending-unions
+                               (k-pendings-append (get k-pending-unions)
+                                                  (product (1 u) (2 start) (3 end) (4 any))))
+                          u)))
+                (any
+                 (let ((ms (k-anyof-sums-merged merged start end)))
+                   (begin (k-anyof-written-apart ms start end) (k-union-build ms))))
+                (else (begin (k-union-overlap merged start end)
+                             (k-union-build (k-union-sums-merged merged))))))))))
+;; `ms` without `void`, and without a member the same as one before it
+;; (`kept`, reversed).
+(define k-anyof-trimmed (->* (k-ids k-ids) k-ids)
+  (lambda (ms kept)
+    (cond ((null? ms) (k-reverse-ids kept nil))
+          ((or (tagcase (k-get (car ms)) (ty-void () #t) (else y #f)) (k-same-in? (car ms) kept))
+           (k-anyof-trimmed (cdr ms) kept))
+          (else (k-anyof-trimmed (cdr ms) (the k-ids (cons (car ms) kept)))))))
+(define k-same-in? (->* (int k-ids) bool)
+  (lambda (m ks) (and (not (null? ks)) (or (k-same-type? (car ks) m) (k-same-in? m (cdr ks))))))
+;; `ms`'s sums made one: each tag once, its payload the `anyof` of its
+;; payloads in them (the same values: a sum's representation names its
+;; tag, not its type's tags).
+(define k-anyof-sums-merged (->* (k-ids int int) k-ids)
+  (lambda (ms start end)
+    (if (< (k-count-sums ms) 2)
+        ms
+        (let ((all (k-all-sum-parts ms)))
+          (k-sums-replaced ms (k-ty-new (ty-sum (k-tags-joined all all nil start end))) #f)))))
+;; Each tag of `ps` once, at its first place, its payload the `anyof` of
+;; every payload `ps` has for it (`all`, the whole; `seen`, tags placed).
+(define k-tags-joined (->* (k-parts k-parts (listof symbol acyclic) int int) k-parts)
+  (lambda (ps all seen start end)
+    (cond ((null? ps) nil)
+          ((k-symbol-in? (extract (car ps) 1) seen) (k-tags-joined (cdr ps) all seen start end))
+          (else
+           (let* ((l (extract (car ps) 1)) (ts (k-payloads-of l all))
+                  (t (if (null? (cdr ts)) (car ts) (k-anyof-of ts start end))))
+             (the k-parts
+                  (cons (product (1 l) (2 t))
+                        (k-tags-joined (cdr ps) all (the (listof symbol acyclic) (cons l seen))
+                                       start end))))))))
+(define k-symbol-in? (->* (symbol (listof symbol acyclic)) bool)
+  (lambda (l ls) (and (not (null? ls)) (or (symbol=? (car ls) l) (k-symbol-in? l (cdr ls))))))
+(define k-payloads-of (->* (symbol k-parts) k-ids)
+  (lambda (l ps)
+    (cond ((null? ps) nil)
+          ((symbol=? (extract (car ps) 1) l)
+           (the k-ids (cons (extract (car ps) 2) (k-payloads-of l (cdr ps)))))
+          (else (k-payloads-of l (cdr ps))))))
+;; Whether a value of `t` may be written: a cell, an array, a bloblet, or a
+;; pair or list not frozen.
+(define k-may-be-written? (->* (int) bool)
+  (lambda (t)
+    (letrec ((thawed? (subr pure (k-region) bool)
+               (lambda (r) (tagcase r (r-frozen (p f) #f) (else y #t)))))
+      (tagcase (k-get (k-resolve t))
+        (ty-ref (a r) #t) (ty-array (a z r) #t) (ty-bloblet (fs z r) #t)
+        (ty-icell (a r) #t) (ty-markkey (a r) #t) (ty-place (r) #t)
+        (ty-pair (a b r nl) (thawed? r))
+        (ty-nlist (e z r) (thawed? r))
+        (else y #f)))))
+;; An `anyof`'s members that may be written each told apart from every
+;; other at run time (`logical-types.md` §9.2, question 14: a union of
+;; cells, refused until a program needs it).
+(define k-anyof-written-apart (->* (k-ids int int) unit)
+  (lambda (ms start end)
+    (if (null? ms)
+        #u
+        (let ((o (k-written-overlap (car ms) (cdr ms))))
+          (if (< o 0)
+              (k-anyof-written-apart (cdr ms) start end)
+              (k-fail (k-cat5 (string-append "an `anyof`'s members that may be written must be "
+                                             "told apart at run time: a ")
+                              (k-show-ty (car ms)) " and a " (k-show-ty o) " cannot be")
+                      start end))))))
+(define k-shape-or-none (->* (int) int)
+  (lambda (t) (let ((s (k-run-shape t))) (if (< s 0) 0 s))))
+(define k-written-overlap (->* (int k-ids) int)
+  (lambda (m ms)
+    (cond ((null? ms) -1)
+          ((and (or (k-may-be-written? m) (k-may-be-written? (car ms)))
+                (k-shapes-meet? (k-shape-or-none m) (k-shape-or-none (car ms))))
+           (car ms))
+          (else (k-written-overlap m (cdr ms))))))
 ;; The unions read before what they name was, each whose members are all
 ;; known now checked as `k-union-of` would have.
 (define k-check-pending-unions (->* () unit)
@@ -297,12 +341,15 @@
                (ms (tagcase (k-get (extract p 1)) (ty-union (ms) ms) (else y (the k-ids nil)))))
           (if (k-any-open? ms)
               (the k-pendings (cons p (k-check-pendings (cdr ps))))
-              (begin (k-union-known ms (extract p 2) (extract p 3))
-                     (k-union-overlap ms (extract p 2) (extract p 3))
+              (begin (k-union-known ms (extract p 2) (extract p 3) (extract p 4))
+                     (if (extract p 4)
+                         (k-anyof-written-apart ms (extract p 2) (extract p 3))
+                         (k-union-overlap ms (extract p 2) (extract p 3)))
                      ;; Made already, its sums cannot be made one now.
                      (if (> (k-count-sums ms) 1)
-                         (k-fail (string-append "a `oneof` of sums with a member not yet defined: "
-                                                "write the sums as one `sumof`")
+                         (k-fail (k-cat3 "a `" (k-former (extract p 4))
+                                         (string-append "` of sums with a member not yet defined: "
+                                                        "write the sums as one `sumof`"))
                                  (extract p 2) (extract p 3))
                          #u)
                      (k-check-pendings (cdr ps))))))))

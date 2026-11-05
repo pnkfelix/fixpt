@@ -1,14 +1,15 @@
-//! `allof`, one procedure with each member's type (`docs/research/logical-types.md`
-//! §8.5, U1): its body checked against each member, a call taking every
-//! member it fits. Each program in `programs/allof` says on its first line
-//! what it gives, `;; => value`, or what its refusal says, `;; ! words`.
+//! `allof` and `anyof` (`docs/research/logical-types.md` §8.5): `allof`,
+//! one procedure with each member's type, its body checked against each
+//! member, a call taking every member it fits (U1); `anyof`, a true union,
+//! whose members may overlap (U2). Each program in `programs/allof` and
+//! `programs/anyof` says on its first line what it gives, `;; => value`, or
+//! what its refusal says, `;; ! words`.
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 
-#[test]
-fn allof_programs_do_as_they_say() {
-    let dir = format!("{}/tests/programs/allof", env!("CARGO_MANIFEST_DIR"));
+fn programs_do_as_they_say(sub: &str, least: usize) {
+    let dir = format!("{}/tests/programs/{sub}", env!("CARGO_MANIFEST_DIR"));
     let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
     names.sort();
     let mut wrong = Vec::new();
@@ -30,6 +31,16 @@ fn allof_programs_do_as_they_say() {
             wrong.push(format!("{}: says `{first}`, gives {got:?}", path.display()));
         }
     }
-    assert!(names.len() >= 6, "only {} programs", names.len());
+    assert!(names.len() >= least, "only {} programs", names.len());
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+#[test]
+fn allof_programs_do_as_they_say() {
+    programs_do_as_they_say("allof", 6);
+}
+
+#[test]
+fn anyof_programs_do_as_they_say() {
+    programs_do_as_they_say("anyof", 6);
 }

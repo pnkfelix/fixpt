@@ -2272,7 +2272,7 @@ impl Verifier<'_> {
                 }
                 let kind = vals.remove(0);
                 // Made where a union was expected: as its one member of the
-                // shape made, a product or a sum (members' shapes differ).
+                // shape made, a product or a sum, if one alone is.
                 let own = match self.c.arena.get(self.c.arena.resolve(own)).clone() {
                     Ty::Union(ms) => {
                         let shaped = |me: &Self, m: &TyId| match (&kind.term, me.c.arena.get(me.c.arena.resolve(*m))) {
@@ -2280,7 +2280,8 @@ impl Verifier<'_> {
                             (Term::Lit(k), Ty::Sum(_)) => *k == Value::fixnum(36),
                             _ => false,
                         };
-                        ms.iter().copied().find(|m| shaped(self, m)).unwrap_or(own)
+                        let found: Vec<TyId> = ms.iter().copied().filter(|m| shaped(self, m)).collect();
+                        if let [m] = found[..] { m } else { own }
                     }
                     _ => own,
                 };

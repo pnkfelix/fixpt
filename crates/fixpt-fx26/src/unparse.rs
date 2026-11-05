@@ -717,8 +717,10 @@ impl Checker {
             Ty::Nil => "nil".into(),
             Ty::False => "false".into(),
             Ty::Union(ms) => {
+                // `oneof` where a run-time test tells its members apart.
+                let former = if self.members_apart(&ms) { "oneof" } else { "anyof" };
                 let ms: Vec<String> = ms.iter().map(|m| self.show_ty_on(*m, path)).collect();
-                format!("(oneof {})", ms.join(" "))
+                format!("({former} {})", ms.join(" "))
             }
             Ty::AllOf(ms) => {
                 let ms: Vec<String> = ms.iter().map(|m| self.show_ty_on(*m, path)).collect();

@@ -67,7 +67,7 @@
 (define k-type-forms k-names
   (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
         'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
-        'sumof 'bool 'oneof 'union 'allof '-> '->* 'restrict))
+        'sumof 'bool 'oneof 'union 'anyof 'allof '-> '->* 'restrict))
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (->* (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))

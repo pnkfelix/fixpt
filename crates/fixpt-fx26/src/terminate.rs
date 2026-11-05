@@ -532,10 +532,14 @@ impl Walk<'_> {
                     .into_iter()
                     .filter_map(|k| {
                         let Tracked::Part { param, ty: Some(ty), .. } = k else { return None };
-                        // Of a union, its pair member: any value `car` or
-                        // `cdr` returns from is that.
+                        // Of a union, its one pair member: any value `car`
+                        // or `cdr` returns from is that.
                         let ty = match arena.get(arena.resolve(ty)) {
-                            Ty::Union(ms) => *ms.iter().find(|m| matches!(arena.get(arena.resolve(**m)), Ty::Pair(..)))?,
+                            Ty::Union(ms) => {
+                                let pairs: Vec<TyId> = ms.iter().copied().filter(|m| matches!(arena.get(arena.resolve(*m)), Ty::Pair(..))).collect();
+                                let [p] = pairs[..] else { return None };
+                                p
+                            }
                             _ => ty,
                         };
                         match arena.get(arena.resolve(ty)) {

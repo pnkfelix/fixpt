@@ -248,7 +248,7 @@
 (define-type k-narrows (listof (productof (1 symbol) (2 int) (3 int)) acyclic))
 ;; Unions read with a member not yet known, a recursive type's own name, and
 ;; where: checked once it is (`k-union-of`).
-(define-type k-pendings (listof (productof (1 int) (2 int) (3 int)) acyclic))
+(define-type k-pendings (listof (productof (1 int) (2 int) (3 int) (4 bool)) acyclic))
 ;; What `length-is?` has just confirmed: a variable, its binding, the length.
 (define-type k-cert-len (productof (1 symbol) (2 int) (3 k-size)))
 ;; The arrow kinds made so far, newest first: each its parameters' kinds and

@@ -440,6 +440,7 @@
                   (r (k-parse-region (k-nth items 3))))
              (k-ty-new (ty-pair a b r #f)))))
         ((oneof union) (k-parse-union s items))
+        ((anyof) (k-parse-anyof s items))
         ((allof) (k-parse-allof s items))
         ((dletrec) (k-parse-dletrec s items))
         ((mu) (k-parse-mu s items))
@@ -541,6 +542,13 @@
     (begin
       (k-shape (>= (k-length items) 3) "`(oneof type type …)`" s)
       (k-union-of (k-parse-types (cdr items)) (syn-start s) (syn-end s)))))
+;; A true union, `(anyof …)`: a value of any of the members, which may
+;; overlap (`logical-types.md` §8.5, U2), normalized.
+(define k-parse-anyof (->* (syn k-syns) int)
+  (lambda (s items)
+    (begin
+      (k-shape (>= (k-length items) 3) "`(anyof type type …)`" s)
+      (k-anyof-of (k-parse-types (cdr items)) (syn-start s) (syn-end s)))))
 ;; One procedure with each member's type, `(allof (subr …) …)`
 ;; (`docs/research/logical-types.md` §8.5, U1): monomorphic `subr` types of
 ;; one convention. As Rust's.

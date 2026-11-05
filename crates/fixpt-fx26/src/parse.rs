@@ -65,7 +65,7 @@ const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a def
 
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "oneof", "union", "allof", "->", "->*", "restrict",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "oneof", "union", "anyof", "allof", "->", "->*", "restrict",
 ];
 
 impl Checker {
@@ -532,7 +532,7 @@ impl Checker {
         };
         // Storage written: a procedure kept there may not reach itself
         // unsaid (`spin`).
-        if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "oneof" | "union" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
+        if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "oneof" | "union" | "anyof" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
             self.no_knot(t, s.span)?;
         }
         Ok(t)
@@ -800,6 +800,18 @@ impl Checker {
                     members.push(self.parse_type(m)?);
                 }
                 self.union_of(&members, s.span)
+            }
+            // A true union: a value of any of the members, which may
+            // overlap (`logical-types.md` §8.5, U2), normalized.
+            "anyof" => {
+                if items.len() < 3 {
+                    return Err(FxError::at(s.span, "`(anyof type type …)`"));
+                }
+                let mut members = Vec::new();
+                for m in &items[1..] {
+                    members.push(self.parse_type(m)?);
+                }
+                self.anyof_of(&members, s.span)
             }
             // One procedure with each member's type (`logical-types.md`
             // §8.5, U1): monomorphic `subr` types of one convention.

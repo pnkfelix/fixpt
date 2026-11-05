@@ -3630,3 +3630,37 @@ from run to run, and right where the name is shadowed.
    too, which `check-rules.fx` imports.
 8. **The verifier's gap recorded, not filled**: three words in
    `typed_cells.rs`'s known gaps, the work in `TODO.md` §79.
+
+## U2: `anyof` (2026-11-05; `TODO.md` §79, `logical-types.md` §8.5)
+
+1. **One node for `oneof` and `anyof`.** As question 9 settled, the former
+   decides only the check where the union is written; printing chooses
+   `oneof` when no two members share a shape, else `anyof`. So a type
+   representation (`reps.rs`) says `oneof` for both; the readers take
+   `anyof` too.
+2. **"A member below another dropped" is narrowed to "a member the same as
+   one before it".** The FX-26 checker reads types before it has
+   subtyping (`check-unions.fx` comes before `check-subtype.fx`), so the
+   normal form uses structural sameness (`same_ty`, `k-same-shape?`),
+   which both have there. Enough for sums' shared tags (`(var symbol)` in
+   `expr` and `op` is one `symbol`); `(anyof int nat)` stays two members,
+   the same values.
+3. **The shape code moved to `check-print-parts.fx`**, so that the
+   printer can tell `oneof` from `anyof`; `check-unions.fx` imports it.
+4. **"May be written" by the member's top**: a cell, an array, a bloblet,
+   an `icell`, a key, a place, or a pair or `nlist` whose region is not
+   frozen. Such a member must be told apart from every other by shape;
+   the rest may overlap. A product of cells is not refused here; what
+   taking it apart gives is U3's.
+5. **Inference picks a member only when one alone fits.** Where the
+   checkers matched a pattern to the first member of the right shape
+   (`cons` where a union is wanted; `car` of a union with a pair), they
+   now do so only if one member has it; with several, nothing is
+   inferred from the union. The same in the termination walk and the
+   verifier. Unchanged for every `oneof`, whose members' shapes differ.
+6. **Narrowing builds its parts directly** in both checkers (`nil` beside
+   one pair merged, nothing else), as the FX-26 checker did: the parts of
+   a normal union are normal.
+7. **Tests in `tests/programs/anyof/`, run** (`logical_types.rs`, formerly
+   `allof.rs`); `allof` and `anyof` added to the sweeps comparing the
+   checkers and the type representations.

@@ -1015,7 +1015,7 @@ impl Im<'_, '_> {
             "void" => Ty::Void,
             "nil" => Ty::Nil,
             "false" => Ty::False,
-            "oneof" | "union" => Ty::Union(args.iter().map(|x| self.ty(Self::child(*x)?)).collect::<Result<_, _>>()?),
+            "oneof" | "union" | "anyof" => Ty::Union(args.iter().map(|x| self.ty(Self::child(*x)?)).collect::<Result<_, _>>()?),
             "allof" => Ty::AllOf(args.iter().map(|x| self.ty(Self::child(*x)?)).collect::<Result<_, _>>()?),
             "var" => Ty::Var(self.var(arg(0)?)?),
             "subr" => {

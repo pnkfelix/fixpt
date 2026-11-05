@@ -907,6 +907,20 @@ table is U1's one test not built; the verifier of typed cellular code
 knows no `allof` (`typed_cells.rs`'s known gaps). Tests:
 `tests/programs/allof/` (swap, the meet, and four refusals).
 
+**U2, as built (2026-11-05).** `(anyof T …)` in both checkers, one node
+with `oneof`'s (`Ty::Union`, `ty-union`), printed `oneof` where no two
+members share a shape, else `anyof`. Normal form as above, but for a
+member below another: only one the same as one before it is dropped
+(CLAUDES_CHOICES.md, "U2": FX-26 reads types before it has subtyping).
+Members that may be written (cells, arrays, bloblets, pairs and lists not
+frozen) must be told apart by shape from the rest. Subtyping needed
+nothing new: both checkers already tried each member with the trail
+rolled back. Where inference took a union's first member of a shape, it
+now takes one only if it alone has it. Tests: `tests/programs/anyof/`
+(`(anyof expr op)` a sub-sum of `sexp`, overlapping lists narrowed, a
+`oneof` and an `anyof` as one type, a recursive one, and three refusals:
+two cells, two writable lists; the sums' shared tag shown).
+
 Each stage in both checkers, agreeing, as L0 to L3 were. U1 before U2
 because swap needs only it: `sexp` is written as the sum it is. U0 to U3
 before macros (`TODO.md` §182), U4 and U5 after (question 15).

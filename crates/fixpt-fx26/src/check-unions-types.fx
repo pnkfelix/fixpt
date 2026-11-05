@@ -5,7 +5,7 @@
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
-(define-type k-pending (productof (1 int) (2 int) (3 int)))
+(define-type k-pending (productof (1 int) (2 int) (3 int) (4 bool)))
 (define-type k-sides (pairof k-ids k-ids @t))
 ;; Type `t` where a value of it is found of shape `k`, and where not, -1
 ;; for no narrowing: a union's members of that shape, and the rest; a pair
@@ -31,6 +31,16 @@
             (val k-member-holding
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) int))
             (val k-union-of
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-ids int int)
+                       int))
+            (val k-anyof-of
                  (subr (maxeff (alloc @t)
                                (goto @z)
                                (read @globals)

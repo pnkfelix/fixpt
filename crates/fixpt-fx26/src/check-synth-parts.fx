@@ -136,12 +136,17 @@
                     #u)))
             (else y #u))
           #u))))
-;; A union's member that is a pair, of members `ms`; or -1.
+;; A union's one member that is a pair, of members `ms`; or below 0 (-2
+;; for several, an `anyof`'s).
 (define k-union-pair-member (->* (k-ids) int)
   (lambda (ms)
-    (cond ((null? ms) -1)
-          ((tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f)) (car ms))
-          (else (k-union-pair-member (cdr ms))))))
+    (if (null? ms)
+        -1
+        (let ((rest (k-union-pair-member (cdr ms))))
+          (cond ((not (tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f)))
+                 rest)
+                ((= rest -1) (car ms))
+                (else -2))))))
 ;; Type `t` and effect `e` of `x`, or `r`, both, with what `x` masks masked.
 (define k-te-masked (->* (kx int k-eff) k-te)
   (lambda (x t e) (k-te t (k-mask x e t))))

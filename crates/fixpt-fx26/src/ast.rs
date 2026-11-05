@@ -465,8 +465,10 @@ pub enum Ty {
     /// stage 3). `#f` is a `bool`, and checks as a `false` where one is
     /// expected.
     False,
-    /// `(oneof T …)`: a value of one of the members, whose shapes at run
-    /// time (`Checker::shape`) are disjoint, so that the shape says which.
+    /// `(oneof T …)` or `(anyof T …)`: a value of one of the members. Of a
+    /// `oneof` their shapes at run time (`Checker::shape`) are disjoint, so
+    /// that the shape says which; of an `anyof` they may overlap, one type
+    /// for both, printed `oneof` where disjoint (`logical-types.md` §8.5).
     /// Kept normalized: no member a union, and `nil` with a pair that is not
     /// `nil` made the pair that may be (`Checker::union_of`).
     Union(Vec<TyId>),

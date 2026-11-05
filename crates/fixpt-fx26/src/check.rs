@@ -405,7 +405,8 @@ pub struct Checker {
     pub(crate) closure_depth: usize,
     /// Unions read with a member not yet known, a recursive type's own
     /// name, and where: checked once it is (`Checker::union_of`).
-    pub(crate) pending_unions: Vec<(TyId, fixpt_read::Span)>,
+    /// Whether each is an `anyof`.
+    pub(crate) pending_unions: Vec<(TyId, fixpt_read::Span, bool)>,
     /// While a `lambda` is checked against each member of an `allof`, one
     /// per `allof`, innermost last: the `tagcase` arms a member's type
     /// rules out, skipped (`logical-types.md` §8.5, rule 2).
@@ -1405,6 +1406,19 @@ impl Checker {
     /// known shape, and no two the same but sums with no tag in common
     /// (`docs/research/logical-types.md`, L1 and §8.5).
     pub(crate) fn union_of(&mut self, members: &[TyId], span: fixpt_read::Span) -> R<TyId> {
+        self.union_formed(members, span, false)
+    }
+
+    /// The true union of `members`, `(anyof …)` (`logical-types.md` §8.5,
+    /// U2), normalized as `union_of` is, but members may overlap: `void`
+    /// and a member the same as one before it dropped, and sums made one
+    /// with a tag in several the union of its payloads. Only a member that
+    /// may be written must still be told apart from every other.
+    pub(crate) fn anyof_of(&mut self, members: &[TyId], span: fixpt_read::Span) -> R<TyId> {
+        self.union_formed(members, span, true)
+    }
+
+    fn union_formed(&mut self, members: &[TyId], span: fixpt_read::Span, any: bool) -> R<TyId> {
         let mut flat: Vec<TyId> = Vec::new();
         for &m in members {
             let m = self.arena.resolve(m);
@@ -1413,41 +1427,141 @@ impl Checker {
                 _ => flat.push(m),
             }
         }
+        if any {
+            self.anyof_trimmed(&mut flat);
+        }
         // A member not yet known (a recursive type's own name, read before
         // its definition is): the union checked once it is.
         let open = |c: &Self, m: TyId| matches!(c.arena.get(c.arena.resolve(m)), Ty::Link(None));
         let pending = flat.iter().any(|m| open(self, *m));
         if !pending {
-            self.union_members_known(&flat, span)?;
+            self.union_members_known(&flat, span, any)?;
         }
-        // `nil` beside a pair: the pair that may be `nil`.
-        if let Some(n) = flat.iter().position(|m| matches!(self.arena.get(*m), Ty::Nil)) {
-            let pairs: Vec<usize> = (0..flat.len()).filter(|&i| matches!(self.arena.get(flat[i]), Ty::Pair(..))).collect();
-            if let [p] = pairs[..] {
-                if let Ty::Pair(a, b, r, false) = self.arena.get(flat[p]).clone() {
-                    flat[p] = self.arena.ty(Ty::Pair(a, b, r, true));
-                }
-                flat.remove(n);
-            }
-        }
+        let mut flat = self.nil_merged(flat);
         if pending {
             let u = self.arena.ty(Ty::Union(flat));
-            self.pending_unions.push((u, span));
+            self.pending_unions.push((u, span, any));
             return Ok(u);
         }
-        self.union_members_differ(&flat, span)?;
-        self.union_sums_merged(&mut flat);
-        match flat[..] {
-            [] => Ok(self.arena.ty(Ty::Void)),
-            [m] => Ok(m),
-            _ => Ok(self.arena.ty(Ty::Union(flat))),
+        if any {
+            self.anyof_sums_merged(&mut flat, span)?;
+            self.anyof_written_apart(&flat, span)?;
+        } else {
+            self.union_members_differ(&flat, span)?;
+            self.union_sums_merged(&mut flat);
+        }
+        Ok(self.union_built(flat))
+    }
+
+    /// `ms` with `nil` beside one pair made the pair that may be `nil`.
+    fn nil_merged(&mut self, mut ms: Vec<TyId>) -> Vec<TyId> {
+        if let Some(n) = ms.iter().position(|m| matches!(self.arena.get(self.arena.resolve(*m)), Ty::Nil)) {
+            let pair = |c: &Self, m: TyId| matches!(c.arena.get(c.arena.resolve(m)), Ty::Pair(..));
+            let pairs: Vec<usize> = (0..ms.len()).filter(|&i| pair(self, ms[i])).collect();
+            if let [p] = pairs[..] {
+                if let Ty::Pair(a, b, r, false) = self.arena.get(self.arena.resolve(ms[p])).clone() {
+                    ms[p] = self.arena.ty(Ty::Pair(a, b, r, true));
+                }
+                ms.remove(n);
+            }
+        }
+        ms
+    }
+
+    /// A union of `ms`, normal already: `void` for none, one itself.
+    pub(crate) fn union_built(&mut self, ms: Vec<TyId>) -> TyId {
+        match ms[..] {
+            [] => self.arena.ty(Ty::Void),
+            [m] => m,
+            _ => self.arena.ty(Ty::Union(ms)),
         }
     }
 
-    fn union_members_known(&mut self, ms: &[TyId], span: fixpt_read::Span) -> R<()> {
+    /// `ms` without `void`, and without a member the same as one before it.
+    fn anyof_trimmed(&mut self, ms: &mut Vec<TyId>) {
+        let mut kept: Vec<TyId> = Vec::new();
+        for &m in ms.iter() {
+            if !matches!(self.arena.get(m), Ty::Void) && !kept.iter().any(|k| self.same_ty(*k, m, &mut Vec::new())) {
+                kept.push(m);
+            }
+        }
+        *ms = kept;
+    }
+
+    /// `ms`'s sums made one: each tag once, its payload the `anyof` of its
+    /// payloads in them (`logical-types.md` §8.5: the same values, since a
+    /// sum's representation names its tag, not its type's tags).
+    fn anyof_sums_merged(&mut self, ms: &mut Vec<TyId>, span: fixpt_read::Span) -> R<()> {
+        let sums: Vec<usize> = (0..ms.len()).filter(|&i| matches!(self.arena.get(ms[i]), Ty::Sum(_))).collect();
+        let [first, ref rest @ ..] = sums[..] else { return Ok(()) };
+        if rest.is_empty() {
+            return Ok(());
+        }
+        let mut tags: Vec<(Sym, Vec<TyId>)> = Vec::new();
+        for &i in &sums {
+            let Ty::Sum(ps) = self.arena.get(ms[i]).clone() else { unreachable!("a sum") };
+            for (l, t) in ps {
+                match tags.iter_mut().find(|(m, _)| *m == l) {
+                    Some((_, ts)) => ts.push(t),
+                    None => tags.push((l, vec![t])),
+                }
+            }
+        }
+        let mut parts = Vec::new();
+        for (l, ts) in tags {
+            let t = if let [t] = ts[..] { t } else { self.anyof_of(&ts, span)? };
+            parts.push((l, t));
+        }
+        ms[first] = self.arena.ty(Ty::Sum(parts));
+        for &i in rest.iter().rev() {
+            ms.remove(i);
+        }
+        Ok(())
+    }
+
+    /// Whether a value of `t` may be written: a cell, an array, a bloblet, or
+    /// a pair or list not frozen.
+    fn may_be_written(&self, t: TyId) -> bool {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Ref(..) | Ty::Array(..) | Ty::Bloblet { .. } | Ty::ICell(..) | Ty::MarkKey(..) | Ty::Place(_) => true,
+            Ty::Pair(_, _, r, _) | Ty::NList { region: r, .. } => !matches!(r, Region::Frozen(..)),
+            _ => false,
+        }
+    }
+
+    /// An `anyof`'s members that may be written each told apart from every
+    /// other at run time (`logical-types.md` §9.2, question 14: a union of
+    /// cells, refused until a program needs it).
+    fn anyof_written_apart(&mut self, ms: &[TyId], span: fixpt_read::Span) -> R<()> {
+        for i in 0..ms.len() {
+            for j in i + 1..ms.len() {
+                let meet = self.shape(ms[i]).unwrap_or(0) & self.shape(ms[j]).unwrap_or(0) != 0;
+                if meet && (self.may_be_written(ms[i]) || self.may_be_written(ms[j])) {
+                    return Err(FxError::at(
+                        span,
+                        format!(
+                            "an `anyof`'s members that may be written must be told apart at run time: a {} and a {} cannot be",
+                            self.show_ty(ms[i]),
+                            self.show_ty(ms[j])
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether no two of `ms` share a shape: a union printed `oneof`.
+    pub(crate) fn members_apart(&self, ms: &[TyId]) -> bool {
+        let shapes: Vec<u32> = ms.iter().map(|m| self.shape(*m).unwrap_or(0)).collect();
+        (0..shapes.len()).all(|i| (i + 1..shapes.len()).all(|j| shapes[i] & shapes[j] == 0))
+    }
+
+    fn union_members_known(&mut self, ms: &[TyId], span: fixpt_read::Span, any: bool) -> R<()> {
+        let former = if any { "anyof" } else { "oneof" };
         for &m in ms {
             if self.shape(m).is_none() {
-                return Err(FxError::at(span, format!("a {} cannot be in a `oneof`: its shape at run time is not known", self.show_ty(m))));
+                return Err(FxError::at(span, format!("a {} cannot be in a `{former}`: its shape at run time is not known", self.show_ty(m))));
             }
         }
         Ok(())
@@ -1559,19 +1673,24 @@ impl Checker {
         let open = |c: &Self, m: TyId| matches!(c.arena.get(c.arena.resolve(m)), Ty::Link(None));
         let mut i = 0;
         while i < self.pending_unions.len() {
-            let (u, span) = self.pending_unions[i];
+            let (u, span, any) = self.pending_unions[i];
             let Ty::Union(ms) = self.arena.get(u).clone() else { unreachable!("a union") };
             if ms.iter().any(|m| open(self, *m)) {
                 i += 1;
                 continue;
             }
             self.pending_unions.remove(i);
-            self.union_members_known(&ms, span)?;
-            self.union_members_differ(&ms, span)?;
+            self.union_members_known(&ms, span, any)?;
+            if any {
+                self.anyof_written_apart(&ms, span)?;
+            } else {
+                self.union_members_differ(&ms, span)?;
+            }
             // Made already, its sums cannot be made one now.
             let sum = |c: &Self, m: &TyId| matches!(c.arena.get(c.arena.resolve(*m)), Ty::Sum(_));
             if ms.iter().filter(|m| sum(self, m)).count() > 1 {
-                return Err(FxError::at(span, "a `oneof` of sums with a member not yet defined: write the sums as one `sumof`"));
+                let former = if any { "anyof" } else { "oneof" };
+                return Err(FxError::at(span, format!("a `{former}` of sums with a member not yet defined: write the sums as one `sumof`")));
             }
         }
         Ok(())
@@ -1819,8 +1938,9 @@ impl Checker {
                         }
                     }
                 }
-                let span = fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0);
-                (self.union_of(&inside, span).ok(), self.union_of(&outside, span).ok())
+                // Parts of a normal union: normal but for `nil` beside a pair.
+                let (inside, outside) = (self.nil_merged(inside), self.nil_merged(outside));
+                (Some(self.union_built(inside)), Some(self.union_built(outside)))
             }
             _ => (None, None),
         }

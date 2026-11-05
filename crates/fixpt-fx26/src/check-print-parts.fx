@@ -367,6 +367,76 @@
 ;; `fits`): `t` is its type, and has parts.
 (define k-fits? (->* (int int) bool)
   (lambda (d t) (and (k-abbreviates? d) (k-same-shape? d t nil))))
+(define k-same-type? (->* (int int) bool)
+  (lambda (a b) (k-same-shape? a b nil)))
+
+;; Shapes at run time (`check-unions.fx` uses them; here, for a union's
+;; former, as shown). The shapes, by number in `check.rs`'s `SHAPES` order:
+;; 0 int, 1 f64, 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol,
+;; 9 procedure, 10 bloblet, 11 box, 12 sum, 13 product, 14 vector, 15
+;; bytevector, 16 keyword. A type's shapes are a mask, bit `k` shape `k`'s,
+;; or -1 if they are not known.
+(define k-base-shape (->* (symbol) int)
+  (lambda (s)
+    (case (symbol->string s)
+      (("int" "i8" "u8" "i32" "u32" "i64" "u64") 0)
+      (("f64") 1) (("f32") 2) (("char") 3) (("bool") 4)
+      (("string") 7)
+      ;; `unit` is the symbol `#u` at run time.
+      (("symbol" "unit") 8)
+      (("vector") 14) (("bytevector") 15) (("keyword") 16)
+      (else -1))))
+;; Shape `k`'s bit, or -1 for none known.
+(define k-shape-bit (->* (int) int)
+  (lambda (k) (if (< k 0) -1 (arithmetic-shift 1 k))))
+(define-rec
+  ;; The shapes a value of type `t` may have at run time: what its tag
+  ;; says, and for a bloblet its kind. Not known for a variable, or an
+  ;; abstract or generative type: no union may have a member of one.
+  ;; `seen`, the unions met on the way down: one met again is its own
+  ;; member, whose shape is not known.
+  (k-run-shape-in (->* (int k-ids) int)
+    (lambda (t0 seen)
+      (let ((t (k-resolve t0)))
+      (tagcase (k-get t)
+        (ty-base (s) (k-shape-bit (k-base-shape s)))
+        (ty-nat (z) 1)
+        (ty-nil () 32)
+        (ty-false () 16)
+        (ty-pair (a b r nl) (if nl 96 64))
+        (ty-nlist (e z r) 96)
+        (ty-subr (e ps r cv spc) 512)
+        (ty-comp (a h e r once) 512)
+        ;; An array is a bloblet as `(bloblet …)` is, of the same kind.
+        (ty-array (a nz r) 1024)
+        (ty-bloblet (fs z r) 1024)
+        (ty-ref (a r) 2048)
+        (ty-sum (ps) 4096)
+        (ty-product (ps) 8192)
+        (ty-union (ms)
+          (if (k-has-id? seen t) -1 (k-run-shapes ms (the k-ids (cons t seen)))))
+        (ty-allof (ms)
+          (if (k-has-id? seen t) -1 (k-run-shapes ms (the k-ids (cons t seen)))))
+        (ty-void () 0)
+        (else y -1)))))
+  (k-run-shapes (->* (k-ids k-ids) int)
+    (lambda (ms seen)
+      (if (null? ms)
+          0
+          (let ((s (k-run-shape-in (car ms) seen)) (rest (k-run-shapes (cdr ms) seen)))
+            (if (or (< s 0) (< rest 0)) -1 (bitwise-ior s rest)))))))
+;; The same, from the top.
+(define k-run-shape (->* (int) int)
+  (lambda (t) (k-run-shape-in t nil)))
+;; Whether no two of `ms` share a known shape: a union shown as `oneof`,
+;; else `anyof` (`logical-types.md` §8.5). As `Checker::members_apart`.
+(define k-members-apart? (->* (k-ids) bool)
+  (lambda (ms)
+    (letrec ((shape (->* (int) int) (lambda (m) (let ((s (k-run-shape m))) (if (< s 0) 0 s))))
+             (apart (->* (int k-ids) bool)
+               (lambda (s ns)
+                 (or (null? ns) (and (= (bitwise-and s (shape (car ns))) 0) (apart s (cdr ns)))))))
+      (or (null? ms) (and (apart (shape (car ms)) (cdr ms)) (k-members-apart? (cdr ms)))))))
 ;; A hash of type `t`'s shape, two nodes down: two types `k-same-shape?`
 ;; finds one hash the same (a node of a kind not compared so, its id).
 (define k-shape-hash (->* (int int) int)

@@ -314,7 +314,10 @@
         (ty-void () (k-put "void" st))
         (ty-nil () (k-put "nil" st))
         (ty-false () (k-put "false" st))
-        (ty-union (ms) (k-put ")" (k-show-seq ms p " " (k-put "(oneof " st))))
+        ;; `oneof` where a run-time test tells its members apart.
+        (ty-union (ms)
+          (let ((former (if (k-members-apart? ms) "(oneof " "(anyof ")))
+            (k-put ")" (k-show-seq ms p " " (k-put former st)))))
         (ty-allof (ms) (k-put ")" (k-show-seq ms p " " (k-put "(allof " st))))
         (ty-var (v)
           (k-put (if (get k-show-marks) (k-dvar-string v) (k-var-shown v (extract p 1))) st))

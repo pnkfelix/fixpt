@@ -10,7 +10,7 @@
 ;; `check-program.fx`, `check-read-descs.fx`, `check-read-helpers.fx`,
 ;; `check-read.fx`, `check-resolve.fx`, `check-rules.fx`, `check-sub-env.fx`,
 ;; `check-subst.fx`, `check-subtype.fx`, `check-syntax.fx`, `check-synth.fx`,
-;; `check-test-facts.fx`).
+;; `check-test-facts.fx`, `check-unions.fx`).
 ;; The types it names, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (import check-types-types (type k-atom k-conv k-eff k-map))
@@ -69,6 +69,12 @@
             (val k-abbreviates?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) bool))
             (val k-fits? (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) bool))
+            (val k-same-type?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) bool))
+            (val k-shape-bit (subr (maxeff (read @globals) spin) (int) int))
+            (val k-run-shape (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) int))
+            (val k-members-apart?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-ids) bool))
             (val k-shape-hash
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) int))
             (val k-naming! (subr (write @t) (bool) unit))

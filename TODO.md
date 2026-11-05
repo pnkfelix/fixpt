@@ -2191,7 +2191,15 @@ checkers (`logical-types.md`, "U1, as built"). Left of it:
 - A call's arguments must each have a type of their own and be below a
   member's parameters as they are: no conversion or reshape at an
   `allof` call, and no `lambda` without parameter types as an argument.
-Next: U2, `anyof`.
+
+U2 done (2026-11-05): `anyof` in both checkers (`logical-types.md`, "U2,
+as built"). Left of it:
+- A member below another is not dropped, only one the same as another
+  (CLAUDES_CHOICES.md, "U2"): `(anyof int nat)` keeps both. Dropping needs
+  subtyping where FX-26 reads types, or normalizing later.
+- Cells, and writable pairs and lists, that share a shape: refused until
+  a program needs them (question 14).
+Next: U3, rule 5 (union elimination at a call's arguments).
 
 ## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
 
