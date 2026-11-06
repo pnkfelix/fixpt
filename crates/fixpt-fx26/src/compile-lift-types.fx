@@ -91,7 +91,7 @@
             (val c-lift-of (subr (maxeff (read @globals) spin (read @k)) (int) c-lift))
             (val c-planned-lift
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (int int int)
+                       (int int int int)
                        (listof (listof c-added @k) @k)))
             (val c-load-names
                  (subr (maxeff (alloc @k)

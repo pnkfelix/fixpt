@@ -512,11 +512,11 @@
 (define k-literal-value (->* (kx int int) (listof int acyclic))
   (lambda (x a b)
     (tagcase x
-      (x-const (t n c d cdk) (if (and (= t k-int) (= c a) (= d b)) (list n) nil))
-      (x-app (f args c d cdk)
+      (x-const (t n c d cdk cdkr) (if (and (= t k-int) (= c a) (= d b)) (list n) nil))
+      (x-app (f args c d cdk cdkr)
         (if (and (= c a) (= d b) (= (k-length args) 2))
             (tagcase f
-              (x-var (s fa fb fafbk)
+              (x-var (s fa fb fafbk fafbkr)
                 (if (and (= fa a) (= fb b) (k-std-binding? s (k-lookup s)))
                     (k-literal-op (symbol->string s) (k-literal-value (car args) a b)
                                   (k-literal-value (car (cdr args)) a b))

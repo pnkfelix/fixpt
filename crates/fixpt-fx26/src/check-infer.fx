@@ -681,7 +681,7 @@
 (define k-plambda-matches? (->* (kx k-ty) bool)
   (lambda (x et)
     (tagcase x
-      (x-plambda (binders body a b abk)
+      (x-plambda (binders body a b abk abkr)
         (tagcase et
           (ty-poly (bs want) (and (= (k-length bs) (k-length binders)) (k-same-kinds? bs binders)))
           (else y #f)))
@@ -769,5 +769,5 @@
 ;; variable `tag`, if it is one.
 (define k-reaches-only? (->* (kx kx k-region) bool)
   (lambda (body tag r)
-    (let ((tv (the k-names (tagcase tag (x-var (s a b abk) (cons s nil)) (else y nil)))))
+    (let ((tv (the k-names (tagcase tag (x-var (s a b abk abkr) (cons s nil)) (else y nil)))))
       (k-none-reach? (k-free-vars body) tv r)))))))

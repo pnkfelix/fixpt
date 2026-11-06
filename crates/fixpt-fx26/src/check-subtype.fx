@@ -894,7 +894,7 @@
           (else (k-base-of x (cdr bs))))))
 ;; Whether `at` is `x`'s.
 (define k-at-x? (->* (k-at kx) bool)
-  (lambda (at x) (k-at-is? at (k-start x) (k-end x) (k-kth x))))
+  (lambda (at x) (k-at-is? at (k-start x) (k-end x) (k-kth x) (k-reading x))))
 ;; Positions `at` of the values `inner` takes.
 (define k-vals-picked (->* (k-picks k-ids) k-picks)
   (lambda (inner at)

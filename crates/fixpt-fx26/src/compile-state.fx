@@ -58,7 +58,7 @@
     (and tail
          (>= (get c-this-params) 0)
          (tagcase f
-           (e-var (n a b abk)
+           (e-var (n a b abk abkr)
              (and (symbol=? n (get c-this-name))
                   (let ((l (c-find e n)))
                     (and (not (null? l))
@@ -135,7 +135,7 @@
       (if (or (null? ms) (null? l))
           #u
           (tagcase (car l)
-            (e-lambda (ps body a b abk)
+            (e-lambda (ps body a b abk abkr)
               (if (null? (c-lambda-captured ps body e))
                   (let* ((word (car (get c-last-word)))
                          (it (product (1 n) (2 word) (3 ps) (4 body) (5 (c-genv-now)))))
@@ -155,10 +155,10 @@
 (define c-checked-lambda? (->* (exp) bool)
   (lambda (x)
     (tagcase x
-      (e-lambda (ps body a b abk) #t)
-      (e-rlambda (r l a b abk) #t)
-      (e-plambda (d body a b abk) (c-checked-lambda? body))
-      (e-the (d body a b abk) (c-checked-lambda? body))
+      (e-lambda (ps body a b abk abkr) #t)
+      (e-rlambda (r l a b abk abkr) #t)
+      (e-plambda (d body a b abk abkr) (c-checked-lambda? body))
+      (e-the (d body a b abk abkr) (c-checked-lambda? body))
       (else y #f))))
 (define c-mv-onto (->* (symbol exp int bool c-mvals) c-mvals)
   (lambda (n x k l rest) (cons (product (1 n) (2 x) (3 k) (4 l)) rest)))
@@ -389,16 +389,16 @@
 (define c-fx-name (->* (symbol exp) string)
   (lambda (m body)
     (tagcase body
-      (e-var (n a b abk) (if (string=? (symbol->string m) "#%fx") (symbol->string n) ""))
+      (e-var (n a b abk abkr) (if (string=? (symbol->string m) "#%fx") (symbol->string n) ""))
       (else y ""))))
 ;; The standard operation `f` names, if it is a name bound nowhere else;
 ;; else "".
 (define c-standard-name (->* (exp cenv) string)
   (lambda (f e)
     (tagcase f
-      (e-var (n a b abk) (if (null? (c-where e n)) (symbol->string n) ""))
+      (e-var (n a b abk abkr) (if (null? (c-where e n)) (symbol->string n) ""))
       ;; `(with #%fx n)` where `n` is shadowed: the standard `n`.
-      (e-with (m body a b abk) (c-fx-name m body))
+      (e-with (m body a b abk abkr) (c-fx-name m body))
       (else y ""))))
 
 ;; Whether `f` names the standard `name`, as the quote rewrite writes it:
@@ -406,8 +406,8 @@
 (define c-quote-names? (->* (exp string) bool)
   (lambda (f name)
     (tagcase f
-      (e-var (n a b abk) (string=? (symbol->string n) name))
-      (e-with (m body a b abk) (string=? (c-fx-name m body) name))
+      (e-var (n a b abk abkr) (string=? (symbol->string n) name))
+      (e-with (m body a b abk abkr) (string=? (c-fx-name m body) name))
       (else y #f))))
 ;; The datum a quote builds (`%quote`'s argument, which only the quote
 ;; rewrite makes: `quoted` in `parser.fx`), as a constant's cell, made
@@ -419,14 +419,15 @@
   (->* (exp) (listof wcell @k))
   (lambda (x)
     (tagcase x
-      (e-int (n a b abk) (cons (wcell-int n) nil))
-      (e-bool (v a b abk) (cons (wcell-bool v) nil))
-      (e-char (v a b abk) (cons (wcell-char v) nil))
-      (e-sym (s a b abk) (cons (wcell-symbol s) nil))
-      (e-the (d body a b abk) (c-quoted-cell body))
-      (e-var (n a b abk) (if (string=? (symbol->string n) "nil") (cons (wcell-nil) nil) nil))
-      (e-with (m body a b abk) (if (string=? (c-fx-name m body) "nil") (cons (wcell-nil) nil) nil))
-      (e-app (f args a b abk)
+      (e-int (n a b abk abkr) (cons (wcell-int n) nil))
+      (e-bool (v a b abk abkr) (cons (wcell-bool v) nil))
+      (e-char (v a b abk abkr) (cons (wcell-char v) nil))
+      (e-sym (s a b abk abkr) (cons (wcell-symbol s) nil))
+      (e-the (d body a b abk abkr) (c-quoted-cell body))
+      (e-var (n a b abk abkr) (if (string=? (symbol->string n) "nil") (cons (wcell-nil) nil) nil))
+      (e-with (m body a b abk abkr)
+              (if (string=? (c-fx-name m body) "nil") (cons (wcell-nil) nil) nil))
+      (e-app (f args a b abk abkr)
         (if (and (c-quote-names? f "cons") (= (c-count-exps args) 2))
             (let ((h (c-quoted-cell (car args))) (t (c-quoted-cell (car (cdr args)))))
               (if (or (null? h) (null? t)) nil (cons (wcell-pair (car h) (car t)) nil)))

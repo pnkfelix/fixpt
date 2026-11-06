@@ -59,14 +59,14 @@ fn without_file_marks(tree: &str) -> String {
 
 /// `tree` with each place in a loaded file, `k·10⁹ + i`, as `i`: the Rust
 /// parser's spans keep the file apart, and show the place in it alone; and
-/// each expression's number, `r·2³² + n` in reading `r`, as `n`, as the
-/// Rust front end numbers them, within the reading (`parser-ids.fx`).
+/// each expression's reading, its last field, as 0, as the Rust front end,
+/// which numbers within the reading, says it (`parser-ids.fx`).
 fn within_files(tree: &str) -> String {
+    let tree = &readings_as_zero(tree);
     let mut out = String::new();
     let mut digits = String::new();
     let flush = |digits: &mut String, out: &mut String| {
         match digits.parse::<u64>() {
-            Ok(n) if n >= 1 << 32 => out.push_str(&(n % (1 << 32)).to_string()),
             Ok(n) if n >= 1_000_000_000 => out.push_str(&(n % 1_000_000_000).to_string()),
             _ => out.push_str(digits),
         }
@@ -81,6 +81,39 @@ fn within_files(tree: &str) -> String {
         }
     }
     flush(&mut digits, &mut out);
+    out
+}
+
+/// `tree` with the last of each run of four numbers before a `)`, an
+/// expression's reading, 0 (its place's start and end, and its number, are
+/// the three before).
+fn readings_as_zero(tree: &str) -> String {
+    let b = tree.as_bytes();
+    let mut out = String::new();
+    // `tree[..copied]` is in `out`; `run`, the numbers in a row before here.
+    let (mut copied, mut run) = (0, Vec::<(usize, usize)>::new());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i].is_ascii_digit() && i > 0 && b[i - 1] == b' ' {
+            let start = i;
+            while i < b.len() && b[i].is_ascii_digit() {
+                i += 1;
+            }
+            run.push((start, i));
+            continue;
+        }
+        if b[i] == b')' && run.len() >= 4 && run.last().map(|r| r.1) == Some(i) {
+            let (start, _) = run[run.len() - 1];
+            out.push_str(&tree[copied..start]);
+            out.push('0');
+            copied = i;
+        }
+        if b[i] != b' ' {
+            run.clear();
+        }
+        i += 1;
+    }
+    out.push_str(&tree[copied..]);
     out
 }
 
@@ -223,9 +256,10 @@ fn a_variant_named_by_a_type_form_is_refused() {
 }
 
 /// What the comparison compares, spelled out once: each expression ends
-/// with where it starts and ends, its provenance, and its number in a walk
-/// that takes each before what is in it, its identity (`parser-ids.fx`):
-/// the `if` that `and` makes and its `#f`, at one span, are 2 and 5.
+/// with where it starts and ends, its provenance, then its identity: its
+/// number in a walk that takes each before what is in it, and its reading
+/// (`parser-ids.fx`; 0 here, as the Rust front end says it). The `if` that
+/// `and` makes and its `#f`, at one span, are 2 and 5.
 #[test]
 fn a_tree_as_text() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
@@ -233,7 +267,7 @@ fn a_tree_as_text() {
     let ours: Vec<String> = s.parse_with_own_parser(text).expect("parses").iter().map(|t| within_files(t)).collect();
     assert_eq!(
         ours,
-        ["(t-exp (e-let ([a (e-bool #t 10 12 1)]) (e-if (e-var a 20 21 3) (e-bool #f 22 24 4) (e-bool #f 15 25 5) 15 25 2) 7 13 0))"]
+        ["(t-exp (e-let ([a (e-bool #t 10 12 1 0)]) (e-if (e-var a 20 21 3 0) (e-bool #f 22 24 4 0) (e-bool #f 15 25 5 0) 15 25 2 0) 7 13 0 0))"]
     );
     assert_eq!(ours, rust_trees(text));
 }

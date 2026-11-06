@@ -204,7 +204,7 @@
                                (read @s)
                                (read @t)
                                (write @t)
-                               spin) (int int int int int int kx int int k-eff) k-te))
+                               spin) (int int int int int int int kx int int k-eff) k-te))
             (val k-in-fixed-range? (subr (maxeff (alloc @t)
                                (goto @z)
                                (read @globals)

@@ -43,45 +43,43 @@
 (define c-int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
 
 ;; The reading the trees being compiled were numbered in (`parser-ids.fx`),
-;; for facts numbered within it alone, as the checker written in Rust's are
-;; (`rust_facts.rs`): 0, all the facts' numbers the reading's own (the
-;; checker written in FX-26's, from the trees themselves).
-(define c-reading-span int 4294967296)
+;; for facts of reading 0, numbered within the trees without knowing their
+;; reading, as the checker written in Rust's are (`rust_facts.rs`); 0 if
+;; there are none (the checker written in FX-26's have the trees' own).
 (define c-reading (ref int @k) (new 0))
-;; `at` with its number the reading's, if it is numbered within it.
+;; `at`, of the trees' reading if it is of reading 0.
 (define c-absolute-at (->* (k-at) k-at)
   (lambda (at)
-    (let ((r (get c-reading)) (k (extract at 3)))
-      (if (and (> r 0) (< k c-reading-span))
-          (product (1 (extract at 1)) (2 (extract at 2)) (3 (+ (* r c-reading-span) k)))
-          at))))
+    (if (and (= (extract at 4) 0) (not (= (get c-reading) 0)))
+        (product (1 (extract at 1)) (2 (extract at 2)) (3 (extract at 3)) (4 (get c-reading))) at)))
 
 ;; An expression's identity, as a table's key: where it starts and ends, and
 ;; which of the expressions there it is. For tables asked once a lambda or
 ;; a `letrec`; those asked of every expression are by where it starts
 ;; (`c-by-at`), so that asking makes nothing.
-(define c-span-key (->* (int int int) k-at)
-  (lambda (a b k) (product (1 a) (2 b) (3 k))))
+(define c-span-key (->* (int int int int) k-at)
+  (lambda (a b k kr) (product (1 a) (2 b) (3 k) (4 kr))))
 (define c-at-hash (subr pure (k-at) int) (lambda (x) (extract x 3)))
-(define c-at-is? (->* (k-at int int int) bool) (lambda (x a b k) (k-at-is? x a b k)))
+(define c-at-is? (->* (k-at int int int int) bool) (lambda (x a b k kr) (k-at-is? x a b k kr)))
 (define c-at=? (subr pure (k-at k-at) bool)
-  (lambda (x y) (k-at-is? x (extract y 1) (extract y 2) (extract y 3))))
+  (lambda (x y) (k-at-is? x (extract y 1) (extract y 2) (extract y 3) (extract y 4))))
 
 ;; What `t` notes of `a` `b` `k`, the newest; or `none`.
 (define c-noted-in
-  (->* ((listof c-noted acyclic) int int int int) int)
-  (lambda (ns a b k none)
+  (->* ((listof c-noted acyclic) int int int int int) int)
+  (lambda (ns a b k kr none)
     (cond ((null? ns) none)
-          ((k-at-is? (extract (car ns) 1) a b k) (extract (car ns) 2))
-          (else (c-noted-in (cdr ns) a b k none)))))
-(define c-noted-at (->* (c-by-at int int int int) int)
-  (lambda (t a b k none) (c-noted-in (table-ref t k nil) a b k none)))
+          ((k-at-is? (extract (car ns) 1) a b k kr) (extract (car ns) 2))
+          (else (c-noted-in (cdr ns) a b k kr none)))))
+(define c-noted-at (->* (c-by-at int int int int int) int)
+  (lambda (t a b k kr none) (c-noted-in (table-ref t k nil) a b k kr none)))
 ;; The same of expression `x`: where it ends, and which it is there, found
 ;; only if something is noted where it starts, as little is.
 (define c-noted-of (->* (c-by-at exp int) int)
   (lambda (t x none)
     (let ((ns (table-ref t (exp-kth x) nil)))
-      (if (null? ns) none (c-noted-in ns (exp-start x) (exp-end x) (exp-kth x) none)))))
+      (if (null? ns) none
+          (c-noted-in ns (exp-start x) (exp-end x) (exp-kth x) (exp-reading x) none)))))
 ;; `t` noting `n` of `at`, over what it noted before.
 (define c-note! (->* (c-by-at k-at int) unit)
   (lambda (t at n)
@@ -119,12 +117,14 @@
 ;; it is one: a list of one.
 (define c-staged-texts (ref c-staged-list @k) (new nil))
 (define c-staged-at (->* (exp) c-staged-list)
-  (lambda (x) (c-staged-find (get c-staged-texts) (exp-start x) (exp-end x) (exp-kth x))))
-(define c-staged-find (->* (c-staged-list int int int) c-staged-list)
-  (lambda (l a b k)
+  (lambda (x)
+          (c-staged-find (get c-staged-texts) (exp-start x) (exp-end x) (exp-kth x)
+                         (exp-reading x))))
+(define c-staged-find (->* (c-staged-list int int int int) c-staged-list)
+  (lambda (l a b k kr)
     (cond ((null? l) nil)
-          ((c-at-is? (extract (car l) 1) a b k) (the c-staged-list (cons (car l) nil)))
-          (else (c-staged-find (cdr l) a b k)))))
+          ((c-at-is? (extract (car l) 1) a b k kr) (the c-staged-list (cons (car l) nil)))
+          (else (c-staged-find (cdr l) a b k kr)))))
 ;; Each `apply` whose list the checker found at `acyclic` (`n-apply-shares`,
 ;; `k-note-apply-shares`). Every other `apply` copies its list.
 (define c-shares-table (ref c-by-at @k) (new (c-new-by-at)))
@@ -133,52 +133,52 @@
 (define c-frozen-table (ref c-by-at @k) (new (c-new-by-at)))
 ;; Each `(with #%fx n)` that is the plain `n` (`n-plain-fx`, `k-synth-fx`).
 (define c-plain-table (ref c-by-at @k) (new (c-new-by-at)))
-(define c-plain-fx-at (->* (int int int) bool)
-  (lambda (a b k) (>= (c-noted-at (get c-plain-table) a b k -1) 0)))
+(define c-plain-fx-at (->* (int int int int) bool)
+  (lambda (a b k kr) (>= (c-noted-at (get c-plain-table) a b k kr -1) 0)))
 ;; Whether the definition's value `a` `b` `k` is such a list.
-(define c-frozen-define-at (->* (int int int) bool)
-  (lambda (a b k) (>= (c-noted-at (get c-frozen-table) a b k -1) 0)))
+(define c-frozen-define-at (->* (int int int int) bool)
+  (lambda (a b k kr) (>= (c-noted-at (get c-frozen-table) a b k kr -1) 0)))
 
 ;; Whether the `apply` `a` `b` `k` may give its list itself.
-(define c-apply-shares-at (->* (int int int) bool)
-  (lambda (a b k) (>= (c-noted-at (get c-shares-table) a b k -1) 0)))
+(define c-apply-shares-at (->* (int int int int) bool)
+  (lambda (a b k kr) (>= (c-noted-at (get c-shares-table) a b k kr -1) 0)))
 
 ;; Each call's callee's convention (`n-call`), by where it starts.
 (define c-call-table (ref c-convs-at @k) (new (make-table c-int-hash c-int=?)))
 (define c-conv-in
-  (->* ((listof c-conv-noted acyclic) int int int) k-conv)
-  (lambda (ns a b k)
+  (->* ((listof c-conv-noted acyclic) int int int int) k-conv)
+  (lambda (ns a b k kr)
     (cond ((null? ns) (cv-fx))
-          ((k-at-is? (extract (car ns) 1) a b k) (extract (car ns) 2))
-          (else (c-conv-in (cdr ns) a b k)))))
+          ((k-at-is? (extract (car ns) 1) a b k kr) (extract (car ns) 2))
+          (else (c-conv-in (cdr ns) a b k kr)))))
 ;; The convention the call whose operator is `x` is compiled in (noted at
 ;; the operator, which every place a compiler makes the call has): its
 ;; callee's, `cellular` or `native`; or `fx`, which looks at the callee's kind, where its type says
 ;; `fx` or a convention binder, or nothing was noted (Rust's
 ;; `NodeFacts::call_conv`).
-(define c-call-conv-at (->* (int int int) k-conv)
-  (lambda (a b k)
+(define c-call-conv-at (->* (int int int int) k-conv)
+  (lambda (a b k kr)
     (let ((ns (table-ref (get c-call-table) k nil)))
       (if (null? ns)
           (cv-fx)
-          (tagcase (c-conv-in ns a b k)
+          (tagcase (c-conv-in ns a b k kr)
             (cv-cellular () (cv-cellular)) (cv-native () (cv-native)) (else y (cv-fx)))))))
 (define c-call-conv (->* (exp) k-conv)
-  (lambda (x) (c-call-conv-at (exp-start x) (exp-end x) (exp-kth x))))
+  (lambda (x) (c-call-conv-at (exp-start x) (exp-end x) (exp-kth x) (exp-reading x))))
 ;; What the checker found the operation `a` `b` `k` takes (`k-datum`), in a
 ;; list of one; none if nothing.
 (define c-datum-in
-  (->* ((listof c-datum-noted acyclic) int int int) k-datums)
-  (lambda (ns a b k)
+  (->* ((listof c-datum-noted acyclic) int int int int) k-datums)
+  (lambda (ns a b k kr)
     (cond ((null? ns) nil)
-          ((k-at-is? (extract (car ns) 1) a b k) (the k-datums (cons (extract (car ns) 2) nil)))
-          (else (c-datum-in (cdr ns) a b k)))))
-(define c-datum-at (->* (int int int) k-datums)
-  (lambda (a b k) (c-datum-in (table-ref (get c-fact-table) k nil) a b k)))
+          ((k-at-is? (extract (car ns) 1) a b k kr) (the k-datums (cons (extract (car ns) 2) nil)))
+          (else (c-datum-in (cdr ns) a b k kr)))))
+(define c-datum-at (->* (int int int int) k-datums)
+  (lambda (a b k kr) (c-datum-in (table-ref (get c-fact-table) k nil) a b k kr)))
 ;; The same of an operation that holds `got`, if any: a form kept to be
 ;; inlined holds it (`c-resolve-extracts`).
-(define c-datum-of (->* (k-datums int int int) k-datums)
-  (lambda (got a b k) (if (null? got) (c-datum-at a b k) got)))
+(define c-datum-of (->* (k-datums int int int int) k-datums)
+  (lambda (got a b k kr) (if (null? got) (c-datum-at a b k kr) got)))
 
 ;; Each `with` the checker saw (its `k-with-vals`, as `c-set-facts!` took
 ;; them), by expression: its module's values' names, in order, and their
@@ -212,34 +212,34 @@
 ;; The `with` `a` `b` `k`, in a list of one; none if the checker did not see
 ;; it.
 (define c-with-in
-  (->* (k-with-list int int int) k-with-list)
-  (lambda (ws a b k)
+  (->* (k-with-list int int int int) k-with-list)
+  (lambda (ws a b k kr)
     (cond ((null? ws) nil)
-          ((k-at-is? (extract (car ws) 1) a b k) ws)
-          (else (c-with-in (cdr ws) a b k)))))
+          ((k-at-is? (extract (car ws) 1) a b k kr) ws)
+          (else (c-with-in (cdr ws) a b k kr)))))
 ;; Its module's values' names, in a list of one; none if it was not seen.
 (define c-with-at
-  (->* (int int int) c-with-names)
-  (lambda (a b k)
-    (let ((ws (c-with-in (table-ref (get c-with-index) k nil) a b k)))
+  (->* (int int int int) c-with-names)
+  (lambda (a b k kr)
+    (let ((ws (c-with-in (table-ref (get c-with-index) k nil) a b k kr)))
       (if (null? ws) nil (the c-with-names (cons (extract (car ws) 2) nil))))))
 ;; Their positions in the module, likewise.
 (define c-with-places-at
-  (->* (int int int) (listof k-ids @k))
-  (lambda (a b k)
-    (let ((ws (c-with-in (table-ref (get c-with-index) k nil) a b k)))
+  (->* (int int int int) (listof k-ids @k))
+  (lambda (a b k kr)
+    (let ((ws (c-with-in (table-ref (get c-with-index) k nil) a b k kr)))
       (if (null? ws) nil (the (listof k-ids @k) (cons (extract (car ws) 3) nil))))))
 ;; Module `x` reshaped, in a list of one; none if it is not.
 (define c-reshape-in
-  (->* (k-reshape-list int int int) k-reshape-list)
-  (lambda (rs a b k)
+  (->* (k-reshape-list int int int int) k-reshape-list)
+  (lambda (rs a b k kr)
     (cond ((null? rs) nil)
-          ((k-at-is? (extract (car rs) 1) a b k) rs)
-          (else (c-reshape-in (cdr rs) a b k)))))
+          ((k-at-is? (extract (car rs) 1) a b k kr) rs)
+          (else (c-reshape-in (cdr rs) a b k kr)))))
 (define c-reshape-of (->* (exp) k-reshape-list)
   (lambda (x)
-    (let* ((k (exp-kth x)) (rs (table-ref (get c-reshape-index) k nil)))
-      (if (null? rs) rs (c-reshape-in rs (exp-start x) (exp-end x) k)))))
+    (let* ((k (exp-kth x)) (kr (exp-reading x)) (rs (table-ref (get c-reshape-index) k nil)))
+      (if (null? rs) rs (c-reshape-in rs (exp-start x) (exp-end x) k kr)))))
 ;; The positions of the values the module `x` reshaped keeps, in a list of
 ;; one; none if it is not reshaped.
 (define c-reshape-at (->* (exp) (listof k-picks @k))

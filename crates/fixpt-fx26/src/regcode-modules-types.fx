@@ -66,7 +66,7 @@
                        r-scopes))
             (val r-with-places
                  (subr (maxeff (alloc @k) (read @globals) spin (read @k))
-                       (int int int)
+                       (int int int int)
                        (listof k-ids @k)))
             (val r-with-fields
                  (subr (maxeff (alloc @k)

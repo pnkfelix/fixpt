@@ -140,7 +140,7 @@
             (case-clauses (cdr clauses) (case-datums data seen)))))))
 ;; `(or t rest)`, spanning a clause.
 (define case-or (->* (exp exp int int) exp)
-  (lambda (t rest ca cb) (e-if t (e-bool #t ca cb 0) rest ca cb 0)))
+  (lambda (t rest ca cb) (e-if t (e-bool #t ca cb 0 0) rest ca cb 0 0)))
 ;; The kind of the clauses' first datum, -1 if there is none.
 (define case-clauses-kind (->* (syns-a) int)
   (lambda (clauses)
@@ -172,13 +172,13 @@
 ;; its body); `m` (or `els`) for none.
 (define case-leaf (->* (case-entries int exp-list exp int int) exp)
   (lambda (es m bodies els a b)
-    (cond ((and (null? es) (null? bodies)) (e-int m a b 0))
+    (cond ((and (null? es) (null? bodies)) (e-int m a b 0 0))
           ((null? es) els)
           (else
            (let ((then (if (null? bodies)
-                           (e-int (extract (car es) 3) a b 0)
+                           (e-int (extract (car es) 3) a b 0 0)
                            (case-body-at bodies (extract (car es) 3)))))
-             (e-if (extract (car es) 1) then (case-leaf (cdr es) m bodies els a b) a b 0))))))
+             (e-if (extract (car es) 1) then (case-leaf (cdr es) m bodies els a b) a b 0 0))))))
 ;; The clause index of sorted entries, `by` halved against their values.
 (define case-index
   (->* (exp case-entries int int exp-list exp int int) exp)
@@ -188,20 +188,21 @@
         (let ((mid (case-mid es n)))
           (if (= mid 0)
               (case-leaf es m bodies els a b)
-              (e-if (e-app (standard-ref '< a b) (list by (e-int (case-key-at es mid) a b 0)) a b 0)
+              (e-if
+               (e-app (standard-ref '< a b) (list by (e-int (case-key-at es mid) a b 0 0)) a b 0 0)
                     (case-index by (case-take es mid) mid m bodies els a b)
                     (case-index by (case-drop es mid) (- n mid) m bodies els a b)
-                    a b 0))))))
+                    a b 0 0))))))
 ;; The body of index `lo`..`hi` that `i` names, by halving.
 (define case-pick (->* (exp exp-list int int int int) exp)
   (lambda (i bodies lo hi a b)
     (if (= lo hi)
         (case-body-at bodies lo)
         (let ((mid (quotient (+ (+ lo hi) 1) 2)))
-          (e-if (e-app (standard-ref '< a b) (list i (e-int mid a b 0)) a b 0)
+          (e-if (e-app (standard-ref '< a b) (list i (e-int mid a b 0 0)) a b 0 0)
                 (case-pick i bodies lo (- mid 1) a b)
                 (case-pick i bodies mid hi a b)
-                a b 0)))))
+                a b 0 0)))))
 (define case-body-at (->* (exp-list int) exp)
   (lambda (es i) (if (= i 0) (car es) (case-body-at (cdr es) (- i 1)))))
 ;; Whether a `case`, `xs` its key and clauses, compares its key as it is:
@@ -228,30 +229,30 @@
     (lambda (forms a b)
       (cond ((null? forms) (pfail-at "an empty body" a b))
             ((null? (cdr forms)) (parse-exp (car forms)))
-            (else (e-begin (parse-exps forms) a b 0)))))
+            (else (e-begin (parse-exps forms) a b 0 0)))))
   (parse-exp (->* (syn) exp)
     (lambda (s)
       (tagcase s
         (atom (d a b)
-          (cond ((datum-int? d) (e-int d a b 0))
+          (cond ((datum-int? d) (e-int d a b 0 0))
                 ((int? d) (big-literal d a b))
-                ((string? d) (e-str d a b 0))
-                ((bool? d) (e-bool d a b 0))
-                ((char? d) (e-char d a b 0))
-                ((f64? d) (e-float d a b 0))
+                ((string? d) (e-str d a b 0 0))
+                ((bool? d) (e-bool d a b 0 0))
+                ((char? d) (e-char d a b 0 0))
+                ((f64? d) (e-float d a b 0 0))
                 ;; `#:name`, a keyword, evaluates to itself: the standard
                 ;; `symbol->keyword` of the name, interned (as `parse.rs`
                 ;; rewrites it).
                 ((keyword? d)
                  (e-app (standard-ref 'symbol->keyword a b)
-                        (list (e-sym (keyword->symbol d) a b 0))
-                        a b 0))
+                        (list (e-sym (keyword->symbol d) a b 0 0))
+                        a b 0 0))
                 ((symbol? d)
                  (let ((n d))
-                   (cond ((symbol=? n sym-true) (e-bool #t a b 0))
-                         ((symbol=? n sym-false) (e-bool #f a b 0))
-                         ((symbol=? n sym-unit) (e-unit a b 0))
-                         (else (e-var n a b 0)))))
+                   (cond ((symbol=? n sym-true) (e-bool #t a b 0 0))
+                         ((symbol=? n sym-false) (e-bool #f a b 0 0))
+                         ((symbol=? n sym-unit) (e-unit a b 0 0))
+                         (else (e-var n a b 0 0)))))
                 (else (pfail "not an expression in the FX-26 kernel" s))))
         (lst (items d a b)
           (if (null? items)
@@ -267,10 +268,10 @@
         ((vlambda)
          (begin (at-least items 3 vlambda-usage a b)
                 (let ((param (parse-vparam (nth items 1) a b)))
-                  (e-app (e-var '%vlambda a b 0)
-                         (cons (e-lambda (cons param nil) (parse-body (drop items 2) a b) a b 0)
+                  (e-app (e-var '%vlambda a b 0 0)
+                         (cons (e-lambda (cons param nil) (parse-body (drop items 2) a b) a b 0 0)
                                nil)
-                         a b 0))))
+                         a b 0 0))))
         ;; Code a running program gives (`docs/research/eval.md`): `(stage m
         ;; E R text (p body …) (why else …))` is `(tagcase ((proj %stage E R)
         ;; m text) (ok p body …) (failed why else …))`, as `parse.rs`.
@@ -288,16 +289,16 @@
         ((reify-effect reify-region reify-type)
          (begin (at-least items 2 "`(reify-… description (given g …))`, the last if any" a b)
                 (e-app (e-proj (e-var (string->symbol (string-append "%" (symbol->string head)))
-                                      a b 0)
-                               (keep (list (nth items 1))) a b 0)
-                       (list (parse-exp (given-form pfail-at items 2 a b))) a b 0)))
+                                      a b 0 0)
+                               (keep (list (nth items 1))) a b 0 0)
+                       (list (parse-exp (given-form pfail-at items 2 a b))) a b 0 0)))
         ;; `(session-commit! s d decision)`: the initializer, which the
-        ;; program runs, then what it made recorded, or why not, as
-        ;; `parse.rs`.
+        ;; program runs, then what it made recorded, or why not, as `parse.rs`.
         ((session-commit!)
          (begin (arity items 4 "`(session-commit! session pending decision)`" a b)
-                (let* ((v (lambda ((n symbol)) (e-var n a b 0)))
-                       (call (lambda ((f symbol) (xs (listof exp acyclic))) (e-app (v f) xs a b 0)))
+                (let* ((v (lambda ((n symbol)) (e-var n a b 0 0)))
+                       (call
+                        (lambda ((f symbol) (xs (listof exp acyclic))) (e-app (v f) xs a b 0 0)))
                        (ready (call '%session-ready
                                     (list (v '%session) (v '%pending) (v '%decision))))
                        (done (call '%session-committed! (list (v '%session) (v '%pending)))))
@@ -306,47 +307,48 @@
                                (product (1 '%decision) (2 (parse-nth items 3))))
                          (e-tagcase ready
                                     (list (product (1 'go) (2 #f) (3 (list '%run))
-                                                   (4 (e-begin (list (call '%run nil) done) a b 0)))
+                                                   (4
+                                                    (e-begin (list (call '%run nil) done) a b 0 0)))
                                           (product (1 'failed) (2 #f) (3 (list '%why))
-                                                   (4 (e-sum 'failed (v '%why) a b 0))))
-                                    nil nil a b 0)
-                         a b 0))))
+                                                   (4 (e-sum 'failed (v '%why) a b 0 0))))
+                                    nil nil a b 0 0)
+                         a b 0 0))))
         ((rlambda)
          (begin (at-least items 3 "`(rlambda region ((name type) …) body …)`" a b)
                 (let ((r (parse-exp (nth items 1))))
-                  (e-rlambda r (parse-lambda-at items 2 a b) a b 0))))
+                  (e-rlambda r (parse-lambda-at items 2 a b) a b 0 0))))
         ((plambda)
          (begin (at-least items 3 "`(plambda ((name kind) …) body …)`" a b)
-                (e-plambda (nth items 1) (parse-body (drop items 2) a b) a b 0)))
+                (e-plambda (nth items 1) (parse-body (drop items 2) a b) a b 0 0)))
         ((proj)
          (begin (at-least items 2 "`(proj expression description …)`" a b)
                 (if (null? (drop items 2))
                     (pfail-at "`proj` needs at least one description" a b)
                     #u)
-                (e-proj (parse-exp (nth items 1)) (keep (drop items 2)) a b 0)))
+                (e-proj (parse-exp (nth items 1)) (keep (drop items 2)) a b 0 0)))
         ((if)
          (begin (arity items 4 "`(if test then else)`" a b)
-                (e-if (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b 0)))
+                (e-if (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b 0 0)))
         ((letrec)
          (begin (at-least items 3 "`(letrec ((name type expression) …) body …)`" a b)
                 (e-letrec (parse-letrec-bindings (syn-items (nth items 1) "letrec bindings"))
-                          (parse-body (drop items 2) a b) a b 0)))
+                          (parse-body (drop items 2) a b) a b 0 0)))
         ((let)
          (begin (at-least items 3 "`(let ((name expression) …) body …)`" a b)
                 (e-let (parse-let-bindings (syn-items (nth items 1) "let bindings"))
-                       (parse-body (drop items 2) a b) a b 0)))
+                       (parse-body (drop items 2) a b) a b 0 0)))
         ((begin) (parse-body (cdr items) a b))
         ;; A syscall declared: its hidden global, whether the runtime has it
         ;; (`docs/research/syscalls.md`). Not of one name, the form, or what
         ;; is no name, is the name `syscall-available?`, which the checker
         ;; refuses as the Rust checker does the form.
         ((syscall-available?)
-         (cond ((not (= (len items) 2)) (e-var 'syscall-available? a b 0))
+         (cond ((not (= (len items) 2)) (e-var 'syscall-available? a b 0 0))
                ((not (syn-symbol? (nth items 1)))
-                (e-var 'syscall-available? (syn-start (nth items 1)) (syn-end (nth items 1)) 0))
+                (e-var 'syscall-available? (syn-start (nth items 1)) (syn-end (nth items 1)) 0 0))
                (else (e-var (string->symbol (string-append "%syscall-available:"
                                                            (syn-name (nth items 1))))
-                            a b 0))))
+                            a b 0 0))))
         ;; Processes and `par` (`parser-forms.fx`).
         ((spawn spawn-monitored send receive self par race attempt attempt-within pselect icell-get
           icell-put!)
@@ -361,7 +363,7 @@
              ;; A natural literal, or a variable holding a `nat`.
              (let* ((n (nth items 2))
                     (k (confirm-length-k n))
-                    (length (if (< k 0) (e-var (syn-symbol n) a b 0) (e-int k a b 0))))
+                    (length (if (< k 0) (e-var (syn-symbol n) a b 0 0) (e-int k a b 0 0))))
                (parse-confirm items 3 usage "%confirm-value" 'length-is? 'certify-length
                               (the exp-list (cons length nil)) a b)))))
         ((acyclic)
@@ -381,46 +383,45 @@
                 (parse-let* (syn-items (nth items 1) "let* bindings")
                             (parse-body (drop items 2) a b))))
         ((the) (begin (arity items 3 "`(the type expression)`" a b)
-                      (e-the (nth items 1) (parse-exp (nth items 2)) a b 0)))
+                      (e-the (nth items 1) (parse-exp (nth items 2)) a b 0 0)))
         ((convention) (begin (arity items 3 "`(convention C expression)`" a b)
-                             (e-convention (nth items 1) (parse-exp (nth items 2)) a b 0)))
-        ((product) (e-product (parse-fields (cdr items)) a b 0))
+                             (e-convention (nth items 1) (parse-exp (nth items 2)) a b 0 0)))
+        ((product) (e-product (parse-fields (cdr items)) a b 0 0))
         ((tuple) (parse-exp (mk-form "product" (dt-labelled (cdr items) 1 a b) a b)))
         ((extract)
          (begin (arity items 3 "`(extract expression label)`" a b)
                 (let ((l (label (nth items 2))))
-                  (e-extract (parse-exp (nth items 1)) l nil a b 0))))
+                  (e-extract (parse-exp (nth items 1)) l nil a b 0 0))))
         ((sum)
          (begin (arity items 3 "`(sum tag expression)`" a b)
-                (let ((t (label (nth items 1)))) (e-sum t (parse-exp (nth items 2)) a b 0))))
+                (let ((t (label (nth items 1)))) (e-sum t (parse-exp (nth items 2)) a b 0 0))))
         ((tagcase)
          (begin (at-least items 2 "`(tagcase expression (tag name body …) …)`" a b)
                 (let ((scrutinee (parse-exp (nth items 1))) (arms (drop items 2)))
-                  (e-tagcase scrutinee (parse-arms arms) (parse-else arms) nil a b 0))))
+                  (e-tagcase scrutinee (parse-arms arms) (parse-else arms) nil a b 0 0))))
         ((quote)
          (begin (arity items 2 "`(quote datum)`" a b)
                 (if (syn-symbol? (nth items 1))
-                    (e-sym (syn-symbol (nth items 1)) a b 0)
+                    (e-sym (syn-symbol (nth items 1)) a b 0 0)
                     (parse-exp (quoted (nth items 1) -1)))))
         ((quasiquote)
          (begin (arity items 2 "`(quasiquote datum)`" a b)
                 (parse-exp (quoted (nth items 1) 1))))
         ((prompt)
          (begin (arity items 4 "`(prompt tag body handler)`" a b)
-                (e-prompt (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b 0)))
-        ((module) (e-module (parse-module-items (cdr items)) a b 0))
+                (e-prompt (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b 0 0)))
+        ((module) (e-module (parse-module-items (cdr items)) a b 0 0))
         ;; `(extend e0 e1)` (`TODO.md` §69): a module of the two, made of
         ;; their values by the checker (`k-extended`), as `parse.rs`; `e1`
-        ;; sees `e0`'s bindings, `(with %extend-0 e1)`, as FX-91's, made at
-        ;; the form.
+        ;; sees `e0`'s bindings, `(with %extend-0 e1)`, as FX-91's, made at the form.
         ((extend)
          (begin (arity items 3 "`(extend module module)`" a b)
                 (e-module (the mod-items
                             (list (mod-item-of 2 '%extend-0 nil (list (parse-nth items 1)))
                                   (mod-item-of 2 '%extend-1 nil
                                                (list (e-with '%extend-0 (parse-nth items 2)
-                                                             a b 0)))))
-                          a b 0)))
+                                                             a b 0 0)))))
+                          a b 0 0)))
         ((load-module load-input)
          (let* ((input? (eq? head 'load-input))
                 (usage (string-append "`(" (if input? "load-input" "load-module") " \"file\")`")))
@@ -438,20 +439,20 @@
         ((with)
          (begin (at-least items 2 "`(with module body …)`" a b)
                 (if (syn-symbol? (nth items 1))
-                    (e-with (syn-symbol (nth items 1)) (parse-body (drop items 2) a b) a b 0)
+                    (e-with (syn-symbol (nth items 1)) (parse-body (drop items 2) a b) a b 0 0)
                     (pfail "`with` opens a module named by a variable" (nth items 1)))))
         (else
          (cond ((region-form? head) (parse-region-form items head a b))
                ((bloblet-form? head) (parse-bloblet head (cdr items) a b))
                (else (let ((f (parse-exp (car items))))
-                       (e-app f (parse-exps (cdr items)) a b 0))))))))
+                       (e-app f (parse-exps (cdr items)) a b 0 0))))))))
   ;; Item `i`, an expression.
   (parse-nth (->* (syns-a int) exp)
     (lambda (items i) (parse-exp (nth items i))))
   ;; A `lambda` of the parameters at `i` and the body after them.
   (parse-lambda-at (->* (syns-a int int int) exp)
     (lambda (items i a b)
-      (e-lambda (parse-params (nth items i)) (parse-body (drop items (+ i 1)) a b) a b 0)))
+      (e-lambda (parse-params (nth items i)) (parse-body (drop items (+ i 1)) a b) a b 0 0)))
   ;; `(letregion name body …)` and the other region forms.
   (parse-region-form (->* (syns-a symbol int int) exp)
     (lambda (items head a b)
@@ -464,7 +465,7 @@
                     (into (if (null? pair) 'heap (syn-symbol (nth pair 1)))))
                (if (and (syn-symbol? name) (not (char=? (string-ref (syn-name name) 0) #\@)))
                    (e-letregion (region-kind head)
-                                (syn-symbol name) into (parse-body (drop items 2) a b) a b 0)
+                                (syn-symbol name) into (parse-body (drop items 2) a b) a b 0 0)
                    (pfail (region-name-error head) name))))))
   ;; A confirming form, `(form e … (x body) else)` with its arm at `i`:
   ;; `(let ((tmp e)) (if (test tmp more …) (let ((x (cert tmp more …)))
@@ -479,8 +480,8 @@
              (body (parse-exp (nth arm 1)))
              (els (parse-exp (nth items (+ i 1))))
              (tmp (fresh-name tmp-name items))
-             (then (e-let (one-let x (call-tmp cert tmp more a b)) body a b 0)))
-        (e-let (one-let tmp e) (e-if (call-tmp test tmp more a b) then els a b 0) a b 0))))
+             (then (e-let (one-let x (call-tmp cert tmp more a b)) body a b 0 0)))
+        (e-let (one-let tmp e) (e-if (call-tmp test tmp more a b) then els a b 0 0) a b 0 0))))
   (parse-letrec-bindings (->* (syns-a) letrec-list)
     (lambda (bs)
       (parse-typed-bindings bs "a letrec binding" "a letrec binding is `(name type expression)`")))
@@ -517,7 +518,7 @@
                 (let* ((name (syn-symbol (car parts)))
                        (init (parse-exp (nth parts 1)))
                        (inner (parse-let* (cdr bs) body)))
-                  (e-let (one-let name init) inner (syn-start (car bs)) (syn-end (car bs)) 0))
+                  (e-let (one-let name init) inner (syn-start (car bs)) (syn-end (car bs)) 0 0))
                 (pfail "a let* binding is `(name expression)`" (car bs)))))))
   ;; `(cond (test e …) … (else e …))`: nested `if`s, each spanning its clause.
   (parse-cond (->* (syns-a int int) exp)
@@ -532,7 +533,7 @@
                        (let* ((test (parse-exp (car parts)))
                               (then (parse-body (cdr parts) (syn-start c) (syn-end c)))
                               (rest (parse-cond (cdr clauses) a b)))
-                         (e-if test then rest (syn-start c) (syn-end c) 0)))))))))
+                         (e-if test then rest (syn-start c) (syn-end c) 0 0)))))))))
   ;; A `cond`'s last clause, `c`, which must be `else`.
   (parse-cond-else (->* (syn syns-a) exp)
     (lambda (c parts)
@@ -542,17 +543,17 @@
   ;; `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
   (parse-and (->* (syns-a int int) exp)
     (lambda (xs a b)
-      (cond ((null? xs) (e-bool #t a b 0))
+      (cond ((null? xs) (e-bool #t a b 0 0))
             ((null? (cdr xs)) (parse-exp (car xs)))
             (else (let* ((x (parse-exp (car xs))) (rest (parse-and (cdr xs) a b)))
-                    (e-if x rest (e-bool #f a b 0) a b 0))))))
+                    (e-if x rest (e-bool #f a b 0 0) a b 0 0))))))
   ;; `(or a b …)`: `(if a #t (or b …))`, and `(or)` is `#f`.
   (parse-or (->* (syns-a int int) exp)
     (lambda (xs a b)
-      (cond ((null? xs) (e-bool #f a b 0))
+      (cond ((null? xs) (e-bool #f a b 0 0))
             ((null? (cdr xs)) (parse-exp (car xs)))
             (else (let* ((x (parse-exp (car xs))) (rest (parse-or (cdr xs) a b)))
-                    (e-if x (e-bool #t a b 0) rest a b 0))))))
+                    (e-if x (e-bool #t a b 0 0) rest a b 0 0))))))
   ;; `(typecase e (shape name body) … (else name body))` on a union's members
   ;; (`docs/research/logical-types.md`, L1): `(let ((%typecase-value e)) (if
   ;; (int? %typecase-value) (let ((name %typecase-value)) body) … else))`,
@@ -568,7 +569,7 @@
              (parse-typecase-arms (drop items 2) (syn-head (nth items 1)) a b))
             (else
              (let* ((e (parse-exp (nth items 1))) (tmp (fresh-name "%typecase-value" items)))
-               (e-let (one-let tmp e) (parse-typecase-arms (drop items 2) tmp a b) a b 0))))))
+               (e-let (one-let tmp e) (parse-typecase-arms (drop items 2) tmp a b) a b 0 0))))))
   (parse-typecase-arms (->* (syns-a symbol int int) exp)
     (lambda (arms tmp a b)                  ; each arm's parts at the arm, as a `cond`'s clause's
      (let ((aa (syn-start (car arms))) (ab (syn-end (car arms))))
@@ -588,7 +589,7 @@
                               #u
                               (pfail typecase-else (car arms))))
                  (body (parse-exp (nth parts (- n 1)))))
-            (if (= n 3) (e-let (one-let name (e-var tmp aa ab 0)) body aa ab 0) body))
+            (if (= n 3) (e-let (one-let name (e-var tmp aa ab 0 0)) body aa ab 0 0) body))
           (let* ((parts (syn-items (car arms) typecase-usage))
                  (shaped (if (= (len parts) 3) #u (pfail typecase-usage (car arms))))
                  (shape (car parts))
@@ -599,8 +600,9 @@
                         (pfail "a name" (nth parts 1))))
                  (body (parse-exp (nth parts 2)))
                  (rest (parse-typecase-arms (cdr arms) tmp a b)))
-            (e-if (call-tmp pred tmp nil aa ab) (e-let (one-let x (e-var tmp aa ab 0)) body aa ab 0)
-                  rest aa ab 0))))))
+            (e-if (call-tmp pred tmp nil aa ab)
+                  (e-let (one-let x (e-var tmp aa ab 0 0)) body aa ab 0 0)
+                  rest aa ab 0 0))))))
   ;; `(case key ((datum …) e …) … (else e …))` on atoms (`TODO.md` §46):
   ;; `(let ((%case-key key)) …)` and nested `if`s, each datum compared by
   ;; its kind's equality. The data are of one kind and distinct, and the
@@ -616,11 +618,11 @@
                       (if (case-direct? xs)
                           ;; A variable, which nothing assigns: compared as it is.
                           (begin (case-clauses (cdr xs) nil)
-                                 (parse-case-body (e-var (syn-head kx) ka kb 0) xs a b))
+                                 (parse-case-body (e-var (syn-head kx) ka kb 0 0) xs a b))
                           (let ((key (parse-exp kx)) (k (fresh-name "%case-key" xs)))
                             (case-clauses (cdr xs) nil)
-                            (e-let (one-let k key) (parse-case-body (e-var k ka kb 0) xs a b)
-                                   a b 0)))))))))
+                            (e-let (one-let k key) (parse-case-body (e-var k ka kb 0 0) xs a b)
+                                   a b 0 0)))))))))
   ;; A chain of tests, or, for many data of a kind that pays (`case-tree-from`)
   ;; all with a sort value, two searches (`case-tree`): as the Rust parser's.
   (parse-case-body (->* (exp syns-a int int) exp)
@@ -655,19 +657,21 @@
              (m (- (case-exps-length bodies) 1))
              (hash (fresh-name "%case-hash" xs))
              (index (fresh-name "%case-index" xs))
-             (by (if (= k 0) kv (e-var hash a b 0)))
+             (by (if (= k 0) kv (e-var hash a b 0 0)))
              (n (case-entries-length sorted))
              (els (case-atom-else (case-last (cdr xs))))
              (tree (if (and (not (null? els)) (= n m))
                        ;; A clause per datum, an `else` of one atom: bodies at the leaves.
                        (case-index by sorted n m bodies (case-body-at bodies m) a b)
-                       (let ((found (case-index by sorted n m nil (e-unit a b 0) a b)))
-                         (e-let (one-let index found) (case-pick (e-var index a b 0) bodies 0 m a b)
-                                a b 0)))))
+                       (let ((found (case-index by sorted n m nil (e-unit a b 0 0) a b)))
+                         (e-let (one-let index found)
+                                (case-pick (e-var index a b 0 0) bodies 0 m a b)
+                                a b 0 0)))))
         (if (= k 0)
             tree
             (let ((op (if (= k 2) 'string-hash 'symbol-name-hash)))
-              (e-let (one-let hash (e-app (standard-ref op a b) (list kv) a b 0)) tree a b 0))))))
+              (e-let (one-let hash (e-app (standard-ref op a b) (list kv) a b 0 0)) tree a b 0
+                     0))))))
   ;; Each clause's body, first to last, the `else`'s last.
   (case-bodies (->* (syns-a) exp-list)
     (lambda (clauses)
@@ -684,7 +688,7 @@
             (parse-body (cdr parts) ca cb)
             (let* ((test (case-tests k (syn-items (car parts) "data") ca cb))
                    (then (parse-body (cdr parts) ca cb)))
-              (e-if test then (parse-case-arms k (cdr clauses)) ca cb 0))))))
+              (e-if test then (parse-case-arms k (cdr clauses)) ca cb 0 0))))))
   ;; `(if d1 #t (if d2 #t … dn))`, each `di` the key compared with a datum.
   (case-tests (->* (exp syns-a int int) exp)
     (lambda (key data ca cb)
@@ -695,24 +699,24 @@
       (let* ((da (syn-start d)) (db (syn-end d)) (k (case-kind d))
              (eq (case k ((0) '=) ((1) 'char=?) ((2) 'string=?)
                          ((3) 'symbol=?) (else 'bool=?)))
-             (lit (if (= k 3) (e-sym (syn-head d) da db 0) (parse-exp d))))
-        (e-app (standard-ref eq da db) (list key lit) da db 0))))
+             (lit (if (= k 3) (e-sym (syn-head d) da db 0 0) (parse-exp d))))
+        (e-app (standard-ref eq da db) (list key lit) da db 0 0))))
   (parse-bloblet (->* (symbol syns-a int int) exp)
     (lambda (op args a b)
       (let ((n (len args)))
         (cond ((and (symbol=? op 'make-bloblet) (>= n 1))
-               (e-bloblet op -1 (parse-exps args) nil a b 0))
+               (e-bloblet op -1 (parse-exps args) nil a b 0 0))
               ((and (symbol=? op 'rmake-bloblet) (>= n 2))
-               (e-bloblet op -1 (parse-exps args) nil a b 0))
+               (e-bloblet op -1 (parse-exps args) nil a b 0 0))
               ((and (symbol=? op 'bloblet-ref) (= n 2))
                (let* ((i (field-index (nth args 1))) (x (parse-exp (car args))))
-                 (e-bloblet op i (the exp-list (cons x nil)) nil a b 0)))
+                 (e-bloblet op i (the exp-list (cons x nil)) nil a b 0 0)))
               ((and (symbol=? op 'bloblet-set!) (= n 3))
                (let* ((i (field-index (nth args 1)))
                       (x (parse-exp (car args)))
                       (v (parse-exp (nth args 2))))
-                 (e-bloblet op i (list x v) nil a b 0)))
-              ((bloblet-untagged? op n) (e-bloblet op -1 (parse-exps args) nil a b 0))
+                 (e-bloblet op i (list x v) nil a b 0 0)))
+              ((bloblet-untagged? op n) (e-bloblet op -1 (parse-exps args) nil a b 0 0))
               (else (pfail-at (string-append "`(" (symbol->string op) " …)`") a b))))))
   (parse-fields (->* (syns-a) let-list)
     (lambda (ps)
@@ -743,16 +747,15 @@
                           (rest (parse-arms (cdr cs))))
                      (cons (product (1 tag) (2 fields) (3 ns) (4 body)) rest))))))))
   ;; `stage`'s form, or a session's, `items`: `(tagcase ((proj op descs …)
-  ;; target code) (ok p …) (failed why …))`, the code at `k`, the arms
-  ;; after it.
+  ;; target code) (ok p …) (failed why …))`, the code at `k`, the arms after it.
   (stage-form (->* (symbol syns-a syns-a int int int) exp)
     (lambda (op descs items k a b)
-      (e-tagcase (e-app (e-proj (e-var op a b 0) descs a b 0)
+      (e-tagcase (e-app (e-proj (e-var op a b 0 0) descs a b 0 0)
                         (list (parse-nth items 1) (parse-nth items k)
                               (parse-exp (given-form pfail-at items (+ k 3) a b)))
-                        a b 0)
+                        a b 0 0)
                  (list (stage-arm 'ok (nth items (+ k 1))) (stage-arm 'failed (nth items (+ k 2))))
-                 nil nil a b 0)))
+                 nil nil a b 0 0)))
   ;; An arm of `stage`, `(name body …)`, as `tagcase`'s `(tag name body …)`.
   (stage-arm (->* (symbol syn) (productof (1 symbol) (2 bool) (3 (listof symbol acyclic)) (4 exp)))
     (lambda (tag c)
@@ -777,8 +780,7 @@
                          (cons (product (1 y) (2 body)) nil))
                        (pfail "`else` binds one name" (nth parts 1))))))
             (else (parse-else (cdr cs))))))
-  ;; A `module`'s items, in order.
-  ;; A module's forms, its `define-datatype`s expanded.
+  ;; A `module`'s items, in order. A module's forms, its `define-datatype`s expanded.
   (parse-module-items (->* (syns-a) mod-items)
     (lambda (fs)
       (let* ((outer (get run-count)) (reset (set run-count 0))
@@ -860,14 +862,13 @@
   ;; the hidden global every load of its path is (`TODO.md` §68), the
   ;; first defining it, as the file loaded (`parse-load-file`), before the
   ;; form that loads it (`shared-pending`); a `load-input`'s, its one item.
-  ;; What it makes is the form's, at `a`..`b`; the file's module, the whole
-  ;; file's.
+  ;; What it makes is the form's, at `a`..`b`; the file's module, the whole file's.
   (parse-loaded (->* (string bool bool int int) exp)
     (lambda (path input? here? a b)
       (let ((f (loaded-next-at a)))
         (if (null? f)
             (e-module (loaded-error (string-append "cannot read `" path "`: it was not read"))
-                      a b 0)
+                      a b 0 0)
             ;; A file of module parameters is read as a `load-input` file is
             ;; (`modules-made`): its key so, as the driver gives it.
             (let* ((raw (extract (car f) 7))
@@ -892,8 +893,8 @@
                                      (cons (t-define name (the syns-a nil) x a b)
                                            (get shared-pending)))))))
                 (if input?
-                    (e-with name (e-var 'input a b 0) a b 0)
-                    (e-var name a b 0)))))))))
+                    (e-with name (e-var 'input a b 0 0) a b 0 0)
+                    (e-var name a b 0 0)))))))))
   ;; File `f`, loaded at `a`..`b` as `path`: the module, its items after its
   ;; mark (`loaded-made` of it, for a file of parameters; for a
   ;; `load-input`, `input?`, its one form, the item `input`); or why it
@@ -905,7 +906,7 @@
     (lambda (f path input? a b)
       (cond
         ((= (extract f 2) 0)
-         (e-module (loaded-error (extract f 3)) a (if (string=? (extract f 6) "") b a) 0))
+         (e-module (loaded-error (extract f 3)) a (if (string=? (extract f 6) "") b a) 0 0))
         ((extract f 8) (parse-exp (car (extract f 5))))
         (else
           (let* ((base (extract f 2))
@@ -919,11 +920,11 @@
                              (t-exp (e-module (cons (loaded-mark base path nil)
                                                     (parse-module-items
                                                      (input-items pfail-at forms a b)))
-                                              base end 0))
+                                              base end 0 0))
                              (let* ((ps (loaded-params forms))
                                     (items (parse-module-items (if (null? ps) forms (cdr forms))))
                                     (m (e-module (cons (loaded-mark base path ps) items)
-                                                 base end 0)))
+                                                 base end 0 0)))
                                (t-exp (if (null? ps)
                                           m
                                           (loaded-made ps m (syn-start (car forms))
@@ -932,9 +933,9 @@
             (tagcase r
               (p-err (m x y)
                 (if (>= x base)
-                    (e-module (loaded-error (in-loaded-as (get loaded) base path m x)) a a 0)
+                    (e-module (loaded-error (in-loaded-as (get loaded) base path m x)) a a 0 0)
                     (pfail-at m x y)))
-              (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b 0)))))))))))
+              (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b 0 0)))))))))))
 ;; Form `s` with each `(load-moduleof "file" arg …)` and
 ;; `(load-input-moduleof "file" arg …)` in it, outside quotations, loaded in
 ;; order as a load of the file is, before the loads of its expressions: each
@@ -988,9 +989,9 @@
 (define loaded-name (->* (exp int int) symbol)
   (lambda (x a b)
     (tagcase x
-      (e-var (n xa xb k) n)
-      (e-with (m body xa xb k) m)
-      (e-module (items xa xb k) (pfail-at (symbol->string (car (extract (car items) 2))) a b))
+      (e-var (n xa xb k kr) n)
+      (e-with (m body xa xb k kr) m)
+      (e-module (items xa xb k kr) (pfail-at (symbol->string (car (extract (car items) 2))) a b))
       (else y (pfail-at "a load is its hidden global" a b)))))
 ;; A `define-rec`'s bindings, as a `letrec`'s are.
 (define parse-rec-bindings (->* (syns-a) letrec-list)

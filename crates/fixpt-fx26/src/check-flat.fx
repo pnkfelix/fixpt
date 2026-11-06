@@ -462,8 +462,8 @@
 ;; variant, of effect `e` and the owner's region read and written; the
 ;; layout's code noted for the compilers (`Checker::synth_blobref`).
 (define k-blobref-variant
-  (->* (int int int int int int kx int int k-eff) k-te)
-  (lambda (a z k xt b f lx la lz e)
+  (->* (int int int int int int int kx int int k-eff) k-te)
+  (lambda (a z k kr xt b f lx la lz e)
     (let* ((l (k-flat-sum-layout f)) (code (extract l 1)) (label (k-variant-label lx code)))
       (if (null? label)
           (k-fail (string-append "a variant is named by a literal: `'label`, or a number where "
@@ -477,7 +477,7 @@
                 (let ((r (k-owner-region a z xt b)))
                   (begin
                     (set k-extracts
-                         (cons (product (1 (product (1 a) (2 z) (3 k)))
+                         (cons (product (1 (product (1 a) (2 z) (3 k) (4 kr)))
                                         (2 (n-datum (datum-layout code))))
                                (get k-extracts)))
                     (k-te (k-blobref-of b g) (k-insert (a-write r) (k-insert (a-read r) e)))))))))))
@@ -488,7 +488,7 @@
 (define k-variant-label (->* (kx int) (listof symbol acyclic))
   (lambda (lx code)
     (tagcase lx
-      (x-const (t n c d cdk)
+      (x-const (t n c d cdk cdkr)
         (cond ((= (modulo (quotient code 8) 2) 1)
                (if (= t k-int) (list (string->symbol (int->string n))) nil))
               ((or (= t k-int) (not (= n -1))) nil)

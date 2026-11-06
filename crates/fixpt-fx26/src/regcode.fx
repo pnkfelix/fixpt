@@ -206,9 +206,9 @@
 (define r-leaf? (->* (exp) bool)
   (lambda (x)
     (tagcase x
-      (e-var (n a b abk) #t) (e-int (n a b abk) #t) (e-bool (v a b abk) #t)
-      (e-char (v a b abk) #t) (e-str (s a b abk) #t) (e-float (v a b abk) #t)
-      (e-sym (s a b abk) #t) (e-unit (a b abk) #t)
+      (e-var (n a b abk abkr) #t) (e-int (n a b abk abkr) #t) (e-bool (v a b abk abkr) #t)
+      (e-char (v a b abk abkr) #t) (e-str (s a b abk abkr) #t) (e-float (v a b abk abkr) #t)
+      (e-sym (s a b abk abkr) #t) (e-unit (a b abk abkr) #t)
       (else y #f))))
 ;; `x`'s code to come: its place marked, unless it is the one already, or
 ;; `x` a leaf; the place before, for `r-leave-place!`.
@@ -249,7 +249,7 @@
 ;; Where the variable `f` is, in a list; none if `f` is no variable, or
 ;; not bound.
 (define r-var-loc (->* (renv exp) rlocs)
-  (lambda (env f) (tagcase f (e-var (n a b abk) (r-where env n)) (else y nil))))
+  (lambda (env f) (tagcase f (e-var (n a b abk abkr) (r-where env n)) (else y nil))))
 ;; The same, if `f` is not converted either.
 (define r-plain-var-loc (->* (renv exp) rlocs)
   (lambda (env f) (if (c-changed? f) nil (r-var-loc env f))))
@@ -272,10 +272,10 @@
   (lambda (x)
     (and (not (c-changed? x))
          (tagcase x
-           (e-var (n a b abk) (not (c-has-standard-value? (symbol->string n))))
-           (e-int (n a b abk) #t) (e-bool (v a b abk) #t) (e-char (v a b abk) #t)
-           (e-sym (v a b abk) #t) (e-unit (a b abk) #t) (e-str (v a b abk) #t)
-           (e-float (v a b abk) #t)
+           (e-var (n a b abk abkr) (not (c-has-standard-value? (symbol->string n))))
+           (e-int (n a b abk abkr) #t) (e-bool (v a b abk abkr) #t) (e-char (v a b abk abkr) #t)
+           (e-sym (v a b abk abkr) #t) (e-unit (a b abk abkr) #t) (e-str (v a b abk abkr) #t)
+           (e-float (v a b abk abkr) #t)
            (else y #f)))))
 
 ;; A constant's cell.
@@ -323,10 +323,10 @@
 ;; `a`–`b` was lifted by its stack code (`c-lift`); none if not, or if it
 ;; is in a body inlined or specialized here, which another program's text
 ;; may have spans in common with.
-(define r-lifted (->* (int int int) (listof (listof int @k) @k))
-  (lambda (a b abk)
+(define r-lifted (->* (int int int int) (listof (listof int @k) @k))
+  (lambda (a b abk abkr)
     (if (and (null? (get c-inlining)) (null? (get c-spec-now)))
-        (table-ref (get c-lifted) (c-span-key a b abk) (the (listof (listof int @k) @k) nil))
+        (table-ref (get c-lifted) (c-span-key a b abk abkr) (the (listof (listof int @k) @k) nil))
         nil)))
 ;; `bs`' names bound to the lifted procedures `ks`, onto `env`.
 (define r-bind-lifted (->* (exp-letrec-bs (listof int @k) renv) renv)
@@ -438,7 +438,7 @@
 (define r-self-known? (->* (rgen exp int cenv) bool)
   (lambda (g f nargs te)
     (tagcase f
-      (e-var (n a b abk)
+      (e-var (n a b abk abkr)
         (and (r-this-name? (extract g this) n nargs)
              (let ((l (c-find te n)) (at (extract (car (extract g this)) 2)))
                (and (not (null? l)) (c-this-loc? (car l) at)))))
@@ -552,22 +552,22 @@
 (define r-operator (->* (exp) exp)
   (lambda (f)
     (tagcase f
-      (e-plambda (d body a b abk) (r-operator body))
-      (e-proj (body ds a b abk) (r-operator body))
-      (e-the (d body a b abk) (r-operator body))
-      (e-convention (cnv body a b abk) (r-operator body))
+      (e-plambda (d body a b abk abkr) (r-operator body))
+      (e-proj (body ds a b abk abkr) (r-operator body))
+      (e-the (d body a b abk abkr) (r-operator body))
+      (e-convention (cnv body a b abk abkr) (r-operator body))
       (else y y))))
 (define r-standard-name (->* (renv exp) string)
   (lambda (env f)
     (tagcase (r-operator f)
-      (e-var (n a b abk) (if (null? (r-where env n)) (symbol->string n) ""))
-      (e-with (m body a b abk) (c-fx-name m body))
+      (e-var (n a b abk abkr) (if (null? (r-where env n)) (symbol->string n) ""))
+      (e-with (m body a b abk abkr) (c-fx-name m body))
       (else y ""))))
 ;; Whether `e` is a `+` or `-` of two.
 (define r-adds? (->* (renv exp) bool)
   (lambda (env e)
     (tagcase e
-      (e-app (f args a b abk)
+      (e-app (f args a b abk abkr)
         (and (= (c-count-exps args) 2) (r-add-name? (r-standard-name env f))))
       (else y #f))))
 (define r-rev-consts (->* (rconsts rconsts) rconsts)
@@ -633,24 +633,24 @@
   (r-known (->* (renv exp) rconsts)
     (lambda (env x)
       (tagcase x
-        (e-int (n a b abk) (r-known-as (rc-int n)))
-        (e-bool (v a b abk) (r-known-as (rc-bool v)))
-        (e-char (v a b abk) (r-known-as (rc-char v)))
-        (e-var (n a b abk)
+        (e-int (n a b abk abkr) (r-known-as (rc-int n)))
+        (e-bool (v a b abk abkr) (r-known-as (rc-bool v)))
+        (e-char (v a b abk abkr) (r-known-as (rc-char v)))
+        (e-var (n a b abk abkr)
           (let ((l (r-where env n)))
             (if (null? l)
                 (if (std-nil-name? (symbol->string n)) (r-known-as (rc-nil)) nil)
                 (tagcase (car l) (rl-const (c) (r-known-as c)) (else y nil)))))
-        (e-the (d body a b abk) (r-known env body))
-        (e-plambda (d body a b abk) (r-known env body))
-        (e-proj (body ds a b abk) (r-known env body))
-        (e-sum (t v a b abk)
+        (e-the (d body a b abk abkr) (r-known env body))
+        (e-plambda (d body a b abk abkr) (r-known env body))
+        (e-proj (body ds a b abk abkr) (r-known env body))
+        (e-sum (t v a b abk abkr)
           (let ((c (r-known env v)))
             (if (null? c) nil (r-known-as (rc-data (wcell-sum t (r-const-cell (car c))))))))
-        (e-product (fs a b abk)
+        (e-product (fs a b abk abkr)
           (let ((vs (r-known-fields env fs nil)))
             (if (null? vs) nil (r-known-as (rc-data (wcell-product (r-const-cells (car vs))))))))
-        (e-app (f args a b abk)
+        (e-app (f args a b abk abkr)
           (let* ((name (r-standard-name env f))
                  (decided (if (r-test-name? name) (r-known-test env x) (the rconsts nil))))
             (cond
@@ -682,7 +682,7 @@
   (r-test-desc (->* (renv exp) (listof rtest @k))
     (lambda (env x)
       (tagcase x
-        (e-app (f args a b abk)
+        (e-app (f args a b abk abkr)
           (let ((name (r-standard-name env f)))
             (if (not (r-test-name? name))
                 nil
@@ -776,7 +776,7 @@
 ;; Whether `a` and `b` are the same expression: their identities.
 (define r-same-exp? (->* (exp exp) bool)
   (lambda (a b)
-    (= (exp-kth a) (exp-kth b))))
+    (and (= (exp-kth a) (exp-kth b)) (= (exp-reading a) (exp-reading b)))))
 ;;; ---------------------------------------------------------------- lists
 
 (define r-count-args (->* (rargs) int)

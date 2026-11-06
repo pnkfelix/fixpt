@@ -50,7 +50,7 @@
 (define r-unrolled (->* (renv exp exps) (listof rinline @k))
   (lambda (env f args)
     (tagcase f
-      (e-var (n a b abk)
+      (e-var (n a b abk abkr)
         (let ((l (r-where env n)))
           (if (null? l)
               nil
@@ -73,7 +73,8 @@
   (lambda (f n cell i ks)
     (let ((body (extract i 4)))
       (if (or (not (extract ks 3))
-              (>= (c-summary-at (exp-start body) (exp-end body) (exp-kth body)) 3))
+              (>= (c-summary-at (exp-start body) (exp-end body) (exp-kth body) (exp-reading body))
+                  3))
           nil
           (let* ((own (if (c-member? (get c-inlining) n)
                           (the r-wglobals nil)
@@ -106,7 +107,7 @@
 (define r-unroll-global (->* (renv exp) r-unroll-globals)
   (lambda (env a)
     (tagcase a
-      (e-var (n x y xyk)
+      (e-var (n x y xyk xykr)
         (let ((l (r-where env n)))
           (if (null? l)
               nil
@@ -193,7 +194,7 @@
         (if (not (null? small))
             (product (1 (the (listof exp @k) nil)) (2 (car small)))
             (let ((s (tagcase x
-                       (e-app (f args a b abk) (r-split-app env (r-standard-name env f) args))
+                       (e-app (f args a b abk abkr) (r-split-app env (r-standard-name env f) args))
                        (else y (the rsplits nil)))))
               (if (null? s) (product (1 (the (listof exp @k) (cons x nil))) (2 0)) (car s)))))))
   ;; The same for standard operation `name` applied to `args`, if it is
@@ -212,9 +213,9 @@
                   (else (the rsplits (cons (product (1 (if (null? pa) pb pa)) (2 k)) nil)))))))))
 ;; A call's inlining: unrolled, if `r-unrolled` says so; else as planned.
 (define r-inline-or-unroll
-  (->* (int int int renv exp exps int) (listof rinline @k))
-  (lambda (a b abk env f args n)
-    (let ((u (r-unrolled env f args))) (if (null? u) (r-inline-of a b abk env f n) u))))
+  (->* (int int int int renv exp exps int) (listof rinline @k))
+  (lambda (a b abk abkr env f args n)
+    (let ((u (r-unrolled env f args))) (if (null? u) (r-inline-of a b abk abkr env f n) u))))
 (define r-just-exp (->* (exp) maybe-exp)
   (lambda (x) (the maybe-exp (cons x nil))))
 ;; A call-out's operands: `a` and `b`, or `a`, `b` and `c`.
@@ -294,7 +295,8 @@
 ;; Whether `x` is an integer, boolean or character literal.
 (define r-literal? (->* (exp) bool)
   (lambda (x)
-    (tagcase x (e-int (n a b abk) #t) (e-bool (v a b abk) #t) (e-char (v a b abk) #t) (else z #f))))
+    (tagcase x (e-int (n a b abk abkr) #t) (e-bool (v a b abk abkr) #t)
+             (e-char (v a b abk abkr) #t) (else z #f))))
 ;; Whether operand `x` neither has an effect nor sees one: a variable or a
 ;; constant (only a definition writes a global).
 (define r-free-operand? (->* (renv exp) bool)
@@ -379,8 +381,9 @@
 (define r-bloblet (->* (rgen exp renv cenv bool r-exper r-primer) unit)
   (lambda (g x env te tail r-exp r-prim)
     (tagcase x
-      (e-bloblet (sop fi args got a b abk)
-        (begin (r-bloblet-op g (symbol->string sop) (if (< fi 0) (r-datum-operand got a b abk) fi)
+      (e-bloblet (sop fi args got a b abk abkr)
+        (begin
+         (r-bloblet-op g (symbol->string sop) (if (< fi 0) (r-datum-operand got a b abk abkr) fi)
                              args env te r-exp r-prim)
                (r-done g tail)))
       (else y (r-decline)))))
@@ -403,7 +406,7 @@
                (("blobref-at")
                 (begin
                   (tagcase (car (cdr args))
-                    (e-int (k a b abk)
+                    (e-int (k a b abk abkr)
                       (if (and (>= k 0) (< k 67108864))
                           (r-prim g "%suffix-ref" (r-args-2 (a-e (car args)) (a-v (wcell-int k)))
                                   env te)
@@ -467,16 +470,16 @@
 ;; The operand of what the checker found the operation `a` `b` `k` takes,
 ;; holding `got` if it is a form kept to be inlined (`k-datum-operand`).
 (define r-datum-operand
-  (->* (k-datums int int int) int)
-  (lambda (got a b k) (k-datum-operand (c-datum-of got a b k))))
+  (->* (k-datums int int int int) int)
+  (lambda (got a b k kr) (k-datum-operand (c-datum-of got a b k kr))))
 ;; `(extract p l)`, `x`, by what the checker found it takes: a field of a
 ;; product; or a blobref to its field at its offset; declined if the
 ;; checker did not see it.
 (define r-extract (->* (rgen exp renv cenv bool r-exper r-primer) unit)
   (lambda (g x env te tail r-exp r-prim)
     (tagcase x
-      (e-extract (p l got a b abk)
-        (let ((d (c-datum-of got a b abk)))
+      (e-extract (p l got a b abk abkr)
+        (let ((d (c-datum-of got a b abk abkr)))
           (if (null? d)
               (r-decline)
               (tagcase (car d)

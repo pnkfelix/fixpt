@@ -84,9 +84,9 @@
                                                         (r-local (cdr sc) (car ns))))))))))
 ;; The positions of the values the `with` at `a`-`b` binds: none of one
 ;; whose names its module bound (`c-included?`).
-(define r-with-places (->* (int int int) (listof k-ids @k))
-  (lambda (a b k)
-    (if (c-included? a b k) (the (listof k-ids @k) (list nil)) (c-with-places-at a b k))))
+(define r-with-places (->* (int int int int) (listof k-ids @k))
+  (lambda (a b k kr)
+    (if (c-included? a b k kr) (the (listof k-ids @k) (list nil)) (c-with-places-at a b k kr))))
 ;; Module `m`'s value into RESULT, from where `env` has it; declined if it
 ;; is not in a place.
 (define r-module-value (->* (rgen symbol renv) unit)

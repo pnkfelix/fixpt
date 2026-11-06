@@ -116,5 +116,5 @@
             (val c-sees? (subr pure (int int) bool))
             (val c-planned-call
                  (subr (maxeff (alloc @k) (read @globals) spin (read @k))
-                       (int int int)
+                       (int int int int)
                        (listof c-called @k)))))

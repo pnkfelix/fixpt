@@ -192,7 +192,7 @@
                        rargs))
             (val r-special-of
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (int int int renv exp exps)
+                       (int int int int renv exp exps)
                        (listof rspecial @k)))
             (val r-nth-param (subr (maxeff (read @globals) spin) (exp-params int) symbol))
             (val r-local-syms
@@ -209,7 +209,7 @@
                        unit))
             (val r-inline-of
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (int int int renv exp int)
+                       (int int int int renv exp int)
                        (listof rinline @k)))
             (val r-slot-move
                  (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))

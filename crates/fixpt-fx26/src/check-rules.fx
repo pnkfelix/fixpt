@@ -116,30 +116,30 @@
   (k-synth-node (->* (kx) k-te)
     (lambda (x)
       (tagcase x
-        (x-var (s a b abk)
-          (if (and (k-second-class? s) (k-std? s) (not (k-operator? s a b abk)))
+        (x-var (s a b abk abkr)
+          (if (and (k-second-class? s) (k-std? s) (not (k-operator? s a b abk abkr)))
               (k-fail (k-named-only s) a b)
               (let ((t (k-lookup-used s)))
                 (if (< t 0) (k-fail (k-unbound s) a b) (k-te t (k-naming-effect s t))))))
-        (x-const (t v a b abk) (k-te t nil))
-        (x-lambda (ps body a b abk) (k-synth-lambda-as x nil -1 nil))
-        (x-app (f args a b abk) (k-split-app x f args -1 k-synth-app k-synth))
-        (x-the (t0 e a b abk)
+        (x-const (t v a b abk abkr) (k-te t nil))
+        (x-lambda (ps body a b abk abkr) (k-synth-lambda-as x nil -1 nil))
+        (x-app (f args a b abk abkr) (k-split-app x f args -1 k-synth-app k-synth))
+        (x-the (t0 e a b abk abkr)
           (let ((t (k-resolve-selects t0 a b))) (k-sized e (k-te t (k-check e t)))))
-        (x-convention (c e a b abk)
+        (x-convention (c e a b abk abkr)
           (let* ((r (k-synth e)) (t (k-resolve (extract r 1))))
             (tagcase (k-get t)
               (ty-subr (fe ps res from spc)
                 (begin (if (k-conv=? from c) #u (k-convert-at x t c))
                        (k-te (k-ty-new (ty-subr fe ps res c spc)) (extract r 2))))
               (else y (k-fail-ty "`convention` takes a procedure, and this is a " t a b)))))
-        (x-plambda (bs body a b abk)
+        (x-plambda (bs body a b abk abkr)
           (let ((r (k-synth body)))
             (if (k-generalizable? body (extract r 2))
                 (k-te (k-ty-new (ty-poly bs (extract r 1))) (extract r 2))
                 (k-fail-impure-plambda (extract r 2) a b))))
-        (x-rlambda (r l a b abk) (k-synth-rlambda-by x r l -1 nil k-synth k-synth-lambda-as))
-        (x-proj (body ds a b abk)
+        (x-rlambda (r l a b abk abkr) (k-synth-rlambda-by x r l -1 nil k-synth k-synth-lambda-as))
+        (x-proj (body ds a b abk abkr)
           (let* ((r (k-synth body)) (t (extract r 1)))
             (tagcase (k-get t)
               (ty-poly (bs inner)
@@ -148,7 +148,7 @@
                     (let ((result (k-projected bs ds inner a b)))
                       (k-te-masked x result (extract r 2)))))
               (else y (k-fail-ty "`proj` needs a polymorphic value, not a " t a b)))))
-        (x-if (p c d a b abk)
+        (x-if (p c d a b abk abkr)
           (let ((rp (k-synth p)))
             (if (not (k-subtype (extract rp 1) k-bool))
                 (k-fail "an `if` test must be a bool" (k-start p) (k-end p))
@@ -160,7 +160,7 @@
                        (t (k-join-branches (extract rc 1) (extract rd 1) a b))
                        (e (k-union (extract rp 2) (k-union (extract rc 2) (extract rd 2)))))
                   (k-te-masked x t e)))))
-        (x-letrec (bs0 body a b abk)
+        (x-letrec (bs0 body a b abk abkr)
           (let ((saved (k-mark)) (rsaved (get k-recursive)) (bs (k-letrec-selected bs0 a b)))
             (begin
               ;; The group bound and checked; the body's calls of it are not recursion.
@@ -171,7 +171,7 @@
                 (begin
                   (k-unbind-to saved)
                   (k-te-masked x (extract rb 1) (k-union ie (extract rb 2))))))))
-        (x-let (bs body a b abk)
+        (x-let (bs body a b abk abkr)
           (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
             (begin
               (k-bind-named (extract inits 1))
@@ -181,10 +181,10 @@
                   (k-unbind-to saved)
                   (let ((t (k-forget-nats named (extract rb 1) a b)))
                     (k-te-masked x t (k-union (extract inits 2) (extract rb 2)))))))))
-        (x-prompt (t body h a b abk) (k-synth-prompt x t body h))
+        (x-prompt (t body h a b abk abkr) (k-synth-prompt x t body h))
         ;; The region's name is a variable too, of type `(place r)`, when
         ;; the form makes a place.
-        (x-letregion (k r i body a b abk)
+        (x-letregion (k r i body a b abk abkr)
           (let* ((saved (k-mark))
                  (bound (if (or (= k 0) (= k 3)) #u (k-bind-place r)))
                  (freezing (get k-freezing))
@@ -197,11 +197,11 @@
               (k-unbind-to saved)
               (let ((t (if (= k 3) (k-frozen-result r i written rt a b) rt)))
                 (k-close-region x (k-region-form k) r t (extract rb 2) a b)))))
-        (x-bloblet (op i args a b abk) (k-synth-bloblet x op i args -1))
-        (x-product (fs a b abk)
+        (x-bloblet (op i args a b abk abkr) (k-synth-bloblet x op i args -1))
+        (x-product (fs a b abk abkr)
           (let* ((r (k-synth-fields fs)) (t (k-ty-new (ty-product (extract r 1)))))
             (k-te-masked x t (extract r 2))))
-        (x-extract (e l a b abk)
+        (x-extract (e l a b abk abkr)
           (let* ((r (k-synth e)) (pt (extract r 1)))
             (tagcase (k-get pt)
               (ty-product (fs)
@@ -211,14 +211,14 @@
                       (begin (k-note-field (k-at-of x) (k-part-position fs l 0))
                              (k-te-masked x t (extract r 2))))))
               (else y (k-extract-blobref x pt e l r)))))
-        (x-sum (l e a b abk)
+        (x-sum (l e a b abk abkr)
           (let* ((r (k-synth e))
                  (t (k-ty-new (ty-sum (cons (product (1 l) (2 (extract r 1))) nil)))))
             (k-te-masked x t (extract r 2))))
-        (x-tagcase (s arms els a b abk) (k-synth-tagcase x s arms els -1))
-        (x-begin (xs a b abk) (k-masked x (k-synth-seq xs k-unit nil)))
-        (x-module (items a b abk) (k-module-rule x))
-        (x-with (m body a b abk) (k-module-rule x)))))
+        (x-tagcase (s arms els a b abk abkr) (k-synth-tagcase x s arms els -1))
+        (x-begin (xs a b abk abkr) (k-masked x (k-synth-seq xs k-unit nil)))
+        (x-module (items a b abk abkr) (k-module-rule x))
+        (x-with (m body a b abk abkr) (k-module-rule x)))))
   (k-synth-seq (->* (kxs int k-eff) k-te)
     (lambda (xs last e)
       (if (null? xs)
@@ -263,7 +263,7 @@
   (k-synth-lambda-as (->* (kx k-ids int k-specs) k-te)
     (lambda (x hint result sp)
       (tagcase x
-        (x-lambda (ps body a b abk)
+        (x-lambda (ps body a b abk abkr)
           (let* ((given (k-param-types ps hint a b))
                  (saved (k-mark))
                  (named (get k-skolems))
@@ -355,7 +355,7 @@
   (k-nlist-cons-tail (->* (kx kx) (listof k-te acyclic))
     (lambda (hd tl)
       (tagcase tl
-        (x-var (v va vb vavbk)
+        (x-var (v va vb vavbk vavbkr)
           (let ((t (k-lookup v)))
             (if (< t 0)
                 nil
@@ -534,9 +534,9 @@
     (lambda (x expected)
       (let* ((et (k-get expected))
              (poly? (tagcase et (ty-poly (bs body) #t) (else y #f)))
-             (plambda? (tagcase x (x-plambda (bs body a b abk) #t) (else y #f)))
+             (plambda? (tagcase x (x-plambda (bs body a b abk abkr) #t) (else y #f)))
              ;; A `let` passes a `poly` to its body, and must then be pure.
-             (let? (tagcase x (x-let (bs body a b abk) #t) (else y #f))))
+             (let? (tagcase x (x-let (bs body a b abk abkr) #t) (else y #f))))
         (cond
           ((and poly? let?)
            (let ((e (k-check-node x expected et)))
@@ -555,7 +555,7 @@
              (else y nil)))
           ((and poly? plambda? (k-plambda-matches? x et))
            (tagcase x
-             (x-plambda (binders body a b abk)
+             (x-plambda (binders body a b abk abkr)
                (tagcase et
                  (ty-poly (bs want)
                    (let* ((want (k-subst want (k-rename bs binders))) (e (k-check body want)))
@@ -569,7 +569,7 @@
                            (lambda () (k-as-expected x (k-synth x) expected))))
        (the k-eff (let ((a (k-start x)) (b (k-end x)))
         (tagcase x
-          (x-lambda (ps body xa xb xaxbk)
+          (x-lambda (ps body xa xb xaxbk xaxbkr)
             (let ((c (k-as-subr expected)))
               (cond
                 ((k-allof-type? expected) (k-allof-lambda x expected k-check))
@@ -582,25 +582,26 @@
                          (k-as-expected x r expected)))))
                 ((k-some-untyped? ps) (k-fail-ty "a `lambda` cannot be a " expected a b))
                 (else (otherwise)))))
-          (x-rlambda (r l xa xb xaxbk)
+          (x-rlambda (r l xa xb xaxbk xaxbkr)
             (if (null? (k-as-subr expected))
                 (otherwise)
                 (let ((sp (k-spec-of expected)))
                   (k-as-expected x (k-synth-rlambda-by x r l expected sp k-synth k-synth-lambda-as)
                                  expected))))
-          (x-app (f args xa xb xaxbk)
+          (x-app (f args xa xb xaxbk xaxbkr)
             (k-as-expected-call x (k-split-app x f args expected k-synth-app k-synth) expected))
-          (x-bloblet (op i args xa xb xaxbk)
+          (x-bloblet (op i args xa xb xaxbk xaxbkr)
             (k-as-expected x (k-synth-bloblet x op i args expected) expected))
-          (x-tagcase (s arms els xa xb xaxbk) (extract (k-synth-tagcase x s arms els expected) 2))
-          (x-product (fs xa xb xaxbk)
+          (x-tagcase (s arms els xa xb xaxbk xaxbkr)
+                     (extract (k-synth-tagcase x s arms els expected) 2))
+          (x-product (fs xa xb xaxbk xaxbkr)
             (tagcase et
               (ty-product (want)
                 (if (k-same-labels? fs want)
                     (k-mask x (k-check-fields fs want) expected)
                     (otherwise)))
               (else y (otherwise))))
-          (x-sum (l e xa xb xaxbk)
+          (x-sum (l e xa xb xaxbk xaxbkr)
             (tagcase et
               (ty-sum (vs)
                 (let ((t (k-part-find vs l)))
@@ -608,12 +609,12 @@
               (else y (otherwise))))
           ;; A natural literal is a `nat`, and a `(nat k)`.
           ;; `#f` where `false` is expected, or a union with it.
-          (x-const (ty k xa xb xaxbk)
+          (x-const (ty k xa xb xaxbk xaxbkr)
             (if (or (and (= ty k-int) (k-literal-within? et k x))
                     (and (= ty k-bool) (= k 0) (k-false-expected? expected)))
                 nil
                 (otherwise)))
-          (x-var (s xa xb xaxbk)
+          (x-var (s xa xb xaxbk xaxbkr)
             (let ((t (k-lookup s)))
               (cond
                ;; `nil` is a `nlist` of no elements, or of some.
@@ -624,12 +625,12 @@
                 (let ((inst (k-instantiate-against t expected a b)))
                   (begin (k-expect x inst expected) (k-naming-effect s t))))
                (else (otherwise)))))
-          (x-with (m body xa xb xaxbk)
+          (x-with (m body xa xb xaxbk xaxbkr)
             (let ((r (k-fx-poly-check x m body expected)))
               (cond ((not (null? r)) (begin (k-note-fx-plain body (k-at-of x)) (car r)))
                     ((k-fx-module? m) (otherwise))
                     (else (extract (k-synth-with x m body a b expected) 2)))))
-          (x-if (p c d xa xb xaxbk)
+          (x-if (p c d xa xb xaxbk xaxbkr)
             (let* ((pe (k-check p k-bool))
                    (tested (k-enter-then p))
                    (ce (k-branch-check c expected (car (extract tested 5)) k-check))
@@ -637,11 +638,11 @@
                    (de (k-branch-check d expected (cdr (extract tested 5)) k-check))
                    (left (k-leave-test tested)))
               (k-mask x (k-union pe (k-union ce de)) expected)))
-          (x-begin (xs xa xb xaxbk)
+          (x-begin (xs xa xb xaxbk xaxbkr)
             (let ((e (k-check-seq xs expected nil)))
               (k-mask x e expected)))
           ;; A `letrec`'s body, as a `let`'s, against what is expected.
-          (x-letrec (bs0 body xa xb xaxbk)
+          (x-letrec (bs0 body xa xb xaxbk xaxbkr)
             (let ((saved (k-mark)) (rsaved (get k-recursive)) (bs (k-letrec-selected bs0 a b)))
               (begin
                 (let* ((ie (k-letrec-checked bs saved rsaved k-check k-check-letrec
@@ -649,7 +650,7 @@
                        (restored (set k-recursive rsaved))
                        (e (k-check body expected)))
                   (begin (k-unbind-to saved) (k-mask x (k-union ie e) expected))))))
-          (x-let (bs body xa xb xaxbk)
+          (x-let (bs body xa xb xaxbk xaxbkr)
             (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
               (begin
                 (k-bind-named (extract inits 1))
@@ -804,7 +805,7 @@
   (k-synth-handler (->* (kx int int) k-te)
     (lambda (h payload answer)
       (tagcase h
-        (x-lambda (ps hbody a b abk)
+        (x-lambda (ps hbody a b abk abkr)
           (if (= (k-length ps) 1)
               (k-rewriting (lambda () (k-synth-lambda-as h (cons payload nil) answer nil))
                            (k-start hbody) (k-end hbody)
@@ -940,8 +941,7 @@
   ;; `(module item …)`, as a `letrec*` (`check-modorder.fx`): its typed
   ;; lambdas bound first, at their written types; every other item checked in
   ;; order, in the scope of those and the items before it; then the lambdas,
-  ;; in the scope of everything. The module's type, its abstract types bound
-  ;; in it.
+  ;; in the scope of everything. The module's type, its abstract types bound in it.
   (k-synth-module-here (->* (kx k-items int int) k-te)
     (lambda (x items a b)
       (let* ((saved (k-mark))
@@ -1008,6 +1008,6 @@
   (k-module-rule (->* (kx) k-te)
     (lambda (x)
       (tagcase x
-        (x-module (items a b abk) (k-synth-module x items a b))
-        (x-with (m body a b abk) (k-synth-with x m body a b -1))
+        (x-module (items a b abk abkr) (k-synth-module x items a b))
+        (x-with (m body a b abk abkr) (k-synth-with x m body a b -1))
         (else y (k-fail-at "a module" x)))))))))

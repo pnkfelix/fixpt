@@ -87,7 +87,7 @@
                                (read @t)
                                (write @k)
                                spin)
-                       (c-recs exp int int int cenv bool)
+                       (c-recs exp int int int int cenv bool)
                        c-lifting))
             (val c-lambda-word
                  (subr (maxeff (alloc @k)

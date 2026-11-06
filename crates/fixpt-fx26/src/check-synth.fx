@@ -101,7 +101,7 @@
           (begin (k-expect (car args) (extract r 1) k-int)
                  (k-te (k-ty-new (ty-nat (sz-finite))) (extract r 2)))))))
 (define k-thunk-lambda? (->* (kx) bool)
-  (lambda (x) (tagcase x (x-lambda (ps body a b abk) (null? ps)) (else y #f))))
+  (lambda (x) (tagcase x (x-lambda (ps body a b abk abkr) (null? ps)) (else y #f))))
 ;; Note argument `i` found to be a `t`, of effect `e`.
 (define k-arg-found (->* (k-done int int k-eff) unit)
   (lambda (done i t e) (begin (array-set! (extract done 1) i t) (array-set! (extract done 2) i e))))
@@ -110,7 +110,7 @@
   (lambda (p kinds solved done i r)
     (begin (k-unify p (extract r 1) kinds solved (k-new-trail))
            (k-arg-found done i (extract r 1) (extract r 2)))))
-(define k-no-call k-call-checked (product (1 (product (1 -1) (2 -1) (3 -1))) (2 -1)))
+(define k-no-call k-call-checked (product (1 (product (1 -1) (2 -1) (3 -1) (4 -1))) (2 -1)))
 (define k-checked-call (ref k-call-checked @t) (new k-no-call))
 ;; Call `x`, found `r`, as `expected`: its effect, and its type noted.
 (define k-as-expected-call (->* (kx k-te int) k-eff)
@@ -154,7 +154,7 @@
 (define k-mono-var? (->* (kx) bool)
   (lambda (x)
     (tagcase x
-      (x-var (s a b abk)
+      (x-var (s a b abk abkr)
         (let ((t (k-lookup s)))
           (and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #f) (else y #t)))))
       (else y #f))))
@@ -190,7 +190,10 @@
              (begin
                (set k-checked-call k-no-call)
                (let* ((e (check arg q)) (c (get k-checked-call))
-                      (t (if (k-at-is? (extract c 1) (k-start arg) (k-end arg) (k-kth arg))
+                      (t
+                       (if
+                        (k-at-is? (extract c 1) (k-start arg) (k-end arg) (k-kth arg)
+                                  (k-reading arg))
                              (extract c 2)
                              q)))
                  (begin (k-unify param t kinds solved (k-new-trail))
@@ -204,7 +207,7 @@
 (define k-poly-var-at (->* (kx int) (listof k-te @t))
   (lambda (x p)
     (tagcase x
-      (x-var (s a b abk)
+      (x-var (s a b abk abkr)
         (let ((t (k-lookup s)))
           (if (and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #t) (else y #f)))
               (the (listof k-te @t) (cons (k-poly-instance s t p a b) nil))
@@ -217,7 +220,7 @@
 (define k-nil-told (->* (kx int int int k-binders k-solved k-done) unit)
   (lambda (arg i p q kinds solved done)
     (tagcase arg
-      (x-var (s a b abk)
+      (x-var (s a b abk abkr)
         (let ((t (k-lookup s)))
           (if (and (>= t 0) (k-list-of-any? t))
               (let ((nil-ty (k-ty-new (ty-nil))))
@@ -269,7 +272,7 @@
 (define k-fx-poly-check (->* (kx symbol kx int) (listof k-eff @t))
   (lambda (x m body expected)
     (let ((t (tagcase body
-               (x-var (n a b abk) (if (k-fx-module? m) (k-std-type n) -1))
+               (x-var (n a b abk abkr) (if (k-fx-module? m) (k-std-type n) -1))
                (else y -1))))
       (if (and (>= t 0) (tagcase (k-get t) (ty-poly (bs pb) #t) (else y #f)))
           (begin (k-expect x (k-instantiate-against t expected (k-start x) (k-end x)) expected)
@@ -364,7 +367,9 @@
           (cond ((null? p) (k-fail-ty-at "a blobref is expected here, and this is a " xt ox))
                 ((string=? name "blobref+") k-int)
                 ((string=? name "blobref-set!")
-                 (let ((r (k-blobref-region (k-start x) (k-end x) (k-kth x) xt (car (car p))
+                 (let
+                  ((r
+                    (k-blobref-region (k-start x) (k-end x) (k-kth x) (k-reading x) xt (car (car p))
                                             (cdr (car p)) #f)))
                    (cdr (car p))))
                 ((or (string=? name "blobref-index") (string=? name "blobref-length"))
@@ -381,21 +386,21 @@
 ;; Its type and effect, `e` its operands', `args` them.
 (define k-blobref-result (->* (kx string int k-eff int kxs) k-te)
   (lambda (x name xt e expected args)
-    (let ((a (k-start x)) (z (k-end x)) (zk (k-kth x)))
+    (let ((a (k-start x)) (z (k-end x)) (zk (k-kth x)) (zkr (k-reading x)))
       (if (string=? name "blobref-at")
-          (k-te (k-blobref-of xt (k-blobref-wanted a z zk expected)) e)
+          (k-te (k-blobref-of xt (k-blobref-wanted a z zk zkr expected)) e)
           (let* ((p (car (k-blobref-parts xt))) (b (car p)) (f (cdr p)))
             (case name
-              (("blobref+") (k-te (k-blobref-of b (k-blobref-wanted a z zk expected)) e))
+              (("blobref+") (k-te (k-blobref-of b (k-blobref-wanted a z zk zkr expected)) e))
               (("blobref-owner") (k-te b e))
               (("blobref-offset") (k-te k-int e))
-              (("blobref-index") (k-te (k-blobref-of b (k-blobref-element a z zk f)) e))
-              (("blobref-length") (k-te (k-blobref-length a z zk f) e))
-              (("blobref-get") (k-te-reading f (k-blobref-region a z zk xt b f #t) e))
+              (("blobref-index") (k-te (k-blobref-of b (k-blobref-element a z zk zkr f)) e))
+              (("blobref-length") (k-te (k-blobref-length a z zk zkr f) e))
+              (("blobref-get") (k-te-reading f (k-blobref-region a z zk zkr xt b f #t) e))
               (("blobref-variant!")
                (let ((lx (car (cdr args))))
-                 (k-blobref-variant a z zk xt b f lx (k-start lx) (k-end lx) e)))
-              (else (k-te-writing k-unit (k-blobref-region a z zk xt b f #t) e))))))))
+                 (k-blobref-variant a z zk zkr xt b f lx (k-start lx) (k-end lx) e)))
+              (else (k-te-writing k-unit (k-blobref-region a z zk zkr xt b f #t) e))))))))
 ;; `(extract ex l)`, `ex` of type `pt` and effect in `r`, not a product: a
 ;; blobref to a flat product's field (`Checker`'s `Exp::Extract`).
 (define k-extract-blobref (->* (kx int kx symbol k-te) k-te)
@@ -463,7 +468,7 @@
            (rt (extract rr 1))
            (g (k-place-region rt (k-start r) (k-end r)))
            (c (if (< expected 0) (the (listof k-callable acyclic) nil) (k-as-subr expected)))
-           (n (tagcase l (x-lambda (ps body a b abk) (k-length ps)) (else y 0)))
+           (n (tagcase l (x-lambda (ps body a b abk abkr) (k-length ps)) (else y 0)))
            (lt (cond
                  ((null? c) (lambda-as l nil -1 nil))
                  ((not (= (k-length (extract (car c) 2)) n))

@@ -208,9 +208,11 @@ impl FormFacts {
 const PRODUCT: u8 = fixpt_heap::layout::kind("product");
 const SUM: u8 = fixpt_heap::layout::kind("sum");
 
-/// An identity, as the product `k-at` is.
+/// An identity, as the product `k-at` is: of reading 0, numbered within
+/// the reading the FX-26 parser will make of the text, which the compiler
+/// gives it (`c-absolute-at`).
 fn identity(heap: &mut Heap, (a, b, k): At) -> Value {
-    heap.make_frozen(PRODUCT, &[Value::fixnum(a), Value::fixnum(b), Value::fixnum(k)])
+    heap.make_frozen(PRODUCT, &[Value::fixnum(a), Value::fixnum(b), Value::fixnum(k), Value::fixnum(0)])
 }
 
 /// A datatype's value: a sum of its constructor's name and the product of

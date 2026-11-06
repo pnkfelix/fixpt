@@ -61,14 +61,14 @@
 ;; `reify-…` makes evidence of), as a rep (or `#f`), in a list of one;
 ;; none if nothing.
 (define ev-staged-in
-  (->* (k-facts int int int) (listof (productof (1 string) (2 string) (3 wcell)) acyclic))
-  (lambda (fs a b k)
+  (->* (k-facts int int int int) (listof (productof (1 string) (2 string) (3 wcell)) acyclic))
+  (lambda (fs a b k kr)
     (cond ((null? fs) nil)
-          ((ev-at-is? (extract (car fs) 1) a b k)
+          ((ev-at-is? (extract (car fs) 1) a b k kr)
            (tagcase (extract (car fs) 2)
              (n-staged (fr ns rp) (cons (product (1 fr) (2 ns) (3 rp)) nil))
-             (else y (ev-staged-in (cdr fs) a b k))))
-          (else (ev-staged-in (cdr fs) a b k)))))
+             (else y (ev-staged-in (cdr fs) a b k kr))))
+          (else (ev-staged-in (cdr fs) a b k kr)))))
 
 ;; Datum `v` written as the reader reads it, pieces in reverse onto `acc`;
 ;; or not, if it is not code (a procedure, say).
@@ -148,9 +148,9 @@
 (define ev-stage-op? (->* (exp env symbol) bool)
   (lambda (f e op)
     (tagcase f
-      (e-proj (body ds a b abk)
+      (e-proj (body ds a b abk abkr)
         (tagcase body
-          (e-var (n c d cdk) (and (symbol=? n op) (not (ev-bound? e n))))
+          (e-var (n c d cdk cdkr) (and (symbol=? n op) (not (ev-bound? e n))))
           (else y #f)))
       (else y #f))))
 
@@ -210,14 +210,14 @@
 (define ev-reshapes (ref k-reshape-list @v) (new nil))
 
 ;; Whether `at` is the expression `a` `b` `k` (`k-at`).
-(define ev-at-is? (->* (k-at int int int) bool)
-  (lambda (at a b k) (= (extract at 3) k)))
+(define ev-at-is? (->* (k-at int int int int) bool)
+  (lambda (at a b k kr) (and (= (extract at 3) k) (= (extract at 4) kr))))
 
-(define ev-reshape-in (->* (k-reshape-list int int int) ev-at)
-  (lambda (rs a b k)
+(define ev-reshape-in (->* (k-reshape-list int int int int) ev-at)
+  (lambda (rs a b k kr)
     (cond ((null? rs) nil)
-          ((ev-at-is? (extract (car rs) 1) a b k) (the ev-at (cons (extract (car rs) 2) nil)))
-          (else (ev-reshape-in (cdr rs) a b k)))))
+          ((ev-at-is? (extract (car rs) 1) a b k kr) (the ev-at (cons (extract (car rs) 2) nil)))
+          (else (ev-reshape-in (cdr rs) a b k kr)))))
 
 ;; Each `with` the checker saw (`k-with-vals`), as `run-checked` was given
 ;; them: which it is, and the module's values its body names, with their
@@ -228,33 +228,33 @@
 (define ev-facts (ref k-facts @v) (new nil))
 ;; What an operation `a` `b` `k` takes (`n-datum`), in a list of one; none
 ;; if nothing.
-(define ev-fact-in (->* (k-facts int int int) k-datums)
-  (lambda (fs a b k)
+(define ev-fact-in (->* (k-facts int int int int) k-datums)
+  (lambda (fs a b k kr)
     (cond ((null? fs) nil)
-          ((ev-at-is? (extract (car fs) 1) a b k)
+          ((ev-at-is? (extract (car fs) 1) a b k kr)
            (tagcase (extract (car fs) 2)
              (n-datum (d) (the k-datums (cons d nil)))
-             (else y (ev-fact-in (cdr fs) a b k))))
-          (else (ev-fact-in (cdr fs) a b k)))))
-(define ev-fact-at (->* (int int int) k-datums)
-  (lambda (a b k) (ev-fact-in (get ev-facts) a b k)))
+             (else y (ev-fact-in (cdr fs) a b k kr))))
+          (else (ev-fact-in (cdr fs) a b k kr)))))
+(define ev-fact-at (->* (int int int int) k-datums)
+  (lambda (a b k kr) (ev-fact-in (get ev-facts) a b k kr)))
 ;; `(extract v l)`, `a` `b` `k`: a product's field; or, of a blobref, one to
 ;; its field, at the offset the checker found.
-(define ev-extract (->* (val symbol int int int) val)
-  (lambda (v l a b k)
-    (let ((d (ev-fact-at a b k)))
+(define ev-extract (->* (val symbol int int int int) val)
+  (lambda (v l a b k kr)
+    (let ((d (ev-fact-at a b k kr)))
       (if (and (not (null? d)) (tagcase (car d) (datum-blobref-field (o) #t) (else y #f)))
           (tagcase (as-other v "a blobref")
             (o-bref (o at) (ev-bref o (+ at (k-datum-operand d))))
             (else y (efail-expected "a blobref")))
           (field-of v l)))))
 
-(define ev-with-in (->* (k-with-list int int int) ev-with-at)
-  (lambda (ws a b k)
+(define ev-with-in (->* (k-with-list int int int int) ev-with-at)
+  (lambda (ws a b k kr)
     (cond ((null? ws) nil)
-          ((ev-at-is? (extract (car ws) 1) a b k)
+          ((ev-at-is? (extract (car ws) 1) a b k kr)
            (the ev-with-at (cons (product (1 (extract (car ws) 2)) (2 (extract (car ws) 3))) nil)))
-          (else (ev-with-in (cdr ws) a b k)))))
+          (else (ev-with-in (cdr ws) a b k kr)))))
 
 ;; The fields of `fs` at positions `ks`, in order.
 ;; The field `p` picks of `fs`: its `k`th, or the `j`th of the module that
@@ -359,21 +359,22 @@
         (if (null? rs)
             (eval-node x e)
             (reshape-val (eval-node x e)
-                         (ev-reshape-in rs (exp-start x) (exp-end x) (exp-kth x)))))))
+                         (ev-reshape-in rs (exp-start x) (exp-end x) (exp-kth x)
+                                        (exp-reading x)))))))
   (eval-node (->* (exp env) val)
     (lambda (x e)
       (tagcase x
-        (e-var (n a b abk) (lookup e n))
-        (e-int (n a b abk) n)
-        (e-bool (v a b abk) v)
-        (e-str (s a b abk) s)
-        (e-char (c a b abk) c)
-        (e-float (x a b abk) x)
-        (e-sym (s a b abk) s)
-        (e-unit (a b abk) the-unit)
+        (e-var (n a b abk abkr) (lookup e n))
+        (e-int (n a b abk abkr) n)
+        (e-bool (v a b abk abkr) v)
+        (e-str (s a b abk abkr) s)
+        (e-char (c a b abk abkr) c)
+        (e-float (x a b abk abkr) x)
+        (e-sym (s a b abk abkr) s)
+        (e-unit (a b abk abkr) the-unit)
         ;; A closure: the host's procedure of its arguments.
-        (e-lambda (ps body a b abk) (lambda ((xs vals)) (eval body (bind ps xs e))))
-        (e-app (f args a b abk)
+        (e-lambda (ps body a b abk abkr) (lambda ((xs vals)) (eval body (bind ps xs e))))
+        (e-app (f args a b abk abkr)
           (cond ((ev-stage-op? f e '%stage) (ev-stage args e))
                 ((ev-stage-op? f e '%session-check) (ev-session-check args e))
                 ((ev-stage-op? f e '%reify-effect) (ev-reify #t args e))
@@ -381,40 +382,42 @@
                 ((ev-stage-op? f e '%reify-type) (ev-reify #f args e))
                 (else (let* ((fv (eval f e)) (xs (eval-all args e)))
                         (begin (ev-poll) (apply-val fv xs))))))
-        (e-plambda (d body a b abk) (eval body e))
+        (e-plambda (d body a b abk abkr) (eval body e))
         ;; Regions and places are erased: a `letrena`'s or `letreap`'s
         ;; allocation is the heap's, and its name, the place as a value, is
         ;; unit.
-        (e-letregion (k r i body a b abk) (eval body (bind1 r the-unit e)))
-        (e-rlambda (r l a b abk) (eval l e))
-        (e-proj (body ds a b abk) (eval body e))
-        (e-the (d body a b abk) (eval body e))
-        (e-convention (cnv body a b abk) (eval body e))
-        (e-if (t th el a b abk) (if (as-bool (eval t e)) (eval th e) (eval el e)))
-        (e-letrec (bs body a b abk) (eval-letrec bs body e))
-        (e-let (bs body a b abk) (eval body (eval-let bs e e)))
-        (e-begin (es a b abk) (eval-begin es e))
-        (e-prompt (t body h a b abk)
+        (e-letregion (k r i body a b abk abkr) (eval body (bind1 r the-unit e)))
+        (e-rlambda (r l a b abk abkr) (eval l e))
+        (e-proj (body ds a b abk abkr) (eval body e))
+        (e-the (d body a b abk abkr) (eval body e))
+        (e-convention (cnv body a b abk abkr) (eval body e))
+        (e-if (t th el a b abk abkr) (if (as-bool (eval t e)) (eval th e) (eval el e)))
+        (e-letrec (bs body a b abk abkr) (eval-letrec bs body e))
+        (e-let (bs body a b abk abkr) (eval body (eval-let bs e e)))
+        (e-begin (es a b abk abkr) (eval-begin es e))
+        (e-prompt (t body h a b abk abkr)
           (let* ((tag (as-tag (eval t e))) (hv (eval h e)))
             (prompt tag (eval body e) (lambda (v) (apply1 hv v)))))
         ;; A blobref's read, write or index: its layout, as the checker found it.
-        (e-bloblet (op i args got a b abk)
-          (ev-bloblet op (if (< i 0) (k-datum-operand (ev-fact-at a b abk)) i) (eval-all args e)))
-        (e-product (fs a b abk) (o-product (eval-fields fs e)))
-        (e-extract (p l got a b abk) (ev-extract (eval p e) l a b abk))
-        (e-sum (t v a b abk) (o-sum t (eval v e)))
-        (e-tagcase (s arms els got a b abk)
-          (eval-tagcase (eval s e) arms els e (k-datum-operand (ev-fact-at a b abk))))
+        (e-bloblet (op i args got a b abk abkr)
+          (ev-bloblet op (if (< i 0) (k-datum-operand (ev-fact-at a b abk abkr)) i)
+                      (eval-all args e)))
+        (e-product (fs a b abk abkr) (o-product (eval-fields fs e)))
+        (e-extract (p l got a b abk abkr) (ev-extract (eval p e) l a b abk abkr))
+        (e-sum (t v a b abk abkr) (o-sum t (eval v e)))
+        (e-tagcase (s arms els got a b abk abkr)
+          (eval-tagcase (eval s e) arms els e (k-datum-operand (ev-fact-at a b abk abkr))))
         ;; A module: a product of its values, in order, each labelled by its
         ;; name; its abstract types' conversions the identity.
-        (e-module (items a b abk) (eval-module items e))
+        (e-module (items a b abk abkr) (eval-module items e))
         ;; `with`: the module's values its body names, by position, bound by
         ;; their names (all of them, if the checker did not say which).
         ;; `(with #%fx n)`: the standard `n`, whatever binds `n` here.
-        (e-with (m body a b abk)
+        (e-with (m body a b abk abkr)
           (if (k-fx-module? m)
-              (tagcase body (e-var (n c d cdk) (standard n)) (else y (efail "`(with #%fx name)`")))
-              (let ((used (ev-with-in (get ev-withs) a b abk)))
+              (tagcase body (e-var (n c d cdk cdkr) (standard n))
+                       (else y (efail "`(with #%fx name)`")))
+              (let ((used (ev-with-in (get ev-withs) a b abk abkr)))
                 (eval body
                       (if (null? used)
                           (bind-module (lookup e m) e)
@@ -436,7 +439,8 @@
   (ev-reify (->* (bool (listof exp acyclic) env) val)
     (lambda (effect args e)
       (let* ((x (car args))
-             (noted (ev-staged-in (get ev-facts) (exp-start x) (exp-end x) (exp-kth x))))
+             (noted
+              (ev-staged-in (get ev-facts) (exp-start x) (exp-end x) (exp-kth x) (exp-reading x))))
         (if (null? noted)
             (efail "evidence: what it is of is not known")
             ;; Its rep, filled by the reps of the evidence given
@@ -469,7 +473,9 @@
     (lambda (args e k)
       (let* ((m (eval (car args) e))
              (code (car (cdr args)))
-             (noted (ev-staged-in (get ev-facts) (exp-start code) (exp-end code) (exp-kth code)))
+             (noted
+              (ev-staged-in (get ev-facts) (exp-start code) (exp-end code) (exp-kth code)
+                            (exp-reading code)))
              (v (eval code e)))
         (if (null? noted)
             (ev-stage-refused
@@ -641,10 +647,10 @@
 (define lambda-exp? (->* (exp) bool)
   (lambda (x)
     (tagcase x
-      (e-lambda (ps body a b abk) #t)
-      (e-plambda (d body a b abk) (lambda-exp? body))
-      (e-the (d body a b abk) (lambda-exp? body))
-      (e-convention (cnv body a b abk) (lambda-exp? body))
+      (e-lambda (ps body a b abk abkr) #t)
+      (e-plambda (d body a b abk abkr) (lambda-exp? body))
+      (e-the (d body a b abk abkr) (lambda-exp? body))
+      (e-convention (cnv body a b abk abkr) (lambda-exp? body))
       (else y #f))))
 
 ;; Defines `n` as `x`'s value, run in the scope before it.

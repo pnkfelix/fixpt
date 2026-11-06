@@ -116,7 +116,7 @@
                          (let ((t (mk-pure-subr (the syns-a (cons from nil)) to a b)))
                            (if family? (mk-poly binders t a b) t))))
                  (x (product (1 'x) (2 (the syns-a nil))))
-                 (identity (e-lambda (the param-list (cons x nil)) (e-var 'x a b 0) a b 0))
+                 (identity (e-lambda (the param-list (cons x nil)) (e-var 'x a b 0 0) a b 0 0))
                  (up (gen-conversion "up-" n (conv rep used) identity a b))
                  (down (gen-conversion "down-" n (conv used rep) identity a b)))
             (list (t-define-generative head rep a b) up down))))))
@@ -155,7 +155,7 @@
            (end (if (null? given) (syn-end x) (extract (car given) 7))))
       (if (string=? why "")
           (parse-each-top (expand-import (include-import x (car given))))
-          (the top-list (list (t-exp (e-module (loaded-error why) at end 0))))))))
+          (the top-list (list (t-exp (e-module (loaded-error why) at end 0 0))))))))
 ;; A top-level `(include m)`, `x`: the `(import m x … (type t …) (effect e
 ;; …))` of what `m` gives, `g`, at `x`'s span (`Checker::include_forms`).
 (define include-import (->* (syn include-given) syn)

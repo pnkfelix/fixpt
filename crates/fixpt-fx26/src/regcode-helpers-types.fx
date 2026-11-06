@@ -99,7 +99,7 @@
                        rsplits))
             (val r-inline-or-unroll
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
-                       (int int int renv exp exps int)
+                       (int int int int renv exp exps int)
                        (listof rinline @k)))
             (val r-just-exp (subr (alloc @k) (exp) maybe-exp))
             (val r-args-2 (subr (alloc @k) (rarg rarg) rargs))
@@ -138,7 +138,7 @@
                        unit))
             (val r-datum-operand
                  (subr (maxeff (alloc @k) (read @globals) spin (read @k))
-                       (k-datums int int int) int))
+                       (k-datums int int int int) int))
             (val r-flat-tagcase
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
                                spin)

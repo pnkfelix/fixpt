@@ -174,5 +174,5 @@
 (define module-items-of (->* (top) mod-items)
   (lambda (t)
     (tagcase t
-      (t-exp (x) (tagcase x (e-module (items a b abk) items) (else y nil)))
+      (t-exp (x) (tagcase x (e-module (items a b abk abkr) items) (else y nil)))
       (else y nil))))

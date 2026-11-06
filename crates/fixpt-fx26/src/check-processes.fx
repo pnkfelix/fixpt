@@ -41,7 +41,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-calls) (include check-effects) (include check-subtype))
-(import check-resolve k-start k-at-of k-kth k-end k-free-vars)
+(import check-resolve k-start k-at-of k-kth k-reading k-end k-free-vars)
 (define k-regions-distinct? (with check-binders k-regions-distinct?))
 (define k-with-used (with check-synth k-with-used))
 (define k-comp-names (with check-module-rules k-comp-names))
@@ -60,7 +60,7 @@
   (lambda (m body)
     (if (symbol=? m '%shared:fx26:processes.fx)
         (tagcase body
-          (x-var (n c d cdk)
+          (x-var (n c d cdk cdkr)
             (k-std-type (string->symbol (string-append "%processes:" (symbol->string n)))))
           (else y -1))
         -1)))
@@ -69,11 +69,11 @@
 (define k-library-op (->* (kx kxs) string)
   (lambda (f args)
     (tagcase f
-      (x-with (m body a b abk)
+      (x-with (m body a b abk abkr)
         (if (< (k-library-type m body) 0)
             ""
             (tagcase body
-              (x-var (n c d cdk)
+              (x-var (n c d cdk cdkr)
                 (let ((s (symbol->string n)) (k (k-length args)))
                   (cond ((and (string=? s "spawn-process") (= k 1)) s)
                         ((and (string=? s "spawn-monitored") (= k 3)) "spawn-process")
@@ -191,9 +191,9 @@
 (define k-spawn-parts (->* (kx k-te) (listof (productof (1 int) (2 k-eff) (3 int)) acyclic))
   (lambda (body pt)
     (tagcase body
-      (x-plambda (bs lam a b abk)
+      (x-plambda (bs lam a b abk abkr)
         (if (and (= (k-length bs) 1) (= (extract (car bs) 2) 3)
-                 (tagcase lam (x-lambda (ps l c d cdk) (= (k-length ps) 2)) (else y #f)))
+                 (tagcase lam (x-lambda (ps l c d cdk cdkr) (= (k-length ps) 2)) (else y #f)))
             (let ((r (extract (car bs) 1)))
               (tagcase (k-get (extract pt 1))
                 (ty-poly (pbs inner)
@@ -498,14 +498,15 @@
            (k-fail "`#%fx` is the standard bindings' module, which nothing else may be" a b))
           (else
            (let ((t (tagcase body
-                      (x-var (n c d cdk)
-                        (if (and (k-second-class? n) (not (k-operator? n a b (k-kth x))))
+                      (x-var (n c d cdk cdkr)
+                        (if
+                         (and (k-second-class? n) (not (k-operator? n a b (k-kth x) (k-reading x))))
                             (k-fail (k-named-only n) a b)
                             (k-std-type n)))
                       (else y -1))))
              (if (< t 0)
                  (k-fail "`(with #%fx name)` names one standard binding" a b)
-                 (begin (if (k-operator? (k-fx-name body) a b (k-kth x))
+                 (begin (if (k-operator? (k-fx-name body) a b (k-kth x) (k-reading x))
                             #u
                             (k-note-fx-plain body (k-at-of x)))
                         (k-te t nil))))))))
@@ -517,16 +518,16 @@
       (k-note-sys-plain f)
       (let ((g (k-under f)))
         (tagcase g
-          (x-with (m body a b abk) (if (k-fx-module? m) (k-note-fx-plain body (k-at-of g)) #u))
+          (x-with (m body a b abk abkr) (if (k-fx-module? m) (k-note-fx-plain body (k-at-of g)) #u))
           (else y #u))))))
 ;; A syscall's call's operator `(the T %syscallN)`, which gives it its
 ;; declared effect (`k-sys-defs`), noted as the plain `%syscallN` it is.
 (define k-note-sys-plain (->* (kx) unit)
   (lambda (f)
     (tagcase f
-      (x-the (t body a b abk)
+      (x-the (t body a b abk abkr)
         (tagcase body
-          (x-var (n c d cdk)
+          (x-var (n c d cdk cdkr)
             (if (let ((s (symbol->string n)))
                   (and (> (string-length s) 8) (string=? (substring s 0 8) "%syscall")
                        (not (string=? (k-std-op body) ""))))

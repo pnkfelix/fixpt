@@ -502,7 +502,7 @@
 ;; An error at `x` if an `->*` (`arrow`) defines it, and it is not a `lambda`.
 (define k-arrow-star-lambda (->* (bool kx) unit)
   (lambda (arrow x)
-    (if (and arrow (not (tagcase x (x-lambda (ps body a b abk) #t) (else y #f))))
+    (if (and arrow (not (tagcase x (x-lambda (ps body a b abk abkr) #t) (else y #f))))
         (k-fail-at "`->*` finds a procedure's effect from its `lambda`: define it as one" x)
         #u)))
 ;; The effect `->*` finds for `name`, from its body's `e`: with `spin` if it

@@ -47,7 +47,8 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-effects) (include check-subtype))
-(import check-resolve k-start k-end k-kth k-last-kth k-at-of k-regions-in k-has-region-in?)
+(import check-resolve k-start k-end k-kth k-reading k-last-kth k-at-of k-regions-in
+        k-has-region-in?)
 (import check-synth k-note-call k-te-masked)
 (import check-calls k-callee-name)
 (import check-expect k-rewriting k-expect k-conversion)
@@ -70,10 +71,12 @@
 ;; what is in it (`k-last-kth`); else an error.
 (define k-arm-dead? (->* (int symbol kx) bool)
   (lambda (st tag body)
-    (let ((fs (get k-dead-arms)) (a (k-start body)) (b (k-end body)) (k (k-kth body)))
+    (let
+     ((fs (get k-dead-arms)) (a (k-start body)) (b (k-end body)) (k (k-kth body))
+                             (kr (k-reading body)))
       (if (null? fs)
           (begin (k-fail-no-part st " has no tag " tag a b) #f)
-          (let* ((f (car fs)) (arms (k-dead-counted (extract f 1) st tag a b k))
+          (let* ((f (car fs)) (arms (k-dead-counted (extract f 1) st tag a b k kr))
                  (now (the k-spans (cons (product (1 k) (2 (k-last-kth body))) (extract f 2)))))
             (begin (set k-dead-arms (cons (product (1 arms) (2 now) (3 (extract f 3))
                                                    (4 (extract f 4)) (5 (extract f 5)))
@@ -81,14 +84,14 @@
                    #t))))))
 ;; `arms` with the one whose body is `k` (at `a`..`b`) counted once more,
 ;; its error's type `st`.
-(define k-dead-counted (->* ((listof k-dead-arm acyclic) int symbol int int int)
+(define k-dead-counted (->* ((listof k-dead-arm acyclic) int symbol int int int int)
                             (listof k-dead-arm acyclic))
-  (lambda (arms st tag a b k)
+  (lambda (arms st tag a b k kr)
     (cond ((null? arms) (list (product (1 a) (2 b) (3 1) (4 st) (5 tag) (6 k))))
           ((= (extract (car arms) 6) k)
            (cons (product (1 a) (2 b) (3 (+ 1 (extract (car arms) 3))) (4 st) (5 tag) (6 k))
                  (cdr arms)))
-          (else (cons (car arms) (k-dead-counted (cdr arms) st tag a b k))))))
+          (else (cons (car arms) (k-dead-counted (cdr arms) st tag a b k kr))))))
 ;; Of `arms`, the first by place skipped `n` times, or `best`, as a list.
 (define k-dead-in-all (->* ((listof k-dead-arm acyclic) int (listof k-dead-arm acyclic))
                            (listof k-dead-arm acyclic))
@@ -189,7 +192,7 @@
              (4 skipped))))
 
 (define k-at=? (->* (k-at k-at) bool)
-  (lambda (x y) (= (extract x 3) (extract y 3))))
+  (lambda (x y) (and (= (extract x 3) (extract y 3)) (= (extract x 4) (extract y 4)))))
 ;; Whether `at` is in one of `spans`, each the numbers of what is in one
 ;; skipped (`k-last-kth`): by the trees' structure, not where it is written.
 (define k-skipped? (->* (k-at k-spans) bool)
@@ -395,7 +398,7 @@
 (define k-untyped-lambda (->* (kx) int)
   (lambda (x)
     (tagcase x
-      (x-lambda (ps body a b abk) (if (k-any-untyped? ps) (k-length ps) -1))
+      (x-lambda (ps body a b abk abkr) (if (k-any-untyped? ps) (k-length ps) -1))
       (else y -1))))
 (define k-any-untyped? (->* (k-typed-params) bool)
   (lambda (ps) (and (not (null? ps)) (or (null? (extract (car ps) 2)) (k-any-untyped? (cdr ps))))))
@@ -647,7 +650,7 @@
 (define k-err-in-arg? (->* (kxs int int) bool)
   (lambda (args a b)
     (and (not (null? args))
-         (or (and (tagcase (car args) (x-var (v xa xb abk) #f) (else y #t))
+         (or (and (tagcase (car args) (x-var (v xa xb abk abkr) #f) (else y #t))
                   (>= a (k-start (car args))) (<= b (k-end (car args))))
              (k-err-in-arg? (cdr args) a b)))))
 ;; Each of `args`, from the `i`th, whose type is a union, in order, as it is
@@ -661,7 +664,7 @@
         nil
         (let* ((a (car args))
                (here (tagcase a
-                       (x-var (v xa xb abk)
+                       (x-var (v xa xb abk abkr)
                          (let ((t (k-lookup v)))
                            (if (< t 0)
                                nil

@@ -245,10 +245,10 @@
 (define k-lambda? (->* (kx) bool)
   (lambda (x)
     (tagcase x
-      (x-lambda (ps body a b abk) #t)
-      (x-rlambda (r l a b abk) #t)
-      (x-plambda (bs e a b abk) (k-lambda? e))
-      (x-the (t e a b abk) (k-lambda? e))
+      (x-lambda (ps body a b abk abkr) #t)
+      (x-rlambda (r l a b abk abkr) #t)
+      (x-plambda (bs e a b abk abkr) (k-lambda? e))
+      (x-the (t e a b abk abkr) (k-lambda? e))
       (else y #f))))
 ;; How many of `ns` are `n`.
 (define k-count-name (->* (k-names symbol) int)
@@ -276,9 +276,9 @@
 (define k-rlambda-under? (->* (kx) bool)
   (lambda (x)
     (tagcase x
-      (x-rlambda (r l a b abk) #t)
-      (x-plambda (bs e a b abk) (k-rlambda-under? e))
-      (x-the (t e a b abk) (k-rlambda-under? e))
+      (x-rlambda (r l a b abk abkr) #t)
+      (x-plambda (bs e a b abk abkr) (k-rlambda-under? e))
+      (x-the (t e a b abk abkr) (k-rlambda-under? e))
       (else y #f))))
 ;; A global read: the same whatever the binders, as the body is run once,
 ;; so its value is every instance's (`check.rs`'s `generalizable`).
@@ -356,8 +356,9 @@
           (else (k-some-untyped? (cdr ps))))))
 
 (define k-unannotated? (->* (kx) bool)
-  (lambda (x) (tagcase x (x-lambda (ps body a b abk) (k-some-untyped? ps)) (else y #f))))
+  (lambda (x) (tagcase x (x-lambda (ps body a b abk abkr) (k-some-untyped? ps)) (else y #f))))
 ;; A `lambda` missing parameter types, or a thunk: better told than asked.
 (define k-needs-telling? (->* (kx) bool)
   (lambda (x)
-    (tagcase x (x-lambda (ps body a b abk) (or (null? ps) (k-some-untyped? ps))) (else y #f)))))))
+    (tagcase x (x-lambda (ps body a b abk abkr) (or (null? ps) (k-some-untyped? ps)))
+             (else y #f)))))))

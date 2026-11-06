@@ -148,7 +148,8 @@
   (lambda (bs)
     (cond ((null? bs) #u)
           ((and (k-arrow-star-ty? (extract (car bs) 2))
-                (not (tagcase (extract (car bs) 3) (x-lambda (ps body a b abk) #t) (else y #f))))
+                (not
+                 (tagcase (extract (car bs) 3) (x-lambda (ps body a b abk abkr) #t) (else y #f))))
            (k-fail (string-append "`->*` finds a procedure's effect from its `lambda`: "
                                   "define it as one")
                    (k-start (extract (car bs) 3)) (k-end (extract (car bs) 3))))

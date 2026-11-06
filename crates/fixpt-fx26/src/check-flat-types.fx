@@ -97,7 +97,7 @@
                                (read @s)
                                (read @t)
                                (write @t)
-                               spin) (int int int int int int kx int int k-eff) k-te))
+                               spin) (int int int int int int int kx int int k-eff) k-te))
             (val k-blobref-parts
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (int)

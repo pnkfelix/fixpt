@@ -162,22 +162,22 @@
 (define k-written-module? (->* (kx k-names) bool)
   (lambda (x early)
     (tagcase x
-      (x-module (items a b abk) #t)
-      (x-app (f args a b abk) (and (null? args) (k-written-module? f early)))
-      (x-lambda (ps body a b abk) (and (null? ps) (k-written-module? body early)))
-      (x-proj (body ds a b abk) (k-written-module? body early))
-      (x-plambda (bs body a b abk) (k-written-module? body early))
-      (x-var (n a b abk) (or (k-has-name? early n) (k-shared-name? n)))
-      (x-with (m body a b abk)
+      (x-module (items a b abk abkr) #t)
+      (x-app (f args a b abk abkr) (and (null? args) (k-written-module? f early)))
+      (x-lambda (ps body a b abk abkr) (and (null? ps) (k-written-module? body early)))
+      (x-proj (body ds a b abk abkr) (k-written-module? body early))
+      (x-plambda (bs body a b abk abkr) (k-written-module? body early))
+      (x-var (n a b abk abkr) (or (k-has-name? early n) (k-shared-name? n)))
+      (x-with (m body a b abk abkr)
         (and (or (k-has-name? early m) (k-shared-name? m))
-             (tagcase body (x-var (n c d cdk) #t) (else y #f))))
+             (tagcase body (x-var (n c d cdk cdkr) #t) (else y #f))))
       (else y #f))))
 ;; The names the module (its places `ps`) defines that a module as written
 ;; `x` names: of `(with m y)`, `m` only, `y` being `m`'s.
 (define k-early-names-in (->* (kx k-places) k-names)
   (lambda (x ps)
     (tagcase x
-      (x-with (m body a b abk) (if (< (k-place-of ps m) 0) nil (the k-names (cons m nil))))
+      (x-with (m body a b abk abkr) (if (< (k-place-of ps m) 0) nil (the k-names (cons m nil))))
       (else y (k-mod-names-in x ps)))))
 ;; Whether each of `ns` is one of `ks`.
 (define k-all-named? (->* (k-names k-names) bool)

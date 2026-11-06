@@ -371,18 +371,21 @@ both front ends.
   in both front ends and the bridge; places no longer in a key); then `S`
   and `F`; then `Z`; then `validate`, in the Rust checker and in the one
   written in FX-26, and a test of every program under it.
-- **Stage 1 done, `path`** (2026-11-06): `k` is `r·2³² + n`, `r` the
-  reading (each `number-tops` one, counted by `parser-ids.fx`'s
-  `readings`), `n` the walk's number in it. Identity compares `k` alone
-  (`k-at-is?`, `k-at=?`, `ev-at-is?`, `r-same-exp?`), and the compiler's
-  tables are by `k`, not by where an expression starts. The checker
-  written in Rust numbers within the reading (`Kth`, `r` = 0), since it
-  checks before the FX-26 parser reads the text; the compiler gives its
-  facts the reading of the trees it compiles (`c-set-facts!`'s reading,
-  `c-reading-of`; `c-absolute-at`), the checker written in FX-26's
-  being the reading's already. A copy kept to be inlined, from an
-  earlier reading, keeps that reading's numbers: its lookups miss, as
-  they must.
+- **Stage 1 done, `path`** (2026-11-06): every tree node (`exp`, `kx`) has
+  a fourth integer, its reading, beside its number `k` (the user's
+  choice over packing the two into one integer: no encoding to get
+  wrong). A reading is each `number-tops`, counted by `parser-ids.fx`'s
+  `readings`; a syscall's definitions, which the checker makes, a reading
+  of their own, counted down from -1 (`k-made-readings`). `k-at` is
+  `(start end k reading)`; identity compares `k` and the reading
+  (`k-at-is?`, `k-at=?`, `ev-at-is?`, `r-same-exp?`), every function that
+  takes `a b k` takes the reading after `k`, and the compiler's tables
+  are by `k`, not by where an expression starts. The checker written in
+  Rust numbers within the reading, its facts of reading 0, since it checks
+  before the FX-26 parser reads the text; the compiler gives them the
+  reading of the trees it compiles (`c-set-facts!`'s reading,
+  `c-reading-of`, `c-absolute-at`). A copy kept to be inlined, from an
+  earlier reading, keeps that reading: its lookups miss, as they must.
 - **For stage 2**: `S` must be one value on both sides for the Rust
   checker's facts to be found. The two front ends do not read the same
   texts (the FX-26 one reads forms printed, some more than once, and has

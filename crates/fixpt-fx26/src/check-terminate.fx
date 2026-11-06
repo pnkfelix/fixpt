@@ -137,9 +137,9 @@
 (define k-sc-lambda-of (->* (kx) kx)
   (lambda (x)
     (tagcase x
-      (x-plambda (bs body a b abk) (k-sc-lambda-of body))
-      (x-the (t body a b abk) (k-sc-lambda-of body))
-      (x-rlambda (r l a b abk) (k-sc-lambda-of l))
+      (x-plambda (bs body a b abk abkr) (k-sc-lambda-of body))
+      (x-the (t body a b abk abkr) (k-sc-lambda-of body))
+      (x-rlambda (r l a b abk abkr) (k-sc-lambda-of l))
       (else y y))))
 ;; The parameter types of a declared type, under its binders.
 (define k-sc-param-types (->* (int) k-ids)
@@ -173,7 +173,7 @@
   (lambda (bs i)
     (or (null? bs)
         (tagcase (k-sc-lambda-of (extract (car bs) 3))
-          (x-lambda (ps body a b abk)
+          (x-lambda (ps body a b abk abkr)
             (let ((ts (k-sc-param-types (extract (car bs) 2))))
               (and (<= (k-length ps) (k-length ts))
                    (begin (set k-sc-current i)
@@ -195,7 +195,7 @@
         out
         (k-sc-all-params (cdr bs) (+ i 1)
           (tagcase (k-sc-lambda-of (extract (car bs) 3))
-            (x-lambda (ps body a b abk) (k-sc-with i (k-sc-upto 0 (k-length ps)) out))
+            (x-lambda (ps body a b abk abkr) (k-sc-with i (k-sc-upto 0 (k-length ps)) out))
             (else y out))))))
 (define k-sc-drop (->* (k-guards int int) k-guards)
   (lambda (gs i j)

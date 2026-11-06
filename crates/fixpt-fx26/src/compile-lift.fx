@@ -41,7 +41,7 @@
       (if (null? l) -1 (tagcase (car l) (at-lifted (k) k) (else y -1))))))
 
 (define c-lifted-at (->* (exp cenv) int)
-  (lambda (f e) (tagcase f (e-var (n a b abk) (c-lifted-index n e)) (else y -1))))
+  (lambda (f e) (tagcase f (e-var (n a b abk abkr) (c-lifted-index n e)) (else y -1))))
 
 ;; Lifted procedure `k`, from `c-lifts`.
 (define c-lift-of (->* (int) c-lift)
@@ -93,9 +93,9 @@
 ;; Whether the `letrec` at `a`-`b` is lifted, as planned, in a list: of what
 ;; `c-lift-plan` would give; none where it was not planned, or in register
 ;; code.
-(define c-planned-lift (->* (int int int) (listof (listof c-added @k) @k))
-  (lambda (a b abk)
-    (let ((key (c-span-key a b abk)))
+(define c-planned-lift (->* (int int int int) (listof (listof c-added @k) @k))
+  (lambda (a b abk abkr)
+    (let ((key (c-span-key a b abk abkr)))
       (if (or (not (get c-planning)) (> (get c-twin-depth) 0)
               (not (table-has? (get c-plan-lifts) key)))
           nil
@@ -150,7 +150,7 @@
         (let ((lam (c-lambda-of (extract (car bs) 3))))
           (and (not (null? lam))
                (tagcase (car lam)
-                 (e-lambda (ps lbody a b abk)
+                 (e-lambda (ps lbody a b abk abkr)
                    (let ((name (extract (car bs) 1)) (n (c-count-params ps)))
                      (and (c-called-only body name n)
                           (c-calls-only-all (c-rec-exps all) name n #f)
@@ -190,7 +190,7 @@
   (lambda (all bs i names e added calls)
     (or (null? bs)
         (tagcase (car (c-lambda-of (extract (car bs) 3)))
-          (e-lambda (ps lbody a b abk)
+          (e-lambda (ps lbody a b abk abkr)
             (let* ((params (c-bind-params ps nil))
                    (free (c-with-lifted-names (c-free lbody params nil) params e))
                    (mine (c-lift-locals free names e nil)))
@@ -257,7 +257,7 @@
   (lambda (bs added i)
     (or (null? bs)
         (tagcase (car (c-lambda-of (extract (car bs) 3)))
-          (e-lambda (ps lbody a b abk)
+          (e-lambda (ps lbody a b abk abkr)
             (let ((m (c-length (array-ref added i))))
               (and (< m 6)
                    (<= (+ m (c-count-params ps)) register-regs)

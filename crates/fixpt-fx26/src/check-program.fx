@@ -379,14 +379,14 @@
           (string h (if (k-sys-host-from? h 0 0 0) h (k-sfail k-sys-host-msg s)))
           (else x (k-sfail k-sys-host-msg s))))
       (else x (k-sfail k-sys-host-msg s)))))
-(define k-sys-str (->* (string int int int) exp) (lambda (v a b k) (e-str v a b k)))
-;; `x1` … `xi`, onto `acc`, the `i`th's identity `k`+`i`.
-(define k-sys-xs (->* (int int int int (listof exp acyclic)) (listof exp acyclic))
-  (lambda (i a b k acc)
+(define k-sys-str (->* (string int int int int) exp) (lambda (v a b k r) (e-str v a b k r)))
+;; `x1` … `xi`, onto `acc`, the `i`th's identity `k`+`i` in reading `r`.
+(define k-sys-xs (->* (int int int int int (listof exp acyclic)) (listof exp acyclic))
+  (lambda (i a b k r acc)
     (if (= i 0)
         acc
-        (k-sys-xs (- i 1) a b k
-                  (cons (e-var (string->symbol (string-append "x" (int->string i))) a b (+ k i))
+        (k-sys-xs (- i 1) a b k r
+                  (cons (e-var (string->symbol (string-append "x" (int->string i))) a b (+ k i) r)
                         acc)))))
 (define k-sys-params (->* (int (listof syn acyclic)) param-list)
   (lambda (i ps)
@@ -404,12 +404,14 @@
 ;; which is checked against its body.
 (define k-sys-defs (->* (symbol string syn string bool int int) (productof (1 top) (2 top)))
   (lambda (name host canonical text required a b)
-    (let* ((label (string-append "syscall " (symbol->string name) " (\"" host "\")"))
+    (let*
+     ((r (- (get k-made-readings) 1))
+      (label (string-append "syscall " (symbol->string name) " (\"" host "\")"))
            (asks (lambda ((f symbol) (k int))
-                   (e-app (e-var f a b k)
-                          (list (k-sys-str label a b (+ k 1)) (k-sys-str host a b (+ k 2))
-                                (k-sys-str text a b (+ k 3)))
-                          a b (+ k 4))))
+                   (e-app (e-var f a b k r)
+                          (list (k-sys-str label a b (+ k 1) r) (k-sys-str host a b (+ k 2) r)
+                                (k-sys-str text a b (+ k 3) r))
+                          a b (+ k 4) r)))
            (cs (k-sys-items canonical))
            (poly? (string=? (syn-name (car cs)) "poly"))
            (subr (if poly? (car (cdr (cdr cs))) canonical))
@@ -423,19 +425,21 @@
                           (car (cdr (cdr (cdr ss)))))
                     nil a b))
            (call (tagcase (asks (string->symbol (string-append "%syscall" (int->string n))) 1010)
-                   (e-app (f xs a2 b2 k2)
-                     (e-app (e-the at f a b 1016) (append xs (k-sys-xs n a b 1020 nil)) a b k2))
+                   (e-app (f xs a2 b2 k2 k2r)
+                     (e-app (e-the at f a b 1016 r) (append xs (k-sys-xs n a b 1020 r nil)) a b k2
+                            k2r))
                    (else x x)))
-           (body (e-lambda (k-sys-params 1 ps) (e-the (car (cdr (cdr (cdr ss)))) call a b 1030)
-                           a b 1031))
+           (body (e-lambda (k-sys-params 1 ps) (e-the (car (cdr (cdr (cdr ss)))) call a b 1030 r)
+                           a b 1031 r))
            (available
             (if required
-                (e-begin (list (asks '%syscall-require 1040) (e-bool #t a b 1045)) a b 1046)
-                (e-app (e-var '%syscall-available? a b 1050)
-                       (list (k-sys-str host a b 1051) (k-sys-str text a b 1052)) a b 1053)))
+                (e-begin (list (asks '%syscall-require 1040) (e-bool #t a b 1045 r)) a b 1046 r)
+                (e-app (e-var '%syscall-available? a b 1050 r)
+                       (list (k-sys-str host a b 1051 r) (k-sys-str text a b 1052 r)) a b 1053 r)))
            (companion (string->symbol (string-append "%syscall-available:" (symbol->string name)))))
-      (product (1 (t-define companion (the syns-a (list (atom 'bool a b))) available a b))
-               (2 (t-define name (the syns-a (list canonical)) body a b))))))
+      (begin (set k-made-readings r)
+             (product (1 (t-define companion (the syns-a (list (atom 'bool a b))) available a b))
+               (2 (t-define name (the syns-a (list canonical)) body a b)))))))
 ;; `(define-syscall name "host" type)` (`required`), or
 ;; `(define-optional-syscall …)`, at `a`..`b`: its line, its definition's.
 (define k-define-syscall (->* (bool syn int int) k-out)

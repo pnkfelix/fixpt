@@ -59,6 +59,7 @@
    (val exp-start (subr pure (exp) int))
    (val exp-end (subr pure (exp) int))
    (val exp-kth (subr pure (exp) int))
+   (val exp-reading (subr pure (exp) int))
    (val exp-at (subr pure (exp) k-at))
    (val k-has-region-in?
         (subr (maxeff (read @globals) (read @t) spin) (k-regions k-region) bool))
@@ -76,6 +77,7 @@
    (val k-start (subr pure (kx) int))
    (val k-end (subr pure (kx) int))
    (val k-kth (subr pure (kx) int))
+   (val k-reading (subr pure (kx) int))
    (val k-last-kth (subr pure (kx) int))
    (val k-at-of (subr pure (kx) k-at))
    (val k-as-subr

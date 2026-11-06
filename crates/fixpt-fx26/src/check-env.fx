@@ -107,6 +107,10 @@
 ;; check's entry point sets it to 0, so that a check that failed half way
 ;; leaves nothing named so.
 (define k-syscall-expanding (ref int @t) (new 0))
+;; The readings of what the checker makes, not the parser (a syscall's
+;; definitions): each a reading of its own, numbered down from -1, apart
+;; from the parser's (`parser-ids.fx`).
+(define k-made-readings (ref int @t) (new 0))
 ;; The standard names only a module file built in may name, in a table:
 ;; every lookup of a name asks (`k-hidden-standard?`).
 (define k-built-in-only-table (table symbol bool @t) (make-table symbol-hash symbol=?))
@@ -226,9 +230,9 @@
               (k-cat3 "unbound variable `" n "`"))
           (k-cat5 "`" n "` is broken, " (car why) ": define it again to use it")))))
 ;; Whether `at` is the identity `a`, `b`, `k`.
-(define k-at-is? (->* (k-at int int int) bool)
-  (lambda (at a b k) (= (extract at 3) k)))
-(define k-no-operator k-op-mark (product (1 '||) (2 (product (1 -1) (2 -1) (3 -1)))))
+(define k-at-is? (->* (k-at int int int int) bool)
+  (lambda (at a b k kr) (and (= (extract at 3) k) (= (extract at 4) kr))))
+(define k-no-operator k-op-mark (product (1 '||) (2 (product (1 -1) (2 -1) (3 -1) (4 -1)))))
 (define k-operator (ref k-op-mark @t) (new k-no-operator))
 ;; The standard operations a rule checks at each call, by their name there:
 ;; named only as a call's operator, so that no other name, and no procedure
@@ -238,10 +242,10 @@
     (let ((n (symbol->string s)))
       (or (string=? n "cwcc") (string=? n "certify-length") (string=? n "certify-acyclic")
           (string=? n "certify-nat") (string=? n "native-procedure") (string=? n "%stage")))))
-(define k-operator? (->* (symbol int int int) bool)
-  (lambda (s a b k)
+(define k-operator? (->* (symbol int int int int) bool)
+  (lambda (s a b k kr)
     (let ((o (get k-operator)))
-      (and (symbol=? (extract o 1) s) (k-at-is? (extract o 2) a b k)))))
+      (and (symbol=? (extract o 1) s) (k-at-is? (extract o 2) a b k kr)))))
 (define k-named-only (->* (symbol) string)
   (lambda (s)
     (string-append "`" (symbol->string s)
@@ -253,20 +257,21 @@
   (lambda (m) (string=? (symbol->string m) "#%fx")))
 ;; The name a `(with #%fx n)`'s body names, `||` if none.
 (define k-fx-name (->* (kx) symbol)
-  (lambda (body) (tagcase body (x-var (n c d cdk) n) (else y '||))))
+  (lambda (body) (tagcase body (x-var (n c d cdk cdkr) n) (else y '||))))
 ;; An operator's mark: its variable's name and identity, past `proj` and
 ;; `the`.
 (define k-operator-mark (->* (kx) k-op-mark)
   (lambda (f)
     (tagcase f
-      (x-var (s a b abk) (product (1 s) (2 (product (1 a) (2 b) (3 abk)))))
-      (x-proj (body ds a b abk) (k-operator-mark body))
-      (x-the (t e a b abk) (k-operator-mark e))
+      (x-var (s a b abk abkr) (product (1 s) (2 (product (1 a) (2 b) (3 abk) (4 abkr)))))
+      (x-proj (body ds a b abk abkr) (k-operator-mark body))
+      (x-the (t e a b abk abkr) (k-operator-mark e))
       ;; `(with #%fx n)`: `n`, as the `with`.
-      (x-with (m body a b abk)
+      (x-with (m body a b abk abkr)
         (tagcase body
-          (x-var (n c d cdk)
-            (if (k-fx-module? m) (product (1 n) (2 (product (1 a) (2 b) (3 abk)))) k-no-operator))
+          (x-var (n c d cdk cdkr)
+            (if (k-fx-module? m) (product (1 n) (2 (product (1 a) (2 b) (3 abk) (4 abkr))))
+                k-no-operator))
           (else y k-no-operator)))
       (else y k-no-operator))))
 ;; A flag, off, for a new innermost binding of `s`.
@@ -474,13 +479,13 @@
 (define k-with-index (ref (table int k-with-list @t) @t)
   (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
 (define k-with-names-in
-  (->* (k-with-list int int int) k-names)
-  (lambda (ws a b k)
+  (->* (k-with-list int int int int) k-names)
+  (lambda (ws a b k kr)
     (cond ((null? ws) nil)
-          ((k-at-is? (extract (car ws) 1) a b k) (extract (car ws) 2))
-          (else (k-with-names-in (cdr ws) a b k)))))
-(define k-with-names (->* (int int int) k-names)
-  (lambda (a b k) (k-with-names-in (table-ref (get k-with-index) a nil) a b k)))
+          ((k-at-is? (extract (car ws) 1) a b k kr) (extract (car ws) 2))
+          (else (k-with-names-in (cdr ws) a b k kr)))))
+(define k-with-names (->* (int int int int) k-names)
+  (lambda (a b k kr) (k-with-names-in (table-ref (get k-with-index) a nil) a b k kr)))
 ;; Note `with` `w`, in the list and by where it starts.
 (define k-note-with (->* (k-with-noted) unit)
   (lambda (w)

@@ -167,10 +167,11 @@
    (val k-syscalls (ref bool @t))
    (val check-syscalls! (subr (maxeff (read @globals) spin (write @t)) (bool) unit))
    (val k-syscall-expanding (ref int @t))
+   (val k-made-readings (ref int @t))
    (val k-unbound (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (symbol) string))
    (val k-operator (ref k-op-mark @t))
    (val k-second-class? (subr pure (symbol) bool))
-   (val k-operator? (subr (maxeff (read @globals) spin (read @t)) (symbol int int int) bool))
+   (val k-operator? (subr (maxeff (read @globals) spin (read @t)) (symbol int int int int) bool))
    (val k-no-operator k-op-mark)
    (val k-named-only (subr pure (symbol) string))
    (val k-fx-name (subr pure (kx) symbol))
@@ -190,8 +191,8 @@
    (val k-note-fixed
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (symbol) unit))
    (val k-hazard-mods (ref k-hazard-list @t))
-   (val k-with-names (subr (maxeff (read @globals) spin (read @t)) (int int int) k-names))
-   (val k-at-is? (subr pure (k-at int int int) bool))
+   (val k-with-names (subr (maxeff (read @globals) spin (read @t)) (int int int int) k-names))
+   (val k-at-is? (subr pure (k-at int int int int) bool))
    (val k-summary (subr (maxeff (read @globals) spin) (k-eff) int))
    (val k-param-map (ref k-params-given @t))
    (val k-param-in

@@ -401,8 +401,8 @@
 ;; (`pick-path`, noted in `k-reshapes`). A side's own abstract types
 ;; the new module's, `e1`'s replacing `e0`'s of their names, refused if what
 ;; is kept mentions one (`k-replaced-check`). As Rust's `Checker::extended`.
-(define k-extended (->* (k-parts int int int) int)
-  (lambda (vs a b which)
+(define k-extended (->* (k-parts int int int int) int)
+  (lambda (vs a b which whichr)
     (let* ((x0 (extract (car vs) 2)) (x1 (extract (car (cdr vs)) 2))
            (r0 (k-taken-abs x0 "first" a b)) (r1 (k-taken-abs x1 "second" a b))
            (m (append (extract r0 2) (extract r1 2)))
@@ -417,7 +417,9 @@
                      (ds (append (k-ext-firsts d0 d1) (k-ext-rest d1 d0)))
                      (out (append (k-ext-firsts v0 v1) (k-ext-rest v1 v0)))
                      (gone (k-parts-not-in a0 (append a1 d1) #t)))
-                (begin (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which))) (2 at))
+                (begin
+                 (set k-reshapes
+                      (cons (product (1 (product (1 a) (2 b) (3 which) (4 whichr))) (2 at))
                                              (get k-reshapes)))
                        (k-replaced-check (append out ds) gone a b)
                        (k-ty-new (ty-module (append (k-parts-not-in a0 (append a1 d1) #f) a1)
@@ -608,7 +610,7 @@
                                          "%hiddenv:" vs dseen
                                          (k-hidden-marks "%hidden:" ds dseen
                                                          (k-hidden-marks "%hidden:" (extract o 1)
-                                                                         dseen (extract r 1))))
+                                                                          dseen (extract r 1))))
                                         (extract r 2) (extract r 3) r)
                              r)
                          own-abs own-ds dseen vseen a b)))
@@ -644,15 +646,15 @@
 ;; values then after it), else from each of `from`. As Rust's
 ;; `Checker::included`.
 (define k-included
-  (->* (k-parts k-parts k-parts k-parts int int int int) int)
-  (lambda (from abs ds own at a b which)
+  (->* (k-parts k-parts k-parts k-parts int int int int int) int)
+  (lambda (from abs ds own at a b which whichr)
     (let* ((dseen (k-see-all (make-table symbol-hash symbol=?) ds))
            (vseen (k-see-all (make-table symbol-hash symbol=?) own))
            (r (k-inc-all from 0 at (product (1 nil) (2 nil) (3 nil) (4 nil) (5 nil)) abs ds dseen
                          vseen a b))
            (m (extract r 5)))
       (begin
-        (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which)))
+        (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which) (4 whichr)))
                                        (2 (append (reverse (extract r 3)) (k-own-at own at 0))))
                               (get k-reshapes)))
         ;; The included modules' own abstract types, then the module's.
@@ -741,8 +743,8 @@
 ;; item …)` hid: each name
 ;; a `%hidden:name` type marks, the markers too; made of the values left
 ;; by position (a reshape, on any it has). As Rust's `Checker::hiding`.
-(define k-hiding (->* (int int int int) int)
-  (lambda (t a b which)
+(define k-hiding (->* (int int int int int) int)
+  (lambda (t a b which whichr)
     (tagcase (k-get t)
       (ty-module (abs ds vs)
         (let ((hs0 (k-hidden-in ds "%hidden:")) (hv0 (k-hidden-in ds "%hiddenv:")))
@@ -750,7 +752,7 @@
               t
               (let* ((hs (k-saw-of hs0)) (hv (k-saw-of hv0))
                      (rs (get k-reshapes))
-                     (mine (and (not (null? rs)) (k-at-is? (extract (car rs) 1) a b which)))
+                     (mine (and (not (null? rs)) (k-at-is? (extract (car rs) 1) a b which whichr)))
                      (at (if mine (extract (car rs) 2) (k-upto (k-length vs) nil)))
                      (out (k-parts-shown vs hv))
                      (shown (k-parts-shown ds hs))
@@ -760,7 +762,8 @@
                 (begin
                   (if (k-identity? path 0 (k-length vs))
                       #u
-                      (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which))) (2 path))
+                      (set k-reshapes
+                           (cons (product (1 (product (1 a) (2 b) (3 which) (4 whichr))) (2 path))
                                             (if mine (cdr rs) rs))))
                   (k-ty-new (ty-module (k-abs-split abs hs #f) shown out)))))))
       (else z t))))
@@ -773,13 +776,14 @@
 (define k-module-type (->* (k-items k-parts k-parts k-parts k-at) int)
   (lambda (items abs ds vs at)
     (let ((k (k-part-position vs '%include 0)) (a (extract at 1)) (b (extract at 2))
-          (which (extract at 3)))
-      (cond ((k-extend-items? items) (k-extended vs a b which))
-            ((k-bucket-items? items) (k-included vs nil nil nil -1 a b which))
+          (which (extract at 3)) (whichr (extract at 4)))
+      (cond ((k-extend-items? items) (k-extended vs a b which whichr))
+            ((k-bucket-items? items) (k-included vs nil nil nil -1 a b which whichr))
             ((>= k 0)
-             (k-hiding (k-included (list (k-nth vs k)) abs ds (k-parts-but vs k 0) k a b which)
-                       a b which))
-            (else (k-hiding (k-ty-new (ty-module abs ds vs)) a b which))))))
+             (k-hiding
+              (k-included (list (k-nth vs k)) abs ds (k-parts-but vs k 0) k a b which whichr)
+                       a b which whichr))
+            (else (k-hiding (k-ty-new (ty-module abs ds vs)) a b which whichr))))))
 
 ;;; ------------------------------------------------------------ with
 

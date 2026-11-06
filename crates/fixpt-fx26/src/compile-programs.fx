@@ -206,12 +206,12 @@
 (define c-literal-of (->* (exp) rconsts)
   (lambda (x)
     (tagcase x
-      (e-int (n a b abk) (the rconsts (cons (rc-int n) nil)))
-      (e-bool (v a b abk) (the rconsts (cons (rc-bool v) nil)))
-      (e-char (v a b abk) (the rconsts (cons (rc-char v) nil)))
-      (e-the (d body a b abk) (c-literal-of body))
-      (e-plambda (d body a b abk) (c-literal-of body))
-      (e-proj (body ds a b abk) (c-literal-of body))
+      (e-int (n a b abk abkr) (the rconsts (cons (rc-int n) nil)))
+      (e-bool (v a b abk abkr) (the rconsts (cons (rc-bool v) nil)))
+      (e-char (v a b abk abkr) (the rconsts (cons (rc-char v) nil)))
+      (e-the (d body a b abk abkr) (c-literal-of body))
+      (e-plambda (d body a b abk abkr) (c-literal-of body))
+      (e-proj (body ds a b abk abkr) (c-literal-of body))
       (else y nil))))
 ;; Module `m`'s member `f`'s literal, in a list; none if it has none: by
 ;; the global `m` names, whose module's members were noted.
@@ -232,18 +232,19 @@
       (cond
         ((not (null? lit)) lit)
         ;; A list nothing writes, of literals: made once, here.
-        ((c-frozen-define-at (exp-start x) (exp-end x) (exp-kth x)) (c-const-list x))
+        ((c-frozen-define-at (exp-start x) (exp-end x) (exp-kth x) (exp-reading x))
+         (c-const-list x))
         (else
           (tagcase x
-            (e-var (n a b abk)
+            (e-var (n a b abk abkr)
               (let ((l (c-where (the cenv nil) n)))
                 (if (null? l)
                     nil
                     (tagcase (car l)
                       (at-global (g) (r-const-in (get r-const-globals) g))
                       (else y nil)))))
-            (e-with (m body a b abk)
-              (tagcase body (e-var (f fa fb fafbk) (c-member-const m f)) (else y nil)))
+            (e-with (m body a b abk abkr)
+              (tagcase body (e-var (f fa fb fafbk fafbkr) (c-member-const m f)) (else y nil)))
             (else y nil)))))))
 ;; The list `x` makes, in a list, if it is one of literals (integers,
 ;; booleans, characters, symbols): `nil`, `(list e …)`, `(cons e l)`, a
@@ -269,11 +270,11 @@
       (if (not (null? lit))
           lit
           (tagcase x
-            (e-sym (s a b abk) (the rconsts (cons (rc-sym s) nil)))
-            (e-the (d body a b abk) (c-const-value body env depth))
-            (e-plambda (d body a b abk) (c-const-value body env depth))
-            (e-proj (body ds a b abk) (c-const-value body env depth))
-            (e-var (n a b abk)
+            (e-sym (s a b abk abkr) (the rconsts (cons (rc-sym s) nil)))
+            (e-the (d body a b abk abkr) (c-const-value body env depth))
+            (e-plambda (d body a b abk abkr) (c-const-value body env depth))
+            (e-proj (body ds a b abk abkr) (c-const-value body env depth))
+            (e-var (n a b abk abkr)
               (let ((k (c-const-in env n)))
                 (if (not (null? k))
                     k
@@ -285,9 +286,9 @@
                           (tagcase (car l)
                             (at-global (g) (r-const-in (get r-const-globals) g))
                             (else y nil)))))))
-            (e-app (f args a b abk)
+            (e-app (f args a b abk abkr)
               (tagcase f
-                (e-var (fname fa fb fafbk)
+                (e-var (fname fa fb fafbk fafbkr)
                   (let ((vs (c-const-values args env depth nil)))
                     (cond ((not (null? (c-const-in env fname))) nil)
                           ((null? vs) nil)
@@ -380,7 +381,7 @@
                    (the r-const-list (cons (cons g (car k)) (get r-const-globals))))))
         (set r-module-consts (c-modules-consts-without (get r-module-consts) g))
         (tagcase x
-          (e-module (items a b abk)
+          (e-module (items a b abk abkr)
             (set r-module-consts
                  (cons (cons g (c-mvals-literal (c-module-values items))) (get r-module-consts))))
           (else y #u))))))
@@ -434,7 +435,7 @@
       (if (null? l)
           #u
           (tagcase (car l)
-            (e-lambda (ps body a b abk) (c-name-word! n))
+            (e-lambda (ps body a b abk abkr) (c-name-word! n))
             (else y #u))))))
 (define c-rec-fill (->* (c-recs (listof wglobal @k) code) unit)
   (lambda (bs gs c)
@@ -467,7 +468,7 @@
           (else (the c-module-list (cons (car ms) (c-modules-without (cdr ms) m)))))))
 ;; Whether `x` is a `module` form.
 (define c-module? (->* (exp) bool)
-  (lambda (x) (tagcase x (e-module (items a b abk) #t) (else y #f))))
+  (lambda (x) (tagcase x (e-module (items a b abk abkr) #t) (else y #f))))
 ;; After `(define m (module …))` is compiled: its members noted, kept by `m`.
 (define c-keep-module! (->* (symbol) unit)
   (lambda (m)
@@ -504,9 +505,9 @@
 (define c-reexport-inline! (->* (symbol exp) unit)
   (lambda (n x)
     (tagcase x
-      (e-with (m body a b abk)
+      (e-with (m body a b abk abkr)
         (tagcase body
-          (e-var (f fa fb fafbk) (c-alias-inline! n f (c-members-of (get c-modules) m)))
+          (e-var (f fa fb fafbk fafbkr) (c-alias-inline! n f (c-members-of (get c-modules) m)))
           (else y #u)))
       (else y #u))))
 ;; Each form in turn; the last expression's value is left on the stack.
@@ -546,7 +547,7 @@
                            (c-note-constant! g x)
                            (c-plan-top x)
                            (tagcase (car (c-lambda-of x))
-                             (e-lambda (ps body la lb lalbk) (c-define-lambda n ps body c))
+                             (e-lambda (ps body la lb lalbk lalbkr) (c-define-lambda n ps body c))
                              (else y (begin (c-exp x (the cenv nil) 0 c #f) (c-form-twins))))
                            (c-op1 c routine-global! (wcell-global g))
                            (c-wrote! g))))
@@ -646,7 +647,7 @@
   (lambda (tops)
     (if (null? tops)
         0
-        (let ((of (lambda ((x exp)) (quotient (exp-kth x) 4294967296))))
+        (let ((of (lambda ((x exp)) (exp-reading x))))
           (tagcase (car tops)
             (t-define (n ty e a b) (of e))
             (t-exp (e) (of e))
