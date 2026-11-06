@@ -4575,7 +4575,15 @@ the Rust checker's view after a resume, which knows nothing of the
 program, so that what needs it (sessions on the Rust checker, `stage`
 lowered) does not see the program's names.
 
-## 190. Q: why is `(define-datatype var (union symbol pat))` accepted? (the user's, 2026-10-31)
+## 190. ~~Q: why is `(define-datatype var (union symbol pat))` accepted?~~ (the user's, 2026-10-31; done 2026-11-05)
+
+Answer: it was read as a datatype of one variant, named `union` (now
+`oneof`), whose members were `symbol` and `pat`, and a constructor
+`oneof` defined. Done (2026-11-05): a variant's tag may not be a type
+form, in both parsers, the refusal saying to write `define-type`; test
+`parser.rs`'s `a_variant_named_by_a_type_form_is_refused`, over every one
+of `parse.rs`'s `TYPE_FORMS`. No variant here, in Heist or in kayak was
+so named.
 
 Find out why this checks as a datatype definition, and whether it
 should: `define-type` would be the right form for it.
@@ -4615,7 +4623,10 @@ With `(define-type tree-loc (listof nat acyclic))`, why is `(the tree-loc
 Make the `(union …)` system treat sums with distinct tags as distinct
 shapes, so that a union may hold two sum types whose tags differ.
 
-## 194. Pending type definitions and `union` (the user's, 2026-10-31)
+## 194. ~~Pending type definitions and `union`~~ (the user's, 2026-10-31; found working 2026-11-05)
+
+Found working (2026-11-05), with `oneof`: the example below checks in
+both checkers, `c` defined after the `a` and `b` that name it.
 
 The pending type definitions (which the user relies on to define
 mutually recursive types one at a time at the REPL) do not work with
@@ -4648,7 +4659,10 @@ Closed (the user's, 2026-11-05): not built in, since it is `(let ((t e1))
 (`docs/research/typed-macros.md`, "The prototype", with what it needs of
 the checker's narrowing on `#f`).
 
-## 198. `(listof T)` short for `(listof T acyclic)` (the user's, 2026-10-31)
+## 198. ~~`(listof T)` short for `(listof T acyclic)`~~ (the user's, 2026-10-31; done 2026-11-05)
+
+Done (2026-11-05), in both checkers; a type still prints with its region.
+Tests: `tests/programs/listof/`.
 
 Make `(listof T)` short for `(listof T acyclic)`, as that is almost always
 what is wanted.

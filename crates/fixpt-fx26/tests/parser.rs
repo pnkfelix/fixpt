@@ -199,6 +199,26 @@ fn case_parse_errors_agree() {
     }
 }
 
+/// No `define-datatype` variant is named by a type form, in either parser
+/// (`TODO.md` §190): `(define-datatype var (oneof symbol pat))` would be
+/// one variant, `oneof`. Each of `parse.rs`'s type forms, so that
+/// `parser.fx`'s list of them cannot fall behind.
+#[test]
+fn a_variant_named_by_a_type_form_is_refused() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    for form in fixpt_fx26::parse::TYPE_FORMS {
+        let text = format!("(define-datatype t (x int) ({form} int))");
+        let ours = s.parse_with_own_parser(&text).expect_err(&text);
+        let mut c = Checker::new();
+        let rust = match c.read_in(FileId(0), &text) {
+            Err(e) => e,
+            Ok(forms) => forms.iter().find_map(|f| c.top(f).err()).expect(&text),
+        };
+        assert!(rust.message.contains("is a type form"), "{text}: {}", rust.message);
+        assert_eq!((ours.message, ours.span.start, ours.span.end), (rust.message, rust.span.start, rust.span.end), "{text}");
+    }
+}
+
 /// What the comparison compares, spelled out once: each expression ends
 /// with where it starts and ends, and which of the expressions there it is,
 /// as the parser numbers them (`parser-ids.fx`): the `#f` that `and` makes

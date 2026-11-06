@@ -750,6 +750,13 @@ impl Checker {
             let Some((tag, members)) = parts.split_first().filter(|(t, _)| t.as_symbol().is_some()) else {
                 return Err(FxError::at(v.span, "a variant is `(tag type …)` or `(#:tag type …)`"));
             };
+            // `(define-datatype var (oneof symbol pat))` is one variant,
+            // `oneof`, not the type `(oneof symbol pat)` (`TODO.md` §190).
+            let t = self.interner.name(tag.as_symbol().unwrap()).to_string();
+            if crate::parse::TYPE_FORMS.contains(&t.as_str()) {
+                let n = self.interner.name(name.as_symbol().unwrap());
+                return Err(FxError::at(v.span, crate::parse::variant_type_form(&t, n)));
+            }
             let mut prod = vec![productof.clone()];
             let mut params = Vec::new();
             let mut fields = vec![product.clone()];

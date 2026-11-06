@@ -10,7 +10,7 @@ mod common;
 
 const DIRS: &[&str] = &[
     "bidirectional", "bloblet", "control", "run", "pldi89", "regions", "datum", "recursive", "terminate", "generative", "lemmas", "sizes",
-    "conventions", "redefine", "modules", "higher-kinds", "unions", "io", "processes", "arrows", "specs", "globals", "allof", "anyof", "tuples",
+    "conventions", "redefine", "modules", "higher-kinds", "unions", "io", "processes", "arrows", "specs", "globals", "allof", "anyof", "tuples", "listof",
 ];
 
 #[test]

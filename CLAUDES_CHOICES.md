@@ -3820,3 +3820,17 @@ Mine:
 - **The refusal** says what to write instead: bind the payload to one
   name and `extract` its fields.
 - An empty `(tuple)` is `(product)`, a `(productof)`.
+
+## A variant named by a type form; `(listof T)` (TODO §190, §198, 2026-11-05)
+
+- **Every type form is refused as a variant's tag**, not only `oneof` and
+  `union`: a constructor `(nat 3)` or `(ref x)` reads as a type wherever
+  it is used. No `define-datatype` here, in Heist or in kayak had one. The
+  FX-26 parser keeps its own list (`parser.fx`'s `dt-type-forms`); a test
+  runs every one of `parse.rs`'s `TYPE_FORMS` through both parsers, so the
+  list cannot fall behind unseen.
+- **`(listof T)` is read as `(listof T acyclic)`**, the region parsed from
+  a written `acyclic`, so it is the same type. Types still print with
+  their region: printing `(listof T)` back would change what every
+  message and `fixpt check` says. `listof` as a description function,
+  written alone, still takes a type and a region.

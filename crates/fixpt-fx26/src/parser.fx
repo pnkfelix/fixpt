@@ -542,6 +542,29 @@
           (if (and (= (len p) 2) (syn-symbol? (car p)))
               (cons (car p) (dt-param-names (cdr ps)))
               (pfail "a parameter is `(name kind)`" (car ps)))))))
+;; The type forms, as `parse.rs`'s `TYPE_FORMS`: no variant's tag (`TODO.md`
+;; §190), as `(define-datatype var (oneof symbol pat))` would be one variant
+;; `oneof`, not the type.
+(define dt-type-forms (listof symbol acyclic)
+  (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
+        'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
+        'sumof 'tupleof 'bool 'oneof 'union 'anyof 'allof '-> '->* 'restrict))
+(define dt-in? (->* (symbol (listof symbol acyclic)) bool)
+  (lambda (x xs) (and (not (null? xs)) (or (symbol=? x (car xs)) (dt-in? x (cdr xs))))))
+;; #t, once no variant of `vs` has a type form's name for its tag.
+(define dt-no-type-forms (->* (syns-a syn) bool)
+  (lambda (vs name)
+    (if (null? vs)
+        #t
+        (let* ((parts (syn-items (car vs) "a variant"))
+               (tag (if (null? parts) (car vs) (dt-tag (car parts)))))
+          (if (and (syn-symbol? tag) (dt-in? (syn-symbol tag) dt-type-forms))
+              (let ((t (syn-name tag)))
+                (pfail (string-append "`" t "` is a type form: this would be a variant named `" t
+                                      "`, not the type; to name a type, write `(define-type "
+                                      (syn-name name) " (" t " …))`")
+                       (car vs)))
+              (dt-no-type-forms (cdr vs) name))))))
 ;; `(define-datatype name (tag type …) …)`, or with parameters,
 ;; `(define-datatype (name (param kind) …) …)`, a type family, which its
 ;; variants may mention with the same parameters: the forms it stands for.
@@ -559,6 +582,7 @@
                              (else (pfail usage s))))
                  (params (if family? (cdr hs) (the syns-a nil)))
                  (used (if family? (mk-list (cons name (dt-param-names params)) a b) name))
+                 (named (dt-no-type-forms (drop items 2) name))
                  (sum (mk-form "sumof" (dt-arms (drop items 2) a b) a b))
                  (ctors (dt-constructors used family? params (drop items 2) a b)))
             (cons (mk-form "define-type" (list head sum) a b) ctors))))))

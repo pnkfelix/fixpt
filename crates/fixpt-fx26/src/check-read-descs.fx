@@ -454,8 +454,11 @@
         ((mu) (k-parse-mu s items))
         ((listof)
          (begin
-           (k-shape (= n 3) "`(listof type region)`" s)
-           (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2)))
+           ;; Without a region, `acyclic` (`TODO.md` §198).
+           (k-shape (or (= n 2) (= n 3)) "`(listof type [region])`" s)
+           (let* ((t (k-parse-type (k-nth items 1)))
+                  (acyclic (atom 'acyclic (syn-start s) (syn-end s)))
+                  (r (k-parse-region (if (= n 2) acyclic (k-nth items 2))))
                   (slot (k-slot)) (pair (k-ty-new (ty-pair t slot r #t))))
              (begin (k-set-link slot pair) slot))))
         ((prompt-tag)

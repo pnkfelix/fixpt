@@ -63,10 +63,16 @@ const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kin
 const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a definition declares (`define`, `define-rec`, `letrec`), \
      its effect found from its `lambda`: here, write `->` or `subr`";
 
-const TYPE_FORMS: &[&str] = &[
+pub const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
     "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "tupleof", "bool", "oneof", "union", "anyof", "allof", "->", "->*", "restrict",
 ];
+
+/// Why a `define-datatype` variant may not be named `form`, a type form,
+/// in the datatype `name` (`TODO.md` §190).
+pub(crate) fn variant_type_form(form: &str, name: &str) -> String {
+    format!("`{form}` is a type form: this would be a variant named `{form}`, not the type; to name a type, write `(define-type {name} ({form} …))`")
+}
 
 impl Checker {
     pub(crate) fn name(&self, s: Sym) -> &str {
@@ -865,12 +871,16 @@ impl Checker {
             }
             "listof" => {
                 // FX-87's `listof`: a pair whose tail is the list itself, or
-                // the empty list, `nil`.
-                let [_, t, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(listof type region)`"));
+                // the empty list, `nil`. Without a region, `acyclic`
+                // (`TODO.md` §198).
+                let (t, r) = match &items[..] {
+                    [_, t] => {
+                        let acyclic = Syntax::symbol(s.span, self.interner.intern("acyclic"));
+                        (self.parse_type(t)?, self.parse_region(&acyclic)?)
+                    }
+                    [_, t, r] => (self.parse_type(t)?, self.parse_region(r)?),
+                    _ => return Err(FxError::at(s.span, "`(listof type [region])`")),
                 };
-                let t = self.parse_type(t)?;
-                let r = self.parse_region(r)?;
                 let slot = self.arena.ty(Ty::Link(None));
                 let pair = self.arena.ty(Ty::Pair(t, slot, r, true));
                 self.arena.set_link(slot, pair);
