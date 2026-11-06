@@ -5212,3 +5212,12 @@ declaration is told apart by how it is written, not by its position. It
 came up over `define-syntax`, whose signature is known as one only by
 being the form's second item (`typed-macros.md`, "The prototype, as
 built"); a parameter's `(x : T)` is the one place FX-26 writes it now.
+
+## 214. Identity by position, spans for provenance (the user's, 2026-11-06)
+Decided: `docs/research/loads-and-places.md`, "Decided: identity by
+position". An expression's identity becomes `(form n last)`, its number
+in a walk of its form and its subtree's last, in both front ends and the
+`Kth` bridge; the Rust checker's span-as-identity uses go; spans become
+provenance with an expansion record. Then the printed expansion's source
+map, then macros' `(many σ)` (`typed-macros.md`). Later, apart: caching
+macro expansion steps.

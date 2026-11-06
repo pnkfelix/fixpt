@@ -237,3 +237,42 @@ What stays: the hidden global, as the store that makes a load one value,
 made once (option B would make that a table of the session's); and the
 front end written in FX-26 finds a file read for it by where its load
 starts, as Rust supplies them.
+
+## Decided: identity by position, spans for provenance (2026-11-06)
+
+The user's reading: a source location serves two roles, provenance (where
+to edit) and a proxy for what defines a fact, the expression and its
+context. Macros break the proxy: a template's nodes share the use's span,
+and an argument placed twice is one span at two positions. So the two
+roles are split.
+
+- **An expression's identity is its position**, `(form n last)`: the form
+  a number given to each top-level form as it is checked (a program's in
+  order, a loaded file's, its hidden globals, each REPL entry), never
+  reused; `n` the expression's number in the walk `number-tops` and `Kth`
+  already make, each before what is in it, from 0 in each form; `last`
+  the greatest number inside it. `x` is inside `e` when `n(e) ≤ n(x) ≤
+  last(e)`. Numbered on the parsed trees, after the parsers' rewrites, so
+  a made expression is numbered where it is, with no count at its
+  origin's span.
+- **Not a summary of expression and context.** Facts keyed by a summary
+  are sound only if it holds all the checkers consult (expected type,
+  narrowings, the `allof` member, masks, what shadows `#%fx`'s names),
+  computed alike by both; a position is the finest such key and needs no
+  proof. A summary may come later as a memo over it, where measurement
+  shows repeated checking in one context.
+- **Spans are provenance**, for messages and edits. An argument's nodes
+  keep its span; a template's nodes their own place in the
+  `define-syntax`; each expanded node an expansion record (the macro, the
+  use's span, the expansion it is in), carried by the span. An error
+  found in both copies of an argument is said once.
+- **Replaces**: `k-at`'s `(start end k)` in the FX-26 front end; `Kth`'s
+  table (`ExpId` to the position, so the Rust checker's facts reach the
+  FX-26 compiler alike); in the Rust checker, the places that read spans
+  as identity or containment (`check_allof_lambda`'s lambdas and dead
+  arms, `split_tries`' kept facts, `lambda_cert`'s free names, blame by
+  `err.span == span_of(x)`, `literal_value`).
+- **Order**: identity first, in both checkers, measured on `peval`; then
+  provenance and the printed expansion's source map; then `(many σ)`
+  (`typed-macros.md`).
+- **Later, not this story**: caching macro expansion steps.
