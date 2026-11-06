@@ -5204,3 +5204,11 @@ the way:
   not wherever the types say `spin` (Heist's refusal said it of control).
   **Left**: naming the prompt, and the free variable, that kept it from
   delimiting.
+
+## 213. Explicit colons where something is declared a bound (the user's, 2026-11-06)
+Not now. A possible broader revision of FX-26's syntax: an explicit `:`
+wherever one thing is declared a bound or constraint on another, so a
+declaration is told apart by how it is written, not by its position. It
+came up over `define-syntax`, whose signature is known as one only by
+being the form's second item (`typed-macros.md`, "The prototype, as
+built"); a parameter's `(x : T)` is the one place FX-26 writes it now.
