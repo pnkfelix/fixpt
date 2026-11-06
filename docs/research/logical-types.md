@@ -744,6 +744,20 @@ refs, and the conditions are what keep refs out.
    still an error. Davies' refinement checking has the same rule. With
    it, the swap above checks: under `expr`, `mac` and `seq` are skipped,
    and a `lam` rebuilt from a symbol and a swapped `expr` is an `expr`.
+   - *Shape tests* (2026-11-05, the user's, from their λm `swap` written
+     with `cond`). An `if`'s branch (so a `cond`'s clause, and a
+     `typecase`'s arm, which are `if`s of shape tests) is skipped under a
+     member where its test narrows a variable to `void`: a shape test the
+     variable's type cannot pass, or cannot fail (`null?` of a `symbol`,
+     `symbol?` of a sum), narrows it to `void` while an `allof` is checked
+     (outside one, nothing changes). One skipped under every member is
+     checked under the last, as it would be outside an `allof`, so that its
+     code has facts and its errors are said; not refused, as an `if` with
+     a branch no value takes is not refused elsewhere. A skipped branch's
+     facts are not compared (rule 3): its place is the whole of the chain
+     a `cond` or `typecase` makes (`Checker::extent`, `k-extent`), each
+     `typecase` arm's parts at the arm, as a `cond` clause's are. Tests
+     `allof/cond-dead*.fx`, `allof/typecase-dead.fx`.
 3. **One body, one code.** The compilers read facts the checker records
    per node (conversions, reshapes, standard operators, operand types,
    sizes). Checked once per member, a node gets them once per member;

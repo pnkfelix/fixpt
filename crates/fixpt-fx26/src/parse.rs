@@ -2198,7 +2198,7 @@ impl Checker {
                 return Err(FxError::at(shape.span, format!("a shape `typecase` tests is one of {}", shapes.join(", "))));
             };
             let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
-            tests.push((pred, x, self.parse_exp(body)?));
+            tests.push((pred, x, self.parse_exp(body)?, arm.span));
         }
         // `(else body)`, or `(else name body)`, `name` the value as what
         // the arms leave it.
@@ -2212,18 +2212,20 @@ impl Checker {
         if head.as_symbol().map(|h| self.name(h)) != Some("else") {
             return Err(FxError::at(last.span, else_usage));
         }
+        // Each arm's parts at the arm, as a `cond`'s clause's are: where an
+        // arm is skipped under a member of an `allof`, that is all it skips.
         let mut chain = self.parse_exp(body)?;
         if let Some(x) = name {
-            let v = self.arena.exp(span, Exp::Var(tmp));
-            chain = self.arena.exp(span, Exp::Let { bindings: vec![(x, v)], body: chain });
+            let v = self.arena.exp(last.span, Exp::Var(tmp));
+            chain = self.arena.exp(last.span, Exp::Let { bindings: vec![(x, v)], body: chain });
         }
-        for (pred, x, body) in tests.into_iter().rev() {
-            let f = self.standard_ref_at(span, pred);
-            let a = self.arena.exp(span, Exp::Var(tmp));
-            let test = self.arena.exp(span, Exp::App { fun: f, args: vec![a] });
-            let v = self.arena.exp(span, Exp::Var(tmp));
-            let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, v)], body });
-            chain = self.arena.exp(span, Exp::If { test, then, els: chain });
+        for (pred, x, body, at) in tests.into_iter().rev() {
+            let f = self.standard_ref_at(at, pred);
+            let a = self.arena.exp(at, Exp::Var(tmp));
+            let test = self.arena.exp(at, Exp::App { fun: f, args: vec![a] });
+            let v = self.arena.exp(at, Exp::Var(tmp));
+            let then = self.arena.exp(at, Exp::Let { bindings: vec![(x, v)], body });
+            chain = self.arena.exp(at, Exp::If { test, then, els: chain });
         }
         Ok(match e {
             Some(e) => self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: chain }),

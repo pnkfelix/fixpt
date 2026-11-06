@@ -364,12 +364,16 @@ fn every_directory_surveyed() {
 const KNOWN_GAPS: &[&str] = &[
     // The verifier has no rule for `allof` yet (`TODO.md` §79, U1): a body
     // checked against each member, a call taking every member it fits.
+    "allof/cond-dead.fx `program`",
+    "allof/cond-dead.fx `swap@727`",
     "allof/fresh-elsewhere.fx `program`",
     "allof/frozen-results.fx `program`",
     "allof/frozen-ring.fx `program`",
     "allof/meet.fx `program`",
     "allof/swap.fx `program`",
     "allof/swap.fx `swap@1194`",
+    "allof/typecase-dead.fx `program`",
+    "allof/typecase-dead.fx `swap@625`",
     // Nor for a call taking a union argument apart by its members (U3): a
     // call whose argument is each member in turn.
     "anyof/allof-split.fx `go`",

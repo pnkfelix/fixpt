@@ -3778,3 +3778,24 @@ from run to run, and right where the name is shadowed.
    says `alloc` (a Rust test), and no cell is polymorphic
    (`allof/poly-cell.fx`). Each refusal test keeps, after the refused
    form, the lines that would go wrong.
+
+## Dead branches of shape tests under an `allof` member (2026-11-05; the user's)
+
+1. **`void` by narrowing**: where a shape test cannot pass (or fail) for a
+   type that is no union (`narrowed_by` gives nothing), the variable is
+   narrowed to `void`, only while an `allof` is checked
+   (`!dead_arms.is_empty()`, `k-dead-arms` not empty). Outside one, every
+   program checks as before, and its messages are unchanged.
+2. **Dead under every member: checked under the last**, not refused: a
+   `tagcase` arm with no tag is a misspelling; an `if` branch no member
+   takes is dead code, which Fixpt checks elsewhere. Checked, the code has
+   the facts the compilers need. Counted by distinct members (a branch
+   met twice under one member is once), keyed by node (`ExpId`; in FX-26
+   start, end and `kth`).
+3. **A `typecase` arm's parts at the arm**, in both parsers, where they
+   were at the whole `typecase`: a skipped arm then hides only its own
+   facts from rule 3, not the live arms'. Messages at an arm's test or
+   binding now point at the arm.
+4. **Termination is not judged per member** (U1's open item): a recursive
+   `allof` whose calls fit another member says `spin` where it ends
+   (`cond-dead.fx`); the user's `swap` in `herman.fx` checks as `pure`.

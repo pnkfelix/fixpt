@@ -89,10 +89,15 @@
 ;; per `allof`, innermost first (`check-allof.fx`): each `tagcase` arm a
 ;; member's type rules out, skipped, by its body's place, with how many
 ;; members skipped it and what its error names (the subject's type, the
-;; tag); and where the member being checked skipped one. Rust's `DeadArms`.
+;; tag); and where the member being checked skipped one; how many members
+;; there are, which is checked, and each `if` branch skipped, by its place,
+;; with the members that skipped it. Rust's `DeadArms`.
 (define-type k-dead-arm (productof (1 int) (2 int) (3 int) (4 int) (5 symbol)))
 (define-type k-spans (listof (productof (1 int) (2 int)) acyclic))
-(define-type k-dead-frame (productof (1 (listof k-dead-arm acyclic)) (2 k-spans)))
+(define-type k-dead-branch (productof (1 k-at) (2 (listof int acyclic))))
+(define-type k-dead-frame
+  (productof (1 (listof k-dead-arm acyclic)) (2 k-spans) (3 int) (4 int)
+             (5 (listof k-dead-branch acyclic))))
 (define-type k-dead-frames (listof k-dead-frame acyclic))
 ;; `with`'s `select` nodes and what each falls back to (`k-with-fallbacks`).
 (define-type k-fallbacks (listof (productof (1 int) (2 int)) acyclic))

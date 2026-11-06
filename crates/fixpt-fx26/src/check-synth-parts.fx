@@ -406,6 +406,18 @@
                (and (symbol=? (extract n 1) v) (= (extract n 2) d) (k-steps=? (extract n 3) steps)))
              (the k-nars (cons one (cdr out))))
             (else (the k-nars (cons (car out) (k-nars-put (cdr out) v d steps rs t))))))))
+;; What a shape test narrows a `t` to, `to` (-1, nothing): checked against a
+;; member of an `allof`, where `t` cannot pass it (or fail it, `negated`),
+;; `void`, and its branch is skipped (`k-dead-branch?`). As `props_narrow`.
+(define k-narrowed-or-void (->* (int int bool int) int)
+  (lambda (t k negated to)
+    (if (or (>= to 0) (null? (get k-dead-arms)))
+        to
+        (let ((s (k-run-shape t)) (bit (k-shape-bit k)))
+          (cond ((<= s 0) to)
+                ((and (not negated) (= (bitwise-and s bit) 0)) k-void)
+                ((and negated (= (bitwise-and s bit) s)) k-void)
+                (else to))))))
 ;; The variables and paths among `args` narrowed by `props`, a conjunction:
 ;; each proposition of a shape, in turn.
 (define k-props-narrow (->* (k-props kxs k-nars) k-nars)
@@ -426,7 +438,9 @@
                     (let* ((shape (tagcase p (pr-shape (i k f) k) (else y 0)))
                            (negated (tagcase p (pr-shape (i k f) f) (else y #f)))
                            (split (k-narrowed-by (k-resolve (extract (car tr) 1)) shape))
-                           (to (if negated (extract split 2) (extract split 1))))
+                           (to (k-narrowed-or-void
+                                (k-resolve (extract (car tr) 1)) shape negated
+                                (if negated (extract split 2) (extract split 1)))))
                       (k-props-narrow
                        (cdr props) args
                        (if (< to 0) out (k-nars-put out n d steps (extract (car tr) 2) to)))))))))))

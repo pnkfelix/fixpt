@@ -39,7 +39,7 @@
 
 ;; The types it uses of the files before it.
 (hide (include check-types-types) (include check-env-types) (include check-allof-types))
-(import check-synth-types (type k-done))
+(import check-synth-types (type k-done k-nars))
 (import check-subtype-types (type k-checking))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
@@ -70,7 +70,10 @@
           (begin (k-fail-no-part st " has no tag " tag a b) #f)
           (let* ((f (car fs)) (arms (k-dead-counted (extract f 1) st tag a b))
                  (now (the k-spans (cons (product (1 a) (2 b)) (extract f 2)))))
-            (begin (set k-dead-arms (cons (product (1 arms) (2 now)) (cdr fs))) #t))))))
+            (begin (set k-dead-arms (cons (product (1 arms) (2 now) (3 (extract f 3))
+                                                   (4 (extract f 4)) (5 (extract f 5)))
+                                          (cdr fs)))
+                   #t))))))
 ;; `arms` with the one at `a`..`b` counted once more, its error's type `st`.
 (define k-dead-counted (->* ((listof k-dead-arm acyclic) int symbol int int)
                             (listof k-dead-arm acyclic))
@@ -91,6 +94,68 @@
                          (< (extract (car arms) 2) (extract (car best) 2)))))
            (k-dead-in-all (cdr arms) n (list (car arms))))
           (else (k-dead-in-all (cdr arms) n best)))))
+
+;; Whether an `if`'s branch `x` is skipped: checked against a member of an
+;; `allof`, the test narrows a variable to `void` there (`ns`, its
+;; narrowing), so it cannot run (rule 2, as a `tagcase`'s arm), unless
+;; every member but this last one skipped it; noted. Rust's `dead_branch`.
+(define k-dead-branch? (->* (k-nars kx) bool)
+  (lambda (ns x)
+    (let ((fs (get k-dead-arms)) (key (k-at-of x)))
+      (if (or (null? fs) (not (k-nars-void? ns)))
+          #f
+          (let* ((f (car fs)) (at (extract f 4))
+                 (skipped (k-branch-skipped (extract f 5) key)))
+            (if (and (= (+ at 1) (extract f 3)) (k-all-below? skipped at))
+                #f
+                (begin
+                  (set k-dead-arms
+                       (cons (product (1 (extract f 1))
+                                      (2 (the k-spans (cons (k-extent x) (extract f 2))))
+                                      (3 (extract f 3)) (4 at)
+                                      (5 (k-branch-noted (extract f 5) key at)))
+                             (cdr fs)))
+                  #t)))))))
+;; Where `x` is in the text, all of it: an `if` made of a `cond`'s clause
+;; (or a `typecase`'s arm) is at that clause, its `else` at the next, so
+;; the clauses after are added. As `Checker::extent`.
+(define k-extent (->* (kx) (productof (1 int) (2 int)))
+  (lambda (x)
+    (tagcase x
+      (x-if (p c d a b abk)
+        (let ((u (k-extent c)) (v (k-extent d)))
+          (product (1 (min a (min (extract u 1) (extract v 1))))
+                   (2 (max b (max (extract u 2) (extract v 2)))))))
+      (else y (product (1 (k-start x)) (2 (k-end x)))))))
+(define k-nars-void? (->* (k-nars) bool)
+  (lambda (ns)
+    (and (not (null? ns))
+         (or (= (k-resolve (extract (car ns) 5)) k-void) (k-nars-void? (cdr ns))))))
+;; The members that skipped the branch `key`.
+(define k-branch-skipped (->* ((listof k-dead-branch acyclic) k-at) (listof int acyclic))
+  (lambda (bs key)
+    (cond ((null? bs) nil)
+          ((k-at=? (extract (car bs) 1) key) (extract (car bs) 2))
+          (else (k-branch-skipped (cdr bs) key)))))
+(define k-branch-noted (->* ((listof k-dead-branch acyclic) k-at int)
+                            (listof k-dead-branch acyclic))
+  (lambda (bs key at)
+    (cond ((null? bs) (list (product (1 key) (2 (list at)))))
+          ((k-at=? (extract (car bs) 1) key)
+           (cons (product (1 key) (2 (cons at (extract (car bs) 2)))) (cdr bs)))
+          (else (cons (car bs) (k-branch-noted (cdr bs) key at))))))
+;; Whether every member before `at` is among `ms`.
+(define k-all-below? (->* ((listof int acyclic) int) bool)
+  (lambda (ms at)
+    (or (= at 0) (and (k-int-in? ms (- at 1)) (k-all-below? ms (- at 1))))))
+(define k-int-in? (->* ((listof int acyclic) int) bool)
+  (lambda (ms i) (and (not (null? ms)) (or (= (car ms) i) (k-int-in? (cdr ms) i)))))
+;; An `if`'s branch `x`, found or checked against `expected`, or skipped
+;; (`k-dead-branch?`), of type `void`.
+(define k-branch-synth (->* (kx k-nars k-synth-fn) k-te)
+  (lambda (x ns synth) (if (k-dead-branch? ns x) (k-te k-void nil) (synth x))))
+(define k-branch-check (->* (kx int k-nars k-check-fn) k-eff)
+  (lambda (x expected ns check) (if (k-dead-branch? ns x) nil (check x expected))))
 
 ;;; ------------------------------------------------------------ facts
 
@@ -235,7 +300,9 @@
 ;; (`logical-types.md` §8.5): its effect.
 (define k-allof-lambda (->* (kx int k-check-fn) k-eff)
   (lambda (x t check)
-    (let* ((pushed (set k-dead-arms (cons (product (1 nil) (2 nil)) (get k-dead-arms))))
+    (let* ((n (k-length (k-allof-members-of t)))
+           (pushed (set k-dead-arms (cons (product (1 nil) (2 nil) (3 n) (4 0) (5 nil))
+                                          (get k-dead-arms))))
            (r (prompt k-tag (k-done (k-allof-run x (k-allof-members-of t) check))
                       (lambda (r) r)))
            (popped (set k-dead-arms (cdr (get k-dead-arms)))))
@@ -246,7 +313,7 @@
 (define k-allof-run (->* (kx k-ids k-check-fn) k-te)
   (lambda (x ms check)
     (let* ((saved (k-code-now))
-           (found (k-allof-each x ms check saved))
+           (found (k-allof-each x ms check saved 0))
            (dead (k-dead-in-all (extract (car (get k-dead-arms)) 1) (k-length ms) nil)))
       (begin
         (if (null? dead)
@@ -261,18 +328,20 @@
         (k-te -1 (extract found 2))))))
 ;; Each member checked, from the facts as they were (`saved`): what each
 ;; found, in order, and the effect.
-(define k-allof-each (->* (kx k-ids k-check-fn k-code)
+(define k-allof-each (->* (kx k-ids k-check-fn k-code int)
                           (productof (1 (listof k-found acyclic)) (2 k-eff)))
-  (lambda (x ms check saved)
+  (lambda (x ms check saved at)
     (if (null? ms)
         (product (1 (the (listof k-found acyclic) nil)) (2 (the k-eff nil)))
         (let* ((reset (begin (k-code-put-back saved)
-                             (set k-dead-arms (cons (product (1 (extract (car (get k-dead-arms)) 1))
-                                                             (2 (the k-spans nil)))
-                                                    (cdr (get k-dead-arms))))))
+                             (let ((f (car (get k-dead-arms))))
+                               (set k-dead-arms
+                                    (cons (product (1 (extract f 1)) (2 (the k-spans nil))
+                                                   (3 (extract f 3)) (4 at) (5 (extract f 5)))
+                                          (cdr (get k-dead-arms)))))))
                (e (check x (car ms)))
                (f (k-found-since saved (extract (car (get k-dead-arms)) 2)))
-               (rest (k-allof-each x (cdr ms) check saved)))
+               (rest (k-allof-each x (cdr ms) check saved (+ at 1))))
           (product (1 (cons f (extract rest 1))) (2 e))))))
 ;; Each two members' found alike (`j` from 1), or an error.
 (define k-found-agree (->* (kx k-ids (listof k-found acyclic) int) unit)

@@ -571,7 +571,8 @@
              (let* ((e (parse-exp (nth items 1))) (tmp (fresh-name "%typecase-value" items)))
                (e-let (one-let tmp e) (parse-typecase-arms (drop items 2) tmp a b) a b 0))))))
   (parse-typecase-arms (->* (syns-a symbol int int) exp)
-    (lambda (arms tmp a b)
+    (lambda (arms tmp a b)                  ; each arm's parts at the arm, as a `cond`'s clause's
+     (let ((aa (syn-start (car arms))) (ab (syn-end (car arms))))
       (if (null? (cdr arms))
           ;; `(else body)`, or `(else name body)`, `name` the value as what
           ;; the arms leave it.
@@ -588,7 +589,7 @@
                               #u
                               (pfail typecase-else (car arms))))
                  (body (parse-exp (nth parts (- n 1)))))
-            (if (= n 3) (e-let (one-let name (e-var tmp a b 0)) body a b 0) body))
+            (if (= n 3) (e-let (one-let name (e-var tmp aa ab 0)) body aa ab 0) body))
           (let* ((parts (syn-items (car arms) typecase-usage))
                  (shaped (if (= (len parts) 3) #u (pfail typecase-usage (car arms))))
                  (shape (car parts))
@@ -599,8 +600,8 @@
                         (pfail "a name" (nth parts 1))))
                  (body (parse-exp (nth parts 2)))
                  (rest (parse-typecase-arms (cdr arms) tmp a b)))
-            (e-if (call-tmp pred tmp nil a b) (e-let (one-let x (e-var tmp a b 0)) body a b 0) rest
-                  a b 0)))))
+            (e-if (call-tmp pred tmp nil aa ab) (e-let (one-let x (e-var tmp aa ab 0)) body aa ab 0)
+                  rest aa ab 0))))))
   ;; `(case key ((datum …) e …) … (else e …))` on atoms (`TODO.md` §46):
   ;; `(let ((%case-key key)) …)` and nested `if`s, each datum compared by
   ;; its kind's equality. The data are of one kind and distinct, and the

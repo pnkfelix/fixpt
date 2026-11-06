@@ -327,9 +327,10 @@ impl Checker {
                 let (narrow_yes, narrow_no) = self.narrowings(test);
                 let depth = self.size_facts.len();
                 let narrowed = (self.narrowed.len(), self.path_narrowed.len());
+                let dead = [self.dead_branch(e, 0, &narrow_yes), self.dead_branch(e, 1, &narrow_no)];
                 self.size_facts.extend(yes);
                 self.push_narrowings(narrow_yes);
-                let ae = self.check(then, expected);
+                let ae = if dead[0] { Ok(Effect::pure()) } else { self.check(then, expected) };
                 self.size_facts.truncate(depth);
                 self.narrowed.truncate(narrowed.0);
                 self.path_narrowed.truncate(narrowed.1);
@@ -345,7 +346,7 @@ impl Checker {
                 let ae = ae?;
                 self.size_facts.extend(no);
                 self.push_narrowings(narrow_no);
-                let be = self.check(els, expected);
+                let be = if dead[1] { Ok(Effect::pure()) } else { self.check(els, expected) };
                 self.size_facts.truncate(depth);
                 self.narrowed.truncate(narrowed.0);
                 self.path_narrowed.truncate(narrowed.1);
@@ -420,11 +421,13 @@ impl Checker {
         // Each member's code facts, and where it checked nothing.
         let mut found: Vec<(HashMap<(ExpId, u8), CodeFact>, Vec<fixpt_read::Span>)> = Vec::new();
         let mut eff = Effect::pure();
-        self.dead_arms.push(crate::check::DeadArms::default());
+        self.dead_arms.push(crate::check::DeadArms { members: members.len(), ..Default::default() });
         let mut checked = || -> R<()> {
-            for m in members {
+            for (at, m) in members.iter().enumerate() {
                 self.facts.code_put_back(&saved);
-                self.dead_arms.last_mut().expect("pushed").now.clear();
+                let dead = self.dead_arms.last_mut().expect("pushed");
+                dead.now.clear();
+                dead.at = at;
                 eff = self.check(e, *m)?;
                 let skipped = std::mem::take(&mut self.dead_arms.last_mut().expect("pushed").now);
                 found.push((self.facts.code_facts(), skipped));

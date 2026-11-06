@@ -870,10 +870,18 @@ impl NodeFacts {
     }
 }
 
-/// The `tagcase` arms skipped while one `lambda` is checked against each
-/// member of an `allof` (`Checker::dead_arms`).
+/// The `tagcase` arms and `if` branches skipped while one `lambda` is
+/// checked against each member of an `allof` (`Checker::dead_arms`).
 #[derive(Default)]
 pub(crate) struct DeadArms {
+    /// How many members there are, and which is being checked.
+    pub(crate) members: usize,
+    pub(crate) at: usize,
+    /// Each `if`'s branch (0, its `then`; 1, its `else`), with the members
+    /// that skipped it: one that every member before the last skipped is
+    /// checked under the last, so that its code has facts, and its errors
+    /// are what they would be.
+    pub(crate) branches: HashMap<(ExpId, u8), HashSet<usize>>,
     /// Each, by its `tagcase` and place, with how many members skipped it
     /// and the error it would have been: one skipped under every member is
     /// that error.
@@ -1853,7 +1861,18 @@ impl Checker {
                 },
             };
             let (yes, no) = self.narrowed_by(t, 1u32 << shape);
-            let Some(t) = (if negated { no } else { yes }) else { continue };
+            let t = match if negated { no } else { yes } {
+                Some(t) => t,
+                // Checked against a member of an `allof`, a test of a type
+                // that cannot pass it (or fail it) leaves its branch no
+                // value: `void`, and the branch is skipped (`dead_branch`).
+                None if !self.dead_arms.is_empty() => match self.shape(t) {
+                    Some(s) if s != 0 && !negated && s & (1u32 << shape) == 0 => self.void,
+                    Some(s) if s != 0 && negated && s & !(1u32 << shape) == 0 => self.void,
+                    _ => continue,
+                },
+                None => continue,
+            };
             match k {
                 Some(k) => out[k].4 = t,
                 None => out.push((v, i, steps, regions, t)),
@@ -1936,6 +1955,46 @@ impl Checker {
     }
 
     /// Narrowings, of variables and of paths, put in force.
+    /// Whether `if` `e`'s branch `side` (0, `then`; 1, `else`) is skipped:
+    /// checked against a member of an `allof`, it narrows a variable to
+    /// `void`, so cannot run (`docs/research/logical-types.md` §8.5, rule
+    /// 2, as a `tagcase`'s arm), unless every member but this last one
+    /// skipped it. Noted, so that the member's facts there are not
+    /// compared.
+    pub(crate) fn dead_branch(&mut self, e: ExpId, side: u8, ns: &[Narrowed]) -> bool {
+        let void = ns.iter().any(|n| matches!(self.arena.get(n.4), Ty::Void));
+        let span = self.extent(match (self.arena.exp_at(e), side) {
+            (Exp::If { then, .. }, 0) => *then,
+            (Exp::If { els, .. }, _) => *els,
+            _ => e,
+        });
+        let Some(dead) = self.dead_arms.last_mut().filter(|_| void) else { return false };
+        let at = dead.at;
+        let skipped = dead.branches.entry((e, side)).or_default();
+        if at + 1 == dead.members && (0..at).all(|i| skipped.contains(&i)) {
+            return false;
+        }
+        skipped.insert(at);
+        dead.now.push(span);
+        true
+    }
+
+    /// Where `e` is in the text, all of it: an `if` made of a `cond`'s
+    /// clause (or a `typecase`'s arm) is at that clause, and its `else` at
+    /// the next, so the clauses after are added.
+    fn extent(&self, e: ExpId) -> fixpt_read::Span {
+        let mut span = self.arena.span_of(e);
+        if let Exp::If { then, els, .. } = self.arena.exp_at(e) {
+            for x in [*then, *els] {
+                let s = self.extent(x);
+                if s.file == span.file {
+                    span = fixpt_read::Span::new(span.file, span.start.min(s.start), span.end.max(s.end));
+                }
+            }
+        }
+        span
+    }
+
     pub(crate) fn push_narrowings(&mut self, ns: Vec<Narrowed>) {
         for (v, i, steps, regions, t) in ns {
             if steps.is_empty() {
@@ -2619,9 +2678,10 @@ impl Checker {
                 let (narrow_yes, narrow_no) = self.narrowings(test);
                 let depth = self.size_facts.len();
                 let narrowed = (self.narrowed.len(), self.path_narrowed.len());
+                let dead = [self.dead_branch(e, 0, &narrow_yes), self.dead_branch(e, 1, &narrow_no)];
                 self.size_facts.extend(yes);
                 self.push_narrowings(narrow_yes);
-                let a = self.synth(then);
+                let a = if dead[0] { Ok((self.void, Effect::pure())) } else { self.synth(then) };
                 self.size_facts.truncate(depth);
                 self.narrowed.truncate(narrowed.0);
                 self.path_narrowed.truncate(narrowed.1);
@@ -2637,7 +2697,7 @@ impl Checker {
                 let (a, ae) = a?;
                 self.size_facts.extend(no);
                 self.push_narrowings(narrow_no);
-                let b = self.synth(els);
+                let b = if dead[1] { Ok((self.void, Effect::pure())) } else { self.synth(els) };
                 self.size_facts.truncate(depth);
                 self.narrowed.truncate(narrowed.0);
                 self.path_narrowed.truncate(narrowed.1);
