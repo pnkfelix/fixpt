@@ -1737,6 +1737,14 @@ fn speculative_notes(session: &mut Fx26Session, text: &str, p: &crate::speculate
 }
 
 fn speculative_notes_now(session: &mut Fx26Session, text: &str, p: &crate::speculate::Partial) -> Vec<Note> {
+    // A macro defined in what is typed is defined for it alone.
+    let kept = session.checker.macros_kept();
+    let notes = speculative_notes_read(session, text, p);
+    session.checker.macros_put_back(kept);
+    notes
+}
+
+fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::speculate::Partial) -> Vec<Note> {
     let c = &mut session.checker;
     let Ok(forms) = c.read_in(FileId(0), &p.closed) else { return Vec::new() };
     // A finished entry of types that names types not defined yet would wait,
@@ -1856,6 +1864,16 @@ mod speculative {
         for text in ["(if", "(if #t", "(+ 1", "(lambda ((x int))"] {
             assert!(notes(text).iter().all(|n| !n.error), "{text:?}: {:?}", notes(text));
         }
+    }
+
+    /// A macro defined in what is typed is used there, and is not defined
+    /// once it is gone (`typed-macros.md`, item 6).
+    #[test]
+    fn a_macro_typed_is_defined_for_it_alone() {
+        let mut s = session();
+        let n = notes_in(&mut s, "(define-syntax m (expr) ((_ e) e)) (m 5)");
+        assert!(n.iter().all(|n| !n.error), "{n:?}");
+        assert!(notes_in(&mut s, "(m 5)").first().is_some_and(|n| n.error));
     }
 
     #[test]

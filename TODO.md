@@ -4303,12 +4303,15 @@ notes).
 Design: `docs/research/typed-macros.md` (Herman's syntax types as FX-26
 `data` types over generative `expr` and `bvar`, his binding signatures as
 annotations the value checker erases; Bawden's macro types for modules,
-later). Next: the
-prototype of its "The prototype" section, in the Rust front end; the
-note's table "What FX-26's type system would need" says what the type
-system needs, and when. Waiting on the user's answers to its questions
-(the signatures' concrete syntax; what a template's reference to a
-redefined global means; ellipsis in the prototype or not).
+later). The user's answers (2026-11-06): Herman's foundations first, his
+tree addresses (with comments in the readable names), recursion not
+ellipsis, a template's globals as at the use, keyword labels in templates.
+Prototype built (2026-11-06, `typed-macros.md`, "The prototype, as
+built"; `macros.rs`, `tests/macros.rs`). Next, its "Not yet": templates
+naming the program's globals (an unshadowable reference to one, as
+`#%fx` is to the standard's); errors in expansions mapped back (item 4);
+macro names a local binder may shadow; `(expr T E)` and templates
+checked once (item 7); the port to the front end written in FX-26.
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`

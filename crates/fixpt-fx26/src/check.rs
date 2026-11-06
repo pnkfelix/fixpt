@@ -353,6 +353,8 @@ pub struct Checker {
     /// `termination`): a call says `spin` only for the members it fits
     /// that may not.
     pub(crate) member_spins: HashMap<(Sym, TyId), Vec<bool>>,
+    /// The macros defined (`crate::macros`), as the forms are read.
+    pub(crate) macros: crate::macros::Macros,
     /// Expressions taken as one member of their union's type while a call
     /// is taken apart by an argument that is no variable (rule 5): each as
     /// that member wherever it is synthesized, or checked as a call.
@@ -1152,6 +1154,7 @@ impl Checker {
             hole_hint: None,
             spin_why: Vec::new(),
             member_spins: HashMap::new(),
+            macros: Default::default(),
             pinned: Vec::new(),
             regions_memo: std::cell::RefCell::new(Default::default()),
             fun_apps: HashMap::new(),

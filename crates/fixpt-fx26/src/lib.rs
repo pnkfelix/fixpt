@@ -1049,6 +1049,7 @@ pub(crate) mod syscall;
 pub mod ids;
 pub mod infer;
 mod kinds;
+pub mod macros;
 pub mod licence;
 pub mod lemma;
 pub mod lower;

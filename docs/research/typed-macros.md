@@ -449,6 +449,93 @@ with `define-command` as its test; the derived forms of both parsers
 rewritten as macros, once, which is the first payoff in this codebase
 itself.
 
+## The prototype, as built (2026-11-06)
+
+`crates/fixpt-fx26/src/macros.rs`, in the front end written in Rust:
+`Checker::expand_forms` defines each `define-syntax` as it is read and
+expands every use in the forms after it, before either checker sees them;
+both check what it expands to, printed, as they agree on any form. Tests:
+`tests/macros.rs`, the programs in `tests/programs/macros`.
+
+**Signatures, in Herman's notation** (the user's answer): a signature is
+the syntax type of a use's operands, all but the macro's name:
+
+```text
+σ ::= expr | bvar | id | data | type | label | ()
+    | (σ . σ) | (σ …)                    a pair; a list, of pairs
+    | (import σ β) | (export σ β)        σ↓β and σ↑β
+    | (mu v σ) | v | (union σ …)
+    | (literal name)                     a name written as it is (`else`)
+β ::= (rho (ℓ δ) …)                      a rib, {ℓ : δ, …}
+    | (cage ρ-or-(at ℓ) …)               a ribcage, innermost first; ℓ@γ
+δ ::= none | var | rib | env
+```
+
+An address is a word of `A` and `D`, read right to left as `cadr` is, from
+the innermost `mu`, `union` member or signature around it. `id` (a
+variable referred to: a cell `swap!` takes), `type` (a description) and
+`label` (a tag or a field's name) are FX-26's. Each signature in the tests
+has a comment saying it in the names of "Binding signatures" above, the
+readable form to move to:
+
+```scheme
+(define-syntax let1
+  ;; As named: ((x bvar) (e expr)) (body (in expr x))
+  ((bvar expr) (import expr (rho (AA var))))
+  ((_ (x e) body) (let ((x e)) body)))
+```
+
+**Checked where defined**, Herman's rules:
+- the signature: `mu` contractive; a `union`'s members told apart by
+  their shapes in the source (`expr` anything but a form's name);
+- each clause's pattern aligned with the signature: each pattern
+  variable's syntax type, and the environment the signature declares
+  around it (its imports evaluated over the pattern);
+- the template, aligned with the signatures of the kernel's forms
+  (`KERNEL` in `macros.rs`, written in the same notation: `lambda`,
+  `let`, `let*` as Herman's let*-cl, `letrec`, `if`, `begin`, `and`,
+  `or`, `quote`, `the`, `sum`, `extract`, `product`, `tagcase`, `cond`,
+  applications) and of the macros, the macro itself among them. A kernel
+  form not there is refused in a template;
+- each pattern variable placed where the form takes its syntax type
+  (subtyping, coinductive, binding structure alike), and in the scope of
+  the bindings its signature declares, no more and no fewer, the
+  template's own binders aside (`bad`, and its converse);
+- a pattern binder referred to only where no other pattern binder may
+  shadow it (the shadow restriction, `K`);
+- a pattern variable with an expression in it placed once: twice, it
+  would run twice (the effect-indexed form, `(expr pure)`, waits for
+  `(expr T E)`, item 7);
+- a template's tag or label a keyword (the user's answer).
+
+**Expanded where used**: the use parsed by the signature (a binder where
+one goes, a macro's name never bound), the first clause whose pattern
+matches transcribed. The template's binders, and its references to them,
+made fresh (`%tmp:3`); its other names the standard bindings, `(with #%fx
+name)`, which nothing shadows; the kernel's form names as they are, as
+no program binds one. So the use's names never capture the template's,
+nor the template's the use's: `swap!` against a use's own `tmp`, `my-or`
+against a use's `t`. A use of a macro inside an expansion is expanded in
+turn.
+
+**Not yet:**
+- A template naming the program's own globals (item 5): refused until
+  there is a reference to a global that nothing shadows, as `#%fx` is to
+  a standard binding. The user's answer: the global as it is where the
+  macro is used.
+- A macro's name may not be bound or defined at all, as a form's may not
+  (Herman lets a local binder shadow a macro); a use binding one is
+  refused, and a definition of one.
+- Errors inside an expansion are said at the use's span (item 4's source
+  map); the template's own parts carry the use's span.
+- The REPL: a macro defined in what is typed is defined for that alone
+  (`Checker::macros_kept`); a use's binders and scopes are not yet shown
+  before it expands.
+- The front end written in FX-26 has no macros: a module's file
+  (`load-module`) and `check_only` see none.
+- Ellipsis (the user's answer: later, as sugar for recursion), `defn`,
+  binders of descriptions, procedural macros (items 7 to 11).
+
 ## FX-26's own extensions as binding information (2026-11-06)
 
 The user asked (2026-11-06) whether FX-26's extensions to its type system

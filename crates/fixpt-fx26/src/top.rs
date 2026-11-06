@@ -113,6 +113,9 @@ fn every_field_placed(c: &Checker) {
         hidden: _, shared_loads: _, shared_files: _, reading_deps: _, loading: _, include_scope: _, run_items: _, with_depth: _, shared_globals: _, hoisted: _,
         loaded: _, in_built_in: _, load_sites: _, files_read: _, ahead: _, ahead_filled: _, hazard_modules: _,
         hazard_items: _, broken: _, defs: _, outdated: _, poly_chain: _, inst_for: _,
+        // The macros defined, as the forms are read, before any is checked
+        // (`expand_forms`): a form tried and thrown away has defined none.
+        macros: _,
         // Put back by `truncate_env`, with the environment.
         known: _, global_slots: _, fixed_slots: _,
         // The arena, reset by `scratch` (a refused check's ids are left
@@ -571,12 +574,41 @@ impl Checker {
     pub fn expand_forms(&mut self, forms: Vec<Syntax>) -> R<Vec<Syntax>> {
         let mut out = Vec::new();
         for f in forms {
+            // A macro defined, or each use of one expanded
+            // (`crate::macros`): before anything else sees the form.
+            let Some(f) = self.macro_expanded(f)? else { continue };
             if self.expand_generative(&f, &mut out)? {
                 continue;
             }
             self.expand_datatype(f, &mut out)?;
         }
         Ok(out)
+    }
+
+    /// The macros defined now, to put back (`macros_put_back`) after reading
+    /// what must leave none defined: the REPL's reading as one types.
+    pub fn macros_kept(&self) -> crate::macros::Macros {
+        self.macros.clone()
+    }
+
+    pub fn macros_put_back(&mut self, kept: crate::macros::Macros) {
+        self.macros = kept;
+    }
+
+    /// `form`, a `(define-syntax …)`, defined, and none; or with the uses of
+    /// the macros defined in it expanded (`crate::macros`).
+    fn macro_expanded(&mut self, form: Syntax) -> R<Option<Syntax>> {
+        let mut macros = std::mem::take(&mut self.macros);
+        let mut interner = std::mem::take(&mut self.interner);
+        let defines = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| interner.name(h) == "define-syntax");
+        let r = if defines {
+            macros.define(&form, &mut interner, &|s| self.standard_type(s).is_some()).map(|()| None)
+        } else {
+            macros.expand(&form, &mut interner).map(Some)
+        };
+        self.macros = macros;
+        self.interner = interner;
+        r
     }
 
     /// `(import m item …)`: what module `m` gives, by name, defined here,

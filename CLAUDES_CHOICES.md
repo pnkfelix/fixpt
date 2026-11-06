@@ -3935,3 +3935,33 @@ The user read the paper as supporting the distribution. Mine:
   word with variants is verified at them only, so weakening the outer
   certificate alone proved nothing (`frozen-ring.fx`'s `mk` showed it once
   it verified).
+
+## Typed macros, the prototype (2026-11-06)
+
+- **Where it runs**: in `Checker::expand_forms`, as forms are read, so
+  that both checkers check the printed expansion (the note's plan); the
+  REPL's reading as one types keeps the macro table and puts it back.
+- **One algorithm for templates and uses**: syntax is aligned with a
+  syntax type into a tree whose annotations are evaluated over it. The
+  kernel's forms are given signatures in Herman's own notation (`KERNEL`
+  in `macros.rs`), so a template is checked as a use is parsed; a form
+  with none is refused in a template rather than guessed at.
+- **Environments compared, the template's own binders left out**: they
+  are made fresh, so they bind nothing a use wrote. Ribs compare as sets
+  of atoms (a pattern binder, a pattern variable's rib, its ribcage), in
+  order of levels, empty ones dropped.
+- **Free names in templates**: kernel form names stay (reserved, so
+  unshadowable); standard bindings become `(with #%fx name)`; anything
+  else is refused, waiting for an unshadowable reference to a program's
+  global (item 5). No resolver over the whole expansion is needed, since
+  nothing left can be captured.
+- **Macro names reserved**, as form names are: no environment of local
+  binders in the expander yet. Herman's shadowable macro names wait.
+- **`id`**, a syntax type of a variable referred to, beside Herman's:
+  FX-26 has no `set!`, and `swap!` exchanges cells, whose variables it
+  names twice; an `expr` may be placed only once.
+- **`for` became `where`** in the tests: FX-26 has no `for-each` yet
+  (it waits on a prelude), and a template may not name a global.
+- **Duplication** refused for any pattern variable with an expression in
+  it, not only `expr`; `(expr pure)` waits for effect-indexed `expr`.
+
