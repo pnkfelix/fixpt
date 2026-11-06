@@ -4640,9 +4640,13 @@ See whether `(bool (then (shape …)))` can be extended to prove that a
 value is of a type that is nearly arbitrary; now it is limited to a fixed
 set of core shapes (probably those `typecase` tells apart).
 
-## 197. A truthy `and` (the user's, 2026-10-31)
+## 197. ~~A truthy `and`~~ (the user's, 2026-10-31; closed 2026-11-05: by macro)
 
 Add `(and e1 e2 …)` that gives false or the last expression's value.
+Closed (the user's, 2026-11-05): not built in, since it is `(let ((t e1))
+(if (false? t) #f e2))`; one of the prototype's first macros instead
+(`docs/research/typed-macros.md`, "The prototype", with what it needs of
+the checker's narrowing on `#f`).
 
 ## 198. `(listof T)` short for `(listof T acyclic)` (the user's, 2026-10-31)
 

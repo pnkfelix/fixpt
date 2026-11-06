@@ -428,6 +428,14 @@ printed expansion.
   naming `#%fx` bindings;
 - `let*` and named `let` written as macros, compared with the built-in
   ones' results;
+- a truthy `and` (`TODO.md` §197, the user's, 2026-11-05: by macro, not
+  built in): `(and e1 e2 …)` giving `#f` or the last operand's value,
+  `(let ((t e1)) (if (false? t) #f (and e2 …)))`, so that `(and (to-enf
+  op) (to-enf arg) …)` chains `(oneof false enf)` results. Its test must
+  be `#f` itself, not `bool?`, or a `#t` would count as failure; whether
+  the checker narrows on `(eq? t #f)` or `(not t)`, so that `t` is the
+  rest of its type after it, is to find out first. Hygiene: `t` against a
+  user's `t` in `e2`;
 - refused at definition: `bad` (a body outside its binder's scope), `K`
   (the shadow restriction), a duplicated argument not declared `pure`;
 - refused at use: an argument not of its syntax type (a binder where an
