@@ -107,10 +107,6 @@
 ;; check's entry point sets it to 0, so that a check that failed half way
 ;; leaves nothing named so.
 (define k-syscall-expanding (ref int @t) (new 0))
-;; The readings of what the checker makes, not the parser (a syscall's
-;; definitions): each a reading of its own, numbered down from -1, apart
-;; from the parser's (`parser-ids.fx`).
-(define k-made-readings (ref int @t) (new 0))
 ;; The standard names only a module file built in may name, in a table:
 ;; every lookup of a name asks (`k-hidden-standard?`).
 (define k-built-in-only-table (table symbol bool @t) (make-table symbol-hash symbol=?))

@@ -59,6 +59,22 @@ struct State {
     texts: HashMap<u32, String>,
 }
 
+impl State {
+    /// The state the session is in, as its compiler reads a text in it: a
+    /// digest of every text it has read, in order (`ids::reading_of`;
+    /// `docs/research/loads-and-places.md`, "Decided: three keys"). Made
+    /// of what it read, not kept beside: nothing to keep in step.
+    fn digest(&self) -> i64 {
+        (1..=self.texts.len() as u32).fold(0, |s, f| self.texts.get(&f).map_or(s, |t| crate::ids::reading_of(s, t)))
+    }
+}
+
+/// The state of the session at `base`, as [`State::digest`]; 0 if it has
+/// none yet.
+fn digest(rt: &Runtime, base: usize) -> i64 {
+    with_state(rt, rt.heap.root_at(base), |state| state.digest()).unwrap_or(0)
+}
+
 /// How a session's steps are made (the module's header).
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
@@ -218,8 +234,9 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
                 state.seeds.extend(code);
             }
         }
+        let session = state.digest();
         for (text, facts) in made {
-            compile_run(rt, base, &text, &facts, false)?.map_err(|why| format!("a session's module's values: {why}"))?;
+            compile_run(rt, base, session, &text, &facts, false)?.map_err(|why| format!("a session's module's values: {why}"))?;
         }
         SESSIONS.with(|ss| ss.borrow_mut().push(state));
         rt.heap.obj_set(rt.heap.root_at(base), S_INDEX, Value::fixnum(i as i64));
@@ -349,7 +366,8 @@ fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<V
         Ok(facts) => facts,
         Err(refused) => return Ok(refused),
     };
-    match compile_run(rt, base, &w.whole, &facts, false)? {
+    let session = digest(rt, base);
+    match compile_run(rt, base, session, &w.whole, &facts, false)? {
         Ok(p) => {
             let p = sum(rt, "expression", p);
             Ok(sum(rt, "ok", p))
@@ -597,7 +615,8 @@ fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Result<Val
         whole.push_str(&text);
         whole.push('\n');
     }
-    match compile_run(rt, base, &whole, &all, true)? {
+    let session = digest(rt, base);
+    match compile_run(rt, base, session, &whole, &all, true)? {
         Ok(p) => Ok(sum(rt, "go", p)),
         Err(why) => Ok(failed(rt, "refused", &why)),
     }
@@ -720,10 +739,11 @@ fn call(rt: &mut Runtime, compiler: Value, i: usize, args: &[Value]) -> Result<V
 }
 
 /// `text`, a session's form, compiled by the session at `base`'s compiler,
-/// given what the checker found of it, and its word run: the value (or,
+/// read in the session's state `session` ([`digest`]), given what the
+/// checker found of it, and its word run: the value (or,
 /// `deferred`, the procedure that runs the forms, `compile-deferred`); or
 /// why the compiler would not.
-fn compile_run(rt: &mut Runtime, base: usize, text: &str, facts: &FormFacts, deferred: bool) -> Result<Result<Value, String>, String> {
+fn compile_run(rt: &mut Runtime, base: usize, session: i64, text: &str, facts: &FormFacts, deferred: bool) -> Result<Result<Value, String>, String> {
     let (native, registers) = crate::stage::flags(rt).ok_or("this machine cannot keep sessions")?;
     let compiler = compiler(rt, base)?;
     let mark = rt.heap.push_root(compiler);
@@ -736,7 +756,7 @@ fn compile_run(rt: &mut Runtime, base: usize, text: &str, facts: &FormFacts, def
     let r = facts.reshapes(&mut rt.heap);
     let [compiler, t, f, w] = [0, 1, 2, 3].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
-    let made = call(rt, compiler, 1, &[t, f, w, r, Value::boolean(native), Value::boolean(registers), Value::boolean(deferred)])?;
+    let made = call(rt, compiler, 1, &[Value::fixnum(session), t, f, w, r, Value::boolean(native), Value::boolean(registers), Value::boolean(deferred)])?;
     let tag = rt.heap.sum_tag(made);
     let payload = rt.heap.sum_payload(made);
     if tag != rt.heap.intern("made") {

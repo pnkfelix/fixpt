@@ -11,6 +11,10 @@
 (define front-end-entries
   (let* (;; Hash tables, a module file of no state.
          (tables (load-module "fx26:table.fx"))
+         ;; A reading's digest, of a session's state `s` and the text read:
+         ;; each entry below that reads is given `s` (`readings.fx`).
+         (readings (load-module "fx26:readings.fx"))
+         (reading-of (with readings reading-of))
          ;; The checker's first file.
          (check-types ((load-input "fx26:check-types.fx") tables))
          ;; Effects.
@@ -491,7 +495,8 @@
             ;; The code wrapped (`stage.rs`'s `wrapped`), `whole`, the code
             ;; `len` characters at `k` of it; and the type it is checked as,
             ;; as a rep, which `whole` names `%stage-type`, if not empty
-            ;; (`check-staged-program`).
+            ;; (`check-staged-program`). Read in no session's state but the
+            ;; standard environment's, 0 (`readings.fx`).
             (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int)
                      (native bool) (registers bool) (rep (bytevectorof @t)))
               (let ((read (read-text-at whole 0)))
@@ -500,16 +505,17 @@
                     (begin
                       (loaded-files! nil)
                       (includes-given! nil)
-                      (tagcase (parse-program (car read))
+                      (tagcase (parse-program (reading-of 0 whole) (car read))
                         (p-err (m a b)
                           (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
                         (p-ok (tops) (checked standard tops k len native registers rep)))))))))
          ;; A `.fasl`'s definition (`session.rs`'s `run_program_def`), its
-         ;; text `whole`, which loads nothing, read, parsed and checked as
-         ;; `check-more-typed` checks it, in one call: its message if refused,
-         ;; else "" (`docs/research/heap-types.md`, step 5).
+         ;; text `whole`, which loads nothing, read in the session's state `s`
+         ;; (`readings.fx`), parsed and checked as `check-more-typed` checks
+         ;; it, in one call: its message if refused, else ""
+         ;; (`docs/research/heap-types.md`, step 5).
          (check-text-typed
-          (lambda ((whole string) (named (listof (productof (1 symbol) (2 int)) acyclic)))
+          (lambda ((s int) (whole string) (named (listof (productof (1 symbol) (2 int)) acyclic)))
             (let ((read (read-text-at whole 0)))
               (if (null? read)
                   "the definition is not one whole form"
@@ -517,7 +523,7 @@
                     (loaded-files! nil)
                     (includes-given! nil)
                     ((with check-program check-lines!) #f)
-                    (tagcase (parse-program (car read))
+                    (tagcase (parse-program (reading-of s whole) (car read))
                       (p-err (m a b) m)
                       (p-ok (tops)
                         (tagcase ((with check-program check-more-typed) tops named)
@@ -526,7 +532,8 @@
          ;; A session's step (`sessions26.rs`), checked by this instance's
          ;; checker, which holds the session's definitions, and compiled by
          ;; its compiler, whose globals are the session's: `whole`, the code
-         ;; wrapped, the code `len` characters at `k` of it; `how`: 0, the
+         ;; wrapped, read in the session's state `s` (`step-state`), the code
+         ;; `len` characters at `k` of it; `how`: 0, the
          ;; first, in the standard environment `standard`, checked alone; 1,
          ;; more, kept, and compiled (if `make`), into the procedure that
          ;; runs it (if `deferred`, a commit's) or the word; 2, tried, not
@@ -536,9 +543,9 @@
          ;; types, each a rep (`set-step-named!`). What each gives, or why
          ;; not, placed in the code.
          (session-step-of
-          (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int) (how int)
-                   (name symbol) (make bool) (deferred bool) (native bool) (registers bool)
-                   (rep (bytevectorof @t)))
+          (lambda ((standard (listof syn acyclic)) (s int) (whole string) (k int) (len int)
+                   (how int) (name symbol) (make bool) (deferred bool) (native bool)
+                   (registers bool) (rep (bytevectorof @t)))
             (let ((read (read-text-at whole 0))
                   (refused (lambda ((m string) (a int) (b int))
                              (fail (sum refused #u) m (clamp a k len) (clamp b k len)))))
@@ -551,7 +558,7 @@
                     ((with check-print-parts check-conv-native!) native)
                     ((with compile compile-conv-native!) native)
                     ((with regcode-entry compile-registers!) registers)
-                    (tagcase (parse-program (car read))
+                    (tagcase (parse-program (reading-of s whole) (car read))
                       (p-err (m a b)
                         (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
                       (p-ok (tops)
@@ -581,25 +588,33 @@
                                                    runs facts))
                                        (c-ok (w) (sum made w))
                                        (c-err (m) (refused m k (+ k len)))))))))))))))))
+         ;; The state a session's checker is in (this instance's, a session's
+         ;; own: `make-session-compiler`), as a step reads its text in it: a
+         ;; digest of each step's text since the first, which begins it again
+         ;; (`readings.fx`). Kept with the checker's state it stands for.
+         (step-state (the (ref int @t) (new 0)))
          (session-step
-          (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int) (how int)
-                   (name symbol) (make bool) (deferred bool) (native bool) (registers bool)
-                   (rep (bytevectorof @t))
+          (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int)
+                   (how int) (name symbol) (make bool) (deferred bool) (native bool)
+                   (registers bool) (rep (bytevectorof @t))
                    (named (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic)))
-            (begin
-             ((with check-program set-step-named!) named)
-             (let ((out (session-step-of standard whole k len how name make deferred native
-                                         registers rep)))
-               (begin ((with check-program set-step-named!) nil) out)))))
+            (let ((s (if (= how 0) 0 (get step-state))))
+              (begin
+               (set step-state (reading-of s whole))
+               ((with check-program set-step-named!) named)
+               (let ((out (session-step-of standard s whole k len how name make deferred native
+                                           registers rep)))
+                 (begin ((with check-program set-step-named!) nil) out))))))
          ;; The types of what the checker tells the compiler.
          (stage-env-types (load-module "fx26:check-env-types.fx"))
          ;; A session's code (`sessions.rs`), checked by the checker written
          ;; in Rust, which gives what it found: compiled by this instance,
          ;; whose globals are the session's, to the word that runs it, or,
          ;; `deferred`, that makes the procedure that does (a commit's); or
-         ;; why not.
+         ;; why not. Read in the session's state `s` (`sessions.rs`'s
+         ;; `digest`).
          (session-compile
-          (lambda ((text string) (facts (select stage-env-types k-facts))
+          (lambda ((s int) (text string) (facts (select stage-env-types k-facts))
                    (withs (select stage-env-types k-with-list))
                    (reshapes (select stage-env-types k-reshape-list))
                    (native bool) (registers bool) (deferred bool))
@@ -609,7 +624,7 @@
                   (begin
                     (loaded-files! nil)
                     (includes-given! nil)
-                    (tagcase (parse-program (car read))
+                    (tagcase (parse-program (reading-of s text) (car read))
                       (p-err (m a b) (sum failed m))
                       (p-ok (tops)
                         (begin

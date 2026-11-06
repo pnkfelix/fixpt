@@ -31,6 +31,10 @@
           (cons (eager-state-syntax st) nil)
           nil))))
 
+;; A reading's digest (`readings.fx`): a program here is read in no
+;; session's state, 0.
+(define readings (load-module "fx26:readings.fx"))
+
 ;; `program`, checked in the initial environment written `standard`
 ;; (`(name type)` for each binding), and compiled.
 (define bootstrap (->* (string string) bresult)
@@ -38,7 +42,8 @@
     (let ((std (b-read standard)) (prog (b-read program)))
       (if (or (null? std) (null? prog))
           (b-fail "the reader could not read the text")
-          (tagcase (begin (check-lines! #f) (parse-program (car prog)))
+          (tagcase (begin (check-lines! #f)
+                          (parse-program ((with readings reading-of) 0 program) (car prog)))
             (p-err (m a b) (b-fail (string-append "parse: " m)))
             (p-ok (tops)
               (tagcase (check-program (car std) tops)

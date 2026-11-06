@@ -748,12 +748,13 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 202] = [
+pub const FRONT_END_MODULES: [(&str, &str); 203] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
     ("table-types.fx", TABLE_TYPES),
     ("table.fx", TABLE),
+    ("readings.fx", READINGS),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
     ("check-processes-types.fx", CHECK_PROCESSES_TYPES),
     ("check-allof-types.fx", CHECK_ALLOF_TYPES),
@@ -1041,6 +1042,7 @@ pub const LAYOUT: &str = include_str!("layout.fx");
 
 /// Hash tables, written in FX-26: prepend to a program that uses them.
 pub const TABLE: &str = include_str!("table.fx");
+pub const READINGS: &str = include_str!("readings.fx");
 
 pub mod check;
 pub mod compare;

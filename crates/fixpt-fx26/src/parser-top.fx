@@ -193,11 +193,12 @@
           (append-tops before (append-tops made rest))))))
 
 ;; The entry point: a program's forms, as read, to trees, each expression
-;; numbered (`parser-ids.fx`), or an error. The
+;; numbered (`parser-ids.fx`) in `reading` (`reading-of` the session's
+;; state and the text the forms are read from: the caller's), or an error. The
 ;; prompt catches every failure, but its tag is a global whose type names
 ;; `rp`, so the control effect stays in the type, as the reader's on `re` do;
 ;; `rp` is one of the regions this module is given, so that is still licensed.
-(define parse-program (->* (syns-a) presult)
-  (lambda (forms)
+(define parse-program (->* (int syns-a) presult)
+  (lambda (reading forms)
     (begin (shared-reset!)
-           (prompt parse-tag (p-ok (number-tops (parse-tops forms))) (lambda (r) r)))))
+           (prompt parse-tag (p-ok (number-tops reading (parse-tops forms))) (lambda (r) r)))))

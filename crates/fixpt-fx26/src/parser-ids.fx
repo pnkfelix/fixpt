@@ -18,19 +18,18 @@
         e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-define-rec t-exp
         (type exp top exp-list let-list letrec-list arm-list mod-items top-list))
 
-;; How many expressions of the reading have been walked.
-(define-type seen (ref int rs))
-;; The readings so far: each `number-tops` is one, the reading every
-;; expression it numbers is of, in a field of its own beside its number,
-;; so that the two tell it from every other expression of the session
-;; (`docs/research/loads-and-places.md`, "Decided: three keys").
-(define readings (ref int rs) (new 0))
+;; How many expressions of the reading have been walked, and the reading:
+;; what every expression it numbers is of, in a field of its own beside
+;; its number, so that the two tell it from every other expression of the
+;; session (`docs/research/loads-and-places.md`, "Decided: three keys").
+(define-type seen (productof (1 (ref int rs)) (2 int)))
+
 (define-effect counts (maxeff (read @globals) spin (read rs) (write rs) (alloc rs)))
 
 ;; The next expression's number, the one walked next (at `a`..`b`, which
 ;; does not matter: its provenance).
 (define next-kth (->* (seen int int) int)
-  (lambda (t a b) (let ((n (get t))) (begin (set t (+ n 1)) n))))
+  (lambda (t a b) (let ((n (get (extract t 1)))) (begin (set (extract t 1) (+ n 1)) n))))
 
 ;; Each `number-` gives what it was given, not a copy, where nothing in it
 ;; changed: as the parser numbers every expression 0, the first.
@@ -38,7 +37,7 @@
   ;; `x` and what is in it, numbered.
   (number-exp (->* (seen exp) exp)
     (lambda (t x)
-      (let ((reading (get readings)))
+      (let ((reading (extract t 2)))
       (tagcase x
         (e-var (s a b k kr)
                (let ((n (next-kth t a b)))
@@ -195,6 +194,6 @@
   (lambda (t ts)
     (if (null? ts) nil (let* ((x (number-top t (car ts)))) (cons x (number-each t (cdr ts)))))))
 ;; A program's forms, each expression in them numbered, the forms in order.
-(define number-tops (->* (top-list) top-list)
-  (lambda (ts)
-    (begin (set readings (+ (get readings) 1)) (number-each (the seen (new 0)) ts))))
+(define number-tops (->* (int top-list) top-list)
+  (lambda (reading ts)
+    (number-each (product (1 (the (ref int rs) (new 0))) (2 reading)) ts)))

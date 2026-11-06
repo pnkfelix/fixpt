@@ -397,6 +397,8 @@
               (k-sys-params (+ i 1) (cdr ps))))))
 (define k-sys-items (->* (syn) (listof syn acyclic))
   (lambda (s) (tagcase s (lst (items d a b) items) (else x nil))))
+;; A reading's digest (`readings.fx`).
+(define readings (load-module "fx26:readings.fx"))
 ;; The two definitions declaration `name` at `a`..`b` is, its type
 ;; `canonical`, `text` printed: whether the runtime has it, for a required
 ;; one checked as it is made; and itself, each of its expressions an
@@ -405,8 +407,11 @@
 (define k-sys-defs (->* (symbol string syn string bool int int) (productof (1 top) (2 top)))
   (lambda (name host canonical text required a b)
     (let*
-     ((r (- (get k-made-readings) 1))
-      (label (string-append "syscall " (symbol->string name) " (\"" host "\")"))
+     ((label (string-append "syscall " (symbol->string name) " (\"" host "\")"))
+           ;; A reading of their own, what they are made of, in no session's
+           ;; state (-1: apart from every text read).
+           (r ((with readings reading-of) -1
+               (string-append label " " text (if required " required" " optional"))))
            (asks (lambda ((f symbol) (k int))
                    (e-app (e-var f a b k r)
                           (list (k-sys-str label a b (+ k 1) r) (k-sys-str host a b (+ k 2) r)
@@ -437,9 +442,8 @@
                 (e-app (e-var '%syscall-available? a b 1050 r)
                        (list (k-sys-str host a b 1051 r) (k-sys-str text a b 1052 r)) a b 1053 r)))
            (companion (string->symbol (string-append "%syscall-available:" (symbol->string name)))))
-      (begin (set k-made-readings r)
-             (product (1 (t-define companion (the syns-a (list (atom 'bool a b))) available a b))
-               (2 (t-define name (the syns-a (list canonical)) body a b)))))))
+      (product (1 (t-define companion (the syns-a (list (atom 'bool a b))) available a b))
+               (2 (t-define name (the syns-a (list canonical)) body a b))))))
 ;; `(define-syscall name "host" type)` (`required`), or
 ;; `(define-optional-syscall …)`, at `a`..`b`: its line, its definition's.
 (define k-define-syscall (->* (bool syn int int) k-out)

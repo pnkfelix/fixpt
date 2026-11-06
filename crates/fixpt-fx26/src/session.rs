@@ -83,6 +83,12 @@ pub struct Fx26Session {
     /// ones before (`check-more`), and compiled alone against the globals
     /// they made, which the compiler keeps.
     own_begun: bool,
+    /// The state this session's program is in, as the checker written in
+    /// FX-26 has read it: a digest of each text it read since it began
+    /// (0 as it begins), the state the next is read in, which decides that
+    /// text's reading (`ids::reading_of`; `docs/research/loads-and-places.md`,
+    /// "Decided: three keys"). Not a count: what was read decides it.
+    own_state: i64,
     /// The loads whose hidden globals this session's program has made, by
     /// key (`syn::set_shared_made`): forms compiled one by one make none of
     /// them again. Forgotten as a whole program begins.
@@ -1038,6 +1044,7 @@ impl Fx26Session {
             breaks_held: false,
             own_made: false,
             own_begun: false,
+            own_state: 0,
             shared_made: Default::default(),
             built_ins_cached: Default::default(),
             source_file: None,
@@ -1867,7 +1874,8 @@ impl Fx26Session {
 
     fn fasl_define_in(&mut self, standard: Option<fixpt_scheme::Handle>, name: Sym, text: &str, fasl: &std::path::Path) -> R<Result<Option<String>, String>> {
         let shown = self.checker.interner.name(name).to_string();
-        if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, FileId(0), text)? {
+        let session = self.own_state_for(&standard, text);
+        if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, session, FileId(0), text)? {
             return Err(FxError::at(Span::new(FileId(0), 0, 0), format!("the checkers disagree: the Rust checker takes `{shown}`'s definition, and the one written in FX-26 refuses it: {why}")));
         }
         self.own_begun = true;
@@ -2142,7 +2150,8 @@ impl Fx26Session {
         let names = self.checker.defined_names(form);
         self.released(|s| {
             let fail = |e: fixpt_scheme::SessionError| FxError::at(form.span, e.to_string());
-            if let Err(why) = crate::syn::check_only(&mut s.scheme, standard, FileId(0), &text)? {
+            let session = s.own_state_for(&standard, &text);
+            if let Err(why) = crate::syn::check_only(&mut s.scheme, standard, session, FileId(0), &text)? {
                 return Err(FxError::at(form.span, format!("the checkers disagree: the Rust checker takes this definition, and the one written in FX-26 refuses it: {why}")));
             }
             s.own_begun = true;
@@ -2566,13 +2575,19 @@ impl Fx26Session {
             let by_rep = match (&standard, ids) {
                 (None, Some(ids)) => {
                     let typed: Vec<(String, i64)> = named.iter().cloned().zip(ids).collect();
-                    crate::syn::check_only_typed(&mut s.scheme, FileId(0), &format!("{named_text}\n"), &typed)?
+                    let named_text = format!("{named_text}\n");
+                    let session = s.own_state_for(&standard, &named_text);
+                    crate::syn::check_only_typed(&mut s.scheme, session, FileId(0), &named_text, &typed)?
                 }
                 _ => Err(String::new()),
             };
             let checked = match by_rep {
                 Ok(()) => Ok(()),
-                Err(_) => crate::syn::check_only(&mut s.scheme, standard, FileId(0), &format!("{text}\n"))?,
+                Err(_) => {
+                    let text = format!("{text}\n");
+                    let session = s.own_state_for(&standard, &text);
+                    crate::syn::check_only(&mut s.scheme, standard, session, FileId(0), &text)?
+                }
             };
             if let Err(why) = checked {
                 return Err(fail(format!("the checkers disagree: the Rust checker takes `{}`'s definition, and the one written in FX-26 refuses it: {why}", group[0].0.name)));
@@ -3025,7 +3040,8 @@ impl Fx26Session {
         let base = self.eval_base;
         self.eval_base += text.chars().count() as i64 + 1;
         self.scheme.engine.set_step_limit(None);
-        let r = crate::syn::eval_more_with_fx26_evaluator(&mut self.scheme, standard, FileId(0), text, base);
+        let session = self.own_state_for(&standard, text);
+        let r = crate::syn::eval_more_with_fx26_evaluator(&mut self.scheme, standard, FileId(0), text, base, session);
         self.scheme.engine.set_step_limit(self.step_limit);
         self.own_begun |= !matches!(&r, Ok(out) if out.starts_with("!! check:"));
         r
@@ -3512,7 +3528,8 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         // The Rust checker took the form: the checker written in FX-26
         // refusing it is the two disagreeing, said, not a reason to run it
         // another way, which would hide it (`TODO.md` §97).
-        if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, FileId(0), form)? {
+        let session = self.own_state_for(&standard, form);
+        if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, session, FileId(0), form)? {
             return Err(FxError::at(Span::new(FileId(0), 0, 0), format!("the checkers disagree: the Rust checker takes `{name}`'s definition, and the one written in FX-26 refuses it: {why}")));
         }
         // The value is checked again below, as an expression (and, if the
@@ -3774,7 +3791,8 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         // (`crate::sources`): what this compile queues, made after, too, so
         // until the next.
         fixpt_heap::regcode::set_source(s.source_of(text));
-        let r = crate::syn::with_last_value(&mut s.scheme, standard, FileId(0), text, native, f);
+        let session = s.own_state_for(&standard, text);
+        let r = crate::syn::with_last_value(&mut s.scheme, standard, session, FileId(0), text, native, f);
         s.own_begun |= !matches!(&r, Ok(Err(m)) if m.starts_with("check:"));
         let off = s.scheme.make(|_| fixpt_heap::Value::boolean(s.register_code));
         s.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(fail)?;
@@ -3876,6 +3894,15 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         if self.own_begun { Ok(None) } else { self.standard26().map(Some) }
     }
 
+    /// The state the checker written in FX-26 reads `text` in: 0 if it
+    /// begins again (`standard`), else the state the texts before left;
+    /// and `text` folded into it, the state the next is read in.
+    fn own_state_for(&mut self, standard: &Option<fixpt_scheme::Handle>, text: &str) -> i64 {
+        let s = if standard.is_some() { 0 } else { self.own_state };
+        self.own_state = crate::ids::reading_of(s, text);
+        s
+    }
+
     /// `text`, one form, as the next of this session's program: checked
     /// after the forms before, compiled against the globals they made, and
     /// run; as [`compile_with_own_compiler_showing`](Self::compile_with_own_compiler_showing).
@@ -3910,7 +3937,8 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         s.scheme
             .call_global(&format!("{READER_PREFIX}compile-registers!"), &[on])
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
-        let r = crate::syn::compile_with_fx26_compiler_showing(&mut s.scheme, standard, FileId(0), text, show, s.step_limit);
+        let session = s.own_state_for(&standard, text);
+        let r = crate::syn::compile_with_fx26_compiler_showing(&mut s.scheme, standard, session, FileId(0), text, show, s.step_limit);
         s.scheme.engine.set_step_limit(s.step_limit);
         r
         })

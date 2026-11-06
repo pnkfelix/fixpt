@@ -16,6 +16,18 @@ use crate::check::Checker;
 use crate::top::Top;
 use std::collections::HashMap;
 
+/// A reading: a digest of the session's state before it, `s`, and the
+/// text read, never 0 (the Rust checker's facts are of reading 0 until the
+/// FX-26 compiler gives them its trees'). Not a count, so that whoever
+/// reads the same text in the same state makes the same and needs to ask
+/// no one: `readings.fx`'s `reading-of`, the same function, each character
+/// folded into 40 bits by a multiplier that keeps every step in a fixnum.
+pub fn reading_of(s: i64, text: &str) -> i64 {
+    const MASK: i64 = (1 << 40) - 1;
+    let h = text.chars().fold(s & MASK, |h, c| (h * 1_000_003 + c as i64 + 1) & MASK);
+    if h == 0 { 1 } else { h }
+}
+
 /// Each expression walked, its number.
 #[derive(Default)]
 pub struct Kth {

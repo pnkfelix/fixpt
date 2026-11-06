@@ -3999,3 +3999,23 @@ The user read the paper as supporting the distribution. Mine:
   its own checker, so their places need only be their entry's.
 - **An error in a file loaded** is said as before (`located`), by the file.
 
+## A reading is a digest, not a count (2026-11-06)
+
+- **The user's call**, after the count (a global in the FX-26 image,
+  bumped by each parse) proved to depend on the image's history, so the
+  two front ends could not agree on it without an owner. Now
+  `reading-of(s, text)`, a fold of the text into 40 bits from the state
+  `s` it is read in, written in FX-26 (`readings.fx`) and Rust
+  (`ids::reading_of`), tested equal.
+- **Why the text, not the parsed syntax**: every caller has the text; a
+  digest of `syn` would need a walk of every datum kind in both
+  languages. Whitespace then makes a new reading, which only shares less.
+- **Why 40 bits by 1000003**: every step stays in a 61-bit fixnum with no
+  wrapping arithmetic, so both sides compute it alike; collisions within
+  a session's readings are about n²/2⁴¹.
+- **Where `s` lives**: with each state it stands for (the REPL session,
+  a staging session's texts, a staging session's own front end), passed
+  to every entry that reads (`parse-program`'s first argument), never a
+  global set beside the call. Every text read advances it, failures
+  included: a reading shared less is never wrong.
+

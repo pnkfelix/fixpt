@@ -167,7 +167,6 @@
    (val k-syscalls (ref bool @t))
    (val check-syscalls! (subr (maxeff (read @globals) spin (write @t)) (bool) unit))
    (val k-syscall-expanding (ref int @t))
-   (val k-made-readings (ref int @t))
    (val k-unbound (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (symbol) string))
    (val k-operator (ref k-op-mark @t))
    (val k-second-class? (subr pure (symbol) bool))

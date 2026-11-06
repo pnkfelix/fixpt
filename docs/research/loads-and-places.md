@@ -374,9 +374,8 @@ both front ends.
 - **Stage 1 done, `path`** (2026-11-06): every tree node (`exp`, `kx`) has
   a fourth integer, its reading, beside its number `k` (the user's
   choice over packing the two into one integer: no encoding to get
-  wrong). A reading is each `number-tops`, counted by `parser-ids.fx`'s
-  `readings`; a syscall's definitions, which the checker makes, a reading
-  of their own, counted down from -1 (`k-made-readings`). `k-at` is
+  wrong). A reading is a digest (below; first a count, which is
+  replaced). `k-at` is
   `(start end k reading)`; identity compares `k` and the reading
   (`k-at-is?`, `k-at=?`, `ev-at-is?`, `r-same-exp?`), every function that
   takes `a b k` takes the reading after `k`, and the compiler's tables
@@ -386,10 +385,33 @@ both front ends.
   reading of the trees it compiles (`c-set-facts!`'s reading,
   `c-reading-of`, `c-absolute-at`). A copy kept to be inlined, from an
   earlier reading, keeps that reading: its lookups miss, as they must.
-- **For stage 2**: `S` must be one value on both sides for the Rust
-  checker's facts to be found. The two front ends do not read the same
-  texts (the FX-26 one reads forms printed, some more than once, and has
-  pipelines of its own), so `S` is given per reading by the Rust session,
-  as a place's base is, a digest of the forms committed before; within a
-  reading both extend it alike from the trees. Pipelines in FX-26 alone
-  keep a chain of their own.
+- **A reading is a digest, not a count** (2026-11-06, the user's call,
+  after the count proved the trouble they had foreseen: a global in the
+  FX-26 image, bumped by every parse, so a reading's number told how many
+  parses that image had made, and the Rust side, which counted nothing,
+  would have had to own a count both agreed on). A reading is
+  `reading-of(s, text)` (`readings.fx`; `ids::reading_of`, the same
+  function, `parser.rs`'s `the_readings_agree`): `s` the state of the
+  session the text is read in, folded with the text's characters into 40
+  bits, never 0. `parse-program` and `number-tops` take it; nothing is
+  counted. Whoever reads the same text in the same state makes the same
+  reading, and asks no one (`a_reading_is_its_text_not_a_count`). The
+  state `s`, each kept by what owns the state it stands for, each the
+  digest of every text read since it began (so the last reading):
+  - a program alone, the bootstrap, a staged check, the evaluator's
+    staged code: 0, the standard environment;
+  - the REPL's checker written in FX-26 (`Fx26Session::own_state`, 0
+    where it begins again): each text it checks, evaluates or compiles;
+  - a staging session on the Rust checker (`sessions.rs`'s `digest`):
+    made of the texts it has read, kept nowhere beside;
+  - a staging session on the checker written in FX-26: its front end's
+    own `step-state`, kept with the checker's state it stands for, 0 at
+    its first step.
+  A syscall's definitions, which the checker makes, are the reading of
+  what they are made of, in state -1. Not yet chained: the evaluator's
+  session forms (`ev-session-top`), read at 0; no table outlives one
+  check there, so equal texts sharing a reading share nothing wrong.
+- **For stage 2**: `S` above is the session's state as each owner has
+  read it; what stage 2 adds is `S` folded from what the session
+  defines (types by `ty_digest`, and the rest the table above lists),
+  and `F`.

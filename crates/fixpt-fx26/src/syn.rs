@@ -66,7 +66,7 @@ pub fn parse_with_fx26_parser(scheme: &mut Session, file: FileId, text: &str) ->
 /// checker says the program runs (`checked-tops`, under redefinition): its
 /// value as Scheme would write it, or `!! ` and its error.
 pub fn eval_with_fx26_evaluator(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
-    eval_more_with_fx26_evaluator(scheme, Some(standard), file, text, 0)
+    eval_more_with_fx26_evaluator(scheme, Some(standard), file, text, 0, 0)
 }
 
 /// [`eval_with_fx26_evaluator`], or, `standard` none, `text` as more of the
@@ -74,11 +74,11 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Session, standard: Handle, file: Fi
 /// run with the globals they made (`run-checked-more`). Its positions are
 /// counted from `base`, past every text given before, so that what the
 /// checker says of a place is said of no other form's.
-pub fn eval_more_with_fx26_evaluator(scheme: &mut Session, standard: Option<Handle>, file: FileId, text: &str, base: i64) -> R<String> {
+pub fn eval_more_with_fx26_evaluator(scheme: &mut Session, standard: Option<Handle>, file: FileId, text: &str, base: i64, session: i64) -> R<String> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let entry = if standard.is_some() { "run-checked" } else { "run-checked-more" };
     scheme.scope(|s| {
-        let tops = parse_to_trees_at(s, file, text, base)?;
+        let tops = parse_to_trees_at(s, file, text, base, session)?;
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = s.view(|v| {
             let r = v.get(checked);
@@ -104,16 +104,18 @@ pub fn eval_more_with_fx26_evaluator(scheme: &mut Session, standard: Option<Hand
 /// compiler written in FX-26, and run the word it makes on the cellular
 /// machine: the value, as Scheme writes it; or `!! ` and why it failed.
 pub fn compile_with_fx26_compiler(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
-    compile_with_fx26_compiler_showing(scheme, Some(standard), file, text, false, None).map(|(out, _)| out)
+    compile_with_fx26_compiler_showing(scheme, Some(standard), 0, file, text, false, None).map(|(out, _)| out)
 }
 
 /// The same, and, if `show`, the word made, and every word it reaches,
 /// disassembled before it runs; the run limited to `steps`, if given.
 /// `standard` begins the checker's state; without it, `text` is checked
-/// after the forms checked before (`check-more`), as the REPL gives them.
+/// after the forms checked before (`check-more`), as the REPL gives them,
+/// in the session's state `session` ([`parse_syns_at`]).
 pub fn compile_with_fx26_compiler_showing(
     scheme: &mut Session,
     standard: Option<Handle>,
+    session: i64,
     file: FileId,
     text: &str,
     show: bool,
@@ -121,7 +123,7 @@ pub fn compile_with_fx26_compiler_showing(
 ) -> R<(String, Option<String>)> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let tops = parse_to_trees(s, file, text)?;
+        let tops = parse_to_trees_at(s, file, text, 0, session)?;
         // Checked first, by the checker written in FX-26, which says where
         // each `extract`'s field is.
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
@@ -378,6 +380,7 @@ fn assemble_twin_by_fx26(
 pub fn with_last_value<T>(
     scheme: &mut Session,
     standard: Option<Handle>,
+    session: i64,
     file: FileId,
     text: &str,
     native: Option<crate::session::NativeFx>,
@@ -385,7 +388,7 @@ pub fn with_last_value<T>(
 ) -> R<Result<T, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let tops = parse_to_trees(s, file, text)?;
+        let tops = parse_to_trees_at(s, file, text, 0, session)?;
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = s.view(|v| {
             let r = v.get(checked);
@@ -423,10 +426,10 @@ pub fn with_last_value<T>(
 
 /// `text` checked by the checker written in FX-26 (after the forms before,
 /// without `standard`), and nothing more: what it found wrong, if anything.
-pub fn check_only(scheme: &mut Session, standard: Option<Handle>, file: FileId, text: &str) -> R<Result<(), String>> {
+pub fn check_only(scheme: &mut Session, standard: Option<Handle>, session: i64, file: FileId, text: &str) -> R<Result<(), String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let tops = parse_to_trees(s, file, text)?;
+        let tops = parse_to_trees_at(s, file, text, 0, session)?;
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         Ok(match s.view(|v| {
             let r = v.get(checked);
@@ -453,7 +456,7 @@ pub fn import_types(scheme: &mut Session, bytes: &[u8]) -> Result<Vec<i64>, Stri
 /// that type, by its id (`import_types`): read, parsed and checked in one
 /// call (`check-text-typed`); a `.fasl`'s definitions,
 /// `docs/research/heap-types.md`, step 5.
-pub fn check_only_typed(scheme: &mut Session, file: FileId, text: &str, typed: &[(String, i64)]) -> R<Result<(), String>> {
+pub fn check_only_typed(scheme: &mut Session, session: i64, file: FileId, text: &str, typed: &[(String, i64)]) -> R<Result<(), String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
         let whole = s.make(|m| m.heap().make_string(text));
@@ -471,7 +474,8 @@ pub fn check_only_typed(scheme: &mut Session, file: FileId, text: &str, typed: &
             }
             l
         });
-        let said = s.call_global(&format!("{READER_PREFIX}check-text-typed"), &[whole, list]).map_err(|e| fail(e.to_string()))?;
+        let session = s.make(|_| Value::fixnum(session));
+        let said = s.call_global(&format!("{READER_PREFIX}check-text-typed"), &[session, whole, list]).map_err(|e| fail(e.to_string()))?;
         let said = s.view(|v| v.get(said).string().unwrap_or_default());
         Ok(if said.is_empty() { Ok(()) } else { Err(said) })
     })
@@ -689,26 +693,30 @@ fn word_of(scheme: &mut Session, result: Handle) -> R<Result<Handle, String>> {
 /// The parser's trees for `text`: a list of `top`s, as a handle in the
 /// caller's scope.
 fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
-    parse_to_trees_at(scheme, file, text, 0)
+    parse_to_trees_at(scheme, file, text, 0, 0)
 }
 
-/// [`parse_to_trees`], its positions counted from `base`.
-fn parse_to_trees_at(scheme: &mut Session, file: FileId, text: &str, base: i64) -> R<Handle> {
+/// [`parse_to_trees`], its positions counted from `base`, read in the
+/// session's state `session` ([`parse_syns_at`]).
+fn parse_to_trees_at(scheme: &mut Session, file: FileId, text: &str, base: i64, session: i64) -> R<Handle> {
     supply_loaded_at(scheme, file, text, base)?;
     let syns = read_to_syns_at(scheme, file, text, base)?;
-    parse_syns_at(scheme, file, text, syns, base)
+    parse_syns_at(scheme, file, text, syns, base, session)
 }
 
 /// What the parser written in FX-26 makes of `syns`, read from `text`
 /// ([`read_to_syns`]): the program's trees, or where it is wrong.
 pub fn parse_syns(scheme: &mut Session, file: FileId, text: &str, syns: Handle) -> R<Handle> {
-    parse_syns_at(scheme, file, text, syns, 0)
+    parse_syns_at(scheme, file, text, syns, 0, 0)
 }
 
-/// [`parse_syns`], the positions read counted from `base`.
-fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, base: i64) -> R<Handle> {
+/// [`parse_syns`], the positions read counted from `base`, its trees of
+/// the reading `text` is in the session's state `session` (0: a program
+/// alone, or the first of a session's; [`crate::ids::reading_of`]).
+fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, base: i64, session: i64) -> R<Handle> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    let result = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[syns]).map_err(|e| fail(e.to_string()))?;
+    let reading = scheme.make(|_| Value::fixnum(crate::ids::reading_of(session, text)));
+    let result = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[reading, syns]).map_err(|e| fail(e.to_string()))?;
     let (tag, err) = scheme.view(|v| {
         let r = v.get(result);
         let tag = r.sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default();

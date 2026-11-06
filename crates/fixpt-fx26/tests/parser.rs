@@ -272,6 +272,32 @@ fn a_tree_as_text() {
     assert_eq!(ours, rust_trees(text));
 }
 
+/// A reading is a digest of the session's state and the text read, not a
+/// count (`readings.fx`): the same text parsed twice is the same trees,
+/// readings and all, each the reading `ids::reading_of` makes of it.
+#[test]
+fn a_reading_is_its_text_not_a_count() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let text = "(if #t 1 2)";
+    let once = s.parse_with_own_parser(text).expect("parses");
+    assert_eq!(once, s.parse_with_own_parser(text).expect("parses"));
+    let r = fixpt_fx26::ids::reading_of(0, text);
+    assert!(once[0].ends_with(&format!(" {r}))")), "{once:?}");
+}
+
+/// The digest written in FX-26 is the one in Rust: each front end makes a
+/// reading alone, and they must agree (`readings.fx`, `ids::reading_of`).
+#[test]
+fn the_readings_agree() {
+    let cases: [(i64, &str); 5] = [(0, ""), (0, "(+ 1 2)"), (-1, "syscall x"), (987_654_321_012, "λx → ü"), (fixpt_fx26::ids::reading_of(5, "a"), "(f)")];
+    let calls: Vec<String> = cases.iter().map(|(s, t)| format!("((with r reading-of) {s} {t:?})")).collect();
+    let program = format!("(define r (load-module \"fx26:readings.fx\"))\n(list {})\n", calls.join(" "));
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let ours = s.run_program(&program).expect("runs").expect("checks");
+    let rust: Vec<String> = cases.iter().map(|(s, t)| fixpt_fx26::ids::reading_of(*s, t).to_string()).collect();
+    assert_eq!(ours, format!("({})", rust.join(" ")));
+}
+
 /// The module files built in load no cycle (`TODO.md` §71): found from
 /// their text, before any checker runs, since a cycle made by a tool once
 /// showed only as a parser recursing without end. Each file's

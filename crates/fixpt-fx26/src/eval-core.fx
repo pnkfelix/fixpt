@@ -30,11 +30,14 @@
            (resolve (select check-resolve-types check-resolve-sig))
            (read-text (subr (select eval-types evals) (string int)
                             (listof (listof (select parser-types syn) acyclic) acyclic)))
-           (parse (subr (select eval-types evals) ((listof (select parser-types syn) acyclic))
+           (parse (subr (select eval-types evals) (int (listof (select parser-types syn) acyclic))
                         (select parser-types presult))))
     (module
 (hide (include eval-types) (include parser-types) (include check-env-types)
       (include check-resolve-types) (include check-types-types) (include check-subst-types))
+;; A reading's digest (`readings.fx`): the code read here is read in no
+;; session's state but the standard environment's, 0.
+(define readings (load-module "fx26:readings.fx"))
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 ev-poll as-bool as-fields as-other as-str as-tag efail
         efail-expected ev-eq? eval-tag show-val the-unit)
@@ -507,7 +510,7 @@
       (let ((read (read-text w ev-stage-base)))
         (if (null? read)
             (ev-stage-refused "the code as checked does not read")
-            (tagcase (parse (car read))
+            (tagcase (parse ((with readings reading-of) 0 w) (car read))
               (p-err (msg a b) (ev-stage-refused msg))
               (p-ok (tops)
                 (if (null? tops)
@@ -755,7 +758,7 @@
     (let ((read (read-text w ev-stage-base)))
       (if (null? read)
           (efail "a session's form does not read")
-          (tagcase (parse (car read))
+          (tagcase (parse ((with readings reading-of) 0 w) (car read))
             (p-err (msg a b) (efail msg))
             (p-ok (tops) (if (null? tops) (efail "a session's form is no form") (car tops))))))))
 
