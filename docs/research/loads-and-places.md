@@ -301,7 +301,23 @@ roles are split.
   `fx words` unchanged (52, 26.5 ms). Compiling the front end: `fx parse`
   350 → 297 ms, and `fx words` 2455 → 2033 ms, which is not explained
   yet.
-- **Left**: blame by span (`synth_app_split`: an error inside an argument
-  that is not a variable ends the split; errors have only a span), for
-  the provenance step; and the expansion record and the printed
-  expansion's source map.
+- **Provenance** (2026-11-06): a `Span` has an `expansion`, the use of a
+  macro whose template made the text (0: none), recorded in a table of
+  the process's (`fixpt_read::record_expansion`, `expansion_trace`), each
+  use's own span saying which made it in turn. A template's parts are at
+  their place in the `define-syntax`; an argument's keep theirs. `fixpt`
+  says an error's place, then each use that made it, innermost first, on
+  the lines after (`located`; `macros/nested-error.fx`).
+- **Not done, and why**: the printed expansion's source map. The checker
+  written in FX-26 checks the printed expansion, so its places are in that
+  text; but its error is said only where the two checkers disagree (where
+  both refuse, the Rust checker's is said, at its provenance). It matters
+  once the expander is the front end written in FX-26's, which reads
+  places from the text it expands; `write_syntax_mapped` is there for it.
+- **Blame by span that stays**: `synth_app_split`, where an error inside an
+  argument that is not a variable ends the split. Errors raised there are
+  of the call's own parts, so an error whose span is inside an argument's
+  is in that argument's text, or in a copy of it another argument holds:
+  in its text either way. A copy is made only where a macro places an
+  argument twice, which waits for `(many σ)`; that both checkers then
+  agree is for it to show.

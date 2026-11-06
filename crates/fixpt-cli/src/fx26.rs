@@ -38,7 +38,13 @@ fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
         return e.message.clone();
     }
     let (line, col) = line_col(text, e.span.start as usize);
-    format!("{name}:{line}:{col}: {}", e.message)
+    let mut out = format!("{name}:{line}:{col}: {}", e.message);
+    // Text a macro's template made: each use that made it, innermost first.
+    for use_ in fixpt_read::expansion_trace(e.span) {
+        let (line, col) = line_col(text, use_.at.start as usize);
+        out.push_str(&format!("\n  in the expansion of `{}` at {name}:{line}:{col}", use_.name));
+    }
+    out
 }
 
 /// A warning, on the standard error, for each type a whole program defines
@@ -1864,6 +1870,18 @@ mod speculative {
         for text in ["(if", "(if #t", "(+ 1", "(lambda ((x int))"] {
             assert!(notes(text).iter().all(|n| !n.error), "{text:?}: {:?}", notes(text));
         }
+    }
+
+    /// An error in text a macro's template made names each use that made
+    /// it, innermost first, after its own place in the template.
+    #[test]
+    fn an_error_in_an_expansion_names_its_uses() {
+        let text = include_str!("../../fixpt-fx26/tests/programs/macros/nested-error.fx");
+        let mut s = session();
+        let e = s.run_program(text).err().expect("refused");
+        let lines: Vec<String> = located("p.fx", text, &e).lines().map(String::from).collect();
+        assert_eq!(lines[0], "p.fx:6:15: argument 2 is a bool, where a int is expected");
+        assert_eq!(lines[1..], ["  in the expansion of `add-one` at p.fx:9:10", "  in the expansion of `twice-add` at p.fx:10:1"]);
     }
 
     /// A macro defined in what is typed is used there, and is not defined

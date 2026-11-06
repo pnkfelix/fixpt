@@ -516,17 +516,20 @@ impl Macros {
                 continue;
             }
             let mut fresh: HashMap<Vec<bool>, Sym> = HashMap::new();
-            return Ok(self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut fresh, interner));
+            let made = fixpt_read::record_expansion(interner.name(name), s.span);
+            return Ok(self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut fresh, made, interner));
         }
         Err(FxError::at(s.span, format!("a use of `{}` that no clause of it matches", interner.name(name))))
     }
 
-    /// Template `t`, at `path` in it, transcribed: each part the template
-    /// makes at its own place in the `define-syntax` (provenance, not
-    /// identity: `docs/research/loads-and-places.md`, "Decided: identity
-    /// by position"), each pattern variable's what the use gave.
-    fn transcribe(&mut self, c: &Clause, t: &Syntax, path: &mut Vec<bool>, binds: &HashMap<Sym, Syntax>, fresh: &mut HashMap<Vec<bool>, Sym>, interner: &mut Interner) -> Syntax {
-        let at = t.span;
+    /// Template `t`, at `path` in it, transcribed by expansion `made`: each
+    /// part the template makes at its own place in the `define-syntax`, of
+    /// that expansion (provenance, not identity:
+    /// `docs/research/loads-and-places.md`, "Decided: identity by
+    /// position"), each pattern variable's what the use gave.
+    #[allow(clippy::too_many_arguments)]
+    fn transcribe(&mut self, c: &Clause, t: &Syntax, path: &mut Vec<bool>, binds: &HashMap<Sym, Syntax>, fresh: &mut HashMap<Vec<bool>, Sym>, made: u32, interner: &mut Interner) -> Syntax {
+        let at = t.span.in_expansion(made);
         match &t.datum {
             Datum::Symbol(n) => {
                 if let Some(b) = binds.get(n) {
@@ -557,11 +560,11 @@ impl Macros {
                 let mut out = Vec::new();
                 for item in items {
                     path.push(true);
-                    out.push(self.transcribe(c, item, path, binds, fresh, interner));
+                    out.push(self.transcribe(c, item, path, binds, fresh, made, interner));
                     path.pop();
                     path.push(false);
                 }
-                let tail = tail.as_ref().map(|x| self.transcribe(c, x, path, binds, fresh, interner));
+                let tail = tail.as_ref().map(|x| self.transcribe(c, x, path, binds, fresh, made, interner));
                 path.truncate(depth);
                 list_of(at, out, tail)
             }

@@ -526,8 +526,11 @@ turn.
 - A macro's name may not be bound or defined at all, as a form's may not
   (Herman lets a local binder shadow a macro); a use binding one is
   refused, and a definition of one.
-- Errors inside an expansion are said at the use's span (item 4's source
-  map); the template's own parts carry the use's span.
+- Errors inside an expansion are said where the template wrote the part,
+  then at each use that made it, innermost first (2026-11-06,
+  `loads-and-places.md`, "Done: identity by position"); the printed
+  expansion's source map, for the checker written in FX-26's places,
+  waits for the expander to be that front end's.
 - The REPL: a macro defined in what is typed is defined for that alone
   (`Checker::macros_kept`); a use's binders and scopes are not yet shown
   before it expands.

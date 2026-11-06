@@ -12,33 +12,82 @@ use std::sync::Arc;
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 pub struct FileId(pub u32);
 
-/// A half-open byte range within one source file.
+/// A half-open byte range within one source file: where something's text
+/// is, its provenance. Of what a macro's template made, the text is the
+/// template's, and `expansion` says which use of the macro made it (0:
+/// none; [`expansion`]).
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Span {
     pub file: FileId,
     pub start: u32,
     pub end: u32,
+    pub expansion: u32,
 }
 
 impl Span {
     pub const fn new(file: FileId, start: u32, end: u32) -> Span {
-        Span { file, start, end }
+        Span { file, start, end, expansion: 0 }
     }
     /// For data built by a desugarer rather than read from a file: keeps the
     /// originating span so errors still point somewhere useful.
     pub const fn synthetic(from: Span) -> Span {
-        Span { file: from.file, start: from.start, end: from.start }
+        Span { end: from.start, ..from }
     }
     pub fn join(self, other: Span) -> Span {
         debug_assert_eq!(self.file, other.file);
-        Span { file: self.file, start: self.start.min(other.start), end: self.end.max(other.end) }
+        Span { start: self.start.min(other.start), end: self.end.max(other.end), ..self }
+    }
+    /// This span, of text a use of a macro made: `expansion`'s.
+    pub const fn in_expansion(self, expansion: u32) -> Span {
+        Span { expansion, ..self }
     }
 }
 
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}..{}", self.file.0, self.start, self.end)
+        write!(f, "{}:{}..{}", self.file.0, self.start, self.end)?;
+        if self.expansion != 0 {
+            write!(f, "@{}", self.expansion)?;
+        }
+        Ok(())
     }
+}
+
+/// A use of a macro that made text: the macro's name, and where the use is
+/// (itself perhaps made by another's, by its `expansion`).
+#[derive(Clone, Debug)]
+pub struct Expansion {
+    pub name: String,
+    pub at: Span,
+}
+
+/// The uses of macros expanded, in this process, by number from 1, as
+/// symbols are interned: so that a span says which made it wherever it
+/// goes, an error's included.
+static EXPANSIONS: std::sync::Mutex<Vec<Expansion>> = std::sync::Mutex::new(Vec::new());
+
+/// A use of macro `name` at `at`, expanded: its number.
+pub fn record_expansion(name: &str, at: Span) -> u32 {
+    let mut all = EXPANSIONS.lock().expect("not poisoned");
+    all.push(Expansion { name: name.to_string(), at });
+    all.len() as u32
+}
+
+/// Expansion `n`, if one was recorded.
+pub fn expansion(n: u32) -> Option<Expansion> {
+    let all = EXPANSIONS.lock().expect("not poisoned");
+    n.checked_sub(1).and_then(|i| all.get(i as usize).cloned())
+}
+
+/// The uses of macros that made the text at `span`, innermost first.
+pub fn expansion_trace(span: Span) -> Vec<Expansion> {
+    let mut out = Vec::new();
+    let mut at = span.expansion;
+    while let Some(e) = expansion(at).filter(|_| out.len() < 100) {
+        at = e.at.expansion;
+        out.push(e);
+    }
+    out
 }
 
 struct SourceFile {

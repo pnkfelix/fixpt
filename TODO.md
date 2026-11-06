@@ -5216,9 +5216,10 @@ built"); a parameter's `(x : T)` is the one place FX-26 writes it now.
 ## 214. Identity by position, spans for provenance (the user's, 2026-11-06)
 Decided: `docs/research/loads-and-places.md`, "Decided: identity by
 position". Identity done in both front ends (2026-11-06, "Done: identity
-by position"): `k` the walk's number, containment by structure. Left:
-blame by span in `synth_app_split`, the expansion record, the source
-map. An expression's identity becomes `(form n last)`, its number
+by position"): `k` the walk's number, containment by structure; and
+provenance, a span's expansion record, traced in `fixpt`'s messages.
+Left: the printed expansion's source map (waits for the expander in the
+front end written in FX-26), then `(many σ)`. An expression's identity becomes `(form n last)`, its number
 in a walk of its form and its subtree's last, in both front ends and the
 `Kth` bridge; the Rust checker's span-as-identity uses go; spans become
 provenance with an expansion record. Then the printed expansion's source
