@@ -125,6 +125,11 @@ pub struct Cert {
     /// Its specification (`requires`, `ensures`), its parameters by slot:
     /// assumed at entry, proved at each `return` (§8 of the note).
     pub spec: Option<std::rc::Rc<crate::ast::Spec>>,
+    /// Of an `allof`'s lambda, or one inside it: the certificate at each
+    /// signature it was checked at, one per member (`NodeFacts::
+    /// lambda_variants`). The word must verify at each, and a closure of
+    /// it is of their `allof`.
+    pub variants: Vec<Cert>,
 }
 
 /// The certificates a compilation made: each word's, and each global cell's
@@ -405,20 +410,51 @@ fn marker(op: &str) -> bool {
     matches!(op, "%call" | "%inst" | "%proj" | "%make" | "%trust" | "%flat" | "%copy")
 }
 
+/// Verify `word` against `cert`, one of its certificate's variants.
+fn verify_as(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value, cert: &Cert) -> Outcome {
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), cell: None };
+    v.word(word, cert);
+    v.finish()
+}
+
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
     let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), cell: None };
     match certs.words.get(&word.raw()) {
+        // At each signature: the first that does not verify, else the
+        // last, with what all of them discharged.
+        Some(cert) if !cert.variants.is_empty() => {
+            drop(v);
+            let mut discharged = 0;
+            let mut last = Outcome::default();
+            for var in &cert.variants {
+                let o = verify_as(c, heap, certs, word, var);
+                discharged += o.discharged;
+                if !o.verified() {
+                    return o;
+                }
+                last = o;
+            }
+            last.discharged = discharged;
+            return last;
+        }
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
     }
-    v.place();
-    use crate::ast::Atom;
-    // Of each step, as it was before any masking (a write to a region
-    // that is gone is still a write to the pairs in it while it was not).
-    let writes = |e: &Effect| e.0.iter().any(|a| matches!(a, Atom::Write(_) | Atom::Init(_) | Atom::Var(_) | Atom::App(_)));
-    v.out.writes = writes(&v.effect) || v.contributed.iter().any(|(_, _, e)| writes(e));
-    v.out
+    v.finish()
+}
+
+impl Verifier<'_> {
+    /// The outcome, once the word is walked.
+    fn finish(mut self) -> Outcome {
+        self.place();
+        use crate::ast::Atom;
+        // Of each step, as it was before any masking (a write to a region
+        // that is gone is still a write to the pairs in it while it was not).
+        let writes = |e: &Effect| e.0.iter().any(|a| matches!(a, Atom::Write(_) | Atom::Init(_) | Atom::Var(_) | Atom::App(_)));
+        self.out.writes = writes(&self.effect) || self.contributed.iter().any(|(_, _, e)| writes(e));
+        self.out
+    }
 }
 
 /// A masked expression's cells, from `start` to `end` (`Cert::masks`): the
@@ -632,6 +668,11 @@ impl Verifier<'_> {
     fn subr_of(&mut self, cert: &Cert) -> Option<TyId> {
         if let Some(t) = cert.conversion {
             return Some(t);
+        }
+        // An `allof`'s lambda's: each member's, together.
+        if !cert.variants.is_empty() {
+            let ms = cert.variants.iter().map(|v| self.subr_of(v)).collect::<Option<Vec<_>>>()?;
+            return Some(self.c.arena.ty(Ty::AllOf(ms)));
         }
         let (result, effect) = (cert.result?, cert.effect.clone()?);
         let conv = self.c.conv_default;
@@ -1986,6 +2027,24 @@ impl Verifier<'_> {
                     self.out.stopped = Some("nclosure (the native convention)".into());
                     return Err(());
                 }
+                // Of a word at several signatures (`Cert::variants`): those
+                // whose free values' types these fit. A lambda inside an
+                // `allof`'s, made under one member, is of that member's; an
+                // `allof`'s own, of every member's.
+                let mut callee = callee;
+                if !callee.variants.is_empty() {
+                    let mut kept = Vec::new();
+                    for var in &callee.variants {
+                        if vals.iter().zip(&var.frees).all(|(v, t)| v.term == Term::Lit(Value::FALSE) || self.fits(v, *t) == Some(true)) {
+                            kept.push(var.clone());
+                        }
+                    }
+                    let Some(first) = kept.first().cloned() else {
+                        self.out.failed.push(format!("{at}: a closure over values that no signature of its word takes"));
+                        return Err(());
+                    };
+                    callee = Cert { variants: if kept.len() > 1 { kept } else { Vec::new() }, ..first };
+                }
                 let made = self.fresh();
                 for (j, (v, t)) in vals.iter().zip(&callee.frees).enumerate() {
                     // A placeholder, `#f` where it does not fit: the free
@@ -2040,6 +2099,54 @@ impl Verifier<'_> {
                     Some(t) if t.as_subr().is_some() => {
                         let (effect, params, result) = t.as_subr().expect("a subroutine");
                         (params, result, effect)
+                    }
+                    // An `allof`'s (`logical-types.md` §8.5, rule 4): every
+                    // member its arguments' types fit; the meet of their
+                    // results, the least of their latent effects if one is,
+                    // else the first's, as the checkers have it.
+                    Some(Ty::AllOf(ms)) => {
+                        let mut fits = Vec::new();
+                        for m in &ms {
+                            let Some((latent, ps, r)) = self.c.arena.get(*m).as_subr() else { continue };
+                            if ps.len() == n && args.iter().zip(&ps).all(|(a, p)| self.fits(a, *p) == Some(true)) {
+                                fits.push((ps, r, latent));
+                            }
+                        }
+                        // None fits whole: rule 5, an argument of a union taken
+                        // as each member in turn, each fitting some member; the
+                        // result their results' union.
+                        if fits.is_empty()
+                            && let Some((ps, r, l)) = self.allof_split(&ms, &args)
+                        {
+                            fits.push((ps, r, l));
+                        }
+                        let Some((ps0, r0, l0)) = fits.first().cloned() else {
+                            self.out.failed.push(format!("{at}: a call that fits no member of {}", self.show(f.ty.expect("known"))));
+                            return Err(());
+                        };
+                        let mut fresh = Vec::new();
+                        for (_, _, l) in &fits {
+                            for a in &l.0 {
+                                if let crate::ast::Atom::Alloc(r) = a
+                                    && !matches!(r, crate::ast::Region::Frozen(..))
+                                    && !fresh.contains(r)
+                                {
+                                    fresh.push(*r);
+                                }
+                            }
+                        }
+                        let mut result = r0;
+                        for (_, r, _) in &fits[1..] {
+                            match self.c.meet(result, *r, &fresh) {
+                                Ok(met) => result = met,
+                                Err(_) => {
+                                    self.out.failed.push(format!("{at}: a call whose members' results have no meet"));
+                                    return Err(());
+                                }
+                            }
+                        }
+                        let latent = fits.iter().map(|(_, _, l)| l).find(|l| fits.iter().all(|(_, _, o)| l.within(o))).unwrap_or(&l0).clone();
+                        (ps0, result, latent)
                     }
                     Some(Ty::Poly { .. }) => {
                         self.out.stopped = Some("a call of a polymorphic value: no instantiation in the certificate yet".into());
@@ -2191,7 +2298,11 @@ impl Verifier<'_> {
                     let cond = prop_of(&flag.term);
                     no.props.push(Formula::Not(Box::new(cond.clone())));
                     yes.props.push(cond);
-                    (no, Some(yes))
+                    // A way the tests show is never taken: not followed.
+                    if self.unreached(&no) {
+                        return Ok((!self.unreached(&yes)).then_some(yes));
+                    }
+                    (no, (!self.unreached(&yes)).then_some(yes))
                 };
                 if to <= here {
                     // A loop: back to the start, whose assertion is the
@@ -2876,6 +2987,48 @@ impl Verifier<'_> {
 
     /// What a branch on `flag` tells the way where it is true (`yes`) or
     /// false: narrowing, from what the flag's term says it tested.
+    /// A call of an `allof` of members `ms` with `args` that no member fits
+    /// whole (rule 5): the first argument of a union each of whose members,
+    /// taken for it, makes the call fit a member; the parameters to hold
+    /// (the argument's own, the union, where it is), the union of each
+    /// one's result (the first fitting member's), and their latent effects
+    /// together.
+    fn allof_split(&mut self, ms: &[TyId], args: &[V]) -> Option<(Vec<TyId>, TyId, Effect)> {
+        for (i, a) in args.iter().enumerate() {
+            let Some(t) = a.ty else { continue };
+            let Ty::Union(us) = self.c.arena.get(self.c.arena.resolve(t)).clone() else { continue };
+            let (mut results, mut effect, mut params) = (Vec::new(), Effect::pure(), None);
+            let mut all = true;
+            for u in &us {
+                let mut one = args.to_vec();
+                one[i].ty = Some(*u);
+                let fit = ms.iter().find_map(|m| {
+                    let (latent, ps, r) = self.c.arena.get(*m).as_subr()?;
+                    (ps.len() == one.len() && one.iter().zip(&ps).all(|(a, p)| self.fits(a, *p) == Some(true))).then_some((ps, r, latent))
+                });
+                let Some((mut ps, r, latent)) = fit else {
+                    all = false;
+                    break;
+                };
+                ps[i] = t;
+                params.get_or_insert(ps);
+                results.push(r);
+                effect = effect.union(&latent);
+            }
+            if all {
+                let result = self.c.anyof_of(&results, fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0)).ok()?;
+                return Some((params?, result, effect));
+            }
+        }
+        None
+    }
+
+    /// Whether no run reaches `s`: a value there is of `void`, which has
+    /// none.
+    fn unreached(&self, s: &State) -> bool {
+        s.stack.iter().any(|v| v.ty.is_some_and(|t| self.c.arena.resolve(t) == self.c.arena.resolve(self.c.void)))
+    }
+
     fn narrow(&mut self, flag: &Term, yes: bool, s: &mut State) {
         // A value the ways joined to make: what every way that may have made
         // it true (`yes`), or false, learned of it there.
@@ -2981,11 +3134,20 @@ impl Verifier<'_> {
                     let (y, n) = c.narrowed_by(t, 1u32 << shape);
                     if negated { n } else { y }
                 });
+                let void = self.c.void;
                 for v in s.stack.iter_mut().filter(|v| v.term == *arg) {
                     let Some(ty) = v.ty else { continue };
                     let (y, n) = self.c.narrowed_by(ty, 1u32 << shape);
-                    if let Some(t) = if negated { n } else { y } {
-                        v.ty = Some(t);
+                    match if negated { n } else { y } {
+                        Some(t) => v.ty = Some(t),
+                        // A test its type cannot pass (or fail): no value
+                        // here, the way never taken (`unreached`), as the
+                        // checkers skip it under an `allof`'s member.
+                        None => match self.c.shape(ty) {
+                            Some(m) if m != 0 && !negated && m & (1u32 << shape) == 0 => v.ty = Some(void),
+                            Some(m) if m != 0 && negated && m & !(1u32 << shape) == 0 => v.ty = Some(void),
+                            _ => {}
+                        },
                     }
                 }
             }
@@ -3029,11 +3191,18 @@ impl Verifier<'_> {
                     let (y, n) = c.narrowed_by(ty, nil);
                     if yes { y } else { n }
                 });
+                let void = self.c.void;
                 for v in s.stack.iter_mut().filter(|v| v.term == *t) {
                     let Some(ty) = v.ty else { continue };
                     let (y, n) = self.c.narrowed_by(ty, nil);
-                    if let Some(t) = if yes { y } else { n } {
-                        v.ty = Some(t);
+                    match if yes { y } else { n } {
+                        Some(t) => v.ty = Some(t),
+                        // Never `nil` (or always): the way never taken.
+                        None => match self.c.shape(ty) {
+                            Some(m) if m != 0 && yes && m & nil == 0 => v.ty = Some(void),
+                            Some(m) if m != 0 && !yes && m & !nil == 0 => v.ty = Some(void),
+                            _ => {}
+                        },
                     }
                 }
             }

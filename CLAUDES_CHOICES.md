@@ -3894,3 +3894,22 @@ The user read the paper as supporting the distribution. Mine:
   some other way (an `if` against a parameter) is not pinned, and stays
   refused. FX-26's split was given the synthesizer to find an argument's
   type (`k-split-app`'s new parameter).
+
+## The verifier and `allof`, in part (2026-11-05)
+
+- **Signatures per member** are recorded where the checker checks each
+  member, for every lambda inside the `allof`'s, after a member checks;
+  a word is then certified at each (`Cert::variants`). A failed trial
+  elsewhere can leave one more: the verifier then fails, never accepts.
+- **A closure's type** is the `allof` of the variants its free values fit:
+  an `allof`'s own lambda has the same free values under every member, so
+  all; one nested inside, only the member it was made under.
+- **Unreachable ways**: a value narrowed to `void` by a shape test its type
+  cannot pass marks the way never taken, in any word, not only under an
+  `allof`: sound, as no value has `void`, and it only removes obligations.
+- **Not done**: notes and operations per member. They come from the
+  checker's facts by expression, the last member's; making them per member
+  means compiling each word's notes at each member's facts, a change to
+  the compiler's every note. Words that verified before at one member and
+  now fail at another (`mk` in the fresh/frozen tests) were not verified as
+  `allof` words before either.

@@ -431,6 +431,11 @@ impl Checker {
         let mut found: Vec<(HashMap<(ExpId, u8), CodeFact>, Vec<fixpt_read::Span>)> = Vec::new();
         let mut eff = Effect::pure();
         self.dead_arms.push(crate::check::DeadArms { members: members.len(), ..Default::default() });
+        // Each lambda's signature, from here in, at each member, for the
+        // verifier (`lambda_variants`). One a member skipped has the last
+        // member's that checked it, again: harmless.
+        let mut variants: Vec<(ExpId, crate::check::LambdaSig)> = Vec::new();
+        let whole = self.arena.span_of(e);
         let mut checked = || -> R<()> {
             for (at, m) in members.iter().enumerate() {
                 self.facts.code_put_back(&saved);
@@ -439,6 +444,15 @@ impl Checker {
                 dead.at = at;
                 eff = self.check(e, *m)?;
                 let skipped = std::mem::take(&mut self.dead_arms.last_mut().expect("pushed").now);
+                if self.record_types {
+                    let inside = |x: fixpt_read::Span, o: &fixpt_read::Span| x.file == o.file && x.start >= o.start && x.end <= o.end;
+                    for (l, sig) in &self.facts.lambdas {
+                        let at = self.arena.span_of(*l);
+                        if inside(at, &whole) {
+                            variants.push((*l, sig.clone()));
+                        }
+                    }
+                }
                 found.push((self.facts.code_facts(), skipped));
                 for (x, xe) in &self.facts.effects {
                     if effects_before.get(x).is_none_or(|b| b.0 != xe.0) {
@@ -485,6 +499,9 @@ impl Checker {
             }
         }
         self.facts.effects.extend(effects);
+        for (l, sig) in variants {
+            self.facts.lambda_variants.entry(l).or_default().push(sig);
+        }
         Ok(eff)
     }
 

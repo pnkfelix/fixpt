@@ -939,9 +939,22 @@ reshape at an `allof` call); two members' facts are compared only where
 both checked (outside the arms either skipped), and kept together; each
 expression's effect summary is the greatest under any member; a call's
 latent effect is the least of the fitting members' if one is, else the
-first's; recursion ends if it does at each member's types. Not yet:
-the verifier of typed cellular code knows no `allof` (`typed_cells.rs`'s
-known gaps).
+first's; recursion ends if it does at each member's types.
+
+**The verifier of typed cellular code (2026-11-05)**, in part. A call of
+an `allof` takes every member the arguments' types fit, the meet of their
+results and the least latent effect, as the checkers do; with none fitting
+whole, rule 5 at an argument of a union. An `allof`'s lambda, and each
+inside it, is certified at each member's signature (`Cert::variants`, from
+`NodeFacts::lambda_variants`, which each member's check records): its word
+must verify at each, and a closure of it is of the `allof` of those its
+free values fit (a lambda inside an `allof`'s body, made under one member,
+of that member's). A shape test a value's type cannot pass (or fail) makes
+its way unreachable (a `void` value), in any word. Left: a word's type
+notes and operations are the last member's check's, so where the
+members' types differ inside a body (a join's type, an instantiation, a
+`sum` made) the other members' variants fail there; and `car` of an
+`anyof` of pairs (`typed_cells.rs`'s known gaps).
 
 **Arguments at an `allof` call (2026-11-05).** A `lambda` with a
 parameter of no type has no type of its own: it fits a member whose

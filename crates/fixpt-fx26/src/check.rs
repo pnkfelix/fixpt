@@ -706,6 +706,10 @@ pub struct NodeFacts {
     /// from its body): its word's precondition and postcondition. With
     /// `record_types`.
     pub lambdas: HashMap<ExpId, LambdaSig>,
+    /// Of an `allof`'s lambda, and each inside it, by body: the signature
+    /// at each member, as the member's check left it, for the verifier of
+    /// typed cellular code to verify its word at each.
+    pub lambda_variants: HashMap<ExpId, Vec<LambdaSig>>,
     /// Each lambda that is a polymorphic value (a `plambda`'s, or one
     /// checked against a `poly`), by its body: the binders its signature's
     /// types are under, a level for each `poly`, outermost first. With

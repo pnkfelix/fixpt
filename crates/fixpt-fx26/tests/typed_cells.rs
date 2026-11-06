@@ -362,33 +362,25 @@ fn every_directory_surveyed() {
 /// verifier wraps in another `poly` instead (`go`; a local's as well, and a
 /// global's since `TODO.md` §211, 5, let one be read there).
 const KNOWN_GAPS: &[&str] = &[
-    // The verifier has no rule for `allof` yet (`TODO.md` §79, U1): a body
-    // checked against each member, a call taking every member it fits.
-    "allof/cond-dead.fx `program`",
+    // An `allof`'s word, verified at each member's signature
+    // (`Cert::variants`), but with one set of type notes and operations,
+    // the last member's check's: where a member's types differ inside the
+    // body (a join's type, an instantiation, a `sum` made), its variant
+    // fails there. Notes per member would need the word's notes made once
+    // at each member's facts.
     "allof/cond-dead.fx `swap@799`",
-    "allof/converted-argument.fx `program`",
-    "allof/fresh-elsewhere.fx `program`",
-    "allof/frozen-results.fx `program`",
-    "allof/frozen-ring.fx `program`",
-    "allof/lambda-argument.fx `program`",
-    "allof/len-by-member.fx `len@562`",
-    "allof/len-by-member.fx `program`",
-    "allof/meet.fx `program`",
+    "allof/fresh-elsewhere.fx `mk`",
+    "allof/frozen-results.fx `mk/lambda@501`",
+    "allof/frozen-results.fx `mk`",
+    "allof/frozen-ring.fx `mk`",
     "allof/product-nested.fx `lambda@325`",
-    "allof/product-nested.fx `program`",
-    "allof/product.fx `program`",
-    "allof/swap.fx `program`",
     "allof/swap.fx `swap@1194`",
-    "allof/typecase-dead.fx `program`",
     "allof/typecase-dead.fx `swap@555`",
-    // Nor for a call taking a union argument apart by its members (U3): a
-    // call whose argument is each member in turn.
-    "anyof/allof-split.fx `go`",
-    "anyof/allof-split.fx `program`",
+    // `car` of an `anyof` of pairs, which the checkers take at the union's
+    // greatest pair member and the verifier does not.
     "anyof/car-split.fx `first`",
-    "anyof/split-call.fx `program`",
+    // As the `allof` words above.
     "anyof/split-call.fx `show`",
-    "anyof/swap-anyof.fx `program`",
     "anyof/swap-anyof.fx `swap-eop`",
     "anyof/swap-anyof.fx `swap@1243`",
     "higher-kinds/poly-global-read.fx `go`",

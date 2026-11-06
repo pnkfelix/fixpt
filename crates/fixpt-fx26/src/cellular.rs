@@ -2737,7 +2737,9 @@ impl<'a> Compiler<'a> {
     /// free value's type by name (a lifted procedure's added parameters are
     /// the free variables it would have captured).
     fn certify_lambda(&mut self, w: Value, params: &[Sym], body: ExpId, fv: &[Sym]) {
-        let Some(certs) = &mut self.certs else { return };
+        if self.certs.is_none() {
+            return;
+        }
         // A `prompt`'s body, which the compiler makes a thunk: of the type
         // and effect checking found the body of.
         let thunk;
@@ -2750,6 +2752,20 @@ impl<'a> Compiler<'a> {
             }
             None => return,
         };
+        let Some(mut cert) = self.lambda_cert(params, body, fv, sig) else { return };
+        // An `allof`'s lambda, and each inside one: verified at each
+        // member's signature too (`NodeFacts::lambda_variants`), its
+        // closures of their `allof`.
+        if let Some(vs) = self.c.facts.lambda_variants.get(&body) {
+            cert.variants = vs.iter().filter_map(|v| self.lambda_cert(params, body, fv, v)).collect();
+        }
+        if let Some(certs) = &mut self.certs {
+            certs.words.insert(w.raw(), cert);
+        }
+    }
+
+    /// Word `w`'s certificate (`certify_lambda`), from signature `sig`.
+    fn lambda_cert(&self, params: &[Sym], body: ExpId, fv: &[Sym], sig: &crate::check::LambdaSig) -> Option<crate::typed_cells::Cert> {
         // A name its lambda does not bind or see: a lifted procedure's added
         // parameter (free in a sibling), or a module's member (seen through
         // `%include`); its type as another lambda saw it, or a global's.
@@ -2798,7 +2814,7 @@ impl<'a> Compiler<'a> {
         };
         let elsewhere = |n: &Sym| referred(n).or_else(|| around(n)).or_else(|| c.global_type(*n));
         let by_name = |n: &Sym| sig.params.iter().rev().chain(sig.frees.iter()).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| included(n)).or_else(|| elsewhere(n));
-        let (Some(ps), Some(fs)) = (params.iter().map(by_name).collect::<Option<Vec<_>>>(), fv.iter().map(by_name).collect::<Option<Vec<_>>>()) else { return };
+        let (Some(ps), Some(fs)) = (params.iter().map(by_name).collect::<Option<Vec<_>>>(), fv.iter().map(by_name).collect::<Option<Vec<_>>>()) else { return None };
         let poly = self.c.facts.generalized.get(&body).cloned().unwrap_or_default();
         let conversion = self.c.facts.conversions.get(&body).copied();
         // Each of the lambda's own parameters as bound inside it; an added
@@ -2835,8 +2851,9 @@ impl<'a> Compiler<'a> {
             own_ops: Vec::new(),
             vsubr: None,
             spec,
+            variants: Vec::new(),
         };
-        certs.words.insert(w.raw(), cert);
+        Some(cert)
     }
 
     /// A literal, under ascriptions: what a module's member may be to be
