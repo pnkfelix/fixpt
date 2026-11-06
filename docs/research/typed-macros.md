@@ -573,22 +573,29 @@ regions.
 
 **Where to build.** Effects as scopes and modules as ribs: between them,
 both of Herman's directions, imports and exports, on what FX-26 checks
-already.
+already. **Decided (the user, 2026-11-06): not first.** The prototype
+starts as close to Herman's foundations as it can: his binding
+signatures (imports, exports, ribs and ribcages), his shadow restriction,
+parsing directed by a macro's type. Scopes as regions, and modules as
+ribs, are for after it, measured against it.
 
 ## Questions for the user
 
-- The concrete syntax of signatures: names in the types as sketched, or
-  Herman's addresses, or patterns and types apart as Herman writes them?
-- Item 5: what a template's reference to a global means after the global
-  is redefined: the global as it was where the macro was defined, or as it
-  is where the macro is used (FX-26's redefinition re-runs definitions)?
-- Ellipsis (`...`) in the prototype, or recursion through syntax types
-  first, as Herman does?
+Answered 2026-11-06 (the user):
+- **Signatures**: Herman's tree addresses to start, each signature with a
+  comment beside it saying how it would read in the names of "Binding
+  signatures" above, the more readable system to move to.
+- **Item 5**: a template's reference to a global is to the global as it is
+  where the macro is used, as FX-26's redefinition re-runs definitions.
+  Only the top level is redefined: a module's definitions never are, and
+  a local binding a template names is its own, hygienically.
+- **Repetition**: recursion through syntax types, as Herman's chapter 7
+  writes `let*` and `cond`; ellipsis later, as sugar for it.
+- **Scopes as regions**: Herman's annotations first ("Where to build").
+- **Labels in templates**: keywords, or `label` pattern variables; a bare
+  label in a template is refused. Ordinary code is unchanged.
+
+Open:
 - Keywords (decided: `#:tag`): a sum's tag at run time a keyword, as
   proposed, or still a symbol with keywords only in the source? And flat
   products, `(product #:n n #:reply c)`, or keep the pairs?
-- Scopes as regions (2026-11-06): index `expr` by a set of scopes, `(expr
-  T E S)`, and check hygiene as region escape, from the prototype, or
-  Herman's annotations first and scopes in the second step (item 7)?
-- Labels in templates: keywords only (or `label` pattern variables), bare
-  labels refused there?
