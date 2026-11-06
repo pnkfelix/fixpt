@@ -940,9 +940,25 @@ both checked (outside the arms either skipped), and kept together; each
 expression's effect summary is the greatest under any member; a call's
 latent effect is the least of the fitting members' if one is, else the
 first's; recursion ends if it does at each member's types. Not yet:
-`spin` judged per member (`len`'s `pure` on `acyclic`), so `len` of the
-table is U1's one test not built; the verifier of typed cellular code
-knows no `allof` (`typed_cells.rs`'s known gaps). Tests:
+the verifier of typed cellular code knows no `allof` (`typed_cells.rs`'s
+known gaps).
+
+**Termination per member (2026-11-05).** Each binding of a recursive
+group is a node at each member of its `allof` (one at its type for a
+binding of no `allof`), its body walked at that member's parameter types,
+passing over the `if` branches (a standard shape predicate, or its `not`,
+of a value whose type is known) and the `tagcase` arms (a tag the sum
+lacks) those types rule out, as checking it against that member does
+(rule 2). Each call goes to every member its arguments' types fit, by
+subtyping where the walk knows them, to every member where it does not. A
+node ends if size-change holds for the calls reachable from it; a call
+says `spin` only where a member it fits may not end; naming the callee as
+its operator says none of its own. So `len` of the table checks: `pure` on
+`acyclic` lists, `spin` on lists at `@heap` (`allof/len-by-member.fx`).
+Calls that alternate between members are one graph, so a loop through
+both that grows is refused though each member's calls alone shrink
+(`members-alternate.fx`). Both checkers (`termination_by_member`,
+`member_spins`; `k-termination-by-member`, `k-member-spins`). Tests:
 `tests/programs/allof/` (swap, the meet, and four refusals).
 
 **U2, as built (2026-11-05).** `(anyof T …)` in both checkers, one node

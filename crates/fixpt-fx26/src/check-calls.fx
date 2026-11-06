@@ -350,6 +350,8 @@
 ;; lambdas, of the group; or a call through a recursive type of anything but
 ;; known code (self-application loops with no store at all). A knot through
 ;; the store needs nothing here: `k-no-knot` makes its type say `spin`.
+(define k-any-true? (->* ((listof bool acyclic)) bool)
+  (lambda (bs) (and (not (null? bs)) (or (car bs) (k-any-true? (cdr bs))))))
 (define k-may-spin? (->* (kx int kxs) bool)
   (lambda (f ft args)
     (let* ((s (k-callee-name f))
@@ -365,7 +367,9 @@
             ((string=? std "cwcc")
              (or (k-receiver-captures? ft)
                  (not (and (not (null? args)) (null? (cdr args)) (k-escape-only? (car args))))))
-            ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t)) #t)
+            ;; Of a group with an `allof`, as its own members end or not.
+            ((and (>= t 0) (k-named-has? (get k-recursive) (car s) t))
+             (let ((m (k-member-spins-of (car s) t))) (or (null? m) (k-any-true? m))))
             ((and (>= t 0) (or (k-known? (car s)) (k-std-binding? (car s) t))) #f)
             ((not (string=? std "")) #f)
             ((k-lambda? (k-under f)) #f)

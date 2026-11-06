@@ -496,7 +496,13 @@ impl Checker {
         mut done: Vec<Synthesised>,
     ) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
+        // The callee's own group, judged member by member: its name is the
+        // operator here, so the `spin` naming it says is the call's, below.
+        let own = self.callee_binding(fun).filter(|b| self.recursive.contains(b)).and_then(|b| self.member_spins.get(&b).cloned());
         let mut effect = fe;
+        if own.is_some() {
+            effect.0.remove(&Atom::Spin);
+        }
         let mut tys = Vec::new();
         for (i, a) in args.iter().enumerate() {
             let (t, eff) = match done[i].take() {
@@ -507,10 +513,12 @@ impl Checker {
             tys.push(t);
         }
         let mut fits: Vec<(TyId, Effect, TyId, Conv)> = Vec::new();
-        for m in members {
+        let mut fit_at = Vec::new();
+        for (k, m) in members.iter().enumerate() {
             let Ty::Subr { conv, effect: latent, params, result, .. } = self.arena.get(*m).clone() else { continue };
             if params.len() == tys.len() && tys.iter().zip(&params).all(|(t, p)| self.subtype(*t, *p)) {
                 fits.push((*m, latent, result, conv));
+                fit_at.push(k);
             }
         }
         let Some(&(m0, ref latent0, result0, conv)) = fits.first() else {
@@ -545,7 +553,13 @@ impl Checker {
         }
         let latent = fits.iter().map(|(_, l, _, _)| l).find(|l| fits.iter().all(|(_, o, _, _)| l.within(o))).unwrap_or(latent0).clone();
         let mut effect = effect.union(&latent);
-        if self.may_spin(fun, ft, args) {
+        // A call of its own recursive group: `spin` if a member it fits may
+        // not end (`termination_by_member`).
+        let spins = match own {
+            Some(m) => fit_at.iter().any(|k| m.get(*k).copied().unwrap_or(true)),
+            None => self.may_spin(fun, ft, args),
+        };
+        if spins {
             effect.0.insert(Atom::Spin);
         }
         let effect = self.mask(e, &effect, result);
@@ -1364,7 +1378,8 @@ impl Checker {
         }
         if let Some(b) = binding {
             if self.recursive.contains(&b) {
-                return true;
+                // Of a group with an `allof`, as its own member ends or not.
+                return self.member_spins.get(&b).is_none_or(|m| m.iter().any(|s| *s));
             }
             let at = self.env.rpos(b.0);
             if at.is_some_and(|i| self.known.contains(&(b.0, i))) || self.is_standard(b.0) {

@@ -265,6 +265,10 @@
 ;; there is recursion; and the standard bindings. (Known procedures are
 ;; kept with the bindings: `k-known`.)
 (define-type k-named (listof (pairof symbol int @t) acyclic))
+;; Of a binding (name and type), for each member, whether a call of it there
+;; may not end (`k-member-spins`).
+(define-type k-member-spin (productof (1 symbol) (2 int) (3 (listof bool acyclic))))
+(define-type k-member-spin-list (listof k-member-spin acyclic))
 ;; Every `define-generative`, newest first: its name, parameters, their
 ;; variance (0 covariant, 1 contravariant, 2 invariant), and representation.
 (define-type k-gen (productof (1 symbol) (2 k-binders) (3 k-ids) (4 int)))
@@ -374,6 +378,9 @@
    (val k-path-narrowed (ref k-path-facts @t))
    (val k-dvar-name (subr (maxeff (read @globals) spin (read @t)) (int) symbol))
    (val k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) acyclic) @t))
+   (val k-member-spins (ref k-member-spin-list @t))
+   (val k-member-spins-of
+        (subr (maxeff (read @globals) spin (read @t)) (symbol int) (listof bool acyclic)))
    (val k-new-epoch (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) () int))
    (val k-visit?
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int int) bool))

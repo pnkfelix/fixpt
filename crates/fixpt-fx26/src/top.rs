@@ -126,6 +126,10 @@ fn every_field_placed(c: &Checker) {
         // A count of regions made, which only grows: a name made once is
         // never made again, put back or not.
         fresh_regions: _,
+        // Each entry written by `note_termination` before any read of it,
+        // and read only for a binding `recursive` holds: one left behind
+        // by a check thrown away is never consulted.
+        member_spins: _,
         // The standard environment, and the session's settings: no check
         // changes them.
         base: _, void: _, int: _, bool_: _, string: _, unit: _, char_: _, f64_: _, symbol: _, conv_default: _,

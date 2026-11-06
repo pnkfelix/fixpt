@@ -3,12 +3,13 @@
 ;; as a `tagcase` arm is (`docs/research/logical-types.md` §8.5, rule 2):
 ;; under `(symbol) symbol` neither `null?`'s branch nor `pair?`'s can run,
 ;; and what they give is no `symbol`; under the list member, `symbol?`'s.
-;; (`spin`: a call fitting another member is not yet seen to shrink.)
+;; Each member checks `pure`: under each, what its types rule out is passed
+;; over in finding whether the recursion ends, as in checking it.
 (define-type syms (listof symbol acyclic))
-(define swap (allof (subr spin (symbol symbol symbol) symbol)
-                    (subr spin (symbol symbol syms) syms))
-  (letrec ((swap (allof (subr spin (symbol symbol symbol) symbol)
-                        (subr spin (symbol symbol syms) syms))
+(define swap (allof (subr pure (symbol symbol symbol) symbol)
+                    (subr pure (symbol symbol syms) syms))
+  (letrec ((swap (allof (subr pure (symbol symbol symbol) symbol)
+                        (subr pure (symbol symbol syms) syms))
              (lambda (a b t)
                (cond ((symbol? t) (cond ((eq? t a) b) ((eq? t b) a) (else t)))
                      ((null? t) (the syms nil))

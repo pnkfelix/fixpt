@@ -347,6 +347,12 @@ pub struct Checker {
     /// Why each member of a recursive group that may not end may not: said
     /// when its declared type leaves out `spin`.
     pub(crate) spin_why: Vec<((Sym, TyId), String)>,
+    /// Of each binding of a recursive group with an `allof`, for each
+    /// member (one for a binding of no `allof`), whether a call of it at
+    /// that member may not end (`termination_by_member`, noted by
+    /// `termination`): a call says `spin` only for the members it fits
+    /// that may not.
+    pub(crate) member_spins: HashMap<(Sym, TyId), Vec<bool>>,
     /// The regions each type mentions (`regions_in`), kept for types with
     /// no inference slot unsolved in them, which cannot change: masking
     /// asks for those of every free variable at each node, and a module
@@ -1127,6 +1133,7 @@ impl Checker {
             holes: None,
             hole_hint: None,
             spin_why: Vec::new(),
+            member_spins: HashMap::new(),
             regions_memo: std::cell::RefCell::new(Default::default()),
             fun_apps: HashMap::new(),
             regions_open: std::cell::Cell::new(false),
@@ -2385,6 +2392,9 @@ impl Checker {
                 }
                 for w in self.spin_why.iter_mut().filter(|w| w.0 == (names[i], old)) {
                     w.0.1 = found;
+                }
+                if let Some(m) = self.member_spins.remove(&(names[i], old)) {
+                    self.member_spins.insert((names[i], found), m);
                 }
                 out[i].1 = found;
                 if alone && self.holes.is_none() {

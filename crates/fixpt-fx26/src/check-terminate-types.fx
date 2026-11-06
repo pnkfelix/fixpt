@@ -25,6 +25,9 @@
 (define-type k-passed (listof (productof (1 int) (2 int) (3 k-ids)) acyclic))
 ;; Texts: a hint for each call, lines, names shown.
 (define-type k-texts (listof string acyclic))
+;; Calls as edges between nodes (`k-termination-by-member`), each with its
+;; hint, alongside.
+(define-type k-edges-hints (productof (1 k-calls) (2 k-texts)))
 ;; Why each definition, by name and declared type, may not end.
 (define-type k-whys (listof (productof (1 symbol) (2 int) (3 string)) acyclic))
 ;; A computation of a type and an effect, which may fail.

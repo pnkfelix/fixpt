@@ -23,7 +23,8 @@
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-expect-types (load-module "fx26:check-expect-types.fx"))
        (check-sc-graphs-types (load-module "fx26:check-sc-graphs-types.fx"))
-       (check-print-types (load-module "fx26:check-print-types.fx")))
+       (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-subtype-types (load-module "fx26:check-subtype-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-resolve (select check-resolve-types check-resolve-sig))
@@ -32,7 +33,8 @@
            (check-expect (select check-expect-types check-expect-sig))
            (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig))
            (check-print (select check-print-types check-print-sig))
-           (tables (select table-types tables-sig)))
+           (tables (select table-types tables-sig))
+           (check-subtype (select check-subtype-types check-subtype-sig)))
     (module
 (hide (include check-terminate-types) (include check-types-types) (include check-synth-types)
       (include check-resolve-types))
@@ -40,7 +42,8 @@
 (define-type table (select table-types table))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-resolve) (include check-holds) (include check-env)
-      (include check-expect) (include check-sc-graphs) (include check-print) (include tables))
+      (include check-expect) (include check-sc-graphs) (include check-print) (include tables)
+      (include check-subtype))
 
 (define k-sc-compose-one (->* (k-edge k-graph k-graph) k-graph)
   (lambda (e b out)
@@ -199,13 +202,22 @@
     (cond ((null? gs) gs)
           ((and (= (car (car gs)) i) (= (cdr (car gs)) j)) (k-sc-drop (cdr gs) i j))
           (else (the k-guards (cons (car gs) (k-sc-drop (cdr gs) i j)))))))
+;; `inv` less parameter `j` of each node `ns` from `n` says is of binding `to`:
+;; any may be called.
+(define k-sc-drop-nodes (->* (k-guards int int k-ids int) k-guards)
+  (lambda (inv to j ns n)
+    (cond ((null? ns) inv)
+          ((= (car ns) to) (k-sc-drop-nodes (k-sc-drop inv n j) to j (cdr ns) (+ n 1)))
+          (else (k-sc-drop-nodes inv to j (cdr ns) (+ n 1))))))
 ;; `inv` less what the call from `from` to `to` passing `args` changes.
 (define k-sc-keep-args (->* (k-guards int int k-ids int) k-guards)
   (lambda (inv from to args j)
     (if (null? args)
         inv
         (let* ((p (car args))
-               (kept (if (and (>= p 0) (k-sc-guarded? inv from p)) inv (k-sc-drop inv to j))))
+               (kept (if (and (>= p 0) (k-sc-guarded? inv from p))
+                         inv
+                         (k-sc-drop-nodes inv to j (get k-sc-node-binding) 0))))
           (k-sc-keep-args kept from to (cdr args) (+ j 1))))))
 (define k-sc-keep-all (->* (k-guards k-passed) k-guards)
   (lambda (inv ps)
@@ -220,6 +232,8 @@
       (if (= (k-length next) (k-length inv)) inv (k-sc-invariants next)))))
 (define k-sc-member-name (->* (int) string)
   (lambda (i) (symbol->string (k-nth (get k-sc-members) i))))
+(define k-sc-node-name (->* (int) string)
+  (lambda (i) (symbol->string (k-nth (get k-sc-node-names) i))))
 (define k-sc-strict-any? (->* (k-graph) bool)
   (lambda (g) (and (not (null? g)) (or (extract (car g) 3) (k-sc-strict-any? (cdr g))))))
 (define k-sc-has-string? (->* (k-texts string) bool)
@@ -227,7 +241,7 @@
 ;; The call `c`, in words.
 (define k-sc-call-words (->* (k-call) string)
   (lambda (c)
-    (let ((callee (k-sc-member-name (extract c 2))) (caller (k-sc-member-name (extract c 1))))
+    (let ((callee (k-sc-node-name (extract c 2))) (caller (k-sc-node-name (extract c 1))))
       (k-cat5 "the call of `" callee "` in `" caller "`"))))
 ;; The calls, in the order met, that pass nothing strictly smaller, and
 ;; either nothing related to the caller's parameters or with a hint why;
@@ -249,7 +263,7 @@
 (define k-sc-escape-why (->* () string)
   (lambda ()
     (let* ((e (car (get k-sc-escapes))) (escapes (k-sc-member-name (cdr e)))
-           (named (k-cat4 "`" escapes "` is named in `" (k-sc-member-name (car e)))))
+           (named (k-cat4 "`" escapes "` is named in `" (k-sc-node-name (car e)))))
       (k-cat3 named "` other than as a call's operator: "
               "whoever is given it may call it again, with anything"))))
 ;; Why the walked calls, not too many, may not end: those that pass nothing smaller, in words.
@@ -271,12 +285,15 @@
             (else (k-sc-shrinks-why))))))
 ;; Whether every run of the group `bs` ends, so that calls within it need
 ;; not say `spin`: "" if so, and otherwise why not, in words for an error.
-;; An `allof`'s body is one: it ends if it does at each member's types, the
-;; `k`th of each `allof` taken together (`logical-types.md` §8.5).
+;; With an `allof`, at each member's types (`k-termination-by-member`), each
+;; binding's kept for its calls (`k-member-spins`): the group ends if it does
+;; from every member.
 (define k-termination (->* (k-letrec-bs) string)
   (lambda (bs)
-    (let ((most (k-sc-most-members bs 0)))
-      (if (= most 0) (k-termination-one bs) (k-termination-each bs 0 most)))))
+    (if (= (k-sc-most-members bs 0) 0)
+        (k-termination-one bs)
+        (let ((by (k-termination-by-member bs)))
+          (begin (k-note-member-spins bs by) (k-first-why by))))))
 (define k-sc-members-of (->* (int) k-ids)
   (lambda (t) (tagcase (k-get (k-resolve t)) (ty-allof (ms) ms) (else y nil))))
 (define k-sc-most-members (->* (k-letrec-bs int) int)
@@ -284,50 +301,197 @@
     (if (null? bs)
         most
         (k-sc-most-members (cdr bs) (max most (k-length (k-sc-members-of (extract (car bs) 2))))))))
-(define k-termination-each (->* (k-letrec-bs int int) string)
-  (lambda (bs k most)
-    (if (= k most)
-        ""
-        (let ((why (k-termination-one (k-sc-at-member bs k))))
-          (if (string=? why "") (k-termination-each bs (+ k 1) most) why)))))
-;; `bs`, each `allof` its `k`th member (its last, if it has fewer).
-(define k-sc-at-member (->* (k-letrec-bs int) k-letrec-bs)
-  (lambda (bs k)
-    (if (null? bs)
-        nil
-        (let* ((b (car bs)) (ms (k-sc-members-of (extract b 2)))
-               (t (if (null? ms) (extract b 2) (k-nth-member ms (min k (- (k-length ms) 1))))))
-          (cons (product (1 (extract b 1)) (2 t) (3 (extract b 3))) (k-sc-at-member (cdr bs) k))))))
-(define k-nth-member (->* (k-ids int) int)
-  (lambda (l i) (if (= i 0) (car l) (k-nth-member (cdr l) (- i 1)))))
-;; Walked twice: first to learn which parameters every call passes on
-;; unchanged, then with them as bounds.
-(define k-termination-one (->* (k-letrec-bs) string)
-  (lambda (bs)
+;; The group walked, its nodes `nodes`: "" if every node is a lambda and no
+;; member escapes; else why not. Walked twice: first to learn which
+;; parameters every call passes on unchanged, then with them as bounds.
+(define k-sc-walked (->* (k-letrec-bs k-letrec-bs k-ids bool) string)
+  (lambda (bs nodes binding skip)
     (begin
       (set k-sc-members (k-sc-names bs))
+      (set k-sc-node-names (k-sc-names nodes))
+      (set k-sc-node-binding binding)
+      (set k-sc-skip-dead skip)
       (set k-sc-calls nil)
       (set k-sc-hints nil)
       (set k-sc-passed nil)
+      (set k-sc-arg-tys nil)
       (set k-sc-invariant nil)
       (set k-sc-escapes nil)
       (set k-sc-too-many #f)
-      (let ((walked (k-sc-walk-members bs 0)))
+      (let ((walked (k-sc-walk-members nodes 0)))
         (cond ((not (null? (get k-sc-escapes))) (k-sc-escape-why))
               ((not walked) "it is not a lambda")
               (else
-               (let ((inv (k-sc-invariants (k-sc-all-params bs 0 nil))))
+               (let ((inv (k-sc-invariants (k-sc-all-params nodes 0 nil))))
                  (if (null? inv)
-                     (k-sc-calls-why)
+                     ""
                      (begin
                        (set k-sc-invariant inv)
                        (set k-sc-calls nil)
                        (set k-sc-hints nil)
                        (set k-sc-passed nil)
-                       (let ((again (k-sc-walk-members bs 0)))
+                       (set k-sc-arg-tys nil)
+                       (let ((again (k-sc-walk-members nodes 0)))
                          (cond ((not (null? (get k-sc-escapes))) (k-sc-escape-why))
                                ((not again) "it is not a lambda")
-                               (else (k-sc-calls-why)))))))))))))
+                               (else ""))))))))))))
+(define k-termination-one (->* (k-letrec-bs) string)
+  (lambda (bs)
+    (let ((why (k-sc-walked bs bs (k-sc-upto 0 (k-length bs)) #f)))
+      (if (string=? why "") (k-sc-calls-why) why))))
+
+;;; ------------------------------------------------------------ by member
+
+;; Each binding of `bs` at each member of its `allof` (at its type, for one of
+;; no `allof`): the nodes walked, and of each, its binding, from `i`.
+(define k-sc-nodes (->* (k-letrec-bs) k-letrec-bs)
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (let* ((b (car bs)) (ms (k-sc-members-of (extract b 2)))
+               (ts (if (null? ms) (the k-ids (cons (extract b 2) nil)) ms)))
+          (k-sc-nodes-at b ts (k-sc-nodes (cdr bs)))))))
+(define k-sc-nodes-at (->* ((productof (1 symbol) (2 int) (3 kx)) k-ids k-letrec-bs) k-letrec-bs)
+  (lambda (b ts rest)
+    (if (null? ts)
+        rest
+        (cons (product (1 (extract b 1)) (2 (car ts)) (3 (extract b 3)))
+              (k-sc-nodes-at b (cdr ts) rest)))))
+(define k-sc-node-bindings (->* (k-letrec-bs int) k-ids)
+  (lambda (bs i)
+    (if (null? bs)
+        nil
+        (let ((ms (k-sc-members-of (extract (car bs) 2))))
+          (k-ids-repeat i (if (null? ms) 1 (k-length ms)) (k-sc-node-bindings (cdr bs) (+ i 1)))))))
+(define k-ids-repeat (->* (int int k-ids) k-ids)
+  (lambda (x n rest) (if (= n 0) rest (k-ids-repeat x (- n 1) (the k-ids (cons x rest))))))
+;; Whether arguments of types `ts` (-1 not known) fit parameters `ps`.
+(define k-sc-fit? (->* (k-ids k-ids) bool)
+  (lambda (ts ps)
+    (if (null? ts)
+        (null? ps)
+        (and (not (null? ps))
+             (or (< (car ts) 0) (k-subtype (car ts) (car ps)))
+             (k-sc-fit? (cdr ts) (cdr ps))))))
+;; The calls, oldest first, each to every node of its binding whose member
+;; its arguments fit: as edges from node to node, oldest first, with their
+;; hints (`hs`) alongside.
+(define k-sc-expand (->* (k-calls k-texts (listof k-ids acyclic) k-letrec-bs k-ids) k-edges-hints)
+  (lambda (cs hs tys nodes binding)
+    (if (null? cs)
+        (product (1 nil) (2 nil))
+        (let ((rest (k-sc-expand (cdr cs) (cdr hs) (cdr tys) nodes binding))
+              (out (k-sc-expand-one (car cs) (car hs) (car tys) nodes binding 0)))
+          (product (1 (k-calls-append (extract out 1) (extract rest 1)))
+                   (2 (k-texts-append (extract out 2) (extract rest 2))))))))
+(define k-sc-expand-one (->* (k-call string k-ids k-letrec-bs k-ids int) k-edges-hints)
+  (lambda (c h ts nodes binding n)
+    (if (null? nodes)
+        (product (1 nil) (2 nil))
+        (let ((rest (k-sc-expand-one c h ts (cdr nodes) (cdr binding) (+ n 1))))
+          (if (and (= (car binding) (extract c 2))
+                   (k-sc-fit? ts (k-sc-param-types (extract (car nodes) 2))))
+              (let ((edge (product (1 (extract c 1)) (2 n) (3 (extract c 3)))))
+                (product (1 (cons edge (extract rest 1))) (2 (cons h (extract rest 2)))))
+              rest)))))
+(define k-calls-append (->* (k-calls k-calls) k-calls)
+  (lambda (a b) (if (null? a) b (cons (car a) (k-calls-append (cdr a) b)))))
+(define k-texts-append (->* (k-texts k-texts) k-texts)
+  (lambda (a b) (if (null? a) b (the k-texts (cons (car a) (k-texts-append (cdr a) b))))))
+;; The nodes reachable from those of `todo`, by `edges`, onto `seen`.
+(define k-sc-reach (->* (k-ids k-ids k-calls) k-ids)
+  (lambda (todo seen edges)
+    (cond ((null? todo) seen)
+          ((k-has-id? seen (car todo)) (k-sc-reach (cdr todo) seen edges))
+          (else (k-sc-reach (k-sc-callees edges (car todo) (cdr todo))
+                            (the k-ids (cons (car todo) seen)) edges)))))
+(define k-sc-callees (->* (k-calls int k-ids) k-ids)
+  (lambda (edges n out)
+    (cond ((null? edges) out)
+          ((= (extract (car edges) 1) n)
+           (k-sc-callees (cdr edges) n (the k-ids (cons (extract (car edges) 2) out))))
+          (else (k-sc-callees (cdr edges) n out)))))
+;; Of `edges` and their hints `hs`, those from a node of `reach`.
+(define k-sc-from (->* (k-calls k-texts k-ids) k-edges-hints)
+  (lambda (edges hs reach)
+    (if (null? edges)
+        (product (1 nil) (2 nil))
+        (let ((rest (k-sc-from (cdr edges) (cdr hs) reach)))
+          (if (k-has-id? reach (extract (car edges) 1))
+              (product (1 (cons (car edges) (extract rest 1))) (2 (cons (car hs) (extract rest 2))))
+              rest)))))
+;; Why node `n` may not end, or "": the calls reachable from it, each loop.
+(define k-sc-node-why (->* (int k-calls k-texts) string)
+  (lambda (n edges hs)
+    (let ((from (k-sc-from edges hs (k-sc-reach (the k-ids (cons n nil)) nil edges))))
+      (begin (set k-sc-calls (the k-calls (reverse (extract from 1))))
+             (set k-sc-hints (the k-texts (reverse (extract from 2))))
+             (set k-sc-too-many #f)
+             (k-sc-calls-why)))))
+;; For each node from `n`, why it may not end, or "", after those of `done`
+;; (newest first).
+(define k-sc-node-whys (->* (int int k-calls k-texts k-texts) k-texts)
+  (lambda (n count edges hs done)
+    (if (= n count)
+        (the k-texts (reverse done))
+        (let ((why (k-sc-node-why n edges hs)))
+          (k-sc-node-whys (+ n 1) count edges hs (the k-texts (cons why done)))))))
+;; For each binding of the group `bs`, for each member of its `allof` (one,
+;; its type, for a binding of no `allof`): why a run from a call of it at
+;; that member may not end, or "". An `allof`'s body is walked once at each
+;; member's types, passing over what they rule out; each call goes to every
+;; member its arguments' types fit, where they are known (to each where they
+;; are not). As Rust's `termination_by_member`.
+(define k-termination-by-member (->* (k-letrec-bs) (listof k-texts acyclic))
+  (lambda (bs)
+    (let* ((nodes (k-sc-nodes bs))
+           (binding (k-sc-node-bindings bs 0))
+           (why (k-sc-walked bs nodes binding #t)))
+      (if (not (string=? why ""))
+          (k-sc-by-binding binding (k-sc-same-texts (k-length nodes) why nil) 0)
+          (let ((ex (k-sc-expand (reverse (get k-sc-calls)) (reverse (get k-sc-hints))
+                                 (reverse (get k-sc-arg-tys)) nodes binding)))
+            (k-sc-by-binding
+             binding (k-sc-node-whys 0 (k-length nodes) (extract ex 1) (extract ex 2) nil) 0))))))
+(define k-sc-same-texts (->* (int string k-texts) k-texts)
+  (lambda (n s out) (if (= n 0) out (k-sc-same-texts (- n 1) s (the k-texts (cons s out))))))
+;; The nodes' whys grouped by binding, from binding `i`.
+(define k-sc-by-binding (->* (k-ids k-texts int) (listof k-texts acyclic))
+  (lambda (binding whys i)
+    (if (null? binding)
+        nil
+        (let ((mine (k-sc-whys-of binding whys i)) (rest (k-sc-whys-past binding whys i)))
+          (cons mine (k-sc-by-binding (extract rest 1) (extract rest 2) (+ i 1)))))))
+(define k-sc-whys-of (->* (k-ids k-texts int) k-texts)
+  (lambda (binding whys i)
+    (if (or (null? binding) (not (= (car binding) i)))
+        nil
+        (the k-texts (cons (car whys) (k-sc-whys-of (cdr binding) (cdr whys) i))))))
+(define k-sc-whys-past (->* (k-ids k-texts int) (productof (1 k-ids) (2 k-texts)))
+  (lambda (binding whys i)
+    (if (or (null? binding) (not (= (car binding) i)))
+        (product (1 binding) (2 whys))
+        (k-sc-whys-past (cdr binding) (cdr whys) i))))
+;; Each binding's members' whys kept, as whether each may not end.
+(define k-note-member-spins (->* (k-letrec-bs (listof k-texts acyclic)) unit)
+  (lambda (bs by)
+    (if (null? bs)
+        #u
+        (let ((m (product (1 (extract (car bs) 1)) (2 (extract (car bs) 2))
+                          (3 (k-texts-nonempty (car by))))))
+          (begin (set k-member-spins (cons m (get k-member-spins)))
+                 (k-note-member-spins (cdr bs) (cdr by)))))))
+(define k-texts-nonempty (->* (k-texts) (listof bool acyclic))
+  (lambda (ws)
+    (if (null? ws) nil (cons (not (string=? (car ws) "")) (k-texts-nonempty (cdr ws))))))
+;; The first why of all, or "".
+(define k-first-why (->* ((listof k-texts acyclic)) string)
+  (lambda (by)
+    (cond ((null? by) "")
+          ((null? (car by)) (k-first-why (cdr by)))
+          ((string=? (car (car by)) "")
+           (k-first-why (the (listof k-texts acyclic) (cons (cdr (car by)) (cdr by)))))
+          (else (car (car by))))))
 ;; Note why each of `g` may not end.
 (define k-note-why (->* (k-letrec-bs string) unit)
   (lambda (g why)

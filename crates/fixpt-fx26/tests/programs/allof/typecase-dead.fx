@@ -2,12 +2,11 @@
 ;; The same by `typecase`, whose arms are those tests in turn: an arm a
 ;; member's type rules out is skipped under it, the last member too (the list
 ;; member first here).
-;; (`spin`: a call fitting another member is not yet seen to shrink.)
 (define-type syms (listof symbol acyclic))
-(define swap (allof (subr spin (symbol symbol syms) syms)
-                    (subr spin (symbol symbol symbol) symbol))
-  (letrec ((swap (allof (subr spin (symbol symbol syms) syms)
-                        (subr spin (symbol symbol symbol) symbol))
+(define swap (allof (subr pure (symbol symbol syms) syms)
+                    (subr pure (symbol symbol symbol) symbol))
+  (letrec ((swap (allof (subr pure (symbol symbol syms) syms)
+                        (subr pure (symbol symbol symbol) symbol))
              (lambda (a b t)
                (typecase t
                  (symbol s (cond ((eq? s a) b) ((eq? s b) a) (else s)))

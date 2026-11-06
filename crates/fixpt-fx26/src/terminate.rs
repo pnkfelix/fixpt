@@ -61,7 +61,15 @@ const MOST_GRAPHS: usize = 4000;
 struct Walk<'a> {
     c: &'a Checker,
     members: Vec<Sym>,
-    /// The member whose body is walked.
+    /// What is walked: each binding at a type, its own or, for an `allof`,
+    /// each member's; for each, the binding. Calls are from these, to a
+    /// binding (`calls`' second index).
+    nodes: Vec<(usize, TyId)>,
+    /// Whether an `if` branch or a `tagcase` arm the parameters' types
+    /// rule out is passed over, as checking against an `allof`'s member
+    /// does (`logical-types.md` §8.5, rule 2).
+    skip_dead: bool,
+    /// The node whose body is walked.
     current: usize,
     /// Names bound on the way down, and what is known of each.
     scope: Vec<(Sym, Vec<Tracked>)>,
@@ -83,76 +91,118 @@ struct Walk<'a> {
     invariant: HashSet<(usize, usize)>,
     /// A member named other than as a call's operator: (where, which).
     escapes: Option<(usize, usize)>,
+    /// For each call, each argument's type, where it is known.
+    arg_tys: Vec<Vec<Option<TyId>>>,
+}
+
+/// What a walk of a group found, owned: its calls, why each may not
+/// shrink, and each one's arguments' types; or the member that escapes.
+struct Found {
+    calls: Vec<(usize, usize, Graph)>,
+    unbounded: Vec<Option<&'static str>>,
+    arg_tys: Vec<Vec<Option<TyId>>>,
+    escapes: Option<(usize, usize)>,
 }
 
 impl Checker {
     /// Whether every run of the group `bindings` (names, declared types and
     /// lambdas) ends, so that calls within it need not say `spin`; if not,
     /// why not, in words for an error.
-    pub(crate) fn termination(&self, bindings: &[(Sym, TyId, ExpId)]) -> Result<(), String> {
-        // An `allof`'s body is one: it ends if it does at each member's
-        // types, the `k`th of each `allof` taken together (`logical-types.md`
-        // §8.5).
-        let members = |t: TyId| match self.arena.get(self.arena.resolve(t)) {
-            Ty::AllOf(ms) => Some(ms.clone()),
-            _ => None,
-        };
-        let most = bindings.iter().filter_map(|(_, t, _)| members(*t)).map(|ms| ms.len()).max();
-        if let Some(most) = most {
-            for k in 0..most {
-                let at: Vec<(Sym, TyId, ExpId)> = bindings
-                    .iter()
-                    .map(|(n, t, e)| (*n, members(*t).map_or(*t, |ms| ms[k.min(ms.len() - 1)]), *e))
-                    .collect();
-                self.termination(&at)?;
+    pub(crate) fn termination(&mut self, bindings: &[(Sym, TyId, ExpId)]) -> Result<(), String> {
+        // With an `allof`, at each member's types (`termination_by_member`),
+        // each binding's kept for its calls (`member_spins`): the group ends
+        // if it does from every member.
+        if bindings.iter().any(|(_, t, _)| matches!(self.arena.get(self.arena.resolve(*t)), Ty::AllOf(_))) {
+            let by = self.termination_by_member(bindings);
+            for ((n, t, _), rs) in bindings.iter().zip(&by) {
+                self.member_spins.insert((*n, *t), rs.iter().map(|r| r.is_err()).collect());
             }
-            return Ok(());
+            return by.into_iter().flatten().find_map(|r| r.err()).map_or(Ok(()), Err);
         }
         let name = |i: usize| self.interner.name(bindings[i].0).to_string();
-        let mut w = self.size_change_walk(bindings);
-        let Some(w) = w.as_mut() else {
+        let nodes: Vec<(usize, TyId)> = bindings.iter().enumerate().map(|(i, (_, t, _))| (i, *t)).collect();
+        let Some(w) = self.size_change_walk(bindings, &nodes, false) else {
             return Err("it is not a lambda".into());
         };
         if let Some((at, m)) = w.escapes {
-            return Err(format!(
-                "`{}` is named in `{}` other than as a call's operator: whoever is given it may call it again, with anything",
-                name(m),
-                name(at)
-            ));
+            return Err(escape_why(&name(m), &name(at)));
         }
-        match size_change_ends(&w.calls) {
-            Ends::Yes => Ok(()),
-            Ends::TooMany => Err("the calls combine in too many ways to follow".into()),
-            Ends::No => {
-                let mut flat: Vec<String> = Vec::new();
-                for ((from, to, g), unbounded) in w.calls.iter().zip(&w.unbounded) {
-                    let mut s = format!("the call of `{}` in `{}`", name(*to), name(*from));
-                    if let Some(u) = unbounded {
-                        s.push_str(&format!(" ({u})"));
-                    }
-                    // A call passing its caller's parameters on unchanged
-                    // is harmless; one passing nothing related to them, or
-                    // with a count unbounded or a part that may be cyclic,
-                    // is the one to look at.
-                    if (g.is_empty() || unbounded.is_some()) && !g.values().any(|strict| *strict) && !flat.contains(&s) {
-                        flat.push(s);
-                    }
-                }
-                Err(if flat.is_empty() {
-                    "no argument keeps shrinking around every loop of calls".into()
-                } else {
-                    format!("nothing smaller, or related, is passed by {}", flat.join(", "))
-                })
+        verdict(&w.calls, &w.unbounded, &name)
+    }
+
+    /// For each binding of the group, for each member of its `allof` (one,
+    /// its type, for a binding of no `allof`): whether every run from a call
+    /// of it at that member ends, and if not, why not. An `allof`'s body is
+    /// walked once at each member's types, passing over what they rule out,
+    /// as checking it against that member does; each call goes to every
+    /// member its arguments' types fit, where they are known (to each where
+    /// they are not). A member ends if every loop of calls reachable from
+    /// it shrinks something (`logical-types.md` §8.5).
+    pub(crate) fn termination_by_member(&mut self, bindings: &[(Sym, TyId, ExpId)]) -> Vec<Vec<Result<(), String>>> {
+        let mut nodes: Vec<(usize, TyId)> = Vec::new();
+        for (i, (_, t, _)) in bindings.iter().enumerate() {
+            match self.arena.get(self.arena.resolve(*t)).clone() {
+                Ty::AllOf(ms) => nodes.extend(ms.iter().map(|m| (i, *m))),
+                _ => nodes.push((i, *t)),
             }
         }
+        let names: Vec<String> = bindings.iter().map(|(n, _, _)| self.interner.name(*n).to_string()).collect();
+        let every = |r: Result<(), String>| -> Vec<Vec<Result<(), String>>> {
+            bindings.iter().enumerate().map(|(i, _)| nodes.iter().filter(|(b, _)| *b == i).map(|_| r.clone()).collect()).collect()
+        };
+        let Some(w) = self.size_change_walk(bindings, &nodes, true) else {
+            return every(Err("it is not a lambda".into()));
+        };
+        if let Some((at, m)) = w.escapes {
+            return every(Err(escape_why(&names[m], &names[nodes[at].0])));
+        }
+        // Each call, to each member it fits.
+        let mut edges: Vec<(usize, usize, Graph)> = Vec::new();
+        let mut why: Vec<Option<&'static str>> = Vec::new();
+        for (((from, to, g), tys), u) in w.calls.iter().zip(&w.arg_tys).zip(&w.unbounded) {
+            for (n, (b, mt)) in nodes.iter().enumerate() {
+                if b != to {
+                    continue;
+                }
+                let params = self.param_types(*mt);
+                if tys.len() == params.len() && tys.iter().zip(&params).all(|(a, p)| a.is_none_or(|a| self.subtype(a, *p))) {
+                    edges.push((*from, n, g.clone()));
+                    why.push(*u);
+                }
+            }
+        }
+        let name = |n: usize| names[nodes[n].0].clone();
+        let mut out = every(Ok(()));
+        let mut seen = vec![0; bindings.len()];
+        for n in 0..nodes.len() {
+            // The calls reachable from `n`.
+            let mut reach = vec![n];
+            let mut i = 0;
+            while i < reach.len() {
+                for (f, t, _) in &edges {
+                    if *f == reach[i] && !reach.contains(t) {
+                        reach.push(*t);
+                    }
+                }
+                i += 1;
+            }
+            let (calls, unbounded): (Vec<_>, Vec<_>) =
+                edges.iter().zip(&why).filter(|((f, _, _), _)| reach.contains(f)).map(|(e, u)| (e.clone(), *u)).unzip();
+            let b = nodes[n].0;
+            out[b][seen[b]] = verdict(&calls, &unbounded, &name);
+            seen[b] += 1;
+        }
+        out
     }
 
     /// The walk of the group, with the calls it found; `None` if a member
     /// is not a lambda.
-    fn size_change_walk<'a>(&'a self, bindings: &[(Sym, TyId, ExpId)]) -> Option<Walk<'a>> {
+    fn size_change_walk(&self, bindings: &[(Sym, TyId, ExpId)], nodes: &[(usize, TyId)], skip_dead: bool) -> Option<Found> {
         let mut w = Walk {
             c: self,
             members: bindings.iter().map(|(n, _, _)| *n).collect(),
+            nodes: nodes.to_vec(),
+            skip_dead,
             current: 0,
             scope: Vec::new(),
             guards: Vec::new(),
@@ -162,26 +212,30 @@ impl Checker {
             passed: Vec::new(),
             invariant: HashSet::new(),
             escapes: None,
+            arg_tys: Vec::new(),
         };
         let mut arity = Vec::new();
-        for (_, _, init) in bindings {
-            let Some((params, _)) = self.lambda_of(*init) else { return None };
+        for (b, _) in nodes {
+            let Some((params, _)) = self.lambda_of(bindings[*b].2) else { return None };
             arity.push(params.len());
         }
         // Twice: first to learn which parameters every call passes on
         // unchanged, then with them as bounds.
         if !w.walk_members(bindings) {
-            return w.escapes.is_some().then_some(w);
+            return w.escapes.is_some().then(|| w.found());
         }
         let mut inv: HashSet<(usize, usize)> =
             arity.iter().enumerate().flat_map(|(i, n)| (0..*n).map(move |j| (i, j))).collect();
         loop {
             let before = inv.len();
             for (from, to, args) in &w.passed {
-                for j in 0..arity[*to] {
-                    let kept = args.get(j).copied().flatten().is_some_and(|p| inv.contains(&(*from, p)));
-                    if !kept {
-                        inv.remove(&(*to, j));
+                // To each node of the binding called, as any may be.
+                for (n, _) in nodes.iter().enumerate().filter(|(_, (b, _))| b == to) {
+                    for j in 0..arity[n] {
+                        let kept = args.get(j).copied().flatten().is_some_and(|p| inv.contains(&(*from, p)));
+                        if !kept {
+                            inv.remove(&(n, j));
+                        }
                     }
                 }
             }
@@ -194,11 +248,12 @@ impl Checker {
             w.calls.clear();
             w.unbounded.clear();
             w.passed.clear();
+            w.arg_tys.clear();
             if !w.walk_members(bindings) {
-                return w.escapes.is_some().then_some(w);
+                return w.escapes.is_some().then(|| w.found());
             }
         }
-        Some(w)
+        Some(w.found())
     }
 
     /// A binding's lambda, under `plambda`, `the` and `rlambda`: its
@@ -228,13 +283,50 @@ impl Checker {
 }
 
 impl Walk<'_> {
+    fn found(self) -> Found {
+        Found { calls: self.calls, unbounded: self.unbounded, arg_tys: self.arg_tys, escapes: self.escapes }
+    }
+
+    /// Of `test`, a standard shape predicate of a value whose type is known
+    /// (`check::SHAPES`), or its `not`: whether its `then` branch
+    /// (`Some(true)`) or its `else` (`Some(false)`) cannot run, the type
+    /// having no value that passes it, or none that fails it.
+    fn dead_side(&self, test: ExpId) -> Option<bool> {
+        let Exp::App { fun, args } = self.c.arena.exp_at(test) else { return None };
+        let [x] = args[..] else { return None };
+        let op = self.std_op(*fun)?;
+        if op == "not" {
+            return self.dead_side(x).map(|d| !d);
+        }
+        let bit = 1u32 << crate::check::SHAPES.iter().position(|(_, p)| *p == op)?;
+        for k in self.tracked(x) {
+            let Tracked::Part { ty: Some(t), .. } = k else { continue };
+            match self.c.shape(t) {
+                Some(s) if s != 0 && s & bit == 0 => return Some(true),
+                Some(s) if s != 0 && s & !bit == 0 => return Some(false),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Whether a `tagcase` arm for `tag` cannot run: what is taken apart is
+    /// known a sum without it.
+    fn dead_arm(&self, whole: &[Tracked], tag: Sym) -> bool {
+        let arena = &self.c.arena;
+        whole.iter().any(|k| {
+            matches!(k, Tracked::Part { ty: Some(t), .. }
+                if matches!(arena.get(arena.resolve(*t)), Ty::Sum(vs) if !vs.iter().any(|(l, _)| *l == tag)))
+        })
+    }
+
     /// Walk every member's body; `false` if one is not a lambda or a member
     /// escapes.
     fn walk_members(&mut self, bindings: &[(Sym, TyId, ExpId)]) -> bool {
         let c = self.c;
-        for (i, (_, ty, init)) in bindings.iter().enumerate() {
-            let Some((params, body)) = c.lambda_of(*init) else { return false };
-            let tys = c.param_types(*ty);
+        for (i, (b, ty)) in self.nodes.clone().into_iter().enumerate() {
+            let Some((params, body)) = c.lambda_of(bindings[b].2) else { return false };
+            let tys = c.param_types(ty);
             self.current = i;
             self.scope.clear();
             self.naturals.clear();
@@ -340,15 +432,20 @@ impl Walk<'_> {
             }
             Exp::If { test, then, els } => {
                 self.walk(test);
+                let dead = if self.skip_dead { self.dead_side(test) } else { None };
                 let depth = self.guards.len();
-                let facts = self.facts(test, true);
-                self.guards.extend(facts);
-                self.walk(then);
-                self.guards.truncate(depth);
-                let facts = self.facts(test, false);
-                self.guards.extend(facts);
-                self.walk(els);
-                self.guards.truncate(depth);
+                if dead != Some(true) {
+                    let facts = self.facts(test, true);
+                    self.guards.extend(facts);
+                    self.walk(then);
+                    self.guards.truncate(depth);
+                }
+                if dead != Some(false) {
+                    let facts = self.facts(test, false);
+                    self.guards.extend(facts);
+                    self.walk(els);
+                    self.guards.truncate(depth);
+                }
             }
             // A module's values made, all its names in scope (a `letrec*`'s),
             // and a `with`'s module named, each as any expression or
@@ -426,6 +523,9 @@ impl Walk<'_> {
                 self.walk(scrutinee);
                 let whole = self.tracked(scrutinee);
                 for arm in &arms {
+                    if self.skip_dead && self.dead_arm(&whole, arm.tag) {
+                        continue;
+                    }
                     let depth = self.scope.len();
                     match &arm.bind {
                         ArmBind::Value(x) => {
@@ -670,6 +770,16 @@ impl Walk<'_> {
             })
             .collect();
         self.passed.push((self.current, to, unchanged));
+        let tys = args
+            .iter()
+            .map(|a| {
+                self.tracked(*a).iter().find_map(|k| match k {
+                    Tracked::Part { ty, .. } => *ty,
+                    Tracked::Int { .. } => None,
+                })
+            })
+            .collect();
+        self.arg_tys.push(tys);
         let mut g = Graph::new();
         let mut unbounded = None;
         let mut add = |from: (usize, Measure), to: (usize, Measure), strict: bool| {
@@ -770,4 +880,40 @@ fn size_change_ends(calls: &[(usize, usize, Graph)]) -> Ends {
         .filter(|(f, g, a)| f == g && compose(a, a) == *a)
         .all(|(_, _, a)| a.iter().any(|((x, y), strict)| x == y && *strict));
     if ends { Ends::Yes } else { Ends::No }
+}
+
+/// Why a group whose member `m` is named in `at` other than as a call's
+/// operator may not end.
+fn escape_why(m: &str, at: &str) -> String {
+    format!("`{m}` is named in `{at}` other than as a call's operator: whoever is given it may call it again, with anything")
+}
+
+/// Whether the group's `calls` end, each with why it may not shrink; if
+/// not, why not, `name` naming a call's ends.
+fn verdict(calls: &[(usize, usize, Graph)], unbounded: &[Option<&'static str>], name: &dyn Fn(usize) -> String) -> Result<(), String> {
+    match size_change_ends(calls) {
+        Ends::Yes => Ok(()),
+        Ends::TooMany => Err("the calls combine in too many ways to follow".into()),
+        Ends::No => {
+            let mut flat: Vec<String> = Vec::new();
+            for ((from, to, g), unbounded) in calls.iter().zip(unbounded) {
+                let mut s = format!("the call of `{}` in `{}`", name(*to), name(*from));
+                if let Some(u) = unbounded {
+                    s.push_str(&format!(" ({u})"));
+                }
+                // A call passing its caller's parameters on unchanged
+                // is harmless; one passing nothing related to them, or
+                // with a count unbounded or a part that may be cyclic,
+                // is the one to look at.
+                if (g.is_empty() || unbounded.is_some()) && !g.values().any(|strict| *strict) && !flat.contains(&s) {
+                    flat.push(s);
+                }
+            }
+            Err(if flat.is_empty() {
+                "no argument keeps shrinking around every loop of calls".into()
+            } else {
+                format!("nothing smaller, or related, is passed by {}", flat.join(", "))
+            })
+        }
+    }
 }

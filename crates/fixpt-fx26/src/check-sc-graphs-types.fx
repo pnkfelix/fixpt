@@ -26,6 +26,10 @@
             (val k-sc-too-many (ref bool @t))
             (val k-sc-passed (ref k-passed @t))
             (val k-sc-invariant (ref k-guards @t))
+            (val k-sc-node-binding (ref k-ids @t))
+            (val k-sc-node-names (ref k-names @t))
+            (val k-sc-skip-dead (ref bool @t))
+            (val k-sc-arg-tys (ref (listof k-ids acyclic) @t))
             (val k-sc-guarded?
                  (subr (maxeff (read @globals) spin (read @t)) (k-guards int int) bool))
             (val k-sc-naturals (ref k-ids @t))

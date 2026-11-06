@@ -22,7 +22,8 @@
        (check-expect-types (load-module "fx26:check-expect-types.fx"))
        (check-errors-types (load-module "fx26:check-errors-types.fx"))
        (check-allof-types (load-module "fx26:check-allof-types.fx"))
-       (check-unions-types (load-module "fx26:check-unions-types.fx")))
+       (check-unions-types (load-module "fx26:check-unions-types.fx"))
+       (check-calls-types (load-module "fx26:check-calls-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-env (select check-env-types check-env-sig))
@@ -34,7 +35,8 @@
            (check-synth (select check-synth-types check-synth-sig))
            (check-expect (select check-expect-types check-expect-sig))
            (check-errors (select check-errors-types check-errors-sig))
-           (check-unions (select check-unions-types check-unions-sig)))
+           (check-unions (select check-unions-types check-unions-sig))
+           (check-calls (select check-calls-types check-calls-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -45,7 +47,8 @@
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-effects) (include check-subtype))
 (import check-resolve k-start k-end k-at-of k-regions-in k-has-region-in?)
-(import check-synth k-note-call)
+(import check-synth k-note-call k-te-masked)
+(import check-calls k-callee-name)
 (import check-expect k-rewriting)
 (import check-errors k-argument-error k-fail-no-part)
 (import check-unions k-anyof-of)
@@ -478,8 +481,36 @@
                   (k-start x) (k-end x))
           (let* ((m0 (car fits))
                  (noted (k-note-call x f m0 (k-subr-params m0)))
-                 (res (k-results-met x m0 (cdr fits) (k-subr-result m0) (k-fresh-of fits nil))))
-            (result x f ft args (k-tes-effect ts fe) (k-least-latent fits fits) res))))))
+                 (res (k-results-met x m0 (cdr fits) (k-subr-result m0) (k-fresh-of fits nil)))
+                 (own (k-own-member-spins f)))
+            (if (null? own)
+                (result x f ft args (k-tes-effect ts fe) (k-least-latent fits fits) res)
+                ;; A call of its own recursive group, judged member by
+                ;; member: `spin` if a member it fits may not end; the `spin`
+                ;; naming the callee says, the call's.
+                (let* ((e (k-union (k-tes-effect ts (k-without-spin fe))
+                                   (k-least-latent fits fits)))
+                       (spins (k-fits-spin? (k-allof-members-of ft) fits own)))
+                  (k-te-masked x res (if spins (k-insert (a-spin) e) e)))))))))
+;; Of the callee `f`, if it is a binding of a recursive group noted member by
+;; member (`k-member-spins`), each member's whether it may not end; else none.
+(define k-own-member-spins (->* (kx) (listof bool acyclic))
+  (lambda (f)
+    (let* ((s (k-callee-name f)) (t (if (null? s) -1 (k-lookup (car s)))))
+      (if (and (>= t 0) (k-named-has? (get k-recursive) (car s) t))
+          (k-member-spins-of (car s) t)
+          nil))))
+;; Whether a member of `ms` among `fits` may not end, by `own`, in order.
+(define k-fits-spin? (->* (k-ids k-ids (listof bool acyclic)) bool)
+  (lambda (ms fits own)
+    (and (not (null? ms))
+         (or (and (k-has-id? fits (car ms)) (or (null? own) (car own)))
+             (k-fits-spin? (cdr ms) fits (if (null? own) own (cdr own)))))))
+(define k-without-spin (->* (k-eff) k-eff)
+  (lambda (e)
+    (cond ((null? e) e)
+          ((tagcase (car e) (a-spin () #t) (else y #f)) (k-without-spin (cdr e)))
+          (else (the k-eff (cons (car e) (k-without-spin (cdr e))))))))
 
 ;;; ------------------------------------------------------------ rule 5
 

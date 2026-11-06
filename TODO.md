@@ -2181,10 +2181,9 @@ kayak have moved.
 
 U1 done (2026-11-05): `allof` of monomorphic `subr` members, in both
 checkers (`logical-types.md`, "U1, as built"). Left of it:
-- `spin` judged per member: a call of the group inside the body says
-  `spin` unless the group ends under every member, so `len` with a `pure`
-  member on `acyclic` lists and a `spin` one on `@heap` lists is refused;
-  `may_spin` (and `k-may-spin?`) would need the member being checked.
+- ~~`spin` judged per member~~ (done 2026-11-05, `logical-types.md`,
+  "Termination per member"): `len` with a `pure` member on `acyclic` lists
+  and a `spin` one on `@heap` lists checks.
 - The verifier of typed cellular code (`typed_cells.rs`) has no rule for
   `allof`: a word whose body is checked against each member, and a call
   taking every member it fits; the three such words are known gaps.

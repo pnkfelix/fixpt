@@ -184,12 +184,12 @@
          (check-sc-graphs
           ((load-input "fx26:check-sc-graphs.fx")
            check-resolve check-env check-types check-read
-           check-calls))
+           check-calls check-unions check-print-parts))
          ;; The checker, termination: the graphs closed under composition.
          (check-terminate
           ((load-input "fx26:check-terminate.fx")
            check-types check-resolve check-holds check-env
-           check-expect check-sc-graphs check-print tables))
+           check-expect check-sc-graphs check-print tables check-subtype))
          ;; The checker, its types as reps (`check-reps.fx`).
          (check-reps ((load-input "fx26:check-reps.fx") check-types check-effects))
          ;; The checker, what tests prove: facts in the type of a test.
@@ -244,7 +244,8 @@
          (check-allof
           ((load-input "fx26:check-allof.fx")
            check-types check-env check-resolve check-print check-print-parts
-           check-effects check-subtype check-synth check-expect check-errors check-unions))
+           check-effects check-subtype check-synth check-expect check-errors check-unions
+           check-calls))
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
           ((load-input "fx26:check-rules.fx")

@@ -14,19 +14,23 @@
        (check-types-types (load-module "fx26:check-types-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-read-types (load-module "fx26:check-read-types.fx"))
-       (check-calls-types (load-module "fx26:check-calls-types.fx")))
+       (check-calls-types (load-module "fx26:check-calls-types.fx"))
+       (check-unions-types (load-module "fx26:check-unions-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-resolve (select check-resolve-types check-resolve-sig))
            (check-env (select check-env-types check-env-sig))
            (check-types (select check-types-types check-types-sig))
            (check-read (select check-read-types check-read-sig))
-           (check-calls (select check-calls-types check-calls-sig)))
+           (check-calls (select check-calls-types check-calls-sig))
+           (check-unions (select check-unions-types check-unions-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 (hide (include check-terminate-types) (include check-resolve-types) (include check-types-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-resolve) (include check-env) (include check-types) (include check-read)
-      (include check-calls))
+      (include check-calls) (include check-unions) (include check-print-parts))
 
 (define k-sc-members (ref k-names @t) (new nil))
 (define k-sc-current (ref int @t) (new 0))
@@ -41,6 +45,17 @@
 ;; (member . parameter): passed unchanged by every call in the group, so the
 ;; same for the whole recursion, and a bound as a literal is.
 (define k-sc-invariant (ref k-guards @t) (new nil))
+;; What is walked: each binding at a type, its own or, for an `allof`, each
+;; member's (`k-termination-by-member`); of each, the binding, and its name.
+;; Calls are from these, to a binding. As Rust's `Walk::nodes`.
+(define k-sc-node-binding (ref k-ids @t) (new nil))
+(define k-sc-node-names (ref k-names @t) (new nil))
+;; Whether an `if` branch or a `tagcase` arm the parameters' types rule out
+;; is passed over, as checking against an `allof`'s member does.
+(define k-sc-skip-dead (ref bool @t) (new #f))
+;; For each call, as `k-sc-calls` has them: each argument's type, -1 where
+;; it is not known.
+(define k-sc-arg-tys (ref (listof k-ids acyclic) @t) (new nil))
 
 (define k-sc-in? (->* (k-tscope symbol) bool)
   (lambda (sc s) (and (not (null? sc)) (or (symbol=? (car (car sc)) s) (k-sc-in? (cdr sc) s)))))
@@ -71,6 +86,8 @@
           (if (and (k-std-binding? s t) (not (k-sc-in? sc s)) (k-sc-nonmember? s))
               (symbol->string s)
               "")))
+      ;; The standard binding as `fx` gives it, as Rust's `Walk::std_op`.
+      (x-with (m body a b abk) (k-std-op (k-under f)))
       (else y ""))))
 ;; Whether `op` is `a` or `b`.
 (define k-op-either? (->* (string string string) bool)
@@ -447,6 +464,65 @@
     (if (k-sc-written-arg? args sc)
         "a part of a list that may be written is no smaller: it may be cyclic"
         (k-sc-count-hints args sc gs))))
+;; The type of the first part of what `ks` knows whose type is known, or -1.
+(define k-sc-known-ty (->* (k-trs) int)
+  (lambda (ks)
+    (cond ((null? ks) -1)
+          ((tagcase (car ks) (tr-part (p s t) (>= t 0)) (else y #f))
+           (tagcase (car ks) (tr-part (p s t) t) (else y -1)))
+          (else (k-sc-known-ty (cdr ks))))))
+(define k-sc-arg-types (->* (kxs k-tscope) k-ids)
+  (lambda (args sc)
+    (if (null? args)
+        nil
+        (the k-ids (cons (k-sc-known-ty (k-sc-tracked (car args) sc))
+                         (k-sc-arg-types (cdr args) sc))))))
+;; The shape whose standard predicate is `op`, from `k`; -1 if none.
+(define k-sc-shape-of-op (->* (string int) int)
+  (lambda (op k)
+    (cond ((> k 16) -1)
+          ((string=? (k-shape-predicate k) op) k)
+          (else (k-sc-shape-of-op op (+ k 1))))))
+;; Of what `ks` knows, by shape `bit`: 1 if a type known has no value that
+;; passes a test of it, 0 if none that fails it, -1 if neither.
+(define k-sc-dead-by (->* (k-trs int) int)
+  (lambda (ks bit)
+    (if (null? ks)
+        -1
+        (let ((s (tagcase (car ks)
+                   (tr-part (p st t) (if (>= t 0) (k-run-shape t) -1))
+                   (else y -1))))
+          (cond ((and (> s 0) (= (bitwise-and s bit) 0)) 1)
+                ((and (> s 0) (= (bitwise-and s bit) s)) 0)
+                (else (k-sc-dead-by (cdr ks) bit)))))))
+;; Of `test`, a standard shape predicate of a value whose type is known, or
+;; its `not`: 1 if its `then` branch cannot run, 0 if its `else` cannot, -1
+;; if both may. As Rust's `Walk::dead_side`.
+(define k-sc-dead-side (->* (kx k-tscope) int)
+  (lambda (test sc)
+    (tagcase test
+      (x-app (f args a b abk)
+        (if (not (k-sc-one? args))
+            -1
+            (let ((op (k-sc-op f sc)))
+              (if (string=? op "not")
+                  (let ((d (k-sc-dead-side (car args) sc))) (if (< d 0) d (- 1 d)))
+                  (let ((k (k-sc-shape-of-op op 0)))
+                    (if (< k 0) -1 (k-sc-dead-by (k-sc-tracked (car args) sc) (k-shape-bit k))))))))
+      (else y -1))))
+;; Whether a `tagcase` arm for `tag` cannot run: what is taken apart, `ks`, is
+;; known a sum without it.
+(define k-sc-dead-arm? (->* (k-trs symbol) bool)
+  (lambda (ks tag)
+    (and (not (null? ks))
+         (or (tagcase (car ks)
+               (tr-part (p s t)
+                 (and (>= t 0)
+                      (tagcase (k-get (k-resolve t))
+                        (ty-sum (ps) (< (k-part-find ps tag) 0))
+                        (else y #f))))
+               (else y #f))
+             (k-sc-dead-arm? (cdr ks) tag)))))
 ;; A call of member `to` with `args`, from the member walked.
 (define k-sc-call (->* (int kxs k-tscope k-guards) unit)
   (lambda (to args sc gs)
@@ -454,6 +530,7 @@
       (begin
         (set k-sc-hints (cons (k-sc-hint args sc gs) (get k-sc-hints)))
         (set k-sc-passed (cons (product (1 from) (2 to) (3 passing)) (get k-sc-passed)))
+        (set k-sc-arg-tys (cons (k-sc-arg-types args sc) (get k-sc-arg-tys)))
         (let ((g (k-sc-arg-edges args 0 sc gs nil)))
           (set k-sc-calls (cons (product (1 from) (2 to) (3 g)) (get k-sc-calls))))))))
 
@@ -532,7 +609,10 @@
                  (inner (if (extract arm 2)
                             (k-sc-arm-scope (extract arm 3) whole tag 0 sc)
                             (k-sc-bind (car (extract arm 3)) (k-sc-variant whole tag -1) sc))))
-            (begin (k-sc-walk (extract arm 4) inner gs) (k-sc-walk-arms (cdr arms) whole sc gs))))))
+            (begin (if (and (get k-sc-skip-dead) (k-sc-dead-arm? whole tag))
+                       #u
+                       (k-sc-walk (extract arm 4) inner gs))
+                   (k-sc-walk-arms (cdr arms) whole sc gs))))))
   ;; A `tagcase`'s `else`, if any, which sees the same value, its type narrowed.
   (k-sc-walk-else (->* (k-let-bs k-trs k-tscope k-guards) unit)
     (lambda (els whole sc gs)
@@ -559,9 +639,10 @@
         (x-letregion (k r i body a b abk) (k-sc-walk body sc gs))
         (x-rlambda (r l a b abk) (begin (k-sc-walk r sc gs) (k-sc-walk l sc gs)))
         (x-if (p c d a b abk)
-          (begin (k-sc-walk p sc gs)
-                 (k-sc-walk c sc (k-sc-append (k-sc-facts p sc #t) gs))
-                 (k-sc-walk d sc (k-sc-append (k-sc-facts p sc #f) gs))))
+          (let ((dead (if (get k-sc-skip-dead) (k-sc-dead-side p sc) -1)))
+            (begin (k-sc-walk p sc gs)
+                   (if (= dead 1) #u (k-sc-walk c sc (k-sc-append (k-sc-facts p sc #t) gs)))
+                   (if (= dead 0) #u (k-sc-walk d sc (k-sc-append (k-sc-facts p sc #f) gs))))))
         (x-letrec (bs body a b abk)
           (let ((inner (k-sc-hide-group bs sc)))
             (begin (k-sc-walk-group bs inner gs) (k-sc-walk body inner gs))))

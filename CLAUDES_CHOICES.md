@@ -3834,3 +3834,27 @@ Mine:
   their region: printing `(listof T)` back would change what every
   message and `fixpt check` says. `listof` as a description function,
   written alone, still takes a type and a region.
+
+## Termination judged per `allof` member (U1's leftover, 2026-11-05)
+
+- **Nodes, not members alone.** Each binding is a node per member; each
+  call goes to every member its arguments fit. Judging each member by its
+  own calls alone would be unsound: calls alternating between members can
+  loop and grow while each member's calls shrink (`members-alternate.fx`).
+  A node ends if size-change holds for everything reachable from it.
+- **What the walk passes over** is decided from types alone, without the
+  checker's narrowing: a standard shape predicate (`check::SHAPES`, by
+  name) or its `not`, of a value whose type the walk knows (a parameter,
+  or a part of one), and a `tagcase` arm for a tag the sum lacks. Not a
+  user predicate's `(bool (then (shape …)))`: the FX-26 walk is loaded
+  before what reads those (`k-latent-props`), and the two must agree.
+- **Fits, where the walk knows the arguments' types**, by subtyping, after
+  the walk; where it does not (a literal, a call's result), every member:
+  the safe side.
+- **Outside an `allof`, nothing changes**: the walk skips nothing.
+- **A call's `spin`** comes from the members it fits; the `spin` that
+  naming a recursive binding says is not added for its operator, as the
+  call decides. Named anywhere else, it still says `spin`, and escapes:
+  the group then does not end at any member.
+- FX-26's `k-sc-op` now sees a standard binding through `fx`, as Rust's
+  `std_op` did already: `typecase`'s tests are written so.

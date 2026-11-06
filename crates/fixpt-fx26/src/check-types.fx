@@ -49,8 +49,8 @@
         k-eff k-vsub k-ids k-term k-prop k-props k-binders k-parts k-names k-strings k-conv k-terms
         k-size k-desc k-descs k-ty k-map k-ds kx kxs k-item k-items k-te k-result k-narrows
         k-pendings k-cert-len k-arrow-kind k-bounded k-nesting k-named k-settleds k-gen k-hyps
-        k-lemma k-regions k-step k-steps k-path-fact k-path-facts) (effect kstate checks kreads
-        kbuilds))
+        k-lemma k-regions k-step k-steps k-path-fact k-path-facts k-member-spin-list)
+        (effect kstate checks kreads kbuilds))
 ;; The types it uses of the files before it.
 (define-type chars (select eager-reader-types chars))
 (define-type table (select table-types table))
@@ -798,6 +798,21 @@
   (lambda (r) (let ((v (k-region-var r))) (and (>= v 0) (k-gen-param? v)))))
 ;; Why each member of a recursive group that may not end may not.
 (define k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) acyclic) @t) (new nil))
+;; Of each binding of a recursive group with an `allof`, for each member (one
+;; for a binding of no `allof`), whether a call of it at that member may not
+;; end (`k-termination-by-member`): a call says `spin` only for the members
+;; it fits that may not. Newest first; as Rust's `member_spins`.
+(define k-member-spins (ref k-member-spin-list @t) (new nil))
+;; `n` at `t`'s, or none.
+(define k-member-spins-of (subr kreads (symbol int) (listof bool acyclic))
+  (lambda (n t)
+    (letrec ((find (subr kreads (k-member-spin-list) (listof bool acyclic))
+                   (lambda (ms)
+                     (cond ((null? ms) nil)
+                           ((and (symbol=? (extract (car ms) 1) n) (= (extract (car ms) 2) t))
+                            (extract (car ms) 3))
+                           (else (find (cdr ms)))))))
+      (find (get k-member-spins)))))
 (define k-named-has? (subr kreads (k-named symbol int) bool)
   (lambda (ns n t)
     (and (not (null? ns))
