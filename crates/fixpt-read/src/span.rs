@@ -53,12 +53,16 @@ impl fmt::Debug for Span {
     }
 }
 
-/// A use of a macro that made text: the macro's name, and where the use is
-/// (itself perhaps made by another's, by its `expansion`).
+/// A use of a macro that made text: the macro's name, where the use is
+/// (itself perhaps made by another's, by its `expansion`), and the text the
+/// macro's definition was read from, which the template's places are in (a
+/// REPL's entries each start at 0: a template's place in an earlier entry
+/// is no place in a later one).
 #[derive(Clone, Debug)]
 pub struct Expansion {
     pub name: String,
     pub at: Span,
+    pub text: Option<Arc<str>>,
 }
 
 /// The uses of macros expanded, in this process, by number from 1, as
@@ -66,10 +70,11 @@ pub struct Expansion {
 /// goes, an error's included.
 static EXPANSIONS: std::sync::Mutex<Vec<Expansion>> = std::sync::Mutex::new(Vec::new());
 
-/// A use of macro `name` at `at`, expanded: its number.
-pub fn record_expansion(name: &str, at: Span) -> u32 {
+/// A use of macro `name` at `at`, expanded, the macro defined in `text`:
+/// its number.
+pub fn record_expansion(name: &str, at: Span, text: Option<Arc<str>>) -> u32 {
     let mut all = EXPANSIONS.lock().expect("not poisoned");
-    all.push(Expansion { name: name.to_string(), at });
+    all.push(Expansion { name: name.to_string(), at, text });
     all.len() as u32
 }
 

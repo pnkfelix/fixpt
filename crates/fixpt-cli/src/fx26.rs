@@ -37,14 +37,29 @@ fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
     if e.span.file == fixpt_fx26::FRONT_END_FILE {
         return e.message.clone();
     }
-    let (line, col) = line_col(text, e.span.start as usize);
-    let mut out = format!("{name}:{line}:{col}: {}", e.message);
+    let mut out = format!("{}: {}", place(name, text, e.span), e.message);
     // Text a macro's template made: each use that made it, innermost first.
     for use_ in fixpt_read::expansion_trace(e.span) {
-        let (line, col) = line_col(text, use_.at.start as usize);
-        out.push_str(&format!("\n  in the expansion of `{}` at {name}:{line}:{col}", use_.name));
+        out.push_str(&format!("\n  in the expansion of `{}` at {}", use_.name, place(name, text, use_.at)));
     }
     out
+}
+
+/// Where `span` is: in `text`, named `name`; or, of text a macro's template
+/// made, in the text its definition was read from, if that is another (an
+/// earlier REPL entry's), named for the macro.
+fn place(name: &str, text: &str, span: fixpt_read::Span) -> String {
+    let made = fixpt_read::expansion(span.expansion);
+    match made.as_ref().and_then(|m| m.text.as_ref().map(|t| (m, t))) {
+        Some((m, t)) if &**t != text => {
+            let (line, col) = line_col(t, span.start as usize);
+            format!("`{}`'s definition:{line}:{col}", m.name)
+        }
+        _ => {
+            let (line, col) = line_col(text, span.start as usize);
+            format!("{name}:{line}:{col}")
+        }
+    }
 }
 
 /// A warning, on the standard error, for each type a whole program defines

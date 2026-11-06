@@ -552,7 +552,11 @@ impl Checker {
         let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
         self.interner = interner;
         let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
-        self.expand_forms(forms)
+        // The text, for the macros defined in it (their templates' places).
+        self.macros.reading = Some(std::sync::Arc::from(text));
+        let r = self.expand_forms(forms);
+        self.macros.reading = None;
+        r
     }
 
     /// A module's file (`load-module`) read: its `define-datatype`s

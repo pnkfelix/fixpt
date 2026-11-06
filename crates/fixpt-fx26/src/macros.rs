@@ -88,6 +88,8 @@ pub(crate) enum Delta {
 struct Macro {
     sig: Rc<STy>,
     clauses: Vec<Clause>,
+    /// The text it was read from, its templates' places in it.
+    text: Option<std::sync::Arc<str>>,
 }
 
 /// A clause: its pattern (of the operands), its template, and what is done
@@ -116,6 +118,9 @@ pub struct Macros {
     kernel: HashMap<String, Rc<STy>>,
     defined: HashMap<Sym, Rc<Macro>>,
     fresh: usize,
+    /// The text being read, if it is known (`Checker::read_in`): a macro
+    /// defined in it has its templates' places in it.
+    pub(crate) reading: Option<std::sync::Arc<str>>,
 }
 
 /// The kernel's forms a template may use, with their binding structure
@@ -373,7 +378,7 @@ impl Macros {
         }
         let sig = self.sty(sig, interner, &HashMap::new(), &mut Vec::new())?;
         // Defined first, so that a template may use the macro itself.
-        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), clauses: Vec::new() }));
+        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), clauses: Vec::new(), text: None }));
         let mut checked = Vec::new();
         for c in clauses {
             match self.clause(c, &sig, interner, is_standard) {
@@ -387,7 +392,8 @@ impl Macros {
                 }
             }
         }
-        self.defined.insert(name, Rc::new(Macro { sig, clauses: checked }));
+        let text = self.reading.clone();
+        self.defined.insert(name, Rc::new(Macro { sig, clauses: checked, text }));
         Ok(())
     }
 
@@ -492,7 +498,11 @@ impl Macros {
             return Ok(form.clone());
         }
         let mut budget = 10_000;
-        self.expand_in(form, interner, &mut budget)
+        let mut out = self.expand_in(form, interner, &mut budget)?;
+        // A form of the program's is the text written for it, what a use
+        // made of it or not: the REPL takes the entry's text by it.
+        out.span = form.span;
+        Ok(out)
     }
 
     fn expand_in(&mut self, s: &Syntax, interner: &mut Interner, budget: &mut usize) -> R<Syntax> {
@@ -539,7 +549,7 @@ impl Macros {
                 continue;
             }
             let mut fresh: HashMap<Vec<bool>, Sym> = HashMap::new();
-            let made = fixpt_read::record_expansion(interner.name(name), s.span);
+            let made = fixpt_read::record_expansion(interner.name(name), s.span, m.text.clone());
             return Ok(self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut fresh, made, interner));
         }
         Err(FxError::at(s.span, format!("a use of `{}` that no clause of it matches", interner.name(name))))
