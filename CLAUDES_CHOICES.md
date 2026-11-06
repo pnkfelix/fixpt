@@ -3965,3 +3965,24 @@ The user read the paper as supporting the distribution. Mine:
 - **Duplication** refused for any pattern variable with an expression in
   it, not only `expr`; `(expr pure)` waits for effect-indexed `expr`.
 
+## `(many σ)`, and identity by position (2026-11-06)
+
+- **`k` as the walk's number, not a new key's shape**: the identity
+  `(start end k)` keeps its three fields, so every comparison and table
+  stands, and `k` alone tells expressions apart. A form's number was not
+  needed: the compiler makes its tables anew each call of the front end,
+  and the walk counts over one call, as `k` did.
+- **`last` computed, not stored**: only skipped arms and branches ask what
+  is inside an expression in the checker written in FX-26, so
+  `k-last-kth` walks the arm once, rather than every node carrying it.
+- **Expansion records in `fixpt-read`, process-wide**, as symbols are
+  interned: an error's span says which use made its text wherever it
+  goes, and `fixpt`'s `located` reads it without the checker passed to
+  each of its 22 callers.
+- **The source map not built**: the checker written in FX-26's place in a
+  printed expansion is said only where the checkers disagree.
+- **`many` counted at placement**: a pattern variable inside a part a
+  form's signature says `many` counts as placed more than once; so `many`
+  goes up a chain of macros, and none hides a duplication by placing an
+  argument once into one that duplicates it.
+

@@ -15,6 +15,7 @@
 //!     | (import σ β) | (export σ β)        Herman's σ↓β and σ↑β
 //!     | (mu v σ) | v | (union σ …)         recursion, alternatives
 //!     | (literal name)                     a name written as it is (`else`)
+//!     | (many σ)                           placed any number of times
 //! β ::= (rho (ℓ δ) …)                      a rib, {ℓ : δ, …}
 //!     | (cage ρ-or-(at ℓ) …)               ribs in order, innermost first; ℓ@γ
 //! δ ::= none | var | rib | env
@@ -24,6 +25,11 @@
 //! as `cadr` is, from the innermost `mu`, `union` member or signature
 //! around it. `id`, `type` and `label` are FX-26's: a variable referred to
 //! (as `set!`'s target would be), a description, a tag or field's name.
+//! So is `many`: a pattern variable with an expression in it is placed at
+//! most once in a template, affine, unless its part of the signature is
+//! `(many σ)`; placed where another macro's signature says `many`, it is
+//! taken as placed more than once, so the opt-out is said all the way up
+//! a chain of macros (`docs/research/typed-macros.md`).
 
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
@@ -46,6 +52,8 @@ pub(crate) enum STy {
     Export(Rc<STy>, Bind),
     /// A `mu`, by its number in `Macros::mus`; and its variable, the same.
     Mu(usize),
+    /// What may be placed any number of times.
+    Many(Rc<STy>),
     Union(Vec<Rc<STy>>),
 }
 
@@ -135,6 +143,8 @@ struct Node {
     /// addresses are from.
     imports: Vec<(Bind, usize)>,
     export: Option<(Bind, usize)>,
+    /// Whether its part of the signature is `(many …)`.
+    many: bool,
     kids: Kids,
 }
 
@@ -161,6 +171,10 @@ enum Atom {
     Lit(usize),
 }
 
+/// Each pattern variable, template binder and name referred to, by node,
+/// with its environment and whether it is in a `many` part (`walk`).
+type Found = Vec<(usize, Vec<Level>, bool)>;
+
 /// One level of an environment: a rib, or a pattern variable's ribcage.
 #[derive(Clone, Debug, PartialEq)]
 enum Level {
@@ -173,6 +187,8 @@ enum Level {
 struct PInfo {
     core: Rc<STy>,
     declared: Vec<Level>,
+    /// Whether it may be placed any number of times (`(many …)`).
+    many: bool,
 }
 
 /// Syntax aligned with syntax types, as a tree of `Node`s.
@@ -268,6 +284,7 @@ impl Macros {
                         }
                         STy::Union(ms)
                     }
+                    (Some("many"), [_, body], None) => STy::Many(self.sty(body, interner, named, mus)?),
                     (Some("literal"), [_, n], None) => STy::Literal(n.as_symbol().ok_or_else(|| bad("`(literal name)`"))?),
                     _ => {
                         let rest = match (items.len(), tail) {
@@ -288,7 +305,7 @@ impl Macros {
     /// to what is under them (for overlap and fit).
     fn unfold<'a>(&'a self, t: &'a Rc<STy>) -> &'a Rc<STy> {
         match &**t {
-            STy::Import(b, _) | STy::Export(b, _) => self.unfold(b),
+            STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) => self.unfold(b),
             STy::Mu(id) => self.unfold(&self.mus[*id]),
             _ => t,
         }
@@ -336,7 +353,7 @@ impl Macros {
             Label => matches!(s.datum, Datum::Keyword(_)) || (mode == Mode::Use && s.as_symbol().is_some()),
             Expr => !s.as_symbol().is_some_and(|n| reserved(interner.name(n))) && !matches!(s.datum, Datum::Nil),
             Data | Type => true,
-            Import(..) | Export(..) | Mu(_) => unreachable!("unfolded"),
+            Import(..) | Export(..) | Mu(_) | Many(_) => unreachable!("unfolded"),
         }
     }
 
@@ -393,11 +410,11 @@ impl Macros {
         let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
         let mut found = Vec::new();
-        p.walk(root, &Vec::new(), &mut found)?;
+        p.walk(root, &Vec::new(), false, &mut found)?;
         let mut pvars: HashMap<Sym, PInfo> = HashMap::new();
-        for (at, env) in found {
+        for (at, env, many) in found {
             let Kids::PVar(n) = p.nodes[at].kids else { continue };
-            if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env }).is_some() {
+            if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env, many }).is_some() {
                 return Err(FxError::at(p.nodes[at].syn.span, format!("`{}` is a pattern variable twice", interner.name(n))));
             }
         }
@@ -406,10 +423,10 @@ impl Macros {
         let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new() };
         let root = t.align(&Rc::new(STy::Expr), template, None, Vec::new())?;
         let mut found = Vec::new();
-        t.walk(root, &Vec::new(), &mut found)?;
+        t.walk(root, &Vec::new(), false, &mut found)?;
         let mut actions = HashMap::new();
         let mut uses: HashMap<Sym, usize> = HashMap::new();
-        for (at, env) in found {
+        for (at, env, many) in found {
             let node = &t.nodes[at];
             let span = node.syn.span;
             match &node.kids {
@@ -418,12 +435,18 @@ impl Macros {
                     let name = interner.name(*n);
                     t.placed(*n, info, &node.core, &env, span)?;
                     // Anything with an expression in it, placed twice, runs
-                    // twice.
-                    if !matches!(&*info.core, STy::Bvar | STy::Id | STy::Label | STy::Data | STy::Type) {
+                    // twice: placed once, unless its signature says `many`.
+                    // Where another macro's says `many`, it may be placed
+                    // more than once there.
+                    let affine = !info.many && !matches!(&*info.core, STy::Bvar | STy::Id | STy::Label | STy::Data | STy::Type);
+                    if affine && many {
+                        return Err(FxError::at(span, format!("`{name}` is placed where it may be placed more than once (a `many` part), and an expression in it may do something each time it runs: its signature says `(many …)` if it may")));
+                    }
+                    if affine {
                         let k = uses.entry(*n).or_default();
                         *k += 1;
                         if *k > 1 {
-                            return Err(FxError::at(span, format!("`{name}` is placed twice, and an expression in it may do something each time it runs (one is placed once)")));
+                            return Err(FxError::at(span, format!("`{name}` is placed twice, and an expression in it may do something each time it runs: its signature says `(many …)` if it may")));
                         }
                     }
                 }
@@ -582,7 +605,7 @@ impl Aligner<'_> {
     /// addresses are from, if not itself.
     fn align(&mut self, t: &Rc<STy>, s: &Syntax, root: Option<usize>, path: Vec<bool>) -> R<usize> {
         let at = self.nodes.len();
-        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, kids: Kids::Other });
+        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, kids: Kids::Other });
         self.fill(at, t, s, root.unwrap_or(at))?;
         Ok(at)
     }
@@ -592,6 +615,10 @@ impl Aligner<'_> {
         match &**t {
             STy::Import(body, b) => {
                 self.nodes[at].imports.push((b.clone(), root));
+                return self.fill(at, body, s, root);
+            }
+            STy::Many(body) => {
+                self.nodes[at].many = true;
                 return self.fill(at, body, s, root);
             }
             STy::Export(body, b) => {
@@ -699,7 +726,7 @@ impl Aligner<'_> {
                 (Datum::Nil, _) => Err(fail("`()` is not an expression".into())),
                 _ => Ok(()),
             },
-            STy::Import(..) | STy::Export(..) => unreachable!("taken off"),
+            STy::Import(..) | STy::Export(..) | STy::Many(_) => unreachable!("taken off"),
         }
     }
 
@@ -755,9 +782,11 @@ impl Aligner<'_> {
 
     /// The tree under `at`, walked with environment `env` (innermost first):
     /// each pattern variable, template binder and name referred to, with
-    /// the environment where it is.
-    fn walk(&self, at: usize, env: &Vec<Level>, found: &mut Vec<(usize, Vec<Level>)>) -> R<()> {
+    /// the environment where it is, and whether it is in a part of the
+    /// signature that is `(many …)` (`many`, of what is around it).
+    fn walk(&self, at: usize, env: &Vec<Level>, many: bool, found: &mut Found) -> R<()> {
         let node = &self.nodes[at];
+        let many = many || node.many;
         let mut env = env.clone();
         for (b, root) in &node.imports {
             let mut levels = self.eval(b, *root, node.syn.span)?;
@@ -766,12 +795,12 @@ impl Aligner<'_> {
         }
         match &node.kids {
             Kids::Pair(x, y) => {
-                self.walk(*x, &env, found)?;
-                self.walk(*y, &env, found)
+                self.walk(*x, &env, many, found)?;
+                self.walk(*y, &env, many, found)
             }
-            Kids::Form(x) => self.walk(*x, &env, found),
+            Kids::Form(x) => self.walk(*x, &env, many, found),
             Kids::PVar(_) | Kids::Binder(_) | Kids::Ref(_) => {
-                found.push((at, env));
+                found.push((at, env, many));
                 Ok(())
             }
             Kids::Nil | Kids::Other => Ok(()),
@@ -888,6 +917,8 @@ impl Macros {
         assumed.insert(key);
         match (&**a, &**b) {
             (Import(x, p), Import(y, q)) | (Export(x, p), Export(y, q)) => p == q && self.sub(x, y, assumed),
+            (Many(x), _) => self.sub(x, b, assumed),
+            (_, Many(y)) => self.sub(a, y, assumed),
             (Mu(i), _) => self.sub(&self.mus[*i], b, assumed),
             (_, Mu(j)) => self.sub(a, &self.mus[*j], assumed),
             (Union(ms), _) => ms.iter().all(|m| self.sub(m, b, assumed)),
@@ -970,7 +1001,7 @@ fn addr(a: &Syntax, interner: &Interner) -> R<Addr> {
 fn guarded(t: &STy, id: usize) -> bool {
     match t {
         STy::Mu(j) => *j != id,
-        STy::Import(b, _) | STy::Export(b, _) => guarded(b, id),
+        STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) => guarded(b, id),
         STy::Union(ms) => ms.iter().all(|m| guarded(m, id)),
         _ => true,
     }

@@ -466,6 +466,7 @@ the syntax type of a use's operands, all but the macro's name:
     | (import σ β) | (export σ β)        σ↓β and σ↑β
     | (mu v σ) | v | (union σ …)
     | (literal name)                     a name written as it is (`else`)
+    | (many σ)                           placed any number of times
 β ::= (rho (ℓ δ) …)                      a rib, {ℓ : δ, …}
     | (cage ρ-or-(at ℓ) …)               a ribcage, innermost first; ℓ@γ
 δ ::= none | var | rib | env
@@ -503,9 +504,15 @@ readable form to move to:
   template's own binders aside (`bad`, and its converse);
 - a pattern binder referred to only where no other pattern binder may
   shadow it (the shadow restriction, `K`);
-- a pattern variable with an expression in it placed once: twice, it
-  would run twice (the effect-indexed form, `(expr pure)`, waits for
-  `(expr T E)`, item 7);
+- a pattern variable with an expression in it placed at most once, affine,
+  unless its part of the signature is `(many σ)` (2026-11-06, the user's
+  choice of a substructural rule with an explicit opt-out over a lint);
+  placed in a part another macro's signature says `many`, it counts as
+  placed more than once, so a chain of macros that multiplies an argument
+  says so in every signature on the way (`many-chain.fx`,
+  `many-chain-refused.fx`). A copy is an expression of its own, its own
+  facts (`many-copies.fx`): identity is by position, not place
+  (`loads-and-places.md`, "Decided: identity by position");
 - a template's tag or label a keyword (the user's answer).
 
 **Expanded where used**: the use parsed by the signature (a binder where
