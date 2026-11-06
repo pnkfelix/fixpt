@@ -2184,12 +2184,11 @@ checkers (`logical-types.md`, "U1, as built"). Left of it:
 - ~~`spin` judged per member~~ (done 2026-11-05, `logical-types.md`,
   "Termination per member"): `len` with a `pure` member on `acyclic` lists
   and a `spin` one on `@heap` lists checks.
-- The verifier of typed cellular code (`typed_cells.rs`): in part
-  (2026-11-05, `logical-types.md`, "The verifier of typed cellular
-  code"): calls, words at each member's signature, closures, unreachable
-  ways. Left: type notes and operations per member (a word's are the last
-  member's check's), so a body whose types differ by member inside still
-  fails at the other members; nine words are known gaps for it.
+- ~~The verifier of typed cellular code (`typed_cells.rs`)~~ (done
+  2026-11-06, `logical-types.md`, "The verifier of typed cellular
+  code"): calls, words at each member's signature with that member's
+  type notes and operations, closures, unreachable ways, `car` of an
+  `anyof` of pairs. No `allof` or `anyof` word is a known gap.
 - ~~A call's arguments must each have a type of their own and be below a
   member's parameters as they are~~ (done 2026-11-05, `logical-types.md`,
   "Arguments at an `allof` call"): a `lambda` without parameter types, a

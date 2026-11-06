@@ -3913,3 +3913,25 @@ The user read the paper as supporting the distribution. Mine:
   the compiler's every note. Words that verified before at one member and
   now fail at another (`mk` in the fresh/frozen tests) were not verified as
   `allof` words before either.
+
+## The verifier and `allof`, the rest (2026-11-06)
+
+- **Notes per member without compiling twice.** Compiling a word again at
+  each member's facts would make its inner lambdas' words again. Instead
+  each member's check records the types and instantiations it found inside
+  the body (`check::MemberFacts`), and the compiler records which
+  expression's fact each note and operation was made of (`Compiler::
+  fact_of`: a type note, a datum made, a call's or operation's
+  instantiation, a `list-copy`'s, a polymorphic value's). A variant's
+  certificate has them made again of its member's facts; one its member
+  found nothing for keeps the last member's.
+- **Rule 5 in the verifier where a call fits whole too**: the split's
+  result is taken where it is within the whole's, differs, and its effect
+  is within the whole's: both are sound, and the checkers take the split
+  there when the whole's is not what is expected (`swap-eop`).
+- **`car` of a union of pairs, none greatest**: the union of each pair's
+  part, each region read, as the checkers' rule 5 gives it.
+- **The weakened-effect test** now weakens each variant's effect too: a
+  word with variants is verified at them only, so weakening the outer
+  certificate alone proved nothing (`frozen-ring.fx`'s `mk` showed it once
+  it verified).

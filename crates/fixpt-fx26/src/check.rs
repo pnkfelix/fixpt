@@ -674,6 +674,16 @@ pub struct Checker {
 
 /// A lambda's signature, for typed cellular code
 /// (`docs/research/typed-cellular-code.md`): its parameters and its free
+/// What one member's check of an `allof`'s lambda found inside it: each
+/// expression's type and instantiations, which the word's type notes and
+/// operations are made of at that member (`NodeFacts::lambda_variants`).
+#[derive(Clone, Debug, Default)]
+pub struct MemberFacts {
+    pub types: HashMap<ExpId, TyId>,
+    pub insts: HashMap<ExpId, Vec<D>>,
+    pub value_insts: HashMap<ExpId, Vec<D>>,
+}
+
 /// variables by name, with their types (a free variable's where the lambda
 /// is made, narrowings included), its result's type and its latent effect.
 #[derive(Clone, Debug)]
@@ -709,7 +719,7 @@ pub struct NodeFacts {
     /// Of an `allof`'s lambda, and each inside it, by body: the signature
     /// at each member, as the member's check left it, for the verifier of
     /// typed cellular code to verify its word at each.
-    pub lambda_variants: HashMap<ExpId, Vec<LambdaSig>>,
+    pub lambda_variants: HashMap<ExpId, Vec<(LambdaSig, std::rc::Rc<MemberFacts>)>>,
     /// Each lambda that is a polymorphic value (a `plambda`'s, or one
     /// checked against a `poly`), by its body: the binders its signature's
     /// types are under, a level for each `poly`, outermost first. With

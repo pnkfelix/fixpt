@@ -21,6 +21,19 @@ mod regcode;
 use fixpt_heap::{Heap, Value};
 use fixpt_read::Sym;
 
+/// Which of checking's facts of an expression a note or operation was made
+/// of (`Compiler::fact_of`): its type (as a note, or as the first of an
+/// operation's: of data made), its instantiations (a `list-copy`'s first
+/// three), or those of a polymorphic value used.
+#[derive(Clone, Copy)]
+enum Fact {
+    Type,
+    Made,
+    Insts,
+    Copied,
+    ValueInsts,
+}
+
 /// One item of a word being built: a cell, a label, or a branch to one;
 /// or, for typed cellular code, an assertion before the next cell (by its
 /// number in `Compiler::notes`).
@@ -238,6 +251,13 @@ pub struct Compiler<'a> {
     last_notes: Vec<(usize, Vec<crate::typed_cells::Prop>)>,
     ops: Vec<(String, Vec<crate::ast::D>)>,
     last_ops: Vec<(usize, String, Vec<crate::ast::D>)>,
+    /// Of the notes and operations made of what checking found of an
+    /// expression, by index: the expression, and which fact. Of those of
+    /// the word assembled last, as `last_notes` and `last_ops` are: an
+    /// `allof`'s word is certified at each member with them made of that
+    /// member's facts (`Compiler::at_member`).
+    fact_of: HashMap<(bool, usize), (ExpId, Fact)>,
+    last_facts: (Vec<Option<(ExpId, Fact)>>, Vec<Option<(ExpId, Fact)>>),
     gens: Vec<Vec<(crate::ast::DVar, crate::ast::Kind)>>,
     packs: Vec<Vec<(crate::ast::DVar, TyId)>>,
     last_packs: Vec<(usize, Vec<(crate::ast::DVar, TyId)>)>,
@@ -400,6 +420,8 @@ impl<'a> Compiler<'a> {
             last_notes: Vec::new(),
             ops: Vec::new(),
             last_ops: Vec::new(),
+            fact_of: HashMap::new(),
+            last_facts: (Vec::new(), Vec::new()),
             gens: Vec::new(),
             last_gens: Vec::new(),
             packs: Vec::new(),
@@ -494,6 +516,7 @@ impl<'a> Compiler<'a> {
         let mut pos = 0;
         self.last_notes.clear();
         self.last_ops.clear();
+        self.last_facts = (Vec::new(), Vec::new());
         self.last_gens.clear();
         self.last_packs.clear();
         self.last_regions.clear();
@@ -508,10 +531,14 @@ impl<'a> Compiler<'a> {
             match i {
                 Item::Cell(x) => cells.push(*x),
                 Item::Label(_) => {}
-                Item::Note(k) => self.last_notes.push((pos as usize, self.notes[*k].clone())),
+                Item::Note(k) => {
+                    self.last_notes.push((pos as usize, self.notes[*k].clone()));
+                    self.last_facts.0.push(self.fact_of.get(&(false, *k)).copied());
+                }
                 Item::Op(k) => {
                     let (name, inst) = self.ops[*k].clone();
                     self.last_ops.push((pos as usize, name, inst));
+                    self.last_facts.1.push(self.fact_of.get(&(true, *k)).copied());
                 }
                 Item::Pack(k) => self.last_packs.push((pos as usize, self.packs[*k].clone())),
                 Item::Open(k) => {
@@ -788,6 +815,7 @@ impl<'a> Compiler<'a> {
             && let Some(inst) = self.c.facts.value_insts.get(&x).cloned()
         {
             self.ops.push(("%inst".to_string(), inst));
+            self.fact_of.insert((true, self.ops.len() - 1), (x, Fact::ValueInsts));
             code.push(Item::Op(self.ops.len() - 1));
         }
         // Where ways join inside it, its value's type, asserted where it
@@ -798,6 +826,7 @@ impl<'a> Compiler<'a> {
             && let Some(&t) = self.c.facts.types.get(&x)
         {
             self.notes.push(vec![crate::typed_cells::Prop::Has(crate::typed_cells::Term::Slot(depth), t)]);
+            self.fact_of.insert((false, self.notes.len() - 1), (x, Fact::Type));
             code.push(Item::Note(self.notes.len() - 1));
         }
         Ok(())
@@ -1963,6 +1992,7 @@ impl<'a> Compiler<'a> {
                     && let Some(inst) = self.c.facts.insts.get(&x).cloned()
                 {
                     self.ops.push(("%call".to_string(), inst));
+                    self.fact_of.insert((true, self.ops.len() - 1), (x, Fact::Insts));
                     code.push(Item::Op(self.ops.len() - 1));
                 }
                 // In the callee's convention, as its type says
@@ -2003,6 +2033,7 @@ impl<'a> Compiler<'a> {
                     && inst.len() == 4
                 {
                     self.ops.push(("%copy".to_string(), inst[..3].to_vec()));
+                    self.fact_of.insert((true, self.ops.len() - 1), (x, Fact::Copied));
                     code.push(Item::Op(self.ops.len() - 1));
                 }
                 self.prim(code, "%fx26-list-copy", 1)?;
@@ -2343,6 +2374,7 @@ impl<'a> Compiler<'a> {
                 None => vec![crate::ast::D::Type(t)],
             };
             self.ops.push(("%make".to_string(), made));
+            self.fact_of.insert((true, self.ops.len() - 1), (x, Fact::Made));
             code.push(Item::Op(self.ops.len() - 1));
             if let Some(packs) = self.c.facts.packs.get(&x) {
                 self.packs.push(packs.clone());
@@ -2358,6 +2390,7 @@ impl<'a> Compiler<'a> {
             && let Some(&t) = self.c.facts.types.get(&x)
         {
             self.ops.push(("%flat".to_string(), vec![crate::ast::D::Type(t)]));
+            self.fact_of.insert((true, self.ops.len() - 1), (x, Fact::Made));
             code.push(Item::Op(self.ops.len() - 1));
         }
     }
@@ -2371,6 +2404,7 @@ impl<'a> Compiler<'a> {
         if self.certs.is_some() && standard_primitive(name) != Some("%fx26-identity") {
             let inst = self.c.facts.insts.get(&x).cloned().unwrap_or_default();
             self.ops.push((name.to_string(), inst));
+            self.fact_of.insert((true, self.ops.len() - 1), (x, Fact::Insts));
             code.push(Item::Op(self.ops.len() - 1));
         }
     }
@@ -2757,11 +2791,43 @@ impl<'a> Compiler<'a> {
         // member's signature too (`NodeFacts::lambda_variants`), its
         // closures of their `allof`.
         if let Some(vs) = self.c.facts.lambda_variants.get(&body) {
-            cert.variants = vs.iter().filter_map(|v| self.lambda_cert(params, body, fv, v)).collect();
+            cert.variants = vs.iter().filter_map(|(v, m)| self.lambda_cert(params, body, fv, v).map(|c| self.at_member(c, m))).collect();
         }
         if let Some(certs) = &mut self.certs {
             certs.words.insert(w.raw(), cert);
         }
+    }
+
+    /// Certificate `cert` of the word assembled last, its notes and
+    /// operations made of what checking found at member `m` where they are
+    /// made of what checking found (`fact_of`): one where `m` found nothing
+    /// kept as the last member's check left it.
+    fn at_member(&self, mut cert: crate::typed_cells::Cert, m: &crate::check::MemberFacts) -> crate::typed_cells::Cert {
+        use crate::typed_cells::{Prop, Term};
+        for (note, fact) in cert.notes.iter_mut().zip(&self.last_facts.0) {
+            if let (Some((x, Fact::Type)), [Prop::Has(Term::Slot(d), _)]) = (fact, &note.1[..])
+                && let Some(&t) = m.types.get(x)
+            {
+                note.1 = vec![Prop::Has(Term::Slot(*d), t)];
+            }
+        }
+        for (op, fact) in cert.ops.iter_mut().zip(&self.last_facts.1) {
+            let found = match fact {
+                Some((x, Fact::Insts)) => m.insts.get(x).cloned(),
+                Some((x, Fact::ValueInsts)) => m.value_insts.get(x).cloned(),
+                Some((x, Fact::Copied)) => m.insts.get(x).filter(|i| i.len() == 4).map(|i| i[..3].to_vec()),
+                _ => None,
+            };
+            if let Some(inst) = found {
+                op.2 = inst;
+            }
+            if let Some((x, Fact::Made)) = fact
+                && let Some(&t) = m.types.get(x)
+            {
+                op.2[0] = crate::ast::D::Type(t);
+            }
+        }
+        cert
     }
 
     /// Word `w`'s certificate (`certify_lambda`), from signature `sig`.

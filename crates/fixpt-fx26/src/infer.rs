@@ -434,7 +434,7 @@ impl Checker {
         // Each lambda's signature, from here in, at each member, for the
         // verifier (`lambda_variants`). One a member skipped has the last
         // member's that checked it, again: harmless.
-        let mut variants: Vec<(ExpId, crate::check::LambdaSig)> = Vec::new();
+        let mut variants: Vec<(ExpId, crate::check::LambdaSig, std::rc::Rc<crate::check::MemberFacts>)> = Vec::new();
         let whole = self.arena.span_of(e);
         let mut checked = || -> R<()> {
             for (at, m) in members.iter().enumerate() {
@@ -446,10 +446,15 @@ impl Checker {
                 let skipped = std::mem::take(&mut self.dead_arms.last_mut().expect("pushed").now);
                 if self.record_types {
                     let inside = |x: fixpt_read::Span, o: &fixpt_read::Span| x.file == o.file && x.start >= o.start && x.end <= o.end;
+                    let here = |x: &ExpId| inside(self.arena.span_of(*x), &whole);
+                    let member = std::rc::Rc::new(crate::check::MemberFacts {
+                        types: self.facts.types.iter().filter(|(x, _)| here(x)).map(|(x, t)| (*x, *t)).collect(),
+                        insts: self.facts.insts.iter().filter(|(x, _)| here(x)).map(|(x, i)| (*x, i.clone())).collect(),
+                        value_insts: self.facts.value_insts.iter().filter(|(x, _)| here(x)).map(|(x, i)| (*x, i.clone())).collect(),
+                    });
                     for (l, sig) in &self.facts.lambdas {
-                        let at = self.arena.span_of(*l);
-                        if inside(at, &whole) {
-                            variants.push((*l, sig.clone()));
+                        if here(l) {
+                            variants.push((*l, sig.clone(), member.clone()));
                         }
                     }
                 }
@@ -499,8 +504,8 @@ impl Checker {
             }
         }
         self.facts.effects.extend(effects);
-        for (l, sig) in variants {
-            self.facts.lambda_variants.entry(l).or_default().push(sig);
+        for (l, sig, member) in variants {
+            self.facts.lambda_variants.entry(l).or_default().push((sig, member));
         }
         Ok(eff)
     }

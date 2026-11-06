@@ -185,6 +185,7 @@ fn weakened(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>,
                 if !verify(&mut c, m.heap(), &certs, w).verified() {
                     continue;
                 }
+                let effects: Vec<_> = certs.words[&raw].variants.iter().map(|v| v.effect.clone()).collect();
                 for a in latent.0.iter() {
                     let mut less = latent.clone();
                     less.0.remove(a);
@@ -193,7 +194,13 @@ fn weakened(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>,
                     if fixpt_fx26::ast::Effect(std::iter::once(*a).collect()).within(&less) {
                         continue;
                     }
-                    certs.words.get_mut(&raw).expect("there").effect = Some(less);
+                    // Of an `allof`'s word, each member's too, which is what
+                    // is verified (`Cert::variants`).
+                    let cert = certs.words.get_mut(&raw).expect("there");
+                    cert.effect = Some(less);
+                    for var in &mut cert.variants {
+                        var.effect.as_mut().map(|e| e.0.remove(a));
+                    }
                     made += 1;
                     if verify(&mut c, m.heap(), &certs, w).verified() {
                         let what = format!("{name}: {a:?} of {}", c.show_effect(&latent));
@@ -203,6 +210,9 @@ fn weakened(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>,
                         }
                         certs.words.get_mut(&raw).expect("there").masks = masks;
                         kept.push(what);
+                    }
+                    for (var, e) in certs.words.get_mut(&raw).expect("there").variants.iter_mut().zip(&effects) {
+                        var.effect = e.clone();
                     }
                 }
                 certs.words.get_mut(&raw).expect("there").effect = Some(latent);
@@ -362,27 +372,6 @@ fn every_directory_surveyed() {
 /// verifier wraps in another `poly` instead (`go`; a local's as well, and a
 /// global's since `TODO.md` §211, 5, let one be read there).
 const KNOWN_GAPS: &[&str] = &[
-    // An `allof`'s word, verified at each member's signature
-    // (`Cert::variants`), but with one set of type notes and operations,
-    // the last member's check's: where a member's types differ inside the
-    // body (a join's type, an instantiation, a `sum` made), its variant
-    // fails there. Notes per member would need the word's notes made once
-    // at each member's facts.
-    "allof/cond-dead.fx `swap@799`",
-    "allof/fresh-elsewhere.fx `mk`",
-    "allof/frozen-results.fx `mk/lambda@501`",
-    "allof/frozen-results.fx `mk`",
-    "allof/frozen-ring.fx `mk`",
-    "allof/product-nested.fx `lambda@325`",
-    "allof/swap.fx `swap@1194`",
-    "allof/typecase-dead.fx `swap@555`",
-    // `car` of an `anyof` of pairs, which the checkers take at the union's
-    // greatest pair member and the verifier does not.
-    "anyof/car-split.fx `first`",
-    // As the `allof` words above.
-    "anyof/split-call.fx `show`",
-    "anyof/swap-anyof.fx `swap-eop`",
-    "anyof/swap-anyof.fx `swap@1243`",
     "higher-kinds/poly-global-read.fx `go`",
     "native/raw-args.fx `given`",
     "redefine/knot-spin.fx `f`",

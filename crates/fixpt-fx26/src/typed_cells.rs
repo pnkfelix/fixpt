@@ -1976,6 +1976,23 @@ impl Verifier<'_> {
                         let f = if name == "pair-car" { "car" } else { "cdr" };
                         self.push_made(s, Some(if name == "pair-car" { a } else { b }), Some(Term::App(f, vec![p.term])));
                     }
+                    // A union of pairs, none above the others: member by
+                    // member (rule 5), the union of what each gives, as the
+                    // checkers take it.
+                    Some(Ty::Union(ms)) if ms.iter().all(|m| matches!(self.c.arena.get(self.c.arena.resolve(*m)), Ty::Pair(..))) => {
+                        let mut parts = Vec::new();
+                        for m in &ms {
+                            let Ty::Pair(a, b, r, nil) = *self.c.arena.get(self.c.arena.resolve(*m)) else { unreachable!("a pair") };
+                            if nil {
+                                self.out.debts.push(format!("{at}: (not (eq {:?} nil))", p.term));
+                            }
+                            self.reads(r);
+                            parts.push(if name == "pair-car" { a } else { b });
+                        }
+                        let ty = self.c.anyof_of(&parts, fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0)).ok();
+                        let f = if name == "pair-car" { "car" } else { "cdr" };
+                        self.push_made(s, ty, Some(Term::App(f, vec![p.term])));
+                    }
                     // `nil` itself: the machine's test fails, safely, as the
                     // program means (a debt sure to fail).
                     Some(Ty::Nil) => {
@@ -2146,7 +2163,15 @@ impl Verifier<'_> {
                             }
                         }
                         let latent = fits.iter().map(|(_, _, l)| l).find(|l| fits.iter().all(|(_, _, o)| l.within(o))).unwrap_or(&l0).clone();
-                        (ps0, result, latent)
+                        // Fitting whole, and by rule 5 too, of a result within
+                        // the whole's and an effect within its: the closer, as
+                        // the checkers take it where the whole's is not what
+                        // is expected (an `(anyof expr op)` swapped, an
+                        // `(anyof expr op)`, not an `sexp`).
+                        match self.allof_split(&ms, &args) {
+                            Some((ps, r, l)) if r != result && self.c.subtype(r, result) && l.within(&latent) => (ps, r, l),
+                            _ => (ps0, result, latent),
+                        }
                     }
                     Some(Ty::Poly { .. }) => {
                         self.out.stopped = Some("a call of a polymorphic value: no instantiation in the certificate yet".into());

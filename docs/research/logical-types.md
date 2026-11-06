@@ -950,11 +950,17 @@ inside it, is certified at each member's signature (`Cert::variants`, from
 must verify at each, and a closure of it is of the `allof` of those its
 free values fit (a lambda inside an `allof`'s body, made under one member,
 of that member's). A shape test a value's type cannot pass (or fail) makes
-its way unreachable (a `void` value), in any word. Left: a word's type
-notes and operations are the last member's check's, so where the
-members' types differ inside a body (a join's type, an instantiation, a
-`sum` made) the other members' variants fail there; and `car` of an
-`anyof` of pairs (`typed_cells.rs`'s known gaps).
+its way unreachable (a `void` value), in any word. Each variant's type
+notes and operations are made of its own member's check (2026-11-06):
+each member's check records what it found inside the body, each
+expression's type and instantiations (`check::MemberFacts`), and the
+compiler, which knows which fact each note and operation was made of
+(`Compiler::fact_of`), makes them again of that member's (a join's type,
+an instantiation, a `sum` made, at each member its own). A call that
+fits an `allof` whole, and by rule 5 too at a result within the whole's,
+has the closer, as the checkers take it where the whole's is not what
+is expected; and `car` of an `anyof` of pairs is the `anyof` of their
+parts. No `allof` or `anyof` word is a known gap now.
 
 **Arguments at an `allof` call (2026-11-05).** A `lambda` with a
 parameter of no type has no type of its own: it fits a member whose
