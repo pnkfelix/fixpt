@@ -227,7 +227,7 @@
           (k-cat5 "`" n "` is broken, " (car why) ": define it again to use it")))))
 ;; Whether `at` is the identity `a`, `b`, `k`.
 (define k-at-is? (->* (k-at int int int) bool)
-  (lambda (at a b k) (and (= (extract at 1) a) (= (extract at 2) b) (= (extract at 3) k))))
+  (lambda (at a b k) (= (extract at 3) k)))
 (define k-no-operator k-op-mark (product (1 '||) (2 (product (1 -1) (2 -1) (3 -1)))))
 (define k-operator (ref k-op-mark @t) (new k-no-operator))
 ;; The standard operations a rule checks at each call, by their name there:

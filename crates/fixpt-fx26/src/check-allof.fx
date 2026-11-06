@@ -189,9 +189,7 @@
              (4 skipped))))
 
 (define k-at=? (->* (k-at k-at) bool)
-  (lambda (x y)
-    (and (= (extract x 1) (extract y 1)) (= (extract x 2) (extract y 2))
-         (= (extract x 3) (extract y 3)))))
+  (lambda (x y) (= (extract x 3) (extract y 3))))
 ;; Whether `at` is in one of `spans`, each the numbers of what is in one
 ;; skipped (`k-last-kth`): by the trees' structure, not where it is written.
 (define k-skipped? (->* (k-at k-spans) bool)

@@ -62,6 +62,7 @@
 ;; What the checker found, by expression (`compile-facts.fx`): all it
 ;; defines, given on.
 (import compile-facts c-facts c-int-hash c-int=? c-span-key c-at-hash c-at-is? c-at=? c-noted-in
+        c-absolute-at c-reading
         c-noted-at c-noted-of c-note! c-new-by-at c-fact-table c-lifts c-lift-count c-lifted
         c-lifting-added c-summary-table c-convert-table c-conversion-at c-staged-texts c-staged-at
         c-staged-find c-shares-table c-frozen-table c-plain-table c-plain-fx-at c-frozen-define-at
@@ -313,11 +314,11 @@
           (begin
             (tagcase (extract (car fs) 2)
               (n-datum (d)
-                (let ((a (extract at 1)))
-                  (table-set! (get c-fact-table) a
+                (let ((k (extract at 3)))
+                  (table-set! (get c-fact-table) k
                               (the (listof c-datum-noted acyclic)
                                 (cons (product (1 at) (2 d))
-                                      (table-ref (get c-fact-table) a nil))))))
+                                      (table-ref (get c-fact-table) k nil))))))
               (n-apply-shares () (c-note! (get c-shares-table) at 0))
               (n-frozen-define () (c-note! (get c-frozen-table) at 0))
               (n-plain-fx () (c-note! (get c-plain-table) at 0))
@@ -326,11 +327,11 @@
                 (set c-staged-texts
                      (cons (product (1 at) (2 fr) (3 ns) (4 rp)) (get c-staged-texts))))
               (n-call (cv)
-                (let ((a (extract at 1)))
-                  (table-set! (get c-call-table) a
+                (let ((k (extract at 3)))
+                  (table-set! (get c-call-table) k
                               (the (listof c-conv-noted acyclic)
                                 (cons (product (1 at) (2 cv))
-                                      (table-ref (get c-call-table) a nil))))))
+                                      (table-ref (get c-call-table) k nil))))))
               ;; The greatest summary, per expression.
               (n-summary (s)
                 (let ((known (c-noted-at (get c-summary-table) (extract at 1) (extract at 2)
@@ -343,11 +344,28 @@
 (define c-summary-at (->* (int int int) int)
   (lambda (a b k) (let ((s (c-noted-at (get c-summary-table) a b k -1))) (if (< s 0) 3 s))))
 
-;; `c-facts` into `c-fact-table`.
-(define c-set-facts! (->* (k-facts) unit)
+;; Facts `fs` with their numbers the reading's (`c-absolute-at`).
+(define c-absolute-facts (->* (k-facts) k-facts)
   (lambda (fs)
+    (letrec ((onto (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                         (k-facts k-facts)
+                         k-facts)
+               (lambda (xs out)
+                 (if (null? xs)
+                     out
+                     (onto (cdr xs)
+                           (cons (product (1 (c-absolute-at (extract (car xs) 1)))
+                                          (2 (extract (car xs) 2)))
+                                 out))))))
+      ;; Twice, so that they are in the order given.
+      (onto (onto fs nil) nil))))
+;; `c-facts` into `c-fact-table`, their numbers reading `r`'s, if they are
+;; numbered within it (0: they are the reading's already).
+(define c-set-facts! (->* (k-facts int) unit)
+  (lambda (fs r)
     (begin
-      (set c-facts fs)
+      (set c-reading r)
+      (set c-facts (c-absolute-facts fs))
       (set c-fact-table (make-table c-int-hash c-int=?))
       (set c-call-table (make-table c-int-hash c-int=?))
       (set c-convert-table (c-new-by-at))
@@ -367,7 +385,7 @@
       (set c-included-index (make-table c-int-hash c-int=?))
       (set c-reshape-index (make-table c-int-hash c-int=?))
       (c-index-reshapes! (get k-reshapes))
-      (c-fill-facts fs))))
+      (c-fill-facts (get c-facts)))))
 
 (define c-member? (->* (syms symbol) bool)
   (lambda (xs n) (and (not (null? xs)) (or (symbol=? (car xs) n) (c-member? (cdr xs) n)))))
@@ -418,7 +436,7 @@
 ;; Rust compiler's `included_withs`.
 (define c-included-index (ref c-with-table @k) (new (make-table c-int-hash c-int=?)))
 (define c-included? (->* (int int int) bool)
-  (lambda (a b k) (not (null? (c-with-in (table-ref (get c-included-index) a nil) a b k)))))
+  (lambda (a b k) (not (null? (c-with-in (table-ref (get c-included-index) k nil) a b k)))))
 ;; Item value `x`'s `(with %include …)` (`with_includes`), in a list of one.
 ;; A parameter of its lambda shadows the included names, and the `with`
 ;; binds none of its (`k-include-free`).
@@ -505,12 +523,13 @@
             (e-with (m body a b abk)
               (if (c-included? a b abk)
                   #u
-                  (let ((at (c-with-in (table-ref (get c-with-index) a nil) a b abk)))
+                  (let ((at (c-with-in (table-ref (get c-with-index) abk nil) a b abk)))
                     (if (null? at)
                         #u
-                        (table-set! (get c-included-index) a
+                        (table-set! (get c-included-index) abk
                                     (the k-with-list
-                                      (cons (car at) (table-ref (get c-included-index) a nil))))))))
+                                      (cons (car at)
+                                            (table-ref (get c-included-index) abk nil))))))))
             (else y #u))
           (c-note-withs! (cdr ws))))))
 ;; `c-included-names`, its `with`s noted as binding nothing.

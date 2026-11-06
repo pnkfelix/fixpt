@@ -776,7 +776,7 @@
 ;; Whether `a` and `b` are the same expression: their identities.
 (define r-same-exp? (->* (exp exp) bool)
   (lambda (a b)
-    (and (= (exp-start a) (exp-start b)) (= (exp-end a) (exp-end b)) (= (exp-kth a) (exp-kth b)))))
+    (= (exp-kth a) (exp-kth b))))
 ;;; ---------------------------------------------------------------- lists
 
 (define r-count-args (->* (rargs) int)

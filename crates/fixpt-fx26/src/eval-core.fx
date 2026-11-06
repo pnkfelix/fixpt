@@ -211,7 +211,7 @@
 
 ;; Whether `at` is the expression `a` `b` `k` (`k-at`).
 (define ev-at-is? (->* (k-at int int int) bool)
-  (lambda (at a b k) (and (= (extract at 1) a) (= (extract at 2) b) (= (extract at 3) k))))
+  (lambda (at a b k) (= (extract at 3) k)))
 
 (define ev-reshape-in (->* (k-reshape-list int int int) ev-at)
   (lambda (rs a b k)

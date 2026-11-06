@@ -371,3 +371,22 @@ both front ends.
   in both front ends and the bridge; places no longer in a key); then `S`
   and `F`; then `Z`; then `validate`, in the Rust checker and in the one
   written in FX-26, and a test of every program under it.
+- **Stage 1 done, `path`** (2026-11-06): `k` is `r·2³² + n`, `r` the
+  reading (each `number-tops` one, counted by `parser-ids.fx`'s
+  `readings`), `n` the walk's number in it. Identity compares `k` alone
+  (`k-at-is?`, `k-at=?`, `ev-at-is?`, `r-same-exp?`), and the compiler's
+  tables are by `k`, not by where an expression starts. The checker
+  written in Rust numbers within the reading (`Kth`, `r` = 0), since it
+  checks before the FX-26 parser reads the text; the compiler gives its
+  facts the reading of the trees it compiles (`c-set-facts!`'s reading,
+  `c-reading-of`; `c-absolute-at`), the checker written in FX-26's
+  being the reading's already. A copy kept to be inlined, from an
+  earlier reading, keeps that reading's numbers: its lookups miss, as
+  they must.
+- **For stage 2**: `S` must be one value on both sides for the Rust
+  checker's facts to be found. The two front ends do not read the same
+  texts (the FX-26 one reads forms printed, some more than once, and has
+  pipelines of its own), so `S` is given per reading by the Rust session,
+  as a place's base is, a digest of the forms committed before; within a
+  reading both extend it alike from the trees. Pipelines in FX-26 alone
+  keep a chain of their own.

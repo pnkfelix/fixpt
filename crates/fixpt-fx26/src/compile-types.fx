@@ -186,7 +186,7 @@
                        c-found))
             (val c-set-facts!
                  (subr (maxeff (alloc @k) (read @globals) spin (read @k) (read @t) (write @k))
-                       (k-facts)
+                       (k-facts int)
                        unit))
             (val c-lambda-of
                  (subr (maxeff (alloc @k) (read @globals) spin) (exp) (listof exp @k)))

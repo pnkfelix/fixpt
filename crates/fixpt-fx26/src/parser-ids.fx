@@ -18,8 +18,14 @@
         e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-define-rec t-exp
         (type exp top exp-list let-list letrec-list arm-list mod-items top-list))
 
-;; How many expressions have been walked.
+;; How many expressions have been walked, from the reading's first.
 (define-type seen (ref int rs))
+;; The readings so far: each `number-tops` is one, its expressions numbered
+;; from the reading's number times `reading-span`, so that an expression's
+;; number tells it from every other's of the session, a reading's from
+;; another's (`docs/research/loads-and-places.md`, "Decided: three keys").
+(define reading-span int 4294967296)
+(define readings (ref int rs) (new 0))
 (define-effect counts (maxeff (read @globals) spin (read rs) (write rs) (alloc rs)))
 
 ;; The next expression's number, the one walked next (at `a`..`b`, which
@@ -168,4 +174,5 @@
 ;; A program's forms, each expression in them numbered, the forms in order.
 (define number-tops (->* (top-list) top-list)
   (lambda (ts)
-    (number-each (the seen (new 0)) ts)))
+    (let ((r (+ (get readings) 1)))
+      (begin (set readings r) (number-each (the seen (new (* r reading-span))) ts)))))

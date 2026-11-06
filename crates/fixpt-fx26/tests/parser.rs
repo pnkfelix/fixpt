@@ -58,12 +58,15 @@ fn without_file_marks(tree: &str) -> String {
 }
 
 /// `tree` with each place in a loaded file, `k·10⁹ + i`, as `i`: the Rust
-/// parser's spans keep the file apart, and show the place in it alone.
+/// parser's spans keep the file apart, and show the place in it alone; and
+/// each expression's number, `r·2³² + n` in reading `r`, as `n`, as the
+/// Rust front end numbers them, within the reading (`parser-ids.fx`).
 fn within_files(tree: &str) -> String {
     let mut out = String::new();
     let mut digits = String::new();
     let flush = |digits: &mut String, out: &mut String| {
         match digits.parse::<u64>() {
+            Ok(n) if n >= 1 << 32 => out.push_str(&(n % (1 << 32)).to_string()),
             Ok(n) if n >= 1_000_000_000 => out.push_str(&(n % 1_000_000_000).to_string()),
             _ => out.push_str(digits),
         }
@@ -227,7 +230,7 @@ fn a_variant_named_by_a_type_form_is_refused() {
 fn a_tree_as_text() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let text = "(let* ((a #t)) (and a #f))";
-    let ours = s.parse_with_own_parser(text).expect("parses");
+    let ours: Vec<String> = s.parse_with_own_parser(text).expect("parses").iter().map(|t| within_files(t)).collect();
     assert_eq!(
         ours,
         ["(t-exp (e-let ([a (e-bool #t 10 12 1)]) (e-if (e-var a 20 21 3) (e-bool #f 22 24 4) (e-bool #f 15 25 5) 15 25 2) 7 13 0))"]
