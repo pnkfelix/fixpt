@@ -2355,7 +2355,6 @@ prims! {
         let (x, y) = (get_string(rt, a[0])?, get_string(rt, a[1])?);
         Ok(Value::boolean(x.to_lowercase() == y.to_lowercase()))
     });
-    "%fx26-string-copy", 1, Some(1), simple!(|rt, a| { let s = get_string(rt, a[0])?; Ok(rt.heap.make_string(&s)) });
     // A list copied; a cyclic one is an error (`list_to_vec` stops on a
     // cycle). Also `apply`'s, whose variadic procedure's rest list must be
     // fresh, as Scheme's is (R7RS 4.1.4, "newly allocated"): FX-26 types it

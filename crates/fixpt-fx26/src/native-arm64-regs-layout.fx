@@ -100,14 +100,14 @@
       ((401) "%fx26-box?")
       ((402) "%fx26-sum?")
       ((403) "%fx26-product?")
-      ((433) "%make-frozen")
-      ((446) "%bloblet-fields")
-      ((449) "%bloblet-set!")
-      ((476) "%make-box")
-      ((499) "%region-cons")
-      ((500) "%region-new")
-      ((504) "%region-closure")
-      ((507) "%symbol-hash")
+      ((432) "%make-frozen")
+      ((445) "%bloblet-fields")
+      ((448) "%bloblet-set!")
+      ((475) "%make-box")
+      ((498) "%region-cons")
+      ((499) "%region-new")
+      ((503) "%region-closure")
+      ((506) "%symbol-hash")
       (else ""))))
 
 ;; The number of the runtime primitive register code names `name`.
@@ -116,12 +116,12 @@
     (case name
       (("string-length") 69)
       (("string-ref") 70)
-      (("%region-cons") 499)
-      (("%bloblet-fields") 446)
-      (("%bloblet-set!") 449)
+      (("%region-cons") 498)
+      (("%bloblet-fields") 445)
+      (("%bloblet-set!") 448)
       (("char-whitespace?") 66)
       (("char-numeric?") 65)
-      (("%symbol-hash") 507)
+      (("%symbol-hash") 506)
       (("%fx26-fixnum?") 395)
       (("char?") 9)
       (("boolean?") 6)
@@ -143,10 +143,10 @@
       (("%fx26-char-in?") 166)
       (("string=?") 78)
       (("modulo") 34)
-      (("%make-box") 476)
-      (("%region-new") 500)
-      (("%region-closure") 504)
-      (("%make-frozen") 433)
+      (("%make-box") 475)
+      (("%region-new") 499)
+      (("%region-closure") 503)
+      (("%make-frozen") 432)
       (("%make-bloblet") 164)
       (("%fx26-quotient") 371)
       (("%fx26-mul") 370)
@@ -372,23 +372,23 @@
       ((402) #t)  ; %fx26-sum?
       ((403) #t)  ; %fx26-product?
       ((408) #t)  ; %fx26-adapted
-      ((432) #t)  ; %string-hash
-      ((446) #t)  ; %bloblet-fields
-      ((454) #t)  ; %suffix-ref
-      ((455) #t)  ; %fx26-suffix-fits
-      ((457) #t)  ; %suffix-ref+
-      ((458) #t)  ; %suffix-ref-owner
-      ((459) #t)  ; %suffix-ref-offset
-      ((464) #t)  ; %fx26-suffix-ref-length
-      ((465) #t)  ; %fx26-suffix-ref-get
-      ((467) #t)  ; %fx26-blobref-index
-      ((468) #t)  ; %fx26-suffix-ref-set!
-      ((469) #t)  ; %fx26-flat-tag
-      ((470) #t)  ; %fx26-flat-variant!
-      ((471) #t)  ; %fx26-flat-no-arm
-      ((507) #t)  ; %symbol-hash
-      ((523) #t)  ; %fx26-keyword->symbol
-      ((524) #t)  ; %fx26-keyword?
+      ((431) #t)  ; %string-hash
+      ((445) #t)  ; %bloblet-fields
+      ((453) #t)  ; %suffix-ref
+      ((454) #t)  ; %fx26-suffix-fits
+      ((456) #t)  ; %suffix-ref+
+      ((457) #t)  ; %suffix-ref-owner
+      ((458) #t)  ; %suffix-ref-offset
+      ((463) #t)  ; %fx26-suffix-ref-length
+      ((464) #t)  ; %fx26-suffix-ref-get
+      ((466) #t)  ; %fx26-blobref-index
+      ((467) #t)  ; %fx26-suffix-ref-set!
+      ((468) #t)  ; %fx26-flat-tag
+      ((469) #t)  ; %fx26-flat-variant!
+      ((470) #t)  ; %fx26-flat-no-arm
+      ((506) #t)  ; %symbol-hash
+      ((522) #t)  ; %fx26-keyword->symbol
+      ((523) #t)  ; %fx26-keyword?
       (else #f))))
 
 ;; The `i`th kind shape test `name` takes a bloblet of (`shape_test`), or -1.
