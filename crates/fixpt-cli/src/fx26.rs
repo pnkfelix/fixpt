@@ -45,6 +45,25 @@ fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
     out
 }
 
+/// `e`, an error in what the REPL read, said where it is in the session's
+/// text (`Fx26Session::place`: which entry, its line and column), then at
+/// each use of a macro that made its text, innermost first. One in a file
+/// loaded, as [`located`] says it.
+fn located_in(session: &Fx26Session, name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
+    if e.span.file != FileId(0) {
+        return located(name, text, e);
+    }
+    let at = |s: fixpt_read::Span| {
+        let (n, line, col) = session.place(s);
+        format!("{n}:{line}:{col}")
+    };
+    let mut out = format!("{}: {}", at(e.span), e.message);
+    for use_ in fixpt_read::expansion_trace(e.span) {
+        out.push_str(&format!("\n  in the expansion of `{}` at {}", use_.name, at(use_.at)));
+    }
+    out
+}
+
 /// Where `span` is: in `text`, named `name`; or, of text a macro's template
 /// made, in the text its definition was read from, if that is another (an
 /// earlier REPL entry's), named for the macro.
@@ -560,10 +579,10 @@ pub fn repl(backend: Backend) -> i32 {
             Some((file, line, col)) => (file, format!("{}{}{text}", "\n".repeat(line - 1), " ".repeat(col - 1))),
             None => (format!("<fx26:{n}>"), text),
         };
-        let forms = match session.checker.read_in(FileId(0), &text) {
+        let forms = match session.read_entry(&name, &text) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("read error: {}", located(&name, &text, &e));
+                eprintln!("read error: {}", located_in(&session, &name, &text, &e));
                 continue;
             }
         };
@@ -600,12 +619,15 @@ pub fn repl(backend: Backend) -> i32 {
                 GcStats::end_form(&mut session, &b);
             }
             if ran.is_ok() {
-                let (start, end) = (form.span.start as usize, form.span.end as usize);
-                program += &text[start..end];
+                program += session.session_text_at(form.span);
                 program.push('\n');
-                // What comes before it blank, so that its places are its own.
+                // What comes before it in its entry blank, so that its places
+                // are its own there.
+                let entry = session.entry_start(form.span);
+                let start = (form.span.start as usize - entry).min(text.len());
                 let before: String = text[..start].chars().map(|c| if c == '\n' { c } else { ' ' }).collect();
-                sources.push(fixpt_fx26::query::Source { name: name.clone(), text: before + &text[start..end], base: session.checker.base_dir.clone() });
+                let own = before + session.session_text_at(form.span);
+                sources.push(fixpt_fx26::query::Source { name: name.clone(), text: own, base: session.checker.base_dir.clone() });
             }
             match ran {
                 // A top-level `include`'s forms, each shown.
@@ -618,7 +640,7 @@ pub fn repl(backend: Backend) -> i32 {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{}", located(&name, &text, &e));
+                    eprintln!("{}", located_in(&session, &name, &text, &e));
                     if let Some(note) = pending_note(&mut session, &e.message) {
                         eprintln!("{note}");
                     }
@@ -656,13 +678,13 @@ fn complete_pending(session: &mut Fx26Session, forms: &[Syntax], names: &[String
             for o in outs {
                 match o {
                     Ok(out) => show(session, &out, show_code),
-                    Err(e) => eprintln!("{}", located(name, text, &e)),
+                    Err(e) => eprintln!("{}", located_in(session, name, text, &e)),
                 }
             }
             let names: Vec<String> = names.iter().map(|n| format!("`{n}`")).collect();
             println!("; no longer pending: {}", names.join(", "));
         }
-        Err(e) => eprintln!("{}", located(name, text, &e)),
+        Err(e) => eprintln!("{}", located_in(session, name, text, &e)),
     }
 }
 
@@ -1766,8 +1788,8 @@ fn speculative_notes_now(session: &mut Fx26Session, text: &str, p: &crate::specu
 }
 
 fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::speculate::Partial) -> Vec<Note> {
-    let c = &mut session.checker;
-    let Ok(forms) = c.read_in(FileId(0), &p.closed) else { return Vec::new() };
+    // Read as the next entry would be, its places past the session's text.
+    let Ok((forms, base)) = session.read_trial(&p.closed) else { return Vec::new() };
     // A finished entry of types that names types not defined yet would wait,
     // or complete what is waiting: said before what checking it alone finds.
     if p.finished(text) {
@@ -1786,9 +1808,11 @@ fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::spec
     // Each form is tried in the environment the ones before it would make,
     // and all of it is forgotten afterwards.
     let error = try_all(c, &forms, &mut |e| {
-        let (start, end) = (e.span.start as usize, e.span.end as usize);
-        (p.finished(text) || p.believe(start, end)).then(|| Note {
-            span: char_span(text, start, end),
+        // In what is typed, or (of a macro's template, typed before) not.
+        let typed = e.span.start as usize >= base && e.span.file == FileId(0);
+        let (start, end) = (e.span.start as usize - if typed { base } else { 0 }, e.span.end as usize - if typed { base } else { 0 });
+        (p.finished(text) || (typed && p.believe(start, end))).then(|| Note {
+            span: if typed { char_span(text, start, end) } else { None },
             message: e.message.clone(),
             error: true,
         })

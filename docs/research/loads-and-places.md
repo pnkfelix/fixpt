@@ -321,3 +321,13 @@ roles are split.
   in its text either way. A copy is made only where a macro places an
   argument twice, which waits for `(many σ)`; that both checkers then
   agree is for it to show.
+- **A REPL session is one text** (2026-11-06, the user's choice over a
+  file number per entry): every entry is read into the session's text,
+  past those before (`Fx26Session::read_entry`; `Checker::read_in_from`
+  reads from where the entry starts), so a span of anything an entry read
+  says which entry it is in (`Fx26Session::place`): a template's, in the
+  entry that defined its macro; a pending entry's, in its own. `FileId(0)`
+  keeps its meaning, the program, which at the REPL is the session's text,
+  as the evaluator's positions are past every text before (`eval_base`).
+  What is typed and not yet entered is read past it too, and kept nowhere
+  (`read_trial`).

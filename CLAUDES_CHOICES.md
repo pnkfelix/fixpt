@@ -3986,3 +3986,16 @@ The user read the paper as supporting the distribution. Mine:
   goes up a chain of macros, and none hides a duplication by placing an
   argument once into one that duplicates it.
 
+## The REPL's session text (2026-11-06)
+
+- **One text, not a file number per entry** (the user agreed): 111 places
+  take `FileId(0)` for the text being compiled; the session's text keeps
+  that true, and matches the evaluator's positions past every text before.
+- **Read by seeking**, not by a base in the reader: `Reader::seek` to where
+  the entry starts in the session's text, so spans are its places.
+- **A trial read copies the session's text** to read past it, keeping
+  nothing: the REPL's reading as one types, which is short.
+- **`,query`'s sources stay each entry's own**: it reads them again with
+  its own checker, so their places need only be their entry's.
+- **An error in a file loaded** is said as before (`located`), by the file.
+

@@ -548,8 +548,17 @@ impl Checker {
     /// Read `text` in FX-26's lexical syntax (`SyntaxProfile::FX26`),
     /// recording spans against `file`.
     pub fn read_in(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
+        self.read_in_from(file, text, 0)
+    }
+
+    /// The forms of `text` from byte `start` on, their places in all of
+    /// `text`: a REPL's entry, in the session's text
+    /// (`Fx26Session::read_entry`).
+    pub fn read_in_from(&mut self, file: FileId, text: &str, start: usize) -> R<Vec<Syntax>> {
         let mut interner = std::mem::take(&mut self.interner);
-        let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
+        let mut reader = Reader::new(text, file, SyntaxProfile::FX26, &mut interner);
+        reader.seek(start);
+        let r = reader.read_all();
         self.interner = interner;
         let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
         // The text, for the macros defined in it (their templates' places).

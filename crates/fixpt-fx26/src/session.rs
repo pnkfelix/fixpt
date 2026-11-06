@@ -115,6 +115,13 @@ pub struct Fx26Session {
     /// Under `Evaluate`, where the next form's positions begin: past every
     /// text the evaluator was given before (`eval_form`).
     eval_base: i64,
+    /// What a REPL has read, every entry in order, and where each starts in
+    /// it, with its name (`<fx26:3>`, or a file's, sent with `,at`): a span
+    /// of what an entry read is a place in it, whichever entry it is
+    /// (`read_entry`, `place`), as the evaluator's positions are past every
+    /// text before (`eval_base`).
+    session_text: String,
+    entries: Vec<(usize, String)>,
     /// How many steps a form may take when run, or no limit: see
     /// [`set_step_limit`](Fx26Session::set_step_limit).
     step_limit: Option<u64>,
@@ -1042,6 +1049,8 @@ impl Fx26Session {
             words_shown: Default::default(),
             standard26: None,
             eval_base: 0,
+            session_text: String::new(),
+            entries: Vec::new(),
             step_limit: Some(DEFAULT_STEP_LIMIT),
             speculation_limit: Some(SPECULATION_STEP_LIMIT),
             pending: Vec::new(),
@@ -3921,6 +3930,48 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             }
         }
         Ok(last)
+    }
+
+    /// A REPL's entry `text`, named `name`, read as the session's next: its
+    /// forms' places are in the session's text, past every entry before.
+    pub fn read_entry(&mut self, name: &str, text: &str) -> R<Vec<Syntax>> {
+        let start = self.session_text.len();
+        self.session_text.push_str(text);
+        self.session_text.push('\n');
+        self.entries.push((start, name.to_string()));
+        self.checker.read_in_from(FileId(0), &self.session_text, start)
+    }
+
+    /// `text` read as the next entry would be, the session left as it was
+    /// (the REPL's reading as one types): its forms, and where it starts.
+    pub fn read_trial(&mut self, text: &str) -> R<(Vec<Syntax>, usize)> {
+        let start = self.session_text.len();
+        let whole = format!("{}{text}", self.session_text);
+        Ok((self.checker.read_in_from(FileId(0), &whole, start)?, start))
+    }
+
+    /// Where `span`, of what an entry read, is: the entry's name, and the
+    /// line and column there, each from 1.
+    pub fn place(&self, span: fixpt_read::Span) -> (String, usize, usize) {
+        let at = (span.start as usize).min(self.session_text.len());
+        let k = self.entries.partition_point(|(s, _)| *s <= at).max(1) - 1;
+        let Some((start, name)) = self.entries.get(k) else { return (String::from("<fx26>"), 1, 1) };
+        let before = &self.session_text[*start..at];
+        let line = before.matches('\n').count() + 1;
+        let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+        (name.clone(), line, col)
+    }
+
+    /// The text of `span`, of what an entry read.
+    pub fn session_text_at(&self, span: fixpt_read::Span) -> &str {
+        let n = self.session_text.len();
+        &self.session_text[(span.start as usize).min(n)..(span.end as usize).min(n)]
+    }
+
+    /// Where the entry that `span` is in starts in the session's text.
+    pub fn entry_start(&self, span: fixpt_read::Span) -> usize {
+        let k = self.entries.partition_point(|(s, _)| *s <= span.start as usize).max(1) - 1;
+        self.entries.get(k).map_or(0, |(s, _)| *s)
     }
 
     /// Run a whole program, and the value of its last expression. Its
