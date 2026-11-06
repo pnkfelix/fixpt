@@ -68,6 +68,84 @@ pub const TYPE_FORMS: &[&str] = &[
     "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "tupleof", "bool", "oneof", "union", "anyof", "allof", "->", "->*", "restrict",
 ];
 
+impl Checker {
+    /// The `allof` of `members`, each a `subr` or a product (`allof`s among
+    /// them already flattened): of `subr`s of one convention, the `allof`;
+    /// of products of the same labels in order, the product whose field is
+    /// what every member's is, where they are the same, and their `allof`
+    /// where not, so that only procedures differ (`logical-types.md` §8.5:
+    /// the intersection distributes over products).
+    pub(crate) fn allof_of(&mut self, members: &[TyId], span: fixpt_read::Span) -> R<TyId> {
+        let products: Vec<Vec<(Sym, TyId)>> = members
+            .iter()
+            .filter_map(|m| match self.arena.get(self.arena.resolve(*m)) {
+                Ty::Product(fs) => Some(fs.clone()),
+                _ => None,
+            })
+            .collect();
+        if products.is_empty() {
+            let conv = |c: &Self, m: TyId| match c.arena.get(m) {
+                Ty::Subr { conv, .. } => *conv,
+                _ => unreachable!("a subr"),
+            };
+            if let Some(m) = members.iter().find(|m| conv(self, **m) != conv(self, members[0])) {
+                return Err(FxError::at(
+                    span,
+                    format!("an `allof`'s members have one convention: a {} and a {} do not", self.show_ty(members[0]), self.show_ty(*m)),
+                ));
+            }
+            return Ok(self.arena.ty(Ty::AllOf(members.to_vec())));
+        }
+        let first = products[0].clone();
+        // The first member that is not a product of the first's labels.
+        let unlike = members.iter().copied().find(|m| match self.arena.get(self.arena.resolve(*m)) {
+            Ty::Product(fs) => fs.len() != first.len() || fs.iter().zip(&first).any(|((l, _), (k, _))| l != k),
+            _ => true,
+        });
+        if let Some(other) = unlike {
+            let p0 = members.iter().copied().find(|m| matches!(self.arena.get(self.arena.resolve(*m)), Ty::Product(_))).expect("a product");
+            return Err(FxError::at(
+                span,
+                format!(
+                    "an `allof` of products: its members are products of the same labels, in order, and a {} and a {} are not",
+                    self.show_ty(p0),
+                    self.show_ty(other)
+                ),
+            ));
+        }
+        let mut fields = Vec::new();
+        for (i, (l, t0)) in first.iter().enumerate() {
+            let at: Vec<TyId> = products.iter().map(|fs| fs[i].1).collect();
+            if at.iter().all(|t| self.same_ty(*t0, *t, &mut Vec::new())) {
+                fields.push((*l, *t0));
+                continue;
+            }
+            let mut flat = Vec::new();
+            for t in &at {
+                let t = self.arena.resolve(*t);
+                match self.arena.get(t).clone() {
+                    Ty::AllOf(ms) => flat.extend(ms),
+                    Ty::Subr { .. } | Ty::Product(_) => flat.push(t),
+                    _ => {
+                        let other = at.iter().copied().find(|u| !self.same_ty(*t0, *u, &mut Vec::new())).unwrap_or(t);
+                        return Err(FxError::at(
+                            span,
+                            format!(
+                                "an `allof`'s members differ at `{}`, a {} and a {}: only procedures, and products of them, may",
+                                self.interner.name(*l),
+                                self.show_ty(*t0),
+                                self.show_ty(other)
+                            ),
+                        ));
+                    }
+                }
+            }
+            fields.push((*l, self.allof_of(&flat, span)?));
+        }
+        Ok(self.arena.ty(Ty::Product(fields)))
+    }
+}
+
 /// Why a `define-datatype` variant may not be named `form`, a type form,
 /// in the datatype `name` (`TODO.md` §190).
 pub(crate) fn variant_type_form(form: &str, name: &str) -> String {
@@ -820,7 +898,8 @@ impl Checker {
                 self.anyof_of(&members, s.span)
             }
             // One procedure with each member's type (`logical-types.md`
-            // §8.5, U1): monomorphic `subr` types of one convention.
+            // §8.5, U1): monomorphic `subr` types of one convention; or
+            // products of them, distributed field by field.
             "allof" => {
                 if items.len() < 3 {
                     return Err(FxError::at(s.span, "`(allof (subr …) (subr …) …)`"));
@@ -831,26 +910,16 @@ impl Checker {
                     let t = self.arena.resolve(t);
                     match self.arena.get(t).clone() {
                         Ty::AllOf(ms) => members.extend(ms),
-                        Ty::Subr { .. } => members.push(t),
+                        Ty::Subr { .. } | Ty::Product(_) => members.push(t),
                         _ => {
                             return Err(FxError::at(
                                 m.span,
-                                format!("a member of an `allof` is a `subr` type, and this is a {}", self.show_ty(t)),
+                                format!("a member of an `allof` is a `subr` type, or a product of them, and this is a {}", self.show_ty(t)),
                             ));
                         }
                     }
                 }
-                let conv = |c: &Self, m: TyId| match c.arena.get(m) {
-                    Ty::Subr { conv, .. } => *conv,
-                    _ => unreachable!("a subr"),
-                };
-                if let Some(m) = members.iter().find(|m| conv(self, **m) != conv(self, members[0])) {
-                    return Err(FxError::at(
-                        s.span,
-                        format!("an `allof`'s members have one convention: a {} and a {} do not", self.show_ty(members[0]), self.show_ty(*m)),
-                    ));
-                }
-                Ok(self.arena.ty(Ty::AllOf(members)))
+                self.allof_of(&members, s.span)
             }
             "dletrec" => self.parse_dletrec(s, &items),
             // `(mu name type)`: a recursive type, anonymous; the same as

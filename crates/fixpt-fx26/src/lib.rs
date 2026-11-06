@@ -384,6 +384,10 @@ pub const CHECK_READ_DESCS: &str = include_str!("check-read-descs.fx");
 /// [`CHECK_READ_DESCS`] of the modules it is given (`TODO.md` §188).
 pub const CHECK_READ_AHEAD: &str = include_str!("check-read-ahead.fx");
 
+/// `check-read-allof.fx`: an `allof` made of its members, made by
+/// [`CHECK_READ_DESCS`] of the modules it is given (`TODO.md` §188).
+pub const CHECK_READ_ALLOF: &str = include_str!("check-read-allof.fx");
+
 /// `check-read-helpers.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_READ_HELPERS: &str = include_str!("check-read-helpers.fx");
 
@@ -744,7 +748,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 201] = [
+pub const FRONT_END_MODULES: [(&str, &str); 202] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -928,6 +932,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 201] = [
     ("check-flat.fx", CHECK_FLAT),
     ("check-read-descs.fx", CHECK_READ_DESCS),
     ("check-read-ahead.fx", CHECK_READ_AHEAD),
+    ("check-read-allof.fx", CHECK_READ_ALLOF),
     ("check-read-helpers.fx", CHECK_READ_HELPERS),
     ("check-proving.fx", CHECK_PROVING),
     ("check-logic.fx", CHECK_LOGIC),

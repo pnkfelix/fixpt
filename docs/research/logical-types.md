@@ -943,6 +943,16 @@ first's; recursion ends if it does at each member's types. Not yet:
 the verifier of typed cellular code knows no `allof` (`typed_cells.rs`'s
 known gaps).
 
+**Over products (2026-11-05, the user's reading of the paper).** An
+`allof` of products of the same labels, in order, is the product whose
+field is what every member's is, where they are the same (by structure,
+`same_ty`, `k-same-type?`), and the `allof` of the members' fields where
+they differ: in procedure types, or products of them, distributed in turn.
+A field that differs otherwise has no meet written (two cells of different
+types, F18's reason, among them) and is refused, naming the field; so is a
+product among `subr` members. Both checkers (`Checker::allof_of`;
+`k-allof-of`, `check-read-allof.fx`). Tests: `allof/product*.fx`.
+
 **Termination per member (2026-11-05).** Each binding of a recursive
 group is a node at each member of its `allof` (one at its type for a
 binding of no `allof`), its body walked at that member's parameter types,

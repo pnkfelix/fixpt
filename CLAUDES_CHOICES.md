@@ -3858,3 +3858,21 @@ Mine:
   the group then does not end at any member.
 - FX-26's `k-sc-op` now sees a standard binding through `fx`, as Rust's
   `std_op` did already: `typecase`'s tests are written so.
+
+## `allof` over products (2026-11-05)
+
+The user read the paper as supporting the distribution. Mine:
+- **Normalized where it is written**: `(allof P1 P2)` is read as one
+  product, so nothing downstream sees an `allof` of products, and a
+  `product` checked against it checks each field as before, a `lambda`
+  against its field's `allof`.
+- **Same labels, in order**, as the meet of products asks; not by name in
+  any order.
+- **Fields the same by structure** (`same_ty`, as the `anyof` trimming
+  compares), not by subtyping: the reader runs before FX-26 has subtyping,
+  and the checkers must agree. `(n int)` and `(n nat)` differ, and are
+  refused.
+- **Only procedures, and products of them, may differ**: no written meet of
+  sums or cells. A cell of one type in every member is one cell, fine.
+- check-read-descs.fx was at 978 lines, so the helpers are a file of their
+  own, `check-read-allof.fx`, made as `check-read-ahead.fx` is.

@@ -47,6 +47,12 @@
             check-types check-read-helpers check-syntax check-read check-subst check-env
             check-print check-holds check-proving check-effects check-unions parser
             check-print-parts check-specs check-read-made)))
+      ;; And the reading of `allof`'s members (`check-read-allof.fx`).
+      (let ((check-read-allof
+             ((load-input "fx26:check-read-allof.fx")
+              check-types check-read-helpers check-syntax check-read check-subst check-env
+              check-print check-holds check-proving check-effects check-unions parser
+              check-print-parts check-specs check-read-made)))
       (module
 
 ;; The types it uses of the files before it.
@@ -399,6 +405,7 @@
         (let* ((saved (get k-dscope)) (t (k-parse-proves (k-nth items 1) usage)))
           (begin (set k-dscope saved) t))))))
 ;; Given on, all `check-read-ahead.fx` defines.
+(import check-read-allof k-allof-of)
 (import check-read-ahead k-read-in-order? k-names-a-file? k-any-names-a-file? k-ahead-names-of
         k-given-again k-again-lines k-ahead-stop k-included? k-type-top-start k-declared-later?
         (type k-tops k-out))
@@ -568,8 +575,7 @@
   (lambda (s items)
     (begin
       (k-shape (>= (k-length items) 3) "`(allof (subr …) (subr …) …)`" s)
-      (let ((ms (k-allof-members (cdr items))))
-        (begin (k-allof-one-conv ms (car ms) s) (k-ty-new (ty-allof ms)))))))
+      (k-allof-of (k-allof-members (cdr items)) s))))
 (define k-allof-members (->* (k-syns) k-ids)
   (lambda (xs)
     (if (null? xs)
@@ -578,18 +584,10 @@
           (tagcase (k-get t)
             (ty-allof (ms) (append ms (k-allof-members (cdr xs))))
             (ty-subr (e ps r cv spc) (the k-ids (cons t (k-allof-members (cdr xs)))))
+            (ty-product (fs) (the k-ids (cons t (k-allof-members (cdr xs)))))
             (else y (k-sfail (string-append "a member of an `allof` is a `subr` type, "
-                                            "and this is a " (k-show-ty t))
+                                            "or a product of them, and this is a " (k-show-ty t))
                              (car xs))))))))
-(define k-subr-conv (->* (int) k-conv)
-  (lambda (t) (tagcase (k-get t) (ty-subr (e ps r cv spc) cv) (else y (get k-conv-default)))))
-(define k-allof-one-conv (->* (k-ids int syn) unit)
-  (lambda (ms m0 s)
-    (cond ((null? ms) #u)
-          ((k-conv=? (k-subr-conv (car ms)) (k-subr-conv m0)) (k-allof-one-conv (cdr ms) m0 s))
-          (else (k-sfail (k-cat5 "an `allof`'s members have one convention: a " (k-show-ty m0)
-                                 " and a " (k-show-ty (car ms)) " do not")
-                         s)))))
 (define k-parse-mu (->* (syn k-syns) int)
   (lambda (s items)
     (begin
@@ -978,4 +976,4 @@
                                          (the k-ids (append tys (cons t nil))) cs)))
           (cons t rest)))))
 (define k-read-params (->* (k-syns syn k-syns) k-ids)
-  (lambda (ps r cs) (k-read-params-from ps r nil nil cs)))))))
+  (lambda (ps r cs) (k-read-params-from ps r nil nil cs))))))))
