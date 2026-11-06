@@ -331,3 +331,43 @@ roles are split.
   as the evaluator's positions are past every text before (`eval_base`).
   What is typed and not yet entered is read past it too, and kept nowhere
   (`read_trial`).
+
+## Decided: three keys, validated (2026-11-06)
+
+The user's direction, after a content digest was set aside (equal
+occurrences are what had to be told apart): a key by digest of the
+occurrence's context and the session's state, the reference; a cheaper
+one by path and digests, checked against it; and the cheapest, a path
+alone, for ordinary runs, the others only where debugging. All modes in
+both front ends.
+
+| mode | key | made of |
+| --- | --- | --- |
+| `full` | `(S, Z)` | `S` the session's state where the form is checked, a digest; `Z` the occurrence's context in its form, a zipper's digest |
+| `digest` | `(S, F, k)` | `F` the form's digest, `k` the occurrence's number in a walk of the form |
+| `path` (default) | `k` | its number in a walk of every form the session reads, continuing from one reading to the next, as places do |
+
+- **`FIXPT_FACT_KEYS=path|digest|full|validate`.** `validate` makes all
+  three and checks: `digest` against `full`, that they tell the same
+  occurrences apart; `path` against `full`, that equal `path` keys are
+  equal `full` keys (the converse failing is sharing lost, counted, not
+  wrong); and `full` against the facts, that occurrences sharing a `full`
+  key have the same facts, up to the fresh names a check makes (renamed in
+  order of appearance; what that cannot settle said, not guessed). The
+  last tests the reference itself: what `S` leaves out that checking
+  reads shows as two contexts with one key and two answers.
+- **`S`** is folded as the session changes: each definition, type,
+  effect, generative type, convention, macro and file loaded, types by
+  `ty_digest`. **`Z`**: each subtree's digest bottom up, then each node's
+  context from its parent's, the parent's form, its place among its
+  siblings and their digests. Provenance (places, expansion records) is
+  in no digest.
+- **Assumed, for the user to overrule** (their questions 2 and 3 not yet
+  answered): `full` is the syntactic context and the session's state, not
+  the checker's state within a form (the expected type, the `allof`
+  member), which checking, deterministic, makes of them; facts compare
+  up to fresh names as above.
+- **Stages**: `path` first (the walk's count continuing across readings
+  in both front ends and the bridge; places no longer in a key); then `S`
+  and `F`; then `Z`; then `validate`, in the Rust checker and in the one
+  written in FX-26, and a test of every program under it.
