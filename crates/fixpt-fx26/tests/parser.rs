@@ -220,9 +220,9 @@ fn a_variant_named_by_a_type_form_is_refused() {
 }
 
 /// What the comparison compares, spelled out once: each expression ends
-/// with where it starts and ends, and which of the expressions there it is,
-/// as the parser numbers them (`parser-ids.fx`): the `#f` that `and` makes
-/// is the second at its span, the `if` the first.
+/// with where it starts and ends, its provenance, and its number in a walk
+/// that takes each before what is in it, its identity (`parser-ids.fx`):
+/// the `if` that `and` makes and its `#f`, at one span, are 2 and 5.
 #[test]
 fn a_tree_as_text() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
@@ -230,7 +230,7 @@ fn a_tree_as_text() {
     let ours = s.parse_with_own_parser(text).expect("parses");
     assert_eq!(
         ours,
-        ["(t-exp (e-let ([a (e-bool #t 10 12 0)]) (e-if (e-var a 20 21 0) (e-bool #f 22 24 0) (e-bool #f 15 25 1) 15 25 0) 7 13 0))"]
+        ["(t-exp (e-let ([a (e-bool #t 10 12 1)]) (e-if (e-var a 20 21 3) (e-bool #f 22 24 4) (e-bool #f 15 25 5) 15 25 2) 7 13 0))"]
     );
     assert_eq!(ours, rust_trees(text));
 }

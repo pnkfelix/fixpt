@@ -76,6 +76,7 @@
    (val k-start (subr pure (kx) int))
    (val k-end (subr pure (kx) int))
    (val k-kth (subr pure (kx) int))
+   (val k-last-kth (subr pure (kx) int))
    (val k-at-of (subr pure (kx) k-at))
    (val k-as-subr
         (subr (maxeff (alloc @t) (read @globals) (read @t) spin)

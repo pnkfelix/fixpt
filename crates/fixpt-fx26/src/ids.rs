@@ -1,27 +1,26 @@
 //! Each expression's identity as the front end written in FX-26 keeps it
-//! (`parser-types.fx`): where it starts and ends, and which of the
-//! expressions there it is, counted in a walk of the program's trees that
-//! takes each expression before what is in it (`parser-top.fx`,
-//! `number-tops`). The first there is 0; one the parser made there besides
-//! (a desugaring's, a loaded file's `input`, a generative type's
-//! conversions) 1, 2, …. What the checkers find of an expression is kept
-//! by it (`docs/research/loads-and-places.md`).
+//! (`parser-types.fx`, `parser-ids.fx`): its position, its number in a
+//! walk of the program's trees that takes each expression before what is
+//! in it, the forms in order, from 0; where it starts and ends beside, its
+//! provenance. What the checkers find of an expression is kept by it
+//! (`docs/research/loads-and-places.md`, "Decided: identity by
+//! position").
 //!
 //! The Rust front end tells its expressions apart by [`ExpId`]; [`Kth`]
-//! says which of the expressions at its span each is, walking the same
-//! trees in the same order, so that what the Rust checker finds is keyed
-//! as the FX-26 compiler looks it up (`syn::rust_facts`).
+//! numbers them, walking the same trees in the same order, so that what
+//! the Rust checker finds is keyed as the FX-26 compiler looks it up
+//! (`syn::rust_facts`).
 
 use crate::ast::{Exp, ExpId, ModItem};
 use crate::check::Checker;
 use crate::top::Top;
 use std::collections::HashMap;
 
-/// Which of the expressions at its span each one walked is.
+/// Each expression walked, its number.
 #[derive(Default)]
 pub struct Kth {
-    /// How many have been walked at each span: its file, start and end.
-    seen: HashMap<(u32, u32, u32), u32>,
+    /// How many have been walked.
+    seen: u32,
     of: HashMap<ExpId, u32>,
 }
 
@@ -45,16 +44,14 @@ impl Kth {
         self.of.contains_key(&e)
     }
 
-    /// Which of the expressions at its span `e` is: 0 if it was not walked.
+    /// `e`'s number: 0 if it was not walked.
     pub fn of(&self, e: ExpId) -> u32 {
         self.of.get(&e).copied().unwrap_or(0)
     }
 
     fn exp(&mut self, c: &Checker, e: ExpId) {
-        let sp = c.arena.span_of(e);
-        let n = self.seen.entry((sp.file.0, sp.start, sp.end)).or_insert(0);
-        self.of.insert(e, *n);
-        *n += 1;
+        self.of.insert(e, self.seen);
+        self.seen += 1;
         for x in within(c, e) {
             self.exp(c, x);
         }

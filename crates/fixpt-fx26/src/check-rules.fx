@@ -708,7 +708,7 @@
           (product (1 nil) (2 nil))
           (let* ((arm (car arms)) (tag (extract arm 1)) (body (extract arm 4))
                  (t (k-part-find variants tag)))
-            (if (and (< t 0) (k-arm-dead? st tag (k-start body) (k-end body)))
+            (if (and (< t 0) (k-arm-dead? st tag body))
                 (k-tagcase-arms (cdr arms) variants st expected)
                 (let* ((bound (if (extract arm 2)
                                   (tagcase (k-get t)

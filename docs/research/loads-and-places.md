@@ -276,3 +276,32 @@ roles are split.
   provenance and the printed expansion's source map; then `(many σ)`
   (`typed-macros.md`).
 - **Later, not this story**: caching macro expansion steps.
+
+## Done: identity by position, in both front ends (2026-11-06)
+
+- **`k` is the walk's number** (`parser-ids.fx`'s `number-tops`, `ids.rs`'s
+  `Kth`): every expression's, from 0, in one call of the front end, the
+  scope the compiler's tables have (`c-set-facts!` makes them anew). So
+  the identity `(start end k)` keeps its shape and every comparison of it
+  stands; `k` alone tells two apart, and the start and end beside it are
+  provenance, kept in it for the tables hashed by where an expression
+  starts. No form's number is needed: nothing keyed outlives a call.
+- **What is inside an expression is found by structure**: in the Rust
+  checker, `ids::subtrees` and `ids::parents` (an `allof` lambda's facts
+  and lambdas, the arms and branches a member skipped, a split call's kept
+  facts, a certificate's references and enclosing lambdas); in the
+  checker written in FX-26, skipped arms and branches as intervals of
+  walk numbers, `(k-kth x)` to `(k-last-kth x)` (`k-skipped?`), and a
+  dead arm counted by its body's number, not its span. `Checker::extent`
+  and `k-extent`, which widened an `if` made of a `cond` to its clauses,
+  are gone.
+- **Cost, on `peval`** (`fixpt bench --tables compile --front-end`, release
+  builds, alternated three times, against `5bffbbbb`): `fx parse` 1.20 →
+  0.55 ms, one count where a table of counts by span was; `fx check` and
+  `fx words` unchanged (52, 26.5 ms). Compiling the front end: `fx parse`
+  350 → 297 ms, and `fx words` 2455 → 2033 ms, which is not explained
+  yet.
+- **Left**: blame by span (`synth_app_split`: an error inside an argument
+  that is not a variable ends the split; errors have only a span), for
+  the provenance step; and the expansion record and the printed
+  expansion's source map.

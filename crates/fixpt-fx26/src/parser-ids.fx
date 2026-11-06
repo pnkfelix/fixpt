@@ -1,13 +1,13 @@
 ;;; The FX-26 parser, in FX-26: each expression's identity
-;;; (`parser-types.fx`). Where it starts and ends, and which of the
-;;; expressions there it is: counted in a walk of the program's trees that
-;;; takes each expression before what is in it, the forms in order; the
-;;; first at a span 0, and each the parser made there besides (a
-;;; desugaring's, a loaded file's `input`, a generative type's conversions)
-;;; 1, 2, …. What the checkers find of an expression is kept by it, so two
-;;; are never taken for one (`docs/research/loads-and-places.md`); the Rust
-;;; front end numbers its trees alike (`ids.rs`). Part of the parser, after
-;;; `parser-exps.fx`, before `parser-top.fx`.
+;;; (`parser-types.fx`): its position, its number in a walk of the
+;;; program's trees that takes each expression before what is in it, the
+;;; forms in order, from 0. Where it starts and ends are its provenance,
+;;; kept beside. What the checkers find of an expression is kept by it, so
+;;; two are never taken for one, not a desugaring's made where what it
+;;; desugars is, nor a macro's argument placed twice
+;;; (`docs/research/loads-and-places.md`, "Decided: identity by
+;;; position"); the Rust front end numbers its trees alike (`ids.rs`).
+;;; Part of the parser, after `parser-exps.fx`, before `parser-top.fx`.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define parser-types ((proj (load-module "fx26:parser-types.fx") rs re rm rc rp)))
@@ -18,33 +18,17 @@
         e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-define-rec t-exp
         (type exp top exp-list let-list letrec-list arm-list mod-items top-list))
 
-;; For each end, how many expressions from one start were walked.
-(define-type seen-ends (listof (productof (1 int) (2 int)) acyclic))
-;; By where they start.
-(define-type seen (table int seen-ends rs))
+;; How many expressions have been walked.
+(define-type seen (ref int rs))
 (define-effect counts (maxeff (read @globals) spin (read rs) (write rs) (alloc rs)))
 
-;; How many at `es` end at `b`.
-(define seen-count (->* (seen-ends int) int)
-  (lambda (es b)
-    (cond ((null? es) 0)
-          ((= (extract (car es) 1) b) (extract (car es) 2))
-          (else (seen-count (cdr es) b)))))
-;; `es` without its count of those ending at `b`.
-(define seen-without (->* (seen-ends int) seen-ends)
-  (lambda (es b)
-    (cond ((null? es) nil)
-          ((= (extract (car es) 1) b) (cdr es))
-          (else (cons (car es) (seen-without (cdr es) b))))))
-;; Which of the expressions at `a`..`b` the next walked there is, counted.
+;; The next expression's number, the one walked next (at `a`..`b`, which
+;; does not matter: its provenance).
 (define next-kth (->* (seen int int) int)
-  (lambda (t a b)
-    (let* ((es (table-ref t a nil)) (n (seen-count es b)))
-      (begin (table-set! t a (the seen-ends (cons (product (1 b) (2 (+ n 1))) (seen-without es b))))
-             n))))
+  (lambda (t a b) (let ((n (get t))) (begin (set t (+ n 1)) n))))
 
 ;; Each `number-` gives what it was given, not a copy, where nothing in it
-;; changed: the parser numbers every expression 0, and most stay so.
+;; changed: as the parser numbers every expression 0, the first.
 (define-rec
   ;; `x` and what is in it, numbered.
   (number-exp (->* (seen exp) exp)
@@ -184,5 +168,4 @@
 ;; A program's forms, each expression in them numbered, the forms in order.
 (define number-tops (->* (top-list) top-list)
   (lambda (ts)
-    (number-each (the seen (make-table (lambda ((a int)) a) (lambda ((a int) (b int)) (= a b))))
-                 ts)))
+    (number-each (the seen (new 0)) ts)))

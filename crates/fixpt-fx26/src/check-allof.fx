@@ -47,7 +47,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-effects) (include check-subtype))
-(import check-resolve k-start k-end k-at-of k-regions-in k-has-region-in?)
+(import check-resolve k-start k-end k-kth k-last-kth k-at-of k-regions-in k-has-region-in?)
 (import check-synth k-note-call k-te-masked)
 (import check-calls k-callee-name)
 (import check-expect k-rewriting k-expect k-conversion)
@@ -64,28 +64,31 @@
 
 ;;; ------------------------------------------------------------ dead arms
 
-;; The arm for `tag`, whose body is at `a`..`b`, of a `tagcase` whose
-;; subject is a `st` without it: skipped (#t) while a `lambda` is checked
-;; against a member of an `allof`, and noted (`k-dead-arms`); else an error.
-(define k-arm-dead? (->* (int symbol int int) bool)
-  (lambda (st tag a b)
-    (let ((fs (get k-dead-arms)))
+;; The arm for `tag`, whose body is `body`, of a `tagcase` whose subject is
+;; a `st` without it: skipped (#t) while a `lambda` is checked against a
+;; member of an `allof`, and noted (`k-dead-arms`), with the numbers of
+;; what is in it (`k-last-kth`); else an error.
+(define k-arm-dead? (->* (int symbol kx) bool)
+  (lambda (st tag body)
+    (let ((fs (get k-dead-arms)) (a (k-start body)) (b (k-end body)) (k (k-kth body)))
       (if (null? fs)
           (begin (k-fail-no-part st " has no tag " tag a b) #f)
-          (let* ((f (car fs)) (arms (k-dead-counted (extract f 1) st tag a b))
-                 (now (the k-spans (cons (product (1 a) (2 b)) (extract f 2)))))
+          (let* ((f (car fs)) (arms (k-dead-counted (extract f 1) st tag a b k))
+                 (now (the k-spans (cons (product (1 k) (2 (k-last-kth body))) (extract f 2)))))
             (begin (set k-dead-arms (cons (product (1 arms) (2 now) (3 (extract f 3))
                                                    (4 (extract f 4)) (5 (extract f 5)))
                                           (cdr fs)))
                    #t))))))
-;; `arms` with the one at `a`..`b` counted once more, its error's type `st`.
-(define k-dead-counted (->* ((listof k-dead-arm acyclic) int symbol int int)
+;; `arms` with the one whose body is `k` (at `a`..`b`) counted once more,
+;; its error's type `st`.
+(define k-dead-counted (->* ((listof k-dead-arm acyclic) int symbol int int int)
                             (listof k-dead-arm acyclic))
-  (lambda (arms st tag a b)
-    (cond ((null? arms) (list (product (1 a) (2 b) (3 1) (4 st) (5 tag))))
-          ((and (= (extract (car arms) 1) a) (= (extract (car arms) 2) b))
-           (cons (product (1 a) (2 b) (3 (+ 1 (extract (car arms) 3))) (4 st) (5 tag)) (cdr arms)))
-          (else (cons (car arms) (k-dead-counted (cdr arms) st tag a b))))))
+  (lambda (arms st tag a b k)
+    (cond ((null? arms) (list (product (1 a) (2 b) (3 1) (4 st) (5 tag) (6 k))))
+          ((= (extract (car arms) 6) k)
+           (cons (product (1 a) (2 b) (3 (+ 1 (extract (car arms) 3))) (4 st) (5 tag) (6 k))
+                 (cdr arms)))
+          (else (cons (car arms) (k-dead-counted (cdr arms) st tag a b k))))))
 ;; Of `arms`, the first by place skipped `n` times, or `best`, as a list.
 (define k-dead-in-all (->* ((listof k-dead-arm acyclic) int (listof k-dead-arm acyclic))
                            (listof k-dead-arm acyclic))
@@ -115,22 +118,13 @@
                 (begin
                   (set k-dead-arms
                        (cons (product (1 (extract f 1))
-                                      (2 (the k-spans (cons (k-extent x) (extract f 2))))
+                                      (2 (the k-spans (cons (product (1 (k-kth x))
+                                                                     (2 (k-last-kth x)))
+                                                            (extract f 2))))
                                       (3 (extract f 3)) (4 at)
                                       (5 (k-branch-noted (extract f 5) key at)))
                              (cdr fs)))
                   #t)))))))
-;; Where `x` is in the text, all of it: an `if` made of a `cond`'s clause
-;; (or a `typecase`'s arm) is at that clause, its `else` at the next, so
-;; the clauses after are added. As `Checker::extent`.
-(define k-extent (->* (kx) (productof (1 int) (2 int)))
-  (lambda (x)
-    (tagcase x
-      (x-if (p c d a b abk)
-        (let ((u (k-extent c)) (v (k-extent d)))
-          (product (1 (min a (min (extract u 1) (extract v 1))))
-                   (2 (max b (max (extract u 2) (extract v 2)))))))
-      (else y (product (1 (k-start x)) (2 (k-end x)))))))
 (define k-nars-void? (->* (k-nars) bool)
   (lambda (ns)
     (and (not (null? ns))
@@ -198,12 +192,13 @@
   (lambda (x y)
     (and (= (extract x 1) (extract y 1)) (= (extract x 2) (extract y 2))
          (= (extract x 3) (extract y 3)))))
-;; Whether `at` is within one of `spans`.
+;; Whether `at` is in one of `spans`, each the numbers of what is in one
+;; skipped (`k-last-kth`): by the trees' structure, not where it is written.
 (define k-skipped? (->* (k-at k-spans) bool)
   (lambda (at spans)
     (and (not (null? spans))
-         (or (and (>= (extract at 1) (extract (car spans) 1))
-                  (<= (extract at 2) (extract (car spans) 2)))
+         (or (and (>= (extract at 3) (extract (car spans) 1))
+                  (<= (extract at 3) (extract (car spans) 2)))
              (k-skipped? at (cdr spans))))))
 (define k-datum=? (->* (k-datum k-datum) bool)
   (lambda (d e)

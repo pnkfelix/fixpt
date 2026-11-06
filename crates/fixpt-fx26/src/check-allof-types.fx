@@ -24,7 +24,7 @@
             (val k-allof-call
                  (subr (maxeff checks spin)
                        (kx kx int kxs k-done k-te k-synth-fn k-result-fn k-check-fn) k-te))
-            (val k-arm-dead? (subr (maxeff checks spin) (int symbol int int) bool))
+            (val k-arm-dead? (subr (maxeff checks spin) (int symbol kx) bool))
             (val k-branch-synth (subr (maxeff checks spin) (kx k-nars k-synth-fn) k-te))
             (val k-branch-check (subr (maxeff checks spin) (kx int k-nars k-check-fn) k-eff))
             (val k-split-app (subr (maxeff checks spin) (kx kx kxs int k-app-fn k-synth-fn) k-te))
