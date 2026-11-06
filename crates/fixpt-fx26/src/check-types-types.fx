@@ -379,6 +379,8 @@
    (val k-dvar-name (subr (maxeff (read @globals) spin (read @t)) (int) symbol))
    (val k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) acyclic) @t))
    (val k-member-spins (ref k-member-spin-list @t))
+   (val k-pinned (ref (listof (productof (1 k-at) (2 int)) acyclic) @t))
+   (val k-pinned-of (subr (maxeff (read @globals) spin (read @t)) (k-at) int))
    (val k-member-spins-of
         (subr (maxeff (read @globals) spin (read @t)) (symbol int) (listof bool acyclic)))
    (val k-new-epoch (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) () int))

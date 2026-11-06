@@ -353,6 +353,10 @@ pub struct Checker {
     /// `termination`): a call says `spin` only for the members it fits
     /// that may not.
     pub(crate) member_spins: HashMap<(Sym, TyId), Vec<bool>>,
+    /// Expressions taken as one member of their union's type while a call
+    /// is taken apart by an argument that is no variable (rule 5): each as
+    /// that member wherever it is synthesized, or checked as a call.
+    pub(crate) pinned: Vec<(ExpId, TyId)>,
     /// The regions each type mentions (`regions_in`), kept for types with
     /// no inference slot unsolved in them, which cannot change: masking
     /// asks for those of every free variable at each node, and a module
@@ -1134,6 +1138,7 @@ impl Checker {
             hole_hint: None,
             spin_why: Vec::new(),
             member_spins: HashMap::new(),
+            pinned: Vec::new(),
             regions_memo: std::cell::RefCell::new(Default::default()),
             fun_apps: HashMap::new(),
             regions_open: std::cell::Cell::new(false),
@@ -2172,6 +2177,7 @@ impl Checker {
         self.facts.effects.insert(e, eff.clone());
         self.kill_paths(&eff);
         let t = self.path_typed(e, t);
+        let t = self.pinned_type(e).unwrap_or(t);
         if self.record_types {
             self.facts.types.insert(e, t);
         }
@@ -2945,6 +2951,11 @@ impl Checker {
 
     /// Whether the group `bindings` ends; if not, its members are recursion
     /// that says `spin`, and why is kept for an error.
+    /// The member `e` is taken as (`pinned`), if it is.
+    pub(crate) fn pinned_type(&self, e: ExpId) -> Option<TyId> {
+        self.pinned.iter().rev().find(|(x, _)| *x == e).map(|(_, t)| *t)
+    }
+
     pub(crate) fn note_termination(&mut self, bindings: &[(Sym, TyId, ExpId)]) -> Result<(), String> {
         let ends = self.termination(bindings);
         self.note_ending(bindings, &ends);

@@ -49,7 +49,7 @@
         k-eff k-vsub k-ids k-term k-prop k-props k-binders k-parts k-names k-strings k-conv k-terms
         k-size k-desc k-descs k-ty k-map k-ds kx kxs k-item k-items k-te k-result k-narrows
         k-pendings k-cert-len k-arrow-kind k-bounded k-nesting k-named k-settleds k-gen k-hyps
-        k-lemma k-regions k-step k-steps k-path-fact k-path-facts k-member-spin-list)
+        k-lemma k-regions k-step k-steps k-path-fact k-path-facts k-member-spin-list k-at)
         (effect kstate checks kreads kbuilds))
 ;; The types it uses of the files before it.
 (define-type chars (select eager-reader-types chars))
@@ -803,6 +803,22 @@
 ;; end (`k-termination-by-member`): a call says `spin` only for the members
 ;; it fits that may not. Newest first; as Rust's `member_spins`.
 (define k-member-spins (ref k-member-spin-list @t) (new nil))
+;; Expressions taken as one member of their union's type while a call is
+;; taken apart by an argument that is no variable (rule 5): each, by its
+;; place, as that member wherever it is synthesized, or checked as a call.
+;; As Rust's `pinned`.
+(define k-pinned (ref (listof (productof (1 k-at) (2 int)) acyclic) @t) (new nil))
+(define k-pinned-of (subr kreads (k-at) int)
+  (lambda (at)
+    (letrec ((find (subr kreads ((listof (productof (1 k-at) (2 int)) acyclic)) int)
+                   (lambda (ps)
+                     (cond ((null? ps) -1)
+                           ((let ((p (extract (car ps) 1)))
+                              (and (= (extract p 1) (extract at 1)) (= (extract p 2) (extract at 2))
+                                   (= (extract p 3) (extract at 3))))
+                            (extract (car ps) 2))
+                           (else (find (cdr ps)))))))
+      (find (get k-pinned)))))
 ;; `n` at `t`'s, or none.
 (define k-member-spins-of (subr kreads (symbol int) (listof bool acyclic))
   (lambda (n t)

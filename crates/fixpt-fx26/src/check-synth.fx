@@ -114,8 +114,10 @@
 (define k-checked-call (ref k-call-checked @t) (new k-no-call))
 ;; Call `x`, found `r`, as `expected`: its effect, and its type noted.
 (define k-as-expected-call (->* (kx k-te int) k-eff)
-  (lambda (x r expected)
-    (let ((e (if (k-fixed-literal? x expected (k-start x) (k-end x))
+  (lambda (x r0 expected)
+    (let* ((p (k-pinned-of (k-at-of x)))
+           (r (if (>= p 0) (k-te p (extract r0 2)) r0))
+           (e (if (k-fixed-literal? x expected (k-start x) (k-end x))
                  (extract r 2)
                  (k-as-expected x r expected))))
       (begin (set k-checked-call (product (1 (k-at-of x)) (2 (extract r 1)))) e))))

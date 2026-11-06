@@ -387,7 +387,9 @@
               (let* ((p (car ps)) (f (k-path-fact-ty (extract p 1) (extract p 2) (extract p 3))))
                 (if (< f 0) t f)))))))
 (define k-path-te (->* (kx k-te) k-te)
-  (lambda (x te) (k-te (k-path-ty x (extract te 1)) (extract te 2))))
+  (lambda (x te)
+    (let ((p (k-pinned-of (k-at-of x))))
+      (k-te (if (>= p 0) p (k-path-ty x (extract te 1))) (extract te 2)))))
 ;; What `out` narrows the path from `v` at `d` by `steps` to (none or one).
 (define k-nars-of (->* (k-nars symbol int k-steps) k-reached)
   (lambda (out v d steps)

@@ -43,13 +43,14 @@
 (hide (include check-types-types) (include check-env-types) (include check-allof-types))
 (import check-synth-types (type k-done k-nars))
 (import check-subtype-types (type k-checking))
+(import check-resolve-types (type k-typed-params))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-effects) (include check-subtype))
 (import check-resolve k-start k-end k-at-of k-regions-in k-has-region-in?)
 (import check-synth k-note-call k-te-masked)
 (import check-calls k-callee-name)
-(import check-expect k-rewriting)
+(import check-expect k-rewriting k-expect k-conversion)
 (import check-errors k-argument-error k-fail-no-part)
 (import check-unions k-anyof-of)
 
@@ -384,39 +385,143 @@
 (define k-as-argument (->* (k-checking kx int) k-te)
   (lambda (f a i)
     (k-rewriting f (k-start a) (k-end a) (lambda (m want got) (k-argument-error i got want)))))
-;; Each of `args`' type and effect: as `done` holds it, or synthesized.
+;; Each of `args`' type and effect: as `done` holds it, or synthesized; but a
+;; `lambda` with a parameter of no type, which has no type of its own, -1:
+;; it fits a member whose parameter is a procedure of its arity, and is
+;; checked once the members are known (`k-allof-lambda-args`).
 (define k-allof-args (->* (kxs int k-done k-synth-fn) (listof k-te acyclic))
   (lambda (args i done synth)
     (if (null? args)
         nil
         (let* ((t (array-ref (extract done 1) i))
-               (te (if (>= t 0)
-                       (k-te t (array-ref (extract done 2) i))
-                       (k-as-argument (lambda () (synth (car args))) (car args) i))))
+               (te (cond ((>= t 0) (k-te t (array-ref (extract done 2) i)))
+                         ((>= (k-untyped-lambda (car args)) 0) (k-te -1 nil))
+                         (else (k-as-argument (lambda () (synth (car args))) (car args) i)))))
           (cons te (k-allof-args (cdr args) (+ i 1) done synth))))))
+;; Of `x`, a `lambda` with a parameter of no type: its arity; else -1.
+(define k-untyped-lambda (->* (kx) int)
+  (lambda (x)
+    (tagcase x
+      (x-lambda (ps body a b abk) (if (k-any-untyped? ps) (k-length ps) -1))
+      (else y -1))))
+(define k-any-untyped? (->* (k-typed-params) bool)
+  (lambda (ps) (and (not (null? ps)) (or (null? (extract (car ps) 2)) (k-any-untyped? (cdr ps))))))
+;; Whether a `t` is taken as a `p` only converted (its procedure to another
+;; convention) or reshaped (a module).
+(define k-adaptable? (->* (int int) bool)
+  (lambda (t p) (or (not (null? (k-conversion t p))) (not (null? (k-reshape (k-resolve t) p))))))
+;; Each argument of `args`, of types `ts`, from the `i`th, converted or
+;; reshaped for a member of `fits`: one value made once, so only where every
+;; member it fits takes the same there.
+(define k-allof-adapted (->* (kxs (listof k-te acyclic) int k-ids) unit)
+  (lambda (args ts i fits)
+    (if (null? args)
+        #u
+        (let ((t (extract (car ts) 1)) (ps (k-params-at fits i)))
+          (begin
+            (if (and (>= t 0) (k-any-not-below? t ps))
+                (let ((p (k-first-unlike-type (car ps) ps)))
+                  (if (>= p 0)
+                      (k-fail (string-append
+                               (k-cat5 "argument " (int->string (+ i 1)) " is a " (k-show-ty t)
+                                       ", made a ")
+                               (k-cat5 (k-show-ty (car ps)) " for one member this call fits and a "
+                                       (k-show-ty p) " for another: one value cannot be both" ""))
+                              (k-start (car args)) (k-end (car args)))
+                      (k-expect (car args) t (car ps))))
+                #u)
+            (k-allof-adapted (cdr args) (cdr ts) (+ i 1) fits))))))
+(define k-any-not-below? (->* (int k-ids) bool)
+  (lambda (t ps)
+    (and (not (null? ps)) (or (not (k-subtype t (car ps))) (k-any-not-below? t (cdr ps))))))
+(define k-first-unlike-type (->* (int k-ids) int)
+  (lambda (t0 ps)
+    (cond ((null? ps) -1)
+          ((k-same-type? t0 (car ps)) (k-first-unlike-type t0 (cdr ps)))
+          (else (car ps)))))
+;; The arity of a procedure of type `t`, a `subr` or an `allof` of them; -1.
+(define k-procedure-arity (->* (int) int)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-subr (e ps r cv spc) (k-length ps))
+      (ty-allof (ms) (k-procedure-arity (car ms)))
+      (else y -1))))
 (define k-tes-effect (->* ((listof k-te acyclic) k-eff) k-eff)
   (lambda (ts e) (if (null? ts) e (k-tes-effect (cdr ts) (k-union e (extract (car ts) 2))))))
-(define k-tes-below? (->* ((listof k-te acyclic) k-ids) bool)
-  (lambda (ts ps)
+(define k-tes-below? (->* ((listof k-te acyclic) kxs k-ids) bool)
+  (lambda (ts args ps)
     (if (null? ts)
         (null? ps)
-        (and (not (null? ps)) (k-subtype (extract (car ts) 1) (car ps))
-             (k-tes-below? (cdr ts) (cdr ps))))))
-;; The members of `ms` arguments `ts` fit.
-(define k-allof-fits (->* (k-ids (listof k-te acyclic)) k-ids)
-  (lambda (ms ts)
+        (and (not (null? ps))
+             (let ((t (extract (car ts) 1)))
+               (if (>= t 0)
+                   (or (k-subtype t (car ps)) (k-adaptable? t (car ps)))
+                   (= (k-procedure-arity (car ps)) (k-untyped-lambda (car args)))))
+             (k-tes-below? (cdr ts) (cdr args) (cdr ps))))))
+;; The members of `ms` arguments `args`, of types `ts`, fit.
+(define k-allof-fits (->* (k-ids (listof k-te acyclic) kxs) k-ids)
+  (lambda (ms ts args)
     (if (null? ms)
         nil
-        (let ((rest (k-allof-fits (cdr ms) ts)))
+        (let ((rest (k-allof-fits (cdr ms) ts args)))
           (tagcase (k-get (k-resolve (car ms)))
             (ty-subr (e ps r cv spc)
-              (if (k-tes-below? ts ps) (the k-ids (cons (car ms) rest)) rest))
+              (if (k-tes-below? ts args ps) (the k-ids (cons (car ms) rest)) rest))
             (else y rest))))))
+;; Each `lambda` of `args` with a parameter of no type (`ts` -1), from the
+;; `i`th, checked against what the members `fits` take there, their `allof`
+;; where they differ: its effect, onto `e`.
+(define k-allof-lambda-args (->* (kxs (listof k-te acyclic) int k-ids k-check-fn k-eff) k-eff)
+  (lambda (args ts i fits check e)
+    (if (null? args)
+        e
+        (let ((more (lambda ((e2 k-eff))
+                      (k-allof-lambda-args (cdr args) (cdr ts) (+ i 1) fits check e2))))
+          (if (>= (extract (car ts) 1) 0)
+              (more e)
+              (let* ((ps (k-params-at fits i))
+                     (want (if (k-all-same? (car ps) ps)
+                               (car ps)
+                               (k-allof-made (k-allof-flat ps) (car args))))
+                     (a (car args))
+                     (te (k-as-argument (lambda () (k-te want (check a want))) a i)))
+                (more (k-union e (extract te 2)))))))))
+(define k-params-at (->* (k-ids int) k-ids)
+  (lambda (ms i)
+    (if (null? ms)
+        nil
+        (the k-ids (cons (k-nth (k-subr-params (car ms)) i) (k-params-at (cdr ms) i))))))
+(define k-all-same? (->* (int k-ids) bool)
+  (lambda (t0 ts) (or (null? ts) (and (k-same-type? t0 (car ts)) (k-all-same? t0 (cdr ts))))))
+(define k-allof-flat (->* (k-ids) k-ids)
+  (lambda (ts)
+    (if (null? ts)
+        nil
+        (let ((t (k-resolve (car ts))))
+          (tagcase (k-get t)
+            (ty-allof (ms) (append ms (k-allof-flat (cdr ts))))
+            (else y (the k-ids (cons t (k-allof-flat (cdr ts))))))))))
+;; The `allof` of `subr`s `ms`, of one convention, else refused at `x`.
+(define k-allof-made (->* (k-ids kx) int)
+  (lambda (ms x)
+    (let ((other (k-other-conv ms (k-subr-conv-of (car ms)))))
+      (if (< other 0)
+          (k-ty-new (ty-allof ms))
+          (k-fail (k-cat5 "an `allof`'s members have one convention: a " (k-show-ty (car ms))
+                          " and a " (k-show-ty other) " do not")
+                  (k-start x) (k-end x))))))
+(define k-other-conv (->* (k-ids k-conv) int)
+  (lambda (ms c)
+    (cond ((null? ms) -1)
+          ((k-conv=? (k-subr-conv-of (car ms)) c) (k-other-conv (cdr ms) c))
+          (else (car ms)))))
 (define k-tes-shown (->* ((listof k-te acyclic)) string)
   (lambda (ts)
     (if (null? ts)
         ""
-        (string-append "a " (k-show-ty (extract (car ts) 1))
+        (string-append (if (< (extract (car ts) 1) 0)
+                           "a `lambda` with a parameter of no type"
+                           (string-append "a " (k-show-ty (extract (car ts) 1))))
                        (if (null? (cdr ts)) "" ", ") (k-tes-shown (cdr ts))))))
 (define k-subr-latent (->* (int) k-eff)
   (lambda (t) (tagcase (k-get (k-resolve t)) (ty-subr (e ps r cv spc) e) (else y nil))))
@@ -471,16 +576,18 @@
 ;; rule 4): each argument synthesized once, and every member whose
 ;; parameters take them fits; the call's result is the meet of theirs, its
 ;; latent effect the least of theirs if one is, else the first's.
-(define k-allof-call (->* (kx kx int kxs k-done k-eff k-synth-fn k-result-fn) k-te)
-  (lambda (x f ft args done fe synth result)
+(define k-allof-call (->* (kx kx int kxs k-done k-te k-synth-fn k-result-fn k-check-fn) k-te)
+  (lambda (x f ft args done rf synth result check)
     (let* ((ts (k-allof-args args 0 done synth))
-           (fits (k-allof-fits (k-allof-members-of ft) ts)))
+           (fits (k-allof-fits (k-allof-members-of ft) ts args)))
       (if (null? fits)
           (k-fail (k-cat4 "this call fits no member of a " (k-show-ty ft) ": its arguments are "
                           (k-tes-shown ts))
                   (k-start x) (k-end x))
           (let* ((m0 (car fits))
                  (noted (k-note-call x f m0 (k-subr-params m0)))
+                 (adapted (k-allof-adapted args ts 0 fits))
+                 (fe (k-allof-lambda-args args ts 0 fits check (extract rf 2)))
                  (res (k-results-met x m0 (cdr fits) (k-subr-result m0) (k-fresh-of fits nil)))
                  (own (k-own-member-spins f)))
             (if (null? own)
@@ -521,23 +628,25 @@
 ;; call's type is the `anyof` of what each gives, its effect theirs
 ;; together; what the compilers read of it alike under every member. As
 ;; Rust's `synth_app_split`.
-(define k-split-app (->* (kx kx kxs int k-app-fn) k-te)
-  (lambda (x f args expected app)
+(define k-split-app (->* (kx kx kxs int k-app-fn k-synth-fn) k-te)
+  (lambda (x f args expected app synth)
     (let ((r (prompt k-tag (k-done (app x f args expected)) (lambda (r) r))))
       (tagcase r
         ;; Checks, but not as what is expected: as its members, if their
         ;; union is (`swap` of an `(anyof expr op)` an `(anyof expr op)`);
         ;; else as it is, for the expectation to refuse.
         (k-done (te)
-          (let ((tried (k-split-candidates args)))
-            (if (or (< expected 0) (k-subtype (extract te 1) expected) (null? tried))
+          (let ((tried (if (or (< expected 0) (k-subtype (extract te 1) expected))
+                           nil
+                           (k-split-candidates args 0 synth))))
+            (if (null? tried)
                 te
                 (k-split-or-whole x f args expected app tried te))))
         (k-err (m a b)
-          (let ((tried (k-split-candidates args)))
-            ;; An error inside an argument that is not a variable is that
-            ;; argument's, which no member of another makes go away.
-            (if (or (k-err-in-arg? args a b) (null? tried))
+          ;; An error inside an argument that is not a variable is that
+          ;; argument's, which no member of another makes go away.
+          (let ((tried (if (k-err-in-arg? args a b) nil (k-split-candidates args 0 synth))))
+            (if (null? tried)
                 (k-fail m a b)
                 (k-split-tries x f args expected app (k-code-but (k-start x) (k-end x)) tried
                                m a b))))
@@ -548,25 +657,38 @@
          (or (and (tagcase (car args) (x-var (v xa xb abk) #f) (else y #t))
                   (>= a (k-start (car args))) (<= b (k-end (car args))))
              (k-err-in-arg? (cdr args) a b)))))
-;; Each of `args` that is a variable whose type is a union: its name, its
-;; binding, its members.
-(define-type k-split (productof (1 symbol) (2 int) (3 k-ids)))
-(define k-split-candidates (->* (kxs) (listof k-split acyclic))
-  (lambda (args)
+;; Each of `args`, from the `i`th, whose type is a union, in order, as it is
+;; taken apart: a variable, by its name and binding (`k-narrowed`; 4 is -1);
+;; any other, by its place (`k-pinned`), its type synthesized (4 is its
+;; index); and its members. As Rust's `union_arguments`.
+(define-type k-split (productof (1 symbol) (2 int) (3 k-ids) (4 int)))
+(define k-split-candidates (->* (kxs int k-synth-fn) (listof k-split acyclic))
+  (lambda (args i synth)
     (if (null? args)
         nil
-        (let ((rest (k-split-candidates (cdr args))))
-          (tagcase (car args)
-            (x-var (v xa xb abk)
-              (let ((t (k-lookup v)))
-                (if (< t 0)
-                    rest
-                    (tagcase (k-get (k-resolve t))
-                      (ty-union (ms)
-                        (cons (product (1 v) (2 (k-name-depth v)) (3 ms))
-                              rest))
-                      (else y rest)))))
-            (else y rest))))))
+        (let* ((a (car args))
+               (here (tagcase a
+                       (x-var (v xa xb abk)
+                         (let ((t (k-lookup v)))
+                           (if (< t 0)
+                               nil
+                               (tagcase (k-get (k-resolve t))
+                                 (ty-union (ms)
+                                   (the (listof k-split acyclic)
+                                        (list (product (1 v) (2 (k-name-depth v)) (3 ms) (4 -1)))))
+                                 (else y nil)))))
+                       (else y
+                         (let ((r (prompt k-tag (k-done (synth a)) (lambda (r) r))))
+                           (tagcase r
+                             (k-done (te)
+                               (tagcase (k-get (k-resolve (extract te 1)))
+                                 (ty-union (ms)
+                                   (the (listof k-split acyclic)
+                                        (list (product (1 '||) (2 -1) (3 ms) (4 i)))))
+                                 (else z nil)))
+                             (else z nil))))))
+               (rest (k-split-candidates (cdr args) (+ i 1) synth)))
+          (if (null? here) rest (cons (car here) rest))))))
 ;; What the compilers read now, but of what is at `a`..`b`: the failed
 ;; try's.
 (define k-code-but (->* (int int) k-code)
@@ -619,10 +741,15 @@
         (list nil)
         (let* ((reset (k-code-put-back saved))
                (outer (get k-narrowed))
+               (pins (get k-pinned))
+               (i (extract s 4))
                (narrow (product (1 (extract s 1)) (2 (extract s 2)) (3 (car ms))))
-               (pushed (set k-narrowed (cons narrow outer)))
+               (pushed (if (< i 0)
+                           (set k-narrowed (cons narrow outer))
+                           (let ((pin (product (1 (k-at-of (k-nth args i))) (2 (car ms)))))
+                             (set k-pinned (cons pin pins)))))
                (r (prompt k-tag (k-done (app x f args expected)) (lambda (r) r)))
-               (popped (set k-narrowed outer)))
+               (popped (begin (set k-narrowed outer) (set k-pinned pins))))
           (tagcase r
             (k-done (te)
               (let ((run (product (1 (k-found-since saved nil)) (2 te)))
@@ -643,8 +770,11 @@
           ((k-found-alike? (extract (car runs) 1) (extract (car rest) 1))
            (k-runs-agree x s runs (cdr rest) (+ j 1)))
           (else
-           (k-fail (k-cat5 (k-cat3 "this call, taken apart by `" (symbol->string (extract s 1))
-                                   "`'s members, would be compiled differently with a ")
+           (k-fail (k-cat5 (k-cat3 "this call, taken apart by "
+                                   (if (< (extract s 4) 0)
+                                       (k-cat3 "`" (symbol->string (extract s 1)) "`'s")
+                                       (k-cat3 "argument " (int->string (+ (extract s 4) 1)) "'s"))
+                                   " members, would be compiled differently with a ")
                            (k-show-ty (car (extract s 3))) " and with a "
                            (k-show-ty (k-nth-id (extract s 3) j)) "")
                    (k-start x) (k-end x))))))

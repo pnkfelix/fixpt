@@ -3876,3 +3876,21 @@ The user read the paper as supporting the distribution. Mine:
   sums or cells. A cell of one type in every member is one cell, fine.
 - check-read-descs.fx was at 978 lines, so the helpers are a file of their
   own, `check-read-allof.fx`, made as `check-read-ahead.fx` is.
+
+## Arguments at an `allof` call, and rule 5 at any argument (2026-11-05)
+
+- **A `lambda` with an untyped parameter** fits by arity alone; it is then
+  checked against the fitting members' parameter types, their `allof`
+  where they differ, so the existing check of one body against several
+  types (rule 3) covers it.
+- **Converted or reshaped arguments** fit, but are made once: every
+  fitting member must take the same type there (by structure). Otherwise
+  refused, as one value cannot be made two ways.
+- **Not literals**: an integer literal at a member taking a `u8` still does
+  not fit; a literal synthesizes as an `int`, and taking it as each
+  member's width would need each width's representation at once.
+- **Rule 5 at any argument** pins the argument expression to each member
+  where it is synthesized, or checked as a call; an argument checked in
+  some other way (an `if` against a parameter) is not pinned, and stays
+  refused. FX-26's split was given the synthesizer to find an argument's
+  type (`k-split-app`'s new parameter).

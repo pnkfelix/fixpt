@@ -2187,9 +2187,11 @@ checkers (`logical-types.md`, "U1, as built"). Left of it:
 - The verifier of typed cellular code (`typed_cells.rs`) has no rule for
   `allof`: a word whose body is checked against each member, and a call
   taking every member it fits; the three such words are known gaps.
-- A call's arguments must each have a type of their own and be below a
-  member's parameters as they are: no conversion or reshape at an
-  `allof` call, and no `lambda` without parameter types as an argument.
+- ~~A call's arguments must each have a type of their own and be below a
+  member's parameters as they are~~ (done 2026-11-05, `logical-types.md`,
+  "Arguments at an `allof` call"): a `lambda` without parameter types, a
+  conversion and a reshape are taken; an integer literal beyond `int`'s
+  type is not.
 
 U2 done (2026-11-05): `anyof` in both checkers (`logical-types.md`, "U2,
 as built"). Left of it:
@@ -2212,7 +2214,9 @@ union (`logical-types.md`, "U3, as built"). Then an `anyof`'s sums kept as
 written, made one only where needed (the user's), so `swap` of an `(anyof
 expr op)` is an `(anyof expr op)`. Left of it: arguments that are not
 variables; `extract`; the verifier of typed cellular code, which has no
-rule for a call split by members (known gaps, as `allof`'s).
+rule for a call split by members (known gaps, as `allof`'s). Arguments
+that are not variables: done 2026-11-05 (`logical-types.md`, "Rule 5 at
+any argument").
 Left of U2b: questions 16, 17, 19 and 20 (built on the proposals,
 provisional); a message of its own past the budget; head forms and
 greatest members kept on the node, and the answer cache, once measured

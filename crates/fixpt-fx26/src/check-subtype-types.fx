@@ -40,7 +40,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-parts (select check-types-types k-parts))
 ;; The types it names, from the files that define them.
-(import check-types-types (type k-region k-size))
+(import check-types-types (type k-region k-size k-ids))
 ;; The types it names, from the files that define them.
 (define-type kx (select check-types-types kx))
 (define-type check-subtype-sig
@@ -52,6 +52,10 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-size k-region)
                        int))
+            (val k-reshape
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int)
+                       (listof k-ids acyclic)))
             (val k-reshape-at
                  (subr (maxeff (alloc @t)
                                (goto @z)

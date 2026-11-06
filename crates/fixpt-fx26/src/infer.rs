@@ -30,6 +30,14 @@ use std::collections::{HashMap, HashSet};
 /// An argument already synthesised: its type and effect.
 type Synthesised = Option<(TyId, Effect)>;
 
+/// What a call's union argument is taken apart by (rule 5): a variable, by
+/// its name and binding; or the `i`th argument, at its place.
+#[derive(Clone, Copy)]
+enum Split {
+    Var(Sym, usize),
+    Arg(usize, ExpId),
+}
+
 /// What has been said of a type binder (`TODO.md` §66, Pierce and Turner's
 /// local type inference): at least `lower`, what the arguments are, joined;
 /// at most `upper`, what the context expects, met; and, where it stands
@@ -234,6 +242,7 @@ impl Checker {
             }
             Exp::App { fun, args } => {
                 let (t, eff) = self.synth_app(e, fun, &args, Some(expected))?;
+                let t = self.pinned_type(e).unwrap_or(t);
                 // A literal past a fixnum, as the parsers write one.
                 match self.literal_value(e) {
                     Some(v) if self.fixed_expected(expected).is_some() => self.literal_in_range(e, v, expected)?,
@@ -503,29 +512,108 @@ impl Checker {
         if own.is_some() {
             effect.0.remove(&Atom::Spin);
         }
-        let mut tys = Vec::new();
+        // Each argument synthesized once; but a `lambda` with a parameter of
+        // no type, which has no type of its own: it fits a member whose
+        // parameter is a procedure of its arity, and is checked once the
+        // members are known, below.
+        let mut tys: Vec<Option<TyId>> = Vec::new();
         for (i, a) in args.iter().enumerate() {
+            if done[i].is_none() && self.untyped_lambda(*a).is_some() {
+                tys.push(None);
+                continue;
+            }
             let (t, eff) = match done[i].take() {
                 Some(x) => x,
                 None => self.synth(*a).map_err(|err| self.as_argument(err, *a, i))?,
             };
             effect = effect.union(&eff);
-            tys.push(t);
+            tys.push(Some(t));
         }
         let mut fits: Vec<(TyId, Effect, TyId, Conv)> = Vec::new();
         let mut fit_at = Vec::new();
+        // Each argument, whether a member it fits takes it only as converted
+        // (its procedure to another convention) or reshaped (a module).
+        let mut adapted = vec![false; args.len()];
         for (k, m) in members.iter().enumerate() {
             let Ty::Subr { conv, effect: latent, params, result, .. } = self.arena.get(*m).clone() else { continue };
-            if params.len() == tys.len() && tys.iter().zip(&params).all(|(t, p)| self.subtype(*t, *p)) {
+            if params.len() != tys.len() {
+                continue;
+            }
+            let mut by = vec![false; args.len()];
+            let mut all = true;
+            for (i, (t, p)) in tys.iter().zip(&params).enumerate() {
+                let ok = match t {
+                    Some(t) if self.subtype(*t, *p) => true,
+                    Some(t) if self.conversion(*t, *p).is_some() || self.reshape(*t, *p).is_some() => {
+                        by[i] = true;
+                        true
+                    }
+                    Some(_) => false,
+                    None => self.untyped_lambda(args[i]).is_some_and(|n| self.procedure_arity(*p) == Some(n)),
+                };
+                if !ok {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
                 fits.push((*m, latent, result, conv));
                 fit_at.push(k);
+                adapted.iter_mut().zip(by).for_each(|(a, b)| *a |= b);
             }
         }
         let Some(&(m0, ref latent0, result0, conv)) = fits.first() else {
-            let shown: Vec<String> = tys.iter().map(|t| format!("a {}", self.show_ty(*t))).collect();
+            let shown: Vec<String> = tys
+                .iter()
+                .map(|t| match t {
+                    Some(t) => format!("a {}", self.show_ty(*t)),
+                    None => "a `lambda` with a parameter of no type".to_string(),
+                })
+                .collect();
             return Err(FxError::at(span, format!("this call fits no member of a {}: its arguments are {}", self.show_ty(ft), shown.join(", "))));
         };
         self.facts.call_convs.insert(fun, conv);
+        // An argument converted or reshaped for a member is one value made
+        // once: so only where every member it fits takes the same there.
+        for (i, t) in tys.iter().enumerate() {
+            let (Some(t), true) = (t, adapted[i]) else { continue };
+            let ps: Vec<TyId> = fits.iter().filter_map(|(m, ..)| self.arena.get(*m).as_subr().map(|(_, ps, _)| ps[i])).collect();
+            if let Some(p) = ps.iter().find(|p| !self.same_ty(ps[0], **p, &mut Vec::new())) {
+                return Err(FxError::at(
+                    self.arena.span_of(args[i]),
+                    format!(
+                        "argument {} is a {}, made a {} for one member this call fits and a {} for another: one value cannot be both",
+                        i + 1,
+                        self.show_ty(*t),
+                        self.show_ty(ps[0]),
+                        self.show_ty(*p)
+                    ),
+                ));
+            }
+            self.expect(args[i], *t, ps[0])?;
+        }
+        // Each `lambda` with a parameter of no type, checked against what the
+        // members it fits take there: their `allof` where they differ.
+        for (i, t) in tys.iter().enumerate() {
+            if t.is_some() {
+                continue;
+            }
+            let ps: Vec<TyId> = fits.iter().filter_map(|(m, ..)| self.arena.get(*m).as_subr().map(|(_, ps, _)| ps[i])).collect();
+            let want = if ps.iter().all(|p| self.same_ty(ps[0], *p, &mut Vec::new())) {
+                ps[0]
+            } else {
+                let mut flat = Vec::new();
+                for p in &ps {
+                    match self.arena.get(self.arena.resolve(*p)).clone() {
+                        Ty::AllOf(ms) => flat.extend(ms),
+                        _ => flat.push(self.arena.resolve(*p)),
+                    }
+                }
+                self.allof_of(&flat, self.arena.span_of(args[i]))?
+            };
+            let eff = self.check(args[i], want).map_err(|err| self.as_argument(err, args[i], i))?;
+            effect = effect.union(&eff);
+        }
         // Where any member it fits allocates, but not frozen data.
         let mut fresh: Vec<Region> = Vec::new();
         for (_, l, _, _) in &fits {
@@ -564,6 +652,24 @@ impl Checker {
         }
         let effect = self.mask(e, &effect, result);
         Ok((result, effect))
+    }
+
+    /// Of `e`, a `lambda` with a parameter of no type, as written (not one
+    /// under `the` or a projection): its arity.
+    pub(crate) fn untyped_lambda(&self, e: ExpId) -> Option<usize> {
+        match self.arena.exp_at(e) {
+            Exp::Lambda { params, .. } if params.iter().any(|(_, t)| t.is_none()) => Some(params.len()),
+            _ => None,
+        }
+    }
+
+    /// The arity of a procedure of type `t`, a `subr` or an `allof` of them.
+    pub(crate) fn procedure_arity(&self, t: TyId) -> Option<usize> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Subr { params, .. } => Some(params.len()),
+            Ty::AllOf(ms) => self.procedure_arity(ms[0]),
+            _ => None,
+        }
     }
 
     /// `got ≤ want`, or an error at `e` saying so.
@@ -819,15 +925,22 @@ impl Checker {
         self.split_tries(e, fun, args, expected, err)
     }
 
-    /// Each argument of `args` that is a variable whose type is a union: its
-    /// name, its binding, its members.
-    fn union_arguments(&self, args: &[ExpId]) -> Vec<(Sym, usize, Vec<TyId>)> {
+    /// Each argument of `args` whose type is a union, in order, as it is
+    /// taken apart: a variable, by its name and binding (`narrowed`); any
+    /// other, by its place (`pinned`), its type synthesized; and its members.
+    fn union_arguments(&mut self, args: &[ExpId]) -> Vec<(Split, Vec<TyId>)> {
         let mut tried = Vec::new();
-        for &a in args {
-            let Some((v, at, steps)) = self.path_of(a) else { continue };
-            let Some(t) = self.lookup(v) else { continue };
-            if let (true, Ty::Union(ms)) = (steps.is_empty(), self.arena.get(self.arena.resolve(t)).clone()) {
-                tried.push((v, at, ms));
+        for (i, &a) in args.iter().enumerate() {
+            if let Exp::Var(v) = self.arena.exp_at(a).clone() {
+                let (Some(at), Some(t)) = (self.env.rpos(v), self.lookup(v)) else { continue };
+                if let Ty::Union(ms) = self.arena.get(self.arena.resolve(t)).clone() {
+                    tried.push((Split::Var(v, at), ms));
+                }
+                continue;
+            }
+            let Ok((t, _)) = self.synth(a) else { continue };
+            if let Ty::Union(ms) = self.arena.get(self.arena.resolve(t)).clone() {
+                tried.push((Split::Arg(i, a), ms));
             }
         }
         tried
@@ -847,8 +960,8 @@ impl Checker {
         let saved = self.facts.code_saved_but(|x| inside(self, x));
         let mut effects_before = self.facts.effects.clone();
         effects_before.retain(|x, _| !inside(self, *x));
-        for (v, at, ms) in tried {
-            if let Some(r) = self.app_by_members(e, fun, args, expected, (v, at), &ms, &saved, &effects_before)? {
+        for (split, ms) in tried {
+            if let Some(r) = self.app_by_members(e, fun, args, expected, split, &ms, &saved, &effects_before)? {
                 return Ok(r);
             }
         }
@@ -865,7 +978,7 @@ impl Checker {
         fun: ExpId,
         args: &[ExpId],
         expected: Option<TyId>,
-        (v, at): (Sym, usize),
+        split: Split,
         ms: &[TyId],
         saved: &crate::check::CodeSaved,
         effects_before: &HashMap<ExpId, Effect>,
@@ -875,9 +988,15 @@ impl Checker {
         for m in ms {
             self.facts.code_put_back(saved);
             self.facts.effects = effects_before.clone();
-            self.narrowed.push((v, at, *m));
+            match split {
+                Split::Var(v, at) => self.narrowed.push((v, at, *m)),
+                Split::Arg(_, a) => self.pinned.push((a, *m)),
+            }
             let r = self.synth_app_of(e, fun, args, expected);
-            self.narrowed.pop();
+            match split {
+                Split::Var(..) => drop(self.narrowed.pop()),
+                Split::Arg(..) => drop(self.pinned.pop()),
+            }
             let Ok((t, x)) = r else { return Ok(None) };
             found.push(self.facts.code_facts());
             for (y, ye) in &self.facts.effects {
@@ -891,11 +1010,14 @@ impl Checker {
         }
         let span = self.arena.span_of(e);
         if let Some(j) = (1..found.len()).find(|j| found[*j] != found[0]) {
-            let name = self.interner.name(v).to_string();
+            let by = match split {
+                Split::Var(v, _) => format!("`{}`'s", self.interner.name(v)),
+                Split::Arg(i, _) => format!("argument {}'s", i + 1),
+            };
             return Err(FxError::at(
                 span,
                 format!(
-                    "this call, taken apart by `{name}`'s members, would be compiled differently with a {} and with a {}",
+                    "this call, taken apart by {by} members, would be compiled differently with a {} and with a {}",
                     self.show_ty(ms[0]),
                     self.show_ty(ms[j])
                 ),

@@ -943,6 +943,26 @@ first's; recursion ends if it does at each member's types. Not yet:
 the verifier of typed cellular code knows no `allof` (`typed_cells.rs`'s
 known gaps).
 
+**Arguments at an `allof` call (2026-11-05).** A `lambda` with a
+parameter of no type has no type of its own: it fits a member whose
+parameter there is a procedure of its arity, and is checked, once the
+members are known, against what they take there, their `allof` where they
+differ (rule 3 then holds of its body). An argument a member takes only
+converted (its procedure to another convention) or reshaped (a module)
+fits it, the adaptation made once: only where every member the call fits
+takes the same type there, else one value would be made two ways
+(refused). Integer literals beyond a member's range are not taken so: a
+literal synthesizes as an `int`. Tests: `allof/lambda-argument*.fx`,
+`converted-argument.fx`, `converted-twice.fx`.
+
+**Rule 5 at any argument (2026-11-05, U3's leftover).** An argument that
+is no variable, of a union, is taken apart as a variable is: the call is
+checked with it taken as each member in turn (`pinned`, `k-pinned`),
+wherever it is synthesized or checked as a call; its value is made once.
+An argument checked against a type it is given in some other way (an `if`
+checked against a parameter) is not pinned, and the call is refused as
+before. Test: `anyof/split-call.fx`.
+
 **Over products (2026-11-05, the user's reading of the paper).** An
 `allof` of products of the same labels, in order, is the product whose
 field is what every member's is, where they are the same (by structure,
