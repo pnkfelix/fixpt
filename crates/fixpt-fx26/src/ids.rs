@@ -61,6 +61,33 @@ impl Kth {
     }
 }
 
+/// `roots` and every expression in them: what is inside one, by the trees'
+/// structure, not by where it is written (a template's parts share a use's
+/// span, and an argument placed twice is one span at two places;
+/// `docs/research/loads-and-places.md`, "Decided: identity by position").
+pub(crate) fn subtrees(c: &Checker, roots: &[ExpId]) -> std::collections::HashSet<ExpId> {
+    let mut out = std::collections::HashSet::new();
+    let mut stack = roots.to_vec();
+    while let Some(x) = stack.pop() {
+        if out.insert(x) {
+            stack.extend(within(c, x));
+        }
+    }
+    out
+}
+
+/// Each expression's parent, the one it is directly in, of every
+/// expression made: what is around one, by structure (`subtrees`).
+pub(crate) fn parents(c: &Checker) -> HashMap<ExpId, ExpId> {
+    let mut out = HashMap::new();
+    for e in c.arena.exp_ids() {
+        for x in within(c, e) {
+            out.insert(x, e);
+        }
+    }
+    out
+}
+
 /// The expressions in `e`, in the order the trees are written
 /// (`sexp::show_top`, and the parser's datatypes in `parser-types.fx`).
 fn within(c: &Checker, e: ExpId) -> Vec<ExpId> {

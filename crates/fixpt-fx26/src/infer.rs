@@ -428,14 +428,14 @@ impl Checker {
         let effects_before = self.facts.effects.clone();
         let mut effects: HashMap<ExpId, Effect> = HashMap::new();
         // Each member's code facts, and where it checked nothing.
-        let mut found: Vec<(HashMap<(ExpId, u8), CodeFact>, Vec<fixpt_read::Span>)> = Vec::new();
+        let mut found: Vec<(HashMap<(ExpId, u8), CodeFact>, std::collections::HashSet<ExpId>)> = Vec::new();
         let mut eff = Effect::pure();
         self.dead_arms.push(crate::check::DeadArms { members: members.len(), ..Default::default() });
         // Each lambda's signature, from here in, at each member, for the
         // verifier (`lambda_variants`). One a member skipped has the last
         // member's that checked it, again: harmless.
         let mut variants: Vec<(ExpId, crate::check::LambdaSig, std::rc::Rc<crate::check::MemberFacts>)> = Vec::new();
-        let whole = self.arena.span_of(e);
+        let whole = crate::ids::subtrees(self, &[e]);
         let mut checked = || -> R<()> {
             for (at, m) in members.iter().enumerate() {
                 self.facts.code_put_back(&saved);
@@ -444,9 +444,9 @@ impl Checker {
                 dead.at = at;
                 eff = self.check(e, *m)?;
                 let skipped = std::mem::take(&mut self.dead_arms.last_mut().expect("pushed").now);
+                let skipped = crate::ids::subtrees(self, &skipped);
                 if self.record_types {
-                    let inside = |x: fixpt_read::Span, o: &fixpt_read::Span| x.file == o.file && x.start >= o.start && x.end <= o.end;
-                    let here = |x: &ExpId| inside(self.arena.span_of(*x), &whole);
+                    let here = |x: &ExpId| whole.contains(x);
                     let member = std::rc::Rc::new(crate::check::MemberFacts {
                         types: self.facts.types.iter().filter(|(x, _)| here(x)).map(|(x, t)| (*x, *t)).collect(),
                         insts: self.facts.insts.iter().filter(|(x, _)| here(x)).map(|(x, i)| (*x, i.clone())).collect(),
@@ -475,14 +475,10 @@ impl Checker {
             return Err(err);
         }
         // Two members' facts compared where both checked.
-        let within = |x: fixpt_read::Span, outer: &fixpt_read::Span| x.file == outer.file && x.start >= outer.start && x.end <= outer.end;
         for j in 1..found.len() {
             for i in 0..j {
                 let ((fi, si), (fj, sj)) = (&found[i], &found[j]);
-                let both = |k: &(ExpId, u8)| {
-                    let at = self.arena.span_of(k.0);
-                    !si.iter().chain(sj).any(|s| within(at, s))
-                };
+                let both = |k: &(ExpId, u8)| !si.contains(&k.0) && !sj.contains(&k.0);
                 let differs = fi.keys().chain(fj.keys()).any(|k| both(k) && fi.get(k) != fj.get(k));
                 if differs {
                     return Err(FxError::at(
@@ -976,12 +972,10 @@ impl Checker {
             return Err(err);
         }
         // What was found before, but in this call: the failed try's.
-        let span = self.arena.span_of(e);
-        let within = |x: fixpt_read::Span, outer: fixpt_read::Span| x.file == outer.file && x.start >= outer.start && x.end <= outer.end;
-        let inside = |c: &Self, x: ExpId| within(c.arena.span_of(x), span);
-        let saved = self.facts.code_saved_but(|x| inside(self, x));
+        let inside = crate::ids::subtrees(self, &[e]);
+        let saved = self.facts.code_saved_but(|x| inside.contains(&x));
         let mut effects_before = self.facts.effects.clone();
-        effects_before.retain(|x, _| !inside(self, *x));
+        effects_before.retain(|x, _| !inside.contains(x));
         for (split, ms) in tried {
             if let Some(r) = self.app_by_members(e, fun, args, expected, split, &ms, &saved, &effects_before)? {
                 return Ok(r);

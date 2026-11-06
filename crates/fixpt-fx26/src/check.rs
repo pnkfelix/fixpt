@@ -912,9 +912,9 @@ pub(crate) struct DeadArms {
     /// and the error it would have been: one skipped under every member is
     /// that error.
     pub(crate) counts: HashMap<(ExpId, usize), (usize, FxError)>,
-    /// Where those of the member being checked are: what it did not check,
-    /// so has no facts of.
-    pub(crate) now: Vec<fixpt_read::Span>,
+    /// Those of the member being checked: what it did not check, so has no
+    /// facts of, each with all that is in it.
+    pub(crate) now: Vec<ExpId>,
 }
 
 impl NodeFacts {
@@ -1992,11 +1992,11 @@ impl Checker {
     /// compared.
     pub(crate) fn dead_branch(&mut self, e: ExpId, side: u8, ns: &[Narrowed]) -> bool {
         let void = ns.iter().any(|n| matches!(self.arena.get(n.4), Ty::Void));
-        let span = self.extent(match (self.arena.exp_at(e), side) {
+        let branch = match (self.arena.exp_at(e), side) {
             (Exp::If { then, .. }, 0) => *then,
             (Exp::If { els, .. }, _) => *els,
             _ => e,
-        });
+        };
         let Some(dead) = self.dead_arms.last_mut().filter(|_| void) else { return false };
         let at = dead.at;
         let skipped = dead.branches.entry((e, side)).or_default();
@@ -2004,24 +2004,8 @@ impl Checker {
             return false;
         }
         skipped.insert(at);
-        dead.now.push(span);
+        dead.now.push(branch);
         true
-    }
-
-    /// Where `e` is in the text, all of it: an `if` made of a `cond`'s
-    /// clause (or a `typecase`'s arm) is at that clause, and its `else` at
-    /// the next, so the clauses after are added.
-    fn extent(&self, e: ExpId) -> fixpt_read::Span {
-        let mut span = self.arena.span_of(e);
-        if let Exp::If { then, els, .. } = self.arena.exp_at(e) {
-            for x in [*then, *els] {
-                let s = self.extent(x);
-                if s.file == span.file {
-                    span = fixpt_read::Span::new(span.file, span.start.min(s.start), span.end.max(s.end));
-                }
-            }
-        }
-        span
     }
 
     pub(crate) fn push_narrowings(&mut self, ns: Vec<Narrowed>) {
@@ -5250,7 +5234,7 @@ impl Checker {
                     let at = dead.counts.entry((e, i)).or_insert((0, err.clone()));
                     at.0 += 1;
                     at.1 = err;
-                    dead.now.push(self.arena.span_of(arm.body));
+                    dead.now.push(arm.body);
                     continue;
                 }
                 return Err(err);

@@ -965,6 +965,11 @@ impl Arena {
         ExpId(last_id(self.exps.len(), "expressions"))
     }
 
+    /// Every expression made, in order.
+    pub fn exp_ids(&self) -> impl Iterator<Item = ExpId> + use<> {
+        (0..self.exps.len()).map(|i| ExpId(i as u32))
+    }
+
     /// Node `id` made `e`, its span kept: a parser rewriting what it made.
     pub fn replace_exp(&mut self, id: ExpId, e: Exp) {
         self.exps[id.0 as usize].1 = e;

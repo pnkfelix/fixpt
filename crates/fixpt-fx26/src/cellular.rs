@@ -140,6 +140,9 @@ fn find(e: &[(Sym, Loc)], n: Sym) -> Option<Loc> {
 pub struct Compiler<'a> {
     heap: &'a mut Heap,
     c: &'a Checker,
+    /// Each expression's parent (`ids::parents`), made when first wanted:
+    /// what lambdas are around one, for its certificate.
+    parents: std::cell::OnceCell<HashMap<ExpId, ExpId>>,
     /// The program's text, for naming each lambda by where its body starts,
     /// in characters, as the compiler written in FX-26 does.
     char_at: Vec<u32>,
@@ -382,7 +385,7 @@ impl<'a> Compiler<'a> {
             n += 1;
         }
         char_at[text.len()] = n;
-        Compiler { heap, c, char_at, labels: 0, genv: Vec::new(), genv_index: Default::default(), this: None, registers: false,
+        Compiler { heap, c, parents: Default::default(), char_at, labels: 0, genv: Vec::new(), genv_index: Default::default(), this: None, registers: false,
             register_report: Vec::new(),
             made: Vec::new(),
             reuse: Vec::new(),
@@ -2848,35 +2851,27 @@ impl<'a> Compiler<'a> {
             })
         };
         // Else as a reference to it in the body was checked: the binding the
-        // body saw (a parameter that hides it is found first, above).
-        let span = c.arena.span_of(body);
+        // body saw (a parameter that hides it is found first, above). In the
+        // body by the trees' structure, not by where it is written
+        // (`ids::subtrees`).
+        let inside = crate::ids::subtrees(c, &[body]);
         // The first such reference, by where it is: the facts are a map, and
         // two references may have been checked at types that differ.
         let referred = |n: &Sym| {
-            c.facts
-                .types
+            inside
                 .iter()
-                .filter_map(|(e, t)| {
-                    let at = c.arena.span_of(*e);
-                    (at.file == span.file && at.start >= span.start && at.end <= span.end && matches!(c.arena.exp_at(*e), Exp::Var(m) if m == n))
-                        .then_some(((at.start, e.0), *t))
-                })
+                .filter(|e| matches!(c.arena.exp_at(**e), Exp::Var(m) if m == n))
+                .filter_map(|e| c.facts.types.get(e).map(|t| ((c.arena.span_of(*e).start, e.0), *t)))
                 .min_by_key(|(k, _)| *k)
                 .map(|(_, t)| t)
         };
         // Else as the innermost lambda around this one that binds it has it:
         // another lambda's of the name (another `tag`, say) is not this one's.
+        let parents = self.parents.get_or_init(|| crate::ids::parents(c));
         let around = |n: &Sym| {
-            c.facts
-                .lambdas
-                .iter()
-                .filter(|(e, _)| {
-                    let at = c.arena.span_of(**e);
-                    at.file == span.file && at.start <= span.start && at.end >= span.end
-                })
-                .filter_map(|(e, s)| s.params.iter().chain(&s.frees).find(|(m, _)| m == n).map(|(_, t)| ((c.arena.span_of(*e).start, e.0), *t)))
-                .max_by_key(|(k, _)| *k)
-                .map(|(_, t)| t)
+            std::iter::successors(Some(body), |x| parents.get(x).copied())
+                .filter_map(|e| c.facts.lambdas.get(&e))
+                .find_map(|s| s.params.iter().chain(&s.frees).find(|(m, _)| m == n).map(|(_, t)| *t))
         };
         let elsewhere = |n: &Sym| referred(n).or_else(|| around(n)).or_else(|| c.global_type(*n));
         let by_name = |n: &Sym| sig.params.iter().rev().chain(sig.frees.iter()).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| included(n)).or_else(|| elsewhere(n));
