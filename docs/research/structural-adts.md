@@ -7,6 +7,13 @@ and intersections, and value constructors that each give a singleton
 type, with generativity kept only where abstraction needs it? Where does
 that break, and what would lemmas have to supply?
 
+**Since 2026-11-05** (`TODO.md` §191), a `tagcase` arm's list of names
+takes apart only a product labelled 1, 2, …, a `(tupleof T …)`, built by
+`(tuple e …)`. The programs quoted here that take a named product, such as
+`(productof (l T) (r T))`, apart by position predate that. The files in
+`docs/research/examples/` are updated to `tupleof` and `tuple` and give
+what they gave before.
+
 Sources are listed at the end with where each was read and how much of
 it. A claim marked *(from memory)* was not checked against a source.
 FX-26 facts cite files in this repository. Every FX-26 program quoted

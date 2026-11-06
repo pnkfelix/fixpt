@@ -3799,3 +3799,24 @@ from run to run, and right where the name is shadowed.
 4. **Termination is not judged per member** (U1's open item): a recursive
    `allof` whose calls fit another member says `spin` where it ends
    (`cond-dead.fx`); the user's `swap` in `herman.fx` checks as `pure`.
+
+## `tupleof`, `tuple`, and taking apart by position (TODO §191, 2026-11-05)
+
+The user chose: only positional products are taken apart by an arm's list
+of names; and `(tupleof T …)`, `(tuple e …)` for products labelled from 1.
+Mine:
+- **Positional** means labels exactly 1, 2, …, n, in the order written.
+  `(productof (2 int) (1 string))` is refused too, though its labels are
+  numbers: by position its first name would bind label 2, which reads
+  wrong. Labels compare as numbers (`tuple-eleven.fx`), never as sorted
+  strings.
+- **Both are rewrites at parse time**, so the types are the same: a
+  `(tupleof int string)` and a `(productof (1 int) (2 string))` are one
+  type, and a type prints as the `productof`. Printing `tupleof` back is
+  left for later; it would change what every message and `fixpt check`
+  says of today's positional products.
+- **Reserved:** `tuple` and `tupleof` are keywords in both checkers. No
+  program here, in Heist or in kayak names either.
+- **The refusal** says what to write instead: bind the payload to one
+  name and `extract` its fields.
+- An empty `(tuple)` is `(product)`, a `(productof)`.

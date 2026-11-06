@@ -33,7 +33,7 @@
         region-kind region-name-error one-let call-tmp standard-ref field-index bloblet-untagged?
         arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol mk-list quoted
         rec-names rec-types rec-inits module-usage loaded loaded-next-at in-loaded loaded-mark
-        loaded-error loaded-params loaded-made
+        loaded-error loaded-params loaded-made mk-form dt-labelled
         (type syns-a exp top exp-list mod-item mod-items letrec-list let-list arm-list loaded-file)
         (effect parses))
 ;; A `case`'s data by halving (`parser.fx`).
@@ -380,13 +380,12 @@
          (begin (at-least items 3 "`(let* ((name expression) …) body …)`" a b)
                 (parse-let* (syn-items (nth items 1) "let* bindings")
                             (parse-body (drop items 2) a b))))
-        ((the)
-         (begin (arity items 3 "`(the type expression)`" a b)
-                (e-the (nth items 1) (parse-exp (nth items 2)) a b 0)))
-        ((convention)
-         (begin (arity items 3 "`(convention C expression)`" a b)
-                (e-convention (nth items 1) (parse-exp (nth items 2)) a b 0)))
+        ((the) (begin (arity items 3 "`(the type expression)`" a b)
+                      (e-the (nth items 1) (parse-exp (nth items 2)) a b 0)))
+        ((convention) (begin (arity items 3 "`(convention C expression)`" a b)
+                             (e-convention (nth items 1) (parse-exp (nth items 2)) a b 0)))
         ((product) (e-product (parse-fields (cdr items)) a b 0))
+        ((tuple) (parse-exp (mk-form "product" (dt-labelled (cdr items) 1 a b) a b)))
         ((extract)
          (begin (arity items 3 "`(extract expression label)`" a b)
                 (let ((l (label (nth items 2))))

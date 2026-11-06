@@ -90,6 +90,8 @@
                                spin)
                        (symbol int k-names kx)
                        k-bindings))
+            (val k-takes-apart?
+                 (subr (maxeff (read @globals) spin (read @t)) (k-parts k-names) bool))
             (val k-zip-fields
                  (subr (maxeff (alloc @t) (read @globals) spin (read @t))
                        (k-names k-parts)

@@ -67,7 +67,7 @@
 (define k-type-forms k-names
   (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
         'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
-        'sumof 'bool 'oneof 'union 'anyof 'allof '-> '->* 'restrict))
+        'sumof 'tupleof 'bool 'oneof 'union 'anyof 'allof '-> '->* 'restrict))
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (->* (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))
@@ -78,7 +78,8 @@
         'oneshot '->*
         'listof 'cond 'else 'and 'or 'let* 'define-effect 'module-parameters 'the 'bloblet 'fields
         'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
-        'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module
+        'sumof 'product 'tupleof 'tuple 'extract 'sum 'tagcase 'module 'moduleof 'with 'select
+        'load-module
         'define-datatype 'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte
         'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=> 'case
         'define-convention 'define-syscall 'define-optional-syscall 'syscall-available?))

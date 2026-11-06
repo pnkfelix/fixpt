@@ -4584,7 +4584,13 @@ should: `define-type` would be the right form for it.
 (define-datatype var (union symbol pat))
 ```
 
-## 191. Q: `tagcase` binds a named product's fields by position (the user's, 2026-10-31)
+## 191. ~~Q: `tagcase` binds a named product's fields by position~~ (the user's, 2026-10-31; done 2026-11-05)
+
+Done (2026-11-05), the user's choice (1), from 1: an arm takes apart by
+position only a product labelled 1, 2, … in order, in both checkers
+(`Checker::positional`, `k-takes-apart?`); and `(tupleof T …)` and `(tuple
+e …)` for such products (`docs/fx26.md`, products). Tests:
+`tests/programs/tuples/`.
 
 Why is a product with named fields taken apart by position, the arm's
 names unrelated to the fields'?

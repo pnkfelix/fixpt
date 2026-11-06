@@ -4,14 +4,14 @@
 ;; staged passes a value of one between the module's procedures; it cannot
 ;; take one apart, nor pass its representation for it.
 (define-generative id int)
-(define-generative (tree (a type)) (sumof (leaf a) (node (productof (l (tree a)) (r (tree a))))))
+(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a)))))
 (define rt
   (module (define make (subr (read (globals up-id)) (int) id) (lambda (n) (up-id n)))
           (define get (subr (read (globals down-id)) (id) int) (lambda (i) (down-id i)))
           (define leaf (subr (read (globals up-tree)) (int) (tree int))
             (lambda (n) (up-tree (sum leaf n))))
           (define join (subr (read (globals up-tree)) ((tree int) (tree int)) (tree int))
-            (lambda (l r) (up-tree (sum node (product (l l) (r r))))))
+            (lambda (l r) (up-tree (sum node (tuple l r)))))
           (define total (subr (read (globals down-tree)) ((tree int)) int)
             (letrec ((total (subr (read (globals down-tree)) ((tree int)) int)
                        (lambda (t)

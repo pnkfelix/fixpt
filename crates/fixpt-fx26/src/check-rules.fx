@@ -713,7 +713,7 @@
                 (let* ((bound (if (extract arm 2)
                                   (tagcase (k-get t)
                                     (ty-product (fs)
-                                      (if (= (k-length fs) (k-length (extract arm 3)))
+                                      (if (k-takes-apart? fs (extract arm 3))
                                           (k-zip-fields (extract arm 3) fs)
                                           (k-cannot-take-apart tag t (extract arm 3) body)))
                                     (else y (k-cannot-take-apart tag t (extract arm 3) body)))

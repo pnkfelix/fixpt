@@ -6,17 +6,17 @@
 ;;; no tag to check; an ill-typed expression cannot be built at `int-exp`.
 (define-type int-exp
   (sumof (int-e int)
-         (add (productof (l int-exp) (r int-exp)))
-         (if-e (productof (c bool-exp) (t int-exp) (f int-exp)))))
+         (add (tupleof int-exp int-exp))
+         (if-e (tupleof bool-exp int-exp int-exp))))
 (define-type bool-exp
   (sumof (bool-e bool)
          (is-zero int-exp)
-         (if-e (productof (c bool-exp) (t bool-exp) (f bool-exp)))))
+         (if-e (tupleof bool-exp bool-exp bool-exp))))
 (define-type any-exp
   (sumof (int-e int) (bool-e bool)
-         (add (productof (l any-exp) (r any-exp)))
+         (add (tupleof any-exp any-exp))
          (is-zero any-exp)
-         (if-e (productof (c any-exp) (t any-exp) (f any-exp)))))
+         (if-e (tupleof any-exp any-exp any-exp))))
 (define eval-int (subr pure (int-exp) int)
   (letrec ((eval-int (subr pure (int-exp) int)
              (lambda (e)
@@ -33,8 +33,6 @@
     eval-int))
 (define one int-exp (sum int-e 1))
 (define prog int-exp
-  (sum if-e (product (c (sum is-zero (sum add (product (l one) (r (sum int-e -1))))))
-                     (t (sum int-e 42))
-                     (f one))))
+  (sum if-e (tuple (sum is-zero (sum add (tuple one (sum int-e -1)))) (sum int-e 42) one)))
 (define untyped any-exp prog)   ; the same value, forgetting its type
 (eval-int prog)

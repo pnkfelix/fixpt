@@ -16,6 +16,13 @@ Each idea has a toy example, Haskell or OCaml beside FX-26, in "Toy
 examples" below (E1 to E8); those FX-26 can say today are checked files
 under `docs/research/examples/gadts/`.
 
+**Since 2026-11-05** (`TODO.md` §191), a `tagcase` arm's list of names
+takes apart only a product labelled 1, 2, …, a `(tupleof T …)`, built by
+`(tuple e …)`. The programs quoted here that take a named product, such as
+`(productof (l T) (r T))`, apart by position predate that. The files in
+`docs/research/examples/` are updated to `tupleof` and `tuple` and give
+what they gave before.
+
 ## What we learned
 
 - **Regular families stay structural.** `(rose t r)` and the rest, tied as

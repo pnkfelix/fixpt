@@ -266,3 +266,34 @@ pub fn bootstrap_compiled(sc: &mut fixpt_scheme::Session, registers: bool) -> fi
     }
     word
 }
+
+/// Each program in `tests/programs/{sub}`, at least `least` of them, does
+/// what its first line says: gives a value, `;; => value`, or is refused by
+/// both checkers alike, the refusal saying `;; ! words`.
+pub fn programs_do_as_they_say(sub: &str, least: usize) {
+    let dir = format!("{}/tests/programs/{sub}", env!("CARGO_MANIFEST_DIR"));
+    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    names.sort();
+    let mut wrong = Vec::new();
+    for path in &names {
+        let text = std::fs::read_to_string(path).unwrap();
+        let first = text.lines().next().unwrap_or("");
+        let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
+        let got = match s.run_program(&text) {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(e) => Err(e.message),
+        };
+        let ok = match (first.strip_prefix(";; => "), first.strip_prefix(";; ! "), &got) {
+            (Some(want), _, Ok(v)) => v == want,
+            // Refused by both alike, not by one of them.
+            (_, Some(want), Err(e)) => e.contains(want) && !e.contains("checkers disagree"),
+            _ => false,
+        };
+        if !ok {
+            wrong.push(format!("{}: says `{first}`, gives {got:?}", path.display()));
+        }
+    }
+    assert!(names.len() >= least, "only {} programs", names.len());
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}

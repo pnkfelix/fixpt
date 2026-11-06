@@ -133,6 +133,14 @@
                     (let ((t (k-parse-type (k-nth pair 1))))
                       (k-parse-parts (cdr ps) (cons (product (1 l) (2 t)) done)))))
               (k-sfail "`(label type)`" (car ps)))))))
+;; A `tupleof`'s parts, `(tupleof T1 T2 …)` as `(productof (1 T1) (2 T2) …)`, from `i`.
+(define k-tuple-parts (->* (k-syns int) k-parts)
+  (lambda (ts i)
+    (if (null? ts)
+        nil
+        (let ((t (k-parse-type (car ts))))
+          (cons (product (1 (string->symbol (int->string i))) (2 t))
+                (k-tuple-parts (cdr ts) (+ i 1)))))))
 ;; Storage written: a procedure kept there may not reach itself unsaid
 ;; (`spin`).
 (define k-parse-type (->* (syn) int)
@@ -477,6 +485,7 @@
                    (k-ty-new (ty-bloblet fs (string=? which "frozen") r)))
                  (k-sfail "`(fields type …)` or `(frozen type …)`" fields)))))
         ((productof) (k-ty-new (ty-product (k-parse-parts (cdr items) nil))))
+        ((tupleof) (k-ty-new (ty-product (k-tuple-parts (cdr items) 1))))
         ;; With a key, a flat sum (`TODO.md` §77).
         ((sumof) (if (and (> n 1) (syn-symbol? (k-nth items 1)))
                      (k-parse-flat s)

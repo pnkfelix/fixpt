@@ -5164,6 +5164,12 @@ impl Checker {
     /// `tagcase`. `expected`, when checking, is what every arm is checked
     /// against; otherwise the result is the arms' types' least upper bound
     /// among themselves.
+    /// Whether a product's labels are 1, 2, … in order, a `tupleof`'s: only
+    /// such a product's fields are bound by position (`TODO.md` §191).
+    pub(crate) fn positional(&self, fs: &[(Sym, TyId)]) -> bool {
+        fs.iter().enumerate().all(|(i, (l, _))| self.interner.name(*l) == (i + 1).to_string())
+    }
+
     pub(crate) fn synth_tagcase(
         &mut self,
         e: ExpId,
@@ -5214,9 +5220,15 @@ impl Checker {
             let bound: Vec<(Sym, TyId)> = match &arm.bind {
                 ArmBind::Value(x) => vec![(*x, *t)],
                 ArmBind::Fields(xs) => match self.arena.get(*t).clone() {
-                    Ty::Product(fs) if fs.len() == xs.len() => xs.iter().zip(&fs).map(|(x, (_, t))| (*x, *t)).collect(),
-                    _ => {
-                        return Err(FxError::at(self.arena.span_of(arm.body), format!("`{}` carries a {}, which cannot be taken apart into {} name(s)", self.interner.name(arm.tag), self.show_ty(*t), xs.len())));
+                    Ty::Product(fs) if fs.len() == xs.len() && self.positional(&fs) => xs.iter().zip(&fs).map(|(x, (_, t))| (*x, *t)).collect(),
+                    ty => {
+                        // A product with names of its own is not taken apart
+                        // by position (`TODO.md` §191).
+                        let named = match ty {
+                            Ty::Product(fs) if !self.positional(&fs) => NOT_POSITIONAL,
+                            _ => "",
+                        };
+                        return Err(FxError::at(self.arena.span_of(arm.body), format!("`{}` carries a {}, which cannot be taken apart into {} name(s){named}", self.interner.name(arm.tag), self.show_ty(*t), xs.len())));
                     }
                 },
             };
@@ -5757,6 +5769,9 @@ const BEYOND: &str = "beyond what is expected, it has ";
 
 /// What a message adds where control is beyond what is expected (Heist's,
 /// `TODO.md` §211): why a `prompt` may not have taken it away.
+/// What a refusal to take a product with names apart by position adds.
+pub const NOT_POSITIONAL: &str = ": only a product labelled 1, 2, …, a `tupleof`, is taken apart by position; bind it to one name and `extract` its fields";
+
 pub const UNDELIMITED: &str = "a `prompt` masks the control on its tag's region only where no free variable of its body names that region but the tag (a continuation resumed under it does); a `letregion` that makes the region masks it";
 
 /// What one whose body may capture a continuation is told.

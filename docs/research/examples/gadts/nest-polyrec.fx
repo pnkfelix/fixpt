@@ -8,7 +8,7 @@
 ;;;   count :: (a -> Int) -> Nest a -> Int
 (define-type (pair (a type)) (productof (l a) (r a)))
 (define-generative (nest (a type))
-  (sumof (none unit) (more (productof (hd a) (tl (nest (pair a)))))))
+  (sumof (none unit) (more (tupleof a (nest (pair a))))))
 (define* count (poly ((a type)) (subr spin ((subr pure (a) int) (nest a)) int))
   (lambda (f n)
     (tagcase (down-nest n)
@@ -18,6 +18,6 @@
            (count (lambda ((p (pair a))) (+ (f (extract p l)) (f (extract p r))))
                   tl))))))
 (define empty (nest (pair (pair int))) (up-nest (sum none #u)))
-(define n2 (nest (pair int)) (up-nest (sum more (product (hd (product (l 2) (r 3))) (tl empty)))))
-(define n3 (nest int) (up-nest (sum more (product (hd 1) (tl n2)))))
+(define n2 (nest (pair int)) (up-nest (sum more (tuple (product (l 2) (r 3)) empty))))
+(define n3 (nest int) (up-nest (sum more (tuple 1 n2))))
 (count (lambda ((x int)) 1) n3)

@@ -65,7 +65,7 @@ const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a def
 
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "oneof", "union", "anyof", "allof", "->", "->*", "restrict",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "tupleof", "bool", "oneof", "union", "anyof", "allof", "->", "->*", "restrict",
 ];
 
 impl Checker {
@@ -915,6 +915,11 @@ impl Checker {
             // A flat sum with a key (`TODO.md` §77), so `define-type` may
             // name one.
             "sumof" if items.get(1).is_some_and(|k| k.as_symbol().is_some()) => self.parse_flat(s),
+            // `(tupleof T1 T2 …)`, `(productof (1 T1) (2 T2) …)`.
+            "tupleof" => {
+                let parts = items[1..].iter().enumerate().map(|(i, t)| Ok((self.interner.intern(&(i + 1).to_string()), self.parse_type(t)?))).collect::<R<Vec<_>>>()?;
+                Ok(self.arena.ty(Ty::Product(parts)))
+            }
             "productof" | "sumof" => {
                 let mut parts = Vec::new();
                 for p in &items[1..] {
@@ -2029,6 +2034,11 @@ impl Checker {
                     }
                     fields.push((label, self.parse_exp(e)?));
                 }
+                Ok(self.arena.exp(span, Exp::Product(fields)))
+            }
+            // `(tuple e1 e2 …)`, `(product (1 e1) (2 e2) …)`.
+            "tuple" => {
+                let fields = items[1..].iter().enumerate().map(|(i, e)| Ok((self.interner.intern(&(i + 1).to_string()), self.parse_exp(e)?))).collect::<R<Vec<_>>>()?;
                 Ok(self.arena.exp(span, Exp::Product(fields)))
             }
             "extract" => {

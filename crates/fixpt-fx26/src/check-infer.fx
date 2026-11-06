@@ -724,12 +724,29 @@
     (cond ((null? vs) nil)
           ((k-arm-named? arms (extract (car vs) 1)) (k-variants-not-named (cdr vs) arms))
           (else (cons (car vs) (k-variants-not-named (cdr vs) arms))))))
+;; Whether a product's labels are 1, 2, … in order, from `i`, a `tupleof`'s:
+;; only such a product's fields are bound by position (`TODO.md` §191).
+(define k-positional? (->* (k-parts int) bool)
+  (lambda (fs i)
+    (cond ((null? fs) #t)
+          ((string=? (symbol->string (extract (car fs) 1)) (int->string i))
+           (k-positional? (cdr fs) (+ i 1)))
+          (else #f))))
+;; Whether an arm's `names` bind the fields `fs`, one each, by position.
+(define k-takes-apart? (->* (k-parts k-names) bool)
+  (lambda (fs names) (and (= (k-length fs) (k-length names)) (k-positional? fs 1))))
+(define k-not-positional string
+  (string-append ": only a product labelled 1, 2, …, a `tupleof`, is taken apart by position;"
+                 " bind it to one name and `extract` its fields"))
 (define k-cannot-take-apart (->* (symbol int k-names kx) k-bindings)
   (lambda (tag t names body)
-    (k-fail (k-cat5 (k-quote (symbol->string tag)) " carries a " (k-show-ty t)
-                    ", which cannot be taken apart into "
-                    (string-append (int->string (k-length names)) " name(s)"))
-            (k-start body) (k-end body))))
+    (let ((named (tagcase (k-get t)
+                   (ty-product (fs) (if (k-positional? fs 1) "" k-not-positional))
+                   (else y ""))))
+      (k-fail (k-cat5 (k-quote (symbol->string tag)) " carries a " (k-show-ty t)
+                      ", which cannot be taken apart into "
+                      (string-append (int->string (k-length names)) " name(s)" named))
+              (k-start body) (k-end body)))))
 (define k-zip-fields (->* (k-names k-parts) k-bindings)
   (lambda (ns fs)
     (if (null? ns)
