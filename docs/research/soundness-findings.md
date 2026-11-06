@@ -42,6 +42,7 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 | F15  | fixed (2026-10-07): `cwcc` bound to another name, `(let ((callcc cwcc)) …)`, was called past F3's rule, which looked for the name `cwcc` at the call: a `pure` procedure looped forever. `cwcc` and the `certify-*` operations are now named only as a call's operator (past `proj` and `the`), so every call of them meets its rule. Both checkers. Tests `control/cwcc-alias.fx`, `second_class_operations_are_named_only_to_call`                          |
 | F16  | fixed (2026-10-07): the same for `certify-nat`: `(let ((cn certify-nat)) (cn -3))` was a `nat`. The same fix. Test `sizes/certify-nat-alias.fx`                                                                                                                                                                                                                                                                                                               |
 | F17  | fixed (2026-10-11, kayak's report): a polymorphic procedure calling a procedure it is given on a value it is given, instantiated at a type whose cycle runs through a parameter, gave it itself with no `spin`. Each procedure such an instantiation gives now says `spin`. Both checkers. Tests `terminate/poly-self-application*.fx`                                                                                                                        |
+| F18  | fixed (2026-11-05, the user's question): an `allof` call fitting two members whose results were procedures met them as their `allof`, though the call made a cell typed by each member's parameter as another type, which a closure in the result kept: written as an `ab`, read as an `ac`. Such a meet is refused where the procedures name a region the call allocates in. Both checkers. Tests `allof/fresh-*.fx`, `allof/cell-*.fx`                      |
 
 **Re-verification of F1–F7, A2, A3 against d83face** (fresh offline build,
 2026-09-27). F1: the name-shadowing probe (`known.fx`) is now rejected
@@ -611,6 +612,41 @@ procedure back to itself needs a call of the instantiation (now `spin`), a
 call through the cyclic type (already `spin`), or the store (`no_knot`).
 That is argued, not proved. Tests `terminate/poly-self-application.fx` and
 `terminate/poly-self-application-spin.fx`.
+
+## F18 — one cell, two types, through an `allof` call's meet
+
+Found 2026-11-05, on the user's question whether the refusals of
+intersections with cells were tested (they were not). An `allof`'s body is
+checked under each member; a call fitting several takes the meet of their
+results, and of two procedure types that meet is their `allof`
+(`docs/research/logical-types.md` §8.5, rule 4). But a body may make a cell
+whose contents its parameter types, another type under each member, and
+return a closure that keeps it:
+
+```
+(define mk (allof (subr (alloc @h) (ab) (subr pure () (ref ab @h)))
+                  (subr (alloc @h) (ac) (subr pure () (ref ac @h))))
+  (lambda (x) (let ((c ((proj new @h) x))) (lambda () c))))
+(define g (mk (sum a 1)))     ; one cell; g both closures' types
+```
+
+Through `g` as the first a `b` is written, through it as the second it is
+read as an `ac`: the program checked, and took the `c` arm for the `b`
+(printing 202; the other machines trapped, "no arm for this value"). Within
+a `letregion` it masked to `pure`. It is the distributivity
+`(A→B) ∩ (A→C) ≤ A → (B∩C)` that Davies and Pfenning drop with effects.
+
+**Fix.** Two procedure types do not meet where they name a region the call
+allocates in, by a fitting member's latent effect (`alloc`, not of frozen
+data), before masking (`Checker::meet`'s `fresh`, `k-meet`'s). That is
+enough: a view of a cell names its region (its type, or a reader's or
+writer's latent effect); a cell from before the call has one type, which
+every member must agree on, cells being invariant; every maker of mutable
+storage says `alloc`, and no cell is polymorphic (the value restriction).
+Argued, not proved. Frozen data (`acyclic`, `const`, cyclic or not) is made
+with no `alloc` where it is seen, and still meets. Tests `allof/fresh-*.fx`
+(refused, and allowed), `allof/frozen-*.fx`, `allof/cell-*.fx`,
+`allof/poly-cell.fx`, `every_maker_of_mutable_storage_allocates`.
 
 ## Assumptions the proof makes
 

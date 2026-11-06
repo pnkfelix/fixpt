@@ -44,7 +44,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-effects) (include check-subtype))
-(import check-resolve k-start k-end k-at-of)
+(import check-resolve k-start k-end k-at-of k-regions-in k-has-region-in?)
 (import check-synth k-note-call)
 (import check-expect k-rewriting)
 (import check-errors k-argument-error k-fail-no-part)
@@ -363,17 +363,38 @@
   (lambda (l fits)
     (or (null? fits)
         (and (k-within? l (k-subr-latent (car fits))) (k-latent-within-all? l (cdr fits))))))
-;; The meet of the results of `fits` after the first, onto `result`.
-(define k-results-met (->* (kx int k-ids int) int)
-  (lambda (x m0 fits result)
+;; Where a member of `fits` allocates, but not frozen data, onto `out`.
+(define k-fresh-of (->* (k-ids k-regions) k-regions)
+  (lambda (fits out)
+    (letrec ((atoms (->* (k-eff k-regions) k-regions)
+                    (lambda (as out)
+                      (if (null? as)
+                          out
+                          (atoms (cdr as)
+                                 (tagcase (car as)
+                                   (a-alloc (r)
+                                     (tagcase r
+                                       (r-frozen (p f) out)
+                                       (else y (if (k-has-region-in? out r) out (cons r out)))))
+                                   (else y out)))))))
+      (if (null? fits) out (k-fresh-of (cdr fits) (atoms (k-subr-latent (car fits)) out))))))
+;; The meet of the results of `fits` after the first, onto `result`; none
+;; where a procedure kept may hold a cell made under each member as
+;; another type (`fresh`, `k-meet`), which a meet with none fresh tells.
+(define k-results-met (->* (kx int k-ids int k-regions) int)
+  (lambda (x m0 fits result fresh)
     (if (null? fits)
         result
-        (let ((met (k-meet result (k-subr-result (car fits)))))
+        (let ((met (k-meet result (k-subr-result (car fits)) fresh)))
           (if (< met 0)
               (k-fail (k-cat5 "this call fits a " (k-show-ty m0) " and a " (k-show-ty (car fits))
-                              ", whose results have no meet")
+                              (if (< (k-meet result (k-subr-result (car fits)) nil) 0)
+                                  ", whose results have no meet"
+                                  (string-append ", whose results are procedures that may"
+                                                 " keep what the call allocates:"
+                                                 " one value would be both")))
                       (k-start x) (k-end x))
-              (k-results-met x m0 (cdr fits) met))))))
+              (k-results-met x m0 (cdr fits) met fresh))))))
 ;; A call `x` of `f`, of type `ft`, an `allof` (`logical-types.md` §8.5,
 ;; rule 4): each argument synthesized once, and every member whose
 ;; parameters take them fits; the call's result is the meet of theirs, its
@@ -388,7 +409,7 @@
                   (k-start x) (k-end x))
           (let* ((m0 (car fits))
                  (noted (k-note-call x f m0 (k-subr-params m0)))
-                 (res (k-results-met x m0 (cdr fits) (k-subr-result m0))))
+                 (res (k-results-met x m0 (cdr fits) (k-subr-result m0) (k-fresh-of fits nil))))
             (result x f ft args (k-tes-effect ts fe) (k-least-latent fits fits) res))))))
 
 ;;; ------------------------------------------------------------ rule 5
@@ -551,52 +572,62 @@
   (lambda (t) (tagcase (k-get (k-resolve t)) (ty-subr (e ps r cv spc) cv) (else y (cv-fx)))))
 ;; The tags of `xs` that `ys` has too, their payloads met; none, if one
 ;; does not meet.
-(define k-meet-sums (->* (k-parts k-parts) (listof k-parts acyclic))
-  (lambda (xs ys)
+(define k-meet-sums (->* (k-parts k-parts k-regions) (listof k-parts acyclic))
+  (lambda (xs ys fresh)
     (if (null? xs)
         (list (the k-parts nil))
-        (let ((rest (k-meet-sums (cdr xs) ys)) (u (k-part-find ys (extract (car xs) 1))))
+        (let ((rest (k-meet-sums (cdr xs) ys fresh)) (u (k-part-find ys (extract (car xs) 1))))
           (cond ((null? rest) nil)
                 ((< u 0) rest)
                 (else
-                 (let ((m (k-meet (extract (car xs) 2) u)))
+                 (let ((m (k-meet (extract (car xs) 2) u fresh)))
                    (if (< m 0)
                        nil
                        (list (the k-parts (cons (product (1 (extract (car xs) 1)) (2 m))
                                                 (car rest))))))))))))
 ;; Field by field, of the same labels; none, if one does not meet.
-(define k-meet-fields (->* (k-parts k-parts) (listof k-parts acyclic))
-  (lambda (xs ys)
+(define k-meet-fields (->* (k-parts k-parts k-regions) (listof k-parts acyclic))
+  (lambda (xs ys fresh)
     (cond ((and (null? xs) (null? ys)) (list (the k-parts nil)))
           ((or (null? xs) (null? ys)
                (not (symbol=? (extract (car xs) 1) (extract (car ys) 1))))
            nil)
           (else
-           (let ((m (k-meet (extract (car xs) 2) (extract (car ys) 2)))
-                 (rest (k-meet-fields (cdr xs) (cdr ys))))
+           (let ((m (k-meet (extract (car xs) 2) (extract (car ys) 2) fresh))
+                 (rest (k-meet-fields (cdr xs) (cdr ys) fresh)))
              (if (or (< m 0) (null? rest))
                  nil
                  (list (the k-parts (cons (product (1 (extract (car xs) 1)) (2 m))
                                           (car rest))))))))))
+;; Whether `named` has a region of `fresh`.
+(define k-names-fresh? (->* (k-regions k-regions) bool)
+  (lambda (named fresh)
+    (and (not (null? fresh))
+         (or (k-has-region-in? named (car fresh)) (k-names-fresh? named (cdr fresh))))))
 ;; The meet of `a` and `b`, the values both are, where that is a type
 ;; exactly and soundly (`logical-types.md` §8.5, rule 4); -1 where not. As
-;; Rust's `Checker::meet`.
-(define k-meet (->* (int int) int)
-  (lambda (a0 b0)
+;; Rust's `Checker::meet`: no two procedure types that name a region of
+;; `fresh`, where the call allocates, since a cell made there under each
+;; member may be another type under each, and a procedure kept read or
+;; write it as either.
+(define k-meet (->* (int int k-regions) int)
+  (lambda (a0 b0 fresh)
     (let ((a (k-resolve a0)) (b (k-resolve b0)))
       (cond ((k-subtype a b) a)
             ((k-subtype b a) b)
             ((and (not (null? (k-procs-of a))) (not (null? (k-procs-of b))))
              (if (k-conv=? (k-subr-conv-of (car (k-procs-of a)))
                            (k-subr-conv-of (car (k-procs-of b))))
-                 (k-ty-new (ty-allof (append (k-procs-of a) (k-procs-of b))))
+                 (if (k-names-fresh? (append (k-regions-in a) (k-regions-in b)) fresh)
+                     -1
+                     (k-ty-new (ty-allof (append (k-procs-of a) (k-procs-of b)))))
                  -1))
             (else
              (tagcase (k-get a)
                (ty-sum (xs)
                  (tagcase (k-get b)
                    (ty-sum (ys)
-                     (let ((ps (k-meet-sums xs ys)))
+                     (let ((ps (k-meet-sums xs ys fresh)))
                        (cond ((null? ps) -1)
                              ((null? (car ps)) k-void)
                              (else (k-ty-new (ty-sum (car ps)))))))
@@ -604,7 +635,7 @@
                (ty-product (xs)
                  (tagcase (k-get b)
                    (ty-product (ys)
-                     (let ((ps (k-meet-fields xs ys)))
+                     (let ((ps (k-meet-fields xs ys fresh)))
                        (if (null? ps) -1 (k-ty-new (ty-product (car ps))))))
                    (else z -1)))
                (else z -1))))))))))

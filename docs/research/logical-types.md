@@ -777,6 +777,27 @@ refs, and the conditions are what keep refs out.
      another only if equal. Where the results of the fitting members have
      no meet, the call is refused, naming them (the caller `proj`s or
      annotates).
+   - *Fresh regions* (2026-11-05, the user's question; soundness finding
+     F18). Two `subr` types do not meet where they name a region the call
+     allocates in (a fitting member's latent `alloc`, not of frozen data).
+     The body is checked under each member, so a cell it makes may be typed
+     by each member's parameter, `(ref ab)` under one and `(ref ac)` under
+     the other; a closure kept in the result may hold it, and their
+     `allof` would be one cell with both views: write a `b` as an `ab`,
+     read it as an `ac` (`allof/fresh-closure.fx`, which ran and took the
+     wrong arm). It is the distributivity above, at a call that allocates.
+     The call's own effect is looked at, before masking hides it
+     (`fresh-closure-masked.fx`). What a call makes is in a region a view
+     of it names (a `ref`'s, or a reader's or writer's latent effect); a
+     cell that existed before the call has one type, which every member
+     agrees on, as cells are invariant; and every maker of mutable storage
+     says `alloc` (`every_maker_of_mutable_storage_allocates`), no cell
+     being polymorphic (`allof/poly-cell.fx`). Frozen data, `acyclic` or
+     `const` (a `letfreeze`'s, cyclic or not), is made with no `alloc` in
+     a region it names, and is one value of both types
+     (`frozen-results.fx`, `frozen-ring.fx`); so is what a call allocates
+     where its results do not look (`fresh-elsewhere.fx`). Where two
+     results are related, the lesser is one member's typing, sound alone.
 5. **Union elimination at a call's arguments** (question 11: at U3). A
    call's argument is
    evaluated once, before the call: Dunfield and Pfenning's condition for
@@ -880,7 +901,7 @@ compares them like any fact.
 | Stage | Size | What                                                                                                          | Test                                                                                     |
 | ----- | ---- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | U0    | S–M  | `union` renamed `oneof`; sums with disjoint tags well-formed members                                          | every existing program, renamed; two sums of disjoint tags; both checkers agree          |
-| U1    | M–L  | `allof` of monomorphic `subr` members: rules 1 to 4, `⊓` on base types, sums, products, immutable lists        | the user's λm swap over `expr`, `op`, `sexp`; `len`'s `pure`/`spin`; a `ref` meet refused |
+| U1    | M–L  | `allof` of monomorphic `subr` members: rules 1 to 4, `⊓` on base types, sums, products, immutable lists        | the user's λm swap over `expr`, `op`, `sexp`; `len`'s `pure`/`spin`; cells refused (`allof/cell-*.fx`, `fresh-*.fx`, from 2026-11-05) |
 | U2    | M    | `anyof`: overlapping immutable members, sums merged, disjunctive subtyping with rollback, narrowing that leaves unions | `(anyof expr op)` a sub-sum of `sexp`; two cells, or two writable lists, refused          |
 | U2b   | M–L  | lazy normalization (§8.8): head forms by shape, greatest members, splits on failure with a budget, caches     | `car` of an `anyof` of `nat` and `int` lists; a pair of a union below a union of pairs; a mixed list refused    |
 | U3    | M    | rule 5, ∪E at arguments                                                                                       | `swap` of an `(anyof expr op)`; `car` of an `anyof` of two `acyclic` lists               |

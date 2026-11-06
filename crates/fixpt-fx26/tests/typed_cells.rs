@@ -364,6 +364,9 @@ fn every_directory_surveyed() {
 const KNOWN_GAPS: &[&str] = &[
     // The verifier has no rule for `allof` yet (`TODO.md` §79, U1): a body
     // checked against each member, a call taking every member it fits.
+    "allof/fresh-elsewhere.fx `program`",
+    "allof/frozen-results.fx `program`",
+    "allof/frozen-ring.fx `program`",
     "allof/meet.fx `program`",
     "allof/swap.fx `program`",
     "allof/swap.fx `swap@1194`",

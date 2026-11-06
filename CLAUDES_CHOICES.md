@@ -3757,3 +3757,24 @@ from run to run, and right where the name is shadowed.
    name; any other `--reps=…` is a usage error (2).
 4. On the test programs of `tests/reps.rs`'s directories: 1923 lines, none
    declined, none differing.
+
+## F18: an `allof` call's meet, and what the call allocates (2026-11-05; the user's)
+
+1. **Where the rule is**: the procedure-type case of the meet only (two
+   `subr` types made an `allof`), not every meet whose results name a
+   fresh region. Where two results are related, the lesser is one member's
+   typing, sound alone; sums and products meet part by part, so a
+   procedure in one is met by the same rule.
+2. **Fresh regions**: each fitting member's latent `alloc`, not
+   `Region::Frozen` (frozen data, immutable). The call's own effect, as
+   the members say it, not the enclosing expression's after masking.
+3. **No region named in the message**: "whose results are procedures that
+   may keep what the call allocates: one value would be both". The two
+   members are shown, with their `alloc`. The FX-26 checker tells the two
+   refusals apart by meeting again with no fresh regions (its
+   `k-meet-sums`, `k-meet-fields` give none, not why); Rust's `meet`
+   returns which.
+4. **Tests of what the rule relies on**: every maker of mutable storage
+   says `alloc` (a Rust test), and no cell is polymorphic
+   (`allof/poly-cell.fx`). Each refusal test keeps, after the refused
+   form, the lines that would go wrong.

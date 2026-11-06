@@ -1695,13 +1695,21 @@ impl Checker {
     /// field; of two procedure types of one convention, their `allof`.
     /// Nothing else meets: in particular no two cells, arrays, writable
     /// pairs or regions that differ, whose meet would be unsound.
-    pub(crate) fn meet(&mut self, a: TyId, b: TyId) -> Option<TyId> {
+    ///
+    /// Nor two procedure types that name a region of `fresh`, where the
+    /// call allocates (`Err(true)`; `Err(false)`, no meet): typed under
+    /// each member, a cell it makes there may be another type under each,
+    /// and a procedure kept in the result may read or write it, as one of
+    /// those types or the other (Davies and Pfenning's reason to drop the
+    /// arrow's distributivity; `docs/research/logical-types.md` §8.5).
+    /// Data made frozen, or no cell, is one value of both types.
+    pub(crate) fn meet(&mut self, a: TyId, b: TyId, fresh: &[Region]) -> Result<TyId, bool> {
         let (a, b) = (self.arena.resolve(a), self.arena.resolve(b));
         if self.subtype(a, b) {
-            return Some(a);
+            return Ok(a);
         }
         if self.subtype(b, a) {
-            return Some(b);
+            return Ok(b);
         }
         let procs = |c: &Self, t: TyId| match c.arena.get(t) {
             Ty::Subr { conv, .. } => Some((*conv, vec![t])),
@@ -1713,29 +1721,35 @@ impl Checker {
         };
         if let (Some((c1, mut ms)), Some((c2, ns))) = (procs(self, a), procs(self, b)) {
             if c1 != c2 {
-                return None;
+                return Err(false);
+            }
+            let mut named = HashSet::new();
+            self.regions_in(a, &mut named);
+            self.regions_in(b, &mut named);
+            if fresh.iter().any(|r| named.contains(r)) {
+                return Err(true);
             }
             ms.extend(ns);
-            return Some(self.arena.ty(Ty::AllOf(ms)));
+            return Ok(self.arena.ty(Ty::AllOf(ms)));
         }
         match (self.arena.get(a).clone(), self.arena.get(b).clone()) {
             (Ty::Sum(xs), Ty::Sum(ys)) => {
                 let mut parts = Vec::new();
                 for (l, t) in xs {
                     if let Some((_, u)) = ys.iter().find(|(m, _)| *m == l) {
-                        parts.push((l, self.meet(t, *u)?));
+                        parts.push((l, self.meet(t, *u, fresh)?));
                     }
                 }
-                Some(if parts.is_empty() { self.void } else { self.arena.ty(Ty::Sum(parts)) })
+                Ok(if parts.is_empty() { self.void } else { self.arena.ty(Ty::Sum(parts)) })
             }
             (Ty::Product(xs), Ty::Product(ys)) if xs.len() == ys.len() && xs.iter().zip(&ys).all(|((l, _), (m, _))| l == m) => {
                 let mut fields = Vec::new();
                 for ((l, t), (_, u)) in xs.iter().zip(&ys) {
-                    fields.push((*l, self.meet(*t, *u)?));
+                    fields.push((*l, self.meet(*t, *u, fresh)?));
                 }
-                Some(self.arena.ty(Ty::Product(fields)))
+                Ok(self.arena.ty(Ty::Product(fields)))
             }
-            _ => None,
+            _ => Err(false),
         }
     }
 

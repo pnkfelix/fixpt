@@ -515,15 +515,30 @@ impl Checker {
             return Err(FxError::at(span, format!("this call fits no member of a {}: its arguments are {}", self.show_ty(ft), shown.join(", "))));
         };
         self.facts.call_convs.insert(fun, conv);
+        // Where any member it fits allocates, but not frozen data.
+        let mut fresh: Vec<Region> = Vec::new();
+        for (_, l, _, _) in &fits {
+            for a in &l.0 {
+                if let Atom::Alloc(r) = a {
+                    if !matches!(r, Region::Frozen(..)) && !fresh.contains(r) {
+                        fresh.push(*r);
+                    }
+                }
+            }
+        }
         let mut result = result0;
         for &(m, _, r, _) in &fits[1..] {
-            let Some(met) = self.meet(result, r) else {
-                return Err(FxError::at(
-                    span,
-                    format!("this call fits a {} and a {}, whose results have no meet", self.show_ty(m0), self.show_ty(m)),
-                ));
+            result = match self.meet(result, r, &fresh) {
+                Ok(met) => met,
+                Err(kept) => {
+                    let why = if kept {
+                        ", whose results are procedures that may keep what the call allocates: one value would be both"
+                    } else {
+                        ", whose results have no meet"
+                    };
+                    return Err(FxError::at(span, format!("this call fits a {} and a {}{why}", self.show_ty(m0), self.show_ty(m))));
+                }
             };
-            result = met;
         }
         let latent = fits.iter().map(|(_, l, _, _)| l).find(|l| fits.iter().all(|(_, o, _, _)| l.within(o))).unwrap_or(latent0).clone();
         let mut effect = effect.union(&latent);

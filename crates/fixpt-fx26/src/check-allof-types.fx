@@ -7,7 +7,7 @@
 (hide (define check-types-types (load-module "fx26:check-types-types.fx"))
       (define check-synth-types (load-module "fx26:check-synth-types.fx"))
       (define check-subtype-types (load-module "fx26:check-subtype-types.fx")))
-(import check-types-types (type kx kxs k-te k-eff) (effect checks))
+(import check-types-types (type kx kxs k-te k-eff k-regions) (effect checks))
 (import check-synth-types (type k-done))
 (import check-subtype-types (type k-checking))
 ;; What the rules give it of their recursive group: `k-check`, `k-synth`,
@@ -27,4 +27,4 @@
             (val k-arm-dead? (subr (maxeff checks spin) (int symbol int int) bool))
             (val k-split-app (subr (maxeff checks spin) (kx kx kxs int k-app-fn) k-te))
             (val k-as-argument (subr (maxeff checks spin) (k-checking kx int) k-te))
-            (val k-meet (subr (maxeff checks spin) (int int) int))))
+            (val k-meet (subr (maxeff checks spin) (int int k-regions) int))))
