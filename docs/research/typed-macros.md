@@ -547,8 +547,10 @@ turn.
 - The REPL: a macro defined in what is typed is defined for that alone
   (`Checker::macros_kept`); a use's binders and scopes are not yet shown
   before it expands.
-- The front end written in FX-26 has no macros: a module's file
-  (`load-module`) and `check_only` see none.
+- The front end written in FX-26 has no macros of its own: what it is
+  given has been expanded by the Rust expander (`expand_forms`), but
+  `fixpt check`, which gives it the text, fails on a program with macros;
+  a module file's macros are what `import-with-syntax` brings.
 - Ellipsis (the user's answer: later, as sugar for recursion), `defn`,
   binders of descriptions, procedural macros (items 7 to 11).
 

@@ -4307,11 +4307,15 @@ later). The user's answers (2026-11-06): Herman's foundations first, his
 tree addresses (with comments in the readable names), recursion not
 ellipsis, a template's globals as at the use, keyword labels in templates.
 Prototype built (2026-11-06, `typed-macros.md`, "The prototype, as
-built"; `macros.rs`, `tests/macros.rs`). Next, its "Not yet": templates
-naming the program's globals (an unshadowable reference to one, as
-`#%fx` is to the standard's); errors in expansions mapped back (item 4);
-macro names a local binder may shadow; `(expr T E)` and templates
-checked once (item 7); the port to the front end written in FX-26.
+built"; `macros.rs`, `tests/macros.rs`). Done since: templates naming the
+program's globals through `#%toplevel` (item 5, 2026-11-07); a file's
+macros brought by `import-with-syntax`, with `only` and `except`
+(2026-11-07). Next, its "Not yet": errors in expansions mapped back for
+the FX-26 checker's places (item 4); macro names a local binder may
+shadow (its interaction with `with` open); a file's own use of its
+macros, files of module parameters; `(expr T E)` and templates checked
+once (item 7); the port to the front end written in FX-26, without which
+`fixpt check` of a program with macros fails.
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`
