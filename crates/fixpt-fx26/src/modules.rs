@@ -726,6 +726,15 @@ impl Checker {
             };
             return Err(FxError::at(span, msg));
         };
+        // A macro used in the body by a name the module gives a value of:
+        // the program would seem to call the value, and the expander, which
+        // cannot know the module's names, made the macro's use of it.
+        if let Some(uses) = self.macros.with_uses.get(&span)
+            && let Some((n, at)) = uses.iter().find(|(n, _)| vals.iter().any(|(v, _)| v == n))
+        {
+            let (n, shown) = (self.interner.name(*n), self.interner.name(m));
+            return Err(FxError::at(*at, format!("`{n}` is a macro here, and `{shown}` gives a value of that name, which this `with` would seem to call")));
+        }
         let mut free = self.free_vars(body);
         // An include's names are the module's own, bound where `%include`
         // is: one bound since (the item's lambda's parameter) shadows them

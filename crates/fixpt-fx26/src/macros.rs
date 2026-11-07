@@ -152,6 +152,16 @@ pub struct Macros {
     /// The text being read, if it is known (`Checker::read_in`): a macro
     /// defined in it has its templates' places in it.
     pub(crate) reading: Option<std::sync::Arc<str>>,
+    /// By each `with` form's place, the macros used in its body by names
+    /// written in the source, each with the use's place: refused there if
+    /// the module gives a value of the name (`Checker::with_as`), which the
+    /// program would seem to call, and the expander cannot see.
+    pub(crate) with_uses: HashMap<Span, Vec<(Sym, Span)>>,
+    /// Where each macro the program has by its name was defined: its
+    /// `define-syntax`, or the `import-with-syntax` that brought it. A
+    /// program is expanded before it is checked, so what is defined when a
+    /// form is checked may be defined after it (`defined_before`).
+    defined_at: HashMap<Sym, Span>,
 }
 
 /// The kernel's forms a template may use, with their binding structure
@@ -262,6 +272,19 @@ impl Macros {
     /// Whether `name` is a macro defined.
     pub fn is_macro(&self, name: Sym) -> bool {
         self.defined.contains_key(&name)
+    }
+
+    /// If `name` is a macro defined, whether before what is at `at` (one
+    /// defined in another file, or where unknown, is taken to be), and if
+    /// not, where.
+    pub fn defined_before(&self, name: Sym, at: Span) -> Option<Result<(), Span>> {
+        if !self.is_macro(name) {
+            return None;
+        }
+        Some(match self.defined_at.get(&name) {
+            Some(d) if d.file == at.file && d.start > at.start => Err(*d),
+            _ => Ok(()),
+        })
     }
 
     /// A syntax type read: `named`'s names (the kernel's abbreviations), and
@@ -397,7 +420,9 @@ impl Macros {
     /// defined. A template's free name is the top level's where the macro
     /// is used (`Action::Toplevel`).
     pub fn define(&mut self, form: &Syntax, interner: &mut Interner) -> R<()> {
-        self.define_in(form, interner, None).map(|_| ())
+        let name = self.define_in(form, interner, None)?;
+        self.defined_at.insert(name, form.span);
+        Ok(())
     }
 
     /// A file's macros, `forms` its `define-syntax`es (each with whether it
@@ -405,13 +430,14 @@ impl Macros {
     /// the name the importer has it by, `scope.internal`'s, and each not
     /// hidden that `taken` takes by its own name too: what `(import-with-syntax
     /// lib)` brings (`(only name …)`, `(except name …)`).
-    pub fn define_file(&mut self, forms: &[(Syntax, bool)], scope: &FileScope, taken: &dyn Fn(Sym) -> bool, interner: &mut Interner) -> R<()> {
+    /// `at`: the `import-with-syntax`.
+    pub fn define_file(&mut self, forms: &[(Syntax, bool)], scope: &FileScope, taken: &dyn Fn(Sym) -> bool, at: Span, interner: &mut Interner) -> R<()> {
         self.ensure_kernel(interner)?;
         // The file's macros defined among themselves, by their names in it,
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone() };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), defined_at: HashMap::new() };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -434,6 +460,7 @@ impl Macros {
                     return Err(FxError::at(forms[0].0.span, format!("`{shown}` is a macro defined already: a file's may not be defined again")));
                 }
                 self.defined.insert(name, m.clone());
+                self.defined_at.insert(name, at);
             }
             self.defined.insert(scope.internal[&name], m);
         }
@@ -594,14 +621,15 @@ impl Macros {
             return Ok(form.clone());
         }
         let mut budget = 10_000;
-        let mut out = self.expand_in(form, interner, &mut budget)?;
+        let mut out = self.expand_in(form, interner, &mut budget, &mut Vec::new())?;
         // A form of the program's is the text written for it, what a use
         // made of it or not: the REPL takes the entry's text by it.
         out.span = form.span;
         Ok(out)
     }
 
-    fn expand_in(&mut self, s: &Syntax, interner: &mut Interner, budget: &mut usize) -> R<Syntax> {
+    /// `withs`: the places of the `with` forms whose bodies `s` is in.
+    fn expand_in(&mut self, s: &Syntax, interner: &mut Interner, budget: &mut usize, withs: &mut Vec<Span>) -> R<Syntax> {
         let Datum::List { items, tail } = &s.datum else { return Ok(s.clone()) };
         let head = items[0].as_symbol();
         if head.is_some_and(|h| interner.name(h) == "quote") {
@@ -614,8 +642,15 @@ impl Macros {
                 return Err(FxError::at(s.span, "this macro's expansion does not end"));
             }
             *budget -= 1;
+            // A name the program wrote (a template's is the macro, by
+            // hygiene), in a `with`'s body.
+            if items[0].span.expansion == 0 {
+                for w in withs.iter() {
+                    self.with_uses.entry(*w).or_default().push((h, items[0].span));
+                }
+            }
             let out = self.expand_use(h, &m, s, interner)?;
-            return self.expand_in(&out, interner, budget);
+            return self.expand_in(&out, interner, budget, withs);
         }
         // A definition of a macro's name: refused, as a form's is.
         if let (Some(h), Some(n)) = (head, items.get(1).and_then(|n| n.as_symbol()))
@@ -624,9 +659,23 @@ impl Macros {
         {
             return Err(FxError::at(items[1].span, format!("`{}` is a macro's name, which is not defined again", interner.name(n))));
         }
-        let items = items.iter().map(|i| self.expand_in(i, interner, budget)).collect::<R<Vec<_>>>()?;
+        // `(with m body …)`: its body in it.
+        let with = head.is_some_and(|h| interner.name(h) == "with");
+        let mut out = Vec::new();
+        for (k, i) in items.iter().enumerate() {
+            let inside = with && k >= 2;
+            if inside {
+                withs.push(s.span);
+            }
+            let r = self.expand_in(i, interner, budget, withs);
+            if inside {
+                withs.pop();
+            }
+            out.push(r?);
+        }
+        let items = out;
         let tail = match tail {
-            Some(t) => Some(Box::new(self.expand_in(t, interner, budget)?)),
+            Some(t) => Some(Box::new(self.expand_in(t, interner, budget, withs)?)),
             None => None,
         };
         Ok(Syntax::new(s.span, Datum::List { items, tail }))

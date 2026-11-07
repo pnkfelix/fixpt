@@ -289,6 +289,18 @@ impl Checker {
 
     fn top_defining_kept(&mut self, form: &Syntax) -> R<Defining> {
         let names = self.defined_names(form);
+        // A macro's name defined, however (an `import`'s or `include`'s
+        // definitions are made after expansion): refused, as a `define` of
+        // one is as it is expanded. A macro of a name defined before it, in
+        // a program expanded before it is checked: refused where it is (as
+        // in the REPL, where it is defined after this is checked).
+        for n in &names {
+            match self.macros.defined_before(*n, form.span) {
+                Some(Ok(())) => return Err(FxError::at(form.span, format!("`{}` is a macro's name, which is not defined again", self.interner.name(*n)))),
+                Some(Err(at)) => return Err(Self::macro_over_global(&self.interner, *n, at)),
+                None => {}
+            }
+        }
         let olds: Vec<(Sym, TyId)> = names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
         let users = if olds.is_empty() || self.defer_reruns { Vec::new() } else { self.users_of(&names) };
         let direct = if olds.is_empty() || !self.defer_reruns { Vec::new() } else { self.direct_users_of(&names) };
@@ -789,7 +801,7 @@ impl Checker {
         let r = {
             let is_standard = |s: Sym| self.standard_type(s).is_some();
             let scope = crate::macros::FileScope { shared, values, types, internal, is_standard: &is_standard };
-            defined.define_file(&macros, &scope, &taken, &mut interner)
+            defined.define_file(&macros, &scope, &taken, form.span, &mut interner)
         };
         defined.reading = outer;
         self.macros = defined;
@@ -827,12 +839,23 @@ impl Checker {
         self.macros = kept;
     }
 
+    /// A macro, defined at `at`, of `n`, a global's name: refused.
+    fn macro_over_global(interner: &fixpt_read::Interner, n: Sym, at: Span) -> FxError {
+        FxError::at(at, format!("`{}` is defined already: a macro may not take its name", interner.name(n)))
+    }
+
     /// `form`, a `(define-syntax …)`, defined, and none; or with the uses of
     /// the macros defined in it expanded (`crate::macros`).
     fn macro_expanded(&mut self, form: Syntax) -> R<Option<Syntax>> {
+        let defines = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "define-syntax");
+        if defines
+            && let Some(n) = form.as_proper_list().and_then(|l| l.get(1)).and_then(|n| n.as_symbol())
+            && self.global_type(n).is_some()
+        {
+            return Err(Self::macro_over_global(&self.interner, n, form.span));
+        }
         let mut macros = std::mem::take(&mut self.macros);
         let mut interner = std::mem::take(&mut self.interner);
-        let defines = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| interner.name(h) == "define-syntax");
         let r = if defines {
             macros.define(&form, &mut interner).map(|()| None)
         } else {

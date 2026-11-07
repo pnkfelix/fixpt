@@ -4312,7 +4312,9 @@ program's globals through `#%toplevel` (item 5, 2026-11-07); a file's
 macros brought by `import-with-syntax`, with `only` and `except`
 (2026-11-07). Next, its "Not yet": errors in expansions mapped back for
 the FX-26 checker's places (item 4); macro names a local binder may
-shadow (its interaction with `with` open); a file's own use of its
+shadow (a `with`'s, a macro used in its body by a name the module gives,
+refused since 2026-11-07; `rename`/`prefix` for `import-with-syntax` the
+way out, when wanted); a file's own use of its
 macros, files of module parameters; `(expr T E)` and templates checked
 once (item 7); the port to the front end written in FX-26, without which
 `fixpt check` of a program with macros fails.

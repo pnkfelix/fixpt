@@ -538,7 +538,17 @@ turn.
 **Not yet:**
 - A macro's name may not be bound or defined at all, as a form's may not
   (Herman lets a local binder shadow a macro); a use binding one is
-  refused, and a definition of one.
+  refused, and a definition of one, however made (an `import`'s, a
+  top-level `include`'s), and a macro of a global's name.
+- A `with` binds what its module gives, which the expander cannot see:
+  a macro used in its body, by a name the program wrote, of which the
+  module gives a value is refused when the `with` is checked
+  (`` `clamp` is a macro here, and `m` gives a value of that name ``),
+  rather than the program seeming to call the value (the user's,
+  2026-11-07). A template's use of a macro is the macro, by hygiene, and
+  not refused. The way out, when one is wanted: `rename` and `prefix`
+  for `import-with-syntax` (not built). Rust expander and checker only,
+  as are macros: the FX-26 front end sees expansions.
 - Errors inside an expansion are said where the template wrote the part,
   then at each use that made it, innermost first (2026-11-06,
   `loads-and-places.md`, "Done: identity by position"); the printed

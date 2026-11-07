@@ -4162,3 +4162,25 @@ The user read the paper as supporting the distribution. Mine:
 - **Nothing left to include is no error there**: `(only macro …)` makes
   no `include`, and an `(except …)` that leaves nothing runs as nothing,
   shown as nothing; a plain `(include m)` of nothing is still refused.
+
+## A `with` and the macros used in its body (2026-11-07)
+
+- **The rule is the user's** (refuse, rather than either meaning winning
+  silently); these are mine:
+- **Refused on use, not on any name given**: a `with` of a module that
+  gives a macro's name is fine unless the body uses the macro by it,
+  so modules need not avoid every macro's name.
+- **Only names the program wrote**: a use whose head came from a template
+  (its span in an expansion) is the macro by hygiene, whatever the
+  `with` around the use binds.
+- **The record is the expander's** (`Macros::with_uses`, by the `with`
+  form's span), read by the Rust checker at the `with`, where the
+  module's names are known. No FX-26 side yet: that front end has no
+  expander and checks only expansions, which the Rust checker has
+  checked first; it goes with the expander's port.
+- **The same hole at the top level closed with it**: an `import`'s or a
+  top-level `include`'s definition of a macro's name (made after
+  expansion, so the expander's refusal of `define` missed them), and a
+  macro of a global's name (refused where the macro is: at expansion in
+  the REPL, at the global's check in a program, which is expanded before
+  anything is checked, so each macro keeps where it was defined).
