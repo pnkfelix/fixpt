@@ -4210,3 +4210,14 @@ The user read the paper as supporting the distribution. Mine:
   number, as there.
 - **The reading is of the form as written**, the macros it is expanded
   with in the state it is read in, rather than of its expansion.
+- **`import-with-syntax` in FX-26 reads the file the driver read** for the
+  `load-module` its name's definition makes, found by path, its key the
+  one both front ends' `%shared:` names use; its load definitions are in
+  the state's table with the macros.
+- **The standard names come from the driver** (`standard-names!`, beside
+  `includes-given!`, both told by `compare::tell_front_end`), as the Rust
+  checker has them, rather than handing the parser the standard
+  environment, which only the conductor holds.
+- **Rust's `includes_given` reads the program again from no macros**: a
+  second whole read in the checker that checked it imported a file's
+  macros twice, refused as defined already, and so said no `include`.

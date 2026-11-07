@@ -155,7 +155,7 @@
 
 ;; What the driver read for each `load-module` or `load-input`, by where
 ;; the form starts: the file's base (0 if it could not be read or read),
-;; its path, why not (`cannot read …`, or where in it reading failed), its
+;; why not (`cannot read …`, or where in it reading failed), its path, its
 ;; forms, its text, the path from the program's directory, which names it
 ;; among the loads that are one (`TODO.md` §68), and whether the forms are
 ;; not the file's but the one expression its `.fasl` is read as

@@ -565,10 +565,12 @@ turn.
   The macros a form is read with are what the session's state it is read
   in says (a table from each state to the macros after it), the
   `define-syntax`es in the readings that make the state. Both expanders
-  agree on every program in `tests/programs/macros`
-  (`tests/macros_both.rs`), but for what is not ported yet:
-  `import-with-syntax`, and the checker's refusals of macros (a `with`'s
-  body, a definition of a macro's name, a macro of a global's). An error
+  agree on every program in `tests/programs/macros` and those of
+  `import-with-syntax` (`tests/macros_both.rs`, ported the same day: the
+  file's forms the driver read, its load definitions in the state too, the
+  standard names the driver gives, `standard-names!`), but for what is not
+  ported yet: the checker's refusals of macros (a `with`'s body, a
+  definition of a macro's name, a macro of a global's). An error
   the FX-26 checker finds in an expansion is said where the template
   wrote it, not yet at each use that made it: its trees keep no
   expansion (`syn` does, since 2026-11-07).

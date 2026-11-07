@@ -2118,6 +2118,12 @@ impl Checker {
     }
 
     /// The type of the global `s` as defined now, broken or not.
+    /// The standard bindings' names, which a file's macro may name
+    /// (`standard_type`): for the expander written in FX-26.
+    pub fn standard_names(&self) -> Vec<String> {
+        (0..self.standard_len).map(|i| self.interner.name(self.env[i].0).to_string()).collect()
+    }
+
     pub fn global_type(&self, s: Sym) -> Option<TyId> {
         self.env.rpos(s).filter(|i| *i >= self.standard_len).map(|i| self.env[i].1)
     }

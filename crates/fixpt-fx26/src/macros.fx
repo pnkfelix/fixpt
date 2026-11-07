@@ -15,7 +15,10 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn-expansion
-        syn->datum len nth (type syns-a names) (effect parses))
+        syn->datum len nth mk-list mk-symbol datatype? expand-datatype in-loaded-as load-base
+        (type syns-a names loaded-file) (effect parses))
+;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
+(define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr
         (type fails addr sty))
 (import align-module defined macro-of macro? nodes-reset! align walk placed node-at node-syn
@@ -252,22 +255,34 @@
 
 ;;; ------------------------------------------------------------ the session
 
-;; The macros defined after each form, by the session's state the form left
-;; (`form-reading`), which folds in every `define-syntax` before it: so what
-;; a form is read with is what its state says, for a program begun in the
-;; standard environment's (none), an entry in a session's, or anything read
-;; again (`typed-macros.md`, the port's decision 3). Only where some are.
-(define by-state (ref (listof (tupleof int macro-env) acyclic) rs) (new nil))
+;; Each top-level `(define name (load-module "path"))` so far, the last
+;; first: the files `import-with-syntax` of `name` reads.
+(define-type load-defs (listof (tupleof symbol string) acyclic))
+(define loads (ref load-defs rs) (new nil))
+;; The macros defined after each form, and the load definitions, by the
+;; session's state the form left (`form-reading`), which folds in every
+;; form before it: so what a form is read with is what its state says, for
+;; a program begun in the standard environment's (none), an entry in a
+;; session's, or anything read again (`typed-macros.md`, the port's
+;; decision 3). Only where there are some.
+(define-type by-states (listof (tupleof int macro-env load-defs) acyclic))
+(define by-state (ref by-states rs) (new nil))
 (define macros-at! (->* (int) unit)
-  (lambda (s) (set defined (env-at s (get by-state)))))
-(define env-at (->* (int (listof (tupleof int macro-env) acyclic)) macro-env)
+  (lambda (s)
+    (let ((at (state-at s (get by-state))))
+      (if (null? at)
+          (begin (set defined nil) (set loads nil))
+          (begin (set defined (extract (car at) 2)) (set loads (extract (car at) 3)))))))
+(define state-at (->* (int by-states) by-states)
   (lambda (s xs)
     (cond ((null? xs) nil)
-          ((= s (extract (car xs) 1)) (extract (car xs) 2))
-          (else (env-at s (cdr xs))))))
+          ((= s (extract (car xs) 1)) (the by-states (list (car xs))))
+          (else (state-at s (cdr xs))))))
 (define macros-after! (->* (int) unit)
   (lambda (s)
-    (if (null? (get defined)) #u (set by-state (cons (tuple s (get defined)) (get by-state))))))
+    (if (and (null? (get defined)) (null? (get loads)))
+        #u
+        (set by-state (cons (tuple s (get defined) (get loads)) (get by-state))))))
 
 ;;; ------------------------------------------------------------ expanding
 
@@ -565,3 +580,295 @@
 (define each-in (->* (syns-a int) syns-a)
   (lambda (xs made)
     (if (null? xs) nil (cons (in-expansion (car xs) made) (each-in (cdr xs) made)))))
+
+;;; ------------------------------------------------------------ a file's macros
+
+(define-type files (listof loaded-file acyclic))
+(define-type mades (listof (tupleof symbol bool) acyclic))
+;; The name at the head of list `s`; "" if none.
+(define head-name (->* (syn) string)
+  (lambda (s)
+    (let ((items (proper s)))
+      (if (and (not (null? items)) (syn-symbol? (car items))) (syn-name (car items)) ""))))
+
+;; Notes a top-level `(define name (load-module "path"))`, the file
+;; `import-with-syntax` of `name` reads; any other definition of `name`
+;; forgets it (`Checker::note_load_def`).
+(define note-load-def! (->* (syn) unit)
+  (lambda (form)
+    (let ((items (proper form)))
+      (if (and (>= (len items) 3) (string=? (head-name form) "define") (syn-symbol? (nth items 1)))
+          (let* ((n (syn-symbol (nth items 1)))
+                 (path (load-path (nth items (- (len items) 1))))
+                 (kept (without-load n (get loads))))
+            (set loads (if (and (not (null? path)) (<= (len items) 4))
+                           (cons (tuple n (car path)) kept)
+                           kept)))
+          #u))))
+;; `(load-module "path")`'s path, in a list of one.
+(define load-path (->* (syn) (listof string acyclic))
+  (lambda (s)
+    (let ((items (proper s)))
+      (if (and (= (len items) 2) (syn-symbol? (car items))
+               (string=? (syn-name (car items)) "load-module"))
+          (tagcase (nth items 1) (atom (d a b x) (if (string? d) (list d) nil)) (else y nil))
+          nil))))
+(define without-load (->* (symbol load-defs) load-defs)
+  (lambda (n ls)
+    (cond ((null? ls) nil)
+          ((symbol=? n (extract (car ls) 1)) (without-load n (cdr ls)))
+          (else (cons (car ls) (without-load n (cdr ls)))))))
+(define load-of (->* (symbol load-defs) (listof string acyclic))
+  (lambda (n ls)
+    (cond ((null? ls) nil)
+          ((symbol=? n (extract (car ls) 1)) (list (extract (car ls) 2)))
+          (else (load-of n (cdr ls))))))
+
+;; The standard bindings' names, which a file's macro may name: what the
+;; driver says, as the Rust checker has them (`standard-names!`).
+(define standard-names (ref names rs) (new nil))
+(define standard-names! (->* (names) unit) (lambda (ns) (set standard-names ns)))
+
+;; Whether `s` is an `import-with-syntax`.
+(define imports-syntax? (->* (syn) bool)
+  (lambda (s)
+    (let ((items (proper s)))
+      (and (not (null? items)) (syn-symbol? (car items))
+           (string=? (syn-name (car items)) "import-with-syntax")))))
+(define import-usage string
+  (string-append "`(import-with-syntax name)`, the name a module loaded by `load-module`, or "
+                 "`(import-with-syntax name (only name …))` or `(except name …)`"))
+;; `(only name …)` or `(except name …)`: whether `only`, and the names, in a
+;; list of one; none if there is none.
+(define-type filter (tupleof bool syns-a))
+(define name-filter (->* (fails syn) filter)
+  (lambda (fail f)
+    (let* ((items (proper f)) (head (if (and (not (null? items)) (syn-symbol? (car items)))
+                                       (syn-name (car items))
+                                       "")))
+      (if (or (string=? head "only") (string=? head "except"))
+          (begin (all-names fail (cdr items)) (tuple (string=? head "only") (cdr items)))
+          (begin (fail-at fail import-usage f) (tuple #t (the syns-a nil)))))))
+(define all-names (->* (fails syns-a) unit)
+  (lambda (fail xs)
+    (cond ((null? xs) #u)
+          ((syn-symbol? (car xs)) (all-names fail (cdr xs)))
+          (else (fail-at fail import-usage (car xs))))))
+(define listed? (->* (symbol syns-a) bool)
+  (lambda (n xs)
+    (and (not (null? xs)) (or (symbol=? n (syn-symbol (car xs))) (listed? n (cdr xs))))))
+
+;; `(import-with-syntax lib)`, `lib` a name defined as `(load-module
+;; "path")`: the file's macros defined, each as the file means it, and the
+;; rest of what it gives as `(include lib)` gives it: that `include`'s form,
+;; in a list of one; none if `(only …)` names macros alone. Of `fs`, the
+;; files the driver read (`Checker::import_file_macros`).
+(define import-file-macros (->* (fails syn files) syns-a)
+  (lambda (fail form fs)
+    (let* ((items (proper form)) (a (syn-start form)) (b (syn-end form)))
+      (if (not (and (or (= (len items) 2) (= (len items) 3)) (syn-symbol? (nth items 1))))
+          (begin (fail-at fail import-usage form) nil)
+          (let* ((lib (syn-symbol (nth items 1)))
+                 (filter (if (= (len items) 3)
+                             (the (listof filter acyclic) (list (name-filter fail (nth items 2))))
+                             nil))
+                 (path (load-of lib (get loads))))
+            (if (null? path)
+                (begin (fail-at fail (string-append "`import-with-syntax` takes a name defined as "
+                                                    "`(load-module \"path\")`, and `"
+                                                    (symbol->string lib) "` is not one")
+                                form)
+                       nil)
+                (let ((exported (file-macros fail form (car path) filter fs)))
+                  (include-of lib filter exported a b))))))))
+;; The `include` that gives the rest: of the names `filter` lists, those
+;; not macros.
+(define include-of (->* (symbol (listof filter acyclic) names int int) syns-a)
+  (lambda (lib filter exported a b)
+    (let ((head (list (mk-symbol "include" a b) (mk-symbol (symbol->string lib) a b))))
+      (if (null? filter)
+          (list (mk-list head a b))
+          (let ((rest (not-macros (extract (car filter) 2) exported)))
+            (if (and (extract (car filter) 1) (null? rest))
+                nil
+                (list (mk-list (append head
+                                       (list (mk-list (cons (mk-symbol (if (extract (car filter) 1)
+                                                                           "only"
+                                                                           "except")
+                                                                       a b)
+                                                            rest)
+                                                      a b)))
+                               a b))))))))
+(define not-macros (->* (syns-a names) syns-a)
+  (lambda (xs ms)
+    (cond ((null? xs) nil)
+          ((name-in? (syn-symbol (car xs)) ms) (not-macros (cdr xs) ms))
+          (else (cons (car xs) (not-macros (cdr xs) ms))))))
+
+;; The macros of the file at `path`, defined (`define-file`): the names of
+;; those not hidden.
+(define file-macros (->* (fails syn string (listof filter acyclic) files) names)
+  (lambda (fail form path filter fs)
+    (let ((f (loaded-path path fs)))
+      (cond
+        ((null? f) (begin (fail-at fail (string-append "cannot read `" path "`") form) nil))
+        (((with forms-module takes-modules?) (extract (car f) 5))
+         (begin (fail-at fail (string-append "`" path "` takes module parameters: its macros "
+                                             "cannot be imported, not yet")
+                         form)
+                nil))
+        (else
+         (let* ((key (extract (car f) 7)) (base (extract (car f) 2)) (forms (extract (car f) 5))
+                ;; An error in the file, said in it, where the form starts.
+                (in-file (lambda ((m string) (x int) (y int))
+                           (if (and (>= x base) (< x (+ base load-base)))
+                               (let ((at (syn-start form)))
+                                 (fail (in-loaded-as fs base path m x) at at))
+                               (fail m x y))))
+                (macros (file-syntax forms))
+                (shown (names-shown (file-items forms) nil nil))
+                (internal (internal-names key (macro-names macros)))
+                (scope (tuple (string->symbol (string-append "%shared:" key)) (extract shown 1)
+                              (extract shown 2) internal (get standard-names))))
+           (define-file in-file macros scope filter)))))))
+;; The file read from `path`, in a list of one.
+(define loaded-path (->* (string files) files)
+  (lambda (path fs)
+    (cond ((null? fs) nil)
+          ((and (string=? (extract (car fs) 4) path) (> (extract (car fs) 2) 0))
+           (the files (list (car fs))))
+          (else (loaded-path path (cdr fs))))))
+;; A file's macros, each with whether it is hidden, in order.
+(define-type file-macro (tupleof syn bool))
+(define file-syntax (->* (syns-a) (listof file-macro acyclic))
+  (lambda (forms)
+    (cond ((null? forms) nil)
+          ((defines-syntax? (car forms))
+           (cons (tuple (car forms) #f) (file-syntax (cdr forms))))
+          ((hide-form? (car forms))
+           (append (hidden-syntax (cdr (proper (car forms)))) (file-syntax (cdr forms))))
+          (else (file-syntax (cdr forms))))))
+(define hidden-syntax (->* (syns-a) (listof file-macro acyclic))
+  (lambda (xs)
+    (cond ((null? xs) nil)
+          ((defines-syntax? (car xs)) (cons (tuple (car xs) #t) (hidden-syntax (cdr xs))))
+          (else (hidden-syntax (cdr xs))))))
+(define hide-form? (->* (syn) bool)
+  (lambda (s)
+    (let ((items (proper s)))
+      (string=? (head-name s) "hide"))))
+;; The file's forms its module shows: neither macros nor hidden.
+(define file-items (->* (syns-a) syns-a)
+  (lambda (forms)
+    (cond ((null? forms) nil)
+          ((or (defines-syntax? (car forms)) (hide-form? (car forms))) (file-items (cdr forms)))
+          ((datatype? (car forms))
+           (append (expand-datatype (car forms)) (file-items (cdr forms))))
+          (else (cons (car forms) (file-items (cdr forms)))))))
+;; The values and the types and effects `forms` define, onto `vs` and `ts`:
+;; what the module shows. An `include`'s are known only once it is
+;; checked: none (`Checker::names_shown`).
+(define names-shown (->* (syns-a names names) (tupleof names names))
+  (lambda (forms vs ts)
+    (if (null? forms)
+        (tuple vs ts)
+        (let* ((items (proper (car forms)))
+               (head (head-name (car forms)))
+               (named (if (< (len items) 2) nil (defined-name (nth items 1)))))
+          (cond
+            ((or (string=? head "define") (string=? head "define*"))
+             (names-shown (cdr forms) (append named vs) ts))
+            ((string=? head "define-rec")
+             (names-shown (cdr forms) (append (rec-names (cdr items)) vs) ts))
+            ((string=? head "define-generative")
+             (names-shown (cdr forms) (append (generative-values named) vs) (append named ts)))
+            ((or (string=? head "define-type") (string=? head "define-effect"))
+             (names-shown (cdr forms) vs (append named ts)))
+            (else (names-shown (cdr forms) vs ts)))))))
+;; A definition's name: `name`, or `(name …)`'s.
+(define defined-name (->* (syn) names)
+  (lambda (s)
+    (cond ((syn-symbol? s) (list (syn-symbol s)))
+          ((and (not (null? (proper s))) (syn-symbol? (car (proper s))))
+           (list (syn-symbol (car (proper s)))))
+          (else nil))))
+(define rec-names (->* (syns-a) names)
+  (lambda (bs)
+    (cond ((null? bs) nil)
+          ((and (not (null? (proper (car bs)))) (syn-symbol? (car (proper (car bs)))))
+           (cons (syn-symbol (car (proper (car bs)))) (rec-names (cdr bs))))
+          (else (rec-names (cdr bs))))))
+;; A generative type's conversions, `up-name` and `down-name`.
+(define generative-values (->* (names) names)
+  (lambda (ns)
+    (if (null? ns)
+        nil
+        (let ((n (symbol->string (car ns))))
+          (list (string->symbol (string-append "up-" n))
+                (string->symbol (string-append "down-" n)))))))
+(define macro-names (->* ((listof file-macro acyclic)) names)
+  (lambda (ms)
+    (if (null? ms)
+        nil
+        (let ((n (nth (proper (extract (car ms) 1)) 1)))
+          (if (syn-symbol? n)
+              (cons (syn-symbol n) (macro-names (cdr ms)))
+              (macro-names (cdr ms)))))))
+;; Each macro's name the importer has it by, which no program writes.
+(define internal-names (->* (string names) (listof (tupleof symbol symbol) acyclic))
+  (lambda (key ns)
+    (if (null? ns)
+        nil
+        (cons (tuple (car ns) (string->symbol (string-append "%syntax:" key ":"
+                                                             (symbol->string (car ns)))))
+              (internal-names key (cdr ns))))))
+
+;; A file's macros, `ms`, defined as the file means them (`scope`): among
+;; themselves first, by their names in it, as its templates name them;
+;; then each by the name the importer has it by, and each not hidden that
+;; `filter` takes by its own name too. The names of those not hidden.
+(define define-file (->* (fails (listof file-macro acyclic) scope (listof filter acyclic)) names)
+  (lambda (fail ms scope filter)
+    (let ((program (get defined)))
+      (begin
+        (set defined nil)
+        (let* ((made (define-each fail ms scope)) (own (get defined)))
+          (begin
+            (set defined program)
+            (give-each fail made own scope filter
+                       (if (null? ms) (atom '() 0 0 0) (extract (car ms) 1)))
+            (shown-names made)))))))
+(define define-each (->* (fails (listof file-macro acyclic) scope) mades)
+  (lambda (fail ms scope)
+    (if (null? ms)
+        nil
+        (let ((n (define-macro fail (extract (car ms) 1) (list scope))))
+          (cons (tuple n (extract (car ms) 2)) (define-each fail (cdr ms) scope))))))
+(define give-each
+  (->* (fails mades macro-env scope (listof filter acyclic) syn) unit)
+  (lambda (fail made own scope filter first)
+    (if (null? made)
+        #u
+        (let* ((n (extract (car made) 1)) (m (car (macro-of n own)))
+               (internal (car (internal-of n (extract scope 4)))))
+          (begin
+            (if (and (not (extract (car made) 2)) (taken? n filter))
+                (if (macro? n)
+                    (fail-at fail (string-append "`" (symbol->string n) "` is a macro defined "
+                                                 "already: a file's may not be defined again")
+                             first)
+                    (set defined (cons (tuple n m) (get defined))))
+                #u)
+            (set defined (cons (tuple internal m) (get defined)))
+            (give-each fail (cdr made) own scope filter first))))))
+(define taken? (->* (symbol (listof filter acyclic)) bool)
+  (lambda (n filter)
+    (or (null? filter)
+        (if (extract (car filter) 1)
+            (listed? n (extract (car filter) 2))
+            (not (listed? n (extract (car filter) 2)))))))
+(define shown-names (->* (mades) names)
+  (lambda (made)
+    (cond ((null? made) nil)
+          ((extract (car made) 2) (shown-names (cdr made)))
+          (else (cons (extract (car made) 1) (shown-names (cdr made)))))))

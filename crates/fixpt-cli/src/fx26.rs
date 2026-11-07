@@ -1218,7 +1218,7 @@ pub fn check_reps(backend: Backend, name: &str, text: &str, readable: bool) -> i
     let (rust, refused) = fixpt_fx26::compare::rust_reps(&mut c, text);
     // The FX-26 checker's, if it takes the whole program, told of the
     // `include`s as `both_checkers` tells it.
-    fixpt_fx26::syn::set_includes(fixpt_fx26::compare::includes_given(&mut c, text));
+    fixpt_fx26::compare::tell_front_end(&mut c, text);
     let ours = match session.check_with_own_checker(text) {
         Ok(Ok(_)) => session.own_checked_reps().unwrap_or_default(),
         _ => Vec::new(),

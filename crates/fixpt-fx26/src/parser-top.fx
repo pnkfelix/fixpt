@@ -28,7 +28,8 @@
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
 ;; The expander (`macros.fx`), which each form goes through first.
 (define macros-module ((proj (load-module "fx26:macros.fx") rs re rm rc rp)))
-(import macros-module expand define-macro defines-syntax? macros-at! macros-after!)
+(import macros-module expand define-macro defines-syntax? macros-at! macros-after! imports-syntax?
+        import-file-macros note-load-def!)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -205,9 +206,14 @@
         ;; Before each form, the hidden globals of the files it loads first
         ;; (`parse-loaded`), those its types name first (`type-loaded`).
         (let* ((written (car xs))
-               (made (if (defines-syntax? written)
-                         (begin (define-macro pfail-at written nil) (the top-list nil))
-                         (parse-made (type-loaded (expand pfail-at written)))))
+               (made (cond ((defines-syntax? written)
+                            (begin (define-macro pfail-at written nil) (the top-list nil)))
+                           ;; A file's macros, and the `include` of the rest.
+                           ((imports-syntax? written)
+                            (let ((inc (import-file-macros pfail-at written (get loaded))))
+                              (if (null? inc) (the top-list nil) (parse-made (car inc)))))
+                           (else (let ((x (expand pfail-at written)))
+                                   (begin (note-load-def! x) (parse-made (type-loaded x)))))))
                (before (shared-taken))
                (r (form-reading (walk-state t) settings written (loads-of before)))
                (form (number-form t r (append-tops before made)))

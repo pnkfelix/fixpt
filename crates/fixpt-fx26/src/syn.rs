@@ -1002,6 +1002,12 @@ fn supply_loaded_at(scheme: &mut Session, file: FileId, text: &str, base: i64) -
         list = scheme.call_global("cons", &[one, list]).map_err(|e| fail(e.to_string()))?;
     }
     scheme.call_global(&format!("{READER_PREFIX}includes-given!"), &[list]).map_err(|e| fail(e.to_string()))?;
+    let mut names = scheme.make(|_| Value::NULL);
+    for n in STANDARD_NAMES.with(|n| std::mem::take(&mut *n.borrow_mut())).into_iter().rev() {
+        let sym = scheme.make(|m| m.heap().intern(&n));
+        names = scheme.call_global("cons", &[sym, names]).map_err(|e| fail(e.to_string()))?;
+    }
+    scheme.call_global(&format!("{READER_PREFIX}standard-names!"), &[names]).map_err(|e| fail(e.to_string()))?;
     Ok(loads)
 }
 
@@ -1010,6 +1016,8 @@ thread_local! {
     /// top-level `include`s: each's start (a byte), and the names of its
     /// module's values, types and effects (`Checker::include_names`).
     static INCLUDES: std::cell::RefCell<Vec<IncludeGiven>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The standard bindings' names, for the next text ([`set_standard_names`]).
+    static STANDARD_NAMES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// What a top-level `include` of a text gives (`includes-given!`): where it
@@ -1028,6 +1036,13 @@ pub struct IncludeGiven {
 /// it, knows (`compare::both_checkers`).
 pub fn set_includes(given: Vec<IncludeGiven>) {
     INCLUDES.with(|i| *i.borrow_mut() = given);
+}
+
+/// For the next text parsed by the front end written in FX-26: the
+/// standard bindings' names, which a file's macro may name, as the Rust
+/// checker has them (`Checker::standard_names`).
+pub fn set_standard_names(names: Vec<String>) {
+    STANDARD_NAMES.with(|n| *n.borrow_mut() = names);
 }
 
 /// What `text`'s `load-module`s read, as [`supply_loaded`] hands it to the

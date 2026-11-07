@@ -1,5 +1,5 @@
 //! Both front ends' expanders (`macros.rs`, `macros.fx`) on each program in
-//! `programs/macros`: what each checker finds of the program expanded, or
+//! `programs/macros`, and those importing a file's macros: what each checker finds of the program expanded, or
 //! where and why each refuses it, the same. An expander's refusal is its
 //! front end's (the FX-26 one's, its parse's). What follows an error's
 //! first line, the uses that made the text it is in, the FX-26 front end
@@ -14,8 +14,19 @@ const NOT_YET: &[&str] = &["import-macro-name.fx", "include-macro-name.fx", "mac
 
 #[test]
 fn both_expanders_agree_on_macro_programs() {
-    let dir = format!("{}/tests/programs/macros", env!("CARGO_MANIFEST_DIR"));
-    let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).collect();
+    agree(&format!("{}/tests/programs/macros", env!("CARGO_MANIFEST_DIR")), "");
+}
+
+/// The programs of `fixpt-cli`'s `import-with-syntax` tests, `main*.fx`
+/// (the rest are the files they import).
+#[test]
+fn both_expanders_agree_on_a_files_macros() {
+    agree(&format!("{}/../fixpt-cli/tests/programs/import-with-syntax", env!("CARGO_MANIFEST_DIR")), "main");
+}
+
+/// Both front ends on each program in `dir` whose name starts with `prefix`.
+fn agree(dir: &str, prefix: &str) {
+    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.file_name().unwrap().to_string_lossy().starts_with(prefix)).collect();
     names.sort();
     let mut wrong = Vec::new();
     // One session for all: each program is read from the standard

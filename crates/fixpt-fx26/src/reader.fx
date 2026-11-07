@@ -44,3 +44,6 @@
         (effect parses))
 ;; From `parser-top.fx`.
 (define parse-program (with parser-top-module parse-program))
+;; For a driver: the standard bindings' names, which a file's macro may name.
+(define macros-module (with parser-top-module macros-module))
+(define standard-names! (with macros-module standard-names!))
