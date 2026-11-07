@@ -111,7 +111,7 @@
           (pfail usage s)
           (let* ((head (nth items 1))
                  (rep (nth items 2))
-                 (family? (tagcase head (lst (hs d ha hb) (not (null? hs))) (else x #f)))
+                 (family? (tagcase head (lst (hs d ha hb xpn) (not (null? hs))) (else x #f)))
                  (hs (if family? (syn-items head "a generative type's name") (the syns-a nil)))
                  (name (if family? (car hs) head))
                  (n (if (syn-symbol? name) (symbol->string (syn-symbol name)) (pfail usage s)))

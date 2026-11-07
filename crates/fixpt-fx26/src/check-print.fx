@@ -472,17 +472,17 @@
   (string-append "a syscall's effect holds only reads, writes and allocations "
                  "of its regions, I/O, `spin` and `nondet`"))
 (define k-sys-regions string "a syscall's regions are its `poly`'s")
-(define k-sys-sym (->* (string int int) syn) (lambda (n a b) (atom (string->symbol n) a b)))
+(define k-sys-sym (->* (string int int) syn) (lambda (n a b) (atom (string->symbol n) a b 0)))
 ;; A list of `xs`; its datum, which nothing reads of a type, empty.
-(define k-sys-list (->* ((listof syn acyclic) int int) syn) (lambda (xs a b) (lst xs nil a b)))
+(define k-sys-list (->* ((listof syn acyclic) int int) syn) (lambda (xs a b) (lst xs nil a b 0)))
 (define k-sys-2 (->* (syn syn int int) syn)
   (lambda (x y a b) (k-sys-list (list x y) a b)))
 ;; Printed: names apart by one space, no other whitespace.
 (define k-syn-text (->* (syn) string)
   (lambda (s)
     (tagcase s
-      (atom (d a b) (typecase d (symbol n (symbol->string n)) (else x "")))
-      (lst (items d a b) (string-append "(" (k-syn-texts items) ")"))
+      (atom (d a b xpn) (typecase d (symbol n (symbol->string n)) (else x "")))
+      (lst (items d a b xpn) (string-append "(" (k-syn-texts items) ")"))
       (else x ""))))
 (define k-syn-texts (->* ((listof syn acyclic)) string)
   (lambda (xs)
@@ -512,7 +512,7 @@
   (lambda (bs t a b ta tb)
     (let ((fail (lambda () (k-fail k-sys-crossing ta tb))))
       (tagcase (k-get (k-resolve t))
-        (ty-base (n) (if (k-sys-base? n) (atom n a b) (fail)))
+        (ty-base (n) (if (k-sys-base? n) (atom n a b 0) (fail)))
         (ty-named (g ds)
           (cond ((and (= g 2) (= (length ds) 2))
                  (tagcase (car ds)

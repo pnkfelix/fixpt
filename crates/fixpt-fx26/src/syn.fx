@@ -11,7 +11,7 @@
 (define syn->datum (->* (syn) datum)
   (lambda (s)
     (tagcase s
-      (atom (d a b) d)
-      (lst (items d a b) d)
-      (dotted (items tail d a b) d)
-      (vec (items d a b) d))))
+      (atom (d a b xpn) d)
+      (lst (items d a b xpn) d)
+      (dotted (items tail d a b xpn) d)
+      (vec (items d a b xpn) d))))

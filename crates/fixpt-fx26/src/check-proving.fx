@@ -45,7 +45,7 @@
 (define k-term-usage string "a size: a parameter's number, `(length i)`, or `(lit k)`")
 ;; Whether `s` is an integer literal.
 (define k-int-lit? (->* (syn) bool)
-  (lambda (s) (tagcase s (atom (d a b) (datum-int? d)) (else x #f))))
+  (lambda (s) (tagcase s (atom (d a b xpn) (datum-int? d)) (else x #f))))
 ;; A parameter's number, from 0, of a procedure of `n`.
 (define k-prop-param (->* (syn int) int)
   (lambda (i n)

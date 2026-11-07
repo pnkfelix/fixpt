@@ -29,12 +29,15 @@
 ;; What is read, with where each piece starts and ends. A vector's elements
 ;; keep theirs; any other datum that is not a list is an `atom`. Each piece
 ;; also carries the plain datum it reads as, made once, when it was read,
-;; from the datums the marks already hold.
+;; from the datums the marks already hold. And last, the expansion that
+;; made it, 0 if none did, as the Rust front end's `Span` has it: a macro's
+;; template's part keeps its place in the template, and says which use of
+;; the macro made it (`macros.fx`), for errors said at each use.
 (define-datatype syn
-  (atom datum int int)
-  (lst (listof syn acyclic) datum int int)
-  (dotted (listof syn acyclic) syn datum int int)
-  (vec (listof syn acyclic) datum int int))
+  (atom datum int int int)
+  (lst (listof syn acyclic) datum int int int)
+  (dotted (listof syn acyclic) syn datum int int int)
+  (vec (listof syn acyclic) datum int int int))
 (define-type syns (listof syn acyclic))
 
 ;; What a suspended parse is in the middle of, as its marks say, in the

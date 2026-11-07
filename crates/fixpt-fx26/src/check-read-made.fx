@@ -41,7 +41,7 @@
 
 ;; The string `s` is, as written; "" if it is none.
 (define k-made-string (->* (syn) string)
-  (lambda (s) (tagcase s (atom (d a b) (typecase d (string x x) (else y ""))) (else y ""))))
+  (lambda (s) (tagcase s (atom (d a b xpn) (typecase d (string x x) (else y ""))) (else y ""))))
 ;; `xs` but the first `n`.
 (define k-made-drop (->* (k-syns int) k-syns)
   (lambda (xs n) (if (= n 0) xs (k-made-drop (cdr xs) (- n 1)))))

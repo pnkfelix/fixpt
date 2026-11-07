@@ -61,7 +61,7 @@
           ((>= (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else
            (tagcase s
-             (atom (d a b)
+             (atom (d a b xpn)
                (if (keyword? d) (keyword->symbol d) (k-sfail k-label-usage s)))
              (else x (k-sfail k-label-usage s)))))))
 (define k-label-usage string "a label is a keyword, a name or a natural number")
@@ -251,7 +251,7 @@
              (k-scope=? (cdr xs) (cdr ys))))))
 ;; The head of a list's first item, or "" for anything else.
 (define k-list-head (->* (syn) string)
-  (lambda (s) (tagcase s (lst (items d a b) (k-head items)) (else x ""))))
+  (lambda (s) (tagcase s (lst (items d a b xpn) (k-head items)) (else x ""))))
 ;; A convention: `cellular`, `native`, `fx`, or a name bound as one.
 (define k-parse-conv (->* (syn) k-conv)
   (lambda (s)

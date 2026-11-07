@@ -118,7 +118,7 @@
                       (tagcase (car d) (ds-var (v k) (= k 5)) (ds-size (z) #t) (else x #f))))))
           (else
            (let ((items (tagcase s
-                          (lst (items d a b) items)
+                          (lst (items d a b xpn) items)
                           (else x (the k-syns nil)))))
              (and (not (null? items)) (syn-symbol? (car items))
                   (case (syn-name (car items)) (("+" "-") #t) (else #f))))))))
@@ -296,7 +296,7 @@
                (else x (k-sfail "an abbreviation" s))))
             ((>= alias 0) (k-parse-app s alias (cdr items)))
             ;; `((dlambda …) d …)` and `((select m f) d …)`.
-            ((and (not (null? items)) (tagcase (car items) (lst (xs d a b) #t) (else x #f)))
+            ((and (not (null? items)) (tagcase (car items) (lst (xs d a b xpn) #t) (else x #f)))
              (k-parse-app s (k-parse-fun (car items) -1) (cdr items)))
             (else (k-parse-type-form s items hd))))))
 ;; `(f d …)`, its descriptions `args`, read in the bodies of `with`s of
@@ -359,7 +359,7 @@
   (lambda (s items)
     (let* ((k (- (k-length items) (k-clauses-ending items)))
            (plain (k-syns-take items k))
-           (whole (tagcase s (lst (xs d a b) (lst plain d a b)) (else y s)))
+           (whole (tagcase s (lst (xs d a b xpn) (lst plain d a b 0)) (else y s)))
            (cs (k-syns-drop items k))
            (t (if (string=? (syn-name (car items)) "subr")
                   (k-parse-subr whole plain cs)
@@ -369,7 +369,7 @@
 (define k-written-arrow-star? (->* (syn) bool)
   (lambda (s)
     (tagcase s
-      (lst (xs d a b)
+      (lst (xs d a b xpn)
         (let ((head (k-symbol-head xs)))
           (or (string=? head "->*")
               (and (string=? head "poly") (= (k-length xs) 3)
@@ -464,7 +464,7 @@
            ;; Without a region, `acyclic` (`TODO.md` §198).
            (k-shape (or (= n 2) (= n 3)) "`(listof type [region])`" s)
            (let* ((t (k-parse-type (k-nth items 1)))
-                  (acyclic (atom 'acyclic (syn-start s) (syn-end s)))
+                  (acyclic (atom 'acyclic (syn-start s) (syn-end s) 0))
                   (r (k-parse-region (if (= n 2) acyclic (k-nth items 2))))
                   (slot (k-slot)) (pair (k-ty-new (ty-pair t slot r #t))))
              (begin (k-set-link slot pair) slot))))
@@ -717,7 +717,7 @@
             (else (k-parse-d-bound s (k-lookup-desc sym)))))))
 (define k-parse-d (->* (syn) k-desc)
   (lambda (s)
-    (cond ((tagcase s (atom (d a b) (datum-int? d)) (else x #f))
+    (cond ((tagcase s (atom (d a b xpn) (datum-int? d)) (else x #f))
            ;; A natural number can only be a size.
            (dz (k-parse-size s)))
           ((syn-symbol? s) (k-parse-d-name s))
@@ -774,7 +774,7 @@
         (let ((usage (string-append "a description function: a name, `(dlambda ((name kind) …) "
                                     "description)` or `(select module name)`")))
           (tagcase s
-            (lst (items d a b)
+            (lst (items d a b xpn)
               (let ((hd (k-symbol-head items)))
                 (case hd (("dlambda") (k-parse-dlambda s items want))
                          (("select") (k-parse-select s items))

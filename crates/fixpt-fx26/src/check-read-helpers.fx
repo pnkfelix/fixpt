@@ -238,7 +238,7 @@
     (if (null? ps)
         nil
         (tagcase (car ps)
-          (lst (items d a b)
+          (lst (items d a b xpn)
             (if (and (= (k-length items) 2) (syn-symbol? (car items)))
                 (cons (car (cdr items)) (k-ctor-param-kinds (cdr ps) name))
                 (k-sfail k-abs-ctor-usage name)))
@@ -249,7 +249,7 @@
 (define k-abs-ctor-params (->* (syn) k-syns)
   (lambda (name)
     (tagcase name
-      (lst (items d a b)
+      (lst (items d a b xpn)
         (cond ((k-all-symbols? items) nil)
               ((syn-symbol? (car items)) (k-ctor-param-kinds (cdr items) name))
               (else (k-sfail k-abs-ctor-usage name))))
@@ -260,7 +260,7 @@
     (if (syn-symbol? name)
         (the k-names (cons (syn-head name) nil))
         (tagcase name
-          (lst (items d a b)
+          (lst (items d a b xpn)
             (cond ((not (string=? head "abs")) (k-sfail "a component's name" name))
                   ((k-all-symbols? items) (k-syn-symbols items))
                   ;; One constructor, its parameters' kinds given.
@@ -343,7 +343,7 @@
 (define k-param-name (->* (syn) k-names)
   (lambda (p)
     (tagcase p
-      (lst (items d a b)
+      (lst (items d a b xpn)
         (if (and (= (k-length items) 3) (syn-symbol? (car items)) (syn-symbol? (k-nth items 1))
                  (symbol=? (syn-head (k-nth items 1)) ':))
             (the k-names (cons (syn-head (car items)) nil))
@@ -357,7 +357,7 @@
 (define k-misnamed-param (->* (syn k-syns) unit)
   (lambda (p later)
     (tagcase p
-      (lst (items d a b)
+      (lst (items d a b xpn)
         (if (and (= (k-length items) 2) (syn-symbol? (car items)))
             (let* ((h (syn-head (car items))) (name (symbol->string h)))
               (if (or (k-has-name? k-type-forms h) (k-has-name? k-keywords h)
@@ -383,7 +383,7 @@
 (define k-named-in (->* (syn symbol) string)
   (lambda (s n)
     (tagcase s
-      (lst (items d a b)
+      (lst (items d a b xpn)
         (if (k-syns-name? (if (and (not (null? items)) (syn-symbol? (car items))) (cdr items) items)
                           n)
             (if (k-all-names? items) (k-cat3 "(" (k-names-shown items) ")") "")

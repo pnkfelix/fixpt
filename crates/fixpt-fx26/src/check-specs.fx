@@ -56,7 +56,7 @@
 (define k-spec-clause? (->* (syn) bool)
   (lambda (s)
     (tagcase s
-      (lst (items d a b)
+      (lst (items d a b xpn)
         (and (not (null? items)) (syn-symbol? (car items))
              (or (string=? (syn-name (car items)) "requires")
                  (string=? (syn-name (car items)) "ensures"))))
@@ -87,19 +87,19 @@
 (define k-syn-bool (->* (syn) int)
   (lambda (s)
     (tagcase s
-      (atom (d a b)
+      (atom (d a b xpn)
         (typecase d
           (bool x (if x 1 0))
           (symbol n (cond ((symbol=? n k-sym-true) 1) ((symbol=? n k-sym-false) 0) (else -1)))
           (else y -1)))
       (else x -1))))
 (define k-syn-literal-int? (->* (syn) bool)
-  (lambda (s) (tagcase s (atom (d a b) (datum-int? d)) (else x #f))))
+  (lambda (s) (tagcase s (atom (d a b xpn) (datum-int? d)) (else x #f))))
 (define k-syn-literal-int (->* (syn) int)
-  (lambda (s) (tagcase s (atom (d a b) (if (datum-int? d) d 0)) (else x 0))))
+  (lambda (s) (tagcase s (atom (d a b xpn) (if (datum-int? d) d 0)) (else x 0))))
 ;; The items of `s`, a list, or the error `usage`.
 (define k-spec-items (->* (syn string) k-syns)
-  (lambda (s usage) (tagcase s (lst (items d a b) items) (else x (k-sfail usage s)))))
+  (lambda (s usage) (tagcase s (lst (items d a b xpn) items) (else x (k-sfail usage s)))))
 ;; The name a list's first item is, or "".
 (define k-spec-head (->* (k-syns) string)
   (lambda (items)

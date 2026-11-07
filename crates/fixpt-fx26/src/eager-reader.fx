@@ -115,7 +115,7 @@
 (define hash-pending? (->* (cursor) bool) (lambda (cur) (not (null? (cur-pending cur)))))
 ;; An atom `d` read from `start` to `cur`, and `cur`.
 (define atom-at (->* (datum int cursor) result)
-  (lambda (d start cur) (cons (atom d start (cur-pos cur)) cur)))
+  (lambda (d start cur) (cons (atom d start (cur-pos cur) 0) cur)))
 
 ;; A cursor with `c` in hand at `pos`: what a loop that reads characters
 ;; itself, keeping only the last and where it is, makes when it is done,
@@ -380,7 +380,7 @@
                    (run (subr reading (char int chars) result)
                      (lambda (c pos acc)
                        (case c ((#\")
-                                (cons (atom (acc->string acc) start (+ pos 1))
+                                (cons (atom (acc->string acc) start (+ pos 1) 0)
                                       (make-cursor nil (+ pos 1) data nil)))
                                ((#\\) (escape (next-at pos data) acc))
                                (else (run (next-char (+ pos 1) data) (+ pos 1) (cons c acc))))))
@@ -560,7 +560,7 @@
     (cons (lst (the syns (reverse syns))
                (datum-reverse-onto items-d no-data)
                start
-               (+ (cur-pos cur) 1))
+               (+ (cur-pos cur) 1) 0)
           (consumed cur))))
 ;; A dotted list read: its items (newest first) `syns` and `items`, and its
 ;; tail `r`'s, closed at `cur`.
@@ -570,7 +570,7 @@
                   (car r)
                   (datum-dotted (the data (reverse items)) (syn->datum (car r)))
                   start
-                  (+ (cur-pos cur) 1))
+                  (+ (cur-pos cur) 1) 0)
           (consumed cur))))
 ;; Whether `cur` is at `close`, not at a `#` whose datum is pending.
 (define closes? (->* (cursor char) bool)
@@ -608,9 +608,9 @@
         (fail-at cur start "`#:` names nothing: a keyword is `#:name`")
         (let ((r (read-atom-from cur (cur-pos cur) "")))
           (tagcase (car r)
-            (atom (d a b)
+            (atom (d a b xpn)
               (if (symbol? d)
-                  (cons (atom (symbol->keyword d) start b) (cdr r))
+                  (cons (atom (symbol->keyword d) start b 0) (cdr r))
                   (fail-at (cdr r) start "a keyword's name is a symbol's: `#:name`")))
             (else x (fail-at (cdr r) start "a keyword's name is a symbol's: `#:name`")))))))
 ;; `#t`, `#true`, `#f` or `#false`, `cur` at the letter.
@@ -667,10 +667,10 @@
       (marking (abbrev-entry start name)
         (lambda ()
           (let ((r (read-datum (skip-atmosphere cur))))
-            (cons (lst (the syns (list (atom (string->symbol name) start (+ start 1)) (car r)))
+            (cons (lst (the syns (list (atom (string->symbol name) start (+ start 1) 0) (car r)))
                        (datum-list2 (string->symbol name) (syn->datum (car r)))
                        start
-                       (cur-pos (cdr r)))
+                       (cur-pos (cdr r)) 0)
                   (cdr r)))))))
   (read-list (->* (cursor int char) result)
     (lambda (cur start close)
@@ -727,7 +727,8 @@
               ((#\()
                (let ((r (read-list (advance cur) start #\))))
                  (tagcase (car r)
-                   (lst (items d a b) (cons (vec items (datum-list->vector d) start b) (cdr r)))
+                   (lst (items d a b xpn)
+                     (cons (vec items (datum-list->vector d) start b 0) (cdr r)))
                    (else x (fail-at (cdr r) start "a vector cannot be a dotted list")))))
               ((#\\) (read-char (advance cur) start))
               ((#\t #\f #\T #\F) (read-bool cur start))

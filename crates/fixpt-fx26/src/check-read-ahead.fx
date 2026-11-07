@@ -70,7 +70,7 @@
 (define k-names-a-file? (->* (syn) bool)
   (lambda (s)
     (tagcase s
-      (lst (items d a b)
+      (lst (items d a b xpn)
         (let ((h (if (and (not (null? items)) (syn-symbol? (car items)))
                      (syn-name (car items))
                      "")))

@@ -396,7 +396,7 @@
 (define k-sys-host-of (->* (syn) string)
   (lambda (s)
     (tagcase s
-      (atom (d a b)
+      (atom (d a b xpn)
         (typecase d
           (string h (if (k-sys-host-from? h 0 0 0) h (k-sfail k-sys-host-msg s)))
           (else x (k-sfail k-sys-host-msg s))))
@@ -418,7 +418,7 @@
                        (2 (the syns-a (list (car ps)))))
               (k-sys-params (+ i 1) (cdr ps))))))
 (define k-sys-items (->* (syn) (listof syn acyclic))
-  (lambda (s) (tagcase s (lst (items d a b) items) (else x nil))))
+  (lambda (s) (tagcase s (lst (items d a b xpn) items) (else x nil))))
 ;; A reading's digest (`readings.fx`).
 (define readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
 ;; The two definitions declaration `name` at `a`..`b` is, its type
@@ -446,11 +446,11 @@
            (ps (k-sys-items (car (cdr (cdr ss)))))
            (n (length ps))
            ;; The call at the declared effect: `%syscallN`'s, a binder, so given.
-           (str (atom 'string a b))
-           (at (lst (list (atom 'subr a b) (car (cdr ss))
-                          (lst (cons str (cons str (cons str ps))) nil a b)
+           (str (atom 'string a b 0))
+           (at (lst (list (atom 'subr a b 0) (car (cdr ss))
+                          (lst (cons str (cons str (cons str ps))) nil a b 0)
                           (car (cdr (cdr (cdr ss)))))
-                    nil a b))
+                    nil a b 0))
            (call (tagcase (asks (string->symbol (string-append "%syscall" (int->string n))) 1010)
                    (e-app (f xs a2 b2 k2 k2r)
                      (e-app (e-the at f a b 1016 r) (append xs (k-sys-xs n a b 1020 r nil)) a b k2
@@ -464,7 +464,7 @@
                 (e-app (e-var '%syscall-available? a b 1050 r)
                        (list (k-sys-str host a b 1051 r) (k-sys-str text a b 1052 r)) a b 1053 r)))
            (companion (string->symbol (string-append "%syscall-available:" (symbol->string name)))))
-      (product (1 (t-define companion (the syns-a (list (atom 'bool a b))) available a b))
+      (product (1 (t-define companion (the syns-a (list (atom 'bool a b 0))) available a b))
                (2 (t-define name (the syns-a (list canonical)) body a b))))))
 ;; `(define-syscall name "host" type)` (`required`), or
 ;; `(define-optional-syscall …)`, at `a`..`b`: its line, its definition's.

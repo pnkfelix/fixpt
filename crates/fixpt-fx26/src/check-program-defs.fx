@@ -107,7 +107,7 @@
 (define k-conv-name? (->* (syn) bool)
   (lambda (s)
     (tagcase s
-      (atom (d a b)
+      (atom (d a b xpn)
         (if (symbol? d)
             (let ((n (symbol->string d)))
               (not (and (> (string-length n) 0) (string=? (substring n 0 1) "#"))))
@@ -117,11 +117,11 @@
 (define k-conv-text (->* (syn) string)
   (lambda (s)
     (tagcase s
-      (atom (d a b)
+      (atom (d a b xpn)
         (if (datum-int? d)
             (int->string d)
             (if (k-conv-name? s) (symbol->string (k-name-of s "a name")) (k-sfail k-conv-atoms s))))
-      (lst (items d a b) (string-append "(" (k-conv-texts items) ")"))
+      (lst (items d a b xpn) (string-append "(" (k-conv-texts items) ")"))
       (else x (k-sfail k-conv-atoms s)))))
 (define k-conv-texts (->* ((listof syn acyclic)) string)
   (lambda (xs)
@@ -141,7 +141,7 @@
         acc
         (let* ((c (car xs))
                (role (tagcase c
-                       (lst (items d a b)
+                       (lst (items d a b xpn)
                          (if (and (not (null? items)) (k-conv-name? (car items)))
                              (symbol->string (k-name-of (car items) "a name"))
                              (k-sfail "a convention's clause is `(role …)`" c)))

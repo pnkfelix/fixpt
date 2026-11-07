@@ -42,7 +42,7 @@
           (mk-list (list product) a b)
           (let ((g (nth items i)))
             (tagcase g
-              (lst (gs d c e)
+              (lst (gs d c e xpn)
                 (if (and (not (null? gs)) (form-of? g 'given))
                     (mk-list (cons product (given-fields fail (cdr gs) 1)) c e)
                     (fail-at-syn fail given-usage g)))
@@ -65,7 +65,7 @@
   (lambda (fail items load a b)
     (let* ((lib (tagcase load (e-var (n c d cdk cdkr) n) (else y '%none)))
            (call (lambda ((name string) (args syns-a))
-                  (mk-list (cons (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b)
+                  (mk-list (cons (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b 0)
                                                             (mk-symbol name a b)))
                                           a b)
                                  args)
@@ -104,7 +104,7 @@
   (lambda (x y a b) (mk-list (the syns-a (list x y)) a b)))
 ;; A list's items, or none.
 (define items-of (->* (syn) syns-a)
-  (lambda (s) (tagcase s (lst (xs d c e) xs) (else y nil))))
+  (lambda (s) (tagcase s (lst (xs d c e xpn) xs) (else y nil))))
 
 ;; `(spawn (box M r) body …)`'s body: `(plambda ((r place)) (lambda ((box
 ;; (inbox M r)) (r (place r))) body … #u))`.
@@ -141,7 +141,7 @@
     (let ((usage "`(par ((name expression) …) body …)`"))
       (begin
         (at-least fail items 3 usage a b)
-        (let ((bs (tagcase (nth items 1) (lst (xs d c e) xs) (else y (fail usage a b)))))
+        (let ((bs (tagcase (nth items 1) (lst (xs d c e xpn) xs) (else y (fail usage a b)))))
           (begin
             (par-check fail bs)
             (if (< (len bs) 2) (fail par-two a b) #u)
@@ -170,7 +170,7 @@
     (let* ((bnd (car bs)) (sa (syn-start bnd)) (sb (syn-end bnd)))
       (if (null? (cdr bs))
           (thunk-syn (par-exp bnd) sa sb)
-          (let* ((op (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b)
+          (let* ((op (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b 0)
                                                 (mk-symbol "par2" a b)))
                               a b))
                  (rest (if (null? (cdr (cdr bs)))
@@ -213,7 +213,7 @@
     (let* ((e (car es)) (sa (syn-start e)) (sb (syn-end e)))
       (if (null? (cdr es))
           (thunk-syn e sa sb)
-          (let* ((op (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b)
+          (let* ((op (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b 0)
                                                 (mk-symbol "race2" a b)))
                               a b))
                  (inner (race-tree (cdr es) lib a b))
@@ -324,7 +324,7 @@
 ;; `(with lib name)`, at `a`..`b`.
 (define lib-op (->* (symbol string int int) syn)
   (lambda (lib name a b)
-    (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b) (mk-symbol name a b))) a b)))
+    (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b 0) (mk-symbol name a b))) a b)))
 ;; `((%sel-i c) …)`'s items, from arm `i` of `arms`.
 (define select-binds (->* (syns-a int int int) syns-a)
   (lambda (arms i a b)
@@ -367,7 +367,7 @@
 (define kind-form? (->* (syn) bool)
   (lambda (k)
     (tagcase k
-      (lst (xs d a b) (and (not (null? xs)) (symbol=? (syn-head (car xs)) '=>)))
+      (lst (xs d a b xpn) (and (not (null? xs)) (symbol=? (syn-head (car xs)) '=>)))
       (else y (case (syn-head k)
                 ((region place effect type data sendable flat size conv) #t)
                 (else #f))))))
@@ -377,7 +377,7 @@
 (define binder-kind? (->* (syn) bool)
   (lambda (b)
     (tagcase b
-      (lst (xs d a b2)
+      (lst (xs d a b2 xpn)
         (cond ((= (len xs) 2) (kind-form? (nth xs 1)))
               ((= (len xs) 3) (or (kind-form? (nth xs 1)) (not (qualified? (nth xs 2)))))
               (else #t)))
@@ -385,14 +385,14 @@
 ;; Whether `q` is `qualified`: a module parameter not included, its names
 ;; reached by `with` or `import` (Heist's, 2026-10-28).
 (define qualified? (->* (syn) bool)
-  (lambda (q) (tagcase q (atom (d a b) (symbol=? (syn-head q) 'qualified)) (else y #f))))
+  (lambda (q) (tagcase q (atom (d a b xpn) (symbol=? (syn-head q) 'qualified)) (else y #f))))
 ;; The binders of form `f`, if it is `(module-parameters (binder …))`.
 (define module-binders (->* (syn) syns-a)
   (lambda (f)
     (if (form-of? f 'module-parameters)
         (tagcase f
-          (lst (xs d a b)
-            (if (= (len xs) 2) (tagcase (nth xs 1) (lst (bs e c z) bs) (else y nil)) nil))
+          (lst (xs d a b xpn)
+            (if (= (len xs) 2) (tagcase (nth xs 1) (lst (bs e c z xpn) bs) (else y nil)) nil))
           (else y nil))
         nil)))
 (define any-module-binder? (->* (syns-a) bool)
@@ -417,7 +417,7 @@
     (if (null? bs)
         nil
         (tagcase (car bs)
-          (lst (xs d c e)
+          (lst (xs d c e xpn)
             (let ((m (car xs)))
               (if (= (len xs) 3)
                   (binder-includes (cdr bs) a b)
@@ -430,7 +430,7 @@
     (if (null? bs)
         nil
         (cons (tagcase (car bs)
-                (lst (xs d c e)
+                (lst (xs d c e xpn)
                   (if (= (len xs) 3) (mk-list (list (car xs) (nth xs 1)) c e) (car bs)))
                 (else y (car bs)))
               (binder-params (cdr bs))))))
@@ -454,7 +454,7 @@
 (define item-form? (->* (syn) bool)
   (lambda (f)
     (tagcase f
-      (lst (xs d a b)
+      (lst (xs d a b xpn)
         (or (null? xs)
             (case (syn-head (car xs))
               ((define-generative define-type define-effect define define* include define-rec hide

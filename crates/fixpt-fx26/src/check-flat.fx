@@ -91,7 +91,7 @@
         (k-sfail k-flat-usage s)))))
 ;; A list's items, or none for what is no list (or an empty one).
 (define k-list-items (->* (syn) k-syns)
-  (lambda (s) (tagcase s (lst (items d a b) items) (else x nil))))
+  (lambda (s) (tagcase s (lst (items d a b xpn) items) (else x nil))))
 ;; `(productof (label flat) …)`, its fields laid out in the order written;
 ;; or `(arrayof flat n)`, `n` a literal length (`Checker::parse_flat_list`).
 (define k-parse-flat-list (->* (syn k-syns) int)

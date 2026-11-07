@@ -212,7 +212,7 @@
                    (2 (the k-ids (cons v (extract rest 2)))))))))
 (define k-define-generative (->* (syn syn) symbol)
   (lambda (head rep)
-    (let* ((hs (tagcase head (lst (items d a b) items) (else x (the k-syns nil))))
+    (let* ((hs (tagcase head (lst (items d a b xpn) items) (else x (the k-syns nil))))
            (name-syn (if (null? hs) head (car hs)))
            (ps (if (null? hs) (the k-syns nil) (cdr hs)))
            (name (k-name-of name-syn "a generative type's name"))

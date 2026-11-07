@@ -45,10 +45,17 @@
 
 (define syn-start (->* (syn) int)
   (lambda (s)
-    (tagcase s (atom (d a b) a) (lst (i d a b) a) (dotted (i t d a b) a) (vec (i d a b) a))))
+    (tagcase s
+      (atom (d a b x) a) (lst (i d a b x) a) (dotted (i t d a b x) a) (vec (i d a b x) a))))
 (define syn-end (->* (syn) int)
   (lambda (s)
-    (tagcase s (atom (d a b) b) (lst (i d a b) b) (dotted (i t d a b) b) (vec (i d a b) b))))
+    (tagcase s
+      (atom (d a b x) b) (lst (i d a b x) b) (dotted (i t d a b x) b) (vec (i d a b x) b))))
+;; The expansion that made `s`, 0 if none did.
+(define syn-expansion (->* (syn) int)
+  (lambda (s)
+    (tagcase s
+      (atom (d a b x) x) (lst (i d a b x) x) (dotted (i t d a b x) x) (vec (i d a b x) x))))
 
 (define pfail (->* (string syn) void)
   (lambda (message s)
@@ -57,18 +64,18 @@
   (lambda (message a b) (abort-current-continuation parse-tag (p-err message a b))))
 
 (define syn-symbol? (->* (syn) bool)
-  (lambda (s) (tagcase s (atom (d a b) (symbol? d)) (else x #f))))
+  (lambda (s) (tagcase s (atom (d a b xpn) (symbol? d)) (else x #f))))
 (define syn-name (->* (syn) string)
   (lambda (s)
     (tagcase s
-      (atom (d a b) (if (symbol? d) (symbol->string d) ""))
+      (atom (d a b xpn) (if (symbol? d) (symbol->string d) ""))
       (else x ""))))
 ;; A form's head as a symbol, to compare with the keywords: any that is
 ;; not a name is taken as `()`, which is none of them.
 (define syn-head (->* (syn) symbol)
   (lambda (s)
     (tagcase s
-      (atom (d a b) (if (symbol? d) d '|()|))
+      (atom (d a b xpn) (if (symbol? d) d '|()|))
       (else x '|()|))))
 (define syn-symbol (->* (syn) symbol)
   (lambda (s) (if (syn-symbol? s) (syn-head s) (pfail "a name" s))))
@@ -78,15 +85,15 @@
 (define sym-unit symbol (string->symbol "#u"))
 ;; `()`, which reads as an empty list.
 (define syn-nil? (->* (syn) bool)
-  (lambda (s) (tagcase s (lst (items d a b) (null? items)) (else x #f))))
+  (lambda (s) (tagcase s (lst (items d a b xpn) (null? items)) (else x #f))))
 ;; A proper list's items; `what`, when it is not one.
 (define syn-items (->* (syn string) syns-a)
   (lambda (s what)
     (tagcase s
-      (lst (items d a b) items)
+      (lst (items d a b xpn) items)
       (else x (pfail (string-append what ": expected a list") s)))))
 (define syn-int (->* (syn) int)
-  (lambda (s) (tagcase s (atom (d a b) (if (datum-int? d) d -1)) (else x -1))))
+  (lambda (s) (tagcase s (atom (d a b xpn) (if (datum-int? d) d -1)) (else x -1))))
 
 (define len (->* (syns-a) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (len (cdr xs))))))
@@ -103,7 +110,7 @@
           ((>= (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else
            (tagcase s
-             (atom (d a b)
+             (atom (d a b xpn)
                (if (keyword? d) (keyword->symbol d) (pfail label-usage s)))
              (else x (pfail label-usage s)))))))
 (define label-usage string "a label is a keyword, a name or a natural number")
@@ -118,11 +125,11 @@
   (lambda (items n shape a b) (if (< (len items) n) (pfail-at shape a b) #u)))
 
 (define mk-symbol (->* (string int int) syn)
-  (lambda (n a b) (atom (string->symbol n) a b)))
+  (lambda (n a b) (atom (string->symbol n) a b 0)))
 (define syn-datums (->* (syns-a) (listof datum acyclic))
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
 (define mk-list (->* (syns-a int int) syn)
-  (lambda (items a b) (lst items (syn-datums items) a b)))
+  (lambda (items a b) (lst items (syn-datums items) a b 0)))
 ;; A parameter: `name`, or `(name type)`.
 (define parse-param (->* (syn) (productof (1 symbol) (2 syns-a)))
   (lambda (p)
@@ -156,7 +163,7 @@
 (define form-head (->* (syn) symbol)
   (lambda (s)
     (tagcase s
-      (lst (items d a b) (if (null? items) '|()| (syn-head (car items))))
+      (lst (items d a b xpn) (if (null? items) '|()| (syn-head (car items))))
       (else x '|()|))))
 ;; Whether `s` is a form headed `keyword`.
 (define form-of? (->* (syn symbol) bool)
@@ -205,7 +212,8 @@
 (define freeze-pair (->* (symbol syn) syns-a)
   (lambda (head given)
     (tagcase given
-      (lst (xs d a2 b2) (if (and (symbol=? head 'letfreeze) (= (len xs) 2)) xs (the syns-a nil)))
+      (lst (xs d a2 b2 xpn)
+        (if (and (symbol=? head 'letfreeze) (= (len xs) 2)) xs (the syns-a nil)))
       (else x (the syns-a nil)))))
 
 ;; A call `(f tmp more …)`, spanning `a`..`b`; and a `let`'s one binding.
@@ -293,10 +301,10 @@
 
 ;; Whether `s` is a string literal; and the string it is.
 (define syn-string? (->* (syn) bool)
-  (lambda (s) (tagcase s (atom (d a b) (string? d)) (else x #f))))
+  (lambda (s) (tagcase s (atom (d a b xpn) (string? d)) (else x #f))))
 (define syn-string (->* (syn) string)
   (lambda (s)
-    (tagcase s (atom (d a b) (if (string? d) d "")) (else x ""))))
+    (tagcase s (atom (d a b xpn) (if (string? d) d "")) (else x ""))))
 ;; `t` alone in a list.
 (define one-syn (->* (syn) syns-a) (lambda (t) (cons t nil)))
 ;; A module's item, of one name.
@@ -306,14 +314,14 @@
 (define param-head? (->* (syn) bool)
   (lambda (head)
     (tagcase head
-      (lst (xs d a b) (and (not (null? xs)) (not (null? (cdr xs)))))
+      (lst (xs d a b xpn) (and (not (null? xs)) (not (null? (cdr xs)))))
       (else x #f))))
 ;; `(define-type (d (p k) …) T)` in a module, at `a`..`b`: `(define-type d
 ;; (dlambda ((p k) …) T))`, what a `define-datatype` with parameters expands
 ;; to, in a `load-module`'s file too, as the Rust parser's `parse_module_in`.
 (define param-desc-item (->* (int int syn syn) mod-item)
   (lambda (a b head t)
-    (let* ((hs (tagcase head (lst (xs d a b) xs) (else x (the syns-a nil))))
+    (let* ((hs (tagcase head (lst (xs d a b xpn) xs) (else x (the syns-a nil))))
            (ha (syn-start head))
            (hb (syn-end head))
            (params (mk-list (cdr hs) ha hb))
@@ -331,7 +339,7 @@
 (define include-form? (->* (syn) bool)
   (lambda (f)
     (tagcase f
-      (lst (xs d a b) (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'include)))
+      (lst (xs d a b xpn) (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'include)))
       (else y #f))))
 (define any-include? (->* (syns-a) bool)
   (lambda (fs)
@@ -343,12 +351,13 @@
 (define hide-forms (->* (syn) syns-a)
   (lambda (f)
     (tagcase f
-      (lst (xs d a b) (if (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'hide)) (cdr xs) nil))
+      (lst (xs d a b xpn)
+        (if (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'hide)) (cdr xs) nil))
       (else y nil))))
 (define hide-form? (->* (syn) bool)
   (lambda (f)
     (tagcase f
-      (lst (xs d a b) (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'hide)))
+      (lst (xs d a b xpn) (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'hide)))
       (else y #f))))
 ;; Each name hidden item `it` (read from `f`) defines, marked by a type of
 ;; its own, onto `rest`: a type's `%hidden:name`, a value's `%hiddenv:name`
@@ -406,7 +415,7 @@
     (let ((k (extract it 1)) (xs (extract it 4)))
       (product (1 k) (2 (extract it 2)) (3 (extract it 3))
                (4 (cond ((= k 2) (inits-in-includes xs (one-syn f)))
-                        ((= k 3) (tagcase f (lst (bs d a b) (inits-in-includes xs (cdr bs)))
+                        ((= k 3) (tagcase f (lst (bs d a b xpn) (inits-in-includes xs (cdr bs)))
                                    (else y xs)))
                         (else xs)))))))
 ;; The included modules of `items`, from `%include-k` on.
@@ -475,7 +484,7 @@
 (define datatype? (->* (syn) bool)
   (lambda (s) (form-of? s 'define-datatype)))
 
-(define mk-int (->* (int int int) syn) (lambda (i a b) (atom i a b)))
+(define mk-int (->* (int int int) syn) (lambda (i a b) (atom i a b 0)))
 ;; `(keyword item …)`; `(subr pure (member …) result)`; and `(poly (binder
 ;; …) body)`: each spanning `a`..`b`.
 (define mk-form (->* (string syns-a int int) syn)
@@ -507,7 +516,7 @@
 (define dt-tag (->* (syn) syn)
   (lambda (t)
     (tagcase t
-      (atom (d a b) (if (keyword? d) (atom (keyword->symbol d) a b) t))
+      (atom (d a b xpn) (if (keyword? d) (atom (keyword->symbol d) a b 0) t))
       (else x t))))
 ;; Each variant's arm of the sum, `(tag (productof (1 T) …))`.
 (define dt-arms (->* (syns-a int int) syns-a)
@@ -641,7 +650,8 @@
 (define quoted (->* (syn int) syn)
   (lambda (x depth)
     (let ((built (quoted-in x depth)) (a (syn-start x)) (b (syn-end x)))
-      (if (and (tagcase x (atom (d c e) #f) (lst (items d c e) (not (null? items))) (else y #t))
+      (if (and (tagcase x
+                 (atom (d c e x2) #f) (lst (items d c e x2) (not (null? items))) (else y #t))
                (null? (unquoted x depth)))
           ;; A quote's, not a quasiquote's, marked (`%quote`): everything in
           ;; it the rewrite's, made once where it is all literals.
@@ -659,7 +669,7 @@
 (define unquote-of (->* (syn string) syns-a)
   (lambda (x form)
     (tagcase x
-      (lst (items d a b)
+      (lst (items d a b xpn)
         (if (and (= (len items) 2) (string=? (syn-name (car items)) form)) (cdr items) nil))
       (else y nil))))
 (define unquoted (->* (syn int) syns-a)
@@ -681,10 +691,10 @@
   (lambda (x depth)
     (and (null? (unquoted x depth))
          (tagcase x
-           (lst (items d a b) (items-free? items depth (quasi-inner items depth)))
-           (dotted (items tail d a b)
+           (lst (items d a b xpn) (items-free? items depth (quasi-inner items depth)))
+           (dotted (items tail d a b xpn)
              (and (items-free? items depth (quasi-inner items depth)) (unquote-free? tail depth)))
-           (vec (items d a b) (items-free? items depth depth))
+           (vec (items d a b xpn) (items-free? items depth depth))
            (else y #t)))))
 ;; Whether each of `items`, the first at `depth` and the rest at `inner`, is
 ;; neither spliced nor reached by an `unquote`.
@@ -700,7 +710,7 @@
            ;; Under a quasiquote, a list or vector no unquote reaches is a
            ;; constant: a quote, made once (`%quote` at its opening).
            (mark? (and (null? u) (>= depth 1)
-                       (tagcase x (atom (d c e) #f) (lst (items d c e) (not (null? items)))
+                       (tagcase x (atom (d c e xpn) #f) (lst (items d c e xpn) (not (null? items)))
                          (else y #t))
                        (unquote-free? x depth)))
            (dq (if mark? -1 depth)))
@@ -708,19 +718,19 @@
           (car u)
           (let ((built
                  (tagcase x
-                   (atom (d c e)
+                   (atom (d c e xpn)
                      (cond ((not (symbol? d))
                             (if (bytevector? d) (pfail "a bytevector cannot be quoted yet" x) x))
                            ((or (symbol=? d sym-true) (symbol=? d sym-false)) x)
                            (else (mk-form "quote" (list x) a b))))
                    ;; `nil` at the list, each `cons` from its item, a constant
                    ;; suffix's `%quote` from its first item to the end.
-                   (lst (items d c e)
+                   (lst (items d c e xpn)
                      (if (null? items)
                          (mk-symbol "nil" a b)
                          (quoted-items items #f (car items) dq a b)))
-                   (dotted (items tail d c e) (quoted-items items #t tail dq a b))
-                   (vec (items d c e)
+                   (dotted (items tail d c e xpn) (quoted-items items #t tail dq a b))
+                   (vec (items d c e xpn)
                      (if (null? items)
                          (fx-call "datum-list->vector" (list (fx-named "nil" a b)) a b)
                          (fx-call "datum-list->vector"
@@ -896,7 +906,7 @@
                      #u
                      (begin
                        (tagcase (car xs)
-                         (lst (items d a b)
+                         (lst (items d a b xpn)
                            (begin
                              (if (and (not (null? items)) (name-in? (syn-head (car items)) ms))
                                  (pfail (string-append
@@ -917,5 +927,5 @@
 (define syntax-form-of? (->* (syn symbol) bool)
   (lambda (s keyword)
     (tagcase s
-      (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) keyword)))
+      (lst (items d a b xpn) (and (not (null? items)) (symbol=? (syn-head (car items)) keyword)))
       (else y #f))))
