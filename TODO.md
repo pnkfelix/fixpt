@@ -4316,8 +4316,10 @@ shadow (a `with`'s, a macro used in its body by a name the module gives,
 refused since 2026-11-07; `rename`/`prefix` for `import-with-syntax` the
 way out, when wanted); a file's own use of its
 macros, files of module parameters; `(expr T E)` and templates checked
-once (item 7); the port to the front end written in FX-26, without which
-`fixpt check` of a program with macros fails.
+once (item 7); the port to the front end written in FX-26 (begun
+2026-11-07: `define-syntax`, expansion, `#%toplevel`; left:
+`import-with-syntax`, the checker's refusals of macros, errors said at each
+use that made them, which the FX-26 trees keep no expansion for).
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`

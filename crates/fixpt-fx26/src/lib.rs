@@ -484,6 +484,21 @@ pub const PARSER_IDS: &str = include_str!("parser-ids.fx");
 /// shared loads: loaded by [`PARSER`], which gives on what it defines.
 pub const PARSER_LOADS: &str = include_str!("parser-loads.fx");
 
+/// The macros' kernel: the kernel's forms' syntax types and the keywords, as
+/// data, which both expanders read (`macros.rs`, [`MACROS`]).
+pub const MACROS_KERNEL: &str = include_str!("macros-kernel.fx");
+
+/// The expander's syntax types, read and compared (`macros.rs`'s first half).
+pub const MACROS_TYPES: &str = include_str!("macros-types.fx");
+
+/// The expander's aligning of syntax with syntax types, its binding walk and
+/// the macros defined (`macros.rs`'s second half).
+pub const MACROS_ALIGN: &str = include_str!("macros-align.fx");
+
+/// The expander of the front end written in FX-26: `define-syntax` checked
+/// and defined, each use of a macro expanded (`macros.rs`'s).
+pub const MACROS: &str = include_str!("macros.fx");
+
 /// The parser's expressions, and its `load-module`
 /// (`docs/research/first-class-modules.md`, M7): the files a program names,
 /// as the driver read them. After [`PARSER`], before [`PARSER_TOP`].
@@ -748,7 +763,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 203] = [
+pub const FRONT_END_MODULES: [(&str, &str); 207] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -805,6 +820,10 @@ pub const FRONT_END_MODULES: [(&str, &str); 203] = [
     ("parser-exps.fx", PARSER_EXPS),
     ("parser-ids.fx", PARSER_IDS),
     ("parser-top.fx", PARSER_TOP),
+    ("macros-kernel.fx", MACROS_KERNEL),
+    ("macros-types.fx", MACROS_TYPES),
+    ("macros-align.fx", MACROS_ALIGN),
+    ("macros.fx", MACROS),
     ("eval-types.fx", EVAL_TYPES),
     ("eval-values.fx", EVAL_VALUES),
     ("eval-prims.fx", EVAL_PRIMS),

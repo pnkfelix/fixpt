@@ -20,12 +20,15 @@
 (import parser-module parse-tag syn-start syn-end pfail syn-symbol? syn-symbol syn-items len nth
         keep mk-list form-head form-of? datatype? mk-pure-subr mk-poly expand-datatype import?
         expand-import e-var e-lambda t-define t-define-rec t-define-type t-define-effect
-        includes-given include-given-at mk-symbol syn-name loaded-error e-module
+        includes-given include-given-at mk-symbol syn-name loaded-error e-module pfail-at
         (type include-given)
         t-define-convention t-define-syscall t-define-generative t-exp p-ok p-err shared-taken
         shared-reset! loaded input-key?
         (type syns-a exp top param-list top-list presult names) (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
+;; The expander (`macros.fx`), which each form goes through first.
+(define macros-module ((proj (load-module "fx26:macros.fx") rs re rm rc rp)))
+(import macros-module expand define-macro defines-syntax? macros-at! macros-after!)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -190,18 +193,25 @@
 
 ;; Forms `xs`, each read in the state the one before left (`t`), under the
 ;; switches `settings`: to trees, each expression numbered (`parser-ids.fx`)
-;; of the form's reading (`form-reading`).
+;; of the form's reading (`form-reading`). Each form is expanded first
+;; (`macros.fx`): a `define-syntax` defines a macro and makes nothing, and
+;; is in the state after it, as every form is; any other is its expansion.
+;; The reading is of the form as written, the macros it was expanded with
+;; in the state it was read in.
 (define parse-tops (->* (seen string syns-a) top-list)
   (lambda (t settings xs)
     (if (null? xs)
         nil
         ;; Before each form, the hidden globals of the files it loads first
         ;; (`parse-loaded`), those its types name first (`type-loaded`).
-        (let* ((made (parse-made (type-loaded (car xs))))
+        (let* ((written (car xs))
+               (made (if (defines-syntax? written)
+                         (begin (define-macro pfail-at written nil) (the top-list nil))
+                         (parse-made (type-loaded (expand pfail-at written)))))
                (before (shared-taken))
-               (r (form-reading (walk-state t) settings (car xs) (loads-of before)))
+               (r (form-reading (walk-state t) settings written (loads-of before)))
                (form (number-form t r (append-tops before made)))
-               (rest (parse-tops t settings (cdr xs))))
+               (rest (begin (macros-after! r) (parse-tops t settings (cdr xs)))))
           (append-tops form rest)))))
 ;; The files the hidden globals `ts` are, each by its key and its trees.
 (define loads-of (->* (top-list) loads)
@@ -240,6 +250,7 @@
   (lambda (keys forms)
     (let* ((t (walk-of keys)) (base (walk-count t)))
       (begin (shared-reset!)
+             (macros-at! (walk-state t))
              (let* ((parsed (prompt parse-tag (p-ok (parse-tops t (extract keys 3) forms))
                                     (lambda (r) r)))
                     (done (walk-done! t))

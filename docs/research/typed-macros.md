@@ -557,10 +557,21 @@ turn.
 - The REPL: a macro defined in what is typed is defined for that alone
   (`Checker::macros_kept`); a use's binders and scopes are not yet shown
   before it expands.
-- The front end written in FX-26 has no macros of its own: what it is
-  given has been expanded by the Rust expander (`expand_forms`), but
-  `fixpt check`, which gives it the text, fails on a program with macros;
-  a module file's macros are what `import-with-syntax` brings.
+- The front end written in FX-26 expands its own since 2026-11-07
+  (`macros.fx`, `macros-align.fx`, `macros-types.fx`; the kernel's
+  signatures and the keywords one file both read, `macros-kernel.fx`):
+  `define-syntax` checked and defined, uses expanded, free names through
+  `#%toplevel`, in `parse-tops`, each form before anything else sees it.
+  The macros a form is read with are what the session's state it is read
+  in says (a table from each state to the macros after it), the
+  `define-syntax`es in the readings that make the state. Both expanders
+  agree on every program in `tests/programs/macros`
+  (`tests/macros_both.rs`), but for what is not ported yet:
+  `import-with-syntax`, and the checker's refusals of macros (a `with`'s
+  body, a definition of a macro's name, a macro of a global's). An error
+  the FX-26 checker finds in an expansion is said where the template
+  wrote it, not yet at each use that made it: its trees keep no
+  expansion (`syn` does, since 2026-11-07).
 - Ellipsis (the user's answer: later, as sugar for recursion), `defn`,
   binders of descriptions, procedural macros (items 7 to 11).
 

@@ -165,9 +165,20 @@ pub struct Macros {
 }
 
 /// The kernel's forms a template may use, with their binding structure
-/// (each signature of a form's operands). A form not here is refused in a
+/// (each signature of a form's operands), and the keywords: data, which the
+/// expander written in FX-26 reads too. A form not here is refused in a
 /// template; what has no binders is an application, of expressions.
-const KERNEL: &str = include_str!("macros-kernel.sx");
+const KERNEL: &str = include_str!("macros-kernel.fx");
+
+/// The list quoted in the kernel's `(define name datum (quote list))`.
+fn kernel_list(forms: &[Syntax], interner: &Interner, name: &str) -> Vec<Syntax> {
+    let def = forms.iter().find_map(|f| match f.as_proper_list() {
+        Some([_, n, _, q]) if n.as_symbol().is_some_and(|n| interner.name(n) == name) => Some(q.clone()),
+        _ => None,
+    });
+    let quoted = def.and_then(|q| q.as_proper_list().and_then(|l| l.get(1).cloned())).expect("the kernel's list");
+    quoted.as_proper_list().expect("a list").to_vec()
+}
 
 /// Where a syntax type is aligned with syntax: a macro's pattern, a
 /// template, or a use.
@@ -255,7 +266,7 @@ impl Macros {
             .read_all()
             .map_err(|e| FxError::at(e.span, format!("the kernel's syntax types: {}", e.message)))?;
         let mut named: HashMap<Sym, Rc<STy>> = HashMap::new();
-        for f in &forms {
+        for f in &kernel_list(&forms, interner, "kernel-forms") {
             let items = f.as_proper_list().expect("a kernel entry");
             let what = interner.name(items[0].as_symbol().expect("a head")).to_string();
             let name = items[1].as_symbol().expect("a name");
@@ -1249,5 +1260,18 @@ fn in_expansion(s: &Syntax, made: u32) -> Syntax {
         Datum::List { items, tail } => list_of(at, items.iter().map(|x| in_expansion(x, made)).collect(), tail.as_ref().map(|x| in_expansion(x, made))),
         Datum::Vector(items) => Syntax::new(at, Datum::Vector(items.iter().map(|x| in_expansion(x, made)).collect())),
         d => Syntax::new(at, d.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The kernel file's reserved words, which the expander written in
+    /// FX-26 reads, are the Rust front end's keywords.
+    #[test]
+    fn the_kernels_reserved_words_are_the_keywords() {
+        let mut interner = fixpt_read::Interner::default();
+        let forms = fixpt_read::Reader::new(super::KERNEL, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().expect("reads");
+        let words: Vec<String> = super::kernel_list(&forms, &interner, "reserved-words").iter().map(|w| interner.name(w.as_symbol().expect("a name")).to_string()).collect();
+        assert_eq!(words, crate::top::KEYWORDS);
     }
 }

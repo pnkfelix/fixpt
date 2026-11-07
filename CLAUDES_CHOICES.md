@@ -4184,3 +4184,29 @@ The user read the paper as supporting the distribution. Mine:
   macro of a global's name (refused where the macro is: at expansion in
   the REPL, at the global's check in a program, which is expanded before
   anything is checked, so each macro keeps where it was defined).
+
+## The expander in FX-26 (2026-11-07)
+
+- **The design is the user's** (the port's four decisions: in
+  `parse-tops`; an expansion field on `syn`; macros in the form's state;
+  the expanders compared); these are mine:
+- **Three files**, as `macros.rs`'s parts: syntax types, aligning and the
+  binding walk, defining and expanding; each part's instance taken from
+  the one that loads it, so all see one table of `mu`s and one of
+  macros, and each fails through the parser's `pfail-at`, as
+  `parser-forms.fx` does.
+- **One kernel file for both**, `macros-kernel.fx`, quoted data the Rust
+  expander reads too, in place of `macros-kernel.sx`; its keywords held
+  to `top::KEYWORDS` by a test rather than replacing it.
+- **Macros by state**: a table from each session state to the macros
+  defined after the form that left it, looked up when a parse begins.
+  So a program begun in the standard state has none, an entry has its
+  session's, and a test may run every program in one session.
+- **Coinduction by structure**: the Rust `sub` assumes pairs of types by
+  pointer; FX-26's `eq?` says nothing of immutable data, so pairs are
+  assumed by structural equality, a `mu` by its number.
+- **The aligner's nodes in a growable array**, reset for each alignment,
+  as the Rust one makes a new arena for each; template binders by node
+  number, as there.
+- **The reading is of the form as written**, the macros it is expanded
+  with in the state it is read in, rather than of its expansion.
