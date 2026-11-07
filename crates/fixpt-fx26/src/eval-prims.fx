@@ -335,6 +335,8 @@
                (lambda (xs) (made (make-bytevector (n xs 0) (int->u8 (n xs 1))))))
         (prim! 'bytevector-length (lambda (xs) (bytevector-length (b xs 0))))
         (prim! 'bytevector-u8-ref (lambda (xs) (u8->int (bytevector-u8-ref (b xs 0) (n xs 1)))))
+        (prim! 'datum-bytevector-length (lambda (xs) (bytevector-length (b xs 0))))
+        (prim! 'datum-bytevector-ref (lambda (xs) (u8->int (bytevector-u8-ref (b xs 0) (n xs 1)))))
         (prim! 'bytevector-u8-set!
                (lambda (xs)
                  (begin (bytevector-u8-set! (b xs 0) (n xs 1) (int->u8 (n xs 2))) the-unit)))
@@ -872,6 +874,11 @@
         (prim! 'nat? (lambda (xs) (nat? (as-int (ev-arg xs 0)))))
         (prim! 'parse-nat
                (lambda (xs) (parse-nat (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
+        ;; A ratio is no value here (`ev-numbers`): only an integer, over 1.
+        (prim! 'datum-rational?
+               (lambda (xs) (typecase (ev-arg xs 0) (int n #t) (f64 x (f64-finite? x)) (else #f))))
+        (prim! 'datum-numerator (lambda (xs) (as-int (ev-arg xs 0))))
+        (prim! 'datum-denominator (lambda (xs) (begin (as-int (ev-arg xs 0)) 1)))
         (prim! 'parse-number
                (lambda (xs)
                  (ev-numbers ((proj parse-number @v) (as-str (ev-arg xs 0))

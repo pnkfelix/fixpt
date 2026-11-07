@@ -437,6 +437,8 @@
          (("make-bytevector") "make-bytevector")
          (("bytevector-copy") "%fx26-bytevector-copy")
          (("string-downcase") "%fx26-string-downcase")
+         (("datum-rational?") "rational?")
+         (("datum-numerator") "%numerator")
          (("certify-acyclic") "%fx26-identity")
          (("symbol->keyword") "%fx26-symbol->keyword")
          (("keyword->symbol") "%fx26-keyword->symbol")
@@ -461,6 +463,7 @@
          (("session-redefines") "%fx26-session-redefines")
          (("bytevector-length") "bytevector-length")
          (("bytevector-u8-ref") "bytevector-u8-ref")
+         (("datum-denominator") "%denominator")
          (("set-register-twin") "%set-register-twin")
          (("runtime-primitive") "%runtime-primitive")
          (else "")))
@@ -482,6 +485,7 @@
          (else "")))
       ((20)
        (case n
+         (("datum-bytevector-ref") "bytevector-u8-ref")
          (("set-register-twin-at") "%set-register-twin")
          (else "")))
       ((22)
@@ -491,6 +495,7 @@
       ((23)
        (case n
          (("%session-eval-redefines") "%fx26-session-redefines")
+         (("datum-bytevector-length") "bytevector-length")
          (("runtime-primitive-arity") "%runtime-primitive-arity")
          (else "")))
       ((24)

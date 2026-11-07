@@ -297,6 +297,9 @@ fn a_reading_is_not_of_how_its_text_is_written() {
     assert_ne!(r("(f #t)"), r("(f #f)"));
     assert_ne!(r("(f) (g)"), r("(f (g))"));
     assert_ne!(r("ab"), r("|a b|"));
+    assert_eq!(r("'(6/4 #x10)"), r("'(3/2 16)"));
+    assert_ne!(r("#u8(1 2)"), r("#u8(1 3)"));
+    assert_ne!(r("1/2"), r("1/3"));
 }
 
 /// The digest written in FX-26 is the one in Rust, each of the trees its
@@ -304,8 +307,8 @@ fn a_reading_is_not_of_how_its_text_is_written() {
 /// agree (`readings.fx`, `ids::reading_of`).
 #[test]
 fn the_readings_agree() {
-    let texts = ["", "(+ 1 2)", "λx → ü #\\ü", "'(a . b) #(1 \"s\") #:k", "(-1.5 1e300 123456789012345678901234567890 -7)"];
-    let cases: Vec<(i64, &str)> = texts.iter().zip([0, -1, 987_654_321_012, 5, 0]).map(|(t, s)| (s, *t)).collect();
+    let texts = ["", "(+ 1 2)", "λx → ü #\\ü", "'(a . b) #(1 \"s\") #:k", "(-1.5 1e300 123456789012345678901234567890 -7)", "'(6/4 -1/3 #u8(1 2 255))"];
+    let cases: Vec<(i64, &str)> = texts.iter().zip([0, -1, 987_654_321_012, 5, 0, 3]).map(|(t, s)| (s, *t)).collect();
     let read = |t: &str| format!("(car ((with er read-text-at) {t:?} 0))");
     let calls: Vec<String> = cases.iter().map(|(s, t)| format!("((with r reading-of) {s} {})", read(t))).collect();
     let load = |f: &str| format!("((proj (load-module \"fx26:{f}.fx\") @s @e @m @c))");

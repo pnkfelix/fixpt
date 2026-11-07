@@ -59,6 +59,8 @@ dependencies = [
  "fixpt-reps",
  "fixpt-runtime",
  "fixpt-scheme",
+ "num-bigint",
+ "num-rational",
 ]
 
 [[package]]

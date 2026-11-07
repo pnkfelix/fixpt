@@ -15,6 +15,8 @@ use crate::ast::{Exp, ExpId, ModItem};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_read::{Datum, Interner, Num, Syntax};
+use num_bigint::BigInt;
+use num_rational::BigRational;
 use std::collections::HashMap;
 
 /// A reading: a digest of the session's state before it, `s`, and the
@@ -75,41 +77,33 @@ fn fold_tree(h: i64, t: &Syntax, names: &Interner) -> i64 {
         Datum::Keyword(n) => fold_run(h, 7, names.name(*n)),
         Datum::Str(s) => fold_run(h, 8, s),
         Datum::Char(c) => fold1(fold1(h, mark(9)), *c as i64),
-        Datum::Number(Num::Int(n)) => fold_run(h, 10, &n.to_string()),
-        Datum::Number(Num::Big { negative, digits, radix }) => fold_run(h, 10, &decimal(*negative, digits, *radix)),
+        Datum::Number(n @ (Num::Int(_) | Num::Big { .. })) => fold_run(h, 10, &integer(n).to_string()),
         Datum::Number(Num::Real(x)) => fold_run(h, 11, &x.to_bits().to_string()),
         Datum::Bool(b) => fold1(h, mark(if *b { 12 } else { 13 })),
-        // Its bytes not folded, as `readings.fx` cannot.
-        Datum::Bytevector(_) => fold1(h, mark(14)),
-        Datum::Number(Num::Ratio(..)) => fold1(h, mark(15)),
+        Datum::Bytevector(bs) => fold1(bs.iter().fold(fold1(h, mark(14)), |h, b| fold1(h, *b as i64)), mark(0)),
+        // In lowest terms, as the FX-26 reader reads it and the Rust reader
+        // leaves it.
+        Datum::Number(Num::Ratio(a, b)) => {
+            let (a, b) = (integer(a), integer(b));
+            if b == BigInt::default() {
+                return fold1(h, mark(16));
+            }
+            let q = BigRational::new(a, b);
+            fold_run(fold_run(h, 15, &q.numer().to_string()), 15, &q.denom().to_string())
+        }
     }
 }
 
-/// An integer's digits in `radix`, written in base 10, as FX-26's
-/// `int->string` writes it.
-fn decimal(negative: bool, digits: &str, radix: u32) -> String {
-    // Little-endian limbs of 10⁹.
-    let mut limbs: Vec<u64> = vec![];
-    for d in digits.chars().filter_map(|c| c.to_digit(radix)) {
-        let mut carry = d as u64;
-        for l in limbs.iter_mut() {
-            let v = *l * radix as u64 + carry;
-            *l = v % 1_000_000_000;
-            carry = v / 1_000_000_000;
+/// A number of the reader's that is an integer, as one.
+fn integer(n: &Num) -> BigInt {
+    match n {
+        Num::Int(n) => BigInt::from(*n),
+        Num::Big { negative, digits, radix } => {
+            let m = BigInt::parse_bytes(digits.as_bytes(), *radix).unwrap_or_default();
+            if *negative { -m } else { m }
         }
-        if carry > 0 {
-            limbs.push(carry);
-        }
+        Num::Ratio(..) | Num::Real(_) => BigInt::default(),
     }
-    let mut out = String::from(if negative && !limbs.is_empty() { "-" } else { "" });
-    match limbs.split_last() {
-        None => out.push('0'),
-        Some((top, rest)) => {
-            out += &top.to_string();
-            rest.iter().rev().for_each(|l| out += &format!("{l:09}"));
-        }
-    }
-    out
 }
 
 /// Each expression walked, its number.

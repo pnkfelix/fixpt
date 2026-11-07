@@ -405,9 +405,13 @@ both front ends.
   (`a_reading_is_not_of_how_its_text_is_written`); what the parser tells
   apart the digest does, `(a . (b c))` from `(a b c)`. Each tree folds its
   kind's mark, then its pieces: a name's, string's or number's characters
-  (an integer's decimal digits, a float's bits) ended by a mark, a list's
-  elements then its end. Not folded, as FX-26 cannot reach them and the
-  parser takes none: a bytevector's bytes, a ratio's value. The state
+  (an integer's decimal digits, a float's bits, a ratio's numerator and
+  denominator in lowest terms, a bytevector's bytes) ended by a mark, a
+  list's elements then its end. Nothing the reader reads is left out:
+  where FX-26 could not reach a datum's pieces (a bytevector's bytes, a
+  ratio's parts), the standard gained what reaches them
+  (`datum-bytevector-length`, `datum-bytevector-ref`, `datum-rational?`,
+  `datum-numerator`, `datum-denominator`). The state
   `s`, each kept by what owns the state it stands for, each the digest of
   the trees of every text read since it began (so the last reading); a
   text that does not read leaves it as it was, saying nothing:

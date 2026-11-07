@@ -53,10 +53,9 @@
   (lambda (h xs) (if (null? xs) h (fold-trees (fold-tree h (car xs)) (cdr xs)))))
 ;; The marks: 0 an end, 1 a list, 2 a list's end, 3 a dotted list, 4 its
 ;; dot, 5 a vector, 6 a name, 7 a keyword, 8 a string, 9 a character, 10 an
-;; integer, 11 a float (its bits), 12 true, 13 false, 14 a bytevector, 15
-;; any other atom (a ratio). A bytevector's bytes are not folded: a datum
-;; known one cannot be indexed, and the parser takes none (`parse-exp`,
-;; `quoted`), so none means anything in a program yet.
+;; integer, 11 a float (its bits), 12 true, 13 false, 14 a bytevector, its
+;; bytes, 15 a ratio's numerator and then its denominator, in lowest terms,
+;; 16 any other atom, of which the reader makes none.
 (define fold-tree (->* (int syn) int)
   (lambda (h x)
     (tagcase x
@@ -72,6 +71,17 @@
               ((char? d) (fold1 (fold1 h (mark 9)) (char->integer d)))
               ((int? d) (fold-run h 10 (int->string d)))
               ((f64? d) (fold-run h 11 (int->string (u64->int (f64->bits d)))))
+              ((datum-rational? d)
+               (fold-run (fold-run h 15 (int->string (datum-numerator d)))
+                         15 (int->string (datum-denominator d))))
               ((bool? d) (fold1 h (mark (if d 12 13))))
-              ((bytevector? d) (fold1 h (mark 14)))
-              (else (fold1 h (mark 15))))))))
+              ((bytevector? d) (fold-bytes (fold1 h (mark 14)) d))
+              (else (fold1 h (mark 16))))))))
+(define fold-bytes (->* (int datum) int)
+  (lambda (h v)
+    (letrec ((go (subr (maxeff (read @globals) spin) (int int) int)
+               (lambda (i h)
+                 (if (>= i (datum-bytevector-length v))
+                     (fold1 h (mark 0))
+                     (go (+ i 1) (fold1 h (datum-bytevector-ref v i)))))))
+      (go 0 h))))

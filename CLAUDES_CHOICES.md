@@ -4015,10 +4015,17 @@ The user read the paper as supporting the distribution. Mine:
   (FX-26 `syn`, Rust `Syntax`) by kind marks past the character codes;
   agreement is tested on floats, bignums, keywords, vectors, non-ASCII.
   `(a . (b c))` stays apart from `(a b c)`: the parser rejects the first
-  as code, so equal digests would hide a difference. Bytevector bytes and
-  ratio values are not folded (FX-26 cannot reach them from a `datum`,
-  and the parser takes neither); a text that does not read leaves the
-  state unchanged.
+  as code, so equal digests would hide a difference. Every piece of every
+  datum is folded: my first cut left out bytevector bytes and ratio
+  values, as FX-26 could not reach them from a `datum`, and the user
+  rejected the hole (a digest that misses a difference validates
+  nothing). So the standard gained `datum-bytevector-length`/`-ref`
+  (lowered to `bytevector-length`/`bytevector-u8-ref`) and
+  `datum-rational?`, `datum-numerator`, `datum-denominator` (`rational?`,
+  `%numerator`, `%denominator`). A ratio folds in lowest terms, as the
+  FX-26 reader reads it; the Rust reader keeps `6/4` as written, so
+  `ids.rs` reduces it (num-rational). A text that does not read leaves
+  the state unchanged.
 - **Why 40 bits by 1000003**: every step stays in a 61-bit fixnum with no
   wrapping arithmetic, so both sides compute it alike; collisions within
   a session's readings are about n²/2⁴¹.

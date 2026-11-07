@@ -550,6 +550,15 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("datum-list->vector", "(subr pure (datum) datum)"),
     ("datum-list->bytevector", "(subr pure (datum) datum)"),
     ("datum-byte?", "(subr pure (datum) bool)"),
+    // A bytevector datum's length and bytes, which `bytevector?` narrows
+    // to no region a `bytevector-` operation reads (`readings.fx`).
+    ("datum-bytevector-length", "(subr pure (datum) int)"),
+    ("datum-bytevector-ref", "(subr pure (datum int) int)"),
+    // Whether a datum is a rational number, an integer, a finite float or a
+    // ratio; and its numerator and denominator, in lowest terms.
+    ("datum-rational?", "(subr pure (datum) bool)"),
+    ("datum-numerator", "(subr pure (datum) int)"),
+    ("datum-denominator", "(subr pure (datum) int)"),
     ("datum-proper-list?", "(subr pure (datum) bool)"),
     // `(acyclic e (x body) else)` is these two: whether data has no cycle,
     // and, of a variable just found to have none, its value at `finite`
