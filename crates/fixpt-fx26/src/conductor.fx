@@ -460,12 +460,12 @@
          ;; the procedure the wrapping is. Or why not, as `stage-failure`
          ;; says it, placed in the code.
          ;; What a text is numbered by (`parser-types.fx`'s `keys`): mode
-         ;; `mode`, read in the session's state `s` after `n` expressions
-         ;; walked, under the switches the checker is set to now
-         ;; (`checked-settings`), which change what it finds.
+         ;; `mode`, read in the session's state `s`, under the switches the
+         ;; checker is set to now (`checked-settings`), which change what it
+         ;; finds.
          (keys-in
-          (lambda ((mode int) (s int) (n int))
-            (product (1 mode) (2 s) (3 n) (4 ((with check-program checked-settings))))))
+          (lambda ((mode int) (s int))
+            (product (1 mode) (2 s) (3 ((with check-program checked-settings))))))
          ;; The state a checker begins in, in the standard environment
          ;; `standard`: its trees' reading (`standard-state`), made once for
          ;; each standard environment given.
@@ -478,11 +478,11 @@
                   (extract (car made) 2)
                   (let ((s ((with readings standard-state) standard)))
                     (begin (set standard-made (cons (product (1 standard) (2 s)) nil)) s))))))
-         ;; How a parse `p` numbered its trees, read after `n` expressions
-         ;; walked, for the compiler (`c-set-facts!`).
+         ;; How a parse `p` numbered its trees, for the compiler
+         ;; (`c-set-facts!`).
          (numbered
-          (lambda ((p (select parser-types keyed)) (mode int) (n int))
-            (product (1 mode) (2 n) (3 (extract p 4)))))
+          (lambda ((p (select parser-types keyed)) (mode int))
+            (product (1 mode) (2 (extract p 3)) (3 (extract p 4)))))
          ;; A refusal as `stage-failure` says it; and place `n` of the text
          ;; checked, in the code, which starts at `k`.
          (fail
@@ -496,7 +496,7 @@
                  (checked
                   (lambda ((standard (listof syn acyclic)) (tops (listof top acyclic))
                            (k int) (len int) (native bool) (registers bool)
-                           (rep (bytevectorof @t)))
+                           (rep (bytevectorof @t)) (mode int))
                     (begin
                       ((with check-program check-lines!) #f)
                       ((with check-print-parts check-conv-native!) native)
@@ -510,7 +510,8 @@
                                (k-ok (ls)
                                  (tagcase ((with compile-programs compile-checked)
                                            ((with check-program checked-tops))
-                                           ((with check-env checked-extracts)))
+                                           ((with check-env checked-extracts))
+                                           (product (1 mode) (2 0) (3 nil)))
                                    (c-ok (w) (sum made w))
                                    (c-err (m) (fail (sum refused #u) m 0 len)))))))
                         ;; The stage's bindings undone, the standard
@@ -532,44 +533,41 @@
                       (includes-given! nil)
                       ((with check-print-parts check-conv-native!) native)
                       (tagcase (let ((s ((with readings with-reps) (begun standard) rep nil)))
-                                 (extract (parse-program (keys-in mode s 0) (car read)) 1))
+                                 (extract (parse-program (keys-in mode s) (car read)) 1))
                         (p-err (m a b)
                           (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
-                        (p-ok (tops) (checked standard tops k len native registers rep)))))))))
+                        (p-ok (tops) (checked standard tops k len native registers rep mode)))))))))
          ;; A `.fasl`'s definition (`session.rs`'s `run_program_def`), its
          ;; text `whole`, which loads nothing, read by `mode` in the session's
-         ;; state `s` after `n` expressions walked (`keys-in`), parsed and
-         ;; checked as `check-more-typed` checks it, in one call: its message
-         ;; if refused, else ""; and the state and count after, if the
-         ;; checker kept it, else as they were
+         ;; state `s` (`keys-in`), parsed and checked as `check-more-typed`
+         ;; checks it, in one call: its message if refused, else ""; and the
+         ;; state after, if the checker kept it, else as it was
          ;; (`docs/research/heap-types.md`, step 5).
          (check-text-typed
-          (lambda ((mode int) (s int) (n int) (whole string)
+          (lambda ((mode int) (s int) (whole string)
                    (named (listof (productof (1 symbol) (2 int)) acyclic)))
             (let ((read (read-text-at whole 0))
-                  (said (lambda ((m string) (s int) (n int)) (product (1 m) (2 s) (3 n)))))
+                  (said (lambda ((m string) (s int)) (product (1 m) (2 s)))))
               (if (null? read)
-                  (said "the definition is not one whole form" s n)
+                  (said "the definition is not one whole form" s)
                   (begin
                     (loaded-files! nil)
                     (includes-given! nil)
                     ((with check-program check-lines!) #f)
-                    (let ((p (parse-program (keys-in mode s n) (car read))))
+                    (let ((p (parse-program (keys-in mode s) (car read))))
                       (tagcase (extract p 1)
-                        (p-err (m a b) (said m s n))
+                        (p-err (m a b) (said m s))
                         (p-ok (tops)
                           (tagcase ((with check-program check-more-typed) tops named)
-                            (k-err (m a b) (said m s n))
-                            (else y (said "" (extract p 2) (extract p 3))))))))))))
+                            (k-err (m a b) (said m s))
+                            (else y (said "" (extract p 2))))))))))))
          ;; The state a session's checker is in (this instance's, a session's
          ;; own: `make-session-compiler`), as a step reads its text in it: the
          ;; state after the last step the checker kept, each read in the state
          ;; the one before left, from the first, which begins it again in the
          ;; standard environment's (`begun`; `readings.fx`). Kept with the
-         ;; checker's state it stands for. And
-         ;; how many expressions its steps have walked (`path`'s numbers).
+         ;; checker's state it stands for.
          (step-state (the (ref int @t) (new 0)))
-         (step-walked (the (ref int @t) (new 0)))
          ;; A session's step (`sessions26.rs`), checked by this instance's
          ;; checker, which holds the session's definitions, and compiled by
          ;; its compiler, whose globals are the session's: `whole`, the code
@@ -601,11 +599,9 @@
                     ((with regcode-entry compile-registers!) registers)
                     ;; The state after is the parse's if the checker keeps the
                     ;; text; a try, or a text refused, leaves it as it was
-                    ;; (the standard environment's, 0, where it began). The
-                    ;; count goes on, kept or not: no number is given twice.
-                    (let* ((p (parse-program (keys-in mode s (get step-walked)) (car read)))
-                           (r (extract p 2))
-                           (walked (set step-walked (extract p 3))))
+                    ;; (the standard environment's, where it began).
+                    (let* ((p (parse-program (keys-in mode s) (car read)))
+                           (r (extract p 2)))
                      (tagcase (extract p 1)
                       (p-err (m a b)
                         (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
@@ -633,9 +629,9 @@
                                          (facts ((with check-env checked-extracts))))
                                      (tagcase (if deferred
                                                   ((with compile-programs compile-checked-deferred)
-                                                   runs facts)
+                                                   runs facts (product (1 mode) (2 0) (3 nil)))
                                                   ((with compile-programs compile-checked)
-                                                   runs facts))
+                                                   runs facts (product (1 mode) (2 0) (3 nil))))
                                        (c-ok (w) (sum made w))
                                        (c-err (m) (refused m k (+ k len)))))))))))))))))))
          (session-step
@@ -659,12 +655,12 @@
          ;; in Rust, which gives what it found: compiled by this instance,
          ;; whose globals are the session's, to the word that runs it, or,
          ;; `deferred`, that makes the procedure that does (a commit's); or
-         ;; why not. Read by `mode` in `s`, the session's state, after `n`
-         ;; expressions walked, under `settings`, the Rust checker's switches
-         ;; as the checker that checked it was set (`sessions.rs`'s `keys`);
-         ;; its facts numbered by their place in the walk (`numbered`).
+         ;; why not. Read by `mode` in `s`, the session's state, under
+         ;; `settings`, the Rust checker's switches as the checker that
+         ;; checked it was set (`sessions.rs`'s `keys`); its facts numbered
+         ;; by their place in the walk (`numbered`).
          (session-compile
-          (lambda ((mode int) (s int) (n int) (settings string) (text string)
+          (lambda ((mode int) (s int) (settings string) (text string)
                    (facts (select stage-env-types k-facts))
                    (withs (select stage-env-types k-with-list))
                    (reshapes (select stage-env-types k-reshape-list))
@@ -675,8 +671,7 @@
                   (begin
                     (loaded-files! nil)
                     (includes-given! nil)
-                    (let ((p (parse-program (product (1 mode) (2 s) (3 n) (4 settings))
-                                            (car read))))
+                    (let ((p (parse-program (product (1 mode) (2 s) (3 settings)) (car read))))
                      (tagcase (extract p 1)
                       (p-err (m a b) (sum failed m))
                       (p-ok (tops)
@@ -687,9 +682,9 @@
                           ((with regcode-entry compile-registers!) registers)
                           (tagcase (if deferred
                                        ((with compile-programs compile-deferred)
-                                        tops facts (numbered p mode n))
+                                        tops facts (numbered p mode))
                                        ((with compile-programs compile-program)
-                                        tops facts (numbered p mode n)))
+                                        tops facts (numbered p mode)))
                             (c-ok (w) (sum made w))
                             (c-err (m) (sum failed m)))))))))))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).

@@ -23,7 +23,7 @@
         e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-define-rec t-exp
         (type exp top exp-list let-list letrec-list arm-list mod-items top-list keys given))
 (define readings ((proj (load-module "fx26:readings.fx") rs re rm rc)))
-(import readings fold1)
+(import readings fold1 read-again-reading)
 
 ;; Where the walk is down a form (`full`): each expression around the one
 ;; walked, the innermost first, by the digest of its path and how many of
@@ -40,6 +40,47 @@
 
 (define-effect counts (maxeff (read @globals) spin (read rs) (write rs) (alloc rs)))
 
+;; `validate` (`docs/research/loads-and-places.md`, "Decided: three keys"):
+;; each cheap key given, `path`'s and `digest`'s, with the full key given
+;; the same expression, as long as the parser lasts (its front end's): a
+;; cheap key given again with another full key would take two expressions
+;; for one in its mode. By a digest of the cheap key, each with the
+;; cheap key and the full one.
+(define-type keys-seen (listof (productof (1 int) (2 int) (3 int) (4 int)) acyclic))
+(define int-hash (subr pure (int) int) (lambda (a) a))
+(define int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
+(define path-seen (ref (table int keys-seen rs) rs) (new (make-table int-hash int=?)))
+(define digest-seen (ref (table int keys-seen rs) rs) (new (make-table int-hash int=?)))
+;; What the parse found wrong, the first, and where; "" if nothing.
+(define validate-why (ref string rs) (new ""))
+(define validate-at (ref (productof (1 int) (2 int)) rs) (new (product (1 0) (2 0))))
+;; `c` `cr`, the `mode` key given the expression at `a`..`b`, whose full
+;; key is `z` `r`, recorded in `seen`; or, given before with another full
+;; key, said (`validate-why`).
+(define validated! (->* ((ref (table int keys-seen rs) rs) string int int int int int int) unit)
+  (lambda (seen mode c cr z r a b)
+    (letrec ((find (subr (maxeff (read @globals) spin) (keys-seen) keys-seen)
+               (lambda (ks)
+                 (cond ((null? ks) nil)
+                       ((and (= (extract (car ks) 1) c) (= (extract (car ks) 2) cr)) ks)
+                       (else (find (cdr ks)))))))
+      (let* ((h (fold1 c cr)) (bucket (table-ref (get seen) h nil)) (found (find bucket)))
+        (cond ((null? found)
+               (table-set! (get seen) h
+                           (the keys-seen (cons (product (1 c) (2 cr) (3 z) (4 r)) bucket))))
+              ((and (= (extract (car found) 3) z) (= (extract (car found) 4) r)) #u)
+              ((not (string=? (get validate-why) "")) #u)
+              (else
+               (let ((key (lambda ((x int) (y int))
+                            (string-append "(" (int->string x) " " (int->string y) ")"))))
+                 (begin
+                   (set validate-why
+                        (string-append "validate: the `" mode "` key " (key c cr)
+                                       " was given another expression before: its full key "
+                                       (key (extract (car found) 3) (extract (car found) 4))
+                                       ", this one's " (key z r)))
+                   (set validate-at (product (1 a) (2 b)))))))))))
+
 ;; The next expression's number, the one walked next (at `a`..`b`, which
 ;; does not matter: its provenance), as the mode keys it.
 (define next-kth (->* (seen int int) int)
@@ -49,9 +90,12 @@
         (set (extract t 1) (+ n 1))
         (if (= mode 0)
             (+ (get (extract t 4)) n)
-            (let ((k (if (= mode 1) n (next-in-path t))))
-              (begin (set (extract t 6) (cons (product (1 k) (2 (get (extract t 2))))
-                                              (get (extract t 6))))
+            (let* ((r (get (extract t 2))) (k (if (= mode 1) n (next-in-path t))))
+              (begin (set (extract t 6) (cons (product (1 k) (2 r)) (get (extract t 6))))
+                     (if (= mode 3)
+                         (begin (validated! path-seen "path" (+ (get (extract t 4)) n) 0 k r a b)
+                                (validated! digest-seen "digest" n r k r a b))
+                         #u)
                      k)))))))
 ;; The path's digest of the expression walked next: its parent's, and its
 ;; place among the parent's, from 0; its frame, the innermost now.
@@ -231,12 +275,32 @@
 (define number-each (->* (seen top-list) top-list)
   (lambda (t ts)
     (if (null? ts) nil (let* ((x (number-top t (car ts)))) (cons x (number-each t (cdr ts)))))))
-;; The walk of a text read with `keys`, before its first form.
+;; How many expressions this parser has walked, in every text it read, kept
+;; or not: `path`'s numbers go on from it, so that none is given twice
+;; while the parser lasts, the key space its front end's tables are of
+;; (the compiler's, `validate`'s).
+(define walked-total (ref int rs) (new 0))
+;; The keys the last text was read with, and the session's state after it:
+;; what a form checked again while that text is checked is read again in
+;; (`read-again`).
+(define last-keys (ref keys rs) (new (product (1 0) (2 0) (3 ""))))
+(define last-state (ref int rs) (new 0))
+;; The walk of a text read with `keys`, before its first form, after all the
+;; parser walked before.
 (define walk-of (->* (keys) seen)
   (lambda (keys)
-    (product (1 (the (ref int rs) (new 0))) (2 (the (ref int rs) (new 0))) (3 (extract keys 1))
-             (4 (the (ref int rs) (new (extract keys 3)))) (5 (the (ref frames rs) (new nil)))
-             (6 (the (ref given rs) (new nil))) (7 (the (ref int rs) (new (extract keys 2)))))))
+    (begin
+     (set validate-why "")
+     (set last-keys keys)
+     (product (1 (the (ref int rs) (new 0))) (2 (the (ref int rs) (new 0))) (3 (extract keys 1))
+             (4 (the (ref int rs) (new (get walked-total)))) (5 (the (ref frames rs) (new nil)))
+             (6 (the (ref given rs) (new nil))) (7 (the (ref int rs) (new (extract keys 2))))))))
+;; What `validate` found wrong in the walk, if anything (`validated!`): its
+;; message, "" if nothing, and where.
+(define walk-wrong (->* () (productof (1 string) (2 int) (3 int)))
+  (lambda ()
+    (product (1 (get validate-why)) (2 (extract (get validate-at) 1))
+             (3 (extract (get validate-at) 2)))))
 ;; A form's trees `ts` (what it makes, and the hidden globals of the files
 ;; it loads first), each expression numbered, of the form's reading `r`
 ;; (`readings.fx`'s `form-reading`), the state after it.
@@ -251,9 +315,26 @@
           (begin (set (extract t 4) (+ (get (extract t 4)) (get (extract t 1))))
                  (set (extract t 7) r)
                  out))))))
-;; The session's state after the forms walked, and how many it has walked.
+;; The session's state after the forms walked, and how many the parser has
+;; walked, these too.
 (define walk-state (->* (seen) int) (lambda (t) (get (extract t 7))))
 (define walk-count (->* (seen) int) (lambda (t) (get (extract t 4))))
+;; The walk done, whether its text parsed or not: the parser's count past it,
+;; and the state after it.
+(define walk-done! (->* (seen) unit)
+  (lambda (t) (begin (set walked-total (get (extract t 4))) (set last-state (get (extract t 7))))))
+;; Form `x`, read before at reading `r`, read again: a definition the
+;; checker checks again, after a name it uses was redefined (`k-rerun`),
+;; in the state the text being checked left (`last-state`), as the mode
+;; that text was read in keys it: its keys new, so that what this check
+;; finds is never taken for what the first found, nor the reverse.
+(define read-again (->* (int top) top)
+  (lambda (r x)
+    (let* ((keys (get last-keys))
+           (t (walk-of (product (1 (extract keys 1)) (2 (get last-state)) (3 (extract keys 3)))))
+           (out (number-form t (read-again-reading (get last-state) r)
+                             (the top-list (cons x nil)))))
+      (begin (set walked-total (get (extract t 4))) (car out)))))
 ;; The keys the walk gave, in its order (none in `path`).
 (define walk-given (->* (seen) given)
   (lambda (t)

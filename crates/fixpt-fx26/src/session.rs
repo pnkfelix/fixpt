@@ -90,9 +90,6 @@ pub struct Fx26Session {
     /// `docs/research/loads-and-places.md`, "Decided: three keys"). Not a
     /// count: what was kept decides it.
     own_state: i64,
-    /// How many expressions the texts it read have walked, kept or not:
-    /// `path`'s numbers go on from there, never given twice.
-    own_walked: i64,
     /// How deep the module files built in being checked are, as the checker
     /// written in FX-26 counts them (`check-built-in!`): a switch a reading
     /// folds ([`Self::read_state`]).
@@ -1053,7 +1050,6 @@ impl Fx26Session {
             own_made: false,
             own_begun: false,
             own_state: 0,
-            own_walked: 0,
             built_in_depth: 0,
             shared_made: Default::default(),
             built_ins_cached: Default::default(),
@@ -3019,11 +3015,17 @@ impl Fx26Session {
     /// Parse `text` with the parser written in FX-26 (and its reader),
     /// loading them the first time: each form's tree, as text.
     pub fn parse_with_own_parser(&mut self, text: &str) -> R<Vec<String>> {
+        self.parse_with_own_parser_from(text).map(|(trees, _)| trees)
+    }
+
+    /// The same, and how many expressions the parser had walked before it
+    /// (`syn::parse_with_fx26_parser_from`).
+    pub fn parse_with_own_parser_from(&mut self, text: &str) -> R<(Vec<String>, i64)> {
         if !self.scheme.is_bound(&format!("{READER_PREFIX}parse-program")) {
             load_eager_reader(&mut self.scheme).map_err(crate::front_end_failure)?;
         }
         self.scheme.engine.set_step_limit(None);
-        let r = crate::syn::parse_with_fx26_parser(&mut self.scheme, FileId(0), text);
+        let r = crate::syn::parse_with_fx26_parser_from(&mut self.scheme, FileId(0), text);
         self.scheme.engine.set_step_limit(self.step_limit);
         r
     }
@@ -3917,11 +3919,9 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         if self.own_begun { Ok(None) } else { self.standard26().map(Some) }
     }
 
-    /// The state a call that read left (`syn.rs`): the session's, and its
-    /// count of expressions walked.
+    /// The state a call that read left (`syn.rs`).
     fn keep_state(&mut self, state: crate::ids::State) {
         self.own_state = state.at;
-        self.own_walked = state.walked;
     }
 
     /// What the checker written in FX-26 reads the next text in, as this
@@ -3950,7 +3950,6 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     fn read_state(&self, standard: &Option<fixpt_scheme::Handle>) -> crate::ids::State {
         crate::ids::State {
             at: if standard.is_some() { crate::ids::standard_state() } else { self.own_state },
-            walked: self.own_walked,
             settings: crate::ids::Settings {
                 native: self.native_convention,
                 globals_effects: self.globals_effects,

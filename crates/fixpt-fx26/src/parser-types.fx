@@ -134,19 +134,19 @@
 (define-type mod-items (listof mod-item acyclic))
 
 (define-datatype presult (p-ok (listof top acyclic)) (p-err string int int))
-;; What a text's trees are numbered by (`parser-ids.fx`; `ids.rs`'s `Keys`;
+;; What a text's trees are numbered by (`parser-ids.fx`;
 ;; `docs/research/loads-and-places.md`, "Decided: three keys"): the mode,
 ;; 0 `path`, 1 `digest`, 2 `full`, 3 `validate`; the session's state the
-;; text is read in; how many expressions the session has walked before it
-;; (`path`'s numbers go on from there); and the switches the checker is set
-;; to, as `checked-settings` writes them.
-(define-type keys (productof (1 int) (2 int) (3 int) (4 string)))
+;; text is read in; and the switches the checker is set to, as
+;; `checked-settings` writes them. (`path`'s count is the parser's own,
+;; which every text it reads goes on from: `walked-total`.)
+(define-type keys (productof (1 int) (2 int) (3 string)))
 ;; Every key a walk gave, each `k` and its reading (not in `path`, whose
 ;; keys are their places in the walk): what the facts the checker written
 ;; in Rust numbers by place are given (`c-set-facts!`).
 (define-type given (listof (productof (1 int) (2 int)) acyclic))
-;; A parse; the session's state and count of expressions after it; and the
-;; keys it gave, in the walk's order.
+;; A parse; the session's state after it; the parser's count of
+;; expressions walked before it; and the keys it gave, in the walk's order.
 (define-type keyed (productof (1 presult) (2 int) (3 int) (4 given)))
 ;; How a parse numbered its trees, as the compiler takes it for the facts
 ;; numbered by their place in the walk (`c-set-facts!`): the mode, how many

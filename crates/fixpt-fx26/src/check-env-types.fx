@@ -58,8 +58,10 @@
   ;; `fresh` or "" (a `reify-region`'s of a region of its own); the names
   ;; of the variables whose evidence it is given (`(given …)`), in order;
   ;; and the type it is checked as, as a rep (`k-staged-rep`), or `#f`. A
-  ;; `reify-…`'s: what it is of, as evidence's rep (`k-reified`).
-  (n-staged string string wcell))
+  ;; `reify-…`'s: what it is of, as evidence's rep (`k-reified`). And the
+  ;; rep's digest (`readings.fx`'s `fold-rep`; 0 for `#f`): the fact as
+  ;; `validate` compares it, the cell being one only the runtime reads.
+  (n-staged string string wcell int))
 ;; Each keyed by the expression (its identity, `k-at`).
 (define-type k-fact (productof (1 k-at) (2 k-noted)))
 (define-type k-facts (listof k-fact acyclic))

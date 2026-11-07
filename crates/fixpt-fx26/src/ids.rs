@@ -70,17 +70,15 @@ impl Settings {
     }
 }
 
-/// What a text is read in: the session's state `at` (0 where it begins),
-/// how many expressions the session has walked (`path`'s numbers go on from
-/// there), and the switches its checker is set to. Given to each entry that
-/// reads (`syn.rs`), which leaves `at` the state after if the checker kept
-/// the text, else as it was (a text refused, or tried, leaves the session
-/// as it was), and `walked` past the text's, kept or not: no number is
-/// given twice.
+/// What a text is read in: the session's state `at` (the standard
+/// environment's where it begins) and the switches its checker is set to.
+/// Given to each entry that reads (`syn.rs`), which leaves `at` the state
+/// after if the checker kept the text, else as it was: a text refused, or
+/// tried, leaves the session as it was. (`path`'s count is the FX-26
+/// parser's own, as long as its front end lasts: `walked-total`.)
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct State {
     pub at: i64,
-    pub walked: i64,
     pub settings: Settings,
 }
 
@@ -99,15 +97,23 @@ pub enum Mode {
     Validate = 3,
 }
 
-/// The process's mode, as `FIXPT_FACT_KEYS` says.
+static MODE: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
+
+/// The process's mode, as `FIXPT_FACT_KEYS` says, unless [`set_mode`] said
+/// first.
 pub fn mode() -> Mode {
-    static MODE: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
     *MODE.get_or_init(|| match std::env::var("FIXPT_FACT_KEYS").as_deref() {
         Ok("digest") => Mode::Digest,
         Ok("full") => Mode::Full,
         Ok("validate") => Mode::Validate,
         _ => Mode::Path,
     })
+}
+
+/// The process's mode made `m`, if nothing has asked it yet (a test's, of
+/// its own process): whether it is `m` now.
+pub fn set_mode(m: Mode) -> bool {
+    *MODE.get_or_init(|| m) == m
 }
 
 /// A form's reading (`readings.fx`'s `form-reading`, the same function):
@@ -164,9 +170,9 @@ pub fn with_reps(s: i64, rep: &[u8], named: &[(String, Vec<u8>)]) -> i64 {
 
 impl State {
     /// Where a checker begins, in the standard environment: its state
-    /// ([`standard_state`]), nothing walked, the default switches.
+    /// ([`standard_state`]), the default switches.
     pub fn begun() -> State {
-        State { at: standard_state(), walked: 0, settings: Settings::default() }
+        State { at: standard_state(), settings: Settings::default() }
     }
 }
 

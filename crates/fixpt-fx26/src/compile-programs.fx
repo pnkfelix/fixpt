@@ -630,18 +630,18 @@
       (lambda (r) r))))
 
 ;; The entry point for a program the checker written in FX-26 checked: what
-;; it runs (`checked-tops`, under redefinition), and what checking found.
+;; it runs (`checked-tops`, under redefinition), and what checking found,
+;; the trees' own keys, of the mode `w` names (`c-set-facts!`: `validate`).
 (define compile-checked
-  (->* ((listof k-run acyclic) k-facts) cresult)
-  (lambda (runs facts) (c-program (lambda (c) (c-runs runs c #f)) facts c-no-numbering)))
+  (->* ((listof k-run acyclic) k-facts numbering) cresult)
+  (lambda (runs facts w) (c-program (lambda (c) (c-runs runs c #f)) facts w)))
 
 ;; The entry point: a checked program's trees, numbered as `w` says (the
 ;; parse's, `parse-program`), and what checking found.
 (define compile-program
   (->* ((listof top acyclic) k-facts numbering) cresult)
   (lambda (tops facts w) (c-program (lambda (c) (c-tops tops c #f)) facts w)))
-;; Facts that are the trees' own already, the checker written in FX-26's.
-(define c-no-numbering numbering (product (1 -1) (2 0) (3 nil)))
+
 
 ;; A session's commit (`sessions.rs`): its forms compiled not into the word,
 ;; which runs them, but into a procedure of no arguments, which the word
@@ -655,8 +655,8 @@
 ;; The same of what a checked program runs (`checked-tops`, under
 ;; redefinition, a definition and those run again), as `compile-checked`.
 (define compile-checked-deferred
-  (->* ((listof k-run acyclic) k-facts) cresult)
-  (lambda (runs facts) (c-deferred (lambda (body) (c-runs runs body #f)) facts c-no-numbering)))
+  (->* ((listof k-run acyclic) k-facts numbering) cresult)
+  (lambda (runs facts w) (c-deferred (lambda (body) (c-runs runs body #f)) facts w)))
 ;; The procedure of no arguments whose body is what `forms` compiles.
 (define c-deferred
   (->* ((subr (maxeff compiles spin) (code) bool) k-facts numbering) cresult)

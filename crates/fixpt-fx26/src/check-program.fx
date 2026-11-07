@@ -82,7 +82,7 @@
       (include check-modules-read) (include check-subst) (include check-synth)
       (include check-module-rules) (include check-subtype) (include parser))
 (import check-effects k-atom-region k-one k-insert)
-(import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs)
+(import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs exp-reading)
 (import check-read k-items k-name-of k-sfail k-symbol-head)
 (define k-names-onto (with check-modorder k-names-onto))
 
@@ -249,25 +249,36 @@
 (define k-note-run (->* (top bool) unit)
   (lambda (form assigns)
     (set k-runs (the k-run-list (cons (product (1 form) (2 assigns)) (get k-runs))))))
+;; The reading form `x` was read at (`parser-ids.fx`): its expressions'.
+(define k-top-reading (->* (top) int)
+  (lambda (x)
+    (tagcase x
+      (t-define (n ty e a b) (exp-reading e))
+      (t-define-rec (bs a b) (if (null? bs) 0 (exp-reading (extract (car bs) 3))))
+      (t-exp (e) (exp-reading e))
+      (else y 0))))
 ;; Each of `users` checked again after the redefinition of `ns`: defined
-;; again if it checks, broken if not.
+;; again if it checks, broken if not. Each read again first, in the state
+;; the session is in now (`read-again`): what this check finds is of keys
+;; of its own, never taken for what the first check of it found.
 (define k-rerun (->* (k-def-list k-names k-out) k-out)
   (lambda (users ns lines)
     (if (null? users)
         lines
         (let* ((u (car users))
+               (form ((with parser read-again) (k-top-reading (extract u 2)) (extract u 2)))
                (olds (k-old-types (extract u 1)))
                (m (k-mark))
                (reset (set k-last-uses nil))
                (r (prompt k-tag
-                    (let ((ls (k-top-lines (extract u 2))))
-                      (begin (k-no-reaching-itself (extract u 2) (extract u 1)) (k-ok ls)))
+                    (let ((ls (k-top-lines form)))
+                      (begin (k-no-reaching-itself form (extract u 1)) (k-ok ls)))
                     (lambda (r) r))))
           (tagcase r
             (k-ok (ls)
               (let* ((assigns (k-fits-old? olds))
-                     (recorded (k-record (extract u 2) (extract u 1)))
-                     (ran (k-note-run (extract u 2) assigns)))
+                     (recorded (k-record form (extract u 1)))
+                     (ran (k-note-run form assigns)))
                 (k-rerun (cdr users) ns (k-lines-append lines ls))))
             (k-err (msg a b)
               (begin (k-unbind-to m)

@@ -56,9 +56,15 @@ pub fn read_with_fx26_reader(scheme: &mut Session, interner: &mut Interner, file
 /// Parse `text` with the reader and the parser written in FX-26: each
 /// top-level form's tree, as [`crate::sexp::show_value`] prints it.
 pub fn parse_with_fx26_parser(scheme: &mut Session, file: FileId, text: &str) -> R<Vec<String>> {
+    parse_with_fx26_parser_from(scheme, file, text).map(|(trees, _)| trees)
+}
+
+/// The same, and how many expressions the parser had walked before it:
+/// where `path`'s numbers of these begin.
+pub fn parse_with_fx26_parser_from(scheme: &mut Session, file: FileId, text: &str) -> R<(Vec<String>, i64)> {
     scheme.scope(|s| {
         let tops = parse_to_trees(s, file, text)?;
-        Ok(s.view(|v| v.get(tops.tops).list().expect("a list").into_iter().map(crate::sexp::show_value).collect()))
+        Ok((s.view(|v| v.get(tops.tops).list().expect("a list").into_iter().map(crate::sexp::show_value).collect()), tops.base))
     })
 }
 
@@ -83,7 +89,6 @@ pub fn eval_more_with_fx26_evaluator(scheme: &mut Session, standard: Option<Hand
     scheme.scope(|s| {
         let parsed = parse_to_trees_at(s, file, text, base, state)?;
         let (tops, after) = (parsed.tops, parsed.after);
-        state.walked = after.walked;
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = refusal(s, checked) {
             return Ok(format!("!! check: {m}"));
@@ -128,7 +133,6 @@ pub fn compile_with_fx26_compiler_showing(
     scheme.scope(|s| {
         let parsed = parse_to_trees_at(s, file, text, 0, state)?;
         let (tops, after) = (parsed.tops, parsed.after);
-        state.walked = after.walked;
         // Checked first, by the checker written in FX-26, which says where
         // each `extract`'s field is.
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
@@ -139,7 +143,8 @@ pub fn compile_with_fx26_compiler_showing(
         let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
         let runs = s.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
         let start = std::time::Instant::now();
-        let result = s.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts]).map_err(|e| fail(e.to_string()))?;
+        let own = own_numbering(s).map_err(fail)?;
+        let result = s.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts, own]).map_err(|e| fail(e.to_string()))?;
         s.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
         let (tag, word) = s.view(|v| {
             let r = v.get(result);
@@ -392,7 +397,6 @@ pub fn with_last_value<T>(
     scheme.scope(|s| {
         let parsed = parse_to_trees_at(s, file, text, 0, state)?;
         let (tops, after) = (parsed.tops, parsed.after);
-        state.walked = after.walked;
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = refusal(s, checked) {
             return Ok(Err(format!("check: {m}")));
@@ -434,7 +438,6 @@ pub fn check_only(scheme: &mut Session, standard: Option<Handle>, state: &mut St
     scheme.scope(|s| {
         let parsed = parse_to_trees_at(s, file, text, 0, state)?;
         let (tops, after) = (parsed.tops, parsed.after);
-        state.walked = after.walked;
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         Ok(match refusal(s, checked) {
             Some(m) => Err(m),
@@ -490,14 +493,12 @@ pub fn check_only_typed(scheme: &mut Session, state: &mut State, file: FileId, t
             l
         });
         let int = |s: &mut Session, n: i64| s.make(|_| Value::fixnum(n));
-        let args = [int(s, crate::ids::mode() as i64), int(s, state.at), int(s, state.walked), whole, list];
+        let args = [int(s, crate::ids::mode() as i64), int(s, state.at), whole, list];
         let said = s.call_global(&format!("{READER_PREFIX}check-text-typed"), &args).map_err(|e| fail(e.to_string()))?;
-        let (said, at, walked) = s.view(|v| {
+        let (said, at) = s.view(|v| {
             let r = v.get(said);
-            let int = |i: usize| r.product_field(i).and_then(|x| x.fixnum()).unwrap_or(0);
-            (r.product_field(1).and_then(|m| m.string()).unwrap_or_default(), int(2), int(3))
+            (r.product_field(1).and_then(|m| m.string()).unwrap_or_default(), r.product_field(2).and_then(|x| x.fixnum()).unwrap_or(0))
         });
-        state.walked = walked;
         if !said.is_empty() {
             return Ok(Err(said));
         }
@@ -681,9 +682,20 @@ pub fn compile_checked_to_word(scheme: &mut Session, file: FileId, facts: Handle
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let runs = scheme.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
     let start = std::time::Instant::now();
-    let result = scheme.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts]).map_err(|e| fail(e.to_string()))?;
+    let own = own_numbering(scheme).map_err(fail)?;
+    let result = scheme.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts, own]).map_err(|e| fail(e.to_string()))?;
     scheme.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
     word_of(scheme, result)
+}
+
+/// The numbering the compiler is given with the facts of the checker written
+/// in FX-26, which are the trees' own keys (`compile-checked`): the mode's,
+/// for `validate`, none to place.
+fn own_numbering(scheme: &mut Session) -> Result<Handle, String> {
+    let mode = crate::ids::mode() as i64;
+    let fields = [37, mode, 0].map(|n| scheme.make(|_| Value::fixnum(n)));
+    let nil = scheme.make(|_| Value::NULL);
+    scheme.call_global("%make-frozen", &[fields[0], fields[1], fields[2], nil]).map_err(|e| e.to_string())
 }
 
 pub fn compile_to_word(scheme: &mut Session, file: FileId, text: &str, facts: Handle) -> R<Result<Handle, String>> {
@@ -723,11 +735,13 @@ fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Parsed> {
 
 /// What the parser written in FX-26 made of a text: its trees, and how it
 /// numbered them (`numbering`, as the compiler takes it with facts numbered
-/// by their place in the walk: `c-set-facts!`); and the session's state and
-/// count after it, if it is kept (`after`).
+/// by their place in the walk: `c-set-facts!`), after how many expressions
+/// the parser walked before (`base`); and the session's state after it, if
+/// it is kept (`after`).
 pub struct Parsed {
     pub tops: Handle,
     pub numbering: Handle,
+    pub base: i64,
     pub after: State,
 }
 
@@ -757,7 +771,7 @@ fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, b
         sc.call_global("%make-frozen", &all).map_err(|e| fail(e.to_string()))
     };
     let int = |sc: &mut Session, n: i64| sc.make(|_| Value::fixnum(n));
-    let fields = [int(scheme, mode), int(scheme, state.at), int(scheme, state.walked), scheme.make(|m| m.heap().make_string(&settings))];
+    let fields = [int(scheme, mode), int(scheme, state.at), scheme.make(|m| m.heap().make_string(&settings))];
     let keys = product(scheme, &fields)?;
     let keyed = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[keys, syns]).map_err(|e| fail(e.to_string()))?;
     let (tag, err, at, walked) = scheme.view(|v| {
@@ -786,9 +800,9 @@ fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, b
         let k = m.get(keyed);
         m.heap().product_field(k, 4)
     });
-    let fields = [int(scheme, mode), int(scheme, state.walked), given];
+    let fields = [int(scheme, mode), int(scheme, walked), given];
     let numbering = product(scheme, &fields)?;
-    Ok(Parsed { tops, numbering, after: State { at, walked, settings: state.settings } })
+    Ok(Parsed { tops, numbering, base: walked, after: State { at, settings: state.settings } })
 }
 
 thread_local! {

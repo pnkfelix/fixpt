@@ -88,6 +88,15 @@
                      (go (+ i 1) (fold1 h (u8->int (bytevector-u8-ref b i))))))))
       (go 0 h))))
 
+;; The reading of a form read before, `r`, read again in the state `s` (a
+;; definition checked again after a name it uses was redefined: `k-rerun`),
+;; never 0 (`ids.rs`'s `read_again`): of the form, which `r` decides, and
+;; of the state it is checked in now.
+(define read-again-reading (->* (int int) int)
+  (lambda (s r)
+    (let ((h (fold1 (fold1 (bitwise-and s 1099511627775) (mark 20)) (bitwise-and r 1099511627775))))
+      (if (= h 0) 1 h))))
+
 ;; The reading of a text that is no trees (a syscall's definitions, which
 ;; the checker makes): its characters, in `s`, `reading-of`'s fold.
 (define text-reading-of (->* (int string) int)
@@ -120,7 +129,7 @@
 ;; bytes, 15 a ratio's numerator and then its denominator, in lowest terms,
 ;; 16 any other atom, of which the reader makes none; 17 a file loaded
 ;; (`form-reading`), 18 a staged step's rep, 19 a name it gives a type
-;; (`with-reps`).
+;; (`with-reps`), 20 a form read again (`read-again-reading`).
 (define fold-tree (->* (int syn) int)
   (lambda (h x)
     (tagcase x

@@ -37,14 +37,13 @@
 (hide (include eval-types) (include parser-types) (include check-env-types)
       (include check-resolve-types) (include check-types-types) (include check-subst-types))
 ;; What the code read here (`stage`'s, a session's forms) is numbered by
-;; (`parser-types.fx`'s `keys`): in `path`, past any number of a program's,
-;; as its places are past any of a program's (`ev-stage-base`), so that no
-;; fact of the program's, which it runs among (`ev-withs`, `ev-facts`), is
-;; taken for one of it: no session walks that many expressions, each one
-;; made in the heap. In no session's state, 0, under no switches: in the
-;; other modes, its forms' readings are not a program's, whose switches
-;; name a convention.
-(define ev-keys keys (product (1 0) (2 0) (3 1000000000000) (4 "")))
+;; (`parser-types.fx`'s `keys`): in `path`, by the parser's count, which
+;; the program's own forms were numbered by too, so that no fact of the
+;; program's, which it runs among (`ev-withs`, `ev-facts`), is taken for
+;; one of it. In no session's state, 0, under no switches: in the other
+;; modes, its forms' readings are not a program's, whose switches name a
+;; convention.
+(define ev-keys keys (product (1 0) (2 0) (3 "")))
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 ev-poll as-bool as-fields as-other as-str as-tag efail
         efail-expected ev-eq? eval-tag show-val the-unit)
@@ -76,7 +75,7 @@
     (cond ((null? fs) nil)
           ((ev-at-is? (extract (car fs) 1) a b k kr)
            (tagcase (extract (car fs) 2)
-             (n-staged (fr ns rp) (cons (product (1 fr) (2 ns) (3 rp)) nil))
+             (n-staged (fr ns rp rd) (cons (product (1 fr) (2 ns) (3 rp)) nil))
              (else y (ev-staged-in (cdr fs) a b k kr))))
           (else (ev-staged-in (cdr fs) a b k kr)))))
 

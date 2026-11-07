@@ -4060,3 +4060,36 @@ The user read the paper as supporting the distribution. Mine:
   numbered them at 0, arguing nothing they find is kept; a staging test
   showed them looked up in the program's tables. The argument had a hole.
 
+## Three keys: `validate`, and the count the parser's (2026-11-07)
+
+- **`path`'s count belongs to the key space, not to each caller.** First
+  each owner passed it with the text; but a caller that began again at 0
+  (a program compiled alone, a test's helper) numbered another program's
+  expressions with numbers already given in the same front end, whose
+  compiler keeps copies to inline across calls. Now the parser instance
+  counts (`walked-total`), every parse going on from it; each parse says
+  where it began, for placing the Rust checker's facts. This also took
+  the count out of `ids::State`, the sessions, and the evaluator's
+  reserved base.
+- **`validate` checks where keys are made and where facts are taken**:
+  cheap keys against full ones in the walk (both cheap modes at once);
+  full keys against facts at `c-set-facts!`, which every handoff of
+  either checker's facts reaches. A difference is an error, said with
+  the keys, since this mode is for finding where the argument breaks.
+- **One facts table per front end** (the user's choice): the FX-26
+  compiler's own, honest in its effects; a process-wide one would need a
+  primitive touching state outside the front end's regions, or a log
+  drained on every entry path.
+- **Facts digested in no order, by kind and parts**; a convention
+  variable as "a variable" (fresh numbering would differ); a staged
+  fact's rep by a digest of its bytes the checker records beside the
+  cell, since FX-26 cannot read a cell back.
+- **A definition checked again is read again** (`validate`'s first
+  finding; the user's call to re-key, not to exempt re-checks): its trees
+  numbered anew by the parser's walk, of a reading of its old reading and
+  the state now. The walk is the parser's one instance (`parser.fx` makes
+  it, `parser-top.fx` and the checker reach it), so its count stays one.
+  The checker's prompt tag now allows writing `@s`, the parser's region,
+  which reading again does; only `k-tag`'s type widened, not the
+  `checks` effect every signature spells out.
+

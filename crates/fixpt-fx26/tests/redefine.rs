@@ -73,7 +73,7 @@ fn the_same_compiled() {
     let out = run(&mut s, "(define f (subr pure (string) int) (lambda (s) (string-length s)))\n(g 1)\n(f \"abc\")");
     assert!(out[0].contains("broken until defined again: `g`"), "{out:?}");
     assert!(out[1].contains("`g` is broken"), "{out:?}");
-    assert_eq!(out[2], "3");
+    assert_eq!(out[2], "3", "{out:?}");
 }
 
 /// A redefinition that reaches itself through a procedure kept as it was

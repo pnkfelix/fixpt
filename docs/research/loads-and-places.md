@@ -446,23 +446,27 @@ both front ends.
     names are given folded in (`with-reps`, `with_reps`).
   - **Each expression's key** (`parser-ids.fx`, by the mode `keys` names;
     `FIXPT_FACT_KEYS`, `ids::mode`): `path`, `(n, 0)`, `n` its place in
-    the session's walk, which goes on from text to text and is never
-    given twice (a text refused still advances it); `digest`, `(n, R)`,
+    the parser's walk of every text it has read, which goes on from text
+    to text and is never given twice (a text refused still advances it):
+    the parser's own count (`walked-total`), as long as its front end
+    lasts, the key space its tables are of; `digest`, `(n, R)`,
     its place in its form's walk and the form's reading; `full` and
     `validate`, `(Z, R)`, `Z` the path's digest down from the form (each
     place among its parent's, folded onto the parent's: a zipper's
     information, since the form fixes the siblings). Identity compares
     the two fields whatever the mode.
-  - **Where `S` and the count live**, each where the checker's state is,
-    each left by a text its checker kept (a refused text, or a try,
-    leaves the state as it was): `Fx26Session::own_state` and
-    `own_walked`, each entry that reads taking an `ids::State` and leaving
-    the state after in it (`syn.rs`); a staging session on the Rust
-    checker (`sessions.rs`'s `kept` and `walked`, `State::keys`, as
+  - **Where `S` lives**, each where the checker's state is, each left by
+    a text its checker kept (a refused text, or a try, leaves the state as
+    it was): `Fx26Session::own_state`, each entry that reads taking an
+    `ids::State` and leaving the state after in it (`syn.rs`); a staging
+    session on the Rust checker (`sessions.rs`'s `kept`, `State::keys`, as
     `session-compile` takes them); a staging session on the checker
-    written in FX-26 (the conductor's `step-state`, `step-walked`).
-    `parse-program` takes the keys and gives the state and count after,
-    and the keys it gave, in order.
+    written in FX-26 (the conductor's `step-state`). `parse-program` takes
+    the keys and gives the state after, the count it began at, and the
+    keys it gave, in order. The count was first each caller's too; but a
+    caller that began again at 0 (a program compiled alone, a test's) gave
+    another program's numbers again in one front end, whose kept copies
+    to inline outlive a call: so it is the parser's.
   - **The Rust checker's facts** are numbered by their place in the walk
     (reading -1, `rust_facts.rs`), since it checks before the text is
     parsed; the compiler gives each the key the parse gave there
@@ -477,5 +481,31 @@ both front ends.
     since nothing they find is kept; but they are looked up in the
     program's facts, and at 0, in `path`, one took a program's `with` for
     its own (`stage.rs`'s `a_process_stages_while_another_runs`).
-  - **Not yet**: `validate`'s checks. `S` by types is tabled (the user,
-    2026-11-07; `TODO.md` §215).
+  - **`validate`** (2026-11-07), each mode's keys made beside the full
+    one, which every expression is keyed by: as the walk gives them,
+    each cheap key, `path`'s and `digest`'s, recorded with the full key
+    of its expression, as long as the parser lasts, and a cheap key
+    given again with another full key the parse's error
+    (`parser-ids.fx`'s `validated!`); as the compiler takes facts, of
+    either checker (`c-set-facts!`), each full key's facts, `with`s and
+    reshapes, by a digest of them in no order, recorded as long as the
+    compiler lasts (one table per front end, the user's choice over one
+    for the process), and a key met again with other facts the
+    compiler's error (`c-validate-facts!`). A convention's variable is a
+    variable in the digest, its number aside, as a fresh one is; a
+    staged fact's rep, a cell only the runtime reads, by a digest the
+    checker makes of its bytes (`n-staged`'s fourth field). Tested:
+    each detector (`tests/validate.rs`), and every test program compiled
+    by one front end under `validate`, each full key met again with the
+    facts it had. `S` by types is tabled (the user, 2026-11-07;
+    `TODO.md` §215).
+  - **Its first finding** (2026-11-07): a definition checked again after
+    a name it uses was redefined (`k-rerun`) was checked on its trees as
+    first read, keys and all, in the state after the redefinition: its
+    facts changed (it broke) under the keys its first check's facts had,
+    which a copy kept to inline has too. Now a definition checked again is
+    read again first (`read-again`, the parser's own walk, so its count):
+    its reading of the form's old reading and the state the text being
+    checked left (`read-again-reading`), its keys new. Checking may so
+    write the syntax's region, `@s` (`k-tag`): the parser's count goes on.
+    `a_definition_checked_again_is_read_again`.

@@ -302,7 +302,8 @@
    (val k-tag
         (prompt-tag k-result
                     k-result
-                    (maxeff (alloc @t) (read @globals) (read @s) (read @t) (write @t) spin)
+                    (maxeff (alloc @t) (read @globals) (read @s) (write @s) (alloc @s) (read @t)
+                            (write @t) spin)
                     @z))
    (val k-fail
         (subr (maxeff (alloc @t) (goto @z) (read @globals) spin (read @s) (read @t) (write @t))

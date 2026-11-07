@@ -185,7 +185,8 @@
                        (cenv symbol)
                        c-found))
             (val c-set-facts!
-                 (subr (maxeff (alloc @k) (read @globals) spin (read @k) (read @t) (write @k))
+                 (subr (maxeff (alloc @k) (goto @y) (read @globals) spin (read @k) (read @t)
+                               (write @k))
                        (k-facts numbering)
                        unit))
             (val c-lambda-of

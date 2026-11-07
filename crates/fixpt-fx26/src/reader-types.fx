@@ -6,7 +6,7 @@
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(import parser-types (type syn syns-a))
+(import parser-types (type syn syns-a top))
 ;; The types it names, from the files that define them.
 (define-type loaded-files (select parser-types loaded-files))
 (define-type parser-sig
@@ -27,4 +27,9 @@
                        (productof (1 string) (2 int))))
             (val syn-head (subr pure (syn) symbol))
             (val syn-int (subr pure (syn) int))
-            (val keep (subr (maxeff (read @globals) spin (read @s)) (syns-a) syns-a))))
+            (val keep (subr (maxeff (read @globals) spin (read @s)) (syns-a) syns-a))
+            ;; A form the checker checks again, read again (`parser-ids.fx`).
+            (val read-again
+                 (subr (maxeff (read @globals) spin (read @s) (write @s) (alloc @s))
+                       (int top)
+                       top))))

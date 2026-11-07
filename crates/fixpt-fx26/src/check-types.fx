@@ -60,7 +60,10 @@
 
 (define k-te (subr pure (int k-eff) k-te) (lambda (t e) (product (1 t) (2 e))))
 
-(define k-tag (prompt-tag k-result k-result (maxeff spin (read @s) kstate) @z)
+;; A check may read the syntax (`@s`), and write it to read a form again: a
+;; definition checked again is read again, its keys new (`k-rerun`,
+;; `read-again`), which advances the parser's count.
+(define k-tag (prompt-tag k-result k-result (maxeff spin (read @s) (write @s) (alloc @s) kstate) @z)
   (make-continuation-prompt-tag))
 (define k-fail (subr checks (string int int) void)
   (lambda (m a b) (abort-current-continuation k-tag (k-err m a b))))

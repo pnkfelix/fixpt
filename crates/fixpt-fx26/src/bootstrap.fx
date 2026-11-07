@@ -40,7 +40,7 @@
 (define b-parse
   (lambda ((std (listof syn acyclic)) (forms (listof syn acyclic)))
     (let ((s ((with readings standard-state) std)))
-      (extract (parse-program (product (1 0) (2 s) (3 0) (4 (checked-settings))) forms) 1))))
+      (extract (parse-program (product (1 0) (2 s) (3 (checked-settings))) forms) 1))))
 ;; A program's trees compiled with what the checker written in FX-26 found,
 ;; the trees' own keys.
 (define b-compile
@@ -61,7 +61,8 @@
               (tagcase (check-program (car std) tops)
                 (k-err (m a b) (b-fail (string-append "check: " m)))
                 (k-ok (lines)
-                  (tagcase (compile-checked (checked-tops) (checked-extracts))
+                  (tagcase (compile-checked (checked-tops) (checked-extracts)
+                                            (product (1 0) (2 0) (3 nil)))
                     (c-ok (w) (b-word w))
                     (c-err (m) (b-fail (string-append "compile: " m)))))
                 (k-done (te) (b-fail "check: no result")))))))))

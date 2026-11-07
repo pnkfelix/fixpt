@@ -219,13 +219,13 @@
       (n-frozen-define () (tagcase y (n-frozen-define () #t) (else z #f)))
       (n-plain-fx () (tagcase y (n-plain-fx () #t) (else z #f)))
       (n-call (c) (tagcase y (n-call (d) (k-conv=? c d)) (else z #f)))
-      (n-staged (f n r) (tagcase y (n-staged (g m s) (and (string=? f g) (string=? n m)))
+      (n-staged (f n r d) (tagcase y (n-staged (g m s e) (and (string=? f g) (string=? n m)))
                           (else z #f))))))
 (define k-noted-kind (->* (k-noted) int)
   (lambda (x)
     (tagcase x
       (n-datum (d) 0) (n-summary (s) 1) (n-conversion (k) 2) (n-apply-shares () 3)
-      (n-frozen-define () 4) (n-plain-fx () 5) (n-call (c) 6) (n-staged (f n r) 7))))
+      (n-frozen-define () 4) (n-plain-fx () 5) (n-call (c) 6) (n-staged (f n r d) 7))))
 ;; Whether each of `xs` not skipped is in `ys` alike, of its place and kind;
 ;; a `stage`'s, which the Rust checker does not compare, aside.
 (define k-facts-in? (->* (k-facts k-facts k-spans) bool)

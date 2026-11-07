@@ -7,13 +7,14 @@
 ;; The parser's other parts at these regions, the reader's types in them,
 ;; and what this file uses of them.
 (define parser-exps-module ((proj (load-module "fx26:parser-exps.fx") rs re rm rc rp)))
-(define parser-ids-module ((proj (load-module "fx26:parser-ids.fx") rs re rm rc rp)))
-(import parser-ids-module walk-of number-form walk-state walk-count walk-given (type seen))
+(define parser-module (with parser-exps-module parser-module))
+(define parser-ids-module (with parser-module parser-ids-module))
+(import parser-ids-module walk-of number-form walk-state walk-count walk-given walk-wrong
+        walk-done! (type seen))
 (define readings ((proj (load-module "fx26:readings.fx") rs re rm rc)))
 (import readings form-reading (type loads))
 (define parser-types ((proj (load-module "fx26:parser-types.fx") rs re rm rc rp)))
 (import parser-types (type keys keyed loaded-file))
-(define parser-module (with parser-exps-module parser-module))
 (define reader-types (with parser-module reader-types))
 (import reader-types lst (type syn))
 (import parser-module parse-tag syn-start syn-end pfail syn-symbol? syn-symbol syn-items len nth
@@ -21,7 +22,7 @@
         expand-import e-var e-lambda t-define t-define-rec t-define-type t-define-effect
         includes-given include-given-at mk-symbol syn-name loaded-error e-module
         (type include-given)
-        t-define-convention t-define-syscall t-define-generative t-exp p-ok shared-taken
+        t-define-convention t-define-syscall t-define-generative t-exp p-ok p-err shared-taken
         shared-reset! loaded input-key?
         (type syns-a exp top param-list top-list presult names) (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
@@ -226,17 +227,23 @@
           (else (loaded-keyed (cdr fs) key)))))
 
 ;; The entry point: a program's forms, as read, read with `keys` (the mode,
-;; the session's state, how many expressions it has walked, the checker's
-;; switches: `parser-types.fx`), to trees, each expression numbered
-;; (`parser-ids.fx`), or an error; and the session's state and count
-;; after them, and the keys given, in order (`walk-given`). The prompt
+;; the session's state, the checker's switches: `parser-types.fx`), to
+;; trees, each expression numbered (`parser-ids.fx`), or an error; and the
+;; session's state after them, the parser's count before them, and the keys
+;; given, in order (`walk-given`). The prompt
 ;; catches every failure, but its tag is a global whose type names `rp`, so
 ;; the control effect stays in the type, as the reader's on `re` do; `rp`
 ;; is one of the regions this module is given, so that is still licensed.
 (define parse-program (->* (keys syns-a) keyed)
   (lambda (keys forms)
-    (let ((t (walk-of keys)))
+    (let* ((t (walk-of keys)) (base (walk-count t)))
       (begin (shared-reset!)
-             (let ((r (prompt parse-tag (p-ok (parse-tops t (extract keys 4) forms))
-                              (lambda (r) r))))
-               (product (1 r) (2 (walk-state t)) (3 (walk-count t)) (4 (walk-given t))))))))
+             (let* ((parsed (prompt parse-tag (p-ok (parse-tops t (extract keys 3) forms))
+                                    (lambda (r) r)))
+                    (done (walk-done! t))
+                    ;; A key `validate` found given twice, the parse's error.
+                    (wrong (walk-wrong))
+                    (r (if (string=? (extract wrong 1) "")
+                           parsed
+                           (p-err (extract wrong 1) (extract wrong 2) (extract wrong 3)))))
+               (product (1 r) (2 (walk-state t)) (3 base) (4 (walk-given t))))))))

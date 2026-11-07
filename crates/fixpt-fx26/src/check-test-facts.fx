@@ -47,6 +47,10 @@
 (import check-subtype k-subtype)
 (import check-subst k-subst)
 (import check-env-types n-staged)
+;; A rep's digest, for the fact that holds it (`n-staged`).
+(define readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
+(define k-rep-digest (->* ((bytevectorof @t)) int)
+  (lambda (bytes) ((with readings fold-rep) 0 bytes)))
 
 (define k-branch-facts-of (->* (k-fact-list k-fact-list) k-branch-facts)
   (lambda (yes no) (the k-branch-facts (cons yes no))))
@@ -201,7 +205,7 @@
                      (rep (k-staged-rep checked))
                      (free ((with check-reps k-rep-holes)))
                      (names (k-given-names given free checked #t form))
-                     (n (n-staged "" names rep)))
+                     (n (n-staged "" names (extract rep 1) (extract rep 2))))
                 (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
             (else y #u))))))
 ;; What a `stage`'s code is checked as, type `checked`, as a rep, for the
@@ -209,10 +213,12 @@
 ;; step 3), its holes the variables it names, which the evidence fills as
 ;; the program runs (`fixpt-reps`'s `fill`); `#f` if a rep does not take
 ;; all of it, and that checker refuses the code.
-(define k-staged-rep (->* (int) wcell)
+(define k-staged-rep (->* (int) (productof (1 wcell) (2 int)))
   (lambda (checked)
     (let ((bytes ((with check-reps k-ty-rep) checked)))
-      (if ((with check-reps k-rep-declined?)) (wcell-bool #f) (rep-cell bytes)))))
+      (if ((with check-reps k-rep-declined?))
+          (product (1 (wcell-bool #f)) (2 0))
+          (product (1 (rep-cell bytes)) (2 (k-rep-digest bytes)))))))
 ;; A `reify-…`'s call, `op`, of `given`, the evidence it is given, of type
 ;; `te`, its `(effectrep E)`, `(regionrep r)` or `(typerep T)`: what it is
 ;; of, as evidence's rep (`k-evidence-rep`), noted at `given`, filled as the
@@ -240,10 +246,9 @@
                                          (else z #f))))
                               "fresh"
                               ""))
-                   (rep (if (or declined (string=? fresh "fresh"))
-                            (wcell-bool #f)
-                            (rep-cell bytes)))
-                   (n (n-staged fresh names rep)))
+                   (none (or declined (string=? fresh "fresh")))
+                   (rep (if none (wcell-bool #f) (rep-cell bytes)))
+                   (n (n-staged fresh names rep (if none 0 (k-rep-digest bytes)))))
               (begin (set k-extracts (cons (product (1 (k-at-of given)) (2 n)) (get k-extracts)))
                      te))))
       (else y te))))

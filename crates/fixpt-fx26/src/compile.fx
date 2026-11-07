@@ -62,7 +62,7 @@
 ;; What the checker found, by expression (`compile-facts.fx`): all it
 ;; defines, given on.
 (import compile-facts c-facts c-int-hash c-int=? c-span-key c-at-hash c-at-is? c-at=? c-noted-in
-        c-absolute-at c-set-numbering!
+        c-absolute-at c-set-numbering! c-validate-facts!
         c-noted-at c-noted-of c-note! c-new-by-at c-fact-table c-lifts c-lift-count c-lifted
         c-lifting-added c-summary-table c-convert-table c-conversion-at c-staged-texts c-staged-at
         c-staged-find c-shares-table c-frozen-table c-plain-table c-plain-fx-at c-frozen-define-at
@@ -323,7 +323,7 @@
               (n-frozen-define () (c-note! (get c-frozen-table) at 0))
               (n-plain-fx () (c-note! (get c-plain-table) at 0))
               (n-conversion (code) (c-note! (get c-convert-table) at code))
-              (n-staged (fr ns rp)
+              (n-staged (fr ns rp rd)
                 (set c-staged-texts
                      (cons (product (1 at) (2 fr) (3 ns) (4 rp)) (get c-staged-texts))))
               (n-call (cv)
@@ -385,7 +385,12 @@
       (set c-included-index (make-table c-int-hash c-int=?))
       (set c-reshape-index (make-table c-int-hash c-int=?))
       (c-index-reshapes! (get k-reshapes))
-      (c-fill-facts (get c-facts)))))
+      (c-fill-facts (get c-facts))
+      ;; `validate`: each key with the facts it had before (`c-validate-facts!`).
+      (if (= (extract w 1) 3)
+          (let ((why (c-validate-facts! fs (get k-with-vals) (get k-reshapes))))
+            (if (string=? why "") #u (c-fail why)))
+          #u))))
 
 (define c-member? (->* (syms symbol) bool)
   (lambda (xs n) (and (not (null? xs)) (or (symbol=? (car xs) n) (c-member? (cdr xs) n)))))

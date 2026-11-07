@@ -32,6 +32,12 @@
         (type syns-a names exp top exp-list param-list letrec-list let-list arm-list top-list
               mod-item mod-items presult loaded-file loaded-files) (effect tree-builds parses))
 
+;; Each expression's identity (`parser-ids.fx`): its walk, made once for
+;; the parser, so that its count is one (`walked-total`); the checker reads
+;; again what it checks again (`read-again`, `k-rerun`).
+(define parser-ids-module ((proj (load-module "fx26:parser-ids.fx") rs re rm rc rp)))
+(define read-again (with parser-ids-module read-again))
+
 (define parse-tag (prompt-tag presult presult (maxeff tree-builds (write rs) spin) rp)
   (make-continuation-prompt-tag))
 

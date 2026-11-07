@@ -10,7 +10,7 @@ use fixpt_read::FileId;
 
 /// The Rust parser's trees for `text`, checking each form as it goes, which
 /// is how the Rust side parses.
-fn rust_trees(text: &str) -> Vec<String> {
+fn rust_trees(text: &str, base: i64) -> Vec<String> {
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), text).expect("reads");
     c.declare_ahead(&forms).expect("declares");
@@ -40,8 +40,8 @@ fn rust_trees(text: &str) -> Vec<String> {
     }
     // Each expression's key, form by form, as the process's mode makes it:
     // read in the standard environment's state, as the FX-26 parser here
-    // reads it (`syn::parse_to_trees`).
-    let mut kth = Kth::keyed(fixpt_fx26::ids::mode(), 0);
+    // reads it (`syn::parse_to_trees`), after `base` the parser walked before.
+    let mut kth = Kth::keyed(fixpt_fx26::ids::mode(), base);
     let mut s = fixpt_fx26::ids::standard_state();
     for (i, group) in &forms {
         let tops: Vec<_> = group.iter().map(|(t, _, _)| t).collect();
@@ -113,9 +113,9 @@ fn within_files(tree: &str) -> String {
 }
 
 fn same_trees(s: &mut Fx26Session, text: &str) {
-    let ours = s.parse_with_own_parser(text).unwrap_or_else(|e| panic!("the FX-26 parser: {e}"));
+    let (ours, base) = s.parse_with_own_parser_from(text).unwrap_or_else(|e| panic!("the FX-26 parser: {e}"));
     let ours: Vec<String> = ours.iter().map(|t| within_files(&without_file_marks(t))).collect();
-    let rust: Vec<String> = rust_trees(text).iter().map(|t| within_files(t)).collect();
+    let rust: Vec<String> = rust_trees(text, base).iter().map(|t| within_files(t)).collect();
     assert_eq!(ours.len(), rust.len(), "different numbers of forms");
     for (a, b) in ours.iter().zip(&rust) {
         assert_eq!(a, b, "the parsers disagree");
@@ -260,8 +260,9 @@ fn a_variant_named_by_a_type_form_is_refused() {
 fn a_tree_as_text() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let text = "(let* ((a #t)) (and a #f))";
-    let ours: Vec<String> = s.parse_with_own_parser(text).expect("parses").iter().map(|t| within_files(t)).collect();
-    assert_eq!(ours, rust_trees(text));
+    let (ours, base) = s.parse_with_own_parser_from(text).expect("parses");
+    let ours: Vec<String> = ours.iter().map(|t| within_files(t)).collect();
+    assert_eq!(ours, rust_trees(text, base));
     // Its keys, in `path`, as written (the others are digests).
     if fixpt_fx26::ids::mode() != fixpt_fx26::ids::Mode::Path {
         return;
@@ -274,8 +275,8 @@ fn a_tree_as_text() {
 
 /// A session's state is of its forms, each read in the state the one before
 /// left (`ids::forms_state`, `readings.fx`'s `form-reading`): the same
-/// however they were split into texts, and the same text parsed twice is
-/// the same trees.
+/// however they were split into texts. The same text parsed twice is the
+/// same trees, their keys too but in `path`, whose numbers go on.
 #[test]
 fn a_state_is_its_forms_however_they_are_split() {
     use fixpt_fx26::ids::forms_state;
@@ -286,7 +287,12 @@ fn a_state_is_its_forms_however_they_are_split() {
     assert_eq!(forms_state(9, &set, "", &[]), Some(9));
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let text = "(if #t 1 2)";
-    assert_eq!(s.parse_with_own_parser(text).expect("parses"), s.parse_with_own_parser(text).expect("parses"));
+    let (once, base) = s.parse_with_own_parser_from(text).expect("parses");
+    let (again, after) = s.parse_with_own_parser_from(text).expect("parses");
+    assert_eq!(after, base + 4);
+    if fixpt_fx26::ids::mode() != fixpt_fx26::ids::Mode::Path {
+        assert_eq!(once, again);
+    }
 }
 
 /// Texts that read as the same trees are one reading: no space, comment or

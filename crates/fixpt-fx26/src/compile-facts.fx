@@ -74,6 +74,134 @@
                 (product (1 a) (2 b) (3 (extract g 1)) (4 (extract g 2))))))
         at)))
 
+;; `validate` (`docs/research/loads-and-places.md`, "Decided: three keys"):
+;; each full key's facts, by a digest of them, as long as the compiler lasts
+;; (its front end's), so that a key given again, in this text or another,
+;; is found with the same facts, or said not to be (`c-validate-facts!`):
+;; the key would leave out something checking reads.
+(define c-readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
+(define c-fold (->* (int int) int)
+  (lambda (h x) ((with c-readings fold1) h (bitwise-and x 1099511627775))))
+(define-type c-key-digests (listof (productof (1 int) (2 int) (3 int)) acyclic))
+(define c-facts-seen (ref (table int c-key-digests @k) @k) (new (make-table c-int-hash c-int=?)))
+;; A fact's digest, by its kind's mark, then its parts. A convention's
+;; variable is a variable, its number aside: a fresh one, which another
+;; check of the same would number otherwise.
+(define c-noted-digest (->* (k-noted) int)
+  (lambda (n)
+    (let ((f c-fold))
+      (tagcase n
+        (n-datum (d)
+          (tagcase d
+            (datum-field (i) (f (f 1 10) i)) (datum-blobref-field (i) (f (f 1 11) i))
+            (datum-layout (i) (f (f 1 12) i)) (datum-array (m s) (f (f (f 1 13) m) s))
+            (datum-fits (i) (f (f 1 14) i))))
+        (n-summary (s) (f 2 s))
+        (n-conversion (c) (f 3 c))
+        (n-apply-shares () 4) (n-frozen-define () 5) (n-plain-fx () 6)
+        (n-call (cv)
+          (f 7 (tagcase cv (cv-cellular () 0) (cv-native () 1) (cv-fx () 2) (cv-var (v) 3))))
+        (n-staged (fresh names rep d)
+          ((with c-readings fold-text) ((with c-readings fold-text) (f 8 d) fresh) names))))))
+;; One handoff's keys, each its facts' digests summed, as they come in no
+;; order: by `k`, and the keys in the order first met.
+(define-type c-key-acc (productof (1 (table int c-key-digests @k)) (2 (ref c-key-digests @k))))
+(define c-key-add! (->* (c-key-acc k-at int) unit)
+  (lambda (acc at d)
+    (let* ((k (extract at 3)) (kr (extract at 4)) (tab (extract acc 1))
+           (ks (table-ref tab k nil)))
+      (letrec ((add (subr (maxeff (alloc @k) (read @globals) spin) (c-key-digests) c-key-digests)
+                 (lambda (ks)
+                   (cond ((null? ks) nil)
+                         ((and (= (extract (car ks) 1) k) (= (extract (car ks) 2) kr))
+                          (cons (product (1 k) (2 kr)
+                                         (3 (bitwise-and (+ (extract (car ks) 3) d) 1099511627775)))
+                                (cdr ks)))
+                         (else (cons (car ks) (add (cdr ks))))))))
+        (if (null? (c-key-digest-in ks k kr))
+            (begin
+              (table-set! tab k (the c-key-digests (cons (product (1 k) (2 kr) (3 d)) ks)))
+              (set (extract acc 2)
+                   (the c-key-digests (cons (product (1 k) (2 kr) (3 0)) (get (extract acc 2))))))
+            (table-set! tab k (add ks)))))))
+;; A `with`'s and a reshape's, of the names, positions and picks noted.
+(define c-names-digest (->* (int (listof symbol acyclic)) int)
+  (lambda (h ns)
+    (if (null? ns)
+        h
+        (c-names-digest ((with c-readings fold-run) h 6 (symbol->string (car ns))) (cdr ns)))))
+(define c-ints-digest (->* (int (listof int acyclic)) int)
+  (lambda (h is) (if (null? is) h (c-ints-digest (c-fold h (car is)) (cdr is)))))
+(define c-picks-digest (->* (int k-picks) int)
+  (lambda (h ps)
+    (if (null? ps)
+        h
+        (c-picks-digest (tagcase (car ps)
+                          (pick-value (k) (c-fold (c-fold h 1) k))
+                          (pick-path (k j) (c-fold (c-fold (c-fold h 2) k) j)))
+                        (cdr ps)))))
+;; The facts `fs`, `with`s `ws` and reshapes `rs` of one handoff (their keys
+;; the walk's: `c-absolute-at`), each key's digest checked against what it
+;; had before, and kept: "", or why not, the first key whose facts differ.
+(define c-validate-facts! (->* (k-facts k-with-list k-reshape-list) string)
+  (lambda (fs ws rs)
+    (let ((acc (product (1 (the (table int c-key-digests @k) (make-table c-int-hash c-int=?)))
+                        (2 (the (ref c-key-digests @k) (new nil))))))
+      (letrec ((facts (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
+                            (k-facts) unit)
+                 (lambda (fs)
+                   (if (null? fs)
+                       #u
+                       (begin (c-key-add! acc (c-absolute-at (extract (car fs) 1))
+                                          (c-noted-digest (extract (car fs) 2)))
+                              (facts (cdr fs))))))
+               (withs (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
+                            (k-with-list) unit)
+                 (lambda (ws)
+                   (if (null? ws)
+                       #u
+                       (begin (c-key-add! acc (c-absolute-at (extract (car ws) 1))
+                                          (c-ints-digest (c-names-digest (c-fold 9 0)
+                                                                         (extract (car ws) 2))
+                                                         (extract (car ws) 3)))
+                              (withs (cdr ws))))))
+               (reshapes (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
+                               (k-reshape-list) unit)
+                 (lambda (rs)
+                   (if (null? rs)
+                       #u
+                       (begin (c-key-add! acc (c-absolute-at (extract (car rs) 1))
+                                          (c-picks-digest (c-fold 10 0) (extract (car rs) 2)))
+                              (reshapes (cdr rs))))))
+               (check (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
+                            (c-key-digests) string)
+                 (lambda (ks)
+                   (if (null? ks)
+                       ""
+                       (let* ((k (extract (car ks) 1)) (kr (extract (car ks) 2))
+                              (d (car (c-key-digest-in (table-ref (extract acc 1) k nil) k kr)))
+                              (seen (table-ref (get c-facts-seen) k nil))
+                              (before (c-key-digest-in seen k kr)))
+                         (cond ((null? before)
+                                (begin (table-set! (get c-facts-seen) k
+                                                   (the c-key-digests
+                                                        (cons (product (1 k) (2 kr) (3 d)) seen)))
+                                       (check (cdr ks))))
+                               ((= (car before) d) (check (cdr ks)))
+                               (else (c-validate-message k kr (car before) d))))))))
+        (begin (facts fs) (withs ws) (reshapes rs) (check (get (extract acc 2))))))))
+(define c-key-digest-in (->* (c-key-digests int int) (listof int acyclic))
+  (lambda (ks k kr)
+    (cond ((null? ks) nil)
+          ((and (= (extract (car ks) 1) k) (= (extract (car ks) 2) kr)) (list (extract (car ks) 3)))
+          (else (c-key-digest-in (cdr ks) k kr)))))
+(define c-validate-message (->* (int int int int) string)
+  (lambda (k kr was now)
+    (string-append "validate: the full key (" (int->string k) " " (int->string kr)
+                   ") has other facts than it had before (their digests "
+                   (int->string was) " and " (int->string now)
+                   "): it leaves out something checking reads")))
+
 ;; An expression's identity, as a table's key: where it starts and ends, and
 ;; which of the expressions there it is. For tables asked once a lambda or
 ;; a `letrec`; those asked of every expression are by where it starts
