@@ -5226,3 +5226,13 @@ in a walk of its form and its subtree's last, in both front ends and the
 provenance with an expansion record. Then the printed expansion's source
 map, then macros' `(many σ)` (`typed-macros.md`). Later, apart: caching
 macro expansion steps.
+
+## 215. A session's state by types, checked against facts (the user's, 2026-11-07; tabled)
+Decided as the cheaper of two session states ("both, validated",
+`docs/research/loads-and-places.md`, "Stage 2, decided"): each
+definition's name and type, each type's definition, macro, load and
+convention, by a type digest written in both languages; checked in
+`validate` against the facts, as `path` is (where two occurrences share
+its key and not the trees' one, their facts must agree). Tabled by the
+user, 2026-11-07, after stage 2: the state by trees, the reference, is
+done and is what every mode keys by.

@@ -477,4 +477,5 @@ both front ends.
     since nothing they find is kept; but they are looked up in the
     program's facts, and at 0, in `path`, one took a program's `with` for
     its own (`stage.rs`'s `a_process_stages_while_another_runs`).
-  - **Not yet**: `S` by types, and `validate`'s checks.
+  - **Not yet**: `validate`'s checks. `S` by types is tabled (the user,
+    2026-11-07; `TODO.md` §215).
