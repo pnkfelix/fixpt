@@ -272,30 +272,51 @@ fn a_tree_as_text() {
     assert_eq!(ours, rust_trees(text));
 }
 
-/// A reading is a digest of the session's state and the text read, not a
+/// A reading is a digest of the session's state and the trees read, not a
 /// count (`readings.fx`): the same text parsed twice is the same trees,
 /// readings and all, each the reading `ids::reading_of` makes of it.
 #[test]
-fn a_reading_is_its_text_not_a_count() {
+fn a_reading_is_its_trees_not_a_count() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let text = "(if #t 1 2)";
     let once = s.parse_with_own_parser(text).expect("parses");
     assert_eq!(once, s.parse_with_own_parser(text).expect("parses"));
-    let r = fixpt_fx26::ids::reading_of(0, text);
+    let r = fixpt_fx26::ids::reading_of(0, text).expect("reads");
     assert!(once[0].ends_with(&format!(" {r}))")), "{once:?}");
 }
 
-/// The digest written in FX-26 is the one in Rust: each front end makes a
-/// reading alone, and they must agree (`readings.fx`, `ids::reading_of`).
+/// Texts that read as the same trees are one reading: no space, comment or
+/// spelling tells them apart, nor where they are; trees that differ are
+/// not, `(a . (b c))` and `(a b c)` among them, which the parser tells
+/// apart (in code the first is no expression).
+#[test]
+fn a_reading_is_not_of_how_its_text_is_written() {
+    let r = |t: &str| fixpt_fx26::ids::reading_of(7, t).expect("reads");
+    assert_eq!(r("(f #t \"A\")"), r("  ( f ; a comment\n #true \"\\x41;\" )"));
+    assert_ne!(r("(a . (b c))"), r("(a b c)"));
+    assert_ne!(r("(f #t)"), r("(f #f)"));
+    assert_ne!(r("(f) (g)"), r("(f (g))"));
+    assert_ne!(r("ab"), r("|a b|"));
+}
+
+/// The digest written in FX-26 is the one in Rust, each of the trees its
+/// own reader reads: each front end makes a reading alone, and they must
+/// agree (`readings.fx`, `ids::reading_of`).
 #[test]
 fn the_readings_agree() {
-    let cases: [(i64, &str); 5] = [(0, ""), (0, "(+ 1 2)"), (-1, "syscall x"), (987_654_321_012, "λx → ü"), (fixpt_fx26::ids::reading_of(5, "a"), "(f)")];
-    let calls: Vec<String> = cases.iter().map(|(s, t)| format!("((with r reading-of) {s} {t:?})")).collect();
-    let program = format!("(define r (load-module \"fx26:readings.fx\"))\n(list {})\n", calls.join(" "));
+    let texts = ["", "(+ 1 2)", "λx → ü #\\ü", "'(a . b) #(1 \"s\") #:k", "(-1.5 1e300 123456789012345678901234567890 -7)"];
+    let cases: Vec<(i64, &str)> = texts.iter().zip([0, -1, 987_654_321_012, 5, 0]).map(|(t, s)| (s, *t)).collect();
+    let read = |t: &str| format!("(car ((with er read-text-at) {t:?} 0))");
+    let calls: Vec<String> = cases.iter().map(|(s, t)| format!("((with r reading-of) {s} {})", read(t))).collect();
+    let load = |f: &str| format!("((proj (load-module \"fx26:{f}.fx\") @s @e @m @c))");
+    let program = format!("(define er {})\n(define r {})\n(list {})\n", load("eager-reader"), load("readings"), calls.join(" "));
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let ours = s.run_program(&program).expect("runs").expect("checks");
-    let rust: Vec<String> = cases.iter().map(|(s, t)| fixpt_fx26::ids::reading_of(*s, t).to_string()).collect();
+    let rust: Vec<String> = cases.iter().map(|(s, t)| fixpt_fx26::ids::reading_of(*s, t).expect("reads").to_string()).collect();
     assert_eq!(ours, format!("({})", rust.join(" ")));
+    let text = |s: &str| format!("((with r text-reading-of) -1 {s:?})");
+    let ours = s.run_program(&format!("(define r {})\n{}\n", load("readings"), text("syscall x"))).expect("runs").expect("checks");
+    assert_eq!(ours, fixpt_fx26::ids::text_reading_of(-1, "syscall x").to_string());
 }
 
 /// The module files built in load no cycle (`TODO.md` §71): found from

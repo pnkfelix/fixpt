@@ -84,8 +84,8 @@ pub struct Fx26Session {
     /// they made, which the compiler keeps.
     own_begun: bool,
     /// The state this session's program is in, as the checker written in
-    /// FX-26 has read it: a digest of each text it read since it began
-    /// (0 as it begins), the state the next is read in, which decides that
+    /// FX-26 has read it: a digest of the trees of each text it read since
+    /// it began (0 as it begins), the state the next is read in, which decides that
     /// text's reading (`ids::reading_of`; `docs/research/loads-and-places.md`,
     /// "Decided: three keys"). Not a count: what was read decides it.
     own_state: i64,
@@ -3896,10 +3896,11 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
 
     /// The state the checker written in FX-26 reads `text` in: 0 if it
     /// begins again (`standard`), else the state the texts before left;
-    /// and `text` folded into it, the state the next is read in.
+    /// and the trees `text` reads as folded into it, the state the next is
+    /// read in (none, if it does not read: it says nothing).
     fn own_state_for(&mut self, standard: &Option<fixpt_scheme::Handle>, text: &str) -> i64 {
         let s = if standard.is_some() { 0 } else { self.own_state };
-        self.own_state = crate::ids::reading_of(s, text);
+        self.own_state = crate::ids::reading_of(s, text).unwrap_or(s);
         s
     }
 

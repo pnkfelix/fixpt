@@ -13,7 +13,7 @@
          (tables (load-module "fx26:table.fx"))
          ;; A reading's digest, of a session's state `s` and the text read:
          ;; each entry below that reads is given `s` (`readings.fx`).
-         (readings (load-module "fx26:readings.fx"))
+         (readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
          (reading-of (with readings reading-of))
          ;; The checker's first file.
          (check-types ((load-input "fx26:check-types.fx") tables))
@@ -505,7 +505,7 @@
                     (begin
                       (loaded-files! nil)
                       (includes-given! nil)
-                      (tagcase (parse-program (reading-of 0 whole) (car read))
+                      (tagcase (parse-program (reading-of 0 (car read)) (car read))
                         (p-err (m a b)
                           (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
                         (p-ok (tops) (checked standard tops k len native registers rep)))))))))
@@ -523,12 +523,18 @@
                     (loaded-files! nil)
                     (includes-given! nil)
                     ((with check-program check-lines!) #f)
-                    (tagcase (parse-program (reading-of s whole) (car read))
+                    (tagcase (parse-program (reading-of s (car read)) (car read))
                       (p-err (m a b) m)
                       (p-ok (tops)
                         (tagcase ((with check-program check-more-typed) tops named)
                           (k-err (m a b) m)
                           (else y "")))))))))
+         ;; The state a session's checker is in (this instance's, a session's
+         ;; own: `make-session-compiler`), as a step reads its text in it: a
+         ;; digest of the trees of each step since the first, which begins it
+         ;; again, that read (`readings.fx`). Kept with the checker's state it
+         ;; stands for.
+         (step-state (the (ref int @t) (new 0)))
          ;; A session's step (`sessions26.rs`), checked by this instance's
          ;; checker, which holds the session's definitions, and compiled by
          ;; its compiler, whose globals are the session's: `whole`, the code
@@ -558,7 +564,8 @@
                     ((with check-print-parts check-conv-native!) native)
                     ((with compile compile-conv-native!) native)
                     ((with regcode-entry compile-registers!) registers)
-                    (tagcase (parse-program (reading-of s whole) (car read))
+                    (set step-state (reading-of s (car read)))
+                    (tagcase (parse-program (get step-state) (car read))
                       (p-err (m a b)
                         (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
                       (p-ok (tops)
@@ -588,11 +595,6 @@
                                                    runs facts))
                                        (c-ok (w) (sum made w))
                                        (c-err (m) (refused m k (+ k len)))))))))))))))))
-         ;; The state a session's checker is in (this instance's, a session's
-         ;; own: `make-session-compiler`), as a step reads its text in it: a
-         ;; digest of each step's text since the first, which begins it again
-         ;; (`readings.fx`). Kept with the checker's state it stands for.
-         (step-state (the (ref int @t) (new 0)))
          (session-step
           (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int)
                    (how int) (name symbol) (make bool) (deferred bool) (native bool)
@@ -600,7 +602,6 @@
                    (named (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic)))
             (let ((s (if (= how 0) 0 (get step-state))))
               (begin
-               (set step-state (reading-of s whole))
                ((with check-program set-step-named!) named)
                (let ((out (session-step-of standard s whole k len how name make deferred native
                                            registers rep)))
@@ -624,7 +625,7 @@
                   (begin
                     (loaded-files! nil)
                     (includes-given! nil)
-                    (tagcase (parse-program (reading-of s text) (car read))
+                    (tagcase (parse-program (reading-of s (car read)) (car read))
                       (p-err (m a b) (sum failed m))
                       (p-ok (tops)
                         (begin

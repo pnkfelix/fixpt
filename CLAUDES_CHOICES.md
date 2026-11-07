@@ -4007,15 +4007,24 @@ The user read the paper as supporting the distribution. Mine:
   `reading-of(s, text)`, a fold of the text into 40 bits from the state
   `s` it is read in, written in FX-26 (`readings.fx`) and Rust
   (`ids::reading_of`), tested equal.
-- **Why the text, not the parsed syntax**: every caller has the text; a
-  digest of `syn` would need a walk of every datum kind in both
-  languages. Whitespace then makes a new reading, which only shares less.
+- **Of the trees, not the text** (the user's point, revising my first cut,
+  which folded the text): the digest is the full key the cheap key is
+  validated against, so it must tell apart exactly what means something
+  different. Finer (whitespace, comments, `#t`/`#true`) and validation
+  flags the cheap key wrongly. Each side walks its own reader's trees
+  (FX-26 `syn`, Rust `Syntax`) by kind marks past the character codes;
+  agreement is tested on floats, bignums, keywords, vectors, non-ASCII.
+  `(a . (b c))` stays apart from `(a b c)`: the parser rejects the first
+  as code, so equal digests would hide a difference. Bytevector bytes and
+  ratio values are not folded (FX-26 cannot reach them from a `datum`,
+  and the parser takes neither); a text that does not read leaves the
+  state unchanged.
 - **Why 40 bits by 1000003**: every step stays in a 61-bit fixnum with no
   wrapping arithmetic, so both sides compute it alike; collisions within
   a session's readings are about n²/2⁴¹.
 - **Where `s` lives**: with each state it stands for (the REPL session,
   a staging session's texts, a staging session's own front end), passed
   to every entry that reads (`parse-program`'s first argument), never a
-  global set beside the call. Every text read advances it, failures
-  included: a reading shared less is never wrong.
+  global set beside the call. Every text that reads advances it, those
+  refused after included.
 

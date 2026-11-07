@@ -61,11 +61,11 @@ struct State {
 
 impl State {
     /// The state the session is in, as its compiler reads a text in it: a
-    /// digest of every text it has read, in order (`ids::reading_of`;
+    /// digest of the trees of every text it has read, in order (`ids::reading_of`;
     /// `docs/research/loads-and-places.md`, "Decided: three keys"). Made
     /// of what it read, not kept beside: nothing to keep in step.
     fn digest(&self) -> i64 {
-        (1..=self.texts.len() as u32).fold(0, |s, f| self.texts.get(&f).map_or(s, |t| crate::ids::reading_of(s, t)))
+        (1..=self.texts.len() as u32).fold(0, |s, f| self.texts.get(&f).and_then(|t| crate::ids::reading_of(s, t)).unwrap_or(s))
     }
 }
 

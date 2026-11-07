@@ -715,7 +715,7 @@ pub fn parse_syns(scheme: &mut Session, file: FileId, text: &str, syns: Handle) 
 /// alone, or the first of a session's; [`crate::ids::reading_of`]).
 fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, base: i64, session: i64) -> R<Handle> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    let reading = scheme.make(|_| Value::fixnum(crate::ids::reading_of(session, text)));
+    let reading = scheme.make(|_| Value::fixnum(crate::ids::reading_of(session, text).unwrap_or_else(|| crate::ids::text_reading_of(session, text))));
     let result = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[reading, syns]).map_err(|e| fail(e.to_string()))?;
     let (tag, err) = scheme.view(|v| {
         let r = v.get(result);

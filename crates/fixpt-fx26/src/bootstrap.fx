@@ -33,7 +33,7 @@
 
 ;; A reading's digest (`readings.fx`): a program here is read in no
 ;; session's state, 0.
-(define readings (load-module "fx26:readings.fx"))
+(define readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
 
 ;; `program`, checked in the initial environment written `standard`
 ;; (`(name type)` for each binding), and compiled.
@@ -43,7 +43,7 @@
       (if (or (null? std) (null? prog))
           (b-fail "the reader could not read the text")
           (tagcase (begin (check-lines! #f)
-                          (parse-program ((with readings reading-of) 0 program) (car prog)))
+                          (parse-program ((with readings reading-of) 0 (car prog)) (car prog)))
             (p-err (m a b) (b-fail (string-append "parse: " m)))
             (p-ok (tops)
               (tagcase (check-program (car std) tops)

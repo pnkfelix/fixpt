@@ -37,7 +37,7 @@
       (include check-resolve-types) (include check-types-types) (include check-subst-types))
 ;; A reading's digest (`readings.fx`): the code read here is read in no
 ;; session's state but the standard environment's, 0.
-(define readings (load-module "fx26:readings.fx"))
+(define readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 ev-poll as-bool as-fields as-other as-str as-tag efail
         efail-expected ev-eq? eval-tag show-val the-unit)
@@ -510,7 +510,7 @@
       (let ((read (read-text w ev-stage-base)))
         (if (null? read)
             (ev-stage-refused "the code as checked does not read")
-            (tagcase (parse ((with readings reading-of) 0 w) (car read))
+            (tagcase (parse ((with readings reading-of) 0 (car read)) (car read))
               (p-err (msg a b) (ev-stage-refused msg))
               (p-ok (tops)
                 (if (null? tops)
@@ -758,7 +758,7 @@
     (let ((read (read-text w ev-stage-base)))
       (if (null? read)
           (efail "a session's form does not read")
-          (tagcase (parse ((with readings reading-of) 0 w) (car read))
+          (tagcase (parse ((with readings reading-of) 0 (car read)) (car read))
             (p-err (msg a b) (efail msg))
             (p-ok (tops) (if (null? tops) (efail "a session's form is no form") (car tops))))))))
 

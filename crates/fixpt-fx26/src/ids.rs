@@ -14,18 +14,102 @@
 use crate::ast::{Exp, ExpId, ModItem};
 use crate::check::Checker;
 use crate::top::Top;
+use fixpt_read::{Datum, Interner, Num, Syntax};
 use std::collections::HashMap;
 
 /// A reading: a digest of the session's state before it, `s`, and the
-/// text read, never 0 (the Rust checker's facts are of reading 0 until the
-/// FX-26 compiler gives them its trees'). Not a count, so that whoever
-/// reads the same text in the same state makes the same and needs to ask
-/// no one: `readings.fx`'s `reading-of`, the same function, each character
-/// folded into 40 bits by a multiplier that keeps every step in a fixnum.
-pub fn reading_of(s: i64, text: &str) -> i64 {
-    const MASK: i64 = (1 << 40) - 1;
-    let h = text.chars().fold(s & MASK, |h, c| (h * 1_000_003 + c as i64 + 1) & MASK);
+/// trees `text` reads as, never 0; or none, if it does not read (the Rust
+/// checker's facts are of reading 0 until the FX-26 compiler gives them its
+/// trees'). Not a count, so that whoever reads the same in the same state
+/// makes the same and needs to ask no one; of the trees, not the text, so
+/// that no space, comment, spelling or position tells two readings apart
+/// that mean the same: `readings.fx`'s `reading-of`, the same function.
+pub fn reading_of(s: i64, text: &str) -> Option<i64> {
+    let mut names = fixpt_read::Interner::new();
+    let trees = fixpt_read::Reader::new(text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut names).read_all().ok()?;
+    Some(trees_reading_of(s, &trees, &names))
+}
+
+/// The reading of `trees`, read in `s`, their names in `names`.
+pub fn trees_reading_of(s: i64, trees: &[Syntax], names: &Interner) -> i64 {
+    let h = trees.iter().fold(s & MASK, |h, t| fold_tree(h, t, names));
     if h == 0 { 1 } else { h }
+}
+
+/// The reading of a text that is no trees (`readings.fx`'s
+/// `text-reading-of`): its characters, in `s`.
+pub fn text_reading_of(s: i64, text: &str) -> i64 {
+    let h = fold_text(s & MASK, text);
+    if h == 0 { 1 } else { h }
+}
+
+const MASK: i64 = (1 << 40) - 1;
+
+/// One piece, a character's code or a mark, folded in, each step a fixnum.
+fn fold1(h: i64, x: i64) -> i64 {
+    (h * 1_000_003 + x + 1) & MASK
+}
+
+/// Mark `m`, past every character's code (`readings.fx`'s list of them).
+fn mark(m: i64) -> i64 {
+    0x11_0000 + m
+}
+
+fn fold_text(h: i64, text: &str) -> i64 {
+    text.chars().fold(h, |h, c| fold1(h, c as i64))
+}
+
+/// `text` after mark `m`, then the end's.
+fn fold_run(h: i64, m: i64, text: &str) -> i64 {
+    fold1(fold_text(fold1(h, mark(m)), text), mark(0))
+}
+
+fn fold_tree(h: i64, t: &Syntax, names: &Interner) -> i64 {
+    let all = |h: i64, xs: &[Syntax]| xs.iter().fold(h, |h, x| fold_tree(h, x, names));
+    match &t.datum {
+        Datum::List { items, tail: None } => fold1(all(fold1(h, mark(1)), items), mark(2)),
+        Datum::List { items, tail: Some(tail) } => fold1(fold_tree(fold1(all(fold1(h, mark(3)), items), mark(4)), tail, names), mark(2)),
+        Datum::Vector(items) => fold1(all(fold1(h, mark(5)), items), mark(2)),
+        Datum::Nil => fold1(fold1(h, mark(1)), mark(2)),
+        Datum::Symbol(n) => fold_run(h, 6, names.name(*n)),
+        Datum::Keyword(n) => fold_run(h, 7, names.name(*n)),
+        Datum::Str(s) => fold_run(h, 8, s),
+        Datum::Char(c) => fold1(fold1(h, mark(9)), *c as i64),
+        Datum::Number(Num::Int(n)) => fold_run(h, 10, &n.to_string()),
+        Datum::Number(Num::Big { negative, digits, radix }) => fold_run(h, 10, &decimal(*negative, digits, *radix)),
+        Datum::Number(Num::Real(x)) => fold_run(h, 11, &x.to_bits().to_string()),
+        Datum::Bool(b) => fold1(h, mark(if *b { 12 } else { 13 })),
+        // Its bytes not folded, as `readings.fx` cannot.
+        Datum::Bytevector(_) => fold1(h, mark(14)),
+        Datum::Number(Num::Ratio(..)) => fold1(h, mark(15)),
+    }
+}
+
+/// An integer's digits in `radix`, written in base 10, as FX-26's
+/// `int->string` writes it.
+fn decimal(negative: bool, digits: &str, radix: u32) -> String {
+    // Little-endian limbs of 10⁹.
+    let mut limbs: Vec<u64> = vec![];
+    for d in digits.chars().filter_map(|c| c.to_digit(radix)) {
+        let mut carry = d as u64;
+        for l in limbs.iter_mut() {
+            let v = *l * radix as u64 + carry;
+            *l = v % 1_000_000_000;
+            carry = v / 1_000_000_000;
+        }
+        if carry > 0 {
+            limbs.push(carry);
+        }
+    }
+    let mut out = String::from(if negative && !limbs.is_empty() { "-" } else { "" });
+    match limbs.split_last() {
+        None => out.push('0'),
+        Some((top, rest)) => {
+            out += &top.to_string();
+            rest.iter().rev().for_each(|l| out += &format!("{l:09}"));
+        }
+    }
+    out
 }
 
 /// Each expression walked, its number.

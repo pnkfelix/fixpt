@@ -398,7 +398,7 @@
 (define k-sys-items (->* (syn) (listof syn acyclic))
   (lambda (s) (tagcase s (lst (items d a b) items) (else x nil))))
 ;; A reading's digest (`readings.fx`).
-(define readings (load-module "fx26:readings.fx"))
+(define readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
 ;; The two definitions declaration `name` at `a`..`b` is, its type
 ;; `canonical`, `text` printed: whether the runtime has it, for a required
 ;; one checked as it is made; and itself, each of its expressions an
@@ -410,7 +410,7 @@
      ((label (string-append "syscall " (symbol->string name) " (\"" host "\")"))
            ;; A reading of their own, what they are made of, in no session's
            ;; state (-1: apart from every text read).
-           (r ((with readings reading-of) -1
+           (r ((with readings text-reading-of) -1
                (string-append label " " text (if required " required" " optional"))))
            (asks (lambda ((f symbol) (k int))
                    (e-app (e-var f a b k r)

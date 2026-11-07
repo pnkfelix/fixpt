@@ -390,14 +390,27 @@ both front ends.
   FX-26 image, bumped by every parse, so a reading's number told how many
   parses that image had made, and the Rust side, which counted nothing,
   would have had to own a count both agreed on). A reading is
-  `reading-of(s, text)` (`readings.fx`; `ids::reading_of`, the same
-  function, `parser.rs`'s `the_readings_agree`): `s` the state of the
-  session the text is read in, folded with the text's characters into 40
-  bits, never 0. `parse-program` and `number-tops` take it; nothing is
-  counted. Whoever reads the same text in the same state makes the same
-  reading, and asks no one (`a_reading_is_its_text_not_a_count`). The
-  state `s`, each kept by what owns the state it stands for, each the
-  digest of every text read since it began (so the last reading):
+  `reading-of(s, trees)` (`readings.fx`; `ids::reading_of`, the same
+  function over the Rust reader's trees, `parser.rs`'s
+  `the_readings_agree`): `s` the state of the session the text is read
+  in, folded with the trees the text reads as into 40 bits, never 0.
+  `parse-program` and `number-tops` take it; nothing is counted. Whoever
+  reads the same in the same state makes the same reading, and asks no
+  one (`a_reading_is_its_trees_not_a_count`).
+  Of the trees, not the text (the user's point, the same day): the full
+  key validates the cheap one, where the cheap key says "the same" the
+  full must too, so a full key finer than meaning reports bugs that are
+  none. So no space, comment, spelling the reader makes one tree of
+  (`#t`, `#true`), or position tells readings apart
+  (`a_reading_is_not_of_how_its_text_is_written`); what the parser tells
+  apart the digest does, `(a . (b c))` from `(a b c)`. Each tree folds its
+  kind's mark, then its pieces: a name's, string's or number's characters
+  (an integer's decimal digits, a float's bits) ended by a mark, a list's
+  elements then its end. Not folded, as FX-26 cannot reach them and the
+  parser takes none: a bytevector's bytes, a ratio's value. The state
+  `s`, each kept by what owns the state it stands for, each the digest of
+  the trees of every text read since it began (so the last reading); a
+  text that does not read leaves it as it was, saying nothing:
   - a program alone, the bootstrap, a staged check, the evaluator's
     staged code: 0, the standard environment;
   - the REPL's checker written in FX-26 (`Fx26Session::own_state`, 0
@@ -408,7 +421,7 @@ both front ends.
     own `step-state`, kept with the checker's state it stands for, 0 at
     its first step.
   A syscall's definitions, which the checker makes, are the reading of
-  what they are made of, in state -1. Not yet chained: the evaluator's
+  the text they are made of, no trees (`text-reading-of`), in state -1. Not yet chained: the evaluator's
   session forms (`ev-session-top`), read at 0; no table outlives one
   check there, so equal texts sharing a reading share nothing wrong.
 - **For stage 2**: `S` above is the session's state as each owner has
