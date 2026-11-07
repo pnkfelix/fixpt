@@ -421,11 +421,15 @@
         (e-module (items a b abk abkr) (eval-module items e))
         ;; `with`: the module's values its body names, by position, bound by
         ;; their names (all of them, if the checker did not say which).
-        ;; `(with #%fx n)`: the standard `n`, whatever binds `n` here.
+        ;; `(with #%fx n)`: the standard `n`, whatever binds `n` here;
+        ;; `(with #%toplevel n)`, the top level's, in the globals the form
+        ;; runs in (`ev-top`), else the standard one.
         (e-with (m body a b abk abkr)
-          (if (k-fx-module? m)
-              (tagcase body (e-var (n c d cdk cdkr) (standard n))
-                       (else y (efail "`(with #%fx name)`")))
+          (if (k-named-module? m)
+              (tagcase body
+                (e-var (n c d cdk cdkr)
+                  (if (k-fx-module? m) (standard n) (lookup (get (get ev-top)) n)))
+                (else y (efail "`(with #%fx name)`")))
               (let ((used (ev-with-in (get ev-withs) a b abk abkr)))
                 (eval body
                       (if (null? used)
@@ -666,9 +670,14 @@
 (define ev-define (->* (vglobals symbol exp) val)
   (lambda (g n x) (let ((v (eval x (get g)))) (begin (set (push-global g n) v) the-unit))))
 
+;; The globals the top-level form being run runs in: the top level, as
+;; `(with #%toplevel n)` names it.
+(define ev-top (ref vglobals @v) (new genv))
 ;; Top-level form `t` run in globals `g`.
 (define eval-top-in (->* (vglobals top) val)
   (lambda (g t)
+   (begin
+    (set ev-top g)
     (tagcase t
       (t-define (n ty x a b)
         (if (and (not (null? ty)) (lambda-exp? x))
@@ -679,7 +688,7 @@
       ;; Every name's cell first; then each lambda, which runs nothing.
       (t-define-rec (bs a b) (begin (rec-fill g bs (rec-cells g bs)) the-unit))
       (t-exp (x) (eval x (get g)))
-      (else x the-unit))))
+      (else x the-unit)))))
 
 (define eval-top (->* (top) val) (lambda (t) (eval-top-in genv t)))
 

@@ -650,9 +650,49 @@ impl Checker {
         self.with_as(e, m, body, None)
     }
 
+    /// `(with #%toplevel n)`: the top level's `n`, as it is here, whatever
+    /// binds `n` between (`typed-macros.md`, item 5): its type, and what
+    /// naming it does, as the plain `n` would there (`naming_effect`).
+    fn toplevel_ref(&mut self, e: ExpId, m: Sym, body: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        if self.lookup(m).is_some() {
+            return Err(FxError::at(span, "`#%toplevel` is the top level's module, which nothing else may be"));
+        }
+        let crate::ast::Exp::Var(n) = *self.arena.exp_at(body) else {
+            return Err(FxError::at(span, "`(with #%toplevel name)` names one name of the top level"));
+        };
+        let shown = self.interner.name(n).to_string();
+        if self.second_class(n) && self.operator_at != Some(e) {
+            return Err(self.named_only_to_call(span, n));
+        }
+        let Some(i) = self.toplevel_pos(n) else {
+            return Err(FxError::at(span, format!("`{shown}` is not defined at the top level")));
+        };
+        if let Some((_, why)) = self.broken.get(&n).filter(|(b, _)| *b == i) {
+            return Err(FxError::at(span, format!("`{shown}` is broken, {why}: define it again to use it")));
+        }
+        let t = self.narrowed.iter().rev().find(|(x, b, _)| *x == n && *b == i).map_or(self.env[i].1, |(_, _, t)| *t);
+        let t = if self.shared_globals.contains(&n) { self.strengthened(t) } else { t };
+        let mut eff = Effect::pure();
+        if self.recursive.contains(&(n, t)) {
+            eff.0.insert(crate::ast::Atom::Spin);
+        }
+        if self.globals_effects && self.global_slots.contains(&i) {
+            eff.0.insert(crate::ast::Atom::Read(crate::ast::Region::Global(n)));
+        }
+        // As an operator, noted by the application (`synth_app`).
+        if self.operator_at != Some(e) {
+            self.plain_fx(e);
+        }
+        Ok((t, eff))
+    }
+
     /// `(with m body)`: its body synthesized, or checked against `expected`.
     pub(crate) fn with_as(&mut self, e: ExpId, m: Sym, body: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
+        if self.is_toplevel_module(m) {
+            return self.toplevel_ref(e, m, body);
+        }
         if self.is_fx_module(m) {
             if self.lookup(m).is_some() {
                 return Err(FxError::at(span, "`#%fx` is the standard bindings' module, which nothing else may be"));

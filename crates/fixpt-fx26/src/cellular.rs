@@ -604,6 +604,13 @@ impl<'a> Compiler<'a> {
         find(e, n).or_else(|| self.global(n, self.genv_limit.unwrap_or(self.genv.len())))
     }
 
+    /// Where `(with #%toplevel n)`'s `n`, `body`, is: the program's global of
+    /// that name, whatever binds it here; none, the standard binding.
+    fn toplevel(&self, body: ExpId) -> Option<Loc> {
+        let Exp::Var(n) = *self.exp_at(body) else { return None };
+        self.global(n, self.genv_limit.unwrap_or(self.genv.len()))
+    }
+
     fn load(&self, code: &mut Vec<Item>, l: Loc) {
         match l {
             Loc::Slot(i) => self.op1(code, "slot", Value::fixnum(i as i64)),
@@ -659,8 +666,9 @@ impl<'a> Compiler<'a> {
                     }
                 }
             }
-            // `(with #%fx n)`, the standard `n`: nothing free.
-            Exp::With { module, .. } if self.c.is_fx_module(module) => {}
+            // `(with #%fx n)`, the standard `n`, and `(with #%toplevel n)`,
+            // the top level's: nothing free.
+            Exp::With { module, .. } if self.c.is_named_module(module) => {}
             // A module's included names, bound where it is made, from inside
             // the item (outside, `%include` is bound, and the names bound in
             // it are as good).
@@ -872,7 +880,15 @@ impl<'a> Compiler<'a> {
         match self.exp_at(x).clone() {
             // `(with #%fx n)` where `n` is shadowed (where it is not, the
             // checker made it the plain `n`): the standard `n`.
-            Exp::With { module, body } if self.c.is_fx_module(module) => {
+            // `(with #%toplevel n)` where `n` is shadowed: the top level's
+            // `n`, the program's global, else the standard binding
+            // (`typed-macros.md`, item 5).
+            Exp::With { module, body } if self.c.is_toplevel_module(module) && self.toplevel(body).is_some() => {
+                let l = self.toplevel(body).expect("matched");
+                self.load(code, l);
+                self.done(code, tail);
+            }
+            Exp::With { module, body } if self.c.is_named_module(module) => {
                 let Exp::Var(n) = *self.exp_at(body) else { return Err("`(with #%fx name)`".into()) };
                 match self.name(n) {
                     "nil" | "no-pair" => self.lit(code, Value::NULL),
@@ -1980,10 +1996,12 @@ impl<'a> Compiler<'a> {
         }
         let standard = match *self.exp_at(f) {
             Exp::Var(n) if self.where_is(e, n).is_none() => Some(self.name(n).to_string()),
-            Exp::With { module, body } if self.c.is_fx_module(module) => match *self.exp_at(body) {
-                Exp::Var(n) => Some(self.name(n).to_string()),
-                _ => None,
-            },
+            Exp::With { module, body } if self.c.is_fx_module(module) || (self.c.is_toplevel_module(module) && self.toplevel(body).is_none()) => {
+                match *self.exp_at(body) {
+                    Exp::Var(n) => Some(self.name(n).to_string()),
+                    _ => None,
+                }
+            }
             _ => None,
         };
         match standard {
@@ -2989,14 +3007,18 @@ impl<'a> Compiler<'a> {
             }
             Exp::The { exp: body, .. } => self.quoted_value(body),
             Exp::Var(n) if self.name(n) == "nil" => Some(Value::NULL),
-            Exp::With { module, body } if self.c.is_fx_module(module) => match *self.exp_at(body) {
-                Exp::Var(n) if self.name(n) == "nil" => Some(Value::NULL),
-                _ => None,
-            },
+            Exp::With { module, body } if self.c.is_fx_module(module) || (self.c.is_toplevel_module(module) && self.toplevel(body).is_none()) => {
+                match *self.exp_at(body) {
+                    Exp::Var(n) if self.name(n) == "nil" => Some(Value::NULL),
+                    _ => None,
+                }
+            }
             Exp::App { fun, args } if args.len() == 2 => {
                 let cons = match *self.exp_at(fun) {
                     Exp::Var(f) => self.name(f) == "cons",
-                    Exp::With { module, body } if self.c.is_fx_module(module) => matches!(*self.exp_at(body), Exp::Var(f) if self.name(f) == "cons"),
+                    Exp::With { module, body } if self.c.is_fx_module(module) || (self.c.is_toplevel_module(module) && self.toplevel(body).is_none()) => {
+                        matches!(*self.exp_at(body), Exp::Var(f) if self.name(f) == "cons")
+                    }
                     _ => false,
                 };
                 if !cons {

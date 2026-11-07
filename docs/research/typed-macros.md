@@ -525,11 +525,17 @@ nor the template's the use's: `swap!` against a use's own `tmp`, `my-or`
 against a use's `t`. A use of a macro inside an expansion is expanded in
 turn.
 
+**Done since:**
+- A template naming the program's own globals (item 5), 2026-11-07: every
+  name free in a template expands to `(with #%toplevel name)`, the top
+  level's as it is where the macro is used, standard names too (the
+  user's choice: `+` in a template is the top level's `+`, as a top-level
+  procedure's is); `(with #%fx name)` written in a template means the
+  standard one whatever the top level does. Each type a template writes
+  expands to `(select #%toplevel T)`. Both front ends; `docs/fx26.md`,
+  "`#%toplevel`".
+
 **Not yet:**
-- A template naming the program's own globals (item 5): refused until
-  there is a reference to a global that nothing shadows, as `#%fx` is to
-  a standard binding. The user's answer: the global as it is where the
-  macro is used.
 - A macro's name may not be bound or defined at all, as a form's may not
   (Herman lets a local binder shadow a macro); a use binding one is
   refused, and a definition of one.

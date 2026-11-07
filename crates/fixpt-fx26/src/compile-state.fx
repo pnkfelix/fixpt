@@ -384,12 +384,17 @@
       (cv-cellular () (c-typed-call c n tail))
       (else y (c-op1 c (if tail routine-tailcall routine-call) (wcell-int n))))))
 
-;; The name `(with m body)` is the standard binding of, if `m` is `#%fx`
-;; (where nothing shadows it, the checker made it the plain name), else "".
+;; The name `(with m body)` is the standard binding of, if `m` is `#%fx`, or
+;; `#%toplevel` and the program defines no global of the name (where nothing
+;; shadows it, the checker made it the plain name), else "".
 (define c-fx-name (->* (symbol exp) string)
   (lambda (m body)
     (tagcase body
-      (e-var (n a b abk abkr) (if (string=? (symbol->string m) "#%fx") (symbol->string n) ""))
+      (e-var (n a b abk abkr)
+        (cond ((string=? (symbol->string m) "#%fx") (symbol->string n))
+              ((and (string=? (symbol->string m) "#%toplevel") (null? (c-toplevel-global n)))
+               (symbol->string n))
+              (else "")))
       (else y ""))))
 ;; The standard operation `f` names, if it is a name bound nowhere else;
 ;; else "".

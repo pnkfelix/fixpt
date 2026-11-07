@@ -510,6 +510,35 @@
                             #u
                             (k-note-fx-plain body (k-at-of x)))
                         (k-te t nil))))))))
+;; `(with #%toplevel n)`: the top level's `n`, as it is here, whatever binds
+;; `n` between (`typed-macros.md`, item 5): its type, and what naming it
+;; does, as the plain `n`'s would there (`k-naming-effect`); noted plain
+;; where nothing shadows it, as `(with #%fx n)` is.
+(define k-synth-toplevel (->* (kx int kx int int) k-te)
+  (lambda (x mt body a b)
+    (if (>= mt 0)
+        (k-fail "`#%toplevel` is the top level's module, which nothing else may be" a b)
+        (tagcase body
+          (x-var (n c d cdk cdkr)
+            (let ((i (k-toplevel-index n)) (shown (symbol->string n))
+                  (op (k-operator? n a b (k-kth x) (k-reading x))))
+              (cond ((and (k-second-class? n) (not op)) (k-fail (k-named-only n) a b))
+                    ((< i 0) (k-fail (k-cat3 "`" shown "` is not defined at the top level") a b))
+                    ((not (null? (k-toplevel-broken n i)))
+                     (k-fail (k-cat5 "`" shown "` is broken, " (car (k-toplevel-broken n i))
+                                     ": define it again to use it")
+                             a b))
+                    (else
+                     (let* ((t (k-toplevel-type n i))
+                            (spins (if (k-named-has? (get k-recursive) n t)
+                                       (k-one (a-spin))
+                                       (the k-eff nil)))
+                            (e (if (and (get k-globals-effects) (k-toplevel-global? n i))
+                                   (k-insert (a-read (r-global n)) spins)
+                                   spins)))
+                       (begin (if (or op (> i 0)) #u (k-note-fx-plain body (k-at-of x)))
+                              (k-te t e)))))))
+          (else y (k-fail "`(with #%toplevel name)` names one name of the top level" a b))))))
 ;; The operator `f`, under any `the` or projection `(with #%fx n)`, noted as
 ;; `k-note-fx-plain` notes it, once; or a syscall's (`k-note-sys-plain`).
 (define k-note-fx-plain-op (->* (kx) unit)
@@ -518,7 +547,11 @@
       (k-note-sys-plain f)
       (let ((g (k-under f)))
         (tagcase g
-          (x-with (m body a b abk abkr) (if (k-fx-module? m) (k-note-fx-plain body (k-at-of g)) #u))
+          (x-with (m body a b abk abkr)
+            (cond ((k-fx-module? m) (k-note-fx-plain body (k-at-of g)))
+                  ((and (k-toplevel-module? m) (= (k-toplevel-index (k-fx-name body)) 0))
+                   (k-note-fx-plain body (k-at-of g)))
+                  (else #u)))
           (else y #u))))))
 ;; A syscall's call's operator `(the T %syscallN)`, which gives it its
 ;; declared effect (`k-sys-defs`), noted as the plain `%syscallN` it is.

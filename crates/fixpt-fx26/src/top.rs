@@ -110,7 +110,7 @@ fn every_field_placed(c: &Checker) {
         certified_nats: _, certified_lengths: _, narrowed: _, path_narrowed: _, closure_depth: _, pending_unions: _,
         checked_call: _, skolems: _, to_end_sizes: _, module_vars: _, abstract_funs: _, effect_selects: _,
         with_effect_fallback: _, subst_keep: _, select_map: _, param_map: _, size_facts: _, operator_at: _,
-        hidden: _, shared_loads: _, shared_files: _, reading_deps: _, loading: _, include_scope: _, run_items: _, with_depth: _, shared_globals: _, hoisted: _,
+        hidden: _, form_began: _, shared_loads: _, shared_files: _, reading_deps: _, loading: _, include_scope: _, run_items: _, with_depth: _, shared_globals: _, hoisted: _,
         loaded: _, in_built_in: _, load_sites: _, files_read: _, ahead: _, ahead_filled: _, hazard_modules: _,
         hazard_items: _, broken: _, defs: _, outdated: _, poly_chain: _, inst_for: _,
         // The macros defined, as the forms are read, before any is checked
@@ -615,7 +615,7 @@ impl Checker {
         let mut interner = std::mem::take(&mut self.interner);
         let defines = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| interner.name(h) == "define-syntax");
         let r = if defines {
-            macros.define(&form, &mut interner, &|s| self.standard_type(s).is_some()).map(|()| None)
+            macros.define(&form, &mut interner).map(|()| None)
         } else {
             macros.expand(&form, &mut interner).map(Some)
         };
@@ -840,6 +840,15 @@ impl Checker {
 
     /// Check one top-level form, keeping what it defines.
     pub fn top(&mut self, form: &Syntax) -> R<Top> {
+        // Where the top level ends as it begins: past it, what the form
+        // binds (`toplevel_hidden`).
+        let outer = self.form_began.replace((self.env.len(), self.dscope.len()));
+        let r = self.top_here(form);
+        self.form_began = outer;
+        r
+    }
+
+    fn top_here(&mut self, form: &Syntax) -> R<Top> {
         // The files its types name, loaded first (`type_loads`).
         self.type_loads(form)?;
         let items = form.as_proper_list().unwrap_or(&[]);

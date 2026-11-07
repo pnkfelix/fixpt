@@ -618,9 +618,13 @@
              (if (k-shared-name? name)
                  nil
                  (cons (k-define-line name (extract r 1) (extract r 2)) nil))))))
-;; One top-level form's lines: what each definition and expression is.
+;; One top-level form's lines: what each definition and expression is. The
+;; description scope as it begins, the top level's (`k-form-dscope`).
 (define k-top-lines (->* (top) k-out)
   (lambda (form)
+   (begin
+    (set k-form-dscope (get k-dscope))
+    (set k-toplevel-reading #f)
     (the k-out (tagcase form
                  (t-define (name ty init a b)
                    (if (null? ty)
@@ -630,7 +634,7 @@
                  (t-exp (e)
                    (let* ((x (k-resolve-exp e)) (r (k-synth x)))
                      (cons (k-line (extract r 1) (extract r 2)) nil)))
-                 (else y nil)))))
+                 (else y nil))))))
 (define k-lines-append-names (->* (k-names k-names) k-names)
   (lambda (xs ys)
     (if (null? xs) ys (the k-names (cons (car xs) (k-lines-append-names (cdr xs) ys))))))

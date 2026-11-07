@@ -391,7 +391,7 @@
 (define k-effect-selected (->* (syn k-syns) (listof k-eff acyclic))
   (lambda (s items)
     (if (and (= (k-length items) 3) (syn-symbol? (k-nth items 1)) (syn-symbol? (k-nth items 2)))
-        (let ((m (syn-head (k-nth items 1))) (e (syn-head (k-nth items 2))))
+        (let ((m (k-toplevel-marked (syn-head (k-nth items 1)))) (e (syn-head (k-nth items 2))))
           (the (listof k-eff acyclic) (list (k-one (a-var (k-effect-select m e))))))
         (begin (k-sfail "`(select module name)`: a module's name, and a component's" s) nil))))
 

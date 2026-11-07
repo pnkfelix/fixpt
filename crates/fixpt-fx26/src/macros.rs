@@ -101,13 +101,17 @@ struct Clause {
     actions: HashMap<Vec<bool>, Action>,
 }
 
-/// What becomes of one of a template's names: made fresh, one name for
-/// the binder found at a path and for each reference to it; or the
-/// standard binding, `(with #%fx name)`.
+/// What becomes of one of a template's parts: a name made fresh, one name
+/// for the binder found at a path and for each reference to it; a name
+/// free in the template, the top level's, as it is where the macro is used,
+/// `(with #%toplevel name)`, nothing at the use shadowing it
+/// (`typed-macros.md`, item 5); a type the template writes, read in the top
+/// level's, `(select #%toplevel type)`.
 #[derive(Clone, Debug)]
 enum Action {
     Rename(Vec<bool>),
-    Standard,
+    Toplevel,
+    ToplevelType,
 }
 
 /// The macros defined, and the syntax types of the kernel's forms, for
@@ -363,9 +367,9 @@ impl Macros {
     }
 
     /// `(define-syntax name σ ((_ . pattern) template) …)`: checked, and
-    /// defined. `is_standard` says whether a name is a standard binding,
-    /// which a template's free name must be.
-    pub fn define(&mut self, form: &Syntax, interner: &mut Interner, is_standard: &dyn Fn(Sym) -> bool) -> R<()> {
+    /// defined. A template's free name is the top level's where the macro
+    /// is used (`Action::Toplevel`).
+    pub fn define(&mut self, form: &Syntax, interner: &mut Interner) -> R<()> {
         self.ensure_kernel(interner)?;
         let usage = "`(define-syntax name signature ((_ . pattern) template) …)`";
         let items = form.as_proper_list().ok_or_else(|| FxError::at(form.span, usage))?;
@@ -381,7 +385,7 @@ impl Macros {
         let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), clauses: Vec::new(), text: None }));
         let mut checked = Vec::new();
         for c in clauses {
-            match self.clause(c, &sig, interner, is_standard) {
+            match self.clause(c, &sig, interner) {
                 Ok(c) => checked.push(c),
                 Err(e) => {
                     match before {
@@ -402,7 +406,7 @@ impl Macros {
     /// placed in the template where the signature says what is in scope
     /// there, and a reference to a pattern's binder is where no other
     /// pattern binder may shadow it.
-    fn clause(&self, c: &Syntax, sig: &Rc<STy>, interner: &Interner, is_standard: &dyn Fn(Sym) -> bool) -> R<Clause> {
+    fn clause(&self, c: &Syntax, sig: &Rc<STy>, interner: &Interner) -> R<Clause> {
         let usage = "a clause is `((_ . pattern) template)`";
         let [pattern, template] = c.as_proper_list().ok_or_else(|| FxError::at(c.span, usage))? else {
             return Err(FxError::at(c.span, usage));
@@ -471,21 +475,19 @@ impl Macros {
                         Some(b) => {
                             actions.insert(node.path.clone(), Action::Rename(t.nodes[b].path.clone()));
                         }
-                        None if is_standard(*n) => {
-                            actions.insert(node.path.clone(), Action::Standard);
-                        }
                         None => {
-                            return Err(FxError::at(
-                                span,
-                                format!(
-                                    "`{}` is not bound in the template, nor a standard binding: a template may name the program's own globals only once there is a reference to them nothing shadows (typed-macros.md, item 5)",
-                                    interner.name(*n)
-                                ),
-                            ))
+                            actions.insert(node.path.clone(), Action::Toplevel);
                         }
                     }
                 }
                 _ => {}
+            }
+        }
+        // Each type the template writes (none of the use's is in it: a
+        // pattern variable is placed only whole), read in the top level's.
+        for node in &t.nodes {
+            if matches!(&*node.core, STy::Type) && matches!(node.kids, Kids::Other) {
+                actions.insert(node.path.clone(), Action::ToplevelType);
             }
         }
         Ok(Clause { pattern, template: template.clone(), actions })
@@ -563,6 +565,11 @@ impl Macros {
     #[allow(clippy::too_many_arguments)]
     fn transcribe(&mut self, c: &Clause, t: &Syntax, path: &mut Vec<bool>, binds: &HashMap<Sym, Syntax>, fresh: &mut HashMap<Vec<bool>, Sym>, made: u32, interner: &mut Interner) -> Syntax {
         let at = t.span.in_expansion(made);
+        if let Some(Action::ToplevelType) = c.actions.get(&*path) {
+            let (select, top) = (interner.intern("select"), interner.intern("#%toplevel"));
+            let ty = in_expansion(t, made);
+            return Syntax::list(at, vec![Syntax::symbol(at, select), Syntax::symbol(at, top), ty]);
+        }
         match &t.datum {
             Datum::Symbol(n) => {
                 if let Some(b) = binds.get(n) {
@@ -581,11 +588,11 @@ impl Macros {
                         };
                         Syntax::symbol(at, name)
                     }
-                    Some(Action::Standard) => {
-                        let (with, fx) = (interner.intern("with"), interner.intern("#%fx"));
-                        Syntax::list(at, vec![Syntax::symbol(at, with), Syntax::symbol(at, fx), Syntax::symbol(at, *n)])
+                    Some(Action::Toplevel) => {
+                        let (with, top) = (interner.intern("with"), interner.intern("#%toplevel"));
+                        Syntax::list(at, vec![Syntax::symbol(at, with), Syntax::symbol(at, top), Syntax::symbol(at, *n)])
                     }
-                    None => Syntax::new(at, t.datum.clone()),
+                    Some(Action::ToplevelType) | None => Syntax::new(at, t.datum.clone()),
                 }
             }
             Datum::List { items, tail } => {
@@ -747,11 +754,12 @@ impl Aligner<'_> {
         let head = items[0].as_symbol().filter(|h| !self.pvars.contains_key(h));
         let sig = match head.map(|h| (h, self.name(h))) {
             Some((_, "with")) => {
-                let standard = tail.is_none() && matches!(&items[..], [_, m, n] if m.as_symbol().is_some_and(|m| self.name(m) == "#%fx") && n.as_symbol().is_some());
+                let named = |m: &str| m == "#%fx" || m == "#%toplevel";
+                let standard = tail.is_none() && matches!(&items[..], [_, m, n] if m.as_symbol().is_some_and(|m| named(self.name(m))) && n.as_symbol().is_some());
                 if standard {
                     return Ok(());
                 }
-                return Err(FxError::at(s.span, "a template's `with` is `(with #%fx name)` (one opening a module waits for scopes of a module's names)"));
+                return Err(FxError::at(s.span, "a template's `with` is `(with #%fx name)` or `(with #%toplevel name)` (one opening a module waits for scopes of a module's names)"));
             }
             Some((h, _)) if self.m.defined.contains_key(&h) => Some(self.m.defined[&h].sig.clone()),
             Some((_, n)) if self.m.kernel.contains_key(n) && n != "%app" => Some(self.m.kernel[n].clone()),
@@ -1017,9 +1025,10 @@ fn guarded(t: &STy, id: usize) -> bool {
     }
 }
 
-/// A form's name, or `#%fx`: never bound, so never a binder or a variable.
+/// A form's name, `#%fx` or `#%toplevel`: never bound, so never a binder or
+/// a variable.
 fn reserved(name: &str) -> bool {
-    crate::top::KEYWORDS.contains(&name) || name == "#%fx" || name == "define-syntax"
+    crate::top::KEYWORDS.contains(&name) || name == "#%fx" || name == "#%toplevel" || name == "define-syntax"
 }
 
 /// A list's car and cdr, the cdr a list of the rest (or the tail).
@@ -1067,5 +1076,16 @@ fn matches(p: &Syntax, s: &Syntax, binds: &mut HashMap<Sym, Syntax>, interner: &
             _ => false,
         },
         other => &s.datum == other,
+    }
+}
+
+/// `s`, each part of it at its place in expansion `made` (`transcribe`'s,
+/// for a part nothing in is renamed or placed).
+fn in_expansion(s: &Syntax, made: u32) -> Syntax {
+    let at = s.span.in_expansion(made);
+    match &s.datum {
+        Datum::List { items, tail } => list_of(at, items.iter().map(|x| in_expansion(x, made)).collect(), tail.as_ref().map(|x| in_expansion(x, made))),
+        Datum::Vector(items) => Syntax::new(at, Datum::Vector(items.iter().map(|x| in_expansion(x, made)).collect())),
+        d => Syntax::new(at, d.clone()),
     }
 }

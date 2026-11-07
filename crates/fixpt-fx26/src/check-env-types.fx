@@ -125,6 +125,17 @@
 (define-type check-env-sig
   (moduleof
    (val k-fx-module? (subr pure (symbol) bool))
+   (val k-toplevel-module? (subr pure (symbol) bool))
+   (val k-named-module? (subr pure (symbol) bool))
+   (val k-toplevel-index (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
+   (val k-toplevel-type (subr (maxeff (read @globals) (read @t) spin) (symbol int) int))
+   (val k-toplevel-broken
+        (subr (maxeff (read @globals) (read @t) spin) (symbol int) (listof string acyclic)))
+   (val k-toplevel-global? (subr (maxeff (read @globals) (read @t) spin) (symbol int) bool))
+   (val k-form-dscope (ref k-scope @t))
+   (val k-toplevel-reading (ref bool @t))
+   (val k-toplevel-marked (subr (maxeff (read @globals) (read @t) spin) (symbol) symbol))
+   (val k-lookup-module (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
    (val k-reshapes (ref k-reshape-list @t))
    (val k-reshape-bases (ref k-reshape-base-list @t))
    (val k-dead-arms (ref k-dead-frames @t))

@@ -193,7 +193,8 @@
   (lambda (s items)
     (cond ((not (= (k-length items) 3)) (k-sfail "`(select module name)`" s))
           ((and (syn-symbol? (k-nth items 1)) (syn-symbol? (k-nth items 2)))
-           (k-ty-new (ty-select (syn-head (k-nth items 1)) (syn-head (k-nth items 2)))))
+           (k-ty-new (ty-select (k-toplevel-marked (syn-head (k-nth items 1)))
+                                (syn-head (k-nth items 2)))))
           (else (k-sfail "`(select module name)`: a module's name, and a component's" s)))))
 ;; Function `f`, given `have` descriptions at `s`, where it takes `want`.
 (define k-arity-fail (->* (int int int syn) void)

@@ -753,10 +753,12 @@
         ;; The module, and the body, which sees its values once checked (or, an
         ;; earlier item's of a module being ordered, `k-with-bound`; or a
         ;; module a `let` binds to one written there, `ls`'s).
-        ;; `(with #%fx n)`, the standard `n`: nothing free.
+        ;; `(with #%fx n)`, the standard `n`: nothing free. `(with #%toplevel
+        ;; n)`, the top level's `n`: a use of it, whatever binds `n` here.
         (x-with (m body a b abk abkr)
-          (if (k-fx-module? m)
-              out
+          (if (k-named-module? m)
+              (let ((n (tagcase body (x-var (n c d cdk cdkr) n) (else y '||))))
+                (if (or (k-fx-module? m) (k-has-name? out n)) out (the k-names (cons n out))))
               (k-free-in body
                          (k-names-onto (k-with-bound m a b abk abkr bound)
                                        (k-names-onto (k-wlocal-vals ls (k-bound-at bound m))

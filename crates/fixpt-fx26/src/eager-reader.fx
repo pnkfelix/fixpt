@@ -592,13 +592,13 @@
   (lambda (cur start what) (fail-at cur start (string-append "unknown `#` syntax: `#" what "`"))))
 (define bytes-message string "bytevector elements must be exact integers in 0..=255")
 
-;; FX-26's `#%fx`, the module of the standard bindings, `cur` at the `%`;
-;; no other `#%` spelling reads.
+;; FX-26's `#%fx`, the module of the standard bindings, or `#%toplevel`,
+;; the top level's, `cur` at the `%`; no other `#%` spelling reads.
 (define read-fx-module (->* (cursor int) result)
   (lambda (cur start)
     (let* ((w (read-word cur)) (word (car w)))
-      (if (string=? word "%fx")
-          (atom-at (string->symbol "#%fx") start (cdr w))
+      (if (or (string=? word "%fx") (string=? word "%toplevel"))
+          (atom-at (string->symbol (string-append "#" word)) start (cdr w))
           (unknown-hash (cdr w) start word)))))
 ;; FX-26's `#:name`, a keyword, `cur` at the name: a symbol's, read as one
 ;; is, and nothing else.

@@ -216,9 +216,10 @@ impl Checker {
     }
 
     /// What `read` reads, in the body of a `(with m …)`: `m`'s type names
-    /// shadowing those before (`withs_over`); `#%fx`'s are the standard's.
+    /// shadowing those before (`withs_over`); `#%fx`'s and `#%toplevel`'s
+    /// body is one name, of no type.
     fn with_types_of<T>(&mut self, m: Sym, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
-        if self.name(m) == "#%fx" {
+        if self.name(m) == "#%fx" || self.name(m) == "#%toplevel" {
             return read(self);
         }
         let depth = self.dscope.len();
@@ -1018,6 +1019,22 @@ impl Checker {
             // `(moduleof (abs t type) … (desc d T) … (val x T) …)`: each
             // abstract type a binder, in scope in what follows it.
             "moduleof" => self.parse_moduleof(s.span, &items[1..]),
+            // `(select #%toplevel T)`: type `T` as the top level reads it,
+            // whatever the form binds around it (a template's type, as it
+            // expands: `typed-macros.md`, item 5); `(select #%fx T)`, as the
+            // standard environment does.
+            "select" if matches!(items.get(1).and_then(|m| m.as_symbol()).map(|m| self.name(m)), Some("#%toplevel" | "#%fx")) => {
+                let [_, m, t] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(select #%toplevel type)` or `(select #%fx type)`"));
+                };
+                // The modules its `select`s name found here too, not where the
+                // type is checked (`resolve_selects`), as the top level has them.
+                let standard = m.as_symbol().is_some_and(|m| self.name(m) == "#%fx");
+                let outer = self.hidden.replace(self.toplevel_hidden(standard));
+                let r = self.parse_type(t).and_then(|ty| self.resolve_selects(ty, s.span));
+                self.hidden = outer;
+                r
+            }
             "select" => {
                 let [_, m, n] = &items[..] else {
                     return Err(FxError::at(s.span, "`(select module name)`"));

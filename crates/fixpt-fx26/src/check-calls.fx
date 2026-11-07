@@ -339,7 +339,12 @@
       (x-with (m body a b abk abkr)
         (tagcase body
           (x-var (n c d cdk cdkr)
-            (if (and (k-fx-module? m) (>= (k-std-type n) 0)) (symbol->string n) ""))
+            (if (or (and (k-fx-module? m) (>= (k-std-type n) 0))
+                    (and (k-toplevel-module? m)
+                         (k-std-binding? n (let ((i (k-toplevel-index n)))
+                                             (if (< i 0) -1 (k-toplevel-type n i))))))
+                (symbol->string n)
+                ""))
           (else y "")))
       (else y ""))))
 ;; Whether `f` names a known procedure.

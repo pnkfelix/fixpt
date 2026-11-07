@@ -184,6 +184,8 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (cenv symbol)
                        c-found))
+            (val c-toplevel-global
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (symbol) c-found))
             (val c-set-facts!
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) spin (read @k) (read @t)
                                (write @k))

@@ -472,11 +472,13 @@ impl<'a> Reader<'a> {
                 Ok(Syntax::new(self.span_from(start), Datum::Keyword(sym)))
             }
             '%' if self.profile.fx_module => {
+                // `#%fx`, the standard bindings' module; `#%toplevel`, the
+                // top level's, as it is where it is named.
                 let word = self.take_while(|c, r| !r.is_delimiter(c));
-                if word != "%fx" {
+                if word != "%fx" && word != "%toplevel" {
                     return Err(ReadError::at(self.span_from(start), format!("unknown `#` syntax: `#{word}`")));
                 }
-                Ok(Syntax::symbol(self.span_from(start), self.interner.intern("#%fx")))
+                Ok(Syntax::symbol(self.span_from(start), self.interner.intern(&format!("#{word}"))))
             }
             _ => {
                 self.bump();

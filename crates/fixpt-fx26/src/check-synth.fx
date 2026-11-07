@@ -267,12 +267,20 @@
               (set solved (cons (cons v (dt (k-subst slot (get solved)))) (get solved)))))
           #u))))
 ;; `(with m body)` checked as a `expected`, if `m` is `#%fx` and `body` a
-;; standard name of a polymorphic type: instantiated as the plain name is
-;; (`TODO.md` §46); its effect, in a list of one, or none.
+;; standard name of a polymorphic type, or `#%toplevel` and the top level's
+;; binding of it is: instantiated as the plain name is (`TODO.md` §46); its
+;; effect, in a list of one, or none.
 (define k-fx-poly-check (->* (kx symbol kx int) (listof k-eff @t))
   (lambda (x m body expected)
     (let ((t (tagcase body
-               (x-var (n a b abk abkr) (if (k-fx-module? m) (k-std-type n) -1))
+               (x-var (n a b abk abkr)
+                 (cond ((k-fx-module? m) (k-std-type n))
+                       ((k-toplevel-module? m)
+                        (let ((i (k-toplevel-index n)))
+                          (if (and (>= i 0) (null? (k-toplevel-broken n i)))
+                              (k-toplevel-type n i)
+                              -1)))
+                       (else -1)))
                (else y -1))))
       (if (and (>= t 0) (tagcase (k-get t) (ty-poly (bs pb) #t) (else y #f)))
           (begin (k-expect x (k-instantiate-against t expected (k-start x) (k-end x)) expected)

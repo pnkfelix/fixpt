@@ -553,6 +553,10 @@ pub struct Checker {
     /// bindings, and the description names, past the standard ones and
     /// before it, which it may not see.
     pub(crate) hidden: Option<((usize, usize), (usize, usize))>,
+    /// Where the top-level form being checked began, the environment's and
+    /// the description names' lengths then: what is bound past them, the
+    /// form binds (`toplevel_hidden`).
+    pub(crate) form_began: Option<(usize, usize)>,
     /// Each file loaded, by its path (`input:` before a `load-input`'s),
     /// and the hidden global its one value is (`%shared:…`): every load of
     /// a path is that value (`TODO.md` §68), made once, purely.
@@ -1212,6 +1216,7 @@ impl Checker {
             operator_at: None,
             standard_dscope: 0,
             hidden: None,
+            form_began: None,
             shared_loads: HashMap::new(),
             shared_files: HashMap::new(),
             reading_deps: Vec::new(),
@@ -2522,6 +2527,57 @@ impl Checker {
         self.interner.name(m) == "#%fx"
     }
 
+    /// Whether `m` is `#%toplevel`, the top level's module, which nothing
+    /// binds: `(with #%toplevel n)` is the top level's `n` as it is where it
+    /// is named, whatever binds `n` between: what a template's free name
+    /// expands to (`typed-macros.md`, item 5).
+    pub(crate) fn is_toplevel_module(&self, m: Sym) -> bool {
+        self.interner.name(m) == "#%toplevel"
+    }
+
+    /// Whether `m` is a module only a name is, `#%fx` or `#%toplevel`.
+    pub(crate) fn is_named_module(&self, m: Sym) -> bool {
+        self.is_fx_module(m) || self.is_toplevel_module(m)
+    }
+
+    /// Where `s` is bound where it is named, of what may be seen there (a
+    /// file loaded sees the standard environment alone: `hidden`), the
+    /// innermost; and where the top level binds it, the newest of the
+    /// program's globals of that name, else the standard binding.
+    fn scope_pos(&self, s: Sym, top: bool) -> Option<usize> {
+        let hidden = self.hidden.map(|(e, _)| e);
+        let seen = |i: usize| !hidden.is_some_and(|(a, b)| (a..b).contains(&i)) || self.shared_globals.contains(&s);
+        let i = self.env.positions(s).find(|i| seen(*i) && (!top || *i < self.standard_len || self.global_slots.contains(i)))?;
+        if i < self.standard_len && self.in_built_in == 0 && built_in_only(self.interner.name(s)) {
+            return None;
+        }
+        Some(i)
+    }
+
+    /// What to hide to read as the top level reads (`(select #%toplevel T)`),
+    /// or, `standard`, as the standard environment does (`(select #%fx T)`):
+    /// what the form being checked binds, or all past the standard
+    /// environment. In a file loaded, which sees the standard environment
+    /// alone, its top level is that.
+    pub(crate) fn toplevel_hidden(&self, standard: bool) -> ((usize, usize), (usize, usize)) {
+        let (env, ds) = (self.env.len(), self.dscope.len());
+        match self.form_began {
+            Some((e, d)) if !standard && self.hidden.is_none() => ((e, env), (d, ds)),
+            _ => ((self.standard_len, env), (self.standard_dscope, ds)),
+        }
+    }
+
+    /// Where the top level binds `s` ([`Self::scope_pos`]).
+    pub(crate) fn toplevel_pos(&self, s: Sym) -> Option<usize> {
+        self.scope_pos(s, true)
+    }
+
+    /// Whether `(with #%toplevel s)` is the plain `s`: nothing shadows the
+    /// top level's `s` where it is named.
+    pub(crate) fn toplevel_unshadowed(&self, s: Sym) -> bool {
+        self.toplevel_pos(s).is_some_and(|i| self.scope_pos(s, false) == Some(i))
+    }
+
     /// The standard binding of `s`'s type, whatever binds `s` since.
     pub(crate) fn standard_type(&self, s: Sym) -> Option<TyId> {
         self.env.positions(s).find(|i| *i < self.standard_len).map(|i| self.env[i].1)
@@ -2533,9 +2589,8 @@ impl Checker {
     /// operator of, or else by the `with`, as `k-note-fx-plain` does.
     pub(crate) fn plain_fx(&mut self, e: ExpId) {
         if let Exp::With { module, body } = *self.arena.exp_at(e)
-            && self.is_fx_module(module)
             && let Exp::Var(n) = *self.arena.exp_at(body)
-            && self.is_standard(n)
+            && ((self.is_fx_module(module) && self.is_standard(n)) || (self.is_toplevel_module(module) && self.toplevel_unshadowed(n)))
         {
             self.facts.fx_plain.insert(e, body);
         }
@@ -2558,21 +2613,30 @@ impl Checker {
     /// The standard type of `(with module body)`, if `module` is `#%fx` and
     /// `body` a standard name whose type is polymorphic.
     pub(crate) fn fx_poly(&self, module: Sym, body: ExpId) -> Option<TyId> {
-        if !self.is_fx_module(module) {
-            return None;
-        }
         let Exp::Var(n) = *self.arena.exp_at(body) else { return None };
-        self.standard_type(n).filter(|t| matches!(self.arena.get(*t), Ty::Poly { .. }))
+        let t = if self.is_fx_module(module) {
+            self.standard_type(n)
+        } else if self.is_toplevel_module(module) {
+            self.toplevel_pos(n).filter(|i| self.broken.get(&n).is_none_or(|(b, _)| b != i)).map(|i| self.env[i].1)
+        } else {
+            None
+        };
+        t.filter(|t| matches!(self.arena.get(*t), Ty::Poly { .. }))
     }
 
     /// The standard name `e` refers to, if it refers to one: a variable the
-    /// initial environment binds where it is used, or `(with #%fx n)`.
+    /// initial environment binds where it is used, `(with #%fx n)`, or
+    /// `(with #%toplevel n)` where the top level's `n` is the standard one.
     /// Every rule for a standard operation asks this.
     pub(crate) fn standard_ref(&self, e: ExpId) -> Option<Sym> {
         match self.arena.exp_at(e) {
             Exp::Var(s) if self.is_standard(*s) => Some(*s),
             Exp::With { module, body } if self.is_fx_module(*module) => match self.arena.exp_at(*body) {
                 Exp::Var(n) if self.standard_type(*n).is_some() => Some(*n),
+                _ => None,
+            },
+            Exp::With { module, body } if self.is_toplevel_module(*module) => match self.arena.exp_at(*body) {
+                Exp::Var(n) if self.toplevel_pos(*n).is_some_and(|i| i < self.standard_len) => Some(*n),
                 _ => None,
             },
             _ => None,
@@ -3189,6 +3253,14 @@ impl Checker {
             // written (`hazard_modules`).
             // The standard `n`: nothing free.
             &Exp::With { module, .. } if self.is_fx_module(module) => {}
+            // The top level's `n`: a use of it, whatever binds `n` here.
+            &Exp::With { module, body } if self.is_toplevel_module(module) => {
+                if let Exp::Var(n) = *self.arena.exp_at(body)
+                    && !out.contains(&n)
+                {
+                    out.push(n);
+                }
+            }
             &Exp::With { module, body } => {
                 let unbound = !bound.contains(&module);
                 if unbound && !out.contains(&module) {

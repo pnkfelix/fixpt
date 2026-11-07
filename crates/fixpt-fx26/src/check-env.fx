@@ -251,6 +251,68 @@
 ;; shadowed or redefined (`TODO.md` §46).
 (define k-fx-module? (->* (symbol) bool)
   (lambda (m) (string=? (symbol->string m) "#%fx")))
+;; Whether `m` is `#%toplevel`, the top level's module, which nothing binds:
+;; `(with #%toplevel n)` is the top level's `n` as it is where it is named,
+;; whatever binds `n` between: what a template's free name expands to
+;; (`typed-macros.md`, item 5). And whether `m` is a module only a name is.
+(define k-toplevel-module? (->* (symbol) bool)
+  (lambda (m) (string=? (symbol->string m) "#%toplevel")))
+(define k-named-module? (->* (symbol) bool)
+  (lambda (m) (or (k-fx-module? m) (k-toplevel-module? m))))
+;; Which of `s`'s bindings the top level's is, the innermost 0: the newest
+;; global, else the standard one; -1 if none. In a file loaded, which sees
+;; the standard environment alone, the standard one.
+(define k-toplevel-index (->* (symbol) int)
+  (lambda (s)
+    (let ((std (k-std-type s)) (hid (>= (get k-hide-mark) 0)))
+      (letrec ((go (subr (maxeff (read @globals) (read @t) spin)
+                         (k-stack (listof bool acyclic) int)
+                         int)
+                 (lambda (ts gs i)
+                   (cond ((null? ts) -1)
+                         ((and (not hid) (not (null? gs)) (car gs)) i)
+                         ((= (car ts) std) (if (k-hidden-standard? s std) -1 i))
+                         (else (go (cdr ts) (if (null? gs) gs (cdr gs)) (+ i 1)))))))
+        (go (table-ref (get k-env) s nil) (table-ref (get k-global) s nil) 0)))))
+;; The top level's binding of `s` (`k-toplevel-index` `i`): its type, as a
+;; test may have narrowed it; and why it is broken, if it is.
+(define k-toplevel-type (->* (symbol int) int)
+  (lambda (s i)
+    (let* ((st (table-ref (get k-env) s nil)) (d (- (k-length st) i)))
+      (k-narrowed-of (get k-narrowed) s d (k-nth st i)))))
+(define k-toplevel-broken (->* (symbol int) k-strings)
+  (lambda (s i)
+    (let ((d (- (k-length (table-ref (get k-env) s nil)) i)))
+      (letrec ((go (subr (maxeff (read @globals) spin) ((listof k-break acyclic)) k-strings)
+                 (lambda (bs)
+                   (cond ((null? bs) nil)
+                         ((k-breaks? (car bs) s d) (the k-strings (cons (extract (car bs) 3) nil)))
+                         (else (go (cdr bs)))))))
+        (go (get k-broken))))))
+;; Whether the top level's binding of `s` is a global's.
+(define k-toplevel-global? (->* (symbol int) bool)
+  (lambda (s i) (k-nth (table-ref (get k-global) s nil) i)))
+;; The description scope as the top-level form being checked began
+;; (`k-top-lines`): the top level's, which `(select #%toplevel T)` reads `T`
+;; in; and whether one is being read: a module a `select` in it names is
+;; the top level's, so marked (`k-toplevel-marked`), and found so when the
+;; `select` is resolved (`k-lookup-module`), whatever binds it there.
+(define k-form-dscope (ref k-scope @t) (new nil))
+(define k-toplevel-reading (ref bool @t) (new #f))
+(define k-toplevel-marked (->* (symbol) symbol)
+  (lambda (m)
+    (if (get k-toplevel-reading)
+        (string->symbol (string-append "#%toplevel:" (symbol->string m)))
+        m)))
+;; Module `m`'s type where a `select` of it is resolved: as `k-lookup` says,
+;; or, marked, the top level's binding of it.
+(define k-lookup-module (->* (symbol) int)
+  (lambda (m)
+    (let ((n (symbol->string m)))
+      (if (and (> (string-length n) 11) (string=? (substring n 0 11) "#%toplevel:"))
+          (let* ((s (string->symbol (substring n 11 (string-length n)))) (i (k-toplevel-index s)))
+            (if (or (< i 0) (not (null? (k-toplevel-broken s i)))) -1 (k-toplevel-type s i)))
+          (k-lookup m)))))
 ;; The name a `(with #%fx n)`'s body names, `||` if none.
 (define k-fx-name (->* (kx) symbol)
   (lambda (body) (tagcase body (x-var (n c d cdk cdkr) n) (else y '||))))
@@ -266,7 +328,7 @@
       (x-with (m body a b abk abkr)
         (tagcase body
           (x-var (n c d cdk cdkr)
-            (if (k-fx-module? m) (product (1 n) (2 (product (1 a) (2 b) (3 abk) (4 abkr))))
+            (if (k-named-module? m) (product (1 n) (2 (product (1 a) (2 b) (3 abk) (4 abkr))))
                 k-no-operator))
           (else y k-no-operator)))
       (else y k-no-operator))))
@@ -353,7 +415,7 @@
 ;; shadows (FX-91 §2.3.19). `#%fx`'s are the standard's.
 (define k-with-mark (->* (symbol) unit)
   (lambda (m)
-    (if (k-fx-module? m)
+    (if (k-named-module? m)
         #u
         (begin (set k-with-depth (+ (get k-with-depth) 1))
                (k-push-desc (string->symbol (string-append "%with:" (symbol->string m)))
@@ -362,7 +424,7 @@
 ;; the caller).
 (define k-with-unmark (->* (symbol) unit)
   (lambda (m)
-    (if (k-fx-module? m) #u (set k-with-depth (- (get k-with-depth) 1)))))
+    (if (k-named-module? m) #u (set k-with-depth (- (get k-with-depth) 1)))))
 ;; The modules of the `with`s whose bodies `s` is read in since it was last
 ;; bound, innermost first: each shadows what `s` was before it. As
 ;; `parse.rs`'s `withs_over`.

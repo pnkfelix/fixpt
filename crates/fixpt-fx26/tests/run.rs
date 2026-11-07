@@ -181,7 +181,7 @@ fn the_checkers_facts_are_in_the_lowered_code() {
     // A local that shadows a standard name is not the standard binding.
     let c = code("((lambda ((car (subr pure (int) int))) (car 1)) (lambda ((x int)) x))");
     assert!(!c.contains("(integrable car)"), "{c}");
-    assert!(c.contains("(fx:car 1)"), "{c}");
+    assert!(c.contains("(fx.car 1)"), "{c}");
 }
 
 /// And the compiled engine acts on it: the integrable call becomes one

@@ -273,7 +273,7 @@
 ;; Module `m`'s component `n`, as select node `node` names it, linked.
 (define k-link-alias (->* (symbol symbol int) unit)
   (lambda (m n node)
-    (let ((mt (k-lookup m)))
+    (let ((mt (k-lookup-module m)))
       (if (< mt 0)
           #u
           (tagcase (k-get mt)
@@ -306,7 +306,7 @@
     (if (null? found)
         nil
         (let* ((m (extract (car found) 1)) (n (extract (car found) 2))
-               (mt (k-lookup m))
+               (mt (k-lookup-module m))
                (to (if (< mt 0)
                        (if (symbol=? m '%include)
                            (k-fail (k-not-included n) a b)
@@ -394,7 +394,7 @@
 ;; at `a`..`b`.
 (define k-selected-effect (->* (symbol symbol int int) k-eff)
   (lambda (m e a b)
-    (let ((mt (k-lookup m)))
+    (let ((mt (k-lookup-module m)))
       (if (< mt 0)
           (begin (k-fail (if (symbol=? m '%include)
                              (k-not-included-effect e)
@@ -424,7 +424,7 @@
     (let ((fall (k-with-effect-fall v)))
       (if (null? fall)
           (k-selected-effect m e a b)
-          (let* ((mt (k-lookup m))
+          (let* ((mt (k-lookup-module m))
                  (given (if (< mt 0)
                             (the (listof k-eff acyclic) nil)
                             (tagcase (k-get mt)

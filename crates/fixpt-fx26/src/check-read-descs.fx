@@ -916,12 +916,32 @@
              (let ((t (k-parse-type what)))
                (k-moduleof-comps (cdr cs) abs ds (k-part-onto (car names) t vs) seen vseen)))
             (else (k-sfail k-moduleof-usage (car parts))))))))
+;; Type `t` read in the top level's description scope, or, `standard`, the
+;; standard environment's; the modules its `select`s name the top level's
+;; (`k-toplevel-marked`). The scope and the switch put back, as the reading
+;; began.
+(define k-read-toplevel-type (->* (syn bool) int)
+  (lambda (t standard)
+    (let ((saved (get k-dscope)) (was (get k-toplevel-reading)))
+      (begin
+        (set k-dscope (if standard (get k-std-dscope) (get k-form-dscope)))
+        (set k-toplevel-reading (not standard))
+        (let ((r (k-parse-type t)))
+          (begin (set k-dscope saved) (set k-toplevel-reading was) r))))))
 ;; `(moduleof …)`, each abstract type a binder in scope in what follows it;
-;; or `(select m t)`.
+;; or `(select m t)`; or `(select #%toplevel T)`, type `T` as the top level
+;; reads it, whatever the form binds around it (a template's type, as it
+;; expands: `typed-macros.md`, item 5), or `(select #%fx T)`, as the
+;; standard environment does.
 (define k-read-module-type (->* (syn k-syns symbol) int)
   (lambda (s items hd)
     (if (symbol=? hd 'select)
-        (k-parse-select s items)
+        (let ((m (if (and (= (k-length items) 3) (syn-symbol? (k-nth items 1)))
+                     (syn-name (k-nth items 1))
+                     "")))
+          (if (or (string=? m "#%toplevel") (string=? m "#%fx"))
+              (k-read-toplevel-type (k-nth items 2) (string=? m "#%fx"))
+              (k-parse-select s items)))
         (let* ((saved (get k-dscope)) (t (k-moduleof-comps (cdr items) nil nil nil nil nil)))
           (begin (set k-dscope saved) t)))))
 (define k-selects-from (->* (int k-seen (ref k-selects @t)) unit)

@@ -5,5 +5,5 @@ mod common;
 
 #[test]
 fn macro_programs_do_as_they_say() {
-    common::programs_do_as_they_say("macros", 22);
+    common::programs_do_as_they_say("macros", 26);
 }

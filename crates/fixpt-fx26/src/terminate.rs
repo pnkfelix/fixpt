@@ -378,7 +378,7 @@ impl Walk<'_> {
     fn is_op(&self, e: ExpId, name: &str) -> bool {
         match self.c.arena.exp_at(strip(self.c, e)) {
             Exp::Var(s) => self.c.interner.name(*s) == name && self.bound(*s).is_none() && self.c.is_standard(*s),
-            Exp::With { module, .. } if self.c.is_fx_module(*module) => {
+            Exp::With { module, .. } if self.c.is_named_module(*module) => {
                 self.c.standard_ref(strip(self.c, e)).is_some_and(|s| self.c.interner.name(s) == name)
             }
             _ => false,
@@ -390,14 +390,33 @@ impl Walk<'_> {
             Exp::Var(s) if self.bound(*s).is_none() && self.members.iter().all(|m| m != s) && self.c.is_standard(*s) => {
                 Some(self.c.interner.name(*s))
             }
-            Exp::With { module, .. } if self.c.is_fx_module(*module) => {
+            Exp::With { module, .. } if self.c.is_named_module(*module) => {
                 self.c.standard_ref(strip(self.c, e)).map(|s| self.c.interner.name(s))
             }
             _ => None,
         }
     }
 
+    /// The member `e` names, if it names one: a variable, or the top
+    /// level's, `(with #%toplevel f)`, whatever binds `f` where it is named.
+    fn member_named(&self, e: ExpId) -> Option<usize> {
+        match self.c.arena.exp_at(e) {
+            Exp::Var(s) => self.member(*s),
+            Exp::With { module, body } if self.c.is_toplevel_module(*module) => match self.c.arena.exp_at(*body) {
+                Exp::Var(s) => self.members.iter().position(|m| m == s),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn walk(&mut self, e: ExpId) {
+        if let Some(m) = self.member_named(e)
+            && !matches!(self.c.arena.exp_at(e), Exp::Var(_))
+        {
+            self.escapes.get_or_insert((self.current, m));
+            return;
+        }
         match self.c.arena.exp_at(e).clone() {
             Exp::Var(s) => {
                 if let Some(m) = self.member(s) {
@@ -406,10 +425,7 @@ impl Walk<'_> {
             }
             Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
             Exp::App { fun, args } => {
-                let callee = match self.c.arena.exp_at(strip(self.c, fun)) {
-                    Exp::Var(s) => self.member(*s),
-                    _ => None,
-                };
+                let callee = self.member_named(strip(self.c, fun));
                 match callee {
                     Some(to) => self.call(to, &args),
                     None => self.walk(fun),
@@ -698,6 +714,8 @@ impl Walk<'_> {
     fn fixed(&self, e: ExpId) -> bool {
         match self.c.arena.exp_at(e).clone() {
             Exp::Int(_) => true,
+            // The standard or the top level's name, as an unbound variable is.
+            Exp::With { module, .. } if self.c.is_named_module(module) => self.member_named(e).is_none(),
             Exp::Var(s) => match self.bound(s) {
                 None => self.member(s).is_none(),
                 Some(known) => known.iter().any(|k| {

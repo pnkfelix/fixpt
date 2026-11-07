@@ -291,6 +291,10 @@
 ;; Where `n` is: in the locals, else in the globals; none means standard.
 (define c-where (->* (cenv symbol) c-found)
   (lambda (e n) (let ((l (c-find e n))) (if (null? l) (c-global-find n (get c-genv)) l))))
+;; Where the program's global `n` is, whatever binds `n` here: the top
+;; level's `n` (`(with #%toplevel n)`), if not the standard one.
+(define c-toplevel-global (->* (symbol) c-found)
+  (lambda (n) (c-global-find n (get c-genv))))
 
 (define c-load (->* (code loc) unit)
   (lambda (c l)
@@ -576,7 +580,9 @@
         (e-module (items a b abk abkr) (c-free-items items (c-module-bound items bound) acc))
         ;; The module, then the body, the module's values bound in it.
         (e-with (m body a b abk abkr)
-          (cond ((string=? (symbol->string m) "#%fx") acc)
+          (cond ((or (string=? (symbol->string m) "#%fx")
+                     (string=? (symbol->string m) "#%toplevel"))
+                 acc)
                 ;; A module's included names, bound where it is made, from
                 ;; inside the item (outside, `%include` is bound, and the
                 ;; names bound in it are as good).

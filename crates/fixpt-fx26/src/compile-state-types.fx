@@ -77,7 +77,8 @@
                  (subr (maxeff (alloc @k) (read @globals) spin (read @k))
                        (c-twin c-spec int int)
                        c-twin))
-            (val c-fx-name (subr (maxeff (read @globals) spin) (symbol exp) string))
+            (val c-fx-name
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (symbol exp) string))
             (val c-standard-name
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp cenv) string))
             (val c-quote-now

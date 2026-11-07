@@ -632,8 +632,11 @@ fn binding(name: Sx, init: Sx) -> Sx {
 }
 
 impl Lowerer<'_> {
+    /// A local's Scheme name: of a prefix of its own, never a global's
+    /// (`Globals`), so that no local shadows a global in Scheme that
+    /// `(with #%toplevel n)` names past it.
     fn local(&self, s: Sym) -> Sx {
-        Sx::sym(format!("fx:{}", self.c.interner.name(s)))
+        Sx::sym(format!("fx.{}", self.c.interner.name(s)))
     }
 
     fn var(&self, s: Sym) -> Sx {
@@ -716,6 +719,11 @@ impl Lowerer<'_> {
             Exp::Var(s) => self.c.interner.name(*s) == n,
             Exp::With { module, body } if self.c.is_fx_module(*module) => {
                 matches!(self.c.arena.exp_at(*body), Exp::Var(s) if self.c.interner.name(*s) == n)
+            }
+            // The top level's, the standard one where the program defines
+            // none of the name.
+            Exp::With { module, body } if self.c.is_toplevel_module(*module) => {
+                matches!(self.c.arena.exp_at(*body), Exp::Var(s) if self.c.interner.name(*s) == n && self.globals.get(*s).is_none())
             }
             _ => false,
         };
@@ -890,6 +898,16 @@ impl Lowerer<'_> {
                 Exp::Var(n) => self.standard_var(n),
                 _ => unreachable!("checked: `(with #%fx name)`"),
             },
+            // `(with #%toplevel n)`: the top level's `n`, whatever binds `n`
+            // here: the program's global, else the standard binding
+            // (`typed-macros.md`, item 5).
+            Exp::With { module, body } if self.c.is_toplevel_module(module) => match *self.c.arena.exp_at(body) {
+                Exp::Var(n) => match self.globals.get(n) {
+                    Some(g) => Sx::sym(g),
+                    None => self.standard_var(n),
+                },
+                _ => unreachable!("checked: `(with #%toplevel name)`"),
+            },
             Exp::With { module, body } => {
                 let used = self.c.facts.with_vals.get(&e).cloned().unwrap_or_default();
                 let m = self.var(module);
@@ -985,7 +1003,7 @@ impl Lowerer<'_> {
         // A module reshaped: a product of the values the type wanted has.
         let code = match self.c.facts.reshaped.get(&e) {
             Some(at) => {
-                let m = || Sx::sym("fx:%reshaped");
+                let m = || Sx::sym("fx.%reshaped");
                 let fields: Vec<Sx> = at
                     .iter()
                     .map(|i| match i.steps() {

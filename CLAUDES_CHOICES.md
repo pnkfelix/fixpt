@@ -4093,3 +4093,30 @@ The user read the paper as supporting the distribution. Mine:
   which reading again does; only `k-tag`'s type widened, not the
   `checks` effect every signature spells out.
 
+## `#%toplevel`: a template's free names, the top level's (2026-11-07)
+
+- **The user's calls**: a special module name, as `#%fx` is, not a
+  primitive; named `#%toplevel` (not `#%top`, a lattice's); every free
+  name in a template through it, standard names too, `#%fx` the opt-out;
+  types now as well as values.
+- **`with` only, of one name**: the top level has no fixed type (it grows,
+  it is redefined), so it is no first-class module; `extract` would need
+  one.
+- **Types by the whole part, `(select #%toplevel T)`**: a template's type
+  parts hold none of the use's syntax, so every name in one is the
+  template's; wrapping the part needs no knowledge of type syntax in the
+  expander, and binders inside `T` still bind inside it. The Rust checker
+  reads `T` with what the form binds hidden (`hidden`, `form_began`) and
+  resolves its `select`s there and then; the checker written in FX-26,
+  whose `select`s resolve later in another module, reads `T` in the
+  description scope the form began in and marks the module names its
+  `select`s name (`#%toplevel:m`), resolved as the top level's.
+- **Lowered locals got a prefix of their own** (`fx.`, globals keep
+  `fx:`): in Scheme a local named as a global shadowed it, so
+  `(with #%toplevel n)` could not name the global past it.
+- **What each compiler does unshadowed is what it does with the plain
+  name**: the checkers note it plain (`fx_plain`, `k-note-fx-plain`), so
+  the fast paths for an unredefined standard name stay.
+- **Termination sees a group's member through `#%toplevel`**: a recursion
+  through the top level's name past a local is still one.
+

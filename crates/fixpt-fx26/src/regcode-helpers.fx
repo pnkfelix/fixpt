@@ -285,13 +285,22 @@
 
 ;; `(with #%fx n)` where `n` is shadowed (the checker made it the plain `n`
 ;; elsewhere): the standard `n`'s value, as of a name bound nowhere
-;; (`TODO.md` §46). Any other `with` the checker did not see: declined.
+;; (`TODO.md` §46); `(with #%toplevel n)`, the top level's, the program's
+;; global, else the standard one, as of a name bound nowhere too. Any other
+;; `with` the checker did not see: declined.
 (define r-fx-value (->* (rgen symbol exp bool) unit)
   (lambda (g m body tail)
-    (let ((n (c-fx-name m body)))
-      (if (string=? n "")
-          (r-decline)
-          (begin (r-var-value g (the rlocs nil) (string->symbol n) tail) (r-done g tail))))))
+    (let* ((top (if (string=? (symbol->string m) "#%toplevel")
+                    (tagcase body (e-var (v a b abk abkr) (c-toplevel-global v)) (else y nil))
+                    nil))
+           (n (c-fx-name m body)))
+      (cond ((not (null? top))
+             (tagcase (car top)
+               (at-global (w) (begin (r-op1 g rop-global (wcell-global w)) (r-done g tail)))
+               (else y (r-decline))))
+            ((string=? n "") (r-decline))
+            (else (begin (r-var-value g (the rlocs nil) (string->symbol n) tail)
+                         (r-done g tail)))))))
 ;; Whether `x` is an integer, boolean or character literal.
 (define r-literal? (->* (exp) bool)
   (lambda (x)

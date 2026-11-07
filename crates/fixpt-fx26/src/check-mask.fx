@@ -133,7 +133,7 @@
                 (k-unseen-else els bound o)))
             (x-module (items a b abk abkr) (k-unseen-module items bound rs))
             (x-with (m body a b abk abkr)
-              (if (k-fx-module? m)
+              (if (k-named-module? m)
                   rs
                   (let ((o (k-unseen (x-var m a b abk abkr) bound rs)))
                     (k-unseen body (k-names-onto (k-with-names a b abk abkr) bound) o))))))))

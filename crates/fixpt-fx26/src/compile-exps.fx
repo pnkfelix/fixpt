@@ -259,6 +259,17 @@
                (let ((n (c-fx-name m body)))
                  (begin (if (std-nil-name? n) (c-lit c (wcell-nil)) (c-standard-value n c))
                         (c-done c tail))))
+              ;; `(with #%toplevel n)` where `n` is shadowed: the program's
+              ;; global `n`, whatever binds `n` here (`typed-macros.md`,
+              ;; item 5).
+              ((string=? (symbol->string m) "#%toplevel")
+               (tagcase body
+                 (e-var (n va vb vk vkr)
+                   (let ((g (c-toplevel-global n)))
+                     (if (null? g)
+                         (c-fail "`(with #%toplevel name)` of no global")
+                         (begin (c-load c (car g)) (c-done c tail)))))
+                 (else y (c-fail "`(with #%toplevel name)`"))))
               ;; A module's included names, bound where it is made.
               ((c-included? a b abk abkr) (c-exp body e depth c tail))
               ((or (null? ns) (null? ps)) (c-fail "a `with` the checker did not see"))
