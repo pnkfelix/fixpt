@@ -107,11 +107,38 @@ struct Clause {
 /// `(with #%toplevel name)`, nothing at the use shadowing it
 /// (`typed-macros.md`, item 5); a type the template writes, read in the top
 /// level's, `(select #%toplevel type)`.
+///
+/// A file's macro (`import-with-syntax`) means what it meant in its file: a
+/// free name the file's own, `(with %shared:key name)`, the one value every
+/// load of the file is, which nothing shadows; else the standard one, `(with
+/// #%fx name)` (a file sees the standard environment alone); a type, read
+/// through the file's module, `(select %shared:key type)`, or the standard
+/// environment, `(select #%fx type)`; a use of another of the file's
+/// macros, that macro, by the name the importer has it by
+/// (`typed-macros.md`, "Decided: macros come with a file").
 #[derive(Clone, Debug)]
 enum Action {
     Rename(Vec<bool>),
     Toplevel,
     ToplevelType,
+    Standard,
+    Module(Sym),
+    ModuleType(Sym),
+    StandardType,
+    MacroHead(Sym),
+}
+
+/// What a file's macros are defined in (`Macros::define_file`): the
+/// hidden global every load of the file is, `%shared:key`; the values and
+/// types its module shows; each of its macros' names, and the name the
+/// importer has it by, which no program writes; and which names are
+/// standard.
+pub struct FileScope<'a> {
+    pub shared: Sym,
+    pub values: std::collections::HashSet<Sym>,
+    pub types: std::collections::HashSet<Sym>,
+    pub internal: HashMap<Sym, Sym>,
+    pub is_standard: &'a dyn Fn(Sym) -> bool,
 }
 
 /// The macros defined, and the syntax types of the kernel's forms, for
@@ -370,6 +397,50 @@ impl Macros {
     /// defined. A template's free name is the top level's where the macro
     /// is used (`Action::Toplevel`).
     pub fn define(&mut self, form: &Syntax, interner: &mut Interner) -> R<()> {
+        self.define_in(form, interner, None).map(|_| ())
+    }
+
+    /// A file's macros, `forms` its `define-syntax`es (each with whether it
+    /// is hidden), defined as the file means them (`FileScope`), each by
+    /// the name the importer has it by, `scope.internal`'s, and each not
+    /// hidden by its own name too: what `(import-with-syntax lib)` brings.
+    pub fn define_file(&mut self, forms: &[(Syntax, bool)], scope: &FileScope, interner: &mut Interner) -> R<()> {
+        self.ensure_kernel(interner)?;
+        // The file's macros defined among themselves, by their names in it,
+        // as its templates name them.
+        // Its recursive syntax types go on from the program's, which take
+        // them back: the signatures refer to them by place.
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone() };
+        let mut made = Vec::new();
+        let mut defined = Ok(());
+        for (form, hidden) in forms {
+            match own.define_in(form, interner, Some(scope)) {
+                Ok(n) => made.push((n, *hidden)),
+                Err(e) => {
+                    defined = Err(e);
+                    break;
+                }
+            }
+        }
+        self.mus = std::mem::take(&mut own.mus);
+        self.fresh = own.fresh;
+        defined?;
+        for (name, hidden) in made {
+            let m = own.defined[&name].clone();
+            if !hidden {
+                if self.defined.contains_key(&name) {
+                    let shown = interner.name(name);
+                    return Err(FxError::at(forms[0].0.span, format!("`{shown}` is a macro defined already: a file's may not be defined again")));
+                }
+                self.defined.insert(name, m.clone());
+            }
+            self.defined.insert(scope.internal[&name], m);
+        }
+        Ok(())
+    }
+
+    /// `define`, in a file's scope if `file` is given: the macro's name.
+    fn define_in(&mut self, form: &Syntax, interner: &mut Interner, file: Option<&FileScope>) -> R<Sym> {
         self.ensure_kernel(interner)?;
         let usage = "`(define-syntax name signature ((_ . pattern) template) …)`";
         let items = form.as_proper_list().ok_or_else(|| FxError::at(form.span, usage))?;
@@ -385,7 +456,7 @@ impl Macros {
         let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), clauses: Vec::new(), text: None }));
         let mut checked = Vec::new();
         for c in clauses {
-            match self.clause(c, &sig, interner) {
+            match self.clause(c, &sig, interner, file) {
                 Ok(c) => checked.push(c),
                 Err(e) => {
                     match before {
@@ -398,7 +469,7 @@ impl Macros {
         }
         let text = self.reading.clone();
         self.defined.insert(name, Rc::new(Macro { sig, clauses: checked, text }));
-        Ok(())
+        Ok(name)
     }
 
     /// A clause checked against signature `sig` (Herman's rules): its
@@ -406,7 +477,7 @@ impl Macros {
     /// placed in the template where the signature says what is in scope
     /// there, and a reference to a pattern's binder is where no other
     /// pattern binder may shadow it.
-    fn clause(&self, c: &Syntax, sig: &Rc<STy>, interner: &Interner) -> R<Clause> {
+    fn clause(&self, c: &Syntax, sig: &Rc<STy>, interner: &Interner, file: Option<&FileScope>) -> R<Clause> {
         let usage = "a clause is `((_ . pattern) template)`";
         let [pattern, template] = c.as_proper_list().ok_or_else(|| FxError::at(c.span, usage))? else {
             return Err(FxError::at(c.span, usage));
@@ -471,23 +542,45 @@ impl Macros {
                         }),
                         Level::Cage(_) => None,
                     });
-                    match bound {
-                        Some(b) => {
-                            actions.insert(node.path.clone(), Action::Rename(t.nodes[b].path.clone()));
+                    let action = match (bound, file) {
+                        (Some(b), _) => Action::Rename(t.nodes[b].path.clone()),
+                        (None, None) => Action::Toplevel,
+                        (None, Some(f)) if f.values.contains(n) => Action::Module(f.shared),
+                        (None, Some(f)) if (f.is_standard)(*n) => Action::Standard,
+                        (None, Some(_)) => {
+                            return Err(FxError::at(
+                                span,
+                                format!("`{}` is neither a value the file's module shows nor a standard binding: a file's macro names only those, as they are where it is imported", interner.name(*n)),
+                            ));
                         }
-                        None => {
-                            actions.insert(node.path.clone(), Action::Toplevel);
-                        }
-                    }
+                    };
+                    actions.insert(node.path.clone(), action);
                 }
                 _ => {}
             }
         }
         // Each type the template writes (none of the use's is in it: a
-        // pattern variable is placed only whole), read in the top level's.
+        // pattern variable is placed only whole), read in the top level's,
+        // or, a file's macro's, through the file's module or the standard
+        // environment.
         for node in &t.nodes {
             if matches!(&*node.core, STy::Type) && matches!(node.kids, Kids::Other) {
-                actions.insert(node.path.clone(), Action::ToplevelType);
+                let action = match file {
+                    None => Action::ToplevelType,
+                    Some(f) => match node.syn.as_symbol() {
+                        Some(n) if !f.types.contains(&n) => Action::StandardType,
+                        _ => Action::ModuleType(f.shared),
+                    },
+                };
+                actions.insert(node.path.clone(), action);
+            }
+            // A use of another of the file's macros: that macro, by the
+            // name the importer has it by.
+            if let (Some(f), Kids::Form(_)) = (file, &node.kids)
+                && let Some(h) = node.syn.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol())
+                && let Some(i) = f.internal.get(&h)
+            {
+                actions.insert(node.path.clone(), Action::MacroHead(*i));
             }
         }
         Ok(Clause { pattern, template: template.clone(), actions })
@@ -565,10 +658,16 @@ impl Macros {
     #[allow(clippy::too_many_arguments)]
     fn transcribe(&mut self, c: &Clause, t: &Syntax, path: &mut Vec<bool>, binds: &HashMap<Sym, Syntax>, fresh: &mut HashMap<Vec<bool>, Sym>, made: u32, interner: &mut Interner) -> Syntax {
         let at = t.span.in_expansion(made);
-        if let Some(Action::ToplevelType) = c.actions.get(&*path) {
-            let (select, top) = (interner.intern("select"), interner.intern("#%toplevel"));
+        let typed = match c.actions.get(&*path) {
+            Some(Action::ToplevelType) => Some(interner.intern("#%toplevel")),
+            Some(Action::StandardType) => Some(interner.intern("#%fx")),
+            Some(Action::ModuleType(m)) => Some(*m),
+            _ => None,
+        };
+        if let Some(m) = typed {
+            let select = interner.intern("select");
             let ty = in_expansion(t, made);
-            return Syntax::list(at, vec![Syntax::symbol(at, select), Syntax::symbol(at, top), ty]);
+            return Syntax::list(at, vec![Syntax::symbol(at, select), Syntax::symbol(at, m), ty]);
         }
         match &t.datum {
             Datum::Symbol(n) => {
@@ -588,14 +687,24 @@ impl Macros {
                         };
                         Syntax::symbol(at, name)
                     }
-                    Some(Action::Toplevel) => {
-                        let (with, top) = (interner.intern("with"), interner.intern("#%toplevel"));
-                        Syntax::list(at, vec![Syntax::symbol(at, with), Syntax::symbol(at, top), Syntax::symbol(at, *n)])
+                    Some(a @ (Action::Toplevel | Action::Standard | Action::Module(_))) => {
+                        let module = match a {
+                            Action::Toplevel => interner.intern("#%toplevel"),
+                            Action::Standard => interner.intern("#%fx"),
+                            Action::Module(m) => *m,
+                            _ => unreachable!("matched"),
+                        };
+                        let with = interner.intern("with");
+                        Syntax::list(at, vec![Syntax::symbol(at, with), Syntax::symbol(at, module), Syntax::symbol(at, *n)])
                     }
-                    Some(Action::ToplevelType) | None => Syntax::new(at, t.datum.clone()),
+                    _ => Syntax::new(at, t.datum.clone()),
                 }
             }
             Datum::List { items, tail } => {
+                let head = match c.actions.get(&*path) {
+                    Some(Action::MacroHead(h)) => Some(*h),
+                    _ => None,
+                };
                 let depth = path.len();
                 let mut out = Vec::new();
                 for item in items {
@@ -603,6 +712,9 @@ impl Macros {
                     out.push(self.transcribe(c, item, path, binds, fresh, made, interner));
                     path.pop();
                     path.push(false);
+                }
+                if let Some(h) = head {
+                    out[0] = Syntax::symbol(out[0].span, h);
                 }
                 let tail = tail.as_ref().map(|x| self.transcribe(c, x, path, binds, fresh, made, interner));
                 path.truncate(depth);

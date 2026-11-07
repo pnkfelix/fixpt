@@ -862,3 +862,60 @@
           ;; `(module-parameters ())`: a `lambda` of none, no `plambda` of none.
           ((syn-nil? (car ps)) (e-lambda (the param-list nil) m a b 0 0))
           (else (e-plambda (car ps) (e-lambda (the param-list nil) m a b 0 0) a b 0 0)))))
+;; A module file's forms without its macros, `define-syntax`es (hidden
+;; or not), which are no items: what `import-with-syntax` brings (the Rust
+;; checker's `read_module_file`). A use of one in the file is refused, for
+;; now: one is used where its file is imported.
+(define without-syntax (->* (syns-a) syns-a)
+  (lambda (forms)
+    (letrec ((names-of (subr (maxeff (read @globals) spin parses)
+                             (syns-a (listof symbol acyclic))
+                             (listof symbol acyclic))
+               (lambda (xs out)
+                 (cond ((null? xs) out)
+                       ((syntax-form-of? (car xs) 'define-syntax)
+                        (names-of (cdr xs) (cons (syn-head (nth (syn-items (car xs) "") 1)) out)))
+                       ((syntax-form-of? (car xs) 'hide)
+                        (names-of (cdr xs) (names-of (cdr (syn-items (car xs) "")) out)))
+                       (else (names-of (cdr xs) out)))))
+             (kept (subr (maxeff (read @globals) spin parses) (syns-a) syns-a)
+               (lambda (xs)
+                 (cond ((null? xs) nil)
+                       ((syntax-form-of? (car xs) 'define-syntax) (kept (cdr xs)))
+                       ((syntax-form-of? (car xs) 'hide)
+                        (let ((items (kept (cdr (syn-items (car xs) "")))))
+                          (if (null? items)
+                              (kept (cdr xs))
+                              (cons (mk-list (cons (car (syn-items (car xs) "")) items)
+                                             (syn-start (car xs)) (syn-end (car xs)))
+                                    (kept (cdr xs))))))
+                       (else (cons (car xs) (kept (cdr xs)))))))
+             (used (subr (maxeff (read @globals) spin parses) (syns-a (listof symbol acyclic)) unit)
+               (lambda (xs ms)
+                 (if (null? xs)
+                     #u
+                     (begin
+                       (tagcase (car xs)
+                         (lst (items d a b)
+                           (begin
+                             (if (and (not (null? items)) (name-in? (syn-head (car items)) ms))
+                                 (pfail (string-append
+                                         "`" (symbol->string (syn-head (car items)))
+                                         "` is a macro of this file: one is used where its file"
+                                         " is imported (`import-with-syntax`), not in its file,"
+                                         " for now")
+                                        (car xs))
+                                 #u)
+                             (used items ms)))
+                         (else y #u))
+                       (used (cdr xs) ms))))))
+      (let ((ms (names-of forms nil)))
+        (if (null? ms) forms (let ((k (kept forms))) (begin (used k ms) k)))))))
+(define name-in? (->* (symbol (listof symbol acyclic)) bool)
+  (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (name-in? n (cdr ns))))))
+;; Whether `s` is a form of `keyword`.
+(define syntax-form-of? (->* (syn symbol) bool)
+  (lambda (s keyword)
+    (tagcase s
+      (lst (items d a b) (and (not (null? items)) (symbol=? (syn-head (car items)) keyword)))
+      (else y #f))))

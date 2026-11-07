@@ -33,7 +33,7 @@
         region-kind region-name-error one-let call-tmp standard-ref field-index bloblet-untagged?
         arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol mk-list quoted
         rec-names rec-types rec-inits module-usage loaded loaded-next-at in-loaded loaded-mark
-        loaded-error loaded-params loaded-made mk-form dt-labelled
+        loaded-error loaded-params loaded-made mk-form dt-labelled without-syntax
         (type syns-a exp top exp-list mod-item mod-items letrec-list let-list arm-list loaded-file)
         (effect parses))
 ;; A `case`'s data by halving (`parser.fx`).
@@ -921,7 +921,7 @@
                                                     (parse-module-items
                                                      (input-items pfail-at forms a b)))
                                               base end 0 0))
-                             (let* ((ps (loaded-params forms))
+                             (let* ((forms (without-syntax forms)) (ps (loaded-params forms))
                                     (items (parse-module-items (if (null? ps) forms (cdr forms))))
                                     (m (e-module (cons (loaded-mark base path ps) items)
                                                  base end 0 0)))

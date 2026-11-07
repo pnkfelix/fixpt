@@ -4120,3 +4120,24 @@ The user read the paper as supporting the distribution. Mine:
 - **Termination sees a group's member through `#%toplevel`**: a recursion
   through the top level's name past a local is still one.
 
+## `import-with-syntax`, as built (2026-11-07)
+
+- **The design is the user's** (`typed-macros.md`, "Decided: macros come
+  with a file"); these follow from its principle, a template means what
+  it meant where it was defined, and I chose them:
+- **Standard names in a file's macro are `#%fx`'s**, not `#%toplevel`'s:
+  the file sees the standard environment alone, so its macros must not
+  see the importer's redefinitions.
+- **Types through `(select %shared:key T)` with `T` a whole type**: the
+  `(select #%toplevel T)` idea, generalized to a real module, read as a
+  `with` of it reads types over the standard environment.
+- **File macros by internal names** (`%syntax:key:name`): a file's macro
+  using a hidden helper macro must reach it at the importer, where the
+  helper's own name is not in scope.
+- **A file's own use of its macros refused**, rather than expanded with
+  free names that a local binding in the file could capture: no
+  unshadowable reference to a module's own items exists yet.
+- **Macro file reading gets file ids of its own** (2,000,000 on), not the
+  loads' count, which places the real load's positions and must match the
+  FX-26 parser's.
+

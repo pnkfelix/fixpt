@@ -1035,6 +1035,18 @@ impl Checker {
                 self.hidden = outer;
                 r
             }
+            // `(select m T)`, `T` a type, not a name: `T` read as a `with` of
+            // module `m` reads types, over the standard environment's alone
+            // (a file's macro's type, `m` the one value every load of the
+            // file is: `typed-macros.md`, "Decided: macros come with a
+            // file"), its `select`s resolved there.
+            "select" if matches!(&items[..], [_, m, t] if m.as_symbol().is_some() && t.as_symbol().is_none()) => {
+                let (m, t) = (items[1].as_symbol().expect("matched"), &items[2]);
+                let outer = self.hidden.replace(self.toplevel_hidden(true));
+                let r = self.with_types_of(m, |c| c.parse_type(t)).and_then(|ty| self.resolve_selects(ty, s.span));
+                self.hidden = outer;
+                r
+            }
             "select" => {
                 let [_, m, n] = &items[..] else {
                     return Err(FxError::at(s.span, "`(select module name)`"));

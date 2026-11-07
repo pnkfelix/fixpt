@@ -607,6 +607,12 @@ pub struct Checker {
     /// order they are begun, a file a loaded file loads after it, as the
     /// driver supplies them to the parser written in FX-26 (`syn.rs`).
     pub(crate) files_read: u32,
+    /// Each top-level name defined as `(load-module "path")` so far, its
+    /// path as written: what `(import-with-syntax name)` reads the macros
+    /// of (`import_file_macros`). And how many files have been read so, each
+    /// a file id of its own, apart from the loads'.
+    pub(crate) load_defs: HashMap<Sym, String>,
+    pub(crate) macro_files: u32,
     /// Where a `load-module`'s relative path is from: the program's own
     /// directory, when it was read from a file; else the current one.
     pub base_dir: Option<std::path::PathBuf>,
@@ -1232,6 +1238,8 @@ impl Checker {
             in_built_in: 0,
             load_sites: HashMap::new(),
             files_read: 0,
+            load_defs: HashMap::new(),
+            macro_files: 0,
             base_dir: None,
             ahead: Vec::new(),
             ahead_filled: Vec::new(),

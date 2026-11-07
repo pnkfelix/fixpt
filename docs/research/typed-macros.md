@@ -682,6 +682,58 @@ signatures (imports, exports, ribs and ribcages), his shadow restriction,
 parsing directed by a macro's type. Scopes as regions, and modules as
 ribs, are for after it, measured against it.
 
+## Decided: macros come with a file, `import-with-syntax` (2026-11-07)
+
+The user's design, the reasons in the conversation that led to it:
+
+- **`with` imports no macros.** A module value's names are its type's,
+  known only once it is checked; a macro must be known before anything
+  is checked. So what brings macros is second-class, and names a file,
+  the static thing FX-26 has: as Sheldon's system intends, macros are not
+  values.
+- **`(import-with-syntax lib)`**, a top-level form, `lib` a top-level name
+  whose definition is literally `(load-module "path")` of a file without
+  module parameters (the expander sees that in the syntax; anything else
+  is refused). It brings all the file's names into the top level from
+  where it is: its values, types and effects, as top-level `(include lib)`
+  does, and its macros. `only` and `except` later.
+- **Privacy by `hide`**: in the file, `(hide (define-syntax …))` keeps a
+  macro to the file, as `hide` keeps a definition out of the module's type.
+- **Hygiene across files**: an imported macro's template means what it
+  meant in its file. A free name in it expands to `(with %shared:key
+  name)`, the file's own (every load of a file is the one hidden global,
+  `%shared:key`, which nothing shadows), a type to `(select %shared:key
+  T)`; a use of another of the file's macros, hidden or not, is that
+  macro. So an exported macro may name only what the file's module shows,
+  refused where the file defines it otherwise.
+- **When**: the macros come in where the form is, tied to the file `lib`
+  named there; a later redefinition of `lib` changes none of them.
+- **Not this**: a local binding shadowing a macro's name (Herman's), whose
+  interaction with `with` is open (a `with` may bind a value of a macro's
+  name, which the expander cannot see); designed after.
+- **Built** (2026-11-07), in the Rust expander (`Checker::import_file_macros`,
+  `Macros::define_file`), which both front ends' checkers then see the
+  expansion of; what follows from "a template means what it meant where it
+  was defined":
+  - a file sees the standard environment alone, so a file's macro's free
+    standard name is `(with #%fx name)`, not the importer's top level; a
+    name neither the file's module shows nor standard is refused where the
+    file defines the macro;
+  - a type a file's macro writes is read through the file's module, `(select
+    %shared:key T)`, `T` a whole type read as a `with` of the module reads
+    types over the standard environment's alone (both checkers);
+  - a file's macros are defined among themselves by their names there, and
+    each has a name the importer has it by, `%syntax:key:name`, which no
+    program writes: so one of them using another, hidden or not, reaches
+    it;
+  - a use of a file's macro in the file itself is refused, for now: no
+    reference to a module's own items is one a local binding cannot shadow;
+  - the names a file's `include`s give are known only once it is checked,
+    so a file's macro cannot name them, not yet; a file of module
+    parameters cannot be imported from, not yet;
+  - a file's macro may not take the name of a macro defined already.
+  Tests: `crates/fixpt-cli/tests/import_with_syntax.rs`, on four machines.
+
 ## Questions for the user
 
 Answered 2026-11-06 (the user):

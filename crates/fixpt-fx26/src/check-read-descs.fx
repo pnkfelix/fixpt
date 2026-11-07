@@ -916,32 +916,33 @@
              (let ((t (k-parse-type what)))
                (k-moduleof-comps (cdr cs) abs ds (k-part-onto (car names) t vs) seen vseen)))
             (else (k-sfail k-moduleof-usage (car parts))))))))
-;; Type `t` read in the top level's description scope, or, `standard`, the
-;; standard environment's; the modules its `select`s name the top level's
-;; (`k-toplevel-marked`). The scope and the switch put back, as the reading
-;; began.
-(define k-read-toplevel-type (->* (syn bool) int)
-  (lambda (t standard)
-    (let ((saved (get k-dscope)) (was (get k-toplevel-reading)))
+;; `(select #%toplevel T)`: `T` as the top level reads it (a template's
+;; type: `typed-macros.md`, item 5), what its `select`s name the top level's
+;; (`k-toplevel-marked`); `(select #%fx T)`, as the standard environment
+;; does; `(select m T)`, `T` no name, as a `with` of `m` reads types, over the
+;; standard environment's (a file's macro's type).
+(define k-read-scoped (->* (string symbol syn) int)
+  (lambda (how m t)
+    (let ((saved (get k-dscope)) (was (get k-toplevel-reading)) (top (string=? how "#%toplevel")))
       (begin
-        (set k-dscope (if standard (get k-std-dscope) (get k-form-dscope)))
-        (set k-toplevel-reading (not standard))
+        (set k-dscope (if top (get k-form-dscope) (get k-std-dscope)))
+        (set k-toplevel-reading top)
+        (if (string=? how "") (k-with-mark m) #u)
         (let ((r (k-parse-type t)))
-          (begin (set k-dscope saved) (set k-toplevel-reading was) r))))))
-;; `(moduleof …)`, each abstract type a binder in scope in what follows it;
-;; or `(select m t)`; or `(select #%toplevel T)`, type `T` as the top level
-;; reads it, whatever the form binds around it (a template's type, as it
-;; expands: `typed-macros.md`, item 5), or `(select #%fx T)`, as the
-;; standard environment does.
+          (begin (if (string=? how "") (k-with-unmark m) #u)
+                 (set k-dscope saved) (set k-toplevel-reading was) r))))))
+;; `(moduleof …)`, each abstract type a binder in what follows; or a `select`.
 (define k-read-module-type (->* (syn k-syns symbol) int)
   (lambda (s items hd)
     (if (symbol=? hd 'select)
         (let ((m (if (and (= (k-length items) 3) (syn-symbol? (k-nth items 1)))
                      (syn-name (k-nth items 1))
                      "")))
-          (if (or (string=? m "#%toplevel") (string=? m "#%fx"))
-              (k-read-toplevel-type (k-nth items 2) (string=? m "#%fx"))
-              (k-parse-select s items)))
+          (cond ((or (string=? m "#%toplevel") (string=? m "#%fx"))
+                 (k-read-scoped m '|| (k-nth items 2)))
+                ((and (not (string=? m "")) (not (syn-symbol? (k-nth items 2))))
+                 (k-read-scoped "" (syn-head (k-nth items 1)) (k-nth items 2)))
+                (else (k-parse-select s items))))
         (let* ((saved (get k-dscope)) (t (k-moduleof-comps (cdr items) nil nil nil nil nil)))
           (begin (set k-dscope saved) t)))))
 (define k-selects-from (->* (int k-seen (ref k-selects @t)) unit)
