@@ -696,7 +696,8 @@ The user's design, the reasons in the conversation that led to it:
   module parameters (the expander sees that in the syntax; anything else
   is refused). It brings all the file's names into the top level from
   where it is: its values, types and effects, as top-level `(include lib)`
-  does, and its macros. `only` and `except` later.
+  does, and its macros. `only` and `except` later (built 2026-11-07:
+  `(import-with-syntax lib (only name …))`, macros and the rest alike).
 - **Privacy by `hide`**: in the file, `(hide (define-syntax …))` keeps a
   macro to the file, as `hide` keeps a definition out of the module's type.
 - **Hygiene across files**: an imported macro's template means what it

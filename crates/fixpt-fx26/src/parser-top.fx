@@ -162,11 +162,13 @@
           (parse-each-top (expand-import (include-import x (car given))))
           (the top-list (list (t-exp (e-module (loaded-error why) at end 0 0))))))))
 ;; A top-level `(include m)`, `x`: the `(import m x … (type t …) (effect e
-;; …))` of what `m` gives, `g`, at `x`'s span (`Checker::include_forms`).
+;; …))` of what `m` gives, `g`, at `x`'s span (`Checker::include_forms`);
+;; of `(include m (only n …))` or `(except n …)`, what `g` says it takes.
 (define include-import (->* (syn include-given) syn)
   (lambda (x g)
     (let* ((items (syn-items x "a top-level `include`")) (a (syn-start x)) (b (syn-end x)))
-      (cond ((not (= (len items) 2)) (pfail "a top-level `include` names a module" x))
+      (cond ((not (or (= (len items) 2) (= (len items) 3)))
+             (pfail "a top-level `include` names a module" x))
             (else
              (begin
                (mk-list (cons (mk-symbol "import" a b)

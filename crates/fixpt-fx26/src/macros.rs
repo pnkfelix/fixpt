@@ -403,8 +403,9 @@ impl Macros {
     /// A file's macros, `forms` its `define-syntax`es (each with whether it
     /// is hidden), defined as the file means them (`FileScope`), each by
     /// the name the importer has it by, `scope.internal`'s, and each not
-    /// hidden by its own name too: what `(import-with-syntax lib)` brings.
-    pub fn define_file(&mut self, forms: &[(Syntax, bool)], scope: &FileScope, interner: &mut Interner) -> R<()> {
+    /// hidden that `taken` takes by its own name too: what `(import-with-syntax
+    /// lib)` brings (`(only name …)`, `(except name …)`).
+    pub fn define_file(&mut self, forms: &[(Syntax, bool)], scope: &FileScope, taken: &dyn Fn(Sym) -> bool, interner: &mut Interner) -> R<()> {
         self.ensure_kernel(interner)?;
         // The file's macros defined among themselves, by their names in it,
         // as its templates name them.
@@ -427,7 +428,7 @@ impl Macros {
         defined?;
         for (name, hidden) in made {
             let m = own.defined[&name].clone();
-            if !hidden {
+            if !hidden && taken(name) {
                 if self.defined.contains_key(&name) {
                     let shown = interner.name(name);
                     return Err(FxError::at(forms[0].0.span, format!("`{shown}` is a macro defined already: a file's may not be defined again")));

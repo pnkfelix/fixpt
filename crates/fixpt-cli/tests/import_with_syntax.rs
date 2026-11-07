@@ -32,11 +32,23 @@ fn a_files_macros_types_are_its_own() {
 }
 
 #[test]
+fn only_and_except_take_macros_and_names_alike() {
+    for (name, want) in [("main-only.fx", "1020 : int"), ("main-except.fx", "1030 : int"), ("main-except-all.fx", "2 : int")] {
+        for m in MACHINES {
+            let (out, err) = eval(m, name);
+            assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");
+        }
+    }
+}
+
+#[test]
 fn what_cannot_be_imported_is_refused() {
     let cases = [
         ("main-secret.fx", "`hidden` is neither a value the file's module shows nor a standard binding"),
         ("main-within.fx", "`one` is a macro of this file"),
         ("main-not-load.fx", "takes a name defined as `(load-module \"path\")`"),
+        ("main-only-not-given.fx", "unbound variable `limit`"),
+        ("main-only-hidden.fx", "`twice` is nothing `lib` gives"),
     ];
     for (name, why) in cases {
         let (out, err) = eval("rs-scheme-vm", name);

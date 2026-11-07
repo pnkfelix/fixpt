@@ -4141,3 +4141,24 @@ The user read the paper as supporting the distribution. Mine:
   loads' count, which places the real load's positions and must match the
   FX-26 parser's.
 
+
+## `only` and `except` for `import-with-syntax` (2026-11-07)
+
+- **Spelled after the name, `(import-with-syntax lib (only n …))`**, not
+  R7RS's `(only lib n …)` around it: `lib` stays where the form takes a
+  name, and `import` already lists names after the module.
+- **One list for macros, values, types and effects, unmarked**: unlike
+  `import`'s `(type t …)`, nothing needs telling apart before checking,
+  since the macros are known as the form is read and the rest when its
+  `include` is checked, from the module's type.
+- **Carried by the top-level `include` it expands to**, `(include lib
+  (only n …))`, the names that are not the file's macros: the Rust checker
+  filters what it gives, and the FX-26 front end, told what each
+  `include` gives, needed only to accept the third item. So a program may
+  write it too, at the top level (a module's `include` is unchanged).
+- **A name listed must be one given**: a hidden macro or value, or one
+  the file lacks, is refused (`` `twice` is nothing `lib` gives ``), as
+  R7RS refuses one.
+- **Nothing left to include is no error there**: `(only macro …)` makes
+  no `include`, and an `(except …)` that leaves nothing runs as nothing,
+  shown as nothing; a plain `(include m)` of nothing is still refused.

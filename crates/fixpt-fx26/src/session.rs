@@ -1306,6 +1306,11 @@ impl Fx26Session {
     /// them, until one fails; of any other form, its own.
     pub fn run_each(&mut self, form: &Syntax) -> R<Vec<Outcome>> {
         let Some(forms) = self.checker.include_forms(form)? else { return Ok(vec![self.run(form)?]) };
+        // `(include m (except name …))` of all `m` gives (`import-with-syntax`
+        // of a file's macros alone): nothing done, nothing to show.
+        if forms.is_empty() && form.as_proper_list().is_some_and(|l| l.len() == 3) {
+            return Ok(Vec::new());
+        }
         if forms.is_empty() {
             return Err(FxError::at(form.span, "this module gives nothing to include"));
         }
@@ -1341,7 +1346,11 @@ impl Fx26Session {
         if self.checker.include_forms(form)?.is_some() {
             let mut each = self.run_each(form)?;
             let printed: String = each.iter().map(|o| o.printed.as_str()).collect();
-            let mut last = each.pop().expect("an `include` makes forms");
+            let Some(mut last) = each.pop() else {
+                let exp = self.checker.arena.exp(form.span, crate::ast::Exp::Unit);
+                let top = Top::Exp(crate::check::Checked { ty: self.checker.unit, effect: crate::ast::Effect::pure(), exp });
+                return Ok(Outcome { top, code: Made::Nothing, printed, value: Ok(None) });
+            };
             last.printed = printed;
             return Ok(last);
         }

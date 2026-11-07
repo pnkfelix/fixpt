@@ -226,16 +226,22 @@ impl Checker {
     }
 
     /// A top-level `(include m)`'s module, and the names of what it gives:
-    /// its values, types and effects, none hidden. `None` if `form` is no
-    /// `include`.
+    /// its values, types and effects, none hidden; those of `(include m
+    /// (only n …))` among the `n`s, of `(include m (except n …))` not
+    /// (what `(import-with-syntax m (only n …))` gives of `m`'s module), each
+    /// `n` a name it gives. `None` if `form` is no `include`.
     #[allow(clippy::type_complexity)]
     pub fn include_names(&mut self, form: &Syntax) -> R<Option<(Sym, Vec<Sym>, Vec<Sym>, Vec<Sym>)>> {
         let Some(items) = form.as_proper_list() else { return Ok(None) };
         if !items.first().and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "include") {
             return Ok(None);
         }
-        let usage = "a top-level `include` names a module bound here: `(include m)`";
-        let [_, m] = items else { return Err(FxError::at(form.span, usage)) };
+        let usage = "a top-level `include` names a module bound here: `(include m)`, or `(include m (only name …))` or `(except name …)`";
+        let (m, filter) = match items {
+            [_, m] => (m, None),
+            [_, m, f] => (m, Some(self.name_filter(f, usage)?)),
+            _ => return Err(FxError::at(form.span, usage)),
+        };
         let Some(name) = m.as_symbol() else { return Err(FxError::at(m.span, usage)) };
         let Some(t) = self.lookup(name) else {
             return Err(FxError::at(m.span, format!("unbound variable `{}`", self.interner.name(name))));
@@ -252,8 +258,33 @@ impl Checker {
             }
             if self.desc_effect(*d).is_some() { effects.push(*n) } else { types.push(*n) }
         }
-        let vals = vals.iter().map(|(n, _)| *n).filter(|n| shown(self, n)).collect();
+        let mut vals: Vec<Sym> = vals.iter().map(|(n, _)| *n).filter(|n| shown(self, n)).collect();
+        if let Some((only, names)) = filter {
+            for (n, at) in &names {
+                if ![&vals, &types, &effects].iter().any(|g| g.contains(n)) {
+                    return Err(FxError::at(*at, format!("`{}` is nothing `{}` gives", self.interner.name(*n), self.interner.name(name))));
+                }
+            }
+            for g in [&mut vals, &mut types, &mut effects] {
+                g.retain(|n| names.iter().any(|(m, _)| m == n) == only);
+            }
+        }
         Ok(Some((name, vals, types, effects)))
+    }
+
+    /// `(only name …)`, true, or `(except name …)`, false, and the names,
+    /// each with its place: which of what a module gives a top-level
+    /// `include` or `import-with-syntax` takes.
+    #[allow(clippy::type_complexity)]
+    fn name_filter(&self, f: &Syntax, usage: &str) -> R<(bool, Vec<(Sym, Span)>)> {
+        let items = f.as_proper_list().unwrap_or(&[]);
+        let only = match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
+            Some("only") => true,
+            Some("except") => false,
+            _ => return Err(FxError::at(f.span, usage)),
+        };
+        let names = items[1..].iter().map(|n| n.as_symbol().map(|s| (s, n.span)).ok_or_else(|| FxError::at(n.span, usage))).collect::<R<_>>()?;
+        Ok((only, names))
     }
 
     fn top_defining_kept(&mut self, form: &Syntax) -> R<Defining> {
@@ -617,10 +648,22 @@ impl Checker {
         for f in forms {
             // `(import-with-syntax lib)`: the file's macros defined, and the
             // rest of what it gives as `(include lib)` gives it.
-            if let Some(lib) = self.import_with_syntax(&f)? {
-                self.import_file_macros(&f, lib)?;
+            // `only` and `except` name macros and the rest alike: the
+            // `include`'s are the names not the file's macros.
+            if let Some((lib, filter)) = self.import_with_syntax(&f)? {
+                let macros = self.import_file_macros(&f, lib, filter.as_ref())?;
                 let include = Syntax::symbol(f.span, self.interner.intern("include"));
-                out.push(Syntax::list(f.span, vec![include, Syntax::symbol(f.span, lib)]));
+                let mut made = vec![include, Syntax::symbol(f.span, lib)];
+                if let Some((only, names)) = filter {
+                    let rest: Vec<Syntax> = names.into_iter().filter(|(n, _)| !macros.contains(n)).map(|(n, at)| Syntax::symbol(at, n)).collect();
+                    // `(only macro …)`: nothing else.
+                    if only && rest.is_empty() {
+                        continue;
+                    }
+                    let word = Syntax::symbol(f.span, self.interner.intern(if only { "only" } else { "except" }));
+                    made.push(Syntax::list(f.span, std::iter::once(word).chain(rest).collect()));
+                }
+                out.push(Syntax::list(f.span, made));
                 continue;
             }
             // A macro defined, or each use of one expanded
@@ -635,15 +678,19 @@ impl Checker {
         Ok(out)
     }
 
-    /// `(import-with-syntax lib)`'s `lib`, if `form` is one.
-    fn import_with_syntax(&self, form: &Syntax) -> R<Option<Sym>> {
+    /// `(import-with-syntax lib)`'s `lib`, if `form` is one, and its
+    /// `(only name …)` or `(except name …)`, if it has one.
+    #[allow(clippy::type_complexity)]
+    fn import_with_syntax(&self, form: &Syntax) -> R<Option<(Sym, Option<(bool, Vec<(Sym, Span)>)>)>> {
         let items = form.as_proper_list().unwrap_or(&[]);
         if items.first().and_then(|h| h.as_symbol()).is_none_or(|h| self.interner.name(h) != "import-with-syntax") {
             return Ok(None);
         }
+        let usage = "`(import-with-syntax name)`, the name a module loaded by `load-module`, or `(import-with-syntax name (only name …))` or `(except name …)`";
         match items {
-            [_, lib] if lib.as_symbol().is_some() => Ok(lib.as_symbol()),
-            _ => Err(FxError::at(form.span, "`(import-with-syntax name)`, the name a module loaded by `load-module`")),
+            [_, lib] if lib.as_symbol().is_some() => Ok(Some((lib.as_symbol().unwrap(), None))),
+            [_, lib, f] if lib.as_symbol().is_some() => Ok(Some((lib.as_symbol().unwrap(), Some(self.name_filter(f, usage)?)))),
+            _ => Err(FxError::at(form.span, usage)),
         }
     }
 
@@ -676,7 +723,11 @@ impl Checker {
     /// The macros of the file `lib` names (`(define lib (load-module
     /// "path"))`) defined, each as the file means it (`Macros::define_file`;
     /// `typed-macros.md`, "Decided: macros come with a file").
-    fn import_file_macros(&mut self, form: &Syntax, lib: Sym) -> R<()> {
+    /// Of its macros not hidden, those `filter` takes (`(only name …)` or
+    /// `(except name …)`) are defined by their names; the names of all
+    /// those not hidden are returned.
+    #[allow(clippy::type_complexity)]
+    fn import_file_macros(&mut self, form: &Syntax, lib: Sym, filter: Option<&(bool, Vec<(Sym, Span)>)>) -> R<std::collections::HashSet<Sym>> {
         let usage = "`import-with-syntax` takes a name defined as `(load-module \"path\")`";
         let Some(path) = self.load_defs.get(&lib).cloned() else {
             return Err(FxError::at(form.span, format!("{usage}, and `{}` is not one", self.interner.name(lib))));
@@ -729,6 +780,8 @@ impl Checker {
             .filter_map(|m| macro_name(m))
             .map(|n| (n, self.interner.intern(&format!("%syntax:{key}:{}", self.interner.name(n)))))
             .collect();
+        let exported: std::collections::HashSet<Sym> = macros.iter().filter(|m| !m.1).filter_map(macro_name).collect();
+        let taken = |n: Sym| filter.is_none_or(|(only, names)| names.iter().any(|(m, _)| *m == n) == *only);
         let shared = self.interner.intern(&format!("%shared:{key}"));
         let mut defined = std::mem::take(&mut self.macros);
         let mut interner = std::mem::take(&mut self.interner);
@@ -736,12 +789,13 @@ impl Checker {
         let r = {
             let is_standard = |s: Sym| self.standard_type(s).is_some();
             let scope = crate::macros::FileScope { shared, values, types, internal, is_standard: &is_standard };
-            defined.define_file(&macros, &scope, &mut interner)
+            defined.define_file(&macros, &scope, &taken, &mut interner)
         };
         defined.reading = outer;
         self.macros = defined;
         self.interner = interner;
-        r.map_err(|e| self.in_loaded(e, file))
+        r.map_err(|e| self.in_loaded(e, file))?;
+        Ok(exported)
     }
 
     /// The values and the types and effects `forms` define, a module
