@@ -774,6 +774,11 @@ fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, b
     let fields = [int(scheme, mode), int(scheme, state.at), scheme.make(|m| m.heap().make_string(&settings))];
     let keys = product(scheme, &fields)?;
     let keyed = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[keys, syns]).map_err(|e| fail(e.to_string()))?;
+    // The checker told of this parse, if there is one: the macros each
+    // `with`'s body used (`check-macro-uses!`).
+    if scheme.is_bound(&format!("{READER_PREFIX}check-macro-uses!")) {
+        scheme.call_global(&format!("{READER_PREFIX}check-macro-uses!"), &[]).map_err(|e| fail(e.to_string()))?;
+    }
     let (tag, err, at, walked) = scheme.view(|v| {
         let k = v.get(keyed);
         let r = k.product_field(1).expect("a parse");

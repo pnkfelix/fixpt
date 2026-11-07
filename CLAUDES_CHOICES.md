@@ -4221,3 +4221,15 @@ The user read the paper as supporting the distribution. Mine:
 - **Rust's `includes_given` reads the program again from no macros**: a
   second whole read in the checker that checked it imported a file's
   macros twice, refused as defined already, and so said no `include`.
+- **Refusals of macros' names in the FX-26 parser, as checker errors**:
+  the parser sees the forms ahead, so a definition whose name a later
+  form makes a macro is refused where that form is, as the Rust checker
+  (which has every macro of the program before it checks) says; made a
+  form the checker refuses in its place, as a refused `include` is, so
+  errors before it come first. A macro of a global's name from an
+  earlier parse is refused by the parser at once, as Rust's expander
+  does; the globals are in the state's table.
+- **The `with` check in the checker, told by the conductor**: the parser's
+  record of each parse (reset as a parse begins, so no program's places
+  meet another's) handed to the checker by `check-macro-uses!`, which the
+  driver calls after each parse, and by the conductor's own parses.

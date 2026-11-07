@@ -47,3 +47,6 @@
 ;; For a driver: the standard bindings' names, which a file's macro may name.
 (define macros-module (with parser-top-module macros-module))
 (define standard-names! (with macros-module standard-names!))
+;; For the conductor: the macros each `with`'s body used, as the expander
+;; met them, for the checker (`k-macro-uses!`).
+(define with-macro-uses (with macros-module with-uses-given))

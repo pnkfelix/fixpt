@@ -362,6 +362,13 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (int kxs k-regions)
                        k-maybe-ty))
+            (val k-macro-uses!
+                 (subr (write @t) ((listof (tupleof int int symbol int int) acyclic)) unit))
+            (val k-with-used-at
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (k-parts k-names int int int symbol)
+                       (productof (1 k-parts) (2 k-ids))))
             (val k-bloblet-field
                  (subr (maxeff (alloc @t)
                                (goto @z)

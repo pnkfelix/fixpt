@@ -29,7 +29,7 @@
 ;; The expander (`macros.fx`), which each form goes through first.
 (define macros-module ((proj (load-module "fx26:macros.fx") rs re rm rc rp)))
 (import macros-module expand define-macro defines-syntax? macros-at! macros-after! imports-syntax?
-        import-file-macros note-load-def!)
+        import-file-macros note-load-def! later-macro-site globals! global-before? macro?)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -207,18 +207,90 @@
         ;; (`parse-loaded`), those its types name first (`type-loaded`).
         (let* ((written (car xs))
                (made (cond ((defines-syntax? written)
-                            (begin (define-macro pfail-at written nil) (the top-list nil)))
+                            (begin (global-macro written) (define-macro pfail-at written nil)
+                                   (the top-list nil)))
                            ;; A file's macros, and the `include` of the rest.
                            ((imports-syntax? written)
                             (let ((inc (import-file-macros pfail-at written (get loaded))))
                               (if (null? inc) (the top-list nil) (parse-made (car inc)))))
                            (else (let ((x (expand pfail-at written)))
                                    (begin (note-load-def! x) (parse-made (type-loaded x)))))))
+               (guarded (guard-defs made (cdr xs)))
                (before (shared-taken))
                (r (form-reading (walk-state t) settings written (loads-of before)))
-               (form (number-form t r (append-tops before made)))
+               (form (number-form t r (append-tops before guarded)))
                (rest (begin (macros-after! r) (parse-tops t settings (cdr xs)))))
           (append-tops form rest)))))
+;; A `define-syntax` of a name a form before this parse defined as a
+;; global: refused, where it is (`Checker::macro_expanded`, which knows the
+;; globals checked; a program's own are refused where each is checked,
+;; `guard-defs`).
+(define global-macro (->* (syn) unit)
+  (lambda (s)
+    (let ((items (syn-items s "a `define-syntax`")))
+      (if (and (> (len items) 1) (syn-symbol? (nth items 1))
+               (global-before? (syn-symbol (nth items 1))))
+          (pfail (string-append "`" (syn-name (nth items 1))
+                                "` is defined already: a macro may not take its name")
+                 s)
+          #u))))
+;; Tops `ts`, each definition's names noted as globals, until one of them
+;; is a macro's: as the Rust checker refuses it where it is checked
+;; (`top_defining_kept`), a form refused there, said where the macro is if
+;; a form after this one (of `later`) makes it; else said at the
+;; definition, which an `import` or `include` made after expansion.
+(define guard-defs (->* (top-list syns-a) top-list)
+  (lambda (ts later)
+    (if (null? ts)
+        nil
+        (let ((bad (bad-name (top-names (car ts)) later)))
+          (if (null? bad)
+              (begin (globals! (top-names (car ts)))
+                     (cons (car ts) (guard-defs (cdr ts) later)))
+              (let* ((n (symbol->string (extract (car bad) 1))) (site (extract (car bad) 2))
+                     (why (if (null? site)
+                              (string-append "`" n "` is a macro's name, which is not defined "
+                                             "again")
+                              (string-append "`" n "` is defined already: a macro may not take its "
+                                             "name")))
+                     (a (if (null? site) (top-start (car ts)) (extract (car site) 1)))
+                     (b (if (null? site) (top-end (car ts)) (extract (car site) 2))))
+                (the top-list (list (t-exp (e-module (loaded-error why) a b 0 0))))))))))
+;; The first of `ns` a macro's, with where a later form makes it one (none
+;; if no later form does), in a list of one.
+(define-type sites (listof (tupleof int int) acyclic))
+(define bad-name (->* (names syns-a) (listof (productof (1 symbol) (2 sites)) acyclic))
+  (lambda (ns later)
+    (if (null? ns)
+        nil
+        (let ((site (later-macro-site (car ns) later (get loaded))))
+          (if (or (not (null? site)) (macro? (car ns)))
+              (list (product (1 (car ns)) (2 site)))
+              (bad-name (cdr ns) later))))))
+;; The names a top-level form defines as values (`Checker::defined_names`).
+(define top-names (->* (top) names)
+  (lambda (x)
+    (tagcase x
+      (t-define (n ty e a b) (list n))
+      (t-define-rec (bs a b) (rec-binding-names bs))
+      (t-define-syscall (req s a b)
+        (let ((items (syn-items s "a syscall")))
+          (if (and (> (len items) 1) (syn-symbol? (nth items 1)))
+              (list (syn-symbol (nth items 1)))
+              nil)))
+      (else y nil))))
+(define rec-binding-names (->* ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic)) names)
+  (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (rec-binding-names (cdr bs))))))
+(define top-start (->* (top) int)
+  (lambda (x)
+    (tagcase x
+      (t-define (n ty e a b) a) (t-define-rec (bs a b) a) (t-define-syscall (q s a b) a)
+      (else y 0))))
+(define top-end (->* (top) int)
+  (lambda (x)
+    (tagcase x
+      (t-define (n ty e a b) b) (t-define-rec (bs a b) b) (t-define-syscall (q s a b) b)
+      (else y 0))))
 ;; The files the hidden globals `ts` are, each by its key and its trees.
 (define loads-of (->* (top-list) loads)
   (lambda (ts)

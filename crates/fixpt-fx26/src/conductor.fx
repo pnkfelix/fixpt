@@ -354,6 +354,12 @@
          (compile-inline
           ((load-input "fx26:compile-inline.fx")
            compile compile-plan compile-exps tables compile-state))
+         ;; A parse, and what the checker is told of it: the macros each
+         ;; `with`'s body used (`k-macro-uses!`), this parse's alone.
+         (parse-checked
+          (lambda ((keys (select parser-types keys)) (forms (listof syn acyclic)))
+            (let ((p (parse-program keys forms)))
+              (begin ((with check-synth k-macro-uses!) (with-macro-uses)) p))))
          ;; The evaluator.
          (eval-values ((load-input "fx26:eval-values.fx") check-types))
          (eval-prims ((load-input "fx26:eval-prims.fx") eval-values tables check-types))
@@ -533,7 +539,7 @@
                       (includes-given! nil)
                       ((with check-print-parts check-conv-native!) native)
                       (tagcase (let ((s ((with readings with-reps) (begun standard) rep nil)))
-                                 (extract (parse-program (keys-in mode s) (car read)) 1))
+                                 (extract (parse-checked (keys-in mode s) (car read)) 1))
                         (p-err (m a b)
                           (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
                         (p-ok (tops) (checked standard tops k len native registers rep mode)))))))))
@@ -554,7 +560,7 @@
                     (loaded-files! nil)
                     (includes-given! nil)
                     ((with check-program check-lines!) #f)
-                    (let ((p (parse-program (keys-in mode s) (car read))))
+                    (let ((p (parse-checked (keys-in mode s) (car read))))
                       (tagcase (extract p 1)
                         (p-err (m a b) (said m s))
                         (p-ok (tops)
@@ -600,7 +606,7 @@
                     ;; The state after is the parse's if the checker keeps the
                     ;; text; a try, or a text refused, leaves it as it was
                     ;; (the standard environment's, where it began).
-                    (let* ((p (parse-program (keys-in mode s) (car read)))
+                    (let* ((p (parse-checked (keys-in mode s) (car read)))
                            (r (extract p 2)))
                      (tagcase (extract p 1)
                       (p-err (m a b)
@@ -671,7 +677,7 @@
                   (begin
                     (loaded-files! nil)
                     (includes-given! nil)
-                    (let ((p (parse-program (product (1 mode) (2 s) (3 settings)) (car read))))
+                    (let ((p (parse-checked (product (1 mode) (2 s) (3 settings)) (car read))))
                      (tagcase (extract p 1)
                       (p-err (m a b) (sum failed m))
                       (p-ok (tops)
@@ -725,6 +731,11 @@
              (check-text-typed check-text-typed)
              (import-types (with check-program import-types))
              (check-program (with check-program check-program))
+             ;; What the checker is told of the last parse: the macros each
+             ;; `with`'s body used (`k-macro-uses!`), for a driver that
+             ;; parses, then checks.
+             (check-macro-uses!
+              (lambda () ((with check-synth k-macro-uses!) (with-macro-uses))))
              (checked-tops (with check-program checked-tops))
              (check-conv-native! (with check-print-parts check-conv-native!))
              (check-globals-effects! (with check-env check-globals-effects!))
@@ -798,6 +809,7 @@
 (define check-text-typed (extract front-end-entries check-text-typed))
 (define import-types (extract front-end-entries import-types))
 (define check-program (extract front-end-entries check-program))
+(define check-macro-uses! (extract front-end-entries check-macro-uses!))
 (define checked-tops (extract front-end-entries checked-tops))
 (define checked-reps (extract front-end-entries checked-reps))
 (define checked-reps-again (extract front-end-entries checked-reps-again))

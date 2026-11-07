@@ -255,6 +255,14 @@
 
 ;;; ------------------------------------------------------------ the session
 
+;; By each `with` form's place, the macros used in its body by names the
+;; program wrote, each with the use's place (`Macros::with_uses`): the
+;; checker refuses the `with` if its module gives a value of the name.
+(define-type uses (listof (tupleof int int symbol int int) acyclic))
+(define with-uses (ref uses rs) (new nil))
+;; For the checker: this parse's, in the order the expander met them.
+(define with-uses-given (->* () uses) (lambda () (reverse (get with-uses))))
+
 ;; Each top-level `(define name (load-module "path"))` so far, the last
 ;; first: the files `import-with-syntax` of `name` reads.
 (define-type load-defs (listof (tupleof symbol string) acyclic))
@@ -265,14 +273,24 @@
 ;; a program begun in the standard environment's (none), an entry in a
 ;; session's, or anything read again (`typed-macros.md`, the port's
 ;; decision 3). Only where there are some.
-(define-type by-states (listof (tupleof int macro-env load-defs) acyclic))
+;; And the globals defined, which no macro may be named (`globals`).
+(define-type by-states (listof (tupleof int macro-env load-defs names) acyclic))
 (define by-state (ref by-states rs) (new nil))
+;; The globals the forms read so far define, and those the forms before
+;; this parse did (`Checker::global_type` as a program is expanded, before
+;; any of its own is checked).
+(define globals (ref names rs) (new nil))
+(define globals-before (ref names rs) (new nil))
 (define macros-at! (->* (int) unit)
   (lambda (s)
     (let ((at (state-at s (get by-state))))
-      (if (null? at)
-          (begin (set defined nil) (set loads nil))
-          (begin (set defined (extract (car at) 2)) (set loads (extract (car at) 3)))))))
+      (begin
+        (set with-uses nil)
+        (if (null? at)
+            (begin (set defined nil) (set loads nil) (set globals nil))
+            (begin (set defined (extract (car at) 2)) (set loads (extract (car at) 3))
+                   (set globals (extract (car at) 4))))
+        (set globals-before (get globals))))))
 (define state-at (->* (int by-states) by-states)
   (lambda (s xs)
     (cond ((null? xs) nil)
@@ -280,9 +298,13 @@
           (else (state-at s (cdr xs))))))
 (define macros-after! (->* (int) unit)
   (lambda (s)
-    (if (and (null? (get defined)) (null? (get loads)))
+    (if (and (null? (get defined)) (null? (get loads)) (null? (get globals)))
         #u
-        (set by-state (cons (tuple s (get defined) (get loads)) (get by-state))))))
+        (set by-state (cons (tuple s (get defined) (get loads) (get globals)) (get by-state))))))
+;; Names `ns` defined as globals.
+(define globals! (->* (names) unit) (lambda (ns) (set globals (append ns (get globals)))))
+;; Whether `n` was a global before this parse.
+(define global-before? (->* (symbol) bool) (lambda (n) (name-in? n (get globals-before))))
 
 ;;; ------------------------------------------------------------ expanding
 
@@ -298,10 +320,6 @@
                             (get expansions)))
       (set nexpansions (+ (get nexpansions) 1))
       (get nexpansions))))
-;; By each `with` form's place, the macros used in its body by names the
-;; program wrote, each with the use's place (`Macros::with_uses`): the
-;; checker refuses the `with` if its module gives a value of the name.
-(define with-uses (ref (listof (tupleof int int symbol int int) acyclic) rs) (new nil))
 ;; The expansions left before one does not end.
 (define budget (ref int rs) (new 0))
 ;; Fresh names' count.
@@ -872,3 +890,60 @@
     (cond ((null? made) nil)
           ((extract (car made) 2) (shown-names (cdr made)))
           (else (cons (extract (car made) 1) (shown-names (cdr made)))))))
+
+;;; ------------------------------------------------------------ macros' names
+
+;; Where the last of forms `xs` after this one makes `n` a macro, by
+;; `define-syntax` or `import-with-syntax`, in a list of one: as the Rust
+;; checker sees it, every macro of the program defined before any
+;; definition is checked (`Macros::defined_before`). `fs`, the files read.
+(define later-macro-site (->* (symbol syns-a files) places)
+  (lambda (n xs fs) (macro-sites n xs fs (get loads) nil)))
+(define macro-sites (->* (symbol syns-a files load-defs places) places)
+  (lambda (n xs fs ls found)
+    (if (null? xs)
+        found
+        (let* ((x (car xs))
+               (here (cond ((defines-syntax? x)
+                            (let ((items (proper x)))
+                              (and (syn-symbol? (nth items 1))
+                                   (symbol=? (syn-symbol (nth items 1)) n))))
+                           ((imports-syntax? x) (brings? n x fs ls))
+                           (else #f)))
+               (found2 (if here (the places (list (tuple (syn-start x) (syn-end x)))) found)))
+          (macro-sites n (cdr xs) fs (load-noted x ls) found2)))))
+;; `ls` with what form `x` says of a load definition (`note-load-def!`).
+(define load-noted (->* (syn load-defs) load-defs)
+  (lambda (x ls)
+    (let ((items (proper x)))
+      (if (and (>= (len items) 3) (string=? (head-name x) "define") (syn-symbol? (nth items 1)))
+          (let* ((n (syn-symbol (nth items 1)))
+                 (path (load-path (nth items (- (len items) 1))))
+                 (kept (without-load n ls)))
+            (if (and (not (null? path)) (<= (len items) 4)) (cons (tuple n (car path)) kept) kept))
+          ls))))
+;; Whether `(import-with-syntax lib …)`, `x`, gives macro `n` its name.
+(define brings? (->* (symbol syn files load-defs) bool)
+  (lambda (n x fs ls)
+    (let* ((items (proper x))
+           (path (if (and (>= (len items) 2) (syn-symbol? (nth items 1)))
+                     (load-of (syn-symbol (nth items 1)) ls)
+                     nil))
+           (f (if (null? path) nil (loaded-path (car path) fs))))
+      (and (not (null? f))
+           (name-in? n (macro-names (shown-syntax (file-syntax (extract (car f) 5)))))
+           (or (= (len items) 2) (taken? n (list (lenient-filter (nth items 2)))))))))
+(define shown-syntax (->* ((listof file-macro acyclic)) (listof file-macro acyclic))
+  (lambda (ms)
+    (cond ((null? ms) nil)
+          ((extract (car ms) 2) (shown-syntax (cdr ms)))
+          (else (cons (car ms) (shown-syntax (cdr ms)))))))
+;; `(only name …)` or `(except name …)`, its names those that are names.
+(define lenient-filter (->* (syn) filter)
+  (lambda (f)
+    (tuple (string=? (head-name f) "only") (names-only (cdr (proper f))))))
+(define names-only (->* (syns-a) syns-a)
+  (lambda (xs)
+    (cond ((null? xs) nil)
+          ((syn-symbol? (car xs)) (cons (car xs) (names-only (cdr xs))))
+          (else (names-only (cdr xs))))))

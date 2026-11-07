@@ -3,14 +3,11 @@
 //! where and why each refuses it, the same. An expander's refusal is its
 //! front end's (the FX-26 one's, its parse's). What follows an error's
 //! first line, the uses that made the text it is in, the FX-26 front end
-//! does not say yet; nor do the refusals of the checker's own of macros.
+//! does not say yet.
 
 use fixpt_engine::Backend;
 use fixpt_fx26::compare;
 use fixpt_fx26::session::Fx26Session;
-
-/// The checker's refusals of macros the FX-26 one does not make yet.
-const NOT_YET: &[&str] = &["import-macro-name.fx", "include-macro-name.fx", "macro-over-global.fx", "with-shadows-macro.fx", "with-shadows-macro-nested.fx"];
 
 #[test]
 fn both_expanders_agree_on_macro_programs() {
@@ -34,9 +31,6 @@ fn agree(dir: &str, prefix: &str) {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     for path in names {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        if NOT_YET.contains(&name.as_str()) {
-            continue;
-        }
         let text = std::fs::read_to_string(&path).unwrap();
         s.checker.base_dir = path.parent().map(|d| d.to_path_buf());
         fixpt_fx26::syn::set_load_base(path.parent().map(|d| d.to_path_buf()));

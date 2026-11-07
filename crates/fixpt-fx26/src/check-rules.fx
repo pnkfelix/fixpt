@@ -996,7 +996,7 @@
             (k-fail (k-cat3 "`" shown "` is not bound") a b)
             (tagcase (k-get mt)
               (ty-module (abs ds vs)
-                (let* ((used (k-with-used vs (k-include-free m (k-free-vars body)) 0))
+                (let* ((used (k-with-used-at vs (k-include-free m (k-free-vars body)) 0 a b m))
                        (noted (k-note-with
                                 (product (1 (k-at-of x)) (2 (k-comp-names (extract used 1)))
                                          (3 (extract used 2)))))

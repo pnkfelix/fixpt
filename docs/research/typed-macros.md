@@ -568,9 +568,12 @@ turn.
   agree on every program in `tests/programs/macros` and those of
   `import-with-syntax` (`tests/macros_both.rs`, ported the same day: the
   file's forms the driver read, its load definitions in the state too, the
-  standard names the driver gives, `standard-names!`), but for what is not
-  ported yet: the checker's refusals of macros (a `with`'s body, a
-  definition of a macro's name, a macro of a global's). An error
+  standard names the driver gives, `standard-names!`), refusals too: a
+  definition of a macro's name and a macro of a global's, in the parser
+  (`guard-defs`, `global-macro`), as forms the checker refuses where
+  the Rust one refuses them; a `with`'s body's macro by a name its module
+  gives, in the checker (`k-with-used-at`), told what the expander found
+  of the last parse (`check-macro-uses!`). An error
   the FX-26 checker finds in an expansion is said where the template
   wrote it, not yet at each use that made it: its trees keep no
   expansion (`syn` does, since 2026-11-07).
