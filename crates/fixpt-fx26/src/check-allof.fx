@@ -47,7 +47,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-effects) (include check-subtype))
-(import check-resolve k-start k-end k-kth k-reading k-last-kth k-at-of k-regions-in
+(import check-resolve k-start k-end k-kth k-reading k-keys-onto k-at-of k-regions-in
         k-has-region-in?)
 (import check-synth k-note-call k-te-masked)
 (import check-calls k-callee-name)
@@ -68,7 +68,7 @@
 ;; The arm for `tag`, whose body is `body`, of a `tagcase` whose subject is
 ;; a `st` without it: skipped (#t) while a `lambda` is checked against a
 ;; member of an `allof`, and noted (`k-dead-arms`), with the numbers of
-;; what is in it (`k-last-kth`); else an error.
+;; what is in it (`k-keys-onto`); else an error.
 (define k-arm-dead? (->* (int symbol kx) bool)
   (lambda (st tag body)
     (let
@@ -77,7 +77,7 @@
       (if (null? fs)
           (begin (k-fail-no-part st " has no tag " tag a b) #f)
           (let* ((f (car fs)) (arms (k-dead-counted (extract f 1) st tag a b k kr))
-                 (now (the k-spans (cons (product (1 k) (2 (k-last-kth body))) (extract f 2)))))
+                 (now (k-keys-onto body (extract f 2))))
             (begin (set k-dead-arms (cons (product (1 arms) (2 now) (3 (extract f 3))
                                                    (4 (extract f 4)) (5 (extract f 5)))
                                           (cdr fs)))
@@ -121,9 +121,7 @@
                 (begin
                   (set k-dead-arms
                        (cons (product (1 (extract f 1))
-                                      (2 (the k-spans (cons (product (1 (k-kth x))
-                                                                     (2 (k-last-kth x)))
-                                                            (extract f 2))))
+                                      (2 (k-keys-onto x (extract f 2)))
                                       (3 (extract f 3)) (4 at)
                                       (5 (k-branch-noted (extract f 5) key at)))
                              (cdr fs)))
@@ -193,14 +191,15 @@
 
 (define k-at=? (->* (k-at k-at) bool)
   (lambda (x y) (and (= (extract x 3) (extract y 3)) (= (extract x 4) (extract y 4)))))
-;; Whether `at` is in one of `spans`, each the numbers of what is in one
-;; skipped (`k-last-kth`): by the trees' structure, not where it is written.
+;; Whether `at` is one of `keys`, the keys of what is in each skipped
+;; (`k-keys-onto`): by the trees' structure, not by where it is written, nor
+;; by its keys' values, which a mode makes digests.
 (define k-skipped? (->* (k-at k-spans) bool)
-  (lambda (at spans)
-    (and (not (null? spans))
-         (or (and (>= (extract at 3) (extract (car spans) 1))
-                  (<= (extract at 3) (extract (car spans) 2)))
-             (k-skipped? at (cdr spans))))))
+  (lambda (at keys)
+    (and (not (null? keys))
+         (or (and (= (extract at 3) (extract (car keys) 1))
+                  (= (extract at 4) (extract (car keys) 2)))
+             (k-skipped? at (cdr keys))))))
 (define k-datum=? (->* (k-datum k-datum) bool)
   (lambda (d e)
     (tagcase d

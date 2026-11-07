@@ -4,7 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(import parser-types (type exp k-datum k-datums mod-items names syn syns-a))
+(import parser-types (type exp k-datum k-datums mod-items names syn syns-a numbering))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (import check-env-types (type k-with-list k-with-noted k-reshaped k-pick k-picks k-reshape-list))
 (hide (define table-types (load-module "fx26:table-types.fx")))
@@ -186,7 +186,7 @@
                        c-found))
             (val c-set-facts!
                  (subr (maxeff (alloc @k) (read @globals) spin (read @k) (read @t) (write @k))
-                       (k-facts int)
+                       (k-facts numbering)
                        unit))
             (val c-lambda-of
                  (subr (maxeff (alloc @k) (read @globals) spin) (exp) (listof exp @k)))

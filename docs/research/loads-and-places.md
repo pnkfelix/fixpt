@@ -413,10 +413,9 @@ both front ends.
   (`datum-bytevector-length`, `datum-bytevector-ref`, `datum-rational?`,
   `datum-numerator`, `datum-denominator`). The state
   `s` is kept by what owns the state it stands for (stage 2a, below, for
-  where, and which texts advance it). A syscall's definitions, which the checker makes, are the reading of
-  the text they are made of, no trees (`text-reading-of`), in state -1. Not yet chained: the evaluator's
-  session forms (`ev-session-top`), read at 0; no table outlives one
-  check there, so equal texts sharing a reading share nothing wrong.
+  where, and which texts advance it). A syscall's definitions, which
+  the checker makes, are the reading of the text they are made of, no
+  trees (`text-reading-of`), in state -1.
 - **Stage 2, decided** (2026-11-07, the user's choice of "both,
   validated"): two `S`. The reference, `S` by trees: the session's state
   is the reading of the last text its checker kept, so it is of the trees
@@ -428,28 +427,54 @@ both front ends.
   `S`-by-trees one, their facts must agree, or `S` by types has left out
   what checking reads (bodies do matter: inlining, frozen definitions,
   certificates). Then `Z`, then `validate`.
-- **Stage 2a done, `S` by trees** (2026-11-07). Each reading is
-  `read_in(S, switches, text, loads)`: the trees of the text, read in the
-  state `S`, with the switches that change what the checker finds folded
-  in first (the program's convention, `globals-effects`, `defer-reruns`,
-  `syscalls`, inside a module file built in; `ids::Settings`, the checker
-  written in FX-26's `checked-settings`, tested to write them alike), and
-  after them each file the text loads, by its key and its trees (or why it
-  could not be read), in the order read (`supply_loaded_at`). The trees
-  of a `load-module` form are not the file's, and a file changed on disk
-  is another program. Where `S` lives, each kept where the checker's
-  state is, each the reading of the last text that checker kept:
-  - `Fx26Session::own_state`: each entry point that reads takes an
-    `ids::State` (the state and the switches) and leaves the state after
-    in it if the checker kept the text (`syn.rs`); 0 where it begins
-    again;
-  - a staging session on the Rust checker (`sessions.rs`'s `kept`,
-    `State::state` folding the Rust checker's switches as
-    `session-compile` takes them): each definition kept and each commit;
-    a try is not;
-  - a staging session on the checker written in FX-26 (the conductor's
-    `step-state`): a first step that checks, a step that checks more; not
-    a try.
-  A program alone, the bootstrap, a staged check: 0, the switches its
-  checker is set to folded in (`read-in`). Not yet: the evaluator's
-  forms, read at 0 under no switches (`eval-core.fx`).
+- **Stage 2a done, `S` by trees** (2026-11-07), and then, the user's
+  choices the same day, per form, `Z` of the path, each mode's keys in
+  both front ends:
+  - **A form's reading** (`readings.fx`'s `form-reading`, `ids.rs`'s
+    `form_reading`, tested alike): the session's state before it, folded
+    with the switches that change what the checker finds (the program's
+    convention, `globals-effects`, `defer-reruns`, `syscalls`, inside a
+    module file built in: `ids::Settings`, `checked-settings`, tested to
+    write them alike), its trees, and each file it loads first, by key and
+    trees, in the order of the keys (the trees of a `load-module` form are
+    not the file's). The state after a form is its reading, so a session's
+    state is the same however its forms were split into texts
+    (`a_state_is_its_forms_however_they_are_split`). Where a checker
+    begins, the standard environment's state, its trees' reading
+    (`standard-state`, `standard_state`); a staged step's text is read
+    with the reps of the type it is checked against and of the types its
+    names are given folded in (`with-reps`, `with_reps`).
+  - **Each expression's key** (`parser-ids.fx`, by the mode `keys` names;
+    `FIXPT_FACT_KEYS`, `ids::mode`): `path`, `(n, 0)`, `n` its place in
+    the session's walk, which goes on from text to text and is never
+    given twice (a text refused still advances it); `digest`, `(n, R)`,
+    its place in its form's walk and the form's reading; `full` and
+    `validate`, `(Z, R)`, `Z` the path's digest down from the form (each
+    place among its parent's, folded onto the parent's: a zipper's
+    information, since the form fixes the siblings). Identity compares
+    the two fields whatever the mode.
+  - **Where `S` and the count live**, each where the checker's state is,
+    each left by a text its checker kept (a refused text, or a try,
+    leaves the state as it was): `Fx26Session::own_state` and
+    `own_walked`, each entry that reads taking an `ids::State` and leaving
+    the state after in it (`syn.rs`); a staging session on the Rust
+    checker (`sessions.rs`'s `kept` and `walked`, `State::keys`, as
+    `session-compile` takes them); a staging session on the checker
+    written in FX-26 (the conductor's `step-state`, `step-walked`).
+    `parse-program` takes the keys and gives the state and count after,
+    and the keys it gave, in order.
+  - **The Rust checker's facts** are numbered by their place in the walk
+    (reading -1, `rust_facts.rs`), since it checks before the text is
+    parsed; the compiler gives each the key the parse gave there
+    (`c-absolute-at`, from the parse's numbering: in `path`, that place
+    past the count before; else the key given there). `and_after`, which
+    joins the facts of several texts, puts each walk after the one before.
+  - **The evaluator's own forms** (`stage`'s code, a session's forms, run
+    among the program's facts: `ev-withs`, `ev-facts`) are numbered past
+    any number of a program's, as their places are past any of a
+    program's (`ev-keys`, `ev-stage-base`): no session walks 10¹²
+    expressions, each made in the heap. I had taken them for safe at 0,
+    since nothing they find is kept; but they are looked up in the
+    program's facts, and at 0, in `path`, one took a program's `with` for
+    its own (`stage.rs`'s `a_process_stages_while_another_runs`).
+  - **Not yet**: `S` by types, and `validate`'s checks.

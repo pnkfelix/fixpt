@@ -58,31 +58,29 @@ struct State {
     seeds: Code,
     seed_texts: Vec<String>,
     texts: HashMap<u32, String>,
-    /// The session's state as its checker kept it (0 as it begins): the
-    /// reading of the last text kept, each read in the state the one
-    /// before left (`ids::read_in`; `docs/research/loads-and-places.md`,
+    /// The session's state as its checker kept it (the standard
+    /// environment's as it begins, `ids::standard_state`): the
+    /// state after the last text kept, each form read in the state the one
+    /// before left (`ids::forms_state`; `docs/research/loads-and-places.md`,
     /// "Decided: three keys"). A try leaves it as it was.
     kept: i64,
+    /// How many expressions the texts it compiled have walked, kept or
+    /// not: `path`'s numbers go on from there.
+    walked: i64,
 }
 
 impl State {
-    /// The state the session is in, as its compiler reads a text in it:
-    /// what it kept, under the switches its checker is set to now, as the
-    /// conductor's `session-compile` takes it.
-    fn state(&self) -> i64 {
-        crate::ids::text_reading_of(self.kept, &crate::ids::Settings::of(&self.checker).text())
+    /// What the session's compiler reads a text in (`session-compile`): the
+    /// state kept, the count walked, and the switches its checker is set to
+    /// now.
+    fn keys(&self) -> (i64, i64, String) {
+        (self.kept, self.walked, crate::ids::Settings::of(&self.checker).text())
     }
 
     /// `text` kept by the checker, as it was set when it checked it.
     fn keep(&mut self, settings: &crate::ids::Settings, text: &str) {
-        self.kept = crate::ids::read_in(self.kept, settings, text, &[]).unwrap_or(self.kept);
+        self.kept = crate::ids::forms_state(self.kept, settings, text, &[]).unwrap_or(self.kept);
     }
-}
-
-/// The state of the session at `base`, as [`State::state`]; 0 if it has
-/// none yet.
-fn state_of(rt: &Runtime, base: usize) -> i64 {
-    with_state(rt, rt.heap.root_at(base), |state| state.state()).unwrap_or(0)
 }
 
 /// How a session's steps are made (the module's header).
@@ -198,7 +196,7 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
         // Reading a session's global is reading the session, which its
         // forms' types say (`(read r)`), not part of the code's `E`.
         checker.globals_effects = false;
-        let mut state = State { checker, globals: Globals::with_prefix(&format!("fx26-session-{i}:")), generation: 0, seeds: Code::default(), seed_texts: Vec::new(), texts: HashMap::new(), kept: 0 };
+        let mut state = State { checker, globals: Globals::with_prefix(&format!("fx26-session-{i}:")), generation: 0, seeds: Code::default(), seed_texts: Vec::new(), texts: HashMap::new(), kept: crate::ids::standard_state(), walked: 0 };
         let module = state.checker.interner.intern("stage-module");
         let depth = bind_step_names(&mut state.checker, reps.as_ref());
         let seed = define(&mut state, &format!("(define stage-module (the {mt} %fasl-value))"));
@@ -244,9 +242,8 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
                 state.seeds.extend(code);
             }
         }
-        let session = state.state();
         for (text, facts) in made {
-            compile_run(rt, base, session, &text, &facts, false)?.map_err(|why| format!("a session's module's values: {why}"))?;
+            compile_run(rt, base, Some(&mut state), None, &text, &facts, false)?.map_err(|why| format!("a session's module's values: {why}"))?;
         }
         SESSIONS.with(|ss| ss.borrow_mut().push(state));
         rt.heap.obj_set(rt.heap.root_at(base), S_INDEX, Value::fixnum(i as i64));
@@ -379,8 +376,7 @@ fn check(rt: &mut Runtime, base: usize, staged: Value, given: Value) -> Result<V
         Ok(facts) => facts,
         Err(refused) => return Ok(refused),
     };
-    let session = state_of(rt, base);
-    match compile_run(rt, base, session, &w.whole, &facts, false)? {
+    match compile_run(rt, base, None, parts.rep.as_deref(), &w.whole, &facts, false)? {
         Ok(p) => {
             let p = sum(rt, "expression", p);
             Ok(sum(rt, "ok", p))
@@ -630,8 +626,7 @@ fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Result<Val
         whole.push_str(&text);
         whole.push('\n');
     }
-    let session = state_of(rt, base);
-    match compile_run(rt, base, session, &whole, &all, true)? {
+    match compile_run(rt, base, None, None, &whole, &all, true)? {
         Ok(p) => Ok(sum(rt, "go", p)),
         Err(why) => Ok(failed(rt, "refused", &why)),
     }
@@ -754,12 +749,32 @@ fn call(rt: &mut Runtime, compiler: Value, i: usize, args: &[Value]) -> Result<V
 }
 
 /// `text`, a session's form, compiled by the session at `base`'s compiler,
-/// read in the session's state `session` ([`State::state`]), given what the
-/// checker found of it, and its word run: the value (or,
+/// read in the session's state ([`State::keys`]; the state `made`, while
+/// the session is being made), with the reps of a step's types, `rep`, if
+/// it is a step's (`ids::with_reps`), given what the checker found of it,
+/// and its word run: the value (or,
 /// `deferred`, the procedure that runs the forms, `compile-deferred`); or
 /// why the compiler would not.
-fn compile_run(rt: &mut Runtime, base: usize, session: i64, text: &str, facts: &FormFacts, deferred: bool) -> Result<Result<Value, String>, String> {
+fn compile_run(rt: &mut Runtime, base: usize, made: Option<&mut State>, rep: Option<&[u8]>, text: &str, facts: &FormFacts, deferred: bool) -> Result<Result<Value, String>, String> {
     let (native, registers) = crate::stage::flags(rt).ok_or("this machine cannot keep sessions")?;
+    // Read in the session's state, its count going on past this text's
+    // (`State::keys`); the session's own state, if it is being made and
+    // not kept yet (`made`).
+    let walk = |s: &mut State| {
+        let keys = s.keys();
+        s.walked += facts.walked();
+        keys
+    };
+    let (at, walked, settings) = match made {
+        Some(s) => walk(s),
+        None => with_state(rt, rt.heap.root_at(base), walk).ok_or("a session's code compiled with no state")?,
+    };
+    // A step's text read with the types it was checked against, its rep and
+    // the names it gives types by it (`bind_step_names`).
+    let at = match rep {
+        Some(r) => crate::ids::with_reps(at, r, &crate::stage::step_reps(r).map(|s| s.named).unwrap_or_default()),
+        None => at,
+    };
     let compiler = compiler(rt, base)?;
     let mark = rt.heap.push_root(compiler);
     let t = rt.heap.make_string(text);
@@ -769,9 +784,12 @@ fn compile_run(rt: &mut Runtime, base: usize, session: i64, text: &str, facts: &
     let w = facts.withs(&mut rt.heap);
     rt.heap.push_root(w);
     let r = facts.reshapes(&mut rt.heap);
-    let [compiler, t, f, w] = [0, 1, 2, 3].map(|i| rt.heap.root_at(mark + i));
+    rt.heap.push_root(r);
+    let s = rt.heap.make_string(&settings);
+    let [compiler, t, f, w, r] = [0, 1, 2, 3, 4].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
-    let made = call(rt, compiler, 1, &[Value::fixnum(session), t, f, w, r, Value::boolean(native), Value::boolean(registers), Value::boolean(deferred)])?;
+    let mode = Value::fixnum(crate::ids::mode() as i64);
+    let made = call(rt, compiler, 1, &[mode, Value::fixnum(at), Value::fixnum(walked), s, t, f, w, r, Value::boolean(native), Value::boolean(registers), Value::boolean(deferred)])?;
     let tag = rt.heap.sum_tag(made);
     let payload = rt.heap.sum_payload(made);
     if tag != rt.heap.intern("made") {

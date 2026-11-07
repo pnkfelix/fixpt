@@ -7,6 +7,11 @@
 ;;; desugars is, nor a macro's argument placed twice
 ;;; (`docs/research/loads-and-places.md`, "Decided: identity by
 ;;; position"); the Rust front end numbers its trees alike (`ids.rs`).
+;;; Each number is a key of the mode the walk is in (`keys`, "Decided:
+;;; three keys"): `path`, the count of the session's walk, which goes on
+;;; from one text to the next; `digest`, the count within the form, beside
+;;; the form's reading; `full` (and `validate`), the digest of the path down
+;;; from the form, beside the form's reading.
 ;;; Part of the parser, after `parser-exps.fx`, before `parser-top.fx`.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
@@ -16,28 +21,61 @@
 (import parser-types e-var e-int e-bool e-str e-char e-float e-sym e-unit e-lambda e-app e-plambda
         e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the e-convention
         e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-define-rec t-exp
-        (type exp top exp-list let-list letrec-list arm-list mod-items top-list))
+        (type exp top exp-list let-list letrec-list arm-list mod-items top-list keys given))
+(define readings ((proj (load-module "fx26:readings.fx") rs re rm rc)))
+(import readings fold1)
 
-;; How many expressions of the reading have been walked, and the reading:
-;; what every expression it numbers is of, in a field of its own beside
-;; its number, so that the two tell it from every other expression of the
-;; session (`docs/research/loads-and-places.md`, "Decided: three keys").
-(define-type seen (productof (1 (ref int rs)) (2 int)))
+;; Where the walk is down a form (`full`): each expression around the one
+;; walked, the innermost first, by the digest of its path and how many of
+;; what is in it have been walked; the form itself last.
+(define-type frames (listof (productof (1 int) (2 int)) acyclic))
+;; The walk of a session's text: how many expressions of the form have been
+;; walked; the form's reading, what every expression it numbers is of, in a
+;; field of its own beside its number (0 in `path`); the mode; how many the
+;; session walked before the form; the frames; the keys given (`given`),
+;; the last first; and the session's state after the forms walked.
+(define-type seen
+  (productof (1 (ref int rs)) (2 (ref int rs)) (3 int) (4 (ref int rs)) (5 (ref frames rs))
+             (6 (ref given rs)) (7 (ref int rs))))
 
 (define-effect counts (maxeff (read @globals) spin (read rs) (write rs) (alloc rs)))
 
 ;; The next expression's number, the one walked next (at `a`..`b`, which
-;; does not matter: its provenance).
+;; does not matter: its provenance), as the mode keys it.
 (define next-kth (->* (seen int int) int)
-  (lambda (t a b) (let ((n (get (extract t 1)))) (begin (set (extract t 1) (+ n 1)) n))))
+  (lambda (t a b)
+    (let ((n (get (extract t 1))) (mode (extract t 3)))
+      (begin
+        (set (extract t 1) (+ n 1))
+        (if (= mode 0)
+            (+ (get (extract t 4)) n)
+            (let ((k (if (= mode 1) n (next-in-path t))))
+              (begin (set (extract t 6) (cons (product (1 k) (2 (get (extract t 2))))
+                                              (get (extract t 6))))
+                     k)))))))
+;; The path's digest of the expression walked next: its parent's, and its
+;; place among the parent's, from 0; its frame, the innermost now.
+(define next-in-path (->* (seen) int)
+  (lambda (t)
+    (let* ((fs (get (extract t 5))) (up (car fs)) (z (fold1 (extract up 1) (extract up 2))))
+      (begin
+        (set (extract t 5)
+             (cons (product (1 z) (2 0))
+                   (cons (product (1 (extract up 1)) (2 (+ (extract up 2) 1))) (cdr fs))))
+        z))))
+;; The walk out of the expression walked last: its frame gone.
+(define walked-out! (->* (seen) unit)
+  (lambda (t) (if (>= (extract t 3) 2) (set (extract t 5) (cdr (get (extract t 5)))) #u)))
 
 ;; Each `number-` gives what it was given, not a copy, where nothing in it
 ;; changed: as the parser numbers every expression 0, the first.
 (define-rec
   ;; `x` and what is in it, numbered.
   (number-exp (->* (seen exp) exp)
+    (lambda (t x) (let ((y (number-exp-in t x))) (begin (walked-out! t) y))))
+  (number-exp-in (->* (seen exp) exp)
     (lambda (t x)
-      (let ((reading (extract t 2)))
+      (let ((reading (get (extract t 2))))
       (tagcase x
         (e-var (s a b k kr)
                (let ((n (next-kth t a b)))
@@ -193,7 +231,32 @@
 (define number-each (->* (seen top-list) top-list)
   (lambda (t ts)
     (if (null? ts) nil (let* ((x (number-top t (car ts)))) (cons x (number-each t (cdr ts)))))))
-;; A program's forms, each expression in them numbered, the forms in order.
-(define number-tops (->* (int top-list) top-list)
-  (lambda (reading ts)
-    (number-each (product (1 (the (ref int rs) (new 0))) (2 reading)) ts)))
+;; The walk of a text read with `keys`, before its first form.
+(define walk-of (->* (keys) seen)
+  (lambda (keys)
+    (product (1 (the (ref int rs) (new 0))) (2 (the (ref int rs) (new 0))) (3 (extract keys 1))
+             (4 (the (ref int rs) (new (extract keys 3)))) (5 (the (ref frames rs) (new nil)))
+             (6 (the (ref given rs) (new nil))) (7 (the (ref int rs) (new (extract keys 2)))))))
+;; A form's trees `ts` (what it makes, and the hidden globals of the files
+;; it loads first), each expression numbered, of the form's reading `r`
+;; (`readings.fx`'s `form-reading`), the state after it.
+(define number-form (->* (seen int top-list) top-list)
+  (lambda (t r ts)
+    (let ((mode (extract t 3)))
+      (begin
+        (set (extract t 1) 0)
+        (set (extract t 2) (if (= mode 0) 0 r))
+        (if (>= mode 2) (set (extract t 5) (cons (product (1 r) (2 0)) nil)) #u)
+        (let ((out (number-each t ts)))
+          (begin (set (extract t 4) (+ (get (extract t 4)) (get (extract t 1))))
+                 (set (extract t 7) r)
+                 out))))))
+;; The session's state after the forms walked, and how many it has walked.
+(define walk-state (->* (seen) int) (lambda (t) (get (extract t 7))))
+(define walk-count (->* (seen) int) (lambda (t) (get (extract t 4))))
+;; The keys the walk gave, in its order (none in `path`).
+(define walk-given (->* (seen) given)
+  (lambda (t)
+    (letrec ((onto (subr (maxeff (read @globals) spin (alloc rs)) (given given) given)
+               (lambda (xs ys) (if (null? xs) ys (onto (cdr xs) (cons (car xs) ys))))))
+      (onto (get (extract t 6)) nil))))

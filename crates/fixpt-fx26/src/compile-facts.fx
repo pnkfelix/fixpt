@@ -42,16 +42,37 @@
 
 (define c-int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
 
-;; The reading the trees being compiled were numbered in (`parser-ids.fx`),
-;; for facts of reading 0, numbered within the trees without knowing their
-;; reading, as the checker written in Rust's are (`rust_facts.rs`); 0 if
-;; there are none (the checker written in FX-26's have the trees' own).
-(define c-reading (ref int @k) (new 0))
-;; `at`, of the trees' reading if it is of reading 0.
+;; How the trees being compiled were numbered (`parser-ids.fx`): for the
+;; facts numbered by their place in the walk, reading -1, as the checker
+;; written in Rust's are (`rust_facts.rs`), which checks before the text is
+;; parsed; mode -1 if there are none (the checker written in FX-26's have
+;; the trees' own keys). And the keys the walk gave, by place.
+(define c-numbering (ref numbering @k) (new (product (1 -1) (2 0) (3 nil))))
+(define c-given (ref (table int (productof (1 int) (2 int)) @k) @k)
+  (new (make-table c-int-hash c-int=?)))
+(define c-set-numbering! (->* (numbering) unit)
+  (lambda (w)
+    (letrec ((index (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
+                          ((listof (productof (1 int) (2 int)) acyclic) int) unit)
+               (lambda (gs i)
+                 (if (null? gs)
+                     #u
+                     (begin (table-set! (get c-given) i (car gs)) (index (cdr gs) (+ i 1)))))))
+      (begin (set c-numbering w)
+             (set c-given (make-table c-int-hash c-int=?))
+             (index (extract w 3) 0)))))
+;; `at`, its key the walk's if it is numbered by its place in the walk: in
+;; `path`, that place past those the session walked before; else the key
+;; given there.
 (define c-absolute-at (->* (k-at) k-at)
   (lambda (at)
-    (if (and (= (extract at 4) 0) (not (= (get c-reading) 0)))
-        (product (1 (extract at 1)) (2 (extract at 2)) (3 (extract at 3)) (4 (get c-reading))) at)))
+    (if (= (extract at 4) -1)
+        (let ((a (extract at 1)) (b (extract at 2)) (k (extract at 3)) (w (get c-numbering)))
+          (if (= (extract w 1) 0)
+              (product (1 a) (2 b) (3 (+ (extract w 2) k)) (4 0))
+              (let ((g (table-ref (get c-given) k (product (1 -1) (2 -1)))))
+                (product (1 a) (2 b) (3 (extract g 1)) (4 (extract g 2))))))
+        at)))
 
 ;; An expression's identity, as a table's key: where it starts and ends, and
 ;; which of the expressions there it is. For tables asked once a lambda or

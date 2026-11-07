@@ -17,21 +17,40 @@ fn rust_trees(text: &str) -> Vec<String> {
     let mut c2 = Checker::new();
     let forms2 = c2.read_in(FileId(0), text).expect("reads");
     let chars = Chars::of(text);
-    let mut tops = Vec::new();
+    // The forms as read, before the Rust checker expands any into several
+    // (a `define-generative`'s conversions, each at its span): a form is
+    // what the FX-26 parser takes as one, and what a reading folds.
+    let mut names = fixpt_read::Interner::new();
+    let read = fixpt_read::Reader::new(text, FileId(0), fixpt_read::SyntaxProfile::FX26, &mut names).read_all().expect("reads");
+    let mut forms: Vec<(usize, Vec<_>)> = Vec::new();
     for f in &forms2 {
         let top = c2.top(f).unwrap_or_else(|e| panic!("checks: {e}"));
-        // The hidden globals of the files it loads first, defined before it.
-        for (t, h) in std::mem::take(&mut c2.hoisted) {
-            tops.push((t, h.span));
+        let within = |r: &fixpt_read::Syntax| r.span.start <= f.span.start && f.span.end <= r.span.end;
+        let i = read.iter().position(within).unwrap_or_else(|| panic!("a form as read: {:?} in {text}", f.span));
+        if forms.last().is_none_or(|(j, _)| *j != i) {
+            forms.push((i, Vec::new()));
         }
-        tops.push((top, f.span));
+        // The hidden globals of the files it loads first, defined before
+        // all it makes.
+        let group = &mut forms.last_mut().expect("one").1;
+        let hoisted: Vec<_> = std::mem::take(&mut c2.hoisted).into_iter().map(|(t, h)| (t, h.span, true)).collect();
+        let at = group.iter().position(|g: &(_, _, bool)| !g.2).unwrap_or(group.len());
+        group.splice(at..at, hoisted);
+        group.push((top, f.span, false));
     }
-    // Which of the expressions at its span each is, the forms in order.
-    let mut kth = Kth::new();
-    for (t, _) in &tops {
-        kth.top(&c2, t);
+    // Each expression's key, form by form, as the process's mode makes it:
+    // read in the standard environment's state, as the FX-26 parser here
+    // reads it (`syn::parse_to_trees`).
+    let mut kth = Kth::keyed(fixpt_fx26::ids::mode(), 0);
+    let mut s = fixpt_fx26::ids::standard_state();
+    for (i, group) in &forms {
+        let tops: Vec<_> = group.iter().map(|(t, _, _)| t).collect();
+        let hoisted: Vec<_> = group.iter().filter(|g| g.2).map(|(t, _, _)| t).collect();
+        let loads = fixpt_fx26::ids::form_loads(&c2, &hoisted);
+        s = fixpt_fx26::ids::form_reading(s, &Default::default(), &read[*i], &names, &loads);
+        kth.form(&c2, s, &tops);
     }
-    tops.iter().map(|(t, span)| show_top(&c2, &chars, t, *span, &kth)).collect()
+    forms.iter().flat_map(|(_, g)| g).map(|(t, span, _)| show_top(&c2, &chars, t, *span, &kth)).collect()
 }
 
 /// `tree` without the FX-26 parser's marks of where a loaded file's
@@ -58,43 +77,17 @@ fn without_file_marks(tree: &str) -> String {
 }
 
 /// `tree` with each place in a loaded file, `k·10⁹ + i`, as `i`: the Rust
-/// parser's spans keep the file apart, and show the place in it alone; and
-/// each expression's reading, its last field, as 0, as the Rust front end,
-/// which numbers within the reading, says it (`parser-ids.fx`).
+/// parser's spans keep the file apart, and show the place in it alone. An
+/// expression's place is the first two of the four numbers that end it
+/// (its start and end, then its key, a number and a reading: `sexp.rs`).
 fn within_files(tree: &str) -> String {
-    let tree = &readings_as_zero(tree);
-    let mut out = String::new();
-    let mut digits = String::new();
-    let flush = |digits: &mut String, out: &mut String| {
-        match digits.parse::<u64>() {
-            Ok(n) if n >= 1_000_000_000 => out.push_str(&(n % 1_000_000_000).to_string()),
-            _ => out.push_str(digits),
-        }
-        digits.clear();
-    };
-    for c in tree.chars() {
-        if c.is_ascii_digit() {
-            digits.push(c);
-        } else {
-            flush(&mut digits, &mut out);
-            out.push(c);
-        }
-    }
-    flush(&mut digits, &mut out);
-    out
-}
-
-/// `tree` with the last of each run of four numbers before a `)`, an
-/// expression's reading, 0 (its place's start and end, and its number, are
-/// the three before).
-fn readings_as_zero(tree: &str) -> String {
     let b = tree.as_bytes();
     let mut out = String::new();
     // `tree[..copied]` is in `out`; `run`, the numbers in a row before here.
     let (mut copied, mut run) = (0, Vec::<(usize, usize)>::new());
     let mut i = 0;
     while i < b.len() {
-        if b[i].is_ascii_digit() && i > 0 && b[i - 1] == b' ' {
+        if b[i].is_ascii_digit() && i > 0 && (b[i - 1] == b' ' || b[i - 1] == b'-') {
             let start = i;
             while i < b.len() && b[i].is_ascii_digit() {
                 i += 1;
@@ -103,10 +96,12 @@ fn readings_as_zero(tree: &str) -> String {
             continue;
         }
         if b[i] == b')' && run.len() >= 4 && run.last().map(|r| r.1) == Some(i) {
-            let (start, _) = run[run.len() - 1];
-            out.push_str(&tree[copied..start]);
-            out.push('0');
-            copied = i;
+            for &(start, end) in &run[run.len() - 4..run.len() - 2] {
+                out.push_str(&tree[copied..start]);
+                let n: u64 = tree[start..end].parse().unwrap_or(0);
+                out.push_str(&(if n >= 1_000_000_000 { n % 1_000_000_000 } else { n }).to_string());
+                copied = end;
+            }
         }
         if b[i] != b' ' {
             run.clear();
@@ -256,34 +251,42 @@ fn a_variant_named_by_a_type_form_is_refused() {
 }
 
 /// What the comparison compares, spelled out once: each expression ends
-/// with where it starts and ends, its provenance, then its identity: its
-/// number in a walk that takes each before what is in it, and its reading
-/// (`parser-ids.fx`; 0 here, as the Rust front end says it). The `if` that
-/// `and` makes and its `#f`, at one span, are 2 and 5.
+/// with where it starts and ends, its provenance, then its key, a number
+/// and a reading, as the process's mode makes it (`parser-ids.fx`, the Rust
+/// front end's `ids::Kth` alike); in `path`, its place in a walk that takes
+/// each before what is in it, of reading 0. The `if` that `and` makes and
+/// its `#f`, at one span, are 2 and 5.
 #[test]
 fn a_tree_as_text() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let text = "(let* ((a #t)) (and a #f))";
     let ours: Vec<String> = s.parse_with_own_parser(text).expect("parses").iter().map(|t| within_files(t)).collect();
+    assert_eq!(ours, rust_trees(text));
+    // Its keys, in `path`, as written (the others are digests).
+    if fixpt_fx26::ids::mode() != fixpt_fx26::ids::Mode::Path {
+        return;
+    }
     assert_eq!(
         ours,
         ["(t-exp (e-let ([a (e-bool #t 10 12 1 0)]) (e-if (e-var a 20 21 3 0) (e-bool #f 22 24 4 0) (e-bool #f 15 25 5 0) 15 25 2 0) 7 13 0 0))"]
     );
-    assert_eq!(ours, rust_trees(text));
 }
 
-/// A reading is a digest of the session's state and the trees read, not a
-/// count (`readings.fx`): the same text parsed twice is the same trees,
-/// readings and all, each the reading `ids::read_in` makes of it, in no
-/// state, by the default switches.
+/// A session's state is of its forms, each read in the state the one before
+/// left (`ids::forms_state`, `readings.fx`'s `form-reading`): the same
+/// however they were split into texts, and the same text parsed twice is
+/// the same trees.
 #[test]
-fn a_reading_is_its_trees_not_a_count() {
+fn a_state_is_its_forms_however_they_are_split() {
+    use fixpt_fx26::ids::forms_state;
+    let set = Default::default();
+    let one = forms_state(9, &set, "(define x int 1)\n(f x)", &[]).expect("reads");
+    let first = forms_state(9, &set, "(define x int 1)", &[]).expect("reads");
+    assert_eq!(one, forms_state(first, &set, " (f x) ; again", &[]).expect("reads"));
+    assert_eq!(forms_state(9, &set, "", &[]), Some(9));
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let text = "(if #t 1 2)";
-    let once = s.parse_with_own_parser(text).expect("parses");
-    assert_eq!(once, s.parse_with_own_parser(text).expect("parses"));
-    let r = fixpt_fx26::ids::read_in(0, &Default::default(), text, &[]).expect("reads");
-    assert!(once[0].ends_with(&format!(" {r}))")), "{once:?}");
+    assert_eq!(s.parse_with_own_parser(text).expect("parses"), s.parse_with_own_parser(text).expect("parses"));
 }
 
 /// Texts that read as the same trees are one reading: no space, comment or
@@ -318,24 +321,43 @@ fn the_readings_agree() {
     let ours = s.run_program(&program).expect("runs").expect("checks");
     let rust: Vec<String> = cases.iter().map(|(s, t)| fixpt_fx26::ids::reading_of(*s, t).expect("reads").to_string()).collect();
     assert_eq!(ours, format!("({})", rust.join(" ")));
+    // A form's, the files it loads first folded in order of their keys.
+    let (form, a, b) = ("(load-module \"b.fx\")", "(define y int 2)", "(+ 1 2)");
+    let file = |k: &str, t: &str| format!("(product (1 {k:?}) (2 {}))", read(t));
+    let call = format!("((with r form-reading) 4 \"native\" (car {}) (list {} {}))", read(form), file("b", b), file("a", a));
+    let ours = s.run_program(&format!("(define er {})\n(define r {})\n{call}\n", load("eager-reader"), load("readings"))).expect("runs").expect("checks");
+    let native = fixpt_fx26::ids::Settings { native: true, ..Default::default() };
+    let loads = vec![("b".to_string(), b.to_string()), ("a".to_string(), a.to_string())];
+    assert_eq!(ours, fixpt_fx26::ids::forms_state(4, &native, form, &[loads]).expect("reads").to_string());
+    // The standard environment's state, and a staged step's reps.
+    let standard = fixpt_fx26::standard::standard_text();
+    let call = format!("((with r standard-state) {})", read(&standard));
+    let ours = s.run_program(&format!("(define er {})\n(define r {})\n{call}\n", load("eager-reader"), load("readings"))).expect("runs").expect("checks");
+    assert_eq!(ours, fixpt_fx26::ids::standard_state().to_string());
+    let bytes = |n: i64, b: u8| format!("(the (bytevectorof @t) (make-bytevector {n} (int->u8 {b})))");
+    let call = format!("((with r with-reps) 5 {} (list (product (1 'a) (2 {}))))", bytes(3, 7), bytes(1, 9));
+    let ours = s.run_program(&format!("(define r {})\n{call}\n", load("readings"))).expect("runs").expect("checks");
+    assert_eq!(ours, fixpt_fx26::ids::with_reps(5, &[7, 7, 7], &[("a".into(), vec![9])]).to_string());
     let text = |s: &str| format!("((with r text-reading-of) -1 {s:?})");
     let ours = s.run_program(&format!("(define r {})\n{}\n", load("readings"), text("syscall x"))).expect("runs").expect("checks");
     assert_eq!(ours, fixpt_fx26::ids::text_reading_of(-1, "syscall x").to_string());
 }
 
-/// A reading is of the switches the checker is set to, and of the files a
-/// text loads, as well as of its trees and the session's state
-/// (`ids::read_in`): what changes what a check finds changes the reading.
+/// A form's reading is of the switches the checker is set to, and of the
+/// files it loads first, as well as of its trees and the session's state
+/// (`ids::forms_state`): what changes what a check finds changes it.
 #[test]
 fn a_reading_is_of_the_switches_and_the_files_loaded() {
-    use fixpt_fx26::ids::{read_in, Settings};
+    use fixpt_fx26::ids::{forms_state, Settings};
     let cellular = Settings::default();
     let native = Settings { native: true, ..cellular };
-    let r = |s: &Settings, loads: &[(String, String)]| read_in(3, s, "(f)", loads).expect("reads");
+    let r = |s: &Settings, loads: &[(String, String)]| forms_state(3, s, "(f)", &[loads.to_vec()]).expect("reads");
     assert_ne!(r(&cellular, &[]), r(&native, &[]));
     let load = |text: &str| [("a.fx".to_string(), text.to_string())];
     assert_ne!(r(&cellular, &load("(define x int 1)")), r(&cellular, &load("(define x int 2)")));
     assert_eq!(r(&cellular, &load("(define x int 1)")), r(&cellular, &load(" (define x int 1) ; one")));
+    let two = |a: &str, b: &str| [(a.to_string(), "1".to_string()), (b.to_string(), "2".to_string())];
+    assert_eq!(r(&cellular, &two("a", "b")), forms_state(3, &cellular, "(f)", &[vec![two("a", "b")[1].clone(), two("a", "b")[0].clone()]]).expect("reads"));
 }
 
 /// The two checkers write their switches alike (`checked-settings`,
@@ -368,8 +390,14 @@ fn a_refused_text_leaves_the_state_as_it_was() {
     assert!(!enter(&mut a, "(define y bool 5)\n"));
     assert_eq!(a.own_reading_state().at, before);
     assert!(enter(&mut a, "(define z int 3)\n") && enter(&mut b, "(define z int 3)\n"));
-    assert_eq!(a.own_reading_state(), b.own_reading_state());
+    assert_eq!(a.own_reading_state().at, b.own_reading_state().at);
     assert_ne!(a.own_reading_state().at, before);
+    // The state the checker written in FX-26 left is the one Rust makes,
+    // from the standard environment's, where the first entry began.
+    let settings = a.own_reading_state().settings;
+    let after = |s: i64, t: &str| fixpt_fx26::ids::forms_state(s, &settings, t, &[]).expect("reads");
+    let begun = fixpt_fx26::ids::standard_state();
+    assert_eq!(a.own_reading_state().at, after(after(begun, "(define x int 1)\n"), "(define z int 3)\n"));
 }
 
 /// The module files built in load no cycle (`TODO.md` §71): found from

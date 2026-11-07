@@ -314,7 +314,7 @@ fn comparison() {
         let std = run(sc, 1, &[st]);
         let std = first(sc, std);
         let t = std::time::Instant::now();
-        let parsed = run(sc, 2, &[syns]);
+        let parsed = run(sc, 2, &[std, syns]);
         let parse = t.elapsed().as_secs_f64();
         let tops = payload(sc, parsed);
         let t = std::time::Instant::now();

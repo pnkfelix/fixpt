@@ -606,12 +606,12 @@
 ;; it is given, saying whether the last form was an expression; `facts`,
 ;; what checking found.
 (define c-program
-  (->* ((subr (maxeff compiles spin) (code) bool) k-facts int) cresult)
-  (lambda (forms facts reading)
+  (->* ((subr (maxeff compiles spin) (code) bool) k-facts numbering) cresult)
+  (lambda (forms facts w)
     (prompt c-tag
       (let ((c (the code (new nil))))
         (begin
-          (c-set-facts! facts reading)
+          (c-set-facts! facts w)
           ;; Constants are a program's own, as the Rust compiler's are
           ;; (`TODO.md` §42; at the REPL, none yet).
           (set r-const-globals nil)
@@ -633,27 +633,15 @@
 ;; it runs (`checked-tops`, under redefinition), and what checking found.
 (define compile-checked
   (->* ((listof k-run acyclic) k-facts) cresult)
-  (lambda (runs facts) (c-program (lambda (c) (c-runs runs c #f)) facts 0)))
+  (lambda (runs facts) (c-program (lambda (c) (c-runs runs c #f)) facts c-no-numbering)))
 
-;; The entry point: a checked program's trees, and what checking found.
+;; The entry point: a checked program's trees, numbered as `w` says (the
+;; parse's, `parse-program`), and what checking found.
 (define compile-program
-  (->* ((listof top acyclic) k-facts) cresult)
-  (lambda (tops facts) (c-program (lambda (c) (c-tops tops c #f)) facts (c-reading-of tops))))
-
-;; The reading `tops` were numbered in (`parser-ids.fx`): an expression's
-;; number over the span of one, for the facts the checker written in Rust
-;; numbers within it (`c-set-facts!`); 0 if none has an expression.
-(define c-reading-of (->* ((listof top acyclic)) int)
-  (lambda (tops)
-    (if (null? tops)
-        0
-        (let ((of (lambda ((x exp)) (exp-reading x))))
-          (tagcase (car tops)
-            (t-define (n ty e a b) (of e))
-            (t-exp (e) (of e))
-            (t-define-rec (bs a b)
-              (if (null? bs) (c-reading-of (cdr tops)) (of (extract (car bs) 3))))
-            (else y (c-reading-of (cdr tops))))))))
+  (->* ((listof top acyclic) k-facts numbering) cresult)
+  (lambda (tops facts w) (c-program (lambda (c) (c-tops tops c #f)) facts w)))
+;; Facts that are the trees' own already, the checker written in FX-26's.
+(define c-no-numbering numbering (product (1 -1) (2 0) (3 nil)))
 
 ;; A session's commit (`sessions.rs`): its forms compiled not into the word,
 ;; which runs them, but into a procedure of no arguments, which the word
@@ -661,18 +649,18 @@
 ;; definition makes is made as it is compiled, in its scope as `c-tops`',
 ;; and filled as the procedure runs; until then, undefined.
 (define compile-deferred
-  (->* ((listof top acyclic) k-facts) cresult)
-  (lambda (tops facts)
-    (c-deferred (lambda (body) (c-tops tops body #f)) facts (c-reading-of tops))))
+  (->* ((listof top acyclic) k-facts numbering) cresult)
+  (lambda (tops facts w)
+    (c-deferred (lambda (body) (c-tops tops body #f)) facts w)))
 ;; The same of what a checked program runs (`checked-tops`, under
 ;; redefinition, a definition and those run again), as `compile-checked`.
 (define compile-checked-deferred
   (->* ((listof k-run acyclic) k-facts) cresult)
-  (lambda (runs facts) (c-deferred (lambda (body) (c-runs runs body #f)) facts 0)))
+  (lambda (runs facts) (c-deferred (lambda (body) (c-runs runs body #f)) facts c-no-numbering)))
 ;; The procedure of no arguments whose body is what `forms` compiles.
 (define c-deferred
-  (->* ((subr (maxeff compiles spin) (code) bool) k-facts int) cresult)
-  (lambda (forms facts reading)
+  (->* ((subr (maxeff compiles spin) (code) bool) k-facts numbering) cresult)
+  (lambda (forms facts w)
     (c-program
      (lambda (c)
        (let ((body (the code (new nil))))
@@ -683,4 +671,4 @@
                        (wcell-word (c-assemble body (string->symbol "session-commit"))))
                 (c-emit c (i-cell (wcell-int 0)))
                 #t)))
-     facts reading))))))
+     facts w))))))

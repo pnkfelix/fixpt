@@ -4035,3 +4035,28 @@ The user read the paper as supporting the distribution. Mine:
   global set beside the call. Every text that reads advances it, those
   refused after included.
 
+## Three keys, stage 2: per form, every mode in both front ends (2026-11-07)
+
+- **The user's calls**: `S` by trees as the reference and `S` by types
+  as a cheaper one checked against facts ("both, validated"); `S` per
+  form, so a session's state does not depend on how its forms were split
+  into texts; `Z` the digest of the child path down from the form, which
+  tells apart what a zipper does, the form fixing the siblings.
+- **What a form's reading folds**, so that the reference is sound by
+  construction, not by each case seen: the state before, the checker's
+  switches, the form's trees, each file it first loads (by key, sorted),
+  and where a checker begins, the standard environment's trees; a staged
+  step, the reps it is checked against.
+- **Modes by the numbers given, not by the comparisons**: each mode
+  decides what the walk writes in an expression's two key fields, and
+  every identity test compares both, so no comparison changes with the
+  mode. `path`'s count never goes back: a refused text, or a try, still
+  advances it, so no number is given twice.
+- **Rust's facts by their place in the walk** (reading -1), the compiler
+  giving each the key the parse gave there: the Rust checker need not
+  know the session's count, nor its state, to key its facts.
+- **The evaluator's forms past any program's**, as `ev-stage-base` puts
+  their places: they run among the program's facts. My first version
+  numbered them at 0, arguing nothing they find is kept; a staging test
+  showed them looked up in the program's tables. The argument had a hole.
+

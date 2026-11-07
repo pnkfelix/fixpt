@@ -30,14 +30,21 @@
            (resolve (select check-resolve-types check-resolve-sig))
            (read-text (subr (select eval-types evals) (string int)
                             (listof (listof (select parser-types syn) acyclic) acyclic)))
-           (parse (subr (select eval-types evals) (int (listof (select parser-types syn) acyclic))
-                        (select parser-types presult))))
+           (parse (subr (select eval-types evals)
+                        ((select parser-types keys) (listof (select parser-types syn) acyclic))
+                        (select parser-types keyed))))
     (module
 (hide (include eval-types) (include parser-types) (include check-env-types)
       (include check-resolve-types) (include check-types-types) (include check-subst-types))
-;; A reading's digest (`readings.fx`): the code read here is read in no
-;; session's state but the standard environment's, 0.
-(define readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
+;; What the code read here (`stage`'s, a session's forms) is numbered by
+;; (`parser-types.fx`'s `keys`): in `path`, past any number of a program's,
+;; as its places are past any of a program's (`ev-stage-base`), so that no
+;; fact of the program's, which it runs among (`ev-withs`, `ev-facts`), is
+;; taken for one of it: no session walks that many expressions, each one
+;; made in the heap. In no session's state, 0, under no switches: in the
+;; other modes, its forms' readings are not a program's, whose switches
+;; name a convention.
+(define ev-keys keys (product (1 0) (2 0) (3 1000000000000) (4 "")))
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 ev-poll as-bool as-fields as-other as-str as-tag efail
         efail-expected ev-eq? eval-tag show-val the-unit)
@@ -510,7 +517,7 @@
       (let ((read (read-text w ev-stage-base)))
         (if (null? read)
             (ev-stage-refused "the code as checked does not read")
-            (tagcase (parse ((with readings reading-of) 0 (car read)) (car read))
+            (tagcase (extract (parse ev-keys (car read)) 1)
               (p-err (msg a b) (ev-stage-refused msg))
               (p-ok (tops)
                 (if (null? tops)
@@ -758,7 +765,7 @@
     (let ((read (read-text w ev-stage-base)))
       (if (null? read)
           (efail "a session's form does not read")
-          (tagcase (parse ((with readings reading-of) 0 (car read)) (car read))
+          (tagcase (extract (parse ev-keys (car read)) 1)
             (p-err (msg a b) (efail msg))
             (p-ok (tops) (if (null? tops) (efail "a session's form is no form") (car tops))))))))
 

@@ -78,7 +78,10 @@
    (val k-end (subr pure (kx) int))
    (val k-kth (subr pure (kx) int))
    (val k-reading (subr pure (kx) int))
-   (val k-last-kth (subr pure (kx) int))
+   (val k-keys-onto
+        (subr (maxeff (alloc @t) (read @globals) spin)
+              (kx (listof (productof (1 int) (2 int)) acyclic))
+              (listof (productof (1 int) (2 int)) acyclic)))
    (val k-at-of (subr pure (kx) k-at))
    (val k-as-subr
         (subr (maxeff (alloc @t) (read @globals) (read @t) spin)

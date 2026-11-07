@@ -230,7 +230,7 @@ fn step_making(rt: &mut Runtime, base: usize, w: &Wrapped, how: i64, name: &str,
     let named = named_list(rt, &named);
     let [standard, whole, name, rep] = [0, 1, 2, 3].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
-    let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers), rep, named];
+    let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), name, Value::boolean(made), Value::boolean(deferred), Value::boolean(native), Value::boolean(registers), rep, named, Value::fixnum(crate::ids::mode() as i64)];
     let out = call(rt, base, E_STEP, &args)?;
     let tag = rt.heap.symbol_name(rt.heap.sum_tag(out));
     let payload = rt.heap.sum_payload(out);

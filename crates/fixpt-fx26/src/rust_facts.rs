@@ -15,7 +15,9 @@ use fixpt_read::FileId;
 use std::collections::HashMap;
 
 /// An expression's identity, as the product `k-at` is: where it starts and
-/// ends, in characters, and which of the expressions there it is.
+/// ends, in characters, and its place in the walk of the forms
+/// (`ids::Kth`), which the compiler makes the key the FX-26 parser gave
+/// there (`c-absolute-at`).
 type At = (i64, i64, i64);
 
 /// What a fact notes, as `k-noted` says it: its constructor's name and its
@@ -33,6 +35,8 @@ pub struct FormFacts {
     facts: Vec<(At, &'static str, Noted)>,
     withs: Vec<(At, Vec<String>, Vec<i64>)>,
     reshapes: Vec<(At, Vec<(i64, Option<i64>)>)>,
+    /// How many expressions the walk took.
+    walked: i64,
 }
 
 /// Where module files' positions begin, each past the one before
@@ -121,22 +125,31 @@ impl FormFacts {
                 (place(*e), picks)
             })
             .collect();
-        FormFacts { facts, withs, reshapes }
+        FormFacts { facts, withs, reshapes, walked: kth.count() as i64 }
     }
 
     /// These, and `more`'s, of a text `by` characters past the start of
-    /// theirs: so that the forms of several texts compile as one.
+    /// theirs, and their walk after this one's: so that the forms of several
+    /// texts compile as one.
     pub fn and_after(mut self, more: FormFacts, by: i64) -> FormFacts {
-        let shift = |(a, b, k): At| if a < LOAD_BASE_STEP { (a + by, b + by, k) } else { (a, b, k) };
+        let walked = self.walked;
+        let shift = |(a, b, k): At| if a < LOAD_BASE_STEP { (a + by, b + by, k + walked) } else { (a, b, k + walked) };
         self.facts.extend(more.facts.into_iter().map(|(at, n, v)| (shift(at), n, v)));
         self.withs.extend(more.withs.into_iter().map(|(at, ns, is)| (shift(at), ns, is)));
         self.reshapes.extend(more.reshapes.into_iter().map(|(at, ps)| (shift(at), ps)));
+        self.walked += more.walked;
         self
+    }
+
+    /// How many expressions the walk of these forms took: how many the
+    /// FX-26 parser numbers of them.
+    pub fn walked(&self) -> i64 {
+        self.walked
     }
 
     /// None.
     pub fn none() -> FormFacts {
-        FormFacts { facts: Vec::new(), withs: Vec::new(), reshapes: Vec::new() }
+        FormFacts { facts: Vec::new(), withs: Vec::new(), reshapes: Vec::new(), walked: 0 }
     }
 
     /// The facts, a `k-facts`, the last found first, as `syn::rust_facts`
@@ -208,11 +221,11 @@ impl FormFacts {
 const PRODUCT: u8 = fixpt_heap::layout::kind("product");
 const SUM: u8 = fixpt_heap::layout::kind("sum");
 
-/// An identity, as the product `k-at` is: of reading 0, numbered within
-/// the reading the FX-26 parser will make of the text, which the compiler
-/// gives it (`c-absolute-at`).
+/// An identity, as the product `k-at` is: of reading -1, its number its
+/// place in the walk, the key the FX-26 parser gives there not known yet,
+/// which the compiler gives it (`c-absolute-at`).
 fn identity(heap: &mut Heap, (a, b, k): At) -> Value {
-    heap.make_frozen(PRODUCT, &[Value::fixnum(a), Value::fixnum(b), Value::fixnum(k), Value::fixnum(0)])
+    heap.make_frozen(PRODUCT, &[Value::fixnum(a), Value::fixnum(b), Value::fixnum(k), Value::fixnum(-1)])
 }
 
 /// A datatype's value: a sum of its constructor's name and the product of

@@ -114,9 +114,9 @@ pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span, k
 
 fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
     let sp = c.arena.span_of(e);
-    // Its reading 0: the Rust front end numbers within a reading
-    // (`ids.rs`), which the parser written in FX-26 numbers.
-    let (a, b) = (chars.at(sp.start), format!("{} {} 0", chars.at(sp.end), kth.of(e)));
+    // Its key, as the walk made it (`ids::Kth::key`).
+    let (k, kr) = kth.key(e);
+    let (a, b) = (chars.at(sp.start), format!("{} {k} {kr}", chars.at(sp.end)));
     let name = |s| c.interner.name(s).to_string();
     let go = |x: ExpId| show_exp(c, chars, x, kth);
     let list = |xs: Vec<String>| format!("({})", xs.join(" "));

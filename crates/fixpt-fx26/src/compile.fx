@@ -62,7 +62,7 @@
 ;; What the checker found, by expression (`compile-facts.fx`): all it
 ;; defines, given on.
 (import compile-facts c-facts c-int-hash c-int=? c-span-key c-at-hash c-at-is? c-at=? c-noted-in
-        c-absolute-at c-reading
+        c-absolute-at c-set-numbering!
         c-noted-at c-noted-of c-note! c-new-by-at c-fact-table c-lifts c-lift-count c-lifted
         c-lifting-added c-summary-table c-convert-table c-conversion-at c-staged-texts c-staged-at
         c-staged-find c-shares-table c-frozen-table c-plain-table c-plain-fx-at c-frozen-define-at
@@ -359,12 +359,12 @@
                                  out))))))
       ;; Twice, so that they are in the order given.
       (onto (onto fs nil) nil))))
-;; `c-facts` into `c-fact-table`, their numbers reading `r`'s, if they are
-;; numbered within it (0: they are the reading's already).
-(define c-set-facts! (->* (k-facts int) unit)
-  (lambda (fs r)
+;; `c-facts` into `c-fact-table`, those numbered by their place in the walk
+;; given the keys `w` gave there (`c-absolute-at`).
+(define c-set-facts! (->* (k-facts numbering) unit)
+  (lambda (fs w)
     (begin
-      (set c-reading r)
+      (c-set-numbering! w)
       (set c-facts (c-absolute-facts fs))
       (set c-fact-table (make-table c-int-hash c-int=?))
       (set c-call-table (make-table c-int-hash c-int=?))

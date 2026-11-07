@@ -25,6 +25,69 @@
   (lambda (s forms)
     (let ((h (fold-trees (bitwise-and s 1099511627775) forms))) (if (= h 0) 1 h))))
 
+;; A form's reading (`docs/research/loads-and-places.md`, "Decided: three
+;; keys"): the session's state before it, `s`, folded with the switches the
+;; checker is set to (`checked-settings`), the form's trees, and each file
+;; the form loads first, by its key and its trees, in the order of the
+;; keys; never 0. The state after the form, which the next is read in: so a
+;; session's state is the same however its forms were split into texts.
+;; `ids.rs`'s `form_reading` is the same function.
+(define-type loads (listof (productof (1 string) (2 (listof syn acyclic))) acyclic))
+(define form-reading (->* (int string syn loads) int)
+  (lambda (s settings form ls)
+    (let ((h (fold-loads (fold-tree (fold-text (bitwise-and s 1099511627775) settings) form)
+                         (sort-loads ls nil))))
+      (if (= h 0) 1 h))))
+;; Each file: its key after mark 17, its trees, an end.
+(define fold-loads (->* (int loads) int)
+  (lambda (h ls)
+    (if (null? ls)
+        h
+        (fold-loads (fold1 (fold-trees (fold-run h 17 (extract (car ls) 1)) (extract (car ls) 2))
+                           (mark 0))
+                    (cdr ls)))))
+;; `ls` in the order of their keys, onto `out`, sorted.
+(define sort-loads (->* (loads loads) loads)
+  (lambda (ls out) (if (null? ls) out (sort-loads (cdr ls) (insert-load (car ls) out)))))
+(define insert-load (->* ((productof (1 string) (2 (listof syn acyclic))) loads) loads)
+  (lambda (l out)
+    (cond ((null? out) (the loads (cons l nil)))
+          ((string<? (extract l 1) (extract (car out) 1)) (the loads (cons l out)))
+          (else (the loads (cons (car out) (insert-load l (cdr out))))))))
+
+;; A session's state where its checker begins in the standard environment
+;; `standard` (as read): its trees' reading, in no state before
+;; (`ids.rs`'s `standard_state`).
+(define standard-state (->* ((listof syn acyclic)) int) (lambda (standard) (reading-of 0 standard)))
+;; The state `s`, as a staged step's text is read in it: with the type it is
+;; checked against, `rep`, and the types its names are given, `named`, each
+;; a rep's bytes, folded in (`ids.rs`'s `with_reps`): what checking it reads
+;; beside the session's state and its trees. None, `s` as it is.
+(define with-reps
+  (->* (int (bytevectorof @t) (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic)) int)
+  (lambda (s rep named)
+    (letrec ((go (subr (maxeff (read @globals) (read @t) spin)
+                       (int (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic)) int)
+               (lambda (h ns)
+                 (if (null? ns)
+                     h
+                     (go (fold-rep (fold-run h 19 (symbol->string (extract (car ns) 1)))
+                                   (extract (car ns) 2))
+                         (cdr ns))))))
+      (if (and (= (bytevector-length rep) 0) (null? named))
+          s
+          (let ((h (go (fold-rep (fold1 (bitwise-and s 1099511627775) (mark 18)) rep) named)))
+            (if (= h 0) 1 h))))))
+;; A rep's bytes, then an end.
+(define fold-rep (->* (int (bytevectorof @t)) int)
+  (lambda (h b)
+    (letrec ((go (subr (maxeff (read @globals) (read @t) spin) (int int) int)
+               (lambda (i h)
+                 (if (>= i (bytevector-length b))
+                     (fold1 h (mark 0))
+                     (go (+ i 1) (fold1 h (u8->int (bytevector-u8-ref b i))))))))
+      (go 0 h))))
+
 ;; The reading of a text that is no trees (a syscall's definitions, which
 ;; the checker makes): its characters, in `s`, `reading-of`'s fold.
 (define text-reading-of (->* (int string) int)
@@ -55,7 +118,9 @@
 ;; dot, 5 a vector, 6 a name, 7 a keyword, 8 a string, 9 a character, 10 an
 ;; integer, 11 a float (its bits), 12 true, 13 false, 14 a bytevector, its
 ;; bytes, 15 a ratio's numerator and then its denominator, in lowest terms,
-;; 16 any other atom, of which the reader makes none.
+;; 16 any other atom, of which the reader makes none; 17 a file loaded
+;; (`form-reading`), 18 a staged step's rep, 19 a name it gives a type
+;; (`with-reps`).
 (define fold-tree (->* (int syn) int)
   (lambda (h x)
     (tagcase x

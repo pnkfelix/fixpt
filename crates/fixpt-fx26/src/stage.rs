@@ -177,7 +177,7 @@ fn compiled(rt: &mut Runtime, w: &Wrapped, rep: &[u8]) -> Result<Result<Value, V
     let (check, settings, whole) = (rt.heap.root_at(base), rt.heap.root_at(base + 1), rt.heap.root_at(base + 2));
     rt.heap.pop_roots_to(base);
     let field = |rt: &Runtime, i: usize| rt.heap.product_field(settings, i);
-    let args = [field(rt, 1), whole, Value::fixnum(w.skip), Value::fixnum(w.len), field(rt, 2), field(rt, 3), rep];
+    let args = [field(rt, 1), whole, Value::fixnum(w.skip), Value::fixnum(w.len), field(rt, 2), field(rt, 3), rep, Value::fixnum(crate::ids::mode() as i64)];
     // The front end is licensed code, which ends: no step limit of the
     // program's is its.
     let fuel = std::mem::replace(&mut rt.word_fuel, u64::MAX);

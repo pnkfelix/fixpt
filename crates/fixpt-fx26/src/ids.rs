@@ -35,7 +35,7 @@ pub fn reading_of(s: i64, text: &str) -> Option<i64> {
 /// The switches a driver set that change what a check finds, as text, as
 /// the checker written in FX-26 writes its own (`checked-settings`): the
 /// program's convention, then each switch on. Folded into each reading
-/// ([`read_in`]), so that a text read under other switches is another.
+/// ([`form_reading`]), so that a text read under other switches is another.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Settings {
     pub native: bool,
@@ -71,27 +71,103 @@ impl Settings {
 }
 
 /// What a text is read in: the session's state `at` (0 where it begins),
-/// and the switches its checker is set to. Given to each entry that reads
-/// (`syn.rs`), which leaves `at` the state after, the reading it made, if
-/// the checker kept the text; else as it was: a text refused, or tried,
-/// leaves the session as it was.
+/// how many expressions the session has walked (`path`'s numbers go on from
+/// there), and the switches its checker is set to. Given to each entry that
+/// reads (`syn.rs`), which leaves `at` the state after if the checker kept
+/// the text, else as it was (a text refused, or tried, leaves the session
+/// as it was), and `walked` past the text's, kept or not: no number is
+/// given twice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct State {
     pub at: i64,
+    pub walked: i64,
     pub settings: Settings,
 }
 
-/// The reading of `text`, read in the session's state `s` under switches
-/// `settings`, each file it loads (`loads`, each its key and its text, or
-/// why it could not be read, in the order they were read) folded after it:
-/// what the parser is given is all of them (`syn::supply_loaded_at`). None
-/// if `text` does not read.
-pub fn read_in(s: i64, settings: &Settings, text: &str, loads: &[(String, String)]) -> Option<i64> {
-    let r = reading_of(text_reading_of(s, &settings.text()), text)?;
-    Some(loads.iter().fold(r, |h, (key, file)| {
-        let h = text_reading_of(h, key);
-        reading_of(h, file).unwrap_or_else(|| text_reading_of(h, file))
-    }))
+/// What an expression's key is made of (`docs/research/loads-and-places.md`,
+/// "Decided: three keys"; `parser-ids.fx`): `Path`, its place in the
+/// session's walk, the cheap key, by default; `Digest`, its place in its
+/// form's, beside the form's reading; `Full`, the digest of its path down
+/// the form, beside the form's reading; `Validate`, `Full`'s, the others
+/// checked against it. As `FIXPT_FACT_KEYS` says (`path`, `digest`, `full`,
+/// `validate`), once for the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Path = 0,
+    Digest = 1,
+    Full = 2,
+    Validate = 3,
+}
+
+/// The process's mode, as `FIXPT_FACT_KEYS` says.
+pub fn mode() -> Mode {
+    static MODE: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var("FIXPT_FACT_KEYS").as_deref() {
+        Ok("digest") => Mode::Digest,
+        Ok("full") => Mode::Full,
+        Ok("validate") => Mode::Validate,
+        _ => Mode::Path,
+    })
+}
+
+/// A form's reading (`readings.fx`'s `form-reading`, the same function):
+/// the session's state before it, `s`, folded with the switches the checker
+/// is set to, the form's trees, and each file the form loads first, by its
+/// key and its trees (or its text, if it does not read), in the order of
+/// the keys; never 0. The state after the form, which the next is read in.
+pub fn form_reading(s: i64, settings: &Settings, form: &Syntax, names: &Interner, loads: &[(String, String)]) -> i64 {
+    let mut loads: Vec<&(String, String)> = loads.iter().collect();
+    loads.sort_by(|a, b| a.0.cmp(&b.0));
+    let h = fold_tree(fold_text(s & MASK, &settings.text()), form, names);
+    let h = loads.iter().fold(h, |h, (key, file)| {
+        let h = fold_run(h, 17, key);
+        let mut names = Interner::new();
+        let h = match fixpt_read::Reader::new(file, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut names).read_all() {
+            Ok(trees) => trees.iter().fold(h, |h, t| fold_tree(h, t, &names)),
+            Err(_) => fold_text(h, file),
+        };
+        fold1(h, mark(0))
+    });
+    if h == 0 { 1 } else { h }
+}
+
+/// The session's state after `text`, read in `s` under `settings`, each of
+/// its forms in turn ([`form_reading`]), the files the `i`th loads first
+/// `loads[i]` (none past the end); none if it does not read. A text with no
+/// form leaves it as it was.
+pub fn forms_state(s: i64, settings: &Settings, text: &str, loads: &[Vec<(String, String)>]) -> Option<i64> {
+    let mut names = Interner::new();
+    let forms = fixpt_read::Reader::new(text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut names).read_all().ok()?;
+    Some(forms.iter().enumerate().fold(s, |s, (i, f)| form_reading(s, settings, f, &names, loads.get(i).map_or(&[][..], |l| &l[..]))))
+}
+
+/// A session's state where its checker begins in the standard environment
+/// (`readings.fx`'s `standard-state`): the reading of its trees, in no
+/// state before; the text of this build's (`standard::standard_text`).
+pub fn standard_state() -> i64 {
+    static STATE: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *STATE.get_or_init(|| reading_of(0, &crate::standard::standard_text()).unwrap_or(0))
+}
+
+/// The state `s`, as a staged step's text is read in it: with the type it
+/// is checked against, `rep`, and the types its names are given, `named`,
+/// each a rep's bytes, folded in (`readings.fx`'s `with-reps`); none, `s`
+/// as it is.
+pub fn with_reps(s: i64, rep: &[u8], named: &[(String, Vec<u8>)]) -> i64 {
+    if rep.is_empty() && named.is_empty() {
+        return s;
+    }
+    let rep_of = |h: i64, b: &[u8]| fold1(b.iter().fold(h, |h, x| fold1(h, *x as i64)), mark(0));
+    let h = named.iter().fold(rep_of(fold1(s & MASK, mark(18)), rep), |h, (n, b)| rep_of(fold_run(h, 19, n), b));
+    if h == 0 { 1 } else { h }
+}
+
+impl State {
+    /// Where a checker begins, in the standard environment: its state
+    /// ([`standard_state`]), nothing walked, the default switches.
+    pub fn begun() -> State {
+        State { at: standard_state(), walked: 0, settings: Settings::default() }
+    }
 }
 
 /// The reading of `trees`, read in `s`, their names in `names`.
@@ -168,17 +244,50 @@ fn integer(n: &Num) -> BigInt {
     }
 }
 
-/// Each expression walked, its number.
+/// Each expression walked, its place in the walk; and, walked form by form
+/// ([`Kth::keyed`], [`Kth::form`]), its key as the mode makes it, as the
+/// FX-26 parser does (`parser-ids.fx`).
 #[derive(Default)]
 pub struct Kth {
     /// How many have been walked.
     seen: u32,
     of: HashMap<ExpId, u32>,
+    keys: HashMap<ExpId, (i64, i64)>,
+    /// The mode, if the walk keys by one.
+    mode: Option<Mode>,
+    /// How many the session walked before the form; how many of the form
+    /// have been walked; the form's reading (0 in `path`); and, in `full`,
+    /// the frames down the form: each expression around the one walked,
+    /// the innermost last, by its path's digest and how many of what is in
+    /// it have been walked.
+    walked: i64,
+    in_form: i64,
+    reading: i64,
+    frames: Vec<(i64, i64)>,
 }
 
 impl Kth {
     pub fn new() -> Kth {
         Kth::default()
+    }
+
+    /// A walk that keys by `mode`, the session having walked `walked`.
+    pub fn keyed(mode: Mode, walked: i64) -> Kth {
+        Kth { mode: Some(mode), walked, ..Kth::default() }
+    }
+
+    /// The expressions of a form's trees `tops` (what it makes, after the
+    /// hidden globals of the files it loads first), of its reading `r`
+    /// ([`form_reading`]).
+    pub fn form(&mut self, c: &Checker, r: i64, tops: &[&Top]) {
+        let mode = self.mode.unwrap_or(Mode::Path);
+        self.in_form = 0;
+        self.reading = if mode == Mode::Path { 0 } else { r };
+        self.frames = vec![(r, 0)];
+        for t in tops {
+            self.top(c, t);
+        }
+        self.walked += self.in_form;
     }
 
     /// The expressions of `top`, the next of the program's forms.
@@ -191,6 +300,11 @@ impl Kth {
         }
     }
 
+    /// How many expressions have been walked.
+    pub fn count(&self) -> u32 {
+        self.seen
+    }
+
     /// Whether `e` was walked: one of the forms' given.
     pub fn walked(&self, e: ExpId) -> bool {
         self.of.contains_key(&e)
@@ -201,13 +315,55 @@ impl Kth {
         self.of.get(&e).copied().unwrap_or(0)
     }
 
+    /// `e`'s key, its number and its reading: as the mode makes it, if the
+    /// walk keys by one; else its place, of reading 0.
+    pub fn key(&self, e: ExpId) -> (i64, i64) {
+        self.keys.get(&e).copied().unwrap_or((self.of(e) as i64, 0))
+    }
+
     fn exp(&mut self, c: &Checker, e: ExpId) {
         self.of.insert(e, self.seen);
         self.seen += 1;
+        let deep = matches!(self.mode, Some(Mode::Full | Mode::Validate));
+        if let Some(mode) = self.mode {
+            let k = match mode {
+                Mode::Path => self.walked + self.in_form,
+                Mode::Digest => self.in_form,
+                Mode::Full | Mode::Validate => {
+                    let up = self.frames.last_mut().expect("a form's frame");
+                    let z = fold1(up.0, up.1);
+                    up.1 += 1;
+                    self.frames.push((z, 0));
+                    z
+                }
+            };
+            self.keys.insert(e, (k, self.reading));
+            self.in_form += 1;
+        }
         for x in within(c, e) {
             self.exp(c, x);
         }
+        if deep {
+            self.frames.pop();
+        }
     }
+}
+
+/// The files the hidden globals `hoisted` are, which a form loads first,
+/// each by its key and its text, as [`form_reading`] takes them: a hidden
+/// global is `%shared:` and its key, its value the file's module, which
+/// the checker read (`Checker::loaded`).
+pub fn form_loads(c: &Checker, hoisted: &[&Top]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for t in hoisted {
+        let Top::Define { name, exp, .. } = t else { continue };
+        let Some(key) = c.interner.name(*name).strip_prefix("%shared:") else { continue };
+        let inside = subtrees(c, &[*exp]);
+        if let Some((_, text, _)) = inside.iter().find_map(|x| c.loaded.get(x)) {
+            out.push((key.to_string(), text.clone()));
+        }
+    }
+    out
 }
 
 /// `roots` and every expression in them: what is inside one, by the trees'

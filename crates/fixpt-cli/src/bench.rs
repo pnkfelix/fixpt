@@ -571,7 +571,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         let lines = std::env::var_os("FIXPT_BENCH_LINES").is_some();
         fixpt_fx26::syn::lines(sc, lines).map_err(|e| e.to_string())?;
         let (fx_check, ()) = fx_phase(sc, r("fx check"), |sc| {
-            let r = sc.call_global(&reader("check-program"), &[standard, tops]).map_err(|e| e.to_string())?;
+            let r = sc.call_global(&reader("check-program"), &[standard, tops.tops]).map_err(|e| e.to_string())?;
             let tag = sc.view(|v| v.get(r).sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default());
             if tag == "k-ok" { Ok(()) } else { Err("the checker written in FX-26 finds it wrong".to_string()) }
         })?;
@@ -579,7 +579,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         let on = sc.make(|_| Value::TRUE);
         sc.call_global(&reader("compile-registers!"), &[on]).map_err(|e| e.to_string())?;
         let fx_words = fx_phase(sc, r("fx words"), |sc| {
-            let made = fixpt_fx26::syn::compile_trees_to_word(sc, file, tops, facts).map_err(msg)?;
+            let made = fixpt_fx26::syn::compile_trees_to_word(sc, file, &tops, facts).map_err(msg)?;
             made.map(|_| ()).map_err(|e| format!("the compiler written in FX-26: {e}"))
         });
         let off = sc.make(|_| Value::FALSE);

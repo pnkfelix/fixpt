@@ -18,6 +18,8 @@
 ;; What compiling may do, of the compiler's types (`compile-types.fx`).
 (define compile-types (load-module "fx26:compile-types.fx"))
 (define-effect compiles (select compile-types compiles))
+;; What the checker tells the compiler (`check-env-types.fx`).
+(define check-env-types (load-module "fx26:check-env-types.fx"))
 ;; What checking may do, of the checker's types (`check-types-types.fx`).
 (define check-types-types (load-module "fx26:check-types-types.fx"))
 (define-effect checks (select check-types-types checks))
@@ -31,9 +33,19 @@
           (cons (eager-state-syntax st) nil)
           nil))))
 
-;; A reading's digest (`readings.fx`): a program here is read in no
-;; session's state, 0, under the checker's switches (`checked-settings`).
+;; A program's forms parsed (`parse-program`): read in the standard
+;; environment `std`'s state (`standard-state`), by `path`, under the
+;; checker's switches (`checked-settings`).
 (define readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
+(define b-parse
+  (lambda ((std (listof syn acyclic)) (forms (listof syn acyclic)))
+    (let ((s ((with readings standard-state) std)))
+      (extract (parse-program (product (1 0) (2 s) (3 0) (4 (checked-settings))) forms) 1))))
+;; A program's trees compiled with what the checker written in FX-26 found,
+;; the trees' own keys.
+(define b-compile
+  (lambda ((tops (listof top acyclic)) (facts (select check-env-types k-facts)))
+    (compile-program tops facts (product (1 -1) (2 0) (3 nil)))))
 
 ;; `program`, checked in the initial environment written `standard`
 ;; (`(name type)` for each binding), and compiled.
@@ -43,10 +55,7 @@
       (if (or (null? std) (null? prog))
           (b-fail "the reader could not read the text")
           (tagcase (begin (check-lines! #f)
-                          (parse-program ((with readings reading-of)
-                                          ((with readings text-reading-of) 0 (checked-settings))
-                                          (car prog))
-                                         (car prog)))
+                          (b-parse (car std) (car prog)))
             (p-err (m a b) (b-fail (string-append "parse: " m)))
             (p-ok (tops)
               (tagcase (check-program (car std) tops)
@@ -57,6 +66,6 @@
                     (c-err (m) (b-fail (string-append "compile: " m)))))
                 (k-done (te) (b-fail "check: no result")))))))))
 
-(product (1 bootstrap) (2 b-read) (3 parse-program) (4 check-program)
-         (5 compile-program) (6 checked-extracts) (7 native-assemble) (8 compile-registers!)
+(product (1 bootstrap) (2 b-read) (3 b-parse) (4 check-program)
+         (5 b-compile) (6 checked-extracts) (7 native-assemble) (8 compile-registers!)
          (9 loaded-files!) (10 native-assemble-x64))
