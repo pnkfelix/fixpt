@@ -412,23 +412,44 @@ both front ends.
   ratio's parts), the standard gained what reaches them
   (`datum-bytevector-length`, `datum-bytevector-ref`, `datum-rational?`,
   `datum-numerator`, `datum-denominator`). The state
-  `s`, each kept by what owns the state it stands for, each the digest of
-  the trees of every text read since it began (so the last reading); a
-  text that does not read leaves it as it was, saying nothing:
-  - a program alone, the bootstrap, a staged check, the evaluator's
-    staged code: 0, the standard environment;
-  - the REPL's checker written in FX-26 (`Fx26Session::own_state`, 0
-    where it begins again): each text it checks, evaluates or compiles;
-  - a staging session on the Rust checker (`sessions.rs`'s `digest`):
-    made of the texts it has read, kept nowhere beside;
-  - a staging session on the checker written in FX-26: its front end's
-    own `step-state`, kept with the checker's state it stands for, 0 at
-    its first step.
-  A syscall's definitions, which the checker makes, are the reading of
+  `s` is kept by what owns the state it stands for (stage 2a, below, for
+  where, and which texts advance it). A syscall's definitions, which the checker makes, are the reading of
   the text they are made of, no trees (`text-reading-of`), in state -1. Not yet chained: the evaluator's
   session forms (`ev-session-top`), read at 0; no table outlives one
   check there, so equal texts sharing a reading share nothing wrong.
-- **For stage 2**: `S` above is the session's state as each owner has
-  read it; what stage 2 adds is `S` folded from what the session
-  defines (types by `ty_digest`, and the rest the table above lists),
-  and `F`.
+- **Stage 2, decided** (2026-11-07, the user's choice of "both,
+  validated"): two `S`. The reference, `S` by trees: the session's state
+  is the reading of the last text its checker kept, so it is of the trees
+  of every text kept, in order; a text refused, or tried, leaves it as it
+  was. The cheaper, `S` by types: each definition's name and type, each
+  type's definition, macro, load and convention, by a type digest written
+  in both languages; checked in `validate` against the facts, as `path`
+  is: where two occurrences share an `S`-by-types key and not an
+  `S`-by-trees one, their facts must agree, or `S` by types has left out
+  what checking reads (bodies do matter: inlining, frozen definitions,
+  certificates). Then `Z`, then `validate`.
+- **Stage 2a done, `S` by trees** (2026-11-07). Each reading is
+  `read_in(S, switches, text, loads)`: the trees of the text, read in the
+  state `S`, with the switches that change what the checker finds folded
+  in first (the program's convention, `globals-effects`, `defer-reruns`,
+  `syscalls`, inside a module file built in; `ids::Settings`, the checker
+  written in FX-26's `checked-settings`, tested to write them alike), and
+  after them each file the text loads, by its key and its trees (or why it
+  could not be read), in the order read (`supply_loaded_at`). The trees
+  of a `load-module` form are not the file's, and a file changed on disk
+  is another program. Where `S` lives, each kept where the checker's
+  state is, each the reading of the last text that checker kept:
+  - `Fx26Session::own_state`: each entry point that reads takes an
+    `ids::State` (the state and the switches) and leaves the state after
+    in it if the checker kept the text (`syn.rs`); 0 where it begins
+    again;
+  - a staging session on the Rust checker (`sessions.rs`'s `kept`,
+    `State::state` folding the Rust checker's switches as
+    `session-compile` takes them): each definition kept and each commit;
+    a try is not;
+  - a staging session on the checker written in FX-26 (the conductor's
+    `step-state`): a first step that checks, a step that checks more; not
+    a try.
+  A program alone, the bootstrap, a staged check: 0, the switches its
+  checker is set to folded in (`read-in`). Not yet: the evaluator's
+  forms, read at 0 under no switches (`eval-core.fx`).

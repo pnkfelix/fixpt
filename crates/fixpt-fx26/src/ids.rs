@@ -32,6 +32,68 @@ pub fn reading_of(s: i64, text: &str) -> Option<i64> {
     Some(trees_reading_of(s, &trees, &names))
 }
 
+/// The switches a driver set that change what a check finds, as text, as
+/// the checker written in FX-26 writes its own (`checked-settings`): the
+/// program's convention, then each switch on. Folded into each reading
+/// ([`read_in`]), so that a text read under other switches is another.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Settings {
+    pub native: bool,
+    pub globals_effects: bool,
+    pub defer_reruns: bool,
+    pub syscalls: bool,
+    pub built_in: bool,
+}
+
+impl Settings {
+    /// The switches checker `c` is set to.
+    pub fn of(c: &Checker) -> Settings {
+        Settings {
+            native: c.conv_default == crate::ast::Conv::Native,
+            globals_effects: c.globals_effects,
+            defer_reruns: c.defer_reruns,
+            syscalls: c.syscalls,
+            built_in: c.in_built_in > 0,
+        }
+    }
+
+    pub fn text(&self) -> String {
+        let on = |b: bool, s: &'static str| if b { s } else { "" };
+        format!(
+            "{}{}{}{}{}",
+            if self.native { "native" } else { "cellular" },
+            on(self.globals_effects, " globals-effects"),
+            on(self.defer_reruns, " defer-reruns"),
+            on(self.syscalls, " syscalls"),
+            on(self.built_in, " built-in")
+        )
+    }
+}
+
+/// What a text is read in: the session's state `at` (0 where it begins),
+/// and the switches its checker is set to. Given to each entry that reads
+/// (`syn.rs`), which leaves `at` the state after, the reading it made, if
+/// the checker kept the text; else as it was: a text refused, or tried,
+/// leaves the session as it was.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct State {
+    pub at: i64,
+    pub settings: Settings,
+}
+
+/// The reading of `text`, read in the session's state `s` under switches
+/// `settings`, each file it loads (`loads`, each its key and its text, or
+/// why it could not be read, in the order they were read) folded after it:
+/// what the parser is given is all of them (`syn::supply_loaded_at`). None
+/// if `text` does not read.
+pub fn read_in(s: i64, settings: &Settings, text: &str, loads: &[(String, String)]) -> Option<i64> {
+    let r = reading_of(text_reading_of(s, &settings.text()), text)?;
+    Some(loads.iter().fold(r, |h, (key, file)| {
+        let h = text_reading_of(h, key);
+        reading_of(h, file).unwrap_or_else(|| text_reading_of(h, file))
+    }))
+}
+
 /// The reading of `trees`, read in `s`, their names in `names`.
 pub fn trees_reading_of(s: i64, trees: &[Syntax], names: &Interner) -> i64 {
     let h = trees.iter().fold(s & MASK, |h, t| fold_tree(h, t, names));

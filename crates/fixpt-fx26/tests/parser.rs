@@ -274,14 +274,15 @@ fn a_tree_as_text() {
 
 /// A reading is a digest of the session's state and the trees read, not a
 /// count (`readings.fx`): the same text parsed twice is the same trees,
-/// readings and all, each the reading `ids::reading_of` makes of it.
+/// readings and all, each the reading `ids::read_in` makes of it, in no
+/// state, by the default switches.
 #[test]
 fn a_reading_is_its_trees_not_a_count() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let text = "(if #t 1 2)";
     let once = s.parse_with_own_parser(text).expect("parses");
     assert_eq!(once, s.parse_with_own_parser(text).expect("parses"));
-    let r = fixpt_fx26::ids::reading_of(0, text).expect("reads");
+    let r = fixpt_fx26::ids::read_in(0, &Default::default(), text, &[]).expect("reads");
     assert!(once[0].ends_with(&format!(" {r}))")), "{once:?}");
 }
 
@@ -320,6 +321,55 @@ fn the_readings_agree() {
     let text = |s: &str| format!("((with r text-reading-of) -1 {s:?})");
     let ours = s.run_program(&format!("(define r {})\n{}\n", load("readings"), text("syscall x"))).expect("runs").expect("checks");
     assert_eq!(ours, fixpt_fx26::ids::text_reading_of(-1, "syscall x").to_string());
+}
+
+/// A reading is of the switches the checker is set to, and of the files a
+/// text loads, as well as of its trees and the session's state
+/// (`ids::read_in`): what changes what a check finds changes the reading.
+#[test]
+fn a_reading_is_of_the_switches_and_the_files_loaded() {
+    use fixpt_fx26::ids::{read_in, Settings};
+    let cellular = Settings::default();
+    let native = Settings { native: true, ..cellular };
+    let r = |s: &Settings, loads: &[(String, String)]| read_in(3, s, "(f)", loads).expect("reads");
+    assert_ne!(r(&cellular, &[]), r(&native, &[]));
+    let load = |text: &str| [("a.fx".to_string(), text.to_string())];
+    assert_ne!(r(&cellular, &load("(define x int 1)")), r(&cellular, &load("(define x int 2)")));
+    assert_eq!(r(&cellular, &load("(define x int 1)")), r(&cellular, &load(" (define x int 1) ; one")));
+}
+
+/// The two checkers write their switches alike (`checked-settings`,
+/// `Settings::text`), as each reading folds them.
+#[test]
+fn the_switches_are_written_alike() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    for (native, effects, defer) in [(false, false, false), (true, true, false), (false, true, true)] {
+        s.set_native_convention(native);
+        s.set_globals_effects(effects);
+        s.set_defer_reruns(defer);
+        let ours = s.own_settings_text().expect("writes them");
+        assert_eq!(ours, s.own_reading_state().settings.text());
+    }
+}
+
+/// A session's state is what its checker kept: a text refused leaves it as
+/// it was, so that a session that never saw it is in the same state.
+#[test]
+fn a_refused_text_leaves_the_state_as_it_was() {
+    use fixpt_fx26::session::Strategy;
+    let session = || Fx26Session::with_backend_preloaded_in(Backend::Bytecode, None, false, Strategy::Cellular).expect("starts");
+    let enter = |s: &mut Fx26Session, text: &str| {
+        let forms = s.read_entry("t", text).expect("reads");
+        forms.iter().map(|f| s.run(f).is_ok()).all(|ok| ok)
+    };
+    let (mut a, mut b) = (session(), session());
+    assert!(enter(&mut a, "(define x int 1)\n") && enter(&mut b, "(define x int 1)\n"));
+    let before = a.own_reading_state().at;
+    assert!(!enter(&mut a, "(define y bool 5)\n"));
+    assert_eq!(a.own_reading_state().at, before);
+    assert!(enter(&mut a, "(define z int 3)\n") && enter(&mut b, "(define z int 3)\n"));
+    assert_eq!(a.own_reading_state(), b.own_reading_state());
+    assert_ne!(a.own_reading_state().at, before);
 }
 
 /// The module files built in load no cycle (`TODO.md` §71): found from

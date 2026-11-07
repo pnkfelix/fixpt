@@ -459,6 +459,13 @@
          ;; standard environment alone, and compiled to the word that makes
          ;; the procedure the wrapping is. Or why not, as `stage-failure`
          ;; says it, placed in the code.
+         ;; The reading of `trees`, read in the session's state `s` under the
+         ;; switches the checker is set to now (`checked-settings`), which
+         ;; change what it finds (`readings.fx`).
+         (read-in
+          (lambda ((s int) (trees (listof syn acyclic)))
+            (reading-of ((with readings text-reading-of) s ((with check-program checked-settings)))
+                        trees)))
          ;; A refusal as `stage-failure` says it; and place `n` of the text
          ;; checked, in the code, which starts at `k`.
          (fail
@@ -496,7 +503,7 @@
             ;; `len` characters at `k` of it; and the type it is checked as,
             ;; as a rep, which `whole` names `%stage-type`, if not empty
             ;; (`check-staged-program`). Read in no session's state but the
-            ;; standard environment's, 0 (`readings.fx`).
+            ;; standard environment's, 0, under its convention (`read-in`).
             (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int)
                      (native bool) (registers bool) (rep (bytevectorof @t)))
               (let ((read (read-text-at whole 0)))
@@ -505,7 +512,8 @@
                     (begin
                       (loaded-files! nil)
                       (includes-given! nil)
-                      (tagcase (parse-program (reading-of 0 (car read)) (car read))
+                      ((with check-print-parts check-conv-native!) native)
+                      (tagcase (parse-program (read-in 0 (car read)) (car read))
                         (p-err (m a b)
                           (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
                         (p-ok (tops) (checked standard tops k len native registers rep)))))))))
@@ -523,17 +531,17 @@
                     (loaded-files! nil)
                     (includes-given! nil)
                     ((with check-program check-lines!) #f)
-                    (tagcase (parse-program (reading-of s (car read)) (car read))
+                    (tagcase (parse-program (read-in s (car read)) (car read))
                       (p-err (m a b) m)
                       (p-ok (tops)
                         (tagcase ((with check-program check-more-typed) tops named)
                           (k-err (m a b) m)
                           (else y "")))))))))
          ;; The state a session's checker is in (this instance's, a session's
-         ;; own: `make-session-compiler`), as a step reads its text in it: a
-         ;; digest of the trees of each step since the first, which begins it
-         ;; again, that read (`readings.fx`). Kept with the checker's state it
-         ;; stands for.
+         ;; own: `make-session-compiler`), as a step reads its text in it: the
+         ;; reading of the last step the checker kept, each read in the state
+         ;; the one before left, from the first, which begins it again at 0
+         ;; (`readings.fx`). Kept with the checker's state it stands for.
          (step-state (the (ref int @t) (new 0)))
          ;; A session's step (`sessions26.rs`), checked by this instance's
          ;; checker, which holds the session's definitions, and compiled by
@@ -564,26 +572,31 @@
                     ((with check-print-parts check-conv-native!) native)
                     ((with compile compile-conv-native!) native)
                     ((with regcode-entry compile-registers!) registers)
-                    (set step-state (reading-of s (car read)))
-                    (tagcase (parse-program (get step-state) (car read))
+                    ;; The state after is this reading if the checker keeps
+                    ;; the text; a try, or a text refused, leaves it as it
+                    ;; was (the standard environment's, 0, where it began).
+                    (let ((r (read-in s (car read))))
+                     (tagcase (parse-program r (car read))
                       (p-err (m a b)
                         (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
                       (p-ok (tops)
                         (cond
                           ((= how 2)
-                           (let ((r ((with check-program check-try) tops name rep)))
-                             (tagcase (extract r 1)
+                           (let ((t ((with check-program check-try) tops name rep)))
+                             (tagcase (extract t 1)
                                (k-err (m a b) (refused m a b))
-                               (else y (sum typed (product (1 (extract r 2)) (2 (extract r 3))))))))
+                               (else y (sum typed (product (1 (extract t 2)) (2 (extract t 3))))))))
                           ((= how 0)
                            (tagcase ((with check-program check-program) standard tops)
                              (k-err (m a b) (refused m a b))
-                             (else y (sum checked #u))))
+                             (else y (begin (set step-state r) (sum checked #u)))))
                           (else
                            (tagcase ((with check-program check-more-with) tops rep)
                              (k-err (m a b) (refused m a b))
                              (k-done (t) (refused "not a form" 0 len))
                              (k-ok (ls)
+                              (begin
+                               (set step-state r)
                                (if (not make)
                                    (sum checked #u)
                                    (let ((runs ((with check-program checked-tops)))
@@ -594,7 +607,7 @@
                                                   ((with compile-programs compile-checked)
                                                    runs facts))
                                        (c-ok (w) (sum made w))
-                                       (c-err (m) (refused m k (+ k len)))))))))))))))))
+                                       (c-err (m) (refused m k (+ k len)))))))))))))))))))
          (session-step
           (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int)
                    (how int) (name symbol) (make bool) (deferred bool) (native bool)
@@ -602,6 +615,7 @@
                    (named (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic)))
             (let ((s (if (= how 0) 0 (get step-state))))
               (begin
+               (if (= how 0) (set step-state 0) #u)
                ((with check-program set-step-named!) named)
                (let ((out (session-step-of standard s whole k len how name make deferred native
                                            registers rep)))
@@ -612,8 +626,9 @@
          ;; in Rust, which gives what it found: compiled by this instance,
          ;; whose globals are the session's, to the word that runs it, or,
          ;; `deferred`, that makes the procedure that does (a commit's); or
-         ;; why not. Read in the session's state `s` (`sessions.rs`'s
-         ;; `digest`).
+         ;; why not. Read in `s`, the session's state with the Rust checker's
+         ;; switches folded in, as the checker that checked it was set
+         ;; (`sessions.rs`'s `state`).
          (session-compile
           (lambda ((s int) (text string) (facts (select stage-env-types k-facts))
                    (withs (select stage-env-types k-with-list))
@@ -664,6 +679,7 @@
              (compile-registers! (with regcode-entry compile-registers!))
              (compile-conv-native! (with compile compile-conv-native!))
              (check-defer-reruns! (with check-program check-defer-reruns!))
+             (checked-settings (with check-program checked-settings))
              (check-redefines (with check-program check-redefines))
              (checked-run-names (with check-program checked-run-names))
              (checked-reps (with check-program checked-reps))
@@ -740,6 +756,7 @@
 (define compile-registers! (extract front-end-entries compile-registers!))
 (define compile-conv-native! (extract front-end-entries compile-conv-native!))
 (define check-defer-reruns! (extract front-end-entries check-defer-reruns!))
+(define checked-settings (extract front-end-entries checked-settings))
 (define check-hold-breaks! (extract front-end-entries check-hold-breaks!))
 (define check-lines! (extract front-end-entries check-lines!))
 (define check-more (extract front-end-entries check-more))

@@ -286,6 +286,17 @@
   (lambda (on) (set k-show-lines on)))
 (define check-defer-reruns! (->* (bool) unit)
   (lambda (on) (set k-defer-reruns on)))
+;; The switches a driver set that change what a check finds, as text:
+;; folded into each reading (`readings.fx`), as the session's state is, so
+;; that a text read under other switches is another reading. As `ids.rs`'s
+;; `settings` writes them: the program's convention, then each switch on.
+(define checked-settings (->* () string)
+  (lambda ()
+    (k-cat5 (k-conv-show (get k-conv-default))
+            (if (get k-globals-effects) " globals-effects" "")
+            (if (get k-defer-reruns) " defer-reruns" "")
+            (if (get k-syscalls) " syscalls" "")
+            (if (> (get k-in-built-in) 0) " built-in" ""))))
 ;; The breaks as the last check began (`k-broken`, which only grows, newest
 ;; first); and, while they are held (`check-hold-breaks!`), those the check
 ;; made, set aside, and the breaks as it began.
