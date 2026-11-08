@@ -4,11 +4,13 @@
 ;;; its module shows (`Checker::import_file_macros`, `names_shown`), the
 ;;; load definitions, `only` and `except`, and where a later form makes a
 ;;; name a macro (`Macros::defined_before`). Loaded by `macros.fx`, which
-;;; takes `align-module`, this file's instance of `macros-align.fx`, from
-;;; it, so that the expander's parts are one.
+;;; takes `exports-module` and `align-module`, this file's instances of
+;;; `macros-exports.fx` and `macros-align.fx`, from it, so that the
+;;; expander's parts are one.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define align-module ((proj (load-module "fx26:macros-align.fx") rs re rm rc rp)))
+(define exports-module ((proj (load-module "fx26:macros-exports.fx") rs re rm rc rp)))
+(define align-module (with exports-module align-module))
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))

@@ -11,6 +11,7 @@
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define files-module ((proj (load-module "fx26:macros-files.fx") rs re rm rc rp)))
+(define exports-module (with files-module exports-module))
 (define align-module (with files-module align-module))
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
@@ -28,11 +29,12 @@
         node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
         act-qualified act-standard act-module act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
-        node-hole s-typed exports-of exports=? shown-exports evaluate levels-of nested-binders
-        unsaid-nested
-        (type exported nested action actions clause clauses macro macro-env scope scopes pinfo pvars
+        node-hole s-typed evaluate levels-of
+        (type action actions clause clauses macro macro-env scope scopes pinfo pvars
               found levels
               atms kids contracts holes))
+(import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
+        (type exported nested))
 (import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
         internal-of
         imports-syntax? import-usage name-filter all-names listed? not-macros loaded-path
