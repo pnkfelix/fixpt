@@ -896,6 +896,31 @@ define `a`, `b` ``; a name bound in a nested use that does not export it,
 referred to, is refused, `(with #%toplevel x)` the way to the top
 level's (`defn-export*.fx`).
 
+## Decided: a template's free description names, one marked name each (2026-11-08)
+
+Binders of descriptions (item 8) makes a template's types transparent, so
+a free name inside one can no longer be read at the top level by wrapping
+the whole type, `(select #%toplevel T)`, as today's expansions do: the
+type may also hold a use's description and the template's own binders.
+Three ways were weighed with the user: per-name `(select #%toplevel n)`,
+whole-type `select` for the parts that are closed and per name inside the
+rest, and a *marked identifier*, one name that is already the top level's.
+Decided (the user, 2026-11-08, "the toplevel is such a special case as it
+is"): **the marked identifier**. Each free description name a template
+writes becomes one symbol that both checkers read in the top level's
+description scope, whatever binds the name where the use is, in any
+description position: a type, an effect, a description function's head, a
+`proj`'s argument.
+
+Found on the way (both checkers agree on each): a type form's name in
+head position, `(listof T)`, is read by the name itself and never looked
+up, while the same name alone is looked up in scope, so `(listof listof)`
+under a binder named `listof` is the built-in list of the binder. The
+names are not to be reserved against description binders: they are to
+become ordinary bindings of a standard library, each tagged for what the
+compiler knows of it (`lang-items.md`, the user's, 2026-11-08). Until
+then the expander treats `TYPE_FORMS` as syntax.
+
 ## Questions for the user
 
 Answered 2026-11-06 (the user):

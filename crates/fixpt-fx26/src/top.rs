@@ -2018,6 +2018,10 @@ pub const KEYWORDS: &[&str] = &[
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet", "dlambda", "=>",
     "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!", "blobref-index", "blobref-length", "blobref-variant!",
+    "vlambda", "stage", "session-check", "session-commit!", "typecase", "reify-type", "reify-effect", "reify-region",
+    "confirm-length", "confirm-nat", "convention", "extend", "load-input", "quasiquote", "letregion", "letfreeze",
+    "spawn", "spawn-monitored", "send", "receive", "self", "par", "race", "attempt", "attempt-within", "pselect",
+    "icell-get", "icell-put!", "acyclic",
 ];
 
 /// What `fixpt` says of type abbreviation `name`, which a whole program

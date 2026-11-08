@@ -1807,4 +1807,23 @@ mod tests {
         let words: Vec<String> = super::kernel_list(&forms, &interner, "reserved-words").iter().map(|w| interner.name(w.as_symbol().expect("a name")).to_string()).collect();
         assert_eq!(words, crate::top::KEYWORDS);
     }
+
+    /// Every form `parse_exp` reads by its head is a keyword, so a template
+    /// that writes one is never read as a call of the top level's name.
+    #[test]
+    fn every_expression_form_is_a_keyword() {
+        let src = include_str!("parse.rs");
+        let body = src.split("pub fn parse_exp(").nth(1).expect("parse_exp");
+        let body = &body[..body.find("\n    }\n").expect("its end")];
+        let mut missing = Vec::new();
+        for line in body.lines().filter(|l| l.starts_with("            \"") || l.starts_with("            head @ (") || l.starts_with("            loader @ (")) {
+            let pattern = line.split("=>").next().unwrap_or("");
+            for name in pattern.split('"').skip(1).step_by(2) {
+                if !name.starts_with('%') && !crate::top::KEYWORDS.contains(&name) {
+                    missing.push(name.to_string());
+                }
+            }
+        }
+        assert!(missing.is_empty(), "forms `parse_exp` reads that are not keywords: {missing:?}");
+    }
 }
