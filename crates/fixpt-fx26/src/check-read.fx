@@ -284,23 +284,39 @@
     (if (not (null? (k-lookup-desc '%include-scope)))
         (k-one (a-var (k-effect-select '%include sym)))
         (k-sfail (no) s))))
+;; Whether `s` is a name `#%toplevel:n`, the top level's `n`, whatever binds
+;; `n` where it is written (`typed-macros.md`, "Decided: a template's free
+;; description names, one qualified name each").
+(define k-qualified? (->* (syn) bool)
+  (lambda (s)
+    (and (syn-symbol? s)
+         (let ((n (syn-name s)))
+           (and (> (string-length n) 11) (string=? (substring n 0 11) "#%toplevel:"))))))
+;; `n`, of `#%toplevel:n` written `s`, where `s` is.
+(define k-unqualified (->* (syn) syn)
+  (lambda (s)
+    (let ((n (syn-name s)))
+      (atom (string->symbol (substring n 11 (string-length n))) (syn-start s) (syn-end s) 0))))
 ;; The effect a name stands for: in `with` bodies, the modules' first
-;; (`k-with-effect-selected`).
+;; (`k-with-effect-selected`); `#%toplevel:n`, the top level's `n`.
 (define k-effect-named (->* (syn) k-eff)
   (lambda (s)
-    (let* ((n (syn-name s)) (sym (string->symbol n)))
-      (case n (("pure") nil)
-              (("spin") (k-one (a-spin)))
-              (("nondet") (k-one (a-nondet)))
-              (("stage") (k-one (a-stage)))
-              (else
-               (let ((withs (k-withs-over sym)))
-                 (if (null? withs)
-                     (k-effect-name-read s n)
-                     (let ((has (or (not (null? (k-lookup-desc sym)))
-                                    (not (null? (k-lookup-desc '%include-scope))))))
-                       (k-with-effect-selected
-                         withs sym has (if has (k-effect-name-read s n) nil))))))))))
+    (if (k-qualified? s)
+        (let* ((was (k-toplevel-enter)) (e (k-effect-named (k-unqualified s))))
+          (begin (k-toplevel-leave was) e))
+        (let* ((n (syn-name s)) (sym (string->symbol n)))
+          (case n (("pure") nil)
+                  (("spin") (k-one (a-spin)))
+                  (("nondet") (k-one (a-nondet)))
+                  (("stage") (k-one (a-stage)))
+                  (else
+                   (let ((withs (k-withs-over sym)))
+                     (if (null? withs)
+                         (k-effect-name-read s n)
+                         (let ((has (or (not (null? (k-lookup-desc sym)))
+                                        (not (null? (k-lookup-desc '%include-scope))))))
+                           (k-with-effect-selected
+                             withs sym has (if has (k-effect-name-read s n) nil)))))))))))
 ;; Effect name `n`, written `s`, as the description scope and `include`s say.
 (define k-effect-name-read (->* (syn string) k-eff)
   (lambda (s n)
@@ -391,7 +407,7 @@
 (define k-effect-selected (->* (syn k-syns) (listof k-eff acyclic))
   (lambda (s items)
     (if (and (= (k-length items) 3) (syn-symbol? (k-nth items 1)) (syn-symbol? (k-nth items 2)))
-        (let ((m (k-toplevel-marked (syn-head (k-nth items 1)))) (e (syn-head (k-nth items 2))))
+        (let ((m (k-toplevel-qualified (syn-head (k-nth items 1)))) (e (syn-head (k-nth items 2))))
           (the (listof k-eff acyclic) (list (k-one (a-var (k-effect-select m e))))))
         (begin (k-sfail "`(select module name)`: a module's name, and a component's" s) nil))))
 

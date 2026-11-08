@@ -100,6 +100,8 @@ fn reader_errors_say_where() {
     let at = |p: &str| common::with_own(|s| s.check_with_own_checker(p).err()).map(|e| (e.message, e.span.start));
     assert_eq!(at("(define x 1)\n(+ x 1))"), Some(("unbalanced `)`".to_string(), 20)));
     assert_eq!(at("(define x 1)\n(define y (+ x 2)\n(+ y 1)"), Some(("unterminated list, expected `)`".to_string(), 13)));
+    // A qualified name names a name, never a number.
+    assert_eq!(at("(the int #%toplevel:12)"), Some(("unknown `#` syntax: `#%toplevel:12`".to_string(), 9)));
 }
 
 /// A shape conflict between a polymorphic call's result and what its context

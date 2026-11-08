@@ -499,6 +499,20 @@
 (define as-number (->* (string bool) data)
   (lambda (text escaped)
     (if (or escaped (not (number-start? (string-ref text 0)))) nil (parse-number text 10))))
+;; Whether `word` is `%toplevel:n`, `n` a name: neither empty nor a number,
+;; and no `|` or `\` in it.
+(define toplevel-qualified? (->* (string) bool)
+  (lambda (word)
+    (let ((k (string-length word)))
+      (and (> k 10) (string=? (substring word 0 10) "%toplevel:")
+           (let ((n (substring word 10 k)))
+             (and (null? (as-number n #f)) (plain-name? n 0)))))))
+;; Whether `n` from `i` on has no `|` and no `\`.
+(define plain-name? (->* (string int) bool)
+  (lambda (n i)
+    (cond ((= i (string-length n)) #t)
+          ((or (char=? (string-ref n i) #\|) (char=? (string-ref n i) #\\)) #f)
+          (else (plain-name? n (+ i 1))))))
 ;; The atom that ends as `text`, `c` in hand at `cur`: a symbol, or a number.
 (define atom-finish (->* (atom-in cursor string bool char) result)
   (lambda (in cur text escaped c)
@@ -593,11 +607,12 @@
 (define bytes-message string "bytevector elements must be exact integers in 0..=255")
 
 ;; FX-26's `#%fx`, the module of the standard bindings, or `#%toplevel`,
-;; the top level's, `cur` at the `%`; no other `#%` spelling reads.
+;; the top level's, `cur` at the `%`; or `#%toplevel:n`, the top level's
+;; `n`, a name written plain (`toplevel-qualified?`); no other `#%` spelling.
 (define read-fx-module (->* (cursor int) result)
   (lambda (cur start)
     (let* ((w (read-word cur)) (word (car w)))
-      (if (or (string=? word "%fx") (string=? word "%toplevel"))
+      (if (or (string=? word "%fx") (string=? word "%toplevel") (toplevel-qualified? word))
           (atom-at (string->symbol (string-append "#" word)) start (cdr w))
           (unknown-hash (cdr w) start word)))))
 ;; FX-26's `#:name`, a keyword, `cur` at the name: a symbol's, read as one

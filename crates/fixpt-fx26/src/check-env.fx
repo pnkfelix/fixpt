@@ -295,17 +295,25 @@
 ;; The description scope as the top-level form being checked began
 ;; (`k-top-lines`): the top level's, which `(select #%toplevel T)` reads `T`
 ;; in; and whether one is being read: a module a `select` in it names is
-;; the top level's, so marked (`k-toplevel-marked`), and found so when the
+;; the top level's, so qualified (`k-toplevel-qualified`), and found so when the
 ;; `select` is resolved (`k-lookup-module`), whatever binds it there.
 (define k-form-dscope (ref k-scope @t) (new nil))
 (define k-toplevel-reading (ref bool @t) (new #f))
-(define k-toplevel-marked (->* (symbol) symbol)
+(define k-toplevel-qualified (->* (symbol) symbol)
   (lambda (m)
     (if (get k-toplevel-reading)
         (string->symbol (string-append "#%toplevel:" (symbol->string m)))
         m)))
+;; Reading as the top level reads, as `(select #%toplevel T)` reads `T`
+;; (`k-read-scoped`): what was, for `k-toplevel-leave` to put back.
+(define k-toplevel-enter (->* () (tupleof k-scope bool))
+  (lambda ()
+    (let ((was (tuple (get k-dscope) (get k-toplevel-reading))))
+      (begin (set k-dscope (get k-form-dscope)) (set k-toplevel-reading #t) was))))
+(define k-toplevel-leave (->* ((tupleof k-scope bool)) unit)
+  (lambda (was) (begin (set k-dscope (extract was 1)) (set k-toplevel-reading (extract was 2)))))
 ;; Module `m`'s type where a `select` of it is resolved: as `k-lookup` says,
-;; or, marked, the top level's binding of it.
+;; or, qualified, the top level's binding of it.
 (define k-lookup-module (->* (symbol) int)
   (lambda (m)
     (let ((n (symbol->string m)))

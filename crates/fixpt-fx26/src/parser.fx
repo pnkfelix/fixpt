@@ -221,6 +221,14 @@
 ;; shadows or redefines `f` where it is (`TODO.md` §46).
 (define standard-ref (->* (symbol int int) exp)
   (lambda (f a b) (e-with '#%fx (e-var f a b 0 0) a b 0 0)))
+;; A name as an expression, spanning `a`..`b`: its variable; or, `n` being
+;; `#%toplevel:x`, `(with #%toplevel x)`, the top level's `x` (`parse.rs`).
+(define var-ref (->* (symbol int int) exp)
+  (lambda (n a b)
+    (let* ((s (symbol->string n)) (k (string-length s)))
+      (if (and (> k 11) (string=? (substring s 0 11) "#%toplevel:"))
+          (e-with '#%toplevel (e-var (string->symbol (substring s 11 k)) a b 0 0) a b 0 0)
+          (e-var n a b 0 0)))))
 (define call-tmp (->* (symbol symbol exp-list int int) exp)
   (lambda (f tmp more a b)
     (e-app (standard-ref f a b) (the exp-list (cons (e-var tmp a b 0 0) more)) a b 0 0)))

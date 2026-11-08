@@ -37,8 +37,8 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-unions) (include check-print-parts) (include check-env)
       (include check-holds) (include parser))
-(import check-read k-atom-of k-atoms-on k-globals-region k-head k-items k-name-of k-parse-kind
-        k-parse-region k-sfail k-symbol-head)
+(import check-read k-qualified? k-unqualified k-atom-of k-atoms-on k-globals-region k-head k-items
+        k-name-of k-parse-kind k-parse-region k-sfail k-symbol-head)
 (import check-effects k-eff=? k-one k-region=?)
 
 (define-rec
@@ -252,23 +252,29 @@
 ;; The head of a list's first item, or "" for anything else.
 (define k-list-head (->* (syn) string)
   (lambda (s) (tagcase s (lst (items d a b xpn) (k-head items)) (else x ""))))
-;; A convention: `cellular`, `native`, `fx`, or a name bound as one.
+;; A convention: `cellular`, `native`, `fx`, or a name bound as one; or,
+;; `#%toplevel:n`, the top level's `n`.
 (define k-parse-conv (->* (syn) k-conv)
   (lambda (s)
-    (if (not (syn-symbol? s))
-        (k-sfail "a convention is `cellular`, `native`, `fx`, or a name bound as one" s)
-        (let* ((n (syn-name s)) (no (k-cat3 "`" n "` is not a convention")))
-          (case n (("cellular") (cv-cellular))
-                  (("native") (cv-native))
-                  (("fx") (cv-fx))
-                  (else
-                   (let ((d (k-lookup-desc (string->symbol n))))
-                     (if (null? d)
-                         (k-sfail no s)
-                         (tagcase (car d)
-                           (ds-var (v k) (if (= k 6) (cv-var v) (k-sfail no s)))
-                           (ds-conv (c) c)
-                           (else x (k-sfail no s)))))))))))
+    (cond
+      ((k-qualified? s)
+       (let* ((was (k-toplevel-enter)) (c (k-parse-conv (k-unqualified s))))
+         (begin (k-toplevel-leave was) c)))
+      ((not (syn-symbol? s))
+       (k-sfail "a convention is `cellular`, `native`, `fx`, or a name bound as one" s))
+      (else
+       (let* ((n (syn-name s)) (no (k-cat3 "`" n "` is not a convention")))
+         (case n (("cellular") (cv-cellular))
+                 (("native") (cv-native))
+                 (("fx") (cv-fx))
+                 (else
+                  (let ((d (k-lookup-desc (string->symbol n))))
+                    (if (null? d)
+                        (k-sfail no s)
+                        (tagcase (car d)
+                          (ds-var (v k) (if (= k 6) (cv-var v) (k-sfail no s)))
+                          (ds-conv (c) c)
+                          (else x (k-sfail no s))))))))))))
 ;; `(conv C)`: the convention `C`.
 (define k-parse-conv-form (->* (syn) k-conv)
   (lambda (s)

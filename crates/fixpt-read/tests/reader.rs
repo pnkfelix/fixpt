@@ -558,3 +558,15 @@ fn fx26_reads_keywords() {
     assert!(err(SyntaxProfile::FX26, "#:12").contains("a keyword's name is a symbol's"));
     assert!(err(SyntaxProfile::SCHEME, "#:a").contains("unknown `#` syntax"));
 }
+
+/// FX-26's qualified names (`#%toplevel:name`), the top level's `name`: one
+/// symbol of that spelling; a name neither empty, nor a number, nor written
+/// with `|` or `\`.
+#[test]
+fn fx26_reads_qualified_names() {
+    let (forms, interner) = read(SyntaxProfile::FX26, "#%toplevel:idx (#%toplevel:listof int)");
+    assert!(matches!(forms[0].datum, Datum::Symbol(s) if interner.name(s) == "#%toplevel:idx"));
+    for bad in ["#%toplevel:", "#%toplevel:12", "#%toplevel:-1.5", "#%toplevel:a|b|", "#%fx:x"] {
+        assert!(err(SyntaxProfile::FX26, bad).contains("unknown `#` syntax"), "{bad}: {}", err(SyntaxProfile::FX26, bad));
+    }
+}

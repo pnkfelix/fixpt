@@ -5275,3 +5275,12 @@ runtime find each special thing by its tag. Design, sorting of today's
 built-ins, open questions and stages: `docs/research/lang-items.md`. To be
 discussed before building. Binders of descriptions treats `TYPE_FORMS` as
 syntax meanwhile, and the reserved-words fix does not reserve them.
+
+## 218. Nothing may bind `#%fx`, `#%toplevel` or a qualified name; both checkers let it (found 2026-11-08)
+`docs/fx26.md` says of `#%fx` and `#%toplevel` that nothing binds or
+defines them, but both checkers accept `(lambda ((#%toplevel int)) 1)`,
+`(define #%fx 3)` and `(define-type #%fx int)`. The binding is inert, as
+`(with #%fx n)` and `(with #%toplevel n)` go by the spelling, and a
+binding of `#%toplevel:x` likewise is never what `#%toplevel:x` reads; but
+the rule the docs state is not the one checked. Refuse every `#%` name as
+a binder or a definition's name, value or description, in both checkers.

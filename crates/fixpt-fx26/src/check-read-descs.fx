@@ -66,7 +66,8 @@
 (import check-read-made k-type-made-by k-restrict-by k-param-selects-given)
 (import check-read k-at-name? k-atom-head? k-ctor-params k-effect-desc k-effect-named
         k-effect-selected k-frozen-into k-head k-items k-items-or-nil k-name-of k-not-applied
-        k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head)
+        k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head
+        k-qualified? k-unqualified)
 (import check-effects k-one k-union)
 (import check-specs k-spec-clause? k-specified k-spec-pnames)
 
@@ -97,31 +98,6 @@
                      (k-effect-atom head (k-nth items 1))
                      (k-sfail (k-cat3 "`(" head " region)`") s)))
                 (else (k-sfail "expected an effect" s)))))))
-;; `(io k)`, `k` a kind of the fixed family (`TODO.md` §84).
-(define k-io-atom (->* (syn k-syns) k-eff)
-  (lambda (s items)
-    (if (= (k-length items) 2)
-        (let* ((x (k-nth items 1)) (k (if (syn-symbol? x) (k-io-kind-code (syn-name x)) -1)))
-          (if (< k 0)
-              (k-sfail (string-append "an I/O effect's kind is one of " k-io-kinds-shown) x)
-              (k-one (a-io k))))
-        (k-sfail (string-append "`(io kind)`, the kind one of " k-io-kinds-shown) s))))
-;; Whether `s` is written as a size, not a region (`Checker::size_written`):
-;; a natural literal, `finite`, a size variable or value, `(+ …)`, `(- …)`.
-(define k-size-written? (->* (syn) bool)
-  (lambda (s)
-    (cond ((>= (syn-int s) 0) #t)
-          ((syn-symbol? s)
-           (or (string=? (syn-name s) "finite")
-               (let ((d (k-lookup-desc (syn-head s))))
-                 (and (not (null? d))
-                      (tagcase (car d) (ds-var (v k) (= k 5)) (ds-size (z) #t) (else x #f))))))
-          (else
-           (let ((items (tagcase s
-                          (lst (items d a b xpn) items)
-                          (else x (the k-syns nil)))))
-             (and (not (null? items)) (syn-symbol? (car items))
-                  (case (syn-name (car items)) (("+" "-") #t) (else #f))))))))
 (define k-parse-types (->* (k-syns) k-ids)
   (lambda (xs)
     (if (null? xs)
@@ -268,24 +244,40 @@
             (ds-rec (t) (if (k-flat-var-type? t) (k-sfail (k-flat-not-type n) s) t))
             (ds-gen (g) (k-apply-gen s g nil))
             (else x (k-sfail (no) s)))))))
+;; A type; `#%toplevel:t`, the top level's `t` (`parse.rs`).
 (define k-parse-type-node (->* (syn) int)
   (lambda (s)
-    (if (syn-symbol? s)
-        (k-type-named s)
-        (let* ((items (k-items s "a type"))
-               (hd (if (null? items) '|()| (syn-head (car items))))
-               ;; In `with` bodies, `(f d …)` is the modules' `f` first.
-               (withs (if (or (symbol=? hd '|()|) (k-type-form? hd)) nil (k-withs-over hd))))
-          (cond ((null? withs) (k-parse-type-list s items hd))
-                ((null? (k-lookup-desc hd)) (k-with-applied withs hd (cdr items) -1))
-                (else (k-with-applied withs hd (cdr items) (k-parse-type-list s items hd))))))))
-;; Type `s`, `(hd …)`, of `items`, as the description scope says.
+    (cond
+      ((k-qualified? s)
+       (let* ((was (k-toplevel-enter)) (t (k-type-named (k-unqualified s))))
+         (begin (k-toplevel-leave was) t)))
+      ((syn-symbol? s) (k-type-named s))
+      (else
+       (let* ((items (k-items s "a type"))
+              (hd (if (null? items) '|()| (syn-head (car items))))
+              ;; In `with` bodies, `(f d …)` is the modules' `f` first.
+              (withs (if (or (symbol=? hd '|()|) (k-type-form? hd) (k-qualified? (car items)))
+                         nil
+                         (k-withs-over hd))))
+         (cond ((null? withs) (k-parse-type-list s items hd))
+               ((null? (k-lookup-desc hd)) (k-with-applied withs hd (cdr items) -1))
+               (else (k-with-applied withs hd (cdr items) (k-parse-type-list s items hd)))))))))
+;; Type `s`, `(hd …)`, of `items`, as the description scope says; `hd`
+;; `#%toplevel:f`, `f` as the top level binds it (`parse.rs`).
 (define k-parse-type-list (->* (syn k-syns symbol) int)
   (lambda (s items hd)
-    (let* ((abbrev (if (symbol=? hd '|()|)
-                       (the (listof k-ds acyclic) nil)
-                       (k-lookup-desc hd)))
-           (alias (k-select-alias abbrev)))
+    (if (and (not (null? items)) (k-qualified? (car items)))
+        (let* ((h (k-unqualified (car items))) (was (k-toplevel-enter)) (f (syn-head h))
+               (found (k-lookup-desc f)))
+          (begin (k-toplevel-leave was)
+                 (k-parse-type-found s (the k-syns (cons h (cdr items))) f found #t)))
+        (k-parse-type-found
+          s items hd (if (symbol=? hd '|()|) (the (listof k-ds acyclic) nil) (k-lookup-desc hd))
+          #f))))
+;; That, its head bound to `abbrev`, as the top level binds it if `top`.
+(define k-parse-type-found (->* (syn k-syns symbol (listof k-ds acyclic) bool) int)
+  (lambda (s items hd abbrev top)
+    (let ((alias (k-select-alias abbrev)))
       (cond ((and (not (null? abbrev)) (k-ds-applied? (car abbrev)))
              (tagcase (car abbrev)
                (ds-abbrev (ps body) (k-expand-abbrev s hd ps body (cdr items)))
@@ -298,6 +290,7 @@
             ;; `((dlambda …) d …)` and `((select m f) d …)`.
             ((and (not (null? items)) (tagcase (car items) (lst (xs d a b xpn) #t) (else x #f)))
              (k-parse-app s (k-parse-fun (car items) -1) (cdr items)))
+            ((and top (not (k-type-form? hd))) (k-sfail (k-not-type-list hd) s))
             (else (k-parse-type-form s items hd))))))
 ;; `(f d …)`, its descriptions `args`, read in the bodies of `with`s of
 ;; modules `withs` (innermost first): `((select m f) d …)` of the innermost,
@@ -720,6 +713,9 @@
     (cond ((tagcase s (atom (d a b xpn) (datum-int? d)) (else x #f))
            ;; A natural number can only be a size.
            (dz (k-parse-size s)))
+          ((k-qualified? s)
+           (let* ((was (k-toplevel-enter)) (d (k-parse-d (k-unqualified s))))
+             (begin (k-toplevel-leave was) d)))
           ((syn-symbol? s) (k-parse-d-name s))
           (else
            (let* ((items (k-items s "a description")) (hd (k-head items)))
@@ -809,19 +805,22 @@
 ;; A description function named.
 (define k-fun-named (->* (syn) int)
   (lambda (s)
-    (let* ((n (syn-name s)) (sym (string->symbol n)) (d (k-lookup-desc sym))
-           (no (k-cat3 (k-quote n) " is not a description function" "")))
-      (if (null? d)
-          (let ((ctor (k-ctor-params n)))
-            (if (null? ctor) (k-sfail no s) (k-ctor-eta n (car ctor))))
-          (tagcase (car d)
-            (ds-var (v k) (if (k-arrow-kind? k) (k-ty-new (ty-var v)) (k-sfail no s)))
-            (ds-fun (f) f)
-            (ds-abbrev (ps body) (if (null? ps) (k-sfail no s) (k-abbrev-eta s sym ps body)))
-            (ds-gen (g)
-              (let ((ps (extract (k-gen-of g) 2)))
-                (if (null? ps) (k-sfail no s) (k-gen-eta g ps))))
-            (else x (k-sfail no s)))))))
+    (if (k-qualified? s)
+        (let* ((was (k-toplevel-enter)) (f (k-fun-named (k-unqualified s))))
+          (begin (k-toplevel-leave was) f))
+        (let* ((n (syn-name s)) (sym (string->symbol n)) (d (k-lookup-desc sym))
+               (no (k-cat3 (k-quote n) " is not a description function" "")))
+          (if (null? d)
+              (let ((ctor (k-ctor-params n)))
+                (if (null? ctor) (k-sfail no s) (k-ctor-eta n (car ctor))))
+              (tagcase (car d)
+                (ds-var (v k) (if (k-arrow-kind? k) (k-ty-new (ty-var v)) (k-sfail no s)))
+                (ds-fun (f) f)
+                (ds-abbrev (ps body) (if (null? ps) (k-sfail no s) (k-abbrev-eta s sym ps body)))
+                (ds-gen (g)
+                  (let ((ps (extract (k-gen-of g) 2)))
+                    (if (null? ps) (k-sfail no s) (k-gen-eta g ps))))
+                (else x (k-sfail no s))))))))
 ;; A type family as a description function: `(dlambda ((p k) …) (name p …))`.
 (define k-abbrev-eta (->* (syn symbol k-params syn) int)
   (lambda (s name ps body)
@@ -918,7 +917,7 @@
             (else (k-sfail k-moduleof-usage (car parts))))))))
 ;; `(select #%toplevel T)`: `T` as the top level reads it (a template's
 ;; type: `typed-macros.md`, item 5), what its `select`s name the top level's
-;; (`k-toplevel-marked`); `(select #%fx T)`, as the standard environment
+;; (`k-toplevel-qualified`); `(select #%fx T)`, as the standard environment
 ;; does; `(select m T)`, `T` no name, as a `with` of `m` reads types, over the
 ;; standard environment's (a file's macro's type).
 (define k-read-scoped (->* (string symbol syn) int)

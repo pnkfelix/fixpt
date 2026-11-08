@@ -1808,6 +1808,17 @@ mod tests {
         assert_eq!(words, crate::top::KEYWORDS);
     }
 
+    /// The FX-26 checker's keywords (`check-read-helpers.fx`'s
+    /// `k-keywords`) are the Rust front end's.
+    #[test]
+    fn the_fx26_checkers_keywords_are_the_keywords() {
+        let src = include_str!("check-read-helpers.fx");
+        let list = src.split("(define k-keywords k-names").nth(1).expect("k-keywords");
+        let list = &list[..list.find("))").expect("its end")];
+        let words: Vec<&str> = list.split_whitespace().filter_map(|w| w.strip_prefix('\'')).collect();
+        assert_eq!(words, crate::top::KEYWORDS);
+    }
+
     /// Every form `parse_exp` reads by its head is a keyword, so a template
     /// that writes one is never read as a call of the top level's name.
     #[test]

@@ -318,6 +318,9 @@ impl Checker {
     }
 
     fn parse_fun_node(&mut self, s: &Syntax, want: Option<Kind>) -> R<TyId> {
+        if let Some(r) = self.read_qualified(s, |c, n| c.parse_fun_node(n, want)) {
+            return r;
+        }
         if let Some(sym) = s.as_symbol() {
             let name = self.interner.name(sym).to_string();
             let params: Option<Vec<(Sym, Kind)>> = match self.lookup_desc(sym) {
@@ -754,11 +757,17 @@ impl Checker {
     pub(crate) fn effect_app(&mut self, s: &Syntax, items: &[Syntax]) -> R<Option<Effect>> {
         let Some(head) = items.first() else { return Ok(None) };
         let f = match head.as_symbol() {
-            Some(h) => match self.lookup_desc(h) {
-                Some(DScope::Var(v, Kind::Arrow(_))) => self.arena.ty(Ty::Var(v)),
-                Some(DScope::Fun(f)) => f,
-                _ => return Ok(None),
-            },
+            Some(h) => {
+                let found = match self.toplevel_unqualified(h) {
+                    Some(n) => self.at_toplevel(|c| c.lookup_desc(n)),
+                    None => self.lookup_desc(h),
+                };
+                match found {
+                    Some(DScope::Var(v, Kind::Arrow(_))) => self.arena.ty(Ty::Var(v)),
+                    Some(DScope::Fun(f)) => f,
+                    _ => return Ok(None),
+                }
+            }
             None if head.as_proper_list().is_some_and(|l| l.first().and_then(|x| x.as_symbol()).is_some_and(|x| self.interner.name(x) == "dlambda")) => {
                 self.parse_fun(head, None)?
             }

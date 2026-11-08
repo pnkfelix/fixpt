@@ -2581,6 +2581,31 @@ impl Checker {
         }
     }
 
+    /// Whether `s` is `#%toplevel:n`, the top level's `n` (a template's free
+    /// name: `typed-macros.md`, "Decided: a template's free description
+    /// names, one qualified name each").
+    pub(crate) fn is_toplevel_qualified(&self, s: Sym) -> bool {
+        self.interner.name(s).starts_with("#%toplevel:")
+    }
+
+    /// `n`, of `#%toplevel:n`.
+    pub(crate) fn toplevel_unqualified(&mut self, s: Sym) -> Option<Sym> {
+        let n = self.interner.name(s).strip_prefix("#%toplevel:")?.to_string();
+        Some(self.interner.intern(&n))
+    }
+
+    /// What `read` gives, read as the top level reads, as `(select
+    /// #%toplevel T)` reads `T`: what the form being checked binds hidden,
+    /// and no module's `include`s around it consulted.
+    pub(crate) fn at_toplevel<T>(&mut self, read: impl FnOnce(&mut Self) -> T) -> T {
+        let outer = self.hidden.replace(self.toplevel_hidden(false));
+        let includes = std::mem::replace(&mut self.include_scope, 0);
+        let r = read(self);
+        self.hidden = outer;
+        self.include_scope = includes;
+        r
+    }
+
     /// Where the top level binds `s` ([`Self::scope_pos`]).
     pub(crate) fn toplevel_pos(&self, s: Sym) -> Option<usize> {
         self.scope_pos(s, true)

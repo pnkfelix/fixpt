@@ -240,6 +240,13 @@ impl Checker {
             .map(|i| self.dscope[i].1.clone())
     }
 
+    /// `read` of `s`, or, `s` being `#%toplevel:n`, of `n` as the top level
+    /// reads it ([`Checker::at_toplevel`]).
+    pub(crate) fn read_qualified<T>(&mut self, s: &Syntax, read: impl FnOnce(&mut Self, &Syntax) -> R<T>) -> Option<R<T>> {
+        let n = s.as_symbol().filter(|m| self.is_toplevel_qualified(*m)).and_then(|m| self.toplevel_unqualified(m))?;
+        Some(self.at_toplevel(|c| read(c, &Syntax::symbol(s.span, n))))
+    }
+
     fn items<'s>(&self, s: &'s Syntax, what: &str) -> R<&'s [Syntax]> {
         s.as_proper_list().ok_or_else(|| FxError::at(s.span, format!("{what}: expected a list")))
     }
@@ -290,7 +297,7 @@ impl Checker {
     }
 
     /// `(conv C)`: the convention `C`.
-    fn parse_conv_form(&self, s: &Syntax) -> R<Conv> {
+    fn parse_conv_form(&mut self, s: &Syntax) -> R<Conv> {
         match self.items(s, "`(conv convention)`")? {
             [_, c] => self.parse_conv(c),
             _ => Err(FxError::at(s.span, "`(conv convention)`")),
@@ -298,7 +305,10 @@ impl Checker {
     }
 
     /// A convention: `cellular`, `native`, `fx`, or a name bound as one.
-    pub(crate) fn parse_conv(&self, s: &Syntax) -> R<Conv> {
+    pub(crate) fn parse_conv(&mut self, s: &Syntax) -> R<Conv> {
+        if let Some(r) = self.read_qualified(s, Self::parse_conv) {
+            return r;
+        }
         let Some(sym) = s.as_symbol() else {
             return Err(FxError::at(s.span, "a convention is `cellular`, `native`, `fx`, or a name bound as one"));
         };
@@ -488,6 +498,9 @@ impl Checker {
 
     // ------------------------------------------------------------- effects
     pub(crate) fn parse_effect(&mut self, s: &Syntax) -> R<Effect> {
+        if let Some(r) = self.read_qualified(s, Self::parse_effect) {
+            return r;
+        }
         if let Some(sym) = s.as_symbol() {
             if self.name(sym) == "pure" {
                 return Ok(Effect::pure());
@@ -672,6 +685,11 @@ impl Checker {
     }
 
     fn parse_type_node(&mut self, s: &Syntax) -> R<TyId> {
+        // `#%toplevel:t`, its `select`s found there too, as `(select
+        // #%toplevel t)`'s are.
+        if let Some(r) = self.read_qualified(s, |c, n| c.parse_type_node(n).and_then(|t| c.resolve_selects(t, n.span))) {
+            return r;
+        }
         if let Some(sym) = s.as_symbol() {
             let name = self.name(sym);
             if name == "void" {
@@ -704,7 +722,7 @@ impl Checker {
         }
         // `(f d …)` in `with` bodies: the modules' `f` first, as names alone.
         let head = s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol());
-        if let Some(head) = head.filter(|h| !TYPE_FORMS.contains(&self.name(*h))) {
+        if let Some(head) = head.filter(|h| !TYPE_FORMS.contains(&self.name(*h)) && !self.is_toplevel_qualified(*h)) {
             let withs = self.withs_over(head);
             if !withs.is_empty() {
                 let outer = if self.lookup_desc(head).is_some() { Some(self.parse_type_list(s)?) } else { None };
@@ -745,8 +763,25 @@ impl Checker {
 
     fn parse_type_list(&mut self, s: &Syntax) -> R<TyId> {
         let items = self.items(s, "a type")?.to_vec();
+        // `(#%toplevel:f d …)`: `f` the top level's, a function it binds or
+        // else the type form of that name; `d …` read where they are.
+        if let Some(h) = items.first().and_then(|h| h.as_symbol()).filter(|h| self.is_toplevel_qualified(*h)) {
+            let n = self.toplevel_unqualified(h).expect("qualified");
+            let found = self.at_toplevel(|c| c.lookup_desc(n));
+            let mut plain = items.clone();
+            plain[0] = Syntax::symbol(items[0].span, n);
+            return self.parse_type_list_found(&Syntax::list(s.span, plain), found, true);
+        }
+        let found = items.first().and_then(|h| h.as_symbol()).and_then(|h| self.lookup_desc(h));
+        self.parse_type_list_found(s, found, false)
+    }
+
+    /// `parse_type_list` of `s`, its head bound to `found`, as the top level
+    /// binds it if `toplevel` (so no module's `include`s consulted).
+    fn parse_type_list_found(&mut self, s: &Syntax, found: Option<DScope>, toplevel: bool) -> R<TyId> {
+        let items = self.items(s, "a type")?.to_vec();
         if let Some(head) = items.first().and_then(|h| h.as_symbol()) {
-            match self.lookup_desc(head) {
+            match found {
                 Some(DScope::Abbrev { params, body }) => return self.expand_abbrev(s, head, &params, &body, &items[1..]),
                 Some(DScope::Generative(g)) => return self.apply_generative(s, g, &items[1..]),
                 Some(DScope::Var(v, Kind::Arrow(_))) => {
@@ -1119,7 +1154,7 @@ impl Checker {
             // is the modules included's family, found when they are typed,
             // as a type's name is (`TODO.md` §69).
             _ => match items.first().and_then(|h| h.as_symbol()) {
-                Some(h) if self.include_scope > 0 && self.lookup_desc(h).is_none() => {
+                Some(h) if !toplevel && self.include_scope > 0 && self.lookup_desc(h).is_none() => {
                     let inc = self.interner.intern("%include");
                     let f = self.arena.ty(Ty::Select(inc, h));
                     self.parse_app(s, f, &items[1..])
@@ -1561,6 +1596,9 @@ impl Checker {
     /// or, for a bare name, in how the name is bound; the checker confirms it
     /// against the binder when it sees the `poly` being projected.
     pub(crate) fn parse_d(&mut self, s: &Syntax) -> R<D> {
+        if let Some(r) = self.read_qualified(s, Self::parse_d) {
+            return r;
+        }
         // A natural number can only be a size.
         if self.literal_int(s).is_some() {
             return Ok(D::Size(self.parse_size(s)?));
@@ -1702,6 +1740,13 @@ impl Checker {
                 let fun = self.standard_ref_at(span, "symbol->keyword");
                 let name = self.arena.exp(span, Exp::Symbol(*sym));
                 return Ok(self.arena.exp(span, Exp::App { fun, args: vec![name] }));
+            }
+            // `#%toplevel:x`, `(with #%toplevel x)`: the top level's `x`.
+            Datum::Symbol(sym) if self.is_toplevel_qualified(*sym) => {
+                let n = self.toplevel_unqualified(*sym).expect("qualified");
+                let (with, top) = (self.interner.intern("with"), self.interner.intern("#%toplevel"));
+                let whole = Syntax::list(span, vec![Syntax::symbol(span, with), Syntax::symbol(span, top), Syntax::symbol(span, n)]);
+                return self.parse_exp(&whole);
             }
             Datum::Symbol(sym) => {
                 // `#u` reads as a symbol; `#t` and `#f` did too in FX-87's

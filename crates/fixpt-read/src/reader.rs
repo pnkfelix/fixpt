@@ -473,9 +473,12 @@ impl<'a> Reader<'a> {
             }
             '%' if self.profile.fx_module => {
                 // `#%fx`, the standard bindings' module; `#%toplevel`, the
-                // top level's, as it is where it is named.
+                // top level's, as it is where it is named; `#%toplevel:n`,
+                // the top level's `n`, whatever binds `n` where it is
+                // written: a name, never a number, written plain.
                 let word = self.take_while(|c, r| !r.is_delimiter(c));
-                if word != "%fx" && word != "%toplevel" {
+                let qualified = word.strip_prefix("%toplevel:").is_some_and(|n| !n.is_empty() && !n.contains(['|', '\\']) && parse_number(n, 10, None).is_none());
+                if word != "%fx" && word != "%toplevel" && !qualified {
                     return Err(ReadError::at(self.span_from(start), format!("unknown `#` syntax: `#{word}`")));
                 }
                 Ok(Syntax::symbol(self.span_from(start), self.interner.intern(&format!("#{word}"))))

@@ -33,7 +33,7 @@
         region-kind region-name-error one-let call-tmp standard-ref field-index bloblet-untagged?
         arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol mk-list quoted
         rec-names rec-types rec-inits module-usage loaded loaded-next-at in-loaded loaded-mark
-        loaded-error loaded-params loaded-made mk-form dt-labelled without-syntax
+        loaded-error loaded-params loaded-made mk-form dt-labelled without-syntax var-ref
         (type syns-a exp top exp-list mod-item mod-items letrec-list let-list arm-list loaded-file)
         (effect parses))
 ;; A `case`'s data by halving (`parser.fx`).
@@ -252,7 +252,7 @@
                    (cond ((symbol=? n sym-true) (e-bool #t a b 0 0))
                          ((symbol=? n sym-false) (e-bool #f a b 0 0))
                          ((symbol=? n sym-unit) (e-unit a b 0 0))
-                         (else (e-var n a b 0 0)))))
+                         (else (var-ref n a b)))))
                 (else (pfail "not an expression in the FX-26 kernel" s))))
         (lst (items d a b xpn)
           (if (null? items)

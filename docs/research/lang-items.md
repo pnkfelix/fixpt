@@ -12,33 +12,42 @@ anything is built.
 A type is read in two kinds of position, and the two do not agree on what a
 name is.
 
-- **Head position**, `(listof T)`: the reader picks the form by the head
-  symbol itself, from a fixed list (`TYPE_FORMS`, `parse.rs:66`), before any
-  scope is consulted. Nothing can shadow it.
+- **Head position**, `(listof T)`: the head is looked up in the description
+  scope first (`parse_type_list`), but only a binding that is a function (a
+  family, a generative type with parameters, a variable of an arrow kind)
+  is used. A binding of any other kind is passed over, and the head is then
+  the built-in form of that name, from a fixed list (`TYPE_FORMS`,
+  `parse.rs:66`).
 - **Bare position**, a lone symbol: it is looked up in the description
   scope. Only when nothing binds it does it fall back to the built-in
   constructors (`CONSTRUCTORS`, `kinds.rs:38`, which give `listof` its kind
   `(=> (type region) type)`) or to the standard base types (`Checker::base`,
   which a program may redefine, `DONE.md` §88).
 
-So the same name can mean two things in one type. Both checkers agree on
-each of these, so the problem is in the language rule, not in a mismatch
+So whether a name is the built-in form depends on the *kind* of what binds
+it, and the same name can mean two things in one type. Both checkers agree
+on each of these, so the problem is in the language rule, not in a mismatch
 between the checkers:
 
 ```scheme
-;; The head is the built-in list, and the argument is the binder:
+;; A binder of kind `type`: the head is the built-in list, the argument the binder.
 (poly ((listof type)) (subr pure ((listof listof)) int))   ; checks
-;; This defines a family no head can ever reach:
-(define-type (listof (a type)) a)                          ; checks
+;; A family: it takes the head over.
+(define-type (listof (a type)) a)
+(define x (listof int) 5)                                  ; checks; x is an int
 ;; A base type is an ordinary name:
 (define-type bool int)                                     ; checks; bool is now int
 ```
 
-For hygiene this means that a template's `int` must be read as the top
-level's (it can be captured), while its `(listof …)` head must not be (it
-cannot be). Whatever rule binders of descriptions picks has to know which
-names are syntax and which are bindings, and today that line is drawn by a
-hard-coded list rather than by the language.
+(An earlier draft of this note said a type form's head is never looked up;
+it is, by kind, as above.)
+
+For hygiene this means that a template's names, heads included, can be
+captured where the macro is used: a `(listof …)` a template writes is the
+use's own family if one named `listof` is in scope there. Whatever rule
+binders of descriptions picks must read each of them where the macro was
+defined, and today which of them is a binding depends on the kind of what
+binds it, a rule drawn by a hard-coded list rather than by the language.
 
 The list also mixes three different things:
 - binding forms and forms with their own grammar (`poly`, `subr`, `moduleof`);

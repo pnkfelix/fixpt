@@ -896,7 +896,7 @@ define `a`, `b` ``; a name bound in a nested use that does not export it,
 referred to, is refused, `(with #%toplevel x)` the way to the top
 level's (`defn-export*.fx`).
 
-## Decided: a template's free description names, one marked name each (2026-11-08)
+## Decided: a template's free description names, one qualified name each (2026-11-08)
 
 Binders of descriptions (item 8) makes a template's types transparent, so
 a free name inside one can no longer be read at the top level by wrapping
@@ -904,22 +904,67 @@ the whole type, `(select #%toplevel T)`, as today's expansions do: the
 type may also hold a use's description and the template's own binders.
 Three ways were weighed with the user: per-name `(select #%toplevel n)`,
 whole-type `select` for the parts that are closed and per name inside the
-rest, and a *marked identifier*, one name that is already the top level's.
-Decided (the user, 2026-11-08, "the toplevel is such a special case as it
-is"): **the marked identifier**. Each free description name a template
+rest, and a *qualified name*, one name that is already the top level's
+(first called a "marked identifier", renamed since: see below). Decided
+(the user, 2026-11-08, "the toplevel is such a special case as it is"):
+**the qualified name**. Each free description name a template
 writes becomes one symbol that both checkers read in the top level's
 description scope, whatever binds the name where the use is, in any
 description position: a type, an effect, a description function's head, a
 `proj`'s argument.
 
 Found on the way (both checkers agree on each): a type form's name in
-head position, `(listof T)`, is read by the name itself and never looked
-up, while the same name alone is looked up in scope, so `(listof listof)`
-under a binder named `listof` is the built-in list of the binder. The
-names are not to be reserved against description binders: they are to
-become ordinary bindings of a standard library, each tagged for what the
-compiler knows of it (`lang-items.md`, the user's, 2026-11-08). Until
-then the expander treats `TYPE_FORMS` as syntax.
+head position, `(listof T)`, is looked up, but only a function binding it
+(a family, an arrow-kinded variable) takes it over; a binding of another
+kind is passed over for the built-in form, so `(listof listof)` under a
+binder of kind `type` named `listof` is the built-in list of the binder.
+So a template's heads can be captured too, and are qualified like any free
+name: `(#%toplevel:listof int)`, where the top level binds no function
+`listof`, is the type form. The names are not to be reserved against
+description binders: they are to become ordinary bindings of a standard
+library, each tagged for what the compiler knows of it (`lang-items.md`,
+the user's, 2026-11-08).
+
+Built 2026-11-08, both checkers and both readers: `#%toplevel:name`, which
+a program may write too, the top level's `name` as a value (`(with
+#%toplevel name)`) and in every description position (`docs/fx26.md`,
+"`#%toplevel`, the top level's bindings"; `modules/toplevel-qualified-*.fx`).
+The expander does not yet emit it: to qualify the free names in a template's
+type it must know which of the type's names the type binds, the grammar
+of descriptions that binders of descriptions (item 8) brings.
+
+**Renaming, not marks** (the user's question, 2026-11-08: do these differ
+from alpha-renaming in any fundamental way?). They do not: the expander
+rewrites symbols, two ways. A template's binder is renamed fresh, at the
+binder and each reference (`%a:5`), alpha-renaming; a template's free name
+is *qualified*, `#%toplevel:x`, a name resolved in one fixed environment,
+nearer a syntactic closure over the top level than a mark. (Not renamed:
+what the top level's `x` is is not fixed where the macro is defined, the
+top level being redefinable, item 5.) KFFD's marks, and Flatt's sets of
+scopes, record which expansion step brought an identifier in, so that what
+binds it can be found later, where binding forms are themselves macros and
+the structure is known only by expanding; Herman's binding signatures say
+the structure before expansion, and with it hygiene is expansion that keeps
+alpha-equivalence (Herman and Wand), which renaming at once gives. What
+marks give that this does not, and where it would matter here:
+- marks that cancel when applied twice tell what a transformer brought in
+  from what the use gave, knowing no structure: the signature tells that;
+- a mark is undone for `quote` and `syntax->datum`: no data position is
+  renamed, the signature saying which are data;
+- `free-identifier=?` against `bound-identifier=?`, for literals such as
+  `else`: such words are reserved keywords here, never bound;
+- **procedural macros** (item 11): a transformer compares identifiers,
+  makes them in another's context (`datum->syntax`, `make-point` of
+  `point`), and decides binding structure as it runs. A renamed symbol has
+  lost the context such code asks about; there marks or scopes earn their
+  keep, as they would for any deliberate break of hygiene, the names
+  computed from operands that "Decided: signatures depend on their operands
+  by address alone" keeps out.
+`let-syntax` does not need them: with the program's binders renamed apart,
+a template's free name is resolved where the macro is defined, to the
+renamed binder in scope there, which no binder where it is used can be. The
+top level, redefinable, is the one environment not resolved so early, which
+is why its names are qualified rather than renamed.
 
 ## Leaning: narrower macros by `let-syntax`, not in module types (2026-11-08)
 

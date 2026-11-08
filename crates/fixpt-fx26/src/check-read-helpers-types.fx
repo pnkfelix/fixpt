@@ -62,7 +62,7 @@
             (val k-params-names (subr (maxeff (read @globals) spin) (k-params) k-names))
             (val k-params-kinds (subr (maxeff (read @globals) spin) (k-params) k-ids))
             (val k-fun-bound?
-                 (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (string) bool))
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) (string) bool))
             (val k-parse-select
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -277,4 +277,11 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-selects k-names)
                        k-selects))
-            (val k-all-unnamed? (subr (maxeff (read @globals) spin) (k-names) bool))))
+            (val k-all-unnamed? (subr (maxeff (read @globals) spin) (k-names) bool))
+            (val k-size-written?
+                 (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin) (syn) bool))
+            (val k-io-atom
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (syn k-syns)
+                       k-eff))))

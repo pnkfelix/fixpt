@@ -71,18 +71,23 @@
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (->* (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))
+;; The Rust front end's `top::KEYWORDS`, which a test holds this to.
 (define k-keywords k-names
   (list 'lambda 'plambda 'proj 'if 'letrec 'let 'begin 'define 'define* 'define-type
-        'define-generative 'subr '-> 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write
-        'alloc 'goto 'comefrom 'region 'effect 'type 'prompt 'prompt-tag 'composable 'mark-key
-        'oneshot '->*
-        'listof 'cond 'else 'and 'or 'let* 'define-effect 'module-parameters 'the 'bloblet 'fields
-        'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
-        'sumof 'product 'tupleof 'tuple 'extract 'sum 'tagcase 'module 'moduleof 'with 'select
-        'load-module
-        'define-datatype 'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte
-        'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=> 'case
-        'define-convention 'define-syscall 'define-optional-syscall 'syscall-available?))
+        'define-generative 'subr '-> '->* 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read
+        'write 'alloc 'goto 'comefrom 'region 'effect 'type 'prompt 'prompt-tag 'composable
+        'oneshot 'mark-key 'listof 'cond 'case 'else 'and 'or 'let* 'define-effect
+        'define-convention 'define-syscall 'define-optional-syscall 'syscall-available?
+        'module-parameters 'the 'bloblet 'fields 'frozen 'arrayof 'icell 'await 'define-rec
+        'letrena 'letreap 'rlambda 'quote 'productof 'sumof 'product 'tupleof 'tuple 'extract 'sum
+        'tagcase 'module 'moduleof 'with 'select 'load-module 'import 'define-datatype
+        'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte 'bloblet-set-byte!
+        'bloblet-bytes 'rmake-bloblet 'dlambda '=> 'blobref-at 'blobref+ 'blobref-owner
+        'blobref-offset 'blobref-get 'blobref-set! 'blobref-index 'blobref-length
+        'blobref-variant! 'vlambda 'stage 'session-check 'session-commit! 'typecase 'reify-type
+        'reify-effect 'reify-region 'confirm-length 'confirm-nat 'convention 'extend 'load-input
+        'quasiquote 'letregion 'letfreeze 'spawn 'spawn-monitored 'send 'receive 'self 'par 'race
+        'attempt 'attempt-within 'pselect 'icell-get 'icell-put! 'acyclic))
 (define k-no-name symbol '||)
 ;; Whether effect `e` is variable `v` alone.
 (define k-eff-is-var? (->* (k-eff int) bool)
@@ -180,9 +185,13 @@
 ;; Whether `n` is bound to a description function.
 (define k-fun-bound? (->* (string) bool)
   (lambda (n)
-    (let ((d (k-lookup-desc (string->symbol n))))
-      (and (not (null? d))
-           (tagcase (car d) (ds-var (v k) (k-arrow-kind? k)) (ds-fun (f) #t) (else y #f))))))
+    (if (and (> (string-length n) 11) (string=? (substring n 0 11) "#%toplevel:"))
+        ;; `#%toplevel:f`: the top level's `f`.
+        (let* ((was (k-toplevel-enter)) (b (k-fun-bound? (substring n 11 (string-length n)))))
+          (begin (k-toplevel-leave was) b))
+        (let ((d (k-lookup-desc (string->symbol n))))
+          (and (not (null? d))
+               (tagcase (car d) (ds-var (v k) (k-arrow-kind? k)) (ds-fun (f) #t) (else y #f)))))))
 ;; Binder `b`'s name.
 (define k-binder-name (->* ((productof (1 int) (2 int))) symbol)
   (lambda (b) (k-dvar-name (extract b 1))))
@@ -193,7 +202,7 @@
   (lambda (s items)
     (cond ((not (= (k-length items) 3)) (k-sfail "`(select module name)`" s))
           ((and (syn-symbol? (k-nth items 1)) (syn-symbol? (k-nth items 2)))
-           (k-ty-new (ty-select (k-toplevel-marked (syn-head (k-nth items 1)))
+           (k-ty-new (ty-select (k-toplevel-qualified (syn-head (k-nth items 1)))
                                 (syn-head (k-nth items 2)))))
           (else (k-sfail "`(select module name)`: a module's name, and a component's" s)))))
 ;; Function `f`, given `have` descriptions at `s`, where it takes `want`.
@@ -535,4 +544,28 @@
           (("*") (list (* (car l) (car r))))
           (("-") (list (- (car l) (car r))))
           (else nil)))))
-)))
+;; Whether `s` is written as a size, not a region (`Checker::size_written`):
+;; a natural literal, `finite`, a size variable or value, `(+ …)`, `(- …)`.
+(define k-size-written? (->* (syn) bool)
+  (lambda (s)
+    (cond ((>= (syn-int s) 0) #t)
+          ((syn-symbol? s)
+           (or (string=? (syn-name s) "finite")
+               (let ((d (k-lookup-desc (syn-head s))))
+                 (and (not (null? d))
+                      (tagcase (car d) (ds-var (v k) (= k 5)) (ds-size (z) #t) (else x #f))))))
+          (else
+           (let ((items (tagcase s
+                          (lst (items d a b xpn) items)
+                          (else x (the k-syns nil)))))
+             (and (not (null? items)) (syn-symbol? (car items))
+                  (case (syn-name (car items)) (("+" "-") #t) (else #f))))))))
+;; `(io k)`, `k` a kind of the fixed family (`TODO.md` §84).
+(define k-io-atom (->* (syn k-syns) k-eff)
+  (lambda (s items)
+    (if (= (k-length items) 2)
+        (let* ((x (k-nth items 1)) (k (if (syn-symbol? x) (k-io-kind-code (syn-name x)) -1)))
+          (if (< k 0)
+              (k-sfail (string-append "an I/O effect's kind is one of " k-io-kinds-shown) x)
+              (k-one (a-io k))))
+        (k-sfail (string-append "`(io kind)`, the kind one of " k-io-kinds-shown) s)))))))

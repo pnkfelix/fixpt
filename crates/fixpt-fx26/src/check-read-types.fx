@@ -161,6 +161,8 @@
                                spin)
                        (syn)
                        k-region))
+            (val k-qualified? (subr (maxeff (read @globals) (read @s) spin) (syn) bool))
+            (val k-unqualified (subr (maxeff (read @globals) (read @s) spin) (syn) syn))
             (val k-effect-named
                  (subr (maxeff (alloc @t)
                                (goto @z)
