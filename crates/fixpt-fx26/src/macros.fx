@@ -12,6 +12,7 @@
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define files-module ((proj (load-module "fx26:macros-files.fx") rs re rm rc rp)))
 (define exports-module (with files-module exports-module))
+(define scopes-module (with exports-module scopes-module))
 (define align-module (with files-module align-module))
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
@@ -27,12 +28,13 @@
         matched pattern-names list-items odd-length nth-name nth-list len-ints addr-under? ints=?
         all-ints? ints-prefix name-kind?
         (type fails addr sty binds))
-(import align-module defined macro-of macro? makes-defns? nodes-reset! align walk placed node-at
+(import scopes-module walk placed evaluate levels-of binder-of)
+(import align-module defined macro-of macro? makes-defns? nodes-reset! align node-at
         node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
         seq-depths
         act-qualified act-standard act-module act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
-        node-hole s-typed evaluate levels-of
+        node-hole s-typed
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
               found levels
               atms kids contracts holes))
@@ -280,9 +282,10 @@
               (name-actions fail ps (cdr fs) file (cons (tuple path (act-rename path depth)) out)
                             uses nested bd))
             (k-ref (n d free)
-              (let ((b (binder-of n d env)))
+              (let ((b (binder-of fail n d env s)))
                 (begin
                   (if d #u (unsaid-nested fail n b nested s))
+                  (repeated-ref fail n b depth bd s)
                   (let ((act (ref-action fail n b free file s bd)))
                     (name-actions fail ps (cdr fs) file
                                   (if (null? act) out (cons (tuple path (car act)) out)) uses
@@ -310,25 +313,16 @@
                                           "names only those, as they are where it is imported")
                       s)
              (list (act-toplevel)))))))
-;; The template's binder of `n` in `env`, innermost first, in a
-;; description's namespace if `d`, else a value's: its node.
-(define binder-of (->* (symbol bool levels) (listof int acyclic))
-  (lambda (n d env)
-    (if (null? env)
-        nil
-        (let ((here (tagcase (car env) (lv-rib (as) (lit-binding n d as)) (else y nil))))
-          (if (null? here) (binder-of n d (cdr env)) here)))))
-(define lit-binding (->* (symbol bool atms) (listof int acyclic))
-  (lambda (n d as)
-    (if (null? as)
-        nil
-        (let ((rest (lit-binding n d (cdr as))))
-          (tagcase (car as)
-            (atm-lit (t e)
-              (tagcase (node-kids t)
-                (k-binder (m f) (if (and (symbol=? m n) (eq? e d)) (list t) rest))
-                (else y rest)))
-            (else y rest))))))
+;; A binder `b` (none or one) repeated, referred to under `depth`, fewer
+;; ellipses than it is under: which repetition's is not said.
+(define repeated-ref (->* (fails symbol (listof int acyclic) int depths syn) unit)
+  (lambda (fail n b depth bd s)
+    (if (and (not (null? b)) (> (depth-of (car b) bd) depth))
+        (fail-at fail (string-append "`" (symbol->string n) "` is bound in each repetition of a "
+                                     "part, and referred to under fewer ellipses than it is "
+                                     "bound: which repetition's it is is not said")
+                 s)
+        #u)))
 ;; A file's macro's descriptions, from node `i` to `n`, each read whole
 ;; through the file's module or the standard environment, of those the
 ;; template writes alone, with no binder of its own or part of a use's in

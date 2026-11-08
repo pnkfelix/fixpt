@@ -3,11 +3,13 @@
 ;;; uses of macros that make definitions (`macros.rs`'s `exports`,
 ;;; `shown_exports` and `binders_under`), and what says how many times a
 ;;; template's part is repeated (`transcribe`'s). Part of the expander: loaded by
-;;; `macros-files.fx`, and loading `macros-align.fx`, whose nodes these read,
-;;; so that `macros.fx` takes one instance of each through it.
+;;; `macros-files.fx`, and loading `macros-scopes.fx` (and through it
+;;; `macros-align.fx`, whose nodes these read), so that `macros.fx` takes one
+;;; instance of each through it.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define align-module ((proj (load-module "fx26:macros-align.fx") rs re rm rc rp)))
+(define scopes-module ((proj (load-module "fx26:macros-scopes.fx") rs re rm rc rp)))
+(define align-module (with scopes-module align-module))
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
@@ -15,7 +17,8 @@
 (import parser-module syn-symbol? syn-symbol (type names))
 (import types-module fail-at name-in? proper-items sorted-strings joined atm-var atm-rib-of
         atm-lit pattern-names addr-under? addr=? (type fails atm atms strings addr))
-(import align-module node-kids node-syn pvar? makes-defns? normal atm-in? lv-rib lv-cage k-pair
+(import scopes-module normal atm-in?)
+(import align-module node-kids node-syn pvar? makes-defns? lv-rib lv-cage lv-earlier k-pair
         k-form k-desc k-seq k-binder act-rename (type levels pvars actions))
 
 ;;; ------------------------------------------------------------ exports
@@ -32,6 +35,7 @@
         (tuple as ns)
         (tagcase (car ls)
           (lv-rib (xs) (exports-onto (cdr ls) (atms-onto xs as) ns))
+          (lv-earlier (xs) (exports-onto (cdr ls) (atms-onto xs as) ns))
           (lv-cage (n) (exports-onto (cdr ls) as (if (name-in? n ns) ns (cons n ns))))))))
 (define atms-onto (->* (atms atms) atms)
   (lambda (xs as)

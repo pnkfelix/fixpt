@@ -58,6 +58,7 @@
     (form sum (label expr))
     (form extract (expr label))
     (form product fields)
+    (form tuple exprs)
     (form tagcase (expr . arms))
     (form cond cond-clauses)
     (form plambda (dbinders . (import exprs (rho (A rib)))))
@@ -73,6 +74,9 @@
     (form letreap (dvar . (import exprs (rho (A place)))))
     (form rlambda (expr formals . (import exprs (rho (AD rib)))))
     (form %app (expr . exprs))
+    ;; A keyword's construction, `(#:tag e …)`, its tag written or a
+    ;; pattern variable's (a `label`).
+    (form %construct (label . exprs))
     ;; The definitions a template may make, a macro's whose signature says
     ;; `(-> σ defn)`, each exporting what it defines: a value, seeing those
     ;; before it, `(define x T lambda)` and `define*` itself, a `define-rec`

@@ -491,9 +491,13 @@ pub const MACROS_KERNEL: &str = include_str!("macros-kernel.fx");
 /// The expander's syntax types, read and compared (`macros.rs`'s first half).
 pub const MACROS_TYPES: &str = include_str!("macros-types.fx");
 
-/// The expander's aligning of syntax with syntax types, its binding walk and
-/// the macros defined (`macros.rs`'s second half).
+/// The expander's aligning of syntax with syntax types, and the macros
+/// defined (`macros.rs`'s second half).
 pub const MACROS_ALIGN: &str = include_str!("macros-align.fx");
+
+/// What binds what in a template's nodes, walked by Herman's rules, and a
+/// pattern variable placed checked (`macros.rs`'s `walk`, `placed`).
+pub const MACROS_SCOPES: &str = include_str!("macros-scopes.fx");
 
 /// What a template's exports bind, compared and said, and the names its
 /// nested uses bind (`macros.rs`'s `exports`, `binders_under`).
@@ -779,7 +783,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 211] = [
+pub const FRONT_END_MODULES: [(&str, &str); 212] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -839,6 +843,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 211] = [
     ("macros-kernel.fx", MACROS_KERNEL),
     ("macros-types.fx", MACROS_TYPES),
     ("macros-align.fx", MACROS_ALIGN),
+    ("macros-scopes.fx", MACROS_SCOPES),
     ("macros-exports.fx", MACROS_EXPORTS),
     ("macros-files.fx", MACROS_FILES),
     ("macros.fx", MACROS),

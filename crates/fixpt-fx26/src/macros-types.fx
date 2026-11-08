@@ -434,12 +434,77 @@
 ;; The type of an element of list type `t`, in a list of one, if a template
 ;; or pattern may give its elements by ellipsis: a `mu` of `()` and of pairs
 ;; of an element and itself, which binds no more than what each element
-;; exports, all of them together (`macros.rs`'s `seq_of`).
+;; exports, all of them together (a `let`'s); or each element's in the
+;; scope of those after it, the list a ribcage (a `let*`'s, a `begin`'s
+;; definitions, `seq-cage?`) (`macros.rs`'s `seq_of`).
 (define seq-elem (->* (sty) stys)
   (lambda (t)
+    (let ((caged (cage-seq-elem t)))
+      (if (null? caged)
+          (tagcase t
+            (s-mu (id)
+              (tagcase (mu-body id) (s-union (ms) (seq-members ms id nil #f)) (else y nil)))
+            (else y nil))
+          caged))))
+(define seq-cage? (->* (sty) bool) (lambda (t) (not (null? (cage-seq-elem t)))))
+;; A ribcage's list (`macros.rs`'s `cage_seq_of`): `(export () (cage))`, and
+;; pairs `(export (e . (import t β)) (cage (at D) β'))`, the rest in the
+;; scope of what the element binds, `β`, which is also the list's innermost
+;; rib or ribcage, `β'`, after the rest's. The element type, with what it
+;; exports, in a list of one.
+(define cage-seq-elem (->* (sty) stys)
+  (lambda (t)
     (tagcase t
-      (s-mu (id) (tagcase (mu-body id) (s-union (ms) (seq-members ms id nil #f)) (else y nil)))
+      (s-mu (id) (tagcase (mu-body id) (s-union (ms) (cage-members ms id nil #f)) (else y nil)))
       (else y nil))))
+(define cage-members (->* (stys int stys bool) stys)
+  (lambda (ms id es none)
+    (if (null? ms)
+        (if (and none (not (null? es)) (null? (cdr es))) es nil)
+        (tagcase (car ms)
+          (s-export (core b)
+            (tagcase b
+              (bind-cage (rings)
+                (cond ((and (null? rings) (= (kind-of core) 6)) (cage-members (cdr ms) id es #t))
+                      ((null? rings) nil)
+                      (else
+                       (let ((e (cage-pair core rings id)))
+                         (if (null? e) nil (cage-members (cdr ms) id (cons (car e) es) none))))))
+              (else y nil)))
+          (else y nil)))))
+;; Pair type `core` of a ribcage's list `id`, which exports `rings`: its
+;; element, with what it exports, in a list of one; none if it is not one.
+(define cage-pair (->* (sty rings int) stys)
+  (lambda (core rings id)
+    (tagcase core
+      (s-pair (a d)
+        (tagcase d
+          (s-import (r inner)
+            (if (and (tagcase r (s-mu (j) (= j id)) (else y #f)) (not (null? (cdr rings)))
+                     (null? (cdr (cdr rings)))
+                     (tagcase (car rings) (ring-at (x) (addr=? x (list #f))) (else y #f)))
+                (let ((own (car (cdr rings))))
+                  (tagcase own
+                    (ring-rib (es)
+                      (let ((stripped (cars-of es nil)))
+                        (if (and (bind=? inner (bind-rib es)) (not (null? stripped)))
+                            (list (s-export a (bind-rib (car stripped))))
+                            nil)))
+                    (ring-at (x)
+                      (if (and (addr=? x (list #t)) (bind=? inner (bind-cage (list own))))
+                          (list a)
+                          nil))))
+                nil))
+          (else y nil)))
+      (else y nil))))
+;; Entries `es`, each at its car's, from the car, onto `out`, in a list of
+;; one; none if one is not its car's.
+(define cars-of (->* (entries entries) (listof entries acyclic))
+  (lambda (es out)
+    (cond ((null? es) (list (the entries (reverse out))))
+          ((and (not (null? (extract (car es) 1))) (car (extract (car es) 1)))
+           (cars-of (cdr es) (cons (tuple (cdr (extract (car es) 1)) (extract (car es) 2)) out)))
+          (else nil))))
 ;; Of members `ms`, from the first: the elements found so far `es`, the last
 ;; first, and whether `()` is one of them.
 (define seq-members (->* (stys int stys bool) stys)

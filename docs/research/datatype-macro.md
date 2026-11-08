@@ -230,6 +230,18 @@ parameters a `dvar` sequence in scope in the fields' types.
    or `(name (p k) ...)`) taking the name's shape, which it then matches
    alone, so that clauses tell the two apart. Not yet: the built-in's own
    test programs through it, which wait on the changeover (5).
+   And, for the changeover, the constructors as procedures beside the
+   keywords (the user, 2026-11-08: a macro should be able to define the
+   backward compatible subroutines in the interim): the use names each,
+   `(define-data shape (circle #:circle int) …)`, and the template
+   defines one per variant, `(begin (define-type …) (define c …) ...)`
+   (`macros/define-data-constructors.fx`). What it needed: ellipsis where
+   each element is in the scope of those before it (a `begin`'s
+   definitions, `let*`'s clauses), which step 1 had left out (§4 asks for
+   it; no test had used it); a keyword, or a `label` pattern variable, at
+   a template's list's head, constructing; `tuple` in a template. And a
+   hole step 1 left: a binder repeated, referred to under fewer ellipses,
+   `(let ((t e) ...) t)`, expanded to an unbound name; now refused.
 4. If it passes, `define-datatype` in `top.rs` and the FX-26 front end
    could become that macro, in a standard library of macros (which wants
    the `#%fx` module of `lang-items.md`).

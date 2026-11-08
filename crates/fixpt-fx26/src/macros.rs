@@ -344,8 +344,10 @@ enum Kids {
     Ref(Sym, Ns, Free),
     /// A description's parts, a list a template writes, in order.
     Desc(Vec<usize>),
-    /// A list given by ellipsis, `(p ...)`: its element, repeated.
-    Seq(usize),
+    /// A list given by ellipsis, `(p ...)`: its element, repeated; whether
+    /// each element is in the scope of those before it (a ribcage's list,
+    /// a `let*`'s clauses or a `begin`'s definitions), not a `let`'s.
+    Seq(usize, bool),
     /// A form in a template, its operands (or, an application's, itself).
     Form(usize),
     Other,
@@ -366,11 +368,14 @@ pub(crate) enum Atom {
 /// ellipses it is under (`walk`).
 type Found = Vec<(usize, Vec<Level>, bool, usize)>;
 
-/// One level of an environment: a rib, or a pattern variable's ribcage.
+/// One level of an environment: a rib, or a pattern variable's ribcage; or,
+/// in a repeated element of a ribcage's list, what the repetitions before
+/// it bound, which its own binders' names cannot tell from its own.
 #[derive(Clone, Debug, PartialEq)]
 enum Level {
     Rib(Vec<Atom>),
     Cage(Sym),
+    Earlier(Vec<Atom>),
 }
 
 /// A pattern variable: its type, its kind (the type's annotations off), and
@@ -561,13 +566,18 @@ impl Macros {
     }
 
     /// The type of an element of list type `t`, if a template or pattern may
-    /// give its elements by ellipsis: a `mu` of `()` and of pairs of an
-    /// element and itself, which binds no more than what each element
-    /// exports, all of them together (a `let`'s, not a `let*`'s). Each
-    /// pair's element, with the part of the pair's export that is its.
-    fn seq_of(&self, t: &Rc<STy>) -> Option<Rc<STy>> {
+    /// give its elements by ellipsis, and whether each is in the scope of
+    /// those before it: a `mu` of `()` and of pairs of an element and
+    /// itself, which binds no more than what each element exports, all of
+    /// them together (a `let`'s); or each element's in the scope of those
+    /// after it, the list a ribcage (a `let*`'s, a `begin`'s definitions).
+    /// Each pair's element, with the part of the pair's export that is its.
+    fn seq_of(&self, t: &Rc<STy>) -> Option<(Rc<STy>, bool)> {
         let STy::Mu(id) = &**t else { return None };
         let STy::Union(ms) = &*self.mus[*id] else { return None };
+        if let Some(elem) = self.cage_seq_of(*id, ms) {
+            return Some((elem, true));
+        }
         let (mut elems, mut nil) = (Vec::new(), false);
         for m in ms {
             let (core, entries) = match &**m {
@@ -600,8 +610,47 @@ impl Macros {
         match elems.len() {
             0 => None,
             _ if !nil => None,
-            1 => elems.pop(),
-            _ => Some(Rc::new(STy::Union(elems))),
+            1 => elems.pop().map(|e| (e, false)),
+            _ => Some((Rc::new(STy::Union(elems)), false)),
+        }
+    }
+
+    /// A ribcage's list, `mu` `id` of members `ms`: `(export () (cage))`,
+    /// and pairs `(export (e . (import id β)) (cage (at D) β'))`, the rest
+    /// in the scope of what the element binds, `β`, which is also the
+    /// list's innermost rib or ribcage, `β'`, after the rest's. The element
+    /// type, with what it exports.
+    fn cage_seq_of(&self, id: usize, ms: &[Rc<STy>]) -> Option<Rc<STy>> {
+        let (mut elems, mut nil) = (Vec::new(), false);
+        for m in ms {
+            let STy::Export(core, Bind::Cage(rings)) = &**m else { return None };
+            match (&**core, &rings[..]) {
+                (STy::Nil, []) => nil = true,
+                (STy::Pair(a, d), [Ring::At(rest), own]) if rest == &vec![false] => {
+                    let STy::Import(r, inner) = &**d else { return None };
+                    if !matches!(&**r, STy::Mu(j) if *j == id) {
+                        return None;
+                    }
+                    // What the rest is in the scope of is the element's own.
+                    let (same, elem) = match (own, inner) {
+                        (Ring::Rib(es), Bind::Rib(fs)) => (es == fs, {
+                            let es: Option<Vec<(Addr, Delta)>> = es.iter().map(|(addr, d)| addr.split_first().filter(|(h, _)| **h).map(|(_, r)| (r.to_vec(), *d))).collect();
+                            Rc::new(STy::Export(a.clone(), Bind::Rib(es?)))
+                        }),
+                        (Ring::At(x), Bind::Cage(fs)) if x == &vec![true] => (fs[..] == [Ring::At(vec![true])], a.clone()),
+                        _ => return None,
+                    };
+                    if !same {
+                        return None;
+                    }
+                    elems.push(elem);
+                }
+                _ => return None,
+            }
+        }
+        match (elems.len(), nil) {
+            (1, true) => elems.pop(),
+            _ => None,
         }
     }
 
@@ -654,7 +703,7 @@ impl Macros {
         use STy::*;
         // `(p ...)`, where a list of elements `p` fits may be.
         if mode != Mode::Use && let Some(x) = ellipsis(s, interner) {
-            return self.seq_of(self.peel(t)).is_some_and(|e| self.fits(&e, &x, mode, interner, pvars));
+            return self.seq_of(self.peel(t)).is_some_and(|(e, _)| self.fits(&e, &x, mode, interner, pvars));
         }
         if let Some(n) = s.as_symbol() {
             let lit = matches!(&**self.unfold(t), Literal(_));
@@ -1025,13 +1074,25 @@ impl Macros {
                 }
                 Kids::Ref(n, ns, free) => {
                     // What the template binds of this name, in its namespace.
-                    let bound = env.iter().find_map(|l| match l {
-                        Level::Rib(atoms) => atoms.iter().find_map(|a| match a {
+                    let binds = |atoms: &[Atom]| {
+                        atoms.iter().find_map(|a| match a {
                             Atom::Lit(b, k) if *k == *ns && matches!(t.nodes[*b].kids, Kids::Binder(m, _) if m == *n) => Some(*b),
                             _ => None,
-                        }),
+                        })
+                    };
+                    let bound = env.iter().find_map(|l| match l {
+                        Level::Rib(atoms) => binds(atoms).map(Some),
+                        Level::Earlier(atoms) => binds(atoms).map(|_| None),
                         Level::Cage(_) => None,
                     });
+                    // A binder of a repeated element of a ribcage's list,
+                    // referred to in that element: this repetition's is not
+                    // yet bound, and which before it is not said.
+                    let bound = match bound {
+                        Some(None) => return Err(FxError::at(span, format!("`{}` is bound by the repetitions before this one, which its name does not tell apart: a repeated element of a `let*` or `begin` refers to no binder it repeats", interner.name(*n)))),
+                        Some(b) => b,
+                        None => None,
+                    };
                     // A name a nested use binds, which it is not said to
                     // define: refused, not read at the top level, which the
                     // template would seem to mean by it.
@@ -1041,6 +1102,13 @@ impl Macros {
                     {
                         let (n, m) = (interner.name(*n), interner.name(*m));
                         return Err(FxError::at(span, format!("`{n}` is bound in a use of `{m}`, whose signature does not say its uses define it: say so (`(-> (export σ β) defn)`), or write `(with #%toplevel {n})` for the top level's")));
+                    }
+                    // A binder repeated, referred to under fewer ellipses
+                    // than it is: which repetition's is not said.
+                    if let Some(b) = bound
+                        && binder_depth.get(&b).copied().unwrap_or(0) > depth
+                    {
+                        return Err(FxError::at(span, format!("`{}` is bound in each repetition of a part, and referred to under fewer ellipses than it is bound: which repetition's it is is not said", interner.name(*n))));
                     }
                     let action = match (bound, free, file) {
                         (Some(b), _, _) => Action::Rename(t.nodes[b].path.clone(), binder_depth.get(&b).copied().unwrap_or(0)),
@@ -1480,7 +1548,7 @@ impl Aligner<'_> {
         // `(p ...)`, a pattern's or a template's: `p` aligned with the list's
         // element type, repeated; the list exports what each element does.
         if self.mode != Mode::Use && let Some(x) = ellipsis(s, self.interner) {
-            let Some(elem) = self.m.seq_of(t) else {
+            let Some((elem, cage)) = self.m.seq_of(t) else {
                 return Err(fail(format!("`{}` repeats a part by `...` where the form takes no list of them", self.show(s))));
             };
             let mut p = self.nodes[at].path.clone();
@@ -1499,7 +1567,7 @@ impl Aligner<'_> {
                     self.nodes[e].core = self.m.peel(&one).clone();
                 }
             }
-            self.nodes[at].kids = Kids::Seq(e);
+            self.nodes[at].kids = Kids::Seq(e, cage);
             // What each element exports, the list does, of each.
             if self.nodes[at].export.is_none() {
                 self.nodes[at].export = self.nodes[e].export.clone();
@@ -1659,14 +1727,20 @@ impl Aligner<'_> {
                 return Err(FxError::at(s.span, "a template's `with` is `(with #%fx name)` or `(with #%toplevel name)` (one opening a module waits for scopes of a module's names)"));
             }
             Some((h, _)) if self.m.defined.contains_key(&h) => Some(self.m.defined[&h].sig.clone()),
-            Some((_, n)) if self.m.kernel.contains_key(n) && n != "%app" => Some(self.m.kernel[n].clone()),
+            Some((_, n)) if self.m.kernel.contains_key(n) && !n.starts_with('%') => Some(self.m.kernel[n].clone()),
             Some((_, n)) if reserved(n) => {
                 return Err(FxError::at(s.span, format!("the prototype does not know `{n}`'s binding structure: not yet in a template")));
             }
             _ => None,
         };
         let path = self.nodes[at].path.clone();
+        // A keyword at a list's head constructs, a tag written or placed.
+        let construct = matches!(items[0].datum, Datum::Keyword(_)) || items[0].as_symbol().and_then(|h| self.pvars.get(&h)).is_some_and(|p| matches!(&*p.core, STy::Label));
         let x = match sig {
+            _ if construct && !defn => {
+                let construct = self.m.kernel["%construct"].clone();
+                self.align(&construct, s, None, path)?
+            }
             Some(sig) => {
                 let (_, operands) = split(s).expect("a list");
                 let mut p = path;
@@ -1958,7 +2032,22 @@ impl Aligner<'_> {
                 self.walk(*x, &env, many, depth, found, seqs)?;
                 self.walk(*y, &env, many, depth, found, seqs)
             }
-            Kids::Form(x) | Kids::Seq(x) => self.walk(*x, &env, many, depth, found, seqs),
+            Kids::Form(x) | Kids::Seq(x, false) => self.walk(*x, &env, many, depth, found, seqs),
+            // An element of a ribcage's list, in the scope of what the
+            // repetitions before it bound.
+            Kids::Seq(x, true) => {
+                let mut levels: Vec<Level> = Vec::new();
+                let mut earlier = Vec::new();
+                for l in self.levels_of(*x, node.syn.span)? {
+                    match l {
+                        Level::Rib(atoms) | Level::Earlier(atoms) => earlier.extend(atoms),
+                        Level::Cage(n) => levels.push(Level::Cage(n)),
+                    }
+                }
+                levels.insert(0, Level::Earlier(earlier));
+                levels.extend(env);
+                self.walk(*x, &levels, many, depth, found, seqs)
+            }
             Kids::Desc(kids) => {
                 for k in kids {
                     self.walk(*k, &env, many, depth, found, seqs)?;
@@ -2041,6 +2130,8 @@ impl Aligner<'_> {
         match (&node.kids, &self.exported(t).export) {
             (Kids::PVar(n), _) => Ok(vec![Level::Cage(*n)]),
             (_, Some((b, r))) => self.eval(b, *r, span),
+            // A ribcage's list by ellipsis: what each element exports.
+            (Kids::Seq(e, true), None) => self.levels_of(*e, span),
             (Kids::Form(_), None) => Ok(Vec::new()),
             _ => Err(FxError::at(node.syn.span, "the signature says what is here exports a ribcage, and it exports none")),
         }
@@ -2054,7 +2145,7 @@ impl Aligner<'_> {
                 self.binders_under(x, m, out);
                 self.binders_under(y, m, out);
             }
-            Kids::Form(x) | Kids::Seq(x) => self.binders_under(x, m, out),
+            Kids::Form(x) | Kids::Seq(x, _) => self.binders_under(x, m, out),
             Kids::Desc(ref kids) => {
                 for k in kids {
                     self.binders_under(*k, m, out);
@@ -2074,7 +2165,7 @@ impl Aligner<'_> {
                 out.extend(self.under(*x));
                 out.extend(self.under(*y));
             }
-            Kids::Form(x) | Kids::Seq(x) => out.extend(self.under(*x)),
+            Kids::Form(x) | Kids::Seq(x, _) => out.extend(self.under(*x)),
             Kids::Desc(kids) => kids.iter().for_each(|k| out.extend(self.under(*k))),
             _ => {}
         }
@@ -2145,15 +2236,18 @@ impl Aligner<'_> {
     /// shadows a description's; every description's shares one namespace.
     fn in_scope(&self, n: Sym, ns: Ns, env: &[Level], span: Span) -> R<()> {
         let name = self.name(n);
-        let Some(i) = env.iter().position(|l| matches!(l, Level::Rib(atoms) if atoms.contains(&Atom::Var(n, ns)))) else {
+        let Some(i) = env.iter().position(|l| matches!(l, Level::Rib(atoms) | Level::Earlier(atoms) if atoms.contains(&Atom::Var(n, ns)))) else {
             return Err(FxError::at(span, format!("`{name}` is referred to where the template does not bind it")));
         };
+        if matches!(&env[i], Level::Earlier(_)) {
+            return Err(FxError::at(span, format!("`{name}` is bound by the repetitions before this one, which its name does not tell apart: a repeated element of a `let*` or `begin` refers to no binder it repeats")));
+        }
         let shadows = |a: &Atom| match a {
             Atom::Lit(..) => false,
             Atom::Var(_, k) => *k == ns,
             Atom::RibOf(_) => true,
         };
-        if env[..i].iter().any(|l| matches!(l, Level::Cage(_)) || matches!(l, Level::Rib(atoms) if atoms.iter().any(shadows))) {
+        if env[..i].iter().any(|l| matches!(l, Level::Cage(_)) || matches!(l, Level::Rib(atoms) | Level::Earlier(atoms) if atoms.iter().any(shadows))) {
             return Err(FxError::at(span, format!("`{name}` is referred to where another of the pattern's binders may shadow it (Herman's shadow restriction): a use giving both one name would change what it refers to")));
         }
         Ok(())
@@ -2197,6 +2291,11 @@ fn normal(env: &[Level]) -> Vec<Level> {
                 a.sort();
                 (!a.is_empty()).then_some(Level::Rib(a))
             }
+            Level::Earlier(atoms) => {
+                let mut a: Vec<Atom> = atoms.iter().filter(|a| !matches!(a, Atom::Lit(..))).cloned().collect();
+                a.sort();
+                (!a.is_empty()).then_some(Level::Earlier(a))
+            }
             Level::Cage(n) => Some(Level::Cage(*n)),
         })
         .collect()
@@ -2210,7 +2309,7 @@ fn exports(levels: &[Level]) -> (Vec<Atom>, Vec<Sym>) {
     let mut cages = Vec::new();
     for l in normal(levels) {
         match l {
-            Level::Rib(a) => atoms.extend(a),
+            Level::Rib(a) | Level::Earlier(a) => atoms.extend(a),
             Level::Cage(n) => cages.push(n),
         }
     }
