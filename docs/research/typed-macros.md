@@ -1008,8 +1008,10 @@ and declared ahead with the program's types when expanded. A pattern
 variable that is a name placed in a template never fits a list's shape
 (so `(define-type t …)`, `t` a `dvar`, is the plain form, not a family's).
 
-Left for the second stage: `define-datatype` and `define-generative`, a `subr`'s named parameters and specification,
-`moduleof`, a file's macro's descriptions with its own binders, a use's
+Left for the second stage: `define-datatype` and `define-generative`
+(`define-datatype` since done as `define-data`, `datatype-macro.md`), a
+`subr`'s named parameters and specification (since built, 2026-11-08:
+`docs/fx26.md`), `moduleof`, a file's macro's descriptions with its own binders, a use's
 type placed in the scope of a use's `dvar` without saying so, and typed
 macros' description parts. Tests: `macros/desc-*.fx`,
 `import-with-syntax/main-poly.fx`.

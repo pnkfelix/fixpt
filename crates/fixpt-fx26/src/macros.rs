@@ -122,6 +122,9 @@ pub(crate) enum Bind {
     /// A rib of what it binds, as found: the binders a template's
     /// description writes (`Aligner::desc`), no signature's.
     Direct(Vec<Atom>),
+    /// What the repetitions before a repeated part bound, as found
+    /// (`Level::Earlier`): a repeated parameter's name in its own type.
+    Earlier(Vec<Atom>),
 }
 
 /// One of a ribcage's: a rib, or the ribcage exported at an address.
@@ -1089,7 +1092,7 @@ impl Macros {
                     // referred to in that element: this repetition's is not
                     // yet bound, and which before it is not said.
                     let bound = match bound {
-                        Some(None) => return Err(FxError::at(span, format!("`{}` is bound by the repetitions before this one, which its name does not tell apart: a repeated element of a `let*` or `begin` refers to no binder it repeats", interner.name(*n)))),
+                        Some(None) => return Err(FxError::at(span, format!("`{}` is bound by the repetitions before this one, which its name does not tell apart: a repeated part refers to no binder it repeats in its own scope", interner.name(*n)))),
                         Some(b) => b,
                         None => None,
                     };
@@ -1878,18 +1881,8 @@ impl Aligner<'_> {
                 Ok(())
             }
             Some("moduleof") => not_yet("a `moduleof`"),
-            Some(h) if self.word(items[0].as_symbol().expect("a name"), true) => {
-                if matches!(h, "subr" | "->" | "->*") {
-                    for i in &items[1..] {
-                        let parts = i.as_proper_list().unwrap_or(&[]);
-                        if parts.first().and_then(|x| x.as_symbol()).is_some_and(|x| matches!(self.name(x), "requires" | "ensures")) {
-                            return not_yet("a specification's clause");
-                        }
-                        if parts.iter().any(|p| p.as_proper_list().is_some_and(|q| q.get(1).and_then(|x| x.as_symbol()).is_some_and(|x| self.name(x) == ":"))) {
-                            return not_yet("a parameter named, `(name : type)`,");
-                        }
-                    }
-                }
+            Some("subr" | "->" | "->*") => self.desc_subr(s, &items, &kids),
+            Some(_) if self.word(items[0].as_symbol().expect("a name"), true) => {
                 for (k, i) in kids[1..].iter().zip(&items[1..]) {
                     self.desc(*k, i)?;
                 }
@@ -1903,6 +1896,123 @@ impl Aligner<'_> {
                 Ok(())
             }
         }
+    }
+
+    /// A procedure type, `(subr …)`, `(-> …)` or `(->* …)`, its parts `items`
+    /// at nodes `kids`: each parameter named, `(x : T)`, a value's binder in
+    /// scope in the types after it, the result and the specification's
+    /// clauses (`Checker::parse_subr_type`, `specified`), and a repeated
+    /// one's in its own type only as the repetitions before it bound it,
+    /// which a name cannot say; `(ensures r Q)`'s `r` in scope in `Q`. A
+    /// `(bool …)` result's propositions are written as they are.
+    fn desc_subr(&mut self, s: &Syntax, items: &[Syntax], kids: &[usize]) -> R<()> {
+        let clause = |c: &Self, x: &Syntax| x.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| matches!(c.name(h), "requires" | "ensures"));
+        let plain = items.len() - items.iter().rev().take_while(|c| clause(self, c)).count();
+        if plain < 3 || kids.len() != items.len() {
+            return Err(FxError::at(s.span, "`(subr effect (param …) result)` or `(-> (param …) result)`, then a specification's clauses"));
+        }
+        let (pi, ri) = (plain - 2, plain - 1);
+        for i in 1..pi {
+            self.desc(kids[i], &items[i])?;
+        }
+        let mut atoms = Vec::new();
+        if !matches!(items[pi].datum, Datum::Nil) {
+            let Some(ps) = items[pi].as_proper_list().map(|l| l.to_vec()) else {
+                return Err(FxError::at(items[pi].span, "a procedure type's parameters are a list"));
+            };
+            let pk = self.desc_kids(kids[pi], &ps);
+            for (k, p) in pk.iter().zip(&ps) {
+                let named = p.as_proper_list().filter(|q| q.len() == 3 && q[1].as_symbol().is_some_and(|c| self.name(c) == ":")).map(|q| q.to_vec());
+                let Some(parts) = named else {
+                    self.desc_scoped(*k, p, atoms.clone())?;
+                    continue;
+                };
+                let q = self.desc_kids(*k, &parts);
+                let a = self.value_binder(q[0], &parts[0])?;
+                self.nodes[q[2]].imports.push((Bind::Direct(atoms.clone()), q[2]));
+                if self.nodes[*k].repeated {
+                    self.nodes[q[2]].imports.push((Bind::Earlier(vec![a.clone()]), q[2]));
+                }
+                self.desc(q[2], &parts[2])?;
+                atoms.push(a);
+            }
+        }
+        let result = &items[ri];
+        if result.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "bool" && !self.pvars.contains_key(&h)) {
+            if let Some(n) = self.pvar_in(result) {
+                return Err(FxError::at(result.span, format!("pattern variable `{}` in a `(bool …)` result's propositions: not yet", self.name(n))));
+            }
+        } else {
+            self.desc_scoped(kids[ri], result, atoms.clone())?;
+        }
+        for (k, c) in kids[plain..].iter().zip(&items[plain..]) {
+            let parts = c.as_proper_list().expect("a clause").to_vec();
+            let q = self.desc_kids(*k, &parts);
+            match (self.name(parts[0].as_symbol().expect("a clause")), &q[..]) {
+                ("requires", [_, p]) => {
+                    self.nodes[*p].imports.push((Bind::Direct(atoms.clone()), *p));
+                    self.spec(*p, &parts[1])?;
+                }
+                ("ensures", [_, r, p]) => {
+                    let mut scope = atoms.clone();
+                    scope.push(self.value_binder(*r, &parts[1])?);
+                    self.nodes[*p].imports.push((Bind::Direct(scope), *p));
+                    self.spec(*p, &parts[2])?;
+                }
+                _ => return Err(FxError::at(c.span, "a specification is `(requires proposition)`, then `(ensures name proposition)`")),
+            }
+        }
+        Ok(())
+    }
+
+    /// A value's binder `n` a description writes (a procedure type's
+    /// parameter named, its result's name), at node `at`: a pattern variable
+    /// (a `bvar` the use gives), or a name the template binds; what it binds.
+    fn value_binder(&mut self, at: usize, n: &Syntax) -> R<Atom> {
+        self.nodes[at].core = Rc::new(STy::Bvar);
+        match n.as_symbol() {
+            Some(m) if self.pvars.contains_key(&m) => {
+                self.nodes[at].kids = Kids::PVar(m);
+                Ok(Atom::Var(m, Ns::Value))
+            }
+            Some(m) if !reserved(self.name(m)) && !self.word(m, false) => {
+                self.nodes[at].kids = Kids::Binder(m, Ns::Value);
+                Ok(Atom::Lit(at, Ns::Value))
+            }
+            _ => Err(FxError::at(n.span, format!("`{}` is not a name that may be bound", self.show(n)))),
+        }
+    }
+
+    /// A specification's proposition or integer `s`, at node `at`
+    /// (`Checker::spec_prop`, `spec_expr`): each name a value's, a
+    /// parameter's or the result's, which the template binds or a use
+    /// gives, else the top level's (which the checkers refuse there); a
+    /// call's head a global procedure's, written as it is, as a
+    /// `(globals …)`'s names are (a local of its name where the macro is
+    /// used is refused, not taken: `Checker::spec_callee`); the logic's
+    /// words, numbers, `#t` and `#f` as they are.
+    fn spec(&mut self, at: usize, s: &Syntax) -> R<()> {
+        let name = |c: &mut Self, at: usize, n: Sym, free: Free| {
+            c.nodes[at].core = Rc::new(STy::Id);
+            c.nodes[at].kids = if c.pvars.contains_key(&n) { Kids::PVar(n) } else { Kids::Ref(n, Ns::Value, free) };
+        };
+        match &s.datum {
+            Datum::Symbol(n) => name(self, at, *n, Free::Qualified),
+            Datum::List { items, tail: None } => {
+                let kids = self.desc_kids(at, items);
+                match items[0].as_symbol() {
+                    Some(h) if !self.pvars.contains_key(&h) && matches!(self.name(h), "<" | "<=" | "=" | ">" | ">=" | "not" | "and" | "or" | "implies" | "+" | "-" | "*") => {}
+                    Some(h) => name(self, kids[0], h, Free::Plain),
+                    None => return Err(FxError::at(s.span, "a specification's proposition or integer")),
+                }
+                for (k, i) in kids[1..].iter().zip(&items[1..]) {
+                    self.spec(*k, i)?;
+                }
+            }
+            Datum::List { .. } => return Err(FxError::at(s.span, "a specification's proposition is a list, not a dotted one")),
+            _ => {}
+        }
+        Ok(())
     }
 
     /// A node for each of `items`, the parts of the list at node `at`, at
@@ -2067,6 +2177,7 @@ impl Aligner<'_> {
         match b {
             Bind::Rib(entries) => Ok(vec![Level::Rib(self.rib(entries, root, span)?)]),
             Bind::Direct(atoms) => Ok(vec![Level::Rib(atoms.clone())]),
+            Bind::Earlier(atoms) => Ok(vec![Level::Earlier(atoms.clone())]),
             Bind::Cage(rings) => {
                 let mut out = Vec::new();
                 for r in rings {
@@ -2240,7 +2351,7 @@ impl Aligner<'_> {
             return Err(FxError::at(span, format!("`{name}` is referred to where the template does not bind it")));
         };
         if matches!(&env[i], Level::Earlier(_)) {
-            return Err(FxError::at(span, format!("`{name}` is bound by the repetitions before this one, which its name does not tell apart: a repeated element of a `let*` or `begin` refers to no binder it repeats")));
+            return Err(FxError::at(span, format!("`{name}` is bound by the repetitions before this one, which its name does not tell apart: a repeated part refers to no binder it repeats in its own scope")));
         }
         let shadows = |a: &Atom| match a {
             Atom::Lit(..) => false,

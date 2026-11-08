@@ -38,8 +38,9 @@
 (define-type atms (listof atm acyclic))
 ;; What an annotation binds (Herman's `β`): a rib, or a ribcage; or a rib of
 ;; what it binds, as found, the binders a template's description writes
-;; (`macros.rs`'s `Bind::Direct`).
-(define-datatype bind (bind-rib entries) (bind-cage rings) (bind-direct atms))
+;; (`macros.rs`'s `Bind::Direct`), or what the repetitions before a repeated
+;; part bound (`Bind::Earlier`).
+(define-datatype bind (bind-rib entries) (bind-cage rings) (bind-direct atms) (bind-earlier atms))
 ;; What a typed hole says (`macros.rs`'s `Hole`): its type and its effect,
 ;; each as written, in a list of one, or none if it is left out.
 (define-type hole (tupleof syns-a syns-a))
@@ -911,7 +912,8 @@
       (bind-rib (es) (tagcase q (bind-rib (fs) (entries=? es fs)) (else y #f)))
       (bind-cage (rs) (tagcase q (bind-cage (ss) (rings=? rs ss)) (else y #f)))
       ;; Found, never written in a signature.
-      (bind-direct (as) #f))))
+      (bind-direct (as) #f)
+      (bind-earlier (as) #f))))
 (define rings=? (->* (rings rings) bool)
   (lambda (rs ss)
     (if (null? rs)

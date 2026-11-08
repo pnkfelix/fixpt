@@ -15,7 +15,7 @@
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
         fits? sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
-        bind-rib bind-cage bind-direct
+        bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit sorted-strings
@@ -553,33 +553,12 @@
         ((string=? head "select")
          (desc-values fail ps (if (null? (cdr kids)) nil (list (kid kids 1))) 1))
         ((string=? head "moduleof") (not-yet "a `moduleof`"))
+        ((or (string=? head "subr") (string=? head "->") (string=? head "->*"))
+         (desc-subr fail ps s items kids))
         ((and (not (string=? head "")) (desc-word? head #t))
-         (let ((no (if (or (string=? head "subr") (string=? head "->") (string=? head "->*"))
-                       (subr-refused (cdr items))
-                       "")))
-           (if (string=? no "") (desc-each fail ps (cdr kids) (cdr items)) (not-yet no))))
+         (desc-each fail ps (cdr kids) (cdr items)))
         ;; A description function applied, its name the head.
         (else (desc-each fail ps kids items))))))
-;; What of a `subr`'s parts `xs` the prototype does not take in a template:
-;; a specification's clause, or a parameter named; "" if neither.
-(define subr-refused (->* (syns-a) string)
-  (lambda (xs)
-    (if (null? xs)
-        ""
-        (let* ((parts (proper-items (car xs)))
-               (head (if (and (not (null? parts)) (syn-symbol? (car parts)))
-                         (syn-name (car parts))
-                         "")))
-          (cond ((or (string=? head "requires") (string=? head "ensures"))
-                 "a specification's clause")
-                ((named-param? parts) "a parameter named, `(name : type)`,")
-                (else (subr-refused (cdr xs))))))))
-(define named-param? (->* (syns-a) bool)
-  (lambda (ps)
-    (and (not (null? ps))
-         (or (let ((q (proper-items (car ps))))
-               (and (>= (len q) 2) (syn-symbol? (nth q 1)) (string=? (syn-name (nth q 1)) ":")))
-             (named-param? (cdr ps))))))
 (define desc-each (->* (fails pvars (listof int acyclic) syns-a) unit)
   (lambda (fail ps ks xs)
     (if (or (null? xs) (null? ks))
@@ -611,17 +590,24 @@
 ;; A description's binder `n`, at node `at`: a pattern variable (a `dvar`
 ;; the use gives), or a name the template binds; what it binds.
 (define desc-binder (->* (fails pvars int syn) atm)
-  (lambda (fail ps at n)
+  (lambda (fail ps at n) (begin (with-core at (s-dvar)) (name-binder fail ps at n #t))))
+;; A value's binder `n` a description writes (a procedure type's parameter
+;; named, its result's name), at node `at`: a pattern variable (a `bvar` the
+;; use gives), or a name the template binds; what it binds.
+(define value-binder (->* (fails pvars int syn) atm)
+  (lambda (fail ps at n) (begin (with-core at (s-bvar)) (name-binder fail ps at n #f))))
+;; Binder `n` at node `at`, a description's if `d`, else a value's.
+(define name-binder (->* (fails pvars int syn bool) atm)
+  (lambda (fail ps at n d)
     (begin
-      (with-core at (s-dvar))
       (cond ((and (syn-symbol? n) (pvar? (syn-symbol n) ps))
-             (begin (with-kids at (k-pvar (syn-symbol n))) (atm-var (syn-symbol n) #t)))
+             (begin (with-kids at (k-pvar (syn-symbol n))) (atm-var (syn-symbol n) d)))
             ((and (syn-symbol? n) (not (reserved-syn? n)) (not (desc-word? (syn-name n) #f)))
-             (begin (with-kids at (k-binder (syn-symbol n) #t)) (atm-lit at #t)))
+             (begin (with-kids at (k-binder (syn-symbol n) d)) (atm-lit at d)))
             (else (begin (fail-at fail (string-append "`" (show-syn n) "` is not a name that may "
                                                       "be bound")
                                   n)
-                         (atm-lit at #t)))))))
+                         (atm-lit at d)))))))
 ;; `((name kind) …)` at node `at`, a binder's place or `distinct` third if
 ;; any, each in the scope of those before it: what they bind.
 (define desc-binders (->* (fails pvars int syn) atms)
@@ -683,6 +669,129 @@
                   (desc fail ps (kid p 1) (nth parts 1))
                   (desc-fields fail ps (cdr ks) (cdr fs))))
               (fail-at fail "`(label type)`" (car fs)))))))
+;; A procedure type, `(subr …)`, `(-> …)` or `(->* …)`, its parts `items`
+;; at nodes `kids` (`macros.rs`'s `desc_subr`): each parameter named, `(x :
+;; T)`, a value's binder in scope in the types after it, the result and the
+;; specification's clauses, and a repeated one's in its own type only as
+;; the repetitions before it bound it, which a name cannot say; `(ensures r
+;; Q)`'s `r` in scope in `Q`. A `(bool …)` result's propositions are written
+;; as they are.
+(define desc-subr (->* (fails pvars syn syns-a (listof int acyclic)) unit)
+  (lambda (fail ps s items kids)
+    (let ((plain (- (len items) (clauses-at-end (reverse items)))))
+      (if (or (< plain 3) (not (= (len-kids kids) (len items))))
+          (fail-at fail (string-append "`(subr effect (param …) result)` or `(-> (param …) "
+                                       "result)`, then a specification's clauses")
+                   s)
+          (desc-subr-parts fail ps kids items 0 (- plain 2) nil)))))
+(define len-kids (->* ((listof int acyclic)) int)
+  (lambda (ks) (if (null? ks) 0 (+ 1 (len-kids (cdr ks))))))
+(define spec-clause? (->* (syn) bool)
+  (lambda (c)
+    (let ((parts (proper-items c)))
+      (and (not (null? parts)) (syn-symbol? (car parts))
+           (or (string=? (syn-name (car parts)) "requires")
+               (string=? (syn-name (car parts)) "ensures"))))))
+(define clauses-at-end (->* (syns-a) int)
+  (lambda (rs)
+    (if (and (not (null? rs)) (spec-clause? (car rs))) (+ 1 (clauses-at-end (cdr rs))) 0)))
+;; The `i`th part on, the parameters the `pi`th; `as`, what the parameters
+;; before bind.
+(define desc-subr-parts (->* (fails pvars (listof int acyclic) syns-a int int atms) unit)
+  (lambda (fail ps ks xs i pi as)
+    (cond ((or (null? ks) (null? xs)) #u)
+          ((= i pi)
+           (desc-subr-parts fail ps (cdr ks) (cdr xs) (+ i 1) pi
+                            (desc-params fail ps (car ks) (car xs))))
+          (else
+           (begin
+             (cond ((= i 0) #u)
+                   ((< i pi) (desc fail ps (car ks) (car xs)))
+                   ((= i (+ pi 1)) (desc-result fail ps (car ks) (car xs) as))
+                   (else (desc-clause fail ps (car ks) (car xs) as)))
+             (desc-subr-parts fail ps (cdr ks) (cdr xs) (+ i 1) pi as))))))
+(define desc-params (->* (fails pvars int syn) atms)
+  (lambda (fail ps at s)
+    (cond ((syn-nil? s) nil)
+          ((null? (proper-items s))
+           (begin (fail-at fail "a procedure type's parameters are a list" s) nil))
+          (else (desc-params-from fail ps (desc-kids at (proper-items s)) (proper-items s) nil)))))
+(define desc-params-from (->* (fails pvars (listof int acyclic) syns-a atms) atms)
+  (lambda (fail ps ks xs as)
+    (if (or (null? ks) (null? xs))
+        as
+        (let ((parts (proper-items (car xs))))
+          (if (and (= (len parts) 3) (syn-symbol? (nth parts 1))
+                   (string=? (syn-name (nth parts 1)) ":"))
+              (let* ((q (desc-kids (car ks) parts)) (a (value-binder fail ps (car q) (car parts))))
+                (begin
+                  (with-import (kid q 2) (bind-direct as) (kid q 2))
+                  (if (repeated? (car ks))
+                      (with-import (kid q 2) (bind-earlier (list a)) (kid q 2))
+                      #u)
+                  (desc fail ps (kid q 2) (nth parts 2))
+                  (desc-params-from fail ps (cdr ks) (cdr xs) (append as (the atms (list a))))))
+              (begin (desc-scoped fail ps (car ks) (car xs) as)
+                     (desc-params-from fail ps (cdr ks) (cdr xs) as)))))))
+(define desc-result (->* (fails pvars int syn atms) unit)
+  (lambda (fail ps at r as)
+    (let ((parts (proper-items r)))
+      (if (and (not (null? parts)) (syn-symbol? (car parts))
+               (string=? (syn-name (car parts)) "bool")
+               (not (pvar? (syn-symbol (car parts)) ps)))
+          (let ((inside (pvar-inside r ps)))
+            (if (null? inside)
+                #u
+                (fail-at fail (string-append "pattern variable `" (symbol->string (car inside))
+                                             "` in a `(bool …)` result's propositions: not yet")
+                         r)))
+          (desc-scoped fail ps at r as)))))
+(define desc-clause (->* (fails pvars int syn atms) unit)
+  (lambda (fail ps at c as)
+    (let* ((parts (proper-items c)) (q (desc-kids at parts)) (head (syn-name (car parts))))
+      (cond ((and (string=? head "requires") (= (len-kids q) 2))
+             (begin (with-import (kid q 1) (bind-direct as) (kid q 1))
+                    (spec fail ps (kid q 1) (nth parts 1))))
+            ((and (string=? head "ensures") (= (len-kids q) 3))
+             (let ((a (value-binder fail ps (kid q 1) (nth parts 1))))
+               (begin (with-import (kid q 2) (bind-direct (append as (the atms (list a))))
+                                   (kid q 2))
+                      (spec fail ps (kid q 2) (nth parts 2)))))
+            (else (fail-at fail (string-append "a specification is `(requires proposition)`, "
+                                               "then `(ensures name proposition)`")
+                           c))))))
+;; A specification's proposition or integer `s`, at node `at`
+;; (`macros.rs`'s `spec`): each name a value's, a parameter's or the
+;; result's, else the top level's (which the checkers refuse there); a
+;; call's head a global procedure's, written as it is, as a `(globals …)`'s
+;; names are; the logic's words, numbers, `#t` and `#f` as they are.
+(define spec (->* (fails pvars int syn) unit)
+  (lambda (fail ps at s)
+    (tagcase s
+      (lst (items d a b x)
+        (if (null? items)
+            #u
+            (let ((kids (desc-kids at items)) (h (car items)))
+              (begin
+                (cond ((and (syn-symbol? h) (not (pvar? (syn-symbol h) ps))
+                            (logic-word? (syn-name h)))
+                       #u)
+                      ((syn-symbol? h) (desc-values fail ps (list (car kids)) 2))
+                      (else (fail-at fail "a specification's proposition or integer" s)))
+                (spec-each fail ps (cdr kids) (cdr items))))))
+      (dotted (items tail d a b x)
+        (fail-at fail "a specification's proposition is a list, not a dotted one" s))
+      (else y (if (syn-symbol? s) (desc-values fail ps (list at) 1) #u)))))
+(define spec-each (->* (fails pvars (listof int acyclic) syns-a) unit)
+  (lambda (fail ps ks xs)
+    (if (or (null? ks) (null? xs))
+        #u
+        (begin (spec fail ps (car ks) (car xs)) (spec-each fail ps (cdr ks) (cdr xs))))))
+(define logic-word? (->* (string) bool)
+  (lambda (h)
+    (or (string=? h "<") (string=? h "<=") (string=? h "=") (string=? h ">") (string=? h ">=")
+        (string=? h "not") (string=? h "and") (string=? h "or") (string=? h "implies")
+        (string=? h "+") (string=? h "-") (string=? h "*"))))
 ;; Names of values at nodes `ks`, each the top level's if free (`free` 1)
 ;; or as written (2), or a pattern variable placed.
 (define desc-values (->* (fails pvars (listof int acyclic) int) unit)

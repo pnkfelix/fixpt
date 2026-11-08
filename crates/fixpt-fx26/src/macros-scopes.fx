@@ -12,7 +12,7 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types (type syn))
 (import types-module fail-at kind-of unfold simple-kind? sub? atm-var atm-rib-of atm-lit
-        bind-rib bind-cage bind-direct ring-rib ring-at
+        bind-rib bind-cage bind-direct bind-earlier ring-rib ring-at
         (type fails addr entries rings bind sty atm atms))
 (import align-module node-at node-syn node-core node-kids node-many? repeated? seq-depths
         cage-seq? lv-rib lv-cage lv-earlier k-pair k-pvar k-binder k-ref k-form k-desc k-seq
@@ -76,7 +76,8 @@
     (tagcase b
       (bind-rib (es) (list (lv-rib (rib fail es root s))))
       (bind-cage (rings) (cage fail rings root s))
-      (bind-direct (as) (list (lv-rib as))))))
+      (bind-direct (as) (list (lv-rib as)))
+      (bind-earlier (as) (list (lv-earlier as))))))
 (define cage (->* (fails rings int syn) levels)
   (lambda (fail rings root s)
     (if (null? rings)
@@ -251,12 +252,11 @@
           (else (rib-binding n d (cdr env) (+ i 1))))))
 (define nth-level (->* (levels int) level)
   (lambda (env i) (if (= i 0) (car env) (nth-level (cdr env) (- i 1)))))
-;; Why a name bound by a repeated element of a ribcage's list is refused
-;; where that element refers to it.
+;; Why a name bound by a repeated part (an element of a ribcage's list, a
+;; parameter named) is refused where that part refers to it.
 (define repeats-said string
   (string-append "is bound by the repetitions before this one, which its name does not tell "
-                 "apart: a repeated element of a `let*` or `begin` refers to no binder it "
-                 "repeats"))
+                 "apart: a repeated part refers to no binder it repeats in its own scope"))
 ;; The template's binder of `n` in `env`, innermost first, in a
 ;; description's namespace if `d`, else a value's: its node, in a list of
 ;; one; refused, at `s`, if the repetitions before an element bind it.
