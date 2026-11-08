@@ -142,6 +142,23 @@
 
 ;;; ------------------------------------------------------------ matching
 
+;; Of union `t`'s members, the one a name is of, in a list of one, if one
+;; is; none else, or if `t` is no union.
+(define name-fit-of (->* (sty) stys)
+  (lambda (t)
+    (tagcase t
+      (s-union (ms)
+        (let ((names (names-of ms))) (if (and (not (null? names)) (null? (cdr names))) names nil)))
+      (else y nil))))
+(define names-of (->* (stys) stys)
+  (lambda (ms)
+    (cond ((null? ms) nil)
+          ((name-kind? (kind-of (unfold (car ms)))) (cons (car ms) (names-of (cdr ms))))
+          (else (names-of (cdr ms))))))
+;; Whether kind `k` is a name's: `bvar`, `dvar`, `id`, `label`.
+(define name-kind? (->* (int) bool)
+  (lambda (k) (or (= k 1) (= k 12) (= k 2) (= k 5))))
+
 ;; Pattern variables' syntax, by name.
 (define-type binds (listof (tupleof symbol syn) acyclic))
 (define bound-of (->* (symbol binds) (listof syn acyclic))
@@ -150,16 +167,16 @@
           ((symbol=? n (extract (car bs) 1)) (list (extract (car bs) 2)))
           (else (bound-of n (cdr bs))))))
 ;; Whether `s` matches pattern `p`, onto `bs`: its bindings, in a list of
-;; one; none if not. A name is a pattern variable (`_` anything), a form's
-;; name or a keyword itself.
-(define matched (->* (syn syn binds) (listof binds acyclic))
-  (lambda (p s bs)
+;; one; none if not. A name is a pattern variable (`_` anything; one of
+;; `ns`, the names', a name alone), a form's name or a keyword itself.
+(define matched (->* (syn syn names binds) (listof binds acyclic))
+  (lambda (p s ns bs)
     (cond
       ;; `(x ...)`: each element of a list by `x`, each of its pattern
       ;; variables then the list of what it matched.
       ((not (null? (ellipsis-of p)))
        (if (or (syn-nil? s) (not (null? (proper-items s))))
-           (let ((each (matched-each (car (ellipsis-of p)) (proper-items s) nil)))
+           (let ((each (matched-each (car (ellipsis-of p)) (proper-items s) ns nil)))
              (if (null? each)
                  nil
                  (list (seq-binds (pattern-names (car (ellipsis-of p))) (car each) s bs))))
@@ -168,25 +185,26 @@
        (cond ((string=? (syn-name p) "_") (list bs))
              ((reserved-syn? p)
               (if (and (syn-symbol? s) (symbol=? (syn-symbol s) (syn-symbol p))) (list bs) nil))
+             ((and (name-in? (syn-symbol p) ns) (not (syn-symbol? s))) nil)
              (else (list (cons (tuple (syn-symbol p) s) bs)))))
       ((syn-nil? p) (if (syn-nil? s) (list bs) nil))
       ((not (null? (split p)))
        (let ((ps (split p)) (ss (split s)))
          (if (null? ss)
              nil
-             (let ((first (matched (car ps) (car ss) bs)))
-               (if (null? first) nil (matched (nth ps 1) (nth ss 1) (car first)))))))
+             (let ((first (matched (car ps) (car ss) ns bs)))
+               (if (null? first) nil (matched (nth ps 1) (nth ss 1) ns (car first)))))))
       ((same-atom? p s) (list bs))
       (else nil))))
 ;; What each of `xs` matched by `x`, in order, onto `out` (reversed), in a
 ;; list of one; none if one does not match.
 (define matched-each
-  (->* (syn syns-a (listof binds acyclic)) (listof (listof binds acyclic) acyclic))
-  (lambda (x xs out)
+  (->* (syn syns-a names (listof binds acyclic)) (listof (listof binds acyclic) acyclic))
+  (lambda (x xs ns out)
     (if (null? xs)
         (list (the (listof binds acyclic) (reverse out)))
-        (let ((one (matched x (car xs) nil)))
-          (if (null? one) nil (matched-each x (cdr xs) (cons (car one) out)))))))
+        (let ((one (matched x (car xs) ns nil)))
+          (if (null? one) nil (matched-each x (cdr xs) ns (cons (car one) out)))))))
 ;; `bs`, each of `ns` bound to the list of what each of `each` bound it to,
 ;; at `s`'s place.
 (define seq-binds (->* (names (listof binds acyclic) syn binds) binds)

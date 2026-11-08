@@ -187,6 +187,9 @@ struct Macro {
 #[derive(Debug)]
 struct Clause {
     pattern: Syntax,
+    /// Its pattern variables that are names (`bvar`, `dvar`, `id`), which
+    /// match a name alone (a `label` may be a keyword).
+    names: HashSet<Sym>,
     template: Syntax,
     actions: HashMap<Vec<bool>, Action>,
     /// Its pattern's variables, in the order the pattern has them.
@@ -1130,8 +1133,9 @@ impl Macros {
             let select = interner.intern("select");
             contracts.insert(*n, Syntax::list(ty.span, vec![Syntax::symbol(ty.span, select), Syntax::symbol(ty.span, module), ty]));
         }
-        let pvars = order.into_iter().map(|n| (n, pvars[&n].clone())).collect();
-        Ok(Clause { pattern, template: template.clone(), actions, pvars, contracts })
+        let pvars: Vec<(Sym, PInfo)> = order.into_iter().map(|n| (n, pvars[&n].clone())).collect();
+        let names = pvars.iter().filter(|(_, p)| matches!(&*p.core, STy::Bvar | STy::Dvar | STy::Id)).map(|(n, _)| *n).collect();
+        Ok(Clause { pattern, names, template: template.clone(), actions, pvars, contracts })
     }
 
     /// `form` with each use of a macro in it expanded, as each expands,
@@ -1256,7 +1260,7 @@ impl Macros {
         u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
         for c in &m.clauses {
             let mut binds = HashMap::new();
-            if !matches(&c.pattern, &operands, &mut binds, interner) {
+            if !matches(&c.pattern, &operands, &c.names, &mut binds, interner) {
                 continue;
             }
             let made = fixpt_read::record_expansion(interner.name(name), s.span, m.text.clone());
@@ -1458,6 +1462,17 @@ impl Aligner<'_> {
                 Mode::Use => false,
             };
             if pvar {
+                // A pattern's variable where a name or a list may be: the
+                // name's shape, if one member is a name's.
+                if self.mode == Mode::Pattern
+                    && let STy::Union(ms) = &**self.m.unfold(t)
+                {
+                    let names: Vec<&Rc<STy>> = ms.iter().filter(|m| matches!(&**self.m.unfold(m), STy::Bvar | STy::Dvar | STy::Id | STy::Label)).collect();
+                    if let [one] = &names[..] {
+                        let one = (*one).clone();
+                        return self.fill(at, &one, s, root);
+                    }
+                }
                 self.nodes[at].kids = Kids::PVar(n);
                 return Ok(());
             }
@@ -2109,7 +2124,7 @@ impl Aligner<'_> {
                 return Err(FxError::at(span, format!("`{name}` is placed where a lambda is wanted: a typed hole there is a lambda, `(lambda #:type T)`")));
             }
             (Expr, Lambda) => true,
-            (Data, Data) | (Type, Type) | (Label, Label) => return Ok(()),
+            (Data, Data) | (Type, Type) | (Label, Label) | (Kind, Kind) => return Ok(()),
             (Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn, _) | (_, Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn) => false,
             _ => self.m.sub(have, want, &mut HashSet::new()),
         };
@@ -2348,7 +2363,7 @@ fn list_of(at: Span, mut items: Vec<Syntax>, tail: Option<Syntax>) -> Syntax {
 /// Whether `s` matches pattern `p`, binding its variables in `binds`: a
 /// name the pattern variable (`_` anything), a form's name or a keyword
 /// itself.
-fn matches(p: &Syntax, s: &Syntax, binds: &mut HashMap<Sym, Syntax>, interner: &Interner) -> bool {
+fn matches(p: &Syntax, s: &Syntax, names: &HashSet<Sym>, binds: &mut HashMap<Sym, Syntax>, interner: &Interner) -> bool {
     // `(x ...)`: each element of a list by `x`, each of its pattern
     // variables then the list of what it matched.
     if let Some(x) = ellipsis(p, interner) {
@@ -2361,7 +2376,7 @@ fn matches(p: &Syntax, s: &Syntax, binds: &mut HashMap<Sym, Syntax>, interner: &
         let mut each = Vec::new();
         for e in &elems {
             let mut b = HashMap::new();
-            if !matches(&x, e, &mut b, interner) {
+            if !matches(&x, e, names, &mut b, interner) {
                 return false;
             }
             each.push(b);
@@ -2375,13 +2390,15 @@ fn matches(p: &Syntax, s: &Syntax, binds: &mut HashMap<Sym, Syntax>, interner: &
     match &p.datum {
         Datum::Symbol(n) if interner.name(*n) == "_" => true,
         Datum::Symbol(n) if reserved(interner.name(*n)) => s.as_symbol() == Some(*n),
+        // A name's pattern variable matches a name alone.
+        Datum::Symbol(n) if names.contains(n) && s.as_symbol().is_none() => false,
         Datum::Symbol(n) => {
             binds.insert(*n, s.clone());
             true
         }
         Datum::Nil => matches!(s.datum, Datum::Nil),
         Datum::List { .. } => match (split(p), split(s)) {
-            (Some((pa, pd)), Some((sa, sd))) => matches(&pa, &sa, binds, interner) && matches(&pd, &sd, binds, interner),
+            (Some((pa, pd)), Some((sa, sd))) => matches(&pa, &sa, names, binds, interner) && matches(&pd, &sd, names, binds, interner),
             _ => false,
         },
         other => &s.datum == other,

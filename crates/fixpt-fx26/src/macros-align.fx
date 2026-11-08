@@ -19,7 +19,7 @@
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit sorted-strings
-        seq-elem peel ellipsis? ellipsis-of
+        seq-elem peel ellipsis? ellipsis-of name-fit-of name-kind?
         joined
         (type fails addr entries ring rings bind sty stys named hole atm atms strings))
 
@@ -196,9 +196,7 @@
 (define pvar-shape (->* (symbol pvars) int)
   (lambda (n ps)
     (let ((p (pvar-of n ps)))
-      (cond ((null? p) 0)
-            ((let ((k (kind-of (extract (car p) 1)))) (or (= k 1) (= k 12) (= k 2) (= k 5))) 1)
-            (else 2)))))
+      (cond ((null? p) 0) ((name-kind? (kind-of (extract (car p) 1))) 1) (else 2)))))
 
 ;; `s`, at `path`, aligned with type `t`, in `mode` (0 a pattern, 1 a
 ;; template, 2 a use); `root`, the node its addresses are from, if not
@@ -229,7 +227,12 @@
                   (or (and (= mode 0) (not (= (kind-of (unfold t)) 7))
                            (not (string=? (syn-name s) "_")) (not (ellipsis? s)))
                       (and (= mode 1) (pvar? (syn-symbol s) ps))))
-             (with-kids at (k-pvar (syn-symbol s))))
+             ;; A pattern's variable where a name or a list may be: the
+             ;; name's shape, if one member is a name's.
+             (let ((one (if (= mode 0) (name-fit-of (unfold t)) (the stys nil))))
+               (if (null? one)
+                   (with-kids at (k-pvar (syn-symbol s)))
+                   (fill fail mode ps at (car one) s root))))
             ((and (not (= mode 2)) (not (null? (ellipsis-of s))))
              (fill-seq fail mode ps at t s (car (ellipsis-of s))))
             ((and (not (= mode 2)) (ellipsis? s))
@@ -901,7 +904,9 @@
         ((and (= kh 0) (= kw 10) (not (null? (extract info 4))))
          (said (string-append "is placed where a lambda is wanted: a typed hole there is a "
                               "lambda, `(lambda #:type T)`")))
-        ((or (and (= kh 3) (= kw 3)) (and (= kh 4) (= kw 4)) (and (= kh 5) (= kw 5))) #u)
+        ((or (and (= kh 3) (= kw 3)) (and (= kh 4) (= kw 4)) (and (= kh 5) (= kw 5))
+             (and (= kh 13) (= kw 13)))
+         #u)
         (else
          (let ((fits (cond ((and (= kh 0) (= kw 0)) #t)
                            ((and (= kh 10) (or (= kw 10) (= kw 0))) #t)

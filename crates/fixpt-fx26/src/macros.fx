@@ -25,7 +25,7 @@
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn s-type
         signature-made pure-hole? affine-kind? int-in? ellipsis? ellipsis-of proper-items bound-of
         matched pattern-names list-items odd-length nth-name nth-list len-ints addr-under? ints=?
-        all-ints? ints-prefix
+        all-ints? ints-prefix name-kind?
         (type fails addr sty binds))
 (import align-module defined macro-of macro? makes-defns? nodes-reset! align walk placed node-at
         node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
@@ -699,6 +699,15 @@
         (nodes-reset!)
         (align in-use 2 (the pvars nil) (extract m 1) operands -1 nil)
         (first-match fail name s operands (extract m 2))))))
+;; The pattern variables of `ps` that are names (`bvar`, `dvar`, `id`),
+;; which match a name alone (a `label` may be a keyword).
+(define name-pvars (->* (pvars) names)
+  (lambda (ps)
+    (cond ((null? ps) nil)
+          ((let ((k ((with types-module kind-of) (extract (extract (car ps) 2) 1))))
+             (and (name-kind? k) (not (= k 5))))
+           (cons (extract (car ps) 1) (name-pvars (cdr ps))))
+          (else (name-pvars (cdr ps))))))
 (define first-match (->* (fails symbol syn syn clauses) syn)
   (lambda (fail name s operands cs)
     (if (null? cs)
@@ -706,7 +715,7 @@
                                             "of it matches")
                         s)
                s)
-        (let ((binds (matched (extract (car cs) 1) operands nil)))
+        (let ((binds (matched (extract (car cs) 1) operands (name-pvars (extract (car cs) 4)) nil)))
           (if (null? binds)
               (first-match fail name s operands (cdr cs))
               (let* ((made (record-expansion name s)) (shown (symbol->string name))

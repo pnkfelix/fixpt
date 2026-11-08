@@ -220,9 +220,16 @@ parameters a `dvar` sequence in scope in the fields' types.
 3. **Built** (2026-11-08): `define-data`, as "Keyword constructors:
    decided", 7, writes it, with no constructors (keywords construct):
    `macros/define-data.fx` and a recursive one, `define-data-recursive.fx`,
-   checked alike by both checkers and run. Not yet: the family form (§7's
-   stretch), and the built-in's own test programs through it, which wait
-   on the changeover (5).
+   checked alike by both checkers and run. And the family form, §7's
+   stretch (the same day): `(define-data (box (a type)) (#:full a)
+   (#:empty))`, the parameters the use names in scope in the variants'
+   types, a recursive family too (`define-data-family.fx`). With keyword
+   constructors there are no constructors to make polymorphic. What it
+   needed of the macro system: a `kind` part placed as a binder's kind,
+   and a pattern variable where a name or a list may be (the head, `name`
+   or `(name (p k) ...)`) taking the name's shape, which it then matches
+   alone, so that clauses tell the two apart. Not yet: the built-in's own
+   test programs through it, which wait on the changeover (5).
 4. If it passes, `define-datatype` in `top.rs` and the FX-26 front end
    could become that macro, in a standard library of macros (which wants
    the `#%fx` module of `lang-items.md`).

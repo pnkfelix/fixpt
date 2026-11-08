@@ -4390,3 +4390,8 @@ The user read the paper as supporting the distribution. Mine:
   what it made.
 - **A label a use gives, in a `productof` or `sumof` a template writes, is
   placed**, so its depth under ellipses is checked as any part's.
+- **A pattern variable where a name or a list may be takes the name's
+  shape** (the family form of `define-data`), if exactly one of the
+  union's members is a name's, and then matches a name alone, so that a
+  variable typed as a name is never given a list; a `label` may also be a
+  keyword, so labels are not held to names when matching.
