@@ -5263,3 +5263,15 @@ several forms of one text (each added once since). Keep the text of each
 entry's forms as written, those of an entry that failed up to the
 failure.
 
+
+## 217. Lang items: the standard library's special names, tagged (the user's, 2026-11-08)
+`listof`, `pairof`, `int` and the other built-in type constructors are a
+fixed list the parser reads by name in head position (`TYPE_FORMS`), while
+the same names alone are looked up in scope: `(listof listof)` under a
+binder named `listof` is the built-in list of the binder. Proposed: a real
+`#%fx` module with source, its special items tagged (Rust's lang items), so
+that the names are ordinary bindings and the checkers, compilers and
+runtime find each special thing by its tag. Design, sorting of today's
+built-ins, open questions and stages: `docs/research/lang-items.md`. To be
+discussed before building. Binders of descriptions treats `TYPE_FORMS` as
+syntax meanwhile, and the reserved-words fix does not reserve them.
