@@ -264,7 +264,8 @@ library's: a bare-name sugar for every common form would hide the tags
 again, which is what keywords are for.
 
 **A hypothetical extension: a keyword as a sum's constructor** (the
-user's, 2026-10-30; not decided). `(#:tag e …)` in operator position
+user's, 2026-10-30; decided to build, 2026-11-08, as the route the
+`define-datatype` spike takes: `datatype-macro.md`, §5 (B)). `(#:tag e …)` in operator position
 constructs a sum, as Haskell's capitalized constructors are told from
 variables by how they are written; a `tagcase` arm then looks like the
 construction it takes apart, `(tagcase r (#:sorted (xs) …) …)`. Keyword
@@ -1058,7 +1059,9 @@ Answered 2026-11-06 (the user):
   Only the top level is redefined: a module's definitions never are, and
   a local binding a template names is its own, hygienically.
 - **Repetition**: recursion through syntax types, as Herman's chapter 7
-  writes `let*` and `cond`; ellipsis later, as sugar for it.
+  writes `let*` and `cond`; ellipsis later, as sugar for it. Revised
+  2026-11-08 (the user): ellipsis is primitive repetition in transcription,
+  since recursion cannot splice into one form (`datatype-macro.md`).
 - **Scopes as regions**: Herman's annotations first ("Where to build").
 - **Labels in templates**: keywords, or `label` pattern variables; a bare
   label in a template is refused. Ordinary code is unchanged.

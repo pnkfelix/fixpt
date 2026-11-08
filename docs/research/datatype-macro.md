@@ -5,7 +5,7 @@ now be written as a macro? Not yet. This note says what it needs, and
 proposes it as the macro system's next *spike goal*: an acceptance test
 that a typed hygienic macro system able to express `define-datatype` has
 the capabilities a language's library needs. Status: **proposed, not
-built**; two choices are the user's (§6).
+built**; the two choices made (the user, 2026-11-08, §6).
 
 ## 1. The goal
 
@@ -124,12 +124,13 @@ clauses by shape for.
 
 ## 6. The user's choices
 
-1. **Ellipsis as primitive repetition**, replacing "ellipsis as sugar for
-   recursion": I recommend yes (§4).
-2. **Tags: (A) or (B).** I recommend deciding this by whether keyword
-   constructors are wanted anyway. If they are, (B), and the spike waits
-   for them. If not now, (A), which keeps the spike within the macro
-   system and does not stand in (B)'s way later.
+Decided (the user, 2026-11-08):
+1. **Ellipsis is primitive repetition** in patterns and templates (§4),
+   replacing "ellipsis as sugar for recursion".
+2. **Tags by (B), keyword constructors**: `(#:circle 1)` constructs the
+   sum, and the macro takes `label` parts; the spike waits for them, and
+   their design settles what `typed-macros.md`'s "hypothetical extension"
+   left open. Route (A), a `tag` syntax type, is not taken.
 
 ## 7. The spike
 
