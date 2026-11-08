@@ -132,6 +132,29 @@ Decided (the user, 2026-11-08):
    their design settles what `typed-macros.md`'s "hypothetical extension"
    left open. Route (A), a `tag` syntax type, is not taken.
 
+### Keyword constructors: decided (the user, 2026-11-08)
+
+1. **What a constructor carries, by arity**: `(#:eof)` carries `unit`,
+   `(#:ok v)` carries `v` itself, `(#:rect 1 2)` a tuple, `(tuple 1 2)`.
+   A datatype's one-field variant then carries its field, not a product
+   of one: code that `extract`s field `1` of one changes.
+2. **`sumof` written as constructors are used**: `(sumof (#:rect int int)
+   …)` is a variant carrying `(tupleof int int)`, `(#:circle int)` one
+   carrying an `int`, `(#:eof)` one carrying `unit`; a `tagcase` arm takes
+   a tuple's members apart alike, `(#:rect (x y) body)`. So a macro writes
+   every variant one way, `(sumof (t field ...) ...)`.
+3. **A sum's tag at run time is a keyword**, so that a printed sum shows
+   what the source wrote: a step of its own.
+4. **No constructors as values**: a keyword constructs a sum only at a
+   list's head. Where a procedure is wanted, it is written as one, the
+   keyword in head position: `(map (lambda (x) (#:ok x)) xs)`, not `(map
+   #:ok xs)`. Singleton keyword types, which would make the latter
+   mean the former, are not to be built.
+5. **The changeover**: `define-datatype`'s constructor procedures stay
+   until programs construct with keywords; `define-data` makes none, so
+   it replaces the built-in only then.
+6. **Flat products** are a decision of their own, not this one's.
+
 ## 7. The spike
 
 The macro, with (A):

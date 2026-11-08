@@ -297,7 +297,12 @@ positions, `(f #:x 1)`, so this would not stand in their way.
   type error, not another answer (`k` is a `keyword`, which is not
   applied), and its message can name the right form; it is where every
   special form is, though `if` is never a value.
-- **A further step that removes the snag**: singleton keyword types. The
+- **Decided (the user, 2026-11-08): no constructors as values.** The
+  snag stays a type error: a keyword constructs only at a list's head,
+  and a procedure that constructs is written as one, `(lambda (x) (#:ok
+  x))`; the singleton types below are not to be built
+  (`datatype-macro.md`, "Keyword constructors: decided").
+- **A further step that removes the snag** (not taken): singleton keyword types. The
   literal `#:variant` of type `(keyword variant)`, below `keyword`, as
   `false` is below `bool` and `(nat 3)` below `nat`; a keyword of a
   singleton type applied constructs the sum, checked as the form is. Then
