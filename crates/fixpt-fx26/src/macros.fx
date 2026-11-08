@@ -12,6 +12,7 @@
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define files-module ((proj (load-module "fx26:macros-files.fx") rs re rm rc rp)))
 (define exports-module (with files-module exports-module))
+(define match-module (with exports-module match-module))
 (define scopes-module (with exports-module scopes-module))
 (define align-module (with files-module align-module))
 (define types-module (with align-module types-module))
@@ -24,10 +25,11 @@
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn s-type
-        signature-made pure-hole? affine-kind? int-in? ellipsis? ellipsis-of proper-items bound-of
-        matched pattern-names list-items odd-length nth-name nth-list len-ints addr-under? ints=?
-        all-ints? ints-prefix name-kind?
-        (type fails addr sty binds))
+        signature-made pure-hole? affine-kind? int-in? ellipsis? ellipsis-of proper-items
+        name-kind?
+        (type fails addr sty))
+(import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list
+        len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
 (import scopes-module walk placed evaluate levels-of binder-of)
 (import align-module defined macro-of macro? makes-defns? nodes-reset! align node-at
         node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
@@ -39,7 +41,7 @@
               found levels
               atms kids contracts holes))
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
-        drivers-of renames-under
+        drivers-of renames-under with-uses with-uses-given note-projection note-uses
         (type exported nested))
 (import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
         internal-of
@@ -300,6 +302,13 @@
   (lambda (fail n b free file s bd)
     (cond ((not (null? b)) (list (act-rename (node-path (car b)) (depth-of (car b) bd))))
           ((= free 2) nil)
+          ((= free 3)
+           (begin
+             (fail-at fail (string-append "`" (symbol->string n) "`, the module a template's "
+                                          "`(with module name)` takes from, is bound by the "
+                                          "template or given by a use: a top level's, not yet")
+                      s)
+             nil))
           ;; A file's macro's description is read through the file's module
           ;; whole (`type-actions`).
           ((= free 1) (if (null? file) (list (act-qualified)) nil))
@@ -435,14 +444,6 @@
           (cons c (check-each fail (cdr cs) sig defn poly file))))))
 
 ;;; ------------------------------------------------------------ the session
-
-;; By each `with` form's place, the macros used in its body by names the
-;; program wrote, each with the use's place (`Macros::with_uses`): the
-;; checker refuses the `with` if its module gives a value of the name.
-(define-type uses (listof (tupleof int int symbol int int) acyclic))
-(define with-uses (ref uses rs) (new nil))
-;; For the checker: this parse's, in the order the expander met them.
-(define with-uses-given (->* () uses) (lambda () (reverse (get with-uses))))
 
 (define loads (ref load-defs rs) (new nil))
 ;; The macros defined after each form, and the load definitions, by the
@@ -605,7 +606,8 @@
 (define expand-in (->* (fails syn places) syn)
   (lambda (fail s withs)
     (let* ((items (list-items s)) (hd (if (null? items) s (car items)))
-           (head (if (syn-symbol? hd) (syn-name hd) "")))
+           (head (if (syn-symbol? hd) (syn-name hd) ""))
+           (noted (if (string=? head "with") (note-projection s items hd) #u)))
       (cond
         ((null? items) s)
         ((string=? head "quote") s)
@@ -633,16 +635,6 @@
                 s))
         (else (rebuilt s (expand-items fail items 0 (string=? head "with") s withs)
                        (expand-tail fail s withs)))))))
-;; The uses of macro `n`, at `hd`, noted in each `with` around it.
-(define note-uses (->* (symbol syn places) unit)
-  (lambda (n hd withs)
-    (if (null? withs)
-        #u
-        (begin
-          (set with-uses (cons (tuple (extract (car withs) 1) (extract (car withs) 2) n
-                                      (syn-start hd) (syn-end hd))
-                               (get with-uses)))
-          (note-uses n hd (cdr withs))))))
 ;; Items from the `k`th, each expanded; in a `with`'s body (from the third)
 ;; noted as in it.
 (define expand-items (->* (fails syns-a int bool syn places) syns-a)

@@ -5298,3 +5298,17 @@ none as values. Built the same day: ellipsis, keyword constructors,
 macros that make descriptions, and `define-data` (the spike passes,
 `macros/define-data*.fx`). Left: the family form, and the changeover of
 `define-datatype`'s programs to keyword construction.
+
+## 220. The verifier and a dependent `lambda` called where it is written (found 2026-11-08)
+
+`((lambda ((o ordered) (a (select o t)) (b (select o t))) (if ((with o
+less) a b) b a)) int-order 3 5)` checks (both checkers agree, it runs to
+5), and `fixpt verify` leaves the call unverified: `(nat 5) is not
+within t`, `o..t is not within int`. The same procedure bound by a
+`define` of its dependent type, `(subr pure ((o : ordered) (select o t)
+(select o t)) (select o t))`, then called, verifies
+(`modules/functor-max.fx`); so does the direct call whose body has no
+`with`. Not yet looked into; a guess: the verifier's reading of a call of
+a lambda in place does not take the module argument for `o` in the
+parameters' `(select o t)` once the body opens `o`. Found while testing a template's `(with m
+name)` (`macros/with-value.fx`, which binds by `define` instead).

@@ -2,7 +2,7 @@
 ;;; syntax types (`macros-align.fx`'s nodes), walked by Herman's rules, and
 ;;; a pattern variable placed in a template checked against its signature
 ;;; (`macros.rs`'s `walk`, `eval`, `levels_of` and `placed`). Part of the
-;;; expander: loaded by `macros-exports.fx`, and loading `macros-align.fx`,
+;;; expander: loaded by `macros-match.fx`, and loading `macros-align.fx`,
 ;;; so that `macros.fx` takes one instance of each through it.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))

@@ -10,10 +10,14 @@
   (quote
    (
     (define exprs (mu es (union () (expr . es))))
-    ;; As named: (union nil (exports (pairof (named x bvar) (named xs formals)) (rib x xs)) …)
+    ;; As named: (union nil (exports (pairof (named x bvar) (named xs formals)) (rib x xs)) …);
+    ;; each parameter in scope in the types of those after it, as the
+    ;; checkers bind them (`Checker::synth_lambda_as`'s `(select m t)` of an
+    ;; earlier one).
     (define formals (mu f (union (export () (rho))
-                                 (export (bvar . f) (rho (A var) (D rib)))
-                                 (export ((bvar type) . f) (rho (AA var) (D rib))))))
+                                 (export (bvar . (import f (rho (A var)))) (rho (A var) (D rib)))
+                                 (export ((bvar type) . (import f (rho (AA var))))
+                                         (rho (AA var) (D rib))))))
     (define let-bindings (mu b (union (export () (rho))
                                       (export ((bvar expr) . b) (rho (AA var) (D rib))))))
     ;; Herman's let*-cl: each clause's expression in the scope of those

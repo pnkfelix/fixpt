@@ -735,6 +735,14 @@ impl Checker {
             let (n, shown) = (self.interner.name(*n), self.interner.name(m));
             return Err(FxError::at(*at, format!("`{n}` is a macro here, and `{shown}` gives a value of that name, which this `with` would seem to call")));
         }
+        // A template's `(with m name)`: a value `m` gives, never what `name`
+        // is where the macro is used.
+        if let Some((n, at)) = self.macros.projections.get(&span)
+            && !vals.iter().any(|(v, _)| v == n)
+        {
+            let (n, shown) = (self.interner.name(*n), self.interner.name(m));
+            return Err(FxError::at(*at, format!("`{shown}` gives no value `{n}`, which a template's `(with {shown} {n})` takes from it alone")));
+        }
         let mut free = self.free_vars(body);
         // An include's names are the module's own, bound where `%include`
         // is: one bound since (the item's lambda's parameter) shadows them

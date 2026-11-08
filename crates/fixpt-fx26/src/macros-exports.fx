@@ -1,22 +1,27 @@
 ;;; Typed hygienic macros, in FX-26: what a template's export binds of what
 ;;; its uses give, compared and said, and the names a template binds in its
 ;;; uses of macros that make definitions (`macros.rs`'s `exports`,
-;;; `shown_exports` and `binders_under`), and what says how many times a
-;;; template's part is repeated (`transcribe`'s). Part of the expander: loaded by
-;;; `macros-files.fx`, and loading `macros-scopes.fx` (and through it
+;;; `shown_exports` and `binders_under`), what says how many times a
+;;; template's part is repeated (`transcribe`'s), and what the checker is
+;;; told of the `with` forms an expansion made (`Macros::with_uses`,
+;;; `projections`). Part of the expander: loaded by `macros-files.fx`, and
+;;; loading `macros-match.fx` (and through it `macros-scopes.fx` and
 ;;; `macros-align.fx`, whose nodes these read), so that `macros.fx` takes one
 ;;; instance of each through it.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define scopes-module ((proj (load-module "fx26:macros-scopes.fx") rs re rm rc rp)))
+(define match-module ((proj (load-module "fx26:macros-match.fx") rs re rm rc rp)))
+(define scopes-module (with match-module scopes-module))
 (define align-module (with scopes-module align-module))
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
 (import reader-types (type syn))
-(import parser-module syn-symbol? syn-symbol (type names))
+(import parser-module syn-start syn-end syn-symbol? syn-symbol syn-name syn-expansion len nth
+        (type names syns-a))
 (import types-module fail-at name-in? proper-items sorted-strings joined atm-var atm-rib-of
-        atm-lit pattern-names addr-under? addr=? (type fails atm atms strings addr))
+        atm-lit addr=? (type fails atm atms strings addr))
+(import match-module pattern-names addr-under?)
 (import scopes-module normal atm-in?)
 (import align-module node-kids node-syn pvar? makes-defns? lv-rib lv-cage lv-earlier k-pair
         k-form k-desc k-seq k-binder act-rename (type levels pvars actions))
@@ -150,3 +155,39 @@
                   (cons (tuple b ((with types-module addr=?) at b)) rest)
                   rest))
             (else y rest))))))
+
+;;; ------------------------------------------------------------ withs
+
+;; The `with` forms around a part, each by its place.
+(define-type places (listof (tupleof int int) acyclic))
+;; By each `with` form's place, the macros used in its body by names the
+;; program wrote, each with the use's place (`Macros::with_uses`): the
+;; checker refuses the `with` if its module gives a value of the name. And,
+;; `#t` last, a template's `(with m name)`, with the name's place
+;; (`Macros::projections`): refused if the module gives no value of it,
+;; which would otherwise be what it is where the macro is used.
+(define-type uses (listof (tupleof int int symbol int int bool) acyclic))
+(define with-uses (ref uses rs) (new nil))
+;; For the checker: this parse's, in the order the expander met them.
+(define with-uses-given (->* () uses) (lambda () (reverse (get with-uses))))
+;; A template's `(with m name)`, `s`, of items `items` and head `hd`: noted,
+;; for the checker to refuse if `m` gives no value `name`.
+(define note-projection (->* (syn syns-a syn) unit)
+  (lambda (s items hd)
+    (if (and (not (= (syn-expansion hd) 0)) (= (len items) 3) (syn-symbol? (nth items 1))
+             (syn-symbol? (nth items 2)) (not (string=? (syn-name (nth items 1)) "#%fx"))
+             (not (string=? (syn-name (nth items 1)) "#%toplevel")))
+        (set with-uses (cons (tuple (syn-start s) (syn-end s) (syn-symbol (nth items 2))
+                                    (syn-start (nth items 2)) (syn-end (nth items 2)) #t)
+                             (get with-uses)))
+        #u)))
+;; The uses of macro `n`, at `hd`, noted in each `with` around it.
+(define note-uses (->* (symbol syn places) unit)
+  (lambda (n hd withs)
+    (if (null? withs)
+        #u
+        (begin
+          (set with-uses (cons (tuple (extract (car withs) 1) (extract (car withs) 2) n
+                                      (syn-start hd) (syn-end hd) #f)
+                               (get with-uses)))
+          (note-uses n hd (cdr withs))))))

@@ -81,8 +81,9 @@
 ;; pattern, or placed in a template); a template's binder, of a
 ;; description (`#t`) or a value; a name in a template referred to, in a
 ;; namespace, and what it is if the template does not bind it (0 the top
-;; level's value, 1 the top level's qualified, 2 as written: `macros.rs`'s
-;; `Free`); a form in a template, its operands (or, an application's,
+;; level's value, 1 the top level's qualified, 2 as written, 3 refused, the
+;; module a template's `(with m name)` takes from: `macros.rs`'s `Free`); a
+;; form in a template, its operands (or, an application's,
 ;; itself); a description's parts, a list a template writes; a list given
 ;; by ellipsis, `(p ...)`, its element, repeated; anything else.
 (define-datatype kids
@@ -425,12 +426,29 @@
                                       "macro that makes definitions, not where an expression is")
                   s))
         ((string=? head "with")
-         (if (standard-with? s)
-             #u
-             (fail-at fail (string-append "a template's `with` is `(with #%fx name)` or `(with "
-                                          "#%toplevel name)` (one opening a module waits for "
-                                          "scopes of a module's names)")
-                      s)))
+         (cond ((standard-with? s) #u)
+               ;; `(with m name)`: the value `name` of module `m`, a
+               ;; template's binder or a use's, the name as written; `m`'s
+               ;; or refused, where it is checked (`macros.fx`'s
+               ;; `projections`).
+               ((and (= (len (proper-items s)) 3) (syn-symbol? (nth (proper-items s) 1))
+                     (syn-symbol? (nth (proper-items s) 2)))
+                (let ((x (align fail 1 ps (s-pair (s-id) (s-pair (s-data) (s-nil))) (nth parts 1)
+                                -1 (path+ (node-path at) #f))))
+                  (begin
+                    (tagcase (node-kids x)
+                      (k-pair (m y)
+                        (tagcase (node-kids m)
+                          (k-ref (n d f) (with-kids m (k-ref n d 3)))
+                          (else z #u)))
+                      (else y #u))
+                    (with-kids at (k-form x)))))
+               (else
+                (fail-at fail (string-append "a template's `with` is `(with module name)`, the "
+                                             "value `name` of the module, or `(with #%fx name)` or "
+                                             "`(with #%toplevel name)` (one opening a module over "
+                                             "a body waits for scopes of a module's names)")
+                         s))))
         (macro (macro-operands fail ps at hd parts))
         ((and (not (string=? head "")) (not (string=? (substring head 0 1) "%"))
               (not (null? (sig-of (string->symbol head) kernel))))

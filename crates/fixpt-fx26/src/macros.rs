@@ -161,13 +161,15 @@ pub(crate) enum Ns {
 /// What a name a template refers to is, if the template does not bind it:
 /// the top level's value, `(with #%toplevel name)`; the top level's,
 /// qualified, `#%toplevel:name` (a description's name, or the module a
-/// `select` names); or as written (a global's, in `(globals g …)`, which no
-/// local can shadow).
+/// `select` names); as written (a global's, in `(globals g …)`, which no
+/// local can shadow); or nothing, refused (the module a template's `(with
+/// m name)` takes from, which a template binds or a use gives, for now).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Free {
     Toplevel,
     Qualified,
     Plain,
+    Bound,
 }
 
 /// A macro defined: its signature and clauses.
@@ -264,6 +266,11 @@ pub struct Macros {
     /// the module gives a value of the name (`Checker::with_as`), which the
     /// program would seem to call, and the expander cannot see.
     pub(crate) with_uses: HashMap<Span, Vec<(Sym, Span)>>,
+    /// By each `(with m name)` form's place that a template wrote, the name
+    /// and its place: refused there if the module gives no value of it
+    /// (`Checker::with_as`), which would otherwise be what it is where the
+    /// macro is used, a binding there capturing it.
+    pub(crate) projections: HashMap<Span, (Sym, Span)>,
     /// Where each macro the program has by its name was defined: its
     /// `define-syntax`, or the `import-with-syntax` that brought it. A
     /// program is expanded before it is checked, so what is defined when a
@@ -572,25 +579,42 @@ impl Macros {
     /// give its elements by ellipsis, and whether each is in the scope of
     /// those before it: a `mu` of `()` and of pairs of an element and
     /// itself, which binds no more than what each element exports, all of
-    /// them together (a `let`'s); or each element's in the scope of those
-    /// after it, the list a ribcage (a `let*`'s, a `begin`'s definitions).
-    /// Each pair's element, with the part of the pair's export that is its.
+    /// them together (a `let`'s), the rest perhaps in the scope of what the
+    /// element binds (a `lambda`'s parameters, each in the later ones'
+    /// types); or each element's in the scope of those after it, the list a
+    /// ribcage (a `let*`'s, a `begin`'s definitions). Each pair's element,
+    /// with the part of the pair's export that is its.
     fn seq_of(&self, t: &Rc<STy>) -> Option<(Rc<STy>, bool)> {
         let STy::Mu(id) = &**t else { return None };
         let STy::Union(ms) = &*self.mus[*id] else { return None };
         if let Some(elem) = self.cage_seq_of(*id, ms) {
             return Some((elem, true));
         }
-        let (mut elems, mut nil) = (Vec::new(), false);
+        let (mut elems, mut nil, mut scoped) = (Vec::new(), false, false);
         for m in ms {
             let (core, entries) = match &**m {
                 STy::Export(b, Bind::Rib(es)) => (b, Some(es)),
                 STy::Export(..) | STy::Import(..) => return None,
                 _ => (m, None),
             };
+            // The rest, and what of the element's it is in the scope of.
+            let (rest, inner) = match &**core {
+                STy::Pair(_, d) => match &**d {
+                    STy::Import(r, Bind::Rib(fs)) => (r, Some(fs)),
+                    _ => (d, None),
+                },
+                _ => (core, None),
+            };
             match &**core {
                 STy::Nil => nil = true,
-                STy::Pair(a, d) if matches!(&**d, STy::Mu(j) if j == id) => {
+                STy::Pair(a, _) if matches!(&**rest, STy::Mu(j) if j == id) => {
+                    if let Some(fs) = inner {
+                        let mine: Vec<(Addr, Delta)> = entries.into_iter().flatten().filter(|(addr, _)| addr.first() == Some(&true)).cloned().collect();
+                        if *fs != mine {
+                            return None;
+                        }
+                        scoped = true;
+                    }
                     let mut own = Vec::new();
                     for (addr, delta) in entries.into_iter().flatten() {
                         match addr.split_first() {
@@ -613,8 +637,8 @@ impl Macros {
         match elems.len() {
             0 => None,
             _ if !nil => None,
-            1 => elems.pop().map(|e| (e, false)),
-            _ => Some((Rc::new(STy::Union(elems)), false)),
+            1 => elems.pop().map(|e| (e, scoped)),
+            _ => Some((Rc::new(STy::Union(elems)), scoped)),
         }
     }
 
@@ -884,7 +908,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), definitions: self.definitions.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), defined_at: HashMap::new(), checking: false, heads: self.heads.clone(), words: self.words.clone() };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), definitions: self.definitions.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), projections: HashMap::new(), defined_at: HashMap::new(), checking: false, heads: self.heads.clone(), words: self.words.clone() };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -1116,6 +1140,9 @@ impl Macros {
                     let action = match (bound, free, file) {
                         (Some(b), _, _) => Action::Rename(t.nodes[b].path.clone(), binder_depth.get(&b).copied().unwrap_or(0)),
                         (None, Free::Plain, _) => continue,
+                        (None, Free::Bound, _) => {
+                            return Err(FxError::at(span, format!("`{}`, the module a template's `(with module name)` takes from, is bound by the template or given by a use: a top level's, not yet", interner.name(*n))));
+                        }
                         (None, Free::Qualified, None) => Action::Qualified,
                         // A file's macro's description is read through the
                         // file's module whole (below).
@@ -1292,6 +1319,15 @@ impl Macros {
             }
             let out = self.expand_use(h, &m, s, interner)?;
             return self.expand_in(&out, interner, budget, withs);
+        }
+        // A template's `(with m name)`: `m`'s `name`, or refused.
+        if let (Some(h), None, [_, m, n]) = (head, tail, &items[..])
+            && interner.name(h) == "with"
+            && items[0].span.expansion != 0
+            && let (Some(m), Some(x)) = (m.as_symbol(), n.as_symbol())
+            && !matches!(interner.name(m), "#%fx" | "#%toplevel")
+        {
+            self.projections.insert(s.span, (x, n.span));
         }
         // A definition of a macro's name: refused, as a form's is.
         if let (Some(h), Some(n)) = (head, items.get(1).and_then(|n| n.as_symbol()))
@@ -1727,7 +1763,27 @@ impl Aligner<'_> {
                 if standard {
                     return Ok(());
                 }
-                return Err(FxError::at(s.span, "a template's `with` is `(with #%fx name)` or `(with #%toplevel name)` (one opening a module waits for scopes of a module's names)"));
+                // `(with m name)`: the value `name` of module `m`, a
+                // template's binder or a use's, the name as written; `m`'s
+                // or refused, where it is checked (`Macros::projections`).
+                if let (None, [_, m, n]) = (tail, &items[..])
+                    && m.as_symbol().is_some()
+                    && n.as_symbol().is_some()
+                {
+                    let sig = Rc::new(STy::Pair(Rc::new(STy::Id), Rc::new(STy::Pair(Rc::new(STy::Data), Rc::new(STy::Nil)))));
+                    let (_, operands) = split(s).expect("a list");
+                    let mut p = self.nodes[at].path.clone();
+                    p.push(false);
+                    let x = self.align(&sig, &operands, None, p)?;
+                    if let Kids::Pair(m, _) = self.nodes[x].kids
+                        && let Kids::Ref(n, ns, _) = self.nodes[m].kids
+                    {
+                        self.nodes[m].kids = Kids::Ref(n, ns, Free::Bound);
+                    }
+                    self.nodes[at].kids = Kids::Form(x);
+                    return Ok(());
+                }
+                return Err(FxError::at(s.span, "a template's `with` is `(with module name)`, the value `name` of the module, or `(with #%fx name)` or `(with #%toplevel name)` (one opening a module over a body waits for scopes of a module's names)"));
             }
             Some((h, _)) if self.m.defined.contains_key(&h) => Some(self.m.defined[&h].sig.clone()),
             Some((_, n)) if self.m.kernel.contains_key(n) && !n.starts_with('%') => Some(self.m.kernel[n].clone()),

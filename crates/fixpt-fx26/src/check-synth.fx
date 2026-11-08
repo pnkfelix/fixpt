@@ -113,7 +113,7 @@
 ;; By each `with` form's place, the macros its body uses by names the
 ;; program wrote, each with the use's place (`macros.fx`'s `with-uses`),
 ;; as the conductor says for the program parsed (`k-macro-uses!`).
-(define-type k-macro-uses (listof (tupleof int int symbol int int) acyclic))
+(define-type k-macro-uses (listof (tupleof int int symbol int int bool) acyclic))
 (define k-macro-uses (ref k-macro-uses @t) (new nil))
 (define k-macro-uses! (->* (k-macro-uses) unit) (lambda (us) (set k-macro-uses us)))
 ;; `k-with-used` of `(with m …)` at `a`..`b`, its module's values `ps`, once
@@ -126,6 +126,16 @@
 (define k-macro-clash (->* (k-parts k-macro-uses int int symbol) unit)
   (lambda (ps us a b m)
     (cond ((null? us) #u)
+          ;; A template's `(with m name)` (`#t`): a value `m` gives, never
+          ;; what `name` is where the macro is used.
+          ((and (= (extract (car us) 1) a) (= (extract (car us) 2) b) (extract (car us) 6)
+                (not (k-part-named? ps (extract (car us) 3))))
+           (let ((n (symbol->string (extract (car us) 3))) (shown (symbol->string m)))
+             (k-fail (string-append "`" shown "` gives no value `" n "`, which a template's `(with "
+                                    shown " " n ")` takes from it alone")
+                     (extract (car us) 4) (extract (car us) 5))))
+          ((and (= (extract (car us) 1) a) (= (extract (car us) 2) b) (extract (car us) 6))
+           (k-macro-clash ps (cdr us) a b m))
           ((and (= (extract (car us) 1) a) (= (extract (car us) 2) b)
                 (k-part-named? ps (extract (car us) 3)))
            (k-fail (string-append "`" (symbol->string (extract (car us) 3))
