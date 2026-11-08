@@ -507,6 +507,10 @@ pub const MACROS_FILES: &str = include_str!("macros-files.fx");
 /// (`macros.rs`'s `template_checks`), on top of [`MACROS`].
 pub const MACROS_TEMPLATES: &str = include_str!("macros-templates.fx");
 
+/// A file's macros, which `import-with-syntax` brings (`macros.rs`'s
+/// `define_file`), on top of [`MACROS_TEMPLATES`].
+pub const MACROS_IMPORTS: &str = include_str!("macros-imports.fx");
+
 /// The expander of the front end written in FX-26: `define-syntax` checked
 /// and defined, each use of a macro expanded (`macros.rs`'s).
 pub const MACROS: &str = include_str!("macros.fx");
@@ -775,7 +779,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 210] = [
+pub const FRONT_END_MODULES: [(&str, &str); 211] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -839,6 +843,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 210] = [
     ("macros-files.fx", MACROS_FILES),
     ("macros.fx", MACROS),
     ("macros-templates.fx", MACROS_TEMPLATES),
+    ("macros-imports.fx", MACROS_IMPORTS),
     ("eval-types.fx", EVAL_TYPES),
     ("eval-values.fx", EVAL_VALUES),
     ("eval-prims.fx", EVAL_PRIMS),

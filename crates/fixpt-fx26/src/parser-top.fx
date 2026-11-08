@@ -27,12 +27,13 @@
         (type syns-a exp top param-list top-list presult names) (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
 ;; The expander (`macros.fx`), which each form goes through first.
-(define templates-module ((proj (load-module "fx26:macros-templates.fx") rs re rm rc rp)))
+(define imports-module ((proj (load-module "fx26:macros-imports.fx") rs re rm rc rp)))
+(define templates-module (with imports-module templates-module))
 (define macros-module (with templates-module macros-module))
 (import templates-module template-checks)
+(import imports-module import-file-macros note-load-def!)
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
-        imports-syntax? import-file-macros note-load-def! later-macro-site globals! global-before?
-        macro?)
+        imports-syntax? globals! global-before? macro? later-macro-site)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
