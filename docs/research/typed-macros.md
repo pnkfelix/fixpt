@@ -869,6 +869,27 @@ circa R5RS").
   `fixpt-cli/tests/programs/import-with-syntax/main-defn.fx`; the REPL,
   `fixpt-cli/tests/repl_macros.rs`.
 
+## Decided: signatures depend on their operands by address alone (2026-11-07)
+
+The user's question: does this become a dependent type system of its own?
+In shape, yes: `(export (bvar expr) (rho (A var)))` speaks of parts of
+the term it classifies, a union member chosen by a use is a case split,
+and a typed hole whose type is another operand's description, `((type #:as
+t) (expr #:type t))`, is a Π over syntax. Decided (the user, 2026-11-07),
+to keep it small: **a signature refers to its own operands only by
+address, and only as binders or as descriptions substituted whole; it
+computes nothing.** Checking stays walking trees, comparing ribs as sets,
+and the checkers' own comparison of types. What needs more, names
+computed from a use's (`make-point` of `point`), exports that depend on
+anything but the syntax's shape, descriptions computed from operands,
+gets a design of its own rather than growing in.
+
+A macro sees what a nested use defines only as that macro's signature
+declares (`(-> (export σ β) defn)`), checked where it is defined, never
+by its expansion (the user, 2026-11-07, "It matches my intent"); a
+reference the declarations do not bind is refused, not read at the top
+level.
+
 ## Questions for the user
 
 Answered 2026-11-06 (the user):

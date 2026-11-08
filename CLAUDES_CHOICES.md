@@ -4301,4 +4301,10 @@ The user read the paper as supporting the distribution. Mine:
 - **Types' and effects' definitions left out**: made fresh, a type's name
   would not reach the types that name it, which the expander does not look
   into; binders of types (item 8) first.
+- **Nested definitions' names, by signature** (decided with the user,
+  2026-11-07; not yet built): a macro sees what another's use defines as
+  that one's signature exports, checked at its definition; an undeclared
+  reference refused. Today such a reference reads the top level's name
+  (`(begin (define-const x 1) (define name x))` gives the top level's
+  `x`), hygienic by what is declared, and surprising: to be refused.
 
