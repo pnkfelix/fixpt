@@ -62,6 +62,16 @@
     (form cond cond-clauses)
     (form plambda (dbinders . (import exprs (rho (A rib)))))
     (form proj (expr . descs))
+    ;; The forms that bind a region (`letregion`, `letfreeze`, the latter
+    ;; into a place if `(r p)`) or a place, which is also a value of type
+    ;; `(place r)` (`letrena`, `letreap`), in their bodies; a lambda whose
+    ;; closure is made in a place.
+    (form letregion (dvar . (import exprs (rho (A dvar)))))
+    (form letfreeze (union (dvar . (import exprs (rho (A dvar))))
+                           ((dvar type) . (import exprs (rho (AA dvar))))))
+    (form letrena (dvar . (import exprs (rho (A place)))))
+    (form letreap (dvar . (import exprs (rho (A place)))))
+    (form rlambda (expr formals . (import exprs (rho (AD rib)))))
     (form %app (expr . exprs))
     ;; The definitions a template may make, a macro's whose signature says
     ;; `(-> σ defn)`, each exporting what it defines: a value, seeing those
@@ -76,6 +86,12 @@
                                       (rho (A var)))))
     (definition define* (export (bvar type (import lambda (rho (A var) (AD rib)))) (rho (A var))))
     (definition define-rec (import defrec-bindings (rho (() rib))))
+    ;; A type, its name in scope in itself (types are declared ahead), a
+    ;; family's parameters too; an effect.
+    (definition define-type
+      (union (export (dvar (import type (rho (A dvar)))) (rho (A dvar)))
+             (export ((dvar . dbinders) (import type (rho (AA dvar) (DA rib)))) (rho (AA dvar)))))
+    (definition define-effect (export (dvar type) (rho (A dvar))))
     (definition begin defns))))
 
 ;; The kernel's keywords (`top::KEYWORDS`, which a test holds this to); with

@@ -200,7 +200,7 @@
     (if (null? as)
         nil
         (tagcase (car as)
-          (atm-var (v)
+          (atm-var (v e)
             (let* ((info (pvar-of v ps)) (h (if (null? info) nil (extract (car info) 4))))
               (if (or (null? h) (null? (extract (car h) 1)))
                   (begin (fail-at fail (string-append "`" (symbol->string v)

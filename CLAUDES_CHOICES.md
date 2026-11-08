@@ -4346,3 +4346,16 @@ The user read the paper as supporting the distribution. Mine:
   refused, not yet: qualifying names through a file's module needs a
   name that is the file's, per position, as `#%toplevel:` is the top
   level's.
+- **Atoms say their namespace, and δ `place` binds both** (stage 1b): a
+  `letrena`'s name is a place and a value of it; one binder, made fresh
+  once, two atoms. A namespace on each atom is Herman's δ per namespace,
+  and lets a use's place be referred to as a value only where the
+  signature says `place`.
+- **A placed name never fits a list's shape**: a pattern variable that
+  is a `bvar`, `dvar`, `id` or `label` cannot be a list, so a union of a
+  name's form and a list's (`define-type`'s plain form and a family's) is
+  not ambiguous where a template places one.
+- **A template's `begin` makes its types in `let*` order**, as its
+  values: a type named before its `define-type` in the same template is
+  the top level's. The checkers declare a program's types ahead, the
+  expanded ones among them, so a use's types are seen before the use.

@@ -176,6 +176,14 @@
           ((symbol=? n (extract (car ps) 1)) (list (extract (car ps) 2)))
           (else (pvar-of n (cdr ps))))))
 (define pvar? (->* (symbol pvars) bool) (lambda (n ps) (not (null? (pvar-of n ps)))))
+;; 0 if `n` is no pattern variable of `ps`; 1 if it is a name's (`bvar`,
+;; `dvar`, `id`, `label`), which is never a list; else 2.
+(define pvar-shape (->* (symbol pvars) int)
+  (lambda (n ps)
+    (let ((p (pvar-of n ps)))
+      (cond ((null? p) 0)
+            ((let ((k (kind-of (extract (car p) 1)))) (or (= k 1) (= k 12) (= k 2) (= k 5))) 1)
+            (else 2)))))
 
 ;; `s`, at `path`, aligned with type `t`, in `mode` (0 a pattern, 1 a
 ;; template, 2 a use); `root`, the node its addresses are from, if not
@@ -304,7 +312,7 @@
 (define fitting (->* (stys syn int pvars) stys)
   (lambda (ms s mode ps)
     (cond ((null? ms) nil)
-          ((fits? (car ms) s mode (lambda ((n symbol)) (pvar? n ps)))
+          ((fits? (car ms) s mode (lambda ((n symbol)) (pvar-shape n ps)))
            (cons (car ms) (fitting (cdr ms) s mode ps)))
           (else (fitting (cdr ms) s mode ps)))))
 ;; A pattern variable written somewhere inside `s`, in a list of one.
@@ -505,13 +513,13 @@
     (begin
       (with-core at (s-dvar))
       (cond ((and (syn-symbol? n) (pvar? (syn-symbol n) ps))
-             (begin (with-kids at (k-pvar (syn-symbol n))) (atm-var (syn-symbol n))))
+             (begin (with-kids at (k-pvar (syn-symbol n))) (atm-var (syn-symbol n) #t)))
             ((and (syn-symbol? n) (not (reserved-syn? n)) (not (desc-word? (syn-name n) #f)))
-             (begin (with-kids at (k-binder (syn-symbol n) #t)) (atm-lit at)))
+             (begin (with-kids at (k-binder (syn-symbol n) #t)) (atm-lit at #t)))
             (else (begin (fail-at fail (string-append "`" (show-syn n) "` is not a name that may "
                                                       "be bound")
                                   n)
-                         (atm-lit at)))))))
+                         (atm-lit at #t)))))))
 ;; `((name kind) …)` at node `at`, a binder's place or `distinct` third if
 ;; any, each in the scope of those before it: what they bind.
 (define desc-binders (->* (fails pvars int syn) atms)
@@ -605,8 +613,8 @@
           (tagcase (node-kids (car es))
             (k-desc (parts)
               (tagcase (node-kids (car parts))
-                (k-pvar (n) (cons (atm-var n) rest))
-                (k-binder (n d) (cons (atm-lit (car parts)) rest))
+                (k-pvar (n) (cons (atm-var n #t) rest))
+                (k-binder (n d) (cons (atm-lit (car parts) #t) rest))
                 (else y rest)))
             (else y rest))))))
 ;; The nodes under node `at`, itself first.
@@ -677,8 +685,7 @@
                (ts (node-syn t)) (rest (rib fail (cdr es) root s)))
           (tagcase (node-kids t)
             (k-pvar (n)
-              (cond ((= delta 1) (cons (binder-atm fail (atm-var n) t #f) rest))
-                    ((= delta 4) (cons (binder-atm fail (atm-var n) t #t) rest))
+              (cond ((binder-delta? delta) (append (binder-atms fail t delta) rest))
                     ;; A use's description: what its own `poly`s bind is the
                     ;; use's, which nothing the template writes can name.
                     ((and (= delta 2) (= (kind-of (node-core t)) 4)) rest)
@@ -686,31 +693,36 @@
                     ((= delta 3) (begin (env-in-rib fail ts) rest))
                     (else rest)))
             (k-binder (n d)
-              (cond ((= delta 1) (cons (binder-atm fail (atm-lit t) t #f) rest))
-                    ((= delta 4) (cons (binder-atm fail (atm-lit t) t #t) rest))
+              (cond ((binder-delta? delta) (append (binder-atms fail t delta) rest))
                     ((= delta 2) (append (exported-rib fail t ts s) rest))
                     ((= delta 3) (begin (env-in-rib fail ts) rest))
                     (else rest)))
             (else y
-              (cond ((or (= delta 1) (= delta 4))
-                     (cons (binder-atm fail (atm-lit t) t (= delta 4)) rest))
+              (cond ((binder-delta? delta) (append (binder-atms fail t delta) rest))
                     ((= delta 2) (append (exported-rib fail t ts s) rest))
                     ((= delta 3) (begin (env-in-rib fail ts) rest))
                     (else rest))))))))
-;; Atom `a` of the binder at node `t`, which the signature says binds a
-;; description if `d`, else a value: refused if it binds the other.
-(define binder-atm (->* (fails atm int bool) atm)
-  (lambda (fail a t d)
-    (let ((desc? (tagcase (node-kids t)
-                   (k-binder (n e) e)
-                   (k-pvar (n) (= (kind-of (node-core t)) 12))
-                   (else y (not d)))))
-      (if (eq? desc? d)
-          a
-          (begin (fail-at fail (string-append "the signature says a "
-                                              (if d "description's" "value's") " binder is here")
-                          (node-syn t))
-                 a)))))
+;; Whether δ `delta` binds a variable: a value's, a description's, or both.
+(define binder-delta? (->* (int) bool) (lambda (delta) (or (= delta 1) (= delta 4) (= delta 5))))
+;; What the binder at node `t` binds, which the signature says binds a value
+;; (δ 1), a description (4) or both, a place (5): refused if it binds what
+;; the signature does not say.
+(define binder-atms (->* (fails int int) atms)
+  (lambda (fail t delta)
+    (let* ((d (not (= delta 1)))
+           (desc? (tagcase (node-kids t)
+                    (k-binder (n e) e)
+                    (k-pvar (n) (= (kind-of (node-core t)) 12))
+                    (else y (not d))))
+           (one (lambda ((e bool))
+                  (tagcase (node-kids t) (k-pvar (n) (atm-var n e)) (else y (atm-lit t e))))))
+      (begin
+        (if (eq? desc? d)
+            #u
+            (fail-at fail (string-append "the signature says a " (if d "description's" "value's")
+                                         " binder is here")
+                     (node-syn t)))
+        (if (= delta 5) (list (one #t) (one #f)) (list (one d)))))))
 (define env-in-rib (->* (fails syn) unit)
   (lambda (fail s) (fail-at fail "a ribcage (`env`) in a rib: write it `(at ℓ)` in a `cage`" s)))
 ;; The rib node `t` exports, its addresses read at `s`'s place, as the
@@ -780,10 +792,10 @@
         ;; A pattern's binder referred to, a value's or a description's: in
         ;; its scope, and where no other of the pattern's binders of its
         ;; namespace may shadow it (the shadow restriction).
-        ((or (and (= kh 1) (or (= kw 0) (= kw 2))) (and (= kh 12) (= kw 4)))
-         (let ((i (rib-binding n env 0)))
+        ((and (or (= kh 1) (= kh 12)) (or (= kw 0) (= kw 2) (and (= kh 12) (= kw 4))))
+         (let* ((d (= kw 4)) (i (rib-binding n d env 0)))
            (cond ((< i 0) (said "is referred to where the template does not bind it"))
-                 ((shadowing? env i ps (= kh 12))
+                 ((shadowing? env i ps d)
                   (said (string-append "is referred to where another of the pattern's binders "
                                        "may shadow it (Herman's shadow restriction): a use "
                                        "giving both one name would change what it refers to")))
@@ -809,11 +821,11 @@
                  (else #u))))))))
 ;; The first level of `env`, from `i`, whose rib binds pattern variable
 ;; `n`; -1 if none.
-(define rib-binding (->* (symbol levels int) int)
-  (lambda (n env i)
+(define rib-binding (->* (symbol bool levels int) int)
+  (lambda (n d env i)
     (cond ((null? env) -1)
-          ((tagcase (car env) (lv-rib (as) (atm-in? (atm-var n) as)) (else y #f)) i)
-          (else (rib-binding n (cdr env) (+ i 1))))))
+          ((tagcase (car env) (lv-rib (as) (atm-in? (atm-var n d) as)) (else y #f)) i)
+          (else (rib-binding n d (cdr env) (+ i 1))))))
 ;; Whether a level of `env` before the `i`th is a ribcage, or a rib with one
 ;; of the pattern's binders of a description's namespace if `d`, else a
 ;; value's: a value's binder never shadows a description's.
@@ -828,18 +840,16 @@
   (lambda (as ps d)
     (and (not (null? as))
          (or (tagcase (car as)
-               (atm-lit (t) #f)
-               (atm-var (m)
-                 (let ((p (pvar-of m ps)))
-                   (or (null? p) (eq? (= (kind-of (extract (car p) 1)) 12) d))))
+               (atm-lit (t e) #f)
+               (atm-var (m e) (eq? e d))
                (else y #t))
              (any-pattern-atom? (cdr as) ps d)))))
 (define atm=? (->* (atm atm) bool)
   (lambda (a b)
     (tagcase a
-      (atm-var (n) (tagcase b (atm-var (m) (symbol=? n m)) (else y #f)))
+      (atm-var (n d) (tagcase b (atm-var (m e) (and (symbol=? n m) (eq? d e))) (else y #f)))
       (atm-rib-of (n) (tagcase b (atm-rib-of (m) (symbol=? n m)) (else y #f)))
-      (atm-lit (t) (tagcase b (atm-lit (u) (= t u)) (else y #f))))))
+      (atm-lit (t d) (tagcase b (atm-lit (u e) (and (= t u) (eq? d e))) (else y #f))))))
 (define atm-in? (->* (atm atms) bool)
   (lambda (a as) (and (not (null? as)) (or (atm=? a (car as)) (atm-in? a (cdr as))))))
 ;; An environment as compared: the template's own binders left out (made
@@ -856,7 +866,7 @@
 (define pattern-atoms (->* (atms) atms)
   (lambda (as)
     (cond ((null? as) nil)
-          ((tagcase (car as) (atm-lit (t) #t) (else y #f)) (pattern-atoms (cdr as)))
+          ((tagcase (car as) (atm-lit (t d) #t) (else y #f)) (pattern-atoms (cdr as)))
           (else (cons (car as) (pattern-atoms (cdr as)))))))
 ;; Whether two environments are the same, each rib's atoms in any order.
 (define levels=? (->* (levels levels) bool)
@@ -922,9 +932,9 @@
         nil
         (let ((rest (atm-strings (cdr as))))
           (tagcase (car as)
-            (atm-var (n) (cons (string-append "`" (symbol->string n) "`") rest))
+            (atm-var (n d) (cons (string-append "`" (symbol->string n) "`") rest))
             (atm-rib-of (n) (cons (string-append "what `" (symbol->string n) "` defines") rest))
-            (atm-lit (t) rest))))))
+            (atm-lit (t d) rest))))))
 (define cage-strings (->* (names) strings)
   (lambda (ns)
     (if (null? ns)

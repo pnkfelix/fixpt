@@ -992,10 +992,17 @@ the effect forms', by name alone. That keeps template heads plain, and
 only names qualified; when the standard library's names become its own
 bindings (`lang-items.md`), they are names, qualified like any.
 
-Left for the second stage: effects and regions as binders (`letregion`,
-`letfreeze`, `letrena`, `letreap`, `rlambda`), `define-type` and
-`define-effect` in templates that make definitions, `define-datatype`
-and `define-generative`, a `subr`'s named parameters and specification,
+Then (1b, the same day, both front ends): regions and places as binders,
+`letregion`, `letfreeze` and `rlambda`, and `letrena` and `letreap`,
+which bind their name both as a place and as a value of type `(place r)`:
+each rib atom says its namespace (`Atom::Var(n, Ns)`), and a δ `place`
+binds both. A macro that makes definitions may make `define-type` and
+`define-effect`, in `let*` order within its `begin`, as its values are,
+and declared ahead with the program's types when expanded. A pattern
+variable that is a name placed in a template never fits a list's shape
+(so `(define-type t …)`, `t` a `dvar`, is the plain form, not a family's).
+
+Left for the second stage: `define-datatype` and `define-generative`, a `subr`'s named parameters and specification,
 `moduleof`, a file's macro's descriptions with its own binders, a use's
 type placed in the scope of a use's `dvar` without saying so, and typed
 macros' description parts. Tests: `macros/desc-*.fx`,

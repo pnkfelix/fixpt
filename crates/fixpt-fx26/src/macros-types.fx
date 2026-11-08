@@ -23,7 +23,8 @@
 ;; An address's steps from its root, first first: `#t` the car.
 (define-type addr (listof bool acyclic))
 ;; What a part at an address binds (Herman's `δ`): 0 nothing, 1 a value's
-;; variable, 2 a rib, 3 a ribcage, 4 a description's variable.
+;; variable, 2 a rib, 3 a ribcage, 4 a description's variable, 5 both, a
+;; place (`letrena`'s), which is also a value of type `(place r)`.
 (define-type entries (listof (tupleof addr int) acyclic))
 ;; One of a ribcage's: a rib, or the ribcage exported at an address.
 (define-datatype ring (ring-rib entries) (ring-at addr))
@@ -31,7 +32,9 @@
 ;; What an environment is made of: a pattern variable bound (`bvar`,
 ;; `dvar`), the rib or ribcage a pattern variable exports, a template's own
 ;; binder (its node).
-(define-datatype atm (atm-var symbol) (atm-rib-of symbol) (atm-lit int))
+;; Each but a ribcage bound in a namespace: a description's if `#t`, else a
+;; value's (Herman's δ, one per namespace).
+(define-datatype atm (atm-var symbol bool) (atm-rib-of symbol) (atm-lit int bool))
 (define-type atms (listof atm acyclic))
 ;; What an annotation binds (Herman's `β`): a rib, or a ribcage; or a rib of
 ;; what it binds, as found, the binders a template's description writes
@@ -114,6 +117,7 @@
   (lambda (x ys)
     (cond ((null? ys) (list x))
           ((string<? x (car ys)) (cons x ys))
+          ((string=? x (car ys)) ys)
           (else (cons (car ys) (inserted x (cdr ys)))))))
 (define joined (->* (strings) string)
   (lambda (ss)
@@ -387,8 +391,9 @@
   (lambda (fail d)
     (let ((n (if (syn-symbol? d) (syn-name d) "")))
       (cond ((string=? n "none") 0) ((string=? n "var") 1) ((string=? n "rib") 2)
-            ((string=? n "env") 3) ((string=? n "dvar") 4)
-            (else (begin (fail-at fail "δ is `none`, `var`, `dvar`, `rib` or `env`" d) 0))))))
+            ((string=? n "env") 3) ((string=? n "dvar") 4) ((string=? n "place") 5)
+            (else (begin (fail-at fail "δ is `none`, `var`, `dvar`, `place`, `rib` or `env`" d)
+                         0))))))
 ;; An address, `A`s and `D`s read right to left, or `()`, none: its steps,
 ;; first first.
 (define read-addr (->* (fails syn) addr)
@@ -553,14 +558,17 @@
          (or (any-overlaps-of? (car ms) (cdr ms) 6) (any-overlap? (cdr ms))))))
 
 ;; Whether `s` has the shape of `t`, in `mode` (0 a pattern, 1 a template,
-;; 2 a use): a pattern variable in a template (`pvar?`), or any name in a
-;; pattern, fits anything.
-(define fits? (->* (sty syn int (subr pure (symbol) bool)) bool)
+;; 2 a use): a pattern variable in a template (`pvar?` says 1 for a name's,
+;; 2 for another's, 0 for none) fits anything but, if it is a name, a
+;; list's shape; any name in a pattern fits anything.
+(define fits? (->* (sty syn int (subr pure (symbol) int)) bool)
   (lambda (t s mode pvar?)
     (let ((u (unfold t)))
       (if (and (syn-symbol? s)
                (or (and (= mode 0) (not (= (kind-of u) 7)) (not (string=? (syn-name s) "_")))
-                   (and (= mode 1) (pvar? (syn-symbol s)))))
+                   (and (= mode 1) (> (pvar? (syn-symbol s)) 0)
+                        (not (and (= (pvar? (syn-symbol s)) 1)
+                                  (or (= (kind-of u) 8) (= (kind-of u) 6) (= (kind-of u) 10)))))))
           #t
           (tagcase u
             (s-union (ms) (any-fits? ms s mode pvar?))
@@ -578,7 +586,7 @@
             (s-lambda () (lambda-shaped? s))
             (s-defn () (not (null? (split s))))
             (else y #t))))))
-(define any-fits? (->* (stys syn int (subr pure (symbol) bool)) bool)
+(define any-fits? (->* (stys syn int (subr pure (symbol) int)) bool)
   (lambda (ms s mode pvar?)
     (and (not (null? ms)) (or (fits? (car ms) s mode pvar?) (any-fits? (cdr ms) s mode pvar?)))))
 

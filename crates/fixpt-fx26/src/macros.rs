@@ -22,7 +22,9 @@
 //!                                          a lambda of a `T`, written
 //! β ::= (rho (ℓ δ) …)                      a rib, {ℓ : δ, …}
 //!     | (cage ρ-or-(at ℓ) …)               ribs in order, innermost first; ℓ@γ
-//! δ ::= none | var | dvar | rib | env    var binds a value; dvar, a description
+//! δ ::= none | var | dvar | place | rib | env
+//!                                         var binds a value; dvar, a description;
+//!                                         place, both (`letrena`'s, `letreap`'s)
 //! ```
 //!
 //! An address `ℓ` is a word of `A` (car) and `D` (cdr), read right to left
@@ -132,14 +134,17 @@ pub(crate) enum Delta {
     None,
     Var,
     Dvar,
+    /// A description, and a value of it: a place, which is also a value of
+    /// type `(place r)`.
+    Place,
     Rib,
     Env,
 }
 
 /// A template's namespaces: values, and descriptions (types, effects,
 /// regions and the rest, which share one scope, `parse.rs`'s `dscope`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Ns {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Ns {
     Value,
     Desc,
 }
@@ -321,13 +326,14 @@ enum Kids {
     Other,
 }
 
-/// What an environment is made of: a pattern variable bound (`bvar`), the
-/// rib or ribcage a pattern variable exports, a template's own binder.
+/// What an environment is made of: a pattern variable bound (`bvar`,
+/// `dvar`), the rib or ribcage a pattern variable exports, a template's own
+/// binder; each bound in a namespace (Herman's δ, one per namespace).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Atom {
-    Var(Sym),
+    Var(Sym, Ns),
     RibOf(Sym),
-    Lit(usize),
+    Lit(usize, Ns),
 }
 
 /// Each pattern variable, template binder and name referred to, by node,
@@ -535,7 +541,11 @@ impl Macros {
         use STy::*;
         if let Some(n) = s.as_symbol() {
             let lit = matches!(&**self.unfold(t), Literal(_));
-            if (mode == Mode::Pattern && !lit && interner.name(n) != "_") || (mode == Mode::Template && pvars.contains_key(&n)) {
+            // A pattern variable placed fits anything but, if it is a name,
+            // a list's shape, which a name never has.
+            let name = pvars.get(&n).is_some_and(|p| matches!(&*p.core, Bvar | Dvar | Id | Label));
+            let list = matches!(&**self.unfold(t), Pair(..) | Nil | Lambda);
+            if (mode == Mode::Pattern && !lit && interner.name(n) != "_") || (mode == Mode::Template && pvars.contains_key(&n) && !(name && list)) {
                 return true;
             }
         }
@@ -621,7 +631,7 @@ impl Macros {
                     return Err(FxError::at(place(*n), format!("`{}` is in the scope of a part's ribcage: not yet where a macro's parts are typed", shown(*n, interner))));
                 };
                 for a in atoms {
-                    let Atom::Var(b) = a else {
+                    let Atom::Var(b, _) = a else {
                         return Err(FxError::at(place(*n), format!("`{}` is in the scope of the binders a part exports: not yet where a macro's parts are typed", shown(*n, interner))));
                     };
                     let ty = c.pvars.iter().find(|(x, _)| x == b).and_then(|(_, q)| q.hole.as_ref()?.ty.clone());
@@ -881,7 +891,7 @@ impl Macros {
                     // What the template binds of this name, in its namespace.
                     let bound = env.iter().find_map(|l| match l {
                         Level::Rib(atoms) => atoms.iter().find_map(|a| match a {
-                            Atom::Lit(b) if matches!(t.nodes[*b].kids, Kids::Binder(m, k) if m == *n && k == *ns) => Some(*b),
+                            Atom::Lit(b, k) if *k == *ns && matches!(t.nodes[*b].kids, Kids::Binder(m, _) if m == *n) => Some(*b),
                             _ => None,
                         }),
                         Level::Cage(_) => None,
@@ -1571,11 +1581,11 @@ impl Aligner<'_> {
         match n.as_symbol() {
             Some(m) if self.pvars.contains_key(&m) => {
                 self.nodes[at].kids = Kids::PVar(m);
-                Ok(Atom::Var(m))
+                Ok(Atom::Var(m, Ns::Desc))
             }
             Some(m) if !reserved(self.name(m)) && !self.word(m, false) => {
                 self.nodes[at].kids = Kids::Binder(m, Ns::Desc);
-                Ok(Atom::Lit(at))
+                Ok(Atom::Lit(at, Ns::Desc))
             }
             _ => Err(FxError::at(n.span, format!("`{}` is not a name that may be bound", self.show(n)))),
         }
@@ -1617,8 +1627,8 @@ impl Aligner<'_> {
                 for e in entries {
                     if let Kids::Desc(parts) = &self.nodes[*e].kids {
                         match self.nodes[parts[0]].kids {
-                            Kids::PVar(n) => out.push(Atom::Var(n)),
-                            Kids::Binder(..) => out.push(Atom::Lit(parts[0])),
+                            Kids::PVar(n) => out.push(Atom::Var(n, Ns::Desc)),
+                            Kids::Binder(..) => out.push(Atom::Lit(parts[0], Ns::Desc)),
                             _ => {}
                         }
                     }
@@ -1703,12 +1713,22 @@ impl Aligner<'_> {
             let value = !matches!(&*node.core, STy::Dvar);
             match (delta, &node.kids) {
                 (Delta::None, _) => {}
-                (Delta::Var, Kids::PVar(n)) if value => out.push(Atom::Var(*n)),
-                (Delta::Var, Kids::Binder(_, Ns::Value)) => out.push(Atom::Lit(t)),
+                (Delta::Var, Kids::PVar(n)) if value => out.push(Atom::Var(*n, Ns::Value)),
+                (Delta::Var, Kids::Binder(_, Ns::Value)) => out.push(Atom::Lit(t, Ns::Value)),
                 (Delta::Var, _) => return Err(FxError::at(node.syn.span, "the signature says a value's binder is here")),
-                (Delta::Dvar, Kids::PVar(n)) if !value => out.push(Atom::Var(*n)),
-                (Delta::Dvar, Kids::Binder(_, Ns::Desc)) => out.push(Atom::Lit(t)),
-                (Delta::Dvar, _) => return Err(FxError::at(node.syn.span, "the signature says a description's binder is here")),
+                (Delta::Dvar | Delta::Place, Kids::PVar(n)) if !value => {
+                    out.push(Atom::Var(*n, Ns::Desc));
+                    if *delta == Delta::Place {
+                        out.push(Atom::Var(*n, Ns::Value));
+                    }
+                }
+                (Delta::Dvar | Delta::Place, Kids::Binder(_, Ns::Desc)) => {
+                    out.push(Atom::Lit(t, Ns::Desc));
+                    if *delta == Delta::Place {
+                        out.push(Atom::Lit(t, Ns::Value));
+                    }
+                }
+                (Delta::Dvar | Delta::Place, _) => return Err(FxError::at(node.syn.span, "the signature says a description's binder is here")),
                 // A use's description: what its own `poly`s bind is the
                 // use's, which nothing the template writes can name.
                 (Delta::Rib, Kids::PVar(_)) if matches!(&*node.core, STy::Type) => {}
@@ -1805,6 +1825,8 @@ impl Aligner<'_> {
             // A pattern's binder referred to, a value's or a description's.
             (Bvar, Expr | Id) => return self.in_scope(n, Ns::Value, env, span),
             (Dvar, Type) => return self.in_scope(n, Ns::Desc, env, span),
+            // A place's binder, referred to as the value it also binds.
+            (Dvar, Expr | Id) => return self.in_scope(n, Ns::Value, env, span),
             (Expr, Expr) | (Id, Expr | Id) | (Lambda, Lambda | Expr) => true,
             // An untyped part where a lambda is wanted: it promises nothing,
             // and its uses' expansions are checked; a typed hole says it is
@@ -1834,12 +1856,12 @@ impl Aligner<'_> {
     /// shadows a description's; every description's shares one namespace.
     fn in_scope(&self, n: Sym, ns: Ns, env: &[Level], span: Span) -> R<()> {
         let name = self.name(n);
-        let Some(i) = env.iter().position(|l| matches!(l, Level::Rib(atoms) if atoms.contains(&Atom::Var(n)))) else {
+        let Some(i) = env.iter().position(|l| matches!(l, Level::Rib(atoms) if atoms.contains(&Atom::Var(n, ns)))) else {
             return Err(FxError::at(span, format!("`{name}` is referred to where the template does not bind it")));
         };
         let shadows = |a: &Atom| match a {
-            Atom::Lit(_) => false,
-            Atom::Var(m) => self.pvars.get(m).is_none_or(|p| ns_of(&p.core) == ns),
+            Atom::Lit(..) => false,
+            Atom::Var(_, k) => *k == ns,
             Atom::RibOf(_) => true,
         };
         if env[..i].iter().any(|l| matches!(l, Level::Cage(_)) || matches!(l, Level::Rib(atoms) if atoms.iter().any(shadows))) {
@@ -1847,11 +1869,6 @@ impl Aligner<'_> {
         }
         Ok(())
     }
-}
-
-/// The namespace a pattern binder of syntax type `t` binds in.
-fn ns_of(t: &STy) -> Ns {
-    if matches!(t, STy::Dvar) { Ns::Desc } else { Ns::Value }
 }
 
 impl Macros {
@@ -1887,7 +1904,7 @@ fn normal(env: &[Level]) -> Vec<Level> {
     env.iter()
         .filter_map(|l| match l {
             Level::Rib(atoms) => {
-                let mut a: Vec<Atom> = atoms.iter().filter(|a| !matches!(a, Atom::Lit(_))).cloned().collect();
+                let mut a: Vec<Atom> = atoms.iter().filter(|a| !matches!(a, Atom::Lit(..))).cloned().collect();
                 a.sort();
                 (!a.is_empty()).then_some(Level::Rib(a))
             }
@@ -1919,12 +1936,13 @@ fn exports(levels: &[Level]) -> (Vec<Atom>, Vec<Sym>) {
 /// defines `` for a rib or ribcage; `nothing` if none.
 fn shown_exports(e: &(Vec<Atom>, Vec<Sym>), interner: &Interner) -> String {
     let mut out: Vec<String> = e.0.iter().filter_map(|a| match a {
-        Atom::Var(n) => Some(format!("`{}`", interner.name(*n))),
+        Atom::Var(n, _) => Some(format!("`{}`", interner.name(*n))),
         Atom::RibOf(n) => Some(format!("what `{}` defines", interner.name(*n))),
-        Atom::Lit(_) => None,
+        Atom::Lit(..) => None,
     }).collect();
     out.extend(e.1.iter().map(|n| format!("what `{}` defines", interner.name(*n))));
     out.sort();
+    out.dedup();
     if out.is_empty() { "nothing".to_string() } else { out.join(", ") }
 }
 
@@ -1941,9 +1959,10 @@ fn bind(b: &Syntax, interner: &Interner) -> R<Bind> {
                         Some("none") => Delta::None,
                         Some("var") => Delta::Var,
                         Some("dvar") => Delta::Dvar,
+                        Some("place") => Delta::Place,
                         Some("rib") => Delta::Rib,
                         Some("env") => Delta::Env,
-                        _ => return Err(FxError::at(d.span, "δ is `none`, `var`, `dvar`, `rib` or `env`")),
+                        _ => return Err(FxError::at(d.span, "δ is `none`, `var`, `dvar`, `place`, `rib` or `env`")),
                     };
                     Ok((addr(a, interner)?, d))
                 }

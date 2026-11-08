@@ -251,9 +251,9 @@
         nil
         (let ((rest (lit-binding n d (cdr as))))
           (tagcase (car as)
-            (atm-lit (t)
+            (atm-lit (t e)
               (tagcase (node-kids t)
-                (k-binder (m e) (if (and (symbol=? m n) (eq? e d)) (list t) rest))
+                (k-binder (m f) (if (and (symbol=? m n) (eq? e d)) (list t) rest))
                 (else y rest)))
             (else y rest))))))
 ;; A file's macro's descriptions, from node `i` to `n`, each read whole
