@@ -215,8 +215,14 @@ parameters a `dvar` sequence in scope in the fields' types.
    in signatures; sequence atoms in Herman's checking. Tests: a `my-let`,
    a `my-let*`, a `my-cond` written with ellipsis, the existing recursive
    ones unchanged.
-2. Tags, as chosen (§6).
-3. `define-data`, the acceptance tests of §7.
+2. **Built** (2026-11-08): tags as chosen (§6), keyword constructors in
+   both parsers, and macros that make descriptions, `(-> σ type)`.
+3. **Built** (2026-11-08): `define-data`, as "Keyword constructors:
+   decided", 7, writes it, with no constructors (keywords construct):
+   `macros/define-data.fx` and a recursive one, `define-data-recursive.fx`,
+   checked alike by both checkers and run. Not yet: the family form (§7's
+   stretch), and the built-in's own test programs through it, which wait
+   on the changeover (5).
 4. If it passes, `define-datatype` in `top.rs` and the FX-26 front end
    could become that macro, in a standard library of macros (which wants
    the `#%fx` module of `lang-items.md`).

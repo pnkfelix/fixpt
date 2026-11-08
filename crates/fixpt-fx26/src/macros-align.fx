@@ -19,7 +19,7 @@
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit sorted-strings
-        seq-elem peel ellipsis? ellipsis-of pattern-names addr-under?
+        seq-elem peel ellipsis? ellipsis-of
         joined
         (type fails addr entries ring rings bind sty stys named hole atm atms strings))
 
@@ -46,9 +46,9 @@
 (define-type clause (tupleof syn syn actions pvars contracts))
 (define-type clauses (listof clause acyclic))
 ;; A macro defined: its signature, its clauses, the binders of its
-;; signature's `(poly (binder …) σ)`, if it has one, and whether it makes
-;; definitions, `(-> σ defn)`.
-(define-type macro (tupleof sty clauses syns-a bool))
+;; signature's `(poly (binder …) σ)`, if it has one, and what it makes (0 an
+;; expression, 1 definitions, `(-> σ defn)`, 2 a description, `(-> σ type)`).
+(define-type macro (tupleof sty clauses syns-a int))
 (define-type macro-env (listof (tupleof symbol macro) acyclic))
 ;; The macros defined, each by the name it is used by, the last defined
 ;; first (`macros.fx`).
@@ -60,9 +60,12 @@
           (else (macro-of n (cdr env))))))
 (define macro? (->* (symbol) bool) (lambda (n) (not (null? (macro-of n (get defined))))))
 ;; Whether `n` is a macro that makes definitions.
-(define makes-defns? (->* (symbol) bool)
+(define makes-defns? (->* (symbol) bool) (lambda (n) (= (makes n) 1)))
+;; Whether `n` is a macro that makes a description.
+(define makes-desc? (->* (symbol) bool) (lambda (n) (= (makes n) 2)))
+(define makes (->* (symbol) int)
   (lambda (n)
-    (let ((m (macro-of n (get defined)))) (and (not (null? m)) (extract (car m) 4)))))
+    (let ((m (macro-of n (get defined)))) (if (null? m) -1 (extract (car m) 4)))))
 
 ;; What a file's macros are defined in (`macros.rs`'s `FileScope`): the
 ;; hidden global every load of the file is; the values and the types its
@@ -385,6 +388,9 @@
       (cond
         (defn
          (cond ((and macro (makes-defns? (syn-symbol hd))) (macro-operands fail ps at hd parts))
+               ((and macro (makes-desc? (syn-symbol hd)))
+                (not-definition fail s (string-append "them by a macro that makes definitions, "
+                                                      "not a description's")))
                (macro (not-definition fail s (string-append "them by a macro that makes "
                                                             "definitions, not an expression's")))
                ((and (not (string=? head "")) (not (null? (sig-of (string->symbol head) defs))))
@@ -396,6 +402,8 @@
          (fail-at fail (string-append "`" head "` makes definitions, which are made at the top "
                                       "level, not where an expression is")
                   s))
+        ((and macro (makes-desc? (syn-symbol hd)))
+         (fail-at fail (string-append "`" head "` makes a description, not an expression") s))
         ((and (not (string=? head "")) (not (null? (sig-of (string->symbol head) defs)))
               (null? (sig-of (string->symbol head) kernel)))
          (fail-at fail (string-append "`" head "` makes a definition, made at the top level by a "
@@ -474,6 +482,23 @@
                                   (else (k-ref n #t 1)))))
             #u)))))
 (define desc-list (->* (fails pvars int syn syns-a) unit)
+  (lambda (fail ps at s items)
+    (if (and (syn-symbol? (car items)) (not (pvar? (syn-symbol (car items)) ps))
+             (macro? (syn-symbol (car items))))
+        (desc-use fail ps at s (syn-symbol (car items)))
+        (desc-items fail ps at s items))))
+;; A macro's use where a description is: its operands aligned with its
+;; signature, if it makes a description.
+(define desc-use (->* (fails pvars int syn symbol) unit)
+  (lambda (fail ps at s n)
+    (if (makes-desc? n)
+        (with-kids at (k-form (align fail 1 ps (extract (car (macro-of n (get defined))) 1)
+                                     (nth (split s) 1) -1 (path+ (node-path at) #f))))
+        (fail-at fail (string-append "`" (symbol->string n) "` makes "
+                                     (if (makes-defns? n) "definitions" "an expression")
+                                     ", not a description")
+                 s))))
+(define desc-items (->* (fails pvars int syn syns-a) unit)
   (lambda (fail ps at s items)
     (let* ((kids (desc-kids at items)) (h (car items))
            (head (if (and (syn-symbol? h) (not (pvar? (syn-symbol h) ps))) (syn-name h) ""))
@@ -626,8 +651,15 @@
         #u
         (let ((parts (proper-items (car fs))))
           (if (= (len parts) 2)
-              (begin (desc fail ps (kid (desc-kids (car ks) parts) 1) (nth parts 1))
-                     (desc-fields fail ps (cdr ks) (cdr fs)))
+              (let ((p (desc-kids (car ks) parts)))
+                (begin
+                  ;; A label a use gives, placed.
+                  (if (and (syn-symbol? (car parts)) (pvar? (syn-symbol (car parts)) ps))
+                      (begin (with-core (car p) (s-label))
+                             (with-kids (car p) (k-pvar (syn-symbol (car parts)))))
+                      #u)
+                  (desc fail ps (kid p 1) (nth parts 1))
+                  (desc-fields fail ps (cdr ks) (cdr fs))))
               (fail-at fail "`(label type)`" (car fs)))))))
 ;; Names of values at nodes `ks`, each the top level's if free (`free` 1)
 ;; or as written (2), or a pattern variable placed.
@@ -954,28 +986,3 @@
           (else (cons (car bs) (without a (cdr bs)))))))
 (define len-atms (->* (atms) int)
   (lambda (as) (if (null? as) 0 (+ 1 (len-atms (cdr as))))))
-
-;;; ------------------------------------------------------------ repeating
-
-;; The pattern variables in `x` under more ellipses than `level`, in the
-;; pattern's order.
-(define drivers-of (->* (pvars syn int) names)
-  (lambda (ps x level)
-    (cond ((null? ps) nil)
-          ((and (> (extract (extract (car ps) 2) 5) level)
-                (name-in? (extract (car ps) 1) (pattern-names x)))
-           (cons (extract (car ps) 1) (drivers-of (cdr ps) x level)))
-          (else (drivers-of (cdr ps) x level)))))
-;; The renamings in `acts` at paths under `p`, of binders under more
-;; ellipses than `level`: each with whether it is at the binder itself.
-(define renames-under (->* (actions addr int) (listof (tupleof addr bool) acyclic))
-  (lambda (acts p level)
-    (if (null? acts)
-        nil
-        (let ((rest (renames-under (cdr acts) p level)) (at (extract (car acts) 1)))
-          (tagcase (extract (car acts) 2)
-            (act-rename (b d)
-              (if (and (> d level) (addr-under? at p))
-                  (cons (tuple b ((with types-module addr=?) at b)) rest)
-                  rest))
-            (else y rest))))))

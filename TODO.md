@@ -5294,4 +5294,7 @@ repetition) and a name that is both a label and a value's binder (a
 syntax type `tag`, or keyword constructors instead). Design, acceptance
 tests and the user's two choices: `docs/research/datatype-macro.md`.
 Decided (the user, 2026-11-08): ellipsis primitive; keyword constructors,
-none as values. Ellipsis built the same day; keyword constructors next.
+none as values. Built the same day: ellipsis, keyword constructors,
+macros that make descriptions, and `define-data` (the spike passes,
+`macros/define-data*.fx`). Left: the family form, and the changeover of
+`define-datatype`'s programs to keyword construction.

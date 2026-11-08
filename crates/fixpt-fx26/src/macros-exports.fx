@@ -1,7 +1,8 @@
 ;;; Typed hygienic macros, in FX-26: what a template's export binds of what
 ;;; its uses give, compared and said, and the names a template binds in its
 ;;; uses of macros that make definitions (`macros.rs`'s `exports`,
-;;; `shown_exports` and `binders_under`). Part of the expander: loaded by
+;;; `shown_exports` and `binders_under`), and what says how many times a
+;;; template's part is repeated (`transcribe`'s). Part of the expander: loaded by
 ;;; `macros-files.fx`, and loading `macros-align.fx`, whose nodes these read,
 ;;; so that `macros.fx` takes one instance of each through it.
 
@@ -13,9 +14,9 @@
 (import reader-types (type syn))
 (import parser-module syn-symbol? syn-symbol (type names))
 (import types-module fail-at name-in? proper-items sorted-strings joined atm-var atm-rib-of
-        atm-lit (type fails atm atms strings))
+        atm-lit pattern-names addr-under? addr=? (type fails atm atms strings addr))
 (import align-module node-kids node-syn pvar? makes-defns? normal atm-in? lv-rib lv-cage k-pair
-        k-form k-desc k-seq k-binder (type levels pvars))
+        k-form k-desc k-seq k-binder act-rename (type levels pvars actions))
 
 ;;; ------------------------------------------------------------ exports
 
@@ -120,3 +121,28 @@
                                          "#%toplevel " n ")` for the top level's")
                      s))
           #u))))
+
+;;; ------------------------------------------------------------ repeating
+
+;; The pattern variables in `x` under more ellipses than `level`, in the
+;; pattern's order.
+(define drivers-of (->* (pvars syn int) names)
+  (lambda (ps x level)
+    (cond ((null? ps) nil)
+          ((and (> (extract (extract (car ps) 2) 5) level)
+                (name-in? (extract (car ps) 1) (pattern-names x)))
+           (cons (extract (car ps) 1) (drivers-of (cdr ps) x level)))
+          (else (drivers-of (cdr ps) x level)))))
+;; The renamings in `acts` at paths under `p`, of binders under more
+;; ellipses than `level`: each with whether it is at the binder itself.
+(define renames-under (->* (actions addr int) (listof (tupleof addr bool) acyclic))
+  (lambda (acts p level)
+    (if (null? acts)
+        nil
+        (let ((rest (renames-under (cdr acts) p level)) (at (extract (car acts) 1)))
+          (tagcase (extract (car acts) 2)
+            (act-rename (b d)
+              (if (and (> d level) (addr-under? at p))
+                  (cons (tuple b ((with types-module addr=?) at b)) rest)
+                  rest))
+            (else y rest))))))

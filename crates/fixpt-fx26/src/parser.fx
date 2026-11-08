@@ -229,6 +229,20 @@
       (if (and (> k 11) (string=? (substring s 0 11) "#%toplevel:"))
           (e-with '#%toplevel (e-var (string->symbol (substring s 11 k)) a b 0 0) a b 0 0)
           (e-var n a b 0 0)))))
+;; Whether `items`' head is a keyword, `(#:t e …)`: a sum constructed.
+(define kw-head? (->* (syns-a) bool)
+  (lambda (items)
+    (tagcase (car items) (atom (d a b x) (keyword? d)) (else y #f))))
+;; `(#:t e …)` (`docs/research/datatype-macro.md`, "Keyword constructors:
+;; decided"): `(sum #:t #u)` of none, `(sum #:t e)` of one, `(sum #:t
+;; (tuple e …))` of more, as `parse.rs` rewrites it.
+(define kw-sum (->* (syns-a int int) syn)
+  (lambda (items a b)
+    (let* ((args (cdr items))
+           (payload (cond ((null? args) (mk-symbol "#u" a b))
+                          ((null? (cdr args)) (car args))
+                          (else (mk-list (cons (mk-symbol "tuple" a b) args) a b)))))
+      (mk-list (list (mk-symbol "sum" a b) (car items) payload) a b))))
 (define call-tmp (->* (symbol symbol exp-list int int) exp)
   (lambda (f tmp more a b)
     (e-app (standard-ref f a b) (the exp-list (cons (e-var tmp a b 0 0) more)) a b 0 0)))

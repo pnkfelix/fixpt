@@ -26,14 +26,14 @@
         syn-symbol syn-items len nth drop label keep arity big-literal mod-item-of with-includes
         any-include? hide-forms hide-form? hidden-marks item-in-includes datatype? expand-datatype
         import? expand-import e-var e-int e-bool e-str e-char e-float e-sym e-unit e-lambda e-app
-        e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the
+        e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the kw-sum
         e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-exp
         p-ok p-err sym-true sym-false sym-unit at-least vlambda-usage stage-usage parse-vparam
         region-form? confirm-length-k bloblet-form? syn-string? syn-string parse-params freeze-pair
         region-kind region-name-error one-let call-tmp standard-ref field-index bloblet-untagged?
         arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol mk-list quoted
         rec-names rec-types rec-inits module-usage loaded loaded-next-at in-loaded loaded-mark
-        loaded-error loaded-params loaded-made mk-form dt-labelled without-syntax var-ref
+        loaded-error loaded-params loaded-made mk-form dt-labelled without-syntax var-ref kw-head?
         (type syns-a exp top exp-list mod-item mod-items letrec-list let-list arm-list loaded-file)
         (effect parses))
 ;; A `case`'s data by halving (`parser.fx`).
@@ -444,8 +444,8 @@
         (else
          (cond ((region-form? head) (parse-region-form items head a b))
                ((bloblet-form? head) (parse-bloblet head (cdr items) a b))
-               (else (let ((f (parse-exp (car items))))
-                       (e-app f (parse-exps (cdr items)) a b 0 0))))))))
+               ((kw-head? items) (parse-exp (kw-sum items a b)))
+               (else (e-app (parse-exp (car items)) (parse-exps (cdr items)) a b 0 0)))))))
   ;; Item `i`, an expression.
   (parse-nth (->* (syns-a int) exp)
     (lambda (items i) (parse-exp (nth items i))))

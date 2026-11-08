@@ -4377,3 +4377,16 @@ The user read the paper as supporting the distribution. Mine:
   skipped; only under an ellipsis, where it matters, for now.
 - **Ellipsis only last in a list**, as `(a ... b)` needs matching from both
   ends; refused where written elsewhere.
+
+## Keyword constructors and macros that make descriptions (2026-11-08)
+
+- **A keyword constructor is a rewrite in both parsers**, `(#:t e …)` to
+  `(sum #:t …)` by arity, so the checkers, compilers and machines see only
+  `sum` and `tuple`, which they have.
+- **A macro that makes a description is expanded where it is used**, the
+  expander not knowing a description's place from an expression's: in a
+  template, its place is checked (refused where an expression is); in a
+  program, a use where an expression is expands, and the checker refuses
+  what it made.
+- **A label a use gives, in a `productof` or `sumof` a template writes, is
+  placed**, so its depth under ellipses is checked as any part's.

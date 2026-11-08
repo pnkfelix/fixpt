@@ -22,14 +22,14 @@
         (type syns-a names loaded-file) (effect parses))
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
-(import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn
+(import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn s-type
         signature-made pure-hole? affine-kind? int-in? ellipsis? ellipsis-of proper-items bound-of
         matched pattern-names list-items odd-length nth-name nth-list len-ints addr-under? ints=?
         all-ints? ints-prefix
         (type fails addr sty binds))
 (import align-module defined macro-of macro? makes-defns? nodes-reset! align walk placed node-at
         node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
-        seq-depths drivers-of renames-under
+        seq-depths
         act-qualified act-standard act-module act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed evaluate levels-of
@@ -37,6 +37,7 @@
               found levels
               atms kids contracts holes))
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
+        drivers-of renames-under
         (type exported nested))
 (import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
         internal-of
@@ -54,7 +55,7 @@
 ;; the pattern's variables is placed in the template where the signature
 ;; says what is in scope there, and a reference to a pattern's binder is
 ;; where no other pattern binder may shadow it.
-(define check-clause (->* (fails syn sty bool syns-a scopes) clause)
+(define check-clause (->* (fails syn sty int syns-a scopes) clause)
   (lambda (fail c sig defn poly file)
     (let ((two (proper c)))
       (if (not (= (len two) 2))
@@ -111,14 +112,14 @@
 ;; such a macro's uses define, if its signature says (`(-> (export σ β)
 ;; defn)`), in a list of one: what a template using it sees, and what its
 ;; own template is held to.
-(define pattern-vars (->* (fails sty syn bool) (tupleof pvars (listof exported acyclic)))
+(define pattern-vars (->* (fails sty syn int) (tupleof pvars (listof exported acyclic)))
   (lambda (fail sig pattern defn)
     (begin
       (nodes-reset!)
       (let* ((root (align fail 0 (the pvars nil) sig pattern -1 nil))
              (found (walk fail root nil #f 0))
              (e (extract (node-at root) 5))
-             (declared (if (and defn (not (null? e)))
+             (declared (if (and (= defn 1) (not (null? e)))
                            (the (listof exported acyclic)
                                 (list (exports-of (evaluate fail (extract (car e) 1)
                                                             (extract (car e) 2) pattern))))
@@ -128,7 +129,7 @@
 (define pinfo-at (->* (int (tupleof int levels bool int)) pinfo)
   (lambda (at f)
     (tuple (node-core at) (extract f 2) (extract f 3) (node-hole at) (extract f 4))))
-(define pvars-of (->* (fails found pvars bool) pvars)
+(define pvars-of (->* (fails found pvars int) pvars)
   (lambda (fail fs ps defn)
     (if (null? fs)
         ps
@@ -144,26 +145,33 @@
                                   (node-syn at))
                          ps))
                 (else
-                  (if (and defn (not (null? (node-hole at))))
+                  (cond
+                    ((and (= defn 1) (not (null? (node-hole at))))
                       (begin (fail-at fail (string-append "a macro that makes definitions has no "
                                                           "typed parts, not yet: what each use "
                                                           "defines is checked where it is")
                                       (node-syn at))
-                             ps)
+                             ps))
+                    ((and (= defn 2) (not (null? (node-hole at))))
+                     (begin (fail-at fail "a macro that makes a description has no typed parts"
+                                     (node-syn at))
+                            ps))
+                    (else
                       (pvars-of fail (cdr fs)
                                 (append ps (the pvars (list (tuple n (pinfo-at at (car fs))))))
-                                defn)))))
+                                defn))))))
             (else y (pvars-of fail (cdr fs) ps defn)))))))
 ;; The template, an expression or definitions (`defn`), aligned with the
 ;; kernel's forms' signatures and the macros', its pattern variables placed
 ;; by the rules, and what is done to each of its names where it is
 ;; transcribed.
 (define template-actions
-  (->* (fails pvars syn bool (listof exported acyclic) scopes) actions)
+  (->* (fails pvars syn int (listof exported acyclic) scopes) actions)
   (lambda (fail ps template defn declared file)
     (begin
       (nodes-reset!)
-      (let* ((root (align fail 1 ps (if defn (s-defn) (s-expr)) template -1 nil))
+      (let* ((made (cond ((= defn 1) (s-defn)) ((= defn 2) (s-type)) (else (s-expr))))
+             (root (align fail 1 ps made template -1 nil))
              (found (walk fail root nil #f 0))
              (nested (nested-binders 0 (get nnodes) ps))
              (named (name-actions fail ps found file nil nil nested (binder-depths found))))
@@ -396,7 +404,8 @@
                            ;; `(poly (binder …) σ)`: the binders its typed holes
                            ;; may name.
                            (poly (signature-poly fail (nth items 2)))
-                           ;; `(-> σ defn)`: of what it makes, definitions.
+                           ;; `(-> σ defn)`, `(-> σ type)`: of what it makes,
+                           ;; definitions or a description.
                            (made (signature-made fail (extract poly 2)))
                            (defn (extract made 2))
                            (sig (read-sty fail (extract made 1) nil nil))
@@ -424,7 +433,7 @@
               (begin (fail-at fail "a signature's `(poly ((name kind) …) σ)`" (nth items 1))
                      (tuple (the syns-a nil) s)))
           (tuple (the syns-a nil) s)))))
-(define check-each (->* (fails syns-a sty bool syns-a scopes) clauses)
+(define check-each (->* (fails syns-a sty int syns-a scopes) clauses)
   (lambda (fail cs sig defn poly file)
     (if (null? cs)
         nil

@@ -1789,6 +1789,20 @@ impl Checker {
             _ => return Err(FxError::at(span, "not an expression in the FX-26 kernel")),
         }
         let items = self.items(s, "an expression")?;
+        // `(#:t e …)`, a sum constructed (`docs/research/datatype-macro.md`,
+        // "Keyword constructors: decided"): `(sum #:t #u)` of none, `(sum
+        // #:t e)` of one, `(sum #:t (tuple e …))` of more. A keyword
+        // anywhere else is a keyword, which constructs nothing.
+        if matches!(items[0].datum, Datum::Keyword(_)) {
+            let sym = |p: &mut Self, n: &str| Syntax::symbol(span, p.interner.intern(n));
+            let payload = match &items[1..] {
+                [] => sym(self, "#u"),
+                [e] => e.clone(),
+                es => Syntax::list(span, std::iter::once(sym(self, "tuple")).chain(es.iter().cloned()).collect()),
+            };
+            let made = Syntax::list(span, vec![sym(self, "sum"), items[0].clone(), payload]);
+            return self.parse_exp(&made);
+        }
         match self.head(&items).unwrap_or("") {
             "lambda" => {
                 let [_, params, body @ ..] = &items[..] else {

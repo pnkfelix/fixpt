@@ -40,6 +40,11 @@
 //! taken as placed more than once, so the opt-out is said all the way up
 //! a chain of macros (`docs/research/typed-macros.md`).
 //!
+//! A macro whose signature is `(-> σ type)` makes a description: its uses
+//! are where a description is, in a template's descriptions too, its
+//! template a description (`docs/research/datatype-macro.md`, "Keyword
+//! constructors: decided", 7).
+//!
 //! A macro whose signature is `(-> σ defn)` makes definitions
 //! (`typed-macros.md`, item 9): its template is one of the kernel's, or a
 //! `begin` of them, spliced where it is used, at the top level alone
@@ -168,6 +173,8 @@ struct Macro {
     sig: Rc<STy>,
     /// Whether it makes definitions, `(-> σ defn)`.
     defn: bool,
+    /// Whether it makes a description, `(-> σ type)`.
+    desc: bool,
     /// The binders of its signature's `(poly (binder …) σ)`, if it has one.
     poly: Vec<Syntax>,
     clauses: Vec<Clause>,
@@ -872,21 +879,23 @@ impl Macros {
             }
             _ => (Vec::new(), sig),
         };
-        // `(-> σ defn)`: of what it makes, definitions; `(-> σ expr)`, as `σ`.
-        let (sig, defn) = match sig.as_proper_list() {
+        // `(-> σ defn)`: of what it makes, definitions; `(-> σ type)`, a
+        // description; `(-> σ expr)`, as `σ`.
+        let (sig, defn, desc) = match sig.as_proper_list() {
             Some([h, body, made]) if h.as_symbol().is_some_and(|h| interner.name(h) == "->") => match made.as_symbol().map(|m| interner.name(m)) {
-                Some("defn") => (body, true),
-                Some("expr") => (body, false),
-                _ => return Err(FxError::at(made.span, "a signature `(-> σ made)` makes `expr` or `defn`")),
+                Some("defn") => (body, true, false),
+                Some("type") => (body, false, true),
+                Some("expr") => (body, false, false),
+                _ => return Err(FxError::at(made.span, "a signature `(-> σ made)` makes `expr`, `defn` or `type`")),
             },
-            _ => (sig, false),
+            _ => (sig, false, false),
         };
         let sig = self.sty(sig, interner, &HashMap::new(), &mut Vec::new())?;
         // Defined first, so that a template may use the macro itself.
-        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), defn, poly: poly.clone(), clauses: Vec::new(), text: None }));
+        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), defn, desc, poly: poly.clone(), clauses: Vec::new(), text: None }));
         let mut checked = Vec::new();
         for c in clauses {
-            match self.clause(c, &sig, defn, &poly, interner, file) {
+            match self.clause(c, &sig, defn, desc, &poly, interner, file) {
                 Ok(c) => checked.push(c),
                 Err(e) => {
                     match before {
@@ -898,7 +907,7 @@ impl Macros {
             }
         }
         let text = self.reading.clone();
-        self.defined.insert(name, Rc::new(Macro { sig, defn, poly, clauses: checked, text }));
+        self.defined.insert(name, Rc::new(Macro { sig, defn, desc, poly, clauses: checked, text }));
         Ok(name)
     }
 
@@ -907,7 +916,8 @@ impl Macros {
     /// placed in the template where the signature says what is in scope
     /// there, and a reference to a pattern's binder is where no other
     /// pattern binder may shadow it.
-    fn clause(&self, c: &Syntax, sig: &Rc<STy>, defn: bool, poly: &[Syntax], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
+    #[allow(clippy::too_many_arguments)]
+    fn clause(&self, c: &Syntax, sig: &Rc<STy>, defn: bool, desc: bool, poly: &[Syntax], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
         let usage = "a clause is `((_ . pattern) template)`";
         let [pattern, template] = c.as_proper_list().ok_or_else(|| FxError::at(c.span, usage))? else {
             return Err(FxError::at(c.span, usage));
@@ -945,11 +955,15 @@ impl Macros {
             if defn && p.nodes[at].hole.is_some() {
                 return Err(FxError::at(p.nodes[at].syn.span, "a macro that makes definitions has no typed parts, not yet: what each use defines is checked where it is"));
             }
+            if desc && p.nodes[at].hole.is_some() {
+                return Err(FxError::at(p.nodes[at].syn.span, "a macro that makes a description has no typed parts"));
+            }
         }
         // The template, an expression or definitions, aligned with the
         // kernel's forms' signatures and the macros'.
         let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new() };
-        let root = t.align(&Rc::new(if defn { STy::Defn } else { STy::Expr }), template, None, Vec::new())?;
+        let made = if defn { STy::Defn } else if desc { STy::Type } else { STy::Expr };
+        let root = t.align(&Rc::new(made), template, None, Vec::new())?;
         let (mut found, mut seqs) = (Vec::new(), Vec::new());
         t.walk(root, &Vec::new(), false, 0, &mut found, &mut seqs)?;
         // How many ellipses each of the template's binders is under: a
@@ -1604,6 +1618,7 @@ impl Aligner<'_> {
         let sig = match head.map(|h| (h, self.name(h))) {
             Some((h, n)) if defn => match self.m.defined.get(&h) {
                 Some(m) if m.defn => Some(m.sig.clone()),
+                Some(m) if m.desc => return Err(not_one("them by a macro that makes definitions, not a description's")),
                 Some(_) => return Err(not_one("them by a macro that makes definitions, not an expression's")),
                 None => match self.m.definitions.get(n) {
                     Some(sig) => Some(sig.clone()),
@@ -1613,6 +1628,9 @@ impl Aligner<'_> {
             None if defn => return Err(not_one("`define`, `define*`, `define-rec`, a `begin` of them, or a use of another such")),
             Some((h, _)) if self.m.defined.get(&h).is_some_and(|m| m.defn) => {
                 return Err(FxError::at(s.span, format!("`{}` makes definitions, which are made at the top level, not where an expression is", self.name(h))));
+            }
+            Some((h, _)) if self.m.defined.get(&h).is_some_and(|m| m.desc) => {
+                return Err(FxError::at(s.span, format!("`{}` makes a description, not an expression", self.name(h))));
             }
             Some((_, n)) if self.m.definitions.contains_key(n) && !self.m.kernel.contains_key(n) => {
                 return Err(FxError::at(s.span, format!("`{n}` makes a definition, made at the top level by a macro that makes definitions, not where an expression is")));
@@ -1682,6 +1700,22 @@ impl Aligner<'_> {
             Datum::List { .. } => return Err(fail("a description is a list, not a dotted one".into())),
             _ => return Ok(()),
         };
+        // A macro's use: its operands aligned with its signature, if it
+        // makes a description.
+        if let Some(h) = items[0].as_symbol().filter(|h| !self.pvars.contains_key(h))
+            && let Some(m) = self.m.defined.get(&h)
+        {
+            if !m.desc {
+                let what = if m.defn { "definitions" } else { "an expression" };
+                return Err(fail(format!("`{}` makes {what}, not a description", self.name(h))));
+            }
+            let (sig, (_, operands)) = (m.sig.clone(), split(s).expect("a list"));
+            let mut p = self.nodes[at].path.clone();
+            p.push(false);
+            let x = self.align(&sig, &operands, None, p)?;
+            self.nodes[at].kids = Kids::Form(x);
+            return Ok(());
+        }
         let head = items[0].as_symbol().filter(|h| !self.pvars.contains_key(h)).map(|h| self.name(h).to_string());
         let kids = self.desc_kids(at, &items);
         let not_yet = |what: &str| Err(fail(format!("{what} in a template's description: not yet")));
@@ -1728,6 +1762,11 @@ impl Aligner<'_> {
                         return Err(FxError::at(f.span, "`(label type)`"));
                     };
                     let p = self.desc_kids(*k, &[label.clone(), ty.clone()]);
+                    // A label a use gives, placed.
+                    if let Some(n) = label.as_symbol().filter(|n| self.pvars.contains_key(n)) {
+                        self.nodes[p[0]].core = Rc::new(STy::Label);
+                        self.nodes[p[0]].kids = Kids::PVar(n);
+                    }
                     self.desc(p[1], ty)?;
                 }
                 Ok(())
