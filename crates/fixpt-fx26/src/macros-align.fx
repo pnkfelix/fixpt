@@ -15,9 +15,9 @@
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
         fits? sub? kind-of kernel-sigs bind-rib bind-cage ring-rib ring-at s-expr s-bvar s-id
-        s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union
+        s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         mu-body addr=?
-        (type fails addr entries ring rings bind sty stys named))
+        (type fails addr entries ring rings bind sty stys named hole))
 
 ;;; ------------------------------------------------------------ macros
 
@@ -33,11 +33,16 @@
   (act-module-type symbol) (act-standard-type) (act-macro-head symbol))
 (define-type actions (listof (tupleof addr action) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
-;; by their paths in the template, the last made first.
-(define-type clause (tupleof syn syn actions))
+;; by their paths in the template, the last made first; its pattern's
+;; variables, in the order the pattern has them; and each typed hole's
+;; type as a use reads it, `(select #%toplevel T)`, which the use's
+;; expression is held to (`macros.rs`'s `Clause`).
+(define-type contracts (listof (tupleof symbol syn) acyclic))
+(define-type clause (tupleof syn syn actions pvars contracts))
 (define-type clauses (listof clause acyclic))
-;; A macro defined: its signature, its clauses.
-(define-type macro (tupleof sty clauses))
+;; A macro defined: its signature, its clauses, and the binders of its
+;; signature's `(poly (binder …) σ)`, if it has one.
+(define-type macro (tupleof sty clauses syns-a))
 (define-type macro-env (listof (tupleof symbol macro) acyclic))
 ;; The macros defined, each by the name it is used by, the last defined
 ;; first (`macros.fx`).
@@ -72,12 +77,14 @@
 ;; A node of syntax aligned with a syntax type: the syntax; its path from
 ;; the root; the type at it, its annotations taken off; its imports; its
 ;; export (none or one); whether its part of the signature is `(many …)`;
-;; what is in it.
-(define-type node (tupleof syn addr sty rooted rooted bool kids))
+;; what is in it; its part's typed hole, if the signature types it (none or
+;; one).
+(define-type holes (listof hole acyclic))
+(define-type node (tupleof syn addr sty rooted rooted bool kids holes))
 (define atom-at (subr pure (int) syn) (lambda (a) (atom '() a a 0)))
 (define nodes (ref (arrayof node rs) rs)
   (new (make-array 256 (tuple (atom-at 0) (the addr nil) (s-nil) (the rooted nil) (the rooted nil)
-                              #f (k-other)))))
+                              #f (k-other) (the holes nil)))))
 (define nnodes (ref int rs) (new 0))
 (define node-at (->* (int) node) (lambda (i) (array-ref (get nodes) i)))
 (define node-set! (->* (int node) unit) (lambda (i n) (array-set! (get nodes) i n)))
@@ -86,33 +93,40 @@
 (define node-core (->* (int) sty) (lambda (i) (extract (node-at i) 3)))
 (define node-kids (->* (int) kids) (lambda (i) (extract (node-at i) 7)))
 (define node-many? (->* (int) bool) (lambda (i) (extract (node-at i) 6)))
+(define node-hole (->* (int) holes) (lambda (i) (extract (node-at i) 8)))
 ;; A node's fields, one of them changed.
 (define with-core (->* (int sty) unit)
   (lambda (i t)
     (let ((n (node-at i)))
       (node-set! i (tuple (extract n 1) (extract n 2) t (extract n 4) (extract n 5) (extract n 6)
-                          (extract n 7))))))
+                          (extract n 7) (extract n 8))))))
 (define with-kids (->* (int kids) unit)
   (lambda (i k)
     (let ((n (node-at i)))
       (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
-                          (extract n 6) k)))))
+                          (extract n 6) k (extract n 8))))))
 (define with-import (->* (int bind int) unit)
   (lambda (i b root)
     (let ((n (node-at i)))
       (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3)
                           (append (extract n 4) (the rooted (list (tuple b root))))
-                          (extract n 5) (extract n 6) (extract n 7))))))
+                          (extract n 5) (extract n 6) (extract n 7) (extract n 8))))))
 (define with-export (->* (int bind int) unit)
   (lambda (i b root)
     (let ((n (node-at i)))
       (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4)
-                          (the rooted (list (tuple b root))) (extract n 6) (extract n 7))))))
+                          (the rooted (list (tuple b root))) (extract n 6) (extract n 7)
+                          (extract n 8))))))
 (define with-many (->* (int) unit)
   (lambda (i)
     (let ((n (node-at i)))
       (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
-                          #t (extract n 7))))))
+                          #t (extract n 7) (extract n 8))))))
+(define with-hole (->* (int hole) unit)
+  (lambda (i h)
+    (let ((n (node-at i)))
+      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
+                          (extract n 6) (extract n 7) (the holes (list h)))))))
 ;; A new node, of `s` at `path`, its type `t`: its number.
 (define node-new (->* (syn addr sty) int)
   (lambda (s path t)
@@ -123,7 +137,8 @@
               (begin (copy-nodes (get nodes) bigger 0) (set nodes bigger)))
             #u)
         (set nnodes (+ i 1))
-        (node-set! i (tuple s path t (the rooted nil) (the rooted nil) #f (k-other)))
+        (node-set! i (tuple s path t (the rooted nil) (the rooted nil) #f (k-other)
+                            (the holes nil)))
         i))))
 (define copy-nodes (->* ((arrayof node rs) (arrayof node rs) int) unit)
   (lambda (from to i)
@@ -136,8 +151,9 @@
 ;;; ------------------------------------------------------------ aligning
 
 ;; A pattern variable: its type, its environment as the signature declares
-;; it, and whether it may be placed any number of times.
-(define-type pinfo (tupleof sty levels bool))
+;; it, whether it may be placed any number of times, and its typed hole, if
+;; the signature types it.
+(define-type pinfo (tupleof sty levels bool holes))
 (define-type pvars (listof (tupleof symbol pinfo) acyclic))
 (define pvar-of (->* (symbol pvars) (listof pinfo acyclic))
   (lambda (n ps)
@@ -160,6 +176,7 @@
     (tagcase t
       (s-import (body b) (begin (with-import at b root) (fill fail mode ps at body s root)))
       (s-many (body) (begin (with-many at) (fill fail mode ps at body s root)))
+      (s-typed (body h) (begin (with-hole at h) (fill fail mode ps at body s root)))
       (s-export (body b)
         (if (null? (extract (node-at at) 5))
             (begin (with-export at b root) (fill fail mode ps at body s root))
@@ -225,6 +242,8 @@
         (s-expr ()
           (cond ((reserved-syn? s)
                  (said (string-append "`" (syn-name s) "` is a form's name, not an expression")))
+                ;; `#u`, unit: a literal, which the parsers read as a name.
+                ((and (syn-symbol? s) (string=? (syn-name s) "#u")) #u)
                 ((and (syn-symbol? s) (= mode 1)) (with-kids at (k-ref (syn-symbol s))))
                 ((and (not (syn-nil? s)) (not (null? (split s))) (= mode 1)) (form fail ps at s))
                 ((syn-nil? s) (said "`()` is not an expression"))

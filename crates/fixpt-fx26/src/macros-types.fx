@@ -30,11 +30,15 @@
 (define-type rings (listof ring acyclic))
 ;; What an annotation binds (Herman's `β`): a rib, or a ribcage.
 (define-datatype bind (bind-rib entries) (bind-cage rings))
-;; A syntax type. A `mu` is by its number in `mus`, its variable the same.
+;; What a typed hole says (`macros.rs`'s `Hole`): its type and its effect,
+;; each as written, in a list of one, or none if it is left out.
+(define-type hole (tupleof syns-a syns-a))
+;; A syntax type. A `mu` is by its number in `mus`, its variable the same;
+;; `s-typed`, an `expr` or `bvar` with its type or effect written.
 (define-datatype sty
   (s-expr) (s-bvar) (s-id) (s-data) (s-type) (s-label) (s-nil)
   (s-literal symbol) (s-pair sty sty) (s-import sty bind) (s-export sty bind)
-  (s-mu int) (s-many sty) (s-union (listof sty acyclic)))
+  (s-mu int) (s-many sty) (s-union (listof sty acyclic)) (s-typed sty hole))
 (define-type stys (listof sty acyclic))
 
 ;; Each `mu`'s body, by its number: the program's, and every file's
@@ -191,6 +195,13 @@
                                   s)
                          #u)
                      (s-union ms))))
+           ;; `(expr #:type T #:effect E)`, `(bvar #:type T)`: a list whose
+           ;; second is a keyword, which no syntax type is.
+           ((and (or (string=? head "expr") (string=? head "bvar")) (> (len (proper-items s)) 1)
+                 (syn-keyword? (nth (proper-items s) 1)))
+            (let ((expr? (string=? head "expr")))
+              (s-typed (if expr? (s-expr) (s-bvar))
+                       (read-hole fail (cdr (proper-items s)) expr? s nil nil))))
            ((and (string=? head "many") (= (len (proper-items s)) 2))
             (s-many (read-sty fail (nth (proper-items s) 1) named scope)))
            ((and (string=? head "literal") (= (len (proper-items s)) 2))
@@ -257,6 +268,32 @@
 (define proper? (->* (syn) bool)
   (lambda (s) (tagcase s (lst (items d a b x) (not (null? items))) (else y #f))))
 
+;; A typed hole's keywords and what each says, `#:type T` and, of an `expr`,
+;; `#:effect E`, each once: from `parts`, onto `ty` and `eff`.
+(define read-hole (->* (fails syns-a bool syn syns-a syns-a) hole)
+  (lambda (fail parts expr? s ty eff)
+    (let ((usage (string-append "a syntax type: "
+                                (if expr?
+                                    "`(expr #:type T #:effect E)`, either left out"
+                                    "`(bvar #:type T)`"))))
+      (cond
+        ((null? parts) (tuple ty eff))
+        ((null? (cdr parts)) (begin (fail-at fail usage s) (tuple ty eff)))
+        (else
+         (let* ((k (car parts)) (word (if (syn-keyword? k) (keyword-name k) "")))
+           (cond ((and (string=? word "type") (null? ty))
+                  (read-hole fail (cdr (cdr parts)) expr? s (list (nth parts 1)) eff))
+                 ((and expr? (string=? word "effect") (null? eff))
+                  (read-hole fail (cdr (cdr parts)) expr? s ty (list (nth parts 1))))
+                 ((or (string=? word "type") (and expr? (string=? word "effect")))
+                  (begin (fail-at fail (string-append usage ", each once") k) (tuple ty eff)))
+                 (else (begin (fail-at fail usage k) (tuple ty eff))))))))))
+;; A keyword's name.
+(define keyword-name (->* (syn) string)
+  (lambda (s)
+    (tagcase s
+      (atom (d a b x) (if (keyword? d) (symbol->string (keyword->symbol d)) ""))
+      (else y ""))))
 ;; A binding, `(rho (address δ) …)` or `(cage (rho …) (at address) …)`.
 (define bind-usage string
   "a binding is `(rho (address δ) …)` or `(cage (rho …) (at address) …)`")
@@ -349,6 +386,7 @@
   (lambda (t)
     (tagcase t
       (s-import (b x) (unfold b)) (s-export (b x) (unfold b)) (s-many (b) (unfold b))
+      (s-typed (b h) (unfold b))
       (s-mu (id) (unfold (mu-body id)))
       (else y t))))
 ;; Whether `t` uses `mu` `id`'s variable only under a pair.
@@ -357,6 +395,7 @@
     (tagcase t
       (s-mu (j) (not (= j id)))
       (s-import (b x) (guarded? b id)) (s-export (b x) (guarded? b id)) (s-many (b) (guarded? b id))
+      (s-typed (b h) (guarded? b id))
       (s-union (ms) (all-guarded? ms id))
       (else y #t))))
 (define all-guarded? (->* (stys int) bool)
@@ -454,6 +493,7 @@
       (s-export (x p) (tagcase b (s-export (y q) (and (sty=? x y) (bind=? p q))) (else z #f)))
       (s-mu (i) (tagcase b (s-mu (j) (= i j)) (else y #f)))
       (s-many (x) (tagcase b (s-many (y) (sty=? x y)) (else z #f)))
+      (s-typed (x h) (tagcase b (s-typed (y g) (sty=? x y)) (else z #f)))
       (s-union (ms) (tagcase b (s-union (ns) (all-sty=? ms ns)) (else y #f)))
       (else y (and (< (kind-of a) 7) (= (kind-of a) (kind-of b)))))))
 (define all-sty=? (->* (stys stys) bool)
@@ -500,11 +540,13 @@
         (let ((more (the assumed (cons (tuple a b) assumed))))
           (tagcase a
             (s-many (x) (sub? x b more))
+            (s-typed (x h) (sub? x b more))
             (s-mu (i) (sub? (mu-body i) b more))
             (s-union (ms) (all-sub? ms b more))
             (else y
               (tagcase b
                 (s-many (x) (sub? a x more))
+                (s-typed (x h) (sub? a x more))
                 (s-mu (j) (sub? a (mu-body j) more))
                 (s-union (ms) (any-sub? a ms more))
                 (else z (sub-base? a b more)))))))))

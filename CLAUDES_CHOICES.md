@@ -4251,3 +4251,23 @@ The user read the paper as supporting the distribution. Mine:
 - **Two checkers' errors are the same** by message, place and each use's
   name and place (`compare::same_error`), not by the numbers each
   expander gives its expansions.
+
+## Typed holes (2026-11-07)
+
+- **The template check is a hidden top-level definition**, rather than a
+  form of its own: both checkers check it as they check anything, and a
+  redefinition of a global its template uses has it checked again, by
+  what re-runs any definition's users. Neither front end shows it
+  (`%template:`, `macros::template_check`, `k-template-check?`).
+- **Made by transcription**, the template's holes bound to their calls, so
+  that free names, renaming and types are as at a use; each call put
+  where the template has the hole, so an error says that place.
+- **A partly typed macro is refused**, not left unchecked, so that a typed
+  macro's check is never silently skipped.
+- **A left-out part's binder is named for its hole** (`%type-of-e`), not
+  numbered, so that a message about it says which hole wants a type.
+- **`macros-templates.fx`** holds the FX-26 side, on top of `macros.fx`,
+  which would have passed 1000 lines.
+- **Found on the way**: a template's `#u` was taken for a name of the top
+  level (both expanders); the FX-26 expander made `()` as an atom, not the
+  empty list the reader makes.

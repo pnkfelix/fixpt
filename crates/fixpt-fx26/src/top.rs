@@ -680,12 +680,13 @@ impl Checker {
             }
             // A macro defined, or each use of one expanded
             // (`crate::macros`): before anything else sees the form.
-            let Some(f) = self.macro_expanded(f)? else { continue };
-            self.note_load_def(&f);
-            if self.expand_generative(&f, &mut out)? {
-                continue;
+            for f in self.macro_expanded(f)? {
+                self.note_load_def(&f);
+                if self.expand_generative(&f, &mut out)? {
+                    continue;
+                }
+                self.expand_datatype(f, &mut out)?;
             }
-            self.expand_datatype(f, &mut out)?;
         }
         Ok(out)
     }
@@ -844,9 +845,11 @@ impl Checker {
         FxError::at(at, format!("`{}` is defined already: a macro may not take its name", interner.name(n)))
     }
 
-    /// `form`, a `(define-syntax …)`, defined, and none; or with the uses of
-    /// the macros defined in it expanded (`crate::macros`).
-    fn macro_expanded(&mut self, form: Syntax) -> R<Option<Syntax>> {
+    /// `form`, a `(define-syntax …)`, defined, and the checks of its
+    /// templates, once, there, expanded (`Macros::template_checks`); or
+    /// `form` with the uses of the macros defined in it expanded
+    /// (`crate::macros`).
+    fn macro_expanded(&mut self, form: Syntax) -> R<Vec<Syntax>> {
         let defines = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "define-syntax");
         if defines
             && let Some(n) = form.as_proper_list().and_then(|l| l.get(1)).and_then(|n| n.as_symbol())
@@ -857,9 +860,9 @@ impl Checker {
         let mut macros = std::mem::take(&mut self.macros);
         let mut interner = std::mem::take(&mut self.interner);
         let r = if defines {
-            macros.define(&form, &mut interner).map(|()| None)
+            macros.define(&form, &mut interner).and_then(|n| macros.template_checks(n, &mut interner)).and_then(|cs| cs.iter().map(|c| macros.expand(c, &mut interner)).collect())
         } else {
-            macros.expand(&form, &mut interner).map(Some)
+            macros.expand(&form, &mut interner).map(|f| vec![f])
         };
         self.macros = macros;
         self.interner = interner;

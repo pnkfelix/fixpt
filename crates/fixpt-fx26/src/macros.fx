@@ -27,8 +27,9 @@
         node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
         act-toplevel-type act-standard act-module act-module-type act-standard-type
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
+        node-hole s-typed
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars found levels
-              atms kids))
+              atms kids contracts holes))
 (import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
         imports-syntax? import-usage name-filter all-names listed? not-macros loaded-path
         file-syntax hidden-syntax hide-form? file-items names-shown defined-name rec-names
@@ -44,8 +45,8 @@
 ;; the pattern's variables is placed in the template where the signature
 ;; says what is in scope there, and a reference to a pattern's binder is
 ;; where no other pattern binder may shadow it.
-(define check-clause (->* (fails syn sty scopes) clause)
-  (lambda (fail c sig file)
+(define check-clause (->* (fails syn sty syns-a scopes) clause)
+  (lambda (fail c sig poly file)
     (let ((two (proper c)))
       (if (not (= (len two) 2))
           (begin (fail-at fail clause-usage c) (stub c))
@@ -55,8 +56,45 @@
                 (let* ((pattern (nth whole 1))
                        (ps (pattern-vars fail sig pattern))
                        (template (nth two 1)))
-                  (tuple pattern template (template-actions fail ps template file)))))))))
-(define stub (->* (syn) clause) (lambda (c) (tuple c c (the actions nil))))
+                  (tuple pattern template (template-actions fail ps template file) ps
+                         (contracts-of ps (binder-names poly) file)))))))))
+(define stub (->* (syn) clause)
+  (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil))))
+;; The names `poly`'s binders bind.
+(define binder-names (->* (syns-a) names)
+  (lambda (bs)
+    (cond ((null? bs) nil)
+          ((and (not (null? (proper (car bs)))) (syn-symbol? (car (proper (car bs)))))
+           (cons (syn-symbol (car (proper (car bs)))) (binder-names (cdr bs))))
+          (else (binder-names (cdr bs))))))
+;; Each typed hole's contract, its type read as a use reads the template's
+;; types; none where it names the macro's own binders, which no use can
+;; write.
+(define contracts-of (->* (pvars names scopes) contracts)
+  (lambda (ps binders file)
+    (if (null? ps)
+        nil
+        (let* ((n (extract (car ps) 1)) (info (extract (car ps) 2)) (h (extract info 4))
+               (rest (contracts-of (cdr ps) binders file)))
+          (if (or (null? h) (null? (extract (car h) 1)) (not (expr-kind? (extract info 1)))
+                  (names-any? (car (extract (car h) 1)) binders))
+              rest
+              (let* ((ty (car (extract (car h) 1))) (a (syn-start ty)) (b (syn-end ty))
+                     (m (cond ((null? file) "#%toplevel")
+                              ((and (syn-symbol? ty)
+                                    (not (name-in? (syn-symbol ty) (extract (car file) 3))))
+                               "#%fx")
+                              (else (symbol->string (extract (car file) 1))))))
+                (cons (tuple n (mk-list (list (mk-symbol "select" a b) (mk-symbol m a b) ty) a b))
+                      rest)))))))
+(define expr-kind? (->* (sty) bool)
+  (lambda (t) (= ((with types-module kind-of) t) 0)))
+;; Whether syntax `s` names one of `ns`.
+(define names-any? (->* (syn names) bool)
+  (lambda (s ns)
+    (cond ((syn-symbol? s) (name-in? (syn-symbol s) ns))
+          ((null? (split s)) #f)
+          (else (or (names-any? (car (split s)) ns) (names-any? (nth (split s) 1) ns))))))
 ;; The pattern, aligned with the signature: each variable's type and
 ;; declared environment.
 (define pattern-vars (->* (fails sty syn) pvars)
@@ -80,7 +118,8 @@
                   (pvars-of fail (cdr fs)
                             (append ps (the pvars (list (tuple n (tuple (node-core at)
                                                                         (extract (car fs) 2)
-                                                                        (extract (car fs) 3)))))))))
+                                                                        (extract (car fs) 3)
+                                                                        (node-hole at)))))))))
             (else y (pvars-of fail (cdr fs) ps)))))))
 ;; The template, an expression, aligned with the kernel's forms' signatures
 ;; and the macros', its pattern variables placed by the rules, and what is
@@ -104,8 +143,10 @@
             (k-pvar (n)
               (let* ((info (car (pvar-of n ps))) (name (symbol->string n))
                      ;; Anything with an expression in it, placed twice, runs
-                     ;; twice: placed once, unless its signature says `many`.
-                     (affine (and (not (extract info 3)) (affine-kind? (extract info 1)))))
+                     ;; twice: placed once, unless its signature says `many`,
+                     ;; or it is a typed hole of no effect, `pure`.
+                     (affine (and (not (extract info 3)) (not (pure-hole? (extract info 4)))
+                                  (affine-kind? (extract info 1)))))
                 (begin
                   (placed fail n info (node-core at) env s)
                   (if (and affine many)
@@ -131,6 +172,12 @@
                 (name-actions fail ps (cdr fs) file
                               (cons (tuple path (ref-action fail n b file s)) out) uses)))
             (else y (name-actions fail ps (cdr fs) file out uses)))))))
+;; Whether typed hole `h` (none or one) has its effect written `pure`.
+(define pure-hole? (->* (holes) bool)
+  (lambda (h)
+    (and (not (null? h)) (not (null? (extract (car h) 2)))
+         (syn-symbol? (car (extract (car h) 2)))
+         (string=? (syn-name (car (extract (car h) 2))) "pure"))))
 ;; Whether a pattern variable of type `t` has an expression in it: not a
 ;; binder, name, label, datum or type.
 (define affine-kind? (->* (sty) bool)
@@ -236,20 +283,38 @@
                     (begin (fail-at fail (string-append define-usage ": at least one clause") form)
                            (string->symbol ""))
                     (let* ((n (syn-symbol name))
-                           (sig (read-sty fail (nth items 2) nil nil))
+                           ;; `(poly (binder …) σ)`: the binders its typed holes
+                           ;; may name.
+                           (poly (signature-poly fail (nth items 2)))
+                           (sig (read-sty fail (extract poly 2) nil nil))
                            (before (get defined))
                            (undo (lambda ((m string) (a int) (b int))
                                    (begin (set defined before) (fail m a b)))))
                       (begin
-                        (set defined (cons (tuple n (tuple sig (the clauses nil))) before))
-                        (let ((cs (check-each undo (cdr (cdr (cdr items))) sig file)))
-                          (begin (set defined (cons (tuple n (tuple sig cs)) before)) n)))))))))))
-(define check-each (->* (fails syns-a sty scopes) clauses)
-  (lambda (fail cs sig file)
+                        (set defined (cons (tuple n (tuple sig (the clauses nil) (extract poly 1)))
+                                           before))
+                        (let ((cs (check-each undo (cdr (cdr (cdr items))) sig (extract poly 1)
+                                              file)))
+                          (begin
+                            (set defined (cons (tuple n (tuple sig cs (extract poly 1))) before))
+                            n)))))))))))
+;; A signature's `(poly ((name kind) …) σ)`: its binders and `σ`; else none
+;; and itself.
+(define signature-poly (->* (fails syn) (tupleof syns-a syn))
+  (lambda (fail s)
+    (let ((items (proper s)))
+      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "poly"))
+          (if (or (syn-nil? (nth items 1)) (not (null? (proper (nth items 1)))))
+              (tuple (proper (nth items 1)) (nth items 2))
+              (begin (fail-at fail "a signature's `(poly ((name kind) …) σ)`" (nth items 1))
+                     (tuple (the syns-a nil) s)))
+          (tuple (the syns-a nil) s)))))
+(define check-each (->* (fails syns-a sty syns-a scopes) clauses)
+  (lambda (fail cs sig poly file)
     (if (null? cs)
         nil
-        (let ((c (check-clause fail (car cs) sig file)))
-          (cons c (check-each fail (cdr cs) sig file))))))
+        (let ((c (check-clause fail (car cs) sig poly file)))
+          (cons c (check-each fail (cdr cs) sig poly file))))))
 
 ;;; ------------------------------------------------------------ the session
 
@@ -331,8 +396,12 @@
 (define source-base int 1125899906842624)
 (define sources (ref (arrayof (tupleof int int) rs) rs) (new (make-array 1024 (tuple 0 0))))
 (define nsources (ref int rs) (new 0))
-;; A new key, for template place `p`, of expansion `made`.
+;; A new key, for template place `p`, of expansion `made`; none in a
+;; template's check (`made` 0), whose places are the template's.
 (define source-key (->* (int int) int)
+  (lambda (p made)
+    (if (= made 0) p (new-source-key p made))))
+(define new-source-key (->* (int int) int)
   (lambda (p made)
     (let ((i (get nsources)))
       (begin
@@ -440,7 +509,8 @@
 (define list-at (->* (int int int syns-a syns-a) syn)
   (lambda (a b x xs t)
     (cond
-      ((and (null? t) (null? xs)) (atom '() a b x))
+      ;; `()`, as the reader reads it: a list of none.
+      ((and (null? t) (null? xs)) (lst nil '() a b x))
       ((null? t) (lst xs (syn-datums xs) a b x))
       ((syn-nil? (car t)) (list-at a b x xs nil))
       (else
@@ -557,7 +627,7 @@
                     (list (atom 'select a b made) (atom (string->symbol typed) a b made) ty) nil)))
         ((syn-symbol? t)
          (let* ((a (source-key ta made)) (b (source-key tb made)))
-           (transcribe-name t (syn-symbol t) a b act bs made)))
+           (transcribe-name c t (syn-symbol t) a b act bs made)))
         ((not (null? (list-items t)))
          (let* ((a (source-key ta made))
                 (xs (transcribe-items c (list-items t) path bs made))
@@ -588,11 +658,19 @@
         nil
         (cons (transcribe-at c (car xs) (append path (the addr (list #t))) bs made)
               (transcribe-items c (cdr xs) (append path (the addr (list #f))) bs made)))))
-(define transcribe-name (->* (syn symbol int int (listof action acyclic) binds int) syn)
-  (lambda (t n a b act bs made)
-    (let ((given (bound-of n bs)))
+(define transcribe-name
+  (->* (clause syn symbol int int (listof action acyclic) binds int) syn)
+  (lambda (c t n a b act bs made)
+    (let ((given (bound-of n bs)) (contract (contract-of n (extract c 5))))
       (if (not (null? given))
-          (car given)
+          ;; A typed hole's expression, held to its type; in a template's
+          ;; check, its call, where the template has it.
+          (cond ((get checking) (respanned (car given) a b made))
+                ((null? contract) (car given))
+                (else
+                 (let* ((g (car given)) (ga (syn-start g)) (gb (syn-end g)) (gx (syn-expansion g)))
+                   (list-at ga gb gx
+                            (list (atom 'the ga gb gx) (in-expansion (car contract) made) g) nil))))
           (if (null? act)
               (atom n a b made)
               (tagcase (car act)
@@ -622,6 +700,28 @@
     (cond ((null? fs) nil)
           (((with types-module addr=?) p (extract (car fs) 1)) (list (extract (car fs) 2)))
           (else (fresh-of p (cdr fs))))))
+;; Each typed hole's contract, by its pattern variable, in a list of one.
+(define contract-of (->* (symbol contracts) syns-a)
+  (lambda (n cs)
+    (cond ((null? cs) nil)
+          ((symbol=? n (extract (car cs) 1)) (list (extract (car cs) 2)))
+          (else (contract-of n (cdr cs))))))
+;; Whether a template is being transcribed for its check, its holes' calls
+;; in place of a use's expressions (`template-checks`).
+(define checking (ref bool rs) (new #f))
+;; `s`, each part at `a`..`b` of expansion `x`: a hole's call, where the
+;; template has the hole.
+(define respanned (->* (syn int int int) syn)
+  (lambda (s a b x)
+    (tagcase s
+      (lst (items d c e y) (lst (respanned-each items a b x) d a b x))
+      (dotted (items tail d c e y)
+        (dotted (respanned-each items a b x) (respanned tail a b x) d a b x))
+      (vec (items d c e y) (vec (respanned-each items a b x) d a b x))
+      (atom (d c e y) (atom d a b x)))))
+(define respanned-each (->* (syns-a int int int) syns-a)
+  (lambda (xs a b x)
+    (if (null? xs) nil (cons (respanned (car xs) a b x) (respanned-each (cdr xs) a b x)))))
 ;; `s`, each part of it at a key of its own for its place, in expansion
 ;; `made`.
 (define in-expansion (->* (syn int) syn)

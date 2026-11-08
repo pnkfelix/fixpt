@@ -27,7 +27,9 @@
         (type syns-a exp top param-list top-list presult names) (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
 ;; The expander (`macros.fx`), which each form goes through first.
-(define macros-module ((proj (load-module "fx26:macros.fx") rs re rm rc rp)))
+(define templates-module ((proj (load-module "fx26:macros-templates.fx") rs re rm rc rp)))
+(define macros-module (with templates-module macros-module))
+(import templates-module template-checks)
 (import macros-module expand define-macro defines-syntax? macros-at! macros-after! imports-syntax?
         import-file-macros note-load-def! later-macro-site globals! global-before? macro?)
 ;; `(define name type expression)` or `(define name expression)`; for a
@@ -206,9 +208,11 @@
         ;; Before each form, the hidden globals of the files it loads first
         ;; (`parse-loaded`), those its types name first (`type-loaded`).
         (let* ((written (car xs))
+               ;; A `define-syntax`: the checks of its templates, once, there.
                (made (cond ((defines-syntax? written)
-                            (begin (global-macro written) (define-macro pfail-at written nil)
-                                   (the top-list nil)))
+                            (begin (global-macro written)
+                                   (let ((n (define-macro pfail-at written nil)))
+                                     (parse-checks (template-checks pfail-at n)))))
                            ;; A file's macros, and the `include` of the rest.
                            ((imports-syntax? written)
                             (let ((inc (import-file-macros pfail-at written (get loaded))))
@@ -221,6 +225,12 @@
                (form (number-form t r (append-tops before guarded)))
                (rest (begin (macros-after! r) (parse-tops t settings (cdr xs)))))
           (append-tops form rest)))))
+;; Each of a macro's templates' checks, expanded and parsed.
+(define parse-checks (->* (syns-a) top-list)
+  (lambda (cs)
+    (if (null? cs)
+        nil
+        (append-tops (parse-made (expand pfail-at (car cs))) (parse-checks (cdr cs))))))
 ;; A `define-syntax` of a name a form before this parse defined as a
 ;; global: refused, where it is (`Checker::macro_expanded`, which knows the
 ;; globals checked; a program's own are refused where each is checked,

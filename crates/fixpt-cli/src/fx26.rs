@@ -119,6 +119,12 @@ fn show(session: &Fx26Session, out: &Outcome, show_code: bool) {
         }
     }
     print!("{}", out.printed);
+    // Not a macro's template's check, which the program does not name.
+    if let Top::Define { name, .. } = &out.top
+        && fixpt_fx26::macros::template_check(session.checker.interner.name(*name))
+    {
+        return;
+    }
     let found = report(&session.checker, &out.top);
     match &out.value {
         Ok(Some(v)) => println!("{v}{found}"),

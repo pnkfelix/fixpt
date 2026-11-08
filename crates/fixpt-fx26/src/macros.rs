@@ -16,6 +16,9 @@
 //!     | (mu v σ) | v | (union σ …)         recursion, alternatives
 //!     | (literal name)                     a name written as it is (`else`)
 //!     | (many σ)                           placed any number of times
+//!     | (expr #:type T #:effect E)         a typed hole: of type at most `T`
+//!     | (bvar #:type T)                      and effect at most `E`; a binder
+//!                                          of a `T` (either part left out)
 //! β ::= (rho (ℓ δ) …)                      a rib, {ℓ : δ, …}
 //!     | (cage ρ-or-(at ℓ) …)               ribs in order, innermost first; ℓ@γ
 //! δ ::= none | var | rib | env
@@ -54,7 +57,26 @@ pub(crate) enum STy {
     Mu(usize),
     /// What may be placed any number of times.
     Many(Rc<STy>),
+    /// An `expr` or `bvar` with its type, effect or both written: a typed
+    /// hole (`typed-macros.md`, "Proposed: typed holes").
+    Typed(Rc<STy>, Hole),
     Union(Vec<Rc<STy>>),
+}
+
+/// What a typed hole says: its type and its effect, each as written, if it
+/// is (left out, the macro is polymorphic in it).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Hole {
+    ty: Option<Syntax>,
+    effect: Option<Syntax>,
+}
+
+impl Hole {
+    /// Whether its effect is written `pure`, so that running it twice does
+    /// nothing twice.
+    fn pure(&self, interner: &Interner) -> bool {
+        self.effect.as_ref().and_then(|e| e.as_symbol()).is_some_and(|e| interner.name(e) == "pure")
+    }
 }
 
 /// What an annotation binds (Herman's `β`): a rib, or a ribcage.
@@ -87,6 +109,8 @@ pub(crate) enum Delta {
 #[derive(Debug)]
 struct Macro {
     sig: Rc<STy>,
+    /// The binders of its signature's `(poly (binder …) σ)`, if it has one.
+    poly: Vec<Syntax>,
     clauses: Vec<Clause>,
     /// The text it was read from, its templates' places in it.
     text: Option<std::sync::Arc<str>>,
@@ -99,6 +123,12 @@ struct Clause {
     pattern: Syntax,
     template: Syntax,
     actions: HashMap<Vec<bool>, Action>,
+    /// Its pattern's variables, in the order the pattern has them.
+    pvars: Vec<(Sym, PInfo)>,
+    /// Each typed hole's type, as a use reads it (`(select #%toplevel T)`),
+    /// which the use's expression is held to, `(the T e)`; none where the
+    /// type names the macro's `poly` binders, which no use can write.
+    contracts: HashMap<Sym, Syntax>,
 }
 
 /// What becomes of one of a template's parts: a name made fresh, one name
@@ -162,6 +192,9 @@ pub struct Macros {
     /// program is expanded before it is checked, so what is defined when a
     /// form is checked may be defined after it (`defined_before`).
     defined_at: HashMap<Sym, Span>,
+    /// Whether a template is being transcribed for its check, its holes'
+    /// calls in place of a use's expressions (`template_checks`).
+    checking: bool,
 }
 
 /// The kernel's forms a template may use, with their binding structure
@@ -202,6 +235,8 @@ struct Node {
     export: Option<(Bind, usize)>,
     /// Whether its part of the signature is `(many …)`.
     many: bool,
+    /// Its part's typed hole, if the signature types it.
+    hole: Option<Hole>,
     kids: Kids,
 }
 
@@ -241,11 +276,14 @@ enum Level {
 
 /// A pattern variable: its type, its kind (the type's annotations off), and
 /// its environment as the signature declares it.
+#[derive(Clone, Debug)]
 struct PInfo {
     core: Rc<STy>,
     declared: Vec<Level>,
     /// Whether it may be placed any number of times (`(many …)`).
     many: bool,
+    /// Its typed hole, if the signature types it.
+    hole: Option<Hole>,
 }
 
 /// Syntax aligned with syntax types, as a tree of `Node`s.
@@ -355,6 +393,12 @@ impl Macros {
                         STy::Union(ms)
                     }
                     (Some("many"), [_, body], None) => STy::Many(self.sty(body, interner, named, mus)?),
+                    // `(expr #:type T #:effect E)`, `(bvar #:type T)`: a list
+                    // whose second is a keyword, which no syntax type is.
+                    (Some(kind @ ("expr" | "bvar")), [_, k, ..], None) if matches!(k.datum, Datum::Keyword(_)) => {
+                        let hole = hole(&items[1..], kind == "expr", s, interner)?;
+                        STy::Typed(Rc::new(if kind == "expr" { STy::Expr } else { STy::Bvar }), hole)
+                    }
                     (Some("literal"), [_, n], None) => STy::Literal(n.as_symbol().ok_or_else(|| bad("`(literal name)`"))?),
                     _ => {
                         let rest = match (items.len(), tail) {
@@ -375,7 +419,7 @@ impl Macros {
     /// to what is under them (for overlap and fit).
     fn unfold<'a>(&'a self, t: &'a Rc<STy>) -> &'a Rc<STy> {
         match &**t {
-            STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) => self.unfold(b),
+            STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) | STy::Typed(b, _) => self.unfold(b),
             STy::Mu(id) => self.unfold(&self.mus[*id]),
             _ => t,
         }
@@ -423,17 +467,113 @@ impl Macros {
             Label => matches!(s.datum, Datum::Keyword(_)) || (mode == Mode::Use && s.as_symbol().is_some()),
             Expr => !s.as_symbol().is_some_and(|n| reserved(interner.name(n))) && !matches!(s.datum, Datum::Nil),
             Data | Type => true,
-            Import(..) | Export(..) | Mu(_) | Many(_) => unreachable!("unfolded"),
+            Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
     }
 
     /// `(define-syntax name σ ((_ . pattern) template) …)`: checked, and
     /// defined. A template's free name is the top level's where the macro
     /// is used (`Action::Toplevel`).
-    pub fn define(&mut self, form: &Syntax, interner: &mut Interner) -> R<()> {
+    pub fn define(&mut self, form: &Syntax, interner: &mut Interner) -> R<Sym> {
         let name = self.define_in(form, interner, None)?;
         self.defined_at.insert(name, form.span);
-        Ok(())
+        Ok(name)
+    }
+
+    /// The checks of macro `name`'s templates, once, where it is defined
+    /// (`typed-macros.md`, "Proposed: typed holes"): for each clause, if
+    /// its `expr` parts are typed holes, a hidden definition of the template
+    /// as a procedure over its holes, each hole a parameter called where the
+    /// template places it, `(subr E (U …) T)`, given the binders of the
+    /// template's in its scope; its binders' types the `bvar`s', each part
+    /// left out a binder of the procedure's `plambda`. Checked as any
+    /// definition is, by both checkers; none if no part is typed.
+    pub fn template_checks(&mut self, name: Sym, interner: &mut Interner) -> R<Vec<Syntax>> {
+        let m = self.defined[&name].clone();
+        let mut out = Vec::new();
+        for c in &m.clauses {
+            if c.pvars.iter().all(|(_, p)| p.hole.is_none()) {
+                continue;
+            }
+            out.push(self.template_check(name, &m, c, interner)?);
+        }
+        Ok(out)
+    }
+
+    fn template_check(&mut self, name: Sym, m: &Macro, c: &Clause, interner: &mut Interner) -> R<Syntax> {
+        let at = c.template.span;
+        let shown = |n: Sym, i: &Interner| i.name(n).to_string();
+        let place = |n: Sym| find_symbol(&c.pattern, n).map_or(c.pattern.span, |s| s.span);
+        let sym = |s: &str, i: &mut Interner| Syntax::symbol(at, i.intern(s));
+        let mut binders = m.poly.clone();
+        let mut binds: HashMap<Sym, Syntax> = HashMap::new();
+        // Each binder, a fresh name for the holes in its scope to be given.
+        for (n, p) in &c.pvars {
+            match &*p.core {
+                STy::Expr => {}
+                STy::Bvar => {
+                    self.fresh += 1;
+                    let f = format!("%{}:{}", shown(*n, interner), self.fresh);
+                    binds.insert(*n, sym(&f, interner));
+                }
+                _ => {
+                    return Err(FxError::at(place(*n), format!("`{}` is not an `expr` or a `bvar`: a macro whose parts are typed is checked once, of those alone, not yet", shown(*n, interner))));
+                }
+            }
+        }
+        let mut params = Vec::new();
+        for (n, p) in &c.pvars {
+            if !matches!(&*p.core, STy::Expr) {
+                continue;
+            }
+            let Some(h) = &p.hole else {
+                return Err(FxError::at(place(*n), format!("`{}` has no type or effect, and another part of this macro does: a macro whose parts are typed is checked once, each `expr` part typed", shown(*n, interner))));
+            };
+            // The binders in its scope, outermost first, each a typed `bvar`.
+            let mut scope = Vec::new();
+            for level in p.declared.iter().rev() {
+                let Level::Rib(atoms) = level else {
+                    return Err(FxError::at(place(*n), format!("`{}` is in the scope of a part's ribcage: not yet where a macro's parts are typed", shown(*n, interner))));
+                };
+                for a in atoms {
+                    let Atom::Var(b) = a else {
+                        return Err(FxError::at(place(*n), format!("`{}` is in the scope of the binders a part exports: not yet where a macro's parts are typed", shown(*n, interner))));
+                    };
+                    let ty = c.pvars.iter().find(|(x, _)| x == b).and_then(|(_, q)| q.hole.as_ref()?.ty.clone());
+                    let Some(ty) = ty else {
+                        return Err(FxError::at(place(*b), format!("`{}` binds a variable `{}` is in the scope of: its type is written, `(bvar #:type T)`, where a macro's parts are typed", shown(*b, interner), shown(*n, interner))));
+                    };
+                    scope.push((*b, ty));
+                }
+            }
+            // A part left out, a binder of the procedure's, named for the
+            // hole (`%type-of-e`), what a message about it says.
+            let mut part = |given: &Option<Syntax>, kind: &str, i: &mut Interner| match given {
+                Some(s) => s.clone(),
+                None => {
+                    let v = Syntax::symbol(at, i.intern(&format!("%{kind}-of-{}", shown(*n, i))));
+                    binders.push(Syntax::list(at, vec![v.clone(), Syntax::symbol(at, i.intern(kind))]));
+                    v
+                }
+            };
+            let ty = part(&h.ty, "type", interner);
+            let effect = part(&h.effect, "effect", interner);
+            self.fresh += 1;
+            let hole = sym(&format!("%h:{}:{}", shown(*n, interner), self.fresh), interner);
+            let args: Vec<Syntax> = scope.iter().map(|(_, t)| t.clone()).collect();
+            let subr = Syntax::list(at, vec![sym("subr", interner), effect, list_of(at, args, None), ty]);
+            params.push(Syntax::list(at, vec![hole.clone(), subr]));
+            let call = std::iter::once(hole).chain(scope.iter().map(|(b, _)| binds[b].clone())).collect();
+            binds.insert(*n, Syntax::list(at, call));
+        }
+        self.checking = true;
+        let body = self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut HashMap::new(), 0, interner);
+        self.checking = false;
+        let lambda = Syntax::list(at, vec![sym("lambda", interner), list_of(at, params, None), body]);
+        let made = if binders.is_empty() { lambda } else { Syntax::list(at, vec![sym("plambda", interner), Syntax::list(at, binders), lambda]) };
+        self.fresh += 1;
+        let hidden = sym(&format!("%template:{}:{}", shown(name, interner), self.fresh), interner);
+        Ok(Syntax::list(at, vec![sym("define", interner), hidden, made]))
     }
 
     /// A file's macros, `forms` its `define-syntax`es (each with whether it
@@ -448,7 +588,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), defined_at: HashMap::new() };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), defined_at: HashMap::new(), checking: false };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -490,12 +630,20 @@ impl Macros {
         if clauses.is_empty() {
             return Err(FxError::at(form.span, format!("{usage}: at least one clause")));
         }
+        // `(poly (binder …) σ)`: the binders its typed holes may name.
+        let (poly, sig) = match sig.as_proper_list() {
+            Some([h, bs, body]) if h.as_symbol().is_some_and(|h| interner.name(h) == "poly") => {
+                let bs = bs.as_proper_list().ok_or_else(|| FxError::at(bs.span, "a signature's `(poly ((name kind) …) σ)`"))?;
+                (bs.to_vec(), body)
+            }
+            _ => (Vec::new(), sig),
+        };
         let sig = self.sty(sig, interner, &HashMap::new(), &mut Vec::new())?;
         // Defined first, so that a template may use the macro itself.
-        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), clauses: Vec::new(), text: None }));
+        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), poly: poly.clone(), clauses: Vec::new(), text: None }));
         let mut checked = Vec::new();
         for c in clauses {
-            match self.clause(c, &sig, interner, file) {
+            match self.clause(c, &sig, &poly, interner, file) {
                 Ok(c) => checked.push(c),
                 Err(e) => {
                     match before {
@@ -507,7 +655,7 @@ impl Macros {
             }
         }
         let text = self.reading.clone();
-        self.defined.insert(name, Rc::new(Macro { sig, clauses: checked, text }));
+        self.defined.insert(name, Rc::new(Macro { sig, poly, clauses: checked, text }));
         Ok(name)
     }
 
@@ -516,7 +664,7 @@ impl Macros {
     /// placed in the template where the signature says what is in scope
     /// there, and a reference to a pattern's binder is where no other
     /// pattern binder may shadow it.
-    fn clause(&self, c: &Syntax, sig: &Rc<STy>, interner: &Interner, file: Option<&FileScope>) -> R<Clause> {
+    fn clause(&self, c: &Syntax, sig: &Rc<STy>, poly: &[Syntax], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
         let usage = "a clause is `((_ . pattern) template)`";
         let [pattern, template] = c.as_proper_list().ok_or_else(|| FxError::at(c.span, usage))? else {
             return Err(FxError::at(c.span, usage));
@@ -532,9 +680,11 @@ impl Macros {
         let mut found = Vec::new();
         p.walk(root, &Vec::new(), false, &mut found)?;
         let mut pvars: HashMap<Sym, PInfo> = HashMap::new();
+        let mut order = Vec::new();
         for (at, env, many) in found {
             let Kids::PVar(n) = p.nodes[at].kids else { continue };
-            if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env, many }).is_some() {
+            order.push(n);
+            if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env, many, hole: p.nodes[at].hole.clone() }).is_some() {
                 return Err(FxError::at(p.nodes[at].syn.span, format!("`{}` is a pattern variable twice", interner.name(n))));
             }
         }
@@ -558,7 +708,10 @@ impl Macros {
                     // twice: placed once, unless its signature says `many`.
                     // Where another macro's says `many`, it may be placed
                     // more than once there.
-                    let affine = !info.many && !matches!(&*info.core, STy::Bvar | STy::Id | STy::Label | STy::Data | STy::Type);
+                    // A typed hole of no effect, `pure`, may be placed any
+                    // number of times: running it twice does nothing twice.
+                    let pure = info.hole.as_ref().is_some_and(|h| h.pure(interner));
+                    let affine = !info.many && !pure && !matches!(&*info.core, STy::Bvar | STy::Id | STy::Label | STy::Data | STy::Type);
                     if affine && many {
                         return Err(FxError::at(span, format!("`{name}` is placed where it may be placed more than once (a `many` part), and an expression in it may do something each time it runs: its signature says `(many …)` if it may")));
                     }
@@ -622,7 +775,27 @@ impl Macros {
                 actions.insert(node.path.clone(), Action::MacroHead(*i));
             }
         }
-        Ok(Clause { pattern, template: template.clone(), actions })
+        // Each typed hole's contract, its type read as a use reads the
+        // template's types; none where it names the macro's own binders.
+        let binders: Vec<Sym> = poly.iter().filter_map(|b| b.as_proper_list()?.first()?.as_symbol()).collect();
+        let mut contracts = HashMap::new();
+        for (n, info) in &pvars {
+            let Some(ty) = info.hole.as_ref().and_then(|h| h.ty.clone()) else { continue };
+            if !matches!(&*info.core, STy::Expr) || names_one_of(&ty, &binders) {
+                continue;
+            }
+            let module = match file {
+                None => interner.intern("#%toplevel"),
+                Some(f) => match ty.as_symbol() {
+                    Some(n) if !f.types.contains(&n) => interner.intern("#%fx"),
+                    _ => f.shared,
+                },
+            };
+            let select = interner.intern("select");
+            contracts.insert(*n, Syntax::list(ty.span, vec![Syntax::symbol(ty.span, select), Syntax::symbol(ty.span, module), ty]));
+        }
+        let pvars = order.into_iter().map(|n| (n, pvars[&n].clone())).collect();
+        Ok(Clause { pattern, template: template.clone(), actions, pvars, contracts })
     }
 
     /// `form` with each use of a macro in it expanded, as each expands,
@@ -733,7 +906,15 @@ impl Macros {
         match &t.datum {
             Datum::Symbol(n) => {
                 if let Some(b) = binds.get(n) {
-                    return b.clone();
+                    // A typed hole's expression, held to its type; in a
+                    // template's check, its call, where the template has it.
+                    if self.checking {
+                        return respanned(b, at);
+                    }
+                    return match c.contracts.get(n) {
+                        Some(ty) => Syntax::list(b.span, vec![Syntax::symbol(b.span, interner.intern("the")), in_expansion(ty, made), b.clone()]),
+                        None => b.clone(),
+                    };
                 }
                 match c.actions.get(&*path) {
                     Some(Action::Rename(binder)) => {
@@ -795,7 +976,7 @@ impl Aligner<'_> {
     /// addresses are from, if not itself.
     fn align(&mut self, t: &Rc<STy>, s: &Syntax, root: Option<usize>, path: Vec<bool>) -> R<usize> {
         let at = self.nodes.len();
-        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, kids: Kids::Other });
+        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, kids: Kids::Other });
         self.fill(at, t, s, root.unwrap_or(at))?;
         Ok(at)
     }
@@ -809,6 +990,10 @@ impl Aligner<'_> {
             }
             STy::Many(body) => {
                 self.nodes[at].many = true;
+                return self.fill(at, body, s, root);
+            }
+            STy::Typed(body, h) => {
+                self.nodes[at].hole = Some(h.clone());
                 return self.fill(at, body, s, root);
             }
             STy::Export(body, b) => {
@@ -908,6 +1093,8 @@ impl Aligner<'_> {
             }
             STy::Expr => match (&s.datum, self.mode) {
                 (Datum::Symbol(n), _) if reserved(self.name(*n)) => Err(fail(format!("`{}` is a form's name, not an expression", self.name(*n)))),
+                // `#u`, unit: a literal, which the parsers read as a name.
+                (Datum::Symbol(n), _) if self.name(*n) == "#u" => Ok(()),
                 (Datum::Symbol(n), Mode::Template) => {
                     self.nodes[at].kids = Kids::Ref(*n);
                     Ok(())
@@ -916,7 +1103,7 @@ impl Aligner<'_> {
                 (Datum::Nil, _) => Err(fail("`()` is not an expression".into())),
                 _ => Ok(()),
             },
-            STy::Import(..) | STy::Export(..) | STy::Many(_) => unreachable!("taken off"),
+            STy::Import(..) | STy::Export(..) | STy::Many(_) | STy::Typed(..) => unreachable!("taken off"),
         }
     }
 
@@ -1108,8 +1295,8 @@ impl Macros {
         assumed.insert(key);
         match (&**a, &**b) {
             (Import(x, p), Import(y, q)) | (Export(x, p), Export(y, q)) => p == q && self.sub(x, y, assumed),
-            (Many(x), _) => self.sub(x, b, assumed),
-            (_, Many(y)) => self.sub(a, y, assumed),
+            (Many(x), _) | (Typed(x, _), _) => self.sub(x, b, assumed),
+            (_, Many(y)) | (_, Typed(y, _)) => self.sub(a, y, assumed),
             (Mu(i), _) => self.sub(&self.mus[*i], b, assumed),
             (_, Mu(j)) => self.sub(a, &self.mus[*j], assumed),
             (Union(ms), _) => ms.iter().all(|m| self.sub(m, b, assumed)),
@@ -1179,6 +1366,29 @@ fn bind(b: &Syntax, interner: &Interner) -> R<Bind> {
     }
 }
 
+/// A typed hole's keywords and what each says, `#:type T` and, of an
+/// `expr`, `#:effect E`, each once.
+fn hole(parts: &[Syntax], expr: bool, s: &Syntax, interner: &Interner) -> R<Hole> {
+    let usage = if expr { "`(expr #:type T #:effect E)`, either left out" } else { "`(bvar #:type T)`" };
+    let mut h = Hole { ty: None, effect: None };
+    let mut rest = parts;
+    while let [k, v, more @ ..] = rest {
+        let slot = match &k.datum {
+            Datum::Keyword(w) if interner.name(*w) == "type" => &mut h.ty,
+            Datum::Keyword(w) if expr && interner.name(*w) == "effect" => &mut h.effect,
+            _ => return Err(FxError::at(k.span, format!("a syntax type: {usage}"))),
+        };
+        if slot.replace(v.clone()).is_some() {
+            return Err(FxError::at(k.span, format!("a syntax type: {usage}, each once")));
+        }
+        rest = more;
+    }
+    if !rest.is_empty() {
+        return Err(FxError::at(s.span, format!("a syntax type: {usage}")));
+    }
+    Ok(h)
+}
+
 /// An address, `A`s and `D`s read right to left: its steps, first first.
 fn addr(a: &Syntax, interner: &Interner) -> R<Addr> {
     let name = a.as_symbol().map(|a| interner.name(a)).filter(|n| !n.is_empty() && n.chars().all(|c| c == 'A' || c == 'D'));
@@ -1192,7 +1402,7 @@ fn addr(a: &Syntax, interner: &Interner) -> R<Addr> {
 fn guarded(t: &STy, id: usize) -> bool {
     match t {
         STy::Mu(j) => *j != id,
-        STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) => guarded(b, id),
+        STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) | STy::Typed(b, _) => guarded(b, id),
         STy::Union(ms) => ms.iter().all(|m| guarded(m, id)),
         _ => true,
     }
@@ -1249,6 +1459,39 @@ fn matches(p: &Syntax, s: &Syntax, binds: &mut HashMap<Sym, Syntax>, interner: &
             _ => false,
         },
         other => &s.datum == other,
+    }
+}
+
+/// Whether `name` is a macro's template's check (`template_checks`), which
+/// no program names, so that nothing shows it.
+pub fn template_check(name: &str) -> bool {
+    name.starts_with("%template:")
+}
+
+/// Name `n` where `s` writes it, the first.
+fn find_symbol(s: &Syntax, n: Sym) -> Option<&Syntax> {
+    match &s.datum {
+        Datum::Symbol(m) if *m == n => Some(s),
+        Datum::List { items, tail } => items.iter().chain(tail.as_deref()).find_map(|x| find_symbol(x, n)),
+        _ => None,
+    }
+}
+
+/// Whether syntax `s` names one of `names`.
+fn names_one_of(s: &Syntax, names: &[Sym]) -> bool {
+    match &s.datum {
+        Datum::Symbol(n) => names.contains(n),
+        Datum::List { items, tail } => items.iter().chain(tail.as_deref()).any(|x| names_one_of(x, names)),
+        _ => false,
+    }
+}
+
+/// `s` at `at`, the place its parts were made for (a hole's call, where the
+/// template has the hole).
+fn respanned(s: &Syntax, at: Span) -> Syntax {
+    match &s.datum {
+        Datum::List { items, tail } => Syntax::new(at, Datum::List { items: items.iter().map(|x| respanned(x, at)).collect(), tail: tail.as_ref().map(|x| Box::new(respanned(x, at))) }),
+        d => Syntax::new(at, d.clone()),
     }
 }
 

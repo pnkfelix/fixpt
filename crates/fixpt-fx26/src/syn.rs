@@ -557,8 +557,9 @@ pub fn check_with_fx26_checker(scheme: &mut Session, standard: Handle, file: Fil
             let tag = r.sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default();
             let p = r.sum_payload().expect("a sum");
             if tag == "k-ok" {
+                // Not the lines of what shows none (`k-define-line`).
                 let lines = p.product_field(1).and_then(|l| l.list()).unwrap_or_default();
-                Ok(lines.into_iter().map(|l| l.string().unwrap_or_default()).collect())
+                Ok(lines.into_iter().map(|l| l.string().unwrap_or_default()).filter(|l| !l.is_empty()).collect())
             } else {
                 let message = p.product_field(1).and_then(|m| m.string()).unwrap_or_default();
                 Err((message, p.product_field(2).and_then(|x| x.fixnum()).unwrap_or(0), p.product_field(3).and_then(|x| x.fixnum()).unwrap_or(0)))

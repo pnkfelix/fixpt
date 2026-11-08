@@ -24,6 +24,9 @@ pub fn check_with_rust_checker(c: &mut Checker, text: &str) -> Checked26 {
         for (top, _) in c.top_defining(f)?.run {
             match top {
                 // Not named by its own module's descriptions (`print_self`).
+                // Not a macro's template's check, which the program does
+                // not name (`Macros::template_checks`).
+                Top::Define { name, .. } if crate::macros::template_check(c.interner.name(name)) => {}
                 Top::Define { name, ty, effect, .. } => {
                     c.print_self.set(Some(name));
                     out.push(format!("define {} : {} ! {}", c.interner.name(name), c.show_ty(ty), c.show_effect(&effect)));

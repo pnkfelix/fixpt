@@ -268,14 +268,21 @@
 ;; modules is most of the cost of checking a front end of them, which the
 ;; compile paths never read (`check-lines!`).
 (define k-show-lines (ref bool @t) (new #t))
+;; Whether `name` is a macro's template's check (`Macros::template_checks`).
+(define k-template-check? (->* (symbol) bool)
+  (lambda (name)
+    (let ((s (symbol->string name)))
+      (and (> (string-length s) 10) (string=? (substring s 0 10) "%template:")))))
 ;; The line for a form of type `t` and effect `e`; empty, if none are made.
 (define k-line (->* (int k-eff) string)
   (lambda (t e)
     (if (get k-show-lines) (k-cat3 (k-show-ty t) " ! " (k-show-effect e)) "")))
-;; The line for a definition of `name`, of type `t` and effect `e`.
+;; The line for a definition of `name`, of type `t` and effect `e`; none for
+;; a macro's template's check (`%template:`), which the program does not
+;; name.
 (define k-define-line (->* (symbol int k-eff) string)
   (lambda (name t e)
-    (if (get k-show-lines)
+    (if (and (get k-show-lines) (not (k-template-check? name)))
         ;; Not named by its own module's descriptions (`k-print-self`).
         (let* ((self (k-print-self! name)) (line (k-line t e)) (none (k-print-self! '||)))
           (k-cat4 "define " (symbol->string name) " : " line))

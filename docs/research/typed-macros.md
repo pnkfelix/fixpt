@@ -768,43 +768,52 @@ The user's design, the reasons in the conversation that led to it:
   - a file's macro may not take the name of a macro defined already.
   Tests: `crates/fixpt-cli/tests/import_with_syntax.rs`, on four machines.
 
-## Proposed: typed holes (2026-11-07, not decided)
+## Typed holes (2026-11-07, built; what they are for, open)
 
-The next step after the port (item 7 of the table above: "well-typed in,
-well-typed out"), written for the user to look at before any code.
+The user's design, the step after the port (item 7 of the table above).
 
-1. **Signatures.** `(expr T E)`, an expression of type at most `T` and
-   effect at most `E`; `(bvar T)`, a binder whose variable has type `T`; a
-   signature in a `(poly ((t type) (e effect)) σ)`, so that `T` and `E`
-   may be the macro's own binders. Plain `expr` and `bvar` mean what they
-   mean now.
-2. **A template checked once, where it is defined, as a procedure over
-   its holes.** A `define-syntax` whose holes are all typed also makes a
-   hidden definition, which the checkers check where the `define-syntax`
-   is: the template as a procedure, each hole a parameter. A hole
-   `(expr T E)` is a thunk, `(subr E () T)`, placed as `(e)`, so that its
-   effect counts each time it is run; one under the template's binder of
-   a `(bvar U)` (`(in (expr T E) x)`) takes that variable, `(subr E (U)
-   T)`, placed as `(e x)`. No new checker: both check ordinary code, and
-   an error in a template is said once, at its definition. The macro's
-   result type and effect are that procedure's result's, or what the
-   signature declares, checked against it.
-3. **Uses.** Each argument held to its hole's declared type in the
-   expansion itself, a typed hole transcribed as `(the T e)`, so that the
-   checker checks the contract (an effect's bound: a form to add, or left
-   to the expansion's check). Expansions are still checked as now, so
-   soundness rests on nothing new; the definition's check gives early
-   errors and the contract, and a disagreement between the two is a bug
-   in it.
-4. **Duplication by effect.** A hole declared `pure` may be placed any
-   number of times without `(many …)`; an effectful one placed twice is
-   refused unless its signature says `(many …)`; an untyped one is affine,
-   as now.
-5. **Open.** A template's free names are checked at their types where
-   the macro is defined: a later redefinition that changes one would have
-   the macro checked again, as the definitions that use a global are run
-   again. Whether an effect's bound gets a form of its own. Each step in
-   both front ends, the Rust one first, `tests/macros_both.rs` extended.
+- **Written** with keywords, each part optional (the user's choice):
+  `(expr #:type T #:effect E)`, `(bvar #:type T)`, in a signature that may
+  be `(poly ((t type) (e effect)) σ)`. A part left out is a binder of the
+  macro's, named for its hole (`%type-of-e`), so that a template that
+  only moves an expression about needs nothing written, and one that
+  depends on its type says which hole wants it. Plain `expr` and `bvar`
+  are untyped, as before. (`(expr T E)` was refused: a list of three
+  syntax types already means three operands.)
+- **A template checked once, where it is defined** (the user: "a great way
+  to go"): for each clause whose parts are typed, a hidden definition,
+  `%template:name:k`, which neither front end shows, of the template as a
+  procedure over its holes, each a parameter `(subr E (U …) T)` called
+  where the template places it, given the template's binders in its scope.
+  Made by transcribing the template as a use is, its holes' calls in place
+  of a use's expressions (`template_checks`, `macros-templates.fx`); both
+  checkers check it as any definition, and a redefinition of a global it
+  uses has it checked again, as any definition that uses one.
+- **Each use's expression held to its hole's type**, `(the (select
+  #%toplevel T) e)` (none where `T` names the macro's own binders).
+- **A hole of no effect, `pure`, may be placed any number of times**; one
+  whose effect is not, only once, unless its signature says `(many …)`.
+- **Refused, not skipped**: a macro some of whose `expr` parts are typed
+  and some not; a typed macro's part that is not an `expr` or a `bvar`; a
+  typed hole in an untyped binder's scope, or in a ribcage's or a part's
+  exported rib's.
+- **Expansions are still checked**, as a safety net.
+- **Found, by looking for it**: the template check refuses a macro that
+  places a hole where `letrec` wants a lambda, though each use passing one
+  is fine (the hole is a call in the check). The user's reading: what goes
+  in a hole should follow what its place requires, a syntax type for it
+  (`lambda`, a narrower `expr`) and a stand-in for each (a `lambda` hole
+  as a lambda calling its procedure).
+- **Open (the user's question)**: whether the annotations promise that a
+  typed macro's expansions need no check (then the template check is a
+  type system, its false refusals its price, and macros in module types,
+  item 10, become possible), or only give early errors where something is
+  certainly wrong (then a failed template check could be no error). The
+  proposal: two tiers, untyped macros promising nothing and checked at
+  each use, typed ones a static guarantee, their expansions checked until
+  it is trusted.
+- Tests: `tests/programs/macros/typed-*.fx`, both front ends
+  (`tests/macros_both.rs`).
 
 ## Questions for the user
 
