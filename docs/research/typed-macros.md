@@ -406,7 +406,7 @@ would be met:
 | 6 | The macro environment in the checker's marks and rollback (`try_top`, `rollback`) | the REPL tries forms and leaves nothing behind | prototype |
 | 7 | `expr` applied to a type and an effect, `(expr T E)`, `(bvar T)`, and templates checked with typed holes | well-typed in, well-typed out; duplication by effect | second step |
 | 8 | A binder type for each sort, and scopes in each namespace | macros that bind type variables, regions, places | second step |
-| 9 | A form type for definitions, `defn`, exporting to the top level or a module | `define-command`; most macros a program wants | third step |
+| 9 | A form type for definitions, `defn`, exporting to the top level or a module | `define-command`; most macros a program wants | third step; built at the top level, 2026-11-07 |
 | 10 | Macro types as module members, generative, in `.fasl`s and `ty_digest` | Bawden's macros in modules | later |
 | 11 | Transformers written in FX-26, ordinary procedures over syntax types: `expr` made only by templates, the effect rule for running at check time | procedural macros | later |
 
@@ -822,6 +822,52 @@ The user's design, the step after the port (item 7 of the table above).
   checked once and runs.
 - Tests: `tests/programs/macros/typed-*.fx`, both front ends
   (`tests/macros_both.rs`).
+
+## Macros that make definitions (2026-11-07, built)
+
+Item 9, the user's order after typed holes; the design agreed before it
+was built (the user: hygiene "largely consistent with my mental model …
+circa R5RS").
+
+- **Written** `(define-syntax name (-> σ defn) clause …)`; `(-> σ expr)`
+  and a plain `σ` make an expression, as before.
+- **A template is definitions**: the kernel's `definition`s,
+  `macros-kernel.fx`, each exporting what it defines, with its scopes as
+  the checkers have them: `(define x e)`, `e` not in `x`'s scope; `(define
+  x T e)` and `(define* x T lambda)`, the initializer in it (a lambda may
+  call itself; a reference from another initializer is the checker's to
+  refuse); a `define-rec` group, each lambda in the whole group's; a
+  `begin` of definitions, Herman's `let*` clauses, each in the scope of
+  those before it, a ribcage. The address `()`, Herman's `ε`, names the
+  part an annotation is on (`define-rec`'s group, its own import). A use of
+  another such macro is a definition too, which exports nothing the
+  template sees: its signature says nothing of what it defines.
+- **Hygiene, Herman's exports**: a name a use gives, a `bvar` part, is
+  defined under that name, the program's; one the template writes is made
+  fresh, as its other binders are, so nothing outside can name it, and
+  each use has its own (`%count:1`, `%count:2`). A reference the template
+  makes to a use's name is held to the shadow restriction, so a second
+  definition's expression in the scope of the first's name says so in its
+  signature: `(bvar expr bvar (import expr (rho (A var))))`.
+- **Where**: at the top level alone (`Macros::expand_top`, `expand-top`):
+  a use is the definitions it makes, in order, a `begin` of them spliced,
+  each a form of its own at the use's place, as a top-level `include`'s
+  forms are. Anywhere else, in a program or a template, refused: `` `m`
+  makes definitions, which are made at the top level ``; so is a kernel
+  definition in an expression's place.
+- **The first tier only**: typed parts in such a macro are refused, "not
+  yet", never ignored; each use's definitions are checked where they are.
+- **Not yet**: definitions of types and effects (a template's type binder
+  would be made fresh, and the types naming it are opaque to the
+  expander: binders of types, item 8); `defn` as a part a use gives;
+  names a template makes from a use's (`make-point` of `point`); uses in
+  a module's items.
+- **Found on the way**: a template's `(->* (T …) R)`, a definition's type
+  and no type, was read through `(select #%toplevel …)` whole, which hid
+  it; each of its types is read so now (`selected`), `letrec`'s too.
+- Tests: `tests/programs/macros/defn-*.fx`, both front ends; a file's,
+  `fixpt-cli/tests/programs/import-with-syntax/main-defn.fx`; the REPL,
+  `fixpt-cli/tests/repl_macros.rs`.
 
 ## Questions for the user
 

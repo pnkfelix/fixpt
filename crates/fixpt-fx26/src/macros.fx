@@ -21,10 +21,10 @@
         (type syns-a names loaded-file) (effect parses))
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
-(import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr
+(import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn
         (type fails addr sty))
-(import align-module defined macro-of macro? nodes-reset! align walk placed node-at node-syn
-        node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
+(import align-module defined macro-of macro? makes-defns? nodes-reset! align walk placed node-at
+        node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
         act-toplevel-type act-standard act-module act-module-type act-standard-type
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed
@@ -45,8 +45,8 @@
 ;; the pattern's variables is placed in the template where the signature
 ;; says what is in scope there, and a reference to a pattern's binder is
 ;; where no other pattern binder may shadow it.
-(define check-clause (->* (fails syn sty syns-a scopes) clause)
-  (lambda (fail c sig poly file)
+(define check-clause (->* (fails syn sty bool syns-a scopes) clause)
+  (lambda (fail c sig defn poly file)
     (let ((two (proper c)))
       (if (not (= (len two) 2))
           (begin (fail-at fail clause-usage c) (stub c))
@@ -54,9 +54,9 @@
             (if (null? whole)
                 (begin (fail-at fail clause-usage (car two)) (stub c))
                 (let* ((pattern (nth whole 1))
-                       (ps (pattern-vars fail sig pattern))
+                       (ps (pattern-vars fail sig pattern defn))
                        (template (nth two 1)))
-                  (tuple pattern template (template-actions fail ps template file) ps
+                  (tuple pattern template (template-actions fail ps template defn file) ps
                          (contracts-of ps (binder-names poly) file)))))))))
 (define stub (->* (syn) clause)
   (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil))))
@@ -96,15 +96,16 @@
           ((null? (split s)) #f)
           (else (or (names-any? (car (split s)) ns) (names-any? (nth (split s) 1) ns))))))
 ;; The pattern, aligned with the signature: each variable's type and
-;; declared environment.
-(define pattern-vars (->* (fails sty syn) pvars)
-  (lambda (fail sig pattern)
+;; declared environment. A macro that makes definitions (`defn`) has no
+;; typed parts: what each use defines is checked where it is.
+(define pattern-vars (->* (fails sty syn bool) pvars)
+  (lambda (fail sig pattern defn)
     (begin
       (nodes-reset!)
       (let ((root (align fail 0 (the pvars nil) sig pattern -1 nil)))
-        (pvars-of fail (walk fail root nil #f) nil)))))
-(define pvars-of (->* (fails found pvars) pvars)
-  (lambda (fail fs ps)
+        (pvars-of fail (walk fail root nil #f) nil defn)))))
+(define pvars-of (->* (fails found pvars bool) pvars)
+  (lambda (fail fs ps defn)
     (if (null? fs)
         ps
         (let ((at (extract (car fs) 1)))
@@ -115,20 +116,28 @@
                                                       "variable twice")
                                   (node-syn at))
                          ps)
-                  (pvars-of fail (cdr fs)
-                            (append ps (the pvars (list (tuple n (tuple (node-core at)
-                                                                        (extract (car fs) 2)
-                                                                        (extract (car fs) 3)
-                                                                        (node-hole at)))))))))
-            (else y (pvars-of fail (cdr fs) ps)))))))
-;; The template, an expression, aligned with the kernel's forms' signatures
-;; and the macros', its pattern variables placed by the rules, and what is
-;; done to each of its names where it is transcribed.
-(define template-actions (->* (fails pvars syn scopes) actions)
-  (lambda (fail ps template file)
+                  (if (and defn (not (null? (node-hole at))))
+                      (begin (fail-at fail (string-append "a macro that makes definitions has no "
+                                                          "typed parts, not yet: what each use "
+                                                          "defines is checked where it is")
+                                      (node-syn at))
+                             ps)
+                      (pvars-of fail (cdr fs)
+                                (append ps (the pvars (list (tuple n (tuple (node-core at)
+                                                                            (extract (car fs) 2)
+                                                                            (extract (car fs) 3)
+                                                                            (node-hole at))))))
+                                defn))))
+            (else y (pvars-of fail (cdr fs) ps defn)))))))
+;; The template, an expression or definitions (`defn`), aligned with the
+;; kernel's forms' signatures and the macros', its pattern variables placed
+;; by the rules, and what is done to each of its names where it is
+;; transcribed.
+(define template-actions (->* (fails pvars syn bool scopes) actions)
+  (lambda (fail ps template defn file)
     (begin
       (nodes-reset!)
-      (let* ((root (align fail 1 ps (s-expr) template -1 nil))
+      (let* ((root (align fail 1 ps (if defn (s-defn) (s-expr)) template -1 nil))
              (named (name-actions fail ps (walk fail root nil #f) file nil nil)))
         (type-actions 0 (get nnodes) file named)))))
 ;; The actions for what the walk found, onto `out`; `uses`, the affine
@@ -286,18 +295,36 @@
                            ;; `(poly (binder …) σ)`: the binders its typed holes
                            ;; may name.
                            (poly (signature-poly fail (nth items 2)))
-                           (sig (read-sty fail (extract poly 2) nil nil))
+                           ;; `(-> σ defn)`: of what it makes, definitions.
+                           (made (signature-made fail (extract poly 2)))
+                           (defn (extract made 2))
+                           (sig (read-sty fail (extract made 1) nil nil))
                            (before (get defined))
                            (undo (lambda ((m string) (a int) (b int))
                                    (begin (set defined before) (fail m a b)))))
                       (begin
-                        (set defined (cons (tuple n (tuple sig (the clauses nil) (extract poly 1)))
+                        (set defined (cons (tuple n (tuple sig (the clauses nil) (extract poly 1)
+                                                           defn))
                                            before))
-                        (let ((cs (check-each undo (cdr (cdr (cdr items))) sig (extract poly 1)
-                                              file)))
+                        (let ((cs (check-each undo (cdr (cdr (cdr items))) sig defn
+                                              (extract poly 1) file)))
                           (begin
-                            (set defined (cons (tuple n (tuple sig cs (extract poly 1))) before))
+                            (set defined (cons (tuple n (tuple sig cs (extract poly 1) defn))
+                                               before))
                             n)))))))))))
+;; A signature's `(-> σ made)`: `σ`, and whether it makes definitions,
+;; `defn`, not an expression, `expr`; else itself, an expression's.
+(define signature-made (->* (fails syn) (tupleof syn bool))
+  (lambda (fail s)
+    (let ((items (proper s)))
+      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "->"))
+          (let ((made (if (syn-symbol? (nth items 2)) (syn-name (nth items 2)) "")))
+            (cond ((string=? made "defn") (tuple (nth items 1) #t))
+                  ((string=? made "expr") (tuple (nth items 1) #f))
+                  (else (begin (fail-at fail "a signature `(-> σ made)` makes `expr` or `defn`"
+                                        (nth items 2))
+                               (tuple s #f)))))
+          (tuple s #f)))))
 ;; A signature's `(poly ((name kind) …) σ)`: its binders and `σ`; else none
 ;; and itself.
 (define signature-poly (->* (fails syn) (tupleof syns-a syn))
@@ -309,12 +336,12 @@
               (begin (fail-at fail "a signature's `(poly ((name kind) …) σ)`" (nth items 1))
                      (tuple (the syns-a nil) s)))
           (tuple (the syns-a nil) s)))))
-(define check-each (->* (fails syns-a sty syns-a scopes) clauses)
-  (lambda (fail cs sig poly file)
+(define check-each (->* (fails syns-a sty bool syns-a scopes) clauses)
+  (lambda (fail cs sig defn poly file)
     (if (null? cs)
         nil
-        (let ((c (check-clause fail (car cs) sig poly file)))
-          (cons c (check-each fail (cdr cs) sig poly file))))))
+        (let ((c (check-clause fail (car cs) sig defn poly file)))
+          (cons c (check-each fail (cdr cs) sig defn poly file))))))
 
 ;;; ------------------------------------------------------------ the session
 
@@ -442,6 +469,40 @@
         (begin
           (set budget 10000)
           (at-place (expand-in fail form nil) (syn-start form) (syn-end form) 0)))))
+;; Top-level form `form` expanded: a use of a macro that makes definitions,
+;; the definitions it makes, in order, a `begin` of them spliced (as R7RS's
+;; at the top level); each at `form`'s place, as `expand`'s, as a top-level
+;; `include`'s forms are (`Macros::expand_top`). Else `expand`'s, alone.
+(define expand-top (->* (fails syn) syns-a)
+  (lambda (fail form)
+    (let ((items (list-items form)))
+      (if (and (not (null? items)) (syn-symbol? (car items))
+               (makes-defns? (syn-symbol (car items))))
+          (begin
+            (set budget 10000)
+            (at-places (expand-defn fail form) (syn-start form) (syn-end form)))
+          (list (expand fail form))))))
+;; `s`, where a definition is: a use of a macro that makes definitions, what
+;; it makes; a `begin`, each of its; a definition, as `expand-in` expands
+;; it.
+(define expand-defn (->* (fails syn) syns-a)
+  (lambda (fail s)
+    (let* ((items (list-items s)) (hd (if (null? items) s (car items)))
+           (head (if (syn-symbol? hd) (syn-name hd) "")))
+      (cond
+        ((and (syn-symbol? hd) (macro? (syn-symbol hd)))
+         (if (= (get budget) 0)
+             (begin (fail-at fail "this macro's expansion does not end" s) nil)
+             (begin
+               (set budget (- (get budget) 1))
+               (expand-defn fail (expand-use fail (syn-symbol hd) s)))))
+        ((string=? head "begin") (expand-defns fail (cdr items)))
+        (else (list (expand-in fail s nil)))))))
+(define expand-defns (->* (fails syns-a) syns-a)
+  (lambda (fail xs)
+    (if (null? xs) nil (append (expand-defn fail (car xs)) (expand-defns fail (cdr xs))))))
+(define at-places (->* (syns-a int int) syns-a)
+  (lambda (xs a b) (if (null? xs) nil (cons (at-place (car xs) a b 0) (at-places (cdr xs) a b)))))
 ;; `s` at `a`..`b`, of expansion `x`.
 (define at-place (->* (syn int int int) syn)
   (lambda (s a b x)
@@ -457,6 +518,11 @@
       (cond
         ((null? items) s)
         ((string=? head "quote") s)
+        ((and (syn-symbol? hd) (makes-defns? (syn-symbol hd)))
+         (begin (fail-at fail (string-append "`" head "` makes definitions, which are made at the "
+                                             "top level, not where an expression is")
+                         s)
+                s))
         ((and (syn-symbol? hd) (macro? (syn-symbol hd)))
          (if (= (get budget) 0)
              (begin (fail-at fail "this macro's expansion does not end" s) s)
@@ -625,10 +691,7 @@
                         (act-module-type (m) (symbol->string m))
                         (else y "")))))
       (cond
-        ((not (string=? typed ""))
-         (let* ((a (source-key ta made)) (ty (in-expansion t made)) (b (source-key tb made)))
-           (list-at a b made
-                    (list (atom 'select a b made) (atom (string->symbol typed) a b made) ty) nil)))
+        ((not (string=? typed "")) (selected (string->symbol typed) t made))
         ((syn-symbol? t)
          (let* ((a (source-key ta made)) (b (source-key tb made)))
            (transcribe-name c t (syn-symbol t) a b act bs made)))
@@ -651,6 +714,26 @@
                 (b (source-key tb made)))
            (list-at a b made xs2 rest)))
         (else (let* ((a (source-key ta made)) (b (source-key tb made))) (at-place t a b made)))))))
+;; Type `t`, which a template writes, read in module `m` (`#%toplevel`,
+;; `#%fx` or a file's), in expansion `made`: `(select m t)`; of a
+;; definition's `(->* (param …) result)`, which is no type, each of its
+;; types so (`macros.rs`'s `selected`).
+(define selected (->* (symbol syn int) syn)
+  (lambda (m t made)
+    (let ((items (proper t)) (a (source-key (syn-start t) made)))
+      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "->*")
+               (or (syn-nil? (nth items 1)) (not (null? (proper (nth items 1))))))
+          (let* ((h (in-expansion (car items) made)) (params (nth items 1))
+                 (pa (source-key (syn-start params) made))
+                 (ps (selected-each m (proper params) made))
+                 (pb (source-key (syn-end params) made))
+                 (r (selected m (nth items 2) made)) (b (source-key (syn-end t) made)))
+            (list-at a b made (list h (list-at pa pb made ps nil) r) nil))
+          (let* ((ty (in-expansion t made)) (b (source-key (syn-end t) made)))
+            (list-at a b made (list (atom 'select a b made) (atom m a b made) ty) nil))))))
+(define selected-each (->* (symbol syns-a int) syns-a)
+  (lambda (m ts made)
+    (if (null? ts) nil (cons (selected m (car ts) made) (selected-each m (cdr ts) made)))))
 ;; `n` `#f`s, onto `out`.
 (define falses (->* (int addr) addr)
   (lambda (n out) (if (= n 0) out (falses (- n 1) (cons #f out)))))

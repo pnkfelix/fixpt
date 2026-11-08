@@ -40,7 +40,10 @@
   (s-literal symbol) (s-pair sty sty) (s-import sty bind) (s-export sty bind)
   (s-mu int) (s-many sty) (s-union (listof sty acyclic)) (s-typed sty hole)
   ;; An expression that is a lambda, where a form wants one (`letrec`).
-  (s-lambda))
+  (s-lambda)
+  ;; A definition, where a template makes one (the kernel's `begin` of
+  ;; them); no part of a signature, for now.
+  (s-defn))
 (define-type stys (listof sty acyclic))
 
 ;; Each `mu`'s body, by its number: the program's, and every file's
@@ -337,16 +340,19 @@
       (cond ((string=? n "none") 0) ((string=? n "var") 1) ((string=? n "rib") 2)
             ((string=? n "env") 3)
             (else (begin (fail-at fail "δ is `none`, `var`, `rib` or `env`" d) 0))))))
-;; An address, `A`s and `D`s read right to left: its steps, first first.
+;; An address, `A`s and `D`s read right to left, or `()`, none: its steps,
+;; first first.
 (define read-addr (->* (fails syn) addr)
   (lambda (fail a)
     (let ((name (if (syn-symbol? a) (syn-name a) "")))
-      (if (and (> (string-length name) 0) (a-or-d? name 0))
-          (steps name 0 nil)
-          (begin (fail-at fail (string-append "an address is a word of `A` (car) and `D` (cdr), "
-                                              "read right to left")
-                          a)
-                 (the addr nil))))))
+      (cond
+        ((syn-nil? a) nil)
+        ((and (> (string-length name) 0) (a-or-d? name 0)) (steps name 0 nil))
+        (else
+         (begin (fail-at fail (string-append "an address is a word of `A` (car) and `D` (cdr), "
+                                             "read right to left")
+                         a)
+                (the addr nil)))))))
 (define a-or-d? (->* (string int) bool)
   (lambda (s i)
     (or (= i (string-length s))
@@ -374,27 +380,36 @@
 (define proper-items (->* (syn) syns-a)
   (lambda (s) (tagcase s (lst (items d a b x) items) (else y nil))))
 
-;; The kernel's forms' signatures, each by its name, and its abbreviations
-;; read on the way: read once, the first time.
-(define kernel-read (ref named rs) (new nil))
+;; The kernel's forms' signatures, each by its name, and its definitions'
+;; (its `begin` of them not its `begin` of expressions), its abbreviations
+;; read on the way, `defn` among them, which no macro's signature names:
+;; read once, the first time.
+(define kernel-read (ref (tupleof named named) rs) (new (tuple (the named nil) (the named nil))))
 (define kernel-sigs (->* (fails) named)
+  (lambda (fail) (extract (kernel-tables fail) 1)))
+(define kernel-definitions (->* (fails) named)
+  (lambda (fail) (extract (kernel-tables fail) 2)))
+(define kernel-tables (->* (fails) (tupleof named named))
   (lambda (fail)
     (begin
-      (if (null? (get kernel-read))
+      (if (null? (extract (get kernel-read) 1))
           (set kernel-read (read-kernel fail (proper-items (datum->syn (with kernel kernel-forms)))
-                                        nil nil))
+                                        (list (tuple 'defn (s-defn))) nil nil))
           #u)
       (get kernel-read))))
-(define read-kernel (->* (fails syns-a named named) named)
-  (lambda (fail fs named out)
+(define read-kernel (->* (fails syns-a named named named) (tupleof named named))
+  (lambda (fail fs named out defs)
     (if (null? fs)
-        out
+        (tuple out defs)
         (let* ((items (proper-items (car fs)))
                (t (read-sty fail (nth items 2) named nil))
-               (n (syn-symbol (nth items 1))))
-          (if (string=? (syn-name (car items)) "define")
-              (read-kernel fail (cdr fs) (cons (tuple n t) named) out)
-              (read-kernel fail (cdr fs) named (cons (tuple n t) out)))))))
+               (n (syn-symbol (nth items 1)))
+               (what (syn-name (car items))))
+          (cond ((string=? what "define")
+                 (read-kernel fail (cdr fs) (cons (tuple n t) named) out defs))
+                ((string=? what "definition")
+                 (read-kernel fail (cdr fs) named out (cons (tuple n t) defs)))
+                (else (read-kernel fail (cdr fs) named (cons (tuple n t) out) defs)))))))
 
 ;;; ------------------------------------------------------------ comparing
 
@@ -439,15 +454,16 @@
     (and (not (null? ms)) (or (overlap? a (car ms) depth) (any-overlaps-of? a (cdr ms) depth)))))
 ;; A kind's number, for the cases of `overlap-base?`: 0 expr, 1 bvar, 2 id,
 ;; 3 data, 4 type, 5 label, 6 nil, 7 literal, 8 pair, 9 anything else, 10
-;; lambda.
+;; lambda, 11 defn.
 (define kind-of (->* (sty) int)
   (lambda (t)
     (tagcase t
       (s-expr () 0) (s-bvar () 1) (s-id () 2) (s-data () 3) (s-type () 4) (s-label () 5)
-      (s-nil () 6) (s-literal (n) 7) (s-pair (a d) 8) (s-lambda () 10) (else y 9))))
+      (s-nil () 6) (s-literal (n) 7) (s-pair (a d) 8) (s-lambda () 10) (s-defn () 11)
+      (else y 9))))
 ;; Whether `k` is a kind of no parts: one of what `(Expr | Id | Data | Type
-;; | Label | Bvar | Lambda)` names in `macros.rs`.
-(define simple-kind? (->* (int) bool) (lambda (k) (or (< k 6) (= k 10))))
+;; | Label | Bvar | Lambda | Defn)` names in `macros.rs`.
+(define simple-kind? (->* (int) bool) (lambda (k) (or (< k 6) (= k 10) (= k 11))))
 (define literal-of (->* (sty) symbol)
   (lambda (t) (tagcase t (s-literal (n) n) (else y (string->symbol "")))))
 (define overlap-base? (->* (sty sty int) bool)
@@ -462,7 +478,7 @@
            (not (or (= other 7) (= other 1) (= other 2) (= other 6) (= other 5)))))
         ((and (= ka 7) (= kb 7)) (symbol=? (literal-of a) (literal-of b)))
         ((or (and (= ka 7) (= kb 2)) (and (= ka 2) (= kb 7))) #t)
-        ((or (= ka 0) (= ka 3) (= ka 4) (= kb 0) (= kb 3) (= kb 4)) #t)
+        ((or (= ka 0) (= ka 3) (= ka 4) (= ka 11) (= kb 0) (= kb 3) (= kb 4) (= kb 11)) #t)
         ((and (= ka 8) (= kb 8))
          (or (= depth 0)
              (tagcase a
@@ -505,6 +521,7 @@
             (s-label () (or (syn-keyword? s) (and (= mode 2) (syn-symbol? s))))
             (s-expr () (and (not (reserved-syn? s)) (not (syn-nil? s))))
             (s-lambda () (lambda-shaped? s))
+            (s-defn () (not (null? (split s))))
             (else y #t))))))
 (define any-fits? (->* (stys syn int (subr pure (symbol) bool)) bool)
   (lambda (ms s mode pvar?)
@@ -522,7 +539,8 @@
       (s-many (x) (tagcase b (s-many (y) (sty=? x y)) (else z #f)))
       (s-typed (x h) (tagcase b (s-typed (y g) (sty=? x y)) (else z #f)))
       (s-union (ms) (tagcase b (s-union (ns) (all-sty=? ms ns)) (else y #f)))
-      (else y (and (or (< (kind-of a) 7) (= (kind-of a) 10)) (= (kind-of a) (kind-of b)))))))
+      (else y (and (or (< (kind-of a) 7) (= (kind-of a) 10) (= (kind-of a) 11))
+                   (= (kind-of a) (kind-of b)))))))
 (define all-sty=? (->* (stys stys) bool)
   (lambda (ms ns)
     (if (null? ms)

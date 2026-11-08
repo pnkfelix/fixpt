@@ -32,6 +32,14 @@ fn a_files_macros_types_are_its_own() {
 }
 
 #[test]
+fn a_files_macro_makes_definitions() {
+    for m in MACHINES {
+        let (out, err) = eval(m, "main-defn.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("18 : int")), "{m}: {out}{err}");
+    }
+}
+
+#[test]
 fn only_and_except_take_macros_and_names_alike() {
     for (name, want) in [("main-only.fx", "1020 : int"), ("main-except.fx", "1030 : int"), ("main-except-all.fx", "2 : int")] {
         for m in MACHINES {

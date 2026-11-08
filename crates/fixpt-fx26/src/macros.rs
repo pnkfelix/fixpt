@@ -27,13 +27,20 @@
 //!
 //! An address `ℓ` is a word of `A` (car) and `D` (cdr), read right to left
 //! as `cadr` is, from the innermost `mu`, `union` member or signature
-//! around it. `id`, `type` and `label` are FX-26's: a variable referred to
+//! around it; `()`, Herman's `ε`, is that part itself. `id`, `type` and `label` are FX-26's: a variable referred to
 //! (as `set!`'s target would be), a description, a tag or field's name.
 //! So is `many`: a pattern variable with an expression in it is placed at
 //! most once in a template, affine, unless its part of the signature is
 //! `(many σ)`; placed where another macro's signature says `many`, it is
 //! taken as placed more than once, so the opt-out is said all the way up
 //! a chain of macros (`docs/research/typed-macros.md`).
+//!
+//! A macro whose signature is `(-> σ defn)` makes definitions
+//! (`typed-macros.md`, item 9): its template is one of the kernel's, or a
+//! `begin` of them, spliced where it is used, at the top level alone
+//! (`Macros::expand_top`). A name a use gives is defined under that name,
+//! as the program sees it; one the template writes is made fresh, as its
+//! other binders are, so that nothing outside it can name it.
 
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
@@ -53,6 +60,9 @@ pub(crate) enum STy {
     Data,
     Type,
     Label,
+    /// A definition, where a template makes one (the kernel's `begin` of
+    /// them); no part of a signature, for now.
+    Defn,
     Nil,
     Literal(Sym),
     Pair(Rc<STy>, Rc<STy>),
@@ -114,6 +124,8 @@ pub(crate) enum Delta {
 #[derive(Debug)]
 struct Macro {
     sig: Rc<STy>,
+    /// Whether it makes definitions, `(-> σ defn)`.
+    defn: bool,
     /// The binders of its signature's `(poly (binder …) σ)`, if it has one.
     poly: Vec<Syntax>,
     clauses: Vec<Clause>,
@@ -182,6 +194,9 @@ pub struct FileScope<'a> {
 pub struct Macros {
     mus: Vec<Rc<STy>>,
     kernel: HashMap<String, Rc<STy>>,
+    /// The kernel's definitions' forms, by name (its `begin` of them is
+    /// not its `begin` of expressions).
+    definitions: HashMap<String, Rc<STy>>,
     defined: HashMap<Sym, Rc<Macro>>,
     fresh: usize,
     /// The text being read, if it is known (`Checker::read_in`): a macro
@@ -308,16 +323,17 @@ impl Macros {
         let forms = fixpt_read::Reader::new(KERNEL, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, interner)
             .read_all()
             .map_err(|e| FxError::at(e.span, format!("the kernel's syntax types: {}", e.message)))?;
-        let mut named: HashMap<Sym, Rc<STy>> = HashMap::new();
+        // `defn`, which the kernel's signatures name, and no macro's.
+        let mut named: HashMap<Sym, Rc<STy>> = HashMap::from([(interner.intern("defn"), Rc::new(STy::Defn))]);
         for f in &kernel_list(&forms, interner, "kernel-forms") {
             let items = f.as_proper_list().expect("a kernel entry");
             let what = interner.name(items[0].as_symbol().expect("a head")).to_string();
             let name = items[1].as_symbol().expect("a name");
             let t = self.sty(&items[2], interner, &named, &mut Vec::new())?;
-            if what == "define" {
-                named.insert(name, t);
-            } else {
-                self.kernel.insert(interner.name(name).to_string(), t);
+            match what.as_str() {
+                "define" => _ = named.insert(name, t),
+                "definition" => _ = self.definitions.insert(interner.name(name).to_string(), t),
+                _ => _ = self.kernel.insert(interner.name(name).to_string(), t),
             }
         }
         Ok(())
@@ -451,7 +467,7 @@ impl Macros {
             (Lambda, _) | (_, Lambda) => true,
             (Literal(x), Literal(y)) => x == y,
             (Literal(_), Id) | (Id, Literal(_)) => true,
-            (Expr | Data | Type, _) | (_, Expr | Data | Type) => true,
+            (Expr | Data | Type | Defn, _) | (_, Expr | Data | Type | Defn) => true,
             (Pair(a1, d1), Pair(a2, d2)) => depth == 0 || (self.overlap(a1, a2, depth - 1) && self.overlap(d1, d2, depth - 1)),
             (Nil, Nil) => true,
             (Label, Label) => true,
@@ -481,6 +497,7 @@ impl Macros {
             Label => matches!(s.datum, Datum::Keyword(_)) || (mode == Mode::Use && s.as_symbol().is_some()),
             Expr => !s.as_symbol().is_some_and(|n| reserved(interner.name(n))) && !matches!(s.datum, Datum::Nil),
             Lambda => lambda_shaped(s, interner),
+            Defn => matches!(s.datum, Datum::List { .. }),
             Data | Type => true,
             Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
@@ -636,7 +653,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), defined_at: HashMap::new(), checking: false };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), definitions: self.definitions.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), defined_at: HashMap::new(), checking: false };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -686,12 +703,21 @@ impl Macros {
             }
             _ => (Vec::new(), sig),
         };
+        // `(-> σ defn)`: of what it makes, definitions; `(-> σ expr)`, as `σ`.
+        let (sig, defn) = match sig.as_proper_list() {
+            Some([h, body, made]) if h.as_symbol().is_some_and(|h| interner.name(h) == "->") => match made.as_symbol().map(|m| interner.name(m)) {
+                Some("defn") => (body, true),
+                Some("expr") => (body, false),
+                _ => return Err(FxError::at(made.span, "a signature `(-> σ made)` makes `expr` or `defn`")),
+            },
+            _ => (sig, false),
+        };
         let sig = self.sty(sig, interner, &HashMap::new(), &mut Vec::new())?;
         // Defined first, so that a template may use the macro itself.
-        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), poly: poly.clone(), clauses: Vec::new(), text: None }));
+        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), defn, poly: poly.clone(), clauses: Vec::new(), text: None }));
         let mut checked = Vec::new();
         for c in clauses {
-            match self.clause(c, &sig, &poly, interner, file) {
+            match self.clause(c, &sig, defn, &poly, interner, file) {
                 Ok(c) => checked.push(c),
                 Err(e) => {
                     match before {
@@ -703,7 +729,7 @@ impl Macros {
             }
         }
         let text = self.reading.clone();
-        self.defined.insert(name, Rc::new(Macro { sig, poly, clauses: checked, text }));
+        self.defined.insert(name, Rc::new(Macro { sig, defn, poly, clauses: checked, text }));
         Ok(name)
     }
 
@@ -712,7 +738,7 @@ impl Macros {
     /// placed in the template where the signature says what is in scope
     /// there, and a reference to a pattern's binder is where no other
     /// pattern binder may shadow it.
-    fn clause(&self, c: &Syntax, sig: &Rc<STy>, poly: &[Syntax], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
+    fn clause(&self, c: &Syntax, sig: &Rc<STy>, defn: bool, poly: &[Syntax], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
         let usage = "a clause is `((_ . pattern) template)`";
         let [pattern, template] = c.as_proper_list().ok_or_else(|| FxError::at(c.span, usage))? else {
             return Err(FxError::at(c.span, usage));
@@ -735,11 +761,16 @@ impl Macros {
             if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env, many, hole: p.nodes[at].hole.clone() }).is_some() {
                 return Err(FxError::at(p.nodes[at].syn.span, format!("`{}` is a pattern variable twice", interner.name(n))));
             }
+            // Its uses' definitions are checked where each is (the first
+            // tier): a template of definitions is not checked once, yet.
+            if defn && p.nodes[at].hole.is_some() {
+                return Err(FxError::at(p.nodes[at].syn.span, "a macro that makes definitions has no typed parts, not yet: what each use defines is checked where it is"));
+            }
         }
-        // The template, an expression, aligned with the kernel's forms'
-        // signatures and the macros'.
+        // The template, an expression or definitions, aligned with the
+        // kernel's forms' signatures and the macros'.
         let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new() };
-        let root = t.align(&Rc::new(STy::Expr), template, None, Vec::new())?;
+        let root = t.align(&Rc::new(if defn { STy::Defn } else { STy::Expr }), template, None, Vec::new())?;
         let mut found = Vec::new();
         t.walk(root, &Vec::new(), false, &mut found)?;
         let mut actions = HashMap::new();
@@ -860,6 +891,49 @@ impl Macros {
         Ok(out)
     }
 
+    /// Top-level form `form` expanded: a use of a macro that makes
+    /// definitions, the definitions it makes, in order, a `begin` of them
+    /// spliced (as R7RS's at the top level); each at `form`'s place, as
+    /// `expand`'s, as a top-level `include`'s forms are. Else `expand`'s.
+    pub fn expand_top(&mut self, form: &Syntax, interner: &mut Interner) -> R<Vec<Syntax>> {
+        let makes = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.defined.get(&h).is_some_and(|m| m.defn));
+        if !makes {
+            return Ok(vec![self.expand(form, interner)?]);
+        }
+        let mut out = Vec::new();
+        self.expand_defn(form, interner, &mut 10_000, &mut out)?;
+        for f in &mut out {
+            f.span = form.span;
+        }
+        Ok(out)
+    }
+
+    /// `s`, where a definition is: a use of a macro that makes definitions,
+    /// what it makes; a `begin`, each of its; a definition, as `expand_in`
+    /// expands it. Each definition pushed on `out`.
+    fn expand_defn(&mut self, s: &Syntax, interner: &mut Interner, budget: &mut usize, out: &mut Vec<Syntax>) -> R<()> {
+        let items = s.as_proper_list().unwrap_or(&[]);
+        let head = items.first().and_then(|h| h.as_symbol());
+        if let Some(h) = head
+            && let Some(m) = self.defined.get(&h).cloned()
+        {
+            if *budget == 0 {
+                return Err(FxError::at(s.span, "this macro's expansion does not end"));
+            }
+            *budget -= 1;
+            let made = self.expand_use(h, &m, s, interner)?;
+            return self.expand_defn(&made, interner, budget, out);
+        }
+        if head.is_some_and(|h| interner.name(h) == "begin") {
+            for d in &items[1..] {
+                self.expand_defn(d, interner, budget, out)?;
+            }
+            return Ok(());
+        }
+        out.push(self.expand_in(s, interner, budget, &mut Vec::new())?);
+        Ok(())
+    }
+
     /// `withs`: the places of the `with` forms whose bodies `s` is in.
     fn expand_in(&mut self, s: &Syntax, interner: &mut Interner, budget: &mut usize, withs: &mut Vec<Span>) -> R<Syntax> {
         let Datum::List { items, tail } = &s.datum else { return Ok(s.clone()) };
@@ -870,6 +944,9 @@ impl Macros {
         if let Some(h) = head
             && let Some(m) = self.defined.get(&h).cloned()
         {
+            if m.defn {
+                return Err(FxError::at(s.span, format!("`{}` makes definitions, which are made at the top level, not where an expression is", interner.name(h))));
+            }
             if *budget == 0 {
                 return Err(FxError::at(s.span, "this macro's expansion does not end"));
             }
@@ -947,9 +1024,7 @@ impl Macros {
             _ => None,
         };
         if let Some(m) = typed {
-            let select = interner.intern("select");
-            let ty = in_expansion(t, made);
-            return Syntax::list(at, vec![Syntax::symbol(at, select), Syntax::symbol(at, m), ty]);
+            return selected(m, t, made, interner);
         }
         match &t.datum {
             Datum::Symbol(n) => {
@@ -1142,7 +1217,7 @@ impl Aligner<'_> {
             // A template writes a lambda (its form aligned as any of the
             // kernel's); a use gives one, of the shape the checkers take.
             STy::Lambda => match (&s.datum, self.mode) {
-                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form(at, s),
+                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form(at, s, false),
                 _ if self.mode != Mode::Template && lambda_shaped(s, self.interner) => Ok(()),
                 _ => Err(fail(format!("`{}` is not a lambda, as this part must be", self.show(s)))),
             },
@@ -1154,20 +1229,41 @@ impl Aligner<'_> {
                     self.nodes[at].kids = Kids::Ref(*n);
                     Ok(())
                 }
-                (Datum::List { .. }, Mode::Template) => self.form(at, s),
+                (Datum::List { .. }, Mode::Template) => self.form(at, s, false),
                 (Datum::Nil, _) => Err(fail("`()` is not an expression".into())),
                 _ => Ok(()),
+            },
+            STy::Defn => match (&s.datum, self.mode) {
+                (Datum::List { .. }, Mode::Template) => self.form(at, s, true),
+                _ => Err(fail(format!("`{}` is not a definition", self.show(s)))),
             },
             STy::Import(..) | STy::Export(..) | STy::Many(_) | STy::Typed(..) => unreachable!("taken off"),
         }
     }
 
     /// A form in a template, at node `at`: a kernel form, a macro's use, or
-    /// an application, aligned with its signature.
-    fn form(&mut self, at: usize, s: &Syntax) -> R<()> {
+    /// an application, aligned with its signature; a definition's, if
+    /// `defn`, where a template makes definitions, else an expression's.
+    fn form(&mut self, at: usize, s: &Syntax, defn: bool) -> R<()> {
         let Datum::List { items, tail } = &s.datum else { unreachable!("a list") };
         let head = items[0].as_symbol().filter(|h| !self.pvars.contains_key(h));
+        let not_one = |what: &str| FxError::at(s.span, format!("`{}` is not a definition: a macro that makes definitions makes {what}", self.show(s)));
         let sig = match head.map(|h| (h, self.name(h))) {
+            Some((h, n)) if defn => match self.m.defined.get(&h) {
+                Some(m) if m.defn => Some(m.sig.clone()),
+                Some(_) => return Err(not_one("them by a macro that makes definitions, not an expression's")),
+                None => match self.m.definitions.get(n) {
+                    Some(sig) => Some(sig.clone()),
+                    None => return Err(not_one("`define`, `define*`, `define-rec`, a `begin` of them, or a use of another such")),
+                },
+            },
+            None if defn => return Err(not_one("`define`, `define*`, `define-rec`, a `begin` of them, or a use of another such")),
+            Some((h, _)) if self.m.defined.get(&h).is_some_and(|m| m.defn) => {
+                return Err(FxError::at(s.span, format!("`{}` makes definitions, which are made at the top level, not where an expression is", self.name(h))));
+            }
+            Some((_, n)) if self.m.definitions.contains_key(n) && !self.m.kernel.contains_key(n) => {
+                return Err(FxError::at(s.span, format!("`{n}` makes a definition, made at the top level by a macro that makes definitions, not where an expression is")));
+            }
             Some((_, "with")) => {
                 let named = |m: &str| m == "#%fx" || m == "#%toplevel";
                 let standard = tail.is_none() && matches!(&items[..], [_, m, n] if m.as_symbol().is_some_and(|m| named(self.name(m))) && n.as_symbol().is_some());
@@ -1271,8 +1367,11 @@ impl Aligner<'_> {
                 (Delta::Var, Kids::Binder(_)) => out.push(Atom::Lit(t)),
                 (Delta::Var, _) => return Err(FxError::at(node.syn.span, "the signature says a binder is here")),
                 (Delta::Rib, Kids::PVar(n)) => out.push(Atom::RibOf(*n)),
-                (Delta::Rib, _) => match &node.export {
+                (Delta::Rib, _) => match &self.exported(t).export {
                     Some((Bind::Rib(es), r)) => out.extend(self.rib(es, *r, span)?),
+                    // A use of a macro that makes definitions: none the
+                    // template sees.
+                    None if matches!(node.kids, Kids::Form(_)) => {}
                     _ => return Err(FxError::at(node.syn.span, "the signature says what is here exports a rib, and it exports none")),
                 },
                 (Delta::Env, _) => return Err(FxError::at(node.syn.span, "a ribcage (`env`) in a rib: write it `(at ℓ)` in a `cage`")),
@@ -1283,10 +1382,20 @@ impl Aligner<'_> {
 
     fn levels_of(&self, t: usize, span: Span) -> R<Vec<Level>> {
         let node = &self.nodes[t];
-        match (&node.kids, &node.export) {
+        match (&node.kids, &self.exported(t).export) {
             (Kids::PVar(n), _) => Ok(vec![Level::Cage(*n)]),
             (_, Some((b, r))) => self.eval(b, *r, span),
+            (Kids::Form(_), None) => Ok(Vec::new()),
             _ => Err(FxError::at(node.syn.span, "the signature says what is here exports a ribcage, and it exports none")),
+        }
+    }
+
+    /// The node whose export is what node `t` exports: a form's operands'
+    /// (a definition's), else its own.
+    fn exported(&self, t: usize) -> &Node {
+        match self.nodes[t].kids {
+            Kids::Form(x) => &self.nodes[x],
+            _ => &self.nodes[t],
         }
     }
 
@@ -1332,7 +1441,7 @@ impl Aligner<'_> {
             }
             (Expr, Lambda) => true,
             (Data, Data) | (Type, Type) | (Label, Label) => return Ok(()),
-            (Expr | Id | Data | Type | Label | Bvar | Lambda, _) | (_, Expr | Id | Data | Type | Label | Bvar | Lambda) => false,
+            (Expr | Id | Data | Type | Label | Bvar | Lambda | Defn, _) | (_, Expr | Id | Data | Type | Label | Bvar | Lambda | Defn) => false,
             _ => self.m.sub(have, want, &mut HashSet::new()),
         };
         if !fits {
@@ -1453,8 +1562,12 @@ fn hole(parts: &[Syntax], kind: &str, s: &Syntax, interner: &Interner) -> R<Hole
     Ok(h)
 }
 
-/// An address, `A`s and `D`s read right to left: its steps, first first.
+/// An address, `A`s and `D`s read right to left, or `()`, none: its steps,
+/// first first.
 fn addr(a: &Syntax, interner: &Interner) -> R<Addr> {
+    if matches!(a.datum, Datum::Nil) {
+        return Ok(Vec::new());
+    }
     let name = a.as_symbol().map(|a| interner.name(a)).filter(|n| !n.is_empty() && n.chars().all(|c| c == 'A' || c == 'D'));
     let Some(name) = name else {
         return Err(FxError::at(a.span, "an address is a word of `A` (car) and `D` (cdr), read right to left"));
@@ -1569,6 +1682,24 @@ fn respanned(s: &Syntax, at: Span) -> Syntax {
         Datum::List { items, tail } => Syntax::new(at, Datum::List { items: items.iter().map(|x| respanned(x, at)).collect(), tail: tail.as_ref().map(|x| Box::new(respanned(x, at))) }),
         d => Syntax::new(at, d.clone()),
     }
+}
+
+/// Type `t`, which a template writes, read in module `m` (`#%toplevel`,
+/// `#%fx` or a file's), at its place in expansion `made`: `(select m t)`;
+/// of a definition's `(->* (param …) result)`, which is no type, each of
+/// its types so.
+fn selected(m: Sym, t: &Syntax, made: u32, interner: &mut Interner) -> Syntax {
+    let at = t.span.in_expansion(made);
+    if let Some([h, params, result]) = t.as_proper_list()
+        && h.as_symbol().is_some_and(|h| interner.name(h) == "->*")
+        && let Some(ps) = params.as_proper_list()
+    {
+        let ps: Vec<Syntax> = ps.iter().map(|p| selected(m, p, made, interner)).collect();
+        let ps = list_of(params.span.in_expansion(made), ps, None);
+        return Syntax::list(at, vec![in_expansion(h, made), ps, selected(m, result, made, interner)]);
+    }
+    let select = interner.intern("select");
+    Syntax::list(at, vec![Syntax::symbol(at, select), Syntax::symbol(at, m), in_expansion(t, made)])
 }
 
 /// `s`, each part of it at its place in expansion `made` (`transcribe`'s,

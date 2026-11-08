@@ -607,6 +607,9 @@ pub fn repl(backend: Backend) -> i32 {
             }
             Consider::Run => {}
         }
+        // The place of the form before: the definitions a use of a macro
+        // makes are each at the use's (`Macros::expand_top`), its text one.
+        let mut last = None;
         for form in &forms {
             if let Some(lines) = answer_hole(&mut session.checker, form) {
                 for l in lines {
@@ -624,7 +627,7 @@ pub fn repl(backend: Backend) -> i32 {
                 GcStats::of(&mut session).form_since(&b);
                 GcStats::end_form(&mut session, &b);
             }
-            if ran.is_ok() {
+            if ran.is_ok() && last.replace(form.span) != Some(form.span) {
                 program += session.session_text_at(form.span);
                 program.push('\n');
                 // What comes before it in its entry blank, so that its places

@@ -14,7 +14,8 @@
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
-        fits? sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs bind-rib bind-cage
+        fits? sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
+        bind-rib bind-cage
         ring-rib ring-at s-expr s-bvar s-id
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         mu-body addr=?
@@ -41,9 +42,10 @@
 (define-type contracts (listof (tupleof symbol syn) acyclic))
 (define-type clause (tupleof syn syn actions pvars contracts))
 (define-type clauses (listof clause acyclic))
-;; A macro defined: its signature, its clauses, and the binders of its
-;; signature's `(poly (binder …) σ)`, if it has one.
-(define-type macro (tupleof sty clauses syns-a))
+;; A macro defined: its signature, its clauses, the binders of its
+;; signature's `(poly (binder …) σ)`, if it has one, and whether it makes
+;; definitions, `(-> σ defn)`.
+(define-type macro (tupleof sty clauses syns-a bool))
 (define-type macro-env (listof (tupleof symbol macro) acyclic))
 ;; The macros defined, each by the name it is used by, the last defined
 ;; first (`macros.fx`).
@@ -54,6 +56,10 @@
           ((symbol=? n (extract (car env) 1)) (list (extract (car env) 2)))
           (else (macro-of n (cdr env))))))
 (define macro? (->* (symbol) bool) (lambda (n) (not (null? (macro-of n (get defined))))))
+;; Whether `n` is a macro that makes definitions.
+(define makes-defns? (->* (symbol) bool)
+  (lambda (n)
+    (let ((m (macro-of n (get defined)))) (and (not (null? m)) (extract (car m) 4)))))
 
 ;; What a file's macros are defined in (`macros.rs`'s `FileScope`): the
 ;; hidden global every load of the file is; the values and the types its
@@ -245,7 +251,7 @@
         (s-lambda ()
           (cond ((and (= mode 1) (not (null? (split s))) (syn-symbol? (car (split s)))
                       (string=? (syn-name (car (split s))) "lambda") (proper? s))
-                 (form fail ps at s))
+                 (form fail ps at s #f))
                 ((and (not (= mode 1)) (lambda-shaped? s)) #u)
                 (else (said (string-append shown " is not a lambda, as this part must be")))))
         (s-expr ()
@@ -254,9 +260,13 @@
                 ;; `#u`, unit: a literal, which the parsers read as a name.
                 ((and (syn-symbol? s) (string=? (syn-name s) "#u")) #u)
                 ((and (syn-symbol? s) (= mode 1)) (with-kids at (k-ref (syn-symbol s))))
-                ((and (not (syn-nil? s)) (not (null? (split s))) (= mode 1)) (form fail ps at s))
+                ((and (not (syn-nil? s)) (not (null? (split s))) (= mode 1)) (form fail ps at s #f))
                 ((syn-nil? s) (said "`()` is not an expression"))
                 (else #u)))
+        (s-defn ()
+          (if (and (= mode 1) (not (syn-nil? s)) (not (null? (split s))))
+              (form fail ps at s #t)
+              (said (string-append shown " is not a definition"))))
         ;; `data` and `type`.
         (else z
           (let ((inside (pvar-inside s ps)))
@@ -284,13 +294,33 @@
                 (if (null? first) (pvar-inside (nth parts 1) ps) first)))))))
 
 ;; A form in a template, at node `at`: a kernel form, a macro's use, or an
-;; application, aligned with its signature.
-(define form (->* (fails pvars int syn) unit)
-  (lambda (fail ps at s)
+;; application, aligned with its signature; a definition's, if `defn`,
+;; where a template makes definitions, else an expression's.
+(define form (->* (fails pvars int syn bool) unit)
+  (lambda (fail ps at s defn)
     (let* ((parts (split s)) (hd (car parts))
            (head (if (and (syn-symbol? hd) (not (pvar? (syn-symbol hd) ps))) (syn-name hd) ""))
-           (kernel (kernel-sigs fail)))
+           (kernel (kernel-sigs fail)) (defs (kernel-definitions fail))
+           (macro (and (not (string=? head "")) (macro? (syn-symbol hd)))))
       (cond
+        (defn
+         (cond ((and macro (makes-defns? (syn-symbol hd))) (macro-operands fail ps at hd parts))
+               (macro (not-definition fail s (string-append "them by a macro that makes "
+                                                            "definitions, not an expression's")))
+               ((and (not (string=? head "")) (not (null? (sig-of (string->symbol head) defs))))
+                (operands fail ps at (car (sig-of (string->symbol head) defs)) (nth parts 1)))
+               (else (not-definition fail s (string-append "`define`, `define*`, `define-rec`, a "
+                                                           "`begin` of them, or a use of another "
+                                                           "such")))))
+        ((and macro (makes-defns? (syn-symbol hd)))
+         (fail-at fail (string-append "`" head "` makes definitions, which are made at the top "
+                                      "level, not where an expression is")
+                  s))
+        ((and (not (string=? head "")) (not (null? (sig-of (string->symbol head) defs)))
+              (null? (sig-of (string->symbol head) kernel)))
+         (fail-at fail (string-append "`" head "` makes a definition, made at the top level by a "
+                                      "macro that makes definitions, not where an expression is")
+                  s))
         ((string=? head "with")
          (if (standard-with? s)
              #u
@@ -298,9 +328,7 @@
                                           "#%toplevel name)` (one opening a module waits for "
                                           "scopes of a module's names)")
                       s)))
-        ((and (not (string=? head "")) (macro? (syn-symbol hd)))
-         (operands fail ps at (extract (car (macro-of (syn-symbol hd) (get defined))) 1)
-                   (nth parts 1)))
+        (macro (macro-operands fail ps at hd parts))
         ((and (not (string=? head "")) (not (string=? head "%app"))
               (not (null? (sig-of (string->symbol head) kernel))))
          (operands fail ps at (car (sig-of (string->symbol head) kernel)) (nth parts 1)))
@@ -311,6 +339,16 @@
         (else
          (with-kids at (k-form (align fail 1 ps (car (sig-of '%app kernel)) s -1
                                       (node-path at)))))))))
+;; The operands of the use of macro `hd` at `at`, aligned with its signature.
+(define macro-operands (->* (fails pvars int syn syns-a) unit)
+  (lambda (fail ps at hd parts)
+    (operands fail ps at (extract (car (macro-of (syn-symbol hd) (get defined))) 1)
+              (nth parts 1))))
+(define not-definition (->* (fails syn string) unit)
+  (lambda (fail s what)
+    (fail-at fail (string-append "`" (show-syn s) "` is not a definition: a macro that makes "
+                                 "definitions makes " what)
+             s)))
 ;; The operands `rest` of the form at `at`, aligned with its signature.
 (define operands (->* (fails pvars int sty syn) unit)
   (lambda (fail ps at sig rest)
@@ -405,15 +443,18 @@
 (define env-in-rib (->* (fails syn) unit)
   (lambda (fail s) (fail-at fail "a ribcage (`env`) in a rib: write it `(at ℓ)` in a `cage`" s)))
 ;; The rib node `t` exports, its addresses read at `s`'s place, as the
-;; import's are.
+;; import's are: a form's, its operands' (a definition's); none, a use of
+;; a macro that makes definitions, which the template sees none of.
 (define exported-rib (->* (fails int syn syn) atms)
   (lambda (fail t ts s)
-    (let ((e (extract (node-at t) 5)))
+    (let ((e (extract (node-at (exporter t)) 5)))
       (if (null? e)
-          (begin (fail-at fail (string-append "the signature says what is here exports a rib, and "
-                                              "it exports none")
-                          ts)
-                 (the atms nil))
+          (if (form-node? t)
+              (the atms nil)
+              (begin (fail-at fail (string-append "the signature says what is here exports a rib, "
+                                                  "and it exports none")
+                              ts)
+                     (the atms nil)))
           (tagcase (extract (car e) 1)
             (bind-rib (es) (rib fail es (extract (car e) 2) s))
             (else y (begin (fail-at fail (string-append "the signature says what is here exports "
@@ -425,13 +466,20 @@
     (tagcase (node-kids t)
       (k-pvar (n) (list (lv-cage n)))
       (else y
-        (let ((e (extract (node-at t) 5)))
-          (if (null? e)
-              (begin (fail-at fail (string-append "the signature says what is here exports a "
-                                                  "ribcage, and it exports none")
-                              (node-syn t))
-                     (the levels nil))
-              (evaluate fail (extract (car e) 1) (extract (car e) 2) s)))))))
+        (let ((e (extract (node-at (exporter t)) 5)))
+          (cond ((not (null? e)) (evaluate fail (extract (car e) 1) (extract (car e) 2) s))
+                ((form-node? t) (the levels nil))
+                (else
+                 (begin (fail-at fail (string-append "the signature says what is here exports a "
+                                                     "ribcage, and it exports none")
+                                 (node-syn t))
+                        (the levels nil)))))))))
+;; The node whose export is what node `t` exports: a form's operands' (a
+;; definition's), else its own.
+(define exporter (->* (int) int)
+  (lambda (t) (tagcase (node-kids t) (k-form (x) x) (else y t))))
+(define form-node? (->* (int) bool)
+  (lambda (t) (tagcase (node-kids t) (k-form (x) #t) (else y #f))))
 ;; The node at `a` from `root`.
 (define nav (->* (fails int addr syn) int)
   (lambda (fail root a s)

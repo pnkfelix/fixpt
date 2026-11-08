@@ -1,8 +1,9 @@
 ;;; The macros' kernel (`macros.rs`, `macros.fx`): the forms a template may
 ;;; use, with their binding structure, each form's signature of its
 ;;; operands in Herman's notation (`define` names an abbreviation, `form` a
-;;; form); and the words that are forms' names, which no macro, binder or
-;;; variable may be. Data, read by both front ends' expanders.
+;;; form, `definition` a definition's form); and the words that are forms'
+;;; names, which no macro, binder or variable may be. Data, read by both
+;;; front ends' expanders.
 
 (define kernel-forms datum
   (quote
@@ -46,7 +47,19 @@
     (form product fields)
     (form tagcase (expr . arms))
     (form cond cond-clauses)
-    (form %app (expr . exprs)))))
+    (form %app (expr . exprs))
+    ;; The definitions a template may make, a macro's whose signature says
+    ;; `(-> σ defn)`, each exporting what it defines: a value, seeing those
+    ;; before it, `(define x T lambda)` and `define*` itself, a `define-rec`
+    ;; group the whole group; a `begin`'s, each in the scope of those before
+    ;; it. The address `()` is the part the annotation is on.
+    (define defns (mu d (union (export () (cage))
+                               (export (defn . (import d (cage (at A)))) (cage (at D) (at A))))))
+    (definition define (union (export (bvar expr) (rho (A var)))
+                              (export (bvar type (import expr (rho (A var)))) (rho (A var)))))
+    (definition define* (export (bvar type (import lambda (rho (A var)))) (rho (A var))))
+    (definition define-rec (import letrec-bindings (rho (() rib))))
+    (definition begin defns))))
 
 ;; The kernel's keywords (`top::KEYWORDS`, which a test holds this to); with
 ;; `#%fx`, `#%toplevel` and `define-syntax`, the names that are reserved.

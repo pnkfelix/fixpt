@@ -862,7 +862,7 @@ impl Checker {
         let r = if defines {
             macros.define(&form, &mut interner).and_then(|n| macros.template_checks(n, &mut interner)).and_then(|cs| cs.iter().map(|c| macros.expand(c, &mut interner)).collect())
         } else {
-            macros.expand(&form, &mut interner).map(|f| vec![f])
+            macros.expand_top(&form, &mut interner)
         };
         self.macros = macros;
         self.interner = interner;

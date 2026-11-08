@@ -30,8 +30,9 @@
 (define templates-module ((proj (load-module "fx26:macros-templates.fx") rs re rm rc rp)))
 (define macros-module (with templates-module macros-module))
 (import templates-module template-checks)
-(import macros-module expand define-macro defines-syntax? macros-at! macros-after! imports-syntax?
-        import-file-macros note-load-def! later-macro-site globals! global-before? macro?)
+(import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
+        imports-syntax? import-file-macros note-load-def! later-macro-site globals! global-before?
+        macro?)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -217,14 +218,22 @@
                            ((imports-syntax? written)
                             (let ((inc (import-file-macros pfail-at written (get loaded))))
                               (if (null? inc) (the top-list nil) (parse-made (car inc)))))
-                           (else (let ((x (expand pfail-at written)))
-                                   (begin (note-load-def! x) (parse-made (type-loaded x)))))))
+                           (else (expanded-tops (expand-top pfail-at written)))))
                (guarded (guard-defs made (cdr xs)))
                (before (shared-taken))
                (r (form-reading (walk-state t) settings written (loads-of before)))
                (form (number-form t r (append-tops before guarded)))
                (rest (begin (macros-after! r) (parse-tops t settings (cdr xs)))))
           (append-tops form rest)))))
+;; Each form a top-level form is expanded to (a use of a macro that makes
+;; definitions, several), parsed, each as it is noted.
+(define expanded-tops (->* (syns-a) top-list)
+  (lambda (xs)
+    (if (null? xs)
+        nil
+        (let* ((x (car xs))
+               (made (begin (note-load-def! x) (parse-made (type-loaded x)))))
+          (append-tops made (expanded-tops (cdr xs)))))))
 ;; Each of a macro's templates' checks, expanded and parsed.
 (define parse-checks (->* (syns-a) top-list)
   (lambda (cs)

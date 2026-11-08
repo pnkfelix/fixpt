@@ -27,3 +27,14 @@ fn a_macro_is_used_in_a_later_entry() {
     assert!(out.contains("<fx26:3>:1:39: argument 2 is a bool") && !out.contains("panicked"), "{out}");
     assert!(out.contains("  in the expansion of `bad` at <fx26:4>:1:1"), "{out}");
 }
+
+/// A macro that makes definitions, used in later entries: each use's
+/// definitions shown, its template's own made fresh for each use.
+#[test]
+fn a_macro_makes_definitions_in_later_entries() {
+    let def = "(define-syntax define-counter (-> (bvar) defn) ((_ name) (begin (define count (new 0)) (define name (lambda () (begin (set count (+ (get count) 1)) (get count)))))))\n";
+    let out = repl(&format!("{def}(define-counter tick)\n(define-counter tock)\n(tick)\n(+ (tick) (tock))\n"));
+    assert!(out.contains("tick : (subr") && out.contains("tock : (subr"), "{out}");
+    assert!(out.contains("%count:1 : (ref int") && out.contains("%count:2 : (ref int"), "{out}");
+    assert!(out.contains("3 : int") && !out.contains("panicked"), "{out}");
+}

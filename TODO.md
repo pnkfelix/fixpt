@@ -4321,7 +4321,13 @@ once (item 7); the port to the front end written in FX-26 (begun
 the refusals of macros' names, errors said at each use that made them;
 the port is done). Typed holes (item 7) built 2026-11-07, both front ends
 (`typed-macros.md`, "Typed holes"): two tiers, the user's; a `lambda` syntax
-type where a form wants one. Next, `defn` (item 9).
+type where a form wants one. Macros that make definitions, `(-> σ defn)`
+(item 9), built 2026-11-07, both front ends, at the top level, untyped
+(`typed-macros.md`, "Macros that make definitions"). Next, of what it
+leaves: definitions of types and effects (binders of types, item 8); a
+template's sight of what another such macro's use defines (an `export` in
+its signature); typed parts, its template checked once; uses in a
+module's items; names a template constructs (`make-point`), if wanted.
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`
@@ -5246,3 +5252,14 @@ convention, by a type digest written in both languages; checked in
 its key and not the trees' one, their facts must agree). Tabled by the
 user, 2026-11-07, after stage 2: the state by trees, the reference, is
 done and is what every mode keys by.
+
+## 216. The REPL's `,verify` loses what makes no form (found 2026-11-07)
+The REPL keeps the program `,verify` verifies as the text of each form
+that ran (`fx26.rs`, `program`), and a `define-syntax` runs as none (or as
+its templates' hidden checks, whose text is the template's): so a session
+that defines a macro and uses it verifies as `unbound variable` of the
+macro. Found while making macros that make definitions, whose use is
+several forms of one text (each added once since). Keep the text of each
+entry's forms as written, those of an entry that failed up to the
+failure.
+

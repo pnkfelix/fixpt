@@ -4279,3 +4279,26 @@ The user read the paper as supporting the distribution. Mine:
 - **The FX-26 expander's count of fresh names is in the state's table**
   too, so that a program begun in the standard state counts from 0, as
   the Rust expander begun anew does (names show in messages).
+
+## Macros that make definitions (2026-11-07)
+
+- **A use is spliced as the expander reads it**, its definitions each a
+  top-level form at the use's place, rather than a top-level `begin` both
+  checkers learn: the forms after are checked as after any definitions,
+  and the REPL, which takes each form's text by its place, adds one text
+  once (the definitions of one use are consecutive).
+- **The kernel says each definition's scopes** (`definition` entries), so
+  the same Herman machinery checks templates of definitions as of
+  expressions; `(define x T e)` puts `e` in `x`'s scope whether or not it
+  is a lambda, the larger scope, which the checker narrows.
+- **`()` is an address**, the part the annotation is on, so `define-rec`'s
+  group is in its own scope without a new annotation.
+- **What a nested definition macro defines is not seen by its template**
+  rather than guessed: its signature does not say.
+- **A template's own definitions are shown** at the REPL and by `fixpt
+  check` (`%count:1`), unlike templates' checks: they are the program's
+  globals, named in the effects of what uses them.
+- **Types' and effects' definitions left out**: made fresh, a type's name
+  would not reach the types that name it, which the expander does not look
+  into; binders of types (item 8) first.
+
