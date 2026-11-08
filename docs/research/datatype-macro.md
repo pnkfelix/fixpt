@@ -138,11 +138,21 @@ Decided (the user, 2026-11-08):
    `(#:ok v)` carries `v` itself, `(#:rect 1 2)` a tuple, `(tuple 1 2)`.
    A datatype's one-field variant then carries its field, not a product
    of one: code that `extract`s field `1` of one changes.
-2. **`sumof` written as constructors are used**: `(sumof (#:rect int int)
-   …)` is a variant carrying `(tupleof int int)`, `(#:circle int)` one
-   carrying an `int`, `(#:eof)` one carrying `unit`; a `tagcase` arm takes
-   a tuple's members apart alike, `(#:rect (x y) body)`. So a macro writes
-   every variant one way, `(sumof (t field ...) ...)`.
+2. **`sumof` keeps one type per variant**, `(#:label type)` (revised by
+   the user the same day, replacing "`sumof` written as constructors are
+   used"): a macro chooses a variant's type by its arity, with a macro
+   that makes a description (below). A `tagcase` arm takes a tuple's
+   members apart, `(#:rect (x y) body)`.
+7. **Macros that make descriptions**, `(-> σ type)` (the user, 2026-11-08:
+   "I had figured we would naturally want description generating macros
+   eventually"): their uses are where a description is, in a template's
+   descriptions too, so that a macro can choose a part of a type by the
+   shape of what it is given, as `define-data`'s variants need:
+   ```scheme
+   (define-syntax payload (-> (type ...) type)
+     ((_) unit) ((_ f) f) ((_ f g ...) (tupleof f g ...)))
+   ;; define-data's type: (sumof (t (payload field ...)) ...)
+   ```
 3. **A sum's tag at run time is a keyword**, so that a printed sum shows
    what the source wrote: a step of its own.
 4. **No constructors as values**: a keyword constructs a sum only at a
