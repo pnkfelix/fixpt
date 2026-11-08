@@ -22,13 +22,16 @@
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn
+        signature-made
         (type fails addr sty))
 (import align-module defined macro-of macro? makes-defns? nodes-reset! align walk placed node-at
         node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
         act-toplevel-type act-standard act-module act-module-type act-standard-type
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
-        node-hole s-typed
-        (type action actions clause clauses macro macro-env scope scopes pinfo pvars found levels
+        node-hole s-typed exports-of exports=? shown-exports evaluate levels-of nested-binders
+        unsaid-nested
+        (type exported nested action actions clause clauses macro macro-env scope scopes pinfo pvars
+              found levels
               atms kids contracts holes))
 (import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
         imports-syntax? import-usage name-filter all-names listed? not-macros loaded-path
@@ -54,9 +57,10 @@
             (if (null? whole)
                 (begin (fail-at fail clause-usage (car two)) (stub c))
                 (let* ((pattern (nth whole 1))
-                       (ps (pattern-vars fail sig pattern defn))
+                       (pv (pattern-vars fail sig pattern defn)) (ps (extract pv 1))
                        (template (nth two 1)))
-                  (tuple pattern template (template-actions fail ps template defn file) ps
+                  (tuple pattern template
+                         (template-actions fail ps template defn (extract pv 2) file) ps
                          (contracts-of ps (binder-names poly) file)))))))))
 (define stub (->* (syn) clause)
   (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil))))
@@ -97,13 +101,23 @@
           (else (or (names-any? (car (split s)) ns) (names-any? (nth (split s) 1) ns))))))
 ;; The pattern, aligned with the signature: each variable's type and
 ;; declared environment. A macro that makes definitions (`defn`) has no
-;; typed parts: what each use defines is checked where it is.
-(define pattern-vars (->* (fails sty syn bool) pvars)
+;; typed parts: what each use defines is checked where it is. And what
+;; such a macro's uses define, if its signature says (`(-> (export σ β)
+;; defn)`), in a list of one: what a template using it sees, and what its
+;; own template is held to.
+(define pattern-vars (->* (fails sty syn bool) (tupleof pvars (listof exported acyclic)))
   (lambda (fail sig pattern defn)
     (begin
       (nodes-reset!)
-      (let ((root (align fail 0 (the pvars nil) sig pattern -1 nil)))
-        (pvars-of fail (walk fail root nil #f) nil defn)))))
+      (let* ((root (align fail 0 (the pvars nil) sig pattern -1 nil))
+             (found (walk fail root nil #f))
+             (e (extract (node-at root) 5))
+             (declared (if (and defn (not (null? e)))
+                           (the (listof exported acyclic)
+                                (list (exports-of (evaluate fail (extract (car e) 1)
+                                                            (extract (car e) 2) pattern))))
+                           nil)))
+        (tuple (pvars-of fail found nil defn) declared)))))
 (define pvars-of (->* (fails found pvars bool) pvars)
   (lambda (fail fs ps defn)
     (if (null? fs)
@@ -133,17 +147,32 @@
 ;; kernel's forms' signatures and the macros', its pattern variables placed
 ;; by the rules, and what is done to each of its names where it is
 ;; transcribed.
-(define template-actions (->* (fails pvars syn bool scopes) actions)
-  (lambda (fail ps template defn file)
+(define template-actions
+  (->* (fails pvars syn bool (listof exported acyclic) scopes) actions)
+  (lambda (fail ps template defn declared file)
     (begin
       (nodes-reset!)
       (let* ((root (align fail 1 ps (if defn (s-defn) (s-expr)) template -1 nil))
-             (named (name-actions fail ps (walk fail root nil #f) file nil nil)))
-        (type-actions 0 (get nnodes) file named)))))
+             (found (walk fail root nil #f))
+             (nested (nested-binders 0 (get nnodes) ps))
+             (named (name-actions fail ps found file nil nil nested)))
+        (begin
+          ;; What the template defines of what its uses give, what its
+          ;; signature says.
+          (if (null? declared)
+              #u
+              (let ((made (exports-of (levels-of fail root template))))
+                (if (exports=? made (car declared))
+                    #u
+                    (fail-at fail (string-append "this template defines " (shown-exports made)
+                                                 ", and its signature says its uses define "
+                                                 (shown-exports (car declared)))
+                             template))))
+          (type-actions 0 (get nnodes) file named))))))
 ;; The actions for what the walk found, onto `out`; `uses`, the affine
 ;; pattern variables placed so far.
-(define name-actions (->* (fails pvars found scopes actions names) actions)
-  (lambda (fail ps fs file out uses)
+(define name-actions (->* (fails pvars found scopes actions names nested) actions)
+  (lambda (fail ps fs file out uses nested)
     (if (null? fs)
         out
         (let* ((at (extract (car fs) 1)) (env (extract (car fs) 2)) (many (extract (car fs) 3))
@@ -173,14 +202,18 @@
                                s)
                       #u)
                   (name-actions fail ps (cdr fs) file out
-                                (if affine (the names (cons n uses)) uses)))))
+                                (if affine (the names (cons n uses)) uses) nested))))
             (k-binder (n)
-              (name-actions fail ps (cdr fs) file (cons (tuple path (act-rename path)) out) uses))
+              (name-actions fail ps (cdr fs) file (cons (tuple path (act-rename path)) out) uses
+                            nested))
             (k-ref (n)
               (let ((b (binder-of n env)))
-                (name-actions fail ps (cdr fs) file
-                              (cons (tuple path (ref-action fail n b file s)) out) uses)))
-            (else y (name-actions fail ps (cdr fs) file out uses)))))))
+                (begin
+                  (unsaid-nested fail n b nested s)
+                  (name-actions fail ps (cdr fs) file
+                                (cons (tuple path (ref-action fail n b file s)) out) uses
+                                nested))))
+            (else y (name-actions fail ps (cdr fs) file out uses nested)))))))
 ;; Whether typed hole `h` (none or one) has its effect written `pure`.
 (define pure-hole? (->* (holes) bool)
   (lambda (h)
@@ -312,19 +345,6 @@
                             (set defined (cons (tuple n (tuple sig cs (extract poly 1) defn))
                                                before))
                             n)))))))))))
-;; A signature's `(-> σ made)`: `σ`, and whether it makes definitions,
-;; `defn`, not an expression, `expr`; else itself, an expression's.
-(define signature-made (->* (fails syn) (tupleof syn bool))
-  (lambda (fail s)
-    (let ((items (proper s)))
-      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "->"))
-          (let ((made (if (syn-symbol? (nth items 2)) (syn-name (nth items 2)) "")))
-            (cond ((string=? made "defn") (tuple (nth items 1) #t))
-                  ((string=? made "expr") (tuple (nth items 1) #f))
-                  (else (begin (fail-at fail "a signature `(-> σ made)` makes `expr` or `defn`"
-                                        (nth items 2))
-                               (tuple s #f)))))
-          (tuple s #f)))))
 ;; A signature's `(poly ((name kind) …) σ)`: its binders and `σ`; else none
 ;; and itself.
 (define signature-poly (->* (fails syn) (tupleof syns-a syn))

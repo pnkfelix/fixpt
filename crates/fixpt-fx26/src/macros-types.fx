@@ -613,3 +613,16 @@
 (define any-sub? (->* (sty stys assumed) bool)
   (lambda (a ms more)
     (and (not (null? ms)) (or (sub? a (car ms) more) (any-sub? a (cdr ms) more)))))
+;; A signature's `(-> σ made)`: `σ`, and whether it makes definitions,
+;; `defn`, not an expression, `expr`; else itself, an expression's.
+(define signature-made (->* (fails syn) (tupleof syn bool))
+  (lambda (fail s)
+    (let ((items (proper-items s)))
+      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "->"))
+          (let ((made (if (syn-symbol? (nth items 2)) (syn-name (nth items 2)) "")))
+            (cond ((string=? made "defn") (tuple (nth items 1) #t))
+                  ((string=? made "expr") (tuple (nth items 1) #f))
+                  (else (begin (fail-at fail "a signature `(-> σ made)` makes `expr` or `defn`"
+                                        (nth items 2))
+                               (tuple s #f)))))
+          (tuple s #f)))))

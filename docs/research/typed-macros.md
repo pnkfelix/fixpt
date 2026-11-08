@@ -840,8 +840,9 @@ circa R5RS").
   `begin` of definitions, Herman's `let*` clauses, each in the scope of
   those before it, a ribcage. The address `()`, Herman's `ε`, names the
   part an annotation is on (`define-rec`'s group, its own import). A use of
-  another such macro is a definition too, which exports nothing the
-  template sees: its signature says nothing of what it defines.
+  another such macro is a definition too, which exports what its
+  signature says, `(-> (export σ β) defn)`, and nothing else ("Decided:
+  signatures depend on their operands by address alone").
 - **Hygiene, Herman's exports**: a name a use gives, a `bvar` part, is
   defined under that name, the program's; one the template writes is made
   fresh, as its other binders are, so nothing outside can name it, and
@@ -888,7 +889,12 @@ A macro sees what a nested use defines only as that macro's signature
 declares (`(-> (export σ β) defn)`), checked where it is defined, never
 by its expansion (the user, 2026-11-07, "It matches my intent"); a
 reference the declarations do not bind is refused, not read at the top
-level.
+level. Built the same day, both front ends: the export is held to what the
+template defines of what its uses give (its own binders, made fresh, are
+none of it), `` this template defines `a`, and its signature says its uses
+define `a`, `b` ``; a name bound in a nested use that does not export it,
+referred to, is refused, `(with #%toplevel x)` the way to the top
+level's (`defn-export*.fx`).
 
 ## Questions for the user
 

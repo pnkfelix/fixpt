@@ -753,6 +753,13 @@ impl Macros {
         let root = p.align(sig, &pattern, None, Vec::new())?;
         let mut found = Vec::new();
         p.walk(root, &Vec::new(), false, &mut found)?;
+        // What a use of a macro that makes definitions says it defines, if
+        // its signature says (`(-> (export σ β) defn)`): what a template
+        // using it sees, and what its own template is held to.
+        let declared = match (defn, &p.nodes[root].export) {
+            (true, Some((b, r))) => Some(exports(&p.eval(b, *r, pattern.span)?)),
+            _ => None,
+        };
         let mut pvars: HashMap<Sym, PInfo> = HashMap::new();
         let mut order = Vec::new();
         for (at, env, many) in found {
@@ -773,6 +780,19 @@ impl Macros {
         let root = t.align(&Rc::new(if defn { STy::Defn } else { STy::Expr }), template, None, Vec::new())?;
         let mut found = Vec::new();
         t.walk(root, &Vec::new(), false, &mut found)?;
+        // The names the template binds in its uses of macros that make
+        // definitions: what their signatures do not say they define, it
+        // does not see.
+        let mut nested = Vec::new();
+        for node in &t.nodes {
+            if let Kids::Form(x) = node.kids
+                && let Some(h) = node.syn.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol())
+                && !pvars.contains_key(&h)
+                && self.defined.get(&h).is_some_and(|m| m.defn)
+            {
+                t.binders_under(x, h, &mut nested);
+            }
+        }
         let mut actions = HashMap::new();
         let mut uses: HashMap<Sym, usize> = HashMap::new();
         for (at, env, many) in found {
@@ -813,6 +833,15 @@ impl Macros {
                         }),
                         Level::Cage(_) => None,
                     });
+                    // A name a nested use binds, which it is not said to
+                    // define: refused, not read at the top level, which the
+                    // template would seem to mean by it.
+                    if bound.is_none()
+                        && let Some((_, m)) = nested.iter().find(|(b, _)| b == n)
+                    {
+                        let (n, m) = (interner.name(*n), interner.name(*m));
+                        return Err(FxError::at(span, format!("`{n}` is bound in a use of `{m}`, whose signature does not say its uses define it: say so (`(-> (export σ β) defn)`), or write `(with #%toplevel {n})` for the top level's")));
+                    }
                     let action = match (bound, file) {
                         (Some(b), _) => Action::Rename(t.nodes[b].path.clone()),
                         (None, None) => Action::Toplevel,
@@ -828,6 +857,14 @@ impl Macros {
                     actions.insert(node.path.clone(), action);
                 }
                 _ => {}
+            }
+        }
+        // What the template defines of what its uses give, what its
+        // signature says.
+        if let Some(declared) = declared {
+            let made = exports(&t.levels_of(root, template.span)?);
+            if made != declared {
+                return Err(FxError::at(template.span, format!("this template defines {}, and its signature says its uses define {}", shown_exports(&made, interner), shown_exports(&declared, interner))));
             }
         }
         // Each type the template writes (none of the use's is in it: a
@@ -1390,6 +1427,20 @@ impl Aligner<'_> {
         }
     }
 
+    /// Each template binder under node `at`, with `m`, the macro whose use
+    /// it is in, onto `out`.
+    fn binders_under(&self, at: usize, m: Sym, out: &mut Vec<(Sym, Sym)>) {
+        match self.nodes[at].kids {
+            Kids::Pair(x, y) => {
+                self.binders_under(x, m, out);
+                self.binders_under(y, m, out);
+            }
+            Kids::Form(x) => self.binders_under(x, m, out),
+            Kids::Binder(n) => out.push((n, m)),
+            _ => {}
+        }
+    }
+
     /// The node whose export is what node `t` exports: a form's operands'
     /// (a definition's), else its own.
     fn exported(&self, t: usize) -> &Node {
@@ -1494,6 +1545,38 @@ fn normal(env: &[Level]) -> Vec<Level> {
             Level::Cage(n) => Some(Level::Cage(*n)),
         })
         .collect()
+}
+
+/// What an export binds of what a use gives, as compared: its pattern
+/// variables' atoms, each once, sorted, and the ribcages, sorted; the
+/// template's own binders, made fresh, none of it.
+fn exports(levels: &[Level]) -> (Vec<Atom>, Vec<Sym>) {
+    let mut atoms = Vec::new();
+    let mut cages = Vec::new();
+    for l in normal(levels) {
+        match l {
+            Level::Rib(a) => atoms.extend(a),
+            Level::Cage(n) => cages.push(n),
+        }
+    }
+    atoms.sort();
+    atoms.dedup();
+    cages.sort();
+    cages.dedup();
+    (atoms, cages)
+}
+
+/// An export's names, as said, in order: `` `a` `` for a binder, `` what `a`
+/// defines `` for a rib or ribcage; `nothing` if none.
+fn shown_exports(e: &(Vec<Atom>, Vec<Sym>), interner: &Interner) -> String {
+    let mut out: Vec<String> = e.0.iter().filter_map(|a| match a {
+        Atom::Var(n) => Some(format!("`{}`", interner.name(*n))),
+        Atom::RibOf(n) => Some(format!("what `{}` defines", interner.name(*n))),
+        Atom::Lit(_) => None,
+    }).collect();
+    out.extend(e.1.iter().map(|n| format!("what `{}` defines", interner.name(*n))));
+    out.sort();
+    if out.is_empty() { "nothing".to_string() } else { out.join(", ") }
 }
 
 fn bind(b: &Syntax, interner: &Interner) -> R<Bind> {
