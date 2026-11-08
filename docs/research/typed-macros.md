@@ -573,10 +573,15 @@ turn.
   (`guard-defs`, `global-macro`), as forms the checker refuses where
   the Rust one refuses them; a `with`'s body's macro by a name its module
   gives, in the checker (`k-with-used-at`), told what the expander found
-  of the last parse (`check-macro-uses!`). An error
-  the FX-26 checker finds in an expansion is said where the template
-  wrote it, not yet at each use that made it: its trees keep no
-  expansion (`syn` does, since 2026-11-07).
+  of the last parse (`check-macro-uses!`). An error in an expansion is
+  said where the template wrote it, then at each use that made it, as the
+  Rust front end says it (the user's design, 2026-11-07): each part a
+  template makes is at a key of its own, a place past every text's, so
+  that two expansions' copies of one part are apart; a table beside the
+  trees says, by key, where the template wrote the part and which
+  expansion made it (`source-of`), and the driver says an error at a key
+  there and at each use (`syn.rs`'s `fx26_span`). Places stay places:
+  nothing is packed into them.
 - Ellipsis (the user's answer: later, as sugar for recursion), `defn`,
   binders of descriptions, procedural macros (items 7 to 11).
 
@@ -762,6 +767,44 @@ The user's design, the reasons in the conversation that led to it:
     parameters cannot be imported from, not yet;
   - a file's macro may not take the name of a macro defined already.
   Tests: `crates/fixpt-cli/tests/import_with_syntax.rs`, on four machines.
+
+## Proposed: typed holes (2026-11-07, not decided)
+
+The next step after the port (item 7 of the table above: "well-typed in,
+well-typed out"), written for the user to look at before any code.
+
+1. **Signatures.** `(expr T E)`, an expression of type at most `T` and
+   effect at most `E`; `(bvar T)`, a binder whose variable has type `T`; a
+   signature in a `(poly ((t type) (e effect)) σ)`, so that `T` and `E`
+   may be the macro's own binders. Plain `expr` and `bvar` mean what they
+   mean now.
+2. **A template checked once, where it is defined, as a procedure over
+   its holes.** A `define-syntax` whose holes are all typed also makes a
+   hidden definition, which the checkers check where the `define-syntax`
+   is: the template as a procedure, each hole a parameter. A hole
+   `(expr T E)` is a thunk, `(subr E () T)`, placed as `(e)`, so that its
+   effect counts each time it is run; one under the template's binder of
+   a `(bvar U)` (`(in (expr T E) x)`) takes that variable, `(subr E (U)
+   T)`, placed as `(e x)`. No new checker: both check ordinary code, and
+   an error in a template is said once, at its definition. The macro's
+   result type and effect are that procedure's result's, or what the
+   signature declares, checked against it.
+3. **Uses.** Each argument held to its hole's declared type in the
+   expansion itself, a typed hole transcribed as `(the T e)`, so that the
+   checker checks the contract (an effect's bound: a form to add, or left
+   to the expansion's check). Expansions are still checked as now, so
+   soundness rests on nothing new; the definition's check gives early
+   errors and the contract, and a disagreement between the two is a bug
+   in it.
+4. **Duplication by effect.** A hole declared `pure` may be placed any
+   number of times without `(many …)`; an effectful one placed twice is
+   refused unless its signature says `(many …)`; an untyped one is affine,
+   as now.
+5. **Open.** A template's free names are checked at their types where
+   the macro is defined: a later redefinition that changes one would have
+   the macro checked again, as the definitions that use a global are run
+   again. Whether an effect's bound gets a form of its own. Each step in
+   both front ends, the Rust one first, `tests/macros_both.rs` extended.
 
 ## Questions for the user
 

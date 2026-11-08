@@ -1,9 +1,8 @@
 //! Both front ends' expanders (`macros.rs`, `macros.fx`) on each program in
 //! `programs/macros`, and those importing a file's macros: what each checker finds of the program expanded, or
 //! where and why each refuses it, the same. An expander's refusal is its
-//! front end's (the FX-26 one's, its parse's). What follows an error's
-//! first line, the uses that made the text it is in, the FX-26 front end
-//! does not say yet.
+//! front end's (the FX-26 one's, its parse's), and an error is the same
+//! with each use of a macro that made the text it is in (`same_error`).
 
 use fixpt_engine::Backend;
 use fixpt_fx26::compare;
@@ -42,7 +41,7 @@ fn agree(dir: &str, prefix: &str) {
         };
         let same = match (&fx26, &rust) {
             (Ok(a), Ok(b)) => a == b,
-            (Err(a), Err(b)) => a.message == b.message && (a.span.start, a.span.end) == (b.span.start, b.span.end),
+            (Err(a), Err(b)) => compare::same_error(a, b),
             _ => false,
         };
         if !same {

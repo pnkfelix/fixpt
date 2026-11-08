@@ -4318,8 +4318,8 @@ way out, when wanted); a file's own use of its
 macros, files of module parameters; `(expr T E)` and templates checked
 once (item 7); the port to the front end written in FX-26 (begun
 2026-11-07: `define-syntax`, expansion, `#%toplevel`, `import-with-syntax`,
-the refusals of macros' names; left: errors said at each
-use that made them, which the FX-26 trees keep no expansion for).
+the refusals of macros' names, errors said at each use that made them;
+the port is done).
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`

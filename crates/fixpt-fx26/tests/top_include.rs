@@ -51,7 +51,7 @@ fn both_checkers_agree_on_top_level_includes() {
         let (fx26, rust) = fixpt_fx26::compare::both_checkers(&mut s, &text).expect("both check");
         let same = match (&fx26, &rust) {
             (Ok(a), Ok(b)) => a == b,
-            (Err(a), Err(b)) => a.message == b.message && a.span == b.span,
+            (Err(a), Err(b)) => fixpt_fx26::compare::same_error(a, b),
             _ => false,
         };
         if !same {

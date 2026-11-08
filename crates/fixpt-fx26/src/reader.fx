@@ -50,3 +50,7 @@
 ;; For the conductor: the macros each `with`'s body used, as the expander
 ;; met them, for the checker (`k-macro-uses!`).
 (define with-macro-uses (with macros-module with-uses-given))
+;; For the driver: each expansion made, by its number, and where a key a
+;; template's part was given is (`syn.rs`'s `fx26_span`).
+(define expansions-made (with macros-module expansions-given))
+(define macro-source (with macros-module source-of))

@@ -1186,7 +1186,7 @@ pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
     };
     let same = match (&fx26, &rust) {
         (Ok(a), Ok(b)) => a == b,
-        (Err(a), Err(b)) => a.message == b.message && a.span == b.span,
+        (Err(a), Err(b)) => fixpt_fx26::compare::same_error(a, b),
         _ => false,
     };
     if same {

@@ -308,18 +308,57 @@
 
 ;;; ------------------------------------------------------------ expanding
 
-;; Each expansion made: its macro's name, and the use's place and its own
-;; expansion, by its number less one, the last first; `syn-expansion`
-;; says which made a part.
-(define expansions (ref (listof (tupleof symbol int int int) acyclic) rs) (new nil))
+;; Each expansion made, the last first: its number, its macro's name, and
+;; where its use is; `syn-expansion` says which made a part.
+(define-type expansions-made (listof (tupleof int symbol int int) acyclic))
+(define expansions (ref expansions-made rs) (new nil))
 (define nexpansions (ref int rs) (new 0))
 (define record-expansion (->* (symbol syn) int)
   (lambda (name s)
-    (begin
-      (set expansions (cons (tuple name (syn-start s) (syn-end s) (syn-expansion s))
-                            (get expansions)))
-      (set nexpansions (+ (get nexpansions) 1))
-      (get nexpansions))))
+    (let ((n (+ (get nexpansions) 1)))
+      (begin
+        (set nexpansions n)
+        (set expansions (cons (tuple n name (syn-start s) (syn-end s)) (get expansions)))
+        n))))
+;; For the driver, which says an error in an expansion at each use.
+(define expansions-given (->* () expansions-made) (lambda () (get expansions)))
+
+;; Where a part a template made is: a key of its own, which no other part
+;; and no text has, a place past every text's (`source-base`, above the
+;; positions of every file loaded, `load-base` apart), so that two
+;; expansions' copies of one part of the template are apart; and, by its
+;; key, where the template wrote it and which expansion made it, for what
+;; is said of it (`source-of`; the driver's `fx26_span`), as the Rust front
+;; end's `Span` has a template's place and its `expansion`. Keys are made
+;; in order, a list's start before its parts' and its end after, so that
+;; a part is within its list. One table for the session, so that no key is
+;; given twice.
+(define source-base int 1125899906842624)
+(define sources (ref (arrayof (tupleof int int) rs) rs) (new (make-array 1024 (tuple 0 0))))
+(define nsources (ref int rs) (new 0))
+;; A new key, for template place `p`, of expansion `made`.
+(define source-key (->* (int int) int)
+  (lambda (p made)
+    (let ((i (get nsources)))
+      (begin
+        (if (= i (array-length (get sources)))
+            (let ((bigger (the (arrayof (tupleof int int) rs) (make-array (* 2 i) (tuple 0 0)))))
+              (begin (copy-sources (get sources) bigger 0) (set sources bigger)))
+            #u)
+        (array-set! (get sources) i (tuple p made))
+        (set nsources (+ i 1))
+        (+ source-base i)))))
+(define copy-sources (->* ((arrayof (tupleof int int) rs) (arrayof (tupleof int int) rs) int) unit)
+  (lambda (from to i)
+    (if (= i (array-length from))
+        #u
+        (begin (array-set! to i (array-ref from i)) (copy-sources from to (+ i 1))))))
+;; Key `k`'s template place and expansion; a place that is no key, itself
+;; and 0.
+(define source-of (->* (int) (tupleof int int))
+  (lambda (k)
+    (let ((i (- k source-base)))
+      (if (and (>= i 0) (< i (get nsources))) (array-ref (get sources) i) (tuple k 0)))))
 ;; The expansions left before one does not end.
 (define budget (ref int rs) (new 0))
 ;; Fresh names' count.
@@ -510,7 +549,7 @@
       (transcribe-at c t path bs made))))
 (define transcribe-at (->* (clause syn addr binds int) syn)
   (lambda (c t path bs made)
-    (let* ((a (syn-start t)) (b (syn-end t)) (act (action-at path (extract c 3)))
+    (let* ((ta (syn-start t)) (tb (syn-end t)) (act (action-at path (extract c 3)))
            (typed (if (null? act)
                       ""
                       (tagcase (car act)
@@ -520,12 +559,15 @@
                         (else y "")))))
       (cond
         ((not (string=? typed ""))
-         (list-at a b made (list (atom 'select a b made) (atom (string->symbol typed) a b made)
-                                 (in-expansion t made))
-                  nil))
-        ((syn-symbol? t) (transcribe-name t (syn-symbol t) a b act bs made))
+         (let* ((a (source-key ta made)) (ty (in-expansion t made)) (b (source-key tb made)))
+           (list-at a b made
+                    (list (atom 'select a b made) (atom (string->symbol typed) a b made) ty) nil)))
+        ((syn-symbol? t)
+         (let* ((a (source-key ta made)) (b (source-key tb made)))
+           (transcribe-name t (syn-symbol t) a b act bs made)))
         ((not (null? (list-items t)))
-         (let* ((xs (transcribe-items c (list-items t) path bs made))
+         (let* ((a (source-key ta made))
+                (xs (transcribe-items c (list-items t) path bs made))
                 (rest (tagcase t
                         (dotted (items tail d c2 e x)
                           (let ((at (append path (falses (len items) nil))))
@@ -538,9 +580,10 @@
                          xs
                          (cons (atom (car head) (syn-start (car xs)) (syn-end (car xs))
                                      (syn-expansion (car xs)))
-                               (cdr xs)))))
+                               (cdr xs))))
+                (b (source-key tb made)))
            (list-at a b made xs2 rest)))
-        (else (at-place t a b made))))))
+        (else (let* ((a (source-key ta made)) (b (source-key tb made))) (at-place t a b made)))))))
 ;; `n` `#f`s, onto `out`.
 (define falses (->* (int addr) addr)
   (lambda (n out) (if (= n 0) out (falses (- n 1) (cons #f out)))))
@@ -586,15 +629,20 @@
     (cond ((null? fs) nil)
           (((with types-module addr=?) p (extract (car fs) 1)) (list (extract (car fs) 2)))
           (else (fresh-of p (cdr fs))))))
-;; `s`, each part of it at its place in expansion `made`.
+;; `s`, each part of it at a key of its own for its place, in expansion
+;; `made`.
 (define in-expansion (->* (syn int) syn)
   (lambda (s made)
-    (tagcase s
-      (lst (items d a b x) (lst (each-in items made) d a b made))
-      (dotted (items tail d a b x)
-        (dotted (each-in items made) (in-expansion tail made) d a b made))
-      (vec (items d a b x) (vec (each-in items made) d a b made))
-      (atom (d a b x) (atom d a b made)))))
+    (let ((a (source-key (syn-start s) made)))
+      (tagcase s
+        (lst (items d c e x)
+          (let* ((xs (each-in items made)) (b (source-key e made))) (lst xs d a b made)))
+        (dotted (items tail d c e x)
+          (let* ((xs (each-in items made)) (tl (in-expansion tail made)) (b (source-key e made)))
+            (dotted xs tl d a b made)))
+        (vec (items d c e x)
+          (let* ((xs (each-in items made)) (b (source-key e made))) (vec xs d a b made)))
+        (atom (d c e x) (atom d a (source-key e made) made))))))
 (define each-in (->* (syns-a int) syns-a)
   (lambda (xs made)
     (if (null? xs) nil (cons (in-expansion (car xs) made) (each-in (cdr xs) made)))))

@@ -552,7 +552,7 @@ pub fn check_with_fx26_checker(scheme: &mut Session, standard: Handle, file: Fil
         phase("checked");
         let offsets = byte_offsets(text);
         let at = |c: i64| offsets.get(c as usize).copied().unwrap_or(text.len()) as u32;
-        Ok(s.view(|v| {
+        let checked = s.view(|v| {
             let r = v.get(result);
             let tag = r.sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default();
             let p = r.sum_payload().expect("a sum");
@@ -561,10 +561,10 @@ pub fn check_with_fx26_checker(scheme: &mut Session, standard: Handle, file: Fil
                 Ok(lines.into_iter().map(|l| l.string().unwrap_or_default()).collect())
             } else {
                 let message = p.product_field(1).and_then(|m| m.string()).unwrap_or_default();
-                let (a, b) = (p.product_field(2).and_then(|x| x.fixnum()).unwrap_or(0), p.product_field(3).and_then(|x| x.fixnum()).unwrap_or(0));
-                Err(FxError::at(Span::new(file, at(a), at(b)), message))
+                Err((message, p.product_field(2).and_then(|x| x.fixnum()).unwrap_or(0), p.product_field(3).and_then(|x| x.fixnum()).unwrap_or(0)))
             }
-        }))
+        });
+        Ok(checked.map_err(|(message, a, b)| FxError::at(fx26_span(s, file, &at, a, b), message)))
     })
 }
 
@@ -792,7 +792,7 @@ fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, b
     if let Some((msg, a, b)) = err {
         let offsets = byte_offsets(text);
         let at = |c: i64| offsets.get((c - base).max(0) as usize).copied().unwrap_or(text.len()) as u32;
-        return Err(FxError::at(Span::new(file, at(a), at(b)), msg));
+        return Err(FxError::at(fx26_span(scheme, file, &at, a, b), msg));
     }
     debug_assert_eq!(tag, "p-ok");
     let tops = scheme.make(|m| {
@@ -1023,6 +1023,87 @@ thread_local! {
     static INCLUDES: std::cell::RefCell<Vec<IncludeGiven>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The standard bindings' names, for the next text ([`set_standard_names`]).
     static STANDARD_NAMES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Where the FX-26 expander's keys begin: a part a template made is at a
+/// key of its own, past every text's place (`source-base`, `macros.fx`).
+const SOURCE_BASE: i64 = 1 << 50;
+
+/// The span of FX-26 places `a`..`b`, characters' places in the text
+/// (`at` takes one to a byte): a part a template made, by its keys, where
+/// the template wrote it, of the expansion that made it, recorded with each
+/// use that made it as the Rust expander records its own, so that what is
+/// said there is said at each use (`located`).
+fn fx26_span(scheme: &mut Session, file: FileId, at: &dyn Fn(i64) -> u32, a: i64, b: i64) -> Span {
+    if a < SOURCE_BASE && b < SOURCE_BASE {
+        return Span::new(file, at(a), at(b));
+    }
+    let made = expansions_made(scheme);
+    Sources { file, at, made, done: HashMap::new() }.span(scheme, a, b)
+}
+
+/// The FX-26 expander's expansions, and those recorded as Rust's so far.
+struct Sources<'a> {
+    file: FileId,
+    at: &'a dyn Fn(i64) -> u32,
+    made: HashMap<i64, (String, i64, i64)>,
+    done: HashMap<i64, u32>,
+}
+
+impl Sources<'_> {
+    fn span(&mut self, scheme: &mut Session, a: i64, b: i64) -> Span {
+        let (ra, x) = source_of(scheme, a);
+        let (rb, _) = source_of(scheme, b);
+        let mut span = Span::new(self.file, (self.at)(ra), (self.at)(rb));
+        span.expansion = self.expansion(scheme, x);
+        span
+    }
+
+    /// FX-26 expansion `x` as a Rust one, its use's own first; 0 if none.
+    fn expansion(&mut self, scheme: &mut Session, x: i64) -> u32 {
+        if let Some(&r) = self.done.get(&x) {
+            return r;
+        }
+        let Some((name, a, b)) = self.made.get(&x).cloned() else { return 0 };
+        let use_at = self.span(scheme, a, b);
+        let r = fixpt_read::record_expansion(&name, use_at, None);
+        self.done.insert(x, r);
+        r
+    }
+}
+
+/// Where key `k` is, and the expansion that made the part there; a place
+/// that is no key, itself and 0 (`macro-source`).
+fn source_of(scheme: &mut Session, k: i64) -> (i64, i64) {
+    let name = format!("{READER_PREFIX}macro-source");
+    if k < SOURCE_BASE || !scheme.is_bound(&name) {
+        return (k, 0);
+    }
+    let arg = scheme.make(|_| Value::fixnum(k));
+    let Ok(r) = scheme.call_global(&name, &[arg]) else { return (k, 0) };
+    scheme.view(|v| {
+        let r = v.get(r);
+        (r.product_field(1).and_then(|x| x.fixnum()).unwrap_or(k), r.product_field(2).and_then(|x| x.fixnum()).unwrap_or(0))
+    })
+}
+
+/// The FX-26 expander's expansions (`expansions-made`): each one's macro's
+/// name and its use's place, by its number.
+fn expansions_made(scheme: &mut Session) -> HashMap<i64, (String, i64, i64)> {
+    let name = format!("{READER_PREFIX}expansions-made");
+    if !scheme.is_bound(&name) {
+        return HashMap::new();
+    }
+    let Ok(list) = scheme.call_global(&name, &[]) else { return HashMap::new() };
+    scheme.view(|v| {
+        let int = |x: Option<Local<'_>>| x.and_then(|x| x.fixnum()).unwrap_or(0);
+        v.get(list)
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| (int(e.product_field(1)), (e.product_field(2).and_then(|n| n.symbol_name()).unwrap_or_default(), int(e.product_field(3)), int(e.product_field(4)))))
+            .collect()
+    })
 }
 
 /// What a top-level `include` of a text gives (`includes-given!`): where it

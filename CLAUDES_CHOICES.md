@@ -4233,3 +4233,21 @@ The user read the paper as supporting the distribution. Mine:
   record of each parse (reset as a parse begins, so no program's places
   meet another's) handed to the checker by `check-macro-uses!`, which the
   driver calls after each parse, and by the conductor's own parses.
+
+## Errors in an expansion, from the FX-26 front end (2026-11-07)
+
+- **The user's design**: a side table, its keys each a source's alone,
+  its values the diagnostic extras. Mine: the keys are the places of the
+  parts a template makes, each part a fresh one from a counter past every
+  text's place (2^50), a list's start before its parts and its end after;
+  the table, by key, the template's place and the expansion. So two
+  expansions' copies of one template part are apart, a place is one
+  number naming one place, and what compares places (all at one place, a
+  part within its list) is as it was. A first try packed the expansion's
+  number above the template's place; the user asked about it, and it was
+  undone before it was committed.
+- **The table is the session's**, keys never given twice, so no key of
+  one parse is taken for another's.
+- **Two checkers' errors are the same** by message, place and each use's
+  name and place (`compare::same_error`), not by the numbers each
+  expander gives its expansions.
