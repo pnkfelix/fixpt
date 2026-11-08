@@ -19,8 +19,9 @@
     (define let*-clauses (mu c (union (export () (cage))
                                       (export ((bvar expr) . (import c (rho (AA var))))
                                               (cage (at D) (rho (AA var)))))))
+    ;; Each bound to a lambda, as the checkers take one.
     (define letrec-bindings (mu b (union (export () (rho))
-                                         (export ((bvar type expr) . b) (rho (AA var) (D rib))))))
+                                         (export ((bvar type lambda) . b) (rho (AA var) (D rib))))))
     ;; A `tagcase` arm, `(#:tag x body …)` or `(else x body …)`: `x` in scope in
     ;; the body.
     (define arms (mu a (union ()

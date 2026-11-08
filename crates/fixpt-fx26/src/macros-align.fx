@@ -14,7 +14,8 @@
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
-        fits? sub? kind-of kernel-sigs bind-rib bind-cage ring-rib ring-at s-expr s-bvar s-id
+        fits? sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs bind-rib bind-cage
+        ring-rib ring-at s-expr s-bvar s-id
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         mu-body addr=?
         (type fails addr entries ring rings bind sty stys named hole))
@@ -239,6 +240,14 @@
                  (said (string-append "a tag or label in a template is a keyword: `#:"
                                       (syn-name s) "`, not `" (syn-name s) "`")))
                 (else (said (string-append shown " is not a tag or label")))))
+        ;; A template writes a lambda (its form aligned as any of the kernel's);
+        ;; a use gives one, of the shape the checkers take.
+        (s-lambda ()
+          (cond ((and (= mode 1) (not (null? (split s))) (syn-symbol? (car (split s)))
+                      (string=? (syn-name (car (split s))) "lambda") (proper? s))
+                 (form fail ps at s))
+                ((and (not (= mode 1)) (lambda-shaped? s)) #u)
+                (else (said (string-append shown " is not a lambda, as this part must be")))))
         (s-expr ()
           (cond ((reserved-syn? s)
                  (said (string-append "`" (syn-name s) "` is a form's name, not an expression")))
@@ -445,7 +454,7 @@
     (let* ((name (symbol->string n)) (have (extract info 1)) (kh (kind-of have))
            (kw (kind-of (unfold want)))
            (said (lambda ((why string)) (fail-at fail (string-append "`" name "` " why) s)))
-           (simple? (lambda ((k int)) (< k 6))))
+           (simple? (lambda ((k int)) (simple-kind? k))))
       (cond
         ((and (= kh 1) (= kw 1)) #u)
         ;; A pattern's binder referred to: in its scope, and where no other of
@@ -458,9 +467,17 @@
                                        "may shadow it (Herman's shadow restriction): a use "
                                        "giving both one name would change what it refers to")))
                  (else #u))))
+        ;; An untyped part where a lambda is wanted: it promises nothing, and
+        ;; its uses' expansions are checked; a typed hole says it is a lambda
+        ;; (`typed-macros.md`, "Typed holes": two tiers).
+        ((and (= kh 0) (= kw 10) (not (null? (extract info 4))))
+         (said (string-append "is placed where a lambda is wanted: a typed hole there is a "
+                              "lambda, `(lambda #:type T)`")))
         ((or (and (= kh 3) (= kw 3)) (and (= kh 4) (= kw 4)) (and (= kh 5) (= kw 5))) #u)
         (else
          (let ((fits (cond ((and (= kh 0) (= kw 0)) #t)
+                           ((and (= kh 10) (or (= kw 10) (= kw 0))) #t)
+                           ((and (= kh 0) (= kw 10)) #t)
                            ((and (= kh 2) (or (= kw 0) (= kw 2))) #t)
                            ((or (simple? kh) (simple? kw)) #f)
                            (else (sub? have want nil)))))

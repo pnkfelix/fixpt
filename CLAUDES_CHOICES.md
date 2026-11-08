@@ -4271,3 +4271,11 @@ The user read the paper as supporting the distribution. Mine:
 - **Found on the way**: a template's `#u` was taken for a name of the top
   level (both expanders); the FX-26 expander made `()` as an atom, not the
   empty list the reader makes.
+- **`lambda` is a syntax type of its own**, a narrower `expr`, with the
+  kernel's `letrec` saying where it is wanted, rather than the template
+  check knowing `letrec`: the user's "generalize what goes in the hole".
+  Its shape is what `Checker::is_lambda` takes. Untyped parts keep their
+  leniency there (two tiers); typed ones say `lambda`.
+- **The FX-26 expander's count of fresh names is in the state's table**
+  too, so that a program begun in the standard state counts from 0, as
+  the Rust expander begun anew does (names show in messages).

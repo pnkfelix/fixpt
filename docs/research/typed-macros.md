@@ -768,7 +768,7 @@ The user's design, the reasons in the conversation that led to it:
   - a file's macro may not take the name of a macro defined already.
   Tests: `crates/fixpt-cli/tests/import_with_syntax.rs`, on four machines.
 
-## Typed holes (2026-11-07, built; what they are for, open)
+## Typed holes (2026-11-07, built)
 
 The user's design, the step after the port (item 7 of the table above).
 
@@ -798,20 +798,28 @@ The user's design, the step after the port (item 7 of the table above).
   typed hole in an untyped binder's scope, or in a ribcage's or a part's
   exported rib's.
 - **Expansions are still checked**, as a safety net.
-- **Found, by looking for it**: the template check refuses a macro that
-  places a hole where `letrec` wants a lambda, though each use passing one
-  is fine (the hole is a call in the check). The user's reading: what goes
-  in a hole should follow what its place requires, a syntax type for it
-  (`lambda`, a narrower `expr`) and a stand-in for each (a `lambda` hole
-  as a lambda calling its procedure).
-- **Open (the user's question)**: whether the annotations promise that a
-  typed macro's expansions need no check (then the template check is a
-  type system, its false refusals its price, and macros in module types,
-  item 10, become possible), or only give early errors where something is
-  certainly wrong (then a failed template check could be no error). The
-  proposal: two tiers, untyped macros promising nothing and checked at
-  each use, typed ones a static guarantee, their expansions checked until
-  it is trusted.
+- **Two tiers** (decided, the user, 2026-11-07): an untyped macro promises
+  nothing, and each use's expansion is checked; a typed macro promises
+  that a use whose expressions fit its holes expands to well-typed code,
+  its template check a type system for macros, its refusals of some safe
+  macros the price, made fewer by what signatures can say. Its expansions
+  are still checked, a safety net that tests the promise (a disagreement
+  is a bug in it), until it is trusted; then they need not be, and macros
+  in module types (item 10), known by their signatures alone, can be.
+- **What goes in a hole follows what its place requires** (the user's
+  reading of the first such refusal, a hole where `letrec` wants a
+  lambda): a syntax type, `lambda`, a narrower `expr` (a `lambda` or
+  `rlambda`, in `plambda`s and `the`s, as `Checker::is_lambda` takes
+  one), which the kernel's `letrec` bindings now say; a typed hole there
+  is `(lambda #:type (subr E (A …) R))`, its stand-in in the check a
+  lambda calling its procedure, of no effect, so its type is written out.
+  An untyped `expr` part there is still placed (it promises nothing); a
+  typed `expr` one is refused, and so is a use's expression that is not a
+  lambda, where it is written, before it is expanded.
+- **Found next, and right**: a typed template whose recursive binding is
+  declared `pure`, with a hole in its scope, is refused (`it may not
+  end`): a lambda a use gives may call it. Said honestly, `spin`, it is
+  checked once and runs.
 - Tests: `tests/programs/macros/typed-*.fx`, both front ends
   (`tests/macros_both.rs`).
 

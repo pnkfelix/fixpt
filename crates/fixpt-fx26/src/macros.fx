@@ -334,7 +334,11 @@
 ;; session's, or anything read again (`typed-macros.md`, the port's
 ;; decision 3). Only where there are some.
 ;; And the globals defined, which no macro may be named (`globals`).
-(define-type by-states (listof (tupleof int macro-env load-defs names) acyclic))
+;; And the count of fresh names, so that a program begun in the standard
+;; environment's state makes them as the Rust expander, begun anew, does.
+(define-type by-states (listof (tupleof int macro-env load-defs names int) acyclic))
+;; Fresh names' count.
+(define fresh-count (ref int rs) (new 0))
 (define by-state (ref by-states rs) (new nil))
 ;; The globals the forms read so far define, and those the forms before
 ;; this parse did (`Checker::global_type` as a program is expanded, before
@@ -347,9 +351,9 @@
       (begin
         (set with-uses nil)
         (if (null? at)
-            (begin (set defined nil) (set loads nil) (set globals nil))
+            (begin (set defined nil) (set loads nil) (set globals nil) (set fresh-count 0))
             (begin (set defined (extract (car at) 2)) (set loads (extract (car at) 3))
-                   (set globals (extract (car at) 4))))
+                   (set globals (extract (car at) 4)) (set fresh-count (extract (car at) 5))))
         (set globals-before (get globals))))))
 (define state-at (->* (int by-states) by-states)
   (lambda (s xs)
@@ -358,9 +362,11 @@
           (else (state-at s (cdr xs))))))
 (define macros-after! (->* (int) unit)
   (lambda (s)
-    (if (and (null? (get defined)) (null? (get loads)) (null? (get globals)))
+    (if (and (null? (get defined)) (null? (get loads)) (null? (get globals))
+             (= (get fresh-count) 0))
         #u
-        (set by-state (cons (tuple s (get defined) (get loads) (get globals)) (get by-state))))))
+        (set by-state (cons (tuple s (get defined) (get loads) (get globals) (get fresh-count))
+                            (get by-state))))))
 ;; Names `ns` defined as globals.
 (define globals! (->* (names) unit) (lambda (ns) (set globals (append ns (get globals)))))
 ;; Whether `n` was a global before this parse.
@@ -425,8 +431,6 @@
       (if (and (>= i 0) (< i (get nsources))) (array-ref (get sources) i) (tuple k 0)))))
 ;; The expansions left before one does not end.
 (define budget (ref int rs) (new 0))
-;; Fresh names' count.
-(define fresh-count (ref int rs) (new 0))
 
 ;; `form` with each use of a macro in it expanded, as each expands, until
 ;; none is left; quoted data left as it is. A form of the program's is at

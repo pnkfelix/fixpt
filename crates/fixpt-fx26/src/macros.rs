@@ -10,7 +10,7 @@
 //! macro's name):
 //!
 //! ```text
-//! σ ::= expr | bvar | id | data | type | label | ()
+//! σ ::= expr | bvar | id | data | type | label | lambda | ()
 //!     | (σ . σ) | (σ …)                    a pair; a list, of pairs
 //!     | (import σ β) | (export σ β)        Herman's σ↓β and σ↑β
 //!     | (mu v σ) | v | (union σ …)         recursion, alternatives
@@ -18,7 +18,8 @@
 //!     | (many σ)                           placed any number of times
 //!     | (expr #:type T #:effect E)         a typed hole: of type at most `T`
 //!     | (bvar #:type T)                      and effect at most `E`; a binder
-//!                                          of a `T` (either part left out)
+//!     | (lambda #:type T)                    of a `T` (either part left out);
+//!                                          a lambda of a `T`, written
 //! β ::= (rho (ℓ δ) …)                      a rib, {ℓ : δ, …}
 //!     | (cage ρ-or-(at ℓ) …)               ribs in order, innermost first; ℓ@γ
 //! δ ::= none | var | rib | env
@@ -43,6 +44,10 @@ use std::rc::Rc;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum STy {
     Expr,
+    /// An expression that is a lambda, where a form wants one (`letrec`'s
+    /// bindings): as the checkers take one (`Checker::is_lambda`), a
+    /// `lambda` or `rlambda`, in `plambda`s and `the`s.
+    Lambda,
     Bvar,
     Id,
     Data,
@@ -350,12 +355,13 @@ impl Macros {
                 } else {
                     match interner.name(*n) {
                         "expr" => STy::Expr,
+                        "lambda" => STy::Lambda,
                         "bvar" => STy::Bvar,
                         "id" => STy::Id,
                         "data" => STy::Data,
                         "type" => STy::Type,
                         "label" => STy::Label,
-                        other => return Err(bad(&format!("`{other}` is none (`expr`, `bvar`, `id`, `data`, `type`, `label`, or a `mu`'s variable)"))),
+                        other => return Err(bad(&format!("`{other}` is none (`expr`, `bvar`, `id`, `data`, `type`, `label`, `lambda`, or a `mu`'s variable)"))),
                     }
                 }
             }
@@ -395,9 +401,14 @@ impl Macros {
                     (Some("many"), [_, body], None) => STy::Many(self.sty(body, interner, named, mus)?),
                     // `(expr #:type T #:effect E)`, `(bvar #:type T)`: a list
                     // whose second is a keyword, which no syntax type is.
-                    (Some(kind @ ("expr" | "bvar")), [_, k, ..], None) if matches!(k.datum, Datum::Keyword(_)) => {
-                        let hole = hole(&items[1..], kind == "expr", s, interner)?;
-                        STy::Typed(Rc::new(if kind == "expr" { STy::Expr } else { STy::Bvar }), hole)
+                    (Some(kind @ ("expr" | "bvar" | "lambda")), [_, k, ..], None) if matches!(k.datum, Datum::Keyword(_)) => {
+                        let hole = hole(&items[1..], kind, s, interner)?;
+                        let core = match kind {
+                            "expr" => STy::Expr,
+                            "bvar" => STy::Bvar,
+                            _ => STy::Lambda,
+                        };
+                        STy::Typed(Rc::new(core), hole)
                     }
                     (Some("literal"), [_, n], None) => STy::Literal(n.as_symbol().ok_or_else(|| bad("`(literal name)`"))?),
                     _ => {
@@ -435,6 +446,9 @@ impl Macros {
             (Union(ms), _) => ms.iter().any(|m| self.overlap(m, b, depth)),
             (_, Union(ms)) => ms.iter().any(|m| self.overlap(a, m, depth)),
             (Literal(_), Expr | Bvar) | (Expr | Bvar, Literal(_)) => false,
+            // A lambda is a list: no name, `()` or label, and any list.
+            (Lambda, Literal(_) | Bvar | Id | Nil | Label) | (Literal(_) | Bvar | Id | Nil | Label, Lambda) => false,
+            (Lambda, _) | (_, Lambda) => true,
             (Literal(x), Literal(y)) => x == y,
             (Literal(_), Id) | (Id, Literal(_)) => true,
             (Expr | Data | Type, _) | (_, Expr | Data | Type) => true,
@@ -466,6 +480,7 @@ impl Macros {
             Id => s.as_symbol().is_some(),
             Label => matches!(s.datum, Datum::Keyword(_)) || (mode == Mode::Use && s.as_symbol().is_some()),
             Expr => !s.as_symbol().is_some_and(|n| reserved(interner.name(n))) && !matches!(s.datum, Datum::Nil),
+            Lambda => lambda_shaped(s, interner),
             Data | Type => true,
             Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
@@ -510,24 +525,25 @@ impl Macros {
         // Each binder, a fresh name for the holes in its scope to be given.
         for (n, p) in &c.pvars {
             match &*p.core {
-                STy::Expr => {}
+                STy::Expr | STy::Lambda => {}
                 STy::Bvar => {
                     self.fresh += 1;
                     let f = format!("%{}:{}", shown(*n, interner), self.fresh);
                     binds.insert(*n, sym(&f, interner));
                 }
                 _ => {
-                    return Err(FxError::at(place(*n), format!("`{}` is not an `expr` or a `bvar`: a macro whose parts are typed is checked once, of those alone, not yet", shown(*n, interner))));
+                    return Err(FxError::at(place(*n), format!("`{}` is not an `expr`, a `lambda` or a `bvar`: a macro whose parts are typed is checked once, of those alone, not yet", shown(*n, interner))));
                 }
             }
         }
         let mut params = Vec::new();
         for (n, p) in &c.pvars {
-            if !matches!(&*p.core, STy::Expr) {
+            let lambda = matches!(&*p.core, STy::Lambda);
+            if !matches!(&*p.core, STy::Expr) && !lambda {
                 continue;
             }
             let Some(h) = &p.hole else {
-                return Err(FxError::at(place(*n), format!("`{}` has no type or effect, and another part of this macro does: a macro whose parts are typed is checked once, each `expr` part typed", shown(*n, interner))));
+                return Err(FxError::at(place(*n), format!("`{}` has no type or effect, and another part of this macro does: a macro whose parts are typed is checked once, each `expr` and `lambda` part typed", shown(*n, interner))));
             };
             // The binders in its scope, outermost first, each a typed `bvar`.
             let mut scope = Vec::new();
@@ -556,15 +572,47 @@ impl Macros {
                     v
                 }
             };
+            // A lambda's stand-in is a lambda: its procedure, given, called
+            // with the lambda's arguments, of the types its type says; so
+            // its type is written, `(subr E (A …) R)`, and making it does
+            // nothing.
+            let lambda_ty = if lambda {
+                let written = h.ty.as_ref().and_then(|t| match t.as_proper_list() {
+                    Some([s, _, args, _]) if s.as_symbol().is_some_and(|s| interner.name(s) == "subr") && (args.as_proper_list().is_some() || matches!(args.datum, Datum::Nil)) => Some(t.clone()),
+                    _ => None,
+                });
+                let Some(written) = written else {
+                    return Err(FxError::at(place(*n), format!("`{}` is a `lambda` part: its type is written, `(lambda #:type (subr E (A …) R))`, which its stand-in in the check is made of", shown(*n, interner))));
+                };
+                Some(written)
+            } else {
+                None
+            };
             let ty = part(&h.ty, "type", interner);
-            let effect = part(&h.effect, "effect", interner);
+            let effect = if lambda { sym("pure", interner) } else { part(&h.effect, "effect", interner) };
             self.fresh += 1;
             let hole = sym(&format!("%h:{}:{}", shown(*n, interner), self.fresh), interner);
             let args: Vec<Syntax> = scope.iter().map(|(_, t)| t.clone()).collect();
             let subr = Syntax::list(at, vec![sym("subr", interner), effect, list_of(at, args, None), ty]);
             params.push(Syntax::list(at, vec![hole.clone(), subr]));
-            let call = std::iter::once(hole).chain(scope.iter().map(|(b, _)| binds[b].clone())).collect();
-            binds.insert(*n, Syntax::list(at, call));
+            let call = Syntax::list(at, std::iter::once(hole).chain(scope.iter().map(|(b, _)| binds[b].clone())).collect());
+            let stand_in = match lambda_ty {
+                None => call,
+                Some(written) => {
+                    let items = written.as_proper_list().expect("a `subr`");
+                    let arg_types = items[2].as_proper_list().map(|l| l.to_vec()).unwrap_or_default();
+                    let mut params = Vec::new();
+                    let mut names = vec![call];
+                    for a in arg_types {
+                        self.fresh += 1;
+                        let v = sym(&format!("%a:{}", self.fresh), interner);
+                        params.push(Syntax::list(at, vec![v.clone(), a]));
+                        names.push(v);
+                    }
+                    Syntax::list(at, vec![sym("lambda", interner), list_of(at, params, None), Syntax::list(at, names)])
+                }
+            };
+            binds.insert(*n, stand_in);
         }
         self.checking = true;
         let body = self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut HashMap::new(), 0, interner);
@@ -1091,6 +1139,13 @@ impl Aligner<'_> {
                 }
                 Ok(())
             }
+            // A template writes a lambda (its form aligned as any of the
+            // kernel's); a use gives one, of the shape the checkers take.
+            STy::Lambda => match (&s.datum, self.mode) {
+                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form(at, s),
+                _ if self.mode != Mode::Template && lambda_shaped(s, self.interner) => Ok(()),
+                _ => Err(fail(format!("`{}` is not a lambda, as this part must be", self.show(s)))),
+            },
             STy::Expr => match (&s.datum, self.mode) {
                 (Datum::Symbol(n), _) if reserved(self.name(*n)) => Err(fail(format!("`{}` is a form's name, not an expression", self.name(*n)))),
                 // `#u`, unit: a literal, which the parsers read as a name.
@@ -1268,9 +1323,16 @@ impl Aligner<'_> {
                 }
                 return Ok(());
             }
-            (Expr, Expr) | (Id, Expr | Id) => true,
+            (Expr, Expr) | (Id, Expr | Id) | (Lambda, Lambda | Expr) => true,
+            // An untyped part where a lambda is wanted: it promises nothing,
+            // and its uses' expansions are checked; a typed hole says it is
+            // a lambda (`typed-macros.md`, "Typed holes": two tiers).
+            (Expr, Lambda) if info.hole.is_some() => {
+                return Err(FxError::at(span, format!("`{name}` is placed where a lambda is wanted: a typed hole there is a lambda, `(lambda #:type T)`")));
+            }
+            (Expr, Lambda) => true,
             (Data, Data) | (Type, Type) | (Label, Label) => return Ok(()),
-            (Expr | Id | Data | Type | Label | Bvar, _) | (_, Expr | Id | Data | Type | Label | Bvar) => false,
+            (Expr | Id | Data | Type | Label | Bvar | Lambda, _) | (_, Expr | Id | Data | Type | Label | Bvar | Lambda) => false,
             _ => self.m.sub(have, want, &mut HashSet::new()),
         };
         if !fits {
@@ -1303,6 +1365,7 @@ impl Macros {
             (_, Union(ms)) => ms.iter().any(|m| self.sub(a, m, assumed)),
             (Import(..) | Export(..), _) | (_, Import(..) | Export(..)) => false,
             (Pair(a1, d1), Pair(a2, d2)) => self.sub(a1, a2, assumed) && self.sub(d1, d2, assumed),
+            (Lambda, Expr) => true,
             (x, y) => x == y,
         }
     }
@@ -1368,8 +1431,9 @@ fn bind(b: &Syntax, interner: &Interner) -> R<Bind> {
 
 /// A typed hole's keywords and what each says, `#:type T` and, of an
 /// `expr`, `#:effect E`, each once.
-fn hole(parts: &[Syntax], expr: bool, s: &Syntax, interner: &Interner) -> R<Hole> {
-    let usage = if expr { "`(expr #:type T #:effect E)`, either left out" } else { "`(bvar #:type T)`" };
+fn hole(parts: &[Syntax], kind: &str, s: &Syntax, interner: &Interner) -> R<Hole> {
+    let expr = kind == "expr";
+    let usage = if expr { "`(expr #:type T #:effect E)`, either left out".to_string() } else { format!("`({kind} #:type T)`") };
     let mut h = Hole { ty: None, effect: None };
     let mut rest = parts;
     while let [k, v, more @ ..] = rest {
@@ -1474,6 +1538,18 @@ fn find_symbol(s: &Syntax, n: Sym) -> Option<&Syntax> {
         Datum::Symbol(m) if *m == n => Some(s),
         Datum::List { items, tail } => items.iter().chain(tail.as_deref()).find_map(|x| find_symbol(x, n)),
         _ => None,
+    }
+}
+
+/// Whether `s` is a lambda as the checkers take one (`Checker::is_lambda`):
+/// a `lambda`, `rlambda` or `vlambda`, in `plambda`s and `the`s.
+fn lambda_shaped(s: &Syntax, interner: &Interner) -> bool {
+    let Some(items) = s.as_proper_list() else { return false };
+    match items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h)) {
+        Some("lambda" | "rlambda" | "vlambda") => true,
+        Some("plambda") if items.len() == 3 => lambda_shaped(&items[2], interner),
+        Some("the") if items.len() == 3 => lambda_shaped(&items[2], interner),
+        _ => false,
     }
 }
 

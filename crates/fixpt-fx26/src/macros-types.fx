@@ -38,7 +38,9 @@
 (define-datatype sty
   (s-expr) (s-bvar) (s-id) (s-data) (s-type) (s-label) (s-nil)
   (s-literal symbol) (s-pair sty sty) (s-import sty bind) (s-export sty bind)
-  (s-mu int) (s-many sty) (s-union (listof sty acyclic)) (s-typed sty hole))
+  (s-mu int) (s-many sty) (s-union (listof sty acyclic)) (s-typed sty hole)
+  ;; An expression that is a lambda, where a form wants one (`letrec`).
+  (s-lambda))
 (define-type stys (listof sty acyclic))
 
 ;; Each `mu`'s body, by its number: the program's, and every file's
@@ -197,11 +199,12 @@
                      (s-union ms))))
            ;; `(expr #:type T #:effect E)`, `(bvar #:type T)`: a list whose
            ;; second is a keyword, which no syntax type is.
-           ((and (or (string=? head "expr") (string=? head "bvar")) (> (len (proper-items s)) 1)
-                 (syn-keyword? (nth (proper-items s) 1)))
-            (let ((expr? (string=? head "expr")))
-              (s-typed (if expr? (s-expr) (s-bvar))
-                       (read-hole fail (cdr (proper-items s)) expr? s nil nil))))
+           ((and (or (string=? head "expr") (string=? head "bvar") (string=? head "lambda"))
+                 (> (len (proper-items s)) 1) (syn-keyword? (nth (proper-items s) 1)))
+            (s-typed (cond ((string=? head "expr") (s-expr))
+                           ((string=? head "bvar") (s-bvar))
+                           (else (s-lambda)))
+                     (read-hole fail (cdr (proper-items s)) head s nil nil)))
            ((and (string=? head "many") (= (len (proper-items s)) 2))
             (s-many (read-sty fail (nth (proper-items s) 1) named scope)))
            ((and (string=? head "literal") (= (len (proper-items s)) 2))
@@ -227,12 +230,13 @@
               (if (null? t)
                   (case n
                     ((expr) (s-expr)) ((bvar) (s-bvar)) ((id) (s-id)) ((data) (s-data))
+                    ((lambda) (s-lambda))
                     ((type) (s-type)) ((label) (s-label))
                     (else
                      (begin
                        (fail-at fail (string-append "a syntax type: `" (symbol->string n) "` is "
                                                     "none (`expr`, `bvar`, `id`, `data`, `type`, "
-                                                    "`label`, or a `mu`'s variable)")
+                                                    "`label`, `lambda`, or a `mu`'s variable)")
                                 s)
                        (s-nil))))
                   (car t))))))))
@@ -269,22 +273,24 @@
   (lambda (s) (tagcase s (lst (items d a b x) (not (null? items))) (else y #f))))
 
 ;; A typed hole's keywords and what each says, `#:type T` and, of an `expr`,
-;; `#:effect E`, each once: from `parts`, onto `ty` and `eff`.
-(define read-hole (->* (fails syns-a bool syn syns-a syns-a) hole)
-  (lambda (fail parts expr? s ty eff)
-    (let ((usage (string-append "a syntax type: "
-                                (if expr?
-                                    "`(expr #:type T #:effect E)`, either left out"
-                                    "`(bvar #:type T)`"))))
+;; `#:effect E`, each once: from `parts`, onto `ty` and `eff`; `kind`, the
+;; part's.
+(define read-hole (->* (fails syns-a string syn syns-a syns-a) hole)
+  (lambda (fail parts kind s ty eff)
+    (let* ((expr? (string=? kind "expr"))
+           (usage (string-append "a syntax type: "
+                                 (if expr?
+                                     "`(expr #:type T #:effect E)`, either left out"
+                                     (string-append "`(" kind " #:type T)`")))))
       (cond
         ((null? parts) (tuple ty eff))
         ((null? (cdr parts)) (begin (fail-at fail usage s) (tuple ty eff)))
         (else
          (let* ((k (car parts)) (word (if (syn-keyword? k) (keyword-name k) "")))
            (cond ((and (string=? word "type") (null? ty))
-                  (read-hole fail (cdr (cdr parts)) expr? s (list (nth parts 1)) eff))
+                  (read-hole fail (cdr (cdr parts)) kind s (list (nth parts 1)) eff))
                  ((and expr? (string=? word "effect") (null? eff))
-                  (read-hole fail (cdr (cdr parts)) expr? s ty (list (nth parts 1))))
+                  (read-hole fail (cdr (cdr parts)) kind s ty (list (nth parts 1))))
                  ((or (string=? word "type") (and expr? (string=? word "effect")))
                   (begin (fail-at fail (string-append usage ", each once") k) (tuple ty eff)))
                  (else (begin (fail-at fail usage k) (tuple ty eff))))))))))
@@ -352,6 +358,18 @@
     (if (= j (string-length s))
         out
         (steps s (+ j 1) (cons (char=? (string-ref s j) #\A) out)))))
+;; Whether `s` is a lambda as the checkers take one: a `lambda`, `rlambda`
+;; or `vlambda`, in `plambda`s and `the`s (`macros.rs`'s `lambda_shaped`).
+(define lambda-shaped? (->* (syn) bool)
+  (lambda (s)
+    (let* ((items (proper-items s))
+           (head (if (and (not (null? items)) (syn-symbol? (car items)))
+                     (syn-name (car items))
+                     "")))
+      (cond ((or (string=? head "lambda") (string=? head "rlambda") (string=? head "vlambda")) #t)
+            ((and (or (string=? head "plambda") (string=? head "the")) (= (len items) 3))
+             (lambda-shaped? (nth items 2)))
+            (else #f)))))
 ;; A proper list's elements; none if `s` is not one.
 (define proper-items (->* (syn) syns-a)
   (lambda (s) (tagcase s (lst (items d a b x) items) (else y nil))))
@@ -420,12 +438,16 @@
   (lambda (a ms depth)
     (and (not (null? ms)) (or (overlap? a (car ms) depth) (any-overlaps-of? a (cdr ms) depth)))))
 ;; A kind's number, for the cases of `overlap-base?`: 0 expr, 1 bvar, 2 id,
-;; 3 data, 4 type, 5 label, 6 nil, 7 literal, 8 pair, 9 anything else.
+;; 3 data, 4 type, 5 label, 6 nil, 7 literal, 8 pair, 9 anything else, 10
+;; lambda.
 (define kind-of (->* (sty) int)
   (lambda (t)
     (tagcase t
       (s-expr () 0) (s-bvar () 1) (s-id () 2) (s-data () 3) (s-type () 4) (s-label () 5)
-      (s-nil () 6) (s-literal (n) 7) (s-pair (a d) 8) (else y 9))))
+      (s-nil () 6) (s-literal (n) 7) (s-pair (a d) 8) (s-lambda () 10) (else y 9))))
+;; Whether `k` is a kind of no parts: one of what `(Expr | Id | Data | Type
+;; | Label | Bvar | Lambda)` names in `macros.rs`.
+(define simple-kind? (->* (int) bool) (lambda (k) (or (< k 6) (= k 10))))
 (define literal-of (->* (sty) symbol)
   (lambda (t) (tagcase t (s-literal (n) n) (else y (string->symbol "")))))
 (define overlap-base? (->* (sty sty int) bool)
@@ -434,6 +456,10 @@
       (cond
         ((and (= ka 7) (or (= kb 0) (= kb 1))) #f)
         ((and (= kb 7) (or (= ka 0) (= ka 1))) #f)
+        ;; A lambda is a list: no name, `()` or label, and any list.
+        ((or (= ka 10) (= kb 10))
+         (let ((other (if (= ka 10) kb ka)))
+           (not (or (= other 7) (= other 1) (= other 2) (= other 6) (= other 5)))))
         ((and (= ka 7) (= kb 7)) (symbol=? (literal-of a) (literal-of b)))
         ((or (and (= ka 7) (= kb 2)) (and (= ka 2) (= kb 7))) #t)
         ((or (= ka 0) (= ka 3) (= ka 4) (= kb 0) (= kb 3) (= kb 4)) #t)
@@ -478,6 +504,7 @@
             (s-id () (syn-symbol? s))
             (s-label () (or (syn-keyword? s) (and (= mode 2) (syn-symbol? s))))
             (s-expr () (and (not (reserved-syn? s)) (not (syn-nil? s))))
+            (s-lambda () (lambda-shaped? s))
             (else y #t))))))
 (define any-fits? (->* (stys syn int (subr pure (symbol) bool)) bool)
   (lambda (ms s mode pvar?)
@@ -495,7 +522,7 @@
       (s-many (x) (tagcase b (s-many (y) (sty=? x y)) (else z #f)))
       (s-typed (x h) (tagcase b (s-typed (y g) (sty=? x y)) (else z #f)))
       (s-union (ms) (tagcase b (s-union (ns) (all-sty=? ms ns)) (else y #f)))
-      (else y (and (< (kind-of a) 7) (= (kind-of a) (kind-of b)))))))
+      (else y (and (or (< (kind-of a) 7) (= (kind-of a) 10)) (= (kind-of a) (kind-of b)))))))
 (define all-sty=? (->* (stys stys) bool)
   (lambda (ms ns)
     (if (null? ms)
@@ -557,7 +584,7 @@
       (s-export (x p) (tagcase b (s-export (y q) (and (bind=? p q) (sub? x y more))) (else z #f)))
       (s-pair (a1 d1)
         (tagcase b (s-pair (a2 d2) (and (sub? a1 a2 more) (sub? d1 d2 more))) (else z #f)))
-      (else y (sty=? a b)))))
+      (else y (or (and (= (kind-of a) 10) (= (kind-of b) 0)) (sty=? a b))))))
 (define assumed? (->* (sty sty assumed) bool)
   (lambda (a b xs)
     (and (not (null? xs))

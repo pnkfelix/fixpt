@@ -12,8 +12,8 @@
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
-(import reader-types atom (type syn))
-(import parser-module syn-start syn-end syn-symbol? syn-symbol len nth mk-list mk-symbol
+(import reader-types atom lst (type syn))
+(import parser-module syn-start syn-end syn-symbol? syn-symbol syn-name len nth mk-list mk-symbol
         (type syns-a) (effect parses))
 (import types-module fail-at split (type fails))
 (import align-module defined macro-of pvar-of atm-var lv-rib
@@ -80,7 +80,7 @@
         out
         (let* ((n (extract (car ps) 1))
                (k ((with types-module kind-of) (extract (extract (car ps) 2) 1))))
-          (cond ((= k 0) (bvar-binds fail c (cdr ps) out))
+          (cond ((or (= k 0) (= k 10)) (bvar-binds fail c (cdr ps) out))
                 ((= k 1)
                  (let ((f (fresh-symbol (string-append "%" (symbol->string n) ":"))))
                    (bvar-binds fail c (cdr ps)
@@ -88,9 +88,9 @@
                                                                                 0 0))))))))
                 (else
                  (begin
-                   (fail-at fail (string-append "`" (symbol->string n) "` is not an `expr` or a "
-                                                "`bvar`: a macro whose parts are typed is checked "
-                                                "once, of those alone, not yet")
+                   (fail-at fail (string-append "`" (symbol->string n) "` is not an `expr`, a "
+                                                "`lambda` or a `bvar`: a macro whose parts are "
+                                                "typed is checked once, of those alone, not yet")
                             (pattern-place c n))
                    out)))))))
 ;; Each hole's parameter, and its call bound to it, onto `acc`: its
@@ -100,32 +100,77 @@
     (if (null? ps)
         acc
         (let* ((n (extract (car ps) 1)) (info (extract (car ps) 2)) (h (extract info 4))
-               (shown (symbol->string n)))
+               (shown (symbol->string n)) (k ((with types-module kind-of) (extract info 1))))
           (cond
-            ((not (= ((with types-module kind-of) (extract info 1)) 0))
-             (hole-params fail c (cdr ps) a b acc))
+            ((not (or (= k 0) (= k 10))) (hole-params fail c (cdr ps) a b acc))
             ((null? h)
              (begin (fail-at fail (string-append "`" shown "` has no type or effect, and another "
                                                  "part of this macro does: a macro whose parts "
-                                                 "are typed is checked once, each `expr` part "
-                                                 "typed")
+                                                 "are typed is checked once, each `expr` and "
+                                                 "`lambda` part typed")
                              (pattern-place c n))
                     acc))
             (else
              (let* ((scope (hole-scope fail c n (reverse (extract info 2)) (extract c 4)))
+                    ;; A lambda's stand-in is a lambda: its procedure, given,
+                    ;; called with the lambda's arguments, of the types its
+                    ;; type says; so its type is written, `(subr E (A …) R)`,
+                    ;; and making it does nothing.
+                    (lambda-ty (if (= k 10) (written-subr fail c n (extract (car h) 1)) nil))
                     (ty (hole-part (extract (car h) 1) "type" shown a b))
-                    (eff (hole-part (extract (car h) 2) "effect" shown a b))
+                    (eff (if (= k 10)
+                             (list (mk-symbol "pure" a b))
+                             (hole-part (extract (car h) 2) "effect" shown a b)))
                     (hole (mk-symbol (symbol->string (fresh-symbol (string-append "%h:" shown ":")))
                                      a b))
                     (subr (mk-list (list (mk-symbol "subr" a b) (car eff)
                                          (list-at a b 0 (scope-types scope) nil) (car ty))
                                    a b))
                     (call (list-at a b 0 (cons hole (scope-calls scope (extract acc 2))) nil))
+                    (stand-in (if (null? lambda-ty)
+                                  call
+                                  (lambda-stand-in call (car lambda-ty) a b)))
                     (acc2 (tuple (append (extract acc 1)
                                          (the syns-a (list (mk-list (list hole subr) a b))))
-                                 (append (extract acc 2) (the binds (list (tuple n call))))
+                                 (append (extract acc 2) (the binds (list (tuple n stand-in))))
                                  (append (extract acc 3) (append (cdr ty) (cdr eff))))))
                (hole-params fail c (cdr ps) a b acc2))))))))
+;; A `lambda` part's type, written `(subr E (A …) R)`, in a list of one.
+(define written-subr (->* (fails clause symbol syns-a) syns-a)
+  (lambda (fail c n ty)
+    (let ((items (if (null? ty) nil (proper-of (car ty)))))
+      (if (and (= (len items) 4) (syn-symbol? (car items))
+               (string=? (syn-name (car items)) "subr")
+               (or (not (null? (proper-of (nth items 2))))
+                   ((with types-module syn-nil?) (nth items 2))))
+          (list (car ty))
+          (begin (fail-at fail (string-append "`" (symbol->string n) "` is a `lambda` part: its "
+                                              "type is written, `(lambda #:type (subr E (A …) "
+                                              "R))`, which its stand-in in the check is made of")
+                          (pattern-place c n))
+                 nil)))))
+(define proper-of (->* (syn) syns-a)
+  (lambda (s) (tagcase s (lst (items d a b x) items) (else y nil))))
+;; `(lambda ((a A) …) (call a …))`, of the argument types of `ty`, each `a`
+;; a fresh name.
+(define lambda-stand-in (->* (syn syn int int) syn)
+  (lambda (call ty a b)
+    (let* ((names (arg-names (proper-of (nth (proper-of ty) 2)))))
+      (mk-list (list (mk-symbol "lambda" a b)
+                     (list-at a b 0 (arg-params names (proper-of (nth (proper-of ty) 2)) a b) nil)
+                     (list-at a b 0 (cons call (arg-refs names a b)) nil))
+               a b))))
+(define arg-names (->* (syns-a) (listof symbol acyclic))
+  (lambda (ts) (if (null? ts) nil (let ((v (fresh-symbol "%a:"))) (cons v (arg-names (cdr ts)))))))
+(define arg-params (->* ((listof symbol acyclic) syns-a int int) syns-a)
+  (lambda (ns ts a b)
+    (if (null? ns)
+        nil
+        (cons (mk-list (list (mk-symbol (symbol->string (car ns)) a b) (car ts)) a b)
+              (arg-params (cdr ns) (cdr ts) a b)))))
+(define arg-refs (->* ((listof symbol acyclic) int int) syns-a)
+  (lambda (ns a b)
+    (if (null? ns) nil (cons (mk-symbol (symbol->string (car ns)) a b) (arg-refs (cdr ns) a b)))))
 ;; A hole's type or effect: as written, or a binder of `kind` named for the
 ;; hole `n` (`%type-of-e`), what a message about it says, in a list with
 ;; that binder.
