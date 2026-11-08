@@ -57,6 +57,7 @@ fn what_cannot_be_imported_is_refused() {
         ("main-not-load.fx", "takes a name defined as `(load-module \"path\")`"),
         ("main-only-not-given.fx", "unbound variable `limit`"),
         ("main-only-hidden.fx", "`twice` is nothing `lib` gives"),
+        ("main-poly.fx", "a file's macro's description with a binder of its own or a part a use gives in it: not yet"),
     ];
     for (name, why) in cases {
         let (out, err) = eval("rs-scheme-vm", name);

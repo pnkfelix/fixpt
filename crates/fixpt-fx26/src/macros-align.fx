@@ -15,23 +15,25 @@
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
         fits? sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
-        bind-rib bind-cage
-        ring-rib ring-at s-expr s-bvar s-id
+        bind-rib bind-cage bind-direct
+        ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
-        mu-body addr=? name-in? proper-items
-        (type fails addr entries ring rings bind sty stys named hole))
+        mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit sorted-strings
+        joined
+        (type fails addr entries ring rings bind sty stys named hole atm atms strings))
 
 ;;; ------------------------------------------------------------ macros
 
 ;; What becomes of one of a template's parts where it is transcribed
 ;; (`macros.rs`'s `Action`): a name made fresh, one for the binder at a
 ;; path and each reference to it; a free name the top level's, `(with
-;; #%toplevel n)`; a type the template writes read in the top level's; a
-;; file's macro's free name the file's own, `(with m n)`, or standard,
-;; `(with #%fx n)`; its type the same, by `select`; a use of another of the
-;; file's macros, by the name the importer has it by.
+;; #%toplevel n)`; a description's free name the top level's, qualified,
+;; `#%toplevel:n`; a file's macro's free name the file's own, `(with m
+;; n)`, or standard, `(with #%fx n)`; its description read whole through
+;; the file's module or the standard environment, by `select`; a use of
+;; another of the file's macros, by the name the importer has it by.
 (define-datatype action
-  (act-rename addr) (act-toplevel) (act-toplevel-type) (act-standard) (act-module symbol)
+  (act-rename addr) (act-toplevel) (act-qualified) (act-standard) (act-module symbol)
   (act-module-type symbol) (act-standard-type) (act-macro-head symbol))
 (define-type actions (listof (tupleof addr action) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
@@ -72,12 +74,15 @@
 ;;; ------------------------------------------------------------ nodes
 
 ;; What is in a node: a pair's two; nothing; a pattern variable (in a
-;; pattern, or placed in a template); a template's binder; a name in a
-;; template referred to; a form in a template, its operands (or, an
-;; application's, itself); anything else.
+;; pattern, or placed in a template); a template's binder, of a
+;; description (`#t`) or a value; a name in a template referred to, in a
+;; namespace, and what it is if the template does not bind it (0 the top
+;; level's value, 1 the top level's qualified, 2 as written: `macros.rs`'s
+;; `Free`); a form in a template, its operands (or, an application's,
+;; itself); a description's parts, a list a template writes; anything else.
 (define-datatype kids
-  (k-pair int int) (k-nil) (k-pvar symbol) (k-binder symbol) (k-ref symbol) (k-form int)
-  (k-other))
+  (k-pair int int) (k-nil) (k-pvar symbol) (k-binder symbol bool) (k-ref symbol bool int)
+  (k-form int) (k-desc (listof int acyclic)) (k-other))
 ;; Each of a node's imports, outermost first, or its export, with the root
 ;; its addresses are from.
 (define-type rooted (listof (tupleof bind int) acyclic))
@@ -153,7 +158,10 @@
         #u
         (begin (array-set! to i (array-ref from i)) (copy-nodes from to (+ i 1))))))
 ;; The nodes forgotten, for another alignment.
-(define nodes-reset! (->* () unit) (lambda () (set nnodes 0)))
+(define nodes-reset! (->* () unit) (lambda () (begin (set nnodes 0) (set desc-roots nil))))
+;; The nodes of the descriptions a template writes, whole (`macros.rs`'s
+;; `Node::desc`).
+(define desc-roots (ref (listof int acyclic) rs) (new nil))
 
 ;;; ------------------------------------------------------------ aligning
 
@@ -229,15 +237,12 @@
           (if (and (syn-symbol? s) (symbol=? (syn-symbol s) n))
               #u
               (said (string-append shown " where `" (symbol->string n) "` is written"))))
-        (s-bvar ()
-          (cond ((and (syn-symbol? s) (macro? (syn-symbol s)))
-                 (said (string-append "`" (syn-name s) "` is a macro's name, which is not bound")))
-                ((and (syn-symbol? s) (not (reserved-syn? s)))
-                 (if (= mode 1) (with-kids at (k-binder (syn-symbol s))) #u))
-                (else (said (string-append shown " is not a name that may be bound")))))
+        (s-bvar () (fill-binder fail mode at s #f))
+        (s-dvar () (fill-binder fail mode at s #t))
+        (s-kind () #u)
         (s-id ()
           (if (syn-symbol? s)
-              (if (= mode 1) (with-kids at (k-ref (syn-symbol s))) #u)
+              (if (= mode 1) (with-kids at (k-ref (syn-symbol s) #f 0)) #u)
               (said (string-append shown " is not a variable"))))
         (s-label ()
           (cond ((syn-keyword? s) #u)
@@ -259,7 +264,7 @@
                  (said (string-append "`" (syn-name s) "` is a form's name, not an expression")))
                 ;; `#u`, unit: a literal, which the parsers read as a name.
                 ((and (syn-symbol? s) (string=? (syn-name s) "#u")) #u)
-                ((and (syn-symbol? s) (= mode 1)) (with-kids at (k-ref (syn-symbol s))))
+                ((and (syn-symbol? s) (= mode 1)) (with-kids at (k-ref (syn-symbol s) #f 0)))
                 ((and (not (syn-nil? s)) (not (null? (split s))) (= mode 1)) (form fail ps at s #f))
                 ((syn-nil? s) (said "`()` is not an expression"))
                 (else #u)))
@@ -267,14 +272,34 @@
           (if (and (= mode 1) (not (syn-nil? s)) (not (null? (split s))))
               (form fail ps at s #t)
               (said (string-append shown " is not a definition"))))
-        ;; `data` and `type`.
+        ;; A description a template writes, name by name; the binders of the
+        ;; `poly`s at its top, what it exports (what a definition's type puts
+        ;; in scope in what it is defined as).
+        (s-type ()
+          (if (= mode 1)
+              (begin (set desc-roots (cons at (get desc-roots)))
+                     (desc fail ps at s)
+                     (if (null? (extract (node-at at) 5))
+                         (with-export at (bind-direct (poly-binders at ps)) at)
+                         #u))
+              #u))
+        ;; `data`.
         (else z
           (let ((inside (pvar-inside s ps)))
             (if (and (= mode 1) (not (null? inside)))
                 (said (string-append "pattern variable `" (symbol->string (car inside))
-                                     "` inside a quoted datum or a type: only a whole one is "
-                                     "placed"))
+                                     "` inside a quoted datum: only a whole one is placed"))
                 #u)))))))
+;; A binder at `at`, of a description if `d`, else of a value.
+(define fill-binder (->* (fails int int syn bool) unit)
+  (lambda (fail mode at s d)
+    (cond ((and (syn-symbol? s) (macro? (syn-symbol s)))
+           (fail-at fail (string-append "`" (syn-name s) "` is a macro's name, which is not bound")
+                    s))
+          ((and (syn-symbol? s) (not (reserved-syn? s)) (not (and d (desc-word? (syn-name s) #f))))
+           (if (= mode 1) (with-kids at (k-binder (syn-symbol s) d)) #u))
+          (else (fail-at fail (string-append "`" (show-syn s) "` is not a name that may be bound")
+                         s)))))
 ;; Those of `ms` that `s` fits.
 (define fitting (->* (stys syn int pvars) stys)
   (lambda (ms s mode ps)
@@ -368,13 +393,235 @@
                  (string=? (syn-name (nth items 1)) "#%toplevel"))))
       (else y #f))))
 
+;;; ------------------------------------------------------------ descriptions
+
+;; The `i`th of nodes `ks`.
+(define kid (->* ((listof int acyclic) int) int)
+  (lambda (ks i) (if (= i 0) (car ks) (kid (cdr ks) (- i 1)))))
+;; Description `s`, which a template writes, at node `at`, aligned name by
+;; name (`macros.rs`'s `Aligner::desc`): each name referred to in the
+;; description namespace, the top level's if the template does not bind it;
+;; but a word of descriptions written as it is, a pattern variable placed,
+;; and what `poly`, `dlambda`, `mu` and `dletrec` bind in scope in what
+;; follows. Labels, a `restrict`'s names and an `io` effect's kind are
+;; written as they are; `(globals g …)`'s names and `(select m n)`'s module
+;; are values.
+(define desc (->* (fails pvars int syn) unit)
+  (lambda (fail ps at s)
+    (tagcase s
+      (lst (items d a b x) (if (null? items) #u (desc-list fail ps at s items)))
+      (dotted (items tail d a b x) (fail-at fail "a description is a list, not a dotted one" s))
+      (else y
+        (if (syn-symbol? s)
+            (let ((n (syn-symbol s)))
+              (with-kids at (cond ((pvar? n ps) (k-pvar n))
+                                  ((desc-word? (syn-name s) #f) (k-other))
+                                  (else (k-ref n #t 1)))))
+            #u)))))
+(define desc-list (->* (fails pvars int syn syns-a) unit)
+  (lambda (fail ps at s items)
+    (let* ((kids (desc-kids at items)) (h (car items))
+           (head (if (and (syn-symbol? h) (not (pvar? (syn-symbol h) ps))) (syn-name h) ""))
+           (not-yet (lambda ((what string))
+                      (fail-at fail (string-append what " in a template's description: not yet")
+                               s))))
+      (cond
+        ((or (string=? head "poly") (string=? head "dlambda"))
+         (if (= (len items) 3)
+             (desc-scoped fail ps (kid kids 2) (nth items 2)
+                          (desc-binders fail ps (kid kids 1) (nth items 1)))
+             (fail-at fail (string-append "`(" head " ((name kind) …) description)`") s)))
+        ((string=? head "mu")
+         (if (= (len items) 3)
+             (desc-scoped fail ps (kid kids 2) (nth items 2)
+                          (list (desc-binder fail ps (kid kids 1) (nth items 1))))
+             (fail-at fail "`(mu name type)`" s)))
+        ((string=? head "dletrec")
+         (if (= (len items) 3)
+             (desc-dletrec fail ps kids items)
+             (fail-at fail "`(dletrec ((name description) …) description)`" s)))
+        ((or (string=? head "productof") (string=? head "sumof"))
+         (desc-fields fail ps (cdr kids) (cdr items)))
+        ((and (string=? head "restrict") (>= (len items) 2))
+         (desc fail ps (kid kids 1) (nth items 1)))
+        ((string=? head "io") #u)
+        ;; Values: a global's name, written as it is, since no local can
+        ;; shadow it; a module's, the top level's.
+        ((string=? head "globals") (desc-values fail ps (cdr kids) 2))
+        ((string=? head "select")
+         (desc-values fail ps (if (null? (cdr kids)) nil (list (kid kids 1))) 1))
+        ((string=? head "moduleof") (not-yet "a `moduleof`"))
+        ((and (not (string=? head "")) (desc-word? head #t))
+         (let ((no (if (or (string=? head "subr") (string=? head "->") (string=? head "->*"))
+                       (subr-refused (cdr items))
+                       "")))
+           (if (string=? no "") (desc-each fail ps (cdr kids) (cdr items)) (not-yet no))))
+        ;; A description function applied, its name the head.
+        (else (desc-each fail ps kids items))))))
+;; What of a `subr`'s parts `xs` the prototype does not take in a template:
+;; a specification's clause, or a parameter named; "" if neither.
+(define subr-refused (->* (syns-a) string)
+  (lambda (xs)
+    (if (null? xs)
+        ""
+        (let* ((parts (proper-items (car xs)))
+               (head (if (and (not (null? parts)) (syn-symbol? (car parts)))
+                         (syn-name (car parts))
+                         "")))
+          (cond ((or (string=? head "requires") (string=? head "ensures"))
+                 "a specification's clause")
+                ((named-param? parts) "a parameter named, `(name : type)`,")
+                (else (subr-refused (cdr xs))))))))
+(define named-param? (->* (syns-a) bool)
+  (lambda (ps)
+    (and (not (null? ps))
+         (or (let ((q (proper-items (car ps))))
+               (and (>= (len q) 2) (syn-symbol? (nth q 1)) (string=? (syn-name (nth q 1)) ":")))
+             (named-param? (cdr ps))))))
+(define desc-each (->* (fails pvars (listof int acyclic) syns-a) unit)
+  (lambda (fail ps ks xs)
+    (if (null? xs)
+        #u
+        (begin (desc fail ps (car ks) (car xs)) (desc-each fail ps (cdr ks) (cdr xs))))))
+;; A node for each of `items`, the parts of the list at node `at`, at their
+;; paths in it: `at`'s kids.
+(define desc-kids (->* (int syns-a) (listof int acyclic))
+  (lambda (at items)
+    (let ((kids (desc-kids-from items (node-path at) nil)))
+      (begin (with-kids at (k-desc kids)) kids))))
+(define desc-kids-from (->* (syns-a addr (listof int acyclic)) (listof int acyclic))
+  (lambda (items path out)
+    (if (null? items)
+        (the (listof int acyclic) (reverse out))
+        (let ((k (node-new (car items) (path+ path #t) (s-type))))
+          (desc-kids-from (cdr items) (path+ path #f) (cons k out))))))
+;; Description `s` at node `at`, in the scope of `as`.
+(define desc-scoped (->* (fails pvars int syn atms) unit)
+  (lambda (fail ps at s as) (begin (with-import at (bind-direct as) at) (desc fail ps at s))))
+;; A description's binder `n`, at node `at`: a pattern variable (a `dvar`
+;; the use gives), or a name the template binds; what it binds.
+(define desc-binder (->* (fails pvars int syn) atm)
+  (lambda (fail ps at n)
+    (begin
+      (with-core at (s-dvar))
+      (cond ((and (syn-symbol? n) (pvar? (syn-symbol n) ps))
+             (begin (with-kids at (k-pvar (syn-symbol n))) (atm-var (syn-symbol n))))
+            ((and (syn-symbol? n) (not (reserved-syn? n)) (not (desc-word? (syn-name n) #f)))
+             (begin (with-kids at (k-binder (syn-symbol n) #t)) (atm-lit at)))
+            (else (begin (fail-at fail (string-append "`" (show-syn n) "` is not a name that may "
+                                                      "be bound")
+                                  n)
+                         (atm-lit at)))))))
+;; `((name kind) …)` at node `at`, a binder's place or `distinct` third if
+;; any, each in the scope of those before it: what they bind.
+(define desc-binders (->* (fails pvars int syn) atms)
+  (lambda (fail ps at bs)
+    (let ((entries (proper-items bs)))
+      (desc-binders-from fail ps (desc-kids at entries) entries nil))))
+(define desc-binders-from (->* (fails pvars (listof int acyclic) syns-a atms) atms)
+  (lambda (fail ps ks es out)
+    (if (null? es)
+        out
+        (let* ((parts (proper-items (car es))) (n (len parts)))
+          (if (or (= n 2) (= n 3))
+              (let* ((p (desc-kids (car ks) parts))
+                     (a (desc-binder fail ps (car p) (car parts))))
+                (begin
+                  (if (= n 3) (desc-scoped fail ps (kid p 2) (nth parts 2) out) #u)
+                  (desc-binders-from fail ps (cdr ks) (cdr es) (append out (the atms (list a))))))
+              (begin (fail-at fail "a binder is `(name kind)`" (car es)) out))))))
+;; `(dletrec ((name description) …) body)`'s parts: each name in scope in
+;; each description and the body.
+(define-type dparts (listof (tupleof atm int syn) acyclic))
+(define desc-dletrec (->* (fails pvars (listof int acyclic) syns-a) unit)
+  (lambda (fail ps kids items)
+    (let* ((entries (proper-items (nth items 1)))
+           (parts (dletrec-parts fail ps (desc-kids (kid kids 1) entries) entries))
+           (as (dparts-atms parts)))
+      (begin (dparts-each fail ps parts as) (desc-scoped fail ps (kid kids 2) (nth items 2) as)))))
+(define dletrec-parts (->* (fails pvars (listof int acyclic) syns-a) dparts)
+  (lambda (fail ps ks es)
+    (if (null? es)
+        nil
+        (let ((parts (proper-items (car es))))
+          (if (= (len parts) 2)
+              (let* ((p (desc-kids (car ks) parts)) (a (desc-binder fail ps (car p) (car parts))))
+                (cons (tuple a (kid p 1) (nth parts 1)) (dletrec-parts fail ps (cdr ks) (cdr es))))
+              (begin (fail-at fail "`(name description)`" (car es)) (the dparts nil)))))))
+(define dparts-atms (->* (dparts) atms)
+  (lambda (ds) (if (null? ds) nil (cons (extract (car ds) 1) (dparts-atms (cdr ds))))))
+(define dparts-each (->* (fails pvars dparts atms) unit)
+  (lambda (fail ps ds as)
+    (if (null? ds)
+        #u
+        (begin (desc-scoped fail ps (extract (car ds) 2) (extract (car ds) 3) as)
+               (dparts-each fail ps (cdr ds) as)))))
+;; `(label type)`s at nodes `ks`.
+(define desc-fields (->* (fails pvars (listof int acyclic) syns-a) unit)
+  (lambda (fail ps ks fs)
+    (if (null? fs)
+        #u
+        (let ((parts (proper-items (car fs))))
+          (if (= (len parts) 2)
+              (begin (desc fail ps (kid (desc-kids (car ks) parts) 1) (nth parts 1))
+                     (desc-fields fail ps (cdr ks) (cdr fs)))
+              (fail-at fail "`(label type)`" (car fs)))))))
+;; Names of values at nodes `ks`, each the top level's if free (`free` 1)
+;; or as written (2), or a pattern variable placed.
+(define desc-values (->* (fails pvars (listof int acyclic) int) unit)
+  (lambda (fail ps ks free)
+    (if (null? ks)
+        #u
+        (let ((s (node-syn (car ks))))
+          (if (syn-symbol? s)
+              (begin
+                (with-core (car ks) (s-id))
+                (with-kids (car ks) (if (pvar? (syn-symbol s) ps)
+                                        (k-pvar (syn-symbol s))
+                                        (k-ref (syn-symbol s) #f free)))
+                (desc-values fail ps (cdr ks) free))
+              (fail-at fail "a name" s))))))
+;; The binders of the `poly`s at the top of the description at node `at`,
+;; outermost first (`Checker::bind_signature`'s).
+(define poly-binders (->* (int pvars) atms)
+  (lambda (at ps)
+    (let ((items (proper-items (node-syn at))))
+      (tagcase (node-kids at)
+        (k-desc (kids)
+          (if (and (= (len items) 3) (syn-symbol? (car items))
+                   (string=? (syn-name (car items)) "poly")
+                   (not (pvar? (syn-symbol (car items)) ps)))
+              (append (entry-binders (tagcase (node-kids (kid kids 1))
+                                       (k-desc (es) es)
+                                       (else y (the (listof int acyclic) nil))))
+                      (poly-binders (kid kids 2) ps))
+              (the atms nil)))
+        (else y (the atms nil))))))
+(define entry-binders (->* ((listof int acyclic)) atms)
+  (lambda (es)
+    (if (null? es)
+        nil
+        (let ((rest (entry-binders (cdr es))))
+          (tagcase (node-kids (car es))
+            (k-desc (parts)
+              (tagcase (node-kids (car parts))
+                (k-pvar (n) (cons (atm-var n) rest))
+                (k-binder (n d) (cons (atm-lit (car parts)) rest))
+                (else y rest)))
+            (else y rest))))))
+;; The nodes under node `at`, itself first.
+(define under (->* (int) (listof int acyclic))
+  (lambda (at)
+    (cons at (tagcase (node-kids at)
+               (k-pair (x y) (append (under x) (under y)))
+               (k-form (x) (under x))
+               (k-desc (xs) (under-each xs))
+               (else y (the (listof int acyclic) nil))))))
+(define under-each (->* ((listof int acyclic)) (listof int acyclic))
+  (lambda (xs) (if (null? xs) nil (append (under (car xs)) (under-each (cdr xs))))))
+
 ;;; ------------------------------------------------------------ binding
 
-;; What an environment is made of: a pattern variable bound (`bvar`), the
-;; rib or ribcage a pattern variable exports, a template's own binder (its
-;; node).
-(define-datatype atm (atm-var symbol) (atm-rib-of symbol) (atm-lit int))
-(define-type atms (listof atm acyclic))
 ;; One level of an environment: a rib, or a pattern variable's ribcage.
 (define-datatype level (lv-rib atms) (lv-cage symbol))
 (define-type levels (listof level acyclic))
@@ -392,10 +639,14 @@
       (tagcase (node-kids at)
         (k-pair (x y) (append (walk fail x env2 many) (walk fail y env2 many)))
         (k-form (x) (walk fail x env2 many))
+        (k-desc (xs) (walk-each fail xs env2 many))
         (k-pvar (n) (the found (list (tuple at env2 many))))
-        (k-binder (n) (the found (list (tuple at env2 many))))
-        (k-ref (n) (the found (list (tuple at env2 many))))
+        (k-binder (n d) (the found (list (tuple at env2 many))))
+        (k-ref (n d free) (the found (list (tuple at env2 many))))
         (else y (the found nil))))))
+(define walk-each (->* (fails (listof int acyclic) levels bool) found)
+  (lambda (fail xs env many)
+    (if (null? xs) nil (append (walk fail (car xs) env many) (walk-each fail (cdr xs) env many)))))
 ;; `env` with what each import binds before it, the last import innermost.
 (define imported (->* (fails rooted levels syn) levels)
   (lambda (fail is env s)
@@ -408,7 +659,8 @@
   (lambda (fail b root s)
     (tagcase b
       (bind-rib (es) (list (lv-rib (rib fail es root s))))
-      (bind-cage (rings) (cage fail rings root s)))))
+      (bind-cage (rings) (cage fail rings root s))
+      (bind-direct (as) (list (lv-rib as))))))
 (define cage (->* (fails rings int syn) levels)
   (lambda (fail rings root s)
     (if (null? rings)
@@ -425,21 +677,40 @@
                (ts (node-syn t)) (rest (rib fail (cdr es) root s)))
           (tagcase (node-kids t)
             (k-pvar (n)
-              (cond ((= delta 1) (cons (atm-var n) rest))
+              (cond ((= delta 1) (cons (binder-atm fail (atm-var n) t #f) rest))
+                    ((= delta 4) (cons (binder-atm fail (atm-var n) t #t) rest))
+                    ;; A use's description: what its own `poly`s bind is the
+                    ;; use's, which nothing the template writes can name.
+                    ((and (= delta 2) (= (kind-of (node-core t)) 4)) rest)
                     ((= delta 2) (cons (atm-rib-of n) rest))
                     ((= delta 3) (begin (env-in-rib fail ts) rest))
                     (else rest)))
-            (k-binder (n)
-              (cond ((= delta 1) (cons (atm-lit t) rest))
+            (k-binder (n d)
+              (cond ((= delta 1) (cons (binder-atm fail (atm-lit t) t #f) rest))
+                    ((= delta 4) (cons (binder-atm fail (atm-lit t) t #t) rest))
                     ((= delta 2) (append (exported-rib fail t ts s) rest))
                     ((= delta 3) (begin (env-in-rib fail ts) rest))
                     (else rest)))
             (else y
-              (cond ((= delta 1)
-                     (begin (fail-at fail "the signature says a binder is here" ts) rest))
+              (cond ((or (= delta 1) (= delta 4))
+                     (cons (binder-atm fail (atm-lit t) t (= delta 4)) rest))
                     ((= delta 2) (append (exported-rib fail t ts s) rest))
                     ((= delta 3) (begin (env-in-rib fail ts) rest))
                     (else rest))))))))
+;; Atom `a` of the binder at node `t`, which the signature says binds a
+;; description if `d`, else a value: refused if it binds the other.
+(define binder-atm (->* (fails atm int bool) atm)
+  (lambda (fail a t d)
+    (let ((desc? (tagcase (node-kids t)
+                   (k-binder (n e) e)
+                   (k-pvar (n) (= (kind-of (node-core t)) 12))
+                   (else y (not d)))))
+      (if (eq? desc? d)
+          a
+          (begin (fail-at fail (string-append "the signature says a "
+                                              (if d "description's" "value's") " binder is here")
+                          (node-syn t))
+                 a)))))
 (define env-in-rib (->* (fails syn) unit)
   (lambda (fail s) (fail-at fail "a ribcage (`env`) in a rib: write it `(at ℓ)` in a `cage`" s)))
 ;; The rib node `t` exports, its addresses read at `s`'s place, as the
@@ -457,6 +728,7 @@
                      (the atms nil)))
           (tagcase (extract (car e) 1)
             (bind-rib (es) (rib fail es (extract (car e) 2) s))
+            (bind-direct (as) as)
             (else y (begin (fail-at fail (string-append "the signature says what is here exports "
                                                         "a rib, and it exports none")
                                     ts)
@@ -496,21 +768,22 @@
           (else y (begin (fail-at fail "an address to no part" s) root))))))
 
 ;; Pattern variable `n`, of `info`, placed in the template where type
-;; `want` is, in environment `env`: Herman's rules.
-(define placed (->* (fails symbol pinfo sty levels syn) unit)
-  (lambda (fail n info want env s)
+;; `want` is, in environment `env`: Herman's rules. `ps`, the pattern's.
+(define placed (->* (fails symbol pinfo sty levels syn pvars) unit)
+  (lambda (fail n info want env s ps)
     (let* ((name (symbol->string n)) (have (extract info 1)) (kh (kind-of have))
            (kw (kind-of (unfold want)))
            (said (lambda ((why string)) (fail-at fail (string-append "`" name "` " why) s)))
            (simple? (lambda ((k int)) (simple-kind? k))))
       (cond
-        ((and (= kh 1) (= kw 1)) #u)
-        ;; A pattern's binder referred to: in its scope, and where no other of
-        ;; the pattern's binders may shadow it (the shadow restriction).
-        ((and (= kh 1) (or (= kw 0) (= kw 2)))
+        ((or (and (= kh 1) (= kw 1)) (and (= kh 12) (= kw 12))) #u)
+        ;; A pattern's binder referred to, a value's or a description's: in
+        ;; its scope, and where no other of the pattern's binders of its
+        ;; namespace may shadow it (the shadow restriction).
+        ((or (and (= kh 1) (or (= kw 0) (= kw 2))) (and (= kh 12) (= kw 4)))
          (let ((i (rib-binding n env 0)))
            (cond ((< i 0) (said "is referred to where the template does not bind it"))
-                 ((shadowing? env i)
+                 ((shadowing? env i ps (= kh 12))
                   (said (string-append "is referred to where another of the pattern's binders "
                                        "may shadow it (Herman's shadow restriction): a use "
                                        "giving both one name would change what it refers to")))
@@ -542,18 +815,25 @@
           ((tagcase (car env) (lv-rib (as) (atm-in? (atm-var n) as)) (else y #f)) i)
           (else (rib-binding n (cdr env) (+ i 1))))))
 ;; Whether a level of `env` before the `i`th is a ribcage, or a rib with one
-;; of the pattern's binders in it.
-(define shadowing? (->* (levels int) bool)
-  (lambda (env i)
+;; of the pattern's binders of a description's namespace if `d`, else a
+;; value's: a value's binder never shadows a description's.
+(define shadowing? (->* (levels int pvars bool) bool)
+  (lambda (env i ps d)
     (and (> i 0)
          (or (tagcase (car env)
                (lv-cage (n) #t)
-               (lv-rib (as) (any-pattern-atom? as)))
-             (shadowing? (cdr env) (- i 1))))))
-(define any-pattern-atom? (->* (atms) bool)
-  (lambda (as)
+               (lv-rib (as) (any-pattern-atom? as ps d)))
+             (shadowing? (cdr env) (- i 1) ps d)))))
+(define any-pattern-atom? (->* (atms pvars bool) bool)
+  (lambda (as ps d)
     (and (not (null? as))
-         (or (tagcase (car as) (atm-lit (t) #f) (else y #t)) (any-pattern-atom? (cdr as))))))
+         (or (tagcase (car as)
+               (atm-lit (t) #f)
+               (atm-var (m)
+                 (let ((p (pvar-of m ps)))
+                   (or (null? p) (eq? (= (kind-of (extract (car p) 1)) 12) d))))
+               (else y #t))
+             (any-pattern-atom? (cdr as) ps d)))))
 (define atm=? (->* (atm atm) bool)
   (lambda (a b)
     (tagcase a
@@ -631,7 +911,6 @@
 (define names-within? (->* (names names) bool)
   (lambda (xs ys) (or (null? xs) (and (name-in? (car xs) ys) (names-within? (cdr xs) ys)))))
 ;; An export's names, as said, in order (`shown_exports`).
-(define-type strings (listof string acyclic))
 (define shown-exports (->* (exported) string)
   (lambda (e)
     (let ((ss (sorted-strings (append (atm-strings (extract e 1)) (cage-strings (extract e 2)))
@@ -652,17 +931,6 @@
         nil
         (cons (string-append "what `" (symbol->string (car ns)) "` defines")
               (cage-strings (cdr ns))))))
-(define sorted-strings (->* (strings strings) strings)
-  (lambda (xs out) (if (null? xs) out (sorted-strings (cdr xs) (inserted (car xs) out)))))
-(define inserted (->* (string strings) strings)
-  (lambda (x ys)
-    (cond ((null? ys) (list x))
-          ((string<? x (car ys)) (cons x ys))
-          (else (cons (car ys) (inserted x (cdr ys)))))))
-(define joined (->* (strings) string)
-  (lambda (ss)
-    (if (null? (cdr ss)) (car ss) (string-append (car ss) ", " (joined (cdr ss))))))
-
 ;; The names a template binds in its uses of macros that make definitions,
 ;; nodes `i` to `n`, each with the macro: what their signatures do not say
 ;; they define, it does not see (`macros.rs`'s `binders_under`).
@@ -690,8 +958,12 @@
     (tagcase (node-kids at)
       (k-pair (x y) (append (binders-under x m) (binders-under y m)))
       (k-form (x) (binders-under x m))
-      (k-binder (n) (the nested (list (tuple n m))))
+      (k-desc (xs) (binders-under-each xs m))
+      (k-binder (n d) (if d (the nested nil) (the nested (list (tuple n m)))))
       (else y (the nested nil)))))
+(define binders-under-each (->* ((listof int acyclic) symbol) nested)
+  (lambda (xs m)
+    (if (null? xs) nil (append (binders-under (car xs) m) (binders-under-each (cdr xs) m)))))
 ;; The macro whose use binds `n`, of `ns`, in a list of one.
 (define nested-of (->* (symbol nested) (listof symbol acyclic))
   (lambda (n ns)

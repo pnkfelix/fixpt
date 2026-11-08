@@ -55,7 +55,6 @@ pub enum FamilyArg {
     Fun(TyId),
 }
 
-/// The heads of the type forms `parse_type_node` reads.
 /// What `(abs (f (name kind) …) type)` is, when it is not.
 const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kind) …) type)`";
 
@@ -63,6 +62,15 @@ const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kin
 const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a definition declares (`define`, `define-rec`, `letrec`), \
      its effect found from its `lambda`: here, write `->` or `subr`";
 
+/// The heads of the effect forms `parse_effect_list` reads: as the type
+/// forms' names, each read by its name alone in head position, never looked
+/// up (`docs/research/typed-macros.md`, "Decided: a template's free
+/// description names, one qualified name each").
+pub const EFFECT_HEADS: &[&str] = &["read", "write", "alloc", "goto", "comefrom", "await", "init", "send", "receive", "io", "maxeff"];
+
+/// The heads of the type forms `parse_type_node` reads, each read by its
+/// name alone in head position, `(listof T)`, never looked up: what binds a
+/// name of one does not change what the form is.
 pub const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
     "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "tupleof", "bool", "oneof", "union", "anyof", "allof", "->", "->*", "restrict",
@@ -242,6 +250,20 @@ impl Checker {
 
     /// `read` of `s`, or, `s` being `#%toplevel:n`, of `n` as the top level
     /// reads it ([`Checker::at_toplevel`]).
+    /// `(select m n)`, a type or a description function: found where the
+    /// type it is in is checked (`resolve_selects`); or, `m` being
+    /// `#%toplevel:x`, the top level's `x`'s, found here, as the top level
+    /// reads it.
+    pub(crate) fn select_of(&mut self, m: Sym, n: Sym, span: fixpt_read::Span) -> R<TyId> {
+        match self.toplevel_unqualified(m) {
+            Some(p) => {
+                let t = self.arena.ty(Ty::Select(p, n));
+                self.at_toplevel(|c| c.resolve_selects(t, span))
+            }
+            None => Ok(self.arena.ty(Ty::Select(m, n))),
+        }
+    }
+
     pub(crate) fn read_qualified<T>(&mut self, s: &Syntax, read: impl FnOnce(&mut Self, &Syntax) -> R<T>) -> Option<R<T>> {
         let n = s.as_symbol().filter(|m| self.is_toplevel_qualified(*m)).and_then(|m| self.toplevel_unqualified(m))?;
         Some(self.at_toplevel(|c| read(c, &Syntax::symbol(s.span, n))))
@@ -565,6 +587,10 @@ impl Checker {
             let (Some(m), Some(e)) = (m.as_symbol(), e.as_symbol()) else {
                 return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
             };
+            // `(select #%toplevel:m e)`: the top level's `m`'s, found here.
+            if let Some(p) = self.toplevel_unqualified(m) {
+                return self.at_toplevel(|c| c.selected_effect(p, e, s.span));
+            }
             return Ok(Effect::atom(Atom::Var(self.effect_select(m, e))));
         }
         // `(e d …)`: a description function to an effect, applied.
@@ -767,12 +793,12 @@ impl Checker {
         // else the type form of that name; `d …` read where they are.
         if let Some(h) = items.first().and_then(|h| h.as_symbol()).filter(|h| self.is_toplevel_qualified(*h)) {
             let n = self.toplevel_unqualified(h).expect("qualified");
-            let found = self.at_toplevel(|c| c.lookup_desc(n));
+            let found = if TYPE_FORMS.contains(&self.name(n)) { None } else { self.at_toplevel(|c| c.lookup_desc(n)) };
             let mut plain = items.clone();
             plain[0] = Syntax::symbol(items[0].span, n);
             return self.parse_type_list_found(&Syntax::list(s.span, plain), found, true);
         }
-        let found = items.first().and_then(|h| h.as_symbol()).and_then(|h| self.lookup_desc(h));
+        let found = items.first().and_then(|h| h.as_symbol()).filter(|h| !TYPE_FORMS.contains(&self.name(*h))).and_then(|h| self.lookup_desc(h));
         self.parse_type_list_found(s, found, false)
     }
 
@@ -1089,7 +1115,7 @@ impl Checker {
                 let (Some(m), Some(n)) = (m.as_symbol(), n.as_symbol()) else {
                     return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
                 };
-                Ok(self.arena.ty(Ty::Select(m, n)))
+                self.select_of(m, n, s.span)
             }
             "arrayof" => {
                 let [_, t, r] = &items[..] else {

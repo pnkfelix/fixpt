@@ -17,6 +17,13 @@
         expand-datatype (type syns-a names loaded-file) (effect parses))
 (import types-module fail-at (type fails))
 
+;; The name the importer has macro `n` by, of `m`'s, in a list of one.
+(define internal-of
+  (->* (symbol (listof (tupleof symbol symbol) acyclic)) (listof symbol acyclic))
+  (lambda (n m)
+    (cond ((null? m) nil)
+          ((symbol=? n (extract (car m) 1)) (list (extract (car m) 2)))
+          (else (internal-of n (cdr m))))))
 (define proper (->* (syn) syns-a)
   (lambda (s) (tagcase s (lst (items d a b x) items) (else y nil))))
 (define name-in? (->* (symbol names) bool)

@@ -22,11 +22,11 @@
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn
-        signature-made
+        signature-made pure-hole? affine-kind? int-in?
         (type fails addr sty))
 (import align-module defined macro-of macro? makes-defns? nodes-reset! align walk placed node-at
         node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
-        act-toplevel-type act-standard act-module act-module-type act-standard-type
+        act-qualified act-standard act-module act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed exports-of exports=? shown-exports evaluate levels-of nested-binders
         unsaid-nested
@@ -34,6 +34,7 @@
               found levels
               atms kids contracts holes))
 (import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
+        internal-of
         imports-syntax? import-usage name-filter all-names listed? not-macros loaded-path
         file-syntax hidden-syntax hide-form? file-items names-shown defined-name rec-names
         generative-values macro-names internal-names taken? shown-names macro-sites load-noted
@@ -168,7 +169,7 @@
                                                  ", and its signature says its uses define "
                                                  (shown-exports (car declared)))
                              template))))
-          (type-actions 0 (get nnodes) file named))))))
+          (type-actions fail 0 (get nnodes) file named))))))
 ;; The actions for what the walk found, onto `out`; `uses`, the affine
 ;; pattern variables placed so far.
 (define name-actions (->* (fails pvars found scopes actions names nested) actions)
@@ -186,7 +187,7 @@
                      (affine (and (not (extract info 3)) (not (pure-hole? (extract info 4)))
                                   (affine-kind? (extract info 1)))))
                 (begin
-                  (placed fail n info (node-core at) env s)
+                  (placed fail n info (node-core at) env s ps)
                   (if (and affine many)
                       (fail-at fail (string-append "`" name "` is placed where it may be placed "
                                                    "more than once (a `many` part), and an "
@@ -203,93 +204,100 @@
                       #u)
                   (name-actions fail ps (cdr fs) file out
                                 (if affine (the names (cons n uses)) uses) nested))))
-            (k-binder (n)
+            (k-binder (n d)
               (name-actions fail ps (cdr fs) file (cons (tuple path (act-rename path)) out) uses
                             nested))
-            (k-ref (n)
-              (let ((b (binder-of n env)))
+            (k-ref (n d free)
+              (let ((b (binder-of n d env)))
                 (begin
-                  (unsaid-nested fail n b nested s)
-                  (name-actions fail ps (cdr fs) file
-                                (cons (tuple path (ref-action fail n b file s)) out) uses
-                                nested))))
+                  (if d #u (unsaid-nested fail n b nested s))
+                  (let ((act (ref-action fail n b free file s)))
+                    (name-actions fail ps (cdr fs) file
+                                  (if (null? act) out (cons (tuple path (car act)) out)) uses
+                                  nested)))))
             (else y (name-actions fail ps (cdr fs) file out uses nested)))))))
-;; Whether typed hole `h` (none or one) has its effect written `pure`.
-(define pure-hole? (->* (holes) bool)
-  (lambda (h)
-    (and (not (null? h)) (not (null? (extract (car h) 2)))
-         (syn-symbol? (car (extract (car h) 2)))
-         (string=? (syn-name (car (extract (car h) 2))) "pure"))))
-;; Whether a pattern variable of type `t` has an expression in it: not a
-;; binder, name, label, datum or type.
-(define affine-kind? (->* (sty) bool)
-  (lambda (t)
-    (let ((k ((with types-module kind-of) t)))
-      (not (or (= k 1) (= k 2) (= k 5) (= k 3) (= k 4))))))
 ;; A reference to `n`: the template's binder of it, if one binds it in
-;; `env` (its node, in a list of one), made fresh with it; else the top
-;; level's, or a file's own or a standard name.
-(define ref-action (->* (fails symbol (listof int acyclic) scopes syn) action)
-  (lambda (fail n b file s)
-    (cond ((not (null? b)) (act-rename (node-path (car b))))
-          ((null? file) (act-toplevel))
-          ((name-in? n (extract (car file) 2)) (act-module (extract (car file) 1)))
-          ((name-in? n (extract (car file) 5)) (act-standard))
+;; `env` (its node, in a list of one), made fresh with it; else, as `free`
+;; says (`k-ref`'s), the top level's, a file's own or a standard name, the
+;; top level's qualified, or none (written as it is). In a list of one.
+(define ref-action (->* (fails symbol (listof int acyclic) int scopes syn) (listof action acyclic))
+  (lambda (fail n b free file s)
+    (cond ((not (null? b)) (list (act-rename (node-path (car b)))))
+          ((= free 2) nil)
+          ;; A file's macro's description is read through the file's module
+          ;; whole (`type-actions`).
+          ((= free 1) (if (null? file) (list (act-qualified)) nil))
+          ((null? file) (list (act-toplevel)))
+          ((name-in? n (extract (car file) 2)) (list (act-module (extract (car file) 1))))
+          ((name-in? n (extract (car file) 5)) (list (act-standard)))
           (else
            (begin
              (fail-at fail (string-append "`" (symbol->string n) "` is neither a value the file's "
                                           "module shows nor a standard binding: a file's macro "
                                           "names only those, as they are where it is imported")
                       s)
-             (act-toplevel))))))
-;; The template's binder of `n` in `env`, innermost first: its node.
-(define binder-of (->* (symbol levels) (listof int acyclic))
-  (lambda (n env)
+             (list (act-toplevel)))))))
+;; The template's binder of `n` in `env`, innermost first, in a
+;; description's namespace if `d`, else a value's: its node.
+(define binder-of (->* (symbol bool levels) (listof int acyclic))
+  (lambda (n d env)
     (if (null? env)
         nil
-        (let ((here (tagcase (car env) (lv-rib (as) (lit-binding n as)) (else y nil))))
-          (if (null? here) (binder-of n (cdr env)) here)))))
-(define lit-binding (->* (symbol atms) (listof int acyclic))
-  (lambda (n as)
+        (let ((here (tagcase (car env) (lv-rib (as) (lit-binding n d as)) (else y nil))))
+          (if (null? here) (binder-of n d (cdr env)) here)))))
+(define lit-binding (->* (symbol bool atms) (listof int acyclic))
+  (lambda (n d as)
     (if (null? as)
         nil
-        (let ((rest (lit-binding n (cdr as))))
+        (let ((rest (lit-binding n d (cdr as))))
           (tagcase (car as)
             (atm-lit (t)
               (tagcase (node-kids t)
-                (k-binder (m) (if (symbol=? m n) (list t) rest))
+                (k-binder (m e) (if (and (symbol=? m n) (eq? e d)) (list t) rest))
                 (else y rest)))
             (else y rest))))))
-;; Each type the template writes, from node `i` to `n` (none of the use's
-;; is in it: a pattern variable is placed only whole), read in the top
-;; level's, or, a file's macro's, through the file's module or the
-;; standard environment; and a file's macro's use of another of its own.
-(define type-actions (->* (int int scopes actions) actions)
-  (lambda (i n file out)
+;; A file's macro's descriptions, from node `i` to `n`, each read whole
+;; through the file's module or the standard environment, of those the
+;; template writes alone, with no binder of its own or part of a use's in
+;; them, for now; and a file's macro's use of another of its own.
+(define type-actions (->* (fails int int scopes actions) actions)
+  (lambda (fail i n file out)
     (if (= i n)
         out
         (let* ((path (node-path i)) (kids (node-kids i))
-               (typed (and (type-core? (node-core i))
-                           (tagcase kids (k-other () #t) (else y #f))))
-               (out2 (if typed
-                         (cons (tuple path (type-action (node-syn i) file)) out)
+               (out2 (if (and (not (null? file)) (int-in? i (get desc-roots)))
+                         (cons (tuple path (type-action fail i file out)) out)
                          out))
                (head (form-head-of i)))
-          (type-actions (+ i 1) n file
+          (type-actions fail (+ i 1) n file
                         (if (and (not (null? file)) (tagcase kids (k-form (x) #t) (else y #f))
                                  (not (null? head))
                                  (not (null? (internal-of (car head) (extract (car file) 4)))))
                             (let ((h (car (internal-of (car head) (extract (car file) 4)))))
                               (cons (tuple path (act-macro-head h)) out2))
                             out2))))))
-(define type-core? (->* (sty) bool)
-  (lambda (t) (= ((with types-module kind-of) t) 4)))
-(define type-action (->* (syn scopes) action)
-  (lambda (s file)
-    (cond ((null? file) (act-toplevel-type))
-          ((and (syn-symbol? s) (not (name-in? (syn-symbol s) (extract (car file) 3))))
-           (act-standard-type))
-          (else (act-module-type (extract (car file) 1))))))
+;; The description at node `i`, a file's macro's, read whole: refused if it
+;; has a binder of the template's or a part a use gives in it (`out`'s).
+(define type-action (->* (fails int scopes actions) action)
+  (lambda (fail i file out)
+    (let ((s (node-syn i)) (open (open-node (under i) out)))
+      (begin
+        (if (null? open)
+            #u
+            (fail-at fail (string-append "a file's macro's description with a binder of its own "
+                                         "or a part a use gives in it: not yet")
+                     (node-syn (car open))))
+        (if (and (syn-symbol? s) (not (name-in? (syn-symbol s) (extract (car file) 3))))
+            (act-standard-type)
+            (act-module-type (extract (car file) 1)))))))
+(define open-node (->* ((listof int acyclic) actions) (listof int acyclic))
+  (lambda (ks out)
+    (cond ((null? ks) nil)
+          ((or (tagcase (node-kids (car ks)) (k-pvar (n) #t) (k-binder (n d) #t) (else y #f))
+               (let ((a (action-at (node-path (car ks)) out)))
+                 (and (not (null? a)) (tagcase (car a) (act-rename (p) #t) (else z #f)))))
+           (list (car ks)))
+          (else (open-node (cdr ks) out)))))
 ;; The name at the head of node `i`'s list, in a list of one.
 (define form-head-of (->* (int) (listof symbol acyclic))
   (lambda (i)
@@ -297,11 +305,6 @@
       (if (and (not (null? items)) (syn-symbol? (car items)))
           (list (syn-symbol (car items)))
           nil))))
-(define internal-of (->* (symbol (listof (tupleof symbol symbol) acyclic)) (listof symbol acyclic))
-  (lambda (n m)
-    (cond ((null? m) nil)
-          ((symbol=? n (extract (car m) 1)) (list (extract (car m) 2)))
-          (else (internal-of n (cdr m))))))
 
 ;;; ------------------------------------------------------------ defining
 
@@ -706,7 +709,6 @@
            (typed (if (null? act)
                       ""
                       (tagcase (car act)
-                        (act-toplevel-type () "#%toplevel")
                         (act-standard-type () "#%fx")
                         (act-module-type (m) (symbol->string m))
                         (else y "")))))
@@ -783,6 +785,8 @@
               (tagcase (car act)
                 (act-rename (binder) (atom (fresh-name n binder) a b made))
                 (act-toplevel () (with-name "#%toplevel" n a b made))
+                (act-qualified ()
+                  (atom (string->symbol (string-append "#%toplevel:" (symbol->string n))) a b made))
                 (act-standard () (with-name "#%fx" n a b made))
                 (act-module (m) (with-name (symbol->string m) n a b made))
                 (else y (atom n a b made))))))))

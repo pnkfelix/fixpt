@@ -14,7 +14,7 @@
 (hide (define check-read-types (load-module "fx26:check-read-types.fx")))
 (define-type k-params (select check-read-types k-params))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
-(import check-env-types (type k-scope k-selects))
+(import check-env-types (type k-scope k-selects k-ds))
 (define-type k-syns (select check-read-types k-syns))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
@@ -61,6 +61,12 @@
                        k-scope))
             (val k-params-names (subr (maxeff (read @globals) spin) (k-params) k-names))
             (val k-params-kinds (subr (maxeff (read @globals) spin) (k-params) k-ids))
+            (val k-head-bound
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (symbol)
+                       (listof k-ds acyclic)))
+            (val k-effect-fun?
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) (string) bool))
             (val k-fun-bound?
                  (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) (string) bool))
             (val k-parse-select

@@ -192,6 +192,15 @@
         (let ((d (k-lookup-desc (string->symbol n))))
           (and (not (null? d))
                (tagcase (car d) (ds-var (v k) (k-arrow-kind? k)) (ds-fun (f) #t) (else y #f)))))))
+;; What binds `hd`, a type's head: none if it is a type form's name, read
+;; by the name alone (`parse.rs`'s `TYPE_FORMS`).
+(define k-head-bound (->* (symbol) (listof k-ds acyclic))
+  (lambda (hd)
+    (if (or (symbol=? hd '|()|) (k-type-form? hd)) nil (k-lookup-desc hd))))
+;; Whether `n`, an effect's head, names a description function: never an
+;; effect form's name, read by the name alone (`parse.rs`'s `EFFECT_HEADS`).
+(define k-effect-fun? (->* (string) bool)
+  (lambda (n) (and (not (k-atom-head? n)) (not (string=? n "maxeff")) (k-fun-bound? n))))
 ;; Binder `b`'s name.
 (define k-binder-name (->* ((productof (1 int) (2 int))) symbol)
   (lambda (b) (k-dvar-name (extract b 1))))

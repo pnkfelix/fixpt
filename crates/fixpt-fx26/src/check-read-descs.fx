@@ -268,12 +268,10 @@
   (lambda (s items hd)
     (if (and (not (null? items)) (k-qualified? (car items)))
         (let* ((h (k-unqualified (car items))) (was (k-toplevel-enter)) (f (syn-head h))
-               (found (k-lookup-desc f)))
+               (found (k-head-bound f)))
           (begin (k-toplevel-leave was)
                  (k-parse-type-found s (the k-syns (cons h (cdr items))) f found #t)))
-        (k-parse-type-found
-          s items hd (if (symbol=? hd '|()|) (the (listof k-ds acyclic) nil) (k-lookup-desc hd))
-          #f))))
+        (k-parse-type-found s items hd (k-head-bound hd) #f))))
 ;; That, its head bound to `abbrev`, as the top level binds it if `top`.
 (define k-parse-type-found (->* (syn k-syns symbol (listof k-ds acyclic) bool) int)
   (lambda (s items hd abbrev top)
@@ -858,7 +856,7 @@
                  -1
                  (let ((head (car items)))
                    (if (syn-symbol? head)
-                       (if (k-fun-bound? (syn-name head)) (k-fun-named head) -1)
+                       (if (k-effect-fun? (syn-name head)) (k-fun-named head) -1)
                        (if (string=? (k-list-head head) "dlambda") (k-parse-fun head -1) -1))))))
       (if (< f 0)
           nil

@@ -22,14 +22,21 @@
 
 ;; An address's steps from its root, first first: `#t` the car.
 (define-type addr (listof bool acyclic))
-;; What a part at an address binds (Herman's `δ`): 0 nothing, 1 a variable,
-;; 2 a rib, 3 a ribcage.
+;; What a part at an address binds (Herman's `δ`): 0 nothing, 1 a value's
+;; variable, 2 a rib, 3 a ribcage, 4 a description's variable.
 (define-type entries (listof (tupleof addr int) acyclic))
 ;; One of a ribcage's: a rib, or the ribcage exported at an address.
 (define-datatype ring (ring-rib entries) (ring-at addr))
 (define-type rings (listof ring acyclic))
-;; What an annotation binds (Herman's `β`): a rib, or a ribcage.
-(define-datatype bind (bind-rib entries) (bind-cage rings))
+;; What an environment is made of: a pattern variable bound (`bvar`,
+;; `dvar`), the rib or ribcage a pattern variable exports, a template's own
+;; binder (its node).
+(define-datatype atm (atm-var symbol) (atm-rib-of symbol) (atm-lit int))
+(define-type atms (listof atm acyclic))
+;; What an annotation binds (Herman's `β`): a rib, or a ribcage; or a rib of
+;; what it binds, as found, the binders a template's description writes
+;; (`macros.rs`'s `Bind::Direct`).
+(define-datatype bind (bind-rib entries) (bind-cage rings) (bind-direct atms))
 ;; What a typed hole says (`macros.rs`'s `Hole`): its type and its effect,
 ;; each as written, in a list of one, or none if it is left out.
 (define-type hole (tupleof syns-a syns-a))
@@ -43,7 +50,9 @@
   (s-lambda)
   ;; A definition, where a template makes one (the kernel's `begin` of
   ;; them); no part of a signature, for now.
-  (s-defn))
+  (s-defn)
+  ;; A description's binder; a binder's kind, which names nothing.
+  (s-dvar) (s-kind))
 (define-type stys (listof sty acyclic))
 
 ;; Each `mu`'s body, by its number: the program's, and every file's
@@ -82,11 +91,50 @@
     (and (pair? ws)
          (or (and (symbol? (car ws)) (string=? name (symbol->string (car ws))))
              (word-in? name (cdr ws))))))
+;; Whether `name` is a word of descriptions (the kernel's): one read
+;; anywhere (`pure`, `heap`, a region constant `@r`, or a name already
+;; `#%`'s), or, `head`, one a list's head may be (`subr`, `listof`).
+(define desc-word? (->* (string bool) bool)
+  (lambda (name head)
+    (or (and (> (string-length name) 0) (char=? (string-ref name 0) #\@))
+        (and (> (string-length name) 1) (string=? (substring name 0 2) "#%"))
+        (word-in? name (with kernel description-words))
+        (and head (word-in? name (with kernel description-heads))))))
 ;; Whether `s` is a name, and a reserved one.
 (define reserved-syn? (->* (syn) bool)
   (lambda (s) (and (syn-symbol? s) (reserved? (syn-name s)))))
 (define name-in? (->* (symbol names) bool)
   (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (name-in? n (cdr ns))))))
+
+;; Strings, `xs` sorted onto `out`; and joined, `, ` between.
+(define-type strings (listof string acyclic))
+(define sorted-strings (->* (strings strings) strings)
+  (lambda (xs out) (if (null? xs) out (sorted-strings (cdr xs) (inserted (car xs) out)))))
+(define inserted (->* (string strings) strings)
+  (lambda (x ys)
+    (cond ((null? ys) (list x))
+          ((string<? x (car ys)) (cons x ys))
+          (else (cons (car ys) (inserted x (cdr ys)))))))
+(define joined (->* (strings) string)
+  (lambda (ss)
+    (if (null? (cdr ss)) (car ss) (string-append (car ss) ", " (joined (cdr ss))))))
+
+
+;; Whether typed hole `h` (none or one) has its effect written `pure`.
+(define pure-hole? (->* ((listof hole acyclic)) bool)
+  (lambda (h)
+    (and (not (null? h)) (not (null? (extract (car h) 2)))
+         (syn-symbol? (car (extract (car h) 2)))
+         (string=? (syn-name (car (extract (car h) 2))) "pure"))))
+;; Whether a pattern variable of type `t` has an expression in it: not a
+;; binder, name, label, datum or type.
+(define affine-kind? (->* (sty) bool)
+  (lambda (t)
+    (let ((k (kind-of t)))
+      (not (or (= k 1) (= k 2) (= k 5) (= k 3) (= k 4) (= k 12) (= k 13))))))
+;; Whether `i` is one of `is`.
+(define int-in? (->* (int (listof int acyclic)) bool)
+  (lambda (i is) (and (not (null? is)) (or (= i (car is)) (int-in? i (cdr is))))))
 
 ;;; ------------------------------------------------------------ syntax
 
@@ -234,12 +282,13 @@
                   (case n
                     ((expr) (s-expr)) ((bvar) (s-bvar)) ((id) (s-id)) ((data) (s-data))
                     ((lambda) (s-lambda))
-                    ((type) (s-type)) ((label) (s-label))
+                    ((type) (s-type)) ((label) (s-label)) ((dvar) (s-dvar)) ((kind) (s-kind))
                     (else
                      (begin
                        (fail-at fail (string-append "a syntax type: `" (symbol->string n) "` is "
                                                     "none (`expr`, `bvar`, `id`, `data`, `type`, "
-                                                    "`label`, `lambda`, or a `mu`'s variable)")
+                                                    "`label`, `lambda`, `dvar`, `kind`, or a "
+                                                    "`mu`'s variable)")
                                 s)
                        (s-nil))))
                   (car t))))))))
@@ -338,8 +387,8 @@
   (lambda (fail d)
     (let ((n (if (syn-symbol? d) (syn-name d) "")))
       (cond ((string=? n "none") 0) ((string=? n "var") 1) ((string=? n "rib") 2)
-            ((string=? n "env") 3)
-            (else (begin (fail-at fail "δ is `none`, `var`, `rib` or `env`" d) 0))))))
+            ((string=? n "env") 3) ((string=? n "dvar") 4)
+            (else (begin (fail-at fail "δ is `none`, `var`, `dvar`, `rib` or `env`" d) 0))))))
 ;; An address, `A`s and `D`s read right to left, or `()`, none: its steps,
 ;; first first.
 (define read-addr (->* (fails syn) addr)
@@ -454,31 +503,31 @@
     (and (not (null? ms)) (or (overlap? a (car ms) depth) (any-overlaps-of? a (cdr ms) depth)))))
 ;; A kind's number, for the cases of `overlap-base?`: 0 expr, 1 bvar, 2 id,
 ;; 3 data, 4 type, 5 label, 6 nil, 7 literal, 8 pair, 9 anything else, 10
-;; lambda, 11 defn.
+;; lambda, 11 defn, 12 dvar, 13 kind.
 (define kind-of (->* (sty) int)
   (lambda (t)
     (tagcase t
       (s-expr () 0) (s-bvar () 1) (s-id () 2) (s-data () 3) (s-type () 4) (s-label () 5)
       (s-nil () 6) (s-literal (n) 7) (s-pair (a d) 8) (s-lambda () 10) (s-defn () 11)
-      (else y 9))))
+      (s-dvar () 12) (s-kind () 13) (else y 9))))
 ;; Whether `k` is a kind of no parts: one of what `(Expr | Id | Data | Type
-;; | Label | Bvar | Lambda | Defn)` names in `macros.rs`.
-(define simple-kind? (->* (int) bool) (lambda (k) (or (< k 6) (= k 10) (= k 11))))
+;; | Label | Bvar | Dvar | Kind | Lambda | Defn)` names in `macros.rs`.
+(define simple-kind? (->* (int) bool) (lambda (k) (or (< k 6) (> k 9))))
 (define literal-of (->* (sty) symbol)
   (lambda (t) (tagcase t (s-literal (n) n) (else y (string->symbol "")))))
 (define overlap-base? (->* (sty sty int) bool)
   (lambda (a b depth)
     (let ((ka (kind-of a)) (kb (kind-of b)))
       (cond
-        ((and (= ka 7) (or (= kb 0) (= kb 1))) #f)
-        ((and (= kb 7) (or (= ka 0) (= ka 1))) #f)
+        ((and (= ka 7) (or (= kb 0) (binder-kind? kb))) #f)
+        ((and (= kb 7) (or (= ka 0) (binder-kind? ka))) #f)
         ;; A lambda is a list: no name, `()` or label, and any list.
         ((or (= ka 10) (= kb 10))
          (let ((other (if (= ka 10) kb ka)))
-           (not (or (= other 7) (= other 1) (= other 2) (= other 6) (= other 5)))))
+           (not (or (= other 7) (binder-kind? other) (= other 2) (= other 6) (= other 5)))))
         ((and (= ka 7) (= kb 7)) (symbol=? (literal-of a) (literal-of b)))
         ((or (and (= ka 7) (= kb 2)) (and (= ka 2) (= kb 7))) #t)
-        ((or (= ka 0) (= ka 3) (= ka 4) (= ka 11) (= kb 0) (= kb 3) (= kb 4) (= kb 11)) #t)
+        ((or (any-kind? ka) (any-kind? kb)) #t)
         ((and (= ka 8) (= kb 8))
          (or (= depth 0)
              (tagcase a
@@ -490,8 +539,13 @@
         ((and (= ka 6) (= kb 6)) #t)
         ((and (= ka 5) (= kb 5)) #t)
         ((or (= ka 5) (= kb 5)) #f)
-        ((and (or (= ka 1) (= ka 2)) (or (= kb 1) (= kb 2))) #t)
+        ((and (or (binder-kind? ka) (= ka 2)) (or (binder-kind? kb) (= kb 2))) #t)
         (else #f)))))
+;; Whether kind `k` is a binder's, `bvar` or `dvar`; one any syntax may be
+;; of, `expr`, `data`, `type`, `kind` or `defn`.
+(define binder-kind? (->* (int) bool) (lambda (k) (or (= k 1) (= k 12))))
+(define any-kind? (->* (int) bool)
+  (lambda (k) (or (= k 0) (= k 3) (= k 4) (= k 11) (= k 13))))
 ;; Whether two of `ms` overlap.
 (define any-overlap? (->* (stys) bool)
   (lambda (ms)
@@ -517,6 +571,7 @@
             (s-nil () (syn-nil? s))
             (s-literal (n) (and (syn-symbol? s) (symbol=? (syn-symbol s) n)))
             (s-bvar () (and (syn-symbol? s) (not (reserved-syn? s))))
+            (s-dvar () (and (syn-symbol? s) (not (reserved-syn? s))))
             (s-id () (syn-symbol? s))
             (s-label () (or (syn-keyword? s) (and (= mode 2) (syn-symbol? s))))
             (s-expr () (and (not (reserved-syn? s)) (not (syn-nil? s))))
@@ -539,8 +594,7 @@
       (s-many (x) (tagcase b (s-many (y) (sty=? x y)) (else z #f)))
       (s-typed (x h) (tagcase b (s-typed (y g) (sty=? x y)) (else z #f)))
       (s-union (ms) (tagcase b (s-union (ns) (all-sty=? ms ns)) (else y #f)))
-      (else y (and (or (< (kind-of a) 7) (= (kind-of a) 10) (= (kind-of a) 11))
-                   (= (kind-of a) (kind-of b)))))))
+      (else y (and (or (< (kind-of a) 7) (> (kind-of a) 9)) (= (kind-of a) (kind-of b)))))))
 (define all-sty=? (->* (stys stys) bool)
   (lambda (ms ns)
     (if (null? ms)
@@ -550,7 +604,9 @@
   (lambda (p q)
     (tagcase p
       (bind-rib (es) (tagcase q (bind-rib (fs) (entries=? es fs)) (else y #f)))
-      (bind-cage (rs) (tagcase q (bind-cage (ss) (rings=? rs ss)) (else y #f))))))
+      (bind-cage (rs) (tagcase q (bind-cage (ss) (rings=? rs ss)) (else y #f)))
+      ;; Found, never written in a signature.
+      (bind-direct (as) #f))))
 (define rings=? (->* (rings rings) bool)
   (lambda (rs ss)
     (if (null? rs)

@@ -10,7 +10,7 @@
 //! macro's name):
 //!
 //! ```text
-//! σ ::= expr | bvar | id | data | type | label | lambda | ()
+//! σ ::= expr | bvar | id | data | type | label | lambda | dvar | kind | ()
 //!     | (σ . σ) | (σ …)                    a pair; a list, of pairs
 //!     | (import σ β) | (export σ β)        Herman's σ↓β and σ↑β
 //!     | (mu v σ) | v | (union σ …)         recursion, alternatives
@@ -22,13 +22,15 @@
 //!                                          a lambda of a `T`, written
 //! β ::= (rho (ℓ δ) …)                      a rib, {ℓ : δ, …}
 //!     | (cage ρ-or-(at ℓ) …)               ribs in order, innermost first; ℓ@γ
-//! δ ::= none | var | rib | env
+//! δ ::= none | var | dvar | rib | env    var binds a value; dvar, a description
 //! ```
 //!
 //! An address `ℓ` is a word of `A` (car) and `D` (cdr), read right to left
 //! as `cadr` is, from the innermost `mu`, `union` member or signature
 //! around it; `()`, Herman's `ε`, is that part itself. `id`, `type` and `label` are FX-26's: a variable referred to
-//! (as `set!`'s target would be), a description, a tag or field's name.
+//! (as `set!`'s target would be), a description, a tag or field's name;
+//! `dvar` a description's binder (a type, an effect, a region: they share
+//! one namespace), and `kind` a binder's kind, which names nothing.
 //! So is `many`: a pattern variable with an expression in it is placed at
 //! most once in a template, affine, unless its part of the signature is
 //! `(many σ)`; placed where another macro's signature says `many`, it is
@@ -41,6 +43,12 @@
 //! (`Macros::expand_top`). A name a use gives is defined under that name,
 //! as the program sees it; one the template writes is made fresh, as its
 //! other binders are, so that nothing outside it can name it.
+//!
+//! A description a template writes is aligned name by name (`Aligner::desc`):
+//! a name it binds made fresh, a pattern variable's what the use gave, the
+//! words of descriptions as written, and any other name the top level's,
+//! `#%toplevel:name` (`typed-macros.md`, "Decided: a template's free
+//! description names, one qualified name each").
 
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
@@ -60,6 +68,10 @@ pub(crate) enum STy {
     Data,
     Type,
     Label,
+    /// A description's binder.
+    Dvar,
+    /// A binder's kind, as written: it names nothing.
+    Kind,
     /// A definition, where a template makes one (the kernel's `begin` of
     /// them); no part of a signature, for now.
     Defn,
@@ -99,6 +111,9 @@ impl Hole {
 pub(crate) enum Bind {
     Rib(Vec<(Addr, Delta)>),
     Cage(Vec<Ring>),
+    /// A rib of what it binds, as found: the binders a template's
+    /// description writes (`Aligner::desc`), no signature's.
+    Direct(Vec<Atom>),
 }
 
 /// One of a ribcage's: a rib, or the ribcage exported at an address.
@@ -116,8 +131,29 @@ type Addr = Vec<bool>;
 pub(crate) enum Delta {
     None,
     Var,
+    Dvar,
     Rib,
     Env,
+}
+
+/// A template's namespaces: values, and descriptions (types, effects,
+/// regions and the rest, which share one scope, `parse.rs`'s `dscope`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ns {
+    Value,
+    Desc,
+}
+
+/// What a name a template refers to is, if the template does not bind it:
+/// the top level's value, `(with #%toplevel name)`; the top level's,
+/// qualified, `#%toplevel:name` (a description's name, or the module a
+/// `select` names); or as written (a global's, in `(globals g …)`, which no
+/// local can shadow).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Free {
+    Toplevel,
+    Qualified,
+    Plain,
 }
 
 /// A macro defined: its signature and clauses.
@@ -152,8 +188,8 @@ struct Clause {
 /// for the binder found at a path and for each reference to it; a name
 /// free in the template, the top level's, as it is where the macro is used,
 /// `(with #%toplevel name)`, nothing at the use shadowing it
-/// (`typed-macros.md`, item 5); a type the template writes, read in the top
-/// level's, `(select #%toplevel type)`.
+/// (`typed-macros.md`, item 5); a description's name free in it, the top
+/// level's, `#%toplevel:name`.
 ///
 /// A file's macro (`import-with-syntax`) means what it meant in its file: a
 /// free name the file's own, `(with %shared:key name)`, the one value every
@@ -167,12 +203,13 @@ struct Clause {
 enum Action {
     Rename(Vec<bool>),
     Toplevel,
-    ToplevelType,
     Standard,
     Module(Sym),
     ModuleType(Sym),
     StandardType,
     MacroHead(Sym),
+    /// A name the top level's, written `#%toplevel:name`.
+    Qualified,
 }
 
 /// What a file's macros are defined in (`Macros::define_file`): the
@@ -215,6 +252,10 @@ pub struct Macros {
     /// Whether a template is being transcribed for its check, its holes'
     /// calls in place of a use's expressions (`template_checks`).
     checking: bool,
+    /// The words of descriptions, the kernel's: those a list's head may be,
+    /// and those read anywhere, as written (`Aligner::desc`).
+    heads: HashSet<String>,
+    words: HashSet<String>,
 }
 
 /// The kernel's forms a template may use, with their binding structure
@@ -257,6 +298,8 @@ struct Node {
     many: bool,
     /// Its part's typed hole, if the signature types it.
     hole: Option<Hole>,
+    /// Whether it is a whole description a template writes (`Aligner::desc`).
+    desc: bool,
     kids: Kids,
 }
 
@@ -265,10 +308,14 @@ enum Kids {
     Nil,
     /// A pattern variable (in a pattern, or placed in a template).
     PVar(Sym),
-    /// A template's binder, a name it writes in a binding position.
-    Binder(Sym),
-    /// A name in a template referred to.
-    Ref(Sym),
+    /// A template's binder, a name it writes in a binding position, of a
+    /// namespace.
+    Binder(Sym, Ns),
+    /// A name in a template referred to, in a namespace, and what it is if
+    /// the template does not bind it.
+    Ref(Sym, Ns, Free),
+    /// A description's parts, a list a template writes, in order.
+    Desc(Vec<usize>),
     /// A form in a template, its operands (or, an application's, itself).
     Form(usize),
     Other,
@@ -277,7 +324,7 @@ enum Kids {
 /// What an environment is made of: a pattern variable bound (`bvar`), the
 /// rib or ribcage a pattern variable exports, a template's own binder.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Atom {
+pub(crate) enum Atom {
     Var(Sym),
     RibOf(Sym),
     Lit(usize),
@@ -336,6 +383,9 @@ impl Macros {
                 _ => _ = self.kernel.insert(interner.name(name).to_string(), t),
             }
         }
+        let names = |list: &str, i: &Interner| kernel_list(&forms, i, list).iter().map(|w| i.name(w.as_symbol().expect("a word")).to_string()).collect::<HashSet<_>>();
+        self.heads = names("description-heads", interner);
+        self.words = names("description-words", interner);
         Ok(())
     }
 
@@ -377,7 +427,9 @@ impl Macros {
                         "data" => STy::Data,
                         "type" => STy::Type,
                         "label" => STy::Label,
-                        other => return Err(bad(&format!("`{other}` is none (`expr`, `bvar`, `id`, `data`, `type`, `label`, `lambda`, or a `mu`'s variable)"))),
+                        "dvar" => STy::Dvar,
+                        "kind" => STy::Kind,
+                        other => return Err(bad(&format!("`{other}` is none (`expr`, `bvar`, `id`, `data`, `type`, `label`, `lambda`, `dvar`, `kind`, or a `mu`'s variable)"))),
                     }
                 }
             }
@@ -461,18 +513,18 @@ impl Macros {
         match (&**a, &**b) {
             (Union(ms), _) => ms.iter().any(|m| self.overlap(m, b, depth)),
             (_, Union(ms)) => ms.iter().any(|m| self.overlap(a, m, depth)),
-            (Literal(_), Expr | Bvar) | (Expr | Bvar, Literal(_)) => false,
+            (Literal(_), Expr | Bvar | Dvar) | (Expr | Bvar | Dvar, Literal(_)) => false,
             // A lambda is a list: no name, `()` or label, and any list.
-            (Lambda, Literal(_) | Bvar | Id | Nil | Label) | (Literal(_) | Bvar | Id | Nil | Label, Lambda) => false,
+            (Lambda, Literal(_) | Bvar | Dvar | Id | Nil | Label) | (Literal(_) | Bvar | Dvar | Id | Nil | Label, Lambda) => false,
             (Lambda, _) | (_, Lambda) => true,
             (Literal(x), Literal(y)) => x == y,
             (Literal(_), Id) | (Id, Literal(_)) => true,
-            (Expr | Data | Type | Defn, _) | (_, Expr | Data | Type | Defn) => true,
+            (Expr | Data | Type | Kind | Defn, _) | (_, Expr | Data | Type | Kind | Defn) => true,
             (Pair(a1, d1), Pair(a2, d2)) => depth == 0 || (self.overlap(a1, a2, depth - 1) && self.overlap(d1, d2, depth - 1)),
             (Nil, Nil) => true,
             (Label, Label) => true,
             (Label, _) | (_, Label) => false,
-            (Bvar | Id, Bvar | Id) => true,
+            (Bvar | Dvar | Id, Bvar | Dvar | Id) => true,
             _ => false,
         }
     }
@@ -492,13 +544,13 @@ impl Macros {
             Pair(a, d) => split(s).is_some_and(|(x, y)| self.fits(a, &x, mode, interner, pvars) && self.fits(d, &y, mode, interner, pvars)),
             Nil => matches!(s.datum, Datum::Nil),
             Literal(n) => s.as_symbol() == Some(*n),
-            Bvar => s.as_symbol().is_some_and(|n| !reserved(interner.name(n))),
+            Bvar | Dvar => s.as_symbol().is_some_and(|n| !reserved(interner.name(n))),
             Id => s.as_symbol().is_some(),
             Label => matches!(s.datum, Datum::Keyword(_)) || (mode == Mode::Use && s.as_symbol().is_some()),
             Expr => !s.as_symbol().is_some_and(|n| reserved(interner.name(n))) && !matches!(s.datum, Datum::Nil),
             Lambda => lambda_shaped(s, interner),
             Defn => matches!(s.datum, Datum::List { .. }),
-            Data | Type => true,
+            Data | Type | Kind => true,
             Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
     }
@@ -653,7 +705,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), definitions: self.definitions.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), defined_at: HashMap::new(), checking: false };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), definitions: self.definitions.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), defined_at: HashMap::new(), checking: false, heads: self.heads.clone(), words: self.words.clone() };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -810,7 +862,7 @@ impl Macros {
                     // A typed hole of no effect, `pure`, may be placed any
                     // number of times: running it twice does nothing twice.
                     let pure = info.hole.as_ref().is_some_and(|h| h.pure(interner));
-                    let affine = !info.many && !pure && !matches!(&*info.core, STy::Bvar | STy::Id | STy::Label | STy::Data | STy::Type);
+                    let affine = !info.many && !pure && !matches!(&*info.core, STy::Bvar | STy::Dvar | STy::Id | STy::Label | STy::Data | STy::Type | STy::Kind);
                     if affine && many {
                         return Err(FxError::at(span, format!("`{name}` is placed where it may be placed more than once (a `many` part), and an expression in it may do something each time it runs: its signature says `(many …)` if it may")));
                     }
@@ -822,13 +874,14 @@ impl Macros {
                         }
                     }
                 }
-                Kids::Binder(_) => {
+                Kids::Binder(..) => {
                     actions.insert(node.path.clone(), Action::Rename(node.path.clone()));
                 }
-                Kids::Ref(n) => {
+                Kids::Ref(n, ns, free) => {
+                    // What the template binds of this name, in its namespace.
                     let bound = env.iter().find_map(|l| match l {
                         Level::Rib(atoms) => atoms.iter().find_map(|a| match a {
-                            Atom::Lit(b) if matches!(t.nodes[*b].kids, Kids::Binder(m) if m == *n) => Some(*b),
+                            Atom::Lit(b) if matches!(t.nodes[*b].kids, Kids::Binder(m, k) if m == *n && k == *ns) => Some(*b),
                             _ => None,
                         }),
                         Level::Cage(_) => None,
@@ -837,17 +890,23 @@ impl Macros {
                     // define: refused, not read at the top level, which the
                     // template would seem to mean by it.
                     if bound.is_none()
+                        && *ns == Ns::Value
                         && let Some((_, m)) = nested.iter().find(|(b, _)| b == n)
                     {
                         let (n, m) = (interner.name(*n), interner.name(*m));
                         return Err(FxError::at(span, format!("`{n}` is bound in a use of `{m}`, whose signature does not say its uses define it: say so (`(-> (export σ β) defn)`), or write `(with #%toplevel {n})` for the top level's")));
                     }
-                    let action = match (bound, file) {
-                        (Some(b), _) => Action::Rename(t.nodes[b].path.clone()),
-                        (None, None) => Action::Toplevel,
-                        (None, Some(f)) if f.values.contains(n) => Action::Module(f.shared),
-                        (None, Some(f)) if (f.is_standard)(*n) => Action::Standard,
-                        (None, Some(_)) => {
+                    let action = match (bound, free, file) {
+                        (Some(b), _, _) => Action::Rename(t.nodes[b].path.clone()),
+                        (None, Free::Plain, _) => continue,
+                        (None, Free::Qualified, None) => Action::Qualified,
+                        // A file's macro's description is read through the
+                        // file's module whole (below).
+                        (None, Free::Qualified, Some(_)) => continue,
+                        (None, Free::Toplevel, None) => Action::Toplevel,
+                        (None, Free::Toplevel, Some(f)) if f.values.contains(n) => Action::Module(f.shared),
+                        (None, Free::Toplevel, Some(f)) if (f.is_standard)(*n) => Action::Standard,
+                        (None, Free::Toplevel, Some(_)) => {
                             return Err(FxError::at(
                                 span,
                                 format!("`{}` is neither a value the file's module shows nor a standard binding: a file's macro names only those, as they are where it is imported", interner.name(*n)),
@@ -867,18 +926,22 @@ impl Macros {
                 return Err(FxError::at(template.span, format!("this template defines {}, and its signature says its uses define {}", shown_exports(&made, interner), shown_exports(&declared, interner))));
             }
         }
-        // Each type the template writes (none of the use's is in it: a
-        // pattern variable is placed only whole), read in the top level's,
-        // or, a file's macro's, through the file's module or the standard
-        // environment.
-        for node in &t.nodes {
-            if matches!(&*node.core, STy::Type) && matches!(node.kids, Kids::Other) {
-                let action = match file {
-                    None => Action::ToplevelType,
-                    Some(f) => match node.syn.as_symbol() {
-                        Some(n) if !f.types.contains(&n) => Action::StandardType,
-                        _ => Action::ModuleType(f.shared),
-                    },
+        // A file's macro's descriptions, each read whole through the file's
+        // module or the standard environment: of those the template writes
+        // alone, with no binder of its own or part of a use's in them, for
+        // now.
+        for (i, node) in t.nodes.iter().enumerate() {
+            if let (Some(f), true) = (file, node.desc) {
+                let open = t.under(i).into_iter().find(|k| match t.nodes[*k].kids {
+                    Kids::PVar(_) | Kids::Binder(..) => true,
+                    _ => matches!(actions.get(&t.nodes[*k].path), Some(Action::Rename(_))),
+                });
+                if let Some(k) = open {
+                    return Err(FxError::at(t.nodes[k].syn.span, "a file's macro's description with a binder of its own or a part a use gives in it: not yet"));
+                }
+                let action = match node.syn.as_symbol() {
+                    Some(n) if !f.types.contains(&n) => Action::StandardType,
+                    _ => Action::ModuleType(f.shared),
                 };
                 actions.insert(node.path.clone(), action);
             }
@@ -1055,7 +1118,6 @@ impl Macros {
     fn transcribe(&mut self, c: &Clause, t: &Syntax, path: &mut Vec<bool>, binds: &HashMap<Sym, Syntax>, fresh: &mut HashMap<Vec<bool>, Sym>, made: u32, interner: &mut Interner) -> Syntax {
         let at = t.span.in_expansion(made);
         let typed = match c.actions.get(&*path) {
-            Some(Action::ToplevelType) => Some(interner.intern("#%toplevel")),
             Some(Action::StandardType) => Some(interner.intern("#%fx")),
             Some(Action::ModuleType(m)) => Some(*m),
             _ => None,
@@ -1099,6 +1161,10 @@ impl Macros {
                         let with = interner.intern("with");
                         Syntax::list(at, vec![Syntax::symbol(at, with), Syntax::symbol(at, module), Syntax::symbol(at, *n)])
                     }
+                    Some(Action::Qualified) => {
+                        let q = interner.intern(&format!("#%toplevel:{}", interner.name(*n)));
+                        Syntax::symbol(at, q)
+                    }
                     _ => Syntax::new(at, t.datum.clone()),
                 }
             }
@@ -1136,7 +1202,7 @@ impl Aligner<'_> {
     /// addresses are from, if not itself.
     fn align(&mut self, t: &Rc<STy>, s: &Syntax, root: Option<usize>, path: Vec<bool>) -> R<usize> {
         let at = self.nodes.len();
-        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, kids: Kids::Other });
+        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, kids: Kids::Other });
         self.fill(at, t, s, root.unwrap_or(at))?;
         Ok(at)
     }
@@ -1220,20 +1286,22 @@ impl Aligner<'_> {
                 Some(m) if m == *n => Ok(()),
                 _ => Err(fail(format!("`{}` where `{}` is written", self.show(s), self.name(*n)))),
             },
-            STy::Bvar => match s.as_symbol() {
+            STy::Bvar | STy::Dvar => match s.as_symbol() {
                 Some(n) if self.m.defined.contains_key(&n) => Err(fail(format!("`{}` is a macro's name, which is not bound", self.name(n)))),
-                Some(n) if !reserved(self.name(n)) => {
+                Some(n) if !reserved(self.name(n)) && !(matches!(&**t, STy::Dvar) && self.word(n, false)) => {
                     if self.mode == Mode::Template {
-                        self.nodes[at].kids = Kids::Binder(n);
+                        let ns = if matches!(&**t, STy::Dvar) { Ns::Desc } else { Ns::Value };
+                        self.nodes[at].kids = Kids::Binder(n, ns);
                     }
                     Ok(())
                 }
                 _ => Err(fail(format!("`{}` is not a name that may be bound", self.show(s)))),
             },
+            STy::Kind => Ok(()),
             STy::Id => match s.as_symbol() {
                 Some(n) => {
                     if self.mode == Mode::Template {
-                        self.nodes[at].kids = Kids::Ref(n);
+                        self.nodes[at].kids = Kids::Ref(n, Ns::Value, Free::Toplevel);
                     }
                     Ok(())
                 }
@@ -1245,12 +1313,25 @@ impl Aligner<'_> {
                 Datum::Symbol(n) => Err(fail(format!("a tag or label in a template is a keyword: `#:{}`, not `{0}`", self.name(*n)))),
                 _ => Err(fail(format!("`{}` is not a tag or label", self.show(s)))),
             },
-            STy::Data | STy::Type => {
+            STy::Data => {
                 if self.mode == Mode::Template && let Some(n) = self.pvar_in(s) {
-                    return Err(fail(format!("pattern variable `{}` inside a quoted datum or a type: only a whole one is placed", self.name(n))));
+                    return Err(fail(format!("pattern variable `{}` inside a quoted datum: only a whole one is placed", self.name(n))));
                 }
                 Ok(())
             }
+            // A description a template writes, name by name; the binders of
+            // the `poly`s at its top, what it exports (what a definition's
+            // type puts in scope in what it is defined as).
+            STy::Type if self.mode == Mode::Template => {
+                self.nodes[at].desc = true;
+                self.desc(at, s)?;
+                if self.nodes[at].export.is_none() {
+                    let atoms = self.poly_binders(at);
+                    self.nodes[at].export = Some((Bind::Direct(atoms), at));
+                }
+                Ok(())
+            }
+            STy::Type => Ok(()),
             // A template writes a lambda (its form aligned as any of the
             // kernel's); a use gives one, of the shape the checkers take.
             STy::Lambda => match (&s.datum, self.mode) {
@@ -1263,7 +1344,7 @@ impl Aligner<'_> {
                 // `#u`, unit: a literal, which the parsers read as a name.
                 (Datum::Symbol(n), _) if self.name(*n) == "#u" => Ok(()),
                 (Datum::Symbol(n), Mode::Template) => {
-                    self.nodes[at].kids = Kids::Ref(*n);
+                    self.nodes[at].kids = Kids::Ref(*n, Ns::Value, Free::Toplevel);
                     Ok(())
                 }
                 (Datum::List { .. }, Mode::Template) => self.form(at, s, false),
@@ -1333,6 +1414,220 @@ impl Aligner<'_> {
         Ok(())
     }
 
+    /// Whether `n` is a word of descriptions, written as it is: one read
+    /// anywhere (`pure`, `heap`, a region constant `@r`, or a name already
+    /// `#%`'s), or, `head`, one a list's head may be (`subr`, `listof`).
+    fn word(&self, n: Sym, head: bool) -> bool {
+        let name = self.name(n);
+        name.starts_with('@') || name.starts_with("#%") || self.m.words.contains(name) || (head && self.m.heads.contains(name))
+    }
+
+    /// Description `s`, which a template writes, at node `at`, aligned name
+    /// by name: each name referred to in the description namespace, the top
+    /// level's if the template does not bind it (`Free::Qualified`); but a
+    /// word of descriptions written as it is, a pattern variable placed, and
+    /// what `poly`, `dlambda`, `mu` and `dletrec` bind in scope in what
+    /// follows. Labels, a `restrict`'s names and an `io` effect's kind are
+    /// written as they are; `(globals g …)`'s names and `(select m n)`'s
+    /// module are values.
+    fn desc(&mut self, at: usize, s: &Syntax) -> R<()> {
+        let fail = |why: String| FxError::at(s.span, why);
+        let items = match &s.datum {
+            Datum::Symbol(n) => {
+                self.nodes[at].kids = if self.pvars.contains_key(n) {
+                    Kids::PVar(*n)
+                } else if self.word(*n, false) {
+                    Kids::Other
+                } else {
+                    Kids::Ref(*n, Ns::Desc, Free::Qualified)
+                };
+                return Ok(());
+            }
+            Datum::List { items, tail: None } => items.clone(),
+            Datum::List { .. } => return Err(fail("a description is a list, not a dotted one".into())),
+            _ => return Ok(()),
+        };
+        let head = items[0].as_symbol().filter(|h| !self.pvars.contains_key(h)).map(|h| self.name(h).to_string());
+        let kids = self.desc_kids(at, &items);
+        let not_yet = |what: &str| Err(fail(format!("{what} in a template's description: not yet")));
+        match head.as_deref() {
+            Some(h @ ("poly" | "dlambda")) => {
+                let [_, bs, body] = &items[..] else {
+                    return Err(fail(format!("`({h} ((name kind) …) description)`")));
+                };
+                let atoms = self.desc_binders(kids[1], bs)?;
+                self.desc_scoped(kids[2], body, atoms)
+            }
+            Some("mu") => {
+                let [_, n, body] = &items[..] else {
+                    return Err(fail("`(mu name type)`".into()));
+                };
+                let a = self.desc_binder(kids[1], n)?;
+                self.desc_scoped(kids[2], body, vec![a])
+            }
+            // Each name in scope in each description and the body.
+            Some("dletrec") => {
+                let [_, bs, body] = &items[..] else {
+                    return Err(fail("`(dletrec ((name description) …) description)`".into()));
+                };
+                let entries = bs.as_proper_list().map(|l| l.to_vec()).unwrap_or_default();
+                let ek = self.desc_kids(kids[1], &entries);
+                let (mut atoms, mut parts) = (Vec::new(), Vec::new());
+                for (k, e) in ek.iter().zip(&entries) {
+                    let Some([n, d]) = e.as_proper_list() else {
+                        return Err(FxError::at(e.span, "`(name description)`"));
+                    };
+                    let p = self.desc_kids(*k, &[n.clone(), d.clone()]);
+                    atoms.push(self.desc_binder(p[0], n)?);
+                    parts.push((p[1], d.clone()));
+                }
+                for (k, d) in parts {
+                    self.desc_scoped(k, &d, atoms.clone())?;
+                }
+                self.desc_scoped(kids[2], body, atoms)
+            }
+            // `(label type)`s.
+            Some("productof" | "sumof") => {
+                for (k, f) in kids[1..].iter().zip(&items[1..]) {
+                    let Some([label, ty]) = f.as_proper_list() else {
+                        return Err(FxError::at(f.span, "`(label type)`"));
+                    };
+                    let p = self.desc_kids(*k, &[label.clone(), ty.clone()]);
+                    self.desc(p[1], ty)?;
+                }
+                Ok(())
+            }
+            Some("restrict") if items.len() >= 2 => self.desc(kids[1], &items[1]),
+            Some("io") => Ok(()),
+            // Values: a global's name, written as it is, since no local can
+            // shadow it; a module's, the top level's.
+            Some(h @ ("globals" | "select")) => {
+                let names: &[usize] = if h == "select" { &kids[1..kids.len().min(2)] } else { &kids[1..] };
+                let free = if h == "select" { Free::Qualified } else { Free::Plain };
+                for &k in names {
+                    let syn = self.nodes[k].syn.clone();
+                    let Some(n) = syn.as_symbol() else {
+                        return Err(FxError::at(syn.span, "a name"));
+                    };
+                    self.nodes[k].core = Rc::new(STy::Id);
+                    self.nodes[k].kids = if self.pvars.contains_key(&n) { Kids::PVar(n) } else { Kids::Ref(n, Ns::Value, free) };
+                }
+                Ok(())
+            }
+            Some("moduleof") => not_yet("a `moduleof`"),
+            Some(h) if self.word(items[0].as_symbol().expect("a name"), true) => {
+                if matches!(h, "subr" | "->" | "->*") {
+                    for i in &items[1..] {
+                        let parts = i.as_proper_list().unwrap_or(&[]);
+                        if parts.first().and_then(|x| x.as_symbol()).is_some_and(|x| matches!(self.name(x), "requires" | "ensures")) {
+                            return not_yet("a specification's clause");
+                        }
+                        if parts.iter().any(|p| p.as_proper_list().is_some_and(|q| q.get(1).and_then(|x| x.as_symbol()).is_some_and(|x| self.name(x) == ":"))) {
+                            return not_yet("a parameter named, `(name : type)`,");
+                        }
+                    }
+                }
+                for (k, i) in kids[1..].iter().zip(&items[1..]) {
+                    self.desc(*k, i)?;
+                }
+                Ok(())
+            }
+            // A description function applied, its name the head.
+            _ => {
+                for (k, i) in kids.iter().zip(&items) {
+                    self.desc(*k, i)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// A node for each of `items`, the parts of the list at node `at`, at
+    /// their paths in it: `at`'s kids.
+    fn desc_kids(&mut self, at: usize, items: &[Syntax]) -> Vec<usize> {
+        let mut path = self.nodes[at].path.clone();
+        let mut kids = Vec::new();
+        for i in items {
+            let mut p = path.clone();
+            p.push(true);
+            kids.push(self.nodes.len());
+            self.nodes.push(Node { syn: i.clone(), path: p, core: Rc::new(STy::Type), imports: Vec::new(), export: None, many: false, hole: None, desc: false, kids: Kids::Other });
+            path.push(false);
+        }
+        self.nodes[at].kids = Kids::Desc(kids.clone());
+        kids
+    }
+
+    /// Description `s` at node `at`, in the scope of `atoms`.
+    fn desc_scoped(&mut self, at: usize, s: &Syntax, atoms: Vec<Atom>) -> R<()> {
+        self.nodes[at].imports.push((Bind::Direct(atoms), at));
+        self.desc(at, s)
+    }
+
+    /// A description's binder `n`, at node `at`: a pattern variable (a
+    /// `dvar` the use gives), or a name the template binds; what it binds.
+    fn desc_binder(&mut self, at: usize, n: &Syntax) -> R<Atom> {
+        self.nodes[at].core = Rc::new(STy::Dvar);
+        match n.as_symbol() {
+            Some(m) if self.pvars.contains_key(&m) => {
+                self.nodes[at].kids = Kids::PVar(m);
+                Ok(Atom::Var(m))
+            }
+            Some(m) if !reserved(self.name(m)) && !self.word(m, false) => {
+                self.nodes[at].kids = Kids::Binder(m, Ns::Desc);
+                Ok(Atom::Lit(at))
+            }
+            _ => Err(FxError::at(n.span, format!("`{}` is not a name that may be bound", self.show(n)))),
+        }
+    }
+
+    /// `((name kind) …)` at node `at`, a binder's place or `distinct` third
+    /// if any, each in the scope of those before it: what they bind.
+    fn desc_binders(&mut self, at: usize, bs: &Syntax) -> R<Vec<Atom>> {
+        let entries = bs.as_proper_list().map(|l| l.to_vec()).unwrap_or_default();
+        let ek = self.desc_kids(at, &entries);
+        let mut atoms = Vec::new();
+        for (k, e) in ek.iter().zip(&entries) {
+            let parts = e.as_proper_list().map(|l| l.to_vec()).unwrap_or_default();
+            let ([n, _] | [n, _, _]) = &parts[..] else {
+                return Err(FxError::at(e.span, "a binder is `(name kind)`"));
+            };
+            let p = self.desc_kids(*k, &parts);
+            let a = self.desc_binder(p[0], n)?;
+            if let Some(third) = parts.get(2) {
+                self.desc_scoped(p[2], third, atoms.clone())?;
+            }
+            atoms.push(a);
+        }
+        Ok(atoms)
+    }
+
+    /// The binders of the `poly`s at the top of the description at node
+    /// `at`, outermost first (`Checker::bind_signature`'s).
+    fn poly_binders(&self, at: usize) -> Vec<Atom> {
+        let mut out = Vec::new();
+        let mut at = at;
+        loop {
+            let Kids::Desc(kids) = &self.nodes[at].kids else { return out };
+            let is_poly = self.nodes[at].syn.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "poly" && !self.pvars.contains_key(&h));
+            if !is_poly || kids.len() != 3 {
+                return out;
+            }
+            if let Kids::Desc(entries) = &self.nodes[kids[1]].kids {
+                for e in entries {
+                    if let Kids::Desc(parts) = &self.nodes[*e].kids {
+                        match self.nodes[parts[0]].kids {
+                            Kids::PVar(n) => out.push(Atom::Var(n)),
+                            Kids::Binder(..) => out.push(Atom::Lit(parts[0])),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            at = kids[2];
+        }
+    }
+
     /// A pattern variable written somewhere inside `s`.
     fn pvar_in(&self, s: &Syntax) -> Option<Sym> {
         match &s.datum {
@@ -1365,7 +1660,13 @@ impl Aligner<'_> {
                 self.walk(*y, &env, many, found)
             }
             Kids::Form(x) => self.walk(*x, &env, many, found),
-            Kids::PVar(_) | Kids::Binder(_) | Kids::Ref(_) => {
+            Kids::Desc(kids) => {
+                for k in kids {
+                    self.walk(*k, &env, many, found)?;
+                }
+                Ok(())
+            }
+            Kids::PVar(_) | Kids::Binder(..) | Kids::Ref(..) => {
                 found.push((at, env, many));
                 Ok(())
             }
@@ -1377,6 +1678,7 @@ impl Aligner<'_> {
     fn eval(&self, b: &Bind, root: usize, span: Span) -> R<Vec<Level>> {
         match b {
             Bind::Rib(entries) => Ok(vec![Level::Rib(self.rib(entries, root, span)?)]),
+            Bind::Direct(atoms) => Ok(vec![Level::Rib(atoms.clone())]),
             Bind::Cage(rings) => {
                 let mut out = Vec::new();
                 for r in rings {
@@ -1398,14 +1700,22 @@ impl Aligner<'_> {
         for (addr, delta) in entries {
             let t = self.nav(root, addr, span)?;
             let node = &self.nodes[t];
+            let value = !matches!(&*node.core, STy::Dvar);
             match (delta, &node.kids) {
                 (Delta::None, _) => {}
-                (Delta::Var, Kids::PVar(n)) => out.push(Atom::Var(*n)),
-                (Delta::Var, Kids::Binder(_)) => out.push(Atom::Lit(t)),
-                (Delta::Var, _) => return Err(FxError::at(node.syn.span, "the signature says a binder is here")),
+                (Delta::Var, Kids::PVar(n)) if value => out.push(Atom::Var(*n)),
+                (Delta::Var, Kids::Binder(_, Ns::Value)) => out.push(Atom::Lit(t)),
+                (Delta::Var, _) => return Err(FxError::at(node.syn.span, "the signature says a value's binder is here")),
+                (Delta::Dvar, Kids::PVar(n)) if !value => out.push(Atom::Var(*n)),
+                (Delta::Dvar, Kids::Binder(_, Ns::Desc)) => out.push(Atom::Lit(t)),
+                (Delta::Dvar, _) => return Err(FxError::at(node.syn.span, "the signature says a description's binder is here")),
+                // A use's description: what its own `poly`s bind is the
+                // use's, which nothing the template writes can name.
+                (Delta::Rib, Kids::PVar(_)) if matches!(&*node.core, STy::Type) => {}
                 (Delta::Rib, Kids::PVar(n)) => out.push(Atom::RibOf(*n)),
                 (Delta::Rib, _) => match &self.exported(t).export {
                     Some((Bind::Rib(es), r)) => out.extend(self.rib(es, *r, span)?),
+                    Some((Bind::Direct(atoms), _)) => out.extend(atoms.iter().cloned()),
                     // A use of a macro that makes definitions: none the
                     // template sees.
                     None if matches!(node.kids, Kids::Form(_)) => {}
@@ -1436,9 +1746,30 @@ impl Aligner<'_> {
                 self.binders_under(y, m, out);
             }
             Kids::Form(x) => self.binders_under(x, m, out),
-            Kids::Binder(n) => out.push((n, m)),
+            Kids::Desc(ref kids) => {
+                for k in kids {
+                    self.binders_under(*k, m, out);
+                }
+            }
+            Kids::Binder(n, Ns::Value) => out.push((n, m)),
             _ => {}
         }
+    }
+
+    /// The nodes under node `at`, itself first, each before what is under
+    /// it.
+    fn under(&self, at: usize) -> Vec<usize> {
+        let mut out = vec![at];
+        match &self.nodes[at].kids {
+            Kids::Pair(x, y) => {
+                out.extend(self.under(*x));
+                out.extend(self.under(*y));
+            }
+            Kids::Form(x) => out.extend(self.under(*x)),
+            Kids::Desc(kids) => kids.iter().for_each(|k| out.extend(self.under(*k))),
+            _ => {}
+        }
+        out
     }
 
     /// The node whose export is what node `t` exports: a form's operands'
@@ -1470,19 +1801,10 @@ impl Aligner<'_> {
         let have = &info.core;
         let want_u = self.m.unfold(want);
         let fits = match (&**have, &**want_u) {
-            (Bvar, Bvar) => return Ok(()),
-            // A pattern's binder referred to: in its scope, and where no other
-            // of the pattern's binders may shadow it (the shadow restriction).
-            (Bvar, Expr | Id) => {
-                let Some(i) = env.iter().position(|l| matches!(l, Level::Rib(atoms) if atoms.contains(&Atom::Var(n)))) else {
-                    return Err(FxError::at(span, format!("`{name}` is referred to where the template does not bind it")));
-                };
-                let pattern_atom = |a: &Atom| !matches!(a, Atom::Lit(_));
-                if env[..i].iter().any(|l| matches!(l, Level::Cage(_)) || matches!(l, Level::Rib(atoms) if atoms.iter().any(pattern_atom))) {
-                    return Err(FxError::at(span, format!("`{name}` is referred to where another of the pattern's binders may shadow it (Herman's shadow restriction): a use giving both one name would change what it refers to")));
-                }
-                return Ok(());
-            }
+            (Bvar, Bvar) | (Dvar, Dvar) => return Ok(()),
+            // A pattern's binder referred to, a value's or a description's.
+            (Bvar, Expr | Id) => return self.in_scope(n, Ns::Value, env, span),
+            (Dvar, Type) => return self.in_scope(n, Ns::Desc, env, span),
             (Expr, Expr) | (Id, Expr | Id) | (Lambda, Lambda | Expr) => true,
             // An untyped part where a lambda is wanted: it promises nothing,
             // and its uses' expansions are checked; a typed hole says it is
@@ -1492,7 +1814,7 @@ impl Aligner<'_> {
             }
             (Expr, Lambda) => true,
             (Data, Data) | (Type, Type) | (Label, Label) => return Ok(()),
-            (Expr | Id | Data | Type | Label | Bvar | Lambda | Defn, _) | (_, Expr | Id | Data | Type | Label | Bvar | Lambda | Defn) => false,
+            (Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn, _) | (_, Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn) => false,
             _ => self.m.sub(have, want, &mut HashSet::new()),
         };
         if !fits {
@@ -1503,6 +1825,33 @@ impl Aligner<'_> {
         }
         Ok(())
     }
+}
+
+impl Aligner<'_> {
+    /// Pattern binder `n`, of namespace `ns`, referred to in `env`: in its
+    /// scope, and where no other of the pattern's binders of that namespace
+    /// may shadow it (Herman's shadow restriction). A value's binder never
+    /// shadows a description's; every description's shares one namespace.
+    fn in_scope(&self, n: Sym, ns: Ns, env: &[Level], span: Span) -> R<()> {
+        let name = self.name(n);
+        let Some(i) = env.iter().position(|l| matches!(l, Level::Rib(atoms) if atoms.contains(&Atom::Var(n)))) else {
+            return Err(FxError::at(span, format!("`{name}` is referred to where the template does not bind it")));
+        };
+        let shadows = |a: &Atom| match a {
+            Atom::Lit(_) => false,
+            Atom::Var(m) => self.pvars.get(m).is_none_or(|p| ns_of(&p.core) == ns),
+            Atom::RibOf(_) => true,
+        };
+        if env[..i].iter().any(|l| matches!(l, Level::Cage(_)) || matches!(l, Level::Rib(atoms) if atoms.iter().any(shadows))) {
+            return Err(FxError::at(span, format!("`{name}` is referred to where another of the pattern's binders may shadow it (Herman's shadow restriction): a use giving both one name would change what it refers to")));
+        }
+        Ok(())
+    }
+}
+
+/// The namespace a pattern binder of syntax type `t` binds in.
+fn ns_of(t: &STy) -> Ns {
+    if matches!(t, STy::Dvar) { Ns::Desc } else { Ns::Value }
 }
 
 impl Macros {
@@ -1591,9 +1940,10 @@ fn bind(b: &Syntax, interner: &Interner) -> R<Bind> {
                     let d = match d.as_symbol().map(|d| interner.name(d)) {
                         Some("none") => Delta::None,
                         Some("var") => Delta::Var,
+                        Some("dvar") => Delta::Dvar,
                         Some("rib") => Delta::Rib,
                         Some("env") => Delta::Env,
-                        _ => return Err(FxError::at(d.span, "δ is `none`, `var`, `rib` or `env`")),
+                        _ => return Err(FxError::at(d.span, "δ is `none`, `var`, `dvar`, `rib` or `env`")),
                     };
                     Ok((addr(a, interner)?, d))
                 }
@@ -1817,6 +2167,33 @@ mod tests {
         let list = &list[..list.find("))").expect("its end")];
         let words: Vec<&str> = list.split_whitespace().filter_map(|w| w.strip_prefix('\'')).collect();
         assert_eq!(words, crate::top::KEYWORDS);
+    }
+
+    /// The kernel's words of descriptions take in every type form's and
+    /// effect form's name, which both checkers read at a list's head by the
+    /// name alone; and the FX-26 checker's type forms are the Rust one's.
+    #[test]
+    fn the_description_heads_are_the_checkers() {
+        let mut interner = fixpt_read::Interner::default();
+        let forms = fixpt_read::Reader::new(super::KERNEL, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().expect("reads");
+        let heads: Vec<String> = super::kernel_list(&forms, &interner, "description-heads").iter().map(|w| interner.name(w.as_symbol().expect("a name")).to_string()).collect();
+        for h in crate::parse::TYPE_FORMS.iter().chain(crate::parse::EFFECT_HEADS) {
+            assert!(heads.iter().any(|x| x == h), "`{h}` is not among the kernel's `description-heads`");
+        }
+        let src = include_str!("check-read-helpers.fx");
+        let list = src.split("(define k-type-forms k-names").nth(1).expect("k-type-forms");
+        let list = &list[..list.find("))").expect("its end")];
+        let words: Vec<&str> = list.split_whitespace().filter_map(|w| w.strip_prefix('\'')).collect();
+        assert_eq!(words, crate::parse::TYPE_FORMS);
+        // The effect forms' heads, `k-atom-head?`'s and `maxeff`.
+        let src = include_str!("check-read.fx");
+        let body = src.split("(define k-atom-head? (->* (string) bool)").nth(1).expect("k-atom-head?");
+        let body = &body[..body.find("\n(define").expect("its end")];
+        let mut atoms: Vec<&str> = body.split('"').skip(1).step_by(2).chain(["maxeff"]).collect();
+        let mut want = crate::parse::EFFECT_HEADS.to_vec();
+        atoms.sort();
+        want.sort();
+        assert_eq!(atoms, want);
     }
 
     /// Every form `parse_exp` reads by its head is a keyword, so a template

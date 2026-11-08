@@ -1,9 +1,10 @@
 ;;; The macros' kernel (`macros.rs`, `macros.fx`): the forms a template may
 ;;; use, with their binding structure, each form's signature of its
 ;;; operands in Herman's notation (`define` names an abbreviation, `form` a
-;;; form, `definition` a definition's form); and the words that are forms'
-;;; names, which no macro, binder or variable may be. Data, read by both
-;;; front ends' expanders.
+;;; form, `definition` a definition's form); the words that are forms'
+;;; names, which no macro, binder or variable may be; and the words of
+;;; descriptions, which a template's descriptions write as they are. Data,
+;;; read by both front ends' expanders.
 
 (define kernel-forms datum
   (quote
@@ -23,6 +24,18 @@
     ;; Each bound to a lambda, as the checkers take one.
     (define letrec-bindings (mu b (union (export () (rho))
                                          (export ((bvar type lambda) . b) (rho (AA var) (D rib))))))
+    ;; A `define-rec`'s, each lambda in the scope of its type's `poly`s'
+    ;; binders, as a definition's is (`Checker::bind_signature`).
+    (define defrec-bindings
+      (mu b (union (export () (rho))
+                   (export ((bvar type (import lambda (rho (ADA rib)))) . b)
+                           (rho (AA var) (D rib))))))
+    ;; A description's binders, `((name kind) …)`, a third the binder's place
+    ;; or `distinct`; each in the scope of those before it.
+    (define dbinders (mu b (union (export () (rho))
+                                  (export ((dvar kind) . b) (rho (AA dvar) (D rib)))
+                                  (export ((dvar kind type) . b) (rho (AA dvar) (D rib))))))
+    (define descs (mu ds (union () (type . ds))))
     ;; A `tagcase` arm, `(#:tag x body …)` or `(else x body …)`: `x` in scope in
     ;; the body.
     (define arms (mu a (union ()
@@ -47,18 +60,22 @@
     (form product fields)
     (form tagcase (expr . arms))
     (form cond cond-clauses)
+    (form plambda (dbinders . (import exprs (rho (A rib)))))
+    (form proj (expr . descs))
     (form %app (expr . exprs))
     ;; The definitions a template may make, a macro's whose signature says
     ;; `(-> σ defn)`, each exporting what it defines: a value, seeing those
     ;; before it, `(define x T lambda)` and `define*` itself, a `define-rec`
     ;; group the whole group; a `begin`'s, each in the scope of those before
-    ;; it. The address `()` is the part the annotation is on.
+    ;; it. The address `()` is the part the annotation is on. A definition's
+    ;; type's `poly`s' binders are in scope in what it is defined as.
     (define defns (mu d (union (export () (cage))
                                (export (defn . (import d (cage (at A)))) (cage (at D) (at A))))))
     (definition define (union (export (bvar expr) (rho (A var)))
-                              (export (bvar type (import expr (rho (A var)))) (rho (A var)))))
-    (definition define* (export (bvar type (import lambda (rho (A var)))) (rho (A var))))
-    (definition define-rec (import letrec-bindings (rho (() rib))))
+                              (export (bvar type (import expr (rho (A var) (AD rib))))
+                                      (rho (A var)))))
+    (definition define* (export (bvar type (import lambda (rho (A var) (AD rib)))) (rho (A var))))
+    (definition define-rec (import defrec-bindings (rho (() rib))))
     (definition begin defns))))
 
 ;; The kernel's keywords (`top::KEYWORDS`, which a test holds this to); with
@@ -79,3 +96,20 @@
     reify-region confirm-length confirm-nat convention extend load-input quasiquote letregion
     letfreeze spawn spawn-monitored send receive self par race attempt attempt-within pselect
     icell-get icell-put! acyclic)))
+
+;; The words of descriptions (`typed-macros.md`, "Decided: a template's free
+;; description names, one qualified name each"), which a template's
+;; descriptions write as they are, not the top level's: the heads of the
+;; forms, each read by its name alone at a list's head (both checkers'
+;; `TYPE_FORMS` and `EFFECT_HEADS`, and the parts of forms), and the words
+;; read before any name is looked up. Any other name in a template's
+;; description is the top level's, or a binder's the template writes.
+(define description-heads datum
+  (quote
+   (
+    arrayof narrayof bloblet composable dletrec icell listof mark-key moduleof mu nat nlist
+    oneshot pairof place poly productof prompt-tag proves ref select subr sumof tupleof bool oneof
+    union anyof allof -> ->* restrict read write alloc goto comefrom await init send receive io
+    maxeff globals conv fields frozen requires ensures <= + - dlambda acyclic const)))
+(define description-words datum
+  (quote (void pure spin nondet stage heap const acyclic finite cellular native fx distinct)))

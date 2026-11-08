@@ -4311,3 +4311,38 @@ The user read the paper as supporting the distribution. Mine:
   of what uses give; the message lists names sorted, so both front ends
   say it alike.
 
+
+## Binders of descriptions, the first stage (2026-11-08)
+
+- **One walk of a template's descriptions, not a grammar in signatures**:
+  the forms that bind (`poly`, `dlambda`, `mu`, `dletrec`) and the
+  positions of labels and values are known to the walk; every other name
+  is a reference. A grammar of every description form as kernel syntax
+  types would say the same at many times the size, and the checkers'
+  readers stay the authority on what a description is.
+- **What a description binds is a rib of what was found** (`Bind::Direct`):
+  Herman's imports, the shadow restriction and the declared scopes then
+  check descriptions unchanged, with no addresses into a form that has
+  no signature.
+- **A type form's or effect form's name at a list's head is that form**,
+  in both checkers, rather than qualifying every head in an expansion:
+  the head was looked up first, a family or an arrow-kinded variable
+  taking it over, so a template's `(listof …)` could be captured; now
+  nothing binding the name changes the form. A family named `listof` is
+  definable and never applied by that head: to be refused, or to become
+  the standard library's own binding (`lang-items.md`). Names (`int`,
+  `box`) are qualified, heads not.
+- **Free description names in regions or sizes are qualified too**, not
+  refused where the macro is defined: the top level binds none, so the
+  use says "not a region"; refusing needs the walk to know each
+  position's sort, the second stage's.
+- **A `dvar` part, like a `bvar`, may be placed any number of times**: a
+  binder and its references are names, nothing that runs.
+- **A use's type exports nothing to the template** (`(ℓ rib)` on a type
+  part): what its own `poly`s bind is the use's, which no name the
+  template writes can be.
+- **A file's macro's descriptions stay read whole** through its module,
+  and one with a binder of its own or a part a use gives in it is
+  refused, not yet: qualifying names through a file's module needs a
+  name that is the file's, per position, as `#%toplevel:` is the top
+  level's.

@@ -929,9 +929,7 @@ Built 2026-11-08, both checkers and both readers: `#%toplevel:name`, which
 a program may write too, the top level's `name` as a value (`(with
 #%toplevel name)`) and in every description position (`docs/fx26.md`,
 "`#%toplevel`, the top level's bindings"; `modules/toplevel-qualified-*.fx`).
-The expander does not yet emit it: to qualify the free names in a template's
-type it must know which of the type's names the type binds, the grammar
-of descriptions that binders of descriptions (item 8) brings.
+The expander emits it since binders of descriptions' first stage (below).
 
 **Renaming, not marks** (the user's question, 2026-11-08: do these differ
 from alpha-renaming in any fundamental way?). They do not: the expander
@@ -965,6 +963,43 @@ a template's free name is resolved where the macro is defined, to the
 renamed binder in scope there, which no binder where it is used can be. The
 top level, redefinable, is the one environment not resolved so early, which
 is why its names are qualified rather than renamed.
+
+## Binders of descriptions, the first stage (2026-11-08, built)
+
+Item 8, its first stage, in both front ends (`docs/fx26.md`, "A
+template's descriptions"). A template's description is aligned name by
+name (`Aligner::desc`, `macros-align.fx`'s `desc`), not as one opaque
+type: no grammar of descriptions in the kernel's signatures, but one
+walk that knows the forms that bind (`poly`, `dlambda`, `mu`, `dletrec`),
+the positions of labels and of values (`(globals g …)`, `(select m n)`'s
+module), and the words of descriptions (the kernel's `description-heads`
+and `description-words`, held to the checkers' `TYPE_FORMS` and
+`EFFECT_HEADS` by a test); every other name is a reference in the
+description namespace. What a description's binder binds is a rib of
+what was found (`Bind::Direct`, `bind-direct`), so Herman's machinery,
+imports, exports, the shadow restriction and the declared scopes, checks
+descriptions as it does expressions: a namespace on each binder, rib
+atom and reference (`Ns`), `dvar` and `(ℓ dvar)` for a description's
+binder a use gives, the shadow restriction per namespace (a value's
+binder never shadows a description's). A type with `poly`s at its top
+exports their binders, which `define`, `define*` and `define-rec` put in
+scope in what each defines (`Checker::bind_signature`'s).
+
+Found and settled on the way: a type form's name at a list's head was
+looked up first, a function binding it taking it over, so a template's
+`(listof …)` could be captured; both checkers now read those heads, and
+the effect forms', by name alone. That keeps template heads plain, and
+only names qualified; when the standard library's names become its own
+bindings (`lang-items.md`), they are names, qualified like any.
+
+Left for the second stage: effects and regions as binders (`letregion`,
+`letfreeze`, `letrena`, `letreap`, `rlambda`), `define-type` and
+`define-effect` in templates that make definitions, `define-datatype`
+and `define-generative`, a `subr`'s named parameters and specification,
+`moduleof`, a file's macro's descriptions with its own binders, a use's
+type placed in the scope of a use's `dvar` without saying so, and typed
+macros' description parts. Tests: `macros/desc-*.fx`,
+`import-with-syntax/main-poly.fx`.
 
 ## Leaning: narrower macros by `let-syntax`, not in module types (2026-11-08)
 

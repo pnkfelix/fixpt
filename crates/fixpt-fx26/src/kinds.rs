@@ -387,9 +387,7 @@ impl Checker {
                 }
             }
             Some("select") => match &items[..] {
-                [_, m, n] if m.as_symbol().is_some() && n.as_symbol().is_some() => {
-                    Ok(self.arena.ty(Ty::Select(m.as_symbol().expect("a name"), n.as_symbol().expect("a name"))))
-                }
+                [_, m, n] if m.as_symbol().is_some() && n.as_symbol().is_some() => self.select_of(m.as_symbol().expect("a name"), n.as_symbol().expect("a name"), s.span),
                 _ => Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's")),
             },
             _ => Err(FxError::at(s.span, usage)),
@@ -757,6 +755,8 @@ impl Checker {
     pub(crate) fn effect_app(&mut self, s: &Syntax, items: &[Syntax]) -> R<Option<Effect>> {
         let Some(head) = items.first() else { return Ok(None) };
         let f = match head.as_symbol() {
+            // An effect form, read by its name alone.
+            Some(h) if crate::parse::EFFECT_HEADS.contains(&self.interner.name(h)) => return Ok(None),
             Some(h) => {
                 let found = match self.toplevel_unqualified(h) {
                     Some(n) => self.at_toplevel(|c| c.lookup_desc(n)),
