@@ -5284,3 +5284,12 @@ defines them, but both checkers accept `(lambda ((#%toplevel int)) 1)`,
 binding of `#%toplevel:x` likewise is never what `#%toplevel:x` reads; but
 the rule the docs state is not the one checked. Refuse every `#%` name as
 a binder or a definition's name, value or description, in both checkers.
+
+## 219. `define-datatype` as a macro, the macro system's spike goal (the user's, 2026-11-08)
+A user macro whose uses expand to what the built-in `define-datatype`
+does. It needs repetition that splices into one form (ellipsis in
+patterns and templates, primitive, not sugar for recursion: the variants
+make one `sumof`, the fields one parameter list, with fresh names per
+repetition) and a name that is both a label and a value's binder (a
+syntax type `tag`, or keyword constructors instead). Design, acceptance
+tests and the user's two choices: `docs/research/datatype-macro.md`.
