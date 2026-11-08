@@ -15,7 +15,7 @@
 (import types-module fail-at name-in? proper-items sorted-strings joined atm-var atm-rib-of
         atm-lit (type fails atm atms strings))
 (import align-module node-kids node-syn pvar? makes-defns? normal atm-in? lv-rib lv-cage k-pair
-        k-form k-desc k-binder (type levels pvars))
+        k-form k-desc k-seq k-binder (type levels pvars))
 
 ;;; ------------------------------------------------------------ exports
 
@@ -93,6 +93,7 @@
     (tagcase (node-kids at)
       (k-pair (x y) (append (binders-under x m) (binders-under y m)))
       (k-form (x) (binders-under x m))
+      (k-seq (x) (binders-under x m))
       (k-desc (xs) (binders-under-each xs m))
       (k-binder (n d) (if d (the nested nil) (the nested (list (tuple n m)))))
       (else y (the nested nil)))))

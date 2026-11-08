@@ -12,6 +12,7 @@
 //! ```text
 //! σ ::= expr | bvar | id | data | type | label | lambda | dvar | kind | ()
 //!     | (σ . σ) | (σ …)                    a pair; a list, of pairs
+//!     | (σ … σ ...)                        a list ending in any number of σ
 //!     | (import σ β) | (export σ β)        Herman's σ↓β and σ↑β
 //!     | (mu v σ) | v | (union σ …)         recursion, alternatives
 //!     | (literal name)                     a name written as it is (`else`)
@@ -206,7 +207,8 @@ struct Clause {
 /// (`typed-macros.md`, "Decided: macros come with a file").
 #[derive(Clone, Debug)]
 enum Action {
-    Rename(Vec<bool>),
+    /// The binder's path, and how many ellipses it is under.
+    Rename(Vec<bool>, usize),
     Toplevel,
     Standard,
     Module(Sym),
@@ -279,6 +281,15 @@ fn kernel_list(forms: &[Syntax], interner: &Interner, name: &str) -> Vec<Syntax>
     quoted.as_proper_list().expect("a list").to_vec()
 }
 
+/// What a transcription has made so far: each binder's fresh name, by its
+/// path and the repetitions it is in; and how many times each repeated
+/// binder was repeated, by its path and the repetitions around that.
+#[derive(Default)]
+struct Made {
+    fresh: HashMap<(Vec<bool>, Vec<usize>), Sym>,
+    counts: HashMap<(Vec<bool>, Vec<usize>), usize>,
+}
+
 /// Where a syntax type is aligned with syntax: a macro's pattern, a
 /// template, or a use.
 #[derive(Clone, Copy, PartialEq)]
@@ -305,6 +316,8 @@ struct Node {
     hole: Option<Hole>,
     /// Whether it is a whole description a template writes (`Aligner::desc`).
     desc: bool,
+    /// Whether an ellipsis follows it, so that it is repeated.
+    repeated: bool,
     kids: Kids,
 }
 
@@ -321,6 +334,8 @@ enum Kids {
     Ref(Sym, Ns, Free),
     /// A description's parts, a list a template writes, in order.
     Desc(Vec<usize>),
+    /// A list given by ellipsis, `(p ...)`: its element, repeated.
+    Seq(usize),
     /// A form in a template, its operands (or, an application's, itself).
     Form(usize),
     Other,
@@ -337,8 +352,9 @@ pub(crate) enum Atom {
 }
 
 /// Each pattern variable, template binder and name referred to, by node,
-/// with its environment and whether it is in a `many` part (`walk`).
-type Found = Vec<(usize, Vec<Level>, bool)>;
+/// with its environment, whether it is in a `many` part, and how many
+/// ellipses it is under (`walk`).
+type Found = Vec<(usize, Vec<Level>, bool, usize)>;
 
 /// One level of an environment: a rib, or a pattern variable's ribcage.
 #[derive(Clone, Debug, PartialEq)]
@@ -357,6 +373,9 @@ struct PInfo {
     many: bool,
     /// Its typed hole, if the signature types it.
     hole: Option<Hole>,
+    /// How many ellipses its pattern has it under: what the use gives of it
+    /// is a list of so many levels.
+    depth: usize,
 }
 
 /// Syntax aligned with syntax types, as a tree of `Node`s.
@@ -439,6 +458,15 @@ impl Macros {
                     }
                 }
             }
+            // `(σ … σ ...)`: a list ending in any number of the last `σ`.
+            Datum::List { items, tail: None } if items.len() >= 2 && is_ellipsis(&items[items.len() - 1], interner) => {
+                let elem = self.sty(&items[items.len() - 2], interner, named, mus)?;
+                let mut t = self.seq(elem);
+                for x in items[..items.len() - 2].iter().rev() {
+                    t = Rc::new(STy::Pair(self.sty(x, interner, named, mus)?, t));
+                }
+                return Ok(t);
+            }
             Datum::List { items, tail } => {
                 let head = items[0].as_symbol().map(|h| interner.name(h));
                 match (head, &items[..], tail) {
@@ -500,6 +528,81 @@ impl Macros {
         Ok(Rc::new(t))
     }
 
+    /// `(elem ...)`: `(mu l (union () (elem . l)))`, and if `elem` exports,
+    /// each element's export together, as a `let`'s bindings do; a binder
+    /// alone, `bvar` or `dvar`, exports itself.
+    fn seq(&mut self, elem: Rc<STy>) -> Rc<STy> {
+        let elem = match &*elem {
+            STy::Bvar => Rc::new(STy::Export(elem, Bind::Rib(vec![(Vec::new(), Delta::Var)]))),
+            STy::Dvar => Rc::new(STy::Export(elem, Bind::Rib(vec![(Vec::new(), Delta::Dvar)]))),
+            _ => elem,
+        };
+        let id = self.mus.len();
+        self.mus.push(Rc::new(STy::Nil));
+        let pair = Rc::new(STy::Pair(elem.clone(), Rc::new(STy::Mu(id))));
+        let body = if matches!(&*elem, STy::Export(..)) {
+            let none = Rc::new(STy::Export(Rc::new(STy::Nil), Bind::Rib(Vec::new())));
+            vec![none, Rc::new(STy::Export(pair, Bind::Rib(vec![(vec![true], Delta::Rib), (vec![false], Delta::Rib)])))]
+        } else {
+            vec![Rc::new(STy::Nil), pair]
+        };
+        self.mus[id] = Rc::new(STy::Union(body));
+        Rc::new(STy::Mu(id))
+    }
+
+    /// The type of an element of list type `t`, if a template or pattern may
+    /// give its elements by ellipsis: a `mu` of `()` and of pairs of an
+    /// element and itself, which binds no more than what each element
+    /// exports, all of them together (a `let`'s, not a `let*`'s). Each
+    /// pair's element, with the part of the pair's export that is its.
+    fn seq_of(&self, t: &Rc<STy>) -> Option<Rc<STy>> {
+        let STy::Mu(id) = &**t else { return None };
+        let STy::Union(ms) = &*self.mus[*id] else { return None };
+        let (mut elems, mut nil) = (Vec::new(), false);
+        for m in ms {
+            let (core, entries) = match &**m {
+                STy::Export(b, Bind::Rib(es)) => (b, Some(es)),
+                STy::Export(..) | STy::Import(..) => return None,
+                _ => (m, None),
+            };
+            match &**core {
+                STy::Nil => nil = true,
+                STy::Pair(a, d) if matches!(&**d, STy::Mu(j) if j == id) => {
+                    let mut own = Vec::new();
+                    for (addr, delta) in entries.into_iter().flatten() {
+                        match addr.split_first() {
+                            Some((true, rest)) => own.push((rest.to_vec(), *delta)),
+                            Some((false, [])) if *delta == Delta::Rib => {}
+                            _ => return None,
+                        }
+                    }
+                    // An element that exports what the pair says it does.
+                    let elem = match (&**a, &own[..]) {
+                        (_, []) => a.clone(),
+                        (STy::Export(..), [(here, Delta::Rib)]) if here.is_empty() => a.clone(),
+                        _ => Rc::new(STy::Export(a.clone(), Bind::Rib(own))),
+                    };
+                    elems.push(elem);
+                }
+                _ => return None,
+            }
+        }
+        match elems.len() {
+            0 => None,
+            _ if !nil => None,
+            1 => elems.pop(),
+            _ => Some(Rc::new(STy::Union(elems))),
+        }
+    }
+
+    /// The type at `t`, its annotations seen through, not its `mu`s.
+    fn peel<'a>(&'a self, t: &'a Rc<STy>) -> &'a Rc<STy> {
+        match &**t {
+            STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) | STy::Typed(b, _) => self.peel(b),
+            _ => t,
+        }
+    }
+
     /// The type at `t`, its annotations, `mu`s and unions seen through
     /// to what is under them (for overlap and fit).
     fn unfold<'a>(&'a self, t: &'a Rc<STy>) -> &'a Rc<STy> {
@@ -539,6 +642,10 @@ impl Macros {
     /// template, or any name in a pattern, fits anything.
     fn fits(&self, t: &Rc<STy>, s: &Syntax, mode: Mode, interner: &Interner, pvars: &HashMap<Sym, PInfo>) -> bool {
         use STy::*;
+        // `(p ...)`, where a list of elements `p` fits may be.
+        if mode != Mode::Use && let Some(x) = ellipsis(s, interner) {
+            return self.seq_of(self.peel(t)).is_some_and(|e| self.fits(&e, &x, mode, interner, pvars));
+        }
         if let Some(n) = s.as_symbol() {
             let lit = matches!(&**self.unfold(t), Literal(_));
             // A pattern variable placed fits anything but, if it is a name,
@@ -694,7 +801,7 @@ impl Macros {
             binds.insert(*n, stand_in);
         }
         self.checking = true;
-        let body = self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut HashMap::new(), 0, interner);
+        let body = self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), 0, interner)?;
         self.checking = false;
         let lambda = Syntax::list(at, vec![sym("lambda", interner), list_of(at, params, None), body]);
         let made = if binders.is_empty() { lambda } else { Syntax::list(at, vec![sym("plambda", interner), Syntax::list(at, binders), lambda]) };
@@ -814,7 +921,7 @@ impl Macros {
         let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
         let mut found = Vec::new();
-        p.walk(root, &Vec::new(), false, &mut found)?;
+        p.walk(root, &Vec::new(), false, 0, &mut found, &mut Vec::new())?;
         // What a use of a macro that makes definitions says it defines, if
         // its signature says (`(-> (export σ β) defn)`): what a template
         // using it sees, and what its own template is held to.
@@ -824,10 +931,13 @@ impl Macros {
         };
         let mut pvars: HashMap<Sym, PInfo> = HashMap::new();
         let mut order = Vec::new();
-        for (at, env, many) in found {
+        for (at, env, many, depth) in found {
             let Kids::PVar(n) = p.nodes[at].kids else { continue };
             order.push(n);
-            if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env, many, hole: p.nodes[at].hole.clone() }).is_some() {
+            if depth > 0 && p.nodes[at].hole.is_some() {
+                return Err(FxError::at(p.nodes[at].syn.span, "a typed part under an ellipsis: not yet"));
+            }
+            if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env, many, hole: p.nodes[at].hole.clone(), depth }).is_some() {
                 return Err(FxError::at(p.nodes[at].syn.span, format!("`{}` is a pattern variable twice", interner.name(n))));
             }
             // Its uses' definitions are checked where each is (the first
@@ -840,8 +950,11 @@ impl Macros {
         // kernel's forms' signatures and the macros'.
         let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new() };
         let root = t.align(&Rc::new(if defn { STy::Defn } else { STy::Expr }), template, None, Vec::new())?;
-        let mut found = Vec::new();
-        t.walk(root, &Vec::new(), false, &mut found)?;
+        let (mut found, mut seqs) = (Vec::new(), Vec::new());
+        t.walk(root, &Vec::new(), false, 0, &mut found, &mut seqs)?;
+        // How many ellipses each of the template's binders is under: a
+        // binder repeated is made fresh in each repetition.
+        let binder_depth: HashMap<usize, usize> = found.iter().filter(|f| matches!(t.nodes[f.0].kids, Kids::Binder(..))).map(|f| (f.0, f.3)).collect();
         // The names the template binds in its uses of macros that make
         // definitions: what their signatures do not say they define, it
         // does not see.
@@ -857,7 +970,7 @@ impl Macros {
         }
         let mut actions = HashMap::new();
         let mut uses: HashMap<Sym, usize> = HashMap::new();
-        for (at, env, many) in found {
+        for (at, env, many, depth) in found {
             let node = &t.nodes[at];
             let span = node.syn.span;
             match &node.kids {
@@ -865,6 +978,9 @@ impl Macros {
                     let info = &pvars[n];
                     let name = interner.name(*n);
                     t.placed(*n, info, &node.core, &env, span)?;
+                    if depth < info.depth {
+                        return Err(FxError::at(span, format!("`{name}` is placed under {depth} ellipses, and the pattern has it under {}", info.depth)));
+                    }
                     // Anything with an expression in it, placed twice, runs
                     // twice: placed once, unless its signature says `many`.
                     // Where another macro's says `many`, it may be placed
@@ -873,6 +989,9 @@ impl Macros {
                     // number of times: running it twice does nothing twice.
                     let pure = info.hole.as_ref().is_some_and(|h| h.pure(interner));
                     let affine = !info.many && !pure && !matches!(&*info.core, STy::Bvar | STy::Dvar | STy::Id | STy::Label | STy::Data | STy::Type | STy::Kind);
+                    if affine && depth > info.depth {
+                        return Err(FxError::at(span, format!("`{name}` is placed under more ellipses than the pattern has it, so in each repetition, and an expression in it may do something each time it runs: its signature says `(many …)` if it may")));
+                    }
                     if affine && many {
                         return Err(FxError::at(span, format!("`{name}` is placed where it may be placed more than once (a `many` part), and an expression in it may do something each time it runs: its signature says `(many …)` if it may")));
                     }
@@ -885,7 +1004,7 @@ impl Macros {
                     }
                 }
                 Kids::Binder(..) => {
-                    actions.insert(node.path.clone(), Action::Rename(node.path.clone()));
+                    actions.insert(node.path.clone(), Action::Rename(node.path.clone(), depth));
                 }
                 Kids::Ref(n, ns, free) => {
                     // What the template binds of this name, in its namespace.
@@ -907,7 +1026,7 @@ impl Macros {
                         return Err(FxError::at(span, format!("`{n}` is bound in a use of `{m}`, whose signature does not say its uses define it: say so (`(-> (export σ β) defn)`), or write `(with #%toplevel {n})` for the top level's")));
                     }
                     let action = match (bound, free, file) {
-                        (Some(b), _, _) => Action::Rename(t.nodes[b].path.clone()),
+                        (Some(b), _, _) => Action::Rename(t.nodes[b].path.clone(), binder_depth.get(&b).copied().unwrap_or(0)),
                         (None, Free::Plain, _) => continue,
                         (None, Free::Qualified, None) => Action::Qualified,
                         // A file's macro's description is read through the
@@ -928,6 +1047,20 @@ impl Macros {
                 _ => {}
             }
         }
+        // Each part a template repeats says how many times: a pattern
+        // variable in it that the pattern has under as many ellipses, or a
+        // reference to a binder of the template's repeated as deep, as many
+        // times as that binder was.
+        for (r, depth) in seqs {
+            let says = |k: &usize| match t.nodes[*k].kids {
+                Kids::PVar(n) => pvars[&n].depth >= depth,
+                Kids::Ref(..) => matches!(actions.get(&t.nodes[*k].path), Some(Action::Rename(_, d)) if *d >= depth),
+                _ => false,
+            };
+            if !t.under(r).iter().any(says) {
+                return Err(FxError::at(t.nodes[r].syn.span, "`...` follows a part with no pattern variable in it under as many ellipses in the pattern, nor a binder repeated as deep, to say how many times"));
+            }
+        }
         // What the template defines of what its uses give, what its
         // signature says.
         if let Some(declared) = declared {
@@ -944,7 +1077,7 @@ impl Macros {
             if let (Some(f), true) = (file, node.desc) {
                 let open = t.under(i).into_iter().find(|k| match t.nodes[*k].kids {
                     Kids::PVar(_) | Kids::Binder(..) => true,
-                    _ => matches!(actions.get(&t.nodes[*k].path), Some(Action::Rename(_))),
+                    _ => matches!(actions.get(&t.nodes[*k].path), Some(Action::Rename(..))),
                 });
                 if let Some(k) = open {
                     return Err(FxError::at(t.nodes[k].syn.span, "a file's macro's description with a binder of its own or a part a use gives in it: not yet"));
@@ -1112,9 +1245,10 @@ impl Macros {
             if !matches(&c.pattern, &operands, &mut binds, interner) {
                 continue;
             }
-            let mut fresh: HashMap<Vec<bool>, Sym> = HashMap::new();
             let made = fixpt_read::record_expansion(interner.name(name), s.span, m.text.clone());
-            return Ok(self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut fresh, made, interner));
+            return self
+                .transcribe(c, &c.template, &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), made, interner)
+                .map_err(|e| FxError::at(s.span, format!("a use of `{}`: {}", interner.name(name), e.message)));
         }
         Err(FxError::at(s.span, format!("a use of `{}` that no clause of it matches", interner.name(name))))
     }
@@ -1123,9 +1257,11 @@ impl Macros {
     /// part the template makes at its own place in the `define-syntax`, of
     /// that expansion (provenance, not identity:
     /// `docs/research/loads-and-places.md`, "Decided: identity by
-    /// position"), each pattern variable's what the use gave.
+    /// position"), each pattern variable's what the use gave. `iters`: the
+    /// repetition of each ellipsis it is under, outermost first; a binder's
+    /// fresh name is by its path and the repetitions it is in.
     #[allow(clippy::too_many_arguments)]
-    fn transcribe(&mut self, c: &Clause, t: &Syntax, path: &mut Vec<bool>, binds: &HashMap<Sym, Syntax>, fresh: &mut HashMap<Vec<bool>, Sym>, made: u32, interner: &mut Interner) -> Syntax {
+    fn transcribe(&mut self, c: &Clause, t: &Syntax, path: &mut Vec<bool>, binds: &HashMap<Sym, Syntax>, fresh: &mut Made, iters: &mut Vec<usize>, made: u32, interner: &mut Interner) -> R<Syntax> {
         let at = t.span.in_expansion(made);
         let typed = match c.actions.get(&*path) {
             Some(Action::StandardType) => Some(interner.intern("#%fx")),
@@ -1133,7 +1269,7 @@ impl Macros {
             _ => None,
         };
         if let Some(m) = typed {
-            return selected(m, t, made, interner);
+            return Ok(selected(m, t, made, interner));
         }
         match &t.datum {
             Datum::Symbol(n) => {
@@ -1141,21 +1277,22 @@ impl Macros {
                     // A typed hole's expression, held to its type; in a
                     // template's check, its call, where the template has it.
                     if self.checking {
-                        return respanned(b, at);
+                        return Ok(respanned(b, at));
                     }
-                    return match c.contracts.get(n) {
+                    return Ok(match c.contracts.get(n) {
                         Some(ty) => Syntax::list(b.span, vec![Syntax::symbol(b.span, interner.intern("the")), in_expansion(ty, made), b.clone()]),
                         None => b.clone(),
-                    };
+                    });
                 }
-                match c.actions.get(&*path) {
-                    Some(Action::Rename(binder)) => {
-                        let name = match fresh.get(binder) {
+                Ok(match c.actions.get(&*path) {
+                    Some(Action::Rename(binder, depth)) => {
+                        let key = (binder.clone(), iters[..(*depth).min(iters.len())].to_vec());
+                        let name = match fresh.fresh.get(&key) {
                             Some(f) => *f,
                             None => {
                                 self.fresh += 1;
                                 let f = interner.intern(&format!("%{}:{}", interner.name(*n), self.fresh));
-                                fresh.insert(binder.clone(), f);
+                                fresh.fresh.insert(key, f);
                                 f
                             }
                         };
@@ -1176,7 +1313,7 @@ impl Macros {
                         Syntax::symbol(at, q)
                     }
                     _ => Syntax::new(at, t.datum.clone()),
-                }
+                })
             }
             Datum::List { items, tail } => {
                 let head = match c.actions.get(&*path) {
@@ -1185,20 +1322,76 @@ impl Macros {
                 };
                 let depth = path.len();
                 let mut out = Vec::new();
-                for item in items {
+                let mut i = 0;
+                while i < items.len() {
                     path.push(true);
-                    out.push(self.transcribe(c, item, path, binds, fresh, made, interner));
+                    // `p ...`: `p` once for each element of what the use gave
+                    // of the pattern variables in it under more ellipses than
+                    // this, together.
+                    if items.get(i + 1).is_some_and(|x| is_ellipsis(x, interner)) {
+                        let drivers: Vec<Sym> = c.pvars.iter().filter(|(n, p)| p.depth > iters.len() && find_symbol(&items[i], *n).is_some()).map(|(n, _)| *n).collect();
+                        let lists: Vec<Vec<Syntax>> = drivers.iter().map(|n| elements(&binds[n])).collect();
+                        if let Some((k, _)) = lists.iter().enumerate().find(|(_, l)| l.len() != lists[0].len()) {
+                            let (a, b) = (interner.name(drivers[0]), interner.name(drivers[k]));
+                            return Err(FxError::at(items[i].span, format!("`{a}` and `{b}`, repeated together, are given {} and {} times", lists[0].len(), lists[k].len())));
+                        }
+                        // The binders of the template's repeated in it,
+                        // and those it refers to that were repeated before.
+                        let under: Vec<(&Vec<bool>, &Vec<bool>)> = c
+                            .actions
+                            .iter()
+                            .filter_map(|(at, a)| match a {
+                                Action::Rename(b, d) if *d > iters.len() && at.starts_with(path) => Some((at, b)),
+                                _ => None,
+                            })
+                            .collect();
+                        // Every count it is repeated by agrees: the pattern
+                        // variables', and the repeated binders' it refers to.
+                        let mut known: Vec<usize> = under.iter().filter_map(|(_, b)| fresh.counts.get(&((*b).clone(), iters.clone())).copied()).collect();
+                        known.extend(lists.first().map(|l| l.len()));
+                        let Some(&times) = known.first() else {
+                            return Err(FxError::at(items[i].span, "this part is repeated before the repetition that binds what it refers to"));
+                        };
+                        if known.iter().any(|k| *k != times) {
+                            return Err(FxError::at(items[i].span, "this part repeats binders and parts that were repeated, or given, different numbers of times"));
+                        }
+                        for (at, b) in &under {
+                            if at == b {
+                                fresh.counts.insert(((*b).clone(), iters.clone()), times);
+                            }
+                        }
+                        for r in 0..times {
+                            let mut each = binds.clone();
+                            for (n, l) in drivers.iter().zip(&lists) {
+                                each.insert(*n, l[r].clone());
+                            }
+                            iters.push(r);
+                            let x = self.transcribe(c, &items[i], path, &each, fresh, iters, made, interner);
+                            iters.pop();
+                            out.push(x?);
+                        }
+                        path.pop();
+                        path.push(false);
+                        path.push(false);
+                        i += 2;
+                        continue;
+                    }
+                    out.push(self.transcribe(c, &items[i], path, binds, fresh, iters, made, interner)?);
                     path.pop();
                     path.push(false);
+                    i += 1;
                 }
                 if let Some(h) = head {
                     out[0] = Syntax::symbol(out[0].span, h);
                 }
-                let tail = tail.as_ref().map(|x| self.transcribe(c, x, path, binds, fresh, made, interner));
+                let tail = match tail {
+                    Some(x) => Some(self.transcribe(c, x, path, binds, fresh, iters, made, interner)?),
+                    None => None,
+                };
                 path.truncate(depth);
-                list_of(at, out, tail)
+                Ok(list_of(at, out, tail))
             }
-            _ => Syntax::new(at, t.datum.clone()),
+            _ => Ok(Syntax::new(at, t.datum.clone())),
         }
     }
 }
@@ -1212,7 +1405,7 @@ impl Aligner<'_> {
     /// addresses are from, if not itself.
     fn align(&mut self, t: &Rc<STy>, s: &Syntax, root: Option<usize>, path: Vec<bool>) -> R<usize> {
         let at = self.nodes.len();
-        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, kids: Kids::Other });
+        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
         self.fill(at, t, s, root.unwrap_or(at))?;
         Ok(at)
     }
@@ -1246,7 +1439,7 @@ impl Aligner<'_> {
         if let Some(n) = s.as_symbol() {
             let lit = matches!(&**self.m.unfold(t), STy::Literal(_));
             let pvar = match self.mode {
-                Mode::Pattern => !lit && self.name(n) != "_",
+                Mode::Pattern => !lit && self.name(n) != "_" && self.name(n) != "...",
                 Mode::Template => self.pvars.contains_key(&n),
                 Mode::Use => false,
             };
@@ -1254,6 +1447,38 @@ impl Aligner<'_> {
                 self.nodes[at].kids = Kids::PVar(n);
                 return Ok(());
             }
+        }
+        // `(p ...)`, a pattern's or a template's: `p` aligned with the list's
+        // element type, repeated; the list exports what each element does.
+        if self.mode != Mode::Use && let Some(x) = ellipsis(s, self.interner) {
+            let Some(elem) = self.m.seq_of(t) else {
+                return Err(fail(format!("`{}` repeats a part by `...` where the form takes no list of them", self.show(s))));
+            };
+            let mut p = self.nodes[at].path.clone();
+            p.push(true);
+            let e = self.align(&elem, &x, None, p)?;
+            self.nodes[e].repeated = true;
+            // A pattern variable where elements of more than one shape may
+            // be: the shape it fits, and what that exports.
+            if let (Kids::PVar(_), STy::Union(ms)) = (&self.nodes[e].kids, &*elem) {
+                let fit: Vec<&Rc<STy>> = ms.iter().filter(|m| self.m.fits(m, &x, self.mode, self.interner, self.pvars)).collect();
+                if let [one] = &fit[..] {
+                    let one = (*one).clone();
+                    if let STy::Export(_, b) = &*one {
+                        self.nodes[e].export = Some((b.clone(), e));
+                    }
+                    self.nodes[e].core = self.m.peel(&one).clone();
+                }
+            }
+            self.nodes[at].kids = Kids::Seq(e);
+            // What each element exports, the list does, of each.
+            if self.nodes[at].export.is_none() {
+                self.nodes[at].export = self.nodes[e].export.clone();
+            }
+            return Ok(());
+        }
+        if self.mode != Mode::Use && s.as_symbol().is_some_and(|n| self.name(n) == "...") {
+            return Err(fail("`...` follows the part it repeats, last in a list".into()));
         }
         match &**t {
             STy::Mu(id) => {
@@ -1557,12 +1782,18 @@ impl Aligner<'_> {
     fn desc_kids(&mut self, at: usize, items: &[Syntax]) -> Vec<usize> {
         let mut path = self.nodes[at].path.clone();
         let mut kids = Vec::new();
+        // `p ...` last: `p` repeated, the `...` no part of its own.
+        let repeated = items.len() >= 2 && is_ellipsis(&items[items.len() - 1], self.interner);
+        let items = if repeated { &items[..items.len() - 1] } else { items };
         for i in items {
             let mut p = path.clone();
             p.push(true);
             kids.push(self.nodes.len());
-            self.nodes.push(Node { syn: i.clone(), path: p, core: Rc::new(STy::Type), imports: Vec::new(), export: None, many: false, hole: None, desc: false, kids: Kids::Other });
+            self.nodes.push(Node { syn: i.clone(), path: p, core: Rc::new(STy::Type), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
             path.push(false);
+        }
+        if repeated && let Some(&k) = kids.last() {
+            self.nodes[k].repeated = true;
         }
         self.nodes[at].kids = Kids::Desc(kids.clone());
         kids
@@ -1655,9 +1886,13 @@ impl Aligner<'_> {
     /// each pattern variable, template binder and name referred to, with
     /// the environment where it is, and whether it is in a part of the
     /// signature that is `(many …)` (`many`, of what is around it).
-    fn walk(&self, at: usize, env: &Vec<Level>, many: bool, found: &mut Found) -> R<()> {
+    fn walk(&self, at: usize, env: &Vec<Level>, many: bool, depth: usize, found: &mut Found, seqs: &mut Vec<(usize, usize)>) -> R<()> {
         let node = &self.nodes[at];
         let many = many || node.many;
+        let depth = depth + usize::from(node.repeated);
+        if node.repeated {
+            seqs.push((at, depth));
+        }
         let mut env = env.clone();
         for (b, root) in &node.imports {
             let mut levels = self.eval(b, *root, node.syn.span)?;
@@ -1666,18 +1901,18 @@ impl Aligner<'_> {
         }
         match &node.kids {
             Kids::Pair(x, y) => {
-                self.walk(*x, &env, many, found)?;
-                self.walk(*y, &env, many, found)
+                self.walk(*x, &env, many, depth, found, seqs)?;
+                self.walk(*y, &env, many, depth, found, seqs)
             }
-            Kids::Form(x) => self.walk(*x, &env, many, found),
+            Kids::Form(x) | Kids::Seq(x) => self.walk(*x, &env, many, depth, found, seqs),
             Kids::Desc(kids) => {
                 for k in kids {
-                    self.walk(*k, &env, many, found)?;
+                    self.walk(*k, &env, many, depth, found, seqs)?;
                 }
                 Ok(())
             }
             Kids::PVar(_) | Kids::Binder(..) | Kids::Ref(..) => {
-                found.push((at, env, many));
+                found.push((at, env, many, depth));
                 Ok(())
             }
             Kids::Nil | Kids::Other => Ok(()),
@@ -1765,7 +2000,7 @@ impl Aligner<'_> {
                 self.binders_under(x, m, out);
                 self.binders_under(y, m, out);
             }
-            Kids::Form(x) => self.binders_under(x, m, out),
+            Kids::Form(x) | Kids::Seq(x) => self.binders_under(x, m, out),
             Kids::Desc(ref kids) => {
                 for k in kids {
                     self.binders_under(*k, m, out);
@@ -1785,7 +2020,7 @@ impl Aligner<'_> {
                 out.extend(self.under(*x));
                 out.extend(self.under(*y));
             }
-            Kids::Form(x) => out.extend(self.under(*x)),
+            Kids::Form(x) | Kids::Seq(x) => out.extend(self.under(*x)),
             Kids::Desc(kids) => kids.iter().for_each(|k| out.extend(self.under(*k))),
             _ => {}
         }
@@ -2075,6 +2310,29 @@ fn list_of(at: Span, mut items: Vec<Syntax>, tail: Option<Syntax>) -> Syntax {
 /// name the pattern variable (`_` anything), a form's name or a keyword
 /// itself.
 fn matches(p: &Syntax, s: &Syntax, binds: &mut HashMap<Sym, Syntax>, interner: &Interner) -> bool {
+    // `(x ...)`: each element of a list by `x`, each of its pattern
+    // variables then the list of what it matched.
+    if let Some(x) = ellipsis(p, interner) {
+        let Some(elems) = (match &s.datum {
+            Datum::Nil => Some(Vec::new()),
+            _ => s.as_proper_list().map(|l| l.to_vec()),
+        }) else {
+            return false;
+        };
+        let mut each = Vec::new();
+        for e in &elems {
+            let mut b = HashMap::new();
+            if !matches(&x, e, &mut b, interner) {
+                return false;
+            }
+            each.push(b);
+        }
+        for n in pattern_names(&x, interner) {
+            let items: Vec<Syntax> = each.iter().map(|b| b[&n].clone()).collect();
+            binds.insert(n, list_of(s.span, items, None));
+        }
+        return true;
+    }
     match &p.datum {
         Datum::Symbol(n) if interner.name(*n) == "_" => true,
         Datum::Symbol(n) if reserved(interner.name(*n)) => s.as_symbol() == Some(*n),
@@ -2088,6 +2346,37 @@ fn matches(p: &Syntax, s: &Syntax, binds: &mut HashMap<Sym, Syntax>, interner: &
             _ => false,
         },
         other => &s.datum == other,
+    }
+}
+
+/// Whether `s` is the name `...`.
+fn is_ellipsis(s: &Syntax, interner: &Interner) -> bool {
+    s.as_symbol().is_some_and(|n| interner.name(n) == "...")
+}
+
+/// `x` of `(x ...)`, a part repeated, if `s` is one.
+fn ellipsis(s: &Syntax, interner: &Interner) -> Option<Syntax> {
+    match s.as_proper_list() {
+        Some([x, dots]) if is_ellipsis(dots, interner) => Some(x.clone()),
+        _ => None,
+    }
+}
+
+/// What a pattern variable repeated was given: the list's elements.
+fn elements(s: &Syntax) -> Vec<Syntax> {
+    match &s.datum {
+        Datum::Nil => Vec::new(),
+        _ => s.as_proper_list().map(|l| l.to_vec()).unwrap_or_default(),
+    }
+}
+
+/// The pattern variables in pattern `p`: its names but `_`, `...` and the
+/// forms' (which match themselves).
+fn pattern_names(p: &Syntax, interner: &Interner) -> Vec<Sym> {
+    match &p.datum {
+        Datum::Symbol(n) if !matches!(interner.name(*n), "_" | "...") && !reserved(interner.name(*n)) => vec![*n],
+        Datum::List { items, tail } => items.iter().chain(tail.as_deref()).flat_map(|x| pattern_names(x, interner)).collect(),
+        _ => Vec::new(),
     }
 }
 

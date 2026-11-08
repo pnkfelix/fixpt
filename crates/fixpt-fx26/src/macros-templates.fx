@@ -48,7 +48,7 @@
            (made (hole-params fail c (extract c 4) a b (tuple (the syns-a nil) binders
                                                               (extract m 3))))
            (body (begin (set checking #t)
-                        (let ((x (transcribe c template nil (extract made 2) 0)))
+                        (let ((x (transcribe fail c template nil (extract made 2) 0)))
                           (begin (set checking #f) x))))
            (params (extract made 1)) (poly (extract made 3))
            (lam (mk-list (list (mk-symbol "lambda" a b) (list-at a b 0 params nil) body) a b))

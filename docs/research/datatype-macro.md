@@ -194,7 +194,13 @@ parameters a `dvar` sequence in scope in the fields' types.
 
 ## 8. Steps
 
-1. Ellipsis in patterns and templates, both front ends: matching,
+1. **Built** (2026-11-08): ellipsis in patterns and templates, both front
+   ends (`docs/fx26.md`, "Ellipsis"), as §4 says, and one rule more: a part
+   repeated with no pattern variable in it says how many times by the
+   binders of the template's it refers to, repeated as many times as their
+   own repetition was, so that `(lambda ((x field) ...) (sum t (tuple x
+   ...)))` needs nothing generated; every count a part is repeated by must
+   agree. Was: ellipsis in patterns and templates, both front ends: matching,
    depth checking, transcription, fresh names per repetition; `(σ ...)`
    in signatures; sequence atoms in Herman's checking. Tests: a `my-let`,
    a `my-let*`, a `my-cond` written with ellipsis, the existing recursive

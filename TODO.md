@@ -5293,3 +5293,5 @@ make one `sumof`, the fields one parameter list, with fresh names per
 repetition) and a name that is both a label and a value's binder (a
 syntax type `tag`, or keyword constructors instead). Design, acceptance
 tests and the user's two choices: `docs/research/datatype-macro.md`.
+Decided (the user, 2026-11-08): ellipsis primitive; keyword constructors,
+none as values. Ellipsis built the same day; keyword constructors next.

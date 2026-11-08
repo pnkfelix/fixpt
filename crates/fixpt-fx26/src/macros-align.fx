@@ -19,6 +19,7 @@
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit sorted-strings
+        seq-elem peel ellipsis? ellipsis-of pattern-names addr-under?
         joined
         (type fails addr entries ring rings bind sty stys named hole atm atms strings))
 
@@ -33,7 +34,7 @@
 ;; the file's module or the standard environment, by `select`; a use of
 ;; another of the file's macros, by the name the importer has it by.
 (define-datatype action
-  (act-rename addr) (act-toplevel) (act-qualified) (act-standard) (act-module symbol)
+  (act-rename addr int) (act-toplevel) (act-qualified) (act-standard) (act-module symbol)
   (act-module-type symbol) (act-standard-type) (act-macro-head symbol))
 (define-type actions (listof (tupleof addr action) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
@@ -79,10 +80,11 @@
 ;; namespace, and what it is if the template does not bind it (0 the top
 ;; level's value, 1 the top level's qualified, 2 as written: `macros.rs`'s
 ;; `Free`); a form in a template, its operands (or, an application's,
-;; itself); a description's parts, a list a template writes; anything else.
+;; itself); a description's parts, a list a template writes; a list given
+;; by ellipsis, `(p ...)`, its element, repeated; anything else.
 (define-datatype kids
   (k-pair int int) (k-nil) (k-pvar symbol) (k-binder symbol bool) (k-ref symbol bool int)
-  (k-form int) (k-desc (listof int acyclic)) (k-other))
+  (k-form int) (k-desc (listof int acyclic)) (k-seq int) (k-other))
 ;; Each of a node's imports, outermost first, or its export, with the root
 ;; its addresses are from.
 (define-type rooted (listof (tupleof bind int) acyclic))
@@ -158,7 +160,17 @@
         #u
         (begin (array-set! to i (array-ref from i)) (copy-nodes from to (+ i 1))))))
 ;; The nodes forgotten, for another alignment.
-(define nodes-reset! (->* () unit) (lambda () (begin (set nnodes 0) (set desc-roots nil))))
+(define nodes-reset! (->* () unit)
+  (lambda () (begin (set nnodes 0) (set desc-roots nil) (set repeated nil) (set seq-depths nil))))
+;; The nodes an ellipsis follows, so that each is repeated; and, as a walk
+;; finds them, each with how many ellipses it is under, itself counted, the
+;; last found first (`macros.rs`'s `Node::repeated`, `walk`'s `seqs`).
+(define repeated (ref (listof int acyclic) rs) (new nil))
+(define seq-depths (ref (listof (tupleof int int) acyclic) rs) (new nil))
+(define repeated? (->* (int) bool)
+  (lambda (i) (int-member? i (get repeated))))
+(define int-member? (->* (int (listof int acyclic)) bool)
+  (lambda (i is) (and (not (null? is)) (or (= i (car is)) (int-member? i (cdr is))))))
 ;; The nodes of the descriptions a template writes, whole (`macros.rs`'s
 ;; `Node::desc`).
 (define desc-roots (ref (listof int acyclic) rs) (new nil))
@@ -166,9 +178,9 @@
 ;;; ------------------------------------------------------------ aligning
 
 ;; A pattern variable: its type, its environment as the signature declares
-;; it, whether it may be placed any number of times, and its typed hole, if
-;; the signature types it.
-(define-type pinfo (tupleof sty levels bool holes))
+;; it, whether it may be placed any number of times, its typed hole, if
+;; the signature types it, and how many ellipses its pattern has it under.
+(define-type pinfo (tupleof sty levels bool holes int))
 (define-type pvars (listof (tupleof symbol pinfo) acyclic))
 (define pvar-of (->* (symbol pvars) (listof pinfo acyclic))
   (lambda (n ps)
@@ -210,12 +222,47 @@
     (begin
       (with-core at t)
       ;; A pattern's variable, or one placed in a template: at any type.
-      (if (and (syn-symbol? s)
-               (or (and (= mode 0) (not (= (kind-of (unfold t)) 7))
-                        (not (string=? (syn-name s) "_")))
-                   (and (= mode 1) (pvar? (syn-symbol s) ps))))
-          (with-kids at (k-pvar (syn-symbol s)))
-          (fill-shape fail mode ps at t s root)))))
+      (cond ((and (syn-symbol? s)
+                  (or (and (= mode 0) (not (= (kind-of (unfold t)) 7))
+                           (not (string=? (syn-name s) "_")) (not (ellipsis? s)))
+                      (and (= mode 1) (pvar? (syn-symbol s) ps))))
+             (with-kids at (k-pvar (syn-symbol s))))
+            ((and (not (= mode 2)) (not (null? (ellipsis-of s))))
+             (fill-seq fail mode ps at t s (car (ellipsis-of s))))
+            ((and (not (= mode 2)) (ellipsis? s))
+             (fail-at fail "`...` follows the part it repeats, last in a list" s))
+            (else (fill-shape fail mode ps at t s root))))))
+;; `(x ...)` at `at`, a pattern's or a template's: `x` aligned with the
+;; element type of list type `t`, repeated; the list exports what each
+;; element does.
+(define fill-seq (->* (fails int pvars int sty syn syn) unit)
+  (lambda (fail mode ps at t s x)
+    (let ((elem (seq-elem t)))
+      (if (null? elem)
+          (fail-at fail (string-append "`" (show-syn s) "` repeats a part by `...` where the form "
+                                       "takes no list of them")
+                   s)
+          (let ((e (align fail mode ps (car elem) x -1 (path+ (node-path at) #t))))
+            (begin
+              (set repeated (cons e (get repeated)))
+              (tagcase (node-kids e) (k-pvar (n) (seq-member ps e (car elem) x mode)) (else y #u))
+              (with-kids at (k-seq e))
+              (let ((ex (extract (node-at e) 5)))
+                (if (or (not (null? (extract (node-at at) 5))) (null? ex))
+                    #u
+                    (with-export at (extract (car ex) 1) (extract (car ex) 2))))))))))
+;; A pattern variable at `e` where elements of more than one shape may be:
+;; the shape it fits, and what that exports.
+(define seq-member (->* (pvars int sty syn int) unit)
+  (lambda (ps e elem x mode)
+    (tagcase elem
+      (s-union (ms)
+        (let ((fit (fitting ms x mode ps)))
+          (if (and (not (null? fit)) (null? (cdr fit)))
+              (begin (tagcase (car fit) (s-export (b bd) (with-export e bd e)) (else y #u))
+                     (with-core e (peel (car fit))))
+              #u)))
+      (else y #u))))
 (define fill-shape (->* (fails int pvars int sty syn int) unit)
   (lambda (fail mode ps at t s root)
     (let ((said (lambda ((why string)) (fail-at fail why s)))
@@ -488,15 +535,23 @@
              (named-param? (cdr ps))))))
 (define desc-each (->* (fails pvars (listof int acyclic) syns-a) unit)
   (lambda (fail ps ks xs)
-    (if (null? xs)
+    (if (or (null? xs) (null? ks))
         #u
         (begin (desc fail ps (car ks) (car xs)) (desc-each fail ps (cdr ks) (cdr xs))))))
 ;; A node for each of `items`, the parts of the list at node `at`, at their
 ;; paths in it: `at`'s kids.
 (define desc-kids (->* (int syns-a) (listof int acyclic))
   (lambda (at items)
-    (let ((kids (desc-kids-from items (node-path at) nil)))
-      (begin (with-kids at (k-desc kids)) kids))))
+    ;; `p ...` last: `p` repeated, the `...` no part of its own.
+    (let* ((n (len items)) (again (and (>= n 2) (ellipsis? (nth items (- n 1)))))
+           (kids (desc-kids-from (if again (the syns-a (reverse (cdr (reverse items)))) items)
+                                 (node-path at) nil)))
+      (begin
+        (if (and again (not (null? kids)))
+            (set repeated (cons (car (the (listof int acyclic) (reverse kids))) (get repeated)))
+            #u)
+        (with-kids at (k-desc kids))
+        kids))))
 (define desc-kids-from (->* (syns-a addr (listof int acyclic)) (listof int acyclic))
   (lambda (items path out)
     (if (null? items)
@@ -528,7 +583,7 @@
       (desc-binders-from fail ps (desc-kids at entries) entries nil))))
 (define desc-binders-from (->* (fails pvars (listof int acyclic) syns-a atms) atms)
   (lambda (fail ps ks es out)
-    (if (null? es)
+    (if (or (null? es) (null? ks))
         out
         (let* ((parts (proper-items (car es))) (n (len parts)))
           (if (or (= n 2) (= n 3))
@@ -549,7 +604,7 @@
       (begin (dparts-each fail ps parts as) (desc-scoped fail ps (kid kids 2) (nth items 2) as)))))
 (define dletrec-parts (->* (fails pvars (listof int acyclic) syns-a) dparts)
   (lambda (fail ps ks es)
-    (if (null? es)
+    (if (or (null? es) (null? ks))
         nil
         (let ((parts (proper-items (car es))))
           (if (= (len parts) 2)
@@ -567,7 +622,7 @@
 ;; `(label type)`s at nodes `ks`.
 (define desc-fields (->* (fails pvars (listof int acyclic) syns-a) unit)
   (lambda (fail ps ks fs)
-    (if (null? fs)
+    (if (or (null? fs) (null? ks))
         #u
         (let ((parts (proper-items (car fs))))
           (if (= (len parts) 2)
@@ -623,6 +678,7 @@
     (cons at (tagcase (node-kids at)
                (k-pair (x y) (append (under x) (under y)))
                (k-form (x) (under x))
+               (k-seq (x) (under x))
                (k-desc (xs) (under-each xs))
                (else y (the (listof int acyclic) nil))))))
 (define under-each (->* ((listof int acyclic)) (listof int acyclic))
@@ -634,27 +690,34 @@
 (define-datatype level (lv-rib atms) (lv-cage symbol))
 (define-type levels (listof level acyclic))
 ;; Each pattern variable, template binder and name referred to, by node,
-;; with its environment (innermost first) and whether it is in a `many`
-;; part.
-(define-type found (listof (tupleof int levels bool) acyclic))
+;; with its environment (innermost first), whether it is in a `many` part,
+;; and how many ellipses it is under.
+(define-type found (listof (tupleof int levels bool int) acyclic))
 
-;; The tree under `at`, walked with environment `env`: what it finds, in
-;; the order a walk finds them, before `out`.
-(define walk (->* (fails int levels bool) found)
-  (lambda (fail at env many0)
+;; The tree under `at`, walked with environment `env`, under `depth0`
+;; ellipses: what it finds, in the order a walk finds them; each node an
+;; ellipsis follows noted in `seq-depths`.
+(define walk (->* (fails int levels bool int) found)
+  (lambda (fail at env many0 depth0)
     (let* ((many (or many0 (node-many? at)))
+           (depth (if (repeated? at) (+ depth0 1) depth0))
+           (noted (if (repeated? at) (set seq-depths (cons (tuple at depth) (get seq-depths))) #u))
            (env2 (imported fail (extract (node-at at) 4) env (node-syn at))))
       (tagcase (node-kids at)
-        (k-pair (x y) (append (walk fail x env2 many) (walk fail y env2 many)))
-        (k-form (x) (walk fail x env2 many))
-        (k-desc (xs) (walk-each fail xs env2 many))
-        (k-pvar (n) (the found (list (tuple at env2 many))))
-        (k-binder (n d) (the found (list (tuple at env2 many))))
-        (k-ref (n d free) (the found (list (tuple at env2 many))))
+        (k-pair (x y) (append (walk fail x env2 many depth) (walk fail y env2 many depth)))
+        (k-form (x) (walk fail x env2 many depth))
+        (k-seq (x) (walk fail x env2 many depth))
+        (k-desc (xs) (walk-each fail xs env2 many depth))
+        (k-pvar (n) (the found (list (tuple at env2 many depth))))
+        (k-binder (n d) (the found (list (tuple at env2 many depth))))
+        (k-ref (n d free) (the found (list (tuple at env2 many depth))))
         (else y (the found nil))))))
-(define walk-each (->* (fails (listof int acyclic) levels bool) found)
-  (lambda (fail xs env many)
-    (if (null? xs) nil (append (walk fail (car xs) env many) (walk-each fail (cdr xs) env many)))))
+(define walk-each (->* (fails (listof int acyclic) levels bool int) found)
+  (lambda (fail xs env many depth)
+    (if (null? xs)
+        nil
+        (let ((first (walk fail (car xs) env many depth)))
+          (append first (walk-each fail (cdr xs) env many depth))))))
 ;; `env` with what each import binds before it, the last import innermost.
 (define imported (->* (fails rooted levels syn) levels)
   (lambda (fail is env s)
@@ -891,3 +954,28 @@
           (else (cons (car bs) (without a (cdr bs)))))))
 (define len-atms (->* (atms) int)
   (lambda (as) (if (null? as) 0 (+ 1 (len-atms (cdr as))))))
+
+;;; ------------------------------------------------------------ repeating
+
+;; The pattern variables in `x` under more ellipses than `level`, in the
+;; pattern's order.
+(define drivers-of (->* (pvars syn int) names)
+  (lambda (ps x level)
+    (cond ((null? ps) nil)
+          ((and (> (extract (extract (car ps) 2) 5) level)
+                (name-in? (extract (car ps) 1) (pattern-names x)))
+           (cons (extract (car ps) 1) (drivers-of (cdr ps) x level)))
+          (else (drivers-of (cdr ps) x level)))))
+;; The renamings in `acts` at paths under `p`, of binders under more
+;; ellipses than `level`: each with whether it is at the binder itself.
+(define renames-under (->* (actions addr int) (listof (tupleof addr bool) acyclic))
+  (lambda (acts p level)
+    (if (null? acts)
+        nil
+        (let ((rest (renames-under (cdr acts) p level)) (at (extract (car acts) 1)))
+          (tagcase (extract (car acts) 2)
+            (act-rename (b d)
+              (if (and (> d level) (addr-under? at p))
+                  (cons (tuple b ((with types-module addr=?) at b)) rest)
+                  rest))
+            (else y rest))))))

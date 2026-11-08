@@ -1014,6 +1014,17 @@ type placed in the scope of a use's `dvar` without saying so, and typed
 macros' description parts. Tests: `macros/desc-*.fx`,
 `import-with-syntax/main-poly.fx`.
 
+## Ellipsis (2026-11-08, built)
+
+Primitive repetition in patterns and templates, both front ends
+(`datatype-macro.md`, §4 and §8; `docs/fx26.md`, "Ellipsis"). For
+Herman's checking, an ellipsis's element is aligned once, with the list's
+element type (`Macros::seq_of`: a `mu` of `()` and pairs of an element and
+itself, binding no more than each element exports, all together), and a
+sequence's binders are one atom; each node an ellipsis follows is
+repeated, and the walk counts the ellipses each part is under, which a
+pattern variable's placing is held to.
+
 ## Leaning: narrower macros by `let-syntax`, not in module types (2026-11-08)
 
 Today `define-syntax` is allowed at a program's top level and a module

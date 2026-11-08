@@ -4359,3 +4359,21 @@ The user read the paper as supporting the distribution. Mine:
   values: a type named before its `define-type` in the same template is
   the top level's. The checkers declare a program's types ahead, the
   expanded ones among them, so a use's types are seen before the use.
+
+## Ellipsis (2026-11-08)
+
+- **A repeated binder says how many times**, where Racket's ellipsis needs
+  a pattern variable: `(let ((t e) ...) (list t ...))` is accepted, `t ...`
+  repeated as many times as its binder was. The spike's constructor,
+  `(lambda ((x field) ...) (sum t (tuple x ...)))`, needs it, and it
+  computes nothing: the count is the use's. Every count a part is
+  repeated by, the pattern variables' and the binders', must agree, so
+  that neither expander chooses among them.
+- **`(bvar ...)` binds each**: a list of bare binders exports them, as a
+  `lambda`'s parameters do, rather than nothing.
+- **A pattern variable where elements of several shapes may be** (a
+  `lambda`'s parameter, a name or `(name type)`) takes the shape it fits
+  and that shape's export, which placing a variable as a whole had
+  skipped; only under an ellipsis, where it matters, for now.
+- **Ellipsis only last in a list**, as `(a ... b)` needs matching from both
+  ends; refused where written elsewhere.

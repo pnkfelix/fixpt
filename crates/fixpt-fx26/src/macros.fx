@@ -23,10 +23,13 @@
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn
-        signature-made pure-hole? affine-kind? int-in?
-        (type fails addr sty))
+        signature-made pure-hole? affine-kind? int-in? ellipsis? ellipsis-of proper-items bound-of
+        matched pattern-names list-items odd-length nth-name nth-list len-ints addr-under? ints=?
+        all-ints? ints-prefix
+        (type fails addr sty binds))
 (import align-module defined macro-of macro? makes-defns? nodes-reset! align walk placed node-at
         node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
+        seq-depths drivers-of renames-under
         act-qualified act-standard act-module act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed evaluate levels-of
@@ -113,7 +116,7 @@
     (begin
       (nodes-reset!)
       (let* ((root (align fail 0 (the pvars nil) sig pattern -1 nil))
-             (found (walk fail root nil #f))
+             (found (walk fail root nil #f 0))
              (e (extract (node-at root) 5))
              (declared (if (and defn (not (null? e)))
                            (the (listof exported acyclic)
@@ -121,6 +124,10 @@
                                                             (extract (car e) 2) pattern))))
                            nil)))
         (tuple (pvars-of fail found nil defn) declared)))))
+;; What pattern variable `at` is, as the walk found it (`f`).
+(define pinfo-at (->* (int (tupleof int levels bool int)) pinfo)
+  (lambda (at f)
+    (tuple (node-core at) (extract f 2) (extract f 3) (node-hole at) (extract f 4))))
 (define pvars-of (->* (fails found pvars bool) pvars)
   (lambda (fail fs ps defn)
     (if (null? fs)
@@ -128,11 +135,15 @@
         (let ((at (extract (car fs) 1)))
           (tagcase (node-kids at)
             (k-pvar (n)
-              (if (pvar? n ps)
+              (cond
+                ((and (> (extract (car fs) 4) 0) (not (null? (node-hole at))))
+                 (begin (fail-at fail "a typed part under an ellipsis: not yet" (node-syn at)) ps))
+                ((pvar? n ps)
                   (begin (fail-at fail (string-append "`" (symbol->string n) "` is a pattern "
                                                       "variable twice")
                                   (node-syn at))
-                         ps)
+                         ps))
+                (else
                   (if (and defn (not (null? (node-hole at))))
                       (begin (fail-at fail (string-append "a macro that makes definitions has no "
                                                           "typed parts, not yet: what each use "
@@ -140,11 +151,8 @@
                                       (node-syn at))
                              ps)
                       (pvars-of fail (cdr fs)
-                                (append ps (the pvars (list (tuple n (tuple (node-core at)
-                                                                            (extract (car fs) 2)
-                                                                            (extract (car fs) 3)
-                                                                            (node-hole at))))))
-                                defn))))
+                                (append ps (the pvars (list (tuple n (pinfo-at at (car fs))))))
+                                defn)))))
             (else y (pvars-of fail (cdr fs) ps defn)))))))
 ;; The template, an expression or definitions (`defn`), aligned with the
 ;; kernel's forms' signatures and the macros', its pattern variables placed
@@ -156,10 +164,15 @@
     (begin
       (nodes-reset!)
       (let* ((root (align fail 1 ps (if defn (s-defn) (s-expr)) template -1 nil))
-             (found (walk fail root nil #f))
+             (found (walk fail root nil #f 0))
              (nested (nested-binders 0 (get nnodes) ps))
-             (named (name-actions fail ps found file nil nil nested)))
+             (named (name-actions fail ps found file nil nil nested (binder-depths found))))
         (begin
+          ;; Each part a template repeats says how many times: a pattern
+          ;; variable in it that the pattern has under as many ellipses, or
+          ;; a reference to a binder of the template's repeated as deep.
+          (repeats-said fail (the (listof (tupleof int int) acyclic) (reverse (get seq-depths)))
+                        ps named)
           ;; What the template defines of what its uses give, what its
           ;; signature says.
           (if (null? declared)
@@ -172,14 +185,49 @@
                                                  (shown-exports (car declared)))
                              template))))
           (type-actions fail 0 (get nnodes) file named))))))
+;; Each part a template repeats, `rs`, with how many ellipses it is under:
+;; refused if nothing in it says how many times (`actions`, what is done to
+;; its names).
+(define repeats-said (->* (fails (listof (tupleof int int) acyclic) pvars actions) unit)
+  (lambda (fail rs ps acts)
+    (cond ((null? rs) #u)
+          ((says-times? (under (extract (car rs) 1)) (extract (car rs) 2) ps acts)
+           (repeats-said fail (cdr rs) ps acts))
+          (else (fail-at fail (string-append "`...` follows a part with no pattern variable in "
+                                             "it under as many ellipses in the pattern, nor a "
+                                             "binder repeated as deep, to say how many times")
+                         (node-syn (extract (car rs) 1)))))))
+(define says-times? (->* ((listof int acyclic) int pvars actions) bool)
+  (lambda (ks depth ps acts)
+    (and (not (null? ks))
+         (or (tagcase (node-kids (car ks))
+               (k-pvar (n) (>= (extract (car (pvar-of n ps)) 5) depth))
+               (k-ref (n d free)
+                 (let ((a (action-at (node-path (car ks)) acts)))
+                   (and (not (null? a)) (tagcase (car a) (act-rename (p e) (>= e depth))
+                                                 (else z #f)))))
+               (else y #f))
+             (says-times? (cdr ks) depth ps acts)))))
+;; Each template binder the walk found, with how many ellipses it is under.
+(define-type depths (listof (tupleof int int) acyclic))
+(define binder-depths (->* (found) depths)
+  (lambda (fs)
+    (cond ((null? fs) nil)
+          ((tagcase (node-kids (extract (car fs) 1)) (k-binder (n d) #t) (else y #f))
+           (cons (tuple (extract (car fs) 1) (extract (car fs) 4)) (binder-depths (cdr fs))))
+          (else (binder-depths (cdr fs))))))
+(define depth-of (->* (int depths) int)
+  (lambda (b ds)
+    (cond ((null? ds) 0) ((= b (extract (car ds) 1)) (extract (car ds) 2))
+          (else (depth-of b (cdr ds))))))
 ;; The actions for what the walk found, onto `out`; `uses`, the affine
-;; pattern variables placed so far.
-(define name-actions (->* (fails pvars found scopes actions names nested) actions)
-  (lambda (fail ps fs file out uses nested)
+;; pattern variables placed so far; `bd`, the binders' depths.
+(define name-actions (->* (fails pvars found scopes actions names nested depths) actions)
+  (lambda (fail ps fs file out uses nested bd)
     (if (null? fs)
         out
         (let* ((at (extract (car fs) 1)) (env (extract (car fs) 2)) (many (extract (car fs) 3))
-               (s (node-syn at)) (path (node-path at)))
+               (depth (extract (car fs) 4)) (s (node-syn at)) (path (node-path at)))
           (tagcase (node-kids at)
             (k-pvar (n)
               (let* ((info (car (pvar-of n ps))) (name (symbol->string n))
@@ -190,6 +238,20 @@
                                   (affine-kind? (extract info 1)))))
                 (begin
                   (placed fail n info (node-core at) env s ps)
+                  (if (< depth (extract info 5))
+                      (fail-at fail (string-append "`" name "` is placed under " (int->string depth)
+                                                   " ellipses, and the pattern has it under "
+                                                   (int->string (extract info 5)))
+                               s)
+                      #u)
+                  (if (and affine (> depth (extract info 5)))
+                      (fail-at fail (string-append "`" name "` is placed under more ellipses than "
+                                                   "the pattern has it, so in each repetition, and "
+                                                   "an expression in it may do something each "
+                                                   "time it runs: its signature says `(many …)` "
+                                                   "if it may")
+                               s)
+                      #u)
                   (if (and affine many)
                       (fail-at fail (string-append "`" name "` is placed where it may be placed "
                                                    "more than once (a `many` part), and an "
@@ -205,26 +267,27 @@
                                s)
                       #u)
                   (name-actions fail ps (cdr fs) file out
-                                (if affine (the names (cons n uses)) uses) nested))))
+                                (if affine (the names (cons n uses)) uses) nested bd))))
             (k-binder (n d)
-              (name-actions fail ps (cdr fs) file (cons (tuple path (act-rename path)) out) uses
-                            nested))
+              (name-actions fail ps (cdr fs) file (cons (tuple path (act-rename path depth)) out)
+                            uses nested bd))
             (k-ref (n d free)
               (let ((b (binder-of n d env)))
                 (begin
                   (if d #u (unsaid-nested fail n b nested s))
-                  (let ((act (ref-action fail n b free file s)))
+                  (let ((act (ref-action fail n b free file s bd)))
                     (name-actions fail ps (cdr fs) file
                                   (if (null? act) out (cons (tuple path (car act)) out)) uses
-                                  nested)))))
-            (else y (name-actions fail ps (cdr fs) file out uses nested)))))))
+                                  nested bd)))))
+            (else y (name-actions fail ps (cdr fs) file out uses nested bd)))))))
 ;; A reference to `n`: the template's binder of it, if one binds it in
 ;; `env` (its node, in a list of one), made fresh with it; else, as `free`
 ;; says (`k-ref`'s), the top level's, a file's own or a standard name, the
 ;; top level's qualified, or none (written as it is). In a list of one.
-(define ref-action (->* (fails symbol (listof int acyclic) int scopes syn) (listof action acyclic))
-  (lambda (fail n b free file s)
-    (cond ((not (null? b)) (list (act-rename (node-path (car b)))))
+(define ref-action
+  (->* (fails symbol (listof int acyclic) int scopes syn depths) (listof action acyclic))
+  (lambda (fail n b free file s bd)
+    (cond ((not (null? b)) (list (act-rename (node-path (car b)) (depth-of (car b) bd))))
           ((= free 2) nil)
           ;; A file's macro's description is read through the file's module
           ;; whole (`type-actions`).
@@ -297,7 +360,7 @@
     (cond ((null? ks) nil)
           ((or (tagcase (node-kids (car ks)) (k-pvar (n) #t) (k-binder (n d) #t) (else y #f))
                (let ((a (action-at (node-path (car ks)) out)))
-                 (and (not (null? a)) (tagcase (car a) (act-rename (p) #t) (else z #f)))))
+                 (and (not (null? a)) (tagcase (car a) (act-rename (p e) #t) (else z #f)))))
            (list (car ks)))
           (else (open-node (cdr ks) out)))))
 ;; The name at the head of node `i`'s list, in a list of one.
@@ -577,10 +640,6 @@
                                       (syn-start hd) (syn-end hd))
                                (get with-uses)))
           (note-uses n hd (cdr withs))))))
-;; A list's items (a dotted list's before its tail); none if `s` is no list.
-(define list-items (->* (syn) syns-a)
-  (lambda (s)
-    (tagcase s (lst (items d a b x) items) (dotted (items t d a b x) items) (else y nil))))
 ;; Items from the `k`th, each expanded; in a `with`'s body (from the third)
 ;; noted as in it.
 (define expand-items (->* (fails syns-a int bool syn places) syns-a)
@@ -641,56 +700,22 @@
         (let ((binds (matched (extract (car cs) 1) operands nil)))
           (if (null? binds)
               (first-match fail name s operands (cdr cs))
-              (let ((made (record-expansion name s)))
-                (transcribe (car cs) (extract (car cs) 2) nil (car binds) made)))))))
+              (let* ((made (record-expansion name s)) (shown (symbol->string name))
+                     (in-use (lambda ((msg string) (a int) (b int))
+                               (fail (string-append "a use of `" shown "`: " msg)
+                                     (syn-start s) (syn-end s)))))
+                (transcribe in-use (car cs) (extract (car cs) 2) nil (car binds) made)))))))
 
-;; Pattern variables' syntax, by name.
-(define-type binds (listof (tupleof symbol syn) acyclic))
-;; Whether `s` matches pattern `p`, onto `bs`: its bindings, in a list of
-;; one; none if not. A name is a pattern variable (`_` anything), a form's
-;; name or a keyword itself.
-(define matched (->* (syn syn binds) (listof binds acyclic))
-  (lambda (p s bs)
-    (cond
-      ((syn-symbol? p)
-       (cond ((string=? (syn-name p) "_") (list bs))
-             ((reserved-syn? p)
-              (if (and (syn-symbol? s) (symbol=? (syn-symbol s) (syn-symbol p))) (list bs) nil))
-             (else (list (cons (tuple (syn-symbol p) s) bs)))))
-      ((syn-nil? p) (if (syn-nil? s) (list bs) nil))
-      ((not (null? (split p)))
-       (let ((ps (split p)) (ss (split s)))
-         (if (null? ss)
-             nil
-             (let ((first (matched (car ps) (car ss) bs)))
-               (if (null? first) nil (matched (nth ps 1) (nth ss 1) (car first)))))))
-      ((same-atom? p s) (list bs))
-      (else nil))))
-;; Whether two atoms are the same datum.
-(define same-atom? (->* (syn syn) bool)
-  (lambda (p s)
-    (tagcase p
-      (atom (d a b x)
-        (tagcase s
-          (atom (e c f y)
-            (cond ((keyword? d)
-                   (and (keyword? e) (symbol=? (keyword->symbol d) (keyword->symbol e))))
-                  ((string? d) (and (string? e) (string=? d e)))
-                  ((int? d) (and (int? e) (= d e)))
-                  ((char? d) (and (char? e) (char=? d e)))
-                  ((bool? d) (and (bool? e) (eq? d e)))
-                  (else #f)))
-          (else z #f)))
-      (else y #f))))
-(define bound-of (->* (symbol binds) (listof syn acyclic))
-  (lambda (n bs)
-    (cond ((null? bs) nil)
-          ((symbol=? n (extract (car bs) 1)) (list (extract (car bs) 2)))
-          (else (bound-of n (cdr bs))))))
 
-;; Each binder's fresh name, by its path.
-(define-type freshes (listof (tupleof addr symbol) acyclic))
+;; Each binder's fresh name, by its path and the repetitions it is in; how
+;; many times each repeated binder was repeated, by its path and the
+;; repetitions around that; and the repetition of each ellipsis
+;; transcription is under, outermost first (`macros.rs`'s `Made`).
+(define-type freshes (listof (tupleof addr (listof int acyclic) symbol) acyclic))
 (define fresh (ref freshes rs) (new nil))
+(define-type counts (listof (tupleof addr (listof int acyclic) int) acyclic))
+(define counts (ref counts rs) (new nil))
+(define iters (ref (listof int acyclic) rs) (new nil))
 (define action-at (->* (addr actions) (listof action acyclic))
   (lambda (path as)
     (cond ((null? as) nil)
@@ -700,13 +725,13 @@
 ;; `made`: each part the template makes at its own place in the
 ;; `define-syntax`, of that expansion, each pattern variable's what the
 ;; use gave.
-(define transcribe (->* (clause syn addr binds int) syn)
-  (lambda (c t path bs made)
+(define transcribe (->* (fails clause syn addr binds int) syn)
+  (lambda (fail c t path bs made)
     (begin
-      (if (null? path) (set fresh nil) #u)
-      (transcribe-at c t path bs made))))
-(define transcribe-at (->* (clause syn addr binds int) syn)
-  (lambda (c t path bs made)
+      (if (null? path) (begin (set fresh nil) (set counts nil) (set iters nil)) #u)
+      (transcribe-at fail c t path bs made))))
+(define transcribe-at (->* (fails clause syn addr binds int) syn)
+  (lambda (fail c t path bs made)
     (let* ((ta (syn-start t)) (tb (syn-end t)) (act (action-at path (extract c 3)))
            (typed (if (null? act)
                       ""
@@ -721,11 +746,11 @@
            (transcribe-name c t (syn-symbol t) a b act bs made)))
         ((not (null? (list-items t)))
          (let* ((a (source-key ta made))
-                (xs (transcribe-items c (list-items t) path bs made))
+                (xs (transcribe-items fail c (list-items t) path bs made))
                 (rest (tagcase t
                         (dotted (items tail d c2 e x)
                           (let ((at (append path (falses (len items) nil))))
-                            (list (transcribe-at c tail at bs made))))
+                            (list (transcribe-at fail c tail at bs made))))
                         (else y nil)))
                 (head (if (null? act)
                           nil
@@ -738,6 +763,55 @@
                 (b (source-key tb made)))
            (list-at a b made xs2 rest)))
         (else (let* ((a (source-key ta made)) (b (source-key tb made))) (at-place t a b made)))))))
+;; The `r`th to the `n`th repetitions of `x`, `drivers` bound to each's
+;; element of `lists`, onto `out` (the last made first).
+(define repeat-each
+  (->* (fails clause syn addr binds int names (listof syns-a acyclic) int int syns-a) syns-a)
+  (lambda (fail c x p bs made drivers lists r n out)
+    (if (= r n)
+        (the syns-a (reverse out))
+        (let* ((each (bind-nth drivers lists r bs))
+               (was (get iters))
+               (one (begin (set iters (append was (the (listof int acyclic) (list r))))
+                           (transcribe-at fail c x p each made))))
+          (begin (set iters was)
+                 (repeat-each fail c x p bs made drivers lists (+ r 1) n (cons one out)))))))
+(define bind-nth (->* (names (listof syns-a acyclic) int binds) binds)
+  (lambda (ns ls r bs)
+    (if (null? ns)
+        bs
+        (bind-nth (cdr ns) (cdr ls) r (cons (tuple (car ns) (nth (car ls) r)) bs)))))
+(define driver-lists (->* (names binds) (listof syns-a acyclic))
+  (lambda (ns bs)
+    (if (null? ns)
+        nil
+        (let ((b (car (bound-of (car ns) bs))))
+          (cons (if (syn-nil? b) (the syns-a nil) (proper-items b)) (driver-lists (cdr ns) bs))))))
+;; The counts known of the binders `under`, as repeated in `is`.
+(define known-counts (->* ((listof (tupleof addr bool) acyclic) (listof int acyclic))
+                          (listof int acyclic))
+  (lambda (under is)
+    (if (null? under)
+        nil
+        (let ((k (count-of (extract (car under) 1) is (get counts))))
+          (if (< k 0) (known-counts (cdr under) is) (cons k (known-counts (cdr under) is)))))))
+(define count-of (->* (addr (listof int acyclic) counts) int)
+  (lambda (b is cs)
+    (cond ((null? cs) -1)
+          ((and ((with types-module addr=?) b (extract (car cs) 1))
+                (ints=? is (extract (car cs) 2)))
+           (extract (car cs) 3))
+          (else (count-of b is (cdr cs))))))
+;; Each binder of `under` that is the binder itself repeated `n` times here.
+(define note-counts (->* ((listof (tupleof addr bool) acyclic) int) unit)
+  (lambda (under n)
+    (if (null? under)
+        #u
+        (begin
+          (if (extract (car under) 2)
+              (set counts (cons (tuple (extract (car under) 1) (get iters) n) (get counts)))
+              #u)
+          (note-counts (cdr under) n)))))
 ;; Type `t`, which a template writes, read in module `m` (`#%toplevel`,
 ;; `#%fx` or a file's), in expansion `made`: `(select m t)`; of a
 ;; definition's `(->* (param …) result)`, which is no type, each of its
@@ -763,12 +837,54 @@
   (lambda (n out) (if (= n 0) out (falses (- n 1) (cons #f out)))))
 ;; The items of a template's list, the `k`th at `path`, `k` `#f`s and a `#t`
 ;; past it.
-(define transcribe-items (->* (clause syns-a addr binds int) syns-a)
-  (lambda (c xs path bs made)
-    (if (null? xs)
-        nil
-        (cons (transcribe-at c (car xs) (append path (the addr (list #t))) bs made)
-              (transcribe-items c (cdr xs) (append path (the addr (list #f))) bs made)))))
+(define transcribe-items (->* (fails clause syns-a addr binds int) syns-a)
+  (lambda (fail c xs path bs made)
+    (cond
+      ((null? xs) nil)
+      ;; `p ...`: `p` once for each element of what the use gave of the
+      ;; pattern variables in it under more ellipses than this, together.
+      ((and (not (null? (cdr xs))) (ellipsis? (car (cdr xs))))
+       (let ((reps (repeated fail c (car xs) (append path (the addr (list #t))) bs made)))
+         (append reps (transcribe-items fail c (cdr (cdr xs)) (append path (the addr (list #f #f)))
+                                        bs made))))
+      (else
+       (let ((first (transcribe-at fail c (car xs) (append path (the addr (list #t))) bs made)))
+         (cons first (transcribe-items fail c (cdr xs) (append path (the addr (list #f))) bs
+                                       made)))))))
+;; `x`, at `p`, repeated: as many times as every count it is repeated by
+;; says, the pattern variables' and the repeated binders' it refers to.
+(define repeated (->* (fails clause syn addr binds int) syns-a)
+  (lambda (fail c x p bs made)
+    (let* ((level (len-ints (get iters)))
+           (drivers (drivers-of (extract c 4) x level))
+           (lists (driver-lists drivers bs))
+           (odd (odd-length lists 0))
+           (under (renames-under (extract c 3) p level))
+           (known (append (known-counts under (get iters))
+                          (if (null? lists) (the (listof int acyclic) nil)
+                              (list (len (car lists)))))))
+      (cond
+        ((>= odd 0)
+         (begin (fail-at fail (string-append "`" (symbol->string (car drivers)) "` and `"
+                                             (symbol->string (nth-name drivers odd))
+                                             "`, repeated together, are given "
+                                             (int->string (len (car lists))) " and "
+                                             (int->string (len (nth-list lists odd))) " times")
+                         x)
+                nil))
+        ((null? known)
+         (begin (fail-at fail (string-append "this part is repeated before the repetition that "
+                                             "binds what it refers to")
+                         x)
+                nil))
+        ((not (all-ints? known (car known)))
+         (begin (fail-at fail (string-append "this part repeats binders and parts that were "
+                                             "repeated, or given, different numbers of times")
+                         x)
+                nil))
+        (else
+         (begin (note-counts under (car known))
+                (repeat-each fail c x p bs made drivers lists 0 (car known) nil)))))))
 (define transcribe-name
   (->* (clause syn symbol int int (listof action acyclic) binds int) syn)
   (lambda (c t n a b act bs made)
@@ -785,7 +901,7 @@
           (if (null? act)
               (atom n a b made)
               (tagcase (car act)
-                (act-rename (binder) (atom (fresh-name n binder) a b made))
+                (act-rename (binder d) (atom (fresh-name n binder d) a b made))
                 (act-toplevel () (with-name "#%toplevel" n a b made))
                 (act-qualified ()
                   (atom (string->symbol (string-append "#%toplevel:" (symbol->string n))) a b made))
@@ -797,22 +913,25 @@
     (list-at a b made (list (atom 'with a b made) (atom (string->symbol m) a b made)
                             (atom n a b made))
              nil)))
-;; The fresh name of the binder at `binder`, made the first time.
-(define fresh-name (->* (symbol addr) symbol)
-  (lambda (n binder)
-    (let ((known (fresh-of binder (get fresh))))
+;; The fresh name of the binder at `binder`, under `d` ellipses, in the
+;; repetitions it is in, made the first time.
+(define fresh-name (->* (symbol addr int) symbol)
+  (lambda (n binder d)
+    (let* ((is (ints-prefix (get iters) d)) (known (fresh-of binder is (get fresh))))
       (if (null? known)
           (begin
             (set fresh-count (+ (get fresh-count) 1))
             (let ((f (string->symbol (string-append "%" (symbol->string n) ":"
                                                     (int->string (get fresh-count))))))
-              (begin (set fresh (cons (tuple binder f) (get fresh))) f)))
+              (begin (set fresh (cons (tuple binder is f) (get fresh))) f)))
           (car known)))))
-(define fresh-of (->* (addr freshes) (listof symbol acyclic))
-  (lambda (p fs)
+(define fresh-of (->* (addr (listof int acyclic) freshes) (listof symbol acyclic))
+  (lambda (p is fs)
     (cond ((null? fs) nil)
-          (((with types-module addr=?) p (extract (car fs) 1)) (list (extract (car fs) 2)))
-          (else (fresh-of p (cdr fs))))))
+          ((and ((with types-module addr=?) p (extract (car fs) 1))
+                (ints=? is (extract (car fs) 2)))
+           (list (extract (car fs) 3)))
+          (else (fresh-of p is (cdr fs))))))
 ;; Each typed hole's contract, by its pattern variable, in a list of one.
 (define contract-of (->* (symbol contracts) syns-a)
   (lambda (n cs)

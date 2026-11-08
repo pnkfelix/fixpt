@@ -9,7 +9,7 @@
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
-(import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth
+(import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth mk-list
         (type syns-a names) (effect parses))
 (define kernel (load-module "fx26:macros-kernel.fx"))
 
@@ -140,6 +140,121 @@
 (define int-in? (->* (int (listof int acyclic)) bool)
   (lambda (i is) (and (not (null? is)) (or (= i (car is)) (int-in? i (cdr is))))))
 
+;;; ------------------------------------------------------------ matching
+
+;; Pattern variables' syntax, by name.
+(define-type binds (listof (tupleof symbol syn) acyclic))
+(define bound-of (->* (symbol binds) (listof syn acyclic))
+  (lambda (n bs)
+    (cond ((null? bs) nil)
+          ((symbol=? n (extract (car bs) 1)) (list (extract (car bs) 2)))
+          (else (bound-of n (cdr bs))))))
+;; Whether `s` matches pattern `p`, onto `bs`: its bindings, in a list of
+;; one; none if not. A name is a pattern variable (`_` anything), a form's
+;; name or a keyword itself.
+(define matched (->* (syn syn binds) (listof binds acyclic))
+  (lambda (p s bs)
+    (cond
+      ;; `(x ...)`: each element of a list by `x`, each of its pattern
+      ;; variables then the list of what it matched.
+      ((not (null? (ellipsis-of p)))
+       (if (or (syn-nil? s) (not (null? (proper-items s))))
+           (let ((each (matched-each (car (ellipsis-of p)) (proper-items s) nil)))
+             (if (null? each)
+                 nil
+                 (list (seq-binds (pattern-names (car (ellipsis-of p))) (car each) s bs))))
+           nil))
+      ((syn-symbol? p)
+       (cond ((string=? (syn-name p) "_") (list bs))
+             ((reserved-syn? p)
+              (if (and (syn-symbol? s) (symbol=? (syn-symbol s) (syn-symbol p))) (list bs) nil))
+             (else (list (cons (tuple (syn-symbol p) s) bs)))))
+      ((syn-nil? p) (if (syn-nil? s) (list bs) nil))
+      ((not (null? (split p)))
+       (let ((ps (split p)) (ss (split s)))
+         (if (null? ss)
+             nil
+             (let ((first (matched (car ps) (car ss) bs)))
+               (if (null? first) nil (matched (nth ps 1) (nth ss 1) (car first)))))))
+      ((same-atom? p s) (list bs))
+      (else nil))))
+;; What each of `xs` matched by `x`, in order, onto `out` (reversed), in a
+;; list of one; none if one does not match.
+(define matched-each
+  (->* (syn syns-a (listof binds acyclic)) (listof (listof binds acyclic) acyclic))
+  (lambda (x xs out)
+    (if (null? xs)
+        (list (the (listof binds acyclic) (reverse out)))
+        (let ((one (matched x (car xs) nil)))
+          (if (null? one) nil (matched-each x (cdr xs) (cons (car one) out)))))))
+;; `bs`, each of `ns` bound to the list of what each of `each` bound it to,
+;; at `s`'s place.
+(define seq-binds (->* (names (listof binds acyclic) syn binds) binds)
+  (lambda (ns each s bs)
+    (if (null? ns)
+        bs
+        (let ((items (bound-in-each (car ns) each)))
+          (seq-binds (cdr ns) each s
+                     (cons (tuple (car ns) (mk-list items (syn-start s) (syn-end s))) bs))))))
+(define bound-in-each (->* (symbol (listof binds acyclic)) syns-a)
+  (lambda (n each)
+    (if (null? each) nil (cons (car (bound-of n (car each))) (bound-in-each n (cdr each))))))
+;; The pattern variables in pattern `p`: its names but `_`, `...` and the
+;; forms' (which match themselves).
+(define pattern-names (->* (syn) names)
+  (lambda (p)
+    (cond ((syn-symbol? p)
+           (if (or (string=? (syn-name p) "_") (ellipsis? p) (reserved-syn? p))
+               nil
+               (list (syn-symbol p))))
+          (else (pattern-names-each (list-items p))))))
+(define pattern-names-each (->* (syns-a) names)
+  (lambda (xs) (if (null? xs) nil (append (pattern-names (car xs)) (pattern-names-each (cdr xs))))))
+;; Whether two atoms are the same datum.
+(define same-atom? (->* (syn syn) bool)
+  (lambda (p s)
+    (tagcase p
+      (atom (d a b x)
+        (tagcase s
+          (atom (e c f y)
+            (cond ((keyword? d)
+                   (and (keyword? e) (symbol=? (keyword->symbol d) (keyword->symbol e))))
+                  ((string? d) (and (string? e) (string=? d e)))
+                  ((int? d) (and (int? e) (= d e)))
+                  ((char? d) (and (char? e) (char=? d e)))
+                  ((bool? d) (and (bool? e) (eq? d e)))
+                  (else #f)))
+          (else z #f)))
+      (else y #f))))
+;; A list's items (a dotted list's before its tail); none if `s` is no list.
+(define list-items (->* (syn) syns-a)
+  (lambda (s)
+    (tagcase s (lst (items d a b x) items) (dotted (items t d a b x) items) (else y nil))))
+;; The first of `ls` from the `i`th whose length is not the first's; -1.
+(define odd-length (->* ((listof syns-a acyclic) int) int)
+  (lambda (ls i)
+    (cond ((or (null? ls) (null? (cdr ls))) -1)
+          ((= (len (car (cdr ls))) (len (car ls)))
+           (odd-length (cons (car ls) (cdr (cdr ls))) (+ i 1)))
+          (else (+ i 1)))))
+(define nth-name (->* (names int) symbol)
+  (lambda (ns i) (if (= i 0) (car ns) (nth-name (cdr ns) (- i 1)))))
+(define nth-list (->* ((listof syns-a acyclic) int) syns-a)
+  (lambda (ls i) (if (= i 0) (car ls) (nth-list (cdr ls) (- i 1)))))
+(define len-ints (->* ((listof int acyclic)) int)
+  (lambda (is) (if (null? is) 0 (+ 1 (len-ints (cdr is))))))
+(define addr-under? (->* (addr addr) bool)
+  (lambda (a p)
+    (or (null? p) (and (not (null? a)) (eq? (car a) (car p)) (addr-under? (cdr a) (cdr p))))))
+(define ints=? (->* ((listof int acyclic) (listof int acyclic)) bool)
+  (lambda (a b)
+    (if (null? a) (null? b) (and (not (null? b)) (= (car a) (car b)) (ints=? (cdr a) (cdr b))))))
+(define all-ints? (->* ((listof int acyclic) int) bool)
+  (lambda (is k) (or (null? is) (and (= (car is) k) (all-ints? (cdr is) k)))))
+;; The first `d` of `is`.
+(define ints-prefix (->* ((listof int acyclic) int) (listof int acyclic))
+  (lambda (is d) (if (or (= d 0) (null? is)) nil (cons (car is) (ints-prefix (cdr is) (- d 1))))))
+
 ;;; ------------------------------------------------------------ syntax
 
 ;; Whether `s` is `()`.
@@ -235,6 +350,10 @@
               (head (if (and (syn-symbol? hd) (proper? s)) (syn-name hd) "")))
          (cond
            ((null? parts) (begin (fail-at fail "a syntax type: not one" s) (s-nil)))
+           ;; `(σ … σ ...)`: a list ending in any number of the last `σ`.
+           ((let ((items (proper-items s)))
+              (and (>= (len items) 2) (ellipsis? (nth items (- (len items) 1)))))
+            (read-seq-list fail (proper-items s) named scope))
            ((or (string=? head "import") (string=? head "export"))
             (let ((args (proper-items s)))
               (if (= (len args) 3)
@@ -267,6 +386,97 @@
                 (s-literal (syn-symbol (nth (proper-items s) 1)))
                 (begin (fail-at fail "a syntax type: `(literal name)`" s) (s-nil))))
            (else (read-pair fail s parts named scope))))))))
+;; The items of a list type ending in `σ ...`: the last `σ` repeated
+;; (`macros.rs`'s `seq`), after the ones before it, each once.
+(define read-seq-list (->* (fails syns-a named mu-scope) sty)
+  (lambda (fail items named scope)
+    (if (null? (cdr (cdr items)))
+        (seq-type (read-sty fail (car items) named scope))
+        (let ((first (read-sty fail (car items) named scope)))
+          (s-pair first (read-seq-list fail (cdr items) named scope))))))
+;; `(elem ...)`: `(mu l (union () (elem . l)))`, and if `elem` exports,
+;; each element's export together, as a `let`'s bindings do; a binder
+;; alone, `bvar` or `dvar`, exports itself.
+(define seq-type (->* (sty) sty)
+  (lambda (elem0)
+    (let* ((elem (tagcase elem0
+                   (s-bvar () (s-export elem0 (bind-rib (list (tuple (the addr nil) 1)))))
+                   (s-dvar () (s-export elem0 (bind-rib (list (tuple (the addr nil) 4)))))
+                   (else y elem0)))
+           (id (mu-new)) (pair (s-pair elem (s-mu id))))
+      (begin
+        (mu-set! id (s-union (tagcase elem
+                               (s-export (b x)
+                                 (list (s-export (s-nil) (bind-rib nil))
+                                       (s-export pair (bind-rib (list (tuple (the addr (list #t)) 2)
+                                                                      (tuple (the addr (list #f))
+                                                                             2))))))
+                               (else y (list (s-nil) pair)))))
+        (s-mu id)))))
+;; The type of an element of list type `t`, in a list of one, if a template
+;; or pattern may give its elements by ellipsis: a `mu` of `()` and of pairs
+;; of an element and itself, which binds no more than what each element
+;; exports, all of them together (`macros.rs`'s `seq_of`).
+(define seq-elem (->* (sty) stys)
+  (lambda (t)
+    (tagcase t
+      (s-mu (id) (tagcase (mu-body id) (s-union (ms) (seq-members ms id nil #f)) (else y nil)))
+      (else y nil))))
+;; Of members `ms`, from the first: the elements found so far `es`, the last
+;; first, and whether `()` is one of them.
+(define seq-members (->* (stys int stys bool) stys)
+  (lambda (ms id es none)
+    (if (null? ms)
+        (cond ((or (null? es) (not none)) nil)
+              ((null? (cdr es)) es)
+              (else (list (s-union (the stys (reverse es))))))
+        (let* ((m (car ms)) (core (tagcase m (s-export (b x) b) (else y m)))
+               (own (tagcase m
+                      (s-export (b x) (tagcase x (bind-rib (es) (own-entries es nil)) (else z nil)))
+                      (s-import (b x) nil)
+                      (else y (list (the entries nil))))))
+          (cond ((null? own) nil)
+                ((= (kind-of core) 6) (seq-members (cdr ms) id es #t))
+                (else
+                 (tagcase core
+                   (s-pair (a d)
+                     (if (tagcase d (s-mu (j) (= j id)) (else y #f))
+                         (seq-members (cdr ms) id (cons (with-own a (car own)) es) none)
+                         nil))
+                   (else y nil))))))))
+;; A pair's export's entries `es` that are its car's, from the car, onto
+;; `out`, in a list of one; none if one is neither its car's nor `(D rib)`.
+(define own-entries (->* (entries entries) (listof entries acyclic))
+  (lambda (es out)
+    (if (null? es)
+        (list (the entries (reverse out)))
+        (let ((a (extract (car es) 1)) (d (extract (car es) 2)))
+          (cond ((and (not (null? a)) (car a)) (own-entries (cdr es) (cons (tuple (cdr a) d) out)))
+                ((and (not (null? a)) (null? (cdr a)) (= d 2)) (own-entries (cdr es) out))
+                (else nil))))))
+;; Element `a`, which exports what `own` says of it.
+(define with-own (->* (sty entries) sty)
+  (lambda (a own)
+    (cond ((null? own) a)
+          ((and (tagcase a (s-export (b x) #t) (else y #f)) (null? (cdr own))
+                (null? (extract (car own) 1)) (= (extract (car own) 2) 2))
+           a)
+          (else (s-export a (bind-rib own))))))
+;; The type at `t`, its annotations seen through, not its `mu`s.
+(define peel (->* (sty) sty)
+  (lambda (t)
+    (tagcase t
+      (s-import (b x) (peel b)) (s-export (b x) (peel b)) (s-many (b) (peel b))
+      (s-typed (b h) (peel b))
+      (else y t))))
+;; Whether `s` is the name `...`.
+(define ellipsis? (->* (syn) bool)
+  (lambda (s) (and (syn-symbol? s) (string=? (syn-name s) "..."))))
+;; `x` of `(x ...)`, a part repeated, in a list of one, if `s` is one.
+(define ellipsis-of (->* (syn) syns-a)
+  (lambda (s)
+    (let ((items (proper-items s)))
+      (if (and (= (len items) 2) (ellipsis? (nth items 1))) (list (car items)) nil))))
 (define read-pair (->* (fails syn syns-a named mu-scope) sty)
   (lambda (fail s parts named scope)
     (s-pair (read-sty fail (car parts) named scope) (read-sty fail (nth parts 1) named scope))))
@@ -563,9 +773,13 @@
 ;; list's shape; any name in a pattern fits anything.
 (define fits? (->* (sty syn int (subr pure (symbol) int)) bool)
   (lambda (t s mode pvar?)
-    (let ((u (unfold t)))
+    (let ((u (unfold t)) (x (if (= mode 2) (the syns-a nil) (ellipsis-of s))))
+      (if (not (null? x))
+          ;; `(p ...)`, where a list of elements `p` fits may be.
+          (let ((e (seq-elem (peel t)))) (and (not (null? e)) (fits? (car e) (car x) mode pvar?)))
       (if (and (syn-symbol? s)
-               (or (and (= mode 0) (not (= (kind-of u) 7)) (not (string=? (syn-name s) "_")))
+               (or (and (= mode 0) (not (= (kind-of u) 7)) (not (string=? (syn-name s) "_"))
+                        (not (string=? (syn-name s) "...")))
                    (and (= mode 1) (> (pvar? (syn-symbol s)) 0)
                         (not (and (= (pvar? (syn-symbol s)) 1)
                                   (or (= (kind-of u) 8) (= (kind-of u) 6) (= (kind-of u) 10)))))))
@@ -585,7 +799,7 @@
             (s-expr () (and (not (reserved-syn? s)) (not (syn-nil? s))))
             (s-lambda () (lambda-shaped? s))
             (s-defn () (not (null? (split s))))
-            (else y #t))))))
+            (else y #t)))))))
 (define any-fits? (->* (stys syn int (subr pure (symbol) int)) bool)
   (lambda (ms s mode pvar?)
     (and (not (null? ms)) (or (fits? (car ms) s mode pvar?) (any-fits? (cdr ms) s mode pvar?)))))
