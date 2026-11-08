@@ -921,6 +921,45 @@ become ordinary bindings of a standard library, each tagged for what the
 compiler knows of it (`lang-items.md`, the user's, 2026-11-08). Until
 then the expander treats `TYPE_FORMS` as syntax.
 
+## Leaning: narrower macros by `let-syntax`, not in module types (2026-11-08)
+
+Today `define-syntax` is allowed at a program's top level and a module
+file's, nowhere else (a `lambda`'s body, a `let`, an inline `(module …)`:
+both checkers say "unbound variable `define-syntax`", a message to be
+improved). So a template's free name only ever reaches a top-level
+environment: the program's, a file's module, the standard bindings.
+
+When macros get a narrower scope, the user and Claude lean (2026-11-08)
+towards **expression-scoped macros, `let-syntax` and its kin, first**, and
+against macros in the types of first-class modules:
+- `let-syntax` is the general case. A macro private to an inline module is
+  one scoped to the module's body, a lexical scope, so it follows.
+- It forces the general mechanism: a template may name a local in scope
+  where the macro is defined, which must stay that local where a use
+  rebinds the name, so marks must name any scope. `#%toplevel:n` is then
+  the outermost case of that.
+- A macro exported through a module would have to be in the module's type
+  (`moduleof`), and a use would depend on which module value reaches it:
+  the signatures that compute (above) this design keeps out. A library as
+  a file, `import-with-syntax` and `hide`, already covers the common need.
+
+Not a firm statement: the user means to re-read Bawden, *First-Class
+Macros Have Types* (POPL 2000; summarized in `modules.md`, item 7 and §5)
+first. The user's reading of it, which Claude shares from that summary:
+what is first-class there is **environments**, not macros. A macro value
+is an environment frame at run time; its expander is fixed by its static
+type where it is used as an operator, so expansion stays entirely static.
+That continues Bawden and Rees's syntactic closures (LFP 1988), a form
+paired with the environment to read it in.
+
+Read so, a file's macros are already that shape: their expanders fixed at
+compile time, their expansions indexing into one module value, `(with
+%shared:key name)`. Bawden's generalization would let that environment be
+any module value of a given `moduleof`, the template's free names typed by
+it and the expansion naming `(with m name)` for whatever `m` reaches it:
+macros typed over environments, rather than macros inside module values.
+Recorded as a possibility, not planned.
+
 ## Questions for the user
 
 Answered 2026-11-06 (the user):
