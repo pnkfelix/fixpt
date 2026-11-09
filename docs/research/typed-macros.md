@@ -1258,9 +1258,14 @@ whether a step was wrong. Four macros, each in:
   see what `a` provides (flowing down); `(export a …)`, the node provides
   what each `a` does (flowing up). Named shapes, recursive or not, are
   bound by `(letrec-shape ((name node-or-union) …) top-node)`, a `union`'s
-  members each a node. A `bvar` provides itself; a part of a named shape,
-  what its node's facts export; a list by ellipsis, all its elements'
-  exports at one level (`let`'s rule).
+  members each a node; a shape's name and its node's are distinct, `(b
+  (binding …))`. A `bvar` provides itself; a part of a named shape, what
+  its node's facts export. Ellipses follow `syntax-rules`' rules, the
+  user's choice (2026-11-08): `p ...` repeats the part before it, as in a
+  pattern, and a label under *k* ellipses is named in a fact under exactly
+  *k*, as a pattern variable is in a template (a repeated label named bare
+  from outside its ellipsis is refused); `(bs ...)` in a fact is every
+  repetition's, at one level, as `let`'s `((x e) ...)` is one rib.
 
 ### `let1`
 
@@ -1290,10 +1295,9 @@ whether a step was wrong. Four macros, each in:
 
 ;; C
 (syntax-contract
-  (letrec-shape ((binding (binding ((x : bvar) (e : expr))
-                            (export x))))
-    (my-let ((bs : binding ...) (body : expr))
-      (bind bs in body))))
+  (letrec-shape ((b (binding ((x : bvar) (e : expr)) (export x))))
+    (my-let (((bs : b) ...) (body : expr))
+      (bind (bs ...) in body))))
 ```
 
 ### `let*`, by recursion
@@ -1342,10 +1346,9 @@ What a use defines: the type's name, and each variant's constructor.
 
 ;; C
 (syntax-contract #:makes defn
-  (letrec-shape ((variant (variant ((c : bvar) (t : label) (fields : type) ...)
-                            (export c))))
-    (define-data ((name : dvar) (vs : variant ...))
-      (export name vs))))
+  (letrec-shape ((v (variant ((c : bvar) (t : label) (fields : type) ...) (export c))))
+    (define-data ((name : dvar) (vs : v) ...)
+      (export name (vs ...)))))
 ```
 
 ### What each shows
