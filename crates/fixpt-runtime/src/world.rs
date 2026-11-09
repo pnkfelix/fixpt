@@ -194,6 +194,28 @@ pub fn error_kind(e: &std::io::Error) -> &'static str {
     }
 }
 
+/// The file at `path`, read whole, if it is a regular file: anything else
+/// (a FIFO, a device, a socket) could wait on another party for as long as
+/// it likes, and `read-file`'s effect, `(io fs-read)`, does not wait
+/// (`TODO.md` §225). Opened without waiting (`O_NONBLOCK`), and only then
+/// asked what it is, so that nothing put in its place in between can make
+/// the open wait.
+pub fn read_regular_file(path: &str) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path)?;
+    let meta = f.metadata()?;
+    if meta.is_dir() {
+        return Err(std::io::Error::new(std::io::ErrorKind::IsADirectory, "is a directory"));
+    }
+    if !meta.is_file() {
+        return Err(std::io::Error::other("not a regular file, which could wait on another program"));
+    }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    f.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 /// The names in directory `path`, sorted by their bytes; one that is not
 /// UTF-8 is an error of kind `invalid-data`, since FX-26's strings are.
 pub fn list_dir(path: &str) -> std::io::Result<Vec<String>> {

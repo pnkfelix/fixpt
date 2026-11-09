@@ -144,10 +144,22 @@ pub enum IoKind {
     Sys,
     /// Heist's (`FIXPT-CHANGES.md` F4): programs run beside this one.
     Process,
+    /// Reading the clock, never sleeping: within `(io clock)` (`TODO.md`
+    /// §225). Each of these three is the part of a kind that never waits,
+    /// so that a procedure may say it does that part alone.
+    ClockRead,
+    /// Asking whether a read of the standard input would wait: within
+    /// `(io stdin)`.
+    StdinPoll,
+    /// Managing programs run beside this one without waiting on them:
+    /// starting, signalling, closing their input, taking their output so
+    /// far, their status, news of any. Within `(io process)`, which waits
+    /// for one to end, or to take what is written to it.
+    ProcessControl,
 }
 
 impl IoKind {
-    pub const ALL: [IoKind; 12] = [
+    pub const ALL: [IoKind; 15] = [
         IoKind::Stdin,
         IoKind::Stdout,
         IoKind::Stderr,
@@ -160,6 +172,9 @@ impl IoKind {
         IoKind::Native,
         IoKind::Sys,
         IoKind::Process,
+        IoKind::ClockRead,
+        IoKind::StdinPoll,
+        IoKind::ProcessControl,
     ];
     /// Its name, as `(io k)` writes it.
     pub fn name(self) -> &'static str {
@@ -176,6 +191,19 @@ impl IoKind {
             IoKind::Native => "native",
             IoKind::Sys => "sys",
             IoKind::Process => "process",
+            IoKind::ClockRead => "clock-read",
+            IoKind::StdinPoll => "stdin-poll",
+            IoKind::ProcessControl => "process-control",
+        }
+    }
+    /// The kind this one is part of, if it is part of one: the part that
+    /// never waits, within the whole (`TODO.md` §225).
+    pub fn wider(self) -> Option<IoKind> {
+        match self {
+            IoKind::ClockRead => Some(IoKind::Clock),
+            IoKind::StdinPoll => Some(IoKind::Stdin),
+            IoKind::ProcessControl => Some(IoKind::Process),
+            _ => None,
         }
     }
     pub fn named(n: &str) -> Option<IoKind> {
@@ -349,6 +377,15 @@ impl Effect {
         if r || w {
             self.0.retain(|a| !matches!((a, r, w), (Atom::Read(Region::Global(_)), true, _) | (Atom::Write(Region::Global(_)), _, true)));
         }
+        // An I/O kind's part that never waits, said with the whole, is the
+        // whole's (`IoKind::wider`).
+        let wide: Vec<Atom> = self.0.iter().filter_map(|a| match a {
+            Atom::Io(k) => k.wider().map(Atom::Io).filter(|w| self.0.contains(w)).map(|_| *a),
+            _ => None,
+        }).collect();
+        for a in wide {
+            self.0.remove(&a);
+        }
         self
     }
     /// Subeffecting: every atom of `self` is in `other`, or, if it reads or
@@ -365,6 +402,9 @@ impl Effect {
                     // Data frozen into a place as it is made is the
                     // place's allocation (Kayak's, 2026-10-28).
                     Atom::Alloc(Region::Frozen(Some(p), _)) => other.0.contains(&Atom::Alloc(Region::Var(*p))),
+                    // The part of an I/O kind that never waits is within
+                    // the whole (`TODO.md` §225).
+                    Atom::Io(k) => k.wider().is_some_and(|w| other.0.contains(&Atom::Io(w))),
                     _ => false,
                 }
         })

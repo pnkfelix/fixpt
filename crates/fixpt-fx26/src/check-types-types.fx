@@ -357,6 +357,7 @@
         (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol int) int))
    (val k-io-kind-name (subr pure (int) string))
    (val k-io-kind-code (subr pure (string) int))
+   (val k-io-wider (subr pure (int) int))
    (val k-io-kinds-shown string)
    (val k-ty-new
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-ty) int))

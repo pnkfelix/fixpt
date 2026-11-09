@@ -227,7 +227,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "(poly ((r region)) (subr (maxeff (io stdin) (write r)) ((bytevectorof r) int int)
            (sumof (count int) (eof unit) (failed io-error))))",
     ),
-    ("stdin-ready?", "(subr (io stdin) () bool)"),
+    ("stdin-ready?", "(subr (io stdin-poll) () bool)"),
     ("terminal-raw", "(subr (io terminal) () (sumof (done unit) (not-a-terminal unit) (failed io-error)))"),
     ("terminal-restore", "(subr (io terminal) () (sumof (done unit) (not-a-terminal unit) (failed io-error)))"),
     (
@@ -246,7 +246,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("native-convention", "(poly ((r region)) (subr (alloc r) () (listof string r)))"),
     // The clock: monotonic nanoseconds since the run began, and a sleep
     // until a time on it. The program's own arguments.
-    ("clock", "(subr (io clock) () i64)"),
+    ("clock", "(subr (io clock-read) () i64)"),
     ("sleep-until", "(subr (io clock) (i64) unit)"),
     ("args", "(poly ((r region)) (subr (maxeff (io args) (alloc r)) () (listof string r)))"),
     ("read-file", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (data (bytevectorof r)) (failed io-error))))"),
@@ -322,12 +322,12 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // one's), standard output and error one stream; what it wrote since last
     // asked, never waiting; whether it runs, which it does until it has
     // exited and all it wrote is read; its input; a signal to its group.
-    ("process-start", "(poly ((r region)) (subr (maxeff (io process) (read r)) ((listof string r) string) (sumof (started int) (failed io-error))))"),
-    ("process-output", "(subr (io process) (int) string)"),
-    ("process-status", "(subr (io process) (int) (sumof (running unit) (exited int) (signalled int) (unknown unit)))"),
+    ("process-start", "(poly ((r region)) (subr (maxeff (io process-control) (read r)) ((listof string r) string) (sumof (started int) (failed io-error))))"),
+    ("process-output", "(subr (io process-control) (int) string)"),
+    ("process-status", "(subr (io process-control) (int) (sumof (running unit) (exited int) (signalled int) (unknown unit)))"),
     ("process-write", "(subr (io process) (int string) (sumof (done unit) (failed io-error)))"),
-    ("process-close-input", "(subr (io process) (int) unit)"),
-    ("process-signal", "(subr (io process) (int int) unit)"),
+    ("process-close-input", "(subr (io process-control) (int) unit)"),
+    ("process-signal", "(subr (io process-control) (int int) unit)"),
     // Heist's (`FIXPT-CHANGES.md` F6): how a process ended, waiting until it
     // has; a `pselect` arm `((process-exit p) how …)` waits for that and its
     // output all taken, one `((process-output p) text …)` for its output.
@@ -335,7 +335,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // The first process with news: output to take, or an end not yet seen
     // (`process-status` or `process-exit`); -1 if none. An arm
     // `((process-news) p …)` waits for one, whichever.
-    ("process-news", "(subr (io process) () int)"),
+    ("process-news", "(subr (io process-control) () int)"),
     // Heist's (`FIXPT-CHANGES.md` F5): files, as SRFI 170 names them. What
     // a path is, a symbolic link not followed: its kind, its size in bytes,
     // when last modified (seconds since the epoch), its permission bits;

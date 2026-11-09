@@ -147,12 +147,18 @@ wait. Three do not:
 | `(io stdin)`   | `read-line`, `read-byte`, `read-bytes` | `stdin-ready?`                                  |
 | `(io process)` | `process-exit`, `process-write`       | `process-output`, `process-status`, `process-news` |
 
-The proposal splits each: `(io sleep)` for sleeping, a separate atom for
-the non-waiting stdin query, and `(io process-wait)` for the process
-operations that wait. Spelling is open. The waiting atoms are then
-`(receive r)`, `(await r)`, `(io sleep)`, `(io stdin)`,
-`(io process-wait)`, and whatever the next question adds. A wait masking
-hides shows as `spin`.
+**Done 2026-11-09, compatibly** (TODO §225). The existing kinds stay as
+the whole, which waits, and each gains a part that never waits, within
+it: `(io clock-read)` for `clock`; `(io stdin-poll)` for `stdin-ready?`;
+`(io process-control)` for `process-start`, `process-close-input`,
+`process-signal`, `process-output`, `process-status` and `process-news`
+(none of which waits, though several change state, so "query" would have
+been the wrong name). Nothing written before breaks: what says `(io
+clock)` still takes `clock`. A procedure that must not sleep says `(io
+clock-read)`. The waiting atoms are then `(receive r)`, `(await r)`, `(io
+clock)`, `(io stdin)`, `(io process)`, `(io stdout)`, `(io stderr)`, and
+whatever the next question adds; the parts are not. A wait masking hides
+shows as `spin`.
 
 **Which writes and files wait** is a question about table entries, not
 about which operations carry a token. Under "sound by construction" the
@@ -221,10 +227,10 @@ where an atom may have `*` for its region, matching any region:
 
   ```
   (define-effect nonblocking
-    (except (receive *) (await *) (io sleep) (io stdin) (io process-wait)
+    (except (receive *) (await *) (io clock) (io stdin) (io process)
             (io stdout) (io stderr)))
   (define-effect wait-free
-    (except (receive *) (await *) (io sleep) (io stdin) (io process-wait)
+    (except (receive *) (await *) (io clock) (io stdin) (io process)
             (io stdout) (io stderr) spin))
   ```
 
@@ -326,5 +332,4 @@ kayak agreed with each recommendation here:
 
 ## Open
 
-- Spelling: `(io sleep)`, the stdin query's atom, `(io process-wait)`,
-  the marker names.
+- Spelling: the marker names.

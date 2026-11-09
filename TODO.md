@@ -5416,7 +5416,7 @@ waits, (await @q), on what nothing outside it sees" (`waits_spun`,
 the same expression fills first, which a proof of fulfilment would let
 masking drop with no `spin`.
 
-## 225. The `io` capabilities that sometimes wait, split (kayak's request, 2026-11-09)
+## 225. The `io` capabilities that sometimes wait, split (kayak's request, 2026-11-09; done 2026-11-09)
 
 For effect markers (`docs/research/effect-markers.md`), each capability
 must either always wait or never wait. Three do not: `(io clock)` is
@@ -5429,11 +5429,21 @@ annotations it breaks, kayak's included. The file operations refuse what
 is not a regular file (or a directory, for `list-dir`), so that
 `fs-read` and `fs-write` never wait on another party.
 
+Done (2026-11-09), compatibly rather than split (the user's): each kind
+stays the whole, and gains a part that never waits, within it
+(`IoKind::wider`, `k-io-wider`): `(io clock-read)`, `(io stdin-poll)`,
+`(io process-control)` (start, close-input, signal, output, status,
+news). No annotation breaks, Heist's (14 files) and kayak's included.
+`read-file` opens without waiting and refuses what is not a regular
+file; `write-file` renames a file written beside, and `list-dir` of a
+FIFO fails at once, so neither could wait. `programs/io/io-parts.fx`,
+`io-part-sleeps.fx`.
+
 ## 226. Effect markers, and bounds on effect variables (kayak's request, 2026-11-09)
 
 Markers, derived from an effect's atoms by a fixed table: `nonblocking`
-(no waiting atom: `(receive r)`, `(await r)`, `(io sleep)`, `(io stdin)`,
-`(io process-wait)`, `(io stdout)`, `(io stderr)`), `terminating` (no
+(no waiting atom: `(receive r)`, `(await r)`, `(io clock)`, `(io stdin)`,
+`(io process)`, `(io stdout)`, `(io stderr)`), `terminating` (no
 `spin`), `deterministic` (no `nondet`), and `wait-free` (`nonblocking`
 and `terminating`). Bounds on a `poly`'s effect variable: `(e effect
 (within E))` and markers, `(e effect (within E) wait-free)`, checked at

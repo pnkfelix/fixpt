@@ -1467,7 +1467,7 @@ prims! {
     // replaced whole, atomically: written beside it, then renamed over it.
     "%fx26-read-file", 1, Some(1), simple!(|rt, a| {
         let path = get_string(rt, a[0])?;
-        Ok(match std::fs::read(&path) {
+        Ok(match crate::world::read_regular_file(&path) {
             Ok(bytes) => {
                 let bv = rt.heap.make_bytevector(&bytes);
                 fx26_sum(rt, "data", bv)
