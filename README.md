@@ -87,6 +87,106 @@ were made, which is what checking as you type needs. The checker always
 knows the type *expected* at a point, which is the question the REPL's
 `,help` answers for a hole.
 
+## Recursive types, unions and intersections
+
+**Recursive types need no names.** `(mu t T)` is a recursive type
+written in place. A union, `oneof`, needs no tags where a test tells its
+members apart. Here a tree is an `int`, or a list of trees:
+
+```scheme
+(define leaves (subr pure ((mu t (oneof int (listof t acyclic)))) int)
+  (letrec ((leaves (subr pure ((mu t (oneof int (listof t acyclic)))) int)
+             (lambda (x)
+               (if (int? x)
+                   1
+                   (if (null? x) 0 (+ (leaves (car x)) (leaves (cdr x))))))))
+    leaves))
+(leaves (list 1 (list 2 3) (list (list 4)) 5))
+```
+```
+leaves : (subr pure ((mu %2 (oneof int (listof %2 acyclic)))) int) ! pure
+5 : int ! (read (globals leaves))
+```
+
+`int?` narrows `x`, so `car` and `cdr` see a list. `(cdr x)` is a list
+of trees, and so a tree itself, by subtyping. And `leaves` needs no
+`spin`: an `acyclic` list is finite, so the recursion ends.
+
+**Subtyping is structural, through `mu`.** A sum with fewer tags is below
+one with more, payloads are compared member by member, and recursive types
+are compared as the infinite trees they unfold to. So an expression with
+no variables, over naturals, is accepted where any expression over
+integers is wanted:
+
+```scheme
+(define vars (subr pure ((mu e (sumof (num int) (var symbol) (add (productof (l e) (r e)))))) int)
+  (letrec ((vars (subr pure ((mu e (sumof (num int) (var symbol) (add (productof (l e) (r e)))))) int)
+             (lambda (x)
+               (tagcase x
+                 (num n 0)
+                 (var v 1)
+                 (add p (+ (vars (extract p l)) (vars (extract p r))))))))
+    vars))
+(define two-plus-three (mu e (sumof (num nat) (add (productof (l e) (r e)))))
+  (sum add (product (l (sum num 2)) (r (sum num 3)))))
+(vars two-plus-three)
+```
+```
+0 : int ! (read (globals two-plus-three vars))
+```
+
+The other way is refused. A variable is not among `two-plus-three`'s
+tags:
+
+```scheme
+(define bad (mu e (sumof (num nat) (add (productof (l e) (r e)))))
+  (sum add (product (l (sum num 2)) (r (sum var 'x)))))
+```
+```
+fixpt: sub.fx:13:40: a (mu %1 (sumof (#:num nat) (#:add (productof (#:l %1) (#:r %1))))) is expected here, and this is a (sumof (#:var symbol))
+```
+
+**Intersections: one procedure, several types.** `(allof T …)` is a
+procedure with each member's type, from one body checked against each.
+A constant folder can then keep an expression without variables free of
+them. Without the `allof`, the folder would take a closed expression (a
+subtype) but give back only an open one:
+
+```scheme
+(define-type closed (mu e (sumof (num int) (add (productof (l e) (r e))))))
+(define-type open (mu e (sumof (num int) (var symbol) (add (productof (l e) (r e))))))
+(define-type folder (allof (subr pure (closed) closed) (subr pure (open) open)))
+(define fold folder
+  (letrec ((fold folder
+             (lambda (x)
+               (tagcase x
+                 (num n x)
+                 (var v x)            ; a closed expression has no var: skipped there
+                 (add p (let ((l (fold (extract p l))) (r (fold (extract p r))))
+                          (tagcase l
+                            (num a (tagcase r
+                                     (num b (sum num (+ a b)))
+                                     (else y (sum add (product (l l) (r r))))))
+                            (else y (sum add (product (l l) (r r)))))))))))
+    fold))
+(define c closed (fold (sum add (product (l (sum num 2)) (r (sum num 3))))))
+(define o open (fold (sum add (product (l (sum var 'x)) (r (sum num 1))))))
+(define wrong closed (fold o))
+```
+```
+fold : folder ! pure
+c : closed ! (read (globals fold))
+o : open ! (read (globals fold))
+fixpt: fold.fx:19:22: `wrong` is declared a closed: a closed is expected here, and this is a open
+```
+
+A call takes every member its arguments fit, and its result is the meet
+of theirs. Termination is judged member by member too: a length
+procedure can be `pure` on `acyclic` lists and `spin` on lists that may be
+cyclic, from one body. Herman and Wand's renaming over λm's syntactic
+sorts is the same idea at full size
+(`crates/fixpt-fx26/tests/programs/allof/swap.fx`).
+
 ## Concurrency, checked
 
 Processes have their own heaps (*places*) and communicate only by
