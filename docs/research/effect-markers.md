@@ -199,6 +199,65 @@ Two kinds of bound on an effect variable:
 - **Evidence:** `(effectbound e)` would carry the markers as it carries
   the bound, and `given` would check them.
 
+## An option, not decided: negative bounds as cofinite effects
+
+Raised 2026-11-09; the user is thinking about it. Markers are negative
+bounds: "`e` has none of these atoms". The question is whether to have
+negative bounds in general, or only the named special cases above.
+
+**The general form.** An effect is a set of atoms from an open-ended
+universe, since regions are open-ended. "Lacks `A`" is "within
+everything but `A`", which no effect can be written as today. One
+addition makes it writable: a **cofinite** effect, `(except atom …)`,
+where an atom may have `*` for its region, matching any region:
+
+```
+(e effect (within (except spin (receive *) (await *))))
+```
+
+- **No separate marker machinery.** A negative bound is a `within` bound,
+  so §226's upper bounds cover it unchanged. The markers become ordinary
+  named effects in the standard environment, not a table in the checker:
+
+  ```
+  (define-effect nonblocking
+    (except (receive *) (await *) (io sleep) (io stdin) (io process-wait)
+            (io stdout) (io stderr)))
+  (define-effect wait-free
+    (except (receive *) (await *) (io sleep) (io stdin) (io process-wait)
+            (io stdout) (io stderr) spin))
+  ```
+
+  Closure under `maxeff` is then free: the join of two effects below a
+  bound is below it.
+- **The rule.** A finite effect is below `(except A)` when none of its
+  atoms matches `A`; an effect variable is below it when its bound is;
+  `(except A)` is below `(except B)` when `B ⊆ A`.
+- **Without `poly`.** `(subr (except …) …)` as a parameter's type takes
+  any handler with none of those atoms, with no polymorphism. Calling it
+  gives the caller that cofinite effect: honest, but coarse. A `poly`
+  binder is what reports a handler's effect precisely.
+
+**Costs.**
+- **The language's own evolution.** A program's `(except …)`, written
+  today, would admit a waiting atom the language adds later. This is the
+  open-world problem that makes Rust wary of negative bounds. The named
+  standard effects do not have it: the language updates `nonblocking`
+  and `wait-free` when it adds an atom. So programs would be steered to
+  the named ones, with a hand-written `except` meaning exactly those
+  atoms.
+- **Where a cofinite effect may stand.** In a bound and in a parameter's
+  latent effect it needs nothing new. Masking leaves it as it is
+  (conservative), and the compilers treat it as an unknown effect is
+  treated, "anything else". As a definition's own declared effect it
+  would only make types vaguer, and could be refused there.
+
+**What neither form gives: relations between variables.** A generic
+`par-map` needs "`e1` does not write what `e2` reads", a disjointness
+constraint between two effect variables, which no bound on one variable
+says. That is P8's open question (`type-and-effect-directions.md`), a
+separate extension.
+
 ## Instead of `rep`: a test that narrows (kayak's item 2)
 
 `rep` as asked is safe: a supertype that forgets, with nothing that

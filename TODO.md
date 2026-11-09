@@ -5400,7 +5400,9 @@ is wrong. The fix, the user's (2026-11-09): masking leaves `spin`
 behind where it drops a waiting atom, since a wait on something private
 is, from outside, unbounded internal work. `spawn` dropping a process's
 place leaves nothing, as the spawner does not wait. See
-`docs/research/effect-markers.md`.
+`docs/research/effect-markers.md`. Later, perhaps: a proof that a wait is
+fulfilled (a substructural account of who fills an I-cell, say) would
+let masking drop it with no `spin`; not now (the user's, 2026-11-09).
 
 ## 225. The `io` capabilities that sometimes wait, split (kayak's request, 2026-11-09)
 
