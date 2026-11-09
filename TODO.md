@@ -5342,3 +5342,33 @@ meanings: the use's environment's against the macro's
 (`docs/research/typed-macros.md`, "Syntactic closures: what an expansion
 means"). Both front ends.
 
+
+## 223. A repeated binder's atom is one repetition's or every one's, unsaid (found 2026-11-08)
+
+A soundness hole in the ellipsis checking (both front ends). A pattern
+binder under an ellipsis is one atom, `v`, in the environments compared
+(`Aligner::placed`): a signature naming it inside its element means that
+repetition's `v`; a template's `(lambda ((v int) ...) …)` binds every
+repetition's. So this is accepted, though each `step` is placed in the
+scope of every `v` and its signature says its own alone:
+
+```scheme
+(define-syntax my-do
+  (((export (bvar expr (import expr (rho (A var)))) (rho (A var))) ...)
+   (import (expr expr) (rho (A rib)))
+   (import expr (rho (A rib))))
+  (syntax-rules ()
+    ((_ ((v init step) ...) (test res) body)
+     (letrec ((loop (subr spin (int int) int)
+                    (lambda ((v int) ...) (if test res (begin body (loop step ...))))))
+       (loop init ...)))))
+(my-do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc) #u)
+```
+
+By the signature, the `i` in `acc`'s step is not the macro's; the
+expansion binds it. The atom must say which: this repetition's, or every
+one's (gathered, as a list's export gathers its elements'), compared as
+such. Then `do`'s steps are refused, as Herman's addresses cannot say a
+part in an element sees every element's binders (nor can contract
+notation C: `typed-macros.md`, "Three notations"); saying it needs named
+scopes (Ott's; Pombrio et al.'s conclusion), a design of its own.
