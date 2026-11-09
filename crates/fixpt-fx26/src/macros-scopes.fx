@@ -124,7 +124,7 @@
                     (k-pvar (n) (= (kind-of (node-core t)) 12))
                     (else y (not d))))
            (one (lambda ((e bool))
-                  (tagcase (node-kids t) (k-pvar (n) (atm-var n e)) (else y (atm-lit t e))))))
+                  (tagcase (node-kids t) (k-pvar (n) (atm-var n e 0)) (else y (atm-lit t e))))))
       (begin
         (if (eq? desc? d)
             #u
@@ -148,7 +148,7 @@
                               ts)
                      (the atms nil)))
           (tagcase (extract (car e) 1)
-            (bind-rib (es) (rib fail es (extract (car e) 2) s))
+            (bind-rib (es) (gathered t (rib fail es (extract (car e) 2) s)))
             (bind-direct (as) as)
             (else y (begin (fail-at fail (string-append "the signature says what is here exports "
                                                         "a rib, and it exports none")
@@ -160,9 +160,9 @@
       (k-pvar (n) (list (lv-cage n)))
       ;; A ribcage's list by ellipsis: what each element exports.
       (k-seq (x)
-        (if (and (cage-seq? t) (null? (extract (node-at t) 5)))
-            (levels-of fail x s)
-            (exported-levels fail t s)))
+        (gathered-levels t (if (and (cage-seq? t) (null? (extract (node-at t) 5)))
+                               (levels-of fail x s)
+                               (exported-levels fail t s))))
       (else y (exported-levels fail t s)))))
 (define exported-levels (->* (fails int syn) levels)
   (lambda (fail t s)
@@ -174,6 +174,30 @@
                                                  "ribcage, and it exports none")
                              (node-syn t))
                     (the levels nil)))))))
+;; Atoms `as` node `t` exports: if `t` is a list by ellipsis, what its
+;; elements export, every repetition's (`macros.rs`'s `gathered`).
+(define gathered (->* (int atms) atms)
+  (lambda (t as)
+    (tagcase (node-kids t)
+      (k-seq (x)
+        (let ((e (extract (node-at t) 5)))
+          (if (or (null? e) (= (extract (car e) 2) x)) (gathered-each as) as)))
+      (else y as))))
+(define gathered-each (->* (atms) atms)
+  (lambda (as)
+    (if (null? as)
+        nil
+        (cons (tagcase (car as) (atm-var (n d g) (atm-var n d (+ g 1))) (else y (car as)))
+              (gathered-each (cdr as))))))
+(define gathered-levels (->* (int levels) levels)
+  (lambda (t ls)
+    (if (null? ls)
+        nil
+        (cons (tagcase (car ls)
+                (lv-rib (as) (lv-rib (gathered t as)))
+                (lv-earlier (as) (lv-earlier (gathered t as)))
+                (else y (car ls)))
+              (gathered-levels t (cdr ls))))))
 ;; The node whose export is what node `t` exports: a form's operands' (a
 ;; definition's), else its own.
 (define exporter (->* (int) int)
@@ -245,11 +269,18 @@
   (lambda (n d env i)
     (cond ((null? env) -1)
           ((tagcase (car env)
-             (lv-rib (as) (atm-in? (atm-var n d) as))
-             (lv-earlier (as) (atm-in? (atm-var n d) as))
+             (lv-rib (as) (named-in? n d as))
+             (lv-earlier (as) (named-in? n d as))
              (else y #f))
            i)
           (else (rib-binding n d (cdr env) (+ i 1))))))
+;; Whether `as` binds pattern variable `n` (a description's if `d`), by its
+;; name: a reference finds its binder whichever repetitions are gathered.
+(define named-in? (->* (symbol bool atms) bool)
+  (lambda (n d as)
+    (and (not (null? as))
+         (or (tagcase (car as) (atm-var (m e g) (and (symbol=? n m) (eq? d e))) (else y #f))
+             (named-in? n d (cdr as))))))
 (define nth-level (->* (levels int) level)
   (lambda (env i) (if (= i 0) (car env) (nth-level (cdr env) (- i 1)))))
 ;; Why a name bound by a repeated part (an element of a ribcage's list, a
@@ -301,13 +332,14 @@
     (and (not (null? as))
          (or (tagcase (car as)
                (atm-lit (t e) #f)
-               (atm-var (m e) (eq? e d))
+               (atm-var (m e g) (eq? e d))
                (else y #t))
              (any-pattern-atom? (cdr as) ps d)))))
 (define atm=? (->* (atm atm) bool)
   (lambda (a b)
     (tagcase a
-      (atm-var (n d) (tagcase b (atm-var (m e) (and (symbol=? n m) (eq? d e))) (else y #f)))
+      (atm-var (n d g)
+        (tagcase b (atm-var (m e h) (and (symbol=? n m) (eq? d e) (= g h))) (else y #f)))
       (atm-rib-of (n) (tagcase b (atm-rib-of (m) (symbol=? n m)) (else y #f)))
       (atm-lit (t d) (tagcase b (atm-lit (u e) (and (= t u) (eq? d e))) (else y #f))))))
 (define atm-in? (->* (atm atms) bool)

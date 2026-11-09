@@ -5366,9 +5366,18 @@ scope of every `v` and its signature says its own alone:
 ```
 
 By the signature, the `i` in `acc`'s step is not the macro's; the
-expansion binds it. The atom must say which: this repetition's, or every
-one's (gathered, as a list's export gathers its elements'), compared as
-such. Then `do`'s steps are refused, as Herman's addresses cannot say a
-part in an element sees every element's binders (nor can contract
-notation C: `typed-macros.md`, "Three notations"); saying it needs named
-scopes (Ott's; Pombrio et al.'s conclusion), a design of its own.
+expansion binds it.
+
+**Fixed** (2026-11-08, both front ends): the atom says how many lists by
+ellipsis gathered it (`Atom::Var`'s third field, `atm-var`'s), 0 its own
+repetition's, 1 every repetition's, as a list's export gathers its
+elements'; environments compare it, a reference's lookup by name does
+not. Inference says each binder through as many lists as gathered it.
+Tests: `macros/ellipsis-every-scope.fx` (refused), `ellipsis-own-scope.fx`,
+`ellipsis-letrec-scope.fx`, `infer-do.fx` (refused).
+
+**Left**: `do` is now refused, honestly: Herman's addresses cannot say a
+part in an element sees every element's binders while the element's other
+part sees none (nor can contract notation C: `typed-macros.md`, "Three
+notations"); saying it needs named scopes (Ott's; Pombrio et al.'s
+conclusion), a design of its own.

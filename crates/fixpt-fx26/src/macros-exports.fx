@@ -67,7 +67,7 @@
         nil
         (let ((rest (atm-strings (cdr as))))
           (tagcase (car as)
-            (atm-var (n d) (cons (string-append "`" (symbol->string n) "`") rest))
+            (atm-var (n d g) (cons (string-append "`" (symbol->string n) "`") rest))
             (atm-rib-of (n) (cons (string-append "what `" (symbol->string n) "` defines") rest))
             (atm-lit (t d) rest))))))
 (define cage-strings (->* (names) strings)

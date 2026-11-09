@@ -619,7 +619,7 @@
   (lambda (fail ps at n d)
     (begin
       (cond ((and (syn-symbol? n) (pvar? (syn-symbol n) ps))
-             (begin (with-kids at (k-pvar (syn-symbol n))) (atm-var (syn-symbol n) d)))
+             (begin (with-kids at (k-pvar (syn-symbol n))) (atm-var (syn-symbol n) d 0)))
             ((and (syn-symbol? n) (not (reserved-syn? n)) (not (desc-word? (syn-name n) #f)))
              (begin (with-kids at (k-binder (syn-symbol n) d)) (atm-lit at d)))
             (else (begin (fail-at fail (string-append "`" (show-syn n) "` is not a name that may "
@@ -849,7 +849,7 @@
           (tagcase (node-kids (car es))
             (k-desc (parts)
               (tagcase (node-kids (car parts))
-                (k-pvar (n) (cons (atm-var n #t) rest))
+                (k-pvar (n) (cons (atm-var n #t 0) rest))
                 (k-binder (n d) (cons (atm-lit (car parts) #t) rest))
                 (else y rest)))
             (else y rest))))))

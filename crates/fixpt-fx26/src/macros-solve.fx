@@ -1,12 +1,13 @@
 ;;; Typed hygienic macros, in FX-26: what a signature inferred says of the
 ;;; scopes, from where the templates place each part (`infer.rs`'s
-;;; `solve`), how it is written (`shown_sty`, `sig_text`), and the
-;;; iterations to the signature that says the same twice (`infer`). On top
-;;; of `macros-infer.fx`, which it loads and gives on (`infer-module`), so
-;;; that `macros.fx` takes one instance of each through it.
+;;; `solve`), and the iterations to the signature that says the same twice
+;;; (`infer`). On top of `macros-show.fx`, how one is written, and through
+;;; it `macros-infer.fx`, which it gives on (`infer-module`), so that
+;;; `macros.fx` takes one instance of each through it.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define infer-module ((proj (load-module "fx26:macros-infer.fx") rs re rm rc rp)))
+(define show-module ((proj (load-module "fx26:macros-show.fx") rs re rm rc rp)))
+(define infer-module (with show-module infer-module))
 (define files-module (with infer-module files-module))
 (define align-module (with files-module align-module))
 (define types-module (with align-module types-module))
@@ -27,6 +28,7 @@
         makes-all absorbed nparts open? sh-seq sh-union sh-leaf
         (type kd kds kinds pkinds ints sol binds-at spans placed placements unsigned
               unsigneds rules items cx mu-parts shape))
+(import show-module show-sty sig-text shown)
 (define exports-module (with files-module exports-module))
 (import exports-module (type exported))
 
@@ -36,7 +38,10 @@
 ;; part; what a region's root must export (`infer.rs`'s `Lv`, `RingD`,
 ;; `Demand`).
 (define-type pents (listof (tupleof int int) acyclic))
-(define-datatype lv (iv-rib pents) (iv-cage int))
+;; A level's entries: each binder's part, what it binds, and how many lists
+;; by ellipsis gathered it (`atm-var`'s).
+(define-type gents (listof (tupleof int int int) acyclic))
+(define-datatype lv (iv-rib gents) (iv-cage int))
 (define-type lvs (listof lv acyclic))
 (define-datatype rd (rd-at int) (rd-rib pents))
 (define-type rds (listof rd acyclic))
@@ -88,42 +93,67 @@
               nil
               (tagcase (car env)
                 (lv-rib (as)
-                  (let ((es (rib-pents cid as nil)))
+                  (let ((es (rib-gents cid as nil)))
                     (if (null? es)
                         nil
-                        (list (cons (iv-rib (pents-sorted (car es) nil)) (car rest))))))
+                        (list (cons (iv-rib (gents-sorted (car es) nil)) (car rest))))))
                 (lv-cage (n)
                   (let ((p (var-part cid n)))
                     (if (null? p) nil (list (cons (iv-cage (car p)) (car rest))))))
                 (lv-earlier (as) nil)))))))
-(define rib-pents (->* (int atms pents) (listof pents acyclic))
+(define rib-gents (->* (int atms gents) (listof gents acyclic))
   (lambda (cid as es)
     (if (null? as)
         (list es)
         (let ((nd (tagcase (car as)
-                    (atm-var (n d) (list (tuple n (if d 4 1))))
-                    (atm-rib-of (n) (list (tuple n 2)))
-                    (atm-lit (t d) (the (listof (tupleof symbol int) acyclic) nil)))))
+                    (atm-var (n d g) (list (tuple n (if d 4 1) g)))
+                    (atm-rib-of (n) (list (tuple n 2 0)))
+                    (atm-lit (t d) (the (listof (tupleof symbol int int) acyclic) nil)))))
           (if (null? nd)
-              (rib-pents cid (cdr as) es)
-              (let ((p (var-part cid (extract (car nd) 1))) (d (extract (car nd) 2)))
+              (rib-gents cid (cdr as) es)
+              (let ((p (var-part cid (extract (car nd) 1))))
                 (if (null? p)
                     nil
-                    (rib-pents cid (cdr as) (pent-merged (car p) d es)))))))))
-(define pent-merged (->* (int int pents) pents)
-  (lambda (p d es)
-    (cond ((null? es) (list (tuple p d)))
-          ((= p (extract (car es) 1))
+                    (rib-gents cid (cdr as)
+                               (gent-merged (car p) (extract (car nd) 2) (extract (car nd) 3)
+                                            es)))))))))
+(define gent-merged (->* (int int int gents) gents)
+  (lambda (p d g es)
+    (cond ((null? es) (list (tuple p d g)))
+          ((and (= p (extract (car es) 1)) (= g (extract (car es) 3)))
            (let ((e (extract (car es) 2)))
-             (if (and (or (= e 1) (= e 4)) (not (= e d))) (cons (tuple p 5) (cdr es)) es)))
-          (else (cons (car es) (pent-merged p d (cdr es)))))))
+             (if (and (or (= e 1) (= e 4)) (not (= e d))) (cons (tuple p 5 g) (cdr es)) es)))
+          (else (cons (car es) (gent-merged p d g (cdr es)))))))
+;; Entries `es` sorted by part, then by how many lists gathered each.
+(define gents-sorted (->* (gents gents) gents)
+  (lambda (es out) (if (null? es) out (gents-sorted (cdr es) (gent-into (car es) out)))))
+(define gent-into (->* ((tupleof int int int) gents) gents)
+  (lambda (e out)
+    (cond ((null? out) (list e))
+          ((or (< (extract e 1) (extract (car out) 1))
+               (and (= (extract e 1) (extract (car out) 1))
+                    (< (extract e 3) (extract (car out) 3))))
+           (cons e out))
+          (else (cons (car out) (gent-into e (cdr out)))))))
 (define atoms-of (->* (lv) ints)
   (lambda (l)
     (tagcase l
-      (iv-rib (es) (pent-parts es))
+      (iv-rib (es) (gent-parts es))
       (iv-cage (p) (list p)))))
-(define pent-parts (->* (pents) ints)
-  (lambda (es) (if (null? es) nil (cons (extract (car es) 1) (pent-parts (cdr es))))))
+(define gent-parts (->* (gents) ints)
+  (lambda (es) (if (null? es) nil (cons (extract (car es) 1) (gent-parts (cdr es))))))
+;; How many lists by ellipsis are between part `x` and region `r` around it.
+(define seqs-between (->* (int int) int)
+  (lambda (x r) (seqs-from (region x) r 0)))
+(define seqs-from (->* (int int int) int)
+  (lambda (q r n)
+    (if (= q r)
+        n
+        (let ((b (boundary-of q)))
+          (if (null? b)
+              n
+              (seqs-from (region (car b)) r
+                         (+ n (tagcase (shape-of (car b)) (sh-seq (e) 1) (else y 0)))))))))
 
 ;; Where each of levels `ls` (innermost first) of part `p` is said: on `p`
 ;; while each level's binders are in or under its region; then on the part
@@ -137,7 +167,7 @@
   (lambda (p rs i ls out)
     (if (null? ls)
         (list (reverse out))
-        (let ((j (first-around rs i (atoms-of (car ls)))))
+        (let ((j (first-around rs i (car ls))))
           (if (< j 0)
               nil
               (let* ((site (if (= j 0) p (car (boundary-of (nth-int rs (- j 1))))))
@@ -150,12 +180,22 @@
                 (sites-from p rs j (cdr ls) out2)))))))
 (define nth-int (->* (ints int) int)
   (lambda (xs i) (if (= i 0) (car xs) (nth-int (cdr xs) (- i 1)))))
-;; The first of regions `rs` from `i` around each of `xs`; -1 if none is.
-(define first-around (->* (ints int ints) int)
-  (lambda (rs i xs)
+;; The first of regions `rs` from `i` around each of level `l`'s binders,
+;; through as many lists as gathered each; -1 if none is.
+(define first-around (->* (ints int lv) int)
+  (lambda (rs i l)
     (cond ((>= i (len-ints rs)) -1)
-          ((all-via? xs (nth-int rs i)) i)
-          (else (first-around rs (+ i 1) xs)))))
+          ((tagcase l
+             (iv-rib (es) (all-gathered? es (nth-int rs i)))
+             (iv-cage (y) (all-via? (list y) (nth-int rs i))))
+           i)
+          (else (first-around rs (+ i 1) l)))))
+(define all-gathered? (->* (gents int) bool)
+  (lambda (es r)
+    (or (null? es)
+        (and (not (null? (via (extract (car es) 1) r)))
+             (= (seqs-between (extract (car es) 1) r) (extract (car es) 3))
+             (all-gathered? (cdr es) r)))))
 (define len-ints (->* (ints) int) (lambda (xs) (if (null? xs) 0 (+ 1 (len-ints (cdr xs))))))
 (define all-via? (->* (ints int) bool)
   (lambda (xs r) (or (null? xs) (and (not (null? (via (car xs) r))) (all-via? (cdr xs) r)))))
@@ -213,7 +253,7 @@
         (let ((more (run-through (cdr ls) r u)))
           (tuple (cons (car ls) (extract more 1)) (extract more 2)))
         (tuple (the lvs nil) ls))))
-(define rib-entries (->* (pents int int) (listof pents acyclic))
+(define rib-entries (->* (gents int int) (listof pents acyclic))
   (lambda (es r cid)
     (let ((split (entries-by es r nil nil)))
       (if (null? split)
@@ -223,21 +263,34 @@
                 nil
                 (list (pents-sorted (append (extract (car split) 1) (car rest)) nil))))))))
 ;; Entries `es` in `r`, and those through each part in `r`, by part, in
-;; the order first found; none if one is not under `r`.
-(define-type thru (listof (tupleof int pents) acyclic))
-(define entries-by (->* (pents int pents thru) (listof (tupleof pents thru) acyclic))
+;; the order first found; none if one is not under `r`, or not through as
+;; many lists as gathered it (a list gathers its elements' repetitions).
+(define-type thru (listof (tupleof int gents) acyclic))
+(define entries-by (->* (gents int pents thru) (listof (tupleof pents thru) acyclic))
   (lambda (es r out th)
     (if (null? es)
         (list (tuple out th))
-        (let ((v (via (extract (car es) 1) r)))
+        (let* ((e (car es)) (v (via (extract e 1) r)) (g (extract e 3)))
           (cond ((null? v) nil)
-                ((< (car v) 0) (entries-by (cdr es) r (append out (the pents (list (car es)))) th))
-                (else (entries-by (cdr es) r out (thru-add (car v) (car es) th))))))))
-(define thru-add (->* (int (tupleof int int) thru) thru)
+                ((< (car v) 0)
+                 (if (= g 0)
+                     (entries-by (cdr es) r
+                                 (append out (the pents (list (tuple (extract e 1) (extract e 2)))))
+                                 th)
+                     nil))
+                (else
+                 (let ((seq (tagcase (shape-of (car v)) (sh-seq (x) #t) (else y #f))))
+                   (if (and seq (= g 0))
+                       nil
+                       (entries-by (cdr es) r out
+                                   (thru-add (car v)
+                                             (tuple (extract e 1) (extract e 2) (if seq (- g 1) g))
+                                             th))))))))))
+(define thru-add (->* (int (tupleof int int int) thru) thru)
   (lambda (b e th)
-    (cond ((null? th) (list (tuple b (the pents (list e)))))
+    (cond ((null? th) (list (tuple b (the gents (list e)))))
           ((= b (extract (car th) 1))
-           (cons (tuple b (append (extract (car th) 2) (the pents (list e)))) (cdr th)))
+           (cons (tuple b (append (extract (car th) 2) (the gents (list e)))) (cdr th)))
           (else (cons (car th) (thru-add b e (cdr th)))))))
 (define through-entries (->* (thru int int) (listof pents acyclic))
   (lambda (th r cid)
@@ -635,211 +688,6 @@
                        (dm-rib (es) (bind-rib (entries-of es)))
                        (dm-cage (rs) (bind-cage (rings-each rs)))))
               (demand-binds (cdr xs))))))
-
-;;; ------------------------------------------------------------ written
-
-;; Syntax type `t` as a signature writes it, at `a`..`b` (`infer.rs`'s
-;; `shown_sty`): a `mu` whose variable is used, or whose addresses are
-;; from it; a list by ellipsis, `(σ ...)`. `shown`, the `mu`s being
-;; written, each with its variable and whether it is used.
-(define shown (ref (listof (tupleof int string bool) acyclic) rs) (new nil))
-(define show-sty (->* (sty int int) syn)
-  (lambda (t a b)
-    (let ((sym (lambda ((s string)) (mk-symbol s a b))))
-      (tagcase t
-        (s-expr () (sym "expr")) (s-lambda () (sym "lambda")) (s-bvar () (sym "bvar"))
-        (s-id () (sym "id")) (s-data () (sym "data")) (s-type () (sym "type"))
-        (s-label () (sym "label")) (s-dvar () (sym "dvar")) (s-kind () (sym "kind"))
-        (s-defn () (sym "defn"))
-        (s-nil () (mk-list nil a b))
-        (s-literal (n) (mk-list (list (sym "literal") (atom n a b 0)) a b))
-        (s-pair (x y) (show-pair t nil a b))
-        (s-import (x bd) (mk-list (list (sym "import") (show-sty x a b) (show-bind bd a b)) a b))
-        (s-export (x bd) (mk-list (list (sym "export") (show-sty x a b) (show-bind bd a b)) a b))
-        (s-many (x) (mk-list (list (sym "many") (show-sty x a b)) a b))
-        (s-typed (x h) (show-sty x a b))
-        (s-union (ms) (mk-list (cons (sym "union") (show-each ms a b)) a b))
-        (s-mu (id) (show-mu id a b))))))
-(define show-each (->* (stys int int) syns-a)
-  (lambda (ms a b) (if (null? ms) nil (cons (show-sty (car ms) a b) (show-each (cdr ms) a b)))))
-(define show-pair (->* (sty syns-a int int) syn)
-  (lambda (cur items a b)
-    (tagcase cur
-      (s-pair (x y) (show-pair y (append items (the syns-a (list (show-sty x a b)))) a b))
-      (s-nil () (mk-list items a b))
-      (s-mu (id)
-        (let ((e (if (null? (shown-of id (get shown))) (listed-elem id) nil)))
-          (if (null? e)
-              (joined-list items (show-sty cur a b) a b)
-              (mk-list (append items
-                               (the syns-a (list (show-sty (car e) a b) (mk-symbol "..." a b))))
-                       a b))))
-      (else y (joined-list items (show-sty cur a b) a b)))))
-;; Items `xs` and tail `t` as one list: a tail that is a list joined to it.
-(define joined-list (->* (syns-a syn int int) syn)
-  (lambda (xs t a b)
-    (tagcase t
-      (lst (more d c e y) (mk-list (append xs more) a b))
-      (dotted (more tl d c e y)
-        (dotted (append xs more) tl (datum-dotted (syn-datums (append xs more)) (syn->datum tl))
-                a b 0))
-      (else y
-        (if (null? xs) t (dotted xs t (datum-dotted (syn-datums xs) (syn->datum t)) a b 0))))))
-(define shown-of (->* (int (listof (tupleof int string bool) acyclic)) (listof string acyclic))
-  (lambda (id xs)
-    (cond ((null? xs) nil)
-          ((= id (extract (car xs) 1)) (list (extract (car xs) 2)))
-          (else (shown-of id (cdr xs))))))
-(define used! (->* (int (listof (tupleof int string bool) acyclic))
-                   (listof (tupleof int string bool) acyclic))
-  (lambda (id xs)
-    (cond ((null? xs) nil)
-          ((= id (extract (car xs) 1)) (cons (tuple id (extract (car xs) 2) #t) (cdr xs)))
-          (else (cons (car xs) (used! id (cdr xs)))))))
-(define len-shown (->* ((listof (tupleof int string bool) acyclic)) int)
-  (lambda (xs) (if (null? xs) 0 (+ 1 (len-shown (cdr xs))))))
-(define show-mu (->* (int int int) syn)
-  (lambda (id a b)
-    (let ((v (shown-of id (get shown))))
-      (if (not (null? v))
-          (begin (set shown (used! id (get shown))) (mk-symbol (car v) a b))
-          (let ((e (listed-elem id)))
-            (if (not (null? e))
-                (mk-list (list (show-sty (car e) a b) (mk-symbol "..." a b)) a b)
-                (let ((name (string-append "m" (int->string (+ (len-shown (get shown)) 1)))))
-                  (begin
-                    (set shown (cons (tuple id name #f) (get shown)))
-                    (let* ((body (show-sty (mu-body id) a b)) (used (extract (car (get shown)) 3)))
-                      (begin
-                        (set shown (cdr (get shown)))
-                        (if (or used (open? (mu-body id)))
-                            (mk-list (list (mk-symbol "mu" a b) (mk-symbol name a b) body) a b)
-                            body)))))))))))
-;; The element of `mu` `id`, in a list of one, if it is a list as `(σ ...)`
-;; writes one (`seq-type`): its element as written.
-(define listed-elem (->* (int) stys)
-  (lambda (id)
-    (tagcase (mu-body id)
-      (s-union (ms)
-        (if (and (not (null? ms)) (not (null? (cdr ms))) (null? (cdr (cdr ms))))
-            (listed-of id (car ms) (car (cdr ms)))
-            nil))
-      (else y nil))))
-(define tail-of? (->* (int sty) bool)
-  (lambda (id d) (tagcase d (s-mu (j) (= j id)) (else y #f))))
-(define listed-of (->* (int sty sty) stys)
-  (lambda (id nil-m pair-m)
-    (tagcase nil-m
-      (s-nil ()
-        (tagcase pair-m
-          (s-pair (e d)
-            (if (and (tail-of? id d)
-                     (tagcase e (s-bvar () #f) (s-dvar () #f) (s-export (x bd) #f) (else y #t)))
-                (list e)
-                nil))
-          (else y nil)))
-      (s-export (n none)
-        (tagcase pair-m
-          (s-export (p both)
-            (if (and (= (kind-of n) 6) (no-entries? none) (both-ribs? both))
-                (tagcase p
-                  (s-pair (e d)
-                    (if (tail-of? id d)
-                        (tagcase e
-                          (s-export (x bd)
-                            (cond ((and (= (kind-of x) 1) (self-entry? bd 1)) (list x))
-                                  ((and (= (kind-of x) 12) (self-entry? bd 4)) (list x))
-                                  (else (list e))))
-                          (else y nil))
-                        nil))
-                  (else y nil))
-                nil))
-          (else y nil)))
-      (else y nil))))
-(define no-entries? (->* (bind) bool)
-  (lambda (bd) (tagcase bd (bind-rib (es) (null? es)) (else y #f))))
-(define both-ribs? (->* (bind) bool)
-  (lambda (bd)
-    (tagcase bd
-      (bind-rib (es)
-        (and (= (len-entries es) 2)
-             (entry-is? (car es) (list #t) 2) (entry-is? (car (cdr es)) (list #f) 2)))
-      (else y #f))))
-(define self-entry? (->* (bind int) bool)
-  (lambda (bd delta)
-    (tagcase bd
-      (bind-rib (es) (and (= (len-entries es) 1) (entry-is? (car es) nil delta)))
-      (else y #f))))
-(define len-entries (->* (entries) int)
-  (lambda (es) (if (null? es) 0 (+ 1 (len-entries (cdr es))))))
-(define entry-is? (->* ((tupleof addr int) addr int) bool)
-  (lambda (e a delta) (and (addr-same? (extract e 1) a) (= (extract e 2) delta))))
-(define addr-same? (->* (addr addr) bool)
-  (lambda (x y)
-    (if (null? x)
-        (null? y)
-        (and (not (null? y)) (eq? (car x) (car y)) (addr-same? (cdr x) (cdr y))))))
-(define show-bind (->* (bind int int) syn)
-  (lambda (bd a b)
-    (tagcase bd
-      (bind-rib (es) (show-rib es a b))
-      (bind-cage (rs) (mk-list (cons (mk-symbol "cage" a b) (show-rings rs a b)) a b))
-      (else y (show-rib nil a b)))))
-(define show-rings (->* (rings int int) syns-a)
-  (lambda (rs a b)
-    (if (null? rs)
-        nil
-        (cons (tagcase (car rs)
-                (ring-rib (es) (show-rib es a b))
-                (ring-at (x) (mk-list (list (mk-symbol "at" a b) (show-addr x a b)) a b)))
-              (show-rings (cdr rs) a b)))))
-(define show-rib (->* (entries int int) syn)
-  (lambda (es a b) (mk-list (cons (mk-symbol "rho" a b) (show-entries es a b)) a b)))
-(define show-entries (->* (entries int int) syns-a)
-  (lambda (es a b)
-    (if (null? es)
-        nil
-        (cons (mk-list (list (show-addr (extract (car es) 1) a b)
-                             (mk-symbol (delta-name (extract (car es) 2)) a b))
-                       a b)
-              (show-entries (cdr es) a b)))))
-(define delta-name (->* (int) string)
-  (lambda (d)
-    (cond ((= d 0) "none") ((= d 1) "var") ((= d 2) "rib") ((= d 3) "env") ((= d 4) "dvar")
-          (else "place"))))
-(define show-addr (->* (addr int int) syn)
-  (lambda (x a b) (if (null? x) (mk-list nil a b) (mk-symbol (addr-letters x "") a b))))
-(define addr-letters (->* (addr string) string)
-  (lambda (x out)
-   (if (null? x) out (addr-letters (cdr x) (string-append (if (car x) "A" "D") out)))))
-
-;; Signature `s` as a message says it (`infer.rs`'s `sig_text`): each
-;; annotation, `union`, `mu`, `many` or literal that is a list's rest after
-;; a ` . `.
-(define sig-text (->* (syn) string)
-  (lambda (s)
-    (tagcase s
-      (lst (items d a b x) (if (null? items) "()" (string-append "(" (sig-items items #t a b) ")")))
-      (dotted (items tl d a b x)
-        (string-append "(" (sig-items items #f a b) " . " (sig-text tl) ")"))
-      (else y (show-syn s)))))
-(define sig-word? (->* (syn) bool)
-  (lambda (s)
-    (and (syn-symbol? s)
-         (let ((n (syn-name s)))
-           (or (string=? n "import") (string=? n "export") (string=? n "union") (string=? n "mu")
-               (string=? n "many") (string=? n "literal"))))))
-;; Items `xs`, the first first (`first`); a word of `sig-word?` past the
-;; first, and a proper list's, starts its rest.
-(define sig-items (->* (syns-a bool int int) string)
-  (lambda (xs proper a b) (sig-items-from xs #t proper a b)))
-(define sig-items-from (->* (syns-a bool bool int int) string)
-  (lambda (xs first proper a b)
-    (cond ((null? xs) "")
-          ((and (not first) proper (sig-word? (car xs)))
-           (string-append " . " (sig-text (mk-list xs a b))))
-          (else (string-append (if first "" " ") (sig-text (car xs))
-                               (sig-items-from (cdr xs) #f proper a b))))))
 
 ;;; ------------------------------------------------------------ inferring
 

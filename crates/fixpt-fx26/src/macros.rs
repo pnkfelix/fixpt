@@ -369,10 +369,14 @@ enum Kids {
 
 /// What an environment is made of: a pattern variable bound (`bvar`,
 /// `dvar`), the rib or ribcage a pattern variable exports, a template's own
-/// binder; each bound in a namespace (Herman's δ, one per namespace).
+/// binder; each bound in a namespace (Herman's δ, one per namespace). A
+/// pattern variable's, with how many lists by ellipsis gathered it: 0 its
+/// own repetition's, as an element's part names it; 1 every repetition's,
+/// as the list's export gathers its elements' (`let`'s body sees every
+/// binder), and so on out (`TODO.md` §223).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Atom {
-    Var(Sym, Ns),
+    Var(Sym, Ns, usize),
     RibOf(Sym),
     Lit(usize, Ns),
 }
@@ -832,7 +836,7 @@ impl Macros {
                     return Err(FxError::at(place(*n), format!("`{}` is in the scope of a part's ribcage: not yet where a macro's parts are typed", shown(*n, interner))));
                 };
                 for a in atoms {
-                    let Atom::Var(b, _) = a else {
+                    let Atom::Var(b, _, _) = a else {
                         return Err(FxError::at(place(*n), format!("`{}` is in the scope of the binders a part exports: not yet where a macro's parts are typed", shown(*n, interner))));
                     };
                     let ty = c.pvars.iter().find(|(x, _)| x == b).and_then(|(_, q)| q.hole.as_ref()?.ty.clone());
@@ -2106,7 +2110,7 @@ impl Aligner<'_> {
         match n.as_symbol() {
             Some(m) if self.pvars.contains_key(&m) => {
                 self.nodes[at].kids = Kids::PVar(m);
-                Ok(Atom::Var(m, Ns::Value))
+                Ok(Atom::Var(m, Ns::Value, 0))
             }
             Some(m) if !reserved(self.name(m)) && !self.word(m, false) => {
                 self.nodes[at].kids = Kids::Binder(m, Ns::Value);
@@ -2183,7 +2187,7 @@ impl Aligner<'_> {
         match n.as_symbol() {
             Some(m) if self.pvars.contains_key(&m) => {
                 self.nodes[at].kids = Kids::PVar(m);
-                Ok(Atom::Var(m, Ns::Desc))
+                Ok(Atom::Var(m, Ns::Desc, 0))
             }
             Some(m) if !reserved(self.name(m)) && !self.word(m, false) => {
                 self.nodes[at].kids = Kids::Binder(m, Ns::Desc);
@@ -2229,7 +2233,7 @@ impl Aligner<'_> {
                 for e in entries {
                     if let Kids::Desc(parts) = &self.nodes[*e].kids {
                         match self.nodes[parts[0]].kids {
-                            Kids::PVar(n) => out.push(Atom::Var(n, Ns::Desc)),
+                            Kids::PVar(n) => out.push(Atom::Var(n, Ns::Desc, 0)),
                             Kids::Binder(..) => out.push(Atom::Lit(parts[0], Ns::Desc)),
                             _ => {}
                         }
@@ -2335,13 +2339,13 @@ impl Aligner<'_> {
             let value = !matches!(&*node.core, STy::Dvar);
             match (delta, &node.kids) {
                 (Delta::None, _) => {}
-                (Delta::Var, Kids::PVar(n)) if value => out.push(Atom::Var(*n, Ns::Value)),
+                (Delta::Var, Kids::PVar(n)) if value => out.push(Atom::Var(*n, Ns::Value, 0)),
                 (Delta::Var, Kids::Binder(_, Ns::Value)) => out.push(Atom::Lit(t, Ns::Value)),
                 (Delta::Var, _) => return Err(FxError::at(node.syn.span, "the signature says a value's binder is here")),
                 (Delta::Dvar | Delta::Place, Kids::PVar(n)) if !value => {
-                    out.push(Atom::Var(*n, Ns::Desc));
+                    out.push(Atom::Var(*n, Ns::Desc, 0));
                     if *delta == Delta::Place {
-                        out.push(Atom::Var(*n, Ns::Value));
+                        out.push(Atom::Var(*n, Ns::Value, 0));
                     }
                 }
                 (Delta::Dvar | Delta::Place, Kids::Binder(_, Ns::Desc)) => {
@@ -2356,7 +2360,7 @@ impl Aligner<'_> {
                 (Delta::Rib, Kids::PVar(_)) if matches!(&*node.core, STy::Type) => {}
                 (Delta::Rib, Kids::PVar(n)) => out.push(Atom::RibOf(*n)),
                 (Delta::Rib, _) => match &self.exported(t).export {
-                    Some((Bind::Rib(es), r)) => out.extend(self.rib(es, *r, span)?),
+                    Some((Bind::Rib(es), r)) => out.extend(self.gathered(t, self.rib(es, *r, span)?)),
                     Some((Bind::Direct(atoms), _)) => out.extend(atoms.iter().cloned()),
                     // A use of a macro that makes definitions: none the
                     // template sees.
@@ -2373,12 +2377,39 @@ impl Aligner<'_> {
         let node = &self.nodes[t];
         match (&node.kids, &self.exported(t).export) {
             (Kids::PVar(n), _) => Ok(vec![Level::Cage(*n)]),
-            (_, Some((b, r))) => self.eval(b, *r, span),
+            (_, Some((b, r))) => Ok(self.gathered_levels(t, self.eval(b, *r, span)?)),
             // A ribcage's list by ellipsis: what each element exports.
-            (Kids::Seq(e, true), None) => self.levels_of(*e, span),
+            (Kids::Seq(e, true), None) => Ok(self.gathered_levels(t, self.levels_of(*e, span)?)),
             (Kids::Form(_), None) => Ok(Vec::new()),
             _ => Err(FxError::at(node.syn.span, "the signature says what is here exports a ribcage, and it exports none")),
         }
+    }
+
+    /// Atoms `atoms` that node `t` exports: if `t` is a list by ellipsis,
+    /// what its elements export, every repetition's.
+    fn gathered(&self, t: usize, atoms: Vec<Atom>) -> Vec<Atom> {
+        let Kids::Seq(e, _) = self.nodes[t].kids else { return atoms };
+        if self.nodes[t].export.as_ref().is_some_and(|(_, r)| *r != e) {
+            return atoms;
+        }
+        atoms
+            .into_iter()
+            .map(|a| match a {
+                Atom::Var(n, ns, g) => Atom::Var(n, ns, g + 1),
+                other => other,
+            })
+            .collect()
+    }
+
+    fn gathered_levels(&self, t: usize, levels: Vec<Level>) -> Vec<Level> {
+        levels
+            .into_iter()
+            .map(|l| match l {
+                Level::Rib(atoms) => Level::Rib(self.gathered(t, atoms)),
+                Level::Earlier(atoms) => Level::Earlier(self.gathered(t, atoms)),
+                cage => cage,
+            })
+            .collect()
     }
 
     /// Each template binder under node `at`, with `m`, the macro whose use
@@ -2480,7 +2511,11 @@ impl Aligner<'_> {
     /// shadows a description's; every description's shares one namespace.
     fn in_scope(&self, n: Sym, ns: Ns, env: &[Level], span: Span) -> R<()> {
         let name = self.name(n);
-        let Some(i) = env.iter().position(|l| matches!(l, Level::Rib(atoms) | Level::Earlier(atoms) if atoms.contains(&Atom::Var(n, ns)))) else {
+        // By its name: a reference finds its binder whichever repetitions
+        // are gathered (the ellipses it is under say which, `Clause`'s
+        // depths).
+        let named = |a: &Atom| matches!(a, Atom::Var(m, k, _) if *m == n && *k == ns);
+        let Some(i) = env.iter().position(|l| matches!(l, Level::Rib(atoms) | Level::Earlier(atoms) if atoms.iter().any(named))) else {
             return Err(FxError::at(span, format!("`{name}` is referred to where the template does not bind it")));
         };
         if matches!(&env[i], Level::Earlier(_)) {
@@ -2488,7 +2523,7 @@ impl Aligner<'_> {
         }
         let shadows = |a: &Atom| match a {
             Atom::Lit(..) => false,
-            Atom::Var(_, k) => *k == ns,
+            Atom::Var(_, k, _) => *k == ns,
             Atom::RibOf(_) => true,
         };
         if env[..i].iter().any(|l| matches!(l, Level::Cage(_)) || matches!(l, Level::Rib(atoms) | Level::Earlier(atoms) if atoms.iter().any(shadows))) {
@@ -2568,7 +2603,7 @@ fn exports(levels: &[Level]) -> (Vec<Atom>, Vec<Sym>) {
 /// defines `` for a rib or ribcage; `nothing` if none.
 fn shown_exports(e: &(Vec<Atom>, Vec<Sym>), interner: &Interner) -> String {
     let mut out: Vec<String> = e.0.iter().filter_map(|a| match a {
-        Atom::Var(n, _) => Some(format!("`{}`", interner.name(*n))),
+        Atom::Var(n, _, _) => Some(format!("`{}`", interner.name(*n))),
         Atom::RibOf(n) => Some(format!("what `{}` defines", interner.name(*n))),
         Atom::Lit(..) => None,
     }).collect();

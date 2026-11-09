@@ -33,8 +33,11 @@
 ;; `dvar`), the rib or ribcage a pattern variable exports, a template's own
 ;; binder (its node).
 ;; Each but a ribcage bound in a namespace: a description's if `#t`, else a
-;; value's (Herman's δ, one per namespace).
-(define-datatype atm (atm-var symbol bool) (atm-rib-of symbol) (atm-lit int bool))
+;; value's (Herman's δ, one per namespace). A pattern variable's, with how
+;; many lists by ellipsis gathered it: 0 its own repetition's, 1 every
+;; repetition's, as a list's export gathers its elements' (`macros.rs`'s
+;; `Atom::Var`; `TODO.md` §223).
+(define-datatype atm (atm-var symbol bool int) (atm-rib-of symbol) (atm-lit int bool))
 (define-type atms (listof atm acyclic))
 ;; What an annotation binds (Herman's `β`): a rib, or a ribcage; or a rib of
 ;; what it binds, as found, the binders a template's description writes

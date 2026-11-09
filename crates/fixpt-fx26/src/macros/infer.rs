@@ -123,10 +123,11 @@ enum K {
 }
 
 /// One level of an environment, its atoms by part: a rib, each binder with
-/// what it binds; the ribcage a part exports.
+/// what it binds and how many lists by ellipsis gathered it (`Atom::Var`'s);
+/// the ribcage a part exports.
 #[derive(Clone, Debug, PartialEq)]
 enum Lv {
-    Rib(Vec<(usize, Delta)>),
+    Rib(Vec<(usize, Delta, usize)>),
     Cage(usize),
 }
 
@@ -197,6 +198,18 @@ impl Parts {
             }
             q = self.region(b);
         }
+    }
+
+    /// How many lists by ellipsis are between part `x` and region `r`
+    /// around it.
+    fn seqs_between(&self, x: usize, r: usize) -> usize {
+        let (mut q, mut n) = (self.region(x), 0);
+        while q != r {
+            let Some(&b) = self.boundary.get(&q) else { return n };
+            n += usize::from(matches!(self.parts[b].shape, Shape::Seq(_)));
+            q = self.region(b);
+        }
+        n
     }
 
     fn is_union(&self, p: usize) -> bool {
@@ -958,22 +971,22 @@ impl Macros {
         for l in env {
             match l {
                 Level::Rib(atoms) => {
-                    let mut es: Vec<(usize, Delta)> = Vec::new();
+                    let mut es: Vec<(usize, Delta, usize)> = Vec::new();
                     for a in atoms {
-                        let (n, d) = match a {
-                            Atom::Var(n, Ns::Value) => (*n, Delta::Var),
-                            Atom::Var(n, Ns::Desc) => (*n, Delta::Dvar),
-                            Atom::RibOf(n) => (*n, Delta::Rib),
+                        let (n, d, g) = match a {
+                            Atom::Var(n, Ns::Value, g) => (*n, Delta::Var, *g),
+                            Atom::Var(n, Ns::Desc, g) => (*n, Delta::Dvar, *g),
+                            Atom::RibOf(n) => (*n, Delta::Rib, 0),
                             Atom::Lit(..) => continue,
                         };
                         let p = *parts.at.get(&(cid, n))?;
-                        match es.iter_mut().find(|(q, _)| *q == p) {
-                            Some((_, e @ (Delta::Var | Delta::Dvar))) if *e != d => *e = Delta::Place,
+                        match es.iter_mut().find(|(q, _, h)| *q == p && *h == g) {
+                            Some((_, e @ (Delta::Var | Delta::Dvar), _)) if *e != d => *e = Delta::Place,
                             Some(_) => {}
-                            None => es.push((p, d)),
+                            None => es.push((p, d, g)),
                         }
                     }
-                    es.sort_by_key(|(p, _)| *p);
+                    es.sort_by_key(|(p, _, g)| (*p, *g));
                     out.push(Lv::Rib(es));
                 }
                 Level::Cage(n) => out.push(Lv::Cage(*parts.at.get(&(cid, *n))?)),
@@ -985,7 +998,7 @@ impl Macros {
 
     fn atoms_of(lv: &Lv) -> Vec<usize> {
         match lv {
-            Lv::Rib(es) => es.iter().map(|(p, _)| *p).collect(),
+            Lv::Rib(es) => es.iter().map(|(p, _, _)| *p).collect(),
             Lv::Cage(p) => vec![*p],
         }
     }
@@ -999,7 +1012,13 @@ impl Macros {
         let mut out: Vec<(usize, usize, Vec<Lv>)> = Vec::new();
         let mut i = 0;
         for lv in lvs {
-            let ok = |r: usize| Self::atoms_of(lv).iter().all(|x| parts.via(*x, r).is_some());
+            // Each binder reached from `r`, through as many lists by
+            // ellipsis as gathered it: its own repetition's from inside its
+            // element, every repetition's from outside the list.
+            let ok = |r: usize| match lv {
+                Lv::Rib(es) => es.iter().all(|(x, _, g)| parts.via(*x, r).is_some() && parts.seqs_between(*x, r) == *g),
+                Lv::Cage(y) => parts.via(*y, r).is_some(),
+            };
             while i < regions.len() && !ok(regions[i]) {
                 i += 1;
             }
@@ -1053,16 +1072,25 @@ impl Macros {
         Some(out)
     }
 
-    fn rib_entries(parts: &Parts, es: &[(usize, Delta)], r: usize, cid: usize, demands: &mut Vec<(usize, Demand)>) -> Option<Vec<(usize, Delta)>> {
+    fn rib_entries(parts: &Parts, es: &[(usize, Delta, usize)], r: usize, cid: usize, demands: &mut Vec<(usize, Demand)>) -> Option<Vec<(usize, Delta)>> {
         let mut out: Vec<(usize, Delta)> = Vec::new();
-        let mut through: Vec<(usize, Vec<(usize, Delta)>)> = Vec::new();
-        for (x, d) in es {
+        let mut through: Vec<(usize, Vec<(usize, Delta, usize)>)> = Vec::new();
+        for (x, d, g) in es {
             match parts.via(*x, r)? {
-                None => out.push((*x, *d)),
-                Some(b) => match through.iter_mut().find(|(c, _)| *c == b) {
-                    Some((_, v)) => v.push((*x, *d)),
-                    None => through.push((b, vec![(*x, *d)])),
-                },
+                None if *g == 0 => out.push((*x, *d)),
+                None => return None,
+                Some(b) => {
+                    // A list gathers its elements' repetitions.
+                    let seq = matches!(parts.parts[b].shape, Shape::Seq(_));
+                    if seq && *g == 0 {
+                        return None;
+                    }
+                    let g = if seq { g - 1 } else { *g };
+                    match through.iter_mut().find(|(c, _)| *c == b) {
+                        Some((_, v)) => v.push((*x, *d, g)),
+                        None => through.push((b, vec![(*x, *d, g)])),
+                    }
+                }
             }
         }
         for (b, xs) in through {
