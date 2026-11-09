@@ -1,6 +1,7 @@
 # Effect markers: properties of effects, apart from their atoms
 
-Status: proposed 2026-11-09, in answer to kayak's request
+Status: proposed 2026-11-09, revised the same day (a private wait is
+`spin`, not a new atom `wait`), in answer to kayak's request
 `docs/requests/fixpt-responsive-effects.md` (kayak 40a951197, C388, on
 Fixpt 13114974). Nothing built yet.
 
@@ -60,15 +61,21 @@ these, for types: the `sendable` kind.
 The proposal does the same for effects. A **marker** is a property of an
 effect, derived from its atoms by a table the language fixes:
 
-| marker          | holds of an effect with none of                                      |
-| --------------- | -------------------------------------------------------------------- |
-| `nonblocking`   | the waiting atoms (below), and `wait` (the residue of masking, below) |
-| `terminating`   | `spin`                                                               |
-| `deterministic` | `nondet`                                                             |
+| marker          | holds of an effect with none of                  |
+| --------------- | ------------------------------------------------ |
+| `nonblocking`   | the waiting atoms (below)                        |
+| `terminating`   | `spin`                                           |
+| `deterministic` | `nondet`                                         |
+| `wait-free`     | both: `nonblocking` and `terminating` together   |
 
-kayak's wait-free is `nonblocking` and `terminating` together. Markers
-are closed under `maxeff`: the join of two effects with a marker has it.
-So a marker holds of an effect exactly when it holds of each of its atoms.
+`wait-free` is kayak's sense: every call ends in a finite number of its
+own steps, whatever others do. It is the marker a responsive handler
+wants. `nonblocking` alone is weaker than its name: it means "waits on
+nothing a caller can see". A private wait shows as `spin` (masking,
+below), so a `nonblocking` procedure that spins may still block on a
+party inside itself. Markers are closed under `maxeff`: the join of two
+effects with a marker has it. So a marker holds of an effect exactly when
+it holds of each of its atoms.
 
 Unlike Rust's auto traits:
 - **The table is closed.** No program can opt a capability in or out. So
@@ -81,7 +88,7 @@ Unlike Rust's auto traits:
   are declared in signatures, so a marker can change only when a
   signature does.
 
-## Masking: why `wait` survives, as a residue
+## Masking: a private wait is a `spin`
 
 A marker computed from the atoms of a *masked* effect is unsound for
 waiting. `mask_keeps` (`check.rs`) drops `(await r)` and `(receive r)`
@@ -99,23 +106,34 @@ acts:
 `spin`, `nondet` and `io` are safe because they have no region and are
 never masked. Waiting on a region needs the same treatment. So:
 
-- **Masking leaves a residue.** Where masking drops a waiting atom, it
-  adds the region-less atom `wait`. `wait` means "waits on something
-  nothing outside can see". It is never written beside a visible waiting
-  atom, and nothing implies it. It is a real capability, the one a body
-  has once its waiting has gone private, and it is what `nonblocking`
-  rules out besides the visible atoms.
+- **Masking leaves `spin` behind** (the user's, 2026-11-09). Where masking
+  drops a waiting atom, it adds `spin`. Masking says what outsiders can
+  see, and to them a wait on something private is the computation's own
+  business: something internal that may take an unbounded time, or never
+  end if the filler never fills it. That is what `spin` says already. It
+  is kayak's own reasoning too: polling `stdin-ready?` until another party
+  moves is `spin`, not a wait, and a private wait is the same with the
+  party hidden inside. No new atom is needed.
+- **It closes a gap in what `spin` promises, today.** FX-26 trusts a
+  procedure whose type has no `spin` to end ("`spin`" in `fx26.md`). A
+  masked await breaks that now, with or without markers: the effect may
+  mask to `pure`, and the checker then claims `pure` for the expander
+  (`fx26.md`'s facts, "`pure`, on an application whose masked effect is
+  `pure`"). See TODO §224.
 - **`spawn` is not masking.** A spawned process's waits are its own: the
   spawner does not wait for them, so the place `spawn` drops leaves no
   residue. The same goes for a `race` loser stopped at a wait.
 - **The cells' verifier** must agree with the checker on where the
   residue goes, since it masks the same expressions (`facts.masked`).
+- **Annotations change.** A procedure that spawns a worker and awaits a
+  private reply cell must now declare `spin`, correctly: it may not end.
+  An inferred effect gets it without a change.
 
 This is how `nondet` already behaves ("Masking never removes it"). One
-consequence, left for later: `nondet` too could become a derived marker
-whose atom appears only as a masking residue. `receive` would then say
-`(receive r)` alone. That would change existing types, and kayak does not
-need it.
+consequence, left for later: `nondet` too could become a derived marker,
+with masking leaving `nondet` behind where it drops a `(receive r)`.
+`receive` would then say `(receive r)` alone. That would change existing
+types, and kayak does not need it.
 
 ## The waiting atoms: capabilities need splitting first
 
@@ -132,7 +150,8 @@ The proposal splits each: `(io sleep)` for sleeping, a separate atom for
 the non-waiting stdin query, and `(io process-wait)` for the process
 operations that wait. Spelling is open. The waiting atoms are then
 `(receive r)`, `(await r)`, `(io sleep)`, `(io stdin)`,
-`(io process-wait)`, `wait`, and whatever the next question adds.
+`(io process-wait)`, and whatever the next question adds. A wait masking
+hides shows as `spin`.
 
 **Which writes and files wait** is a question about table entries, not
 about which operations carry a token. Under "sound by construction" the
@@ -140,7 +159,7 @@ table must be honest:
 - `write-out` and `write-err` can block on a full pipe that no one reads,
   and kayak's async mode makes that a real wait. So they wait, unless the
   runtime makes them never block (buffering, with a separate flush that
-  waits). The cost of the honest entry: a `nonblocking` handler cannot
+  waits). The cost of the honest entry: a `wait-free` handler cannot
   log. If kayak needs that, the buffered write is the way to provide it.
 - Files: `read-file` on a FIFO blocks until a writer appears, and a
   network mount can stall. kayak's "bounded by the machine" holds only if
@@ -156,8 +175,8 @@ Two kinds of bound on an effect variable:
 
 ```
 (poly ((e effect (within (maxeff (send @w) (alloc @r))))) …)   ; upper bound
-(poly ((e effect nonblocking terminating)) …)                  ; markers
-(poly ((e effect (within E) nonblocking)) …)                   ; both
+(poly ((e effect wait-free)) …)                                ; a marker
+(poly ((e effect (within E) wait-free)) …)                     ; both
 ```
 
 - **At instantiation**, both checkers check the effect given: within `E`
@@ -175,7 +194,7 @@ Two kinds of bound on an effect variable:
 - **Marker bounds cover what upper bounds cannot.** "Anything that does
   not wait" is not an upper bound, because regions are open-ended:
   there is no `E` with every effect but the waiting ones below it. So the
-  generic responsive loop wants `(e effect nonblocking)`, not `within`.
+  generic responsive loop wants `(e effect wait-free)`, not `within`.
 - **Evidence:** `(effectbound e)` would carry the markers as it carries
   the bound, and `given` would check them.
 
@@ -194,7 +213,7 @@ variable in the branch that passes:
 
 ```
 (effect-case er
-  ((nonblocking terminating) (run-inline h))   ; here e is nonblocking, terminating
+  ((wait-free) (run-inline h))                 ; here e is wait-free
   ((within (maxeff (send @w))) …)               ; here e ≤ (maxeff (send @w))
   (else (hand-to-a-process h)))
 ```
@@ -214,10 +233,10 @@ like to know whether kayak needs it beyond this use.
 ## What kayak's tests need
 
 `tests/kfx/responsive.kfx`'s handler, `(maxeff (send @srv) (alloc @r))`,
-is `nonblocking` today by the table: no change is needed.
+is `wait-free` by the table, with no change to it.
 `tests/kfx-refused/responsive-handler-waits.kfx` is refused today for its
 `(await @r)`, and still would be. With markers, a handler could also be
-declared `nonblocking` and generic, with the refusal naming the marker.
+declared `wait-free` and generic, with the refusal naming the marker.
 
 ## Order of work
 
@@ -225,8 +244,9 @@ Each step goes into both front ends, and the cells' verifier where it
 masks.
 1. Split `(io clock)`, `(io stdin)` and `(io process)`. Make the file
    operations refuse non-regular files. Fix the annotations this breaks.
-2. The `wait` residue in masking (checker and verifier), with a test of
-   the private I-cell example above.
+2. `spin` left by masking a wait (checker and verifier), with a test of
+   the private I-cell example above (TODO §224). This stands on its own,
+   markers or not.
 3. Markers and both kinds of bound on effect variables, with their
    evidence (`effectbound`, `given`).
 4. `effect-case`.
@@ -234,6 +254,8 @@ masks.
 
 ## Open
 
+- Whether to offer `nonblocking` alone, given that it means "waits on
+  nothing a caller can see", or only `wait-free`.
 - Spelling: `(io sleep)`, the stdin query's atom, `(io process-wait)`,
   the marker names.
 - Standard-stream writes: honest-and-waiting, or a buffered non-waiting

@@ -5381,3 +5381,18 @@ part in an element sees every element's binders while the element's other
 part sees none (nor can contract notation C: `typed-macros.md`, "Three
 notations"); saying it needs named scopes (Ott's; Pombrio et al.'s
 conclusion), a design of its own.
+
+## 224. A wait on a private region masks to nothing: neither `spin` nor a wait shows (found 2026-11-09)
+
+A soundness gap in what `spin` promises (both front ends, and the cells'
+verifier). `mask_keeps` (`check.rs`) drops `(await r)` and `(receive r)`
+where nothing outside sees `r`, so a procedure that makes a private I-cell,
+spawns a process to fill it, and awaits it may have the effect `pure`. Yet
+it waits on the other process, and never ends if that never fills the
+cell. A type without `spin` is trusted to end, and a masked `pure` is
+claimed to the expander as `pure`. Not yet shown to miscompile: to be
+tested first. The fix, the user's (2026-11-09): masking leaves `spin`
+behind where it drops a waiting atom, since a wait on something private
+is, from outside, unbounded internal work. `spawn` dropping a process's
+place leaves nothing, as the spawner does not wait. See
+`docs/research/effect-markers.md`.
