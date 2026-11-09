@@ -5396,3 +5396,36 @@ behind where it drops a waiting atom, since a wait on something private
 is, from outside, unbounded internal work. `spawn` dropping a process's
 place leaves nothing, as the spawner does not wait. See
 `docs/research/effect-markers.md`.
+
+## 225. The `io` capabilities that sometimes wait, split (kayak's request, 2026-11-09)
+
+For effect markers (`docs/research/effect-markers.md`), each capability
+must either always wait or never wait. Three do not: `(io clock)` is
+`clock` and `sleep-until`; `(io stdin)` is the reads and `stdin-ready?`;
+`(io process)` is `process-exit` and `process-write`, which wait, and
+`process-output`, `process-status` and `process-news`, which do not. Split
+each (spellings open: `(io sleep)`, `(io process-wait)`, the stdin
+query's), in both checkers, the `io` table of `fx26.md`, and the
+annotations it breaks, kayak's included. The file operations refuse what
+is not a regular file (or a directory, for `list-dir`), so that
+`fs-read` and `fs-write` never wait on another party.
+
+## 226. Effect markers, and bounds on effect variables (kayak's request, 2026-11-09)
+
+Markers, derived from an effect's atoms by a fixed table: `nonblocking`
+(no waiting atom: `(receive r)`, `(await r)`, `(io sleep)`, `(io stdin)`,
+`(io process-wait)`, `(io stdout)`, `(io stderr)`), `terminating` (no
+`spin`), `deterministic` (no `nondet`), and `wait-free` (`nonblocking`
+and `terminating`). Bounds on a `poly`'s effect variable: `(e effect
+(within E))` and markers, `(e effect (within E) wait-free)`, checked at
+each instantiation, assumed in the body, closed under `maxeff`, and
+carried by `(effectbound e)` and `given`. Both front ends. Needs §225
+for the markers; `within` does not. `docs/research/effect-markers.md`.
+
+## 227. `effect-case`: effect evidence tested, and its variable narrowed (kayak's request, 2026-11-09)
+
+`(effect-case er ((wait-free) …) ((within E) …) (else …))`, `er` an
+`(effectrep e)`: tests the effect the evidence describes at run time,
+and in a branch that passes, `e` has that bound or those markers, as a
+bounded binder's has (§226). In place of kayak's `rep` supertype and
+`effect-within` syscall. Both front ends. `docs/research/effect-markers.md`.

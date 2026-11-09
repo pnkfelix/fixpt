@@ -3,7 +3,8 @@
 Status: proposed 2026-11-09, revised the same day (a private wait is
 `spin`, not a new atom `wait`), in answer to kayak's request
 `docs/requests/fixpt-responsive-effects.md` (kayak 40a951197, C388, on
-Fixpt 13114974). Nothing built yet.
+Fixpt 13114974). Settled with kayak the same day (below). Nothing built
+yet: TODO §224 to §227.
 
 ## The request, in short
 
@@ -252,14 +253,19 @@ masks.
 4. `effect-case`.
 5. Later, separately: `nondet` as a derived marker.
 
+## Settled with kayak (2026-11-09)
+
+kayak agreed with each recommendation here:
+- `nonblocking` is offered by itself as well as in `wait-free`. kayak
+  finds it useful on its own, meaning "waits on nothing a caller can see".
+- Standard-stream writes are in the table honestly, as waiting. A
+  buffered write that never waits is for later, if it is needed.
+- No `rep`: `effect-case` covers what it was for.
+- `comefrom` is not a wait.
+- Files: the file operations refuse what is not a regular file (or a
+  directory, for `list-dir`), and `fs-read` and `fs-write` do not wait.
+
 ## Open
 
-- Whether to offer `nonblocking` alone, given that it means "waits on
-  nothing a caller can see", or only `wait-free`.
 - Spelling: `(io sleep)`, the stdin query's atom, `(io process-wait)`,
   the marker names.
-- Standard-stream writes: honest-and-waiting, or a buffered non-waiting
-  write.
-- Whether `comefrom` (kayak lists it among waits) belongs in the table.
-  A control effect's prompt is the program's own, so it is not a wait on
-  another party. Our reading is that it does not.
