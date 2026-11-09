@@ -5390,8 +5390,13 @@ where nothing outside sees `r`, so a procedure that makes a private I-cell,
 spawns a process to fill it, and awaits it may have the effect `pure`. Yet
 it waits on the other process, and never ends if that never fills the
 cell. A type without `spin` is trusted to end, and a masked `pure` is
-claimed to the expander as `pure`. Not yet shown to miscompile: to be
-tested first. The fix, the user's (2026-11-09): masking leaves `spin`
+claimed to the expander as `pure`. Shown (2026-11-09), in both checkers:
+`(define stuck (subr pure (int) int) (lambda (n) (let ((c (the (icell int
+@q) (make-icell)))) (icell-get c))))` is accepted, and `(begin (stuck 1)
+7)` fails with a deadlock on every machine tried (native, the Scheme VM,
+the cellular machine in Rust). So a `pure` procedure does not end. The
+call is kept, not dropped, so nothing is miscompiled yet; but the type
+is wrong. The fix, the user's (2026-11-09): masking leaves `spin`
 behind where it drops a waiting atom, since a wait on something private
 is, from outside, unbounded internal work. `spawn` dropping a process's
 place leaves nothing, as the spawner does not wait. See
