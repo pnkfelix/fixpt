@@ -17,7 +17,9 @@
                (let ((s (symbol->string x)))
                  (if (and (> (string-length s) 2) (string=? (substring s 0 2) "%~"))
                      (let ((c (colon s 2)))
-                       (if (< c 0) x (base (string->symbol (substring s (+ c 1) (string-length s))))))
+                       (if (< c 0)
+                           x
+                           (base (string->symbol (substring s (+ c 1) (string-length s))))))
                      x)))))
     base))
 ;; ER's `rename`, for expansion `n`: `x` as where the macro was defined.
@@ -25,7 +27,8 @@
   (lambda (n)
     (lambda (x)
       (string->symbol
-       (string-append "%~" (string-append (int->string n) (string-append ":" (symbol->string x))))))))
+       (string-append "%~"
+                      (string-append (int->string n) (string-append ":" (symbol->string x))))))))
 ;; ER's `compare`: two names the same, aliases as their names.
 (define %er-compare (subr spin (symbol symbol) bool)
   (let ((base %alias-base)) (lambda (a b) (symbol=? (base a) (base b)))))
