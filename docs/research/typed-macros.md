@@ -1114,25 +1114,29 @@ each in the scope of those before (a pattern's binders through a template's
 variable makes, `((_ f) f)`; a tag placed only at an application's head,
 `(t e)`. Tests: `macros/infer-*.fx`, `macros/syntax-rules-unsaid.fx`.
 
-## Proposed: signatures as contracts, named, outside the code (2026-11-08)
+## Decided: signatures as contracts, named, outside the code (2026-11-08)
 
-Not built; for the user to look over. The user's direction, after the
-inference above:
+Not built. The user's direction, after the inference above, and the
+choices made with them the same day:
 
 - **Types outside the code.** Nothing is written in a `syntax-rules`'
   patterns or templates; a signature is a part of the `define-syntax` of
   its own.
 - **A signature says what it is**, as a transformer does: `(syntax-contract
-  …)`, in the named notation below; `(syntax-contract/addressed …)`,
-  Herman's, as written today, kept. A bare signature is refused, as a bare
-  clause list is, its message naming both.
-- **Readable**: names, not chains of `A` and `D`. The addresses were to
-  work from a well-defined reference point; they stay what the names
-  elaborate to, and the checker is unchanged.
+  …)`, in the notation below; `(syntax-contract/addressed …)`, Herman's,
+  as written today, kept. A bare signature is refused, as a bare clause
+  list is, its message naming both. "Contract" in Findler and Felleisen's
+  sense: for `syntax-rules` it is discharged once, where the macro is
+  defined; for a procedural transformer it is checked at each expansion,
+  at the boundary between the transformer and what it makes, the macro
+  blamed ("Proposed: procedural macros", below). The expander's own word
+  for a typed hole's `(the T e)` wrapper (`Clause::contracts`) is renamed.
+- **Readable**: labels and contexts, not chains of `A` and `D`, which stay
+  what a contract elaborates to; the checker is unchanged.
 
 ```scheme
 (define-syntax let1
-  (syntax-contract ((x : bvar) (e : expr)) (body : (in expr x)))
+  (syntax-contract ((x : bvar) (e : expr)) (body : expr (in (x hole))))
   (syntax-rules ()
     ((_ (y v) b) (let ((y v)) b))))
 ```
@@ -1140,65 +1144,89 @@ inference above:
 ### The notation
 
 ```text
-σ ::= expr | bvar | id | data | type | label | lambda | dvar | kind | ()
-    | (σ … σ ...) | (σ … . σ)          lists, as written today
-    | (x : σ)                          a part, labelled x
-    | (in σ x …)                       σ in the scope of what x … offer,
-                                       outermost first (Herman's import)
-    | (exports σ (rib x …))            σ offers one level: what x … offer
-    | (exports σ (cage x …))           σ offers levels, outermost first
-    | (union σ …) | (mu t σ) | t       alternatives, recursion
-    | (many σ) | (literal name)
-    | (expr #:type T #:effect E) …     typed holes, as written today
-    | _                                inferred (`syntax-rules` only)
+part  ::= (x : σ)                       labelled x, of syntax type σ
+        | (x : σ (in C))                in the scope C, the part in its hole
+σ     ::= expr | bvar | id | data | type | label | lambda | dvar | kind
+        | place                         a binder of a description and a
+                                        value both (`letrena`'s)
+        | () | (σ-or-part … σ-or-part ...) | (σ-or-part … . σ-or-part)
+        | (offers σ C)                  σ offers the scope C to what brings
+                                        it into scope
+        | (union σ …) | (mu t σ) | t | (many σ) | (literal name)
+        | (expr #:type T #:effect E) …  typed holes, as written today
+        | _                             inferred (`syntax-rules` only)
+C     ::= hole                          where the part (or the importer) goes
+        | (L C)                         L's scope, C inside it
+L     ::= x                             what the part labelled x offers: a
+                                        binder, itself; a part that offers, its C
+        | (x …)                         several, one level, none shadowing
+                                        another (a rib)
 ```
 
-What a labelled part offers: a `bvar`, itself, a value's binder; a `dvar`,
-itself, a description's; a part that `exports`, what it exports. The
-colon is FX-26's own for a part named where it is declared (`(x : T)`, a
-procedure type's parameters; `TODO.md` §213), and keeps a label apart from
-a list of two types, `(x : bvar)` from `(expr bvar)`.
+A scope is a context, written as it nests: no order to remember. What a
+part sees and what it offers are both contexts, so `in` and `offers` read
+alike; naming a label whose part offers a context plugs that context in
+there. A `let` is one level, a `let*` levels nested:
 
-Whole signatures: `(syntax-contract #:makes defn σ)` for what makes
-definitions, `#:makes type` a description (`(-> σ defn)` today: `->` reads
+```scheme
+let:   (body : expr (in ((x1 x2 x3) hole)))
+let*:  (body : expr (in (x1 (x2 (x3 hole)))))
+```
+
+The contracts of the kernel's examples:
+
+```scheme
+;; let, by ellipsis: each element offers its binder; the list, all of them,
+;; one level.
+(syntax-contract ((bindings : ((offers ((x : bvar) (e : expr)) (x hole)) ...))
+                  (body : expr (in (bindings hole)))))
+
+;; let*, by recursion: Herman's let*-cl, which inference finds. Each later
+;; clause is in the hole of x's scope; each clause offers x's scope with the
+;; later ones' inside it.
+(syntax-contract
+  ((cs : (mu clauses
+           (union ()
+                  (offers ((x : bvar) (e : expr) . (rest : clauses (in (x hole))))
+                          (x (rest hole))))))
+   (body : expr (in (cs hole)))))
+
+;; A macro that makes a definition, and says what it defines.
+(syntax-contract #:makes defn (offers ((n : bvar) (e : expr)) (n hole)))
+```
+
+Whole contracts: `#:makes defn` for what makes definitions, `#:makes type`
+a description, an expression's by default (`(-> σ defn)` today: `->` reads
 as a procedure's type, which this is not); `#:poly ((t type) …)` for the
 binders typed holes may name.
 
-```scheme
-;; let, by ellipsis: each element offers its binder; the list, all of them.
-(syntax-contract ((bindings : ((exports ((x : bvar) (e : expr)) (rib x)) ...))
-                  (body : (in expr bindings))))
-
-;; let*, by recursion: Herman's let*-cl, which inference finds.
-(syntax-contract ((cs : (mu clauses
-                          (union ()
-                                 (exports ((x : bvar) (e : expr) . (rest : (in clauses x)))
-                                          (cage x rest)))))
-                  (body : (in expr cs))))
-
-;; A macro that makes a definition, and says what it defines.
-(syntax-contract #:makes defn (exports ((n : bvar) (e : expr)) (rib n)))
-```
-
 ### Labels and their scopes
 
-A label is the signature's, not a pattern variable: the signature is the
+A label is the contract's, not a pattern variable: the contract is the
 interface, each clause matched against it by shape as today, so clauses
 may name a part differently, or not at all, and renaming a pattern
-variable changes no type. A label is in scope in the region it is in
-(the signature, a list's element, a `union`'s member, a `mu`'s body: what
-an address is from today) and in the regions inside it; two of one name
-in a region are refused. A part may be in the scope of a label of a
-region around it: the import is said on the part around it that the
-binder is outside of, as inference says it (`Macros::sites`).
+variable changes no type. A label is in scope in the region it is in (the
+contract, a list's element, a `union`'s member, a `mu`'s body: what an
+address is from today) and the regions inside it; two of one name in a
+region are refused. Inside a `mu` body a label means its own unfolding's
+part (`x` is this clause's binder, each time the `mu` unrolls), never an
+outer one's, which the inherited scopes bring in already: an `in` flows
+down, pushing its unfolding's binder onto what the parts around inherited,
+and an `offers` flows up, each unfolding's scope with its `rest`'s plugged
+in (an inherited and a synthesized attribute). A part may be in the scope
+of a label of a region around it; it may not name a part inside a list's
+element or a `union`'s member from outside, which reaches it only by what
+that region `offers`, written (the user's: each binding's way from binder
+to scope is in the contract, self-documenting).
 
 ### Elaboration, and printing
 
-Each label becomes its part's address from its region's root, each `in`
-an `import` (`rho`, or `cage` for levels of more than one part), each
-`exports` an `export`, its δ from what the part offers (`var`, `dvar`, a
-part's `rib`, or `(at ℓ)` for a ribcage). So a contract is a way of
-writing a signature the checker already checks; it adds no rule.
+Each label becomes its part's address from its region's root; each `in`'s
+context an `import` (one level a `rho`, levels a `cage` of them, innermost
+first); each `offers` an `export`; δ from what the part offers (`var` for a
+`bvar`, `dvar`, `place`, a part's `rib`, or `(at ℓ)` for nested levels). A
+contract is a way of writing a signature the checker already checks; it
+adds no rule.
 
 An inferred signature is printed as a contract, each part labelled by the
 first clause's pattern variable there, or `p1`, `p2`, … where none is,
@@ -1210,28 +1238,6 @@ is written, else refused, saying both.
 The tests' signatures move to contracts, their "As named:" comments the
 start (each checked to elaborate to the addressed signature it replaces);
 some stay `/addressed`, for Herman's notation itself.
-
-### Open
-
-1. **The header's word.** `syntax-contract` is the user's. Against it:
-   the expander already calls a typed hole's `(the T e)` its contract
-   (`Clause::contracts`), and Racket's contracts are checked as a program
-   runs, these once, where the macro is defined. `syntax-type` or
-   `syntax-signature` would not collide. The user's to settle.
-2. **`/addressed`**, not `/debruijn`: Herman's addresses are paths into
-   the operands, not counts of binders out from a reference.
-3. **Into a repeated element.** May `(in expr x)` name `x` inside a list's
-   element from outside it, meaning every repetition's together (`let`'s
-   rule), the `exports` made by elaboration as inference makes them? Or
-   is the `exports` written, so that each binding's way from binder to
-   scope is in the signature (the user's thought: more self-documenting)?
-   Today's addresses require it.
-4. **A place** (`letrena`'s binder, a description and a value): offered
-   as both where its kind says `dvar` and a form binds it so; or written,
-   `(in expr (place r))`.
-5. **Order in a `cage`**: outermost first, as `in`'s parts are, against
-   today's innermost first.
-6. **`#:makes`** as a keyword, or kept `(-> σ made)`.
 
 ## Syntactic closures: what an expansion means (2026-11-08)
 
