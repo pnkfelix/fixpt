@@ -16,7 +16,7 @@ are in the last section, "Log: the glance's details", and in
   compiler written in FX-26, bootstrapped to a fixpoint, on
   cellular[^cellular] machines in Rust and arm64. The Rust versions stay
   as oracles: both checkers, and both compilers, must agree.
-- **FX all the way down** (2026-10-02; README, "Which compiler makes the
+- **FX all the way down** (2026-10-02; `docs/repository.md`, "Which compiler makes the
   machine code"): `--cellular-machine fx-compiled` makes the REPL's words
   arm64 with `native.fx` in place of the Rust `assemble_word`, which stays
   as its oracle and for comparison; only placing the code, and the

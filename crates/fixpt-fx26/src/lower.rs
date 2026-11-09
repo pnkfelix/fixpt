@@ -1,7 +1,7 @@
 //! Lowering to Scheme that keeps what the checker proved.
 //!
 //! Not erasure. FX-87's eraser threw the checker's knowledge away, and adding
-//! it back as `%fx-note` claims was an afterthought (README, "What a front end
+//! it back as `%fx-note` claims was an afterthought (`docs/repository.md`, "What a front end
 //! proves, the compiler uses"). Here the claims are the point: the output is
 //! ordinary Scheme, runnable by any Scheme, and wherever the checker proved
 //! something the compiler can use, the expression carries it as an inert
