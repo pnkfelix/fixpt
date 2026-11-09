@@ -562,7 +562,11 @@
   (lambda (v kind)
     (let* ((b (k-bound-of v)) (named (k-cat3 (k-dvar-text v "b") " " (k-kind-text kind)))
            (d (if (k-distinct-var? v) " distinct)" ")")))
-      (if (null? b) (k-cat3 "(" named d) (k-cat5 "(" named " " (k-region-show (car b)) d)))))
+      (cond ((not (null? b)) (k-cat5 "(" named " " (k-region-show (car b)) d))
+            ;; An effect binder's bound (`TODO.md` §226).
+            ((not (null? (k-effect-bound-of v)))
+             (k-cat5 "(" named " (within " (k-show-effect (car (k-effect-bound-of v))) "))"))
+            (else (k-cat3 "(" named d))))))
 (define k-show-binders (->* (k-binders) k-strings)
   (lambda (bs)
     (if (null? bs)

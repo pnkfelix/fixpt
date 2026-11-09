@@ -945,6 +945,9 @@ pub struct Arena {
     /// Each region binder's bound, if it has one: `(r region p)`, a region
     /// that won't outlive `p` (`docs/research/places-and-regions.md`).
     dvar_bounds: Vec<Option<Region>>,
+    /// Each effect binder's bound, if it has one: `(e effect (within E))`,
+    /// an effect `e` is within wherever it is bound (`TODO.md` §226).
+    dvar_effect_bounds: Vec<Option<Effect>>,
     /// Region binders that alias no other region in their scope: a
     /// `(r region distinct)` binder, or a `letregion`'s fresh region
     /// (`docs/research/region-anti-aliasing.md`, variant (C)).
@@ -1044,6 +1047,7 @@ impl Arena {
         self.dvar_places.push(false);
         self.dvar_data.push(false);
         self.dvar_bounds.push(None);
+        self.dvar_effect_bounds.push(None);
         self.dvar_distinct.push(false);
         self.dvar_outer.push(Vec::new());
         self.dvar_kinds.push(Kind::Type);
@@ -1107,6 +1111,15 @@ impl Arena {
     pub fn bound(&self, v: DVar) -> Option<Region> {
         self.dvar_bounds[v.0 as usize]
     }
+    /// Give effect binder `v` a bound: an effect it is within.
+    pub fn set_effect_bound(&mut self, v: DVar, b: Effect) {
+        self.dvar_effect_bounds[v.0 as usize] = Some(b);
+    }
+    /// The bound of effect binder `v`, if it has one; none for a label a
+    /// comparison made (`BinderEnv`).
+    pub fn effect_bound(&self, v: DVar) -> Option<&Effect> {
+        self.dvar_effect_bounds.get(v.0 as usize).and_then(|b| b.as_ref())
+    }
     /// Record the region and place variables bound around `v`'s binder.
     pub fn set_outer(&mut self, v: DVar, outer: Vec<DVar>) {
         self.dvar_outer[v.0 as usize] = outer;
@@ -1163,6 +1176,7 @@ impl Arena {
         self.dvar_places.truncate(mark.dvars);
         self.dvar_data.truncate(mark.dvars);
         self.dvar_bounds.truncate(mark.dvars);
+        self.dvar_effect_bounds.truncate(mark.dvars);
         self.dvar_distinct.truncate(mark.dvars);
         self.dvar_outer.truncate(mark.dvars);
         self.dvar_kinds.truncate(mark.dvars);

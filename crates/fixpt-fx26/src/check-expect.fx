@@ -124,7 +124,7 @@
 (define k-uncovered (->* (k-eff k-eff) k-eff)
   (lambda (g w)
     (cond ((null? g) nil)
-          ((k-within? (k-one (car g)) w) (k-uncovered (cdr g) w))
+          ((k-atom-le? w (car g)) (k-uncovered (cdr g) w))
           (else (the k-eff (cons (car g) (k-uncovered (cdr g) w)))))))
 ;; The second line of an "is expected here" message, where `got` and `want`
 ;; are procedures: the atoms of `got`'s latent effect that `want`'s does not

@@ -304,6 +304,19 @@
               (r-frozen (p f) (and (>= p 0) (k-contains? e (a-alloc (r-var p)))))
               (else y #f)))
           (else y #f)))))
+;; Subeffecting with effect variables' bounds (`TODO.md` §226;
+;; `Checker::effect_le`): each atom of `x` is within `y`, or is a variable,
+;; or a comparison's label, whose bound is. A bound names only the binders
+;; before its own, so this ends.
+(define k-effect-le? (->* (k-eff k-eff) bool)
+  (lambda (x y) (or (null? x) (and (k-atom-le? y (car x)) (k-effect-le? (cdr x) y)))))
+(define k-atom-le? (->* (k-eff k-atom) bool)
+  (lambda (y a)
+    (or (k-covered? y a)
+        (tagcase a
+          (a-var (v)
+            (let ((b (k-effect-bound-of v))) (and (not (null? b)) (k-effect-le? (car b) y))))
+          (else z #f)))))
 ;; Whether `e` makes data frozen into a place: what only `k-covered?` sees
 ;; within the place's allocation.
 (define k-frozen-alloc? (->* (k-eff) bool)

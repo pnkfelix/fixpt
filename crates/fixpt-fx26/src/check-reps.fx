@@ -225,9 +225,14 @@
         nil
         (let* ((v (extract (car bs) 1))
                (bound (k-bound-of v))
+               ;; An effect binder's bound, in the place a region's is
+               ;; (`TODO.md` §226).
+               (within (k-effect-bound-of v))
+               (last (cond ((not (null? bound)) (list (rp-region (car bound))))
+                           ((not (null? within)) (list (rp-effect (car within))))
+                           (else nil)))
                (args (cons (rp-kind (extract (car bs) 2))
-                           (cons (sum flag (k-distinct-var? v))
-                                 (if (null? bound) nil (list (rp-region (car bound))))))))
+                           (cons (sum flag (k-distinct-var? v)) last))))
           (cons (rp-node "binder" args) (rp-binder-nodes (cdr bs)))))))
 (define rp-binder-names (->* (k-binders) k-names)
   (lambda (bs)
@@ -625,10 +630,15 @@
                           #u
                           (let* ((b (ri-args (ri-child (car xs)))) (v (extract (car bs) 1)))
                             (begin (if (ri-flag (ri-nth b 1)) (k-set-distinct v) #u)
-                                   (if (null? (cdr (cdr b)))
-                                       #u
-                                       (let ((r (ri-region (ri-nth b 2))))
-                                         (set k-bounds (cons (cons v r) (get k-bounds)))))
+                                   (cond ((null? (cdr (cdr b))) #u)
+                                         ((= (extract (car bs) 2) 1)
+                                          (let ((e (the (listof k-eff acyclic)
+                                                        (list (ri-effect (ri-nth b 2))))))
+                                            (set k-effect-bounds
+                                                 (cons (cons v e) (get k-effect-bounds)))))
+                                         (else
+                                          (let ((r (ri-region (ri-nth b 2))))
+                                            (set k-bounds (cons (cons v r) (get k-bounds))))))
                                    (marks (cdr bs) (cdr xs))))))))
       (let ((bs (make (extract (ri-node k) 4) (ri-args k) 0)))
         (begin (marks bs (ri-args k)) bs)))))

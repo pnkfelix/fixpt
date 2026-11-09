@@ -110,6 +110,27 @@
                (or (not (k-distinct-var? (extract (car ba) 1)))
                    (k-distinct-var? (extract (car bb) 1)))
                (k-same-bounds? (cdr ba) (cdr bb) ea eb))))))
+;; Each pair of effect binders' bounds (`TODO.md` §226): `b`'s within
+;; `a`'s, none the loosest, so that what may be given there may be given
+;; here; `b`'s noted for the pair's label, assumed in comparing the bodies.
+;; Every pair's is noted, none too, so that no label keeps another
+;; question's (`k-label-bounds`).
+(define k-effect-bounds-sub? (->* (k-binders k-binders k-benv k-benv) bool)
+  (lambda (ba bb ea eb)
+    (or (null? ba)
+        (let* ((va (extract (car ba) 1))
+               (l (k-atom-var (car (k-benv-effect ea (k-one (a-var va))))))
+               (x (k-bound-renamed va ea)) (y (k-bound-renamed (extract (car bb) 1) eb))
+               (noted (set k-label-bounds (cons (cons l y) (get k-label-bounds)))))
+          (and (cond ((null? x) #t)
+                     ((null? y) #f)
+                     (else (k-effect-le? (car y) (car x))))
+               (k-effect-bounds-sub? (cdr ba) (cdr bb) ea eb))))))
+;; The bound of effect binder `v`, renamed by `env`: none or one.
+(define k-bound-renamed (->* (int k-benv) (listof k-eff acyclic))
+  (lambda (v env)
+    (let ((b (k-effect-bound-of v)))
+      (if (null? b) b (the (listof k-eff acyclic) (cons (k-benv-effect env (car b)) nil))))))
 ;; Whether two nodes are the same generative type's.
 (define k-same-named? (->* (k-ty k-ty) bool)
   (lambda (ta tb)
@@ -158,7 +179,7 @@
     (lambda (a b ea eb trail labels)
       (let ((ca (car (k-as-subr a))) (cb (car (k-as-subr b))))
         (and (= (k-length (extract ca 2)) (k-length (extract cb 2)))
-             (k-within? (k-benv-effect ea (extract ca 1)) (k-benv-effect eb (extract cb 1)))
+             (k-effect-le? (k-benv-effect ea (extract ca 1)) (k-benv-effect eb (extract cb 1)))
              (k-subs-contra (extract ca 2) (extract cb 2) ea eb trail labels)
              (k-sub (extract ca 3) (extract cb 3) ea eb trail labels)))))
   ;; `a ≤ b`. Recursive types are compared coinductively: a pair already
@@ -541,7 +562,7 @@
               (tagcase tb
                 (ty-comp (t2 a2 d2 r2 o2)
                   (and (bool=? o1 o2) (k-benv-region=? r1 r2 ea eb)
-                       (k-within? (k-benv-effect ea d1) (k-benv-effect eb d2))
+                       (k-effect-le? (k-benv-effect ea d1) (k-benv-effect eb d2))
                        (k-sub t2 t1 eb ea trail labels) (k-sub a1 a2 ea eb trail labels)))
                 (else z #f)))
             (ty-markkey (x r)
@@ -572,6 +593,7 @@
                        (let* ((named (k-name-binders ba bb a b 0 (the k-benvs (cons ea eb)) labels))
                               (ia (car named)) (ib (cdr named)))
                          (and (k-same-bounds? ba bb ia ib)
+                              (k-effect-bounds-sub? ba bb ia ib)
                               (k-sub xa xb ia ib trail labels)))))
                 (else z #f)))
             ;; A `nlist` is frozen, so covariant in its elements, and
@@ -635,8 +657,8 @@
                      (tagcase (car ys)
                        (de (e)
                          (let ((d2 (k-benv-effect ea d)) (e2 (k-benv-effect eb e)))
-                           (case v ((0) (k-within? d2 e2))
-                                   ((1) (k-within? e2 d2))
+                           (case v ((0) (k-effect-le? d2 e2))
+                                   ((1) (k-effect-le? e2 d2))
                                    (else (k-eff=? d2 e2)))))
                        (else z #f)))
                    (dz (m) (tagcase (car ys) (dz (n) (k-size-eq? m n)) (else z #f)))

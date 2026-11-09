@@ -67,7 +67,7 @@
 (import check-read k-at-name? k-atom-head? k-ctor-params k-effect-desc k-effect-named
         k-effect-selected k-frozen-into k-head k-items k-items-or-nil k-name-of k-not-applied
         k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head
-        k-qualified? k-unqualified)
+        k-settle-withins k-qualified? k-unqualified)
 (import check-effects k-one k-union)
 (import check-specs k-spec-clause? k-specified k-spec-pnames)
 
@@ -98,6 +98,9 @@
                      (k-effect-atom head (k-nth items 1))
                      (k-sfail (k-cat3 "`(" head " region)`") s)))
                 (else (k-sfail "expected an effect" s)))))))
+;; Binders `s`, each effect binder's bound read (`k-settle-withins`).
+(define k-parse-binders-bounded (->* (syn) k-binders)
+  (lambda (s) (let ((bs (k-parse-binders s))) (begin (k-settle-withins k-parse-effect) bs))))
 (define k-parse-types (->* (k-syns) k-ids)
   (lambda (xs)
     (if (null? xs)
@@ -148,7 +151,7 @@
            (shape (cond (poly? (if (>= (k-length items) 3) #u (k-sfail usage prop)))
                         ((string=? head "<=") #u)
                         (else (k-sfail usage prop))))
-           (bs (if poly? (k-parse-binders (k-nth items 1)) (the k-binders nil)))
+           (bs (if poly? (k-parse-binders-bounded (k-nth items 1)) (the k-binders nil)))
            (conc (k-le (if poly? (k-nth items 2) prop)))
            (hyps (if poly? (k-les (cdr (cdr (cdr items)))) (the k-hyps nil)))
            (spin (k-one (a-spin)))
@@ -418,7 +421,7 @@
          (begin
            (k-shape (= n 3) "`(poly ((name kind) …) type)`" s)
            (let* ((saved (get k-dscope))
-                  (bs (k-parse-binders (k-nth items 1)))
+                  (bs (k-parse-binders-bounded (k-nth items 1)))
                   (body (k-parse-type (k-nth items 2))))
              (begin (set k-dscope saved) (k-ty-new (ty-poly bs body))))))
         ((nlist)

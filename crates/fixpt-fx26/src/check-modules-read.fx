@@ -179,7 +179,7 @@
         (e-plambda (binders body a b abk abkr)
           (let* ((saved (get k-dscope))
                  (lives (get k-lifetimes))
-                 (bs (k-parse-binders binders))
+                 (bs (k-parse-binders-bounded binders))
                  ;; A procedure's regions and places outlive whatever its
                  ;; body binds.
                  (ordered (k-order-binders bs lives))

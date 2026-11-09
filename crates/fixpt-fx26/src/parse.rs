@@ -368,10 +368,24 @@ impl Checker {
             // `(r region p)`: a region that won't outlive `p`, a place
             // bound before it. `(t data p)`: data at `p` or the heap
             // (`docs/research/shapes.md`; F13).
+            // `(e effect (within E))`: an effect within `E`, which may name
+            // the binders before it (`TODO.md` §226).
+            let mut within = None;
             let bound = match bound {
                 Some(p) if matches!(kind, Kind::Region | Kind::Data) => Some(self.parse_place(p)?),
+                Some(p) if kind == Kind::Effect => {
+                    let form = self.items(p, "an effect binder's bound")?;
+                    match form {
+                        [head, e] if head.as_symbol().is_some_and(|h| self.name(h) == "within") => within = Some(self.parse_effect(e)?),
+                        _ => return Err(FxError::at(p.span, "an effect binder's bound is `(within effect)`: `(name effect (within effect))`")),
+                    }
+                    None
+                }
                 Some(p) => {
-                    return Err(FxError::at(p.span, "only a region or data binder has a bound: `(name region place)` or `(name data place)`"));
+                    return Err(FxError::at(
+                        p.span,
+                        "only a region, data or effect binder has a bound: `(name region place)`, `(name data place)` or `(name effect (within effect))`",
+                    ));
                 }
                 None => None,
             };
@@ -381,6 +395,9 @@ impl Checker {
             let v = self.arena.dvar_of(name, kind);
             if let Some(p) = bound {
                 self.arena.set_bound(v, p);
+            }
+            if let Some(e) = within {
+                self.arena.set_effect_bound(v, e);
             }
             if distinct {
                 self.arena.set_distinct(v);

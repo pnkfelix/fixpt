@@ -259,6 +259,15 @@
 ;; Each bounded region binder's bound: `(r region p)`, a region that won't
 ;; outlive `p` (`docs/research/places-and-regions.md`).
 (define-type k-bounded (listof (pairof int k-region @t) acyclic))
+;; Each effect binder's bound as written, to be read once the binders are
+;; (`k-settle-withins`): its variable, its `E`, and the description scope
+;; at its binder, which has the binders before it and not itself.
+(define-type k-withins
+  (listof (productof (1 int) (2 syn) (3 (listof (pairof symbol k-ds @t) acyclic))) acyclic))
+;; Each bounded effect binder's bound: `(e effect (within E))` (`TODO.md`
+;; §226), by its variable, or by the label a comparison of `poly`s gave a
+;; pair of binders (negative), none or one.
+(define-type k-effect-bounded (listof (pairof int (listof k-eff acyclic) @t) acyclic))
 ;; The region and place variables bound around each one's binder, which it
 ;; won't outlive: the order of lifetimes, by nesting.
 (define-type k-nesting (listof (pairof int k-ids @t) acyclic))
@@ -422,6 +431,11 @@
    (val k-flats (ref k-ids @t))
    (val k-arrow-vars (ref (listof (pairof int int @t) acyclic) @t))
    (val k-bounds (ref k-bounded @t))
+   (val k-effect-bounds (ref k-effect-bounded @t))
+   (val k-label-bounds (ref k-effect-bounded @t))
+   (val k-pending-withins (ref k-withins @t))
+   (val k-effect-bound-of
+        (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (int) (listof k-eff acyclic)))
    (val k-outers (ref k-nesting @t))
    (val k-distincts (ref k-ids @t))
    (val k-distinct-var? (subr (maxeff (read @globals) spin (read @t)) (int) bool))

@@ -32,6 +32,10 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-eff k-eff) k-eff))
             (val k-waits-dropped
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-eff k-eff) k-eff))
+            (val k-effect-le?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-eff k-eff) bool))
+            (val k-atom-le?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-eff k-atom) bool))
             (val k-covered?
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool))
             (val k-within?

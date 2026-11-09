@@ -5439,7 +5439,7 @@ file; `write-file` renames a file written beside, and `list-dir` of a
 FIFO fails at once, so neither could wait. `programs/io/io-parts.fx`,
 `io-part-sleeps.fx`.
 
-## 226. Effect markers, and bounds on effect variables (kayak's request, 2026-11-09)
+## 226. Effect markers, and bounds on effect variables (kayak's request, 2026-11-09; `within` done 2026-11-09)
 
 Markers, derived from an effect's atoms by a fixed table: `nonblocking`
 (no waiting atom: `(receive r)`, `(await r)`, `(io clock)`, `(io stdin)`,
@@ -5450,6 +5450,14 @@ and `terminating`). Bounds on a `poly`'s effect variable: `(e effect
 each instantiation, assumed in the body, closed under `maxeff`, and
 carried by `(effectbound e)` and `given`. Both front ends. Needs §225
 for the markers; `within` does not. `docs/research/effect-markers.md`.
+
+Done (2026-11-09): `within` bounds, in both checkers (`docs/fx26.md`,
+"Bounded effect variables"; `programs/higher-kinds/effect-within*.fx`):
+parsed, printed, kept by reps and `.fasl`s; each instantiation checked;
+`e` within its bound wherever effects are compared; `poly`s compared by
+`F<:`'s rule. Left: markers, waiting on whether they are cofinite effects
+(the note's option); a binder only a bound mentions, found from it; the
+bound in `effectbound` evidence and `given`.
 
 ## 227. `effect-case`: effect evidence tested, and its variable narrowed (kayak's request, 2026-11-09)
 

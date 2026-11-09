@@ -420,6 +420,7 @@
   (lambda ()
     (begin
       (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil)
+      (set k-effect-bounds nil) (set k-label-bounds nil)
       (set k-distincts nil)
       (set k-lifetimes nil) (set k-freezing nil) (set k-written nil)
       (set k-arrow-vars nil) (set k-abstract-funs nil))))

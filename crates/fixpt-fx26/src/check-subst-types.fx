@@ -28,7 +28,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-region (select check-types-types k-region))
 ;; The types it names, from the files that define them.
-(import check-types-types (type k-binders k-desc k-descs k-ids k-parts))
+(import check-types-types (type k-binders k-desc k-descs k-ids k-parts k-eff))
 ;; What a substitution can change of a type (`k-fv-of`): the description
 ;; variables in it, sorted; what else it holds that a substitution acts on
 ;; (`k-fv-select` and the others, or'd); and, while it is walked, the
@@ -48,6 +48,10 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-parts k-map)
                        k-parts))
+            (val k-subst-effect
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-eff k-map)
+                       k-eff))
             (val k-subst-region
                  (subr (maxeff (read @globals) spin (read @t)) (k-region k-map) k-region))
             (val k-new-smemo

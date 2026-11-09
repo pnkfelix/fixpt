@@ -405,6 +405,7 @@ impl Checker {
             Ty::Poly { binders, .. } => {
                 for (v, k) in binders {
                     (var(*v), self.show_kind(*k), self.arena.is_distinct(*v), self.arena.bound(*v).map(|b| self.show_region(b))).hash(&mut h);
+                    self.arena.effect_bound(*v).map(|e| self.show_effect(e)).hash(&mut h);
                 }
             }
             Ty::Ref(_, r) | Ty::ICell(_, r) | Ty::MarkKey(_, r) | Ty::Pair(_, _, r, false) | Ty::Place(r) => self.show_region(*r).hash(&mut h),
@@ -774,9 +775,10 @@ impl Checker {
                     .map(|(v, k)| {
                         let k = self.show_kind(*k);
                         let d = if self.arena.is_distinct(*v) { " distinct" } else { "" };
-                        match self.arena.bound(*v) {
-                            Some(b) => format!("({} {k} {}{d})", self.dvar_text(*v, 'b'), self.show_region(b)),
-                            None => format!("({} {k}{d})", self.dvar_text(*v, 'b')),
+                        match (self.arena.bound(*v), self.arena.effect_bound(*v)) {
+                            (Some(b), _) => format!("({} {k} {}{d})", self.dvar_text(*v, 'b'), self.show_region(b)),
+                            (None, Some(e)) => format!("({} {k} (within {}))", self.dvar_text(*v, 'b'), self.show_effect(e)),
+                            (None, None) => format!("({} {k}{d})", self.dvar_text(*v, 'b')),
                         }
                     })
                     .collect();

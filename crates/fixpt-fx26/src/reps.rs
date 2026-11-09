@@ -258,7 +258,7 @@ impl Ex<'_> {
     }
 
     /// Binders `bs`, bound by node `slot`, in scope; their nodes.
-    fn binders(&mut self, slot: u32, bs: &[(DVar, Kind)]) -> Vec<Arg> {
+    fn binders(&mut self, slot: u32, bs: &[(DVar, Kind)]) -> Result<Vec<Arg>, String> {
         for (pos, (v, _)) in bs.iter().enumerate() {
             self.scope.push((*v, slot, pos as u32));
         }
@@ -269,7 +269,11 @@ impl Ex<'_> {
                 if let Some(b) = self.c.arena.bound(*v) {
                     args.push(self.region(b));
                 }
-                self.node("binder", args)
+                // An effect binder's bound, in the place a region's is.
+                if let Some(e) = self.c.arena.effect_bound(*v).cloned() {
+                    args.push(self.effect(&e)?);
+                }
+                Ok(self.node("binder", args))
             })
             .collect()
     }
@@ -289,7 +293,7 @@ impl Ex<'_> {
         let (params, variance, rep) = (g.params.clone(), g.variance.clone(), g.rep);
         let names = self.names_of(&params);
         let mark = self.scope.len();
-        let mut args = self.binders(slot, &params);
+        let mut args = self.binders(slot, &params)?;
         let vs = variance
             .iter()
             .map(|v| {
@@ -577,7 +581,7 @@ impl Ex<'_> {
             Ty::Poly { binders, body } => {
                 let names = self.names_of(&binders);
                 let mark = self.scope.len();
-                let mut args = self.binders(slot, &binders);
+                let mut args = self.binders(slot, &binders)?;
                 args.push(Arg::Node(self.ty(body)?));
                 self.scope.truncate(mark);
                 ("poly", names, args)
@@ -623,7 +627,7 @@ impl Ex<'_> {
                 let bs: Vec<(DVar, Kind)> = abs.iter().map(|(_, v)| (*v, self.c.arena.dvar_kind_known(*v).unwrap_or(Kind::Type))).collect();
                 let names = abs.iter().map(|(n, _)| self.c.interner.name(*n).to_string()).collect();
                 let mark = self.scope.len();
-                let mut args = self.binders(slot, &bs);
+                let mut args = self.binders(slot, &bs)?;
                 let ds = self.parts(&descs)?;
                 args.push(self.node("descs", ds));
                 let vs = self.parts(&vals)?;
@@ -636,7 +640,7 @@ impl Ex<'_> {
             Ty::Lam { params, body } => {
                 let names = self.names_of(&params);
                 let mark = self.scope.len();
-                let mut args = self.binders(slot, &params);
+                let mut args = self.binders(slot, &params)?;
                 args.push(self.d(&body)?);
                 self.scope.truncate(mark);
                 ("dlambda", names, args)
@@ -789,9 +793,16 @@ impl Im<'_, '_> {
             if args.get(1).copied().map(Self::flag).transpose()?.unwrap_or(false) {
                 self.c.arena.set_distinct(*v);
             }
-            if let Some(r) = args.get(2) {
-                let r = self.region(*r)?;
-                self.c.arena.set_bound(*v, r);
+            match (args.get(2), self.c.arena.dvar_kind_known(*v)) {
+                (Some(e), Some(Kind::Effect)) => {
+                    let e = self.effect(*e)?;
+                    self.c.arena.set_effect_bound(*v, e);
+                }
+                (Some(r), _) => {
+                    let r = self.region(*r)?;
+                    self.c.arena.set_bound(*v, r);
+                }
+                (None, _) => {}
             }
         }
         Ok(out)

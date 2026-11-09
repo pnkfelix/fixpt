@@ -314,7 +314,8 @@ masks.
    the private I-cell example above (TODO §224). This stands on its own,
    markers or not. Done 2026-11-09.
 3. Markers and both kinds of bound on effect variables, with their
-   evidence (`effectbound`, `given`).
+   evidence (`effectbound`, `given`). `within` bounds done 2026-11-09,
+   without their evidence (TODO §226).
 4. `effect-case`.
 5. Later, separately: `nondet` as a derived marker.
 

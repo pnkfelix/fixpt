@@ -756,7 +756,7 @@
 (define k-beyond (->* (k-eff k-eff k-eff) k-eff)
   (lambda (e bound own)
     (cond ((null? e) nil)
-          ((or (k-covered? bound (car e)) (k-contains? own (car e))) (k-beyond (cdr e) bound own))
+          ((or (k-atom-le? bound (car e)) (k-contains? own (car e))) (k-beyond (cdr e) bound own))
           (else (cons (car e) (k-beyond (cdr e) bound own))))))
 (define k-none-reach? (->* (k-names k-names k-region) bool)
   (lambda (vs tv r)

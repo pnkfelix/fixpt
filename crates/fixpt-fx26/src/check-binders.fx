@@ -364,9 +364,35 @@
             ;; outlive its bound.
             (cond ((= (extract (car kinds) 2) 4) (k-check-data v bd m a b))
                   ((= (extract (car kinds) 2) 8) (k-check-sendable v m a b))
+                  ((= (extract (car kinds) 2) 1) (k-check-within v m a b))
                   ((null? bd) #u)
                   (else (k-check-bound v (car bd) m a b)))
             (k-check-bounds (cdr kinds) m a b))))))
+;; Effect binder `v`, as `m` solves it, takes only an effect within its
+;; bound, the bound's binders as `m` gives them (`TODO.md` §226;
+;; `Checker::check_bounds`); or an error.
+(define k-check-within (->* (int k-map int int) unit)
+  (lambda (v m a b)
+    (let ((bd (k-effect-bound-of v)) (f (k-map-find m v)))
+      (if (or (null? bd) (null? f))
+          #u
+          (tagcase (cdr (car f))
+            (de (given)
+              (let ((bound (k-subst-effect (car bd) m)))
+                (if (k-effect-le? given bound)
+                    #u
+                    (k-fail (k-cat5 (k-quote-dvar v) " is bound within " (k-show-effect bound)
+                                    ", and "
+                                    (k-cat4 (k-show-effect given) " is not: it has "
+                                            (k-show-effect (k-not-within given bound)) ""))
+                            a b))))
+            (else y #u))))))
+;; The atoms of `g` not within `w`, bounds counted (`k-effect-le?`).
+(define k-not-within (->* (k-eff k-eff) k-eff)
+  (lambda (g w)
+    (cond ((null? g) nil)
+          ((k-atom-le? w (car g)) (k-not-within (cdr g) w))
+          (else (the k-eff (cons (car g) (k-not-within (cdr g) w)))))))
 ;; A size binder instantiated as `finite` is sound only where it stands for
 ;; one size a caller supplies (`docs/research/soundness-findings.md`, F4): as
 ;; the size of at most one parameter, that parameter's own `(nlist T v)` or

@@ -2079,6 +2079,28 @@ impl Checker {
             r => r,
         };
         for (v, k) in kinds {
+            // An effect binder with a bound takes only an effect within it,
+            // the bound's binders as given (`TODO.md` §226).
+            if *k == Kind::Effect
+                && let Some(bound) = self.arena.effect_bound(*v).cloned()
+            {
+                let Some(D::Effect(given)) = map.get(v) else { continue };
+                let bound = crate::check::subst_effect(&bound, map, &self.arena);
+                if !self.effect_le(given, &bound) {
+                    let beyond = Effect(given.0.iter().copied().filter(|a| !self.effect_le(&Effect::atom(*a), &bound)).collect());
+                    let name = self.interner.name(self.arena.dvar_name(*v));
+                    return Err(FxError::at(
+                        span,
+                        format!(
+                            "`{name}` is bound within {}, and {} is not: it has {}",
+                            self.show_effect(&bound),
+                            self.show_effect(given),
+                            self.show_effect(&beyond)
+                        ),
+                    ));
+                }
+                continue;
+            }
             // A `data` binder takes only data, at its place: the heap, or
             // the place its bound says (F13).
             // A `sendable` binder takes only what may be sent to a process.

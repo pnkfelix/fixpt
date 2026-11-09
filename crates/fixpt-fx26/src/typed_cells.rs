@@ -888,7 +888,7 @@ impl Verifier<'_> {
         if let Some(latent) = &cert.effect {
             let effect = self.masked(&code, cert, &slot_types);
             let effect = self.masked_within(effect);
-            if !effect.within(latent) {
+            if !self.c.effect_le(&effect, latent) {
                 let msg = format!("effect {} is not within the latent {}", self.c.show_effect(&effect), self.c.show_effect(latent));
                 self.out.open.push(msg);
             }
@@ -2180,14 +2180,14 @@ impl Verifier<'_> {
                                 }
                             }
                         }
-                        let latent = fits.iter().map(|(_, _, l)| l).find(|l| fits.iter().all(|(_, _, o)| l.within(o))).unwrap_or(&l0).clone();
+                        let latent = fits.iter().map(|(_, _, l)| l).find(|l| fits.iter().all(|(_, _, o)| self.c.effect_le(l, o))).unwrap_or(&l0).clone();
                         // Fitting whole, and by rule 5 too, of a result within
                         // the whole's and an effect within its: the closer, as
                         // the checkers take it where the whole's is not what
                         // is expected (an `(anyof expr op)` swapped, an
                         // `(anyof expr op)`, not an `sexp`).
                         match self.allof_split(&ms, &args) {
-                            Some((ps, r, l)) if r != result && self.c.subtype(r, result) && l.within(&latent) => (ps, r, l),
+                            Some((ps, r, l)) if r != result && self.c.subtype(r, result) && self.c.effect_le(&l, &latent) => (ps, r, l),
                             _ => (ps0, result, latent),
                         }
                     }
@@ -2314,7 +2314,7 @@ impl Verifier<'_> {
                         // tag).
                         if let Some((bound, r)) = &bound {
                             let own = Effect([crate::ast::Atom::Goto(*r), crate::ast::Atom::Comefrom(*r)].into_iter().collect());
-                            let beyond = Effect(te.0.iter().copied().filter(|a| !Effect::atom(*a).within(bound) && !own.0.contains(a)).collect());
+                            let beyond = Effect(te.0.iter().copied().filter(|a| !self.c.effect_le(&Effect::atom(*a), bound) && !own.0.contains(a)).collect());
                             if !beyond.is_pure() {
                                 self.out.failed.push(format!("{at}: the prompt's body does {}, beyond its tag's {}", self.c.show_effect(&beyond), self.c.show_effect(bound)));
                             }

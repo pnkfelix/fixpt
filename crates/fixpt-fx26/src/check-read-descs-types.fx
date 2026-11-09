@@ -25,7 +25,17 @@
 ;; The types it names, from the files that define them.
 (define-type k-desc (select check-types-types k-desc))
 (define-type check-read-descs-sig
-  (moduleof (val k-parse-effect
+  (moduleof (val k-parse-binders-bounded
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (syn)
+                       k-binders))
+            (val k-parse-effect
                  (subr (maxeff (alloc @t)
                                (goto @z)
                                (read @globals)

@@ -2445,12 +2445,33 @@ impl Checker {
         }
     }
 
+    /// Subeffecting with effect variables' bounds (`TODO.md` §226): each
+    /// atom of `a` is within `b`, or is a variable whose bound is.
+    pub(crate) fn effect_le(&self, a: &Effect, b: &Effect) -> bool {
+        self.effect_le_by(a, b, &|v| self.arena.effect_bound(v).cloned())
+    }
+
+    /// [`effect_le`](Self::effect_le), the bounds of variables as `bound`
+    /// gives them: a comparison's labels' as well (`BinderEnv`). A bound
+    /// names only the binders before its own, so this ends.
+    fn effect_le_by(&self, a: &Effect, b: &Effect, bound: &dyn Fn(DVar) -> Option<Effect>) -> bool {
+        a.0.iter().all(|x| {
+            Effect::atom(*x).within(b) || matches!(x, Atom::Var(v) if bound(*v).is_some_and(|bv| self.effect_le_by(&bv, b, bound)))
+        })
+    }
+
+    /// [`effect_le`](Self::effect_le) within a comparison of types, whose
+    /// binders' labels have the bounds `env` gives them.
+    fn effect_le_in(&self, a: &Effect, b: &Effect, env: &BinderEnv) -> bool {
+        self.effect_le_by(a, b, &|v| env.bounds.get(&v).cloned().or_else(|| self.arena.effect_bound(v).cloned()))
+    }
+
     /// The second line of an "is expected here" message, where `got` and
     /// `want` are procedures: the atoms of `got`'s latent effect that
     /// `want`'s does not cover, which the two whole types can bury.
     pub(crate) fn effect_delta(&self, got: TyId, want: TyId) -> String {
         let (Some(g), Some(w)) = (self.latent_of(got), self.latent_of(want)) else { return String::new() };
-        let beyond = Effect(g.0.into_iter().filter(|a| !Effect::atom(*a).within(&w)).collect());
+        let beyond = Effect(g.0.into_iter().filter(|a| !self.effect_le(&Effect::atom(*a), &w)).collect());
         if beyond.is_pure() {
             return self.spec_delta(got, want).to_string();
         }
@@ -4500,7 +4521,7 @@ impl Checker {
             let (xa, pa, qa) = ta.as_subr().expect("callable");
             let (xb, pb, qb) = tb.as_subr().expect("callable");
             return pa.len() == pb.len()
-                && ea(&xa).within(&eb(&xb))
+                && self.effect_le_in(&ea(&xa), &eb(&xb), env)
                 && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
                 && self.sub(qa, qb, env, st)
                 && crate::logic::spec_within(None, spec.as_deref());
@@ -4593,7 +4614,7 @@ impl Checker {
                 };
                 conv_ok
                     && pa.len() == pb.len()
-                    && ea(&xa).within(&eb(&xb))
+                    && self.effect_le_in(&ea(&xa), &eb(&xb), env)
                     && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
                     && self.sub(qa, qb, env, st)
                     && crate::logic::spec_within(sa.as_deref(), sb.as_deref())
@@ -4641,7 +4662,7 @@ impl Checker {
             (
                 Ty::Composable { arg: t1, answer: a1, effect: d1, region: r1, once: o1 },
                 Ty::Composable { arg: t2, answer: a2, effect: d2, region: r2, once: o2 },
-            ) => o1 == o2 && ra(r1) == rb(r2) && ea(&d1).within(&eb(&d2)) && self.sub(t2, t1, &flip, st) && self.sub(a1, a2, env, st),
+            ) => o1 == o2 && ra(r1) == rb(r2) && self.effect_le_in(&ea(&d1), &eb(&d2), env) && self.sub(t2, t1, &flip, st) && self.sub(a1, a2, env, st),
             (Ty::MarkKey(x, r), Ty::MarkKey(y, s)) => ra(r) == rb(s) && self.sub(x, y, env, st) && self.sub(y, x, &flip, st),
             // A bloblet's fields are invariant, as a reference's contents
             // are, unless they are frozen, when nothing can store into them.
@@ -4722,8 +4743,8 @@ impl Checker {
                     (D::Conv(Conv::Var(x)), D::Conv(Conv::Var(y))) => env.var(&env.a, *x) == env.var(&env.b, *y),
                     (D::Conv(c), D::Conv(d)) => c == d,
                     (D::Effect(d), D::Effect(e)) => match v {
-                        Variance::Co => ea(d).within(&eb(e)),
-                        Variance::Contra => eb(e).within(&ea(d)),
+                        Variance::Co => self.effect_le_in(&ea(d), &eb(e), env),
+                        Variance::Contra => self.effect_le_in(&eb(e), &ea(d), env),
                         Variance::Inv => ea(d) == eb(e),
                     },
                     (D::Fun(f), D::Fun(g)) => self.fun_same(*f, *g, env, st),
@@ -4770,7 +4791,28 @@ impl Checker {
                     };
                     same && (!self.arena.is_distinct(*va) || self.arena.is_distinct(*vb))
                 });
-                bounds && self.sub(xa, xb, &inner, st)
+                // An effect binder's bound (`TODO.md` §226): the expected
+                // side's within the other's, none the loosest, so that
+                // what may be given there may be given here; assumed in
+                // comparing the bodies. As `F<:`'s rule, decidable here as
+                // effects are finite sets.
+                let mut effects = true;
+                for ((va, _), (vb, _)) in ba.iter().zip(&bb) {
+                    let l = inner.var(&inner.a, *va);
+                    let (x, y) = (self.arena.effect_bound(*va).cloned(), self.arena.effect_bound(*vb).cloned());
+                    let apps = self.arena.effect_apps.clone();
+                    let x = x.map(|x| inner.effect(&inner.a, &x, &apps));
+                    let y = y.map(|y| inner.effect(&inner.b, &y, &apps));
+                    effects &= match (&x, &y) {
+                        (None, _) => true,
+                        (Some(_), None) => false,
+                        (Some(x), Some(y)) => self.effect_le_in(y, x, &inner),
+                    };
+                    if let Some(y) = y {
+                        inner.bounds.insert(l, y);
+                    }
+                }
+                bounds && effects && self.sub(xa, xb, &inner, st)
             }
             _ => false,
         }
@@ -5837,7 +5879,7 @@ impl Checker {
         })?;
         let own = Effect([Atom::Goto(region), Atom::Comefrom(region)].into_iter().collect());
         let beyond = match &bound {
-            Some(bound) => Effect(be.0.iter().copied().filter(|a| !Effect::atom(*a).within(bound) && !own.contains(*a)).collect()),
+            Some(bound) => Effect(be.0.iter().copied().filter(|a| !self.effect_le(&Effect::atom(*a), bound) && !own.contains(*a)).collect()),
             None => Effect::pure(),
         };
         if let (Some(bound), false) = (&bound, beyond.is_pure()) {
@@ -5972,6 +6014,9 @@ type ModuleView<'a> = (&'a [(Sym, DVar)], &'a [(Sym, TyId)], &'a [(Sym, TyId)]);
 struct BinderEnv {
     a: std::collections::BTreeMap<DVar, DVar>,
     b: std::collections::BTreeMap<DVar, DVar>,
+    /// Each pair of effect binders' bound, by the name the pair was given:
+    /// the expected side's, assumed while comparing their bodies.
+    bounds: std::collections::BTreeMap<DVar, Effect>,
 }
 
 impl BinderEnv {
@@ -5980,7 +6025,7 @@ impl BinderEnv {
     }
     /// The same environment, for the question asked the other way round.
     fn flip(&self) -> BinderEnv {
-        BinderEnv { a: self.b.clone(), b: self.a.clone() }
+        BinderEnv { a: self.b.clone(), b: self.a.clone(), bounds: self.bounds.clone() }
     }
     fn var(&self, side: &std::collections::BTreeMap<DVar, DVar>, v: DVar) -> DVar {
         side.get(&v).copied().unwrap_or(v)
