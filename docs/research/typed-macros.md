@@ -1114,7 +1114,7 @@ each in the scope of those before (a pattern's binders through a template's
 variable makes, `((_ f) f)`; a tag placed only at an application's head,
 `(t e)`. Tests: `macros/infer-*.fx`, `macros/syntax-rules-unsaid.fx`.
 
-## Decided: signatures as contracts, named, outside the code (2026-11-08)
+## Decided: signatures as contracts, named, outside the code (2026-11-08; its notation reopened, "Three notations", below)
 
 Not built. The user's direction, after the inference above, and the
 choices made with them the same day:
@@ -1238,6 +1238,153 @@ is written, else refused, saying both.
 The tests' signatures move to contracts, their "As named:" comments the
 start (each checked to elaborate to the addressed signature it replaces);
 some stay `/addressed`, for Herman's notation itself.
+
+## Three notations, side by side (2026-11-08)
+
+For the user to judge by reading, before any is built: the contract
+notation decided above was settled one confusion at a time (which context
+is offered, which order a ribcage is written in), and the user asked
+whether a step was wrong. Four macros, each in:
+
+- **A**, Herman's addresses, as written today (`syntax-contract/addressed`);
+- **B**, the contexts with a `hole` decided above, with `offers` made a
+  clause of a labelled part, as `in` is;
+- **C**, *shape and facts* (after Pombrio, Krishnamurthi and Wand): the
+  shape a pattern-like tree of labelled parts, recursion a named `shape`;
+  the scoping a list of facts attached to the node they describe, each
+  naming only labels of that node's region: `(bind a in b)`, `b`'s insides
+  see what `a` provides (flowing down); `(export a …)`, the node provides
+  what each `a` does (flowing up). A `bvar` provides itself; a part of a
+  named shape, what that shape's facts export; a list by ellipsis, all its
+  elements' exports at one level (`let`'s rule).
+
+### `let1`
+
+```scheme
+;; A
+((bvar expr) (import expr (rho (AA var))))
+
+;; B
+(syntax-contract ((x : bvar) (e : expr)) (body : expr (in (x hole))))
+
+;; C
+(syntax-contract ((x : bvar) (e : expr)) (body : expr)
+  (bind x in body))
+```
+
+### `let`, by ellipsis
+
+```scheme
+;; A
+(((export (bvar expr) (rho (A var))) ...) . (import (expr) (rho (A rib))))
+
+;; B
+(syntax-contract
+  ((b : ((x : bvar) (e : expr)) (offers (x hole))) ...)
+  (body : expr (in (b hole))))
+
+;; C
+(syntax-contract
+  (shape binding ((x : bvar) (e : expr))
+    (export x))
+  ((bs : binding ...) (body : expr))
+  (bind bs in body))
+```
+
+### `let*`, by recursion
+
+```scheme
+;; A
+((mu c (union (export () (cage))
+              (export ((bvar expr) . (import c (rho (AA var))))
+                      (cage (at D) (rho (AA var))))))
+ (import expr (cage (at A))))
+
+;; B
+(syntax-contract
+  ((cs : (mu clauses
+           (union ()
+                  (clause : ((x : bvar) (e : expr) . (rest : clauses (in (x hole))))
+                            (offers (x (rest hole)))))))
+   (body : expr (in (cs hole)))))
+
+;; C
+(syntax-contract
+  (shape clauses
+    (union ()
+           (clause ((x : bvar) (e : expr) . (rest : clauses))
+             (bind x in rest)
+             (export x rest))))
+  ((cs : clauses) (body : expr))
+  (bind cs in body))
+```
+
+### `define-data`, with a constructor procedure per variant
+
+What a use defines: the type's name, and each variant's constructor.
+
+```scheme
+;; A
+(-> (export (dvar (export (bvar label type ...) (rho (A var))) ...)
+            (rho (A dvar) (D rib)))
+    defn)
+
+;; B
+(syntax-contract #:makes defn
+  ((name : dvar)
+   (v : ((c : bvar) (t : label) (fields : type) ...) (offers (c hole))) ...)
+  (offers ((name v) hole)))
+
+;; C
+(syntax-contract #:makes defn
+  (shape variant ((c : bvar) (t : label) (fields : type) ...)
+    (export c))
+  ((name : dvar) (vs : variant ...))
+  (export name vs))
+```
+
+### What each shows
+
+- **A** says everything, in a form for machines: no names, and the reader
+  works out `AA`, `(at D)` and `(D rib)` by counting.
+- **B** puts scopes inside types: what a part sees and what it provides
+  sit within its shape, among its sub-parts' own, and a ribcage's order is
+  a written convention (the hole says it, but the reader must still find
+  which context is whose).
+- **C** separates the two. The shape reads as a pattern; each node's
+  scoping is a few one-line facts beside it, about its own parts alone, so
+  each named shape is read, and could be reused, by itself (the kernel's
+  `formals`, `let-bindings`, `let*-clauses` are such shapes already:
+  `(cs : let*-clauses)`). No order is written for shadowing: in `let*`'s
+  `(export x rest)`, `rest`'s binders win because `(bind x in rest)` puts
+  them inside `x`'s scope; in `let`'s, the elements are at one level and
+  two of one name collide. `bind` and `export` are distinct because forms
+  combine them differently: `let` exports without binding the later
+  initializers, `let*` does both, a part may bind a local without
+  exporting it.
+
+### Leaning: C, to test before deciding
+
+- **Expressiveness.** Pombrio et al. show their four facts (`import`,
+  `export`, `bind i in j`, re-export) cover `let`, `let*`, named `let`,
+  Pyret's `for` and Haskell's list comprehensions, and that they are a
+  little weaker than Romeo (no two binders that shadow each other in
+  different parts). To check: every signature in `tests/programs/macros`
+  written in C, and elaborated back to A. Their failure, Scheme's `do` (a
+  variable seen by every element's `step` and no element's `init`), is the
+  case to try first: `(bind bs in step)` names a part inside the list's
+  elements, which C's locality forbids, and A says it today only by an
+  import on the list.
+- **Elaboration.** C's facts give each part the environment it is in;
+  turning environments into Herman's imports and exports is what
+  inference's solving already does (`macros/infer.rs`'s `sites`, `rings`,
+  `merge_rings`), so C elaborates through code we have.
+- **Printing what is inferred.** Inference finds environments by region,
+  which print as C's facts, a few named shapes each with its own, rather
+  than one deep signature.
+- **Supersedes B** if chosen: the decisions above stand (contracts outside
+  the code, headers, exports written, `#:makes`/`#:poly`, `place`), the
+  context notation replaced by facts.
 
 ## Syntactic closures: what an expansion means (2026-11-08)
 
