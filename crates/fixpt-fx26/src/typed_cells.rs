@@ -1045,7 +1045,8 @@ impl Verifier<'_> {
                 return Err(());
             }
             let written = own.0.iter().any(|a| matches!(a, crate::ast::Atom::Write(g) | crate::ast::Atom::Init(g) if *g == region));
-            let masked = Effect(own.0.iter().copied().filter(|a| a.region() != Some(region)).collect());
+            // A wait on it dropped leaves `spin` (`Effect::waits_dropped`).
+            let masked = own.waits_dropped(Effect(own.0.iter().copied().filter(|a| a.region() != Some(region)).collect()));
             self.effect = self.effect.union(&masked);
             if let Some(s) = cur.as_mut()
                 && let Some(v) = s.stack.last_mut()
