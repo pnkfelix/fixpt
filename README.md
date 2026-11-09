@@ -187,6 +187,50 @@ cyclic, from one body. Herman and Wand's renaming over λm's syntactic
 sorts is the same idea at full size
 (`crates/fixpt-fx26/tests/programs/allof/swap.fx`).
 
+## Modules are values, and a file is a module
+
+A module is a first-class value with a type, a `moduleof`, as in Sheldon
+and Gifford's design for FX-91. It needs no name: `(module item …)` is an
+expression. A file is a module too, and it is written as nothing more than
+a list of top-level definitions. It doesn't know it will be loaded as a
+module. `counter.fx` is
+
+```scheme
+(define-generative t int)
+(define zero t (up-t 0))
+(define inc (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))
+(define value (subr pure (t) int) (lambda (c) (down-t c)))
+```
+
+and a program loads it, uses it with `with`, and passes it to a procedure
+whose type depends on the module it is given:
+
+```scheme
+(define counter (load-module "counter.fx"))
+(with counter (value (inc (inc zero))))
+(define twice (subr pure ((m : (moduleof (abs t type) (val inc (subr pure (t) t)))) (select m t)) (select m t))
+  (lambda (m c) (with m (inc (inc c)))))
+(with counter (value (twice counter zero)))
+(with counter (+ zero 1))
+```
+```
+counter : (moduleof (desc t counter.fx..t) (val zero counter.fx..t) (val inc (subr pure (counter.fx..t) counter.fx..t)) (val value (subr pure (counter.fx..t) int))) ! (read (globals %shared:counter.fx))
+2 : int ! (read (globals counter))
+twice : (subr pure ((moduleof (abs t type) (val inc (subr pure (t) t))) (select $1 t)) (select $1 t)) ! pure
+2 : int ! (read (globals counter twice))
+fixpt: main.fx:6:18: argument 1 is a counter.fx..t, where a int is expected
+```
+
+`define-generative` makes `t` a new type: `up-t` and `down-t` convert
+between it and `int`, and only the file's own definitions can call them.
+So outside the file a counter is not an `int`. The type of `twice`'s
+first parameter asks for less than `counter` has, a module with some
+abstract `t` and an `inc`, and the types after it select `t` from
+whichever module is passed. ML's functors are a restricted form of these
+dependent procedures. A file may also take parameters (regions, types or
+other modules) from whoever loads it, and loaded files can be compiled
+apart, to `.fasl` files.
+
 ## Concurrency, checked
 
 Processes have their own heaps (*places*) and communicate only by
