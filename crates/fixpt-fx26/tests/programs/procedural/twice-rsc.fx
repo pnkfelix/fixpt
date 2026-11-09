@@ -6,5 +6,5 @@
     (lambda (form env)
       (let ((r (the (subr pure (datum) datum) (lambda (s) (make-syntactic-closure env '() s))))
             (e (car (cdr form))))
-        (list (r 'let) (list (list (r 'x) e)) (list (r '+) (r 'x) (r 'x)))))))
+        `(,(r 'let) ((,(r 'x) ,e)) (,(r '+) ,(r 'x) ,(r 'x)))))))
 (let ((x 10)) (twice (+ x 1)))

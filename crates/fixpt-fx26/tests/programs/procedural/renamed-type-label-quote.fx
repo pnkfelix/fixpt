@@ -5,8 +5,8 @@
 (define-syntax tagged
   (er-macro-transformer
     (lambda (form rename compare)
-      (list (rename 'the) (list (rename 'sumof) (list (rename 'num) (rename 'int)))
-            (list (rename 'sum) (rename 'num) (car (cdr form)))))))
+      `(,(rename 'the) (,(rename 'sumof) (,(rename 'num) ,(rename 'int)))
+         (,(rename 'sum) ,(rename 'num) ,(car (cdr form)))))))
 (define-syntax quoted
-  (er-macro-transformer (lambda (form rename compare) (list (rename 'quote) (rename 'hello)))))
+  (er-macro-transformer (lambda (form rename compare) `(,(rename 'quote) ,(rename 'hello)))))
 (if (symbol=? (quoted) 'hello) (tagcase (tagged 5) (num n n)) 0)

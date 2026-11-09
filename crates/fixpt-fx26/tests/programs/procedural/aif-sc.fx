@@ -7,5 +7,5 @@
       (let ((test (make-syntactic-closure env '() (car (cdr form))))
             (then (make-syntactic-closure env '(it) (car (cdr (cdr form)))))
             (else (make-syntactic-closure env '(it) (car (cdr (cdr (cdr form)))))))
-        (list 'let (list (list 'it test)) (list 'if (list '= 'it 0) else then))))))
+        `(let ((it ,test)) (if (= it 0) ,else ,then))))))
 (list (aif (+ 2 4) it -1) (aif 0 it 0))

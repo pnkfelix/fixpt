@@ -5,7 +5,7 @@
 (define-syntax define-const
   (er-macro-transformer
     (lambda (form rename compare)
-      (list (rename 'define) (car (cdr form)) (rename 'int)
-            (list (rename 'let1) (rename 'v) (car (cdr (cdr form))) (rename 'v))))))
+      `(,(rename 'define) ,(car (cdr form)) ,(rename 'int)
+         (,(rename 'let1) ,(rename 'v) ,(car (cdr (cdr form))) ,(rename 'v))))))
 (define-const seven 7)
 (+ seven 1)

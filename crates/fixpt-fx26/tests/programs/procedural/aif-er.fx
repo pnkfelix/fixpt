@@ -7,6 +7,6 @@
     (lambda (form rename compare)
       (let ((test (car (cdr form))) (then (car (cdr (cdr form))))
             (else (car (cdr (cdr (cdr form))))))
-        (list (rename 'let) (list (list 'it test))
-              (list (rename 'if) (list (rename '=) 'it 0) else then))))))
+        `(,(rename 'let) ((it ,test))
+           (,(rename 'if) (,(rename '=) it 0) ,else ,then))))))
 (list (aif (+ 2 4) it -1) (aif 0 it 0))

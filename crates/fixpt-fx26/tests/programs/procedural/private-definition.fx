@@ -4,5 +4,5 @@
 (define-syntax counter
   (er-macro-transformer
     (lambda (form rename compare)
-      (list (rename 'begin) (list (rename 'define) (rename 'n) 1) (rename 'n)))))
+      `(,(rename 'begin) (,(rename 'define) ,(rename 'n) 1) ,(rename 'n)))))
 (counter)

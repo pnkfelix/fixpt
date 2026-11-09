@@ -6,8 +6,8 @@
   (sc-macro-transformer
     (lambda (form env)
       (let ((e (make-syntactic-closure env '() (car (cdr form)))))
-        (list 'let (list (list 'x e)) (list '+ 'x 'x))))))
+        `(let ((x ,e)) (+ x x))))))
 (define-syntax inc
   (sc-macro-transformer
-    (lambda (form env) (list 'helper (make-syntactic-closure env '() (car (cdr form)))))))
+    (lambda (form env) `(helper ,(make-syntactic-closure env '() (car (cdr form)))))))
 (list (let ((x 10)) (twice (+ x 1))) (let ((helper 100)) (inc helper)))

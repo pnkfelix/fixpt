@@ -6,9 +6,9 @@
   (er-macro-transformer
     (lambda (form rename compare)
       (let ((e (car (cdr form))))
-        (list (rename 'let) (list (list (rename 'x) e))
-              (list (rename '+) (rename 'x) (rename 'x)))))))
+        `(,(rename 'let) ((,(rename 'x) ,e))
+           (,(rename '+) ,(rename 'x) ,(rename 'x)))))))
 (define-syntax inc
   (er-macro-transformer
-    (lambda (form rename compare) (list (rename 'helper) (car (cdr form))))))
+    (lambda (form rename compare) `(,(rename 'helper) ,(car (cdr form))))))
 (list (let ((x 10)) (twice (+ x 1))) (let ((helper 100)) (inc helper)))
