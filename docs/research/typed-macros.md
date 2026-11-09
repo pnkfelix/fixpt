@@ -1187,7 +1187,7 @@ The contracts of the kernel's examples:
 (syntax-contract
   ((cs : (mu clauses
            (union ()
-                  (offers ((x : bvar) (e : expr) . (rest : clauses (in (x hole))))
+                  (offers (((x : bvar) (e : expr)) . (rest : clauses (in (x hole))))
                           (x (rest hole))))))
    (body : expr (in (cs hole)))))
 
@@ -1249,14 +1249,18 @@ whether a step was wrong. Four macros, each in:
 - **A**, Herman's addresses, as written today (`syntax-contract/addressed`);
 - **B**, the contexts with a `hole` decided above, with `offers` made a
   clause of a labelled part, as `in` is;
-- **C**, *shape and facts* (after Pombrio, Krishnamurthi and Wand): the
-  shape a pattern-like tree of labelled parts, recursion a named `shape`;
-  the scoping a list of facts attached to the node they describe, each
-  naming only labels of that node's region: `(bind a in b)`, `b`'s insides
+- **C**, *shapes and facts* (after Pombrio, Krishnamurthi and Wand). Each
+  node is `(NAME SHAPE FACT …)`: a name for the node (not syntax; the
+  macro's node is named for the macro, or `_`, as a `syntax-rules`
+  pattern's head is, no other name accepted), its shape (a pattern-like
+  tree of labelled parts, exactly what a use writes), and its facts, each
+  naming only labels of the node's region: `(bind a in b)`, `b`'s insides
   see what `a` provides (flowing down); `(export a …)`, the node provides
-  what each `a` does (flowing up). A `bvar` provides itself; a part of a
-  named shape, what that shape's facts export; a list by ellipsis, all its
-  elements' exports at one level (`let`'s rule).
+  what each `a` does (flowing up). Named shapes, recursive or not, are
+  bound by `(letrec-shape ((name node-or-union) …) top-node)`, a `union`'s
+  members each a node. A `bvar` provides itself; a part of a named shape,
+  what its node's facts export; a list by ellipsis, all its elements'
+  exports at one level (`let`'s rule).
 
 ### `let1`
 
@@ -1268,8 +1272,9 @@ whether a step was wrong. Four macros, each in:
 (syntax-contract ((x : bvar) (e : expr)) (body : expr (in (x hole))))
 
 ;; C
-(syntax-contract ((x : bvar) (e : expr)) (body : expr)
-  (bind x in body))
+(syntax-contract
+  (let1 (((x : bvar) (e : expr)) (body : expr))
+    (bind x in body)))
 ```
 
 ### `let`, by ellipsis
@@ -1285,10 +1290,10 @@ whether a step was wrong. Four macros, each in:
 
 ;; C
 (syntax-contract
-  (shape binding ((x : bvar) (e : expr))
-    (export x))
-  ((bs : binding ...) (body : expr))
-  (bind bs in body))
+  (letrec-shape ((binding (binding ((x : bvar) (e : expr))
+                            (export x))))
+    (my-let ((bs : binding ...) (body : expr))
+      (bind bs in body))))
 ```
 
 ### `let*`, by recursion
@@ -1304,19 +1309,19 @@ whether a step was wrong. Four macros, each in:
 (syntax-contract
   ((cs : (mu clauses
            (union ()
-                  (clause : ((x : bvar) (e : expr) . (rest : clauses (in (x hole))))
+                  (clause : (((x : bvar) (e : expr)) . (rest : clauses (in (x hole))))
                             (offers (x (rest hole)))))))
    (body : expr (in (cs hole)))))
 
 ;; C
 (syntax-contract
-  (shape clauses
-    (union ()
-           (clause ((x : bvar) (e : expr) . (rest : clauses))
-             (bind x in rest)
-             (export x rest))))
-  ((cs : clauses) (body : expr))
-  (bind cs in body))
+  (letrec-shape ((clauses
+                   (union (end ())
+                          (clause (((x : bvar) (e : expr)) . (rest : clauses))
+                            (bind x in rest)
+                            (export x rest)))))
+    (my-let* ((cs : clauses) (body : expr))
+      (bind cs in body))))
 ```
 
 ### `define-data`, with a constructor procedure per variant
@@ -1337,10 +1342,10 @@ What a use defines: the type's name, and each variant's constructor.
 
 ;; C
 (syntax-contract #:makes defn
-  (shape variant ((c : bvar) (t : label) (fields : type) ...)
-    (export c))
-  ((name : dvar) (vs : variant ...))
-  (export name vs))
+  (letrec-shape ((variant (variant ((c : bvar) (t : label) (fields : type) ...)
+                            (export c))))
+    (define-data ((name : dvar) (vs : variant ...))
+      (export name vs))))
 ```
 
 ### What each shows
@@ -1351,9 +1356,10 @@ What a use defines: the type's name, and each variant's constructor.
   sit within its shape, among its sub-parts' own, and a ribcage's order is
   a written convention (the hole says it, but the reader must still find
   which context is whose).
-- **C** separates the two. The shape reads as a pattern; each node's
-  scoping is a few one-line facts beside it, about its own parts alone, so
-  each named shape is read, and could be reused, by itself (the kernel's
+- **C** separates the two. The shape reads as a pattern (the macro's node
+  as a use would be written, `(my-let* cs body)`); each node's scoping is
+  a few one-line facts after it, about its own parts alone, so each named
+  shape is read, and could be reused, by itself (the kernel's
   `formals`, `let-bindings`, `let*-clauses` are such shapes already:
   `(cs : let*-clauses)`). No order is written for shadowing: in `let*`'s
   `(export x rest)`, `rest`'s binders win because `(bind x in rest)` puts
@@ -1547,6 +1553,11 @@ could not say it.
    by address alone"; a design of its own, as decided then.
 5. *The syntax datatype* a transformer sees: FX-26's `syn` (the reader's),
    or a type of handles and forms of its own.
+6. *The macro's own keyword.* `syntax-rules` ignores a pattern's head (R7RS:
+   neither a pattern variable nor a literal); `syntax-case` binds it, so
+   that `#'foo` is the keyword with the use's context, which a transformer
+   recursing through itself may rely on. Whether a transformer is given a
+   handle on its keyword, and with whose context.
 
 ## Leaning: narrower macros by `let-syntax`, not in module types (2026-11-08)
 
