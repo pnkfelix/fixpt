@@ -20,8 +20,39 @@ fn both_expanders_agree_on_a_files_macros() {
     agree(&format!("{}/../fixpt-cli/tests/programs/import-with-syntax", env!("CARGO_MANIFEST_DIR")), "main");
 }
 
+/// Each program in `programs/macros` with its macros' signatures left out,
+/// to be inferred: both front ends infer the same, as each finds of the
+/// program, or each refuses it, the same.
+#[test]
+fn both_expanders_infer_alike() {
+    agree_as(&format!("{}/tests/programs/macros", env!("CARGO_MANIFEST_DIR")), "", unsigned);
+}
+
+/// Program `text` with each `(define-syntax name σ (syntax-rules …))`'s `σ`
+/// left out.
+fn unsigned(text: &str) -> String {
+    let mut interner = fixpt_read::Interner::default();
+    let Ok(forms) = fixpt_read::Reader::new(text, fixpt_read::FileId(1), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() else { return text.to_string() };
+    let mut out = String::new();
+    for f in forms {
+        let f = match f.as_proper_list() {
+            Some([h, n, _, rules]) if h.as_symbol().is_some_and(|h| interner.name(h) == "define-syntax") => fixpt_read::Syntax::list(f.span, vec![h.clone(), n.clone(), rules.clone()]),
+            _ => f,
+        };
+        out.push_str(&fixpt_read::write_syntax(&f, &interner));
+        out.push('\n');
+    }
+    out
+}
+
 /// Both front ends on each program in `dir` whose name starts with `prefix`.
 fn agree(dir: &str, prefix: &str) {
+    agree_as(dir, prefix, |t| t.to_string());
+}
+
+/// Both front ends on each program in `dir` whose name starts with
+/// `prefix`, as `made` makes it.
+fn agree_as(dir: &str, prefix: &str, made: fn(&str) -> String) {
     let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.file_name().unwrap().to_string_lossy().starts_with(prefix)).collect();
     names.sort();
     let mut wrong = Vec::new();
@@ -30,7 +61,7 @@ fn agree(dir: &str, prefix: &str) {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     for path in names {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = made(&std::fs::read_to_string(&path).unwrap());
         s.checker.base_dir = path.parent().map(|d| d.to_path_buf());
         fixpt_fx26::syn::set_load_base(path.parent().map(|d| d.to_path_buf()));
         let mut c = s.fresh_checker();

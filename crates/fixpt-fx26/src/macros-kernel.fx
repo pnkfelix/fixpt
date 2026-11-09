@@ -135,5 +135,14 @@
     oneshot pairof place poly productof prompt-tag proves ref select subr sumof tupleof bool oneof
     union anyof allof -> ->* restrict read write alloc goto comefrom await init send receive io
     maxeff globals conv fields frozen requires ensures <= + - dlambda acyclic const)))
+;; The type forms' heads (`parse.rs`'s `TYPE_FORMS`, which a test holds
+;; this to): a template whose head is one makes a description, which is
+;; how a signature inferred says so (`macros/infer.rs`'s `makes`).
+(define type-forms datum
+  (quote
+   (
+    arrayof narrayof bloblet composable dletrec icell listof mark-key moduleof mu nat nlist
+    oneshot pairof place poly productof prompt-tag proves ref select subr sumof tupleof bool oneof
+    union anyof allof -> ->* restrict)))
 (define description-words datum
   (quote (void pure spin nondet stage heap const acyclic finite cellular native fx distinct)))

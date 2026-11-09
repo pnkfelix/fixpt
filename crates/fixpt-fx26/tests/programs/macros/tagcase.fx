@@ -4,5 +4,6 @@
 (define-syntax or-zero
   ;; As named: ((e expr))
   (expr)
-  ((_ e) (tagcase e (#:some v v) (#:none u 0))))
+  (syntax-rules ()
+    ((_ e) (tagcase e (#:some v v) (#:none u 0)))))
 (list (or-zero (the opt (sum some 4))) (or-zero (the opt (sum none #u))))

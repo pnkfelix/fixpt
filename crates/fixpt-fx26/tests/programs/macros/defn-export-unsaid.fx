@@ -3,7 +3,9 @@
 ;; the top level, which the template would seem to mean.
 (define-syntax define-const
   (-> (bvar expr) defn)
-  ((_ n e) (define n e)))
+  (syntax-rules ()
+    ((_ n e) (define n e))))
 (define-syntax define-via
   (-> (bvar) defn)
-  ((_ name) (begin (define-const x 1) (define name x))))
+  (syntax-rules ()
+    ((_ name) (begin (define-const x 1) (define name x)))))

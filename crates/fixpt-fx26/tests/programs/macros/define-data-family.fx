@@ -4,14 +4,16 @@
 ;; variants' types; a recursive one, a list.
 (define-syntax payload
   (-> (type ...) type)
-  ((_) unit)
-  ((_ f) f)
-  ((_ f g ...) (tupleof f g ...)))
+  (syntax-rules ()
+    ((_) unit)
+    ((_ f) f)
+    ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
   (-> ((union dvar (dvar (dvar kind) ...)) (label type ...) ...) defn)
-  ((_ (name (p k) ...) (t field ...) ...)
-   (define-type (name (p k) ...) (sumof (t (payload field ...)) ...)))
-  ((_ name (t field ...) ...) (define-type name (sumof (t (payload field ...)) ...))))
+  (syntax-rules ()
+    ((_ (name (p k) ...) (t field ...) ...)
+     (define-type (name (p k) ...) (sumof (t (payload field ...)) ...)))
+    ((_ name (t field ...) ...) (define-type name (sumof (t (payload field ...)) ...)))))
 (define-data (box (a type)) (#:full a) (#:empty))
 (define-data (chain (a type)) (#:end) (#:link a (chain a)))
 (define b (box int) (#:full 3))

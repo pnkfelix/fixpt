@@ -8,9 +8,11 @@
           (define less (subr pure (t t) bool) (lambda (a b) (< a b)))))
 (define-syntax max-fn
   (-> () expr)
-  ((_) (lambda ((o ordered) (a (select o t)) (b (select o t))) (if ((with o less) a b) b a))))
+  (syntax-rules ()
+    ((_) (lambda ((o ordered) (a (select o t)) (b (select o t))) (if ((with o less) a b) b a)))))
 (define-syntax less-of
   (-> (id expr expr) expr)
-  ((_ m x y) ((with m less) x y)))
+  (syntax-rules ()
+    ((_ m x y) ((with m less) x y))))
 (define max-of (subr pure ((o : ordered) (select o t) (select o t)) (select o t)) (max-fn))
 (if (less-of int-order 1 2) (max-of int-order 3 5) 0)

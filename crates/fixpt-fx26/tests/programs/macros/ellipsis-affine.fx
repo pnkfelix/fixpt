@@ -2,5 +2,6 @@
 ;; An expression placed in each repetition would run each time.
 (define-syntax bad
   (expr expr ...)
-  ((_ e r ...) (list (+ e r) ...)))
+  (syntax-rules ()
+    ((_ e r ...) (list (+ e r) ...))))
 1

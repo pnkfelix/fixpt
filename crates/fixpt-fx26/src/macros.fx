@@ -10,7 +10,11 @@
 ;;; (`parse-tops`); how it fails is the parser's (`fails`).
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define files-module ((proj (load-module "fx26:macros-files.fx") rs re rm rc rp)))
+;; Signatures inferred (`macros-solve.fx`, on `macros-infer.fx`), which
+;; loads the rest.
+(define solve-module ((proj (load-module "fx26:macros-solve.fx") rs re rm rc rp)))
+(define infer-module (with solve-module infer-module))
+(define files-module (with infer-module files-module))
 (define exports-module (with files-module exports-module))
 (define match-module (with exports-module match-module))
 (define scopes-module (with exports-module scopes-module))
@@ -43,6 +47,11 @@
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
         (type exported nested))
+(import solve-module infer sig-text)
+(import infer-module (type unsigned unsigneds))
+(import files-module written-of signature-of written-names literals-said binder-names names-any?
+        said-fail signed-each syntax-names
+        (type written writtens signed signed-opt))
 (import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
         internal-of
         imports-syntax? import-usage name-filter all-names listed? not-macros loaded-path
@@ -58,9 +67,10 @@
 ;; file's scope if `file` has one: its pattern fits the signature, each of
 ;; the pattern's variables is placed in the template where the signature
 ;; says what is in scope there, and a reference to a pattern's binder is
-;; where no other pattern binder may shadow it.
-(define check-clause (->* (fails syn sty int syns-a scopes) clause)
-  (lambda (fail c sig defn poly file)
+;; where no other pattern binder may shadow it. `lits`, its `syntax-rules`'
+;; literals.
+(define check-clause (->* (fails syn sty int syns-a names scopes) clause)
+  (lambda (fail c sig defn poly lits file)
     (let ((two (proper c)))
       (if (not (= (len two) 2))
           (begin (fail-at fail clause-usage c) (stub c))
@@ -68,20 +78,13 @@
             (if (null? whole)
                 (begin (fail-at fail clause-usage (car two)) (stub c))
                 (let* ((pattern (nth whole 1))
-                       (pv (pattern-vars fail sig pattern defn)) (ps (extract pv 1))
+                       (pv (pattern-vars fail sig pattern defn lits)) (ps (extract pv 1))
                        (template (nth two 1)))
                   (tuple pattern template
                          (template-actions fail ps template defn (extract pv 2) file) ps
                          (contracts-of ps (binder-names poly) file)))))))))
 (define stub (->* (syn) clause)
   (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil))))
-;; The names `poly`'s binders bind.
-(define binder-names (->* (syns-a) names)
-  (lambda (bs)
-    (cond ((null? bs) nil)
-          ((and (not (null? (proper (car bs)))) (syn-symbol? (car (proper (car bs)))))
-           (cons (syn-symbol (car (proper (car bs)))) (binder-names (cdr bs))))
-          (else (binder-names (cdr bs))))))
 ;; Each typed hole's contract, its type read as a use reads the template's
 ;; types; none where it names the macro's own binders, which no use can
 ;; write.
@@ -104,23 +107,18 @@
                       rest)))))))
 (define expr-kind? (->* (sty) bool)
   (lambda (t) (= ((with types-module kind-of) t) 0)))
-;; Whether syntax `s` names one of `ns`.
-(define names-any? (->* (syn names) bool)
-  (lambda (s ns)
-    (cond ((syn-symbol? s) (name-in? (syn-symbol s) ns))
-          ((null? (split s)) #f)
-          (else (or (names-any? (car (split s)) ns) (names-any? (nth (split s) 1) ns))))))
 ;; The pattern, aligned with the signature: each variable's type and
 ;; declared environment. A macro that makes definitions (`defn`) has no
 ;; typed parts: what each use defines is checked where it is. And what
 ;; such a macro's uses define, if its signature says (`(-> (export σ β)
 ;; defn)`), in a list of one: what a template using it sees, and what its
 ;; own template is held to.
-(define pattern-vars (->* (fails sty syn int) (tupleof pvars (listof exported acyclic)))
-  (lambda (fail sig pattern defn)
+(define pattern-vars (->* (fails sty syn int names) (tupleof pvars (listof exported acyclic)))
+  (lambda (fail sig pattern defn lits)
     (begin
       (nodes-reset!)
       (let* ((root (align fail 0 (the pvars nil) sig pattern -1 nil))
+             (said (literals-said fail lits 0))
              (found (walk fail root nil #f 0))
              (e (extract (node-at root) 5))
              (declared (if (and (= defn 1) (not (null? e)))
@@ -384,64 +382,79 @@
 
 ;;; ------------------------------------------------------------ defining
 
-(define define-usage string "`(define-syntax name signature ((_ . pattern) template) …)`")
-;; `(define-syntax name σ ((_ . pattern) template) …)`, checked, in a file's
-;; scope if `file` has one, and defined: its name. A template's free name
-;; is the top level's where the macro is used (`act-toplevel`). Defined
-;; first, so that a template may use the macro itself; what was defined
-;; before put back if a clause fails.
-(define define-macro (->* (fails syn scopes) symbol)
+;; `(define-syntax name [σ] (syntax-rules (literal …) ((_ . pattern)
+;; template) …))`, its signature written or inferred, or a
+;; `define-syntax-rec` of them, checked, in a file's scope if `file` has
+;; one, and defined: their names. A template's free name is the top level's
+;; where the macro is used (`act-toplevel`). Each defined first, with its
+;; signature, so that a template may use it or another of its
+;; `define-syntax-rec`; what was defined before put back if one fails.
+(define define-macro (->* (fails syn scopes) names)
   (lambda (fail form file)
-    (let ((items (proper form)))
-      (if (< (len items) 3)
-          (begin (fail-at fail define-usage form) (string->symbol ""))
-          (let ((name (nth items 1)))
-            (if (or (not (syn-symbol? name)) (reserved-syn? name))
-                (begin (fail-at fail (string-append define-usage ": a macro's name, not a form's")
-                                name)
-                       (string->symbol ""))
-                (if (null? (cdr (cdr (cdr items))))
-                    (begin (fail-at fail (string-append define-usage ": at least one clause") form)
-                           (string->symbol ""))
-                    (let* ((n (syn-symbol name))
-                           ;; `(poly (binder …) σ)`: the binders its typed holes
-                           ;; may name.
-                           (poly (signature-poly fail (nth items 2)))
-                           ;; `(-> σ defn)`, `(-> σ type)`: of what it makes,
-                           ;; definitions or a description.
-                           (made (signature-made fail (extract poly 2)))
-                           (defn (extract made 2))
-                           (sig (read-sty fail (extract made 1) nil nil))
-                           (before (get defined))
-                           (undo (lambda ((m string) (a int) (b int))
-                                   (begin (set defined before) (fail m a b)))))
-                      (begin
-                        (set defined (cons (tuple n (tuple sig (the clauses nil) (extract poly 1)
-                                                           defn))
-                                           before))
-                        (let ((cs (check-each undo (cdr (cdr (cdr items))) sig defn
-                                              (extract poly 1) file)))
-                          (begin
-                            (set defined (cons (tuple n (tuple sig cs (extract poly 1) defn))
-                                               before))
-                            n)))))))))))
-;; A signature's `(poly ((name kind) …) σ)`: its binders and `σ`; else none
-;; and itself.
-(define signature-poly (->* (fails syn) (tupleof syns-a syn))
-  (lambda (fail s)
-    (let ((items (proper s)))
-      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "poly"))
-          (if (or (syn-nil? (nth items 1)) (not (null? (proper (nth items 1)))))
-              (tuple (proper (nth items 1)) (nth items 2))
-              (begin (fail-at fail "a signature's `(poly ((name kind) …) σ)`" (nth items 1))
-                     (tuple (the syns-a nil) s)))
-          (tuple (the syns-a nil) s)))))
-(define check-each (->* (fails syns-a sty int syns-a scopes) clauses)
-  (lambda (fail cs sig defn poly file)
+    (let* ((before (get defined))
+           (undo (lambda ((m string) (a int) (b int))
+                   (begin (set defined before) (fail m a b)))))
+      (define-written undo (written-of undo form) file before))))
+;; Each signature, written, or inferred together for those not written,
+;; each defined first; then each macro's clauses checked, and defined.
+(define define-written (->* (fails writtens scopes macro-env) names)
+  (lambda (fail ws file before)
+    (let* ((written (signed-each fail ws))
+           (us (unsigned-of ws))
+           (inferred (if (null? us) nil (infer fail us)))
+           (sigs (inferred-each fail ws written inferred))
+           (made (checked-each fail ws sigs file)))
+      (begin
+        (set defined (append made before))
+        (written-names ws)))))
+(define-type said (tupleof signed-opt (listof string acyclic)))
+(define unsigned-of (->* (writtens) unsigneds)
+  (lambda (ws)
+    (cond ((null? ws) nil)
+          ((null? (extract (car ws) 2))
+           (cons (tuple (extract (car ws) 1) (extract (car ws) 3) (extract (car ws) 4)
+                        (extract (car ws) 5))
+                 (unsigned-of (cdr ws))))
+          (else (unsigned-of (cdr ws))))))
+;; Each signature, the written one's, or the inferred one read, with how
+;; it is said where its macro is refused.
+(define inferred-each
+  (->* (fails writtens (listof signed-opt acyclic) syns-a) (listof said acyclic))
+  (lambda (fail ws written inferred)
+    (cond
+      ((null? ws) nil)
+      ((not (null? (car written)))
+       (cons (tuple (car written) (the (listof string acyclic) nil))
+             (inferred-each fail (cdr ws) (cdr written) inferred)))
+      (else
+       (let* ((n (symbol->string (extract (car ws) 1))) (shown (sig-text (car inferred)))
+              (s (signature-of (said-fail fail n shown) (car inferred))))
+         (begin
+           (set defined (cons (tuple (extract (car ws) 1) (tuple (extract s 2) (the clauses nil)
+                                                                  (the syns-a nil) (extract s 3)))
+                              (get defined)))
+           (cons (tuple (the signed-opt (list s)) (the (listof string acyclic) (list shown)))
+                 (inferred-each fail (cdr ws) (cdr written) (cdr inferred)))))))))
+(define checked-each (->* (fails writtens (listof said acyclic) scopes) macro-env)
+  (lambda (fail ws sigs file)
+    (if (null? ws)
+        nil
+        (let* ((w (car ws)) (s (car (extract (car sigs) 1))) (shown (extract (car sigs) 2))
+               (f (if (null? shown) fail (said-fail fail (symbol->string (extract w 1))
+                                                    (car shown))))
+               (cs (if (null? (extract w 4))
+                       (begin (fail-at fail "a macro has at least one clause" (extract w 5))
+                              (the clauses nil))
+                       (check-each f (extract w 4) (extract s 2) (extract s 3) (extract s 1)
+                                   (extract w 3) file))))
+          (cons (tuple (extract w 1) (tuple (extract s 2) cs (extract s 1) (extract s 3)))
+                (checked-each fail (cdr ws) (cdr sigs) file))))))
+(define check-each (->* (fails syns-a sty int syns-a names scopes) clauses)
+  (lambda (fail cs sig defn poly lits file)
     (if (null? cs)
         nil
-        (let ((c (check-clause fail (car cs) sig defn poly file)))
-          (cons c (check-each fail (cdr cs) sig defn poly file))))))
+        (let ((c (check-clause fail (car cs) sig defn poly lits file)))
+          (cons c (check-each fail (cdr cs) sig defn poly lits file))))))
 
 ;;; ------------------------------------------------------------ the session
 

@@ -8,5 +8,6 @@
 (define more (subr pure (int) int) (lambda (x) x))
 (define-syntax call-more
   (-> (id expr) expr)
-  ((_ m e) ((with m more) e)))
+  (syntax-rules ()
+    ((_ m e) ((with m more) e))))
 (call-more int-order 1)

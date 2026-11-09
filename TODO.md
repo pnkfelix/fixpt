@@ -5312,3 +5312,21 @@ within t`, `o..t is not within int`. The same procedure bound by a
 a lambda in place does not take the module argument for `o` in the
 parameters' `(select o t)` once the body opens `o`. Found while testing a template's `(with m
 name)` (`macros/with-value.fx`, which binds by `define` instead).
+
+## 221. Signatures inferred: what is not yet (the user's, 2026-11-08)
+
+`syntax-rules` with its signature left out (`docs/research/typed-macros.md`,
+"Inferred signatures"). Not inferred, so written:
+
+- A part in a list by ellipsis whose elements are each in the scope of
+  those before: a pattern's binders through a template's `let*` of them by
+  ellipsis, `((_ ((x e) ...) body) (let* ((x e) ...) body))`. The walk finds
+  the repetitions before (`Level::Earlier`); the signature would be a
+  ribcage's list, `(mu c (union (export () (cage)) …))`, made for the
+  pattern's ellipsis.
+- Typed holes; a signature in part, `_` where it is inferred.
+- What `((_ f) f)` makes, and a tag placed only at an application's head,
+  `(t e)`: a template alone does not say. Taken: an expression, an
+  application.
+- Showing the signature inferred without a refusal: the REPL, `fixpt
+  check`.

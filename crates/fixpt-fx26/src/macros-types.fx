@@ -89,6 +89,7 @@
 (define reserved? (->* (string) bool)
   (lambda (name)
     (or (string=? name "#%fx") (string=? name "#%toplevel") (string=? name "define-syntax")
+        (string=? name "define-syntax-rec")
         (word-in? name (with kernel reserved-words)))))
 (define word-in? (->* (string datum) bool)
   (lambda (name ws)
@@ -104,6 +105,10 @@
         (and (> (string-length name) 1) (string=? (substring name 0 2) "#%"))
         (word-in? name (with kernel description-words))
         (and head (word-in? name (with kernel description-heads))))))
+;; Whether `name` is a type form's head (the kernel's `type-forms`), whose
+;; template makes a description.
+(define type-form? (->* (string) bool)
+  (lambda (name) (word-in? name (with kernel type-forms))))
 ;; Whether `s` is a name, and a reserved one.
 (define reserved-syn? (->* (syn) bool)
   (lambda (s) (and (syn-symbol? s) (reserved? (syn-name s)))))

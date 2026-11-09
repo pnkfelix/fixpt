@@ -4,7 +4,8 @@
 ;; variable `idx` the use's `plambda` binds.
 (define-type idx int)
 (define-syntax as-idx (expr)
-  ((_ e) (the idx e)))
+  (syntax-rules ()
+    ((_ e) (the idx e))))
 (define g (poly ((idx type)) (subr pure (idx) int))
   (plambda ((idx type)) (lambda ((x idx)) (+ (as-idx 5) 1))))
 ((proj g bool) #t)

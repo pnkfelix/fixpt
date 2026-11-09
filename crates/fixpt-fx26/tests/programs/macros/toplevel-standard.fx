@@ -4,5 +4,6 @@
 ;; the standard one, whatever the top level does.
 (define string-length (subr pure (string) int) (lambda (s) 42))
 (define-syntax size-of (expr)
-  ((_ e) (let ((s e)) (+ (* 100 (string-length s)) ((with #%fx string-length) s)))))
+  (syntax-rules ()
+    ((_ e) (let ((s e)) (+ (* 100 (string-length s)) ((with #%fx string-length) s))))))
 (size-of "abc")

@@ -124,8 +124,10 @@
   (lambda (fail ms scope)
     (if (null? ms)
         nil
-        (let ((n (define-macro fail (extract (car ms) 1) (list scope))))
-          (cons (tuple n (extract (car ms) 2)) (define-each fail (cdr ms) scope))))))
+        (let ((ns (define-macro fail (extract (car ms) 1) (list scope))))
+          (append (hidden-as ns (extract (car ms) 2)) (define-each fail (cdr ms) scope))))))
+(define hidden-as (->* (names bool) mades)
+  (lambda (ns h) (if (null? ns) nil (cons (tuple (car ns) h) (hidden-as (cdr ns) h)))))
 (define give-each
   (->* (fails mades macro-env scope (listof filter acyclic) syn) unit)
   (lambda (fail made own scope filter first)

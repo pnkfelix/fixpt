@@ -3,5 +3,6 @@
 ;; which a name cannot say.
 (define-syntax chained
   (-> (expr ...) expr)
-  ((_ e ...) ((lambda ((p (select p t)) ...) 0) e ...)))
+  (syntax-rules ()
+    ((_ e ...) ((lambda ((p (select p t)) ...) 0) e ...))))
 (chained 1 2)

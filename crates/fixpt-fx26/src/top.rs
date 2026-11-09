@@ -623,17 +623,18 @@ impl Checker {
         let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
         self.interner = interner;
         let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
-        let defines_syntax = |c: &Self, s: &Syntax| s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| c.interner.name(h) == "define-syntax");
+        let defines_syntax = |c: &Self, s: &Syntax| syntax_names(s, &c.interner).is_some();
+        let names_of = |c: &Self, s: &Syntax| syntax_names(s, &c.interner).unwrap_or_default().into_iter().map(|(n, _)| n);
         let mut macros = Vec::new();
         let mut kept = Vec::new();
         for f in forms {
             if defines_syntax(self, &f) {
-                macros.extend(f.as_proper_list().and_then(|l| l.get(1)).and_then(|n| n.as_symbol()));
+                macros.extend(names_of(self, &f));
                 continue;
             }
             match f.as_proper_list() {
                 Some([h, items @ ..]) if h.as_symbol().is_some_and(|h| self.interner.name(h) == "hide") && items.iter().any(|i| defines_syntax(self, i)) => {
-                    macros.extend(items.iter().filter(|i| defines_syntax(self, i)).filter_map(|i| i.as_proper_list().and_then(|l| l.get(1)).and_then(|n| n.as_symbol())));
+                    macros.extend(items.iter().filter(|i| defines_syntax(self, i)).flat_map(|i| names_of(self, i)));
                     let rest: Vec<Syntax> = std::iter::once(h.clone()).chain(items.iter().filter(|i| !defines_syntax(self, i)).cloned()).collect();
                     if rest.len() > 1 {
                         kept.push(Syntax::list(f.span, rest));
@@ -770,10 +771,10 @@ impl Checker {
         for f in forms {
             let head = f.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
             match head.as_deref() {
-                Some("define-syntax") => macros.push((f, false)),
+                Some("define-syntax" | "define-syntax-rec") => macros.push((f, false)),
                 Some("hide") => {
                     for item in f.as_proper_list().unwrap_or(&[]).iter().skip(1) {
-                        if item.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "define-syntax") {
+                        if syntax_names(item, &self.interner).is_some() {
                             macros.push((item.clone(), true));
                         }
                     }
@@ -787,13 +788,9 @@ impl Checker {
             }
         }
         let (values, types) = self.names_shown(&shown);
-        let macro_name = |m: &(Syntax, bool)| m.0.as_proper_list().and_then(|l| l.get(1)).and_then(|n| n.as_symbol());
-        let internal: std::collections::HashMap<Sym, Sym> = macros
-            .iter()
-            .filter_map(|m| macro_name(m))
-            .map(|n| (n, self.interner.intern(&format!("%syntax:{key}:{}", self.interner.name(n)))))
-            .collect();
-        let exported: std::collections::HashSet<Sym> = macros.iter().filter(|m| !m.1).filter_map(macro_name).collect();
+        let names: Vec<(Sym, bool)> = macros.iter().flat_map(|m| syntax_names(&m.0, &self.interner).unwrap_or_default().into_iter().map(|(n, _)| (n, m.1))).collect();
+        let internal: std::collections::HashMap<Sym, Sym> = names.iter().map(|(n, _)| (*n, self.interner.intern(&format!("%syntax:{key}:{}", self.interner.name(*n))))).collect();
+        let exported: std::collections::HashSet<Sym> = names.iter().filter(|(_, hidden)| !hidden).map(|(n, _)| *n).collect();
         let taken = |n: Sym| filter.is_none_or(|(only, names)| names.iter().any(|(m, _)| *m == n) == *only);
         let shared = self.interner.intern(&format!("%shared:{key}"));
         let mut defined = std::mem::take(&mut self.macros);
@@ -850,17 +847,25 @@ impl Checker {
     /// `form` with the uses of the macros defined in it expanded
     /// (`crate::macros`).
     fn macro_expanded(&mut self, form: Syntax) -> R<Vec<Syntax>> {
-        let defines = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "define-syntax");
-        if defines
-            && let Some(n) = form.as_proper_list().and_then(|l| l.get(1)).and_then(|n| n.as_symbol())
-            && self.global_type(n).is_some()
-        {
-            return Err(Self::macro_over_global(&self.interner, n, form.span));
+        let names = syntax_names(&form, &self.interner);
+        let defines = names.is_some();
+        for (n, _) in names.unwrap_or_default() {
+            if self.global_type(n).is_some() {
+                return Err(Self::macro_over_global(&self.interner, n, form.span));
+            }
         }
         let mut macros = std::mem::take(&mut self.macros);
         let mut interner = std::mem::take(&mut self.interner);
         let r = if defines {
-            macros.define(&form, &mut interner).and_then(|n| macros.template_checks(n, &mut interner)).and_then(|cs| cs.iter().map(|c| macros.expand(c, &mut interner)).collect())
+            macros.define(&form, &mut interner).and_then(|ns| {
+                let mut out = Vec::new();
+                for n in ns {
+                    for c in macros.template_checks(n, &mut interner)? {
+                        out.push(macros.expand(&c, &mut interner)?);
+                    }
+                }
+                Ok(out)
+            })
         } else {
             macros.expand_top(&form, &mut interner)
         };
@@ -2044,3 +2049,15 @@ fn uses_one_of(s: &Syntax, macros: &[Sym]) -> Option<(fixpt_read::Span, Sym)> {
     items.iter().find_map(|x| uses_one_of(x, macros))
 }
 
+
+/// The macros `s` defines, each with its name's place, if it is a
+/// `define-syntax` or a `define-syntax-rec`.
+fn syntax_names(s: &Syntax, interner: &fixpt_read::Interner) -> Option<Vec<(Sym, Span)>> {
+    let items = s.as_proper_list()?;
+    let named = |n: &Syntax| n.as_symbol().map(|m| (m, n.span));
+    match interner.name(items.first()?.as_symbol()?) {
+        "define-syntax" => Some(items.get(1).and_then(named).into_iter().collect()),
+        "define-syntax-rec" => Some(items[1..].iter().filter_map(|m| m.as_proper_list().and_then(|l| l.first()).and_then(named)).collect()),
+        _ => None,
+    }
+}

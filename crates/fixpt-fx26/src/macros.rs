@@ -63,6 +63,8 @@ use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+mod infer;
+
 /// A syntax type (Herman's `σ`).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum STy {
@@ -283,6 +285,8 @@ pub struct Macros {
     /// and those read anywhere, as written (`Aligner::desc`).
     heads: HashSet<String>,
     words: HashSet<String>,
+    /// The type forms' heads, whose template makes a description.
+    type_forms: HashSet<String>,
 }
 
 /// The kernel's forms a template may use, with their binding structure
@@ -436,6 +440,7 @@ impl Macros {
         let names = |list: &str, i: &Interner| kernel_list(&forms, i, list).iter().map(|w| i.name(w.as_symbol().expect("a word")).to_string()).collect::<HashSet<_>>();
         self.heads = names("description-heads", interner);
         self.words = names("description-words", interner);
+        self.type_forms = names("type-forms", interner);
         Ok(())
     }
 
@@ -758,13 +763,16 @@ impl Macros {
         }
     }
 
-    /// `(define-syntax name σ ((_ . pattern) template) …)`: checked, and
-    /// defined. A template's free name is the top level's where the macro
-    /// is used (`Action::Toplevel`).
-    pub fn define(&mut self, form: &Syntax, interner: &mut Interner) -> R<Sym> {
-        let name = self.define_in(form, interner, None)?;
-        self.defined_at.insert(name, form.span);
-        Ok(name)
+    /// `(define-syntax name [σ] (syntax-rules (literal …) ((_ . pattern)
+    /// template) …))`, its signature written or inferred; or a
+    /// `define-syntax-rec` of them: checked, and defined; their names. A template's free name is the top level's
+    /// where the macro is used (`Action::Toplevel`).
+    pub fn define(&mut self, form: &Syntax, interner: &mut Interner) -> R<Vec<Sym>> {
+        let names = self.define_in(form, interner, None)?;
+        for n in &names {
+            self.defined_at.insert(*n, form.span);
+        }
+        Ok(names)
     }
 
     /// The checks of macro `name`'s templates, once, where it is defined
@@ -908,12 +916,12 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), definitions: self.definitions.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), projections: HashMap::new(), defined_at: HashMap::new(), checking: false, heads: self.heads.clone(), words: self.words.clone() };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), definitions: self.definitions.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), projections: HashMap::new(), defined_at: HashMap::new(), checking: false, heads: self.heads.clone(), words: self.words.clone(), type_forms: self.type_forms.clone() };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
             match own.define_in(form, interner, Some(scope)) {
-                Ok(n) => made.push((n, *hidden)),
+                Ok(ns) => made.extend(ns.into_iter().map(|n| (n, *hidden))),
                 Err(e) => {
                     defined = Err(e);
                     break;
@@ -938,18 +946,90 @@ impl Macros {
         Ok(())
     }
 
-    /// `define`, in a file's scope if `file` is given: the macro's name.
-    fn define_in(&mut self, form: &Syntax, interner: &mut Interner, file: Option<&FileScope>) -> R<Sym> {
+    /// `define`, in a file's scope if `file` is given: the macros' names.
+    fn define_in(&mut self, form: &Syntax, interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Sym>> {
         self.ensure_kernel(interner)?;
-        let usage = "`(define-syntax name signature ((_ . pattern) template) …)`";
-        let items = form.as_proper_list().ok_or_else(|| FxError::at(form.span, usage))?;
-        let [_, name, sig, clauses @ ..] = items else {
-            return Err(FxError::at(form.span, usage));
-        };
-        let name = name.as_symbol().filter(|n| !reserved(interner.name(*n))).ok_or_else(|| FxError::at(name.span, format!("{usage}: a macro's name, not a form's")))?;
-        if clauses.is_empty() {
-            return Err(FxError::at(form.span, format!("{usage}: at least one clause")));
+        let ws = written(form, interner)?;
+        // Each macro defined first, with its signature, so that a template
+        // may use it, or another of its `define-syntax-rec`; put back as it
+        // was if one is refused.
+        let before: Vec<(Sym, Option<Rc<Macro>>)> = ws.iter().map(|w| (w.name, self.defined.get(&w.name).cloned())).collect();
+        let r = self.define_written(&ws, interner, file);
+        if r.is_err() {
+            for (n, b) in before {
+                match b {
+                    Some(m) => self.defined.insert(n, m),
+                    None => self.defined.remove(&n),
+                };
+            }
         }
+        r
+    }
+
+    fn define_written(&mut self, ws: &[Written], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Sym>> {
+        let mut sigs = Vec::new();
+        for w in ws {
+            let s = match &w.sig {
+                Some(sig) => {
+                    let s = self.signature(sig, interner)?;
+                    self.defined.insert(w.name, Rc::new(Macro { sig: s.1.clone(), defn: s.2, desc: s.3, poly: s.0.clone(), clauses: Vec::new(), text: None }));
+                    Some(s)
+                }
+                None => None,
+            };
+            sigs.push(s);
+        }
+        // The signatures not written, inferred together.
+        let unsigned: Vec<infer::Unsigned> = ws.iter().filter(|w| w.sig.is_none()).map(|w| infer::Unsigned { name: w.name, lits: w.lits.clone(), clauses: w.clauses.clone(), span: w.span }).collect();
+        let mut inferred = Vec::new();
+        if !unsigned.is_empty() {
+            let made = self.infer(&unsigned, interner)?;
+            let mut made = made.into_iter();
+            for (w, s) in ws.iter().zip(sigs.iter_mut()) {
+                if s.is_some() {
+                    continue;
+                }
+                let sig = made.next().expect("one each");
+                let shown = infer::sig_text(&sig, interner);
+                let name = interner.name(w.name).to_string();
+                let said = |e: FxError| FxError::at(e.span, format!("{}; `{name}`'s signature, inferred, is `{shown}`: write one if it means another", e.message));
+                let parsed = self.signature(&sig, interner).map_err(said)?;
+                self.defined.insert(w.name, Rc::new(Macro { sig: parsed.1.clone(), defn: parsed.2, desc: parsed.3, poly: Vec::new(), clauses: Vec::new(), text: None }));
+                inferred.push((w.name, shown));
+                *s = Some(parsed);
+            }
+        }
+        let mut out = Vec::new();
+        for (w, s) in ws.iter().zip(sigs) {
+            let (poly, sig, defn, desc) = s.expect("each signature, written or inferred");
+            if w.clauses.is_empty() {
+                return Err(FxError::at(w.span, "a macro has at least one clause"));
+            }
+            let mut checked = Vec::new();
+            for c in &w.clauses {
+                let r = self.clause(c, &sig, defn, desc, &poly, &w.lits, interner, file);
+                match (r, inferred.iter().find(|(n, _)| *n == w.name)) {
+                    (Ok(c), _) => checked.push(c),
+                    (Err(e), None) => return Err(e),
+                    (Err(e), Some((_, shown))) => {
+                        return Err(FxError::at(e.span, format!("{}; `{}`'s signature, inferred, is `{shown}`: write one if it means another", e.message, interner.name(w.name))));
+                    }
+                }
+            }
+            out.push((w.name, Macro { sig, defn, desc, poly, clauses: checked, text: self.reading.clone() }));
+        }
+        Ok(out
+            .into_iter()
+            .map(|(n, m)| {
+                self.defined.insert(n, Rc::new(m));
+                n
+            })
+            .collect())
+    }
+
+    /// A signature as written: the binders of its `(poly (binder …) σ)`, the
+    /// syntax type, and whether it makes definitions or a description.
+    fn signature(&mut self, sig: &Syntax, interner: &mut Interner) -> R<(Vec<Syntax>, Rc<STy>, bool, bool)> {
         // `(poly (binder …) σ)`: the binders its typed holes may name.
         let (poly, sig) = match sig.as_proper_list() {
             Some([h, bs, body]) if h.as_symbol().is_some_and(|h| interner.name(h) == "poly") => {
@@ -970,24 +1050,7 @@ impl Macros {
             _ => (sig, false, false),
         };
         let sig = self.sty(sig, interner, &HashMap::new(), &mut Vec::new())?;
-        // Defined first, so that a template may use the macro itself.
-        let before = self.defined.insert(name, Rc::new(Macro { sig: sig.clone(), defn, desc, poly: poly.clone(), clauses: Vec::new(), text: None }));
-        let mut checked = Vec::new();
-        for c in clauses {
-            match self.clause(c, &sig, defn, desc, &poly, interner, file) {
-                Ok(c) => checked.push(c),
-                Err(e) => {
-                    match before {
-                        Some(b) => self.defined.insert(name, b),
-                        None => self.defined.remove(&name),
-                    };
-                    return Err(e);
-                }
-            }
-        }
-        let text = self.reading.clone();
-        self.defined.insert(name, Rc::new(Macro { sig, defn, desc, poly, clauses: checked, text }));
-        Ok(name)
+        Ok((poly, sig, defn, desc))
     }
 
     /// A clause checked against signature `sig` (Herman's rules): its
@@ -996,7 +1059,7 @@ impl Macros {
     /// there, and a reference to a pattern's binder is where no other
     /// pattern binder may shadow it.
     #[allow(clippy::too_many_arguments)]
-    fn clause(&self, c: &Syntax, sig: &Rc<STy>, defn: bool, desc: bool, poly: &[Syntax], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
+    fn clause(&self, c: &Syntax, sig: &Rc<STy>, defn: bool, desc: bool, poly: &[Syntax], lits: &[Sym], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
         let usage = "a clause is `((_ . pattern) template)`";
         let [pattern, template] = c.as_proper_list().ok_or_else(|| FxError::at(c.span, usage))? else {
             return Err(FxError::at(c.span, usage));
@@ -1009,6 +1072,20 @@ impl Macros {
         let none = HashMap::new();
         let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
+        // A `syntax-rules`' literals, each a name the signature has written
+        // as it is, `(literal name)`, where the pattern has it; and no other.
+        {
+            for node in &p.nodes {
+                let Some(n) = node.syn.as_symbol() else { continue };
+                let lit = matches!(&*node.core, STy::Literal(_));
+                if lit && !lits.contains(&n) && !reserved(interner.name(n)) {
+                    return Err(FxError::at(node.syn.span, format!("`{}` is written as it is in the signature, `(literal {0})`, and is not among the `syntax-rules` literals", interner.name(n))));
+                }
+                if !lit && matches!(node.kids, Kids::PVar(_)) && lits.contains(&n) {
+                    return Err(FxError::at(node.syn.span, format!("`{}` is among the `syntax-rules` literals, and the signature has a part here, not `(literal {0})`", interner.name(n))));
+                }
+            }
+        }
         let mut found = Vec::new();
         p.walk(root, &Vec::new(), false, 0, &mut found, &mut Vec::new())?;
         // What a use of a macro that makes definitions says it defines, if
@@ -2501,6 +2578,69 @@ fn shown_exports(e: &(Vec<Atom>, Vec<Sym>), interner: &Interner) -> String {
     if out.is_empty() { "nothing".to_string() } else { out.join(", ") }
 }
 
+/// A macro as its `define-syntax` writes it: its name, its signature if
+/// written, and its `syntax-rules`' literals and clauses.
+struct Written {
+    name: Sym,
+    sig: Option<Syntax>,
+    lits: Vec<Sym>,
+    clauses: Vec<Syntax>,
+    span: Span,
+}
+
+/// The macros `form` defines: a `define-syntax`'s one, or each of a
+/// `define-syntax-rec`'s, `(define-syntax-rec (name [σ] (syntax-rules …)) …)`,
+/// all defined together, so that each template may use any of them.
+fn written(form: &Syntax, interner: &Interner) -> R<Vec<Written>> {
+    let usage = "`(define-syntax name [signature] (syntax-rules (literal …) ((_ . pattern) template) …))`";
+    let rec = "`(define-syntax-rec (name [signature] (syntax-rules (literal …) clause …)) …)`";
+    let items = form.as_proper_list().ok_or_else(|| FxError::at(form.span, usage))?;
+    if items.first().and_then(|h| h.as_symbol()).is_some_and(|h| interner.name(h) == "define-syntax-rec") {
+        if items.len() < 2 {
+            return Err(FxError::at(form.span, rec));
+        }
+        let mut out: Vec<Written> = Vec::new();
+        for m in &items[1..] {
+            let Some([name, rest @ ..]) = m.as_proper_list() else {
+                return Err(FxError::at(m.span, rec));
+            };
+            let w = written_one(name, rest, m.span, rec, interner)?;
+            if out.iter().any(|o| o.name == w.name) {
+                return Err(FxError::at(name.span, format!("`{}` is defined twice in this `define-syntax-rec`", interner.name(w.name))));
+            }
+            out.push(w);
+        }
+        return Ok(out);
+    }
+    let [_, name, rest @ ..] = items else {
+        return Err(FxError::at(form.span, usage));
+    };
+    Ok(vec![written_one(name, rest, form.span, usage, interner)?])
+}
+
+fn written_one(name: &Syntax, rest: &[Syntax], at: Span, usage: &str, interner: &Interner) -> R<Written> {
+    let name = name.as_symbol().filter(|n| !reserved(interner.name(*n))).ok_or_else(|| FxError::at(name.span, format!("{usage}: a macro's name, not a form's")))?;
+    let rules = |s: &Syntax| s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| interner.name(h) == "syntax-rules");
+    let (sig, rules) = match rest {
+        [r] if rules(r) => (None, r),
+        [sig, r] if rules(r) => (Some(sig.clone()), r),
+        // The clauses are a transformer's, which says how to read them.
+        [_, c, ..] if c.as_proper_list().is_some_and(|l| l.len() == 2) => {
+            return Err(FxError::at(c.span, "a macro's clauses are a transformer's: `(syntax-rules (literal …) ((_ . pattern) template) …)`, after its signature if it is written"));
+        }
+        _ => return Err(FxError::at(at, usage.to_string())),
+    };
+    let parts = rules.as_proper_list().expect("a list");
+    let Some((lits, clauses)) = parts[1..].split_first() else {
+        return Err(FxError::at(rules.span, "`(syntax-rules (literal …) ((_ . pattern) template) …)`"));
+    };
+    let lits = match &lits.datum {
+        Datum::Nil => Vec::new(),
+        _ => lits.as_proper_list().and_then(|l| l.iter().map(|x| x.as_symbol()).collect::<Option<Vec<_>>>()).ok_or_else(|| FxError::at(lits.span, "a `syntax-rules`' literals are a list of names"))?,
+    };
+    Ok(Written { name, sig, lits, clauses: clauses.to_vec(), span: at })
+}
+
 fn bind(b: &Syntax, interner: &Interner) -> R<Bind> {
     let usage = "a binding is `(rho (address δ) …)` or `(cage (rho …) (at address) …)`";
     let items = b.as_proper_list().ok_or_else(|| FxError::at(b.span, usage))?;
@@ -2595,7 +2735,7 @@ fn guarded(t: &STy, id: usize) -> bool {
 /// A form's name, `#%fx` or `#%toplevel`: never bound, so never a binder or
 /// a variable.
 fn reserved(name: &str) -> bool {
-    crate::top::KEYWORDS.contains(&name) || name == "#%fx" || name == "#%toplevel" || name == "define-syntax"
+    crate::top::KEYWORDS.contains(&name) || name == "#%fx" || name == "#%toplevel" || name == "define-syntax" || name == "define-syntax-rec"
 }
 
 /// A list's car and cdr, the cdr a list of the rest (or the tail).
@@ -2786,6 +2926,15 @@ mod tests {
         let forms = fixpt_read::Reader::new(super::KERNEL, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().expect("reads");
         let words: Vec<String> = super::kernel_list(&forms, &interner, "reserved-words").iter().map(|w| interner.name(w.as_symbol().expect("a name")).to_string()).collect();
         assert_eq!(words, crate::top::KEYWORDS);
+    }
+
+    /// The kernel's type forms are the checkers' (`parse.rs`'s `TYPE_FORMS`).
+    #[test]
+    fn the_kernels_type_forms_are_the_checkers() {
+        let mut interner = fixpt_read::Interner::default();
+        let forms = fixpt_read::Reader::new(super::KERNEL, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().expect("reads");
+        let words: Vec<String> = super::kernel_list(&forms, &interner, "type-forms").iter().map(|w| interner.name(w.as_symbol().expect("a name")).to_string()).collect();
+        assert_eq!(words, crate::parse::TYPE_FORMS);
     }
 
     /// The FX-26 checker's keywords (`check-read-helpers.fx`'s

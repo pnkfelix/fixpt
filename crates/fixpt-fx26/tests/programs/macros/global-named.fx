@@ -5,5 +5,6 @@
 (define helper 3)
 (define-syntax use-helper
   ()
-  ((_) helper))
+  (syntax-rules ()
+    ((_) helper)))
 (let ((helper 99)) (use-helper))

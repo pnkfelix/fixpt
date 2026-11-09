@@ -3,6 +3,7 @@
 (define-syntax both
   ;; As named: ((e (many expr)))
   ((many expr))
-  ((_ e) (list e e)))
+  (syntax-rules ()
+    ((_ e) (list e e))))
 (let ((c (new 0)))
   (both (begin (set c (+ (get c) 1)) (get c))))

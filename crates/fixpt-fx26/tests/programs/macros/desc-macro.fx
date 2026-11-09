@@ -3,8 +3,9 @@
 ;; type by how many parts it has.
 (define-syntax payload
   (-> (type ...) type)
-  ((_) unit)
-  ((_ f) f)
-  ((_ f g ...) (tupleof f g ...)))
+  (syntax-rules ()
+    ((_) unit)
+    ((_ f) f)
+    ((_ f g ...) (tupleof f g ...))))
 (define x (payload int bool) (tuple 7 #t))
 (extract x 1)

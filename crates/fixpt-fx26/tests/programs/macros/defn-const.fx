@@ -3,6 +3,7 @@
 ;; defined under that name, as the program sees it.
 (define-syntax define-const
   (-> (bvar expr) defn)
-  ((_ n e) (define n e)))
+  (syntax-rules ()
+    ((_ n e) (define n e))))
 (define-const x 5)
 (+ x 1)

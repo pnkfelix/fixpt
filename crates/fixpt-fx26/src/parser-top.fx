@@ -33,7 +33,7 @@
 (import templates-module template-checks)
 (import imports-module import-file-macros note-load-def!)
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
-        imports-syntax? globals! global-before? macro? later-macro-site)
+        syntax-names imports-syntax? globals! global-before? macro? later-macro-site)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -213,8 +213,7 @@
                ;; A `define-syntax`: the checks of its templates, once, there.
                (made (cond ((defines-syntax? written)
                             (begin (global-macro written)
-                                   (let ((n (define-macro pfail-at written nil)))
-                                     (parse-checks (template-checks pfail-at n)))))
+                                   (macro-checks (define-macro pfail-at written nil))))
                            ;; A file's macros, and the `include` of the rest.
                            ((imports-syntax? written)
                             (let ((inc (import-file-macros pfail-at written (get loaded))))
@@ -235,25 +234,32 @@
         (let* ((x (car xs))
                (made (begin (note-load-def! x) (parse-made (type-loaded x)))))
           (append-tops made (expanded-tops (cdr xs)))))))
+;; Each of macros `ns`' templates' checks, expanded and parsed.
+(define macro-checks (->* (names) top-list)
+  (lambda (ns)
+    (if (null? ns)
+        nil
+        (append-tops (parse-checks (template-checks pfail-at (car ns))) (macro-checks (cdr ns))))))
 ;; Each of a macro's templates' checks, expanded and parsed.
 (define parse-checks (->* (syns-a) top-list)
   (lambda (cs)
     (if (null? cs)
         nil
         (append-tops (parse-made (expand pfail-at (car cs))) (parse-checks (cdr cs))))))
-;; A `define-syntax` of a name a form before this parse defined as a
-;; global: refused, where it is (`Checker::macro_expanded`, which knows the
-;; globals checked; a program's own are refused where each is checked,
-;; `guard-defs`).
+;; A `define-syntax` (or `define-syntax-rec`) of a name a form before this
+;; parse defined as a global: refused, where it is
+;; (`Checker::macro_expanded`, which knows the globals checked; a program's
+;; own are refused where each is checked, `guard-defs`).
 (define global-macro (->* (syn) unit)
-  (lambda (s)
-    (let ((items (syn-items s "a `define-syntax`")))
-      (if (and (> (len items) 1) (syn-symbol? (nth items 1))
-               (global-before? (syn-symbol (nth items 1))))
-          (pfail (string-append "`" (syn-name (nth items 1))
-                                "` is defined already: a macro may not take its name")
-                 s)
-          #u))))
+  (lambda (s) (globals-taken (syntax-names s) s)))
+(define globals-taken (->* (names syn) unit)
+  (lambda (ns s)
+    (cond ((null? ns) #u)
+          ((global-before? (car ns))
+           (pfail (string-append "`" (symbol->string (car ns))
+                                 "` is defined already: a macro may not take its name")
+                  s))
+          (else (globals-taken (cdr ns) s)))))
 ;; Tops `ts`, each definition's names noted as globals, until one of them
 ;; is a macro's: as the Rust checker refuses it where it is checked
 ;; (`top_defining_kept`), a form refused there, said where the macro is if

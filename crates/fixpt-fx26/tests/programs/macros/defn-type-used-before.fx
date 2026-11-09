@@ -4,6 +4,7 @@
 (define xs ints (list 1))
 (define-syntax define-ints
   (-> (dvar) defn)
-  ((_ t) (define-type t (listof int))))
+  (syntax-rules ()
+    ((_ t) (define-type t (listof int)))))
 (define-ints ints)
 (length xs)

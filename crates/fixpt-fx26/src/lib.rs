@@ -499,6 +499,14 @@ pub const MACROS_ALIGN: &str = include_str!("macros-align.fx");
 /// pattern variable placed checked (`macros.rs`'s `walk`, `placed`).
 pub const MACROS_SCOPES: &str = include_str!("macros-scopes.fx");
 
+/// Signatures inferred, a `syntax-rules` macro's: its shape, kinds and
+/// placements (`macros/infer.rs`'s first half).
+pub const MACROS_INFER: &str = include_str!("macros-infer.fx");
+
+/// Signatures inferred: the scopes, how one is written, and the iterations
+/// (`macros/infer.rs`'s second half), on top of [`MACROS_INFER`].
+pub const MACROS_SOLVE: &str = include_str!("macros-solve.fx");
+
 /// A use matched against a clause's pattern (`macros.rs`'s `matches`).
 pub const MACROS_MATCH: &str = include_str!("macros-match.fx");
 
@@ -786,7 +794,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 213] = [
+pub const FRONT_END_MODULES: [(&str, &str); 215] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -850,6 +858,8 @@ pub const FRONT_END_MODULES: [(&str, &str); 213] = [
     ("macros-match.fx", MACROS_MATCH),
     ("macros-exports.fx", MACROS_EXPORTS),
     ("macros-files.fx", MACROS_FILES),
+    ("macros-infer.fx", MACROS_INFER),
+    ("macros-solve.fx", MACROS_SOLVE),
     ("macros.fx", MACROS),
     ("macros-templates.fx", MACROS_TEMPLATES),
     ("macros-imports.fx", MACROS_IMPORTS),

@@ -3,5 +3,6 @@
 ;; before's, which a name cannot say.
 (define-syntax chain
   (-> (bvar type ...) defn)
-  ((_ name f ...) (define name (subr pure ((m : (select m t)) ...) int) (lambda (x) 0))))
+  (syntax-rules ()
+    ((_ name f ...) (define name (subr pure ((m : (select m t)) ...) int) (lambda (x) 0)))))
 (chain c int int)

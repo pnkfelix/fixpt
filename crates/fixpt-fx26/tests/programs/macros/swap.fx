@@ -4,6 +4,7 @@
 (define-syntax swap!
   ;; As named: ((a id) (b id))
   (id id)
-  ((_ a b) (let ((tmp (get a))) (begin (set a (get b)) (set b tmp)))))
+  (syntax-rules ()
+    ((_ a b) (let ((tmp (get a))) (begin (set a (get b)) (set b tmp))))))
 (let ((tmp (new 1)) (other (new 2)))
   (begin (swap! tmp other) (list (get tmp) (get other))))

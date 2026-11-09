@@ -3,5 +3,6 @@
 (define-syntax my-or
   ;; As named: ((a expr) (b expr))
   (expr expr)
-  ((_ a b) (let ((t a)) (if t t b))))
+  (syntax-rules ()
+    ((_ a b) (let ((t a)) (if t t b)))))
 (let ((t #t)) (my-or #f t))

@@ -2,5 +2,6 @@
 ;; A binder the template repeats, referred to outside the repetition.
 (define-syntax last
   (expr ...)
-  ((_ e ...) (let ((t e) ...) t)))
+  (syntax-rules ()
+    ((_ e ...) (let ((t e) ...) t))))
 (last 1 2 3)

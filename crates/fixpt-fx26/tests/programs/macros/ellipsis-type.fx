@@ -3,5 +3,6 @@
 ;; gives.
 (define-syntax as-tuple
   (expr type ...)
-  ((_ e t ...) (the (tupleof t ...) e)))
+  (syntax-rules ()
+    ((_ e t ...) (the (tupleof t ...) e))))
 (extract (as-tuple (tuple 1 #t) int bool) 1)

@@ -9,5 +9,6 @@
   ((mu f (union (export () (rho))
                 (export ((bvar type) . (import f (rho (AA var)))) (rho (AA var) (D rib)))))
    (import expr (rho (A rib))))
-  ((_ fs body) (lambda fs body)))
+  (syntax-rules ()
+    ((_ fs body) (lambda fs body))))
 ((fun ((a int) (b int)) (* a b)) 3 3)

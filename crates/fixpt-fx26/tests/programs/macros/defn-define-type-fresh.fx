@@ -3,6 +3,7 @@
 (define-type cell bool)
 (define-syntax define-cell
   (-> (bvar) defn)
-  ((_ name) (begin (define-type cell (ref int @heap)) (define name cell (new 3)))))
+  (syntax-rules ()
+    ((_ name) (begin (define-type cell (ref int @heap)) (define name cell (new 3))))))
 (define-cell c)
 (get c)

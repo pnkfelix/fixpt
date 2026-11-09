@@ -8,5 +8,6 @@
           (define less (subr pure (t t) bool) (lambda (a b) (< a b)))))
 (define-syntax first-fn
   (-> () expr)
-  ((_) (lambda ((o ordered) (a (select o t)) (b (select o t))) a)))
+  (syntax-rules ()
+    ((_) (lambda ((o ordered) (a (select o t)) (b (select o t))) a))))
 ((first-fn) int-order 3 5)

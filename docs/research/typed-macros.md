@@ -489,8 +489,12 @@ readable form to move to:
 (define-syntax let1
   ;; As named: ((x bvar) (e expr)) (body (in expr x))
   ((bvar expr) (import expr (rho (AA var))))
-  ((_ (x e) body) (let ((x e)) body)))
+  (syntax-rules ()
+    ((_ (x e) body) (let ((x e)) body))))
 ```
+
+(Written with `syntax-rules` since 2026-11-08: "Inferred signatures",
+below.)
 
 **Checked where defined**, Herman's rules:
 - the signature: `mu` contractive; a `union`'s members told apart by
@@ -1026,6 +1030,82 @@ itself, binding no more than each element exports, all together), and a
 sequence's binders are one atom; each node an ellipsis follows is
 repeated, and the walk counts the ellipses each part is under, which a
 pattern variable's placing is held to.
+
+## Inferred signatures, and `syntax-rules` (2026-11-08, built)
+
+The user's question: why not a `syntax-rules` that infers its macro type,
+since in practice the analysis is local? Pombrio, Krishnamurthi and Wand,
+"Inferring Scope through Syntactic Sugar" (ICFP 2017), does it for scope
+alone: per-constructor binding facts, a least fixpoint over all the sugar
+at once. Built here for Herman's whole signatures, the user's design
+choices (2026-11-08):
+
+- **Written** `(define-syntax name [σ] (syntax-rules (literal …) clause
+  …))`, the signature optional; `(define-syntax-rec (name [σ]
+  (syntax-rules …)) …)` for macros whose templates use each other, as
+  `define-rec` is for values. The clauses are always a transformer's (the
+  user: "we need to distinguish our different macro forms"): the form
+  without one, `(define-syntax name σ clause …)`, is refused, and every
+  program was moved. A `syntax-rules`' literals are the names its
+  signature writes as they are, `(literal name)`, held to each other where
+  the signature is written (a form's name matches itself either way).
+- **`many` is inferred** where a template places a part with an
+  expression in it more than once (the user's choice, against keeping it
+  an opt-out to write).
+- **Overlapping clauses are refused** (the user's choice): a `union`'s
+  members are told apart by their shapes, as `syntax-rules`' order would
+  not.
+- **Sound by construction**: what is inferred is a signature, checked by
+  the unchanged checker as a written one is; inference only decides which
+  macros need none written. A refusal says the signature inferred, to copy
+  and change.
+
+How (`macros/infer.rs`, `macros-infer.fx` and `macros-solve.fx`, alike in
+each step so that both front ends infer the same, which
+`macros_both::both_expanders_infer_alike` holds them to on every program
+in `tests/programs/macros` with its signatures left out):
+
+1. **Shape**, from the patterns: where they differ, a `union` of their
+   shapes, each member a region its addresses are from; a list by ellipsis
+   takes in `()` and the patterns that write its elements one by one where
+   one of them is a list by ellipsis (`()`, `(e)`, `(e r ...)` are
+   `(expr ...)`, which the template's `(or* r ...)` needs), unless their
+   elements turn out of more than one syntax type (then not, the next
+   time). `()` and `((x e) . rest)` stay a `union`, whose `rest` may be in
+   the scope of what the first clause binds: Herman's let*-cl.
+2. **What it makes**, from the templates' heads: a definition's form or
+   such a macro's use, definitions; a type form's (`type-forms` in the
+   kernel file, `parse.rs`'s `TYPE_FORMS`), a description; an
+   expression's form, an expression. A clause that says nothing, a name,
+   takes another's; none, an expression.
+3. **Each pattern variable's syntax type**, from where the template places
+   it, aligned with the kernel's forms' signatures and the macros' (the
+   group's, as inferred so far): a binder over the references to it, a tag
+   over an application's head it looked like, a variable over an
+   expression, an expression over a lambda. Not known yet, taken for a
+   name where a form takes a name or a list, else for anything.
+4. **Scopes**: the environment each part is placed in, said on the part
+   by addresses where its binders are in its region, else on the part
+   around it whose region they are outside of; a binder inside a list's
+   element or a `union`'s member reached through what that exports (a rib,
+   or for a run of levels inside one member, a ribcage). A clause whose
+   member has none of what another's exports exports an empty one. A macro
+   that makes definitions exports what its template defines of what a use
+   gives, so that a template using it sees them.
+5. **Recursion**: the group's signatures so far are what a template's use
+   of one is aligned with, again, until each says the same twice (at most
+   16 times; then the last, which the checker judges).
+
+Of the 125 macros in `tests/programs/macros` with written signatures, the
+signature inferred from the clauses alone is the written one for 72
+(`macros::infer::tests::inferred_against_written`); most of the rest are
+refusal tests, or differ by saying more: a `defn` macro's export, `(many
+expr)` where `id` was written, the kernel's whole `formals`. Not inferred,
+to be written: typed holes; a part in a list by ellipsis whose elements are
+each in the scope of those before (a pattern's binders through a template's
+`let*` of them by ellipsis); what a template that names only a pattern
+variable makes, `((_ f) f)`; a tag placed only at an application's head,
+`(t e)`. Tests: `macros/infer-*.fx`, `macros/syntax-rules-unsaid.fx`.
 
 ## Leaning: narrower macros by `let-syntax`, not in module types (2026-11-08)
 

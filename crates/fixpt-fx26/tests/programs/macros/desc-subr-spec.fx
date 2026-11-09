@@ -7,14 +7,16 @@
   (lambda (x) (< 0 x)))
 (define-syntax define-sum
   (-> (bvar bvar) defn)
-  ((_ name a)
-   (define name (subr pure ((a : int) (b : int)) int
-                  (requires (and (<= 0 b) (implies (pos? a) (<= 0 b))))
-                  (ensures r (<= a r)))
-     (lambda (x y) (+ x y)))))
+  (syntax-rules ()
+    ((_ name a)
+     (define name (subr pure ((a : int) (b : int)) int
+                    (requires (and (<= 0 b) (implies (pos? a) (<= 0 b))))
+                    (ensures r (<= a r)))
+       (lambda (x y) (+ x y))))))
 (define-syntax define-int-test
   (-> (bvar) defn)
-  ((_ name) (define name (-> ((oneof int string)) (bool (then (shape 0 int)) (else))) int?)))
+  (syntax-rules ()
+    ((_ name) (define name (-> ((oneof int string)) (bool (then (shape 0 int)) (else))) int?))))
 (define-sum add a)
 (define-int-test int-test)
 (if (int-test 1) (add 3 4) 0)

@@ -4,6 +4,7 @@
 (define-type a bool)
 (define-syntax def-id
   (-> (bvar) defn)
-  ((_ name) (define name (poly ((a type)) (subr pure (a) a)) (lambda ((x a)) x))))
+  (syntax-rules ()
+    ((_ name) (define name (poly ((a type)) (subr pure (a) a)) (lambda ((x a)) x)))))
 (def-id ident)
 ((proj ident int) 3)

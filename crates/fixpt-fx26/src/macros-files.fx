@@ -17,7 +17,9 @@
 (import reader-types (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth datatype?
         expand-datatype (type syns-a names loaded-file) (effect parses))
-(import types-module fail-at (type fails))
+(import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty signature-made kind-of
+        (type fails sty))
+(import align-module nnodes node-syn node-core node-kids k-pvar defined (type clauses))
 
 ;; The name the importer has macro `n` by, of `m`'s, in a list of one.
 (define internal-of
@@ -30,12 +32,29 @@
   (lambda (s) (tagcase s (lst (items d a b x) items) (else y nil))))
 (define name-in? (->* (symbol names) bool)
   (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (name-in? n (cdr ns))))))
-;; Whether `s` is a `define-syntax`.
+;; Whether `s` is a `define-syntax` or a `define-syntax-rec`.
 (define defines-syntax? (->* (syn) bool)
   (lambda (s)
     (let ((items (proper s)))
       (and (not (null? items)) (syn-symbol? (car items))
-           (string=? (syn-name (car items)) "define-syntax")))))
+           (or (string=? (syn-name (car items)) "define-syntax")
+               (string=? (syn-name (car items)) "define-syntax-rec"))))))
+;; The macros `s`, a `define-syntax` or a `define-syntax-rec`, defines.
+(define syntax-names (->* (syn) names)
+  (lambda (s)
+    (let ((items (proper s)))
+      (cond ((not (defines-syntax? s)) nil)
+            ((string=? (syn-name (car items)) "define-syntax")
+             (if (and (> (len items) 1) (syn-symbol? (nth items 1)))
+                 (list (syn-symbol (nth items 1)))
+                 nil))
+            (else (member-names (cdr items)))))))
+(define member-names (->* (syns-a) names)
+  (lambda (ms)
+    (cond ((null? ms) nil)
+          ((and (not (null? (proper (car ms)))) (syn-symbol? (car (proper (car ms)))))
+           (cons (syn-symbol (car (proper (car ms)))) (member-names (cdr ms))))
+          (else (member-names (cdr ms))))))
 ;; Each top-level `(define name (load-module "path"))` so far, the last
 ;; first: the files `import-with-syntax` of `name` reads.
 (define-type load-defs (listof (tupleof symbol string) acyclic))
@@ -178,10 +197,7 @@
   (lambda (ms)
     (if (null? ms)
         nil
-        (let ((n (nth (proper (extract (car ms) 1)) 1)))
-          (if (syn-symbol? n)
-              (cons (syn-symbol n) (macro-names (cdr ms)))
-              (macro-names (cdr ms)))))))
+        (append (syntax-names (extract (car ms) 1)) (macro-names (cdr ms))))))
 ;; Each macro's name the importer has it by, which no program writes.
 (define internal-names (->* (string names) (listof (tupleof symbol symbol) acyclic))
   (lambda (key ns)
@@ -206,10 +222,7 @@
     (if (null? xs)
         found
         (let* ((x (car xs))
-               (here (cond ((defines-syntax? x)
-                            (let ((items (proper x)))
-                              (and (syn-symbol? (nth items 1))
-                                   (symbol=? (syn-symbol (nth items 1)) n))))
+               (here (cond ((defines-syntax? x) (name-in? n (syntax-names x)))
                            ((imports-syntax? x) (brings? n x fs ls))
                            (else #f)))
                (found2 (if here (the places (list (tuple (syn-start x) (syn-end x)))) found)))
@@ -249,3 +262,162 @@
     (cond ((null? xs) nil)
           ((syn-symbol? (car xs)) (cons (car xs) (names-only (cdr xs))))
           (else (names-only (cdr xs))))))
+
+;;; ------------------------------------------------------------ a macro written
+
+;; A `syntax-rules`' literals, `lits`, each a name the signature has written
+;; as it is, `(literal name)`, where the pattern has it; and no other: of
+;; the pattern's nodes from `i`.
+(define literals-said (->* (fails names int) unit)
+  (lambda (fail lits i)
+    (if (= i (get nnodes))
+        #u
+        (let ((s (node-syn i)))
+          (begin
+            (if (syn-symbol? s)
+                (let ((lit (= (kind-of (node-core i)) 7))
+                      (n (syn-symbol s)))
+                  (cond
+                    ((and lit (not (name-in? n lits)) (not (reserved? (syn-name s))))
+                     (fail-at fail (string-append "`" (syn-name s) "` is written as it is in the "
+                                                  "signature, `(literal " (syn-name s) ")`, and is "
+                                                  "not among the `syntax-rules` literals")
+                              s))
+                    ((and (not lit) (tagcase (node-kids i) (k-pvar (m) #t) (else y #f))
+                          (name-in? n lits))
+                     (fail-at fail (string-append "`" (syn-name s) "` is among the `syntax-rules` "
+                                                  "literals, and the signature has a part here, "
+                                                  "not `(literal " (syn-name s) ")`")
+                              s))
+                    (else #u)))
+                #u)
+            (literals-said fail lits (+ i 1)))))))
+;; A macro's definition as written (`macros.rs`'s `written`).
+(define define-usage string
+  "`(define-syntax name [signature] (syntax-rules (literal …) ((_ . pattern) template) …))`")
+(define rec-usage string
+  "`(define-syntax-rec (name [signature] (syntax-rules (literal …) clause …)) …)`")
+(define rules-usage string "`(syntax-rules (literal …) ((_ . pattern) template) …)`")
+;; A macro as its `define-syntax` writes it: its name, its signature if
+;; written (none or one), its `syntax-rules`' literals and clauses, and the
+;; form (or `define-syntax-rec`'s member) it is in.
+(define-type written (tupleof symbol syns-a names syns-a syn))
+(define-type writtens (listof written acyclic))
+(define written-of (->* (fails syn) writtens)
+  (lambda (fail form)
+    (let ((items (proper form)))
+      (cond
+        ((< (len items) 2)
+         (begin (fail-at fail (if (string=? (head-name form) "define-syntax-rec") rec-usage
+                                  define-usage)
+                         form)
+                nil))
+        ((string=? (head-name form) "define-syntax-rec") (written-members fail (cdr items) nil))
+        (else (list (written-one fail (nth items 1) (cdr (cdr items)) form define-usage)))))))
+(define written-members (->* (fails syns-a writtens) writtens)
+  (lambda (fail ms out)
+    (if (null? ms)
+        (reverse out)
+        (let ((parts (proper (car ms))))
+          (if (null? parts)
+              (begin (fail-at fail rec-usage (car ms)) nil)
+              (let ((w (written-one fail (car parts) (cdr parts) (car ms) rec-usage)))
+                (if (written-in? (extract w 1) out)
+                    (begin (fail-at fail (string-append "`" (symbol->string (extract w 1))
+                                                        "` is defined twice in this "
+                                                        "`define-syntax-rec`")
+                                    (car parts))
+                           nil)
+                    (written-members fail (cdr ms) (cons w out)))))))))
+(define written-in? (->* (symbol writtens) bool)
+  (lambda (n ws)
+   (and (not (null? ws)) (or (symbol=? n (extract (car ws) 1)) (written-in? n (cdr ws))))))
+(define rules? (->* (syn) bool) (lambda (s) (string=? (head-name s) "syntax-rules")))
+(define written-one (->* (fails syn syns-a syn string) written)
+  (lambda (fail name rest at usage)
+    (let ((none (tuple (string->symbol "") (the syns-a nil) (the names nil) (the syns-a nil) at)))
+      (cond
+        ((or (not (syn-symbol? name)) (reserved-syn? name))
+         (begin (fail-at fail (string-append usage ": a macro's name, not a form's") name) none))
+        ((and (= (len rest) 1) (rules? (car rest)))
+         (rules-written fail (syn-symbol name) nil (car rest) at))
+        ((and (= (len rest) 2) (rules? (nth rest 1)))
+         (rules-written fail (syn-symbol name) (list (car rest)) (nth rest 1) at))
+        ((and (>= (len rest) 2) (= (len (proper (nth rest 1))) 2))
+         (begin (fail-at fail (string-append "a macro's clauses are a transformer's: "
+                                             rules-usage ", after its signature if it is written")
+                         (nth rest 1))
+                none))
+        (else (begin (fail-at fail usage at) none))))))
+(define rules-written (->* (fails symbol syns-a syn syn) written)
+  (lambda (fail n sig rules at)
+    (let ((parts (proper rules)))
+      (if (null? (cdr parts))
+          (begin (fail-at fail rules-usage rules) (tuple n sig (the names nil) (the syns-a nil) at))
+          (let ((lits (nth parts 1)))
+            (tuple n sig (literals-of fail lits) (cdr (cdr parts)) at))))))
+(define literals-of (->* (fails syn) names)
+  (lambda (fail lits)
+    (cond ((syn-nil? lits) nil)
+          ((and (not (null? (proper lits))) (all-names? (proper lits)))
+           (names-of-syns (proper lits)))
+          (else (begin (fail-at fail "a `syntax-rules`' literals are a list of names" lits) nil)))))
+(define all-names? (->* (syns-a) bool)
+  (lambda (xs) (or (null? xs) (and (syn-symbol? (car xs)) (all-names? (cdr xs))))))
+(define names-of-syns (->* (syns-a) names)
+  (lambda (xs) (if (null? xs) nil (cons (syn-symbol (car xs)) (names-of-syns (cdr xs))))))
+;; A signature as written: the binders of its `(poly (binder …) σ)`, the
+;; syntax type, and what it makes (0 an expression, 1 definitions, 2 a
+;; description).
+(define-type signed (tupleof syns-a sty int))
+(define signature-of (->* (fails syn) signed)
+  (lambda (fail s)
+    (let* ((poly (signature-poly fail s)) (made (signature-made fail (extract poly 2))))
+      (tuple (extract poly 1) (read-sty fail (extract made 1) nil nil) (extract made 2)))))
+(define written-names (->* (writtens) names)
+  (lambda (ws) (if (null? ws) nil (cons (extract (car ws) 1) (written-names (cdr ws))))))
+;; A signature's `(poly ((name kind) …) σ)`: its binders and `σ`; else none
+;; and itself.
+(define signature-poly (->* (fails syn) (tupleof syns-a syn))
+  (lambda (fail s)
+    (let ((items (proper s)))
+      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "poly"))
+          (if (or (syn-nil? (nth items 1)) (not (null? (proper (nth items 1)))))
+              (tuple (proper (nth items 1)) (nth items 2))
+              (begin (fail-at fail "a signature's `(poly ((name kind) …) σ)`" (nth items 1))
+                     (tuple (the syns-a nil) s)))
+          (tuple (the syns-a nil) s)))))
+;; The names `poly`'s binders bind.
+(define binder-names (->* (syns-a) names)
+  (lambda (bs)
+    (cond ((null? bs) nil)
+          ((and (not (null? (proper (car bs)))) (syn-symbol? (car (proper (car bs)))))
+           (cons (syn-symbol (car (proper (car bs)))) (binder-names (cdr bs))))
+          (else (binder-names (cdr bs))))))
+;; Whether syntax `s` names one of `ns`.
+(define names-any? (->* (syn names) bool)
+  (lambda (s ns)
+    (cond ((syn-symbol? s) (name-in? (syn-symbol s) ns))
+          ((null? (split s)) #f)
+          (else (or (names-any? (car (split s)) ns) (names-any? (nth (split s) 1) ns))))))
+(define-type signed-opt (listof signed acyclic))
+(define signed-each (->* (fails writtens) (listof signed-opt acyclic))
+  (lambda (fail ws)
+    (if (null? ws)
+        nil
+        (let ((w (car ws)))
+          (if (null? (extract w 2))
+              (cons (the signed-opt nil) (signed-each fail (cdr ws)))
+              (let ((s (signature-of fail (car (extract w 2)))))
+                (begin
+                  (set defined (cons (tuple (extract w 1) (tuple (extract s 2) (the clauses nil)
+                                                                 (extract s 1) (extract s 3)))
+                                     (get defined)))
+                  (cons (the signed-opt (list s)) (signed-each fail (cdr ws))))))))))
+;; How macro `n`'s refusal is said, its signature inferred, `shown`.
+(define said-fail (->* (fails string string) fails)
+  (lambda (fail n shown)
+    (lambda ((m string) (a int) (b int))
+      (fail (string-append m "; `" n "`'s signature, inferred, is `" shown
+                           "`: write one if it means another")
+            a b))))

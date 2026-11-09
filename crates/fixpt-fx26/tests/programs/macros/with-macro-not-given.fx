@@ -5,6 +5,6 @@
 ;; around the use gives.
 (define m (module (define double (lambda ((x int)) (* x 2))) (define clamp 0)))
 (define n (module (define double (lambda ((x int)) (* x 2)))))
-(define-syntax clamp (expr) ((_ e) (let ((v e)) (if (> v 10) 10 v))))
-(define-syntax clamped (expr) ((_ e) (clamp e)))
+(define-syntax clamp (expr) (syntax-rules () ((_ e) (let ((v e)) (if (> v 10) 10 v)))))
+(define-syntax clamped (expr) (syntax-rules () ((_ e) (clamp e))))
 (+ (with n (double (clamp 100))) (- (with m (clamped 1)) (with m clamp)))

@@ -6,16 +6,18 @@
 ;; constructs by its keyword, a pattern variable at a list's head.
 (define-syntax payload
   (-> (type ...) type)
-  ((_) unit)
-  ((_ f) f)
-  ((_ f g ...) (tupleof f g ...)))
+  (syntax-rules ()
+    ((_) unit)
+    ((_ f) f)
+    ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
   (-> (dvar (bvar label type ...) ...) defn)
-  ((_ name (c t field ...) ...)
-   (begin
-     (define-type name (sumof (t (payload field ...)) ...))
-     (define c (subr pure (field ...) name) (lambda ((x field) ...) (t x ...)))
-     ...)))
+  (syntax-rules ()
+    ((_ name (c t field ...) ...)
+     (begin
+       (define-type name (sumof (t (payload field ...)) ...))
+       (define c (subr pure (field ...) name) (lambda ((x field) ...) (t x ...)))
+       ...))))
 (define-data shape (circle #:circle int) (rect #:rect int int) (none #:none))
 (define area (subr pure (shape) int)
   (lambda (s) (tagcase s (#:circle r (* 3 r)) (#:rect (w h) (* w h)) (#:none u 0))))

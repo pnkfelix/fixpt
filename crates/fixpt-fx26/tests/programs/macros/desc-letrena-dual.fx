@@ -4,5 +4,6 @@
 ;; As named: ((p dvar) (body (in expr p p-value)))
 (define-syntax with-arena
   (dvar (import expr (rho (A place))))
-  ((_ p body) (letrena p body)))
+  (syntax-rules ()
+    ((_ p body) (letrena p body))))
 (with-arena a (car (the (listof int a) (rcons a 3 nil))))

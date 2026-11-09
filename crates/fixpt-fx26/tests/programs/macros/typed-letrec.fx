@@ -6,5 +6,6 @@
 (define-syntax call-rec
   ((bvar #:type (subr spin (int) int))
    (import (lambda #:type (subr spin (int) int)) (rho (A var))))
-  ((_ f e) (letrec ((f (subr spin (int) int) e)) (f 3))))
+  (syntax-rules ()
+    ((_ f e) (letrec ((f (subr spin (int) int) e)) (f 3)))))
 (call-rec g (lambda ((n int)) n))

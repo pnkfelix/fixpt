@@ -1928,8 +1928,8 @@ mod speculative {
         let mut s = session();
         let e = s.run_program(text).err().expect("refused");
         let lines: Vec<String> = located("p.fx", text, &e).lines().map(String::from).collect();
-        assert_eq!(lines[0], "p.fx:6:15: argument 2 is a bool, where a int is expected");
-        assert_eq!(lines[1..], ["  in the expansion of `add-one` at p.fx:9:10", "  in the expansion of `twice-add` at p.fx:10:1"]);
+        assert_eq!(lines[0], "p.fx:7:17: argument 2 is a bool, where a int is expected");
+        assert_eq!(lines[1..], ["  in the expansion of `add-one` at p.fx:11:12", "  in the expansion of `twice-add` at p.fx:12:1"]);
     }
 
     /// A macro defined in what is typed is used there, and is not defined
@@ -1937,7 +1937,7 @@ mod speculative {
     #[test]
     fn a_macro_typed_is_defined_for_it_alone() {
         let mut s = session();
-        let n = notes_in(&mut s, "(define-syntax m (expr) ((_ e) e)) (m 5)");
+        let n = notes_in(&mut s, "(define-syntax m (expr) (syntax-rules () ((_ e) e))) (m 5)");
         assert!(n.iter().all(|n| !n.error), "{n:?}");
         assert!(notes_in(&mut s, "(m 5)").first().is_some_and(|n| n.error));
     }
