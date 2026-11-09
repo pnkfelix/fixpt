@@ -5,7 +5,9 @@
 (define-type byte-result (sumof (byte u8) (eof unit) (failed io-error)))
 (define* code (subr pure (byte-result) int)
   (lambda (b) (tagcase b (byte k (u8->int k)) (eof u -1) (failed e -2))))
-(define-effect waits (maxeff (alloc @p) (init @c) (await @c) (io stdin) (io clock) nondet))
+;; `spin`: `main` waits on `answer`, which nothing outside sees, so to its
+;; caller the wait is work of unbounded length (TODO.md §224).
+(define-effect waits (maxeff (alloc @p) (init @c) (await @c) (io stdin) (io clock) nondet spin))
 (define main (subr (maxeff waits (read (globals code))) () int)
   (lambda ()
     (let* ((answer (the (icell int @c) (make-icell)))

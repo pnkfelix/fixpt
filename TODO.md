@@ -5382,7 +5382,7 @@ part sees none (nor can contract notation C: `typed-macros.md`, "Three
 notations"); saying it needs named scopes (Ott's; Pombrio et al.'s
 conclusion), a design of its own.
 
-## 224. A wait on a private region masks to nothing: neither `spin` nor a wait shows (found 2026-11-09)
+## 224. A wait on a private region masks to nothing: neither `spin` nor a wait shows (found 2026-11-09; fixed 2026-11-09)
 
 A soundness gap in what `spin` promises (both front ends, and the cells'
 verifier). `mask_keeps` (`check.rs`) drops `(await r)` and `(receive r)`
@@ -5403,6 +5403,13 @@ place leaves nothing, as the spawner does not wait. See
 `docs/research/effect-markers.md`. Later, perhaps: a proof that a wait is
 fulfilled (a substructural account of who fills an I-cell, say) would
 let masking drop it with no `spin`; not now (the user's, 2026-11-09).
+Fixed: masking, freezing and substitution leave `spin` where they drop a
+wait, in both checkers (`Effect::waits_dropped`, `k-waits-dropped`); the
+cells' verifier too, which now counts the globals its closures' words
+name as seen, as the checker does (`globals_named`): without that it
+dropped `par.fx`'s awaits on a global's I-cell and found a `spin` the
+checker had not. `key-or-message.fx` says `spin` now. Left: the refusal
+says only "it has spin", not why (a wait nothing outside sees).
 
 ## 225. The `io` capabilities that sometimes wait, split (kayak's request, 2026-11-09)
 

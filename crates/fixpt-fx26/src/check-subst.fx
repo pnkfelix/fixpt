@@ -72,7 +72,10 @@
     (let* ((r (k-subst-region (k-atom-region a) m))
            (heap-frozen (tagcase r (r-frozen (p f) (< p 0)) (else y #f)))
            (pure-there (tagcase a (a-read (x) #t) (a-alloc (x) #t) (a-await (x) #t) (else y #f))))
-      (if (and heap-frozen pure-there) nil (k-one (k-atom-with a r))))))
+      ;; A wait dropped leaves `spin` (`k-waits-dropped`).
+      (cond ((not (and heap-frozen pure-there)) (k-one (k-atom-with a r)))
+            ((tagcase a (a-await (x) #t) (else y #f)) (k-one (a-spin)))
+            (else nil)))))
 (define k-subst-effect (->* (k-eff k-map) k-eff)
   (lambda (e m)
     (if (null? e)

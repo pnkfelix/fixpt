@@ -180,7 +180,7 @@
     (cond ((not (k-any-frozen? e)) e)
           ((k-writes-frozen? e)
            (k-fail "this writes frozen data, whose region is `const`" (k-start x) (k-end x)))
-          (else (k-drop-frozen e)))))
+          (else (k-waits-dropped e (k-drop-frozen e))))))
 
 ;; A `letfreeze r`'s value, of type `t`, as it leaves: `r` made `const`,
 ;; unless something in it could still write `r`.

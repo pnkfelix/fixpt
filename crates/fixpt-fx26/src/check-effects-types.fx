@@ -28,6 +28,8 @@
             (val k-atom-rank (subr pure (k-atom) int))
             (val k-contains?
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool))
+            (val k-waits-dropped
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-eff k-eff) k-eff))
             (val k-covered?
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool))
             (val k-within?

@@ -35,7 +35,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-resolve) (include check-env)
       (include check-print-parts))
-(import check-effects k-atom-rank k-atom-region k-has-region?)
+(import check-effects k-atom-rank k-atom-region k-has-region? k-waits-dropped)
 (define k-items (with check-read k-items))
 
 ;; Whether an atom is on `const`, the frozen region.
@@ -209,4 +209,4 @@
                (sought (k-sought e in-result nil)))
           (if (null? sought)
               e
-              (k-keep e (k-unseen x nil sought) in-result)))))))))
+              (k-waits-dropped e (k-keep e (k-unseen x nil sought) in-result))))))))))

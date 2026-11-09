@@ -306,7 +306,7 @@ masks.
    operations refuse non-regular files. Fix the annotations this breaks.
 2. `spin` left by masking a wait (checker and verifier), with a test of
    the private I-cell example above (TODO §224). This stands on its own,
-   markers or not.
+   markers or not. Done 2026-11-09.
 3. Markers and both kinds of bound on effect variables, with their
    evidence (`effectbound`, `given`).
 4. `effect-case`.

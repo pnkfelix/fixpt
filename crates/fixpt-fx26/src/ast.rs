@@ -321,6 +321,17 @@ impl Effect {
     pub fn union(&self, other: &Effect) -> Effect {
         Effect(self.0.union(&other.0).copied().collect()).absorbed()
     }
+    /// `kept`, what is left of this effect once masking (or freezing)
+    /// dropped some of it, with `spin` where a wait was dropped: a wait on
+    /// what nothing outside sees is, to anything outside, work of unbounded
+    /// length, and never ends if nothing fills what it waits on (the
+    /// user's, 2026-11-09; `TODO.md` §224).
+    pub fn waits_dropped(&self, mut kept: Effect) -> Effect {
+        if self.0.iter().any(|a| matches!(a, Atom::Await(_) | Atom::Receive(_)) && !kept.0.contains(a)) {
+            kept.0.insert(Atom::Spin);
+        }
+        kept
+    }
     /// Whether this reads `@globals`, and writes it: what makes its reads
     /// and writes of single globals nothing more ([`absorbed`](Self::absorbed)).
     pub fn absorbs(&self) -> (bool, bool) {

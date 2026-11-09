@@ -2470,7 +2470,9 @@ impl Checker {
             return Err(FxError::at(self.arena.span_of(e), "this writes frozen data, whose region is `const`"));
         }
         let in_heap = |r: &Region| matches!(r, Region::Frozen(None, _));
-        Ok(Effect(eff.0.into_iter().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if in_heap(r))).collect()))
+        // An I-cell frozen in the heap cannot be filled after, so a wait on
+        // one is dropped as masking drops one: leaving `spin`.
+        Ok(eff.waits_dropped(Effect(eff.0.iter().copied().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if in_heap(r))).collect())))
     }
 
     /// A summary of an effect, for a compiler, each a stronger claim on what
@@ -3128,7 +3130,7 @@ impl Checker {
         }
         let mut in_result = HashSet::new();
         self.regions_in(result, &mut in_result);
-        let kept = Effect(effect.0.iter().copied().filter(|a| Self::mask_keeps(*a, &visible, &in_result)).collect());
+        let kept = effect.waits_dropped(Effect(effect.0.iter().copied().filter(|a| Self::mask_keeps(*a, &visible, &in_result)).collect()));
         // Where masking dropped something, noted for the cells' verifier,
         // which masks the expression's cells as it finds them seen.
         if self.record_types && kept.0.len() < effect.0.len() {
@@ -5232,6 +5234,10 @@ pub(crate) fn subst_effect(e: &Effect, map: &HashMap<DVar, D>, arena: &crate::as
         if let Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) = *a
             && matches!(sub_r(r), Region::Frozen(None, _))
         {
+            // A wait dropped leaves `spin` (`Effect::waits_dropped`).
+            if matches!(a, Atom::Await(_)) {
+                out.0.insert(Atom::Spin);
+            }
             continue;
         }
         let piece = match *a {
