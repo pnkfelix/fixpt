@@ -5330,3 +5330,15 @@ name)` (`macros/with-value.fx`, which binds by `define` instead).
   application.
 - Showing the signature inferred without a refusal: the REPL, `fixpt
   check`.
+
+## 222. A `syntax-rules`' literals matched by meaning (found 2026-11-08)
+
+A literal is matched by its name (`macros.rs`'s `matches`, the `Mode::Use`
+fit of `(literal name)`): a reserved word is safe, since nothing binds it,
+but another, `for-sum`'s `in` (`macros/infer-literal.fx`), matches a use's
+local variable `in`, and misses an alias of `in` another macro's template
+passed on. Clinger and Rees's `match` and Hanson's `identifier=?` compare
+meanings: the use's environment's against the macro's
+(`docs/research/typed-macros.md`, "Syntactic closures: what an expansion
+means"). Both front ends.
+

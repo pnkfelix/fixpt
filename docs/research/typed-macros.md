@@ -37,6 +37,13 @@ would need. Nothing here is built.
 - **Alan Bawden, *First-class Macros Have Types*, POPL 2000.** A macro's
   type names its expander, and its value is the environment the expansion
   refers to: macros as members of modules (later, below).
+- **Alan Bawden and Jonathan Rees, *Syntactic Closures*, LFP 1988**; Chris
+  Hanson, *A Syntactic Closures Macro Facility*, Lisp Pointers IV-4, 1991
+  (aliases, `identifier=?`); William Clinger and Jonathan Rees, *Macros
+  That Work*, POPL 1991; William Clinger, *Hygienic Macros Through
+  Explicit Renaming*, Lisp Pointers IV-4, 1991. The meaning of an
+  expansion, and the procedural macros to come ("Syntactic closures: what
+  an expansion means", below).
 - Culpepper and Felleisen, *Taming macros* (GPCE 2004), shape types:
   Herman's starting point, the shape alone. Ganz, Sabry and Taha, MacroML
   (ICFP 2001): typed macros as staging, arguments opaque. Rust's
@@ -1106,6 +1113,287 @@ each in the scope of those before (a pattern's binders through a template's
 `let*` of them by ellipsis); what a template that names only a pattern
 variable makes, `((_ f) f)`; a tag placed only at an application's head,
 `(t e)`. Tests: `macros/infer-*.fx`, `macros/syntax-rules-unsaid.fx`.
+
+## Proposed: signatures as contracts, named, outside the code (2026-11-08)
+
+Not built; for the user to look over. The user's direction, after the
+inference above:
+
+- **Types outside the code.** Nothing is written in a `syntax-rules`'
+  patterns or templates; a signature is a part of the `define-syntax` of
+  its own.
+- **A signature says what it is**, as a transformer does: `(syntax-contract
+  …)`, in the named notation below; `(syntax-contract/addressed …)`,
+  Herman's, as written today, kept. A bare signature is refused, as a bare
+  clause list is, its message naming both.
+- **Readable**: names, not chains of `A` and `D`. The addresses were to
+  work from a well-defined reference point; they stay what the names
+  elaborate to, and the checker is unchanged.
+
+```scheme
+(define-syntax let1
+  (syntax-contract ((x : bvar) (e : expr)) (body : (in expr x)))
+  (syntax-rules ()
+    ((_ (y v) b) (let ((y v)) b))))
+```
+
+### The notation
+
+```text
+σ ::= expr | bvar | id | data | type | label | lambda | dvar | kind | ()
+    | (σ … σ ...) | (σ … . σ)          lists, as written today
+    | (x : σ)                          a part, labelled x
+    | (in σ x …)                       σ in the scope of what x … offer,
+                                       outermost first (Herman's import)
+    | (exports σ (rib x …))            σ offers one level: what x … offer
+    | (exports σ (cage x …))           σ offers levels, outermost first
+    | (union σ …) | (mu t σ) | t       alternatives, recursion
+    | (many σ) | (literal name)
+    | (expr #:type T #:effect E) …     typed holes, as written today
+    | _                                inferred (`syntax-rules` only)
+```
+
+What a labelled part offers: a `bvar`, itself, a value's binder; a `dvar`,
+itself, a description's; a part that `exports`, what it exports. The
+colon is FX-26's own for a part named where it is declared (`(x : T)`, a
+procedure type's parameters; `TODO.md` §213), and keeps a label apart from
+a list of two types, `(x : bvar)` from `(expr bvar)`.
+
+Whole signatures: `(syntax-contract #:makes defn σ)` for what makes
+definitions, `#:makes type` a description (`(-> σ defn)` today: `->` reads
+as a procedure's type, which this is not); `#:poly ((t type) …)` for the
+binders typed holes may name.
+
+```scheme
+;; let, by ellipsis: each element offers its binder; the list, all of them.
+(syntax-contract ((bindings : ((exports ((x : bvar) (e : expr)) (rib x)) ...))
+                  (body : (in expr bindings))))
+
+;; let*, by recursion: Herman's let*-cl, which inference finds.
+(syntax-contract ((cs : (mu clauses
+                          (union ()
+                                 (exports ((x : bvar) (e : expr) . (rest : (in clauses x)))
+                                          (cage x rest)))))
+                  (body : (in expr cs))))
+
+;; A macro that makes a definition, and says what it defines.
+(syntax-contract #:makes defn (exports ((n : bvar) (e : expr)) (rib n)))
+```
+
+### Labels and their scopes
+
+A label is the signature's, not a pattern variable: the signature is the
+interface, each clause matched against it by shape as today, so clauses
+may name a part differently, or not at all, and renaming a pattern
+variable changes no type. A label is in scope in the region it is in
+(the signature, a list's element, a `union`'s member, a `mu`'s body: what
+an address is from today) and in the regions inside it; two of one name
+in a region are refused. A part may be in the scope of a label of a
+region around it: the import is said on the part around it that the
+binder is outside of, as inference says it (`Macros::sites`).
+
+### Elaboration, and printing
+
+Each label becomes its part's address from its region's root, each `in`
+an `import` (`rho`, or `cage` for levels of more than one part), each
+`exports` an `export`, its δ from what the part offers (`var`, `dvar`, a
+part's `rib`, or `(at ℓ)` for a ribcage). So a contract is a way of
+writing a signature the checker already checks; it adds no rule.
+
+An inferred signature is printed as a contract, each part labelled by the
+first clause's pattern variable there, or `p1`, `p2`, … where none is,
+which written back elaborates to the same signature (a property to test,
+over `tests/programs/macros`). A `_` leaves a part to inference within the
+shape and scopes written around it; what is inferred must agree with what
+is written, else refused, saying both.
+
+The tests' signatures move to contracts, their "As named:" comments the
+start (each checked to elaborate to the addressed signature it replaces);
+some stay `/addressed`, for Herman's notation itself.
+
+### Open
+
+1. **The header's word.** `syntax-contract` is the user's. Against it:
+   the expander already calls a typed hole's `(the T e)` its contract
+   (`Clause::contracts`), and Racket's contracts are checked as a program
+   runs, these once, where the macro is defined. `syntax-type` or
+   `syntax-signature` would not collide. The user's to settle.
+2. **`/addressed`**, not `/debruijn`: Herman's addresses are paths into
+   the operands, not counts of binders out from a reference.
+3. **Into a repeated element.** May `(in expr x)` name `x` inside a list's
+   element from outside it, meaning every repetition's together (`let`'s
+   rule), the `exports` made by elaboration as inference makes them? Or
+   is the `exports` written, so that each binding's way from binder to
+   scope is in the signature (the user's thought: more self-documenting)?
+   Today's addresses require it.
+4. **A place** (`letrena`'s binder, a description and a value): offered
+   as both where its kind says `dvar` and a form binds it so; or written,
+   `(in expr (place r))`.
+5. **Order in a `cage`**: outermost first, as `in`'s parts are, against
+   today's innermost first.
+6. **`#:makes`** as a keyword, or kept `(-> σ made)`.
+
+## Syntactic closures: what an expansion means (2026-11-08)
+
+The user's question, reading Clinger and Rees: since a signature already
+gives what their deferred renaming was for, should syntactic closures be
+our reference? Leaning: yes, as the meaning of an expansion, with
+Herman's signatures the static discipline and renaming the
+implementation. Not built; nothing changes yet but what we argue from.
+
+**The line of work.** Bawden and Rees's syntactic closure is a form, a
+syntactic environment, and a list of names left free: every name in the
+form means what it means in the environment, but those, whose meaning the
+context gives ("call-by-context"). An expander closes each piece of a use
+in the use's environment, leaving free what the expansion will bind
+around it, and closes its own text in its own. Clinger and Rees objected
+that a pattern language cannot choose the environments and free lists,
+since "the syntactic role of an identifier" is not known before
+expansion; their algorithm renames as expansion goes, to defer the
+choice. The objection is to closures as first proposed, whose names were
+symbols. The two lines then met rather than one refuting the other:
+Clinger and Rees's algorithm "unifies and extends" both, its renaming
+done over syntactic environments ("Rees married syntactic closures to the
+modified Kohlbecker's algorithm"); Hanson's 1991 facility, which does not
+discuss the objection, adds an identifier type with *aliases* (Bawden's
+"synthetic names"), a name closed in the transformer's environment that
+may yet be bound, much as a renamed identifier is, so that a
+`syntax-rules` template's names become aliases and the output is left in
+the use's, which "is hygienic, without requiring the transformer to know
+the syntactic roles of the substituted input subforms".
+
+**Herman, on it.** The ESOP paper: "Our work shares a common observation
+with the syntactic closures macro system, namely that macro programmers
+know the binding structure of macros a priori; their work provides an API
+rather than a theory." The dissertation, §8.1: expansion algorithms
+"must generally perform provisional variable renamings, since [they do]
+not discover the actual syntactic roles of identifiers until quite late
+… By contrast, our system provides all of this information up front." He
+relates neither his α-equivalence to closing nor his types to free lists;
+his semantics is substitution and renaming, chosen to connect hygiene to
+α-equivalence. §7.3.3 blames macro-defining macros' troubles on expansion
+"defined as simple textual substitution, without regard for binding
+structure".
+
+**What a signature is, in closures.** Hanson's `let1`:
+
+```scheme
+`((lambda (,id) ,(make-syntactic-closure env (list id) exp))
+  ,(make-syntactic-closure env '() init))
+```
+
+leaves free in the body the name the use gave, `(list id)`: Herman's
+`(body (in expr x))`. His `loop` leaves free `exit`, a name its own
+expansion binds: the capture Herman's types refuse. Hanson remarks the two
+differ only in "the source of the identifier being left free". So:
+
+> **An import is a free list drawn only from the binders the use gave.**
+
+Syntactic closures are the larger system; a signature picks out the
+hygienic part of it, the part that can be checked once, where the macro is
+defined, and that keeps α-equivalence of programs not yet expanded
+(Herman's theorem), which aliases alone, hygienic only of each expansion
+made, do not.
+
+**Ours, read so.** The expander is Hanson's alias scheme compiled to
+names: a template's binder made fresh (`%t:3`) is an alias bound by the
+expansion; a template's free name, `(with #%toplevel n)` or `(with
+%shared:key n)`, an alias closed in the top level's or a file's
+environment, as FX-26's `with` closes a body in a module's (`(with m body)`
+is a closure in `m`, leaving free what `m` does not give; "First-class
+modules as environments", above); a use's part goes in as it is, open in
+the use's environment, which the signature has said its free names reach.
+The claim to argue, for soundness by construction: for a macro whose
+templates the checker accepts, renaming yields what closing yields.
+
+**Where we differ from the closures' meaning, to settle:**
+1. *Literals.* A `syntax-rules`' literal is matched by name; Hanson's
+   `cond` matches `else` by `identifier=?`, the same meaning in the use's
+   environment as in the transformer's, since a macro's output may hold an
+   alias of `else`. Reserved words are safe (nothing binds them); a
+   literal like `for-sum`'s `in` matches a use's local variable `in`. A
+   hygiene gap (`TODO.md` §222).
+2. *A template's free names.* Ours mean the top level's where the macro is
+   used (item 5, the user's), so a later redefinition is seen; a closure
+   in the transformer's environment would mean the definition's. The same
+   for any local binding at the use, which neither sees.
+3. *Local macros*, `let-syntax`: closures' environments are what they
+   need ("Leaning: narrower macros by `let-syntax`", below).
+
+## Proposed: procedural macros, checked by their contracts (2026-11-08)
+
+The user's question: can there be procedural macros at all, with the
+contract (above, "signatures as contracts") made an expansion-time
+wrapper that holds each expansion to its binding shapes and types? Not
+built; a direction.
+
+**Yes, by the same rules, applied to each expansion instead of once to a
+template.** A `syntax-rules` macro is a transformer whose output's shape
+is known when it is defined, so the checker can align the template with
+the kernel's signatures and hold each pattern variable's placing to the
+signature, for every use at once. A procedural transformer's output is
+known only when it runs; the same check runs then, on the output:
+
+1. The use is parsed by the contract, as today (`Mode::Use`), before the
+   transformer runs: each part with its syntax type and the scope the
+   contract declares, evaluated over the use.
+2. The transformer is given the parts as *handles* (a use's part, closed
+   in the use's environment, free in it only what the contract imports:
+   Hanson's closures, made from the contract), and builds the output with
+   them, its own names aliases in its environment by default, hygienic as
+   Hanson's `syntax-rules` is.
+3. The output is aligned with the kernel's signatures as a template is
+   (`Aligner`, `Mode::Template`), each handle in it a pattern variable of
+   the contract's type, and held to the rules a template is
+   (`Aligner::placed`: its syntax type where it is placed, the scope there
+   the one its contract declares, no more and no fewer; the shadow
+   restriction; placed once unless `many`; what a macro that makes
+   definitions defines, what its contract exports). Refused there, the
+   macro blamed at the use: "`m`'s expansion places `body` where …, and
+   its contract says …".
+
+So the wrapper is the template checker, run per expansion; a
+`syntax-rules` macro is the case checked once for all. It is the two tiers
+already decided for typed holes ("Typed holes": an untyped part promises
+nothing and each expansion is checked; a typed one is checked once), one
+level up. What a procedural macro gives up is checking where it is
+defined: a use may be refused that another is not. What it keeps is
+Herman's α-equivalence of programs as written, which the contract alone
+gives (a use is parsed by it before anything runs).
+
+**Which procedural system.** Of the four in the literature:
+- *Explicit renaming* (Clinger): `rename` and `compare`; simplest, but
+  hygiene is opt-in, a name not renamed captures: against "sound by
+  construction".
+- *Syntax-case* (Dybvig), and Racket's sets of scopes: hygienic by
+  default, but syntax objects carry marks or scope sets, an expander's
+  representation a transformer sees (Herman's §7.3.3 complaint).
+- *Syntactic closures* (Bawden, Rees, Hanson): closures and aliases,
+  `identifier=?`; a free list says, at each piece, what may bind in it,
+  which is what the contract says, so a contract can *make* the closures
+  rather than check what a programmer wrote.
+
+Leaning: syntactic closures made from the contract. The transformer never
+writes a free list: a handle is closed as the contract imports, a name
+the transformer writes is an alias, and the only way to leave a name free
+for its own binder (`loop`'s `exit`) is not offered, since the contract
+could not say it.
+
+**Open:**
+1. *When transformers run, in both front ends.* A transformer is FX-26
+   code, run by each expander (the Rust one's evaluator, the FX-26 one's),
+   the two to agree; `pure` (FX-26's effects say so, and it keeps
+   expansion deterministic, which both front ends' agreement needs).
+2. *What a transformer may name.* Phase separation (Flatt's "composable
+   and compilable macros"): the standard environment, and modules imported
+   for expansion; not the program's own definitions, not yet run.
+3. *Inspecting handles.* Destructuring a use's part (counting, a
+   literal's test by `identifier=?`) without reaching into its scope.
+4. *Names computed from a use's* (`make-point` of `point`): a binder the
+   contract cannot address, against "signatures depend on their operands
+   by address alone"; a design of its own, as decided then.
+5. *The syntax datatype* a transformer sees: FX-26's `syn` (the reader's),
+   or a type of handles and forms of its own.
 
 ## Leaning: narrower macros by `let-syntax`, not in module types (2026-11-08)
 
