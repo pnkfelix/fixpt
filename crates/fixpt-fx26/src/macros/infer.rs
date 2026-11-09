@@ -573,7 +573,7 @@ impl Macros {
                 return Ok(shown);
             }
             for ((u, t), m) in us.iter().zip(&tys).zip(makes) {
-                self.defined.insert(u.name, Rc::new(Macro { sig: t.clone(), defn: *m == Makes::Defn, desc: *m == Makes::Type, poly: Vec::new(), clauses: Vec::new(), text: None }));
+                self.defined.insert(u.name, Rc::new(Macro { sig: t.clone(), defn: *m == Makes::Defn, desc: *m == Makes::Type, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: None }));
             }
             let mut placed = Vec::new();
             let mut made = Vec::new();

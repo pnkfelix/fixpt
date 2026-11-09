@@ -64,6 +64,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 mod infer;
+pub(crate) mod procedural;
 
 /// A syntax type (Herman's `σ`).
 #[derive(Clone, Debug, PartialEq)]
@@ -187,6 +188,9 @@ struct Macro {
     clauses: Vec<Clause>,
     /// The text it was read from, its templates' places in it.
     text: Option<std::sync::Arc<str>>,
+    /// A procedural macro's transformer (`procedural`), which has no
+    /// signature nor clauses: `sig` says nothing of it.
+    procedural: Option<Rc<procedural::Procedural>>,
 }
 
 /// A clause: its pattern (of the operands), its template, and what is done
@@ -971,12 +975,18 @@ impl Macros {
     }
 
     fn define_written(&mut self, ws: &[Written], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Sym>> {
+        if let [w @ Written { procedural: Some((style, code)), .. }] = ws {
+            return self.define_procedural(w.name, *style, code, interner);
+        }
+        if let Some(w) = ws.iter().find(|w| w.procedural.is_some()) {
+            return Err(FxError::at(w.span, "a procedural macro is defined alone, by `define-syntax`"));
+        }
         let mut sigs = Vec::new();
         for w in ws {
             let s = match &w.sig {
                 Some(sig) => {
                     let s = self.signature(sig, interner)?;
-                    self.defined.insert(w.name, Rc::new(Macro { sig: s.1.clone(), defn: s.2, desc: s.3, poly: s.0.clone(), clauses: Vec::new(), text: None }));
+                    self.defined.insert(w.name, Rc::new(Macro { sig: s.1.clone(), defn: s.2, desc: s.3, poly: s.0.clone(), clauses: Vec::new(), text: None, procedural: None }));
                     Some(s)
                 }
                 None => None,
@@ -998,7 +1008,7 @@ impl Macros {
                 let name = interner.name(w.name).to_string();
                 let said = |e: FxError| FxError::at(e.span, format!("{}; `{name}`'s signature, inferred, is `{shown}`: write one if it means another", e.message));
                 let parsed = self.signature(&sig, interner).map_err(said)?;
-                self.defined.insert(w.name, Rc::new(Macro { sig: parsed.1.clone(), defn: parsed.2, desc: parsed.3, poly: Vec::new(), clauses: Vec::new(), text: None }));
+                self.defined.insert(w.name, Rc::new(Macro { sig: parsed.1.clone(), defn: parsed.2, desc: parsed.3, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: None }));
                 inferred.push((w.name, shown));
                 *s = Some(parsed);
             }
@@ -1020,7 +1030,7 @@ impl Macros {
                     }
                 }
             }
-            out.push((w.name, Macro { sig, defn, desc, poly, clauses: checked, text: self.reading.clone() }));
+            out.push((w.name, Macro { sig, defn, desc, poly, clauses: checked, text: self.reading.clone(), procedural: None }));
         }
         Ok(out
             .into_iter()
@@ -1029,6 +1039,17 @@ impl Macros {
                 n
             })
             .collect())
+    }
+
+    /// Procedural macro `name`, its transformer `code` checked at its
+    /// style's type in the transformers' session (`procedural::run`).
+    fn define_procedural(&mut self, name: Sym, style: procedural::Style, code: &Syntax, interner: &mut Interner) -> R<Vec<Sym>> {
+        let text = fixpt_read::write_syntax(code, interner);
+        procedural::run(&procedural::checked(style, &text)).map_err(|e| FxError::at(code.span, format!("`{}`'s transformer: {e}", interner.name(name))))?;
+        let p = procedural::Procedural { style, code: text };
+        let m = Macro { sig: Rc::new(STy::Expr), defn: false, desc: false, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: Some(Rc::new(p)) };
+        self.defined.insert(name, Rc::new(m));
+        Ok(vec![name])
     }
 
     /// A signature as written: the binders of its `(poly (binder …) σ)`, the
@@ -1336,7 +1357,9 @@ impl Macros {
     /// spliced (as R7RS's at the top level); each at `form`'s place, as
     /// `expand`'s, as a top-level `include`'s forms are. Else `expand`'s.
     pub fn expand_top(&mut self, form: &Syntax, interner: &mut Interner) -> R<Vec<Syntax>> {
-        let makes = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.defined.get(&h).is_some_and(|m| m.defn));
+        // A procedural macro may make definitions too, which no signature
+        // says ahead.
+        let makes = form.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.defined.get(&h).is_some_and(|m| m.defn || m.procedural.is_some()));
         if !makes {
             return Ok(vec![self.expand(form, interner)?]);
         }
@@ -1442,6 +1465,9 @@ impl Macros {
     /// A use of macro `name`, parsed by its signature, then the first clause
     /// whose pattern matches it transcribed.
     fn expand_use(&mut self, name: Sym, m: &Macro, s: &Syntax, interner: &mut Interner) -> R<Syntax> {
+        if let Some(p) = &m.procedural {
+            return self.expand_procedural(name, p, s, interner);
+        }
         let (_, operands) = split(s).expect("a list");
         let none = HashMap::new();
         let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new() };
@@ -1457,6 +1483,39 @@ impl Macros {
                 .map_err(|e| FxError::at(s.span, format!("a use of `{}`: {}", interner.name(name), e.message)));
         }
         Err(FxError::at(s.span, format!("a use of `{}` that no clause of it matches", interner.name(name))))
+    }
+
+    /// A use of procedural macro `name`, `s`: its transformer run on it
+    /// (`procedural::run`), what it gave read back at the use's place, a
+    /// syntactic closure's opened (`procedural::closed`).
+    fn expand_procedural(&mut self, name: Sym, p: &procedural::Procedural, s: &Syntax, interner: &mut Interner) -> R<Syntax> {
+        let made = fixpt_read::record_expansion(interner.name(name), s.span, None);
+        let form = fixpt_read::write_syntax(s, interner);
+        let said = |e: String| FxError::at(s.span, format!("a use of `{}`: its transformer: {e}", interner.name(name)));
+        let out = procedural::run(&procedural::applied(p.style, &p.code, &form, made)).map_err(said)?;
+        let read = fixpt_read::Reader::new(&out, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, interner).read_all();
+        let read = read.map_err(|e| FxError::at(s.span, format!("a use of `{}`: what its transformer gave, `{out}`, is not read: {}", interner.name(name), e.message)))?;
+        let [one] = &read[..] else {
+            return Err(FxError::at(s.span, format!("a use of `{}`: its transformer gave `{out}`, not one form", interner.name(name))));
+        };
+        let at = procedural::placed(one, s.span, made);
+        let opened = match p.style {
+            procedural::Style::Er => at,
+            procedural::Style::Sc => procedural::closed(&at, true, made, interner)?,
+            procedural::Style::Rsc => procedural::closed(&at, false, made, interner)?,
+        };
+        let defined: HashSet<String> = self.defined.keys().map(|k| interner.name(*k).to_string()).collect();
+        let is_keyword = |n: &str| {
+            self.kernel.contains_key(n)
+                || self.definitions.contains_key(n)
+                || self.heads.contains(n)
+                || self.words.contains(n)
+                || self.type_forms.contains(n)
+                || reserved(n)
+                || matches!(n, "else" | "=>" | "quote" | "quasiquote" | "unquote" | "unquote-splicing")
+                || defined.contains(n)
+        };
+        Ok(procedural::keywords(&opened, &is_keyword, interner))
     }
 
     /// Template `t`, at `path` in it, transcribed by expansion `made`: each
@@ -1819,6 +1878,9 @@ impl Aligner<'_> {
         let head = items[0].as_symbol().filter(|h| !self.pvars.contains_key(h));
         let not_one = |what: &str| FxError::at(s.span, format!("`{}` is not a definition: a macro that makes definitions makes {what}", self.show(s)));
         let sig = match head.map(|h| (h, self.name(h))) {
+            Some((h, _)) if self.m.defined.get(&h).is_some_and(|m| m.procedural.is_some()) => {
+                return Err(FxError::at(s.span, format!("`{}` is a procedural macro, whose binding structure no signature says: not in a template", self.name(h))));
+            }
             Some((h, n)) if defn => match self.m.defined.get(&h) {
                 Some(m) if m.defn => Some(m.sig.clone()),
                 Some(m) if m.desc => return Err(not_one("them by a macro that makes definitions, not a description's")),
@@ -2621,6 +2683,8 @@ struct Written {
     lits: Vec<Sym>,
     clauses: Vec<Syntax>,
     span: Span,
+    /// A procedural macro's transformer: its style, and the procedure.
+    procedural: Option<(procedural::Style, Syntax)>,
 }
 
 /// The macros `form` defines: a `define-syntax`'s one, or each of a
@@ -2656,6 +2720,17 @@ fn written(form: &Syntax, interner: &Interner) -> R<Vec<Written>> {
 fn written_one(name: &Syntax, rest: &[Syntax], at: Span, usage: &str, interner: &Interner) -> R<Written> {
     let name = name.as_symbol().filter(|n| !reserved(interner.name(*n))).ok_or_else(|| FxError::at(name.span, format!("{usage}: a macro's name, not a form's")))?;
     let rules = |s: &Syntax| s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| interner.name(h) == "syntax-rules");
+    // A procedural macro: `(er-macro-transformer proc)`, `(sc-macro-
+    // transformer proc)` or `(rsc-macro-transformer proc)`, no signature.
+    if let [t] = rest
+        && let Some(items) = t.as_proper_list()
+        && let Some(style) = items.first().and_then(|h| h.as_symbol()).and_then(|h| procedural::Style::named(interner.name(h)))
+    {
+        let [_, code] = items else {
+            return Err(FxError::at(t.span, format!("`({} procedure)`", interner.name(items[0].as_symbol().expect("a head")))));
+        };
+        return Ok(Written { name, sig: None, lits: Vec::new(), clauses: Vec::new(), span: at, procedural: Some((style, code.clone())) });
+    }
     let (sig, rules) = match rest {
         [r] if rules(r) => (None, r),
         [sig, r] if rules(r) => (Some(sig.clone()), r),
@@ -2673,7 +2748,7 @@ fn written_one(name: &Syntax, rest: &[Syntax], at: Span, usage: &str, interner: 
         Datum::Nil => Vec::new(),
         _ => lits.as_proper_list().and_then(|l| l.iter().map(|x| x.as_symbol()).collect::<Option<Vec<_>>>()).ok_or_else(|| FxError::at(lits.span, "a `syntax-rules`' literals are a list of names"))?,
     };
-    Ok(Written { name, sig, lits, clauses: clauses.to_vec(), span: at })
+    Ok(Written { name, sig, lits, clauses: clauses.to_vec(), span: at, procedural: None })
 }
 
 fn bind(b: &Syntax, interner: &Interner) -> R<Bind> {

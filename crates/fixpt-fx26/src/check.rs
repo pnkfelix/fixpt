@@ -1314,7 +1314,7 @@ impl Checker {
         let [form] = &forms[..] else {
             return Err(FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0), "one expression"));
         };
-        let e = self.parse_exp(form)?;
+        let e = self.parse_top_exp(form, &[])?;
         let (ty, effect) = self.synth(e)?;
         Ok(Checked { ty, effect, exp: e })
     }
