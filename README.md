@@ -13,8 +13,8 @@ FX-26 is also the language `fixpt`'s own tooling is written in. Its
 reader, parser, checker, compiler and machine-code generators are about
 78,000 lines of FX-26, and they compile and check every FX-26 program you
 run. The repository exists to try design ideas for FX-26 and see them
-hold up in real use. Other projects use FX-26 too, and several of its features
-were built at their request.
+hold up in real use, here and in [Heist](https://github.com/pnkfelix/heist)
+("Used elsewhere", below).
 
 ```scheme
 (define sum-to (subr pure (int) int)
@@ -218,6 +218,22 @@ By default FX-26 runs as native machine code on arm64 (macOS or Linux) and
 x86_64 Linux. Other machines (a bytecode VM, interpreters of the threaded
 code, a copy-and-patch stencil machine) are kept as references, and each
 benchmark runs on all of them (`fixpt machines`).
+
+## Used elsewhere
+
+[Heist](https://github.com/pnkfelix/heist) is a separate project with
+about 39,000 lines of FX-26 programs of its own:
+- an Emacs-lineage editor;
+- an R7RS Scheme, compiled to FX-26 and run through `stage`;
+- a SAT and SMT solver, a port of a Scheme solver;
+- a relational model finder after Alloy;
+- a bounded model checker, and a control-flow analysis, each for both
+  Scheme and FX-26 programs.
+
+Several FX-26 features exist because Heist asked for them: running other
+programs as processes, `attempt` and `attempt-within` for failures and
+time limits, module parameters and modules with state of their own, among
+others. `docs/fx26.md` says where each came from.
 
 ## Trying it
 
