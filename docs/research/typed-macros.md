@@ -1255,7 +1255,9 @@ whether a step was wrong. Four macros, each in:
   writes), and its facts, each
   naming only labels of the node's region: `(bind a in b)`, `b`'s insides
   see what `a` provides (flowing down); `(export a …)`, the node provides
-  what each `a` does (flowing up). Named shapes, recursive or not, are
+  what each `a` does, at one level, two of one name colliding (flowing up,
+  `let`'s); `(export* a …)`, the same nested, each inside those before
+  it, a later one shadowing an earlier (`let*`'s). Named shapes, recursive or not, are
   bound by `(letrec-shape ((name node-or-union) …) top-node)`, a `union`'s
   members each a node; a shape's name and its node's are distinct, `(b
   (binding …))`. The macro's node is named for the macro, and its shape is
@@ -1326,7 +1328,7 @@ whether a step was wrong. Four macros, each in:
                    (union (end ())
                           (clause (((x : bvar) (e : expr)) . (rest : clauses))
                             (bind x in rest)
-                            (export x rest)))))
+                            (export* x rest)))))
     (my-let* (_ (cs : clauses) (body : expr))
       (bind cs in body))))
 ```
@@ -1367,13 +1369,14 @@ What a use defines: the type's name, and each variant's constructor.
   a few one-line facts after it, about its own parts alone, so each named
   shape is read, and could be reused, by itself (the kernel's
   `formals`, `let-bindings`, `let*-clauses` are such shapes already:
-  `(cs : let*-clauses)`). No order is written for shadowing: in `let*`'s
-  `(export x rest)`, `rest`'s binders win because `(bind x in rest)` puts
-  them inside `x`'s scope; in `let`'s, the elements are at one level and
-  two of one name collide. `bind` and `export` are distinct because forms
-  combine them differently: `let` exports without binding the later
-  initializers, `let*` does both, a part may bind a local without
-  exporting it.
+  `(cs : let*-clauses)`). Shadowing is written, `export*` against
+  `export`, and is not read off `bind`: a `lambda`'s parameters each see
+  those before (a type may name an earlier one) and yet export one level,
+  two of one name colliding, while `let*`'s clauses see those before and
+  export nested levels (found writing the tests' signatures in C, below).
+  `bind` and `export` are distinct because forms combine them
+  differently: `let` exports without binding the later initializers,
+  `let*` does both, a part may bind a local without exporting it.
 
 ### Leaning: C, to test before deciding
 
@@ -1397,6 +1400,64 @@ What a use defines: the type's name, and each variant's constructor.
 - **Supersedes B** if chosen: the decisions above stand (contracts outside
   the code, headers, exports written, `#:makes`/`#:poly`, `place`), the
   context notation replaced by facts.
+
+### C against the tests' signatures (2026-11-08)
+
+The tests' written signatures (`tests/programs/macros`, and the files of
+`import-with-syntax`): 62 distinct. 42 have no scopes (no `import`,
+`export`): in C a shape alone, no facts (a `union`'s members named, as
+`define-data`'s `(union dvar (dvar (dvar kind) ...))`, a `(many σ)` or a
+typed hole a part's kind). The other 20, each in C (the `syntax-contract`
+around each left out; a defn's `#:makes defn` written):
+
+```scheme
+;; let1, ((bvar expr) (import expr (rho (AA var))))
+(let1 (_ ((x : bvar) (e : expr)) (body : expr)) (bind x in body))
+;; where, ((import expr (rho (AAD var))) (bvar expr)): the binder after its scope
+(where (_ (body : expr) ((x : bvar) (e : expr))) (bind x in body))
+;; call-rec, (bvar (import expr (rho (A var)))); also with `lambda` for `expr`
+(call-rec (_ (f : bvar) (e : expr)) (bind f in e))
+;; with typed parts: each kind as written, `(e : (lambda #:type fn))`,
+;; `#:poly ((t type) …)` before the node; the facts as above
+(let1 (_ ((x : (bvar #:type t)) (e : (expr #:type t #:effect e1)))
+         (body : (expr #:type u #:effect e2)))
+  (bind x in body))
+;; a description's binder, (dvar (import expr (rho (A dvar)))); a place's,
+;; (dvar (import expr (rho (A place)))), the part's kind `place`
+(pfun (_ (t : dvar) (e : expr)) (bind t in e))
+(with-arena (_ (r : place) (e : expr)) (bind r in e))
+;; defns: (-> (export (bvar expr) (rho (A var))) defn), and two names
+(define-const (_ (n : bvar) (e : expr)) (export n))
+(define-and-double (_ (a : bvar) (b : bvar) (e : expr)) (export a b))
+;; (-> (bvar expr bvar (import expr (rho (A var)))) defn)
+(define-both (_ (a : bvar) (e1 : expr) (b : bvar) (e2 : expr)) (bind a in e2))
+;; each element's part its own element's binder, ((bvar (import expr …)) ...)
+(letrec-shape ((p (pair ((v : bvar) (e : expr)) (bind v in e))))
+  (m (_ (ps : p) ...)))
+;; let by ellipsis, and let* by recursion: above
+;; fun's formals, each parameter's type in the scope of those before,
+;; exported at one level, a lambda's: (mu f (union (export () (rho))
+;; (export ((bvar type) . (import f (rho (AA var)))) (rho (AA var) (D rib)))))
+(letrec-shape ((f (union (none ())
+                         (param (((x : bvar) (t : type)) . (rest : f))
+                           (bind x in rest)
+                           (export x rest)))))
+  (fun (_ (fs : f) (body : expr)) (bind fs in body)))
+```
+
+Found:
+1. **Shadowing is written** (`export*`), not read off `bind`: `fun`'s
+   formals and `let*`'s clauses have the same `bind x in rest` and export
+   one level and nested levels.
+2. **Not writable, and rightly**: `desc-delta-mismatch.fx`'s `(dvar (import
+   expr (rho (A var))))`, a description's binder brought in as a value's,
+   which the checker refuses. C reads δ off the part's kind, so the
+   mismatch cannot be written; that test stays `/addressed`, as a test of
+   Herman's notation.
+3. **`do`** is said by neither (`TODO.md` §223): named scopes.
+
+So C says what the tests' signatures say. Elaboration to A, and a test
+that it gives each of these back, is for the build.
 
 ## Syntactic closures: what an expansion means (2026-11-08)
 
