@@ -1250,16 +1250,19 @@ whether a step was wrong. Four macros, each in:
 - **B**, the contexts with a `hole` decided above, with `offers` made a
   clause of a labelled part, as `in` is;
 - **C**, *shapes and facts* (after Pombrio, Krishnamurthi and Wand). Each
-  node is `(NAME SHAPE FACT …)`: a name for the node (not syntax; the
-  macro's node is named for the macro, or `_`, as a `syntax-rules`
-  pattern's head is, no other name accepted), its shape (a pattern-like
-  tree of labelled parts, exactly what a use writes), and its facts, each
+  node is `(NAME SHAPE FACT …)`: a name for the node (not syntax), its
+  shape (a pattern-like tree of labelled parts, exactly what a use
+  writes), and its facts, each
   naming only labels of the node's region: `(bind a in b)`, `b`'s insides
   see what `a` provides (flowing down); `(export a …)`, the node provides
   what each `a` does (flowing up). Named shapes, recursive or not, are
   bound by `(letrec-shape ((name node-or-union) …) top-node)`, a `union`'s
   members each a node; a shape's name and its node's are distinct, `(b
-  (binding …))`. A `bvar` provides itself; a part of a named shape, what
+  (binding …))`. The macro's node is named for the macro, and its shape is
+  written as a `syntax-rules` pattern is, the keyword's place first, `_`
+  (or the macro's name, no other), so that a contract reads against the
+  clauses beside it (the user's): `(my-let (_ ((bs : b) ...) (body :
+  expr)) …)`. A `bvar` provides itself; a part of a named shape, what
   its node's facts export. Ellipses follow `syntax-rules`' rules, the
   user's choice (2026-11-08): `p ...` repeats the part before it, as in a
   pattern, and a label under *k* ellipses is named in a fact under exactly
@@ -1278,7 +1281,7 @@ whether a step was wrong. Four macros, each in:
 
 ;; C
 (syntax-contract
-  (let1 (((x : bvar) (e : expr)) (body : expr))
+  (let1 (_ ((x : bvar) (e : expr)) (body : expr))
     (bind x in body)))
 ```
 
@@ -1296,7 +1299,7 @@ whether a step was wrong. Four macros, each in:
 ;; C
 (syntax-contract
   (letrec-shape ((b (binding ((x : bvar) (e : expr)) (export x))))
-    (my-let (((bs : b) ...) (body : expr))
+    (my-let (_ ((bs : b) ...) (body : expr))
       (bind (bs ...) in body))))
 ```
 
@@ -1324,7 +1327,7 @@ whether a step was wrong. Four macros, each in:
                           (clause (((x : bvar) (e : expr)) . (rest : clauses))
                             (bind x in rest)
                             (export x rest)))))
-    (my-let* ((cs : clauses) (body : expr))
+    (my-let* (_ (cs : clauses) (body : expr))
       (bind cs in body))))
 ```
 
@@ -1347,7 +1350,7 @@ What a use defines: the type's name, and each variant's constructor.
 ;; C
 (syntax-contract #:makes defn
   (letrec-shape ((v (variant ((c : bvar) (t : label) (fields : type) ...) (export c))))
-    (define-data ((name : dvar) (vs : v) ...)
+    (define-data (_ (name : dvar) (vs : v) ...)
       (export name (vs ...)))))
 ```
 
@@ -1360,7 +1363,7 @@ What a use defines: the type's name, and each variant's constructor.
   a written convention (the hole says it, but the reader must still find
   which context is whose).
 - **C** separates the two. The shape reads as a pattern (the macro's node
-  as a use would be written, `(my-let* cs body)`); each node's scoping is
+  as its clauses' patterns are, `(_ (cs : clauses) (body : expr))`); each node's scoping is
   a few one-line facts after it, about its own parts alone, so each named
   shape is read, and could be reused, by itself (the kernel's
   `formals`, `let-bindings`, `let*-clauses` are such shapes already:
