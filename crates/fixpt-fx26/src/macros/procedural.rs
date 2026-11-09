@@ -82,6 +82,12 @@ thread_local! {
     static SESSION: RefCell<Option<crate::session::Fx26Session>> = const { RefCell::new(None) };
 }
 
+/// `run` made what the runtime's syscall for the expander written in
+/// FX-26 calls (`fixpt_runtime::syscall::PROCEDURAL`).
+pub fn install() {
+    let _ = fixpt_runtime::syscall::PROCEDURAL.set(run);
+}
+
 /// FX-26 program `code` run in the transformers' session: the last form's
 /// value, printed as `write` does; or why not.
 pub fn run(code: &str) -> Result<String, String> {

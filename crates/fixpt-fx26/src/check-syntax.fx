@@ -54,10 +54,11 @@
               (else (k-sfail (k-cat3 "globals are only read and written, not `" head "`") x)))))))
 
 ;; A label or tag: a keyword, `#:name`, or the name bare, the same label;
-;; or a natural number, which is its digits.
+;; or a natural number, which is its digits. A procedural macro's alias is
+;; its name (`parser.fx`'s `label`).
 (define k-syn-label (->* (syn) symbol)
   (lambda (s)
-    (cond ((syn-symbol? s) (syn-head s))
+    (cond ((syn-symbol? s) (string->symbol (k-label-name (symbol->string (syn-head s)))))
           ((>= (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else
            (tagcase s
@@ -65,6 +66,21 @@
                (if (keyword? d) (keyword->symbol d) (k-sfail k-label-usage s)))
              (else x (k-sfail k-label-usage s)))))))
 (define k-label-usage string "a label is a keyword, a name or a natural number")
+;; Name `n`, a procedural macro's alias `%~N:x` its name `x`.
+(define k-label-name (->* (string) string)
+  (lambda (n)
+    (let ((c (if (and (> (string-length n) 2) (string=? (substring n 0 2) "%~"))
+                 (k-label-digits-end n 2)
+                 -1)))
+      (if (and (> c 2) (< c (string-length n)) (char=? (string-ref n c) #\:))
+          (k-label-name (substring n (+ c 1) (string-length n)))
+          n))))
+(define k-label-digits-end (->* (string int) int)
+  (lambda (s i)
+    (if (and (< i (string-length s)) (char-numeric? (string-ref s i)))
+        (k-label-digits-end s (+ i 1))
+        i)))
+
 (define k-has-label? (->* (k-parts symbol) bool)
   (lambda (ps l)
     (cond ((null? ps) #f) ((symbol=? (extract (car ps) 1) l) #t) (else (k-has-label? (cdr ps) l)))))

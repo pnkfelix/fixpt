@@ -1626,6 +1626,65 @@ could not say it.
    recursing through itself may rely on. Whether a transformer is given a
    handle on its keyword, and with whose context.
 
+## Procedural macros, prototyped (2026-11-09)
+
+Built in both front ends, so that writing a macro each of three ways can be
+compared (the user's request): `syntax-rules`, explicit renaming (Clinger),
+and syntactic closures (Bawden and Rees, as Hanson's facility gives them).
+No contracts yet (the section above): a procedural macro has no signature,
+its expansion is checked as any code is, and its hygiene is enforced as it
+runs. `TODO.md` §228; tests `tests/programs/procedural/`, the same macros
+each way (`twice-*.fx`, `aif-*.fx`).
+
+```
+(define-syntax name (er-macro-transformer  (lambda (form rename compare) …)))
+(define-syntax name (sc-macro-transformer  (lambda (form use-env) …)))
+(define-syntax name (rsc-macro-transformer (lambda (form macro-env) …)))
+```
+
+**A transformer is FX-26 code over `datum`s**, checked where the macro is
+defined at its style's type:
+- ER: `(subr spin (datum (subr pure (symbol) symbol) (subr spin (symbol
+  symbol) bool)) datum)`, the use's whole form, `rename` and `compare`.
+- SC and RSC: `(subr spin (datum symbol) datum)`, the form and an
+  environment. Around it, as locals, are `make-syntactic-closure (env free
+  form)`, `identifier?` and `identifier=?`.
+
+It sees the standard environment and those alone: nothing the program
+defines (phases apart). It is checked and run by an FX-26 session of its
+own, the same for both front ends (`macros/procedural.rs`'s `run`; the
+expander written in FX-26 reaches it through the standard
+`%macros:expand-procedural`), and what it gives comes back as text, read at
+the use's place.
+
+**Hygiene by aliases, one spelling for both systems.** `%~N:x` is `x` as
+where the macro was defined, made by expansion `N`:
+- ER's `rename` makes them; `compare` compares names, an alias as its
+  name.
+- A syntactic closure is a list, `(%sc env (free …) form)`; once the
+  transformer has given its answer, every name closed in the macro's
+  environment is made an alias, and every name closed in the use's is left
+  as written, a closure's free names closed in the environment around it.
+  `sc-macro-transformer`'s answer is closed in the macro's, `rsc-`'s in the
+  use's. So syntactic closures are explicit renaming of every name the
+  macro writes, as this note's "Syntactic closures" section found.
+- What an alias means is decided where its role is known: a keyword's name
+  (a form's, a description's word, a macro's), which nothing binds, is the
+  keyword, by the expander; a quoted one is its name; a label is its name
+  (both labels' readers); a type or effect name nothing in scope binds is
+  the top level's (`read_qualified`, `k-qualified?`); and a value's that
+  nothing in scope binds, nor the top level defined, the top level's,
+  `(with #%toplevel x)` (`aliases.rs`; in FX-26, on the parser's trees,
+  `parser-top.fx`'s `unalias`, which both its checker and its compiler
+  read). One the expansion binds is a name of its own, which nothing the
+  use wrote can capture.
+
+**Not built.** `capture-syntactic-environment`; names compared by what
+they mean, not as written (`compare` and `identifier=?` are by name, as
+`syntax-rules`' literals are, §222); a procedural macro in a
+`syntax-rules` template (refused: no signature says what it binds); and
+the contracts.
+
 ## Leaning: narrower macros by `let-syntax`, not in module types (2026-11-08)
 
 Today `define-syntax` is allowed at a program's top level and a module

@@ -3208,6 +3208,23 @@ prims! {
             Err(why) => rt.fail(&format!("rep-of-hex: {why}"), &[]),
         }
     });
+    // A procedural macro's transformer run, for the expander written in
+    // FX-26 (`%macros:expand-procedural`; `TODO.md` §228): the program,
+    // FX-26 text; its answer, `=` and the last form's value as `write`
+    // prints it, or `!` and why not. Run by the transformers' own session,
+    // the one the Rust front end's expander runs them in, so both expand
+    // alike (`crate::syscall::PROCEDURAL`).
+    "%fx26-expand-procedural", 1, Some(1), simple!(|rt, a| {
+        let code = get_string(rt, a[0])?;
+        let answer = match crate::syscall::PROCEDURAL.get() {
+            Some(run) => match run(&code) {
+                Ok(v) => format!("={v}"),
+                Err(e) => format!("!{e}"),
+            },
+            None => "!no transformer runs here".to_string(),
+        };
+        Ok(rt.heap.make_string(&answer))
+    });
 }
 
 /// Promise states. `[state, payload]`.

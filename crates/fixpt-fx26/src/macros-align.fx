@@ -61,6 +61,10 @@
 (define macro? (->* (symbol) bool) (lambda (n) (not (null? (macro-of n (get defined))))))
 ;; Whether `n` is a macro that makes definitions.
 (define makes-defns? (->* (symbol) bool) (lambda (n) (= (makes n) 1)))
+;; Whether `n` is a macro a top level's form may make definitions with: one
+;; that makes them, or a procedural one (`macros-procedural.fx`), which no
+;; signature says.
+(define makes-top-defns? (->* (symbol) bool) (lambda (n) (or (= (makes n) 1) (= (makes n) 3))))
 ;; Whether `n` is a macro that makes a description.
 (define makes-desc? (->* (symbol) bool) (lambda (n) (= (makes n) 2)))
 (define makes (->* (symbol) int)
@@ -398,6 +402,12 @@
            (kernel (kernel-sigs fail)) (defs (kernel-definitions fail))
            (macro (and (not (string=? head "")) (macro? (syn-symbol hd)))))
       (cond
+        ;; A procedural macro (`macros-procedural.fx`): no signature says
+        ;; what it binds.
+        ((and macro (= (makes (syn-symbol hd)) 3))
+         (fail-at fail (string-append "`" head "` is a procedural macro, whose binding structure "
+                                      "no signature says: not in a template")
+                  s))
         (defn
          (cond ((and macro (makes-defns? (syn-symbol hd))) (macro-operands fail ps at hd parts))
                ((and macro (makes-desc? (syn-symbol hd)))

@@ -5466,3 +5466,17 @@ bound in `effectbound` evidence and `given`.
 and in a branch that passes, `e` has that bound or those markers, as a
 bounded binder's has (§226). In place of kayak's `rep` supertype and
 `effect-within` syscall. Both front ends. `docs/research/effect-markers.md`.
+
+## 228. Procedural macros, a prototype: explicit renaming and syntactic closures (the user's, 2026-11-09)
+
+Built in both front ends, to compare writing macros three ways:
+`er-macro-transformer`, `sc-macro-transformer`, `rsc-macro-transformer`
+beside `syntax-rules` (`docs/research/typed-macros.md`, "Procedural macros,
+prototyped"; tests `tests/programs/procedural/`). A transformer is FX-26
+code over `datum`s, checked and run by a session of its own
+(`macros/procedural.rs`; from FX-26, `%macros:expand-procedural`); hygiene
+by aliases, `%~N:x`. Left: `capture-syntactic-environment`; `compare` and
+`identifier=?` by meaning, not name (§222); a transformer that sees the
+program's own definitions (phases); contracts, checked at each expansion
+(the note's proposal); a transformer run each use is checked again each
+use, which a definition's compiled transformer kept would not need.

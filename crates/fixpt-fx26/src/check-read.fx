@@ -333,17 +333,35 @@
         (k-sfail (no) s))))
 ;; Whether `s` is a name `#%toplevel:n`, the top level's `n`, whatever binds
 ;; `n` where it is written (`typed-macros.md`, "Decided: a template's free
-;; description names, one qualified name each").
+;; description names, one qualified name each"); or a procedural macro's
+;; alias no description here has, which is its name as the top level reads
+;; it (`Checker::read_qualified`; `TODO.md` §228).
 (define k-qualified? (->* (syn) bool)
   (lambda (s)
     (and (syn-symbol? s)
          (let ((n (syn-name s)))
-           (and (> (string-length n) 11) (string=? (substring n 0 11) "#%toplevel:"))))))
-;; `n`, of `#%toplevel:n` written `s`, where `s` is.
+           (or (and (> (string-length n) 11) (string=? (substring n 0 11) "#%toplevel:"))
+               (and (not (string=? (k-alias-base n #f) ""))
+                    (null? (k-lookup-desc (string->symbol n)))))))))
+;; `n`, of `#%toplevel:n` or an alias `%~N:n` written `s`, where `s` is.
 (define k-unqualified (->* (syn) syn)
   (lambda (s)
-    (let ((n (syn-name s)))
-      (atom (string->symbol (substring n 11 (string-length n))) (syn-start s) (syn-end s) 0))))
+    (let* ((n (syn-name s)) (base (k-alias-base n #f))
+           (m (if (string=? base "") (substring n 11 (string-length n)) base)))
+      (atom (string->symbol m) (syn-start s) (syn-end s) 0))))
+;; `x`'s name as where its alias's macro was defined, if it is a procedural
+;; macro's alias (`%~N:x`): every `%~N:` taken off; else "".
+(define k-alias-base (->* (string bool) string)
+  (lambda (n any)
+    (let ((c (if (and (> (string-length n) 2) (string=? (substring n 0 2) "%~"))
+                 (k-digits-end n 2)
+                 -1)))
+      (if (and (> c 2) (< c (string-length n)) (char=? (string-ref n c) #\:))
+          (k-alias-base (substring n (+ c 1) (string-length n)) #t)
+          (if any n "")))))
+(define k-digits-end (->* (string int) int)
+  (lambda (s i)
+    (if (and (< i (string-length s)) (char-numeric? (string-ref s i))) (k-digits-end s (+ i 1)) i)))
 ;; The effect a name stands for: in `with` bodies, the modules' first
 ;; (`k-with-effect-selected`); `#%toplevel:n`, the top level's `n`.
 (define k-effect-named (->* (syn) k-eff)

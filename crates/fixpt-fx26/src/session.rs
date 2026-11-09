@@ -989,6 +989,9 @@ impl Fx26Session {
         native: bool,
         strategy: Strategy,
     ) -> R<Fx26Session> {
+        // The expander written in FX-26 runs procedural macros' transformers
+        // through a syscall (`macros::procedural`).
+        crate::macros::procedural::install();
         let preload = |heap: &mut fixpt_heap::Heap| -> Option<fixpt_heap::Value> {
             let k = keeping?;
             // A dump's, resumed (`resume_from`): its start in a global.

@@ -103,10 +103,12 @@
   (lambda (xs i) (if (= i 0) xs (drop (cdr xs) (- i 1)))))
 
 ;; A label or tag: a keyword, `#:name`, or the name bare, the same label;
-;; or a natural number, which is its digits (as `parse.rs`'s `label`).
+;; or a natural number, which is its digits (as `parse.rs`'s `label`). A
+;; procedural macro's alias is its name: a label binds nothing (`TODO.md`
+;; §228).
 (define label (->* (syn) symbol)
   (lambda (s)
-    (cond ((syn-symbol? s) (syn-head s))
+    (cond ((syn-symbol? s) (string->symbol (label-name (symbol->string (syn-head s)))))
           ((>= (syn-int s) 0) (string->symbol (int->string (syn-int s))))
           (else
            (tagcase s
@@ -114,6 +116,21 @@
                (if (keyword? d) (keyword->symbol d) (pfail label-usage s)))
              (else x (pfail label-usage s)))))))
 (define label-usage string "a label is a keyword, a name or a natural number")
+;; Name `n`, a procedural macro's alias `%~N:x` its name `x`.
+(define label-name (->* (string) string)
+  (lambda (n)
+    (let ((c (if (and (> (string-length n) 2) (string=? (substring n 0 2) "%~"))
+                 (label-digits-end n 2)
+                 -1)))
+      (if (and (> c 2) (< c (string-length n)) (char=? (string-ref n c) #\:))
+          (label-name (substring n (+ c 1) (string-length n)))
+          n))))
+(define label-digits-end (->* (string int) int)
+  (lambda (s i)
+    (if (and (< i (string-length s)) (char-numeric? (string-ref s i)))
+        (label-digits-end s (+ i 1))
+        i)))
+
 
 (define keep (->* (syns-a) syns-a)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (keep (cdr xs))))))

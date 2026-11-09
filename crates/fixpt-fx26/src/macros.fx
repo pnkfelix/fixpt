@@ -12,7 +12,8 @@
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 ;; Signatures inferred (`macros-solve.fx`, on `macros-infer.fx`), which
 ;; loads the rest.
-(define solve-module ((proj (load-module "fx26:macros-solve.fx") rs re rm rc rp)))
+(define procedural-module ((proj (load-module "fx26:macros-procedural.fx") rs re rm rc rp)))
+(define solve-module (with procedural-module solve-module))
 (define infer-module (with solve-module infer-module))
 (define files-module (with infer-module files-module))
 (define exports-module (with files-module exports-module))
@@ -35,8 +36,8 @@
 (import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list
         len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
 (import scopes-module walk placed evaluate levels-of binder-of)
-(import align-module defined macro-of macro? makes-defns? nodes-reset! align node-at
-        node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
+(import align-module defined macro-of macro? makes-defns? makes-top-defns? nodes-reset! align
+        node-at node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
         seq-depths
         act-qualified act-standard act-module act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
@@ -48,6 +49,8 @@
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
         (type exported nested))
 (import solve-module infer sig-text)
+(import procedural-module procedural-of procedural-form define-procedural expand-procedural
+        source-key source-of)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names
@@ -394,7 +397,9 @@
     (let* ((before (get defined))
            (undo (lambda ((m string) (a int) (b int))
                    (begin (set defined before) (fail m a b)))))
-      (define-written undo (written-of undo form) file before))))
+      (if (null? (procedural-form form))
+          (define-written undo (written-of undo form) file before)
+          (define-procedural fail form)))))
 ;; Each signature, written, or inferred together for those not written,
 ;; each defined first; then each macro's clauses checked, and defined.
 (define define-written (->* (fails writtens scopes macro-env) names)
@@ -521,46 +526,6 @@
 ;; For the driver, which says an error in an expansion at each use.
 (define expansions-given (->* () expansions-made) (lambda () (get expansions)))
 
-;; Where a part a template made is: a key of its own, which no other part
-;; and no text has, a place past every text's (`source-base`, above the
-;; positions of every file loaded, `load-base` apart), so that two
-;; expansions' copies of one part of the template are apart; and, by its
-;; key, where the template wrote it and which expansion made it, for what
-;; is said of it (`source-of`; the driver's `fx26_span`), as the Rust front
-;; end's `Span` has a template's place and its `expansion`. Keys are made
-;; in order, a list's start before its parts' and its end after, so that
-;; a part is within its list. One table for the session, so that no key is
-;; given twice.
-(define source-base int 1125899906842624)
-(define sources (ref (arrayof (tupleof int int) rs) rs) (new (make-array 1024 (tuple 0 0))))
-(define nsources (ref int rs) (new 0))
-;; A new key, for template place `p`, of expansion `made`; none in a
-;; template's check (`made` 0), whose places are the template's.
-(define source-key (->* (int int) int)
-  (lambda (p made)
-    (if (= made 0) p (new-source-key p made))))
-(define new-source-key (->* (int int) int)
-  (lambda (p made)
-    (let ((i (get nsources)))
-      (begin
-        (if (= i (array-length (get sources)))
-            (let ((bigger (the (arrayof (tupleof int int) rs) (make-array (* 2 i) (tuple 0 0)))))
-              (begin (copy-sources (get sources) bigger 0) (set sources bigger)))
-            #u)
-        (array-set! (get sources) i (tuple p made))
-        (set nsources (+ i 1))
-        (+ source-base i)))))
-(define copy-sources (->* ((arrayof (tupleof int int) rs) (arrayof (tupleof int int) rs) int) unit)
-  (lambda (from to i)
-    (if (= i (array-length from))
-        #u
-        (begin (array-set! to i (array-ref from i)) (copy-sources from to (+ i 1))))))
-;; Key `k`'s template place and expansion; a place that is no key, itself
-;; and 0.
-(define source-of (->* (int) (tupleof int int))
-  (lambda (k)
-    (let ((i (- k source-base)))
-      (if (and (>= i 0) (< i (get nsources))) (array-ref (get sources) i) (tuple k 0)))))
 ;; The expansions left before one does not end.
 (define budget (ref int rs) (new 0))
 
@@ -582,7 +547,7 @@
   (lambda (fail form)
     (let ((items (list-items form)))
       (if (and (not (null? items)) (syn-symbol? (car items))
-               (makes-defns? (syn-symbol (car items))))
+               (makes-top-defns? (syn-symbol (car items))))
           (begin
             (set budget 10000)
             (at-places (expand-defn fail form) (syn-start form) (syn-end form)))
@@ -694,10 +659,12 @@
            (shown (symbol->string name))
            (in-use (lambda ((msg string) (a int) (b int))
                      (fail (string-append "a use of `" shown "`: " msg) a b))))
-      (begin
-        (nodes-reset!)
-        (align in-use 2 (the pvars nil) (extract m 1) operands -1 nil)
-        (first-match fail name s operands (extract m 2))))))
+      (if (not (null? (procedural-of name)))
+          (expand-procedural fail name s (record-expansion name s))
+          (begin
+            (nodes-reset!)
+            (align in-use 2 (the pvars nil) (extract m 1) operands -1 nil)
+            (first-match fail name s operands (extract m 2)))))))
 ;; The pattern variables of `ps` that are names (`bvar`, `dvar`, `id`),
 ;; which match a name alone (a `label` may be a keyword).
 (define name-pvars (->* (pvars) names)

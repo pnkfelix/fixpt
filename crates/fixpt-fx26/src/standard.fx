@@ -502,4 +502,8 @@
        (case n
          (("%session-eval-committed!") "%fx26-session-committed!")
          (else "")))
+      ((25)
+       (case n
+         (("%macros:expand-procedural") "%fx26-expand-procedural")
+         (else "")))
       (else "")))))

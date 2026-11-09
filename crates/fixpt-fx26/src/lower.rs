@@ -223,6 +223,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("sleep-until", "%fx26-sleep-until", true),
     ("args", "%fx26-args", true),
     ("read-file", "%fx26-read-file", true),
+    ("%macros:expand-procedural", "%fx26-expand-procedural", true),
     ("type-at", "%fx26-type-at", true),
     ("%stage", "%fx26-stage", false),
     ("%stage-check", "%fx26-stage-check", false),

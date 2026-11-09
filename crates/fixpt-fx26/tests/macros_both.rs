@@ -13,6 +13,27 @@ fn both_expanders_agree_on_macro_programs() {
     agree(&format!("{}/tests/programs/macros", env!("CARGO_MANIFEST_DIR")), "");
 }
 
+/// Procedural macros (`TODO.md` §228): both expanders run the transformers
+/// alike, and decide their aliases alike.
+#[test]
+fn both_expanders_agree_on_procedural_macros() {
+    agree_seen(&format!("{}/tests/programs/procedural", env!("CARGO_MANIFEST_DIR")), "", |t| t.to_string(), unnumbered);
+}
+
+/// `s` with each alias's expansion number taken out (`%~N:x` is `%~:x`):
+/// which expansion made it is the session's count, and the two front ends
+/// count in sessions of their own here.
+fn unnumbered(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find("%~") {
+        out.push_str(&rest[..i + 2]);
+        rest = rest[i + 2..].trim_start_matches(|c: char| c.is_ascii_digit());
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The programs of `fixpt-cli`'s `import-with-syntax` tests, `main*.fx`
 /// (the rest are the files they import).
 #[test]
@@ -53,6 +74,11 @@ fn agree(dir: &str, prefix: &str) {
 /// Both front ends on each program in `dir` whose name starts with
 /// `prefix`, as `made` makes it.
 fn agree_as(dir: &str, prefix: &str, made: fn(&str) -> String) {
+    agree_seen(dir, prefix, made, |s| s.to_string());
+}
+
+/// [`agree_as`], what each found compared as `seen` shows it.
+fn agree_seen(dir: &str, prefix: &str, made: fn(&str) -> String, seen: fn(&str) -> String) {
     let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.file_name().unwrap().to_string_lossy().starts_with(prefix)).collect();
     names.sort();
     let mut wrong = Vec::new();
@@ -70,8 +96,9 @@ fn agree_as(dir: &str, prefix: &str, made: fn(&str) -> String) {
             Ok((fx26, _)) => fx26,
             Err(e) => Err(e),
         };
+        let shown = |xs: &Vec<String>| xs.iter().map(|x| seen(x)).collect::<Vec<_>>();
         let same = match (&fx26, &rust) {
-            (Ok(a), Ok(b)) => a == b,
+            (Ok(a), Ok(b)) => shown(a) == shown(b),
             (Err(a), Err(b)) => compare::same_error(a, b),
             _ => false,
         };

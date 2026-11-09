@@ -476,6 +476,8 @@
                  (eof u (the val (o-sum 'eof the-unit)))
                  (failed e (ev-io-failed e)))))
       (prim! 'stdin-ready? (lambda (xs) (stdin-ready?)))
+      (prim! '%macros:expand-procedural
+             (lambda (xs) (%macros:expand-procedural (as-str (ev-arg xs 0)))))
       (prim! 'terminal-raw (lambda (xs) (ev-terminal-result (terminal-raw))))
       (prim! 'terminal-restore (lambda (xs) (ev-terminal-result (terminal-restore))))
       (prim! 'terminal-size

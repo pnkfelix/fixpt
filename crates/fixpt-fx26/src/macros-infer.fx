@@ -595,7 +595,8 @@
                   (nth-known known i)
                   (let ((m (macro-of (syn-symbol h) (get defined))))
                     (if (not (null? m))
-                        (list (extract (car m) 4))
+                        ;; A procedural macro (`3`) is read as an expression's.
+                        (list (if (= (extract (car m) 4) 3) 0 (extract (car m) 4)))
                         (head-makes (syn-name h) (proper-or-dotted t) pv us known))))))))))))
 (define unsigned-index (->* (symbol unsigneds int) int)
   (lambda (n us i)

@@ -250,6 +250,11 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("sleep-until", "(subr (io clock) (i64) unit)"),
     ("args", "(poly ((r region)) (subr (maxeff (io args) (alloc r)) () (listof string r)))"),
     ("read-file", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (data (bytevectorof r)) (failed io-error))))"),
+    // A procedural macro's transformer run, for the expander written in
+    // FX-26 (`macros-procedural.fx`; `TODO.md` §228): FX-26 text in, `=` and
+    // its last form's value or `!` and why not out. It only computes, and
+    // gives the same for the same text.
+    ("%macros:expand-procedural", "(subr spin (string) string)"),
     ("list-dir", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (names (listof string r)) (failed io-error))))"),
     // Heist's (`FIXPT-CHANGES.md` F3): the checker's type of the innermost
     // expression of a program text at a character (`typeat.rs`). Reading the

@@ -78,7 +78,7 @@
       (include check-module-rules) (include check-subtype) (include parser))
 (import check-effects k-atom-region k-one k-insert k-contains?)
 (import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs)
-(import check-read k-items k-name-of k-sfail k-symbol-head)
+(import check-read k-items k-name-of k-sfail k-symbol-head k-alias-base)
 (define k-names-onto (with check-modorder k-names-onto))
 
 ;; The generative type `name` may see inside, as one of its conversions, or
@@ -303,6 +303,120 @@
                (bound (k-bind-named-global (extract (car bs) 1) t))
                (noted (k-note-known (extract (car bs) 1) 0)))
           (cons t (k-rec-types (cdr bs)))))))
+;; A top level's expression `e` read, its procedural macro's aliases
+;; decided (`aliases.rs`; `TODO.md` §228), `defining` in scope: what the
+;; form defines.
+(define k-resolve-top-exp (->* (exp k-names) kx)
+  (lambda (e defining) (k-unalias (k-resolve-exp e) defining)))
+;; Each alias in `x` that nothing binds where it is, `bound` those around
+;; it, nor the top level defined: the top level's name, `(with #%toplevel
+;; x)` (`Checker::resolve_aliases`).
+(define k-unalias (->* (kx k-names) kx)
+  (lambda (x bound)
+    (tagcase x
+      (x-var (s a b k kr)
+        (if (or (k-has-name? bound s) (>= (k-lookup-raw s) 0))
+            x
+            (let ((base (k-alias-base (symbol->string s) #f)))
+              (if (string=? base "")
+                  x
+                  (x-with '#%toplevel (x-var (string->symbol base) a b k kr) a b k kr)))))
+      (x-lambda (ps body a b k kr) (x-lambda ps (k-unalias body (k-param-names ps bound)) a b k kr))
+      (x-app (f xs a b k kr) (x-app (k-unalias f bound) (k-unalias-each xs bound) a b k kr))
+      (x-plambda (bs body a b k kr) (x-plambda bs (k-unalias body bound) a b k kr))
+      (x-letregion (m v r body a b k kr) (x-letregion m v r (k-unalias body bound) a b k kr))
+      (x-rlambda (r l a b k kr) (x-rlambda (k-unalias r bound) (k-unalias l bound) a b k kr))
+      (x-proj (body ds a b k kr) (x-proj (k-unalias body bound) ds a b k kr))
+      (x-if (t c e a b k kr)
+        (x-if (k-unalias t bound) (k-unalias c bound) (k-unalias e bound) a b k kr))
+      (x-letrec (bs body a b k kr)
+        (let ((in (k-letrec-names bs bound)))
+          (x-letrec (k-unalias-letrec bs in) (k-unalias body in) a b k kr)))
+      (x-let (bs body a b k kr)
+        (x-let (k-unalias-let bs bound) (k-unalias body (k-let-names bs bound)) a b k kr))
+      (x-begin (xs a b k kr) (x-begin (k-unalias-each xs bound) a b k kr))
+      (x-prompt (t body h a b k kr)
+        (x-prompt (k-unalias t bound) (k-unalias body bound) (k-unalias h bound) a b k kr))
+      (x-the (t e a b k kr) (x-the t (k-unalias e bound) a b k kr))
+      (x-convention (c e a b k kr) (x-convention c (k-unalias e bound) a b k kr))
+      (x-bloblet (op n xs a b k kr) (x-bloblet op n (k-unalias-each xs bound) a b k kr))
+      (x-product (fs a b k kr) (x-product (k-unalias-let fs bound) a b k kr))
+      (x-extract (e l a b k kr) (x-extract (k-unalias e bound) l a b k kr))
+      (x-sum (l e a b k kr) (x-sum l (k-unalias e bound) a b k kr))
+      (x-tagcase (e arms els a b k kr)
+        (x-tagcase (k-unalias e bound) (k-unalias-arms arms bound) (k-unalias-let-in els bound)
+                   a b k kr))
+      (x-module (items a b k kr)
+        (x-module (k-unalias-items items (k-item-names items bound)) a b k kr))
+      (x-with (m body a b k kr)
+        (if (or (symbol=? m '#%fx) (symbol=? m '#%toplevel))
+            x
+            (x-with m (k-unalias body bound) a b k kr)))
+      (else y x))))
+(define k-unalias-each (->* (kxs k-names) kxs)
+  (lambda (xs bound)
+    (if (null? xs) nil (cons (k-unalias (car xs) bound) (k-unalias-each (cdr xs) bound)))))
+(define k-param-names
+  (->* ((listof (productof (1 symbol) (2 k-ids)) acyclic) k-names) k-names)
+  (lambda (ps bound)
+    (if (null? ps) bound (cons (extract (car ps) 1) (k-param-names (cdr ps) bound)))))
+(define k-letrec-names
+  (->* ((listof (productof (1 symbol) (2 int) (3 kx)) acyclic) k-names) k-names)
+  (lambda (bs bound)
+    (if (null? bs) bound (cons (extract (car bs) 1) (k-letrec-names (cdr bs) bound)))))
+(define k-unalias-letrec
+  (->* ((listof (productof (1 symbol) (2 int) (3 kx)) acyclic) k-names)
+       (listof (productof (1 symbol) (2 int) (3 kx)) acyclic))
+  (lambda (bs bound)
+    (if (null? bs)
+        nil
+        (cons (product (1 (extract (car bs) 1)) (2 (extract (car bs) 2))
+                       (3 (k-unalias (extract (car bs) 3) bound)))
+              (k-unalias-letrec (cdr bs) bound)))))
+(define k-let-names (->* ((listof (productof (1 symbol) (2 kx)) acyclic) k-names) k-names)
+  (lambda (bs bound)
+    (if (null? bs) bound (cons (extract (car bs) 1) (k-let-names (cdr bs) bound)))))
+;; A `let`'s bindings, a product's fields, a `tagcase`'s `else`: each
+;; expression, `bound` around it.
+(define k-unalias-let
+  (->* ((listof (productof (1 symbol) (2 kx)) acyclic) k-names)
+       (listof (productof (1 symbol) (2 kx)) acyclic))
+  (lambda (bs bound)
+    (if (null? bs)
+        nil
+        (cons (product (1 (extract (car bs) 1)) (2 (k-unalias (extract (car bs) 2) bound)))
+              (k-unalias-let (cdr bs) bound)))))
+;; A `tagcase`'s `else`, its name in scope in its body.
+(define k-unalias-let-in
+  (->* ((listof (productof (1 symbol) (2 kx)) acyclic) k-names)
+       (listof (productof (1 symbol) (2 kx)) acyclic))
+  (lambda (bs bound)
+    (if (null? bs)
+        nil
+        (cons (product (1 (extract (car bs) 1))
+                       (2 (k-unalias (extract (car bs) 2) (cons (extract (car bs) 1) bound))))
+              (k-unalias-let-in (cdr bs) bound)))))
+(define k-unalias-arms
+  (->* ((listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic) k-names)
+       (listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic))
+  (lambda (arms bound)
+    (if (null? arms)
+        nil
+        (let ((r (car arms)))
+          (cons (product (1 (extract r 1)) (2 (extract r 2)) (3 (extract r 3))
+                         (4 (k-unalias (extract r 4) (append (extract r 3) bound))))
+                (k-unalias-arms (cdr arms) bound))))))
+(define k-item-names (->* (k-items k-names) k-names)
+  (lambda (items bound)
+    (if (null? items) bound (append (extract (car items) 2) (k-item-names (cdr items) bound)))))
+(define k-unalias-items (->* (k-items k-names) k-items)
+  (lambda (items bound)
+    (if (null? items)
+        nil
+        (let ((it (car items)))
+          (cons (product (1 (extract it 1)) (2 (extract it 2)) (3 (extract it 3)) (4 (extract it 4))
+                         (5 (k-unalias-each (extract it 5) bound)))
+                (k-unalias-items (cdr items) bound))))))
 ;; Each lambda, read under its signature: a lambda, or an error.
 (define k-rec-lambdas (->* (k-rec-forms k-ids) k-letrec-bs)
   (lambda (bs ts)
@@ -312,7 +426,7 @@
                (t (car ts))
                (saved (get k-dscope))
                (signed (k-bind-signature t))
-               (x (k-resolve-exp (extract (car bs) 3)))
+               (x (k-resolve-top-exp (extract (car bs) 3) (k-rec-names bs)))
                (restored (set k-dscope saved))
                (checked (if (k-lambda? x) #u (k-fail-not-lambda name x))))
           (cons (product (1 name) (2 t) (3 x)) (k-rec-lambdas (cdr bs) (cdr ts)))))))
@@ -542,7 +656,7 @@
            (taken (set k-pending-lemma nil))
            (saved (get k-dscope))
            (signed (k-bind-signature t))
-           (x (k-resolve-exp init))
+           (x (k-resolve-top-exp init (list name)))
            (lambda-ok (k-star-lambda star x))
            (arrow-ok (k-arrow-star-lambda arrow x))
            (u (set k-last-uses (k-free-into x nil nil)))
@@ -612,7 +726,7 @@
 ;; none; the definition is at `a`..`b`, the form that loads it.
 (define k-define-untyped (->* (symbol exp int int) k-out)
   (lambda (name init a b)
-    (let* ((x (k-resolve-exp init))
+    (let* ((x (k-resolve-top-exp init (list name)))
            (u (set k-last-uses (k-free-into x nil nil)))
            (r (k-synth x)))
       (begin (if (and (k-shared-name? name) (not (k-reads-globals-only? (extract r 2))))
@@ -639,7 +753,7 @@
                        (k-define-typed name (car ty) (cdr ty) init)))
                  (t-define-rec (bs a b) (k-define-rec bs))
                  (t-exp (e)
-                   (let* ((x (k-resolve-exp e)) (r (k-synth x)))
+                   (let* ((x (k-resolve-top-exp e nil)) (r (k-synth x)))
                      (cons (k-line (extract r 1) (extract r 2)) nil)))
                  (else y nil))))))
 (define k-lines-append-names (->* (k-names k-names) k-names)

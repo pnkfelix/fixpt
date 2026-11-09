@@ -18,6 +18,12 @@ pub struct Syscall {
     pub run: fn(&mut Runtime, &[Value]) -> Outcome<Value>,
 }
 
+/// What runs a procedural macro's transformer (`fixpt_fx26::macros::
+/// procedural::run`), installed by the crate that has one, which this
+/// runtime does not depend on: FX-26 text in, the last form's value printed,
+/// or why not, out (`%fx26-expand-procedural`).
+pub static PROCEDURAL: std::sync::OnceLock<fn(&str) -> Result<String, String>> = std::sync::OnceLock::new();
+
 /// The most arguments a syscall takes.
 pub const MAX_ARGS: usize = 6;
 

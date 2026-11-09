@@ -23,7 +23,9 @@
         includes-given include-given-at mk-symbol syn-name loaded-error e-module pfail-at
         (type include-given)
         t-define-convention t-define-syscall t-define-generative t-exp p-ok p-err shared-taken
-        shared-reset! loaded input-key?
+        shared-reset! loaded input-key? label-name e-app e-plambda e-proj e-if e-letrec e-let
+        e-begin e-prompt e-letregion e-rlambda e-the e-convention e-bloblet e-product e-extract
+        e-sum e-tagcase e-with
         (type syns-a exp top param-list top-list presult names) (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
 ;; The expander (`macros.fx`), which each form goes through first.
@@ -232,7 +234,7 @@
     (if (null? xs)
         nil
         (let* ((x (car xs))
-               (made (begin (note-load-def! x) (parse-made (type-loaded x)))))
+               (made (begin (note-load-def! x) (unalias-tops (parse-made (type-loaded x))))))
           (append-tops made (expanded-tops (cdr xs)))))))
 ;; Each of macros `ns`' templates' checks, expanded and parsed.
 (define macro-checks (->* (names) top-list)
@@ -341,6 +343,137 @@
                     (string=? (string-append "input:" (extract (car fs) 7)) key)))
            (the (listof loaded-file acyclic) (cons (car fs) nil)))
           (else (loaded-keyed (cdr fs) key)))))
+
+;;; ------------------------------------------------------------ aliases
+
+;; A procedural macro's aliases (`macros-procedural.fx`; `TODO.md` §228),
+;; decided where both the checker and the compiler read them: `%~N:x`, which
+;; an expansion bound, is a name of its own; one it left free is the top
+;; level's `x`, `(with #%toplevel x)` (`aliases.rs`). The aliases the top
+;; level defined so far, in the session: each read alone, as a REPL's entry
+;; or `fixpt eval`'s form; an alias is spelled once in a session.
+(define alias-defs (ref names rs) (new nil))
+(define alias? (->* (symbol) bool)
+  (lambda (n) (not (string=? (label-name (symbol->string n)) (symbol->string n)))))
+(define name-in? (->* (symbol names) bool)
+  (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (name-in? n (cdr ns))))))
+(define unalias-tops (->* (top-list) top-list)
+  (lambda (ts) (if (null? ts) nil (cons (unalias-top (car ts)) (unalias-tops (cdr ts))))))
+(define unalias-top (->* (top) top)
+  (lambda (t)
+    (tagcase t
+      (t-define (n ty e a b)
+        (begin (if (alias? n) (set alias-defs (cons n (get alias-defs))) #u)
+               (t-define n ty (unalias e (list n)) a b)))
+      (t-define-rec (bs a b)
+        (let ((ns (rec-names bs)))
+          (begin (set alias-defs (append ns (get alias-defs)))
+                 (t-define-rec (unalias-rec bs ns) a b))))
+      (t-exp (e) (t-exp (unalias e nil)))
+      (else y t))))
+;; Each alias in `e` that nothing binds where it is, `bound` those around
+;; it, nor the top level defined: the top level's name.
+(define unalias (->* (exp names) exp)
+  (lambda (e bound)
+    (tagcase e
+      (e-var (s a b k kr)
+        (if (or (not (alias? s)) (name-in? s bound) (name-in? s (get alias-defs)))
+            e
+            (e-with '#%toplevel (e-var (string->symbol (label-name (symbol->string s))) a b k kr)
+                    a b k kr)))
+      (e-lambda (ps body a b k kr) (e-lambda ps (unalias body (param-names ps bound)) a b k kr))
+      (e-app (f xs a b k kr) (e-app (unalias f bound) (unalias-each xs bound) a b k kr))
+      (e-plambda (bs body a b k kr) (e-plambda bs (unalias body bound) a b k kr))
+      (e-proj (body ds a b k kr) (e-proj (unalias body bound) ds a b k kr))
+      (e-if (t c x a b k kr) (e-if (unalias t bound) (unalias c bound) (unalias x bound) a b k kr))
+      (e-letrec (bs body a b k kr)
+        (let ((in (append (rec-names bs) bound)))
+          (e-letrec (unalias-rec bs in) (unalias body in) a b k kr)))
+      (e-let (bs body a b k kr)
+        (e-let (unalias-binds bs bound) (unalias body (bind-names bs bound)) a b k kr))
+      (e-begin (xs a b k kr) (e-begin (unalias-each xs bound) a b k kr))
+      (e-prompt (t body h a b k kr)
+        (e-prompt (unalias t bound) (unalias body bound) (unalias h bound) a b k kr))
+      (e-letregion (m r p body a b k kr) (e-letregion m r p (unalias body bound) a b k kr))
+      (e-rlambda (r l a b k kr) (e-rlambda (unalias r bound) (unalias l bound) a b k kr))
+      (e-the (t x a b k kr) (e-the t (unalias x bound) a b k kr))
+      (e-convention (c x a b k kr) (e-convention c (unalias x bound) a b k kr))
+      (e-bloblet (op i xs d a b k kr) (e-bloblet op i (unalias-each xs bound) d a b k kr))
+      (e-product (fs a b k kr) (e-product (unalias-binds fs bound) a b k kr))
+      (e-extract (x l d a b k kr) (e-extract (unalias x bound) l d a b k kr))
+      (e-sum (l x a b k kr) (e-sum l (unalias x bound) a b k kr))
+      (e-tagcase (x arms els d a b k kr)
+        (e-tagcase (unalias x bound) (unalias-arms arms bound) (unalias-else els bound) d
+                   a b k kr))
+      (e-module (items a b k kr) (e-module (unalias-items items (item-names items bound)) a b k kr))
+      (e-with (m body a b k kr)
+        (if (or (symbol=? m '#%fx) (symbol=? m '#%toplevel))
+            e
+            (e-with m (unalias body bound) a b k kr)))
+      (else y e))))
+(define unalias-each (->* ((listof exp acyclic) names) (listof exp acyclic))
+  (lambda (xs bound)
+    (if (null? xs) nil (cons (unalias (car xs) bound) (unalias-each (cdr xs) bound)))))
+(define param-names (->* (param-list names) names)
+  (lambda (ps bound)
+    (if (null? ps) bound (cons (extract (car ps) 1) (param-names (cdr ps) bound)))))
+(define rec-names (->* ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic)) names)
+  (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (rec-names (cdr bs))))))
+(define unalias-rec
+  (->* ((listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) names)
+       (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
+  (lambda (bs bound)
+    (if (null? bs)
+        nil
+        (cons (product (1 (extract (car bs) 1)) (2 (extract (car bs) 2))
+                       (3 (unalias (extract (car bs) 3) bound)))
+              (unalias-rec (cdr bs) bound)))))
+(define bind-names (->* ((listof (productof (1 symbol) (2 exp)) acyclic) names) names)
+  (lambda (bs bound)
+    (if (null? bs) bound (cons (extract (car bs) 1) (bind-names (cdr bs) bound)))))
+(define unalias-binds
+  (->* ((listof (productof (1 symbol) (2 exp)) acyclic) names)
+       (listof (productof (1 symbol) (2 exp)) acyclic))
+  (lambda (bs bound)
+    (if (null? bs)
+        nil
+        (cons (product (1 (extract (car bs) 1)) (2 (unalias (extract (car bs) 2) bound)))
+              (unalias-binds (cdr bs) bound)))))
+;; A `tagcase`'s `else`, its name in scope in its body.
+(define unalias-else
+  (->* ((listof (productof (1 symbol) (2 exp)) acyclic) names)
+       (listof (productof (1 symbol) (2 exp)) acyclic))
+  (lambda (bs bound)
+    (if (null? bs)
+        nil
+        (cons (product (1 (extract (car bs) 1))
+                       (2 (unalias (extract (car bs) 2) (cons (extract (car bs) 1) bound))))
+              (unalias-else (cdr bs) bound)))))
+(define unalias-arms
+  (->* ((listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic) names)
+       (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
+  (lambda (arms bound)
+    (if (null? arms)
+        nil
+        (let ((r (car arms)))
+          (cons (product (1 (extract r 1)) (2 (extract r 2)) (3 (extract r 3))
+                         (4 (unalias (extract r 4) (append (extract r 3) bound))))
+                (unalias-arms (cdr arms) bound))))))
+(define item-names
+  (->* ((listof (productof (1 int) (2 names) (3 syns-a) (4 (listof exp acyclic))) acyclic) names)
+       names)
+  (lambda (items bound)
+    (if (null? items) bound (append (extract (car items) 2) (item-names (cdr items) bound)))))
+(define unalias-items
+  (->* ((listof (productof (1 int) (2 names) (3 syns-a) (4 (listof exp acyclic))) acyclic) names)
+       (listof (productof (1 int) (2 names) (3 syns-a) (4 (listof exp acyclic))) acyclic))
+  (lambda (items bound)
+    (if (null? items)
+        nil
+        (let ((it (car items)))
+          (cons (product (1 (extract it 1)) (2 (extract it 2)) (3 (extract it 3))
+                         (4 (unalias-each (extract it 4) bound)))
+                (unalias-items (cdr items) bound))))))
 
 ;; The entry point: a program's forms, as read, read with `keys` (the mode,
 ;; the session's state, the checker's switches: `parser-types.fx`), to
