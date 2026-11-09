@@ -254,20 +254,20 @@
           (else (cons (car e) (k-absorb-drop (cdr e) r w))))))
 (define k-contains? (->* (k-eff k-atom) bool)
   (lambda (e a) (cond ((null? e) #f) ((k-atom=? (car e) a) #t) (else (k-contains? (cdr e) a)))))
-;; Whether `e` has a wait that `kept` has not.
-(define k-dropped-wait? (->* (k-eff k-eff) bool)
+;; The waits of `e` that `kept` has not.
+(define k-dropped-waits (->* (k-eff k-eff) k-eff)
   (lambda (e kept)
-    (cond ((null? e) #f)
+    (cond ((null? e) nil)
           ((and (tagcase (car e) (a-await (r) #t) (a-receive (r) #t) (else y #f))
                 (not (k-contains? kept (car e))))
-           #t)
-          (else (k-dropped-wait? (cdr e) kept)))))
+           (k-insert (car e) (k-dropped-waits (cdr e) kept)))
+          (else (k-dropped-waits (cdr e) kept)))))
 ;; `kept`, what is left of `e` once masking (or freezing) dropped some of
 ;; it, with `spin` where a wait was dropped: a wait on what nothing outside
 ;; sees is, to anything outside, work of unbounded length, and never ends
 ;; if nothing fills what it waits on (`Effect::waits_dropped`).
 (define k-waits-dropped (->* (k-eff k-eff) k-eff)
-  (lambda (e kept) (if (k-dropped-wait? e kept) (k-insert (a-spin) kept) kept)))
+  (lambda (e kept) (if (null? (k-dropped-waits e kept)) kept (k-insert (a-spin) kept))))
 ;; Whether `a` is in `e`, or, reading or writing one global, `e` does so to
 ;; `@globals`.
 (define k-covered? (->* (k-eff k-atom) bool)

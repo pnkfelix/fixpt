@@ -1,4 +1,4 @@
-;; ! beyond what is expected, it has spin
+;; ! it may not end: it waits, (await @q), on what nothing outside it sees
 ;; A wait on an I-cell nothing outside sees (TODO §224): masking drops the
 ;; `(await @q)`, and leaves `spin`, since to anything outside the wait is
 ;; work of unbounded length, and never ends if nothing fills the cell.

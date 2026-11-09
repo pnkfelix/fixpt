@@ -106,6 +106,9 @@ fn every_field_placed(c: &Checker) {
     let Checker {
         // Put back by `keep` and `put_back`.
         env: _, dscope: _, lifetimes: _, freezing: _, recursive: _, closed_named: _, expanding: _, knots: _, spin_why: _,
+        // Each read only for an error inside its span: one a check thrown
+        // away left is what the same text did. Cleared by `scratch`.
+        waits_spun: _,
         generatives: _, transparent: _, inside: _, conversions: _, lemmas: _, pending_lemma: _, certified: _,
         certified_nats: _, certified_lengths: _, narrowed: _, path_narrowed: _, closure_depth: _, pending_unions: _,
         checked_call: _, skolems: _, to_end_sizes: _, module_vars: _, abstract_funs: _, effect_selects: _,
@@ -1780,6 +1783,7 @@ impl Checker {
         self.regions_memo.borrow_mut().clear();
         self.fv_memo.clear();
         self.fun_apps.clear();
+        self.waits_spun.clear();
         out
     }
 

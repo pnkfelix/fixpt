@@ -801,6 +801,9 @@
   (lambda (r) (let ((v (k-region-var r))) (and (>= v 0) (k-gen-param? v)))))
 ;; Why each member of a recursive group that may not end may not.
 (define k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) acyclic) @t) (new nil))
+;; Each wait masking or freezing dropped, leaving `spin`: where, and why
+;; that may not end (`k-note-waits-spun`; `TODO.md` §224).
+(define k-waits-spun (ref (listof (productof (1 int) (2 int) (3 string)) acyclic) @t) (new nil))
 ;; Of each binding of a recursive group with an `allof`, for each member (one
 ;; for a binding of no `allof`), whether a call of it at that member may not
 ;; end (`k-termination-by-member`): a call says `spin` only for the members

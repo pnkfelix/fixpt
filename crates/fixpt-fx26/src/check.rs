@@ -347,6 +347,10 @@ pub struct Checker {
     /// Why each member of a recursive group that may not end may not: said
     /// when its declared type leaves out `spin`.
     pub(crate) spin_why: Vec<((Sym, TyId), String)>,
+    /// Each wait masking or freezing dropped, leaving `spin`: where, and
+    /// why that may not end, said when a declared type around it leaves
+    /// out `spin` (`declared_error`; `TODO.md` §224).
+    pub(crate) waits_spun: Vec<(fixpt_read::Span, String)>,
     /// Of each binding of a recursive group with an `allof`, for each
     /// member (one for a binding of no `allof`), whether a call of it at
     /// that member may not end (`termination_by_member`, noted by
@@ -1163,6 +1167,7 @@ impl Checker {
             holes: None,
             hole_hint: None,
             spin_why: Vec::new(),
+            waits_spun: Vec::new(),
             member_spins: HashMap::new(),
             macros: Default::default(),
             pinned: Vec::new(),
@@ -2462,7 +2467,7 @@ impl Checker {
     /// ends, and the atom is what ties a closure that reads the data to it
     /// (`docs/research/soundness-findings.md`, F2), until masking removes
     /// it where the place is no longer seen.
-    pub(crate) fn frozen(&self, e: ExpId, eff: Effect) -> R<Effect> {
+    pub(crate) fn frozen(&mut self, e: ExpId, eff: Effect) -> R<Effect> {
         if !eff.0.iter().any(|a| a.region().is_some_and(Region::is_frozen)) {
             return Ok(eff);
         }
@@ -2472,7 +2477,9 @@ impl Checker {
         let in_heap = |r: &Region| matches!(r, Region::Frozen(None, _));
         // An I-cell frozen in the heap cannot be filled after, so a wait on
         // one is dropped as masking drops one: leaving `spin`.
-        Ok(eff.waits_dropped(Effect(eff.0.iter().copied().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if in_heap(r))).collect())))
+        let kept = Effect(eff.0.iter().copied().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if in_heap(r))).collect());
+        self.note_waits_spun(e, &eff, &kept, "on an I-cell frozen in the heap, which nothing can fill");
+        Ok(eff.waits_dropped(kept))
     }
 
     /// A summary of an effect, for a compiler, each a stronger claim on what
@@ -3080,6 +3087,16 @@ impl Checker {
         }
     }
 
+    /// The waits of `effect`, `e`'s, that `kept` has not, noted with why
+    /// they may not end (`waits_spun`).
+    fn note_waits_spun(&mut self, e: ExpId, effect: &Effect, kept: &Effect, how: &str) {
+        let dropped = Effect(effect.0.iter().copied().filter(|a| matches!(a, Atom::Await(_) | Atom::Receive(_)) && !kept.0.contains(a)).collect());
+        if !dropped.is_pure() {
+            let why = format!("it waits, {}, {how}", self.show_effect(&dropped));
+            self.waits_spun.push((self.arena.span_of(e), why));
+        }
+    }
+
     /// An error checking `init` against `t`, the type `n` is declared: at
     /// `init` itself it says so, and, if it is about `spin` and `n`'s group
     /// may not end, why not.
@@ -3088,8 +3105,16 @@ impl Checker {
             return err;
         }
         let mut msg = format!("`{}` is declared a {}: {}", self.interner.name(n), self.show_ty(t), err.message);
+        // Why it may not end: its group's, else the first wait inside it
+        // masked or frozen away.
+        let at = self.arena.span_of(init);
+        let waits = || {
+            let inside = self.waits_spun.iter().filter(|(s, _)| s.file == at.file && at.start <= s.start && s.end <= at.end);
+            inside.min_by_key(|(s, _)| (s.start, s.end)).map(|(_, why)| why)
+        };
+        let why = self.spin_why.iter().rev().find(|(k, _)| *k == (n, t)).map(|(_, why)| why).or_else(waits);
         if about_spin(&err.message)
-            && let Some((_, why)) = self.spin_why.iter().rev().find(|(k, _)| *k == (n, t))
+            && let Some(why) = why
         {
             // On the line it is about: before why control was not masked.
             let tail = format!("; it may not end: {why}");
@@ -3130,7 +3155,9 @@ impl Checker {
         }
         let mut in_result = HashSet::new();
         self.regions_in(result, &mut in_result);
-        let kept = effect.waits_dropped(Effect(effect.0.iter().copied().filter(|a| Self::mask_keeps(*a, &visible, &in_result)).collect()));
+        let kept = Effect(effect.0.iter().copied().filter(|a| Self::mask_keeps(*a, &visible, &in_result)).collect());
+        self.note_waits_spun(e, effect, &kept, "on what nothing outside it sees");
+        let kept = effect.waits_dropped(kept);
         // Where masking dropped something, noted for the cells' verifier,
         // which masks the expression's cells as it finds them seen.
         if self.record_types && kept.0.len() < effect.0.len() {

@@ -453,6 +453,7 @@
       (set k-regions-memo (make-array 512 nil)) (k-fv-forget) (set k-dscope nil)
       (set k-with-depth 0) (set k-with-fallbacks nil) (set k-with-apps nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
+      (set k-waits-spun nil)
       (k-forget-closed-named)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil)
       (set k-conversions nil) (k-reset-facts)

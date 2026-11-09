@@ -5408,8 +5408,13 @@ wait, in both checkers (`Effect::waits_dropped`, `k-waits-dropped`); the
 cells' verifier too, which now counts the globals its closures' words
 name as seen, as the checker does (`globals_named`): without that it
 dropped `par.fx`'s awaits on a global's I-cell and found a `spin` the
-checker had not. `key-or-message.fx` says `spin` now. Left: the refusal
-says only "it has spin", not why (a wait nothing outside sees).
+checker had not. `key-or-message.fx` says `spin` now. A declared type
+that leaves the `spin` out is refused saying why: "it may not end: it
+waits, (await @q), on what nothing outside it sees" (`waits_spun`,
+`k-waits-spun`). Left: an await dropped by substitution (`icell-get` at
+`const`) says no why; and no wait is known fulfilled, even one whose cell
+the same expression fills first, which a proof of fulfilment would let
+masking drop with no `spin`.
 
 ## 225. The `io` capabilities that sometimes wait, split (kayak's request, 2026-11-09)
 

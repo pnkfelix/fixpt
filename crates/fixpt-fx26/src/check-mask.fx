@@ -35,7 +35,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-resolve) (include check-env)
       (include check-print-parts))
-(import check-effects k-atom-rank k-atom-region k-has-region? k-waits-dropped)
+(import check-effects k-atom-rank k-atom-region k-has-region? k-waits-dropped k-dropped-waits)
 (define k-items (with check-read k-items))
 
 ;; Whether an atom is on `const`, the frozen region.
@@ -201,6 +201,20 @@
             (a-init (r) (tagcase r (r-var (v) (k-note-written v)) (else y #u)))
             (else x #u))
           (k-note-writes (cdr e))))))
+;; Waits `dropped`, `x`'s, noted with where and why they may not end
+;; (`k-waits-spun`), if any: on what nothing outside sees, or, `frozen`, on
+;; an I-cell nothing can fill (`check.rs`'s `note_waits_spun`).
+(define k-note-waits-spun (->* (kx k-eff bool) unit)
+  (lambda (x dropped frozen)
+    (if (null? dropped)
+        #u
+        (let ((why (string-append
+                    (string-append "it waits, " (k-show-effect dropped))
+                    (if frozen
+                        ", on an I-cell frozen in the heap, which nothing can fill"
+                        ", on what nothing outside it sees"))))
+          (set k-waits-spun
+               (cons (product (1 (k-start x)) (2 (k-end x)) (3 why)) (get k-waits-spun)))))))
 (define k-mask (->* (kx k-eff int) k-eff)
   (lambda (x e result)
     (if (begin (k-note-writes e) (null? e))
@@ -209,4 +223,7 @@
                (sought (k-sought e in-result nil)))
           (if (null? sought)
               e
-              (k-waits-dropped e (k-keep e (k-unseen x nil sought) in-result))))))))))
+              (let ((kept (k-keep e (k-unseen x nil sought) in-result)))
+                (begin (k-note-waits-spun x (k-dropped-waits e kept) #f)
+                       (k-waits-dropped e kept))))))))))
+)

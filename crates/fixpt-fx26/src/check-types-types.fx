@@ -380,6 +380,7 @@
    (val k-path-narrowed (ref k-path-facts @t))
    (val k-dvar-name (subr (maxeff (read @globals) spin (read @t)) (int) symbol))
    (val k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) acyclic) @t))
+   (val k-waits-spun (ref (listof (productof (1 int) (2 int) (3 string)) acyclic) @t))
    (val k-member-spins (ref k-member-spin-list @t))
    (val k-pinned (ref (listof (productof (1 k-at) (2 int)) acyclic) @t))
    (val k-pinned-of (subr (maxeff (read @globals) spin (read @t)) (k-at) int))

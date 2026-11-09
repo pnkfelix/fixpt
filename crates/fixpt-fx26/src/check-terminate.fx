@@ -532,11 +532,29 @@
       (if (< i 0)
           (k-text-has? m "spin" 0)
           (k-text-has? (substring m i (k-line-end m i)) "spin" 0)))))
-;; Error `m` where `n`, declared `t`, is defined: saying so, and, if about
-;; `spin`, why, on the line it is about, before why control was not masked.
-(define k-declared-error (->* (string symbol int) string)
-  (lambda (m n t)
-    (let* ((why (k-why-of (get k-spin-why) n t))
+;; Why a wait inside `a`..`b` may not end: the first's, by where it starts
+;; and ends, of `ws`, else "" (`k-waits-spun`; `check.rs`'s `declared_error`).
+(define k-waits-why (->* ((listof (productof (1 int) (2 int) (3 string)) acyclic) int int) string)
+  (lambda (ws a b) (k-waits-best ws a b -1 -1 "")))
+;; The loop of `k-waits-why`: `s`..`e` where the best so far starts and
+;; ends, `why` its, or `s` -1.
+(define k-waits-best
+  (->* ((listof (productof (1 int) (2 int) (3 string)) acyclic) int int int int string) string)
+  (lambda (ws a b s e why)
+    (if (null? ws)
+        why
+        (let* ((w (car ws)) (ws1 (extract w 1)) (we (extract w 2)))
+          (if (and (<= a ws1) (<= we b)
+                   (or (< s 0) (< ws1 s) (and (= ws1 s) (< we e))))
+              (k-waits-best (cdr ws) a b ws1 we (extract w 3))
+              (k-waits-best (cdr ws) a b s e why))))))
+;; Error `m` where `n`, declared `t`, is defined at `a`..`b`: saying so, and,
+;; if about `spin`, why, on the line it is about, before why control was not
+;; masked: its group's, else a wait's inside it.
+(define k-declared-error (->* (string symbol int int int) string)
+  (lambda (m n t a b)
+    (let* ((group (k-why-of (get k-spin-why) n t))
+           (why (if (string=? group "") (k-waits-why (get k-waits-spun) a b) group))
            (spins (and (not (string=? why "")) (k-about-spin? m)))
            (tail (if spins (string-append "; it may not end: " why) ""))
            (at (k-text-find m (string-append k-newline "  " k-undelimited) 0))
@@ -553,7 +571,7 @@
         (k-done (te) te)
         (k-err (m ea eb)
           (if (and (= ea a) (= eb b))
-              (k-fail (k-declared-error m n t) ea eb)
+              (k-fail (k-declared-error m n t a b) ea eb)
               (k-fail m ea eb)))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 
