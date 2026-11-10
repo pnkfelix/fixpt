@@ -40,8 +40,10 @@ pub enum DScope {
     /// or a type family's parameter of an arrow kind given one.
     Fun(TyId),
     /// A `(with m …)` body's start, under the name `%with`: a type name
-    /// bound before it is `m`'s, if `m` gives it (`with_selected`).
-    With(Sym),
+    /// bound before it is `m`'s, if `m` gives it (`with_selected`); and,
+    /// where the expander wrote what it relied on of `m` (`#:relied`), the
+    /// frame that holds it and what is read past it (`withs_reading`).
+    With(Sym, Option<usize>),
 }
 
 /// A description given a type family, as a key for its knot.
@@ -184,11 +186,47 @@ impl Checker {
             }
             match &self.dscope[i] {
                 (n, _) if *n == s => break,
-                (_, DScope::With(m)) => out.push(*m),
+                (_, DScope::With(m, _)) => out.push(*m),
                 _ => {}
             }
         }
         out
+    }
+
+    /// The `with`s description name `s` is read through, innermost first,
+    /// as `withs_over`, up to the first whose module the expander found
+    /// gives it (`#:relied`), which it is that module's: the `with`s before
+    /// it of no such record, whose modules may give it (`with_selected`
+    /// falls back through them), and that module. Each `with` with a record
+    /// it is read past notes it there, its module's type held not to give
+    /// it (`Checker::shape_held`).
+    fn withs_reading(&mut self, s: Sym) -> (Vec<Sym>, Option<Sym>) {
+        let hidden = self.hidden.map(|(_, d)| d);
+        let mut out = Vec::new();
+        if self.with_depth == 0 {
+            return (out, None);
+        }
+        for i in (0..self.dscope.len()).rev() {
+            if hidden.is_some_and(|(a, b)| (a..b).contains(&i)) {
+                continue;
+            }
+            match &self.dscope[i] {
+                (n, _) if *n == s => break,
+                (_, DScope::With(m, None)) => out.push(*m),
+                (_, DScope::With(m, Some(f))) => {
+                    let (m, f) = (*m, *f);
+                    let frame = &mut self.arena.withs.frames[f];
+                    if frame.0.descs.contains(&s) {
+                        return (out, Some(m));
+                    }
+                    if !frame.1.contains(&s) {
+                        frame.1.push(s);
+                    }
+                }
+                _ => {}
+            }
+        }
+        (out, None)
     }
 
     /// Type name `sym`, read in the bodies of `with`s of modules `withs`
@@ -226,18 +264,26 @@ impl Checker {
     /// What `read` reads, in the body of a `(with m …)`: `m`'s type names
     /// shadowing those before (`withs_over`); `#%fx`'s and `#%toplevel`'s
     /// body is one name, of no type.
-    fn with_types_of<T>(&mut self, m: Sym, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+    /// With what the expander relied on of `m`, `relied`, its names `m`'s
+    /// where it gives them and the rest outside; and the descriptions read
+    /// past it, given back.
+    fn with_types_of<T>(&mut self, m: Sym, relied: Option<crate::ast::Relied>, read: impl FnOnce(&mut Self) -> R<T>) -> R<(T, Vec<Sym>)> {
         if self.name(m) == "#%fx" || self.name(m) == "#%toplevel" {
-            return read(self);
+            return read(self).map(|t| (t, Vec::new()));
         }
         let depth = self.dscope.len();
         let mark = self.interner.intern("%with");
-        self.dscope.push((mark, DScope::With(m)));
+        let frame = relied.map(|r| {
+            self.arena.withs.frames.push((r, Vec::new()));
+            self.arena.withs.frames.len() - 1
+        });
+        self.dscope.push((mark, DScope::With(m, frame)));
         self.with_depth += 1;
         let r = read(self);
         self.with_depth -= 1;
         self.dscope.truncate(depth);
-        r
+        let past = frame.map(|f| self.arena.withs.frames.split_off(f).swap_remove(0).1).unwrap_or_default();
+        r.map(|t| (t, past))
     }
 
     pub(crate) fn lookup_desc(&self, s: Sym) -> Option<DScope> {
@@ -569,10 +615,20 @@ impl Checker {
             if self.name(sym) == "stage" {
                 return Ok(Effect::atom(Atom::Stage));
             }
-            let withs = self.withs_over(sym);
+            let (withs, given) = self.withs_reading(sym);
+            if let Some(m) = given {
+                let e = Effect::atom(Atom::Var(self.effect_select(m, sym)));
+                return Ok(if withs.is_empty() { e } else { self.with_effect_selected(&withs, sym, Some(e)) });
+            }
             if !withs.is_empty() {
                 let outer = if self.lookup_desc(sym).is_some() || self.include_scope > 0 { Some(self.effect_name_read(s, sym)?) } else { None };
                 return Ok(self.with_effect_selected(&withs, sym, outer));
+            }
+            if self.lookup_desc(sym).is_none() && self.include_scope == 0 {
+                let all = self.withs_over(sym);
+                if !all.is_empty() {
+                    return Ok(self.with_effect_selected(&all, sym, None));
+                }
             }
             return self.effect_name_read(s, sym);
         }
@@ -765,6 +821,14 @@ impl Checker {
             if name == "nat" && self.lookup_desc(sym).is_none() {
                 return Ok(self.arena.ty(Ty::Nat(Size::Finite)));
             }
+            // A module a `with` opens gives it, as the expander found
+            // (`#:relied`): that module's, whatever is outside, a standard
+            // type too (`with` shadows, types as values).
+            let (withs, given) = self.withs_reading(sym);
+            if let Some(m) = given {
+                let t = self.arena.ty(Ty::Select(m, sym));
+                return Ok(if withs.is_empty() { t } else { self.with_selected(&withs, sym, Some(t)) });
+            }
             // A standard type, unless the program defines the name itself
             // (`TODO.md` §88), as it may `nil` and the rest above.
             if let Some(&t) = self.base.get(&sym)
@@ -772,20 +836,40 @@ impl Checker {
             {
                 return Ok(t);
             }
-            let withs = self.withs_over(sym);
             if !withs.is_empty() {
                 let outer = if self.lookup_desc(sym).is_some() || self.include_scope > 0 { Some(self.type_name_read(s, sym)?) } else { None };
                 return Ok(self.with_selected(&withs, sym, outer));
+            }
+            // Defined nowhere: said as the checkers have said it, of the
+            // `with`s it was read in (as the FX-26 front end says it).
+            if self.lookup_desc(sym).is_none() && self.include_scope == 0 {
+                let all = self.withs_over(sym);
+                if !all.is_empty() {
+                    return Ok(self.with_selected(&all, sym, None));
+                }
             }
             return self.type_name_read(s, sym);
         }
         // `(f d …)` in `with` bodies: the modules' `f` first, as names alone.
         let head = s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol());
         if let Some(head) = head.filter(|h| !TYPE_FORMS.contains(&self.name(*h)) && !self.is_toplevel_qualified(*h)) {
-            let withs = self.withs_over(head);
+            let (withs, given) = self.withs_reading(head);
+            if let Some(m) = given {
+                let fun = self.arena.ty(Ty::Select(m, head));
+                let args = &self.items(s, "a type")?.to_vec()[1..];
+                let ds = args.iter().map(|a| self.parse_d(a)).collect::<R<Vec<_>>>()?;
+                let app = self.arena.ty(Ty::App { fun, args: ds });
+                return if withs.is_empty() { Ok(app) } else { self.with_applied(s, &withs, head, Some(app)) };
+            }
             if !withs.is_empty() {
                 let outer = if self.lookup_desc(head).is_some() { Some(self.parse_type_list(s)?) } else { None };
                 return self.with_applied(s, &withs, head, outer);
+            }
+            if self.lookup_desc(head).is_none() && self.include_scope == 0 && !crate::kinds::CONSTRUCTORS.iter().any(|(n, _)| *n == self.name(head)) {
+                let all = self.withs_over(head);
+                if !all.is_empty() {
+                    return self.with_applied(s, &all, head, None);
+                }
             }
         }
         self.parse_type_list(s)
@@ -1235,7 +1319,7 @@ impl Checker {
     fn parse_type_select_desc(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
         let (m, t) = (items[1].as_symbol().expect("matched"), &items[2]);
         let outer = self.hidden.replace(self.toplevel_hidden(true));
-        let r = self.with_types_of(m, |c| c.parse_type(t)).and_then(|ty| self.resolve_selects(ty, s.span));
+        let r = self.with_types_of(m, None, |c| c.parse_type(t)).and_then(|(ty, _)| self.resolve_selects(ty, s.span));
         self.hidden = outer;
         r
     }
@@ -2392,12 +2476,13 @@ impl Checker {
         let [e1] = rest else { return Err(usage()) };
         let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
         let e0 = self.parse_exp(e0)?;
-        if let Some(s) = shape {
+        if let Some(s) = shape.clone() {
             self.arena.withs.shaped.insert(e0, s);
         }
-        let e1 = self.with_types_of(names[0], |p| p.parse_exp(e1))?;
+        let (e1, past) = self.with_types_of(names[0], shape.flatten(), |p| p.parse_exp(e1))?;
         // Made at the form.
         let e1 = self.arena.exp(span, Exp::With { module: names[0], body: e1 });
+        self.arena.withs.read_past.insert(e1, past);
         let items = vec![
             ModItem::Val { name: names[0], ty: None, init: e0, infer: false },
             ModItem::Val { name: names[1], ty: None, init: e1, infer: false },
@@ -2435,11 +2520,12 @@ impl Checker {
         };
         let module = m.as_symbol().ok_or_else(|| FxError::at(m.span, "`with` opens a module named by a variable"))?;
         let (shape, body) = self.written_shape(body)?;
-        let body = self.with_types_of(module, |p| p.parse_body(span, body))?;
+        let (body, past) = self.with_types_of(module, shape.clone().flatten(), |p| p.parse_body(span, body))?;
         let e = self.arena.exp(span, Exp::With { module, body });
         if let Some(s) = shape {
             self.arena.withs.opened.insert(e, s);
         }
+        self.arena.withs.read_past.insert(e, past);
         Ok(e)
     }
 
@@ -2448,7 +2534,7 @@ impl Checker {
         matches!(f.as_proper_list(), Some([_, _, rest @ ..]) if self.written_shape(rest).is_ok_and(|(_, r)| r.is_empty()))
     }
 
-    /// `(include m #:shape S)`'s module, `m`, held to its shape where it is
+    /// `(include m #:relied S)`'s module, `m`, held to its shape where it is
     /// checked.
     fn parse_include_item(&mut self, f: &Syntax) -> R<ExpId> {
         let [_, m, rest @ ..] = f.as_proper_list().expect("an include") else { unreachable!("an include") };
@@ -2460,36 +2546,31 @@ impl Checker {
         Ok(m)
     }
 
-    /// `#:shape S` at the start of `rest`, as the expander writes it into
+    /// `#:relied S` at the start of `rest`, as the expander writes it into
     /// a form that opens a module (`Macros::shaped`): the module's names,
     /// `((value …) (description …))`, or `#f` where they are not known;
     /// and what follows it.
-    pub(crate) fn written_shape<'s>(&self, rest: &'s [Syntax]) -> R<(Option<Option<crate::ast::WrittenShape>>, &'s [Syntax])> {
+    pub(crate) fn written_shape<'s>(&self, rest: &'s [Syntax]) -> R<(Option<Option<crate::ast::Relied>>, &'s [Syntax])> {
         let [k, s, after @ ..] = rest else { return Ok((None, rest)) };
-        if !matches!(&k.datum, Datum::Keyword(w) if self.name(*w) == "shape") {
+        if !matches!(&k.datum, Datum::Keyword(w) if self.name(*w) == "relied") {
             return Ok((None, rest));
         }
         if s.as_symbol().is_some_and(|f| self.name(f) == "#f") {
             return Ok((Some(None), after));
         }
-        let shape = self.shape_read(s).ok_or_else(|| FxError::at(s.span, "a module's shape: `((value …) (description …))`, each `name` or `(not name)`"))?;
+        let shape = self.shape_read(s).ok_or_else(|| FxError::at(s.span, "a module's shape: `((value …) (description …))`, the names it gives that the program asked of it"))?;
         Ok((Some(Some(shape)), after))
     }
 
     /// What a form relied on of a module, `s`, as `Asked::written`
-    /// writes it.
-    fn shape_read(&self, s: &Syntax) -> Option<crate::ast::WrittenShape> {
-        let list = |l: &Syntax| -> Option<Vec<(Sym, bool)>> {
+    /// writes it: `((value …) (description …))`.
+    fn shape_read(&self, s: &Syntax) -> Option<crate::ast::Relied> {
+        let names = |l: &Syntax| -> Option<Vec<Sym>> {
             let l: &[Syntax] = if matches!(l.datum, Datum::Nil) { &[] } else { l.as_proper_list()? };
-            l.iter()
-                .map(|m| match m.as_proper_list() {
-                    Some([w, n]) if w.as_symbol().is_some_and(|w| self.name(w) == "not") => Some((n.as_symbol()?, false)),
-                    _ => Some((m.as_symbol()?, true)),
-                })
-                .collect()
+            l.iter().map(|n| n.as_symbol()).collect()
         };
         match s.as_proper_list()? {
-            [v, d] => Some(crate::ast::WrittenShape { vals: list(v)?, descs: list(d)? }),
+            [v, d] => Some(crate::ast::Relied { vals: names(v)?, descs: names(d)? }),
             _ => None,
         }
     }
@@ -3731,6 +3812,51 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// scope before any is read, so that they may name each other, and
     /// themselves, in any order; each checked grounded once all are.
     fn parse_module_in(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
+        // What its `include`s give, as the expander found, in scope outside
+        // its own types (declared ahead, below) and inside what is outside
+        // it: `(with %include …)`'s, as its values are (`with_includes`).
+        let frame = self.includes_relied(forms).map(|r| {
+            self.arena.withs.frames.push((r, Vec::new()));
+            let f = self.arena.withs.frames.len() - 1;
+            let (mark, inc) = (self.interner.intern("%with"), self.interner.intern("%include"));
+            self.dscope.push((mark, DScope::With(inc, Some(f))));
+            self.with_depth += 1;
+            self.arena.withs.include_frames.push(f);
+            f
+        });
+        let r = self.parse_module_in_scope(forms);
+        if let Some(f) = frame {
+            self.with_depth -= 1;
+            self.arena.withs.include_frames.pop();
+            self.arena.withs.frames.truncate(f);
+        }
+        r
+    }
+
+    /// What a module's `include`s, `forms`' (in `hide`s too), give, as the
+    /// expander found (`#:relied`), together; none if one of them has no
+    /// record.
+    fn includes_relied(&self, forms: &[Syntax]) -> Option<crate::ast::Relied> {
+        let mut all = crate::ast::Relied { vals: Vec::new(), descs: Vec::new() };
+        let mut any = false;
+        let mut work: Vec<&Syntax> = forms.iter().collect();
+        while let Some(f) = work.pop() {
+            let items = f.as_proper_list().unwrap_or(&[]);
+            match self.head(items) {
+                Some("hide") => work.extend(&items[1..]),
+                Some("include") => {
+                    let (Some(Some(r)), _) = self.written_shape(&items[2..]).ok()? else { return None };
+                    all.vals.extend(r.vals);
+                    all.descs.extend(r.descs);
+                    any = true;
+                }
+                _ => {}
+            }
+        }
+        any.then_some(all)
+    }
+
+    fn parse_module_in_scope(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
         let outer = (std::mem::take(&mut self.ahead), std::mem::take(&mut self.ahead_filled));
         let mut names: Vec<Sym> = Vec::new();
         let mut twice: Vec<Sym> = Vec::new();
@@ -3998,6 +4124,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let first = includes[0].0;
         // A hidden one's, `%hinclude-k`: its values in scope, not in the
         // module's type.
+        let included: Vec<ExpId> = includes.iter().map(|(_, m, _)| *m).collect();
         let bucket = includes
             .into_iter()
             .enumerate()
@@ -4007,6 +4134,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             })
             .collect();
         let bucket = self.arena.exp(first, Exp::Module(bucket));
+        let withs = self.arena.mark().exps();
         for (item, at) in out.iter_mut().zip(spans) {
             match item {
                 ModItem::Val { init, .. } => *init = self.in_includes(*init, at[0], inc),
@@ -4016,6 +4144,20 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     }
                 }
                 ModItem::Abs { .. } | ModItem::Desc { .. } => {}
+            }
+        }
+        // What the expander relied on of the modules included, all of them:
+        // each `(with %include …)` held to it (the values its items name),
+        // and each module included to the descriptions read past them.
+        if let Some(&f) = self.arena.withs.include_frames.last() {
+            let (all, past) = self.arena.withs.frames[f].clone();
+            for x in withs..self.arena.mark().exps() {
+                if matches!(self.arena.exp_at(crate::ast::ExpId(x as u32)), Exp::With { module, .. } if *module == inc) {
+                    self.arena.withs.opened.insert(crate::ast::ExpId(x as u32), Some(all.clone()));
+                }
+            }
+            for m in &included {
+                self.arena.withs.read_past.insert(*m, past.clone());
             }
         }
         out.insert(0, ModItem::Val { name: inc, ty: None, init: bucket, infer: false });

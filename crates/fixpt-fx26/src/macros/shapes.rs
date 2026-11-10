@@ -2,7 +2,7 @@
 //! module gives, by namespace, read from a program's syntax after its
 //! expansion and before its types are known, so that what `with`,
 //! `extend` and `include` bind is known where they are. Each such form has
-//! its module's shape written into it, `(with m #:shape ((x …) (t …)) body
+//! its module's shape written into it, `(with m #:relied ((x …) (t …)) body
 //! …)`, which the checkers hold to the module's type there: a shape is a
 //! promise the checkers keep, never a guess the expander makes alone.
 //!
@@ -194,15 +194,14 @@ impl Asked {
         }
     }
 
-    /// As written into a form (`#:shape`, `ast::Relied`): `((value …)
-    /// (description …))`, each a name the module gives, or `(not name)`,
-    /// one it does not.
-    fn written(&self, span: Span, interner: &Interner) -> Syntax {
-        let not = interner.get("not").expect("interned");
-        let one = |(n, given): &(Sym, bool)| {
-            if *given { Syntax::symbol(span, *n) } else { Syntax::list(span, vec![Syntax::symbol(span, not), Syntax::symbol(span, *n)]) }
-        };
-        Syntax::list(span, vec![Syntax::list(span, self.vals.iter().map(one).collect()), Syntax::list(span, self.descs.iter().map(one).collect())])
+    /// As written into a form (`#:relied`, `ast::Relied`): `((value …)
+    /// (description …))`, the names asked of the module that it gives.
+    /// What it was asked and does not give, the checkers find for
+    /// themselves (each reference whose name the module's type gives, held
+    /// to this list).
+    fn written(&self, span: Span) -> Syntax {
+        let given = |l: &[(Sym, bool)]| Syntax::list(span, l.iter().filter(|(_, g)| *g).map(|(n, _)| Syntax::symbol(span, *n)).collect());
+        Syntax::list(span, vec![given(&self.vals), given(&self.descs)])
     }
 }
 
@@ -259,14 +258,14 @@ pub(crate) fn loads_in(s: &Syntax, interner: &Interner, out: &mut Vec<(String, b
     }
 }
 
-/// `s` without the shapes written into it (`#:shape …`), as it was
+/// `s` without the shapes written into it (`#:relied …`), as it was
 /// expanded: what a program's walk reads.
 pub(crate) fn unshaped(s: &Syntax, interner: &Interner) -> Syntax {
     let Datum::List { items, tail } = &s.datum else { return s.clone() };
     let mut out = Vec::with_capacity(items.len());
     let mut k = 0;
     while k < items.len() {
-        if matches!(&items[k].datum, Datum::Keyword(w) if interner.name(*w) == "shape") && k == 2 {
+        if matches!(&items[k].datum, Datum::Keyword(w) if interner.name(*w) == "relied") && k == 2 {
             k += 2;
             continue;
         }
@@ -455,27 +454,28 @@ impl<'a, 'm> Shaper<'a, 'm> {
         if let Some(s) = self.segments.get(&Rc::as_ptr(chunk)) {
             return s.clone();
         }
+        // A part's own binders before the modules it opens: a module's
+        // items before what its `include`s give, as the checkers read them.
         let nodes = &self.a.nodes;
-        let mut out: Vec<Segment> = Vec::new();
+        let mut ribs: Fast<(Sym, Ns), usize> = Fast::default();
+        let mut shapes = Vec::new();
         for level in chunk.iter() {
             match level {
                 Level::Rib(atoms) | Level::Earlier(atoms) => {
-                    if !matches!(out.last(), Some(Segment::Ribs(_))) {
-                        out.push(Segment::Ribs(Fast::default()));
-                    }
-                    let Some(Segment::Ribs(ix)) = out.last_mut() else { unreachable!("a rib's segment") };
                     for x in atoms.iter() {
                         if let Atom::Lit(b, m) = x
                             && let Kids::Binder(k, _) = nodes[*b].kids
                         {
-                            ix.entry((k, *m)).or_insert(*b);
+                            ribs.entry((k, *m)).or_insert(*b);
                         }
                     }
                 }
-                Level::Shape(m) => out.push(Segment::Shape(*m, self.included(*m))),
+                Level::Shape(m) => shapes.push(Segment::Shape(*m, self.included(*m))),
                 Level::Cage(_) => {}
             }
         }
+        let mut out = vec![Segment::Ribs(ribs)];
+        out.extend(shapes);
         let out = Rc::new(out);
         self.segments.insert(Rc::as_ptr(chunk), out.clone());
         out
@@ -905,7 +905,7 @@ impl Macros {
     /// Form `form`, a program's after expansion (a top-level form, or, a
     /// file's items, a `module` of them, `module`): each `with`, `extend`
     /// and `include` in it with its module's shape written in, `#:shape
-    /// ((value …) (description …))`, or `#:shape #f` where the shape is not
+    /// ((value …) (description …))`, or `#:relied #f` where the shape is not
     /// known (`binding-shapes.md`, step 2); and, at the top level, what its
     /// definitions bind kept for the forms after it.
     pub(crate) fn shaped(&mut self, form: &Syntax, top: bool, dir: Option<std::path::PathBuf>, global: Global, interner: &Interner) -> R<Syntax> {
@@ -970,7 +970,7 @@ impl Macros {
             }
             let Some(m) = c.elem(k, 1) else { continue };
             let asked = c.asked.get(&m).cloned().unwrap_or_default();
-            let s = (!asked.unknown).then(|| asked.written(node.syn.span, interner));
+            let s = (!asked.unknown).then(|| asked.written(node.syn.span));
             out.written.insert(node.path.clone(), s);
         }
         if !top {
@@ -1061,9 +1061,8 @@ impl Macros {
     /// What `shaped` needs made first, which it cannot make itself: the
     /// kernel read, and the names it writes interned.
     pub(crate) fn shapes_prepared(&mut self, interner: &mut Interner) -> R<()> {
-        interner.intern("shape");
+        interner.intern("relied");
         interner.intern("#f");
-        interner.intern("not");
         self.ensure_kernel(interner)
     }
 
@@ -1094,7 +1093,7 @@ impl Macros {
 /// `s`, at `path`, with each shape of `written` written into the form at
 /// its path, after its first operand.
 fn with_written(s: &Syntax, path: &mut Vec<bool>, written: &Written, interner: &Interner) -> Syntax {
-    let words = (interner.get("shape").expect("interned"), interner.get("#f").expect("interned"));
+    let words = (interner.get("relied").expect("interned"), interner.get("#f").expect("interned"));
     with_written_in(s, path, written, interner, words)
 }
 
@@ -1156,7 +1155,7 @@ mod tests {
     fn opened(s: &fixpt_read::Syntax, c: &Checker, out: &mut Vec<String>) {
         let Some(items) = s.as_proper_list() else { return };
         if let [h, m, k, shape, ..] = items
-            && matches!(&k.datum, fixpt_read::Datum::Keyword(w) if c.interner.name(*w) == "shape")
+            && matches!(&k.datum, fixpt_read::Datum::Keyword(w) if c.interner.name(*w) == "relied")
         {
             let w = |s| fixpt_read::write_syntax(s, &c.interner);
             out.push(format!("({} {} {})", w(h), w(m), w(shape)));
@@ -1186,8 +1185,9 @@ mod tests {
         let text = "(define a (module (define-type t int) (define x int 1)))
                     (define b (module (hide (include a)) (define-type t int) (define-type u int) (define y int 2)))
                     (define main (lambda () (with b y)))";
-        // `int`, which the items name, asked of `a` too: not given.
-        assert_eq!(written(text), ["(include a (() ((not int))))", "(with b ((y) ()))"]);
+        // `int`, which the items name, asked of `a` too, is not written:
+        // the checker holds `a` not to give it, as it reads the items.
+        assert_eq!(written(text), ["(include a (() ()))", "(with b ((y) ()))"]);
     }
 
     #[test]
@@ -1201,34 +1201,38 @@ mod tests {
             let s = c.shapes_written(f, true);
             fixpt_read::write_syntax(&s, &c.interner)
         }).collect();
-        assert!(shown[1].contains("(with m #:shape ((x) ()) x)"), "{}", shown[1]);
-        assert!(shown[2].contains("(with m #:shape |#f| x)"), "{}", shown[2]);
+        assert!(shown[1].contains("(with m #:relied ((x) ()) x)"), "{}", shown[1]);
+        assert!(shown[2].contains("(with m #:relied |#f| x)"), "{}", shown[2]);
         c.top(&forms[0]).expect("checks");
         c.top(&forms[1]).expect("checks");
         let e = c.top(&forms[2]).expect_err("refused");
         assert!(e.message.contains("the names `m` gives are not known before it is checked"), "{}", e.message);
     }
 
-    /// A shape that is not the module's type's, as no walk writes it: the
-    /// checker holds the module to the shape, and refuses it.
+    /// A record that is not the module's type's, as no walk writes it: the
+    /// checker holds the module to the names it gives, and refuses one it
+    /// gives that a reference took to be bound outside it, value or type.
     #[test]
-    fn a_shape_the_type_does_not_have_is_refused() {
+    fn a_record_the_type_does_not_keep_is_refused() {
         let mut c = Checker::new();
         for (text, said) in [
-            ("(define m (module (define x int 5))) (define main (lambda () (with m #:shape ((x y) ()) x)))", "its type has no `y`"),
-            ("(define m (module (define x int 5) (define-type t int))) (define main (lambda () (with m #:shape ((x) ((not t))) x)))", "its type gives `t`, which the program took"),
-            ("(define m (module (define x int 5) (define y int 6))) (define main (lambda () (with m #:shape ((x) ()) x)))", ""),
+            ("(define m (module (define x int 5))) (define main (lambda () (with m #:relied ((x y) ()) x)))", "its type has no `y`"),
+            ("(define y int 1) (define m (module (define x int 5) (define y int 6))) (define main (lambda () (with m #:relied ((x) ()) (+ x y))))", "its type gives `y`, which the program took"),
+            ("(define-type t int) (define m (module (define-type t bool))) (define main (lambda () (with m #:relied (() ()) (the t 5))))", "its type gives `t`, which the program took"),
+            ("(define m (module (define x int 5) (define y int 6))) (define main (lambda () (with m #:relied ((x) ()) x)))", ""),
         ] {
             let forms = c.read_in(FileId(0), text).expect("reads");
-            c.top(&forms[0]).expect("checks");
+            let (last, before) = forms.split_last().expect("forms");
+            for f in before {
+                c.top(f).expect("checks");
+            }
             // A name no reference asked, the module may give.
             if said.is_empty() {
-                c.top_as_shaped(&forms[1]).expect("checks");
+                c.top_as_shaped(last).expect("checks");
                 continue;
             }
-            let e = c.top_as_shaped(&forms[1]).expect_err("refused");
+            let e = c.top_as_shaped(last).expect_err("refused");
             assert!(e.message.contains("gives other names than were read") && e.message.contains(said), "{}", e.message);
         }
     }
 }
-

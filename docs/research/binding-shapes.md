@@ -514,3 +514,29 @@ alternated), from 83.4 s before the answers alone were written, lookups
 were by segments of an environment in hash tables, a program's nodes kept
 their syntax three lists deep, a form's operands were moved and not
 copied, and a file read for its shape was not read again to be parsed.
+
+**Only what it gives is written; the absences are the checkers'** (the
+user's, 2026-11-10). The record a form carries is the names asked of the
+module that it gives, `#:relied ((x) (t))`: what a reference was taken to
+find outside the module is not written, the checkers find it themselves,
+each name the scope names that the module's type gives held to the list.
+A value: of those the body names, the checker's `used`, as it reads the
+`with` (an inner `with`'s values bound by its record, until it is checked:
+`free_into`). A type, effect or function of descriptions: as the parser
+reads it, each `with` with a record it is read past noting it, its type
+held not to give it. Written so, the absences came to 111,301 names of the
+119,094 written in the front end's sources (an `include` in a module of
+items naming a hundred standard names noted each); now a median of 3 a form.
+
+**`include` and `with` shadow by one rule**, innermost first, type names
+as values: a module's own definitions, then what its `include`s give,
+then what is outside it, the standard names too (a `with`'s, the same).
+The parser read a type name in a module with `include`s from the
+`include`s last, after what is outside, and a standard type (`int`)
+before any `with`'s; values were read innermost first already, through
+`(with %include …)`. No program of the suite, nor Heist's, reads a type
+otherwise than before; Heist includes its own `keyword?`, `parse-number`
+and `make-session`, values over standard ones, as it did. The walk takes a
+part's own binders before the modules it opens, as the checkers do.
+
+Checking the front end's sources cold: 60.7 s with shapes, 55.6 s without.

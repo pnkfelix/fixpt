@@ -693,10 +693,8 @@ impl Checker {
     /// shape's names, so that what the expander took a `with` or an
     /// `include` to bind is what it binds. A name of the checkers' own
     /// (`%…`) is no name a program reads.
-    pub(crate) fn shape_held(&self, span: Span, m: Option<Sym>, mt: TyId, shape: &Option<crate::ast::WrittenShape>) -> R<()> {
-        if !matches!(self.arena.get(self.arena.resolve(mt)), Ty::Module { .. }) {
-            return Ok(());
-        }
+    pub(crate) fn shape_held(&self, span: Span, m: Option<Sym>, mt: TyId, shape: &Option<crate::ast::Relied>, used: &[Sym], past: &[Sym]) -> R<()> {
+        let Ty::Module { vals, abs, descs } = self.arena.get(self.arena.resolve(mt)) else { return Ok(()) };
         let shown = match m.map(|m| self.interner.name(m)) {
             Some(m) if !m.starts_with('%') => format!("`{m}`"),
             _ => "this module".to_string(),
@@ -706,22 +704,21 @@ impl Checker {
         let Some(shape) = shape else {
             return Err(FxError::at(span, format!("the names {shown} gives are not known before it is checked: give it a type where it is bound, `(the (moduleof …) e)` or a parameter's")));
         };
-        let Ty::Module { vals, abs, descs } = self.arena.get(self.arena.resolve(mt)) else { return Ok(()) };
         let gives_val = |n: &Sym| vals.iter().any(|(v, _)| v == n);
         let gives_desc = |n: &Sym| abs.iter().any(|(v, _)| v == n) || descs.iter().any(|(v, _)| v == n);
-        let wrong = |l: &[(Sym, bool)], gives: &dyn Fn(&Sym) -> bool, given: bool| -> Vec<String> {
-            l.iter().filter(|(n, g)| *g == given && gives(n) != given).map(|(n, _)| format!("`{}`", self.interner.name(*n))).collect()
-        };
-        let (more, fewer): (Vec<String>, Vec<String>) = (
-            [wrong(&shape.vals, &gives_val, false), wrong(&shape.descs, &gives_desc, false)].concat(),
-            [wrong(&shape.vals, &gives_val, true), wrong(&shape.descs, &gives_desc, true)].concat(),
-        );
+        let names = |ns: Vec<&Sym>| ns.iter().map(|n| format!("`{}`", self.interner.name(**n))).collect::<Vec<_>>().join(", ");
+        // What the program took to be the module's, it gives; what it took
+        // to be bound outside it, and names here, it does not: a value the
+        // body uses that the module gives (`used`), a description read past
+        // it (`past`).
+        let fewer: Vec<&Sym> = shape.vals.iter().filter(|n| !gives_val(n)).chain(shape.descs.iter().filter(|n| !gives_desc(n))).collect();
+        let more: Vec<&Sym> = used.iter().filter(|n| !shape.vals.contains(n)).chain(past.iter().filter(|n| gives_desc(n))).collect();
         let mut said = Vec::new();
         if !more.is_empty() {
-            said.push(format!("its type gives {}, which the program took to be bound outside it", more.join(", ")));
+            said.push(format!("its type gives {}, which the program took to be bound outside it", names(more)));
         }
         if !fewer.is_empty() {
-            said.push(format!("its type has no {}", fewer.join(", ")));
+            said.push(format!("its type has no {}", names(fewer)));
         }
         if said.is_empty() {
             return Ok(());
@@ -767,9 +764,6 @@ impl Checker {
             };
             return Err(FxError::at(span, msg));
         };
-        if let Some(shape) = self.arena.withs.opened.get(&e).cloned() {
-            self.shape_held(span, Some(m), mt, &shape)?;
-        }
         // A macro used in the body by a name the module gives a value of:
         // the program would seem to call the value, and the expander, which
         // cannot know the module's names, made the macro's use of it.
@@ -797,6 +791,11 @@ impl Checker {
             free.retain(|n| self.env.rpos(*n).is_none_or(|i| i < at));
         }
         let used: Vec<(usize, (Sym, TyId))> = vals.iter().copied().enumerate().filter(|(_, (n, _))| free.contains(n)).collect();
+        if let Some(shape) = self.arena.withs.opened.get(&e).cloned() {
+            let names: Vec<Sym> = used.iter().map(|(_, (n, _))| *n).collect();
+            let past = self.arena.withs.read_past.get(&e).cloned().unwrap_or_default();
+            self.shape_held(span, Some(m), mt, &shape, &names, &past)?;
+        }
         self.facts.with_vals.insert(e, used.iter().map(|(i, (n, _))| (*n, *i)).collect());
         let vals: Vec<(Sym, TyId)> = used.into_iter().map(|(_, v)| v).collect();
         let naming = self.naming_effect(m, mt);

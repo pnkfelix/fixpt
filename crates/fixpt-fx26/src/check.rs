@@ -2236,7 +2236,8 @@ impl Checker {
             Exp::Var(m) => Some(*m),
             _ => None,
         };
-        self.shape_held(self.arena.span_of(e), m, t, shape)
+        let past = self.arena.withs.read_past.get(&e).cloned().unwrap_or_default();
+        self.shape_held(self.arena.span_of(e), m, t, shape, &[], &past)
     }
 
     /// A `letrec`: its group checked at the types declared, then its body,
@@ -3441,6 +3442,13 @@ impl Checker {
                 let depth = bound.len();
                 match self.facts.with_vals.get(&e) {
                     Some(vals) => bound.extend(vals.iter().map(|(n, _)| *n)),
+                    // Not checked yet: what the expander found the module
+                    // gives, of what its body names (`#:relied`), which its
+                    // type is held to.
+                    None if matches!(self.arena.withs.opened.get(&e), Some(Some(_))) => {
+                        let Some(Some(r)) = self.arena.withs.opened.get(&e) else { unreachable!("a record") };
+                        bound.extend(r.vals.iter().copied());
+                    }
                     None if unbound => {
                         bound.extend(self.hazard_modules.iter().filter(|(m, _)| *m == module).flat_map(|(_, ns)| ns.iter().copied()));
                         // A module in scope, not one of the items being

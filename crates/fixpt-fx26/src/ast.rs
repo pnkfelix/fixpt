@@ -782,26 +782,36 @@ pub struct WithTables {
     /// Of those, each that is applied, `(f d …)`: the application, which
     /// is what falls back.
     pub with_applied: crate::ast::TyMap<TyId>,
-    /// The shapes the expander wrote (`#:shape`, `binding-shapes.md`):
+    /// The shapes the expander wrote (`#:relied`, `binding-shapes.md`):
     /// of each `with`'s module, by the `with`; of each module expression an
     /// `extend` or `include` opens, by the expression. Each held to the
     /// module's type where it is checked (`Checker::shape_held`).
-    /// `None` where the expander did not know the shape (`#:shape #f`).
-    pub opened: std::collections::HashMap<ExpId, Option<WrittenShape>>,
-    pub shaped: std::collections::HashMap<ExpId, Option<WrittenShape>>,
+    /// `None` where the expander did not know the shape (`#:relied #f`).
+    pub opened: std::collections::HashMap<ExpId, Option<Relied>>,
+    pub shaped: std::collections::HashMap<ExpId, Option<Relied>>,
+    /// By each `with`, the descriptions its body reads that the module
+    /// was not taken to give (read past it, to what is outside): which its
+    /// type must not give (`Checker::shape_held`).
+    pub read_past: std::collections::HashMap<ExpId, Vec<Sym>>,
+    /// The `with`s being parsed whose records the expander wrote, innermost
+    /// last: each record, and what is read past it so far
+    /// (`Parser::withs_reading`).
+    pub frames: Vec<(Relied, Vec<Sym>)>,
+    /// Of those, each module's of its `include`s, innermost last.
+    pub include_frames: Vec<usize>,
 }
 
 /// What the expander relied on of a module, before its type was known
-/// (`binding-shapes.md`): each name a reference it found reached the
-/// module by, in its namespace, values' and descriptions' (types, effects,
-/// functions of descriptions), with whether the module gives it, which the
-/// expander took the reference to mean. Written into a form (`#:shape`):
-/// `((x (not y)) (t))`. The module's type must answer each alike; what no
-/// reference asked, it may give or not.
+/// (`binding-shapes.md`): the names references it found reached the module
+/// by and found it gives, values' and descriptions' (types, effects,
+/// functions of descriptions). Written into a form (`#:relied`): `((x)
+/// (t))`. The module's type must give each; and each name it gives that a
+/// reference in the scope it opens names, the checkers see, must be one of
+/// them (what the expander took to be bound outside it, it may not give).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WrittenShape {
-    pub vals: Vec<(Sym, bool)>,
-    pub descs: Vec<(Sym, bool)>,
+pub struct Relied {
+    pub vals: Vec<Sym>,
+    pub descs: Vec<Sym>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -1206,6 +1216,7 @@ impl Arena {
         self.withs.with_applied.retain(|t, _| (t.0 as usize) < mark.tys);
         self.withs.opened.retain(|e, _| (e.0 as usize) < mark.exps);
         self.withs.shaped.retain(|e, _| (e.0 as usize) < mark.exps);
+        self.withs.read_past.retain(|e, _| (e.0 as usize) < mark.exps);
         self.exps.truncate(mark.exps);
         self.dvar_names.truncate(mark.dvars);
         self.dvar_places.truncate(mark.dvars);
