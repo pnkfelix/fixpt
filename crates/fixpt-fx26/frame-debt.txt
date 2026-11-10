@@ -2,34 +2,39 @@
 # 4096 bytes, each with its frame in bytes (tests/stack.rs): lowered as they
 # are split, never raised. The recursive ones matter most: every level of
 # nesting has their frames.
-blobref_rule 4264
-check_node 4152
-expand_abbrev 4488
-expand_datatype 9400
-expand_generative 5400
-fasl_load 5704
-import_file_macros 5432
-included 4696
-module_items_from 11592
-par_expansion 6680
-parse_case 5528
-parse_d 4472
-parse_exp 4680
-parse_moduleof_in 5064
-parse_process_form 6328
-parse_session_commit_form 4504
-parse_typecase 4152
-rebuild 4424
-select_expansion 7608
-show_ty_body 7560
-sub_rules 8520
-synth_allof_call 5592
-synth_attempt 4376
-synth_bloblet 5416
-synth_lambda_as 4360
-synth_module_items 10840
-synth_tagcase 4728
-syscall_expansion 7360
-top_here 4936
-unify 5896
-with_convention 13456
+# Measured with frame pointers since 2026-11-10 (`.cargo/config.toml`):
+# each prologue saves `rbp`, so the reservation read moved by 8 bytes either
+# way to keep the stack aligned, and the entries were read again then
+# (`process_body` came over 4096 so: 4112).
+blobref_rule 4256
+check_node 4160
+expand_abbrev 4480
+expand_datatype 9408
+expand_generative 5392
+fasl_load 5712
+import_file_macros 5424
+included 4688
+module_items_from 11584
+par_expansion 6688
+parse_case 5536
+parse_d 4480
+parse_exp 4672
+parse_moduleof_in 5072
+parse_process_form 6336
+parse_session_commit_form 4512
+parse_typecase 4160
+process_body 4112
+rebuild 4432
+select_expansion 7616
+show_ty_body 7568
+sub_rules 8528
+synth_allof_call 5584
+synth_attempt 4384
+synth_bloblet 5424
+synth_lambda_as 4352
+synth_module_items 10832
+synth_tagcase 4736
+syscall_expansion 7352
+top_here 4928
+unify 5888
+with_convention 13448

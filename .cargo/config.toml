@@ -3,3 +3,9 @@
 # otherwise): a debug build's frames on x86_64 are larger than on arm64, and
 # the deepest programs outgrow it there.
 RUST_MIN_STACK = "8388608"
+
+[build]
+# Frame pointers in every build, debug and release: perf's call graphs
+# (`--call-graph fp`) through Rust's own code, which we profile often
+# (the user's, 2026-11-10). A percent or so of time, for stacks that walk.
+rustflags = ["-C", "force-frame-pointers=yes"]

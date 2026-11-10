@@ -104,9 +104,10 @@ Call stacks are walked through the native convention's code with
 `[rbp + 8]`, as perf's walker reads them (`trampoline` → `native run` →
 `native deriv` → `native map-deriv`). What breaks a stack: a leaf, which
 has no frame, so its caller is missed (its caller's caller is seen); a
-tail call, which replaces its caller's frame; Rust's own code, built
-without frame pointers unless `RUSTFLAGS="-C force-frame-pointers=yes"`;
-and cellular code, not yet looked at.
+tail call, which replaces its caller's frame; and cellular code, not yet
+looked at. Rust's own code keeps its frame pointers: every build is made
+with `-C force-frame-pointers=yes` (`.cargo/config.toml`, 2026-11-10), so
+`perf record -g` walks it too.
 
 `sample` cannot say who called a word: register code calls register code
 with no native frame, so every stack of ours ends in `run_in_runtime`.
