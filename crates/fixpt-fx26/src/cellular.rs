@@ -752,7 +752,7 @@ impl<'a> Compiler<'a> {
                 }
                 self.free(scrutinee, bound, acc);
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => {}
         }
     }
 
@@ -934,6 +934,11 @@ impl<'a> Compiler<'a> {
             }
             Exp::Symbol(s) => {
                 let v = self.heap.intern(self.c.interner.name(s));
+                self.lit(code, v);
+                self.done(code, tail);
+            }
+            Exp::Quote { datum, .. } => {
+                let v = self.quote_value(&datum);
                 self.lit(code, v);
                 self.done(code, tail);
             }
@@ -1553,7 +1558,7 @@ impl<'a> Compiler<'a> {
                 let n = all(&arms.iter().map(|a| a.body).collect::<Vec<_>>(), self.room(scrutinee, n, withs));
                 all(&els.map(|(_, b)| b).into_iter().collect::<Vec<_>>(), n)
             }
-            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => n,
+            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => n,
         }
     }
 
@@ -1598,7 +1603,7 @@ impl<'a> Compiler<'a> {
                     && els.is_none_or(|(y, b)| y != p && y != f && self.call_only(b, p, f, k, n, arity))
             }
             Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } => false,
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => true,
         }
     }
 
@@ -1639,7 +1644,7 @@ impl<'a> Compiler<'a> {
                     && arms.iter().all(|a| a.names().contains(&f) || self.called_only(a.body, f, n))
                     && els.is_none_or(|(y, b)| y == f || self.called_only(b, f, n))
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => true,
         }
     }
 
@@ -1814,7 +1819,7 @@ impl<'a> Compiler<'a> {
                     && arms.iter().all(|a| a.names().contains(&f) || self.loops_only(a.body, f, n, tail))
                     && els.is_none_or(|(y, b)| y == f || self.loops_only(b, f, n, tail))
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => true,
         }
     }
 
@@ -2026,12 +2031,6 @@ impl<'a> Compiler<'a> {
                     (_, true) => "tailcall",
                 };
                 self.op1(code, op, Value::fixnum(n as i64));
-            }
-            // A quoted datum (TODO §51): made once, here, where it is all
-            // literals; else built as written.
-            Some(s) if s == "%quote" && args.len() == 1 && let Some(v) = self.quote_now(args[0]) => {
-                self.lit(code, v);
-                self.done(code, tail);
             }
             // In tail position, the mark replaces this frame's: a loop that
             // marks each iteration runs in constant space.
@@ -2983,51 +2982,51 @@ impl<'a> Compiler<'a> {
         (v.is_pair() || v == Value::NULL).then_some(v)
     }
 
-    /// `(%quote arg)`'s datum, made now and interned (`Heap::intern_datum`),
-    /// where it is all literals: the one object equal to it, at every copy
-    /// of the quote and every quote of it.
-    fn quote_now(&mut self, arg: ExpId) -> Option<Value> {
-        let v = self.quoted_value(arg)?;
-        Some(self.heap.intern_datum(v))
+    /// Constant `x`, a quote's (`Exp::Quote`), made now and interned
+    /// (`Heap::intern_datum`): the one object equal to it, at every copy of
+    /// the quote and every quote of it. As `c-quote-cell`.
+    pub(crate) fn quote_value(&mut self, x: &fixpt_read::Syntax) -> Value {
+        let v = self.datum_value(x);
+        self.heap.intern_datum(v)
     }
 
-    /// The datum a quote builds (`%quote`'s argument, which only the quote
-    /// rewrite makes: `Checker::quoted`), made now, as constant data, where
-    /// it is made of literals and symbols: `cons` and `nil` here are the
-    /// standard ones, by how the rewrite wrote them. A string, a float or a
-    /// vector in it, not yet: built as written. As `c-quoted-cell`.
-    fn quoted_value(&mut self, x: ExpId) -> Option<Value> {
-        if let Some(v) = self.literal_of(x) {
-            return Some(v);
-        }
-        match self.exp_at(x).clone() {
-            Exp::Symbol(s) => {
-                let name = self.c.interner.name(s).to_string();
-                Some(self.heap.intern(&name))
+    /// Datum `x` in the heap, as a reader makes it: its atoms those the
+    /// parser lets a constant have (`Checker::constant_atoms`).
+    fn datum_value(&mut self, x: &fixpt_read::Syntax) -> Value {
+        use fixpt_read::{Datum as D, Num};
+        match &x.datum {
+            D::Bool(b) => Value::boolean(*b),
+            D::Char(c) => Value::char(*c),
+            D::Nil => Value::NULL,
+            D::Number(Num::Int(n)) => Value::fixnum(*n),
+            D::Number(Num::Real(f)) => self.heap.make_flonum(*f),
+            D::Str(t) => self.heap.make_string(t),
+            // `#t` and `#f` are literals, as the FX-26 reader gives them.
+            D::Symbol(n) => match self.c.interner.name(*n) {
+                "#t" => Value::TRUE,
+                "#f" => Value::FALSE,
+                name => self.heap.intern(name),
+            },
+            D::Keyword(n) => {
+                let s = self.heap.intern(self.c.interner.name(*n));
+                self.heap.make_keyword(s)
             }
-            Exp::The { exp: body, .. } => self.quoted_value(body),
-            Exp::Var(n) if self.name(n) == "nil" => Some(Value::NULL),
-            Exp::With { module, body } if self.c.is_fx_module(module) || (self.c.is_toplevel_module(module) && self.toplevel(body).is_none()) => {
-                match *self.exp_at(body) {
-                    Exp::Var(n) if self.name(n) == "nil" => Some(Value::NULL),
-                    _ => None,
-                }
-            }
-            Exp::App { fun, args } if args.len() == 2 => {
-                let cons = match *self.exp_at(fun) {
-                    Exp::Var(f) => self.name(f) == "cons",
-                    Exp::With { module, body } if self.c.is_fx_module(module) || (self.c.is_toplevel_module(module) && self.toplevel(body).is_none()) => {
-                        matches!(*self.exp_at(body), Exp::Var(f) if self.name(f) == "cons")
-                    }
-                    _ => false,
+            D::List { items, tail } => {
+                let mut acc = match tail {
+                    Some(t) => self.datum_value(t),
+                    None => Value::NULL,
                 };
-                if !cons {
-                    return None;
+                for item in items.iter().rev() {
+                    let v = self.datum_value(item);
+                    acc = self.heap.cons(v, acc);
                 }
-                let (a, d) = (self.quoted_value(args[0])?, self.quoted_value(args[1])?);
-                Some(self.heap.cons(a, d))
+                acc
             }
-            _ => None,
+            D::Vector(items) => {
+                let vs: Vec<Value> = items.iter().map(|i| self.datum_value(i)).collect();
+                self.heap.vector_from(&vs)
+            }
+            D::Number(_) | D::Bytevector(_) => unreachable!("refused by the parser (`constant_atoms`)"),
         }
     }
 

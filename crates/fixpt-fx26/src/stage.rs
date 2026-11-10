@@ -332,6 +332,14 @@ pub(crate) fn sx_value(rt: &mut Runtime, x: &crate::sx::Sx) -> Value {
             }
             out
         }
+        Sx::Vector(items) => {
+            let vs: Vec<Value> = items.iter().map(|i| sx_value(rt, i)).collect();
+            rt.heap.vector_from(&vs)
+        }
+        Sx::Keyword(s) => {
+            let s = rt.heap.intern(s);
+            rt.heap.make_keyword(s)
+        }
     }
 }
 

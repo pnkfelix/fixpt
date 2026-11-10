@@ -59,6 +59,7 @@
    (val exp-start (subr pure (exp) int))
    (val exp-end (subr pure (exp) int))
    (val exp-kth (subr pure (exp) int))
+   (val exp-quote-datum (subr pure (syn) datum))
    (val exp-reading (subr pure (exp) int))
    (val exp-at (subr pure (exp) k-at))
    (val k-has-region-in?

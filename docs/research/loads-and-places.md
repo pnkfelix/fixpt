@@ -185,7 +185,7 @@ Not yet done, and what C makes possible:
   (done, 2026-10-15): a made expression is at its origin's span, the form
   or the binding, branch or arm it was made for: `extend`'s `with`, a
   parameterized file's `lambda` (both of no width before), a
-  `load-input`'s `input` (its keyword before), a quote's `%quote`, `nil`
+  `load-input`'s `input` (its keyword before), a quote's constant, `nil`
   and vector (its opening parenthesis, closing one, `#(`), and `spawn`'s,
   `par`'s, `race`'s and `pselect`'s pieces (none wide, or from a branch
   to the form's end). And the Rust compiler keys what it decides by

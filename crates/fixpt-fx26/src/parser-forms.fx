@@ -14,7 +14,7 @@
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define reader-types (with parser-module reader-types))
-(import reader-types atom lst (type syn))
+(import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-symbol? syn-head syn-start syn-end len nth drop (type syns-a exp)
         (effect parses))
 
@@ -30,6 +30,42 @@
 (define fail-at-syn (->* (fails string syn) void)
   (lambda (fail message s) (fail message (syn-start s) (syn-end s))))
 (import parser-module mk-symbol mk-list mk-int form-of?)
+
+;; The first atom of constant `x`, in the order written, that `bad?`
+;; refuses: `why`, there.
+(define refuse-atoms (->* (fails syn (subr pure (datum) bool) string) unit)
+  (lambda (fail x bad? why)
+    (letrec ((each (subr (maxeff (read @globals) spin parses) (syns-a) unit)
+               (lambda (xs) (if (null? xs) #u (begin (one (car xs)) (each (cdr xs))))))
+             (one (subr (maxeff (read @globals) spin parses) (syn) unit)
+               (lambda (y)
+                 (tagcase y
+                   (atom (d a b xpn) (if (bad? d) (fail-at-syn fail why y) #u))
+                   (lst (items d a b xpn) (each items))
+                   (dotted (items tail d a b xpn) (begin (each items) (one tail)))
+                   (vec (items d a b xpn) (each items))))))
+      (one x))))
+;; `(%datum x)`, which the quote rewrites make of a list or vector
+;; (`quoted-in`): `x`, one constant (TODO §229), its type the checker's
+;; (`k-resolve-exp`). It may hold no bytevector, and then no integer past a
+;; fixnum or ratio, each refused at the first. As
+;; `Checker::parse_datum_form`.
+(define datum-form (->* (fails syns-a int int) syn)
+  (lambda (fail items a b)
+    (let ((x (begin (arity fail items 2 "`(%datum list-or-vector)`" a b) (nth items 1))))
+    (begin
+      (tagcase x
+        (atom (d c e xpn) (fail-at-syn fail "`(%datum list-or-vector)`" x))
+        (lst (xs d c e xpn) (if (null? xs) (fail-at-syn fail "`(%datum list-or-vector)`" x) #u))
+        (else y #u))
+      (refuse-atoms fail x (lambda (d) (bytevector? d)) "a bytevector cannot be quoted yet")
+      (refuse-atoms fail x
+                    (lambda (d)
+                      (and (not (datum-int? d))
+                           (or (int? d) (and (datum-rational? d) (not (f64? d))))))
+                    (string-append "an integer past a fixnum, or a ratio, cannot be quoted"
+                                   " in a list or vector yet"))
+      x))))
 
 ;; Evidence (`docs/research/eval.md`, "Evidence"): item `i` of `items`,
 ;; `(given g …)`, each a variable, as `(product (1 g) …)`, what a staging

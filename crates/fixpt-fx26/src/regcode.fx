@@ -208,7 +208,7 @@
     (tagcase x
       (e-var (n a b abk abkr) #t) (e-int (n a b abk abkr) #t) (e-bool (v a b abk abkr) #t)
       (e-char (v a b abk abkr) #t) (e-str (s a b abk abkr) #t) (e-float (v a b abk abkr) #t)
-      (e-sym (s a b abk abkr) #t) (e-unit (a b abk abkr) #t)
+      (e-sym (s a b abk abkr) #t) (e-quote (s a b abk abkr) #t) (e-unit (a b abk abkr) #t)
       (else y #f))))
 ;; `x`'s code to come: its place marked, unless it is the one already, or
 ;; `x` a leaf; the place before, for `r-leave-place!`.
@@ -275,7 +275,7 @@
            (e-var (n a b abk abkr) (not (c-has-standard-value? (symbol->string n))))
            (e-int (n a b abk abkr) #t) (e-bool (v a b abk abkr) #t) (e-char (v a b abk abkr) #t)
            (e-sym (v a b abk abkr) #t) (e-unit (a b abk abkr) #t) (e-str (v a b abk abkr) #t)
-           (e-float (v a b abk abkr) #t)
+           (e-float (v a b abk abkr) #t) (e-quote (v a b abk abkr) #t)
            (else y #f)))))
 
 ;; A constant's cell.
@@ -636,6 +636,7 @@
         (e-int (n a b abk abkr) (r-known-as (rc-int n)))
         (e-bool (v a b abk abkr) (r-known-as (rc-bool v)))
         (e-char (v a b abk abkr) (r-known-as (rc-char v)))
+        (e-quote (v a b abk abkr) (r-known-as (rc-data (c-quote-cell v))))
         (e-var (n a b abk abkr)
           (let ((l (r-where env n)))
             (if (null? l)
@@ -656,11 +657,6 @@
             (cond
               ((not (null? decided)) decided)
               ((string=? name "") nil)
-              ;; A quoted datum (TODO §51), made once where it is all
-              ;; literals, as the stack code makes it.
-              ((and (string=? name "%quote") (= (c-count-exps args) 1))
-               (let ((k (c-quote-now (car args))))
-                 (if (null? k) nil (r-known-as (rc-data (car k))))))
               (else
                 (let ((vs (r-knowns env args nil)))
                   (if (or (null? vs) (not (= (c-length-consts (car vs)) (c-count-exps args))))

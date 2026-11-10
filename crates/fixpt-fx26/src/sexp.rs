@@ -128,6 +128,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
         Exp::Char(ch) => format!("(e-char {ch:?} {a} {b})"),
         Exp::Float(x) => format!("(e-float {} {a} {b})", fixpt_runtime::num::format_flonum(x)),
         Exp::Symbol(s) => format!("(e-sym {} {a} {b})", name(s)),
+        Exp::Quote { .. } => format!("(e-quote _ {a} {b})"),
         Exp::Unit => format!("(e-unit {a} {b})"),
         Exp::Lambda { params, body } => {
             let ps = params

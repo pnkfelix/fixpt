@@ -19,7 +19,8 @@
        (check-syntax-types (load-module "fx26:check-syntax-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
        (check-subst-types (load-module "fx26:check-subst-types.fx"))
-       (reader-types (load-module "fx26:reader-types.fx")))
+       (reader-types (load-module "fx26:reader-types.fx"))
+       (eager-reader-types ((proj (load-module "fx26:eager-reader-types.fx") @s @e @m @c))))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-resolve (select check-resolve-types check-resolve-sig))
@@ -32,7 +33,7 @@
     (module
 (hide (include check-modules-types) (include check-types-types) (include check-synth-types)
       (include parser-types) (include check-resolve-types) (include check-read-types)
-      (include check-env-types))
+      (include check-env-types) (include eager-reader-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-resolve) (include check-syntax) (include check-read)
@@ -158,6 +159,19 @@
     (if (and (not (null? items)) (symbol=? (car (extract (car items) 2)) '%include))
         (k-push-desc '%include-scope (ds-var -1 0))
         #u)))
+;; A quote's constant `x`'s type: the standard `(listof datum acyclic)` if
+;; `x` is a proper list, else the standard `datum`, whatever the program
+;; binds those names to (`Checker::parse_datum_form`).
+(define k-quote-type (->* (syn int int) int)
+  (lambda (x a b)
+    (let* ((datum (atom 'datum a b 0))
+           (ty (tagcase x
+                 (lst (items d c e xpn) (lst (list (atom 'listof a b 0) datum (atom 'acyclic a b 0))
+                                             nil a b 0))
+                 (else y datum)))
+           (saved (get k-dscope))
+           (t (begin (set k-dscope (get k-std-dscope)) (k-parse-type ty))))
+      (begin (set k-dscope saved) t))))
 ;; Reading expressions (`check-resolve.fx`'s walk) and modules' items, one
 ;; recursive group: a module is an expression, and its items hold them.
 (define-rec
@@ -177,6 +191,7 @@
         (e-char (v a b abk abkr) (x-const k-char 0 a b abk abkr))
         (e-float (v a b abk abkr) (x-const k-f64 0 a b abk abkr))
         (e-sym (v a b abk abkr) (x-const k-symbol 0 a b abk abkr))
+        (e-quote (v a b abk abkr) (x-const (k-quote-type v a b) 0 a b abk abkr))
         (e-unit (a b abk abkr) (x-const k-unit 0 a b abk abkr))
         (e-lambda (ps body a b abk abkr)
           (let* ((params (k-resolve-params ps)) (x (k-resolve-exp body)))

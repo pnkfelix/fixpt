@@ -89,7 +89,6 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("bool?", "boolean?", true),
     ("string?", "string?", true),
     ("f64?", "%fx26-datum-f64?", false),
-    ("%quote", "%fx26-intern-datum", false),
     ("vector?", "vector?", true),
     ("bytevector?", "bytevector?", true),
     ("symbol?", "symbol?", true),
@@ -487,6 +486,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("wcell-sum", "%fx26-sum-cell", false),
     ("wcell-pair", "%fx26-pair-cell", false),
     ("wcell-interned", "%fx26-intern-datum", false),
+    ("wcell-datum", "%fx26-identity", false),
     ("wcell-closure", "%fx26-closure-cell", false),
     ("close-over-word!", "%fx26-close-over-word!", false),
     ("wcell-product", "%fx26-product-cell", false),
@@ -711,45 +711,33 @@ impl Lowerer<'_> {
         Sx::call("letrec*", [Sx::List(bs), Sx::call("%fx26-product", fields)])
     }
 
-    /// The datum a quote builds (`%quote`'s argument, the rewrite's), as
-    /// Scheme data, where it is made of integers, booleans, characters,
-    /// symbols, `nil` and `cons`: what the compilers make once
-    /// (`quoted_value`, `c-quoted-cell`).
-    fn quoted_datum(&self, e: ExpId) -> Option<Sx> {
-        let named = |x: ExpId, n: &str| match self.c.arena.exp_at(x) {
-            Exp::Var(s) => self.c.interner.name(*s) == n,
-            Exp::With { module, body } if self.c.is_fx_module(*module) => {
-                matches!(self.c.arena.exp_at(*body), Exp::Var(s) if self.c.interner.name(*s) == n)
+    /// Constant `x`, a quote's (`Exp::Quote`), as Scheme data: what the
+    /// compilers make once (`quote_value`, `c-quote-cell`).
+    fn datum_sx(&self, x: &fixpt_read::Syntax) -> Sx {
+        use fixpt_read::{Datum, Num};
+        match &x.datum {
+            Datum::Bool(b) => Sx::Bool(*b),
+            Datum::Char(c) => Sx::Char(*c),
+            Datum::Nil => Sx::List(Vec::new()),
+            Datum::Number(Num::Int(n)) => Sx::int(*n),
+            Datum::Number(Num::Real(f)) => Sx::Float(*f),
+            Datum::Str(t) => Sx::Str(t.clone()),
+            // `#t` and `#f` are literals, as the FX-26 reader gives them.
+            Datum::Symbol(n) => match self.c.interner.name(*n) {
+                "#t" => Sx::Bool(true),
+                "#f" => Sx::Bool(false),
+                name => Sx::sym(name),
+            },
+            Datum::Keyword(n) => Sx::Keyword(self.c.interner.name(*n).to_string()),
+            Datum::List { items, tail } => {
+                let items = items.iter().map(|i| self.datum_sx(i)).collect();
+                match tail {
+                    Some(t) => Sx::Dotted(items, Box::new(self.datum_sx(t))),
+                    None => Sx::List(items),
+                }
             }
-            // The top level's, the standard one where the program defines
-            // none of the name.
-            Exp::With { module, body } if self.c.is_toplevel_module(*module) => {
-                matches!(self.c.arena.exp_at(*body), Exp::Var(s) if self.c.interner.name(*s) == n && self.globals.get(*s).is_none())
-            }
-            _ => false,
-        };
-        match self.c.arena.exp_at(e).clone() {
-            Exp::Int(n) => Some(Sx::int(n)),
-            Exp::Bool(b) => Some(Sx::Bool(b)),
-            Exp::Char(c) => Some(Sx::Char(c)),
-            Exp::Symbol(s) => Some(Sx::sym(self.c.interner.name(s))),
-            Exp::The { exp, .. } => self.quoted_datum(exp),
-            _ if named(e, "nil") => Some(Sx::List(Vec::new())),
-            Exp::App { fun, args } if args.len() == 2 && named(fun, "cons") => {
-                let (a, d) = (self.quoted_datum(args[0])?, self.quoted_datum(args[1])?);
-                Some(match d {
-                    Sx::List(mut items) => {
-                        items.insert(0, a);
-                        Sx::List(items)
-                    }
-                    Sx::Dotted(mut items, tail) => {
-                        items.insert(0, a);
-                        Sx::Dotted(items, tail)
-                    }
-                    d => Sx::Dotted(vec![a], Box::new(d)),
-                })
-            }
-            _ => None,
+            Datum::Vector(items) => Sx::Vector(items.iter().map(|i| self.datum_sx(i)).collect()),
+            Datum::Number(_) | Datum::Bytevector(_) => unreachable!("refused by the parser (`constant_atoms`)"),
         }
     }
 
@@ -768,6 +756,9 @@ impl Lowerer<'_> {
             Exp::Bool(b) => Sx::Bool(b),
             Exp::Str(s) => Sx::Str(s.to_string()),
             Exp::Symbol(s) => Sx::quote(Sx::sym(self.c.interner.name(s))),
+            // A quote's constant (TODO §229), interned as each compiler
+            // interns it (`quote_value`).
+            Exp::Quote { datum, .. } => Sx::call("%fx26-intern-datum", [Sx::quote(self.datum_sx(&datum))]),
             Exp::Float(x) => Sx::Float(x),
             Exp::Char(c) => Sx::Char(c),
             Exp::Unit => Sx::sym("%fx26-unit"),
@@ -775,16 +766,6 @@ impl Lowerer<'_> {
                 let names: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
                 let ps: Vec<Sx> = names.iter().map(|n| self.local(*n)).collect();
                 Sx::call("lambda", [Sx::List(ps), self.body(&names, body)])
-            }
-            // A quoted datum (TODO §51), made of literals and symbols: a
-            // Scheme constant, interned as each compiler interns it
-            // (`quoted_value`).
-            Exp::App { fun, args }
-                if args.len() == 1
-                    && self.c.standard_ref(fun).is_some_and(|s| self.c.interner.name(s) == "%quote")
-                    && let Some(d) = self.quoted_datum(args[0]) =>
-            {
-                Sx::call("%fx26-intern-datum", [Sx::quote(d)])
             }
             Exp::App { fun, args } => {
                 let mut parts = vec![self.go(fun)];

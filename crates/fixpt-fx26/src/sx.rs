@@ -18,6 +18,10 @@ pub enum Sx {
     List(Vec<Sx>),
     /// `(a … . d)`.
     Dotted(Vec<Sx>, Box<Sx>),
+    /// `#(x …)`, in a quote's constant.
+    Vector(Vec<Sx>),
+    /// `#:name`, in a quote's constant.
+    Keyword(String),
 }
 
 impl Sx {
@@ -56,6 +60,8 @@ impl Sx {
                 items: items.iter().map(|x| x.syntax(interner, span)).collect(),
                 tail: Some(Box::new(tail.syntax(interner, span))),
             },
+            Sx::Vector(items) => Datum::Vector(items.iter().map(|x| x.syntax(interner, span)).collect()),
+            Sx::Keyword(s) => Datum::Keyword(interner.intern(s)),
         };
         Syntax::new(span, datum)
     }
@@ -106,6 +112,17 @@ impl fmt::Display for Sx {
                 }
                 write!(f, ". {tail})")
             }
+            Sx::Vector(items) => {
+                f.write_str("#(")?;
+                for (i, x) in items.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" ")?;
+                    }
+                    write!(f, "{x}")?;
+                }
+                f.write_str(")")
+            }
+            Sx::Keyword(s) => write!(f, "#:{}", fixpt_read::escape_symbol(s)),
         }
     }
 }

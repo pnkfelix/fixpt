@@ -657,7 +657,7 @@ impl Compiler<'_> {
             Exp::Var(n) if self.where_is(e, n).is_none() && Self::has_standard_value(self.name(n)) => {
                 !tail || Self::vsubr_list_op(self.name(n)).is_some()
             }
-            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => false,
+            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => false,
             // A closure made as the value: its call-out may collect, but
             // nothing is used after it (`r_lambda`); past `REGS` free
             // values, though, they are a call-out's operands, made in a
@@ -775,7 +775,7 @@ impl Compiler<'_> {
             // Not a name a standard operation has, which may be one made a
             // value, a closure.
             Exp::Var(n) => !Self::has_standard_value(self.name(*n)),
-            Exp::Int(_) | Exp::Bool(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Unit | Exp::Str(_) | Exp::Float(_) => true,
+            Exp::Int(_) | Exp::Bool(_) | Exp::Char(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit | Exp::Str(_) | Exp::Float(_) => true,
             _ => false,
         };
         plain && !self.c.facts.changed(x)
@@ -787,7 +787,7 @@ impl Compiler<'_> {
     /// constant's, whose code is its parent's, as the FX-26 compiler's
     /// `r-leaf?`.
     fn r_exp(&mut self, g: &mut Gen, x: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
-        if matches!(self.exp_at(x), Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit) {
+        if matches!(self.exp_at(x), Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit) {
             return self.r_exp_at(g, x, env, te, tail);
         }
         let outer = g.at;
@@ -914,6 +914,11 @@ impl Compiler<'_> {
             }
             Exp::Symbol(s) => {
                 let v = self.heap.intern(self.c.interner.name(s));
+                g.op("const", &[v]);
+                g.done(tail);
+            }
+            Exp::Quote { datum, .. } => {
+                let v = self.quote_value(&datum);
                 g.op("const", &[v]);
                 g.done(tail);
             }
@@ -2440,6 +2445,7 @@ impl Compiler<'_> {
                 None if matches!(self.name(n), "nil" | "no-pair") => Some(Value::NULL),
                 _ => None,
             },
+            Exp::Quote { datum, .. } => Some(self.quote_value(&datum)),
             Exp::The { exp: body, .. } | Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.r_const(env, body),
             Exp::Sum(t, v) => {
                 let v = self.r_const(env, v)?;
@@ -2455,11 +2461,6 @@ impl Compiler<'_> {
                     return Some(v);
                 }
                 let name = self.r_standard_name(env, fun)?;
-                // A quoted datum (TODO §51), made once where it is all
-                // literals, as the stack code makes it.
-                if name == "%quote" && args.len() == 1 {
-                    return self.quote_now(args[0]);
-                }
                 let vs: Vec<Value> = args.iter().map(|a| self.r_const(env, *a)).collect::<O<_>>()?;
                 let small = |v: &Value| v.is_fixnum() && v.as_fixnum().abs() < 1 << 30;
                 let int2 = || (vs.len() == 2 && vs.iter().all(small)).then(|| (vs[0].as_fixnum(), vs[1].as_fixnum()));

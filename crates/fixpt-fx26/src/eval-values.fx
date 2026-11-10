@@ -232,37 +232,146 @@
 
 ;; Quoted data interned (TODO §51), as the heap interns them
 ;; (`Heap::intern_datum`): a pair found by its interned parts, a string by
-;; its characters; so a quote is one value each time, and equal quotes one.
-(define ev-interned (ref vals @v) (new nil))
+;; its characters, a float by its bits and a vector by its elements; so a
+;; quote is one value each time, and equal quotes one. A table, as the
+;; heap's: buckets by a hash of each datum's parts, each entry a hash and
+;; its value, so that interning takes time in proportion to what is
+;; interned (TODO §229).
+(define-type ev-entries (listof (pairof int val @v) @v))
+(define ev-interned (ref (arrayof ev-entries @v) @v)
+  (new (the (arrayof ev-entries @v) (make-array 64 (the ev-entries nil)))))
+(define ev-interned-count (ref int @v) (new 0))
+(define ev-mix (->* (int int) int)
+  (lambda (h x) (modulo (+ (* h 31) (modulo x 1073741789)) 1073741789)))
+;; An atom's hash, by what it is: what interning is keyed by.
+(define ev-atom-hash (->* (val) int)
+  (lambda (v)
+    (typecase v
+      (int n (ev-mix 2 n)) (char c (ev-mix 3 (char->integer c))) (bool b (if b 5 7))
+      (string s (ev-mix 11 (string-hash s))) (symbol s (ev-mix 13 (symbol-name-hash s)))
+      (keyword k (ev-mix 17 (symbol-name-hash (keyword->symbol k))))
+      (f64 x (ev-mix 19 (string-hash (f64->string x))))
+      (else 0))))
+
+;; Whether parts `a` and `b`, interned, are one: the same object, or a
+;; float of the same bits, as the heap keeps one of each.
+(define ev-same-part? (->* (val val) bool)
+  (lambda (a b)
+    (typecase a
+      (f64 x (typecase b (f64 y (u64= (f64->bits x) (f64->bits y))) (else #f)))
+      (else (ev-eq? a b)))))
+;; Whether vectors `xs` and `ys`, their elements interned, are one, from `i`.
+(define ev-same-elements? (->* ((arrayof val @v) (arrayof val @v) int) bool)
+  (lambda (xs ys i)
+    (or (< i 0)
+        (and (ev-same-part? (array-ref xs i) (array-ref ys i)) (ev-same-elements? xs ys (- i 1))))))
 
 ;; Whether `a`, interned, is what `b`, its parts interned, is.
 (define ev-same-datum? (->* (val val) bool)
   (lambda (a b)
     (cond ((pair? a)
-           (and (pair? b) (ev-eq? (car a) (car b)) (ev-eq? (cdr a) (cdr b))))
+           (and (pair? b) (ev-same-part? (car a) (car b)) (ev-same-part? (cdr a) (cdr b))))
           ((string? a) (and (string? b) (string=? a b)))
-          (else #f))))
+          ((f64? a) (ev-same-part? a b))
+          (else
+            (typecase a
+              (sum o
+                (tagcase o
+                  (o-vec (xs)
+                    (typecase b
+                      (sum p (tagcase p
+                               (o-vec (ys) (and (= (array-length xs) (array-length ys))
+                                                (ev-same-elements? xs ys (- (array-length xs) 1))))
+                               (else y #f)))
+                      (else #f)))
+                  (else y #f)))
+              (else #f))))))
 
-;; The interned value of `is` that `c` is, or none.
-(define ev-interned-as (->* (vals val) vals)
-  (lambda (is c)
-    (cond ((null? is) nil)
-          ((ev-same-datum? (car is) c) (the vals (cons (car is) nil)))
-          (else (ev-interned-as (cdr is) c)))))
+;; The entry of `es` that is `c`, of hash `h`, or none.
+(define ev-entry-of (->* (ev-entries val int) ev-entries)
+  (lambda (es c h)
+    (cond ((null? es) nil)
+          ((and (= (car (car es)) h) (ev-same-datum? (cdr (car es)) c)) es)
+          (else (ev-entry-of (cdr es) c h)))))
+;; Entries `es` into buckets `bs`.
+(define ev-rebucket! (->* (ev-entries (arrayof ev-entries @v)) unit)
+  (lambda (es bs)
+    (if (null? es)
+        #u
+        (let ((i (modulo (car (car es)) (array-length bs))))
+          (begin (array-set! bs i (cons (car es) (array-ref bs i))) (ev-rebucket! (cdr es) bs))))))
+;; The table's buckets from `i` down into `bs`.
+(define ev-rebucket-all! (->* ((arrayof ev-entries @v) int (arrayof ev-entries @v)) unit)
+  (lambda (old i bs)
+    (if (< i 0) #u (begin (ev-rebucket! (array-ref old i) bs) (ev-rebucket-all! old (- i 1) bs)))))
 
-;; `c` interned: the value equal to it, or it, interned from now on.
-(define ev-intern-as (->* (val) val)
-  (lambda (c)
-    (let ((found (ev-interned-as (get ev-interned) c)))
-      (if (null? found) (begin (set ev-interned (cons c (get ev-interned))) c) (car found)))))
+;; `c`, of hash `h`, interned: the value equal to it, or it, interned from
+;; now on; with its hash.
+(define ev-intern-as (->* (val int) (pairof val int @v))
+  (lambda (c h)
+    (let* ((bs (get ev-interned))
+           (i (modulo h (array-length bs)))
+           (found (ev-entry-of (array-ref bs i) c h)))
+      (if (not (null? found))
+          (cons (cdr (car found)) h)
+          (begin
+            (array-set! bs i (cons (cons h c) (array-ref bs i)))
+            (set ev-interned-count (+ (get ev-interned-count) 1))
+            (if (> (get ev-interned-count) (* 2 (array-length bs)))
+                (let ((more (the (arrayof ev-entries @v)
+                                 (make-array (* 4 (array-length bs)) (the ev-entries nil)))))
+                  (begin (ev-rebucket-all! bs (- (array-length bs) 1) more) (set ev-interned more)))
+                #u)
+            (cons c h))))))
 
-(define ev-intern (->* (val) val)
+;; A list's pairs from `v` on, the last first, onto `acc`; and what ends
+;; it.
+(define ev-spine (->* (val (listof (pairof val val @v) @v)) (listof (pairof val val @v) @v))
+  (lambda (v acc) (if (pair? v) (ev-spine (cdr v) (cons v acc)) acc)))
+(define ev-spine-end (->* (val) val)
+  (lambda (v) (if (pair? v) (ev-spine-end (cdr v)) v)))
+;; Pairs `ps`, the last first, interned over `dh`, the rest interned with
+;; its hash: a loop down a list's spine, as the heap's, so that a long list
+;; takes no stack.
+(define ev-intern-spine
+  (->* ((listof (pairof val val @v) @v) (pairof val int @v)) (pairof val int @v))
+  (lambda (ps dh)
+    (if (null? ps)
+        dh
+        (let* ((p (car ps)) (ah (ev-interned-h (car p))) (a (car ah)) (d (car dh)))
+          (ev-intern-spine
+            (cdr ps)
+            (ev-intern-as
+              (if (and (ev-same-part? a (car p)) (ev-same-part? d (cdr p))) p (cons a d))
+              (ev-mix (ev-mix 23 (cdr ah)) (cdr dh))))))))
+;; Vector `xs`'s elements, interned, from `i`, into `ys`; the hash of all
+;; from `i` on, from `h`.
+(define ev-intern-elements! (->* ((arrayof val @v) (arrayof val @v) int int) int)
+  (lambda (xs ys i h)
+    (if (< i 0)
+        h
+        (let ((yh (ev-interned-h (array-ref xs i))))
+          (begin (array-set! ys i (car yh))
+                 (ev-intern-elements! xs ys (- i 1) (ev-mix h (cdr yh))))))))
+
+;; `v` interned, with its hash.
+(define ev-interned-h (->* (val) (pairof val int @v))
   (lambda (v)
-    (cond ((pair? v)
-           (let ((a (ev-intern (car v))) (d (ev-intern (cdr v))))
-             (ev-intern-as (if (and (ev-eq? a (car v)) (ev-eq? d (cdr v))) v (cons a d)))))
-          ((string? v) (ev-intern-as v))
-          (else v))))
+    (cond ((pair? v) (ev-intern-spine (ev-spine v nil) (ev-interned-h (ev-spine-end v))))
+          ((or (string? v) (f64? v)) (ev-intern-as v (ev-atom-hash v)))
+          (else
+            (typecase v
+              (sum o
+                (tagcase o
+                  (o-vec (xs)
+                    (let* ((n (array-length xs))
+                           (ys (the (arrayof val @v) (make-array n (the val #f))))
+                           (h (ev-intern-elements! xs ys (- n 1) 29)))
+                      (ev-intern-as
+                        (if (ev-same-elements? xs ys (- n 1)) v (the val (o-vec ys))) h)))
+                  (else y (cons v 0))))
+              (else (cons v (ev-atom-hash v))))))))
+(define ev-intern (->* (val) val) (lambda (v) (car (ev-interned-h v))))
 
 ;; How many fields `fs` has.
 (define ev-count (->* (vfields) int)

@@ -608,9 +608,41 @@ impl Verifier<'_> {
         Some(self.c.subtype(s, t))
     }
 
-    /// Whether literal `x` is of type `t`, by looking at it.
-    fn inhabits(&mut self, x: Value, t: TyId) -> bool {
-        let t = self.c.arena.resolve(t);
+    /// Whether literal `x` is of type `t`, by looking at it: a quote's
+    /// constant (TODO §229) down its list's spine in a loop, so that a long
+    /// one takes no stack, a pair being of the one pair type of a union
+    /// that has one.
+    fn inhabits(&mut self, mut x: Value, t: TyId) -> bool {
+        let mut t = self.c.arena.resolve(t);
+        loop {
+            match self.c.arena.get(t).clone() {
+                Ty::Pair(a, b, _, nil) => {
+                    if nil && x.is_null() {
+                        return true;
+                    }
+                    if !(x.is_pair() && self.inhabits(self.heap.car(x), a)) {
+                        return false;
+                    }
+                    (x, t) = (self.heap.cdr(x), self.c.arena.resolve(b));
+                    continue;
+                }
+                Ty::Union(ms) if x.is_pair() => {
+                    let pairs: Vec<TyId> = ms.iter().map(|m| self.c.arena.resolve(*m)).filter(|m| matches!(self.c.arena.get(*m), Ty::Pair(..))).collect();
+                    if let [one] = pairs[..]
+                        && ms.iter().all(|m| matches!(self.c.arena.get(self.c.arena.resolve(*m)), Ty::Pair(..) | Ty::Base(_) | Ty::Nil | Ty::False | Ty::Nat(_)))
+                    {
+                        t = one;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            return self.inhabits_here(x, t);
+        }
+    }
+
+    /// Whether literal `x` is of type `t`, its pairs to `inhabits`.
+    fn inhabits_here(&mut self, x: Value, t: TyId) -> bool {
         match self.c.arena.get(t).clone() {
             Ty::Nat(Size::Finite) => x.is_fixnum() && x.as_fixnum() >= 0,
             Ty::Nat(s) => x.is_fixnum() && s.as_lit() == Some(x.as_fixnum()),
@@ -618,12 +650,16 @@ impl Verifier<'_> {
             Ty::Nil => x.is_null(),
             Ty::Union(ms) => ms.iter().any(|m| self.inhabits(x, *m)),
             Ty::AllOf(ms) => ms.iter().all(|m| self.inhabits(x, *m)),
-            Ty::Pair(a, b, _, nil) => (nil && x.is_null()) || (x.is_pair() && self.inhabits(self.heap.car(x), a) && self.inhabits(self.heap.cdr(x), b)),
+            Ty::Pair(..) => self.inhabits(x, t),
             _ if t == self.c.int => x.is_fixnum(),
             // `string`, by name: `(stringof const)` is made as one too.
             Ty::Base(b) if Some(b) == self.c.arena.string_sym => self.heap.is_a(x, ObjType::String),
             // A scalar by its name: `f64` the flat names is the base type.
             Ty::Base(b) if self.c.interner.name(b) == "f64" => self.heap.is_a(x, ObjType::Flonum),
+            // A datum's vector and keyword, by their names: what a quote's
+            // constant holds.
+            Ty::Base(b) if self.c.interner.name(b) == "vector" => self.heap.is_a(x, ObjType::Vector),
+            Ty::Base(b) if self.c.interner.name(b) == "keyword" => self.heap.is_keyword(x),
             _ if t == self.c.bool_ => x.is_boolean(),
             _ if t == self.c.char_ => x.is_char(),
             _ if t == self.c.unit => self.symbol_named(x, "#u"),

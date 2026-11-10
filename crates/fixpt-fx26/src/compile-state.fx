@@ -406,47 +406,12 @@
       (e-with (m body a b abk abkr) (c-fx-name m body))
       (else y ""))))
 
-;; Whether `f` names the standard `name`, as the quote rewrite writes it:
-;; plainly, or through `#%fx`.
-(define c-quote-names? (->* (exp string) bool)
-  (lambda (f name)
-    (tagcase f
-      (e-var (n a b abk abkr) (string=? (symbol->string n) name))
-      (e-with (m body a b abk abkr) (string=? (c-fx-name m body) name))
-      (else y #f))))
-;; The datum a quote builds (`%quote`'s argument, which only the quote
-;; rewrite makes: `quoted` in `parser.fx`), as a constant's cell, made
-;; once, where it is made of literals and symbols: `cons` and `nil` here
-;; are the standard ones, by how the rewrite wrote them. A string, a float
-;; or a vector in it, not yet: built as written. As the Rust compiler's
-;; `quoted_value`. None, or one.
-(define c-quoted-cell
-  (->* (exp) (listof wcell @k))
-  (lambda (x)
-    (tagcase x
-      (e-int (n a b abk abkr) (cons (wcell-int n) nil))
-      (e-bool (v a b abk abkr) (cons (wcell-bool v) nil))
-      (e-char (v a b abk abkr) (cons (wcell-char v) nil))
-      (e-sym (s a b abk abkr) (cons (wcell-symbol s) nil))
-      (e-the (d body a b abk abkr) (c-quoted-cell body))
-      (e-var (n a b abk abkr) (if (string=? (symbol->string n) "nil") (cons (wcell-nil) nil) nil))
-      (e-with (m body a b abk abkr)
-              (if (string=? (c-fx-name m body) "nil") (cons (wcell-nil) nil) nil))
-      (e-app (f args a b abk abkr)
-        (if (and (c-quote-names? f "cons") (= (c-count-exps args) 2))
-            (let ((h (c-quoted-cell (car args))) (t (c-quoted-cell (car (cdr args)))))
-              (if (or (null? h) (null? t)) nil (cons (wcell-pair (car h) (car t)) nil)))
-            nil))
-      (else y nil))))
-
-;; `(%quote arg)`'s datum, made now and interned (`wcell-interned`), where
-;; it is all literals: the one object equal to it, at every copy of the
-;; quote and every quote of it. As the Rust compiler's `quote_now`.
-(define c-quote-now
-  (->* (exp) (listof wcell @k))
-  (lambda (arg)
-    (let ((made (c-quoted-cell arg)))
-      (if (null? made) nil (cons (wcell-interned (car made)) nil)))))
+;; A quote's constant, `e-quote`'s `x`, as a constant's cell, made now and
+;; interned (`wcell-interned`): the one object equal to it, at every copy
+;; of the quote and every quote of it (TODO §229). As the Rust compiler's
+;; `quote_value`.
+(define c-quote-cell (->* (syn) wcell)
+  (lambda (x) (wcell-interned (wcell-datum (exp-quote-datum x)))))
 
 ;; The value `p` picks of the module pushed: its value `k`, or value `j` of
 ;; the module that is its value `k`.

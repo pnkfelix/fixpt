@@ -593,7 +593,7 @@
               (let ((inner (r-loop-names e bs)))
                 (or (r-collects body inner this tail) (r-collects-joins bs inner this)))
               #t))
-        (e-sym (v a b abk abkr) #f) (e-unit (a b abk abkr) #f)
+        (e-sym (v a b abk abkr) #f) (e-quote (v a b abk abkr) #f) (e-unit (a b abk abkr) #f)
         ;; A closure made as the value: its call-out may collect, but nothing
         ;; is used after it (`r-lambda`); past `register-regs` free values,
         ;; though, they are a call-out's operands, made in a frame.

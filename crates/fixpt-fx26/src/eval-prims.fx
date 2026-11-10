@@ -24,7 +24,7 @@
 (import values apply-val apply1 as-array as-bool as-bytes ev-preempt-set! as-char as-cont as-f32
         as-f64 as-int as-key as-keyword as-other as-pair as-ref as-str as-sym as-tag efail
         efail-expected
-        ev-arg as-mstr ev-eq? ev-intern list->val the-unit val->vals vals->val)
+        ev-arg as-mstr ev-eq? list->val the-unit val->vals vals->val)
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include tables) (include check-types))
 
@@ -192,8 +192,7 @@
       (prim! 'error (lambda (xs) (efail (as-str (ev-arg xs 0)))))
       (prim! 'assert (lambda (xs) (if (as-bool (ev-arg xs 0)) the-unit (efail "assertion failed"))))
       (prim! 'assume
-             (lambda (xs) (if (as-bool (ev-arg xs 0)) the-unit (efail "assumption not met"))))
-      (prim! '%quote (lambda (xs) (ev-intern (ev-arg xs 0)))))))
+             (lambda (xs) (if (as-bool (ev-arg xs 0)) the-unit (efail "assumption not met")))))))
 
 (define ev-symbol? (->* (val) bool)
   (lambda (v) (typecase v (symbol s #t) (sum o (tagcase o (o-unit () #t) (else y #f))) (else #f))))

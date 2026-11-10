@@ -38,7 +38,7 @@ impl Checker {
                 let module = self.interner.intern("#%toplevel");
                 self.arena.replace_exp(e, Exp::With { module, body });
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => {}
             Exp::Lambda { params, body } => {
                 let depth = bound.len();
                 bound.extend(params.iter().map(|(n, _)| *n));

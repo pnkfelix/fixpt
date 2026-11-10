@@ -102,6 +102,7 @@
         (e-float (x a b abk abkr) (begin (c-lit c (wcell-f64 x)) (c-done c tail)))
         (e-char (ch a b abk abkr) (begin (c-lit c (wcell-char ch)) (c-done c tail)))
         (e-sym (s a b abk abkr) (begin (c-lit c (wcell-symbol s)) (c-done c tail)))
+        (e-quote (x a b abk abkr) (begin (c-lit c (c-quote-cell x)) (c-done c tail)))
         (e-unit (a b abk abkr) (begin (c-lit c (wcell-unit)) (c-done c tail)))
         (e-lambda (ps body a b abk abkr)
                   (begin (c-lambda ps body e depth c nil nil) (c-done c tail)))
@@ -468,11 +469,6 @@
                         ;; In the callee's convention, as its type says
                         ;; (`c-call-conv`).
                         (c-call-in c n tail (c-call-conv f)))))
-              ;; A quoted datum (TODO §51): made once, here, where it is all
-              ;; literals; else built as written.
-              ((and (string=? standard "%quote") (= (c-count-exps args) 1)
-                    (not (null? (c-quote-now (car args)))))
-               (begin (c-lit c (car (c-quote-now (car args)))) (c-done c tail)))
               ;; In tail position, the mark replaces this frame's: a loop
               ;; that marks each iteration runs in constant space.
               ((and tail (string=? standard "with-mark"))

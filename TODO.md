@@ -5481,21 +5481,57 @@ program's own definitions (phases); contracts, checked at each expansion
 (the note's proposal); a transformer run each use is checked again each
 use, which a definition's compiled transformer kept would not need.
 
-## 229. A quoted list's length is how deep every phase recurses (found 2026-11-09)
+## 229. ~~A quoted list's length is how deep every phase recurses~~ (found and done 2026-11-09)
 
-Both parsers rewrite `'(a b c …)` as `(cons a (cons b (cons c … nil)))`
-(`Checker::quoted`, `quoted` in `parser.fx`), so a list of n elements is
-calls nested n deep: in the parsers, the checkers, the lowering, the
-evaluator and every compiler. `macros-kernel.fx`'s reserved words, 115
-long, were the deepest stack in checking the front end (`debug_stack`'s
-report, `docs/research/debugging.md`); a list of some thousands overflows a
-release build's stack. Not a frame to make smaller: a representation.
-Options: `(list a b c …)` (one call, flat, `list` being a `vsubr`; a dotted
-tail through `append`), or a constant node of its own, typed `datum` with no
-look inside (a quote that unquotes nothing is a constant, which the
-compilers intern already). Undecided: the user's.
+Both parsers rewrote `'(a b c …)` as `(cons a (cons b (cons c … nil)))`, so
+a list of n elements was calls nested n deep in every phase. A list of
+some thousands overflowed a release build's stack. The user's decision: a
+constant node of its own. A quoted list, dotted list or vector, and each
+part of a quasiquote no unquote reaches, is now one leaf, `(%datum x)`
+(`Exp::Quote`, `e-quote`). It is typed the standard `(listof datum
+acyclic)` for a proper list and the standard `datum` otherwise, whatever
+the program binds those names to, and each compiler makes it once,
+interned. `%quote` is gone. The heap's `intern_datum` and the walks the
+FX-26 code makes over a constant loop down a list's spine. A bignum or
+ratio in a quoted list or vector is refused, as a bytevector was. Test:
+`datum/quote-constant.fx`, a list of 3000.
+
+The evaluator written in FX-26 interned into a list it searched, so a
+long quote cost it quadratic time (80 s for 50 000). It now interns into
+a table hashed by a datum's interned parts, as the heap does (0.4 s).
+
+Left: the datum boundary for procedural transformers (§228) can hand these
+constants over as they are.
 
 Left from the stack work: the methods `frame-debt.txt` lists, the recursive
 first (`sub_rules`, `show_ty_body`, `unify`, `module_items_from`,
 `synth_module_items`); and the checker written in FX-26, whose depth is each
 machine's.
+
+## 230. Debugging a procedural macro: what channels to give (the user's, 2026-11-09)
+
+To discuss, not decided. A transformer is a pure subroutine from datum to
+datum (§228): no I/O, no global state it may write, and its input a
+datum, so there is no 3-D syntax either. Every way a Schemer would see a
+transformer's intermediate steps, or just print while debugging one, is
+refused by the types and effects. That is coherent, which is good, but it
+is frustrating to use. The options are open: something outside the
+transformer that the expander does (a trace of each call's input and
+output datum, say, behind a flag), an effect that only a debugging build
+grants, a transformer returning its notes beside its output, or something
+else. No shape is chosen yet.
+
+## 231. Catching obvious macro mistakes, a transformer that never ends (the user's, 2026-11-09)
+
+To discuss, not decided. An `sc-macro-transformer` can easily return its
+input `expr` as it is. The expander then expands the same form again,
+forever. Ruling out "the output contains the input" is too strong:
+`` `(quote ,expr) `` puts `expr` in the output legitimately, since it is
+quoted there and not expanded again. Whether `expr` appears is not the
+question; the question is whether it appears again *in a position that
+gets expanded*, unchanged, under the same macro. Ideas to weigh: noticing,
+at expansion time, a use whose expansion is the use itself (or comes back
+to it) and saying so where the macro is used and defined; a depth or fuel
+limit with a message that names the macro; or something static over the
+transformer's body. Either way, the message should name the mistake, not
+just an exhausted stack.

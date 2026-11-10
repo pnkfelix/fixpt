@@ -23,7 +23,8 @@
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
-       (table-types (load-module "fx26:table-types.fx")))
+       (table-types (load-module "fx26:table-types.fx"))
+       (eager-reader-types ((proj (load-module "fx26:eager-reader-types.fx") @s @e @m @c))))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-subst (select check-subst-types check-subst-sig))
@@ -37,7 +38,8 @@
            (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 (hide (include check-resolve-types) (include check-types-types) (include check-modorder-types)
-      (include parser-types) (include check-subst-types) (include check-subtype-types))
+      (include parser-types) (include check-subst-types) (include check-subtype-types)
+      (include eager-reader-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-subst) (include check-env) (include check-syntax)
@@ -196,6 +198,7 @@
       (e-var (s a b abk abkr) a) (e-int (n a b abk abkr) a) (e-bool (v a b abk abkr) a)
       (e-str (v a b abk abkr) a)
       (e-char (v a b abk abkr) a) (e-float (v a b abk abkr) a) (e-sym (v a b abk abkr) a)
+      (e-quote (v a b abk abkr) a)
       (e-unit (a b abk abkr) a)
       (e-lambda (ps x a b abk abkr) a) (e-app (f xs a b abk abkr) a)
       (e-plambda (bs x a b abk abkr) a)
@@ -214,6 +217,7 @@
       (e-var (s a b abk abkr) b) (e-int (n a b abk abkr) b) (e-bool (v a b abk abkr) b)
       (e-str (v a b abk abkr) b)
       (e-char (v a b abk abkr) b) (e-float (v a b abk abkr) b) (e-sym (v a b abk abkr) b)
+      (e-quote (v a b abk abkr) b)
       (e-unit (a b abk abkr) b)
       (e-lambda (ps x a b abk abkr) b) (e-app (f xs a b abk abkr) b)
       (e-plambda (bs x a b abk abkr) b)
@@ -231,7 +235,9 @@
     (tagcase e
       (e-var (s a b abk abkr) abk) (e-int (n a b abk abkr) abk) (e-bool (v a b abk abkr) abk)
       (e-str (v a b abk abkr) abk) (e-char (v a b abk abkr) abk) (e-float (v a b abk abkr) abk)
-      (e-sym (v a b abk abkr) abk) (e-unit (a b abk abkr) abk) (e-lambda (ps x a b abk abkr) abk)
+      (e-sym (v a b abk abkr) abk)
+      (e-quote (v a b abk abkr) abk) (e-unit (a b abk abkr) abk)
+      (e-lambda (ps x a b abk abkr) abk)
       (e-app (f xs a b abk abkr) abk) (e-plambda (bs x a b abk abkr) abk)
       (e-proj (x ds a b abk abkr) abk)
       (e-if (p c d a b abk abkr) abk) (e-letrec (bs x a b abk abkr) abk)
@@ -244,13 +250,38 @@
       (e-tagcase (x arms els got a b abk abkr) abk) (e-letregion (k r i x a b abk abkr) abk)
       (e-rlambda (r l a b abk abkr) abk) (e-module (items a b abk abkr) abk)
       (e-with (m x a b abk abkr) abk))))
+;; A quote's constant, `e-quote`'s `x`, as data: `#t` and `#f` the booleans
+;; the reader leaves as symbols in it. What each compiler and the evaluator
+;; make once, interned (TODO §229); as `Compiler::datum_value`.
+(define-rec
+  (exp-quote-datum (->* (syn) datum)
+    (lambda (x)
+      (tagcase x
+        (atom (d a b xpn)
+          (cond ((not (symbol? d)) d)
+                ((string=? (symbol->string d) "#t") #t)
+                ((string=? (symbol->string d) "#f") #f)
+                (else d)))
+        (lst (items d a b xpn) (datum-list (exp-quote-datums items)))
+        (dotted (items tail d a b xpn)
+          (datum-dotted (exp-quote-datums items) (exp-quote-datum tail)))
+        (vec (items d a b xpn) (datum-list->vector (datum-list (exp-quote-datums items)))))))
+  (exp-quote-datums (->* ((listof syn acyclic)) (listof datum acyclic))
+    (lambda (xs) (reverse (exp-quote-onto xs nil))))
+  ;; `xs`'s data, the last first, onto `acc`: a loop, so that a long list
+  ;; takes no stack.
+  (exp-quote-onto (->* ((listof syn acyclic) (listof datum acyclic)) (listof datum acyclic))
+    (lambda (xs acc)
+      (if (null? xs) acc (exp-quote-onto (cdr xs) (cons (exp-quote-datum (car xs)) acc))))))
 ;; The reading `e` was numbered in (`parser-ids.fx`).
 (define exp-reading (->* (exp) int)
   (lambda (e)
     (tagcase e
       (e-var (s a b abk abkr) abkr) (e-int (n a b abk abkr) abkr) (e-bool (v a b abk abkr) abkr)
       (e-str (v a b abk abkr) abkr) (e-char (v a b abk abkr) abkr) (e-float (v a b abk abkr) abkr)
-      (e-sym (v a b abk abkr) abkr) (e-unit (a b abk abkr) abkr) (e-lambda (ps x a b abk abkr) abkr)
+      (e-sym (v a b abk abkr) abkr)
+      (e-quote (v a b abk abkr) abkr) (e-unit (a b abk abkr) abkr)
+      (e-lambda (ps x a b abk abkr) abkr)
       (e-app (f xs a b abk abkr) abkr) (e-plambda (bs x a b abk abkr) abkr)
       (e-proj (x ds a b abk abkr) abkr)
       (e-if (p c d a b abk abkr) abkr) (e-letrec (bs x a b abk abkr) abkr)

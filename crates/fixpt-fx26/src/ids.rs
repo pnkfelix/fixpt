@@ -403,7 +403,7 @@ pub(crate) fn parents(c: &Checker) -> HashMap<ExpId, ExpId> {
 /// (`sexp::show_top`, and the parser's datatypes in `parser-types.fx`).
 fn within(c: &Checker, e: ExpId) -> Vec<ExpId> {
     match c.arena.exp_at(e) {
-        Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => Vec::new(),
+        Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => Vec::new(),
         Exp::Lambda { body, .. } | Exp::PLambda { body, .. } | Exp::LetRegion { body, .. } | Exp::Proj { body, .. } => vec![*body],
         Exp::App { fun, args } => std::iter::once(*fun).chain(args.iter().copied()).collect(),
         Exp::RLambda { region, lambda } => vec![*region, *lambda],

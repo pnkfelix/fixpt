@@ -2025,23 +2025,9 @@ impl Checker {
             "extract" => self.parse_extract_form(span, items),
             "sum" => self.parse_sum_form(span, items),
             "tagcase" => self.parse_tagcase(span, &items[1..]),
-            "quote" => match &items[..] {
-                [_, x] if x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
-                [_, x] => {
-                    Self::no_bytevector(x)?;
-                    let built = self.quoted(x, None);
-                    self.parse_exp(&built)
-                }
-                _ => Err(FxError::at(span, "`(quote datum)`")),
-            },
-            "quasiquote" => match &items[..] {
-                [_, x] => {
-                    Self::no_bytevector(x)?;
-                    let built = self.quoted(x, Some(1));
-                    self.parse_exp(&built)
-                }
-                _ => Err(FxError::at(span, "`(quasiquote datum)`")),
-            },
+            "quote" => self.parse_quote_form(span, items, None),
+            "%datum" => self.parse_datum_form(span, items),
+            "quasiquote" => self.parse_quote_form(span, items, Some(1)),
             form @ ("letregion" | "letfreeze" | "letrena" | "letreap") => {
                 let form = form.to_string();
                 self.parse_letregion_form(span, items, &form)
@@ -4203,20 +4189,80 @@ impl Checker {
     pub(crate) fn quoted(&mut self, x: &Syntax, depth: Option<u32>) -> Syntax {
         let built = self.quoted_in(x, depth);
         match &x.datum {
-            Datum::List { .. } | Datum::Vector(_) | Datum::Bytevector(_) if !matches!(self.unquoted(x, depth), Some(_)) => {
+            Datum::List { .. } | Datum::Vector(_) | Datum::Bytevector(_) if self.unquoted(x, depth).is_none() => {
                 let the = self.named(x.span, "the");
                 let datum = self.named(x.span, "datum");
-                // A quote's, not a quasiquote's, marked (`%quote`):
-                // everything in it the rewrite's, made once where it is all
-                // literals.
-                let built = if depth.is_none() {
-                    self.call(x.span, "%quote", vec![built])
-                } else {
-                    built
-                };
                 Syntax::list(x.span, vec![the, datum, built])
             }
             _ => built,
+        }
+    }
+
+    /// `(quote x)`, `depth` none, or `(quasiquote x)`, `depth` 1, of
+    /// `parse_exp`: what builds `x` (`quoted`).
+    fn parse_quote_form(&mut self, span: fixpt_read::Span, items: &[Syntax], depth: Option<u32>) -> R<ExpId> {
+        match items {
+            [_, x] if depth.is_none() && x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
+            [_, x] => {
+                Self::no_bytevector(x)?;
+                let built = self.quoted(x, depth);
+                self.parse_exp(&built)
+            }
+            _ if depth.is_none() => Err(FxError::at(span, "`(quote datum)`")),
+            _ => Err(FxError::at(span, "`(quasiquote datum)`")),
+        }
+    }
+
+    /// `(%datum x)`: list or vector `x` as a constant (`parse_datum_form`).
+    fn datum_node(&mut self, x: &Syntax) -> Syntax {
+        let d = self.named(x.span, "%datum");
+        Syntax::list(x.span, vec![d, x.clone()])
+    }
+
+    /// `(%datum x)`, which the quote rewrites make of a list or vector
+    /// (`quoted_in`): one constant, made once and interned, not a `cons`
+    /// at each pair, so that no phase recurses as deep as the list is long
+    /// (TODO §229). Of the standard `(listof datum acyclic)` if `x` is a
+    /// proper list, else of the standard `datum`, whatever the program
+    /// binds those names to. As `datum-form` in `parser-forms.fx`.
+    fn parse_datum_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let usage = "`(%datum list-or-vector)`";
+        let [_, x] = items else {
+            return Err(FxError::at(span, usage));
+        };
+        let proper = match &x.datum {
+            Datum::List { items, tail } if !items.is_empty() => tail.is_none(),
+            Datum::Vector(_) => false,
+            _ => return Err(FxError::at(x.span, usage)),
+        };
+        Self::no_bytevector(x)?;
+        Self::constant_atoms(x)?;
+        let ty = if proper {
+            let (l, d, a) = (self.named(span, "listof"), self.named(span, "datum"), self.named(span, "acyclic"));
+            Syntax::list(span, vec![l, d, a])
+        } else {
+            self.named(span, "datum")
+        };
+        let outer = self.hidden.replace(((self.standard_len, self.env.len()), (self.standard_dscope, self.dscope.len())));
+        let ty = self.parse_type(&ty);
+        self.hidden = outer;
+        Ok(self.arena.exp(span, Exp::Quote { datum: std::sync::Arc::new(x.clone()), ty: ty? }))
+    }
+
+    /// Whether each number in constant `x` is one every compiler makes: an
+    /// integer a fixnum, or a float; no ratio. As `constant-atoms` in
+    /// `parser-exps.fx`.
+    fn constant_atoms(x: &Syntax) -> R<()> {
+        match &x.datum {
+            Datum::Number(fixpt_read::Num::Int(n)) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => Ok(()),
+            Datum::Number(fixpt_read::Num::Real(_)) => Ok(()),
+            Datum::Number(_) => Err(FxError::at(x.span, "an integer past a fixnum, or a ratio, cannot be quoted in a list or vector yet")),
+            Datum::List { items, tail } => {
+                items.iter().try_for_each(Self::constant_atoms)?;
+                tail.as_deref().map_or(Ok(()), Self::constant_atoms)
+            }
+            Datum::Vector(items) => items.iter().try_for_each(Self::constant_atoms),
+            _ => Ok(()),
         }
     }
 
@@ -4308,11 +4354,12 @@ impl Checker {
         if let Some(e) = self.unquoted(x, depth) {
             return e.clone();
         }
-        // Under a quasiquote, a list or vector no unquote reaches is a
-        // constant: a quote, made once (`%quote`).
-        if depth.is_some() && matches!(x.datum, Datum::List { .. } | Datum::Vector(_)) && self.unquote_free(x, depth) {
-            let built = self.quoted_in(x, None);
-            return self.call(span, "%quote", vec![built]);
+        // A list or vector a quote makes, or no unquote of a quasiquote
+        // reaches, is a constant (`%datum`).
+        if matches!(&x.datum, Datum::List { items, .. } if !items.is_empty()) || matches!(x.datum, Datum::Vector(_)) {
+            if depth.is_none() || self.unquote_free(x, depth) {
+                return self.datum_node(x);
+            }
         }
         match &x.datum {
             Datum::Symbol(s) => match self.name(*s) {
@@ -4337,11 +4384,10 @@ impl Checker {
                     }
                 }
                 // `nil` at the list, each `cons` from its item, a constant
-                // suffix's `%quote` from its first item to the end.
+                // suffix one `%datum` from its first item to the end.
                 let mut acc = if k < items.len() {
-                    let rest = Syntax::new(span, Datum::List { items: items[k..].to_vec(), tail: tail.clone() });
-                    let built = self.quoted_in(&rest, None);
-                    self.call(fixpt_read::Span { start: items[k].span.start, ..span }, "%quote", vec![built])
+                    let rest = Syntax::new(fixpt_read::Span { start: items[k].span.start, ..span }, Datum::List { items: items[k..].to_vec(), tail: tail.clone() });
+                    self.datum_node(&rest)
                 } else {
                     match tail {
                         Some(t) => self.quoted_in(t, depth),

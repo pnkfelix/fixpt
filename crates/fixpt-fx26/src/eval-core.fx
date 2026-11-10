@@ -19,7 +19,8 @@
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
        (check-types-types (load-module "fx26:check-types-types.fx"))
-       (check-subst-types (load-module "fx26:check-subst-types.fx")))
+       (check-subst-types (load-module "fx26:check-subst-types.fx"))
+       (eager-reader-types ((proj (load-module "fx26:eager-reader-types.fx") @s @e @m @c))))
   ;; What it is given: the evaluator's values and primitives, and the
   ;; checker's environment (`check-env.fx`) and resolution (`check-resolve.fx`).
   ;; And the reader's and the parser's entries, for `stage` (`ev-stage`).
@@ -35,7 +36,8 @@
                         (select parser-types keyed))))
     (module
 (hide (include eval-types) (include parser-types) (include check-env-types)
-      (include check-resolve-types) (include check-types-types) (include check-subst-types))
+      (include check-resolve-types) (include check-types-types) (include check-subst-types)
+      (include eager-reader-types))
 ;; What the code read here (`stage`'s, a session's forms) is numbered by
 ;; (`parser-types.fx`'s `keys`): in `path`, by the parser's count, which
 ;; the program's own forms were numbered by too, so that no fact of the
@@ -46,7 +48,7 @@
 (define ev-keys keys (product (1 0) (2 0) (3 "")))
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 ev-poll as-bool as-fields as-other as-str as-tag efail
-        efail-expected ev-eq? eval-tag show-val the-unit)
+        efail-expected ev-eq? eval-tag show-val the-unit ev-intern)
 (import prims prim! standard)
 (import bloblets ev-bloblet ev-bref ev-blobref ev-flat-tag ev-label-is?)
 ;; What it uses of the modules it is given: all of each, hidden.
@@ -342,6 +344,32 @@
           (module-values (cdr items) e
                          (if (or (= k 2) (= k 3)) (rec-values (extract (car items) 2) e vs) vs))))))
 
+;; A quote's constant, `e-quote`'s `x`, as values, which `cons`es built
+;; before it was one (TODO §229): `#t` and `#f` the booleans the reader
+;; leaves as symbols in it (`exp-quote-datum`).
+(define ev-atom (->* (datum) val)
+  (lambda (d)
+    (cond ((int? d) d) ((f64? d) d) ((char? d) d) ((bool? d) d) ((string? d) d)
+          ((symbol? d) d) ((keyword? d) d) (else nil))))
+(define-rec
+  (ev-constant (->* (syn) val)
+    (lambda (x)
+      (tagcase x
+        (atom (d a b xpn) (ev-atom (exp-quote-datum x)))
+        (lst (items d a b xpn) (ev-vals-onto (ev-constants-rev items nil) nil))
+        (dotted (items tail d a b xpn)
+          (ev-vals-onto (ev-constants-rev items nil) (ev-constant tail)))
+        (vec (items d a b xpn)
+          (the val (o-vec (list->array (reverse (ev-constants-rev items nil)))))))))
+  ;; `xs`'s values, the last first, onto `acc`: a loop, so that a long list
+  ;; takes no stack.
+  (ev-constants-rev (->* ((listof syn acyclic) (listof val @v)) (listof val @v))
+    (lambda (xs acc)
+      (if (null? xs) acc (ev-constants-rev (cdr xs) (cons (ev-constant (car xs)) acc))))))
+;; Values `rev`, the last first, as a list onto `tail`.
+(define ev-vals-onto (->* ((listof val @v) val) val)
+  (lambda (rev tail) (if (null? rev) tail (ev-vals-onto (cdr rev) (cons (car rev) tail)))))
+
 (define open-letrec (->* (exp-letrec-bs env) env)
   (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (bind1 (extract (car bs) 1) the-unit e)))))
 
@@ -380,6 +408,7 @@
         (e-char (c a b abk abkr) c)
         (e-float (x a b abk abkr) x)
         (e-sym (s a b abk abkr) s)
+        (e-quote (v a b abk abkr) (ev-intern (ev-constant v)))
         (e-unit (a b abk abkr) the-unit)
         ;; A closure: the host's procedure of its arguments.
         (e-lambda (ps body a b abk abkr) (lambda ((xs vals)) (eval body (bind ps xs e))))

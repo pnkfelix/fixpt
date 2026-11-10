@@ -423,7 +423,7 @@ impl Walk<'_> {
                     self.escapes.get_or_insert((self.current, m));
                 }
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => {}
             Exp::App { fun, args } => {
                 let callee = self.member_named(strip(self.c, fun));
                 match callee {

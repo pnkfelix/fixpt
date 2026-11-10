@@ -112,7 +112,7 @@ impl Compiler<'_> {
     fn plan_exp(&mut self, x: ExpId, e: &Env, tail: bool, plan: &mut Plan) {
         let tail = tail && self.c.facts.conversion_code(x).is_none() && !self.c.facts.reshaped.contains_key(&x);
         match self.exp_at(x).clone() {
-            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
+            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => {}
             Exp::Lambda { params, body } => {
                 let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
                 self.plan_lambda(&ps, body, e, None, plan);

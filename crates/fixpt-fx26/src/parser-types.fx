@@ -60,6 +60,9 @@
   (e-char char int int int int)
   (e-float f64 int int int int)
   (e-sym symbol int int int int)
+  ;; A quoted list or vector, `(%datum x)`, as the quote rewrites make it:
+  ;; one constant, made once and interned (TODO §229).
+  (e-quote syn int int int int)
   (e-unit int int int int)
   (e-lambda (listof (productof (1 symbol) (2 syns-a)) acyclic) exp int int int int)
   (e-app exp (listof exp acyclic) int int int int)

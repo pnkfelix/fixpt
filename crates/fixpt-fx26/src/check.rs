@@ -2748,6 +2748,7 @@ impl Checker {
             Exp::Char(_) => Ok((self.char_, Effect::pure())),
             Exp::Float(_) => Ok((self.f64_, Effect::pure())),
             Exp::Symbol(_) => Ok((self.symbol, Effect::pure())),
+            Exp::Quote { ty, .. } => Ok((ty, Effect::pure())),
             Exp::Unit => Ok((self.unit, Effect::pure())),
             Exp::Lambda { .. } => self.synth_lambda(e, None),
             Exp::RLambda { region, lambda } => self.synth_rlambda(e, region, lambda, None),
@@ -3340,7 +3341,7 @@ impl Checker {
                     out.push(s);
                 }
             }
-            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => {}
+            Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Quote { .. } | Exp::Unit => {}
             Exp::Lambda { params, body } => {
                 let depth = bound.len();
                 bound.extend(params.iter().map(|(n, _)| *n));

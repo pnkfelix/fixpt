@@ -66,12 +66,26 @@ impl Heap {
     /// itself (or, of a pair or vector whose parts were not interned, a
     /// copy over the interned parts), interned from now on.
     pub fn intern_datum(&mut self, v: Value) -> Value {
+        // A list's spine in a loop, last pair first, so that a long list
+        // takes no stack (TODO §229); only nesting in the cars recurses.
+        if v.is_pair() {
+            let mut spine = Vec::new();
+            let mut p = v;
+            while p.is_pair() {
+                spine.push(p);
+                p = self.cdr(p);
+            }
+            let mut d = self.intern_datum(p);
+            for &pair in spine.iter().rev() {
+                let (a, old_d) = (self.car(pair), self.cdr(pair));
+                let ia = self.intern_datum(a);
+                let candidate = if ia == a && d == old_d { pair } else { self.cons(ia, d) };
+                d = self.intern_one(candidate);
+            }
+            return d;
+        }
         let candidate = if self.is_keyword(v) {
             v
-        } else if v.is_pair() {
-            let (a, d) = (self.car(v), self.cdr(v));
-            let (ia, id) = (self.intern_datum(a), self.intern_datum(d));
-            if ia == a && id == d { v } else { self.cons(ia, id) }
         } else {
             match self.obj_type(v) {
                 Some(ObjType::String | ObjType::Flonum) => v,
@@ -83,6 +97,12 @@ impl Heap {
                 _ => return v,
             }
         };
+        self.intern_one(candidate)
+    }
+
+    /// `candidate`, its parts interned already: the interned object equal
+    /// to it, or, if none, itself, interned from now on.
+    fn intern_one(&mut self, candidate: Value) -> Value {
         let t = self.interned_table();
         let h = self.datum_hash(candidate);
         let buckets = self.obj_ref(t, BUCKETS);

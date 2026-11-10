@@ -14,7 +14,7 @@
 (import compile-exps-types (type c-spec c-twin c-waits))
 (define-type cenv (select compile-types cenv))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(import parser-types (type exp mod-items))
+(import parser-types (type exp mod-items syn))
 (import compile-types (type patches syms))
 ;; The types it names, from the files that define them.
 (import compile-types (type c-this code exps))
@@ -81,10 +81,7 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (symbol exp) string))
             (val c-standard-name
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp cenv) string))
-            (val c-quote-now
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (exp)
-                       (listof wcell @k)))
+            (val c-quote-cell (subr pure (syn) wcell))
             (val c-push-all
                  (subr (maxeff (alloc @k)
                                (goto @y)

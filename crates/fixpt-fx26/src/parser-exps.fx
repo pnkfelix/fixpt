@@ -18,17 +18,18 @@
 ;; what this file uses of them.
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
-(import forms-module process-form given-form processes input-items item-form? run-item run-count)
+(import forms-module process-form given-form processes input-items item-form? run-item run-count
+        datum-form)
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type data syn))
 (define syn->datum (with parser-module syn->datum))
 (import parser-module parse-tag syn-start syn-end pfail pfail-at syn-symbol? syn-name syn-head
         syn-symbol syn-items len nth drop label keep arity big-literal mod-item-of with-includes
         any-include? hide-forms hide-form? hidden-marks item-in-includes datatype? expand-datatype
-        import? expand-import e-var e-int e-bool e-str e-char e-float e-sym e-unit e-lambda e-app
-        e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the kw-sum
-        e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-exp
-        p-ok p-err sym-true sym-false sym-unit at-least vlambda-usage stage-usage parse-vparam
+        import? expand-import e-var e-int e-bool e-str e-char e-float e-sym e-quote e-unit e-lambda
+        e-app e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the
+        kw-sum e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define
+        t-exp p-ok p-err sym-true sym-false sym-unit at-least vlambda-usage stage-usage parse-vparam
         region-form? confirm-length-k bloblet-form? syn-string? syn-string parse-params freeze-pair
         region-kind region-name-error one-let call-tmp standard-ref field-index bloblet-untagged?
         arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol mk-list quoted
@@ -400,13 +401,11 @@
                 (let ((scrutinee (parse-exp (nth items 1))) (arms (drop items 2)))
                   (e-tagcase scrutinee (parse-arms arms) (parse-else arms) nil a b 0 0))))
         ((quote)
-         (begin (arity items 2 "`(quote datum)`" a b)
-                (if (syn-symbol? (nth items 1))
-                    (e-sym (syn-symbol (nth items 1)) a b 0 0)
-                    (parse-exp (quoted (nth items 1) -1)))))
+         (let ((x (begin (arity items 2 "`(quote datum)`" a b) (nth items 1))))
+           (if (syn-symbol? x) (e-sym (syn-symbol x) a b 0 0) (parse-exp (quoted x -1)))))
+        ((%datum) (e-quote (datum-form pfail-at items a b) a b 0 0))
         ((quasiquote)
-         (begin (arity items 2 "`(quasiquote datum)`" a b)
-                (parse-exp (quoted (nth items 1) 1))))
+         (begin (arity items 2 "`(quasiquote datum)`" a b) (parse-exp (quoted (nth items 1) 1))))
         ((prompt)
          (begin (arity items 4 "`(prompt tag body handler)`" a b)
                 (e-prompt (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b 0 0)))

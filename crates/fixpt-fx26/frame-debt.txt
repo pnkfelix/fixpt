@@ -14,7 +14,7 @@ module_items_from 11608
 par_expansion 6680
 parse_case 5528
 parse_d 4472
-parse_exp 5384
+parse_exp 4680
 parse_moduleof_in 5064
 parse_process_form 6328
 parse_session_commit_form 4504
