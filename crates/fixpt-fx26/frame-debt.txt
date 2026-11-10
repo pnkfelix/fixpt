@@ -8,9 +8,9 @@ expand_abbrev 4488
 expand_datatype 9400
 expand_generative 5400
 fasl_load 5704
-import_file_macros 5608
+import_file_macros 5432
 included 4696
-module_items_from 11608
+module_items_from 11592
 par_expansion 6680
 parse_case 5528
 parse_d 4472
@@ -32,4 +32,4 @@ synth_tagcase 4728
 syscall_expansion 7360
 top_here 4936
 unify 5896
-with_convention 13792
+with_convention 13456

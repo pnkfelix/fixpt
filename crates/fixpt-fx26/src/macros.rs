@@ -64,6 +64,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 mod infer;
+pub(crate) mod shapes;
 pub(crate) mod procedural;
 
 /// A syntax type (Herman's `σ`).
@@ -143,6 +144,9 @@ pub(crate) enum Bind {
 pub(crate) enum Ring {
     Rib(Vec<(Addr, Delta)>),
     At(Addr),
+    /// What the module at an address gives (`Bind::Shape`), in a cage: a
+    /// file's module parameters, each included in its items.
+    Shape(Addr),
 }
 
 /// An address's steps from its root, first first: `true` the car.
@@ -273,6 +277,23 @@ pub struct Macros {
     /// The text being read, if it is known (`Checker::read_in`): a macro
     /// defined in it has its templates' places in it.
     pub(crate) reading: Option<std::sync::Arc<str>>,
+    /// What the expander saw of `with`s and of the modules forms open,
+    /// out of line (`Withs`): a `Macros` is moved whole.
+    pub(crate) withs: Box<Withs>,
+    /// Where each macro the program has by its name was defined: its
+    /// `define-syntax`, or the `import-with-syntax` that brought it. A
+    /// program is expanded before it is checked, so what is defined when a
+    /// form is checked may be defined after it (`defined_before`).
+    defined_at: HashMap<Sym, Span>,
+    /// Whether a template is being transcribed for its check, its holes'
+    /// calls in place of a use's expressions (`template_checks`).
+    checking: bool,
+}
+
+/// What the expander saw of `with`s, for the checkers, and the shapes it
+/// knows of the modules forms open.
+#[derive(Clone, Default)]
+pub(crate) struct Withs {
     /// By each `with` form's place, the macros used in its body by names
     /// written in the source, each with the use's place: refused there if
     /// the module gives a value of the name (`Checker::with_as`), which the
@@ -283,14 +304,8 @@ pub struct Macros {
     /// (`Checker::with_as`), which would otherwise be what it is where the
     /// macro is used, a binding there capturing it.
     pub(crate) projections: HashMap<Span, (Sym, Span)>,
-    /// Where each macro the program has by its name was defined: its
-    /// `define-syntax`, or the `import-with-syntax` that brought it. A
-    /// program is expanded before it is checked, so what is defined when a
-    /// form is checked may be defined after it (`defined_before`).
-    defined_at: HashMap<Sym, Span>,
-    /// Whether a template is being transcribed for its check, its holes'
-    /// calls in place of a use's expressions (`template_checks`).
-    checking: bool,
+    /// The shapes known (`shapes`): the top level's names', files'.
+    shapes: shapes::Known,
 }
 
 /// The kernel's tables (`macros-kernel.fx`), read once, never changed.
@@ -418,16 +433,42 @@ pub(crate) enum Atom {
 /// Each pattern variable, template binder and name referred to, by node,
 /// with its environment, whether it is in a `many` part, and how many
 /// ellipses it is under (`walk`).
-type Found = Vec<(usize, Vec<Level>, bool, usize)>;
+type Found = Vec<(usize, Env, bool, usize)>;
+
+/// An environment, innermost first, as the walk makes it: what each
+/// import added, shared, so that a part's is its parent's with its own
+/// added, not all of it made again (a module's items each bind a level).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Env(Vec<Rc<Vec<Level>>>);
+
+impl Env {
+    /// This, with `levels` inside it.
+    fn within(&self, levels: Vec<Level>) -> Env {
+        let mut out = self.clone();
+        if !levels.is_empty() {
+            out.0.push(Rc::new(levels));
+        }
+        out
+    }
+
+    /// Its levels, innermost first.
+    fn levels(&self) -> impl Iterator<Item = &Level> {
+        self.0.iter().rev().flat_map(|c| c.iter())
+    }
+
+    fn to_vec(&self) -> Vec<Level> {
+        self.levels().cloned().collect()
+    }
+}
 
 /// One level of an environment: a rib, or a pattern variable's ribcage; or,
 /// in a repeated element of a ribcage's list, what the repetitions before
 /// it bound, which its own binders' names cannot tell from its own.
 #[derive(Clone, Debug, PartialEq)]
 enum Level {
-    Rib(Vec<Atom>),
+    Rib(Rc<Vec<Atom>>),
     Cage(Sym),
-    Earlier(Vec<Atom>),
+    Earlier(Rc<Vec<Atom>>),
     /// What the module at a node gives (`Bind::Shape`), whose names a
     /// program's walk does not know yet: a name looked for past it may be
     /// one of them.
@@ -460,7 +501,13 @@ struct Aligner<'m> {
     /// reaches no part (inside a quasiquoted vector), so neither they nor
     /// a binder of their name are renamed (`alpha_renamed`).
     unplaced: Vec<Sym>,
+    /// The parts left to fill (`run`).
+    work: Vec<Step>,
 }
+
+/// A part to fill: its node, its type, its syntax, and the node its
+/// addresses are from.
+type Step = (usize, Rc<STy>, Syntax, usize);
 
 impl Macros {
     fn ensure_kernel(&mut self, interner: &mut Interner) -> R<()> {
@@ -817,7 +864,10 @@ impl Macros {
         }
         match &**self.unfold(t) {
             Union(ms) => ms.iter().any(|m| self.fits_within(m, s, mode, interner, pvars, depth)),
-            Pair(a, d) => split(s).is_some_and(|(x, y)| depth == 0 || (self.fits_within(a, &x, mode, interner, pvars, depth - 1) && self.fits_within(d, &y, mode, interner, pvars, depth - 1))),
+            Pair(a, d) => match &s.datum {
+                Datum::List { items, tail } => depth == 0 || (self.fits_within(a, &items[0], mode, interner, pvars, depth - 1) && self.fits_rest(d, items, 1, tail.as_deref(), s.span, mode, interner, pvars, depth - 1)),
+                _ => false,
+            },
             Nil => matches!(s.datum, Datum::Nil),
             Literal(n) => s.as_symbol() == Some(*n),
             Bvar | Dvar => s.as_symbol().is_some_and(|n| mode == Mode::Program || !reserved(interner.name(n))),
@@ -827,6 +877,34 @@ impl Macros {
             Lambda => lambda_shaped(s, interner),
             Defn => matches!(s.datum, Datum::List { .. }),
             Data | Type | Kind | Item => true,
+            Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
+        }
+    }
+
+    /// `fits_within` of the rest of a list, `items` from `k` on and then
+    /// `tail`, looked at where it is: a long list's rest is not made again
+    /// at each of its parts.
+    #[allow(clippy::too_many_arguments)]
+    fn fits_rest(&self, t: &Rc<STy>, items: &[Syntax], k: usize, tail: Option<&Syntax>, span: Span, mode: Mode, interner: &Interner, pvars: &HashMap<Sym, PInfo>, depth: usize) -> bool {
+        use STy::*;
+        if k == items.len() {
+            return match tail {
+                Some(t1) => self.fits_within(t, t1, mode, interner, pvars, depth),
+                None => self.fits_within(t, &Syntax::new(span, Datum::Nil), mode, interner, pvars, depth),
+            };
+        }
+        // What a pattern or template writes by ellipsis, or a lambda's
+        // shape, is read from the rest made whole (a template is small).
+        let whole = || Syntax::new(span, Datum::List { items: items[k..].to_vec(), tail: tail.map(|t| Box::new(t.clone())) });
+        if matches!(mode, Mode::Pattern | Mode::Template) {
+            return self.fits_within(t, &whole(), mode, interner, pvars, depth);
+        }
+        match &**self.unfold(t) {
+            Union(ms) => ms.iter().any(|m| self.fits_rest(m, items, k, tail, span, mode, interner, pvars, depth)),
+            Pair(a, d) => depth == 0 || (self.fits_within(a, &items[k], mode, interner, pvars, depth - 1) && self.fits_rest(d, items, k + 1, tail, span, mode, interner, pvars, depth - 1)),
+            Nil | Literal(_) | Bvar | Dvar | Id | Label => false,
+            Lambda => lambda_shaped(&whole(), interner),
+            Expr | Defn | Data | Type | Kind | Item => true,
             Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
     }
@@ -899,7 +977,7 @@ impl Macros {
                 let Level::Rib(atoms) = level else {
                     return Err(FxError::at(place(*n), format!("`{}` is in the scope of a part's ribcage: not yet where a macro's parts are typed", shown(*n, interner))));
                 };
-                for a in atoms {
+                for a in atoms.iter() {
                     let Atom::Var(b, _, _) = a else {
                         return Err(FxError::at(place(*n), format!("`{}` is in the scope of the binders a part exports: not yet where a macro's parts are typed", shown(*n, interner))));
                     };
@@ -984,7 +1062,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), projections: HashMap::new(), defined_at: HashMap::new(), checking: false };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::new(), checking: false, withs: Box::default() };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -1155,7 +1233,7 @@ impl Macros {
         // The pattern, aligned with the signature: each variable's type and
         // declared environment.
         let none = HashMap::new();
-        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new() };
+        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
         // A `syntax-rules`' literals, each a name the signature has written
         // as it is, `(literal name)`, where the pattern has it; and no other.
@@ -1172,7 +1250,7 @@ impl Macros {
             }
         }
         let mut found = Vec::new();
-        p.walk(root, &Vec::new(), false, 0, &mut found, &mut Vec::new())?;
+        p.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
         // What a use of a macro that makes definitions says it defines, if
         // its signature says (`(-> (export σ β) defn)`): what a template
         // using it sees, and what its own template is held to.
@@ -1188,7 +1266,7 @@ impl Macros {
             if depth > 0 && p.nodes[at].hole.is_some() {
                 return Err(FxError::at(p.nodes[at].syn.span, "a typed part under an ellipsis: not yet"));
             }
-            if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env, many, hole: p.nodes[at].hole.clone(), depth }).is_some() {
+            if pvars.insert(n, PInfo { core: p.nodes[at].core.clone(), declared: env.to_vec(), many, hole: p.nodes[at].hole.clone(), depth }).is_some() {
                 return Err(FxError::at(p.nodes[at].syn.span, format!("`{}` is a pattern variable twice", interner.name(n))));
             }
             // Its uses' definitions are checked where each is (the first
@@ -1202,11 +1280,11 @@ impl Macros {
         }
         // The template, an expression or definitions, aligned with the
         // kernel's forms' signatures and the macros'.
-        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new() };
+        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
         let made = if defn { STy::Defn } else if desc { STy::Type } else { STy::Expr };
         let root = t.align(&Rc::new(made), template, None, Vec::new())?;
         let (mut found, mut seqs) = (Vec::new(), Vec::new());
-        t.walk(root, &Vec::new(), false, 0, &mut found, &mut seqs)?;
+        t.walk(root, &Env::default(), false, 0, &mut found, &mut seqs)?;
         // How many ellipses each of the template's binders is under: a
         // binder repeated is made fresh in each repetition.
         let binder_depth: HashMap<usize, usize> = found.iter().filter(|f| matches!(t.nodes[f.0].kids, Kids::Binder(..))).map(|f| (f.0, f.3)).collect();
@@ -1232,7 +1310,7 @@ impl Macros {
                 Kids::PVar(n) => {
                     let info = &pvars[n];
                     let name = interner.name(*n);
-                    t.placed(*n, info, &node.core, &env, span)?;
+                    t.placed(*n, info, &node.core, &env.to_vec(), span)?;
                     if depth < info.depth {
                         return Err(FxError::at(span, format!("`{name}` is placed under {depth} ellipses, and the pattern has it under {}", info.depth)));
                     }
@@ -1269,7 +1347,7 @@ impl Macros {
                             _ => None,
                         })
                     };
-                    let bound = env.iter().find_map(|l| match l {
+                    let bound = env.levels().find_map(|l| match l {
                         Level::Rib(atoms) => binds(atoms).map(Some),
                         Level::Earlier(atoms) => binds(atoms).map(|_| None),
                         Level::Cage(_) | Level::Shape(_) => None,
@@ -1478,7 +1556,7 @@ impl Macros {
             // hygiene), in a `with`'s body.
             if items[0].span.expansion == 0 {
                 for w in withs.iter() {
-                    self.with_uses.entry(*w).or_default().push((h, items[0].span));
+                    self.withs.with_uses.entry(*w).or_default().push((h, items[0].span));
                 }
             }
             let out = self.expand_use(h, &m, s, interner)?;
@@ -1491,7 +1569,7 @@ impl Macros {
             && let (Some(m), Some(x)) = (m.as_symbol(), n.as_symbol())
             && !matches!(interner.name(m), "#%fx" | "#%toplevel")
         {
-            self.projections.insert(s.span, (x, n.span));
+            self.withs.projections.insert(s.span, (x, n.span));
         }
         // A definition of a macro's name: refused, as a form's is.
         if let (Some(h), Some(n)) = (head, items.get(1).and_then(|n| n.as_symbol()))
@@ -1533,10 +1611,10 @@ impl Macros {
         let none = HashMap::new();
         let mut renamed: HashMap<Vec<bool>, String> = HashMap::new();
         {
-            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new() };
+            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
             let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
             let mut found = Vec::new();
-            a.walk(root, &Vec::new(), false, 0, &mut found, &mut Vec::new())?;
+            a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
             // The names definitions give, which other forms see.
             let mut defined = HashSet::new();
             for node in &a.nodes {
@@ -1556,7 +1634,7 @@ impl Macros {
             let mut kept: HashSet<Sym> = HashSet::new();
             for (at, env, _, _) in &found {
                 let Kids::Ref(n, Ns::Value, _) = a.nodes[*at].kids else { continue };
-                for level in env {
+                for level in env.levels() {
                     match level {
                         Level::Rib(atoms) | Level::Earlier(atoms) => {
                             let b = atoms.iter().find_map(|x| match x {
@@ -1604,7 +1682,7 @@ impl Macros {
         }
         let (_, operands) = split(s).expect("a list");
         let none = HashMap::new();
-        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new() };
+        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
         u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
         for c in &m.clauses {
             let mut binds = HashMap::new();
@@ -1803,23 +1881,49 @@ impl Aligner<'_> {
     /// `s`, at `path`, aligned with type `t`; `root`, the node its
     /// addresses are from, if not itself.
     fn align(&mut self, t: &Rc<STy>, s: &Syntax, root: Option<usize>, path: Vec<bool>) -> R<usize> {
-        let at = self.nodes.len();
-        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
+        let at = self.node_new(t, s, path);
         self.fill(at, t, s, root.unwrap_or(at))?;
         Ok(at)
     }
 
+    /// A node for `s`, at `path`, of type `t`, to be filled.
+    fn node_new(&mut self, t: &Rc<STy>, s: &Syntax, path: Vec<bool>) -> usize {
+        let at = self.nodes.len();
+        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
+        at
+    }
+
     fn fill(&mut self, at: usize, t: &Rc<STy>, s: &Syntax, root: usize) -> R<()> {
-        let mut next = Some((at, t.clone(), s.clone(), root));
-        while let Some((at, t, s, root)) = next {
-            next = self.fill_step(at, t, s, root)?;
+        self.run((at, t.clone(), s.clone(), root))
+    }
+
+    /// Step `first` filled, and every part it leaves to fill after it
+    /// (`work`), in a loop: a list's rest, a form's operands and a list's
+    /// first part each a step, so that neither a long list nor deep
+    /// nesting takes stack. The parts left are filled first first.
+    fn run(&mut self, first: Step) -> R<()> {
+        let base = self.work.len();
+        let mut next = Some(first);
+        loop {
+            while let Some((at, t, s, root)) = next {
+                next = match self.fill_step(at, t, s, root) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        self.work.truncate(base);
+                        return Err(e);
+                    }
+                };
+            }
+            if self.work.len() == base {
+                return Ok(());
+            }
+            next = self.work.pop();
         }
-        Ok(())
     }
 
     /// One step of `fill`: what is left to fill, a list's rest or the same
     /// part at a type unfolded, so that a long list takes no stack.
-    fn fill_step(&mut self, at: usize, t: Rc<STy>, s_owned: Syntax, root: usize) -> R<Option<(usize, Rc<STy>, Syntax, usize)>> {
+    fn fill_step(&mut self, at: usize, t: Rc<STy>, s_owned: Syntax, root: usize) -> R<Option<Step>> {
         let s = &s_owned;
         let t = &t;
         let span = s.span;
@@ -1926,20 +2030,27 @@ impl Aligner<'_> {
                 }
             }
             STy::Pair(a, d) => {
-                let Some((x, y)) = split(s) else {
+                if !matches!(s.datum, Datum::List { .. }) {
                     return Err(fail(format!("`{}` is not a list as this part must be", self.show(s))));
-                };
+                }
+                // Taken apart, not copied: a long list's rest is not made
+                // again at each of its parts.
+                let (x, y) = split_owned(s_owned).expect("a list");
                 let path = self.nodes[at].path.clone();
                 let mut ap = path.clone();
                 ap.push(true);
                 let mut dp = path;
                 dp.push(false);
-                let x = self.align(a, &x, Some(root), ap)?;
-                // The rest, its node made here and filled next.
+                let x_at = self.node_new(a, &x, ap);
+                // The rest, its node made here and filled after the first
+                // part; a program's keeps only its place (what a rest is,
+                // its parts say).
                 let rest = self.nodes.len();
-                self.nodes.push(Node { syn: y.clone(), path: dp, core: d.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
-                self.nodes[at].kids = Kids::Pair(x, rest);
-                Ok(Some((rest, d.clone(), y, root)))
+                let syn = if self.mode == Mode::Program { Syntax::new(y.span, Datum::Nil) } else { y.clone() };
+                self.nodes.push(Node { syn, path: dp, core: d.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
+                self.nodes[at].kids = Kids::Pair(x_at, rest);
+                self.work.push((rest, d.clone(), y, root));
+                Ok(Some((x_at, a.clone(), x, root)))
             }
             STy::Nil => match &s.datum {
                 Datum::Nil => {
@@ -2013,7 +2124,7 @@ impl Aligner<'_> {
             // A program's lambda, as any expression of one.
             STy::Lambda if self.mode == Mode::Program => Ok(Some((at, Rc::new(STy::Expr), s_owned, root))),
             STy::Lambda => match (&s.datum, self.mode) {
-                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form(at, s, false).map(|()| None),
+                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form(at, s, false),
                 _ if self.mode != Mode::Template && lambda_shaped(s, self.interner) => Ok(None),
                 _ => Err(fail(format!("`{}` is not a lambda, as this part must be", self.show(s)))),
             },
@@ -2029,19 +2140,19 @@ impl Aligner<'_> {
                     self.nodes[at].kids = Kids::Ref(*n, Ns::Value, Free::Toplevel);
                     Ok(None)
                 }
-                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form(at, s, false).map(|()| None),
+                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form(at, s, false),
                 (Datum::Nil, _) => Err(fail("`()` is not an expression".into())),
                 _ => Ok(None),
             },
             STy::Defn => match (&s.datum, self.mode) {
-                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form(at, s, true).map(|()| None),
+                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form(at, s, true),
                 _ => Err(fail(format!("`{}` is not a definition", self.show(s)))),
             },
             // A module's item: a definition by its head, a string, or an
             // expression.
             STy::Item => {
                 if self.defines(s) {
-                    return self.form(at, s, true).map(|()| None);
+                    return self.form(at, s, true);
                 }
                 if matches!(s.datum, Datum::Str(_)) {
                     self.nodes[at].export = Some((Bind::Rib(Vec::new()), at));
@@ -2133,7 +2244,7 @@ impl Aligner<'_> {
     /// A form in a template, at node `at`: a kernel form, a macro's use, or
     /// an application, aligned with its signature; a definition's, if
     /// `defn`, where a template makes definitions, else an expression's.
-    fn form(&mut self, at: usize, s: &Syntax, defn: bool) -> R<()> {
+    fn form(&mut self, at: usize, s: &Syntax, defn: bool) -> R<Option<Step>> {
         let Datum::List { items, tail } = &s.datum else { unreachable!("a list") };
         let head = items[0].as_symbol().filter(|h| !self.pvars.contains_key(h));
         let not_one = |what: &str| FxError::at(s.span, format!("`{}` is not a definition: a macro that makes definitions makes {what}", self.show(s)));
@@ -2141,6 +2252,10 @@ impl Aligner<'_> {
             Some((h, _)) if self.m.defined.get(&h).is_some_and(|m| m.procedural.is_some()) => {
                 return Err(FxError::at(s.span, format!("`{}` is a procedural macro, whose binding structure no signature says: not in a template", self.name(h))));
             }
+            // A program's `(module-parameters ((name T) … (name kind) …))`:
+            // a module's values or descriptions by what each is given, which
+            // only the kind's word tells (`parse::binder_is_kind`).
+            Some((_, "module-parameters")) if defn && self.mode == Mode::Program && items.len() == 2 => Some(self.parameters_sig(&items[1])),
             Some((h, n)) if defn => match self.m.defined.get(&h) {
                 Some(m) if m.defn => Some(m.sig.clone()),
                 Some(m) if m.desc => return Err(not_one("them by a macro that makes definitions, not a description's")),
@@ -2167,17 +2282,17 @@ impl Aligner<'_> {
                 let mut kids = Vec::new();
                 self.unquoted(x, p, 1, &mut kids)?;
                 self.nodes[at].kids = Kids::Desc(kids);
-                return Ok(());
+                return Ok(None);
             }
             Some((_, "with")) if self.mode == Mode::Program && {
                 let named = |m: &str| m == "#%fx" || m == "#%toplevel";
                 tail.is_none() && matches!(&items[..], [_, m, n] if m.as_symbol().is_some_and(|m| named(self.name(m))) && n.as_symbol().is_some())
-            } => return Ok(()),
+            } => return Ok(None),
             Some((_, "with")) if self.mode == Mode::Template => {
                 let named = |m: &str| m == "#%fx" || m == "#%toplevel";
                 let standard = tail.is_none() && matches!(&items[..], [_, m, n] if m.as_symbol().is_some_and(|m| named(self.name(m))) && n.as_symbol().is_some());
                 if standard {
-                    return Ok(());
+                    return Ok(None);
                 }
                 // `(with m name)`: the value `name` of module `m`, a
                 // template's binder or a use's, the name as written; `m`'s
@@ -2197,7 +2312,7 @@ impl Aligner<'_> {
                         self.nodes[m].kids = Kids::Ref(n, ns, Free::Bound);
                     }
                     self.nodes[at].kids = Kids::Form(x);
-                    return Ok(());
+                    return Ok(None);
                 }
                 return Err(FxError::at(s.span, "a template's `with` is `(with module name)`, the value `name` of the module, or `(with #%fx name)` or `(with #%toplevel name)` (one opening a module over a body waits for scopes of a module's names)"));
             }
@@ -2217,24 +2332,46 @@ impl Aligner<'_> {
         let path = self.nodes[at].path.clone();
         // A keyword at a list's head constructs, a tag written or placed.
         let construct = matches!(items[0].datum, Datum::Keyword(_)) || items[0].as_symbol().and_then(|h| self.pvars.get(&h)).is_some_and(|p| matches!(&*p.core, STy::Label));
-        let x = match sig {
-            _ if construct && !defn => {
-                let construct = self.m.k.forms["%construct"].clone();
-                self.align(&construct, s, None, path)?
-            }
+        // Aligned next, by `run`, not here: a form nested in a form takes
+        // no stack.
+        let (t, s, path) = match sig {
+            _ if construct && !defn => (self.m.k.forms["%construct"].clone(), s.clone(), path),
             Some(sig) => {
                 let (_, operands) = split(s).expect("a list");
                 let mut p = path;
                 p.push(false);
-                self.align(&sig, &operands, None, p)?
+                (sig, operands, p)
             }
-            None => {
-                let app = self.m.k.forms["%app"].clone();
-                self.align(&app, s, None, path)?
-            }
+            None => (self.m.k.forms["%app"].clone(), s.clone(), path),
         };
+        let x = self.node_new(&t, &s, path);
         self.nodes[at].kids = Kids::Form(x);
-        Ok(())
+        Ok(Some((x, t, s, x)))
+    }
+
+    /// The binding structure of a program's `module-parameters`' list
+    /// `bs`: each a value's binder, its type in the scope of those before
+    /// it, or a description's.
+    fn parameters_sig(&self, bs: &Syntax) -> Rc<STy> {
+        let entry = |d| Bind::Rib(vec![(vec![true], d)]);
+        let ps = bs.as_proper_list().unwrap_or(&[]);
+        let mut list = Rc::new(STy::Nil);
+        for p in ps.iter().rev() {
+            let one = if crate::parse::binder_is_kind(p, self.interner) {
+                STy::Export(Rc::new(STy::Pair(Rc::new(STy::Dvar), Rc::new(STy::Data))), entry(Delta::Dvar))
+            } else {
+                STy::Export(Rc::new(STy::Pair(Rc::new(STy::Bvar), Rc::new(STy::Pair(Rc::new(STy::Type), Rc::new(STy::Data))))), entry(Delta::Var))
+            };
+            // A `union` of one, so that its addresses are from it.
+            list = Rc::new(STy::Pair(Rc::new(STy::Union(vec![Rc::new(one)])), list));
+        }
+        let entries = (0..ps.len()).map(|k| ([vec![true], vec![false; k], vec![true]].concat(), Delta::Rib)).collect();
+        // Each module not `qualified` included in the items, as the
+        // checkers make the file (`Checker::modules_made`).
+        let included = ps.iter().enumerate().filter(|(_, p)| !crate::parse::binder_is_kind(p, self.interner) && p.as_proper_list().is_some_and(|l| l.len() == 2));
+        let shapes = included.map(|(k, _)| Ring::Shape([vec![true], vec![false; k], vec![true, true]].concat()));
+        let rings = std::iter::once(Ring::Rib(entries)).chain(shapes).collect();
+        Rc::new(STy::Export(Rc::new(STy::Pair(list, Rc::new(STy::Nil))), Bind::Cage(rings)))
     }
 
     /// Whether `n` is a word of descriptions, written as it is: one read
@@ -2645,7 +2782,7 @@ impl Aligner<'_> {
     /// each pattern variable, template binder and name referred to, with
     /// the environment where it is, and whether it is in a part of the
     /// signature that is `(many …)` (`many`, of what is around it).
-    fn walk(&self, at: usize, env: &Vec<Level>, many: bool, depth: usize, found: &mut Found, seqs: &mut Vec<(usize, usize)>) -> R<()> {
+    fn walk(&self, at: usize, env: &Env, many: bool, depth: usize, found: &mut Found, seqs: &mut Vec<(usize, usize)>) -> R<()> {
         // A list's rest in a loop, so that a long list takes no stack.
         let (mut at, mut env, mut many, mut depth) = (at, env.clone(), many, depth);
         loop {
@@ -2656,9 +2793,7 @@ impl Aligner<'_> {
                 seqs.push((at, depth));
             }
             for (b, root) in &node.imports {
-                let mut levels = self.eval(b, *root, node.syn.span)?;
-                levels.extend(env);
-                env = levels;
+                env = env.within(self.eval(b, *root, node.syn.span)?);
             }
             match &node.kids {
                 Kids::Pair(x, y) => {
@@ -2673,14 +2808,13 @@ impl Aligner<'_> {
                     let mut earlier = Vec::new();
                     for l in self.levels_of(*x, node.syn.span)? {
                         match l {
-                            Level::Rib(atoms) | Level::Earlier(atoms) => earlier.extend(atoms),
+                            Level::Rib(atoms) | Level::Earlier(atoms) => earlier.extend(atoms.iter().cloned()),
                             Level::Cage(n) => levels.push(Level::Cage(n)),
                             Level::Shape(n) => levels.push(Level::Shape(n)),
                         }
                     }
-                    levels.insert(0, Level::Earlier(earlier));
-                    levels.extend(env);
-                    env = levels;
+                    levels.insert(0, Level::Earlier(Rc::new(earlier)));
+                    env = env.within(levels);
                     at = *x;
                 }
                 Kids::Desc(kids) => {
@@ -2701,9 +2835,9 @@ impl Aligner<'_> {
     /// What `b` binds, its addresses from `root`: levels, innermost first.
     fn eval(&self, b: &Bind, root: usize, span: Span) -> R<Vec<Level>> {
         match b {
-            Bind::Rib(entries) => Ok(vec![Level::Rib(self.rib(entries, root, span)?)]),
-            Bind::Direct(atoms) => Ok(vec![Level::Rib(atoms.clone())]),
-            Bind::Earlier(atoms) => Ok(vec![Level::Earlier(atoms.clone())]),
+            Bind::Rib(entries) => Ok(vec![Level::Rib(Rc::new(self.rib(entries, root, span)?))]),
+            Bind::Direct(atoms) => Ok(vec![Level::Rib(Rc::new(atoms.clone()))]),
+            Bind::Earlier(atoms) => Ok(vec![Level::Earlier(Rc::new(atoms.clone()))]),
             Bind::Shape(addr) => Ok(vec![Level::Shape(self.nav(root, addr, span)?)]),
             // A part's own cage, in place, in a loop: a list's ribcage, each
             // element's then the rest's, takes no stack.
@@ -2712,7 +2846,8 @@ impl Aligner<'_> {
                 let mut work: Vec<(&Ring, usize)> = rings.iter().rev().map(|r| (r, root)).collect();
                 while let Some((r, root)) = work.pop() {
                     match r {
-                        Ring::Rib(entries) => out.push(Level::Rib(self.rib(entries, root, span)?)),
+                        Ring::Rib(entries) => out.push(Level::Rib(Rc::new(self.rib(entries, root, span)?))),
+                        Ring::Shape(addr) => out.push(Level::Shape(self.nav(root, addr, span)?)),
                         Ring::At(addr) => {
                             let t = self.nav(root, addr, span)?;
                             match (&self.nodes[t].kids, &self.exported(t).export) {
@@ -2813,8 +2948,8 @@ impl Aligner<'_> {
         levels
             .into_iter()
             .map(|l| match l {
-                Level::Rib(atoms) => Level::Rib(self.gathered(t, atoms)),
-                Level::Earlier(atoms) => Level::Earlier(self.gathered(t, atoms)),
+                Level::Rib(atoms) => Level::Rib(Rc::new(self.gathered(t, Rc::unwrap_or_clone(atoms)))),
+                Level::Earlier(atoms) => Level::Earlier(Rc::new(self.gathered(t, Rc::unwrap_or_clone(atoms)))),
                 cage => cage,
             })
             .collect()
@@ -2976,12 +3111,12 @@ fn normal(env: &[Level]) -> Vec<Level> {
             Level::Rib(atoms) => {
                 let mut a: Vec<Atom> = atoms.iter().filter(|a| !matches!(a, Atom::Lit(..))).cloned().collect();
                 a.sort();
-                (!a.is_empty()).then_some(Level::Rib(a))
+                (!a.is_empty()).then_some(Level::Rib(Rc::new(a)))
             }
             Level::Earlier(atoms) => {
                 let mut a: Vec<Atom> = atoms.iter().filter(|a| !matches!(a, Atom::Lit(..))).cloned().collect();
                 a.sort();
-                (!a.is_empty()).then_some(Level::Earlier(a))
+                (!a.is_empty()).then_some(Level::Earlier(Rc::new(a)))
             }
             Level::Cage(n) => Some(Level::Cage(*n)),
             Level::Shape(n) => Some(Level::Shape(*n)),
@@ -2997,7 +3132,7 @@ fn exports(levels: &[Level]) -> (Vec<Atom>, Vec<Sym>) {
     let mut cages = Vec::new();
     for l in normal(levels) {
         match l {
-            Level::Rib(a) | Level::Earlier(a) => atoms.extend(a),
+            Level::Rib(a) | Level::Earlier(a) => atoms.extend(a.iter().cloned()),
             Level::Cage(n) => cages.push(n),
             Level::Shape(_) => {}
         }
@@ -3221,6 +3356,17 @@ fn reserved(name: &str) -> bool {
 }
 
 /// A list's car and cdr, the cdr a list of the rest (or the tail).
+/// `split` of `s`, which is taken: its parts moved, not copied.
+fn split_owned(s: Syntax) -> Option<(Syntax, Syntax)> {
+    let Datum::List { mut items, tail } = s.datum else { return None };
+    if items.len() > 1 {
+        let first = items.remove(0);
+        return Some((first, Syntax::new(s.span, Datum::List { items, tail })));
+    }
+    let first = items.pop()?;
+    Some((first, tail.map(|t| *t).unwrap_or_else(|| Syntax::new(s.span, Datum::Nil))))
+}
+
 fn split(s: &Syntax) -> Option<(Syntax, Syntax)> {
     let Datum::List { items, tail } = &s.datum else { return None };
     let rest = if items.len() > 1 {

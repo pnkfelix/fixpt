@@ -688,6 +688,38 @@ impl Checker {
     }
 
     /// `(with m body)`: its body synthesized, or checked against `expected`.
+    /// Module type `mt`, of `m`, held to the shape the expander read it as
+    /// (`binding-shapes.md`): what it gives, by namespace, exactly the
+    /// shape's names, so that what the expander took a `with` or an
+    /// `include` to bind is what it binds. A name of the checkers' own
+    /// (`%…`) is no name a program reads.
+    pub(crate) fn shape_held(&self, span: Span, m: Option<Sym>, mt: TyId, shape: &crate::ast::WrittenShape) -> R<()> {
+        let Ty::Module { vals, abs, descs } = self.arena.get(self.arena.resolve(mt)) else { return Ok(()) };
+        let own = |c: &Self, n: &Sym| !c.interner.name(*n).starts_with('%');
+        let given: Vec<Sym> = vals.iter().map(|(n, _)| *n).filter(|n| own(self, n)).collect();
+        let given_d: Vec<Sym> = abs.iter().map(|(n, _)| *n).chain(descs.iter().map(|(n, _)| *n)).filter(|n| own(self, n)).collect();
+        let mut more: Vec<&str> = given.iter().filter(|n| !shape.vals.contains(n)).chain(given_d.iter().filter(|n| !shape.descs.contains(n))).map(|n| self.interner.name(*n)).collect();
+        let mut fewer: Vec<&str> = shape.vals.iter().filter(|n| !given.contains(n)).chain(shape.descs.iter().filter(|n| !given_d.contains(n))).map(|n| self.interner.name(*n)).collect();
+        if more.is_empty() && fewer.is_empty() {
+            return Ok(());
+        }
+        more.sort_unstable();
+        fewer.sort_unstable();
+        let list = |ns: &[&str]| ns.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
+        let mut said = Vec::new();
+        if !more.is_empty() {
+            said.push(format!("its type gives {} too", list(&more)));
+        }
+        if !fewer.is_empty() {
+            said.push(format!("its type has no {}", list(&fewer)));
+        }
+        let shown = match m.map(|m| self.interner.name(m)) {
+            Some(m) if !m.starts_with('%') => format!("`{m}`"),
+            _ => "this module".to_string(),
+        };
+        Err(FxError::at(span, format!("{shown} gives other names than were read from the program before it was checked: {}", said.join(", and "))))
+    }
+
     pub(crate) fn with_as(&mut self, e: ExpId, m: Sym, body: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         if self.is_toplevel_module(m) {
@@ -726,10 +758,13 @@ impl Checker {
             };
             return Err(FxError::at(span, msg));
         };
+        if let Some(shape) = self.arena.withs.opened.get(&e).cloned() {
+            self.shape_held(span, Some(m), mt, &shape)?;
+        }
         // A macro used in the body by a name the module gives a value of:
         // the program would seem to call the value, and the expander, which
         // cannot know the module's names, made the macro's use of it.
-        if let Some(uses) = self.macros.with_uses.get(&span)
+        if let Some(uses) = self.macros.withs.with_uses.get(&span)
             && let Some((n, at)) = uses.iter().find(|(n, _)| vals.iter().any(|(v, _)| v == n))
         {
             let (n, shown) = (self.interner.name(*n), self.interner.name(m));
@@ -737,7 +772,7 @@ impl Checker {
         }
         // A template's `(with m name)`: a value `m` gives, never what `name`
         // is where the macro is used.
-        if let Some((n, at)) = self.macros.projections.get(&span)
+        if let Some((n, at)) = self.macros.withs.projections.get(&span)
             && !vals.iter().any(|(v, _)| v == n)
         {
             let (n, shown) = (self.interner.name(*n), self.interner.name(m));
@@ -887,9 +922,9 @@ impl Checker {
                 // A name read in a `with` body that `m` does not give: what
                 // it is outside the `with` (`Parser::with_selected`).
                 // Applied, `(f d …)`: the application is what it is outside.
-                (None, None) if self.arena.with_applied.contains_key(&node) => {
-                    let app = self.arena.with_applied[&node];
-                    let Some(outer) = self.arena.with_fallback[&node] else {
+                (None, None) if self.arena.withs.with_applied.contains_key(&node) => {
+                    let app = self.arena.withs.with_applied[&node];
+                    let Some(outer) = self.arena.withs.with_fallback[&node] else {
                         let shown = self.interner.name(n);
                         return Err(FxError::at(span, format!("`{shown}` is not a description function, nor one a module opened by `with` gives")));
                     };
@@ -897,7 +932,7 @@ impl Checker {
                     self.arena.set_link(app, to);
                     continue;
                 }
-                (None, None) if self.arena.with_fallback.contains_key(&node) => match self.arena.with_fallback[&node] {
+                (None, None) if self.arena.withs.with_fallback.contains_key(&node) => match self.arena.withs.with_fallback[&node] {
                     Some(outer) => self.resolve_selects(outer, span)?,
                     None => return Err(FxError::at(span, format!("`{}` is not a type, nor one a module opened by `with` gives", self.interner.name(n)))),
                 },

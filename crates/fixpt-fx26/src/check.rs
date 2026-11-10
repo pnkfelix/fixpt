@@ -2212,6 +2212,11 @@ impl Checker {
             Ok(eff) => eff,
             Err(err) => return Err(err.found_in(e)),
         };
+        if !self.arena.withs.shaped.is_empty()
+            && let Err(err) = self.shape_kept(e, t)
+        {
+            return Err(err.found_in(e));
+        }
         self.facts.effects.insert(e, eff.clone());
         self.kill_paths(&eff);
         let t = self.path_typed(e, t);
@@ -2220,6 +2225,18 @@ impl Checker {
             self.facts.types.insert(e, t);
         }
         Ok((t, eff))
+    }
+
+    /// Module expression `e`, of type `t`, held to the shape the expander
+    /// wrote for it, if it did (an `extend`'s first, an `include`'s).
+    #[inline(never)]
+    fn shape_kept(&self, e: ExpId, t: TyId) -> R<()> {
+        let Some(shape) = self.arena.withs.shaped.get(&e) else { return Ok(()) };
+        let m = match self.arena.exp_at(e) {
+            Exp::Var(m) => Some(*m),
+            _ => None,
+        };
+        self.shape_held(self.arena.span_of(e), m, t, shape)
     }
 
     /// A `letrec`: its group checked at the types declared, then its body,

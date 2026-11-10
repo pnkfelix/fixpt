@@ -772,6 +772,33 @@ pub enum D {
     Fun(TyId),
 }
 
+/// What `with`s and the forms that open a module read and are held to.
+#[derive(Clone, Debug, Default)]
+pub struct WithTables {
+    /// Each `select` node a type name in a `with` body was read as
+    /// (`(with m …)`'s, shadowing): what the name meant outside, if
+    /// anything, should `m` not give it.
+    pub with_fallback: crate::ast::TyMap<Option<TyId>>,
+    /// Of those, each that is applied, `(f d …)`: the application, which
+    /// is what falls back.
+    pub with_applied: crate::ast::TyMap<TyId>,
+    /// The shapes the expander wrote (`#:shape`, `binding-shapes.md`):
+    /// of each `with`'s module, by the `with`; of each module expression an
+    /// `extend` or `include` opens, by the expression. Each held to the
+    /// module's type where it is checked (`Checker::shape_held`).
+    pub opened: std::collections::HashMap<ExpId, WrittenShape>,
+    pub shaped: std::collections::HashMap<ExpId, WrittenShape>,
+}
+
+/// A module's names as the expander read them, before its type was known
+/// (`binding-shapes.md`): its values', and its descriptions' (types,
+/// effects, functions of descriptions).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WrittenShape {
+    pub vals: Vec<Sym>,
+    pub descs: Vec<Sym>,
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ExpId(pub u32);
 
@@ -967,13 +994,9 @@ pub struct Arena {
     arrows: Vec<(Vec<Kind>, Kind)>,
     /// The effect applications, interned.
     pub effect_apps: EffectApps,
-    /// Each `select` node a type name in a `with` body was read as
-    /// (`(with m …)`'s, shadowing): what the name meant outside, if
-    /// anything, should `m` not give it.
-    pub with_fallback: crate::ast::TyMap<Option<TyId>>,
-    /// Of those, each that is applied, `(f d …)`: the application, which
-    /// is what falls back.
-    pub with_applied: crate::ast::TyMap<TyId>,
+    /// What `with`s and the forms that open a module read and are held to
+    /// (`WithTables`), out of line: the arena is moved whole.
+    pub withs: Box<WithTables>,
     /// `string`'s name, once known: `(stringof const)` (or `acyclic`, its
     /// finite subregion) is made as `string` itself, the one type
     /// (`check::STRINGOF`).
@@ -1174,8 +1197,10 @@ impl Arena {
     /// parse.
     pub fn reset(&mut self, mark: ArenaMark) {
         self.tys.truncate(mark.tys);
-        self.with_fallback.retain(|t, _| (t.0 as usize) < mark.tys);
-        self.with_applied.retain(|t, _| (t.0 as usize) < mark.tys);
+        self.withs.with_fallback.retain(|t, _| (t.0 as usize) < mark.tys);
+        self.withs.with_applied.retain(|t, _| (t.0 as usize) < mark.tys);
+        self.withs.opened.retain(|e, _| (e.0 as usize) < mark.exps);
+        self.withs.shaped.retain(|e, _| (e.0 as usize) < mark.exps);
         self.exps.truncate(mark.exps);
         self.dvar_names.truncate(mark.dvars);
         self.dvar_places.truncate(mark.dvars);

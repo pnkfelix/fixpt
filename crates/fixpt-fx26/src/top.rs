@@ -653,10 +653,28 @@ impl Checker {
     /// items is one a local binding cannot shadow, which its template's free
     /// names would need).
     pub(crate) fn read_module_file(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
+        self.read_module_file_at(file, text, None)
+    }
+
+    /// `read_module_file`, of the file at `at` (an `input`'s, or not): its
+    /// forms with the shapes of what they open written in, before anything
+    /// else is made of them (`Macros::file_forms_shaped`).
+    pub(crate) fn read_module_file_at(&mut self, file: FileId, text: &str, at: Option<(&std::path::Path, bool)>) -> R<Vec<Syntax>> {
         let mut interner = std::mem::take(&mut self.interner);
         let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
         self.interner = interner;
-        let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+        let mut forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+        if let Some((at, input)) = at {
+            let params = forms.first().is_some_and(|f| crate::parse::module_parameters_of(f, &self.interner).is_some());
+            let key = format!("{}{}", if input && !params { "input:" } else { "" }, at.display());
+            let dir = at.parent().map(|d| d.to_path_buf());
+            self.file_shapes_for(&forms, dir.clone());
+            let mut macros = std::mem::take(&mut self.macros);
+            let mut interner = std::mem::take(&mut self.interner);
+            forms = macros.file_forms_shaped(&key, forms, input, dir, &mut interner);
+            self.macros = macros;
+            self.interner = interner;
+        }
         let defines_syntax = |c: &Self, s: &Syntax| syntax_names(s, &c.interner).is_some();
         let names_of = |c: &Self, s: &Syntax| syntax_names(s, &c.interner).unwrap_or_default().into_iter().map(|(n, _)| n);
         let mut macros = Vec::new();
@@ -686,6 +704,59 @@ impl Checker {
             self.expand_datatype(f, &mut out)?;
         }
         Ok(out)
+    }
+
+    /// `form`, a top-level form or (not `top`) a file's module or one
+    /// expression, with the shapes of the modules its `with`s, `extend`s
+    /// and `include`s open written in (`Macros::shaped`;
+    /// `binding-shapes.md`, step 2), the files it loads read for theirs
+    /// first. A form the walk does not take is left as it is, for the
+    /// checkers to say why.
+    pub(crate) fn shapes_written(&mut self, form: &Syntax, top: bool) -> Syntax {
+        let dir = self.base_dir.clone();
+        self.file_shapes_for(std::slice::from_ref(form), dir.clone());
+        let mut macros = std::mem::take(&mut self.macros);
+        let mut interner = std::mem::take(&mut self.interner);
+        let r = macros.shaped(form, top, dir, &mut interner);
+        self.macros = macros;
+        self.interner = interner;
+        r.unwrap_or_else(|_| form.clone())
+    }
+
+    /// The shapes of the files `forms` load, read from directory `dir`, and
+    /// of those they load, each read once (`Macros::file_shaped`). A file
+    /// not read has none, which the checkers will say why of where it is
+    /// loaded.
+    fn file_shapes_for(&mut self, forms: &[Syntax], dir: Option<std::path::PathBuf>) {
+        let mut loads = Vec::new();
+        for f in forms {
+            crate::macros::shapes::loads_in(f, &self.interner, &mut loads);
+        }
+        for (path, input) in loads {
+            let (at, key) = crate::macros::shapes::load_key(dir.as_deref(), &path, input);
+            if self.macros.file_shape_known(&key) {
+                continue;
+            }
+            self.macros.file_shape_begun(key.clone());
+            let text = match crate::built_in_module(&path) {
+                Some(t) => t.to_string(),
+                None => match std::fs::read_to_string(&at) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                },
+            };
+            let mut interner = std::mem::take(&mut self.interner);
+            let r = Reader::new(&text, FileId(0), SyntaxProfile::FX26, &mut interner).read_all();
+            self.interner = interner;
+            let Ok(forms) = r else { continue };
+            let sub = at.parent().map(|d| d.to_path_buf());
+            self.file_shapes_for(&forms, sub.clone());
+            let mut macros = std::mem::take(&mut self.macros);
+            let mut interner = std::mem::take(&mut self.interner);
+            let _ = macros.file_shaped(key, &forms, input, sub, &mut interner);
+            self.macros = macros;
+            self.interner = interner;
+        }
     }
 
     /// What is expanded as it is read (`define-datatype`), for forms read
@@ -1128,6 +1199,17 @@ impl Checker {
     pub fn top(&mut self, form: &Syntax) -> R<Top> {
         // Where the top level ends as it begins: past it, what the form
         // binds (`toplevel_hidden`).
+        let outer = self.form_began.replace((self.env.len(), self.dscope.len()));
+        let shaped = self.shapes_written(form, true);
+        let r = self.top_here(&shaped);
+        self.form_began = outer;
+        r
+    }
+
+    /// `top` of `form` as it is, its shapes not written again: for a test
+    /// of what the checkers make of a shape that is wrong.
+    #[cfg(test)]
+    pub(crate) fn top_as_shaped(&mut self, form: &Syntax) -> R<Top> {
         let outer = self.form_began.replace((self.env.len(), self.dscope.len()));
         let r = self.top_here(form);
         self.form_began = outer;

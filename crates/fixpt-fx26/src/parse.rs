@@ -199,7 +199,7 @@ impl Checker {
         let mut t = outer;
         for m in withs.iter().rev() {
             let node = self.arena.ty(Ty::Select(*m, sym));
-            self.arena.with_fallback.insert(node, t);
+            self.arena.withs.with_fallback.insert(node, t);
             t = Some(node);
         }
         t.expect("a `with`")
@@ -216,8 +216,8 @@ impl Checker {
             let fun = self.arena.ty(Ty::Select(*m, f));
             let ds = args.iter().map(|a| self.parse_d(a)).collect::<R<Vec<_>>>()?;
             let app = self.arena.ty(Ty::App { fun, args: ds });
-            self.arena.with_fallback.insert(fun, t);
-            self.arena.with_applied.insert(fun, app);
+            self.arena.withs.with_fallback.insert(fun, t);
+            self.arena.withs.with_applied.insert(fun, app);
             t = Some(app);
         }
         Ok(t.expect("a `with`"))
@@ -2386,11 +2386,15 @@ impl Checker {
 
     /// `(extend …)`, of `parse_exp`.
     fn parse_extend_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
-        let [_, e0, e1] = &items[..] else {
-            return Err(FxError::at(span, "`(extend module module)`"));
-        };
+        let usage = || FxError::at(span, "`(extend module module)`");
+        let [_, e0, rest @ ..] = &items[..] else { return Err(usage()) };
+        let (shape, rest) = self.written_shape(rest)?;
+        let [e1] = rest else { return Err(usage()) };
         let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
         let e0 = self.parse_exp(e0)?;
+        if let Some(Some(s)) = shape {
+            self.arena.withs.shaped.insert(e0, s);
+        }
         let e1 = self.with_types_of(names[0], |p| p.parse_exp(e1))?;
         // Made at the form.
         let e1 = self.arena.exp(span, Exp::With { module: names[0], body: e1 });
@@ -2430,8 +2434,51 @@ impl Checker {
             return Err(FxError::at(span, "`(with module body …)`"));
         };
         let module = m.as_symbol().ok_or_else(|| FxError::at(m.span, "`with` opens a module named by a variable"))?;
+        let (shape, body) = self.written_shape(body)?;
         let body = self.with_types_of(module, |p| p.parse_body(span, body))?;
-        Ok(self.arena.exp(span, Exp::With { module, body }))
+        let e = self.arena.exp(span, Exp::With { module, body });
+        if let Some(Some(s)) = shape {
+            self.arena.withs.opened.insert(e, s);
+        }
+        Ok(e)
+    }
+
+    /// Whether `f` is `(include m)`, its shape written or not.
+    fn include_item(&self, f: &Syntax) -> bool {
+        matches!(f.as_proper_list(), Some([_, _, rest @ ..]) if self.written_shape(rest).is_ok_and(|(_, r)| r.is_empty()))
+    }
+
+    /// `(include m #:shape S)`'s module, `m`, held to its shape where it is
+    /// checked.
+    fn parse_include_item(&mut self, f: &Syntax) -> R<ExpId> {
+        let [_, m, rest @ ..] = f.as_proper_list().expect("an include") else { unreachable!("an include") };
+        let (shape, _) = self.written_shape(rest)?;
+        let m = self.parse_exp(m)?;
+        if let Some(Some(s)) = shape {
+            self.arena.withs.shaped.insert(m, s);
+        }
+        Ok(m)
+    }
+
+    /// `#:shape S` at the start of `rest`, as the expander writes it into
+    /// a form that opens a module (`Macros::shaped`): the module's names,
+    /// `((value …) (description …))`, or `#f` where they are not known;
+    /// and what follows it.
+    pub(crate) fn written_shape<'s>(&self, rest: &'s [Syntax]) -> R<(Option<Option<crate::ast::WrittenShape>>, &'s [Syntax])> {
+        let [k, s, after @ ..] = rest else { return Ok((None, rest)) };
+        if !matches!(&k.datum, Datum::Keyword(w) if self.name(*w) == "shape") {
+            return Ok((None, rest));
+        }
+        if s.as_symbol().is_some_and(|f| self.name(f) == "#f") {
+            return Ok((Some(None), after));
+        }
+        let names = |l: &Syntax| l.as_proper_list().or(matches!(l.datum, Datum::Nil).then_some(&[][..])).and_then(|l| l.iter().map(|n| n.as_symbol()).collect::<Option<Vec<_>>>());
+        let shape = match s.as_proper_list() {
+            Some([v, d]) => names(v).zip(names(d)).map(|(vals, descs)| crate::ast::WrittenShape { vals, descs }),
+            _ => None,
+        };
+        let shape = shape.ok_or_else(|| FxError::at(s.span, "a module's shape: `((value …) (description …))`"))?;
+        Ok((Some(Some(shape)), after))
     }
 
     /// `(product …)`, of `parse_exp`.
@@ -3477,7 +3524,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         #[cfg(debug_assertions)]
         fixpt_read::note_source(file, path, text.as_str().into());
         let at_file = |e: FxError, c: &Self| c.in_loaded(e, file);
-        let forms = match self.read_module_file(file, &text) {
+        let forms = match self.read_module_file_at(file, &text, Some((at, input))) {
             Ok(f) => f,
             Err(e) => return Err(at_file(e, self)),
         };
@@ -3874,8 +3921,8 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp(init)?, infer });
                 }
                 // `(include m)` (`TODO.md` §69): `m`'s values the module's own.
-                (Some("include"), [_, m]) => {
-                    includes.push((f.span, self.parse_exp(m)?, hidden));
+                (Some("include"), [_, _, ..]) if self.include_item(f) => {
+                    includes.push((f.span, self.parse_include_item(f)?, hidden));
                     continue;
                 }
                 (Some("define-rec"), [_, bs @ ..]) => {

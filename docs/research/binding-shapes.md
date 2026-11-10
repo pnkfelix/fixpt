@@ -1,7 +1,8 @@
 # Binding shapes: a module's names known before its types
 
-Status: a design for the user to review (2026-11-10). Nothing here is
-built. It grew out of Heist's request that module files use macros
+Status: a design for the user to review (2026-11-10); step 1 and part of
+step 2 built (the sections at the end). It grew out of Heist's request
+that module files use macros
 (`heist/docs/requests/fixpt-macros-from-heist.md`, item 1) and the
 conversation that followed, in which the user asked whether the set of
 *bindings* could be known at expansion time, with only the *types*
@@ -418,3 +419,54 @@ evaluating what a list's parts bind (`rib`, `eval`) loop down a list's
 rest, and `fits` looks no deeper than a `union`'s members can differ
 (`FITS_DEPTH`), as §229 did for quotes: the front end's own
 `native-direct-arm64-layout.fx` has a `case` of 550 clauses.
+
+## Step 2, begun (2026-11-10): shapes read, written into forms, and held to types (Rust)
+
+The expander written in Rust now reads every module's shape and writes it
+into each form that opens one, and the Rust checker holds it to the type.
+The FX-26 front end has none of this yet: it is the next part of step 2,
+with `with`'s type names read by shape (retiring the fallback) and
+`(modnames …)`.
+
+**Written into the form.** After expansion, and before a top-level form
+or a module file's forms are parsed, the program's walk (step 1's) finds
+the shape of the module each `with`, `extend`, `include` and
+`import-with-syntax` opens, and writes it in after the module:
+`(with m #:shape ((x y) (t)) body …)`, values then descriptions; or
+`#:shape #f` where it is not known (`macros/shapes.rs`). A shape written by
+hand is thrown away and read again: only the walk writes one.
+
+**Where a shape comes from**, as the table above has it: a binder's
+from where its value comes, by its place in the form that binds it (a
+`define`'s expression or written type, a `let`'s or `let*`'s expression, a
+typed parameter's type, a `module-parameters` type, a `define-type`'s
+description); a `module`'s, its items' exports, without what a `hide`
+holds or what a hidden `include` gives (as the checkers' `hiding` leaves
+out every name so marked, though the module define it too); a file's,
+read from its text before the program that loads it is expanded, a
+function's of its module if it takes module parameters; a `the`'s,
+`moduleof`'s, `load-moduleof`'s, `restrict`'s and `(select m t)`'s from the
+types (a type that is a module's has a shape of its own); a function's
+result's from its body or its declared type. A file's module parameters
+bind its names, each module not `qualified` included (`Ring::Shape`), as
+the checkers make the file.
+
+**Held to the type.** The checker reads the shape off the form
+(`Parser::written_shape`) and, where the module's type is known, refuses
+a type whose names, by namespace, are not exactly the shape's
+(`Checker::shape_held`): `` `m` gives other names than were read from the
+program before it was checked: its type has no `y` ``. A shape is so a
+promise the checker keeps, never a guess the expander makes alone; no
+program of the suite is refused by it.
+
+**Fast enough to run on every form.** Reading a program's binding
+structure was a test's alone in step 1, and quadratic in a list's length:
+a list's rest was copied at each of its parts, by `split` and by `fits`,
+and the walk's environment copied at each part (a module's items each a
+level). Now a rest is taken apart, not copied, `fits` looks at a rest in
+place (`fits_rest`), an environment is shared segments (`Env`), and
+aligning is a loop over a stack of parts to fill (`Aligner::run`), so
+that deep nesting takes no stack: the 100-deep nesting `tests/stack.rs`
+holds the checker to fits the walk too. A file is walked once, its shapes
+kept for when it is read to be checked. Checking the front end's own
+sources cold, in a debug build, takes 57 s where it took 53 s.
