@@ -78,7 +78,8 @@
 
 ;; Given on, all `check-synth-parts.fx` defines.
 (import check-synth-parts k-fail-no-arm k-acyclic-list? k-note-frozen-define k-note-call
-        k-note-apply-shares k-partial-pair-arg k-union-pairs k-te-masked k-masked k-te-onto
+        k-note-apply-shares k-partial-pair-arg k-union-pairs k-te-masked k-masked k-app-result
+        k-te-onto
         k-as-expected k-claims-proved k-new-subr k-new-subr-spec k-nlist-te k-new-trail k-bind-place
         k-region-form k-note-extract k-note-field k-subst-checked k-projected k-nil-if-any
         k-nils-if-any k-nil-pair k-nil-pairs k-any-nil? k-join-with-nil k-parts-known? k-fold-join

@@ -28,7 +28,7 @@ fn bloblet_programs_do_as_they_say() {
         let got = match s.run_program(&text) {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => Err(e.to_string()),
-            Err(e) => Err(e.message),
+            Err(e) => Err(String::from(e.message)),
         };
         seen += 1;
         let ok = match (gives, refused, &got) {

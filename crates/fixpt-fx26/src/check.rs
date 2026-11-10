@@ -2192,13 +2192,25 @@ impl Checker {
     }
 
     // ------------------------------------------------------------ synthesis
-    /// What `e` is, and what evaluating it does.
+    /// What `e` is, and what evaluating it does; an error found, found in
+    /// `e` unless in what is in it (`FxError::origin`).
     pub fn synth(&mut self, e: ExpId) -> R<(TyId, Effect)> {
-        if self.holes.is_some() {
-            self.at_hole(e, None)?;
+        // Tagged where each error leaves, by a plain `match` and a call out
+        // of line: no frame more and none larger per level of nesting, which
+        // the front end's own sources, checked, would overflow the stack by.
+        if self.holes.is_some()
+            && let Err(err) = self.at_hole(e, None)
+        {
+            return Err(err.found_in(e));
         }
-        let (t, eff) = self.synth_node(e)?;
-        let eff = self.frozen(e, eff)?;
+        let (t, eff) = match self.synth_node(e) {
+            Ok(r) => r,
+            Err(err) => return Err(err.found_in(e)),
+        };
+        let eff = match self.frozen(e, eff) {
+            Ok(eff) => eff,
+            Err(err) => return Err(err.found_in(e)),
+        };
         self.facts.effects.insert(e, eff.clone());
         self.kill_paths(&eff);
         let t = self.path_typed(e, t);
@@ -3144,7 +3156,7 @@ impl Checker {
                 None => msg.push_str(&tail),
             }
         }
-        FxError::at(err.span, msg)
+        err.reworded(err.span, msg)
     }
 
     pub fn is_lambda(&self, mut x: ExpId) -> bool {
@@ -5873,7 +5885,7 @@ impl Checker {
         // know — an operator's binders, a `nil` — it is told.
         let be = self.check(body, answer).map_err(|err| match expected_and_found(&err.message) {
             Some((want, got, delta)) if err.span == self.arena.span_of(body) => {
-                FxError::at(err.span, format!("the tag's prompts deliver a {want}, and this body is a {got}{delta}"))
+                err.reworded(err.span, format!("the tag's prompts deliver a {want}, and this body is a {got}{delta}"))
             }
             _ => err,
         })?;
@@ -5896,7 +5908,7 @@ impl Checker {
         let (ht, he) = if matches!(self.arena.exp_at(handler), Exp::Lambda { params, .. } if params.len() == 1) {
             let Exp::Lambda { body: hbody, .. } = self.arena.exp_at(handler).clone() else { unreachable!() };
             self.synth_lambda_as(handler, Some(&[payload]), Some(answer), None).map_err(|err| match expected_and_found(&err.message) {
-                Some((_, got, delta)) if err.span == self.arena.span_of(hbody) => FxError::at(
+                Some((_, got, delta)) if err.span == self.arena.span_of(hbody) => err.reworded(
                     err.span,
                     format!("the handler must take a {} to a {}, and this gives a {got}{delta}", self.show_ty(payload), self.show_ty(answer)),
                 ),

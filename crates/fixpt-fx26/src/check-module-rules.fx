@@ -194,10 +194,12 @@
 ;; `f`'s value, or, if it fails, the error `say` makes of its message.
 (define k-saying (->* (k-thunk k-say) k-te)
   (lambda (f say)
-    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag (k-done (f)) (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       (tagcase r
         (k-done (te) te)
-        (k-err (m ea eb) (k-fail (say m) ea eb))
+        (k-err (m ea eb ok or) (k-fail-found (say m) ea eb ok or))
         (k-ok (xs) (k-fail "k-ok inside" 0 0))))))
 ;; What `define*` says when `name`, found to be a `tf`, does not check at
 ;; it, as `m` says: the program's error, since only that check sees a call

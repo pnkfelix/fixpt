@@ -148,6 +148,14 @@
   (lambda (x t e) (k-te t (k-mask x e t))))
 (define k-masked (->* (kx k-te) k-te)
   (lambda (x r) (k-te-masked x (extract r 1) (extract r 2))))
+;; A call's type and effect, once its arguments have effect `e`: its
+;; callee's latent effect too, `spin` where the call may loop, and what
+;; the call masks; its result, of type `result`.
+(define k-app-result (->* (kx kx int kxs k-eff k-eff int) k-te)
+  (lambda (x f ft args e latent result)
+    (let* ((e (k-union e latent))
+           (e (if (k-may-spin? f ft args) (k-insert (a-spin) e) e)))
+      (k-te-masked x result e))))
 ;; `r`'s type onto `rest`'s types, and the effects of both.
 (define k-te-onto (->* (k-te k-types-eff) k-types-eff)
   (lambda (r rest)

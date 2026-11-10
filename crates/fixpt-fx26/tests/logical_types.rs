@@ -44,7 +44,7 @@ fn every_maker_of_mutable_storage_allocates() {
         let got = match s.run_program(&text) {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => Err(e.to_string()),
-            Err(e) => Err(e.message),
+            Err(e) => Err(String::from(e.message)),
         };
         if !matches!(&got, Err(e) if e.contains("it has (alloc @h)") && !e.contains("checkers disagree")) {
             wrong.push(format!("{made}: {got:?}"));

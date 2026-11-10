@@ -344,7 +344,7 @@ impl Checker {
                     for n in &u.names {
                         self.break_global(*n, why.clone());
                     }
-                    done.broken.push((u.names, e.message));
+                    done.broken.push((u.names, e.message.into()));
                 }
             }
         }
@@ -1309,7 +1309,7 @@ impl Checker {
                         let again = again.map_err(|err| {
                             let shown = self.show_ty(found);
                             let how = if star { "`->*`" } else { "`define*`" };
-                            FxError::at(err.span, format!("{how} found `{}` to be a {shown}: {}", self.interner.name(name), err.message))
+                            err.reworded(err.span, format!("{how} found `{}` to be a {shown}: {}", self.interner.name(name), err.message))
                         });
                         (again, found)
                     }

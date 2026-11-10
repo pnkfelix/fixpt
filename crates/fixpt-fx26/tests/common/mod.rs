@@ -282,7 +282,7 @@ pub fn programs_do_as_they_say(sub: &str, least: usize) {
         let got = match s.run_program(&text) {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => Err(e.to_string()),
-            Err(e) => Err(e.message),
+            Err(e) => Err(String::from(e.message)),
         };
         let ok = match (first.strip_prefix(";; => "), first.strip_prefix(";; ! "), &got) {
             (Some(want), _, Ok(v)) => v == want,

@@ -1158,17 +1158,38 @@ pub use top::Top;
 pub use error::{FxError, R};
 
 pub mod error {
+    use std::sync::Arc;
+
     use fixpt_read::Span;
 
     #[derive(Clone, Debug)]
     pub struct FxError {
         pub span: Span,
-        pub message: String,
+        pub message: Message,
+        /// The expression whose check found it: the innermost the checker
+        /// was synthesizing or checking (`Checker::synth`, `Checker::check`).
+        /// Its identity, where the span is only its provenance, which a
+        /// macro's expansion may give many expressions.
+        pub origin: Option<crate::ast::ExpId>,
     }
 
     impl FxError {
-        pub fn at(span: Span, message: impl Into<String>) -> FxError {
-            FxError { span, message: message.into() }
+        pub fn at(span: Span, message: impl Into<Message>) -> FxError {
+            FxError { span, message: message.into(), origin: None }
+        }
+
+        /// The same error said otherwise, or elsewhere: found where it was.
+        pub fn reworded(&self, span: Span, message: impl Into<Message>) -> FxError {
+            FxError { span, message: message.into(), origin: self.origin }
+        }
+
+        /// Found in `e`'s check, unless in one inside it. Out of line, so
+        /// that the checker's recursion keeps its frames as they were.
+        #[cold]
+        #[inline(never)]
+        pub fn found_in(mut self, e: crate::ast::ExpId) -> FxError {
+            self.origin.get_or_insert(e);
+            self
         }
     }
 
@@ -1176,6 +1197,80 @@ pub mod error {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str(&self.message)
         }
+    }
+
+    /// What an error says: shared, so that an error is cheap to copy, and
+    /// two words, so that an error is five (`FxError`'s size, tested): every
+    /// `R` in the checker's recursion is sized by it, and the front end's own
+    /// sources, checked, need those frames small. Its representation is its
+    /// own business; it reads as a `str`.
+    #[derive(Clone, PartialEq, Eq, Hash, Default)]
+    pub struct Message(Arc<str>);
+
+    impl std::ops::Deref for Message {
+        type Target = str;
+        fn deref(&self) -> &str {
+            &self.0
+        }
+    }
+
+    impl std::fmt::Display for Message {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+
+    impl std::fmt::Debug for Message {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            std::fmt::Debug::fmt(&*self.0, f)
+        }
+    }
+
+    impl From<String> for Message {
+        fn from(s: String) -> Message {
+            Message(s.into())
+        }
+    }
+
+    impl From<&str> for Message {
+        fn from(s: &str) -> Message {
+            Message(s.into())
+        }
+    }
+
+    impl From<&String> for Message {
+        fn from(s: &String) -> Message {
+            Message(s.as_str().into())
+        }
+    }
+
+    impl From<Message> for String {
+        fn from(m: Message) -> String {
+            m.0.to_string()
+        }
+    }
+
+    impl PartialEq<str> for Message {
+        fn eq(&self, other: &str) -> bool {
+            &*self.0 == other
+        }
+    }
+
+    impl PartialEq<&str> for Message {
+        fn eq(&self, other: &&str) -> bool {
+            &*self.0 == *other
+        }
+    }
+
+    impl PartialEq<String> for Message {
+        fn eq(&self, other: &String) -> bool {
+            &*self.0 == other.as_str()
+        }
+    }
+
+    #[test]
+    fn an_error_is_five_words() {
+        assert_eq!(std::mem::size_of::<FxError>(), 40);
     }
 
     pub type R<T> = Result<T, FxError>;

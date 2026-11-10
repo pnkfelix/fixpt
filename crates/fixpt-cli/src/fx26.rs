@@ -35,7 +35,7 @@ fn parse_origin(arg: &str) -> Option<(String, usize, usize)> {
 fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
     // An error in the front end itself says where in it, not in `text`.
     if e.span.file == fixpt_fx26::FRONT_END_FILE {
-        return e.message.clone();
+        return e.message.to_string();
     }
     let mut out = format!("{}: {}", place(name, text, e.span), e.message);
     // Text a macro's template made: each use that made it, innermost first.
@@ -255,7 +255,7 @@ pub fn repl(backend: Backend) -> i32 {
 
     // FX-26 code reads FX-26 input: the eager reader written in FX-26, once
     // its licence is checked. Without it, the Rust reader.
-    let mut eager = match session.load_own_reader().map_err(|e| e.message).and_then(|()| {
+    let mut eager = match session.load_own_reader().map_err(|e| String::from(e.message)).and_then(|()| {
         fixpt_scheme::eager::EagerReader::attach_starting(
             &mut session.scheme,
             fixpt_fx26::session::READER_PREFIX,
@@ -1669,7 +1669,7 @@ impl crate::help::Helpful for Checker {
     fn fits(&mut self, type_text: &str) -> Option<Result<Vec<String>, String>> {
         let want = match self.type_of_str(type_text) {
             Ok(t) => t,
-            Err(e) => return Some(Err(e.message)),
+            Err(e) => return Some(Err(String::from(e.message))),
         };
         Some(Ok(self.search(|c, params, _| params.first().is_some_and(|p| c.subtype(want, *p)))))
     }
@@ -1677,7 +1677,7 @@ impl crate::help::Helpful for Checker {
     fn returns(&mut self, type_text: &str) -> Option<Result<Vec<String>, String>> {
         let want = match self.type_of_str(type_text) {
             Ok(t) => t,
-            Err(e) => return Some(Err(e.message)),
+            Err(e) => return Some(Err(String::from(e.message))),
         };
         Some(Ok(self.search(|c, _, result| c.subtype(result, want))))
     }
@@ -1822,7 +1822,7 @@ fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::spec
         let (start, end) = (e.span.start as usize - if typed { base } else { 0 }, e.span.end as usize - if typed { base } else { 0 });
         (p.finished(text) || (typed && p.believe(start, end))).then(|| Note {
             span: if typed { char_span(text, start, end) } else { None },
-            message: e.message.clone(),
+            message: e.message.to_string(),
             error: true,
         })
     });

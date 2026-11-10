@@ -28,7 +28,7 @@ fn check(c: &mut Checker, program: &str) -> String {
 fn rejects(c: &mut Checker, program: &str) -> String {
     match c.check_program(program) {
         Ok(k) => panic!("checks as {}, and should not:\n{program}", c.show_ty(k.ty)),
-        Err(e) => e.message,
+        Err(e) => String::from(e.message),
     }
 }
 

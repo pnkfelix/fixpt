@@ -447,10 +447,13 @@
 (define k-respanning
   (->* ((subr (maxeff checks spin) () k-te) int int int int) k-te)
   (lambda (f a b ta tb)
-    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag (k-done (f)) (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       (tagcase r
         (k-done (te) te)
-        (k-err (m ea eb) (if (and (= ea a) (= eb b)) (k-fail m ta tb) (k-fail m ea eb)))
+        (k-err (m ea eb ok or)
+          (if (and (= ea a) (= eb b)) (k-fail-found m ta tb ok or) (k-fail-found m ea eb ok or)))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 (define k-bind-each (->* (k-parts) unit)
   (lambda (ps)

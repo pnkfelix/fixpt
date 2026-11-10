@@ -73,13 +73,15 @@
   (lambda (f base a b)
     (let* ((n (if (k-built-in-at? (get loaded) base) 1 0))
            (in (set k-in-built-in (+ (get k-in-built-in) n)))
-           (r (prompt k-tag (begin (f) (k-done (k-te 0 nil))) (lambda (r) r)))
+           (r (let* ((k-at-now (k-now))
+                     (k-caught (prompt k-tag (begin (f) (k-done (k-te 0 nil))) (lambda (r) r))))
+                (k-now-back k-at-now k-caught)))
            (out (set k-in-built-in (- (get k-in-built-in) n))))
       (tagcase r
-        (k-err (m ea eb)
+        (k-err (m ea eb ok or)
           (if (and (>= ea base) (< ea (+ base load-base)))
-              (k-fail-placed m ea)
-              (k-fail m ea eb)))
+              (k-fail-placed-found m ea ok or)
+              (k-fail-found m ea eb ok or)))
         (else y #u)))))
 ;; Error `m` at `at`, in a file read, said in each file on the way out to
 ;; the program (`loaded-placed`), there.
@@ -87,6 +89,11 @@
   (lambda (m at)
     (let ((p (loaded-placed (get loaded) m at)))
       (k-fail (extract p 1) (extract p 2) (extract p 2)))))
+;; The same, of an error caught, found in `ok` of reading `or`.
+(define k-fail-placed-found (->* (string int int int) void)
+  (lambda (m at ok or)
+    (let ((p (loaded-placed (get loaded) m at)))
+      (k-fail-found (extract p 1) (extract p 2) (extract p 2) ok or))))
 ;; What a module's first item says of where it was read: from its file, at
 ;; a base (> 3); not, and why (-1); or not from a file (0 to 3).
 (define k-items-kind (->* (mod-items) int)
@@ -369,13 +376,16 @@
              (declared (k-ahead-declare names names))
              (got (the (ref k-items @t) (new nil)))
              ;; What is wrong in the items, kept until the state outside is back.
-             (r (prompt k-tag (begin (set got (k-resolve-items items)) (k-done (k-te 0 nil)))
-                        (lambda (r) r)))
+             (r (let* ((k-at-now (k-now))
+                       (k-caught (prompt k-tag
+                                   (begin (set got (k-resolve-items items)) (k-done (k-te 0 nil)))
+                                   (lambda (r) r))))
+                  (k-now-back k-at-now k-caught)))
              (filled (get k-ahead-filled)))
         (begin (set k-ahead-names outer-names)
                (set k-ahead-filled outer-filled)
                (tagcase r
-                 (k-err (m a b) (k-fail m a b))
+                 (k-err (m a b ok or) (k-fail-found m a b ok or))
                  (else y (begin (k-ground-filled (k-filled-reversed filled nil))
                                 (k-note-closed-filled filled))))
                (get got)))))

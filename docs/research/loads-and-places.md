@@ -314,13 +314,23 @@ roles are split.
   both refuse, the Rust checker's is said, at its provenance). It matters
   once the expander is the front end written in FX-26's, which reads
   places from the text it expands; `write_syntax_mapped` is there for it.
-- **Blame by span that stays**: `synth_app_split`, where an error inside an
-  argument that is not a variable ends the split. Errors raised there are
-  of the call's own parts, so an error whose span is inside an argument's
-  is in that argument's text, or in a copy of it another argument holds:
-  in its text either way. A copy is made only where a macro places an
-  argument twice, which waits for `(many σ)`; that both checkers then
-  agree is for it to show.
+- ~~Blame by span that stays~~ (gone, 2026-11-09): `synth_app_split`,
+  where an error inside an argument that is not a variable ends the split,
+  asked whether the error's span was inside the argument's. A procedural
+  macro's answer, every node at the use's place, broke it: an error at a
+  variable was "inside" every other argument, and both checkers refused
+  a call a split would have taken (`procedural/split-er.fx`). An argument
+  a macro copies would too, its nodes at another's place. Now an error
+  carries the expression whose check found it, its *origin* (Rust's
+  `FxError::origin`, set by the innermost `synth` or `check` it leaves,
+  kept by what says it again otherwise, `FxError::reworded`; FX-26's
+  `k-err` its walk number and reading, from `k-now-kth`, which `k-synth`
+  and `k-check` set and restore and every `prompt` that catches puts back,
+  and `k-fail-found` what raises a caught error again), and the split
+  asks whether the origin is inside the argument by structure
+  (`ids::subtrees`, `k-keys-onto`). Spans are only provenance; what still
+  compares them chooses only how an error is worded (`as_argument`, a
+  prompt's body and handler, a `with`'s body, `declared_error`).
 - **A REPL session is one text** (2026-11-06, the user's choice over a
   file number per entry): every entry is read into the session's text,
   past those before (`Fx26Session::read_entry`; `Checker::read_in_from`

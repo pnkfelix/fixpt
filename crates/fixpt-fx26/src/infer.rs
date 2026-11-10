@@ -136,13 +136,23 @@ impl Checker {
 
     // ----------------------------------------------------------- check mode
 
-    /// Check `e` against `expected`, returning its effect.
+    /// Check `e` against `expected`, returning its effect; an error found,
+    /// found in `e` unless in what is in it (`FxError::origin`).
     pub fn check(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
-        if self.holes.is_some() {
-            self.at_hole(e, Some(expected))?;
+        // As `synth`: tagged by a plain `match`, the frame no larger.
+        if self.holes.is_some()
+            && let Err(err) = self.at_hole(e, Some(expected))
+        {
+            return Err(err.found_in(e));
         }
-        let eff = self.check_node(e, expected)?;
-        let eff = self.frozen(e, eff)?;
+        let eff = match self.check_node(e, expected) {
+            Ok(eff) => eff,
+            Err(err) => return Err(err.found_in(e)),
+        };
+        let eff = match self.frozen(e, eff) {
+            Ok(eff) => eff,
+            Err(err) => return Err(err.found_in(e)),
+        };
         self.facts.effects.insert(e, eff.clone());
         if self.record_types {
             self.facts.types.insert(e, expected);
@@ -934,10 +944,13 @@ impl Checker {
             },
             Err(err) => err,
         };
-        // An error inside an argument that is not a variable is that
-        // argument's, which no member of another makes go away.
-        let within = |x: fixpt_read::Span, outer: fixpt_read::Span| x.file == outer.file && x.start >= outer.start && x.end <= outer.end;
-        if args.iter().any(|a| !matches!(self.arena.exp_at(*a), Exp::Var(_)) && within(err.span, self.arena.span_of(*a))) {
+        // An error found inside an argument that is not a variable is that
+        // argument's, which no member of another makes go away. Inside by
+        // structure, not by place: a macro's expansion may give its nodes
+        // one place, and an argument it copies the place of another's.
+        if let Some(o) = err.origin
+            && args.iter().any(|a| !matches!(self.arena.exp_at(*a), Exp::Var(_)) && crate::ids::subtrees(self, &[*a]).contains(&o))
+        {
             return Err(err);
         }
         self.split_tries(e, fun, args, expected, err)
@@ -1655,7 +1668,7 @@ impl Checker {
         if err.span == self.arena.span_of(a)
             && let Some((want, got, delta)) = crate::check::expected_and_found(&err.message)
         {
-            return FxError::at(err.span, format!("argument {} is a {got}, where a {want} is expected{delta}", i + 1));
+            return err.reworded(err.span, format!("argument {} is a {got}, where a {want} is expected{delta}", i + 1));
         }
         err
     }

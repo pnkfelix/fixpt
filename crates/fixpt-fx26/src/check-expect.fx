@@ -54,10 +54,12 @@
   (lambda (w g) (k-cat4 "a " w k-sep g)))
 (define k-rewriting (->* (k-checking int int k-saying) k-te)
   (lambda (f a b say)
-    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag (k-done (f)) (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       (tagcase r
         (k-done (te) te)
-        (k-err (m ea eb)
+        (k-err (m ea eb ok or)
           ;; Its second line, an effect's delta, apart, and put back last.
           (let* ((nl (string-search m k-newline 0))
                  (first (if (< nl 0) m (substring m 0 nl)))
@@ -66,17 +68,21 @@
             (if (and (= ea a) (= eb b) (not (string=? rest "")) (>= at 0))
                 (let ((w (substring rest 0 at))
                       (g (substring rest (+ at (string-length k-sep)) (string-length rest))))
-                  (k-fail (string-append (say m w g) delta) ea eb))
-                (k-fail m ea eb))))
+                  (k-fail-found (string-append (say m w g) delta) ea eb ok or))
+                (k-fail-found m ea eb ok or))))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 ;; The same, for any error at `a`..`b`.
 (define k-prefixing (->* ((subr checks () k-te) int int (subr checks () string)) k-te)
   (lambda (f a b prefix)
-    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag (k-done (f)) (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       (tagcase r
         (k-done (te) te)
-        (k-err (m ea eb)
-          (if (and (= ea a) (= eb b)) (k-fail (string-append (prefix) m) ea eb) (k-fail m ea eb)))
+        (k-err (m ea eb ok or)
+          (if (and (= ea a) (= eb b))
+              (k-fail-found (string-append (prefix) m) ea eb ok or)
+              (k-fail-found m ea eb ok or)))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 
 ;; The convention `want` asks of `got`, where a procedure differs from what

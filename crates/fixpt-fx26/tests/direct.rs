@@ -860,7 +860,7 @@ fn native_and_cellular_code_call_each_other() {
         s.scheme.runtime_unrooted().heap.gc_every = gc_every;
         let forms = s.checker.read_in(FileId(0), include_str!("programs/native/mixed.fx")).expect("reads");
         let out: Vec<String> =
-            s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
+            s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{}{:?}", o.printed, o.value))).collect();
         // Native: `bump`, which stays cellular, is neither inlined nor
         // specialized into its callers, so they stay native.
         assert!(out[4].ends_with("Ok(Some(\"5150\"))") && !out[4].contains("run as cellular code"), "{out:?}");
@@ -903,7 +903,7 @@ fn typed_calls_of_native_code() {
                 (f 1 2)";
     let forms = s.checker.read_in(FileId(0), text).expect("reads");
     let out: Vec<String> =
-        s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
+        s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{}{:?}", o.printed, o.value))).collect();
     assert!(out[1].ends_with("Ok(Some(\"2\"))"), "{out:?}");
     assert_eq!(out[3], "Ok(Some(\"3\"))", "{out:?}");
 }
@@ -920,7 +920,7 @@ fn far_fields_are_native_code() {
                         (+ (with m a39) ((with m f)))");
     let forms = s.checker.read_in(FileId(0), &text).expect("reads");
     let out: Vec<String> =
-        s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
+        s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{}{:?}", o.printed, o.value))).collect();
     assert_eq!(out[1], "Ok(Some(\"78\"))", "{out:?}");
     assert!(!out.iter().any(|o| o.contains("not in the native convention")), "{out:?}");
 }
@@ -977,7 +977,7 @@ fn an_entry_waits_for_the_types_it_names() {
         let forest = entry(&mut s, "(define-datatype forest (fnil) (fcons tree forest))");
         assert_eq!(s.consider(&forest), Consider::Completes(vec!["tree".into(), "leaf".into(), "node".into()]));
         for o in s.complete(&forest).expect("runs") {
-            assert!(o.as_ref().is_ok_and(|o| o.value.is_ok()), "{:?}", o.err().map(|e| e.message));
+            assert!(o.as_ref().is_ok_and(|o| o.value.is_ok()), "{:?}", o.err().map(|e| String::from(e.message)));
         }
         assert!(s.pending.is_empty());
         let use_it = entry(&mut s, "(node (fcons (leaf 1) (fnil)))");
@@ -1500,13 +1500,13 @@ fn inlined_calls_see_a_redefinition() {
             s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
         }
         let forms = s.checker.read_in(FileId(0), include_str!("programs/redefine/compatible.fx")).expect("reads");
-        let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{:?}", o.value))).collect();
+        let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{:?}", o.value))).collect();
         assert_eq!(out[2], "Ok(Some(\"4\"))", "native {native}: {out:?}");
         assert_eq!(s.inliners("f").expect("asks"), Ok(vec!["g".to_string()]), "native {native}");
         assert_eq!(out[4], "Ok(Some(\"202\"))", "native {native}: {out:?}");
         // A call specialized at a lambda, the same.
         let forms = s.checker.read_in(FileId(0), include_str!("programs/redefine/specialized.fx")).expect("reads");
-        let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{:?}", o.value))).collect();
+        let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{:?}", o.value))).collect();
         assert_eq!((out[3].as_str(), out[5].as_str()), ("Ok(Some(\"36\"))", "Ok(Some(\"3036\"))"), "native {native}: {out:?}");
         assert_eq!(s.inliners("map1").expect("asks"), Ok(vec!["test".to_string()]), "native {native}");
     }

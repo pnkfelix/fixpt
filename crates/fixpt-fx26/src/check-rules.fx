@@ -99,7 +99,7 @@
       (include check-modules) (include check-mask) (include check-calls) (include check-bounds)
       (include check-holds) (include check-subtype) (include check-subst) (include check-processes))
 (import check-resolve k-as-subr k-callee-of k-conversion-name k-end k-free-vars k-rename k-start
-        k-at-of k-vsubr-parts) (import check-logic k-spec-of k-spec-delta)
+        k-at-of k-vsubr-parts k-entered k-left) (import check-logic k-spec-of k-spec-delta)
 (import check-allof k-allof-type? k-allof-lambda k-allof-call k-arm-dead? k-as-argument k-split-app
         k-branch-synth k-branch-check)
 (import check-modorder k-early-modules k-lambda-item? k-mod-edges k-mod-groups k-mod-hazards
@@ -109,10 +109,12 @@
 (define k-items (with check-read k-items))
 
 (define-rec
+  ;; Where an error raised in it is found, unless in what is in it (`k-entered`).
   (k-synth (->* (kx) k-te)
     (lambda (x)
-      (let* ((r (k-synth-node x)) (e (k-frozen x (extract r 2))))
-        (begin (k-note-effect x e) (k-kill-paths e) (k-path-te x (k-te (extract r 1) e))))))
+      (let* ((was (k-entered x)) (r (k-synth-node x)) (e (k-frozen x (extract r 2))))
+        (begin (k-note-effect x e) (k-kill-paths e)
+               (k-left was) (k-path-te x (k-te (extract r 1) e))))))
   (k-synth-node (->* (kx) k-te)
     (lambda (x)
       (tagcase x
@@ -412,14 +414,6 @@
              (begin
                (k-note-call x f ft (extract c 2))
                (k-app-result x f ft args e (extract c 1) (extract c 3)))))))))
-  ;; A call's type and effect, once its arguments have effect `e`: its
-  ;; callee's latent effect too, `spin` where the call may loop, and what
-  ;; the call masks; its result, of type `result`.
-  (k-app-result (->* (kx kx int kxs k-eff k-eff int) k-te)
-    (lambda (x f ft args e latent result)
-      (let* ((e (k-union e latent))
-             (e (if (k-may-spin? f ft args) (k-insert (a-spin) e) e)))
-        (k-te-masked x result e))))
   (k-app-args (->* (kxs k-ids int k-done k-eff) k-eff)
     (lambda (args params i done e)
       (if (null? args)
@@ -528,8 +522,8 @@
   ;;; ------------------------------------------------------------ check mode
   (k-check (->* (kx int) k-eff)
     (lambda (x expected)
-      (let ((e (k-frozen x (k-check-mode x expected))))
-        (begin (k-note-effect x e) (k-kill-paths e) e))))
+      (let* ((was (k-entered x)) (e (k-frozen x (k-check-mode x expected))))
+        (begin (k-note-effect x e) (k-kill-paths e) (k-left was) e))))
   (k-check-mode (->* (kx int) k-eff)
     (lambda (x expected)
       (let* ((et (k-get expected))

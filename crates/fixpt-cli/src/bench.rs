@@ -207,12 +207,12 @@ fn usage(why: &str) -> i32 {
 /// One program's row: its name, its answer, and a time per machine.
 fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<String>) -> Result<Vec<String>, String> {
     let answer = {
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| e.message)?;
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| String::from(e.message))?;
         s.scheme.engine.set_step_limit(None);
         match s.run_program(text) {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => return Err(e),
-            Err(e) => return Err(e.message),
+            Err(e) => return Err(String::from(e.message)),
         }
     };
     let lowered = lowered_run(text, runs)?;
@@ -259,12 +259,12 @@ pub(crate) fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
 /// The same, by checker `c`: one of the native convention, for code run
 /// natively, whose calls are compiled as their types say (`TODO.md` §97).
 fn checked_in(text: &str, mut c: Checker) -> Result<(Checker, Vec<Top>), String> {
-    let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
-    let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
+    let forms = c.read_in(FileId(0), text).map_err(|e| String::from(e.message))?;
+    let done = c.declare_ahead(&forms).map_err(|e| String::from(e.message))?;
     let mut tops = Vec::new();
     for (f, d) in forms.iter().zip(done) {
         if !d {
-            tops.extend(c.top_all(f).map_err(|e| e.message)?);
+            tops.extend(c.top_all(f).map_err(|e| String::from(e.message))?);
         }
     }
     Ok((c, tops))
@@ -304,7 +304,7 @@ fn time(runs: usize, mut f: impl FnMut()) -> f64 {
 /// The program checked and lowered by the Rust front end, then run on the
 /// bytecode engine in a session of its own each time, only that timed.
 fn lowered_run(text: &str, runs: usize) -> Result<(String, f64), String> {
-    let compiled = fixpt_fx26::session::compile_program(text).map_err(|e| e.message)?;
+    let compiled = fixpt_fx26::session::compile_program(text).map_err(|e| String::from(e.message))?;
     let mut code = fixpt_fx26::sx::Code::default();
     for c in compiled.code {
         code.extend(c);
@@ -486,10 +486,10 @@ fn fx_phase<T>(
 /// A session with the pieces written in FX-26 loaded, as register code, as
 /// the REPL runs them.
 fn fx_session() -> Result<Fx26Session, String> {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| e.message)?;
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| String::from(e.message))?;
     s.scheme.runtime_unrooted().front_end_run_word = Some(crate::register_machine());
     s.front_end_compiled = true;
-    s.load_own_pieces().map_err(|e| e.message)?;
+    s.load_own_pieces().map_err(|e| String::from(e.message))?;
     s.scheme.engine.set_step_limit(None);
     Ok(s)
 }
@@ -513,7 +513,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         }
     });
     // The Rust compiler, and the Rust assemblers over what it made.
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| e.message)?;
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| String::from(e.message))?;
     s.scheme.engine.set_step_limit(None);
     let (t_words, t_arm, t_regs) = s.scheme.scope(|sc| -> Result<(f64, f64, f64), String> {
         let (mut t_words, mut made) = (f64::INFINITY, Err(String::new()));
@@ -556,7 +556,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
     // code. Each phase starts from what the one before made.
     let (fx_read, fx_parse, fx_check, fx_words, fx_arm) = fx.scheme.scope(|sc| -> Result<_, String> {
         let file = FileId(0);
-        let msg = |e: fixpt_fx26::FxError| e.message;
+        let msg = |e: fixpt_fx26::FxError| String::from(e.message);
         // Reading, the files its `load-module`s name too (the front end's
         // module files built in), handed to the parser.
         let (fx_read, syns) = fx_phase(sc, r("fx read"), |sc| {

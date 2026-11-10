@@ -302,12 +302,14 @@
     (let* ((n (k-length (k-allof-members-of t)))
            (pushed (set k-dead-arms (cons (product (1 nil) (2 nil) (3 n) (4 0) (5 nil))
                                           (get k-dead-arms))))
-           (r (prompt k-tag (k-done (k-allof-run x (k-allof-members-of t) check))
-                      (lambda (r) r)))
+           (r (let* ((k-at-now (k-now))
+                     (k-caught (prompt k-tag (k-done (k-allof-run x (k-allof-members-of t) check))
+                                 (lambda (r) r))))
+                (k-now-back k-at-now k-caught)))
            (popped (set k-dead-arms (cdr (get k-dead-arms)))))
       (tagcase r
         (k-done (te) (extract te 2))
-        (k-err (m a b) (k-fail m a b))
+        (k-err (m a b ok or) (k-fail-found m a b ok or))
         (k-ok (xs) (k-fail "k-ok inside" (k-start x) (k-end x)))))))
 (define k-allof-run (->* (kx k-ids k-check-fn) k-te)
   (lambda (x ms check)
@@ -625,7 +627,9 @@
 ;; Rust's `synth_app_split`.
 (define k-split-app (->* (kx kx kxs int k-app-fn k-synth-fn) k-te)
   (lambda (x f args expected app synth)
-    (let ((r (prompt k-tag (k-done (app x f args expected)) (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag (k-done (app x f args expected)) (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       (tagcase r
         ;; Checks, but not as what is expected: as its members, if their
         ;; union is (`swap` of an `(anyof expr op)` an `(anyof expr op)`);
@@ -637,21 +641,25 @@
             (if (null? tried)
                 te
                 (k-split-or-whole x f args expected app tried te))))
-        (k-err (m a b)
-          ;; An error inside an argument that is not a variable is that
-          ;; argument's, which no member of another makes go away.
-          (let ((tried (if (k-err-in-arg? args a b) nil (k-split-candidates args 0 synth))))
+        (k-err (m a b ok or)
+          ;; An error found inside an argument that is not a variable is that
+          ;; argument's, which no member of another makes go away. Inside by
+          ;; structure, not by place: a macro's expansion may give its nodes
+          ;; one place, and an argument it copies the place of another's.
+          (let ((tried (if (k-err-in-arg? args ok or) nil (k-split-candidates args 0 synth))))
             (if (null? tried)
-                (k-fail m a b)
+                (k-fail-found m a b ok or)
                 (k-split-tries x f args expected app (k-code-but (k-start x) (k-end x)) tried
-                               m a b))))
+                               m a b ok or))))
         (k-ok (xs) (k-fail "k-ok inside" (k-start x) (k-end x)))))))
+;; Whether the expression of walk number `ok` and reading `or` is in one of
+;; `args` that is not a variable.
 (define k-err-in-arg? (->* (kxs int int) bool)
-  (lambda (args a b)
+  (lambda (args ok or)
     (and (not (null? args))
          (or (and (tagcase (car args) (x-var (v xa xb abk abkr) #f) (else y #t))
-                  (>= a (k-start (car args))) (<= b (k-end (car args))))
-             (k-err-in-arg? (cdr args) a b)))))
+                  (k-skipped? (product (1 0) (2 0) (3 ok) (4 or)) (k-keys-onto (car args) nil)))
+             (k-err-in-arg? (cdr args) ok or)))))
 ;; Each of `args`, from the `i`th, whose type is a union, in order, as it is
 ;; taken apart: a variable, by its name and binding (`k-narrowed`; 4 is -1);
 ;; any other, by its place (`k-pinned`), its type synthesized (4 is its
@@ -673,7 +681,10 @@
                                         (list (product (1 v) (2 (k-name-depth v)) (3 ms) (4 -1)))))
                                  (else y nil)))))
                        (else y
-                         (let ((r (prompt k-tag (k-done (synth a)) (lambda (r) r))))
+                         (let ((r (let* ((k-at-now (k-now))
+                                         (k-caught
+                                          (prompt k-tag (k-done (synth a)) (lambda (r) r))))
+                                    (k-now-back k-at-now k-caught))))
                            (tagcase r
                              (k-done (te)
                                (tagcase (k-get (k-resolve (extract te 1)))
@@ -709,21 +720,25 @@
   (lambda (x f args expected app tried te)
     (let* ((whole (k-code-now))
            (inside (k-code-but (k-start x) (k-end x)))
-           (r (prompt k-tag (k-done (k-split-tries x f args expected app inside tried "" 0 0))
-                      (lambda (r) r))))
+           (r (let* ((k-at-now (k-now))
+                     (k-caught (prompt k-tag
+                                 (k-done (k-split-tries x f args expected app inside tried
+                                                        "" 0 0 -1 -1))
+                                 (lambda (r) r))))
+                (k-now-back k-at-now k-caught))))
       (tagcase r
         (k-done (u) (if (k-subtype (extract u 1) expected) u (begin (k-code-put-back whole) te)))
         (else y (begin (k-code-put-back whole) te))))))
 ;; Each of `tried` in turn, until one whose every member checks; none, the
-;; error `m` at `a`..`b`.
+;; error `m` at `a`..`b`, found in `ok` of reading `or`.
 (define k-split-tries
-  (->* (kx kx kxs int k-app-fn k-code (listof k-split acyclic) string int int) k-te)
-  (lambda (x f args expected app saved tried m a b)
+  (->* (kx kx kxs int k-app-fn k-code (listof k-split acyclic) string int int int int) k-te)
+  (lambda (x f args expected app saved tried m a b ok or)
     (if (null? tried)
-        (k-fail m a b)
+        (k-fail-found m a b ok or)
         (let ((runs (k-split-runs x f args expected app saved (car tried) (extract (car tried) 3))))
           (if (null? runs)
-              (k-split-tries x f args expected app saved (cdr tried) m a b)
+              (k-split-tries x f args expected app saved (cdr tried) m a b ok or)
               (k-split-joined x saved (car tried) (car runs)))))))
 ;; One member's: what it found, and the call's type and effect with it.
 (define-type k-run (productof (1 k-found) (2 k-te)))
@@ -743,7 +758,9 @@
                            (set k-narrowed (cons narrow outer))
                            (let ((pin (product (1 (k-at-of (k-nth args i))) (2 (car ms)))))
                              (set k-pinned (cons pin pins)))))
-               (r (prompt k-tag (k-done (app x f args expected)) (lambda (r) r)))
+               (r (let* ((k-at-now (k-now))
+                         (k-caught (prompt k-tag (k-done (app x f args expected)) (lambda (r) r))))
+                    (k-now-back k-at-now k-caught)))
                (popped (begin (set k-narrowed outer) (set k-pinned pins))))
           (tagcase r
             (k-done (te)

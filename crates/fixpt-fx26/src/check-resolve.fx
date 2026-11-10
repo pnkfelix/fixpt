@@ -90,6 +90,16 @@
       (x-tagcase (e arms els a b abk abkr) abk) (x-letregion (k r i e a b abk abkr) abk)
       (x-rlambda (r l a b abk abkr) abk) (x-module (items a b abk abkr) abk)
       (x-with (m e a b abk abkr) abk))))
+;; `x` entered, the expression being checked (`k-now-kth`), by `k-synth` or
+;; `k-check`, which find what error is raised in it, unless in what is in
+;; it (Rust's `FxError::origin`); and the one entered before, which
+;; `k-left` makes the one being checked again.
+(define k-entered (->* (kx) (productof (1 int) (2 int)))
+  (lambda (x)
+    (let ((was (k-now)))
+      (begin (set k-now-kth (k-kth x)) (set k-now-reading (k-reading x)) was))))
+(define k-left (->* ((productof (1 int) (2 int))) unit)
+  (lambda (was) (begin (set k-now-kth (extract was 1)) (set k-now-reading (extract was 2)))))
 ;; The reading `x` was numbered in.
 (define k-reading (->* (kx) int)
   (lambda (x)
@@ -160,8 +170,6 @@
 ;; `x`'s identity.
 (define k-at-of (->* (kx) k-at)
   (lambda (x) (product (1 (k-start x)) (2 (k-end x)) (3 (k-kth x)) (4 (k-reading x)))))
-(define k-same-span? (->* (kx int int) bool)
-  (lambda (x a b) (and (= (k-start x) a) (= (k-end x) b))))
 
 (define k-resolve-params (->* (exp-params) k-typed-params)
   (lambda (ps)

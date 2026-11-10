@@ -15,7 +15,7 @@ fn rejects(program: &str) -> String {
     let mut c = Checker::new();
     match c.check_program(program) {
         Ok(k) => panic!("checks as {}, and should not:\n{program}", c.show_ty(k.ty)),
-        Err(e) => e.message,
+        Err(e) => String::from(e.message),
     }
 }
 

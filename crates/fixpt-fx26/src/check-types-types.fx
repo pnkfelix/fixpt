@@ -239,10 +239,13 @@
 ;; A type and an effect.
 (define-type k-te (productof (1 int) (2 k-eff)))
 ;; What checking a program found, or the first error; and, inside, what a
-;; computation whose errors are being rewritten produced.
+;; computation whose errors are being rewritten produced. An error is what
+;; it says, where (its provenance), and the walk number and reading of the
+;; expression whose check found it (its identity, -1 for none: Rust's
+;; `FxError::origin`).
 (define-datatype k-result
   (k-ok (listof string acyclic))
-  (k-err string int int)
+  (k-err string int int int int)
   (k-done k-te))
 ;; The variables a test has narrowed, in the branch where it did: each by
 ;; name and binding, and its type there (the Rust checker's `narrowed`).
@@ -318,6 +321,11 @@
         (subr (maxeff (alloc @t) (goto @z) (read @globals) spin (read @s) (read @t) (write @t))
               (string int int)
               void))
+   (val k-fail-found (subr checks (string int int int int) void))
+   (val k-now-kth (ref int @t))
+   (val k-now-reading (ref int @t))
+   (val k-now (subr kbuilds () (productof (1 int) (2 int))))
+   (val k-now-back (subr kstate ((productof (1 int) (2 int)) k-result) k-result))
    (val k-cat4 (subr (maxeff (read @globals) spin) (string string string string) string))
    (val k-quote (subr (maxeff (read @globals) spin) (string) string))
    (val k-join

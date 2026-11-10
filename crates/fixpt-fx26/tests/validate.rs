@@ -96,7 +96,7 @@ fn a_definition_checked_again_is_read_again() {
     s.strategy = fixpt_fx26::session::Strategy::Cellular;
     let mut run = |text: &str| -> Vec<String> {
         let forms = s.checker.read_in(FileId(0), text).expect("reads");
-        forms.iter().map(|f| s.run(f).map(|o| format!("{}{}", o.printed, o.value.map(|v| v.unwrap_or_default()).unwrap_or_default())).unwrap_or_else(|e| e.message)).collect()
+        forms.iter().map(|f| s.run(f).map(|o| format!("{}{}", o.printed, o.value.map(|v| v.unwrap_or_default()).unwrap_or_default())).unwrap_or_else(|e| String::from(e.message))).collect()
     };
     run(include_str!("programs/redefine/compatible.fx"));
     let out = run(include_str!("validate/redefine-again.fx"));

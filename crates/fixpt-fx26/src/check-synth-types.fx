@@ -131,6 +131,16 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (kx int k-eff)
                        k-te))
+            (val k-app-result
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (kx kx int kxs k-eff k-eff int)
+                       k-te))
             (val k-masked
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (kx k-te)

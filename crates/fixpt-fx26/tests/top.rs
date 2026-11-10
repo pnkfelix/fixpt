@@ -4,8 +4,8 @@ use fixpt_fx26::{Checker, Top};
 use fixpt_read::FileId;
 
 fn top(c: &mut Checker, text: &str) -> Result<Top, String> {
-    let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
-    c.top(&forms[0]).map_err(|e| e.message)
+    let forms = c.read_in(FileId(0), text).map_err(|e| String::from(e.message))?;
+    c.top(&forms[0]).map_err(|e| String::from(e.message))
 }
 
 fn ty_of(c: &mut Checker, text: &str) -> String {
@@ -143,7 +143,7 @@ fn refused_loads_leave_nothing_behind() {
     let mut c = Checker::new();
     c.base_dir = Some(std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/module-files")));
     let form = c.read_in(FileId(0), "(load-module \"stateful-nested.fx\")").expect("reads");
-    let first = c.top_defining(&form[0]).expect_err("refused").message;
+    let first = String::from(c.top_defining(&form[0]).expect_err("refused").message);
     assert!(first.starts_with("a loaded file is one value for all its loads"), "{first}");
     let again = c.top_defining(&form[0]).expect_err("refused again").message;
     assert_eq!(again, first);
@@ -153,7 +153,7 @@ fn refused_loads_leave_nothing_behind() {
     d.base_dir = c.base_dir.clone();
     let form = d.read_in(FileId(0), "(load-module \"stateful-nested.fx\")").expect("reads");
     let mark = d.interner.len();
-    let tried = d.try_top(&form[0], |_, r| r.err().map(|e| e.message));
+    let tried = d.try_top(&form[0], |_, r| r.err().map(|e| String::from(e.message)));
     d.interner.truncate(mark);
     assert_eq!(tried.as_deref(), Some(first.as_str()));
     assert_eq!(d.top_defining(&form[0]).expect_err("refused").message, first);

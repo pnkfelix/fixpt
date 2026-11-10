@@ -270,17 +270,19 @@
                (olds (k-old-types (extract u 1)))
                (m (k-mark))
                (reset (set k-last-uses nil))
-               (r (prompt k-tag
-                    (let ((ls (k-top-lines form)))
-                      (begin (k-no-reaching-itself form (extract u 1)) (k-ok ls)))
-                    (lambda (r) r))))
+               (r (let* ((k-at-now (k-now))
+                         (k-caught (prompt k-tag
+                                     (let ((ls (k-top-lines form)))
+                                       (begin (k-no-reaching-itself form (extract u 1)) (k-ok ls)))
+                                     (lambda (r) r))))
+                    (k-now-back k-at-now k-caught))))
           (tagcase r
             (k-ok (ls)
               (let* ((assigns (k-fits-old? olds))
                      (recorded (k-record form (extract u 1)))
                      (ran (k-note-run form assigns)))
                 (k-rerun (cdr users) ns (k-lines-append lines ls))))
-            (k-err (msg a b)
+            (k-err (msg a b ok or)
               (begin (k-unbind-to m)
                      (let ((why (k-cat5 "since " (k-shown ns) " was redefined (" msg ")")))
                        (k-break-all (extract u 1) why))
@@ -545,14 +547,17 @@
 ;; then names, not spells out; nothing bound if `rep` is empty.
 (define check-staged-program (->* (syns-a k-tops (bytevectorof @t)) k-result)
   (lambda (standard forms rep)
-    (let ((r (prompt k-tag
-               (begin (k-reset) (set k-broken-began (get k-broken)) (set k-syscall-expanding 0)
-                      (k-standard standard)
-                      (set k-std-dscope (get k-dscope))
-                      (k-stage-type! rep)
-                      (k-ahead forms)
-                      (k-ok (k-forms forms (k-types-again forms))))
-               (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag
+                                (begin (k-reset) (set k-broken-began (get k-broken))
+                                       (set k-syscall-expanding 0)
+                                       (k-standard standard)
+                                       (set k-std-dscope (get k-dscope))
+                                       (k-stage-type! rep)
+                                       (k-ahead forms)
+                                       (k-ok (k-forms forms (k-types-again forms))))
+                                (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       (begin (k-stage-type-gone! rep) r))))
 
 ;; The entry point for more of a program, form by form, as the REPL gives
@@ -565,19 +570,21 @@
 ;; (`k-rep-ty`), if not empty: as `check-staged-program` binds it.
 (define check-more-with (->* (k-tops (bytevectorof @t)) k-result)
   (lambda (forms rep)
-    (let ((r (prompt k-tag
-               (begin (set k-extracts nil)
-                      (set k-syscall-expanding 0)
-                      (set k-broken-began (get k-broken))
-                      (set k-effect-notes nil)
-                      (k-forget-withs)
-                      (set k-reshapes nil)
-                      (set k-reshape-bases nil)
-                      (set k-runs nil)
-                      (k-stage-type! rep)
-                      (k-ahead forms)
-                      (k-ok (k-forms forms nil)))
-               (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag
+                                (begin (set k-extracts nil)
+                                       (set k-syscall-expanding 0)
+                                       (set k-broken-began (get k-broken))
+                                       (set k-effect-notes nil)
+                                       (k-forget-withs)
+                                       (set k-reshapes nil)
+                                       (set k-reshape-bases nil)
+                                       (set k-runs nil)
+                                       (k-stage-type! rep)
+                                       (k-ahead forms)
+                                       (k-ok (k-forms forms nil)))
+                                (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       ;; Kept or not, the name gone after: a session's next step binds its own.
       (begin (k-stage-type-gone! rep) r))))
 ;; For a load of a `.fasl` (`session.rs`'s `run_program_def`,
@@ -590,11 +597,13 @@
   (lambda (bytes)
     (begin
       (set k-imported nil)
-      (prompt k-tag
-        (begin ((with check-reps k-rep-making!) #f)
-               (set k-imported ((with check-reps k-rep-tys) bytes))
-               (k-ok nil))
-        (lambda (r) r))
+      (let* ((k-at-now (k-now))
+             (k-caught (prompt k-tag
+                         (begin ((with check-reps k-rep-making!) #f)
+                                (set k-imported ((with check-reps k-rep-tys) bytes))
+                                (k-ok nil))
+                         (lambda (r) r))))
+        (k-now-back k-at-now k-caught))
       ((with check-reps k-rep-making!) #t)
       (get k-imported))))
 ;; `forms` checked as `check-more` checks them, each of `named` its name

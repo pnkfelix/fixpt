@@ -1102,7 +1102,7 @@ impl Fx26Session {
     /// budget of its own, since speculation must not hang the editor.
     pub fn speculate(&mut self, form: &Syntax) -> Speculation {
         let code = self.checker.try_top(form, |c, r| match r {
-            Err(e) => Err(Speculation::Rejected(e.message)),
+            Err(e) => Err(Speculation::Rejected(e.message.into())),
             Ok(Top::Exp(k)) => match crate::licence::unlicensed(&k.effect, &[]) {
                 Some(a) => Err(Speculation::NotLicensed(c.show_atom(a))),
                 None => Ok(lower(c, &self.globals, k.exp)),
@@ -1204,7 +1204,8 @@ impl Fx26Session {
         self.scheme.scope(|s| s.runtime_unrooted().heap.regions_exit_to(0));
         match r {
             Ok(Ok(v)) => Speculation::Value(v),
-            Ok(Err(e)) | Err(FxError { message: e, .. }) => Speculation::Failed(e),
+            Ok(Err(e)) => Speculation::Failed(e),
+            Err(FxError { message: e, .. }) => Speculation::Failed(e.into()),
         }
     }
 
@@ -1943,11 +1944,11 @@ impl Fx26Session {
                 }
                 crate::fasl::Link::Global(n) => (n, false),
                 crate::fasl::Link::DepCell(i) | crate::fasl::Link::DepValue(i) => {
-                    let Some(d) = deps.get(i) else { return Ok(Err(fail(format!("it names its load {i}, which it has not")).message)) };
+                    let Some(d) = deps.get(i) else { return Ok(Err(fail(format!("it names its load {i}, which it has not")).message.into())) };
                     (self.checker.interner.name(*d).to_string(), matches!(link, crate::fasl::Link::DepValue(_)))
                 }
             };
-            let Some(cell) = self.global_cell(&global)? else { return Ok(Err(fail(format!("it names `{global}`, which is not defined here")).message)) };
+            let Some(cell) = self.global_cell(&global)? else { return Ok(Err(fail(format!("it names `{global}`, which is not defined here")).message.into())) };
             let h = if value { self.scheme.make(|m| { let c = m.get(cell); m.heap().bloblet_slot(c, GLOBAL_VALUE) }) } else { cell };
             found.push((p, h));
         }
@@ -2008,7 +2009,7 @@ impl Fx26Session {
             fixpt_heap::Value::FALSE
         });
         if let Some(why) = why {
-            return Ok(Err(fail(why).message));
+            return Ok(Err(fail(why).message.into()));
         }
         Ok(Ok(None))
     }

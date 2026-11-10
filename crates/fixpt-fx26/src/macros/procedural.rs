@@ -104,7 +104,7 @@ pub fn run(code: &str) -> Result<String, String> {
         }
         match s.as_mut().expect("made").run_program(code) {
             Ok(r) => r,
-            Err(e) => Err(e.message),
+            Err(e) => Err(e.message.into()),
         }
     })
 }

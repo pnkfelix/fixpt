@@ -636,7 +636,7 @@ impl Checker {
         note(self, found);
         let again = self.check_declared(n, found, init).map_err(|err| {
             let shown = self.show_ty(found);
-            FxError::at(err.span, format!("`define*` found `{}` to be a {shown}: {}", self.interner.name(n), err.message))
+            err.reworded(err.span, format!("`define*` found `{}` to be a {shown}: {}", self.interner.name(n), err.message))
         });
         self.recursive.truncate(rdepth);
         Ok((found, again?))
@@ -760,7 +760,7 @@ impl Checker {
         // call's argument's is the argument's (`as_argument`).
         let at = self.arena.span_of(body);
         let (t, be) = self.in_scope(&vals, |c| match expected {
-            Some(x) => Ok((x, c.check(body, x).map_err(|err| if err.span == at { FxError::at(span, err.message) } else { err })?)),
+            Some(x) => Ok((x, c.check(body, x).map_err(|err| if err.span == at { err.reworded(span, err.message.clone()) } else { err })?)),
             None => c.synth(body),
         })?;
         let eff = self.mask(e, &naming.union(&be), t);

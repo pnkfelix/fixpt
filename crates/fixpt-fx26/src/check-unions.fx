@@ -313,7 +313,10 @@
 ;; `sums` made one, or `t` if they cannot be.
 (define k-sums-joined-or (->* (k-ids int) int)
   (lambda (sums t)
-    (let ((r (prompt k-tag (k-done (k-te (k-sums-joined sums 0 0) nil)) (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag (k-done (k-te (k-sums-joined sums 0 0) nil))
+                                (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       (tagcase r (k-done (te) (extract te 1)) (else y t)))))
 ;; Each tag of `ps` once, at its first place, its payload the `anyof` of
 ;; every payload `ps` has for it (`all`, the whole; `seen`, tags placed).

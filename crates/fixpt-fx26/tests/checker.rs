@@ -40,7 +40,7 @@ fn rust_check(program: &str) -> Result<Vec<String>, (String, u32, u32)> {
 }
 
 fn rust_check_in(mut c: Checker, program: &str) -> Result<Vec<String>, (String, u32, u32)> {
-    fixpt_fx26::compare::check_with_rust_checker(&mut c, program).map_err(|e| (e.message, e.span.start, e.span.end))
+    fixpt_fx26::compare::check_with_rust_checker(&mut c, program).map_err(|e| (String::from(e.message), e.span.start, e.span.end))
 }
 
 /// The FX-26 checker on `program`; `None` if the FX-26 front end cannot
@@ -51,7 +51,7 @@ fn fx26_check(program: &str) -> Option<Result<Vec<String>, (String, u32, u32)>> 
 
 fn fx26_check_in(s: &mut Fx26Session, program: &str) -> Option<Result<Vec<String>, (String, u32, u32)>> {
     let r = s.check_with_own_checker(program).ok()?;
-    Some(r.map_err(|e| (e.message, e.span.start, e.span.end)))
+    Some(r.map_err(|e| (String::from(e.message), e.span.start, e.span.end)))
 }
 
 fn canon(r: Result<Vec<String>, (String, u32, u32)>) -> Result<Vec<String>, (String, u32, u32)> {
@@ -97,7 +97,7 @@ fn small_programs() {
 /// places it, not at 1:1 (PLAN.md Q11, `DONE.md` §15).
 #[test]
 fn reader_errors_say_where() {
-    let at = |p: &str| common::with_own(|s| s.check_with_own_checker(p).err()).map(|e| (e.message, e.span.start));
+    let at = |p: &str| common::with_own(|s| s.check_with_own_checker(p).err()).map(|e| (String::from(e.message), e.span.start));
     assert_eq!(at("(define x 1)\n(+ x 1))"), Some(("unbalanced `)`".to_string(), 20)));
     assert_eq!(at("(define x 1)\n(define y (+ x 2)\n(+ y 1)"), Some(("unterminated list, expected `)`".to_string(), 13)));
     // A qualified name names a name, never a number.

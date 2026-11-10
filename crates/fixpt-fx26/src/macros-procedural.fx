@@ -117,11 +117,13 @@
 
 ;; Where a part a template made is: a key of its own, which no other part
 ;; and no text has, a place past every text's (`source-base`, above the
-;; positions of every file loaded, `load-base` apart), so that two
-;; expansions' copies of one part of the template are apart; and, by its
-;; key, where the template wrote it and which expansion made it, for what
-;; is said of it (`source-of`; the driver's `fx26_span`), as the Rust front
-;; end's `Span` has a template's place and its `expansion`. Keys are made
+;; positions of every file loaded, `load-base` apart); and, by its key,
+;; where the template wrote it and which expansion made it, for what is
+;; said of it (`source-of`; the driver's `fx26_span`), as the Rust front
+;; end's `Span` has a template's place and its `expansion`. Provenance
+;; only: what the checkers find of an expression is keyed by its place in
+;; the parser's walk (`docs/research/loads-and-places.md`), so parts that
+;; share a key, or a part placed twice, are told apart. Keys are made
 ;; in order, a list's start before its parts' and its end after, so that
 ;; a part is within its list. One table for the session, so that no key is
 ;; given twice.

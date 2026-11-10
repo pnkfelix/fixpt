@@ -59,7 +59,7 @@
             (p-err (m a b) (b-fail (string-append "parse: " m)))
             (p-ok (tops)
               (tagcase (check-program (car std) tops)
-                (k-err (m a b) (b-fail (string-append "check: " m)))
+                (k-err (m a b ok or) (b-fail (string-append "check: " m)))
                 (k-ok (lines)
                   (tagcase (compile-checked (checked-tops) (checked-extracts)
                                             (product (1 0) (2 0) (3 nil)))

@@ -566,13 +566,15 @@
 ;; so, and, if it is about `spin` and `n`'s group may not end, why not.
 (define k-declaring (->* (k-thunk int int symbol int) k-te)
   (lambda (f a b n t)
-    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
+    (let ((r (let* ((k-at-now (k-now))
+                    (k-caught (prompt k-tag (k-done (f)) (lambda (r) r))))
+               (k-now-back k-at-now k-caught))))
       (tagcase r
         (k-done (te) te)
-        (k-err (m ea eb)
+        (k-err (m ea eb ok or)
           (if (and (= ea a) (= eb b))
-              (k-fail (k-declared-error m n t a b) ea eb)
-              (k-fail m ea eb)))
+              (k-fail-found (k-declared-error m n t a b) ea eb ok or)
+              (k-fail-found m ea eb ok or)))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 
 ;; The error for `n`, bound in a recursive group to `x`, which is not a lambda.

@@ -551,9 +551,9 @@ fn committed<T>(
                 _ => state.checker.defer_reruns = true,
             }
         }
-        let (_, forms) = read(state, &form).map_err(|e| ("refused", e.message))?;
+        let (_, forms) = read(state, &form).map_err(|e| ("refused", e.message.into()))?;
         let settings = crate::ids::Settings::of(&state.checker);
-        let done = state.checker.top_defining(&forms[0]).map_err(|e| ("refused", e.message));
+        let done = state.checker.top_defining(&forms[0]).map_err(|e| ("refused", String::from(e.message)));
         state.checker.defer_reruns = true;
         let done = done?;
         state.keep(&settings, &form);

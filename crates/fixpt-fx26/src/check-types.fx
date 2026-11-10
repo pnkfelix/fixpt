@@ -66,8 +66,22 @@
 ;; `read-again`), which advances the parser's count.
 (define k-tag (prompt-tag k-result k-result (maxeff spin (read @s) (write @s) (alloc @s) kstate) @z)
   (make-continuation-prompt-tag))
+;; The expression being checked, the innermost (`k-synth`, `k-check`): its
+;; walk number and reading, -1 where none; where an error raised is found.
+(define k-now-kth (ref int @t) (new -1))
+(define k-now-reading (ref int @t) (new -1))
 (define k-fail (subr checks (string int int) void)
-  (lambda (m a b) (abort-current-continuation k-tag (k-err m a b))))
+  (lambda (m a b)
+    (abort-current-continuation k-tag (k-err m a b (get k-now-kth) (get k-now-reading)))))
+;; An error caught raised again, perhaps said otherwise: found where it was.
+(define k-fail-found (subr checks (string int int int int) void)
+  (lambda (m a b ok or) (abort-current-continuation k-tag (k-err m a b ok or))))
+;; Where checking is, `(k-now)`, put back by `k-now-back` once a `prompt`
+;; has caught an error raised deeper.
+(define k-now (subr kbuilds () (productof (1 int) (2 int)))
+  (lambda () (product (1 (get k-now-kth)) (2 (get k-now-reading)))))
+(define k-now-back (subr kstate ((productof (1 int) (2 int)) k-result) k-result)
+  (lambda (n r) (begin (set k-now-kth (extract n 1)) (set k-now-reading (extract n 2)) r)))
 
 ;;; ---------------------------------------------------------------- strings
 

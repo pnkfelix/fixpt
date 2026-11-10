@@ -31,7 +31,7 @@ fn module_programs_do_as_they_say() {
         let got = match s.run_program(&text) {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => Err(e.to_string()),
-            Err(e) => Err(e.message),
+            Err(e) => Err(String::from(e.message)),
         };
         seen += 1;
         let ok = match (first.strip_prefix(";; => "), first.strip_prefix(";; ! "), &got) {
@@ -59,12 +59,12 @@ fn the_rust_compiler_runs_modules_as_lowered() {
     let checked = |text: &str, dir: Option<std::path::PathBuf>| -> Result<(Checker, Vec<Top>), String> {
         let mut c = Checker::new();
         c.base_dir = dir;
-        let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
-        let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
+        let forms = c.read_in(FileId(0), text).map_err(|e| String::from(e.message))?;
+        let done = c.declare_ahead(&forms).map_err(|e| String::from(e.message))?;
         let mut tops = Vec::new();
         for (f, done) in forms.iter().zip(done) {
             if !done {
-                tops.extend(c.top_all(f).map_err(|e| e.message)?);
+                tops.extend(c.top_all(f).map_err(|e| String::from(e.message))?);
             }
         }
         Ok((c, tops))

@@ -121,7 +121,7 @@ pub fn canonical(s: &str) -> String {
 /// [`canonical`] on each line, and on the error's message.
 pub fn canonical_checked(r: Checked26) -> Checked26 {
     r.map(|ls| ls.iter().map(|l| canonical(l)).collect()).map_err(|mut e| {
-        e.message = canonical(&e.message);
+        e.message = canonical(&e.message).into();
         e
     })
 }
@@ -184,7 +184,7 @@ pub fn includes_given(c: &mut Checker, text: &str) -> Vec<crate::syn::IncludeGiv
                 out.push(crate::syn::IncludeGiven { at: f.span.start, names: [names(vals), names(types), names(effects)], why: String::new(), why_at: f.span.start, why_end: f.span.end });
             }
             Ok(None) => {}
-            Err(e) => out.push(crate::syn::IncludeGiven { at: f.span.start, names: Default::default(), why: e.message, why_at: e.span.start, why_end: e.span.end }),
+            Err(e) => out.push(crate::syn::IncludeGiven { at: f.span.start, names: Default::default(), why: e.message.into(), why_at: e.span.start, why_end: e.span.end }),
         }
     }
     out

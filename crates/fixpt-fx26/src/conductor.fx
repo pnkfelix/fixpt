@@ -510,7 +510,7 @@
                       ((with regcode-entry compile-registers!) registers)
                       (let ((out
                              (tagcase ((with check-program check-staged) standard tops rep)
-                               (k-err (m a b)
+                               (k-err (m a b ok or)
                                  (fail (sum refused #u) m (clamp a k len) (clamp b k len)))
                                (k-done (t) (fail (sum refused #u) "not an expression" 0 len))
                                (k-ok (ls)
@@ -565,7 +565,7 @@
                         (p-err (m a b) (said m s))
                         (p-ok (tops)
                           (tagcase ((with check-program check-more-typed) tops named)
-                            (k-err (m a b) (said m s))
+                            (k-err (m a b ok or) (said m s))
                             (else y (said "" (extract p 2))))))))))))
          ;; The state a session's checker is in (this instance's, a session's
          ;; own: `make-session-compiler`), as a step reads its text in it: the
@@ -616,15 +616,15 @@
                           ((= how 2)
                            (let ((t ((with check-program check-try) tops name rep)))
                              (tagcase (extract t 1)
-                               (k-err (m a b) (refused m a b))
+                               (k-err (m a b ok or) (refused m a b))
                                (else y (sum typed (product (1 (extract t 2)) (2 (extract t 3))))))))
                           ((= how 0)
                            (tagcase ((with check-program check-program) standard tops)
-                             (k-err (m a b) (refused m a b))
+                             (k-err (m a b ok or) (refused m a b))
                              (else y (begin (set step-state r) (sum checked #u)))))
                           (else
                            (tagcase ((with check-program check-more-with) tops rep)
-                             (k-err (m a b) (refused m a b))
+                             (k-err (m a b ok or) (refused m a b))
                              (k-done (t) (refused "not a form" 0 len))
                              (k-ok (ls)
                               (begin

@@ -55,14 +55,14 @@ fn lowered(text: &str, seed: Option<i64>) -> Result<String, String> {
     fixpt_runtime::sched::set_seed(&mut s.scheme.runtime_unrooted().heap, seed);
     match s.run_program(text) {
         Ok(r) => r,
-        Err(e) => Err(e.message),
+        Err(e) => Err(String::from(e.message)),
     }
 }
 
 /// What the pieces written in FX-26 print, as a value or why not; or why
 /// they could not run it, a program they could not parse.
 fn printed(out: Result<String, fixpt_fx26::FxError>) -> Result<String, String> {
-    let out = out.map_err(|e| e.message)?;
+    let out = out.map_err(|e| String::from(e.message))?;
     match out.strip_prefix("!! ") {
         Some(e) => Err(e.to_string()),
         None => Ok(out),
@@ -93,16 +93,16 @@ fn native(text: &str) -> Result<String, String> {
     s.register_code = true;
     s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
     s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
-    let forms = s.checker.read_in(FileId(0), text).map_err(|e| e.message)?;
+    let forms = s.checker.read_in(FileId(0), text).map_err(|e| String::from(e.message))?;
     let mut last = Ok(String::new());
-    for o in s.run_forms(&forms).map_err(|e| e.message)? {
+    for o in s.run_forms(&forms).map_err(|e| String::from(e.message))? {
         match o {
             Ok(o) => match o.value {
                 Ok(Some(v)) => last = Ok(v),
                 Ok(None) => {}
                 Err(e) => return Err(e),
             },
-            Err(e) => return Err(e.message),
+            Err(e) => return Err(String::from(e.message)),
         }
     }
     last
@@ -247,8 +247,8 @@ fn the_interference_table_both_checkers() {
     for (i, (a, ea)) in effects.iter().enumerate() {
         for (b, eb) in &effects[i..] {
             let program = format!("{defs}(par ((u (begin {ea} 0)) (v (begin {eb} 0))) (+ u v))\n");
-            let rust = fixpt_fx26::compare::check_with_rust_checker(&mut Checker::new(), &program).map_err(|e| e.message);
-            let ours = common::with_own(|s| s.check_with_own_checker(&program)).expect("parses").map_err(|e| e.message);
+            let rust = fixpt_fx26::compare::check_with_rust_checker(&mut Checker::new(), &program).map_err(|e| String::from(e.message));
+            let ours = common::with_own(|s| s.check_with_own_checker(&program)).expect("parses").map_err(|e| String::from(e.message));
             let refused = |r: &Result<Vec<String>, String>| r.as_ref().err().is_some_and(|m| m.contains("interfere"));
             if refused(&rust) != clash(a, b) || refused(&ours) != clash(a, b) || rust.is_err() != ours.is_err() {
                 wrong.push(format!("{a} against {b}: Rust {rust:?}, FX-26 {ours:?}"));
