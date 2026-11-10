@@ -5558,7 +5558,15 @@ check, `modnames`. **Begun 2026-11-10**: in Rust, every module's shape read
 and written into the forms that open it (`#:shape`), held to its type by
 the checker (`macros/shapes.rs`); the walk made linear and of no stack.
 A module of no known shape refused (none in the suite's programs that
-check, nor in Heist's). Left: the FX-26 front end's walk and check; type
+check, nor in Heist's). What a form opening a module carries is what the
+references in its scope asked of it, the answers alone (subsumption); the
+walk's shapes are environments of environments, functions' parameters
+included; about 4.5 s of a 56 s cold check of the front end's sources.
+To investigate (the user's, 2026-11-10): shapes written up front
+(`modnames`, `moduleof`) and confirmed lazily, as asked. They would save
+computing a module's shape (some 12% of the 4.5 s), not the walk of each
+file, which its own records (and step 3's renaming) need; more where a
+file is loaded for its shape alone, through a type, and not parsed. Left: the FX-26 front end's walk and check; type
 names by shape (retiring `with`'s fallback); `modnames`. (3) Renaming hygiene with `with` and `include` as
 visible binders; a file's own macros (Heist's (a)); `import-with-syntax`
 in module files and of files with parameters ((b), (c)). (4) Later:

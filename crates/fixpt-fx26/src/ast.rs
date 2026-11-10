@@ -791,13 +791,17 @@ pub struct WithTables {
     pub shaped: std::collections::HashMap<ExpId, Option<WrittenShape>>,
 }
 
-/// A module's names as the expander read them, before its type was known
-/// (`binding-shapes.md`): its values', and its descriptions' (types,
-/// effects, functions of descriptions).
+/// What the expander relied on of a module, before its type was known
+/// (`binding-shapes.md`): each name a reference it found reached the
+/// module by, in its namespace, values' and descriptions' (types, effects,
+/// functions of descriptions), with whether the module gives it, which the
+/// expander took the reference to mean. Written into a form (`#:shape`):
+/// `((x (not y)) (t))`. The module's type must answer each alike; what no
+/// reference asked, it may give or not.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WrittenShape {
-    pub vals: Vec<Sym>,
-    pub descs: Vec<Sym>,
+    pub vals: Vec<(Sym, bool)>,
+    pub descs: Vec<(Sym, bool)>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]

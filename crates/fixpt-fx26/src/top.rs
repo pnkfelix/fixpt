@@ -660,10 +660,20 @@ impl Checker {
     /// forms with the shapes of what they open written in, before anything
     /// else is made of them (`Macros::file_forms_shaped`).
     pub(crate) fn read_module_file_at(&mut self, file: FileId, text: &str, at: Option<(&std::path::Path, bool)>) -> R<Vec<Syntax>> {
-        let mut interner = std::mem::take(&mut self.interner);
-        let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
-        self.interner = interner;
-        let mut forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+        // As read for its shape, if it was: its places made this file's.
+        let kept = at.and_then(|(at, _)| self.macros.forms_read(&at.display().to_string(), text));
+        let mut forms = match kept {
+            Some(mut forms) => {
+                forms.iter_mut().for_each(|f| placed_in(f, file));
+                forms
+            }
+            None => {
+                let mut interner = std::mem::take(&mut self.interner);
+                let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
+                self.interner = interner;
+                r.map_err(|e| FxError::at(e.span, e.message))?
+            }
+        };
         if let Some((at, input)) = at {
             let params = forms.first().is_some_and(|f| crate::parse::module_parameters_of(f, &self.interner).is_some());
             let key = format!("{}{}", if input && !params { "input:" } else { "" }, at.display());
@@ -742,7 +752,11 @@ impl Checker {
                 vals: vals.iter().map(|(n, t)| (*n, self.type_shape(*t, depth + 1))).collect(),
                 descs: abs.iter().map(|(n, _)| (*n, None)).chain(descs.iter().map(|(n, _)| (*n, None))).collect(),
             })),
-            crate::ast::Ty::Subr { result, .. } => Some(std::rc::Rc::new(Shape::Fun(self.type_shape(*result, depth + 1)?))),
+            crate::ast::Ty::Subr { params, result, .. } => {
+                let params: Vec<_> = params.iter().map(|p| self.type_shape(*p, depth + 1)).collect();
+                let result = self.type_shape(*result, depth + 1);
+                (result.is_some() || params.iter().any(Option::is_some)).then(|| std::rc::Rc::new(Shape::Fun { params, result }))
+            }
             crate::ast::Ty::Poly { body, .. } => self.type_shape(*body, depth + 1),
             _ => None,
         }
@@ -788,6 +802,7 @@ impl Checker {
             let mut macros = std::mem::take(&mut self.macros);
             let mut interner = std::mem::take(&mut self.interner);
             let _ = macros.file_shaped(key, &forms, input, sub, &mut interner);
+            macros.keep_forms_read(at.display().to_string(), text, forms);
             self.macros = macros;
             self.interner = interner;
         }
@@ -2213,5 +2228,19 @@ fn syntax_names(s: &Syntax, interner: &fixpt_read::Interner) -> Option<Vec<(Sym,
         "define-syntax" => Some(items.get(1).and_then(named).into_iter().collect()),
         "define-syntax-rec" => Some(items[1..].iter().filter_map(|m| m.as_proper_list().and_then(|l| l.first()).and_then(named)).collect()),
         _ => None,
+    }
+}
+
+/// `s`, its places made places of `file`, in place.
+fn placed_in(s: &mut Syntax, file: FileId) {
+    s.span.file = file;
+    if let fixpt_read::Datum::List { items, tail } = &mut s.datum {
+        items.iter_mut().for_each(|i| placed_in(i, file));
+        if let Some(t) = tail {
+            placed_in(t, file);
+        }
+    }
+    if let fixpt_read::Datum::Vector(items) = &mut s.datum {
+        items.iter_mut().for_each(|i| placed_in(i, file));
     }
 }

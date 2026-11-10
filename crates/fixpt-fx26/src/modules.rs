@@ -694,7 +694,9 @@ impl Checker {
     /// `include` to bind is what it binds. A name of the checkers' own
     /// (`%…`) is no name a program reads.
     pub(crate) fn shape_held(&self, span: Span, m: Option<Sym>, mt: TyId, shape: &Option<crate::ast::WrittenShape>) -> R<()> {
-        let Ty::Module { vals, abs, descs } = self.arena.get(self.arena.resolve(mt)) else { return Ok(()) };
+        if !matches!(self.arena.get(self.arena.resolve(mt)), Ty::Module { .. }) {
+            return Ok(());
+        }
         let shown = match m.map(|m| self.interner.name(m)) {
             Some(m) if !m.starts_with('%') => format!("`{m}`"),
             _ => "this module".to_string(),
@@ -704,23 +706,25 @@ impl Checker {
         let Some(shape) = shape else {
             return Err(FxError::at(span, format!("the names {shown} gives are not known before it is checked: give it a type where it is bound, `(the (moduleof …) e)` or a parameter's")));
         };
-        let own = |c: &Self, n: &Sym| !c.interner.name(*n).starts_with('%');
-        let given: Vec<Sym> = vals.iter().map(|(n, _)| *n).filter(|n| own(self, n)).collect();
-        let given_d: Vec<Sym> = abs.iter().map(|(n, _)| *n).chain(descs.iter().map(|(n, _)| *n)).filter(|n| own(self, n)).collect();
-        let mut more: Vec<&str> = given.iter().filter(|n| !shape.vals.contains(n)).chain(given_d.iter().filter(|n| !shape.descs.contains(n))).map(|n| self.interner.name(*n)).collect();
-        let mut fewer: Vec<&str> = shape.vals.iter().filter(|n| !given.contains(n)).chain(shape.descs.iter().filter(|n| !given_d.contains(n))).map(|n| self.interner.name(*n)).collect();
-        if more.is_empty() && fewer.is_empty() {
-            return Ok(());
-        }
-        more.sort_unstable();
-        fewer.sort_unstable();
-        let list = |ns: &[&str]| ns.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
+        let Ty::Module { vals, abs, descs } = self.arena.get(self.arena.resolve(mt)) else { return Ok(()) };
+        let gives_val = |n: &Sym| vals.iter().any(|(v, _)| v == n);
+        let gives_desc = |n: &Sym| abs.iter().any(|(v, _)| v == n) || descs.iter().any(|(v, _)| v == n);
+        let wrong = |l: &[(Sym, bool)], gives: &dyn Fn(&Sym) -> bool, given: bool| -> Vec<String> {
+            l.iter().filter(|(n, g)| *g == given && gives(n) != given).map(|(n, _)| format!("`{}`", self.interner.name(*n))).collect()
+        };
+        let (more, fewer): (Vec<String>, Vec<String>) = (
+            [wrong(&shape.vals, &gives_val, false), wrong(&shape.descs, &gives_desc, false)].concat(),
+            [wrong(&shape.vals, &gives_val, true), wrong(&shape.descs, &gives_desc, true)].concat(),
+        );
         let mut said = Vec::new();
         if !more.is_empty() {
-            said.push(format!("its type gives {} too", list(&more)));
+            said.push(format!("its type gives {}, which the program took to be bound outside it", more.join(", ")));
         }
         if !fewer.is_empty() {
-            said.push(format!("its type has no {}", list(&fewer)));
+            said.push(format!("its type has no {}", fewer.join(", ")));
+        }
+        if said.is_empty() {
+            return Ok(());
         }
         Err(FxError::at(span, format!("{shown} gives other names than were read from the program before it was checked: {}", said.join(", and "))))
     }

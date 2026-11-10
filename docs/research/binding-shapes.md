@@ -490,3 +490,27 @@ sources, every with and include of a known shape (1238 unknown at first,
 from an `include`'s module read in the scope of the others'); the test
 programs, unknown only in the 7 written to be refused, each refused as it
 expects; Heist's 7 subsystems, none unknown, all checked.
+
+**What is written is what was relied on** (the user's, 2026-11-10). A
+module's shape is the walk's, in memory: an environment of environments,
+each value's own shape where it is a module's, each type's where it is a
+module type's, a function's its parameters' and result's, so that a shape
+in any positive place reaches a binder (a callback's parameter takes the
+shape of what the procedure it is given to gives it). What the form that
+opens a module carries is less: the names references in its scope asked
+of it, and the answers, `#:shape ((x (not y)) (t))`, `x` and `t` given,
+`y` not (the reference was taken to mean an outer `y`). The checker holds
+the module's type to those answers alone: a name nothing asked, it may
+give or not (subsumption). A member that is a module is opened by a form
+of its own, which carries its own answers, so the record never nests.
+Writing whole shapes, nested, came to 12.5 million names in the front
+end's sources (a module of a types file gives some 50 to 350 names, each
+form opening it wrote them all, and their members' over again); the
+answers are a few names each.
+
+**Its cost.** Checking the front end's own sources cold, debug build, with
+frame pointers: 60.7 s with shapes, 56.1 s without (two runs each,
+alternated), from 83.4 s before the answers alone were written, lookups
+were by segments of an environment in hash tables, a program's nodes kept
+their syntax three lists deep, a form's operands were moved and not
+copied, and a file read for its shape was not read again to be parsed.

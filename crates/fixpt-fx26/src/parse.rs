@@ -2472,13 +2472,26 @@ impl Checker {
         if s.as_symbol().is_some_and(|f| self.name(f) == "#f") {
             return Ok((Some(None), after));
         }
-        let names = |l: &Syntax| l.as_proper_list().or(matches!(l.datum, Datum::Nil).then_some(&[][..])).and_then(|l| l.iter().map(|n| n.as_symbol()).collect::<Option<Vec<_>>>());
-        let shape = match s.as_proper_list() {
-            Some([v, d]) => names(v).zip(names(d)).map(|(vals, descs)| crate::ast::WrittenShape { vals, descs }),
-            _ => None,
-        };
-        let shape = shape.ok_or_else(|| FxError::at(s.span, "a module's shape: `((value …) (description …))`"))?;
+        let shape = self.shape_read(s).ok_or_else(|| FxError::at(s.span, "a module's shape: `((value …) (description …))`, each `name` or `(not name)`"))?;
         Ok((Some(Some(shape)), after))
+    }
+
+    /// What a form relied on of a module, `s`, as `Asked::written`
+    /// writes it.
+    fn shape_read(&self, s: &Syntax) -> Option<crate::ast::WrittenShape> {
+        let list = |l: &Syntax| -> Option<Vec<(Sym, bool)>> {
+            let l: &[Syntax] = if matches!(l.datum, Datum::Nil) { &[] } else { l.as_proper_list()? };
+            l.iter()
+                .map(|m| match m.as_proper_list() {
+                    Some([w, n]) if w.as_symbol().is_some_and(|w| self.name(w) == "not") => Some((n.as_symbol()?, false)),
+                    _ => Some((m.as_symbol()?, true)),
+                })
+                .collect()
+        };
+        match s.as_proper_list()? {
+            [v, d] => Some(crate::ast::WrittenShape { vals: list(v)?, descs: list(d)? }),
+            _ => None,
+        }
     }
 
     /// `(product …)`, of `parse_exp`.

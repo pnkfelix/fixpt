@@ -167,7 +167,7 @@ pub(crate) enum Delta {
 
 /// A template's namespaces: values, and descriptions (types, effects,
 /// regions and the rest, which share one scope, `parse.rs`'s `dscope`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Ns {
     Value,
     Desc,
@@ -1891,7 +1891,11 @@ impl Aligner<'_> {
     /// A node for `s`, at `path`, of type `t`, to be filled.
     fn node_new(&mut self, t: &Rc<STy>, s: &Syntax, path: Vec<bool>) -> usize {
         let at = self.nodes.len();
-        self.nodes.push(Node { syn: s.clone(), path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
+        // A program's node keeps its syntax three lists deep, all that is
+        // read of it (`shapes.rs`: a `moduleof`'s members' names), not a
+        // copy of all it holds at every node it holds.
+        let syn = if self.mode == Mode::Program { shallow(s, 3) } else { s.clone() };
+        self.nodes.push(Node { syn, path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
         at
     }
 
@@ -2126,7 +2130,7 @@ impl Aligner<'_> {
             // A program's lambda, as any expression of one.
             STy::Lambda if self.mode == Mode::Program => Ok(Some((at, Rc::new(STy::Expr), s_owned, root))),
             STy::Lambda => match (&s.datum, self.mode) {
-                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form(at, s, false),
+                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form_owned(at, s_owned, false),
                 _ if self.mode != Mode::Template && lambda_shaped(s, self.interner) => Ok(None),
                 _ => Err(fail(format!("`{}` is not a lambda, as this part must be", self.show(s)))),
             },
@@ -2142,19 +2146,19 @@ impl Aligner<'_> {
                     self.nodes[at].kids = Kids::Ref(*n, Ns::Value, Free::Toplevel);
                     Ok(None)
                 }
-                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form(at, s, false),
+                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form_owned(at, s_owned, false),
                 (Datum::Nil, _) => Err(fail("`()` is not an expression".into())),
                 _ => Ok(None),
             },
             STy::Defn => match (&s.datum, self.mode) {
-                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form(at, s, true),
+                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form_owned(at, s_owned, true),
                 _ => Err(fail(format!("`{}` is not a definition", self.show(s)))),
             },
             // A module's item: a definition by its head, a string, or an
             // expression.
             STy::Item => {
                 if self.defines(s) {
-                    return self.form(at, s, true);
+                    return self.form_owned(at, s_owned, true);
                 }
                 if matches!(s.datum, Datum::Str(_)) {
                     self.nodes[at].export = Some((Bind::Rib(Vec::new()), at));
@@ -2246,7 +2250,9 @@ impl Aligner<'_> {
     /// A form in a template, at node `at`: a kernel form, a macro's use, or
     /// an application, aligned with its signature; a definition's, if
     /// `defn`, where a template makes definitions, else an expression's.
-    fn form(&mut self, at: usize, s: &Syntax, defn: bool) -> R<Option<Step>> {
+    /// What it aligns next, if anything: the type, the path, and whether
+    /// it is the form's operands (else the whole form).
+    fn form(&mut self, at: usize, s: &Syntax, defn: bool) -> R<Option<(Rc<STy>, Vec<bool>, bool)>> {
         let Datum::List { items, tail } = &s.datum else { unreachable!("a list") };
         let head = items[0].as_symbol().filter(|h| !self.pvars.contains_key(h));
         let not_one = |what: &str| FxError::at(s.span, format!("`{}` is not a definition: a macro that makes definitions makes {what}", self.show(s)));
@@ -2336,16 +2342,22 @@ impl Aligner<'_> {
         let construct = matches!(items[0].datum, Datum::Keyword(_)) || items[0].as_symbol().and_then(|h| self.pvars.get(&h)).is_some_and(|p| matches!(&*p.core, STy::Label));
         // Aligned next, by `run`, not here: a form nested in a form takes
         // no stack.
-        let (t, s, path) = match sig {
-            _ if construct && !defn => (self.m.k.forms["%construct"].clone(), s.clone(), path),
+        Ok(Some(match sig {
+            _ if construct && !defn => (self.m.k.forms["%construct"].clone(), path, false),
             Some(sig) => {
-                let (_, operands) = split(s).expect("a list");
                 let mut p = path;
                 p.push(false);
-                (sig, operands, p)
+                (sig, p, true)
             }
-            None => (self.m.k.forms["%app"].clone(), s.clone(), path),
-        };
+            None => (self.m.k.forms["%app"].clone(), path, false),
+        }))
+    }
+
+    /// `form` of `s`, which is taken: what it aligns next, its operands
+    /// moved out of it, not copied, at every form a program nests.
+    fn form_owned(&mut self, at: usize, s: Syntax, defn: bool) -> R<Option<Step>> {
+        let Some((t, path, operands)) = self.form(at, &s, defn)? else { return Ok(None) };
+        let s = if operands { split_owned(s).expect("a list").1 } else { s };
         let x = self.node_new(&t, &s, path);
         self.nodes[at].kids = Kids::Form(x);
         Ok(Some((x, t, s, x)))
@@ -3358,6 +3370,18 @@ fn reserved(name: &str) -> bool {
 }
 
 /// A list's car and cdr, the cdr a list of the rest (or the tail).
+/// `s`, `depth` lists deep: a list deeper, `()` at its place.
+fn shallow(s: &Syntax, depth: usize) -> Syntax {
+    match &s.datum {
+        Datum::List { .. } if depth == 0 => Syntax::new(s.span, Datum::Nil),
+        Datum::List { items, tail } => Syntax::new(
+            s.span,
+            Datum::List { items: items.iter().map(|i| shallow(i, depth - 1)).collect(), tail: tail.as_ref().map(|t| Box::new(shallow(t, depth - 1))) },
+        ),
+        _ => s.clone(),
+    }
+}
+
 /// `split` of `s`, which is taken: its parts moved, not copied.
 fn split_owned(s: Syntax) -> Option<(Syntax, Syntax)> {
     let Datum::List { mut items, tail } = s.datum else { return None };
