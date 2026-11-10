@@ -597,6 +597,33 @@ impl Checker {
         self.read_in_from(file, text, 0)
     }
 
+    /// Program `text`, expanded (`read_in`), each local value binder and
+    /// the references to it renamed as the expander's walk finds their
+    /// scopes (`Macros::alpha_renamed`; `binding-shapes.md`, step 1): its
+    /// forms, written, to be read again; so without the conversions a
+    /// `define-generative` makes, which reading it makes again.
+    pub fn alpha_renamed(&mut self, text: &str) -> R<Vec<String>> {
+        let forms = self.read_in(FileId(0), text)?;
+        let mut out = Vec::new();
+        let mut made = 0;
+        for f in forms {
+            if made > 0 {
+                made -= 1;
+                continue;
+            }
+            if f.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "define-generative") {
+                made = 2;
+            }
+            let mut macros = std::mem::take(&mut self.macros);
+            let mut interner = std::mem::take(&mut self.interner);
+            let r = macros.alpha_renamed(&f, &mut interner).map(|s| fixpt_read::write_syntax(&s, &interner));
+            self.macros = macros;
+            self.interner = interner;
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// The forms of `text` from byte `start` on, their places in all of
     /// `text`: a REPL's entry, in the session's text
     /// (`Fx26Session::read_entry`).

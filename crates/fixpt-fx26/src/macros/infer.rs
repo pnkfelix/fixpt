@@ -643,10 +643,10 @@ impl Macros {
                             let each: Vec<Makes> = items[1..].iter().filter_map(|i| self.makes(i, pv, us, known, interner)).collect();
                             if each.contains(&Makes::Defn) { Some(Makes::Defn) } else { each.first().copied() }
                         }
-                        n if self.kernel.contains_key(n) => Some(Makes::Expr),
+                        n if self.k.forms.contains_key(n) => Some(Makes::Expr),
                         // A type form's head; not `+` and the like, which
                         // descriptions share with expressions.
-                        n if self.type_forms.contains(n) => Some(Makes::Type),
+                        n if self.k.type_forms.contains(n) => Some(Makes::Type),
                         _ => None,
                     }
                 }
@@ -772,7 +772,7 @@ impl Macros {
             };
             pvars.insert(n, PInfo { core, declared: Vec::new(), many: false, hole: None, depth: parts.depth[&(c, n)] });
         }
-        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new() };
+        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new() };
         let ty = Rc::new(match made {
             Makes::Defn => STy::Defn,
             Makes::Type => STy::Type,
@@ -970,6 +970,7 @@ impl Macros {
         let mut out = Vec::new();
         for l in env {
             match l {
+                Level::Shape(_) => return None,
                 Level::Rib(atoms) => {
                     let mut es: Vec<(usize, Delta, usize)> = Vec::new();
                     for a in atoms {
@@ -1156,6 +1157,7 @@ impl Macros {
         match &**t {
             STy::Expr => sym("expr", interner),
             STy::Lambda => sym("lambda", interner),
+            STy::Item => sym("item", interner),
             STy::Bvar => sym("bvar", interner),
             STy::Id => sym("id", interner),
             STy::Data => sym("data", interner),
@@ -1301,6 +1303,7 @@ fn shown_bind(b: &Bind, at: Span, interner: &mut Interner) -> Syntax {
     };
     match b {
         Bind::Rib(es) => rib(es, interner),
+        Bind::Shape(a) => Syntax::list(at, vec![sym("shape", interner), addr(a, interner)]),
         Bind::Cage(rings) => {
             let mut items = vec![sym("cage", interner)];
             for r in rings {

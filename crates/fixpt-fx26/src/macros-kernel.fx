@@ -102,6 +102,122 @@
     (definition define-effect (export (dvar type) (rho (A dvar))))
     (definition begin defns))))
 
+;; The binding structure of the forms `kernel-forms` has not (yet), for a
+;; program's walk (`binding-shapes.md`, step 1; `Macros::alpha_renamed`),
+;; read by the expander written in Rust alone, for now: a template may not
+;; use these. Its notation is the kernel's, and two more: `item`, a
+;; module's item (a definition, a string, or an expression run as the module
+;; is made), and `(shape A)`, what the module at address `A` gives, which
+;; `with` and `include` bind. A `union` of one member is there to start its
+;; addresses from where it is.
+(define scope-forms datum
+  (quote
+   (
+    (define items (mu d (union (export () (cage)) (export (item . d) (cage (at A) (at D))))))
+    ;; `(name body …)`, `(name body)`: the name in scope in the body.
+    (define clause (union (bvar . (import exprs (rho (A var))))))
+    (define arm1 (union (bvar (import expr (rho (A var))))))
+    (define ids (mu i (union () (id . i))))
+    (define given-opt (union () (((literal given) . ids))))
+    (define dvars (mu d (union (export () (rho)) (export (dvar . d) (rho (A dvar) (D rib))))))
+    (define import-names
+      (mu n (union (export () (rho))
+                   (export (bvar . n) (rho (A var) (D rib)))
+                   (export (((literal type) . dvars) . n) (rho (DA rib) (D rib)))
+                   (export (((literal effect) . dvars) . n) (rho (DA rib) (D rib))))))
+    (define variants (mu v (union (export () (rho))
+                                  (export ((bvar . descs) . v) (rho (AA var) (D rib))))))
+    (define case-clauses (mu c (union ()
+                                      (((data . data) . exprs) . c)
+                                      (((literal else) . exprs) . c))))
+    (define typecase-arm (union (kind bvar (import expr (rho (AD var)))) (kind expr)))
+    ;; A program's `tagcase` arm, `(tag x body …)` or `(tag (x …) body …)`,
+    ;; the latter taking the tag's product apart; `else` a tag here.
+    (define bvars (mu n (union (export () (rho)) (export (bvar . n) (rho (A var) (D rib))))))
+    (define tag-arm (union (label bvar . (import exprs (rho (AD var))))
+                           (label bvars . (import exprs (rho (AD rib))))))
+    (define tag-arms (mu a (union () (tag-arm . a))))
+    (define typecase-arms (mu a (union () (typecase-arm . a))))
+    (define select-arm (union ((data . exprs) bvar . (import exprs (rho (AD var))))))
+    (define select-arms (mu a (union () (select-arm . a))))
+    (form vlambda (union (bvar . (import exprs (rho (A var))))
+                         ((bvar type) . (import exprs (rho (AA var))))))
+    (form stage (expr type type expr clause clause . given-opt))
+    (form session-check (expr type type expr clause clause . given-opt))
+    (form reify-effect (type . given-opt))
+    (form reify-region (type . given-opt))
+    (form reify-type (type . given-opt))
+    (form session-commit! (expr expr expr))
+    (form syscall-available? (data))
+    (form send (expr expr))
+    (form receive (expr))
+    (form self (expr))
+    (form icell-get (expr))
+    (form icell-put! (expr expr))
+    ;; `(spawn (mailbox message-type place) body …)`: the mailbox and the
+    ;; place (a description, and a value of it) in the body, the place in
+    ;; the message's type.
+    (form spawn (union ((bvar (import type (rho (ADDA place))) dvar)
+                        . (import exprs (rho (AA var) (ADDA place))))))
+    (form spawn-monitored (union (expr expr (bvar (import type (rho (ADDADD place))) dvar)
+                                       . (import exprs (rho (AADD var) (ADDADD place))))))
+    (form par (let-bindings . (import exprs (rho (A rib)))))
+    (form race exprs)
+    (form attempt (expr expr))
+    (form attempt-within (expr expr expr expr))
+    (form pselect select-arms)
+    (form tagcase (expr . tag-arms))
+    (form case (expr . case-clauses))
+    (form typecase (expr . typecase-arms))
+    (form confirm-length (expr expr arm1 expr))
+    (form acyclic (expr arm1 expr))
+    (form confirm-nat (expr arm1 expr))
+    (form convention (type expr))
+    (form make-bloblet exprs)
+    (form rmake-bloblet exprs)
+    (form bloblet-ref exprs)
+    (form bloblet-set! exprs)
+    (form bloblet-freeze exprs)
+    (form bloblet-byte exprs)
+    (form bloblet-set-byte! exprs)
+    (form bloblet-bytes exprs)
+    (form blobref-at exprs)
+    (form blobref+ exprs)
+    (form blobref-owner exprs)
+    (form blobref-offset exprs)
+    (form blobref-get exprs)
+    (form blobref-set! exprs)
+    (form blobref-index exprs)
+    (form blobref-length exprs)
+    (form blobref-variant! exprs)
+    ;; A module's items, each in scope in all of them (values as a
+    ;; `letrec*`'s, types as declared ahead).
+    (form module (import items (cage (at ()))))
+    (form extend (expr (import expr (shape A))))
+    (form load-module (data))
+    (form load-input (data))
+    (form %loaded (data data))
+    (form with (expr . (import exprs (shape A))))
+    (form %datum (data))
+    (form prompt (expr expr expr))
+    (definition define-generative
+      (union (export (dvar (import type (rho (A dvar)))) (rho (A dvar)))
+             (export ((dvar . dbinders) (import type (rho (AA dvar) (DA rib)))) (rho (AA dvar)))))
+    (definition define-datatype
+      (union (export (dvar . (import variants (rho (A dvar)))) (rho (A dvar) (D rib)))
+             (export ((dvar . dbinders) . (import variants (rho (AA dvar) (DA rib))))
+                     (rho (AA dvar) (D rib)))))
+    (definition define-convention (export (dvar . data) (rho (A dvar))))
+    (definition define-syscall (export (bvar data type) (rho (A var))))
+    (definition define-optional-syscall (export (bvar data type) (rho (A var))))
+    (definition include (union (export (expr) (shape A)) (export (expr data) (shape A))))
+    (definition import (export (id . import-names) (rho (D rib))))
+    (definition hide items)
+    (definition module-parameters (data))
+    (definition import-with-syntax (union (export (expr) (shape A)) (export (expr data) (shape A))))
+    (definition define-syntax data)
+    (definition define-syntax-rec data))))
+
 ;; The kernel's keywords (`top::KEYWORDS`, which a test holds this to); with
 ;; `#%fx`, `#%toplevel` and `define-syntax`, the names that are reserved.
 (define reserved-words datum

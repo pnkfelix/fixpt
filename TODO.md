@@ -5535,3 +5535,34 @@ to it) and saying so where the macro is used and defined; a depth or fuel
 limit with a message that names the macro; or something static over the
 transformer's body. Either way, the message should name the mistake, not
 just an exhausted stack.
+
+## 232. Binding shapes: a module's names known before its types (the user's, 2026-11-10)
+
+Design: `docs/research/binding-shapes.md`, from Heist's request that module
+files use macros (`heist/docs/requests/fixpt-macros-from-heist.md`, item
+1). `with` and `include` bind by a module's type, known only after
+expansion, so the expander cannot see every binder, and a file's own
+macros were refused. A module's *shape*, its names by namespace, is read
+from the syntax (or written, `(modnames …)`, named by `define-syntax`),
+and the checker confirms each module's type has exactly its shape's names.
+Answered: refusing `with` of a module of no known shape; macros not in
+shapes yet (the 2026-11-08 leaning stands); `import-with-syntax` stays;
+leaving names out of a `modnames` seals. Open: `define-syntax` with
+`modnames`, or `define-syntax-shape`.
+
+Stages: (1) every form's binding structure, and a walk held to the
+checkers': **built 2026-11-10** (`scope-forms`, `Mode::Program`,
+`tests/scopes.rs`), Rust alone. (2) The walk in the FX-26 expander too;
+shapes for module values, `with`'s type names by shape, the checker's
+check, `modnames`. (3) Renaming hygiene with `with` and `include` as
+visible binders; a file's own macros (Heist's (a)); `import-with-syntax`
+in module files and of files with parameters ((b), (c)). (4) Later:
+top-level `include` without the driver; macros in shapes, if revisited.
+
+Also from Heist (2026-11-10), not yet done: quotes checked against their
+expected type (the user's yes); `,@` of a `datum`; `datum-proper-list?`
+narrowing; a standard `map`; `when`/`unless`; the message fixes (macro
+refusals called read errors, `product`'s labels, `(define sum …)`);
+`syntax-rules` ellipsis tails, literals telling clauses apart, a
+recursion's signature suggested, tagcase clauses in signatures; `nestof`
+and a negatively bounded type variable (to discuss).

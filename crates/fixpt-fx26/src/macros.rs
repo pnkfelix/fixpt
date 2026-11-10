@@ -86,6 +86,10 @@ pub(crate) enum STy {
     /// A definition, where a template makes one (the kernel's `begin` of
     /// them); no part of a signature, for now.
     Defn,
+    /// A module's item, as a program's walk takes one (`scope-forms`): a
+    /// definition, a string (a comment), or an expression run as the module
+    /// is made.
+    Item,
     Nil,
     Literal(Sym),
     Pair(Rc<STy>, Rc<STy>),
@@ -128,6 +132,10 @@ pub(crate) enum Bind {
     /// What the repetitions before a repeated part bound, as found
     /// (`Level::Earlier`): a repeated parameter's name in its own type.
     Earlier(Vec<Atom>),
+    /// The names of the module at an address, `(shape A)`: what `with` and
+    /// `include` bind (`binding-shapes.md`), not known to a program's walk
+    /// yet (`Level::Shape`).
+    Shape(Addr),
 }
 
 /// One of a ribcage's: a rib, or the ribcage exported at an address.
@@ -258,10 +266,8 @@ pub struct FileScope<'a> {
 #[derive(Clone, Default)]
 pub struct Macros {
     mus: Vec<Rc<STy>>,
-    kernel: HashMap<String, Rc<STy>>,
-    /// The kernel's definitions' forms, by name (its `begin` of them is
-    /// not its `begin` of expressions).
-    definitions: HashMap<String, Rc<STy>>,
+    /// The kernel's tables, read once and shared (`ensure_kernel`).
+    k: Rc<Kernel>,
     defined: HashMap<Sym, Rc<Macro>>,
     fresh: usize,
     /// The text being read, if it is known (`Checker::read_in`): a macro
@@ -285,12 +291,26 @@ pub struct Macros {
     /// Whether a template is being transcribed for its check, its holes'
     /// calls in place of a use's expressions (`template_checks`).
     checking: bool,
-    /// The words of descriptions, the kernel's: those a list's head may be,
-    /// and those read anywhere, as written (`Aligner::desc`).
+}
+
+/// The kernel's tables (`macros-kernel.fx`), read once, never changed.
+#[derive(Default)]
+struct Kernel {
+    /// Its forms' signatures, by name.
+    forms: HashMap<String, Rc<STy>>,
+    /// Its definitions' forms, by name (its `begin` of them is not its
+    /// `begin` of expressions).
+    definitions: HashMap<String, Rc<STy>>,
+    /// The words of descriptions: those a list's head may be, and those
+    /// read anywhere, as written (`Aligner::desc`).
     heads: HashSet<String>,
     words: HashSet<String>,
     /// The type forms' heads, whose template makes a description.
     type_forms: HashSet<String>,
+    /// The binding structure of the forms its list has not (yet):
+    /// `scope-forms`, for a program's walk alone; and its definitions.
+    scope_forms: HashMap<String, Rc<STy>>,
+    scope_definitions: HashMap<String, Rc<STy>>,
 }
 
 /// The kernel's forms a template may use, with their binding structure
@@ -298,6 +318,12 @@ pub struct Macros {
 /// expander written in FX-26 reads too. A form not here is refused in a
 /// template; what has no binders is an application, of expressions.
 const KERNEL: &str = include_str!("macros-kernel.fx");
+
+/// How deep two members of a `union` are compared for overlap (`sty`):
+/// members must differ within so many lists.
+const OVERLAP_DEPTH: usize = 6;
+/// How deep `fits` looks, more than `OVERLAP_DEPTH`.
+const FITS_DEPTH: usize = OVERLAP_DEPTH + 2;
 
 /// The list quoted in the kernel's `(define name datum (quote list))`.
 fn kernel_list(forms: &[Syntax], interner: &Interner, name: &str) -> Vec<Syntax> {
@@ -325,6 +351,10 @@ enum Mode {
     Pattern,
     Template,
     Use,
+    /// A program's form, after expansion: a template with no pattern
+    /// variables, its binders and references found, as the checkers will
+    /// read them (`binding-shapes.md`, step 1; `Macros::alpha_renamed`).
+    Program,
 }
 
 /// One node of syntax aligned with a syntax type.
@@ -398,6 +428,10 @@ enum Level {
     Rib(Vec<Atom>),
     Cage(Sym),
     Earlier(Vec<Atom>),
+    /// What the module at a node gives (`Bind::Shape`), whose names a
+    /// program's walk does not know yet: a name looked for past it may be
+    /// one of them.
+    Shape(usize),
 }
 
 /// A pattern variable: its type, its kind (the type's annotations off), and
@@ -422,16 +456,21 @@ struct Aligner<'m> {
     mode: Mode,
     pvars: &'m HashMap<Sym, PInfo>,
     nodes: Vec<Node>,
+    /// The names a program's walk cannot place: written where an address
+    /// reaches no part (inside a quasiquoted vector), so neither they nor
+    /// a binder of their name are renamed (`alpha_renamed`).
+    unplaced: Vec<Sym>,
 }
 
 impl Macros {
     fn ensure_kernel(&mut self, interner: &mut Interner) -> R<()> {
-        if !self.kernel.is_empty() {
+        if !self.k.forms.is_empty() {
             return Ok(());
         }
         let forms = fixpt_read::Reader::new(KERNEL, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, interner)
             .read_all()
             .map_err(|e| FxError::at(e.span, format!("the kernel's syntax types: {}", e.message)))?;
+        let mut k = Kernel::default();
         // `defn`, which the kernel's signatures name, and no macro's.
         let mut named: HashMap<Sym, Rc<STy>> = HashMap::from([(interner.intern("defn"), Rc::new(STy::Defn))]);
         for f in &kernel_list(&forms, interner, "kernel-forms") {
@@ -441,14 +480,26 @@ impl Macros {
             let t = self.sty(&items[2], interner, &named, &mut Vec::new())?;
             match what.as_str() {
                 "define" => _ = named.insert(name, t),
-                "definition" => _ = self.definitions.insert(interner.name(name).to_string(), t),
-                _ => _ = self.kernel.insert(interner.name(name).to_string(), t),
+                "definition" => _ = k.definitions.insert(interner.name(name).to_string(), t),
+                _ => _ = k.forms.insert(interner.name(name).to_string(), t),
+            }
+        }
+        for f in &kernel_list(&forms, interner, "scope-forms") {
+            let items = f.as_proper_list().expect("a scope entry");
+            let what = interner.name(items[0].as_symbol().expect("a head")).to_string();
+            let name = items[1].as_symbol().expect("a name");
+            let t = self.sty(&items[2], interner, &named, &mut Vec::new())?;
+            match what.as_str() {
+                "define" => _ = named.insert(name, t),
+                "definition" => _ = k.scope_definitions.insert(interner.name(name).to_string(), t),
+                _ => _ = k.scope_forms.insert(interner.name(name).to_string(), t),
             }
         }
         let names = |list: &str, i: &Interner| kernel_list(&forms, i, list).iter().map(|w| i.name(w.as_symbol().expect("a word")).to_string()).collect::<HashSet<_>>();
-        self.heads = names("description-heads", interner);
-        self.words = names("description-words", interner);
-        self.type_forms = names("type-forms", interner);
+        k.heads = names("description-heads", interner);
+        k.words = names("description-words", interner);
+        k.type_forms = names("type-forms", interner);
+        self.k = Rc::new(k);
         Ok(())
     }
 
@@ -492,7 +543,8 @@ impl Macros {
                         "label" => STy::Label,
                         "dvar" => STy::Dvar,
                         "kind" => STy::Kind,
-                        other => return Err(bad(&format!("`{other}` is none (`expr`, `bvar`, `id`, `data`, `type`, `label`, `lambda`, `dvar`, `kind`, or a `mu`'s variable)"))),
+                        "item" => STy::Item,
+                        other => return Err(bad(&format!("`{other}` is none (`expr`, `bvar`, `id`, `data`, `type`, `label`, `lambda`, `dvar`, `kind`, `item`, or a `mu`'s variable)"))),
                     }
                 }
             }
@@ -531,7 +583,7 @@ impl Macros {
                         let ms = ms.iter().map(|m| self.sty(m, interner, named, mus)).collect::<R<Vec<_>>>()?;
                         for (i, a) in ms.iter().enumerate() {
                             for b in &ms[i + 1..] {
-                                if self.overlap(a, b, 6) {
+                                if self.overlap(a, b, OVERLAP_DEPTH) {
                                     return Err(bad("a `union`'s members must be told apart by their shapes in the source (an `expr` may be anything)"));
                                 }
                             }
@@ -727,7 +779,7 @@ impl Macros {
             (Lambda, _) | (_, Lambda) => true,
             (Literal(x), Literal(y)) => x == y,
             (Literal(_), Id) | (Id, Literal(_)) => true,
-            (Expr | Data | Type | Kind | Defn, _) | (_, Expr | Data | Type | Kind | Defn) => true,
+            (Expr | Data | Type | Kind | Defn | Item, _) | (_, Expr | Data | Type | Kind | Defn | Item) => true,
             (Pair(a1, d1), Pair(a2, d2)) => depth == 0 || (self.overlap(a1, a2, depth - 1) && self.overlap(d1, d2, depth - 1)),
             (Nil, Nil) => true,
             (Label, Label) => true,
@@ -740,10 +792,18 @@ impl Macros {
     /// Whether `s` has the shape of `t`, in `mode`: a pattern variable in a
     /// template, or any name in a pattern, fits anything.
     fn fits(&self, t: &Rc<STy>, s: &Syntax, mode: Mode, interner: &Interner, pvars: &HashMap<Sym, PInfo>) -> bool {
+        self.fits_within(t, s, mode, interner, pvars, FITS_DEPTH)
+    }
+
+    /// `fits`, looking no deeper than `depth` lists: a `union`'s members
+    /// differ within `OVERLAP_DEPTH` (`sty`), so that is enough to choose
+    /// one, and what is chosen is aligned whole; and a long list is not
+    /// looked through at each of its parts.
+    fn fits_within(&self, t: &Rc<STy>, s: &Syntax, mode: Mode, interner: &Interner, pvars: &HashMap<Sym, PInfo>, depth: usize) -> bool {
         use STy::*;
         // `(p ...)`, where a list of elements `p` fits may be.
-        if mode != Mode::Use && let Some(x) = ellipsis(s, interner) {
-            return self.seq_of(self.peel(t)).is_some_and(|(e, _)| self.fits(&e, &x, mode, interner, pvars));
+        if matches!(mode, Mode::Pattern | Mode::Template) && let Some(x) = ellipsis(s, interner) {
+            return self.seq_of(self.peel(t)).is_some_and(|(e, _)| self.fits_within(&e, &x, mode, interner, pvars, depth));
         }
         if let Some(n) = s.as_symbol() {
             let lit = matches!(&**self.unfold(t), Literal(_));
@@ -756,17 +816,17 @@ impl Macros {
             }
         }
         match &**self.unfold(t) {
-            Union(ms) => ms.iter().any(|m| self.fits(m, s, mode, interner, pvars)),
-            Pair(a, d) => split(s).is_some_and(|(x, y)| self.fits(a, &x, mode, interner, pvars) && self.fits(d, &y, mode, interner, pvars)),
+            Union(ms) => ms.iter().any(|m| self.fits_within(m, s, mode, interner, pvars, depth)),
+            Pair(a, d) => split(s).is_some_and(|(x, y)| depth == 0 || (self.fits_within(a, &x, mode, interner, pvars, depth - 1) && self.fits_within(d, &y, mode, interner, pvars, depth - 1))),
             Nil => matches!(s.datum, Datum::Nil),
             Literal(n) => s.as_symbol() == Some(*n),
-            Bvar | Dvar => s.as_symbol().is_some_and(|n| !reserved(interner.name(n))),
+            Bvar | Dvar => s.as_symbol().is_some_and(|n| mode == Mode::Program || !reserved(interner.name(n))),
             Id => s.as_symbol().is_some(),
-            Label => matches!(s.datum, Datum::Keyword(_)) || (mode == Mode::Use && s.as_symbol().is_some()),
-            Expr => !s.as_symbol().is_some_and(|n| reserved(interner.name(n))) && !matches!(s.datum, Datum::Nil),
+            Label => matches!(s.datum, Datum::Keyword(_)) || (matches!(mode, Mode::Use | Mode::Program) && s.as_symbol().is_some()) || (mode == Mode::Program && matches!(s.datum, Datum::Number(_))),
+            Expr => (mode == Mode::Program || !s.as_symbol().is_some_and(|n| reserved(interner.name(n)))) && !matches!(s.datum, Datum::Nil),
             Lambda => lambda_shaped(s, interner),
             Defn => matches!(s.datum, Datum::List { .. }),
-            Data | Type | Kind => true,
+            Data | Type | Kind | Item => true,
             Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
     }
@@ -924,7 +984,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), kernel: self.kernel.clone(), definitions: self.definitions.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), projections: HashMap::new(), defined_at: HashMap::new(), checking: false, heads: self.heads.clone(), words: self.words.clone(), type_forms: self.type_forms.clone() };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), with_uses: HashMap::new(), projections: HashMap::new(), defined_at: HashMap::new(), checking: false };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -1095,7 +1155,7 @@ impl Macros {
         // The pattern, aligned with the signature: each variable's type and
         // declared environment.
         let none = HashMap::new();
-        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new() };
+        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
         // A `syntax-rules`' literals, each a name the signature has written
         // as it is, `(literal name)`, where the pattern has it; and no other.
@@ -1142,7 +1202,7 @@ impl Macros {
         }
         // The template, an expression or definitions, aligned with the
         // kernel's forms' signatures and the macros'.
-        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new() };
+        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new() };
         let made = if defn { STy::Defn } else if desc { STy::Type } else { STy::Expr };
         let root = t.align(&Rc::new(made), template, None, Vec::new())?;
         let (mut found, mut seqs) = (Vec::new(), Vec::new());
@@ -1212,7 +1272,7 @@ impl Macros {
                     let bound = env.iter().find_map(|l| match l {
                         Level::Rib(atoms) => binds(atoms).map(Some),
                         Level::Earlier(atoms) => binds(atoms).map(|_| None),
-                        Level::Cage(_) => None,
+                        Level::Cage(_) | Level::Shape(_) => None,
                     });
                     // A binder of a repeated element of a ribcage's list,
                     // referred to in that element: this repetition's is not
@@ -1462,6 +1522,80 @@ impl Macros {
         Ok(Syntax::new(s.span, Datum::List { items, tail }))
     }
 
+    /// Form `form`, a program's after expansion, each local value binder
+    /// renamed, and each reference to it, as a program's walk finds their
+    /// scopes (`binding-shapes.md`, step 1): the same program, if the
+    /// kernel's binding structure is the checkers'. A definition's name is
+    /// kept, and so is every binder of a name a reference reaches only past
+    /// what a `with` or `include` binds, which the walk does not know yet.
+    pub fn alpha_renamed(&mut self, form: &Syntax, interner: &mut Interner) -> R<Syntax> {
+        self.ensure_kernel(interner)?;
+        let none = HashMap::new();
+        let mut renamed: HashMap<Vec<bool>, String> = HashMap::new();
+        {
+            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new() };
+            let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
+            let mut found = Vec::new();
+            a.walk(root, &Vec::new(), false, 0, &mut found, &mut Vec::new())?;
+            // The names definitions give, which other forms see.
+            let mut defined = HashSet::new();
+            for node in &a.nodes {
+                if let (STy::Item | STy::Defn, Kids::Form(x)) = (&*node.core, &node.kids)
+                    && let Some((b, r)) = &a.nodes[*x].export
+                {
+                    for level in a.eval(b, *r, node.syn.span)? {
+                        if let Level::Rib(atoms) = level {
+                            defined.extend(atoms.iter().filter_map(|x| if let Atom::Lit(t, _) = x { Some(*t) } else { None }));
+                        }
+                    }
+                }
+            }
+            // Each reference's binder, innermost first; a name looked for
+            // past a module's names, kept.
+            let mut target: HashMap<usize, usize> = HashMap::new();
+            let mut kept: HashSet<Sym> = HashSet::new();
+            for (at, env, _, _) in &found {
+                let Kids::Ref(n, Ns::Value, _) = a.nodes[*at].kids else { continue };
+                for level in env {
+                    match level {
+                        Level::Rib(atoms) | Level::Earlier(atoms) => {
+                            let b = atoms.iter().find_map(|x| match x {
+                                Atom::Lit(b, Ns::Value) if matches!(a.nodes[*b].kids, Kids::Binder(m, _) if m == n) => Some(*b),
+                                _ => None,
+                            });
+                            if let Some(b) = b {
+                                target.insert(*at, b);
+                                break;
+                            }
+                        }
+                        Level::Shape(_) => {
+                            kept.insert(n);
+                            break;
+                        }
+                        Level::Cage(_) => {}
+                    }
+                }
+            }
+            kept.extend(a.unplaced.iter().copied());
+            let mut fresh = 0;
+            for (t, node) in a.nodes.iter().enumerate() {
+                if let Kids::Binder(n, Ns::Value) = node.kids
+                    && !defined.contains(&t)
+                    && !kept.contains(&n)
+                {
+                    fresh += 1;
+                    renamed.insert(node.path.clone(), format!("{}%{fresh}", a.name(n)));
+                }
+            }
+            for (at, b) in &target {
+                if let Some(name) = renamed.get(&a.nodes[*b].path).cloned() {
+                    renamed.insert(a.nodes[*at].path.clone(), name);
+                }
+            }
+        }
+        Ok(rename_paths(form, &mut Vec::new(), &renamed, interner))
+    }
+
     /// A use of macro `name`, parsed by its signature, then the first clause
     /// whose pattern matches it transcribed.
     fn expand_use(&mut self, name: Sym, m: &Macro, s: &Syntax, interner: &mut Interner) -> R<Syntax> {
@@ -1470,7 +1604,7 @@ impl Macros {
         }
         let (_, operands) = split(s).expect("a list");
         let none = HashMap::new();
-        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new() };
+        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new() };
         u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
         for c in &m.clauses {
             let mut binds = HashMap::new();
@@ -1506,11 +1640,11 @@ impl Macros {
         };
         let defined: HashSet<String> = self.defined.keys().map(|k| interner.name(*k).to_string()).collect();
         let is_keyword = |n: &str| {
-            self.kernel.contains_key(n)
-                || self.definitions.contains_key(n)
-                || self.heads.contains(n)
-                || self.words.contains(n)
-                || self.type_forms.contains(n)
+            self.k.forms.contains_key(n)
+                || self.k.definitions.contains_key(n)
+                || self.k.heads.contains(n)
+                || self.k.words.contains(n)
+                || self.k.type_forms.contains(n)
                 || reserved(n)
                 || matches!(n, "else" | "=>" | "quote" | "quasiquote" | "unquote" | "unquote-splicing")
                 || defined.contains(n)
@@ -1676,26 +1810,39 @@ impl Aligner<'_> {
     }
 
     fn fill(&mut self, at: usize, t: &Rc<STy>, s: &Syntax, root: usize) -> R<()> {
-        let fail = |why: String| FxError::at(s.span, why);
+        let mut next = Some((at, t.clone(), s.clone(), root));
+        while let Some((at, t, s, root)) = next {
+            next = self.fill_step(at, t, s, root)?;
+        }
+        Ok(())
+    }
+
+    /// One step of `fill`: what is left to fill, a list's rest or the same
+    /// part at a type unfolded, so that a long list takes no stack.
+    fn fill_step(&mut self, at: usize, t: Rc<STy>, s_owned: Syntax, root: usize) -> R<Option<(usize, Rc<STy>, Syntax, usize)>> {
+        let s = &s_owned;
+        let t = &t;
+        let span = s.span;
+        let fail = |why: String| FxError::at(span, why);
         match &**t {
             STy::Import(body, b) => {
                 self.nodes[at].imports.push((b.clone(), root));
-                return self.fill(at, body, s, root);
+                return Ok(Some((at, body.clone(), s_owned, root)));
             }
             STy::Many(body) => {
                 self.nodes[at].many = true;
-                return self.fill(at, body, s, root);
+                return Ok(Some((at, body.clone(), s_owned, root)));
             }
             STy::Typed(body, h) => {
                 self.nodes[at].hole = Some(h.clone());
-                return self.fill(at, body, s, root);
+                return Ok(Some((at, body.clone(), s_owned, root)));
             }
             STy::Export(body, b) => {
                 if self.nodes[at].export.is_some() {
                     return Err(fail("two exports at one part".into()));
                 }
                 self.nodes[at].export = Some((b.clone(), root));
-                return self.fill(at, body, s, root);
+                return Ok(Some((at, body.clone(), s_owned, root)));
             }
             _ => {}
         }
@@ -1706,7 +1853,7 @@ impl Aligner<'_> {
             let pvar = match self.mode {
                 Mode::Pattern => !lit && self.name(n) != "_" && self.name(n) != "...",
                 Mode::Template => self.pvars.contains_key(&n),
-                Mode::Use => false,
+                Mode::Use | Mode::Program => false,
             };
             if pvar {
                 // A pattern's variable where a name or a list may be: the
@@ -1717,16 +1864,16 @@ impl Aligner<'_> {
                     let names: Vec<&Rc<STy>> = ms.iter().filter(|m| matches!(&**self.m.unfold(m), STy::Bvar | STy::Dvar | STy::Id | STy::Label)).collect();
                     if let [one] = &names[..] {
                         let one = (*one).clone();
-                        return self.fill(at, &one, s, root);
+                        return Ok(Some((at, one, s_owned, root)));
                     }
                 }
                 self.nodes[at].kids = Kids::PVar(n);
-                return Ok(());
+                return Ok(None);
             }
         }
         // `(p ...)`, a pattern's or a template's: `p` aligned with the list's
         // element type, repeated; the list exports what each element does.
-        if self.mode != Mode::Use && let Some(x) = ellipsis(s, self.interner) {
+        if matches!(self.mode, Mode::Pattern | Mode::Template) && let Some(x) = ellipsis(s, self.interner) {
             let Some((elem, cage)) = self.m.seq_of(t) else {
                 return Err(fail(format!("`{}` repeats a part by `...` where the form takes no list of them", self.show(s))));
             };
@@ -1751,22 +1898,28 @@ impl Aligner<'_> {
             if self.nodes[at].export.is_none() {
                 self.nodes[at].export = self.nodes[e].export.clone();
             }
-            return Ok(());
+            return Ok(None);
         }
-        if self.mode != Mode::Use && s.as_symbol().is_some_and(|n| self.name(n) == "...") {
+        if matches!(self.mode, Mode::Pattern | Mode::Template) && s.as_symbol().is_some_and(|n| self.name(n) == "...") {
             return Err(fail("`...` follows the part it repeats, last in a list".into()));
         }
         match &**t {
             STy::Mu(id) => {
                 let body = self.m.mus[*id].clone();
-                self.fill(at, &body, s, at)
+                Ok(Some((at, body, s_owned, at)))
             }
             STy::Union(ms) => {
-                let fit: Vec<&Rc<STy>> = ms.iter().filter(|m| self.m.fits(m, s, self.mode, self.interner, self.pvars)).collect();
+                let mut fit: Vec<&Rc<STy>> = ms.iter().filter(|m| self.m.fits(m, s, self.mode, self.interner, self.pvars)).collect();
+                // A program's name that a form's word may be too, `else`
+                // or a variable bound to `else`: the form's word, if a
+                // member writes it.
+                if self.mode == Mode::Program && fit.len() > 1 {
+                    fit.retain(|m| self.m.fits(m, s, Mode::Use, self.interner, self.pvars));
+                }
                 match &fit[..] {
                     [one] => {
                         let one = (*one).clone();
-                        self.fill(at, &one, s, at)
+                        Ok(Some((at, one, s_owned, at)))
                     }
                     [] => Err(fail(format!("`{}` is of none of the shapes this part may have", self.show(s)))),
                     _ => Err(fail(format!("`{}` could be of more than one of this part's shapes", self.show(s)))),
@@ -1782,45 +1935,57 @@ impl Aligner<'_> {
                 let mut dp = path;
                 dp.push(false);
                 let x = self.align(a, &x, Some(root), ap)?;
-                let y = self.align(d, &y, Some(root), dp)?;
-                self.nodes[at].kids = Kids::Pair(x, y);
-                Ok(())
+                // The rest, its node made here and filled next.
+                let rest = self.nodes.len();
+                self.nodes.push(Node { syn: y.clone(), path: dp, core: d.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
+                self.nodes[at].kids = Kids::Pair(x, rest);
+                Ok(Some((rest, d.clone(), y, root)))
             }
             STy::Nil => match &s.datum {
                 Datum::Nil => {
                     self.nodes[at].kids = Kids::Nil;
-                    Ok(())
+                    Ok(None)
                 }
                 _ => Err(fail(format!("`{}` is more than this part may have", self.show(s)))),
             },
             STy::Literal(n) => match s.as_symbol() {
-                Some(m) if m == *n => Ok(()),
+                Some(m) if m == *n => Ok(None),
                 _ => Err(fail(format!("`{}` where `{}` is written", self.show(s), self.name(*n)))),
             },
+            // A program's binder: any name the checkers let it bind, which
+            // they decide.
+            STy::Bvar | STy::Dvar if self.mode == Mode::Program && s.as_symbol().is_some() => {
+                let n = s.as_symbol().expect("a name");
+                let ns = if matches!(&**t, STy::Dvar) { Ns::Desc } else { Ns::Value };
+                self.nodes[at].kids = Kids::Binder(n, ns);
+                Ok(None)
+            }
             STy::Bvar | STy::Dvar => match s.as_symbol() {
                 Some(n) if self.m.defined.contains_key(&n) => Err(fail(format!("`{}` is a macro's name, which is not bound", self.name(n)))),
                 Some(n) if !reserved(self.name(n)) && !(matches!(&**t, STy::Dvar) && self.word(n, false)) => {
-                    if self.mode == Mode::Template {
+                    if self.writes() {
                         let ns = if matches!(&**t, STy::Dvar) { Ns::Desc } else { Ns::Value };
                         self.nodes[at].kids = Kids::Binder(n, ns);
                     }
-                    Ok(())
+                    Ok(None)
                 }
                 _ => Err(fail(format!("`{}` is not a name that may be bound", self.show(s)))),
             },
-            STy::Kind => Ok(()),
+            STy::Kind => Ok(None),
             STy::Id => match s.as_symbol() {
                 Some(n) => {
-                    if self.mode == Mode::Template {
+                    if self.writes() {
                         self.nodes[at].kids = Kids::Ref(n, Ns::Value, Free::Toplevel);
                     }
-                    Ok(())
+                    Ok(None)
                 }
                 None => Err(fail(format!("`{}` is not a variable", self.show(s)))),
             },
             STy::Label => match &s.datum {
-                Datum::Keyword(_) => Ok(()),
-                Datum::Symbol(_) if self.mode == Mode::Use => Ok(()),
+                Datum::Keyword(_) => Ok(None),
+                Datum::Symbol(_) if matches!(self.mode, Mode::Use | Mode::Program) => Ok(None),
+                // A product's field by its position, a program's.
+                Datum::Number(_) if self.mode == Mode::Program => Ok(None),
                 Datum::Symbol(n) => Err(fail(format!("a tag or label in a template is a keyword: `#:{}`, not `{0}`", self.name(*n)))),
                 _ => Err(fail(format!("`{}` is not a tag or label", self.show(s)))),
             },
@@ -1828,46 +1993,141 @@ impl Aligner<'_> {
                 if self.mode == Mode::Template && let Some(n) = self.pvar_in(s) {
                     return Err(fail(format!("pattern variable `{}` inside a quoted datum: only a whole one is placed", self.name(n))));
                 }
-                Ok(())
+                Ok(None)
             }
             // A description a template writes, name by name; the binders of
             // the `poly`s at its top, what it exports (what a definition's
             // type puts in scope in what it is defined as).
-            STy::Type if self.mode == Mode::Template => {
+            STy::Type if self.writes() => {
                 self.nodes[at].desc = true;
                 self.desc(at, s)?;
                 if self.nodes[at].export.is_none() {
                     let atoms = self.poly_binders(at);
                     self.nodes[at].export = Some((Bind::Direct(atoms), at));
                 }
-                Ok(())
+                Ok(None)
             }
-            STy::Type => Ok(()),
+            STy::Type => Ok(None),
             // A template writes a lambda (its form aligned as any of the
             // kernel's); a use gives one, of the shape the checkers take.
+            // A program's lambda, as any expression of one.
+            STy::Lambda if self.mode == Mode::Program => Ok(Some((at, Rc::new(STy::Expr), s_owned, root))),
             STy::Lambda => match (&s.datum, self.mode) {
-                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form(at, s, false),
-                _ if self.mode != Mode::Template && lambda_shaped(s, self.interner) => Ok(()),
+                (Datum::List { .. }, Mode::Template) if s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "lambda") => self.form(at, s, false).map(|()| None),
+                _ if self.mode != Mode::Template && lambda_shaped(s, self.interner) => Ok(None),
                 _ => Err(fail(format!("`{}` is not a lambda, as this part must be", self.show(s)))),
             },
             STy::Expr => match (&s.datum, self.mode) {
+                (Datum::Symbol(n), Mode::Program) if !matches!(self.name(*n), "#t" | "#f" | "#u") => {
+                    self.nodes[at].kids = Kids::Ref(*n, Ns::Value, Free::Toplevel);
+                    Ok(None)
+                }
                 (Datum::Symbol(n), _) if reserved(self.name(*n)) => Err(fail(format!("`{}` is a form's name, not an expression", self.name(*n)))),
                 // `#u`, unit: a literal, which the parsers read as a name.
-                (Datum::Symbol(n), _) if self.name(*n) == "#u" => Ok(()),
-                (Datum::Symbol(n), Mode::Template) => {
+                (Datum::Symbol(n), _) if self.name(*n) == "#u" => Ok(None),
+                (Datum::Symbol(n), Mode::Template | Mode::Program) => {
                     self.nodes[at].kids = Kids::Ref(*n, Ns::Value, Free::Toplevel);
-                    Ok(())
+                    Ok(None)
                 }
-                (Datum::List { .. }, Mode::Template) => self.form(at, s, false),
+                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form(at, s, false).map(|()| None),
                 (Datum::Nil, _) => Err(fail("`()` is not an expression".into())),
-                _ => Ok(()),
+                _ => Ok(None),
             },
             STy::Defn => match (&s.datum, self.mode) {
-                (Datum::List { .. }, Mode::Template) => self.form(at, s, true),
+                (Datum::List { .. }, Mode::Template | Mode::Program) => self.form(at, s, true).map(|()| None),
                 _ => Err(fail(format!("`{}` is not a definition", self.show(s)))),
             },
+            // A module's item: a definition by its head, a string, or an
+            // expression.
+            STy::Item => {
+                if self.defines(s) {
+                    return self.form(at, s, true).map(|()| None);
+                }
+                if matches!(s.datum, Datum::Str(_)) {
+                    self.nodes[at].export = Some((Bind::Rib(Vec::new()), at));
+                    return Ok(None);
+                }
+                Ok(Some((at, Rc::new(STy::Expr), s_owned, root)))
+            }
             STy::Import(..) | STy::Export(..) | STy::Many(_) | STy::Typed(..) => unreachable!("taken off"),
         }
+    }
+
+    /// The expressions a quasiquote's datum `s`, at `path`, unquotes at
+    /// `depth` 1, each aligned, onto `kids`: a nested `quasiquote` deepens,
+    /// an `unquote` or `unquote-splicing` shallows, as R7RS counts.
+    fn unquoted(&mut self, s: &Syntax, path: Vec<bool>, depth: u32, kids: &mut Vec<usize>) -> R<()> {
+        match &s.datum {
+            Datum::List { items, tail } => {
+                let head = items[0].as_symbol().map(|h| self.name(h).to_string());
+                if items.len() == 2 && tail.is_none() {
+                    let mut inner = path.clone();
+                    inner.extend([false, true]);
+                    match head.as_deref() {
+                        Some("unquote" | "unquote-splicing") if depth == 1 => {
+                            kids.push(self.align(&Rc::new(STy::Expr), &items[1], None, inner)?);
+                            return Ok(());
+                        }
+                        Some("unquote" | "unquote-splicing") => return self.unquoted(&items[1], inner, depth - 1, kids),
+                        Some("quasiquote") => return self.unquoted(&items[1], inner, depth + 1, kids),
+                        _ => {}
+                    }
+                }
+                let mut p = path;
+                for i in items {
+                    let mut ip = p.clone();
+                    ip.push(true);
+                    self.unquoted(i, ip, depth, kids)?;
+                    p.push(false);
+                }
+                match tail {
+                    Some(t) => self.unquoted(t, p, depth, kids),
+                    None => Ok(()),
+                }
+            }
+            Datum::Vector(items) if items.iter().any(|i| self.unquotes(i)) => {
+                items.iter().for_each(|i| self.symbols_into(i));
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Whether `s` is a definition, by its head: a `begin` one if all it
+    /// holds are.
+    fn defines(&self, s: &Syntax) -> bool {
+        let Some([h, rest @ ..]) = s.as_proper_list() else { return false };
+        match h.as_symbol().map(|h| self.name(h)) {
+            Some("begin") => !rest.is_empty() && rest.iter().all(|r| self.defines(r)),
+            Some(h) => self.m.k.definitions.contains_key(h) || self.m.k.scope_definitions.contains_key(h),
+            None => false,
+        }
+    }
+
+    /// Each name in `s`, unplaced.
+    fn symbols_into(&mut self, s: &Syntax) {
+        match &s.datum {
+            Datum::Symbol(n) => self.unplaced.push(*n),
+            Datum::List { items, tail } => items.iter().chain(tail.as_deref()).for_each(|i| self.symbols_into(i)),
+            Datum::Vector(items) => items.iter().for_each(|i| self.symbols_into(i)),
+            _ => {}
+        }
+    }
+
+    /// Whether `s` has an `unquote` or `unquote-splicing` in it.
+    fn unquotes(&self, s: &Syntax) -> bool {
+        match &s.datum {
+            Datum::Symbol(n) => matches!(self.name(*n), "unquote" | "unquote-splicing"),
+            Datum::List { items, tail } => items.iter().chain(tail.as_deref()).any(|i| self.unquotes(i)),
+            Datum::Vector(items) => items.iter().any(|i| self.unquotes(i)),
+            _ => false,
+        }
+    }
+
+    /// Whether this aligns what is written, a template's or a program's,
+    /// its binders and references found.
+    fn writes(&self) -> bool {
+        matches!(self.mode, Mode::Template | Mode::Program)
     }
 
     /// A form in a template, at node `at`: a kernel form, a macro's use, or
@@ -1885,7 +2145,7 @@ impl Aligner<'_> {
                 Some(m) if m.defn => Some(m.sig.clone()),
                 Some(m) if m.desc => return Err(not_one("them by a macro that makes definitions, not a description's")),
                 Some(_) => return Err(not_one("them by a macro that makes definitions, not an expression's")),
-                None => match self.m.definitions.get(n) {
+                None => match self.m.k.definitions.get(n).or_else(|| self.m.k.scope_definitions.get(n).filter(|_| self.mode == Mode::Program)) {
                     Some(sig) => Some(sig.clone()),
                     None => return Err(not_one("`define`, `define*`, `define-rec`, a `begin` of them, or a use of another such")),
                 },
@@ -1897,10 +2157,23 @@ impl Aligner<'_> {
             Some((h, _)) if self.m.defined.get(&h).is_some_and(|m| m.desc) => {
                 return Err(FxError::at(s.span, format!("`{}` makes a description, not an expression", self.name(h))));
             }
-            Some((_, n)) if self.m.definitions.contains_key(n) && !self.m.kernel.contains_key(n) => {
+            Some((_, n)) if self.m.k.definitions.contains_key(n) && !self.m.k.forms.contains_key(n) => {
                 return Err(FxError::at(s.span, format!("`{n}` makes a definition, made at the top level by a macro that makes definitions, not where an expression is")));
             }
-            Some((_, "with")) => {
+            Some((_, "quasiquote")) if self.mode == Mode::Program => {
+                let [_, x] = &items[..] else { return Err(FxError::at(s.span, "`(quasiquote datum)`")) };
+                let mut p = self.nodes[at].path.clone();
+                p.extend([false, true]);
+                let mut kids = Vec::new();
+                self.unquoted(x, p, 1, &mut kids)?;
+                self.nodes[at].kids = Kids::Desc(kids);
+                return Ok(());
+            }
+            Some((_, "with")) if self.mode == Mode::Program && {
+                let named = |m: &str| m == "#%fx" || m == "#%toplevel";
+                tail.is_none() && matches!(&items[..], [_, m, n] if m.as_symbol().is_some_and(|m| named(self.name(m))) && n.as_symbol().is_some())
+            } => return Ok(()),
+            Some((_, "with")) if self.mode == Mode::Template => {
                 let named = |m: &str| m == "#%fx" || m == "#%toplevel";
                 let standard = tail.is_none() && matches!(&items[..], [_, m, n] if m.as_symbol().is_some_and(|m| named(self.name(m))) && n.as_symbol().is_some());
                 if standard {
@@ -1929,7 +2202,13 @@ impl Aligner<'_> {
                 return Err(FxError::at(s.span, "a template's `with` is `(with module name)`, the value `name` of the module, or `(with #%fx name)` or `(with #%toplevel name)` (one opening a module over a body waits for scopes of a module's names)"));
             }
             Some((h, _)) if self.m.defined.contains_key(&h) => Some(self.m.defined[&h].sig.clone()),
-            Some((_, n)) if self.m.kernel.contains_key(n) && !n.starts_with('%') => Some(self.m.kernel[n].clone()),
+            Some((_, n)) if self.mode == Mode::Program && self.m.k.scope_forms.contains_key(n) => Some(self.m.k.scope_forms[n].clone()),
+            Some((_, n)) if self.m.k.forms.contains_key(n) && !n.starts_with('%') => Some(self.m.k.forms[n].clone()),
+            // A program's reserved word at a list's head with no binding
+            // structure of its own: a variable's name there (`else`, `read`),
+            // so an application, as the checkers take it; every form they
+            // parse has its entry (`tests/scopes.rs` finds one missing).
+            Some((_, n)) if self.mode == Mode::Program && reserved(n) => None,
             Some((_, n)) if reserved(n) => {
                 return Err(FxError::at(s.span, format!("the prototype does not know `{n}`'s binding structure: not yet in a template")));
             }
@@ -1940,7 +2219,7 @@ impl Aligner<'_> {
         let construct = matches!(items[0].datum, Datum::Keyword(_)) || items[0].as_symbol().and_then(|h| self.pvars.get(&h)).is_some_and(|p| matches!(&*p.core, STy::Label));
         let x = match sig {
             _ if construct && !defn => {
-                let construct = self.m.kernel["%construct"].clone();
+                let construct = self.m.k.forms["%construct"].clone();
                 self.align(&construct, s, None, path)?
             }
             Some(sig) => {
@@ -1950,7 +2229,7 @@ impl Aligner<'_> {
                 self.align(&sig, &operands, None, p)?
             }
             None => {
-                let app = self.m.kernel["%app"].clone();
+                let app = self.m.k.forms["%app"].clone();
                 self.align(&app, s, None, path)?
             }
         };
@@ -1963,7 +2242,7 @@ impl Aligner<'_> {
     /// `#%`'s), or, `head`, one a list's head may be (`subr`, `listof`).
     fn word(&self, n: Sym, head: bool) -> bool {
         let name = self.name(n);
-        name.starts_with('@') || name.starts_with("#%") || self.m.words.contains(name) || (head && self.m.heads.contains(name))
+        name.starts_with('@') || name.starts_with("#%") || self.m.k.words.contains(name) || (head && self.m.k.heads.contains(name))
     }
 
     /// Description `s`, which a template writes, at node `at`, aligned name
@@ -2011,6 +2290,13 @@ impl Aligner<'_> {
         let kids = self.desc_kids(at, &items);
         let not_yet = |what: &str| Err(fail(format!("{what} in a template's description: not yet")));
         match head.as_deref() {
+            Some("poly" | "dlambda") if self.mode == Mode::Program && items.len() > 3 => {
+                let atoms = self.desc_binders(kids[1], &items[1])?;
+                for (k, i) in kids[2..].iter().zip(&items[2..]) {
+                    self.desc_scoped(*k, i, atoms.clone())?;
+                }
+                Ok(())
+            }
             Some(h @ ("poly" | "dlambda")) => {
                 let [_, bs, body] = &items[..] else {
                     return Err(fail(format!("`({h} ((name kind) …) description)`")));
@@ -2050,6 +2336,11 @@ impl Aligner<'_> {
             Some("productof" | "sumof") => {
                 for (k, f) in kids[1..].iter().zip(&items[1..]) {
                     let Some([label, ty]) = f.as_proper_list() else {
+                        // A program's flat sum's tag type, `(sumof u8 …)`.
+                        if self.mode == Mode::Program {
+                            self.desc(*k, f)?;
+                            continue;
+                        }
                         return Err(FxError::at(f.span, "`(label type)`"));
                     };
                     let p = self.desc_kids(*k, &[label.clone(), ty.clone()]);
@@ -2063,6 +2354,16 @@ impl Aligner<'_> {
                 Ok(())
             }
             Some("restrict") if items.len() >= 2 => self.desc(kids[1], &items[1]),
+            // A file's module type, given descriptions and module values,
+            // which a name alone does not tell apart: the checker decides
+            // by what binds it, so a program's walk leaves the names
+            // unplaced (`binding-shapes.md`, step 3, decides them by shape).
+            Some("load-moduleof" | "load-input-moduleof") if self.mode == Mode::Program => {
+                for i in &items[2..] {
+                    self.symbols_into(i);
+                }
+                Ok(())
+            }
             Some("io") => Ok(()),
             // Values: a global's name, written as it is, since no local can
             // shadow it; a module's, the top level's.
@@ -2076,6 +2377,27 @@ impl Aligner<'_> {
                     };
                     self.nodes[k].core = Rc::new(STy::Id);
                     self.nodes[k].kids = if self.pvars.contains_key(&n) { Kids::PVar(n) } else { Kids::Ref(n, Ns::Value, free) };
+                }
+                Ok(())
+            }
+            // A program's: each member's type in the scope of the abstract
+            // and transparent types before it, a value's name a label.
+            Some("moduleof") if self.mode == Mode::Program => {
+                let mut atoms = Vec::new();
+                for (k, m) in kids[1..].iter().zip(&items[1..]) {
+                    let parts = m.as_proper_list().map(|l| l.to_vec()).unwrap_or_default();
+                    let word = parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h).to_string());
+                    if parts.len() < 2 {
+                        self.desc(*k, m)?;
+                        continue;
+                    }
+                    let p = self.desc_kids(*k, &parts);
+                    for (q, x) in p[2..].iter().zip(&parts[2..]) {
+                        self.desc_scoped(*q, x, atoms.clone())?;
+                    }
+                    if matches!(word.as_deref(), Some("abs" | "desc")) && parts[1].as_symbol().is_some() {
+                        atoms.push(self.desc_binder(p[1], &parts[1])?);
+                    }
                 }
                 Ok(())
             }
@@ -2251,7 +2573,7 @@ impl Aligner<'_> {
                 self.nodes[at].kids = Kids::PVar(m);
                 Ok(Atom::Var(m, Ns::Desc, 0))
             }
-            Some(m) if !reserved(self.name(m)) && !self.word(m, false) => {
+            Some(m) if self.mode == Mode::Program || (!reserved(self.name(m)) && !self.word(m, false)) => {
                 self.nodes[at].kids = Kids::Binder(m, Ns::Desc);
                 Ok(Atom::Lit(at, Ns::Desc))
             }
@@ -2324,50 +2646,55 @@ impl Aligner<'_> {
     /// the environment where it is, and whether it is in a part of the
     /// signature that is `(many …)` (`many`, of what is around it).
     fn walk(&self, at: usize, env: &Vec<Level>, many: bool, depth: usize, found: &mut Found, seqs: &mut Vec<(usize, usize)>) -> R<()> {
-        let node = &self.nodes[at];
-        let many = many || node.many;
-        let depth = depth + usize::from(node.repeated);
-        if node.repeated {
-            seqs.push((at, depth));
-        }
-        let mut env = env.clone();
-        for (b, root) in &node.imports {
-            let mut levels = self.eval(b, *root, node.syn.span)?;
-            levels.extend(env);
-            env = levels;
-        }
-        match &node.kids {
-            Kids::Pair(x, y) => {
-                self.walk(*x, &env, many, depth, found, seqs)?;
-                self.walk(*y, &env, many, depth, found, seqs)
+        // A list's rest in a loop, so that a long list takes no stack.
+        let (mut at, mut env, mut many, mut depth) = (at, env.clone(), many, depth);
+        loop {
+            let node = &self.nodes[at];
+            many = many || node.many;
+            depth += usize::from(node.repeated);
+            if node.repeated {
+                seqs.push((at, depth));
             }
-            Kids::Form(x) | Kids::Seq(x, false) => self.walk(*x, &env, many, depth, found, seqs),
-            // An element of a ribcage's list, in the scope of what the
-            // repetitions before it bound.
-            Kids::Seq(x, true) => {
-                let mut levels: Vec<Level> = Vec::new();
-                let mut earlier = Vec::new();
-                for l in self.levels_of(*x, node.syn.span)? {
-                    match l {
-                        Level::Rib(atoms) | Level::Earlier(atoms) => earlier.extend(atoms),
-                        Level::Cage(n) => levels.push(Level::Cage(n)),
-                    }
-                }
-                levels.insert(0, Level::Earlier(earlier));
+            for (b, root) in &node.imports {
+                let mut levels = self.eval(b, *root, node.syn.span)?;
                 levels.extend(env);
-                self.walk(*x, &levels, many, depth, found, seqs)
+                env = levels;
             }
-            Kids::Desc(kids) => {
-                for k in kids {
-                    self.walk(*k, &env, many, depth, found, seqs)?;
+            match &node.kids {
+                Kids::Pair(x, y) => {
+                    self.walk(*x, &env, many, depth, found, seqs)?;
+                    at = *y;
                 }
-                Ok(())
+                Kids::Form(x) | Kids::Seq(x, false) => at = *x,
+                // An element of a ribcage's list, in the scope of what the
+                // repetitions before it bound.
+                Kids::Seq(x, true) => {
+                    let mut levels: Vec<Level> = Vec::new();
+                    let mut earlier = Vec::new();
+                    for l in self.levels_of(*x, node.syn.span)? {
+                        match l {
+                            Level::Rib(atoms) | Level::Earlier(atoms) => earlier.extend(atoms),
+                            Level::Cage(n) => levels.push(Level::Cage(n)),
+                            Level::Shape(n) => levels.push(Level::Shape(n)),
+                        }
+                    }
+                    levels.insert(0, Level::Earlier(earlier));
+                    levels.extend(env);
+                    env = levels;
+                    at = *x;
+                }
+                Kids::Desc(kids) => {
+                    for k in kids {
+                        self.walk(*k, &env, many, depth, found, seqs)?;
+                    }
+                    return Ok(());
+                }
+                Kids::PVar(_) | Kids::Binder(..) | Kids::Ref(..) => {
+                    found.push((at, env, many, depth));
+                    return Ok(());
+                }
+                Kids::Nil | Kids::Other => return Ok(()),
             }
-            Kids::PVar(_) | Kids::Binder(..) | Kids::Ref(..) => {
-                found.push((at, env, many, depth));
-                Ok(())
-            }
-            Kids::Nil | Kids::Other => Ok(()),
         }
     }
 
@@ -2377,14 +2704,22 @@ impl Aligner<'_> {
             Bind::Rib(entries) => Ok(vec![Level::Rib(self.rib(entries, root, span)?)]),
             Bind::Direct(atoms) => Ok(vec![Level::Rib(atoms.clone())]),
             Bind::Earlier(atoms) => Ok(vec![Level::Earlier(atoms.clone())]),
+            Bind::Shape(addr) => Ok(vec![Level::Shape(self.nav(root, addr, span)?)]),
+            // A part's own cage, in place, in a loop: a list's ribcage, each
+            // element's then the rest's, takes no stack.
             Bind::Cage(rings) => {
                 let mut out = Vec::new();
-                for r in rings {
+                let mut work: Vec<(&Ring, usize)> = rings.iter().rev().map(|r| (r, root)).collect();
+                while let Some((r, root)) = work.pop() {
                     match r {
                         Ring::Rib(entries) => out.push(Level::Rib(self.rib(entries, root, span)?)),
                         Ring::At(addr) => {
                             let t = self.nav(root, addr, span)?;
-                            out.extend(self.levels_of(t, span)?);
+                            match (&self.nodes[t].kids, &self.exported(t).export) {
+                                (Kids::PVar(_) | Kids::Seq(..), _) => out.extend(self.levels_of(t, span)?),
+                                (_, Some((Bind::Cage(rs), r))) => work.extend(rs.iter().rev().map(|x| (x, *r))),
+                                _ => out.extend(self.levels_of(t, span)?),
+                            }
                         }
                     }
                 }
@@ -2393,9 +2728,15 @@ impl Aligner<'_> {
         }
     }
 
+    /// What rib `entries` binds, its addresses from `root`: a part's own
+    /// rib in place, in a loop, so that a list's (each element's, then the
+    /// rest's) takes no stack.
     fn rib(&self, entries: &[(Addr, Delta)], root: usize, span: Span) -> R<Vec<Atom>> {
         let mut out = Vec::new();
-        for (addr, delta) in entries {
+        let mut work: Vec<(&[(Addr, Delta)], usize)> = vec![(entries, root)];
+        while let Some((es, root)) = work.pop() {
+            let Some(((addr, delta), rest)) = es.split_first() else { continue };
+            work.push((rest, root));
             let t = self.nav(root, addr, span)?;
             let node = &self.nodes[t];
             let value = !matches!(&*node.core, STy::Dvar);
@@ -2421,8 +2762,13 @@ impl Aligner<'_> {
                 // use's, which nothing the template writes can name.
                 (Delta::Rib, Kids::PVar(_)) if matches!(&*node.core, STy::Type) => {}
                 (Delta::Rib, Kids::PVar(n)) => out.push(Atom::RibOf(*n)),
-                (Delta::Rib, _) => match &self.exported(t).export {
+                (Delta::Rib, Kids::Seq(..)) => match &self.exported(t).export {
                     Some((Bind::Rib(es), r)) => out.extend(self.gathered(t, self.rib(es, *r, span)?)),
+                    Some((Bind::Direct(atoms), _)) => out.extend(atoms.iter().cloned()),
+                    _ => return Err(FxError::at(node.syn.span, "the signature says what is here exports a rib, and it exports none")),
+                },
+                (Delta::Rib, _) => match &self.exported(t).export {
+                    Some((Bind::Rib(es), r)) => work.push((es, *r)),
                     Some((Bind::Direct(atoms), _)) => out.extend(atoms.iter().cloned()),
                     // A use of a macro that makes definitions: none the
                     // template sees.
@@ -2638,6 +2984,7 @@ fn normal(env: &[Level]) -> Vec<Level> {
                 (!a.is_empty()).then_some(Level::Earlier(a))
             }
             Level::Cage(n) => Some(Level::Cage(*n)),
+            Level::Shape(n) => Some(Level::Shape(*n)),
         })
         .collect()
 }
@@ -2652,6 +2999,7 @@ fn exports(levels: &[Level]) -> (Vec<Atom>, Vec<Sym>) {
         match l {
             Level::Rib(a) | Level::Earlier(a) => atoms.extend(a),
             Level::Cage(n) => cages.push(n),
+            Level::Shape(_) => {}
         }
     }
     atoms.sort();
@@ -2777,6 +3125,7 @@ fn bind(b: &Syntax, interner: &Interner) -> R<Bind> {
     };
     match head {
         Some("rho") => Ok(Bind::Rib(rib(&items[1..])?)),
+        Some("shape") if items.len() == 2 => Ok(Bind::Shape(addr(&items[1], interner)?)),
         Some("cage") => {
             let rings = items[1..]
                 .iter()
@@ -2830,6 +3179,29 @@ fn addr(a: &Syntax, interner: &Interner) -> R<Addr> {
         return Err(FxError::at(a.span, "an address is a word of `A` (car) and `D` (cdr), read right to left"));
     };
     Ok(name.chars().rev().map(|c| c == 'A').collect())
+}
+
+/// `s`, at `path`, each symbol at a path of `renamed` renamed so.
+fn rename_paths(s: &Syntax, path: &mut Vec<bool>, renamed: &HashMap<Vec<bool>, String>, interner: &mut Interner) -> Syntax {
+    if let Some(n) = renamed.get(path) {
+        return Syntax::symbol(s.span, interner.intern(n));
+    }
+    match &s.datum {
+        Datum::List { items, tail } => {
+            let depth = path.len();
+            let mut out = Vec::new();
+            for i in items {
+                path.push(true);
+                out.push(rename_paths(i, path, renamed, interner));
+                path.pop();
+                path.push(false);
+            }
+            let tail = tail.as_ref().map(|t| Box::new(rename_paths(t, path, renamed, interner)));
+            path.truncate(depth);
+            Syntax::new(s.span, Datum::List { items: out, tail })
+        }
+        _ => s.clone(),
+    }
 }
 
 /// Whether `t` uses `mu` `id`'s variable only under a pair.
