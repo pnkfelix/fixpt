@@ -865,6 +865,8 @@ impl Macros {
         match &**self.unfold(t) {
             Union(ms) => ms.iter().any(|m| self.fits_within(m, s, mode, interner, pvars, depth)),
             Pair(a, d) => match &s.datum {
+                // No parts: what its tail is.
+                Datum::List { items, tail } if items.is_empty() => tail.as_deref().is_some_and(|x| self.fits_within(t, x, mode, interner, pvars, depth)),
                 Datum::List { items, tail } => depth == 0 || (self.fits_within(a, &items[0], mode, interner, pvars, depth - 1) && self.fits_rest(d, items, 1, tail.as_deref(), s.span, mode, interner, pvars, depth - 1)),
                 _ => false,
             },
@@ -3359,6 +3361,9 @@ fn reserved(name: &str) -> bool {
 /// `split` of `s`, which is taken: its parts moved, not copied.
 fn split_owned(s: Syntax) -> Option<(Syntax, Syntax)> {
     let Datum::List { mut items, tail } = s.datum else { return None };
+    if items.is_empty() {
+        return split_owned(*tail?);
+    }
     if items.len() > 1 {
         let first = items.remove(0);
         return Some((first, Syntax::new(s.span, Datum::List { items, tail })));
@@ -3369,6 +3374,9 @@ fn split_owned(s: Syntax) -> Option<(Syntax, Syntax)> {
 
 fn split(s: &Syntax) -> Option<(Syntax, Syntax)> {
     let Datum::List { items, tail } = &s.datum else { return None };
+    if items.is_empty() {
+        return split(tail.as_deref()?);
+    }
     let rest = if items.len() > 1 {
         Syntax::new(s.span, Datum::List { items: items[1..].to_vec(), tail: tail.clone() })
     } else {

@@ -100,6 +100,13 @@ fn file_form(forms: &[Syntax], input: bool, interner: &mut Interner) -> Option<S
 pub(crate) struct TopShapes {
     vals: HashMap<Sym, Option<Rc<Shape>>>,
     descs: HashMap<Sym, Option<Rc<Shape>>>,
+    /// The form of each description whose shape was not known where it was
+    /// defined, to read it again where it is used: types are declared ahead
+    /// of the values they may name (`Checker::declare_ahead`).
+    desc_forms: HashMap<Sym, Syntax>,
+    /// How deep such forms are being read again, so that one that names
+    /// itself ends.
+    again: std::cell::Cell<usize>,
 }
 
 /// The shapes known from form to form: the top level's names', each file's
@@ -117,6 +124,11 @@ pub(crate) struct Known {
 enum Source {
     Value(usize),
     Typed(usize),
+    /// A name an `import` takes from the module at a node.
+    Member(usize, Sym),
+    /// The `k`th parameter of the procedure type of a name, which the
+    /// checker knows and no form the walk reads defines.
+    Param(Sym, usize),
 }
 
 /// A module's names as they are gathered, a later one of a name in its
@@ -134,6 +146,13 @@ impl Members {
         list.push((n, s));
     }
 }
+
+/// The shape a top-level value's type says it has, where the checker has
+/// checked it: for a value whose definition the walk did not read.
+///
+/// Asked of a name in a namespace: a value's; a type's; or, given `k`, the
+/// `k`th parameter's of the procedure type of that name.
+pub(crate) type Global<'a> = Option<&'a dyn Fn(Sym, Ns, Option<usize>) -> Option<Rc<Shape>>>;
 
 /// What a name referred to is bound by: a binder, the module a `with` (or
 /// `extend` or `include`) opens around it, or nothing here.
@@ -206,6 +225,8 @@ struct Shaper<'a, 'm> {
     top: &'a TopShapes,
     files: &'a HashMap<String, FileShape>,
     dir: Option<&'a std::path::Path>,
+    /// A top-level value's shape as its checked type says (`Global`).
+    global: Global<'a>,
     /// Each node's parent: the node of the list or form it is a part of.
     parent: Vec<Option<usize>>,
     envs: HashMap<usize, &'a super::Env>,
@@ -216,7 +237,7 @@ struct Shaper<'a, 'm> {
 }
 
 impl<'a, 'm> Shaper<'a, 'm> {
-    fn new(a: &'a Aligner<'m>, found: &'a super::Found, top: &'a TopShapes, files: &'a HashMap<String, FileShape>, dir: Option<&'a std::path::Path>) -> Self {
+    fn new(a: &'a Aligner<'m>, found: &'a super::Found, top: &'a TopShapes, files: &'a HashMap<String, FileShape>, dir: Option<&'a std::path::Path>, global: Global<'a>) -> Self {
         let mut parent = vec![None; a.nodes.len()];
         for (k, n) in a.nodes.iter().enumerate() {
             match &n.kids {
@@ -227,7 +248,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
             }
         }
         let envs = found.iter().map(|(at, env, _, _)| (*at, env)).collect();
-        Shaper { a, top, files, dir, parent, envs, memo: HashMap::new() }
+        Shaper { a, top, files, dir, global, parent, envs, memo: HashMap::new() }
     }
 
     fn name(&self, n: Sym) -> &'m str {
@@ -237,6 +258,27 @@ impl<'a, 'm> Shaper<'a, 'm> {
 
     fn head(&self, s: &Syntax) -> Option<&'m str> {
         s.as_proper_list()?.first()?.as_symbol().map(|h| self.name(h))
+    }
+
+    /// What the checker's types say of `n` (`Global`), without its own
+    /// names.
+    fn global_of(&self, n: Sym, ns: Ns, k: Option<usize>) -> Option<Rc<Shape>> {
+        self.global.and_then(|g| g(n, ns, k)).map(|s| self.own(&s))
+    }
+
+    /// Shape `s` without the checkers' own names (`%…`), which no program
+    /// reads, as a type has them.
+    fn own(&self, s: &Rc<Shape>) -> Rc<Shape> {
+        match &**s {
+            Shape::Fun(r) => Rc::new(Shape::Fun(self.own(r))),
+            Shape::Module { vals, descs } => {
+                let mine = |n: &Sym| !self.name(*n).starts_with('%');
+                Rc::new(Shape::Module {
+                    vals: vals.iter().filter(|(n, _)| mine(n)).map(|(n, x)| (*n, x.as_ref().map(|x| self.own(x)))).collect(),
+                    descs: descs.iter().filter(|(n, _)| mine(n)).cloned().collect(),
+                })
+            }
+        }
     }
 
     /// The `k`th element of node `at`'s list.
@@ -302,8 +344,10 @@ impl<'a, 'm> Shaper<'a, 'm> {
                     }
                 }
                 // A module's own expression is not in the scope of what it
-                // gives (an `include`'s, in its module's items).
+                // gives; nor is an `include`'s of what any includes, as the
+                // checkers make the modules included before the items.
                 Level::Shape(m) if self.a.nodes[at].path.starts_with(&self.a.nodes[*m].path) => {}
+                Level::Shape(m) if self.included(*m) && self.in_include(at) => {}
                 Level::Shape(m) => match self.exp(*m) {
                     Some(s) if s.gives(n, ns) => return Res::Member(*m, n, ns),
                     Some(_) => {}
@@ -315,16 +359,65 @@ impl<'a, 'm> Shaper<'a, 'm> {
         Res::Free(n, ns)
     }
 
+    /// Whether node `m` is the module an `include` includes.
+    fn included(&self, m: usize) -> bool {
+        self.position(m).is_some_and(|(f, i)| i == 1 && self.head(&self.a.nodes[f].syn) == Some("include"))
+    }
+
+    /// Whether node `at` is in the module expression an `include` includes.
+    fn in_include(&self, mut at: usize) -> bool {
+        loop {
+            if self.included(at) {
+                return true;
+            }
+            match self.parent[at] {
+                Some(p) => at = p,
+                None => return false,
+            }
+        }
+    }
+
+    /// Top-level description `n`'s shape, its form read again now that
+    /// what it names may be known.
+    fn desc_again(&self, n: Sym) -> Option<Rc<Shape>> {
+        let form = self.top.desc_forms.get(&n)?;
+        if self.top.again.get() > 4 {
+            return None;
+        }
+        self.top.again.set(self.top.again.get() + 1);
+        let walked = self.a.m.walked(form, true, self.global, self.a.interner);
+        self.top.again.set(self.top.again.get() - 1);
+        walked.ok()?.defined.into_iter().find(|(m, ns, _)| *m == n && *ns == Ns::Desc).and_then(|(_, _, s)| s)
+    }
+
     /// Where binder `b`'s value comes from: the binding form it is in, by
     /// its place there.
     fn source(&self, b: usize) -> Option<Source> {
         let (q, i) = self.position(b)?;
+        // A lambda's parameter of no type of its own: the procedure type
+        // the lambda is declared at says it.
+        if let Some((f, 1)) = self.position(q)
+            && self.head(&self.a.nodes[f].syn) == Some("lambda")
+        {
+            return self.declared_param(f, i);
+        }
+        // A description function's name, `(define-type (f (a kind) …) T)`:
+        // `T`, whatever it is given.
+        if let (0, Some((d, 1))) = (i, self.position(q))
+            && self.head(&self.a.nodes[d].syn) == Some("define-type")
+        {
+            return Some(Source::Typed(self.elem(d, 2)?));
+        }
         let list = &self.a.nodes[q].syn;
         let items = list.as_proper_list()?;
         match (self.head(list), i, items.len()) {
             (Some("define"), 1, 3) => Some(Source::Value(self.elem(q, 2)?)),
             (Some("define" | "define*"), 1, 4) => Some(Source::Typed(self.elem(q, 2)?)),
             (Some("define-type"), 1, 3) => Some(Source::Typed(self.elem(q, 2)?)),
+            (Some("import"), 2.., _) => match self.a.nodes[b].kids {
+                Kids::Binder(n, Ns::Value) => Some(Source::Member(self.elem(q, 1)?, n)),
+                _ => None,
+            },
             // An element of a list of bindings, `(x e)`, `(x T)`, `(x T e)`:
             // which, by the form whose operand the list is.
             (_, 0, 2..=3) => {
@@ -342,10 +435,59 @@ impl<'a, 'm> Shaper<'a, 'm> {
         }
     }
 
+    /// The type node of parameter `k` of lambda `f`, as the type the
+    /// lambda is declared at writes it: a typed `define`'s or a `the`'s,
+    /// through `plambda`s, in a `subr` or `->` under `poly`s.
+    fn declared_param(&self, f: usize, k: usize) -> Option<Source> {
+        let mut at = f;
+        let t = loop {
+            let (p, i) = self.position(at)?;
+            match (self.head(&self.a.nodes[p].syn), i) {
+                (Some("plambda"), 2) => at = p,
+                (Some("define" | "define*"), 3) => break self.elem(p, 2)?,
+                (Some("the"), 2) => break self.elem(p, 1)?,
+                _ => return None,
+            }
+        };
+        let mut t = t;
+        loop {
+            let syn = &self.a.nodes[t].syn;
+            // A procedure type by its name: its parameter, as the checker
+            // has the type.
+            if let Some(n) = syn.as_symbol() {
+                return Some(Source::Param(n, k));
+            }
+            let items = syn.as_proper_list()?;
+            let params = match self.head(syn)? {
+                // Each member a type of the procedure: its first's says,
+                // and the checker holds the others to the shape.
+                "allof" => {
+                    t = self.elem(t, 1)?;
+                    continue;
+                }
+                "poly" => {
+                    t = self.elem(t, items.len() - 1)?;
+                    continue;
+                }
+                "->" => self.elem(t, 1)?,
+                "subr" => self.elem(t, if items.get(1).is_some_and(|c| self.head(c) == Some("conv")) { 3 } else { 2 })?,
+                _ => return None,
+            };
+            let p = self.elem(params, k)?;
+            // A dependent parameter, `(c : T)`: its type.
+            return match self.a.nodes[p].syn.as_proper_list() {
+                Some([_, c, _]) if c.as_symbol().is_some_and(|c| self.name(c) == ":") => self.elem(p, 2).map(Source::Typed),
+                _ => Some(Source::Typed(p)),
+            };
+        }
+    }
+
     fn binder(&mut self, b: usize) -> Option<Rc<Shape>> {
         match self.source(b)? {
             Source::Value(e) => self.exp(e),
             Source::Typed(t) => self.ty(t),
+            Source::Member(m, n) => self.exp(m)?.member(n, Ns::Value),
+            Source::Param(n, k) => self.global_of(n, Ns::Desc, Some(k)),
         }
     }
 
@@ -354,8 +496,14 @@ impl<'a, 'm> Shaper<'a, 'm> {
         match self.resolve(at, n, ns) {
             Res::Binder(b) => self.binder(b),
             Res::Member(m, n, ns) => self.exp(m)?.member(n, ns),
-            Res::Free(n, Ns::Value) => self.top.vals.get(&n).cloned().flatten(),
-            Res::Free(n, Ns::Desc) => self.top.descs.get(&n).cloned().flatten(),
+            // A top-level name: as its definition's walk found it, or as
+            // the checker found its type, which a definition read from a
+            // fasl, or a file's hidden global, has alone.
+            Res::Free(n, Ns::Value) => self.top.vals.get(&n).cloned().flatten().or_else(|| self.global_of(n, Ns::Value, None)),
+            Res::Free(n, Ns::Desc) => match self.top.descs.get(&n).cloned().flatten() {
+                Some(s) => Some(s),
+                None => self.desc_again(n).or_else(|| self.global_of(n, Ns::Desc, None)),
+            },
             Res::Unknown => None,
         }
     }
@@ -499,6 +647,13 @@ impl<'a, 'm> Shaper<'a, 'm> {
         if let Kids::Ref(n, Ns::Desc, _) = node.kids {
             return self.reference(at, n, Ns::Desc);
         }
+        // A template's free description name, the top level's, qualified.
+        if let Some(n) = node.syn.as_symbol()
+            && let Some(x) = self.name(n).strip_prefix("#%toplevel:")
+        {
+            let x = self.a.interner.get(x)?;
+            return self.top.descs.get(&x).cloned().flatten().or_else(|| self.desc_again(x));
+        }
         let syn = &node.syn;
         let items = syn.as_proper_list()?;
         let e = self.elems(at);
@@ -556,7 +711,12 @@ impl<'a, 'm> Shaper<'a, 'm> {
                 let k = if conv { 4 } else { 3 };
                 Some(Rc::new(Shape::Fun(self.ty(e.get(k).copied().flatten()?)?)))
             }
-            _ => None,
+            // A description function applied: what it makes, whatever it is
+            // given.
+            _ => match e.first().copied().flatten().map(|h| &a.nodes[h].kids) {
+                Some(Kids::Ref(_, Ns::Desc, _)) => self.ty(e[0]?),
+                _ => None,
+            },
         }
     }
 }
@@ -568,22 +728,31 @@ impl Macros {
     /// ((value …) (description …))`, or `#:shape #f` where the shape is not
     /// known (`binding-shapes.md`, step 2); and, at the top level, what its
     /// definitions bind kept for the forms after it.
-    pub(crate) fn shaped(&mut self, form: &Syntax, top: bool, dir: Option<std::path::PathBuf>, interner: &mut Interner) -> R<Syntax> {
+    pub(crate) fn shaped(&mut self, form: &Syntax, top: bool, dir: Option<std::path::PathBuf>, global: Global, interner: &Interner) -> R<Syntax> {
         let outer = std::mem::replace(&mut self.withs.shapes.dir, dir);
-        let r = self.shaped_from(form, top, interner);
+        let r = self.shaped_from(form, top, global, interner);
         self.withs.shapes.dir = outer;
         r
     }
 
-    fn shaped_from(&mut self, form: &Syntax, top: bool, interner: &mut Interner) -> R<Syntax> {
-        self.ensure_kernel(interner)?;
+    fn shaped_from(&mut self, form: &Syntax, top: bool, global: Global, interner: &Interner) -> R<Syntax> {
         let form = unshaped(form, interner);
-        let walked = self.walked(&form, top, interner)?;
+        let walked = self.walked(&form, top, global, interner)?;
         for (n, ns, s) in walked.defined {
+            let top = &mut self.withs.shapes.top;
             match ns {
-                Ns::Value => self.withs.shapes.top.vals.insert(n, s),
-                Ns::Desc => self.withs.shapes.top.descs.insert(n, s),
-            };
+                Ns::Value => {
+                    top.vals.insert(n, s);
+                }
+                Ns::Desc if s.is_none() => {
+                    top.descs.insert(n, None);
+                    top.desc_forms.insert(n, form.clone());
+                }
+                Ns::Desc => {
+                    top.descs.insert(n, s);
+                    top.desc_forms.remove(&n);
+                }
+            }
         }
         Ok(with_written(&form, &mut Vec::new(), &walked.written, interner))
     }
@@ -591,7 +760,7 @@ impl Macros {
     /// Form `form`, walked: the shapes to write into it, by the path of
     /// each form that opens a module; its own shape, as an expression's;
     /// and, `top`, what its definitions bind, with their shapes.
-    fn walked(&self, form: &Syntax, top: bool, interner: &Interner) -> R<Walked> {
+    fn walked(&self, form: &Syntax, top: bool, global: Global, interner: &Interner) -> R<Walked> {
         let none = HashMap::new();
         let mut out = Walked::default();
         let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
@@ -601,7 +770,7 @@ impl Macros {
         a.walk(root, &super::Env::default(), false, 0, &mut found, &mut Vec::new())?;
         let empty = TopShapes::default();
         let tops = if top { &self.withs.shapes.top } else { &empty };
-        let mut c = Shaper::new(&a, &found, tops, &self.withs.shapes.files, self.withs.shapes.dir.as_deref());
+        let mut c = Shaper::new(&a, &found, tops, &self.withs.shapes.files, self.withs.shapes.dir.as_deref(), global.filter(|_| top));
         for (k, node) in a.nodes.iter().enumerate() {
             let Kids::Form(_) = node.kids else { continue };
             if !c.head(&node.syn).is_some_and(opens) || out.written.contains_key(&node.path) {
@@ -659,11 +828,20 @@ impl Macros {
             return Ok(());
         };
         let outer = std::mem::replace(&mut self.withs.shapes.dir, dir);
-        let walked = self.walked(&form, false, interner);
+        let walked = self.walked(&form, false, None, interner);
         self.withs.shapes.dir = outer;
         let walked = walked.unwrap_or_default();
-        let module = walked.shape;
-        let value = if params { module.clone().map(|m| Rc::new(Shape::Fun(m))) } else { module.clone() };
+        // An input's value is its expression's; the module
+        // `load-input-moduleof` describes, what that makes, given what it
+        // takes. A file of module parameters makes a module of its items.
+        let (value, module) = match (params, walked.shape) {
+            (true, m) => (m.clone().map(|m| Rc::new(Shape::Fun(m))), m),
+            (false, Some(f)) if input && matches!(&*f, Shape::Fun(_)) => {
+                let Shape::Fun(m) = &*f else { unreachable!("a function") };
+                (Some(f.clone()), Some(m.clone()))
+            }
+            (false, m) => (m.clone(), m),
+        };
         self.withs.shapes.files.insert(key, FileShape { value, module, written: Some(Rc::new(walked.written)) });
         Ok(())
     }
@@ -679,7 +857,7 @@ impl Macros {
             Some(w) => w,
             None => {
                 let outer = std::mem::replace(&mut self.withs.shapes.dir, dir);
-                let walked = self.ensure_kernel(interner).and_then(|()| self.walked(&form, false, interner));
+                let walked = self.shapes_prepared(interner).and_then(|()| self.walked(&form, false, None, interner));
                 self.withs.shapes.dir = outer;
                 match walked {
                     Ok(w) => Rc::new(w.written),
@@ -687,8 +865,19 @@ impl Macros {
                 }
             }
         };
+        if self.shapes_prepared(interner).is_err() {
+            return forms;
+        }
         let shaped = with_written(&form, &mut Vec::new(), &written, interner);
         if wrapped { shaped.as_proper_list().expect("a module")[1..].to_vec() } else { vec![shaped] }
+    }
+
+    /// What `shaped` needs made first, which it cannot make itself: the
+    /// kernel read, and the names it writes interned.
+    pub(crate) fn shapes_prepared(&mut self, interner: &mut Interner) -> R<()> {
+        interner.intern("shape");
+        interner.intern("#f");
+        self.ensure_kernel(interner)
     }
 
     /// Whether the file of `key` has had its shape found (or is being).
@@ -705,7 +894,8 @@ impl Macros {
 
 /// `s`, at `path`, with each shape of `written` written into the form at
 /// its path, after its first operand.
-fn with_written(s: &Syntax, path: &mut Vec<bool>, written: &Written, interner: &mut Interner) -> Syntax {
+fn with_written(s: &Syntax, path: &mut Vec<bool>, written: &Written, interner: &Interner) -> Syntax {
+    let (shape, no) = (interner.get("shape").expect("interned"), interner.get("#f").expect("interned"));
     let Datum::List { items, tail } = &s.datum else { return s.clone() };
     let mut out = Vec::with_capacity(items.len() + 2);
     let depth = path.len();
@@ -717,8 +907,8 @@ fn with_written(s: &Syntax, path: &mut Vec<bool>, written: &Written, interner: &
         if k == 2
             && let Some(w) = &written_here
         {
-            out.push(Syntax::new(s.span, Datum::Keyword(interner.intern("shape"))));
-            out.push(w.clone().unwrap_or_else(|| Syntax::symbol(s.span, interner.intern("#f"))));
+            out.push(Syntax::new(s.span, Datum::Keyword(shape)));
+            out.push(w.clone().unwrap_or_else(|| Syntax::symbol(s.span, no)));
         }
         path.push(true);
         out.push(with_written(i, path, written, interner));
@@ -728,8 +918,8 @@ fn with_written(s: &Syntax, path: &mut Vec<bool>, written: &Written, interner: &
     if items.len() == 2
         && let Some(w) = &written_here
     {
-        out.push(Syntax::new(s.span, Datum::Keyword(interner.intern("shape"))));
-        out.push(w.clone().unwrap_or_else(|| Syntax::symbol(s.span, interner.intern("#f"))));
+        out.push(Syntax::new(s.span, Datum::Keyword(shape)));
+        out.push(w.clone().unwrap_or_else(|| Syntax::symbol(s.span, no)));
     }
     let tail = tail.as_ref().map(|t| Box::new(with_written(t, path, written, interner)));
     path.truncate(depth);
@@ -801,6 +991,10 @@ mod tests {
         }).collect();
         assert!(shown[1].contains("(with m #:shape ((x) ()) x)"), "{}", shown[1]);
         assert!(shown[2].contains("(with m #:shape |#f| x)"), "{}", shown[2]);
+        c.top(&forms[0]).expect("checks");
+        c.top(&forms[1]).expect("checks");
+        let e = c.top(&forms[2]).expect_err("refused");
+        assert!(e.message.contains("the names `m` gives are not known before it is checked"), "{}", e.message);
     }
 
     /// A shape that is not the module's type's, as no walk writes it: the

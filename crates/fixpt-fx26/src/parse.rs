@@ -2392,7 +2392,7 @@ impl Checker {
         let [e1] = rest else { return Err(usage()) };
         let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
         let e0 = self.parse_exp(e0)?;
-        if let Some(Some(s)) = shape {
+        if let Some(s) = shape {
             self.arena.withs.shaped.insert(e0, s);
         }
         let e1 = self.with_types_of(names[0], |p| p.parse_exp(e1))?;
@@ -2437,7 +2437,7 @@ impl Checker {
         let (shape, body) = self.written_shape(body)?;
         let body = self.with_types_of(module, |p| p.parse_body(span, body))?;
         let e = self.arena.exp(span, Exp::With { module, body });
-        if let Some(Some(s)) = shape {
+        if let Some(s) = shape {
             self.arena.withs.opened.insert(e, s);
         }
         Ok(e)
@@ -2454,7 +2454,7 @@ impl Checker {
         let [_, m, rest @ ..] = f.as_proper_list().expect("an include") else { unreachable!("an include") };
         let (shape, _) = self.written_shape(rest)?;
         let m = self.parse_exp(m)?;
-        if let Some(Some(s)) = shape {
+        if let Some(s) = shape {
             self.arena.withs.shaped.insert(m, s);
         }
         Ok(m)

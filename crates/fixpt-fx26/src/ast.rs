@@ -786,8 +786,9 @@ pub struct WithTables {
     /// of each `with`'s module, by the `with`; of each module expression an
     /// `extend` or `include` opens, by the expression. Each held to the
     /// module's type where it is checked (`Checker::shape_held`).
-    pub opened: std::collections::HashMap<ExpId, WrittenShape>,
-    pub shaped: std::collections::HashMap<ExpId, WrittenShape>,
+    /// `None` where the expander did not know the shape (`#:shape #f`).
+    pub opened: std::collections::HashMap<ExpId, Option<WrittenShape>>,
+    pub shaped: std::collections::HashMap<ExpId, Option<WrittenShape>>,
 }
 
 /// A module's names as the expander read them, before its type was known

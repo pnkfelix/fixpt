@@ -5557,8 +5557,9 @@ shapes for module values, `with`'s type names by shape, the checker's
 check, `modnames`. **Begun 2026-11-10**: in Rust, every module's shape read
 and written into the forms that open it (`#:shape`), held to its type by
 the checker (`macros/shapes.rs`); the walk made linear and of no stack.
-Left: the FX-26 front end's walk and check; type names by shape; a
-refusal of a module of no known shape; `modnames`. (3) Renaming hygiene with `with` and `include` as
+A module of no known shape refused (none in the suite's programs that
+check, nor in Heist's). Left: the FX-26 front end's walk and check; type
+names by shape (retiring `with`'s fallback); `modnames`. (3) Renaming hygiene with `with` and `include` as
 visible binders; a file's own macros (Heist's (a)); `import-with-syntax`
 in module files and of files with parameters ((b), (c)). (4) Later:
 top-level `include` without the driver; macros in shapes, if revisited.

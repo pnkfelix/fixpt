@@ -693,8 +693,17 @@ impl Checker {
     /// shape's names, so that what the expander took a `with` or an
     /// `include` to bind is what it binds. A name of the checkers' own
     /// (`%…`) is no name a program reads.
-    pub(crate) fn shape_held(&self, span: Span, m: Option<Sym>, mt: TyId, shape: &crate::ast::WrittenShape) -> R<()> {
+    pub(crate) fn shape_held(&self, span: Span, m: Option<Sym>, mt: TyId, shape: &Option<crate::ast::WrittenShape>) -> R<()> {
         let Ty::Module { vals, abs, descs } = self.arena.get(self.arena.resolve(mt)) else { return Ok(()) };
+        let shown = match m.map(|m| self.interner.name(m)) {
+            Some(m) if !m.starts_with('%') => format!("`{m}`"),
+            _ => "this module".to_string(),
+        };
+        // A module whose names the program does not say before it is
+        // checked: what opens it cannot know what it binds.
+        let Some(shape) = shape else {
+            return Err(FxError::at(span, format!("the names {shown} gives are not known before it is checked: give it a type where it is bound, `(the (moduleof …) e)` or a parameter's")));
+        };
         let own = |c: &Self, n: &Sym| !c.interner.name(*n).starts_with('%');
         let given: Vec<Sym> = vals.iter().map(|(n, _)| *n).filter(|n| own(self, n)).collect();
         let given_d: Vec<Sym> = abs.iter().map(|(n, _)| *n).chain(descs.iter().map(|(n, _)| *n)).filter(|n| own(self, n)).collect();
@@ -713,10 +722,6 @@ impl Checker {
         if !fewer.is_empty() {
             said.push(format!("its type has no {}", list(&fewer)));
         }
-        let shown = match m.map(|m| self.interner.name(m)) {
-            Some(m) if !m.starts_with('%') => format!("`{m}`"),
-            _ => "this module".to_string(),
-        };
         Err(FxError::at(span, format!("{shown} gives other names than were read from the program before it was checked: {}", said.join(", and "))))
     }
 

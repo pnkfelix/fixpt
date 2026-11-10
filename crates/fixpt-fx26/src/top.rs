@@ -716,11 +716,45 @@ impl Checker {
         let dir = self.base_dir.clone();
         self.file_shapes_for(std::slice::from_ref(form), dir.clone());
         let mut macros = std::mem::take(&mut self.macros);
-        let mut interner = std::mem::take(&mut self.interner);
-        let r = macros.shaped(form, top, dir, &mut interner);
+        let r = macros.shapes_prepared(&mut self.interner).and_then(|()| {
+            let global = |n: Sym, ns: crate::macros::Ns, k: Option<usize>| match (ns, k) {
+                (crate::macros::Ns::Value, _) => self.lookup(n).and_then(|t| self.type_shape(t, 0)),
+                (crate::macros::Ns::Desc, None) => self.type_named(n).and_then(|t| self.type_shape(t, 0)),
+                (crate::macros::Ns::Desc, Some(k)) => self.type_named(n).and_then(|t| self.param_shape(t, k)),
+            };
+            macros.shaped(form, top, dir, Some(&global), &self.interner)
+        });
         self.macros = macros;
-        self.interner = interner;
         r.unwrap_or_else(|_| form.clone())
+    }
+
+    /// The shape a module of type `t` has, as the type says it: its values'
+    /// names, each with its own if it is a module's (or a procedure's that
+    /// makes one), and its descriptions'. The checkers' own names are
+    /// kept, for the walk to leave out (`Shaper::own`).
+    fn type_shape(&self, t: TyId, depth: usize) -> Option<std::rc::Rc<crate::macros::shapes::Shape>> {
+        use crate::macros::shapes::Shape;
+        if depth > 8 {
+            return None;
+        }
+        match self.arena.get(self.arena.resolve(t)) {
+            crate::ast::Ty::Module { abs, descs, vals } => Some(std::rc::Rc::new(Shape::Module {
+                vals: vals.iter().map(|(n, t)| (*n, self.type_shape(*t, depth + 1))).collect(),
+                descs: abs.iter().map(|(n, _)| (*n, None)).chain(descs.iter().map(|(n, _)| (*n, None))).collect(),
+            })),
+            crate::ast::Ty::Subr { result, .. } => Some(std::rc::Rc::new(Shape::Fun(self.type_shape(*result, depth + 1)?))),
+            crate::ast::Ty::Poly { body, .. } => self.type_shape(*body, depth + 1),
+            _ => None,
+        }
+    }
+
+    /// The shape of parameter `k` of procedure type `t`, under its `poly`s.
+    fn param_shape(&self, t: TyId, k: usize) -> Option<std::rc::Rc<crate::macros::shapes::Shape>> {
+        match self.arena.get(self.arena.resolve(t)) {
+            crate::ast::Ty::Poly { body, .. } => self.param_shape(*body, k),
+            crate::ast::Ty::Subr { params, .. } => self.type_shape(*params.get(k)?, 0),
+            _ => None,
+        }
     }
 
     /// The shapes of the files `forms` load, read from directory `dir`, and

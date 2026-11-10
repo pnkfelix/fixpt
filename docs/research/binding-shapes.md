@@ -470,3 +470,23 @@ that deep nesting takes no stack: the 100-deep nesting `tests/stack.rs`
 holds the checker to fits the walk too. A file is walked once, its shapes
 kept for when it is read to be checked. Checking the front end's own
 sources cold, in a debug build, takes 57 s where it took 53 s.
+
+**A module of no known shape is refused** (the user's answer 1), where the
+checker finds its type a module's: `` the names `m` gives are not known
+before it is checked: give it a type where it is bound ``. A name whose
+definition the walk did not read, a top-level one checked already (read
+from a fasl, a file's hidden global `%shared:…`, a staged step's
+`stage-module`), has the shape its checked type says: the checker answers
+the walk (`shaped`'s `Global`). Besides the forms above, a shape is read
+from an `import`'s names (the module's member), a lambda's parameter of no
+type of its own (the parameter of the procedure type the lambda is
+declared at, through `allof` and `poly`), a description function applied
+(its body), and a type defined ahead of a value it names (read again where
+it is used). An `include`'s module is not in the scope of what any
+`include` gives, as the checkers make the modules included first.
+
+Counted 2026-11-10, with the checker's answers: the front end's own
+sources, every with and include of a known shape (1238 unknown at first,
+from an `include`'s module read in the scope of the others'); the test
+programs, unknown only in the 7 written to be refused, each refused as it
+expects; Heist's 7 subsystems, none unknown, all checked.
