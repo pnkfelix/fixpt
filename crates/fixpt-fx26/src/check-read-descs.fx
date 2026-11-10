@@ -214,20 +214,8 @@
             ((and (string=? n "false") (null? (k-lookup-desc sym))) (k-ty-new (ty-false)))
             ((and (string=? n "nat") (null? (k-lookup-desc sym)))
              (k-ty-new (ty-nat (sz-finite))))
-            ;; A standard type, unless the program defines the name itself
-            ;; (`TODO.md` §88), as it may `nil` and the rest above.
-            ((and (>= base 0) (null? (k-lookup-desc sym))) base)
-            (else
-             ;; In `with` bodies, the modules' names first (`k-with-selected`).
-             (let ((withs (k-withs-over sym)))
-               (if (null? withs)
-                   (k-type-name-read s n sym)
-                   (k-with-selected
-                     withs sym
-                     (if (or (not (null? (k-lookup-desc sym)))
-                             (not (null? (k-lookup-desc '%include-scope))))
-                         (k-type-name-read s n sym)
-                         -1)))))))))
+            (else (k-type-by-withs sym base (k-withs-reading sym)
+                                   (lambda () (k-type-name-read s n sym))))))))
 ;; Type name `n`, `sym`, written `s`, as the description scope and
 ;; `include`s say.
 (define k-type-name-read (->* (syn string symbol) int)
@@ -258,13 +246,20 @@
       (else
        (let* ((items (k-items s "a type"))
               (hd (if (null? items) '|()| (syn-head (car items))))
-              ;; In `with` bodies, `(f d …)` is the modules' `f` first.
-              (withs (if (or (symbol=? hd '|()|) (k-type-form? hd) (k-qualified? (car items)))
-                         nil
-                         (k-withs-over hd))))
-         (cond ((null? withs) (k-parse-type-list s items hd))
-               ((null? (k-lookup-desc hd)) (k-with-applied withs hd (cdr items) -1))
-               (else (k-with-applied withs hd (cdr items) (k-parse-type-list s items hd)))))))))
+              ;; In `with` bodies, `(f d …)` is the modules' `f` first, as
+              ;; names alone (`k-type-by-withs`).
+              (r (if (or (symbol=? hd '|()|) (k-type-form? hd) (k-qualified? (car items)))
+                     (the (productof (1 k-names) (2 k-names)) (product (1 nil) (2 nil)))
+                     (k-withs-reading hd)))
+              (withs (extract r 1)) (here (not (null? (k-lookup-desc hd)))))
+         (cond ((not (null? (extract r 2)))
+                (k-with-applied withs hd (lambda () (k-parse-ds (cdr items)))
+                                (k-ty-new (ty-app (k-ty-new (ty-select (car (extract r 2)) hd))
+                                                  (k-parse-ds (cdr items))))))
+               ((not (null? withs))
+                (k-with-applied withs hd (lambda () (k-parse-ds (cdr items)))
+                                (if here (k-parse-type-list s items hd) -1)))
+               (else (k-parse-type-list s items hd))))))))
 ;; Type `s`, `(hd …)`, of `items`, as the description scope says; `hd`
 ;; `#%toplevel:f`, `f` as the top level binds it (`parse.rs`).
 (define k-parse-type-list (->* (syn k-syns symbol) int)
@@ -293,21 +288,6 @@
              (k-parse-app s (k-parse-fun (car items) -1) (cdr items)))
             ((and top (not (k-type-form? hd))) (k-sfail (k-not-type-list hd) s))
             (else (k-parse-type-form s items hd))))))
-;; `(f d …)`, its descriptions `args`, read in the bodies of `with`s of
-;; modules `withs` (innermost first): `((select m f) d …)` of the innermost,
-;; which, where `m` does not give `f`, is the next's, and so on out to
-;; `outer`, what it means here otherwise, or -1. As `parse.rs`'s
-;; `with_applied`.
-(define k-with-applied (->* (k-names symbol k-syns int) int)
-  (lambda (withs f args outer)
-    (if (null? withs)
-        outer
-        (let* ((t (k-with-applied (cdr withs) f args outer))
-               (fun (k-ty-new (ty-select (car withs) f)))
-               (app (k-ty-new (ty-app fun (k-parse-ds args)))))
-          (begin (set k-with-fallbacks (cons (product (1 fun) (2 t)) (get k-with-fallbacks)))
-                 (set k-with-apps (cons (product (1 fun) (2 app)) (get k-with-apps)))
-                 app)))))
 ;; A procedure type's parameters and result, after its effect, with its
 ;; convention: `(subr …)`'s and `(-> …)`'s. A test's result, `(bool …)`, a
 ;; `bool` and what it proves, an `ensures` of it.
@@ -927,9 +907,9 @@
       (begin
         (set k-dscope (if top (get k-form-dscope) (get k-std-dscope)))
         (set k-toplevel-reading top)
-        (if (string=? how "") (k-with-mark m) #u)
+        (if (string=? how "") (begin (k-with-mark m k-no-record) #u) #u)
         (let ((r (k-parse-type t)))
-          (begin (if (string=? how "") (k-with-unmark m) #u)
+          (begin (if (string=? how "") (k-with-unmark m -1) #u)
                  (set k-dscope saved) (set k-toplevel-reading was) r))))))
 ;; `(moduleof …)`, each abstract type a binder in what follows; or a `select`.
 (define k-read-module-type (->* (syn k-syns symbol) int)

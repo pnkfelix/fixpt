@@ -3186,7 +3186,7 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 53] = [
+    pub const FRONT_ENTRIES: [&'static str; 56] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "includes-given!", "standard-names!", "check-macro-uses!", "expansions-made", "macro-source", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-adopt-globals!", "compile-adopt-broken?", "compile-name-word!", "compile-defining!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
@@ -3194,7 +3194,7 @@ impl Fx26Session {
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
         "checked-reps", "checked-reps-again", "check-more-typed", "import-types", "check-text-typed",
         "native-assemble-arm64-regs", "native-adapter-arm64",
-        "native-compile-arm64-proc",
+        "native-compile-arm64-proc", "program-walked", "program-shaped", "check-global-shapes!",
     ];
 
     /// The front end's checker and compilers run as register code, not as
@@ -3941,6 +3941,41 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     /// session keeps it ([`Self::read_state`]).
     pub fn own_reading_state(&self) -> crate::ids::State {
         self.read_state(&None)
+    }
+
+    /// Program forms `text`, after expansion, each with its local value
+    /// binders renamed as the FX-26 expander's walk finds their scopes
+    /// (`macros-walk.fx`'s `walked-forms`): for holding the two walks to
+    /// one another (`tests/scopes.rs`).
+    pub fn own_program_walked(&mut self, text: &str) -> R<Vec<String>> {
+        self.own_strings_of("program-walked", text)
+    }
+
+    /// Program forms `text`, after expansion, each with what each module it
+    /// opens was relied on for written in, as the FX-26 expander finds it
+    /// (`macros-shapes.fx`'s `shaped-forms`): for holding the two
+    /// expanders' records to one another (`tests/scopes.rs`).
+    /// The files its loads read are read from `dir`.
+    pub fn own_program_shaped(&mut self, text: &str, dir: Option<std::path::PathBuf>) -> R<Vec<String>> {
+        self.own_pieces()?;
+        crate::syn::set_load_base(dir);
+        let supplied = crate::syn::supply_loaded(&mut self.scheme, FileId(0), text);
+        crate::syn::set_load_base(None);
+        supplied?;
+        self.own_strings_of("program-shaped", text)
+    }
+
+    /// What FX-26 global `entry` makes of `text`: a list of strings.
+    fn own_strings_of(&mut self, entry: &str, text: &str) -> R<Vec<String>> {
+        self.own_pieces()?;
+        let mark = self.scheme.root_mark();
+        let t = self.scheme.make(|m| m.heap().make_string(text));
+        let r = self.scheme.call_global(&format!("{READER_PREFIX}{entry}"), &[t]);
+        let out = r.map(|r| {
+            self.scheme.view(|v| v.get(r).list().unwrap_or_default().into_iter().map(|x| x.string().unwrap_or_default()).collect::<Vec<String>>())
+        });
+        self.scheme.release_to(mark);
+        out.map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))
     }
 
     /// The switches the checker written in FX-26 is set to, as it writes

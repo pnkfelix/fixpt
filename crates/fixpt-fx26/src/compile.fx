@@ -452,7 +452,7 @@
 (define c-include-with (->* (exp) exps)
   (lambda (x)
     (tagcase x
-      (e-with (m body a b abk abkr)
+      (e-with (m body a b abk abkr wrl)
         (if (and (string=? (symbol->string m) "%include") (not (null? (c-with-at a b abk abkr))))
             (the exps (cons x nil))
             nil))
@@ -481,7 +481,7 @@
            (if (null? w)
                acc
                (tagcase (car w)
-                 (e-with (m body a b abk abkr)
+                 (e-with (m body a b abk abkr wrl)
                    (let ((more (c-included-add (car (c-with-at a b abk abkr))
                                                (car (c-with-places-at a b abk abkr))
                                                (extract acc 1) (extract acc 2) seen)))
@@ -529,7 +529,7 @@
         #u
         (begin
           (tagcase (car ws)
-            (e-with (m body a b abk abkr)
+            (e-with (m body a b abk abkr wrl)
               (if (c-included? a b abk abkr)
                   #u
                   (let ((at (c-with-in (table-ref (get c-with-index) abk nil) a b abk abkr)))
@@ -579,7 +579,7 @@
         ;; A module's items see all of them, as a `letrec*`'s.
         (e-module (items a b abk abkr) (c-free-items items (c-module-bound items bound) acc))
         ;; The module, then the body, the module's values bound in it.
-        (e-with (m body a b abk abkr)
+        (e-with (m body a b abk abkr wrl)
           (cond ((or (string=? (symbol->string m) "#%fx")
                      (string=? (symbol->string m) "#%toplevel"))
                  acc)
@@ -756,7 +756,7 @@
         ;; Said of no module (as the Rust compiler's `loops_only` and
         ;; `called_only` say).
         (e-module (items a b abk abkr) #f)
-        (e-with (m body a b abk abkr) #f)
+        (e-with (m body a b abk abkr wrl) #f)
         (else y #t))))
   ;; The same for the body of a lambda or a prompt in `x`: where `loops`
   ;; asks, no call there is in tail position, so it may not mention `f`.

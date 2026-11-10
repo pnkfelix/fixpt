@@ -131,7 +131,7 @@
                 (r-let g (extract (car l) 1) (extract (car l) 2) env te tail))))
         ;; `regcode-modules.fx`'s.
         (e-module (items a b abk abkr) (r-module-or-with g x env te tail))
-        (e-with (m body a b abk abkr) (r-module-or-with g x env te tail)))))))
+        (e-with (m body a b abk abkr wrl) (r-module-or-with g x env te tail)))))))
   ;; The region's name bound, as a `let`'s, to a region entered (never in a
   ;; leaf), and left with the body's value, which is so not in tail
   ;; position.
@@ -1052,7 +1052,7 @@
     (lambda (g x env te tail)
       (tagcase x
         (e-module (items a b abk abkr) (r-module g items env te tail))
-        (e-with (m body a b abk abkr) (r-with g m body a b abk abkr env te tail))
+        (e-with (m body a b abk abkr wrl) (r-with g m body a b abk abkr env te tail))
         (else y (r-decline)))))
   (r-reshape (->* (rgen exp k-picks renv cenv bool) unit)
     (lambda (g x at env te tail)

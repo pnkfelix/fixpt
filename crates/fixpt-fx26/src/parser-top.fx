@@ -23,12 +23,17 @@
         includes-given include-given-at mk-symbol syn-name loaded-error e-module pfail-at
         (type include-given)
         t-define-convention t-define-syscall t-define-generative t-exp p-ok p-err shared-taken
-        shared-reset! loaded input-key? label-name e-app e-plambda e-proj e-if e-letrec e-let
-        e-begin e-prompt e-letregion e-rlambda e-the e-convention e-bloblet e-product e-extract
-        e-sum e-tagcase e-with
+        shared-reset! loaded loaded-next input-key? label-name e-app e-plambda e-proj e-if
+        e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the e-convention e-bloblet
+        e-product e-extract e-sum e-tagcase e-with rl-none
         (type syns-a exp top param-list top-list presult names) (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
 ;; The expander (`macros.fx`), which each form goes through first.
+;; A program's binding structure, walked, and the shapes of the modules its
+;; forms open written in (`macros-shapes.fx`).
+(define shapes-module ((proj (load-module "fx26:macros-shapes.fx") rs re rm rc rp)))
+(import shapes-module top-shaped forms-written-in shapes-at! shapes-after! files-shaped
+        shared-shaped!)
 (define imports-module ((proj (load-module "fx26:macros-imports.fx") rs re rm rc rp)))
 (define templates-module (with imports-module templates-module))
 (define macros-module (with templates-module macros-module))
@@ -144,8 +149,8 @@
 (define parse-made (->* (syn) top-list)
   (lambda (x)
     (cond ((generative? x) (parse-generative x))
-          ((datatype? x) (parse-each-top (expand-datatype x)))
-          ((import? x) (parse-each-top (expand-import x)))
+          ((datatype? x) (parse-each-top (written-each (expand-datatype x))))
+          ((import? x) (parse-each-top (written-each (expand-import x))))
           ((form-of? x 'include) (cons (included-mark x) (include-made x)))
           (else (the top-list (cons (parse-top x) nil))))))
 ;; Where a top-level `include` is, `x`: the end of what is declared ahead,
@@ -169,7 +174,7 @@
            (at (if (null? given) (syn-start x) (extract (car given) 6)))
            (end (if (null? given) (syn-end x) (extract (car given) 7))))
       (if (string=? why "")
-          (parse-each-top (expand-import (include-import x (car given))))
+          (parse-each-top (written-each (expand-import (include-import x (car given)))))
           (the top-list (list (t-exp (e-module (loaded-error why) at end 0 0))))))))
 ;; A top-level `(include m)`, `x`: the `(import m x … (type t …) (effect e
 ;; …))` of what `m` gives, `g`, at `x`'s span (`Checker::include_forms`);
@@ -222,10 +227,10 @@
                               (if (null? inc) (the top-list nil) (parse-made (car inc)))))
                            (else (expanded-tops (expand-top pfail-at written)))))
                (guarded (guard-defs made (cdr xs)))
-               (before (shared-taken))
+               (before (shared-noted (shared-taken)))
                (r (form-reading (walk-state t) settings written (loads-of before)))
                (form (number-form t r (append-tops before guarded)))
-               (rest (begin (macros-after! r) (parse-tops t settings (cdr xs)))))
+               (rest (begin (macros-after! r) (shapes-after! r) (parse-tops t settings (cdr xs)))))
           (append-tops form rest)))))
 ;; Each form a top-level form is expanded to (a use of a macro that makes
 ;; definitions, several), parsed, each as it is noted.
@@ -234,8 +239,47 @@
     (if (null? xs)
         nil
         (let* ((x (car xs))
-               (made (begin (note-load-def! x) (unalias-tops (parse-made (type-loaded x))))))
+               (made (begin (note-load-def! x)
+                            (unalias-tops (parse-made (type-loaded (written-top x)))))))
           (append-tops made (expanded-tops (cdr xs)))))))
+;; Top-level form `x`, after expansion, with what each module it opens was
+;; relied on for written in (`macros-shapes.fx`), the files it loads shaped
+;; first, and their forms so written given the parser (`forms-written-in`).
+;; Not a top-level `include`, an `import` or a datatype's definition, whose
+;; forms are shaped as each is made (`include-made`, `written-each`), as the
+;; Rust checker shapes them.
+(define written-top (->* (syn) syn)
+  (lambda (x)
+    (if (or (form-of? x 'include) (import? x) (datatype? x))
+        x
+        (let ((shaped (top-shaped x)))
+          (begin (files-written!) shaped)))))
+;; The hidden globals of the files loaded, `ts`, each noted with its file's
+;; shape (`shared-shaped!`), for the forms after: its definition is made,
+;; not read, so is not shaped as forms are.
+(define shared-noted (->* (top-list) top-list)
+  (lambda (ts)
+    (begin (shared-each ts) ts)))
+(define shared-each (->* (top-list) unit)
+  (lambda (ts)
+    (if (null? ts)
+        #u
+        (begin (tagcase (car ts) (t-define (n t x a b) (shared-shaped! n)) (else y #u))
+               (shared-each (cdr ts))))))
+;; Each of `xs`, `written-top`.
+(define written-each (->* (syns-a) syns-a)
+  (lambda (xs) (if (null? xs) nil (cons (written-top (car xs)) (written-each (cdr xs))))))
+;; The loads' files, their forms as their shapes wrote them, once more are
+;; shaped.
+(define files-shaped-count (ref int rs) (new 0))
+(define files-written! (->* () unit)
+  (lambda ()
+    (let ((n (files-shaped)))
+      (if (= n (get files-shaped-count))
+          #u
+          (begin (set files-shaped-count n)
+                 (set loaded (forms-written-in (get loaded)))
+                 (set loaded-next (forms-written-in (get loaded-next))))))))
 ;; Each of macros `ns`' templates' checks, expanded and parsed.
 (define macro-checks (->* (names) top-list)
   (lambda (ns)
@@ -380,7 +424,7 @@
         (if (or (not (alias? s)) (name-in? s bound) (name-in? s (get alias-defs)))
             e
             (e-with '#%toplevel (e-var (string->symbol (label-name (symbol->string s))) a b k kr)
-                    a b k kr)))
+                    a b k kr (rl-none))))
       (e-lambda (ps body a b k kr) (e-lambda ps (unalias body (param-names ps bound)) a b k kr))
       (e-app (f xs a b k kr) (e-app (unalias f bound) (unalias-each xs bound) a b k kr))
       (e-plambda (bs body a b k kr) (e-plambda bs (unalias body bound) a b k kr))
@@ -406,10 +450,10 @@
         (e-tagcase (unalias x bound) (unalias-arms arms bound) (unalias-else els bound) d
                    a b k kr))
       (e-module (items a b k kr) (e-module (unalias-items items (item-names items bound)) a b k kr))
-      (e-with (m body a b k kr)
+      (e-with (m body a b k kr wrl)
         (if (or (symbol=? m '#%fx) (symbol=? m '#%toplevel))
             e
-            (e-with m (unalias body bound) a b k kr)))
+            (e-with m (unalias body bound) a b k kr wrl)))
       (else y e))))
 (define unalias-each (->* ((listof exp acyclic) names) (listof exp acyclic))
   (lambda (xs bound)
@@ -488,6 +532,8 @@
     (let* ((t (walk-of keys)) (base (walk-count t)))
       (begin (shared-reset!)
              (macros-at! (walk-state t))
+             (shapes-at! (walk-state t) (get loaded))
+             (set files-shaped-count -1)
              (let* ((parsed (prompt parse-tag (p-ok (parse-tops t (extract keys 3) forms))
                                     (lambda (r) r)))
                     (done (walk-done! t))

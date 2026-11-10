@@ -2,19 +2,21 @@
 ;;; tree of nodes, walked for what binds what (Herman's rules), and a
 ;;; macro's clause checked against its signature, as the Rust expander has
 ;;; them (`macros.rs`). Part of the expander (`macros.fx`, which loads it,
-;;; and takes `types-module`, this file's instance of `macros-types.fx`,
-;;; from it, so that both see one table of `mu`s); the macros defined are
-;;; here, which aligning a template looks up.
+;;; and takes `types-module`, the one instance of `macros-types.fx`, from
+;;; it, so that every part sees one table of `mu`s); the macros defined and
+;;; the nodes are `macros-nodes.fx`'s, which this file gives on.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define types-module ((proj (load-module "fx26:macros-types.fx") rs re rm rc rp)))
+(define nodes-module ((proj (load-module "fx26:macros-nodes.fx") rs re rm rc rp)))
+(define types-module (with nodes-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
 (import reader-types atom (type syn))
-(import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth
+(import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth syn-string?
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
         fits? sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
+        scope-sigs scope-definitions syn-number? s-item bind-shape ring-shape
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
@@ -22,193 +24,17 @@
         seq-elem seq-cage? peel ellipsis? ellipsis-of name-fit-of name-kind?
         joined
         (type fails addr entries ring rings bind sty stys named hole atm atms strings))
-
-;;; ------------------------------------------------------------ macros
-
-;; What becomes of one of a template's parts where it is transcribed
-;; (`macros.rs`'s `Action`): a name made fresh, one for the binder at a
-;; path and each reference to it; a free name the top level's, `(with
-;; #%toplevel n)`; a description's free name the top level's, qualified,
-;; `#%toplevel:n`; a file's macro's free name the file's own, `(with m
-;; n)`, or standard, `(with #%fx n)`; its description read whole through
-;; the file's module or the standard environment, by `select`; a use of
-;; another of the file's macros, by the name the importer has it by.
-(define-datatype action
-  (act-rename addr int) (act-toplevel) (act-qualified) (act-standard) (act-module symbol)
-  (act-module-type symbol) (act-standard-type) (act-macro-head symbol))
-(define-type actions (listof (tupleof addr action) acyclic))
-;; A clause: its pattern (of the operands), its template, and its actions,
-;; by their paths in the template, the last made first; its pattern's
-;; variables, in the order the pattern has them; and each typed hole's
-;; type as a use reads it, `(select #%toplevel T)`, which the use's
-;; expression is held to (`macros.rs`'s `Clause`).
-(define-type contracts (listof (tupleof symbol syn) acyclic))
-(define-type clause (tupleof syn syn actions pvars contracts))
-(define-type clauses (listof clause acyclic))
-;; A macro defined: its signature, its clauses, the binders of its
-;; signature's `(poly (binder …) σ)`, if it has one, and what it makes (0 an
-;; expression, 1 definitions, `(-> σ defn)`, 2 a description, `(-> σ type)`).
-(define-type macro (tupleof sty clauses syns-a int))
-(define-type macro-env (listof (tupleof symbol macro) acyclic))
-;; The macros defined, each by the name it is used by, the last defined
-;; first (`macros.fx`).
-(define defined (ref macro-env rs) (new nil))
-(define macro-of (->* (symbol macro-env) (listof macro acyclic))
-  (lambda (n env)
-    (cond ((null? env) nil)
-          ((symbol=? n (extract (car env) 1)) (list (extract (car env) 2)))
-          (else (macro-of n (cdr env))))))
-(define macro? (->* (symbol) bool) (lambda (n) (not (null? (macro-of n (get defined))))))
-;; Whether `n` is a macro that makes definitions.
-(define makes-defns? (->* (symbol) bool) (lambda (n) (= (makes n) 1)))
-;; Whether `n` is a macro a top level's form may make definitions with: one
-;; that makes them, or a procedural one (`macros-procedural.fx`), which no
-;; signature says.
-(define makes-top-defns? (->* (symbol) bool) (lambda (n) (or (= (makes n) 1) (= (makes n) 3))))
-;; Whether `n` is a macro that makes a description.
-(define makes-desc? (->* (symbol) bool) (lambda (n) (= (makes n) 2)))
-(define makes (->* (symbol) int)
-  (lambda (n)
-    (let ((m (macro-of n (get defined)))) (if (null? m) -1 (extract (car m) 4)))))
-
-;; What a file's macros are defined in (`macros.rs`'s `FileScope`): the
-;; hidden global every load of the file is; the values and the types its
-;; module shows; each of its macros' names, and the name the importer has
-;; it by; and the standard names. None for a program's own.
-(define-type scope
-  (tupleof symbol names names (listof (tupleof symbol symbol) acyclic) names))
-(define-type scopes (listof scope acyclic))
-
-;;; ------------------------------------------------------------ nodes
-
-;; What is in a node: a pair's two; nothing; a pattern variable (in a
-;; pattern, or placed in a template); a template's binder, of a
-;; description (`#t`) or a value; a name in a template referred to, in a
-;; namespace, and what it is if the template does not bind it (0 the top
-;; level's value, 1 the top level's qualified, 2 as written, 3 refused, the
-;; module a template's `(with m name)` takes from: `macros.rs`'s `Free`); a
-;; form in a template, its operands (or, an application's,
-;; itself); a description's parts, a list a template writes; a list given
-;; by ellipsis, `(p ...)`, its element, repeated; anything else.
-(define-datatype kids
-  (k-pair int int) (k-nil) (k-pvar symbol) (k-binder symbol bool) (k-ref symbol bool int)
-  (k-form int) (k-desc (listof int acyclic)) (k-seq int) (k-other))
-;; Each of a node's imports, outermost first, or its export, with the root
-;; its addresses are from.
-(define-type rooted (listof (tupleof bind int) acyclic))
-;; A node of syntax aligned with a syntax type: the syntax; its path from
-;; the root; the type at it, its annotations taken off; its imports; its
-;; export (none or one); whether its part of the signature is `(many …)`;
-;; what is in it; its part's typed hole, if the signature types it (none or
-;; one).
-(define-type holes (listof hole acyclic))
-(define-type node (tupleof syn addr sty rooted rooted bool kids holes))
-(define atom-at (subr pure (int) syn) (lambda (a) (atom '() a a 0)))
-(define nodes (ref (arrayof node rs) rs)
-  (new (make-array 256 (tuple (atom-at 0) (the addr nil) (s-nil) (the rooted nil) (the rooted nil)
-                              #f (k-other) (the holes nil)))))
-(define nnodes (ref int rs) (new 0))
-(define node-at (->* (int) node) (lambda (i) (array-ref (get nodes) i)))
-(define node-set! (->* (int node) unit) (lambda (i n) (array-set! (get nodes) i n)))
-(define node-syn (->* (int) syn) (lambda (i) (extract (node-at i) 1)))
-(define node-path (->* (int) addr) (lambda (i) (extract (node-at i) 2)))
-(define node-core (->* (int) sty) (lambda (i) (extract (node-at i) 3)))
-(define node-kids (->* (int) kids) (lambda (i) (extract (node-at i) 7)))
-(define node-many? (->* (int) bool) (lambda (i) (extract (node-at i) 6)))
-(define node-hole (->* (int) holes) (lambda (i) (extract (node-at i) 8)))
-;; A node's fields, one of them changed.
-(define with-core (->* (int sty) unit)
-  (lambda (i t)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) t (extract n 4) (extract n 5) (extract n 6)
-                          (extract n 7) (extract n 8))))))
-(define with-kids (->* (int kids) unit)
-  (lambda (i k)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
-                          (extract n 6) k (extract n 8))))))
-(define with-import (->* (int bind int) unit)
-  (lambda (i b root)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3)
-                          (append (extract n 4) (the rooted (list (tuple b root))))
-                          (extract n 5) (extract n 6) (extract n 7) (extract n 8))))))
-(define with-export (->* (int bind int) unit)
-  (lambda (i b root)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4)
-                          (the rooted (list (tuple b root))) (extract n 6) (extract n 7)
-                          (extract n 8))))))
-(define with-many (->* (int) unit)
-  (lambda (i)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
-                          #t (extract n 7) (extract n 8))))))
-(define with-hole (->* (int hole) unit)
-  (lambda (i h)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
-                          (extract n 6) (extract n 7) (the holes (list h)))))))
-;; A new node, of `s` at `path`, its type `t`: its number.
-(define node-new (->* (syn addr sty) int)
-  (lambda (s path t)
-    (let ((i (get nnodes)))
-      (begin
-        (if (= i (array-length (get nodes)))
-            (let ((bigger (the (arrayof node rs) (make-array (* 2 i) (node-at 0)))))
-              (begin (copy-nodes (get nodes) bigger 0) (set nodes bigger)))
-            #u)
-        (set nnodes (+ i 1))
-        (node-set! i (tuple s path t (the rooted nil) (the rooted nil) #f (k-other)
-                            (the holes nil)))
-        i))))
-(define copy-nodes (->* ((arrayof node rs) (arrayof node rs) int) unit)
-  (lambda (from to i)
-    (if (= i (array-length from))
-        #u
-        (begin (array-set! to i (array-ref from i)) (copy-nodes from to (+ i 1))))))
-;; The nodes forgotten, for another alignment.
-(define nodes-reset! (->* () unit)
-  (lambda ()
-    (begin (set nnodes 0) (set desc-roots nil) (set repeated nil) (set seq-depths nil)
-           (set cage-seqs nil))))
-;; The nodes an ellipsis follows, so that each is repeated; and, as a walk
-;; finds them, each with how many ellipses it is under, itself counted, the
-;; last found first (`macros.rs`'s `Node::repeated`, `walk`'s `seqs`).
-(define repeated (ref (listof int acyclic) rs) (new nil))
-(define seq-depths (ref (listof (tupleof int int) acyclic) rs) (new nil))
-(define repeated? (->* (int) bool)
-  (lambda (i) (int-member? i (get repeated))))
-;; The lists given by ellipsis whose elements are each in the scope of those
-;; before it, a ribcage's (`macros.rs`'s `Kids::Seq`'s flag).
-(define cage-seqs (ref (listof int acyclic) rs) (new nil))
-(define cage-seq? (->* (int) bool)
-  (lambda (i) (int-member? i (get cage-seqs))))
-(define int-member? (->* (int (listof int acyclic)) bool)
-  (lambda (i is) (and (not (null? is)) (or (= i (car is)) (int-member? i (cdr is))))))
-;; The nodes of the descriptions a template writes, whole (`macros.rs`'s
-;; `Node::desc`).
-(define desc-roots (ref (listof int acyclic) rs) (new nil))
+(import nodes-module act-rename act-toplevel act-qualified act-standard act-module act-module-type
+        act-standard-type act-macro-head defined macro-of macro? makes-defns? makes-top-defns?
+        makes-desc? makes k-pair k-nil k-pvar k-binder k-ref k-form k-desc k-seq k-other atom-at
+        nodes nnodes node-at node-set! node-syn node-path node-core node-kids node-many? node-hole
+        with-core with-kids with-import with-export with-many with-hole node-new copy-nodes
+        nodes-reset! repeated seq-depths repeated? cage-seqs cage-seq? int-member? desc-roots
+        pvar-of pvar? pvar-shape lv-rib lv-cage lv-earlier lv-shape program-walk unplaced
+        (type action actions contracts clause clauses macro macro-env scope scopes kids rooted holes
+              node pinfo pvars level levels found))
 
 ;;; ------------------------------------------------------------ aligning
-
-;; A pattern variable: its type, its environment as the signature declares
-;; it, whether it may be placed any number of times, its typed hole, if
-;; the signature types it, and how many ellipses its pattern has it under.
-(define-type pinfo (tupleof sty levels bool holes int))
-(define-type pvars (listof (tupleof symbol pinfo) acyclic))
-(define pvar-of (->* (symbol pvars) (listof pinfo acyclic))
-  (lambda (n ps)
-    (cond ((null? ps) nil)
-          ((symbol=? n (extract (car ps) 1)) (list (extract (car ps) 2)))
-          (else (pvar-of n (cdr ps))))))
-(define pvar? (->* (symbol pvars) bool) (lambda (n ps) (not (null? (pvar-of n ps)))))
-;; 0 if `n` is no pattern variable of `ps`; 1 if it is a name's (`bvar`,
-;; `dvar`, `id`, `label`), which is never a list; else 2.
-(define pvar-shape (->* (symbol pvars) int)
-  (lambda (n ps)
-    (let ((p (pvar-of n ps)))
-      (cond ((null? p) 0) ((name-kind? (kind-of (extract (car p) 1))) 1) (else 2)))))
 
 ;; `s`, at `path`, aligned with type `t`, in `mode` (0 a pattern, 1 a
 ;; template, 2 a use); `root`, the node its addresses are from, if not
@@ -217,7 +43,12 @@
   (lambda (fail mode ps t s root path)
     (let ((at (node-new s path t)))
       (begin (fill fail mode ps at t s (if (< root 0) at root)) at))))
-(define path+ (->* (addr bool) addr) (lambda (p step) (append p (the addr (list step)))))
+;; Node path `p` a step further: in a program's walk, kept innermost step
+;; first, so that a step costs one pair however deep (a program's lists may
+;; be long); a template's, in order. A signature's address, `addr+`.
+(define path+ (->* (addr bool) addr)
+  (lambda (p step) (if (get program-walk) (cons step p) (addr+ p step))))
+(define addr+ (->* (addr bool) addr) (lambda (p step) (append p (the addr (list step)))))
 
 (define fill (->* (fails int pvars int sty syn int) unit)
   (lambda (fail mode ps at t s root)
@@ -245,9 +76,9 @@
                (if (null? one)
                    (with-kids at (k-pvar (syn-symbol s)))
                    (fill fail mode ps at (car one) s root))))
-            ((and (not (= mode 2)) (not (null? (ellipsis-of s))))
+            ((and (< mode 2) (not (null? (ellipsis-of s))))
              (fill-seq fail mode ps at t s (car (ellipsis-of s))))
-            ((and (not (= mode 2)) (ellipsis? s))
+            ((and (< mode 2) (ellipsis? s))
              (fail-at fail "`...` follows the part it repeats, last in a list" s))
             (else (fill-shape fail mode ps at t s root))))))
 ;; `(x ...)` at `at`, a pattern's or a template's: `x` aligned with the
@@ -285,20 +116,26 @@
 (define fill-shape (->* (fails int pvars int sty syn int) unit)
   (lambda (fail mode ps at t s root)
     (let ((said (lambda ((why string)) (fail-at fail why s)))
-          (shown (string-append "`" (show-syn s) "`")))
+          ;; Written only if refused: `s` may be large.
+          (shown (lambda () (string-append "`" (show-syn s) "`"))))
       (tagcase t
         (s-mu (id) (fill fail mode ps at (mu-body id) s at))
         (s-union (ms)
-          (let ((fit (fitting ms s mode ps)))
-            (cond ((null? fit) (said (string-append shown " is of none of the shapes this part "
+          ;; A program's name that a form's word may be too, `else` or a
+          ;; variable bound to `else`: the form's word, if a member writes it.
+          (let* ((all (fitting ms s mode ps))
+                 (fit (if (and (= mode 3) (not (null? all)) (not (null? (cdr all))))
+                          (fitting all s 2 ps)
+                          all)))
+            (cond ((null? fit) (said (string-append (shown) " is of none of the shapes this part "
                                                     "may have")))
                   ((null? (cdr fit)) (fill fail mode ps at (car fit) s at))
-                  (else (said (string-append shown " could be of more than one of this part's "
+                  (else (said (string-append (shown) " could be of more than one of this part's "
                                              "shapes"))))))
         (s-pair (a d)
           (let ((parts (split s)))
             (if (null? parts)
-                (said (string-append shown " is not a list as this part must be"))
+                (said (string-append (shown) " is not a list as this part must be"))
                 (let* ((path (node-path at))
                        (x (align fail mode ps a (car parts) root (path+ path #t)))
                        (y (align fail mode ps d (nth parts 1) root (path+ path #f))))
@@ -306,35 +143,39 @@
         (s-nil ()
           (if (syn-nil? s)
               (with-kids at (k-nil))
-              (said (string-append shown " is more than this part may have"))))
+              (said (string-append (shown) " is more than this part may have"))))
         (s-literal (n)
           (if (and (syn-symbol? s) (symbol=? (syn-symbol s) n))
               #u
-              (said (string-append shown " where `" (symbol->string n) "` is written"))))
+              (said (string-append (shown) " where `" (symbol->string n) "` is written"))))
         (s-bvar () (fill-binder fail mode at s #f))
         (s-dvar () (fill-binder fail mode at s #t))
         (s-kind () #u)
         (s-id ()
           (if (syn-symbol? s)
-              (if (= mode 1) (with-kids at (k-ref (syn-symbol s) #f 0)) #u)
-              (said (string-append shown " is not a variable"))))
+              (if (writes? mode) (with-kids at (k-ref (syn-symbol s) #f 0)) #u)
+              (said (string-append (shown) " is not a variable"))))
         (s-label ()
           (cond ((syn-keyword? s) #u)
-                ((and (syn-symbol? s) (= mode 2)) #u)
+                ((and (syn-symbol? s) (>= mode 2)) #u)
+                ;; A program's field by position.
+                ((and (= mode 3) (syn-number? s)) #u)
                 ((syn-symbol? s)
                  (said (string-append "a tag or label in a template is a keyword: `#:"
                                       (syn-name s) "`, not `" (syn-name s) "`")))
-                (else (said (string-append shown " is not a tag or label")))))
+                (else (said (string-append (shown) " is not a tag or label")))))
         ;; A template writes a lambda (its form aligned as any of the kernel's);
         ;; a use gives one, of the shape the checkers take.
         (s-lambda ()
-          (cond ((and (= mode 1) (not (null? (split s))) (syn-symbol? (car (split s)))
+          (cond ((= mode 3) (fill fail mode ps at (s-expr) s root))
+                ((and (= mode 1) (not (null? (split s))) (syn-symbol? (car (split s)))
                       (string=? (syn-name (car (split s))) "lambda") (proper? s))
                  (form fail ps at s #f))
-                ((and (not (= mode 1)) (lambda-shaped? s)) #u)
-                (else (said (string-append shown " is not a lambda, as this part must be")))))
+                ((and (= mode 2) (lambda-shaped? s)) #u)
+                (else (said (string-append (shown) " is not a lambda, as this part must be")))))
         (s-expr ()
-          (cond ((reserved-syn? s)
+          (cond ((= mode 3) (program-expr fail ps at s))
+                ((reserved-syn? s)
                  (said (string-append "`" (syn-name s) "` is a form's name, not an expression")))
                 ;; `#u`, unit: a literal, which the parsers read as a name.
                 ((and (syn-symbol? s) (string=? (syn-name s) "#u")) #u)
@@ -343,20 +184,26 @@
                 ((syn-nil? s) (said "`()` is not an expression"))
                 (else #u)))
         (s-defn ()
-          (if (and (= mode 1) (not (syn-nil? s)) (not (null? (split s))))
+          (if (and (writes? mode) (not (syn-nil? s)) (not (null? (split s))))
               (form fail ps at s #t)
-              (said (string-append shown " is not a definition"))))
+              (said (string-append (shown) " is not a definition"))))
         ;; A description a template writes, name by name; the binders of the
         ;; `poly`s at its top, what it exports (what a definition's type puts
         ;; in scope in what it is defined as).
         (s-type ()
-          (if (= mode 1)
+          (if (writes? mode)
               (begin (set desc-roots (cons at (get desc-roots)))
                      (desc fail ps at s)
                      (if (null? (extract (node-at at) 5))
                          (with-export at (bind-direct (poly-binders at ps)) at)
                          #u))
               #u))
+        ;; A module's item, as a program's walk takes one: a definition, a
+        ;; string (a comment, binding nothing), or an expression.
+        (s-item ()
+          (cond ((defines? fail s) (form fail ps at s #t))
+                ((syn-string? s) (with-export at (bind-rib nil) at))
+                (else (fill fail mode ps at (s-expr) s root))))
         ;; `data`.
         (else z
           (let ((inside (pvar-inside s ps)))
@@ -370,6 +217,9 @@
     (cond ((and (syn-symbol? s) (macro? (syn-symbol s)))
            (fail-at fail (string-append "`" (syn-name s) "` is a macro's name, which is not bound")
                     s))
+          ;; A program's binder: any name the checkers let it bind, which they
+          ;; decide.
+          ((and (syn-symbol? s) (= mode 3)) (with-kids at (k-binder (syn-symbol s) d)))
           ((and (syn-symbol? s) (not (reserved-syn? s)) (not (and d (desc-word? (syn-name s) #f))))
            (if (= mode 1) (with-kids at (k-binder (syn-symbol s) d)) #u))
           (else (fail-at fail (string-append "`" (show-syn s) "` is not a name that may be bound")
@@ -402,6 +252,8 @@
            (kernel (kernel-sigs fail)) (defs (kernel-definitions fail))
            (macro (and (not (string=? head "")) (macro? (syn-symbol hd)))))
       (cond
+        ;; A program's form, after expansion: its own binding structure.
+        ((get program-walk) (program-form fail ps at s defn))
         ;; A procedural macro (`macros-procedural.fx`): no signature says
         ;; what it binds.
         ((and macro (= (makes (syn-symbol hd)) 3))
@@ -470,6 +322,191 @@
         (else
          (with-kids at (k-form (align fail 1 ps (car (sig-of '%app kernel)) s -1
                                       (node-path at)))))))))
+;; Whether nodes of `mode` are written, their binders and references found:
+;; a template's, a program's.
+(define writes? (->* (int) bool) (lambda (mode) (or (= mode 1) (= mode 3))))
+
+;;; ------------------------------------------------------------ programs
+
+;; A program's expression `s` at `at`, after expansion: a name referred to
+;; (but the literals the parsers read as names), or a form.
+(define program-expr (->* (fails pvars int syn) unit)
+  (lambda (fail ps at s)
+    (cond ((syn-symbol? s)
+           (if (or (string=? (syn-name s) "#t") (string=? (syn-name s) "#f")
+                   (string=? (syn-name s) "#u"))
+               #u
+               (with-kids at (k-ref (syn-symbol s) #f 0))))
+          ((syn-nil? s) (fail-at fail "`()` is not an expression" s))
+          ((not (null? (split s))) (form fail ps at s #f))
+          (else #u))))
+;; Whether `s` is a definition, by its head: a `begin` one if all it holds
+;; are (`macros.rs`'s `defines`).
+(define defines? (->* (fails syn) bool)
+  (lambda (fail s)
+    (let* ((items (proper-items s))
+           (head (if (and (not (null? items)) (syn-symbol? (car items))) (syn-name (car items))
+                   "")))
+      (cond ((string=? head "") #f)
+            ((string=? head "begin") (and (not (null? (cdr items))) (all-define? fail (cdr items))))
+            (else (or (not (null? (sig-of (string->symbol head) (kernel-definitions fail))))
+                      (not (null? (sig-of (string->symbol head) (scope-definitions fail))))))))))
+(define all-define? (->* (fails syns-a) bool)
+  (lambda (fail xs) (or (null? xs) (and (defines? fail (car xs)) (all-define? fail (cdr xs))))))
+;; A program's form at `at`: its binding structure, the kernel's or
+;; `scope-forms`'; a reserved word at its head with none, an application,
+;; as the checkers take it (`macros.rs`'s `Aligner::form`, `Mode::Program`).
+(define program-form (->* (fails pvars int syn bool) unit)
+  (lambda (fail ps at s defn)
+    (let* ((parts (split s)) (hd (car parts))
+           (head (if (syn-symbol? hd) (syn-name hd) "")) (n (string->symbol head))
+           (kernel (kernel-sigs fail)) (sforms (scope-sigs fail))
+           (defs (kernel-definitions fail)) (sdefs (scope-definitions fail)))
+      (cond
+        (defn
+         (cond ((and (string=? head "module-parameters") (= (len (proper-items s)) 2))
+                (operands-as fail 3 ps at (parameters-sig (nth (proper-items s) 1)) (nth parts 1)))
+               ((not (null? (sig-of n defs))) (operands-as fail 3 ps at (car (sig-of n defs))
+                                                (nth parts 1)))
+               ((not (null? (sig-of n sdefs)))
+                (operands-as fail 3 ps at (car (sig-of n sdefs)) (nth parts 1)))
+               (else (not-definition fail s "a definition of the kernel's"))))
+        ((syn-keyword? hd)
+         (with-kids at (k-form (align fail 3 ps (car (sig-of '%construct kernel)) s -1
+                                      (node-path at)))))
+        ((and (string=? head "quasiquote") (= (len (proper-items s)) 2))
+         (with-kids at (k-desc (unquoted fail ps (nth (proper-items s) 1)
+                                         (path+ (path+ (node-path at) #f) #t) 1 nil))))
+        ((and (string=? head "with") (standard-with? s)) #u)
+        ((not (null? (sig-of n sforms)))
+         (operands-as fail 3 ps at (car (sig-of n sforms)) (nth parts 1)))
+        ((and (not (string=? head "")) (not (string=? (substring head 0 1) "%"))
+              (not (null? (sig-of n kernel))))
+         (operands-as fail 3 ps at (car (sig-of n kernel)) (nth parts 1)))
+        (else (with-kids at (k-form (align fail 3 ps (car (sig-of '%app kernel)) s -1
+                                            (node-path at)))))))))
+;; The operands `rest` of the form at `at`, aligned with its signature, in
+;; `mode`.
+(define operands-as (->* (fails int pvars int sty syn) unit)
+  (lambda (fail mode ps at sig rest)
+    (with-kids at (k-form (align fail mode ps sig rest -1 (path+ (node-path at) #f))))))
+;; The expressions a quasiquote's datum `s`, at `path`, unquotes at `depth`
+;; 1, each aligned, onto `kids` (the last first, given back first first):
+;; a nested `quasiquote` deepens, an `unquote` or `unquote-splicing`
+;; shallows, as R7RS counts (`macros.rs`'s `unquoted`).
+(define unquoted (->* (fails pvars syn addr int (listof int acyclic)) (listof int acyclic))
+  (lambda (fail ps s path depth kids)
+    (the (listof int acyclic) (reverse (unquoted-onto fail ps s path depth kids)))))
+(define unquoted-onto (->* (fails pvars syn addr int (listof int acyclic)) (listof int acyclic))
+  (lambda (fail ps s path depth kids)
+    (tagcase s
+      (lst (items d a b x)
+        (let ((head (if (and (not (null? items)) (syn-symbol? (car items)))
+                        (syn-name (car items))
+                        ""))
+              (inner (path+ (path+ path #f) #t)))
+          (cond ((and (= (len items) 2) (= depth 1)
+                      (or (string=? head "unquote") (string=? head "unquote-splicing")))
+                 (cons (align fail 3 ps (s-expr) (nth items 1) -1 inner) kids))
+                ((and (= (len items) 2) (or (string=? head "unquote") (string=? head
+                                                                        "unquote-splicing")))
+                 (unquoted-onto fail ps (nth items 1) inner (- depth 1) kids))
+                ((and (= (len items) 2) (string=? head "quasiquote"))
+                 (unquoted-onto fail ps (nth items 1) inner (+ depth 1) kids))
+                (else (unquoted-items fail ps items path depth kids)))))
+      (dotted (items tail d a b x)
+        (unquoted-onto fail ps tail (falses path (len items)) depth
+                       (unquoted-items fail ps items path depth kids)))
+      (vec (items d a b x)
+        (begin (if (any-unquotes? items) (set unplaced (symbols-onto items (get unplaced))) #u)
+          kids))
+      (else y kids))))
+(define unquoted-items (->* (fails pvars syns-a addr int (listof int acyclic)) (listof int acyclic))
+  (lambda (fail ps items path depth kids)
+    (if (null? items)
+        kids
+        (unquoted-items fail ps (cdr items) (path+ path #f) depth
+                        (unquoted-onto fail ps (car items) (path+ path #t) depth kids)))))
+(define falses (->* (addr int) addr)
+  (lambda (path k) (if (= k 0) path (falses (path+ path #f) (- k 1)))))
+(define addr-falses (->* (addr int) addr)
+  (lambda (a k) (if (= k 0) a (addr-falses (addr+ a #f) (- k 1)))))
+;; Whether one of `xs` has an `unquote` or `unquote-splicing` in it.
+(define any-unquotes? (->* (syns-a) bool)
+  (lambda (xs) (and (not (null? xs)) (or (unquotes? (car xs)) (any-unquotes? (cdr xs))))))
+(define unquotes? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b x) (any-unquotes? items))
+      (dotted (items tail d a b x) (or (any-unquotes? items) (unquotes? tail)))
+      (vec (items d a b x) (any-unquotes? items))
+      (else y (and (syn-symbol? s) (or (string=? (syn-name s) "unquote")
+                                       (string=? (syn-name s) "unquote-splicing")))))))
+;; Each name in `xs`, onto `out`: names a walk leaves unplaced.
+(define symbols-onto (->* (syns-a names) names)
+  (lambda (xs out)
+    (if (null? xs)
+        out
+        (symbols-onto (cdr xs)
+                      (tagcase (car xs)
+                        (lst (items d a b x) (symbols-onto items out))
+                        (dotted (items tail d a b x) (symbols-onto (cons tail items) out))
+                        (vec (items d a b x) (symbols-onto items out))
+                        (else y (if (syn-symbol? (car xs)) (cons (syn-symbol (car xs)) out)
+                                  out)))))))
+;; The binding structure of a program's `module-parameters`' list `bs`:
+;; each a value's binder, its type in the scope of those before it, or a
+;; description's; each module not `qualified` included in the items, as the
+;; checkers make the file (`macros.rs`'s `parameters_sig`).
+(define parameters-sig (->* (syn) sty)
+  (lambda (bs)
+    (let ((ps (proper-items bs)))
+      (s-export (s-pair (parameters-list ps) (s-nil))
+                (bind-cage (cons (ring-rib (parameter-entries ps 0)) (parameter-shapes ps 0)))))))
+(define parameters-list (->* (syns-a) sty)
+  (lambda (ps)
+    (if (null? ps)
+        (s-nil)
+        (s-pair (s-union (list (if (binder-is-kind? (car ps))
+                                   (s-export (s-pair (s-dvar) (s-data))
+                                             (bind-rib (list (tuple (list #t) 4))))
+                                   (s-export (s-pair (s-bvar) (s-pair (s-type) (s-data)))
+                                             (bind-rib (list (tuple (list #t) 1)))))))
+                (parameters-list (cdr ps))))))
+(define parameter-entries (->* (syns-a int) entries)
+  (lambda (ps k)
+    (if (null? ps)
+        nil
+        (cons (tuple (cons #t (addr+ (addr-falses nil k) #t)) 2)
+              (parameter-entries (cdr ps) (+ k 1))))))
+(define parameter-shapes (->* (syns-a int) rings)
+  (lambda (ps k)
+    (cond ((null? ps) nil)
+          ((or (binder-is-kind? (car ps)) (not (= (len (proper-items (car ps))) 2)))
+           (parameter-shapes (cdr ps) (+ k 1)))
+          (else (cons (ring-shape (cons #t (addr+ (addr+ (addr-falses nil k) #t) #t)))
+                      (parameter-shapes (cdr ps) (+ k 1)))))))
+;; Whether module parameter `b` binds a description, `(name kind)` or `(r
+;; region p)`; else it is `(m T)` or `(m T qualified)`, a module
+;; (`parse::binder_is_kind`).
+(define binder-is-kind? (->* (syn) bool)
+  (lambda (b)
+    (let ((parts (proper-items b)))
+      (cond ((= (len parts) 2) (kind-form? (nth parts 1)))
+            ((= (len parts) 3)
+             (or (kind-form? (nth parts 1))
+                 (not (and (syn-symbol? (nth parts 2)) (string=? (syn-name (nth parts 2))
+                                                         "qualified")))))
+            (else #t)))))
+(define kind-form? (->* (syn) bool)
+  (lambda (k)
+    (let ((parts (proper-items k)))
+      (if (not (null? parts))
+          (and (syn-symbol? (car parts)) (string=? (syn-name (car parts)) "=>"))
+          (and (syn-symbol? k)
+               (name-in? (syn-symbol k)
+                         (list 'region 'place 'effect 'type 'data 'sendable 'flat 'size 'conv)))))))
+
 ;; Whether a list headed by `hd` constructs: a keyword, or a pattern
 ;; variable of a `label`.
 (define constructs? (->* (syn pvars) bool)
@@ -556,6 +593,11 @@
                       (fail-at fail (string-append what " in a template's description: not yet")
                                s))))
       (cond
+        ;; A program's `poly` of several descriptions after its binders.
+        ((and (or (string=? head "poly") (string=? head "dlambda")) (get program-walk)
+              (> (len items) 3))
+         (desc-each-scoped fail ps (cdr (cdr kids)) (cdr (cdr items))
+                           (desc-binders fail ps (kid kids 1) (nth items 1))))
         ((or (string=? head "poly") (string=? head "dlambda"))
          (if (= (len items) 3)
              (desc-scoped fail ps (kid kids 2) (nth items 2)
@@ -580,6 +622,16 @@
         ((string=? head "globals") (desc-values fail ps (cdr kids) 2))
         ((string=? head "select")
          (desc-values fail ps (if (null? (cdr kids)) nil (list (kid kids 1))) 1))
+        ;; A file's module type, given descriptions and module values, which
+        ;; a name alone does not tell apart: the checker decides by what
+        ;; binds it, so a program's walk leaves the names unplaced.
+        ((and (get program-walk)
+              (or (string=? head "load-moduleof") (string=? head "load-input-moduleof")))
+         (set unplaced (symbols-onto (cdr (cdr items)) (get unplaced))))
+        ;; A program's: each member's type in the scope of the abstract and
+        ;; transparent types before it, a value's name a label.
+        ((and (get program-walk) (string=? head "moduleof"))
+         (desc-members fail ps (cdr kids) (cdr items) nil))
         ((string=? head "moduleof") (not-yet "a `moduleof`"))
         ((or (string=? head "subr") (string=? head "->") (string=? head "->*"))
          (desc-subr fail ps s items kids))
@@ -630,7 +682,9 @@
     (begin
       (cond ((and (syn-symbol? n) (pvar? (syn-symbol n) ps))
              (begin (with-kids at (k-pvar (syn-symbol n))) (atm-var (syn-symbol n) d 0)))
-            ((and (syn-symbol? n) (not (reserved-syn? n)) (not (desc-word? (syn-name n) #f)))
+            ((and (syn-symbol? n)
+                  (or (get program-walk)
+                      (and (not (reserved-syn? n)) (not (desc-word? (syn-name n) #f)))))
              (begin (with-kids at (k-binder (syn-symbol n) d)) (atm-lit at d)))
             (else (begin (fail-at fail (string-append "`" (show-syn n) "` is not a name that may "
                                                       "be bound")
@@ -696,7 +750,38 @@
                       #u)
                   (desc fail ps (kid p 1) (nth parts 1))
                   (desc-fields fail ps (cdr ks) (cdr fs))))
-              (fail-at fail "`(label type)`" (car fs)))))))
+              ;; A program's flat sum's tag type, `(sumof u8 …)`.
+              (if (get program-walk)
+                  (begin (desc fail ps (car ks) (car fs)) (desc-fields fail ps (cdr ks) (cdr fs)))
+                  (fail-at fail "`(label type)`" (car fs))))))))
+;; Descriptions `xs` at nodes `ks`, each in the scope of `as`.
+(define desc-each-scoped (->* (fails pvars (listof int acyclic) syns-a atms) unit)
+  (lambda (fail ps ks xs as)
+    (if (or (null? xs) (null? ks))
+        #u
+        (begin (desc-scoped fail ps (car ks) (car xs) as)
+               (desc-each-scoped fail ps (cdr ks) (cdr xs) as)))))
+;; A program's `moduleof`'s members `ms` at nodes `ks`: each's type in the
+;; scope of `as`, the abstract and transparent types before it.
+(define desc-members (->* (fails pvars (listof int acyclic) syns-a atms) unit)
+  (lambda (fail ps ks ms as)
+    (if (or (null? ms) (null? ks))
+        #u
+        (let* ((parts (proper-items (car ms)))
+               (word (if (and (not (null? parts)) (syn-symbol? (car parts)))
+                         (syn-name (car parts))
+                         "")))
+          (if (< (len parts) 2)
+              (begin (desc fail ps (car ks) (car ms)) (desc-members fail ps (cdr ks) (cdr ms) as))
+              (let ((p (desc-kids (car ks) parts)))
+                (begin
+                  (desc-each-scoped fail ps (cdr (cdr p)) (cdr (cdr parts)) as)
+                  (desc-members fail ps (cdr ks) (cdr ms)
+                                (if (and (or (string=? word "abs") (string=? word "desc"))
+                                         (syn-symbol? (nth parts 1)))
+                                    (append as (the atms (list (desc-binder fail ps (kid p 1)
+                                                                 (nth parts 1)))))
+                                    as)))))))))
 ;; A procedure type, `(subr …)`, `(-> …)` or `(->* …)`, its parts `items`
 ;; at nodes `kids` (`macros.rs`'s `desc_subr`): each parameter named, `(x :
 ;; T)`, a value's binder in scope in the types after it, the result and the
@@ -874,16 +959,3 @@
                (else y (the (listof int acyclic) nil))))))
 (define under-each (->* ((listof int acyclic)) (listof int acyclic))
   (lambda (xs) (if (null? xs) nil (append (under (car xs)) (under-each (cdr xs))))))
-
-;;; ------------------------------------------------------------ binding
-
-;; One level of an environment: a rib, or a pattern variable's ribcage; or,
-;; in a repeated element of a ribcage's list, what the repetitions before
-;; it bound, which its own binders' names cannot tell from its own
-;; (`macros-scopes.fx`).
-(define-datatype level (lv-rib atms) (lv-cage symbol) (lv-earlier atms))
-(define-type levels (listof level acyclic))
-;; Each pattern variable, template binder and name referred to, by node,
-;; with its environment (innermost first), whether it is in a `many` part,
-;; and how many ellipses it is under.
-(define-type found (listof (tupleof int levels bool int) acyclic))

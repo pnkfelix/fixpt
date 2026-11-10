@@ -15,7 +15,9 @@
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
-(import parser-module syn-symbol? syn-head syn-start syn-end len nth drop (type syns-a exp)
+(import parser-module syn-symbol? syn-symbol syn-name syn-head syn-start syn-end len nth drop
+        rl-none rl-unknown rl-names
+        (type syns-a exp names relied)
         (effect parses))
 
 ;; How a form here fails: the caller's `pfail-at`, as this file's instance
@@ -524,3 +526,71 @@
                (item (the syns-a (list (mk-symbol "define" a b) (mk-symbol "input" a b) one))))
           (the syns-a (cons (mk-list item (syn-start one) (syn-end one)) nil)))
         (fail "a `load-input` file is one expression" a b))))
+
+;; Whether `s` mentions the name `n` anywhere, quoted or not.
+(define syn-mentions? (->* (symbol syn) bool)
+  (lambda (n s)
+    (tagcase s
+      (atom (d a b xpn) (and (symbol? d) (symbol=? d n)))
+      (lst (items d a b xpn) (syns-mention? n items))
+      (dotted (items t d a b xpn) (or (syns-mention? n items) (syn-mentions? n t)))
+      (vec (items d a b xpn) (syns-mention? n items)))))
+(define syns-mention? (->* (symbol syns-a) bool)
+  (lambda (n ss) (and (not (null? ss)) (or (syn-mentions? n (car ss)) (syns-mention? n (cdr ss))))))
+;; A name for an expansion's own variable that `forms` never mention:
+;; `base`, else `base1`, `base2` and so on. Its scope is within the form,
+;; and nothing refers to a name it does not write, so it captures nothing
+;; and nothing captures it.
+(define fresh-name (->* (string syns-a) symbol)
+  (lambda (base forms) (fresh-from base forms 0)))
+(define fresh-from (->* (string syns-a int) symbol)
+  (lambda (base forms i)
+    (let ((n (string->symbol (if (= i 0) base (string-append base (int->string i))))))
+      (if (syns-mention? n forms) (fresh-from base forms (+ i 1)) n))))
+;; `#:relied S` at the start of `rest`, as the expander writes it into a
+;; form that opens a module (`macros-shapes.fx`): the module's names,
+;; `((value …) (description …))`, or `#f` where they are not known; and
+;; what follows it (`parse.rs`'s `written_shape`).
+(define written-relied (->* (fails syns-a) (tupleof relied syns-a))
+  (lambda (fail rest)
+    (if (or (< (len rest) 2) (not (relied-word? (car rest))))
+        (tuple (rl-none) rest)
+        (let ((s (nth rest 1)))
+          (cond ((and (syn-symbol? s) (string=? (syn-name s) "#f"))
+                 (tuple (rl-unknown) (drop rest 2)))
+                (else
+                 (let ((parts (relied-parts s)))
+                   (if (null? parts)
+                       (fail-at-syn fail relied-usage s)
+                       (tuple (car parts) (drop rest 2))))))))))
+(define relied-usage string
+  (string-append "a module's shape: `((value …) (description …))`, "
+                 "the names it gives that the program asked of it"))
+(define relied-word? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (atom (d a b x) (and (keyword? d) (symbol=? (keyword->symbol d) 'relied)))
+      (else y #f))))
+;; `((value …) (description …))`, `s`, read: in a list of one, none if it
+;; is not.
+(define relied-parts (->* (syn) (listof relied acyclic))
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b x)
+        (if (= (len items) 2)
+            (let ((vs (symbols-in (car items))) (ds (symbols-in (nth items 1))))
+              (if (or (null? vs) (null? ds)) nil (list (rl-names (car vs) (car ds)))))
+            nil))
+      (else y nil))))
+;; The names list `s` is, in a list of one; none if it is not one of names.
+(define symbols-in (->* (syn) (listof names acyclic))
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b x) (symbols-of items nil))
+      (atom (d a b x) (if (null? d) (list (the names nil)) nil))
+      (else y nil))))
+(define symbols-of (->* (syns-a names) (listof names acyclic))
+  (lambda (xs out)
+    (cond ((null? xs) (list (reverse out)))
+          ((syn-symbol? (car xs)) (symbols-of (cdr xs) (cons (syn-symbol (car xs)) out)))
+          (else nil))))

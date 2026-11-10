@@ -113,7 +113,7 @@
   (k-synth (->* (kx) k-te)
     (lambda (x)
       (let* ((was (k-entered x)) (r (k-synth-node x)) (e (k-frozen x (extract r 2))))
-        (begin (k-note-effect x e) (k-kill-paths e)
+        (begin (k-note-effect x e) (k-kill-paths e) (if (k-any-held?) (k-kept x (extract r 1)) #u)
                (k-left was) (k-path-te x (k-te (extract r 1) e))))))
   (k-synth-node (->* (kx) k-te)
     (lambda (x)
@@ -991,10 +991,10 @@
             (tagcase (k-get mt)
               (ty-module (abs ds vs)
                 (let* ((used (k-with-used-at vs (k-include-free m (k-free-vars body)) 0 a b m))
+                       (held (k-with-held x m mt (k-comp-names (extract used 1)) a b))
                        (noted (k-note-with
                                 (product (1 (k-at-of x)) (2 (k-comp-names (extract used 1)))
-                                         (3 (extract used 2)))))
-                       (naming (k-naming-effect m mt))
+                                         (3 (extract used 2))))) (naming (k-naming-effect m mt))
                        (r (k-in-scope-parts (extract used 1) body expected k-synth-as
                                             a b (k-start body) (k-end body))))
                   (k-te-masked x (extract r 1) (k-union naming (extract r 2)))))

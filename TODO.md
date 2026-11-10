@@ -5568,8 +5568,12 @@ To investigate (the user's, 2026-11-10): shapes written up front
 (`modnames`, `moduleof`) and confirmed lazily, as asked. They would save
 computing a module's shape (some 12% of the 4.5 s), not the walk of each
 file, which its own records (and step 3's renaming) need; more where a
-file is loaded for its shape alone, through a type, and not parsed. Left: the FX-26 front end's walk and check; type
-names by shape (retiring `with`'s fallback); `modnames`. (3) Renaming hygiene with `with` and `include` as
+file is loaded for its shape alone, through a type, and not parsed. **The
+FX-26 front end, 2026-11-10**: the same records written (all 110 test
+programs with one), read and held by its checker alike; a global's shape
+from the FX-26 checker's types (the user's choice); the walk made linear;
+`with`'s fallback for a name defined nowhere retired in both front ends.
+Left: `modnames`. (3) Renaming hygiene with `with` and `include` as
 visible binders; a file's own macros (Heist's (a)); `import-with-syntax`
 in module files and of files with parameters ((b), (c)). (4) Later:
 top-level `include` without the driver; macros in shapes, if revisited.

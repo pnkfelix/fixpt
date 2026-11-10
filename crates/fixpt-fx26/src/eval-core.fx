@@ -453,7 +453,7 @@
         ;; `(with #%fx n)`: the standard `n`, whatever binds `n` here;
         ;; `(with #%toplevel n)`, the top level's, in the globals the form
         ;; runs in (`ev-top`), else the standard one.
-        (e-with (m body a b abk abkr)
+        (e-with (m body a b abk abkr wrl)
           (if (k-named-module? m)
               (tagcase body
                 (e-var (n c d cdk cdkr)

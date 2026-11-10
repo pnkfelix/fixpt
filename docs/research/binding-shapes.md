@@ -330,14 +330,15 @@ modules, Heist's cases.
    it. The cost is sealing's: where names are dropped, a new product at
    run time; where none are, nothing.
 
-So the stages become:
-1. Shapes for module values, `with`'s type names by shape, the checker's
+So the stages become, numbered as the steps below are (step 1, every
+form's binding structure walked, the groundwork built first):
+2. Shapes for module values, `with`'s type names by shape, the checker's
    check, and `(modnames …)`.
-2. Renaming hygiene, `with` and `include` as visible binders; a file's
+3. Renaming hygiene, `with` and `include` as visible binders; a file's
    own macros (Heist's (a)).
-3. `import-with-syntax` in module files and of files with parameters
+4. `import-with-syntax` in module files and of files with parameters
    (Heist's (b), (c)).
-4. Later: top-level `include` without the driver; macros in shapes, if
+5. Later: top-level `include` without the driver; macros in shapes, if
    the leaning is revisited.
 
 ## Naming a shape: `define-syntax` (the user's, 2026-11-10)
@@ -420,7 +421,7 @@ rest, and `fits` looks no deeper than a `union`'s members can differ
 (`FITS_DEPTH`), as §229 did for quotes: the front end's own
 `native-direct-arm64-layout.fx` has a `case` of 550 clauses.
 
-## Step 2, begun (2026-11-10): shapes read, written into forms, and held to types (Rust)
+## Step 2 (2026-11-10): shapes read, written into forms, and held to types (Rust)
 
 The expander written in Rust now reads every module's shape and writes it
 into each form that opens one, and the Rust checker holds it to the type.
@@ -540,3 +541,52 @@ and `make-session`, values over standard ones, as it did. The walk takes a
 part's own binders before the modules it opens, as the checkers do.
 
 Checking the front end's sources cold: 60.7 s with shapes, 55.6 s without.
+
+## Step 2 in FX-26 (2026-11-10): the same records, read and held alike
+
+The expander and the checker written in FX-26 now do what the Rust ones
+do, held to them form by form: `tests/scopes.rs`'s
+`the_two_expanders_write_the_same_records` compares each test program's
+top-level forms as each expander writes them (110 programs with a record,
+all the same), and the checkers agree on every test program, the three new
+ones of modules of no known shape (`modules/*-shape-unknown.fx`) among
+them.
+
+**The walk and the shapes** (`macros-walk.fx`, `macros-shaper.fx`,
+`macros-shapes.fx`): the walk of step 1, then the shapes of expressions,
+types and modules as `Shaper` finds them, and the records written into
+each top-level form before the parser reads it, and into each file loaded,
+each file shaped first by where its load is (the files the driver read,
+`parser-loads.fx`). The top level's shapes are kept by the reading state
+each form leaves, as the expander keeps its macros; a file's are found
+again in each parse, at its places. The walk was cubic in FX-26 at first:
+each part's syntax was written for a message it rarely said, and a node's
+path grew by appending. Now a message is written when it is said, and a
+program walk's paths are kept innermost step first (a template's as
+before): a 520-binding `let*` walked in 3.5 s, from 502 s; the front end
+compiling itself, within noise of no shapes.
+
+**The checker** reads a type, effect or function of descriptions in a
+`with` body by its record (a `with`'s mark carries its frame,
+`k-withs-reading`), a module's `include`s' records together outside its
+own types, and holds each `with`, each module included and each
+`extend`'s first to its record where it is checked, with the Rust
+checker's messages (`k-shape-held`).
+
+**What no form the expander reads defines** has the shape its type says,
+as the checker has it (the user's choice of the FX-26 checker over the
+driver): before a parse that the checker goes on from, the expander is
+told the shapes of the globals the forms name (`check-global-shapes!`,
+`k-global-shapes`): a definition read from a `.fasl`, a session's or a
+stage's module (`%stage-type`, a step's named types). A parse that begins
+the standard environment's again is told none, whatever the checker held.
+
+**The fallback for a name defined nowhere is retired**, in both front
+ends: a name read in a `with` body that the record does not give is read
+outside it, and one defined nowhere is said plainly, `` `nope` is not a
+type `` (`with-type-missing.fx`, `with-effect-missing.fx`,
+`with-applied-missing.fx`). A `with` with no record, as `(select m T)`
+reads `T`, still falls back through `(select m n)`.
+
+Left of step 2: `(modnames …)` and sealing, its name to decide
+(`define-syntax` with `modnames`, or `define-syntax-shape`).

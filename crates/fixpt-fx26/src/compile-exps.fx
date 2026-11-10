@@ -193,7 +193,7 @@
                    (c-module items e depth c tail)
                    (set c-module-members (get c-collecting))
                    (set c-collecting outer))))
-        (e-with (m body a b abk abkr) (c-with m body a b abk abkr e depth c tail)))))
+        (e-with (m body a b abk abkr wrl) (c-with m body a b abk abkr e depth c tail)))))
   ;; A module (`docs/research/first-class-modules.md`): its items made in
   ;; slots in order from `depth`, as a `letrec*`'s (`c-module-make`); then
   ;; the product of its values.

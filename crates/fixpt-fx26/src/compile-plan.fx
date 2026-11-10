@@ -123,7 +123,7 @@
               (e-letrec (bs body a b abk abkr) -1)
               (e-prompt (t body h a b abk abkr) -1)
               (e-module (items a b abk abkr) -1)
-              (e-with (m body a b abk abkr) (if w (c-room body n w) -1))
+              (e-with (m body a b abk abkr wrl) (if w (c-room body n w) -1))
               (e-app (f args a b abk abkr)
                 (c-room-all args
                             (tagcase f (e-var (v c d cdk cdkr) (- n 1)) (else y (c-room f n w))) w))
@@ -324,7 +324,7 @@
           (e-module (items a b abk abkr)
             (let ((vs (c-module-values items)))
               (p-module vs e (c-module-slots vs 0) (extract (c-note-included! items) 1))))
-          (e-with (m body a b abk abkr)
+          (e-with (m body a b abk abkr wrl)
             (let ((ns (c-with-at a b abk abkr)))
               (cond ((c-included? a b abk abkr) (p-exp body e tail))
                     ((null? ns) #u)

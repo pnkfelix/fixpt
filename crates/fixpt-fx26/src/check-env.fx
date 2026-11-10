@@ -421,18 +421,201 @@
 ;; In a `(with m …)` body, a mark in the description scope, `%with:m`, so
 ;; that a type name bound before it is `m`'s, if `m` gives it: `with`
 ;; shadows (FX-91 §2.3.19). `#%fx`'s are the standard's.
-(define k-with-mark (->* (symbol) unit)
-  (lambda (m)
+(define k-with-mark (->* (symbol k-record) int)
+  (lambda (m rec)
+    (if (k-named-module? m)
+        -1
+        (let ((f (if (= (extract rec 1) 2) (k-frame-push rec) -1)))
+          (begin (set k-with-depth (+ (get k-with-depth) 1))
+                 ;; Its frame, if its record was written: what the module
+                 ;; was relied on for, and what is read past it.
+                 (k-push-desc (string->symbol (string-append "%with:" (symbol->string m)))
+                              (ds-var f 0))
+                 f)))))
+;; The end of a `with` body that `k-with-mark` marked, its frame `f` (its
+;; scope restored by the caller).
+(define k-with-unmark (->* (symbol int) unit)
+  (lambda (m f)
     (if (k-named-module? m)
         #u
-        (begin (set k-with-depth (+ (get k-with-depth) 1))
-               (k-push-desc (string->symbol (string-append "%with:" (symbol->string m)))
-                            (ds-var -1 0))))))
-;; The end of a `with` body that `k-with-mark` marked (its scope restored by
-;; the caller).
-(define k-with-unmark (->* (symbol) unit)
-  (lambda (m)
-    (if (k-named-module? m) #u (set k-with-depth (- (get k-with-depth) 1)))))
+        (begin (set k-with-depth (- (get k-with-depth) 1))
+               (if (< f 0) #u (set k-frames (k-frames-but f (get k-frames))))))))
+;; The frames of the `with`s being read whose records were written,
+;; innermost first: each its number, its record, and what is read past it
+;; (`withs_reading`), kept by what it is held to once it is read.
+(define-type k-frame (productof (1 int) (2 k-record) (3 (ref k-names @t))))
+(define k-frames (ref (listof k-frame acyclic) @t) (new nil))
+(define k-frames-made (ref int @t) (new 0))
+(define k-no-record k-record (product (1 0) (2 nil) (3 nil)))
+(define k-frame-push (->* (k-record) int)
+  (lambda (rec)
+    (let ((f (get k-frames-made)))
+      (begin (set k-frames-made (+ f 1))
+             (set k-frames (cons (product (1 f) (2 rec) (3 (the (ref k-names @t) (new nil))))
+                                 (get k-frames)))
+             f))))
+(define k-frames-but (->* (int (listof k-frame acyclic)) (listof k-frame acyclic))
+  (lambda (f fs)
+    (cond ((null? fs) nil)
+          ((= f (extract (car fs) 1)) (cdr fs))
+          (else (cons (car fs) (k-frames-but f (cdr fs)))))))
+(define k-frame-of (->* (int (listof k-frame acyclic)) (listof k-frame acyclic))
+  (lambda (f fs)
+    (cond ((null? fs) nil)
+          ((= f (extract (car fs) 1)) (list (car fs)))
+          (else (k-frame-of f (cdr fs))))))
+;; What is read past frame `f`, a place kept: none if it has no frame.
+(define k-frame-past (->* (int) (ref k-names @t))
+  (lambda (f)
+    (let ((fr (k-frame-of f (get k-frames))))
+      (if (null? fr) (the (ref k-names @t) (new nil)) (extract (car fr) 3)))))
+;; The `with`s description name `s` is read through, innermost first, as
+;; `k-withs-over`, up to the first whose module the expander found gives it
+;; (`#:relied`), which it is that module's: those before it of no record,
+;; whose modules may give it (`k-with-selected` falls back through them),
+;; and that module, in a list of one. Each `with` with a record it is read
+;; past notes it, its module's type held not to give it (`k-shape-held`).
+;; As `parse.rs`'s `withs_reading`.
+(define k-withs-reading (->* (symbol) (productof (1 k-names) (2 k-names)))
+  (lambda (s)
+    (if (= (get k-with-depth) 0)
+        (product (1 nil) (2 nil))
+        (k-reading-in s (get k-dscope) nil))))
+(define k-reading-in (->* (symbol k-scope k-names) (productof (1 k-names) (2 k-names)))
+  (lambda (s ds out)
+    (if (null? ds)
+        (product (1 (reverse out)) (2 nil))
+        (let ((n (symbol->string (car (car ds)))))
+          (cond ((symbol=? (car (car ds)) s) (product (1 (reverse out)) (2 nil)))
+                ((and (> (string-length n) 6) (string=? (substring n 0 6) "%with:"))
+                 (let* ((m (string->symbol (substring n 6 (string-length n))))
+                        (f (tagcase (cdr (car ds)) (ds-var (v k) v) (else y -1)))
+                        (fr (if (< f 0) nil (k-frame-of f (get k-frames)))))
+                   (cond ((null? fr) (k-reading-in s (cdr ds) (cons m out)))
+                         ((k-has-name? (extract (extract (car fr) 2) 3) s)
+                          (product (1 (reverse out)) (2 (list m))))
+                         (else
+                          (begin (k-note-past (extract (car fr) 3) s)
+                                 (k-reading-in s (cdr ds) out))))))
+                (else (k-reading-in s (cdr ds) out)))))))
+(define k-note-past (->* ((ref k-names @t) symbol) unit)
+  (lambda (past s)
+    (if (k-has-name? (get past) s) #u (set past (append (get past) (list s))))))
+;; The forms that open a module and the module expressions held to their
+;; records where each is checked (`k-shape-held`; `WithTables::opened`,
+;; `shaped`), by where each starts.
+(define k-opened (ref (table int k-helds @t) @t)
+  (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
+(define k-held-exps (ref (table int k-helds @t) @t)
+  (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
+(define k-helds-made (ref int @t) (new 0))
+(define k-note-in (->* ((ref (table int k-helds @t) @t) k-held) unit)
+  (lambda (t h)
+    (let ((a (extract (extract h 1) 1)))
+      (table-set! (get t) a (the k-helds (cons h (table-ref (get t) a nil)))))))
+(define k-helds-in (->* (k-helds int int int int) k-helds)
+  (lambda (hs a b k kr)
+    (cond ((null? hs) nil)
+          ((k-at-is? (extract (car hs) 1) a b k kr) (list (car hs)))
+          (else (k-helds-in (cdr hs) a b k kr)))))
+(define k-note-opened! (->* (k-held) unit) (lambda (h) (k-note-in k-opened h)))
+(define k-opened-at (->* (int int int int) k-helds)
+  (lambda (a b k kr) (k-helds-in (table-ref (get k-opened) a nil) a b k kr)))
+(define k-note-held! (->* (k-held) unit)
+  (lambda (h) (begin (set k-helds-made (+ (get k-helds-made) 1)) (k-note-in k-held-exps h))))
+(define k-held-at (->* (int int int int) k-helds)
+  (lambda (a b k kr) (k-helds-in (table-ref (get k-held-exps) a nil) a b k kr)))
+(define k-any-held? (->* () bool) (lambda () (> (get k-helds-made) 0)))
+;; Of each module with `include`s being read, innermost first: the frame of
+;; what they give, as the expander found (`#:relied`, all of them), or -1 if
+;; one has no record; and that record (`parse.rs`'s `include_frames`, one
+;; for each such module).
+(define k-include-frames (ref (listof (productof (1 int) (2 k-record)) acyclic) @t) (new nil))
+;; A module's `include`s' record, `rec`: in scope outside its own types and
+;; inside what is outside it, as a `with` of `%include`'s.
+(define k-include-frame! (->* (k-record) unit)
+  (lambda (rec)
+    (set k-include-frames (cons (product (1 (k-with-mark '%include rec)) (2 rec))
+                                (get k-include-frames)))))
+(define k-include-frame-end! (->* () unit)
+  (lambda ()
+    (let ((fs (get k-include-frames)))
+      (if (null? fs)
+          #u
+          (begin (k-with-unmark '%include (extract (car fs) 1)) (set k-include-frames (cdr fs)))))))
+;; The innermost module's with `include`s: its frame and record; -1 and none
+;; if there is none.
+(define k-include-record (->* () (productof (1 int) (2 k-record)))
+  (lambda ()
+    (let ((fs (get k-include-frames)))
+      (if (null? fs) (product (1 -1) (2 k-no-record)) (car fs)))))
+;; Module type `mt`, of `m` (`||` if none to say), at `a`..`b`, held to the
+;; record `rec` of what the expander read it as: what it gives, each name
+;; recorded; and not a value the body uses (`used`) that it does not record,
+;; nor a description read past it (`past`). As `Checker::shape_held`.
+(define k-shape-held (->* (int int symbol int k-record k-names k-names) unit)
+  (lambda (a b m mt rec used past)
+    (tagcase (k-get (k-resolve mt))
+      (ty-module (abs ds vs)
+        (let ((shown (if (or (symbol=? m '||) (string=? (substring (symbol->string m) 0 1) "%"))
+                         "this module"
+                         (string-append "`" (symbol->string m) "`"))))
+          (if (= (extract rec 1) 1)
+              (k-fail (string-append "the names " shown " gives are not known before it is "
+                                     "checked: give it a type where it is bound, `(the (moduleof "
+                                     "…) e)` or a parameter's")
+                      a b)
+              (let* ((fewer (append (k-names-not-in (extract rec 2) vs nil)
+                                    (k-descs-not-in (extract rec 3) abs ds)))
+                     (more (append (k-names-not-among used (extract rec 2))
+                                   (k-descs-in past abs ds)))
+                     (said (k-said-shape more fewer)))
+                (if (string=? said "")
+                    #u
+                    (k-fail (string-append shown " gives other names than were read from the "
+                                           "program before it was checked: " said)
+                            a b))))))
+      (else y #u))))
+(define k-part-named? (->* (symbol k-parts) bool)
+  (lambda (n ps)
+    (and (not (null? ps)) (or (symbol=? n (extract (car ps) 1)) (k-part-named? n (cdr ps))))))
+(define k-names-not-in (->* (k-names k-parts k-names) k-names)
+  (lambda (ns ps out)
+    (cond ((null? ns) (reverse out))
+          ((k-part-named? (car ns) ps) (k-names-not-in (cdr ns) ps out))
+          (else (k-names-not-in (cdr ns) ps (cons (car ns) out))))))
+(define k-descs-not-in (->* (k-names k-parts k-parts) k-names)
+  (lambda (ns abs ds)
+    (cond ((null? ns) nil)
+          ((or (k-part-named? (car ns) abs) (k-part-named? (car ns) ds))
+           (k-descs-not-in (cdr ns) abs ds))
+          (else (cons (car ns) (k-descs-not-in (cdr ns) abs ds))))))
+(define k-names-not-among (->* (k-names k-names) k-names)
+  (lambda (ns among)
+    (cond ((null? ns) nil)
+          ((k-has-name? among (car ns)) (k-names-not-among (cdr ns) among))
+          (else (cons (car ns) (k-names-not-among (cdr ns) among))))))
+(define k-descs-in (->* (k-names k-parts k-parts) k-names)
+  (lambda (ns abs ds)
+    (cond ((null? ns) nil)
+          ((or (k-part-named? (car ns) abs) (k-part-named? (car ns) ds))
+           (cons (car ns) (k-descs-in (cdr ns) abs ds)))
+          (else (k-descs-in (cdr ns) abs ds)))))
+(define k-said-shape (->* (k-names k-names) string)
+  (lambda (more fewer)
+    (let ((m (if (null? more)
+                 ""
+                 (string-append "its type gives " (k-quoted-names more)
+                                ", which the program took to be bound outside it")))
+          (f (if (null? fewer) "" (string-append "its type has no " (k-quoted-names fewer)))))
+      (cond ((string=? m "") f)
+            ((string=? f "") m)
+            (else (string-append m ", and " f))))))
+(define k-quoted-names (->* (k-names) string)
+  (lambda (ns)
+    (cond ((null? ns) "")
+          ((null? (cdr ns)) (string-append "`" (symbol->string (car ns)) "`"))
+          (else (string-append "`" (symbol->string (car ns)) "`, " (k-quoted-names (cdr ns)))))))
 ;; The modules of the `with`s whose bodies `s` is read in since it was last
 ;; bound, innermost first: each shadows what `s` was before it. As
 ;; `parse.rs`'s `withs_over`.
@@ -484,6 +667,38 @@
 ;; (`k-with-applied`).
 (define k-with-app-of (->* (int) int)
   (lambda (node) (k-fallback-in (get k-with-apps) node -1)))
+;; Type name `sym` read in `with` bodies (`r`, as `k-withs-reading` reads
+;; them): a module a `with` opens gives it, as the expander found
+;; (`#:relied`), that module's, whatever is outside, a standard type `base`
+;; too (`with` shadows, types as values); else the standard type, unless
+;; the program defines the name itself (`TODO.md` §88); else the modules of
+;; no record first (`k-with-selected`), then what it is here, as `read`
+;; reads it. As `parse.rs`'s `parse_type_node`.
+(define k-type-by-withs
+  (->* (symbol int (productof (1 k-names) (2 k-names)) (subr checks () int)) int)
+  (lambda (sym base r read)
+    (let ((withs (extract r 1)) (here (or (not (null? (k-lookup-desc sym)))
+                                          (not (null? (k-lookup-desc '%include-scope))))))
+      (cond ((not (null? (extract r 2)))
+             (k-with-selected withs sym (k-ty-new (ty-select (car (extract r 2)) sym))))
+            ((and (>= base 0) (null? (k-lookup-desc sym))) base)
+            ((not (null? withs)) (k-with-selected withs sym (if here (read) -1)))
+            (else (read))))))
+;; `(f d …)`, its descriptions read by `args`, read in the bodies of `with`s
+;; of modules `withs` (innermost first): `((select m f) d …)` of the
+;; innermost, which, where `m` does not give `f`, is the next's, and so on
+;; out to `outer`, what it means here otherwise, or -1. As `parse.rs`'s
+;; `with_applied`.
+(define k-with-applied (->* (k-names symbol (subr checks () k-descs) int) int)
+  (lambda (withs f args outer)
+    (if (null? withs)
+        outer
+        (let* ((t (k-with-applied (cdr withs) f args outer))
+               (fun (k-ty-new (ty-select (car withs) f)))
+               (app (k-ty-new (ty-app fun (args)))))
+          (begin (set k-with-fallbacks (cons (product (1 fun) (2 t)) (get k-with-fallbacks)))
+                 (set k-with-apps (cons (product (1 fun) (2 app)) (get k-with-apps)))
+                 app)))))
 
 ;; How many fresh regions have been made, for naming the next.
 (define k-fresh (ref int @t) (new 0))

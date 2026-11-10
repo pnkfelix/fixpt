@@ -13,6 +13,7 @@
 (hide (define check-modules-types (load-module "fx26:check-modules-types.fx")))
 (define-type k-thunk-unit (select check-modules-types k-thunk-unit))
 (define-type kx (select check-types-types kx))
+(define-type k-names (select check-types-types k-names))
 (define-type check-modules-read-sig
   (moduleof (val k-push-binders
                  (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
@@ -37,4 +38,14 @@
                                (write @t)
                                spin)
                        (exp)
-                       kx))))
+                       kx))
+            (val k-kept
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (kx int)
+                       unit))
+            (val k-with-held
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (kx symbol int k-names int int)
+                       unit))))

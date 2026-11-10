@@ -87,7 +87,7 @@ pub fn eval_more_with_fx26_evaluator(scheme: &mut Session, standard: Option<Hand
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let entry = if standard.is_some() { "run-checked" } else { "run-checked-more" };
     scheme.scope(|s| {
-        let parsed = parse_to_trees_at(s, file, text, base, state)?;
+        let parsed = parse_to_trees_at(s, file, text, base, state, standard.is_none())?;
         let (tops, after) = (parsed.tops, parsed.after);
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = refusal(s, checked) {
@@ -131,7 +131,7 @@ pub fn compile_with_fx26_compiler_showing(
 ) -> R<(String, Option<String>)> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let parsed = parse_to_trees_at(s, file, text, 0, state)?;
+        let parsed = parse_to_trees_at(s, file, text, 0, state, standard.is_none())?;
         let (tops, after) = (parsed.tops, parsed.after);
         // Checked first, by the checker written in FX-26, which says where
         // each `extract`'s field is.
@@ -395,7 +395,7 @@ pub fn with_last_value<T>(
 ) -> R<Result<T, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let parsed = parse_to_trees_at(s, file, text, 0, state)?;
+        let parsed = parse_to_trees_at(s, file, text, 0, state, standard.is_none())?;
         let (tops, after) = (parsed.tops, parsed.after);
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = refusal(s, checked) {
@@ -436,7 +436,7 @@ pub fn with_last_value<T>(
 pub fn check_only(scheme: &mut Session, standard: Option<Handle>, state: &mut State, file: FileId, text: &str) -> R<Result<(), String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let parsed = parse_to_trees_at(s, file, text, 0, state)?;
+        let parsed = parse_to_trees_at(s, file, text, 0, state, standard.is_none())?;
         let (tops, after) = (parsed.tops, parsed.after);
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         Ok(match refusal(s, checked) {
@@ -731,7 +731,7 @@ fn word_of(scheme: &mut Session, result: Handle) -> R<Result<Handle, String>> {
 /// The parser's trees for `text`: a list of `top`s, as a handle in the
 /// caller's scope.
 fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Parsed> {
-    parse_to_trees_at(scheme, file, text, 0, &State::begun())
+    parse_to_trees_at(scheme, file, text, 0, &State::begun(), false)
 }
 
 /// What the parser written in FX-26 made of a text: its trees, and how it
@@ -747,22 +747,25 @@ pub struct Parsed {
 }
 
 /// [`parse_to_trees`], its positions counted from `base`, read in `state`.
-fn parse_to_trees_at(scheme: &mut Session, file: FileId, text: &str, base: i64, state: &State) -> R<Parsed> {
+/// `globals`: whether the checker goes on from its state (checked by
+/// `check-more`, not `check-program`), its globals' shapes told the
+/// expander (`check-global-shapes!`).
+fn parse_to_trees_at(scheme: &mut Session, file: FileId, text: &str, base: i64, state: &State, globals: bool) -> R<Parsed> {
     supply_loaded_at(scheme, file, text, base)?;
     let syns = read_to_syns_at(scheme, file, text, base)?;
-    parse_syns_at(scheme, file, text, syns, base, state)
+    parse_syns_at(scheme, file, text, syns, base, state, globals)
 }
 
 /// What the parser written in FX-26 makes of `syns`, read from `text`
 /// ([`read_to_syns`]): the program's trees, or where it is wrong; read in
 /// the standard environment's state, by the default switches.
 pub fn parse_syns(scheme: &mut Session, file: FileId, text: &str, syns: Handle) -> R<Parsed> {
-    parse_syns_at(scheme, file, text, syns, 0, &State::begun())
+    parse_syns_at(scheme, file, text, syns, 0, &State::begun(), false)
 }
 
 /// [`parse_syns`], the positions read counted from `base`, read in `state`
 /// by the process's mode (`parser-types.fx`'s `keys`).
-fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, base: i64, state: &State) -> R<Parsed> {
+fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, base: i64, state: &State, globals: bool) -> R<Parsed> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mode = crate::ids::mode() as i64;
     let settings = state.settings.text();
@@ -774,6 +777,14 @@ fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, b
     let int = |sc: &mut Session, n: i64| sc.make(|_| Value::fixnum(n));
     let fields = [int(scheme, mode), int(scheme, state.at), scheme.make(|m| m.heap().make_string(&settings))];
     let keys = product(scheme, &fields)?;
+    // The expander told, first, the shapes of the globals the forms name, as
+    // the checker has their types (`check-global-shapes!`): none if it is not
+    // to go on from them (`globals`), whatever it last held.
+    let global = format!("{READER_PREFIX}check-global-shapes!");
+    if scheme.is_bound(&global) {
+        let fresh = scheme.make(|_| Value::boolean(!globals));
+        scheme.call_global(&global, &[syns, fresh]).map_err(|e| fail(e.to_string()))?;
+    }
     let keyed = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[keys, syns]).map_err(|e| fail(e.to_string()))?;
     // The checker told of this parse, if there is one: the macros each
     // `with`'s body used (`check-macro-uses!`).

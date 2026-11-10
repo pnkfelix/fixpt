@@ -199,8 +199,13 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
                         format!("[1 ({}) {ts} ()]", name(*n))
                     }
                     // A `define*`'s types the type and a mark, `*`.
+                    // An included module's, its `include` form, if the
+                    // expander wrote what it relied on of the module (as the
+                    // FX-26 parser keeps it).
                     ModItem::Val { name: n, ty, init, infer } => {
-                        let ts = if *infer { "(_ _)" } else if ty.is_some() { "(_)" } else { "()" };
+                        let shown = name(*n);
+                        let included = (shown.starts_with("%include-") || shown.starts_with("%hinclude-")) && c.arena.withs.shaped.contains_key(init);
+                        let ts = if *infer { "(_ _)" } else if ty.is_some() || included { "(_)" } else { "()" };
                         format!("[2 ({}) {ts} ({})]", name(*n), go(*init))
                     }
                     ModItem::Rec(group) => format!(
@@ -213,7 +218,26 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
                 .collect();
             format!("(e-module {} {a} {b})", list(shown))
         }
-        Exp::With { module, body } => format!("(e-with {} {} {a} {b})", name(module), go(body)),
+        // What the expander relied on of the module, as the FX-26 parser
+        // keeps it (`relied`): an `extend`'s on its `with`; none on a
+        // `(with %include …)`, made after the items are read.
+        Exp::With { module, body } => {
+            let tables = &c.arena.withs;
+            let written = match c.interner.name(module) {
+                "%include" => None,
+                "%extend-0" => tables.extended.get(&e),
+                _ => tables.opened.get(&e),
+            };
+            let relied = match written {
+                None => "(rl-none)".to_string(),
+                Some(None) => "(rl-unknown)".to_string(),
+                Some(Some(r)) => {
+                    let (vs, ds) = (r.vals.iter().map(|n| name(*n)).collect(), r.descs.iter().map(|n| name(*n)).collect());
+                    format!("(rl-names {} {})", list(vs), list(ds))
+                }
+            };
+            format!("(e-with {} {} {a} {b} {relied})", name(module), go(body))
+        }
         Exp::Product(fields) => {
             let fs = fields.iter().map(|(l, x)| format!("[{} {}]", name(*l), go(*x))).collect();
             format!("(e-product {} {a} {b})", list(fs))

@@ -624,12 +624,6 @@ impl Checker {
                 let outer = if self.lookup_desc(sym).is_some() || self.include_scope > 0 { Some(self.effect_name_read(s, sym)?) } else { None };
                 return Ok(self.with_effect_selected(&withs, sym, outer));
             }
-            if self.lookup_desc(sym).is_none() && self.include_scope == 0 {
-                let all = self.withs_over(sym);
-                if !all.is_empty() {
-                    return Ok(self.with_effect_selected(&all, sym, None));
-                }
-            }
             return self.effect_name_read(s, sym);
         }
         self.parse_effect_list(s)
@@ -840,14 +834,6 @@ impl Checker {
                 let outer = if self.lookup_desc(sym).is_some() || self.include_scope > 0 { Some(self.type_name_read(s, sym)?) } else { None };
                 return Ok(self.with_selected(&withs, sym, outer));
             }
-            // Defined nowhere: said as the checkers have said it, of the
-            // `with`s it was read in (as the FX-26 front end says it).
-            if self.lookup_desc(sym).is_none() && self.include_scope == 0 {
-                let all = self.withs_over(sym);
-                if !all.is_empty() {
-                    return Ok(self.with_selected(&all, sym, None));
-                }
-            }
             return self.type_name_read(s, sym);
         }
         // `(f d …)` in `with` bodies: the modules' `f` first, as names alone.
@@ -864,12 +850,6 @@ impl Checker {
             if !withs.is_empty() {
                 let outer = if self.lookup_desc(head).is_some() { Some(self.parse_type_list(s)?) } else { None };
                 return self.with_applied(s, &withs, head, outer);
-            }
-            if self.lookup_desc(head).is_none() && self.include_scope == 0 && !crate::kinds::CONSTRUCTORS.iter().any(|(n, _)| *n == self.name(head)) {
-                let all = self.withs_over(head);
-                if !all.is_empty() {
-                    return self.with_applied(s, &all, head, None);
-                }
             }
         }
         self.parse_type_list(s)
@@ -2479,10 +2459,13 @@ impl Checker {
         if let Some(s) = shape.clone() {
             self.arena.withs.shaped.insert(e0, s);
         }
-        let (e1, past) = self.with_types_of(names[0], shape.flatten(), |p| p.parse_exp(e1))?;
+        let (e1, past) = self.with_types_of(names[0], shape.clone().flatten(), |p| p.parse_exp(e1))?;
         // Made at the form.
         let e1 = self.arena.exp(span, Exp::With { module: names[0], body: e1 });
         self.arena.withs.read_past.insert(e1, past);
+        if let Some(s) = shape {
+            self.arena.withs.extended.insert(e1, s);
+        }
         let items = vec![
             ModItem::Val { name: names[0], ty: None, init: e0, infer: false },
             ModItem::Val { name: names[1], ty: None, init: e1, infer: false },
@@ -3815,19 +3798,24 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         // What its `include`s give, as the expander found, in scope outside
         // its own types (declared ahead, below) and inside what is outside
         // it: `(with %include …)`'s, as its values are (`with_includes`).
+        let includes = forms.iter().any(|f| self.includes_in(f));
         let frame = self.includes_relied(forms).map(|r| {
             self.arena.withs.frames.push((r, Vec::new()));
             let f = self.arena.withs.frames.len() - 1;
             let (mark, inc) = (self.interner.intern("%with"), self.interner.intern("%include"));
             self.dscope.push((mark, DScope::With(inc, Some(f))));
             self.with_depth += 1;
-            self.arena.withs.include_frames.push(f);
             f
         });
+        if includes {
+            self.arena.withs.include_frames.push(frame);
+        }
         let r = self.parse_module_in_scope(forms);
+        if includes {
+            self.arena.withs.include_frames.pop();
+        }
         if let Some(f) = frame {
             self.with_depth -= 1;
-            self.arena.withs.include_frames.pop();
             self.arena.withs.frames.truncate(f);
         }
         r
@@ -4149,7 +4137,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         // What the expander relied on of the modules included, all of them:
         // each `(with %include …)` held to it (the values its items name),
         // and each module included to the descriptions read past them.
-        if let Some(&f) = self.arena.withs.include_frames.last() {
+        if let Some(&Some(f)) = self.arena.withs.include_frames.last() {
             let (all, past) = self.arena.withs.frames[f].clone();
             for x in withs..self.arena.mark().exps() {
                 if matches!(self.arena.exp_at(crate::ast::ExpId(x as u32)), Exp::With { module, .. } if *module == inc) {

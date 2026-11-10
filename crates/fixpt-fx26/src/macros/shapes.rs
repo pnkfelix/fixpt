@@ -135,6 +135,9 @@ pub(crate) struct Known {
     /// Each file's forms as they were read for its shape, by its path, for
     /// the parser to take rather than read the file again.
     read: HashMap<String, (String, Vec<Syntax>)>,
+    /// Each top-level form before and after its shapes were written, if
+    /// they are kept (`Checker::keep_shapes_seen`).
+    seen: Option<Vec<(String, String)>>,
 }
 
 /// Where a binder's value comes from, for its shape: the expression it is
@@ -1076,6 +1079,12 @@ impl Macros {
     /// Keeps the forms of the file at `at`, as read for its shape.
     pub(crate) fn keep_forms_read(&mut self, at: String, text: String, forms: Vec<Syntax>) {
         self.withs.shapes.read.insert(at, (text, forms));
+    }
+
+    /// The top-level forms noted, before and after their shapes were
+    /// written, if they are kept (`Checker::keep_shapes_seen`).
+    pub(crate) fn shapes_seen(&mut self) -> &mut Option<Vec<(String, String)>> {
+        &mut self.withs.shapes.seen
     }
 
     /// Whether the file of `key` has had its shape found (or is being).

@@ -17,6 +17,8 @@ pub fn check_with_rust_checker(c: &mut Checker, text: &str) -> Checked26 {
     let mut out: Vec<String> = c.types_defined_again(&forms).into_iter().map(|(n, _)| crate::top::type_again_warning(c.interner.name(n))).collect();
     for (f, done) in forms.iter().zip(done) {
         if done {
+            // Declared ahead, not shaped: noted, its shapes none.
+            c.declared_noted(f);
             continue;
         }
         // Not the hidden definitions of the files it loads (`hoisted`),

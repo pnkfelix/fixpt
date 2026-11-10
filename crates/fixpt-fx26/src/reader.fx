@@ -55,3 +55,24 @@
 ;; template's part was given is (`syn.rs`'s `fx26_span`).
 (define expansions-made (with macros-module expansions-given))
 (define macro-source (with macros-module source-of))
+;; A program's forms after expansion, in `text`, each with its local value
+;; binders renamed as the expander's walk finds their scopes
+;; (`macros-walk.fx`): for `tests/scopes.rs`, which holds the walk to the
+;; Rust expander's.
+(define shapes-module (with parser-top-module shapes-module))
+(define walk-module (with shapes-module walk-module))
+(define program-walked
+  (lambda ((text string))
+    (let ((read (read-text text)))
+      (if (null? read)
+          (the (listof string acyclic) nil)
+          ((with walk-module walked-forms) (car read))))))
+;; A program's forms after expansion, in `text`, each with what each module
+;; it opens was relied on for written in (`macros-shapes.fx`'s `shaped`):
+;; for `tests/scopes.rs`, which holds the records to the Rust expander's.
+(define program-shaped
+  (lambda ((text string))
+    (let ((read (read-text text)))
+      (if (null? read)
+          (the (listof string acyclic) nil)
+          ((with shapes-module shaped-forms) (car read) (get loaded))))))

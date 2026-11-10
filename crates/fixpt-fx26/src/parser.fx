@@ -26,10 +26,12 @@
 (define parser-types ((proj (load-module "fx26:parser-types.fx") rs re rm rc rp)))
 (import parser-types e-var e-int e-bool e-str e-char e-float e-sym e-quote e-unit e-lambda e-app
         e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the
-        e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define
+        e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with rl-none
+        rl-unknown rl-names sh-module sh-fun t-define
         t-define-rec t-define-type t-define-effect t-define-convention t-define-syscall
         t-define-generative t-exp p-ok p-err
-        (type syns-a names exp top exp-list param-list letrec-list let-list arm-list top-list
+        (type syns-a names relied shape shapes members exp top exp-list param-list letrec-list
+              let-list arm-list top-list
               mod-item mod-items presult loaded-file loaded-files) (effect tree-builds parses))
 
 ;; Each expression's identity (`parser-ids.fx`): its walk, made once for
@@ -237,14 +239,14 @@
 ;; `(with #%fx f)`: what an expansion calls, the standard binding, whatever
 ;; shadows or redefines `f` where it is (`TODO.md` §46).
 (define standard-ref (->* (symbol int int) exp)
-  (lambda (f a b) (e-with '#%fx (e-var f a b 0 0) a b 0 0)))
+  (lambda (f a b) (e-with '#%fx (e-var f a b 0 0) a b 0 0 (rl-none))))
 ;; A name as an expression, spanning `a`..`b`: its variable; or, `n` being
 ;; `#%toplevel:x`, `(with #%toplevel x)`, the top level's `x` (`parse.rs`).
 (define var-ref (->* (symbol int int) exp)
   (lambda (n a b)
     (let* ((s (symbol->string n)) (k (string-length s)))
       (if (and (> k 11) (string=? (substring s 0 11) "#%toplevel:"))
-          (e-with '#%toplevel (e-var (string->symbol (substring s 11 k)) a b 0 0) a b 0 0)
+          (e-with '#%toplevel (e-var (string->symbol (substring s 11 k)) a b 0 0) a b 0 0 (rl-none))
           (e-var n a b 0 0)))))
 ;; Whether `items`' head is a keyword, `(#:t e …)`: a sum constructed.
 (define kw-head? (->* (syns-a) bool)
@@ -435,12 +437,12 @@
   (lambda (x a b)
     (tagcase x
       (e-lambda (ps body la lb lalbk lalbkr)
-                (e-lambda ps (e-with '%include body a b 0 0) la lb lalbk lalbkr))
+                (e-lambda ps (e-with '%include body a b 0 0 (rl-none)) la lb lalbk lalbkr))
       (e-plambda (bs body la lb lalbk lalbkr)
                  (e-plambda bs (in-includes body a b) la lb lalbk lalbkr))
       (e-the (t e la lb lalbk lalbkr) (e-the t (in-includes e a b) la lb lalbk lalbkr))
       (e-rlambda (r l la lb lalbk lalbkr) (e-rlambda r (in-includes l a b) la lb lalbk lalbkr))
-      (else y (e-with '%include x a b 0 0)))))
+      (else y (e-with '%include x a b 0 0 (rl-none))))))
 ;; Each of `xs` so, at the place of the binding of `bs` it is.
 (define inits-in-includes (->* (exp-list syns-a) exp-list)
   (lambda (xs bs)
@@ -457,15 +459,24 @@
                         ((= k 3) (tagcase f (lst (bs d a b xpn) (inits-in-includes xs (cdr bs)))
                                    (else y xs)))
                         (else xs)))))))
-;; The included modules of `items`, from `%include-k` on.
+;; The included modules of `items`, from `%include-k` on: each with its
+;; `include` form for its types, if the expander wrote what it relied on of
+;; the module (`#:relied`), which the checker reads (`k-resolve-item`).
 (define include-items (->* (mod-items int) mod-items)
   (lambda (items k)
     (cond ((null? items) nil)
           ((= (extract (car items) 1) 9)
-           (cons (mod-item-of 2 (include-name (car (extract (car items) 2)) k) nil
+           (cons (mod-item-of 2 (include-name (car (extract (car items) 2)) k)
+                              (if (relied-form? (car (extract (car items) 3)))
+                                  (extract (car items) 3)
+                                  nil)
                               (extract (car items) 4))
                  (include-items (cdr items) (+ k 1))))
           (else (include-items (cdr items) k)))))
+;; Whether `include` form `f` has what the expander relied on written in,
+;; `(include m #:relied S)`.
+(define relied-form? (->* (syn) bool)
+  (lambda (f) (tagcase f (lst (xs d a b xpn) (= (len xs) 4)) (else y #f))))
 ;; The `k`th included module's item's name: `%hinclude-k` if hidden.
 (define include-name (->* (symbol int) symbol)
   (lambda (n k)

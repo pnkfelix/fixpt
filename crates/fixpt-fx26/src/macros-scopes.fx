@@ -12,10 +12,11 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types (type syn))
 (import types-module fail-at kind-of unfold simple-kind? sub? atm-var atm-rib-of atm-lit
-        bind-rib bind-cage bind-direct bind-earlier ring-rib ring-at
+        bind-rib bind-cage bind-direct bind-earlier bind-shape ring-rib ring-at ring-shape
         (type fails addr entries rings bind sty atm atms))
 (import align-module node-at node-syn node-core node-kids node-many? repeated? seq-depths
-        cage-seq? lv-rib lv-cage lv-earlier k-pair k-pvar k-binder k-ref k-form k-desc k-seq
+        cage-seq? program-walk lv-rib lv-cage lv-earlier lv-shape k-pair k-pvar k-binder k-ref
+        k-form k-desc k-seq
         (type level levels found rooted pinfo pvars))
 
 ;;; ------------------------------------------------------------ binding
@@ -56,12 +57,14 @@
   (lambda (ls)
     (if (null? ls)
         nil
-        (append (tagcase (car ls) (lv-rib (as) as) (lv-earlier (as) as) (lv-cage (n) nil))
+        (append (tagcase (car ls)
+                  (lv-rib (as) as) (lv-earlier (as) as) (lv-cage (n) nil) (lv-shape (m) nil))
                 (earlier-atoms (cdr ls))))))
 (define earlier-cages (->* (levels) levels)
   (lambda (ls)
     (cond ((null? ls) nil)
-          ((tagcase (car ls) (lv-cage (n) #t) (else y #f)) (cons (car ls) (earlier-cages (cdr ls))))
+          ((tagcase (car ls) (lv-cage (n) #t) (lv-shape (m) #t) (else y #f))
+           (cons (car ls) (earlier-cages (cdr ls))))
           (else (earlier-cages (cdr ls))))))
 ;; `env` with what each import binds before it, the last import innermost.
 (define imported (->* (fails rooted levels syn) levels)
@@ -69,7 +72,23 @@
     (if (null? is)
         env
         (imported fail (cdr is)
-                  (append (evaluate fail (extract (car is) 1) (extract (car is) 2) s) env) s))))
+                  (append (own-first (evaluate fail (extract (car is) 1) (extract (car is) 2) s))
+                          env)
+                  s))))
+;; In a program's walk, what one import binds of its own before the modules
+;; it opens: a module's items before what its `include`s give, as the
+;; checkers read them (`macros/shapes.rs`'s `segments_of`).
+(define own-first (->* (levels) levels)
+  (lambda (ls)
+    (if (get program-walk)
+        (append (levels-shaped #f ls) (levels-shaped #t ls))
+        ls)))
+(define levels-shaped (->* (bool levels) levels)
+  (lambda (shaped ls)
+    (cond ((null? ls) nil)
+          ((eq? shaped (tagcase (car ls) (lv-shape (m) #t) (else y #f)))
+           (cons (car ls) (levels-shaped shaped (cdr ls))))
+          (else (levels-shaped shaped (cdr ls))))))
 ;; What `b` binds, its addresses from `root`: levels, innermost first.
 (define evaluate (->* (fails bind int syn) levels)
   (lambda (fail b root s)
@@ -77,14 +96,16 @@
       (bind-rib (es) (list (lv-rib (rib fail es root s))))
       (bind-cage (rings) (cage fail rings root s))
       (bind-direct (as) (list (lv-rib as)))
-      (bind-earlier (as) (list (lv-earlier as))))))
+      (bind-earlier (as) (list (lv-earlier as)))
+      (bind-shape (a) (list (lv-shape (nav fail root a s)))))))
 (define cage (->* (fails rings int syn) levels)
   (lambda (fail rings root s)
     (if (null? rings)
         nil
         (append (tagcase (car rings)
                   (ring-rib (es) (the levels (list (lv-rib (rib fail es root s)))))
-                  (ring-at (a) (levels-of fail (nav fail root a s) s)))
+                  (ring-at (a) (levels-of fail (nav fail root a s) s))
+                  (ring-shape (a) (the levels (list (lv-shape (nav fail root a s))))))
                 (cage fail (cdr rings) root s)))))
 (define rib (->* (fails entries int syn) atms)
   (lambda (fail es root s)
@@ -325,7 +346,8 @@
          (or (tagcase (car env)
                (lv-cage (n) #t)
                (lv-rib (as) (any-pattern-atom? as ps d))
-               (lv-earlier (as) (any-pattern-atom? as ps d)))
+               (lv-earlier (as) (any-pattern-atom? as ps d))
+               (lv-shape (m) #f))
              (shadowing? (cdr env) (- i 1) ps d)))))
 (define any-pattern-atom? (->* (atms pvars bool) bool)
   (lambda (as ps d)
@@ -357,7 +379,8 @@
           (lv-earlier (as)
             (let ((kept (pattern-atoms as)))
               (if (null? kept) (normal (cdr env)) (cons (lv-earlier kept) (normal (cdr env))))))
-          (lv-cage (n) (cons (car env) (normal (cdr env))))))))
+          (lv-cage (n) (cons (car env) (normal (cdr env))))
+          (lv-shape (m) (normal (cdr env)))))))
 (define pattern-atoms (->* (atms) atms)
   (lambda (as)
     (cond ((null? as) nil)
@@ -373,7 +396,8 @@
                (lv-rib (as) (tagcase (car ys) (lv-rib (bs) (same-atoms? as bs)) (else y #f)))
                (lv-earlier (as)
                  (tagcase (car ys) (lv-earlier (bs) (same-atoms? as bs)) (else y #f)))
-               (lv-cage (n) (tagcase (car ys) (lv-cage (m) (symbol=? n m)) (else y #f))))
+               (lv-cage (n) (tagcase (car ys) (lv-cage (m) (symbol=? n m)) (else y #f)))
+               (lv-shape (n) (tagcase (car ys) (lv-shape (m) (= n m)) (else y #f))))
              (levels=? (cdr xs) (cdr ys))))))
 (define same-atoms? (->* (atms atms) bool)
   (lambda (as bs)

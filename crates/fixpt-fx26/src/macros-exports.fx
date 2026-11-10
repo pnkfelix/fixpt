@@ -23,7 +23,7 @@
         atm-lit addr=? (type fails atm atms strings addr))
 (import match-module pattern-names addr-under?)
 (import scopes-module normal atm-in?)
-(import align-module node-kids node-syn pvar? makes-defns? lv-rib lv-cage lv-earlier k-pair
+(import align-module node-kids node-syn pvar? makes-defns? lv-rib lv-cage lv-earlier lv-shape k-pair
         k-form k-desc k-seq k-binder act-rename (type levels pvars actions))
 
 ;;; ------------------------------------------------------------ exports
@@ -41,7 +41,8 @@
         (tagcase (car ls)
           (lv-rib (xs) (exports-onto (cdr ls) (atms-onto xs as) ns))
           (lv-earlier (xs) (exports-onto (cdr ls) (atms-onto xs as) ns))
-          (lv-cage (n) (exports-onto (cdr ls) as (if (name-in? n ns) ns (cons n ns))))))))
+          (lv-cage (n) (exports-onto (cdr ls) as (if (name-in? n ns) ns (cons n ns))))
+          (lv-shape (m) (exports-onto (cdr ls) as ns))))))
 (define atms-onto (->* (atms atms) atms)
   (lambda (xs as)
     (cond ((null? xs) as)

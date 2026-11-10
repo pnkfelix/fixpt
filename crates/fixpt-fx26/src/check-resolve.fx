@@ -210,7 +210,7 @@
       (e-sum (l x a b abk abkr) a)
       (e-tagcase (x arms els got a b abk abkr) a) (e-letregion (k r i x a b abk abkr) a)
       (e-rlambda (r l a b abk abkr) a) (e-module (items a b abk abkr) a)
-      (e-with (m x a b abk abkr) a))))
+      (e-with (m x a b abk abkr wrl) a))))
 (define exp-end (->* (exp) int)
   (lambda (e)
     (tagcase e
@@ -229,7 +229,7 @@
       (e-sum (l x a b abk abkr) b)
       (e-tagcase (x arms els got a b abk abkr) b) (e-letregion (k r i x a b abk abkr) b)
       (e-rlambda (r l a b abk abkr) b) (e-module (items a b abk abkr) b)
-      (e-with (m x a b abk abkr) b))))
+      (e-with (m x a b abk abkr wrl) b))))
 (define exp-kth (->* (exp) int)
   (lambda (e)
     (tagcase e
@@ -249,7 +249,7 @@
       (e-sum (l x a b abk abkr) abk)
       (e-tagcase (x arms els got a b abk abkr) abk) (e-letregion (k r i x a b abk abkr) abk)
       (e-rlambda (r l a b abk abkr) abk) (e-module (items a b abk abkr) abk)
-      (e-with (m x a b abk abkr) abk))))
+      (e-with (m x a b abk abkr wrl) abk))))
 ;; A quote's constant, `e-quote`'s `x`, as data: `#t` and `#f` the booleans
 ;; the reader leaves as symbols in it. What each compiler and the evaluator
 ;; make once, interned (TODO §229); as `Compiler::datum_value`.
@@ -293,7 +293,7 @@
       (e-sum (l x a b abk abkr) abkr)
       (e-tagcase (x arms els got a b abk abkr) abkr) (e-letregion (k r i x a b abk abkr) abkr)
       (e-rlambda (r l a b abk abkr) abkr) (e-module (items a b abk abkr) abkr)
-      (e-with (m x a b abk abkr) abkr))))
+      (e-with (m x a b abk abkr wrl) abkr))))
 ;; `x`'s identity.
 (define exp-at (->* (exp) k-at)
   (lambda (x) (product (1 (exp-start x)) (2 (exp-end x)) (3 (exp-kth x)) (4 (exp-reading x)))))
@@ -670,13 +670,18 @@
 ;; The names a `with` of `m`, `a` `b` `k`, binds for its body, bound inside
 ;; `bound`: its module's values the body names, once checked; before, if
 ;; `m` is not bound inside, those of an earlier item of a module being
-;; ordered whose value is a module as written (`k-hazard-mods`).
+;; ordered whose value is a module as written (`k-hazard-mods`); or, before
+;; that, what its record says it gives (`k-opened-at`).
 (define k-with-bound (->* (symbol int int int int k-names) k-names)
   (lambda (m a b k kr bound)
-    (let ((ns (k-with-names a b k kr)))
-      (if (and (null? ns) (not (k-has-name? bound m)))
-          (k-hazard-names-in (get k-hazard-mods) m)
-          ns))))
+    (let ((ns (k-with-names a b k kr)) (h (k-opened-at a b k kr)))
+      (cond ((not (null? ns)) ns)
+            ;; Not checked yet: what the expander found the module gives, of
+            ;; what its body names (`#:relied`), which its type is held to.
+            ((and (not (null? h)) (= (extract (extract (car h) 2) 1) 2))
+             (extract (extract (car h) 2) 2))
+            ((not (k-has-name? bound m)) (k-hazard-names-in (get k-hazard-mods) m))
+            (else ns)))))
 
 ;; The names in `bound` (each by how many names are from it to the
 ;; outermost) that a `let` binds to a module written there, with the values

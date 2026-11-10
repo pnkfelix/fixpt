@@ -4,7 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-ds k-ids k-names k-at k-conv))
+(import check-types-types (type k-ds k-ids k-names k-at k-conv k-descs) (effect kstate checks))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Bindings, as lists of them are passed around.
@@ -32,6 +32,16 @@
 ;; `the`, by name and place: where a second-class standard operation may be
 ;; named (F15, F16).
 (define-type k-op-mark (productof (1 symbol) (2 k-at)))
+;; What the expander relied on of a module a form opens (`#:relied`, the
+;; parser's `relied`): what it is, 0 none written, 1 not known, 2 the names
+;; its references found the module gives; and those names, values' and
+;; descriptions' (`ast::Relied`).
+(define-type k-record (productof (1 int) (2 k-names) (3 k-names)))
+;; A form or a module expression held to its record where it is checked:
+;; where it is, the record, what was read past it (`withs_reading`), and the
+;; module's name, as said, or `||`.
+(define-type k-held (productof (1 k-at) (2 k-record) (3 (ref k-names @t)) (4 symbol)))
+(define-type k-helds (listof k-held acyclic))
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) acyclic))
 ;; What checking found of an expression that running needs, for the
@@ -250,10 +260,23 @@
    (val k-param-sel-of (subr (maxeff (read @globals) spin (read @t)) (int symbol int) int))
    (val k-globals-region? (subr pure (k-region) bool))
    (val k-with-depth (ref int @t))
-   (val k-with-mark (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
-                          (symbol) unit))
-   (val k-with-unmark
-        (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) (symbol) unit))
+   (val k-with-mark (subr kstate (symbol k-record) int))
+   (val k-with-unmark (subr kstate (symbol int) unit))
+   (val k-no-record k-record)
+   (val k-frame-past (subr kstate (int) (ref k-names @t)))
+   (val k-withs-reading (subr kstate (symbol) (productof (1 k-names) (2 k-names))))
+   (val k-note-opened! (subr kstate (k-held) unit))
+   (val k-opened-at (subr (maxeff (read @globals) spin (read @t)) (int int int int) k-helds))
+   (val k-note-held! (subr kstate (k-held) unit))
+   (val k-held-at (subr (maxeff (read @globals) spin (read @t)) (int int int int) k-helds))
+   (val k-any-held? (subr kstate () bool))
+   (val k-include-frame! (subr kstate (k-record) unit))
+   (val k-include-frame-end! (subr kstate () unit))
+   (val k-include-record (subr kstate () (productof (1 int) (2 k-record))))
+   (val k-shape-held (subr checks (int int symbol int k-record k-names k-names) unit))
+   (val k-type-by-withs
+        (subr checks (symbol int (productof (1 k-names) (2 k-names)) (subr checks () int)) int))
+   (val k-with-applied (subr checks (k-names symbol (subr checks () k-descs) int) int))
    (val k-withs-over (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (symbol) k-names))
    (val k-with-fallbacks (ref k-fallbacks @t))
    (val k-with-selected

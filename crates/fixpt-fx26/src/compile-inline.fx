@@ -84,7 +84,7 @@
         (e-letrec (bs body a b abk abkr) -2)
         (e-prompt (t body h a b abk abkr) -2)
         (e-module (items a b abk abkr) -2)
-        (e-with (m body a b abk abkr) -2)
+        (e-with (m body a b abk abkr wrl) -2)
         (else y -1))))
   (c-call-only-all (->* (exps symbol symbol int int) int)
     (lambda (es p f k n)
@@ -145,10 +145,10 @@
   (c-plain-fx (->* (exp) exp)
     (lambda (x)
       (tagcase x
-        (e-with (m body a b abk abkr)
+        (e-with (m body a b abk abkr wrl)
           (tagcase body
             (e-var (n c d cdk cdkr) (if (c-plain-fx-at a b abk abkr) (e-var n a b abk abkr) x))
-            (else y (e-with m (c-plain-fx body) a b abk abkr))))
+            (else y (e-with m (c-plain-fx body) a b abk abkr wrl))))
         (e-module (items a b abk abkr) (e-module (c-plain-items items) a b abk abkr))
         (e-lambda (ps body a b abk abkr) (e-lambda ps (c-plain-fx body) a b abk abkr))
         (e-app (f args a b abk abkr) (e-app (c-plain-fx f) (c-plain-all args) a b abk abkr))

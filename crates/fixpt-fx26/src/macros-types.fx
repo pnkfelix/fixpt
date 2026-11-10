@@ -26,8 +26,10 @@
 ;; variable, 2 a rib, 3 a ribcage, 4 a description's variable, 5 both, a
 ;; place (`letrena`'s), which is also a value of type `(place r)`.
 (define-type entries (listof (tupleof addr int) acyclic))
-;; One of a ribcage's: a rib, or the ribcage exported at an address.
-(define-datatype ring (ring-rib entries) (ring-at addr))
+;; One of a ribcage's: a rib, or the ribcage exported at an address; or, a
+;; program's (`scope-forms`), what the module at an address gives (a file's
+;; module parameters, each included in its items).
+(define-datatype ring (ring-rib entries) (ring-at addr) (ring-shape addr))
 (define-type rings (listof ring acyclic))
 ;; What an environment is made of: a pattern variable bound (`bvar`,
 ;; `dvar`), the rib or ribcage a pattern variable exports, a template's own
@@ -43,7 +45,10 @@
 ;; what it binds, as found, the binders a template's description writes
 ;; (`macros.rs`'s `Bind::Direct`), or what the repetitions before a repeated
 ;; part bound (`Bind::Earlier`).
-(define-datatype bind (bind-rib entries) (bind-cage rings) (bind-direct atms) (bind-earlier atms))
+(define-datatype bind (bind-rib entries) (bind-cage rings) (bind-direct atms) (bind-earlier atms)
+  ;; What the module at an address gives, `(shape A)`: what `with` and
+  ;; `include` bind, in a program's walk (`scope-forms`).
+  (bind-shape addr))
 ;; What a typed hole says (`macros.rs`'s `Hole`): its type and its effect,
 ;; each as written, in a list of one, or none if it is left out.
 (define-type hole (tupleof syns-a syns-a))
@@ -59,7 +64,11 @@
   ;; them); no part of a signature, for now.
   (s-defn)
   ;; A description's binder; a binder's kind, which names nothing.
-  (s-dvar) (s-kind))
+  (s-dvar) (s-kind)
+  ;; A module's item, as a program's walk takes one (`scope-forms`): a
+  ;; definition, a string (a comment), or an expression run as the module
+  ;; is made.
+  (s-item))
 (define-type stys (listof sty acyclic))
 
 ;; Each `mu`'s body, by its number: the program's, and every file's
@@ -180,6 +189,9 @@
 ;; Whether `s` is a keyword, `#:name`.
 (define syn-keyword? (->* (syn) bool)
   (lambda (s) (tagcase s (atom (d a b x) (keyword? d)) (else y #f))))
+;; Whether `s` is an integer, as a program's label by position may be.
+(define syn-number? (->* (syn) bool)
+  (lambda (s) (tagcase s (atom (d a b x) (datum-int? d)) (else y #f))))
 ;; A list's car and cdr, the cdr a list of the rest (or the tail), in a list
 ;; of two; none if `s` is no pair.
 (define split (->* (syn) syns-a)
@@ -390,7 +402,8 @@
                     (ring-at (x)
                       (if (and (addr=? x (list #t)) (bind=? inner (bind-cage (list own))))
                           (list a)
-                          nil))))
+                          nil))
+                    (ring-shape (x) nil)))
                 nil))
           (else y nil)))
       (else y nil))))
@@ -517,6 +530,7 @@
                     ((expr) (s-expr)) ((bvar) (s-bvar)) ((id) (s-id)) ((data) (s-data))
                     ((lambda) (s-lambda))
                     ((type) (s-type)) ((label) (s-label)) ((dvar) (s-dvar)) ((kind) (s-kind))
+                    ((item) (s-item))
                     (else
                      (begin
                        (fail-at fail (string-append "a syntax type: `" (symbol->string n) "` is "
@@ -596,6 +610,8 @@
                                              "")))
       (cond ((string=? head "rho") (bind-rib (read-rib fail (cdr items))))
             ((string=? head "cage") (bind-cage (read-rings fail (cdr items))))
+            ((and (string=? head "shape") (= (len items) 2))
+             (bind-shape (read-addr fail (nth items 1))))
             (else (begin (fail-at fail bind-usage b) (bind-rib nil)))))))
 (define read-rings (->* (fails syns-a) rings)
   (lambda (fail rs)
@@ -606,6 +622,8 @@
                (r (cond ((string=? head "rho") (ring-rib (read-rib fail (cdr parts))))
                         ((and (string=? head "at") (= (len parts) 2))
                          (ring-at (read-addr fail (nth parts 1))))
+                        ((and (string=? head "shape") (= (len parts) 2))
+                         (ring-shape (read-addr fail (nth parts 1))))
                         (else (begin (fail-at fail bind-usage (car rs)) (ring-rib nil))))))
           (cons r (read-rings fail (cdr rs)))))))
 (define read-rib (->* (fails syns-a) entries)
@@ -668,12 +686,13 @@
 ;; (its `begin` of them not its `begin` of expressions), its abbreviations
 ;; read on the way, `defn` among them, which no macro's signature names:
 ;; read once, the first time.
-(define kernel-read (ref (tupleof named named) rs) (new (tuple (the named nil) (the named nil))))
+(define kernel-read (ref (tupleof named named named) rs)
+  (new (tuple (the named nil) (the named nil) (the named nil))))
 (define kernel-sigs (->* (fails) named)
   (lambda (fail) (extract (kernel-tables fail) 1)))
 (define kernel-definitions (->* (fails) named)
   (lambda (fail) (extract (kernel-tables fail) 2)))
-(define kernel-tables (->* (fails) (tupleof named named))
+(define kernel-tables (->* (fails) (tupleof named named named))
   (lambda (fail)
     (begin
       (if (null? (extract (get kernel-read) 1))
@@ -681,10 +700,27 @@
                                         (list (tuple 'defn (s-defn))) nil nil))
           #u)
       (get kernel-read))))
-(define read-kernel (->* (fails syns-a named named named) (tupleof named named))
+;; The binding structure of the forms the kernel's list has not, for a
+;; program's walk alone (`scope-forms`), its signatures and definitions,
+;; read with the kernel's abbreviations: read once, the first time.
+(define scope-read (ref (tupleof named named named) rs)
+  (new (tuple (the named nil) (the named nil) (the named nil))))
+(define scope-sigs (->* (fails) named)
+  (lambda (fail) (extract (scope-tables fail) 1)))
+(define scope-definitions (->* (fails) named)
+  (lambda (fail) (extract (scope-tables fail) 2)))
+(define scope-tables (->* (fails) (tupleof named named named))
+  (lambda (fail)
+    (begin
+      (if (null? (extract (get scope-read) 1))
+          (set scope-read (read-kernel fail (proper-items (datum->syn (with kernel scope-forms)))
+                                       (extract (kernel-tables fail) 3) nil nil))
+          #u)
+      (get scope-read))))
+(define read-kernel (->* (fails syns-a named named named) (tupleof named named named))
   (lambda (fail fs named out defs)
     (if (null? fs)
-        (tuple out defs)
+        (tuple out defs named)
         (let* ((items (proper-items (car fs)))
                (t (read-sty fail (nth items 2) named nil))
                (n (syn-symbol (nth items 1)))
@@ -738,13 +774,13 @@
     (and (not (null? ms)) (or (overlap? a (car ms) depth) (any-overlaps-of? a (cdr ms) depth)))))
 ;; A kind's number, for the cases of `overlap-base?`: 0 expr, 1 bvar, 2 id,
 ;; 3 data, 4 type, 5 label, 6 nil, 7 literal, 8 pair, 9 anything else, 10
-;; lambda, 11 defn, 12 dvar, 13 kind.
+;; lambda, 11 defn, 12 dvar, 13 kind, 14 item.
 (define kind-of (->* (sty) int)
   (lambda (t)
     (tagcase t
       (s-expr () 0) (s-bvar () 1) (s-id () 2) (s-data () 3) (s-type () 4) (s-label () 5)
       (s-nil () 6) (s-literal (n) 7) (s-pair (a d) 8) (s-lambda () 10) (s-defn () 11)
-      (s-dvar () 12) (s-kind () 13) (else y 9))))
+      (s-dvar () 12) (s-kind () 13) (s-item () 14) (else y 9))))
 ;; Whether `k` is a kind of no parts: one of what `(Expr | Id | Data | Type
 ;; | Label | Bvar | Dvar | Kind | Lambda | Defn)` names in `macros.rs`.
 (define simple-kind? (->* (int) bool) (lambda (k) (or (< k 6) (> k 9))))
@@ -780,7 +816,7 @@
 ;; of, `expr`, `data`, `type`, `kind` or `defn`.
 (define binder-kind? (->* (int) bool) (lambda (k) (or (= k 1) (= k 12))))
 (define any-kind? (->* (int) bool)
-  (lambda (k) (or (= k 0) (= k 3) (= k 4) (= k 11) (= k 13))))
+  (lambda (k) (or (= k 0) (= k 3) (= k 4) (= k 11) (= k 13) (= k 14))))
 ;; Whether two of `ms` overlap.
 (define any-overlap? (->* (stys) bool)
   (lambda (ms)
@@ -788,15 +824,23 @@
          (or (any-overlaps-of? (car ms) (cdr ms) 6) (any-overlap? (cdr ms))))))
 
 ;; Whether `s` has the shape of `t`, in `mode` (0 a pattern, 1 a template,
-;; 2 a use): a pattern variable in a template (`pvar?` says 1 for a name's,
-;; 2 for another's, 0 for none) fits anything but, if it is a name, a
-;; list's shape; any name in a pattern fits anything.
+;; 2 a use, 3 a program's form after expansion): a pattern variable in a
+;; template (`pvar?` says 1 for a name's, 2 for another's, 0 for none) fits
+;; anything but, if it is a name, a list's shape; any name in a pattern
+;; fits anything. No deeper than `fits-depth` lists: a `union`'s members
+;; differ within `overlap?`'s depth, and a long list is not looked through
+;; at each of its parts (`macros.rs`'s `FITS_DEPTH`).
+(define fits-depth int 8)
 (define fits? (->* (sty syn int (subr pure (symbol) int)) bool)
-  (lambda (t s mode pvar?)
-    (let ((u (unfold t)) (x (if (= mode 2) (the syns-a nil) (ellipsis-of s))))
+  (lambda (t s mode pvar?) (fits-within? t s mode pvar? fits-depth)))
+(define fits-within? (->* (sty syn int (subr pure (symbol) int) int) bool)
+  (lambda (t s mode pvar? depth)
+    (let ((u (unfold t)) (x (if (>= mode 2) (the syns-a nil) (ellipsis-of s)))
+          (program? (= mode 3)))
       (if (not (null? x))
           ;; `(p ...)`, where a list of elements `p` fits may be.
-          (let ((e (seq-elem (peel t)))) (and (not (null? e)) (fits? (car e) (car x) mode pvar?)))
+          (let ((e (seq-elem (peel t))))
+            (and (not (null? e)) (fits-within? (car e) (car x) mode pvar? depth)))
       (if (and (syn-symbol? s)
                (or (and (= mode 0) (not (= (kind-of u) 7)) (not (string=? (syn-name s) "_"))
                         (not (string=? (syn-name s) "...")))
@@ -805,24 +849,29 @@
                                   (or (= (kind-of u) 8) (= (kind-of u) 6) (= (kind-of u) 10)))))))
           #t
           (tagcase u
-            (s-union (ms) (any-fits? ms s mode pvar?))
+            (s-union (ms) (any-fits? ms s mode pvar? depth))
             (s-pair (a d)
               (let ((parts (split s)))
                 (and (not (null? parts))
-                     (fits? a (car parts) mode pvar?) (fits? d (nth parts 1) mode pvar?))))
+                     (or (= depth 0)
+                         (and (fits-within? a (car parts) mode pvar? (- depth 1))
+                              (fits-within? d (nth parts 1) mode pvar? (- depth 1)))))))
             (s-nil () (syn-nil? s))
             (s-literal (n) (and (syn-symbol? s) (symbol=? (syn-symbol s) n)))
-            (s-bvar () (and (syn-symbol? s) (not (reserved-syn? s))))
-            (s-dvar () (and (syn-symbol? s) (not (reserved-syn? s))))
+            ;; A program's binder: any name the checkers let it bind.
+            (s-bvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
+            (s-dvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
             (s-id () (syn-symbol? s))
-            (s-label () (or (syn-keyword? s) (and (= mode 2) (syn-symbol? s))))
-            (s-expr () (and (not (reserved-syn? s)) (not (syn-nil? s))))
+            (s-label () (or (syn-keyword? s) (and (>= mode 2) (syn-symbol? s))
+                            (and program? (syn-number? s))))
+            (s-expr () (and (or program? (not (reserved-syn? s))) (not (syn-nil? s))))
             (s-lambda () (lambda-shaped? s))
             (s-defn () (not (null? (split s))))
             (else y #t)))))))
-(define any-fits? (->* (stys syn int (subr pure (symbol) int)) bool)
-  (lambda (ms s mode pvar?)
-    (and (not (null? ms)) (or (fits? (car ms) s mode pvar?) (any-fits? (cdr ms) s mode pvar?)))))
+(define any-fits? (->* (stys syn int (subr pure (symbol) int) int) bool)
+  (lambda (ms s mode pvar? depth)
+    (and (not (null? ms))
+         (or (fits-within? (car ms) s mode pvar? depth) (any-fits? (cdr ms) s mode pvar? depth)))))
 
 ;; Whether two types are the same, structurally (a `mu` by its number).
 (define sty=? (->* (sty sty) bool)
@@ -849,7 +898,8 @@
       (bind-cage (rs) (tagcase q (bind-cage (ss) (rings=? rs ss)) (else y #f)))
       ;; Found, never written in a signature.
       (bind-direct (as) #f)
-      (bind-earlier (as) #f))))
+      (bind-earlier (as) #f)
+      (bind-shape (a) (tagcase q (bind-shape (b) (addr=? a b)) (else y #f))))))
 (define rings=? (->* (rings rings) bool)
   (lambda (rs ss)
     (if (null? rs)
@@ -857,7 +907,8 @@
         (and (not (null? ss))
              (tagcase (car rs)
                (ring-rib (es) (tagcase (car ss) (ring-rib (fs) (entries=? es fs)) (else y #f)))
-               (ring-at (a) (tagcase (car ss) (ring-at (b) (addr=? a b)) (else y #f))))
+               (ring-at (a) (tagcase (car ss) (ring-at (b) (addr=? a b)) (else y #f)))
+               (ring-shape (a) (tagcase (car ss) (ring-shape (b) (addr=? a b)) (else y #f))))
              (rings=? (cdr rs) (cdr ss))))))
 (define entries=? (->* (entries entries) bool)
   (lambda (es fs)

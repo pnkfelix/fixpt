@@ -624,6 +624,27 @@ impl Checker {
         Ok(out)
     }
 
+    /// Program `text`, expanded (`read_in`), each form written as
+    /// `alpha_renamed` walks it, without the conversions a
+    /// `define-generative` makes: for giving the expander written in FX-26
+    /// the forms this one walked (`tests/scopes.rs`).
+    pub fn expanded_written(&mut self, text: &str) -> R<Vec<String>> {
+        let forms = self.read_in(FileId(0), text)?;
+        let mut out = Vec::new();
+        let mut made = 0;
+        for f in forms {
+            if made > 0 {
+                made -= 1;
+                continue;
+            }
+            if f.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "define-generative") {
+                made = 2;
+            }
+            out.push(fixpt_read::write_syntax(&f, &self.interner));
+        }
+        Ok(out)
+    }
+
     /// The forms of `text` from byte `start` on, their places in all of
     /// `text`: a REPL's entry, in the session's text
     /// (`Fx26Session::read_entry`).
@@ -1250,9 +1271,45 @@ impl Checker {
         // binds (`toplevel_hidden`).
         let outer = self.form_began.replace((self.env.len(), self.dscope.len()));
         let shaped = self.shapes_written(form, true);
+        if self.macros.shapes_seen().is_some() {
+            self.shapes_noted(form, &shaped);
+        }
         let r = self.top_here(&shaped);
         self.form_began = outer;
         r
+    }
+
+    /// Form `form` and `shaped`, it with its shapes written, noted
+    /// (`keep_shapes_seen`); out of line, as `top`'s frame is small.
+    #[inline(never)]
+    fn shapes_noted(&mut self, form: &Syntax, shaped: &Syntax) {
+        let seen = (fixpt_read::write_syntax(form, &self.interner), fixpt_read::write_syntax(shaped, &self.interner));
+        if let Some(s) = self.macros.shapes_seen() {
+            s.push(seen);
+        }
+    }
+
+    /// From here on, each top-level form noted as it was before and after
+    /// its shapes were written (`shapes_written`), written: for holding the
+    /// two expanders' records to one another (`tests/scopes.rs`). A form
+    /// declared ahead, which is not shaped, with none after
+    /// (`compare::check_with_rust_checker`).
+    pub fn keep_shapes_seen(&mut self) {
+        *self.macros.shapes_seen() = Some(Vec::new());
+    }
+
+    /// The forms noted since `keep_shapes_seen`, taken.
+    pub fn shapes_seen(&mut self) -> Vec<(String, String)> {
+        self.macros.shapes_seen().take().unwrap_or_default()
+    }
+
+    /// Form `f`, declared ahead, noted with no shapes written, if forms are
+    /// noted (`keep_shapes_seen`).
+    pub(crate) fn declared_noted(&mut self, f: &Syntax) {
+        if self.macros.shapes_seen().is_some() {
+            let seen = (fixpt_read::write_syntax(f, &self.interner), String::new());
+            self.macros.shapes_seen().as_mut().expect("kept").push(seen);
+        }
     }
 
     /// `top` of `form` as it is, its shapes not written again: for a test

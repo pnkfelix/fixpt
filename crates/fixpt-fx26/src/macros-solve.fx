@@ -21,7 +21,7 @@
         s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib ring-at
         bind-direct bind-earlier atm-var atm-rib-of atm-lit
         (type fails addr entries ring rings bind sty stys atm atms))
-(import align-module defined lv-rib lv-cage lv-earlier (type macro macro-env levels))
+(import align-module defined lv-rib lv-cage lv-earlier lv-shape (type macro macro-env levels))
 (import infer-module shape-of path-of region leaf? union? boundary-of var-of var-part regions
         via inner int-in? int-assoc found-vars parts-reset! merge roots fingerprint sol-empty
         build built-mus placements-of combine scoped? affine? kind-at pkind-of kd-ty kd-ref
@@ -100,7 +100,8 @@
                 (lv-cage (n)
                   (let ((p (var-part cid n)))
                     (if (null? p) nil (list (cons (iv-cage (car p)) (car rest))))))
-                (lv-earlier (as) nil)))))))
+                (lv-earlier (as) nil)
+                (lv-shape (m) nil)))))))
 (define rib-gents (->* (int atms gents) (listof gents acyclic))
   (lambda (cid as es)
     (if (null? as)

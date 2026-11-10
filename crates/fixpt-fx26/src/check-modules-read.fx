@@ -150,15 +150,114 @@
 (define k-scope-newest (->* (int k-scope k-scope) k-scope)
   (lambda (n s onto)
     (if (or (<= n 0) (null? s)) onto (cons (car s) (k-scope-newest (- n 1) (cdr s) onto)))))
+;; Whether names `ns` are an included module's item's, `%include-k` or
+;; `%hinclude-k` (`include-items`).
+(define k-included-item? (->* (k-names) bool)
+  (lambda (ns)
+    (and (not (null? ns))
+         (let ((n (symbol->string (car ns))))
+           (or (and (> (string-length n) 9) (string=? (substring n 0 9) "%include-"))
+               (and (> (string-length n) 10) (string=? (substring n 0 10) "%hinclude-")))))))
 ;; In a module with `include`s (its first item `%include`; a file's, after
 ;; the item that says the file), a mark in the description scope,
 ;; `%include-scope`, so that a type name nothing else defines is the modules
 ;; included's (`k-type-unknown`, `TODO.md` §69); gone with the module's scope.
-(define k-include-mark (->* (mod-items) unit)
+;; And what the `include`s give, as the expander found (`#:relied`, all of
+;; them), in scope outside its own types (declared ahead, after) and inside
+;; what is outside it (`k-include-frame!`, ended by `k-include-frame-end!`).
+;; Whether it has `include`s.
+(define k-include-mark (->* (mod-items) bool)
   (lambda (items)
     (if (and (not (null? items)) (symbol=? (car (extract (car items) 2)) '%include))
-        (k-push-desc '%include-scope (ds-var -1 0))
+        (begin (k-push-desc '%include-scope (ds-var -1 0))
+               (k-include-frame! (k-includes-record (extract (car items) 4)))
+               #t)
+        #f)))
+;; What the modules included give, as the expander found, together, from
+;; the `%include` item's expressions `xs` (the modules included, each with
+;; its `include` form, `include-items`); none if one of them has no record
+;; (`parse.rs`'s `includes_relied`).
+(define k-includes-record (->* (exp-list) k-record)
+  (lambda (xs)
+    (tagcase (car xs)
+      (e-module (items a b abk abkr) (k-records-joined items nil nil))
+      (else y k-no-record))))
+(define k-records-joined (->* (mod-items k-names k-names) k-record)
+  (lambda (items vs ds)
+    (if (null? items)
+        (product (1 2) (2 vs) (3 ds))
+        (let ((r (if (null? (extract (car items) 3))
+                     k-no-record
+                     (k-record-written (car (extract (car items) 3))))))
+          (if (= (extract r 1) 2)
+              (k-records-joined (cdr items) (append vs (extract r 2)) (append ds (extract r 3)))
+              k-no-record)))))
+;; The record written into `include` form `f`, `(include m #:relied S)`
+;; (`written-relied` read it, so it is well formed).
+(define k-record-written (->* (syn) k-record)
+  (lambda (f)
+    (let ((items (k-items f "an `include`")))
+      (if (< (k-length items) 4)
+          k-no-record
+          (let ((s (k-nth items 3)))
+            (if (syn-symbol? s)
+                (product (1 1) (2 nil) (3 nil))
+                (let ((parts (k-items s "a record")))
+                  (product (1 2) (2 (k-syn-names (k-nth parts 0)))
+                           (3 (k-syn-names (k-nth parts 1)))))))))))
+(define k-syn-names (->* (syn) k-names)
+  (lambda (s)
+    (tagcase s
+      (lst (xs d a b x) (k-syms-of xs))
+      (else y nil))))
+(define k-syms-of (->* (k-syns) k-names)
+  (lambda (xs) (if (null? xs) nil (cons (syn-head (car xs)) (k-syms-of (cdr xs))))))
+;; A parser's record as the checker keeps it.
+(define k-record-of (->* (relied) k-record)
+  (lambda (r)
+    (tagcase r
+      (rl-names (vs ds) (product (1 2) (2 vs) (3 ds)))
+      (rl-unknown () (product (1 1) (2 nil) (3 nil)))
+      (else y k-no-record))))
+;; Module expression `x`, of type `t`, held to what the expander relied on
+;; of it, if it wrote it (an included module, an `extend`'s first): as
+;; `Checker::shape_kept`.
+(define k-kept (->* (kx int) unit)
+  (lambda (x t)
+    (let ((h (k-held-at (k-start x) (k-end x) (k-kth x) (k-reading x))))
+      (if (null? h)
+          #u
+          (k-shape-held (k-start x) (k-end x) (extract (car h) 4) t (extract (car h) 2) nil
+                        (get (extract (car h) 3)))))))
+;; `(with m …)`, `x`, at `a`..`b`, `m`'s type `mt`: held to what the expander
+;; relied on of `m`, if it wrote it, the values its body uses `used` (as
+;; `Checker::with_as`).
+(define k-with-held (->* (kx symbol int k-names int int) unit)
+  (lambda (x m mt used a b)
+    (let ((h (k-opened-at a b (k-kth x) (k-reading x))))
+      (if (null? h)
+          #u
+          (k-shape-held a b m mt (extract (car h) 2) used (get (extract (car h) 3)))))))
+;; The module expression `x` held to `rec` where it is checked, with what
+;; is read past `past`: an included module, an `extend`'s first (`shaped`).
+(define k-hold-exp (->* (kx k-record (ref k-names @t)) unit)
+  (lambda (x rec past)
+    (if (= (extract rec 1) 0)
+        #u
+        (k-note-held! (product (1 (k-at-of x)) (2 rec) (3 past)
+                               (4 (tagcase x (x-var (s a b abk abkr) s) (else y '||))))))))
+;; Of an `extend`'s module, `items`, its first held to what the expander
+;; relied on of it, written on the `with` of it, `xs` the items resolved.
+(define k-extend-held (->* (mod-items k-items) unit)
+  (lambda (items xs)
+    (if (and (= (k-length-items items) 2) (symbol=? (car (extract (car items) 2)) '%extend-0))
+        (tagcase (car (extract (car (cdr items)) 4))
+          (e-with (m body a b abk abkr wrl)
+            (k-hold-exp (car (extract (car xs) 5)) (k-record-of wrl) (k-frame-past -1)))
+          (else y #u))
         #u)))
+(define k-length-items (->* (mod-items) int)
+  (lambda (xs) (if (null? xs) 0 (+ 1 (k-length-items (cdr xs))))))
 ;; A quote's constant `x`'s type: the standard `(listof datum acyclic)` if
 ;; `x` is a proper list, else the standard `datum`, whatever the program
 ;; binds those names to (`Checker::parse_datum_form`).
@@ -260,10 +359,33 @@
                  (rels (k-resolve-let els)))
             (x-tagcase sx rarms rels a b abk abkr)))
         (e-module (items a b abk abkr) (k-resolve-module-items items a b abk abkr))
-        ;; Its body read with `m`'s type names shadowing (`k-with-mark`).
-        (e-with (m body a b abk abkr)
-          (let* ((saved (get k-dscope)) (marked (k-with-mark m)) (x (k-resolve-exp body)))
-            (begin (set k-dscope saved) (k-with-unmark m) (x-with m x a b abk abkr)))))))
+        ;; `(with %include …)`, made after a module's items are read: no mark
+        ;; of its own; held to what its module's `include`s were relied on
+        ;; for (`with_includes`).
+        (e-with (m body a b abk abkr wrl)
+          (if (symbol=? m '%include)
+              (let ((x (k-resolve-exp body)) (ir (k-include-record)))
+                (begin
+                  (if (= (extract (extract ir 2) 1) 2)
+                      (k-note-opened! (product (1 (product (1 a) (2 b) (3 abk) (4 abkr)))
+                                               (2 (extract ir 2)) (3 (k-frame-past -1)) (4 m)))
+                      #u)
+                  (x-with m x a b abk abkr)))
+              (k-resolve-with m body a b abk abkr (k-record-of wrl)))))))
+  ;; `(with m …)`: its body read with `m`'s type names shadowing
+  ;; (`k-with-mark`), by its record (`rec`), where the expander wrote it,
+  ;; and held to it where it is checked, with what is read past it; an
+  ;; `extend`'s, its first module's (`k-extend-held`).
+  (k-resolve-with (->* (symbol exp int int int int k-record) kx)
+    (lambda (m body a b abk abkr rec)
+      (let* ((saved (get k-dscope)) (f (k-with-mark m rec)) (past (k-frame-past f))
+             (x (k-resolve-exp body)))
+        (begin (set k-dscope saved) (k-with-unmark m f)
+               (if (or (= (extract rec 1) 0) (symbol=? m '%extend-0))
+                   #u
+                   (k-note-opened! (product (1 (product (1 a) (2 b) (3 abk) (4 abkr))) (2 rec)
+                                            (3 past) (4 m))))
+               (x-with m x a b abk abkr)))))
   (k-resolve-letrec (->* (exp-letrec-bs) k-letrec-bs)
     (lambda (bs)
       (if (null? bs)
@@ -366,6 +488,16 @@
                                 #u))
                       (t (k-parse-types (the syns-a (cons (car ts) nil)))) (x (k-resolve-all xs)))
                  (k-item-of k ns -2 t x)))
+;; An included module's: its types its `include` form, held to
+              ;; what the expander relied on of it (`include-items`).
+              ((and (= k 2) (k-included-item? ns))
+               (let ((x (k-resolve-all xs)))
+                 (begin
+                   (if (null? ts)
+                       #u
+                       (k-hold-exp (car x) (k-record-written (car ts))
+                                   (k-frame-past (extract (k-include-record) 1))))
+                   (k-item-of k ns -1 nil x))))
               ((= k 2)
                (let* ((star (if (null? ts) #u (set k-arrow-star (k-written-arrow-star? (car ts)))))
                       (t (if (null? ts) (the k-ids nil) (k-parse-types ts))) (x (k-resolve-all xs)))
@@ -425,11 +557,15 @@
            (let ((got (the (ref k-items @t) (new nil)))
                  (ps (k-syns-count (extract (car items) 3))))
              (begin (set k-dscope (k-scope-newest ps saved (get k-std-dscope)))
-                    (k-in-loaded (lambda () (begin (k-include-mark (cdr items))
-                                                   (set got (k-resolve-items-ahead items))))
+                    (k-in-loaded (lambda ()
+                                   (let ((inc (k-include-mark (cdr items))))
+                                     (begin (set got (k-resolve-items-ahead items))
+                                            (if inc (k-include-frame-end!) #u))))
                                  k a b)
                     (set k-dscope saved)
                     (x-module (get got) a b abk abkr))))
           (else
-           (let ((xs (begin (k-include-mark items) (k-resolve-items-ahead items))))
-             (begin (set k-dscope saved) (x-module xs a b abk abkr))))))))))))
+           (let* ((inc (k-include-mark items)) (xs (k-resolve-items-ahead items)))
+             (begin (if inc (k-include-frame-end!) #u)
+                    (k-extend-held items xs)
+                    (set k-dscope saved) (x-module xs a b abk abkr))))))))))))

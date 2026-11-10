@@ -19,7 +19,7 @@
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import forms-module process-form given-form processes input-items item-form? run-item run-count
-        datum-form)
+        datum-form fresh-name written-relied relied-word?)
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type data syn))
 (define syn->datum (with parser-module syn->datum))
@@ -28,7 +28,8 @@
         any-include? hide-forms hide-form? hidden-marks item-in-includes datatype? expand-datatype
         import? expand-import e-var e-int e-bool e-str e-char e-float e-sym e-quote e-unit e-lambda
         e-app e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the
-        kw-sum e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define
+        kw-sum e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with rl-none
+        rl-unknown rl-names t-define
         t-exp p-ok p-err sym-true sym-false sym-unit at-least vlambda-usage stage-usage parse-vparam
         region-form? confirm-length-k bloblet-form? syn-string? syn-string parse-params freeze-pair
         region-kind region-name-error one-let call-tmp standard-ref field-index bloblet-untagged?
@@ -42,26 +43,6 @@
         case-key-at case-take case-drop case-mid shared-keys shared-pending input-key? shared-key?
         load-cycle in-loaded-as loading-keys (type case-entry case-entries))
 ;;; ------------------------------------------------------------ expressions
-;; Whether `s` mentions the name `n` anywhere, quoted or not.
-(define syn-mentions? (->* (symbol syn) bool)
-  (lambda (n s)
-    (tagcase s
-      (atom (d a b xpn) (and (symbol? d) (symbol=? d n)))
-      (lst (items d a b xpn) (syns-mention? n items))
-      (dotted (items t d a b xpn) (or (syns-mention? n items) (syn-mentions? n t)))
-      (vec (items d a b xpn) (syns-mention? n items)))))
-(define syns-mention? (->* (symbol syns-a) bool)
-  (lambda (n ss) (and (not (null? ss)) (or (syn-mentions? n (car ss)) (syns-mention? n (cdr ss))))))
-;; A name for an expansion's own variable that `forms` never mention:
-;; `base`, else `base1`, `base2` and so on. Its scope is within the form,
-;; and nothing refers to a name it does not write, so it captures nothing
-;; and nothing captures it.
-(define fresh-name (->* (string syns-a) symbol)
-  (lambda (base forms) (fresh-from base forms 0)))
-(define fresh-from (->* (string syns-a int) symbol)
-  (lambda (base forms i)
-    (let ((n (string->symbol (if (= i 0) base (string-append base (int->string i))))))
-      (if (syns-mention? n forms) (fresh-from base forms (+ i 1)) n))))
 ;; The shapes `typecase` tests (`check.rs`'s `SHAPES`, those with a
 ;; standard predicate), and the predicate of each; `||` if not one.
 (define typecase-predicate (->* (symbol) symbol)
@@ -413,14 +394,17 @@
         ;; `(extend e0 e1)` (`TODO.md` §69): a module of the two, made of
         ;; their values by the checker (`k-extended`), as `parse.rs`; `e1`
         ;; sees `e0`'s bindings, `(with %extend-0 e1)`, as FX-91's, made at the form.
+        ;; What the expander relied on of `e0` (`#:relied`) is the `with`'s.
         ((extend)
-         (begin (arity items 3 "`(extend module module)`" a b)
-                (e-module (the mod-items
-                            (list (mod-item-of 2 '%extend-0 nil (list (parse-nth items 1)))
-                                  (mod-item-of 2 '%extend-1 nil
-                                               (list (e-with '%extend-0 (parse-nth items 2)
-                                                             a b 0 0)))))
-                          a b 0 0)))
+         (let ((r (written-relied pfail-at (drop items 2))))
+           (begin (arity (extract r 2) 1 "`(extend module module)`" a b)
+                  (e-module (the mod-items
+                              (list (mod-item-of 2 '%extend-0 nil (list (parse-nth items 1)))
+                                    (mod-item-of 2 '%extend-1 nil
+                                                 (list (e-with '%extend-0
+                                                               (parse-exp (car (extract r 2)))
+                                                               a b 0 0 (extract r 1))))))
+                            a b 0 0))))
         ((load-module load-input)
          (let* ((input? (eq? head 'load-input))
                 (usage (string-append "`(" (if input? "load-input" "load-module") " \"file\")`")))
@@ -435,10 +419,14 @@
          (begin (arity items 3 "`(%loaded \"key\" \"path\")`" a b)
                 (parse-loaded (syn-string (nth items 2)) (input-key? (syn-string (nth items 1)))
                               #t a b)))
+        ;; What the expander relied on of the module written after it
+        ;; (`#:relied`, `written-relied`).
         ((with)
          (begin (at-least items 2 "`(with module body …)`" a b)
                 (if (syn-symbol? (nth items 1))
-                    (e-with (syn-symbol (nth items 1)) (parse-body (drop items 2) a b) a b 0 0)
+                    (let ((r (written-relied pfail-at (drop items 2))))
+                      (e-with (syn-symbol (nth items 1)) (parse-body (extract r 2) a b) a b 0 0
+                              (extract r 1)))
                     (pfail "`with` opens a module named by a variable" (nth items 1)))))
         (else
          (cond ((region-form? head) (parse-region-form items head a b))
@@ -849,8 +837,10 @@
                       (mark (mk-symbol "*" (syn-start f) (syn-end f))))
                  (mod-item-of 2 name (the syns-a (list (nth parts 2) mark))
                               (the exp-list (cons init nil)))))
-              ;; `(include m)` (`TODO.md` §69): kind 9, its form kept.
-              ((and (symbol=? head 'include) (= n 2))
+              ;; `(include m)` (`TODO.md` §69): kind 9, its form kept, with what
+              ;; the expander relied on of `m` (`#:relied`).
+              ((and (symbol=? head 'include)
+                    (or (= n 2) (and (= n 4) (relied-word? (nth parts 2)))))
                (mod-item-of 9 '%include (one-syn f) (list (parse-exp (nth parts 1)))))
               ((symbol=? head 'define-rec)
                (let ((bs (parse-typed-bindings (cdr parts) "`(name type expression)`"
@@ -892,7 +882,7 @@
                                      (cons (t-define name (the syns-a nil) x a b)
                                            (get shared-pending)))))))
                 (if input?
-                    (e-with name (e-var 'input a b 0 0) a b 0 0)
+                    (e-with name (e-var 'input a b 0 0) a b 0 0 (rl-none))
                     (e-var name a b 0 0)))))))))
   ;; File `f`, loaded at `a`..`b` as `path`: the module, its items after its
   ;; mark (`loaded-made` of it, for a file of parameters; for a
@@ -989,7 +979,7 @@
   (lambda (x a b)
     (tagcase x
       (e-var (n xa xb k kr) n)
-      (e-with (m body xa xb k kr) m)
+      (e-with (m body xa xb k kr wrl) m)
       (e-module (items xa xb k kr) (pfail-at (symbol->string (car (extract (car items) 2))) a b))
       (else y (pfail-at "a load is its hidden global" a b)))))
 ;; A `define-rec`'s bindings, as a `letrec`'s are.

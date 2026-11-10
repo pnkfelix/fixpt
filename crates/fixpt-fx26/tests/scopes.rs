@@ -153,3 +153,146 @@ fn a_directory_is_walked() {
         eprintln!("{n:4} {m}  (first: {first})");
     }
 }
+
+/// The walk written in FX-26 (`macros-walk.fx`) finds the scopes the Rust
+/// one finds: each test program the checker accepts, expanded by the Rust
+/// expander, its local value binders renamed by each walk, the same.
+#[test]
+fn the_two_walks_agree() {
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs"));
+    let mut files = Vec::new();
+    programs(root, &mut files);
+    let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
+    let (mut compared, mut differ) = (0, Vec::new());
+    for f in &files {
+        let text = std::fs::read_to_string(f).expect("readable");
+        let mut c = Checker::new();
+        c.base_dir = f.parent().map(|d| d.to_path_buf());
+        if fixpt_fx26::compare::check_with_rust_checker(&mut c, &text).is_err() {
+            continue;
+        }
+        let mut c = Checker::new();
+        c.base_dir = f.parent().map(|d| d.to_path_buf());
+        let (Ok(forms), Ok(rust)) = (c.expanded_written(&text), Checker::new().alpha_renamed(&text)) else { continue };
+        let fx = s.own_program_walked(&forms.join("\n")).unwrap_or_else(|e| vec![format!("walk: {}", e.message)]);
+        compared += 1;
+        let same = |a: &str, b: &str| normal(a) == normal(b);
+        if fx.len() != rust.len() || fx.iter().zip(&rust).any(|(a, b)| !same(a, b)) {
+            let first = fx.iter().zip(&rust).find(|(a, b)| !same(a, b)).map(|(a, b)| format!("FX-26 {a}\n  Rust  {b}")).unwrap_or_else(|| format!("{} forms against {}", fx.len(), rust.len()));
+            differ.push(format!("{}: {first}", f.display()));
+        }
+    }
+    eprintln!("{compared} programs compared, {} differ", differ.len());
+    assert!(differ.is_empty(), "the walks differ:\n{}", differ.iter().take(10).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+/// The records the FX-26 expander writes (`macros-shapes.fx`'s `shaped`)
+/// are the Rust one's: each test program the checker accepts, each of its
+/// top-level forms as the Rust checker shaped it, and as FX-26 shapes it
+/// given the same form unshaped.
+#[test]
+fn the_two_expanders_write_the_same_records() {
+    let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs"));
+    let mut files = Vec::new();
+    programs(root, &mut files);
+    let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
+    let (mut compared, mut differ) = (0, Vec::new());
+    for f in &files {
+        let text = std::fs::read_to_string(f).expect("readable");
+        let mut c = Checker::new();
+        c.base_dir = f.parent().map(|d| d.to_path_buf());
+        c.keep_shapes_seen();
+        if fixpt_fx26::compare::check_with_rust_checker(&mut c, &text).is_err() {
+            continue;
+        }
+        let seen = c.shapes_seen();
+        if !seen.iter().any(|(_, after)| after.contains("#:relied")) {
+            continue;
+        }
+        // Each form as FX-26 shapes it, in order, those declared ahead
+        // too, which the Rust checker does not shape.
+        let before: Vec<&str> = seen.iter().map(|(b, _)| b.as_str()).collect();
+        let fx = s.own_program_shaped(&before.join("\n"), f.parent().map(|d| d.to_path_buf())).unwrap_or_else(|e| vec![format!("shape: {}", e.message)]);
+        compared += 1;
+        let same = |a: &str, b: &str| b.is_empty() || normal(a) == normal(b);
+        if fx.len() != seen.len() || fx.iter().zip(&seen).any(|(a, (_, b))| !same(a, b)) {
+            let first = fx.iter().zip(&seen).find(|(a, (_, b))| !same(a, b)).map(|(a, (_, b))| format!("FX-26 {a}\n  Rust  {b}")).unwrap_or_else(|| format!("{} forms against {}", fx.len(), seen.len()));
+            differ.push(format!("{}: {first}", f.display()));
+        }
+    }
+    eprintln!("{compared} programs compared, {} differ", differ.len());
+    for d in &differ {
+        eprintln!("{d}");
+    }
+    assert!(differ.is_empty(), "the records differ in {} programs", differ.len());
+}
+
+/// The forms of the file named by `FIXPT_SHAPED_FILE`, after expansion,
+/// shaped by each expander, written. Run by hand (`cargo test --test scopes
+/// -- --ignored`).
+#[test]
+#[ignore]
+fn a_file_is_shaped() {
+    let Ok(path) = std::env::var("FIXPT_SHAPED_FILE") else { return };
+    let text = std::fs::read_to_string(&path).expect("readable");
+    let mut c = Checker::new();
+    c.base_dir = std::path::Path::new(&path).parent().map(|d| d.to_path_buf());
+    c.keep_shapes_seen();
+    let checked = fixpt_fx26::compare::check_with_rust_checker(&mut c, &text);
+    eprintln!("Rust checks: {:?}", checked.as_ref().err().map(|e| &e.message));
+    let seen = c.shapes_seen();
+    let before: Vec<&str> = seen.iter().map(|(b, _)| b.as_str()).collect();
+    let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
+    let fx = s.own_program_shaped(&before.join("\n"), std::path::Path::new(&path).parent().map(|d| d.to_path_buf())).unwrap_or_else(|e| vec![format!("shape: {}", e.message)]);
+    for (k, (_, after)) in seen.iter().enumerate() {
+        eprintln!("Rust  {after}\nFX-26 {}", fx.get(k).map_or("(none)", |s| s.as_str()));
+    }
+}
+
+/// Form text `t` read and written again by the Rust reader, its strings
+/// emptied and its aliases' expansion numbers taken out: two writers'
+/// spellings of one form alike (the FX-26 one escapes nothing in a string),
+/// and two expansions' counts (`%~N:x` is `%~:x`) the same.
+fn normal(t: &str) -> String {
+    let mut interner = fixpt_read::Interner::default();
+    let written = match fixpt_read::Reader::new(t, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() {
+        Ok(forms) => forms.iter().map(|f| fixpt_read::write_syntax(&unstrung(f), &interner)).collect::<Vec<_>>().join(" "),
+        Err(_) => t.to_string(),
+    };
+    let mut out = String::new();
+    let mut rest = written.as_str();
+    while let Some(i) = rest.find("%~") {
+        out.push_str(&rest[..i + 2]);
+        rest = rest[i + 2..].trim_start_matches(|c: char| c.is_ascii_digit());
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `s` with each string empty.
+fn unstrung(s: &fixpt_read::Syntax) -> fixpt_read::Syntax {
+    use fixpt_read::Datum;
+    let datum = match &s.datum {
+        Datum::Str(_) => Datum::Str(String::new()),
+        Datum::List { items, tail } => Datum::List { items: items.iter().map(unstrung).collect(), tail: tail.as_ref().map(|t| Box::new(unstrung(t))) },
+        d => d.clone(),
+    };
+    fixpt_read::Syntax::new(s.span, datum)
+}
+
+/// Probe: the FX-26 walk of the forms in `FIXPT_WALK_TEXT`'s file.
+#[test]
+#[ignore]
+fn a_text_is_walked() {
+    let Ok(paths) = std::env::var("FIXPT_WALK_TEXT") else { return };
+    let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
+    for path in paths.split(',') {
+        let text = std::fs::read_to_string(path).expect("readable");
+        let t = std::time::Instant::now();
+        let fx = s.own_program_walked(&text).unwrap_or_else(|e| vec![format!("walk: {}", e.message)]);
+        for f in &fx {
+            eprintln!("{}", f.chars().take(60).collect::<String>());
+        }
+        eprintln!("{path}: {:?}", t.elapsed());
+    }
+}

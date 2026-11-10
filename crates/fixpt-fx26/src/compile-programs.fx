@@ -243,7 +243,7 @@
                     (tagcase (car l)
                       (at-global (g) (r-const-in (get r-const-globals) g))
                       (else y nil)))))
-            (e-with (m body a b abk abkr)
+            (e-with (m body a b abk abkr wrl)
               (tagcase body (e-var (f fa fb fafbk fafbkr) (c-member-const m f)) (else y nil)))
             (else y nil)))))))
 ;; The list `x` makes, in a list, if it is one of literals (integers,
@@ -505,7 +505,7 @@
 (define c-reexport-inline! (->* (symbol exp) unit)
   (lambda (n x)
     (tagcase x
-      (e-with (m body a b abk abkr)
+      (e-with (m body a b abk abkr wrl)
         (tagcase body
           (e-var (f fa fb fafbk fafbkr) (c-alias-inline! n f (c-members-of (get c-modules) m)))
           (else y #u)))

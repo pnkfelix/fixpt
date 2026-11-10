@@ -33,7 +33,7 @@
         (s-expr () (sym "expr")) (s-lambda () (sym "lambda")) (s-bvar () (sym "bvar"))
         (s-id () (sym "id")) (s-data () (sym "data")) (s-type () (sym "type"))
         (s-label () (sym "label")) (s-dvar () (sym "dvar")) (s-kind () (sym "kind"))
-        (s-defn () (sym "defn"))
+        (s-defn () (sym "defn")) (s-item () (sym "item"))
         (s-nil () (mk-list nil a b))
         (s-literal (n) (mk-list (list (sym "literal") (atom n a b 0)) a b))
         (s-pair (x y) (show-pair t nil a b))
@@ -174,7 +174,8 @@
         nil
         (cons (tagcase (car rs)
                 (ring-rib (es) (show-rib es a b))
-                (ring-at (x) (mk-list (list (mk-symbol "at" a b) (show-addr x a b)) a b)))
+                (ring-at (x) (mk-list (list (mk-symbol "at" a b) (show-addr x a b)) a b))
+                (ring-shape (x) (mk-list (list (mk-symbol "shape" a b) (show-addr x a b)) a b)))
               (show-rings (cdr rs) a b)))))
 (define show-rib (->* (entries int int) syn)
   (lambda (es a b) (mk-list (cons (mk-symbol "rho" a b) (show-entries es a b)) a b)))

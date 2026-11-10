@@ -403,7 +403,7 @@
     (tagcase f
       (e-var (n a b abk abkr) (if (null? (c-where e n)) (symbol->string n) ""))
       ;; `(with #%fx n)` where `n` is shadowed: the standard `n`.
-      (e-with (m body a b abk abkr) (c-fx-name m body))
+      (e-with (m body a b abk abkr wrl) (c-fx-name m body))
       (else y ""))))
 
 ;; A quote's constant, `e-quote`'s `x`, as a constant's cell, made now and

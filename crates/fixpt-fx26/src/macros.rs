@@ -1657,15 +1657,17 @@ impl Macros {
                 }
             }
             kept.extend(a.unplaced.iter().copied());
-            let mut fresh = 0;
-            for (t, node) in a.nodes.iter().enumerate() {
-                if let Kids::Binder(n, Ns::Value) = node.kids
-                    && !defined.contains(&t)
-                    && !kept.contains(&n)
-                {
-                    fresh += 1;
-                    renamed.insert(node.path.clone(), format!("{}%{fresh}", a.name(n)));
-                }
+            // Numbered in the order the binders are written, a list's
+            // first part before its rest, as the FX-26 walk numbers them
+            // (`macros-walk.fx`'s `walked-forms`).
+            let mut binders: Vec<usize> = (0..a.nodes.len())
+                .filter(|t| matches!(a.nodes[*t].kids, Kids::Binder(n, Ns::Value) if !defined.contains(t) && !kept.contains(&n)))
+                .collect();
+            binders.sort_by(|x, y| a.nodes[*x].path.iter().map(|s| !s).cmp(a.nodes[*y].path.iter().map(|s| !s)));
+            binders.dedup_by(|x, y| a.nodes[*x].path == a.nodes[*y].path);
+            for (k, t) in binders.into_iter().enumerate() {
+                let Kids::Binder(n, _) = a.nodes[t].kids else { unreachable!("a binder") };
+                renamed.insert(a.nodes[t].path.clone(), format!("{}%{}", a.name(n), k + 1));
             }
             for (at, b) in &target {
                 if let Some(name) = renamed.get(&a.nodes[*b].path).cloned() {

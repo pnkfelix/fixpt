@@ -561,7 +561,7 @@
   (lambda (env f)
     (tagcase (r-operator f)
       (e-var (n a b abk abkr) (if (null? (r-where env n)) (symbol->string n) ""))
-      (e-with (m body a b abk abkr) (c-fx-name m body))
+      (e-with (m body a b abk abkr wrl) (c-fx-name m body))
       (else y ""))))
 ;; Whether `e` is a `+` or `-` of two.
 (define r-adds? (->* (renv exp) bool)

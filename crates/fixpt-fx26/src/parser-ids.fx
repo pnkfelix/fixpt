@@ -219,10 +219,10 @@
         (e-module (items a b k kr)
           (let* ((n (next-kth t a b)) (items2 (number-items t items)))
             (if (and (= n k) (= reading kr) (eq? items items2)) x (e-module items2 a b n reading))))
-        (e-with (m body a b k kr)
+        (e-with (m body a b k kr wrl)
           (let* ((n (next-kth t a b)) (body2 (number-exp t body)))
             (if (and (= n k) (= reading kr) (eq? body body2)) x
-                (e-with m body2 a b n reading))))))))
+                (e-with m body2 a b n reading wrl))))))))
   (number-exps (->* (seen exp-list) exp-list)
     (lambda (t xs)
       (if (null? xs)

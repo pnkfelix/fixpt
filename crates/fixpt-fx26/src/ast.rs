@@ -789,6 +789,10 @@ pub struct WithTables {
     /// `None` where the expander did not know the shape (`#:relied #f`).
     pub opened: std::collections::HashMap<ExpId, Option<Relied>>,
     pub shaped: std::collections::HashMap<ExpId, Option<Relied>>,
+    /// Of each `extend`, by the `(with %extend-0 …)` it makes, what the
+    /// expander relied on of its first module (that module's, `shaped`):
+    /// as the FX-26 parser keeps it, on the `with`, for writing the tree.
+    pub extended: std::collections::HashMap<ExpId, Option<Relied>>,
     /// By each `with`, the descriptions its body reads that the module
     /// was not taken to give (read past it, to what is outside): which its
     /// type must not give (`Checker::shape_held`).
@@ -797,8 +801,10 @@ pub struct WithTables {
     /// last: each record, and what is read past it so far
     /// (`Parser::withs_reading`).
     pub frames: Vec<(Relied, Vec<Sym>)>,
-    /// Of those, each module's of its `include`s, innermost last.
-    pub include_frames: Vec<usize>,
+    /// Of each module with `include`s being parsed, innermost last, the
+    /// frame of what they give, if each has its record (`None` if not):
+    /// one for each such module, so that one's is never an outer one's.
+    pub include_frames: Vec<Option<usize>>,
 }
 
 /// What the expander relied on of a module, before its type was known
@@ -1216,6 +1222,7 @@ impl Arena {
         self.withs.with_applied.retain(|t, _| (t.0 as usize) < mark.tys);
         self.withs.opened.retain(|e, _| (e.0 as usize) < mark.exps);
         self.withs.shaped.retain(|e, _| (e.0 as usize) < mark.exps);
+        self.withs.extended.retain(|e, _| (e.0 as usize) < mark.exps);
         self.withs.read_past.retain(|e, _| (e.0 as usize) < mark.exps);
         self.exps.truncate(mark.exps);
         self.dvar_names.truncate(mark.dvars);

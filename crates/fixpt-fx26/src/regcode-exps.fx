@@ -635,7 +635,7 @@
                 (not (or loop-call (or inline (or leaves (r-call-is-free? f n e tail))))))))
         ;; A `with` only loads fields (`r-with`): as its body. `(with #%fx n)`:
         ;; as the standard `n` as a value.
-        (e-with (m body a b abk abkr)
+        (e-with (m body a b abk abkr wrl)
           (let ((ns (c-with-at a b abk abkr)) (n (c-fx-name m body)))
             (if (string=? n "")
                 (r-collects body (if (null? ns) e (r-local-syms e (car ns))) this tail)

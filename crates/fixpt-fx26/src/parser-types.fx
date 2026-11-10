@@ -16,6 +16,20 @@
 
 (define-type syns-a (listof syn acyclic))
 (define-type names (listof symbol acyclic))
+;; What the expander relied on of a module a form opens, as it wrote it
+;; (`#:relied`, `macros-shapes.fx`; `ast::Relied`): none written; not
+;; known (`#f`); or the names references it found reached the module by
+;; and found it gives, values' and descriptions'.
+(define-datatype relied (rl-none) (rl-unknown) (rl-names names names))
+;; What a module gives, as expansion needs it (`macros-shaper.fx`) (`macros/shapes.rs`'s
+;; `Shape`): its values' names, each with its own shape where it is known
+;; and a module's (or a function's that makes one), and its descriptions'
+;; (types, effects, functions of descriptions), each with its own where it
+;; is a module type's; or a function's, its parameters' shapes and its
+;; result's. A shape where it may not be known is a list of none or one.
+(define-datatype shape (sh-module members members) (sh-fun (listof shapes acyclic) shapes))
+(define-type shapes (listof shape acyclic))
+(define-type members (listof (tupleof symbol shapes) acyclic))
 
 ;;; ------------------------------------------------------------------ trees
 ;;; Each node ends with where it starts and ends, and which of the
@@ -102,8 +116,9 @@
   ;; conversions, each `(lambda (x) x)` spanning the item.
   (e-module (listof (productof (1 int) (2 names) (3 syns-a) (4 (listof exp acyclic))) acyclic)
             int int int int)
-  ;; `(with module body …)`: the body, with the module's values in scope.
-  (e-with symbol exp int int int int))
+  ;; `(with module body …)`: the body, with the module's values in scope;
+  ;; what the expander relied on of the module (`relied`).
+  (e-with symbol exp int int int int relied))
 
 ;; A top-level form. A definition's type is a list of none or one; a
 ;; `define*`'s, of it and the `define*`.

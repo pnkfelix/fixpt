@@ -374,14 +374,18 @@
                   (("spin") (k-one (a-spin)))
                   (("nondet") (k-one (a-nondet)))
                   (("stage") (k-one (a-stage)))
+                  ;; As a type name is read (`k-type-by-withs`).
                   (else
-                   (let ((withs (k-withs-over sym)))
-                     (if (null? withs)
-                         (k-effect-name-read s n)
-                         (let ((has (or (not (null? (k-lookup-desc sym)))
-                                        (not (null? (k-lookup-desc '%include-scope))))))
-                           (k-with-effect-selected
-                             withs sym has (if has (k-effect-name-read s n) nil)))))))))))
+                   (let* ((r (k-withs-reading sym)) (withs (extract r 1))
+                          (has (or (not (null? (k-lookup-desc sym)))
+                                   (not (null? (k-lookup-desc '%include-scope))))))
+                     (cond ((not (null? (extract r 2)))
+                            (let ((e (k-one (a-var (k-effect-select (car (extract r 2)) sym)))))
+                              (if (null? withs) e (k-with-effect-selected withs sym #t e))))
+                           ((not (null? withs))
+                            (k-with-effect-selected withs sym has
+                                                    (if has (k-effect-name-read s n) nil)))
+                           (else (k-effect-name-read s n))))))))))
 ;; Effect name `n`, written `s`, as the description scope and `include`s say.
 (define k-effect-name-read (->* (syn string) k-eff)
   (lambda (s n)
