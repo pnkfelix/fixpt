@@ -139,6 +139,7 @@ impl Checker {
     /// Check `e` against `expected`, returning its effect; an error found,
     /// found in `e` unless in what is in it (`FxError::origin`).
     pub fn check(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        crate::debug_stack::enter("check", self.arena.span_of(e));
         // As `synth`: tagged by a plain `match`, the frame no larger.
         if self.holes.is_some()
             && let Err(err) = self.at_hole(e, Some(expected))
@@ -194,6 +195,9 @@ impl Checker {
     fn check_node(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
         let span = self.arena.span_of(e);
         let expected_ty = self.arena.get(expected).clone();
+        // Each large arm its own function, out of this one: every level of
+        // nesting has this frame, which a debug build makes room in for
+        // every local of every arm.
         match self.arena.exp_at(e).clone() {
             // `#f` where `false` is expected, or a union with it.
             Exp::Bool(false) if self.false_expected(expected) => Ok(Effect::pure()),
@@ -202,46 +206,21 @@ impl Checker {
             // the binders held abstract, as though it were wrapped in a
             // `plambda` binding them — so it must be pure, as a `plambda`
             // body must.
-            _ if matches!(expected_ty, Ty::Poly { .. }) && !matches!(self.arena.exp_at(e), Exp::PLambda { .. } | Exp::Let { .. }) => {
-                let Ty::Poly { binders, body } = expected_ty else { unreachable!() };
-                let deeper = matches!(self.arena.get(self.arena.resolve(body)), Ty::Poly { .. });
-                self.note_generalized(e, &binders, deeper);
-                let eff = self.check(e, body)?;
-                if !self.generalizable(e, &eff) {
-                    return Err(FxError::at(span, format!("a polymorphic value must be pure, and this has {}", self.show_effect(&eff))));
-                }
-                Ok(eff)
-            }
+            _ if matches!(expected_ty, Ty::Poly { .. }) && !matches!(self.arena.exp_at(e), Exp::PLambda { .. } | Exp::Let { .. }) => self.check_node_against_poly(e, expected),
             // A `plambda` against a `poly` of the same binders: the body is
             // checked against the `poly`'s body, its binders renamed to the
             // `plambda`'s, so what the signature says reaches inside.
-            Exp::PLambda { binders, body }
+            Exp::PLambda { binders, .. }
                 if matches!(&expected_ty, Ty::Poly { binders: bs, .. } if bs.len() == binders.len()
                     && bs.iter().zip(&binders).all(|((_, a), (_, b))| a == b)) =>
             {
-                let Ty::Poly { binders: bs, body: want } = expected_ty else { unreachable!() };
-                let want = self.renamed(want, &bs, &binders);
-                self.note_generalized(e, &binders, false);
-                let eff = self.check(body, want)?;
-                if !self.generalizable(body, &eff) {
-                    return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
-                }
-                Ok(eff)
+                self.check_node_plambda(e, expected)
             }
             Exp::Lambda { .. } if matches!(expected_ty, Ty::AllOf(_)) => {
                 let Ty::AllOf(members) = expected_ty else { unreachable!() };
                 self.check_allof_lambda(e, &members)
             }
-            Exp::Lambda { params, .. } if expected_ty.as_subr().is_some() => {
-                let (_, want, result) = expected_ty.as_subr().expect("a subroutine");
-                if want.len() != params.len() {
-                    return Err(FxError::at(span, format!("a subroutine of {} parameter(s) is expected, and this `lambda` has {}", want.len(), params.len())));
-                }
-                let spec = self.spec_of(expected);
-                let (t, eff) = self.synth_lambda_as(e, Some(&want), Some(result), spec)?;
-                self.expect(e, t, expected)?;
-                Ok(eff)
-            }
+            Exp::Lambda { .. } if expected_ty.as_subr().is_some() => self.check_node_lambda(e, expected),
             Exp::Lambda { params, .. } if params.iter().any(|(_, t)| t.is_none()) => {
                 Err(FxError::at(span, format!("a `lambda` cannot be a {}", self.show_ty(expected))))
             }
@@ -250,17 +229,7 @@ impl Checker {
                 self.expect(e, t, expected)?;
                 Ok(eff)
             }
-            Exp::App { fun, args } => {
-                let (t, eff) = self.synth_app(e, fun, &args, Some(expected))?;
-                let t = self.pinned_type(e).unwrap_or(t);
-                // A literal past a fixnum, as the parsers write one.
-                match self.literal_value(e) {
-                    Some(v) if self.fixed_expected(expected).is_some() => self.literal_in_range(e, v, expected)?,
-                    _ => self.expect(e, t, expected)?,
-                }
-                self.checked_call = Some((e, t));
-                Ok(eff)
-            }
+            Exp::App { .. } => self.check_node_app(e, expected),
             Exp::Bloblet { op, args } => {
                 let (t, eff) = self.synth_bloblet(e, op, &args, Some(expected))?;
                 self.expect(e, t, expected)?;
@@ -274,19 +243,9 @@ impl Checker {
                 if matches!(&expected_ty, Ty::Product(fs) if fs.len() == fields.len()
                     && fs.iter().zip(&fields).all(|((a, _), (b, _))| a == b)) =>
             {
-                let Ty::Product(fs) = expected_ty else { unreachable!() };
-                let mut eff = Effect::pure();
-                for ((_, x), (_, t)) in fields.iter().zip(&fs) {
-                    eff = eff.union(&self.check(*x, *t)?);
-                }
-                Ok(self.mask(e, &eff, expected))
+                self.check_node_product(e, expected)
             }
-            Exp::Sum(tag, x) if matches!(&expected_ty, Ty::Sum(vs) if vs.iter().any(|(l, _)| *l == tag)) => {
-                let Ty::Sum(vs) = expected_ty else { unreachable!() };
-                let t = vs.iter().find(|(l, _)| *l == tag).expect("matched").1;
-                let eff = self.check(x, t)?;
-                Ok(self.mask(e, &eff, expected))
-            }
+            Exp::Sum(tag, _) if matches!(&expected_ty, Ty::Sum(vs) if vs.iter().any(|(l, _)| *l == tag)) => self.check_node_sum(e, expected),
             // A natural literal is a `nat`, and a `(nat k)`.
             Exp::Int(k) if k >= 0 && matches!(&expected_ty, Ty::Nat(s) if self.size_le(&Size::lit(k), s)) => Ok(Effect::pure()),
             // A literal in a fixed-width type's range is one; past it, an
@@ -305,119 +264,20 @@ impl Checker {
             }
             // A standard polymorphic value through `#%fx` (`(with #%fx
             // nil)`), instantiated as the plain name is (`TODO.md` §46).
-            Exp::With { module, body } if self.fx_poly(module, body).is_some() => {
-                let t = self.fx_poly(module, body).expect("matched");
-                self.inst_for = Some(e);
-                let inst = self.instantiate_against(t, expected, span)?;
-                self.expect(e, inst, expected)?;
-                self.plain_fx(e);
-                Ok(Effect::pure())
-            }
+            Exp::With { module, body } if self.fx_poly(module, body).is_some() => self.check_node_fx_poly(e, expected),
             // A procedure of the scheduler's, at the type its form gives
             // it (`library_type`).
-            Exp::With { module, body } if self.library_type(module, body).is_some() => {
-                let t = self.library_type(module, body).expect("matched");
-                self.inst_for = Some(e);
-                let inst = if matches!(self.arena.get(t), Ty::Poly { .. }) { self.instantiate_against(t, expected, span)? } else { t };
-                self.expect(e, inst, expected)?;
-                self.with_as(e, module, body, None)?;
-                Ok(Effect::pure())
-            }
+            Exp::With { module, body } if self.library_type(module, body).is_some() => self.check_node_library(e, expected),
             // `(with m e)` checked as its body is, `m`'s values in scope:
             // so an `include`'s module item, `(with %include e)`, is checked
             // against the type the item declares (`TODO.md` §69).
             Exp::With { module, body } if !self.is_named_module(module) => Ok(self.with_as(e, module, body, Some(expected))?.1),
-            Exp::Var(s) if self.lookup(s).is_some_and(|t| matches!(self.arena.get(t), Ty::Poly { .. })) => {
-                let t = self.lookup(s).expect("bound");
-                self.inst_for = Some(e);
-                let inst = self.instantiate_against(t, expected, span)?;
-                self.expect(e, inst, expected)?;
-                Ok(self.naming_effect(s, t))
-            }
-            Exp::If { test, then, els } => {
-                let te = self.check(test, self.bool_ty())?;
-                let certified = self.acyclic_test(test);
-                self.certified.extend(certified);
-                let lengths = self.length_test(test);
-                self.certified_lengths.extend(lengths.clone());
-                let nats = self.nat_test(test);
-                self.certified_nats.extend(nats);
-                let (yes, no) = self.test_facts(test);
-                let (narrow_yes, narrow_no) = self.narrowings(test);
-                let depth = self.size_facts.len();
-                let narrowed = (self.narrowed.len(), self.path_narrowed.len());
-                let dead = [self.dead_branch(e, 0, &narrow_yes), self.dead_branch(e, 1, &narrow_no)];
-                self.size_facts.extend(yes);
-                self.push_narrowings(narrow_yes);
-                let ae = if dead[0] { Ok(Effect::pure()) } else { self.check(then, expected) };
-                self.size_facts.truncate(depth);
-                self.narrowed.truncate(narrowed.0);
-                self.path_narrowed.truncate(narrowed.1);
-                if certified.is_some() {
-                    self.certified.pop();
-                }
-                if lengths.is_some() {
-                    self.certified_lengths.pop();
-                }
-                if nats.is_some() {
-                    self.certified_nats.pop();
-                }
-                let ae = ae?;
-                self.size_facts.extend(no);
-                self.push_narrowings(narrow_no);
-                let be = if dead[1] { Ok(Effect::pure()) } else { self.check(els, expected) };
-                self.size_facts.truncate(depth);
-                self.narrowed.truncate(narrowed.0);
-                self.path_narrowed.truncate(narrowed.1);
-                let be = be?;
-                Ok(self.mask(e, &te.union(&ae).union(&be), expected))
-            }
-            Exp::Begin(items) => {
-                let (last, init) = items.split_last().expect("a body is not empty");
-                let mut eff = Effect::pure();
-                for i in init {
-                    eff = eff.union(&self.synth(*i)?.1);
-                }
-                eff = eff.union(&self.check(*last, expected)?);
-                Ok(self.mask(e, &eff, expected))
-            }
+            Exp::Var(s) if self.lookup(s).is_some_and(|t| matches!(self.arena.get(t), Ty::Poly { .. })) => self.check_node_var(e, expected),
+            Exp::If { .. } => self.check_node_if(e, expected),
+            Exp::Begin(..) => self.check_node_begin(e, expected),
             // A `letrec`'s body, as a `let`'s, against what is expected.
             Exp::Letrec { bindings, body } => Ok(self.letrec(e, &bindings, body, Some(expected))?.1),
-            Exp::Let { bindings, body } => {
-                let mut eff = Effect::pure();
-                let mut bound = Vec::new();
-                // Where the bindings will be in `env`.
-                let base = self.env.len();
-                for (i, (n, init)) in bindings.iter().enumerate() {
-                    let (t, ie) = self.synth(*init)?;
-                    eff = eff.union(&ie);
-                    if self.is_lambda(*init) {
-                        self.known.insert((*n, base + i));
-                    }
-                    bound.push((*n, t));
-                }
-                let depth = self.env.len();
-                let named = self.skolems.len();
-                for ((n, t), (_, init)) in bound.into_iter().zip(bindings.iter()) {
-                    let opened_from = self.skolems.len();
-                    let opened = self.name_nat(n, t);
-                    if self.record_types && opened != t {
-                        let vars = self.skolems[opened_from..].to_vec();
-                        self.facts.let_opened.insert(*init, (opened, vars));
-                    }
-                    self.env.push((n, opened));
-                }
-                let r = self.check(body, expected);
-                self.truncate_env(depth);
-                self.skolems.truncate(named);
-                let eff = self.mask(e, &eff.union(&r?), expected);
-                // A `let` whose value is polymorphic (a `plambda` under it,
-                // say) must be pure, as a `plambda` body must.
-                if matches!(expected_ty, Ty::Poly { .. }) && !self.generalizable(e, &eff) {
-                    return Err(FxError::at(span, format!("a polymorphic value must be pure, and this has {}", self.show_effect(&eff))));
-                }
-                Ok(eff)
-            }
+            Exp::Let { .. } => self.check_node_let(e, expected),
             _ => {
                 let (t, eff) = self.synth(e)?;
                 self.expect(e, t, expected)?;
@@ -425,6 +285,215 @@ impl Checker {
             }
         }
     }
+
+    /// A `plambda` against a `poly` of the same binders, of `check_node`.
+    fn check_node_plambda(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let span = self.arena.span_of(e);
+        let (Exp::PLambda { binders, body }, Ty::Poly { binders: bs, body: want }) = (self.arena.exp_at(e).clone(), self.arena.get(expected).clone()) else {
+            unreachable!("check_node: a plambda against a poly")
+        };
+        let want = self.renamed(want, &bs, &binders);
+        self.note_generalized(e, &binders, false);
+        let eff = self.check(body, want)?;
+        if !self.generalizable(body, &eff) {
+            return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
+        }
+        Ok(eff)
+    }
+
+    /// A product against a product type of the same labels, of `check_node`.
+    fn check_node_product(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let (Exp::Product(fields), Ty::Product(fs)) = (self.arena.exp_at(e).clone(), self.arena.get(expected).clone()) else {
+            unreachable!("check_node: a product against a product")
+        };
+        let mut eff = Effect::pure();
+        for ((_, x), (_, t)) in fields.iter().zip(&fs) {
+            eff = eff.union(&self.check(*x, *t)?);
+        }
+        Ok(self.mask(e, &eff, expected))
+    }
+
+    /// A sum against a sum type with its tag, of `check_node`.
+    fn check_node_sum(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let (Exp::Sum(tag, x), Ty::Sum(vs)) = (self.arena.exp_at(e).clone(), self.arena.get(expected).clone()) else {
+            unreachable!("check_node: a sum against a sum")
+        };
+        let t = vs.iter().find(|(l, _)| *l == tag).expect("matched").1;
+        let eff = self.check(x, t)?;
+        Ok(self.mask(e, &eff, expected))
+    }
+
+    /// Any expression against a `poly`, of `check_node`.
+    fn check_node_against_poly(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let span = self.arena.span_of(e);
+        let expected_ty = self.arena.get(expected).clone();
+        let Ty::Poly { binders, body } = expected_ty else { unreachable!() };
+        let deeper = matches!(self.arena.get(self.arena.resolve(body)), Ty::Poly { .. });
+        self.note_generalized(e, &binders, deeper);
+        let eff = self.check(e, body)?;
+        if !self.generalizable(e, &eff) {
+            return Err(FxError::at(span, format!("a polymorphic value must be pure, and this has {}", self.show_effect(&eff))));
+        }
+        Ok(eff)
+    }
+
+    /// `Exp::Lambda`, of `check_node`.
+    fn check_node_lambda(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let span = self.arena.span_of(e);
+        let expected_ty = self.arena.get(expected).clone();
+        let Exp::Lambda { params, .. } = self.arena.exp_at(e).clone() else { unreachable!("check_node: not a Lambda") };
+        let (_, want, result) = expected_ty.as_subr().expect("a subroutine");
+        if want.len() != params.len() {
+            return Err(FxError::at(span, format!("a subroutine of {} parameter(s) is expected, and this `lambda` has {}", want.len(), params.len())));
+        }
+        let spec = self.spec_of(expected);
+        let (t, eff) = self.synth_lambda_as(e, Some(&want), Some(result), spec)?;
+        self.expect(e, t, expected)?;
+        Ok(eff)
+    }
+
+    /// `Exp::App`, of `check_node`.
+    fn check_node_app(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let Exp::App { fun, args } = self.arena.exp_at(e).clone() else { unreachable!("check_node: not a App") };
+        let (t, eff) = self.synth_app(e, fun, &args, Some(expected))?;
+        let t = self.pinned_type(e).unwrap_or(t);
+        // A literal past a fixnum, as the parsers write one.
+        match self.literal_value(e) {
+            Some(v) if self.fixed_expected(expected).is_some() => self.literal_in_range(e, v, expected)?,
+            _ => self.expect(e, t, expected)?,
+        }
+        self.checked_call = Some((e, t));
+        Ok(eff)
+    }
+
+    /// A standard polymorphic value through `#%fx`, of `check_node`.
+    fn check_node_fx_poly(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let span = self.arena.span_of(e);
+        let Exp::With { module, body } = self.arena.exp_at(e).clone() else { unreachable!("check_node: not a With") };
+        let t = self.fx_poly(module, body).expect("matched");
+        self.inst_for = Some(e);
+        let inst = self.instantiate_against(t, expected, span)?;
+        self.expect(e, inst, expected)?;
+        self.plain_fx(e);
+        Ok(Effect::pure())
+    }
+
+    /// A procedure of the scheduler's, at its form's type, of `check_node`.
+    fn check_node_library(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let span = self.arena.span_of(e);
+        let Exp::With { module, body } = self.arena.exp_at(e).clone() else { unreachable!("check_node: not a With") };
+        let t = self.library_type(module, body).expect("matched");
+        self.inst_for = Some(e);
+        let inst = if matches!(self.arena.get(t), Ty::Poly { .. }) { self.instantiate_against(t, expected, span)? } else { t };
+        self.expect(e, inst, expected)?;
+        self.with_as(e, module, body, None)?;
+        Ok(Effect::pure())
+    }
+
+    /// `Exp::Var`, of `check_node`.
+    fn check_node_var(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let span = self.arena.span_of(e);
+        let Exp::Var(s) = self.arena.exp_at(e).clone() else { unreachable!("check_node: not a Var") };
+        let t = self.lookup(s).expect("bound");
+        self.inst_for = Some(e);
+        let inst = self.instantiate_against(t, expected, span)?;
+        self.expect(e, inst, expected)?;
+        Ok(self.naming_effect(s, t))
+    }
+
+    /// `Exp::If`, of `check_node`.
+    fn check_node_if(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let Exp::If { test, then, els } = self.arena.exp_at(e).clone() else { unreachable!("check_node: not a If") };
+        let te = self.check(test, self.bool_ty())?;
+        let certified = self.acyclic_test(test);
+        self.certified.extend(certified);
+        let lengths = self.length_test(test);
+        self.certified_lengths.extend(lengths.clone());
+        let nats = self.nat_test(test);
+        self.certified_nats.extend(nats);
+        let (yes, no) = self.test_facts(test);
+        let (narrow_yes, narrow_no) = self.narrowings(test);
+        let depth = self.size_facts.len();
+        let narrowed = (self.narrowed.len(), self.path_narrowed.len());
+        let dead = [self.dead_branch(e, 0, &narrow_yes), self.dead_branch(e, 1, &narrow_no)];
+        self.size_facts.extend(yes);
+        self.push_narrowings(narrow_yes);
+        let ae = if dead[0] { Ok(Effect::pure()) } else { self.check(then, expected) };
+        self.size_facts.truncate(depth);
+        self.narrowed.truncate(narrowed.0);
+        self.path_narrowed.truncate(narrowed.1);
+        if certified.is_some() {
+            self.certified.pop();
+        }
+        if lengths.is_some() {
+            self.certified_lengths.pop();
+        }
+        if nats.is_some() {
+            self.certified_nats.pop();
+        }
+        let ae = ae?;
+        self.size_facts.extend(no);
+        self.push_narrowings(narrow_no);
+        let be = if dead[1] { Ok(Effect::pure()) } else { self.check(els, expected) };
+        self.size_facts.truncate(depth);
+        self.narrowed.truncate(narrowed.0);
+        self.path_narrowed.truncate(narrowed.1);
+        let be = be?;
+        Ok(self.mask(e, &te.union(&ae).union(&be), expected))
+    }
+
+    /// `Exp::Begin`, of `check_node`.
+    fn check_node_begin(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let Exp::Begin(items) = self.arena.exp_at(e).clone() else { unreachable!("check_node: not a Begin") };
+        let (last, init) = items.split_last().expect("a body is not empty");
+        let mut eff = Effect::pure();
+        for i in init {
+            eff = eff.union(&self.synth(*i)?.1);
+        }
+        eff = eff.union(&self.check(*last, expected)?);
+        Ok(self.mask(e, &eff, expected))
+    }
+
+    /// `Exp::Let`, of `check_node`.
+    fn check_node_let(&mut self, e: ExpId, expected: TyId) -> R<Effect> {
+        let span = self.arena.span_of(e);
+        let expected_ty = self.arena.get(expected).clone();
+        let Exp::Let { bindings, body } = self.arena.exp_at(e).clone() else { unreachable!("check_node: not a Let") };
+        let mut eff = Effect::pure();
+        let mut bound = Vec::new();
+        // Where the bindings will be in `env`.
+        let base = self.env.len();
+        for (i, (n, init)) in bindings.iter().enumerate() {
+            let (t, ie) = self.synth(*init)?;
+            eff = eff.union(&ie);
+            if self.is_lambda(*init) {
+                self.known.insert((*n, base + i));
+            }
+            bound.push((*n, t));
+        }
+        let depth = self.env.len();
+        let named = self.skolems.len();
+        for ((n, t), (_, init)) in bound.into_iter().zip(bindings.iter()) {
+            let opened_from = self.skolems.len();
+            let opened = self.name_nat(n, t);
+            if self.record_types && opened != t {
+                let vars = self.skolems[opened_from..].to_vec();
+                self.facts.let_opened.insert(*init, (opened, vars));
+            }
+            self.env.push((n, opened));
+        }
+        let r = self.check(body, expected);
+        self.truncate_env(depth);
+        self.skolems.truncate(named);
+        let eff = self.mask(e, &eff.union(&r?), expected);
+        // A `let` whose value is polymorphic (a `plambda` under it,
+        // say) must be pure, as a `plambda` body must.
+        if matches!(expected_ty, Ty::Poly { .. }) && !self.generalizable(e, &eff) {
+            return Err(FxError::at(span, format!("a polymorphic value must be pure, and this has {}", self.show_effect(&eff))));
+        }
+        Ok(eff)
+    }
+
 
     /// `lambda` `e` checked against each of `members`, an `allof`'s
     /// (`docs/research/logical-types.md` §8.5): a `tagcase` arm a member's
@@ -1277,26 +1346,7 @@ impl Checker {
         if let Some(op) = self.standard_ref(fun)
             && self.interner.name(op) == "certify-length"
         {
-            let span = self.arena.span_of(e);
-            let found = match &args[..] {
-                [a, n] => self.length_arg(*a, *n),
-                _ => None,
-            };
-            let Some((_, _, k)) = found.filter(|f| self.certified_lengths.contains(f)) else {
-                return Err(FxError::at(span, "`certify-length` takes only a variable and a length `length-is?` has just confirmed"));
-            };
-            let (t, eff) = self.synth(args[0])?;
-            let t = self.arena.resolve(t);
-            let (elem, region) = match self.arena.get(t).clone() {
-                Ty::Pair(elem, tail, r, _) if self.arena.resolve(tail) == t && r.is_frozen() => (elem, r),
-                Ty::NList { elem, region, .. } => (elem, region),
-                _ => return Err(FxError::at(span, format!("`certify-length` takes a frozen list, and this is a {}", self.show_ty(t)))),
-            };
-            let region = match region {
-                Region::Frozen(p, _) => Region::Frozen(p, true),
-                r => r,
-            };
-            return Ok((self.arena.ty(Ty::NList { elem, size: k, region }), eff));
+            return self.synth_certify_length(e, args);
         }
         // `+` and `-` of naturals: a natural, of a size when both are known.
         if let Some(op) = self.standard_ref(fun)
@@ -1304,32 +1354,7 @@ impl Checker {
             && let [a, b] = args
         {
             let name = name.to_string();
-            // Still the standard operation, for the lowering to integrate.
-            self.facts.standard_operator.insert(e, op);
-            let mut eff = Effect::pure();
-            let mut sizes = Vec::new();
-            for (i, x) in [*a, *b].into_iter().enumerate() {
-                // Only what has a type of its own is asked for it; anything
-                // else is told it is an int, as for any call.
-                if !self.natural_by_itself(x) {
-                    eff = eff.union(&self.check(x, self.int).map_err(|err| self.as_argument(err, x, i))?);
-                    sizes.push(None);
-                    continue;
-                }
-                let (t, xe) = self.synth(x)?;
-                self.expect(x, t, self.int).map_err(|err| self.as_argument(err, x, i))?;
-                eff = eff.union(&xe);
-                sizes.push(match (self.arena.exp_at(x), self.arena.get(self.arena.resolve(t))) {
-                    (Exp::Int(k), _) if *k >= 0 => Some(Size::lit(*k)),
-                    (_, Ty::Nat(s)) => Some(s.clone()),
-                    _ => None,
-                });
-            }
-            let t = match (&sizes[0], &sizes[1]) {
-                (Some(x), Some(y)) => self.nat_arith(&name, x, y).map(|s| self.arena.ty(Ty::Nat(s))),
-                _ => None,
-            };
-            return Ok((t.unwrap_or(self.int), eff));
+            return self.synth_nat_arith(e, op, &name, *a, *b);
         }
         // `cons` onto a `nlist`: one more element. Where a `nlist` is expected,
         // the tail is checked as one shorter; otherwise, a tail that is a
@@ -1337,69 +1362,23 @@ impl Checker {
         if let Some(op) = self.standard_ref(fun)
             && self.interner.name(op) == "cons"
             && let [x, tail] = args
+            && let Some(r) = self.synth_nlist_cons(e, *x, *tail, expected)?
         {
-            let want = expected.map(|t| self.arena.get(self.arena.resolve(t)).clone());
-            if let Some(Ty::NList { elem, size, region }) = want
-                && (matches!(size, Size::Finite) || self.size_nonneg(&size.plus(-1)))
-            {
-                let tail_ty = self.arena.ty(Ty::NList { elem, size: size.plus(-1), region });
-                let xe = self.check(*x, elem)?;
-                let te = self.check(*tail, tail_ty)?;
-                self.note_nlist_cons(e, elem, tail_ty, region);
-                return Ok((expected.expect("an nlist"), xe.union(&te)));
-            }
-            if let Exp::Var(v) = self.arena.exp_at(*tail)
-                && let Some(t) = self.lookup(*v)
-                && let Ty::NList { elem, size, region } = self.arena.get(self.arena.resolve(t)).clone()
-            {
-                let xe = self.check(*x, elem)?;
-                let (_, te) = self.synth(*tail)?;
-                self.note_nlist_cons(e, elem, t, region);
-                let t = self.arena.ty(Ty::NList { elem, size: size.plus(1), region });
-                return Ok((t, xe.union(&te)));
-            }
+            return Ok(r);
         }
         // `(certify-nat v)`: `v`'s value as a `nat`, where `nat?` has just
         // found `v` no less than 0; nowhere else.
         if let Some(op) = self.standard_ref(fun)
             && self.interner.name(op) == "certify-nat"
         {
-            let span = self.arena.span_of(e);
-            let v = match &args[..] {
-                [a] => match self.arena.exp_at(*a) {
-                    Exp::Var(v) => self.env.rpos(*v).map(|i| (*v, i)),
-                    _ => None,
-                },
-                _ => None,
-            };
-            if !v.is_some_and(|v| self.certified_nats.contains(&v)) {
-                return Err(FxError::at(span, "`certify-nat` takes only a variable `nat?` has just found no less than 0"));
-            }
-            let (t, eff) = self.synth(args[0])?;
-            self.expect(args[0], t, self.int)?;
-            return Ok((self.arena.ty(Ty::Nat(Size::Finite)), eff));
+            return self.synth_certify_nat(e, args);
         }
         // `(certify-acyclic v)`: `v`'s value at `acyclic`, where `acyclic?`
         // has just found `v` acyclic; nowhere else.
         if let Some(op) = self.standard_ref(fun)
             && self.interner.name(op) == "certify-acyclic"
         {
-            let span = self.arena.span_of(e);
-            let v = match &args[..] {
-                [a] => match self.arena.exp_at(*a) {
-                    Exp::Var(v) => self.env.rpos(*v).map(|i| (*v, i)),
-                    _ => None,
-                },
-                _ => None,
-            };
-            if !v.is_some_and(|v| self.certified.contains(&v)) {
-                return Err(FxError::at(span, "`certify-acyclic` takes only a variable `acyclic?` has just found acyclic"));
-            }
-            let (t, eff) = self.synth(args[0])?;
-            if !self.is_data(t) {
-                return Err(FxError::at(span, format!("`certify-acyclic` takes data, and a {} is not data", self.show_ty(t))));
-            }
-            return Ok((self.finitized(t), eff));
+            return self.synth_certify_acyclic(e, args);
         }
         let span = self.arena.span_of(e);
         if let Some(s) = self.standard_ref(fun) {
@@ -1427,6 +1406,132 @@ impl Checker {
         if let Ty::AllOf(members) = &callee {
             return self.synth_allof_call(e, fun, args, ft, members, fe, done);
         }
+        self.synth_subr_call(e, fun, args, ft, fe, done, callee, span)
+    }
+
+    /// `(certify-length v k)`, of `synth_app_of`.
+    fn synth_certify_length(&mut self, e: ExpId, args: &[ExpId]) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let found = match &args[..] {
+            [a, n] => self.length_arg(*a, *n),
+            _ => None,
+        };
+        let Some((_, _, k)) = found.filter(|f| self.certified_lengths.contains(f)) else {
+            return Err(FxError::at(span, "`certify-length` takes only a variable and a length `length-is?` has just confirmed"));
+        };
+        let (t, eff) = self.synth(args[0])?;
+        let t = self.arena.resolve(t);
+        let (elem, region) = match self.arena.get(t).clone() {
+            Ty::Pair(elem, tail, r, _) if self.arena.resolve(tail) == t && r.is_frozen() => (elem, r),
+            Ty::NList { elem, region, .. } => (elem, region),
+            _ => return Err(FxError::at(span, format!("`certify-length` takes a frozen list, and this is a {}", self.show_ty(t)))),
+        };
+        let region = match region {
+            Region::Frozen(p, _) => Region::Frozen(p, true),
+            r => r,
+        };
+        return Ok((self.arena.ty(Ty::NList { elem, size: k, region }), eff));
+    }
+
+    /// `+` or `-`, `name`, the standard operation `op`, of `a` and `b`, of
+    /// `synth_app_of`.
+    fn synth_nat_arith(&mut self, e: ExpId, op: Sym, name: &str, a: ExpId, b: ExpId) -> R<(TyId, Effect)> {
+        // Still the standard operation, for the lowering to integrate.
+        self.facts.standard_operator.insert(e, op);
+        let mut eff = Effect::pure();
+        let mut sizes = Vec::new();
+        for (i, x) in [a, b].into_iter().enumerate() {
+            // Only what has a type of its own is asked for it; anything
+            // else is told it is an int, as for any call.
+            if !self.natural_by_itself(x) {
+                eff = eff.union(&self.check(x, self.int).map_err(|err| self.as_argument(err, x, i))?);
+                sizes.push(None);
+                continue;
+            }
+            let (t, xe) = self.synth(x)?;
+            self.expect(x, t, self.int).map_err(|err| self.as_argument(err, x, i))?;
+            eff = eff.union(&xe);
+            sizes.push(match (self.arena.exp_at(x), self.arena.get(self.arena.resolve(t))) {
+                (Exp::Int(k), _) if *k >= 0 => Some(Size::lit(*k)),
+                (_, Ty::Nat(s)) => Some(s.clone()),
+                _ => None,
+            });
+        }
+        let t = match (&sizes[0], &sizes[1]) {
+            (Some(x), Some(y)) => self.nat_arith(name, x, y).map(|s| self.arena.ty(Ty::Nat(s))),
+            _ => None,
+        };
+        return Ok((t.unwrap_or(self.int), eff));
+    }
+
+    /// `(cons x tail)` onto a `nlist`, of `synth_app_of`: none where it is not
+    /// one.
+    fn synth_nlist_cons(&mut self, e: ExpId, x: ExpId, tail: ExpId, expected: Option<TyId>) -> R<Option<(TyId, Effect)>> {
+        let want = expected.map(|t| self.arena.get(self.arena.resolve(t)).clone());
+        if let Some(Ty::NList { elem, size, region }) = want
+            && (matches!(size, Size::Finite) || self.size_nonneg(&size.plus(-1)))
+        {
+            let tail_ty = self.arena.ty(Ty::NList { elem, size: size.plus(-1), region });
+            let xe = self.check(x, elem)?;
+            let te = self.check(tail, tail_ty)?;
+            self.note_nlist_cons(e, elem, tail_ty, region);
+            return Ok(Some((expected.expect("an nlist"), xe.union(&te))));
+        }
+        if let Exp::Var(v) = self.arena.exp_at(tail)
+            && let Some(t) = self.lookup(*v)
+            && let Ty::NList { elem, size, region } = self.arena.get(self.arena.resolve(t)).clone()
+        {
+            let xe = self.check(x, elem)?;
+            let (_, te) = self.synth(tail)?;
+            self.note_nlist_cons(e, elem, t, region);
+            let t = self.arena.ty(Ty::NList { elem, size: size.plus(1), region });
+            return Ok(Some((t, xe.union(&te))));
+        }
+        Ok(None)
+    }
+
+    /// `(certify-nat v)`, of `synth_app_of`.
+    fn synth_certify_nat(&mut self, e: ExpId, args: &[ExpId]) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let v = match &args[..] {
+            [a] => match self.arena.exp_at(*a) {
+                Exp::Var(v) => self.env.rpos(*v).map(|i| (*v, i)),
+                _ => None,
+            },
+            _ => None,
+        };
+        if !v.is_some_and(|v| self.certified_nats.contains(&v)) {
+            return Err(FxError::at(span, "`certify-nat` takes only a variable `nat?` has just found no less than 0"));
+        }
+        let (t, eff) = self.synth(args[0])?;
+        self.expect(args[0], t, self.int)?;
+        return Ok((self.arena.ty(Ty::Nat(Size::Finite)), eff));
+    }
+
+    /// `(certify-acyclic v)`, of `synth_app_of`.
+    fn synth_certify_acyclic(&mut self, e: ExpId, args: &[ExpId]) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let v = match &args[..] {
+            [a] => match self.arena.exp_at(*a) {
+                Exp::Var(v) => self.env.rpos(*v).map(|i| (*v, i)),
+                _ => None,
+            },
+            _ => None,
+        };
+        if !v.is_some_and(|v| self.certified.contains(&v)) {
+            return Err(FxError::at(span, "`certify-acyclic` takes only a variable `acyclic?` has just found acyclic"));
+        }
+        let (t, eff) = self.synth(args[0])?;
+        if !self.is_data(t) {
+            return Err(FxError::at(span, format!("`certify-acyclic` takes data, and a {} is not data", self.show_ty(t))));
+        }
+        return Ok((self.finitized(t), eff));
+    }
+
+    /// The call `e` of `fun`, of type `ft` (`callee`), effect `fe`, to
+    /// `args`, those `done` already synthesized, of `synth_app_of`.
+    #[allow(clippy::too_many_arguments)]
+    fn synth_subr_call(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], ft: TyId, fe: Effect, mut done: Vec<Synthesised>, callee: Ty, span: fixpt_read::Span) -> R<(TyId, Effect)> {
         // A `vsubr` (generative type 0): any number of arguments, each of
         // its element type.
         if let Ty::Named { which: 0, args: ds } = &callee
@@ -1752,86 +1857,117 @@ impl Checker {
         if let Some(want) = expected
             && self.result_misfits(want, result)
         {
-            let map = self.partial_map(&u);
-            let got = self.subst(result, &map);
-            let got = self.show_open(got, &u);
-            return Err(FxError::at(span, format!("this is a {got}, where a {} is expected", self.show_ty(want))));
+            return Err(self.result_misfit(want, result, &u, span));
         }
         self.shape_errors(args, &params, &done, &u)?;
         // The arguments that needed telling: each is checked against its
         // parameter as solved so far, and what it turns out to be solves more.
         for (i, a) in args.iter().enumerate() {
-            if done[i].is_some() {
-                continue;
-            }
-            self.default_regions(&mut u);
-            let map = self.partial_map(&u);
-            let p = self.subst(params[i], &map);
-            let not_known = |c: &Checker, t: TyId| {
-                FxError::at(
-                    c.arena.span_of(*a),
-                    format!(
-                        "argument {} must be a {}, which is not yet known here; give the other arguments first, or `proj` the operator",
-                        i + 1,
-                        c.show_ty(t)
-                    ),
-                )
-            };
-            if self.needs_telling(*a) {
-                // The parameter types must be known; the result helps if it
-                // is, and otherwise the body says what it is.
-                let Some((_, ps, res)) = self.arena.get(p).as_subr() else {
-                    // A thunk has no parameters to be told: told nothing, it
-                    // says what it is, as any argument does.
-                    if !self.unannotated_lambda(*a) {
-                        let (t, eff) = self.synth(*a)?;
-                        self.unify(params[i], t, &mut u, &mut HashSet::new());
-                        done[i] = Some((t, eff));
-                        continue;
-                    }
-                    return Err(not_known(self, p));
-                };
-                if ps.iter().any(|t| self.mentions_unknown_type(*t, &u)) {
-                    return Err(not_known(self, p));
-                }
-                let res = (!self.mentions_unknown_type(res, &u)).then_some(res);
-                let spec = self.spec_of(p);
-                let (t, eff) = self.synth_lambda_as(*a, Some(&ps), res, spec)?;
-                self.unify(params[i], t, &mut u, &mut HashSet::new());
-                done[i] = Some((t, eff));
-            } else if self.mentions_unknown_type(p, &u)
-                && let Exp::Var(s) = *self.arena.exp_at(*a)
-                && let Some(t) = self.lookup(s).filter(|t| self.list_of_any(*t))
-            {
-                // `nil` where nothing yet says which list: the type `nil`
-                // (`TODO.md` §48), heard last, after what the context
-                // expects and every other argument.
-                let nil = self.arena.ty(Ty::Nil);
-                self.unify(params[i], nil, &mut u, &mut HashSet::new());
-                if self.mentions_unknown_type(params[i], &u) {
-                    return Err(not_known(self, p));
-                }
-                done[i] = Some((nil, self.naming_effect(s, t)));
-            } else if self.mentions_unknown_type(p, &u) {
-                return Err(not_known(self, p));
-            } else if let Exp::Var(s) = *self.arena.exp_at(*a)
-                && let Some(t) = self.lookup(s).filter(|t| matches!(self.arena.get(*t), Ty::Poly { .. }))
-            {
-                // A variable of a polymorphic type: instantiated at the
-                // parameter, and what it turns out to be solves more
-                // (`(apply list xs)`: `apply`'s effect).
-                self.inst_for = Some(*a);
-                let inst = self.instantiate_against(t, p, self.arena.span_of(*a))?;
-                self.unify(params[i], inst, &mut u, &mut HashSet::new());
-                done[i] = Some((inst, self.naming_effect(s, t)));
-            } else {
-                let eff = self.check(*a, p)?;
-                done[i] = Some((p, eff));
+            if done[i].is_none() {
+                done[i] = Some(self.told_argument(*a, i, params[i], &mut u)?);
             }
         }
+        self.instantiated(e, args, &params, done, u, expected, result, inner, ft, span)
+    }
+
+    /// The error that the call's result, `result`, solved as far as `u`
+    /// goes, is not the `want` expected, of `instantiate`.
+    fn result_misfit(&mut self, want: TyId, result: TyId, u: &Unknowns, span: fixpt_read::Span) -> FxError {
+        let map = self.partial_map(u);
+        let got = self.subst(result, &map);
+        let got = self.show_open(got, u);
+        FxError::at(span, format!("this is a {got}, where a {} is expected", self.show_ty(want)))
+    }
+
+    /// Argument `i`, `a`, which needed telling, checked against its
+    /// parameter `param` as solved so far in `u`, which what it turns out to
+    /// be solves more: its type and effect, of `instantiate`.
+    fn told_argument(&mut self, a: ExpId, i: usize, param: TyId, u: &mut Unknowns) -> R<(TyId, Effect)> {
+        self.default_regions(u);
+        let map = self.partial_map(u);
+        let p = self.subst(param, &map);
+        let not_known = |c: &Checker, t: TyId| {
+            FxError::at(
+                c.arena.span_of(a),
+                format!(
+                    "argument {} must be a {}, which is not yet known here; give the other arguments first, or `proj` the operator",
+                    i + 1,
+                    c.show_ty(t)
+                ),
+            )
+        };
+        if self.needs_telling(a) {
+            // The parameter types must be known; the result helps if it
+            // is, and otherwise the body says what it is.
+            let Some((_, ps, res)) = self.arena.get(p).as_subr() else {
+                // A thunk has no parameters to be told: told nothing, it
+                // says what it is, as any argument does.
+                if !self.unannotated_lambda(a) {
+                    let (t, eff) = self.synth(a)?;
+                    self.unify(param, t, u, &mut HashSet::new());
+                    return Ok((t, eff));
+                }
+                return Err(not_known(self, p));
+            };
+            if ps.iter().any(|t| self.mentions_unknown_type(*t, u)) {
+                return Err(not_known(self, p));
+            }
+            let res = (!self.mentions_unknown_type(res, u)).then_some(res);
+            let spec = self.spec_of(p);
+            let (t, eff) = self.synth_lambda_as(a, Some(&ps), res, spec)?;
+            self.unify(param, t, u, &mut HashSet::new());
+            Ok((t, eff))
+        } else if self.mentions_unknown_type(p, u)
+            && let Exp::Var(s) = *self.arena.exp_at(a)
+            && let Some(t) = self.lookup(s).filter(|t| self.list_of_any(*t))
+        {
+            // `nil` where nothing yet says which list: the type `nil`
+            // (`TODO.md` §48), heard last, after what the context
+            // expects and every other argument.
+            let nil = self.arena.ty(Ty::Nil);
+            self.unify(param, nil, u, &mut HashSet::new());
+            if self.mentions_unknown_type(param, u) {
+                return Err(not_known(self, p));
+            }
+            Ok((nil, self.naming_effect(s, t)))
+        } else if self.mentions_unknown_type(p, u) {
+            Err(not_known(self, p))
+        } else if let Exp::Var(s) = *self.arena.exp_at(a)
+            && let Some(t) = self.lookup(s).filter(|t| matches!(self.arena.get(*t), Ty::Poly { .. }))
+        {
+            // A variable of a polymorphic type: instantiated at the
+            // parameter, and what it turns out to be solves more
+            // (`(apply list xs)`: `apply`'s effect).
+            self.inst_for = Some(a);
+            let inst = self.instantiate_against(t, p, self.arena.span_of(a))?;
+            self.unify(param, inst, u, &mut HashSet::new());
+            Ok((inst, self.naming_effect(s, t)))
+        } else {
+            let eff = self.check(a, p)?;
+            Ok((p, eff))
+        }
+    }
+
+    /// The instantiation, once every argument is known (`done`), of
+    /// `instantiate`: the binders `u` solves, checked, and `inner`, the
+    /// operator's type under them, of them.
+    #[allow(clippy::too_many_arguments)]
+    fn instantiated(
+        &mut self,
+        e: ExpId,
+        args: &[ExpId],
+        params: &[TyId],
+        done: Vec<Synthesised>,
+        mut u: Unknowns,
+        expected: Option<TyId>,
+        result: TyId,
+        inner: TyId,
+        ft: TyId,
+        span: fixpt_read::Span,
+    ) -> R<(TyId, Vec<Synthesised>)> {
         // An argument of the wrong shape altogether is the error to report,
         // before any binder it left unsolved.
-        self.shape_errors(args, &params, &done, &u)?;
+        self.shape_errors(args, params, &done, &u)?;
         self.default_regions(&mut u);
         if expected.is_none() {
             self.widen_nil_tail(result, &mut u);

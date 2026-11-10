@@ -19,6 +19,7 @@
 pub mod typed_cells;
 pub mod logic;
 pub mod ast;
+pub mod debug_stack;
 
 /// The eager reader, written in FX-26: see the file's own header. A module
 /// file of the reader's regions, built in ([`FRONT_END_MODULES`]).

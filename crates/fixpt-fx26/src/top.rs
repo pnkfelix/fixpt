@@ -601,6 +601,10 @@ impl Checker {
     /// `text`: a REPL's entry, in the session's text
     /// (`Fx26Session::read_entry`).
     pub fn read_in_from(&mut self, file: FileId, text: &str, start: usize) -> R<Vec<Syntax>> {
+        // Where its spans are, for what is said of the checks when the stack
+        // runs low (`debug_stack`).
+        #[cfg(debug_assertions)]
+        fixpt_read::note_source(file, if file.0 == 0 { "<program>" } else { "<text>" }, text.into());
         let mut interner = std::mem::take(&mut self.interner);
         let mut reader = Reader::new(text, file, SyntaxProfile::FX26, &mut interner);
         reader.seek(start);
@@ -764,6 +768,8 @@ impl Checker {
         self.macro_files += 1;
         let file = FileId(2_000_000 + self.macro_files);
         self.load_sites.insert(file, (form.span, path.clone(), text.as_str().into()));
+        #[cfg(debug_assertions)]
+        fixpt_read::note_source(file, &path, text.as_str().into());
         let mut interner = std::mem::take(&mut self.interner);
         let read = Reader::new(&text, file, SyntaxProfile::FX26, &mut interner).read_all();
         self.interner = interner;

@@ -1,0 +1,35 @@
+# The checker's methods whose frames, in a debug build on x86_64, are over
+# 4096 bytes, each with its frame in bytes (tests/stack.rs): lowered as they
+# are split, never raised. The recursive ones matter most: every level of
+# nesting has their frames.
+blobref_rule 4264
+check_node 4152
+expand_abbrev 4488
+expand_datatype 9400
+expand_generative 5400
+fasl_load 5704
+import_file_macros 6072
+included 4696
+module_items_from 11608
+par_expansion 6680
+parse_case 5528
+parse_d 4472
+parse_exp 5384
+parse_moduleof_in 5064
+parse_process_form 6328
+parse_session_commit_form 4504
+parse_typecase 4152
+rebuild 4424
+select_expansion 7608
+show_ty_body 7560
+sub_rules 8520
+synth_allof_call 5592
+synth_attempt 4376
+synth_bloblet 5416
+synth_lambda_as 4360
+synth_module_items 10840
+synth_tagcase 4728
+syscall_expansion 7360
+top_here 4936
+unify 5896
+with_convention 14256

@@ -95,6 +95,42 @@ pub fn expansion_trace(span: Span) -> Vec<Expansion> {
     out
 }
 
+thread_local! {
+    /// The texts read on this thread, by file id, the latest under each id
+    /// (a checker numbers its own files, and one thread may run several):
+    /// for saying where a span is when nothing else at hand knows, as a
+    /// report of what was being checked when the stack ran low does.
+    static SOURCES: std::cell::RefCell<std::collections::HashMap<FileId, (Arc<str>, Arc<str>)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Text `text`, read as file `file`, named `name`: what [`describe_source`]
+/// says of spans in it.
+pub fn note_source(file: FileId, name: &str, text: Arc<str>) {
+    SOURCES.with(|s| {
+        s.borrow_mut().insert(file, (Arc::from(name), text));
+    });
+}
+
+/// Where `span` is, `name:line:col` and the start of its text, as
+/// [`note_source`] was told on this thread; none for a file it was not.
+pub fn describe_source(span: Span) -> Option<String> {
+    SOURCES.with(|s| {
+        let s = s.borrow();
+        let (name, text) = s.get(&span.file)?;
+        let at = (span.start as usize).min(text.len());
+        let before = &text[..at];
+        let line = before.matches('\n').count() + 1;
+        let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+        let end = (span.end as usize).clamp(at, text.len());
+        let mut snippet: String = text[at..end].chars().take(60).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+        if text[at..end].chars().count() > 60 {
+            snippet.push_str(" …");
+        }
+        Some(format!("{name}:{line}:{col}: {snippet}"))
+    })
+}
+
 struct SourceFile {
     name: String,
     text: Arc<str>,

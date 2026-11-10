@@ -126,6 +126,53 @@ x86_64, so lines are made once it is here. What it gives (verified):
   on Linux.
 - Lines come with `fixpt run`; `fixpt eval` keeps no sources for them.
 
+## Since: the front end's own stack, in debug builds (2026-11-09)
+
+Checking the front end's own sources overflowed the 8 MiB stack of a debug
+test once an error grew by 8 bytes. Measured (`fx-stack` below, then each
+method's prologue), the depth was small, about 90 nested expressions and 15
+nested loads, and the frames large: a debug build makes room in a frame for
+every local of every arm of a `match`, so `parse_exp` took 40 KB a level,
+`synth_node` 15 KB, `check_node` 14 KB, `synth_app_of` 11 KB (a release
+build, 1.5–2.5 KB). Their large arms are now methods of their own, the
+dispatchers 2–5 KB, and the front end checks in 3 MiB.
+
+What there is, for the next time:
+
+- **A shadow stack** (`crates/fixpt-fx26/src/debug_stack.rs`): `synth`,
+  `check` and `parse_exp` note what they are in, with the address of their
+  frame; an entry at or below a frame entered later is a returned call's,
+  and goes then, so no early return need see to it. Debug builds only.
+- **A mark**: past `FIXPT_STACK_HIGH_WATER` bytes (else three quarters of
+  `RUST_MIN_STACK`), the shadow stack is written once to stderr, each entry
+  where its text is, and `fixpt_stack_high_water` is called, to stop at
+  with stack still to run commands on:
+
+      fixpt: the checks have used more than 1572864 bytes of stack; what they are in:
+           0        0 B  parse  <program>:23:21: (load-module "fx26:parser-top.fx")
+         …
+         323  1578144 B  parse  fx26:macros-kernel.fx:118:19: blobref-offset
+
+  Where a span is comes from a table of the texts read on the thread
+  (`fixpt_read::note_source`, `describe_source`), the latest under each
+  file id, since a checker numbers its own files.
+- **gdb** (`scripts/debuggers/fixpt_gdb.py`): `fx-stop-high-water`,
+  `fx-checks` (the shadow stack), `fx-stack [N]` (the stack by function,
+  its bytes and frames: memory only, so after an overflow too), and a
+  printer of `Span`s, `1026:7009..7023`, with `set fx-span-places on`
+  `(fx26:macros-kernel.fx:118:19: blobref-offset)`, asked of the program.
+  The crate has no unsafe code, so its functions are called by their Rust
+  names (`fixpt_fx26::debug_stack::fixpt_shadow_report()`), not exported.
+- **Budgets** (`crates/fixpt-fx26/tests/stack.rs`): the front end checked on
+  a thread of 3 MiB, calls nested 100 deep in 2 MiB, and each checker
+  method's debug frame read from the test's own executable (its symbols,
+  then its prologue's `sub`s; x86_64 Linux) against `frame-debt.txt`: over
+  4 KiB only with an entry, never above it.
+
+What it found besides the frames: a quoted list is rewritten as nested
+`cons` calls, so its length is how deep every phase recurses
+(`macros-kernel.fx`'s reserved words, 115: `TODO.md` §229).
+
 ## 0. The answer, up front
 
 - **`lldb` already walks through compiled code** (verified, §1). The

@@ -856,6 +856,8 @@ impl crate::check::Checker {
         self.files_read += 1;
         let file = fixpt_read::FileId(self.files_read + 1000);
         self.load_sites.insert(file, (span, path.to_string(), text.as_str().into()));
+        #[cfg(debug_assertions)]
+        fixpt_read::note_source(file, path, text.as_str().into());
         let (depth, standard) = (self.dscope.len(), self.standard_dscope);
         let outer = self.hidden.replace(((0, 0), (standard, depth)));
         let outer_dir = std::mem::replace(&mut self.base_dir, dir);

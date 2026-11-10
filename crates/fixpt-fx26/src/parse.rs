@@ -864,21 +864,14 @@ impl Checker {
             let f = self.parse_fun(head, None)?;
             return self.parse_app(s, f, &items[1..]);
         }
+        // Each form's own function, out of this one: every level of nesting
+        // has this frame, which a debug build makes room in for every local
+        // of every arm (`tests/stack.rs`).
         match self.head(&items).unwrap_or("") {
             // `(subr effect (param …) result)`, or with a convention first,
             // `(subr (conv C) effect (param …) result)`; left out, it is the
             // program's (`docs/research/native-conventions.md`).
-            "subr" | "->" if items.len() > 3 && crate::specs::clause(self, items.last().expect("items")) => {
-                // A specification after the result: the type without it,
-                // then the clauses read against its parameters.
-                let n = items.iter().rev().take_while(|c| crate::specs::clause(self, c)).count();
-                let (plain, clauses) = items.split_at(items.len() - n);
-                // (The parameters are second to last, in either form.)
-                let params = plain[plain.len() - 2].clone();
-                let whole = Syntax { datum: Datum::List { items: plain.to_vec(), tail: None }, span: s.span };
-                let t = self.parse_subr_form(&whole, plain, clauses)?;
-                self.specified(t, &params, clauses)
-            }
+            "subr" | "->" if items.len() > 3 && crate::specs::clause(self, items.last().expect("items")) => self.parse_type_subr_specified(s, &items),
             "subr" | "->" => self.parse_subr_form(s, &items, &[]),
             "->*" => Err(FxError::at(s.span, ARROW_STAR_ONLY)),
             "bool" => Err(FxError::at(s.span, "`(bool …)` is a procedure's result, and only that")),
@@ -887,205 +880,36 @@ impl Checker {
             // `X ≤ Y`), a function from a coercion for each hypothesis and
             // an `A` to a `B`, which may run for ever. The lemma waits for
             // the definition it declares (`crate::lemma`).
-            "proves" => {
-                let usage = "`(proves (<= type type))` or `(proves (poly ((name kind) …) (<= type type) (<= type type) …))`";
-                let [_, prop] = &items[..] else {
-                    return Err(FxError::at(s.span, usage));
-                };
-                let depth = self.dscope.len();
-                let r = self.parse_proves(prop, usage);
-                self.dscope.truncate(depth);
-                r
-            }
-            "poly" => {
-                let [_, binders, body] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(poly ((name kind) …) type)`"));
-                };
-                let depth = self.dscope.len();
-                let binders = self.parse_binders(binders);
-                let body = binders.and_then(|b| Ok((b, self.parse_type(body)?)));
-                self.dscope.truncate(depth);
-                let (binders, body) = body?;
-                Ok(self.arena.ty(Ty::Poly { binders, body }))
-            }
+            "proves" => self.parse_type_proves(s, &items),
+            "poly" => self.parse_type_poly(s, &items),
             // `(nlist T size)` or `(nlist T size p)`: a list frozen in the heap,
             // or into place `p`, with `size` elements.
-            "nlist" => {
-                let (t, size, place) = match &items[..] {
-                    [_, t, n] => (t, n, None),
-                    [_, t, n, p] => (t, n, Some(p)),
-                    _ => return Err(FxError::at(s.span, "`(nlist type size)` or `(nlist type size place)`")),
-                };
-                let elem = self.parse_type(t)?;
-                let size = self.parse_size(size)?;
-                let region = match place {
-                    None => Region::Frozen(None, true),
-                    Some(p) => match self.parse_place(p)? {
-                        Region::Var(v) => Region::Frozen(Some(v), true),
-                        _ => Region::Frozen(None, true),
-                    },
-                };
-                Ok(self.arena.ty(Ty::NList { elem, size, region }))
-            }
+            "nlist" => self.parse_type_nlist(s, &items),
             // `(nat size)`: exactly that natural.
-            "nat" => {
-                let [_, n] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(nat size)`"));
-                };
-                let size = self.parse_size(n)?;
-                Ok(self.arena.ty(Ty::Nat(size)))
-            }
-            "ref" => {
-                let [_, t, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(ref type region)`"));
-                };
-                let t = self.parse_type(t)?;
-                let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Ref(t, r)))
-            }
-            "icell" => {
-                let [_, t, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(icell type region)`"));
-                };
-                let t = self.parse_type(t)?;
-                let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::ICell(t, r)))
-            }
-            "place" => {
-                let [_, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(place region)`"));
-                };
-                let r = self.parse_place(r)?;
-                Ok(self.arena.ty(Ty::Place(r)))
-            }
-            "pairof" => {
-                let [_, a, b, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(pairof type type region)`"));
-                };
-                let a = self.parse_type(a)?;
-                let b = self.parse_type(b)?;
-                let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Pair(a, b, r, false)))
-            }
+            "nat" => self.parse_type_nat(s, &items),
+            "ref" => self.parse_type_ref(s, &items),
+            "icell" => self.parse_type_icell(s, &items),
+            "place" => self.parse_type_place(s, &items),
+            "pairof" => self.parse_type_pairof(s, &items),
             // A union of members a run-time test tells apart
             // (`docs/research/logical-types.md`, L1 and §8.5), normalized.
             // `union`, its name until 2026-11-05, read as it for now.
-            "oneof" | "union" => {
-                if items.len() < 3 {
-                    return Err(FxError::at(s.span, "`(oneof type type …)`"));
-                }
-                let mut members = Vec::new();
-                for m in &items[1..] {
-                    members.push(self.parse_type(m)?);
-                }
-                self.union_of(&members, s.span)
-            }
+            "oneof" | "union" => self.parse_type_oneof(s, &items),
             // A true union: a value of any of the members, which may
             // overlap (`logical-types.md` §8.5, U2), normalized.
-            "anyof" => {
-                if items.len() < 3 {
-                    return Err(FxError::at(s.span, "`(anyof type type …)`"));
-                }
-                let mut members = Vec::new();
-                for m in &items[1..] {
-                    members.push(self.parse_type(m)?);
-                }
-                self.anyof_of(&members, s.span)
-            }
+            "anyof" => self.parse_type_anyof(s, &items),
             // One procedure with each member's type (`logical-types.md`
             // §8.5, U1): monomorphic `subr` types of one convention; or
             // products of them, distributed field by field.
-            "allof" => {
-                if items.len() < 3 {
-                    return Err(FxError::at(s.span, "`(allof (subr …) (subr …) …)`"));
-                }
-                let mut members = Vec::new();
-                for m in &items[1..] {
-                    let t = self.parse_type(m)?;
-                    let t = self.arena.resolve(t);
-                    match self.arena.get(t).clone() {
-                        Ty::AllOf(ms) => members.extend(ms),
-                        Ty::Subr { .. } | Ty::Product(_) => members.push(t),
-                        _ => {
-                            return Err(FxError::at(
-                                m.span,
-                                format!("a member of an `allof` is a `subr` type, or a product of them, and this is a {}", self.show_ty(t)),
-                            ));
-                        }
-                    }
-                }
-                self.allof_of(&members, s.span)
-            }
+            "allof" => self.parse_type_allof(s, &items),
             "dletrec" => self.parse_dletrec(s, &items),
             // `(mu name type)`: a recursive type, anonymous; the same as
             // `(dletrec ((name type)) name)`.
-            "mu" => {
-                let [_, name, body] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(mu name type)`"));
-                };
-                let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-                let depth = self.dscope.len();
-                let slot = self.arena.ty(Ty::Link(None));
-                self.dscope.push((name, DScope::Rec(slot)));
-                let t = self.parse_type(body);
-                self.dscope.truncate(depth);
-                self.arena.set_link(slot, t?);
-                self.grounded(slot, s.span)?;
-                Ok(slot)
-            }
-            "listof" => {
-                // FX-87's `listof`: a pair whose tail is the list itself, or
-                // the empty list, `nil`. Without a region, `acyclic`
-                // (`TODO.md` §198).
-                let (t, r) = match &items[..] {
-                    [_, t] => {
-                        let acyclic = Syntax::symbol(s.span, self.interner.intern("acyclic"));
-                        (self.parse_type(t)?, self.parse_region(&acyclic)?)
-                    }
-                    [_, t, r] => (self.parse_type(t)?, self.parse_region(r)?),
-                    _ => return Err(FxError::at(s.span, "`(listof type [region])`")),
-                };
-                let slot = self.arena.ty(Ty::Link(None));
-                let pair = self.arena.ty(Ty::Pair(t, slot, r, true));
-                self.arena.set_link(slot, pair);
-                Ok(slot)
-            }
-            "prompt-tag" => {
-                let [_, a, h, d, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(prompt-tag answer payload effect region)`"));
-                };
-                let answer = self.parse_type(a)?;
-                let payload = self.parse_type(h)?;
-                let effect = self.parse_effect(d)?;
-                let region = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::PromptTag { answer, payload, effect, region }))
-            }
-            "composable" | "oneshot" => {
-                let once = self.head(&items) == Some("oneshot");
-                let [_, t, a, d, r] = &items[..] else {
-                    let head = if once { "oneshot" } else { "composable" };
-                    return Err(FxError::at(s.span, format!("`({head} argument answer effect region)`")));
-                };
-                let arg = self.parse_type(t)?;
-                let answer = self.parse_type(a)?;
-                let effect = self.parse_effect(d)?;
-                let region = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Composable { arg, answer, effect, region, once }))
-            }
-            "bloblet" => {
-                let [_, fields, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(bloblet (fields type …) region)`, or `(frozen type …)`"));
-                };
-                let parts = self.items(fields, "`(fields type …)`")?.to_vec();
-                let frozen = match parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) {
-                    Some("fields") => false,
-                    Some("frozen") => true,
-                    _ => return Err(FxError::at(fields.span, "`(fields type …)` or `(frozen type …)`")),
-                };
-                let fields = parts[1..].iter().map(|t| self.parse_type(t)).collect::<R<Vec<_>>>()?;
-                let region = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Bloblet { fields, frozen, region }))
-            }
+            "mu" => self.parse_type_mu(s, &items),
+            "listof" => self.parse_type_listof(s, &items),
+            "prompt-tag" => self.parse_type_prompt_tag(s, &items),
+            "composable" | "oneshot" => self.parse_type_composable(s, &items),
+            "bloblet" => self.parse_type_bloblet(s, &items),
             // A flat sum with a key (`TODO.md` §77), so `define-type` may
             // name one.
             "sumof" if items.get(1).is_some_and(|k| k.as_symbol().is_some()) => self.parse_flat(s),
@@ -1094,22 +918,7 @@ impl Checker {
                 let parts = items[1..].iter().enumerate().map(|(i, t)| Ok((self.interner.intern(&(i + 1).to_string()), self.parse_type(t)?))).collect::<R<Vec<_>>>()?;
                 Ok(self.arena.ty(Ty::Product(parts)))
             }
-            "productof" | "sumof" => {
-                let mut parts = Vec::new();
-                for p in &items[1..] {
-                    let pair = self.items(p, "`(label type)`")?.to_vec();
-                    let [label, t] = &pair[..] else {
-                        return Err(FxError::at(p.span, "`(label type)`"));
-                    };
-                    let label = self.label(label)?;
-                    if parts.iter().any(|(l, _)| *l == label) {
-                        return Err(FxError::at(p.span, format!("`{}` appears twice", self.name(label))));
-                    }
-                    parts.push((label, self.parse_type(t)?));
-                }
-                let product = self.head(&items) == Some("productof");
-                Ok(self.arena.ty(if product { Ty::Product(parts) } else { Ty::Sum(parts) }))
-            }
+            "productof" | "sumof" => self.parse_type_productof(&items),
             // `(moduleof (abs t type) … (desc d T) … (val x T) …)`: each
             // abstract type a binder, in scope in what follows it.
             "moduleof" => self.parse_moduleof(s.span, &items[1..]),
@@ -1117,63 +926,17 @@ impl Checker {
             // whatever the form binds around it (a template's type, as it
             // expands: `typed-macros.md`, item 5); `(select #%fx T)`, as the
             // standard environment does.
-            "select" if matches!(items.get(1).and_then(|m| m.as_symbol()).map(|m| self.name(m)), Some("#%toplevel" | "#%fx")) => {
-                let [_, m, t] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(select #%toplevel type)` or `(select #%fx type)`"));
-                };
-                // The modules its `select`s name found here too, not where the
-                // type is checked (`resolve_selects`), as the top level has them.
-                let standard = m.as_symbol().is_some_and(|m| self.name(m) == "#%fx");
-                let outer = self.hidden.replace(self.toplevel_hidden(standard));
-                let r = self.parse_type(t).and_then(|ty| self.resolve_selects(ty, s.span));
-                self.hidden = outer;
-                r
-            }
+            "select" if matches!(items.get(1).and_then(|m| m.as_symbol()).map(|m| self.name(m)), Some("#%toplevel" | "#%fx")) => self.parse_type_select_qualified(s, &items),
             // `(select m T)`, `T` a type, not a name: `T` read as a `with` of
             // module `m` reads types, over the standard environment's alone
             // (a file's macro's type, `m` the one value every load of the
             // file is: `typed-macros.md`, "Decided: macros come with a
             // file"), its `select`s resolved there.
-            "select" if matches!(&items[..], [_, m, t] if m.as_symbol().is_some() && t.as_symbol().is_none()) => {
-                let (m, t) = (items[1].as_symbol().expect("matched"), &items[2]);
-                let outer = self.hidden.replace(self.toplevel_hidden(true));
-                let r = self.with_types_of(m, |c| c.parse_type(t)).and_then(|ty| self.resolve_selects(ty, s.span));
-                self.hidden = outer;
-                r
-            }
-            "select" => {
-                let [_, m, n] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(select module name)`"));
-                };
-                let (Some(m), Some(n)) = (m.as_symbol(), n.as_symbol()) else {
-                    return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
-                };
-                self.select_of(m, n, s.span)
-            }
-            "arrayof" => {
-                let [_, t, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(arrayof type region)`"));
-                };
-                // With a length, a literal or a size (`finite`, a size
-                // variable, a sum of sizes), a flat array (`TODO.md` §77), so
-                // a `define-type` may name one.
-                if self.size_written(r) {
-                    return self.parse_flat(s);
-                }
-                let t = self.parse_type(t)?;
-                let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Array(t, Size::Finite, r)))
-            }
+            "select" if matches!(&items[..], [_, m, t] if m.as_symbol().is_some() && t.as_symbol().is_none()) => self.parse_type_select_desc(s, &items),
+            "select" => self.parse_type_select(s, &items),
+            "arrayof" => self.parse_type_arrayof(s, &items),
             // `(narrayof type size region)`: an array of `size` elements.
-            "narrayof" => {
-                let [_, t, n, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(narrayof type size region)`"));
-                };
-                let t = self.parse_type(t)?;
-                let n = self.parse_size(n)?;
-                let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Array(t, n, r)))
-            }
+            "narrayof" => self.parse_type_narrayof(s, &items),
             // `(load-moduleof "file" arg …)`: the type of the module a
             // `load-module` of the file makes, given `arg …`;
             // `(load-input-moduleof "file" arg …)`, of the module a
@@ -1181,33 +944,13 @@ impl Checker {
             // derived-signatures.md`). The file is loaded as a load of it
             // is (`type_loads`), and nothing is made of it here.
             loader @ ("load-moduleof" | "load-input-moduleof") => {
-                let input = loader == "load-input-moduleof";
-                let usage = format!("`({loader} \"file\" argument …)`");
-                let Some(Datum::Str(path)) = items.get(1).map(|p| &p.datum) else {
-                    return Err(FxError::at(s.span, usage));
-                };
-                let path = path.clone();
-                let name = self.load_name(s.span, &path, input)?;
-                let Some(made) = self.lookup(name) else {
-                    return Err(FxError::at(s.span, format!("`{path}` is not loaded here")));
-                };
-                // A file of module parameters is loaded as a `load-input`
-                // file is (`modules_made`), its global's key so.
-                let input = input || self.name(name).starts_with("%shared:input:");
-                let made = if input { self.module_val(made, "input").expect("a `load-input` file's module gives `input`") } else { made };
-                self.type_made(made, &items[2..], s.span, &path)
+                let loader = loader.to_string();
+                self.parse_type_load_moduleof(s, &items, &loader)
             }
             // `(restrict T name …)`: module type `T` with only the names
             // given (`docs/research/derived-signatures.md`, narrowing).
             "restrict" => self.restricted(s, &items),
-            "mark-key" => {
-                let [_, t, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(mark-key type region)`"));
-                };
-                let t = self.parse_type(t)?;
-                let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::MarkKey(t, r)))
-            }
+            "mark-key" => self.parse_type_mark_key(s, &items),
             // A name applied that is no description function: unbound, a
             // typo, or a type. In a module with `include`s, an unbound one
             // is the modules included's family, found when they are typed,
@@ -1223,6 +966,347 @@ impl Checker {
             },
         }
     }
+
+    /// `(subr …)` or `(-> …)` with a specification after the result, of
+    /// `parse_type_list_found`.
+    fn parse_type_subr_specified(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        // A specification after the result: the type without it,
+        // then the clauses read against its parameters.
+        let n = items.iter().rev().take_while(|c| crate::specs::clause(self, c)).count();
+        let (plain, clauses) = items.split_at(items.len() - n);
+        // (The parameters are second to last, in either form.)
+        let params = plain[plain.len() - 2].clone();
+        let whole = Syntax { datum: Datum::List { items: plain.to_vec(), tail: None }, span: s.span };
+        let t = self.parse_subr_form(&whole, plain, clauses)?;
+        self.specified(t, &params, clauses)
+    }
+
+    /// `(proves …)`, of `parse_type_list_found`.
+    fn parse_type_proves(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let usage = "`(proves (<= type type))` or `(proves (poly ((name kind) …) (<= type type) (<= type type) …))`";
+        let [_, prop] = &items[..] else {
+            return Err(FxError::at(s.span, usage));
+        };
+        let depth = self.dscope.len();
+        let r = self.parse_proves(prop, usage);
+        self.dscope.truncate(depth);
+        r
+    }
+
+    /// `(poly …)`, of `parse_type_list_found`.
+    fn parse_type_poly(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, binders, body] = &items[..] else {
+            return Err(FxError::at(s.span, "`(poly ((name kind) …) type)`"));
+        };
+        let depth = self.dscope.len();
+        let binders = self.parse_binders(binders);
+        let body = binders.and_then(|b| Ok((b, self.parse_type(body)?)));
+        self.dscope.truncate(depth);
+        let (binders, body) = body?;
+        Ok(self.arena.ty(Ty::Poly { binders, body }))
+    }
+
+    /// `(nlist …)`, of `parse_type_list_found`.
+    fn parse_type_nlist(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let (t, size, place) = match &items[..] {
+            [_, t, n] => (t, n, None),
+            [_, t, n, p] => (t, n, Some(p)),
+            _ => return Err(FxError::at(s.span, "`(nlist type size)` or `(nlist type size place)`")),
+        };
+        let elem = self.parse_type(t)?;
+        let size = self.parse_size(size)?;
+        let region = match place {
+            None => Region::Frozen(None, true),
+            Some(p) => match self.parse_place(p)? {
+                Region::Var(v) => Region::Frozen(Some(v), true),
+                _ => Region::Frozen(None, true),
+            },
+        };
+        Ok(self.arena.ty(Ty::NList { elem, size, region }))
+    }
+
+    /// `(nat …)`, of `parse_type_list_found`.
+    fn parse_type_nat(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, n] = &items[..] else {
+            return Err(FxError::at(s.span, "`(nat size)`"));
+        };
+        let size = self.parse_size(n)?;
+        Ok(self.arena.ty(Ty::Nat(size)))
+    }
+
+    /// `(ref …)`, of `parse_type_list_found`.
+    fn parse_type_ref(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, t, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(ref type region)`"));
+        };
+        let t = self.parse_type(t)?;
+        let r = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::Ref(t, r)))
+    }
+
+    /// `(icell …)`, of `parse_type_list_found`.
+    fn parse_type_icell(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, t, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(icell type region)`"));
+        };
+        let t = self.parse_type(t)?;
+        let r = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::ICell(t, r)))
+    }
+
+    /// `(place …)`, of `parse_type_list_found`.
+    fn parse_type_place(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(place region)`"));
+        };
+        let r = self.parse_place(r)?;
+        Ok(self.arena.ty(Ty::Place(r)))
+    }
+
+    /// `(pairof …)`, of `parse_type_list_found`.
+    fn parse_type_pairof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, a, b, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(pairof type type region)`"));
+        };
+        let a = self.parse_type(a)?;
+        let b = self.parse_type(b)?;
+        let r = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::Pair(a, b, r, false)))
+    }
+
+    /// `(oneof …)` / `(union …)`, of `parse_type_list_found`.
+    fn parse_type_oneof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        if items.len() < 3 {
+            return Err(FxError::at(s.span, "`(oneof type type …)`"));
+        }
+        let mut members = Vec::new();
+        for m in &items[1..] {
+            members.push(self.parse_type(m)?);
+        }
+        self.union_of(&members, s.span)
+    }
+
+    /// `(anyof …)`, of `parse_type_list_found`.
+    fn parse_type_anyof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        if items.len() < 3 {
+            return Err(FxError::at(s.span, "`(anyof type type …)`"));
+        }
+        let mut members = Vec::new();
+        for m in &items[1..] {
+            members.push(self.parse_type(m)?);
+        }
+        self.anyof_of(&members, s.span)
+    }
+
+    /// `(allof …)`, of `parse_type_list_found`.
+    fn parse_type_allof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        if items.len() < 3 {
+            return Err(FxError::at(s.span, "`(allof (subr …) (subr …) …)`"));
+        }
+        let mut members = Vec::new();
+        for m in &items[1..] {
+            let t = self.parse_type(m)?;
+            let t = self.arena.resolve(t);
+            match self.arena.get(t).clone() {
+                Ty::AllOf(ms) => members.extend(ms),
+                Ty::Subr { .. } | Ty::Product(_) => members.push(t),
+                _ => {
+                    return Err(FxError::at(
+                        m.span,
+                        format!("a member of an `allof` is a `subr` type, or a product of them, and this is a {}", self.show_ty(t)),
+                    ));
+                }
+            }
+        }
+        self.allof_of(&members, s.span)
+    }
+
+    /// `(mu …)`, of `parse_type_list_found`.
+    fn parse_type_mu(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, name, body] = &items[..] else {
+            return Err(FxError::at(s.span, "`(mu name type)`"));
+        };
+        let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+        let depth = self.dscope.len();
+        let slot = self.arena.ty(Ty::Link(None));
+        self.dscope.push((name, DScope::Rec(slot)));
+        let t = self.parse_type(body);
+        self.dscope.truncate(depth);
+        self.arena.set_link(slot, t?);
+        self.grounded(slot, s.span)?;
+        Ok(slot)
+    }
+
+    /// `(listof …)`, of `parse_type_list_found`.
+    fn parse_type_listof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        // FX-87's `listof`: a pair whose tail is the list itself, or
+        // the empty list, `nil`. Without a region, `acyclic`
+        // (`TODO.md` §198).
+        let (t, r) = match &items[..] {
+            [_, t] => {
+                let acyclic = Syntax::symbol(s.span, self.interner.intern("acyclic"));
+                (self.parse_type(t)?, self.parse_region(&acyclic)?)
+            }
+            [_, t, r] => (self.parse_type(t)?, self.parse_region(r)?),
+            _ => return Err(FxError::at(s.span, "`(listof type [region])`")),
+        };
+        let slot = self.arena.ty(Ty::Link(None));
+        let pair = self.arena.ty(Ty::Pair(t, slot, r, true));
+        self.arena.set_link(slot, pair);
+        Ok(slot)
+    }
+
+    /// `(prompt-tag …)`, of `parse_type_list_found`.
+    fn parse_type_prompt_tag(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, a, h, d, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(prompt-tag answer payload effect region)`"));
+        };
+        let answer = self.parse_type(a)?;
+        let payload = self.parse_type(h)?;
+        let effect = self.parse_effect(d)?;
+        let region = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::PromptTag { answer, payload, effect, region }))
+    }
+
+    /// `(composable …)` / `(oneshot …)`, of `parse_type_list_found`.
+    fn parse_type_composable(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let once = self.head(&items) == Some("oneshot");
+        let [_, t, a, d, r] = &items[..] else {
+            let head = if once { "oneshot" } else { "composable" };
+            return Err(FxError::at(s.span, format!("`({head} argument answer effect region)`")));
+        };
+        let arg = self.parse_type(t)?;
+        let answer = self.parse_type(a)?;
+        let effect = self.parse_effect(d)?;
+        let region = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::Composable { arg, answer, effect, region, once }))
+    }
+
+    /// `(bloblet …)`, of `parse_type_list_found`.
+    fn parse_type_bloblet(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, fields, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(bloblet (fields type …) region)`, or `(frozen type …)`"));
+        };
+        let parts = self.items(fields, "`(fields type …)`")?.to_vec();
+        let frozen = match parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) {
+            Some("fields") => false,
+            Some("frozen") => true,
+            _ => return Err(FxError::at(fields.span, "`(fields type …)` or `(frozen type …)`")),
+        };
+        let fields = parts[1..].iter().map(|t| self.parse_type(t)).collect::<R<Vec<_>>>()?;
+        let region = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::Bloblet { fields, frozen, region }))
+    }
+
+    /// `(productof …)` / `(sumof …)`, of `parse_type_list_found`.
+    fn parse_type_productof(&mut self, items: &[Syntax]) -> R<TyId> {
+        let mut parts = Vec::new();
+        for p in &items[1..] {
+            let pair = self.items(p, "`(label type)`")?.to_vec();
+            let [label, t] = &pair[..] else {
+                return Err(FxError::at(p.span, "`(label type)`"));
+            };
+            let label = self.label(label)?;
+            if parts.iter().any(|(l, _)| *l == label) {
+                return Err(FxError::at(p.span, format!("`{}` appears twice", self.name(label))));
+            }
+            parts.push((label, self.parse_type(t)?));
+        }
+        let product = self.head(&items) == Some("productof");
+        Ok(self.arena.ty(if product { Ty::Product(parts) } else { Ty::Sum(parts) }))
+    }
+
+    /// `(select #%toplevel t)` or `(select #%fx t)`, of `parse_type_list_found`.
+    fn parse_type_select_qualified(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, m, t] = &items[..] else {
+            return Err(FxError::at(s.span, "`(select #%toplevel type)` or `(select #%fx type)`"));
+        };
+        // The modules its `select`s name found here too, not where the
+        // type is checked (`resolve_selects`), as the top level has them.
+        let standard = m.as_symbol().is_some_and(|m| self.name(m) == "#%fx");
+        let outer = self.hidden.replace(self.toplevel_hidden(standard));
+        let r = self.parse_type(t).and_then(|ty| self.resolve_selects(ty, s.span));
+        self.hidden = outer;
+        r
+    }
+
+    /// `(select m t)`, `t` a description, not a name, of
+    /// `parse_type_list_found`.
+    fn parse_type_select_desc(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let (m, t) = (items[1].as_symbol().expect("matched"), &items[2]);
+        let outer = self.hidden.replace(self.toplevel_hidden(true));
+        let r = self.with_types_of(m, |c| c.parse_type(t)).and_then(|ty| self.resolve_selects(ty, s.span));
+        self.hidden = outer;
+        r
+    }
+
+    /// `(select m t)`, of `parse_type_list_found`.
+    fn parse_type_select(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, m, n] = &items[..] else {
+            return Err(FxError::at(s.span, "`(select module name)`"));
+        };
+        let (Some(m), Some(n)) = (m.as_symbol(), n.as_symbol()) else {
+            return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
+        };
+        self.select_of(m, n, s.span)
+    }
+
+    /// `(arrayof …)`, of `parse_type_list_found`.
+    fn parse_type_arrayof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, t, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(arrayof type region)`"));
+        };
+        // With a length, a literal or a size (`finite`, a size
+        // variable, a sum of sizes), a flat array (`TODO.md` §77), so
+        // a `define-type` may name one.
+        if self.size_written(r) {
+            return self.parse_flat(s);
+        }
+        let t = self.parse_type(t)?;
+        let r = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::Array(t, Size::Finite, r)))
+    }
+
+    /// `(narrayof …)`, of `parse_type_list_found`.
+    fn parse_type_narrayof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, t, n, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(narrayof type size region)`"));
+        };
+        let t = self.parse_type(t)?;
+        let n = self.parse_size(n)?;
+        let r = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::Array(t, n, r)))
+    }
+
+    /// `(load-moduleof …)` / `(load-input-moduleof …)`, of `parse_type_list_found`.
+    fn parse_type_load_moduleof(&mut self, s: &Syntax, items: &[Syntax], loader: &str) -> R<TyId> {
+        let input = loader == "load-input-moduleof";
+        let usage = format!("`({loader} \"file\" argument …)`");
+        let Some(Datum::Str(path)) = items.get(1).map(|p| &p.datum) else {
+            return Err(FxError::at(s.span, usage));
+        };
+        let path = path.clone();
+        let name = self.load_name(s.span, &path, input)?;
+        let Some(made) = self.lookup(name) else {
+            return Err(FxError::at(s.span, format!("`{path}` is not loaded here")));
+        };
+        // A file of module parameters is loaded as a `load-input`
+        // file is (`modules_made`), its global's key so.
+        let input = input || self.name(name).starts_with("%shared:input:");
+        let made = if input { self.module_val(made, "input").expect("a `load-input` file's module gives `input`") } else { made };
+        self.type_made(made, &items[2..], s.span, &path)
+    }
+
+    /// `(mark-key …)`, of `parse_type_list_found`.
+    fn parse_type_mark_key(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, t, r] = &items[..] else {
+            return Err(FxError::at(s.span, "`(mark-key type region)`"));
+        };
+        let t = self.parse_type(t)?;
+        let r = self.parse_region(r)?;
+        Ok(self.arena.ty(Ty::MarkKey(t, r)))
+    }
+
 
     /// `(dletrec ((name type) …) type)`: recursive types, as cycles in the
     /// arena. Each name gets a forwarding slot before any body is parsed, so
@@ -1779,6 +1863,7 @@ impl Checker {
 
     pub fn parse_exp(&mut self, s: &Syntax) -> R<ExpId> {
         let span = s.span;
+        crate::debug_stack::enter("parse", span);
         match &s.datum {
             Datum::Number(fixpt_read::Num::Int(n)) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => return Ok(self.arena.exp(span, Exp::Int(*n))),
             // An integer literal past a fixnum: arithmetic on fixnums, which
@@ -1836,35 +1921,16 @@ impl Checker {
             let made = Syntax::list(span, vec![sym(self, "sum"), items[0].clone(), payload]);
             return self.parse_exp(&made);
         }
+        // Each form's own function, out of this one: every level of nesting
+        // has this frame, which a debug build makes room in for every local
+        // of every arm, and the stack would hold so few levels (`TODO.md`).
         match self.head(&items).unwrap_or("") {
-            "lambda" => {
-                let [_, params, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(lambda ((name type) …) body …)`"));
-                };
-                self.parse_lambda(span, params, body)
-            }
+            "lambda" => self.parse_lambda_form(span, items),
             // A variadic procedure, FX-87's: `(vlambda xs body …)`, or with
             // the arguments' type, `(vlambda (xs T) body …)`, is
             // `(%vlambda (lambda ((xs (listof T acyclic))) body …))`, the
             // procedure of the list of its arguments made a `vsubr`.
-            "vlambda" => {
-                let [_, param, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(vlambda name body …)` or `(vlambda (name type) body …)`"));
-                };
-                let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
-                let param = match param.as_proper_list() {
-                    Some([name, t]) => {
-                        let list = Syntax::list(span, vec![sym(self, "listof"), t.clone(), sym(self, "acyclic")]);
-                        Syntax::list(span, vec![name.clone(), list])
-                    }
-                    _ if param.as_symbol().is_some() => param.clone(),
-                    _ => return Err(FxError::at(param.span, "`(vlambda name body …)` or `(vlambda (name type) body …)`")),
-                };
-                let mut lambda = vec![sym(self, "lambda"), Syntax::list(span, vec![param])];
-                lambda.extend(body.iter().cloned());
-                let call = Syntax::list(span, vec![sym(self, "%vlambda"), Syntax::list(span, lambda)]);
-                self.parse_exp(&call)
-            }
+            "vlambda" => self.parse_vlambda_form(span, items),
             // Code a running program gives (`docs/research/eval.md`):
             // `(stage m E R code (p body …) (why else …))` is `(tagcase
             // ((proj %stage E R) m code) (ok p body …) (failed why else
@@ -1873,58 +1939,16 @@ impl Checker {
             // `%session-check`, `c` an expression's procedure or a pending
             // definition.
             head @ ("stage" | "session-check") => {
-                let (op, usage) = match head {
-                    "stage" => ("%stage", "`(stage module effect type code (procedure body …) (failure else …) (given evidence …))`, the last if any"),
-                    _ => ("%session-check", "`(session-check session effect type code (checked body …) (failure else …) (given evidence …))`, the last if any"),
-                };
-                let (rest, given) = match &items[..] {
-                    [rest @ .., last] if items.len() == 8 => (rest, Some(last)),
-                    all => (all, None),
-                };
-                let [_, target, e, r, code, ok, failed] = rest else {
-                    return Err(FxError::at(span, usage));
-                };
-                let given = self.given(given, span, usage)?;
-                let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
-                // `E` as `(maxeff E)`, read as an effect: a name a `with` or a
-                // module's parameter gives, or a `select`, is its effect, not
-                // a type (as `parser-exps.fx`).
-                let e = Syntax::list(e.span, vec![sym(self, "maxeff"), e.clone()]);
-                let descs = vec![e, r.clone()];
-                let arm = |p: &mut Self, tag: &str, a: &Syntax| -> R<Syntax> {
-                    match a.as_proper_list() {
-                        Some([name, body @ ..]) if name.as_symbol().is_some() && !body.is_empty() => {
-                            let mut parts = vec![sym(p, tag), name.clone()];
-                            parts.extend(body.iter().cloned());
-                            Ok(Syntax::list(a.span, parts))
-                        }
-                        _ => Err(FxError::at(a.span, usage)),
-                    }
-                };
-                let (ok, failed) = (arm(self, "ok", ok)?, arm(self, "failed", failed)?);
-                let mut proj = vec![sym(self, "proj"), sym(self, op)];
-                proj.extend(descs);
-                let call = Syntax::list(span, vec![Syntax::list(span, proj), target.clone(), code.clone(), given]);
-                let form = Syntax::list(span, vec![sym(self, "tagcase"), call, ok, failed]);
-                self.parse_exp(&form)
+                let head = head.to_string();
+                self.parse_stage_form(span, items, &head)
             }
             // Evidence (`docs/research/eval.md`, "Evidence"): `(reify-effect
             // E (given g …))` is `((proj %reify-effect E) (product (1 g)
             // …))`, the operand where what it is of is noted; `reify-region`
             // and `reify-type` alike.
             head @ ("reify-effect" | "reify-region" | "reify-type") => {
-                let op = format!("%{head}");
-                let usage = format!("`({} description (given evidence …))`, the last if any", &op[1..]);
-                let (d, given) = match &items[..] {
-                    [_, d] => (d, None),
-                    [_, d, g] => (d, Some(g)),
-                    _ => return Err(FxError::at(span, usage)),
-                };
-                let given = self.given(given, span, &usage)?;
-                let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
-                let proj = Syntax::list(span, vec![sym(self, "proj"), sym(self, &op), d.clone()]);
-                let call = Syntax::list(span, vec![proj, given]);
-                self.parse_exp(&call)
+                let head = head.to_string();
+                self.parse_reify_form(span, items, &head)
             }
             // `(session-commit! s d decision)`: the initializer, which the
             // program runs, then what it made recorded, or why not (`(let
@@ -1932,105 +1956,13 @@ impl Checker {
             // (%session-ready %session %pending %decision) (go %run (begin
             // (%run) (%session-committed! %session %pending))) (failed %why
             // (sum failed %why))))`).
-            "session-commit!" => {
-                let [_, sess, pending, decision] = &items[..] else {
-                    return Err(FxError::at(span, "`(session-commit! session pending decision)`"));
-                };
-                let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
-                let list = |xs: Vec<Syntax>| Syntax::list(span, xs);
-                let bind = |p: &mut Self, n: &str, x: &Syntax| list(vec![sym(p, n), x.clone()]);
-                let bs = list(vec![bind(self, "%session", sess), bind(self, "%pending", pending), bind(self, "%decision", decision)]);
-                let ready = list(vec![sym(self, "%session-ready"), sym(self, "%session"), sym(self, "%pending"), sym(self, "%decision")]);
-                let committed = list(vec![sym(self, "%session-committed!"), sym(self, "%session"), sym(self, "%pending")]);
-                let go = list(vec![sym(self, "go"), sym(self, "%run"), list(vec![sym(self, "begin"), list(vec![sym(self, "%run")]), committed])]);
-                let failed = list(vec![sym(self, "failed"), sym(self, "%why"), list(vec![sym(self, "sum"), sym(self, "failed"), sym(self, "%why")])]);
-                let form = list(vec![sym(self, "let"), bs, list(vec![sym(self, "tagcase"), ready, go, failed])]);
-                self.parse_exp(&form)
-            }
-            "rlambda" => {
-                let [_, region, params, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(rlambda region ((name type) …) body …)`"));
-                };
-                let region = self.parse_exp(region)?;
-                let lambda = self.parse_lambda(span, params, body)?;
-                Ok(self.arena.exp(span, Exp::RLambda { region, lambda }))
-            }
-            "plambda" => {
-                let [_, binders, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(plambda ((name kind) …) body …)`"));
-                };
-                let (depth, lives) = (self.dscope.len(), self.lifetimes.len());
-                // A procedure's regions and places outlive whatever its body
-                // binds.
-                let parsed = self.parse_binders(binders).and_then(|b| {
-                    for (v, k) in &b {
-                        if matches!(k, Kind::Region | Kind::Place) {
-                            self.arena.set_outer(*v, self.lifetimes[..lives].to_vec());
-                            self.lifetimes.push(*v);
-                        }
-                    }
-                    Ok((b, self.parse_body(span, body)?))
-                });
-                self.dscope.truncate(depth);
-                self.lifetimes.truncate(lives);
-                let (binders, body) = parsed?;
-                Ok(self.arena.exp(span, Exp::PLambda { binders, body }))
-            }
-            "proj" => {
-                let [_, body, args @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(proj expression description …)`"));
-                };
-                if args.is_empty() {
-                    return Err(FxError::at(span, "`proj` needs at least one description"));
-                }
-                let body = self.parse_exp(body)?;
-                let args = args.iter().map(|a| self.parse_d(a)).collect::<R<Vec<_>>>()?;
-                Ok(self.arena.exp(span, Exp::Proj { body, args }))
-            }
-            "if" => {
-                let [_, test, then, els] = &items[..] else {
-                    return Err(FxError::at(span, "`(if test then else)`"));
-                };
-                let (test, then, els) = (self.parse_exp(test)?, self.parse_exp(then)?, self.parse_exp(els)?);
-                Ok(self.arena.exp(span, Exp::If { test, then, els }))
-            }
-            "letrec" => {
-                let [_, bindings, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(letrec ((name type expression) …) body …)`"));
-                };
-                let mut out = Vec::new();
-                for b in self.items(bindings, "letrec bindings")? {
-                    let parts = self.items(b, "a letrec binding")?;
-                    let [name, ty, init] = &parts[..] else {
-                        return Err(FxError::at(b.span, "a letrec binding is `(name type expression)`"));
-                    };
-                    let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-                    self.arrow_star = self.written_arrow_star(ty);
-                    out.push((name, self.parse_type(ty)?, self.parse_exp(init)?));
-                }
-                let body = self.parse_body(span, body)?;
-                Ok(self.arena.exp(span, Exp::Letrec { bindings: out, body }))
-            }
-            "let" => {
-                let [_, bindings, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(let ((name expression) …) body …)`"));
-                };
-                let mut out = Vec::new();
-                let bs = match &bindings.datum {
-                    Datum::Nil => &[][..],
-                    _ => self.items(bindings, "let bindings")?,
-                };
-                for b in bs {
-                    let parts = self.items(b, "a let binding")?;
-                    let [name, init] = &parts[..] else {
-                        return Err(FxError::at(b.span, "a let binding is `(name expression)`"));
-                    };
-                    let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-                    out.push((name, self.parse_exp(init)?));
-                }
-                let body = self.parse_body(span, body)?;
-                Ok(self.arena.exp(span, Exp::Let { bindings: out, body }))
-            }
+            "session-commit!" => self.parse_session_commit_form(span, items),
+            "rlambda" => self.parse_rlambda_form(span, items),
+            "plambda" => self.parse_plambda_form(span, items),
+            "proj" => self.parse_proj_form(span, items),
+            "if" => self.parse_if_form(span, items),
+            "letrec" => self.parse_letrec_form(span, items),
+            "let" => self.parse_let_form(span, items),
             "begin" => self.parse_body(span, &items[1..]),
             // A syscall declared (`syscall.rs`): its hidden global, whether
             // the runtime has it.
@@ -2052,145 +1984,17 @@ impl Checker {
             // `(confirm-length e k (x body) else)`: `(let ((%confirm-value
             // e)) (if (length-is? %confirm-value k) (let ((x (certify-length
             // %confirm-value k))) body) else))`.
-            "confirm-length" => {
-                let usage = "`(confirm-length expression length (name body) else)`";
-                let [_, e, n, arm, els] = &items[..] else {
-                    return Err(FxError::at(span, usage));
-                };
-                // A natural literal, or a variable holding a `nat`.
-                let k = match (self.literal_int(n), n.as_symbol()) {
-                    (Some(k), _) if k >= 0 => Exp::Int(k),
-                    (None, Some(v)) => Exp::Var(v),
-                    _ => return Err(FxError::at(n.span, "a length is a natural number, or a variable holding one")),
-                };
-                let [x, body] = self.items(arm, usage)? else {
-                    return Err(FxError::at(arm.span, usage));
-                };
-                let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
-                let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
-                let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
-                let tmp = self.fresh_name("%confirm-value", &items);
-                let a = self.arena.exp(span, Exp::Var(tmp));
-                let (f, l) = (var(self, "length-is?"), self.arena.exp(span, k.clone()));
-                let test = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
-                let a = self.arena.exp(span, Exp::Var(tmp));
-                let (f, l) = (var(self, "certify-length"), self.arena.exp(span, k));
-                let cert = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
-                let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
-                let branch = self.arena.exp(span, Exp::If { test, then, els });
-                Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
-            }
-            "acyclic" => {
-                let usage = "`(acyclic expression (name body) else)`";
-                let [_, e, arm, els] = &items[..] else {
-                    return Err(FxError::at(span, usage));
-                };
-                let [x, body] = self.items(arm, usage)? else {
-                    return Err(FxError::at(arm.span, usage));
-                };
-                let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
-                let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
-                let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
-                let tmp = self.fresh_name("%acyclic-value", &items);
-                let (test_f, test_a) = (var(self, "acyclic?"), self.arena.exp(span, Exp::Var(tmp)));
-                let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
-                let (cert_f, cert_a) = (var(self, "certify-acyclic"), self.arena.exp(span, Exp::Var(tmp)));
-                let cert = self.arena.exp(span, Exp::App { fun: cert_f, args: vec![cert_a] });
-                let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
-                let branch = self.arena.exp(span, Exp::If { test, then, els });
-                Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
-            }
+            "confirm-length" => self.parse_confirm_length_form(span, items),
+            "acyclic" => self.parse_acyclic_form(span, items),
             // `(confirm-nat e (n body) else)`: `(let ((%nat-value e)) (if
             // (nat? %nat-value) (let ((n (certify-nat %nat-value))) body)
             // else))`.
-            "confirm-nat" => {
-                let usage = "`(confirm-nat expression (name body) else)`";
-                let [_, e, arm, els] = &items[..] else {
-                    return Err(FxError::at(span, usage));
-                };
-                let [x, body] = self.items(arm, usage)? else {
-                    return Err(FxError::at(arm.span, usage));
-                };
-                let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
-                let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
-                let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
-                let tmp = self.fresh_name("%nat-value", &items);
-                let (test_f, test_a) = (var(self, "nat?"), self.arena.exp(span, Exp::Var(tmp)));
-                let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
-                let (cert_f, cert_a) = (var(self, "certify-nat"), self.arena.exp(span, Exp::Var(tmp)));
-                let cert = self.arena.exp(span, Exp::App { fun: cert_f, args: vec![cert_a] });
-                let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
-                let branch = self.arena.exp(span, Exp::If { test, then, els });
-                Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
-            }
-            "and" => {
-                // `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
-                let mut out = self.arena.exp(span, Exp::Bool(true));
-                for (i, x) in items[1..].iter().enumerate().rev() {
-                    let x = self.parse_exp(x)?;
-                    out = if i == items.len() - 2 {
-                        x
-                    } else {
-                        let f = self.arena.exp(span, Exp::Bool(false));
-                        self.arena.exp(span, Exp::If { test: x, then: out, els: f })
-                    };
-                }
-                Ok(out)
-            }
-            "or" => {
-                // `(or a b …)`: `(if a #t (or b …))`, and `(or)` is `#f`. On
-                // booleans only, so `#t` loses nothing.
-                let mut out = self.arena.exp(span, Exp::Bool(false));
-                for (i, x) in items[1..].iter().enumerate().rev() {
-                    let x = self.parse_exp(x)?;
-                    out = if i == items.len() - 2 {
-                        x
-                    } else {
-                        let t = self.arena.exp(span, Exp::Bool(true));
-                        self.arena.exp(span, Exp::If { test: x, then: t, els: out })
-                    };
-                }
-                Ok(out)
-            }
-            "let*" => {
-                let [_, bindings, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(let* ((name expression) …) body …)`"));
-                };
-                let bs = match &bindings.datum {
-                    Datum::Nil => &[][..],
-                    _ => self.items(bindings, "let* bindings")?,
-                };
-                let mut parsed = Vec::new();
-                for b in bs {
-                    let parts = self.items(b, "a let* binding")?;
-                    let [name, init] = &parts[..] else {
-                        return Err(FxError::at(b.span, "a let* binding is `(name expression)`"));
-                    };
-                    let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-                    parsed.push((name, self.parse_exp(init)?, b.span));
-                }
-                let mut out = self.parse_body(span, body)?;
-                for (name, init, bspan) in parsed.into_iter().rev() {
-                    out = self.arena.exp(bspan, Exp::Let { bindings: vec![(name, init)], body: out });
-                }
-                Ok(out)
-            }
-            "the" => {
-                let [_, ty, exp] = &items[..] else {
-                    return Err(FxError::at(span, "`(the type expression)`"));
-                };
-                let ty = self.parse_type(ty)?;
-                let exp = self.parse_exp(exp)?;
-                Ok(self.arena.exp(span, Exp::The { ty, exp }))
-            }
-            "convention" => {
-                let [_, conv, exp] = &items[..] else {
-                    return Err(FxError::at(span, "`(convention C expression)`"));
-                };
-                let conv = self.parse_conv(conv)?;
-                let exp = self.parse_exp(exp)?;
-                Ok(self.arena.exp(span, Exp::Convention { conv, exp }))
-            }
+            "confirm-nat" => self.parse_confirm_nat_form(span, items),
+            "and" => self.parse_and_form(span, items),
+            "or" => self.parse_or_form(span, items),
+            "let*" => self.parse_let_star_form(span, items),
+            "the" => self.parse_the_form(span, items),
+            "convention" => self.parse_convention_form(span, items),
             name if BlobletOp::NAMES.contains(&name) => {
                 let name = name.to_string();
                 self.parse_bloblet(span, &name, &items[1..])
@@ -2200,96 +2004,26 @@ impl Checker {
             // `%extend-0` and `%extend-1`, whose values the checker makes it
             // of, `e1`'s where both have a name (`Checker::extended`). `e1`
             // sees `e0`'s bindings, `(with %extend-0 e1)`, as FX-91's.
-            "extend" => {
-                let [_, e0, e1] = &items[..] else {
-                    return Err(FxError::at(span, "`(extend module module)`"));
-                };
-                let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
-                let e0 = self.parse_exp(e0)?;
-                let e1 = self.with_types_of(names[0], |p| p.parse_exp(e1))?;
-                // Made at the form.
-                let e1 = self.arena.exp(span, Exp::With { module: names[0], body: e1 });
-                let items = vec![
-                    ModItem::Val { name: names[0], ty: None, init: e0, infer: false },
-                    ModItem::Val { name: names[1], ty: None, init: e1, infer: false },
-                ];
-                Ok(self.arena.exp(span, Exp::Module(items)))
-            }
+            "extend" => self.parse_extend_form(span, items),
             // `(load-module "file")`: the file's forms, a module's items,
             // seeing only the standard environment (M7). `(load-input
             // "file")`: the file's one expression, Sheldon's `input`.
             loader @ ("load-module" | "load-input") => {
-                let input = loader == "load-input";
-                let [_, path] = &items[..] else {
-                    return Err(FxError::at(span, format!("`({loader} \"file\")`")));
-                };
-                let Datum::Str(path) = &path.datum else {
-                    return Err(FxError::at(path.span, format!("`({loader} \"file\")`: the file's name, as a string")));
-                };
-                self.parse_load(span, path, input)
+                let loader = loader.to_string();
+                self.parse_load_module_form(span, items, &loader)
             }
             // `(%loaded "key" "path")`: the module of the file `key` names,
             // `path` as a load wrote it (`parse_loaded`).
-            "%loaded" => {
-                let [_, key, path] = &items[..] else {
-                    return Err(FxError::at(span, "`(%loaded \"key\" \"path\")`"));
-                };
-                let (Datum::Str(key), Datum::Str(path)) = (&key.datum, &path.datum) else {
-                    return Err(FxError::at(span, "`(%loaded \"key\" \"path\")`"));
-                };
-                self.parse_loaded(span, key, path)
-            }
-            "with" => {
-                let [_, m, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, "`(with module body …)`"));
-                };
-                let module = m.as_symbol().ok_or_else(|| FxError::at(m.span, "`with` opens a module named by a variable"))?;
-                let body = self.with_types_of(module, |p| p.parse_body(span, body))?;
-                Ok(self.arena.exp(span, Exp::With { module, body }))
-            }
-            "product" => {
-                let mut fields = Vec::new();
-                for p in &items[1..] {
-                    let pair = self.items(p, "`(label expression)`")?.to_vec();
-                    let [label, e] = &pair[..] else {
-                        return Err(FxError::at(p.span, "`(product (label expression) …)`"));
-                    };
-                    let label = self.label(label)?;
-                    if fields.iter().any(|(l, _)| *l == label) {
-                        return Err(FxError::at(p.span, format!("`{}` appears twice", self.name(label))));
-                    }
-                    fields.push((label, self.parse_exp(e)?));
-                }
-                Ok(self.arena.exp(span, Exp::Product(fields)))
-            }
+            "%loaded" => self.parse_loaded_form(span, items),
+            "with" => self.parse_with_form(span, items),
+            "product" => self.parse_product_form(span, items),
             // `(tuple e1 e2 …)`, `(product (1 e1) (2 e2) …)`.
             "tuple" => {
                 let fields = items[1..].iter().enumerate().map(|(i, e)| Ok((self.interner.intern(&(i + 1).to_string()), self.parse_exp(e)?))).collect::<R<Vec<_>>>()?;
                 Ok(self.arena.exp(span, Exp::Product(fields)))
             }
-            "extract" => {
-                let [_, e, label] = &items[..] else {
-                    return Err(FxError::at(span, "`(extract expression label)`"));
-                };
-                let label = self.label(label)?;
-                let e = self.parse_exp(e)?;
-                Ok(self.arena.exp(span, Exp::Extract(e, label)))
-            }
-            "sum" => {
-                // `(sum ⟨hole⟩)`: the hole is a tag; the payload, nothing yet.
-                if let (Some(h), [_, tag]) = (self.holes, &items[..])
-                    && tag.as_symbol() == Some(h.exp)
-                {
-                    let unit = self.arena.exp(span, Exp::Unit);
-                    return Ok(self.arena.exp(span, Exp::Sum(h.tag, unit)));
-                }
-                let [_, tag, e] = &items[..] else {
-                    return Err(FxError::at(span, "`(sum tag expression)`"));
-                };
-                let tag = self.label(tag)?;
-                let e = self.parse_exp(e)?;
-                Ok(self.arena.exp(span, Exp::Sum(tag, e)))
-            }
+            "extract" => self.parse_extract_form(span, items),
+            "sum" => self.parse_sum_form(span, items),
             "tagcase" => self.parse_tagcase(span, &items[1..]),
             "quote" => match &items[..] {
                 [_, x] if x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
@@ -2309,64 +2043,518 @@ impl Checker {
                 _ => Err(FxError::at(span, "`(quasiquote datum)`")),
             },
             form @ ("letregion" | "letfreeze" | "letrena" | "letreap") => {
-                let [_, name, body @ ..] = &items[..] else {
-                    return Err(FxError::at(span, format!("`({form} name body …)`")));
-                };
-                // `(letfreeze (r p) body …)` freezes into place `p`;
-                // `(letfreeze r body …)` into the heap.
-                let (name, into) = match name.as_proper_list() {
-                    Some([n, p]) if form == "letfreeze" => (n, Some(self.parse_place(p)?)),
-                    _ => (name, None),
-                };
-                let name = name.as_symbol().filter(|n| !self.name(*n).starts_with('@')).ok_or_else(|| {
-                    FxError::at(name.span, format!("a `{form}` binds a region variable's name, without `@`"))
-                })?;
-                let form = match form {
-                    "letregion" => RegionForm::Region,
-                    "letfreeze" => RegionForm::Freeze(match into {
-                        Some(Region::Var(p)) => Some(p),
-                        _ => None,
-                    }),
-                    "letrena" => RegionForm::Arena,
-                    _ => RegionForm::Reap,
-                };
-                let depth = self.dscope.len();
-                // `letrena` and `letreap` make a place (which is also a
-                // region), `letregion` a region only.
-                let kind = if matches!(form, RegionForm::Region | RegionForm::Freeze(_)) { Kind::Region } else { Kind::Place };
-                let region = self.arena.dvar_of(name, kind);
-                // Fresh, so it aliases nothing (Lucassen's `PRIVATE`).
-                self.arena.set_distinct(region);
-                // A `letfreeze`'s data leaves in the place it freezes into, so
-                // it may be allocated only in that place or one outliving it:
-                // those are all it won't outlive.
-                let outer = match form {
-                    RegionForm::Freeze(Some(p)) => [p].into_iter().chain(self.arena.outer(p).iter().copied()).collect(),
-                    RegionForm::Freeze(None) => Vec::new(),
-                    _ => self.lifetimes.clone(),
-                };
-                self.arena.set_outer(region, outer);
-                self.dscope.push((name, DScope::Var(region, kind)));
-                self.lifetimes.push(region);
-                let body = self.parse_body(span, body);
-                self.lifetimes.pop();
-                self.dscope.truncate(depth);
-                Ok(self.arena.exp(span, Exp::LetRegion { form, region, body: body? }))
+                let form = form.to_string();
+                self.parse_letregion_form(span, items, &form)
             }
-            "prompt" => {
-                let [_, tag, body, handler] = &items[..] else {
-                    return Err(FxError::at(span, "`(prompt tag body handler)`"));
-                };
-                let (tag, body, handler) = (self.parse_exp(tag)?, self.parse_exp(body)?, self.parse_exp(handler)?);
-                Ok(self.arena.exp(span, Exp::Prompt { tag, body, handler }))
-            }
-            _ => {
-                let fun = self.parse_exp(&items[0])?;
-                let args = items[1..].iter().map(|a| self.parse_exp(a)).collect::<R<Vec<_>>>()?;
-                Ok(self.arena.exp(span, Exp::App { fun, args }))
-            }
+            "prompt" => self.parse_prompt_form(span, items),
+            _ => self.parse_application_form(span, items),
         }
     }
+
+    /// `(lambda …)`, of `parse_exp`.
+    fn parse_lambda_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, params, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(lambda ((name type) …) body …)`"));
+        };
+        self.parse_lambda(span, params, body)
+    }
+
+    /// `(vlambda …)`, of `parse_exp`.
+    fn parse_vlambda_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, param, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(vlambda name body …)` or `(vlambda (name type) body …)`"));
+        };
+        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+        let param = match param.as_proper_list() {
+            Some([name, t]) => {
+                let list = Syntax::list(span, vec![sym(self, "listof"), t.clone(), sym(self, "acyclic")]);
+                Syntax::list(span, vec![name.clone(), list])
+            }
+            _ if param.as_symbol().is_some() => param.clone(),
+            _ => return Err(FxError::at(param.span, "`(vlambda name body …)` or `(vlambda (name type) body …)`")),
+        };
+        let mut lambda = vec![sym(self, "lambda"), Syntax::list(span, vec![param])];
+        lambda.extend(body.iter().cloned());
+        let call = Syntax::list(span, vec![sym(self, "%vlambda"), Syntax::list(span, lambda)]);
+        self.parse_exp(&call)
+    }
+
+    /// `(stage …)` / `(session-check …)`, of `parse_exp`.
+    fn parse_stage_form(&mut self, span: fixpt_read::Span, items: &[Syntax], head: &str) -> R<ExpId> {
+        let (op, usage) = match head {
+            "stage" => ("%stage", "`(stage module effect type code (procedure body …) (failure else …) (given evidence …))`, the last if any"),
+            _ => ("%session-check", "`(session-check session effect type code (checked body …) (failure else …) (given evidence …))`, the last if any"),
+        };
+        let (rest, given) = match &items[..] {
+            [rest @ .., last] if items.len() == 8 => (rest, Some(last)),
+            all => (all, None),
+        };
+        let [_, target, e, r, code, ok, failed] = rest else {
+            return Err(FxError::at(span, usage));
+        };
+        let given = self.given(given, span, usage)?;
+        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+        // `E` as `(maxeff E)`, read as an effect: a name a `with` or a
+        // module's parameter gives, or a `select`, is its effect, not
+        // a type (as `parser-exps.fx`).
+        let e = Syntax::list(e.span, vec![sym(self, "maxeff"), e.clone()]);
+        let descs = vec![e, r.clone()];
+        let arm = |p: &mut Self, tag: &str, a: &Syntax| -> R<Syntax> {
+            match a.as_proper_list() {
+                Some([name, body @ ..]) if name.as_symbol().is_some() && !body.is_empty() => {
+                    let mut parts = vec![sym(p, tag), name.clone()];
+                    parts.extend(body.iter().cloned());
+                    Ok(Syntax::list(a.span, parts))
+                }
+                _ => Err(FxError::at(a.span, usage)),
+            }
+        };
+        let (ok, failed) = (arm(self, "ok", ok)?, arm(self, "failed", failed)?);
+        let mut proj = vec![sym(self, "proj"), sym(self, op)];
+        proj.extend(descs);
+        let call = Syntax::list(span, vec![Syntax::list(span, proj), target.clone(), code.clone(), given]);
+        let form = Syntax::list(span, vec![sym(self, "tagcase"), call, ok, failed]);
+        self.parse_exp(&form)
+    }
+
+    /// `(reify-effect …)` / `(reify-region …)` / `(reify-type …)`, of `parse_exp`.
+    fn parse_reify_form(&mut self, span: fixpt_read::Span, items: &[Syntax], head: &str) -> R<ExpId> {
+        let op = format!("%{head}");
+        let usage = format!("`({} description (given evidence …))`, the last if any", &op[1..]);
+        let (d, given) = match &items[..] {
+            [_, d] => (d, None),
+            [_, d, g] => (d, Some(g)),
+            _ => return Err(FxError::at(span, usage)),
+        };
+        let given = self.given(given, span, &usage)?;
+        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+        let proj = Syntax::list(span, vec![sym(self, "proj"), sym(self, &op), d.clone()]);
+        let call = Syntax::list(span, vec![proj, given]);
+        self.parse_exp(&call)
+    }
+
+    /// `(session-commit! …)`, of `parse_exp`.
+    fn parse_session_commit_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, sess, pending, decision] = &items[..] else {
+            return Err(FxError::at(span, "`(session-commit! session pending decision)`"));
+        };
+        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+        let list = |xs: Vec<Syntax>| Syntax::list(span, xs);
+        let bind = |p: &mut Self, n: &str, x: &Syntax| list(vec![sym(p, n), x.clone()]);
+        let bs = list(vec![bind(self, "%session", sess), bind(self, "%pending", pending), bind(self, "%decision", decision)]);
+        let ready = list(vec![sym(self, "%session-ready"), sym(self, "%session"), sym(self, "%pending"), sym(self, "%decision")]);
+        let committed = list(vec![sym(self, "%session-committed!"), sym(self, "%session"), sym(self, "%pending")]);
+        let go = list(vec![sym(self, "go"), sym(self, "%run"), list(vec![sym(self, "begin"), list(vec![sym(self, "%run")]), committed])]);
+        let failed = list(vec![sym(self, "failed"), sym(self, "%why"), list(vec![sym(self, "sum"), sym(self, "failed"), sym(self, "%why")])]);
+        let form = list(vec![sym(self, "let"), bs, list(vec![sym(self, "tagcase"), ready, go, failed])]);
+        self.parse_exp(&form)
+    }
+
+    /// `(rlambda …)`, of `parse_exp`.
+    fn parse_rlambda_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, region, params, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(rlambda region ((name type) …) body …)`"));
+        };
+        let region = self.parse_exp(region)?;
+        let lambda = self.parse_lambda(span, params, body)?;
+        Ok(self.arena.exp(span, Exp::RLambda { region, lambda }))
+    }
+
+    /// `(plambda …)`, of `parse_exp`.
+    fn parse_plambda_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, binders, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(plambda ((name kind) …) body …)`"));
+        };
+        let (depth, lives) = (self.dscope.len(), self.lifetimes.len());
+        // A procedure's regions and places outlive whatever its body
+        // binds.
+        let parsed = self.parse_binders(binders).and_then(|b| {
+            for (v, k) in &b {
+                if matches!(k, Kind::Region | Kind::Place) {
+                    self.arena.set_outer(*v, self.lifetimes[..lives].to_vec());
+                    self.lifetimes.push(*v);
+                }
+            }
+            Ok((b, self.parse_body(span, body)?))
+        });
+        self.dscope.truncate(depth);
+        self.lifetimes.truncate(lives);
+        let (binders, body) = parsed?;
+        Ok(self.arena.exp(span, Exp::PLambda { binders, body }))
+    }
+
+    /// `(proj …)`, of `parse_exp`.
+    fn parse_proj_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, body, args @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(proj expression description …)`"));
+        };
+        if args.is_empty() {
+            return Err(FxError::at(span, "`proj` needs at least one description"));
+        }
+        let body = self.parse_exp(body)?;
+        let args = args.iter().map(|a| self.parse_d(a)).collect::<R<Vec<_>>>()?;
+        Ok(self.arena.exp(span, Exp::Proj { body, args }))
+    }
+
+    /// `(if …)`, of `parse_exp`.
+    fn parse_if_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, test, then, els] = &items[..] else {
+            return Err(FxError::at(span, "`(if test then else)`"));
+        };
+        let (test, then, els) = (self.parse_exp(test)?, self.parse_exp(then)?, self.parse_exp(els)?);
+        Ok(self.arena.exp(span, Exp::If { test, then, els }))
+    }
+
+    /// `(letrec …)`, of `parse_exp`.
+    fn parse_letrec_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, bindings, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(letrec ((name type expression) …) body …)`"));
+        };
+        let mut out = Vec::new();
+        for b in self.items(bindings, "letrec bindings")? {
+            let parts = self.items(b, "a letrec binding")?;
+            let [name, ty, init] = &parts[..] else {
+                return Err(FxError::at(b.span, "a letrec binding is `(name type expression)`"));
+            };
+            let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+            self.arrow_star = self.written_arrow_star(ty);
+            out.push((name, self.parse_type(ty)?, self.parse_exp(init)?));
+        }
+        let body = self.parse_body(span, body)?;
+        Ok(self.arena.exp(span, Exp::Letrec { bindings: out, body }))
+    }
+
+    /// `(let …)`, of `parse_exp`.
+    fn parse_let_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, bindings, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(let ((name expression) …) body …)`"));
+        };
+        let mut out = Vec::new();
+        let bs = match &bindings.datum {
+            Datum::Nil => &[][..],
+            _ => self.items(bindings, "let bindings")?,
+        };
+        for b in bs {
+            let parts = self.items(b, "a let binding")?;
+            let [name, init] = &parts[..] else {
+                return Err(FxError::at(b.span, "a let binding is `(name expression)`"));
+            };
+            let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+            out.push((name, self.parse_exp(init)?));
+        }
+        let body = self.parse_body(span, body)?;
+        Ok(self.arena.exp(span, Exp::Let { bindings: out, body }))
+    }
+
+    /// `(confirm-length …)`, of `parse_exp`.
+    fn parse_confirm_length_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let usage = "`(confirm-length expression length (name body) else)`";
+        let [_, e, n, arm, els] = &items[..] else {
+            return Err(FxError::at(span, usage));
+        };
+        // A natural literal, or a variable holding a `nat`.
+        let k = match (self.literal_int(n), n.as_symbol()) {
+            (Some(k), _) if k >= 0 => Exp::Int(k),
+            (None, Some(v)) => Exp::Var(v),
+            _ => return Err(FxError::at(n.span, "a length is a natural number, or a variable holding one")),
+        };
+        let [x, body] = self.items(arm, usage)? else {
+            return Err(FxError::at(arm.span, usage));
+        };
+        let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
+        let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+        let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
+        let tmp = self.fresh_name("%confirm-value", &items);
+        let a = self.arena.exp(span, Exp::Var(tmp));
+        let (f, l) = (var(self, "length-is?"), self.arena.exp(span, k.clone()));
+        let test = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
+        let a = self.arena.exp(span, Exp::Var(tmp));
+        let (f, l) = (var(self, "certify-length"), self.arena.exp(span, k));
+        let cert = self.arena.exp(span, Exp::App { fun: f, args: vec![a, l] });
+        let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
+        let branch = self.arena.exp(span, Exp::If { test, then, els });
+        Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
+    }
+
+    /// `(acyclic …)`, of `parse_exp`.
+    fn parse_acyclic_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let usage = "`(acyclic expression (name body) else)`";
+        let [_, e, arm, els] = &items[..] else {
+            return Err(FxError::at(span, usage));
+        };
+        let [x, body] = self.items(arm, usage)? else {
+            return Err(FxError::at(arm.span, usage));
+        };
+        let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
+        let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+        let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
+        let tmp = self.fresh_name("%acyclic-value", &items);
+        let (test_f, test_a) = (var(self, "acyclic?"), self.arena.exp(span, Exp::Var(tmp)));
+        let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
+        let (cert_f, cert_a) = (var(self, "certify-acyclic"), self.arena.exp(span, Exp::Var(tmp)));
+        let cert = self.arena.exp(span, Exp::App { fun: cert_f, args: vec![cert_a] });
+        let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
+        let branch = self.arena.exp(span, Exp::If { test, then, els });
+        Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
+    }
+
+    /// `(confirm-nat …)`, of `parse_exp`.
+    fn parse_confirm_nat_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let usage = "`(confirm-nat expression (name body) else)`";
+        let [_, e, arm, els] = &items[..] else {
+            return Err(FxError::at(span, usage));
+        };
+        let [x, body] = self.items(arm, usage)? else {
+            return Err(FxError::at(arm.span, usage));
+        };
+        let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
+        let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+        let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
+        let tmp = self.fresh_name("%nat-value", &items);
+        let (test_f, test_a) = (var(self, "nat?"), self.arena.exp(span, Exp::Var(tmp)));
+        let test = self.arena.exp(span, Exp::App { fun: test_f, args: vec![test_a] });
+        let (cert_f, cert_a) = (var(self, "certify-nat"), self.arena.exp(span, Exp::Var(tmp)));
+        let cert = self.arena.exp(span, Exp::App { fun: cert_f, args: vec![cert_a] });
+        let then = self.arena.exp(span, Exp::Let { bindings: vec![(x, cert)], body });
+        let branch = self.arena.exp(span, Exp::If { test, then, els });
+        Ok(self.arena.exp(span, Exp::Let { bindings: vec![(tmp, e)], body: branch }))
+    }
+
+    /// `(and …)`, of `parse_exp`.
+    fn parse_and_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        // `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
+        let mut out = self.arena.exp(span, Exp::Bool(true));
+        for (i, x) in items[1..].iter().enumerate().rev() {
+            let x = self.parse_exp(x)?;
+            out = if i == items.len() - 2 {
+                x
+            } else {
+                let f = self.arena.exp(span, Exp::Bool(false));
+                self.arena.exp(span, Exp::If { test: x, then: out, els: f })
+            };
+        }
+        Ok(out)
+    }
+
+    /// `(or …)`, of `parse_exp`.
+    fn parse_or_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        // `(or a b …)`: `(if a #t (or b …))`, and `(or)` is `#f`. On
+        // booleans only, so `#t` loses nothing.
+        let mut out = self.arena.exp(span, Exp::Bool(false));
+        for (i, x) in items[1..].iter().enumerate().rev() {
+            let x = self.parse_exp(x)?;
+            out = if i == items.len() - 2 {
+                x
+            } else {
+                let t = self.arena.exp(span, Exp::Bool(true));
+                self.arena.exp(span, Exp::If { test: x, then: t, els: out })
+            };
+        }
+        Ok(out)
+    }
+
+    /// `(let* …)`, of `parse_exp`.
+    fn parse_let_star_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, bindings, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(let* ((name expression) …) body …)`"));
+        };
+        let bs = match &bindings.datum {
+            Datum::Nil => &[][..],
+            _ => self.items(bindings, "let* bindings")?,
+        };
+        let mut parsed = Vec::new();
+        for b in bs {
+            let parts = self.items(b, "a let* binding")?;
+            let [name, init] = &parts[..] else {
+                return Err(FxError::at(b.span, "a let* binding is `(name expression)`"));
+            };
+            let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+            parsed.push((name, self.parse_exp(init)?, b.span));
+        }
+        let mut out = self.parse_body(span, body)?;
+        for (name, init, bspan) in parsed.into_iter().rev() {
+            out = self.arena.exp(bspan, Exp::Let { bindings: vec![(name, init)], body: out });
+        }
+        Ok(out)
+    }
+
+    /// `(the …)`, of `parse_exp`.
+    fn parse_the_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, ty, exp] = &items[..] else {
+            return Err(FxError::at(span, "`(the type expression)`"));
+        };
+        let ty = self.parse_type(ty)?;
+        let exp = self.parse_exp(exp)?;
+        Ok(self.arena.exp(span, Exp::The { ty, exp }))
+    }
+
+    /// `(convention …)`, of `parse_exp`.
+    fn parse_convention_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, conv, exp] = &items[..] else {
+            return Err(FxError::at(span, "`(convention C expression)`"));
+        };
+        let conv = self.parse_conv(conv)?;
+        let exp = self.parse_exp(exp)?;
+        Ok(self.arena.exp(span, Exp::Convention { conv, exp }))
+    }
+
+    /// `(extend …)`, of `parse_exp`.
+    fn parse_extend_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, e0, e1] = &items[..] else {
+            return Err(FxError::at(span, "`(extend module module)`"));
+        };
+        let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
+        let e0 = self.parse_exp(e0)?;
+        let e1 = self.with_types_of(names[0], |p| p.parse_exp(e1))?;
+        // Made at the form.
+        let e1 = self.arena.exp(span, Exp::With { module: names[0], body: e1 });
+        let items = vec![
+            ModItem::Val { name: names[0], ty: None, init: e0, infer: false },
+            ModItem::Val { name: names[1], ty: None, init: e1, infer: false },
+        ];
+        Ok(self.arena.exp(span, Exp::Module(items)))
+    }
+
+    /// `(load-module …)` / `(load-input …)`, of `parse_exp`.
+    fn parse_load_module_form(&mut self, span: fixpt_read::Span, items: &[Syntax], loader: &str) -> R<ExpId> {
+        let input = loader == "load-input";
+        let [_, path] = &items[..] else {
+            return Err(FxError::at(span, format!("`({loader} \"file\")`")));
+        };
+        let Datum::Str(path) = &path.datum else {
+            return Err(FxError::at(path.span, format!("`({loader} \"file\")`: the file's name, as a string")));
+        };
+        self.parse_load(span, path, input)
+    }
+
+    /// `(%loaded …)`, of `parse_exp`.
+    fn parse_loaded_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, key, path] = &items[..] else {
+            return Err(FxError::at(span, "`(%loaded \"key\" \"path\")`"));
+        };
+        let (Datum::Str(key), Datum::Str(path)) = (&key.datum, &path.datum) else {
+            return Err(FxError::at(span, "`(%loaded \"key\" \"path\")`"));
+        };
+        self.parse_loaded(span, key, path)
+    }
+
+    /// `(with …)`, of `parse_exp`.
+    fn parse_with_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, m, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, "`(with module body …)`"));
+        };
+        let module = m.as_symbol().ok_or_else(|| FxError::at(m.span, "`with` opens a module named by a variable"))?;
+        let body = self.with_types_of(module, |p| p.parse_body(span, body))?;
+        Ok(self.arena.exp(span, Exp::With { module, body }))
+    }
+
+    /// `(product …)`, of `parse_exp`.
+    fn parse_product_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let mut fields = Vec::new();
+        for p in &items[1..] {
+            let pair = self.items(p, "`(label expression)`")?.to_vec();
+            let [label, e] = &pair[..] else {
+                return Err(FxError::at(p.span, "`(product (label expression) …)`"));
+            };
+            let label = self.label(label)?;
+            if fields.iter().any(|(l, _)| *l == label) {
+                return Err(FxError::at(p.span, format!("`{}` appears twice", self.name(label))));
+            }
+            fields.push((label, self.parse_exp(e)?));
+        }
+        Ok(self.arena.exp(span, Exp::Product(fields)))
+    }
+
+    /// `(extract …)`, of `parse_exp`.
+    fn parse_extract_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, e, label] = &items[..] else {
+            return Err(FxError::at(span, "`(extract expression label)`"));
+        };
+        let label = self.label(label)?;
+        let e = self.parse_exp(e)?;
+        Ok(self.arena.exp(span, Exp::Extract(e, label)))
+    }
+
+    /// `(sum …)`, of `parse_exp`.
+    fn parse_sum_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        // `(sum ⟨hole⟩)`: the hole is a tag; the payload, nothing yet.
+        if let (Some(h), [_, tag]) = (self.holes, &items[..])
+            && tag.as_symbol() == Some(h.exp)
+        {
+            let unit = self.arena.exp(span, Exp::Unit);
+            return Ok(self.arena.exp(span, Exp::Sum(h.tag, unit)));
+        }
+        let [_, tag, e] = &items[..] else {
+            return Err(FxError::at(span, "`(sum tag expression)`"));
+        };
+        let tag = self.label(tag)?;
+        let e = self.parse_exp(e)?;
+        Ok(self.arena.exp(span, Exp::Sum(tag, e)))
+    }
+
+    /// `(letregion …)` / `(letfreeze …)` / `(letrena …)` / `(letreap …)`, of `parse_exp`.
+    fn parse_letregion_form(&mut self, span: fixpt_read::Span, items: &[Syntax], form: &str) -> R<ExpId> {
+        let [_, name, body @ ..] = &items[..] else {
+            return Err(FxError::at(span, format!("`({form} name body …)`")));
+        };
+        // `(letfreeze (r p) body …)` freezes into place `p`;
+        // `(letfreeze r body …)` into the heap.
+        let (name, into) = match name.as_proper_list() {
+            Some([n, p]) if form == "letfreeze" => (n, Some(self.parse_place(p)?)),
+            _ => (name, None),
+        };
+        let name = name.as_symbol().filter(|n| !self.name(*n).starts_with('@')).ok_or_else(|| {
+            FxError::at(name.span, format!("a `{form}` binds a region variable's name, without `@`"))
+        })?;
+        let form = match form {
+            "letregion" => RegionForm::Region,
+            "letfreeze" => RegionForm::Freeze(match into {
+                Some(Region::Var(p)) => Some(p),
+                _ => None,
+            }),
+            "letrena" => RegionForm::Arena,
+            _ => RegionForm::Reap,
+        };
+        let depth = self.dscope.len();
+        // `letrena` and `letreap` make a place (which is also a
+        // region), `letregion` a region only.
+        let kind = if matches!(form, RegionForm::Region | RegionForm::Freeze(_)) { Kind::Region } else { Kind::Place };
+        let region = self.arena.dvar_of(name, kind);
+        // Fresh, so it aliases nothing (Lucassen's `PRIVATE`).
+        self.arena.set_distinct(region);
+        // A `letfreeze`'s data leaves in the place it freezes into, so
+        // it may be allocated only in that place or one outliving it:
+        // those are all it won't outlive.
+        let outer = match form {
+            RegionForm::Freeze(Some(p)) => [p].into_iter().chain(self.arena.outer(p).iter().copied()).collect(),
+            RegionForm::Freeze(None) => Vec::new(),
+            _ => self.lifetimes.clone(),
+        };
+        self.arena.set_outer(region, outer);
+        self.dscope.push((name, DScope::Var(region, kind)));
+        self.lifetimes.push(region);
+        let body = self.parse_body(span, body);
+        self.lifetimes.pop();
+        self.dscope.truncate(depth);
+        Ok(self.arena.exp(span, Exp::LetRegion { form, region, body: body? }))
+    }
+
+    /// `(prompt …)`, of `parse_exp`.
+    fn parse_prompt_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let [_, tag, body, handler] = &items[..] else {
+            return Err(FxError::at(span, "`(prompt tag body handler)`"));
+        };
+        let (tag, body, handler) = (self.parse_exp(tag)?, self.parse_exp(body)?, self.parse_exp(handler)?);
+        Ok(self.arena.exp(span, Exp::Prompt { tag, body, handler }))
+    }
+
+    /// An application, `(f arg …)`, of `parse_exp`.
+    fn parse_application_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+        let fun = self.parse_exp(&items[0])?;
+        let args = items[1..].iter().map(|a| self.parse_exp(a)).collect::<R<Vec<_>>>()?;
+        Ok(self.arena.exp(span, Exp::App { fun, args }))
+    }
+
 
     /// `(cond (test e …) … (else e …))`: nested `if`s. FX has no unspecified
     /// value, so the `else` is required.
@@ -3300,6 +3488,8 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         self.files_read += 1;
         let file = fixpt_read::FileId(self.files_read + 1000);
         self.load_sites.insert(file, (span, path.to_string(), text.as_str().into()));
+        #[cfg(debug_assertions)]
+        fixpt_read::note_source(file, path, text.as_str().into());
         let at_file = |e: FxError, c: &Self| c.in_loaded(e, file);
         let forms = match self.read_module_file(file, &text) {
             Ok(f) => f,

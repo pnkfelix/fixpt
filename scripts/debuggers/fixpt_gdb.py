@@ -12,7 +12,22 @@ so. A frame's values are those its stack map says are live (`[rbp + 16]`),
 its slots from `[rbp + 24]`; a leaf procedure has no frame of its own.
 Frames are told to gdb once it is here (`FIXPT_JIT_DEBUG=frames` from the
 start): attached to a running program, let it go on (`continue`, then
-interrupt) before asking of a frame."""
+interrupt) before asking of a frame.
+
+And for the front end's own stack (`crates/fixpt-fx26/src/debug_stack.rs`,
+debug builds), what the checks are in when the stack runs low:
+
+    (gdb) fx-stop-high-water   stop where the checks pass the mark, with
+                               stack still to run commands on
+    (gdb) fx-checks            the checks' shadow stack: each expression
+                               `synth`, `check`, `parse_exp` is in, where
+    (gdb) fx-stack [N]         the stack by function, its N largest: frames
+                               and bytes; after an overflow too
+    (gdb) set fx-span-places on   a `Span` printed where it is, the program
+                               asked (not after an overflow: no stack)
+
+The mark is `FIXPT_STACK_HIGH_WATER` bytes, else three quarters of
+`RUST_MIN_STACK`; passing it also says the shadow stack on stderr."""
 
 import struct
 
@@ -99,3 +114,103 @@ class FxRegs(gdb.Command):
 FxPrint()
 FxFrame()
 FxRegs()
+
+
+# ---------------------------------------------------------------- the front end's stack
+
+DEBUG_STACK = "fixpt_fx26::debug_stack::"
+
+
+class FxStopHighWater(gdb.Command):
+    """fx-stop-high-water: stop where the checks pass the stack's mark."""
+
+    def __init__(self):
+        super().__init__("fx-stop-high-water", gdb.COMMAND_BREAKPOINTS)
+
+    def invoke(self, arg, from_tty):
+        gdb.Breakpoint(DEBUG_STACK + "fixpt_stack_high_water")
+
+
+class FxChecks(gdb.Command):
+    """fx-checks: the checks' shadow stack, said by the program on stderr."""
+
+    def __init__(self):
+        super().__init__("fx-checks", gdb.COMMAND_STACK)
+
+    def invoke(self, arg, from_tty):
+        gdb.parse_and_eval(DEBUG_STACK + "fixpt_shadow_report()")
+
+
+class FxStack(gdb.Command):
+    """fx-stack [N]: this thread's stack by function, the N (40) using most:
+    bytes, frames, bytes a frame. Reads only registers and memory, so it
+    works after an overflow, where nothing can be called."""
+
+    def __init__(self):
+        super().__init__("fx-stack", gdb.COMMAND_STACK)
+
+    def invoke(self, arg, from_tty):
+        top = int(arg) if arg.strip() else 40
+        by = {}
+        f, n = gdb.newest_frame(), 0
+        while f is not None:
+            older = f.older()
+            try:
+                size = int(older.read_register("sp")) - int(f.read_register("sp")) if older else 0
+            except gdb.error:
+                size = 0
+            name = f.name() or "??"
+            c, b = by.get(name, (0, 0))
+            by[name] = (c + 1, b + size)
+            n += 1
+            f = older
+        print("frames %d, bytes %d" % (n, sum(b for _, b in by.values())))
+        for name, (c, b) in sorted(by.items(), key=lambda kv: -kv[1][1])[:top]:
+            print("%10d %7d %7d  %s" % (b, c, b // max(c, 1), name[:150]))
+
+
+class FxSpanPlaces(gdb.Parameter):
+    """Whether a `Span` is printed where it is, by asking the program."""
+
+    set_doc = "Set whether a fixpt Span is printed as its place."
+    show_doc = "Show whether a fixpt Span is printed as its place."
+
+    def __init__(self):
+        super().__init__("fx-span-places", gdb.COMMAND_DATA, gdb.PARAM_BOOLEAN)
+        self.value = False
+
+
+SPAN_PLACES = FxSpanPlaces()
+
+
+class SpanPrinter:
+    """A `fixpt_read::span::Span`: `file:start..end`, and where, if asked."""
+
+    def __init__(self, val):
+        self.val = val
+
+    def to_string(self):
+        file = int(self.val["file"]["__0"])
+        start, end = int(self.val["start"]), int(self.val["end"])
+        said = "%d:%d..%d" % (file, start, end)
+        expansion = int(self.val["expansion"])
+        if expansion:
+            said += "@%d" % expansion
+        if SPAN_PLACES.value:
+            try:
+                place = gdb.parse_and_eval("%sfixpt_span_place(%d, %d, %d)" % (DEBUG_STACK, file, start, end))
+                said += " (%s)" % place.string()
+            except gdb.error as e:
+                said += " (no place: %s)" % e
+        return said
+
+
+def lookup_printer(val):
+    t = val.type.strip_typedefs()
+    return SpanPrinter(val) if t.name == "fixpt_read::span::Span" else None
+
+
+gdb.pretty_printers.append(lookup_printer)
+FxStopHighWater()
+FxChecks()
+FxStack()

@@ -5480,3 +5480,22 @@ by aliases, `%~N:x`. Left: `capture-syntactic-environment`; `compare` and
 program's own definitions (phases); contracts, checked at each expansion
 (the note's proposal); a transformer run each use is checked again each
 use, which a definition's compiled transformer kept would not need.
+
+## 229. A quoted list's length is how deep every phase recurses (found 2026-11-09)
+
+Both parsers rewrite `'(a b c …)` as `(cons a (cons b (cons c … nil)))`
+(`Checker::quoted`, `quoted` in `parser.fx`), so a list of n elements is
+calls nested n deep: in the parsers, the checkers, the lowering, the
+evaluator and every compiler. `macros-kernel.fx`'s reserved words, 115
+long, were the deepest stack in checking the front end (`debug_stack`'s
+report, `docs/research/debugging.md`); a list of some thousands overflows a
+release build's stack. Not a frame to make smaller: a representation.
+Options: `(list a b c …)` (one call, flat, `list` being a `vsubr`; a dotted
+tail through `append`), or a constant node of its own, typed `datum` with no
+look inside (a quote that unquotes nothing is a constant, which the
+compilers intern already). Undecided: the user's.
+
+Left from the stack work: the methods `frame-debt.txt` lists, the recursive
+first (`sub_rules`, `show_ty_body`, `unify`, `module_items_from`,
+`synth_module_items`); and the checker written in FX-26, whose depth is each
+machine's.

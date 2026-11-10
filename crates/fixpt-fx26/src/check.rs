@@ -2195,6 +2195,7 @@ impl Checker {
     /// What `e` is, and what evaluating it does; an error found, found in
     /// `e` unless in what is in it (`FxError::origin`).
     pub fn synth(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        crate::debug_stack::enter("synth", self.arena.span_of(e));
         // Tagged where each error leaves, by a plain `match` and a call out
         // of line: no frame more and none larger per level of nesting, which
         // the front end's own sources, checked, would overflow the stack by.
@@ -2726,6 +2727,9 @@ impl Checker {
 
     fn synth_node(&mut self, e: ExpId) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
+        // Each large arm its own function, out of this one: every level of
+        // nesting has this frame, which a debug build makes room in for
+        // every local of every arm.
         match self.arena.exp_at(e).clone() {
             Exp::Var(s) if self.second_class(s) && self.is_standard(s) && self.operator_at != Some(e) => {
                 Err(self.named_only_to_call(span, s))
@@ -2748,233 +2752,22 @@ impl Checker {
             Exp::Lambda { .. } => self.synth_lambda(e, None),
             Exp::RLambda { region, lambda } => self.synth_rlambda(e, region, lambda, None),
             Exp::App { fun, args } => self.synth_app(e, fun, &args, None),
-            Exp::The { ty, exp } => {
-                let ty = self.resolve_selects(ty, span)?;
-                let eff = self.check(exp, ty)?;
-                // `(the (arrayof T R) (make-array n …))`: the region said,
-                // the length kept (`TODO.md` §77).
-                let ty = match self.arena.exp_at(exp).clone() {
-                    Exp::App { fun, args } => self.array_sized(exp, fun, &args, ty),
-                    _ => ty,
-                };
-                Ok((ty, eff))
-            }
-            Exp::Convention { conv, exp } => {
-                let (t, eff) = self.synth(exp)?;
-                let t = self.arena.resolve(t);
-                let Ty::Subr { conv: from, effect, params, result, spec } = self.arena.get(t).clone() else {
-                    return Err(FxError::at(span, format!("`convention` takes a procedure, and this is a {}", self.show_ty(t))));
-                };
-                if from != conv {
-                    self.convert_at(e, conv, params.len());
-                }
-                Ok((self.arena.ty(Ty::Subr { conv, effect, params, result, spec }), eff))
-            }
-            Exp::PLambda { binders, body } => {
-                self.note_generalized(e, &binders, false);
-                let (t, eff) = self.synth(body)?;
-                if !self.generalizable(body, &eff) {
-                    return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
-                }
-                Ok((self.arena.ty(Ty::Poly { binders, body: t }), eff))
-            }
-            Exp::Proj { body, args } => {
-                let (t, eff) = self.synth(body)?;
-                let Ty::Poly { binders, body: inner } = self.arena.get(t).clone() else {
-                    return Err(FxError::at(span, format!("`proj` needs a polymorphic value, not a {}", self.show_ty(t))));
-                };
-                if binders.len() != args.len() {
-                    return Err(FxError::at(span, format!("this `poly` binds {} description(s); `proj` gave {}", binders.len(), args.len())));
-                }
-                let mut map = HashMap::new();
-                for ((v, k), d) in binders.iter().zip(args) {
-                    // A function given as a `select`: resolved first.
-                    let d = match d {
-                        D::Fun(f) | D::Type(f) if matches!(k, Kind::Arrow(_)) && matches!(self.arena.get(f), Ty::Select(..)) => {
-                            D::Fun(self.resolve_selects(f, span)?)
-                        }
-                        // A type given, its `select`s resolved, as an
-                        // annotation's are: a type a module re-exports may be
-                        // inside it.
-                        D::Type(x) => D::Type(self.resolve_selects(x, span)?),
-                        // An effect given, likewise: an effect a module
-                        // re-exports, `(select m e)`, may be in it.
-                        D::Effect(x) => {
-                            let unit = self.unit;
-                            let carrier = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: x, params: Vec::new(), result: unit, spec: None });
-                            let resolved = self.resolve_selects(carrier, span)?;
-                            match self.arena.get(resolved).as_subr() {
-                                Some((x, _, _)) => D::Effect(x),
-                                None => unreachable!("a subroutine resolved is one"),
-                            }
-                        }
-                        d => d,
-                    };
-                    if !self.d_fits(&d, *k) {
-                        let word = self.kind_word(*k);
-                        return Err(FxError::at(span, format!("`{}` is bound as a {word}, and the description given is not one", self.interner.name(self.arena.dvar_name(*v)))));
-                    }
-                    map.insert(*v, d);
-                }
-                self.check_bounds(&binders, &map, span)?;
-                self.check_distinct(&binders, &map, inner, span)?;
-                self.check_finite_sizes(&binders, &map, inner, span)?;
-                let result = self.subst(inner, &map);
-                let result = self.spin_for_cyclic(inner, result, &map);
-                self.no_knot(result, span)?;
-                let eff = self.mask(e, &eff, result);
-                Ok((result, eff))
-            }
-            Exp::If { test, then, els } => {
-                let (tt, te) = self.synth(test)?;
-                if !self.subtype(tt, self.bool_) {
-                    return Err(FxError::at(self.arena.span_of(test), "an `if` test must be a bool"));
-                }
-                let certified = self.acyclic_test(test);
-                self.certified.extend(certified);
-                let lengths = self.length_test(test);
-                self.certified_lengths.extend(lengths.clone());
-                let nats = self.nat_test(test);
-                self.certified_nats.extend(nats);
-                let (yes, no) = self.test_facts(test);
-                let (narrow_yes, narrow_no) = self.narrowings(test);
-                let depth = self.size_facts.len();
-                let narrowed = (self.narrowed.len(), self.path_narrowed.len());
-                let dead = [self.dead_branch(e, 0, &narrow_yes), self.dead_branch(e, 1, &narrow_no)];
-                self.size_facts.extend(yes);
-                self.push_narrowings(narrow_yes);
-                let a = if dead[0] { Ok((self.void, Effect::pure())) } else { self.synth(then) };
-                self.size_facts.truncate(depth);
-                self.narrowed.truncate(narrowed.0);
-                self.path_narrowed.truncate(narrowed.1);
-                if certified.is_some() {
-                    self.certified.pop();
-                }
-                if lengths.is_some() {
-                    self.certified_lengths.pop();
-                }
-                if nats.is_some() {
-                    self.certified_nats.pop();
-                }
-                let (a, ae) = a?;
-                self.size_facts.extend(no);
-                self.push_narrowings(narrow_no);
-                let b = if dead[1] { Ok((self.void, Effect::pure())) } else { self.synth(els) };
-                self.size_facts.truncate(depth);
-                self.narrowed.truncate(narrowed.0);
-                self.path_narrowed.truncate(narrowed.1);
-                let (b, be) = b?;
-                // `nil`, beside another branch, is what that is if `nil` is
-                // one (`TODO.md` §48); beside `nil`, the type `nil`; beside
-                // a pair, the pair that may be `nil`.
-                let [a, b] = self.join_with_nil(&[a, b])[..] else { unreachable!() };
-                let Some(t) = self.branch_join(a, b, 0) else {
-                    return Err(FxError::at(span, format!("the branches are a {} and a {}", self.show_ty(a), self.show_ty(b))));
-                };
-                let eff = self.mask(e, &te.union(&ae).union(&be), t);
-                Ok((t, eff))
-            }
+            Exp::The { .. } => self.synth_node_the(e),
+            Exp::Convention { .. } => self.synth_node_convention(e),
+            Exp::PLambda { .. } => self.synth_node_p_lambda(e),
+            Exp::Proj { .. } => self.synth_node_proj(e),
+            Exp::If { .. } => self.synth_node_if(e),
             Exp::Letrec { bindings, body } => self.letrec(e, &bindings, body, None),
-            Exp::Let { bindings, body } => {
-                let mut eff = Effect::pure();
-                let mut bound = Vec::new();
-                // Where the bindings will be in `env`.
-                let base = self.env.len();
-                for (i, (n, init)) in bindings.iter().enumerate() {
-                    let (t, ie) = self.synth(*init)?;
-                    eff = eff.union(&ie);
-                    if self.is_lambda(*init) {
-                        self.known.insert((*n, base + i));
-                    }
-                    bound.push((*n, t));
-                }
-                let depth = self.env.len();
-                let named = self.skolems.len();
-                for ((n, t), (_, init)) in bound.into_iter().zip(bindings.iter()) {
-                    let opened_from = self.skolems.len();
-                    let opened = self.name_nat(n, t);
-                    if self.record_types && opened != t {
-                        let vars = self.skolems[opened_from..].to_vec();
-                        self.facts.let_opened.insert(*init, (opened, vars));
-                    }
-                    self.env.push((n, opened));
-                }
-                let r = self.synth(body);
-                self.truncate_env(depth);
-                let r = r.and_then(|(t, be)| Ok((self.forget_nats(named, t, span)?, be)));
-                self.skolems.truncate(named);
-                let (t, be) = r?;
-                let eff = self.mask(e, &eff.union(&be), t);
-                Ok((t, eff))
-            }
+            Exp::Let { .. } => self.synth_node_let(e),
             Exp::Prompt { tag, body, handler } => self.synth_prompt(e, tag, body, handler),
             Exp::Module(items) => self.synth_module(e, &items),
             Exp::With { module, body } => self.synth_with(e, module, body),
             // The region's name is a variable too, of type `(place r)`,
             // when the form makes a place: to allocate in (`rcons`).
-            Exp::LetRegion { form, region, body } => {
-                let name = self.arena.dvar_name(region);
-                let rt = self.arena.ty(Ty::Place(Region::Var(region)));
-                let depth = self.env.len();
-                if !matches!(form, RegionForm::Region | RegionForm::Freeze(_)) {
-                    self.env.push((name, rt));
-                }
-                if matches!(form, RegionForm::Freeze(_)) {
-                    self.freezing.push((region, false));
-                }
-                let r = self.synth(body);
-                let written = if matches!(form, RegionForm::Freeze(_)) { self.freezing.pop().expect("pushed").1 } else { true };
-                self.truncate_env(depth);
-                let (t, eff) = r?;
-                // A `letfreeze`'s value leaves with its region's data frozen:
-                // `r` made `const`, unless something in it could still write.
-                let t = if let RegionForm::Freeze(into) = form {
-                    if self.writes_in(t, Region::Var(region)) {
-                        let name = self.interner.name(name);
-                        return Err(FxError::at(span, format!("the value of `letfreeze {name}` could still write its region's data: its type is {}", self.show_ty(t))));
-                    }
-                    self.subst(t, &HashMap::from([(region, D::Region(Region::Frozen(into, !written)))]))
-                } else {
-                    t
-                };
-                self.close_region(e, form.keyword(), region, t, eff)
-            }
+            Exp::LetRegion { .. } => self.synth_node_let_region(e),
             Exp::Bloblet { op, args } => self.synth_bloblet(e, op, &args, None),
-            Exp::Product(fields) => {
-                let mut eff = Effect::pure();
-                let mut tys = Vec::new();
-                for (l, x) in &fields {
-                    let (t, xe) = self.synth(*x)?;
-                    eff = eff.union(&xe);
-                    tys.push((*l, t));
-                }
-                let t = self.arena.ty(Ty::Product(tys));
-                let eff = self.mask(e, &eff, t);
-                Ok((t, eff))
-            }
-            Exp::Extract(x, label) => {
-                let (pt, eff) = self.synth(x)?;
-                // A blobref to a flat product: one to its field, at its offset.
-                if let Some((b, f)) = self.blobref_parts(pt) {
-                    let Some((at, g)) = self.flat_field(f, label) else {
-                        return Err(FxError::at(span, format!("a {} has no `{}` laid out", self.show_ty(pt), self.interner.name(label))));
-                    };
-                    self.facts.datum.insert(e, Datum::BlobrefField(at));
-                    let t = self.blobref_of(b, g);
-                    let eff = self.mask(e, &eff, t);
-                    return Ok((t, eff));
-                }
-                let Ty::Product(fields) = self.arena.get(pt).clone() else {
-                    return Err(FxError::at(self.arena.span_of(x), format!("a product is expected here, and this is a {}", self.show_ty(pt))));
-                };
-                let Some(i) = fields.iter().position(|(l, _)| *l == label) else {
-                    return Err(FxError::at(span, format!("a {} has no `{}`", self.show_ty(pt), self.interner.name(label))));
-                };
-                self.facts.datum.insert(e, Datum::Field(i));
-                let t = fields[i].1;
-                let eff = self.mask(e, &eff, t);
-                Ok((t, eff))
-            }
+            Exp::Product(..) => self.synth_node_product(e),
+            Exp::Extract(..) => self.synth_node_extract(e),
             Exp::Sum(tag, x) => {
                 let (t, eff) = self.synth(x)?;
                 let t = self.arena.ty(Ty::Sum(vec![(tag, t)]));
@@ -2982,19 +2775,279 @@ impl Checker {
                 Ok((t, eff))
             }
             Exp::TagCase { scrutinee, arms, els } => self.synth_tagcase(e, scrutinee, &arms, &els, None),
-            Exp::Begin(items) => {
-                let mut eff = Effect::pure();
-                let mut last = self.unit;
-                for i in &items {
-                    let (t, ie) = self.synth(*i)?;
-                    eff = eff.union(&ie);
-                    last = t;
-                }
-                let eff = self.mask(e, &eff, last);
-                Ok((last, eff))
-            }
+            Exp::Begin(..) => self.synth_node_begin(e),
         }
     }
+
+    /// `Exp::The`, of `synth_node`.
+    fn synth_node_the(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let Exp::The { ty, exp } = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a The") };
+        let ty = self.resolve_selects(ty, span)?;
+        let eff = self.check(exp, ty)?;
+        // `(the (arrayof T R) (make-array n …))`: the region said,
+        // the length kept (`TODO.md` §77).
+        let ty = match self.arena.exp_at(exp).clone() {
+            Exp::App { fun, args } => self.array_sized(exp, fun, &args, ty),
+            _ => ty,
+        };
+        Ok((ty, eff))
+    }
+
+    /// `Exp::Convention`, of `synth_node`.
+    fn synth_node_convention(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let Exp::Convention { conv, exp } = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a Convention") };
+        let (t, eff) = self.synth(exp)?;
+        let t = self.arena.resolve(t);
+        let Ty::Subr { conv: from, effect, params, result, spec } = self.arena.get(t).clone() else {
+            return Err(FxError::at(span, format!("`convention` takes a procedure, and this is a {}", self.show_ty(t))));
+        };
+        if from != conv {
+            self.convert_at(e, conv, params.len());
+        }
+        Ok((self.arena.ty(Ty::Subr { conv, effect, params, result, spec }), eff))
+    }
+
+    /// `Exp::PLambda`, of `synth_node`.
+    fn synth_node_p_lambda(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let Exp::PLambda { binders, body } = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a PLambda") };
+        self.note_generalized(e, &binders, false);
+        let (t, eff) = self.synth(body)?;
+        if !self.generalizable(body, &eff) {
+            return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
+        }
+        Ok((self.arena.ty(Ty::Poly { binders, body: t }), eff))
+    }
+
+    /// `Exp::Proj`, of `synth_node`.
+    fn synth_node_proj(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let Exp::Proj { body, args } = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a Proj") };
+        let (t, eff) = self.synth(body)?;
+        let Ty::Poly { binders, body: inner } = self.arena.get(t).clone() else {
+            return Err(FxError::at(span, format!("`proj` needs a polymorphic value, not a {}", self.show_ty(t))));
+        };
+        if binders.len() != args.len() {
+            return Err(FxError::at(span, format!("this `poly` binds {} description(s); `proj` gave {}", binders.len(), args.len())));
+        }
+        let mut map = HashMap::new();
+        for ((v, k), d) in binders.iter().zip(args) {
+            // A function given as a `select`: resolved first.
+            let d = match d {
+                D::Fun(f) | D::Type(f) if matches!(k, Kind::Arrow(_)) && matches!(self.arena.get(f), Ty::Select(..)) => {
+                    D::Fun(self.resolve_selects(f, span)?)
+                }
+                // A type given, its `select`s resolved, as an
+                // annotation's are: a type a module re-exports may be
+                // inside it.
+                D::Type(x) => D::Type(self.resolve_selects(x, span)?),
+                // An effect given, likewise: an effect a module
+                // re-exports, `(select m e)`, may be in it.
+                D::Effect(x) => {
+                    let unit = self.unit;
+                    let carrier = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: x, params: Vec::new(), result: unit, spec: None });
+                    let resolved = self.resolve_selects(carrier, span)?;
+                    match self.arena.get(resolved).as_subr() {
+                        Some((x, _, _)) => D::Effect(x),
+                        None => unreachable!("a subroutine resolved is one"),
+                    }
+                }
+                d => d,
+            };
+            if !self.d_fits(&d, *k) {
+                let word = self.kind_word(*k);
+                return Err(FxError::at(span, format!("`{}` is bound as a {word}, and the description given is not one", self.interner.name(self.arena.dvar_name(*v)))));
+            }
+            map.insert(*v, d);
+        }
+        self.check_bounds(&binders, &map, span)?;
+        self.check_distinct(&binders, &map, inner, span)?;
+        self.check_finite_sizes(&binders, &map, inner, span)?;
+        let result = self.subst(inner, &map);
+        let result = self.spin_for_cyclic(inner, result, &map);
+        self.no_knot(result, span)?;
+        let eff = self.mask(e, &eff, result);
+        Ok((result, eff))
+    }
+
+    /// `Exp::If`, of `synth_node`.
+    fn synth_node_if(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let Exp::If { test, then, els } = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a If") };
+        let (tt, te) = self.synth(test)?;
+        if !self.subtype(tt, self.bool_) {
+            return Err(FxError::at(self.arena.span_of(test), "an `if` test must be a bool"));
+        }
+        let certified = self.acyclic_test(test);
+        self.certified.extend(certified);
+        let lengths = self.length_test(test);
+        self.certified_lengths.extend(lengths.clone());
+        let nats = self.nat_test(test);
+        self.certified_nats.extend(nats);
+        let (yes, no) = self.test_facts(test);
+        let (narrow_yes, narrow_no) = self.narrowings(test);
+        let depth = self.size_facts.len();
+        let narrowed = (self.narrowed.len(), self.path_narrowed.len());
+        let dead = [self.dead_branch(e, 0, &narrow_yes), self.dead_branch(e, 1, &narrow_no)];
+        self.size_facts.extend(yes);
+        self.push_narrowings(narrow_yes);
+        let a = if dead[0] { Ok((self.void, Effect::pure())) } else { self.synth(then) };
+        self.size_facts.truncate(depth);
+        self.narrowed.truncate(narrowed.0);
+        self.path_narrowed.truncate(narrowed.1);
+        if certified.is_some() {
+            self.certified.pop();
+        }
+        if lengths.is_some() {
+            self.certified_lengths.pop();
+        }
+        if nats.is_some() {
+            self.certified_nats.pop();
+        }
+        let (a, ae) = a?;
+        self.size_facts.extend(no);
+        self.push_narrowings(narrow_no);
+        let b = if dead[1] { Ok((self.void, Effect::pure())) } else { self.synth(els) };
+        self.size_facts.truncate(depth);
+        self.narrowed.truncate(narrowed.0);
+        self.path_narrowed.truncate(narrowed.1);
+        let (b, be) = b?;
+        // `nil`, beside another branch, is what that is if `nil` is
+        // one (`TODO.md` §48); beside `nil`, the type `nil`; beside
+        // a pair, the pair that may be `nil`.
+        let [a, b] = self.join_with_nil(&[a, b])[..] else { unreachable!() };
+        let Some(t) = self.branch_join(a, b, 0) else {
+            return Err(FxError::at(span, format!("the branches are a {} and a {}", self.show_ty(a), self.show_ty(b))));
+        };
+        let eff = self.mask(e, &te.union(&ae).union(&be), t);
+        Ok((t, eff))
+    }
+
+    /// `Exp::Let`, of `synth_node`.
+    fn synth_node_let(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let Exp::Let { bindings, body } = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a Let") };
+        let mut eff = Effect::pure();
+        let mut bound = Vec::new();
+        // Where the bindings will be in `env`.
+        let base = self.env.len();
+        for (i, (n, init)) in bindings.iter().enumerate() {
+            let (t, ie) = self.synth(*init)?;
+            eff = eff.union(&ie);
+            if self.is_lambda(*init) {
+                self.known.insert((*n, base + i));
+            }
+            bound.push((*n, t));
+        }
+        let depth = self.env.len();
+        let named = self.skolems.len();
+        for ((n, t), (_, init)) in bound.into_iter().zip(bindings.iter()) {
+            let opened_from = self.skolems.len();
+            let opened = self.name_nat(n, t);
+            if self.record_types && opened != t {
+                let vars = self.skolems[opened_from..].to_vec();
+                self.facts.let_opened.insert(*init, (opened, vars));
+            }
+            self.env.push((n, opened));
+        }
+        let r = self.synth(body);
+        self.truncate_env(depth);
+        let r = r.and_then(|(t, be)| Ok((self.forget_nats(named, t, span)?, be)));
+        self.skolems.truncate(named);
+        let (t, be) = r?;
+        let eff = self.mask(e, &eff.union(&be), t);
+        Ok((t, eff))
+    }
+
+    /// `Exp::LetRegion`, of `synth_node`.
+    fn synth_node_let_region(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let Exp::LetRegion { form, region, body } = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a LetRegion") };
+        let name = self.arena.dvar_name(region);
+        let rt = self.arena.ty(Ty::Place(Region::Var(region)));
+        let depth = self.env.len();
+        if !matches!(form, RegionForm::Region | RegionForm::Freeze(_)) {
+            self.env.push((name, rt));
+        }
+        if matches!(form, RegionForm::Freeze(_)) {
+            self.freezing.push((region, false));
+        }
+        let r = self.synth(body);
+        let written = if matches!(form, RegionForm::Freeze(_)) { self.freezing.pop().expect("pushed").1 } else { true };
+        self.truncate_env(depth);
+        let (t, eff) = r?;
+        // A `letfreeze`'s value leaves with its region's data frozen:
+        // `r` made `const`, unless something in it could still write.
+        let t = if let RegionForm::Freeze(into) = form {
+            if self.writes_in(t, Region::Var(region)) {
+                let name = self.interner.name(name);
+                return Err(FxError::at(span, format!("the value of `letfreeze {name}` could still write its region's data: its type is {}", self.show_ty(t))));
+            }
+            self.subst(t, &HashMap::from([(region, D::Region(Region::Frozen(into, !written)))]))
+        } else {
+            t
+        };
+        self.close_region(e, form.keyword(), region, t, eff)
+    }
+
+    /// `Exp::Product`, of `synth_node`.
+    fn synth_node_product(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let Exp::Product(fields) = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a Product") };
+        let mut eff = Effect::pure();
+        let mut tys = Vec::new();
+        for (l, x) in &fields {
+            let (t, xe) = self.synth(*x)?;
+            eff = eff.union(&xe);
+            tys.push((*l, t));
+        }
+        let t = self.arena.ty(Ty::Product(tys));
+        let eff = self.mask(e, &eff, t);
+        Ok((t, eff))
+    }
+
+    /// `Exp::Extract`, of `synth_node`.
+    fn synth_node_extract(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let Exp::Extract(x, label) = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a Extract") };
+        let (pt, eff) = self.synth(x)?;
+        // A blobref to a flat product: one to its field, at its offset.
+        if let Some((b, f)) = self.blobref_parts(pt) {
+            let Some((at, g)) = self.flat_field(f, label) else {
+                return Err(FxError::at(span, format!("a {} has no `{}` laid out", self.show_ty(pt), self.interner.name(label))));
+            };
+            self.facts.datum.insert(e, Datum::BlobrefField(at));
+            let t = self.blobref_of(b, g);
+            let eff = self.mask(e, &eff, t);
+            return Ok((t, eff));
+        }
+        let Ty::Product(fields) = self.arena.get(pt).clone() else {
+            return Err(FxError::at(self.arena.span_of(x), format!("a product is expected here, and this is a {}", self.show_ty(pt))));
+        };
+        let Some(i) = fields.iter().position(|(l, _)| *l == label) else {
+            return Err(FxError::at(span, format!("a {} has no `{}`", self.show_ty(pt), self.interner.name(label))));
+        };
+        self.facts.datum.insert(e, Datum::Field(i));
+        let t = fields[i].1;
+        let eff = self.mask(e, &eff, t);
+        Ok((t, eff))
+    }
+
+    /// `Exp::Begin`, of `synth_node`.
+    fn synth_node_begin(&mut self, e: ExpId) -> R<(TyId, Effect)> {
+        let Exp::Begin(items) = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a Begin") };
+        let mut eff = Effect::pure();
+        let mut last = self.unit;
+        for i in &items {
+            let (t, ie) = self.synth(*i)?;
+            eff = eff.union(&ie);
+            last = t;
+        }
+        let eff = self.mask(e, &eff, last);
+        Ok((last, eff))
+    }
+
 
     // --------------------------------------------------------------- masking
     /// Remove from `effect` what cannot be observed outside expression `e`,
@@ -4730,39 +4783,7 @@ impl Checker {
             }
             // A generative type is related only to itself, argument by
             // argument, as its variance says.
-            (Ty::Named { which: g, args: mut xa }, Ty::Named { which: h, args: xb }) if g == h => {
-                // A blobref to an array that runs to the end of the suffix,
-                // its length named where it was bound, is one of length
-                // `finite`, which means just that (`TODO.md` §77).
-                if g == BLOBREF_INDEX
-                    && let ([_, D::Type(xf)], [_, D::Type(yf)]) = (&xa[..], &xb[..])
-                    && self.unsized_length(*yf) == Some(Size::Finite)
-                    && matches!(self.unsized_length(*xf), Some(Size::Lin { k: 0, terms }) if matches!(terms[..], [(v, 1)] if self.to_end_sizes.contains(&v)))
-                {
-                    xa[1] = D::Type(self.with_unsized_length(*xf, Size::Finite));
-                }
-                let variance = self.generatives[g as usize].variance.clone();
-                xa.iter().zip(&xb).zip(variance).all(|((x, y), v)| match (x, y) {
-                    (D::Type(x), D::Type(y)) => match v {
-                        Variance::Co => self.sub(*x, *y, env, st),
-                        Variance::Contra => self.sub(*y, *x, &flip, st),
-                        Variance::Inv => self.sub(*x, *y, env, st) && self.sub(*y, *x, &flip, st),
-                    },
-                    // Frozen data is never written: at a region that
-                    // outlives the one expected, as a pair's (Kayak's).
-                    (D::Region(r), D::Region(s)) => ra(*r) == rb(*s) || (ra(*r).is_frozen() && self.frozen_le(ra(*r), rb(*s))),
-                    (D::Size(m), D::Size(n)) => self.size_eq(m, n),
-                    (D::Conv(Conv::Var(x)), D::Conv(Conv::Var(y))) => env.var(&env.a, *x) == env.var(&env.b, *y),
-                    (D::Conv(c), D::Conv(d)) => c == d,
-                    (D::Effect(d), D::Effect(e)) => match v {
-                        Variance::Co => self.effect_le_in(&ea(d), &eb(e), env),
-                        Variance::Contra => self.effect_le_in(&eb(e), &ea(d), env),
-                        Variance::Inv => ea(d) == eb(e),
-                    },
-                    (D::Fun(f), D::Fun(g)) => self.fun_same(*f, *g, env, st),
-                    _ => false,
-                })
-            }
+            (Ty::Named { which: g, args: xa }, Ty::Named { which: h, args: xb }) if g == h => self.named_sub(g, xa, &xb, env, st),
             // A description function applied: the same function, given
             // the same descriptions (FX-91's congruence).
             (Ty::App { fun: f, args: xa }, Ty::App { fun: g, args: xb }) => {
@@ -4777,57 +4798,103 @@ impl Checker {
             (Ty::ParamSel(k, x), Ty::ParamSel(j, y)) => k == j && x == y,
             // Two description functions (a module's transparent ones).
             (Ty::Lam { .. }, Ty::Lam { .. }) => self.fun_same(a, b, env, st),
-            (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => {
-                if ba.len() != bb.len() || ba.iter().zip(&bb).any(|((_, k1), (_, k2))| k1 != k2) {
-                    return false;
-                }
-                // Each pair of binders is named by the pair of nodes and its
-                // position: entering the same pair again rebinds the same
-                // name, as re-entering a scope shadows it, so the
-                // environments stay finitely many.
-                let mut inner = env.clone();
-                for (i, ((va, _), (vb, _))) in ba.iter().zip(&bb).enumerate() {
-                    let n = st.labels.len() as u32;
-                    let l = *st.labels.entry((a, b, i)).or_insert(DVar(u32::MAX - n));
-                    inner.a.insert(*va, l);
-                    inner.b.insert(*vb, l);
-                }
-                // Bounded region binders must have the same bounds; a
-                // `distinct` one of `a`'s must be one of `b`'s, whose callers
-                // promise at least what `a` needs.
-                let bounds = ba.iter().zip(&bb).all(|((va, _), (vb, _))| {
-                    let same = match (self.arena.bound(*va), self.arena.bound(*vb)) {
-                        (None, None) => true,
-                        (Some(x), Some(y)) => inner.region(&inner.a, x) == inner.region(&inner.b, y),
-                        _ => false,
-                    };
-                    same && (!self.arena.is_distinct(*va) || self.arena.is_distinct(*vb))
-                });
-                // An effect binder's bound (`TODO.md` §226): the expected
-                // side's within the other's, none the loosest, so that
-                // what may be given there may be given here; assumed in
-                // comparing the bodies. As `F<:`'s rule, decidable here as
-                // effects are finite sets.
-                let mut effects = true;
-                for ((va, _), (vb, _)) in ba.iter().zip(&bb) {
-                    let l = inner.var(&inner.a, *va);
-                    let (x, y) = (self.arena.effect_bound(*va).cloned(), self.arena.effect_bound(*vb).cloned());
-                    let apps = self.arena.effect_apps.clone();
-                    let x = x.map(|x| inner.effect(&inner.a, &x, &apps));
-                    let y = y.map(|y| inner.effect(&inner.b, &y, &apps));
-                    effects &= match (&x, &y) {
-                        (None, _) => true,
-                        (Some(_), None) => false,
-                        (Some(x), Some(y)) => self.effect_le_in(y, x, &inner),
-                    };
-                    if let Some(y) = y {
-                        inner.bounds.insert(l, y);
-                    }
-                }
-                bounds && effects && self.sub(xa, xb, &inner, st)
-            }
+            (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => self.poly_sub((a, b), (&ba, xa), (&bb, xb), env, st),
             _ => false,
         }
+    }
+
+    /// `poly` ≤ `poly`, of `sub_rules`: the binders paired, of the same
+    /// kinds and bounds, and the bodies compared under them.
+    fn poly_sub(&mut self, (a, b): (TyId, TyId), (ba, xa): (&[(DVar, Kind)], TyId), (bb, xb): (&[(DVar, Kind)], TyId), env: &BinderEnv, st: &mut SubState) -> bool {
+        if ba.len() != bb.len() || ba.iter().zip(bb).any(|((_, k1), (_, k2))| k1 != k2) {
+            return false;
+        }
+        // Each pair of binders is named by the pair of nodes and its
+        // position: entering the same pair again rebinds the same
+        // name, as re-entering a scope shadows it, so the
+        // environments stay finitely many.
+        let mut inner = env.clone();
+        for (i, ((va, _), (vb, _))) in ba.iter().zip(bb).enumerate() {
+            let n = st.labels.len() as u32;
+            let l = *st.labels.entry((a, b, i)).or_insert(DVar(u32::MAX - n));
+            inner.a.insert(*va, l);
+            inner.b.insert(*vb, l);
+        }
+        // Bounded region binders must have the same bounds; a
+        // `distinct` one of `a`'s must be one of `b`'s, whose callers
+        // promise at least what `a` needs.
+        let bounds = ba.iter().zip(bb).all(|((va, _), (vb, _))| {
+            let same = match (self.arena.bound(*va), self.arena.bound(*vb)) {
+                (None, None) => true,
+                (Some(x), Some(y)) => inner.region(&inner.a, x) == inner.region(&inner.b, y),
+                _ => false,
+            };
+            same && (!self.arena.is_distinct(*va) || self.arena.is_distinct(*vb))
+        });
+        // An effect binder's bound (`TODO.md` §226): the expected
+        // side's within the other's, none the loosest, so that
+        // what may be given there may be given here; assumed in
+        // comparing the bodies. As `F<:`'s rule, decidable here as
+        // effects are finite sets.
+        let mut effects = true;
+        for ((va, _), (vb, _)) in ba.iter().zip(bb) {
+            let l = inner.var(&inner.a, *va);
+            let (x, y) = (self.arena.effect_bound(*va).cloned(), self.arena.effect_bound(*vb).cloned());
+            let apps = self.arena.effect_apps.clone();
+            let x = x.map(|x| inner.effect(&inner.a, &x, &apps));
+            let y = y.map(|y| inner.effect(&inner.b, &y, &apps));
+            effects &= match (&x, &y) {
+                (None, _) => true,
+                (Some(_), None) => false,
+                (Some(x), Some(y)) => self.effect_le_in(y, x, &inner),
+            };
+            if let Some(y) = y {
+                inner.bounds.insert(l, y);
+            }
+        }
+        bounds && effects && self.sub(xa, xb, &inner, st)
+    }
+
+    /// Generative type `g` of `xa` ≤ of `xb`, of `sub_rules`: each argument
+    /// as `g`'s variance there says.
+    fn named_sub(&mut self, g: u32, mut xa: Vec<D>, xb: &[D], env: &BinderEnv, st: &mut SubState) -> bool {
+        let ra = |r: Region| env.region(&env.a, r);
+        let rb = |r: Region| env.region(&env.b, r);
+        let apps = self.arena.effect_apps.clone();
+        let ea = |e: &Effect| env.effect(&env.a, e, &apps);
+        let eb = |e: &Effect| env.effect(&env.b, e, &apps);
+        let flip = env.flip();
+        // A blobref to an array that runs to the end of the suffix,
+        // its length named where it was bound, is one of length
+        // `finite`, which means just that (`TODO.md` §77).
+        if g == BLOBREF_INDEX
+            && let ([_, D::Type(xf)], [_, D::Type(yf)]) = (&xa[..], xb)
+            && self.unsized_length(*yf) == Some(Size::Finite)
+            && matches!(self.unsized_length(*xf), Some(Size::Lin { k: 0, terms }) if matches!(terms[..], [(v, 1)] if self.to_end_sizes.contains(&v)))
+        {
+            xa[1] = D::Type(self.with_unsized_length(*xf, Size::Finite));
+        }
+        let variance = self.generatives[g as usize].variance.clone();
+        xa.iter().zip(xb).zip(variance).all(|((x, y), v)| match (x, y) {
+            (D::Type(x), D::Type(y)) => match v {
+                Variance::Co => self.sub(*x, *y, env, st),
+                Variance::Contra => self.sub(*y, *x, &flip, st),
+                Variance::Inv => self.sub(*x, *y, env, st) && self.sub(*y, *x, &flip, st),
+            },
+            // Frozen data is never written: at a region that
+            // outlives the one expected, as a pair's (Kayak's).
+            (D::Region(r), D::Region(s)) => ra(*r) == rb(*s) || (ra(*r).is_frozen() && self.frozen_le(ra(*r), rb(*s))),
+            (D::Size(m), D::Size(n)) => self.size_eq(m, n),
+            (D::Conv(Conv::Var(x)), D::Conv(Conv::Var(y))) => env.var(&env.a, *x) == env.var(&env.b, *y),
+            (D::Conv(c), D::Conv(d)) => c == d,
+            (D::Effect(d), D::Effect(e)) => match v {
+                Variance::Co => self.effect_le_in(&ea(d), &eb(e), env),
+                Variance::Contra => self.effect_le_in(&eb(e), &ea(d), env),
+                Variance::Inv => ea(d) == eb(e),
+            },
+            (D::Fun(f), D::Fun(g)) => self.fun_same(*f, *g, env, st),
+            _ => false,
+        })
     }
 
     /// `n`, without the mark `restrict` gives an abstract type it keeps

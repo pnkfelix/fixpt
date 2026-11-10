@@ -730,122 +730,10 @@ impl Checker {
             Ty::Var(v) => self.dvar_text(v, 'f'),
             Ty::Link(None) => "?".into(),
             Ty::Link(Some(_)) => unreachable!("resolved"),
-            Ty::Subr { conv, effect, params, result, spec } => {
-                let fasl = self.print_for_fasl.borrow().is_some();
-                let depth = self.print_subrs.get() + 1;
-                self.print_subrs.set(depth);
-                let mut ps: Vec<String> = params.iter().map(|p| self.show_ty_on(*p, path)).collect();
-                // The convention only where it is not the program's.
-                let c = if conv == self.conv_default { String::new() } else { format!("(conv {}) ", self.show_conv(conv)) };
-                // What a `bool` result proves, `(bool (then …) (else …))`,
-                // as written; a specification's parameters by their names,
-                // where it has clauses, and its clauses after the result.
-                let mut clauses = String::new();
-                let mut shown = self.show_ty_on(result, path);
-                if let Some(spec) = &spec {
-                    let mut spec = (**spec).clone();
-                    if let Some((then, els, rest)) = crate::specs::latent_split(&spec.ensures) {
-                        let side = |c: &Self, which: &str, ps: &[crate::ast::Prop]| format!("({which}{})", ps.iter().map(|p| format!(" {}", c.show_prop(p))).collect::<String>());
-                        shown = format!("(bool {} {})", side(self, "then", &then), side(self, "else", &els));
-                        spec.ensures = rest;
-                    }
-                    clauses = self.show_spec(&spec);
-                    if !clauses.is_empty() {
-                        for (p, n) in ps.iter_mut().zip(&spec.params) {
-                            if let Some(n) = n {
-                                *p = format!("({} : {p})", self.interner.name(*n));
-                            }
-                        }
-                    }
-                }
-                self.print_subrs.set(depth - 1);
-                // For a `.fasl`: the outermost one's parameters named, where
-                // a type in it selects from one (`Ty::ParamSel`).
-                let mark = "%p.";
-                if fasl && depth == 1 && clauses.is_empty() && (ps.iter().any(|p| p.contains(mark)) || shown.contains(mark)) {
-                    for (i, p) in ps.iter_mut().enumerate() {
-                        *p = format!("({mark}{} : {p})", i + 1);
-                    }
-                }
-                format!("(subr {c}{} ({}) {shown}{clauses})", self.show_effect(&effect), ps.join(" "))
-            }
-            Ty::Poly { binders, body } => {
-                let bs: Vec<String> = binders
-                    .iter()
-                    .map(|(v, k)| {
-                        let k = self.show_kind(*k);
-                        let d = if self.arena.is_distinct(*v) { " distinct" } else { "" };
-                        match (self.arena.bound(*v), self.arena.effect_bound(*v)) {
-                            (Some(b), _) => format!("({} {k} {}{d})", self.dvar_text(*v, 'b'), self.show_region(b)),
-                            (None, Some(e)) => format!("({} {k} (within {}))", self.dvar_text(*v, 'b'), self.show_effect(e)),
-                            (None, None) => format!("({} {k}{d})", self.dvar_text(*v, 'b')),
-                        }
-                    })
-                    .collect();
-                format!("(poly ({}) {})", bs.join(" "), self.show_ty_on(body, path))
-            }
+            Ty::Subr { .. } => self.show_subr_ty(t, path),
+            Ty::Poly { .. } => self.show_poly_ty(t, path),
             Ty::Ref(a, r) => format!("(ref {} {})", self.show_ty_on(a, path), self.show_region(r)),
-            Ty::Module { abs, descs, vals } => {
-                // For a `.fasl`, each abstract type named as its component,
-                // which a restricted one's is not (`%hidden:t`).
-                let renamed: Vec<_> = match self.print_for_fasl.borrow_mut().as_mut() {
-                    Some(m) => abs.iter().map(|(n, v)| (*v, m.insert(*v, self.interner.name(*n).to_string()))).collect(),
-                    None => Vec::new(),
-                };
-                let shown_as: Vec<_> = abs.iter().map(|(n, v)| (*v, self.print_abs.borrow_mut().insert(*v, self.interner.name(*n).to_string()))).collect();
-                let mut out = String::from("(moduleof");
-                for (n, v) in &abs {
-                    // Bound here, as a `poly`'s binders are.
-                    let bound = self.dvar_text(*v, 'h');
-                    let k = self.arena.dvar_kind_known(*v).unwrap_or(crate::ast::Kind::Type);
-                    out.push_str(&format!(" (abs {}{bound} {})", self.interner.name(*n), self.show_kind(k)));
-                }
-                // Each description's name, after it, names what it is.
-                let mark = self.print_names.borrow().len();
-                for (n, x) in descs.iter() {
-                    // An effect, a description function of no parameters.
-                    let shown = match self.arena.get(self.arena.resolve(*x)) {
-                        Ty::Lam { params, body: crate::ast::D::Effect(e) } if params.is_empty() => self.show_effect(e),
-                        // A description function, as its `dlambda`: a name
-                        // of one does not stand bare (`not_applied`).
-                        Ty::Lam { params, .. } if !params.is_empty() => self.show_ty_body(self.canon(self.arena.resolve(*x)), path),
-                        // What it is, not its own name: a `define-type` alias
-                        // of it, `(select m n)`, named `n` too; nor a module's
-                        // `select` (`module_selects`), which, of the module
-                        // printed, would name it by itself. Its class's first
-                        // node, as `show_ty_on` shows (`canon`).
-                        _ if self
-                            .abbreviation(self.arena.resolve(*x))
-                            .is_some_and(|a| a == self.interner.name(*n) || a.starts_with("(select ")) =>
-                        {
-                            self.show_ty_body(self.canon(self.arena.resolve(*x)), path)
-                        }
-                        _ => self.show_ty_on(*x, path),
-                    };
-                    out.push_str(&format!(" (desc {} {shown})", self.interner.name(*n)));
-                    self.print_names.borrow_mut().push((*n, *x));
-                }
-                for (n, x) in vals.iter() {
-                    out.push_str(&format!(" (val {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
-                }
-                self.print_names.borrow_mut().truncate(mark);
-                for (v, was) in shown_as {
-                    match was {
-                        Some(w) => self.print_abs.borrow_mut().insert(v, w),
-                        None => self.print_abs.borrow_mut().remove(&v),
-                    };
-                }
-                if let Some(m) = self.print_for_fasl.borrow_mut().as_mut() {
-                    for (v, was) in renamed {
-                        match was {
-                            Some(w) => m.insert(v, w),
-                            None => m.remove(&v),
-                        };
-                    }
-                }
-                out.push(')');
-                out
-            }
+            Ty::Module { .. } => self.show_module_ty(t, path),
             Ty::Select(m, n) => format!("(select {} {})", self.interner.name(m), self.interner.name(n)),
             // A call takes apart every one in the types its procedure's
             // type has, however deep (`dependent_args`): the outermost
@@ -933,6 +821,131 @@ impl Checker {
         }
         if mentions_token(&out, &name) { format!("(mu {name} {out})") } else { out }
     }
+
+    /// A `Ty::Subr`, of `show_ty_body`.
+    fn show_subr_ty(&self, t: TyId, path: &mut Vec<TyId>) -> String {
+        let Ty::Subr { conv, effect, params, result, spec } = self.arena.get(t).clone() else { unreachable!("show_ty_body: a Subr") };
+        let fasl = self.print_for_fasl.borrow().is_some();
+        let depth = self.print_subrs.get() + 1;
+        self.print_subrs.set(depth);
+        let mut ps: Vec<String> = params.iter().map(|p| self.show_ty_on(*p, path)).collect();
+        // The convention only where it is not the program's.
+        let c = if conv == self.conv_default { String::new() } else { format!("(conv {}) ", self.show_conv(conv)) };
+        // What a `bool` result proves, `(bool (then …) (else …))`,
+        // as written; a specification's parameters by their names,
+        // where it has clauses, and its clauses after the result.
+        let mut clauses = String::new();
+        let mut shown = self.show_ty_on(result, path);
+        if let Some(spec) = &spec {
+            let mut spec = (**spec).clone();
+            if let Some((then, els, rest)) = crate::specs::latent_split(&spec.ensures) {
+                let side = |c: &Self, which: &str, ps: &[crate::ast::Prop]| format!("({which}{})", ps.iter().map(|p| format!(" {}", c.show_prop(p))).collect::<String>());
+                shown = format!("(bool {} {})", side(self, "then", &then), side(self, "else", &els));
+                spec.ensures = rest;
+            }
+            clauses = self.show_spec(&spec);
+            if !clauses.is_empty() {
+                for (p, n) in ps.iter_mut().zip(&spec.params) {
+                    if let Some(n) = n {
+                        *p = format!("({} : {p})", self.interner.name(*n));
+                    }
+                }
+            }
+        }
+        self.print_subrs.set(depth - 1);
+        // For a `.fasl`: the outermost one's parameters named, where
+        // a type in it selects from one (`Ty::ParamSel`).
+        let mark = "%p.";
+        if fasl && depth == 1 && clauses.is_empty() && (ps.iter().any(|p| p.contains(mark)) || shown.contains(mark)) {
+            for (i, p) in ps.iter_mut().enumerate() {
+                *p = format!("({mark}{} : {p})", i + 1);
+            }
+        }
+        format!("(subr {c}{} ({}) {shown}{clauses})", self.show_effect(&effect), ps.join(" "))
+    }
+
+    /// A `Ty::Poly`, of `show_ty_body`.
+    fn show_poly_ty(&self, t: TyId, path: &mut Vec<TyId>) -> String {
+        let Ty::Poly { binders, body } = self.arena.get(t).clone() else { unreachable!("show_ty_body: a Poly") };
+        let bs: Vec<String> = binders
+            .iter()
+            .map(|(v, k)| {
+                let k = self.show_kind(*k);
+                let d = if self.arena.is_distinct(*v) { " distinct" } else { "" };
+                match (self.arena.bound(*v), self.arena.effect_bound(*v)) {
+                    (Some(b), _) => format!("({} {k} {}{d})", self.dvar_text(*v, 'b'), self.show_region(b)),
+                    (None, Some(e)) => format!("({} {k} (within {}))", self.dvar_text(*v, 'b'), self.show_effect(e)),
+                    (None, None) => format!("({} {k}{d})", self.dvar_text(*v, 'b')),
+                }
+            })
+            .collect();
+        format!("(poly ({}) {})", bs.join(" "), self.show_ty_on(body, path))
+    }
+
+    /// A `Ty::Module`, of `show_ty_body`.
+    fn show_module_ty(&self, t: TyId, path: &mut Vec<TyId>) -> String {
+        let Ty::Module { abs, descs, vals } = self.arena.get(t).clone() else { unreachable!("show_ty_body: a Module") };
+        // For a `.fasl`, each abstract type named as its component,
+        // which a restricted one's is not (`%hidden:t`).
+        let renamed: Vec<_> = match self.print_for_fasl.borrow_mut().as_mut() {
+            Some(m) => abs.iter().map(|(n, v)| (*v, m.insert(*v, self.interner.name(*n).to_string()))).collect(),
+            None => Vec::new(),
+        };
+        let shown_as: Vec<_> = abs.iter().map(|(n, v)| (*v, self.print_abs.borrow_mut().insert(*v, self.interner.name(*n).to_string()))).collect();
+        let mut out = String::from("(moduleof");
+        for (n, v) in &abs {
+            // Bound here, as a `poly`'s binders are.
+            let bound = self.dvar_text(*v, 'h');
+            let k = self.arena.dvar_kind_known(*v).unwrap_or(crate::ast::Kind::Type);
+            out.push_str(&format!(" (abs {}{bound} {})", self.interner.name(*n), self.show_kind(k)));
+        }
+        // Each description's name, after it, names what it is.
+        let mark = self.print_names.borrow().len();
+        for (n, x) in descs.iter() {
+            // An effect, a description function of no parameters.
+            let shown = match self.arena.get(self.arena.resolve(*x)) {
+                Ty::Lam { params, body: crate::ast::D::Effect(e) } if params.is_empty() => self.show_effect(e),
+                // A description function, as its `dlambda`: a name
+                // of one does not stand bare (`not_applied`).
+                Ty::Lam { params, .. } if !params.is_empty() => self.show_ty_body(self.canon(self.arena.resolve(*x)), path),
+                // What it is, not its own name: a `define-type` alias
+                // of it, `(select m n)`, named `n` too; nor a module's
+                // `select` (`module_selects`), which, of the module
+                // printed, would name it by itself. Its class's first
+                // node, as `show_ty_on` shows (`canon`).
+                _ if self
+                    .abbreviation(self.arena.resolve(*x))
+                    .is_some_and(|a| a == self.interner.name(*n) || a.starts_with("(select ")) =>
+                {
+                    self.show_ty_body(self.canon(self.arena.resolve(*x)), path)
+                }
+                _ => self.show_ty_on(*x, path),
+            };
+            out.push_str(&format!(" (desc {} {shown})", self.interner.name(*n)));
+            self.print_names.borrow_mut().push((*n, *x));
+        }
+        for (n, x) in vals.iter() {
+            out.push_str(&format!(" (val {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
+        }
+        self.print_names.borrow_mut().truncate(mark);
+        for (v, was) in shown_as {
+            match was {
+                Some(w) => self.print_abs.borrow_mut().insert(v, w),
+                None => self.print_abs.borrow_mut().remove(&v),
+            };
+        }
+        if let Some(m) = self.print_for_fasl.borrow_mut().as_mut() {
+            for (v, was) in renamed {
+                match was {
+                    Some(w) => m.insert(v, w),
+                    None => m.remove(&v),
+                };
+            }
+        }
+        out.push(')');
+        out
+    }
+
 }
 
 /// What brackets a variable's mark in [`Checker::show_apart`]'s texts.
