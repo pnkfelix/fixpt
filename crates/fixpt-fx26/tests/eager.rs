@@ -300,3 +300,29 @@ fn the_driver_survives_collections_anywhere() {
         }
     }
 }
+
+/// The reader's lowering, as a REPL's start loads it from the cache
+/// (`session.rs`'s `load_lowered`, `TODO.md` §237): written and read back,
+/// the same code, every piece; a file cut short, or with more after it,
+/// is none.
+#[test]
+fn the_readers_lowering_reads_back_as_it_was_written() {
+    use fixpt_fx26::sx::{Code, Sx};
+    let reader = fixpt_fx26::FRONT_END_FILES.iter().position(|(n, _)| *n == "reader.fx").expect("listed");
+    let text = fixpt_fx26::FRONT_END_FILES[..=reader].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
+    let code = fixpt_fx26::session::compile_program_as(&text, fixpt_fx26::session::READER_PREFIX).expect("compiles").all_code();
+    let bytes = code.encode();
+    assert!(Code::decode(&bytes) == Some(code), "read back as written");
+    assert!(Code::decode(&bytes[..bytes.len() - 1]).is_none(), "cut short");
+    assert!(Code::decode(&[bytes.as_slice(), &[0]].concat()).is_none(), "more after it");
+    // Each kind of piece, a float by its bits.
+    let every = Code(vec![Sx::Dotted(
+        vec![Sx::sym("a b"), Sx::Int(-(1i128 << 100)), Sx::Float(-0.0), Sx::Float(f64::INFINITY), Sx::Str("\"λ\"\n".into()), Sx::Char('λ')],
+        Box::new(Sx::Vector(vec![Sx::Bool(true), Sx::Bool(false), Sx::List(vec![]), Sx::Keyword("k".into())])),
+    )]);
+    let back = Code::decode(&every.encode()).expect("reads");
+    assert_eq!(back, every);
+    let Sx::Dotted(xs, _) = &back.0[0] else { panic!("a dotted list") };
+    assert_eq!(xs[2], Sx::Float(-0.0));
+    assert!(matches!(xs[2], Sx::Float(x) if x.is_sign_negative()), "-0.0 kept by its bits");
+}

@@ -151,6 +151,125 @@ impl Code {
         let span = Span::new(file, 0, 0);
         self.0.iter().map(|x| x.syntax(&mut rt.interner, span)).collect()
     }
+
+    /// As bytes, for a cache (`session.rs`'s `load_lowered`): each piece
+    /// exactly, a float by its bits; read back by [`Code::decode`].
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        put_len(&mut out, self.0.len());
+        for x in &self.0 {
+            x.encode(&mut out);
+        }
+        out
+    }
+
+    /// What [`Code::encode`] made of some code: that code; none if `bytes`
+    /// are not all of one.
+    pub fn decode(bytes: &[u8]) -> Option<Code> {
+        let mut at = 0;
+        let n = get_len(bytes, &mut at)?;
+        let mut xs = Vec::with_capacity(n.min(bytes.len()));
+        for _ in 0..n {
+            xs.push(Sx::decode(bytes, &mut at)?);
+        }
+        (at == bytes.len()).then_some(Code(xs))
+    }
+}
+
+impl Sx {
+    fn encode(&self, out: &mut Vec<u8>) {
+        let text = |out: &mut Vec<u8>, tag: u8, s: &str| {
+            out.push(tag);
+            put_len(out, s.len());
+            out.extend(s.as_bytes());
+        };
+        let items = |out: &mut Vec<u8>, xs: &[Sx]| {
+            put_len(out, xs.len());
+            for x in xs {
+                x.encode(out);
+            }
+        };
+        match self {
+            Sx::Sym(s) => text(out, 0, s),
+            Sx::Int(n) => {
+                out.push(1);
+                out.extend(n.to_le_bytes());
+            }
+            Sx::Float(x) => {
+                out.push(2);
+                out.extend(x.to_bits().to_le_bytes());
+            }
+            Sx::Str(s) => text(out, 3, s),
+            Sx::Char(c) => {
+                out.push(4);
+                out.extend((*c as u32).to_le_bytes());
+            }
+            Sx::Bool(b) => out.push(if *b { 6 } else { 5 }),
+            Sx::List(xs) => {
+                out.push(7);
+                items(out, xs);
+            }
+            Sx::Dotted(xs, tail) => {
+                out.push(8);
+                items(out, xs);
+                tail.encode(out);
+            }
+            Sx::Vector(xs) => {
+                out.push(9);
+                items(out, xs);
+            }
+            Sx::Keyword(s) => text(out, 10, s),
+        }
+    }
+
+    fn decode(bytes: &[u8], at: &mut usize) -> Option<Sx> {
+        let tag = *bytes.get(*at)?;
+        *at += 1;
+        let take = |at: &mut usize, n: usize| -> Option<&[u8]> {
+            let b = bytes.get(*at..at.checked_add(n)?)?;
+            *at += n;
+            Some(b)
+        };
+        let text = |at: &mut usize| -> Option<String> {
+            let n = get_len(bytes, at)?;
+            String::from_utf8(take(at, n)?.to_vec()).ok()
+        };
+        let items = |at: &mut usize| -> Option<Vec<Sx>> {
+            let n = get_len(bytes, at)?;
+            let mut xs = Vec::with_capacity(n.min(bytes.len()));
+            for _ in 0..n {
+                xs.push(Sx::decode(bytes, at)?);
+            }
+            Some(xs)
+        };
+        Some(match tag {
+            0 => Sx::Sym(text(at)?),
+            1 => Sx::Int(i128::from_le_bytes(take(at, 16)?.try_into().ok()?)),
+            2 => Sx::Float(f64::from_bits(u64::from_le_bytes(take(at, 8)?.try_into().ok()?))),
+            3 => Sx::Str(text(at)?),
+            4 => Sx::Char(char::from_u32(u32::from_le_bytes(take(at, 4)?.try_into().ok()?))?),
+            5 => Sx::Bool(false),
+            6 => Sx::Bool(true),
+            7 => Sx::List(items(at)?),
+            8 => {
+                let xs = items(at)?;
+                Sx::Dotted(xs, Box::new(Sx::decode(bytes, at)?))
+            }
+            9 => Sx::Vector(items(at)?),
+            10 => Sx::Keyword(text(at)?),
+            _ => return None,
+        })
+    }
+}
+
+fn put_len(out: &mut Vec<u8>, n: usize) {
+    out.extend((n as u64).to_le_bytes());
+}
+
+fn get_len(bytes: &[u8], at: &mut usize) -> Option<usize> {
+    let b = bytes.get(*at..*at + 8)?;
+    *at += 8;
+    usize::try_from(u64::from_le_bytes(b.try_into().ok()?)).ok()
 }
 
 impl From<Sx> for Code {

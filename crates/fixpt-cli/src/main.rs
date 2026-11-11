@@ -90,7 +90,8 @@ usage:
                                  (`main`, or what it gave `dump-heap!`)
   fixpt machines                 the machines FX-26 runs on, and which run here
   fixpt prewarm                  make the caches of the FX-26 front end, both
-                                 kinds, before they are wanted
+                                 kinds, and of its reader, before they are
+                                 wanted
   fixpt bench [FILE...]          time FX-26 programs on each machine (`fixpt bench --help`)
   fixpt repl                     the REPL of the language (`fixpt fx26` too)
   fixpt scheme                   the Scheme REPL: `fixpt --dialect scheme repl`
@@ -685,7 +686,8 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
 ];
 
 /// `fixpt prewarm`: the two caches of the FX-26 front end made now
-/// (`front_end_cache`), shared by every executable built from the same
+/// (`front_end_cache`), and the reader's lowering (`load_lowered`), which a
+/// REPL's start reads, shared by every executable built from the same
 /// sources: the one for its register code, which library sessions (the
 /// tests') and `fx-regs-fxjit-nativecc` read, and the one for its native
 /// code, which the CLI reads wherever native code runs (`TODO.md` §168).
@@ -726,6 +728,16 @@ fn prewarm() -> i32 {
                 eprintln!("fixpt: prewarm: cannot run {}: {e}", exe.display());
                 status = 1;
             }
+        }
+    }
+    // The reader and parser, checked, licensed and lowered, as a REPL's
+    // start loads them (`load_lowered`'s cache, `TODO.md` §237).
+    let started = std::time::Instant::now();
+    match fixpt_fx26::session::load_reader_alone(&mut Session::new()) {
+        Ok(()) => println!("; the reader's lowering cached, {:.1} s", started.elapsed().as_secs_f64()),
+        Err(e) => {
+            eprintln!("fixpt: prewarm: the reader: {e}");
+            status = 1;
         }
     }
     status

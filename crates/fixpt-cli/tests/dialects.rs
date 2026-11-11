@@ -685,7 +685,7 @@ fn fx26_machines_by_name() {
 }
 
 /// `fixpt prewarm` makes both of the executable's caches of the front end,
-/// each said; and with no cache, says it keeps none.
+/// and its reader's, each said; and with no cache, says it keeps none.
 #[test]
 fn prewarm_makes_both_caches_of_the_front_end() {
     let out = Command::new(FIXPT).arg("prewarm").output().expect("runs");
@@ -695,6 +695,7 @@ fn prewarm_makes_both_caches_of_the_front_end() {
     if fixpt_native::NATIVE_CONVENTION_AVAILABLE {
         assert!(said.contains("the front end's native code cached"), "{said}");
     }
+    assert!(said.contains("the reader's lowering cached"), "{said}");
     let out = Command::new(FIXPT).arg("prewarm").env("FIXPT_NO_CACHE", "1").output().expect("runs");
     assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("keeps no cache"));
 }

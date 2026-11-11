@@ -373,20 +373,64 @@ fn entry_defines(entries: &[&str], native: &str, prefix: &str) -> String {
 }
 
 /// `text`, the front end or its first files, checked, licensed as the
-/// reader, lowered and loaded.
+/// reader, lowered and loaded: the lowering kept in the cache once its
+/// licence is checked, and read from there by the next process of this
+/// build, which neither checks nor lowers it again (`TODO.md` §237).
 fn load_lowered(scheme: &mut Session, text: &str) -> Result<(), String> {
-    // An error in the front end says where in its files.
-    let mut compiled = compile_program_as(text, READER_PREFIX)
-        .map_err(|e| format!("the front end, {}: {}", crate::front_end_location(e.span.start as usize), e.message))?;
-    compiled.checker.reader_licence()?;
+    let cache = lowered_cache(text);
+    let cached = cache.as_ref().and_then(|(path, key)| read_lowered(path, *key));
+    let code = match cached {
+        Some(code) => code,
+        None => {
+            // An error in the front end says where in its files.
+            let mut compiled = compile_program_as(text, READER_PREFIX)
+                .map_err(|e| format!("the front end, {}: {}", crate::front_end_location(e.span.start as usize), e.message))?;
+            compiled.checker.reader_licence()?;
+            let code = compiled.all_code();
+            if let Some((path, key)) = &cache {
+                let mut bytes = key.to_le_bytes().to_vec();
+                bytes.extend(code.encode());
+                write_cache(path, &bytes);
+            }
+            code
+        }
+    };
     // The front end is the session's own, licensed code: loading it is not
     // the program's work, and counts against no step limit (as reading
     // with it does not, `read_with_own_reader`).
     let limit = scheme.engine.step_limit();
     scheme.engine.set_step_limit(None);
-    let r = compiled.load_into(scheme);
+    let r = load_code(scheme, &code);
     scheme.engine.set_step_limit(limit);
     r
+}
+
+/// Where the lowering of `text` as the reader is cached, if anywhere, and
+/// the key its file starts with: as the front end's register code is
+/// (`front_end_cache`), a file for each build and text, the key a hash of
+/// the text, the prefix and the build. `FIXPT_NO_CACHE` turns it off.
+fn lowered_cache(text: &str) -> Option<(std::path::PathBuf, u64)> {
+    use std::hash::{Hash, Hasher};
+    if std::env::var_os("FIXPT_NO_CACHE").is_some() {
+        return None;
+    }
+    let build = env!("FIXPT_BUILD_HASH");
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    (text, READER_PREFIX, build).hash(&mut key);
+    let key = key.finish();
+    let dir = crate::fasl::cache_dir()?;
+    Some((dir.join(format!("front-end-reader-{key:016x}.code")), key))
+}
+
+/// The lowering kept at `path`, if its file starts with `key` and the rest
+/// is all of one.
+fn read_lowered(path: &std::path::Path, key: u64) -> Option<Code> {
+    let bytes = std::fs::read(path).ok()?;
+    let (head, rest) = bytes.split_at_checked(8)?;
+    if u64::from_le_bytes(head.try_into().ok()?) != key {
+        return None;
+    }
+    Code::decode(rest)
 }
 
 /// A failure of the lowered Scheme, said as the other machines say it
@@ -769,8 +813,9 @@ fn write_cache(path: &std::path::Path, bytes: &[u8]) {
 /// another branch or profile still in use.
 const CACHE_LIFE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
 /// And at most this many front-end caches, the most recently used: two
-/// kinds for each of a few builds (debug, release, a second tree).
-const CACHE_MOST: usize = 8;
+/// kinds and the reader's lowering (`lowered_cache`) for each of a few
+/// builds (debug, release, a second tree).
+const CACHE_MOST: usize = 12;
 
 /// The caches in `dir` let go: front-end caches and the `.fasl`s of the
 /// module files built in (`fasl::path_for_load`, made again by the next run
@@ -828,20 +873,30 @@ pub fn load_bootstrap_program(scheme: &mut Session) -> Result<(), String> {
 impl Compiled {
     /// Load into `scheme`: the FX-26 runtime, then the program.
     pub fn load_into(&self, scheme: &mut Session) -> Result<(), String> {
-        if !scheme.is_bound("%fx26-unit") {
-            scheme.eval_str("<fx26-runtime>", RUNTIME).map_err(|e| e.to_string())?;
-        }
-        // All in one evaluation: each recompiles the whole of the session's
-        // program so far (`Prepared::update`), so one per form made loading
-        // the front end quadratic in its forms.
+        load_code(scheme, &self.all_code())
+    }
+
+    /// All its forms' code, in order, as one.
+    pub fn all_code(&self) -> Code {
         let mut all = Code::default();
         for c in &self.code {
             all.extend(c.clone());
         }
-        let forms = all.syntax(scheme.runtime_unrooted(), "<fx26>");
-        scheme.eval_forms(&forms).map_err(|e| e.to_string())?;
-        Ok(())
+        all
     }
+}
+
+/// Lowered code `all` loaded into `scheme`, the runtime first if it is not.
+/// All in one evaluation: each recompiles the whole of the session's
+/// program so far (`Prepared::update`), so one per form made loading the
+/// front end quadratic in its forms.
+fn load_code(scheme: &mut Session, all: &Code) -> Result<(), String> {
+    if !scheme.is_bound("%fx26-unit") {
+        scheme.eval_str("<fx26-runtime>", RUNTIME).map_err(|e| e.to_string())?;
+    }
+    let forms = all.syntax(scheme.runtime_unrooted(), "<fx26>");
+    scheme.eval_forms(&forms).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// What a form became, written out only when it is shown (`,code`): the

@@ -5651,6 +5651,17 @@ after; `dialects fx26_machines_by_name`, `help
 fx26_apropos_searches_every_namespace`, `native_reach
 a_definition_calling_itself_in_tail_position_loops`, alone.
 
+Done (2026-11-11), the second way: the first does nothing, since the
+parser itself loads the expander, its walk and its shaper (`parser-top.fx`),
+which it needs; the entries only name what it loads (without them, REPL
+start was 0.79 s user as with them, x86_64 Linux, release). Now
+`load_lowered` keeps the lowering it made, once its licence is checked, in
+the user's cache directory (`front-end-reader-KEY.code`), its key a hash of
+the text, the prefix and the build, and reads it back there, neither
+checking nor lowering again; `fixpt prewarm` makes it; `FIXPT_NO_CACHE`
+turns it off. REPL start 0.80 s to 0.15 s user (0.10 s at 10-28): what is
+left is loading the lowered Scheme, and the process's own start.
+
 ## 238. Caching across the board (the user's, 2026-11-11)
 
 "We need to be doing more aggressive caching across the board. We're
