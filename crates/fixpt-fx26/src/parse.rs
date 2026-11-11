@@ -315,24 +315,10 @@ impl Checker {
     }
 
     pub(crate) fn read_qualified<T>(&mut self, s: &Syntax, read: impl FnOnce(&mut Self, &Syntax) -> R<T>) -> Option<R<T>> {
-        let m = s.as_symbol()?;
-        // A procedural macro's alias nothing here binds: its name, as the
-        // top level reads it (`macros::procedural`).
-        let n = match self.unbound_alias_desc(m) {
-            Some(n) => n,
-            None => self.toplevel_unqualified(m)?,
-        };
+        // (A procedural macro's alias is resolved as it is expanded:
+        // `Macros::aliases_resolved`.)
+        let n = self.toplevel_unqualified(s.as_symbol()?)?;
         Some(self.at_toplevel(|c| read(c, &Syntax::symbol(s.span, n))))
-    }
-
-    /// The name alias `m` stands for, if it is a procedural macro's alias
-    /// (`%~N:x`) and no description in scope here has it.
-    fn unbound_alias_desc(&mut self, m: Sym) -> Option<Sym> {
-        let base = crate::macros::procedural::alias_base(self.name(m))?.to_string();
-        if self.lookup_desc(m).is_some() {
-            return None;
-        }
-        Some(self.interner.intern(&base))
     }
 
     fn items<'s>(&self, s: &'s Syntax, what: &str) -> R<&'s [Syntax]> {

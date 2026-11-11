@@ -138,6 +138,10 @@ pub(crate) struct Known {
     /// Each top-level form before and after its shapes were written, if
     /// they are kept (`Checker::keep_shapes_seen`).
     seen: Option<Vec<(String, String)>>,
+    /// Each alias an expansion defined at the top level (`(define %~N:x
+    /// …)`), a description's if marked: a name of its own wherever later
+    /// forms name it (`Macros::aliases_resolved`).
+    pub(crate) aliases_defined: std::collections::HashSet<(Sym, bool)>,
     /// The shapes named by `define-syntax` (`(define-syntax s (modnames …))`,
     /// `binding-shapes.md`), each its `modnames` form, by its name.
     named: HashMap<Sym, Syntax>,
@@ -1185,6 +1189,14 @@ impl Macros {
     /// load cycle finds none.
     pub(crate) fn file_shape_begun(&mut self, key: String) {
         self.withs.shapes.files.insert(key, FileShape::default());
+    }
+}
+
+impl Known {
+    /// Whether the top level defines `n`, a description if `desc`, as the
+    /// forms walked before found it.
+    pub(crate) fn top_has(&self, n: Sym, desc: bool) -> bool {
+        self.aliases_defined.contains(&(n, desc)) || if desc { self.top.descs.contains_key(&n) } else { self.top.vals.contains_key(&n) }
     }
 }
 

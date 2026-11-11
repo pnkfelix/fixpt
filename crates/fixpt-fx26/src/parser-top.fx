@@ -33,7 +33,7 @@
 ;; forms open written in (`macros-shapes.fx`).
 (define shapes-module ((proj (load-module "fx26:macros-shapes.fx") rs re rm rc rp)))
 (import shapes-module top-shaped forms-written-in shapes-at! shapes-after! files-shaped
-        shared-shaped! shape-definition? shape-defined! sealed-written)
+        shared-shaped! shape-definition? shape-defined! sealed-written aliases-resolved)
 (define imports-module ((proj (load-module "fx26:macros-imports.fx") rs re rm rc rp)))
 (define templates-module (with imports-module templates-module))
 (define macros-module (with templates-module macros-module))
@@ -254,7 +254,7 @@
   (lambda (x)
     (if (or (form-of? x 'include) (import? x) (datatype? x))
         x
-        (let ((shaped (top-shaped (sealed-written pfail-at x))))
+        (let ((shaped (top-shaped (aliases-resolved pfail-at (sealed-written pfail-at x)))))
           (begin (files-written!) shaped)))))
 ;; The hidden globals of the files loaded, `ts`, each noted with its file's
 ;; shape (`shared-shaped!`), for the forms after: its definition is made,
@@ -293,7 +293,8 @@
   (lambda (cs)
     (if (null? cs)
         nil
-        (append-tops (parse-made (expand pfail-at (car cs))) (parse-checks (cdr cs))))))
+        (append-tops (parse-made (aliases-resolved pfail-at (expand pfail-at (car cs))))
+                     (parse-checks (cdr cs))))))
 ;; A `define-syntax` (or `define-syntax-rec`) of a name a form before this
 ;; parse defined as a global: refused, where it is
 ;; (`Checker::macro_expanded`, which knows the globals checked; a program's

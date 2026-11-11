@@ -611,3 +611,95 @@ would need one that makes a new product of the module inside.
 
 Step 2 is done. Next, step 3: renaming hygiene, `with` and `include` as
 visible binders, a file's own macros (Heist's (a)).
+
+## Step 3, proposed (2026-11-10): one mechanism for hygiene, renaming
+
+**The rule** is ordinary hygiene: a template's free name refers to the
+binding visible where its macro is defined, whatever binds the name where
+the macro is used; a template's own binders bind only the template's
+references. What changes is how both front ends make it so: one
+mechanism for every macro, `syntax-rules` and procedural alike, at the
+top level, imported, and in a file (the user's, 2026-11-10: one mechanism
+is easier to understand, and is what `expand-once` and `local-expand`
+would build on). Qualifiers (`(with #%toplevel x)`, `(with %shared:key
+x)`) stay as syntax a program may write, no longer what expansion writes.
+
+**Marks.** Expansion writes each name a template introduces as an alias of
+its use, `%~N:x`, `N` the use's expansion number, as procedural macros'
+names are written now: a free name's meaning is `x` as bound in the
+macro's definition environment (the top level, a file's items, the
+standard environment); a template's binder is the use's own, fresh. An
+alias says where a name came from and nothing else, so partly expanded
+syntax keeps it (an `expand-once` gives back syntax with its marks).
+
+**Resolution, after expansion.** When a top-level form, or a module
+file's items, are fully expanded, a pass over the program's walk (step 1)
+resolves every alias, and no alias reaches the checkers:
+- A template's binder and its references: a fresh name, as now.
+- A free alias `%~N:x`: what `x` is in `N`'s definition environment is
+  its intended binding. A top-level macro's is the top level's, written so,
+  `(with #%toplevel x)` or `#%toplevel:x`, which nothing captures (stage 1,
+  built: the messages a reference to a name the top level lacks gives stay
+  as they are). A file's own macro's is its file's item, which no
+  qualifier names: the alias becomes `x`, and what would capture it is
+  dealt with as below.
+- Captured by a use's binder that can be renamed (a `lambda`'s or `let`'s
+  parameter, a `tagcase` arm's): that binder, and every reference the walk
+  found bound to it, renamed fresh; then the alias becomes `x`.
+- Captured by a name a module gives, a `with`'s or `include`'s: the
+  `with`'s body given `x` from outside under a fresh name, `(let ((x%k
+  x)) (with m body))` with the alias made `x%k`, for a value. Nothing of
+  `m` is renamed: its names are its interface. A type, effect or
+  function of descriptions the same way, by `let-desc` (below): `(let-desc
+  ((t%k t)) (with m body))`.
+- Captured by an item of an inner module that defines `x` itself: the
+  same, the outer `x` named fresh before the module; the module's own
+  `x` keeps its name, which is its interface.
+So no capture is refused: each is resolved by naming the outer binding
+afresh where the capture is, never by renaming what a module gives.
+
+**A file's own macros** (Heist's (a)) then need nothing of their own: a
+file's `define-syntax` items are macros of the file, defined before the
+items that use them, their definition environment the file's items (any
+of them, hidden ones too) and the standard environment.
+
+**Messages** show names as written: an alias and a fresh name are shown as
+their base, as procedural aliases are now (`TODO.md` §228), and the
+checkers' special cases for unbound aliases retire with the qualifiers.
+
+**Held alike.** The walk, the renaming and the records are held between
+the front ends as in steps 1 and 2 (`tests/scopes.rs`), on the test
+programs and on new ones for each kind of capture, and every expansion of
+the suite checks and runs as before: the change is of mechanism, not of
+meaning.
+
+**Local binding forms** (the user's, 2026-11-10): each namespace has one,
+so that every capture is resolved where it is, and a program can bind as
+locally as a macro does.
+- `(let-desc ((name description) …) body …)`: descriptions bound in
+  `body`, as `define-type`, `define-effect` and a description function's
+  `define-type` bind them at the top level or in a module. Each clause's
+  kind is read from its description (the user's, 2026-11-10): an effect
+  form, a `dlambda`, or else a type; a bare name, of what it names.
+  Recursive descriptions stay `dletrec`'s.
+- `(let-syntax ((name transformer) …) body …)` (R7RS's, with FX-26's
+  signatures): macros bound in `body` alone, the narrower route the
+  2026-11-08 leaning named (`typed-macros.md`).
+
+**Order of work.** (1) The resolution pass, in both front ends, for
+procedural aliases (the checkers' special cases retired). (2) `syntax-rules`
+templates writing aliases, not qualifiers, top level and imported. (3) A
+module file's own macros. (4) `let-desc`. (5) Captures by `with`,
+`include` and inner modules resolved by naming the outer binding afresh
+(`let`, `let-desc`). (6) `let-syntax`.
+
+**A property to prove, one day** (the user's, 2026-11-10): full expansion
+is the same as repeated `expand-once` steps. What keeps it within reach:
+- Resolution reads the fully expanded term and its marks alone, never how
+  it was reached: aliases resolved once, after expansion, as now. An
+  `expand-once` gives back syntax with its marks, unresolved.
+- Marks are stable across steps: an expansion's aliases the same whether
+  its use is expanded inside a larger expansion or alone. Expansions are
+  numbered in the order they happen today, which a proof would have to
+  number by something intrinsic (the use's place) or quotient by (marks
+  equal up to renumbering). A gap noted, not yet closed.

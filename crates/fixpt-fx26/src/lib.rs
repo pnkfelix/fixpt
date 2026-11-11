@@ -1132,7 +1132,6 @@ pub const LAYOUT: &str = include_str!("layout.fx");
 pub const TABLE: &str = include_str!("table.fx");
 pub const READINGS: &str = include_str!("readings.fx");
 
-mod aliases;
 pub mod check;
 pub mod compare;
 mod convention;

@@ -1042,7 +1042,8 @@ impl Checker {
                 let mut out = Vec::new();
                 for n in ns {
                     for c in macros.template_checks(n, &mut interner)? {
-                        out.push(macros.expand(&c, &mut interner)?);
+                        let e = macros.expand(&c, &mut interner)?;
+                        out.push(macros.aliases_resolved(&e, &mut interner)?);
                     }
                 }
                 Ok(out)
@@ -1051,7 +1052,11 @@ impl Checker {
             // Each shape a name stands for written in where a value supplies
             // its types (`Macros::sealed_written`): what is expanded is
             // what a driver hands the checker written in FX-26.
-            macros.expand_top(&form, &mut interner).and_then(|fs| fs.iter().map(|f| macros.sealed_written(f, &mut interner)).collect())
+            // And each alias it leaves free the name it stands for
+            // (`Macros::aliases_resolved`).
+            macros.expand_top(&form, &mut interner).and_then(|fs| {
+                fs.iter().map(|f| macros.sealed_written(f, &mut interner).and_then(|f| macros.aliases_resolved(&f, &mut interner))).collect()
+            })
         };
         self.macros = macros;
         self.interner = interner;
@@ -1413,7 +1418,7 @@ impl Checker {
                 Ok(Top::DefineType { name, ty })
             }
             _ => {
-                let e = self.parse_top_exp(form, &[])?;
+                let e = self.parse_exp(form)?;
                 let (ty, effect) = self.synth(e)?;
                 Ok(Top::Exp(Checked { ty, effect, exp: e }))
             }
@@ -1485,7 +1490,7 @@ impl Checker {
                 // (lambda ((x t)) x))` means what a `plambda` would.
                 let depth = self.dscope.len();
                 self.bind_signature(ty);
-                let e = self.parse_top_exp(init, &[name]);
+                let e = self.parse_exp(init);
                 self.dscope.truncate(depth);
                 let e = e?;
                 if infer && !self.is_lambda(e) {
@@ -1588,7 +1593,7 @@ impl Checker {
             }
             [_, name, init] => {
                 let name = self.binder_name(name)?;
-                let e = self.parse_top_exp(init, &[name])?;
+                let e = self.parse_exp(init)?;
                 let (ty, effect) = self.synth(e)?;
                 if self.is_lambda(e) {
                     self.known.insert((name, self.env.len()));
@@ -1696,11 +1701,10 @@ impl Checker {
                 return Err(FxError::at(span, "`(define-rec (name type lambda) …)`"));
             }
             let mut bindings = Vec::new();
-            let group: Vec<Sym> = parts.iter().map(|(n, _, _)| *n).collect();
             for (name, ty, init) in parts {
                 let d = self.dscope.len();
                 self.bind_signature(ty);
-                let e = self.parse_top_exp(&init, &group);
+                let e = self.parse_exp(&init);
                 self.dscope.truncate(d);
                 let e = e?;
                 if !self.is_lambda(e) {

@@ -65,6 +65,7 @@ use std::rc::Rc;
 
 mod infer;
 pub(crate) mod shapes;
+pub(crate) mod hygiene;
 pub(crate) mod procedural;
 
 /// A syntax type (Herman's `σ`).

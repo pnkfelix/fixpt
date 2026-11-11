@@ -24,7 +24,7 @@
         file-shape-keyed file-shapes files-given form-node? head-of inputs-at input-key?
         load-input-at? members-onto member-shape
         name-in-list? resolve result-of sh-fun sh-fun-of sh-module shaper-begin! shapes-reset!
-        shaping-top top-descs top-vals with-member globals-given!
+        shaping-top top-descs top-vals with-member globals-given! binder-named
         (type asked file-shape shapes members))
 
 ;;; ------------------------------------------------------------ a form's shapes written
@@ -520,3 +520,147 @@
                   (file-shape-keyed (substring name 8 (string-length name)) (get file-shapes))
                   nil)))
       (if (null? f) #u (set top-vals (with-member (get top-vals) n (extract (car f) 2)))))))
+
+;;; ------------------------------------------------------------ aliases resolved
+
+;; Hygiene, one mechanism (`binding-shapes.md`, step 3; `macros/hygiene.rs`):
+;; top-level form `x`, after expansion, each alias an expansion left free,
+;; `%~N:x`, made the name it stands for where its macro is defined, a
+;; top-level macro's the top level's, written so (`(with #%toplevel x)`,
+;; `#%toplevel:x`); an alias the expansion bound, here or at the top level
+;; before, a name of its own. Itself if it has no alias. No alias reaches
+;; the checker.
+(define aliases-resolved (->* (fails syn) syn)
+  (lambda (fail x)
+    (if (not (alias-in? x))
+        x
+        (let* ((w (walked fail x #t)) (root (extract w 1)) (found (extract w 2))
+               (written (aliases-written found nil)))
+          (begin (aliases-defined-in fail root x)
+                 (with-parts x nil written))))))
+;; Whether `s` holds an alias, outside quotes.
+(define alias-in? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (atom (d a b x) (and (syn-symbol? s) (not (string=? (alias-base (syn-name s)) ""))))
+      (lst (items d a b x)
+        (let ((h (head-of s)))
+          (and (not (or (string=? h "quote") (string=? h "quasiquote") (string=? h "%datum")))
+               (aliases-in? items))))
+      (dotted (items t d a b x) (or (aliases-in? items) (alias-in? t)))
+      (else y #f))))
+(define aliases-in? (->* (syns-a) bool)
+  (lambda (xs) (and (not (null? xs)) (or (alias-in? (car xs)) (aliases-in? (cdr xs))))))
+;; Each free alias `found` reaches, by its node's path, what it is written as.
+(define-type parts (listof (tupleof addr syn) acyclic))
+(define aliases-written (->* (found parts) parts)
+  (lambda (fs out)
+    (if (null? fs)
+        out
+        (aliases-written
+          (cdr fs)
+          (let ((at (extract (car fs) 1)) (env (extract (car fs) 2)))
+            (tagcase (node-kids at)
+              (k-ref (n d free)
+                (let ((base (alias-base (symbol->string n))))
+                  (if (or (string=? base "") (bound-in? n d env) (alias-defined? n d))
+                      out
+                      (cons (tuple (node-path at) (top-written base d (node-syn at)))
+                            out))))
+              (else y out)))))))
+;; The top level's `base`, a description's if `d`, at `s`'s place.
+(define top-written (->* (string bool syn) syn)
+  (lambda (base d s)
+    (let* ((ab (syn-span s)) (a (extract ab 1)) (b (extract ab 2)))
+      (if d
+          (mk-symbol (string-append "#%toplevel:" base) a b)
+          (mk-list (list (mk-symbol "with" a b) (mk-symbol "#%toplevel" a b) (mk-symbol base a b))
+                   a b)))))
+;; Whether a binder in `env` binds `n`, a description's if `d`.
+(define bound-in? (->* (symbol bool levels) bool)
+  (lambda (n d env)
+    (and (not (null? env))
+         (or (tagcase (car env)
+               (lv-rib (as) (>= (binder-named n d as) 0))
+               (lv-earlier (as) (>= (binder-named n d as) 0))
+               (else y #f))
+             (bound-in? n d (cdr env))))))
+;; Each alias an expansion defined at the top level, a description's if
+;; marked: a name of its own wherever later forms name it.
+(define aliases-defined (ref (listof (tupleof symbol bool) acyclic) rs) (new nil))
+(define alias-defined? (->* (symbol bool) bool)
+  (lambda (n d) (alias-defined-in? n d (get aliases-defined))))
+(define alias-defined-in? (->* (symbol bool (listof (tupleof symbol bool) acyclic)) bool)
+  (lambda (n d xs)
+    (and (not (null? xs))
+         (or (and (symbol=? n (extract (car xs) 1)) (eq? d (extract (car xs) 2)))
+             (alias-defined-in? n d (cdr xs))))))
+;; The aliases form `x`'s definitions (its root `root`'s export) bind, noted.
+(define aliases-defined-in (->* (fails int syn) unit)
+  (lambda (fail root x)
+    (tagcase (node-kids root)
+      (k-form (f)
+        (let ((ex (extract (node-at f) 5)))
+          (if (null? ex) #u (aliases-noted (exported fail ex x)))))
+      (else y #u))))
+(define aliases-noted (->* (levels) unit)
+  (lambda (ls)
+    (if (null? ls)
+        #u
+        (begin
+          (tagcase (car ls) (lv-rib (as) (atms-aliases-noted as)) (else y #u))
+          (aliases-noted (cdr ls))))))
+(define atms-aliases-noted (->* (atms) unit)
+  (lambda (as)
+    (if (null? as)
+        #u
+        (begin
+          (tagcase (car as)
+            (atm-lit (b d)
+              (tagcase (node-kids b)
+                (k-binder (n e)
+                  (if (string=? (alias-base (symbol->string n)) "")
+                      #u
+                      (set aliases-defined (cons (tuple n d) (get aliases-defined)))))
+                (else y #u)))
+            (else y #u))
+          (atms-aliases-noted (cdr as))))))
+;; `s`, at `path` (innermost step first, as a walk's), each part of `ws` at
+;; its path written so.
+(define with-parts (->* (syn addr (listof (tupleof addr syn) acyclic)) syn)
+  (lambda (s path ws)
+    (let ((w (part-at path ws)))
+      (if (not (null? w))
+          (car w)
+          (tagcase s
+            (lst (items d a b x)
+              (let ((xs (parts-items items path ws))) (lst xs (syn-datums xs) a b x)))
+            (dotted (items t d a b x)
+              (let ((xs (parts-items items path ws)))
+                (dotted xs (with-parts t (falses path (len items)) ws) (syn-datums xs) a b x)))
+            (else y s))))))
+(define parts-items (->* (syns-a addr (listof (tupleof addr syn) acyclic)) syns-a)
+  (lambda (xs path ws)
+    (if (null? xs)
+        nil
+        (cons (with-parts (car xs) (cons #t path) ws) (parts-items (cdr xs) (cons #f path) ws)))))
+(define part-at (->* (addr (listof (tupleof addr syn) acyclic)) (listof syn acyclic))
+  (lambda (p ws)
+    (cond ((null? ws) nil)
+          ((addr=? p (extract (car ws) 1)) (list (extract (car ws) 2)))
+          (else (part-at p (cdr ws))))))
+;; `x`'s name as where its alias's macro was defined, if it is an alias
+;; (`%~N:x`): every `%~N:` taken off; else "" (`macros-procedural.fx`'s).
+(define alias-base (->* (string) string)
+  (lambda (n) (alias-base-from n #f)))
+(define alias-base-from (->* (string bool) string)
+  (lambda (n any)
+    (let ((c (if (and (> (string-length n) 2) (string=? (substring n 0 2) "%~"))
+                 (digits-end n 2)
+                 -1)))
+      (if (and (> c 2) (< c (string-length n)) (char=? (string-ref n c) #\:))
+          (alias-base-from (substring n (+ c 1) (string-length n)) #t)
+          (if any n "")))))
+(define digits-end (->* (string int) int)
+  (lambda (s i)
+    (if (and (< i (string-length s)) (char-numeric? (string-ref s i))) (digits-end s (+ i 1)) i)))
