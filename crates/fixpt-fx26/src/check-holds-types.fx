@@ -12,10 +12,12 @@
 (define-type k-knot (listof (pairof k-region int @t) acyclic))
 ;; The types a search for a knot has met, each with what it found kept.
 (define-type k-kept-seen (listof (pairof int k-kept @t) acyclic))
-;; By type: the kept sets met at it, as the Rust checker's set of pairs.
-(define-type k-kseen (table int k-kept-seen @t))
-;; The types a walk has met: whether `t` is one, and if not, it is now.
-(define-type k-seen (table int bool @t))
+;; A walk's types met (`k-new-seen`): its level in the stack of marks, and
+;; its epoch, which a type met is marked with there.
+(define-type k-seen (tupleof int int))
+;; By type: the kept sets met at it, as the Rust checker's set of pairs;
+;; kept at the walk's level beside its marks.
+(define-type k-kseen k-seen)
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -39,11 +41,13 @@
             (val k-id=? (subr pure (int int) bool))
             (val k-ds-types
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-descs) k-ids))
-            (val k-new-seen (subr (maxeff (alloc @t) (read @globals) spin) () k-seen))
+            (val k-new-seen
+                 (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) () k-seen))
             (val k-seen?
                  (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-seen int)
                        bool))
+            (val k-seen-done! (subr (maxeff (read @t) (write @t)) (k-seen) unit))
             (val k-fun-kind
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int)

@@ -5741,3 +5741,35 @@ and compiled before it enters `spin`; gdb attaches as soon as it reads
 parse's changes of 2026-11-11 is not known (a comparison with a43f87cb
 was begun and stopped). A fix: say `ready` only from inside the loop's
 caller, or let gdb attach again until `spin` is on the stack.
+
+## 244. Sets keyed by small ints: what the checker's walks need, and bit vectors in the runtime (the user's, 2026-11-11)
+
+The FX-26 checker's type-graph walks (`k-param-sels-from`,
+`k-selects-from`, `k-esels-from`, `k-check-apps-from`, `k-knot-in`, …)
+each kept the type ids they had seen in a fresh hash table (`table.fx`,
+from 8 buckets, rehashed as it doubles): 22% of stage 2's cells on small
+workloads (2026-11-11). They now take a stack of epoch-marked arrays
+(`check-holds.fx`, `k-new-seen`): a walk's start is a counter's step, a
+walk inside another takes the next level. To explore what fits each use
+best:
+- a set structure keyed by the ids themselves, a tree (a trie of the
+  id's bits) or an adaptive one, a list or small array while it is small
+  and a hash table, or the marks, only past some size;
+- bit vectors, which FX-26 has not: an array of `bool` is a word a bit,
+  and a bytevector's bits are written out in FX. Operations in the Rust
+  runtime (make, test-and-set, clear, count, union) would give a dense
+  set at a bit an element, and its bulk operations at native speed; for
+  the walks, for the expander's per-node marks (`repeated-marks`,
+  `macros-tree.fx`'s), and wherever a set of small ints is a list now.
+Measure first how many types each walk touches against how many there
+are: that decides between per-walk structures and shared marks.
+
+And `table.fx` itself (the user's, 2026-11-11): it doubles and rehashes
+every entry, chained buckets of conses. Other designs may grow more
+gradually or probe more cheaply: cuckoo hashing, Robin Hood hashing
+(open addressing, a probe's length evened out), linear hashing or
+incremental rehashing (a bucket split at a time), or a list of tables,
+each larger, the old ones never rehashed (a lookup tries each, newest
+first). To compare on the checker's and compiler's real tables
+(`check-env.fx`'s, `compile.fx`'s), by cells on the cellular machine and
+by time as register code.

@@ -102,7 +102,8 @@
           #u
           (begin (k-check-apps-from (car ts) seen a b) (k-check-apps-each (cdr ts) seen a b))))))
 (define k-check-apps (->* (int int int) unit)
-  (lambda (t a b) (k-check-apps-from t (k-new-seen) a b)))
+  (lambda (t a b)
+    (let ((seen (k-new-seen))) (begin (k-check-apps-from t seen a b) (k-seen-done! seen)))))
 ;; Whether type variable `v` is somewhere in `t`, or in `ts`; `seen`, the
 ;; nodes walked.
 (define-rec
@@ -378,7 +379,8 @@
     (if (null? (get k-effect-selects))
         nil
         (let ((out (the (ref k-effect-sels @t) (new nil))))
-          (begin (k-esels-from t (k-new-seen) out) (reverse (get out)))))))
+          (let ((seen (k-new-seen)))
+            (begin (k-esels-from t seen out) (k-seen-done! seen) (reverse (get out))))))))
 ;; The effect a module's description `d` is, in a list; none if not one.
 ;; `(the (modnames …) e)`, `x`, its type the slot `slot`: `e`'s type, found
 ;; by `synth`, sealed to the names (`k-sealed`), the slot linked to it, and

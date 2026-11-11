@@ -944,8 +944,9 @@
 (define k-selects-in (->* (int) k-selects)
   (lambda (t)
     (let ((out (the (ref k-selects @t) (new nil))))
-      (begin (k-selects-from t (k-new-seen) out)
-             (k-selects-reversed (get out) nil)))))
+      (let ((seen (k-new-seen)))
+        (begin (k-selects-from t seen out) (k-seen-done! seen)
+               (k-selects-reversed (get out) nil))))))
 ;; `t` (read from `s`) with each `(select m x)` of a parameter named before
 ;; it, the `k`th, made `(select $k x)`; the parameters typed `tys`.
 (define k-select-params (->* (int k-names k-ids syn) int)
