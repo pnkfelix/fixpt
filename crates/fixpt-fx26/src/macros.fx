@@ -37,13 +37,14 @@
         len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
 (import scopes-module walk placed evaluate levels-of binder-of)
 (import align-module defined macro-of macro? makes-defns? makes-top-defns? nodes-reset! align
-        node-at node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-alias
-        seq-depths def-env-top
+        node-export node-imports node-syn node-path node-core node-kids pvar-of pvar? nnodes
+        act-rename act-alias
+        seq-depths def-env-top env-empty env-levels
         act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
-              found levels def-env def-envs
+              found levels env def-env def-envs
               atms kids contracts holes))
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
@@ -137,8 +138,8 @@
       (nodes-reset!)
       (let* ((root (align fail 0 (the pvars nil) sig pattern -1 nil))
              (said (literals-said fail lits 0))
-             (found (walk fail root nil #f 0))
-             (e (extract (node-at root) 5))
+             (found (walk fail root env-empty #f 0))
+             (e (node-export root))
              (declared (if (and (= defn 1) (not (null? e)))
                            (the (listof exported acyclic)
                                 (list (exports-of (evaluate fail (extract (car e) 1)
@@ -146,9 +147,9 @@
                            nil)))
         (tuple (pvars-of fail found nil defn) declared)))))
 ;; What pattern variable `at` is, as the walk found it (`f`).
-(define pinfo-at (->* (int (tupleof int levels bool int)) pinfo)
+(define pinfo-at (->* (int (tupleof int env bool int)) pinfo)
   (lambda (at f)
-    (tuple (node-core at) (extract f 2) (extract f 3) (node-hole at) (extract f 4))))
+    (tuple (node-core at) (env-levels (extract f 2)) (extract f 3) (node-hole at) (extract f 4))))
 (define pvars-of (->* (fails found pvars int) pvars)
   (lambda (fail fs ps defn)
     (if (null? fs)
@@ -192,7 +193,7 @@
       (nodes-reset!)
       (let* ((made (cond ((= defn 1) (s-defn)) ((= defn 2) (s-type)) (else (s-expr))))
              (root (align fail 1 ps made template -1 nil))
-             (found (walk fail root nil #f 0))
+             (found (walk fail root env-empty #f 0))
              (nested (nested-binders 0 (get nnodes) ps))
              (named (name-actions fail ps found file nil nil nested (binder-depths found))))
         (begin
@@ -254,7 +255,8 @@
   (lambda (fail ps fs file out uses nested bd)
     (if (null? fs)
         out
-        (let* ((at (extract (car fs) 1)) (env (extract (car fs) 2)) (many (extract (car fs) 3))
+        (let* ((at (extract (car fs) 1)) (env (env-levels (extract (car fs) 2)))
+               (many (extract (car fs) 3))
                (depth (extract (car fs) 4)) (s (node-syn at)) (path (node-path at)))
           (tagcase (node-kids at)
             (k-pvar (n)

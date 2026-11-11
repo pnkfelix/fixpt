@@ -27,12 +27,15 @@
 (import nodes-module act-rename act-alias act-module-type
         act-standard-type act-macro-head defined macro-of macro? makes-defns? makes-top-defns?
         makes-desc? makes k-pair k-nil k-pvar k-binder k-ref k-form k-desc k-seq k-other atom-at
-        nodes nnodes node-at node-set! node-syn node-path node-core node-kids node-many? node-hole
-        with-core with-kids with-import with-export with-many with-hole node-new copy-nodes
-        nodes-reset! repeated seq-depths repeated? cage-seqs cage-seq? int-member? desc-roots
+        nnodes node-syn node-path node-core node-kids node-many? node-hole
+        with-core with-kids with-import with-export with-many with-hole node-new
+        node-imports node-export
+        nodes-reset! repeated repeated! seq-depths repeated? cage-seqs cage-seq? int-member?
+        desc-roots
         pvar-of pvar? pvar-shape lv-rib lv-cage lv-earlier lv-shape program-walk unplaced
         (type action actions contracts clause clauses macro macro-env scope scopes kids rooted holes
-              node pinfo pvars level levels found def-env def-envs))
+              node pinfo pvars level levels found def-env def-envs env namer looked))
+(import nodes-module env-empty env-within env-lookup env-any-shape? env-levels binder-name)
 (import nodes-module def-env-top)
 
 ;;; ------------------------------------------------------------ aligning
@@ -58,7 +61,7 @@
       (s-many (body) (begin (with-many at) (fill fail mode ps at body s root)))
       (s-typed (body h) (begin (with-hole at h) (fill fail mode ps at body s root)))
       (s-export (body b)
-        (if (null? (extract (node-at at) 5))
+        (if (null? (node-export at))
             (begin (with-export at b root) (fill fail mode ps at body s root))
             (fail-at fail "two exports at one part" s)))
       (else y (fill-core fail mode ps at t s root)))))
@@ -94,12 +97,12 @@
                    s)
           (let ((e (align fail mode ps (car elem) x -1 (path+ (node-path at) #t))))
             (begin
-              (set repeated (cons e (get repeated)))
+              (repeated! e)
               (tagcase (node-kids e) (k-pvar (n) (seq-member ps e (car elem) x mode)) (else y #u))
               (with-kids at (k-seq e))
               (if (seq-cage? t) (set cage-seqs (cons at (get cage-seqs))) #u)
-              (let ((ex (extract (node-at e) 5)))
-                (if (or (not (null? (extract (node-at at) 5))) (null? ex))
+              (let ((ex (node-export e)))
+                (if (or (not (null? (node-export at))) (null? ex))
                     #u
                     (with-export at (extract (car ex) 1) (extract (car ex) 2))))))))))
 ;; A pattern variable at `e` where elements of more than one shape may be:
@@ -195,7 +198,7 @@
           (if (writes? mode)
               (begin (set desc-roots (cons at (get desc-roots)))
                      (desc fail ps at s)
-                     (if (null? (extract (node-at at) 5))
+                     (if (null? (node-export at))
                          (with-export at (bind-direct (poly-binders at ps)) at)
                          #u))
               #u))
@@ -334,8 +337,8 @@
 (define program-expr (->* (fails pvars int syn) unit)
   (lambda (fail ps at s)
     (cond ((syn-symbol? s)
-           (if (or (string=? (syn-name s) "#t") (string=? (syn-name s) "#f")
-                   (string=? (syn-name s) "#u"))
+           (if (let ((n (syn-symbol s)))
+                 (or (symbol=? n '|#t|) (symbol=? n '|#f|) (symbol=? n '|#u|)))
                #u
                (with-kids at (k-ref (syn-symbol s) #f 0))))
           ((syn-nil? s) (fail-at fail "`()` is not an expression" s))
@@ -350,8 +353,9 @@
                    "")))
       (cond ((string=? head "") #f)
             ((string=? head "begin") (and (not (null? (cdr items))) (all-define? fail (cdr items))))
-            (else (or (not (null? (sig-of (string->symbol head) (kernel-definitions fail))))
-                      (not (null? (sig-of (string->symbol head) (scope-definitions fail))))))))))
+            (else (let ((n (syn-symbol (car items))))
+                    (or (not (null? (sig-of n (kernel-definitions fail))))
+                        (not (null? (sig-of n (scope-definitions fail)))))))))))
 (define all-define? (->* (fails syns-a) bool)
   (lambda (fail xs) (or (null? xs) (and (defines? fail (car xs)) (all-define? fail (cdr xs))))))
 ;; A program's form at `at`: its binding structure, the kernel's or
@@ -360,7 +364,8 @@
 (define program-form (->* (fails pvars int syn bool) unit)
   (lambda (fail ps at s defn)
     (let* ((parts (split s)) (hd (car parts))
-           (head (if (syn-symbol? hd) (syn-name hd) "")) (n (string->symbol head))
+           (head (if (syn-symbol? hd) (syn-name hd) ""))
+           (n (if (syn-symbol? hd) (syn-symbol hd) (string->symbol "")))
            (kernel (kernel-sigs fail)) (sforms (scope-sigs fail))
            (defs (kernel-definitions fail)) (sdefs (scope-definitions fail)))
       (cond
@@ -655,7 +660,7 @@
                                  (node-path at) nil)))
       (begin
         (if (and again (not (null? kids)))
-            (set repeated (cons (car (the (listof int acyclic) (reverse kids))) (get repeated)))
+            (repeated! (car (the (listof int acyclic) (reverse kids))))
             #u)
         (with-kids at (k-desc kids))
         kids))))

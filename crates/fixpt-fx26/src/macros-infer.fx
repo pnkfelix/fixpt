@@ -31,6 +31,7 @@
         (type fails addr entries ring rings bind sty stys atm atms))
 (import align-module defined macro-of nodes-reset! align node-core node-kids k-pvar lv-rib
         lv-cage lv-earlier
+        env-empty env-levels
         (type macro macro-env pinfo pvars levels found))
 (import scopes-module walk levels-of normal)
 (import exports-module exports-of (type exported))
@@ -757,7 +758,7 @@
       (let* ((ps (pvars-for cid (get found-vars) s names))
              (ty (cond ((= made 1) (s-defn)) ((= made 2) (s-type)) (else (s-expr))))
              (root (align fail 1 ps ty template -1 nil))
-             (fs (walk fail root nil #f 0)))
+             (fs (walk fail root env-empty #f 0)))
         (tuple (placements-in fs)
                (if (= made 1)
                    (the (listof exported acyclic)
@@ -785,7 +786,7 @@
         (let ((at (extract (car fs) 1)))
           (tagcase (node-kids at)
             (k-pvar (n)
-              (cons (tuple n (node-core at) (normal (extract (car fs) 2)) (extract (car fs) 3)
-                           (extract (car fs) 4))
+              (cons (tuple n (node-core at) (normal (env-levels (extract (car fs) 2)))
+                           (extract (car fs) 3) (extract (car fs) 4))
                     (placements-in (cdr fs))))
             (else y (placements-in (cdr fs))))))))

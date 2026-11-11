@@ -1727,6 +1727,8 @@ impl Stacks {
             regs: [0; 9],
             machine_sp: 0,
             slice: fixpt_runtime::sched::slice(),
+            prof_site: 0,
+            prof_sp: 0,
         }
     }
 

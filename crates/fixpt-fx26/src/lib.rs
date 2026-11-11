@@ -494,6 +494,13 @@ pub const MACROS_TYPES: &str = include_str!("macros-types.fx");
 
 /// The macros defined, and the nodes syntax is aligned into, with the
 /// types of pattern variables and environments.
+/// The environments the expander's walk resolves names in, abstract: their
+/// levels and operations (`env-ops`), and two implementations of them, a
+/// list of levels and each import's ribs indexed by name (`TODO.md` §234).
+pub const MACROS_ENV_TYPES: &str = include_str!("macros-env-types.fx");
+pub const MACROS_ENV_LIST: &str = include_str!("macros-env-list.fx");
+pub const MACROS_ENV_INDEXED: &str = include_str!("macros-env-indexed.fx");
+
 pub const MACROS_NODES: &str = include_str!("macros-nodes.fx");
 
 /// The expander's aligning of syntax with syntax types (`macros.rs`'s
@@ -506,6 +513,10 @@ pub const MACROS_WALK: &str = include_str!("macros-walk.fx");
 /// The shapes of the modules a program's forms open, as its walk finds
 /// them (`macros/shapes.rs`'s `Shaper`).
 pub const MACROS_SHAPER: &str = include_str!("macros-shaper.fx");
+
+/// A program's aligned tree as its shaper asks of it: parents, places in
+/// lists, and what is under what, found once (`TODO.md` §239).
+pub const MACROS_TREE: &str = include_str!("macros-tree.fx");
 
 /// What each module a program's forms open was relied on for, written into
 /// the forms, and each loaded file's shape (`macros/shapes.rs`'s
@@ -818,7 +829,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 221] = [
+pub const FRONT_END_MODULES: [(&str, &str); 225] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -877,10 +888,14 @@ pub const FRONT_END_MODULES: [(&str, &str); 221] = [
     ("parser-top.fx", PARSER_TOP),
     ("macros-kernel.fx", MACROS_KERNEL),
     ("macros-types.fx", MACROS_TYPES),
+    ("macros-env-types.fx", MACROS_ENV_TYPES),
+    ("macros-env-list.fx", MACROS_ENV_LIST),
+    ("macros-env-indexed.fx", MACROS_ENV_INDEXED),
     ("macros-nodes.fx", MACROS_NODES),
     ("macros-align.fx", MACROS_ALIGN),
     ("macros-scopes.fx", MACROS_SCOPES),
     ("macros-walk.fx", MACROS_WALK),
+    ("macros-tree.fx", MACROS_TREE),
     ("macros-shaper.fx", MACROS_SHAPER),
     ("macros-shapes.fx", MACROS_SHAPES),
     ("macros-match.fx", MACROS_MATCH),

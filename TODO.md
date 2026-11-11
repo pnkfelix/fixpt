@@ -5601,3 +5601,86 @@ branch `fix-callout-fields-in-asm-pieces-test` (`a4563ec5`, from
 x86_64's twin of the test has it. Not merged yet, on the user's word:
 to merge once the user says.
 
+## 234. The expander's environments abstract, and indexed (2026-11-11)
+
+`macros-env-types.fx`, `macros-env-list.fx`, `macros-env-indexed.fx`: the
+environments the FX-26 walk resolves names in, behind their operations
+(`env-within`, `env-lookup`, `env-any-shape?`, `env-levels`), one
+implementation chosen by the `load-module` in `macros-nodes.fx`. The
+indexed one makes each import's ribs one level, a tree by name, where the
+list walks a rib for each of a module's items: a module of `n` items cost
+`n` for each name looked for in it. Not yet: a test holding the indexed one
+to the list one on every test program (the user's: keep both).
+
+## 235. A sealed module's names in a module file, and an abstract type of a module a file makes (2026-11-11)
+
+- In a module file, `(import m x)` of `(define m (the (moduleof (val x int))
+  (load-module "f.fx")))` is refused (`` `x` uses `x`, before it is made ``):
+  the file's `import`s are expanded after its shapes are written
+  (`Checker::read_module_file_at`, `expand_datatype`), so the `with` each
+  makes has no record; one written by hand works, and so does an `import`
+  of an unsealed module. At the top level, expansion comes first. To expand
+  a module file's imports before it is shaped, in both front ends.
+- A type `define-generative` makes, in a module a file makes (a functor's
+  application, `(proj (load-module …) rs …)`), cannot be named in that
+  file's own type (`` mentions `m..t`, which is not known outside the module
+  ``); a datatype can. `macros-env-*.fx` keep `env` a datatype for it.
+
+## 236. Calls counted in native register code (2026-11-11)
+
+`FIXPT_PROFILE_CALLS` set: the x86_64 machine's register words count each
+call by its site and the word entered (`fixpt_native::profile`); with
+`perf`, which names our words but cannot walk their stacks, who calls whom
+and how often. About 2.2 times slower when on; nothing assembled when off.
+Not yet: arm64's register words, native-convention procedures, stack code;
+a report from the CLI.
+
+## 237. REPL start checks and lowers the eager reader every time (the Mac team's, 2026-11-11)
+
+REPL start went from 0.10 s to 0.37 s since 10-28, on every machine, with no
+input: each start checks and lowers the eager reader from source
+(`load_own_reader`, `load_reader_alone`, `load_lowered`), and since 11-07
+`reader.fx` reaches the macro modules through `parser-top-module`, for the
+drivers' and `tests/scopes.rs`'s entries (`program-walked`,
+`program-shaped`, `expansions-made`, …), so every start checks that graph.
+Their proposal: cache the lowered reader (`Compiled.code`) at run time,
+keyed by `FIXPT_BUILD_HASH`, as the front end's register code is; `fixpt
+prewarm` makes it. Or move those entries out of `reader.fx`. Check: `fixpt
+--machine rs-scheme-vm repl`, empty input, user time, best of 3, before and
+after; `dialects fx26_machines_by_name`, `help
+fx26_apropos_searches_every_namespace`, `native_reach
+a_definition_calling_itself_in_tail_position_loops`, alone.
+
+## 238. Caching across the board (the user's, 2026-11-11)
+
+"We need to be doing more aggressive caching across the board. We're
+wasting a lot of time re-doing work." Candidates: the eager reader (§237);
+a file's shaping, its shape and its records by path, keyed by its text,
+how it is loaded, its loads' shapes and the build (the FX parse forgets
+every file's shapes at each parse, `shapes-at!`, and the suite shapes the
+front end's files in every process that compiles it).
+
+
+## 239. The FX-26 shaping pass at a program's scale (the Mac team's, 2026-11-11)
+
+Step 2 (97400f83) made the FX-26 parse shape every top-level form and
+every file it loads, through the aligner and walk written for templates of
+a few dozen nodes; the front end is about 1.08 million. Its parse went
+from 0.59 s to 3.59 s. Fixed so far, each where a question cost the size
+of the program: node positions, `under?` and parents found once
+(`macros-tree.fx`); what each module was asked and gives, by node; the
+environments indexed (§234); `repeated?` an array; the nodes a field's
+array each, where each field set made a node's tuple again; `sealed-written`
+and `with-written` giving a form itself where nothing in it changes; heads
+compared as symbols, not names copied to strings. Now 2.20 s: 0.45 s not
+shaping, 0.88 s aligning, 0.19 s walking, about 0.65 s the shaper (0.26 s
+of it asking modules for names). Each linear: what is left is about a
+microsecond and a half a node. Not yet: doing less of it (aligning only
+what a record or a shape asked for depends on), or caching it (§238).
+
+## 240. The FX-26 parse of a program of many top-level forms is quadratic (found 2026-11-11)
+
+3200 one-line `define`s at the top level parse in 2.6 s, 1600 in 0.65 s,
+800 in 0.2 s, before step 2 as after, shaping off or on: something in each
+top-level form's parse costs as many as the forms before it. Not yet
+found.

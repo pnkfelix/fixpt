@@ -21,6 +21,22 @@
         seq-elem seq-cage? peel ellipsis? ellipsis-of name-fit-of name-kind?
         joined
         (type fails addr entries ring rings bind sty stys named hole atm atms strings))
+;; The environments the walk resolves names in (`macros-env-types.fx`): their
+;; levels, and one implementation of them, whose `env` is abstract outside
+;; it (`define-generative`), so that nothing here depends on how it keeps
+;; them. The `load-module` below chooses it: `macros-env-indexed.fx`, or
+;; `macros-env-list.fx`, which it is held to. Each gives the same
+;; operations: none, `env-empty`; `ls`, innermost first, inside `e`,
+;; `(env-within e ls name)`; what binds name `n` (a description's if `d`),
+;; looked for from place `from` (0, else a `next` of `env-lookup`'s), the
+;; first binder in the order of its levels and of each level's atoms;
+;; whether a module's names are among its levels; its levels, innermost
+;; first, for what compares them by place (a template's checks).
+(define env-types ((proj (load-module "fx26:macros-env-types.fx") rs re rm rc rp)))
+(import env-types lv-rib lv-cage lv-earlier lv-shape (type level levels namer looked))
+(define env-impl ((proj (load-module "fx26:macros-env-indexed.fx") rs re rm rc rp)))
+(define-type env (select env-impl env))
+(import env-impl env-empty env-within env-lookup env-any-shape? env-levels)
 
 ;;; ------------------------------------------------------------ macros
 
@@ -112,69 +128,81 @@
 (define-type holes (listof hole acyclic))
 (define-type node (tupleof syn addr sty rooted rooted bool kids holes))
 (define atom-at (subr pure (int) syn) (lambda (a) (atom '() a a 0)))
-(define nodes (ref (arrayof node rs) rs)
-  (new (make-array 256 (tuple (atom-at 0) (the addr nil) (s-nil) (the rooted nil) (the rooted nil)
-                              #f (k-other) (the holes nil)))))
+;; The nodes, a field's array each, so that a field set is one store (a
+;; program's are a million, each set some times: `TODO.md` §239). `node`,
+;; as a tuple, is what a node's fields are, in this order.
+(define node-syns (ref (arrayof syn rs) rs) (new (make-array 256 (atom-at 0))))
+(define node-paths (ref (arrayof addr rs) rs) (new (make-array 256 (the addr nil))))
+(define node-cores (ref (arrayof sty rs) rs) (new (make-array 256 (s-nil))))
+(define node-importss (ref (arrayof rooted rs) rs) (new (make-array 256 (the rooted nil))))
+(define node-exports (ref (arrayof rooted rs) rs) (new (make-array 256 (the rooted nil))))
+(define node-manys (ref (arrayof bool rs) rs) (new (make-array 256 #f)))
+(define node-kidss (ref (arrayof kids rs) rs) (new (make-array 256 (k-other))))
+(define node-holes (ref (arrayof holes rs) rs) (new (make-array 256 (the holes nil))))
 (define nnodes (ref int rs) (new 0))
-(define node-at (->* (int) node) (lambda (i) (array-ref (get nodes) i)))
-(define node-set! (->* (int node) unit) (lambda (i n) (array-set! (get nodes) i n)))
-(define node-syn (->* (int) syn) (lambda (i) (extract (node-at i) 1)))
-(define node-path (->* (int) addr) (lambda (i) (extract (node-at i) 2)))
-(define node-core (->* (int) sty) (lambda (i) (extract (node-at i) 3)))
-(define node-kids (->* (int) kids) (lambda (i) (extract (node-at i) 7)))
-(define node-many? (->* (int) bool) (lambda (i) (extract (node-at i) 6)))
-(define node-hole (->* (int) holes) (lambda (i) (extract (node-at i) 8)))
-;; A node's fields, one of them changed.
-(define with-core (->* (int sty) unit)
-  (lambda (i t)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) t (extract n 4) (extract n 5) (extract n 6)
-                          (extract n 7) (extract n 8))))))
-(define with-kids (->* (int kids) unit)
-  (lambda (i k)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
-                          (extract n 6) k (extract n 8))))))
+(define node-syn (->* (int) syn) (lambda (i) (array-ref (get node-syns) i)))
+(define node-path (->* (int) addr) (lambda (i) (array-ref (get node-paths) i)))
+(define node-core (->* (int) sty) (lambda (i) (array-ref (get node-cores) i)))
+(define node-imports (->* (int) rooted) (lambda (i) (array-ref (get node-importss) i)))
+(define node-export (->* (int) rooted) (lambda (i) (array-ref (get node-exports) i)))
+(define node-many? (->* (int) bool) (lambda (i) (array-ref (get node-manys) i)))
+(define node-kids (->* (int) kids) (lambda (i) (array-ref (get node-kidss) i)))
+(define node-hole (->* (int) holes) (lambda (i) (array-ref (get node-holes) i)))
+;; A node's field, set.
+(define with-core (->* (int sty) unit) (lambda (i t) (array-set! (get node-cores) i t)))
+(define with-kids (->* (int kids) unit) (lambda (i k) (array-set! (get node-kidss) i k)))
 (define with-import (->* (int bind int) unit)
   (lambda (i b root)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3)
-                          (append (extract n 4) (the rooted (list (tuple b root))))
-                          (extract n 5) (extract n 6) (extract n 7) (extract n 8))))))
+    (array-set! (get node-importss) i
+                (append (node-imports i) (the rooted (list (tuple b root)))))))
 (define with-export (->* (int bind int) unit)
-  (lambda (i b root)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4)
-                          (the rooted (list (tuple b root))) (extract n 6) (extract n 7)
-                          (extract n 8))))))
-(define with-many (->* (int) unit)
-  (lambda (i)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
-                          #t (extract n 7) (extract n 8))))))
+  (lambda (i b root) (array-set! (get node-exports) i (the rooted (list (tuple b root))))))
+(define with-many (->* (int) unit) (lambda (i) (array-set! (get node-manys) i #t)))
 (define with-hole (->* (int hole) unit)
-  (lambda (i h)
-    (let ((n (node-at i)))
-      (node-set! i (tuple (extract n 1) (extract n 2) (extract n 3) (extract n 4) (extract n 5)
-                          (extract n 6) (extract n 7) (the holes (list h)))))))
+  (lambda (i h) (array-set! (get node-holes) i (the holes (list h)))))
 ;; A new node, of `s` at `path`, its type `t`: its number.
 (define node-new (->* (syn addr sty) int)
   (lambda (s path t)
     (let ((i (get nnodes)))
       (begin
-        (if (= i (array-length (get nodes)))
-            (let ((bigger (the (arrayof node rs) (make-array (* 2 i) (node-at 0)))))
-              (begin (copy-nodes (get nodes) bigger 0) (set nodes bigger)))
-            #u)
+        (if (= i (array-length (get node-syns))) (nodes-grown!) #u)
         (set nnodes (+ i 1))
-        (node-set! i (tuple s path t (the rooted nil) (the rooted nil) #f (k-other)
-                            (the holes nil)))
+        (array-set! (get node-syns) i s)
+        (array-set! (get node-paths) i path)
+        (array-set! (get node-cores) i t)
+        (array-set! (get node-importss) i (the rooted nil))
+        (array-set! (get node-exports) i (the rooted nil))
+        (array-set! (get node-manys) i #f)
+        (array-set! (get node-kidss) i (k-other))
+        (array-set! (get node-holes) i (the holes nil))
+        (array-set! (get repeated-marks) i #f)
         i))))
-(define copy-nodes (->* ((arrayof node rs) (arrayof node rs) int) unit)
-  (lambda (from to i)
-    (if (= i (array-length from))
-        #u
-        (begin (array-set! to i (array-ref from i)) (copy-nodes from to (+ i 1))))))
+;; Each field's array, twice as long.
+(define nodes-grown! (->* () unit)
+  (lambda ()
+    (begin
+      (set node-syns (array-grown (get node-syns) (atom-at 0)))
+      (set node-paths (array-grown (get node-paths) (the addr nil)))
+      (set node-cores (array-grown (get node-cores) (s-nil)))
+      (set node-importss (array-grown (get node-importss) (the rooted nil)))
+      (set node-exports (array-grown (get node-exports) (the rooted nil)))
+      (set node-manys (array-grown (get node-manys) #f))
+      (set node-kidss (array-grown (get node-kidss) (k-other)))
+      (set node-holes (array-grown (get node-holes) (the holes nil)))
+      (set repeated-marks (array-grown (get repeated-marks) #f)))))
+;; `a`, in an array twice as long, the rest `fill`.
+(define array-grown
+  (poly ((t type)) (subr (maxeff (read rs) (write rs) (alloc rs) spin) ((arrayof t rs) t)
+                         (arrayof t rs)))
+  (plambda ((t type))
+    (lambda ((a (arrayof t rs)) (fill t))
+      (let ((b (the (arrayof t rs) (make-array (* 2 (array-length a)) fill))))
+        (letrec ((copied (subr (maxeff (read rs) (write rs) spin) (int) unit)
+                         (lambda (i)
+                           (if (= i (array-length a))
+                               #u
+                               (begin (array-set! b i (array-ref a i)) (copied (+ i 1)))))))
+          (begin (copied 0) b))))))
 ;; Whether a program's form is being aligned, after expansion (`macros.rs`'s
 ;; `Mode::Program`), not a template: its binders and references found as
 ;; the checkers will read them (`binding-shapes.md`); and the names its
@@ -192,8 +220,15 @@
 ;; last found first (`macros.rs`'s `Node::repeated`, `walk`'s `seqs`).
 (define repeated (ref (listof int acyclic) rs) (new nil))
 (define seq-depths (ref (listof (tupleof int int) acyclic) rs) (new nil))
+;; Each node's whether `repeated` has it, by its number: asked of every
+;; node a walk reaches, where the list would be searched each time. Grown
+;; with the nodes (`node-new`), which clears each new node's.
+(define repeated-marks (ref (arrayof bool rs) rs) (new (make-array 256 #f)))
+(define repeated! (->* (int) unit)
+  (lambda (e)
+    (begin (set repeated (cons e (get repeated))) (array-set! (get repeated-marks) e #t))))
 (define repeated? (->* (int) bool)
-  (lambda (i) (int-member? i (get repeated))))
+  (lambda (i) (array-ref (get repeated-marks) i)))
 ;; The lists given by ellipsis whose elements are each in the scope of those
 ;; before it, a ribcage's (`macros.rs`'s `Kids::Seq`'s flag).
 (define cage-seqs (ref (listof int acyclic) rs) (new nil))
@@ -228,16 +263,11 @@
 
 ;;; ------------------------------------------------------------ binding
 
-;; One level of an environment: a rib, or a pattern variable's ribcage; or,
-;; in a repeated element of a ribcage's list, what the repetitions before
-;; it bound, which its own binders' names cannot tell from its own
-;; (`macros-scopes.fx`).
-;; Or, in a program's walk, what the module at a node gives (`bind-shape`),
-;; whose names the walk does not know: a name looked for past it may be one
-;; of them (`macros.rs`'s `Level::Shape`).
-(define-datatype level (lv-rib atms) (lv-cage symbol) (lv-earlier atms) (lv-shape int))
-(define-type levels (listof level acyclic))
+;; The name of the binder at node `b`, in a list of one; none if it is no
+;; binder: what an environment is told of its atoms (`namer`).
+(define binder-name (->* (int) (listof symbol acyclic))
+  (lambda (b) (tagcase (node-kids b) (k-binder (m e) (list m)) (else y nil))))
 ;; Each pattern variable, template binder and name referred to, by node,
-;; with its environment (innermost first), whether it is in a `many` part,
-;; and how many ellipses it is under.
-(define-type found (listof (tupleof int levels bool int) acyclic))
+;; with its environment, whether it is in a `many` part, and how many
+;; ellipses it is under.
+(define-type found (listof (tupleof int env bool int) acyclic))

@@ -14,22 +14,24 @@
 (import types-module fail-at kind-of unfold simple-kind? sub? atm-var atm-rib-of atm-lit
         bind-rib bind-cage bind-direct bind-earlier bind-shape ring-rib ring-at ring-shape
         (type fails addr entries rings bind sty atm atms))
-(import align-module node-at node-syn node-core node-kids node-many? repeated? seq-depths
+(import align-module node-export node-imports node-syn node-core node-kids node-many? repeated?
+        seq-depths
         cage-seq? program-walk lv-rib lv-cage lv-earlier lv-shape k-pair k-pvar k-binder k-ref
         k-form k-desc k-seq
-        (type level levels found rooted pinfo pvars))
+        env-within binder-name
+        (type level levels found rooted pinfo pvars env))
 
 ;;; ------------------------------------------------------------ binding
 
 ;; The tree under `at`, walked with environment `env`, under `depth0`
 ;; ellipses: what it finds, in the order a walk finds them; each node an
 ;; ellipsis follows noted in `seq-depths`.
-(define walk (->* (fails int levels bool int) found)
+(define walk (->* (fails int env bool int) found)
   (lambda (fail at env many0 depth0)
     (let* ((many (or many0 (node-many? at)))
            (depth (if (repeated? at) (+ depth0 1) depth0))
            (noted (if (repeated? at) (set seq-depths (cons (tuple at depth) (get seq-depths))) #u))
-           (env2 (imported fail (extract (node-at at) 4) env (node-syn at))))
+           (env2 (imported fail (node-imports at) env (node-syn at))))
       (tagcase (node-kids at)
         (k-pair (x y) (append (walk fail x env2 many depth) (walk fail y env2 many depth)))
         (k-form (x) (walk fail x env2 many depth))
@@ -41,7 +43,7 @@
         (k-binder (n d) (the found (list (tuple at env2 many depth))))
         (k-ref (n d free) (the found (list (tuple at env2 many depth))))
         (else y (the found nil))))))
-(define walk-each (->* (fails (listof int acyclic) levels bool int) found)
+(define walk-each (->* (fails (listof int acyclic) env bool int) found)
   (lambda (fail xs env many depth)
     (if (null? xs)
         nil
@@ -49,10 +51,10 @@
           (append first (walk-each fail (cdr xs) env many depth))))))
 ;; `env` with what the repetitions of element `x` before each bound, which
 ;; its binders' names cannot tell from its own.
-(define earlier (->* (fails int levels) levels)
+(define earlier (->* (fails int env) env)
   (lambda (fail x env)
     (let ((ls (levels-of fail x (node-syn x))))
-      (cons (lv-earlier (earlier-atoms ls)) (append (earlier-cages ls) env)))))
+      (env-within env (cons (lv-earlier (earlier-atoms ls)) (earlier-cages ls)) binder-name))))
 (define earlier-atoms (->* (levels) atms)
   (lambda (ls)
     (if (null? ls)
@@ -67,13 +69,15 @@
            (cons (car ls) (earlier-cages (cdr ls))))
           (else (earlier-cages (cdr ls))))))
 ;; `env` with what each import binds before it, the last import innermost.
-(define imported (->* (fails rooted levels syn) levels)
+(define imported (->* (fails rooted env syn) env)
   (lambda (fail is env s)
     (if (null? is)
         env
         (imported fail (cdr is)
-                  (append (own-first (evaluate fail (extract (car is) 1) (extract (car is) 2) s))
-                          env)
+                  (env-within env
+                              (own-first
+                                (evaluate fail (extract (car is) 1) (extract (car is) 2) s))
+                              binder-name)
                   s))))
 ;; In a program's walk, what one import binds of its own before the modules
 ;; it opens: a module's items before what its `include`s give, as the
@@ -160,7 +164,7 @@
 ;; a macro that makes definitions, which the template sees none of.
 (define exported-rib (->* (fails int syn syn) atms)
   (lambda (fail t ts s)
-    (let ((e (extract (node-at (exporter t)) 5)))
+    (let ((e (node-export (exporter t))))
       (if (null? e)
           (if (form-node? t)
               (the atms nil)
@@ -181,13 +185,13 @@
       (k-pvar (n) (list (lv-cage n)))
       ;; A ribcage's list by ellipsis: what each element exports.
       (k-seq (x)
-        (gathered-levels t (if (and (cage-seq? t) (null? (extract (node-at t) 5)))
+        (gathered-levels t (if (and (cage-seq? t) (null? (node-export t)))
                                (levels-of fail x s)
                                (exported-levels fail t s))))
       (else y (exported-levels fail t s)))))
 (define exported-levels (->* (fails int syn) levels)
   (lambda (fail t s)
-    (let ((e (extract (node-at (exporter t)) 5)))
+    (let ((e (node-export (exporter t))))
       (cond ((not (null? e)) (evaluate fail (extract (car e) 1) (extract (car e) 2) s))
             ((form-node? t) (the levels nil))
             (else
@@ -201,7 +205,7 @@
   (lambda (t as)
     (tagcase (node-kids t)
       (k-seq (x)
-        (let ((e (extract (node-at t) 5)))
+        (let ((e (node-export t)))
           (if (or (null? e) (= (extract (car e) 2) x)) (gathered-each as) as)))
       (else y as))))
 (define gathered-each (->* (atms) atms)

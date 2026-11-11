@@ -16,16 +16,20 @@
 (import parser-module parse-tag p-ok p-err syn-symbol? syn-symbol syn-name mk-symbol mk-list len nth
         syn-string? syn-string syn-datums (type syns-a presult loaded-file loaded-files))
 (import types-module proper-items fail-at name-in? (type fails addr atms))
-(import align-module node-at node-syn node-kids node-path nnodes program-walk lv-rib lv-shape
+(import align-module node-export node-imports node-syn node-kids node-path nnodes program-walk
+        lv-rib lv-shape
         k-binder k-ref k-form atm-lit lv-earlier def-env-top
-        (type levels found def-env def-envs))
+        env-any-shape? env-lookup binder-name
+        (type levels found def-env def-envs env))
 (import walk-module walked pfail-walk walked-out show-renamed falses addr=?)
-(import shaper-module askeds binder-shape elem exp-shape exported file-given-at file-key
-        file-shape-keyed file-shapes files-given form-node? head-of inputs-at input-key?
+(import shaper-module asked-of binder-shape elem exp-shape exported file-given-at file-key
+        file-shape-keyed file-shapes files-given form-node? head-of head-is? head-sym no-head
+        inputs-at input-key?
         load-input-at? members-onto member-shape
         name-in-list? resolve result-of sh-fun sh-fun-of sh-module shaper-begin! shapes-reset!
-        shaping-top top-descs top-vals with-member globals-given! binder-named
-        (type asked file-shape shapes members))
+        shaping-top top-descs top-vals names-with names-onto names-empty? nm-leaf
+        globals-given! binder-named
+        (type asked file-shape shapes members name-tree))
 
 ;;; ------------------------------------------------------------ a form's shapes written
 
@@ -57,13 +61,9 @@
           (let ((at (extract (car fs) 1)))
             (tagcase (node-kids at)
               (k-ref (n d free)
-                (if (any-shape? (extract (car fs) 2)) (begin (resolve fail at n d) #u) #u))
+                (if (env-any-shape? (extract (car fs) 2)) (begin (resolve fail at n d) #u) #u))
               (else y #u)))
           (asked-all fail (cdr fs))))))
-(define any-shape? (->* (levels) bool)
-  (lambda (ls)
-    (and (not (null? ls)) (or (tagcase (car ls) (lv-shape (m) #t) (else y #f))
-                              (any-shape? (cdr ls))))))
 ;; What to write into each form that opens a module, by its path: what its
 ;; module was asked, or none (`#f`) where its shape was not known.
 (define-type writing (tupleof addr (listof syn acyclic)))
@@ -73,14 +73,16 @@
         out
         (writings (+ k 1) n
           (let ((s (node-syn k)))
-            (if (and (form-node? k) (opens? (head-of s)) (null? (writing-at (node-path k) out))
+            (if (and (form-node? k) (opens? s) (null? (writing-at (node-path k) out))
                      (not (toplevel-or-fx? s)) (>= (elem k 1) 0))
-                (let ((a (asked-of (elem k 1) (get askeds))))
+                (let ((a (asked-of (elem k 1))))
                   (cons (tuple (node-path k) (if (extract a 2) nil (list (asked-written a s))))
                         out))
                 out))))))
-(define opens? (->* (string) bool)
-  (lambda (h) (name-in-list? h (list "with" "extend" "include" "import-with-syntax"))))
+(define opens? (->* (syn) bool)
+  (lambda (s)
+    (or (head-is? s 'with) (head-is? s 'extend) (head-is? s 'include)
+        (head-is? s 'import-with-syntax))))
 (define toplevel-or-fx? (->* (syn) bool)
   (lambda (s)
     (let ((items (proper-items s)))
@@ -92,13 +94,6 @@
     (cond ((null? ws) nil)
           ((addr=? p (extract (car ws) 1)) (list (car ws)))
           (else (writing-at p (cdr ws))))))
-(define asked-of (->* (int (listof (tupleof int asked) acyclic)) asked)
-  (lambda (m as)
-    (cond ((null? as) (tuple nil #f))
-          ((= m (extract (car as) 1)) (extract (car as) 2))
-          (else (asked-of m (cdr as))))))
-;; As written into a form: `((value …) (description …))`, the names asked
-;; of the module that it gives.
 (define asked-written (->* (asked syn) syn)
   (lambda (a s)
     (let ((ab (syn-span s)))
@@ -122,23 +117,40 @@
       (atom (d a b x) (tuple a b))
       (else y (tuple 0 0)))))
 ;; `s`, at `path`, with each of `ws` written into the form at its path,
-;; after its first operand.
+;; after its first operand: itself where none is at or under `path`.
 (define with-written (->* (syn addr (listof writing acyclic)) syn)
-  (lambda (s path ws)
-    (tagcase s
-      (lst (items d a b x)
-        (let ((items2 (written-items items path ws (written-here s path ws) 0 a b)))
-          (lst items2 (syn-datums items2) a b x)))
-      (dotted (items tail d a b x)
-        (let ((items2 (written-items items path ws (written-here s path ws) 0 a b)))
-          (dotted items2 (with-written tail (falses path (len items)) ws) (syn-datums items2) a b
-                  x)))
-      (else y s))))
+  (lambda (s path ws0)
+    (let ((ws (writings-under ws0 path)))
+      (if (null? ws)
+          s
+          (tagcase s
+            (lst (items d a b x)
+              (let ((items2 (written-items items path ws (written-here s path ws) 0 a b)))
+                (lst items2 (syn-datums items2) a b x)))
+            (dotted (items tail d a b x)
+              (let ((items2 (written-items items path ws (written-here s path ws) 0 a b)))
+                (dotted items2 (with-written tail (falses path (len items)) ws) (syn-datums items2)
+                        a b x)))
+            (else y s))))))
+;; Those of `ws` at or under `path`: whose paths end with it.
+(define writings-under (->* ((listof writing acyclic) addr) (listof writing acyclic))
+  (lambda (ws path) (writings-under-n ws path (steps-count path 0))))
+(define writings-under-n (->* ((listof writing acyclic) addr int) (listof writing acyclic))
+  (lambda (ws path n)
+    (cond ((null? ws) nil)
+          ((let* ((p (extract (car ws) 1)) (m (steps-count p 0)))
+             (and (>= m n) (addr=? (steps-dropped p (- m n)) path)))
+           (cons (car ws) (writings-under-n (cdr ws) path n)))
+          (else (writings-under-n (cdr ws) path n)))))
+(define steps-count (->* (addr int) int)
+  (lambda (p k) (if (null? p) k (steps-count (cdr p) (+ k 1)))))
+(define steps-dropped (->* (addr int) addr)
+  (lambda (p k) (if (= k 0) p (steps-dropped (cdr p) (- k 1)))))
 ;; What to write into list `s` at `path`, in a list of one, if it is a form
 ;; that opens a module.
 (define written-here (->* (syn addr (listof writing acyclic)) (listof (listof syn acyclic) acyclic))
   (lambda (s path ws)
-    (if (opens? (head-of s))
+    (if (opens? s)
         (let ((w (writing-at path ws))) (if (null? w) nil (list (extract (car w) 2))))
         nil)))
 (define written-items
@@ -161,7 +173,7 @@
   (lambda (fail root form)
     (tagcase (node-kids root)
       (k-form (x)
-        (let ((ex (extract (node-at x) 5)))
+        (let ((ex (node-export x)))
           (if (null? ex) #u (defined-onto fail (exported fail ex form)))))
       (else y #u))))
 (define defined-onto (->* (fails levels) unit)
@@ -176,8 +188,8 @@
                 (if (null? s)
                     #u
                     (tagcase (car s)
-                      (sh-module (vs ds) (begin (set top-vals (members-onto vs (get top-vals)))
-                                                (set top-descs (members-onto ds (get top-descs)))))
+                      (sh-module (vs ds) (begin (set top-vals (names-onto vs (get top-vals)))
+                                                (set top-descs (names-onto ds (get top-descs)))))
                       (else y #u)))))
             (else y #u))
           (defined-onto fail (cdr ls))))))
@@ -191,8 +203,8 @@
               (tagcase (node-kids b)
                 (k-binder (n e)
                   (let ((s (binder-shape fail b)))
-                    (if d (set top-descs (with-member (get top-descs) n s))
-                        (set top-vals (with-member (get top-vals) n s)))))
+                    (if d (set top-descs (names-with (get top-descs) n s))
+                        (set top-vals (names-with (get top-vals) n s)))))
                 (else y #u)))
             (else y #u))
           (defined-atoms fail (cdr as))))))
@@ -230,14 +242,14 @@
   (lambda (s out)
     (tagcase s
       (lst (items d a b x)
-        (let* ((h (head-of s))
+        (let* ((h (head-sym s))
                ;; A hidden global's definition, `(%loaded "key" "path")`
                ;; (`parse-loaded`), an input's if its key says so.
-               (hoisted (and (string=? h "%loaded") (> (len items) 1) (syn-string? (nth items 1))))
-               (input (or (string=? h "load-input") (string=? h "load-input-moduleof")
+               (hoisted (and (symbol=? h '%loaded) (> (len items) 1) (syn-string? (nth items 1))))
+               (input (or (symbol=? h 'load-input) (symbol=? h 'load-input-moduleof)
                           (and hoisted (input-key? (syn-string (nth items 1))))))
                (load (or hoisted
-                         (and (or input (string=? h "load-module") (string=? h "load-moduleof"))
+                         (and (or input (symbol=? h 'load-module) (symbol=? h 'load-moduleof))
                               (> (len items) 1) (syn-string? (nth items 1)))))
                (out2 (if load
                          (begin (if input (set inputs-at (cons a (get inputs-at))) #u)
@@ -399,7 +411,7 @@
 ;; expander keeps its macros (`macros-at!`, `macros-after!`); and the shapes
 ;; named (`named-shapes`).
 (define-type named (listof (tupleof symbol syn) acyclic))
-(define-type shapes-state (tupleof int members members named))
+(define-type shapes-state (tupleof int name-tree name-tree named))
 (define shapes-by-state (ref (listof shapes-state acyclic) rs) (new nil))
 ;; The top level's shapes as reading state `s` left them; the files read
 ;; for the forms to come, `fs`, none shaped yet: their forms are this
@@ -412,7 +424,7 @@
         (set file-shapes nil)
         (set inputs-at nil)
         (if (null? at)
-            (begin (set top-vals nil) (set top-descs nil) (set named-shapes nil))
+            (begin (set top-vals (nm-leaf)) (set top-descs (nm-leaf)) (set named-shapes nil))
             (begin (set top-vals (extract (car at) 2)) (set top-descs (extract (car at) 3))
                    (set named-shapes (extract (car at) 4))))))))
 (define state-shapes (->* (int (listof shapes-state acyclic)) (listof shapes-state acyclic))
@@ -422,7 +434,8 @@
           (else (state-shapes s (cdr xs))))))
 (define shapes-after! (->* (int) unit)
   (lambda (s)
-    (if (and (null? (get top-vals)) (null? (get top-descs)) (null? (get named-shapes)))
+    (if (and (names-empty? (get top-vals)) (names-empty? (get top-descs))
+             (null? (get named-shapes)))
         #u
         (set shapes-by-state
              (cons (tuple s (get top-vals) (get top-descs) (get named-shapes))
@@ -458,39 +471,45 @@
 ;; its types, a `define`'s or `the`'s type, and each such `define` made
 ;; `(define x (the (modnames …) e))`, which the checkers seal there; outside
 ;; quotes. A shape used as a form's head, refused. As
-;; `Macros::sealed_written`.
+;; `Macros::sealed_written`. Itself where nothing in it is written.
 (define sealed-written (->* (fails syn) syn)
   (lambda (fail s)
     (tagcase s
       (lst (items d a b x)
-        (let ((h (head-of s)))
+        (let ((h (head-sym s)))
           (cond
-            ((or (string=? h "quote") (string=? h "quasiquote") (string=? h "%datum")) s)
-            ((and (not (string=? h "")) (not (null? (shape-named (string->symbol h)))))
-             (begin (fail (string-append "`" h "` is a shape, not a macro: it is written as a "
-                                         "`define`'s or `the`'s type")
+            ((or (symbol=? h 'quote) (symbol=? h 'quasiquote) (symbol=? h '%datum)) s)
+            ((and (not (symbol=? h no-head)) (not (null? (shape-named h))))
+             (begin (fail (string-append "`" (symbol->string h) "` is a shape, not a macro: it is "
+                                         "written as a `define`'s or `the`'s type")
                           a b)
                     s))
             (else
              (let* ((xs (sealed-each fail items))
                     (n (len xs))
-                    (ys (cond ((and (string=? h "define") (= n 4)
+                    (ys (cond ((and (symbol=? h 'define) (= n 4)
                                     (not (null? (shape-of (nth xs 2)))))
                                (list (car xs) (nth xs 1)
                                      (mk-list (list (mk-symbol "the" a b)
                                                     (car (shape-of (nth xs 2))) (nth xs 3))
                                               a b)))
-                              ((and (string=? h "the") (= n 3) (not (null? (shape-of (nth xs 1)))))
+                              ((and (symbol=? h 'the) (= n 3) (not (null? (shape-of (nth xs 1)))))
                                (list (car xs) (car (shape-of (nth xs 1))) (nth xs 2)))
                               (else xs))))
-               (lst ys (syn-datums ys) a b x))))))
+               (if (same-items? ys items) s (lst ys (syn-datums ys) a b x)))))))
       (dotted (items t d a b x)
-        (let ((xs (sealed-each fail items)))
-          (dotted xs (sealed-written fail t) (syn-datums xs) a b x)))
+        (let ((xs (sealed-each fail items)) (t2 (sealed-written fail t)))
+          (if (and (same-items? xs items) (eq? t2 t)) s (dotted xs t2 (syn-datums xs) a b x))))
       (else y s))))
 (define sealed-each (->* (fails syns-a) syns-a)
   (lambda (fail xs)
     (if (null? xs) nil (cons (sealed-written fail (car xs)) (sealed-each fail (cdr xs))))))
+;; Whether `xs` are `ys`, each the same object.
+(define same-items? (->* (syns-a syns-a) bool)
+  (lambda (xs ys)
+    (cond ((null? xs) (null? ys))
+          ((null? ys) #f)
+          (else (and (eq? (car xs) (car ys)) (same-items? (cdr xs) (cdr ys)))))))
 ;; The `modnames` form type `t` is: itself, or the shape its name names; in
 ;; a list of one, none if neither.
 (define shape-of (->* (syn) (listof syn acyclic))
@@ -519,7 +538,7 @@
            (f (if (> (string-length name) 8)
                   (file-shape-keyed (substring name 8 (string-length name)) (get file-shapes))
                   nil)))
-      (if (null? f) #u (set top-vals (with-member (get top-vals) n (extract (car f) 2)))))))
+      (if (null? f) #u (set top-vals (names-with (get top-vals) n (extract (car f) 2)))))))
 
 ;;; ------------------------------------------------------------ aliases resolved
 
@@ -552,8 +571,8 @@
     (tagcase s
       (atom (d a b x) (and (syn-symbol? s) (not (string=? (alias-base (syn-name s)) ""))))
       (lst (items d a b x)
-        (let ((h (head-of s)))
-          (and (not (or (string=? h "quote") (string=? h "quasiquote") (string=? h "%datum")))
+        (let ((h (head-sym s)))
+          (and (not (or (symbol=? h 'quote) (symbol=? h 'quasiquote) (symbol=? h '%datum)))
                (aliases-in? items))))
       (dotted (items t d a b x) (or (aliases-in? items) (alias-in? t)))
       (else y #f))))
@@ -606,22 +625,16 @@
   (lambda (k ks) (and (not (null? ks)) (or (= k (car ks)) (int-in? k (cdr ks))))))
 ;; The binder `n` (a description's if `d`) refers to in `env`, innermost
 ;; first: -1 if none; -2 if a module's names come first, which may have it.
-(define captor-of (->* (symbol bool levels) int)
+(define captor-of (->* (symbol bool env) int)
   (lambda (n d env)
-    (if (null? env)
-        -1
-        (let ((b (tagcase (car env)
-                   (lv-rib (as) (binder-named n d as))
-                   (lv-earlier (as) (binder-named n d as))
-                   (lv-shape (m) -2)
-                   (else y -1))))
-          (if (= b -1) (captor-of n d (cdr env)) b)))))
+    (let ((l (env-lookup env n d 0 binder-name)))
+      (case (extract l 1) ((0) (extract l 2)) ((1) -2) (else -1)))))
 ;; The binders a form's definitions bind (its root `root`'s export).
 (define root-binders (->* (fails int syn) ints)
   (lambda (fail root x)
     (tagcase (node-kids root)
       (k-form (f)
-        (let ((ex (extract (node-at f) 5)))
+        (let ((ex (node-export f)))
           (if (null? ex) nil (levels-binders (exported fail ex x)))))
       (else y nil))))
 (define levels-binders (->* (levels) ints)
@@ -739,14 +752,13 @@
         (digits-value s (+ i 1) end
                       (+ (* acc 10) (- (char->integer (string-ref s i)) (char->integer #\0)))))))
 ;; Whether a binder in `env` binds `n`, a description's if `d`.
-(define bound-in? (->* (symbol bool levels) bool)
-  (lambda (n d env)
-    (and (not (null? env))
-         (or (tagcase (car env)
-               (lv-rib (as) (>= (binder-named n d as) 0))
-               (lv-earlier (as) (>= (binder-named n d as) 0))
-               (else y #f))
-             (bound-in? n d (cdr env))))))
+(define bound-in? (->* (symbol bool env) bool)
+  (lambda (n d env) (bound-from? n d env 0)))
+;; The same, looked for from place `from`, past each module's names.
+(define bound-from? (->* (symbol bool env int) bool)
+  (lambda (n d env from)
+    (let ((l (env-lookup env n d from binder-name)))
+      (case (extract l 1) ((0) #t) ((1) (bound-from? n d env (extract l 3))) (else #f)))))
 ;; Each alias an expansion defined at the top level, a description's if
 ;; marked: a name of its own wherever later forms name it.
 (define aliases-defined (ref (listof (tupleof symbol bool) acyclic) rs) (new nil))
@@ -762,7 +774,7 @@
   (lambda (fail root x)
     (tagcase (node-kids root)
       (k-form (f)
-        (let ((ex (extract (node-at f) 5)))
+        (let ((ex (node-export f)))
           (if (null? ex) #u (aliases-noted (exported fail ex x)))))
       (else y #u))))
 (define aliases-noted (->* (levels) unit)

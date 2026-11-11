@@ -5,7 +5,9 @@
 ;;; `macros-shapes.fx`, and loading `macros-walk.fx`.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define walk-module ((proj (load-module "fx26:macros-walk.fx") rs re rm rc rp)))
+(define tree-module ((proj (load-module "fx26:macros-tree.fx") rs re rm rc rp)))
+(define walk-module (with tree-module walk-module))
+(import tree-module tree-begin! parent-of position elems elem under?)
 (define scopes-module (with walk-module scopes-module))
 (define align-module (with scopes-module align-module))
 (define types-module (with align-module types-module))
@@ -18,10 +20,12 @@
         (effect parses tree-builds))
 (import types-module kind-of proper-items s-item s-expr syn-keyword? split
         (type fails addr atm atms))
-(import align-module align node-at node-syn node-core node-kids node-path nnodes nodes-reset!
+(import align-module align node-export node-imports node-syn node-core node-kids node-path nnodes
+        nodes-reset!
         program-walk unplaced lv-rib lv-earlier lv-shape lv-cage k-binder k-ref k-form k-pair
         k-desc k-seq atm-lit
-        (type level levels found rooted))
+        env-empty env-lookup binder-name
+        (type level levels found rooted env))
 (import scopes-module walk evaluate)
 (import walk-module walked pfail-walk walked-out show-renamed falses addr=? int-in?)
 
@@ -41,6 +45,45 @@
     (cond ((null? ms) nil)
           ((symbol=? n (extract (car ms) 1)) (list (car ms)))
           (else (member-of n (cdr ms))))))
+;; Members by name, for as many as the top level has (`top-vals`): a tree
+;; by each name's hash (`symbol-name-hash`, FNV-1a, so as deep as a
+;; tree of random keys), a name of the same hash as a node's but another
+;; to its right; persistent, so that each form's reading state keeps the
+;; top level's as they were (`shapes-after!`) for nothing. Added and found
+;; in the tree's depth, where a list of them was copied whole for each name
+;; added (`with-member`) and walked for each found (`member-of`).
+(define-datatype name-tree (nm-leaf) (nm-node int symbol shapes name-tree name-tree))
+;; Member `n` of `t`, in a list of one, as `member-of` gives it.
+(define names-find (->* (symbol name-tree) (listof (tupleof symbol shapes) acyclic))
+  (lambda (n t) (names-find-hashed n (symbol-name-hash n) t)))
+(define names-find-hashed (->* (symbol int name-tree) (listof (tupleof symbol shapes) acyclic))
+  (lambda (n h t)
+    (tagcase t
+      (nm-node (k m s l r)
+        (cond ((< h k) (names-find-hashed n h l))
+              ((and (= h k) (symbol=? n m)) (list (tuple m s)))
+              (else (names-find-hashed n h r))))
+      (else y nil))))
+;; `t` with `n` (its shape `s`) in its place, a later one of a name in its
+;; place.
+(define names-with (->* (name-tree symbol shapes) name-tree)
+  (lambda (t n s) (names-with-hashed t n (symbol-name-hash n) s)))
+(define names-with-hashed (->* (name-tree symbol int shapes) name-tree)
+  (lambda (t n h s)
+    (tagcase t
+      (nm-node (k m x l r)
+        (cond ((< h k) (nm-node k m x (names-with-hashed l n h s) r))
+              ((and (= h k) (symbol=? n m)) (nm-node k m s l r))
+              (else (nm-node k m x l (names-with-hashed r n h s)))))
+      (else y (nm-node h n s (nm-leaf) (nm-leaf))))))
+;; Each of members `xs` onto `t`, in order.
+(define names-onto (->* (members name-tree) name-tree)
+  (lambda (xs t)
+    (if (null? xs)
+        t
+        (names-onto (cdr xs) (names-with t (extract (car xs) 1) (extract (car xs) 2))))))
+(define names-empty? (->* (name-tree) bool)
+  (lambda (t) (tagcase t (nm-leaf () #t) (else y #f))))
 ;; Whether shape `s` gives `n`, a description's if `d`, else a value's.
 (define gives? (->* (shapes symbol bool) bool)
   (lambda (s n d)
@@ -83,21 +126,25 @@
   (lambda (xs ms)
           (if (null? xs) ms
               (members-onto (cdr xs) (with-member ms (extract (car xs) 1) (extract (car xs) 2))))))
-(define members-without (->* (members members) members)
+;; `xs` onto `out`, the last first.
+(define members-reversed (->* (members members) members)
+  (lambda (xs out) (if (null? xs) out (members-reversed (cdr xs) (cons (car xs) out)))))
+;; Of `rs`, gathered the last first, each name's last, in the order of the
+;; last definitions; `seen`, the names already kept, onto `out`.
+(define members-latest (->* (members name-tree members) members)
+  (lambda (rs seen out)
+    (cond ((null? rs) out)
+          ((not (null? (names-find (extract (car rs) 1) seen))) (members-latest (cdr rs) seen out))
+          (else (members-latest (cdr rs) (names-with seen (extract (car rs) 1) nil)
+                                (cons (car rs) out))))))
+;; Those of `ms` that `hidden` has not.
+(define members-hidden (->* (members name-tree) members)
   (lambda (ms hidden)
     (cond ((null? ms) nil)
-          ((not (null? (member-of (extract (car ms) 1) hidden))) (members-without (cdr ms) hidden))
-          (else (cons (car ms) (members-without (cdr ms) hidden))))))
-
-;;; ------------------------------------------------------------ what is known
-
-;; The top level's names' shapes, from form to form, and whether a
-;; top-level form is being shaped (not a file); each file's, by its key
-;; (`file-key`): what `load-module` of it makes, what `load-moduleof` of it
-;; describes, and its forms with what each module they open was relied on
-;; for written in.
-(define top-vals (ref members rs) (new nil))
-(define top-descs (ref members rs) (new nil))
+          ((not (null? (names-find (extract (car ms) 1) hidden))) (members-hidden (cdr ms) hidden))
+          (else (cons (car ms) (members-hidden (cdr ms) hidden))))))
+(define top-vals (ref name-tree rs) (new (nm-leaf)))
+(define top-descs (ref name-tree rs) (new (nm-leaf)))
 (define shaping-top (ref bool rs) (new #f))
 (define-type file-shape (tupleof string shapes shapes syns-a))
 (define file-shapes (ref (listof file-shape acyclic) rs) (new nil))
@@ -140,9 +187,9 @@
                (if (null? g)
                    nil
                    (let* ((input? (load-input-at? a))
-                          (v (member-of (string->symbol
-                                         (string-append "%shared:" (file-key (car g) input?)))
-                                        (get top-vals)))
+                          (v (names-find (string->symbol
+                                          (string-append "%shared:" (file-key (car g) input?)))
+                                         (get top-vals)))
                           (s (if (null? v) nil (extract (car v) 2))))
                      (if (and module? input?) (result-of s) s)))))))))
 ;; Whether the load at `a` is an input's, as the prepass noted it.
@@ -153,7 +200,8 @@
 ;; `fs`.
 (define shapes-reset! (->* (loaded-files) unit)
   (lambda (fs)
-    (begin (set top-vals nil) (set top-descs nil) (set file-shapes nil) (set inputs-at nil)
+    (begin (set top-vals (nm-leaf)) (set top-descs (nm-leaf)) (set file-shapes nil)
+           (set inputs-at nil)
            (set files-given fs))))
 ;; The files the driver read for the forms to come, `fs`.
 (define shapes-files! (->* (loaded-files) unit)
@@ -161,13 +209,12 @@
 
 ;;; ------------------------------------------------------------ one walk's shapes
 
-;; The walk's: each node's parent (-1 the root), and its environment if the
-;; walk found it; each node's shape as an expression and as a type, once
+;; The walk's: each node's environment if the walk found it (its tree:
+;; `macros-tree.fx`); each node's shape as an expression and as a type, once
 ;; found (0 not yet, 1 being found, 2 found); what each module, by its
 ;; expression's node, was asked; and whether each node is in a module an
 ;; `include` includes.
-(define parents (ref (arrayof int rs) rs) (new (make-array 1 -1)))
-(define envs (ref (arrayof levels rs) rs) (new (make-array 1 (the levels nil))))
+(define envs (ref (arrayof env rs) rs) (new (make-array 1 env-empty)))
 (define exp-state (ref (arrayof int rs) rs) (new (make-array 1 0)))
 (define exp-made (ref (arrayof shapes rs) rs) (new (make-array 1 (the shapes nil))))
 (define ty-state (ref (arrayof int rs) rs) (new (make-array 1 0)))
@@ -176,39 +223,40 @@
 ;; What a module was asked: each name, a description's or a value's, and
 ;; whether it gives it; and whether its shape was not known where asked.
 (define-type asked (tupleof (listof (tupleof symbol bool bool) acyclic) bool))
-(define askeds (ref (listof (tupleof int asked) acyclic) rs) (new nil))
+;; By each module's node: the names asked, the last first; those of
+;; values and of descriptions, by name; whether its shape was not known
+;; where asked. And what each module gives, by name, once found.
+(define ask-names (ref (arrayof (listof (tupleof symbol bool bool) acyclic) rs) rs)
+  (new (make-array 1 (the (listof (tupleof symbol bool bool) acyclic) nil))))
+(define ask-vals (ref (arrayof name-tree rs) rs) (new (make-array 1 (nm-leaf))))
+(define ask-descs (ref (arrayof name-tree rs) rs) (new (make-array 1 (nm-leaf))))
+(define ask-unknown (ref (arrayof bool rs) rs) (new (make-array 1 #f)))
+(define given-done (ref (arrayof bool rs) rs) (new (make-array 1 #f)))
+(define given-vals (ref (arrayof name-tree rs) rs) (new (make-array 1 (nm-leaf))))
+(define given-descs (ref (arrayof name-tree rs) rs) (new (make-array 1 (nm-leaf))))
 ;; The walk of form `form`'s state made, its root `root`, what it found
 ;; `found`.
 (define shaper-begin! (->* (int found) unit)
   (lambda (root found)
     (let ((n (get nnodes)))
       (begin
-        (set parents (the (arrayof int rs) (make-array n -1)))
-        (set envs (the (arrayof levels rs) (make-array n (the levels nil))))
+        (tree-begin! n)
+        (set envs (the (arrayof env rs) (make-array n env-empty)))
         (set exp-state (the (arrayof int rs) (make-array n 0)))
         (set exp-made (the (arrayof shapes rs) (make-array n (the shapes nil))))
         (set ty-state (the (arrayof int rs) (make-array n 0)))
         (set ty-made (the (arrayof shapes rs) (make-array n (the shapes nil))))
         (set in-included (the (arrayof bool rs) (make-array n #f)))
-        (set askeds nil)
-        (parents-from 0 n)
+        (set ask-names (the (arrayof (listof (tupleof symbol bool bool) acyclic) rs)
+                            (make-array n (the (listof (tupleof symbol bool bool) acyclic) nil))))
+        (set ask-vals (the (arrayof name-tree rs) (make-array n (nm-leaf))))
+        (set ask-descs (the (arrayof name-tree rs) (make-array n (nm-leaf))))
+        (set ask-unknown (the (arrayof bool rs) (make-array n #f)))
+        (set given-done (the (arrayof bool rs) (make-array n #f)))
+        (set given-vals (the (arrayof name-tree rs) (make-array n (nm-leaf))))
+        (set given-descs (the (arrayof name-tree rs) (make-array n (nm-leaf))))
         (envs-from found)
         (includes-marked 0 n)))))
-(define parents-from (->* (int int) unit)
-  (lambda (i n)
-    (if (= i n)
-        #u
-        (begin
-          (tagcase (node-kids i)
-            (k-pair (x y) (begin (array-set! (get parents) x i) (array-set! (get parents) y i)))
-            (k-form (x) (array-set! (get parents) x i))
-            (k-seq (x) (array-set! (get parents) x i))
-            (k-desc (xs) (parent-each xs i))
-            (else y #u))
-          (parents-from (+ i 1) n)))))
-(define parent-each (->* ((listof int acyclic) int) unit)
-  (lambda (xs i) (if (null? xs) #u (begin (array-set! (get parents) (car xs) i)
-                                          (parent-each (cdr xs) i)))))
 (define envs-from (->* (found) unit)
   (lambda (fs)
     (if (null? fs)
@@ -221,7 +269,7 @@
     (if (= i n)
         #u
         (begin
-          (if (and (form-node? i) (string=? (head-of (node-syn i)) "include"))
+          (if (and (form-node? i) (head-is? (node-syn i) 'include))
               (let ((m (elem i 1))) (if (>= m 0) (mark-under m) #u))
               #u)
           (includes-marked (+ i 1) n)))))
@@ -244,45 +292,14 @@
   (lambda (s)
     (let ((items (proper-items s)))
       (if (and (not (null? items)) (syn-symbol? (car items))) (syn-name (car items)) ""))))
-;; The nodes of node `at`'s list's elements, by position (-1 where no node
-;; is, a form's head).
-(define elems (->* (int) (listof int acyclic))
-  (lambda (at)
-    (tagcase (node-kids at)
-      (k-form (x)
-        (if (addr=? (node-path x) (node-path at)) (cars x) (cons -1 (cars x))))
-      (k-pair (a d) (cars at))
-      (k-desc (xs) xs)
-      (else y nil))))
-(define cars (->* (int) (listof int acyclic))
-  (lambda (x) (tagcase (node-kids x) (k-pair (a d) (cons a (cars d))) (else y nil))))
-;; The `k`th element of node `at`'s list, or -1.
-(define elem (->* (int int) int)
-  (lambda (at k) (int-at (elems at) k)))
-;; The list node `b` is an element of, and its place there; (-1 . 0) if
-;; none.
-(define position (->* (int) (tupleof int int))
-  (lambda (b)
-    (let ((p (if (>= b 0) (array-ref (get parents) b) -1)))
-      (cond ((< p 0) (tuple -1 0))
-            (else
-             (tagcase (node-kids p)
-               (k-pair (a d) (if (= a b) (chain-top p 0) (tuple -1 0)))
-               (k-desc (xs) (tuple p (index-of b xs 0)))
-               (else y (tuple -1 0))))))))
-(define index-of (->* (int (listof int acyclic) int) int)
-  (lambda (b xs i) (cond ((null? xs) -1) ((= b (car xs)) i) (else (index-of b (cdr xs) (+ i 1))))))
-;; From pair node `top`, `i` cdrs from its list's start: the list's start
-;; climbed to, and `b`'s place in the form or list it is.
-(define chain-top (->* (int int) (tupleof int int))
-  (lambda (top i)
-    (let ((q (array-ref (get parents) top)))
-      (if (and (>= q 0) (tagcase (node-kids q) (k-pair (a d) (= d top)) (else y #f)))
-          (chain-top q (+ i 1))
-          (if (and (>= q 0) (tagcase (node-kids q) (k-form (x) (= x top)) (else y #f)))
-              (tuple q (if (addr=? (node-path top) (node-path q)) i (+ i 1)))
-              (tuple top i))))))
-
+;; The name at the head of list `s`, or `no-head`: asked of every list a
+;; pass reaches, its name not made a string (`head-of`).
+(define no-head symbol (string->symbol ""))
+(define head-sym (->* (syn) symbol)
+  (lambda (s)
+    (let ((items (proper-items s)))
+      (if (and (not (null? items)) (syn-symbol? (car items))) (syn-symbol (car items)) no-head))))
+(define head-is? (->* (syn symbol) bool) (lambda (s n) (symbol=? (head-sym s) n)))
 ;;; ------------------------------------------------------------ where a value comes from
 
 ;; Where binder `b`'s value comes from (`macros/shapes.rs`'s `Source`): the
@@ -411,30 +428,24 @@
 ;; whose shape is not known, not to be said (-2). Each module looked at is
 ;; asked, and the answer kept (`askeds`).
 (define resolve (->* (fails int symbol bool) (tupleof int int))
-  (lambda (fail at n d) (resolve-in fail at n d (array-ref (get envs) at))))
-(define resolve-in (->* (fails int symbol bool levels) (tupleof int int))
-  (lambda (fail at n d env)
-    (if (null? env)
-        (tuple -1 0)
-        (tagcase (car env)
-          (lv-rib (as)
-            (let ((b (binder-named n d as)))
-              (if (>= b 0) (tuple b 0) (resolve-in fail at n d (cdr env)))))
-          (lv-earlier (as)
-            (let ((b (binder-named n d as)))
-              (if (>= b 0) (tuple b 0) (resolve-in fail at n d (cdr env)))))
-          (lv-cage (c) (resolve-in fail at n d (cdr env)))
-          (lv-shape (m)
-            ;; A module's own expression is not in the scope of what it
-            ;; gives; nor is an `include`'s of what any includes.
-            (if (or (under? at m) (and (array-ref (get in-included) at) (included? m)))
-                (resolve-in fail at n d (cdr env))
-                (let ((s (exp-shape fail m)))
-                  (if (null? s)
-                      (begin (ask! m n d #f #t) (tuple -2 0))
-                      (let ((given (gives? s n d)))
-                        (begin (ask! m n d given #f)
-                               (if given (tuple -3 m) (resolve-in fail at n d (cdr env)))))))))))))
+  (lambda (fail at n d) (resolve-in fail at n d (array-ref (get envs) at) 0)))
+(define resolve-in (->* (fails int symbol bool env int) (tupleof int int))
+  (lambda (fail at n d env from)
+    (let* ((l (env-lookup env n d from binder-name)) (m (extract l 2)) (next (extract l 3)))
+      (case (extract l 1)
+        ((0) (tuple m 0))
+        ((1)
+         ;; A module's own expression is not in the scope of what it gives;
+         ;; nor is an `include`'s of what any includes.
+         (if (or (under? at m) (and (array-ref (get in-included) at) (included? m)))
+             (resolve-in fail at n d env next)
+             (let ((s (exp-shape fail m)))
+               (if (null? s)
+                   (begin (ask! m n d #f #t) (tuple -2 0))
+                   (let ((given (node-gives? m s n d)))
+                     (begin (ask! m n d given #f)
+                            (if given (tuple -3 m) (resolve-in fail at n d env next))))))))
+        (else (tuple -1 0))))))
 (define binder-named (->* (symbol bool atms) int)
   (lambda (n d as)
     (if (null? as)
@@ -445,50 +456,57 @@
                 b
                 (binder-named n d (cdr as))))
           (else y (binder-named n d (cdr as)))))))
-;; Whether node `at` is node `m` or under it, by its path (each innermost
-;; step first, `path+`: `m`'s is the end of `at`'s).
-(define under? (->* (int int) bool)
-  (lambda (at m)
-    (let* ((p (node-path m)) (q (node-path at)) (k (- (addr-length q 0) (addr-length p 0))))
-      (and (>= k 0) (addr=? p (addr-drop q k))))))
-(define addr-length (->* (addr int) int)
-  (lambda (p n) (if (null? p) n (addr-length (cdr p) (+ n 1)))))
-(define addr-drop (->* (addr int) addr)
-  (lambda (p k) (if (= k 0) p (addr-drop (cdr p) (- k 1)))))
 ;; Whether node `m` is the module an `include` includes.
 (define included? (->* (int) bool)
   (lambda (m)
     (let ((fi (position m)))
       (and (= (extract fi 2) 1) (>= (extract fi 1) 0)
-           (string=? (head-of (node-syn (extract fi 1))) "include")))))
+           (head-is? (node-syn (extract fi 1)) 'include)))))
 ;; Module `m` asked for `n`, and its answer.
 (define ask! (->* (int symbol bool bool bool) unit)
   (lambda (m n d given unknown)
-    (set askeds (asked-onto (get askeds) m n d given unknown))))
-(define asked-onto
-  (->* ((listof (tupleof int asked) acyclic) int symbol bool bool bool)
-       (listof (tupleof int asked) acyclic))
-  (lambda (as m n d given unknown)
-    (cond ((null? as) (list (tuple m (tuple (if unknown nil (list (tuple n d given))) unknown))))
-          ((= m (extract (car as) 1))
-           (let ((a (extract (car as) 2)))
-             (cons (tuple m (tuple (if (or unknown (name-asked? n d (extract a 1)))
-                                       (extract a 1)
-                                       (append (extract a 1) (list (tuple n d given))))
-                                   (or unknown (extract a 2))))
-                   (cdr as))))
-          (else (cons (car as) (asked-onto (cdr as) m n d given unknown))))))
-(define name-asked? (->* (symbol bool (listof (tupleof symbol bool bool) acyclic)) bool)
-  (lambda (n d xs)
-    (and (not (null? xs))
-         (or (and (symbol=? n (extract (car xs) 1)) (eq? d (extract (car xs) 2)))
-             (name-asked? n d (cdr xs))))))
+    (cond (unknown (array-set! (get ask-unknown) m #t))
+          ((not (null? (names-find n (array-ref (get (if d ask-descs ask-vals)) m)))) #u)
+          (else
+           (begin
+             (array-set! (get (if d ask-descs ask-vals)) m
+                         (names-with (array-ref (get (if d ask-descs ask-vals)) m) n nil))
+             (array-set! (get ask-names) m
+                         (cons (tuple n d given) (array-ref (get ask-names) m))))))))
+;; What module `m` was asked, in the order asked.
+(define asked-of (->* (int) asked)
+  (lambda (m)
+    (if (< m 0)
+        (tuple nil #f)
+        (tuple (reverse (array-ref (get ask-names) m)) (array-ref (get ask-unknown) m)))))
+;; Whether module `m`, of shape `s`, gives `n`; its shape there: by names
+;; found once for each module node (`given-by`), not its members searched.
+(define node-gives? (->* (int shapes symbol bool) bool)
+  (lambda (m s n d) (not (null? (names-find n (given-by m s d))))))
+(define node-member-shape (->* (int shapes symbol bool) shapes)
+  (lambda (m s n d)
+    (let ((x (names-find n (given-by m s d)))) (if (null? x) nil (extract (car x) 2)))))
+(define given-by (->* (int shapes bool) name-tree)
+  (lambda (m s d)
+    (begin
+      (if (array-ref (get given-done) m)
+          #u
+          (let ((both (tagcase (if (null? s) (sh-module nil nil) (car s))
+                        (sh-module (vs ds) (tuple (names-first vs) (names-first ds)))
+                        (else y (tuple (nm-leaf) (nm-leaf))))))
+            (begin (array-set! (get given-vals) m (extract both 1))
+                   (array-set! (get given-descs) m (extract both 2))
+                   (array-set! (get given-done) m #t))))
+      (array-ref (get (if d given-descs given-vals)) m))))
+;; Members `ms` by name, the first of a name kept, as `member-of` finds it.
+(define names-first (->* (members) name-tree)
+  (lambda (ms) (names-onto (members-reversed ms nil) (nm-leaf))))
 ;; The shape of what reference `at`, of `n`, refers to.
 (define reference (->* (fails int symbol bool) shapes)
   (lambda (fail at n d)
     (let* ((r (resolve fail at n d)) (b (extract r 1)))
       (cond ((>= b 0) (binder-shape fail b))
-            ((= b -3) (member-shape (exp-shape fail (extract r 2)) n d))
+            ((= b -3) (node-member-shape (extract r 2) (exp-shape fail (extract r 2)) n d))
             ((= b -1) (top-shape n d))
             (else nil)))))
 ;; A top-level name's shape; a file's hidden global's, its file's.
@@ -497,7 +515,7 @@
     (let* ((name (symbol->string n))
            (shared (and (not d) (> (string-length name) 8)
                         (string=? (substring name 0 8) "%shared:")))
-           (m (if (get shaping-top) (member-of n (get (if d top-descs top-vals))) nil)))
+           (m (if (get shaping-top) (names-find n (get (if d top-descs top-vals))) nil)))
       (cond ((and (not (null? m)) (not (null? (extract (car m) 2)))) (extract (car m) 2))
             (shared
              (let ((f (file-shape-keyed (substring name 8 (string-length name)) (get file-shapes))))
@@ -507,16 +525,18 @@
             (else (global-shape n d))))))
 ;; The top level's names' shapes as the checker has their types, for the
 ;; forms to be parsed (`check-global-shapes!`): values', descriptions'.
-(define global-vals (ref members rs) (new nil))
-(define global-descs (ref members rs) (new nil))
+(define global-vals (ref name-tree rs) (new (nm-leaf)))
+(define global-descs (ref name-tree rs) (new (nm-leaf)))
 (define globals-given! (->* (members members) unit)
-  (lambda (vs ds) (begin (set global-vals vs) (set global-descs ds))))
+  (lambda (vs ds)
+    (begin (set global-vals (names-onto vs (nm-leaf)))
+           (set global-descs (names-onto ds (nm-leaf))))))
 ;; Name `n`'s shape, a description's if `d`, as the checker has its type
 ;; (`Global`): of a top-level form only.
 (define global-shape (->* (symbol bool) shapes)
   (lambda (n d)
     (if (get shaping-top)
-        (let ((m (member-of n (get (if d global-descs global-vals)))))
+        (let ((m (names-find n (get (if d global-descs global-vals)))))
           (if (null? m) nil (extract (car m) 2)))
         nil)))
 
@@ -615,12 +635,19 @@
 ;; The shape of the module whose items are the nodes `items`: the names each
 ;; exports, but a `module-parameters`'; without what a `hide` holds or
 ;; gives, though the module define it too.
+;; Each item's members gathered onto `vs`, `ds` (and what a `hide` holds,
+;; onto `hvs`, `hds`), the last first, so that gathering copies nothing;
+;; at the end each name once, where its last definition puts it
+;; (`members-latest`), as `with-member` one at a time would have it.
 (define module-shape (->* (fails (listof int acyclic)) shapes)
   (lambda (fail items) (module-from fail items nil nil nil nil)))
 (define module-from (->* (fails (listof int acyclic) members members members members) shapes)
   (lambda (fail items vs ds hvs hds)
     (if (null? items)
-        (one (sh-module (members-without vs hvs) (members-without ds hds)))
+        (one (sh-module (members-hidden (members-latest vs (nm-leaf) nil)
+                                        (names-onto hvs (nm-leaf)))
+                        (members-hidden (members-latest ds (nm-leaf) nil)
+                                        (names-onto hds (nm-leaf)))))
         (let* ((x (car items)) (h (if (< x 0) "" (head-of (node-syn x)))))
           (cond
             ((< x 0) nil)
@@ -628,7 +655,7 @@
             (else
              (tagcase (node-kids x)
                (k-form (f)
-                 (let ((ex (extract (node-at f) 5)))
+                 (let ((ex (node-export f)))
                    (if (null? ex)
                        (module-from fail (cdr items) vs ds hvs hds)
                        (let ((got (levels-members fail (exported fail ex (node-syn x))
@@ -636,14 +663,15 @@
                          (cond ((not (extract got 3)) nil)
                                ((string=? h "hide")
                                 (module-from fail (cdr items) vs ds
-                                             (members-onto (extract got 1) hvs)
-                                             (members-onto (extract got 2) hds)))
+                                             (append (extract got 1) hvs)
+                                             (append (extract got 2) hds)))
                                (else
-                                (module-from fail (cdr items) (members-onto (extract got 1) vs)
-                                             (members-onto (extract got 2) ds) hvs hds)))))))
+                                (module-from fail (cdr items) (append (extract got 1) vs)
+                                             (append (extract got 2) ds) hvs hds)))))))
                (else y (module-from fail (cdr items) vs ds hvs hds)))))))))
-;; What levels `ls` bind, as members, onto `got`; its third, whether every
-;; module among them has a shape.
+;; What levels `ls` bind, as members, onto `got`, the last first (and a
+;; name more than once: `module-from` keeps each one's last); its third,
+;; whether every module among them has a shape.
 (define levels-members
         (->* (fails levels (tupleof members members bool)) (tupleof members members bool))
   (lambda (fail ls got)
@@ -659,8 +687,8 @@
                     (tuple (extract got 1) (extract got 2) #f)
                     (tagcase (car s)
                       (sh-module (v d)
-                        (tuple (members-onto v (extract got 1))
-                                        (members-onto d (extract got 2)) #t))
+                        (tuple (members-reversed v (extract got 1))
+                               (members-reversed d (extract got 2)) #t))
                       (else y (tuple (extract got 1) (extract got 2) #f))))))
             (lv-cage (c) (tuple (extract got 1) (extract got 2) #f)))))))
 (define atms-members
@@ -675,8 +703,8 @@
                 (k-binder (n e)
                   (let ((s (binder-shape fail b)))
                     (if d
-                        (tuple (extract got 1) (with-member (extract got 2) n s) #t)
-                        (tuple (with-member (extract got 1) n s) (extract got 2) #t))))
+                        (tuple (extract got 1) (cons (tuple n s) (extract got 2)) #t)
+                        (tuple (cons (tuple n s) (extract got 1)) (extract got 2) #t))))
                 (else y got)))
             (else y got))))))
 ;; Whether two shapes are the same.
@@ -720,9 +748,9 @@
             ;; qualified.
             ((and (syn-symbol? s) (> (string-length (syn-name s)) 11)
                   (string=? (substring (syn-name s) 0 11) "#%toplevel:"))
-             (let ((m (member-of (string->symbol (substring (syn-name s) 11
-                                                            (string-length (syn-name s))))
-                                 (get top-descs))))
+             (let ((m (names-find (string->symbol (substring (syn-name s) 11
+                                                             (string-length (syn-name s))))
+                                  (get top-descs))))
                (if (null? m) nil (extract (car m) 2))))
             ((= k 0) nil)
             ((string=? h "moduleof") (moduleof-shape fail (cdr items) (cdr e) nil nil))

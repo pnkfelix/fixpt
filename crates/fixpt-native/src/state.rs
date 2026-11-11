@@ -98,4 +98,9 @@ pub struct State {
     /// area's execute view, less a reference's tag
     /// (`Heap::code_exec_distance`).
     pub code_delta: u64,
+    /// With calls counted (`crate::profile`): the site of the call a
+    /// register word is entered by, as its caller noted it, 0 if none;
+    /// and the machine stack pointer, kept while the count is made.
+    pub prof_site: u64,
+    pub prof_sp: u64,
 }

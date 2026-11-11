@@ -29,6 +29,7 @@ use fixpt_heap::layout::cellular::{
 use fixpt_heap::{Heap, Shots, Value};
 use fixpt_runtime::crossing::{self, Crossed, Crossing};
 use fixpt_runtime::{NativeExit, PrimKind, Runtime};
+use std::rc::Rc;
 
 /// The most values the data stack may hold, and the most calls the return
 /// stack may hold, checked where a word is entered and where a branch is
@@ -427,17 +428,18 @@ use std::collections::HashMap;
 /// looked up once per word and collection (a collection moves words).
 #[derive(Default)]
 pub struct Profile {
-    pub cells: HashMap<String, u64>,
-    pub allocated: HashMap<String, u64>,
-    names: HashMap<u64, String>,
+    // Names shared (`Rc<str>`), so that counting a cell copies no string.
+    pub cells: HashMap<Rc<str>, u64>,
+    pub allocated: HashMap<Rc<str>, u64>,
+    names: HashMap<u64, Rc<str>>,
     gc_count: u64,
     /// The heap's words allocated when the last cell began, and its word.
-    last: (u64, Option<String>),
+    last: (u64, Option<Rc<str>>),
     /// Cells run by each word as entered from another: the word run before
     /// it, the word, and how many cells it ran so entered (a callee's cells
     /// by caller; a return's, by callee, which is noise to ignore).
-    pub edges: HashMap<(String, String), u64>,
-    from: Option<String>,
+    pub edges: HashMap<(Rc<str>, Rc<str>), u64>,
+    from: Option<Rc<str>>,
     /// Each global read (`global`), by its name: how many times
     /// (`TODO.md` §42, what folding constants would save).
     pub globals: HashMap<String, u64>,
@@ -452,7 +454,7 @@ impl Profile {
         }
         let name = self.names.entry(word.raw()).or_insert_with(|| {
             let sym = heap.bloblet_slot(word, WORD_NAME);
-            heap.symbol_name(sym)
+            Rc::from(heap.symbol_name(sym))
         });
         *self.cells.entry(name.clone()).or_insert(0) += 1;
         if self.last.1.as_ref() != Some(name) {
@@ -472,7 +474,7 @@ impl Profile {
 
     /// The `n` words that allocated the most, with how many words.
     pub fn top_allocating(&self, n: usize) -> Vec<(String, u64)> {
-        let mut all: Vec<(String, u64)> = self.allocated.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let mut all: Vec<(String, u64)> = self.allocated.iter().map(|(k, v)| (k.to_string(), *v)).collect();
         all.sort_by_key(|(_, v)| std::cmp::Reverse(*v));
         all.truncate(n);
         all
@@ -481,7 +483,7 @@ impl Profile {
     /// The `n` words that ran the most cells in `callee` on entering it,
     /// with how many: its callers.
     pub fn callers_of(&self, callee: &str, n: usize) -> Vec<(String, u64)> {
-        let mut all: Vec<(String, u64)> = self.edges.iter().filter(|((_, c), _)| c == callee).map(|((f, _), v)| (f.clone(), *v)).collect();
+        let mut all: Vec<(String, u64)> = self.edges.iter().filter(|((_, c), _)| &**c == callee).map(|((f, _), v)| (f.to_string(), *v)).collect();
         all.sort_by_key(|(_, v)| std::cmp::Reverse(*v));
         all.truncate(n);
         all
@@ -489,7 +491,7 @@ impl Profile {
 
     /// The `n` words that ran the most cells, with how many.
     pub fn top(&self, n: usize) -> Vec<(String, u64)> {
-        let mut all: Vec<(String, u64)> = self.cells.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let mut all: Vec<(String, u64)> = self.cells.iter().map(|(k, v)| (k.to_string(), *v)).collect();
         all.sort_by_key(|(_, v)| std::cmp::Reverse(*v));
         all.truncate(n);
         all

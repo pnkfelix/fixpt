@@ -54,7 +54,30 @@ fn prim_named(p: usize, name: &str) -> bool {
     fixpt_runtime::PRIMITIVES.get(p).is_some_and(|d| d.name == name)
 }
 
+/// The registers a call into Rust may change that register code may hold
+/// live (`profile_entry`).
+const CALLER_SAVED: [Reg; 9] = [RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11];
+
 impl Asm {
+    /// A register word's entry counted (`crate::profile::enter`), word `id`
+    /// entered: every register it may hold kept, the machine stack aligned
+    /// for the call and put back after it.
+    fn profile_entry(&mut self, id: u32) {
+        for r in CALLER_SAVED {
+            self.e(push(r));
+        }
+        self.e(store(st(offset_of!(State, prof_sp)), RSP_));
+        self.e(and_imm(RSP_, -16));
+        self.e(mov(RDI, ST));
+        self.e(mov_imm(RSI, id as u64));
+        self.e(mov_imm64(RAX, crate::profile::enter as *const () as u64));
+        self.e(call_r(RAX));
+        self.e(load(RSP_, st(offset_of!(State, prof_sp))));
+        for r in CALLER_SAVED.iter().rev() {
+            self.e(pop(*r));
+        }
+    }
+
     /// `REGk` in a register: its own, or `tmp`, loaded.
     fn get(&mut self, k: usize, tmp: Reg) -> Reg {
         match loc(k) {
@@ -855,6 +878,12 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
     let entry = a.label();
     a.bind(entry);
     a.link_pushed = true;
+    // Calls counted (`crate::profile`): this word's, as it is entered, and
+    // each of its calls' sites as it calls.
+    let profiled = crate::profile::on().then(|| crate::profile::word_id(&heap.symbol_name(heap.bloblet_slot(rw, WORD_NAME))));
+    if let Some(id) = profiled {
+        a.profile_entry(id);
+    }
     match OPS[cells[0].as_fixnum() as usize].0 {
         "args" => {
             let n = cells[1].as_fixnum() as usize;
@@ -1148,6 +1177,9 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
             }
             "invoke" | "tailinvoke" => {
                 let tail = name == "tailinvoke";
+                if let Some(id) = profiled {
+                    a.e(store_imm(st(offset_of!(State, prof_site)), crate::profile::site_id(id, i) as i32));
+                }
                 let count = k(o(0));
                 if tail != a.link_pushed {
                     return Err(format!("cell {i}: `{name}` with the link {}", if tail { "in a frame" } else { "on the stack" }));

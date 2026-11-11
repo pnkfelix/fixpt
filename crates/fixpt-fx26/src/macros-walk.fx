@@ -18,10 +18,12 @@
         (effect parses tree-builds))
 (import types-module kind-of proper-items s-item s-expr syn-keyword? split
         (type fails addr atm atms))
-(import align-module align node-at node-syn node-core node-kids node-path nnodes nodes-reset!
+(import align-module align node-export node-imports node-syn node-core node-kids node-path nnodes
+        nodes-reset!
         program-walk unplaced lv-rib lv-earlier lv-shape lv-cage k-binder k-ref k-form k-pair
         k-desc k-seq atm-lit
-        (type level levels found rooted))
+        env-empty env-lookup binder-name
+        (type level levels found rooted env))
 (import scopes-module walk evaluate)
 
 ;;; ------------------------------------------------------------ a program's walk
@@ -36,7 +38,7 @@
       (nodes-reset!)
       (set unplaced nil)
       (let* ((root (align fail 3 nil (if top (s-item) (s-expr)) form -1 nil))
-             (found (walk fail root nil #f 0)))
+             (found (walk fail root env-empty #f 0)))
         (begin (set program-walk #f) (tuple root found))))))
 
 ;; Each of `forms`, a program's after expansion, its local value binders
@@ -89,7 +91,7 @@
             (if (or (= k 14) (= k 11))
                 (tagcase (node-kids i)
                   (k-form (x)
-                    (let ((ex (extract (node-at x) 5)))
+                    (let ((ex (node-export x)))
                       (if (null? ex)
                           out
                           (lits-onto (evaluate fail (extract (car ex) 1) (extract (car ex) 2)
@@ -128,16 +130,10 @@
             (else y (targets (cdr found) kept out)))))))
 ;; Value binder `n`'s node in `env`, innermost first: -1 if none binds it,
 ;; -2 if a module's names are looked past first.
-(define binder-in (->* (symbol levels) int)
+(define binder-in (->* (symbol env) int)
   (lambda (n env)
-    (if (null? env)
-        -1
-        (tagcase (car env)
-          (lv-rib (as) (let ((b (value-binder-in n as))) (if (>= b 0) b (binder-in n (cdr env)))))
-          (lv-earlier (as)
-            (let ((b (value-binder-in n as))) (if (>= b 0) b (binder-in n (cdr env)))))
-          (lv-shape (m) -2)
-          (lv-cage (c) (binder-in n (cdr env)))))))
+    (let ((l (env-lookup env n #f 0 binder-name)))
+      (case (extract l 1) ((0) (extract l 2)) ((1) -2) (else -1)))))
 (define value-binder-in (->* (symbol atms) int)
   (lambda (n as)
     (if (null? as)
