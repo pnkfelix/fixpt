@@ -63,11 +63,21 @@ fn fields(p: Local<'_>) -> Vec<Local<'_>> {
     (0..).map_while(|i| p.value(i)).collect()
 }
 
-/// Byte offset to character position, for text with non-ASCII in it.
-pub struct Chars(Vec<u32>);
+/// Byte offset to character position, for text with non-ASCII in it: the
+/// program's, and each file it loaded ([`Chars::with_loaded`]).
+pub struct Chars(Vec<u32>, std::collections::HashMap<fixpt_read::FileId, Vec<u32>>);
 
 impl Chars {
     pub fn of(text: &str) -> Chars {
+        Chars(Self::table(text), Default::default())
+    }
+    /// These, and the files `c` loaded, a span of one of them at its
+    /// character there.
+    pub fn with_loaded(mut self, c: &Checker) -> Chars {
+        self.1 = c.loaded.values().map(|(_, text, file)| (*file, Self::table(text))).collect();
+        self
+    }
+    fn table(text: &str) -> Vec<u32> {
         let mut v = vec![0u32; text.len() + 1];
         let mut c = 0u32;
         for (i, ch) in text.char_indices() {
@@ -77,10 +87,10 @@ impl Chars {
             c += 1;
         }
         v[text.len()] = c;
-        Chars(v)
+        v
     }
-    fn at(&self, byte: u32) -> u32 {
-        self.0[byte as usize]
+    fn at(&self, file: fixpt_read::FileId, byte: u32) -> u32 {
+        self.1.get(&file).unwrap_or(&self.0)[byte as usize]
     }
 }
 
@@ -88,7 +98,7 @@ impl Chars {
 /// `top`. `span` is the form's; `kth`, which of the expressions at its span
 /// each is, the program's forms walked in order.
 pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span, kth: &Kth) -> String {
-    let (a, b) = (chars.at(span.start), chars.at(span.end));
+    let (a, b) = (chars.at(span.file, span.start), chars.at(span.file, span.end));
     match top {
         Top::Define { name, exp, typed, inferred, .. } => {
             // A `define*`'s type is a list of the type and the `define*`.
@@ -116,7 +126,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
     let sp = c.arena.span_of(e);
     // Its key, as the walk made it (`ids::Kth::key`).
     let (k, kr) = kth.key(e);
-    let (a, b) = (chars.at(sp.start), format!("{} {k} {kr}", chars.at(sp.end)));
+    let (a, b) = (chars.at(sp.file, sp.start), format!("{} {k} {kr}", chars.at(sp.file, sp.end)));
     let name = |s| c.interner.name(s).to_string();
     let go = |x: ExpId| show_exp(c, chars, x, kth);
     let list = |xs: Vec<String>| format!("({})", xs.join(" "));

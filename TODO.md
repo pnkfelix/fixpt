@@ -5814,7 +5814,13 @@ since hygiene's step 3 stage 3), the user's choice over a language
 feature, it made three: on a `parser-top.fx` load, calls into `table.fx`
 21.9 M to 10.0 M, `symbol=?` 3.75 M to 1.25 M, stage 2 9.5 s to 8.8 s.
 Parked on the local branch `table-macros` (`05840827`), its release suite
-failing 5 (§248, §249); to come back to once those are fixed. To consider when more code wants it: an
+failing 5 (§248, §249). Those fixed (2026-11-11), the branch rebased
+and its template reading the table's fields itself (§247), its release
+suite passes; but measured again, six rounds alternating with main, three
+runs each, stage 2's `parser-top.fx` load took 9.25 s (σ 0.21) against
+main's 9.14 s (σ 0.16) over the last two of each: no gain, the calls
+saved not paying for what the expansions cost as compiled (§251). Kept
+on the branch until the compilers make more of it. To consider when more code wants it: an
 annotation saying a procedure is inlined at its calls (both checkers
 accept it, both compilers inline it, at either kind of code; arguments
 evaluated once, a type of its own), or the automatic inliner extended to
@@ -5857,7 +5863,7 @@ the branch `table-macros`, §245) reads the table's fields itself, as its
 comment says: `(bloblet-ref t 2)` the buckets, `(bloblet-ref t 0)` the
 hash, `(bloblet-ref t 1)` the equality.
 
-## 248. A module file's own hidden macros, loaded on the native-convention machines (found 2026-11-11; fixed the same day, but the top level's `hide`)
+## 248. ~~A module file's own hidden macros, loaded on the native-convention machines~~ (found 2026-11-11; fixed the same day)
 
 `table.fx` with hidden `define-syntax`es of its own (the branch
 `table-macros`, §245): `(define t (load-module "fx26:table.fx"))` fails
@@ -5889,7 +5895,18 @@ place said as the loader's); and the tests that paste `table.fx`'s text
 into a program (`tests/table.rs`, `parser::the_parsers_agree_on_real_programs`)
 meet `(hide (define-syntax …))` at the top level, which is refused: load
 it as a module there, or let the top level hide a macro. (The first of
-the two, fixed as above; this one, not yet.)
+the two, fixed as above.) The second, the user's choice: `(hide F…)` at
+a program's top level makes F… as though written there, a program
+exporting nothing to hide them from (`top.rs`'s `expand_forms`,
+`parser-top.fx`'s `top-made`); one form still, of one reading, as a
+macro's use that makes several definitions is, since a form's reading is
+of the text as written (`ids::form_reading`, and every driver that reads
+it). Test: `programs/macros/top-level-hide.fx`. And the two tests that
+had never met a program using macros: the readers' (`tests/syn.rs`) now
+compares the readings unexpanded; the parsers' (`tests/parser.rs`) gives
+the FX-26 expander's keys their template's place (`syn::source_place`),
+and a loaded file's spans their characters in its own text
+(`Chars::with_loaded`).
 
 ## 249. ~~Macro-made code's places differ between the two front ends~~ (found 2026-11-11; built the same day)
 
@@ -5921,3 +5938,40 @@ another datum: `(spin (+ n 1))`, made by `(again spin n)`, mapped to
 provenance there are only as good as that mapping. To place such code by
 the expanded form's own datums (their spans, expansion and all), or to
 give it provenance ids as the trees' compile does.
+
+## 251. What the compilers make of `table.fx`'s lookup (the user's, 2026-11-11)
+
+`,disassemble` and `,disassemble-asm` of `table-ref` (macro version, §245)
+and `bucket-find`, register code (and its x86_64 machine code, 608
+instructions for 178 cells) and cellular code. What they show, each a
+primop or a transformation to try, the first the likeliest to pay:
+
+1. **Call-outs on the cellular machines.** `array-length`
+   (`%bloblet-fields`) and `bitwise-and` (`%fx26-bitwise-and`) are `prim`
+   cells, which the hand-encoded machine runs by calling into Rust
+   (registers saved, `PRIMITIVES` looked up, loaded again): two a lookup,
+   on the machine stage 2 runs on. Cells of their own, as `int-sub` and
+   `eq` have (register code's machine code already has fast paths for
+   both: `direct.rs`, `cellular/x64/regcode.rs`). To count first:
+   `FIXPT_CALLOUTS=1`, "commonest primitives".
+2. **A boolean made to be tested.** `(or (eq? x y) (same x y))` as a test
+   loads `#t`, jumps, and tests it; `entry-of`'s `cond` gives `()` and
+   its user tests it for `()` at once. A test compiled as jumps (`or`,
+   `and`, `not`, `if` in a test), and a test of an `if`'s or `cond`'s
+   value moved into its arms where an arm's value is a constant. (Register
+   code keeps tests decided on a path, `r-decided`; not this.)
+3. **No constant folding.** `(- (array-length b) 1)` is two `- 1`s (the
+   length is its fields less one), each tag- and overflow-checked in
+   machine code, then `+ 2` to the element's field.
+4. **Copies kept.** A `let` binding a variable to a variable (a macro's
+   hygienic temporaries, `same-key?`'s `y`) takes a slot and a move; a
+   loop's (a self tail call's) arguments passed unchanged (`bucket-find`'s
+   `key` and `same`) are moved through temporaries each time round.
+5. **No register allocation** in register code's machine code: each
+   `let`'s value stored to the frame and loaded again at once.
+6. **Checks the types make needless:** `car` tag-checked after a test
+   that the list is not empty; `array-length`'s tag checks of a value
+   typed an array; overflow checked on a length less one; the bounds of
+   an index masked by the length less one. Each needs the checker's
+   types, or a fact a test established, to reach the compiler, sound by
+   construction (a type the checker proved, never a guess).

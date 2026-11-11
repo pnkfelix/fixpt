@@ -935,6 +935,14 @@ impl Checker {
     pub fn expand_forms(&mut self, forms: Vec<Syntax>) -> R<Vec<Syntax>> {
         let mut out = Vec::new();
         for f in forms {
+            // `(hide form …)`: its forms, as if written there, a program
+            // exporting nothing to hide them from.
+            if let Some([h, items @ ..]) = f.as_proper_list()
+                && h.as_symbol().is_some_and(|h| self.interner.name(h) == "hide")
+            {
+                out.extend(self.expand_forms(items.to_vec())?);
+                continue;
+            }
             // `(import-with-syntax lib)`: the file's macros defined, and the
             // rest of what it gives as `(include lib)` gives it.
             // `only` and `except` name macros and the rest alike: the

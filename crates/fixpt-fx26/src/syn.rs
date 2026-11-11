@@ -1091,6 +1091,12 @@ impl Sources<'_> {
 
 /// Where key `k` is, and the expansion that made the part there; a place
 /// that is no key, itself and 0 (`macro-source`).
+/// Where the FX-26 expander's key `k` was written: its template's place (a
+/// character); `k` itself if it is no key.
+pub fn source_place(scheme: &mut Session, k: i64) -> i64 {
+    source_of(scheme, k).0
+}
+
 fn source_of(scheme: &mut Session, k: i64) -> (i64, i64) {
     let name = format!("{READER_PREFIX}macro-source");
     if k < SOURCE_BASE || !scheme.is_bound(&name) {

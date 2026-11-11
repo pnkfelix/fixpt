@@ -220,23 +220,33 @@
         ;; Before each form, the hidden globals of the files it loads first
         ;; (`parse-loaded`), those its types name first (`type-loaded`).
         (let* ((written (car xs))
-               ;; A `define-syntax`: the checks of its templates, once, there.
-               (made (cond ((shape-definition? written)
-                            (begin (global-macro written) (shape-defined! written) nil))
-                           ((defines-syntax? written)
-                            (begin (global-macro written)
-                                   (macro-checks (define-macro pfail-at written nil))))
-                           ;; A file's macros, and the `include` of the rest.
-                           ((imports-syntax? written)
-                            (let ((inc (import-file-macros pfail-at written (get loaded))))
-                              (if (null? inc) (the top-list nil) (parse-made (car inc)))))
-                           (else (expanded-tops (expand-top pfail-at written)))))
+               (made (top-made written))
                (guarded (guard-defs made (cdr xs)))
                (before (shared-noted (shared-taken)))
                (r (form-reading (walk-state t) settings written (loads-of before)))
                (form (number-form t r (append-tops before guarded)))
                (rest (begin (macros-after! r) (shapes-after! r) (parse-tops t settings (cdr xs)))))
           (append-tops form rest)))))
+;; What top-level form `written` makes, parsed. A `define-syntax`: the
+;; checks of its templates, once, there. A `hide`: its forms', as if
+;; written there, a program exporting nothing to hide them from; one form
+;; still, of one reading.
+(define top-made (->* (syn) top-list)
+  (lambda (written)
+    (cond ((shape-definition? written)
+           (begin (global-macro written) (shape-defined! written) nil))
+          ((defines-syntax? written)
+           (begin (global-macro written)
+                  (macro-checks (define-macro pfail-at written nil))))
+          ;; A file's macros, and the `include` of the rest.
+          ((imports-syntax? written)
+           (let ((inc (import-file-macros pfail-at written (get loaded))))
+             (if (null? inc) (the top-list nil) (parse-made (car inc)))))
+          ((form-of? written 'hide) (tops-made (cdr (syn-items written ""))))
+          (else (expanded-tops (expand-top pfail-at written))))))
+(define tops-made (->* (syns-a) top-list)
+  (lambda (xs)
+    (if (null? xs) nil (let ((made (top-made (car xs)))) (append-tops made (tops-made (cdr xs)))))))
 ;; Each form a top-level form is expanded to (a use of a macro that makes
 ;; definitions, several), parsed, each as it is noted.
 (define expanded-tops (->* (syns-a) top-list)

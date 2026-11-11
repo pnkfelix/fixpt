@@ -7,11 +7,13 @@ use fixpt_fx26::session::Fx26Session;
 use fixpt_read::{FileId, Reader, SyntaxProfile};
 
 /// Both readers on `text`, into the same interner, so the syntax compares
-/// whole: data, and every span.
+/// whole: data, and every span. As read, not expanded: an expansion's
+/// renamed binders are new symbols each time.
 fn same_syntax(s: &mut Fx26Session, text: &str) {
-    let ours = s.read_with_own_reader(text).unwrap_or_else(|e| panic!("the FX-26 reader: {e}"));
+    s.load_own_reader().expect("loads");
+    let ours = fixpt_fx26::syn::read_with_fx26_reader(&mut s.scheme, &mut s.checker.interner, FileId(0), text)
+        .unwrap_or_else(|e| panic!("the FX-26 reader: {e}"));
     let rust = Reader::new(text, FileId(0), SyntaxProfile::FX26, &mut s.checker.interner).read_all().expect("reads");
-    let rust = s.checker.expand_forms(rust).expect("expands");
     assert_eq!(ours.len(), rust.len(), "different numbers of forms");
     for (a, b) in ours.iter().zip(&rust) {
         assert_eq!(a, b, "the readers disagree");
