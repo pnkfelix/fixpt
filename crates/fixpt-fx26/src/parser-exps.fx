@@ -909,9 +909,11 @@
                  ;; prompt that catches what is wrong in them.
                  (made (lambda ()
                          (if input?
+                             ;; Its macros, too, no items (`without-syntax`).
                              (t-exp (e-module (cons (loaded-mark base path nil)
                                                     (parse-module-items
-                                                     (input-items pfail-at forms a b)))
+                                                     (input-items pfail-at (without-syntax forms)
+                                                                  a b)))
                                               base end 0 0))
                              (let* ((forms (without-syntax forms)) (ps (loaded-params forms))
                                     (items (parse-module-items (if (null? ps) forms (cdr forms))))

@@ -20,8 +20,9 @@ const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 /// `load-input`'s for its value, not its file's module). And files of module
 /// parameters typed by what a file makes (`load-moduleof`), whose loads a
 /// session makes as forms of their own first (Kayak's report, 2026-11-11:
-/// the expander written in FX-26 took such a file's value for its module).
-const PROGRAMS: [&str; 10] = [
+/// the expander written in FX-26 took such a file's value for its module);
+/// and such a file that uses its own macros (Heist's, the same day).
+const PROGRAMS: [&str; 11] = [
     "load",
     "functor-max",
     "width",
@@ -32,6 +33,7 @@ const PROGRAMS: [&str; 10] = [
     "restrict-parameter",
     "module-parameters-modules",
     "load-moduleof-define-type",
+    "own-macros-params",
 ];
 const AT_THE_REPL: [&str; 4] = ["load", "functor-max", "load-input", "load-input-built-in"];
 
