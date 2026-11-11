@@ -1038,6 +1038,8 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
 /// that is an operand. [`NativeMachine::compile_word`] places it; the
 /// compiler written in FX-26 must make exactly this.
 pub fn assemble_word(heap: &Heap, word: Value, far: [i64; 2]) -> Result<(Vec<u32>, Vec<i64>), String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("rust-compile");
     assemble_word_as(heap, word, far, false)
 }
 
@@ -1844,6 +1846,8 @@ impl NativeMachine {
     /// freely; branches become jumps, and the dispatch between cells goes.
     /// A word already compiled is left alone.
     pub fn compile_word(&mut self, heap: &mut Heap, word: Value) -> Result<(), String> {
+        // Its phase (`TODO.md` §252).
+        let _phase = fixpt_memmgmt::phases::enter("rust-compile");
         if heap.word_code(word).is_some() {
             return Ok(());
         }
@@ -1891,6 +1895,8 @@ impl NativeMachine {
     /// has register code (PLAN.md 13h′) run as register code when
     /// `registers`, and everything its register code reaches compiled too.
     pub fn compile_reachable_as(&mut self, heap: &mut Heap, word: Value, registers: bool) -> Result<usize, String> {
+        // Its phase (`TODO.md` §252).
+        let _phase = fixpt_memmgmt::phases::enter("rust-compile");
         let closure = const { kind("cellular-closure") };
         let (mut todo, mut seen, mut n) = (vec![word], std::collections::HashSet::new(), 0);
         while let Some(w) = todo.pop() {
@@ -2097,6 +2103,8 @@ pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) ->
 
 /// The same, compiling or not as `compile` says.
 pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value], compile: bool) -> Result<Value, String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter(if compile { "run:jit-cells" } else { "run:asm-cells" });
     if !crate::CELLULAR_AVAILABLE {
         return Err(crate::UNAVAILABLE.into());
     }
@@ -2135,6 +2143,8 @@ fn collect_for_code(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]
 /// [`run_word`], compiling what it runs, and running as register code
 /// (PLAN.md 13h′) each word that has some.
 pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("run:regs");
     if !crate::CELLULAR_AVAILABLE {
         return Err(crate::UNAVAILABLE.into());
     }

@@ -343,6 +343,9 @@ impl Session {
     /// procedure held across any call that may collect is a stale pointer
     /// after it, and there is none to hold here.
     pub fn call_global(&mut self, name: &str, args: &[Handle]) -> Result<Handle, SessionError> {
+        // An entry of the front end written in FX-26, its phase by its name
+        // (`TODO.md` §252).
+        let _phase = name.strip_prefix("fx26-reader:").map(|entry| fixpt_memmgmt::phases::enter_named("fx:", entry));
         let f = self.global_value_raw(name).unwrap_or_else(|| panic!("`{name}` is not defined"));
         let args: Vec<Value> = args.iter().map(|a| self.handle_value(*a)).collect();
         self.call_raw(f, &args)

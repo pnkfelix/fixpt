@@ -1249,6 +1249,8 @@ pub fn compile(heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)
 }
 
 fn compile_with(cs: &mut Compiler, heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("rust-compile");
     // Native already (`adapt` made it so): itself.
     if let Some(c) = DirectMachine::compiled_of(heap, closure)
         && heap.adapted(closure).is_none()
@@ -1332,6 +1334,8 @@ impl DirectMachine {
     /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
     /// heap its call-outs allocate in, collecting when they must.
     pub fn call(&mut self, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
+        // Its phase (`TODO.md` §252).
+        let _phase = fixpt_memmgmt::phases::enter("run:native");
         // The heap's native stack (`Heap::native_stack`), with a little room
         // at its top, where the outermost frame flushed there points.
         let top = (rt.heap.native_stack().1 - 16) & !15;

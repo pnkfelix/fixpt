@@ -2494,6 +2494,8 @@ impl Heap {
     /// contiguous and relocation-free.
     pub fn collect(&mut self, extra_roots: &mut [&mut [Value]]) {
         let started = std::time::Instant::now();
+        // The mutator's phase paused (`TODO.md` §252).
+        let phase = fixpt_memmgmt::phases::collection("gc:major");
         let before = self.used();
         self.peak_words = self.peak_words.max(before as u64);
         self.words_allocated += self.top.saturating_sub(self.top_after_gc) as u64 + (self.nursery_top - NURSERY_BASE) as u64;
@@ -2680,6 +2682,7 @@ impl Heap {
         self.top = to + free;
         self.gc_count += 1;
         self.words_copied += free as u64;
+        phase.copied(free as u64);
         // The nursery emptied into the old space; no card of it dirty.
         self.nursery_top = NURSERY_BASE;
         self.clear_cards(to, to + free);

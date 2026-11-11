@@ -275,6 +275,8 @@ pub fn call_closure(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value,
 /// end's machine, which may not run their code (register code, under
 /// native code that calls it as cellular: `TODO.md` §187).
 pub fn call_front_end(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("fx:front-end");
     let run = rt.front_end_run_word.or(rt.run_word);
     rt.heap.quiet_enter();
     let out = call_closure_by(rt, f, args, run);

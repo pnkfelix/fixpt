@@ -44,6 +44,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-core",
  "fixpt-heap",
+ "fixpt-memmgmt",
  "fixpt-read",
  "fixpt-runtime",
 ]
@@ -54,6 +55,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-engine",
  "fixpt-heap",
+ "fixpt-memmgmt",
  "fixpt-native",
  "fixpt-read",
  "fixpt-reps",
@@ -146,6 +148,7 @@ dependencies = [
  "fixpt-core",
  "fixpt-engine",
  "fixpt-heap",
+ "fixpt-memmgmt",
  "fixpt-read",
  "fixpt-runtime",
 ]

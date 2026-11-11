@@ -26,6 +26,25 @@ is a subset, about a minute:
 The full `fixpt-scheme` suite under it takes well over an hour, mostly the
 eager-reader tests, and is run only at milestones.
 
+**Where a run's time goes, by phase** (2026-11-11, `TODO.md` §252).
+`FIXPT_PHASE_TIMES=dir` has each process write `dir/PID.tsv`: the exclusive
+time of each path of phases it was in (`other;fx:check-program;run:native`,
+as a flame graph's collapsed stacks are), with entries, and the collections
+each phase began and the words they copied. The phases
+(`fixpt_memmgmt::phases`) are entered where such work starts: `rust-front`
+(the Rust reader, expander and checker), `rust-compile` (each compiler
+written in Rust, the lowering to Scheme, a JIT's compile within a run),
+`fx:NAME` (each entry of the front end written in FX-26), `run:MACHINE`
+(code entered on each machine), `gc:minor` and `gc:major`, `load:…` (the
+front end's cache, a `.fasl`); `other` is the rest. The file is written at
+exit, on `SIGTERM`, `SIGINT` or `SIGHUP` (the signal raised again after),
+and, a snapshot, when a thread's last phase ends a second after the last
+write. `scripts/phase-times.py dir` sums a run, by phase, by work (a path's
+first `fx:` entry), and by test binary and test, nextest running each test
+as a process:
+`FIXPT_PHASE_TIMES=/tmp/pt cargo nextest run --workspace`. Off, an entry
+is a load and a test.
+
 **Profiling with `sample`, our code named** (2026-10-05). macOS's
 `sample PID SECONDS -file OUT` names every Rust frame, but shows machine
 code we made as `???  (in <unknown binary>)` and an address. With

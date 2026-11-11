@@ -178,6 +178,8 @@ impl Checker {
     /// the first time, which another try would take as loaded, with their
     /// hidden globals never made (`put_back`).
     pub fn top_defining(&mut self, form: &Syntax) -> R<Defining> {
+        // Its phase (`TODO.md` §252).
+        let _phase = fixpt_memmgmt::phases::enter("rust-front");
         let kept = self.keep(false);
         let r = match self.include_forms(form) {
             Ok(Some(forms)) => self.top_defining_each(&forms),
@@ -649,6 +651,8 @@ impl Checker {
     /// `text`: a REPL's entry, in the session's text
     /// (`Fx26Session::read_entry`).
     pub fn read_in_from(&mut self, file: FileId, text: &str, start: usize) -> R<Vec<Syntax>> {
+        // Its phase (`TODO.md` §252).
+        let _phase = fixpt_memmgmt::phases::enter("rust-front");
         // Where its spans are, for what is said of the checks when the stack
         // runs low (`debug_stack`).
         #[cfg(debug_assertions)]
@@ -1391,6 +1395,8 @@ impl Checker {
 
     /// Check one top-level form, keeping what it defines.
     pub fn top(&mut self, form: &Syntax) -> R<Top> {
+        // Its phase (`TODO.md` §252).
+        let _phase = fixpt_memmgmt::phases::enter("rust-front");
         // Where the top level ends as it begins: past it, what the form
         // binds (`toplevel_hidden`).
         let outer = self.form_began.replace((self.env.len(), self.dscope.len()));

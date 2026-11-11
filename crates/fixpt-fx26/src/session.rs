@@ -279,6 +279,8 @@ pub fn compile_form_defining(checker: &mut Checker, globals: &mut Globals, form:
 /// A checked top-level form, lowered: a definition that assigns keeps the
 /// global its name has (`Globals::keep_next`).
 pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> Code {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("rust-compile");
     match top {
         Top::Define { name, assigns: true, .. } => globals.keep_next(*name),
         Top::DefineRec { bindings, assigns: true } => bindings.iter().for_each(|(n, _, _)| globals.keep_next(*n)),
@@ -570,6 +572,8 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, file: &
 /// The same, and what the image keeps after the standard environment (a
 /// dump's start, `dump_image`), or `#f`; spliced, not copied.
 fn load_native_front_end_keeping(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, file: &fixpt_heap::Mapped) -> Option<(fixpt_heap::Value, fixpt_heap::Value)> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("load:front-end");
     let bytes = file.get(CACHE_IMAGE_AT..)?;
     use fixpt_heap::Value;
     let img = fixpt_heap::image::parts(bytes, false).ok()?;
@@ -1912,6 +1916,7 @@ impl Fx26Session {
         let (printed, value) = self.scheme.scope(|s| {
             // The lowered Scheme's own compiling, quick, is counted as run.
             let start = std::time::Instant::now();
+            let _phase = fixpt_memmgmt::phases::enter("run:scheme-vm");
             s.bare_failures = true;
             let forms = code.syntax(s.runtime_unrooted(), "<fx26>");
             let (printed, result) = s.eval_forms_capturing(&forms);

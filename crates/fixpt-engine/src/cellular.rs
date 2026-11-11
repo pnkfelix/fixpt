@@ -1485,6 +1485,8 @@ impl Machine {
 /// With `FIXPT_PROFILE` set, the words that ran the most cells are written
 /// to stderr after each run.
 pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("run:rust-cells");
     let mut m = Machine::with_fuel(rt.word_fuel);
     let profiling = std::env::var_os("FIXPT_PROFILE").is_some();
     if profiling {

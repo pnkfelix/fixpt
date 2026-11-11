@@ -851,6 +851,8 @@ impl Asm {
 /// then an instruction's code after another; and where each cell's resume
 /// point is (`-1` for none), for [`NativeMachine::install_bytes`].
 pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i64>), String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("rust-compile");
     let cells: Vec<Value> = heap.bloblet_fields_from(rw, WORD_CELL0);
     let mut a = Asm::new();
     a.in_regcode = true;

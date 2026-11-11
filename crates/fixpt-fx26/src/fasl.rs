@@ -737,6 +737,8 @@ pub type Read = (Heap, Value, Vec<(Value, Link)>, Vec<Value>);
 /// A `.fasl`'s image `bytes` read ([`Read`]), the globals it links to
 /// named by `globals` ([`Header::globals`]).
 pub fn read_image(bytes: &[u8], globals: &[String]) -> Result<Read, String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("load:fasl");
     let heap = fixpt_heap::image::load_trusted(bytes).map_err(|e| format!("its image: {e:?}"))?;
     let root = *heap.roots_slice().first().ok_or("its image has no root")?;
     if !root.is_pair() {

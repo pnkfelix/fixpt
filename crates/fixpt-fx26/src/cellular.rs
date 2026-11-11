@@ -3153,6 +3153,8 @@ impl<'a> Compiler<'a> {
     /// A checked program's forms, as the checker found them, to one word
     /// that runs it and leaves its last expression's value (unit if none).
     pub fn program(&mut self, tops: &[Top]) -> R<Value> {
+        // Its phase (`TODO.md` §252).
+        let _phase = fixpt_memmgmt::phases::enter("rust-compile");
         let mut code = Vec::new();
         let mut has_value = false;
         for t in tops {

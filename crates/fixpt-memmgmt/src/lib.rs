@@ -6,12 +6,15 @@
 //! Address space is reserved up front and never moves, so that a Value's
 //! index is from a fixed base; pages are committed by the system as they
 //! are first written (`tests/reserve.rs` measures how). Every `unsafe`
-//! block says what it relies on.
+//! block says what it relies on. And the process's own accounts, which need
+//! the system too: who allocates (`alloc_profile`), and where the time goes
+//! (`phases`, its exit handler and signals).
 #![allow(unsafe_code)]
 
 pub mod alloc_profile;
 pub mod exec;
 pub mod mapped;
+pub mod phases;
 pub mod reserve;
 pub mod words;
 

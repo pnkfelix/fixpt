@@ -110,6 +110,8 @@ impl Heap {
     /// area.
     pub(super) fn collect_minor(&mut self, extra_roots: &mut [&mut [Value]]) {
         let started = std::time::Instant::now();
+        // The mutator's phase paused (`TODO.md` §252).
+        let phase = fixpt_memmgmt::phases::collection("gc:minor");
         let before = self.used();
         self.peak_words = self.peak_words.max(before as u64);
         if self.verify_barrier {
@@ -251,6 +253,7 @@ impl Heap {
         self.minor_count += 1;
         self.words_copied += free as u64;
         self.minor_words_copied += free as u64;
+        phase.copied(free as u64);
         self.top_after_gc = self.top;
         let nanos = started.elapsed().as_nanos() as u64;
         self.gc_nanos += nanos;

@@ -845,6 +845,8 @@ impl Asm {
 /// instruction's code after another; and where each cell's resume point
 /// is (`-1` for none), for [`NativeMachine::install`].
 pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(Vec<u32>, Vec<i64>), String> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("rust-compile");
     assemble_register_word_as(heap, rw, far, false)
 }
 
@@ -1519,6 +1521,8 @@ impl NativeMachine {
     /// compiled: the register word's code its entry, and `word` entered
     /// through an adapter to it. Whether it did.
     pub fn compile_register_word(&mut self, heap: &mut Heap, word: Value) -> Result<bool, String> {
+        // Its phase (`TODO.md` §252).
+        let _phase = fixpt_memmgmt::phases::enter("rust-compile");
         let rw = heap.bloblet_slot(word, WORD_TWIN);
         if !heap.is_register_word(rw) || heap.word_code(rw).is_some() {
             return Ok(false);
