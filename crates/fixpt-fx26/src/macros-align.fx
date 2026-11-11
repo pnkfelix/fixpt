@@ -31,7 +31,7 @@
         with-core with-kids with-import with-export with-many with-hole node-new
         node-imports node-export
         nodes-reset! repeated repeated! seq-depths repeated? cage-seqs cage-seq? int-member?
-        desc-roots
+        desc-roots binds-nothing?
         pvar-of pvar? pvar-shape lv-rib lv-cage lv-earlier lv-shape program-walk unplaced
         (type action actions contracts clause clauses macro macro-env scope scopes kids rooted holes
               node pinfo pvars level levels found def-env def-envs env namer looked))
@@ -321,6 +321,12 @@
         ((and (not (string=? head "")) (not (string=? (substring head 0 1) "%"))
               (not (null? (sig-of (string->symbol head) kernel))))
          (operands fail ps at (car (sig-of (string->symbol head) kernel)) (nth parts 1)))
+        ;; A form the kernel has not, but `scope-forms`, that binds
+        ;; nothing (`bloblet-ref`, `TODO.md` §247).
+        ((and (not (string=? head ""))
+              (let ((sig (sig-of (string->symbol head) (scope-sigs fail))))
+                (and (not (null? sig)) (binds-nothing? (car sig) nil))))
+         (operands fail ps at (car (sig-of (string->symbol head) (scope-sigs fail))) (nth parts 1)))
         ((and (not (string=? head "")) (reserved? head))
          (fail-at fail (string-append "the prototype does not know `" head "`'s binding "
                                       "structure: not yet in a template")

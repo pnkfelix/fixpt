@@ -5833,7 +5833,7 @@ values is one compare, with no type test or boxing; then the same for
 `bitwise-and`, shifts, and the comparisons the hash arithmetic uses
 (`fixpt dump-heap`, `FIXPT_JIT_DEBUG`, the disassembler).
 
-## 247. Templates writing the forms only programs' walks know (2026-11-11)
+## 247. ~~Templates writing the forms only programs' walks know~~ (2026-11-11; the forms that bind nothing, done the same day)
 
 A template is aligned with the kernel's form signatures alone
 (`kernel-forms`); `scope-forms` (`macros-kernel.fx`), which binding
@@ -5844,7 +5844,15 @@ is refused, "not yet in a template". To let a template use a
 `scope-forms` signature written in the kernel's notation alone (no
 `item`, no `(shape A)`): every `bloblet-*` and `blobref-*` form, which
 binds nothing, in both expanders, with a test that a template writing
-one aligns and expands alike in both. Then `table.fx`'s `entry-of` (on
+one aligns and expands alike in both.
+
+Done for those that bind nothing (the user's framing: forms like `if`,
+unlike `lambda` and `let`): a template may use a `scope-forms` signature
+with no `import` or `export` in it (`macros.rs`'s `binds_nothing`,
+`macros-types.fx`'s `binds-nothing?`), so `bloblet-*` and `blobref-*`;
+`typecase`, `case` and the other binding ones are refused in a template
+as before (`programs/macros/template-bloblet-ref.fx`,
+`unknown-form-in-template.fx`). Then `table.fx`'s `entry-of` (on
 the branch `table-macros`, §245) reads the table's fields itself, as its
 comment says: `(bloblet-ref t 2)` the buckets, `(bloblet-ref t 0)` the
 hash, `(bloblet-ref t 1)` the equality.

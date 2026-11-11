@@ -816,6 +816,26 @@ impl Macros {
         }
     }
 
+    /// Whether signature `t` binds nothing, as a template may use one of
+    /// `scope-forms` (`bloblet-ref`'s, `TODO.md` §247): no `import` or
+    /// `export` in it, so neither a module's item nor its names (`item`,
+    /// `(shape A)`), which a program's walk alone knows; `mu`s seen through
+    /// once (`seen`).
+    fn binds_nothing(&self, t: &STy, seen: &mut Vec<usize>) -> bool {
+        match t {
+            STy::Item | STy::Import(..) | STy::Export(..) => false,
+            STy::Pair(a, d) => self.binds_nothing(a, seen) && self.binds_nothing(d, seen),
+            STy::Many(b) | STy::Typed(b, _) => self.binds_nothing(b, seen),
+            STy::Union(ms) => ms.iter().all(|m| self.binds_nothing(m, seen)),
+            STy::Mu(id) if seen.contains(id) => true,
+            STy::Mu(id) => {
+                seen.push(*id);
+                self.binds_nothing(&self.mus[*id], seen)
+            }
+            _ => true,
+        }
+    }
+
     /// The type at `t`, its annotations, `mu`s and unions seen through
     /// to what is under them (for overlap and fit).
     fn unfold<'a>(&'a self, t: &'a Rc<STy>) -> &'a Rc<STy> {
@@ -2369,7 +2389,14 @@ impl Aligner<'_> {
                 return Err(FxError::at(s.span, "a template's `with` is `(with module name)`, the value `name` of the module, or `(with #%fx name)` or `(with #%toplevel name)` (one opening a module over a body waits for scopes of a module's names)"));
             }
             Some((h, _)) if self.m.defined.contains_key(&h) => Some(self.m.defined[&h].sig.clone()),
-            Some((_, n)) if self.mode == Mode::Program && self.m.k.scope_forms.contains_key(n) => Some(self.m.k.scope_forms[n].clone()),
+            // A form the kernel has not, but `scope-forms`: in a program's
+            // walk; in a template too, if it binds nothing (`bloblet-ref`,
+            // `TODO.md` §247).
+            Some((_, n))
+                if self.m.k.scope_forms.get(n).is_some_and(|t| self.mode == Mode::Program || self.m.binds_nothing(t, &mut Vec::new())) =>
+            {
+                Some(self.m.k.scope_forms[n].clone())
+            }
             Some((_, n)) if self.m.k.forms.contains_key(n) && !n.starts_with('%') => Some(self.m.k.forms[n].clone()),
             // A program's reserved word at a list's head with no binding
             // structure of its own: a variable's name there (`else`, `read`),

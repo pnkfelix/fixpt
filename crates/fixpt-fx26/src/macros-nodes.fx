@@ -236,6 +236,26 @@
   (lambda (i) (int-member? i (get cage-seqs))))
 (define int-member? (->* (int (listof int acyclic)) bool)
   (lambda (i is) (and (not (null? is)) (or (= i (car is)) (int-member? i (cdr is))))))
+;; Whether signature `t` binds nothing, as a template may use one of
+;; `scope-forms` (`bloblet-ref`'s, `TODO.md` §247): no `import` or `export`
+;; in it, so neither a module's item nor its names (`item`, `(shape A)`),
+;; which a program's walk alone knows; `mu`s seen through once (`seen`). As
+;; `macros.rs`'s `binds_nothing`.
+(define binds-nothing? (->* (sty (listof int acyclic)) bool)
+  (lambda (t seen)
+    (tagcase t
+      (s-item () #f)
+      (s-import (b x) #f)
+      (s-export (b x) #f)
+      (s-pair (a d) (and (binds-nothing? a seen) (binds-nothing? d seen)))
+      (s-many (b) (binds-nothing? b seen))
+      (s-typed (b h) (binds-nothing? b seen))
+      (s-union (ms) (all-bind-nothing? ms seen))
+      (s-mu (id) (or (int-member? id seen) (binds-nothing? (mu-body id) (cons id seen))))
+      (else y #t))))
+(define all-bind-nothing? (->* (stys (listof int acyclic)) bool)
+  (lambda (ms seen)
+    (or (null? ms) (and (binds-nothing? (car ms) seen) (all-bind-nothing? (cdr ms) seen)))))
 ;; The nodes of the descriptions a template writes, whole (`macros.rs`'s
 ;; `Node::desc`).
 (define desc-roots (ref (listof int acyclic) rs) (new nil))
