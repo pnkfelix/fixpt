@@ -563,7 +563,8 @@
               (same-files (cdr ns) fs)))))
 (define file-own-expanded (->* (loaded-file) loaded-file)
   (lambda (f)
-    (if (or (<= (extract f 2) 0) (extract f 8) (not (own-macros? (extract f 5))))
+    (if (or (<= (extract f 2) 0) (extract f 8)
+            (not (or (own-macros? (extract f 5)) (imports-syntax-in? (extract f 5)))))
         f
         (let* ((saved (file-scope-begin!))
                (r (prompt parse-tag (begin (set own-out (own-each (extract f 5))) (p-ok nil))
@@ -584,6 +585,11 @@
               (product (1 (extract f 1)) (2 (extract f 2)) (3 (extract f 3)) (4 (extract f 4))
                        (5 (get own-out)) (6 (extract f 6)) (7 (extract f 7)) (8 #f))))))))
 (define own-out (ref syns-a rs) (new nil))
+;; Whether forms `xs` import a file's macros (`import-with-syntax`), which a
+;; module file may not yet (`own-each`).
+(define imports-syntax-in? (->* (syns-a) bool)
+  (lambda (xs) (and (not (null? xs)) (or (form-of? (car xs) 'import-with-syntax)
+                                        (imports-syntax-in? (cdr xs))))))
 ;; Whether forms `xs` define a macro, hidden or not.
 (define own-macros? (->* (syns-a) bool)
   (lambda (xs)
@@ -599,6 +605,13 @@
         nil
         (let* ((x (car xs))
                (made (cond ((or (form-of? x 'module-parameters) (shape-definition? x)) (list x))
+                           ((form-of? x 'import-with-syntax)
+                            (begin (pfail-at (string-append "`import-with-syntax` in a module "
+                                                            "file: not yet; a program's top "
+                                                            "level imports a file's macros "
+                                                            "(`binding-shapes.md`, step 4)")
+                                             (syn-start x) (syn-end x))
+                                   nil))
                            ((own-macro? x) (begin (define-macro pfail-at x nil) (list x)))
                            ((form-of? x 'hide)
                             (let ((items (syn-items x "")))

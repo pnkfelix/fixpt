@@ -1365,13 +1365,11 @@ impl Fx26Session {
     /// them, until one fails; of any other form, its own.
     pub fn run_each(&mut self, form: &Syntax) -> R<Vec<Outcome>> {
         let Some(forms) = self.checker.include_forms(form)? else { return Ok(vec![self.run(form)?]) };
-        // `(include m (except name …))` of all `m` gives (`import-with-syntax`
-        // of a file's macros alone): nothing done, nothing to show.
-        if forms.is_empty() && form.as_proper_list().is_some_and(|l| l.len() == 3) {
-            return Ok(Vec::new());
-        }
+        // Of a module that gives nothing, or `(include m (except name …))`
+        // of all it gives (`import-with-syntax` of a file of macros alone,
+        // Heist's): nothing done, nothing to show, as both checkers take it.
         if forms.is_empty() {
-            return Err(FxError::at(form.span, "this module gives nothing to include"));
+            return Ok(Vec::new());
         }
         let mut out = Vec::new();
         for f in &forms {

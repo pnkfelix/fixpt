@@ -224,6 +224,10 @@
           ;; A program's binder: any name the checkers let it bind, which they
           ;; decide.
           ((and (syn-symbol? s) (= mode 3)) (with-kids at (k-binder (syn-symbol s) d)))
+          ;; A value's binder a use gives: as a program's, any name the
+          ;; checkers let it bind, a keyword too (`fields`, Heist's), which a
+          ;; template's form, read by its head, does not see bound.
+          ((and (syn-symbol? s) (= mode 2) (not d)) #u)
           ((and (syn-symbol? s) (not (reserved-syn? s)) (not (and d (desc-word? (syn-name s) #f))))
            (if (= mode 1) (with-kids at (k-binder (syn-symbol s) d)) #u))
           (else (fail-at fail (string-append "`" (show-syn s) "` is not a name that may be bound")

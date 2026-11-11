@@ -55,7 +55,9 @@ fn a_file_uses_its_own_macros() {
 
 #[test]
 fn only_and_except_take_macros_and_names_alike() {
-    for (name, want) in [("main-only.fx", "1020 : int"), ("main-except.fx", "1030 : int"), ("main-except-all.fx", "2 : int")] {
+    // A file of macros alone: its `include` gives nothing, and is nothing
+    // (Heist's).
+    for (name, want) in [("main-only.fx", "1020 : int"), ("main-except.fx", "1030 : int"), ("main-except-all.fx", "2 : int"), ("main-macros-only.fx", "10 : int")] {
         for m in MACHINES {
             let (out, err) = eval(m, name);
             assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");
@@ -74,6 +76,7 @@ fn what_cannot_be_imported_is_refused() {
         ("main-only-not-given.fx", "unbound variable `limit`"),
         ("main-only-hidden.fx", "`twice` is nothing `lib` gives"),
         ("main-poly.fx", "a file's macro's description with a binder of its own or a part a use gives in it: not yet"),
+        ("main-imports-in-file.fx", "`import-with-syntax` in a module file: not yet"),
     ];
     for (name, why) in cases {
         let (out, err) = eval("rs-scheme-vm", name);

@@ -884,6 +884,11 @@ impl Checker {
         let shape = |s: &Syntax| matches!(s.as_proper_list(), Some([_, _, m]) if head(m).as_deref() == Some("modnames"));
         let macro_of = |s: &Syntax| syntax_names(s, interner).is_some() && !shape(s);
         let hidden = |s: &Syntax| head(s).as_deref() == Some("hide") && s.as_proper_list().is_some_and(|l| l[1..].iter().any(macro_of));
+        // Another file's macros: a program's alone, for now (as the FX-26
+        // parser's `own-each`).
+        if let Some(f) = forms.iter().find(|f| head(f).as_deref() == Some("import-with-syntax")) {
+            return Err(FxError::at(f.span, "`import-with-syntax` in a module file: not yet; a program's top level imports a file's macros (`binding-shapes.md`, step 4)"));
+        }
         if !forms.iter().any(|f| macro_of(f) || hidden(f)) {
             return Ok(forms);
         }

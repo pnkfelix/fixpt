@@ -2143,7 +2143,11 @@ impl Aligner<'_> {
             }
             STy::Bvar | STy::Dvar => match s.as_symbol() {
                 Some(n) if self.m.defined.contains_key(&n) => Err(fail(format!("`{}` is a macro's name, which is not bound", self.name(n)))),
-                Some(n) if !reserved(self.name(n)) && !(matches!(&**t, STy::Dvar) && self.word(n, false)) => {
+                // A value's binder a use gives: as a program's, any name the
+                // checkers let it bind, a keyword too (`fields`, Heist's),
+                // which a template's form, read by its head, does not see
+                // bound.
+                Some(n) if (self.mode == Mode::Use && matches!(&**t, STy::Bvar)) || (!reserved(self.name(n)) && !(matches!(&**t, STy::Dvar) && self.word(n, false))) => {
                     if self.writes() {
                         let ns = if matches!(&**t, STy::Dvar) { Ns::Desc } else { Ns::Value };
                         self.nodes[at].kids = Kids::Binder(n, ns);

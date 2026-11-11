@@ -1960,7 +1960,8 @@ impl Checker {
                 };
                 return Ok(self.arena.exp(span, e));
             }
-            Datum::List { .. } => {}
+            // `()` none, as the FX-26 parser says.
+            Datum::List { items, .. } if !items.is_empty() => {}
             _ => return Err(FxError::at(span, "not an expression in the FX-26 kernel")),
         }
         let items = self.items(s, "an expression")?;

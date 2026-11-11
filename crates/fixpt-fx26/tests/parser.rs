@@ -223,6 +223,20 @@ fn module_parse_errors_agree() {
     }
 }
 
+/// `()` where an expression is wanted, which each parser refuses alike
+/// (the Rust one indexed an empty list: Heist's).
+#[test]
+fn an_empty_list_is_no_expression_alike() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    for text in ["(f ())", "()", "(define x int ())"] {
+        let ours = s.parse_with_own_parser(text).expect_err("refused");
+        let mut c = Checker::new();
+        let forms = c.read_in(FileId(0), text).expect("reads");
+        let rust = forms.iter().find_map(|f| c.top(f).err()).expect("refused");
+        assert_eq!((ours.message, ours.span.start, ours.span.end), (rust.message, rust.span.start, rust.span.end), "{text}");
+    }
+}
+
 /// A `case` the parsers refuse (`TODO.md` §46), each saying the same, at
 /// the same place.
 #[test]
