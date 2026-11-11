@@ -99,15 +99,20 @@
 ;; Whether `name` is a form's, `#%fx`, `#%toplevel` or `define-syntax`: never
 ;; bound, so never a binder or a variable.
 (define reserved? (->* (string) bool)
-  (lambda (name)
-    (or (string=? name "#%fx") (string=? name "#%toplevel") (string=? name "define-syntax")
-        (string=? name "define-syntax-rec")
-        (word-in? name (with kernel reserved-words)))))
+  (lambda (name) (reserved-sym? (string->symbol name))))
+(define reserved-sym? (->* (symbol) bool)
+  (lambda (n)
+    (or (symbol=? n '|#%fx|) (symbol=? n '|#%toplevel|) (symbol=? n 'define-syntax)
+        (symbol=? n 'define-syntax-rec)
+        (words-have? n (with kernel reserved-words)))))
+;; Whether `name` is one of words `ws`: compared as symbols, no word's name
+;; copied to a string.
 (define word-in? (->* (string datum) bool)
-  (lambda (name ws)
+  (lambda (name ws) (words-have? (string->symbol name) ws)))
+(define words-have? (->* (symbol datum) bool)
+  (lambda (n ws)
     (and (pair? ws)
-         (or (and (symbol? (car ws)) (string=? name (symbol->string (car ws))))
-             (word-in? name (cdr ws))))))
+         (or (and (symbol? (car ws)) (symbol=? n (car ws))) (words-have? n (cdr ws))))))
 ;; Whether `name` is a word of descriptions (the kernel's): one read
 ;; anywhere (`pure`, `heap`, a region constant `@r`, or a name already
 ;; `#%`'s), or, `head`, one a list's head may be (`subr`, `listof`).
@@ -123,7 +128,7 @@
   (lambda (name) (word-in? name (with kernel type-forms))))
 ;; Whether `s` is a name, and a reserved one.
 (define reserved-syn? (->* (syn) bool)
-  (lambda (s) (and (syn-symbol? s) (reserved? (syn-name s)))))
+  (lambda (s) (and (syn-symbol? s) (reserved-sym? (syn-symbol s)))))
 (define name-in? (->* (symbol names) bool)
   (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (name-in? n (cdr ns))))))
 

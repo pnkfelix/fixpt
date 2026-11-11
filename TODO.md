@@ -5684,3 +5684,37 @@ what a record or a shape asked for depends on), or caching it (§238).
 800 in 0.2 s, before step 2 as after, shaping off or on: something in each
 top-level form's parse costs as many as the forms before it. Not yet
 found.
+
+## 241. A `map` that shares what it does not change (the user's, 2026-11-11)
+
+The FX-26 expander rebuilds lists by recursions written out for each type
+(`sealed-each`, `unshaped-items`, `written-items` in `macros-shapes.fx`,
+`renamed-items` in `macros-walk.fx`), each copying the whole form however
+little it changes; `sealed-written` and `with-written` now give a form
+itself where nothing changed, each by hand. One helper instead, a
+`plambda` over the element type and the function's effect: on the way
+back, a cell whose new car and cdr are `eq?` to its old ones is the old
+cell, so that an unchanged tail is shared and an unchanged list is
+itself, and the `syn` around it need not be made again (nor its
+`syn-datums`). Sound as `eq?` is on immutable data: `#t` means the same,
+`#f` only costs a copy. Then those recursions as calls of it.
+
+## 242. Text embedded in the binary, held as static (the user's, 2026-11-11)
+
+Source text is transient by default, which is right; but some is static:
+the front end's files, `include_str!`'d (`FRONT_END_FILES`). Neither
+compiler keeps that: `fixpt_fx26::front_end()` joins the files into a new
+`String` for each caller, and `syn.rs` copies the text into the nursery
+(`Heap::make_string`), where FX-26 code sees it as any string; only
+symbols have a static path (`Heap::intern_static`, which still copies the
+name). Wanted: such text carried as static, a `Cow<'static, str>` or the
+like, on both sides. In the heap, a string allocated once into the static
+area's immutable half (§161), never moved, copied or scanned, of the same
+layout, so that every string primitive and native fast path reads it as
+it is; the static area has no allocation API but images'
+(`image_static`, `dump_static`) yet. A string that borrows the binary's
+own bytes would instead be a new kind that every primitive and both
+native back ends would have to take. Not a parse-time lever (a profile of
+the FX-26 parse, 2026-11-11, finds no time in the text itself); the work
+derived from static text each run is (its readings' hashes, its read, its
+shapes), for caching by build (§238).

@@ -251,13 +251,15 @@
 ;; where a template makes definitions, else an expression's.
 (define form (->* (fails pvars int syn bool) unit)
   (lambda (fail ps at s defn)
+    ;; A program's form, after expansion: its own binding structure.
+    (if (get program-walk) (program-form fail ps at s defn) (template-form fail ps at s defn))))
+(define template-form (->* (fails pvars int syn bool) unit)
+  (lambda (fail ps at s defn)
     (let* ((parts (split s)) (hd (car parts))
            (head (if (and (syn-symbol? hd) (not (pvar? (syn-symbol hd) ps))) (syn-name hd) ""))
            (kernel (kernel-sigs fail)) (defs (kernel-definitions fail))
            (macro (and (not (string=? head "")) (macro? (syn-symbol hd)))))
       (cond
-        ;; A program's form, after expansion: its own binding structure.
-        ((get program-walk) (program-form fail ps at s defn))
         ;; A procedural macro (`macros-procedural.fx`): no signature says
         ;; what it binds.
         ((and macro (= (makes (syn-symbol hd)) 3))
@@ -364,13 +366,12 @@
 (define program-form (->* (fails pvars int syn bool) unit)
   (lambda (fail ps at s defn)
     (let* ((parts (split s)) (hd (car parts))
-           (head (if (syn-symbol? hd) (syn-name hd) ""))
            (n (if (syn-symbol? hd) (syn-symbol hd) (string->symbol "")))
            (kernel (kernel-sigs fail)) (sforms (scope-sigs fail))
            (defs (kernel-definitions fail)) (sdefs (scope-definitions fail)))
       (cond
         (defn
-         (cond ((and (string=? head "module-parameters") (= (len (proper-items s)) 2))
+         (cond ((and (symbol=? n 'module-parameters) (= (len (proper-items s)) 2))
                 (operands-as fail 3 ps at (parameters-sig (nth (proper-items s) 1)) (nth parts 1)))
                ((not (null? (sig-of n defs))) (operands-as fail 3 ps at (car (sig-of n defs))
                                                 (nth parts 1)))
@@ -380,17 +381,34 @@
         ((syn-keyword? hd)
          (with-kids at (k-form (align fail 3 ps (car (sig-of '%construct kernel)) s -1
                                       (node-path at)))))
-        ((and (string=? head "quasiquote") (= (len (proper-items s)) 2))
+        ((and (symbol=? n 'quasiquote) (= (len (proper-items s)) 2))
          (with-kids at (k-desc (unquoted fail ps (nth (proper-items s) 1)
                                          (path+ (path+ (node-path at) #f) #t) 1 nil))))
-        ((and (string=? head "with") (standard-with? s)) #u)
+        ((and (symbol=? n 'with) (standard-with? s)) #u)
         ((not (null? (sig-of n sforms)))
          (operands-as fail 3 ps at (car (sig-of n sforms)) (nth parts 1)))
-        ((and (not (string=? head "")) (not (string=? (substring head 0 1) "%"))
-              (not (null? (sig-of n kernel))))
+        ;; Of the kernel's, not one the expander writes, `%app` or
+        ;; `%construct`, named so.
+        ((and (not (null? (sig-of n kernel))) (not (name-in? n (percent-named kernel))))
          (operands-as fail 3 ps at (car (sig-of n kernel)) (nth parts 1)))
         (else (with-kids at (k-form (align fail 3 ps (car (sig-of '%app kernel)) s -1
                                             (node-path at)))))))))
+;; The names of `kernel`'s forms that start with `%`, found once.
+(define percent-named (->* (named) names)
+  (lambda (kernel)
+    (begin
+      (if (get percent-found) #u
+          (begin (set percent-names (percent-of kernel)) (set percent-found #t)))
+      (get percent-names))))
+(define percent-found (ref bool rs) (new #f))
+(define percent-names (ref names rs) (new nil))
+(define percent-of (->* (named) names)
+  (lambda (ns)
+    (cond ((null? ns) nil)
+          ((let ((h (symbol->string (extract (car ns) 1))))
+             (and (> (string-length h) 0) (string=? (substring h 0 1) "%")))
+           (cons (extract (car ns) 1) (percent-of (cdr ns))))
+          (else (percent-of (cdr ns))))))
 ;; The operands `rest` of the form at `at`, aligned with its signature, in
 ;; `mode`.
 (define operands-as (->* (fails int pvars int sty syn) unit)
