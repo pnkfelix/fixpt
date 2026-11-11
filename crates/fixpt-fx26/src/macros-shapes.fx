@@ -50,8 +50,8 @@
         (asked-all fail found)
         (let ((written (writings 0 (get nnodes) nil)))
           (if top
-              (begin (defined-kept fail root form) (tuple (with-written form nil written) nil))
-              (tuple (with-written form nil written) (exp-shape fail root))))))))
+              (begin (defined-kept fail root form) (tuple (with-written form written) nil))
+              (tuple (with-written form written) (exp-shape fail root))))))))
 ;; Every reference that reaches a module's names asks the module.
 (define asked-all (->* (fails found) unit)
   (lambda (fail fs)
@@ -116,57 +116,68 @@
       (dotted (items t d a b x) (tuple a b))
       (atom (d a b x) (tuple a b))
       (else y (tuple 0 0)))))
-;; `s`, at `path`, with each of `ws` written into the form at its path,
-;; after its first operand: itself where none is at or under `path`.
-(define with-written (->* (syn addr (listof writing acyclic)) syn)
-  (lambda (s path ws0)
-    (let ((ws (writings-under ws0 path)))
-      (if (null? ws)
-          s
-          (tagcase s
-            (lst (items d a b x)
-              (let ((items2 (written-items items path ws (written-here s path ws) 0 a b)))
-                (lst items2 (syn-datums items2) a b x)))
-            (dotted (items tail d a b x)
-              (let ((items2 (written-items items path ws (written-here s path ws) 0 a b)))
-                (dotted items2 (with-written tail (falses path (len items)) ws) (syn-datums items2)
-                        a b x)))
-            (else y s))))))
-;; Those of `ws` at or under `path`: whose paths end with it.
-(define writings-under (->* ((listof writing acyclic) addr) (listof writing acyclic))
-  (lambda (ws path) (writings-under-n ws path (steps-count path 0))))
-(define writings-under-n (->* ((listof writing acyclic) addr int) (listof writing acyclic))
-  (lambda (ws path n)
+;; `s` with each of `ws` written into the form at its path, after its
+;; first operand.
+(define with-written (->* (syn (listof writing acyclic)) syn)
+  (lambda (s ws) (written-under s (writings-from-top ws))))
+;; `ws`, each its path outermost step first: what is left of it below a
+;; node, as a walk down from the top takes its steps (`written-under`).
+(define writings-from-top (->* ((listof writing acyclic)) (listof writing acyclic))
+  (lambda (ws)
+    (if (null? ws)
+        nil
+        (cons (tuple (the addr (reverse (extract (car ws) 1))) (extract (car ws) 2))
+              (writings-from-top (cdr ws))))))
+;; `s` with each of `ws`, under it by the steps left of each, written:
+;; itself where none is. Each step of each path taken once, at its list
+;; (`written-items`), so that a long list costs no more than its length.
+(define written-under (->* (syn (listof writing acyclic)) syn)
+  (lambda (s ws)
+    (if (null? ws)
+        s
+        (tagcase s
+          (lst (items d a b x)
+            (let ((items2 (written-items items ws (written-here s ws) 0 a b)))
+              (lst items2 (syn-datums items2) a b x)))
+          (dotted (items tail d a b x)
+            (let ((items2 (written-items items ws (written-here s ws) 0 a b)))
+              (dotted items2 (written-under tail (steps-taken ws (len items))) (syn-datums items2)
+                      a b x)))
+          (else y s)))))
+;; Those of `ws` whose next step is `step`, past it.
+(define step-taken (->* ((listof writing acyclic) bool) (listof writing acyclic))
+  (lambda (ws step)
     (cond ((null? ws) nil)
-          ((let* ((p (extract (car ws) 1)) (m (steps-count p 0)))
-             (and (>= m n) (addr=? (steps-dropped p (- m n)) path)))
-           (cons (car ws) (writings-under-n (cdr ws) path n)))
-          (else (writings-under-n (cdr ws) path n)))))
-(define steps-count (->* (addr int) int)
-  (lambda (p k) (if (null? p) k (steps-count (cdr p) (+ k 1)))))
-(define steps-dropped (->* (addr int) addr)
-  (lambda (p k) (if (= k 0) p (steps-dropped (cdr p) (- k 1)))))
-;; What to write into list `s` at `path`, in a list of one, if it is a form
-;; that opens a module.
-(define written-here (->* (syn addr (listof writing acyclic)) (listof (listof syn acyclic) acyclic))
-  (lambda (s path ws)
+          ((let ((p (extract (car ws) 1))) (and (not (null? p)) (eq? (car p) step)))
+           (cons (tuple (cdr (extract (car ws) 1)) (extract (car ws) 2))
+                 (step-taken (cdr ws) step)))
+          (else (step-taken (cdr ws) step)))))
+;; Those of `ws` past `k` cdrs: a dotted list's tail's.
+(define steps-taken (->* ((listof writing acyclic) int) (listof writing acyclic))
+  (lambda (ws k) (if (= k 0) ws (steps-taken (step-taken ws #f) (- k 1)))))
+;; What to write into list `s`, in a list of one, if it is a form that
+;; opens a module and one of `ws` is at it, no step left.
+(define written-here (->* (syn (listof writing acyclic)) (listof (listof syn acyclic) acyclic))
+  (lambda (s ws)
     (if (opens? s)
-        (let ((w (writing-at path ws))) (if (null? w) nil (list (extract (car w) 2))))
+        (let ((w (writing-at nil ws))) (if (null? w) nil (list (extract (car w) 2))))
         nil)))
+;; List items `items`, from the `k`th, each with those of `ws` under it
+;; written (its first step `#t`, after `k` cdrs taken), the record `here`
+;; after the first operand.
 (define written-items
-  (->* (syns-a addr (listof writing acyclic) (listof (listof syn acyclic) acyclic) int int int)
+  (->* (syns-a (listof writing acyclic) (listof (listof syn acyclic) acyclic) int int int)
        syns-a)
-  (lambda (items path ws here k a b)
+  (lambda (items ws here k a b)
     (let ((record (if (null? here)
                       (the syns-a nil)
                       (list (atom (symbol->keyword 'relied) a b 0)
                             (if (null? (car here)) (mk-symbol "#f" a b) (car (car here)))))))
       (cond ((null? items) (if (= k 2) record nil))
             ((and (= k 2) (not (null? here)))
-             (append record (written-items items path ws nil k a b)))
-            (else (cons (with-written (car items) (cons #t path) ws)
-                        (written-items (cdr items) (cons #f path) ws here
-                                       (+ k 1) a b)))))))
+             (append record (written-items items ws nil k a b)))
+            (else (cons (written-under (car items) (step-taken ws #t))
+                        (written-items (cdr items) (step-taken ws #f) here (+ k 1) a b)))))))
 ;; What the top level's definitions in `form` bind, kept for the forms
 ;; after it.
 (define defined-kept (->* (fails int syn) unit)
@@ -802,23 +813,44 @@
 ;; `s`, at `path` (innermost step first, as a walk's), each part of `ws` at
 ;; its path written so.
 (define with-parts (->* (syn addr (listof (tupleof addr syn) acyclic)) syn)
-  (lambda (s path ws)
-    (let ((w (part-at path ws)))
-      (if (not (null? w))
-          (car w)
-          (tagcase s
-            (lst (items d a b x)
-              (let ((xs (parts-items items path ws))) (lst xs (syn-datums xs) a b x)))
-            (dotted (items t d a b x)
-              (let ((xs (parts-items items path ws)))
-                (dotted xs (with-parts t (falses path (len items)) ws) (syn-datums xs) a b x)))
-            (else y s))))))
-(define parts-items (->* (syns-a addr (listof (tupleof addr syn) acyclic)) syns-a)
-  (lambda (xs path ws)
+  (lambda (s path ws) (parts-under s (parts-from-top ws))))
+;; `ws`, each its path outermost step first (`writings-from-top`).
+(define parts-from-top (->* (parts) parts)
+  (lambda (ws)
+    (if (null? ws)
+        nil
+        (cons (tuple (the addr (reverse (extract (car ws) 1))) (extract (car ws) 2))
+              (parts-from-top (cdr ws))))))
+;; `s` with each of `ws`, under it by the steps left of each, put in place:
+;; itself where none is; each step taken once (`written-under`).
+(define parts-under (->* (syn parts) syn)
+  (lambda (s ws)
+    (let ((w (part-at nil ws)))
+      (cond ((not (null? w)) (car w))
+            ((null? ws) s)
+            (else
+             (tagcase s
+               (lst (items d a b x)
+                 (let ((xs (parts-items items ws))) (lst xs (syn-datums xs) a b x)))
+               (dotted (items t d a b x)
+                 (let ((xs (parts-items items ws)))
+                   (dotted xs (parts-under t (parts-past ws (len items))) (syn-datums xs) a b x)))
+               (else y s)))))))
+(define parts-items (->* (syns-a parts) syns-a)
+  (lambda (xs ws)
     (if (null? xs)
         nil
-        (cons (with-parts (car xs) (cons #t path) ws) (parts-items (cdr xs) (cons #f path) ws)))))
-(define part-at (->* (addr (listof (tupleof addr syn) acyclic)) (listof syn acyclic))
+        (cons (parts-under (car xs) (part-step ws #t)) (parts-items (cdr xs) (part-step ws #f))))))
+;; Those of `ws` whose next step is `step`, past it; past `k` cdrs.
+(define part-step (->* (parts bool) parts)
+  (lambda (ws step)
+    (cond ((null? ws) nil)
+          ((let ((p (extract (car ws) 1))) (and (not (null? p)) (eq? (car p) step)))
+           (cons (tuple (cdr (extract (car ws) 1)) (extract (car ws) 2)) (part-step (cdr ws) step)))
+          (else (part-step (cdr ws) step)))))
+(define parts-past (->* (parts int) parts)
+  (lambda (ws k) (if (= k 0) ws (parts-past (part-step ws #f) (- k 1)))))
+(define part-at (->* (addr parts) (listof syn acyclic))
   (lambda (p ws)
     (cond ((null? ws) nil)
           ((addr=? p (extract (car ws) 1)) (list (extract (car ws) 2)))
