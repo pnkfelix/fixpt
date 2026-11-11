@@ -5729,3 +5729,15 @@ native back ends would have to take. Not a parse-time lever (a profile of
 the FX-26 parse, 2026-11-11, finds no time in the text itself); the work
 derived from static text each run is (its readings' hashes, its read, its
 shapes), for caching by build (§238).
+
+## 243. `jit_lines gdb_shows_the_frames_values` is flaky (found 2026-11-11)
+
+It failed once in a full suite (`no line for \`spin\``) and once in three
+runs alone, then passed ten times alone. A race in the test: `values.fx`
+says `ready` and then has its last form, `(keep 3 …)`, parsed, checked
+and compiled before it enters `spin`; gdb attaches as soon as it reads
+`ready`, and sometimes finds thread 2 still compiling (interning names,
+`WordHasher::write`). Whether it fails more often since the FX-26
+parse's changes of 2026-11-11 is not known (a comparison with a43f87cb
+was begun and stopped). A fix: say `ready` only from inside the loop's
+caller, or let gdb attach again until `spin` is on the stack.
