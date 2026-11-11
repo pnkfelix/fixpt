@@ -919,8 +919,9 @@
           (else (e-plambda (car ps) (e-lambda (the param-list nil) m a b 0 0) a b 0 0)))))
 ;; A module file's forms without its macros, `define-syntax`es (hidden
 ;; or not), which are no items: what `import-with-syntax` brings (the Rust
-;; checker's `read_module_file`). A use of one in the file is refused, for
-;; now: one is used where its file is imported.
+;; checker's `read_module_file`). Each use of one after it is expanded
+;; already (`parser-top.fx`'s `loaded-own-expanded!`): one left is used
+;; before its file defines it, and refused.
 (define without-syntax (->* (syns-a) syns-a)
   (lambda (forms)
     (letrec ((names-of (subr (maxeff (read @globals) spin parses)
@@ -961,9 +962,8 @@
                              (if (and (not (null? items)) (name-in? (syn-head (car items)) ms))
                                  (pfail (string-append
                                          "`" (symbol->string (syn-head (car items)))
-                                         "` is a macro of this file: one is used where its file"
-                                         " is imported (`import-with-syntax`), not in its file,"
-                                         " for now")
+                                         "` is a macro of this file used before the file "
+                                         "defines it")
                                         (car xs))
                                  #u)
                              (used items ms)))

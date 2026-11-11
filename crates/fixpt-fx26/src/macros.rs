@@ -223,7 +223,7 @@ struct Clause {
     /// type names the macro's `poly` binders, which no use can write.
     contracts: HashMap<Sym, Syntax>,
     /// Where its macro is defined, what its aliases are read in.
-    home: hygiene::Home,
+    def_env: hygiene::DefEnv,
 }
 
 /// What becomes of one of a template's parts: a name made fresh, one name
@@ -311,9 +311,16 @@ pub(crate) struct Withs {
     /// The shapes known (`shapes`): the top level's names', files'.
     shapes: shapes::Known,
     /// Where the macro each expansion's aliases are of was defined, by the
-    /// expansion's number (`hygiene::Home`); a template's check is
+    /// expansion's number (`hygiene::DefEnv`); a template's check is
     /// expansion 0.
-    pub(crate) homes: HashMap<u32, hygiene::Home>,
+    pub(crate) def_envs: HashMap<u32, hygiene::DefEnv>,
+    /// How many binders at uses the resolution renamed, which would have
+    /// captured a name a module file's own macro introduces (`%x~N`).
+    pub(crate) captors: usize,
+    /// Where the macros defined now are, unless a file's scope is given:
+    /// the top level, or a module file's items, as its own macros are
+    /// (`Checker::file_own_expanded`).
+    pub(crate) def_env: hygiene::DefEnv,
 }
 
 /// The kernel's tables (`macros-kernel.fx`), read once, never changed.
@@ -1051,7 +1058,7 @@ impl Macros {
             binds.insert(*n, stand_in);
         }
         self.checking = true;
-        self.withs.homes.insert(0, c.home.clone());
+        self.withs.def_envs.insert(0, c.def_env.clone());
         let body = self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), 0, interner)?;
         self.checking = false;
         let lambda = Syntax::list(at, vec![sym("lambda", interner), list_of(at, params, None), body]);
@@ -1059,6 +1066,33 @@ impl Macros {
         self.fresh += 1;
         let hidden = sym(&format!("%template:{}:{}", shown(name, interner), self.fresh), interner);
         Ok(Syntax::list(at, vec![sym("define", interner), hidden, made]))
+    }
+
+    /// `f` run with a module file's own macros in place of these: none but
+    /// the file's, which it defines as it goes, where its items are
+    /// (`hygiene::DefEnv::Within`), read from `text`; these put back after.
+    /// A file sees the standard environment alone, no macro of the
+    /// program's.
+    pub(crate) fn in_file_scope<T>(&mut self, text: &str, f: impl FnOnce(&mut Macros) -> T) -> T {
+        let defined = std::mem::take(&mut self.defined);
+        let defined_at = std::mem::take(&mut self.defined_at);
+        let def_env = std::mem::replace(&mut self.withs.def_env, hygiene::DefEnv::Within);
+        let reading = self.reading.replace(std::sync::Arc::from(text));
+        let r = f(self);
+        self.defined = defined;
+        self.defined_at = defined_at;
+        self.withs.def_env = def_env;
+        self.reading = reading;
+        r
+    }
+
+    /// Where a macro defined now is defined: in a file's scope, if `file`
+    /// gives one, as its importer has it; else where macros are now.
+    fn def_env_of(&self, file: Option<&FileScope>) -> hygiene::DefEnv {
+        match file {
+            None => self.withs.def_env.clone(),
+            Some(f) => hygiene::DefEnv::File { shared: f.shared, values: Rc::new(f.values.clone()) },
+        }
     }
 
     /// A file's macros, `forms` its `define-syntax`es (each with whether it
@@ -1125,7 +1159,8 @@ impl Macros {
 
     fn define_written(&mut self, ws: &[Written], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Sym>> {
         if let [w @ Written { procedural: Some((style, code)), .. }] = ws {
-            return self.define_procedural(w.name, *style, code, interner);
+            let def_env = self.def_env_of(file);
+            return self.define_procedural(w.name, *style, code, def_env, interner);
         }
         if let Some(w) = ws.iter().find(|w| w.procedural.is_some()) {
             return Err(FxError::at(w.span, "a procedural macro is defined alone, by `define-syntax`"));
@@ -1192,10 +1227,10 @@ impl Macros {
 
     /// Procedural macro `name`, its transformer `code` checked at its
     /// style's type in the transformers' session (`procedural::run`).
-    fn define_procedural(&mut self, name: Sym, style: procedural::Style, code: &Syntax, interner: &mut Interner) -> R<Vec<Sym>> {
+    fn define_procedural(&mut self, name: Sym, style: procedural::Style, code: &Syntax, def_env: hygiene::DefEnv, interner: &mut Interner) -> R<Vec<Sym>> {
         let text = fixpt_read::write_syntax(code, interner);
         procedural::run(&procedural::checked(style, &text)).map_err(|e| FxError::at(code.span, format!("`{}`'s transformer: {e}", interner.name(name))))?;
-        let p = procedural::Procedural { style, code: text };
+        let p = procedural::Procedural { style, code: text, def_env };
         let m = Macro { sig: Rc::new(STy::Expr), defn: false, desc: false, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: Some(Rc::new(p)) };
         self.defined.insert(name, Rc::new(m));
         Ok(vec![name])
@@ -1483,11 +1518,14 @@ impl Macros {
         }
         let pvars: Vec<(Sym, PInfo)> = order.into_iter().map(|n| (n, pvars[&n].clone())).collect();
         let names = pvars.iter().filter(|(_, p)| matches!(&*p.core, STy::Bvar | STy::Dvar | STy::Id)).map(|(n, _)| *n).collect();
-        let home = match file {
-            None => hygiene::Home::Top,
-            Some(f) => hygiene::Home::File { shared: f.shared, values: Rc::new(f.values.clone()) },
-        };
-        Ok(Clause { pattern, names, template: template.clone(), actions, pvars, contracts, home })
+        let def_env = self.def_env_of(file);
+        // A typed hole's contract is its type as the top level or the
+        // file's module reads it, by a qualifier: none names a file's own
+        // items, which a binder at the use could capture.
+        if matches!(def_env, hygiene::DefEnv::Within) && let Some(n) = contracts.keys().next() {
+            return Err(FxError::at(c.span, format!("`{}`: a typed hole in a macro a file uses itself, not yet", interner.name(*n))));
+        }
+        Ok(Clause { pattern, names, template: template.clone(), actions, pvars, contracts, def_env })
     }
 
     /// `form` with each use of a macro in it expanded, as each expands,
@@ -1706,7 +1744,7 @@ impl Macros {
                 continue;
             }
             let made = fixpt_read::record_expansion(interner.name(name), s.span, m.text.clone());
-            self.withs.homes.insert(made, c.home.clone());
+            self.withs.def_envs.insert(made, c.def_env.clone());
             return self
                 .transcribe(c, &c.template, &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), made, interner)
                 .map_err(|e| FxError::at(s.span, format!("a use of `{}`: {}", interner.name(name), e.message)));
@@ -1719,7 +1757,7 @@ impl Macros {
     /// syntactic closure's opened (`procedural::closed`).
     fn expand_procedural(&mut self, name: Sym, p: &procedural::Procedural, s: &Syntax, interner: &mut Interner) -> R<Syntax> {
         let made = fixpt_read::record_expansion(interner.name(name), s.span, None);
-        self.withs.homes.insert(made, hygiene::Home::Top);
+        self.withs.def_envs.insert(made, p.def_env.clone());
         let form = fixpt_read::write_syntax(s, interner);
         let said = |e: String| FxError::at(s.span, format!("a use of `{}`: its transformer: {e}", interner.name(name)));
         let out = procedural::run(&procedural::applied(p.style, &p.code, &form, made)).map_err(said)?;

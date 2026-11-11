@@ -38,18 +38,19 @@
 (import scopes-module walk placed evaluate levels-of binder-of)
 (import align-module defined macro-of macro? makes-defns? makes-top-defns? nodes-reset! align
         node-at node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-alias
-        seq-depths
+        seq-depths def-env-top
         act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
-              found levels home homes
+              found levels def-env def-envs
               atms kids contracts holes))
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
         (type exported nested))
 (import solve-module infer sig-text)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
+        def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of alias)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
@@ -86,11 +87,22 @@
                   (tuple pattern template
                          (template-actions fail ps template defn (extract pv 2) file) ps
                          (contracts-of ps (binder-names poly) file)
-                         (if (null? file)
-                             (the home nil)
-                             (list (tuple (extract (car file) 1) (extract (car file) 2))))))))))))
+                         (clause-def-env fail c ps poly file)))))))))
+;; Where clause `c`'s macro is defined (`def-env-of-file`): refused where a
+;; module file uses its own macro with a typed hole, whose contract is read
+;; by a qualifier, which names no file's own items.
+(define clause-def-env (->* (fails syn pvars syns-a scopes) def-env)
+  (lambda (fail c ps poly file)
+    (let ((e (def-env-of-file file)) (cs (contracts-of ps (binder-names poly) file)))
+      (begin
+        (if (and (= (extract e 1) 2) (not (null? cs)))
+            (fail-at fail (string-append "`" (symbol->string (extract (car cs) 1)) "`: a typed "
+                                         "hole in a macro a file uses itself, not yet")
+                     c)
+            #u)
+        e))))
 (define stub (->* (syn) clause)
-  (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil) (the home nil))))
+  (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil) (def-env-top))))
 ;; Each typed hole's contract, its type read as a use reads the template's
 ;; types; none where it names the macro's own binders, which no use can
 ;; write.
@@ -401,7 +413,7 @@
                    (begin (set defined before) (fail m a b)))))
       (if (null? (procedural-form form))
           (define-written undo (written-of undo form) file before)
-          (define-procedural fail form)))))
+          (define-procedural fail form (def-env-of-file file))))))
 ;; Each signature, written, or inferred together for those not written,
 ;; each defined first; then each macro's clauses checked, and defined.
 (define define-written (->* (fails writtens scopes macro-env) names)
@@ -525,14 +537,6 @@
         (set nexpansions n)
         (set expansions (cons (tuple n name (syn-start s) (syn-end s)) (get expansions)))
         n))))
-;; Where the macro each expansion's aliases are of was defined, by the
-;; expansion's number, the last first; a template's check is expansion 0
-;; (`macros.rs`'s `Withs::homes`). Given to the resolution after expansion
-;; (`macros-shapes.fx`'s `aliases-resolved`), which another instance of the
-;; expander's files reads.
-(define homes (ref homes rs) (new nil))
-(define home! (->* (int home) unit) (lambda (k h) (set homes (cons (tuple k h) (get homes)))))
-(define homes-given (->* () homes) (lambda () (get homes)))
 ;; For the driver, which says an error in an expansion at each use.
 (define expansions-given (->* () expansions-made) (lambda () (get expansions)))
 
@@ -671,7 +675,8 @@
                      (fail (string-append "a use of `" shown "`: " msg) a b))))
       (if (not (null? (procedural-of name)))
           (let ((made (record-expansion name s)))
-            (begin (home! made nil) (expand-procedural fail name s made)))
+            (begin (def-env! made (extract (car (procedural-of name)) 3))
+                   (expand-procedural fail name s made)))
           (begin
             (nodes-reset!)
             (align in-use 2 (the pvars nil) (extract m 1) operands -1 nil)
@@ -696,7 +701,7 @@
           (if (null? binds)
               (first-match fail name s operands (cdr cs))
               (let* ((made (record-expansion name s)) (shown (symbol->string name))
-                     (homed (home! made (extract (car cs) 6)))
+                     (noted (def-env! made (extract (car cs) 6)))
                      (in-use (lambda ((msg string) (a int) (b int))
                                (fail (string-append "a use of `" shown "`: " msg)
                                      (syn-start s) (syn-end s)))))

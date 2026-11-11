@@ -14,7 +14,7 @@
 (define readings ((proj (load-module "fx26:readings.fx") rs re rm rc)))
 (import readings form-reading (type loads))
 (define parser-types ((proj (load-module "fx26:parser-types.fx") rs re rm rc rp)))
-(import parser-types (type keys keyed loaded-file))
+(import parser-types (type keys keyed loaded-file loaded-files))
 (define reader-types (with parser-module reader-types))
 (import reader-types lst (type syn))
 (import parser-module parse-tag syn-start syn-end pfail syn-symbol? syn-symbol syn-items len nth
@@ -24,9 +24,11 @@
         (type include-given)
         t-define-convention t-define-syscall t-define-generative t-exp p-ok p-err shared-taken
         shared-reset! loaded loaded-next input-key? label-name e-app e-plambda e-proj e-if
+        loaded-based in-loaded-as
         e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the e-convention e-bloblet
         e-product e-extract e-sum e-tagcase e-with rl-none
-        (type syns-a exp top param-list top-list presult names) (effect parses))
+        (type syns-a exp top param-list top-list presult names)
+        (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
 ;; The expander (`macros.fx`), which each form goes through first.
 ;; A program's binding structure, walked, and the shapes of the modules its
@@ -40,7 +42,8 @@
 (import templates-module template-checks)
 (import imports-module import-file-macros note-load-def!)
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
-        syntax-names imports-syntax? globals! global-before? macro? later-macro-site homes-given)
+        syntax-names imports-syntax? globals! global-before? macro? later-macro-site def-envs-given
+        file-scope-begin! file-scope-end! source-of)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -255,7 +258,7 @@
     (if (or (form-of? x 'include) (import? x) (datatype? x))
         x
         (let ((shaped (top-shaped (aliases-resolved pfail-at (sealed-written pfail-at x)
-                                                    (homes-given)))))
+                                                    (def-envs-given)))))
           (begin (files-written!) shaped)))))
 ;; The hidden globals of the files loaded, `ts`, each noted with its file's
 ;; shape (`shared-shaped!`), for the forms after: its definition is made,
@@ -295,7 +298,7 @@
     (if (null? cs)
         nil
         (append-tops (parse-made (aliases-resolved pfail-at (expand pfail-at (car cs))
-                                                   (homes-given)))
+                                                   (def-envs-given)))
                      (parse-checks (cdr cs))))))
 ;; A `define-syntax` (or `define-syntax-rec`) of a name a form before this
 ;; parse defined as a global: refused, where it is
@@ -524,6 +527,82 @@
                          (4 (unalias-each (extract it 4) bound)))
                 (unalias-items (cdr items) bound))))))
 
+;;; ------------------------------------------------------------ a file's own macros
+
+;; Each file loaded, its own macros' uses expanded (`binding-shapes.md`,
+;; step 3; Heist's (a); the Rust checker's `file_own_expanded`): each
+;; `define-syntax`, hidden or not, defined in order where the file's items
+;; are (`file-scope-begin!`), and the items after it expanded by them, each
+;; name a template leaves free the file's item or standard binding of that
+;; name, a binder at the use that would capture it renamed. Its
+;; `define-syntax`es kept; a shape's no macro. Once for each file, both
+;; lists of them alike; a file whose expansion fails keeps why, which its
+;; load says.
+(define loaded-own-expanded! (->* () unit)
+  (lambda ()
+    (let ((fs (files-own-expanded (get loaded))))
+      (begin (set loaded fs) (set loaded-next (same-files (get loaded-next) fs))))))
+(define files-own-expanded (->* (loaded-files) loaded-files)
+  (lambda (fs)
+    (if (null? fs) nil (cons (file-own-expanded (car fs)) (files-own-expanded (cdr fs))))))
+(define same-files (->* (loaded-files loaded-files) loaded-files)
+  (lambda (ns fs)
+    (if (null? ns)
+        nil
+        (cons (let ((f (loaded-based fs (extract (car ns) 2)))) (if (null? f) (car ns) (car f)))
+              (same-files (cdr ns) fs)))))
+(define file-own-expanded (->* (loaded-file) loaded-file)
+  (lambda (f)
+    (if (or (<= (extract f 2) 0) (extract f 8) (not (own-macros? (extract f 5))))
+        f
+        (let* ((saved (file-scope-begin!))
+               (r (prompt parse-tag (begin (set own-out (own-each (extract f 5))) (p-ok nil))
+                          (lambda ((r presult)) r)))
+               (ended (file-scope-end! saved)))
+          (tagcase r
+            ;; Its forms as read, which its shape is found from; the
+            ;; error said where it is loaded (`parse-load-file`).
+            (p-err (m x y)
+              (product (1 (extract f 1)) (2 (extract f 2))
+                       ;; At its place in the file, an expansion's part's
+                       ;; where its template has it.
+                       (3 (in-loaded-as (get loaded) (extract f 2) (extract f 4) m
+                                        (extract (source-of x) 1)))
+                       (4 (extract f 4)) (5 (extract f 5)) (6 (extract f 6)) (7 (extract f 7))
+                       (8 #f)))
+            (else y
+              (product (1 (extract f 1)) (2 (extract f 2)) (3 (extract f 3)) (4 (extract f 4))
+                       (5 (get own-out)) (6 (extract f 6)) (7 (extract f 7)) (8 #f))))))))
+(define own-out (ref syns-a rs) (new nil))
+;; Whether forms `xs` define a macro, hidden or not.
+(define own-macros? (->* (syns-a) bool)
+  (lambda (xs)
+    (and (not (null? xs))
+         (or (own-macro? (car xs))
+             (and (form-of? (car xs) 'hide) (own-macros? (cdr (syn-items (car xs) ""))))
+             (own-macros? (cdr xs))))))
+(define own-macro? (->* (syn) bool)
+  (lambda (x) (and (defines-syntax? x) (not (shape-definition? x)))))
+(define own-each (->* (syns-a) syns-a)
+  (lambda (xs)
+    (if (null? xs)
+        nil
+        (let* ((x (car xs))
+               (made (cond ((or (form-of? x 'module-parameters) (shape-definition? x)) (list x))
+                           ((own-macro? x) (begin (define-macro pfail-at x nil) (list x)))
+                           ((form-of? x 'hide)
+                            (let ((items (syn-items x "")))
+                              (list (mk-list (cons (car items) (own-each (cdr items)))
+                                             (syn-start x) (syn-end x)))))
+                           (else (own-expanded (expand-top pfail-at x))))))
+          (append made (own-each (cdr xs)))))))
+(define own-expanded (->* (syns-a) syns-a)
+  (lambda (xs)
+    (if (null? xs)
+        nil
+        (cons (aliases-resolved pfail-at (sealed-written pfail-at (car xs)) (def-envs-given))
+              (own-expanded (cdr xs))))))
+
 ;; The entry point: a program's forms, as read, read with `keys` (the mode,
 ;; the session's state, the checker's switches: `parser-types.fx`), to
 ;; trees, each expression numbered (`parser-ids.fx`), or an error; and the
@@ -537,6 +616,7 @@
     (let* ((t (walk-of keys)) (base (walk-count t)))
       (begin (shared-reset!)
              (macros-at! (walk-state t))
+             (loaded-own-expanded!)
              (shapes-at! (walk-state t) (get loaded))
              (set files-shaped-count -1)
              (let* ((parsed (prompt parse-tag (p-ok (parse-tops t (extract keys 3) forms))

@@ -18,7 +18,7 @@
 (import types-module fail-at split (type fails))
 (import align-module defined macro-of pvar-of atm-var lv-rib
         (type macro clause clauses pvars levels atms))
-(import macros-module transcribe checking fresh-count list-at bound-of home! (type binds))
+(import macros-module transcribe checking fresh-count list-at bound-of def-env! (type binds))
 
 ;;; ------------------------------------------------------------ checking templates
 
@@ -47,7 +47,7 @@
            (binders (bvar-binds fail c (extract c 4) nil))
            (made (hole-params fail c (extract c 4) a b (tuple (the syns-a nil) binders
                                                               (extract m 3))))
-           (body (begin (set checking #t) (home! 0 (extract c 6))
+           (body (begin (set checking #t) (def-env! 0 (extract c 6))
                         (let ((x (transcribe fail c template nil (extract made 2) 0)))
                           (begin (set checking #f) x))))
            (params (extract made 1)) (poly (extract made 3))

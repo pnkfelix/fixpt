@@ -1,7 +1,7 @@
 //! Hygiene, one mechanism (`docs/research/binding-shapes.md`, step 3):
 //! after a form is expanded, each name an expansion introduced and left
 //! free, an alias `%~N:x` (`procedural::alias_base`), made the name it
-//! stands for where its macro is defined (`Home`), by the program's walk:
+//! stands for where its macro is defined (`DefEnv`), by the program's walk:
 //! a top-level macro's, the top level's `x`, written so (`(with #%toplevel
 //! x)`, `#%toplevel:x`); a file's macro's, the file's value `(with
 //! %shared:key x)` or else the standard one, `(with #%fx x)`: none of
@@ -20,10 +20,15 @@ use std::rc::Rc;
 /// top level; a file, `%shared:key` the hidden global every load of it is
 /// and the values its module shows (its other names the standard
 /// environment's, which a file's macro's check has held them to).
-#[derive(Clone, Debug)]
-pub(crate) enum Home {
+/// Or a module file's items, as the file's own macros see them, which no
+/// qualifier names: an alias becomes the plain name, and a binder at the
+/// use that would capture it is renamed (`Checker::file_own_expanded`).
+#[derive(Clone, Debug, Default)]
+pub(crate) enum DefEnv {
+    #[default]
     Top,
     File { shared: Sym, values: Rc<HashSet<Sym>> },
+    Within,
 }
 
 /// What an alias is written as: the top level's value or qualified name, or
@@ -48,6 +53,7 @@ impl Macros {
         let mut parts: Vec<(Vec<bool>, fixpt_read::Span, Made)> = Vec::new();
         let mut made: Vec<(usize, Made)> = Vec::new();
         let mut defined = Vec::new();
+        let mut next_fresh = self.withs.captors;
         {
             let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
             let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
@@ -78,21 +84,58 @@ impl Macros {
                     _ => None,
                 })
             };
+            // The binder a name `n` refers to in `env`, innermost first; or
+            // whether a module's names come first, which may have it.
+            let innermost = |env: &Env, n: Sym, ns: Ns| -> Result<Option<usize>, ()> {
+                for level in env.levels() {
+                    match level {
+                        Level::Rib(atoms) | Level::Earlier(atoms) => {
+                            if let Some(b) = binder_named(atoms, n, ns) {
+                                return Ok(Some(b));
+                            }
+                        }
+                        Level::Shape(_) => return Err(()),
+                        Level::Cage(_) => {}
+                    }
+                }
+                Ok(None)
+            };
+            // The binders at uses that would capture a name a file's own
+            // macro introduces.
+            let mut captors: HashSet<usize> = HashSet::new();
             for (at, env, _, _) in &found {
                 let Kids::Ref(n, ns, free) = a.nodes[*at].kids else { continue };
                 let Some(base) = alias_base(a.name(n)) else { continue };
+                let def_env = alias_made(a.name(n)).and_then(|k| a.m.withs.def_envs.get(&k));
                 // Bound by the expansion, here or at the top level before.
                 let bound = env.levels().any(|l| matches!(l, Level::Rib(atoms) | Level::Earlier(atoms) if binder_named(atoms, n, ns).is_some()));
-                let global = a.m.withs.shapes.top_has(n, ns == Ns::Desc);
+                let global = !matches!(def_env, Some(DefEnv::Within)) && a.m.withs.shapes.top_has(n, ns == Ns::Desc);
                 if bound || global {
                     continue;
                 }
                 // Where its macro is defined: so written, which nothing
-                // around it captures.
-                let home = alias_made(a.name(n)).and_then(|k| a.m.withs.homes.get(&k));
-                let m = match home {
-                    None | Some(Home::Top) => top_made(free, ns, base),
-                    Some(Home::File { shared, values }) => match free {
+                // around it captures; in a file's own, the plain name, its
+                // captor at the use renamed.
+                let m = match def_env {
+                    Some(DefEnv::Within) => {
+                        let captor = match a.interner.get(base) {
+                            Some(x) => innermost(env, x, ns),
+                            None => Ok(None),
+                        };
+                        match captor {
+                            Ok(Some(b)) if !top.contains(&b) => {
+                                captors.insert(b);
+                            }
+                            Ok(_) => {}
+                            Err(()) => {
+                                let span = a.nodes[*at].syn.span;
+                                return Err(crate::error::FxError::at(span, format!("`{base}`, which a macro of this file names, where a `with` or `include` around its use may give it: not yet")));
+                            }
+                        }
+                        Made::Plain(base.to_string())
+                    }
+                    None | Some(DefEnv::Top) => top_made(free, ns, base),
+                    Some(DefEnv::File { shared, values }) => match free {
                         Free::Toplevel if a.interner.get(base).is_some_and(|v| values.contains(&v)) => Made::Of(*shared, base.to_string()),
                         Free::Toplevel => Made::Of(fx, base.to_string()),
                         Free::Plain => Made::Plain(base.to_string()),
@@ -103,12 +146,36 @@ impl Macros {
                 };
                 made.push((*at, m));
             }
+            // Each captor renamed, and each reference to it.
+            if !captors.is_empty() {
+                let mut fresh: HashMap<usize, String> = HashMap::new();
+                let mut sorted: Vec<usize> = captors.iter().copied().collect();
+                sorted.sort_by(|x, y| a.nodes[*x].path.iter().map(|s| !s).cmp(a.nodes[*y].path.iter().map(|s| !s)));
+                for b in sorted {
+                    let Kids::Binder(n, _) = a.nodes[b].kids else { unreachable!("a binder") };
+                    next_fresh += 1;
+                    // Spelled apart from a template's fresh names, `%x:N`,
+                    // and counted apart, as the FX-26 one counts them.
+                    fresh.insert(b, format!("%{}~{}", a.name(n), next_fresh));
+                }
+                for (at, env, _, _) in &found {
+                    let Kids::Ref(n, ns, _) = a.nodes[*at].kids else { continue };
+                    if alias_base(a.name(n)).is_none()
+                        && let Ok(Some(b)) = innermost(env, n, ns)
+                        && let Some(f) = fresh.get(&b)
+                    {
+                        made.push((*at, Made::Plain(f.clone())));
+                    }
+                }
+                made.extend(fresh.into_iter().map(|(b, f)| (b, Made::Plain(f))));
+            }
             let at = |k: usize| (a.nodes[k].path.clone(), a.nodes[k].syn.span);
             for (r, m) in made {
                 let (p, sp) = at(r);
                 parts.push((p, sp, m));
             }
         }
+        self.withs.captors = next_fresh;
         self.withs.shapes.aliases_defined.extend(defined);
         let (with, toplevel) = (interner.intern("with"), interner.intern("#%toplevel"));
         let mut written: HashMap<Vec<bool>, Syntax> = HashMap::new();

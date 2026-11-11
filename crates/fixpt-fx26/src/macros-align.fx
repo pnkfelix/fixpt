@@ -32,7 +32,8 @@
         nodes-reset! repeated seq-depths repeated? cage-seqs cage-seq? int-member? desc-roots
         pvar-of pvar? pvar-shape lv-rib lv-cage lv-earlier lv-shape program-walk unplaced
         (type action actions contracts clause clauses macro macro-env scope scopes kids rooted holes
-              node pinfo pvars level levels found home homes))
+              node pinfo pvars level levels found def-env def-envs))
+(import nodes-module def-env-top)
 
 ;;; ------------------------------------------------------------ aligning
 

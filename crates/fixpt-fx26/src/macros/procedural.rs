@@ -60,11 +60,13 @@ impl Style {
     }
 }
 
-/// A procedural macro: its style, and its transformer's text.
+/// A procedural macro: its style, its transformer's text, and where it is
+/// defined, what its aliases are read in (`hygiene::DefEnv`).
 #[derive(Debug)]
 pub(crate) struct Procedural {
     pub style: Style,
     pub code: String,
+    pub def_env: super::hygiene::DefEnv,
 }
 
 /// The syntactic environments a syntactic-closure transformer is given and

@@ -896,6 +896,9 @@
       (cond
         ((= (extract f 2) 0)
          (e-module (loaded-error (extract f 3)) a (if (string=? (extract f 6) "") b a) 0 0))
+        ;; Read, but its own macros' expansion failed
+        ;; (`parser-top.fx`'s `file-own-expanded`).
+        ((not (string=? (extract f 3) "")) (e-module (loaded-error (extract f 3)) a a 0 0))
         ((extract f 8) (parse-exp (car (extract f 5))))
         (else
           (let* ((base (extract f 2))

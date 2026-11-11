@@ -22,7 +22,8 @@
         syn-expansion len (type syns-a))
 (import types-module reserved? desc-word? type-form? kernel-sigs kernel-definitions s-expr
         (type fails sty))
-(import align-module macro? defined (type macro clauses))
+(import align-module macro? defined def-env-top
+        (type macro clauses def-env def-envs macro-env scopes))
 
 
 ;;; ------------------------------------------------------------ the programs
@@ -433,15 +434,16 @@
 
 ;; Each procedural macro, by its name: its style, and its transformer as
 ;; text; the last defined first.
-(define procedurals (ref (listof (tupleof symbol int string) acyclic) rs) (new nil))
-(define procedural-of (->* (symbol) (listof (tupleof int string) acyclic))
+(define procedurals (ref (listof (tupleof symbol int string def-env) acyclic) rs) (new nil))
+(define procedural-of (->* (symbol) (listof (tupleof int string def-env) acyclic))
   (lambda (n) (procedural-in n (get procedurals))))
 (define procedural-in
-  (->* (symbol (listof (tupleof symbol int string) acyclic)) (listof (tupleof int string) acyclic))
+  (->* (symbol (listof (tupleof symbol int string def-env) acyclic))
+       (listof (tupleof int string def-env) acyclic))
   (lambda (n ps)
     (cond ((null? ps) nil)
           ((symbol=? n (extract (car ps) 1))
-           (list (tuple (extract (car ps) 2) (extract (car ps) 3))))
+           (list (tuple (extract (car ps) 2) (extract (car ps) 3) (extract (car ps) 4))))
           (else (procedural-in n (cdr ps))))))
 ;; `(define-syntax name (STYLE proc))`, its parts: the name, the style and
 ;; the procedure, in a list of one; none if `form` is not one.
@@ -463,8 +465,8 @@
 ;; checked; its name (`macros.fx`'s `define-macro`). As `defined` has it, a
 ;; procedural macro has no signature nor clauses, and makes `3`
 ;; (`macros-align.fx`'s `makes`); its transformer is `procedurals`'.
-(define define-procedural (->* (fails syn) (listof symbol acyclic))
-  (lambda (fail form)
+(define define-procedural (->* (fails syn def-env) (listof symbol acyclic))
+  (lambda (fail form e)
     (let* ((p (car (procedural-form form))) (name (extract p 1)) (code (extract p 3))
            (text (syn-text code)))
       (cond
@@ -475,7 +477,7 @@
            (ok v
              (begin
                (set procedurals
-                    (cons (tuple (syn-symbol name) (extract p 2) text) (get procedurals)))
+                    (cons (tuple (syn-symbol name) (extract p 2) text e) (get procedurals)))
                (set defined
                     (cons (tuple (syn-symbol name)
                                  (the macro (tuple (s-expr) (the clauses nil) (the syns-a nil) 3)))
@@ -504,3 +506,37 @@
                                     ((= style 2) (closed fail (car read) #f made))
                                     (else (car read)))))
                   (keywords fail opened)))))))))
+
+;;; ------------------------------------------------------------ definition environments
+
+;; Where a macro defined now is defined: in a file's scope, if `file` has
+;; one, as its importer has it; else where macros are now (`def-env-now`).
+(define def-env-of-file (->* (scopes) def-env)
+  (lambda (file)
+    (if (null? file)
+        (get def-env-now)
+        (tuple 1 (extract (car file) 1) (extract (car file) 2)))))
+(define def-env-now (ref def-env rs) (new (def-env-top)))
+;; A module file's own macros' scope begun: none of these macros, nor any
+;; procedural, defined, and macros defined where the file's items are; what
+;; was, given back, for `file-scope-end!` (`Macros::in_file_scope`).
+(define-type scope-saved (tupleof macro-env (listof (tupleof symbol int string def-env) acyclic)
+                                  def-env))
+(define file-scope-begin! (->* () scope-saved)
+  (lambda ()
+    (let ((saved (tuple (get defined) (get procedurals) (get def-env-now))))
+      (begin (set defined nil) (set procedurals nil) (set def-env-now (tuple 2 'within nil))
+             saved))))
+(define file-scope-end! (->* (scope-saved) unit)
+  (lambda (s)
+    (begin (set defined (extract s 1)) (set procedurals (extract s 2))
+           (set def-env-now (extract s 3)))))
+;; Where the macro each expansion's aliases are of was defined, by the
+;; expansion's number, the last first; a template's check is expansion 0
+;; (`macros.rs`'s `Withs::def_envs`). Given to the resolution after expansion
+;; (`macros-shapes.fx`'s `aliases-resolved`), which another instance of the
+;; expander's files reads.
+(define def-envs (ref def-envs rs) (new nil))
+(define def-env! (->* (int def-env) unit)
+  (lambda (k h) (set def-envs (cons (tuple k h) (get def-envs)))))
+(define def-envs-given (->* () def-envs) (lambda () (get def-envs)))

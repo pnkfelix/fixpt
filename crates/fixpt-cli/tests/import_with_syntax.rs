@@ -39,6 +39,20 @@ fn a_files_macro_makes_definitions() {
     }
 }
 
+/// A module file's own macros, used in it (`binding-shapes.md`, step 3;
+/// Heist's (a)): their templates' free names the file's items, hidden or
+/// not, a binder around a use that would capture one renamed; and where
+/// the file is imported, as before.
+#[test]
+fn a_file_uses_its_own_macros() {
+    for (name, want) in [("main-own.fx", "(3 10 8 8) : "), ("main-within.fx", "32 : int"), ("main-procedural.fx", "66 : int")] {
+        for m in MACHINES {
+            let (out, err) = eval(m, name);
+            assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");
+        }
+    }
+}
+
 #[test]
 fn only_and_except_take_macros_and_names_alike() {
     for (name, want) in [("main-only.fx", "1020 : int"), ("main-except.fx", "1030 : int"), ("main-except-all.fx", "2 : int")] {
@@ -53,7 +67,9 @@ fn only_and_except_take_macros_and_names_alike() {
 fn what_cannot_be_imported_is_refused() {
     let cases = [
         ("main-secret.fx", "`hidden` is neither a value the file's module shows nor a standard binding"),
-        ("main-within.fx", "`one` is a macro of this file"),
+        ("main-own-before.fx", "`one` is a macro of this file used before the file defines it"),
+        ("main-own-with.fx", "where a `with` or `include` around its use may give it: not yet"),
+        ("main-own-typed.fx", "a typed hole in a macro a file uses itself, not yet"),
         ("main-not-load.fx", "takes a name defined as `(load-module \"path\")`"),
         ("main-only-not-given.fx", "unbound variable `limit`"),
         ("main-only-hidden.fx", "`twice` is nothing `lib` gives"),

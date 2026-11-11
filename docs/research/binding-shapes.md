@@ -696,11 +696,14 @@ module file's own macros. (4) `let-desc`. (5) Captures by `with`,
 **Stage 2, built (2026-11-10).** A `syntax-rules` template's free names
 are written as aliases, `%~N:x`, as a procedural macro's are, at the top
 level and in an imported file's macro alike (`Action::Alias`,
-`act-alias`). Each expansion records where its macro is defined, by its
-number (`hygiene::Home`, `Withs::homes`; `macros.fx`'s `homes`): the top
+`act-alias`). Each expansion records its macro's definition environment
+(the environment the macro is defined in, which its template's free names
+refer into), by its number (`hygiene::DefEnv`, `Withs::def_envs`;
+`macros.fx`'s `def-envs`): the top
 level, or a file, its hidden global `%shared:key` and the values its
 module shows; a template's check is expansion 0. The resolution writes a
-free alias as the qualifier its home says, so expansions read as they did:
+free alias as the qualifier its definition environment says, so
+expansions read as they did:
 a top-level macro's `(with #%toplevel x)`, or `#%toplevel:x` where the walk
 says the name is qualified (a description's, a specification's), or `x`
 where written as is (a `globals` list); a file's macro's `(with %shared:key
@@ -712,9 +715,30 @@ naming them one by one would need a type's qualifier for each name.
 
 The FX-26 expander's two chains of files (the one the expander's forms
 load, and `macros-shapes.fx`'s through `macros-shaper.fx`) are separate
-instances, with separate state, so the table of homes is handed to the
-resolution by `parser-top.fx` (`homes-given`), and its type is
-structural (`home`, none or one file's), the same in each instance.
+instances, with separate state, so the table of definition environments
+is handed to the resolution by `parser-top.fx` (`def-envs-given`), and its
+type is structural (`def-env`), the same in each instance.
+
+**Stage 3, built (2026-11-10).** A module file uses its own macros
+(Heist's (a)): its `define-syntax`es, hidden or not, are defined in order
+in a scope of the file's own (no macro of the program's: a file sees the
+standard environment alone), and each item after one is expanded by them
+before the file's shape is found (`Checker::file_own_expanded`;
+`parser-top.fx`'s `loaded-own-expanded!`, run on the files the driver
+read, before they are shaped). Their definition environment is the
+file's items (`DefEnv::Within`, kind 2): a free alias becomes the plain
+name, and a binder at the use that the plain name would reach, other
+than the item's own definitions, is renamed `%x~N` with each reference to
+it (counted apart from a template's fresh names, `%x:N`, in both front
+ends alike). A `with` or `include` around the use, whose names may
+include it, is refused for now (stage 5), and so is a typed hole in a
+macro a file uses itself, whose contract a qualifier reads. A macro used
+before its file defines it is refused. Found on the way: a procedural
+macro of an imported file read what it renames as the importer's top
+level (`(inc 5)` 500, not 6); a procedural macro now keeps its definition
+environment as a `syntax-rules` one does. Open: a file's macro that makes
+definitions defines its template's own names, `%raw:N`, as items of the
+file's module, so they are in its type, unnameable.
 
 **A property to prove, one day** (the user's, 2026-11-10): full expansion
 is the same as repeated `expand-once` steps. What keeps it within reach:

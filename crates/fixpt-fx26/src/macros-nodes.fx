@@ -36,20 +36,22 @@
   (act-macro-head symbol))
 (define-type actions (listof (tupleof addr action) acyclic))
 ;; Where a macro is defined, what its expansions' aliases are read in
-;; (`macros/hygiene.rs`'s `Home`): the top level; a file, its hidden global
-;; `%shared:key` and the values its module shows (its other names the
-;; standard environment's).
-;; None, the top level, or one, a file's: a type of its structure, the
-;; same in each instance of the expander's files (`macros.fx`'s `homes`).
-(define-type home (listof (tupleof symbol names) acyclic))
-(define-type homes (listof (tupleof int home) acyclic))
+;; (`macros/hygiene.rs`'s `DefEnv`), by its kind: the top level (0); a file
+;; as its importer has it (1), its hidden global `%shared:key` and the
+;; values its module shows (its other names the standard environment's); or
+;; a module file's items, as its own macros see them (2). A type of its
+;; structure, the same in each instance of the expander's files
+;; (`macros.fx`'s `def-envs`).
+(define-type def-env (tupleof int symbol names))
+(define def-env-top (->* () def-env) (lambda () (tuple 0 'top (the names nil))))
+(define-type def-envs (listof (tupleof int def-env) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
 ;; by their paths in the template, the last made first; its pattern's
 ;; variables, in the order the pattern has them; each typed hole's type as
 ;; a use reads it, `(select #%toplevel T)`, which the use's expression is
 ;; held to; and where its macro is defined (`macros.rs`'s `Clause`).
 (define-type contracts (listof (tupleof symbol syn) acyclic))
-(define-type clause (tupleof syn syn actions pvars contracts home))
+(define-type clause (tupleof syn syn actions pvars contracts def-env))
 (define-type clauses (listof clause acyclic))
 ;; A macro defined: its signature, its clauses, the binders of its
 ;; signature's `(poly (binder …) σ)`, if it has one, and what it makes (0 an

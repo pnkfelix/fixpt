@@ -666,13 +666,12 @@ impl Checker {
         r
     }
 
-    /// A module's file (`load-module`) read: its `define-datatype`s
-    /// expanded, its `define-generative`s left as they are, a module's own.
-    /// Its macros, `define-syntax`es (hidden or not), are no items: what
-    /// `import-with-syntax` brings (`import_file_macros`); a use of one in
-    /// the file itself is refused, for now (no reference to a module's own
-    /// items is one a local binding cannot shadow, which its template's free
-    /// names would need).
+    /// A module's file (`load-module`) read: its own macros' uses expanded
+    /// (`file_own_expanded`), its `define-datatype`s expanded, its
+    /// `define-generative`s left as they are, a module's own. Its macros,
+    /// `define-syntax`es (hidden or not), are no items: what
+    /// `import-with-syntax` brings (`import_file_macros`); a use of one
+    /// left, before its definition, is refused.
     pub(crate) fn read_module_file(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
         self.read_module_file_at(file, text, None)
     }
@@ -688,13 +687,7 @@ impl Checker {
                 forms.iter_mut().for_each(|f| placed_in(f, file));
                 forms
             }
-            None => {
-                let mut interner = std::mem::take(&mut self.interner);
-                let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
-                self.interner = interner;
-                let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
-                forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>()?
-            }
+            None => self.module_file_forms(file, text)?,
         };
         if let Some((at, input)) = at {
             let params = forms.first().is_some_and(|f| crate::parse::module_parameters_of(f, &self.interner).is_some());
@@ -727,9 +720,11 @@ impl Checker {
                 _ => kept.push(f),
             }
         }
+        // Each use after its macro's definition is expanded: what is left
+        // comes before it.
         if let Some(at) = kept.iter().find_map(|f| uses_one_of(f, &macros)) {
             let shown = self.interner.name(at.1);
-            return Err(FxError::at(at.0, format!("`{shown}` is a macro of this file: one is used where its file is imported (`import-with-syntax`), not in its file, for now")));
+            return Err(FxError::at(at.0, format!("`{shown}` is a macro of this file used before the file defines it")));
         }
         let mut out = Vec::new();
         for f in kept {
@@ -820,6 +815,7 @@ impl Checker {
             self.interner = interner;
             let Ok(forms) = r else { continue };
             let Ok(forms) = forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>() else { continue };
+            let Ok(forms) = self.file_own_expanded(forms, &text) else { continue };
             let sub = at.parent().map(|d| d.to_path_buf());
             self.file_shapes_for(&forms, sub.clone());
             let mut macros = std::mem::take(&mut self.macros);
@@ -829,6 +825,81 @@ impl Checker {
             self.macros = macros;
             self.interner = interner;
         }
+    }
+
+    /// A module file's forms, `text` read as file `file`: the shapes named
+    /// written in (`sealed_written`), and its own macros' uses expanded
+    /// (`file_own_expanded`). Apart from `read_module_file_at`, whose frame
+    /// it would grow.
+    fn module_file_forms(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
+        let mut interner = std::mem::take(&mut self.interner);
+        let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
+        self.interner = interner;
+        let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+        let forms = forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>()?;
+        self.file_own_expanded(forms, text)
+    }
+
+    /// A module file's forms, `forms`, of `text`, with its own macros' uses
+    /// expanded (`binding-shapes.md`, step 3; Heist's (a)): each
+    /// `define-syntax`, hidden or not, defined in order where the file's
+    /// items are (`Macros::in_file_scope`), and the items after it
+    /// expanded by them, each name a template leaves free the file's item
+    /// or standard binding of that name, a binder at the use that would
+    /// capture it renamed (`hygiene::DefEnv::Within`). Its `define-syntax`es
+    /// kept, which `import-with-syntax` reads; a shape's,
+    /// `(define-syntax s (modnames …))`, no macro. Itself if it defines no
+    /// macro.
+    pub(crate) fn file_own_expanded(&mut self, forms: Vec<Syntax>, text: &str) -> R<Vec<Syntax>> {
+        let interner = &self.interner;
+        let head = |s: &Syntax| s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).map(|h| interner.name(h).to_string());
+        let shape = |s: &Syntax| matches!(s.as_proper_list(), Some([_, _, m]) if head(m).as_deref() == Some("modnames"));
+        let macro_of = |s: &Syntax| syntax_names(s, interner).is_some() && !shape(s);
+        let hidden = |s: &Syntax| head(s).as_deref() == Some("hide") && s.as_proper_list().is_some_and(|l| l[1..].iter().any(macro_of));
+        if !forms.iter().any(|f| macro_of(f) || hidden(f)) {
+            return Ok(forms);
+        }
+        let kinds: Vec<u8> = forms.iter().map(|f| if head(f).as_deref() == Some("module-parameters") || shape(f) { 0 } else if macro_of(f) { 1 } else if head(f).as_deref() == Some("hide") { 2 } else { 3 }).collect();
+        let marks: Vec<Vec<bool>> = forms.iter().map(|f| f.as_proper_list().map(|l| l.iter().map(macro_of).collect()).unwrap_or_default()).collect();
+        let mut macros = std::mem::take(&mut self.macros);
+        let mut interner = std::mem::take(&mut self.interner);
+        let r = macros.in_file_scope(text, |m| {
+            let expanded = |m: &mut crate::macros::Macros, f: &Syntax, out: &mut Vec<Syntax>, interner: &mut fixpt_read::Interner| -> R<()> {
+                for f in m.expand_top(f, interner)? {
+                    let f = m.sealed_written(&f, interner)?;
+                    out.push(m.aliases_resolved(&f, interner)?);
+                }
+                Ok(())
+            };
+            let mut out = Vec::new();
+            for ((f, kind), marks) in forms.into_iter().zip(kinds).zip(marks) {
+                match kind {
+                    0 => out.push(f),
+                    1 => {
+                        m.define(&f, &mut interner)?;
+                        out.push(f);
+                    }
+                    2 => {
+                        let items = f.as_proper_list().expect("a `hide`");
+                        let mut kept = vec![items[0].clone()];
+                        for (i, is_macro) in items.iter().zip(marks).skip(1) {
+                            if is_macro {
+                                m.define(i, &mut interner)?;
+                                kept.push(i.clone());
+                            } else {
+                                expanded(m, i, &mut kept, &mut interner)?;
+                            }
+                        }
+                        out.push(Syntax::list(f.span, kept));
+                    }
+                    _ => expanded(m, &f, &mut out, &mut interner)?,
+                }
+            }
+            Ok(out)
+        });
+        self.macros = macros;
+        self.interner = interner;
+        r
     }
 
     /// What is expanded as it is read (`define-datatype`), for forms read

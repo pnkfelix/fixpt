@@ -17,8 +17,8 @@
         syn-string? syn-string syn-datums (type syns-a presult loaded-file loaded-files))
 (import types-module proper-items fail-at name-in? (type fails addr atms))
 (import align-module node-at node-syn node-kids node-path nnodes program-walk lv-rib lv-shape
-        k-binder k-ref k-form atm-lit
-        (type levels found home homes))
+        k-binder k-ref k-form atm-lit lv-earlier def-env-top
+        (type levels found def-env def-envs))
 (import walk-module walked pfail-walk walked-out show-renamed falses addr=?)
 (import shaper-module askeds binder-shape elem exp-shape exported file-given-at file-key
         file-shape-keyed file-shapes files-given form-node? head-of inputs-at input-key?
@@ -526,19 +526,26 @@
 ;; Hygiene, one mechanism (`binding-shapes.md`, step 3; `macros/hygiene.rs`):
 ;; top-level form `x`, after expansion, each alias an expansion left free,
 ;; `%~N:x`, made the name it stands for where its macro is defined
-;; (`home-of`): a top-level macro's the top level's, written so (`(with
+;; (`def-env-of`): a top-level macro's the top level's, written so (`(with
 ;; #%toplevel x)`, `#%toplevel:x`); a file's macro's the file's value,
-;; `(with %shared:key x)`, else the standard one, `(with #%fx x)`; an alias
-;; the expansion bound, here or at the top level before, a name of its own.
+;; `(with %shared:key x)`, else the standard one, `(with #%fx x)`; a module
+;; file's own macro's the plain name, a binder at the use that would capture
+;; it renamed, `%x~N`, and each reference to that binder; an alias the
+;; expansion bound, here or at the top level before, a name of its own.
 ;; Itself if it has no alias. No alias reaches the checker.
-(define aliases-resolved (->* (fails syn homes) syn)
+(define aliases-resolved (->* (fails syn def-envs) syn)
   (lambda (fail x hs)
     (if (not (alias-in? x))
         x
         (let* ((w (walked fail x #t)) (root (extract w 1)) (found (extract w 2))
-               (written (aliases-written fail found hs nil)))
+               (made (aliases-written fail found hs (root-binders fail root x)
+                                      (tuple (the parts nil) (the ints nil))))
+               (fresh (captors-named (extract made 2) nil))
+               (written (append (captors-renamed found fresh (binders-renamed fresh nil))
+                                (extract made 1))))
           (begin (aliases-defined-in fail root x)
                  (with-parts x nil written))))))
+(define-type ints (listof int acyclic))
 ;; Whether `s` holds an alias, outside quotes.
 (define alias-in? (->* (syn) bool)
   (lambda (s)
@@ -552,41 +559,156 @@
       (else y #f))))
 (define aliases-in? (->* (syns-a) bool)
   (lambda (xs) (and (not (null? xs)) (or (alias-in? (car xs)) (aliases-in? (cdr xs))))))
-;; Each free alias `found` reaches, by its node's path, what it is written as.
+;; Each free alias `found` reaches, by its node's path, what it is written
+;; as, onto `out`'s; and onto its binders, each binder at a use that would
+;; capture a name a module file's own macro introduces (none of `top`, the
+;; form's own definitions, which are the file's items).
 (define-type parts (listof (tupleof addr syn) acyclic))
-(define aliases-written (->* (fails found homes parts) parts)
-  (lambda (fail fs hs out)
+(define-type written-of (tupleof parts ints))
+(define aliases-written (->* (fails found def-envs ints written-of) written-of)
+  (lambda (fail fs hs top out)
     (if (null? fs)
         out
         (aliases-written
-          fail (cdr fs) hs
+          fail (cdr fs) hs top
           (let ((at (extract (car fs) 1)) (env (extract (car fs) 2)))
             (tagcase (node-kids at)
               (k-ref (n d free)
-                (let ((base (alias-base (symbol->string n))))
-                  (if (or (string=? base "") (bound-in? n d env) (alias-defined? n d))
+                (let* ((base (alias-base (symbol->string n)))
+                       (h (def-env-of (alias-made (symbol->string n)) hs))
+                       (within (= (extract h 1) 2)))
+                  (if (or (string=? base "") (bound-in? n d env)
+                          (and (not within) (alias-defined? n d)))
                       out
-                      (cons (tuple (node-path at)
-                                   (alias-written fail base d free
-                                                  (home-of (alias-made (symbol->string n)) hs)
-                                                  (node-syn at)))
-                            out))))
+                      (let ((parts (cons (tuple (node-path at)
+                                                (alias-written fail base d free h (node-syn at)))
+                                         (extract out 1))))
+                        (if within
+                            (tuple parts (captor-noted fail (captor-of (string->symbol base) d env)
+                                                       top base (node-syn at) (extract out 2)))
+                            (tuple parts (extract out 2)))))))
               (else y out)))))))
+;; Binder `c` (`captor-of`'s) onto `cs`, if it captures `base`, which a
+;; module file's own macro introduces at `s`: not if it is none, or one of
+;; `top`; refused where a module's names come first, which may give it.
+(define captor-noted (->* (fails int ints string syn ints) ints)
+  (lambda (fail c top base s cs)
+    (cond ((= c -1) cs)
+          ((= c -2)
+           (begin (fail-at fail (string-append "`" base "`, which a macro of this file names, "
+                                               "where a `with` or `include` around its use may "
+                                               "give it: not yet")
+                           s)
+                  cs))
+          ((or (int-in? c top) (int-in? c cs)) cs)
+          (else (cons c cs)))))
+(define int-in? (->* (int ints) bool)
+  (lambda (k ks) (and (not (null? ks)) (or (= k (car ks)) (int-in? k (cdr ks))))))
+;; The binder `n` (a description's if `d`) refers to in `env`, innermost
+;; first: -1 if none; -2 if a module's names come first, which may have it.
+(define captor-of (->* (symbol bool levels) int)
+  (lambda (n d env)
+    (if (null? env)
+        -1
+        (let ((b (tagcase (car env)
+                   (lv-rib (as) (binder-named n d as))
+                   (lv-earlier (as) (binder-named n d as))
+                   (lv-shape (m) -2)
+                   (else y -1))))
+          (if (= b -1) (captor-of n d (cdr env)) b)))))
+;; The binders a form's definitions bind (its root `root`'s export).
+(define root-binders (->* (fails int syn) ints)
+  (lambda (fail root x)
+    (tagcase (node-kids root)
+      (k-form (f)
+        (let ((ex (extract (node-at f) 5)))
+          (if (null? ex) nil (levels-binders (exported fail ex x)))))
+      (else y nil))))
+(define levels-binders (->* (levels) ints)
+  (lambda (ls)
+    (if (null? ls)
+        nil
+        (append (tagcase (car ls) (lv-rib (as) (atms-binders as)) (else y nil))
+                (levels-binders (cdr ls))))))
+(define atms-binders (->* (atms) ints)
+  (lambda (as)
+    (if (null? as)
+        nil
+        (append (tagcase (car as) (atm-lit (b d) (list b)) (else y nil))
+                (atms-binders (cdr as))))))
+;; Each captor, `cs`, with its fresh name, `%x~N`: spelled apart from a
+;; template's fresh names, which another count makes.
+(define-type captors (listof (tupleof int symbol) acyclic))
+(define captors-made (ref int rs) (new 0))
+(define captors-named (->* (ints captors) captors)
+  (lambda (cs out)
+    (if (null? cs)
+        out
+        (tagcase (node-kids (car cs))
+          (k-binder (n e)
+            (begin
+              (set captors-made (+ (get captors-made) 1))
+              (captors-named (cdr cs)
+                             (cons (tuple (car cs)
+                                          (string->symbol
+                                           (string-append "%" (symbol->string n) "~"
+                                                          (int->string (get captors-made)))))
+                                   out))))
+          (else y (captors-named (cdr cs) out))))))
+;; Each captor of `fresh` written as its fresh name, onto `out`.
+(define binders-renamed (->* (captors parts) parts)
+  (lambda (fresh out)
+    (if (null? fresh)
+        out
+        (binders-renamed (cdr fresh)
+                         (cons (tuple (node-path (extract (car fresh) 1))
+                                      (renamed-at (extract (car fresh) 2)
+                                                  (node-syn (extract (car fresh) 1))))
+                               out)))))
+;; Each reference `fs` reaches to a captor of `fresh`, written as its fresh
+;; name, onto `out`.
+(define captors-renamed (->* (found captors parts) parts)
+  (lambda (fs fresh out)
+    (if (or (null? fs) (null? fresh))
+        out
+        (captors-renamed
+          (cdr fs) fresh
+          (let ((at (extract (car fs) 1)))
+            (tagcase (node-kids at)
+              (k-ref (n d free)
+                (let ((f (if (string=? (alias-base (symbol->string n)) "")
+                             (captor-name (captor-of n d (extract (car fs) 2)) fresh)
+                             nil)))
+                  (if (null? f)
+                      out
+                      (cons (tuple (node-path at) (renamed-at (car f) (node-syn at))) out))))
+              (else y out)))))))
+(define captor-name (->* (int captors) (listof symbol acyclic))
+  (lambda (b fresh)
+    (cond ((null? fresh) nil)
+          ((= b (extract (car fresh) 1)) (list (extract (car fresh) 2)))
+          (else (captor-name b (cdr fresh))))))
+(define renamed-at (->* (symbol syn) syn)
+  (lambda (n s)
+    (let ((ab (syn-span s))) (mk-symbol (symbol->string n) (extract ab 1) (extract ab 2)))))
 ;; Alias `base`, of a description's if `d`, written as `free` says (0 a
 ;; value, 1 qualified, 2 as written, 3 a `with`'s module) where its macro
 ;; is defined, `h`, at `s`'s place (`macros/hygiene.rs`'s `top_made`).
-(define alias-written (->* (fails string bool int home syn) syn)
+(define alias-written (->* (fails string bool int def-env syn) syn)
   (lambda (fail base d free h s)
     (let* ((ab (syn-span s)) (a (extract ab 1)) (b (extract ab 2))
            (with-of (lambda ((m string))
                       (mk-list (list (mk-symbol "with" a b) (mk-symbol m a b) (mk-symbol base a b))
                                a b))))
-      (if (null? h)
+      (case (extract h 1)
+        ((0)
           (cond ((or (= free 0) (and (= free 3) (not d))) (with-of "#%toplevel"))
                 ((= free 2) (mk-symbol base a b))
-                (else (mk-symbol (string-append "#%toplevel:" base) a b)))
-          (cond ((and (= free 0) (name-in? (string->symbol base) (extract (car h) 2)))
-                 (with-of (symbol->string (extract (car h) 1))))
+                (else (mk-symbol (string-append "#%toplevel:" base) a b))))
+        ((2) (mk-symbol base a b))
+        (else
+          (cond ((and (= free 0) (name-in? (string->symbol base) (extract h 3)))
+                 (with-of (symbol->string (extract h 2))))
                 ((= free 0) (with-of "#%fx"))
                 ((= free 2) (mk-symbol base a b))
                 ;; A file's macro writes its descriptions through its module
@@ -595,14 +717,14 @@
                  (begin (fail-at fail (string-append "`" base "`: a file's macro's description "
                                                      "named apart from its module, not yet")
                                  s)
-                        s)))))))
+                        s))))))))
 ;; Where expansion `k`'s macro was defined, of `hs`: the top level if none
 ;; is said.
-(define home-of (->* (int homes) home)
+(define def-env-of (->* (int def-envs) def-env)
   (lambda (k hs)
-    (cond ((null? hs) nil)
+    (cond ((null? hs) (def-env-top))
           ((= k (extract (car hs) 1)) (extract (car hs) 2))
-          (else (home-of k (cdr hs))))))
+          (else (def-env-of k (cdr hs))))))
 ;; The expansion that made alias `x`, its outermost `%~N:`'s `N`; else 0.
 (define alias-made (->* (string) int)
   (lambda (x)

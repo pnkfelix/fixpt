@@ -5587,3 +5587,17 @@ refusals called read errors, `product`'s labels, `(define sum …)`);
 `syntax-rules` ellipsis tails, literals telling clauses apart, a
 recursion's signature suggested, tagcase clauses in signatures; `nestof`
 and a negatively bounded type variable (to discuss).
+
+## 233. The arm64 assembler pieces' test: its fix to merge (the user's, 2026-11-10)
+
+`fixpt-fx26::native_direct_arm64 the_assemblers_pieces_as_the_rust_compiler_makes_them`
+fails in a debug build, on any host: it asks for `continuation_code(n)`
+with `n` 10 and 37, past the machine's own call-outs (`OWN_CALLOUTS`),
+whose field the continuation procedure's code has none of, so
+`Asm::finish`'s assertion fires ("a call-out's field not given"); in a
+release build both sides compared two placeholders. The fix is on the
+branch `fix-callout-fields-in-asm-pieces-test` (`a4563ec5`, from
+`bc0a119f`), test-only: the continuation code for `0, 7, 9` alone, as
+x86_64's twin of the test has it. Not merged yet, on the user's word:
+to merge once the user says.
+
