@@ -395,6 +395,7 @@
         ((%type-made) (k-type-made-by s items #f k-parse-d))
         ((%input-made) (k-type-made-by s items #t k-parse-d))
         ((restrict) (k-restrict-by s items k-parse-type))
+        ((modnames) (k-sfail k-modnames-where s))
         ((proves) (k-parse-proves-type s items))
         ((bool) (k-sfail "`(bool …)` is a procedure's result, and only that" s))
         ((poly)

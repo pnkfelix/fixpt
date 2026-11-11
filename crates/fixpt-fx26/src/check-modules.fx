@@ -380,6 +380,132 @@
         (let ((out (the (ref k-effect-sels @t) (new nil))))
           (begin (k-esels-from t (k-new-seen) out) (reverse (get out)))))))
 ;; The effect a module's description `d` is, in a list; none if not one.
+;; `(the (modnames …) e)`, `x`, its type the slot `slot`: `e`'s type, found
+;; by `synth`, sealed to the names (`k-sealed`), the slot linked to it, and
+;; `e` held to it as `the` holds a value to its type, by `expect` (a module
+;; of more values made into one of these). As `Checker::the_sealed`.
+(define k-the-sealed
+  (->* (kx int (subr (maxeff checks spin) (kx) k-te) (subr (maxeff checks spin) (kx int int) unit))
+       k-te)
+  (lambda (e slot synth expect)
+    (let* ((entry (car (k-sealed-members slot))) (r (synth e)) (got (extract r 1))
+           (s (k-sealed got (extract entry 2) (extract entry 3) (extract entry 4))))
+      (begin (k-sealed-done! slot) (k-set-link slot s) (expect e got s) (k-te s (extract r 2))))))
+;; Module type `got` with the names `ms` alone (`binding-shapes.md`,
+;; "leaving names out seals"): each as `got` has it, a value named as a
+;; module itself sealed so; each type's and effect's kind as written (the
+;; user's, 2026-11-10); an abstract type left out that what is kept
+;; mentions kept hidden, as `restrict` keeps it. As `Checker::sealed`.
+(define k-sealed (->* (int k-syns int int) int)
+  (lambda (got ms a b)
+    (tagcase (k-get got)
+      (ty-module (abs ds vs)
+        (let* ((kept (k-sealed-names got abs ds vs ms nil))
+               (ds2 (k-parts-kept ds kept))
+               (vs2 (k-vals-sealed (k-parts-kept vs kept) ms)))
+          (k-ty-new (ty-module (k-abs-kept abs kept (append ds2 vs2)) ds2 vs2))))
+      (else y (k-fail (string-append "`modnames` names a module's members, and this is a "
+                                     (k-show-ty got))
+                      a b)))))
+;; The names `ms` keep of `got` (its parts `abs`, `ds`, `vs`), each checked:
+;; given, and of the kind written.
+(define k-sealed-names (->* (int k-parts k-parts k-parts k-syns k-names) k-names)
+  (lambda (got abs ds vs ms out)
+    (if (null? ms)
+        out
+        (let* ((m (car ms)) (parts (tagcase m (lst (xs d a b x) xs) (else y (the k-syns nil))))
+               (w (if (syn-symbol? m) "val" (syn-name (car parts))))
+               (n (if (syn-symbol? m) (syn-head m) (syn-head (k-nth parts 1))))
+               (shown (symbol->string n))
+               (is-abs (k-sealed-has? n abs)) (d (k-part-of n ds)) (is-val (k-sealed-has? n vs))
+               (eff (and (>= d 0) (not (null? (k-desc-effect d)))))
+               (said (lambda ((what string) (word string))
+                       (k-fail (string-append "`" shown "` is " what " of " (k-show-ty got) ": `("
+                                              word " " shown ")`")
+                               (syn-start m) (syn-end m)))))
+          (begin
+            (cond ((and (or (string=? w "val") (string=? w "modnames")) is-val) #u)
+                  ((and (string=? w "abs") is-abs) #u)
+                  ((and (string=? w "desc") (>= d 0) (not eff)) #u)
+                  ((and (string=? w "eff") (>= d 0) eff) #u)
+                  ((or (and (or (string=? w "val") (string=? w "modnames")) (not is-abs) (< d 0))
+                       (and (not is-abs) (< d 0)))
+                   (k-fail (string-append "the module gives no `" shown "`")
+                           (syn-start m) (syn-end m)))
+                  (is-abs (said "an abstract type" "abs"))
+                  ((not eff) (said "a transparent type" "desc"))
+                  (else (said "an effect" "eff")))
+            (k-sealed-names got abs ds vs (cdr ms) (cons n out)))))))
+(define k-module-count (->* (int) int)
+  (lambda (t)
+    (tagcase (k-get t)
+      (ty-module (abs ds vs) (+ (k-length abs) (+ (k-length ds) (k-length vs))))
+      (else y 0))))
+(define k-sealed-has? (->* (symbol k-parts) bool)
+  (lambda (n ps)
+    (and (not (null? ps)) (or (symbol=? n (extract (car ps) 1)) (k-sealed-has? n (cdr ps))))))
+(define k-part-of (->* (symbol k-parts) int)
+  (lambda (n ps)
+    (cond ((null? ps) -1)
+          ((symbol=? n (extract (car ps) 1)) (extract (car ps) 2))
+          (else (k-part-of n (cdr ps))))))
+(define k-parts-kept (->* (k-parts k-names) k-parts)
+  (lambda (ps kept)
+    (cond ((null? ps) nil)
+          ((k-has-name? kept (extract (car ps) 1)) (cons (car ps) (k-parts-kept (cdr ps) kept)))
+          (else (k-parts-kept (cdr ps) kept)))))
+;; Values `vs`, each named as a module, `(modnames m member …)` in `ms`,
+;; sealed so.
+(define k-vals-sealed (->* (k-parts k-syns) k-parts)
+  (lambda (vs ms)
+    (if (null? vs)
+        nil
+        (let ((inner (k-modnames-member (extract (car vs) 1) ms)))
+          (cons (if (null? inner)
+                    (car vs)
+                    ;; A module inside, its names as written; not sealed to
+                    ;; fewer yet (no reshape reaches inside a value).
+                    (let* ((m (car inner)) (t (extract (car vs) 2))
+                           (s (k-sealed t (cdr (cdr (tagcase m (lst (xs d a b x) xs)
+                                                      (else y (the k-syns nil)))))
+                                        (syn-start m) (syn-end m)))
+                           (shown (symbol->string (extract (car vs) 1))))
+                      (if (= (k-module-count s) (k-module-count t))
+                          (product (1 (extract (car vs) 1)) (2 s))
+                          (k-fail (string-append "`" shown "` gives more than this names of it: a "
+                                                 "`modnames` seals a module's own names, not yet "
+                                                 "those of one inside it; name all of `" shown
+                                                 "`'s here, or seal it where it is defined")
+                                  (syn-start m) (syn-end m)))))
+                (k-vals-sealed (cdr vs) ms))))))
+;; The member `(modnames n member …)` among `ms`, in a list of one.
+(define k-modnames-member (->* (symbol k-syns) k-syns)
+  (lambda (n ms)
+    (if (null? ms)
+        nil
+        (let ((parts (tagcase (car ms) (lst (xs d a b x) xs) (else y (the k-syns nil)))))
+          (if (and (> (k-length parts) 1) (syn-symbol? (car parts))
+                   (symbol=? (syn-head (car parts)) 'modnames)
+                   (symbol=? (syn-head (k-nth parts 1)) n))
+              (list (car ms))
+              (k-modnames-member n (cdr ms)))))))
+;; The abstract types `abs` that `kept` names, and those left out that
+;; `parts` mention, each `%hidden:t`.
+(define k-abs-kept (->* (k-parts k-names k-parts) k-parts)
+  (lambda (abs kept parts)
+    (cond ((null? abs) nil)
+          ((k-has-name? kept (extract (car abs) 1))
+           (cons (car abs) (k-abs-kept (cdr abs) kept parts)))
+          ((k-parts-mention? parts (extract (car abs) 2))
+           (let ((n (symbol->string (extract (car abs) 1))))
+             (cons (product (1 (string->symbol (string-append "%hidden:" n)))
+                            (2 (extract (car abs) 2)))
+                   (k-abs-kept (cdr abs) kept parts))))
+          (else (k-abs-kept (cdr abs) kept parts)))))
+(define k-parts-mention? (->* (k-parts int) bool)
+  (lambda (ps v)
+    (and (not (null? ps))
+         (or (k-mentions-var? (extract (car ps) 2) v) (k-parts-mention? (cdr ps) v)))))
 (define k-desc-effect (->* (int) (listof k-eff acyclic))
   (lambda (d)
     (tagcase (k-get d)

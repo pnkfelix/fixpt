@@ -212,6 +212,44 @@
       (else y nil))))
 (define k-syms-of (->* (k-syns) k-names)
   (lambda (xs) (if (null? xs) nil (cons (syn-head (car xs)) (k-syms-of (cdr xs))))))
+;; Whether type `s` is `(modnames member …)`.
+(define k-modnames? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (xs d a b x)
+        (and (not (null? xs)) (syn-symbol? (car xs)) (symbol=? (syn-head (car xs)) 'modnames)))
+      (else y #f))))
+;; `(modnames member …)`, `s`: its members read, then a slot for its type,
+;; noted with them and where the value sealed is, `a`..`b`
+;; (`k-note-sealed!`), as `Parser::parse_the_form` makes it.
+(define k-sealed-slot (->* (syn int int) int)
+  (lambda (s a b)
+    (let ((ms (cdr (k-items s "`(modnames member …)`"))))
+      (begin (k-members-read ms)
+             (let ((slot (k-slot))) (begin (k-note-sealed! slot ms a b) slot))))))
+(define k-modnames-usage string
+  (string-append "a `modnames` member is `x`, `(val x)`, `(abs t)`, `(desc u)`, `(eff e)` "
+                 "or `(modnames m member …)`"))
+(define k-members-read (->* (k-syns) unit)
+  (lambda (ms)
+    (if (null? ms)
+        #u
+        (let ((m (car ms)))
+          (begin
+            (if (syn-symbol? m)
+                #u
+                (let ((parts (tagcase m (lst (xs d a b x) xs) (else y (the k-syns nil)))))
+                  (if (or (< (k-length parts) 2) (not (syn-symbol? (car parts)))
+                          (not (syn-symbol? (k-nth parts 1))))
+                      (k-sfail k-modnames-usage m)
+                      (let ((w (syn-name (car parts))))
+                        (cond ((string=? w "modnames") (k-members-read (cdr (cdr parts))))
+                              ((and (= (k-length parts) 2)
+                                    (or (string=? w "val") (string=? w "abs") (string=? w "desc")
+                                        (string=? w "eff")))
+                               #u)
+                              (else (k-sfail k-modnames-usage m)))))))
+            (k-members-read (cdr ms)))))))
 ;; A parser's record as the checker keeps it.
 (define k-record-of (->* (relied) k-record)
   (lambda (r)
@@ -343,8 +381,12 @@
         (e-prompt (t body h a b abk abkr)
           (let* ((tx (k-resolve-exp t)) (bx (k-resolve-exp body)) (hx (k-resolve-exp h)))
             (x-prompt tx bx hx a b abk abkr)))
+        ;; `(the (modnames …) e)`: its type a slot, sealed where it is checked.
         (e-the (ty body a b abk abkr)
-          (let* ((t (k-parse-type ty)) (x (k-resolve-exp body))) (x-the t x a b abk abkr)))
+          (let* ((t (if (k-modnames? ty) (k-sealed-slot ty (exp-start body) (exp-end body))
+                        (k-parse-type ty)))
+                 (x (k-resolve-exp body)))
+            (x-the t x a b abk abkr)))
         (e-convention (c body a b abk abkr)
           (let* ((cv (k-parse-conv c)) (x (k-resolve-exp body))) (x-convention cv x a b abk abkr)))
         (e-bloblet (op i args got a b abk abkr)

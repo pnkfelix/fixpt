@@ -14,7 +14,7 @@
 //! a function's result's, its body's or its type's.
 
 use super::{Aligner, Atom, Kids, Level, Macros, Mode, Ns, STy};
-use crate::error::R;
+use crate::error::{FxError, R};
 use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -138,6 +138,9 @@ pub(crate) struct Known {
     /// Each top-level form before and after its shapes were written, if
     /// they are kept (`Checker::keep_shapes_seen`).
     seen: Option<Vec<(String, String)>>,
+    /// The shapes named by `define-syntax` (`(define-syntax s (modnames …))`,
+    /// `binding-shapes.md`), each its `modnames` form, by its name.
+    named: HashMap<Sym, Syntax>,
 }
 
 /// Where a binder's value comes from, for its shape: the expression it is
@@ -820,6 +823,29 @@ impl<'a, 'm> Shaper<'a, 'm> {
         Some(Rc::new(Shape::Module { vals: given.vals, descs: given.descs }))
     }
 
+    /// The shape of `(modnames member …)`, its members `members`: each
+    /// value's name (`x`, `(val x)`), a module's with its own shape
+    /// (`(modnames m member …)`), each description's (`(abs t)`, `(desc u)`,
+    /// `(eff e)`).
+    fn modnames_shape(&self, members: &[Syntax]) -> Option<Rc<Shape>> {
+        let (mut vals, mut descs) = (Vec::new(), Vec::new());
+        for m in members {
+            if let Some(n) = m.as_symbol() {
+                vals.push((n, None));
+                continue;
+            }
+            let [w, n, rest @ ..] = m.as_proper_list()? else { return None };
+            let n = n.as_symbol()?;
+            match self.name(w.as_symbol()?) {
+                "val" => vals.push((n, None)),
+                "modnames" => vals.push((n, self.modnames_shape(rest))),
+                "abs" | "desc" | "eff" => descs.push((n, None)),
+                _ => return None,
+            }
+        }
+        Some(Rc::new(Shape::Module { vals, descs }))
+    }
+
     fn ty_found(&mut self, at: usize) -> Option<Rc<Shape>> {
         let a = self.a;
         let node = &a.nodes[at];
@@ -837,6 +863,8 @@ impl<'a, 'm> Shaper<'a, 'm> {
         let items = syn.as_proper_list()?;
         let e = self.elems(at);
         match self.head(syn)? {
+            // A shape written (`binding-shapes.md`): the names it gives.
+            "modnames" => self.modnames_shape(&items[1..]),
             "moduleof" => {
                 let (mut vals, mut descs) = (Vec::new(), Vec::new());
                 for (k, m) in items.iter().enumerate().skip(1) {
@@ -1079,6 +1107,67 @@ impl Macros {
     /// Keeps the forms of the file at `at`, as read for its shape.
     pub(crate) fn keep_forms_read(&mut self, at: String, text: String, forms: Vec<Syntax>) {
         self.withs.shapes.read.insert(at, (text, forms));
+    }
+
+    /// `(define-syntax s (modnames …))`, `form`, if it is one: the shape
+    /// named, its name given back; a macro of that name forgotten.
+    pub(crate) fn shape_defined(&mut self, form: &Syntax, interner: &Interner) -> Option<Sym> {
+        let [h, n, m] = form.as_proper_list()? else { return None };
+        let (h, n) = (h.as_symbol()?, n.as_symbol()?);
+        let head = m.as_proper_list()?.first()?.as_symbol()?;
+        if interner.name(h) != "define-syntax" || interner.name(head) != "modnames" {
+            return None;
+        }
+        self.defined.remove(&n);
+        self.withs.shapes.named.insert(n, m.clone());
+        Some(n)
+    }
+
+    /// Whether `n` names a shape (`shape_defined`).
+    pub(crate) fn is_shape(&self, n: Sym) -> bool {
+        self.withs.shapes.named.contains_key(&n)
+    }
+
+    /// Form `s` with each shape a name stands for written where a value
+    /// supplies its types, a `define`'s or `the`'s type (`(define x S e)`,
+    /// `(the S e)`, `S` a shape's name), and each such `define` made `(define
+    /// x (the (modnames …) e))`, which the checkers seal there
+    /// (`Checker::the_sealed`); outside quotes. The first shape used as a
+    /// form's head, refused.
+    pub(crate) fn sealed_written(&self, s: &Syntax, interner: &mut Interner) -> R<Syntax> {
+        let Datum::List { items, tail } = &s.datum else { return Ok(s.clone()) };
+        let head = items.first().and_then(|h| h.as_symbol());
+        let name = head.map(|h| interner.name(h).to_string()).unwrap_or_default();
+        if matches!(name.as_str(), "quote" | "quasiquote" | "%datum") {
+            return Ok(s.clone());
+        }
+        if let Some(h) = head.filter(|h| self.is_shape(*h)) {
+            return Err(FxError::at(s.span, format!("`{}` is a shape, not a macro: it is written as a `define`'s or `the`'s type", interner.name(h))));
+        }
+        let mut items = items.iter().map(|i| self.sealed_written(i, interner)).collect::<R<Vec<_>>>()?;
+        let modnames = interner.intern("modnames");
+        let shape_of = |t: &Syntax| -> Option<Syntax> {
+            let named = t.as_symbol().and_then(|n| self.withs.shapes.named.get(&n)).cloned();
+            let written = t.as_proper_list().and_then(|l| l.first()?.as_symbol()) == Some(modnames);
+            named.or_else(|| written.then(|| t.clone()))
+        };
+        match (name.as_str(), &items[..]) {
+            ("define", [_, x, t, e]) if tail.is_none() => {
+                if let Some(m) = shape_of(t) {
+                    let the = Syntax::symbol(s.span, interner.intern("the"));
+                    let sealed = Syntax::list(s.span, vec![the, m, e.clone()]);
+                    items = vec![items[0].clone(), x.clone(), sealed];
+                }
+            }
+            ("the", [_, t, _]) if tail.is_none() => {
+                if let Some(m) = shape_of(t) {
+                    items[1] = m;
+                }
+            }
+            _ => {}
+        }
+        let tail = tail.as_ref().map(|t| self.sealed_written(t, interner).map(Box::new)).transpose()?;
+        Ok(Syntax::new(s.span, Datum::List { items, tail }))
     }
 
     /// The top-level forms noted, before and after their shapes were

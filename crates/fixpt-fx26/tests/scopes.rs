@@ -296,3 +296,16 @@ fn a_text_is_walked() {
         eprintln!("{path}: {:?}", t.elapsed());
     }
 }
+
+/// Probe: the Rust checker alone on the file `FIXPT_RUST_CHECK` names.
+#[test]
+#[ignore]
+fn a_text_rust_checks() {
+    let Ok(path) = std::env::var("FIXPT_RUST_CHECK") else { return };
+    let text = std::fs::read_to_string(&path).expect("readable");
+    let mut c = Checker::new();
+    match fixpt_fx26::compare::check_with_rust_checker(&mut c, &text) {
+        Ok(out) => out.iter().for_each(|l| eprintln!("{l}")),
+        Err(e) => eprintln!("refused at {}: {}", e.span.start, e.message),
+    }
+}

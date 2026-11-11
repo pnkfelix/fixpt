@@ -615,7 +615,7 @@
 (define dt-type-forms (listof symbol acyclic)
   (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
         'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
-        'sumof 'tupleof 'bool 'oneof 'union 'anyof 'allof '-> '->* 'restrict))
+        'sumof 'tupleof 'bool 'oneof 'union 'anyof 'allof '-> '->* 'restrict 'modnames))
 (define dt-in? (->* (symbol (listof symbol acyclic)) bool)
   (lambda (x xs) (and (not (null? xs)) (or (symbol=? x (car xs)) (dt-in? x (cdr xs))))))
 ;; #t, once no variant of `vs` has a type form's name for its tag.

@@ -33,7 +33,7 @@
 ;; forms open written in (`macros-shapes.fx`).
 (define shapes-module ((proj (load-module "fx26:macros-shapes.fx") rs re rm rc rp)))
 (import shapes-module top-shaped forms-written-in shapes-at! shapes-after! files-shaped
-        shared-shaped!)
+        shared-shaped! shape-definition? shape-defined! sealed-written)
 (define imports-module ((proj (load-module "fx26:macros-imports.fx") rs re rm rc rp)))
 (define templates-module (with imports-module templates-module))
 (define macros-module (with templates-module macros-module))
@@ -218,7 +218,9 @@
         ;; (`parse-loaded`), those its types name first (`type-loaded`).
         (let* ((written (car xs))
                ;; A `define-syntax`: the checks of its templates, once, there.
-               (made (cond ((defines-syntax? written)
+               (made (cond ((shape-definition? written)
+                            (begin (global-macro written) (shape-defined! written) nil))
+                           ((defines-syntax? written)
                             (begin (global-macro written)
                                    (macro-checks (define-macro pfail-at written nil))))
                            ;; A file's macros, and the `include` of the rest.
@@ -252,7 +254,7 @@
   (lambda (x)
     (if (or (form-of? x 'include) (import? x) (datatype? x))
         x
-        (let ((shaped (top-shaped x)))
+        (let ((shaped (top-shaped (sealed-written pfail-at x))))
           (begin (files-written!) shaped)))))
 ;; The hidden globals of the files loaded, `ts`, each noted with its file's
 ;; shape (`shared-shaped!`), for the forms after: its definition is made,

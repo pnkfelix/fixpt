@@ -588,5 +588,26 @@ type `` (`with-type-missing.fx`, `with-effect-missing.fx`,
 `with-applied-missing.fx`). A `with` with no record, as `(select m T)`
 reads `T`, still falls back through `(select m n)`.
 
-Left of step 2: `(modnames …)` and sealing, its name to decide
-(`define-syntax` with `modnames`, or `define-syntax-shape`).
+## `(modnames …)` (2026-11-10): shapes written, and sealing
+
+Named by `define-syntax` (the user's choice over a `define-syntax-shape`),
+written as a `define`'s or a `the`'s type, in both front ends alike
+(`docs/fx26.md` has the language). The expander writes a shape's name out
+where it is used and makes `(define x (modnames …) e)` a `(define x (the
+(modnames …) e))` before the walk (`Macros::sealed_written`,
+`macros-shapes.fx`'s `sealed-written`), so that the parsers, the checkers
+and a driver that hands the checker written in FX-26 expanded forms see
+the `modnames` alone; the walk reads a binder's shape from it. The
+checkers give `the`'s type a slot, linked where the value is checked to
+its type sealed to the names (`Checker::the_sealed`, `k-the-sealed`), and
+hold the value to it as `the` holds a value to a `moduleof`: the same
+subsumption, the same run-time reshape where names are dropped (the
+user's, 2026-11-10: `modnames` restricts the names as `moduleof` does).
+`(abs t)` must name a type the module has abstract and `(desc u)` one it
+has transparent (the user's): `modnames` drops names, it makes no type
+abstract. A module inside, `(modnames m …)`, is not sealed to fewer names
+yet, as a `moduleof` is not: no reshape reaches inside a value, so both
+would need one that makes a new product of the module inside.
+
+Step 2 is done. Next, step 3: renaming hygiene, `with` and `include` as
+visible binders, a file's own macros (Heist's (a)).

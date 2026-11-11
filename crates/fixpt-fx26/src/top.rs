@@ -692,7 +692,8 @@ impl Checker {
                 let mut interner = std::mem::take(&mut self.interner);
                 let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
                 self.interner = interner;
-                r.map_err(|e| FxError::at(e.span, e.message))?
+                let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+                forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>()?
             }
         };
         if let Some((at, input)) = at {
@@ -818,6 +819,7 @@ impl Checker {
             let r = Reader::new(&text, FileId(0), SyntaxProfile::FX26, &mut interner).read_all();
             self.interner = interner;
             let Ok(forms) = r else { continue };
+            let Ok(forms) = forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>() else { continue };
             let sub = at.parent().map(|d| d.to_path_buf());
             self.file_shapes_for(&forms, sub.clone());
             let mut macros = std::mem::take(&mut self.macros);
@@ -1033,7 +1035,9 @@ impl Checker {
         }
         let mut macros = std::mem::take(&mut self.macros);
         let mut interner = std::mem::take(&mut self.interner);
-        let r = if defines {
+        let r = if defines && macros.shape_defined(&form, &interner).is_some() {
+            Ok(Vec::new())
+        } else if defines {
             macros.define(&form, &mut interner).and_then(|ns| {
                 let mut out = Vec::new();
                 for n in ns {
@@ -1044,7 +1048,10 @@ impl Checker {
                 Ok(out)
             })
         } else {
-            macros.expand_top(&form, &mut interner)
+            // Each shape a name stands for written in where a value supplies
+            // its types (`Macros::sealed_written`): what is expanded is
+            // what a driver hands the checker written in FX-26.
+            macros.expand_top(&form, &mut interner).and_then(|fs| fs.iter().map(|f| macros.sealed_written(f, &mut interner)).collect())
         };
         self.macros = macros;
         self.interner = interner;
@@ -1270,6 +1277,7 @@ impl Checker {
         // Where the top level ends as it begins: past it, what the form
         // binds (`toplevel_hidden`).
         let outer = self.form_began.replace((self.env.len(), self.dscope.len()));
+        let form = &self.sealed_written(form)?;
         let shaped = self.shapes_written(form, true);
         if self.macros.shapes_seen().is_some() {
             self.shapes_noted(form, &shaped);
@@ -1287,6 +1295,15 @@ impl Checker {
         if let Some(s) = self.macros.shapes_seen() {
             s.push(seen);
         }
+    }
+
+    /// Form `form` with each shape a name stands for written, and each
+    /// `define` of a shape's type made a `the` of it (`Macros::sealed_written`).
+    pub(crate) fn sealed_written(&mut self, form: &Syntax) -> R<Syntax> {
+        let mut interner = std::mem::take(&mut self.interner);
+        let r = self.macros.sealed_written(form, &mut interner);
+        self.interner = interner;
+        r
     }
 
     /// From here on, each top-level form noted as it was before and after

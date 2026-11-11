@@ -127,7 +127,8 @@
         (x-lambda (ps body a b abk abkr) (k-synth-lambda-as x nil -1 nil))
         (x-app (f args a b abk abkr) (k-split-app x f args -1 k-synth-app k-synth))
         (x-the (t0 e a b abk abkr)
-          (let ((t (k-resolve-selects t0 a b))) (k-sized e (k-te t (k-check e t)))))
+          (if (pair? (k-sealed-members t0)) (k-the-sealed e t0 k-synth k-expect)
+              (let ((t (k-resolve-selects t0 a b))) (k-sized e (k-te t (k-check e t))))))
         (x-convention (c e a b abk abkr)
           (let* ((r (k-synth e)) (t (k-resolve (extract r 1))))
             (tagcase (k-get t)
@@ -377,8 +378,7 @@
           (k-fail-at "`certify-acyclic` takes only a variable `acyclic?` has just found acyclic" x)
           (let* ((r (k-synth (car args))) (t (extract r 1)))
             (if (k-is-data? t) (k-te (k-finitized t) (extract r 2)) (k-fail-not-data t x))))))
-  ;; An application's operator, where a second-class standard operation may
-  ;; be named.
+  ;; An application's operator, where a second-class standard operation may be named.
   (k-synth-operator (->* (kx) k-te)
     (lambda (f)
       (let ((outer (get k-operator)))

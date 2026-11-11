@@ -4,7 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-ids k-map k-parts kxs) (effect checks))
+(import check-types-types (type k-ids k-map k-parts kxs k-te) (effect checks))
 ;; A `define-rec`'s types and expressions, each type read before its
 ;; expression, as the Rust parser reads them.
 (define-type k-rec-read (productof (1 k-ids) (2 kxs)))
@@ -118,4 +118,9 @@
             (val k-mentions-var?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int)
-                       bool))))
+                       bool))
+            (val k-the-sealed
+                 (subr (maxeff checks spin)
+                       (kx int (subr (maxeff checks spin) (kx) k-te)
+                        (subr (maxeff checks spin) (kx int int) unit))
+                       k-te))))

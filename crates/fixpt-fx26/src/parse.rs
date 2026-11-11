@@ -70,12 +70,16 @@ const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a def
 /// description names, one qualified name each").
 pub const EFFECT_HEADS: &[&str] = &["read", "write", "alloc", "goto", "comefrom", "await", "init", "send", "receive", "io", "maxeff"];
 
+/// Where a `(modnames …)` may not be written: no value supplies its types.
+pub(crate) const MODNAMES_WHERE: &str = "`(modnames …)` names no types: it is written as a `define`'s or `the`'s type, whose value supplies them; here a `moduleof` is needed";
+
 /// The heads of the type forms `parse_type_node` reads, each read by its
 /// name alone in head position, `(listof T)`, never looked up: what binds a
 /// name of one does not change what the form is.
 pub const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
     "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "tupleof", "bool", "oneof", "union", "anyof", "allof", "->", "->*", "restrict",
+    "modnames",
 ];
 
 impl Checker {
@@ -1014,6 +1018,9 @@ impl Checker {
             // `(restrict T name …)`: module type `T` with only the names
             // given (`docs/research/derived-signatures.md`, narrowing).
             "restrict" => self.restricted(s, &items),
+            // `(modnames …)` names no types: only where a value supplies
+            // them (`parse_the_form`).
+            "modnames" => Err(FxError::at(s.span, MODNAMES_WHERE)),
             "mark-key" => self.parse_type_mark_key(s, &items),
             // A name applied that is no description function: unbound, a
             // typo, or a type. In a module with `include`s, an unbound one
@@ -2429,13 +2436,55 @@ impl Checker {
     }
 
     /// `(the …)`, of `parse_exp`.
+    /// `(the (modnames …) e)` (`binding-shapes.md`): its type a slot, linked
+    /// where it is checked to `e`'s type sealed to the names
+    /// (`Checker::sealed`).
     fn parse_the_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
         let [_, ty, exp] = &items[..] else {
             return Err(FxError::at(span, "`(the type expression)`"));
         };
-        let ty = self.parse_type(ty)?;
+        let ty = match self.modnames_read(ty)? {
+            Some(names) => {
+                let slot = self.arena.ty(Ty::Link(None));
+                self.arena.withs.sealed.insert(slot, names);
+                slot
+            }
+            None => self.parse_type(ty)?,
+        };
         let exp = self.parse_exp(exp)?;
         Ok(self.arena.exp(span, Exp::The { ty, exp }))
+    }
+
+    /// `(modnames member …)`'s members, if `s` is one: `x` or `(val x)`,
+    /// `(abs t)`, `(desc u)`, `(eff e)`, `(modnames m member …)`.
+    fn modnames_read(&self, s: &Syntax) -> R<Option<Vec<crate::ast::ShapeMember>>> {
+        match s.as_proper_list() {
+            Some([h, members @ ..]) if h.as_symbol().is_some_and(|h| self.name(h) == "modnames") => Ok(Some(self.named_each(members)?)),
+            _ => Ok(None),
+        }
+    }
+
+    fn named_each(&self, members: &[Syntax]) -> R<Vec<crate::ast::ShapeMember>> {
+        use crate::ast::ShapeMember as Named;
+        let usage = "a `modnames` member is `x`, `(val x)`, `(abs t)`, `(desc u)`, `(eff e)` or `(modnames m member …)`";
+        let mut out = Vec::new();
+        for m in members {
+            if let Some(n) = m.as_symbol() {
+                out.push(Named::Val(n, m.span, None));
+                continue;
+            }
+            let Some([w, n, rest @ ..]) = m.as_proper_list() else { return Err(FxError::at(m.span, usage)) };
+            let (Some(w), Some(n)) = (w.as_symbol(), n.as_symbol()) else { return Err(FxError::at(m.span, usage)) };
+            out.push(match (self.name(w), rest) {
+                ("val", []) => Named::Val(n, m.span, None),
+                ("abs", []) => Named::Abs(n, m.span),
+                ("desc", []) => Named::Desc(n, m.span),
+                ("eff", []) => Named::Eff(n, m.span),
+                ("modnames", rest) => Named::Val(n, m.span, Some(self.named_each(rest)?)),
+                _ => return Err(FxError::at(m.span, usage)),
+            });
+        }
+        Ok(out)
     }
 
     /// `(convention …)`, of `parse_exp`.

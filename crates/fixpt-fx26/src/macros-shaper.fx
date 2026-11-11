@@ -726,6 +726,8 @@
                (if (null? m) nil (extract (car m) 2))))
             ((= k 0) nil)
             ((string=? h "moduleof") (moduleof-shape fail (cdr items) (cdr e) nil nil))
+            ;; A shape written (`binding-shapes.md`): the names it gives.
+            ((string=? h "modnames") (modnames-shape (cdr items)))
             ((or (string=? h "load-moduleof") (string=? h "load-input-moduleof"))
              (load-shape (syn-start-of-list s) #t))
             ((string=? h "restrict")
@@ -754,6 +756,30 @@
             ((and (>= (at-e 0) 0) (tagcase (node-kids (at-e 0)) (k-ref (n d free) d) (else y #f)))
              (ty-shape fail (at-e 0)))
             (else nil)))))))
+;; The shape of `(modnames member …)`, its members `ms`: each value's name
+;; (`x`, `(val x)`), a module's with its own shape (`(modnames m member
+;; …)`), each description's (`(abs t)`, `(desc u)`, `(eff e)`).
+(define modnames-shape (->* (syns-a) shapes)
+  (lambda (ms) (modnames-from ms nil nil)))
+(define modnames-from (->* (syns-a members members) shapes)
+  (lambda (ms vs ds)
+    (if (null? ms)
+        (one (sh-module (reverse vs) (reverse ds)))
+        (let* ((m (car ms)) (parts (proper-items m))
+               (w (if (and (> (len parts) 1) (syn-symbol? (car parts))) (syn-name (car parts)) ""))
+               (n (if (> (len parts) 1) (nth parts 1) m)))
+          (cond ((syn-symbol? m)
+                 (modnames-from (cdr ms) (cons (tuple (syn-symbol m) (the shapes nil)) vs) ds))
+                ((not (syn-symbol? n)) nil)
+                ((string=? w "val")
+                 (modnames-from (cdr ms) (cons (tuple (syn-symbol n) (the shapes nil)) vs) ds))
+                ((string=? w "modnames")
+                 (modnames-from (cdr ms)
+                                (cons (tuple (syn-symbol n) (modnames-shape (cdr (cdr parts)))) vs)
+                                ds))
+                ((or (string=? w "abs") (string=? w "desc") (string=? w "eff"))
+                 (modnames-from (cdr ms) vs (cons (tuple (syn-symbol n) (the shapes nil)) ds)))
+                (else nil))))))
 ;; The shapes of a procedure type's parameters, node `ps` their list, each
 ;; a type or a dependent `(c : T)`.
 (define param-types (->* (fails int) (listof shapes acyclic))

@@ -501,6 +501,14 @@
 (define k-note-past (->* ((ref k-names @t) symbol) unit)
   (lambda (past s)
     (if (k-has-name? (get past) s) #u (set past (append (get past) (list s))))))
+;; Every record and sealed slot forgotten, with the types and expressions
+;; they are kept by, for another program (`k-reset`).
+(define k-forget-records (->* () unit)
+  (lambda ()
+    (begin (set k-frames nil) (set k-include-frames nil) (set k-sealed-slots nil)
+           (set k-helds-made 0)
+           (set k-opened (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n))))
+           (set k-held-exps (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))))
 ;; The forms that open a module and the module expressions held to their
 ;; records where each is checked (`k-shape-held`; `WithTables::opened`,
 ;; `shaped`), by where each starts.
@@ -632,6 +640,32 @@
                                      (walk (cdr ds))))
                               (else (walk (cdr ds)))))))))
       (if (= (get k-with-depth) 0) nil (walk (get k-dscope))))))
+;; Each `(the (modnames …) e)`'s type, a slot linked where it is checked to
+;; the type of `e` sealed to the names (`k-the-sealed`), and the members,
+;; until it is.
+(define-type k-sealed-entries (listof (tupleof int (listof syn acyclic) int int) acyclic))
+(define k-sealed-slots (ref k-sealed-entries @t) (new nil))
+;; (With where the value sealed is, for what is said of it.)
+(define k-note-sealed! (->* (int (listof syn acyclic) int int) unit)
+  (lambda (slot ms a b) (set k-sealed-slots (cons (tuple slot ms a b) (get k-sealed-slots)))))
+;; Slot `slot`'s entry, in a list of one, if it waits to be sealed.
+(define k-sealed-members (->* (int) k-sealed-entries)
+  (lambda (slot) (k-sealed-in slot (get k-sealed-slots))))
+(define k-sealed-in (->* (int k-sealed-entries) k-sealed-entries)
+  (lambda (slot ss)
+    (cond ((null? ss) nil)
+          ((= slot (extract (car ss) 1)) (list (car ss)))
+          (else (k-sealed-in slot (cdr ss))))))
+(define k-sealed-done! (->* (int) unit)
+  (lambda (slot) (set k-sealed-slots (k-sealed-but slot (get k-sealed-slots)))))
+(define k-sealed-but (->* (int k-sealed-entries) k-sealed-entries)
+  (lambda (slot ss)
+    (cond ((null? ss) nil)
+          ((= slot (extract (car ss) 1)) (cdr ss))
+          (else (cons (car ss) (k-sealed-but slot (cdr ss)))))))
+(define k-modnames-where string
+  (string-append "`(modnames …)` names no types: it is written as a `define`'s or `the`'s type, "
+                 "whose value supplies them; here a `moduleof` is needed"))
 ;; Each `select` node a type name in a `with` body was read as, and what the
 ;; name meant outside, should the module not give it: a type, or -1.
 (define k-with-fallbacks (ref k-fallbacks @t) (new nil))

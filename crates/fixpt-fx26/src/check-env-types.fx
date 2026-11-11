@@ -4,7 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-ds k-ids k-names k-at k-conv k-descs) (effect kstate checks))
+(import check-types-types (type k-ds k-ids k-names k-at k-conv k-descs syn) (effect kstate checks))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Bindings, as lists of them are passed around.
@@ -274,6 +274,14 @@
    (val k-include-frame-end! (subr kstate () unit))
    (val k-include-record (subr kstate () (productof (1 int) (2 k-record))))
    (val k-shape-held (subr checks (int int symbol int k-record k-names k-names) unit))
+   (val k-note-sealed! (subr kstate (int (listof syn acyclic) int int) unit))
+   (val k-forget-records (subr kstate () unit))
+   (val k-sealed-members
+        (subr (maxeff (read @globals) spin (read @t))
+              (int)
+              (listof (tupleof int (listof syn acyclic) int int) acyclic)))
+   (val k-sealed-done! (subr kstate (int) unit))
+   (val k-modnames-where string)
    (val k-type-by-withs
         (subr checks (symbol int (productof (1 k-names) (2 k-names)) (subr checks () int)) int))
    (val k-with-applied (subr checks (k-names symbol (subr checks () k-descs) int) int))

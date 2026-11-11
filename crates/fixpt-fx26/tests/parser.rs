@@ -230,6 +230,19 @@ fn case_parse_errors_agree() {
     }
 }
 
+/// A shape (`(define-syntax s (modnames …))`, `binding-shapes.md`) used as
+/// a macro is refused as it is read, by both, alike.
+#[test]
+fn a_shape_used_as_a_macro_is_refused_alike() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    for text in ["(define-syntax sh (modnames x))\n(sh 1 2)", "(define-syntax sh (modnames x))\n(+ 1 (sh))"] {
+        let ours = s.parse_with_own_parser(text).expect_err("refused");
+        let mut c = Checker::new();
+        let rust = c.read_in(FileId(0), text).expect_err("refused");
+        assert_eq!((ours.message, ours.span.start, ours.span.end), (rust.message, rust.span.start, rust.span.end), "{text}");
+    }
+}
+
 /// No `define-datatype` variant is named by a type form, in either parser
 /// (`TODO.md` §190): `(define-datatype var (oneof symbol pat))` would be
 /// one variant, `oneof`. Each of `parse.rs`'s type forms, so that

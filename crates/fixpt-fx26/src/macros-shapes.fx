@@ -13,7 +13,7 @@
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted (type syn))
-(import parser-module parse-tag p-ok p-err syn-symbol? syn-name mk-symbol mk-list len nth
+(import parser-module parse-tag p-ok p-err syn-symbol? syn-symbol syn-name mk-symbol mk-list len nth
         syn-string? syn-string syn-datums (type syns-a presult loaded-file loaded-files))
 (import types-module proper-items (type fails addr atms))
 (import align-module node-at node-syn node-kids node-path nnodes program-walk lv-rib lv-shape
@@ -288,7 +288,7 @@
                                     (get file-shapes)))))))
 (define file-kept! (->* (string syns-a bool) unit)
   (lambda (key forms0 input?)
-   (let ((forms (unshaped-items forms0)))
+   (let ((forms (sealed-items (unshaped-items forms0))))
     (let* ((params (and (not (null? forms)) (string=? (head-of (car forms)) "module-parameters")))
            (wrapped (not (and input? (not params))))
            (form (cond ((null? forms) nil)
@@ -396,8 +396,10 @@
                              (8 (extract f 8)))))
               (forms-written-in (cdr fs))))))
 ;; The top level's shapes by the reading state each form left, as the
-;; expander keeps its macros (`macros-at!`, `macros-after!`).
-(define-type shapes-state (tupleof int members members))
+;; expander keeps its macros (`macros-at!`, `macros-after!`); and the shapes
+;; named (`named-shapes`).
+(define-type named (listof (tupleof symbol syn) acyclic))
+(define-type shapes-state (tupleof int members members named))
 (define shapes-by-state (ref (listof shapes-state acyclic) rs) (new nil))
 ;; The top level's shapes as reading state `s` left them; the files read
 ;; for the forms to come, `fs`, none shaped yet: their forms are this
@@ -410,8 +412,9 @@
         (set file-shapes nil)
         (set inputs-at nil)
         (if (null? at)
-            (begin (set top-vals nil) (set top-descs nil))
-            (begin (set top-vals (extract (car at) 2)) (set top-descs (extract (car at) 3))))))))
+            (begin (set top-vals nil) (set top-descs nil) (set named-shapes nil))
+            (begin (set top-vals (extract (car at) 2)) (set top-descs (extract (car at) 3))
+                   (set named-shapes (extract (car at) 4))))))))
 (define state-shapes (->* (int (listof shapes-state acyclic)) (listof shapes-state acyclic))
   (lambda (s xs)
     (cond ((null? xs) nil)
@@ -419,10 +422,89 @@
           (else (state-shapes s (cdr xs))))))
 (define shapes-after! (->* (int) unit)
   (lambda (s)
-    (if (and (null? (get top-vals)) (null? (get top-descs)))
+    (if (and (null? (get top-vals)) (null? (get top-descs)) (null? (get named-shapes)))
         #u
         (set shapes-by-state
-             (cons (tuple s (get top-vals) (get top-descs)) (get shapes-by-state))))))
+             (cons (tuple s (get top-vals) (get top-descs) (get named-shapes))
+                   (get shapes-by-state))))))
+;; The shapes named by `define-syntax` (`(define-syntax s (modnames …))`,
+;; `binding-shapes.md`), each its `modnames` form, by its name.
+(define named-shapes (ref named rs) (new nil))
+;; Whether `x` is `(define-syntax s (modnames …))`.
+(define shape-definition? (->* (syn) bool)
+  (lambda (x)
+    (let ((items (proper-items x)))
+      (and (= (len items) 3) (string=? (head-of x) "define-syntax") (syn-symbol? (nth items 1))
+           (string=? (head-of (nth items 2)) "modnames")))))
+;; `(define-syntax s (modnames …))`, `x`: the shape kept, by its name.
+(define shape-defined! (->* (syn) unit)
+  (lambda (x)
+    (let ((items (proper-items x)))
+      (set named-shapes (cons (tuple (syn-symbol (nth items 1)) (nth items 2))
+                              (named-without (syn-symbol (nth items 1)) (get named-shapes)))))))
+(define named-without (->* (symbol named) named)
+  (lambda (n ns)
+    (cond ((null? ns) nil)
+          ((symbol=? n (extract (car ns) 1)) (named-without n (cdr ns)))
+          (else (cons (car ns) (named-without n (cdr ns)))))))
+(define shape-named (->* (symbol) (listof syn acyclic))
+  (lambda (n) (named-shape-in n (get named-shapes))))
+(define named-shape-in (->* (symbol named) (listof syn acyclic))
+  (lambda (n ns)
+    (cond ((null? ns) nil)
+          ((symbol=? n (extract (car ns) 1)) (list (extract (car ns) 2)))
+          (else (named-shape-in n (cdr ns))))))
+;; Form `s` with each shape a name stands for written where a value supplies
+;; its types, a `define`'s or `the`'s type, and each such `define` made
+;; `(define x (the (modnames …) e))`, which the checkers seal there; outside
+;; quotes. A shape used as a form's head, refused. As
+;; `Macros::sealed_written`.
+(define sealed-written (->* (fails syn) syn)
+  (lambda (fail s)
+    (tagcase s
+      (lst (items d a b x)
+        (let ((h (head-of s)))
+          (cond
+            ((or (string=? h "quote") (string=? h "quasiquote") (string=? h "%datum")) s)
+            ((and (not (string=? h "")) (not (null? (shape-named (string->symbol h)))))
+             (begin (fail (string-append "`" h "` is a shape, not a macro: it is written as a "
+                                         "`define`'s or `the`'s type")
+                          a b)
+                    s))
+            (else
+             (let* ((xs (sealed-each fail items))
+                    (n (len xs))
+                    (ys (cond ((and (string=? h "define") (= n 4)
+                                    (not (null? (shape-of (nth xs 2)))))
+                               (list (car xs) (nth xs 1)
+                                     (mk-list (list (mk-symbol "the" a b)
+                                                    (car (shape-of (nth xs 2))) (nth xs 3))
+                                              a b)))
+                              ((and (string=? h "the") (= n 3) (not (null? (shape-of (nth xs 1)))))
+                               (list (car xs) (car (shape-of (nth xs 1))) (nth xs 2)))
+                              (else xs))))
+               (lst ys (syn-datums ys) a b x))))))
+      (dotted (items t d a b x)
+        (let ((xs (sealed-each fail items)))
+          (dotted xs (sealed-written fail t) (syn-datums xs) a b x)))
+      (else y s))))
+(define sealed-each (->* (fails syns-a) syns-a)
+  (lambda (fail xs)
+    (if (null? xs) nil (cons (sealed-written fail (car xs)) (sealed-each fail (cdr xs))))))
+;; The `modnames` form type `t` is: itself, or the shape its name names; in
+;; a list of one, none if neither.
+(define shape-of (->* (syn) (listof syn acyclic))
+  (lambda (t)
+    (cond ((syn-symbol? t) (shape-named (syn-symbol t)))
+          ((string=? (head-of t) "modnames") (list t))
+          (else nil))))
+;; File forms `xs`, sealed (`sealed-written`); as they are if that fails.
+(define sealed-items (->* (syns-a) syns-a)
+  (lambda (xs)
+    (let ((r (prompt parse-tag (begin (set sealed-out (sealed-each pfail-walk xs)) (p-ok nil))
+                     (lambda ((r presult)) r))))
+      (tagcase r (p-err (why a b) xs) (else y (get sealed-out))))))
+(define sealed-out (ref syns-a rs) (new nil))
 ;; How many files have been shaped (or are being).
 (define files-shaped (->* () int)
   (lambda () (shapes-count (get file-shapes) 0)))

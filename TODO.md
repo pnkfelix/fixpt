@@ -5547,8 +5547,8 @@ from the syntax (or written, `(modnames …)`, named by `define-syntax`),
 and the checker confirms each module's type has exactly its shape's names.
 Answered: refusing `with` of a module of no known shape; macros not in
 shapes yet (the 2026-11-08 leaning stands); `import-with-syntax` stays;
-leaving names out of a `modnames` seals. Open: `define-syntax` with
-`modnames`, or `define-syntax-shape`.
+leaving names out of a `modnames` seals; a shape named by `define-syntax`
+(2026-11-10).
 
 Stages: (1) every form's binding structure, and a walk held to the
 checkers': **built 2026-11-10** (`scope-forms`, `Mode::Program`,
@@ -5573,7 +5573,9 @@ FX-26 front end, 2026-11-10**: the same records written (all 110 test
 programs with one), read and held by its checker alike; a global's shape
 from the FX-26 checker's types (the user's choice); the walk made linear;
 `with`'s fallback for a name defined nowhere retired in both front ends.
-Left: `modnames`. (3) Renaming hygiene with `with` and `include` as
+`(modnames …)`, 2026-11-10: named by `define-syntax` (the user's), sealing
+as `moduleof` does; not yet a module inside to fewer names (neither seals
+one: a reshape inside a value). **Step 2 done.** (3) Renaming hygiene with `with` and `include` as
 visible binders; a file's own macros (Heist's (a)); `import-with-syntax`
 in module files and of files with parameters ((b), (c)). (4) Later:
 top-level `include` without the driver; macros in shapes, if revisited.

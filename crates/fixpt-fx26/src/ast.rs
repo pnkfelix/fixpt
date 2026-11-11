@@ -801,6 +801,10 @@ pub struct WithTables {
     /// last: each record, and what is read past it so far
     /// (`Parser::withs_reading`).
     pub frames: Vec<(Relied, Vec<Sym>)>,
+    /// Each `(the (modnames …) e)`'s type, a slot linked where it is checked
+    /// to the type of `e` sealed to the names (`Checker::sealed`), and the
+    /// names.
+    pub sealed: std::collections::HashMap<TyId, Vec<ShapeMember>>,
     /// Of each module with `include`s being parsed, innermost last, the
     /// frame of what they give, if each has its record (`None` if not):
     /// one for each such module, so that one's is never an outer one's.
@@ -818,6 +822,17 @@ pub struct WithTables {
 pub struct Relied {
     pub vals: Vec<Sym>,
     pub descs: Vec<Sym>,
+}
+
+/// A member a `(modnames …)` names (`binding-shapes.md`): a value, its
+/// own members named if it is a module (`(modnames m …)`); an abstract
+/// type, a transparent one, an effect. Each where it is written.
+#[derive(Clone, Debug)]
+pub enum ShapeMember {
+    Val(Sym, Span, Option<Vec<ShapeMember>>),
+    Abs(Sym, Span),
+    Desc(Sym, Span),
+    Eff(Sym, Span),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -1223,6 +1238,7 @@ impl Arena {
         self.withs.opened.retain(|e, _| (e.0 as usize) < mark.exps);
         self.withs.shaped.retain(|e, _| (e.0 as usize) < mark.exps);
         self.withs.extended.retain(|e, _| (e.0 as usize) < mark.exps);
+        self.withs.sealed.retain(|t, _| (t.0 as usize) < mark.tys);
         self.withs.read_past.retain(|e, _| (e.0 as usize) < mark.exps);
         self.exps.truncate(mark.exps);
         self.dvar_names.truncate(mark.dvars);

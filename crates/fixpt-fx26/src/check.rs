@@ -2802,6 +2802,9 @@ impl Checker {
     fn synth_node_the(&mut self, e: ExpId) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let Exp::The { ty, exp } = self.arena.exp_at(e).clone() else { unreachable!("synth_node: not a The") };
+        if self.arena.withs.sealed.contains_key(&ty) && matches!(self.arena.get(ty), Ty::Link(None)) {
+            return self.the_sealed(ty, exp);
+        }
         let ty = self.resolve_selects(ty, span)?;
         let eff = self.check(exp, ty)?;
         // `(the (arrayof T R) (make-array n …))`: the region said,
