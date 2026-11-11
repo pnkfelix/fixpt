@@ -186,12 +186,17 @@
              (let ((g (file-given-at a (get files-given))))
                (if (null? g)
                    nil
-                   (let* ((input? (load-input-at? a))
-                          (v (names-find (string->symbol
-                                          (string-append "%shared:" (file-key (car g) input?)))
+                   ;; The module it describes, of a value that is a function
+                   ;; (a file of module parameters', an input's of modules):
+                   ;; what that makes, as `file-kept!` keeps it.
+                   (let* ((v (names-find (string->symbol
+                                          (string-append "%shared:"
+                                                         (file-key (car g) (load-input-at? a))))
                                          (get top-vals)))
-                          (s (if (null? v) nil (extract (car v) 2))))
-                     (if (and module? input?) (result-of s) s)))))))))
+                          (s (if (null? v) nil (extract (car v) 2)))
+                          (fun? (and (not (null? s))
+                                     (tagcase (car s) (sh-fun (ps r) #t) (else y #f)))))
+                     (if (and module? fun?) (result-of s) s)))))))))
 ;; Whether the load at `a` is an input's, as the prepass noted it.
 (define inputs-at (ref (listof int acyclic) rs) (new nil))
 (define load-input-at? (->* (int) bool)
