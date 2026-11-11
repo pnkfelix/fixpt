@@ -366,6 +366,32 @@
                  nil ((with check-program k-named-shapes) named))
                 (let ((g ((with check-program k-global-shapes) forms)))
                   ((with shapes-module globals-given!) (extract g 1) (extract g 2))))))
+         ;; What the register compiler needs of the keys and expansions the
+         ;; expander made since it was last told: each key's template
+         ;; place and expansion, each expansion's use site, copied to its
+         ;; region (`regcode.fx`'s provenance; `docs/research/macro-provenance.md`).
+         (keys-mirrored!
+          (lambda ()
+            (letrec ((keys (subr (maxeff (alloc @k) (read @k) (write @k) (read @s) (read @globals)
+                                         spin)
+                                 (int int) unit)
+                           (lambda (i n)
+                             (if (>= i n)
+                                 #u
+                                 (let ((s (macro-source (+ 1125899906842624 i))))
+                                   (begin ((with regcode r-key-given!) (extract s 1) (extract s 2))
+                                          (keys (+ i 1) n))))))
+                     (uses (subr (maxeff (alloc @k) (read @k) (write @k) (read @s) (read @globals)
+                                         spin)
+                                 ((listof (tupleof int symbol int int) acyclic) int) unit)
+                           (lambda (xs known)
+                             (if (or (null? xs) (< (extract (car xs) 1) known))
+                                 #u
+                                 (begin (uses (cdr xs) known)
+                                        ((with regcode r-use-given!) (extract (car xs) 1)
+                                                                     (extract (car xs) 3)))))))
+              (begin (keys ((with regcode r-keys-known)) (macro-sources-made))
+                     (uses (expansions-made) ((with regcode r-uses-known)))))))
          ;; A parse, and what the checker is told of it: the macros each
          ;; `with`'s body used (`k-macro-uses!`), this parse's alone.
          ;; Before it, the expander told the shapes of the globals the forms
@@ -376,7 +402,7 @@
           (lambda ((keys (select parser-types keys)) (forms (listof syn acyclic)) (globals bool)
                    (named (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic)))
             (let ((p (begin (global-shapes forms (not globals) named) (parse-program keys forms))))
-              (begin ((with check-synth k-macro-uses!) (with-macro-uses)) p))))
+              (begin ((with check-synth k-macro-uses!) (with-macro-uses)) (keys-mirrored!) p))))
          ;; The evaluator.
          (eval-values ((load-input "fx26:eval-values.fx") check-types))
          (eval-prims ((load-input "fx26:eval-prims.fx") eval-values tables check-types))
@@ -758,6 +784,10 @@
              ;; parses, then checks.
              (check-macro-uses!
               (lambda () ((with check-synth k-macro-uses!) (with-macro-uses))))
+             ;; What the register compiler is told after a parse: the keys
+             ;; and expansions the expander made (`keys-mirrored!`), for a
+             ;; driver that parses, then compiles.
+             (keys-mirrored! keys-mirrored!)
              ;; What the expander is told before a parse: the shapes of the
              ;; globals the forms name (`global-shapes`), for a driver that
              ;; parses, then checks.
@@ -837,6 +867,7 @@
 (define import-types (extract front-end-entries import-types))
 (define check-program (extract front-end-entries check-program))
 (define check-macro-uses! (extract front-end-entries check-macro-uses!))
+(define keys-mirrored! (extract front-end-entries keys-mirrored!))
 (define check-global-shapes! (extract front-end-entries check-global-shapes!))
 (define checked-tops (extract front-end-entries checked-tops))
 (define checked-reps (extract front-end-entries checked-reps))

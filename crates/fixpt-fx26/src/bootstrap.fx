@@ -39,8 +39,10 @@
 (define readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
 (define b-parse
   (lambda ((std (listof syn acyclic)) (forms (listof syn acyclic)))
-    (let ((s ((with readings standard-state) std)))
-      (extract (parse-program (product (1 0) (2 s) (3 (checked-settings))) forms) 1))))
+    (let* ((s ((with readings standard-state) std))
+           (p (parse-program (product (1 0) (2 s) (3 (checked-settings))) forms)))
+      ;; The register compiler told of the keys the parse made.
+      (begin (keys-mirrored!) (extract p 1)))))
 ;; A program's trees compiled with what the checker written in FX-26 found,
 ;; the trees' own keys.
 (define b-compile

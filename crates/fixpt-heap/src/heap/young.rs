@@ -257,6 +257,7 @@ impl Heap {
         self.minor_nanos += nanos;
         self.max_minor_nanos = self.max_minor_nanos.max(nanos);
         self.traced("minor", self.minor_count, nanos, free, before);
+        self.provenance_swept();
     }
 
     /// That every young reference in the old space and the code area is on a

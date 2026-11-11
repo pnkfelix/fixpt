@@ -639,6 +639,11 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // With where each expression's code starts: each cell and place in
     // turn (`Heap::register_places`).
     ("set-register-twin-at", "(poly ((r region)) (subr (read r) (tword (listof wcell r) (listof int r)) tword))"),
+    // Where code a macro made comes from, one integer for both front ends:
+    // a chain of places, innermost first (the template's place, the use
+    // site, and out), as an id (`fixpt_heap::provenance`), its chain kept
+    // for the readers of places, which no program reads.
+    ("provenance-id", "(poly ((r region)) (subr (read r) ((listof int r)) int))"),
     // A word's cells, looked at, for the compiler to machine code: how many
     // fields it has, and field k if it is an int.
     ("tword-fields", "(subr pure (tword) int)"),

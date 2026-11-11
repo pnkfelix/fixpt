@@ -791,6 +791,11 @@ fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, b
     if scheme.is_bound(&format!("{READER_PREFIX}check-macro-uses!")) {
         scheme.call_global(&format!("{READER_PREFIX}check-macro-uses!"), &[]).map_err(|e| fail(e.to_string()))?;
     }
+    // And the register compiler told of the keys the expander made
+    // (`keys-mirrored!`), where a part a template made is placed.
+    if scheme.is_bound(&format!("{READER_PREFIX}keys-mirrored!")) {
+        scheme.call_global(&format!("{READER_PREFIX}keys-mirrored!"), &[]).map_err(|e| fail(e.to_string()))?;
+    }
     let (tag, err, at, walked) = scheme.view(|v| {
         let k = v.get(keyed);
         let r = k.product_field(1).expect("a parse");

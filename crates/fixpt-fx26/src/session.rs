@@ -1818,18 +1818,22 @@ impl Fx26Session {
                 let name = self.checker.interner.name(*name).to_string();
                 // Checked against the type the definition says, if it says
                 // one: a `lambda`'s parameters may be typed only by it.
+                let built_in = match ty {
+                    None => built_in_load(init, &mut self.checker)?,
+                    Some(_) => None,
+                };
                 let w = |s: &Syntax| fixpt_read::write_syntax(s, &self.checker.interner);
-                let built_in = ty.is_none().then(|| built_in_load(init, &self.checker)).flatten();
                 let init = match ty {
                     Some(t) => format!("(the {} {})", w(t), w(init)),
-                    None => built_in.clone().unwrap_or_else(|| w(init)),
+                    None => built_in.as_ref().map(|b| b.text.clone()).unwrap_or_else(|| w(init)),
                 };
                 // A module file built in, as its text: seen as built in.
                 if built_in.is_some() {
                     self.check_built_in(true)?;
                 }
                 let lambda = Self::names_its_word(&self.checker, *exp);
-                let defined = self.native_define(&name, &format!("{form_text}\n"), &init, lambda, run);
+                let in_file = built_in.as_ref().map(|b| (b, form.span));
+                let defined = self.native_define(&name, &format!("{form_text}\n"), &init, lambda, run, in_file);
                 if built_in.is_some() {
                     self.check_built_in(false)?;
                 }
@@ -3241,9 +3245,9 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 56] = [
+    pub const FRONT_ENTRIES: [&'static str; 57] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
-        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "includes-given!", "standard-names!", "check-macro-uses!", "expansions-made", "macro-source", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
+        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "includes-given!", "standard-names!", "check-macro-uses!", "keys-mirrored!", "expansions-made", "macro-source", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-adopt-globals!", "compile-adopt-broken?", "compile-name-word!", "compile-defining!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
         "check-built-in!", "check-syscalls!", "checked-settings", "make-stage-check", "make-session-compiler",
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
@@ -3594,14 +3598,14 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     /// made by the compiler written in FX-26; `init` run as a procedure of
     /// no arguments, by `run`; and its value put in the global. What `run`
     /// did instead, if anything else.
-    fn native_define(&mut self, name: &str, form: &str, init: &str, lambda: bool, run: NativeRunner) -> R<Result<(), NativeRun>> {
+    fn native_define(&mut self, name: &str, form: &str, init: &str, lambda: bool, run: NativeRunner, in_file: Option<(&BuiltInLoad, Span)>) -> R<Result<(), NativeRun>> {
         self.own_pieces()?;
         let standard = self.next_standard()?;
         // What is loaded is loaded, above; the handles below are this
         // definition's, released at its end: kept, the global's cell would
         // keep each old definition alive, its code with it.
         let mark = self.scheme.root_mark();
-        let r = self.native_define_in(standard, name, form, init, lambda, run);
+        let r = self.native_define_in(standard, name, form, init, lambda, run, in_file);
         self.scheme.release_to(mark);
         r
     }
@@ -3614,6 +3618,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         init: &str,
         lambda: bool,
         run: NativeRunner,
+        in_file: Option<(&BuiltInLoad, Span)>,
     ) -> R<Result<(), NativeRun>> {
         // The Rust checker took the form: the checker written in FX-26
         // refusing it is the two disagreeing, said, not a reason to run it
@@ -3693,6 +3698,12 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             other => Err(other),
         });
         self.scheme.runtime_unrooted().heap.pop_roots_to(at);
+        // An error in a built-in file's text, said in that file, at its
+        // load: not at a place in the program, past its end.
+        let r = match (r, in_file) {
+            (Err(e), Some((b, at))) => Err(b.said_in(e, at)),
+            (r, _) => r,
+        };
         if lambda {
             name_word(self, false).map_err(fail)?;
         }
@@ -4188,15 +4199,61 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
 /// be compiled apart, as cellular code, and a continuation captured in one
 /// called from the program (a process's `receive`) could not be taken
 /// across the call between the conventions.
-fn built_in_load(init: &Syntax, c: &Checker) -> Option<String> {
-    let fixpt_read::Datum::List { items, tail: None } = &init.datum else { return None };
-    let [head, path] = &items[..] else { return None };
+///
+/// Its items as a module file's are read (`Checker::built_in_items`): if it
+/// defines macros of its own, expanded where it uses them and their
+/// definitions left out, as its load on any other machine reads it; else
+/// its text as written, so that a place in it is the file's.
+fn built_in_load(init: &Syntax, c: &mut Checker) -> R<Option<BuiltInLoad>> {
+    let fixpt_read::Datum::List { items, tail: None } = &init.datum else { return Ok(None) };
+    let [head, path] = &items[..] else { return Ok(None) };
     if !head.as_symbol().is_some_and(|h| c.interner.name(h) == "load-module") {
-        return None;
+        return Ok(None);
     }
-    let fixpt_read::Datum::Str(path) = &path.datum else { return None };
-    let text = crate::built_in_module(path)?;
-    (!text.contains("(module-parameters")).then(|| format!("(module\n{text}\n)"))
+    let fixpt_read::Datum::Str(path) = &path.datum else { return Ok(None) };
+    let Some(text) = crate::built_in_module(path) else { return Ok(None) };
+    built_in_load_of(path, text, init.span, c)
+}
+
+/// [`built_in_load`] of the built-in file `path`, its text `text`, loaded at
+/// `at`.
+fn built_in_load_of(path: &str, text: &str, at: Span, c: &mut Checker) -> R<Option<BuiltInLoad>> {
+    if text.contains("(module-parameters") {
+        return Ok(None);
+    }
+    let said = |e: FxError| FxError::at(at, format!("in `{path}`: {}", e.message));
+    let (body, expanded) = match c.built_in_items(text).map_err(said)? {
+        None => (text.to_string(), false),
+        Some(items) => (items.iter().map(|i| fixpt_read::write_syntax(i, &c.interner)).collect::<Vec<_>>().join("\n"), true),
+    };
+    Ok(Some(BuiltInLoad { path: path.to_string(), text: format!("(module\n{body}\n)"), expanded }))
+}
+
+/// A built-in module file's load, defined natively (`built_in_load`): its
+/// path, the `module` its items are, and whether they are its own macros'
+/// expansions, not its text as written.
+struct BuiltInLoad {
+    path: String,
+    text: String,
+    expanded: bool,
+}
+
+impl BuiltInLoad {
+    /// Error `e` of the `module` this load is defined as, said in its file,
+    /// at `at`, the load: a place in the file as written, `line:column`,
+    /// unless its items are its macros' expansions, which have none of its.
+    fn said_in(&self, e: FxError, at: Span) -> FxError {
+        if self.expanded {
+            return FxError::at(at, format!("in `{}` (its own macros expanded): {}", self.path, e.message));
+        }
+        // Past `(module` and its line.
+        let skip = "(module\n".chars().count();
+        let k = (e.span.start as usize).saturating_sub(skip);
+        let before: String = self.text.chars().skip(skip).take(k).collect();
+        let line = before.matches('\n').count() + 1;
+        let col = before.chars().rev().take_while(|c| *c != '\n').count() + 1;
+        FxError::at(at, format!("in `{}`, {line}:{col}: {}", self.path, e.message))
+    }
 }
 
 /// A definition's type, if it says one, and initializer, when `form` is
@@ -4259,3 +4316,39 @@ fn form_digest(form: &Syntax, interner: &fixpt_read::Interner) -> u64 {
     h.finish()
 }
 
+
+#[cfg(test)]
+mod built_in_tests {
+    use super::*;
+
+    /// A built-in file with a macro of its own, hidden, defined natively
+    /// (`built_in_load`): its uses expanded, its definition left out, as a
+    /// module file is read on every other machine (`TODO.md` §248).
+    #[test]
+    fn a_built_in_files_own_macros_are_expanded_and_left_out() {
+        let text = "(hide (define-syntax twice (expr) (syntax-rules () ((_ e) (let ((v e)) (+ v v))))))\n(define four int (twice 2))\n";
+        let mut c = Checker::new();
+        let load = built_in_load_of("fx26:own.fx", text, Span::new(FileId(0), 0, 0), &mut c).expect("reads").expect("a load");
+        assert!(load.expanded, "{}", load.text);
+        assert!(!load.text.contains("define-syntax") && !load.text.contains("twice"), "{}", load.text);
+        assert!(load.text.starts_with("(module\n") && load.text.contains("(define four int"), "{}", load.text);
+        // None of its own: its text as written.
+        let plain = built_in_load_of("fx26:plain.fx", "(define four int 4)\n", Span::new(FileId(0), 0, 0), &mut c).expect("reads").expect("a load");
+        assert!(!plain.expanded && plain.text == "(module\n(define four int 4)\n\n)", "{}", plain.text);
+    }
+
+    /// An error in a built-in file's text, defined natively, said in that
+    /// file at its line and column, not at a place in the program
+    /// (`TODO.md` §248).
+    #[test]
+    fn an_error_in_a_built_in_file_is_said_in_it() {
+        let load = BuiltInLoad { path: "fx26:x.fx".into(), text: "(module\n(define a int 1)\n  (oops)\n)".into(), expanded: false };
+        let at = "(module\n(define a int 1)\n  ".chars().count() as u32;
+        let e = load.said_in(FxError::at(Span::new(FileId(0), at, at + 6), "bad"), Span::new(FileId(0), 0, 3));
+        assert_eq!(e.message, "in `fx26:x.fx`, 2:3: bad");
+        assert_eq!((e.span.start, e.span.end), (0, 3));
+        let expanded = BuiltInLoad { expanded: true, ..load };
+        let e = expanded.said_in(FxError::at(Span::new(FileId(0), at, at + 6), "bad"), Span::new(FileId(0), 0, 3));
+        assert_eq!(e.message, "in `fx26:x.fx` (its own macros expanded): bad");
+    }
+}

@@ -87,6 +87,11 @@ def fx_print(debugger, command, result, internal_dict):
 def fx_frame(debugger, command, result, internal_dict):
     """fx-frame: the values the selected native frame keeps, by its stack map."""
     frame = debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame()
+    # Code a macro made: its template and each use, the line table having
+    # the use (`fixpt_place_at`, `docs/research/macro-provenance.md`).
+    made = frame.EvaluateExpression("(char *)((char *(*)(unsigned long)) fixpt_place_at)(%dUL)" % frame.GetPC()).GetSummary()
+    if made and made.strip('"'):
+        result.AppendMessage("  " + made.strip('"'))
     got = frame_values(frame)
     if isinstance(got, str):
         result.AppendMessage(got)

@@ -1016,6 +1016,12 @@ fn lines_of(heap: &Heap, p: &Proc) -> Option<(u32, Vec<(u32, i64)>)> {
         return None;
     }
     let (source, places) = heap.register_places(p.rw)?;
+    // Each place a macro's code has, its provenance told to the lines.
+    for &(_, place) in &places {
+        if let Some(chain) = heap.provenance.chain(place) {
+            crate::jitdebug::note_chain(place, chain);
+        }
+    }
     let mut rows: Vec<(u32, i64)> = Vec::new();
     for &(off, cell) in &p.starts {
         let k = places.partition_point(|&(c, _)| c <= cell as usize);

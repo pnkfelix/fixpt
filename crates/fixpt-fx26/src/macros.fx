@@ -52,7 +52,7 @@
 (import solve-module infer sig-text)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
-        source-key source-of alias)
+        source-key source-of sources-made alias)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names

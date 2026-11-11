@@ -700,6 +700,18 @@ impl Checker {
             self.macros = macros;
             self.interner = interner;
         }
+        let kept = self.without_own_macros(forms)?;
+        let mut out = Vec::new();
+        for f in kept {
+            self.expand_datatype(f, &mut out)?;
+        }
+        Ok(out)
+    }
+
+    /// A module file's forms, `forms`, its own macros' uses expanded, without
+    /// their definitions (`define-syntax`es, hidden or not), which are no
+    /// items; refused if a use of one is left, which comes before it.
+    fn without_own_macros(&mut self, forms: Vec<Syntax>) -> R<Vec<Syntax>> {
         let defines_syntax = |c: &Self, s: &Syntax| syntax_names(s, &c.interner).is_some();
         let names_of = |c: &Self, s: &Syntax| syntax_names(s, &c.interner).unwrap_or_default().into_iter().map(|(n, _)| n);
         let mut macros = Vec::new();
@@ -726,11 +738,27 @@ impl Checker {
             let shown = self.interner.name(at.1);
             return Err(FxError::at(at.0, format!("`{shown}` is a macro of this file used before the file defines it")));
         }
-        let mut out = Vec::new();
-        for f in kept {
-            self.expand_datatype(f, &mut out)?;
+        Ok(kept)
+    }
+
+    /// A built-in module file's items, `text`, as a module file is read
+    /// (`module_file_forms`, `without_own_macros`), if it defines macros of
+    /// its own; none if it does not, when its text is its items as written.
+    pub(crate) fn built_in_items(&mut self, text: &str) -> R<Option<Vec<Syntax>>> {
+        let mut interner = std::mem::take(&mut self.interner);
+        let read = Reader::new(text, FileId(0), SyntaxProfile::FX26, &mut interner).read_all();
+        self.interner = interner;
+        let forms = read.map_err(|e| FxError::at(e.span, e.message))?;
+        let defines = |s: &Syntax| syntax_names(s, &self.interner).is_some();
+        let own = forms.iter().any(|f| {
+            defines(f)
+                || matches!(f.as_proper_list(), Some([h, items @ ..]) if h.as_symbol().is_some_and(|h| self.interner.name(h) == "hide") && items.iter().any(defines))
+        });
+        if !own {
+            return Ok(None);
         }
-        Ok(out)
+        let forms = self.module_file_forms(FileId(0), text)?;
+        self.without_own_macros(forms).map(Some)
     }
 
     /// `form`, a top-level form or (not `top`) a file's module or one
@@ -2383,6 +2411,11 @@ fn syntax_names(s: &Syntax, interner: &fixpt_read::Interner) -> Option<Vec<(Sym,
 /// `s`, its places made places of `file`, in place.
 fn placed_in(s: &mut Syntax, file: FileId) {
     s.span.file = file;
+    // The expansion that made it, if one did, read in the same reading:
+    // its use this file's too.
+    if s.span.expansion != 0 {
+        fixpt_read::expansion_placed_in(s.span.expansion, file);
+    }
     if let fixpt_read::Datum::List { items, tail } = &mut s.datum {
         items.iter_mut().for_each(|i| placed_in(i, file));
         if let Some(t) = tail {

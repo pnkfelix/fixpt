@@ -455,6 +455,10 @@ pub struct Heap {
     /// collection due is a major one; and, under the stress policy, how
     /// many policy collections were made.
     pub minor_count: u64,
+    /// The provenances of the places its register words hold
+    /// (`crate::provenance`): a major collection lets go those none of the
+    /// words it keeps hold.
+    pub provenance: crate::provenance::Provenance,
     pub minor_words_copied: u64,
     pub minor_nanos: u64,
     due_major: bool,
@@ -547,6 +551,7 @@ impl Heap {
             cards: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the card table"),
             crossing: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the crossing map"),
             minor_count: 0,
+            provenance: crate::provenance::Provenance::default(),
             minor_words_copied: 0,
             minor_nanos: 0,
             max_major_nanos: 0,
@@ -2465,6 +2470,20 @@ impl Heap {
         v.is_ref().then_some(v)
     }
 
+    /// The provenances the dead register words held let go
+    /// (`crate::provenance`), after a collection has updated the weak
+    /// references.
+    pub(crate) fn provenance_swept(&mut self) {
+        if self.provenance.is_empty() {
+            return;
+        }
+        let weak = &self.weak;
+        let released = self.provenance.swept(|i| weak[i].is_ref());
+        for i in released {
+            self.weak_release(i);
+        }
+    }
+
     /// Weak reference `i` no longer wanted: its number may be given again.
     pub fn weak_release(&mut self, i: usize) {
         self.weak[i] = WEAK_DEAD;
@@ -2613,6 +2632,7 @@ impl Heap {
         }
         let Copier { free, new, marked, large_marks, code_marks, .. } = c;
         self.sweep_code(&code_marks);
+        self.provenance_swept();
         // Ended reaps' chunks no reference was found into may be reused;
         // the rest wait for a collection that finds none.
         self.regions.quarantine_ends(&marked);

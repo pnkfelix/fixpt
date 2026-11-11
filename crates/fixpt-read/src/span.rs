@@ -84,6 +84,24 @@ pub fn expansion(n: u32) -> Option<Expansion> {
     n.checked_sub(1).and_then(|i| all.get(i as usize).cloned())
 }
 
+/// Expansion `n`, and those its use was made by, out, made in a reading of
+/// a file as file 0 (a module file read for its shape, before its own
+/// number is known): their uses placed in `file`, as the reading's forms
+/// are (`Checker::read_module_file_at`'s `placed_in`), so that a use's
+/// place is its file's wherever it is said (`docs/research/macro-provenance.md`).
+pub fn expansion_placed_in(n: u32, file: FileId) {
+    let mut all = EXPANSIONS.lock().expect("not poisoned");
+    let (mut at, mut steps) = (n, 0);
+    while let Some(e) = at.checked_sub(1).and_then(|i| all.get_mut(i as usize)).filter(|_| steps < 100) {
+        if e.at.file != FileId(0) {
+            break;
+        }
+        e.at.file = file;
+        at = e.at.expansion;
+        steps += 1;
+    }
+}
+
 /// The uses of macros that made the text at `span`, innermost first.
 pub fn expansion_trace(span: Span) -> Vec<Expansion> {
     let mut out = Vec::new();

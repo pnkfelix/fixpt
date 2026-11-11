@@ -409,6 +409,7 @@
          (("string-search") "%fx26-string-search")
          (("pair-identity") "%fx26-address-identity")
          (("eqtable-count") "%fx26-eqtable-count")
+         (("provenance-id") "%provenance-id")
          (("wcell-routine") "%fx26-identity")
          (("wcell-closure") "%fx26-closure-cell")
          (("wcell-product") "%fx26-product-cell")

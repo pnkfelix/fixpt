@@ -10,7 +10,7 @@ mod common;
 /// theirs; and the i-cells' forms' names as values, whose forms it runs.
 fn not_the_evaluators(name: &str) -> bool {
     ["tword-", "wcell-", "wglobal", "rep-", "runtime-primitive", "set-register-twin"].iter().any(|p| name.starts_with(p))
-        || ["make-word", "make-global", "close-over-word!", "disassemble", "icell-get", "icell-put!"].contains(&name)
+        || ["make-word", "make-global", "close-over-word!", "disassemble", "provenance-id", "icell-get", "icell-put!"].contains(&name)
 }
 
 #[test]

@@ -62,7 +62,9 @@ pub fn register(text: &str, form: Option<(String, Vec<(usize, usize, Span)>)>, f
     })
 }
 
-/// The file and line of `place` in source `id`, if known.
+/// The file and line of `place` in source `id`, if known; a datum a
+/// macro made, at its use in a text as written, the outermost
+/// (`docs/research/macro-provenance.md`), not its template.
 pub fn resolve(id: u32, place: i64) -> Option<(String, u32)> {
     if place < 0 || id < FIRST {
         return None;
@@ -76,22 +78,61 @@ pub fn resolve(id: u32, place: i64) -> Option<(String, u32)> {
             let f = &src.loaded.iter().find(|(id, _)| id.0 as i64 == 1000 + k)?.1;
             return Some((f.0.clone(), line_of_char(&f.1, ch)));
         }
-        // In the text compiled: the datum of the form there, and its span.
-        let byte = src.text.char_indices().nth(place as usize).map_or(src.text.len(), |(b, _)| b);
-        let (form, map) = src.form.as_ref()?;
-        // Where the form is in the text: the form itself, else the largest
-        // list of it found there (a definition's value, inside `the`).
-        let base = (*src.base.get_or_init(|| {
-            let mut lists: Vec<(usize, usize)> = map.iter().filter(|&&(a, _, _)| form[a..].starts_with('(')).map(|&(a, b, _)| (a, b)).collect();
-            lists.sort_by_key(|&(a, b)| std::cmp::Reverse(b - a));
-            lists.iter().find_map(|&(a, b)| src.text.find(&form[a..b]).map(|at| at as i64 - a as i64))
-        }))?;
-        let at = byte as i64 - base;
-        // The innermost datum that starts there or before and holds it.
-        let &(_, _, span) = map.iter().filter(|&&(a, b, _)| a as i64 <= at && at < b as i64).max_by_key(|&&(a, _, _)| a)?;
-        let file = if span.file == FileId(0) { src.file.as_ref()? } else { &src.loaded.iter().find(|(id, _)| *id == span.file)?.1 };
-        Some((file.0.clone(), line_of_byte(&file.1, span.start as usize)))
+        let span = datum_span(src, place)?;
+        let span = match fixpt_read::expansion_trace(span).last() {
+            Some(e) => e.at,
+            None => span,
+        };
+        span_line(src, span)
     })
+}
+
+/// What made the code at `place` in source `id`, if a macro did: its
+/// template's file and line, then each use's, out, as `fixpt_place_at`
+/// says a provenance (`jitdebug::set_describer`); none if no macro did.
+pub fn describe(id: u32, place: i64) -> Option<String> {
+    if !(0..1_000_000_000).contains(&place) || id < FIRST {
+        return None;
+    }
+    SOURCES.with(|s| {
+        let s = s.borrow();
+        let src = s.get((id - FIRST) as usize)?;
+        let span = datum_span(src, place)?;
+        let trace = fixpt_read::expansion_trace(span);
+        if trace.is_empty() {
+            return None;
+        }
+        let at = |sp: Span| span_line(src, sp).map_or_else(|| "where not known".to_string(), |(f, l)| format!("{f}:{l}"));
+        let mut out = format!("made by a macro: template {}", at(span));
+        for e in &trace {
+            out.push_str(&format!(", used at {}", at(e.at)));
+        }
+        Some(out)
+    })
+}
+
+/// The span of the innermost datum of source `src`'s form at character
+/// `place` of its text.
+fn datum_span(src: &Source, place: i64) -> Option<Span> {
+    let byte = src.text.char_indices().nth(place as usize).map_or(src.text.len(), |(b, _)| b);
+    let (form, map) = src.form.as_ref()?;
+    // Where the form is in the text: the form itself, else the largest
+    // list of it found there (a definition's value, inside `the`).
+    let base = (*src.base.get_or_init(|| {
+        let mut lists: Vec<(usize, usize)> = map.iter().filter(|&&(a, _, _)| form[a..].starts_with('(')).map(|&(a, b, _)| (a, b)).collect();
+        lists.sort_by_key(|&(a, b)| std::cmp::Reverse(b - a));
+        lists.iter().find_map(|&(a, b)| src.text.find(&form[a..b]).map(|at| at as i64 - a as i64))
+    }))?;
+    let at = byte as i64 - base;
+    // The innermost datum that starts there or before and holds it.
+    let &(_, _, span) = map.iter().filter(|&&(a, b, _)| a as i64 <= at && at < b as i64).max_by_key(|&&(a, _, _)| a)?;
+    Some(span)
+}
+
+/// The file and line where `span` starts, in source `src`'s files.
+fn span_line(src: &Source, span: Span) -> Option<(String, u32)> {
+    let file = if span.file == FileId(0) { src.file.as_ref()? } else { &src.loaded.iter().find(|(id, _)| *id == span.file)?.1 };
+    Some((file.0.clone(), line_of_byte(&file.1, span.start as usize)))
 }
 
 fn line_of_byte(text: &str, byte: usize) -> u32 {

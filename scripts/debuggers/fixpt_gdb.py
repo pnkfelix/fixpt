@@ -91,7 +91,16 @@ class FxFrame(gdb.Command):
         super().__init__("fx-frame", gdb.COMMAND_STACK)
 
     def invoke(self, arg, from_tty):
-        got = frame_values(gdb.selected_frame())
+        frame = gdb.selected_frame()
+        # Code a macro made: its template and each use, the line table
+        # having the use (`fixpt_place_at`, `docs/research/macro-provenance.md`).
+        try:
+            made = gdb.parse_and_eval("((char *(*)(unsigned long)) fixpt_place_at)(%d)" % frame.pc()).string()
+        except gdb.error:
+            made = ""
+        if made:
+            print("  " + made)
+        got = frame_values(frame)
         if isinstance(got, str):
             print(got)
             return

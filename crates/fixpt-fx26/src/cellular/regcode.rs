@@ -308,9 +308,22 @@ impl Compiler<'_> {
 
     /// Where `x` is, as the compiler written in FX-26 has it (`exp-start`):
     /// its first character in the program's text, or in a module's file
-    /// (`load-module`) past that file's base, a billion times its number.
-    fn place_of(&self, x: ExpId) -> i64 {
+    /// (`load-module`) past that file's base, a billion times its number;
+    /// if a macro wrote it, its provenance's id (`fixpt_heap::provenance`):
+    /// its place in the template, then each expansion's use site, out
+    /// (`docs/research/macro-provenance.md`).
+    fn place_of(&mut self, x: ExpId) -> i64 {
         let span = self.c.arena.span_of(x);
+        if span.expansion == 0 {
+            return self.span_place(span);
+        }
+        let mut chain = vec![self.span_place(span)];
+        chain.extend(fixpt_read::expansion_trace(span).iter().map(|e| self.span_place(e.at)));
+        self.heap.provenance.id(&chain)
+    }
+
+    /// Where `span` starts, as [`place_of`] says a place written in a text.
+    fn span_place(&self, span: fixpt_read::Span) -> i64 {
         if span.file.0 == 0 {
             self.char_at.get(span.start as usize).map_or(-1, |&c| c as i64)
         } else {

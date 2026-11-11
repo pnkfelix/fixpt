@@ -188,3 +188,31 @@ fn the_bootstrap_program_compiles_the_same() {
     let text = fixpt_fx26::bootstrap_program();
     assert_eq!(compare(&mut s, &text), Some(Ok(())));
 }
+
+/// Code a macro made, placed by both register compilers at the same
+/// provenance (`docs/research/macro-provenance.md`): a template's parts,
+/// and a template's that another macro's template used (a chain of two),
+/// each at the id of its places, its template's, then each use's, out.
+#[test]
+fn macro_made_code_is_placed_alike() {
+    let text = include_str!("programs/places/macro-made.fx");
+    let mut s = common::front_end_session();
+    let kept = |s: &mut Fx26Session| {
+        let mut n = 0;
+        s.scheme.scope(|sc| {
+            sc.make(|m| {
+                n = m.heap().provenance.len();
+                Value::NULL
+            })
+        });
+        n
+    };
+    let before = kept(&mut s);
+    match compare_with(&mut s, text, true) {
+        Some(Ok(())) => {}
+        Some(Err(why)) => panic!("placed otherwise: {why}"),
+        None => panic!("does not check"),
+    }
+    let after = kept(&mut s);
+    assert!(after > before, "no provenance was made: the macros' code not placed by one");
+}

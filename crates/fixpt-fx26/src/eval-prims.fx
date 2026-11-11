@@ -947,7 +947,7 @@
       (or (starts "tword-") (starts "wcell-") (starts "wglobal") (starts "rep-")
           (starts "runtime-primitive") (starts "set-register-twin")
           (string=? n "make-word") (string=? n "make-global") (string=? n "close-over-word!")
-          (string=? n "disassemble")))))
+          (string=? n "disassemble") (string=? n "provenance-id")))))
 
 (define ev-prims-made unit
   (begin (ev-int-prims!) (ev-text-prims!) (ev-shape-prims!) (ev-data-prims!) (ev-f64-prims!)

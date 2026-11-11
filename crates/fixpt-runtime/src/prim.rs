@@ -3225,6 +3225,17 @@ prims! {
         };
         Ok(rt.heap.make_string(&answer))
     });
+    // A provenance's id (`fixpt_heap::provenance`): chain `a[0]`, places
+    // innermost first, kept in the heap for the readers of places, its id
+    // given, the same one the Rust compiler gives the same chain
+    // (`docs/research/macro-provenance.md`).
+    "%provenance-id", 1, Some(1), simple!(|rt, a| {
+        let chain = match rt.heap.list_to_vec(a[0]) {
+            Some(v) if !v.is_empty() && v.iter().all(|x| x.is_fixnum()) => v.iter().map(|x| x.as_fixnum()).collect::<Vec<i64>>(),
+            _ => return rt.type_error("a list of places", a[0]),
+        };
+        Ok(Value::fixnum(rt.heap.provenance.id(&chain)))
+    });
 }
 
 /// Promise states. `[state, payload]`.

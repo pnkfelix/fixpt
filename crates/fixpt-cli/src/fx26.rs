@@ -175,6 +175,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         if fixpt_native::jitdebug::enabled() {
             fixpt_fx26::sources::want();
             fixpt_native::jitdebug::set_resolver(fixpt_fx26::sources::resolve);
+            fixpt_native::jitdebug::set_describer(fixpt_fx26::sources::describe);
         }
         // Each procedure's code made by the compiler written in FX-26.
         if by_fx26 {

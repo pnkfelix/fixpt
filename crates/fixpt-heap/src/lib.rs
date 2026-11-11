@@ -16,6 +16,7 @@
 pub mod heap;
 pub mod image;
 pub mod layout;
+pub mod provenance;
 pub mod regcode;
 mod sro;
 mod cellular;

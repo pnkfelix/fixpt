@@ -24,6 +24,43 @@ fn compiled_by_fx26_procedures_have_their_files_lines() {
     lines_on("fx-regs-fxjit-nativecc");
 }
 
+/// Code a macro made, its lines at its use, not at its template
+/// (`docs/research/macro-provenance.md`): `f`'s rows all where `f` is.
+#[test]
+fn a_macros_code_is_at_its_use() {
+    macro_lines_on("fx-regs-rsjit-nativecc");
+}
+
+/// The same where the compiler written in FX-26 makes the code.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn a_macros_code_is_at_its_use_by_fx26() {
+    macro_lines_on("fx-regs-fxjit-nativecc");
+}
+
+fn macro_lines_on(machine: &str) {
+    let dir = std::env::temp_dir().join(format!("fixpt-jit-macro-{machine}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("macro.fx"), include_str!("programs/jit-lines/macro.fx")).unwrap();
+    let lines = dir.join("lines.txt");
+    let out = Command::new(FIXPT)
+        .args(["--fx26-machine", machine, "run", dir.join("macro.fx").to_str().unwrap()])
+        .env("FIXPT_JIT_DEBUG", "frames")
+        .env("FIXPT_LINES", &lines)
+        .output()
+        .expect("fixpt runs");
+    let written = std::fs::read_to_string(&lines).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows: Vec<u32> = written
+        .lines()
+        .filter(|l| l.split(' ').next() == Some("f"))
+        .filter_map(|l| l.rsplit_once(':')?.1.parse().ok())
+        .collect();
+    assert!(!rows.is_empty(), "no rows for `f`:\n{written}");
+    assert!(rows.iter().all(|l| (4..=6).contains(l)), "`f` placed at {rows:?}, its template's lines among them:\n{written}");
+}
+
 fn lines_on(machine: &str) {
     let dir = std::env::temp_dir().join(format!("fixpt-jit-lines-{machine}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

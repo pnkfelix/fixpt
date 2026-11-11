@@ -1,0 +1,5 @@
+(define-syntax twice (expr) (syntax-rules () ((_ e) (let ((v e)) (+ v v)))))
+(define-syntax four-times (expr) (syntax-rules () ((_ e) (twice (twice e)))))
+(define f (subr pure (int) int) (lambda (x) (twice (* x 3))))
+(define g (subr pure (int) int) (lambda (x) (four-times (+ x 1))))
+(+ (f 2) (g 1))

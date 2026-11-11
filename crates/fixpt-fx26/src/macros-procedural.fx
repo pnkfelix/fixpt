@@ -152,6 +152,8 @@
     (if (= i (array-length from))
         #u
         (begin (array-set! to i (array-ref from i)) (copy-sources from to (+ i 1))))))
+;; How many keys have been made: the next one's number, from `source-base`.
+(define sources-made (->* () int) (lambda () (get nsources)))
 ;; Key `k`'s template place and expansion; a place that is no key, itself
 ;; and 0.
 (define source-of (->* (int) (tupleof int int))

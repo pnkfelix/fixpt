@@ -55,6 +55,9 @@
 ;; template's part was given is (`syn.rs`'s `fx26_span`).
 (define expansions-made (with macros-module expansions-given))
 (define macro-source (with macros-module source-of))
+;; For the conductor, which copies what the register compiler needs of
+;; each key to its region (`regcode.fx`'s `r-key-given!`).
+(define macro-sources-made (with macros-module sources-made))
 ;; A program's forms after expansion, in `text`, each with its local value
 ;; binders renamed as the expander's walk finds their scopes
 ;; (`macros-walk.fx`): for `tests/scopes.rs`, which holds the walk to the

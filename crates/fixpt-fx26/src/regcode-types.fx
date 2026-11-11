@@ -206,7 +206,11 @@
                        wcells))
             (val r-placed (ref rints @k))
             (val r-at (ref int @k))
-            (val r-enter-place! (subr (maxeff (alloc @k) (read @k) (write @k)) (rgen exp) int))
+            (val r-enter-place! (subr (maxeff (alloc @k) (read @k) (write @k) spin) (rgen exp) int))
+            (val r-keys-known (subr (read @k) () int))
+            (val r-uses-known (subr (read @k) () int))
+            (val r-key-given! (subr (maxeff (alloc @k) (read @k) (write @k) spin) (int int) unit))
+            (val r-use-given! (subr (maxeff (alloc @k) (read @k) (write @k) spin) (int int) unit))
             (val r-leave-place! (subr (maxeff (alloc @k) (read @k) (write @k)) (rgen int) unit))
             (val r-where
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)

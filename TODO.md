@@ -5849,26 +5849,67 @@ the branch `table-macros`, §245) reads the table's fields itself, as its
 comment says: `(bloblet-ref t 2)` the buckets, `(bloblet-ref t 0)` the
 hash, `(bloblet-ref t 1)` the equality.
 
-## 248. A module file's own macros where it is not loaded as a module (found 2026-11-11)
+## 248. A module file's own hidden macros, loaded on the native-convention machines (found 2026-11-11; fixed the same day, but the top level's `hide`)
 
-`table.fx` with a hidden `define-syntax` of its own (the branch
-`table-macros`, §245): a program loading it, `(load-module
-"fx26:table.fx")`, through the CLI, its `.fasl` made in the cache
-(`fasl::a_built_in_module_is_kept_in_the_cache`), fails "not an
-expression in the FX-26 kernel" (`parse.rs`), so the `.fasl` path does
-not expand a module file's own macros as stage 3 has the module's load
-do. And the tests that paste `table.fx`'s text into a program
-(`tests/table.rs`, `parser::the_parsers_agree_on_real_programs`) meet it
-at the top level, where `hide` around a `define-syntax` is refused: for
-them, load it as a module, or let the top level hide a macro.
+`table.fx` with hidden `define-syntax`es of its own (the branch
+`table-macros`, §245): `(define t (load-module "fx26:table.fx"))` fails
+"not an expression in the FX-26 kernel" on `fx-regs-rsjit-nativecc` (the
+default), `fx-regs-fxjit-nativecc` and `fx-cells-rsinterp-nativecc`, and
+runs on `rs-scheme-vm`, `fx-ast-eval`, `fx-cells-rsinterp`,
+`fx-regs-rsjit-cellcc`; `fixpt check` passes, both checkers agreeing, and
+the module's type shows none of the hidden macros. Not the `.fasl` path
+(as first filed): it fails with an empty cache, and those machines make
+no `.fasl`. The message is the FX-26 parser's (`parser-exps.fx`), though
+its own expansion (`parser-top.fx`'s `file-own-expanded`) and its
+stripping of macros, hidden ones too (`parser.fx`'s `without-syntax`),
+look right: the native-convention machines give the parser the file's
+forms by some way around them, not yet found
+(`fasl::a_built_in_module_is_kept_in_the_cache`, run on the default
+machine, is how it showed).
 
-## 249. The two compilers' register code for an `or` of `eq?` and a call (found 2026-11-11)
+Fixed: on those machines a built-in module of no parameters is defined
+natively as a `module` of its text (`session.rs`'s `built_in_load`, so
+that its procedures are in the program's convention), which no own
+expansion read: now of its items as a module file is read
+(`Checker::built_in_items`, `without_own_macros`) where it has macros of
+its own, its text as written where not. And an error in that text is
+said in its file, `in `fx26:table.fx`, L:C` (`BuiltInLoad::said_in`).
 
-With `table.fx`'s `bucket-find` comparing by `(let ((x a) (y b)) (or
-(eq? x y) (same x y)))` (the branch `table-macros`, §245),
-`bootstrap::fixpoint_as_register_code` fails: `bucket-find`'s places
-differ between stage 1, the Rust compiler's register code, and stage 2,
-the compiler written in FX-26 (`stage 1 and stage 2 differ:
-bucket-find@1008:2718's places …`). The two compilers must make the same
-code; one of them places this shape otherwise. Before §245 comes back: a
-small program of that shape alone, held to both compilers.
+Two more it showed: the error is placed `p.fx:3:1`, in the two-line
+program that loads the file, where it is in `table.fx` (a loaded file's
+place said as the loader's); and the tests that paste `table.fx`'s text
+into a program (`tests/table.rs`, `parser::the_parsers_agree_on_real_programs`)
+meet `(hide (define-syntax …))` at the top level, which is refused: load
+it as a module there, or let the top level hide a macro. (The first of
+the two, fixed as above; this one, not yet.)
+
+## 249. ~~Macro-made code's places differ between the two front ends~~ (found 2026-11-11; built the same day)
+
+Not a disagreement of the compilers, as first filed: the Rust compiler
+recorded a template's place, the FX-26 compiler the expander's key. Now
+both record a provenance's id, made by the runtime from its chain
+(template, use, out), as `docs/research/macro-provenance.md` says, with
+the user's decisions: a debugger's line the use, `fx-frame` saying the
+template too; only keys placed in code made ids; an entry living as long
+as code holds it. `bootstrap::fixpoint_as_register_code` passes with
+`table.fx`'s macros (the branch `table-macros`); `rust_compiler::macro_made_code_is_placed_alike`,
+`jit_lines::a_macros_code_is_at_its_use`.
+
+Not yet: an image's and a `.fasl`'s words hold ids whose entries are not
+written beside them (read elsewhere: "from where not known"); an image's
+entries immortal; `copy_graph_from` carrying a word's entries. Later (the
+user's): the provenance as a heap object, weakly interned, once the
+binary has a portion in the heap's own format (§161, §242).
+
+## 250. The CLI's sessions place a macro's code by position in the form's text (found 2026-11-11)
+
+On the machines that compile a form from its text written out (the
+native convention's, `session.rs`), code is placed at characters of that
+text, and `sources::resolve` maps a character to the form's innermost
+datum there, by position. For a form a macro expanded, the text compiled
+is the expansion's and the datums the form's, so a place may map to
+another datum: `(spin (+ n 1))`, made by `(again spin n)`, mapped to
+`(spin 1)` beside it (the same line, by luck). Lines and `fx-frame`'s
+provenance there are only as good as that mapping. To place such code by
+the expanded form's own datums (their spans, expansion and all), or to
+give it provenance ids as the trees' compile does.

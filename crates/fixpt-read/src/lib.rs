@@ -22,7 +22,7 @@ pub use datum::{Datum, Num, Syntax};
 pub use intern::{Interner, Sym};
 pub use profile::{Brackets, SyntaxProfile, UnitSyntax};
 pub use reader::{ReadError, ReadResult, Reader, form_status, FormStatus};
-pub use span::{describe_source, expansion, expansion_trace, note_source, record_expansion, Expansion, FileId, SourceMap, Span};
+pub use span::{describe_source, expansion, expansion_placed_in, expansion_trace, note_source, record_expansion, Expansion, FileId, SourceMap, Span};
 pub use reader::{match_delimiter, tokens, Token, TokenKind};
 pub use writer::{display_syntax, escape_symbol, write_syntax, write_syntax_mapped};
 

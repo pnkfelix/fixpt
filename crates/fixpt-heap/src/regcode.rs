@@ -91,6 +91,15 @@ impl Heap {
             self.set_bloblet_slot(w, WORD_CELL0 + i, *c);
         }
         self.set_bloblet_bytes(w, 0, &bytes).map_err(|e| format!("{e:?}"))?;
+        // Its places that are provenances' ids, held while it lives
+        // (`crate::provenance`).
+        let mut ids: Vec<i64> = places.iter().map(|&(_, p)| p).filter(|&p| crate::provenance::is_provenance(p)).collect();
+        if !ids.is_empty() {
+            ids.sort_unstable();
+            ids.dedup();
+            let weak = self.weak_add(w);
+            self.provenance.hold(weak, ids);
+        }
         Ok(w)
     }
 

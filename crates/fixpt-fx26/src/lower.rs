@@ -466,6 +466,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("make-word", "%make-word", false),
     ("set-register-twin", "%set-register-twin", false),
     ("set-register-twin-at", "%set-register-twin", false),
+    ("provenance-id", "%provenance-id", false),
     ("tword-fields", "%tword-fields", false),
     ("disassemble", "%disassemble", false),
     ("tword-int?", "%tword-fixnum?", false),

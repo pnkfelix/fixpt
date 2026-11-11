@@ -139,6 +139,7 @@ fn mode() -> u8 {
     *MODE.get_or_init(|| {
         // What a debugger calls, kept in the program: nothing else names it.
         std::hint::black_box(crate::direct::fixpt_debug_show as *const ());
+        std::hint::black_box(fixpt_place_at as *const ());
         mode_said()
     })
 }
@@ -228,6 +229,81 @@ static RESOLVER: std::sync::OnceLock<Resolver> = std::sync::OnceLock::new();
 /// frames: the session's sources (`fixpt_fx26::sources`).
 pub fn set_resolver(r: Resolver) {
     let _ = RESOLVER.set(r);
+}
+
+/// What says what made the code at a place that is no provenance's id, if
+/// a macro did (`set_describer`): a place in a text compiled whose datum a
+/// macro made, as the session's sources know it.
+pub type Describer = fn(u32, i64) -> Option<String>;
+
+static DESCRIBER: std::sync::OnceLock<Describer> = std::sync::OnceLock::new();
+
+/// `d` says what made the code at a place no provenance's id is
+/// (`fixpt_place_at`): the session's sources (`fixpt_fx26::sources::describe`).
+pub fn set_describer(d: Describer) {
+    let _ = DESCRIBER.set(d);
+}
+
+/// The provenances of the places pieces' lines hold
+/// (`fixpt_heap::provenance`), by id: noted where the code is placed, the
+/// heap at hand (`note_chain`), and read where a line or a frame is said,
+/// where it is not. An id's chain is the same in every heap.
+static CHAINS: Mutex<BTreeMap<i64, Vec<i64>>> = Mutex::new(BTreeMap::new());
+
+/// Provenance `id`'s chain, for the lines and `fixpt_place_at`.
+pub fn note_chain(id: i64, chain: &[i64]) {
+    CHAINS.lock().unwrap_or_else(|e| e.into_inner()).entry(id).or_insert_with(|| chain.to_vec());
+}
+
+/// The place written in a text that place `p` stands for: itself, or its
+/// provenance's use (its chain's last); none if its chain is not known,
+/// so that no line is said rather than a wrong one.
+fn written(p: i64) -> Option<i64> {
+    if !fixpt_heap::provenance::is_provenance(p) {
+        return Some(p);
+    }
+    CHAINS.lock().unwrap_or_else(|e| e.into_inner()).get(&p).and_then(|c| c.last().copied())
+}
+
+/// What made the code at address `pc`, if a macro did, for a debugger
+/// stopped there to call (`fx-frame`, `scripts/debuggers/fixpt_gdb.py`):
+/// a C string, good until the next call, empty if no macro made it:
+/// `made by a macro: template F:L, used at F:L[, used at F:L…]`, each
+/// place of its provenance in turn, innermost first.
+#[unsafe(no_mangle)]
+pub extern "C" fn fixpt_place_at(pc: u64) -> *const std::ffi::c_char {
+    static SAID: Mutex<Option<std::ffi::CString>> = Mutex::new(None);
+    let text = place_at(pc as usize).unwrap_or_default();
+    let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+    *said = Some(std::ffi::CString::new(text.replace('\0', " ")).expect("no NUL"));
+    said.as_ref().expect("just set").as_ptr()
+}
+
+fn place_at(pc: usize) -> Option<String> {
+    let (source, place) = {
+        let r = lock();
+        let (&start, &(len, obj)) = r.pieces.range(..=pc).next_back()?;
+        if pc >= start + len {
+            return None;
+        }
+        let piece = r.objects.get(&obj)?.pieces.iter().find(|p| p.start == start)?;
+        let (source, rows) = piece.lines.as_ref()?;
+        let off = (pc - start) as u32;
+        let k = rows.partition_point(|&(o, _)| o <= off);
+        (*source, rows.get(k.checked_sub(1)?)?.1)
+    };
+    if !fixpt_heap::provenance::is_provenance(place) {
+        return DESCRIBER.get().and_then(|d| d(source, place));
+    }
+    let chain = CHAINS.lock().unwrap_or_else(|e| e.into_inner()).get(&place).cloned();
+    let Some(chain) = chain else { return Some("made by a macro, from where not known".into()) };
+    let resolve = RESOLVER.get();
+    let at = |p: i64| resolve.and_then(|r| r(source, p)).map_or_else(|| format!("place {p}"), |(f, l)| format!("{f}:{l}"));
+    let mut out = format!("made by a macro: template {}", at(chain[0]));
+    for &p in &chain[1..] {
+        out.push_str(&format!(", used at {}", at(p)));
+    }
+    Some(out)
 }
 
 /// `piece` to be registered at the next [`flush`], in place of every
@@ -536,6 +612,8 @@ fn dwarf_lines(pieces: &[Owned], resolve: Resolver) -> Option<(Vec<u8>, Vec<u8>,
         let mut files: Vec<String> = Vec::new();
         let mut rows: Vec<(u32, usize, u32)> = Vec::new();
         for &(off, place) in places {
+            // A macro's code: at its use in a text as written.
+            let Some(place) = written(place) else { continue };
             let Some((file, ln)) = resolve(*source, place) else { continue };
             let f = files.iter().position(|x| *x == file).unwrap_or_else(|| {
                 files.push(file);
