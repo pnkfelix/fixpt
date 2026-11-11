@@ -5773,3 +5773,102 @@ each larger, the old ones never rehashed (a lookup tries each, newest
 first). To compare on the checker's and compiler's real tables
 (`check-env.fx`'s, `compile.fx`'s), by cells on the cellular machine and
 by time as register code.
+
+`table.fx` as it is, to consider (2026-11-11; its clients use only
+`make-table`, `table-ref`, `table-set!`, `table-has?`, `table-count`, so
+its representation may change freely):
+- `bucket-of`'s `modulo` a mask: the buckets are always a power of two;
+- `table-ref`, `table-entry`, `bucket-of` one body, half the calls a
+  lookup makes; `table-set!` testing for growth itself, calling
+  `table-grow` only when due;
+- `eq?` tried before the equality closure, at each entry;
+- the first entry of each bucket inline (the user's): the bucket array
+  holding the first `(key . value)` pair itself, or `nil`, and a second
+  array the rest of the chain, a list; a lookup reads one pair, the list
+  only after a collision; one cons an entry, not two; a doubling moves the
+  pairs, allocating only for what collides again. Keys and values
+  themselves inline need what a generic table cannot give `make-array`,
+  a fill of the key's and value's types: a default given to `make-table`,
+  arrays made at the first insert, or a runtime primitive for an array of
+  any type made without one (beside the bit vectors above).
+- each slot's hash kept beside it (the user's): an `int` array, which has
+  a fill, 0 kept for empty by a hash made never 0 (0 taken to 1, say).
+  It marks a slot free where a key of any type cannot; a lookup compares
+  hashes before calling the equality closure; a doubling calls no hash
+  closure, each entry's hash being kept; and it makes open addressing
+  possible for a generic table, the hash array saying which slots are
+  free. `table.fx` keeps no hash now: each doubling hashes every entry
+  again.
+First, measure which tables are left hot after the seen tables went (10%
+of stage 2's cells on a `parser-top.fx` load), and whether their cost is
+lookups or growth: the call counters on register code (`FIXPT_PROFILE_CALLS`).
+
+## 245. Inlining a module's procedures, generic ones, in cellular code too (2026-11-11)
+
+The compilers inline only small global procedures (`compile-inline.fx`,
+`compile-plan.fx`'s `c-inline-limit`, and the Rust compiler's twin), and
+only in register code: not a module's members, not a `plambda`, and
+nothing in cellular code. So `table.fx`'s lookup is seven calls. Written
+as macros private to the file (`define-syntax`, a module file's own,
+since hygiene's step 3 stage 3), the user's choice over a language
+feature, it made three: on a `parser-top.fx` load, calls into `table.fx`
+21.9 M to 10.0 M, `symbol=?` 3.75 M to 1.25 M, stage 2 9.5 s to 8.8 s.
+Parked on the local branch `table-macros` (`05840827`), its release suite
+failing 5 (§248, §249); to come back to once those are fixed. To consider when more code wants it: an
+annotation saying a procedure is inlined at its calls (both checkers
+accept it, both compilers inline it, at either kind of code; arguments
+evaluated once, a type of its own), or the automatic inliner extended to
+small module members and to cellular code.
+
+## 246. The machine code of the fast paths `table.fx` relies on (the user's, 2026-11-11)
+
+`table.fx`'s lookup (§244, §245) is written on the belief that `eq?`,
+`bitwise-and`, `-`, `array-length`, `array-ref`, `car` and `null?` are
+each a few instructions in register code and one cell each in cellular
+code, where `modulo` and a call were not. Not yet checked. To look at
+the code each machine makes of `table-ref` (x86_64 and arm64 register
+code, native-convention code, the hand-encoded machine's cells): which
+of these are inline and which are call-outs, and that `eq?` on two
+values is one compare, with no type test or boxing; then the same for
+`bitwise-and`, shifts, and the comparisons the hash arithmetic uses
+(`fixpt dump-heap`, `FIXPT_JIT_DEBUG`, the disassembler).
+
+## 247. Templates writing the forms only programs' walks know (2026-11-11)
+
+A template is aligned with the kernel's form signatures alone
+(`kernel-forms`); `scope-forms` (`macros-kernel.fx`), which binding
+shapes' step 1 made for the walk of programs after expansion, is
+consulted only in that mode (`macros.rs`'s `Mode::Program` arm,
+`macros-align.fx`'s `program-form`), so a template writing `bloblet-ref`
+is refused, "not yet in a template". To let a template use a
+`scope-forms` signature written in the kernel's notation alone (no
+`item`, no `(shape A)`): every `bloblet-*` and `blobref-*` form, which
+binds nothing, in both expanders, with a test that a template writing
+one aligns and expands alike in both. Then `table.fx`'s `entry-of` (on
+the branch `table-macros`, §245) reads the table's fields itself, as its
+comment says: `(bloblet-ref t 2)` the buckets, `(bloblet-ref t 0)` the
+hash, `(bloblet-ref t 1)` the equality.
+
+## 248. A module file's own macros where it is not loaded as a module (found 2026-11-11)
+
+`table.fx` with a hidden `define-syntax` of its own (the branch
+`table-macros`, §245): a program loading it, `(load-module
+"fx26:table.fx")`, through the CLI, its `.fasl` made in the cache
+(`fasl::a_built_in_module_is_kept_in_the_cache`), fails "not an
+expression in the FX-26 kernel" (`parse.rs`), so the `.fasl` path does
+not expand a module file's own macros as stage 3 has the module's load
+do. And the tests that paste `table.fx`'s text into a program
+(`tests/table.rs`, `parser::the_parsers_agree_on_real_programs`) meet it
+at the top level, where `hide` around a `define-syntax` is refused: for
+them, load it as a module, or let the top level hide a macro.
+
+## 249. The two compilers' register code for an `or` of `eq?` and a call (found 2026-11-11)
+
+With `table.fx`'s `bucket-find` comparing by `(let ((x a) (y b)) (or
+(eq? x y) (same x y)))` (the branch `table-macros`, §245),
+`bootstrap::fixpoint_as_register_code` fails: `bucket-find`'s places
+differ between stage 1, the Rust compiler's register code, and stage 2,
+the compiler written in FX-26 (`stage 1 and stage 2 differ:
+bucket-find@1008:2718's places …`). The two compilers must make the same
+code; one of them places this shape otherwise. Before §245 comes back: a
+small program of that shape alone, held to both compilers.
