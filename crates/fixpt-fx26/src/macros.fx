@@ -37,20 +37,20 @@
         len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
 (import scopes-module walk placed evaluate levels-of binder-of)
 (import align-module defined macro-of macro? makes-defns? makes-top-defns? nodes-reset! align
-        node-at node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-toplevel
+        node-at node-syn node-path node-core node-kids pvar-of pvar? nnodes act-rename act-alias
         seq-depths
-        act-qualified act-standard act-module act-module-type act-standard-type desc-roots under
+        act-module-type act-standard-type desc-roots under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
-              found levels
+              found levels home homes
               atms kids contracts holes))
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
         (type exported nested))
 (import solve-module infer sig-text)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
-        source-key source-of)
+        source-key source-of alias)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names
@@ -85,9 +85,12 @@
                        (template (nth two 1)))
                   (tuple pattern template
                          (template-actions fail ps template defn (extract pv 2) file) ps
-                         (contracts-of ps (binder-names poly) file)))))))))
+                         (contracts-of ps (binder-names poly) file)
+                         (if (null? file)
+                             (the home nil)
+                             (list (tuple (extract (car file) 1) (extract (car file) 2))))))))))))
 (define stub (->* (syn) clause)
-  (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil))))
+  (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil) (the home nil))))
 ;; Each typed hole's contract, its type read as a use reads the template's
 ;; types; none where it names the macro's own binders, which no use can
 ;; write.
@@ -312,17 +315,16 @@
              nil))
           ;; A file's macro's description is read through the file's module
           ;; whole (`type-actions`).
-          ((= free 1) (if (null? file) (list (act-qualified)) nil))
-          ((null? file) (list (act-toplevel)))
-          ((name-in? n (extract (car file) 2)) (list (act-module (extract (car file) 1))))
-          ((name-in? n (extract (car file) 5)) (list (act-standard)))
+          ((= free 1) (if (null? file) (list (act-alias)) nil))
+          ((or (null? file) (name-in? n (extract (car file) 2)) (name-in? n (extract (car file) 5)))
+           (list (act-alias)))
           (else
            (begin
              (fail-at fail (string-append "`" (symbol->string n) "` is neither a value the file's "
                                           "module shows nor a standard binding: a file's macro "
                                           "names only those, as they are where it is imported")
                       s)
-             (list (act-toplevel)))))))
+             (list (act-alias)))))))
 ;; A binder `b` (none or one) repeated, referred to under `depth`, fewer
 ;; ellipses than it is under: which repetition's is not said.
 (define repeated-ref (->* (fails symbol (listof int acyclic) int depths syn) unit)
@@ -523,6 +525,14 @@
         (set nexpansions n)
         (set expansions (cons (tuple n name (syn-start s) (syn-end s)) (get expansions)))
         n))))
+;; Where the macro each expansion's aliases are of was defined, by the
+;; expansion's number, the last first; a template's check is expansion 0
+;; (`macros.rs`'s `Withs::homes`). Given to the resolution after expansion
+;; (`macros-shapes.fx`'s `aliases-resolved`), which another instance of the
+;; expander's files reads.
+(define homes (ref homes rs) (new nil))
+(define home! (->* (int home) unit) (lambda (k h) (set homes (cons (tuple k h) (get homes)))))
+(define homes-given (->* () homes) (lambda () (get homes)))
 ;; For the driver, which says an error in an expansion at each use.
 (define expansions-given (->* () expansions-made) (lambda () (get expansions)))
 
@@ -660,7 +670,8 @@
            (in-use (lambda ((msg string) (a int) (b int))
                      (fail (string-append "a use of `" shown "`: " msg) a b))))
       (if (not (null? (procedural-of name)))
-          (expand-procedural fail name s (record-expansion name s))
+          (let ((made (record-expansion name s)))
+            (begin (home! made nil) (expand-procedural fail name s made)))
           (begin
             (nodes-reset!)
             (align in-use 2 (the pvars nil) (extract m 1) operands -1 nil)
@@ -685,6 +696,7 @@
           (if (null? binds)
               (first-match fail name s operands (cdr cs))
               (let* ((made (record-expansion name s)) (shown (symbol->string name))
+                     (homed (home! made (extract (car cs) 6)))
                      (in-use (lambda ((msg string) (a int) (b int))
                                (fail (string-append "a use of `" shown "`: " msg)
                                      (syn-start s) (syn-end s)))))
@@ -886,17 +898,9 @@
               (atom n a b made)
               (tagcase (car act)
                 (act-rename (binder d) (atom (fresh-name n binder d) a b made))
-                (act-toplevel () (with-name "#%toplevel" n a b made))
-                (act-qualified ()
-                  (atom (string->symbol (string-append "#%toplevel:" (symbol->string n))) a b made))
-                (act-standard () (with-name "#%fx" n a b made))
-                (act-module (m) (with-name (symbol->string m) n a b made))
+                (act-alias ()
+                  (atom (string->symbol (alias (symbol->string n) made)) a b made))
                 (else y (atom n a b made))))))))
-(define with-name (->* (string symbol int int int) syn)
-  (lambda (m n a b made)
-    (list-at a b made (list (atom 'with a b made) (atom (string->symbol m) a b made)
-                            (atom n a b made))
-             nil)))
 ;; The fresh name of the binder at `binder`, under `d` ellipses, in the
 ;; repetitions it is in, made the first time.
 (define fresh-name (->* (symbol addr int) symbol)

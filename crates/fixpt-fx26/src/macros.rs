@@ -222,19 +222,23 @@ struct Clause {
     /// which the use's expression is held to, `(the T e)`; none where the
     /// type names the macro's `poly` binders, which no use can write.
     contracts: HashMap<Sym, Syntax>,
+    /// Where its macro is defined, what its aliases are read in.
+    home: hygiene::Home,
 }
 
 /// What becomes of one of a template's parts: a name made fresh, one name
 /// for the binder found at a path and for each reference to it; a name
-/// free in the template, the top level's, as it is where the macro is used,
-/// `(with #%toplevel name)`, nothing at the use shadowing it
-/// (`typed-macros.md`, item 5); a description's name free in it, the top
-/// level's, `#%toplevel:name`.
+/// free in the template, its alias, `%~N:name`, which the resolution after
+/// expansion makes the name where the macro is defined, nothing at the use
+/// capturing it (`hygiene`): a top-level macro's the top level's, `(with
+/// #%toplevel name)` or, a description's, `#%toplevel:name`
+/// (`typed-macros.md`, item 5).
 ///
 /// A file's macro (`import-with-syntax`) means what it meant in its file: a
 /// free name the file's own, `(with %shared:key name)`, the one value every
 /// load of the file is, which nothing shadows; else the standard one, `(with
-/// #%fx name)` (a file sees the standard environment alone); a type, read
+/// #%fx name)` (a file sees the standard environment alone), both by its
+/// alias; a type, read
 /// through the file's module, `(select %shared:key type)`, or the standard
 /// environment, `(select #%fx type)`; a use of another of the file's
 /// macros, that macro, by the name the importer has it by
@@ -243,14 +247,13 @@ struct Clause {
 enum Action {
     /// The binder's path, and how many ellipses it is under.
     Rename(Vec<bool>, usize),
-    Toplevel,
-    Standard,
-    Module(Sym),
+    /// A name free in the template: its alias, `%~N:name`, which the
+    /// resolution after expansion makes the name where the macro is
+    /// defined (`hygiene`).
+    Alias,
     ModuleType(Sym),
     StandardType,
     MacroHead(Sym),
-    /// A name the top level's, written `#%toplevel:name`.
-    Qualified,
 }
 
 /// What a file's macros are defined in (`Macros::define_file`): the
@@ -307,6 +310,10 @@ pub(crate) struct Withs {
     pub(crate) projections: HashMap<Span, (Sym, Span)>,
     /// The shapes known (`shapes`): the top level's names', files'.
     shapes: shapes::Known,
+    /// Where the macro each expansion's aliases are of was defined, by the
+    /// expansion's number (`hygiene::Home`); a template's check is
+    /// expansion 0.
+    pub(crate) homes: HashMap<u32, hygiene::Home>,
 }
 
 /// The kernel's tables (`macros-kernel.fx`), read once, never changed.
@@ -1044,6 +1051,7 @@ impl Macros {
             binds.insert(*n, stand_in);
         }
         self.checking = true;
+        self.withs.homes.insert(0, c.home.clone());
         let body = self.transcribe(c, &c.template, &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), 0, interner)?;
         self.checking = false;
         let lambda = Syntax::list(at, vec![sym("lambda", interner), list_of(at, params, None), body]);
@@ -1386,13 +1394,12 @@ impl Macros {
                         (None, Free::Bound, _) => {
                             return Err(FxError::at(span, format!("`{}`, the module a template's `(with module name)` takes from, is bound by the template or given by a use: a top level's, not yet", interner.name(*n))));
                         }
-                        (None, Free::Qualified, None) => Action::Qualified,
+                        (None, Free::Qualified, None) => Action::Alias,
                         // A file's macro's description is read through the
                         // file's module whole (below).
                         (None, Free::Qualified, Some(_)) => continue,
-                        (None, Free::Toplevel, None) => Action::Toplevel,
-                        (None, Free::Toplevel, Some(f)) if f.values.contains(n) => Action::Module(f.shared),
-                        (None, Free::Toplevel, Some(f)) if (f.is_standard)(*n) => Action::Standard,
+                        (None, Free::Toplevel, None) => Action::Alias,
+                        (None, Free::Toplevel, Some(f)) if f.values.contains(n) || (f.is_standard)(*n) => Action::Alias,
                         (None, Free::Toplevel, Some(_)) => {
                             return Err(FxError::at(
                                 span,
@@ -1476,7 +1483,11 @@ impl Macros {
         }
         let pvars: Vec<(Sym, PInfo)> = order.into_iter().map(|n| (n, pvars[&n].clone())).collect();
         let names = pvars.iter().filter(|(_, p)| matches!(&*p.core, STy::Bvar | STy::Dvar | STy::Id)).map(|(n, _)| *n).collect();
-        Ok(Clause { pattern, names, template: template.clone(), actions, pvars, contracts })
+        let home = match file {
+            None => hygiene::Home::Top,
+            Some(f) => hygiene::Home::File { shared: f.shared, values: Rc::new(f.values.clone()) },
+        };
+        Ok(Clause { pattern, names, template: template.clone(), actions, pvars, contracts, home })
     }
 
     /// `form` with each use of a macro in it expanded, as each expands,
@@ -1695,6 +1706,7 @@ impl Macros {
                 continue;
             }
             let made = fixpt_read::record_expansion(interner.name(name), s.span, m.text.clone());
+            self.withs.homes.insert(made, c.home.clone());
             return self
                 .transcribe(c, &c.template, &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), made, interner)
                 .map_err(|e| FxError::at(s.span, format!("a use of `{}`: {}", interner.name(name), e.message)));
@@ -1707,6 +1719,7 @@ impl Macros {
     /// syntactic closure's opened (`procedural::closed`).
     fn expand_procedural(&mut self, name: Sym, p: &procedural::Procedural, s: &Syntax, interner: &mut Interner) -> R<Syntax> {
         let made = fixpt_read::record_expansion(interner.name(name), s.span, None);
+        self.withs.homes.insert(made, hygiene::Home::Top);
         let form = fixpt_read::write_syntax(s, interner);
         let said = |e: String| FxError::at(s.span, format!("a use of `{}`: its transformer: {e}", interner.name(name)));
         let out = procedural::run(&procedural::applied(p.style, &p.code, &form, made)).map_err(said)?;
@@ -1780,19 +1793,9 @@ impl Macros {
                         };
                         Syntax::symbol(at, name)
                     }
-                    Some(a @ (Action::Toplevel | Action::Standard | Action::Module(_))) => {
-                        let module = match a {
-                            Action::Toplevel => interner.intern("#%toplevel"),
-                            Action::Standard => interner.intern("#%fx"),
-                            Action::Module(m) => *m,
-                            _ => unreachable!("matched"),
-                        };
-                        let with = interner.intern("with");
-                        Syntax::list(at, vec![Syntax::symbol(at, with), Syntax::symbol(at, module), Syntax::symbol(at, *n)])
-                    }
-                    Some(Action::Qualified) => {
-                        let q = interner.intern(&format!("#%toplevel:{}", interner.name(*n)));
-                        Syntax::symbol(at, q)
+                    Some(Action::Alias) => {
+                        let a = interner.intern(&procedural::alias(interner.name(*n), made));
+                        Syntax::symbol(at, a)
                     }
                     _ => Syntax::new(at, t.datum.clone()),
                 })

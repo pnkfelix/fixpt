@@ -40,7 +40,7 @@
 (import templates-module template-checks)
 (import imports-module import-file-macros note-load-def!)
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
-        syntax-names imports-syntax? globals! global-before? macro? later-macro-site)
+        syntax-names imports-syntax? globals! global-before? macro? later-macro-site homes-given)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -254,7 +254,8 @@
   (lambda (x)
     (if (or (form-of? x 'include) (import? x) (datatype? x))
         x
-        (let ((shaped (top-shaped (aliases-resolved pfail-at (sealed-written pfail-at x)))))
+        (let ((shaped (top-shaped (aliases-resolved pfail-at (sealed-written pfail-at x)
+                                                    (homes-given)))))
           (begin (files-written!) shaped)))))
 ;; The hidden globals of the files loaded, `ts`, each noted with its file's
 ;; shape (`shared-shaped!`), for the forms after: its definition is made,
@@ -293,7 +294,8 @@
   (lambda (cs)
     (if (null? cs)
         nil
-        (append-tops (parse-made (aliases-resolved pfail-at (expand pfail-at (car cs))))
+        (append-tops (parse-made (aliases-resolved pfail-at (expand pfail-at (car cs))
+                                                   (homes-given)))
                      (parse-checks (cdr cs))))))
 ;; A `define-syntax` (or `define-syntax-rec`) of a name a form before this
 ;; parse defined as a global: refused, where it is

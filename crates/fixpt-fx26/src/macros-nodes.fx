@@ -26,23 +26,30 @@
 
 ;; What becomes of one of a template's parts where it is transcribed
 ;; (`macros.rs`'s `Action`): a name made fresh, one for the binder at a
-;; path and each reference to it; a free name the top level's, `(with
-;; #%toplevel n)`; a description's free name the top level's, qualified,
-;; `#%toplevel:n`; a file's macro's free name the file's own, `(with m
-;; n)`, or standard, `(with #%fx n)`; its description read whole through
+;; path and each reference to it; a free name its alias, `%~N:n`, which
+;; the resolution after expansion makes the name where the macro is defined
+;; (`macros-shapes.fx`'s `aliases-resolved`); a file's macro's description read whole through
 ;; the file's module or the standard environment, by `select`; a use of
 ;; another of the file's macros, by the name the importer has it by.
 (define-datatype action
-  (act-rename addr int) (act-toplevel) (act-qualified) (act-standard) (act-module symbol)
-  (act-module-type symbol) (act-standard-type) (act-macro-head symbol))
+  (act-rename addr int) (act-alias) (act-module-type symbol) (act-standard-type)
+  (act-macro-head symbol))
 (define-type actions (listof (tupleof addr action) acyclic))
+;; Where a macro is defined, what its expansions' aliases are read in
+;; (`macros/hygiene.rs`'s `Home`): the top level; a file, its hidden global
+;; `%shared:key` and the values its module shows (its other names the
+;; standard environment's).
+;; None, the top level, or one, a file's: a type of its structure, the
+;; same in each instance of the expander's files (`macros.fx`'s `homes`).
+(define-type home (listof (tupleof symbol names) acyclic))
+(define-type homes (listof (tupleof int home) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
 ;; by their paths in the template, the last made first; its pattern's
-;; variables, in the order the pattern has them; and each typed hole's
-;; type as a use reads it, `(select #%toplevel T)`, which the use's
-;; expression is held to (`macros.rs`'s `Clause`).
+;; variables, in the order the pattern has them; each typed hole's type as
+;; a use reads it, `(select #%toplevel T)`, which the use's expression is
+;; held to; and where its macro is defined (`macros.rs`'s `Clause`).
 (define-type contracts (listof (tupleof symbol syn) acyclic))
-(define-type clause (tupleof syn syn actions pvars contracts))
+(define-type clause (tupleof syn syn actions pvars contracts home))
 (define-type clauses (listof clause acyclic))
 ;; A macro defined: its signature, its clauses, the binders of its
 ;; signature's `(poly (binder …) σ)`, if it has one, and what it makes (0 an

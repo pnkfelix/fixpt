@@ -1,23 +1,38 @@
 //! Hygiene, one mechanism (`docs/research/binding-shapes.md`, step 3):
 //! after a form is expanded, each name an expansion introduced and left
 //! free, an alias `%~N:x` (`procedural::alias_base`), made the name it
-//! stands for where its macro is defined, by the program's walk: a
-//! top-level macro's, the top level's `x`, written so (`(with #%toplevel
-//! x)`, `#%toplevel:x`), which nothing around it captures. An alias the
-//! expansion bound, here or at the top level before, is a name of its own,
-//! and stays. No alias reaches the checkers.
+//! stands for where its macro is defined (`Home`), by the program's walk:
+//! a top-level macro's, the top level's `x`, written so (`(with #%toplevel
+//! x)`, `#%toplevel:x`); a file's macro's, the file's value `(with
+//! %shared:key x)` or else the standard one, `(with #%fx x)`: none of
+//! which anything around it captures. An alias the expansion bound, here
+//! or at the top level before, is a name of its own, and stays. No alias
+//! reaches the checkers.
 
-use super::procedural::alias_base;
-use super::{Aligner, Atom, Env, Kids, Level, Macros, Mode, Ns, STy};
+use super::procedural::{alias_base, alias_made};
+use super::{Aligner, Atom, Env, Free, Kids, Level, Macros, Mode, Ns, STy};
 use crate::error::R;
 use fixpt_read::{Datum, Interner, Sym, Syntax};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-/// What an alias is written as: the top level's value or description.
+/// Where a macro is defined, what its expansions' aliases are read in: the
+/// top level; a file, `%shared:key` the hidden global every load of it is
+/// and the values its module shows (its other names the standard
+/// environment's, which a file's macro's check has held them to).
+#[derive(Clone, Debug)]
+pub(crate) enum Home {
+    Top,
+    File { shared: Sym, values: Rc<HashSet<Sym>> },
+}
+
+/// What an alias is written as: the top level's value or qualified name, or
+/// a value of a module's (`(with m x)`).
 enum Made {
     TopValue(String),
     TopDesc(String),
+    Of(Sym, String),
+    Plain(String),
 }
 
 impl Macros {
@@ -28,6 +43,7 @@ impl Macros {
             return Ok(form.clone());
         }
         self.ensure_kernel(interner)?;
+        let fx = interner.intern("#%fx");
         let none = HashMap::new();
         let mut parts: Vec<(Vec<bool>, fixpt_read::Span, Made)> = Vec::new();
         let mut made: Vec<(usize, Made)> = Vec::new();
@@ -63,7 +79,7 @@ impl Macros {
                 })
             };
             for (at, env, _, _) in &found {
-                let Kids::Ref(n, ns, _) = a.nodes[*at].kids else { continue };
+                let Kids::Ref(n, ns, free) = a.nodes[*at].kids else { continue };
                 let Some(base) = alias_base(a.name(n)) else { continue };
                 // Bound by the expansion, here or at the top level before.
                 let bound = env.levels().any(|l| matches!(l, Level::Rib(atoms) | Level::Earlier(atoms) if binder_named(atoms, n, ns).is_some()));
@@ -71,9 +87,21 @@ impl Macros {
                 if bound || global {
                     continue;
                 }
-                // The top level's, where a top-level macro is defined: so
-                // written, which nothing around it captures.
-                made.push((*at, top_made(ns, base)));
+                // Where its macro is defined: so written, which nothing
+                // around it captures.
+                let home = alias_made(a.name(n)).and_then(|k| a.m.withs.homes.get(&k));
+                let m = match home {
+                    None | Some(Home::Top) => top_made(free, ns, base),
+                    Some(Home::File { shared, values }) => match free {
+                        Free::Toplevel if a.interner.get(base).is_some_and(|v| values.contains(&v)) => Made::Of(*shared, base.to_string()),
+                        Free::Toplevel => Made::Of(fx, base.to_string()),
+                        Free::Plain => Made::Plain(base.to_string()),
+                        // A file's macro writes its descriptions through
+                        // its module whole (`Action::ModuleType`).
+                        _ => return Err(crate::error::FxError::at(a.nodes[*at].syn.span, format!("`{base}`: a file's macro's description named apart from its module, not yet"))),
+                    },
+                };
+                made.push((*at, m));
             }
             let at = |k: usize| (a.nodes[k].path.clone(), a.nodes[k].syn.span);
             for (r, m) in made {
@@ -91,6 +119,11 @@ impl Macros {
                     let n = interner.intern(&n);
                     Syntax::list(span, vec![Syntax::symbol(span, with), Syntax::symbol(span, toplevel), Syntax::symbol(span, n)])
                 }
+                Made::Plain(n) => Syntax::symbol(span, interner.intern(&n)),
+                Made::Of(m, n) => {
+                    let n = interner.intern(&n);
+                    Syntax::list(span, vec![Syntax::symbol(span, with), Syntax::symbol(span, m), Syntax::symbol(span, n)])
+                }
             };
             written.insert(p, s);
         }
@@ -98,11 +131,15 @@ impl Macros {
     }
 }
 
-/// The top level's `base`, a value or (`ns`) a description, so written.
-fn top_made(ns: Ns, base: &str) -> Made {
-    match ns {
-        Ns::Desc => Made::TopDesc(base.to_string()),
-        Ns::Value => Made::TopValue(base.to_string()),
+/// The top level's `base`, written as `free` says: a value, `(with
+/// #%toplevel base)`; qualified (a description's name, a specification's),
+/// `#%toplevel:base`; as written (a global's, which nothing shadows); a
+/// `with`'s module, by its namespace `ns`.
+fn top_made(free: Free, ns: Ns, base: &str) -> Made {
+    match (free, ns) {
+        (Free::Toplevel, _) | (Free::Bound, Ns::Value) => Made::TopValue(base.to_string()),
+        (Free::Qualified, _) | (Free::Bound, Ns::Desc) => Made::TopDesc(base.to_string()),
+        (Free::Plain, _) => Made::Plain(base.to_string()),
     }
 }
 

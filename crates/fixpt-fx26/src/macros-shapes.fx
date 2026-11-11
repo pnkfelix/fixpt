@@ -15,10 +15,10 @@
 (import reader-types atom lst dotted (type syn))
 (import parser-module parse-tag p-ok p-err syn-symbol? syn-symbol syn-name mk-symbol mk-list len nth
         syn-string? syn-string syn-datums (type syns-a presult loaded-file loaded-files))
-(import types-module proper-items (type fails addr atms))
+(import types-module proper-items fail-at name-in? (type fails addr atms))
 (import align-module node-at node-syn node-kids node-path nnodes program-walk lv-rib lv-shape
         k-binder k-ref k-form atm-lit
-        (type levels found))
+        (type levels found home homes))
 (import walk-module walked pfail-walk walked-out show-renamed falses addr=?)
 (import shaper-module askeds binder-shape elem exp-shape exported file-given-at file-key
         file-shape-keyed file-shapes files-given form-node? head-of inputs-at input-key?
@@ -525,17 +525,18 @@
 
 ;; Hygiene, one mechanism (`binding-shapes.md`, step 3; `macros/hygiene.rs`):
 ;; top-level form `x`, after expansion, each alias an expansion left free,
-;; `%~N:x`, made the name it stands for where its macro is defined, a
-;; top-level macro's the top level's, written so (`(with #%toplevel x)`,
-;; `#%toplevel:x`); an alias the expansion bound, here or at the top level
-;; before, a name of its own. Itself if it has no alias. No alias reaches
-;; the checker.
-(define aliases-resolved (->* (fails syn) syn)
-  (lambda (fail x)
+;; `%~N:x`, made the name it stands for where its macro is defined
+;; (`home-of`): a top-level macro's the top level's, written so (`(with
+;; #%toplevel x)`, `#%toplevel:x`); a file's macro's the file's value,
+;; `(with %shared:key x)`, else the standard one, `(with #%fx x)`; an alias
+;; the expansion bound, here or at the top level before, a name of its own.
+;; Itself if it has no alias. No alias reaches the checker.
+(define aliases-resolved (->* (fails syn homes) syn)
+  (lambda (fail x hs)
     (if (not (alias-in? x))
         x
         (let* ((w (walked fail x #t)) (root (extract w 1)) (found (extract w 2))
-               (written (aliases-written found nil)))
+               (written (aliases-written fail found hs nil)))
           (begin (aliases-defined-in fail root x)
                  (with-parts x nil written))))))
 ;; Whether `s` holds an alias, outside quotes.
@@ -553,29 +554,68 @@
   (lambda (xs) (and (not (null? xs)) (or (alias-in? (car xs)) (aliases-in? (cdr xs))))))
 ;; Each free alias `found` reaches, by its node's path, what it is written as.
 (define-type parts (listof (tupleof addr syn) acyclic))
-(define aliases-written (->* (found parts) parts)
-  (lambda (fs out)
+(define aliases-written (->* (fails found homes parts) parts)
+  (lambda (fail fs hs out)
     (if (null? fs)
         out
         (aliases-written
-          (cdr fs)
+          fail (cdr fs) hs
           (let ((at (extract (car fs) 1)) (env (extract (car fs) 2)))
             (tagcase (node-kids at)
               (k-ref (n d free)
                 (let ((base (alias-base (symbol->string n))))
                   (if (or (string=? base "") (bound-in? n d env) (alias-defined? n d))
                       out
-                      (cons (tuple (node-path at) (top-written base d (node-syn at)))
+                      (cons (tuple (node-path at)
+                                   (alias-written fail base d free
+                                                  (home-of (alias-made (symbol->string n)) hs)
+                                                  (node-syn at)))
                             out))))
               (else y out)))))))
-;; The top level's `base`, a description's if `d`, at `s`'s place.
-(define top-written (->* (string bool syn) syn)
-  (lambda (base d s)
-    (let* ((ab (syn-span s)) (a (extract ab 1)) (b (extract ab 2)))
-      (if d
-          (mk-symbol (string-append "#%toplevel:" base) a b)
-          (mk-list (list (mk-symbol "with" a b) (mk-symbol "#%toplevel" a b) (mk-symbol base a b))
-                   a b)))))
+;; Alias `base`, of a description's if `d`, written as `free` says (0 a
+;; value, 1 qualified, 2 as written, 3 a `with`'s module) where its macro
+;; is defined, `h`, at `s`'s place (`macros/hygiene.rs`'s `top_made`).
+(define alias-written (->* (fails string bool int home syn) syn)
+  (lambda (fail base d free h s)
+    (let* ((ab (syn-span s)) (a (extract ab 1)) (b (extract ab 2))
+           (with-of (lambda ((m string))
+                      (mk-list (list (mk-symbol "with" a b) (mk-symbol m a b) (mk-symbol base a b))
+                               a b))))
+      (if (null? h)
+          (cond ((or (= free 0) (and (= free 3) (not d))) (with-of "#%toplevel"))
+                ((= free 2) (mk-symbol base a b))
+                (else (mk-symbol (string-append "#%toplevel:" base) a b)))
+          (cond ((and (= free 0) (name-in? (string->symbol base) (extract (car h) 2)))
+                 (with-of (symbol->string (extract (car h) 1))))
+                ((= free 0) (with-of "#%fx"))
+                ((= free 2) (mk-symbol base a b))
+                ;; A file's macro writes its descriptions through its module
+                ;; whole (`act-module-type`).
+                (else
+                 (begin (fail-at fail (string-append "`" base "`: a file's macro's description "
+                                                     "named apart from its module, not yet")
+                                 s)
+                        s)))))))
+;; Where expansion `k`'s macro was defined, of `hs`: the top level if none
+;; is said.
+(define home-of (->* (int homes) home)
+  (lambda (k hs)
+    (cond ((null? hs) nil)
+          ((= k (extract (car hs) 1)) (extract (car hs) 2))
+          (else (home-of k (cdr hs))))))
+;; The expansion that made alias `x`, its outermost `%~N:`'s `N`; else 0.
+(define alias-made (->* (string) int)
+  (lambda (x)
+    (let ((c (if (and (> (string-length x) 2) (string=? (substring x 0 2) "%~"))
+                 (digits-end x 2)
+                 -1)))
+      (if (> c 2) (digits-value x 2 c 0) 0))))
+(define digits-value (->* (string int int int) int)
+  (lambda (s i end acc)
+    (if (>= i end)
+        acc
+        (digits-value s (+ i 1) end
+                      (+ (* acc 10) (- (char->integer (string-ref s i)) (char->integer #\0)))))))
 ;; Whether a binder in `env` binds `n`, a description's if `d`.
 (define bound-in? (->* (symbol bool levels) bool)
   (lambda (n d env)

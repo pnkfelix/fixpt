@@ -693,6 +693,29 @@ module file's own macros. (4) `let-desc`. (5) Captures by `with`,
 `include` and inner modules resolved by naming the outer binding afresh
 (`let`, `let-desc`). (6) `let-syntax`.
 
+**Stage 2, built (2026-11-10).** A `syntax-rules` template's free names
+are written as aliases, `%~N:x`, as a procedural macro's are, at the top
+level and in an imported file's macro alike (`Action::Alias`,
+`act-alias`). Each expansion records where its macro is defined, by its
+number (`hygiene::Home`, `Withs::homes`; `macros.fx`'s `homes`): the top
+level, or a file, its hidden global `%shared:key` and the values its
+module shows; a template's check is expansion 0. The resolution writes a
+free alias as the qualifier its home says, so expansions read as they did:
+a top-level macro's `(with #%toplevel x)`, or `#%toplevel:x` where the walk
+says the name is qualified (a description's, a specification's), or `x`
+where written as is (a `globals` list); a file's macro's `(with %shared:key
+x)` for a value its module shows, else `(with #%fx x)`. What the template
+check refuses is refused as before, at the check. Left for later: a
+file's macro's descriptions are still read through its module whole
+(`Action::ModuleType`, `(select %shared:key τ)`), not by aliases, as
+naming them one by one would need a type's qualifier for each name.
+
+The FX-26 expander's two chains of files (the one the expander's forms
+load, and `macros-shapes.fx`'s through `macros-shaper.fx`) are separate
+instances, with separate state, so the table of homes is handed to the
+resolution by `parser-top.fx` (`homes-given`), and its type is
+structural (`home`, none or one file's), the same in each instance.
+
 **A property to prove, one day** (the user's, 2026-11-10): full expansion
 is the same as repeated `expand-once` steps. What keeps it within reach:
 - Resolution reads the fully expanded term and its marks alone, never how
