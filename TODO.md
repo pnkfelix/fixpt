@@ -3978,7 +3978,13 @@ machine so that nextest runs the parts at once.
    `fasl` and `every_program_on_*` tests (70 to 80 s);
    `modules/convention-read.fx` collecting at every allocation 63 s, all
    but 1 s its run.
-4. Left: the bootstrap program's shared compile (`common::bootstrap_compiled`)
+4. Done (2026-11-11): `fixpt prewarm` makes it, both kinds, beside the
+   front end's native half (`fixpt_fx26::bootstrap_cache`, its image in the
+   cache directory, the front end's, not the build's temporary one), so
+   that no test waits on it; before, it was the suite's critical path,
+   130 to 170 s for each of its tests in a debug build, since a change to
+   the sources (the usual case) made it cold. Was:
+   the bootstrap program's shared compile (`common::bootstrap_compiled`)
    is made by the first test that wants it after each change to the
    sources, and the five tests of the native compilers wait on it: 107 to
    110 s each then, 6 to 11 s warm. Made before the tests start (`fixpt
@@ -5975,3 +5981,33 @@ primop or a transformation to try, the first the likeliest to pay:
    an index masked by the length less one. Each needs the checker's
    types, or a fact a test established, to reach the compiler, sound by
    construction (a type the checker proved, never a guess).
+
+## 252. Where the suite's time goes, by phase (the user's, 2026-11-10; filed 2026-11-11)
+
+Asked 2026-11-10, queued until binding shapes' step 2 was done, and not
+filed then: how much of the suite's time is compiling FX-26 code with
+the compiler written in Rust, running what it makes, compiling with the
+one written in FX-26, and running what that makes. Nextest's time per
+test mixes them all. The design sketched then:
+1. One entry point per compiler (`compile_with_rust`, `compile_with_fx`),
+   each timing its phase and stamping each word it makes with its maker.
+2. Running time charged by the stamp of the word entered, at the
+   runtime's one hook for entering compiled code (`run_word`), so no test
+   changes.
+3. Exclusive time, on a stack of timers per thread: the phases nest (the
+   compiler written in FX-26 is itself code compiled by Rust; the `rsjit`
+   machines compile as they run; native code calls back into cellular
+   code), so entering one pauses the one below and each second counts
+   once.
+4. Collected outside the tests: under `FIXPT_PHASE_TIMES=dir` each process
+   writes its totals at exit, which a script sums over a run. Two more
+   buckets for the totals to add up: the Rust checker and parser, and the
+   rest (the cached front end's loading, I/O, the harness).
+
+The user's leaning (2026-11-11): instrument at phase boundaries, not on
+the hottest paths; `perf` and continuation marks for within a phase;
+hooks for events such as a collection's. First: a survey of every place
+code is compiled or entered outside the entry points (`%run-word`, the
+trampolines between native and cellular code, staging, `.fasl`s, tests
+that make words by hand), whatever is not routed through them left in
+"the rest", and a first run to say how large that is.

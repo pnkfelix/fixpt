@@ -708,7 +708,14 @@ fn prewarm() -> i32 {
         FX26_MACHINES.iter().find(|(_, run, m, c, _)| *run == "cellular" && (*c == Some("native")) == native && (native || c.is_none()) && unavailable(*m, *c).is_none()).map(|(n, ..)| *n)
     };
     let mut status = 0;
+    // The bootstrap program compiled by the compiler written in FX-26, as
+    // the tests of the native compilers compare it (`bootstrap_cache`): on
+    // the front end's register code, once that is cached, beside the rest.
+    let mut bootstrap = None;
     for (what, native) in [("register code", false), ("native code", true)] {
+        if native {
+            bootstrap = Some(std::thread::spawn(fixpt_fx26::bootstrap_cache::prewarm));
+        }
         let Some(machine) = first(native) else {
             println!("; the front end's {what}: no machine here runs it");
             continue;
@@ -738,6 +745,17 @@ fn prewarm() -> i32 {
         Err(e) => {
             eprintln!("fixpt: prewarm: the reader: {e}");
             status = 1;
+        }
+    }
+    let made = bootstrap.map(|t| t.join().unwrap_or_else(|_| vec![(false, Err("panicked".to_string()))]));
+    for (registers, took) in made.unwrap_or_default() {
+        let what = if registers { "with register code" } else { "as cellular words" };
+        match took {
+            Ok(secs) => println!("; the bootstrap program compiled {what}, cached, {secs:.1} s"),
+            Err(e) => {
+                eprintln!("fixpt: prewarm: the bootstrap program {what}: {e}");
+                status = 1;
+            }
         }
     }
     status

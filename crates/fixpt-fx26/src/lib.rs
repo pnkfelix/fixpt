@@ -1168,6 +1168,7 @@ pub mod session;
 pub mod spec_tests;
 pub mod sexp;
 pub mod syn;
+pub mod bootstrap_cache;
 mod terminate;
 pub mod cellular;
 pub mod debts;

@@ -217,54 +217,11 @@ macro_rules! sharded {
 #[allow(unused_imports)]
 pub(crate) use sharded;
 
-/// The bootstrap program (`fixpt_fx26::bootstrap_program`) compiled by the
-/// compiler written in FX-26 to one cellular word, with register code if
-/// `registers`, in `sc`'s heap: what the tests of the native compilers
-/// compare word by word. The compile is a minute and more in a debug
-/// build, the same in each of them, so it is kept: the word copied into a
-/// heap of its own and written as an image in the build's temporary
-/// directory, keyed by the sources (`FIXPT_BUILD_HASH`), the program and
-/// `registers`, and read back by the next (`TODO.md` §167). A lock on the
-/// file makes one test compile while the others wait for it.
+/// The bootstrap program compiled by the compiler written in FX-26, kept
+/// for all these tests and made by `fixpt prewarm`
+/// (`fixpt_fx26::bootstrap_cache`).
 pub fn bootstrap_compiled(sc: &mut fixpt_scheme::Session, registers: bool) -> fixpt_scheme::Handle {
-    use fixpt_read::FileId;
-    use std::hash::{Hash, Hasher};
-    let text = fixpt_fx26::bootstrap_program();
-    let mut key = std::collections::hash_map::DefaultHasher::new();
-    (env!("FIXPT_BUILD_HASH"), &text, registers).hash(&mut key);
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    let path = dir.join(format!("bootstrap-compiled-{:016x}.img", key.finish()));
-    let lock = std::fs::File::create(path.with_extension("lock")).expect("a lock file");
-    lock.lock().expect("locked");
-    if let Ok(bytes) = std::fs::read(&path)
-        && let Ok(from) = fixpt_heap::image::load_trusted(&bytes)
-    {
-        let root = from.roots_slice()[0];
-        return sc.make(|m| m.heap().copy_graph_from(&from, root));
-    }
-    let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
-    let compile = if registers { fixpt_fx26::syn::compile_to_word_with_registers } else { fixpt_fx26::syn::compile_to_word };
-    let word = compile(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
-    sc.make(|m| {
-        let mut alone = Heap::new();
-        let w = m.get(word);
-        let copy = alone.copy_graph_from(m.heap(), w);
-        alone.push_root(copy);
-        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, fixpt_heap::image::dump_packed(&alone)).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        }
-        Value::NULL
-    });
-    // Those of other builds, unused for a day, let go.
-    let day = std::time::Duration::from_secs(24 * 3600);
-    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a > day);
-        if old && e.file_name().to_string_lossy().starts_with("bootstrap-compiled-") {
-            let _ = std::fs::remove_file(e.path());
-        }
-    }
-    word
+    fixpt_fx26::bootstrap_cache::bootstrap_compiled(sc, registers)
 }
 
 /// Each program in `tests/programs/{sub}`, at least `least` of them, does
