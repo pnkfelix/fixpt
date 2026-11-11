@@ -53,8 +53,14 @@ fn the_assemblers_pieces_as_the_rust_compiler_makes_them() {
     let mut cases: Vec<Case> = Vec::new();
     let mut add = |name: &'static str, fx: Vec<A>, rust: Vec<i64>| cases.push((name, fx, rust));
     use A::{I, L};
-    for n in [0i64, 7, 9, 10, 37] {
+    // A machine's own call-outs (`OWN_CALLOUTS`), which code alone can name:
+    // another is loaded from a field of its code bloblet, which the
+    // continuation procedure's code has not (`continuation_code`). A
+    // call-out piece runs in `harness`, which gives each its field.
+    for n in [0i64, 7, 9] {
         add("continuation-code", vec![I(n)], vec![n]);
+    }
+    for n in [0i64, 7, 9, 10, 37] {
         add("call-out", vec![I(n)], vec![n]);
     }
     for size in [16i64, 32, 208, 4096, 4112, 8192 + 48, 16368] {
