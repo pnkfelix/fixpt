@@ -169,6 +169,36 @@ fn run_front_end(rt: &mut Runtime, a: &[Value]) -> Outcome<Value> {
     out
 }
 
+/// What `%run-front-end` does with entry `f` and `args`, called from Rust,
+/// with no engine between (`TODO.md` §252, `fixpt_fx26::entries`): its
+/// value, or the message its failure says as `%run-front-end`'s does. Every
+/// value the caller holds must be rooted.
+pub fn enter_front_end(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, String> {
+    rt.heap.quiet_enter();
+    let out = enter_front_end_quietly(rt, f, args);
+    rt.heap.quiet_leave();
+    out
+}
+
+fn enter_front_end_quietly(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, String> {
+    let native = f.is_bloblet() && rt.heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("native-closure") };
+    if let (true, Some(call)) = (native, rt.call_native) {
+        return call(rt, f, args).map_err(|e| match e {
+            crate::NativeExit::Failed(m) => format!("cellular word: {m}"),
+            _ => "cellular word: the front end escaped its entry".to_string(),
+        });
+    }
+    let (word, args) = if is_closure(rt, f) {
+        (closure_word(rt, f, args)?, Vec::new())
+    } else if rt.heap.is_cellular_word(f) {
+        (f, args.to_vec())
+    } else {
+        return Err("a cellular word or closure is expected".to_string());
+    };
+    let run = rt.front_end_run_word.or(rt.run_word).ok_or("no cellular machine is installed")?;
+    run(rt, word, &args).map_err(|e| format!("cellular word: {e}"))
+}
+
 fn run_front_end_quietly(rt: &mut Runtime, a: &[Value]) -> Outcome<Value> {
     let native = a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == const { fixpt_heap::layout::kind("native-closure") };
     if let (true, Some(call)) = (native, rt.call_native) {

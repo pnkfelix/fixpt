@@ -6,7 +6,6 @@
 
 mod common;
 
-use fixpt_fx26::session::READER_PREFIX;
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0};
 use fixpt_heap::{Heap, Value};
@@ -60,7 +59,7 @@ fn compare(limit: usize) {
                 Value::NULL
             });
             let got = sc.scope(|one| {
-                let r = one.call_global(&format!("{READER_PREFIX}native-assemble"), &[w, ft, fe]).expect("runs");
+                let r = fixpt_fx26::entries::call(&mut *one, "native-assemble", &[w, ft, fe]).expect("runs");
                 one.view(|v| {
                     let r = v.get(r);
                     let ints = |l: fixpt_scheme::Local| l.list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>();
@@ -132,7 +131,7 @@ fn compare_registers(limit: usize) {
                 Value::NULL
             });
             let got = sc.scope(|one| {
-                let r = one.call_global(&format!("{READER_PREFIX}native-assemble-arm64-regs"), &[rw, ft, fe, sl]).expect("runs");
+                let r = fixpt_fx26::entries::call(&mut *one, "native-assemble-arm64-regs", &[rw, ft, fe, sl]).expect("runs");
                 one.view(|v| {
                     let r = v.get(r);
                     let ints = |l: fixpt_scheme::Local| l.list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>();
@@ -162,7 +161,7 @@ fn compare_registers(limit: usize) {
             let want: Vec<i64> = fixpt_native::cellular::assemble_adapter(n).into_iter().map(i64::from).collect();
             let got = sc.scope(|one| {
                 let a = one.make(|_| Value::fixnum(n as i64));
-                let r = one.call_global(&format!("{READER_PREFIX}native-adapter-arm64"), &[a]).expect("runs");
+                let r = fixpt_fx26::entries::call(&mut *one, "native-adapter-arm64", &[a]).expect("runs");
                 one.view(|v| v.get(r).list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>())
             });
             if got != want {

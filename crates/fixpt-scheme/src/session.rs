@@ -351,6 +351,24 @@ impl Session {
         self.call_raw(f, &args)
     }
 
+    /// Global `name`'s value given to `f` with `args`, no engine between:
+    /// for one that Rust enters itself, such as the front end written in
+    /// FX-26's (`fixpt_runtime::prim::enter_front_end`). Its result rooted,
+    /// or why it failed; none if `name` is unbound.
+    pub fn call_global_with(
+        &mut self,
+        name: &str,
+        args: &[Handle],
+        f: impl FnOnce(&mut Runtime, Value, &[Value]) -> Result<Value, String>,
+    ) -> Option<Result<Handle, SessionError>> {
+        let callee = self.global_value_raw(name)?;
+        let args: Vec<Value> = args.iter().map(|a| self.handle_value(*a)).collect();
+        Some(match f(&mut self.rt, callee, &args) {
+            Ok(v) => Ok(self.root_value(v)),
+            Err(m) => Err(SessionError::Raised(m)),
+        })
+    }
+
     /// Apply a procedure from Rust. Unlike an input, this runs with no
     /// top-level prompt around it: it is for calling library code — the eager
     /// reader — not for running a user's program.

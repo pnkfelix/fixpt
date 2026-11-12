@@ -6042,3 +6042,13 @@ compiled in the test's thread, whose stack is the test harness's. The
 suite runs after `fixpt prewarm`, so it never shows there. To find which
 recursion, and whether the compile should run on a thread of its own
 with a stack sized for it, as the front end's other long walks do.
+
+## 254. `FIXPT_FRONT_END_LOWERED=1` fails in the CLI: `unbound variable: char=?` (found 2026-11-11)
+
+`printf '(+ 1 2)\n' | FIXPT_FRONT_END_LOWERED=1 fixpt eval -` stops with
+"unbound variable: char=?", a release build at 5983942d too (so before
+the day's changes to the sessions): the front end lowered wants the
+prelude's data (`prelude-data.scm`, `whole_prelude`), which a session
+whose strategy is not `Lower` does not load before it. To load it with
+lowered code, as `runtime.scm` is loaded (`load_code`), when the Scheme
+engine is made only where lowered code runs (`TODO.md` §252's host).

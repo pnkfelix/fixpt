@@ -62,7 +62,7 @@ fn compare(limit: usize) {
                 Value::NULL
             });
             let got = sc.scope(|one| {
-                let r = one.call_global(&format!("{READER_PREFIX}native-assemble-x64"), &[w]).expect("runs");
+                let r = fixpt_fx26::entries::call(&mut *one, "native-assemble-x64", &[w]).expect("runs");
                 one.view(|v| {
                     let r = v.get(r);
                     let ints = |l: fixpt_scheme::Local| l.list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>();
@@ -131,7 +131,7 @@ fn compare_registers(limit: usize) {
                 Value::NULL
             });
             let got = sc.scope(|one| {
-                let r = one.call_global(&format!("{READER_PREFIX}native-assemble-x64-regs"), &[rw]).expect("runs");
+                let r = fixpt_fx26::entries::call(&mut *one, "native-assemble-x64-regs", &[rw]).expect("runs");
                 one.view(|v| {
                     let r = v.get(r);
                     let ints = |l: fixpt_scheme::Local| l.list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>();
@@ -161,7 +161,7 @@ fn compare_registers(limit: usize) {
             let want: Vec<i64> = fixpt_native::cellular::x64::assemble_adapter(n).into_iter().map(i64::from).collect();
             let got = sc.scope(|one| {
                 let a = one.make(|_| Value::fixnum(n as i64));
-                let r = one.call_global(&format!("{READER_PREFIX}native-adapter-x64"), &[a]).expect("runs");
+                let r = fixpt_fx26::entries::call(&mut *one, "native-adapter-x64", &[a]).expect("runs");
                 one.view(|v| v.get(r).list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect::<Vec<i64>>())
             });
             if got != want {
@@ -290,7 +290,13 @@ fn compare_one(sc: &mut fixpt_scheme::Session, entry: &str, clo: Handle, rust: &
             fx.fx_park(m.heap(), &mut c);
             Value::NULL
         });
-        let made = sc.call_global(entry, &[name, lists, errors]).expect("runs");
+        // The front end's entry entered from Rust; a program's loaded beside
+        // it, through its Scheme global.
+        let made = match entry.strip_prefix(READER_PREFIX) {
+            Some(e) => fixpt_fx26::entries::call(sc, e, &[name, lists, errors]),
+            None => sc.call_global(entry, &[name, lists, errors]),
+        }
+        .expect("runs");
         sc.make(|m| {
             fx.fx_unpark(m.heap(), &mut c);
             Value::NULL

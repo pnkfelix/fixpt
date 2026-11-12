@@ -94,11 +94,11 @@ pub fn eval_more_with_fx26_evaluator(scheme: &mut Session, standard: Option<Hand
             return Ok(format!("!! check: {m}"));
         }
         state.at = after.at;
-        let runs = s.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
+        let runs = crate::entries::call(&mut *s, "checked-tops", &[]).map_err(|e| fail(e.to_string()))?;
         // A primitive the evaluator calls may fail, as the program's own
         // failure (`DONE.md` §85).
         s.bare_failures = true;
-        let out = s.call_global(&format!("{READER_PREFIX}{entry}"), &[runs]);
+        let out = crate::entries::call(s, entry, &[runs]);
         s.bare_failures = false;
         match out {
             Ok(out) => Ok(s.view(|v| v.get(out).string().unwrap_or_default())),
@@ -140,11 +140,11 @@ pub fn compile_with_fx26_compiler_showing(
             return Ok((format!("!! check: {m}"), None));
         }
         state.at = after.at;
-        let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
-        let runs = s.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
+        let facts = crate::entries::call(&mut *s, "checked-extracts", &[]).map_err(|e| fail(e.to_string()))?;
+        let runs = crate::entries::call(&mut *s, "checked-tops", &[]).map_err(|e| fail(e.to_string()))?;
         let start = std::time::Instant::now();
         let own = own_numbering(s).map_err(fail)?;
-        let result = s.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts, own]).map_err(|e| fail(e.to_string()))?;
+        let result = crate::entries::call(&mut *s, "compile-checked", &[runs, facts, own]).map_err(|e| fail(e.to_string()))?;
         s.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
         let (tag, word) = s.view(|v| {
             let r = v.get(result);
@@ -264,9 +264,9 @@ pub fn assemble_reachable_by_fx26(
             continue;
         }
         let assembled = if x64 {
-            s.call_global(&format!("{READER_PREFIX}native-assemble-x64"), &[w])
+            crate::entries::call(&mut *s, "native-assemble-x64", &[w])
         } else {
-            s.call_global(&format!("{READER_PREFIX}native-assemble"), &[w, far, far])
+            crate::entries::call(&mut *s, "native-assemble", &[w, far, far])
         };
         let assembled = assembled.map_err(|e| e.to_string())?;
         let (code, starts) = s.view(|v| {
@@ -342,13 +342,13 @@ fn assemble_twin_by_fx26(
     let Some(rw) = twin else { return Ok(false) };
     let rw = s.make(|_| rw);
     let assembled = if x64 {
-        s.call_global(&format!("{READER_PREFIX}native-assemble-x64-regs"), &[rw])
+        crate::entries::call(&mut *s, "native-assemble-x64-regs", &[rw])
     } else {
         // As `native-assemble`, of a place it need not know; and the time
         // slice, which arm64's register code has as a constant.
         let far = s.make(|_| Value::fixnum(0));
         let slice = s.make(|_| Value::fixnum(fixpt_runtime::sched::slice() as i64));
-        s.call_global(&format!("{READER_PREFIX}native-assemble-arm64-regs"), &[rw, far, far, slice])
+        crate::entries::call(&mut *s, "native-assemble-arm64-regs", &[rw, far, far, slice])
     };
     let assembled = assembled.map_err(|e| e.to_string())?;
     let (code, resume, err) = s.view(|v| {
@@ -372,7 +372,7 @@ fn assemble_twin_by_fx26(
         return Ok(false);
     }
     let n = s.make(|_| Value::fixnum(n));
-    let adapter = s.call_global(&format!("{READER_PREFIX}{}", if x64 { "native-adapter-x64" } else { "native-adapter-arm64" }), &[n]).map_err(|e| e.to_string())?;
+    let adapter = crate::entries::call(s, if x64 { "native-adapter-x64" } else { "native-adapter-arm64" }, &[n]).map_err(|e| e.to_string())?;
     let (adapter, _) = machine_bytes(s.view(|v| ints_of(Some(v.get(adapter)))), Vec::new());
     let mut starts = vec![-1i64; cells];
     starts[0] = 0;
@@ -402,7 +402,7 @@ pub fn with_last_value<T>(
             return Ok(Err(format!("check: {m}")));
         }
         state.at = after.at;
-        let facts = s.call_global(&format!("{READER_PREFIX}checked-extracts"), &[]).map_err(|e| fail(e.to_string()))?;
+        let facts = crate::entries::call(&mut *s, "checked-extracts", &[]).map_err(|e| fail(e.to_string()))?;
         let word = match compile_checked_to_word(s, file, facts)? {
             Ok(w) => w,
             Err(m) => return Ok(Err(format!("compile: {m}"))),
@@ -463,7 +463,7 @@ fn refusal(s: &mut Session, checked: Handle) -> Option<String> {
 /// if it could not import them.
 pub fn import_types(scheme: &mut Session, bytes: &[u8]) -> Result<Vec<i64>, String> {
     let b = scheme.make(|m| m.heap().make_bytevector(bytes));
-    let ids = scheme.call_global(&format!("{READER_PREFIX}import-types"), &[b]).map_err(|e| e.to_string())?;
+    let ids = crate::entries::call(&mut *scheme, "import-types", &[b]).map_err(|e| e.to_string())?;
     Ok(scheme.view(|v| v.get(ids).list().unwrap_or_default().iter().filter_map(|x| x.fixnum()).collect()))
 }
 
@@ -494,7 +494,7 @@ pub fn check_only_typed(scheme: &mut Session, state: &mut State, file: FileId, t
         });
         let int = |s: &mut Session, n: i64| s.make(|_| Value::fixnum(n));
         let args = [int(s, crate::ids::mode() as i64), int(s, state.at), whole, list];
-        let said = s.call_global(&format!("{READER_PREFIX}check-text-typed"), &args).map_err(|e| fail(e.to_string()))?;
+        let said = crate::entries::call(&mut *s, "check-text-typed", &args).map_err(|e| fail(e.to_string()))?;
         let (said, at) = s.view(|v| {
             let r = v.get(said);
             (r.product_field(1).and_then(|m| m.string()).unwrap_or_default(), r.product_field(2).and_then(|x| x.fixnum()).unwrap_or(0))
@@ -514,8 +514,8 @@ fn check_in(s: &mut Session, standard: Option<Handle>, tops: Handle) -> Result<H
     // What these callers keep is the facts, not the lines (`check-lines!`).
     lines(s, false)?;
     match standard {
-        Some(std) => s.call_global(&format!("{READER_PREFIX}check-program"), &[std, tops]),
-        None => s.call_global(&format!("{READER_PREFIX}check-more"), &[tops]),
+        Some(std) => crate::entries::call(&mut *s, "check-program", &[std, tops]),
+        None => crate::entries::call(&mut *s, "check-more", &[tops]),
     }
 }
 
@@ -523,7 +523,7 @@ fn check_in(s: &mut Session, standard: Option<Handle>, tops: Handle) -> Result<H
 /// name : type ! effect`: only for a caller that reads them.
 pub fn lines(s: &mut Session, on: bool) -> Result<(), fixpt_scheme::SessionError> {
     let v = s.make(|_| Value::boolean(on));
-    s.call_global(&format!("{READER_PREFIX}check-lines!"), &[v]).map(|_| ())
+    crate::entries::call(&mut *s, "check-lines!", &[v]).map(|_| ())
 }
 
 /// What the checker written in FX-26 made of a program: for each definition
@@ -548,7 +548,7 @@ pub fn check_with_fx26_checker(scheme: &mut Session, standard: Handle, file: Fil
         let tops = parse_to_trees(s, file, text)?;
         phase("program parsed");
         lines(s, true).map_err(|e| fail(e.to_string()))?;
-        let result = s.call_global(&format!("{READER_PREFIX}check-program"), &[standard, tops.tops]).map_err(|e| fail(e.to_string()))?;
+        let result = crate::entries::call(&mut *s, "check-program", &[standard, tops.tops]).map_err(|e| fail(e.to_string()))?;
         phase("checked");
         let offsets = byte_offsets(text);
         let at = |c: i64| offsets.get(c as usize).copied().unwrap_or(text.len()) as u32;
@@ -596,7 +596,7 @@ pub fn read_to_syns_at(scheme: &mut Session, file: FileId, text: &str, at: i64) 
     let limit = scheme.engine.step_limit();
     scheme.engine.set_step_limit(None);
     let at = scheme.make(|_| fixpt_heap::Value::fixnum(at));
-    let read = scheme.call_global(&format!("{READER_PREFIX}read-text-at"), &[s, at]);
+    let read = crate::entries::call(&mut *scheme, "read-text-at", &[s, at]);
     scheme.engine.set_step_limit(limit);
     let read = read.map_err(|e| fail(e.to_string()))?;
     // Its forms, the list's one element, or `#f` for none.
@@ -652,9 +652,9 @@ pub fn rust_facts_in(scheme: &mut Session, file: FileId, text: &str, conv: crate
     // expression (`checked-withs!`), and each module reshaped
     // (`checked-reshapes!`): the checker's record, which the compiler reads.
     let withs = scheme.make(|m| found.withs(m.heap()));
-    scheme.call_global(&format!("{READER_PREFIX}checked-withs!"), &[withs]).map_err(|e| fail(e.to_string()))?;
+    crate::entries::call(&mut *scheme, "checked-withs!", &[withs]).map_err(|e| fail(e.to_string()))?;
     let reshapes = scheme.make(|m| found.reshapes(m.heap()));
-    scheme.call_global(&format!("{READER_PREFIX}checked-reshapes!"), &[reshapes]).map_err(|e| fail(e.to_string()))?;
+    crate::entries::call(&mut *scheme, "checked-reshapes!", &[reshapes]).map_err(|e| fail(e.to_string()))?;
     let list = scheme.make(|m| found.facts(m.heap()));
     Ok(list)
 }
@@ -668,10 +668,10 @@ pub fn rust_facts_in(scheme: &mut Session, file: FileId, text: &str, conv: crate
 pub fn compile_to_word_with_registers(scheme: &mut Session, file: FileId, text: &str, facts: Handle) -> R<Result<Handle, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let on = scheme.make(|_| Value::TRUE);
-    scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[on]).map_err(|e| fail(e.to_string()))?;
+    crate::entries::call(&mut *scheme, "compile-registers!", &[on]).map_err(|e| fail(e.to_string()))?;
     let out = compile_to_word(scheme, file, text, facts);
     let off = scheme.make(|_| Value::FALSE);
-    scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(|e| fail(e.to_string()))?;
+    crate::entries::call(&mut *scheme, "compile-registers!", &[off]).map_err(|e| fail(e.to_string()))?;
     out
 }
 
@@ -681,10 +681,10 @@ pub fn compile_to_word_with_registers(scheme: &mut Session, file: FileId, text: 
 /// not make one.
 pub fn compile_checked_to_word(scheme: &mut Session, file: FileId, facts: Handle) -> R<Result<Handle, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    let runs = scheme.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
+    let runs = crate::entries::call(&mut *scheme, "checked-tops", &[]).map_err(|e| fail(e.to_string()))?;
     let start = std::time::Instant::now();
     let own = own_numbering(scheme).map_err(fail)?;
-    let result = scheme.call_global(&format!("{READER_PREFIX}compile-checked"), &[runs, facts, own]).map_err(|e| fail(e.to_string()))?;
+    let result = crate::entries::call(&mut *scheme, "compile-checked", &[runs, facts, own]).map_err(|e| fail(e.to_string()))?;
     scheme.runtime_unrooted().compile_nanos += start.elapsed().as_nanos() as u64;
     word_of(scheme, result)
 }
@@ -707,7 +707,7 @@ pub fn compile_to_word(scheme: &mut Session, file: FileId, text: &str, facts: Ha
 /// The same, from the program's trees ([`parse_syns`]).
 pub fn compile_trees_to_word(scheme: &mut Session, file: FileId, parsed: &Parsed, facts: Handle) -> R<Result<Handle, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    let result = scheme.call_global(&format!("{READER_PREFIX}compile-program"), &[parsed.tops, facts, parsed.numbering]).map_err(|e| fail(e.to_string()))?;
+    let result = crate::entries::call(&mut *scheme, "compile-program", &[parsed.tops, facts, parsed.numbering]).map_err(|e| fail(e.to_string()))?;
     word_of(scheme, result)
 }
 
@@ -780,21 +780,20 @@ fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, b
     // The expander told, first, the shapes of the globals the forms name, as
     // the checker has their types (`check-global-shapes!`): none if it is not
     // to go on from them (`globals`), whatever it last held.
-    let global = format!("{READER_PREFIX}check-global-shapes!");
-    if scheme.is_bound(&global) {
+    if crate::entries::bound(scheme, "check-global-shapes!") {
         let fresh = scheme.make(|_| Value::boolean(!globals));
-        scheme.call_global(&global, &[syns, fresh]).map_err(|e| fail(e.to_string()))?;
+        crate::entries::call(scheme, "check-global-shapes!", &[syns, fresh]).map_err(|e| fail(e.to_string()))?;
     }
-    let keyed = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[keys, syns]).map_err(|e| fail(e.to_string()))?;
+    let keyed = crate::entries::call(&mut *scheme, "parse-program", &[keys, syns]).map_err(|e| fail(e.to_string()))?;
     // The checker told of this parse, if there is one: the macros each
     // `with`'s body used (`check-macro-uses!`).
-    if scheme.is_bound(&format!("{READER_PREFIX}check-macro-uses!")) {
-        scheme.call_global(&format!("{READER_PREFIX}check-macro-uses!"), &[]).map_err(|e| fail(e.to_string()))?;
+    if crate::entries::bound(&scheme, "check-macro-uses!") {
+        crate::entries::call(&mut *scheme, "check-macro-uses!", &[]).map_err(|e| fail(e.to_string()))?;
     }
     // And the register compiler told of the keys the expander made
     // (`keys-mirrored!`), where a part a template made is placed.
-    if scheme.is_bound(&format!("{READER_PREFIX}keys-mirrored!")) {
-        scheme.call_global(&format!("{READER_PREFIX}keys-mirrored!"), &[]).map_err(|e| fail(e.to_string()))?;
+    if crate::entries::bound(&scheme, "keys-mirrored!") {
+        crate::entries::call(&mut *scheme, "keys-mirrored!", &[]).map_err(|e| fail(e.to_string()))?;
     }
     let (tag, err, at, walked) = scheme.view(|v| {
         let k = v.get(keyed);
@@ -1002,7 +1001,7 @@ pub fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
 fn supply_loaded_at(scheme: &mut Session, file: FileId, text: &str, base: i64) -> R<Vec<(String, String)>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let (list, loads) = loaded_files_at(scheme, file, text, base)?;
-    scheme.call_global(&format!("{READER_PREFIX}loaded-files!"), &[list]).map_err(|e| fail(e.to_string()))?;
+    crate::entries::call(&mut *scheme, "loaded-files!", &[list]).map_err(|e| fail(e.to_string()))?;
     let offsets = byte_offsets(text);
     let mut list = scheme.make(|_| Value::NULL);
     let char_at = |byte: u32| base + offsets.partition_point(|&o| o < byte as usize) as i64;
@@ -1023,13 +1022,13 @@ fn supply_loaded_at(scheme: &mut Session, file: FileId, text: &str, base: i64) -
         let one = scheme.call_global("%make-frozen", &fields).map_err(|e| fail(e.to_string()))?;
         list = scheme.call_global("cons", &[one, list]).map_err(|e| fail(e.to_string()))?;
     }
-    scheme.call_global(&format!("{READER_PREFIX}includes-given!"), &[list]).map_err(|e| fail(e.to_string()))?;
+    crate::entries::call(&mut *scheme, "includes-given!", &[list]).map_err(|e| fail(e.to_string()))?;
     let mut names = scheme.make(|_| Value::NULL);
     for n in STANDARD_NAMES.with(|n| std::mem::take(&mut *n.borrow_mut())).into_iter().rev() {
         let sym = scheme.make(|m| m.heap().intern(&n));
         names = scheme.call_global("cons", &[sym, names]).map_err(|e| fail(e.to_string()))?;
     }
-    scheme.call_global(&format!("{READER_PREFIX}standard-names!"), &[names]).map_err(|e| fail(e.to_string()))?;
+    crate::entries::call(&mut *scheme, "standard-names!", &[names]).map_err(|e| fail(e.to_string()))?;
     Ok(loads)
 }
 
@@ -1098,12 +1097,11 @@ pub fn source_place(scheme: &mut Session, k: i64) -> i64 {
 }
 
 fn source_of(scheme: &mut Session, k: i64) -> (i64, i64) {
-    let name = format!("{READER_PREFIX}macro-source");
-    if k < SOURCE_BASE || !scheme.is_bound(&name) {
+    if k < SOURCE_BASE || !crate::entries::bound(scheme, "macro-source") {
         return (k, 0);
     }
     let arg = scheme.make(|_| Value::fixnum(k));
-    let Ok(r) = scheme.call_global(&name, &[arg]) else { return (k, 0) };
+    let Ok(r) = crate::entries::call(scheme, "macro-source", &[arg]) else { return (k, 0) };
     scheme.view(|v| {
         let r = v.get(r);
         (r.product_field(1).and_then(|x| x.fixnum()).unwrap_or(k), r.product_field(2).and_then(|x| x.fixnum()).unwrap_or(0))
@@ -1113,11 +1111,10 @@ fn source_of(scheme: &mut Session, k: i64) -> (i64, i64) {
 /// The FX-26 expander's expansions (`expansions-made`): each one's macro's
 /// name and its use's place, by its number.
 fn expansions_made(scheme: &mut Session) -> HashMap<i64, (String, i64, i64)> {
-    let name = format!("{READER_PREFIX}expansions-made");
-    if !scheme.is_bound(&name) {
+    if !crate::entries::bound(scheme, "expansions-made") {
         return HashMap::new();
     }
-    let Ok(list) = scheme.call_global(&name, &[]) else { return HashMap::new() };
+    let Ok(list) = crate::entries::call(scheme, "expansions-made", &[]) else { return HashMap::new() };
     scheme.view(|v| {
         let int = |x: Option<Local<'_>>| x.and_then(|x| x.fixnum()).unwrap_or(0);
         v.get(list)

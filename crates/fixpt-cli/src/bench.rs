@@ -565,25 +565,24 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         })?;
         let (fx_parse, tops) = fx_phase(sc, r("fx parse"), |sc| fixpt_fx26::syn::parse_syns(sc, file, text, syns).map_err(msg))?;
         let standard = fixpt_fx26::syn::read_standard(sc).map_err(msg)?;
-        let reader = |n: &str| format!("{}{n}", fixpt_fx26::session::READER_PREFIX);
         // A compile reads the facts, not each form's line; with
         // `FIXPT_BENCH_LINES` set, the lines too, as `fixpt check` makes them.
         let lines = std::env::var_os("FIXPT_BENCH_LINES").is_some();
         fixpt_fx26::syn::lines(sc, lines).map_err(|e| e.to_string())?;
         let (fx_check, ()) = fx_phase(sc, r("fx check"), |sc| {
-            let r = sc.call_global(&reader("check-program"), &[standard, tops.tops]).map_err(|e| e.to_string())?;
+            let r = fixpt_fx26::entries::call(sc, "check-program", &[standard, tops.tops]).map_err(|e| e.to_string())?;
             let tag = sc.view(|v| v.get(r).sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default());
             if tag == "k-ok" { Ok(()) } else { Err("the checker written in FX-26 finds it wrong".to_string()) }
         })?;
         let facts = fixpt_fx26::syn::rust_facts(sc, file, text).map_err(msg)?;
         let on = sc.make(|_| Value::TRUE);
-        sc.call_global(&reader("compile-registers!"), &[on]).map_err(|e| e.to_string())?;
+        fixpt_fx26::entries::call(sc, "compile-registers!", &[on]).map_err(|e| e.to_string())?;
         let fx_words = fx_phase(sc, r("fx words"), |sc| {
             let made = fixpt_fx26::syn::compile_trees_to_word(sc, file, &tops, facts).map_err(msg)?;
             made.map(|_| ()).map_err(|e| format!("the compiler written in FX-26: {e}"))
         });
         let off = sc.make(|_| Value::FALSE);
-        sc.call_global(&reader("compile-registers!"), &[off]).map_err(|e| e.to_string())?;
+        fixpt_fx26::entries::call(sc, "compile-registers!", &[off]).map_err(|e| e.to_string())?;
         let (fx_words, ()) = fx_words?;
         // `native.fx` over the words the Rust compiler makes, as
         // `fx-compiled` at the REPL over the FX-26 compiler's.

@@ -2364,7 +2364,7 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
             fx_park(heap, &mut c);
             fixpt_heap::Value::NULL
         });
-        let made = s.call_global(&format!("{}{}", fixpt_fx26::session::READER_PREFIX, DIRECT_FX.1), &[name, lists, errors]);
+        let made = fixpt_fx26::entries::call(s, DIRECT_FX.1, &[name, lists, errors]);
         s.make(|m| {
             let heap = m.heap();
             fx_unpark(heap, &mut c);
