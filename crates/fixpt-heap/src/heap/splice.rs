@@ -26,6 +26,7 @@
 //! (`save_native_front_end`).
 
 use super::code::{PART_BASES, in_code_area};
+use super::tables::Which;
 use super::young::is_young;
 use super::{Heap, read_head, relocating};
 use crate::image::Parts;
@@ -89,7 +90,7 @@ impl Heap {
         // symbol here may move: none here yet, as when the image is read
         // before anything else); else its mutable half, scanned, since this
         // heap's symbols, which move, may stand for the image's.
-        let immutable_ok = !self.symbols.iter().any(|&s| self.moves(s));
+        let immutable_ok = !self.table_values(Which::Symbols).into_iter().any(|s| self.moves(s));
         // In place only where every part lands where it was made for: not
         // where the immutable half goes to the mutable half, whose words
         // the fixups alone would not reach (a front end read after the
@@ -181,13 +182,17 @@ impl Heap {
         // What stands for objects of the image's, by their values there: not
         // by where they are alone, since a bloblet of no suffix is pointed
         // at one past its fields, where the next object, a pair say, is.
-        let (symbols, globals, image_symbols, mut added) = (self.symbols.len(), self.globals.len(), self.image_symbols.len(), Vec::new());
+        let (symbols, globals, image_symbols, mut added) = (self.symbols.len, self.globals.len, self.image_symbols.len(), Vec::new());
+        // The image's symbols that are new here, and as many globals: put
+        // in the tables (their chunks the tables area's) once the image is
+        // in place, nothing made meanwhile.
+        let mut new_symbols: Vec<Value> = Vec::new();
         let mut instead: HashMap<u64, Value> = given.iter().map(|&(v, to)| (v.raw(), to)).collect();
         let mut stub = None;
         // Into a heap of no symbols yet, none of the image's can be one of
         // this heap's: their names are not read, but looked up by their
         // hashes when first asked for (`image_symbols`).
-        let fresh = self.symbols.is_empty() && self.image_symbols.is_empty();
+        let fresh = symbols == 0 && self.image_symbols.is_empty();
         let stub_hash = super::symbol_hash_of("%fx26-foreign-stub");
         for &s in &img.symbols {
             let at_s = moves.index(s.index() - ib).ok_or("a symbol outside the image")?;
@@ -212,19 +217,20 @@ impl Heap {
                 }
             }
             if let Some(i) = name.as_deref().and_then(|n| self.symbol_number(n)) {
-                instead.insert(s.raw(), self.symbols[i as usize]);
+                let i = i as usize;
+                let sym = if i < symbols { self.table_get(Which::Symbols, i) } else { new_symbols[i - symbols] };
+                instead.insert(s.raw(), sym);
                 continue;
             }
             // The image's symbol is this heap's, at a global slot of its own.
-            let slot = self.globals.len();
-            self.globals.push(Value::UNBOUND);
+            let slot = globals + new_symbols.len();
             // Written only if it is another slot than the image's: in a heap
             // that holds no symbol yet, it is the same.
             let w = Value::fixnum(slot as i64).raw();
             if self.mem.words()[at_s - SYMBOL_SLOT] != w {
                 self.mem.words_mut()[at_s - SYMBOL_SLOT] = w;
             }
-            let i = self.symbols.len() as u32;
+            let i = (symbols + new_symbols.len()) as u32;
             match name {
                 Some(name) if !fresh => {
                     self.symbol_index.insert(name.clone(), i);
@@ -232,7 +238,7 @@ impl Heap {
                 }
                 _ => self.image_symbols.push((hash, i)),
             }
-            self.symbols.push(moved(s).expect("moved above"));
+            new_symbols.push(moved(s).expect("moved above"));
         }
         self.image_symbols.sort_unstable();
 
@@ -310,19 +316,11 @@ impl Heap {
                 self.symbol_index.remove(&name);
             }
             self.image_symbols.truncate(image_symbols);
-            self.symbols.truncate(symbols);
-            self.globals.truncate(globals);
             (self.top, self.immutable_top, self.static_top) = (old_top, old_immutable_top, old_static_top);
             return Err(why);
         }
         for f in young {
             self.mark_card(f);
-        }
-        if let Some(old) = stub.and_then(moved) {
-            let sym = self.intern("%fx26-foreign-stub");
-            let slot = self.symbol_global_slot(sym);
-            self.globals[slot] = old;
-            self.code.stub = old;
         }
 
         self.cross_all(at, at + n);
@@ -379,6 +377,18 @@ impl Heap {
         // swept: no collection scans that half to find it.
         if immutable_ok && ni > 0 {
             self.fix_code();
+        }
+        // The new symbols and their globals in the tables; then the stub,
+        // which is found by a global.
+        for sym in new_symbols {
+            self.table_push(Which::Globals, Value::UNBOUND, true);
+            self.table_push(Which::Symbols, sym, true);
+        }
+        if let Some(old) = stub.and_then(moved) {
+            let sym = self.intern("%fx26-foreign-stub");
+            let slot = self.symbol_global_slot(sym);
+            self.set_global(slot, old);
+            self.code.stub = old;
         }
         // Read-only: nothing may write there (`set_slot` refuses what
         // would), and a page past it the heap writes next is not one of it.

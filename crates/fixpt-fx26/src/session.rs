@@ -1118,8 +1118,13 @@ pub enum Strategy {
 }
 
 impl Fx26Session {
+    /// A session on `backend`; where the native front end is the default
+    /// (`native_front_end_default`), its cache read in first, in place
+    /// (`with_backend_preloaded`): a compiled session wants it, and read
+    /// then it is mapped where it was made, not copied into a heap in use
+    /// (`TODO.md` §262).
     pub fn with_backend(backend: fixpt_engine::Backend) -> R<Fx26Session> {
-        Fx26Session::with_backend_preloaded(backend, None)
+        Fx26Session::with_backend_preloaded(backend, native_front_end_default().then_some(NATIVE_KEEPING))
     }
 
     /// [`with_backend`](Fx26Session::with_backend), and where `keeping`

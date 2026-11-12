@@ -31,7 +31,10 @@ mod code;
 mod intern;
 mod regions;
 mod splice;
+mod tables;
 mod young;
+
+use tables::Which;
 pub use code::CodePart;
 pub use regions::REGION_SLOTS;
 
@@ -244,10 +247,15 @@ const NURSERY_MAX: usize = 1 << 30;
 const STATIC_BASE: usize = NURSERY_BASE + NURSERY_MAX;
 const STATIC_WORDS: usize = 1 << 30;
 const STATIC_MUTABLE_BASE: usize = STATIC_BASE + STATIC_WORDS / 2;
+/// Past the static area, the tables area (`tables`, `TODO.md` §264): the
+/// globals' cells and the interned symbols an image brought, chunks that
+/// never move nor are freed, a generation of their own.
+const TABLES_BASE: usize = STATIC_BASE + STATIC_WORDS;
+const TABLES_WORDS: usize = 1 << 27;
 /// Last, the code area (`code`): bloblets that never move, collected by
 /// marking and sweeping. Last, since native code takes a callee whose code
 /// is at or past the code area's start to be native code.
-const CODE_BASE: usize = STATIC_BASE + STATIC_WORDS;
+const CODE_BASE: usize = TABLES_BASE + TABLES_WORDS;
 /// The nursery's range ends with the native convention's stack
 /// (`fixpt-native`'s stack cache, `docs/research/deep-recursion.md`), which
 /// the nursery never allocates into: so that frames flushed where they are
@@ -265,21 +273,24 @@ const MEM_WORDS: usize = CODE_BASE + CODE_WORDS;
 pub(crate) const GEN_SHIFT: u32 = 27;
 const GEN_CHUNKS: usize = MEM_WORDS >> GEN_SHIFT;
 /// A chunk's generation, in a byte's low seven bits, by how rarely its
-/// objects are collected (static ≫ code ≫ old ≫ nursery): the nursery's,
-/// the old space's (the arenas' and reaps' too), the code area's (whose
-/// objects never move, but a code collection may free), and the static
-/// area's (never collected); its top bit, that it is the static area's
-/// immutable half, where nothing that may move or be freed may be stored.
+/// objects are collected (static ≫ code ≫ tables ≫ old ≫ nursery): the
+/// nursery's, the old space's (the arenas' and reaps' too), the tables
+/// area's (whose chunks never move nor are freed, but are scanned whole by
+/// a code collection), the code area's (whose objects never move, but a
+/// code collection may free), and the static area's (never collected); its
+/// top bit, that it is the static area's immutable half, where nothing that
+/// may move or be freed may be stored.
 pub(crate) const GEN_YOUNG: u8 = 0;
 pub(crate) const GEN_OLD: u8 = 1;
-pub(crate) const GEN_CODE: u8 = 2;
+pub(crate) const GEN_TABLES: u8 = 2;
+pub(crate) const GEN_CODE: u8 = 3;
 pub(crate) const GEN_STILL: u8 = 0x7f;
 pub(crate) const GEN_MASK: u8 = 0x7f;
 pub(crate) const GEN_IMMUTABLE: u8 = 0x80;
 
 const _: () = {
     let chunk = 1 << GEN_SHIFT;
-    let bounds = [MAX_SEMI_WORDS, ARENA_BASE, REAP_BASE, NURSERY_BASE, STATIC_BASE, STATIC_MUTABLE_BASE, CODE_BASE, MEM_WORDS];
+    let bounds = [MAX_SEMI_WORDS, ARENA_BASE, REAP_BASE, NURSERY_BASE, STATIC_BASE, STATIC_MUTABLE_BASE, TABLES_BASE, CODE_BASE, MEM_WORDS];
     let mut i = 0;
     while i < bounds.len() {
         assert!(bounds[i] % chunk == 0, "an area's boundary inside a chunk of the generation table");
@@ -300,6 +311,8 @@ static GEN: [u8; GEN_CHUNKS] = {
             GEN_STILL | GEN_IMMUTABLE
         } else if at >= CODE_BASE {
             GEN_CODE
+        } else if at >= TABLES_BASE {
+            GEN_TABLES
         } else if at >= STATIC_MUTABLE_BASE {
             GEN_STILL
         } else {
@@ -398,11 +411,14 @@ pub struct Heap {
     /// transformer while its half-built program holds constants. Growing
     /// never moves anything, so those `Value`s stay valid.
     inhibited: u32,
-    /// Global variable slots, indexed by a symbol's global-slot field.
-    globals: Vec<Value>,
-    /// Interned symbols. Position is the symbol's identity; the `Value`s here
-    /// are ordinary roots and get forwarded like any other.
-    symbols: Vec<Value>,
+    /// Global variable slots, indexed by a symbol's global-slot field: a
+    /// table of chunks (`tables`, `TODO.md` §264).
+    globals: tables::Table,
+    /// Interned symbols, a table of chunks too. Position is the symbol's
+    /// identity.
+    symbols: tables::Table,
+    /// Where an image's chunks of the two tables are (`tables`).
+    tables: tables::Area,
     /// Rust-side name lookup. Keys are plain `String`s, so a collection cannot
     /// invalidate them.
     symbol_index: HashMap<String, u32, std::hash::BuildHasherDefault<WordHasher>>,
@@ -569,8 +585,9 @@ impl Heap {
                 s
             },
             inhibited: 0,
-            globals: Vec::new(),
-            symbols: Vec::new(),
+            globals: tables::Table::default(),
+            symbols: tables::Table::default(),
+            tables: tables::Area::default(),
             symbol_index: HashMap::default(),
             name_buf: String::new(),
             static_symbols: Vec::new(),
@@ -658,11 +675,11 @@ impl Heap {
     }
     #[inline]
     pub fn symbol_count(&self) -> usize {
-        self.symbols.len()
+        self.symbols.len
     }
     #[inline]
     pub fn global_count(&self) -> usize {
-        self.globals.len()
+        self.globals.len
     }
 
     // ------------------------------------------------------------ raw word I/O
@@ -2159,7 +2176,7 @@ impl Heap {
     // ----------------------------------------------------------------- symbols
     /// The symbol `name`, if it has been interned; making none.
     pub fn interned(&self, name: &str) -> Option<Value> {
-        self.symbol_number(name).map(|i| self.symbols[i as usize])
+        self.symbol_number(name).map(|i| self.table_get(Which::Symbols, i as usize))
     }
 
     /// Where `name`'s symbol is in `symbols`, if it is interned: in
@@ -2181,7 +2198,7 @@ impl Heap {
             .iter()
             .take_while(|&&(k, _)| k == h)
             .map(|&(_, i)| i)
-            .find(|&i| self.string_is(self.obj_ref(self.symbols[i as usize], 0), name))
+            .find(|&i| self.string_is(self.obj_ref(self.table_get(Which::Symbols, i as usize), 0), name))
     }
 
     /// Whether string `o` holds `text`, compared in place.
@@ -2203,7 +2220,7 @@ impl Heap {
     pub fn intern_static(&mut self, name: &'static str) -> Value {
         let key = name.as_ptr() as usize ^ name.len() << 48;
         if let Some(&(_, i)) = self.static_symbols.iter().find(|(k, _)| *k == key) {
-            return self.symbols[i as usize];
+            return self.table_get(Which::Symbols, i as usize);
         }
         let v = self.intern(name);
         let i = self.symbol_number(name).expect("interned just now");
@@ -2226,22 +2243,23 @@ impl Heap {
 
     pub fn intern(&mut self, name: &str) -> Value {
         if let Some(&i) = self.symbol_index.get(name) {
-            return self.symbols[i as usize];
+            return self.table_get(Which::Symbols, i as usize);
         }
         // An image's, asked for the first time: kept where it is found next.
         if let Some(i) = self.image_symbol(name) {
             self.symbol_index.insert(name.to_string(), i);
-            return self.symbols[i as usize];
+            return self.table_get(Which::Symbols, i as usize);
         }
+        // As long as the heap lives: not in a region, which may end.
+        let region = self.regions.target.take();
         let s = self.make_string(name);
         let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
+        self.regions.target = region;
         self.obj_set(sym, 0, s);
         self.obj_set(sym, 1, Value::fixnum(symbol_hash_of(name)));
-        let slot = self.globals.len();
-        self.globals.push(Value::UNBOUND);
+        let slot = self.table_push(Which::Globals, Value::UNBOUND, false);
         self.obj_set(sym, 2, Value::fixnum(slot as i64));
-        let idx = self.symbols.len() as u32;
-        self.symbols.push(sym);
+        let idx = self.table_push(Which::Symbols, sym, false) as u32;
         self.symbol_index.insert(name.to_string(), idx);
         sym
     }
@@ -2295,7 +2313,7 @@ impl Heap {
     /// (`fixpt-native`'s `adapt`), once made: a code bloblet, which never
     /// moves, held in a global of its own, so that it lives as the heap does.
     pub fn adapter_code(&self) -> Option<Value> {
-        self.adapter_slot.map(|s| self.globals[s])
+        self.adapter_slot.map(|s| self.table_get(Which::Globals, s))
     }
     /// The next cell made for global `name` starts its count of writes at
     /// `n` (`layout::cellular::GLOBAL_WRITES`), not 0: a session's plan for
@@ -2316,7 +2334,7 @@ impl Heap {
     pub fn set_adapter_code(&mut self, code: Value) {
         let sym = self.intern("%fx26-adapter-code");
         let slot = self.symbol_global_slot(sym);
-        self.globals[slot] = code;
+        self.table_set(Which::Globals, slot, code);
         self.adapter_slot = Some(slot);
     }
 
@@ -2347,11 +2365,11 @@ impl Heap {
 
     #[inline]
     pub fn global(&self, slot: usize) -> Value {
-        self.globals[slot]
+        self.table_get(Which::Globals, slot)
     }
     #[inline]
     pub fn set_global(&mut self, slot: usize, v: Value) {
-        self.globals[slot] = v;
+        self.table_set(Which::Globals, slot, v);
     }
 
     /// Hold off collection until the matching [`allow_collection`].
@@ -2372,7 +2390,7 @@ impl Heap {
 
     /// Every Value the heap itself roots, for `sro`.
     pub(crate) fn roots_for_sro(&self) -> Vec<Value> {
-        self.roots.iter().chain(&self.globals).chain(&self.symbols).copied().collect()
+        self.roots.iter().copied().chain(self.table_values(Which::Globals)).chain(self.table_values(Which::Symbols)).collect()
     }
 
     // ------------------------------------------------------------ native roots
@@ -2631,6 +2649,10 @@ impl Heap {
         let from = self.active;
         let to = if self.active == 0 { MAX_SEMI_WORDS } else { 0 };
         let (remembered, stressed) = (self.remembered(), self.stressed());
+        // A code collection scans the whole tables area: roots, all of them.
+        if code {
+            self.tables_all_dirty();
+        }
         let mem = self.mem.words_mut();
         let reaps = self.regions.live.len();
         let arenas: Vec<(usize, usize)> = self.regions.arena_ranges().collect();
@@ -2693,11 +2715,12 @@ impl Heap {
         for i in 0..self.roots.len() {
             self.roots[i] = fwd!(self.roots[i]);
         }
-        for i in 0..self.globals.len() {
-            self.globals[i] = fwd!(self.globals[i]);
-        }
-        for i in 0..self.symbols.len() {
-            self.symbols[i] = fwd!(self.symbols[i]);
+        // The tables' chunks of the heap's own (`tables`), as roots; the
+        // tables area's are scanned below.
+        for chunk in self.globals.chunks.iter_mut().chain(self.symbols.chunks.iter_mut()) {
+            if !tables::in_tables(chunk.index() - c.base) {
+                *chunk = fwd!(*chunk);
+            }
         }
         for slice in extra_roots.iter_mut() {
             for v in slice.iter_mut() {
@@ -2782,6 +2805,11 @@ impl Heap {
                 young::scan_code_cards(&mut self.cards, mem, &mut c, part.base, &part.starts, older);
             }
         }
+        // The tables area, by its cards of either table; in a code
+        // collection, all of them (`tables_all_dirty`, above), so that the
+        // code its slots hold is marked.
+        let older = young::OlderScan { table: &mut self.old_cards, remembered: young::Remembered::NONE, major: true, slots: None };
+        young::scan_code_cards(&mut self.cards, mem, &mut c, TABLES_BASE, &self.tables.starts, older);
 
         // Scan to-space linearly, and each reap's new chunks, until neither
         // has anything left to scan: each may copy into the other.
@@ -3053,6 +3081,9 @@ impl Heap {
         } else if in_static(i) {
             // It never moves, and is scanned whole as a root.
             return v;
+        } else if tables::in_tables(i) {
+            // A chunk of the tables area: never moves, scanned by its cards.
+            return v;
         } else if code::in_code_area(i) {
             // It never moves: marked, and scanned once, in a code
             // collection; else live, what it refers to found by its cards.
@@ -3162,7 +3193,7 @@ impl Heap {
         words.extend_from_slice(&self.mem.words()[NURSERY_BASE..self.nursery_top]);
         map_refs(&mut words, &rebase);
         let all = |vs: &[Value]| vs.iter().map(|v| rebase(*v)).collect::<Vec<_>>();
-        (words, all(&self.globals), all(&self.symbols), all(&self.roots))
+        (words, all(&self.table_values(Which::Globals)), all(&self.table_values(Which::Symbols)), all(&self.roots))
     }
 
     /// The code area as an image carries it: each part's words, rebased as
@@ -3226,7 +3257,7 @@ impl Heap {
         // object by a reference to it, as `goes` finds it below.
         let mut first = vec![false; objects.len()];
         let object_of = |i: usize| objects.partition_point(|&(at, _, _)| at < i).checked_sub(1);
-        for &sym in &self.symbols {
+        for sym in self.table_values(Which::Symbols) {
             for v in [sym, self.obj_ref(sym, 0)] {
                 let i = v.index() - self.base;
                 if let Some(k) = object_of(i).filter(|&k| objects[k].2 == 0 && i <= objects[k].0 + objects[k].1) {
@@ -3281,7 +3312,7 @@ impl Heap {
             map_refs(&mut words, &rebase);
             (words, free)
         });
-        (halves, all(&self.globals), all(&self.symbols), all(&self.roots), code)
+        (halves, all(&self.table_values(Which::Globals)), all(&self.table_values(Which::Symbols)), all(&self.roots), code)
     }
 
     /// A reference, as an image has it: as though the active semispace
@@ -3326,9 +3357,7 @@ impl Heap {
     pub fn live_words(&self) -> &[u64] {
         &self.mem.words()[self.active..self.top]
     }
-    pub fn globals_slice(&self) -> &[Value] {
-        &self.globals
-    }
+
     /// Where the heap's memory starts, in words.
     pub fn base_word(&self) -> usize {
         self.base
@@ -3341,8 +3370,14 @@ impl Heap {
         FIXED_BASE / 8
     }
 
-    pub fn symbols_slice(&self) -> &[Value] {
-        &self.symbols
+    /// The interned symbols, in order: a symbol's number its index.
+    pub fn symbols(&self) -> Vec<Value> {
+        self.table_values(Which::Symbols)
+    }
+
+    /// Interned symbol number `i`.
+    pub fn symbol_at(&self, i: usize) -> Value {
+        self.table_get(Which::Symbols, i)
     }
 
     /// Rebuild a heap from a dumped image. `words` is the live region; the
@@ -3424,14 +3459,7 @@ impl Heap {
         heap.cross_all(STATIC_BASE, heap.immutable_top);
         heap.cross_all(STATIC_MUTABLE_BASE, heap.static_top);
         heap.remember_moving(STATIC_MUTABLE_BASE, heap.static_top);
-        heap.globals = globals.into_iter().map(relocate).collect();
-        heap.symbols = symbols.into_iter().map(relocate).collect();
         heap.roots = roots.into_iter().map(relocate).collect();
-        heap.symbol_index = HashMap::with_capacity_and_hasher(heap.symbols.len(), Default::default());
-        for i in 0..heap.symbols.len() {
-            let name = heap.symbol_name(heap.symbols[i]);
-            heap.symbol_index.insert(name, i as u32);
-        }
         heap.code_from_image(code)?;
         // What its code refers to that moves remembered, as by the barrier.
         for (lo, hi) in heap.code.parts.each_ref().map(|p| (p.base, p.top)) {
@@ -3440,6 +3468,19 @@ impl Heap {
         if heap.immutable_top > STATIC_BASE {
             heap.fix_code();
         }
+        // The tables, the image's: in the tables area.
+        for g in globals {
+            heap.table_push(Which::Globals, relocate(g), true);
+        }
+        for s in symbols {
+            heap.table_push(Which::Symbols, relocate(s), true);
+        }
+        heap.symbol_index = HashMap::with_capacity_and_hasher(heap.symbols.len, Default::default());
+        for i in 0..heap.symbols.len {
+            let name = heap.symbol_name(heap.table_get(Which::Symbols, i));
+            heap.symbol_index.insert(name, i as u32);
+        }
+        heap.code_stub_found();
         Ok(heap)
     }
 
@@ -3458,12 +3499,14 @@ impl Heap {
         for p in &self.code.parts {
             self.verify_range(p.base, p.top).map_err(|e| format!("in the code area: {e}"))?;
         }
-        for (i, g) in self.globals.iter().enumerate() {
-            self.check_ref(*g, i)
+        self.verify_tables()?;
+        self.verify_range(TABLES_BASE, self.tables.top).map_err(|e| format!("in the tables area: {e}"))?;
+        for (i, g) in self.table_values(Which::Globals).into_iter().enumerate() {
+            self.check_ref(g, i)
                 .map_err(|e| format!("global {i}: {e}"))?;
         }
-        for (i, s) in self.symbols.iter().enumerate() {
-            if !self.is_a(*s, ObjType::Symbol) {
+        for (i, s) in self.table_values(Which::Symbols).into_iter().enumerate() {
+            if !self.is_a(s, ObjType::Symbol) {
                 return Err(format!("symbol table entry {i} is not a symbol"));
             }
         }
@@ -3866,6 +3909,7 @@ mod gen_tests {
             (NURSERY_BASE, NURSERY_MAX, GEN_YOUNG),
             (STATIC_BASE, STATIC_WORDS / 2, GEN_STILL | GEN_IMMUTABLE),
             (STATIC_MUTABLE_BASE, STATIC_WORDS / 2, GEN_STILL),
+            (TABLES_BASE, TABLES_WORDS, GEN_TABLES),
             (CODE_BASE, CODE_WORDS, GEN_CODE),
         ];
         for (k, &(start, len, expected)) in areas.iter().enumerate() {

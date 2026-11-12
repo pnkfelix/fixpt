@@ -804,6 +804,9 @@ fn code_compiled_and_dropped_is_reclaimed() {
         });
         let rt = sc.runtime_unrooted();
         let root = rt.heap.push_root(closure);
+        // What the area spans before: the front end's code, where it is
+        // native and read in at the session's start, kept.
+        let before = rt.heap.code_words().1;
         let mut most = 0;
         for round in 0..5000 {
             // The closure, from its root: a collection may have moved it.
@@ -813,14 +816,14 @@ fn code_compiled_and_dropped_is_reclaimed() {
             assert_eq!(m.call(rt, p, &args, FUEL).map(|v| v.as_fixnum()), Ok(5), "round {round}");
             if round % 16 == 15 {
                 rt.heap.collect(&mut []);
-                most = most.max(rt.heap.code_words().1);
+                most = most.max(rt.heap.code_words().1 - before);
             }
         }
         // Sixteen compiles' worth, and room to spare: not five thousand.
         let closure = rt.heap.root_at(root);
         let p = m.compile(&mut rt.heap, closure).expect("compiles")[0].1;
         let one = rt.heap.bloblet_head(p.code).bytes / 8;
-        assert!(most < 64 * (one + 2), "the code area spans {most} words; one compile is {one}");
+        assert!(most < 64 * (one + 2), "the code area grew by {most} words; one compile is {one}");
     });
 }
 

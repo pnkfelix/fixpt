@@ -187,7 +187,7 @@ impl Heap {
             let s = self.make_stubbed_bloblet(const { layout::kind("bloblet") }, 0, false);
             let sym = self.intern("%fx26-foreign-stub");
             let slot = self.symbol_global_slot(sym);
-            self.globals[slot] = s;
+            self.set_global(slot, s);
             self.code.stub = s;
         }
         self.code.stub
@@ -408,13 +408,17 @@ impl Heap {
                 }
             }
         }
-        // The shared stub, if the image has it, found again by its global.
-        let sym = self.intern("%fx26-foreign-stub");
-        let slot = self.symbol_global_slot(sym);
-        if self.is_code_bloblet(self.globals[slot]) {
-            self.code.stub = self.globals[slot];
-        }
         Ok(())
+    }
+
+    /// The shared stub, if an image brought it, found again by its global:
+    /// once the image's globals are this heap's. No symbol made for it.
+    pub(super) fn code_stub_found(&mut self) {
+        let Some(sym) = self.interned("%fx26-foreign-stub") else { return };
+        let stub = self.global(self.symbol_global_slot(sym));
+        if self.is_code_bloblet(stub) {
+            self.code.stub = stub;
+        }
     }
 }
 

@@ -6459,3 +6459,54 @@ end (`fx-regs-fxjit-nativecc`) then fell back to the cellular one, and
 counts no file being written, never removes this build's, and lets go
 other builds whole, past the four most recently used. Next: preloading
 measured again, now that sessions want the front end.
+
+## 263. `Heap::collect` to say which collection (the user's, 2026-11-12)
+
+The heap's collections are asked for by five names: `collect` (a full
+one, the code area marked and swept too), `collect_old` (the old space
+and the nursery, the code area left be), `collect_young` (the nursery,
+or on a heap with none, a full one), and `collect_due`/`maybe_collect`
+(what the policy says is due). The bare `collect()` hides that it is the
+dearest; a caller wanting "a collection now" marks the code area. One
+`collect(kind, roots)`, of `enum Collection { Minor, Major, Full }`, each
+caller saying which; `collect_due` choosing its kind within. `Minor` on a
+heap with no nursery a `Major`, not a full one as `collect_young` does
+now: the cheapest asked for never the dearest made. Some sixty callers,
+most `fixpt-heap`'s tests; outside them `fixpt-runtime/src/host.rs`
+(`collect`), `fixpt-native/src/cellular.rs` (`collect`, `collect_old`),
+`fixpt-native/src/direct.rs` (`collect_young`), each to be read for
+which it means. Its own commit.
+
+## 264. The globals and the symbol table off the heap, scanned whole by every collection (2026-11-12)
+
+The global variables' cells (`Heap::globals`, a `Vec<Value>` a symbol's
+global-slot field indexes) and the intern table (`Heap::symbols`) lived in
+Rust vectors beside the heap, not in it: no card covered them and
+`set_global` had no barrier, so every collection, minor or major, took
+each slot as a root and looked at it. With a few hundred, nothing; with
+the front end preloaded (§262), 9,785 of each, some 0.15 ms of each minor
+in debug, seconds over a test that collects at every safepoint
+(`direct::lists_made_in_call_outs_survive_collection`, 13 s to 20 s).
+
+Done (2026-11-12), as the user laid it out: each table chunks of 256
+slots (`heap/tables.rs`), written through `set_slot`'s barrier. What an
+image brought is in the tables area, a generation of its own between the
+old space and the code area (static ≫ code ≫ tables ≫ old ≫ nursery):
+chunks that never move nor are freed, one after another, so no hole;
+scanned by their cards (first table in a minor, either in a major), and
+whole in a code collection, which so marks the code a global holds
+(younger than code, so a pointer into code needs no remembering; nothing
+points into the area but the tables). What is made at run time is in
+chunks of the heap's own, objects as any other, each forwarded as a root.
+No collection looks at every slot: a minor with the front end preloaded,
+0.161 ms to 0.012 ms (none preloaded: 0.013). An image carries the
+tables as lists still; its reader puts them in its tables area. Interned
+symbols, and the chunks, are never made in a region, which may end (a
+symbol interned in one was freed with it before).
+
+Measured on the way: of a preloaded session's 9,785 globals, 9,230 are
+unbound, a slot made for every symbol interned ("a global reference is
+one array index"), most never bound (the front end's quoted names). A
+slot made when a symbol is first bound would make the table some fifteen
+times smaller. Maybe: a major collection moving the run-time chunks that
+survive into the tables area (the user's).

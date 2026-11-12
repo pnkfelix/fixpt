@@ -124,7 +124,7 @@ impl Heap {
                 Some(Referrers::Many) => {}
             }
         };
-        let (r, g) = (self.roots_slice().len(), self.globals_slice().len());
+        let (r, g) = (self.roots_slice().len(), self.global_count());
         for (i, v) in self.roots_for_sro().into_iter().enumerate() {
             let by = if i < r {
                 Referrer::Root(i)
@@ -171,7 +171,7 @@ impl Heap {
         // through what; breadth first, so the chain found is a shortest.
         let mut from: HashMap<u64, (Option<u64>, String)> = HashMap::new();
         let mut todo = std::collections::VecDeque::new();
-        let (r, g) = (self.roots_slice().len(), self.globals_slice().len());
+        let (r, g) = (self.roots_slice().len(), self.global_count());
         let roots = self.roots_for_sro();
         let starts = roots.iter().enumerate().map(|(i, v)| {
             let how = if i < r {

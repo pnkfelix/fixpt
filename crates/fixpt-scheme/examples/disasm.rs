@@ -21,7 +21,7 @@ fn histogram(s: &Session) -> (Vec<(String, usize)>, usize, usize) {
     // Every code object reachable from a global closure, plus the nested ones
     // in their constant vectors.
     let mut todo: Vec<fixpt_heap::Value> = Vec::new();
-    for sym in heap.symbols_slice().to_vec() {
+    for sym in heap.symbols() {
         let v = heap.global(heap.symbol_global_slot(sym));
         if heap.is_a(v, ObjType::Closure) {
             todo.push(heap.closure_code(v));

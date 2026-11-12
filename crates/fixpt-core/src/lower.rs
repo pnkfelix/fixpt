@@ -352,7 +352,7 @@ impl Lowerer<'_> {
     /// A global's printable name, for the "unbound variable" message.
     fn global_name(&mut self, g: crate::ir::GlobalId) -> Value {
         for i in 0..self.heap.symbol_count() {
-            let sym = self.heap.symbols_slice()[i];
+            let sym = self.heap.symbol_at(i);
             if self.heap.symbol_global_slot(sym) == g.index() {
                 return sym;
             }

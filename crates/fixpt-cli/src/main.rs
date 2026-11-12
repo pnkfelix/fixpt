@@ -1442,7 +1442,7 @@ fn arity_of_closure(session: &Session, v: fixpt_heap::Value) -> Option<String> {
 /// never defined never appears.
 pub fn bound_names(session: &Session) -> Vec<String> {
     let heap = &session.runtime_unrooted_ref().heap;
-    let symbols: Vec<fixpt_heap::Value> = heap.symbols_slice().to_vec();
+    let symbols: Vec<fixpt_heap::Value> = heap.symbols();
     symbols
         .into_iter()
         .filter(|s| !heap.global(heap.symbol_global_slot(*s)).is_unbound())

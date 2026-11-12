@@ -34,12 +34,14 @@ const CARD_WORDS: usize = 1 << CARD_SHIFT;
 /// crossing map's, which knows the semispaces' and the static area's).
 pub(super) const CARDS: usize = MEM_WORDS >> CARD_SHIFT;
 /// Cards over the areas older than the old space (`Heap::old_cards`): the
-/// static area's mutable half, and after it the code area, to the end.
+/// static area's mutable half, and after it the tables area and the code
+/// area, to the end.
 pub(super) const OLDER_CARDS: usize = (MEM_WORDS - super::STATIC_MUTABLE_BASE) >> CARD_SHIFT;
 /// The first of them, in the whole table.
 const OLDER_CARD_0: usize = super::STATIC_MUTABLE_BASE >> CARD_SHIFT;
 const _: () = assert!(OLDER_CARD_0.is_multiple_of(8), "the two tables' words cover the same cards");
-const _: () = assert!(super::STATIC_MUTABLE_BASE + super::STATIC_WORDS / 2 == super::CODE_BASE, "the code area follows the static area's mutable half");
+const _: () = assert!(super::STATIC_MUTABLE_BASE + super::STATIC_WORDS / 2 == super::TABLES_BASE, "the tables area follows the static area's mutable half");
+const _: () = assert!(super::TABLES_BASE + super::TABLES_WORDS == super::CODE_BASE, "the code area follows the tables area");
 
 /// Whether word `i` of the heap's memory is the nursery's.
 #[inline(always)]
@@ -201,8 +203,14 @@ impl Heap {
                 if v.is_ref() { Self::copy_out(mem, &mut c, v) } else { v }
             }};
         }
-        for r in self.roots.iter_mut().chain(self.globals.iter_mut()).chain(self.symbols.iter_mut()) {
+        // Nor the globals and the symbols, each slot of them: only the
+        // tables' young chunks of the heap's own, and what an old one or
+        // one of the tables area refers to by its card (`tables`).
+        for r in self.roots.iter_mut() {
             *r = fwd!(*r);
+        }
+        for chunk in self.globals.chunks.iter_mut().chain(self.symbols.chunks.iter_mut()) {
+            *chunk = fwd!(*chunk);
         }
         for slice in extra_roots.iter_mut() {
             for v in slice.iter_mut() {
@@ -224,6 +232,8 @@ impl Heap {
             let older = OlderScan { table: &mut self.old_cards, remembered: Remembered::NONE, major: false, slots: None };
             scan_code_cards(&mut self.cards, mem, &mut c, part.base, &part.starts, older);
         }
+        let older = OlderScan { table: &mut self.old_cards, remembered: Remembered::NONE, major: false, slots: None };
+        scan_code_cards(&mut self.cards, mem, &mut c, super::TABLES_BASE, &self.tables.starts, older);
         scan_dirty_cards(&mut self.cards, mem, &mut c, lo, old_top, None);
         let statics = OlderScan { table: &mut self.old_cards, remembered, major: false, slots: Some(&mut self.static_code_slots) };
         scan_dirty_cards(&mut self.cards, mem, &mut c, super::STATIC_MUTABLE_BASE, self.static_top, Some(statics));
@@ -293,11 +303,12 @@ impl Heap {
     pub fn verify_remembered(&self) -> Result<(), String> {
         let code = self.code.parts.each_ref().map(|p| (p.base, p.top));
         let young = |v: Value| v.is_ref() && is_young(self.ref_ix(v));
-        for (lo, hi) in [(self.active, self.top), (super::STATIC_MUTABLE_BASE, self.static_top), code[0], code[1]] {
+        let tables = (super::TABLES_BASE, self.tables.top);
+        for (lo, hi) in [(self.active, self.top), (super::STATIC_MUTABLE_BASE, self.static_top), tables, code[0], code[1]] {
             self.verify_remembered_in(lo, hi, |f, v| young(v) && byte(&self.cards, f >> CARD_SHIFT) == 0)?;
         }
         let neither = |f: usize| byte(&self.cards, f >> CARD_SHIFT) == 0 && byte(&self.old_cards, (f >> CARD_SHIFT) - OLDER_CARD_0) == 0;
-        for (lo, hi) in [code[0], code[1]] {
+        for (lo, hi) in [tables, code[0], code[1]] {
             self.verify_remembered_in(lo, hi, |f, v| self.moves(v) && neither(f))?;
         }
         let r = self.remembered();
@@ -348,8 +359,13 @@ impl Heap {
 /// cleaned there too.
 pub(super) fn scan_dirty_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64], c: &mut Copier, lo: usize, hi: usize, mut older: Option<OlderScan>) {
     let (first, end) = (lo >> CARD_SHIFT, hi.div_ceil(CARD_WORDS));
+    let major = older.as_ref().is_some_and(|o| o.major);
     let mut card = first;
     while card < end {
+        if !major && let Some(clean) = clean_run(cards, card, end) {
+            card += clean;
+            continue;
+        }
         if card % 8 == 0 && card + 8 <= end && cards.words()[card >> 3] == 0 && !older.as_ref().is_some_and(|o| o.dirty(true, card)) {
             card += 8;
             continue;
@@ -510,6 +526,20 @@ impl OlderScan<'_> {
     }
 }
 
+/// From `card`, on an eight's boundary, how many cards before `end` are
+/// clean in `cards`, eight at a time, if any: what a minor collection, which
+/// scans only the first table's, skips, over one borrow of the table (the
+/// code area may span tens of thousands of cards, all clean).
+#[inline(always)]
+fn clean_run(cards: &fixpt_memmgmt::Words, card: usize, end: usize) -> Option<usize> {
+    if card % 8 != 0 || card + 8 > end {
+        return None;
+    }
+    let words = &cards.words()[card >> 3..end >> 3];
+    let clean = words.iter().take_while(|&&w| w == 0).count();
+    (clean > 0).then_some(8 * clean)
+}
+
 /// A part of the code area's dirty cards, from `base`, each scanned as
 /// [`scan_dirty_cards`] scans the static area's (`older`), the fields on it
 /// of the objects `starts` (the part's, in address order) finds there.
@@ -520,6 +550,10 @@ pub(super) fn scan_code_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64],
     let (first, end) = (base >> CARD_SHIFT, (last + read_head(mem, last).size()).div_ceil(CARD_WORDS));
     let mut card = first;
     while card < end {
+        if !older.major && let Some(clean) = clean_run(cards, card, end) {
+            card += clean;
+            continue;
+        }
         if card % 8 == 0 && card + 8 <= end && cards.words()[card >> 3] == 0 && !older.dirty(true, card) {
             card += 8;
             continue;

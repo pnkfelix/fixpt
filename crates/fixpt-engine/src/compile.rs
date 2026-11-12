@@ -300,7 +300,7 @@ impl Compiler<'_> {
         }
         let mut found = Value::FALSE;
         for i in 0..self.heap.symbol_count() {
-            let sym = self.heap.symbols_slice()[i];
+            let sym = self.heap.symbol_at(i);
             if self.heap.symbol_global_slot(sym) == slot {
                 found = sym;
                 break;
