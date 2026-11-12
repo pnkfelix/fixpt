@@ -6402,3 +6402,25 @@ a compiled strategy; the tests that want the lowered machine (the
 scheduler's under seeds, `processes`; the comparisons of the two) to ask
 for it. What changes is what dozens of tests exercise: to be done with
 the probe at hand, each failure classified by its first caller.
+
+What a session's front end costs, measured (2026-11-12): a library session
+loads it lazily, when first wanted, into a heap in use already (copied, and
+every reference moved on: some 1.75 s in a debug build); the CLI preloads
+it, mapped in place in a process's first heap before anything else is
+there (`with_backend_preloaded`). `with_backend` made to preload too: the
+debug suite 113 s to 354 s, `compiler::every_program_on_*` 45 s to 212 s
+each, since they make a session for each of 455 programs and today's
+sessions, lowered, never want the front end: preloaded, each mapped it,
+some 0.37 s. Not a fair test of preloading, which is to be measured again
+once sessions are compiled (they will want the front end, and mapped in
+place beats copied into a heap in use); but what this change must keep:
+a front end loaded once per test (or shard), not per program. The pattern
+is there already: the compiled side of those tests shares one session
+(`common::with_own`), reset between programs by hand
+(`compile_with_own_compiler_showing`: `shared_made`, processes,
+`own_begun`, `compile-forget-globals!`), its isolation an audit. Each path
+that lowers today to be brought to it, and the audit made for it. And a
+procedural macro's transformer runs in a session, and a heap, of its own,
+a second heap in the process, which cannot be at the fixed base: its front
+end is always copied in (about 2 s over the tests heavy in macros, against
+the lowered prelude); accepted.
