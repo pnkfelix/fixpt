@@ -234,8 +234,11 @@ const NURSERY_MAX: usize = 1 << 30;
 /// there never moves, nor is copied, and lives as long as the heap. Two
 /// halves: the immutable, whose objects refer only to what never moves (the
 /// static area and the code area), which no collection scans; then the
-/// mutable, whose objects are roots, scanned whole by a major collection
-/// and by their dirty cards by a minor one. Before the code area, not past
+/// mutable, whose objects are roots, scanned by their dirty cards: of the
+/// card table by a minor collection, and of it and the half's own second
+/// table by a major one, a card that still refers to what moves or may be
+/// freed left marked in the second, its remembered set
+/// (`young::scan_dirty_cards`). Before the code area, not past
 /// it: a closure whose code field is at or past the code area's native part
 /// is taken for native code.
 const STATIC_BASE: usize = NURSERY_BASE + NURSERY_MAX;
@@ -261,12 +264,15 @@ const MEM_WORDS: usize = CODE_BASE + CODE_WORDS;
 /// flags differ is a chunk's, which the build checks below.
 pub(crate) const GEN_SHIFT: u32 = 27;
 const GEN_CHUNKS: usize = MEM_WORDS >> GEN_SHIFT;
-/// A chunk's generation, in a byte's low seven bits: the nursery's, the old
-/// space's (the arenas' and reaps' too), and what never moves (the static
-/// area, the code area); its top bit, that it is the static area's
-/// immutable half, where nothing that may move may be stored.
+/// A chunk's generation, in a byte's low seven bits, by how rarely its
+/// objects are collected (static ≫ code ≫ old ≫ nursery): the nursery's,
+/// the old space's (the arenas' and reaps' too), the code area's (whose
+/// objects never move, but a code collection may free), and the static
+/// area's (never collected); its top bit, that it is the static area's
+/// immutable half, where nothing that may move or be freed may be stored.
 pub(crate) const GEN_YOUNG: u8 = 0;
 pub(crate) const GEN_OLD: u8 = 1;
+pub(crate) const GEN_CODE: u8 = 2;
 pub(crate) const GEN_STILL: u8 = 0x7f;
 pub(crate) const GEN_MASK: u8 = 0x7f;
 pub(crate) const GEN_IMMUTABLE: u8 = 0x80;
@@ -292,6 +298,8 @@ static GEN: [u8; GEN_CHUNKS] = {
             GEN_YOUNG
         } else if at >= STATIC_BASE && at < STATIC_MUTABLE_BASE {
             GEN_STILL | GEN_IMMUTABLE
+        } else if at >= CODE_BASE {
+            GEN_CODE
         } else if at >= STATIC_MUTABLE_BASE {
             GEN_STILL
         } else {
@@ -327,11 +335,12 @@ fn past_threshold(words: usize, semi: usize) -> bool {
 }
 /// The heap is kept at least this many times the peak of what is live
 /// after a major collection, counting every space a major collection
-/// reclaims: the old space, the code area, and code a machine keeps outside
-/// the heap for it ([`Heap::note_outside_code`]). So a major collection
-/// comes after `LIVE_RATIO - 1` times that is allocated across them
+/// reclaims: the old space, and code a machine keeps outside the heap for
+/// it ([`Heap::note_outside_code`]). So a major collection comes after
+/// `LIVE_RATIO - 1` times that is allocated across them
 /// ([`Heap::major_due`]), and marking and copying cost at most half a word
-/// per word allocated.
+/// per word allocated. The code area, which a code collection alone
+/// reclaims, so too by its own count ([`Heap::code_due`]).
 pub const LIVE_RATIO: usize = 3;
 /// The least a major collection waits for, in words allocated across those
 /// spaces: 32 MB, while little is live (a session's start, loading the
@@ -417,11 +426,16 @@ pub struct Heap {
     planned_writes: HashMap<String, i64>,
 
     pub gc_count: u64,
-    /// Collect at every `gc_every`th safepoint whatever the heap's fill, as
-    /// well as when it is full: a policy for finding rooting bugs, swept
-    /// over many values so that a collection lands in every window. 0 is
-    /// off; the `gc-stress` feature makes it 1 from the start.
+    /// The stress policy, for finding rooting bugs, swept over many values
+    /// so that a collection lands in every window: as well as when one is
+    /// due, a collection at every `gc_every`th safepoint (a minor one, in a
+    /// heap with a nursery), a major one at every `gc_major_every`th, and a
+    /// code collection at every `gc_code_every`th; at a safepoint where more
+    /// than one is, the one that collects most. Each a count of safepoints,
+    /// 0 for none; the `gc-stress` feature starts them at 1, 4 and 16.
     pub gc_every: u64,
+    pub gc_major_every: u64,
+    pub gc_code_every: u64,
     safepoints: u64,
     pub words_copied: u64,
     /// Time spent collecting, in nanoseconds; and the words allocated
@@ -446,7 +460,29 @@ pub struct Heap {
     nursery_words: usize,
     /// One byte per card of 64 words of `mem`: 1 where a store may have put
     /// a young reference since the last collection (the remembered set).
+    /// Native code marks it at every store, whatever it stores.
     cards: fixpt_memmgmt::Words,
+    /// The second card table, of the areas older than the old space (the
+    /// static area's mutable half, then the code area), one byte per card
+    /// from `STATIC_MUTABLE_BASE`: 1 where a card may refer to the old space
+    /// (`young::Remembered`), for a major collection; so that a minor one,
+    /// which scans `cards` alone, does not scan the cards that only a major
+    /// one needs.
+    old_cards: fixpt_memmgmt::Words,
+    /// Each field of the static area's mutable half that a store or a scan
+    /// found holding code that may be freed (`young::Held::Code`): a code
+    /// collection marks what each still holds, and keeps those that do; a
+    /// major one keeps them, and its scan of the cards adds to them. In
+    /// order, without repeats, up to `static_code_sorted`; what the barrier
+    /// and the scans add since, after it, as they come.
+    static_code_slots: Vec<usize>,
+    static_code_sorted: usize,
+    /// Words in the code area found live by the last code collection: what
+    /// the next one's budget is from (`code_due`).
+    code_live: usize,
+    /// Whether the collection a safepoint found due collects the code area
+    /// too (`collection_due`).
+    due_code: bool,
     /// For each card of the semispaces, where the first object starting in
     /// it starts, plus one; 0 for none.
     crossing: fixpt_memmgmt::Words,
@@ -462,7 +498,6 @@ pub struct Heap {
     pub minor_words_copied: u64,
     pub minor_nanos: u64,
     due_major: bool,
-    policy_count: u64,
     /// Telemetry (`docs/research/telemetry.md`, stage 1): the longest pause
     /// of each kind, in nanoseconds; the most words in use, sampled as each
     /// collection starts, which is when the heap is fullest; and whether to
@@ -470,6 +505,8 @@ pub struct Heap {
     pub max_major_nanos: u64,
     pub max_minor_nanos: u64,
     pub peak_words: u64,
+    /// A line on stderr for each collection (`traced`): from the start
+    /// where `FIXPT_GC_TRACE` is set, for any heap, a test's too.
     pub trace: bool,
     /// Check, before each minor collection, that every young reference in
     /// the old space is on a dirty card: for tests.
@@ -536,6 +573,8 @@ impl Heap {
             planned_writes: HashMap::new(),
             gc_count: 0,
             gc_every: if cfg!(feature = "gc-stress") { 1 } else { 0 },
+            gc_major_every: if cfg!(feature = "gc-stress") { 4 } else { 0 },
+            gc_code_every: if cfg!(feature = "gc-stress") { 16 } else { 0 },
             safepoints: 0,
             words_copied: 0,
             gc_nanos: 0,
@@ -549,6 +588,11 @@ impl Heap {
             nursery_top: NURSERY_BASE,
             nursery_words: nursery_words.max(1024),
             cards: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the card table"),
+            old_cards: fixpt_memmgmt::Words::new(young::OLDER_CARDS / 8).expect("address space for the second card table"),
+            static_code_slots: Vec::new(),
+            static_code_sorted: 0,
+            code_live: 0,
+            due_code: false,
             crossing: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the crossing map"),
             minor_count: 0,
             provenance: crate::provenance::Provenance::default(),
@@ -557,9 +601,8 @@ impl Heap {
             max_major_nanos: 0,
             max_minor_nanos: 0,
             peak_words: 0,
-            trace: false,
+            trace: std::env::var_os("FIXPT_GC_TRACE").is_some(),
             due_major: false,
-            policy_count: 0,
             verify_barrier: std::env::var("FIXPT_VERIFY_BARRIER").is_ok_and(|v| v == "1"),
         }
     }
@@ -589,14 +632,14 @@ impl Heap {
     }
 
     /// That nothing in the static area's immutable half refers to what may
-    /// move (`TODO.md` §161): what a collection relies on, never scanning
-    /// it. For `verify`, and for barrier verification, which a store of
-    /// native code's (which marks cards only) could break.
+    /// move or be freed (`TODO.md` §161): what a collection relies on, never
+    /// scanning it. For `verify`, and for barrier verification, which a
+    /// store of native code's (which marks cards only) could break.
     pub fn verify_immutable(&self) -> Result<(), String> {
-        let mut found = None;
+        let (mut found, r) = (None, self.remembered());
         each_field(&self.mem.words()[STATIC_BASE..self.immutable_top], STATIC_BASE, |at, v| {
-            if found.is_none() && self.moves(v) {
-                found = Some(format!("word {at}, in the static area's immutable half, refers to {v:?}, which may move"));
+            if found.is_none() && r.holds(self.base, v) {
+                found = Some(format!("word {at}, in the static area's immutable half, refers to {v:?}, which may move or be freed"));
             }
         });
         found.map_or(Ok(()), Err)
@@ -628,8 +671,8 @@ impl Heap {
         Value(self.word(rel))
     }
     /// A value stored into word `rel` of an object: the write barrier
-    /// marks its card when it puts a young reference into the old space or
-    /// the code area.
+    /// marks its card when it puts into an area what is in an area
+    /// collected more often (`older_to_younger`).
     #[inline]
     pub fn set_slot(&mut self, rel: usize, v: Value) {
         self.set_word(rel, v.raw());
@@ -649,17 +692,26 @@ impl Heap {
     /// `rel`, of the older generation `to`: what the barrier does then.
     #[inline]
     fn older_to_younger(&mut self, rel: usize, to: u8, from: u8, v: Value) {
-        // What is immutable and static refers only to what never moves.
+        // What is immutable and static refers only to what never moves and
+        // is never freed: the static area, and code an image brought.
         if to & GEN_IMMUTABLE != 0 {
-            moving_into_immutable(rel, v);
+            if self.remembered().holds(self.base, v) {
+                moving_into_immutable(rel, v);
+            }
+            return;
         }
         // A young object referred to from older: its card, for a minor
-        // collection. (Something of the old space referred to from what
-        // never moves is what the static area's remembered set will be
-        // for, `TODO.md` §161 step 5; its mutable half is scanned whole by
-        // a major collection meanwhile, and the code area is marked.)
-        if from & GEN_MASK == GEN_YOUNG && self.generational {
-            self.mark_card(rel);
+        // collection. Code referred to from the static area's mutable half:
+        // the field, among the slots, for a code collection. Anything else
+        // (of the old space, from the static area or the code area): its
+        // card in the second table, for a major one (`TODO.md` §161 step
+        // 5). (No mark for a young object in a heap with no nursery: none
+        // is there.)
+        match from & GEN_MASK {
+            GEN_YOUNG if self.generational => self.mark_card(rel),
+            GEN_YOUNG => {}
+            GEN_CODE => self.remember_static_code(rel),
+            _ => self.mark_old_card(rel),
         }
     }
 
@@ -678,7 +730,7 @@ impl Heap {
         if !v.is_ref() {
             return false;
         }
-        gen_of(self.ref_ix(v)) & GEN_MASK != GEN_STILL
+        gen_of(self.ref_ix(v)) & GEN_MASK <= GEN_OLD
     }
 
     /// Where the heap's memory starts: word `i` of it, as the heap counts
@@ -740,7 +792,7 @@ impl Heap {
     /// budget and a nursery's promotion before its threshold, so that the
     /// threshold, a backstop, does not come first.
     fn budget_from(&mut self, old: usize) {
-        self.peak_live = self.peak_live.max(old + self.code.used() + self.outside_code);
+        self.peak_live = self.peak_live.max(old + self.outside_code);
         self.top_after_major = self.top;
         let nursery = if self.generational { self.nursery_words } else { 0 };
         let need = old + self.major_budget() + nursery;
@@ -2346,12 +2398,14 @@ impl Heap {
     }
 
     /// The collection [`collection_due`](Heap::collection_due) said is due:
-    /// of the nursery alone, or of everything.
+    /// of the nursery alone, of the old space too, or of the code area too.
     pub fn collect_due(&mut self, extra_roots: &mut [&mut [Value]]) {
-        if self.generational && !self.due_major {
+        if self.due_code {
+            self.collect(extra_roots);
+        } else if self.generational && !self.due_major {
             self.collect_minor(extra_roots);
         } else {
-            self.collect(extra_roots);
+            self.collect_old(extra_roots);
         }
     }
 
@@ -2365,15 +2419,29 @@ impl Heap {
         }
         let full = self.major_due();
         self.safepoints += 1;
-        let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
+        // The stress policy's (`gc_every`): each period, of safepoints.
+        let every = |n: u64| n > 0 && self.safepoints.is_multiple_of(n);
+        let (forced, forced_major, forced_code) = (every(self.gc_every), every(self.gc_major_every), every(self.gc_code_every));
         let nursery_full = self.generational && self.nursery_top - NURSERY_BASE >= self.nursery_words;
-        // Under the stress policy, a generational heap's policy collections
-        // are minor ones, but every fourth, which is major.
-        if policy {
-            self.policy_count += 1;
-        }
-        self.due_major = full || (policy && (!self.generational || self.policy_count.is_multiple_of(4)));
-        full || policy || nursery_full
+        self.due_code = self.code_due() || forced_code;
+        self.due_major = full || self.due_code || forced_major || (forced && !self.generational);
+        self.due_major || forced || nursery_full
+    }
+
+    /// Whether the stress policy is on (`gc_every`), of any period.
+    pub fn stressed(&self) -> bool {
+        self.gc_every > 0 || self.gc_major_every > 0 || self.gc_code_every > 0
+    }
+
+    /// Whether a code collection is due: code allocated since the last
+    /// (`LIVE_RATIO - 1` times what it found live, or `MIN_MAJOR_BUDGET`);
+    /// or, as a backstop, either of the code area's parts walkable past
+    /// `COLLECT_THRESHOLD` of its room, since one full fails its next
+    /// allocation. The code area is collected only so, never by a major
+    /// collection alone (`collect_old`), whose budget does not count it.
+    pub fn code_due(&self) -> bool {
+        self.code.taken >= ((LIVE_RATIO - 1) * self.code_live).max(MIN_MAJOR_BUDGET)
+            || self.code.parts.iter().any(|p| past_threshold(p.top - p.base, p.limit() - p.base))
     }
 
     /// Words a major collection waits for, allocated across the spaces it
@@ -2384,11 +2452,12 @@ impl Heap {
     }
 
     /// Whether a major collection is due: the budget allocated since the
-    /// last, in the old space (promoted, or allocated there), the code area,
-    /// the reaps' chunks and code outside the heap; or, as a backstop, the
+    /// last, in the old space (promoted, or allocated there), the reaps'
+    /// chunks and code outside the heap (the code area's has a budget of its
+    /// own, `code_due`); or, as a backstop, the
     /// old space at `COLLECT_THRESHOLD` of its semispace (one made small).
     pub fn major_due(&self) -> bool {
-        let taken = (self.top - self.top_after_major) + self.code.taken + self.regions.reap_taken + self.outside_taken;
+        let taken = (self.top - self.top_after_major) + self.regions.reap_taken + self.outside_taken;
         taken >= self.major_budget() || past_threshold(self.top - self.active, self.semi)
     }
 
@@ -2490,17 +2559,35 @@ impl Heap {
         self.weak_free.push(i);
     }
 
-    /// Cheney semispace copy. Compacts, which is also what makes a dumped image
-    /// contiguous and relocation-free.
+    /// A full collection: the old space and the nursery, and the code area
+    /// too (a code collection, `collect_major`). What a caller asks for.
     pub fn collect(&mut self, extra_roots: &mut [&mut [Value]]) {
+        self.collect_major(extra_roots, true);
+    }
+
+    /// A major collection that leaves the code area be: none of its objects
+    /// freed, nor any traced; what they refer to in the old space found by
+    /// its cards, as the static area's is.
+    pub fn collect_old(&mut self, extra_roots: &mut [&mut [Value]]) {
+        self.collect_major(extra_roots, false);
+    }
+
+    /// Cheney semispace copy of the old space and the nursery, and, if
+    /// `code`, a mark and sweep of the code area. Compacts, which is also
+    /// what makes a dumped image contiguous and relocation-free.
+    fn collect_major(&mut self, extra_roots: &mut [&mut [Value]], code: bool) {
         let started = std::time::Instant::now();
         // The mutator's phase paused (`TODO.md` §252).
         let phase = fixpt_memmgmt::phases::collection("gc:major");
+        if self.verify_barrier {
+            self.verify_remembered().unwrap_or_else(|e| panic!("the write barrier missed a store: {e}"));
+        }
         let before = self.used();
         self.peak_words = self.peak_words.max(before as u64);
         self.words_allocated += self.top.saturating_sub(self.top_after_gc) as u64 + (self.nursery_top - NURSERY_BASE) as u64;
         let from = self.active;
         let to = if self.active == 0 { MAX_SEMI_WORDS } else { 0 };
+        let (remembered, stressed) = (self.remembered(), self.stressed());
         let mem = self.mem.words_mut();
         let reaps = self.regions.live.len();
         let arenas: Vec<(usize, usize)> = self.regions.arena_ranges().collect();
@@ -2520,6 +2607,7 @@ impl Heap {
             weak_pairs: Vec::new(),
             regions: &mut self.regions,
             minor: false,
+            trace_code: code,
             crossing: &mut self.crossing,
             last_card: usize::MAX,
         };
@@ -2532,7 +2620,7 @@ impl Heap {
         // moves at every collection. Otherwise a copying collector tends to
         // put each object back where it was, and a stale Value someone held
         // across a collection still finds its object, and the bug hides.
-        if self.gc_every > 0 {
+        if stressed {
             let pad = 1 + (self.gc_count as usize % 7);
             if self.top - self.active + pad <= self.semi {
                 // A raw bloblet: a header, then a suffix the scan skips.
@@ -2573,12 +2661,82 @@ impl Heap {
                 *v = fwd!(*v);
             }
         }
-        // What the arenas and the static area hold is live, and stays where
-        // it is.
-        for (lo, hi) in arenas.into_iter().chain([(STATIC_MUTABLE_BASE, self.static_top)]) {
+        // What the arenas hold is live, and stays where it is.
+        for (lo, hi) in arenas {
             let mut at = lo;
             while at < hi {
                 at += Self::scan_one(mem, at, &mut c);
+            }
+        }
+        // Each field of the static area that held code that may be freed:
+        // in a code collection, what it holds marked, and the field kept if
+        // it still does; else kept as it is.
+        let mut slots = std::mem::take(&mut self.static_code_slots);
+        let mut sorted = self.static_code_sorted;
+        if code {
+            let mut k = 0;
+            slots.retain(|&f| {
+                k += 1;
+                let v = Value(mem[f]);
+                let held = remembered.kind(c.base, v) == Some(young::Held::Code);
+                if held {
+                    Self::copy_out(mem, &mut c, v);
+                } else if k <= self.static_code_sorted {
+                    sorted -= 1;
+                }
+                held
+            });
+        }
+        // What the static area's mutable half holds is live too, and stays
+        // where it is: only the cards that may refer to what moves (or to
+        // code that may be freed), by either table, its remembered set
+        // (each left in the second if it still does). So is what the code
+        // area holds, by its cards, in a major collection that does not
+        // collect it; one that does finds what is live there by tracing
+        // from everything else, its cards no roots (a dead bloblet's card
+        // would keep alive what it refers to, and so, round a cycle, the
+        // bloblet).
+        let older = young::OlderScan { table: &mut self.old_cards, remembered, major: true, slots: Some(&mut slots) };
+        young::scan_dirty_cards(&mut self.cards, mem, &mut c, STATIC_MUTABLE_BASE, self.static_top, Some(older));
+        // Those added since put in order: alone, then merged.
+        let mut added = slots.split_off(sorted);
+        if !added.is_empty() {
+            added.sort_unstable();
+            added.dedup();
+            let old = std::mem::take(&mut slots);
+            slots.reserve(old.len() + added.len());
+            let (mut i, mut j) = (0, 0);
+            while i < old.len() || j < added.len() {
+                let next = if j == added.len() || (i < old.len() && old[i] <= added[j]) {
+                    i += 1;
+                    old[i - 1]
+                } else {
+                    j += 1;
+                    added[j - 1]
+                };
+                if slots.last() != Some(&next) {
+                    slots.push(next);
+                }
+            }
+        }
+        self.static_code_sorted = slots.len();
+        self.static_code_slots = slots;
+        if code {
+            // What an image brought there is never freed (`code::Part::
+            // fixed`): roots, as the static area's objects are, each traced
+            // whole, so that what it refers to in the old space or the code
+            // area is found though nothing else refers to it.
+            for part in &self.code.parts {
+                for &at in part.starts.iter().take_while(|&&at| at < part.fixed) {
+                    if c.code_marks.insert(at) {
+                        c.code_gray.push(at);
+                    }
+                }
+            }
+        } else {
+            for part in &self.code.parts {
+                let older = young::OlderScan { table: &mut self.old_cards, remembered: young::Remembered::NONE, major: true, slots: None };
+                young::scan_code_cards(&mut self.cards, mem, &mut c, part.base, &part.starts, older);
             }
         }
 
@@ -2622,9 +2780,11 @@ impl Heap {
         update_weak(mem, self.base, &mut self.weak, from, false);
         update_weak_pairs(mem, self.base, &c.weak_pairs, from, false);
         // The code area's bloblets never move, so the update above keeps a
-        // weak reference to one; one not found live is swept just below.
+        // weak reference to one; one not found live is swept just below (in
+        // a code collection: no other knows what is live there).
         for w in self.weak.iter_mut() {
-            if w.is_bloblet()
+            if code
+                && w.is_bloblet()
                 && !w.is_suffix_ref()
                 && code::in_code_area(w.index() - self.base)
                 && find_main(mem, w.index() - self.base).is_ok_and(|main| !c.code_marks.contains(&main))
@@ -2633,7 +2793,16 @@ impl Heap {
             }
         }
         let Copier { free, new, marked, large_marks, code_marks, .. } = c;
-        self.sweep_code(&code_marks);
+        if code {
+            self.sweep_code(&code_marks);
+            self.code_live = self.code.used();
+            // A live bloblet's fields were moved on as it was traced, each
+            // card of the second table still marked where they refer to the
+            // old space; one of the first, whose young referents are old
+            // now, moved to the second (the next scan of the cards sorts
+            // them).
+            self.code_cards_aged();
+        }
         self.provenance_swept();
         // Ended reaps' chunks no reference was found into may be reused;
         // the rest wait for a collection that finds none.
@@ -2687,7 +2856,6 @@ impl Heap {
         self.nursery_top = NURSERY_BASE;
         self.clear_cards(to, to + free);
         self.clear_cards(STATIC_BASE, self.immutable_top);
-        self.clear_cards(STATIC_MUTABLE_BASE, self.static_top);
 
         // The next major collection after `major_budget` is allocated, in
         // proportion to the most found live across the spaces it reclaims
@@ -2731,10 +2899,10 @@ impl Heap {
     /// program, and runs compare. (Machine code needs no headroom, and could
     /// go to the end of the semispace; a program that allocates mostly
     /// inline would then collect less often, but at other points than the
-    /// Rust machine.) 0 while a policy collects at every safepoint, or
+    /// Rust machine.) 0 while the stress policy is on (`gc_every`), or
     /// collection is inhibited: then every allocation calls in.
     pub fn inline_limit(&self) -> usize {
-        if self.gc_every > 0 || self.inhibited > 0 {
+        if self.stressed() || self.inhibited > 0 {
             0
         } else if self.generational {
             NURSERY_BASE + self.nursery_words
@@ -2843,9 +3011,12 @@ impl Heap {
             // It never moves, and is scanned whole as a root.
             return v;
         } else if code::in_code_area(i) {
-            // It never moves: marked, and scanned once.
+            // It never moves: marked, and scanned once, in a code
+            // collection; else live, what it refers to found by its cards.
             debug_assert!(v.tag() == TAG_BLOBLET, "only bloblets are in the code area");
-            code::mark_code(mem, i, &mut c.code_marks, &mut c.code_gray);
+            if c.trace_code {
+                code::mark_code(mem, i, &mut c.code_marks, &mut c.code_gray);
+            }
             return v;
         } else if i >= REAP_BASE {
             // A bloblet with no suffix is pointed at one past its fields,
@@ -3209,6 +3380,7 @@ impl Heap {
         heap.cross_all(0, n_words);
         heap.cross_all(STATIC_BASE, heap.immutable_top);
         heap.cross_all(STATIC_MUTABLE_BASE, heap.static_top);
+        heap.remember_moving(STATIC_MUTABLE_BASE, heap.static_top);
         heap.globals = globals.into_iter().map(relocate).collect();
         heap.symbols = symbols.into_iter().map(relocate).collect();
         heap.roots = roots.into_iter().map(relocate).collect();
@@ -3218,6 +3390,10 @@ impl Heap {
             heap.symbol_index.insert(name, i as u32);
         }
         heap.code_from_image(code)?;
+        // What its code refers to that moves remembered, as by the barrier.
+        for (lo, hi) in heap.code.parts.each_ref().map(|p| (p.base, p.top)) {
+            heap.remember_moving(lo, hi);
+        }
         if heap.immutable_top > STATIC_BASE {
             heap.fix_code();
         }
@@ -3417,6 +3593,10 @@ struct Copier<'r> {
     /// Whether this is a minor collection, which copies the nursery's
     /// objects to the end of the old space and nothing else.
     minor: bool,
+    /// Whether a reference to the code area's object marks it, to be
+    /// scanned (`code_gray`): in a code collection, but while it scans the
+    /// code area's own cards.
+    trace_code: bool,
     /// The crossing map, kept as objects are copied into the old space; and
     /// the card the last one started in.
     crossing: &'r mut fixpt_memmgmt::Words,
@@ -3643,7 +3823,7 @@ mod gen_tests {
             (NURSERY_BASE, NURSERY_MAX, GEN_YOUNG),
             (STATIC_BASE, STATIC_WORDS / 2, GEN_STILL | GEN_IMMUTABLE),
             (STATIC_MUTABLE_BASE, STATIC_WORDS / 2, GEN_STILL),
-            (CODE_BASE, CODE_WORDS, GEN_STILL),
+            (CODE_BASE, CODE_WORDS, GEN_CODE),
         ];
         for (k, &(start, len, expected)) in areas.iter().enumerate() {
             assert_eq!(gen_of(start), expected, "area {k}'s first word");

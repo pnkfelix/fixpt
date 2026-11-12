@@ -131,9 +131,13 @@ options (before or after the command; after `--`, the program's):
   --engine bytecode|ast          the Scheme engine (default: bytecode)
   --reader scheme|fx26           the Scheme REPL's eager reader (default: scheme)
   --main NAME                    an image's entry point (default: main)
-  --gc-every N                   also collect at every Nth safepoint, moving every
-                                 object each time, to shake out rooting bugs
-                                 (default: 0, only when the heap is full)
+  --gc-every N                   also collect at every Nth safepoint (the nursery),
+                                 moving every object each time, to shake out
+                                 rooting bugs (default: 0, only when one is due)
+  --gc-major-every N             also make a major collection at every Nth
+                                 safepoint (default: 0)
+  --gc-code-every N              also make a code collection, of the code area
+                                 too, at every Nth safepoint (default: 0)
 
 `--dialect fx87` and `--dialect fx91` select a *language*, not merely its
 reader: a form is type- and effect-checked, erased to Scheme and run on the same
@@ -342,16 +346,20 @@ fn run(args: &[String]) -> i32 {
             }
         }
     }
-    if let Some(n) = flags.gc_every.as_deref() {
-        match n.parse::<u64>() {
-            Ok(n) => {
-                let _ = GC_EVERY.set(n);
-            }
-            Err(_) => {
-                eprintln!("fixpt: --gc-every takes a count, 0 or more");
-                return 2;
+    let mut stress = [0; 3];
+    for (k, (flag, n)) in [("--gc-every", &flags.gc_every), ("--gc-major-every", &flags.gc_major_every), ("--gc-code-every", &flags.gc_code_every)].into_iter().enumerate() {
+        if let Some(n) = n.as_deref() {
+            match n.parse::<u64>() {
+                Ok(n) => stress[k] = n,
+                Err(_) => {
+                    eprintln!("fixpt: {flag} takes a count, 0 or more");
+                    return 2;
+                }
             }
         }
+    }
+    if stress != [0; 3] {
+        let _ = GC_EVERY.set(stress);
     }
 
     match rest.first().map(String::as_str) {
@@ -624,6 +632,8 @@ struct Flags {
     reader: Option<String>,
     fx26_run: Option<String>,
     gc_every: Option<String>,
+    gc_major_every: Option<String>,
+    gc_code_every: Option<String>,
     cellular_machine: Option<String>,
     calling_convention: Option<String>,
     fx26_machine: Option<String>,
@@ -876,8 +886,9 @@ pub(crate) static EMACS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// `--syscalls`: the FX-26 program is a runtime's, which may declare
 /// syscalls (`docs/research/syscalls.md`, "Containment").
 pub(crate) static SYSCALLS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-/// `--gc-every`, for every heap this process starts.
-pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+/// `--gc-every`, `--gc-major-every` and `--gc-code-every`, for every heap
+/// this process starts (`Heap::gc_every`).
+pub(crate) static GC_EVERY: std::sync::OnceLock<[u64; 3]> = std::sync::OnceLock::new();
 
 /// `--step-limit` and `--speculation-step-limit`: `Some(limit)` when given,
 /// `limit` being `None` for no limit.
@@ -892,7 +903,7 @@ pub(crate) fn parse_limit(v: &str) -> Option<Option<u64>> {
     }
 }
 
-/// Apply `--gc-every` to a session's heap, and `--step-limit` to its engine.
+/// Apply the `--gc-…` flags to a session's heap, and `--step-limit` to its engine.
 pub(crate) fn apply_gc_policy(session: &mut Session) {
     apply_heap_policy(session);
     if let Some(l) = STEP_LIMIT.get() {
@@ -900,11 +911,11 @@ pub(crate) fn apply_gc_policy(session: &mut Session) {
     }
 }
 
-/// Apply `--gc-every` to a host's heap, and its trace (an FX-26 session's,
+/// Apply the `--gc-…` flags to a host's heap, and its trace (an FX-26 session's,
 /// which says its step limit itself).
 pub(crate) fn apply_heap_policy(host: &mut fixpt_runtime::host::Host) {
-    if let Some(n) = GC_EVERY.get() {
-        host.set_gc_every(*n);
+    if let Some(&[minor, major, code]) = GC_EVERY.get() {
+        host.set_gc_stress(minor, major, code);
     }
     // A line on stderr for each collection (`docs/research/telemetry.md`).
     host.runtime_unrooted().heap.trace = std::env::var_os("FIXPT_GC_TRACE").is_some();
@@ -924,6 +935,8 @@ fn split_flags(args: &[String]) -> Result<(Flags, Vec<String>), String> {
         reader: None,
         fx26_run: None,
         gc_every: None,
+        gc_major_every: None,
+        gc_code_every: None,
         cellular_machine: None,
         calling_convention: None,
         fx26_machine: None,
@@ -936,12 +949,14 @@ fn split_flags(args: &[String]) -> Result<(Flags, Vec<String>), String> {
     let mut i = 0;
     // Each flag takes a value, spelled either `--flag v` or `--flag=v`.
     type Setter = fn(&mut Flags, String);
-    let named: [(&str, Setter); 10] = [
+    let named: [(&str, Setter); 12] = [
         ("--machine", |f, v| f.fx26_machine = Some(v)),
         ("--fx26-machine", |f, v| f.fx26_machine = Some(v)),
         ("--speculation-step-limit", |f, v| f.speculation_step_limit = Some(v)),
         ("--step-limit", |f, v| f.step_limit = Some(v)),
         ("--gc-every", |f, v| f.gc_every = Some(v)),
+        ("--gc-major-every", |f, v| f.gc_major_every = Some(v)),
+        ("--gc-code-every", |f, v| f.gc_code_every = Some(v)),
         ("--dialect", |f, v| f.dialect = Some(v)),
         ("--reader", |f, v| f.reader = Some(v)),
         ("--engine", |f, v| f.engine = Some(v)),

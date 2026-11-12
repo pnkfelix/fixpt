@@ -338,6 +338,8 @@ impl Heap {
             self.immutable_top = iat + ni;
         }
         self.static_top = sat + ns;
+        // Its mutable objects' references to what moves remembered.
+        self.remember_moving(old_static_top, self.static_top);
         self.budget_from(self.top - self.active);
         for (k, (words, free)) in img.code.iter().enumerate() {
             let (len, to) = (words.len() / 8, moves.regions[k + 3].1);
@@ -370,6 +372,8 @@ impl Heap {
             {
                 view.flush((self.base + to) * 8, len * 8);
             }
+            // Its references to what moves remembered, as the static area's.
+            self.remember_moving(to, to + len);
         }
         // What the image's immutable half refers to of its code is never
         // swept: no collection scans that half to find it.

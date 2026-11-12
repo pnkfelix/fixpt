@@ -1132,7 +1132,7 @@ fn native_session_adapters_aborts_and_stack_maps() {
     }
     // Collecting often while the native code runs (not while the front end
     // compiles it): how many collections, and how many words they copied.
-    s.native_runner = Some(run_native_collecting);
+    s.native_runner = Some(run_native_collecting_majors);
     let mut seen = Vec::new();
     for form in runs {
         // Major collections, and the words they copied (minor ones copy
@@ -1147,8 +1147,8 @@ fn native_session_adapters_aborts_and_stack_maps() {
         let after = heap(&mut s);
         seen.push((after.0 - before.0, after.1 - before.1));
     }
-    // About as many major collections each (three policy collections in
-    // four are minor, and the array, old, is not copied by those); each of
+    // About as many major collections each (one policy collection in four
+    // is major, and the array, old, is not copied by the others); each of
     // `keep`'s copies the array, 100 000 words, and `drop`'s do not: per
     // collection, since each copies the whole live heap besides.
     let ((n0, c0), (n1, c1)) = (seen[0], seen[1]);
@@ -1344,18 +1344,34 @@ fn raw_args_between_every_kind_of_caller_and_callee() {
     assert!(after.overflows - before.overflows > 10, "{before:?} {after:?}");
 }
 
+/// `run_native`, under the stress policy (`Heap::gc_every`) while the
+/// native code runs: a collection at every 97th safepoint, a major one at
+/// every 16 of those; the code area collected only when due.
 fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
-    let was = std::mem::replace(&mut rt.heap.gc_every, 97);
-    let r = run_native(rt, closure, fuel);
-    rt.heap.gc_every = was;
-    r
+    run_native_stressed(rt, closure, fuel, [97, 97 * 16, 0])
 }
 
-/// `run_native`, collecting at every safepoint while the native code runs.
+/// `run_native_collecting`, a major collection at every fourth of its
+/// collections.
+fn run_native_collecting_majors(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
+    run_native_stressed(rt, closure, fuel, [97, 97 * 4, 0])
+}
+
+/// `run_native`, collecting at every safepoint while the native code runs:
+/// a major collection at every 16th, and a code collection at every 256th.
 fn run_native_collecting_always(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
-    let was = std::mem::replace(&mut rt.heap.gc_every, 1);
+    run_native_stressed(rt, closure, fuel, [1, 16, 256])
+}
+
+/// `run_native` with the stress policy's three periods `[every, major,
+/// code]` while it runs, and the heap's own after.
+fn run_native_stressed(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64, periods: [u64; 3]) -> fixpt_fx26::session::NativeRun {
+    let heap = &mut rt.heap;
+    let was = [heap.gc_every, heap.gc_major_every, heap.gc_code_every];
+    [heap.gc_every, heap.gc_major_every, heap.gc_code_every] = periods;
     let r = run_native(rt, closure, fuel);
-    rt.heap.gc_every = was;
+    let heap = &mut rt.heap;
+    [heap.gc_every, heap.gc_major_every, heap.gc_code_every] = was;
     r
 }
 

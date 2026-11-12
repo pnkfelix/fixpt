@@ -70,9 +70,9 @@ fn placed_code_waits_for_the_heaps_major_collection() {
     assert_eq!(rt.heap.gc_count, before, "a major collection for the code's sake");
 }
 
-/// Code placed past the heap's budget for a major collection, as it counts
-/// code installed outside it: the first run collects the heap and the
-/// code, and the runs after it neither.
+/// Code placed past the code area's budget (`Heap::code_due`): the first
+/// run collects the heap and the code (a code collection), and the runs
+/// after it neither.
 #[test]
 fn placed_code_past_the_heaps_budget_collects_once() {
     let mut rt = Runtime::new();
@@ -81,7 +81,7 @@ fn placed_code_past_the_heaps_budget_collects_once() {
         let w = fresh_word(&mut rt, 0, 2000);
         placed += place(&mut rt, w);
     }
-    assert!(rt.heap.major_due());
+    assert!(rt.heap.code_due());
     let w = fresh_word(&mut rt, 7, 1);
     place(&mut rt, w);
     let at = rt.heap.push_root(w);

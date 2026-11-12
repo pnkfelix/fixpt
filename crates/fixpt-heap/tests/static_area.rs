@@ -1,6 +1,7 @@
 //! The static area (`TODO.md` §161): what an image put there never moves,
 //! nor is copied; its objects are roots, so what they refer to lives and
-//! follows when it moves, by their dirty cards in a minor collection.
+//! follows when it moves, by their dirty cards in a minor collection, and
+//! by the cards that refer to what moves, its remembered set, in a major.
 
 use fixpt_heap::{Heap, Value, image, layout};
 
@@ -65,6 +66,92 @@ fn what_a_static_object_refers_to_lives_and_follows() {
         assert_eq!(h.string_to_rust(h.car(h.car(last))), "young");
     }
     assert_eq!(h.root_at(r), l);
+}
+
+/// What the old space holds, stored into a static object, is remembered by
+/// its card (the write barrier's), not by a scan of the whole half: it
+/// lives and follows through major collections, the card kept while it
+/// refers to what moves.
+#[test]
+fn an_old_object_a_static_one_refers_to_is_remembered() {
+    let mut h = Heap::new();
+    h.verify_barrier = true;
+    let r = spliced(&mut h);
+    let l = h.root_at(r);
+    let old = h.make_string("old");
+    let old = h.cons(old, Value::NULL);
+    let k = h.push_root(old);
+    h.collect(&mut []);
+    let old = h.root_at(k);
+    h.set_root_at(k, Value::NULL);
+    let last = h.cdr(h.cdr(l));
+    h.set_car(last, old);
+    h.collect(&mut []);
+    assert_ne!(h.car(last), old, "it moved, and the static field followed");
+    for _ in 0..3 {
+        h.collect(&mut []);
+        h.verify().unwrap();
+        assert_eq!(h.string_to_rust(h.car(h.car(last))), "old");
+    }
+    // Let go: the card is clean again after the next, and nothing lingers.
+    h.set_car(last, Value::fixnum(3));
+    h.collect(&mut []);
+    h.collect(&mut []);
+    h.verify().unwrap();
+    assert_eq!(h.car(last), Value::fixnum(3));
+}
+
+/// Code made after the image, stored into a static object, is remembered
+/// as what moves is: the code area is swept, and that object may be all
+/// that refers to it.
+#[test]
+fn code_a_static_object_refers_to_is_remembered() {
+    let mut h = Heap::new();
+    h.verify_barrier = true;
+    let r = spliced(&mut h);
+    let l = h.root_at(r);
+    let code = h.make_code_bloblet(layout::kind("bloblet"), 2, 64, false);
+    h.set_bloblet_slot(code, 2, Value::fixnum(42));
+    let last = h.cdr(h.cdr(l));
+    h.set_car(last, code);
+    for _ in 0..3 {
+        h.collect(&mut []);
+        h.verify().unwrap();
+        assert_eq!(h.car(last), code, "it does not move");
+        assert_eq!(h.bloblet_slot(code, 2), Value::fixnum(42), "nor was it freed");
+    }
+    let other = h.make_code_bloblet(layout::kind("bloblet"), 2, 64, false);
+    assert_ne!(other, code, "its room not reused");
+}
+
+/// An image spliced where a symbol of its own is this heap's, which moves:
+/// its objects go into the mutable half, and their references to what moves
+/// are remembered at once, with no store to mark them.
+#[test]
+fn an_image_spliced_beside_moving_symbols_remembers_them() {
+    let bytes = {
+        let mut h = Heap::new();
+        let sym = h.intern("shared-name");
+        let l = h.cons(sym, Value::NULL);
+        h.push_root(l);
+        image::dump_static(&h)
+    };
+    let mut h = Heap::new();
+    h.verify_barrier = true;
+    let mine = h.intern("shared-name");
+    assert!(!h.is_static(mine));
+    let img = image::parts(&bytes, true).unwrap();
+    let roots = h.splice_image(&img, &[]).unwrap();
+    let r = h.push_root(roots[0]);
+    let l = h.root_at(r);
+    assert!(h.is_static(l));
+    for _ in 0..3 {
+        h.collect(&mut []);
+        h.verify().unwrap();
+        let sym = h.car(h.root_at(r));
+        assert_eq!(h.symbol_name(sym), "shared-name");
+        assert_eq!(sym, h.intern("shared-name"), "the heap's own, followed as it moved");
+    }
 }
 
 #[test]

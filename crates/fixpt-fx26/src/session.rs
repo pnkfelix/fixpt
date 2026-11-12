@@ -3397,7 +3397,8 @@ impl Fx26Session {
         }
         let (cached, kept) = match keeping {
             Some(_) => (None, image),
-            None => (image.and_then(|b| fixpt_heap::image::load_trusted(b.get(CACHE_IMAGE_AT..)?).ok()), None),
+            // One that reads as an image; otherwise the front end is made.
+            None => (image.filter(|b| b.get(CACHE_IMAGE_AT..).is_some_and(|i| fixpt_heap::image::parts(i, false).is_ok())), None),
         };
         if let (Some(from), Some(k)) = (&kept, &keeping) {
             let mut loaded = false;
@@ -3437,8 +3438,17 @@ impl Fx26Session {
         let pieces: Result<(), String> = self.scheme.scope(|sc| {
             let mut compiled = Err(String::new());
             let word = sc.make(|m| {
-                if let Some(from) = &cached {
-                    compiled = Ok(m.heap().copy_graph_from(from, from.roots_slice()[0]));
+                // Spliced into the static area, as the cache was written
+                // for (`save_image`), not copied into the old space, where
+                // every major collection would copy it again.
+                // (Copied, if the static area has no room for it.)
+                if let Some(b) = &cached {
+                    let img = b.get(CACHE_IMAGE_AT..).expect("checked above");
+                    let parts = fixpt_heap::image::parts(img, false).expect("checked above");
+                    compiled = match m.heap().splice_image(&parts, &[]) {
+                        Ok(roots) => Ok(roots[0]),
+                        Err(_) => fixpt_heap::image::load_trusted(img).map(|from| m.heap().copy_graph_from(&from, from.roots_slice()[0])).map_err(|e| e.to_string()),
+                    };
                 } else if let Some((c, tops)) = &checked {
                     let mut comp = crate::cellular::Compiler::new(m.heap(), c, &text);
                     comp.registers = true;

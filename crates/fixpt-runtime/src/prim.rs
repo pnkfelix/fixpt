@@ -2538,8 +2538,9 @@ prims! {
     // Collections made, minor and major.
     "%gc-count", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.collections() as i64)));
     "%gc-words-copied", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.heap.words_copied as i64)));
-    // Collect at every nth safepoint as well as when full; 0 for only when
-    // full. For sweeping collections through a program to find rooting bugs.
+    // Collect at every nth safepoint as well as when one is due (a minor
+    // collection, in a heap with a nursery); 0 for only when one is due.
+    // For sweeping collections through a program to find rooting bugs.
     "%gc-every!", 1, Some(1), simple!(|rt, a| {
         let n = int(rt, a[0])?;
         if n < 0 { return rt.fail("%gc-every! takes a count, 0 or more", &[a[0]]); }
@@ -3288,6 +3289,21 @@ prims! {
             _ => return rt.type_error("a list of places", a[0]),
         };
         Ok(Value::fixnum(rt.heap.provenance.id(&chain)))
+    });
+    // `%gc-every!`'s fellows (`Heap::gc_every`): a major collection at every
+    // nth safepoint, and a code collection; 0 for none. (Last in the table,
+    // so that no primitive before them is numbered anew.)
+    "%gc-major-every!", 1, Some(1), simple!(|rt, a| {
+        let n = int(rt, a[0])?;
+        if n < 0 { return rt.fail("%gc-major-every! takes a count, 0 or more", &[a[0]]); }
+        rt.heap.gc_major_every = n as u64;
+        Ok(Value::UNSPECIFIED)
+    });
+    "%gc-code-every!", 1, Some(1), simple!(|rt, a| {
+        let n = int(rt, a[0])?;
+        if n < 0 { return rt.fail("%gc-code-every! takes a count, 0 or more", &[a[0]]); }
+        rt.heap.gc_code_every = n as u64;
+        Ok(Value::UNSPECIFIED)
     });
 }
 

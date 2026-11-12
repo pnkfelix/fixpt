@@ -2127,15 +2127,19 @@ pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value],
     })
 }
 
-/// Before running: the heap collected if its major collection is due
-/// (code made counts toward it, and a run that only makes code may reach
-/// no safepoint), `word` and `args` rooted, and moved on. A heap whose
-/// collection is held off is left alone.
+/// Before running: the heap collected if a code collection is due (a run
+/// that only makes code may reach no safepoint), or its major collection
+/// (code installed outside it counts toward that); `word` and `args`
+/// rooted, and moved on. A heap whose collection is held off is left alone.
 fn collect_for_code(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> (Value, Vec<Value>) {
     let mut word = [word];
     let mut args = args.to_vec();
-    if !rt.heap.collection_inhibited() && rt.heap.major_due() {
-        rt.heap.collect(&mut [&mut word, &mut args]);
+    if !rt.heap.collection_inhibited() {
+        if rt.heap.code_due() {
+            rt.heap.collect(&mut [&mut word, &mut args]);
+        } else if rt.heap.major_due() {
+            rt.heap.collect_old(&mut [&mut word, &mut args]);
+        }
     }
     (word[0], args)
 }

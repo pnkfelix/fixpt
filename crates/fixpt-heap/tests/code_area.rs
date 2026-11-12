@@ -210,3 +210,52 @@ fn an_image_carries_the_code_area() {
     let stub = back.bloblet_slot(c, layout::closure::CLOSURE_STUB);
     assert_eq!(back.foreign_stub(), stub, "the shared stub found again, not made anew");
 }
+
+/// A major collection that leaves the code area be (`collect_old`) frees
+/// none of it, and finds what a code bloblet refers to in the old space by
+/// its card: it lives, and the field follows it as it moves. A code
+/// collection (`collect`) then frees what nothing refers to.
+#[test]
+fn a_collection_of_the_old_space_leaves_the_code_area_be() {
+    let mut heap = Heap::new();
+    heap.verify_barrier = true;
+    let kept = code(&mut heap, 16);
+    let root = heap.push_root(kept);
+    // An old pair, stored once it is old: by the second table's mark alone.
+    let pair = heap.cons(Value::fixnum(42), Value::NULL);
+    let k = heap.push_root(pair);
+    collect(&mut heap);
+    let pair = heap.root_at(k);
+    heap.set_root_at(k, Value::NULL);
+    heap.set_bloblet_slot(kept, 1, pair);
+    let _dropped = code(&mut heap, 16);
+    let (before, _) = heap.code_words();
+    for _ in 0..4 {
+        heap.collect_old(&mut []);
+        heap.verify().unwrap();
+        assert_eq!(heap.car(heap.bloblet_slot(kept, 1)), Value::fixnum(42));
+        assert_eq!(heap.code_words().0, before, "nothing freed");
+    }
+    collect(&mut heap);
+    let (after, _) = heap.code_words();
+    assert!(after < before, "the dropped one freed by a code collection");
+    assert_eq!(heap.car(heap.bloblet_slot(kept, 1)), Value::fixnum(42));
+    heap.pop_roots_to(root);
+}
+
+/// A dead code bloblet and a heap object that refer to each other are
+/// freed together by a code collection: the code area's cards are no roots
+/// of one, though they are of a collection of the old space alone.
+#[test]
+fn a_cycle_through_the_code_area_is_freed() {
+    let mut heap = Heap::new();
+    heap.verify_barrier = true;
+    let c = code(&mut heap, 16);
+    let pair = heap.cons(c, Value::NULL);
+    heap.set_bloblet_slot(c, 1, pair);
+    heap.collect_old(&mut []);
+    heap.collect_old(&mut []);
+    assert_ne!(heap.code_words(), (0, 0), "kept by its own card till the code is collected");
+    collect(&mut heap);
+    assert_eq!(heap.code_words(), (0, 0), "both freed");
+}

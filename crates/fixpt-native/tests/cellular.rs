@@ -99,10 +99,10 @@ fn cons_calls_out_and_survives_collection() {
     heap.gc_every = 200;
     for opt in opt_levels() {
         let mut m = StencilMachine::new(opt).expect("built");
-        let before = heap.gc_count;
+        let before = heap.collections();
         let w = heap.root_at(root);
         assert_eq!(m.run(&mut heap, w, &[fx(3000)], FUEL).unwrap(), [fx(4501500)]);
-        assert!(heap.gc_count > before);
+        assert!(heap.collections() > before);
     }
     let w = heap.root_at(root);
     both(&mut heap, w, &[fx(500)]).unwrap();

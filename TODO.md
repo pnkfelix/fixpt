@@ -3462,6 +3462,11 @@ first run after a build, which compiles the front end again for its
 cache, about 3 s, had looked like their cost.) **Left**: the checking
 itself, 1.7 s where the same files as globals check in under one.
 
+
+Seen again (2026-11-12): `fixpt eval` of a program that loads
+`fx26:parser-top.fx` (`load-module`) ran over ten minutes in a release
+build, all in the Rust checker (`same_ty` 24%, `Ty::clone` 15%,
+`abbreviation` 10%, the rest the allocator), and was stopped.
 ## 139. A module's static part as a kind (the user's, 2026-10-28)
 
 A `moduleof` type is, by Harper, Mitchell and Moggi's phase distinction
@@ -3803,11 +3808,13 @@ spliced into the session's: a major collection no longer copies it (stage
    immutable half), the place's tested first; an immutable place refusing
    what may move, in every build. Stage 0: majors 125 ms to 119 ms,
    instructions 0.4% more, cycles the same.
-5. The remembered set for the mutable part, seeded by the image (below),
-   in place of scanning it whole: what the barrier's "something of the
-   old space into what never moves" case is for (`older_to_younger`); and
-   native code's barrier by the table too (`gen_table_address`, biased as
-   the card table's), which marks every store's card meanwhile.
+5. ~~The remembered set for the mutable part, seeded by the image (below),
+   in place of scanning it whole~~ (2026-11-12): what the barrier's
+   "something of the old space into what never moves" case is for
+   (`older_to_younger`). Done with the code area made a generation of its
+   own (§252, "Then"). Left: native code's barrier by the table too
+   (`gen_table_address`, biased as the card table's), which marks every
+   store's card in the first table meanwhile, sorted at the next minor.
 6. Global cells in the static area.
 
 What the collector does with what §160 maps, the user's design:
@@ -6045,6 +6052,44 @@ path evaluates Scheme it has not made ready. A debug `fixpt eval 0` 0.52 s
 to 0.16 s. `tests/scheme_free.rs` holds that a program run compiled loads
 none of it.
 
+Then (2026-11-12, the user's): the long debug tests. `direct::
+control_on_native_frames` (152 s) and `deep_recursion_through_the_stack_
+cache` (109 s) were 99% major collections, the stress policy's: each
+copied the 3.4 M words live, 2.7 M of them the front end's register code,
+read from its cache (a static image) and copied into the old space. Now:
+- The cache spliced into the static area (`as_register_code`), as it was
+  written for.
+- The static area's mutable half remembered (§161 step 5), not scanned
+  whole, in two card tables (the user's): the first for young referents,
+  which a minor collection reads; the second (`Heap::old_cards`) for the
+  old space's, which a major one reads too. A card is cleaned only by a
+  scan that finds nothing there left to remember. Static fields that hold
+  code made at run time (some 24 000, each register word's machine code)
+  kept as slots (`static_code_slots`), not by cards.
+- The code area a generation of its own (static ≫ code ≫ old ≫ nursery,
+  `GEN_CODE`): a major collection (`collect_old`) neither traces nor
+  sweeps it, finding what it refers to in the old space by its cards (both
+  tables); a code collection (`collect`) traces and sweeps it as every
+  major collection did, its cards no roots (a dead bloblet's would keep a
+  cycle through the heap alive), code an image brought (`Part::fixed`)
+  its roots. Each on its own budget (`major_due`, `code_due`), the code
+  area's with a backstop at `COLLECT_THRESHOLD` of either part.
+- The stress policy as three periods of safepoints (the user's): forced
+  collections (`gc_every`: minor, where there is a nursery), major ones
+  (`gc_major_every`) and code collections (`gc_code_every`); the CLI's
+  `--gc-major-every` and `--gc-code-every`, the runtime's
+  `%gc-major-every!` and `%gc-code-every!`. Each test says what it wants.
+
+The two tests 152 s to 69 s and 109 s to 59 s; the debug suite 279 s to
+237 s, its long poles now the front end's compiles (`bootstrap::the_
+compiler_compiles_the_front_end`, 116 s), `scopes` and the checker's (95
+s) and the CLI's cache tests (91 s); the release suite as it was (143 s,
+`bootstrap fixpoint` its long pole). Left: the heap crate optimized in
+debug builds (`[profile.dev.package.fixpt-heap]`; every `Value::is_ref`
+a call there now); the code collection's marks a bitmap, not a
+`HashSet` (SipHash, 8% of a code collection); and why the test's session
+makes some 88 MB of machine code.
+
 ## 253. A debug test process with no cache at all overflows its stack (found 2026-11-11)
 
 `direct::speculation_reads_compiled_globals` (and likely any test that
@@ -6109,3 +6154,76 @@ related bug:
 
 (Also to keep in mind: the Rust compiler's naming of the same procedures,
 `cellular.rs`'s, so that the two compilers name alike.)
+
+## 256. A syntactic closure's unbound name could say why (the user's, 2026-11-12)
+
+The user's report: with
+`(define-syntax let1sc (sc-macro-transformer (lambda (exp env) … `(let ((,x ,e)) . ,rest))))`,
+`(let1sc x 3 (let1sc y 4 (+ x y)))` fails "`x` is not defined at the top
+level", where the `er-` and `syntax-rules` versions give 7. Not a hygiene
+bug, as found: an `sc-macro-transformer`'s output is closed in the
+environment the macro was defined in, and so is any part of its input
+left unwrapped; the inner expansion's `(+ x y)`, closed at the top level,
+does not see the outer expansion's `x`. The idiom wraps the input in the
+use's environment, letting the inserted binder capture what it binds:
+`(make-syntactic-closure env (list x) body)` (and `env '()` for `e`), with
+which the nested use gives 7 here, as MIT Scheme's does. To do: the
+message, where a name a syntactic closure's output names is unbound,
+could say so: that the output is closed where the macro is defined, and
+`make-syntactic-closure` closes a part where it is used.
+
+## 257. The Mac team's notes on `table.fx`'s code and its listings (2026-11-12)
+
+From reading the code made of `bucket-of`. Measured since (2026-11-12, the
+bootstrap compile, release, natively): `table.fx` is 1.1% of samples, all
+the native front end 19.9%, so these are small wins now; the listing
+items stand on their own.
+
+`table.fx`:
+1. `bucket-of`'s `(modulo h n)` as `(bitwise-and h (- n 1))`: the count of
+   buckets is always a power of two (8, doubled), and the buckets come out
+   the same, negative hashes too; the division, its zero check and sign
+   fix-up gone. A comment at `make-table` and `table-grow` of the
+   invariant. (To check: whether inline `bitwise-and` still tests for
+   bignums.) The branch `table-macros` does this already.
+2. Maybe: each entry's hash kept, so that `rehash-bucket` does not hash
+   every entry again at each doubling: a word an entry; only if hashing
+   is costly (strings) or growth shows in a profile.
+
+The front end, inlining:
+3. `bucket-of` inlined at its three callers (`table-entry`, `table-set!`,
+   `rehash-bucket`): a native frame less a table operation (fuel and stack
+   checks, spills, the call). §245, §251.
+
+The register code generator:
+4. Only what is live across a call kept in the frame: `bucket-of` stores
+   `t`, `key`, `n` and the hash closure, and reads back only `n` after the
+   call; the frame could shrink with it. To check first: whether the
+   debugger's frame view or continuation capture relies on those slots.
+
+The native backend (`direct.rs`):
+5. `reg k` right after `setreg k` as nothing: `mov x1, x0; mov x0, x1` after
+   the call, both gone, nothing reading `x1` after. The compiler tracks what
+   each register holds already (it made `load 1 1` a `mov x1, x2`); it
+   misses this case.
+6. Slow paths out of line, after the `ret`, the fast path falling through
+   to the epilogue (`modulo`'s fast path ends `b @76`, over its slow path).
+7. A branchless floor fix-up for `modulo` (`add/eor/cmp/ccmp/csel`), for
+   `modulo` in general (item 1 makes it moot for `bucket-of`); only if
+   measurements show mispredictions.
+
+Names and listings: items 8–13 are §255's (a module's members unnamed,
+`c-module-make`; the `lambda/` around them; `symbol-hash`'s wrong place;
+`file:line` in `,disassemble` by a resolver hook in `fixpt-runtime`, on
+each register-code line too; the name as now where no sources are kept,
+the raw places kept for profiles and `FIXPT_REG_RANGE`). And:
+14. `,disassemble-asm`'s "code 2" is no callee: the 2-instruction foreign
+    stub of the cellular word code 1 was compiled from, found through the
+    `CODE_SOURCE` field (`code_text`, `direct.rs`). Walk the fields after
+    `CODE_SOURCE`, or label it "the source word's stub".
+
+Also seen in that profile, larger than all of the above: collection ~11%;
+SipHash of `FileId` keys ~6% (`hash_one::<&FileId>`, `sip::Hasher::write`;
+a `HashMap<FileId, …>` looked up very often, likely `rust_facts`' byte
+offsets by span), worth a faster hasher or a direct index; call-outs from
+native code ~5%, one primitive (`PRIMITIVES` closure #161) 2.8%.

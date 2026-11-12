@@ -181,9 +181,17 @@ impl Host {
     pub fn heap_used(&self) -> usize {
         self.rt.heap.used()
     }
-    /// The collector's bug-finding policy (`Heap::gc_every`).
+    /// The collector's bug-finding policy (`Heap::gc_every`): its period of
+    /// forced collections, in safepoints.
     pub fn set_gc_every(&mut self, n: u64) {
         self.rt.heap.gc_every = n;
+    }
+
+    /// All three of its periods: of forced collections, major ones, and code
+    /// collections.
+    pub fn set_gc_stress(&mut self, every: u64, major: u64, code: u64) {
+        let heap = &mut self.rt.heap;
+        (heap.gc_every, heap.gc_major_every, heap.gc_code_every) = (every, major, code);
     }
 
     /// The runtime, with nothing rooted: for the machinery (engines, front

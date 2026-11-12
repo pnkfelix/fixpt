@@ -82,7 +82,7 @@ fn a_far_field_of_a_large_old_object_is_found_by_the_crossing_map() {
 #[test]
 fn stores_across_generations_survive_many_collections() {
     let mut h = heap();
-    h.gc_every = 3;
+    (h.gc_every, h.gc_major_every) = (3, 12);
     // A table of old pairs, each overwritten with young lists as it goes,
     // collecting at safepoints, minor and major.
     let mut roots = [Value::NULL];
