@@ -137,7 +137,7 @@ pub fn session() -> fixpt_fx26::session::Fx26Session {
 pub fn front_end_session() -> fixpt_fx26::session::Fx26Session {
     let mut s = session();
     s.load_own_pieces().expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    s.scheme.set_step_limit(None);
     s
 }
 
@@ -220,7 +220,7 @@ pub(crate) use sharded;
 /// The bootstrap program compiled by the compiler written in FX-26, kept
 /// for all these tests and made by `fixpt prewarm`
 /// (`fixpt_fx26::bootstrap_cache`).
-pub fn bootstrap_compiled(sc: &mut fixpt_scheme::Session, registers: bool) -> fixpt_scheme::Handle {
+pub fn bootstrap_compiled(sc: &mut fixpt_fx26::front::Front, registers: bool) -> fixpt_scheme::Handle {
     fixpt_fx26::bootstrap_cache::bootstrap_compiled(sc, registers)
 }
 

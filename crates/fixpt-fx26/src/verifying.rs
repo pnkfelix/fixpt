@@ -64,7 +64,7 @@ pub struct Verified {
 /// `tops`, checked by `c` from `text`, compiled and each word verified, the
 /// words kept alive in `scheme`'s scope as they are; or why it was not
 /// compiled. Loads are from `base`.
-pub fn verify_program(scheme: &mut fixpt_scheme::Session, c: &mut Checker, text: &str, tops: &[Top], base: Option<std::path::PathBuf>) -> Result<Verified, String> {
+pub fn verify_program(scheme: &mut crate::front::Front, c: &mut Checker, text: &str, tops: &[Top], base: Option<std::path::PathBuf>) -> Result<Verified, String> {
     crate::syn::set_load_base(base);
     let mut out = Err(String::new());
     scheme.scope(|sc| {
@@ -125,7 +125,7 @@ fn bare(said: &str) -> &str {
 /// whether all of those verified. Or why the program was refused, or not
 /// compiled. Each VC left open is asked of an SMT solver, if there is one
 /// (`crate::smt`), and sorted by what it says (`sort`).
-pub fn report(scheme: &mut fixpt_scheme::Session, text: &str, file: Option<&str>, base: Option<std::path::PathBuf>, only: &[String]) -> Result<(Vec<String>, bool), String> {
+pub fn report(scheme: &mut crate::front::Front, text: &str, file: Option<&str>, base: Option<std::path::PathBuf>, only: &[String]) -> Result<(Vec<String>, bool), String> {
     let (mut c, tops) = checked_in(text, base.clone()).map_err(|e| format!("the checker refused it: {e}"))?;
     let v = verify_program(scheme, &mut c, text, &tops, base.clone()).map_err(|e| format!("not compiled: {e}"))?;
     let mut lines = Vec::new();

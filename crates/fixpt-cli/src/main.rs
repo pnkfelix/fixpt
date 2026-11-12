@@ -894,14 +894,20 @@ pub(crate) fn parse_limit(v: &str) -> Option<Option<u64>> {
 
 /// Apply `--gc-every` to a session's heap, and `--step-limit` to its engine.
 pub(crate) fn apply_gc_policy(session: &mut Session) {
-    if let Some(n) = GC_EVERY.get() {
-        session.set_gc_every(*n);
-    }
+    apply_heap_policy(session);
     if let Some(l) = STEP_LIMIT.get() {
         session.engine.set_step_limit(*l);
     }
+}
+
+/// Apply `--gc-every` to a host's heap, and its trace (an FX-26 session's,
+/// which says its step limit itself).
+pub(crate) fn apply_heap_policy(host: &mut fixpt_runtime::host::Host) {
+    if let Some(n) = GC_EVERY.get() {
+        host.set_gc_every(*n);
+    }
     // A line on stderr for each collection (`docs/research/telemetry.md`).
-    session.runtime_unrooted().heap.trace = std::env::var_os("FIXPT_GC_TRACE").is_some();
+    host.runtime_unrooted().heap.trace = std::env::var_os("FIXPT_GC_TRACE").is_some();
 }
 
 /// The options a command takes after it, left for it to read.

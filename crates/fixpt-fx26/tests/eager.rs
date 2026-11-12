@@ -25,8 +25,8 @@ fn session(backend: Backend) -> Fx26Session {
     let mut s = Fx26Session::with_backend(backend).expect("starts");
     let loaded = s.run_program(&reader_program()).expect("the reader checks");
     loaded.expect("the reader loads");
-    s.scheme.eval_str("<scheme-eager>", fixpt_scheme::eager::SOURCE).expect("the Scheme reader loads");
-    s.scheme.eval_str("<helper>", include_str!("programs/eager/read-all.scm")).expect("the helper loads");
+    s.scheme.lowered().eval_str("<scheme-eager>", fixpt_scheme::eager::SOURCE).expect("the Scheme reader loads");
+    s.scheme.lowered().eval_str("<helper>", include_str!("programs/eager/read-all.scm")).expect("the helper loads");
     s
 }
 
@@ -47,7 +47,7 @@ fn scheme_string(text: &str) -> String {
 /// The FX-26 reader reads `text` to the data the Rust reader reads.
 fn agree(s: &mut Fx26Session, text: &str) {
     let program = format!("(equal? (fx-data {}) (quote ({text}\n)))", scheme_string(text));
-    let got = s.scheme.eval_to_string("<agree>", &program);
+    let got = s.scheme.lowered().eval_to_string("<agree>", &program);
     assert_eq!(got.as_deref().ok(), Some("#t"), "the FX-26 reader disagrees on:\n{text}\n{got:?}");
 }
 
@@ -113,16 +113,16 @@ fn it_agrees_on_every_prefix() {
     let text = "(define (f x) \"s;(\" #\\) #| ) |# |a(b| '#(1 2) `(a ,b) (g . h))";
     for backend in [Backend::Ast, Backend::Bytecode] {
         let mut s = session(backend);
-        let mut fx = EagerReader::attach(&mut s.scheme, "fx:").expect("starts");
-        let mut scheme = EagerReader::attach(&mut s.scheme, "").expect("starts");
+        let mut fx = EagerReader::attach(s.scheme.lowered(), "fx:").expect("starts");
+        let mut scheme = EagerReader::attach(s.scheme.lowered(), "").expect("starts");
         let chars: Vec<char> = text.chars().collect();
         for n in 0..=chars.len() {
             let prefix: String = chars[..n].iter().collect();
-            let mine = fx.status(&mut s.scheme, &prefix, false).expect("reads");
-            let theirs = scheme.status(&mut s.scheme, &prefix, false).expect("reads");
+            let mine = fx.status(s.scheme.lowered(), &prefix, false).expect("reads");
+            let theirs = scheme.status(s.scheme.lowered(), &prefix, false).expect("reads");
             assert_eq!(mine, theirs, "{backend:?}: {prefix:?}");
             assert!(!matches!(mine, EagerStatus::Invalid { .. }), "{backend:?}: {prefix:?}: {mine:?}");
-            let at_enter = fx.status(&mut s.scheme, &prefix, true).expect("reads");
+            let at_enter = fx.status(s.scheme.lowered(), &prefix, true).expect("reads");
             let rust = fixpt_read::form_status(&format!("{prefix}\n"), fixpt_read::SyntaxProfile::SCHEME);
             assert_eq!(
                 matches!(at_enter, EagerStatus::Incomplete),
@@ -138,10 +138,10 @@ fn errors_are_caught_where_the_rust_reader_catches_them() {
     let cases = [")", "(a b]", "(1 2 . )", "(. a)", "#q ", "#\\bogus ", "(\"a\" #tru )", "#(1 . 2)"];
     for backend in [Backend::Ast, Backend::Bytecode] {
         let mut s = session(backend);
-        let mut fx = EagerReader::attach(&mut s.scheme, "fx:").expect("starts");
-        let mut scheme = EagerReader::attach(&mut s.scheme, "").expect("starts");
+        let mut fx = EagerReader::attach(s.scheme.lowered(), "fx:").expect("starts");
+        let mut scheme = EagerReader::attach(s.scheme.lowered(), "").expect("starts");
         for text in cases {
-            let mine = fx.status(&mut s.scheme, text, false).expect("reads");
+            let mine = fx.status(s.scheme.lowered(), text, false).expect("reads");
             let rust = fixpt_read::form_status(text, fixpt_read::SyntaxProfile::SCHEME);
             let at = match rust {
                 fixpt_read::FormStatus::Invalid(e) => e.span.start as usize,
@@ -152,7 +152,7 @@ fn errors_are_caught_where_the_rust_reader_catches_them() {
                 other => panic!("{backend:?}: {text:?} should be an error, got {other:?}"),
             }
             // Word for word what the Scheme reader says.
-            assert_eq!(mine, scheme.status(&mut s.scheme, text, false).expect("reads"), "{backend:?}: {text:?}");
+            assert_eq!(mine, scheme.status(s.scheme.lowered(), text, false).expect("reads"), "{backend:?}: {text:?}");
         }
     }
 }
@@ -163,8 +163,8 @@ fn errors_are_caught_where_the_rust_reader_catches_them() {
 fn checkpoints_back_up_and_branch() {
     for backend in [Backend::Ast, Backend::Bytecode] {
         let mut s = session(backend);
-        let mut r = EagerReader::attach(&mut s.scheme, "fx:").expect("starts");
-        let mut st = |text: &str| r.status(&mut s.scheme, text, false).expect("reads");
+        let mut r = EagerReader::attach(s.scheme.lowered(), "fx:").expect("starts");
+        let mut st = |text: &str| r.status(s.scheme.lowered(), text, false).expect("reads");
         assert_eq!(st("(a b"), EagerStatus::Incomplete);
         assert!(matches!(st("(a b]"), EagerStatus::Invalid { at: 4, .. }));
         assert_eq!(st("(a b"), EagerStatus::Incomplete);
@@ -180,8 +180,8 @@ fn checkpoints_back_up_and_branch() {
 #[test]
 fn a_hole_before_the_form_is_finished() {
     let mut s = session(Backend::Bytecode);
-    let mut r = EagerReader::attach(&mut s.scheme, "fx:").expect("starts");
-    let mut at_enter = |text: &str| r.status(&mut s.scheme, text, true).expect("reads");
+    let mut r = EagerReader::attach(s.scheme.lowered(), "fx:").expect("starts");
+    let mut at_enter = |text: &str| r.status(s.scheme.lowered(), text, true).expect("reads");
     assert_eq!(at_enter("(vector-ref (make-vector 3 0) ,help"), EagerStatus::Hole { closers: ")".into() });
     assert_eq!(at_enter("(f (g [h ,help"), EagerStatus::Hole { closers: "]))".into() });
     assert_eq!(at_enter("#(1 ,help"), EagerStatus::Hole { closers: ")".into() });
@@ -195,8 +195,8 @@ fn a_hole_before_the_form_is_finished() {
 fn the_context_is_the_parse_stack() {
     for backend in [Backend::Ast, Backend::Bytecode] {
         let mut s = session(backend);
-        let fx = s.scheme.eval_to_string("<ctx>", "(fx-context \"(vector-ref (make-vector 3 0) \")");
-        let scheme = s.scheme.eval_to_string("<ctx>", "(scheme-context \"(vector-ref (make-vector 3 0) \")");
+        let fx = s.scheme.lowered().eval_to_string("<ctx>", "(fx-context \"(vector-ref (make-vector 3 0) \")");
+        let scheme = s.scheme.lowered().eval_to_string("<ctx>", "(scheme-context \"(vector-ref (make-vector 3 0) \")");
         assert_eq!(fx.as_deref().ok(), Some("((list 0 #\\) ((make-vector 3 0) vector-ref)) (top))"), "{backend:?}");
         assert_eq!(fx.ok(), scheme.ok(), "{backend:?}");
     }
@@ -232,7 +232,7 @@ fn it_reads_fx26_as_the_rust_reader_does() {
         fixpt_fx26::EAGER_READER,
     ];
     for text in sources {
-        let got = s.scheme.eval_to_string("<fx26>", &format!("(fx26-data {})", scheme_string(text)));
+        let got = s.scheme.lowered().eval_to_string("<fx26>", &format!("(fx26-data {})", scheme_string(text)));
         let want = rust_fx26(text);
         if let Err(e) = &got {
             panic!("the FX-26 reader failed: {e}");
@@ -254,11 +254,11 @@ fn it_reads_fx26_as_the_rust_reader_does() {
 #[test]
 fn it_knows_fx26s_differences() {
     let mut s = session(Backend::Bytecode);
-    let mut r = EagerReader::attach_starting(&mut s.scheme, "fx:", "eager-start-fx26").expect("starts");
+    let mut r = EagerReader::attach_starting(s.scheme.lowered(), "fx:", "eager-start-fx26").expect("starts");
     for text in ["[a]", "(a ]", "a]", "(a [b"] {
         let rust = fixpt_read::form_status(text, fixpt_read::SyntaxProfile::FX26);
         let fixpt_read::FormStatus::Invalid(e) = rust else { panic!("{text:?}: Rust says {rust:?}") };
-        match r.status(&mut s.scheme, text, false).expect("reads") {
+        match r.status(s.scheme.lowered(), text, false).expect("reads") {
             EagerStatus::Invalid { at, message } => {
                 assert_eq!(at, e.span.start as usize, "{text:?}");
                 assert_eq!(message, e.message, "{text:?}");
@@ -270,7 +270,7 @@ fn it_knows_fx26s_differences() {
     let chars: Vec<char> = text.chars().collect();
     for n in 0..=chars.len() {
         let prefix: String = chars[..n].iter().collect();
-        let eager = r.status(&mut s.scheme, &prefix, true).expect("reads");
+        let eager = r.status(s.scheme.lowered(), &prefix, true).expect("reads");
         let rust = fixpt_read::form_status(&format!("{prefix}\n"), fixpt_read::SyntaxProfile::FX26);
         assert_eq!(
             matches!(eager, EagerStatus::Incomplete),
@@ -292,11 +292,11 @@ fn the_driver_survives_collections_anywhere() {
     for every in [1, 2, 3, 5, 7, 11, 13, 17] {
         let mut s = session(Backend::Bytecode);
         s.scheme.set_gc_every(every);
-        let mut r = EagerReader::attach_starting(&mut s.scheme, "fx:", "eager-start-fx26").expect("starts");
+        let mut r = EagerReader::attach_starting(s.scheme.lowered(), "fx:", "eager-start-fx26").expect("starts");
         let chars: Vec<char> = text.chars().collect();
         for n in 0..=chars.len() {
             let prefix: String = chars[..n].iter().collect();
-            r.status(&mut s.scheme, &prefix, true).unwrap_or_else(|e| panic!("every {every}, {prefix:?}: {e}"));
+            r.status(s.scheme.lowered(), &prefix, true).unwrap_or_else(|e| panic!("every {every}, {prefix:?}: {e}"));
         }
     }
 }

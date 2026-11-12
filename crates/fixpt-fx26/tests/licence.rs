@@ -175,11 +175,11 @@ fn the_fx26_reader_loads_into_a_scheme_session() {
 #[test]
 fn the_reader_beside_a_program_keeps_its_own_names() {
     let mut s = session();
-    fixpt_fx26::session::load_eager_reader(&mut s.scheme).expect("licensed and loaded");
-    let mut r = EagerReader::attach_starting(&mut s.scheme, fixpt_fx26::session::READER_PREFIX, "eager-start-fx26")
+    fixpt_fx26::session::load_eager_reader(s.scheme.lowered()).expect("licensed and loaded");
+    let mut r = EagerReader::attach_starting(s.scheme.lowered(), fixpt_fx26::session::READER_PREFIX, "eager-start-fx26")
         .expect("starts");
     run(&mut s, "(define need 0)");
     run(&mut s, "(define advance (subr pure (int) int) (lambda (n) n))");
-    assert_eq!(r.status(&mut s.scheme, "(f #u", false).expect("reads"), EagerStatus::Incomplete);
-    assert_eq!(r.status(&mut s.scheme, "(f #u)", false).expect("reads"), EagerStatus::Complete);
+    assert_eq!(r.status(s.scheme.lowered(), "(f #u", false).expect("reads"), EagerStatus::Incomplete);
+    assert_eq!(r.status(s.scheme.lowered(), "(f #u)", false).expect("reads"), EagerStatus::Complete);
 }

@@ -242,7 +242,7 @@ fn compare_direct(limit: usize) {
 
 /// Closure `clo`'s own procedure, compiled by both: its bytes' count if
 /// they agree, none if both refuse it, or what differs.
-fn compare_one(sc: &mut fixpt_scheme::Session, entry: &str, clo: Handle, rust: &mut fixpt_native::direct::DirectMachine, fx: &mut fixpt_native::direct::DirectMachine) -> Result<Option<usize>, String> {
+fn compare_one(sc: &mut fixpt_fx26::front::Front, entry: &str, clo: Handle, rust: &mut fixpt_native::direct::DirectMachine, fx: &mut fixpt_native::direct::DirectMachine) -> Result<Option<usize>, String> {
     use fixpt_native::direct::{Each, FxEmitted};
     let mut want: Vec<Each> = Vec::new();
     sc.make(|m| {
@@ -294,7 +294,7 @@ fn compare_one(sc: &mut fixpt_scheme::Session, entry: &str, clo: Handle, rust: &
         // it, through its Scheme global.
         let made = match entry.strip_prefix(READER_PREFIX) {
             Some(e) => fixpt_fx26::entries::call(sc, e, &[name, lists, errors]),
-            None => sc.call_global(entry, &[name, lists, errors]),
+            None => sc.lowered().call_global(entry, &[name, lists, errors]),
         }
         .expect("runs");
         sc.make(|m| {
@@ -367,7 +367,7 @@ fn direct_entry(s: &mut fixpt_fx26::session::Fx26Session) -> String {
             _ => std::fs::read_to_string(&alone).expect("a program"),
         };
         let compiled = fixpt_fx26::session::compile_program(&program).unwrap_or_else(|e| panic!("checks: {e}"));
-        compiled.load_into(&mut s.scheme).expect("loads");
+        compiled.load_into(s.scheme.lowered()).expect("loads");
         return "fx:native-compile-arm64-proc".into();
     }
     format!("{READER_PREFIX}native-compile-arm64-proc")

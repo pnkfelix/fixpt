@@ -6032,6 +6032,19 @@ Left: a process's time before its first phase is in no file (a thread is
 counted from its first `enter`): a test that loads the lowered reader
 first showed 1.1 s of its 17.
 
+Then (2026-11-11, the user's): FX-26's sessions on a host of their own,
+not on the Scheme engine. Compiled FX-26 code calls nothing written in
+Scheme, so the engine is made only where lowered code runs: the front
+end's entries entered from Rust (`entries`, not 57 wrappers evaluated);
+`runtime.scm` and the prelude loaded only with lowered code
+(`scheme_ready`); `fixpt_runtime::host::Host` (the runtime and its handles)
+apart from `fixpt_scheme::Session` (a host and the engine); and
+`crate::front::Front`, an FX-26 session's: a host, and a Scheme session made
+on it only by `Front::lowered`, the one way to one, so that by its type no
+path evaluates Scheme it has not made ready. A debug `fixpt eval 0` 0.52 s
+to 0.16 s. `tests/scheme_free.rs` holds that a program run compiled loads
+none of it.
+
 ## 253. A debug test process with no cache at all overflows its stack (found 2026-11-11)
 
 `direct::speculation_reads_compiled_globals` (and likely any test that

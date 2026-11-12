@@ -1169,6 +1169,7 @@ pub mod spec_tests;
 pub mod sexp;
 pub mod syn;
 pub mod entries;
+pub mod front;
 pub mod bootstrap_cache;
 mod terminate;
 pub mod cellular;

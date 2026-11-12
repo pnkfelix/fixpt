@@ -51,11 +51,16 @@ fn twins(heap: &Heap, word: Value) -> Vec<Value> {
 }
 
 /// FX-26's `name` on `args` (a register word, then ints): a list of ints.
-fn ints(sc: &mut fixpt_scheme::Session, name: &str, rw: Handle, args: &[i64]) -> Vec<i64> {
+/// Its entry, `fx-native:NAME`, entered from Rust, as the front end's are
+/// (`fixpt_fx26::entries`).
+fn ints(sc: &mut fixpt_fx26::front::Front, name: &str, rw: Handle, args: &[i64]) -> Vec<i64> {
     sc.scope(|one| {
         let mut all = vec![rw];
         all.extend(args.iter().map(|&x| one.make(|_| Value::fixnum(x))));
-        let r = one.call_global(&format!("fx:{name}"), &all).unwrap_or_else(|e| panic!("{name} runs: {e}"));
+        let r = one
+            .call_global_with(&format!("fx-native:{name}"), &all, fixpt_runtime::prim::enter_front_end)
+            .expect("loaded")
+            .unwrap_or_else(|e| panic!("{name} runs: {e}"));
         one.view(|v| {
             let r = v.get(r);
             match r.fixnum() {

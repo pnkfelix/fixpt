@@ -117,7 +117,7 @@ fn the_rust_compiler_runs_modules_as_lowered() {
                     }
                 }
                 let none = sc.make(|_| Value::NULL);
-                match sc.call_global("%run-word", &[w, none]) {
+                match sc.run_word_on(w, none) {
                     Ok(v) => sc.write(v),
                     Err(e) => format!("!! {e}"),
                 }

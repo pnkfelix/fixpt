@@ -213,7 +213,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         s.front_end_native = false;
         s.native_keeping = None;
     }
-    crate::apply_gc_policy(&mut s.scheme);
+    crate::apply_heap_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
         s.set_step_limit(*l);
     }
@@ -263,7 +263,7 @@ pub fn repl(backend: Backend) -> i32 {
     // its licence is checked. Without it, the Rust reader.
     let mut eager = match session.load_own_reader().map_err(|e| String::from(e.message)).and_then(|()| {
         fixpt_scheme::eager::EagerReader::attach_starting(
-            &mut session.scheme,
+            session.scheme.lowered(),
             fixpt_fx26::session::READER_PREFIX,
             "eager-start-fx26",
         )
@@ -1766,7 +1766,7 @@ impl crate::lineedit::Oracle for Oracle<'_> {
         match self.reader.as_deref_mut() {
             // A `,help` hole in FX-26 is answered once the form is entered,
             // so a hole mid-form is just an unfinished form.
-            Some(r) => crate::eager_status(r, &mut self.session.scheme, text, at_enter, SyntaxProfile::FX26, false),
+            Some(r) => crate::eager_status(r, self.session.scheme.lowered(), text, at_enter, SyntaxProfile::FX26, false),
             None => crate::lineedit::Reread(SyntaxProfile::FX26).status(text, at_enter),
         }
     }
@@ -2213,7 +2213,7 @@ thread_local! {
 /// (so that the call-outs are numbered alike), and the two compiles
 /// compared (`fixpt_native::direct::describe`): what differs is said on
 /// stderr, after `fx-native oracle:`.
-pub(crate) fn compile_by_fx26(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle) -> Result<fixpt_scheme::Handle, String> {
+pub(crate) fn compile_by_fx26(s: &mut fixpt_fx26::front::Front, closure: fixpt_scheme::Handle) -> Result<fixpt_scheme::Handle, String> {
     let oracle = std::env::var_os("FIXPT_FX_NATIVE_ORACLE").is_some();
     let want = oracle.then(|| oracle_compile(s, closure));
     let mut got = Vec::new();
@@ -2249,12 +2249,12 @@ pub(crate) fn compile_by_fx26(s: &mut fixpt_scheme::Session, closure: fixpt_sche
 /// closure (`#f` but for the first).
 type Held = Vec<(String, fixpt_scheme::Handle, usize, fixpt_scheme::Handle)>;
 
-fn hold(s: &mut fixpt_scheme::Session, procs: &[(String, fixpt_native::direct::Compiled)]) -> Held {
+fn hold(s: &mut fixpt_fx26::front::Front, procs: &[(String, fixpt_native::direct::Compiled)]) -> Held {
     procs.iter().map(|(n, c)| (n.clone(), s.make(|_| c.code), c.len, s.make(|_| c.closure))).collect()
 }
 
 /// What `fixpt_native::direct::describe` says of held procedures.
-fn describe_held(s: &mut fixpt_scheme::Session, held: &Held) -> Vec<String> {
+fn describe_held(s: &mut fixpt_fx26::front::Front, held: &Held) -> Vec<String> {
     let mut out = Vec::new();
     s.make(|m| {
         let procs: Vec<(String, fixpt_native::direct::Compiled)> = held
@@ -2274,7 +2274,7 @@ thread_local! {
 
 /// `closure` compiled by the Rust compiler on the oracle's machine: its
 /// procedures, held, and the machine's call-outs after it.
-fn oracle_compile(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle) -> Result<(Held, Vec<i64>), String> {
+fn oracle_compile(s: &mut fixpt_fx26::front::Front, closure: fixpt_scheme::Handle) -> Result<(Held, Vec<i64>), String> {
     let mut r = Err(String::new());
     s.make(|m| {
         let v = m.get(closure);
@@ -2301,7 +2301,7 @@ fn oracle_compile(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle) 
 const DIRECT_FX: (&str, &str) =
     if cfg!(target_arch = "x86_64") { ("native-direct-x64.fx", "native-compile-x64-proc") } else { ("native-direct-arm64.fx", "native-compile-arm64-proc") };
 
-fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle, described: Option<&mut Held>) -> Result<fixpt_scheme::Handle, String> {
+fn compile_by_fx26_in(s: &mut fixpt_fx26::front::Front, closure: fixpt_scheme::Handle, described: Option<&mut Held>) -> Result<fixpt_scheme::Handle, String> {
     use fixpt_native::direct::{fx_begin, fx_emitted, fx_finish, fx_next, fx_park, fx_unpark, DirectMachine, FxEmitted};
     let mut begun = None;
     let mut native = false;
@@ -2319,7 +2319,7 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
         return Ok(closure);
     }
     let mut c = begun.expect("begun")?;
-    let abandon = |s: &mut fixpt_scheme::Session, c: fixpt_native::direct::FxCompile| {
+    let abandon = |s: &mut fixpt_fx26::front::Front, c: fixpt_native::direct::FxCompile| {
         s.make(|m| {
             fixpt_native::direct::fx_abandon(m.heap(), c);
             fixpt_heap::Value::NULL

@@ -11,7 +11,7 @@ use fixpt_read::{FileId, Reader, SyntaxProfile};
 /// renamed binders are new symbols each time.
 fn same_syntax(s: &mut Fx26Session, text: &str) {
     s.load_own_reader().expect("loads");
-    let ours = fixpt_fx26::syn::read_with_fx26_reader(&mut s.scheme, &mut s.checker.interner, FileId(0), text)
+    let ours = fixpt_fx26::syn::read_with_fx26_reader(s.scheme.lowered(), &mut s.checker.interner, FileId(0), text)
         .unwrap_or_else(|e| panic!("the FX-26 reader: {e}"));
     let rust = Reader::new(text, FileId(0), SyntaxProfile::FX26, &mut s.checker.interner).read_all().expect("reads");
     assert_eq!(ours.len(), rust.len(), "different numbers of forms");

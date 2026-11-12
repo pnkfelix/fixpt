@@ -31,7 +31,7 @@ fn image_path(registers: bool) -> Option<PathBuf> {
 /// The compile, in `sc`'s heap: read from its image if one is kept, else
 /// made (and kept). `sc` is a session with the pieces written in FX-26
 /// loaded (`Fx26Session::load_own_pieces`).
-pub fn bootstrap_compiled(sc: &mut fixpt_scheme::Session, registers: bool) -> fixpt_scheme::Handle {
+pub fn bootstrap_compiled(sc: &mut crate::front::Front, registers: bool) -> fixpt_scheme::Handle {
     let Some(path) = image_path(registers) else { return compiled(sc, registers) };
     let lock = std::fs::File::create(path.with_extension("lock")).expect("a lock file");
     lock.lock().expect("locked");
@@ -67,7 +67,7 @@ pub fn bootstrap_compiled(sc: &mut fixpt_scheme::Session, registers: bool) -> fi
 }
 
 /// The compile itself.
-fn compiled(sc: &mut fixpt_scheme::Session, registers: bool) -> fixpt_scheme::Handle {
+fn compiled(sc: &mut crate::front::Front, registers: bool) -> fixpt_scheme::Handle {
     let text = crate::bootstrap_program();
     let facts = crate::syn::rust_facts(sc, FileId(0), &text).expect("checks");
     let compile = if registers { crate::syn::compile_to_word_with_registers } else { crate::syn::compile_to_word };
@@ -89,7 +89,7 @@ pub fn prewarm() -> Vec<(bool, Result<f64, String>)> {
                         Some(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
                     f.front_end_compiled = true;
                     f.load_own_pieces().map_err(|e| e.to_string())?;
-                    f.scheme.engine.set_step_limit(None);
+                    f.scheme.set_step_limit(None);
                     f.scheme.scope(|sc| {
                         bootstrap_compiled(sc, registers);
                     });

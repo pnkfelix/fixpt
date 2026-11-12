@@ -161,25 +161,31 @@ impl Session {
     /// A bare session whose heap `preload` fills first
     /// (`Runtime::new_preloaded`).
     pub fn bare_preloaded(backend: Backend, preload: impl FnOnce(&mut fixpt_heap::Heap) -> Option<Value>) -> Session {
-        let mut rt = Runtime::new_preloaded(preload);
-        install_primitives(&mut rt);
-        rt.run_word = Some(fixpt_engine::cellular::run_word);
-        let empty = Builder::new();
-        let mut expander = Expander::new(&mut rt);
+        Session::on_host(backend, Host::new(Runtime::new_preloaded(preload)))
+    }
+
+    /// A bare session on `host`, whose runtime may hold much already (an
+    /// FX-26 session's, made a Scheme session where it first runs lowered
+    /// code): the primitives bound to their globals, the cellular machine
+    /// written in Rust as its `run_word` if it has none, and the engine.
+    pub fn on_host(backend: Backend, mut host: Host) -> Session {
+        let hole_root = host.engine_root();
+        let rt = host.runtime_unrooted();
+        install_primitives(rt);
+        rt.run_word.get_or_insert(fixpt_engine::cellular::run_word);
+        let mut expander = Expander::new(rt);
         let body = expander
             .expand_forms(&[])
             .expect("an empty program expands");
         let (program, parts) = expander.into_parts(body);
-        let _ = empty;
         let prepared = Prepared::for_backend(backend, &mut rt.heap, &rt.interner, &program)
             .expect("an empty program compiles");
-        let hole_root = rt.heap.push_root(Value::FALSE);
         let engine = match backend {
             Backend::Ast => Engine::Ast(Box::new(Interp::new())),
             Backend::Bytecode => Engine::Bytecode(Box::new(Vm::new())),
         };
         Session {
-            host: Host::new(rt),
+            host,
             engine,
             program,
             prepared,

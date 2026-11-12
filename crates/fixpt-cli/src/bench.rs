@@ -208,7 +208,7 @@ fn usage(why: &str) -> i32 {
 fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<String>) -> Result<Vec<String>, String> {
     let answer = {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| String::from(e.message))?;
-        s.scheme.engine.set_step_limit(None);
+        s.scheme.set_step_limit(None);
         match s.run_program(text) {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => return Err(e),
@@ -311,8 +311,8 @@ fn lowered_run(text: &str, runs: usize) -> Result<(String, f64), String> {
     }
     Ok(best_of(runs, || {
         let Ok(mut s) = Fx26Session::with_backend(Backend::Bytecode) else { return ("!! no session".into(), f64::INFINITY) };
-        s.scheme.engine.set_step_limit(None);
-        s.scheme.scope(|sc| {
+        s.scheme.set_step_limit(None);
+        s.lowered().scope(|sc| {
             let start = Instant::now();
             let forms = code.syntax(sc.runtime_unrooted(), "<fx26>");
             let (_, r) = sc.eval_forms_capturing(&forms);
@@ -328,7 +328,7 @@ fn lowered_run(text: &str, runs: usize) -> Result<(String, f64), String> {
 /// done first, and not timed.
 fn on_machine(text: &str, c: &Checker, tops: &[Top], runs: usize, run: Run, registers: bool, compiles: bool) -> Option<(String, f64)> {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).ok()?;
-    s.scheme.engine.set_step_limit(None);
+    s.scheme.set_step_limit(None);
     s.scheme.scope(|sc| {
         let w = sc.make(|m| {
             let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), c, text);
@@ -347,7 +347,7 @@ fn on_machine(text: &str, c: &Checker, tops: &[Top], runs: usize, run: Run, regi
         sc.runtime_unrooted().run_word = Some(run);
         Some(best(runs, || {
             let none = sc.make(|_| Value::NULL);
-            match sc.call_global("%run-word", &[w, none]) {
+            match sc.run_word_on(w, none) {
                 Ok(v) => sc.write(v),
                 Err(e) => format!("!! {e}"),
             }
@@ -386,7 +386,7 @@ fn in_native_convention(text: &str, runs: usize) -> Option<(String, f64, (u64, u
             comp.program(&tops).unwrap_or(Value::FALSE)
         });
         let none = sc.make(|_| Value::NULL);
-        let h = sc.call_global("%run-word", &[w, none]).ok()?;
+        let h = sc.run_word_on(w, none).ok()?;
         let mut closure = Value::NULL;
         sc.make(|m| {
             closure = m.get(h);
@@ -467,9 +467,9 @@ fn compile_table_of(programs: &[(String, String)], runs: usize, with_front_end: 
 /// `f` run `runs` times in `sc`: the best time, with the words allocated
 /// and the collections made, and the last run's value.
 fn fx_phase<T>(
-    sc: &mut fixpt_scheme::Session,
+    sc: &mut fixpt_fx26::front::Front,
     runs: usize,
-    mut f: impl FnMut(&mut fixpt_scheme::Session) -> Result<T, String>,
+    mut f: impl FnMut(&mut fixpt_fx26::front::Front) -> Result<T, String>,
 ) -> Result<((f64, (u64, u64)), T), String> {
     let (mut t, mut work, mut out) = (f64::INFINITY, (0, 0), None);
     for _ in 0..runs {
@@ -490,7 +490,7 @@ fn fx_session() -> Result<Fx26Session, String> {
     s.scheme.runtime_unrooted().front_end_run_word = Some(crate::register_machine());
     s.front_end_compiled = true;
     s.load_own_pieces().map_err(|e| String::from(e.message))?;
-    s.scheme.engine.set_step_limit(None);
+    s.scheme.set_step_limit(None);
     Ok(s)
 }
 
@@ -514,7 +514,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
     });
     // The Rust compiler, and the Rust assemblers over what it made.
     let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| String::from(e.message))?;
-    s.scheme.engine.set_step_limit(None);
+    s.scheme.set_step_limit(None);
     let (t_words, t_arm, t_regs) = s.scheme.scope(|sc| -> Result<(f64, f64, f64), String> {
         let (mut t_words, mut made) = (f64::INFINITY, Err(String::new()));
         let w = sc.make(|m| {
@@ -679,7 +679,7 @@ fn native_compile_time(text: &str, runs: usize) -> Option<f64> {
             comp.program(&tops).unwrap_or(Value::FALSE)
         });
         let none = sc.make(|_| Value::NULL);
-        let h = sc.call_global("%run-word", &[w, none]).ok()?;
+        let h = sc.run_word_on(w, none).ok()?;
         let mut closure = Value::NULL;
         sc.make(|m| {
             closure = m.get(h);

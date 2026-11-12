@@ -39,6 +39,10 @@ pub struct Host {
     /// For each explicit root that is a handle, the stamp it was made with.
     handle_stamps: Vec<u32>,
     next_stamp: u32,
+    /// A root kept for an engine made on this host later (a Scheme
+    /// session's held hole): pushed first, below every handle and scope, so
+    /// that no scope's end pops it.
+    engine_root: usize,
 }
 
 /// A rooted Value: valid across collections, until its scope ends.
@@ -50,8 +54,14 @@ pub struct Handle {
 
 impl Host {
     /// A host of runtime `rt`.
-    pub fn new(rt: Runtime) -> Host {
-        Host { rt, handle_stamps: Vec::new(), next_stamp: 0 }
+    pub fn new(mut rt: Runtime) -> Host {
+        let engine_root = rt.heap.push_root(Value::FALSE);
+        Host { rt, handle_stamps: Vec::new(), next_stamp: 0, engine_root }
+    }
+
+    /// The root kept for an engine made on this host ([`Host::new`]).
+    pub fn engine_root(&self) -> usize {
+        self.engine_root
     }
 
     /// Root `v` as a new handle. `v` must be a Value from just now: from
@@ -205,6 +215,20 @@ impl Host {
     /// Whether a global is bound.
     pub fn is_bound(&self, name: &str) -> bool {
         self.global_value_raw(name).is_some()
+    }
+
+    /// What handle `callee` roots given to `f` with `args`, no engine
+    /// between (`prim::enter_word`, `prim::enter_front_end`): its result
+    /// rooted, or why it failed.
+    pub fn call_handle_with(
+        &mut self,
+        callee: Handle,
+        args: &[Handle],
+        f: impl FnOnce(&mut Runtime, Value, &[Value]) -> Result<Value, String>,
+    ) -> Result<Handle, String> {
+        let callee = self.handle_value(callee);
+        let args: Vec<Value> = args.iter().map(|a| self.handle_value(*a)).collect();
+        f(&mut self.rt, callee, &args).map(|v| self.root_value(v))
     }
 
     /// Global `name`'s value given to `f` with `args`, no engine between:

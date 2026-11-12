@@ -87,7 +87,7 @@ fn direct_made(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option
             comp.program(&tops).expect("compiles")
         });
         let none = sc.make(|_| Value::NULL);
-        let h = sc.call_global("%run-word", &[w, none]).expect("defines");
+        let h = sc.run_word_on(w, none).expect("defines");
         // Nothing allocates from here on, so nothing moves.
         let mut closure = Value::NULL;
         sc.make(|m| {
@@ -152,7 +152,7 @@ fn on_rust_machine(text: &str) -> String {
     s.scheme.scope(|sc| {
         let w = sc.make(|h| fixpt_fx26::cellular::Compiler::new(h.heap(), &c, text).program(&tops).expect("compiles"));
         let none = sc.make(|_| Value::NULL);
-        match sc.call_global("%run-word", &[w, none]) {
+        match sc.run_word_on(w, none) {
             Ok(v) => sc.write(v),
             Err(e) => format!("!! {e}"),
         }
@@ -796,7 +796,7 @@ fn code_compiled_and_dropped_is_reclaimed() {
             comp.program(&tops).expect("compiles")
         });
         let none = sc.make(|_| Value::NULL);
-        let h = sc.call_global("%run-word", &[w, none]).expect("defines");
+        let h = sc.run_word_on(w, none).expect("defines");
         let mut closure = Value::NULL;
         sc.make(|m| {
             closure = m.get(h);

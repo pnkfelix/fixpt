@@ -188,7 +188,7 @@ fn runs_as_lowered(subs: &[&str], gc_every: Option<u64>, shard: Option<usize>) -
                     sc.set_gc_every(n);
                 }
                 let none = sc.make(|_| Value::NULL);
-                match sc.call_global("%run-word", &[w, none]) {
+                match sc.run_word_on(w, none) {
                     Ok(v) => sc.write(v),
                     Err(e) => format!("!! {e}"),
                 }
@@ -237,7 +237,7 @@ fn run_text_in_registers_counting(text: &str, gc_every: Option<u64>) -> (String,
             sc.set_gc_every(n);
         }
         let none = sc.make(|_| Value::NULL);
-        let got = sc.call_global("%run-word", &[w, none]).map(|v| sc.write(v)).unwrap_or_else(|e| format!("!! {e}"));
+        let got = sc.run_word_on(w, none).map(|v| sc.write(v)).unwrap_or_else(|e| format!("!! {e}"));
         let h = &sc.runtime_unrooted().heap;
         (got, h.region_words(), h.live_regions(), h.gc_count)
     })

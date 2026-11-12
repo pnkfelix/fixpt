@@ -117,11 +117,11 @@ fn a_shape_conflict_is_the_error() {
 #[ignore = "a probe: the checker's helpers one by one"]
 fn probe_helpers() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    fixpt_fx26::session::load_eager_reader(&mut s.scheme).expect("loads");
+    fixpt_fx26::session::load_eager_reader(s.scheme.lowered()).expect("loads");
     let exprs = std::env::var("PROBE").unwrap_or_default();
     for e in exprs.split(';') {
-        s.scheme.engine.set_step_limit(Some(2_000_000));
-        let r = s.scheme.eval_str("<probe>", e).map(|h| s.scheme.write(h));
+        s.scheme.set_step_limit(Some(2_000_000));
+        let r = s.scheme.lowered().eval_str("<probe>", e).map(|h| s.scheme.write(h));
         eprintln!("{e} => {r:?}");
     }
 }

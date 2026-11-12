@@ -31,7 +31,7 @@ fn a_cheap_key_given_twice_is_said() {
 fn a_key_with_other_facts_is_refused() {
     validating();
     let mut s = common::front_end_session();
-    let facts = |s: &mut fixpt_scheme::Session, summary: i64| {
+    let facts = |s: &mut fixpt_fx26::front::Front, summary: i64| {
         s.make(|m| {
             let h = m.heap();
             let product = fixpt_heap::layout::kind("product");

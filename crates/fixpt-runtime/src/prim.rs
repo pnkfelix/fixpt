@@ -169,6 +169,27 @@ fn run_front_end(rt: &mut Runtime, a: &[Value]) -> Outcome<Value> {
     out
 }
 
+/// What `%run-word` does with `f`, a cellular word or closure, and `args`,
+/// called from Rust, with no engine between (`fixpt_fx26::front`): its
+/// value, or the message its failure says as `%run-word`'s does. Every
+/// value the caller holds must be rooted.
+pub fn enter_word(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, String> {
+    let (word, args) = if is_closure(rt, f) {
+        (closure_word(rt, f, args).map_err(|e| format!("{e}: {}", crate::write_value(&rt.heap, f)))?, Vec::new())
+    } else if rt.heap.is_cellular_word(f) {
+        (f, args.to_vec())
+    } else {
+        return Err(format!("a cellular word or closure is expected: {}", crate::write_value(&rt.heap, f)));
+    };
+    let run = rt.run_word.ok_or("no cellular machine is installed")?;
+    let started = std::env::var_os("FIXPT_TIME_WORDS").map(|_| std::time::Instant::now());
+    let out = run(rt, word, &args);
+    if let Some(t) = started {
+        eprintln!("run-word: {:.6} s", t.elapsed().as_secs_f64());
+    }
+    out.map_err(|e| format!("cellular word: {e}"))
+}
+
 /// What `%run-front-end` does with entry `f` and `args`, called from Rust,
 /// with no engine between (`TODO.md` §252, `fixpt_fx26::entries`): its
 /// value, or the message its failure says as `%run-front-end`'s does. Every

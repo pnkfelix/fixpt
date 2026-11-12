@@ -9,14 +9,14 @@ use fixpt_read::FileId;
 /// handed to the front end `pieces` are of (`loaded-files!`, the
 /// bootstrap's ninth piece), as a system call would: FX-26 code reads no
 /// files (`syn::loaded_files`).
-fn supply_loaded(sc: &mut fixpt_scheme::Session, pieces: fixpt_scheme::Handle, text: &str) {
+fn supply_loaded(sc: &mut fixpt_fx26::front::Front, pieces: fixpt_scheme::Handle, text: &str) {
     let list = fixpt_fx26::syn::loaded_files(sc, FileId(0), text).expect("the module files read");
     let set = sc.make(|m| {
         let p = m.get(pieces);
         m.heap().product_field(p, 9)
     });
-    let args = sc.call_global("list", &[list]).expect("a list");
-    sc.call_global("%run-word", &[set, args]).expect("the files handed over");
+    let args = sc.list(&[list]).expect("a list");
+    sc.run_word_on(set, args).expect("the files handed over");
 }
 
 /// The front end, compiled to one cellular word by the compiler written in
@@ -139,18 +139,18 @@ fn fixpoint_as_register_code() {
         });
         lap("stage 1 compiled by the Rust compiler, with register code");
         let none = sc.make(|_| Value::NULL);
-        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
+        let pieces = sc.run_word_on(stage1, none).expect("the front end runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, 1) });
         supply_loaded(sc, pieces, &text);
         // Stage 2 with register code too, by the register compiler written
         // in FX-26 (`regcode.fx`): its twins the same as the Rust one's.
         let registers = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, 8) });
         let on = sc.make(|_| Value::TRUE);
-        let on = sc.call_global("list", &[on]).expect("a list");
-        sc.call_global("%run-word", &[registers, on]).expect("register code on");
+        let on = sc.list(&[on]).expect("a list");
+        sc.run_word_on(registers, on).expect("register code on");
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
-        let args = sc.call_global("list", &[std, prog]).expect("a list");
-        let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
+        let args = sc.list(&[std, prog]).expect("a list");
+        let result = sc.run_word_on(driver, args).expect("the driver runs");
         lap("stage 2 compiled, with register code, by the compiler run as register code");
         if std::env::var_os("FIXPT_GC_REPORT").is_some() {
             let h = &sc.runtime_unrooted().heap;
@@ -198,13 +198,13 @@ fn fixpoint_on(machine: fixpt_runtime::RunWord) {
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
         lap("stage 1 compiled, by the compiler run as register code");
         let none = sc.make(|_| Value::NULL);
-        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
+        let pieces = sc.run_word_on(stage1, none).expect("the front end runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, 1) });
         supply_loaded(sc, pieces, &text);
         lap("the compiled front end ran, giving the driver");
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
-        let args = sc.call_global("list", &[std, prog]).expect("a list");
-        let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
+        let args = sc.list(&[std, prog]).expect("a list");
+        let result = sc.run_word_on(driver, args).expect("the driver runs");
         lap("stage 2 compiled, by the compiler compiled");
         let (tag, stage2) = sc.view(|v| {
             let r = v.get(result);
@@ -247,20 +247,21 @@ fn probe_stage2() {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
         let none = sc.make(|_| Value::NULL);
-        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("runs");
+        let pieces = sc.run_word_on(stage1, none).expect("runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, 1) });
         supply_loaded(sc, pieces, &text);
         let _ = fixpt_native::cellular::take_callout_counts();
         let _ = fixpt_native::cellular::take_callout_nanos();
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&target)));
-        let args = sc.call_global("list", &[std, prog]).expect("a list");
-        let gc = |sc: &mut fixpt_scheme::Session| {
-            let (n, w) = (sc.call_global("%gc-count", &[]).unwrap(), sc.call_global("%gc-words-copied", &[]).unwrap());
-            sc.view(|v| (v.get(n).fixnum().unwrap_or(0), v.get(w).fixnum().unwrap_or(0)))
+        let args = sc.list(&[std, prog]).expect("a list");
+        // `%gc-count` and `%gc-words-copied`, read from the heap.
+        let gc = |sc: &mut fixpt_fx26::front::Front| {
+            let heap = &sc.runtime_unrooted_ref().heap;
+            (heap.collections() as i64, heap.words_copied as i64)
         };
         let before = gc(sc);
         let t = std::time::Instant::now();
-        let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
+        let result = sc.run_word_on(driver, args).expect("the driver runs");
         eprintln!("the compiled driver: {:.2} s", t.elapsed().as_secs_f64());
         let after = gc(sc);
         eprintln!("collections: {}, words copied: {}, heap in use: {} words", after.0 - before.0, after.1 - before.1, sc.heap_used());
@@ -276,7 +277,7 @@ fn probe_stage2() {
 #[ignore = "a report: cargo test --release -p fixpt-fx26 --test bootstrap comparison -- --ignored --nocapture"]
 fn comparison() {
     use fixpt_fx26::session::{BOOTSTRAP_PREFIX, load_bootstrap_program};
-    use fixpt_scheme::{Handle, Session};
+    use fixpt_scheme::Handle;
     let text = fixpt_fx26::bootstrap_program();
     let standard = fixpt_fx26::standard::standard_text();
     let mut rows: Vec<(String, [f64; 4])> = Vec::new();
@@ -297,14 +298,14 @@ fn comparison() {
     rows.push(("Rust".into(), [read, f64::NAN, check, f64::NAN]));
 
     // The four phases, through `run`: how one piece is called.
-    fn phases(sc: &mut Session, text: &str, standard: &str, run: &dyn Fn(&mut Session, usize, &[Handle]) -> Handle) -> [f64; 4] {
+    // Of a Scheme session (lowered) or an FX-26 session's front (compiled):
+    // what each derefs to, a host.
+    fn phases<S: std::ops::DerefMut<Target = fixpt_runtime::host::Host>>(sc: &mut S, text: &str, standard: &str, run: &dyn Fn(&mut S, usize, &[Handle]) -> Handle) -> [f64; 4] {
         let (tx, st) = (sc.make(|m| m.heap().make_string(text)), sc.make(|m| m.heap().make_string(standard)));
-        let payload = |sc: &mut Session, h: Handle| sc.make(|m| { let r = m.get(h); let p = m.heap().sum_payload(r); m.heap().product_field(p, 1) });
-        let first = |sc: &mut Session, h: Handle| sc.make(|m| { let l = m.get(h); m.heap().car(l) });
-        let copied = |sc: &mut Session| {
-            let w = sc.call_global("%gc-words-copied", &[]).unwrap();
-            sc.view(|v| v.get(w).fixnum().unwrap_or(0))
-        };
+        let payload = |sc: &mut S, h: Handle| sc.make(|m| { let r = m.get(h); let p = m.heap().sum_payload(r); m.heap().product_field(p, 1) });
+        let first = |sc: &mut S, h: Handle| sc.make(|m| { let l = m.get(h); m.heap().car(l) });
+        // `%gc-words-copied`, read from the heap.
+        let copied = |sc: &mut S| sc.runtime_unrooted_ref().heap.words_copied as i64;
         let c0 = copied(sc);
         let t = std::time::Instant::now();
         let syns = run(sc, 1, &[tx]);
@@ -330,10 +331,10 @@ fn comparison() {
 
     // Lowered to Scheme, on the bytecode VM.
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    s.scheme.engine.set_step_limit(None);
-    load_bootstrap_program(&mut s.scheme).expect("loads");
+    s.scheme.set_step_limit(None);
+    load_bootstrap_program(s.scheme.lowered()).expect("loads");
     s.scheme.collect();
-    let lowered = s.scheme.scope(|sc| {
+    let lowered = s.scheme.lowered().scope(|sc| {
         phases(sc, &text, &standard, &|sc, i, args| {
             sc.call_global(&format!("{BOOTSTRAP_PREFIX}{}", NAMES[i]), args).expect("runs")
         })
@@ -349,8 +350,8 @@ fn comparison() {
     ];
     for (name, machine) in machines {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        load_eager_reader(&mut s.scheme).expect("loads");
-        s.scheme.engine.set_step_limit(None);
+        load_eager_reader(s.scheme.lowered()).expect("loads");
+        s.scheme.set_step_limit(None);
         s.scheme.runtime_unrooted().run_word = Some(machine);
         let times = s.scheme.scope(|sc| {
             // Stage 1 in a scope of its own, so that what it leaves (the Rust
@@ -360,14 +361,14 @@ fn comparison() {
                 let facts = fixpt_fx26::syn::rust_facts(inner, FileId(0), &text).expect("checks");
                 let stage1 = fixpt_fx26::syn::compile_to_word(inner, FileId(0), &text, facts).expect("parses").expect("compiles");
                 let none = inner.make(|_| Value::NULL);
-                let made = inner.call_global("%run-word", &[stage1, none]).expect("runs");
+                let made = inner.run_word_on(stage1, none).expect("runs");
                 inner.replace(pieces, |m| m.get(made));
             });
             sc.collect();
             phases(sc, &text, &standard, &|sc, i, args| {
                 let f = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, i + 1) });
-                let list = sc.call_global("list", args).expect("a list");
-                sc.call_global("%run-word", &[f, list]).expect("runs")
+                let list = sc.list(args).expect("a list");
+                sc.run_word_on(f, list).expect("runs")
             })
         });
         rows.push((format!("FX-26, compiled, {name}"), times));
@@ -379,8 +380,8 @@ fn comparison() {
     // it runs; the second run is timed.
     for (name, registers) in [("words compiled", false), ("register code", true)] {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        load_eager_reader(&mut s.scheme).expect("loads");
-        s.scheme.engine.set_step_limit(None);
+        load_eager_reader(s.scheme.lowered()).expect("loads");
+        s.scheme.set_step_limit(None);
         s.scheme.runtime_unrooted().run_word =
             Some(if registers { fixpt_native::cellular::run_word_registers } else { fixpt_native::cellular::run_word_compiled });
         let times = s.scheme.scope(|sc| {
@@ -401,14 +402,14 @@ fn comparison() {
                     fixpt_fx26::syn::compile_to_word(inner, FileId(0), &text, facts).expect("parses").expect("compiles")
                 };
                 let none = inner.make(|_| Value::NULL);
-                let made = inner.call_global("%run-word", &[stage1, none]).expect("runs");
+                let made = inner.run_word_on(stage1, none).expect("runs");
                 inner.replace(pieces, |m| m.get(made));
             });
             sc.collect();
-            let run = |sc: &mut Session, i: usize, args: &[Handle]| {
+            let run = |sc: &mut fixpt_fx26::front::Front, i: usize, args: &[Handle]| {
                 let f = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, i + 1) });
-                let list = sc.call_global("list", args).expect("a list");
-                sc.call_global("%run-word", &[f, list]).expect("runs")
+                let list = sc.list(args).expect("a list");
+                sc.run_word_on(f, list).expect("runs")
             };
             phases(sc, &text, &standard, &run);
             phases(sc, &text, &standard, &run)
@@ -445,18 +446,18 @@ fn probe_read() {
                 comp.program(&tops).expect("compiles")
             });
             let none = inner.make(|_| Value::NULL);
-            let made = inner.call_global("%run-word", &[stage1, none]).expect("runs");
+            let made = inner.run_word_on(stage1, none).expect("runs");
             inner.replace(pieces, |m| m.get(made));
         });
         sc.collect();
         let read = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, 2) });
         let tx = sc.make(|m| m.heap().make_string(&text));
-        let args = sc.call_global("list", &[tx]).expect("a list");
+        let args = sc.list(&[tx]).expect("a list");
         eprintln!("reading");
         for _ in 0..10 {
             let t = std::time::Instant::now();
             sc.scope(|one| {
-                one.call_global("%run-word", &[read, args]).expect("reads");
+                one.run_word_on(read, args).expect("reads");
             });
             eprintln!("read: {:.1} ms", 1e3 * t.elapsed().as_secs_f64());
         }
@@ -481,7 +482,7 @@ fn fixpoint_with_words_compiled_by_fx26() {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
         let none = sc.make(|_| Value::NULL);
-        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
+        let pieces = sc.run_word_on(stage1, none).expect("the front end runs");
         // On x86_64, `native-x64.fx`'s compiler, the tenth of the pieces.
         let x64 = cfg!(target_arch = "x86_64");
         let assemble = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, if x64 { 10 } else { 7 }) });
@@ -496,11 +497,11 @@ fn fixpoint_with_words_compiled_by_fx26() {
         let words: Vec<_> = raw.into_iter().map(|w| sc.make(|_| w)).collect();
         let mut instructions = 0;
         for w in &words {
-            let code = |sc: &mut fixpt_scheme::Session, far: [i64; 2]| {
+            let code = |sc: &mut fixpt_fx26::front::Front, far: [i64; 2]| {
                 sc.scope(|one| {
                     let (ft, fe) = (one.make(|_| Value::fixnum(far[0])), one.make(|_| Value::fixnum(far[1])));
-                    let args = if x64 { one.call_global("list", &[*w]) } else { one.call_global("list", &[*w, ft, fe]) }.expect("a list");
-                    let r = one.call_global("%run-word", &[assemble, args]).unwrap_or_else(|e| {
+                    let args = if x64 { one.list(&[*w]) } else { one.list(&[*w, ft, fe]) }.expect("a list");
+                    let r = one.run_word_on(assemble, args).unwrap_or_else(|e| {
                         // Which word, and how large, for a failure to say.
                         let mut shown = String::new();
                         one.make(|m| {
@@ -544,8 +545,8 @@ fn fixpoint_with_words_compiled_by_fx26() {
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, 1) });
         supply_loaded(sc, pieces, &text);
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));
-        let args = sc.call_global("list", &[std, prog]).expect("a list");
-        let result = sc.call_global("%run-word", &[driver, args]).expect("the driver runs");
+        let args = sc.list(&[std, prog]).expect("a list");
+        let result = sc.run_word_on(driver, args).expect("the driver runs");
         lap("stage 2 compiled, on machine code FX-26 made");
         let (mut same, mut why) = (false, String::new());
         sc.make(|m| {
@@ -651,11 +652,11 @@ fn probe_profile_check() {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
         let none = sc.make(|_| Value::NULL);
-        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("runs");
-        let piece = |sc: &mut fixpt_scheme::Session, i: usize| sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, i) });
-        let run = |sc: &mut fixpt_scheme::Session, f: fixpt_scheme::Handle, args: &[fixpt_scheme::Handle]| {
-            let list = sc.call_global("list", args).expect("a list");
-            sc.call_global("%run-word", &[f, list]).expect("runs")
+        let pieces = sc.run_word_on(stage1, none).expect("runs");
+        let piece = |sc: &mut fixpt_fx26::front::Front, i: usize| sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, i) });
+        let run = |sc: &mut fixpt_fx26::front::Front, f: fixpt_scheme::Handle, args: &[fixpt_scheme::Handle]| {
+            let list = sc.list(args).expect("a list");
+            sc.run_word_on(f, list).expect("runs")
         };
         let (read, parse, check) = (piece(sc, 2), piece(sc, 3), piece(sc, 4));
         // What is checked: the front end, or `PROBE_CHECK_FILE`.
@@ -708,11 +709,11 @@ fn probe_phases_as_register_code() {
             comp.program(&tops).expect("compiles")
         });
         let none = sc.make(|_| Value::NULL);
-        let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
-        let piece = |sc: &mut fixpt_scheme::Session, i: usize| sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, i) });
-        let run = |sc: &mut fixpt_scheme::Session, f: fixpt_scheme::Handle, args: &[fixpt_scheme::Handle]| {
-            let list = sc.call_global("list", args).expect("a list");
-            sc.call_global("%run-word", &[f, list]).expect("runs")
+        let pieces = sc.run_word_on(stage1, none).expect("the front end runs");
+        let piece = |sc: &mut fixpt_fx26::front::Front, i: usize| sc.make(|m| { let p = m.get(pieces); m.heap().product_field(p, i) });
+        let run = |sc: &mut fixpt_fx26::front::Front, f: fixpt_scheme::Handle, args: &[fixpt_scheme::Handle]| {
+            let list = sc.list(args).expect("a list");
+            sc.run_word_on(f, list).expect("runs")
         };
         let (read, parse, check, compile, extracts, registers) =
             (piece(sc, 2), piece(sc, 3), piece(sc, 4), piece(sc, 5), piece(sc, 6), piece(sc, 8));
@@ -728,7 +729,7 @@ fn probe_phases_as_register_code() {
         // Time, and what explains a step in it: collections, and the cons
         // rate and working set (words allocated; words copied, which is
         // what the collections found live).
-        let mut lap = |sc: &mut fixpt_scheme::Session, what: &str| {
+        let mut lap = |sc: &mut fixpt_fx26::front::Front, what: &str| {
             let h = &sc.runtime_unrooted().heap;
             let now = (h.collections(), h.gc_nanos, h.allocated(), h.words_copied);
             eprintln!(
@@ -747,7 +748,7 @@ fn probe_phases_as_register_code() {
         // word: its work, whatever its code.
         let phase = std::env::var("FIXPT_PROFILE_PHASE").unwrap_or_default();
         let fast = sc.runtime_unrooted().run_word;
-        let profile_from = |sc: &mut fixpt_scheme::Session, what: &str| {
+        let profile_from = |sc: &mut fixpt_fx26::front::Front, what: &str| {
             sc.runtime_unrooted().run_word = if !phase.is_empty() && phase == what { Some(profiled) } else { fast };
         };
         profile_from(sc, "read");

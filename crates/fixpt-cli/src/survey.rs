@@ -364,7 +364,7 @@ fn survey_word(heap: &Heap, rw: Value, found: &mut Found) {
 fn survey(text: &str, propagate: bool, show: Option<String>) -> Result<Found, String> {
     let (c, tops) = crate::bench::checked(text)?;
     let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| e.message)?;
-    s.scheme.engine.set_step_limit(None);
+    s.scheme.set_step_limit(None);
     let mut found = Found { propagate, show, ..Found::default() };
     s.scheme.scope(|sc| {
         let w = sc.make(|m| {
@@ -374,7 +374,7 @@ fn survey(text: &str, propagate: bool, show: Option<String>) -> Result<Found, St
         });
         sc.runtime_unrooted().run_word = Some(crate::register_machine());
         let none = sc.make(|_| Value::NULL);
-        sc.call_global("%run-word", &[w, none]).map_err(|e| e.to_string())?;
+        sc.run_word_on(w, none).map_err(|e| e.to_string())?;
         sc.make(|m| {
             let w = m.get(w);
             let heap = m.heap();

@@ -31,7 +31,9 @@ pub struct Fx26Session {
     /// REPL entries of type definitions that name types not defined yet:
     /// held, unrun, until those are (`Fx26Session::consider`).
     pub pending: Vec<Pending>,
-    pub scheme: Session,
+    /// What it runs on: a host, and a Scheme session made on it only where
+    /// lowered code runs (`crate::front`).
+    pub scheme: crate::front::Front,
     pub globals: Globals,
     /// How checked forms run.
     pub strategy: Strategy,
@@ -901,7 +903,7 @@ impl Compiled {
 /// session begins with none of them (`with_backend_preloaded_in`), so one
 /// that runs no lowered code evaluates no Scheme (`TODO.md` §252,
 /// `tests/scheme_free.rs`).
-fn scheme_ready(scheme: &mut Session) -> Result<(), String> {
+pub(crate) fn scheme_ready(scheme: &mut Session) -> Result<(), String> {
     let parts = [("%toplevel-run", "<prelude>", fixpt_scheme::PRELUDE_CONTROL), ("char=?", "<prelude>", fixpt_scheme::PRELUDE_DATA), ("%fx26-unit", "<fx26-runtime>", RUNTIME)];
     for (marker, name, text) in parts {
         if !scheme.is_bound(marker) {
@@ -987,7 +989,7 @@ pub type NativeRunner = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, u64) 
 /// direct`'s `fx_begin` …) being the CLI's: a native closure of the same
 /// code over the same values, or why not. It runs FX-26, so it is given
 /// the Scheme session, and the closure rooted.
-pub type NativeFx = fn(&mut fixpt_scheme::Session, fixpt_scheme::Handle) -> Result<fixpt_scheme::Handle, String>;
+pub type NativeFx = fn(&mut crate::front::Front, fixpt_scheme::Handle) -> Result<fixpt_scheme::Handle, String>;
 
 /// How the native front end's cache is read back, by the native machine
 /// written in Rust (`TODO.md` §126): what a session's front end is, by
@@ -1106,8 +1108,14 @@ impl Fx26Session {
             }
             load_native_front_end(&k, heap, &b)
         };
-        let mut scheme = Session::bare_preloaded(backend, preload);
-        scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        // A host, no engine (`crate::front`): the primitives in their
+        // globals and the cellular machine written in Rust, as a Scheme
+        // session's are, but nothing evaluated.
+        let mut rt = fixpt_runtime::Runtime::new_preloaded(preload);
+        fixpt_scheme::session::install_primitives(&mut rt);
+        rt.run_word = Some(fixpt_engine::cellular::run_word);
+        let mut scheme = crate::front::Front::new(backend, fixpt_runtime::host::Host::new(rt));
+        scheme.set_step_limit(Some(DEFAULT_STEP_LIMIT));
         scheme.runtime_unrooted().type_at = Some(crate::typeat::type_at);
         scheme.runtime_unrooted().stage_lower = Some(crate::stage::lower_staged);
         scheme.runtime_unrooted().stage_check = Some(crate::stage::check_staged);
@@ -1180,7 +1188,7 @@ impl Fx26Session {
     /// start with), or `None` for no limit.
     pub fn set_step_limit(&mut self, limit: Option<u64>) {
         self.step_limit = limit;
-        self.scheme.engine.set_step_limit(limit);
+        self.scheme.set_step_limit(limit);
     }
 
     pub fn step_limit(&self) -> Option<u64> {
@@ -1217,13 +1225,13 @@ impl Fx26Session {
             return self.speculate_own(&fixpt_read::write_syntax(form, &self.checker.interner));
         }
         let limit = self.speculation_limit;
-        self.lowered().engine.set_step_limit(limit);
-        let result = self.scheme.scope(|s| {
+        self.scheme.set_step_limit(limit);
+        let result = self.lowered().scope(|s| {
             let forms = Code::from(code).syntax(s.runtime_unrooted(), "<fx26-speculative>");
             let (_, result) = s.eval_forms_capturing(&forms);
             result.map(|v| s.write(v))
         });
-        self.scheme.engine.set_step_limit(self.step_limit);
+        self.scheme.set_step_limit(self.step_limit);
         match result {
             Ok(v) => Speculation::Value(v),
             Err(e) => Speculation::Failed(e.to_string()),
@@ -1298,7 +1306,7 @@ impl Fx26Session {
         self.step_limit = self.speculation_limit;
         let r = self.run_expression_own(text);
         self.step_limit = saved;
-        self.scheme.engine.set_step_limit(saved);
+        self.scheme.set_step_limit(saved);
         self.scheme.scope(|s| s.runtime_unrooted().heap.regions_exit_to(0));
         match r {
             Ok(Ok(v)) => Speculation::Value(v),
@@ -3120,9 +3128,9 @@ impl Fx26Session {
     /// is licensed code, and a text ends.
     pub fn read_with_own_reader(&mut self, text: &str) -> R<Vec<Syntax>> {
         self.load_own_reader()?;
-        self.scheme.engine.set_step_limit(None);
-        let forms = crate::syn::read_with_fx26_reader(&mut self.scheme, &mut self.checker.interner, FileId(0), text);
-        self.scheme.engine.set_step_limit(self.step_limit);
+        self.scheme.set_step_limit(None);
+        let forms = crate::syn::read_with_fx26_reader(self.scheme.lowered(), &mut self.checker.interner, FileId(0), text);
+        self.scheme.set_step_limit(self.step_limit);
         self.checker.expand_forms(forms?)
     }
 
@@ -3136,11 +3144,11 @@ impl Fx26Session {
     /// (`syn::parse_with_fx26_parser_from`).
     pub fn parse_with_own_parser_from(&mut self, text: &str) -> R<(Vec<String>, i64)> {
         if !crate::entries::bound(&self.scheme, "parse-program") {
-            load_eager_reader(&mut self.scheme).map_err(crate::front_end_failure)?;
+            load_eager_reader(self.scheme.lowered()).map_err(crate::front_end_failure)?;
         }
-        self.scheme.engine.set_step_limit(None);
+        self.scheme.set_step_limit(None);
         let r = crate::syn::parse_with_fx26_parser_from(&mut self.scheme, FileId(0), text);
-        self.scheme.engine.set_step_limit(self.step_limit);
+        self.scheme.set_step_limit(self.step_limit);
         r
     }
 
@@ -3154,9 +3162,9 @@ impl Fx26Session {
         let standard = self.standard26()?;
         // A whole program: the checker begins again.
         self.own_begun = false;
-        self.scheme.engine.set_step_limit(None);
+        self.scheme.set_step_limit(None);
         let r = crate::syn::eval_with_fx26_evaluator(&mut self.scheme, standard, FileId(0), text);
-        self.scheme.engine.set_step_limit(self.step_limit);
+        self.scheme.set_step_limit(self.step_limit);
         r
     }
 
@@ -3174,11 +3182,11 @@ impl Fx26Session {
         }
         let base = self.eval_base;
         self.eval_base += text.chars().count() as i64 + 1;
-        self.scheme.engine.set_step_limit(None);
+        self.scheme.set_step_limit(None);
         let mut state = self.read_state(&standard);
         let r = crate::syn::eval_more_with_fx26_evaluator(&mut self.scheme, standard, FileId(0), text, base, &mut state);
         self.keep_state(state);
-        self.scheme.engine.set_step_limit(self.step_limit);
+        self.scheme.set_step_limit(self.step_limit);
         self.own_begun |= !matches!(&r, Ok(out) if out.starts_with("!! check:"));
         r
     }
@@ -3190,8 +3198,7 @@ impl Fx26Session {
     /// the first time. Every run of lowered code goes through here, so a
     /// session that runs none loads neither (`tests/scheme_free.rs`).
     pub fn lowered(&mut self) -> &mut Session {
-        scheme_ready(&mut self.scheme).expect("the prelude and FX-26's runtime must load");
-        &mut self.scheme
+        self.scheme.lowered()
     }
 
     pub fn whole_prelude(&mut self) {
@@ -3423,7 +3430,7 @@ impl Fx26Session {
             checked = Some((c, tops));
         }
         let limit = self.step_limit();
-        self.scheme.engine.set_step_limit(None);
+        self.scheme.set_step_limit(None);
         // The pieces the front end's run made, kept past the scope: the
         // cache is saved once the entries can read the standard environment.
         let made = self.scheme.make(|_| fixpt_heap::Value::FALSE);
@@ -3453,8 +3460,7 @@ impl Fx26Session {
                 compiled.clone().unwrap_or(fixpt_heap::Value::FALSE)
             });
             compiled.map_err(|e| format!("{what} as register code: {e}"))?;
-            let none = sc.make(|_| fixpt_heap::Value::NULL);
-            let pieces = sc.call_global("%run-front-end", &[word, none]).map_err(|e| e.to_string())?;
+            let pieces = sc.run_front_end(word, &[]).map_err(|e| e.to_string())?;
             sc.replace(made, |m| {
                 let p = m.get(pieces);
                 set_entries(m.heap(), p, entries, native);
@@ -3462,7 +3468,7 @@ impl Fx26Session {
             });
             Ok(())
         });
-        self.scheme.engine.set_step_limit(limit);
+        self.scheme.set_step_limit(limit);
         pieces?;
         self.define_entries(entries, native, prefix)?;
         if let (Some((path, key)), Some(_)) = (&cache, &keeping) {
@@ -3493,7 +3499,7 @@ impl Fx26Session {
         if prefix == READER_PREFIX && native == "fx26-native:" {
             return Ok(());
         }
-        self.scheme.eval_str("<register code>", &entry_defines(entries, native, prefix)).map_err(|e| e.to_string())?;
+        self.scheme.lowered().eval_str("<register code>", &entry_defines(entries, native, prefix)).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -3506,7 +3512,7 @@ impl Fx26Session {
             return Ok(());
         }
         let load = if self.front_end_compiled { load_reader_alone } else { load_eager_reader };
-        load(&mut self.scheme).map_err(crate::front_end_failure)?;
+        load(self.scheme.lowered()).map_err(crate::front_end_failure)?;
         // Loaded after the front end's register code, whose entries it
         // shares names with (`read-text-at`, `parse-program`): those still
         // called, `crate::entries` entering `fx26-native:NAME` first.
@@ -3610,7 +3616,7 @@ impl Fx26Session {
                 self.front_end_as_register_code()?;
             }
         } else if !crate::entries::bound(&self.scheme, "check-program") {
-            load_eager_reader(&mut self.scheme).map_err(fail)?;
+            load_eager_reader(self.scheme.lowered()).map_err(fail)?;
         }
         // The handles below are this call's: released at its end (what
         // was loaded above stays, made before the mark).
@@ -3956,7 +3962,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     /// program, and run: its value, to `f`.
     fn with_last_value<T>(&mut self, text: &str, native: Option<NativeFx>, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
         self.own_pieces()?;
-        self.scheme.engine.set_step_limit(None);
+        self.scheme.set_step_limit(None);
         let standard = self.next_standard()?;
         self.released(|s| {
         let on = s.scheme.make(|_| fixpt_heap::Value::TRUE);
@@ -3972,7 +3978,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         s.own_begun |= !matches!(&r, Ok(Err(m)) if m.starts_with("check:"));
         let off = s.scheme.make(|_| fixpt_heap::Value::boolean(s.register_code));
         crate::entries::call(&mut s.scheme, "compile-registers!", &[off]).map_err(fail)?;
-        s.scheme.engine.set_step_limit(s.step_limit);
+        s.scheme.set_step_limit(s.step_limit);
         r
         })
     }
@@ -3983,10 +3989,10 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         self.shared_made.clear();
         self.own_pieces()?;
         // Generous, but a checker that loops is an error, not a hang.
-        self.scheme.engine.set_step_limit(Some(2_000_000_000));
+        self.scheme.set_step_limit(Some(2_000_000_000));
         let standard = self.standard26()?;
         let r = crate::syn::check_with_fx26_checker(&mut self.scheme, standard, FileId(0), text);
-        self.scheme.engine.set_step_limit(self.step_limit);
+        self.scheme.set_step_limit(self.step_limit);
         r
     }
 
@@ -4174,14 +4180,14 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     fn compile_showing_in(&mut self, standard: Option<fixpt_scheme::Handle>, text: &str, show: bool) -> R<(String, Option<String>)> {
         self.own_pieces()?;
         self.released(|s| {
-        s.scheme.engine.set_step_limit(None);
+        s.scheme.set_step_limit(None);
         let on = s.scheme.make(|_| fixpt_heap::Value::boolean(s.register_code));
         crate::entries::call(&mut s.scheme, "compile-registers!", &[on])
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
         let mut state = s.read_state(&standard);
         let r = crate::syn::compile_with_fx26_compiler_showing(&mut s.scheme, standard, &mut state, FileId(0), text, show, s.step_limit);
         s.keep_state(state);
-        s.scheme.engine.set_step_limit(s.step_limit);
+        s.scheme.set_step_limit(s.step_limit);
         r
         })
     }
