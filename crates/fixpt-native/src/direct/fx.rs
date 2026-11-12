@@ -215,7 +215,7 @@ impl FxCompile {
     /// Every value the driver holds, in one order (`fx_park`).
     fn values_mut(&mut self) -> impl Iterator<Item = &mut Value> {
         let procs = self.procs.iter_mut().flat_map(|p| {
-            let fields = p.fields.iter_mut().flat_map(|f| -> Box<dyn Iterator<Item = &mut Value>> {
+            let fields = p.fields.values_mut().flat_map(|f| -> Box<dyn Iterator<Item = &mut Value>> {
                 match f {
                     Field::Const(v) | Field::Cell(v) => Box::new(std::iter::once(v)),
                     Field::Closure(_, free) => Box::new(free.iter_mut()),
@@ -340,7 +340,7 @@ pub fn fx_emitted(heap: &Heap, c: &mut FxCompile, out: FxEmitted) -> Result<(), 
     }
     let fields = out.fields.iter().map(|&f| field_of(c, f)).collect::<Result<Vec<Field>, String>>()?;
     let proc_ = &mut c.procs[p];
-    proc_.fields = fields;
+    proc_.fields = super::Fields::new(fields);
     proc_.code = out.code;
     proc_.len = out.len;
     let mut starts: Vec<(u32, u32)> = out.starts.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0] as u32, c[1] as u32)).collect();

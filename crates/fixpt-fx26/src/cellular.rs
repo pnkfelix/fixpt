@@ -142,7 +142,7 @@ pub struct Compiler<'a> {
     c: &'a Checker,
     /// Each expression's parent (`ids::parents`), made when first wanted:
     /// what lambdas are around one, for its certificate.
-    parents: std::cell::OnceCell<HashMap<ExpId, ExpId>>,
+    parents: std::cell::OnceCell<crate::ast::IdMap<ExpId, ExpId>>,
     /// The program's text, for naming each lambda by where its body starts,
     /// in characters, as the compiler written in FX-26 does.
     char_at: Vec<u32>,

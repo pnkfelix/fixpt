@@ -370,6 +370,27 @@ fn a_description_function_reads_back_from_a_fasl_read_from_one() {
     assert!(ok && err.contains("`u.fx` is read from `u.fasl`") && !err.contains("stale"), "{out}{err}");
 }
 
+/// The cache directory `cache` (an `XDG_CACHE_HOME`) given the front end's
+/// kept files from this user's, linked (else copied), where there are any:
+/// a test of what else is kept there then waits on no front end made anew,
+/// a minute in a debug build. Each is keyed by its build, so another's is
+/// never read; and the cache replaces a file, never writes into one, so
+/// the link is never changed through.
+fn seed_front_end(cache: &std::path::Path) {
+    let home = std::env::var_os("XDG_CACHE_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")));
+    let Some(kept) = home.map(|h| h.join("fixpt")) else { return };
+    let to = cache.join("fixpt");
+    std::fs::create_dir_all(&to).expect("the cache's directory");
+    for e in std::fs::read_dir(&kept).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().starts_with("front-end-") {
+            let at = to.join(e.file_name());
+            if std::fs::hard_link(e.path(), &at).is_err() {
+                let _ = std::fs::copy(e.path(), &at);
+            }
+        }
+    }
+}
+
 #[test]
 fn a_built_in_module_is_kept_in_the_cache() {
     // A built-in has no directory of its own: its `.fasl` is made in the
@@ -377,6 +398,7 @@ fn a_built_in_module_is_kept_in_the_cache() {
     // next.
     let dir = scratch("built-in");
     let cache = dir.join("cache");
+    seed_front_end(&cache);
     std::fs::write(dir.join("p.fx"), "(define t (load-module \"fx26:table.fx\"))\n1\n").expect("written");
     let envs = [("XDG_CACHE_HOME", cache.to_str().expect("a path"))];
     let (ok, out, err) = fixpt(&dir, &["run", "p.fx"], &envs);

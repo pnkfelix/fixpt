@@ -6280,3 +6280,17 @@ a `.fasl`, asking whether a file is there), the one way it has to one,
 which records every use; "the check read nothing" a property of that
 object. Rust cannot stop a call to `std::fs`, so the tidy rule stays, as a
 backstop.
+
+## 260. A tree of session states (the user's, 2026-11-12; probably a non-starter)
+
+Whether sessions could be cheap forks of one ready session, or a session's
+imperative state a tree of levels (FORTH's vocabularies), so that tests of
+many programs (`compiler::every_program_compiled`: 455 fresh sessions)
+need not make each anew. The pitfalls, in `docs/research/session-tree.md`:
+a session accumulates by design and is isolated today only by hand-written
+resets (`compile_with_own_compiler_showing`); a shared heap isolates
+nothing; a tree of names misses code linked to cells and the heap's own
+objects, so isolation by construction needs copy-on-write of the heap (a
+ready session's image mapped privately, as the front end's cache is) and
+a copy of what lies outside it; and moving about such a tree is Baker's
+deep-against-shallow-binding question again.

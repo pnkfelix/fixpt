@@ -389,8 +389,8 @@ pub(crate) fn subtrees(c: &Checker, roots: &[ExpId]) -> std::collections::HashSe
 
 /// Each expression's parent, the one it is directly in, of every
 /// expression made: what is around one, by structure (`subtrees`).
-pub(crate) fn parents(c: &Checker) -> HashMap<ExpId, ExpId> {
-    let mut out = HashMap::new();
+pub(crate) fn parents(c: &Checker) -> crate::ast::IdMap<ExpId, ExpId> {
+    let mut out = crate::ast::IdMap::default();
     for e in c.arena.exp_ids() {
         for x in within(c, e) {
             out.insert(x, e);

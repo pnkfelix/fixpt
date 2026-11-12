@@ -27,7 +27,7 @@ process_body 4112
 rebuild 4432
 select_expansion 7616
 show_ty_body 7568
-sub_rules 8528
+sub_rules 8496
 synth_allof_call 5584
 synth_attempt 4384
 synth_bloblet 5424

@@ -511,7 +511,7 @@ impl Callout {
 
 /// What a field of a procedure's code bloblet holds, for its code to read
 /// PC-relatively.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 enum Field {
     /// The bloblet itself, which each frame of it keeps, so that code
     /// running is alive.
@@ -532,6 +532,56 @@ enum Field {
     /// Call-out `n` of this machine's table, which the code calls out to
     /// by it (`call_out`), as a call-out (`Value::callout`).
     Callout(usize),
+}
+
+/// A procedure's fields, in order, each once ([`Field`]); and where each
+/// is, so that one used again is found in a step, not by a search of them
+/// all (a procedure of the front end's may have thousands, a search of
+/// which was a fourteenth of its compile, `TODO.md` §252). The index is
+/// made anew before it is next used once the fields' values may have
+/// changed (`values_mut`, as a collection moves them), so that it can
+/// never say what the fields no longer are.
+struct Fields {
+    list: Vec<Field>,
+    index: std::collections::HashMap<Field, usize>,
+    stale: bool,
+}
+
+impl Fields {
+    fn new(list: Vec<Field>) -> Fields {
+        Fields { list, index: std::collections::HashMap::new(), stale: true }
+    }
+
+    /// Where `f` is, from 1: its first place, else a new one at the end.
+    fn position_or_push(&mut self, f: Field) -> usize {
+        if self.stale {
+            self.index.clear();
+            for (k, g) in self.list.iter().enumerate() {
+                self.index.entry(g.clone()).or_insert(k);
+            }
+            self.stale = false;
+        }
+        if let Some(&k) = self.index.get(&f) {
+            return k + 1;
+        }
+        self.list.push(f.clone());
+        self.index.insert(f, self.list.len() - 1);
+        self.list.len()
+    }
+
+    fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, Field> {
+        self.list.iter()
+    }
+
+    /// Each field, to change: the index made anew before it is next used.
+    fn values_mut(&mut self) -> std::slice::IterMut<'_, Field> {
+        self.stale = true;
+        self.list.iter_mut()
+    }
 }
 
 thread_local! {
@@ -995,7 +1045,7 @@ struct Proc {
     rw: Value,
     name: String,
     arity: usize,
-    fields: Vec<Field>,
+    fields: Fields,
     code: Vec<u8>,
     len: usize,
     /// A global's procedure, which may be called through its cell instead.
@@ -1920,7 +1970,7 @@ impl Compiling<'_> {
         }
         let code = continuation_bytes(REINSTATE);
         let q = self.procs.len();
-        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false, params: Some(0), starts: Vec::new() });
+        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: Fields::new(vec![Field::Myself, Field::Const(Value::FALSE)]), len: code.len(), code, global: false, params: Some(0), starts: Vec::new() });
         self.resume = Some(q);
         q
     }
@@ -1939,7 +1989,7 @@ impl Compiling<'_> {
         let variadic = h.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == const { fixpt_heap::layout::regcode::op("vargs") };
         let arity = if variadic { usize::MAX } else { h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize };
         let p = self.procs.len();
-        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0, global: false, params: None, starts: Vec::new() });
+        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: Fields::new(vec![Field::Myself, Field::Const(word)]), code: Vec::new(), len: 0, global: false, params: None, starts: Vec::new() });
         self.by_word.insert(word.raw(), p);
         self.queue.push(p);
         Ok(p)
@@ -1964,14 +2014,7 @@ impl Compiling<'_> {
     /// Procedure `p`'s field holding `f`: an index from 1, shared with an
     /// equal one.
     fn field(&mut self, p: usize, f: Field) -> usize {
-        let fs = &mut self.procs[p].fields;
-        match fs.iter().position(|g| *g == f) {
-            Some(k) => k + 1,
-            None => {
-                fs.push(f);
-                fs.len()
-            }
-        }
+        self.procs[p].fields.position_or_push(f)
     }
 
     /// How a global's value is had: the global's cell, read when the code

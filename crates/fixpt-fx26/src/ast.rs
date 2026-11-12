@@ -449,6 +449,12 @@ impl std::hash::Hasher for IdHasher {
 pub type TySet = std::collections::HashSet<TyId, std::hash::BuildHasherDefault<IdHasher>>;
 /// A map by node, hashed by [`IdHasher`].
 pub type TyMap<V> = std::collections::HashMap<TyId, V, std::hash::BuildHasherDefault<IdHasher>>;
+/// A map by any key of ids, hashed by [`IdHasher`]: one asked of very often
+/// (an expression's parent, as the cellular compiler climbs to its body).
+pub type IdMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<IdHasher>>;
+/// A set of any key of ids, hashed by [`IdHasher`] (a walk's or a subtype
+/// question's pairs met).
+pub type IdSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<IdHasher>>;
 
 /// A step of a path from a variable (`check::PathFact`): `car`, `cdr`, or
 /// a product's field.

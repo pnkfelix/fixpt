@@ -4218,7 +4218,7 @@ impl Checker {
     /// which only its type can show (`docs/research/type-and-effect-directions.md`,
     /// R6).
     pub(crate) fn no_knot(&self, t: TyId, span: fixpt_read::Span) -> R<()> {
-        let mut seen = HashSet::new();
+        let mut seen = crate::ast::IdSet::default();
         match self.knot_in(t, &[], &mut seen) {
             None => Ok(()),
             Some((r, p)) => {
@@ -4231,7 +4231,7 @@ impl Checker {
         }
     }
 
-    fn knot_in(&self, t: TyId, kept: &[Region], seen: &mut HashSet<(TyId, Vec<Region>)>) -> Option<(Region, TyId)> {
+    fn knot_in(&self, t: TyId, kept: &[Region], seen: &mut crate::ast::IdSet<(TyId, Vec<Region>)>) -> Option<(Region, TyId)> {
         let t = self.arena.resolve(t);
         if !seen.insert((t, kept.to_vec())) {
             return None;
@@ -6104,7 +6104,7 @@ const SPLIT_BUDGET: usize = 64;
 
 #[derive(Clone, Default)]
 struct SubState {
-    trail: HashSet<(TyId, TyId, BinderEnv)>,
+    trail: crate::ast::IdSet<(TyId, TyId, BinderEnv)>,
     labels: HashMap<(TyId, TyId, usize), DVar>,
     /// For a pair of module types met before, the wanted one's
     /// descriptions and values with its abstract types the given one's

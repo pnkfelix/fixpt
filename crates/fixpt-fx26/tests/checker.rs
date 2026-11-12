@@ -233,8 +233,12 @@ fn messages_have_a_usable_first_line() {
 
 /// The front end's checker run as register code
 /// (`Fx26Session::front_end_compiled`) says what it says run as lowered
-/// Scheme, on programs that check and one that does not.
+/// Scheme, on programs that check and one that does not. Not in the suite:
+/// nearly all of it is the checker interpreted on the Scheme VM, some 30 s
+/// for four small programs, for little the suite learns; run it with
+/// `--run-ignored` where the lowered front end is in question.
 #[test]
+#[ignore = "the lowered front end, on the Scheme VM: run on demand"]
 fn the_front_end_compiled_checks_alike() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let programs = ["run/recursion.fx", "sizes/solved-by-test.fx", "sizes/solved-negative.fx", "native/many-values.fx"];
