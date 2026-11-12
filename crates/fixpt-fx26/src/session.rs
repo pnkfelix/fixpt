@@ -474,7 +474,7 @@ fn lowered_cache(text: &str) -> Option<(std::path::PathBuf, u64)> {
     (text, READER_PREFIX, build).hash(&mut key);
     let key = key.finish();
     let dir = crate::fasl::cache_dir()?;
-    Some((dir.join(format!("front-end-reader-{key:016x}.code")), key))
+    Some((dir.join(format!("front-end-{build}-reader-{key:016x}.code")), key))
 }
 
 /// The lowering kept at `path`, if its file starts with `key` and the rest
@@ -533,12 +533,11 @@ fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)
     // By the sources and the build (`build.rs`), not the executable: every
     // one built from them shares the cache, the CLI and each test binary.
     let build = env!("FIXPT_BUILD_HASH");
-    let mut name = std::collections::hash_map::DefaultHasher::new();
-    (build, native).hash(&mut name);
     let mut key = std::collections::hash_map::DefaultHasher::new();
     (text, build).hash(&mut key);
     let dir = crate::fasl::cache_dir()?;
-    Some((dir.join(format!("front-end-{:016x}.img", name.finish())), key.finish()))
+    let kind = if native { "native" } else { "cellular" };
+    Some((dir.join(format!("front-end-{build}-{kind}.img")), key.finish()))
 }
 
 /// The front end's compiled word `w`, copied out of `heap` into a heap of
@@ -869,38 +868,52 @@ fn write_cache(path: &std::path::Path, bytes: &[u8]) {
 /// edit makes new ones and leaves the old to no one; a day keeps those of
 /// another branch or profile still in use.
 const CACHE_LIFE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
-/// And at most this many front-end caches, the most recently used: two
-/// kinds and the reader's lowering (`lowered_cache`) for each of a few
-/// builds (debug, release, a second tree).
-const CACHE_MOST: usize = 12;
+/// And besides this build's, the front-end caches of at most this many
+/// other builds, the most recently used: the other profile's, a second
+/// tree's.
+const CACHE_BUILDS: usize = 4;
 
 /// The caches in `dir` let go: front-end caches and the `.fasl`s of the
 /// module files built in (`fasl::path_for_load`, made again by the next run
-/// that wants them) unused for `CACHE_LIFE`, and the front-end caches past
-/// the `CACHE_MOST` most recent. Done by whatever writes a front-end cache
-/// (a process of the CLI, a test's session, `fixpt prewarm`): that is when
-/// a build is new. Used is read or written, by the file's times (access
-/// times may lag by a day where the file system keeps them `relatime`).
+/// that wants them) unused for `CACHE_LIFE`, and the front-end caches of
+/// builds past the `CACHE_BUILDS` most recent other than this one. Done by
+/// whatever writes a front-end cache (a process of the CLI, a test's
+/// session, `fixpt prewarm`): that is when a build is new. Used is read or
+/// written, by the file's times (access times may lag by a day where the
+/// file system keeps them `relatime`, so a cache in use may look unused
+/// for hours: hence never this build's). A file being written (`.tmpPID`,
+/// `write_cache`) is no cache: not counted, and let go only once a day old,
+/// its writer gone.
 fn sweep_cache(dir: &std::path::Path) {
-    let mut front_ends = Vec::new();
+    let this = env!("FIXPT_BUILD_HASH");
+    let mut builds: std::collections::HashMap<String, (Option<std::time::SystemTime>, Vec<std::path::PathBuf>)> =
+        std::collections::HashMap::new();
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let Ok(m) = e.metadata() else { continue };
         let used = [m.accessed().ok(), m.modified().ok()].into_iter().flatten().max();
         let old = used.and_then(|t| t.elapsed().ok()).is_some_and(|a| a > CACHE_LIFE);
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with("front-end-") {
+        if let Some(rest) = name.strip_prefix("front-end-") {
+            let finished = name.ends_with(".img") || name.ends_with(".code");
+            // `front-end-{build}-…`; a name of another form, its own.
+            let build = rest.split_once('-').map_or(rest, |(b, _)| b);
             if old {
                 let _ = std::fs::remove_file(e.path());
-            } else {
-                front_ends.push((used, e.path()));
+            } else if finished && build != this {
+                let b = builds.entry(build.to_string()).or_default();
+                b.0 = b.0.max(used);
+                b.1.push(e.path());
             }
         } else if old && name.starts_with("built-in-") {
             let _ = std::fs::remove_dir_all(e.path());
         }
     }
-    front_ends.sort_by(|a, b| b.0.cmp(&a.0));
-    for (_, p) in front_ends.into_iter().skip(CACHE_MOST) {
-        let _ = std::fs::remove_file(p);
+    let mut builds: Vec<_> = builds.into_values().collect();
+    builds.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, paths) in builds.into_iter().skip(CACHE_BUILDS) {
+        for p in paths {
+            let _ = std::fs::remove_file(p);
+        }
     }
 }
 
@@ -1092,13 +1105,15 @@ pub struct Redefinition {
 /// How a checked form is run.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum Strategy {
-    /// Lowered to annotated Scheme and run on the session's engine.
-    #[default]
+    /// Lowered to annotated Scheme and run on the session's engine: only
+    /// where asked for (`Fx26Session::lowering`), to compare with or test
+    /// the lowering (`TODO.md` §262).
     Lower,
     /// Run by the evaluator written in FX-26 (`eval-core.fx`).
     Evaluate,
     /// Compiled to a cellular word by the compiler written in FX-26
-    /// (`compile.fx`) and run on the cellular machine.
+    /// (`compile.fx`) and run on the cellular machine: the default.
+    #[default]
     Cellular,
 }
 
@@ -1115,7 +1130,14 @@ impl Fx26Session {
     /// (`as_register_code`), with `front_end_native` and `native_keeping`
     /// set as the cache was made.
     pub fn with_backend_preloaded(backend: fixpt_engine::Backend, keeping: Option<NativeKeeping>) -> R<Fx26Session> {
-        Fx26Session::with_backend_preloaded_in(backend, keeping, false, Strategy::Lower)
+        Fx26Session::with_backend_preloaded_in(backend, keeping, false, Strategy::Cellular)
+    }
+
+    /// [`with_backend`](Fx26Session::with_backend), its forms lowered to
+    /// Scheme and run on `backend`'s engine (`Strategy::Lower`): for what
+    /// compares with the lowering, or tests it.
+    pub fn lowering(backend: fixpt_engine::Backend) -> R<Fx26Session> {
+        Fx26Session::with_backend_preloaded_in(backend, None, false, Strategy::Lower)
     }
 
     /// [`with_backend_preloaded`](Fx26Session::with_backend_preloaded), its
@@ -4485,5 +4507,50 @@ mod built_in_tests {
         let expanded = BuiltInLoad { expanded: true, ..load };
         let e = expanded.said_in(FxError::at(Span::new(FileId(0), at, at + 6), "bad"), Span::new(FileId(0), 0, 3));
         assert_eq!(e.message, "in `fx26:x.fx` (its own macros expanded): bad");
+    }
+}
+
+#[cfg(test)]
+mod sweep_tests {
+    use super::*;
+
+    /// A sweep keeps every cache of this build, however long since it was
+    /// written, and files still being written, however many; of other
+    /// builds, the `CACHE_BUILDS` most recently used, whole.
+    #[test]
+    fn a_sweep_keeps_this_builds_caches_and_files_being_written() {
+        let dir = std::env::temp_dir().join(format!("fixpt-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("made");
+        let this = env!("FIXPT_BUILD_HASH");
+        let ago = |s: u64| std::time::SystemTime::now() - std::time::Duration::from_secs(s);
+        let file = |name: &str, at: std::time::SystemTime| {
+            let p = dir.join(name);
+            std::fs::write(&p, b"x").expect("written");
+            let f = std::fs::File::options().write(true).open(&p).expect("opened");
+            f.set_times(std::fs::FileTimes::new().set_accessed(at).set_modified(at)).expect("timed");
+        };
+        // This build's, the oldest of all.
+        file(&format!("front-end-{this}-native.img"), ago(3600 * 20));
+        file(&format!("front-end-{this}-reader-0000000000000001.code"), ago(3600 * 20));
+        // Other builds', the one `i` hours old, two files each.
+        for i in 1..=CACHE_BUILDS + 2 {
+            file(&format!("front-end-{i:016x}-native.img"), ago(3600 * i as u64));
+            file(&format!("front-end-{i:016x}-cellular.img"), ago(3600 * i as u64));
+        }
+        // Many being written at once, by as many processes.
+        for pid in 0..20 {
+            file(&format!("front-end-{this}-native.tmp{pid}"), ago(0));
+        }
+        sweep_cache(&dir);
+        let left = |name: &str| dir.join(name).exists();
+        assert!(left(&format!("front-end-{this}-native.img")) && left(&format!("front-end-{this}-reader-0000000000000001.code")));
+        assert!((0..20).all(|pid| left(&format!("front-end-{this}-native.tmp{pid}"))));
+        for i in 1..=CACHE_BUILDS + 2 {
+            let kept = i <= CACHE_BUILDS;
+            assert_eq!(left(&format!("front-end-{i:016x}-native.img")), kept, "build {i}");
+            assert_eq!(left(&format!("front-end-{i:016x}-cellular.img")), kept, "build {i}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

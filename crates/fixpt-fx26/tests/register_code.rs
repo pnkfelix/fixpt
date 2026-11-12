@@ -175,7 +175,7 @@ fn runs_as_lowered(subs: &[&str], gc_every: Option<u64>, shard: Option<usize>) -
             let tops: Result<Vec<Vec<_>>, _> = forms.iter().zip(done).filter(|(_, d)| !d).map(|(f, _)| c.top_all(f)).collect();
             let tops = tops.map(|t| t.concat());
             let Ok(tops) = tops else { continue };
-            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+            let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
             let Ok(Ok(lowered)) = s.run_program(&text).map(|v| v.map_err(|e| e.to_string())) else { continue };
             let got = s.scheme.scope(|sc| {
                 let w = sc.make(|m| {

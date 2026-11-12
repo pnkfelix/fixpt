@@ -8,7 +8,7 @@ use fixpt_fx26::session::Fx26Session;
 fn run(program: &str) -> String {
     let mut answers = Vec::new();
     for backend in [Backend::Ast, Backend::Bytecode] {
-        let mut s = Fx26Session::with_backend(backend).expect("starts");
+        let mut s = Fx26Session::lowering(backend).expect("starts");
         let v = s.run_program(program).unwrap_or_else(|e| panic!("does not check: {e}\n{program}"));
         answers.push(v.unwrap_or_else(|e| format!("!! {e}")));
     }
@@ -18,7 +18,7 @@ fn run(program: &str) -> String {
 
 /// What the last form of `program` lowers to.
 fn code(program: &str) -> String {
-    let mut s = Fx26Session::with_backend(Backend::Ast).expect("starts");
+    let mut s = Fx26Session::lowering(Backend::Ast).expect("starts");
     let forms = s.checker.read_in(fixpt_read::FileId(0), program).expect("reads");
     let mut last = String::new();
     for f in &forms {
@@ -189,7 +189,7 @@ fn the_checkers_facts_are_in_the_lowered_code() {
 #[test]
 fn the_compiler_uses_the_facts() {
     use fixpt_engine::compile::disassemble;
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
     let forms = s
         .checker
         .read_in(fixpt_read::FileId(0), "(define f (subr pure (int int) int) (lambda (a b) (+ a b)))")

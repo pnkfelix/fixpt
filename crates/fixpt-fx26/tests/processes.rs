@@ -51,7 +51,7 @@ fn as_said(says: &Result<String, String>, got: &Result<String, String>) -> bool 
 /// A program's last value, lowered and run on the bytecode engine, with
 /// the scheduler taking its run queue in `seed`'s order.
 fn lowered(text: &str, seed: Option<i64>) -> Result<String, String> {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
     fixpt_runtime::sched::set_seed(&mut s.scheme.runtime_unrooted().heap, seed);
     match s.run_program(text) {
         Ok(r) => r,

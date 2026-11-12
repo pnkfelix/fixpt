@@ -20,9 +20,10 @@ fn reader_program() -> String {
     format!("(define eager-reader-module ((proj (load-module \"fx26:eager-reader.fx\") @s @e @m @c)))\n{block}")
 }
 
-/// A session with the FX-26 reader loaded, and the Scheme one beside it.
+/// A session with the FX-26 reader loaded, and the Scheme one beside it:
+/// lowered, so that both are Scheme globals the one driver calls.
 fn session(backend: Backend) -> Fx26Session {
-    let mut s = Fx26Session::with_backend(backend).expect("starts");
+    let mut s = Fx26Session::lowering(backend).expect("starts");
     let loaded = s.run_program(&reader_program()).expect("the reader checks");
     loaded.expect("the reader loads");
     s.scheme.lowered().eval_str("<scheme-eager>", fixpt_scheme::eager::SOURCE).expect("the Scheme reader loads");

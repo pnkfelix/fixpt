@@ -10,7 +10,7 @@ use fixpt_fx26::session::Fx26Session;
 /// Both ways; they must agree. Returns the value.
 fn both(program: &str) -> String {
     let ours = common::with_own(|s| s.eval_with_own_evaluator(program)).unwrap_or_else(|e| panic!("the FX-26 front end: {e}\n{program}"));
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
     let scheme = s.run_program(program).unwrap_or_else(|e| panic!("does not check: {e}\n{program}"));
     let scheme = scheme.unwrap_or_else(|e| format!("!! {e}"));
     assert_eq!(ours, scheme, "the evaluator and the lowering disagree on:\n{program}");
@@ -97,7 +97,7 @@ fn every_program(wanted: impl Fn(&str) -> bool) {
                 continue;
             }
             let program = std::fs::read_to_string(&path).unwrap();
-            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+            let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
             let scheme = match s.run_program(&program) {
                 Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
                 Err(_) => continue, // written to be rejected

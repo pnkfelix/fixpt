@@ -75,7 +75,7 @@ fn the_rust_compiler_runs_modules_as_lowered() {
         let text = std::fs::read_to_string(&path).unwrap();
         let dir = path.parent().map(|d| d.to_path_buf());
         let Ok((c, tops)) = checked(&text, dir.clone()) else { continue };
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
         s.checker.base_dir = dir;
         let Ok(Ok(lowered)) = s.run_program(&text) else { continue };
         // Its cellular words on the machine written in Rust; and its

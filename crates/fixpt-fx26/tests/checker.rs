@@ -432,7 +432,7 @@ fn every_program_in_the_tests_compiled() {
     let mut compiler = common::session();
     let (mut report, mut ran) = (Vec::new(), 0);
     for p in &programs {
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
         let lowered = match s.run_program(p) {
             Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
             Err(_) => continue,

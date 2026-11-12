@@ -6443,3 +6443,19 @@ tests that lower by the library default (`run::run`, `eager::session`,
 `redefine::run`, the `programs_do_as_they_say` helpers, …), and the tests
 that lower on purpose (`processes` under seeds, the comparisons), to ask.
 
+
+Then (2026-11-12): the default is `Strategy::Cellular`; what lowers on
+purpose says so, by `Fx26Session::lowering` (the comparisons with the
+lowering: `compiler`, `evaluator`, `run::run`, `eager`'s with the Scheme
+reader, `bench`'s reference answer, `processes` under seeds, …). Debug
+suite 125 s, release 134 s (its long pole `bootstrap fixpoint`, 131 s, a
+test debug skips). Found on the way: the front-end caches' sweep kept the
+twelve newest `front-end-*` entries, counting files still being written,
+so a burst of processes making a cache (a build with none prewarmed)
+removed the caches of the build in use, read by `mmap` and so never
+newer under `relatime`; and a machine that may not make the native front
+end (`fx-regs-fxjit-nativecc`) then fell back to the cellular one, and
+`fixpt dump` refused. Each cache's name now carries its build; the sweep
+counts no file being written, never removes this build's, and lets go
+other builds whole, past the four most recently used. Next: preloading
+measured again, now that sessions want the front end.

@@ -206,8 +206,9 @@ fn usage(why: &str) -> i32 {
 
 /// One program's row: its name, its answer, and a time per machine.
 fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<String>) -> Result<Vec<String>, String> {
+    // The answer each machine's is held to: the lowering's.
     let answer = {
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| String::from(e.message))?;
+        let mut s = Fx26Session::lowering(Backend::Bytecode).map_err(|e| String::from(e.message))?;
         s.scheme.set_step_limit(None);
         match s.run_program(text) {
             Ok(Ok(v)) => v,

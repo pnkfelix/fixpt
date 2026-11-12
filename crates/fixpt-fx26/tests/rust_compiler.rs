@@ -150,7 +150,7 @@ fn the_rust_compilers_words_run_as_lowered() {
     let mut ran = 0;
     for (name, text) in programs() {
         let Ok((c, tops)) = checked(&text) else { continue };
-        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
         let Ok(Ok(lowered)) = s.run_program(&text).map(|v| v.map_err(|e| e.to_string())) else { continue };
         let got = s.scheme.scope(|sc| {
             let mut err = None;
