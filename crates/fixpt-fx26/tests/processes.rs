@@ -155,18 +155,21 @@ fn process_programs_in(way: &str, these: Vec<(String, String, Result<String, Str
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+// Each program under twenty schedules, a test for each shard of the runs
+// (`common::shard`), which nextest runs at once.
+common::sharded!(answers_hold_under_any_schedule, schedules_shard);
+
 /// What gives a value gives it whatever order the scheduler runs its tasks
 /// in: `par`'s answer, the dataflow of I-cells, and messages each sent by
-/// one sender, which arrive in the order sent.
-#[test]
-fn answers_hold_under_any_schedule() {
+/// one sender, which arrive in the order sent. Of shard `k` of the runs, a
+/// program under a seed each.
+fn schedules_shard(k: usize) {
+    let runs = programs().into_iter().filter(|(_, _, s)| s.is_ok()).flat_map(|p| (1..=20).map(move |seed| (p.clone(), seed)));
     let mut wrong = Vec::new();
-    for (name, text, says) in programs().iter().filter(|(_, _, s)| s.is_ok()) {
-        for seed in 1..=20 {
-            let got = lowered(text, Some(seed * 7919));
-            if !as_said(says, &got) {
-                wrong.push(format!("{name}, seed {seed}: gives {got:?}"));
-            }
+    for ((name, text, says), seed) in common::shard(runs, k) {
+        let got = lowered(&text, Some(seed * 7919));
+        if !as_said(&says, &got) {
+            wrong.push(format!("{name}, seed {seed}: gives {got:?}"));
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));

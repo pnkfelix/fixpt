@@ -158,6 +158,7 @@ impl Heap {
         let started = std::time::Instant::now();
         // The mutator's phase paused (`TODO.md` §252).
         let phase = fixpt_memmgmt::phases::collection("gc:minor");
+        self.assert_not_in_leaf("a minor collection");
         let before = self.used();
         self.peak_words = self.peak_words.max(before as u64);
         if self.verify_barrier {

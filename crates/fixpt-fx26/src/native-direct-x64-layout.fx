@@ -365,7 +365,7 @@
       ((523) #t)
       (else #f))))
 
-;; Whether runtime primitive `n` is simple, of a fixed number of arguments at least (its `min`).
+;; Whether runtime primitive `n` needs no engine, of a fixed number of arguments (`min`) at least.
 (define d-prim-min (subr pure (int) int)
   (lambda (n)
     (case n

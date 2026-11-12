@@ -6294,3 +6294,76 @@ objects, so isolation by construction needs copy-on-write of the heap (a
 ready session's image mapped privately, as the front end's cache is) and
 a copy of what lies outside it; and moving about such a tree is Baker's
 deep-against-shallow-binding question again.
+
+## 261. A primitive that runs code, called with its caller's values not rooted (found 2026-11-12)
+
+A soundness bug, latent: nothing in the suite has met it. Found while
+asking what a run of a machine owns (procedural macros run compiled,
+`TODO.md` §252). The heap's rule is that allocation never collects, so a
+primitive that neither runs code nor collects may be called with its
+caller's values where they lie. One that runs code on the same heap (whose
+safepoints may collect) needs the caller's stacks, registers and marks
+kept where the collector finds them while it runs. Today that is a list by
+name, `prim::reenters` (six session primitives), which the cellular machine
+written in Rust, the native cellular machine and the direct machine honour
+(`reentering`, `call_foreign`), and which:
+
+- leaves out `%run-word` and `%run-front-end`, which run code on the same
+  heap: from the cellular machines and native code, they are called with
+  the stacks not kept;
+- is ignored by both Scheme engines (`vm.rs`, `interp.rs`), which call a
+  `PrimKind::Simple` primitive with `&mut self.stack[base..]` and root
+  nothing: lowered code that calls the compiled front end
+  (`%run-front-end`, the `fx26-reader:` wrappers `session.rs` writes) or a
+  word (`%run-word`, as `fixpt-scheme/tests/bloblet.rs` does) leaves every
+  value below the call stale if the run it starts collects.
+
+Nothing ensures the list is right, either: a primitive runs code through
+the runtime's hooks (`stage_check`, `stage_lower`, `sessions`,
+`run_word`, `call_native`, …), which no reading by name sees.
+
+The fix, by construction:
+
+1. **A kind of its own**: `PrimKind::Reenters`, beside `Simple`, for a
+   primitive that may run code (or collect); `prim::reenters` gone. Every
+   machine's call site then must decide, and the compiler sees to it:
+   both Scheme engines keep their stack, registers and marks rooted across
+   such a call (as `reentering` does); the native compilers call it as
+   they call what is not native code.
+2. **What a `Simple` primitive may reach**: given not the whole runtime but
+   a view of it without the hooks that run code or collect, so that a
+   primitive declared `Simple` cannot run code, whatever it calls. Larger
+   (every primitive's signature); without it, (1) is a classification
+   made by hand, checked by nothing.
+
+Done (2026-11-12): (1), the kind (`PrimKind::Reenters`, thirteen primitives:
+`%run-word`, `%run-front-end`, the three `%fx26-stage…` and the eight
+`%fx26-session-…`; seven of them were missing from the list), every
+machine choosing by it, `prim::rooted_across` the one way a caller's
+values are kept; and in place of (2), a check in every build with debug
+assertions: a leaf is called through `prim::call_leaf`, which marks the
+heap while it runs, and running a word, calling native code, or a
+collection then fails loudly (`Heap::assert_not_in_leaf`). It sees only
+what the tests run; (2) by type is still the whole answer.
+`fixpt-scheme`'s `bloblet::a_word_that_collects_leaves_the_callers_values`
+fails without the engines' rooting.
+
+The effects, a design of their own (the user's, 2026-11-12): rooting is
+the floor, what keeps the suspended caller's values valid whatever runs
+(even a `spin`-only run allocates, and the stress policy collects at any
+safepoint; and Scheme and Rust callers are checked by no FX-26 type).
+Effect bounds are the ceiling: what nested code may do to the world its
+suspended caller is in the midst of. A reentering primitive with no bound
+is an escape hatch with a name. Each one's FX-26 type to say it: writes of
+regions and globals; control, a continuation taken inside and resumed past
+the boundary, or an abort through it, delimited there or refused (the
+machines catch some today, `THROWN`, `ABORTED`, by run, not by type); `io`
+and `spin`. `%run-word` effect-polymorphic: running a word of latent
+effect `E` is `E` where it is called. The session primitives: the
+session's private state, not the program's. A procedural macro's
+transformer has its bound already, both ways: checked at `(subr spin
+(datum …) datum)`, and run in a session and heap of its own. And where the
+two meet: a bound that leaves out allocating in the caller's heap would
+let its collection be held off while the nested code runs, in place of
+the caller's stacks copied and rooted (sound only once the bound is
+enforced, and the stress policy would have to respect it).

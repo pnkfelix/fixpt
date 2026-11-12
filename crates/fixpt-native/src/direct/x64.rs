@@ -1732,7 +1732,7 @@ impl Compiling<'_> {
                             // `%region-nclosure`'s, natively: the same.
                             Some(d) if matches!(d.name, "%region-closure" | "%region-nclosure") => Callout::RegionClosure { n: k(o(1)) },
                             Some(d) if d.name == "%stay-cellular" => return decline("it calls `stay-cellular`".into()),
-                            Some(d) if matches!(d.kind, fixpt_runtime::PrimKind::Simple(_)) && d.accepts(k(o(1))) => {
+                            Some(d) if d.kind.function().is_some() && d.accepts(k(o(1))) => {
                                 Callout::Prim { p: k(o(0)), n: k(o(1)) }
                             }
                             Some(d) => return decline(format!("the primitive `{}`", d.name)),
@@ -4215,10 +4215,10 @@ pub(super) fn fx26_direct_layout_of(intro: &[&str], regs: &[(&str, i64)], sig_in
         "#f",
     );
     table(
-        "Whether runtime primitive `n` is simple, of a fixed number of arguments at least (its `min`).",
+        "Whether runtime primitive `n` needs no engine, of a fixed number of arguments (`min`) at least.",
         "d-prim-min",
         "(int) int",
-        prims().filter(|(_, d)| matches!(d.kind, fixpt_runtime::PrimKind::Simple(_))).map(|(i, d)| (i.to_string(), d.min.to_string())).collect(),
+        prims().filter(|(_, d)| d.kind.function().is_some()).map(|(i, d)| (i.to_string(), d.min.to_string())).collect(),
         "-1",
     );
     table(

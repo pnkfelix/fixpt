@@ -1083,9 +1083,9 @@ fn what_cellular_code_makes_is_native() {
 fn a_place_holds_its_closures_adapter() {
     let mut s = session(true);
     let rt = s.scheme.runtime_unrooted();
-    let prim = |name: &str| match fixpt_runtime::PRIMITIVES.iter().find(|d| d.name == name).map(|d| &d.kind) {
-        Some(fixpt_runtime::PrimKind::Simple(f)) => *f,
-        _ => panic!("no simple primitive {name}"),
+    let prim = |name: &str| match fixpt_runtime::PRIMITIVES.iter().find(|d| d.name == name).and_then(|d| d.kind.function()) {
+        Some((f, _)) => f,
+        None => panic!("no primitive {name} the machines call"),
     };
     let word = { let u = rt.heap.undefined_closure(); rt.heap.bloblet_slot(u, fixpt_heap::layout::cellular::CLOSURE_WORD) };
     let made = |rt: &mut fixpt_runtime::Runtime, name: &str| {

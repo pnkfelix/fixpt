@@ -851,6 +851,7 @@ fn adapter_code() -> Vec<u32> {
 /// use: the call runs on its stack below the frames of the run that called
 /// out, whose values that call-out keeps rooted.
 pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Value]) -> Result<Value, fixpt_runtime::NativeExit> {
+    rt.heap.assert_not_in_leaf("calling native code");
     let fail = fixpt_runtime::NativeExit::Failed;
     let p = DirectMachine::compiled_of(&rt.heap, closure).ok_or_else(|| fail("not a native closure".into()))?;
     let fuel = rt.word_fuel.min(u64::MAX >> 1);
@@ -3264,7 +3265,7 @@ impl Compiling<'_> {
                             // By design: a procedure calling `stay-cellular`
                             // runs as cellular code.
                             Some(d) if d.name == "%stay-cellular" => return decline("it calls `stay-cellular`".into()),
-                            Some(d) if matches!(d.kind, fixpt_runtime::PrimKind::Simple(_)) && d.accepts(k(o(1))) => {
+                            Some(d) if d.kind.function().is_some() && d.accepts(k(o(1))) => {
                                 Callout::Prim { p: k(o(0)), n: k(o(1)) }
                             }
                             Some(d) => return decline(format!("the primitive `{}`", d.name)),
@@ -5666,8 +5667,10 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             Some(marks) => rt.heap.list_from(&marks).raw(),
             None => failed(st, "marks-of: not a continuation".into()),
         },
-        Callout::Prim { p, .. } | Callout::Pure { p, .. } if fixpt_runtime::prim::reenters(fixpt_runtime::PRIMITIVES[p].name) => {
-            let fixpt_runtime::PrimKind::Simple(f) = fixpt_runtime::PRIMITIVES[p].kind else { unreachable!("checked when compiled") };
+        // One that runs code (`TODO.md` §261): called as what is not native
+        // code is, the frames kept where a collection finds them.
+        Callout::Prim { p, .. } | Callout::Pure { p, .. } if matches!(fixpt_runtime::PRIMITIVES[p].kind, fixpt_runtime::PrimKind::Reenters(_)) => {
+            let Some((f, _)) = fixpt_runtime::PRIMITIVES[p].kind.function() else { unreachable!("checked when compiled") };
             let mut args = args.to_vec();
             call_foreign_with(rt, st, None, |rt| {
                 f(rt, &mut args).map_err(|t| fixpt_runtime::NativeExit::Failed(fixpt_engine::cellular::describe(rt, t.obj)))
@@ -5676,7 +5679,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         Callout::Prim { p, .. } | Callout::Pure { p, .. } => {
             let def = &fixpt_runtime::PRIMITIVES[p];
             let fixpt_runtime::PrimKind::Simple(f) = def.kind else { unreachable!("checked when compiled") };
-            match f(rt, args) {
+            match fixpt_runtime::prim::call_leaf(rt, f, args) {
                 Ok(v) => v.raw(),
                 Err(t) => {
                     let m = fixpt_engine::cellular::describe(rt, t.obj);

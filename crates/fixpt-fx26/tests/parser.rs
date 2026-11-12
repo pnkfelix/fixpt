@@ -8,6 +8,8 @@ use fixpt_fx26::sexp::{Chars, show_top};
 use fixpt_fx26::session::Fx26Session;
 use fixpt_read::FileId;
 
+mod common;
+
 /// The Rust parser's trees for `text`, checking each form as it goes, which
 /// is how the Rust side parses.
 fn rust_trees(text: &str, base: i64) -> Vec<String> {
@@ -145,7 +147,7 @@ fn same_trees(s: &mut Fx26Session, text: &str) {
 
 #[test]
 fn the_parsers_agree_on_small_programs() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     for text in [
         "(+ 1 2)",
         "(define x int 5) (define y (+ x 1)) (if #t x y)",
@@ -167,7 +169,7 @@ fn the_parsers_agree_on_small_programs() {
 
 #[test]
 fn the_parsers_agree_on_real_programs() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     for text in [
         include_str!("programs/bidirectional/twice.fx"),
         include_str!("programs/bloblet/point.fx"),
@@ -191,7 +193,7 @@ fn the_parsers_agree_on_real_programs() {
 
 #[test]
 fn a_parse_error_says_where() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     let err = s.parse_with_own_parser("(if 1 2)").expect_err("too short");
     assert_eq!(err.message, "`(if test then else)`");
     assert_eq!((err.span.start, err.span.end), (0, 8));
@@ -203,7 +205,7 @@ fn a_parse_error_says_where() {
 /// same place, as the Rust checker reading it.
 #[test]
 fn module_parse_errors_agree() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     for text in [
         "(module (define))",
         "(module 5)",
@@ -227,7 +229,7 @@ fn module_parse_errors_agree() {
 /// (the Rust one indexed an empty list: Heist's).
 #[test]
 fn an_empty_list_is_no_expression_alike() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     for text in ["(f ())", "()", "(define x int ())"] {
         let ours = s.parse_with_own_parser(text).expect_err("refused");
         let mut c = Checker::new();
@@ -241,7 +243,7 @@ fn an_empty_list_is_no_expression_alike() {
 /// the same place.
 #[test]
 fn case_parse_errors_agree() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     for text in [
         "(case)",
         "(case 1)",
@@ -269,7 +271,7 @@ fn case_parse_errors_agree() {
 /// a macro is refused as it is read, by both, alike.
 #[test]
 fn a_shape_used_as_a_macro_is_refused_alike() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     for text in ["(define-syntax sh (modnames x))\n(sh 1 2)", "(define-syntax sh (modnames x))\n(+ 1 (sh))"] {
         let ours = s.parse_with_own_parser(text).expect_err("refused");
         let mut c = Checker::new();
@@ -284,7 +286,7 @@ fn a_shape_used_as_a_macro_is_refused_alike() {
 /// `parser.fx`'s list of them cannot fall behind.
 #[test]
 fn a_variant_named_by_a_type_form_is_refused() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     for form in fixpt_fx26::parse::TYPE_FORMS {
         let text = format!("(define-datatype t (x int) ({form} int))");
         let ours = s.parse_with_own_parser(&text).expect_err(&text);
@@ -306,7 +308,7 @@ fn a_variant_named_by_a_type_form_is_refused() {
 /// its `#f`, at one span, are 2 and 5.
 #[test]
 fn a_tree_as_text() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     let text = "(let* ((a #t)) (and a #f))";
     let (ours, base) = s.parse_with_own_parser_from(text).expect("parses");
     let ours: Vec<String> = ours.iter().map(|t| within_files(t)).collect();
@@ -333,7 +335,7 @@ fn a_state_is_its_forms_however_they_are_split() {
     let first = forms_state(9, &set, "(define x int 1)", &[]).expect("reads");
     assert_eq!(one, forms_state(first, &set, " (f x) ; again", &[]).expect("reads"));
     assert_eq!(forms_state(9, &set, "", &[]), Some(9));
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     let text = "(if #t 1 2)";
     let (once, base) = s.parse_with_own_parser_from(text).expect("parses");
     let (again, after) = s.parse_with_own_parser_from(text).expect("parses");
@@ -371,7 +373,7 @@ fn the_readings_agree() {
     let calls: Vec<String> = cases.iter().map(|(s, t)| format!("((with r reading-of) {s} {})", read(t))).collect();
     let load = |f: &str| format!("((proj (load-module \"fx26:{f}.fx\") @s @e @m @c))");
     let program = format!("(define er {})\n(define r {})\n(list {})\n", load("eager-reader"), load("readings"), calls.join(" "));
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     let ours = s.run_program(&program).expect("runs").expect("checks");
     let rust: Vec<String> = cases.iter().map(|(s, t)| fixpt_fx26::ids::reading_of(*s, t).expect("reads").to_string()).collect();
     assert_eq!(ours, format!("({})", rust.join(" ")));
@@ -418,7 +420,7 @@ fn a_reading_is_of_the_switches_and_the_files_loaded() {
 /// `Settings::text`), as each reading folds them.
 #[test]
 fn the_switches_are_written_alike() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::front_end_session();
     for (native, effects, defer) in [(false, false, false), (true, true, false), (false, true, true)] {
         s.set_native_convention(native);
         s.set_globals_effects(effects);

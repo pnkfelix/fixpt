@@ -68,6 +68,23 @@ fn cellular_words_from_scheme() {
     assert_eq!(same("(%make-word 'w (list 1))"), "#<cellular-word w>");
 }
 
+/// A word run from Scheme that collects as it runs (`%run-word`, which runs
+/// code: `PrimKind::Reenters`) leaves the VM's own values where they were:
+/// kept where the collector found them, and moved on (`TODO.md` §261). A
+/// list held on the VM's stack across the call, the word consing at every
+/// safepoint's collection, each a major one: what is old moves too (a minor
+/// one, the list promoted at the call's own safepoint, would not move it).
+#[test]
+fn a_word_that_collects_leaves_the_callers_values() {
+    use fixpt_heap::layout::cellular::routine;
+    let cells = format!("(list {} {})", routine("cons"), routine("exit"));
+    let src = format!(
+        "(define w (%make-word 'pair {cells})) (%gc-every! 1) (%gc-major-every! 1) \
+         (define got (let ((held (list 'a 'b 'c))) (%run-word w (list 1 2)) held)) (%gc-every! 0) (%gc-major-every! 0) got"
+    );
+    assert_eq!(same(&src), "(a b c)");
+}
+
 /// Looking at the heap from outside: SRO, and the collector's counters and
 /// policy.
 #[test]

@@ -10,6 +10,8 @@ use fixpt_fx26::{Checker, Top};
 use fixpt_heap::Value;
 use std::collections::BTreeMap;
 
+mod common;
+
 fn modules_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/modules"))
 }
@@ -150,19 +152,23 @@ fn mutants(s: &mut Fx26Session, name: &str, text: &str, swaps: &[(&str, &str)], 
     (made, kept)
 }
 
+// A verified word changed, in every program, a test for each shard of
+// them (`common::shard`), which nextest runs at once.
+common::sharded!(a_verified_word_changed_is_refused, mutants_shard);
+
 /// A verified word changed is refused: the verifier is not merely
-/// agreeing with the compiler (directions §4, C5's mutation tests).
-#[test]
-fn a_verified_word_changed_is_refused() {
+/// agreeing with the compiler (directions §4, C5's mutation tests). Of
+/// shard `k` of the programs.
+fn mutants_shard(k: usize) {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let (mut made, mut kept) = (0, Vec::new());
-    for (name, text) in programs() {
+    for (name, text) in common::shard(programs(), k) {
         let (m, k) = mutants(&mut s, &name, &text, &[("int-add", "pair-car"), ("pair-car", "int-add")], false);
         made += m;
         kept.extend(k);
     }
     eprintln!("{made} mutants, {} not refused", kept.len());
-    assert!(made > 20, "too few mutants: {made}");
+    assert!(made > 20 / common::SHARDS, "too few mutants: {made}");
     assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
 }
 
@@ -223,18 +229,21 @@ fn weakened(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>,
     (made, kept, by_masks)
 }
 
+// A latent effect weakened, in every program, a test for each shard of
+// them (`common::shard`), which nextest runs at once.
+common::sharded!(a_latent_effect_weakened_is_not_masked_away, latent_effects_shard);
+
 /// A latent effect made smaller is not verified for what the verifier
 /// masks of expressions inside a word: it masks no more than the checker,
 /// whose latent effect keeps only what its masking did not drop; and a
 /// global's read is never left out unseen. (Some still verify, for what
 /// the verifier does not yet compute: `spin`, and what the scheduler's
 /// procedures, trusted at their forms' types, do to its private regions;
-/// `TODO.md` §117. `ALL` lists them.)
-#[test]
-fn a_latent_effect_weakened_is_not_masked_away() {
+/// `TODO.md` §117. `ALL` lists them.) Of shard `k` of the programs.
+fn latent_effects_shard(k: usize) {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let (mut made, mut kept, mut by_masks) = (0, Vec::new(), Vec::new());
-    for (name, text) in programs() {
+    for (name, text) in common::shard(programs(), k) {
         let (m, k, b) = weakened(&mut s, &name, &text);
         made += m;
         kept.extend(k);
@@ -246,7 +255,7 @@ fn a_latent_effect_weakened_is_not_masked_away() {
             eprintln!("  {k}");
         }
     }
-    assert!(made > 10000, "too few weakened: {made}");
+    assert!(made > 10000 / common::SHARDS, "too few weakened: {made}");
     assert!(by_masks.is_empty(), "weakened, and verified for the masks alone:\n{}", by_masks.join("\n"));
     let reads: Vec<&String> = kept.iter().filter(|k| k.contains(": Read(Global(")).collect();
     assert!(reads.is_empty(), "a global's read left out, and verified:\n{reads:?}");
@@ -379,22 +388,29 @@ const KNOWN_GAPS: &[&str] = &[
     "redefine/rerun-chain.fx `program`",
 ];
 
+// Every word verified, a test for each shard of the programs
+// (`common::shard`), which nextest runs at once.
+common::sharded!(every_test_programs_words_verified, words_verified_shard);
+
 /// Every word of every test program, verified: each must verify. The
 /// checker accepted these programs, so a VC that fails is the verifier's
 /// mistake or the compiler's; one left open, or a word the verifier stops
 /// in, a rule it lacks. What is assumed (the scheduler's procedures at
 /// their forms' types) is said, not refused. The words of `KNOWN_GAPS`, and
-/// only those, do not verify yet.
-#[test]
-fn every_test_programs_words_verified() {
+/// only those, do not verify yet. Of shard `k` of the programs, and those
+/// of `KNOWN_GAPS` that are of its programs.
+fn words_verified_shard(k: usize) {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let mut t = Tally::default();
-    for (name, text) in programs() {
-        verify_program(&mut s, &name, &text, &mut t);
+    let programs = common::shard(programs(), k);
+    for (name, text) in &programs {
+        verify_program(&mut s, name, text, &mut t);
     }
+    // A gap is its program's name, then its word's.
+    let gaps: Vec<&str> = KNOWN_GAPS.iter().copied().filter(|g| programs.iter().any(|(n, _)| g.split_once(" `").is_some_and(|(p, _)| p == n))).collect();
     t.unverified.sort();
-    assert_eq!(t.unverified, KNOWN_GAPS, "the words not verified are not the known gaps");
-    let gap = |x: &String| KNOWN_GAPS.iter().any(|g| x.starts_with(g));
+    assert_eq!(t.unverified, gaps, "the words not verified are not the known gaps");
+    let gap = |x: &String| gaps.iter().any(|g| x.starts_with(g));
     t.failed.retain(|f| !gap(f));
     t.open_examples.retain(|f| !gap(f));
     t.open -= t.open_gaps;
@@ -414,7 +430,7 @@ fn every_test_programs_words_verified() {
     assert!(t.failed.is_empty(), "type VCs failed: {}", t.failed.len());
     assert!(t.open == 0, "VCs left open: {}", t.open);
     assert!(t.stopped.is_empty(), "words stopped in: {:?}", t.stopped);
-    assert!(t.verified + KNOWN_GAPS.len() == t.words && t.words > 5000, "{} of {} words verified", t.verified, t.words);
+    assert!(t.verified + gaps.len() == t.words && t.words > 5000 / common::SHARDS, "{} of {} words verified", t.verified, t.words);
 }
 
 /// Programs that state propositions (`requires`, `ensures`; the note's

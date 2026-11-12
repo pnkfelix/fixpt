@@ -1,11 +1,16 @@
 //! The primitive table.
 //!
-//! Primitives come in two kinds, and the split is what keeps the engines
+//! Primitives come in three kinds, and the split is what keeps the engines
 //! simple. A [`PrimKind::Simple`] primitive is a leaf: it takes values, returns
-//! a value or raises, and cannot re-enter the evaluator. Anything that *must*
-//! call back — `apply`, `call/cc`, `dynamic-wind`, `call-with-values` — is a
-//! [`PrimKind::Engine`] operation the engine recognises and implements against
-//! its own stack.
+//! a value or raises, and cannot re-enter the evaluator; it runs no code and
+//! never collects, so a machine calls it with its own values where they lie
+//! (allocation never collects). A [`PrimKind::Reenters`] primitive runs code
+//! on the same heap, whose safepoints may collect: every machine calls it with
+//! its stacks, registers and marks kept where the collector finds them, and
+//! puts them back after (`TODO.md` §261). Anything that *must* call back into
+//! the engine itself — `apply`, `call/cc`, `dynamic-wind`, `call-with-values`
+//! — is a [`PrimKind::Engine`] operation the engine recognises and implements
+//! against its own stack.
 //!
 //! Derived list and control operations that could be primitives (`map`,
 //! `for-each`, `assoc`, `member`, `list-copy`, the `caar`…`cddddr` family) are
@@ -84,9 +89,60 @@ pub enum EngineOp {
     Host,
 }
 
+/// What a primitive the machines call is: a function of its arguments.
+pub type PrimFn = fn(&mut Runtime, &mut [Value]) -> Outcome<Value>;
+
+/// Leaf primitive `f` (`PrimKind::Simple`) called with `args`: marked as
+/// one while it runs, in a build with debug assertions, so that it running
+/// code or collecting fails loudly (`Heap::assert_not_in_leaf`), not leaves
+/// its caller's values stale. Every machine calls a leaf so.
+#[inline(always)]
+pub fn call_leaf(rt: &mut Runtime, f: PrimFn, args: &mut [Value]) -> Outcome<Value> {
+    rt.heap.leaf_enter();
+    let out = f(rt, args);
+    rt.heap.leaf_leave();
+    out
+}
+
 pub enum PrimKind {
     Simple(fn(&mut Runtime, &mut [Value]) -> Outcome<Value>),
+    /// One that runs code on the same heap (through `run_word`, a native
+    /// call, or a session's or a stage's hook), which may collect: called
+    /// with the caller's values rooted. Its own locals across the code it
+    /// runs are its to root.
+    Reenters(fn(&mut Runtime, &mut [Value]) -> Outcome<Value>),
     Engine(EngineOp),
+}
+
+/// `call`, which may collect (a [`PrimKind::Reenters`] primitive's), with
+/// every value in `roots` (a machine's stacks and registers, as it lies)
+/// kept where the collector finds them meanwhile, and put back after, moved
+/// on as it moved them.
+pub fn rooted_across<T>(rt: &mut Runtime, roots: &mut [&mut [Value]], call: impl FnOnce(&mut Runtime) -> T) -> T {
+    let held: Vec<Value> = roots.iter().flat_map(|r| r.iter().copied()).collect();
+    let kept = rt.heap.vector_from(&held);
+    let at = rt.heap.push_root(kept);
+    let out = call(rt);
+    let kept = rt.heap.root_at(at);
+    rt.heap.pop_roots_to(at);
+    let mut i = 0;
+    for v in roots.iter_mut().flat_map(|r| r.iter_mut()) {
+        *v = rt.heap.obj_ref(kept, i);
+        i += 1;
+    }
+    out
+}
+
+impl PrimKind {
+    /// The function of a primitive the machines call, and whether it runs
+    /// code (`Reenters`); none for an engine's operation.
+    pub fn function(&self) -> Option<(fn(&mut Runtime, &mut [Value]) -> Outcome<Value>, bool)> {
+        match *self {
+            PrimKind::Simple(f) => Some((f, false)),
+            PrimKind::Reenters(f) => Some((f, true)),
+            PrimKind::Engine(_) => None,
+        }
+    }
 }
 
 pub struct PrimDef {
@@ -260,13 +316,6 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
         Ok(v) => Ok(v),
         Err(e) => rt.fail(&format!("cellular word: {e}"), &[]),
     }
-}
-
-/// Whether primitive `name` runs code itself, which may collect: native
-/// code calls it as it calls what is not native code, its frames' values
-/// kept where a collection finds them (`call_foreign`).
-pub fn reenters(name: &str) -> bool {
-    matches!(name, "%fx26-stage" | "%fx26-session-check" | "%fx26-session-ready" | "%fx26-session-redefines" | "%fx26-session-eval-check" | "%fx26-session-eval-ready")
 }
 
 fn is_closure(rt: &Runtime, f: Value) -> bool {
@@ -1080,6 +1129,13 @@ macro_rules! prims {
 macro_rules! simple {
     (|$rt:ident, $a:ident| $body:expr) => {
         PrimKind::Simple(|$rt: &mut Runtime, $a: &mut [Value]| -> Outcome<Value> { $body })
+    };
+}
+
+/// A primitive that runs code ([`PrimKind::Reenters`]).
+macro_rules! reenters {
+    (|$rt:ident, $a:ident| $body:expr) => {
+        PrimKind::Reenters(|$rt: &mut Runtime, $a: &mut [Value]| -> Outcome<Value> { $body })
     };
 }
 
@@ -2563,21 +2619,21 @@ prims! {
     // engine; -1 otherwise.
     "%runtime-primitive", 1, Some(1), simple!(|rt, a| {
         let name = get_string(rt, a[0])?;
-        let n = PRIMITIVES.iter().position(|p| p.name == name && matches!(p.kind, PrimKind::Simple(_)));
+        let n = PRIMITIVES.iter().position(|p| p.name == name && p.kind.function().is_some());
         Ok(Value::fixnum(n.map_or(-1, |n| n as i64)))
     });
     // How many arguments the runtime primitive named `a[0]` takes, if it is
     // one `%runtime-primitive` finds and takes a fixed number; else -1.
     "%runtime-primitive-arity", 1, Some(1), simple!(|rt, a| {
         let name = get_string(rt, a[0])?;
-        let p = PRIMITIVES.iter().find(|p| p.name == name && matches!(p.kind, PrimKind::Simple(_)));
+        let p = PRIMITIVES.iter().find(|p| p.name == name && p.kind.function().is_some());
         Ok(Value::fixnum(p.filter(|p| p.max == Some(p.min)).map_or(-1, |p| p.min as i64)))
     });
     // Run a word with the arguments in a list on its data stack; the value it
     // leaves on top.
-    "%run-word", 2, Some(2), simple!(|rt, a| { let run = rt.run_word; run_word_by(rt, a, run) });
+    "%run-word", 2, Some(2), reenters!(|rt, a| { let run = rt.run_word; run_word_by(rt, a, run) });
     // `%run-word` on the machine for the front end (`front_end_run_word`).
-    "%run-front-end", 2, Some(2), simple!(|rt, a| run_front_end(rt, a));
+    "%run-front-end", 2, Some(2), reenters!(|rt, a| run_front_end(rt, a));
 
     "%bloblet?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_bloblet())));
     "%bloblet-kind", 1, Some(1), simple!(|rt, a| {
@@ -3124,7 +3180,7 @@ prims! {
     // above this crate; the session installs it (`stage`). Where none is,
     // or the text came as it was written (a machine that does not compile
     // with the compilers written in FX-26), a refusal.
-    "%fx26-stage", 3, Some(3), simple!(|rt, a| {
+    "%fx26-stage", 3, Some(3), reenters!(|rt, a| {
         let made = match rt.stage {
             Some(stage) => stage(rt, a[0], a[1], a[2]),
             None => Err("this machine cannot stage code".to_string()),
@@ -3139,7 +3195,7 @@ prims! {
     // Rust (the session installs it, `stage_lower`): a list of the datum
     // that makes the procedure of the module, which the runtime's
     // `%fx26-stage-lowered` gives `eval`; or the sum `(failed why)`.
-    "%fx26-stage-lower", 2, Some(2), simple!(|rt, a| {
+    "%fx26-stage-lower", 2, Some(2), reenters!(|rt, a| {
         let made = match rt.stage_lower {
             Some(lower) => lower(rt, a[0], a[1]),
             None => Err("this machine cannot stage code".to_string()),
@@ -3163,16 +3219,16 @@ prims! {
     // given the decision, recorded; and, lowered (`rs-scheme-vm`), the
     // Scheme each makes, for `eval`.
     "%fx26-make-session", 1, Some(1), simple!(|rt, a| Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE, Value::FALSE])));
-    "%fx26-session-check", 3, Some(3), simple!(|rt, a| session_op(rt, "check", a));
-    "%fx26-session-redefines", 2, Some(2), simple!(|rt, a| session_op(rt, "redefines", a));
-    "%fx26-session-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "ready", a));
-    "%fx26-session-committed!", 2, Some(2), simple!(|rt, a| session_op(rt, "committed", a));
-    "%fx26-session-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "lower", a));
-    "%fx26-session-commit-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "commit-lower", a));
+    "%fx26-session-check", 3, Some(3), reenters!(|rt, a| session_op(rt, "check", a));
+    "%fx26-session-redefines", 2, Some(2), reenters!(|rt, a| session_op(rt, "redefines", a));
+    "%fx26-session-ready", 3, Some(3), reenters!(|rt, a| session_op(rt, "ready", a));
+    "%fx26-session-committed!", 2, Some(2), reenters!(|rt, a| session_op(rt, "committed", a));
+    "%fx26-session-lower", 3, Some(3), reenters!(|rt, a| session_op(rt, "lower", a));
+    "%fx26-session-commit-lower", 3, Some(3), reenters!(|rt, a| session_op(rt, "commit-lower", a));
     // The evaluator's `stage` (`fx-ast-eval`): its code as text, the names of
     // the variables its type names, what it is checked as, as a rep (or
     // `#f`), and the evidence's reps' binary forms.
-    "%fx26-stage-check", 4, Some(4), simple!(|rt, a| {
+    "%fx26-stage-check", 4, Some(4), reenters!(|rt, a| {
         let text = get_string(rt, a[0])?;
         let given = crate::evidence::Given::of_bytes(rt, a[1], a[3]);
         let rep = fixpt_reps::heap::from_heap(&rt.heap, a[2], true).ok();
@@ -3185,8 +3241,8 @@ prims! {
     // evaluator to run: a form checked, given the code as text, the names
     // of the variables its type names, what it is checked as, as a rep, and
     // the evidence's reps; and readied, given the decision's tag as text.
-    "%fx26-session-eval-check", 5, Some(5), simple!(|rt, a| session_op(rt, "eval-check", a));
-    "%fx26-session-eval-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "eval-ready", a));
+    "%fx26-session-eval-check", 5, Some(5), reenters!(|rt, a| session_op(rt, "eval-check", a));
+    "%fx26-session-eval-ready", 3, Some(3), reenters!(|rt, a| session_op(rt, "eval-ready", a));
     // Evidence (`docs/research/eval.md`, "Evidence"): what a `reify-…`
     // makes of the product the compilers make of its operand
     // (`evidence::reified`).

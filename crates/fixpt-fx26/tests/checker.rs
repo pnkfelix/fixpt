@@ -188,11 +188,15 @@ fn message_shape(message: &str) -> Option<&'static str> {
     }
 }
 
+// Every refusal's first line looked at, a test for each shard of the
+// programs (`common::shard`), which nextest runs at once.
+common::sharded!(messages_have_a_usable_first_line, messages_shard);
+
 /// Every refusal in the test programs, and in the tests' inline programs,
-/// has a first line that stands alone. The checkers agree word for word
-/// (`every_test_program`), so the Rust checker's messages speak for both.
-#[test]
-fn messages_have_a_usable_first_line() {
+/// of shard `k`, has a first line that stands alone. The checkers agree
+/// word for word (`every_test_program`), so the Rust checker's messages
+/// speak for both.
+fn messages_shard(k: usize) {
     assert!(message_shape("a is expected\n  beyond, b").is_none());
     for bad in ["", "in this definition:\n  a", "a\nb", "a\n\n  b"] {
         assert!(message_shape(bad).is_some(), "{bad:?}");
@@ -217,6 +221,9 @@ fn messages_have_a_usable_first_line() {
             }
         }
     }
+    // In one order in every shard's process, whatever the directories'.
+    programs.sort();
+    let programs = common::shard(programs, k);
     let (mut refused, mut report) = (0, Vec::new());
     for (name, p) in &programs {
         if let Err((message, ..)) = rust_check(p) {
@@ -227,7 +234,7 @@ fn messages_have_a_usable_first_line() {
         }
     }
     eprintln!("{refused} refusals looked at");
-    assert!(refused >= 100, "only {refused} refusals found");
+    assert!(refused >= 100 / common::SHARDS, "only {refused} refusals found");
     assert!(report.is_empty(), "messages whose first line does not stand alone:\n{}", report.join("\n"));
 }
 

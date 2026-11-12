@@ -28,7 +28,7 @@ use fixpt_heap::layout::cellular::{
 };
 use fixpt_heap::{Heap, Shots, Value};
 use fixpt_runtime::crossing::{self, Crossed, Crossing};
-use fixpt_runtime::{NativeExit, PrimKind, Runtime};
+use fixpt_runtime::{NativeExit, Runtime};
 use std::rc::Rc;
 
 /// The most values the data stack may hold, and the most calls the return
@@ -308,7 +308,7 @@ pub const SELF: Value = Value::DEFAULT;
 /// A runtime primitive's number, for `prim`, if it is one the machine can
 /// call: one that needs no engine.
 pub fn runtime_primitive(name: &str) -> Option<usize> {
-    fixpt_runtime::PRIMITIVES.iter().position(|p| p.name == name && matches!(p.kind, PrimKind::Simple(_)))
+    fixpt_runtime::PRIMITIVES.iter().position(|p| p.name == name && p.kind.function().is_some())
 }
 
 /// A word whose entry is primitive `name`: the way to pass a primitive to
@@ -1268,7 +1268,7 @@ impl Machine {
                 }
                 let Ctx::Rt(rt) = cx else { return Err(Trap::Prim("no runtime to call a primitive in".into())) };
                 let Some(def) = fixpt_runtime::PRIMITIVES.get(p) else { return Err(Trap::Prim(format!("no primitive {p}"))) };
-                let PrimKind::Simple(f) = def.kind else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
+                let Some((f, reenters)) = def.kind.function() else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
                 if count < def.min || def.max.is_some_and(|m| count > m) {
                     return Err(Trap::Prim(format!("`{}` given {count} argument(s)", def.name)));
                 }
@@ -1281,22 +1281,13 @@ impl Machine {
                 // One that runs code itself may collect as it runs: the
                 // stacks and registers kept where the collector finds them,
                 // and put back.
-                let out = if fixpt_runtime::prim::reenters(def.name) {
-                    let mut held: Vec<Value> = self.ds.iter().chain(self.rs.iter()).copied().collect();
-                    held.extend([r.cur, r.clo]);
-                    let kept = rt.heap.vector_from(&held);
-                    let at = rt.heap.push_root(kept);
-                    let out = f(rt, &mut args);
-                    let kept = rt.heap.root_at(at);
-                    rt.heap.pop_roots_to(at);
-                    let (nds, nrs) = (self.ds.len(), self.rs.len());
-                    for (i, v) in self.ds.iter_mut().chain(self.rs.iter_mut()).enumerate() {
-                        *v = rt.heap.obj_ref(kept, i);
-                    }
-                    (r.cur, r.clo) = (rt.heap.obj_ref(kept, nds + nrs), rt.heap.obj_ref(kept, nds + nrs + 1));
+                let out = if reenters {
+                    let mut regs = [r.cur, r.clo];
+                    let out = fixpt_runtime::prim::rooted_across(rt, &mut [&mut self.ds, &mut self.rs, &mut regs], |rt| f(rt, &mut args));
+                    (r.cur, r.clo) = (regs[0], regs[1]);
                     out
                 } else {
-                    f(rt, &mut args)
+                    fixpt_runtime::prim::call_leaf(rt, f, &mut args)
                 };
                 match out {
                     Ok(v) => self.ds.push(v),
@@ -1485,6 +1476,7 @@ impl Machine {
 /// With `FIXPT_PROFILE` set, the words that ran the most cells are written
 /// to stderr after each run.
 pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    rt.heap.assert_not_in_leaf("running a word");
     // Its phase (`TODO.md` §252).
     let _phase = fixpt_memmgmt::phases::enter("run:rust-cells");
     let mut m = Machine::with_fuel(rt.word_fuel);
@@ -1688,14 +1680,17 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
     // code, may send either here (`docs/research/code-stubs.md`).
     if !(is("cellular-closure") || is("cellular-continuation") || is("native-closure")) {
         // The bytecode VM's primitive, a standard operation as a value
-        // there: a simple one runs as it is, needing no machine.
+        // there: one that needs no engine runs as it is, needing no machine
+        // (native code's frames, calling it as what is not native code,
+        // kept where a collection finds them meanwhile).
         if heap.obj_type(f) == Some(fixpt_heap::ObjType::Primitive) {
             let def = fixpt_runtime::prim::def(heap.obj_ref(f, 1).as_fixnum() as u16);
-            if let fixpt_runtime::prim::PrimKind::Simple(func) = def.kind {
+            if let Some((func, reenters)) = def.kind.function() {
                 if !def.accepts(args.len()) {
                     return Err(NativeExit::Failed(format!("{} got {} argument(s)", def.name, args.len())));
                 }
-                return func(rt, &mut args.to_vec()).map_err(|t| NativeExit::Failed(describe(rt, t.obj)));
+                let out = if reenters { func(rt, &mut args.to_vec()) } else { fixpt_runtime::prim::call_leaf(rt, func, &mut args.to_vec()) };
+                return out.map_err(|t| NativeExit::Failed(describe(rt, t.obj)));
             }
         }
         // The bytecode VM's procedures: a primitive cannot run the VM again

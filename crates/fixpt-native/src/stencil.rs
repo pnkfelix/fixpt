@@ -33,6 +33,7 @@ pub fn opt_levels() -> Vec<&'static str> {
 /// Run `word` with `args` on the stencil machine at `-O2`, in `rt`: for the
 /// runtime's `%run-word` (`Runtime::run_word`).
 pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    rt.heap.assert_not_in_leaf("running a word");
     // Its phase (`TODO.md` §252).
     let _phase = fixpt_memmgmt::phases::enter("run:stencils");
     let mut m = StencilMachine::new("2").ok_or("no stencils: this build had no nightly compiler")?;

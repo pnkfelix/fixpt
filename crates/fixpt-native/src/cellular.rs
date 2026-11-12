@@ -1272,11 +1272,13 @@ pub(crate) extern "C" fn pure_call(st: *mut State, p: u64, x: u64, y: u64, z: u6
     }
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let def = &fixpt_runtime::PRIMITIVES[p as usize];
-    let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return fail(format!("`{}` needs an engine", def.name)) };
+    // Only a leaf: one that runs code is called with the stacks kept
+    // (`prim`), never here, where nothing is.
+    let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return fail(format!("`{}` is not a leaf primitive", def.name)) };
     // On the stack: a call per primitive run, no allocation for it.
     let mut buf = [Value::from_raw(x), Value::from_raw(y), Value::from_raw(z)];
     let args = &mut buf[..def.min.clamp(1, 3)];
-    let out = match f(rt, args) {
+    let out = match fixpt_runtime::prim::call_leaf(rt, f, args) {
         Ok(v) => PureOut { v: v.raw(), failed: 0 },
         Err(t) => fail(fixpt_engine::cellular::describe(rt, t.obj)),
     };
@@ -1479,7 +1481,7 @@ fn prim(st: &mut State) -> Result<(), Trap> {
         let caller = rt.heap.symbol_name(rt.heap.bloblet_slot(Value::from_raw(st.cur), WORD_NAME));
         PRIM_CALLERS.with(|c| *c.borrow_mut().entry((def.name, caller)).or_insert(0) += 1);
     }
-    let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
+    let Some((f, reenters)) = def.kind.function() else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
     if count < def.min || def.max.is_some_and(|m| count > m) {
         return Err(Trap::Prim(format!("`{}` given {count} argument(s)", def.name)));
     }
@@ -1498,10 +1500,10 @@ fn prim(st: &mut State) -> Result<(), Trap> {
         many.extend((0..count).rev().map(|i| word(st.dsp + 8 * i as u64)));
         &mut many[..]
     };
-    let v = if fixpt_runtime::prim::reenters(def.name) {
+    let v = if reenters {
         reentering(st, rt, |rt| f(rt, args))
     } else {
-        f(rt, args)
+        fixpt_runtime::prim::call_leaf(rt, f, args)
     };
     let v = v.map_err(|t| Trap::Prim(fixpt_engine::cellular::describe(rt, t.obj)))?;
     st.dsp = st.dsp + 8 * count as u64 - 8;
@@ -2103,6 +2105,7 @@ pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) ->
 
 /// The same, compiling or not as `compile` says.
 pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value], compile: bool) -> Result<Value, String> {
+    rt.heap.assert_not_in_leaf("running a word");
     // Its phase (`TODO.md` §252).
     let _phase = fixpt_memmgmt::phases::enter(if compile { "run:jit-cells" } else { "run:asm-cells" });
     if !crate::CELLULAR_AVAILABLE {
@@ -2147,6 +2150,7 @@ fn collect_for_code(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]
 /// [`run_word`], compiling what it runs, and running as register code
 /// (PLAN.md 13h′) each word that has some.
 pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    rt.heap.assert_not_in_leaf("running a word");
     // Its phase (`TODO.md` §252).
     let _phase = fixpt_memmgmt::phases::enter("run:regs");
     if !crate::CELLULAR_AVAILABLE {

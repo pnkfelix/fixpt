@@ -463,7 +463,7 @@ impl Vm {
                         &[],
                     );
                 };
-                let result = func(rt, &mut self.stack[base..]);
+                let result = prim::call_leaf(rt, func, &mut self.stack[base..]);
                 self.stack.truncate(base);
                 self.stack.push(result?);
             }
@@ -647,8 +647,16 @@ impl Vm {
                     return rt.fail(&format!("{} got {argc} argument(s)", def.name), &[]);
                 }
                 match def.kind {
-                    PrimKind::Simple(func) => {
-                        let result = func(rt, &mut self.stack[base + 1..]);
+                    PrimKind::Simple(func) | PrimKind::Reenters(func) => {
+                        let result = if matches!(def.kind, PrimKind::Reenters(_)) {
+                            // It runs code, which may collect: this VM's
+                            // values kept where the collector finds them
+                            // meanwhile (`TODO.md` §261).
+                            let (below, args) = self.stack.split_at_mut(base + 1);
+                            fixpt_runtime::prim::rooted_across(rt, &mut [below, &mut self.regs, &mut self.marks.vals], |rt| func(rt, args))
+                        } else {
+                            prim::call_leaf(rt, func, &mut self.stack[base + 1..])
+                        };
                         self.stack.truncate(base);
                         let v = result?;
                         match call {

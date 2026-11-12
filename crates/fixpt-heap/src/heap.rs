@@ -511,6 +511,12 @@ pub struct Heap {
     /// Check, before each minor collection, that every young reference in
     /// the old space is on a dirty card: for tests.
     pub verify_barrier: bool,
+    /// How many leaf primitives (`PrimKind::Simple`) are running, in a build
+    /// with debug assertions: while one is, what runs code and a collection
+    /// fail loudly (`assert_not_in_leaf`), since a leaf is called with its
+    /// caller's values where they lie (`TODO.md` §261).
+    #[cfg(debug_assertions)]
+    leaf_primitives: u32,
 }
 
 impl Default for Heap {
@@ -604,6 +610,8 @@ impl Heap {
             trace: std::env::var_os("FIXPT_GC_TRACE").is_some(),
             due_major: false,
             verify_barrier: std::env::var("FIXPT_VERIFY_BARRIER").is_ok_and(|v| v == "1"),
+            #[cfg(debug_assertions)]
+            leaf_primitives: 0,
         }
     }
 
@@ -2433,6 +2441,40 @@ impl Heap {
         self.gc_every > 0 || self.gc_major_every > 0 || self.gc_code_every > 0
     }
 
+    /// A leaf primitive's call begun (`fixpt_runtime::prim::call_leaf`);
+    /// nothing in a build without debug assertions.
+    #[inline(always)]
+    pub fn leaf_enter(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            self.leaf_primitives += 1;
+        }
+    }
+
+    /// And ended.
+    #[inline(always)]
+    pub fn leaf_leave(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            self.leaf_primitives -= 1;
+        }
+    }
+
+    /// That no leaf primitive is running, which `what` (what runs code, or a
+    /// collection) asks before it starts: one that does either is to be
+    /// `PrimKind::Reenters` (`TODO.md` §261). Nothing in a build without
+    /// debug assertions.
+    #[inline(always)]
+    #[track_caller]
+    pub fn assert_not_in_leaf(&self, what: &str) {
+        #[cfg(debug_assertions)]
+        assert!(
+            self.leaf_primitives == 0,
+            "{what} inside a primitive declared `PrimKind::Simple`: one that runs code or collects is `Reenters` (`TODO.md` §261)"
+        );
+        let _ = what;
+    }
+
     /// Whether a code collection is due: code allocated since the last
     /// (`LIVE_RATIO - 1` times what it found live, or `MIN_MAJOR_BUDGET`);
     /// or, as a backstop, either of the code area's parts walkable past
@@ -2576,6 +2618,7 @@ impl Heap {
     /// `code`, a mark and sweep of the code area. Compacts, which is also
     /// what makes a dumped image contiguous and relocation-free.
     fn collect_major(&mut self, extra_roots: &mut [&mut [Value]], code: bool) {
+        self.assert_not_in_leaf("a major collection");
         let started = std::time::Instant::now();
         // The mutator's phase paused (`TODO.md` §252).
         let phase = fixpt_memmgmt::phases::collection("gc:major");
