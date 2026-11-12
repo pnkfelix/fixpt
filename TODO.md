@@ -6054,3 +6054,45 @@ lowered code, as `runtime.scm` is loaded (`load_code`), when the Scheme
 engine is made only where lowered code runs (`TODO.md` §252's host).
 Fixed: `load_code` and `lowered()` make the session ready by what it has
 bound (`scheme_ready`: the prelude's control and data, and the runtime).
+
+## 255. `,disassemble`'s names for a native closure's procedures (the Mac team's, 2026-11-11)
+
+`,disassemble` prints a native closure's procedures under names like
+`lambda/lambda@1001:2257`, which tell a reader nothing. Two problems, and a
+related bug:
+
+1. **The place is encoded.** `c-place-name` (`compile.fx:76`) writes a place
+   in a module file as `(1000 + file number):character`, so `1001:2257` is
+   character 2257 of the first file `load-module` loaded (`fx26:table.fx`,
+   line 48, `bucket-of`'s body); the formatter never maps it to a file and
+   line. The data is there: register words carry a source id and a place
+   for each cell (`Heap::register_places`, `regcode.rs:110`), and
+   `fixpt_fx26::sources::resolve` turns them into a file and line for the JIT
+   debugger. `fixpt_runtime::disasm::native_source` cannot call it only
+   because `fixpt-runtime` is below `fixpt-fx26` and `fixpt-native`. Their
+   proposal: a resolver hook in `fixpt-runtime` (a `OnceLock<fn(u32, i64) ->
+   Option<(String, u32)>>`, as `jitdebug::set_resolver`, or that hook moved
+   down so both share it), installed in `fixpt-cli` beside the jitdebug
+   resolver (`fx26.rs:177`); `native_source` printing `file:line` from the
+   word's first place in each procedure's header, and maybe on each register
+   code line; the name as now where no sources are kept (`sources::wanted()`
+   false, or `FIXPT_JIT_DEBUG=0`). The place's encoding kept for profiles and
+   `FIXPT_REG_RANGE`.
+2. **A module's members lose their names.** In `c-module-make`
+   (`compile-exps.fx:224`) a member is named only on the `c-module-closure`
+   path, taken only where it refers to items defined later in the module;
+   every other is compiled by a bare `(c-exp x e d c #f)`, and is `lambda`:
+   `bucket-find`, recursive, prints as `lambda/bucket-find`, but
+   `symbol-hash`, `bucket-of` and `table-ref` as `lambda/lambda`. (A
+   polymorphic top-level `define` keeps its name, so not `plambda`.) Their
+   proposal: the member's name passed as the binding's on the `c-exp` path
+   too, as `let` does. The outer `lambda/` is some unnamed enclosing lambda,
+   not identified: probably the one the module file is compiled into.
+3. **A wrong place.** After `(define tm (load-module "fx26:table.fx"))`,
+   `,disassemble (with tm symbol-hash)` prints `lambda/lambda@1219`: no file
+   part, and 1219 wrong as a character and as a byte (the body starts at
+   character 1200). To check whether the word's recorded places are right
+   there, though its name is not.
+
+(Also to keep in mind: the Rust compiler's naming of the same procedures,
+`cellular.rs`'s, so that the two compilers name alike.)

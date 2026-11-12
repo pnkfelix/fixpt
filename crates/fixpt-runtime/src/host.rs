@@ -1,19 +1,25 @@
+//! A host for code that drives the runtime from Rust (`TODO.md` §252): the
+//! runtime, and the discipline for the Values it holds, handles, scopes and
+//! views; its globals looked up and given to Rust. No engine: a Scheme
+//! session (`fixpt_scheme::Session`) is a host and the Scheme engine, and
+//! FX-26's sessions need the engine only where code is lowered.
+//!
 //! Values for code outside the runtime: handles, scopes and views.
 //!
 //! A `Value` is a pointer the collector moves, and anything that may
 //! collect (every call into the engine, every evaluation) leaves a Value
-//! held across it stale. Code driving a session never holds one:
+//! held across it stale. Code driving a host never holds one:
 //!
-//! * what a session hands out is a [`Handle`], rooted, so it survives
-//!   collections, and stamped, so using one after the [`Session::scope`]
+//! * what a host hands out is a [`Handle`], rooted, so it survives
+//!   collections, and stamped, so using one after the [`Host::scope`]
 //!   that made it has ended is refused rather than misread;
-//! * a heap's contents are read only in [`Session::view`], whose [`Local`]s
-//!   cannot leave the closure, and which borrows the session immutably, so
+//! * a heap's contents are read only in [`Host::view`], whose [`Local`]s
+//!   cannot leave the closure, and which borrows the host immutably, so
 //!   nothing in it can collect;
-//! * Values are built only in [`Session::make`], whose closure cannot call
+//! * Values are built only in [`Host::make`], whose closure cannot call
 //!   the engine, and whose result is rooted as it returns.
 //!
-//! The runtime itself is behind [`Session::runtime_unrooted`], for code that
+//! The runtime itself is behind [`Host::runtime_unrooted`], for code that
 //! is part of the machinery; its name says what it gives up.
 //!
 //! This is the discipline V8's `HandleScope` and `Local`, and JNI's local
@@ -21,9 +27,19 @@
 //! is a read of it scoped to the view, and a call that may collect is the
 //! effect that ends it.
 
-use super::Session;
+use crate::Runtime;
 use fixpt_heap::{Heap, ObjType, Value};
-use fixpt_runtime::Runtime;
+
+/// The runtime and the handles rooted in it.
+pub struct Host {
+    /// Private: a Value from here is stale after anything that may collect,
+    /// so code driving a host gets handles, views and `make` instead, and the
+    /// machinery `runtime_unrooted`.
+    rt: Runtime,
+    /// For each explicit root that is a handle, the stamp it was made with.
+    handle_stamps: Vec<u32>,
+    next_stamp: u32,
+}
 
 /// A rooted Value: valid across collections, until its scope ends.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -32,10 +48,15 @@ pub struct Handle {
     stamp: u32,
 }
 
-impl Session {
+impl Host {
+    /// A host of runtime `rt`.
+    pub fn new(rt: Runtime) -> Host {
+        Host { rt, handle_stamps: Vec::new(), next_stamp: 0 }
+    }
+
     /// Root `v` as a new handle. `v` must be a Value from just now: from
     /// `make`, or from the engine's result before anything else ran.
-    pub(super) fn root_value(&mut self, v: Value) -> Handle {
+    pub fn root_value(&mut self, v: Value) -> Handle {
         let index = self.rt.heap.push_root(v);
         if self.handle_stamps.len() <= index {
             self.handle_stamps.resize(index + 1, 0);
@@ -47,7 +68,7 @@ impl Session {
 
     /// The Value a handle roots, now; for this module's callers, which use
     /// it at once.
-    pub(super) fn handle_value(&self, h: Handle) -> Value {
+    pub fn handle_value(&self, h: Handle) -> Value {
         let i = h.index as usize;
         assert!(
             i < self.rt.heap.root_count() && self.handle_stamps.get(i) == Some(&h.stamp),
@@ -56,15 +77,15 @@ impl Session {
         self.rt.heap.root_at(i)
     }
 
-    /// How deep the explicit roots are now: for [`release_to`](Session::release_to),
-    /// where a [`scope`](Session::scope) cannot be used (its caller owns
-    /// more than the session).
+    /// How deep the explicit roots are now: for [`release_to`](Host::release_to),
+    /// where a [`scope`](Host::scope) cannot be used (its caller owns
+    /// more than the host).
     pub fn root_mark(&self) -> usize {
         self.rt.heap.root_count()
     }
 
     /// Release the handles made, and the roots pushed, since `mark`
-    /// ([`root_mark`](Session::root_mark)), as the end of a scope does.
+    /// ([`root_mark`](Host::root_mark)), as the end of a scope does.
     pub fn release_to(&mut self, mark: usize) {
         self.rt.heap.pop_roots_to(mark);
         self.handle_stamps.truncate(mark);
@@ -73,7 +94,7 @@ impl Session {
     /// Run `f`; the handles it makes are released when it returns (so are
     /// any roots anything in it pushed). Keep what `f` computes as Rust data
     /// or as handles made before the scope.
-    pub fn scope<R>(&mut self, f: impl FnOnce(&mut Session) -> R) -> R {
+    pub fn scope<R>(&mut self, f: impl FnOnce(&mut Host) -> R) -> R {
         let depth = self.rt.heap.root_count();
         let r = f(self);
         self.rt.heap.pop_roots_to(depth);
@@ -84,7 +105,7 @@ impl Session {
     /// Look at the heap: `f` gets a view, whose `Local`s cannot leave it,
     /// and cannot run anything that collects.
     pub fn view<R>(&self, f: impl for<'v> FnOnce(View<'v>) -> R) -> R {
-        f(View { session: self })
+        f(View { host: self })
     }
 
     /// Build a Value: `f` gets the heap, whose allocation never collects,
@@ -92,7 +113,7 @@ impl Session {
     /// rooted as a handle.
     pub fn make(&mut self, f: impl FnOnce(&mut Maker) -> Value) -> Handle {
         let v = {
-            let mut m = Maker { session: self };
+            let mut m = Maker { host: self };
             f(&mut m)
         };
         self.root_value(v)
@@ -102,7 +123,7 @@ impl Session {
     pub fn replace(&mut self, h: Handle, f: impl FnOnce(&mut Maker) -> Value) {
         let _ = self.handle_value(h);
         let v = {
-            let mut m = Maker { session: self };
+            let mut m = Maker { host: self };
             f(&mut m)
         };
         self.rt.heap.set_root_at(h.index as usize, v);
@@ -156,7 +177,7 @@ impl Session {
     }
 
     /// The runtime, with nothing rooted: for the machinery (engines, front
-    /// ends that lower into this session), not for code driving it. A Value
+    /// ends that lower into this host), not for code driving it. A Value
     /// taken from here is stale after anything that may collect.
     pub fn runtime_unrooted(&mut self) -> &mut Runtime {
         &mut self.rt
@@ -166,35 +187,69 @@ impl Session {
     pub fn runtime_unrooted_ref(&self) -> &Runtime {
         &self.rt
     }
+
+    /// Global `name`'s value, now, if it is bound: for this module's callers,
+    /// which use it at once.
+    pub fn global_value_raw(&self, name: &str) -> Option<Value> {
+        let sym = self.rt.heap.intern_existing(name)?;
+        let v = self.rt.heap.global(self.rt.heap.symbol_global_slot(sym));
+        if v.is_unbound() { None } else { Some(v) }
+    }
+
+    /// Global `name`'s value, rooted, if it is bound.
+    pub fn global(&mut self, name: &str) -> Option<Handle> {
+        let v = self.global_value_raw(name)?;
+        Some(self.root_value(v))
+    }
+
+    /// Whether a global is bound.
+    pub fn is_bound(&self, name: &str) -> bool {
+        self.global_value_raw(name).is_some()
+    }
+
+    /// Global `name`'s value given to `f` with `args`, no engine between:
+    /// for one that Rust enters itself, such as the front end written in
+    /// FX-26's (`prim::enter_front_end`). Its result rooted, or why it
+    /// failed; none if `name` is unbound.
+    pub fn call_global_with(
+        &mut self,
+        name: &str,
+        args: &[Handle],
+        f: impl FnOnce(&mut Runtime, Value, &[Value]) -> Result<Value, String>,
+    ) -> Option<Result<Handle, String>> {
+        let callee = self.global_value_raw(name)?;
+        let args: Vec<Value> = args.iter().map(|a| self.handle_value(*a)).collect();
+        Some(f(&mut self.rt, callee, &args).map(|v| self.root_value(v)))
+    }
 }
 
 /// Building Values: the heap, and what handles root, within `make`.
 pub struct Maker<'m> {
-    session: &'m mut Session,
+    host: &'m mut Host,
 }
 
 impl Maker<'_> {
     pub fn heap(&mut self) -> &mut Heap {
-        &mut self.session.rt.heap
+        &mut self.host.rt.heap
     }
     pub fn get(&self, h: Handle) -> Value {
-        self.session.handle_value(h)
+        self.host.handle_value(h)
     }
 }
 
 /// The heap, to look at, within `view`.
 #[derive(Copy, Clone)]
 pub struct View<'v> {
-    session: &'v Session,
+    host: &'v Host,
 }
 
 impl<'v> View<'v> {
     pub fn get(self, h: Handle) -> Local<'v> {
-        Local { v: self.session.handle_value(h), rt: &self.session.rt }
+        Local { v: self.host.handle_value(h), rt: &self.host.rt }
     }
     /// What a global holds, if it is bound.
     pub fn global(self, name: &str) -> Option<Local<'v>> {
-        self.session.global_value_raw(name).map(|v| Local { v, rt: &self.session.rt })
+        self.host.global_value_raw(name).map(|v| Local { v, rt: &self.host.rt })
     }
 }
 
@@ -314,9 +369,9 @@ impl<'v> Local<'v> {
         self.value(1)
     }
     pub fn write(self) -> String {
-        fixpt_runtime::write_value(self.heap(), self.v)
+        crate::write_value(self.heap(), self.v)
     }
     pub fn display(self) -> String {
-        fixpt_runtime::display_value(self.heap(), self.v)
+        crate::display_value(self.heap(), self.v)
     }
 }

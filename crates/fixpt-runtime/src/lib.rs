@@ -35,6 +35,7 @@ pub mod equal;
 pub mod literal;
 pub mod error;
 pub mod evidence;
+pub mod host;
 pub mod num;
 pub mod port;
 pub mod prim;

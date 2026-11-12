@@ -97,13 +97,12 @@ impl Engine {
 }
 
 pub struct Session {
-    /// Private: see `handles`. A Value from here is stale after anything
-    /// that may collect, so code driving a session gets handles, views and
-    /// `make` instead, and the machinery `runtime_unrooted`.
-    rt: Runtime,
-    /// For each explicit root that is a handle, the stamp it was made with.
-    handle_stamps: Vec<u32>,
-    next_stamp: u32,
+    /// The runtime and its handles (`fixpt_runtime::host`), which a session
+    /// is as well as its engine (`Deref`): a Value from the runtime is stale
+    /// after anything that may collect, so code driving a session gets
+    /// handles, views and `make` instead, and the machinery
+    /// `runtime_unrooted`.
+    host: Host,
     pub engine: Engine,
     /// The compiler-side arena, carried across inputs. What actually *runs* is
     /// the lowered copy in the heap; this is kept because each new input is
@@ -123,10 +122,31 @@ pub struct Session {
 }
 
 mod eval;
-mod handles;
-pub use handles::{Handle, Local, Maker, View};
+pub use fixpt_runtime::host::{Handle, Host, Local, Maker, View};
+
+impl std::ops::Deref for Session {
+    type Target = Host;
+    fn deref(&self) -> &Host {
+        &self.host
+    }
+}
+
+impl std::ops::DerefMut for Session {
+    fn deref_mut(&mut self) -> &mut Host {
+        &mut self.host
+    }
+}
 
 impl Session {
+    /// Run `f`; the handles it makes are released when it returns, as
+    /// [`Host::scope`] does, but `f` gets the session, engine and all.
+    pub fn scope<R>(&mut self, f: impl FnOnce(&mut Session) -> R) -> R {
+        let depth = self.root_mark();
+        let r = f(self);
+        self.release_to(depth);
+        r
+    }
+
     /// A session with the primitives installed but no prelude — used to build
     /// the prelude itself, and by tests that want a bare environment.
     pub fn bare() -> Session {
@@ -159,9 +179,7 @@ impl Session {
             Backend::Bytecode => Engine::Bytecode(Box::new(Vm::new())),
         };
         Session {
-            rt,
-            handle_stamps: Vec::new(),
-            next_stamp: 0,
+            host: Host::new(rt),
             engine,
             program,
             prepared,
@@ -231,10 +249,10 @@ impl Session {
         name: &str,
         text: &str,
     ) -> Result<Vec<fixpt_read::Syntax>, SessionError> {
-        let file = self.rt.sources.add(name, text);
-        let mut interner = std::mem::take(&mut self.rt.interner);
+        let file = self.host.runtime_unrooted().sources.add(name, text);
+        let mut interner = std::mem::take(&mut self.host.runtime_unrooted().interner);
         let result = Reader::new(text, file, self.profile, &mut interner).read_all();
-        self.rt.interner = interner;
+        self.host.runtime_unrooted().interner = interner;
         result.map_err(|e| SessionError::Read(self.describe(e.span, &e.message)))
     }
 
@@ -250,7 +268,7 @@ impl Session {
             .expect("expander state is always returned");
         let program = std::mem::replace(&mut self.program, Program::empty());
         let mut expander = Expander::resume(
-            &mut self.rt,
+            self.host.runtime_unrooted(),
             ExpanderParts {
                 builder: Builder::from_program(program),
                 ..parts
@@ -276,9 +294,8 @@ impl Session {
         self.parts = Some(parts);
         let mut program = program;
         fixpt_core::analyze(&mut program);
-        let compiled = self
-            .prepared
-            .update(&mut self.rt.heap, &self.rt.interner, &program);
+        let rt = self.host.runtime_unrooted();
+        let compiled = self.prepared.update(&mut rt.heap, &rt.interner, &program);
         self.program = program;
         if let Err(e) = compiled {
             return Err(SessionError::Compile(e.to_string()));
@@ -287,7 +304,7 @@ impl Session {
         let outcome = self.answered(outcome);
         match outcome {
             Ok(v) if self.is_hole(v) => {
-                self.rt.heap.set_root_at(self.hole_root, v);
+                self.host.runtime_unrooted().heap.set_root_at(self.hole_root, v);
                 Err(SessionError::Hole(self.hole_report(v)))
             }
             Ok(v) => Ok(v),
@@ -306,37 +323,21 @@ impl Session {
     /// Run the prepared program under the top level's prompts, once the
     /// prelude has defined them; the prelude itself runs bare.
     fn run_prepared(&mut self) -> fixpt_runtime::Outcome<Value> {
-        let wrapper = self.prepared.global(&mut self.rt.heap, "%toplevel-run");
+        let wrapper = self.prepared.global(&mut self.host.runtime_unrooted().heap, "%toplevel-run");
         match (wrapper, &mut self.engine) {
             (Some(w), Engine::Ast(i)) => {
-                let thunk = self.prepared.thunk(&self.rt.heap);
-                i.call(&mut self.rt, &mut self.prepared, w, &[thunk])
+                let thunk = self.prepared.thunk(&self.host.runtime_unrooted().heap);
+                i.call(self.host.runtime_unrooted(), &mut self.prepared, w, &[thunk])
             }
             (Some(w), Engine::Bytecode(v)) => {
-                let thunk = self.prepared.thunk(&self.rt.heap);
-                v.call(&mut self.rt, &mut self.prepared, w, &[thunk])
+                let thunk = self.prepared.thunk(&self.host.runtime_unrooted().heap);
+                v.call(self.host.runtime_unrooted(), &mut self.prepared, w, &[thunk])
             }
-            (None, Engine::Ast(i)) => i.run(&mut self.rt, &mut self.prepared),
-            (None, Engine::Bytecode(v)) => v.run(&mut self.rt, &mut self.prepared),
+            (None, Engine::Ast(i)) => i.run(self.host.runtime_unrooted(), &mut self.prepared),
+            (None, Engine::Bytecode(v)) => v.run(self.host.runtime_unrooted(), &mut self.prepared),
         }
     }
 
-    /// A global's value, as a handle, or `None` while it is unbound.
-    pub fn global(&mut self, name: &str) -> Option<Handle> {
-        let v = self.global_value_raw(name)?;
-        Some(self.root_value(v))
-    }
-
-    /// Whether a global is bound.
-    pub fn is_bound(&self, name: &str) -> bool {
-        self.global_value_raw(name).is_some()
-    }
-
-    fn global_value_raw(&self, name: &str) -> Option<Value> {
-        let sym = self.rt.heap.intern_existing(name)?;
-        let v = self.rt.heap.global(self.rt.heap.symbol_global_slot(sym));
-        if v.is_unbound() { None } else { Some(v) }
-    }
 
     /// Call the procedure a global holds, looked up at the moment of the
     /// call. Prefer this to looking a procedure up and calling it later: a
@@ -361,12 +362,7 @@ impl Session {
         args: &[Handle],
         f: impl FnOnce(&mut Runtime, Value, &[Value]) -> Result<Value, String>,
     ) -> Option<Result<Handle, SessionError>> {
-        let callee = self.global_value_raw(name)?;
-        let args: Vec<Value> = args.iter().map(|a| self.handle_value(*a)).collect();
-        Some(match f(&mut self.rt, callee, &args) {
-            Ok(v) => Ok(self.root_value(v)),
-            Err(m) => Err(SessionError::Raised(m)),
-        })
+        self.host.call_global_with(name, args, f).map(|r| r.map_err(SessionError::Raised))
     }
 
     /// Apply a procedure from Rust. Unlike an input, this runs with no
@@ -381,7 +377,7 @@ impl Session {
     /// The engine's call, its arguments Values from this moment (the engine
     /// roots them on its stack at once), its result rooted as it returns.
     fn call_raw(&mut self, f: Value, args: &[Value]) -> Result<Handle, SessionError> {
-        let outcome = self.engine.call(&mut self.rt, &mut self.prepared, f, args);
+        let outcome = self.engine.call(self.host.runtime_unrooted(), &mut self.prepared, f, args);
         match self.answered(outcome) {
             Ok(v) => Ok(self.root_value(v)),
             Err(t) => Err(SessionError::Raised(self.condition_message(t.obj))),
@@ -392,22 +388,22 @@ impl Session {
     /// A hole is `#(tag k report position total)` whose tag is the top level's
     /// own prompt tag — see `cmarks::make_hole`.
     fn is_hole(&mut self, v: Value) -> bool {
-        let heap = &self.rt.heap;
+        let heap = &self.host.runtime_unrooted().heap;
         if !(heap.is_a(v, ObjType::Vector) && heap.obj_len(v) == 5) {
             return false;
         }
         let tag = heap.obj_ref(v, 0);
-        self.prepared.global(&mut self.rt.heap, "%toplevel-tag") == Some(tag)
+        self.prepared.global(&mut self.host.runtime_unrooted().heap, "%toplevel-tag") == Some(tag)
     }
 
     /// Whether a hole is held for [`resume`](Self::resume).
     pub fn has_hole(&self) -> bool {
-        !self.rt.heap.root_at(self.hole_root).is_false()
+        !self.host.runtime_unrooted_ref().heap.root_at(self.hole_root).is_false()
     }
 
     /// The held hole's report, or `None` if there is none.
     pub fn held_hole_report(&mut self) -> Option<String> {
-        let h = self.rt.heap.root_at(self.hole_root);
+        let h = self.host.runtime_unrooted().heap.root_at(self.hole_root);
         if h.is_false() { None } else { Some(self.hole_report(h)) }
     }
 
@@ -415,19 +411,20 @@ impl Session {
     /// the top level — the part a *program* chose to expose, read from the
     /// captured continuation itself.
     fn hole_report(&mut self, hole: Value) -> String {
-        let text = self.rt.heap.string_to_rust(self.rt.heap.obj_ref(hole, 2));
-        let k = self.rt.heap.obj_ref(hole, 1);
-        let handler_key = self.prepared.global(&mut self.rt.heap, "%handler-key");
-        let marks = fixpt_runtime::cmarks::continuation_mark_list(&mut self.rt.heap, k, Value::FALSE);
+        let heap = &self.host.runtime_unrooted_ref().heap;
+        let text = heap.string_to_rust(heap.obj_ref(hole, 2));
+        let k = self.host.runtime_unrooted().heap.obj_ref(hole, 1);
+        let handler_key = self.prepared.global(&mut self.host.runtime_unrooted().heap, "%handler-key");
+        let marks = fixpt_runtime::cmarks::continuation_mark_list(&mut self.host.runtime_unrooted().heap, k, Value::FALSE);
         let mut lines = Vec::new();
         let mut handlers = false;
-        for pair in self.rt.heap.list_to_vec(marks).unwrap_or_default() {
-            let (key, val) = (self.rt.heap.car(pair), self.rt.heap.cdr(pair));
+        for pair in self.host.runtime_unrooted().heap.list_to_vec(marks).unwrap_or_default() {
+            let (key, val) = (self.host.runtime_unrooted().heap.car(pair), self.host.runtime_unrooted().heap.cdr(pair));
             if Some(key) == handler_key {
                 // The prelude's own mark. Its value is the whole handler list,
                 // innermost first, so only the innermost mark says anything.
                 if !handlers && !val.is_null() {
-                    let n = self.rt.heap.list_to_vec(val).map_or(0, |l| l.len());
+                    let n = self.host.runtime_unrooted().heap.list_to_vec(val).map_or(0, |l| l.len());
                     lines.push(format!("{n} exception handler(s) installed around it"));
                 }
                 handlers = true;
@@ -435,8 +432,8 @@ impl Session {
             }
             lines.push(format!(
                 "marked {} = {}",
-                write_value(&self.rt.heap, key),
-                write_value(&self.rt.heap, val)
+                write_value(&self.host.runtime_unrooted().heap, key),
+                write_value(&self.host.runtime_unrooted().heap, val)
             ));
         }
         let mut out = text;
@@ -466,21 +463,21 @@ impl Session {
     /// caller can rewrite it first, as the REPL does to let the value itself
     /// contain a hole.
     pub fn resume_forms(&mut self, forms: &[fixpt_read::Syntax]) -> Result<Handle, SessionError> {
-        let hole = self.rt.heap.root_at(self.hole_root);
+        let hole = self.host.runtime_unrooted().heap.root_at(self.hole_root);
         if hole.is_false() {
             return Err(SessionError::Raised("no hole to resume".into()));
         }
         let [value] = forms else {
             return Err(SessionError::Raised("`,resume` takes one expression".into()));
         };
-        let k = self.rt.heap.obj_ref(hole, 1);
-        let slot_sym = self.rt.heap.intern("%resuming");
-        let slot = self.rt.heap.symbol_global_slot(slot_sym);
-        self.rt.heap.set_global(slot, k);
+        let k = self.host.runtime_unrooted().heap.obj_ref(hole, 1);
+        let slot_sym = self.host.runtime_unrooted().heap.intern("%resuming");
+        let slot = self.host.runtime_unrooted().heap.symbol_global_slot(slot_sym);
+        self.host.runtime_unrooted().heap.set_global(slot, k);
         let span = value.span;
         let sym = |s: &mut Session, name: &str| fixpt_read::Syntax {
             span,
-            datum: fixpt_read::Datum::Symbol(s.rt.interner.intern(name)),
+            datum: fixpt_read::Datum::Symbol(s.runtime_unrooted().interner.intern(name)),
         };
         let call = fixpt_read::Syntax {
             span,
@@ -495,7 +492,7 @@ impl Session {
     /// Evaluate and render the result the way a REPL would.
     pub fn eval_to_string(&mut self, name: &str, text: &str) -> Result<String, SessionError> {
         let v = self.eval_str_raw(name, text)?;
-        Ok(write_value(&self.rt.heap, v))
+        Ok(write_value(&self.host.runtime_unrooted().heap, v))
     }
 
     /// Run with output captured, returning `(printed, result)`.
@@ -504,18 +501,18 @@ impl Session {
         name: &str,
         text: &str,
     ) -> (String, Result<Handle, SessionError>) {
-        let saved = self.rt.capture();
+        let saved = self.host.runtime_unrooted().capture();
         let result = self.eval_str(name, text);
-        let printed = self.rt.restore(saved);
+        let printed = self.host.runtime_unrooted().restore(saved);
         (printed, result)
     }
 
     /// [`eval_capturing`](Self::eval_capturing) of forms already read, or
     /// made: what a front end lowered to Scheme gives, with no text between.
     pub fn eval_forms_capturing(&mut self, forms: &[fixpt_read::Syntax]) -> (String, Result<Handle, SessionError>) {
-        let saved = self.rt.capture();
+        let saved = self.host.runtime_unrooted().capture();
         let result = self.eval_forms(forms);
-        let printed = self.rt.restore(saved);
+        let printed = self.host.runtime_unrooted().restore(saved);
         (printed, result)
     }
 
@@ -524,24 +521,24 @@ impl Session {
     }
 
     fn condition_message(&self, obj: Value) -> String {
-        if self.rt.is_error_object(obj) {
-            let msg = display_value(&self.rt.heap, self.rt.heap.obj_ref(obj, 1));
-            let irritants = self.rt.heap.obj_ref(obj, 2);
-            let list = self.rt.heap.list_to_vec(irritants).unwrap_or_default();
+        if self.host.runtime_unrooted_ref().is_error_object(obj) {
+            let msg = display_value(&self.host.runtime_unrooted_ref().heap, self.host.runtime_unrooted_ref().heap.obj_ref(obj, 1));
+            let irritants = self.host.runtime_unrooted_ref().heap.obj_ref(obj, 2);
+            let list = self.host.runtime_unrooted_ref().heap.list_to_vec(irritants).unwrap_or_default();
             if list.is_empty() || self.bare_failures {
                 return msg;
             }
             let rendered: Vec<String> = list
                 .iter()
-                .map(|v| write_value(&self.rt.heap, *v))
+                .map(|v| write_value(&self.host.runtime_unrooted_ref().heap, *v))
                 .collect();
             return format!("{msg}: {}", rendered.join(" "));
         }
-        format!("uncaught: {}", write_value(&self.rt.heap, obj))
+        format!("uncaught: {}", write_value(&self.host.runtime_unrooted_ref().heap, obj))
     }
 
     fn describe(&self, span: fixpt_read::Span, message: &str) -> String {
-        format!("{}: {message}", self.rt.sources.describe(span))
+        format!("{}: {message}", self.host.runtime_unrooted_ref().sources.describe(span))
     }
 }
 
