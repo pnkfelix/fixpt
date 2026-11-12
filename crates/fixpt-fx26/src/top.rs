@@ -837,7 +837,7 @@ impl Checker {
             self.macros.file_shape_begun(key.clone());
             let text = match crate::built_in_module(&path) {
                 Some(t) => t.to_string(),
-                None => match std::fs::read_to_string(&at) {
+                None => match crate::reads::read_file(&at) {
                     Ok(t) => t,
                     Err(_) => continue,
                 },
@@ -1047,10 +1047,7 @@ impl Checker {
             return Err(FxError::at(form.span, format!("`{path}` takes module parameters: its macros cannot be imported, not yet")));
         }
         let key = at.display().to_string();
-        let text = match crate::built_in_module(&path) {
-            Some(t) => t.to_string(),
-            None => std::fs::read_to_string(&at).map_err(|e| FxError::at(form.span, format!("cannot read `{path}`: {e}")))?,
-        };
+        let text = module_text(&path, &at, form.span)?;
         self.macro_files += 1;
         let file = FileId(2_000_000 + self.macro_files);
         self.load_sites.insert(file, (form.span, path.clone(), text.as_str().into()));
@@ -2443,5 +2440,15 @@ fn placed_in(s: &mut Syntax, file: FileId) {
     }
     if let fixpt_read::Datum::Vector(items) = &mut s.datum {
         items.iter_mut().for_each(|i| placed_in(i, file));
+    }
+}
+
+/// The text of module file `path`, at `at`: built in, or read (`reads`); or
+/// why it cannot be, at `span`. Apart from its caller, whose frame is in
+/// the checker's debt (`tests/stack.rs`).
+fn module_text(path: &str, at: &std::path::Path, span: fixpt_read::Span) -> R<String> {
+    match crate::built_in_module(path) {
+        Some(t) => Ok(t.to_string()),
+        None => crate::reads::read_file(at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}"))),
     }
 }

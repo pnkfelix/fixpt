@@ -218,6 +218,151 @@ impl FormFacts {
     }
 }
 
+/// Every name a fact notes, or a tag it holds: what one read back
+/// ([`FormFacts::from_bytes`]) is one of.
+const NAMES: [&str; 10] = ["n-datum", "n-summary", "n-conversion", "n-apply-shares", "n-frozen-define", "n-plain-fx", "n-call", "cv-cellular", "cv-native", "cv-fx"];
+
+impl FormFacts {
+    /// These as bytes, for the cache of what checking a text found
+    /// (`facts_cache`): read back by [`from_bytes`](Self::from_bytes).
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Bytes(Vec::new());
+        out.int(self.walked);
+        out.int(self.facts.len() as i64);
+        for (at, noted, value) in &self.facts {
+            out.at(*at);
+            out.str(noted);
+            match value {
+                Noted::None => out.int(0),
+                Noted::Int(n) => {
+                    out.int(1);
+                    out.int(*n);
+                }
+                Noted::Tag(t) => {
+                    out.int(2);
+                    out.str(t);
+                }
+                Noted::Datum(d) => {
+                    out.int(3);
+                    let (k, a, b) = match *d {
+                        Datum::Field(i) => (0, i as i64, 0),
+                        Datum::BlobrefField(o) => (1, o as i64, 0),
+                        Datum::Layout(c) => (2, c as i64, 0),
+                        Datum::Array { n, size } => (3, n, size as i64),
+                        Datum::Fits(size) => (4, size as i64, 0),
+                    };
+                    [k, a, b].into_iter().for_each(|n| out.int(n));
+                }
+            }
+        }
+        out.int(self.withs.len() as i64);
+        for (at, names, is) in &self.withs {
+            out.at(*at);
+            out.int(names.len() as i64);
+            names.iter().for_each(|n| out.str(n));
+            out.int(is.len() as i64);
+            is.iter().for_each(|i| out.int(*i));
+        }
+        out.int(self.reshapes.len() as i64);
+        for (at, picks) in &self.reshapes {
+            out.at(*at);
+            out.int(picks.len() as i64);
+            for (k, j) in picks {
+                out.int(*k);
+                out.int(j.unwrap_or(-1));
+            }
+        }
+        out.0
+    }
+
+    /// What [`to_bytes`](Self::to_bytes) made; none if `bytes` is not that.
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<FormFacts> {
+        let mut r = Reader(bytes);
+        let walked = r.int()?;
+        let mut facts = Vec::new();
+        for _ in 0..r.count()? {
+            let at = r.at()?;
+            let noted = r.name()?;
+            let value = match r.int()? {
+                0 => Noted::None,
+                1 => Noted::Int(r.int()?),
+                2 => Noted::Tag(r.name()?),
+                3 => {
+                    let (k, a, b) = (r.int()?, r.int()?, r.int()?);
+                    Noted::Datum(match k {
+                        0 => Datum::Field(a as usize),
+                        1 => Datum::BlobrefField(a as usize),
+                        2 => Datum::Layout(a as usize),
+                        3 => Datum::Array { n: a, size: b as usize },
+                        4 => Datum::Fits(a as usize),
+                        _ => return None,
+                    })
+                }
+                _ => return None,
+            };
+            facts.push((at, noted, value));
+        }
+        let mut withs = Vec::new();
+        for _ in 0..r.count()? {
+            let at = r.at()?;
+            let names = (0..r.count()?).map(|_| r.str()).collect::<Option<Vec<_>>>()?;
+            let is = (0..r.count()?).map(|_| r.int()).collect::<Option<Vec<_>>>()?;
+            withs.push((at, names, is));
+        }
+        let mut reshapes = Vec::new();
+        for _ in 0..r.count()? {
+            let at = r.at()?;
+            let picks = (0..r.count()?).map(|_| Some((r.int()?, Some(r.int()?).filter(|j| *j >= 0)))).collect::<Option<Vec<_>>>()?;
+            reshapes.push((at, picks));
+        }
+        r.0.is_empty().then_some(FormFacts { facts, withs, reshapes, walked })
+    }
+}
+
+/// Bytes being written: each integer eight, little-endian; each string its
+/// length, then it.
+struct Bytes(Vec<u8>);
+
+impl Bytes {
+    fn int(&mut self, n: i64) {
+        self.0.extend_from_slice(&n.to_le_bytes());
+    }
+    fn at(&mut self, (a, b, k): At) {
+        [a, b, k].into_iter().for_each(|n| self.int(n));
+    }
+    fn str(&mut self, s: &str) {
+        self.int(s.len() as i64);
+        self.0.extend_from_slice(s.as_bytes());
+    }
+}
+
+/// [`Bytes`] read back.
+struct Reader<'a>(&'a [u8]);
+
+impl Reader<'_> {
+    fn int(&mut self) -> Option<i64> {
+        let (n, rest) = self.0.split_first_chunk::<8>()?;
+        self.0 = rest;
+        Some(i64::from_le_bytes(*n))
+    }
+    fn count(&mut self) -> Option<usize> {
+        usize::try_from(self.int()?).ok().filter(|n| *n <= self.0.len())
+    }
+    fn at(&mut self) -> Option<At> {
+        Some((self.int()?, self.int()?, self.int()?))
+    }
+    fn str(&mut self) -> Option<String> {
+        let n = self.count()?;
+        let (s, rest) = self.0.split_at(n);
+        self.0 = rest;
+        String::from_utf8(s.to_vec()).ok()
+    }
+    fn name(&mut self) -> Option<&'static str> {
+        let s = self.str()?;
+        NAMES.iter().find(|n| **n == s).copied()
+    }
+}
+
 const PRODUCT: u8 = fixpt_heap::layout::kind("product");
 const SUM: u8 = fixpt_heap::layout::kind("sum");
 
@@ -234,4 +379,38 @@ fn sum(heap: &mut Heap, name: &str, fields: &[Value]) -> Value {
     let fields = heap.make_frozen(PRODUCT, fields);
     let name = heap.intern(name);
     heap.make_frozen(SUM, &[name, fields])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Facts of every kind, written and read back, are what they were (as
+    /// written again), and bytes cut short are none.
+    #[test]
+    fn facts_are_kept_as_they_were() {
+        let facts = FormFacts {
+            facts: vec![
+                ((0, 5, 1), "n-datum", Noted::Datum(Datum::Field(3))),
+                ((1, 4, 2), "n-datum", Noted::Datum(Datum::BlobrefField(16))),
+                ((2, 3, 3), "n-datum", Noted::Datum(Datum::Layout(7))),
+                ((3, 9, 4), "n-datum", Noted::Datum(Datum::Array { n: -1, size: 8 })),
+                ((4, 9, 5), "n-datum", Noted::Datum(Datum::Fits(24))),
+                ((5, 6, 6), "n-summary", Noted::Int(2)),
+                ((6, 7, 7), "n-apply-shares", Noted::None),
+                ((7, 8, 8), "n-call", Noted::Tag("cv-native")),
+            ],
+            withs: vec![((10, 20, 9), vec!["car".into(), "a name with spaces".into()], vec![0, 4])],
+            reshapes: vec![((30, 40, 10), vec![(1, None), (2, Some(5))])],
+            walked: 11,
+        };
+        let bytes = facts.to_bytes();
+        let back = FormFacts::from_bytes(&bytes).expect("read back");
+        assert_eq!(back.to_bytes(), bytes);
+        assert_eq!(back.walked(), 11);
+        assert!(FormFacts::from_bytes(&bytes[..bytes.len() - 1]).is_none(), "cut short");
+        let mut more = bytes.clone();
+        more.push(0);
+        assert!(FormFacts::from_bytes(&more).is_none(), "with more after");
+    }
 }

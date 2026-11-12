@@ -3608,7 +3608,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     fn parse_load_kept(&mut self, span: fixpt_read::Span, key: &str, path: &str, at: &std::path::Path, input: bool) -> R<ExpId> {
         let text = match crate::built_in_module(path) {
             Some(t) => t.to_string(),
-            None => std::fs::read_to_string(at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?,
+            None => crate::reads::read_file(at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?,
         };
         let source = crate::fasl::digest(&text);
         let name = self.interner.intern(&format!("%shared:{key}"));
@@ -4722,7 +4722,7 @@ pub(crate) fn takes_modules(forms: &[Syntax], interner: &fixpt_read::Interner) -
 pub(crate) fn takes_modules_at(at: &std::path::Path, path: &str) -> bool {
     let text = match crate::built_in_module(path) {
         Some(t) => t.to_string(),
-        None => match std::fs::read_to_string(at) {
+        None => match crate::reads::read_file(at) {
             Ok(t) => t,
             Err(_) => return false,
         },

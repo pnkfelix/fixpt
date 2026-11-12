@@ -781,6 +781,7 @@ impl crate::check::Checker {
     pub(crate) fn fasl_load(&mut self, span: fixpt_read::Span, key: &str, path: &str, at: &Path, input: bool, source: u64) -> crate::R<Option<crate::ast::ExpId>> {
         let native = self.conv_default == crate::ast::Conv::Native;
         let Some(fasl) = path_for_load(at, path, native) else { return Ok(None) };
+        crate::reads::note();
         let Ok(bytes) = fixpt_heap::Mapped::open(&fasl) else { return Ok(None) };
         // One built in is made again, quietly, by the run that reads its
         // source (`Fx26Session::cache_built_ins`).

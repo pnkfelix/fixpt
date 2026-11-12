@@ -12,7 +12,7 @@ expand_abbrev 4480
 expand_datatype 9408
 expand_generative 5392
 fasl_load 5712
-import_file_macros 5424
+import_file_macros 5392
 included 4688
 module_items_from 11584
 par_expansion 6688

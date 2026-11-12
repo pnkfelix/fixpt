@@ -629,23 +629,27 @@ pub fn rust_facts(scheme: &mut Front, file: FileId, text: &str) -> R<Handle> {
 /// [`rust_facts`] of a program of convention `conv`, as its own checker
 /// (`Fx26Session::fresh_checker`) checks it: what each call is compiled in
 /// follows. With `syscalls`, a runtime's program (`Checker::syscalls`).
+/// What it found kept, and read back where it was (`facts_cache`): the
+/// same text checks alike.
 pub fn rust_facts_in(scheme: &mut Front, file: FileId, text: &str, conv: crate::ast::Conv, syscalls: bool) -> R<Handle> {
-    let mut c = crate::Checker::with_convention(conv);
-    c.syscalls = syscalls;
-    c.base_dir = LOAD_BASE.with(|b| b.borrow().clone());
-    let forms = c.read_in(file, text)?;
-    let done = c.declare_ahead(&forms)?;
-    // Which of the expressions at its span each is, as the FX-26 parser
-    // numbers them (`crate::ids`): the forms in order, each after the
-    // hidden globals of the files it loads first.
-    let mut tops = Vec::new();
-    for (f, done) in forms.iter().zip(done) {
-        if !done {
-            let defining = c.top_defining(f)?;
-            tops.extend(defining.hoisted.iter().chain(&defining.run[..1]).map(|(t, _)| t.clone()));
+    let found = crate::facts_cache::found(text, conv, syscalls, || {
+        let mut c = crate::Checker::with_convention(conv);
+        c.syscalls = syscalls;
+        c.base_dir = LOAD_BASE.with(|b| b.borrow().clone());
+        let forms = c.read_in(file, text)?;
+        let done = c.declare_ahead(&forms)?;
+        // Which of the expressions at its span each is, as the FX-26 parser
+        // numbers them (`crate::ids`): the forms in order, each after the
+        // hidden globals of the files it loads first.
+        let mut tops = Vec::new();
+        for (f, done) in forms.iter().zip(done) {
+            if !done {
+                let defining = c.top_defining(f)?;
+                tops.extend(defining.hoisted.iter().chain(&defining.run[..1]).map(|(t, _)| t.clone()));
+            }
         }
-    }
-    let found = crate::rust_facts::FormFacts::of(&c, &tops.iter().collect::<Vec<_>>(), file, text, false);
+        Ok(crate::rust_facts::FormFacts::of(&c, &tops.iter().collect::<Vec<_>>(), file, text, false))
+    })?;
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     // And each `with`'s module's values it names, and their positions, by
     // expression (`checked-withs!`), and each module reshaped
@@ -1242,7 +1246,7 @@ fn supply_loaded_in(
         let fasl = FASL_USED.with(|f| f.borrow().get(&shared).cloned());
         let contents = |at: &std::path::Path| match (fasl.as_deref(), crate::built_in_module(&path)) {
             (Some(t), _) | (None, Some(t)) => Ok(t.to_string()),
-            (None, None) => std::fs::read_to_string(at),
+            (None, None) => crate::reads::read_file(at),
         };
         let (file_base, why, syns, ftext) = match contents(&at) {
             Err(e) => (0, format!("cannot read `{path}`: {e}"), scheme.make(|_| Value::NULL), String::new()),

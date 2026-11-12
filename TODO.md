@@ -6093,6 +6093,19 @@ long pole now. Left: the code collection's marks a bitmap, not a
 `HashSet` (SipHash, 8% of a code collection); and why the test's session
 makes some 88 MB of machine code.
 
+Then (2026-11-12, the user's): one long pole alone,
+`bootstrap::the_compiler_compiles_the_front_end` (64 s), by phase: 46% the
+Rust checker making the front end's facts (`syn::rust_facts`), 41% the
+compiler written in FX-26 compiling it (what the test is for), 6%
+collection. The facts now kept (`facts_cache`): as plain data
+(`FormFacts::to_bytes`), keyed by the text, its convention, a runtime's
+or not, the facts' keys (`ids::mode`) and the build; only of a check that
+read nothing from disk (`reads`, through which every read of the checker's
+goes, a failed one and a `.fasl`'s too). The test 64 s to 42 s on a hit.
+The front end's facts: 443 909 of them (28.5 MB), but 61 values: 286 843
+an effect summary of 0, 75 119 a cellular call (every call). Left: whether
+the compiler's defaults let those go unsaid (§258).
+
 ## 253. A debug test process with no cache at all overflows its stack (found 2026-11-11)
 
 `direct::speculation_reads_compiled_globals` (and likely any test that
@@ -6230,3 +6243,40 @@ SipHash of `FileId` keys ~6% (`hash_one::<&FileId>`, `sip::Hasher::write`;
 a `HashMap<FileId, …>` looked up very often, likely `rust_facts`' byte
 offsets by span), worth a faster hasher or a direct index; call-outs from
 native code ~5%, one primitive (`PRIMITIVES` closure #161) 2.8%.
+
+## 258. Facts keyed by what an expression is, not where (the user's, 2026-11-12)
+
+The checker's facts for the compiler written in FX-26 (`rust_facts.rs`)
+are keyed by where each expression is (its characters and its place in
+the walk): ground data, polymorphism already instantiated at each site.
+The front end's: 443 909 facts, but 61 distinct values (§252). Keyed by
+what an expression is (its constructor, operator, types; hash-consed, or a
+ZDD over those features), families of like expressions would share one
+fact, and the facts would survive an edit elsewhere (every offset after
+an edit moves now). A decision diagram earns its place only if something
+asks of whole families at once; the compiler asks of one expression at a
+time. The care it needs: a fact may depend on an expression's context (the
+type it is checked against, an instantiation inference chose, the
+enclosing convention), which the key must then hold; each kind of fact
+argued context-free, or keyed with its context, before any is shared.
+
+First, smaller: whether the compiler's defaults (no summary as 0, no call
+convention as cellular) let the 360 000 facts that say only that go
+unsaid, which would lighten the compile itself as well as the cache.
+
+## 259. The checker's disk a capability it is given (the user's, 2026-11-12)
+
+What a check found is kept (`facts_cache`, §252) only if it read nothing
+from disk, which `reads` counts: each read of the checker's goes through
+`reads::read_file` or follows `reads::note()`, and `fixpt-tidy`'s
+`tests/reads.rs` finds, by their spellings, reads in the checker's files
+that do not. Holes: a read by another API (`std::io::read_to_string` of a
+handle, `OpenOptions`, `Path::exists`, `metadata`, `canonicalize`), in a
+file not on the rule's list, in a crate the checker calls, or on another
+thread; and inputs that are not files (an environment variable, as
+`FIXPT_FACT_KEYS` is, which the key holds). Sound by construction instead:
+the checker given its disk as an object it holds (reading a text, mapping
+a `.fasl`, asking whether a file is there), the one way it has to one,
+which records every use; "the check read nothing" a property of that
+object. Rust cannot stop a call to `std::fs`, so the tidy rule stays, as a
+backstop.
