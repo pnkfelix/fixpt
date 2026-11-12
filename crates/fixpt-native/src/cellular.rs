@@ -2106,6 +2106,7 @@ pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) ->
 /// The same, compiling or not as `compile` says.
 pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value], compile: bool) -> Result<Value, String> {
     rt.heap.assert_not_in_leaf("running a word");
+    fixpt_runtime::crossing::assert_own_chain(rt.heap.serial(), "a word");
     // Its phase (`TODO.md` §252).
     let _phase = fixpt_memmgmt::phases::enter(if compile { "run:jit-cells" } else { "run:asm-cells" });
     if !crate::CELLULAR_AVAILABLE {
@@ -2151,6 +2152,7 @@ fn collect_for_code(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]
 /// (PLAN.md 13h′) each word that has some.
 pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
     rt.heap.assert_not_in_leaf("running a word");
+    fixpt_runtime::crossing::assert_own_chain(rt.heap.serial(), "a word");
     // Its phase (`TODO.md` §252).
     let _phase = fixpt_memmgmt::phases::enter("run:regs");
     if !crate::CELLULAR_AVAILABLE {

@@ -6348,6 +6348,26 @@ what the tests run; (2) by type is still the whole answer.
 `fixpt-scheme`'s `bloblet::a_word_that_collects_leaves_the_callers_values`
 fails without the engines' rooting.
 
+Then (2026-11-12): a run of another session's code inside a call of this
+one's, which procedural macros' transformers are (run compiled now,
+`Strategy::Cellular`, no longer lowered to Scheme: §262's first). What a
+run owns, by tier: the machine's code and trampolines, which never move
+(`CodeSpace` neither moves nor grows; `own` never replaced), shared; each
+heap's stack, cards and areas, the heap's; each run's state (`DState`),
+its own. What was thread-wide and is set aside now: the direct machine
+was held for a whole run (only to copy its `Runner`, now held for that
+alone, `call_on`); `CALLED_OUT` and the crossing's boundaries
+(`fixpt_runtime::crossing`), which captures, prompts and marks walk, are
+the session's. `crossing::apart(f)` sets them aside for another session's
+run and puts them back however it ends; what it set aside stays where a
+walk meant to go past the marker finds it (`SET_ASIDE`). Each boundary,
+and `CALLED_OUT`, says its heap: a run of another heap's code begun where
+one of them is the innermost, not apart, fails loudly
+(`crossing::assert_own_chain`, `call_native`); so does native code run
+afresh on a heap whose native code is suspended in a call that keeps no
+frames (`RUNS`). The cellular machine keeps its stacks in itself still,
+and runs a nested word on a machine of its own, as it did.
+
 The effects, a design of their own (the user's, 2026-11-12): rooting is
 the floor, what keeps the suspended caller's values valid whatever runs
 (even a `spin`-only run allocates, and the stress policy collects at any
@@ -6367,3 +6387,18 @@ two meet: a bound that leaves out allocating in the caller's heap would
 let its collection be held off while the nested code runs, in place of
 the caller's stacks copied and rooted (sound only once the bound is
 enforced, and the stress policy would have to respect it).
+
+## 262. A library session's default strategy is to lower (the user's, 2026-11-12; high priority)
+
+`Fx26Session::with_backend` makes a session whose programs are lowered to
+Scheme and run on the Scheme VM (`Strategy::Lower`), though nothing else
+an FX-26 session does needs the Scheme engine any more (§252). A probe
+(`Front::lowered` made to panic, the release suite run) failed 288 tests:
+most of them not by choosing the lowered machine but by taking the
+default, e.g. every program `common::programs_do_as_they_say` runs, and
+the session procedural macros' transformers ran in (`macros::procedural`;
+the first to change, §261's reentrancy permitting). The default to become
+a compiled strategy; the tests that want the lowered machine (the
+scheduler's under seeds, `processes`; the comparisons of the two) to ask
+for it. What changes is what dozens of tests exercise: to be done with
+the probe at hand, each failure classified by its first caller.

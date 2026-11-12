@@ -91,12 +91,21 @@ pub fn install() {
 }
 
 /// FX-26 program `code` run in the transformers' session: the last form's
-/// value, printed as `write` does; or why not.
+/// value, printed as `write` does; or why not. Apart from the session whose
+/// check asked for it (`crossing::apart`): a session, and a heap, of its
+/// own, which may be asked inside a call of that session's native code.
 pub fn run(code: &str) -> Result<String, String> {
+    fixpt_runtime::crossing::apart(|| run_apart(code))
+}
+
+fn run_apart(code: &str) -> Result<String, String> {
     SESSION.with(|s| {
         let mut s = s.borrow_mut();
         if s.is_none() {
             let mut made = crate::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).map_err(|e| e.message)?;
+            // Compiled and run on the cellular machine, not lowered: so that
+            // a program's macros, as it is checked, need no Scheme engine.
+            made.strategy = crate::session::Strategy::Cellular;
             match made.run_program(PRELUDE) {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => return Err(format!("the transformers' prelude: {e}")),

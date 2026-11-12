@@ -930,7 +930,8 @@ impl Machine {
         let kept = rt.heap.vector_from(&all);
         let at = rt.heap.push_root(kept);
         let held = Held { at, nd, nr, k: r.k, fp: r.fp, tail, floor: self.rs_floor, nested: self.nested, run: self.run };
-        let v = crossing::across(std::rc::Rc::new(held), || call(rt, c, &args));
+        let serial = rt.heap.serial();
+        let v = crossing::across(serial, std::rc::Rc::new(held), || call(rt, c, &args));
         let kept = rt.heap.root_at(at);
         rt.heap.pop_roots_to(at);
         let all: Vec<Value> = (0..rt.heap.obj_len(kept)).map(|i| rt.heap.obj_ref(kept, i)).collect();
@@ -1477,6 +1478,7 @@ impl Machine {
 /// to stderr after each run.
 pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
     rt.heap.assert_not_in_leaf("running a word");
+    crossing::assert_own_chain(rt.heap.serial(), "a word");
     // Its phase (`TODO.md` §252).
     let _phase = fixpt_memmgmt::phases::enter("run:rust-cells");
     let mut m = Machine::with_fuel(rt.word_fuel);

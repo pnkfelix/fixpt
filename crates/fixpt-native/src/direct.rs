@@ -601,9 +601,14 @@ thread_local! {
     /// native code, and the native stack's pointer as it called out, below
     /// which a native call from that cellular code runs (`call_native`),
     /// the machine being in use.
-    static CALLED_OUT: std::cell::Cell<Option<(Runner, u64)>> = const { std::cell::Cell::new(None) };
+    /// And the serial of the heap whose code it is.
+    static CALLED_OUT: std::cell::Cell<Option<(Runner, u64, u64)>> = const { std::cell::Cell::new(None) };
     /// The run of native code innermost, if one is running.
     static RUNNING: std::cell::Cell<Option<Runner>> = const { std::cell::Cell::new(None) };
+    /// The heaps (by serial) whose native code is running, outermost first:
+    /// a run begun afresh on one of these would put its frames where the
+    /// suspended run's are (`call_native`).
+    static RUNS: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
     /// What this thread's stack caches have done (`stack_stats`).
     static STATS: std::cell::Cell<StackStats> = std::cell::Cell::new(StackStats::default());
 }
@@ -856,14 +861,31 @@ pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Valu
     let p = DirectMachine::compiled_of(&rt.heap, closure).ok_or_else(|| fail("not a native closure".into()))?;
     let fuel = rt.word_fuel.min(u64::MAX >> 1);
     let r = match CALLED_OUT.with(|c| c.get()) {
-        Some((runner, sp)) => {
+        // Below the frames of the call out, on that heap's stack: its own
+        // code alone, another session's being `crossing::apart`.
+        Some((runner, sp, serial)) => {
+            assert!(serial == rt.heap.serial(), "native code of another heap's session inside this one's call out, not `crossing::apart` (`TODO.md` §261)");
             let top = (sp - 16) & !15;
             if top < rt.heap.native_stack().0 + 2 * STACK_SLACK {
                 return Err(fail("stack overflow".into()));
             }
             run(&runner, rt, p, args, fuel, top)
         }
-        None => with_machine(|m| m.call(rt, p, args, fuel)).map_err(fail)?,
+        // Afresh, on this heap's stack from its top: the machine held only
+        // to copy what a run needs of it, so that another session's code may
+        // run so inside a call this run made (`crossing::apart`). Not on a
+        // heap whose native code is suspended already, which a call that
+        // keeps its frames (`call_foreign_with`, above) is the only way in
+        // to: its frames are where this run's would go.
+        None => {
+            let serial = rt.heap.serial();
+            fixpt_runtime::crossing::assert_own_chain(serial, "native code");
+            if RUNS.with(|runs| runs.borrow().contains(&serial)) {
+                return Err(fail("native code run afresh on a heap whose native code is suspended in a call that keeps no frames (`TODO.md` §261)".into()));
+            }
+            let runner = with_machine(|m| m.runner()).map_err(fail)?;
+            call_on(&runner, rt, p, args, fuel)
+        }
     };
     r.map_err(|t| match (take_thrown(), ABORTED.with(|a| a.take())) {
         (Some((k, v)), _) => fixpt_runtime::NativeExit::Throw { k, v },
@@ -1216,6 +1238,11 @@ impl DirectMachine {
             return Err(crate::UNAVAILABLE.into());
         }
         fixpt_runtime::crossing::set_foreign_marks(marks_of);
+        // Its mark of the call out it runs native calls below, set aside
+        // while another session's code runs (`crossing::apart`).
+        fixpt_runtime::crossing::set_apart_hooks((|| Box::new(CALLED_OUT.replace(None)), |m| {
+            CALLED_OUT.set(*m.downcast::<Option<(Runner, u64, u64)>>().expect("what the take gave"));
+        }));
         let mut space = CodeSpace::new(8 << 20).map_err(|e| e.to_string())?;
         // The machine's own code, in bytes, for this instruction set.
         let a64 = |w: Vec<u32>| crate::arm64::bytes(&w);
@@ -1402,12 +1429,7 @@ impl DirectMachine {
     /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
     /// heap its call-outs allocate in, collecting when they must.
     pub fn call(&mut self, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
-        // Its phase (`TODO.md` §252).
-        let _phase = fixpt_memmgmt::phases::enter("run:native");
-        // The heap's native stack (`Heap::native_stack`), with a little room
-        // at its top, where the outermost frame flushed there points.
-        let top = (rt.heap.native_stack().1 - 16) & !15;
-        run(&self.runner(), rt, p, args, fuel, top)
+        call_on(&self.runner(), rt, p, args, fuel)
     }
 
     fn runner(&self) -> Runner {
@@ -1439,6 +1461,18 @@ impl DirectMachine {
     pub fn lines(&self, heap: &Heap, p: Compiled) -> Vec<String> {
         code_lines(&heap.bloblet_bytes(p.code)[..p.len])
     }
+}
+
+/// [`DirectMachine::call`] on what `r` copied of a machine: needing nothing
+/// more of it, so that the machine is not held while the code runs, and a
+/// run of another heap's code may begin inside (`call_native`).
+fn call_on(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
+    // Its phase (`TODO.md` §252).
+    let _phase = fixpt_memmgmt::phases::enter("run:native");
+    // The heap's native stack (`Heap::native_stack`), with a little room
+    // at its top, where the outermost frame flushed there points.
+    let top = (rt.heap.native_stack().1 - 16) & !15;
+    run(r, rt, p, args, fuel, top)
 }
 
 /// Run `p` with `args`, in at most about `fuel` steps, in `rt`, whose heap
@@ -1507,7 +1541,9 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     let entry: extern "C" fn(u64, u64, u64, u64) -> u64 = unsafe { std::mem::transmute(r.entry as usize) };
     let outer = RUNNING.replace(Some(*r));
     let outer_state = SHOWN_IN.replace(&st as *const DState);
+    RUNS.with(|runs| runs.borrow_mut().push(rt.heap.serial()));
     let v = entry(&mut st as *mut DState as u64, target, 0, 0);
+    RUNS.with(|runs| runs.borrow_mut().pop());
     SHOWN_IN.set(outer_state);
     RUNNING.set(outer);
     STATS.with(|s| {
@@ -5740,9 +5776,10 @@ fn call_foreign_with(
     rt.heap.push_root(Value::from_raw(st.code));
     // A native call from the cellular code runs below these frames.
     let runner = RUNNING.get().expect("native code is running");
-    let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));
+    let outer = CALLED_OUT.replace(Some((runner, st.native_sp, rt.heap.serial())));
     let boundary = std::rc::Rc::new(Foreign { st: st as *mut DState, at, resume });
-    let r = fixpt_runtime::crossing::across(boundary, || call(rt));
+    let serial = rt.heap.serial();
+    let r = fixpt_runtime::crossing::across(serial, boundary, || call(rt));
     CALLED_OUT.set(outer);
     put_back(rt, st, at);
     rt.heap.pop_roots_to(at);
