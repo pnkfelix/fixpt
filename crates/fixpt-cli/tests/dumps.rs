@@ -40,6 +40,18 @@ fn a_dumped_program_resumes_as_its_load_left_it() {
     }
 }
 
+/// Where the compiler written in FX-26 makes each procedure's code too, its
+/// front end native, read back from its cache (`TODO.md` §252).
+#[test]
+fn a_dump_resumes_where_fx26_compiles_natively() {
+    let dir = scratch("fxjit");
+    let m = ["--machine", "fx-regs-fxjit-nativecc"];
+    let (code, _, err) = fixpt(&dir, &[&m[..], &["dump", "counter.img", "counter.fx"]].concat());
+    assert_eq!(code, Some(0), "{err}");
+    let (code, out, err) = fixpt(&dir, &[&m[..], &["resume", "counter.img", "--", "a", "b"]].concat());
+    assert_eq!((code, out.as_str()), (Some(7), "count 3, args 2\n"), "{err}");
+}
+
 #[test]
 fn a_resumed_program_is_extended_by_more_files() {
     let dir = scratch("more");
@@ -77,7 +89,7 @@ fn a_stale_dump_or_none_is_refused() {
 #[test]
 fn a_machine_that_cannot_dump_says_so() {
     let dir = scratch("machines");
-    for m in ["rs-scheme-vm", "fx-ast-eval", "fx-regs-fxjit-nativecc"] {
+    for m in ["rs-scheme-vm", "fx-ast-eval"] {
         let (code, _, err) = fixpt(&dir, &["--machine", m, "dump", "counter.img", "counter.fx"]);
         assert_eq!(code, Some(1), "{m}");
         assert!(err.contains("this machine cannot dump a program"), "{m}: {err}");

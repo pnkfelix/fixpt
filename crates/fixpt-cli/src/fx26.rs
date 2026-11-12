@@ -138,15 +138,16 @@ fn show(session: &Fx26Session, out: &Outcome, show_code: bool) {
 
 fn start(backend: Backend) -> Result<Fx26Session, i32> {
     // The front end native wherever native code runs, whatever the
-    // program's convention, but where the compiler written in FX-26 makes
-    // each procedure's code (below): its cache, the front end as its first
-    // run left it, read into the heap first, before the runtime and the
-    // prelude intern anything (`TODO.md` §161). The cellular front end's
-    // cache is of it before its run, which every process then makes again,
-    // its register words assembled again (`TODO.md` §168): some 4 s of a
-    // debug build's start, 0.6 s natively.
+    // program's convention: its cache, the front end as its first run left
+    // it, read into the heap first, before the runtime and the prelude
+    // intern anything (`TODO.md` §161). The cellular front end's cache is of
+    // it before its run, which every process then makes again, its register
+    // words assembled again (`TODO.md` §168): some 4 s of a debug build's
+    // start, 0.6 s natively; 7.3 s where the compiler written in FX-26 makes
+    // each procedure's code, which read it back too (`TODO.md` §252), but
+    // makes no native front end and compiles nothing at `adapt` (below).
     let by_fx26 = crate::NATIVE_BY_FX26.get().copied().unwrap_or(false);
-    let native_front_end = fixpt_fx26::session::native_front_end_default() && !by_fx26;
+    let native_front_end = fixpt_fx26::session::native_front_end_default();
     // Read in first only where the program will run on it: lowered, the
     // Rust checker checks, and a session may not load the front end at
     // all (read in when it does).
@@ -199,15 +200,19 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         // What cellular code makes, compiled natively where it can be, on
         // the machine `run_native` runs on: by the compiler written in
         // Rust, so not where the one written in FX-26 makes each
-        // procedure's code (`TODO.md` §121).
-        fixpt_native::direct::compile_when_adapting(true);
+        // procedure's code, whose program's code is all its own, as its
+        // oracle compares it (`TODO.md` §121).
+        if !by_fx26 {
+            fixpt_native::direct::compile_when_adapting(true);
+        }
         // The front end native: about 3% of loading kayak's compiler
         // (`TODO.md` §126), its native code kept in the cache after its
         // first run, and read back.
         s.front_end_native = true;
         s.native_keeping = Some(NATIVE_KEEPING);
-        // Made here, if its cache has none: `adapt` compiles natively.
-        s.makes_native_front_end = true;
+        // Made here, if its cache has none, only where `adapt` compiles
+        // natively; elsewhere read back or not taken (the cellular one).
+        s.makes_native_front_end = !by_fx26;
     } else {
         // Not the library's default here: the cellular front end.
         s.front_end_native = false;
