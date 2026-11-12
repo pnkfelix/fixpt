@@ -3424,6 +3424,16 @@ impl Fx26Session {
                     let mut comp = crate::cellular::Compiler::new(m.heap(), c, &text);
                     comp.registers = true;
                     compiled = comp.program(tops);
+                    // Each lambda left without register code, and why, said
+                    // with `FIXPT_NATIVE_DECLINES` set: native code is made
+                    // from register code, so these stay cellular.
+                    if std::env::var_os("FIXPT_NATIVE_DECLINES").is_some() {
+                        for (n, why) in &comp.register_report {
+                            if let Some(why) = why {
+                                eprintln!("fixpt: register code: declined `{n}`: {why}");
+                            }
+                        }
+                    }
                     if let (Ok(w), Some((path, key)), None) = (&compiled, &cache, keeping) {
                         save_front_end(m.heap(), *w, path, *key);
                     }

@@ -366,6 +366,18 @@ impl Compiler<'_> {
         // Past `REGS` parameters, the rest come as a list in REG8, taken
         // apart into the frame.
         let leaf = params.len() <= REGS && !self.r_collects(body, inner, this, true);
+        // A leaf that runs out of registers (its arguments and their
+        // temporaries past `REGS`): with a frame, as any other body. Without
+        // this, it had no register code, and so its module no native code
+        // (`TODO.md` §252: the expander's own files, in the native front end).
+        if leaf {
+            let declined = self.declined.clone();
+            if let Some(g) = self.register_body_as(params, body, inner, this, own, true) {
+                return Some(g);
+            }
+            self.declined = declined;
+            return self.register_body_as(params, body, inner, this, own, false);
+        }
         // A leaf too where its only calls are plain tail calls; made so
         // first, and if that runs out of registers, made as before.
         if !leaf && params.len() <= REGS {

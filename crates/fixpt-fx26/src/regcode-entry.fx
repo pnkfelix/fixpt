@@ -173,8 +173,9 @@
 ;; this compiler declines. In a fast version, where a call inlined or of
 ;; itself in tail position is no call, a leaf maybe where the plain one is
 ;; not. A leaf too where its only calls are plain tail calls: made so
-;; first, and if that declines (out of registers), made as before. As the
-;; Rust compiler's `register_body_in`.
+;; first, and if that declines (out of registers), made as before; and a
+;; leaf that runs out of registers, made with a frame. As the Rust
+;; compiler's `register_body_in`.
 (define r-register-body (->* (exp-params exp cenv rthis rowner) rgens)
   (lambda (ps body inner this own)
     (let ((n (c-count-params ps)))
@@ -183,8 +184,8 @@
         ;; Past `register-regs` parameters, the rest come as a list in the
         ;; last register, taken apart into the frame.
         (let ((leaf (and (<= n register-regs) (not (r-collects body inner this #t)))))
-          (if (or leaf (> n register-regs) (not (r-leaves? body inner this)))
-              (r-register-body-as ps body inner this own leaf)
+          (if (and (not leaf) (or (> n register-regs) (not (r-leaves? body inner this))))
+              (r-register-body-as ps body inner this own #f)
               (let ((gs (r-register-body-as ps body inner this own #t)))
                 (if (null? gs) (r-register-body-as ps body inner this own #f) gs))))))))
 ;; The body compiled once, as ever.

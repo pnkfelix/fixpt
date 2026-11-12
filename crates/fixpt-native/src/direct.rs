@@ -1273,8 +1273,18 @@ fn compile_with(cs: &mut Compiler, heap: &mut Heap, closure: Value) -> Result<Ve
         }
         match failed {
             None => break (std::mem::take(&mut c.procs), first, free),
-            Some((p, e)) if p == first || !c.procs[p].global => return Err(e),
-            Some((p, _)) => {
+            Some((p, e)) if p == first || !c.procs[p].global => {
+                if declines_said() {
+                    eprintln!("fixpt: native: declined, the whole compile: {e}");
+                }
+                return Err(e);
+            }
+            Some((p, why)) => {
+                // Why, said with `FIXPT_NATIVE_DECLINES` set: what the
+                // compiler declined, called as cellular code instead.
+                if declines_said() {
+                    eprintln!("fixpt: native: declined {why}");
+                }
                 refused = std::mem::take(&mut c.refused);
                 refused.insert(c.procs[p].word.raw());
             }
@@ -1283,6 +1293,13 @@ fn compile_with(cs: &mut Compiler, heap: &mut Heap, closure: Value) -> Result<Ve
     let done = install(heap, &procs, first, &free, &cs.callouts);
     cs.callouts.truncate(OWN_CALLOUTS);
     done
+}
+
+/// Whether each procedure the compiler declines is said, with why
+/// (`FIXPT_NATIVE_DECLINES`).
+fn declines_said() -> bool {
+    static SAID: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SAID.get_or_init(|| std::env::var_os("FIXPT_NATIVE_DECLINES").is_some())
 }
 
 /// `procs`, compiled, each in a code bloblet of its own: what they are,
