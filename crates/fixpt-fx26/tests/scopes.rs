@@ -7,6 +7,8 @@ use fixpt_fx26::Checker;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+mod common;
+
 fn programs(dir: &Path, out: &mut Vec<PathBuf>) {
     let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).expect("a directory").map(|e| e.expect("an entry").path()).collect();
     entries.sort();
@@ -19,14 +21,19 @@ fn programs(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Every test program walked: what the walk refuses, by its message, with
-/// the first program that has it. A program the front end does not read
-/// (a module file's parameters, a load it cannot find) is not counted.
-#[test]
-fn every_program_is_walked() {
+// Every test program walked, a test for each shard of them (`common::shard`),
+// which nextest runs at once: the longest test of the suite, alone.
+common::sharded!(every_program_is_walked, walked_shard);
+
+/// Every test program of shard `k` walked: what the walk refuses, by its
+/// message, with the first program that has it. A program the front end
+/// does not read (a module file's parameters, a load it cannot find) is not
+/// counted.
+fn walked_shard(k: usize) {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs"));
     let mut files = Vec::new();
     programs(root, &mut files);
+    let files = common::shard(files, k);
     let mut refused: BTreeMap<String, (usize, String)> = BTreeMap::new();
     let (mut walked, mut unread, mut renamings, mut module_files) = (0, 0, 0, 0);
     let mut differ = Vec::new();
@@ -36,7 +43,10 @@ fn every_program_is_walked() {
         c.base_dir = f.parent().map(|d| d.to_path_buf());
         // Unread or refused as a whole: a module file, one written to be
         // refused; the checker's refusal, not the walk's, is what it says.
-        if let Err(e) = fixpt_fx26::compare::check_with_rust_checker(&mut c, &text) {
+        // Its types, else, what the renamed program's are held to (as
+        // `c_types` says them).
+        let checked = fixpt_fx26::compare::check_with_rust_checker(&mut c, &text);
+        if let Err(e) = &checked {
             if std::env::var("SCOPES_SHOW_UNREAD").is_ok() {
                 eprintln!("unread {}: {}", f.strip_prefix(root).unwrap_or(f).display(), e.message.chars().take(100).collect::<String>());
             }
@@ -57,7 +67,7 @@ fn every_program_is_walked() {
             }
             continue;
         }
-        let types = c_types(f, &text);
+        let types = checked.map_err(|e| String::from(e.message));
         let mut c = Checker::new();
         c.base_dir = f.parent().map(|d| d.to_path_buf());
         match c.alpha_renamed(&text) {
@@ -154,14 +164,19 @@ fn a_directory_is_walked() {
     }
 }
 
+// The two walks held to each other, a test for each shard of the
+// programs (`common::shard`), which nextest runs at once.
+common::sharded!(the_two_walks_agree, walks_agree_shard);
+
 /// The walk written in FX-26 (`macros-walk.fx`) finds the scopes the Rust
-/// one finds: each test program the checker accepts, expanded by the Rust
-/// expander, its local value binders renamed by each walk, the same.
-#[test]
-fn the_two_walks_agree() {
+/// one finds: each test program of shard `k` the checker accepts, expanded
+/// by the Rust expander, its local value binders renamed by each walk, the
+/// same.
+fn walks_agree_shard(k: usize) {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs"));
     let mut files = Vec::new();
     programs(root, &mut files);
+    let files = common::shard(files, k);
     let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
     let (mut compared, mut differ) = (0, Vec::new());
     for f in &files {
@@ -186,15 +201,19 @@ fn the_two_walks_agree() {
     assert!(differ.is_empty(), "the walks differ:\n{}", differ.iter().take(10).cloned().collect::<Vec<_>>().join("\n"));
 }
 
+// The two expanders' records held to each other, a test for each shard of
+// the programs (`common::shard`), which nextest runs at once.
+common::sharded!(the_two_expanders_write_the_same_records, records_shard);
+
 /// The records the FX-26 expander writes (`macros-shapes.fx`'s `shaped`)
-/// are the Rust one's: each test program the checker accepts, each of its
-/// top-level forms as the Rust checker shaped it, and as FX-26 shapes it
-/// given the same form unshaped.
-#[test]
-fn the_two_expanders_write_the_same_records() {
+/// are the Rust one's: each test program of shard `k` the checker accepts,
+/// each of its top-level forms as the Rust checker shaped it, and as FX-26
+/// shapes it given the same form unshaped.
+fn records_shard(k: usize) {
     let root = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs"));
     let mut files = Vec::new();
     programs(root, &mut files);
+    let files = common::shard(files, k);
     let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
     let (mut compared, mut differ) = (0, Vec::new());
     for f in &files {
