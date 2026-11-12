@@ -6084,9 +6084,12 @@ The two tests 152 s to 69 s and 109 s to 59 s; the debug suite 279 s to
 237 s, its long poles now the front end's compiles (`bootstrap::the_
 compiler_compiles_the_front_end`, 116 s), `scopes` and the checker's (95
 s) and the CLI's cache tests (91 s); the release suite as it was (143 s,
-`bootstrap fixpoint` its long pole). Left: the heap crate optimized in
-debug builds (`[profile.dev.package.fixpt-heap]`; every `Value::is_ref`
-a call there now); the code collection's marks a bitmap, not a
+`bootstrap fixpoint` its long pole). Then the heap crate optimized in
+debug builds (`[profile.dev.package.fixpt-heap]`, `opt-level = 1`; its
+checks kept, which `fixpt-runtime`'s `tests/checks.rs` holds): the debug
+suite 236 s to 196 s, a cold prewarm 193 s to 122 s, the front end's
+compile 116 s to 70 s; `scopes` (93 s, the Rust front end's own time) its
+long pole now. Left: the code collection's marks a bitmap, not a
 `HashSet` (SipHash, 8% of a code collection); and why the test's session
 makes some 88 MB of machine code.
 

@@ -28,4 +28,12 @@ pub mod value;
 pub use heap::{BlobletError, CodePart, Head, Heap};
 pub use image::ImageError;
 pub use fixpt_memmgmt::Mapped;
+
+/// Whether this crate was built with `debug_assert!`s on, and arithmetic
+/// overflow checked: for a crate built without its profile's settings for
+/// this one (`Cargo.toml`) to compare with its own.
+pub fn built_checking() -> (bool, bool) {
+    let overflow = std::panic::catch_unwind(|| std::hint::black_box(u8::MAX) + std::hint::black_box(1u8)).is_err();
+    (cfg!(debug_assertions), overflow)
+}
 pub use value::{ObjType, Value};

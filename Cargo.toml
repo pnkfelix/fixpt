@@ -55,3 +55,9 @@ unsafe_code = "deny"
 inherits = "release"
 debug-assertions = true
 overflow-checks = true
+
+# The heap, collector and all, optimized in a debug build (the user's,
+# 2026-11-12, TODO §252): its checks kept, as a package's own setting
+# leaves them (`fixpt-runtime`'s `tests/checks.rs` holds that it does).
+[profile.dev.package.fixpt-heap]
+opt-level = 1
