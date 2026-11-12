@@ -38,6 +38,10 @@ pub struct Fx26Session {
     /// Whether the prelude's data is still to be read
     /// (`with_backend_preloaded_in`, `whole_prelude`).
     prelude_data_pending: bool,
+    /// Whether FX-26's run-time environment in Scheme (`runtime.scm`) is
+    /// yet to be loaded: what lowered code calls, and nothing else, so
+    /// loaded only where lowered code runs ([`lowered`](Self::lowered)).
+    runtime_pending: bool,
     /// Under `Strategy::Cellular`: whether the compiler written in FX-26
     /// makes each lambda's register code too, for a machine that runs it.
     pub register_code: bool,
@@ -1098,9 +1102,6 @@ impl Fx26Session {
         let lowered = strategy == Strategy::Lower;
         let prelude = if lowered { fixpt_scheme::PRELUDE } else { fixpt_scheme::PRELUDE_CONTROL };
         let mut scheme = Session::with_prelude_preloaded(backend, prelude, preload);
-        scheme
-            .eval_str("<fx26-runtime>", RUNTIME)
-            .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
         scheme.runtime_unrooted().type_at = Some(crate::typeat::type_at);
         scheme.runtime_unrooted().stage_lower = Some(crate::stage::lower_staged);
@@ -1131,6 +1132,7 @@ impl Fx26Session {
             globals: Globals::default(),
             strategy,
             prelude_data_pending: !lowered,
+            runtime_pending: true,
             register_code: false,
             front_end_compiled: true,
             front_end_native: native_front_end,
@@ -1211,8 +1213,8 @@ impl Fx26Session {
         if self.strategy != Strategy::Lower {
             return self.speculate_own(&fixpt_read::write_syntax(form, &self.checker.interner));
         }
-        self.whole_prelude();
-        self.scheme.engine.set_step_limit(self.speculation_limit);
+        let limit = self.speculation_limit;
+        self.lowered().engine.set_step_limit(limit);
         let result = self.scheme.scope(|s| {
             let forms = Code::from(code).syntax(s.runtime_unrooted(), "<fx26-speculative>");
             let (_, result) = s.eval_forms_capturing(&forms);
@@ -1758,7 +1760,7 @@ impl Fx26Session {
 
     fn run_checked_in(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
         if self.strategy == Strategy::Lower {
-            self.whole_prelude();
+            self.lowered();
         }
         // What runs natively is typed so: a call typed `cellular` is made
         // with no look at its callee (`TODO.md` §97).
@@ -1947,7 +1949,7 @@ impl Fx26Session {
             return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: Ok(None) });
         }
         let is_define = matches!(top, Top::Define { .. } | Top::DefineRec { .. });
-        let (printed, value) = self.scheme.scope(|s| {
+        let (printed, value) = self.lowered().scope(|s| {
             // The lowered Scheme's own compiling, quick, is counted as run.
             let start = std::time::Instant::now();
             let _phase = fixpt_memmgmt::phases::enter("run:scheme-vm");
@@ -3180,6 +3182,18 @@ impl Fx26Session {
 
     /// The prelude whole, for lowered code to call: what a session begun
     /// not lowering left out (`with_backend_preloaded_in`).
+    /// The Scheme session, made ready to run lowered code: the whole
+    /// prelude, and FX-26's run-time environment (`runtime.scm`), loaded
+    /// the first time. Every run of lowered code goes through here, so a
+    /// session that runs none loads neither (`tests/scheme_free.rs`).
+    pub fn lowered(&mut self) -> &mut Session {
+        self.whole_prelude();
+        if std::mem::take(&mut self.runtime_pending) && !self.scheme.is_bound("%fx26-unit") {
+            self.scheme.eval_str("<fx26-runtime>", RUNTIME).expect("the FX-26 runtime must load");
+        }
+        &mut self.scheme
+    }
+
     pub fn whole_prelude(&mut self) {
         if std::mem::take(&mut self.prelude_data_pending) {
             self.scheme.eval_str("<prelude>", fixpt_scheme::PRELUDE_DATA).expect("the prelude must load");
