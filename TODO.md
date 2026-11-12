@@ -4011,7 +4011,11 @@ lowered (`rs-scheme-vm`, 0.1 s, which may never load the front end).
 `FIXPT_FRONT_END_CELLULAR=1` for the cellular front end, as before.
 Trivial programs, debug: 4.0–4.6 s to 0.65–1.15 s on the cellular machines.
 Left: library sessions (`Fx26Session::with_backend`, the tests') still
-take the cellular front end (§167).
+take the cellular front end (§167). Done (2026-11-11, §252): native by
+default wherever the native convention runs and its cache can be read
+(`session::native_front_end_default`); made only by a session whose
+`adapt` compiles (`makes_native_front_end`, the CLI's). The debug suite
+453 s to 310 s.
 
 ## 169. The caches' life a day, not a month (the user's, 2026-10-29)
 
@@ -6011,3 +6015,30 @@ code is compiled or entered outside the entry points (`%run-word`, the
 trampolines between native and cellular code, staging, `.fasl`s, tests
 that make words by hand), whatever is not routed through them left in
 "the rest", and a first run to say how large that is.
+
+Measured (2026-11-11), the debug suite with the times on: 10,286 s of the
+processes' time, 2,439 s of it `run:regs;rust-compile`, the cellular front
+end's register code assembled again in each test process (§168, now
+native: the suite 453 s to 310 s). Then `load:front-end`, 698 s: a test's
+load of the native front end into a heap already in use, 1.75 s each in a
+debug build, 3 to 4.5 s where a process loaded it more than once, against
+0.15 s for the CLI's preload; 70% of such a test's time was the debugger's
+registry (`jitdebug`, on by default) remaking each object a new piece
+overlapped, once for each of the five thousand new pieces, since every
+heap's code is at the same addresses: now once for them all
+(`drop_overlapping_all`), a test of two loads 6.8 s to 1.8 s.
+
+Left: a process's time before its first phase is in no file (a thread is
+counted from its first `enter`): a test that loads the lowered reader
+first showed 1.1 s of its 17.
+
+## 253. A debug test process with no cache at all overflows its stack (found 2026-11-11)
+
+`direct::speculation_reads_compiled_globals` (and likely any test that
+makes the front end itself) aborts with a stack overflow in a debug build
+when the cache directory is empty (`XDG_CACHE_HOME` a new directory),
+with the cellular front end as well as the native default: the front end
+compiled in the test's thread, whose stack is the test harness's. The
+suite runs after `fixpt prewarm`, so it never shows there. To find which
+recursion, and whether the compile should run on a thread of its own
+with a stack sized for it, as the front end's other long walks do.

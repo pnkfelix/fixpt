@@ -387,11 +387,36 @@ impl Registry {
         // where nothing registered is within their span.
         let span = (kept[0].start, kept.last().map_or(0, |p| p.start + p.len));
         if self.pieces.range(..span.1).next_back().is_some_and(|(_, &(end, _))| end > span.0) {
-            for p in &kept {
-                self.drop_overlapping(p.start, p.start + p.len);
-            }
+            self.drop_overlapping_all(&kept);
         }
         self.add(kept);
+    }
+
+    /// Every registered piece that one of `new` overlaps gone, `new` sorted
+    /// and disjoint: each object one is in unregistered once, and made
+    /// again once of its pieces none of `new` overlaps. Once for them all,
+    /// not for each of `new`: a session's code where an earlier session's
+    /// was (every heap's addresses are the same, `fixpt_memmgmt::reserve`)
+    /// made each of its five thousand pieces remake an object of hundreds,
+    /// most of a test's time where it loads the front end twice
+    /// (`TODO.md` §252).
+    fn drop_overlapping_all(&mut self, new: &[Owned]) {
+        let overlaps = |start: usize, end: usize| {
+            let i = new.partition_point(|n| n.start < end);
+            i > 0 && new[i - 1].start + new[i - 1].len > start
+        };
+        let mut ids: Vec<u64> = Vec::new();
+        for n in new {
+            let end = n.start + n.len;
+            ids.extend(self.pieces.range(..end).rev().take_while(|(_, (e, _))| *e > n.start).map(|(_, &(_, id))| id));
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        for id in ids {
+            let pieces = self.remove(id);
+            let rest: Vec<Owned> = pieces.into_iter().filter(|p| !overlaps(p.start, p.start + p.len)).collect();
+            self.add(rest);
+        }
     }
 
     /// Every object made again, with its frames: a debugger has come,
