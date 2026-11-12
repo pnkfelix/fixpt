@@ -53,6 +53,14 @@ pub struct Fx26Session {
     /// first run, and read back (`TODO.md` §126); without it, the front end
     /// is compiled and run natively in every session, its word kept.
     pub native_keeping: Option<NativeKeeping>,
+    /// Whether this session may make the native front end where its cache
+    /// has none: only where `adapt` compiles what it adapts
+    /// (`fixpt_native::direct::compile_when_adapting`, the CLI's). Elsewhere
+    /// (by default, a library's session, a test's) the native front end is
+    /// read back from its cache or not taken: without it the cellular one,
+    /// since made here its closures would be cellular code run through
+    /// adapters on the machine written in Rust, slower than either.
+    pub makes_native_front_end: bool,
     /// Whether the program's convention is native (a `nativecc` machine;
     /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
     native_convention: bool,
@@ -970,8 +978,25 @@ pub type NativeRunner = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, u64) 
 /// the Scheme session, and the closure rooted.
 pub type NativeFx = fn(&mut fixpt_scheme::Session, fixpt_scheme::Handle) -> Result<fixpt_scheme::Handle, String>;
 
+/// How the native front end's cache is read back, by the native machine
+/// written in Rust (`TODO.md` §126): what a session's front end is, by
+/// default, wherever that machine runs (`native_front_end_default`).
+pub const NATIVE_KEEPING: NativeKeeping =
+    NativeKeeping { adapter_code: fixpt_native::direct::native_adapter_code, note_code: fixpt_native::direct::note_cached_code };
+
+/// Whether a session's front end is native by default: wherever the
+/// native convention runs, as the CLI's is, not where
+/// `FIXPT_FRONT_END_CELLULAR` asks for the cellular one. Its code is read
+/// back from the cache, made by its first run (`fixpt prewarm`), the first
+/// time the session wants it; the cellular front end's register code is
+/// assembled again by every process, a quarter of the debug suite's time
+/// (`TODO.md` §168, §252).
+pub fn native_front_end_default() -> bool {
+    fixpt_native::NATIVE_CONVENTION_AVAILABLE && std::env::var_os("FIXPT_FRONT_END_CELLULAR").is_none()
+}
+
 /// How the front end's native code is kept in the cache and read back
-/// (`TODO.md` §126). The CLI's are `fixpt_native::direct`'s.
+/// (`TODO.md` §126): [`NATIVE_KEEPING`], `fixpt_native::direct`'s.
 #[derive(Clone, Copy)]
 pub struct NativeKeeping {
     /// The heap's native adapter's code, shared.
@@ -1092,6 +1117,14 @@ impl Fx26Session {
         } else {
             fixpt_engine::cellular::run_word
         });
+        // Native where the native convention runs (`native_front_end_default`):
+        // its entries native procedures, which cellular code calls, and
+        // conversions adapt.
+        let native_front_end = keeping.is_some() || native_front_end_default();
+        if native_front_end {
+            scheme.runtime_unrooted().call_native.get_or_insert(fixpt_native::direct::call_native);
+            scheme.runtime_unrooted().adapt.get_or_insert(fixpt_native::direct::adapt);
+        }
         Ok(Fx26Session {
             checker: if native { Checker::with_convention(crate::ast::Conv::Native) } else { Checker::new() },
             scheme,
@@ -1100,8 +1133,9 @@ impl Fx26Session {
             prelude_data_pending: !lowered,
             register_code: false,
             front_end_compiled: true,
-            front_end_native: false,
-            native_keeping: None,
+            front_end_native: native_front_end,
+            native_keeping: native_front_end.then_some(keeping.unwrap_or(NATIVE_KEEPING)),
+            makes_native_front_end: false,
             native_convention: false,
             native_runner: None,
             native_compiler: None,
@@ -3308,7 +3342,18 @@ impl Fx26Session {
         fixpt_heap::regcode::set_source(0);
         // The front end in the native convention where its closures are
         // made native code, kept apart from the cellular one.
-        let as_native = keep && self.front_end_native;
+        let mut as_native = keep && self.front_end_native;
+        // Native only as read back, unless this session may make it
+        // (`makes_native_front_end`); if not, cellular, here and after.
+        if as_native && !self.makes_native_front_end && self.scheme.runtime_unrooted().preloaded.is_none() {
+            let readable = front_end_cache(&text, true).is_some_and(|(p, key)| {
+                fixpt_heap::Mapped::open(&p).ok().is_some_and(|b| b.get(..8).is_some_and(|k| k == key.to_le_bytes()))
+            });
+            if !readable {
+                as_native = false;
+                self.front_end_native = false;
+            }
+        }
         let cache = if keep { front_end_cache(&text, as_native) } else { None };
         let image = cache.as_ref().and_then(|(p, key)| {
             let b = fixpt_heap::Mapped::open(p).ok()?;

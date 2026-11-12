@@ -146,7 +146,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     // its register words assembled again (`TODO.md` §168): some 4 s of a
     // debug build's start, 0.6 s natively.
     let by_fx26 = crate::NATIVE_BY_FX26.get().copied().unwrap_or(false);
-    let native_front_end = fixpt_native::NATIVE_CONVENTION_AVAILABLE && !by_fx26 && std::env::var_os("FIXPT_FRONT_END_CELLULAR").is_none();
+    let native_front_end = fixpt_fx26::session::native_front_end_default() && !by_fx26;
     // Read in first only where the program will run on it: lowered, the
     // Rust checker checks, and a session may not load the front end at
     // all (read in when it does).
@@ -206,6 +206,12 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         // first run, and read back.
         s.front_end_native = true;
         s.native_keeping = Some(NATIVE_KEEPING);
+        // Made here, if its cache has none: `adapt` compiles natively.
+        s.makes_native_front_end = true;
+    } else {
+        // Not the library's default here: the cellular front end.
+        s.front_end_native = false;
+        s.native_keeping = None;
     }
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
@@ -223,8 +229,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
 }
 
 /// How the native front end's cache is read back (`TODO.md` §126).
-const NATIVE_KEEPING: fixpt_fx26::session::NativeKeeping =
-    fixpt_fx26::session::NativeKeeping { adapter_code: fixpt_native::direct::native_adapter_code, note_code: fixpt_native::direct::note_cached_code };
+const NATIVE_KEEPING: fixpt_fx26::session::NativeKeeping = fixpt_fx26::session::NATIVE_KEEPING;
 
 pub fn repl(backend: Backend) -> i32 {
     let mut session = match start(backend) {
