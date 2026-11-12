@@ -35,13 +35,6 @@ pub struct Fx26Session {
     pub globals: Globals,
     /// How checked forms run.
     pub strategy: Strategy,
-    /// Whether the prelude's data is still to be read
-    /// (`with_backend_preloaded_in`, `whole_prelude`).
-    prelude_data_pending: bool,
-    /// Whether FX-26's run-time environment in Scheme (`runtime.scm`) is
-    /// yet to be loaded: what lowered code calls, and nothing else, so
-    /// loaded only where lowered code runs ([`lowered`](Self::lowered)).
-    runtime_pending: bool,
     /// Under `Strategy::Cellular`: whether the compiler written in FX-26
     /// makes each lambda's register code too, for a machine that runs it.
     pub register_code: bool,
@@ -902,14 +895,28 @@ impl Compiled {
     }
 }
 
-/// Lowered code `all` loaded into `scheme`, the runtime first if it is not.
+/// `scheme` made ready to run lowered code, as what it has bound says: the
+/// prelude's control (`%toplevel-run`) and data (`char=?`), and FX-26's
+/// run-time environment (`%fx26-unit`), each loaded if it is not. A
+/// session begins with none of them (`with_backend_preloaded_in`), so one
+/// that runs no lowered code evaluates no Scheme (`TODO.md` §252,
+/// `tests/scheme_free.rs`).
+fn scheme_ready(scheme: &mut Session) -> Result<(), String> {
+    let parts = [("%toplevel-run", "<prelude>", fixpt_scheme::PRELUDE_CONTROL), ("char=?", "<prelude>", fixpt_scheme::PRELUDE_DATA), ("%fx26-unit", "<fx26-runtime>", RUNTIME)];
+    for (marker, name, text) in parts {
+        if !scheme.is_bound(marker) {
+            scheme.eval_str(name, text).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Lowered code `all` loaded into `scheme`, made ready first (`scheme_ready`).
 /// All in one evaluation: each recompiles the whole of the session's
 /// program so far (`Prepared::update`), so one per form made loading the
 /// front end quadratic in its forms.
 fn load_code(scheme: &mut Session, all: &Code) -> Result<(), String> {
-    if !scheme.is_bound("%fx26-unit") {
-        scheme.eval_str("<fx26-runtime>", RUNTIME).map_err(|e| e.to_string())?;
-    }
+    scheme_ready(scheme)?;
     let forms = all.syntax(scheme.runtime_unrooted(), "<fx26>");
     scheme.eval_forms(&forms).map_err(|e| e.to_string())?;
     Ok(())
@@ -1068,9 +1075,9 @@ impl Fx26Session {
     /// made cellular and then again native
     /// ([`set_native_convention`](Fx26Session::set_native_convention)), each
     /// some 2 ms of a start (`TODO.md` §177); and its strategy `strategy`.
-    /// Its forms not lowered, the prelude's data (`PRELUDE_DATA`) is left
-    /// out, some 2 ms more, until the session lowers one
-    /// (`whole_prelude`).
+    /// No Scheme evaluated: the prelude and FX-26's runtime in Scheme are
+    /// loaded when lowered code first runs ([`lowered`](Self::lowered),
+    /// `scheme_ready`), so a session that runs none evaluates none.
     pub fn with_backend_preloaded_in(
         backend: fixpt_engine::Backend,
         keeping: Option<NativeKeeping>,
@@ -1099,9 +1106,7 @@ impl Fx26Session {
             }
             load_native_front_end(&k, heap, &b)
         };
-        let lowered = strategy == Strategy::Lower;
-        let prelude = if lowered { fixpt_scheme::PRELUDE } else { fixpt_scheme::PRELUDE_CONTROL };
-        let mut scheme = Session::with_prelude_preloaded(backend, prelude, preload);
+        let mut scheme = Session::bare_preloaded(backend, preload);
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
         scheme.runtime_unrooted().type_at = Some(crate::typeat::type_at);
         scheme.runtime_unrooted().stage_lower = Some(crate::stage::lower_staged);
@@ -1131,8 +1136,6 @@ impl Fx26Session {
             scheme,
             globals: Globals::default(),
             strategy,
-            prelude_data_pending: !lowered,
-            runtime_pending: true,
             register_code: false,
             front_end_compiled: true,
             front_end_native: native_front_end,
@@ -3187,17 +3190,12 @@ impl Fx26Session {
     /// the first time. Every run of lowered code goes through here, so a
     /// session that runs none loads neither (`tests/scheme_free.rs`).
     pub fn lowered(&mut self) -> &mut Session {
-        self.whole_prelude();
-        if std::mem::take(&mut self.runtime_pending) && !self.scheme.is_bound("%fx26-unit") {
-            self.scheme.eval_str("<fx26-runtime>", RUNTIME).expect("the FX-26 runtime must load");
-        }
+        scheme_ready(&mut self.scheme).expect("the prelude and FX-26's runtime must load");
         &mut self.scheme
     }
 
     pub fn whole_prelude(&mut self) {
-        if std::mem::take(&mut self.prelude_data_pending) {
-            self.scheme.eval_str("<prelude>", fixpt_scheme::PRELUDE_DATA).expect("the prelude must load");
-        }
+        self.lowered();
     }
 
     /// The initial environment as the FX-26 reader reads it, read once.

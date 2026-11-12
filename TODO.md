@@ -6043,7 +6043,7 @@ suite runs after `fixpt prewarm`, so it never shows there. To find which
 recursion, and whether the compile should run on a thread of its own
 with a stack sized for it, as the front end's other long walks do.
 
-## 254. `FIXPT_FRONT_END_LOWERED=1` fails in the CLI: `unbound variable: char=?` (found 2026-11-11)
+## 254. ~~`FIXPT_FRONT_END_LOWERED=1` fails in the CLI: `unbound variable: char=?`~~ (found 2026-11-11; fixed the same day)
 
 `printf '(+ 1 2)\n' | FIXPT_FRONT_END_LOWERED=1 fixpt eval -` stops with
 "unbound variable: char=?", a release build at 5983942d too (so before
@@ -6052,3 +6052,5 @@ prelude's data (`prelude-data.scm`, `whole_prelude`), which a session
 whose strategy is not `Lower` does not load before it. To load it with
 lowered code, as `runtime.scm` is loaded (`load_code`), when the Scheme
 engine is made only where lowered code runs (`TODO.md` §252's host).
+Fixed: `load_code` and `lowered()` make the session ready by what it has
+bound (`scheme_ready`: the prelude's control and data, and the runtime).
