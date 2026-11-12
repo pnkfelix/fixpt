@@ -264,16 +264,10 @@ pub fn repl(backend: Backend) -> i32 {
         _ => println!(" `,help` for commands, `,code` to show the lowering to Scheme, which is not what runs. ^D leaves.)"),
     }
 
-    // FX-26 code reads FX-26 input: the eager reader written in FX-26, once
-    // its licence is checked. Without it, the Rust reader.
-    let mut eager = match session.load_own_reader().map_err(|e| String::from(e.message)).and_then(|()| {
-        fixpt_scheme::eager::EagerReader::attach_starting(
-            session.scheme.lowered(),
-            fixpt_fx26::session::READER_PREFIX,
-            "eager-start-fx26",
-        )
-        .map_err(|e| e.to_string())
-    }) {
+    // FX-26 code reads FX-26 input: the eager reader written in FX-26, run
+    // compiled with the front end once its licence is checked
+    // (`fixpt_fx26::eager`). Without it, the Rust reader.
+    let mut eager = match fixpt_fx26::eager::Eager::start(&mut session) {
         Ok(r) => {
             println!("(read as you type by the eager reader written in FX-26; its licence checked)");
             Some(r)
@@ -1763,7 +1757,7 @@ fn answer_hole(c: &mut Checker, form: &Syntax) -> Option<Vec<String>> {
 struct Oracle<'a> {
     session: &'a mut Fx26Session,
     /// The eager reader written in FX-26, deciding what `Enter` does.
-    reader: Option<&'a mut fixpt_scheme::eager::EagerReader>,
+    reader: Option<&'a mut fixpt_fx26::eager::Eager>,
 }
 
 impl crate::lineedit::Oracle for Oracle<'_> {
@@ -1771,7 +1765,18 @@ impl crate::lineedit::Oracle for Oracle<'_> {
         match self.reader.as_deref_mut() {
             // A `,help` hole in FX-26 is answered once the form is entered,
             // so a hole mid-form is just an unfinished form.
-            Some(r) => crate::eager_status(r, self.session.scheme.lowered(), text, at_enter, SyntaxProfile::FX26, false),
+            Some(r) => {
+                use crate::lineedit::Status;
+                use fixpt_fx26::eager::Status as Eager;
+                match r.status(&mut self.session.scheme, text, at_enter) {
+                    Ok(Eager::Complete) => Status::Complete,
+                    Ok(Eager::Incomplete | Eager::Hole { .. }) => Status::Incomplete,
+                    Ok(Eager::Invalid { at, message }) => Status::Invalid { at, message },
+                    // The eager reader failing is a bug in it, not the
+                    // user's problem: the Rust reader answers instead.
+                    Err(_) => crate::lineedit::Reread(SyntaxProfile::FX26).status(text, at_enter),
+                }
+            }
             None => crate::lineedit::Reread(SyntaxProfile::FX26).status(text, at_enter),
         }
     }

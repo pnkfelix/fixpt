@@ -763,6 +763,16 @@ fn prewarm() -> i32 {
             status = 1;
         }
     }
+    // The eager reader's licence, which a REPL checks before it reads what
+    // is typed with the reader compiled (`fixpt_fx26::eager`): its mark.
+    let started = std::time::Instant::now();
+    match fixpt_fx26::session::reader_licensed() {
+        Ok(()) => println!("; the eager reader's licence checked, {:.1} s", started.elapsed().as_secs_f64()),
+        Err(e) => {
+            eprintln!("fixpt: prewarm: the eager reader's licence: {e}");
+            status = 1;
+        }
+    }
     match facts.map_err(|e| e.to_string()).and_then(|t| t.join().unwrap_or_else(|_| Err("panicked".to_string()))) {
         Ok(secs) => println!("; the front end's facts cached, {secs:.1} s"),
         Err(e) => {

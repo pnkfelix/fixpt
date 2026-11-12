@@ -368,9 +368,55 @@ pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
 /// needs. A tenth of the front end, and of its loading, which is most of a
 /// session's start (3.6 s for the whole, lowered, on x86_64).
 pub fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
+    load_lowered(scheme, &reader_text())
+}
+
+/// The reader and parser's text: the front end's files to `reader.fx`,
+/// the eager reader's among them.
+fn reader_text() -> String {
     let parser = crate::FRONT_END_FILES.iter().position(|(n, _)| *n == "reader.fx").expect("listed");
-    let text = crate::FRONT_END_FILES[..=parser].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
-    load_lowered(scheme, &text)
+    crate::FRONT_END_FILES[..=parser].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n")
+}
+
+/// The eager reader's licence (`Checker::reader_licence`), checked of the
+/// reader's text without lowering it, as the REPL runs the reader compiled
+/// with the rest of the front end (`crate::eager`): it runs on every
+/// keystroke, so nothing of it may run before the licence says it can.
+/// Once a build: a mark kept in the cache directory once it holds (none
+/// with `FIXPT_NO_CACHE`, when it is checked each time).
+pub fn reader_licensed() -> Result<(), String> {
+    use std::hash::{Hash, Hasher};
+    let text = reader_text();
+    let mark = (std::env::var_os("FIXPT_NO_CACHE").is_none())
+        .then(crate::fasl::cache_dir)
+        .flatten()
+        .map(|dir| {
+            let mut key = std::collections::hash_map::DefaultHasher::new();
+            (env!("FIXPT_BUILD_HASH"), &text).hash(&mut key);
+            dir.join(format!("reader-licensed-{:016x}", key.finish()))
+        });
+    if mark.as_ref().is_some_and(|m| m.exists()) {
+        return Ok(());
+    }
+    let mut c = Checker::new();
+    let at = |e: FxError| format!("the reader, {}: {}", crate::front_end_location(e.span.start as usize), e.message);
+    let forms = c.read_in(FileId(0), &text).map_err(at)?;
+    let done = c.declare_ahead(&forms).map_err(at)?;
+    for (f, done) in forms.iter().zip(done) {
+        if !done {
+            c.top_all(f).map_err(at)?;
+        }
+    }
+    c.reader_licence()?;
+    if let Some(m) = mark
+        && m.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+    {
+        let tmp = m.with_extension(format!("tmp{}", std::process::id()));
+        if std::fs::write(&tmp, b"licensed").is_ok() {
+            let _ = std::fs::rename(&tmp, &m);
+        }
+    }
+    Ok(())
 }
 
 /// Each of `entries`, called by `{prefix}{name}` from Scheme, run as the
@@ -3301,7 +3347,7 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 57] = [
+    pub const FRONT_ENTRIES: [&'static str; 68] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "includes-given!", "standard-names!", "check-macro-uses!", "keys-mirrored!", "expansions-made", "macro-source", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-adopt-globals!", "compile-adopt-broken?", "compile-name-word!", "compile-defining!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
@@ -3310,6 +3356,9 @@ impl Fx26Session {
         "checked-reps", "checked-reps-again", "check-more-typed", "import-types", "check-text-typed",
         "native-assemble-arm64-regs", "native-adapter-arm64",
         "native-compile-arm64-proc", "program-walked", "program-shaped", "check-global-shapes!",
+        // The eager reader's (`crate::eager`), run compiled with the rest.
+        "eager-start-fx26", "eager-feed", "eager-feed-string", "eager-status", "eager-state-kind", "eager-state-position",
+        "eager-state-message", "eager-state-data", "eager-context", "eager-hole-closers", "eager-state-syntax",
     ];
 
     /// The front end's checker and compilers run as register code, not as

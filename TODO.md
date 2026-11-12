@@ -5759,6 +5759,11 @@ parse's changes of 2026-11-11 is not known (a comparison with a43f87cb
 was begun and stopped). A fix: say `ready` only from inside the loop's
 caller, or let gdb attach again until `spin` is on the stack.
 
+
+Seen again 2026-11-12, in a debug suite run (1188 of 1189 passed): gdb's
+interrupt landed in Rust (a hash table's lookup), before `spin` ran; the
+test alone passed three times of three.
+
 ## 244. Sets keyed by small ints: what the checker's walks need, and bit vectors in the runtime (the user's, 2026-11-11)
 
 The FX-26 checker's type-graph walks (`k-param-sels-from`,
@@ -6424,3 +6429,17 @@ procedural macro's transformer runs in a session, and a heap, of its own,
 a second heap in the process, which cannot be at the fixed base: its front
 end is always copied in (about 2 s over the tests heavy in macros, against
 the lowered prelude); accepted.
+
+Then (2026-11-12): the paths that lower, found (`Front::lowered` made to
+panic, the debug suite run, each failure grouped by its first caller):
+the REPL's start loaded the eager reader lowered (`load_own_reader`),
+so every interactive session made a Scheme engine. Now the reader runs
+compiled with the front end (its entry points among `FRONT_ENTRIES`),
+driven by `fixpt_fx26::eager` (the FX-26 REPL's own; Scheme's REPL keeps
+`fixpt_scheme::eager`), its licence checked of its text without lowering
+it (`session::reader_licensed`, a mark a build, made by `fixpt prewarm`).
+Speculation already follows the session's strategy. Left: some seventy
+tests that lower by the library default (`run::run`, `eager::session`,
+`redefine::run`, the `programs_do_as_they_say` helpers, …), and the tests
+that lower on purpose (`processes` under seeds, the comparisons), to ask.
+
