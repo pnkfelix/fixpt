@@ -696,7 +696,9 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
 ];
 
 /// `fixpt prewarm`: the two caches of the FX-26 front end made now
-/// (`front_end_cache`), and the reader's lowering (`load_lowered`), which a
+/// (`front_end_cache`), its facts (`syn::prewarm_front_end_facts`), the
+/// bootstrap program's compiles (`bootstrap_cache`), and the reader's
+/// lowering (`load_lowered`), which a
 /// REPL's start reads, shared by every executable built from the same
 /// sources: the one for its register code, which library sessions (the
 /// tests') and `fx-regs-fxjit-nativecc` read, and the one for its native
@@ -718,6 +720,10 @@ fn prewarm() -> i32 {
         FX26_MACHINES.iter().find(|(_, run, m, c, _)| *run == "cellular" && (*c == Some("native")) == native && (native || c.is_none()) && unavailable(*m, *c).is_none()).map(|(n, ..)| *n)
     };
     let mut status = 0;
+    // The front end's facts, as the Rust checker finds them for the
+    // compiler written in FX-26 (`syn::prewarm_front_end_facts`), which
+    // many tests compile it with: needing nothing above, from the start.
+    let facts = std::thread::Builder::new().stack_size(256 << 20).spawn(fixpt_fx26::syn::prewarm_front_end_facts);
     // The bootstrap program compiled by the compiler written in FX-26, as
     // the tests of the native compilers compare it (`bootstrap_cache`): on
     // the front end's register code, once that is cached, beside the rest.
@@ -754,6 +760,13 @@ fn prewarm() -> i32 {
         Ok(()) => println!("; the reader's lowering cached, {:.1} s", started.elapsed().as_secs_f64()),
         Err(e) => {
             eprintln!("fixpt: prewarm: the reader: {e}");
+            status = 1;
+        }
+    }
+    match facts.map_err(|e| e.to_string()).and_then(|t| t.join().unwrap_or_else(|_| Err("panicked".to_string()))) {
+        Ok(secs) => println!("; the front end's facts cached, {secs:.1} s"),
+        Err(e) => {
+            eprintln!("fixpt: prewarm: the front end's facts: {e}");
             status = 1;
         }
     }

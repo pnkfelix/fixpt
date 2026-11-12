@@ -632,7 +632,33 @@ pub fn rust_facts(scheme: &mut Front, file: FileId, text: &str) -> R<Handle> {
 /// What it found kept, and read back where it was (`facts_cache`): the
 /// same text checks alike.
 pub fn rust_facts_in(scheme: &mut Front, file: FileId, text: &str, conv: crate::ast::Conv, syscalls: bool) -> R<Handle> {
-    let found = crate::facts_cache::found(text, conv, syscalls, || {
+    let found = form_facts(file, text, conv, syscalls)?;
+    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    // And each `with`'s module's values it names, and their positions, by
+    // expression (`checked-withs!`), and each module reshaped
+    // (`checked-reshapes!`): the checker's record, which the compiler reads.
+    let withs = scheme.make(|m| found.withs(m.heap()));
+    crate::entries::call(&mut *scheme, "checked-withs!", &[withs]).map_err(|e| fail(e.to_string()))?;
+    let reshapes = scheme.make(|m| found.reshapes(m.heap()));
+    crate::entries::call(&mut *scheme, "checked-reshapes!", &[reshapes]).map_err(|e| fail(e.to_string()))?;
+    let list = scheme.make(|m| found.facts(m.heap()));
+    Ok(list)
+}
+
+/// The front end's facts, as the tests compile it ([`rust_facts`], of file
+/// 0), found now and kept (`fixpt prewarm`): so that a suite's tests,
+/// started together, find them rather than each checking the front end.
+/// How long it took, or why it failed.
+pub fn prewarm_front_end_facts() -> Result<f64, String> {
+    let started = std::time::Instant::now();
+    form_facts(FileId(0), &crate::front_end(), crate::ast::Conv::Cellular, false).map_err(|e| e.message)?;
+    Ok(started.elapsed().as_secs_f64())
+}
+
+/// What the Rust checker finds of `text` for [`rust_facts_in`], as plain
+/// data: kept, and read back where it was (`facts_cache`).
+fn form_facts(file: FileId, text: &str, conv: crate::ast::Conv, syscalls: bool) -> R<crate::rust_facts::FormFacts> {
+    crate::facts_cache::found(text, conv, syscalls, || {
         let mut c = crate::Checker::with_convention(conv);
         c.syscalls = syscalls;
         c.base_dir = LOAD_BASE.with(|b| b.borrow().clone());
@@ -649,17 +675,7 @@ pub fn rust_facts_in(scheme: &mut Front, file: FileId, text: &str, conv: crate::
             }
         }
         Ok(crate::rust_facts::FormFacts::of(&c, &tops.iter().collect::<Vec<_>>(), file, text, false))
-    })?;
-    let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    // And each `with`'s module's values it names, and their positions, by
-    // expression (`checked-withs!`), and each module reshaped
-    // (`checked-reshapes!`): the checker's record, which the compiler reads.
-    let withs = scheme.make(|m| found.withs(m.heap()));
-    crate::entries::call(&mut *scheme, "checked-withs!", &[withs]).map_err(|e| fail(e.to_string()))?;
-    let reshapes = scheme.make(|m| found.reshapes(m.heap()));
-    crate::entries::call(&mut *scheme, "checked-reshapes!", &[reshapes]).map_err(|e| fail(e.to_string()))?;
-    let list = scheme.make(|m| found.facts(m.heap()));
-    Ok(list)
+    })
 }
 
 /// Compile `text` with the compiler written in FX-26, given what checking
