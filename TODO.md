@@ -4546,7 +4546,7 @@ another order, or `cond` for `and`/`or` (`k-has-id?` in `check-types.fx`,
 `k-id-in?` in `check-print-parts.fx`: one membership of an id, twice; and
 `k-given-member?`, of a field of each).
 
-## 189. Heap dumps for FX-26, for faster testing (the user's, 2026-10-31; urgent)
+## 189. Heap dumps for FX-26, for faster testing (the user's, 2026-10-31; built 2026-10-31; left: a dump keyed by the files it loads, dumps on `fx-regs-fxjit-nativecc`, `,dump`, the Rust checker after a resume)
 
 Add heap dumping to FX-26: a running program's heap written to a file
 and loaded back, so that a test suite such as Heist's starts from the
@@ -6300,7 +6300,7 @@ ready session's image mapped privately, as the front end's cache is) and
 a copy of what lies outside it; and moving about such a tree is Baker's
 deep-against-shallow-binding question again.
 
-## 261. A primitive that runs code, called with its caller's values not rooted (found 2026-11-12)
+## 261. A primitive that runs code, called with its caller's values not rooted (found 2026-11-12; fixed the same day; left, not urgent: a leaf unable to run code by its type)
 
 A soundness bug, latent: nothing in the suite has met it. Found while
 asking what a run of a machine owns (procedural macros run compiled,
@@ -6393,7 +6393,7 @@ let its collection be held off while the nested code runs, in place of
 the caller's stacks copied and rooted (sound only once the bound is
 enforced, and the stress policy would have to respect it).
 
-## 262. A library session's default strategy is to lower (the user's, 2026-11-12; high priority)
+## 262. ~~A library session's default strategy is to lower~~ (the user's, 2026-11-12; done the same day)
 
 `Fx26Session::with_backend` makes a session whose programs are lowered to
 Scheme and run on the Scheme VM (`Strategy::Lower`), though nothing else
@@ -6477,7 +6477,7 @@ most `fixpt-heap`'s tests; outside them `fixpt-runtime/src/host.rs`
 `fixpt-native/src/direct.rs` (`collect_young`), each to be read for
 which it means. Its own commit.
 
-## 264. The globals and the symbol table off the heap, scanned whole by every collection (2026-11-12)
+## 264. The globals and the symbol table off the heap, scanned whole by every collection (2026-11-12; done the same day; left, maybe: a slot made when its symbol is bound, survivors moved to the tables area)
 
 The global variables' cells (`Heap::globals`, a `Vec<Value>` a symbol's
 global-slot field indexes) and the intern table (`Heap::symbols`) lived in
@@ -6511,7 +6511,7 @@ slot made when a symbol is first bound would make the table some fifteen
 times smaller. Maybe: a major collection moving the run-time chunks that
 survive into the tables area (the user's).
 
-## 265. One prewarm's caches for debug and release alike (2026-11-12)
+## 265. ~~One prewarm's caches for debug and release alike~~ (2026-11-12; done the same day)
 
 A debug prewarm takes some 80 s, a release one 11 s; were the caches
 shared, a debug build would read the release one's. They are the same
@@ -6534,7 +6534,7 @@ makes its own and holds them the same file by file. The steps: the
 release prewarm (some 11 s cold) and suite before a commit, the debug suite
 before a push with no debug prewarm of its own.
 
-## 266. A test of the checker's cost, not only of what it says (2026-11-12)
+## 266. A test of the checker's cost, not only of what it says (2026-11-12; done the same day; left: the checker's other walks with a path)
 
 The FX-26 checker's `k-kept-reading` walked a global's type with the path
 to it, not the types seen (the Rust checker's `kept_reading` keeps
@@ -6555,7 +6555,7 @@ takes some 0.1 s, 0.3 s): with the old walk, the first not checked in
 `seen` or a path (`check-syntax`, `check-subst`, `check-print-parts`)
 looked at for the same shape.
 
-## 267. A call through `#%toplevel` lost its latent effect to masking (2026-11-12)
+## 267. ~~A call through `#%toplevel` lost its latent effect to masking~~ (2026-11-12; fixed the same day)
 
 Found writing §266's test, whose macro calls its functor as `(with
 #%toplevel double)`: the FX-26 checker said `((with #%toplevel g) 1)` did
@@ -6574,7 +6574,7 @@ held to what each says, not only to their agreeing. The shared caches'
 makers noted file by file (`FILE.made-by`, `session::note_made`), not by a
 cold prewarm, which another process may have made them before.
 
-## 268. Cellular words' primitives and pairs without the call-out (2026-11-12)
+## 268. Cellular words' primitives and pairs without the call-out (2026-11-12; x86_64 done; left: arm64, the interpreter's `prim`, `field!` and `closure`)
 
 What the cellular fixpoints spent their time on (`FIXPT_CALLOUTS`): some
 410 M call-outs in stage 2, `prim` 247 M and `cons` 139 M, each with the
