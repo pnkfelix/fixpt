@@ -4546,7 +4546,7 @@ another order, or `cond` for `and`/`or` (`k-has-id?` in `check-types.fx`,
 `k-id-in?` in `check-print-parts.fx`: one membership of an id, twice; and
 `k-given-member?`, of a field of each).
 
-## 189. Heap dumps for FX-26, for faster testing (the user's, 2026-10-31; built 2026-10-31; left: a dump keyed by the files it loads, dumps on `fx-regs-fxjit-nativecc`, `,dump`, the Rust checker after a resume)
+## 189. Heap dumps for FX-26, for faster testing (the user's, 2026-10-31; built 2026-10-31; left: `,dump`, the Rust checker after a resume, `dump-heap!` standing alone)
 
 Add heap dumping to FX-26: a running program's heap written to a file
 and loaded back, so that a test suite such as Heist's starts from the
@@ -4615,6 +4615,20 @@ Heist's runners on dumps (Heist's to decide; its tree is not ours); and
 the Rust checker's view after a resume, which knows nothing of the
 program, so that what needs it (sessions on the Rust checker, `stage`
 lowered) does not see the program's names.
+
+Done (2026-11-13): a dump keyed by every file its load read, not only
+those it was given: `fixpt_fx26::reads`, the one way the checker reads
+from disk (`fixpt-tidy`'s `reads.rs`), logs each file read or tried, its
+path and a digest of what was in it, while the CLI keeps a log (`fixpt
+dump`, and `fixpt run` for `dump-heap!`); the `.fasl`s a session maps
+go through it too (`reads::map`). A file changed, made or gone since
+makes the dump stale (`dumps::a_dump_is_stale_when_a_file_its_load_read_
+changes`). And `fixpt dump --standalone` (the user's): kept by no file,
+an application that outlives its sources, still only by the build of
+fixpt that made it. A program's own `dump-heap!` cannot ask for that yet.
+What a program read as it ran (its own I/O, not a load) is what the
+heap holds, by any key. Dumps on `fx-regs-fxjit-nativecc` work since
+§262's caches (`dumps::a_dump_resumes_where_fx26_compiles_natively`).
 
 ## 190. ~~Q: why is `(define-datatype var (union symbol pat))` accepted?~~ (the user's, 2026-10-31; done 2026-11-05)
 
@@ -6533,6 +6547,13 @@ says which profile made the caches (`prewarm-BUILD.made-by`), and
 makes its own and holds them the same file by file. The steps: the
 release prewarm (some 11 s cold) and suite before a commit, the debug suite
 before a push with no debug prewarm of its own.
+
+Found by it (2026-11-13): the native front end's cache was not the same
+whatever made it: `native_image` listed the native code it kept in the
+order of a map keyed by where each was in the session's heap, which what
+the process did first decides (`fixpt dump` before `fixpt run`), not the
+build. Listed in the order of their copies now, which the graph alone
+decides; `run`, `dump` and `prewarm` make the same bytes.
 
 ## 266. A test of the checker's cost, not only of what it says (2026-11-12; done the same day; left: the checker's other walks with a path)
 

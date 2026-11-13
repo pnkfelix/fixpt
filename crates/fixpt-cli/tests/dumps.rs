@@ -2,8 +2,9 @@
 //! by `fixpt dump IMAGE FILE…` or by the program itself (`dump-heap!`), and
 //! resumed, by `fixpt resume IMAGE [FILE…] -- ARG…`, where the load is not
 //! done again: what it left in the heap is there, and more of the program
-//! may be checked and run after it. A dump of sources changed since, or a
-//! file that is no dump, is refused.
+//! may be checked and run after it. A dump one of whose files has changed
+//! since (one given, or one they load), or a file that is no dump, is
+//! refused; a dump made to stand alone is kept by no file.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -84,6 +85,34 @@ fn a_stale_dump_or_none_is_refused() {
     let (code, _, err) = fixpt(&dir, &["resume", "more.fx"]);
     assert_eq!(code, Some(1));
     assert!(err.contains("it is not a dump"), "{err}");
+}
+
+/// Stale by a file the program loads, not only one it was given: `lib.fx`,
+/// which `loads.fx` loads (`load-module`).
+#[test]
+fn a_dump_is_stale_when_a_file_its_load_read_changes() {
+    let dir = scratch("loaded");
+    let (code, _, err) = fixpt(&dir, &["dump", "loads.img", "loads.fx"]);
+    assert_eq!(code, Some(0), "{err}");
+    let (code, out, err) = fixpt(&dir, &["resume", "loads.img"]);
+    assert_eq!((code, out.as_str()), (Some(0), "base 3\n"), "{err}");
+    std::fs::write(dir.join("lib.fx"), "(define base int 4)\n").expect("written");
+    let (code, _, err) = fixpt(&dir, &["resume", "loads.img"]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("is stale"), "{err}");
+}
+
+/// A dump made to stand alone, an application: its sources changed or gone,
+/// it runs as its load left it.
+#[test]
+fn a_standalone_dump_outlives_its_sources() {
+    let dir = scratch("standalone");
+    let (code, _, err) = fixpt(&dir, &["dump", "--standalone", "loads.img", "loads.fx"]);
+    assert_eq!(code, Some(0), "{err}");
+    std::fs::write(dir.join("lib.fx"), "(define base int 4)\n").expect("written");
+    std::fs::remove_file(dir.join("loads.fx")).expect("removed");
+    let (code, out, err) = fixpt(&dir, &["resume", "loads.img"]);
+    assert_eq!((code, out.as_str()), (Some(0), "base 3\n"), "{err}");
 }
 
 #[test]

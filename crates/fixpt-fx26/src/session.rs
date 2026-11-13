@@ -611,12 +611,21 @@ fn native_image(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, standard: fi
         s
     };
     let adapter = heap.adapter_code().filter(|a| made.contains_key(&a.raw()));
+    // In the order of their copies, which the graph alone decides: `made`
+    // is keyed by where each was in `heap`, which what the process did
+    // before decides, and a cache must be the same whatever made it.
+    let mut native: Vec<Value> = made
+        .iter()
+        .filter(|&(&k, _)| {
+            let v = Value::from_raw(k);
+            heap.code_part(v) == Some(fixpt_heap::CodePart::Native) && Some(v) != adapter && !let_go.contains_key(&k)
+        })
+        .map(|(_, &c)| c)
+        .collect();
+    native.sort_by_key(|c| std::cmp::Reverse(c.raw()));
     let mut codes = Value::NULL;
-    for (&k, &c) in &made {
-        let v = Value::from_raw(k);
-        if heap.code_part(v) == Some(fixpt_heap::CodePart::Native) && Some(v) != adapter && !let_go.contains_key(&k) {
-            codes = alone.cons(c, codes);
-        }
+    for c in native {
+        codes = alone.cons(c, codes);
     }
     let adapter = adapter.map_or(Value::FALSE, |a| made[&a.raw()]);
     // The standard environment as the reader written in FX-26 reads it
@@ -732,16 +741,36 @@ fn front_end_key() -> u64 {
     key.finish()
 }
 
-/// The key of a dump made on `machine` of the program in `sources` (each
-/// file's path and text).
-pub fn dump_key(machine: &str, sources: &[(String, String)]) -> u64 {
+/// The key of a dump made on `machine` of a program whose load read
+/// `files`: each file's path, and the digest of what was in it
+/// ([`crate::reads::digest`]), none if there was nothing to read.
+pub fn dump_key(machine: &str, files: &[(String, Option<u64>)]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut key = std::collections::hash_map::DefaultHasher::new();
     machine.hash(&mut key);
-    for (path, text) in sources {
-        (path, crate::fasl::digest(text)).hash(&mut key);
-    }
+    files.hash(&mut key);
     key.finish()
+}
+
+/// Each of `paths` as a dump keys it ([`dump_key`]): what is in it now.
+pub fn dump_files_now(paths: &[String]) -> Vec<(String, Option<u64>)> {
+    paths.iter().map(|p| (p.clone(), std::fs::read(p).ok().map(|b| crate::reads::digest(&b)))).collect()
+}
+
+/// What a dump of the program in `sources` (each file's path and text) is
+/// keyed by: those files, then every other its load read, by
+/// [`crate::reads`]'s log (`load-input`, `load-module`, `include`, a
+/// `.fasl`), each once.
+fn dump_files(sources: &[(String, String)]) -> Vec<(String, Option<u64>)> {
+    let given = sources.iter().map(|(p, t)| (p.clone(), Some(crate::reads::digest(t.as_bytes()))));
+    let read = crate::reads::logged().into_iter().map(|(p, d)| (p.display().to_string(), d));
+    let mut files: Vec<(String, Option<u64>)> = Vec::new();
+    for f in given.chain(read) {
+        if !files.contains(&f) {
+            files.push(f);
+        }
+    }
+    files
 }
 
 /// What a dump says of itself, if `bytes` is one this build can read: its
@@ -787,8 +816,9 @@ thread_local! {
 fn dump_bytes(heap: &mut fixpt_heap::Heap, standard: fixpt_heap::Value, start: fixpt_heap::Value, machine: &str, sources: &[(String, String)]) -> Result<Vec<u8>, String> {
     let mut header = DUMP_MAGIC.to_vec();
     header.extend(front_end_key().to_le_bytes());
-    header.extend(dump_key(machine, sources).to_le_bytes());
-    let paths: String = sources.iter().map(|(p, _)| format!("{p}\n")).collect();
+    let files = dump_files(sources);
+    header.extend(dump_key(machine, &files).to_le_bytes());
+    let paths: String = files.iter().map(|(p, _)| format!("{p}\n")).collect();
     header.extend((paths.len() as u64).to_le_bytes());
     header.extend(paths.as_bytes());
     if header.len() > CACHE_IMAGE_AT {
@@ -2109,7 +2139,7 @@ impl Fx26Session {
         }
         self.own_begun = true;
         let fail = |e: String| FxError::at(Span::new(FileId(0), 0, 0), format!("`{}`: {e}", fasl.display()));
-        let bytes = fixpt_heap::Mapped::open(fasl).map_err(|e| fail(e.to_string()))?;
+        let bytes = crate::reads::map(fasl).map_err(|e| fail(e.to_string()))?;
         let (header, image) = crate::fasl::Header::read(&bytes).map_err(fail)?;
         // Spliced into the heap (`TODO.md` §160 item 5), unless
         // `FIXPT_IMAGE_COPY` asks for it read into a heap of its own and
@@ -2405,7 +2435,7 @@ impl Fx26Session {
     /// code. A stale one said (`fasl_notes`).
     fn program_fasl(&mut self, path: &std::path::Path, forms: &[Syntax]) -> Option<ProgramFasl> {
         let fasl = crate::fasl::path_for(path);
-        let bytes = fixpt_heap::Mapped::open(&fasl).ok()?;
+        let bytes = crate::reads::map(&fasl).ok()?;
         let stale = |s: &mut Self, why: &str| {
             s.checker.fasl_notes.push(format!("`{}` is stale ({why}): `{}` is run from its source", fasl.display(), path.display()));
             None

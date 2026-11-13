@@ -81,8 +81,12 @@ usage:
                                  `,load`) reads while it is fresh; its native
                                  code kept, or with --cellular its cellular
                                  words alone, compiled natively at load
-  fixpt dump IMAGE FILE...       FX-26: the program in FILE... loaded, and its
-                                 heap dumped to IMAGE (`main` not called)
+  fixpt dump [--standalone] IMAGE FILE...
+                                 FX-26: the program in FILE... loaded, and its
+                                 heap dumped to IMAGE (`main` not called);
+                                 stale once a file its load read changes,
+                                 unless --standalone: kept by no file, only
+                                 by the build of fixpt that made it
   fixpt resume IMAGE [FILE...] [-- ARG...]
                                  the program dumped to IMAGE, by `fixpt dump`
                                  or its own `dump-heap!`, as its load left it:
@@ -419,13 +423,15 @@ fn run(args: &[String]) -> i32 {
         }
         // A program's heap dumped, and resumed (`TODO.md` §189).
         Some(cmd @ ("dump" | "resume")) => {
+            let standalone = cmd == "dump" && rest.get(1).is_some_and(|a| a == "--standalone");
+            let rest: Vec<String> = rest.iter().enumerate().filter(|(i, _)| !(standalone && *i == 1)).map(|(_, a)| a.clone()).collect();
             if rest.len() < 3 && cmd == "dump" || rest.len() < 2 {
-                eprintln!("fixpt {cmd}: `fixpt dump IMAGE FILE…` or `fixpt resume IMAGE [FILE…] [-- ARG…]`");
+                eprintln!("fixpt {cmd}: `fixpt dump [--standalone] IMAGE FILE…` or `fixpt resume IMAGE [FILE…] [-- ARG…]`");
                 return 2;
             }
             let machine = FX26_MACHINE_NAME.get().cloned().unwrap_or_default();
             if cmd == "dump" {
-                fx26::dump_files(backend, &rest[1], &rest[2..], &machine)
+                fx26::dump_files(backend, &rest[1], &rest[2..], &machine, standalone)
             } else {
                 // Files to run as more of the program, then the program's
                 // arguments, after a `--`.
@@ -975,7 +981,7 @@ pub(crate) fn apply_heap_policy(host: &mut fixpt_runtime::host::Host) {
 }
 
 /// The options a command takes after it, left for it to read.
-const COMMAND_OPTIONS: [&str; 10] = ["--raw", "--full-literals", "--reps", "--program", "--cellular", "--eval", "--check", "--compile", "--help", "-h"];
+const COMMAND_OPTIONS: [&str; 11] = ["--raw", "--standalone", "--full-literals", "--reps", "--program", "--cellular", "--eval", "--check", "--compile", "--help", "-h"];
 
 /// The options, read from anywhere before a `--`; the rest of the words,
 /// in order, with the `--` and all after it. Or why not: an unknown option.
