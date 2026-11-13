@@ -152,7 +152,12 @@
                    (let ((i (ready)))
                      (if (>= i 0)
                          i
-                         (let ((t (pop-any)))
+                         ;; What is due fired first, every time round: a
+                         ;; task preempted is parked and popped again, so
+                         ;; one that spins would otherwise keep a deadline,
+                         ;; the input or a process's news from ever being
+                         ;; seen (`TODO.md` §270).
+                         (let ((t (begin ((proj %sched unit unit bool) 30 #u #u) (pop-any))))
                            (cond ((procedure? t) (begin (run-task t) (go)))
                                  (((proj %sched unit unit bool) 21 #u #u) (go))
                                  ;; Preempted since it looked, it may have

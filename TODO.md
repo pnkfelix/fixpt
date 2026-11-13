@@ -5138,7 +5138,7 @@ twins take is still there, unused. **Left**:
   machine's start gains what mapping a larger image costs (142 MB to 59
   for the default machine's, 3 ms of its start).
 
-## 211. Heist's R4: evaluating FX-26 inside the running editor (Heist's, 2026-11-01; 2–5 done; left: time slices, a resuming handler's delimiting, macros)
+## 211. Heist's R4: evaluating FX-26 inside the running editor (Heist's, 2026-11-01; 1 (dropping), 2–6 done; left: resuming what a budget cut off, macros)
 
 Heist's `docs/fx26-for-yank.md`, "R4. Evaluating FX-26 inside the running
 editor", for Yank's `M-:`, `C-x C-e` and init file: a persistent
@@ -6692,3 +6692,16 @@ expects `b` (`echo B1; sleep 0.1; echo B2`) to end before `a` (`sleep
 0.3; echo A`), a margin of 0.2 s a loaded machine may eat; or a race in
 the news itself. To find which when it fails again, its message kept,
 before widening the margin.
+
+## 270. A sleeping task never woke while another task spun (found and fixed 2026-11-13)
+
+Found trying §211's time slices: a `race` of a branch that never ends
+against one waiting for a cell a process fills after `sleep-until` hung on
+every machine. The first task's `main-wait` fired what is due (op 21, the
+clock, the input, processes' news) only when no task could run; a task
+preempted is parked and popped again, so one that spins kept every
+deadline from being seen. `preempt` fired them (op 30) only when the first
+task itself was preempted, which is why a spinning first task let a
+sleeper wake. Now `main-wait` fires what is due each time round
+(`processes.fx`); op 30 returns at once when nothing waits on a timer, the
+input or a process. Test: `processes/race-deadline.fx`.
