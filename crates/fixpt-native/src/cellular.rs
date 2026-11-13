@@ -1168,6 +1168,9 @@ pub(crate) fn fx26_module_of(generator: &str, registers: &[(&str, i64)], extra: 
         ("n-st-resume", offset_of!(State, resume)), ("n-st-trap", offset_of!(State, trap)),
         ("n-st-exit", offset_of!(State, exit)), ("n-st-cards", offset_of!(State, cards)),
         ("n-st-code-lo", offset_of!(State, code_lo)), ("n-st-code-delta", offset_of!(State, code_delta)),
+        ("n-st-top", offset_of!(State, top)), ("n-st-alloc-limit", offset_of!(State, alloc_limit)),
+        ("n-st-words", offset_of!(State, words)), ("n-st-regs", offset_of!(State, regs)),
+        ("n-st-prim-call", offset_of!(State, prim_call)),
     ] {
         c(name, o as i64, "a State field's offset");
     }
@@ -1286,6 +1289,38 @@ pub(crate) extern "C" fn pure_call(st: *mut State, p: u64, x: u64, y: u64, z: u6
     out
 }
 
+/// A compiled word's `prim p n` (`State::prim_call`), its `p` and `n` known
+/// as the word was compiled (`cellular::x64::prim_compiled`): checked and
+/// called as the call-out does (`prim_checked`), past the same operands,
+/// and what follows as it follows the call-out's; but no name to find the
+/// routine by, and no operands to read back from the word.
+pub(crate) extern "C" fn prim_call(st: *mut State, p: u64, n: u64) -> u64 {
+    // SAFETY: as for `callout`: the state of a machine stopped with every
+    // register saved, its runtime held exclusively.
+    let st = unsafe { &mut *st };
+    let result = if st.rt == 0 { Err(Trap::Prim("no runtime to call a primitive in".into())) } else { prim_checked(st, p as usize, n as usize) };
+    // SAFETY: as above.
+    let heap = unsafe { heap_of(st) };
+    st.base = 0;
+    st.alloc_limit = heap.inline_limit() as u64;
+    match result {
+        Ok(()) => 0,
+        Err(t) => trapped(st, t),
+    }
+}
+
+/// A call-out's trap, kept in the state for the machine to stop with:
+/// its code, and a failed primitive's message.
+fn trapped(st: &mut State, t: Trap) -> u64 {
+    let (code, aux) = t.code();
+    if let Trap::Prim(m) = &t {
+        LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m.clone()));
+    }
+    st.status = code;
+    st.aux = aux;
+    1
+}
+
 fn callout_on(st: &mut State, n: u64, name: &'static str, heap: &mut Heap, ds: &mut [Value], rs: &mut [Value]) -> u64 {
     if !matches!(name, "field@" | "field!" | "cons") {
         let result = match name {
@@ -1306,15 +1341,7 @@ fn callout_on(st: &mut State, n: u64, name: &'static str, heap: &mut Heap, ds: &
         st.alloc_limit = heap.inline_limit() as u64;
         return match result {
             Ok(()) => 0,
-            Err(t) => {
-                let (code, aux) = t.code();
-                if let Trap::Prim(m) = &t {
-                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m.clone()));
-                }
-                st.status = code;
-                st.aux = aux;
-                1
-            }
+            Err(t) => trapped(st, t),
         };
     }
     let result = callout_routine(heap, st, ds, rs, name);
@@ -1459,7 +1486,6 @@ fn round_trip(st: &mut State, n: u64) -> Result<(), Trap> {
 /// stacks are roots as they lie: a return entry's `d` and frame pointer
 /// have a fixnum's bits.
 fn prim(st: &mut State) -> Result<(), Trap> {
-    let name = "prim";
     if st.rt == 0 {
         return Err(Trap::Prim("no runtime to call a primitive in".into()));
     }
@@ -1468,6 +1494,30 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     let k = (st.d / 8) as usize;
     let p = rt.heap.bloblet_slot(Value::from_raw(st.cur), k).as_fixnum() as usize; // fields: the cell at the machine's cursor
     let count = rt.heap.bloblet_slot(Value::from_raw(st.cur), k + 1).as_fixnum() as usize; // fields: and the one after it
+    prim_checked(st, p, count)
+}
+
+/// `prim p n` once `p` and `n` are known (from the word's cells, `prim`;
+/// or as it was compiled, `prim_call`): refused if `p` names no primitive
+/// with a function or `n` is not an arity of it, else called.
+fn prim_checked(st: &mut State, p: usize, count: usize) -> Result<(), Trap> {
+    let Some(def) = fixpt_runtime::PRIMITIVES.get(p) else { return Err(Trap::Prim(format!("no primitive {p}"))) };
+    if def.kind.function().is_none() {
+        return Err(Trap::Prim(format!("`{}` needs an engine", def.name)));
+    }
+    if count < def.min || def.max.is_some_and(|m| count > m) {
+        return Err(Trap::Prim(format!("`{}` given {count} argument(s)", def.name)));
+    }
+    prim_known(st, p, count)
+}
+
+/// `prim p n` once `p` and `n` are known and checked (`prim_checked`):
+/// primitive `p`, one with a function, on the top `n` values, the result
+/// in their place.
+fn prim_known(st: &mut State, p: usize, count: usize) -> Result<(), Trap> {
+    let name = "prim";
+    // SAFETY: the runtime `run_in_runtime` holds exclusively.
+    let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let depth = (st.ds_base - st.dsp) as usize / 8;
     if depth < count {
         return Err(Trap::Underflow { routine: name });
@@ -1475,16 +1525,13 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     if count == 0 && st.dsp - 8 < st.ds_limit {
         return Err(Trap::StackOverflow);
     }
-    let Some(def) = fixpt_runtime::PRIMITIVES.get(p) else { return Err(Trap::Prim(format!("no primitive {p}"))) };
+    let def = &fixpt_runtime::PRIMITIVES[p];
     if TIMING.with(|t| *t) {
         PRIM_COUNTS.with(|c| *c.borrow_mut().entry(def.name).or_insert(0) += 1);
         let caller = rt.heap.symbol_name(rt.heap.bloblet_slot(Value::from_raw(st.cur), WORD_NAME));
         PRIM_CALLERS.with(|c| *c.borrow_mut().entry((def.name, caller)).or_insert(0) += 1);
     }
-    let Some((f, reenters)) = def.kind.function() else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
-    if count < def.min || def.max.is_some_and(|m| count > m) {
-        return Err(Trap::Prim(format!("`{}` given {count} argument(s)", def.name)));
-    }
+    let (f, reenters) = def.kind.function().expect("checked to have a function");
     safepoint(st, &mut rt.heap);
     // The top is at `dsp`; the arguments go deepest first.
     // SAFETY: as above.
@@ -1733,6 +1780,7 @@ impl Stacks {
             slice: fixpt_runtime::sched::slice(),
             prof_site: 0,
             prof_sp: 0,
+            prim_call: prim_call as *const () as u64,
         }
     }
 

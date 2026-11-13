@@ -553,6 +553,11 @@
       (else (if (rg-shape-test r-rdi (rg-shape-name what) slow) #u #u)))))
 
 ;; What `prim`, `lambda` or `cellular` does inline, if anything ("").
+;; What a compiled cellular word's `prim p n` is done as in line, if
+;; anything, as register code does it: `rg-inline-name`'s for a primitive,
+;; of one to `r-regs` arguments (`cellular::x64`'s `prim` routine).
+(define rg-prim-inline-name (subr pure (int int) string)
+  (lambda (p c) (if (and (>= c 1) (<= c r-regs)) (rg-inline-name rop-prim p c) "")))
 (define rg-inline-name (subr pure (int int int) string)
   (lambda (op k0 count)
     (cond

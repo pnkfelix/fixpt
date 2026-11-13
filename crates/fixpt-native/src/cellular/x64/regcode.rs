@@ -49,10 +49,49 @@ fn cell_mem(f: usize) -> Mem {
     m(CUR, -((4 + 8 * f) as i32))
 }
 
-/// Whether runtime primitive `p` is the one called `name`.
-fn prim_named(p: usize, name: &str) -> bool {
-    fixpt_runtime::PRIMITIVES.get(p).is_some_and(|d| d.name == name)
+/// Which of `inline_op`'s operations runtime primitive `p`, given `count`
+/// arguments, is done as, if any: register code's `prim`, and a compiled
+/// cellular word's (`cellular::x64`), so that the two do the same.
+pub(super) fn inline_prim(p: usize, count: usize) -> Option<&'static str> {
+    let name = fixpt_runtime::PRIMITIVES.get(p)?.name;
+    match (count, name) {
+        (1, "string-length") => Some("string-length"),
+        (2, "string-ref") => Some("string-ref"),
+        (3, "%region-cons") => Some("rcons"),
+        (1, "%bloblet-fields") => Some("fields"),
+        (3, "%bloblet-set!") => Some("field!"),
+        (1, "char-whitespace?") => Some("whitespace"),
+        (1, "char-numeric?") => Some("numeric"),
+        (1, "%symbol-hash") => Some("symbol-hash"),
+        (1, "%fx26-fixnum?") => Some("fixnum?"),
+        (1, "char?") => Some("char?"),
+        (1, "boolean?") => Some("boolean?"),
+        (1, "symbol?") => Some("symbol?"),
+        (1, "string?") => Some("string?"),
+        (1, "pair?") => Some("pair?"),
+        (2, "%fx26-bitwise-and") => Some("bit-and"),
+        (2, "%fx26-bitwise-ior") => Some("bit-ior"),
+        (2, "%fx26-bitwise-xor") => Some("bit-xor"),
+        (1, "%fx26-bitwise-not") => Some("bit-not"),
+        (1, "exact-integer?") => Some("exact-integer?"),
+        (1, "%fx26-array?") => Some("array?"),
+        (1, "%fx26-f32?") => Some("f32?"),
+        (1, "%fx26-box?") => Some("box?"),
+        (1, "%fx26-sum?") => Some("sum?"),
+        (1, "%fx26-product?") => Some("product?"),
+        (1, "%fx26-procedure?") => Some("procedure?"),
+        (2, "%fx26-char-in?") => Some("char-in"),
+        (2, "string=?") => Some("string="),
+        (2, "modulo") => Some("modulo"),
+        (1, "%make-box") => Some("box"),
+        (2, "%region-new") => Some("rnew"),
+        (_, "%region-closure") if count >= 2 && count <= REGS => Some("region-closure"),
+        (_, "%make-frozen") if count >= 1 => Some("frozen"),
+        (_, "%make-bloblet") if count >= 1 => Some("bloblet"),
+        _ => None,
+    }
 }
+
 
 /// The registers a call into Rust may change that register code may hold
 /// live (`profile_entry`).
@@ -515,7 +554,7 @@ impl Asm {
     /// `what` on `REG1`…`REGn` (`count` of them) into `RESULT`, without
     /// calling out; to `slow` when it cannot be done so. `word` is the
     /// field of a closure's word, for `closure`.
-    fn inline_op(&mut self, what: &str, count: usize, word: usize, slow: Label) {
+    pub(super) fn inline_op(&mut self, what: &str, count: usize, word: usize, slow: Label) {
         use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
         use fixpt_heap::value::make_header;
         let (r1, r2, r3) = (IN_REGS[1], IN_REGS[2], IN_REGS[3]);
@@ -1119,40 +1158,8 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                 let inline = match (name, count) {
                     ("cellular", 2) if ROUTINES[k(o(0))].0 == "cons" => Some("cons"),
                     ("cellular", 2) if ROUTINES[k(o(0))].0 == "field@" => Some("field@"),
-                    ("prim", 1) if prim_named(k(o(0)), "string-length") => Some("string-length"),
-                    ("prim", 2) if prim_named(k(o(0)), "string-ref") => Some("string-ref"),
-                    ("prim", 3) if prim_named(k(o(0)), "%region-cons") => Some("rcons"),
-                    ("prim", 1) if prim_named(k(o(0)), "%bloblet-fields") => Some("fields"),
-                    ("prim", 3) if prim_named(k(o(0)), "%bloblet-set!") => Some("field!"),
-                    ("prim", 1) if prim_named(k(o(0)), "char-whitespace?") => Some("whitespace"),
-                    ("prim", 1) if prim_named(k(o(0)), "char-numeric?") => Some("numeric"),
-                    ("prim", 1) if prim_named(k(o(0)), "%symbol-hash") => Some("symbol-hash"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-fixnum?") => Some("fixnum?"),
-                    ("prim", 1) if prim_named(k(o(0)), "char?") => Some("char?"),
-                    ("prim", 1) if prim_named(k(o(0)), "boolean?") => Some("boolean?"),
-                    ("prim", 1) if prim_named(k(o(0)), "symbol?") => Some("symbol?"),
-                    ("prim", 1) if prim_named(k(o(0)), "string?") => Some("string?"),
-                    ("prim", 1) if prim_named(k(o(0)), "pair?") => Some("pair?"),
-                    ("prim", 2) if prim_named(k(o(0)), "%fx26-bitwise-and") => Some("bit-and"),
-                    ("prim", 2) if prim_named(k(o(0)), "%fx26-bitwise-ior") => Some("bit-ior"),
-                    ("prim", 2) if prim_named(k(o(0)), "%fx26-bitwise-xor") => Some("bit-xor"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-bitwise-not") => Some("bit-not"),
-                    ("prim", 1) if prim_named(k(o(0)), "exact-integer?") => Some("exact-integer?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-array?") => Some("array?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-f32?") => Some("f32?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-box?") => Some("box?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-sum?") => Some("sum?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-product?") => Some("product?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-procedure?") => Some("procedure?"),
-                    ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
-                    ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),
-                    ("prim", 2) if prim_named(k(o(0)), "modulo") => Some("modulo"),
-                    ("prim", 1) if prim_named(k(o(0)), "%make-box") => Some("box"),
-                    ("prim", 2) if prim_named(k(o(0)), "%region-new") => Some("rnew"),
-                    ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),
-                    ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-frozen") => Some("frozen"),
-                    ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-bloblet") => Some("bloblet"),
                     ("lambda", _) if routine_n == const { routine("closure") } => Some("closure"),
+                    ("prim", c) => inline_prim(k(o(0)), c),
                     _ => None,
                 };
                 if let Some(what) = inline.filter(|_| count <= REGS) {

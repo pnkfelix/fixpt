@@ -103,4 +103,10 @@ pub struct State {
     /// and the machine stack pointer, kept while the count is made.
     pub prof_site: u64,
     pub prof_sp: u64,
+    /// The call of primitive `p` on the top `n` values that a compiled
+    /// word's `prim p n` makes, its `p` and `n` known as it was compiled
+    /// (`cellular::prim_call`): not the call-out, which finds its routine
+    /// by name and its operands in the word. Last, so that no field the
+    /// FX-26 compilers' layouts name moves.
+    pub prim_call: u64,
 }

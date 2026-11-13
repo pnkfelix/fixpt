@@ -58,6 +58,11 @@
             (val n-st-clo int)
             (val n-st-resume int)
             (val n-st-code-delta int)
+            (val n-st-top int)
+            (val n-st-alloc-limit int)
+            (val n-st-words int)
+            (val n-st-regs int)
+            (val n-st-prim-call int)
             (val n-st-trap int)
             (val n-st-exit int)
             (val n-st-cards int)
@@ -91,9 +96,15 @@
             (val n-st-fal int)
             (val n-st-tru int)))
 
-;; What the conductor names of the assembler, for Rust.
+;; What the conductor names of the assembler, for Rust: a word's code, given
+;; how its known primitives are done in line (`native-x64-regs.fx` gives
+;; register code's, `native-assemble-x64-words`).
 (define-type native-x64-sig
-  (moduleof (val native-assemble-x64 (subr (maxeff x-assembles spin) (tword) x-assembled))))
+  (moduleof (val native-assemble-x64-with
+                 (subr (maxeff x-assembles spin)
+                       (tword (subr pure (int int) string)
+                              (subr (maxeff x-assembles spin) (string int int int) unit))
+                       x-assembled))))
 
 ;; What `native-x64-regs.fx` uses of `native-x64.fx`'s assembler: its
 ;; bytes, labels and traps, and the machine sequences the two share.
@@ -148,7 +159,12 @@
             (val x-pass-mark (subr (maxeff x-assembles spin) (int int) unit))
             (val x-fuel (subr (maxeff x-assembles spin) () unit))
             (val x-ds-limit (subr (maxeff x-assembles spin) () unit))
-            (val x-rs-limit (subr (maxeff x-assembles spin) () unit))))
+            (val x-rs-limit (subr (maxeff x-assembles spin) () unit))
+            (val native-assemble-x64-with
+                 (subr (maxeff x-assembles spin)
+                       (tword (subr pure (int int) string)
+                              (subr (maxeff x-assembles spin) (string int int int) unit))
+                       x-assembled))))
 
 ;; A register word's machine code (`native-x64-regs.fx`): its bytes, where
 ;; each cell's resume point is (-1 for none), and why it cannot be
@@ -193,6 +209,7 @@
 ;; What the conductor names of the register code's compiler, for Rust.
 (define-type native-x64-regs-sig
   (moduleof (val native-assemble-x64-regs (subr (maxeff x-assembles spin) (tword) x-regs-assembled))
+            (val native-assemble-x64-words (subr (maxeff x-assembles spin) (tword) x-assembled))
             (val native-adapter-x64 (subr (maxeff x-assembles spin) (int) x-out))))
 
 ;; What `native-x64-regs.fx` uses of `native-x64-regs-ops.fx`: the helpers
@@ -231,4 +248,5 @@
             (val rg-ascii (subr (maxeff x-assembles spin) (int) unit))
             (val rg-shape-name (subr pure (string) string))
             (val rg-inline-op (subr (maxeff x-assembles spin) (string int int int) unit))
-            (val rg-inline-name (subr pure (int int int) string))))
+            (val rg-inline-name (subr pure (int int int) string))
+            (val rg-prim-inline-name (subr pure (int int) string))))

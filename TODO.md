@@ -6573,3 +6573,37 @@ larger). Test: `checker::a_call_through_the_top_level_keeps_its_latent_effect`,
 held to what each says, not only to their agreeing. The shared caches'
 makers noted file by file (`FILE.made-by`, `session::note_made`), not by a
 cold prewarm, which another process may have made them before.
+
+## 268. Cellular words' primitives and pairs without the call-out (2026-11-12)
+
+What the cellular fixpoints spent their time on (`FIXPT_CALLOUTS`): some
+410 M call-outs in stage 2, `prim` 247 M and `cons` 139 M, each with the
+call-out's name dispatch, operands read back from the word, arity checks
+and a safepoint; the hottest the table library's (`table.fx`: a symbol's
+hash, `modulo`, an array's length, each a call-out) and the checker's
+products and fields. A compiled word knew `p` and `n` all along: its code
+for `prim p n` was the interpreter's routine, pasted (`routine_body`).
+
+Done, x86_64, both word compilers (`cellular/x64.rs`, `native-x64.fx`),
+byte for byte (`tests/native_x64.rs`):
+- `cons` made in line where the heap has room short of where it would
+  collect (`inline_limit`, 0 under the stress policy), else the call-out;
+  the machine's own routine too, so the interpreter's.
+- A compiled word's `prim p n` called directly (`State::prim_call`,
+  `prim_call`), checked as the call-out checks (`prim_checked`); and done
+  in line where register code does it (`regcode::inline_prim`,
+  `inline_op`; FX-26's `rg-prim-inline-name`, `rg-inline-op`, given to
+  `native-x64.fx` as procedures by `native-x64-regs.fx`), the ip kept on
+  the machine stack meanwhile.
+
+The release suite 97 s to 89 s; in it `fixpoint_with_words_compiled_by_fx26`
+101 s to 72 s, `fixpoint_with_words_compiled` 61 s to 44 s, `fixpoint` 78 s
+to 75 s, now the long pole. Left:
+- arm64, both word compilers (`cellular.rs`, `native.fx`): the same three,
+  over `cellular/regcode.rs`'s and `native-arm64-regs-ops.fx`'s inline
+  operations. Not written here: no arm64 machine or emulator to run it on,
+  and the comparison of the two compilers checks only that they agree.
+- The interpreter's `prim` routine, which reads `p` as it runs: the hot
+  primitives done in line behind a test of `p`, what the interpreted
+  `fixpoint` now waits on.
+- `field!` and `closure`, the call-outs left (14 M, 10 M).

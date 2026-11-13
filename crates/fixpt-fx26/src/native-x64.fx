@@ -49,6 +49,7 @@
 (define x-rdi int 7)
 (define x-rsi int 6)
 (define x-rax int 0)
+(define x-rdx int 2)
 
 ;;; ------------------------------------------------------------ the assembler
 ;;; Bytes, and labels patched when everything is placed. A label is where
@@ -71,6 +72,9 @@
 (define x-target-cell (ref int @k) (new -1))
 ;; Compiling a word: the cell being compiled.
 (define x-at (ref int @k) (new 0))
+;; Compiling a word's `prim p n`: `p`, or -1, and `n` (`known_prim`).
+(define x-prim-p (ref int @k) (new -1))
+(define x-prim-n (ref int @k) (new 0))
 (define x-trap-common (ref int @k) (new 0))
 (define x-exit-common (ref int @k) (new 0))
 
@@ -651,8 +655,12 @@
         (x-callout n)))))
 
 ;; Routine `n`'s code, going on to the next cell's.
-(define x-routine (subr (maxeff x-assembles spin) (int) unit)
-  (lambda (n)
+(define x-routine
+  (subr (maxeff x-assembles spin)
+        (int (subr pure (int int) string)
+         (subr (maxeff x-assembles spin) (string int int int) unit))
+        unit)
+  (lambda (n inline-name inline-op)
     (cond
       ((= n routine-docol)
        (begin
@@ -775,7 +783,83 @@
          (x-mov n-dsp n-fp)
          (x-store n-dsp 0 n-x15)
          (x-pop-return)))
+      ;; A pair of the two on top, made here where the heap has room.
+      ((= n routine-cons) (x-cons-inline n))
+      ;; A compiled word's, its primitive known: in line, else called.
+      ((and (= n routine-prim) (>= (get x-prim-p) 0))
+       (let* ((p (get x-prim-p)) (c (get x-prim-n)) (what (inline-name p c)))
+         (if (string=? what "") (x-prim-compiled p c) (x-prim-inline what p c inline-op))))
       (else (x-callout n)))))
+;; `cons` (`routine_body`'s): a pair of the two on top, the `car` under the
+;; `cdr`, where the heap has room short of where it would collect; else
+;; the call-out, which may collect first.
+(define x-cons-inline (subr (maxeff x-assembles spin) (int) unit)
+  (lambda (n)
+    (let ((slow (x-label)))
+      (begin
+        (x-load n-x14 n-st n-st-top)
+        (x-load n-x15 n-x14 0)
+        (x-lea n-x16 n-x15 2)
+        (x-e (x86-alu-rm x-cmp n-x16 n-st n-st-alloc-limit))
+        (x-jcc x-c-a slow)
+        (x-load n-x13 n-st n-st-words)
+        (x-e (x86-lea-ix n-x13 n-x13 n-x15 8 0))
+        (x-load n-x15 n-dsp 8)
+        (x-store n-x13 0 n-x15)
+        (x-load n-x15 n-dsp 0)
+        (x-store n-x13 8 n-x15)
+        (x-store n-x14 0 n-x16)
+        (x-alu-imm x-add n-x13 n-tag-pair)
+        (x-alu-imm x-add n-dsp 8)
+        (x-store n-dsp 0 n-x13)
+        (x-cont-code)
+        (x-bind slow)
+        (x-callout n)))))
+;; A compiled word's `prim p n` called directly (`prim_compiled`).
+(define x-prim-compiled (subr (maxeff x-assembles spin) (int int) unit)
+  (lambda (p c)
+    (begin
+      (x-save)
+      (x-mov x-rdi n-st)
+      (x-e (x86-mov-imm x-rsi p))
+      (x-e (x86-mov-imm x-rdx c))
+      (x-e (x86-call-m n-st n-st-prim-call))
+      (x-e (x86-test x-rax x-rax))
+      (x-jcc x-c-ne (get x-exit-common))
+      (x-load-state)
+      (x-cont-code))))
+;; Argument `k` of `c`, from the data stack, into `REGk` (`prim_inline`).
+(define x-prim-arg (subr (maxeff x-assembles spin) (int int) unit)
+  (lambda (k c)
+    (let ((at (* 8 (- c k))))
+      (case k
+        ((1) (x-load n-x10 n-dsp at))
+        ((2) (x-load n-x11 n-dsp at))
+        ((3) (x-load n-x15 n-dsp at))
+        (else (begin (x-load n-x13 n-dsp at) (x-store n-st (+ n-st-regs (* 8 k)) n-x13)))))))
+(define x-prim-args (subr (maxeff x-assembles spin) (int int) unit)
+  (lambda (k c) (if (> k c) #u (begin (x-prim-arg k c) (x-prim-args (+ k 1) c)))))
+;; A compiled word's `prim p n` done in line, as register code does it
+;; (`prim_inline`): the ip kept on the machine stack meanwhile.
+(define x-prim-inline
+  (subr (maxeff x-assembles spin)
+        (string int int (subr (maxeff x-assembles spin) (string int int int) unit))
+        unit)
+  (lambda (what p c inline-op)
+    (let ((slow (x-label)))
+      (begin
+        (x-prim-args 1 c)
+        (x-e (x86-push n-ip))
+        (inline-op what c 0 slow)
+        (x-e (x86-pop n-ip))
+        ;; Past `p` and `n`, as the call would have gone.
+        (x-alu-imm x-sub n-ip 16)
+        (x-alu-imm x-add n-dsp (* 8 (- c 1)))
+        (x-store n-dsp 0 n-w)
+        (x-cont-code)
+        (x-bind slow)
+        (x-e (x86-pop n-ip))
+        (x-prim-compiled p c)))))
 
 ;;; ------------------------------------------------------------ words
 
@@ -816,8 +900,12 @@
 (define x-next-start (subr (maxeff (read @globals) spin (read @k)) (int int (arrayof bool @k)) int)
   (lambda (i n starts) (if (or (>= i n) (array-ref starts i)) i (x-next-start (+ i 1) n starts))))
 
-(define x-cells (subr (maxeff x-assembles spin) (tword int int x-bools x-ints) unit)
-  (lambda (w i n starts labels)
+(define x-cells
+  (subr (maxeff x-assembles spin)
+        (tword int int x-bools x-ints (subr pure (int int) string)
+         (subr (maxeff x-assembles spin) (string int int int) unit))
+        unit)
+  (lambda (w i n starts labels inline-name inline-op)
     (if (= i n)
         #u
         (begin
@@ -839,8 +927,16 @@
                                    -1
                                    (array-ref labels (get x-target-cell))))
                           (set x-at i)
+                          ;; A primitive known as the word is compiled.
+                          (set x-prim-p
+                               (if (and (= r routine-prim) (< (+ i 2) n)
+                                        (tword-int? w (+ k 1)) (tword-int? w (+ k 2))
+                                        (>= (tword-int w (+ k 1)) 0) (>= (tword-int w (+ k 2)) 0))
+                                   (tword-int w (+ k 1))
+                                   -1))
+                          (set x-prim-n (if (< (get x-prim-p) 0) 0 (tword-int w (+ k 2))))
                           (x-alu-imm x-sub n-ip 8)
-                          (x-routine r)))
+                          (x-routine r inline-name inline-op)))
                       (begin
                         (set x-cont -1)
                         (set x-target -1)
@@ -848,12 +944,16 @@
                         (x-operand n-w)
                         (x-run-word-in-w)))))
               #u)
-          (x-cells w (+ i 1) n starts labels)))))
+          (x-cells w (+ i 1) n starts labels inline-name inline-op)))))
 
 ;; `w`'s cells as x86_64 machine code: the bytes, and where each cell's
 ;; code starts in them, or -1. What `x64::assemble_word` makes.
-(define native-assemble-x64 (subr (maxeff x-assembles spin) (tword) x-assembled)
-  (lambda (w)
+(define native-assemble-x64-with
+  (subr (maxeff x-assembles spin)
+        (tword (subr pure (int int) string)
+               (subr (maxeff x-assembles spin) (string int int int) unit))
+        x-assembled)
+  (lambda (w inline-name inline-op)
     (begin
       (x-reset)
       (let* ((cells (- (+ (tword-fields w) 1) n-word-cell0))
@@ -866,7 +966,7 @@
           (x-lea n-ip n-x11 (- 0 (+ 4 (* 8 n-word-cell0))))
           (x-fuel)
           (x-jmp (array-ref labels 0))
-          (x-cells w 0 cells starts labels)
+          (x-cells w 0 cells starts labels inline-name inline-op)
           ;; The traps, after all the cells, so that each cell's code runs
           ;; on into the next's.
           (x-flush-stubs)

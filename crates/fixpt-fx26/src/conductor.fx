@@ -746,7 +746,7 @@
              (run-checked-more (with eval-core run-checked-more))
              (run-program (with eval-core run-program))
              (native-assemble (with native native-assemble))
-             (native-assemble-x64 (with native-x64 native-assemble-x64))
+             (native-assemble-x64 (with native-x64-regs native-assemble-x64-words))
              (native-assemble-x64-regs (with native-x64-regs native-assemble-x64-regs))
              (native-adapter-x64 (with native-x64-regs native-adapter-x64))
              (native-assemble-arm64-regs (with native-arm64-regs native-assemble-arm64-regs))

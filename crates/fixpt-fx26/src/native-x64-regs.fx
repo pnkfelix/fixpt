@@ -749,6 +749,11 @@
 
 ;; A register word's machine code, as `assemble_register_word` makes it:
 ;; its bytes, where each cell's resume point is, and why not, if not.
+;; A cellular word as x86_64 machine code (`x64::assemble_word`), its
+;; known primitives done in line as register code does them
+;; (`native-x64-regs-ops.fx`), which `native-x64.fx` is given so.
+(define native-assemble-x64-words (subr (maxeff x-assembles spin) (tword) x-assembled)
+  (lambda (w) (native-assemble-x64-with w rg-prim-inline-name rg-inline-op)))
 (define native-assemble-x64-regs (subr (maxeff x-assembles spin) (tword) x-regs-assembled)
   (lambda (rw)
     (let ((n (- (+ (tword-fields rw) 1) n-word-cell0)))

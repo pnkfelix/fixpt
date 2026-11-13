@@ -100,6 +100,10 @@ struct Asm {
     target: Option<(Label, usize)>,
     /// Compiling a word: the cell being compiled.
     at: usize,
+    /// Compiling a word's `prim p n`: `p` and `n`, which the code calls the
+    /// primitive by directly (`prim_compiled`); `None` elsewhere, and in
+    /// the machine's own `prim` routine, which reads them from the word.
+    known_prim: Option<(u64, u64)>,
     /// Compiling register code (`regcode`): its frame's size, once `save`
     /// has made it, and whether the link is on the machine stack here.
     link: Option<usize>,
@@ -138,6 +142,7 @@ impl Asm {
             cont: None,
             target: None,
             at: 0,
+            known_prim: None,
             link: None,
             link_pushed: false,
             in_regcode: false,
@@ -548,6 +553,56 @@ impl Asm {
     /// Leave machine code for the Rust side of routine `n`; carry on
     /// unless it reports a trap: with this word's next cell if the routine
     /// only computes, or from wherever it left the machine (control).
+    /// A compiled word's `prim p n`, its `p` and `n` known
+    /// (`known_prim`): the primitive called through `State::prim_call`,
+    /// with the machine's registers saved and restored as `callout`
+    /// saves them, and on as `callout` goes on.
+    fn prim_compiled(&mut self, p: u64, count: u64) {
+        self.save();
+        self.e(mov(RDI, ST));
+        self.e(mov_imm(RSI, p));
+        self.e(mov_imm(RDX, count));
+        self.e(call_m(st(offset_of!(State, prim_call))));
+        self.e(test(RAX, RAX));
+        let exit = self.exit_common;
+        self.jcc(Cond::Ne, exit);
+        self.load();
+        self.cont();
+    }
+
+    /// A compiled word's `prim p n` done in line (`inline_op`, register
+    /// code's): the arguments in `REG1`…`REGn`, as register code has them
+    /// (the first three in registers, the rest in `State::regs`), the ip
+    /// kept on the machine stack meanwhile (`inline_op` takes its register
+    /// for scratch), the result in their place; else `prim_compiled`.
+    fn prim_inline(&mut self, what: &str, p: u64, count: u64) {
+        let n = count as usize;
+        for k in 1..=n {
+            let at = m(DSP, 8 * (n - k) as i32);
+            match k {
+                1 => self.e(load(X10, at)),
+                2 => self.e(load(X11, at)),
+                3 => self.e(load(X15, at)),
+                _ => {
+                    self.e(load(X13, at));
+                    self.e(store(st(offset_of!(State, regs) + 8 * k), X13));
+                }
+            }
+        }
+        let slow = self.label();
+        self.e(push(IP));
+        self.inline_op(what, n, 0, slow);
+        self.e(pop(IP));
+        // Past `p` and `n`, as the call would have gone.
+        self.e(sub_imm(IP, 16));
+        self.e(add_imm(DSP, 8 * (n as i32 - 1)));
+        self.e(store(m(DSP, 0), W));
+        self.cont();
+        self.bind(slow);
+        self.e(pop(IP));
+        self.prim_compiled(p, count);
+    }
+
     fn callout(&mut self, n: u64) {
         self.save();
         self.e(mov(RDI, ST));
@@ -971,6 +1026,41 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(store(m(DSP, 0), X15));
             a.pop_return();
         }
+        // A pair of the two on top (the `car` under the `cdr`), made here
+        // where the heap has room short of where it would collect
+        // (`Heap::inline_limit`, 0 while the stress policy is on); else the
+        // call-out, which may collect first.
+        "cons" => {
+            let slow = a.label();
+            a.e(load(X14, st(offset_of!(State, top))));
+            a.e(load(X15, m(X14, 0)));
+            a.e(lea(X16, m(X15, 2)));
+            a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(State, alloc_limit))));
+            a.jcc(Cond::A, slow);
+            a.e(load(X13, st(offset_of!(State, words))));
+            a.e(lea(X13, mi(X13, X15, 8, 0)));
+            a.e(load(X15, m(DSP, 8)));
+            a.e(store(m(X13, 0), X15));
+            a.e(load(X15, m(DSP, 0)));
+            a.e(store(m(X13, 8), X15));
+            a.e(store(m(X14, 0), X16));
+            a.e(add_imm(X13, TAG_PAIR as i32));
+            a.e(add_imm(DSP, 8));
+            a.e(store(m(DSP, 0), X13));
+            a.cont();
+            a.bind(slow);
+            a.callout(n as u64);
+        }
+        // A compiled word's, its primitive known: done here as register
+        // code does it (`regcode::inline_prim`), where it can be; else, and
+        // for what it cannot do here, called directly.
+        "prim" if a.known_prim.is_some() => {
+            let (p, count) = a.known_prim.expect("known");
+            match regcode::inline_prim(p as usize, count as usize).filter(|_| count >= 1 && count as usize <= fixpt_heap::layout::regcode::REGS) {
+                Some(what) => a.prim_inline(what, p, count),
+                None => a.prim_compiled(p, count),
+            }
+        }
         // Everything else: the Rust machine runs it on these stacks
         // (`callout`), so it means exactly what it means there.
         _ => a.callout(n as u64),
@@ -1018,6 +1108,12 @@ pub fn assemble_word(heap: &Heap, word: Value) -> Result<(Vec<u8>, Vec<i64>), St
                 None
             };
             a.at = i;
+            // A primitive known as the word is compiled: called directly,
+            // which checks it as the call-out does (`prim_checked`).
+            a.known_prim = match (name, cells.get(i + 1), cells.get(i + 2)) {
+                ("prim", Some(p), Some(c)) if p.is_fixnum() && c.is_fixnum() && p.as_fixnum() >= 0 && c.as_fixnum() >= 0 => Some((p.as_fixnum() as u64, c.as_fixnum() as u64)),
+                _ => None,
+            };
             // The cell is consumed, as `NEXT` would have.
             a.e(sub_imm(IP, 8));
             routine_body(&mut a, n, name);
