@@ -72,19 +72,24 @@ impl Words {
         self.len == 0
     }
 
-    #[inline]
+    /// The words, as a slice. Made by a raw slice reborrowed, not by
+    /// `slice::from_raw_parts`, whose checks of its arguments a debug build
+    /// makes at every call: some tenth of a debug build's time, since the
+    /// heap makes the slice at nearly every word it reads or writes. What
+    /// they check holds here once and for all (`new`, `new_at`).
+    #[inline(always)]
     pub fn words(&self) -> &[u64] {
-        // SAFETY: the mapping is `len` words, readable and writable
-        // throughout (an untouched page reads as zero), and only this value
-        // hands out references to it, borrowed from it.
-        unsafe { std::slice::from_raw_parts(self.base, self.len) }
+        // SAFETY: the mapping is `len` words from `base`, aligned (a page),
+        // readable and writable throughout (an untouched page reads as zero),
+        // and only this value hands out references to it, borrowed from it.
+        unsafe { &*std::ptr::slice_from_raw_parts(self.base, self.len) }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn words_mut(&mut self) -> &mut [u64] {
         // SAFETY: as for `words`, and `&mut self` makes this the only
         // reference.
-        unsafe { std::slice::from_raw_parts_mut(self.base, self.len) }
+        unsafe { &mut *std::ptr::slice_from_raw_parts_mut(self.base, self.len) }
     }
 
     /// The words from `at` on, as many as `part` holds, made `file`'s
