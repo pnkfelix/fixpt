@@ -211,6 +211,7 @@ fn overview(h: &dyn Helpful) {
     if h.dialect() == "FX-26" {
         rows.push((",disassemble E", "E's cellular code (not on rs-scheme-vm or fx-ast-eval); polymorphic, projected first"));
         rows.push((",disassemble-asm E", "the same, and each word's machine code (or its stencils' source)"));
+        rows.push((",dump IMAGE [START]", "the session's heap dumped to IMAGE: `fixpt resume IMAGE` calls START (`main` if none)"));
         rows.push((",inliners NAME", "the globals whose register code inlines NAME's calls"));
         rows.push((",list-outdated", "the definitions out of date: using a global since defined again at another type"));
         rows.push((",load FILE", "run the file's forms here, as `fixpt eval` does, re-runs waiting (`,rerun-outdated`)"));

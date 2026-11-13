@@ -373,6 +373,24 @@ pub fn repl(backend: Backend) -> i32 {
             }
             continue;
         }
+        // `,dump IMAGE [START]`: the session's heap dumped, as `fixpt dump`
+        // dumps a program's, its start START or `main` (`TODO.md` §189).
+        if let Some(arg) = text.trim().strip_prefix(",dump")
+            && (arg.is_empty() || arg.starts_with(char::is_whitespace))
+        {
+            match arg.split_whitespace().collect::<Vec<_>>()[..] {
+                [image] | [image, _] => {
+                    let start = arg.split_whitespace().nth(1).unwrap_or("main");
+                    let machine = crate::FX26_MACHINE_NAME.get().map_or("", String::as_str);
+                    match session.dump_image(std::path::Path::new(image), start, machine, &[]) {
+                        Ok(()) => println!("; dumped to {image}: `fixpt resume {image}` calls `{start}`"),
+                        Err(e) => println!("; {e}"),
+                    }
+                }
+                _ => println!("; `,dump IMAGE [START]`: the session's heap dumped to IMAGE, `fixpt resume IMAGE` calling START (`main` if none)"),
+            }
+            continue;
+        }
         // `,inliners NAME`: the globals whose code inlines NAME's calls.
         if let Some(rest) = text.trim().strip_prefix(",inliners") {
             let name = rest.trim();
@@ -824,9 +842,10 @@ pub fn compile_files(backend: Backend, files: &[String]) -> i32 {
 /// checked and compiled by the front end written in FX-26 alone, its
 /// top-level forms run, and the heap dumped to IMAGE, `main` its start
 /// (`Fx26Session::dump_image`). Files from one directory: the program's
-/// loads are from the first's. Keyed by every file the load read, unless
-/// `standalone`: then by none, an application that outlives its sources.
-pub fn dump_files(backend: Backend, image: &str, files: &[String], machine: &str, standalone: bool) -> i32 {
+/// loads are from the first's. Keyed by no file, an application that
+/// outlives its sources; or, if `check_sources`, by every file the load
+/// read, so that a change to one makes it stale.
+pub fn dump_files(backend: Backend, image: &str, files: &[String], machine: &str, check_sources: bool) -> i32 {
     let mut session = match start(backend) {
         Ok(s) => s,
         Err(code) => return code,
@@ -834,9 +853,9 @@ pub fn dump_files(backend: Backend, image: &str, files: &[String], machine: &str
     if crate::STEP_LIMIT.get().is_none() {
         session.set_step_limit(None);
     }
-    // What the dump is keyed by: the files given, and every file their
-    // load reads; none if it is to stand alone.
-    if !standalone {
+    // What the dump is keyed by, if its sources are to be checked: the
+    // files given, and every file their load reads.
+    if check_sources {
         fixpt_fx26::reads::log_begin();
     }
     let mut sources = Vec::new();
@@ -862,7 +881,7 @@ pub fn dump_files(backend: Backend, image: &str, files: &[String], machine: &str
             return 1;
         }
     }
-    let keyed = if standalone { &[][..] } else { &sources[..] };
+    let keyed = if check_sources { &sources[..] } else { &[][..] };
     match session.dump_image(std::path::Path::new(image), "main", machine, keyed) {
         Ok(()) => 0,
         Err(e) => {
@@ -881,8 +900,9 @@ fn canonical(f: &str) -> String {
 /// dumped to IMAGE (`dump_files`, or its own `dump-heap!`), the files
 /// checked and run as more of it, and its start called with the
 /// arguments, as `fixpt run` calls `main`; refused if IMAGE was dumped by
-/// another build, on another machine, or if a file its load read (those
-/// given, and those they load or include) has changed since.
+/// another build, on another machine, or, dumped by `fixpt dump
+/// --check-sources`, if a file its load read (those given, and those they
+/// load or include) has changed since.
 
 pub fn resume(backend: Backend, image: &str, files: &[String], args: &[String], machine: &str) -> i32 {
     let bytes = match fixpt_heap::Mapped::open(std::path::Path::new(image)) {
@@ -942,11 +962,10 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
     if crate::STEP_LIMIT.get().is_none() {
         session.set_step_limit(None);
     }
-    // What a dump the program makes of itself (`dump-heap!`) is keyed by,
-    // as `fixpt dump`'s is: the files, and every file their load reads.
-    fixpt_fx26::reads::log_begin();
-    let sources = files.iter().filter_map(|f| Some((canonical(f), std::fs::read_to_string(f).ok()?))).collect();
-    session.dump_sources(crate::FX26_MACHINE_NAME.get().map_or("", String::as_str), sources);
+    // A dump the program makes of itself (`dump-heap!`) is keyed by the
+    // machine, and by no file: it outlives its sources, as `fixpt dump`'s
+    // does unless told to check them.
+    session.dump_sources(crate::FX26_MACHINE_NAME.get().map_or("", String::as_str), Vec::new());
     for f in files {
         let text = match std::fs::read_to_string(f) {
             Ok(t) => t,

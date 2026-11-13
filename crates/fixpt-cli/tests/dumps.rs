@@ -2,9 +2,10 @@
 //! by `fixpt dump IMAGE FILE…` or by the program itself (`dump-heap!`), and
 //! resumed, by `fixpt resume IMAGE [FILE…] -- ARG…`, where the load is not
 //! done again: what it left in the heap is there, and more of the program
-//! may be checked and run after it. A dump one of whose files has changed
-//! since (one given, or one they load), or a file that is no dump, is
-//! refused; a dump made to stand alone is kept by no file.
+//! may be checked and run after it. A dump outlives its sources, an
+//! application; one made to check them (`--check-sources`) is refused once
+//! one of its files has changed (one given, or one they load), as is a file
+//! that is no dump. The REPL dumps its session (`,dump IMAGE [START]`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -76,7 +77,7 @@ fn a_program_dumps_its_own_heap() {
 #[test]
 fn a_stale_dump_or_none_is_refused() {
     let dir = scratch("stale");
-    assert_eq!(fixpt(&dir, &["dump", "counter.img", "counter.fx"]).0, Some(0));
+    assert_eq!(fixpt(&dir, &["dump", "--check-sources", "counter.img", "counter.fx"]).0, Some(0));
     let text = std::fs::read_to_string(dir.join("counter.fx")).expect("read");
     std::fs::write(dir.join("counter.fx"), format!("{text};; changed\n")).expect("written");
     let (code, _, err) = fixpt(&dir, &["resume", "counter.img"]);
@@ -92,7 +93,7 @@ fn a_stale_dump_or_none_is_refused() {
 #[test]
 fn a_dump_is_stale_when_a_file_its_load_read_changes() {
     let dir = scratch("loaded");
-    let (code, _, err) = fixpt(&dir, &["dump", "loads.img", "loads.fx"]);
+    let (code, _, err) = fixpt(&dir, &["dump", "--check-sources", "loads.img", "loads.fx"]);
     assert_eq!(code, Some(0), "{err}");
     let (code, out, err) = fixpt(&dir, &["resume", "loads.img"]);
     assert_eq!((code, out.as_str()), (Some(0), "base 3\n"), "{err}");
@@ -102,17 +103,52 @@ fn a_dump_is_stale_when_a_file_its_load_read_changes() {
     assert!(err.contains("is stale"), "{err}");
 }
 
-/// A dump made to stand alone, an application: its sources changed or gone,
-/// it runs as its load left it.
+/// A dump, unless told to check its sources, stands alone, an application:
+/// its sources changed or gone, it runs as its load left it.
 #[test]
-fn a_standalone_dump_outlives_its_sources() {
+fn a_dump_outlives_its_sources() {
     let dir = scratch("standalone");
-    let (code, _, err) = fixpt(&dir, &["dump", "--standalone", "loads.img", "loads.fx"]);
+    let (code, _, err) = fixpt(&dir, &["dump", "loads.img", "loads.fx"]);
     assert_eq!(code, Some(0), "{err}");
     std::fs::write(dir.join("lib.fx"), "(define base int 4)\n").expect("written");
     std::fs::remove_file(dir.join("loads.fx")).expect("removed");
     let (code, out, err) = fixpt(&dir, &["resume", "loads.img"]);
     assert_eq!((code, out.as_str()), (Some(0), "base 3\n"), "{err}");
+}
+
+/// The REPL's session dumped, `main` its start or the one named; resumed,
+/// as the session left it.
+#[test]
+fn the_repl_dumps_its_session() {
+    let dir = scratch("repl");
+    let forms = [
+        "(define n (ref int @heap) (new 40))",
+        "(define bump! (subr (maxeff (read @heap) (write @heap) (read (globals n))) () unit) (lambda () (set n (+ (get n) 1))))",
+        "(bump!)",
+        "(define main (subr (maxeff (io stdout) (read @heap) (write @heap) (read (globals n bump!))) () int) \
+         (lambda () (begin (bump!) (write-out (string-append \"n \" (int->string (get n)) \"\\n\")) 3)))",
+        "(define other (subr (io stdout) () int) (lambda () (begin (write-out \"other\\n\") 4)))",
+        ",dump main.img",
+        ",dump other.img other",
+        ",dump none.img nosuch",
+    ];
+    let mut child = Command::new(FIXPT)
+        .arg("repl")
+        .current_dir(&dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt runs");
+    use std::io::Write;
+    child.stdin.take().expect("its input").write_all(format!("{}\n", forms.join("\n")).as_bytes()).expect("written");
+    let out = child.wait_with_output().expect("it ends");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("; dumped to main.img: `fixpt resume main.img` calls `main`"), "{said}");
+    assert!(said.contains("; the program defines no `nosuch`"), "{said}");
+    let (code, out, err) = fixpt(&dir, &["resume", "main.img"]);
+    assert_eq!((code, out.as_str()), (Some(3), "n 42\n"), "{err}");
+    let (code, out, err) = fixpt(&dir, &["resume", "other.img"]);
+    assert_eq!((code, out.as_str()), (Some(4), "other\n"), "{err}");
 }
 
 #[test]

@@ -4554,7 +4554,7 @@ another order, or `cond` for `and`/`or` (`k-has-id?` in `check-types.fx`,
 `k-id-in?` in `check-print-parts.fx`: one membership of an id, twice; and
 `k-given-member?`, of a field of each).
 
-## 189. Heap dumps for FX-26, for faster testing (the user's, 2026-10-31; built 2026-10-31; left: `,dump`, the Rust checker after a resume, `dump-heap!` standing alone)
+## 189. Heap dumps for FX-26, for faster testing (the user's, 2026-10-31; built 2026-10-31; left: the Rust checker after a resume)
 
 Add heap dumping to FX-26: a running program's heap written to a file
 and loaded back, so that a test suite such as Heist's starts from the
@@ -4631,9 +4631,12 @@ path and a digest of what was in it, while the CLI keeps a log (`fixpt
 dump`, and `fixpt run` for `dump-heap!`); the `.fasl`s a session maps
 go through it too (`reads::map`). A file changed, made or gone since
 makes the dump stale (`dumps::a_dump_is_stale_when_a_file_its_load_read_
-changes`). And `fixpt dump --standalone` (the user's): kept by no file,
-an application that outlives its sources, still only by the build of
-fixpt that made it. A program's own `dump-heap!` cannot ask for that yet.
+changes`). Then (the user's, the same day): a dump stands alone by
+default, kept by no file, an application that outlives its sources (still
+only by the build of fixpt that made it); the keying by files is asked for
+(`fixpt dump --check-sources`), mainly by tests. `dump-heap!` stands
+alone. And the REPL's `,dump IMAGE [START]` (START `main` if not given),
+the session's heap dumped (`dumps::the_repl_dumps_its_session`).
 What a program read as it ran (its own I/O, not a load) is what the
 heap holds, by any key. Dumps on `fx-regs-fxjit-nativecc` work since
 §262's caches (`dumps::a_dump_resumes_where_fx26_compiles_natively`).
@@ -6636,3 +6639,13 @@ to 75 s, now the long pole. Left:
   primitives done in line behind a test of `p`, what the interpreted
   `fixpoint` now waits on.
 - `field!` and `closure`, the call-outs left (14 M, 10 M).
+
+## 269. `io::news_of_any_process` failed once in a release suite (found 2026-11-13)
+
+Once, in a release suite (1212 of 1213 passed), on a change that touches
+no process: then five runs alone and 24 at once passed. Not seen how it
+failed (the suite's lines were filtered). A guess: `process-news.fx`
+expects `b` (`echo B1; sleep 0.1; echo B2`) to end before `a` (`sleep
+0.3; echo A`), a margin of 0.2 s a loaded machine may eat; or a race in
+the news itself. To find which when it fails again, its message kept,
+before widening the margin.
