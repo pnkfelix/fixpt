@@ -23,7 +23,7 @@
 use super::{ellipsis, exports, normal, reserved, split, Addr, Aligner, Atom, Bind, Delta, Env, Kids, Level, Macro, Macros, Mode, Ns, PInfo, Ring, STy};
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// A macro whose signature is inferred: its name, the literals its
@@ -542,7 +542,7 @@ impl Macros {
 
     fn infer_loop(&mut self, us: &[Unsigned], clauses: &[(usize, Syntax, Syntax)], makes: &[Makes], interner: &mut Interner) -> R<Vec<Syntax>> {
         let mut sol = Sol::default();
-        let mut sticky: HashSet<Span> = HashSet::new();
+        let mut sticky: HashSet<Span> = HashSet::default();
         let mut last: Option<(Vec<String>, Vec<Syntax>)> = None;
         let mut shape_was = String::new();
         let lits: Vec<&[Sym]> = us.iter().map(|u| &u.lits[..]).collect();
@@ -661,7 +661,7 @@ impl Macros {
     /// and each `mu` made for a list by ellipsis, a `union`, or a part of a
     /// syntax type not known yet, by its part.
     fn build(&mut self, parts: &Parts, sol: &Sol) -> (Vec<Rc<STy>>, HashMap<usize, usize>) {
-        let mut mu_of = HashMap::new();
+        let mut mu_of = HashMap::default();
         for (p, part) in parts.parts.iter().enumerate() {
             if matches!(part.shape, Shape::Seq(_) | Shape::Union(_)) || (part.shape == Shape::Leaf && !sol.kinds.contains_key(&p)) {
                 mu_of.insert(p, self.mus.len());
@@ -760,7 +760,7 @@ impl Macros {
 
     #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     fn placed_as(&self, parts: &Parts, sol: &Sol, cid: usize, template: &Syntax, made: Makes, interner: &Interner, names: bool) -> R<(Vec<Placed>, Option<(Vec<Atom>, Vec<Sym>)>)> {
-        let mut pvars = HashMap::new();
+        let mut pvars = HashMap::default();
         for (&(c, n), &p) in &parts.at {
             if c != cid {
                 continue;
@@ -829,7 +829,7 @@ impl Macros {
                 sol.pkinds.insert(*key, k.clone());
             }
         }
-        let mut of_part: HashMap<usize, Vec<(usize, Sym)>> = HashMap::new();
+        let mut of_part: HashMap<usize, Vec<(usize, Sym)>> = HashMap::default();
         for key in &parts.order {
             of_part.entry(parts.at[key]).or_default().push(*key);
         }
@@ -859,7 +859,7 @@ impl Macros {
         // says is, or under more ellipses than the pattern has it.
         for (cid, ps) in placed.iter().enumerate() {
             let Some(ps) = ps else { continue };
-            let mut counts: HashMap<Sym, usize> = HashMap::new();
+            let mut counts: HashMap<Sym, usize> = HashMap::default();
             for pl in ps {
                 *counts.entry(pl.n).or_default() += 1;
             }
@@ -875,11 +875,11 @@ impl Macros {
         }
         // The scopes: what each part placed in a scope is in, as imports on
         // it or the parts around it, and what the parts between export.
-        let mut sites: HashMap<usize, Vec<(usize, Vec<RingD>)>> = HashMap::new();
+        let mut sites: HashMap<usize, Vec<(usize, Vec<RingD>)>> = HashMap::default();
         let mut demands: Vec<(usize, Demand)> = Vec::new();
         for (cid, ps) in placed.iter().enumerate() {
             let Some(ps) = ps else { continue };
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             for pl in ps {
                 let Some(&p) = parts.at.get(&(cid, pl.n)) else { continue };
                 if !seen.insert(pl.n) || !kind_of(p).is_some_and(|k| scoped(&k)) {
@@ -933,7 +933,7 @@ impl Macros {
         }
         // Each region's export, the first said (an empty one only where none
         // is); each other member of a `union` one that exports, an empty one.
-        let mut got: HashMap<usize, Demand> = HashMap::new();
+        let mut got: HashMap<usize, Demand> = HashMap::default();
         for (inner, d) in demands {
             let empty = matches!(&d, Demand::Rib(es) if es.is_empty()) || matches!(&d, Demand::Cage(rs) if rs.is_empty());
             match got.get(&inner) {

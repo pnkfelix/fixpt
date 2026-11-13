@@ -462,7 +462,7 @@ fn a_refused_text_leaves_the_state_as_it_was() {
 /// `(load-module "fx26:…")` and `(load-input "fx26:…")` are its edges.
 #[test]
 fn the_built_in_files_load_no_cycle() {
-    let files: std::collections::HashMap<&str, &str> =
+    let files: fixpt_hash::HashMap<&str, &str> =
         fixpt_fx26::FRONT_END_MODULES.iter().chain(fixpt_fx26::FRONT_END_FILES.iter()).copied().collect();
     let loads = |text: &str| -> Vec<String> {
         let mut out = Vec::new();
@@ -478,7 +478,7 @@ fn the_built_in_files_load_no_cycle() {
         out
     };
     // Depth first, each file's state: 1 being visited, 2 done.
-    fn visit(n: &str, files: &std::collections::HashMap<&str, &str>, loads: &dyn Fn(&str) -> Vec<String>, state: &mut std::collections::HashMap<String, u8>, path: &mut Vec<String>) -> Option<Vec<String>> {
+    fn visit(n: &str, files: &fixpt_hash::HashMap<&str, &str>, loads: &dyn Fn(&str) -> Vec<String>, state: &mut fixpt_hash::HashMap<String, u8>, path: &mut Vec<String>) -> Option<Vec<String>> {
         match state.get(n) {
             Some(1) => {
                 let i = path.iter().position(|p| p == n).unwrap_or(0);
@@ -500,7 +500,7 @@ fn the_built_in_files_load_no_cycle() {
         state.insert(n.to_string(), 2);
         None
     }
-    let mut state = std::collections::HashMap::new();
+    let mut state = fixpt_hash::HashMap::default();
     let mut names: Vec<&str> = files.keys().copied().collect();
     names.sort();
     for n in names {

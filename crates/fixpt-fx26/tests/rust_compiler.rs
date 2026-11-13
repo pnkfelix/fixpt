@@ -9,7 +9,7 @@ use fixpt_fx26::session::Fx26Session;
 use fixpt_fx26::{Checker, Top};
 use fixpt_heap::Value;
 use fixpt_read::FileId;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 mod common;
 use common::same_code;
@@ -78,7 +78,7 @@ fn compare_with(s: &mut Fx26Session, text: &str, registers: bool) -> Option<Resu
                 let (mut same, mut why) = (false, String::new());
                 sc.make(|m| {
                     let (a, b) = (m.get(theirs), m.get(ours));
-                    same = same_code(m.heap(), a, b, &mut HashMap::new(), &mut why);
+                    same = same_code(m.heap(), a, b, &mut HashMap::default(), &mut why);
                     if same && registers {
                         let fx = common::register_words(m.heap(), a, &mut Default::default());
                         let rust = common::register_words(m.heap(), b, &mut Default::default());

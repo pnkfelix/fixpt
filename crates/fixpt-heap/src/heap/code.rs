@@ -20,7 +20,7 @@
 use super::{CODE_BASE, CODE_WORDS, Heap, find_main, read_head};
 use crate::layout;
 use crate::value::{TAG_MASK, TAG_TRAILER, Value, is_extension, is_header, make_header};
-use std::collections::HashSet;
+use crate::HashSet;
 
 /// The code area's parts: what native code calls through a stub, and
 /// native code.

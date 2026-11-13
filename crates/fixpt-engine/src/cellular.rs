@@ -421,7 +421,7 @@ pub struct Machine {
     run: u64,
 }
 
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// Cells run per word, by name, and words allocated: what a cell
 /// allocates (by a primitive it calls too) is its word's. A word's name is

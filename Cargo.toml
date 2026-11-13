@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/fixpt-hash",
     "crates/fixpt-memmgmt",
     "crates/fixpt-heap",
     "crates/fixpt-read",
@@ -22,6 +23,7 @@ members = [
 # finds one binary, `fixpt`, and starts the FX-26 REPL. The tools are
 # `cargo run -p fixpt-tools --bin sexp-edit` (or `fixpt-symbolize`).
 default-members = [
+    "crates/fixpt-hash",
     "crates/fixpt-memmgmt",
     "crates/fixpt-heap",
     "crates/fixpt-read",

@@ -30,7 +30,7 @@
 //! which is why this needs a paren-tracking scan rather than a regular
 //! expression.
 
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -206,9 +206,9 @@ fn unquote(s: &str) -> String {
 
 /// Canonicalise the run-dependent identifier numbering. See the module docs.
 pub fn normalize(text: &str) -> String {
-    let mut unif: HashMap<u32, u32> = HashMap::new();
-    let mut gensym: HashMap<u32, u32> = HashMap::new();
-    let mut bare: HashMap<u32, u32> = HashMap::new();
+    let mut unif: HashMap<u32, u32> = HashMap::default();
+    let mut gensym: HashMap<u32, u32> = HashMap::default();
+    let mut bare: HashMap<u32, u32> = HashMap::default();
     // The head word of each currently-open list, so a `productof` label can be
     // told apart from a generalised binder that happens to be numeric.
     let mut heads: Vec<Option<String>> = Vec::new();
@@ -359,7 +359,7 @@ impl Report {
         for (num, src, message) in self.errors.iter().take(n) {
             out.push_str(&format!("\n  case {num} ERROR\n    src: {src}\n    {message}\n"));
         }
-        let mut reasons: HashMap<&str, usize> = HashMap::new();
+        let mut reasons: HashMap<&str, usize> = HashMap::default();
         for (_, reason) in &self.unsupported {
             *reasons.entry(reason.as_str()).or_insert(0) += 1;
         }

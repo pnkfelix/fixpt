@@ -4,7 +4,7 @@
 //! `Value`s, and so is unaffected by collection. Front ends compare symbols by
 //! `Sym` equality, which is a `u32` comparison.
 
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct Sym(pub u32);

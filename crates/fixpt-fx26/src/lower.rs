@@ -35,7 +35,7 @@ use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
 use crate::check::{Checker, Datum};
 use crate::sx::Sx;
 use fixpt_read::Sym;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// Whether standard operation `name` cannot fail, whatever its arguments
 /// of their types (`DONE.md` §85): arithmetic on `int` (a bignum, so no
@@ -546,7 +546,7 @@ pub fn standard_fx26_module() -> String {
     }
     for (len, names) in by_len {
         out.push_str(&format!("      (({len})\n       (case n\n"));
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = fixpt_hash::HashSet::default();
         for (fx, scheme) in names {
             // A `case`'s data are distinct: the first of a name, as the
             // `cond` it was took.
@@ -583,7 +583,7 @@ impl Default for Globals {
 
 impl Globals {
     pub fn with_prefix(prefix: &str) -> Globals {
-        Globals { prefix: prefix.to_string(), current: HashMap::new(), defined: HashMap::new(), keep: Vec::new() }
+        Globals { prefix: prefix.to_string(), current: HashMap::default(), defined: HashMap::default(), keep: Vec::new() }
     }
 
     /// The next definition of `name` keeps the global it has: every use of

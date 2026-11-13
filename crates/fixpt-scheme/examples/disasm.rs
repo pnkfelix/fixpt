@@ -28,7 +28,7 @@ fn histogram(s: &Session) -> (Vec<(String, usize)>, usize, usize) {
         }
     }
     let mut seen: Vec<fixpt_heap::Value> = Vec::new();
-    let mut counts: std::collections::HashMap<u32, usize> = Default::default();
+    let mut counts: fixpt_hash::HashMap<u32, usize> = Default::default();
     let mut words = 0usize;
     while let Some(code) = todo.pop() {
         if !heap.is_a(code, ObjType::Code) || seen.contains(&code) {

@@ -25,7 +25,7 @@ use crate::ast::{Atom, Conv, D, DVar, Effect, Exp, ExpId, Kind, Region, Size, Ty
 use fixpt_read::Sym;
 use crate::check::{Checker, CodeFact};
 use crate::error::{FxError, R};
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 
 /// An argument already synthesised: its type and effect.
 type Synthesised = Option<(TyId, Effect)>;
@@ -65,7 +65,7 @@ struct Unknowns {
 
 impl Unknowns {
     fn new(kinds: Vec<(DVar, Kind)>) -> Unknowns {
-        Unknowns { kinds, solved: HashMap::new(), bounds: HashMap::new(), keep_fresh: HashSet::new() }
+        Unknowns { kinds, solved: HashMap::default(), bounds: HashMap::default(), keep_fresh: HashSet::default() }
     }
 
     fn is_unknown(&self, v: DVar) -> bool {
@@ -505,9 +505,9 @@ impl Checker {
     fn check_allof_lambda(&mut self, e: ExpId, members: &[TyId]) -> R<Effect> {
         let saved = self.facts.code_saved();
         let effects_before = self.facts.effects.clone();
-        let mut effects: HashMap<ExpId, Effect> = HashMap::new();
+        let mut effects: HashMap<ExpId, Effect> = HashMap::default();
         // Each member's code facts, and where it checked nothing.
-        let mut found: Vec<(HashMap<(ExpId, u8), CodeFact>, std::collections::HashSet<ExpId>)> = Vec::new();
+        let mut found: Vec<(HashMap<(ExpId, u8), CodeFact>, fixpt_hash::HashSet<ExpId>)> = Vec::new();
         let mut eff = Effect::pure();
         self.dead_arms.push(crate::check::DeadArms { members: members.len(), ..Default::default() });
         // Each lambda's signature, from here in, at each member, for the
@@ -868,7 +868,7 @@ impl Checker {
         // Each parameter as bound in the body: `name_nat`'s opening of it.
         let mut inside: Vec<(TyId, Vec<DVar>)> = Vec::new();
         let named = self.skolems.len();
-        let (mut given, mut back): (HashMap<(usize, Sym), TyId>, HashMap<DVar, D>) = (HashMap::new(), HashMap::new());
+        let (mut given, mut back): (HashMap<(usize, Sym), TyId>, HashMap<DVar, D>) = (HashMap::default(), HashMap::default());
         for (j, (n, t)) in typed.iter_mut().enumerate() {
             let resolved = match self.resolve_selects_outside(*t, &names[j..], span) {
                 Ok(r) => r,
@@ -1082,7 +1082,7 @@ impl Checker {
         effects_before: &HashMap<ExpId, Effect>,
     ) -> R<Option<(TyId, Effect)>> {
         let (mut found, mut tys, mut eff) = (Vec::new(), Vec::new(), Effect::pure());
-        let mut effects: HashMap<ExpId, Effect> = HashMap::new();
+        let mut effects: HashMap<ExpId, Effect> = HashMap::default();
         for m in ms {
             self.facts.code_put_back(saved);
             self.facts.effects = effects_before.clone();
@@ -1300,7 +1300,7 @@ impl Checker {
             Some(Kind::Effect) => D::Effect(Effect::pure()),
             _ => D::Type(self.arena.ty(Ty::Void)),
         };
-        let lower = self.subst(t, &HashMap::from([(v, least)]));
+        let lower = self.subst(t, &HashMap::from_iter([(v, least)]));
         self.subtype(lower, t)
     }
 
@@ -1829,7 +1829,7 @@ impl Checker {
         // array or a reference, where they are invariant, it fixes them.
         if let Some(want) = expected {
             let outer = std::mem::replace(&mut self.unify_upper, true);
-            self.unify(result, want, &mut u, &mut HashSet::new());
+            self.unify(result, want, &mut u, &mut HashSet::default());
             self.unify_upper = outer;
         }
         // What the arguments are, except the ones that need to be told.
@@ -1846,7 +1846,7 @@ impl Checker {
             if matches!(self.arena.get(t), Ty::Poly { .. }) {
                 continue;
             }
-            self.unify(params[i], t, &mut u, &mut HashSet::new());
+            self.unify(params[i], t, &mut u, &mut HashSet::default());
             done[i] = Some((t, eff));
         }
         self.partial_pair_argument(e, &params, &mut done, &mut u);
@@ -1904,7 +1904,7 @@ impl Checker {
                 // says what it is, as any argument does.
                 if !self.unannotated_lambda(a) {
                     let (t, eff) = self.synth(a)?;
-                    self.unify(param, t, u, &mut HashSet::new());
+                    self.unify(param, t, u, &mut HashSet::default());
                     return Ok((t, eff));
                 }
                 return Err(not_known(self, p));
@@ -1915,7 +1915,7 @@ impl Checker {
             let res = (!self.mentions_unknown_type(res, u)).then_some(res);
             let spec = self.spec_of(p);
             let (t, eff) = self.synth_lambda_as(a, Some(&ps), res, spec)?;
-            self.unify(param, t, u, &mut HashSet::new());
+            self.unify(param, t, u, &mut HashSet::default());
             Ok((t, eff))
         } else if self.mentions_unknown_type(p, u)
             && let Exp::Var(s) = *self.arena.exp_at(a)
@@ -1925,7 +1925,7 @@ impl Checker {
             // (`TODO.md` §48), heard last, after what the context
             // expects and every other argument.
             let nil = self.arena.ty(Ty::Nil);
-            self.unify(param, nil, u, &mut HashSet::new());
+            self.unify(param, nil, u, &mut HashSet::default());
             if self.mentions_unknown_type(param, u) {
                 return Err(not_known(self, p));
             }
@@ -1940,7 +1940,7 @@ impl Checker {
             // (`(apply list xs)`: `apply`'s effect).
             self.inst_for = Some(a);
             let inst = self.instantiate_against(t, p, self.arena.span_of(a))?;
-            self.unify(param, inst, u, &mut HashSet::new());
+            self.unify(param, inst, u, &mut HashSet::default());
             Ok((inst, self.naming_effect(s, t)))
         } else {
             let eff = self.check(a, p)?;
@@ -1998,7 +1998,7 @@ impl Checker {
         for (i, a) in given {
             let Some(p) = params.get(*i) else { continue };
             if let Ok((t, _)) = self.synth(*a) {
-                self.unify(*p, t, &mut u, &mut HashSet::new());
+                self.unify(*p, t, &mut u, &mut HashSet::default());
             }
         }
         Some(self.subst(want, &u.solved))
@@ -2036,7 +2036,7 @@ impl Checker {
         let mut u = Unknowns::new(kinds);
         u.keep_fresh = self.not_only_data_regions(inner);
         let outer = std::mem::replace(&mut self.unify_upper, true);
-        self.unify(inner, expected, &mut u, &mut HashSet::new());
+        self.unify(inner, expected, &mut u, &mut HashSet::default());
         self.unify_upper = outer;
         self.default_regions(&mut u);
         let map = self.finish(&u, span, t)?;
@@ -2118,7 +2118,7 @@ impl Checker {
         let Ty::Union(ms) = self.arena.get(self.arena.resolve(t)).clone() else { return };
         let pairs: Vec<TyId> = ms.iter().copied().filter(|m| matches!(self.arena.get(self.arena.resolve(*m)), Ty::Pair(..))).collect();
         if let Some(m) = self.greatest_of(&pairs) {
-            self.unify(params[0], m, u, &mut HashSet::new());
+            self.unify(params[0], m, u, &mut HashSet::default());
             done[0] = Some((m, eff));
         }
     }
@@ -2191,7 +2191,7 @@ impl Checker {
             Some(D::Region(r)) => Some(*r),
             _ => None,
         };
-        let mut mentioned = HashSet::new();
+        let mut mentioned = HashSet::default();
         self.regions_in(inner, &mut mentioned);
         let own: HashSet<Region> = kinds.iter().map(|(v, _)| Region::Var(*v)).collect();
         let name = |v: DVar| self.interner.name(self.arena.dvar_name(v));
@@ -2467,7 +2467,7 @@ impl Checker {
             D::Size(z) => matches!(z, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
             D::Conv(c) => matches!(c, crate::ast::Conv::Var(v) if open(*v)),
         };
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut stack = vec![t];
         while let Some(t) = stack.pop() {
             let t = self.arena.resolve(t);
@@ -2543,7 +2543,7 @@ impl Checker {
     /// The type binders whose bounds have not met, of those `u` has bounds
     /// for: neither fixed, nor at least and at most one type.
     fn unsettled(&mut self, u: &Unknowns) -> HashSet<DVar> {
-        let mut out = HashSet::new();
+        let mut out = HashSet::default();
         for (v, b) in &u.bounds {
             if u.bounded(*v).is_none() {
                 continue;
@@ -2581,7 +2581,7 @@ impl Checker {
         if let Some(lower) = self.sum_lower_only(param, u) {
             let (t, eff) = self.synth(a)?;
             let raised = self.branch_join(lower, t, 0).unwrap_or(t);
-            self.unify(param, raised, u, &mut HashSet::new());
+            self.unify(param, raised, u, &mut HashSet::default());
             return Ok((t, eff));
         }
         // A variable's type is its own; a call, told what it is, is told
@@ -2592,7 +2592,7 @@ impl Checker {
         };
         if by_itself {
             let (t, eff) = self.synth(a)?;
-            self.unify(param, t, u, &mut HashSet::new());
+            self.unify(param, t, u, &mut HashSet::default());
             return Ok((t, eff));
         }
         // Checked against the upper bounds, where there are some.
@@ -2609,7 +2609,7 @@ impl Checker {
             Some((e, t)) if e == a => t,
             _ => p,
         };
-        self.unify(param, t, u, &mut HashSet::new());
+        self.unify(param, t, u, &mut HashSet::default());
         Ok((t, eff))
     }
 
@@ -2705,7 +2705,7 @@ impl Checker {
                 _ => {}
             }
         }
-        let mut out = HashSet::new();
+        let mut out = HashSet::default();
         walk(self, t, &mut Default::default(), &mut out);
         out
     }

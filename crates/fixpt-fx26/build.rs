@@ -13,7 +13,7 @@ use std::path::Path;
 
 /// The crates the front end's image depends on, by their directories next to
 /// this one, and what in each.
-const CRATES: [&str; 8] = ["fixpt-read", "fixpt-heap", "fixpt-memmgmt", "fixpt-engine", "fixpt-runtime", "fixpt-scheme", "fixpt-native", "fixpt-fx26"];
+const CRATES: [&str; 9] = ["fixpt-hash", "fixpt-read", "fixpt-heap", "fixpt-memmgmt", "fixpt-engine", "fixpt-runtime", "fixpt-scheme", "fixpt-native", "fixpt-fx26"];
 const PARTS: [&str; 4] = ["src", "stencils", "build.rs", "Cargo.toml"];
 
 fn main() {

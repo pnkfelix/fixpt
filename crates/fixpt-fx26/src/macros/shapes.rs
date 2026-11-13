@@ -16,7 +16,7 @@
 use super::{Aligner, Atom, Kids, Level, Macros, Mode, Ns, STy};
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::rc::Rc;
 
 /// What a module gives, as expansion needs it: its values' names, each
@@ -35,7 +35,7 @@ pub(crate) enum Shape {
 
 impl Shape {
     /// Its names, by namespace, as a set.
-    fn name_set(&self) -> std::collections::HashSet<(Sym, Ns)> {
+    fn name_set(&self) -> fixpt_hash::HashSet<(Sym, Ns)> {
         match self {
             Shape::Module { vals, descs } => vals.iter().map(|(n, _)| (*n, Ns::Value)).chain(descs.iter().map(|(n, _)| (*n, Ns::Desc))).collect(),
             Shape::Fun { .. } => Default::default(),
@@ -141,7 +141,7 @@ pub(crate) struct Known {
     /// Each alias an expansion defined at the top level (`(define %~N:x
     /// …)`), a description's if marked: a name of its own wherever later
     /// forms name it (`Macros::aliases_resolved`).
-    pub(crate) aliases_defined: std::collections::HashSet<(Sym, bool)>,
+    pub(crate) aliases_defined: fixpt_hash::HashSet<(Sym, bool)>,
     /// The shapes named by `define-syntax` (`(define-syntax s (modnames …))`,
     /// `binding-shapes.md`), each its `modnames` form, by its name.
     named: HashMap<Sym, Syntax>,
@@ -216,7 +216,7 @@ impl Asked {
 }
 
 /// A table made with a cheap hash, of the walk's own keys.
-type Fast<K, V> = HashMap<K, V, std::hash::BuildHasherDefault<crate::ast::IdHasher>>;
+type Fast<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<crate::ast::IdHasher>>;
 
 /// A run of an environment's levels, as a reference is looked up: ribs,
 /// one table of their binders by name and namespace; or a module's names
@@ -313,7 +313,7 @@ struct Shaper<'a, 'm> {
     /// not in the scope of what any `include` gives.
     in_included: Vec<bool>,
     /// Each shape's names by namespace, made once a shape is asked.
-    names: HashMap<*const Shape, std::collections::HashSet<(Sym, Ns)>>,
+    names: HashMap<*const Shape, fixpt_hash::HashSet<(Sym, Ns)>>,
     /// Each node's shape as an expression (`false`) and as a type (`true`),
     /// once found; `None` while it is being found, so that a cycle finds
     /// none.
@@ -332,7 +332,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
             }
         }
         let envs = found.iter().map(|(at, env, _, _)| (*at, env)).collect();
-        let mut c = Shaper { a, top, files, dir, global, parent, envs, asked: HashMap::new(), segments: Fast::default(), in_included: Vec::new(), names: HashMap::new(), memo: HashMap::new() };
+        let mut c = Shaper { a, top, files, dir, global, parent, envs, asked: HashMap::default(), segments: Fast::default(), in_included: Vec::new(), names: HashMap::default(), memo: HashMap::default() };
         c.in_included = c.included_nodes();
         c
     }
@@ -976,7 +976,7 @@ impl Macros {
     /// each form that opens a module; its own shape, as an expression's;
     /// and, `top`, what its definitions bind, with their shapes.
     fn walked(&self, form: &Syntax, top: bool, global: Global, interner: &Interner) -> R<Walked> {
-        let none = HashMap::new();
+        let none = HashMap::default();
         let mut out = Walked::default();
         let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
         let t = Rc::new(if top { STy::Item } else { STy::Expr });

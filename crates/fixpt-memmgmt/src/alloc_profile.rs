@@ -10,7 +10,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::backtrace::Backtrace;
 use std::cell::Cell;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -88,11 +88,11 @@ pub fn report() {
     BUSY.with(|b| b.set(true));
     let samples = std::mem::take(&mut *SAMPLES.lock().expect("not poisoned"));
     let depth = std::env::var("FIXPT_ALLOC_DEPTH").ok().and_then(|n| n.parse::<usize>().ok()).unwrap_or(3);
-    let mut by: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut by: HashMap<String, (u64, u64)> = HashMap::default();
     for (stack, size) in &samples {
         let text = stack.to_string();
         // A recursion's frames as one: each function where it is first met.
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = fixpt_hash::HashSet::default();
         let frames: Vec<&str> = text
             .lines()
             .filter_map(|l| l.trim_start().split_once(": ").filter(|(n, _)| n.bytes().all(|b| b.is_ascii_digit())).map(|(_, f)| f))

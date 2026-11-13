@@ -29,7 +29,7 @@ use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, EArg, Effe
 use crate::error::{FxError, R};
 use crate::parse::DScope;
 use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 
 /// `vsubr`'s declaration: generative type 0, in both checkers.
 pub const VSUBR: &str = "(vsubr (e effect +) (t type -) (r type +)) (subr e ((listof t acyclic)) r)";
@@ -860,7 +860,7 @@ pub(crate) enum CodeFact {
 impl NodeFacts {
     /// Each code fact, by its expression and kind.
     pub(crate) fn code_facts(&self) -> HashMap<(ExpId, u8), CodeFact> {
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         out.extend(self.datum.iter().map(|(e, d)| ((*e, 0), CodeFact::Datum(*d))));
         out.extend(self.converted.iter().map(|(e, (c, n))| ((*e, 1), CodeFact::Converted(*c, *n))));
         out.extend(self.apply_shares.iter().map(|e| ((*e, 2), CodeFact::ApplyShares)));
@@ -1094,7 +1094,7 @@ impl Checker {
     pub fn with_convention(conv: Conv) -> Checker {
         let mut interner = Interner::new();
         let mut arena = Arena::default();
-        let mut base = HashMap::new();
+        let mut base = HashMap::default();
         let mut basic = |name: &str| {
             let sym = interner.intern(name);
             let t = arena.ty(Ty::Base(sym));
@@ -1149,7 +1149,7 @@ impl Checker {
             dscope: Vec::new(),
             lifetimes: Vec::new(),
             freezing: Vec::new(),
-            known: HashSet::new(),
+            known: HashSet::default(),
             recursive: Vec::new(),
             base,
             void,
@@ -1168,11 +1168,11 @@ impl Checker {
             hole_hint: None,
             spin_why: Vec::new(),
             waits_spun: Vec::new(),
-            member_spins: HashMap::new(),
+            member_spins: HashMap::default(),
             macros: Default::default(),
             pinned: Vec::new(),
             regions_memo: std::cell::RefCell::new(Default::default()),
-            fun_apps: HashMap::new(),
+            fun_apps: HashMap::default(),
             regions_open: std::cell::Cell::new(false),
             generatives: Vec::new(),
             transparent: Vec::new(),
@@ -1196,18 +1196,18 @@ impl Checker {
             checked_call: None,
             size_facts: Vec::new(),
             skolems: Vec::new(),
-            to_end_sizes: HashSet::new(),
-            module_vars: HashSet::new(),
-            abstract_funs: HashSet::new(),
+            to_end_sizes: HashSet::default(),
+            module_vars: HashSet::default(),
+            abstract_funs: HashSet::default(),
             effect_selects: Vec::new(),
-            with_effect_fallback: HashMap::new(),
+            with_effect_fallback: HashMap::default(),
             print_names: std::cell::RefCell::new(Vec::new()),
             print_expanded: std::cell::Cell::new(false),
             print_for_fasl: std::cell::RefCell::new(None),
             fasl_selects: std::cell::RefCell::new(None),
-            print_abs: std::cell::RefCell::new(HashMap::new()),
+            print_abs: std::cell::RefCell::new(HashMap::default()),
             fasl_selects_key: std::cell::Cell::new(0),
-            fasl_digests: std::cell::RefCell::new(HashMap::new()),
+            fasl_digests: std::cell::RefCell::new(HashMap::default()),
             print_canon: std::cell::RefCell::new(None),
             print_shallow: std::cell::Cell::new(false),
             print_subrs: std::cell::Cell::new(0),
@@ -1216,11 +1216,11 @@ impl Checker {
             print_aliases: std::cell::RefCell::new(None),
             print_selects: std::cell::RefCell::new(None),
             print_self: std::cell::Cell::new(None),
-            print_cycles: std::cell::RefCell::new(HashSet::new()),
+            print_cycles: std::cell::RefCell::new(HashSet::default()),
             show_marks: std::cell::Cell::new(false),
             subst_keep: None,
-            select_map: HashMap::new(),
-            param_map: HashMap::new(),
+            select_map: HashMap::default(),
+            param_map: HashMap::default(),
             conv_default: conv,
             fresh_regions: 0,
             standard_len: 0,
@@ -1228,8 +1228,8 @@ impl Checker {
             standard_dscope: 0,
             hidden: None,
             form_began: None,
-            shared_loads: HashMap::new(),
-            shared_files: HashMap::new(),
+            shared_loads: HashMap::default(),
+            shared_files: HashMap::default(),
             reading_deps: Vec::new(),
             fasls: false,
             fasl_notes: Vec::new(),
@@ -1237,13 +1237,13 @@ impl Checker {
             include_scope: 0,
             run_items: 0,
             with_depth: 0,
-            shared_globals: HashSet::new(),
+            shared_globals: HashSet::default(),
             hoisted: Vec::new(),
-            loaded: HashMap::new(),
+            loaded: HashMap::default(),
             in_built_in: 0,
-            load_sites: HashMap::new(),
+            load_sites: HashMap::default(),
             files_read: 0,
-            load_defs: HashMap::new(),
+            load_defs: HashMap::default(),
             macro_files: 0,
             base_dir: None,
             ahead: Vec::new(),
@@ -1252,7 +1252,7 @@ impl Checker {
             hazard_modules: Vec::new(),
             hazard_items: Vec::new(),
             masking: true,
-            broken: HashMap::new(),
+            broken: HashMap::default(),
             defs: Vec::new(),
             defer_reruns: false,
             syscalls: false,
@@ -1260,10 +1260,10 @@ impl Checker {
             globals_effects: true,
             record_operands: false,
             record_types: false,
-            poly_chain: HashMap::new(),
+            poly_chain: HashMap::default(),
             inst_for: None,
-            global_slots: HashSet::new(),
-            fixed_slots: HashSet::new(),
+            global_slots: HashSet::default(),
+            fixed_slots: HashSet::default(),
         };
         // FX-87's variadic procedure type, `(vsubr E T R)`: the first
         // generative type, in both checkers, whose insides nothing sees
@@ -1778,7 +1778,7 @@ impl Checker {
             if c1 != c2 {
                 return Err(false);
             }
-            let mut named = HashSet::new();
+            let mut named = HashSet::default();
             self.regions_in(a, &mut named);
             self.regions_in(b, &mut named);
             if fresh.iter().any(|r| named.contains(r)) {
@@ -2556,7 +2556,7 @@ impl Checker {
     /// Each expression's effect summary ([`Self::effect_summary`]), by
     /// expression: the greater where it was noted twice.
     pub fn effect_summaries_by_exp(&self) -> HashMap<ExpId, u8> {
-        let mut out: HashMap<ExpId, u8> = HashMap::new();
+        let mut out: HashMap<ExpId, u8> = HashMap::default();
         for (e, eff) in &self.facts.effects {
             let k = out.entry(*e).or_insert(0);
             *k = (*k).max(Self::effect_summary(eff));
@@ -2569,7 +2569,7 @@ impl Checker {
     /// those of one span, as the checker written in FX-26's
     /// `checked-effects` are compared with them.
     pub fn effect_summaries(&self) -> HashMap<(u32, u32, u32), u8> {
-        let mut out: HashMap<(u32, u32, u32), u8> = HashMap::new();
+        let mut out: HashMap<(u32, u32, u32), u8> = HashMap::default();
         for (e, s) in self.effect_summaries_by_exp() {
             let span = self.arena.span_of(e);
             let k = out.entry((span.file.0, span.start, span.end)).or_insert(s);
@@ -2854,7 +2854,7 @@ impl Checker {
         if binders.len() != args.len() {
             return Err(FxError::at(span, format!("this `poly` binds {} description(s); `proj` gave {}", binders.len(), args.len())));
         }
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         for ((v, k), d) in binders.iter().zip(args) {
             // A function given as a `select`: resolved first.
             let d = match d {
@@ -3007,7 +3007,7 @@ impl Checker {
                 let name = self.interner.name(name);
                 return Err(FxError::at(span, format!("the value of `letfreeze {name}` could still write its region's data: its type is {}", self.show_ty(t))));
             }
-            self.subst(t, &HashMap::from([(region, D::Region(Region::Frozen(into, !written)))]))
+            self.subst(t, &HashMap::from_iter([(region, D::Region(Region::Frozen(into, !written)))]))
         } else {
             t
         };
@@ -3082,7 +3082,7 @@ impl Checker {
     pub(crate) fn close_region(&mut self, e: ExpId, form: &str, r: DVar, t: TyId, eff: Effect) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let name = self.interner.name(self.arena.dvar_name(r)).to_string();
-        let mut in_t = HashSet::new();
+        let mut in_t = HashSet::default();
         self.regions_in(t, &mut in_t);
         if in_t.contains(&Region::Var(r)) {
             return Err(FxError::at(span, region_escapes(form, &name, &self.show_ty(t))));
@@ -3255,13 +3255,13 @@ impl Checker {
         if !self.masking || effect.is_pure() {
             return effect.clone();
         }
-        let mut visible = HashSet::new();
+        let mut visible = HashSet::default();
         for v in self.free_vars(e) {
             if let Some(t) = self.lookup(v) {
                 self.regions_in(t, &mut visible);
             }
         }
-        let mut in_result = HashSet::new();
+        let mut in_result = HashSet::default();
         self.regions_in(result, &mut in_result);
         let kept = Effect(effect.0.iter().copied().filter(|a| Self::mask_keeps(*a, &visible, &in_result)).collect());
         self.note_waits_spun(e, effect, &kept, "on what nothing outside it sees");
@@ -3318,7 +3318,7 @@ impl Checker {
     /// procedure, continuation, tag, key, generative type or type variable
     /// anywhere that could hold what its type does not say.
     fn first_order(&self, t: TyId) -> bool {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut stack = vec![t];
         while let Some(t) = stack.pop() {
             let t = self.arena.resolve(t);
@@ -3570,7 +3570,7 @@ impl Checker {
             return;
         }
         let mut seen = crate::ast::TySet::default();
-        let mut found = HashSet::new();
+        let mut found = HashSet::default();
         let outer = self.regions_open.replace(false);
         self.regions_walk(t, &mut seen, &mut found);
         // Frozen data mentions the place it is in.
@@ -3669,7 +3669,7 @@ impl Checker {
             // Transparent to safety: what its representation holds, its
             // parameters' regions standing for what it was given.
             Ty::Named { which, args } => {
-                let mut inner = HashSet::new();
+                let mut inner = HashSet::default();
                 self.regions_walk(self.generatives[which as usize].rep, seen, &mut inner);
                 out.extend(inner.into_iter().filter(|r| !self.is_generative_param(*r)));
                 for d in args {
@@ -3984,7 +3984,7 @@ impl Checker {
                 continue;
             }
             let mut found = Vec::new();
-            self.polarity(g.rep, *v, Variance::Co, &mut HashSet::new(), &mut found);
+            self.polarity(g.rep, *v, Variance::Co, &mut HashSet::default(), &mut found);
             let bad = found.iter().any(|p| *p != *want);
             if bad {
                 return Err(FxError::at(
@@ -4312,7 +4312,7 @@ impl Checker {
     /// Whether a latent effect anywhere in `t` writes `r`: what a
     /// `letfreeze`'s value may not do to its region.
     pub(crate) fn writes_in(&self, t: TyId, r: Region) -> bool {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut todo = vec![t];
         // A generative type's representation writing one of its parameters
         // writes whatever it was given: cautiously, any region given any.
@@ -4980,7 +4980,7 @@ impl Checker {
                         (*x, if matches!(self.arena.dvar_kind_known(*x), Some(Kind::Arrow(_))) { D::Fun(t) } else { D::Type(t) })
                     })
                     .collect();
-                let mut by: HashMap<DVar, D> = HashMap::new();
+                let mut by: HashMap<DVar, D> = HashMap::default();
                 for (n, y) in ab {
                     if !aa.iter().any(|(m, _)| m == n)
                         && let Some((_, d)) = da.iter().find(|(m, _)| m == n)
@@ -5191,7 +5191,7 @@ impl Checker {
     /// use of the file that makes it: Heist's request, `TODO.md` §178). As
     /// the checker written in FX-26's `k-subst-leaves?`.
     fn subst_leaves(&mut self, t: TyId, map: &HashMap<DVar, D>) -> bool {
-        let (vars, flags, _) = self.fv_walk(t, 1, &mut HashMap::new());
+        let (vars, flags, _) = self.fv_walk(t, 1, &mut HashMap::default());
         flags & FV_APP == 0
             && (flags & FV_SELECT == 0 || self.select_map.is_empty())
             && (flags & FV_PARAM == 0 || self.param_map.is_empty())
@@ -6040,7 +6040,7 @@ impl Checker {
         };
         self.free_vars(body).into_iter().filter(|v| Some(*v) != tag_var).all(|v| {
             let Some(t) = self.lookup(v) else { return true };
-            let mut rs = HashSet::new();
+            let mut rs = HashSet::default();
             self.regions_in(t, &mut rs);
             !rs.contains(&r)
         })

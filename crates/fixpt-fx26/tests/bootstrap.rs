@@ -85,7 +85,7 @@ fn the_bootstrap_program_checks() {
 }
 
 use fixpt_heap::{Heap, Value};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 mod common;
 use common::same_code;
@@ -179,7 +179,7 @@ fn fixpoint_as_register_code() {
             let r = m.get(result);
             let h = m.heap();
             let b = h.product_field(h.sum_payload(r), 1);
-            same = same_code(h, a, b, &mut HashMap::new(), &mut why);
+            same = same_code(h, a, b, &mut HashMap::default(), &mut why);
             Value::NULL
         });
         assert!(same, "stage 1 and stage 2 differ: {why}");
@@ -221,7 +221,7 @@ fn fixpoint_on(machine: fixpt_runtime::RunWord) {
             let r = m.get(result);
             let h = m.heap();
             let b = h.product_field(h.sum_payload(r), 1);
-            same = same_code(h, a, b, &mut HashMap::new(), &mut why);
+            same = same_code(h, a, b, &mut HashMap::default(), &mut why);
             Value::NULL
         });
         assert!(same, "stage 1 and stage 2 differ: {why}");
@@ -554,7 +554,7 @@ fn fixpoint_with_words_compiled_by_fx26() {
             let r = m.get(result);
             let h = m.heap();
             let b = h.product_field(h.sum_payload(r), 1);
-            same = same_code(h, a, b, &mut HashMap::new(), &mut why);
+            same = same_code(h, a, b, &mut HashMap::default(), &mut why);
             Value::NULL
         });
         assert!(same, "stage 1 and stage 2 differ: {why}");
@@ -565,7 +565,7 @@ fn fixpoint_with_words_compiled_by_fx26() {
 /// Every word `word` reaches through its cells and operands.
 fn reachable_words(heap: &Heap, word: Value) -> Vec<Value> {
     let closure = fixpt_heap::layout::kind("cellular-closure");
-    let (mut todo, mut seen, mut out) = (vec![word], std::collections::HashSet::new(), Vec::new());
+    let (mut todo, mut seen, mut out) = (vec![word], fixpt_hash::HashSet::default(), Vec::new());
     while let Some(w) = todo.pop() {
         if !seen.insert(w.raw()) {
             continue;

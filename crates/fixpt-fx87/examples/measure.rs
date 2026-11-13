@@ -36,7 +36,7 @@ fn erase_both(src: &str) -> (String, String) {
     let exp = fx.checker.p.parse_exp(&forms[0], &Default::default()).expect("parses");
     fx.checker.check(exp, &env).expect("checks");
 
-    let standard: std::collections::HashSet<_> = env.value_names().collect();
+    let standard: fixpt_hash::HashSet<_> = env.value_names().collect();
     let purity = PurityOf(&fx.checker);
     let annotated =
         erase_with(&fx.checker.p.arena, &fx.checker.p.interner, exp, &standard, Some(&purity));

@@ -9,6 +9,7 @@ name = "fixpt"
 path = "src/main.rs"
 
 [dependencies]
+fixpt-hash = { path = "../fixpt-hash" }
 fixpt-heap = { path = "../fixpt-heap" }
 fixpt-read = { path = "../fixpt-read" }
 fixpt-core = { path = "../fixpt-core" }

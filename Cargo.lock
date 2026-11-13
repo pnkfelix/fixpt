@@ -17,6 +17,7 @@ dependencies = [
  "fixpt-fx26",
  "fixpt-fx87",
  "fixpt-fx91",
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-memmgmt",
  "fixpt-native",
@@ -29,11 +30,15 @@ dependencies = [
 [[package]]
 name = "fixpt-conform"
 version = "0.1.0"
+dependencies = [
+ "fixpt-hash",
+]
 
 [[package]]
 name = "fixpt-core"
 version = "0.1.0"
 dependencies = [
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-read",
 ]
@@ -43,6 +48,7 @@ name = "fixpt-engine"
 version = "0.1.0"
 dependencies = [
  "fixpt-core",
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-memmgmt",
  "fixpt-read",
@@ -54,6 +60,7 @@ name = "fixpt-fx26"
 version = "0.1.0"
 dependencies = [
  "fixpt-engine",
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-memmgmt",
  "fixpt-native",
@@ -71,6 +78,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-conform",
  "fixpt-engine",
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-read",
  "fixpt-runtime",
@@ -84,6 +92,7 @@ dependencies = [
  "fixpt-conform",
  "fixpt-core",
  "fixpt-engine",
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-read",
  "fixpt-runtime",
@@ -91,9 +100,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixpt-hash"
+version = "0.1.0"
+
+[[package]]
 name = "fixpt-heap"
 version = "0.1.0"
 dependencies = [
+ "fixpt-hash",
  "fixpt-memmgmt",
 ]
 
@@ -101,6 +115,7 @@ dependencies = [
 name = "fixpt-memmgmt"
 version = "0.1.0"
 dependencies = [
+ "fixpt-hash",
  "libc",
 ]
 
@@ -109,6 +124,7 @@ name = "fixpt-native"
 version = "0.1.0"
 dependencies = [
  "fixpt-engine",
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-memmgmt",
  "fixpt-runtime",
@@ -118,11 +134,15 @@ dependencies = [
 [[package]]
 name = "fixpt-read"
 version = "0.1.0"
+dependencies = [
+ "fixpt-hash",
+]
 
 [[package]]
 name = "fixpt-reps"
 version = "0.1.0"
 dependencies = [
+ "fixpt-hash",
  "fixpt-heap",
 ]
 
@@ -130,6 +150,7 @@ dependencies = [
 name = "fixpt-runtime"
 version = "0.1.0"
 dependencies = [
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-memmgmt",
  "fixpt-read",
@@ -147,6 +168,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-core",
  "fixpt-engine",
+ "fixpt-hash",
  "fixpt-heap",
  "fixpt-memmgmt",
  "fixpt-read",
@@ -157,6 +179,7 @@ dependencies = [
 name = "fixpt-tidy"
 version = "0.1.0"
 dependencies = [
+ "fixpt-hash",
  "fixpt-read",
 ]
 

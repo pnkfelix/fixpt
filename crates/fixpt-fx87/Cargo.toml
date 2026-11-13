@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+fixpt-hash = { path = "../fixpt-hash" }
 fixpt-read = { path = "../fixpt-read" }
 fixpt-heap = { path = "../fixpt-heap" }
 fixpt-runtime = { path = "../fixpt-runtime" }

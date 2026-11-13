@@ -17,7 +17,8 @@
 //! second has passed since the last write. Its first line says which wrote
 //! it. `scripts/phase-times.py` sums a run's files.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use fixpt_hash::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -137,7 +138,7 @@ thread_local! {
 fn number(name: &str) -> u32 {
     let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
     let (all, index) = &mut *names;
-    let index = index.get_or_insert_with(HashMap::new);
+    let index = index.get_or_insert_with(HashMap::default);
     if let Some(&n) = index.get(name) {
         return n;
     }

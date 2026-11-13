@@ -793,16 +793,16 @@ pub struct WithTables {
     /// `extend` or `include` opens, by the expression. Each held to the
     /// module's type where it is checked (`Checker::shape_held`).
     /// `None` where the expander did not know the shape (`#:relied #f`).
-    pub opened: std::collections::HashMap<ExpId, Option<Relied>>,
-    pub shaped: std::collections::HashMap<ExpId, Option<Relied>>,
+    pub opened: fixpt_hash::HashMap<ExpId, Option<Relied>>,
+    pub shaped: fixpt_hash::HashMap<ExpId, Option<Relied>>,
     /// Of each `extend`, by the `(with %extend-0 …)` it makes, what the
     /// expander relied on of its first module (that module's, `shaped`):
     /// as the FX-26 parser keeps it, on the `with`, for writing the tree.
-    pub extended: std::collections::HashMap<ExpId, Option<Relied>>,
+    pub extended: fixpt_hash::HashMap<ExpId, Option<Relied>>,
     /// By each `with`, the descriptions its body reads that the module
     /// was not taken to give (read past it, to what is outside): which its
     /// type must not give (`Checker::shape_held`).
-    pub read_past: std::collections::HashMap<ExpId, Vec<Sym>>,
+    pub read_past: fixpt_hash::HashMap<ExpId, Vec<Sym>>,
     /// The `with`s being parsed whose records the expander wrote, innermost
     /// last: each record, and what is read past it so far
     /// (`Parser::withs_reading`).
@@ -810,7 +810,7 @@ pub struct WithTables {
     /// Each `(the (modnames …) e)`'s type, a slot linked where it is checked
     /// to the type of `e` sealed to the names (`Checker::sealed`), and the
     /// names.
-    pub sealed: std::collections::HashMap<TyId, Vec<ShapeMember>>,
+    pub sealed: fixpt_hash::HashMap<TyId, Vec<ShapeMember>>,
     /// Of each module with `include`s being parsed, innermost last, the
     /// frame of what they give, if each has its record (`None` if not):
     /// one for each such module, so that one's is never an outer one's.

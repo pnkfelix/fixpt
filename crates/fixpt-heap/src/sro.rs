@@ -11,7 +11,7 @@
 use crate::layout::TAG_MASK;
 use crate::value::TAG_TRAILER;
 use crate::{Heap, Value};
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Who refers to an object, as [`Heap::sro_referrers`] says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,7 +53,7 @@ impl Heap {
     /// particular order.
     pub fn sro(&self, kind: SroKind, limit: Option<usize>, extra_roots: &[&[Value]]) -> Vec<Value> {
         // Reference counts, by Value; each object's edges are followed once.
-        let mut counts: HashMap<u64, usize> = HashMap::new();
+        let mut counts: HashMap<u64, usize> = HashMap::default();
         let mut todo: Vec<Value> = Vec::new();
         let reach = |v: Value, counts: &mut HashMap<u64, usize>, todo: &mut Vec<Value>| {
             if !v.is_ref() {
@@ -107,7 +107,7 @@ impl Heap {
     /// `extra_roots`. For finding why something is alive, from the other end
     /// than `sro`'s counts: walk the referrers back to a root.
     pub fn sro_referrers(&self, kind: SroKind, limit: usize, extra_roots: &[&[Value]]) -> HashMap<u64, Referrers> {
-        let mut seen: HashMap<u64, Referrers> = HashMap::new();
+        let mut seen: HashMap<u64, Referrers> = HashMap::default();
         let mut todo: Vec<Value> = Vec::new();
         let reach = |v: Value, by: Referrer, seen: &mut HashMap<u64, Referrers>, todo: &mut Vec<Value>| {
             if !v.is_ref() {
@@ -169,7 +169,7 @@ impl Heap {
     pub fn path_to(&self, target: Value, extra_roots: &[&[Value]]) -> Option<Vec<String>> {
         // Each object reached, with the one it was first reached from and
         // through what; breadth first, so the chain found is a shortest.
-        let mut from: HashMap<u64, (Option<u64>, String)> = HashMap::new();
+        let mut from: HashMap<u64, (Option<u64>, String)> = HashMap::default();
         let mut todo = std::collections::VecDeque::new();
         let (r, g) = (self.roots_slice().len(), self.global_count());
         let roots = self.roots_for_sro();

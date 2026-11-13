@@ -8,7 +8,7 @@
 //! has rebuilt: a guarded structural identity. So every `A` already is a
 //! `B`; nothing need call the proof, and subtyping uses what it proves.
 
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 
 use crate::ast::{ArmBind, D, DVar, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::check::Checker;
@@ -281,8 +281,8 @@ impl Checker {
     pub(crate) fn lemma_instances(&mut self, a: TyId, b: TyId) -> Vec<Vec<(TyId, TyId)>> {
         let mut out = Vec::new();
         for l in self.lemmas.clone() {
-            let mut map = HashMap::new();
-            let mut seen = HashSet::new();
+            let mut map = HashMap::default();
+            let mut seen = HashSet::default();
             if !(self.match_ty(&l, l.lhs, a, &mut map, &mut seen) && self.match_ty(&l, l.rhs, b, &mut map, &mut seen)) {
                 continue;
             }

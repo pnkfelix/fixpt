@@ -34,7 +34,7 @@ impl Ctx {
 }
 
 fn empty() -> DStore {
-    DStore::new()
+    DStore::default()
 }
 
 #[test]

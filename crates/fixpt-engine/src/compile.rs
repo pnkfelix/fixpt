@@ -43,7 +43,7 @@ use fixpt_core::lower::{
 use fixpt_heap::{Heap, ObjType, Value};
 use fixpt_read::Interner;
 use fixpt_runtime::prim::{self, PrimKind};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// Opcodes. Operand counts are in the comments and encoded in [`op::len`].
 pub mod op {
@@ -157,7 +157,7 @@ pub fn compile(
         heap,
         interner,
         program: &converted,
-        global_names: HashMap::new(),
+        global_names: HashMap::default(),
         boxes: prims,
     };
     c.code_for(None, &[], None, converted.body)
@@ -242,7 +242,7 @@ impl Compiler<'_> {
         free: &[VarId],
     ) -> Result<Value, CompileError> {
         let mut scope = Scope {
-            places: HashMap::new(),
+            places: HashMap::default(),
             next: 0,
             frame: 0,
             code: Vec::new(),

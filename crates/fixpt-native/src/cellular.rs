@@ -1377,9 +1377,9 @@ thread_local! {
     static ROUND_TRIP_WORDS: std::cell::RefCell<u64> = const { std::cell::RefCell::new(0) };
     /// Words of stack captured into continuations, and how many there were.
     pub(crate) static CAPTURED: std::cell::RefCell<(u64, u64)> = const { std::cell::RefCell::new((0, 0)) };
-    static PRIM_COUNTS: std::cell::RefCell<std::collections::HashMap<&'static str, u64>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    static PRIM_COUNTS: std::cell::RefCell<fixpt_hash::HashMap<&'static str, u64>> = std::cell::RefCell::new(fixpt_hash::HashMap::default());
     /// The same, by the word each call is made from.
-    static PRIM_CALLERS: std::cell::RefCell<std::collections::HashMap<(&'static str, String), u64>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    static PRIM_CALLERS: std::cell::RefCell<fixpt_hash::HashMap<(&'static str, String), u64>> = std::cell::RefCell::new(fixpt_hash::HashMap::default());
     /// Whether `FIXPT_CALLOUTS` is set, asked once.
     pub(crate) static TIMING: bool = std::env::var_os("FIXPT_CALLOUTS").is_some();
     /// A runtime primitive's message, when one failed in a call-out: a
@@ -1900,7 +1900,7 @@ impl NativeMachine {
         // Its phase (`TODO.md` §252).
         let _phase = fixpt_memmgmt::phases::enter("rust-compile");
         let closure = const { kind("cellular-closure") };
-        let (mut todo, mut seen, mut n) = (vec![word], std::collections::HashSet::new(), 0);
+        let (mut todo, mut seen, mut n) = (vec![word], fixpt_hash::HashSet::default(), 0);
         while let Some(w) = todo.pop() {
             if !seen.insert(w.raw()) {
                 continue;

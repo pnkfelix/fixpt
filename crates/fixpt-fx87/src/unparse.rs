@@ -29,7 +29,7 @@
 
 use crate::ast::{Arena, Desc, DescId, Kind};
 use fixpt_read::{escape_symbol, Interner};
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 
 pub struct Printer<'a> {
     arena: &'a Arena,
@@ -43,13 +43,13 @@ pub struct Printer<'a> {
 
 /// Render `root` exactly as `unparse-dexp` would.
 pub fn unparse(arena: &Arena, interner: &Interner, root: DescId) -> String {
-    let mut names = HashMap::new();
+    let mut names = HashMap::default();
     let mut order = Vec::new();
-    find_cycles(arena, root, &mut Vec::new(), &mut HashSet::new(), &mut order);
+    find_cycles(arena, root, &mut Vec::new(), &mut HashSet::default(), &mut order);
     for (i, id) in order.iter().enumerate() {
         names.insert(*id, format!("#{}", i + 1));
     }
-    let mut p = Printer { arena, interner, names, expanding: HashSet::new() };
+    let mut p = Printer { arena, interner, names, expanding: HashSet::default() };
     if order.is_empty() {
         return p.print(root);
     }

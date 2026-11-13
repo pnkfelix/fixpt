@@ -6,7 +6,7 @@
 
 use crate::num::N;
 use fixpt_heap::{Heap, ObjType, Value};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::fmt::Write as _;
 
 pub fn write_value(heap: &Heap, v: Value) -> String {
@@ -19,7 +19,7 @@ pub fn display_value(heap: &Heap, v: Value) -> String {
 
 fn print(heap: &Heap, v: Value, write: bool) -> String {
     let shared = find_shared(heap, v);
-    let mut labels: HashMap<Value, (u32, bool)> = HashMap::new();
+    let mut labels: HashMap<Value, (u32, bool)> = HashMap::default();
     for (i, s) in shared.iter().enumerate() {
         labels.insert(*s, (i as u32, false));
     }
@@ -41,8 +41,8 @@ fn find_shared(heap: &Heap, root: Value) -> Vec<Value> {
         Enter(Value),
         Leave(Value),
     }
-    let mut on_path: HashMap<Value, ()> = HashMap::new();
-    let mut finished: HashMap<Value, ()> = HashMap::new();
+    let mut on_path: HashMap<Value, ()> = HashMap::default();
+    let mut finished: HashMap<Value, ()> = HashMap::default();
     let mut cyclic = Vec::new();
     let mut stack = vec![Step::Enter(root)];
     // A bound on total work, so a pathological structure cannot hang the

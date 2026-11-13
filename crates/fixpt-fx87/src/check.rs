@@ -31,7 +31,7 @@ use crate::parse::Parser;
 use crate::subtype::Rel;
 use crate::unparse::unparse;
 use fixpt_read::{Span, Sym};
-use std::collections::HashSet;
+use fixpt_hash::HashSet;
 
 /// One answer to a type-directed question.
 #[derive(Copy, Clone, Debug)]
@@ -213,14 +213,14 @@ impl Checker {
     /// Cycle-safe by the same means as substitution: a hole is allocated before
     /// the children are walked, so a recursive occurrence finds it.
     fn eval_deep(&mut self, d: DescId) -> DescId {
-        let mut memo = std::collections::HashMap::new();
+        let mut memo = fixpt_hash::HashMap::default();
         self.eval_deep_memo(d, &mut memo)
     }
 
     fn eval_deep_memo(
         &mut self,
         d: DescId,
-        memo: &mut std::collections::HashMap<DescId, DescId>,
+        memo: &mut fixpt_hash::HashMap<DescId, DescId>,
     ) -> DescId {
         if let Some(done) = memo.get(&d) {
             return *done;
@@ -1059,7 +1059,7 @@ impl Checker {
             let Some(formal) = formals.get(position).copied() else { continue };
             let formal = self.eval_deep(formal);
             let unknowns: HashSet<Sym> = vars.into_iter().collect();
-            let mut solution = std::collections::HashMap::new();
+            let mut solution = fixpt_hash::HashMap::default();
             let matched =
                 self.match_desc(formal, ty, &unknowns, &mut solution, &mut Vec::new());
             // A monomorphic formal is accepted on subtyping instead, so
@@ -1106,7 +1106,7 @@ impl Checker {
     ) -> Option<DescId> {
         let (vars, formals, _) = self.open_subr(fun_ty)?;
         let unknowns: HashSet<Sym> = vars.into_iter().collect();
-        let mut solution = std::collections::HashMap::new();
+        let mut solution = fixpt_hash::HashMap::default();
         for (i, actual) in known {
             let Some(formal) = formals.get(*i).copied() else { continue };
             let formal = self.eval_deep(formal);
@@ -1132,7 +1132,7 @@ impl Checker {
             let Some((vars, _, result)) = self.open_subr(binding.ty) else { continue };
             let result = self.eval_deep(result);
             let unknowns: HashSet<Sym> = vars.into_iter().collect();
-            let mut solution = std::collections::HashMap::new();
+            let mut solution = fixpt_hash::HashMap::default();
             let matched =
                 self.match_desc(result, ty, &unknowns, &mut solution, &mut Vec::new());
             let subtypes = unknowns.is_empty() && {
@@ -1191,7 +1191,7 @@ impl Checker {
             return Err(self.declined(exp));
         }
         let names: HashSet<Sym> = binders.iter().map(|b| b.name).collect();
-        let mut solution = std::collections::HashMap::new();
+        let mut solution = fixpt_hash::HashMap::default();
         // The formals have to be evaluated before they can be matched: `length`
         // expects `(listof t r)`, while the actual from `(list 1 2 3)` is
         // already the recursive pair type that denotes. Matching one against
@@ -1230,7 +1230,7 @@ impl Checker {
         formal: DescId,
         actual: DescId,
         vars: &HashSet<Sym>,
-        out: &mut std::collections::HashMap<Sym, DescId>,
+        out: &mut fixpt_hash::HashMap<Sym, DescId>,
         trail: &mut Vec<(DescId, DescId)>,
     ) -> bool {
         if trail.contains(&(formal, actual)) {
@@ -1335,7 +1335,7 @@ impl Checker {
         result: DescId,
         bound: &[Sym],
     ) -> DescId {
-        let mut free = HashSet::new();
+        let mut free = HashSet::default();
         self.free_vars(exp, &mut free);
         let mut visible = Vec::new();
         let immutable = self.con(self.immutable);
@@ -1382,7 +1382,7 @@ impl Checker {
                 }
             }
             Exp::Lambda { params, body } => {
-                let mut inner = HashSet::new();
+                let mut inner = HashSet::default();
                 self.free_vars(*body, &mut inner);
                 for p in params {
                     inner.remove(&p.name);
@@ -1390,7 +1390,7 @@ impl Checker {
                 out.extend(inner);
             }
             Exp::Let { bindings, body } | Exp::Letrec { bindings, body } => {
-                let mut inner = HashSet::new();
+                let mut inner = HashSet::default();
                 self.free_vars(*body, &mut inner);
                 for b in bindings {
                     self.free_vars(b.value, out);
@@ -1418,7 +1418,7 @@ impl Checker {
             Exp::Delay(e) => self.free_vars(*e, out),
             Exp::TagCase { var, scrutinee, clauses, .. } => {
                 self.free_vars(*scrutinee, out);
-                let mut inner = HashSet::new();
+                let mut inner = HashSet::default();
                 for c in clauses {
                     self.free_vars(c.body, &mut inner);
                 }
@@ -1426,13 +1426,13 @@ impl Checker {
                 out.extend(inner);
             }
             Exp::VLambda { name, body, .. } => {
-                let mut inner = HashSet::new();
+                let mut inner = HashSet::default();
                 self.free_vars(*body, &mut inner);
                 inner.remove(name);
                 out.extend(inner);
             }
             Exp::Do { bindings, test, result, body } => {
-                let mut inner = HashSet::new();
+                let mut inner = HashSet::default();
                 self.free_vars(*test, &mut inner);
                 self.free_vars(*result, &mut inner);
                 if let Some(b) = body {

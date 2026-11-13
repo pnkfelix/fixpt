@@ -5,7 +5,7 @@
 
 #[test]
 fn no_primitive_is_defined_twice() {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = fixpt_hash::HashSet::default();
     let twice: Vec<&str> = fixpt_runtime::PRIMITIVES.iter().map(|d| d.name).filter(|n| !seen.insert(*n)).collect();
     assert!(twice.is_empty(), "defined more than once: {twice:?}");
 }

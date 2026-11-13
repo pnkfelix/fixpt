@@ -8,7 +8,7 @@
 //! of it is assembled.
 
 use crate::cellular::State;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 /// Whether calls are counted: `FIXPT_PROFILE_CALLS` set, read once.
@@ -69,7 +69,7 @@ pub unsafe extern "C" fn enter(st: *mut State, word: u32) {
 /// its callers that called it most, by site.
 pub fn report(n: usize) -> String {
     let c = counts();
-    let mut calls: HashMap<u32, u64> = HashMap::new();
+    let mut calls: HashMap<u32, u64> = HashMap::default();
     for (&(_, w), &k) in &c.edges {
         *calls.entry(w).or_default() += k;
     }

@@ -26,6 +26,9 @@ pub use sro::{Referrer, Referrers, SroKind};
 pub mod value;
 
 pub use heap::{BlobletError, CodePart, Head, Heap};
+
+/// The heap's maps and sets, unseeded (`fixpt-hash`).
+pub use fixpt_hash::{HashMap, HashSet, Unseeded};
 pub use image::ImageError;
 pub use fixpt_memmgmt::Mapped;
 

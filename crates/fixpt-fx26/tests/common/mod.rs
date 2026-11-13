@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use fixpt_heap::{Heap, Value};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// Whether words `a` and `b` are the same code: cell for cell, the words
 /// they call compared the same way, and each global's cell in one standing
@@ -61,7 +61,7 @@ pub fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, wh
 
 /// How many register words (twins) the code reachable from word `w` has: to
 /// see that a comparison of register code compared some.
-pub fn register_words(h: &Heap, w: Value, seen: &mut std::collections::HashSet<u64>) -> usize {
+pub fn register_words(h: &Heap, w: Value, seen: &mut fixpt_hash::HashSet<u64>) -> usize {
     if !w.is_bloblet() || !seen.insert(w.raw()) {
         return 0;
     }

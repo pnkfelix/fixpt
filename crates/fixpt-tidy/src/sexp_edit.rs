@@ -394,7 +394,7 @@ pub struct Early {
 pub fn order(texts: &[(String, SyntaxProfile)]) -> Result<Vec<Early>, String> {
     // Where each value is defined: (text, start, and the top-level form
     // around it, whose members may use each other).
-    let mut defined: std::collections::HashMap<String, (usize, usize, usize, usize)> = std::collections::HashMap::new();
+    let mut defined: fixpt_hash::HashMap<String, (usize, usize, usize, usize)> = fixpt_hash::HashMap::default();
     for (k, (text, profile)) in texts.iter().enumerate() {
         let (forms, _) = read(text, *profile)?;
         for d in definitions(text, *profile)? {

@@ -21,7 +21,7 @@ use crate::ast::{Arm, Exp, ExpId, ModItem, Ty};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_read::Sym;
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 
 /// How one debt stands.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -94,7 +94,7 @@ impl Walk<'_> {
             _ => Vec::new(),
         };
         let i = self.units.len();
-        self.units.push(Unit { name, debts: Vec::new(), calls: HashSet::new(), calls_given: 0 });
+        self.units.push(Unit { name, debts: Vec::new(), calls: HashSet::default(), calls_given: 0 });
         self.walk(init, Some(i), &params);
     }
 

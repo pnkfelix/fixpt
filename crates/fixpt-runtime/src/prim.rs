@@ -2492,7 +2492,7 @@ prims! {
             }
         };
         // 1: on the path; 2: finished.
-        let mut mark: std::collections::HashMap<Value, u8> = std::collections::HashMap::new();
+        let mut mark: fixpt_hash::HashMap<Value, u8> = fixpt_hash::HashMap::default();
         let mut stack: Vec<(Value, Vec<Value>)> = vec![(a[0], kids(a[0]))];
         mark.insert(a[0], 1);
         while let Some((v, ks)) = stack.last_mut() {

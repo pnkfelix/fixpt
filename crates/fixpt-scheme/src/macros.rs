@@ -19,7 +19,7 @@
 use crate::env::{Binding, Special};
 use crate::expand::{ExpandError, Expander};
 use fixpt_read::{Datum, Span, Sym, Syntax};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::rc::Rc;
 
 type R<T> = Result<T, ExpandError>;
@@ -262,10 +262,10 @@ impl Expander<'_> {
             MacroDef::Proc(p) => return self.expand_proc_macro(&p, form),
         };
         for (pattern, template) in &m.rules {
-            let mut binds = HashMap::new();
+            let mut binds = HashMap::default();
             if self.match_top(&m, pattern, form, &mut binds) {
-                let mut renames = HashMap::new();
-                let out = self.instantiate(&m, template, &binds, &HashMap::new(), &mut renames, false, form.span)?;
+                let mut renames = HashMap::default();
+                let out = self.instantiate(&m, template, &binds, &HashMap::default(), &mut renames, false, form.span)?;
                 return Ok(out);
             }
         }
@@ -377,7 +377,7 @@ impl Expander<'_> {
             let vars = self.pattern_vars(m, rep);
             let mut seqs: Vec<Vec<M>> = vec![Vec::new(); vars.len()];
             for i in middle {
-                let mut one = HashMap::new();
+                let mut one = HashMap::default();
                 if !self.matches(m, rep, i, &mut one) {
                     return false;
                 }

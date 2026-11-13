@@ -45,7 +45,7 @@ use fixpt_core::ir::Builder;
 use fixpt_engine::Prepared;
 use fixpt_heap::{ObjType, Value};
 use fixpt_read::{Datum, Span, Sym, Syntax};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 type R<T> = Result<T, ExpandError>;
 
@@ -209,10 +209,10 @@ impl Expander<'_> {
         let mut conv = Conv {
             kind: pm.kind,
             scope: pm.scope,
-            heap_of: HashMap::new(),
-            sym_of: HashMap::new(),
-            renamed: HashMap::new(),
-            pairs: HashMap::new(),
+            heap_of: HashMap::default(),
+            sym_of: HashMap::default(),
+            renamed: HashMap::default(),
+            pairs: HashMap::default(),
             span: form.span,
         };
         let input = self.syntax_to_heap(form, &mut conv);

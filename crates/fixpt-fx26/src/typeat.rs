@@ -83,14 +83,14 @@ pub(crate) fn named(c: &mut Checker, t: crate::ast::TyId) -> String {
 /// written out, and each family of one type parameter applied to what the
 /// types printed so far had in them.
 pub(crate) struct Namer {
-    map: std::collections::HashMap<crate::ast::DVar, crate::ast::D>,
+    map: fixpt_hash::HashMap<crate::ast::DVar, crate::ast::D>,
     families: Vec<(fixpt_read::Sym, crate::ast::DVar, crate::ast::TyId)>,
     /// Each named type: its name, itself, and what it prints as.
     printed: Vec<(String, crate::ast::TyId, String)>,
     /// What each name stands for, written out, and the name.
     names: Vec<(String, String)>,
     /// The arguments the families have been applied to.
-    applied: std::collections::HashSet<String>,
+    applied: fixpt_hash::HashSet<String>,
 }
 
 impl Namer {
@@ -102,7 +102,7 @@ impl Namer {
             c.type_names().into_iter().filter_map(|n| c.type_named(n).map(|d| (n, d))).collect();
         // A module's effect read as `(select m e)` is an effect variable; each
         // replaced by the effect `m` defines.
-        let mut map = std::collections::HashMap::new();
+        let mut map = fixpt_hash::HashMap::default();
         for ((m, e), v) in c.effect_selects.clone() {
             if let Ok(x) = c.selected_effect(m, e, fixpt_read::Span::new(FileId(0), 0, 0)) {
                 map.insert(v, crate::ast::D::Effect(x));
@@ -153,7 +153,7 @@ impl Namer {
             plain.iter().map(|(name, d)| (name.clone(), *d, c.show_ty(*d))).collect();
         c.print_expanded.set(false);
         let names = printed.iter().filter(|(_, _, e)| e.starts_with('(')).map(|(n, _, e)| (e.clone(), n.clone())).collect();
-        Namer { map, families, printed, names, applied: std::collections::HashSet::new() }
+        Namer { map, families, printed, names, applied: fixpt_hash::HashSet::default() }
     }
 
     /// Type `t` printed with each compound type a name names shown by it.

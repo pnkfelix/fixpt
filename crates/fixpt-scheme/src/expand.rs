@@ -26,7 +26,7 @@
 //! original with no stripping pass, and only resolution sees the difference.
 
 use crate::env::{Binding, Env, Special};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use fixpt_core::ir::{Builder, Node, NodeId, Program};
 use fixpt_core::{GlobalId, VarId};
 use fixpt_heap::Value;
@@ -172,7 +172,7 @@ pub struct ExpanderParts {
     pub aliases: HashMap<Sym, Alias>,
     pub core: HashMap<Sym, Binding>,
     pub macros: Vec<crate::macros::MacroDef>,
-    pub params: std::collections::HashSet<u32>,
+    pub params: fixpt_hash::HashSet<u32>,
 }
 
 pub struct Expander<'a> {
@@ -192,7 +192,7 @@ pub struct Expander<'a> {
     /// Macros, indexed by [`Binding::Macro`].
     pub(crate) macros: Vec<crate::macros::MacroDef>,
     /// Macros defined with `define-syntax-parameter`.
-    pub(crate) params: std::collections::HashSet<u32>,
+    pub(crate) params: fixpt_hash::HashSet<u32>,
     /// While a `syntax-parameterize` body is being expanded: which transformer
     /// a parameter currently stands for.
     pub(crate) param_overrides: HashMap<u32, u32>,
@@ -248,10 +248,10 @@ const SPECIAL_FORMS: &[(&str, Special)] = &[
 
 impl<'a> Expander<'a> {
     pub fn new(rt: &'a mut Runtime) -> Expander<'a> {
-        let mut aliases = HashMap::new();
+        let mut aliases = HashMap::default();
         let syms = Syms::new(&mut rt.interner, &mut aliases);
         let mut env = Env::new();
-        let mut core = HashMap::new();
+        let mut core = HashMap::default();
         for (name, s) in SPECIAL_FORMS {
             // `make-promise` is both a primitive and, here, a special form: the
             // primitive is what `delay` ultimately calls, and binding the name
@@ -274,7 +274,7 @@ impl<'a> Expander<'a> {
             core,
             macros: Vec::new(),
             params: Default::default(),
-            param_overrides: HashMap::new(),
+            param_overrides: HashMap::default(),
             macro_depth: 0,
             host: None,
         }
@@ -293,7 +293,7 @@ impl<'a> Expander<'a> {
             core: parts.core,
             macros: parts.macros,
             params: parts.params,
-            param_overrides: HashMap::new(),
+            param_overrides: HashMap::default(),
             macro_depth: 0,
             host: None,
         }

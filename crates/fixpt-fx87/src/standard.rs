@@ -38,7 +38,7 @@ pub fn load(parser: &mut Parser) -> R<Standard> {
     };
 
     let mut env = TkEnv::new();
-    let mut store = DStore::new();
+    let mut store = DStore::default();
     // Each section is read in turn, and the order matters: `d-store` entries
     // may mention constructors that `k-env` introduced, and `t-env` types
     // mention both.

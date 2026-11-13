@@ -27,7 +27,7 @@
 //! first meets them; holes and constants numbered so too. Two reps of one
 //! type are then equal, and have one [`Rep::digest`].
 
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 pub mod binary;
 pub mod fill;
@@ -436,7 +436,7 @@ fn canonical(nodes: Vec<Node>, root: u32, names: Vec<String>, holes: Vec<String>
     // Numbered as a walk from the root first meets each class, operands in
     // order (a set's in its order above); holes and constants as it first
     // meets them.
-    let mut first: HashMap<usize, u32> = HashMap::new();
+    let mut first: HashMap<usize, u32> = HashMap::default();
     let mut order: Vec<usize> = Vec::new();
     let mut stack = vec![root as usize];
     while let Some(k) = stack.pop() {
@@ -450,7 +450,7 @@ fn canonical(nodes: Vec<Node>, root: u32, names: Vec<String>, holes: Vec<String>
         stack.extend(edges(&ordered).iter().rev().map(|&i| i as usize));
     }
     let mut new_names: Vec<String> = Vec::new();
-    let mut name_of: HashMap<u32, u32> = HashMap::new();
+    let mut name_of: HashMap<u32, u32> = HashMap::default();
     let mut rename = |i: u32| *name_of.entry(i).or_insert_with(|| {
         new_names.push(names[i as usize].clone());
         new_names.len() as u32 - 1
@@ -495,7 +495,7 @@ fn digest_words(words: &[u64]) -> u64 {
 
 /// Each of `keys` numbered by its first occurrence among them.
 fn numbered<K: std::hash::Hash + Eq>(keys: impl Iterator<Item = K>) -> Vec<usize> {
-    let mut seen: HashMap<K, usize> = HashMap::new();
+    let mut seen: HashMap<K, usize> = HashMap::default();
     keys.map(|k| {
         let n = seen.len();
         *seen.entry(k).or_insert(n)

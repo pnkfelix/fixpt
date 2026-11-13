@@ -9,7 +9,7 @@
 
 use fixpt_core::{GlobalId, VarId};
 use fixpt_read::Sym;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Special {
@@ -77,7 +77,7 @@ pub struct Env {
 
 impl Env {
     pub fn new() -> Env {
-        Env { bound: HashMap::new(), scopes: vec![Vec::new()] }
+        Env { bound: HashMap::default(), scopes: vec![Vec::new()] }
     }
 
     /// Just the top-level scope — what a macro transformer's expression sees,

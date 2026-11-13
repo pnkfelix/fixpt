@@ -31,7 +31,7 @@
 
 use crate::ast::{Arena, Desc, DescId, Kind};
 use fixpt_read::Sym;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// A per-side renaming of description variables, for comparing `poly` types.
 pub type DStore = HashMap<Sym, Sym>;

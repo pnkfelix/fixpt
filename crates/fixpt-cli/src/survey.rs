@@ -16,7 +16,8 @@ use fixpt_fx26::session::Fx26Session;
 use fixpt_heap::layout::cellular::{CLOSURE_WORD, GLOBAL_FIELDS, GLOBAL_VALUE, ROUTINES, WORD_CELL0, WORD_TWIN};
 use fixpt_heap::layout::regcode::OPS;
 use fixpt_heap::{Heap, Value};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+use fixpt_hash::{HashMap, HashSet};
 
 /// What one program's register code leaves: each kind of finding, in all
 /// and in loops, and by operation.
@@ -141,7 +142,7 @@ fn fold(op: &str, x: u64, y: u64) -> Option<Value> {
 /// its register code's, closures and the globals they name.
 fn words_of(heap: &Heap, start: Value) -> Vec<Value> {
     let closure = const { fixpt_heap::layout::kind("cellular-closure") };
-    let (mut todo, mut seen, mut out) = (vec![start], HashSet::new(), Vec::new());
+    let (mut todo, mut seen, mut out) = (vec![start], HashSet::default(), Vec::new());
     let push = |v: Value, todo: &mut Vec<Value>| {
         if heap.is_cellular_word(v) {
             todo.push(v);
@@ -200,7 +201,7 @@ fn survey_word(heap: &Heap, rw: Value, found: &mut Found) {
     }
     found.words += 1;
     found.cells += n;
-    let mut p = Pass { result: None, regs: HashMap::new(), slots: HashMap::new(), vns: HashMap::new(), tested: HashSet::new(), next: 0 };
+    let mut p = Pass { result: None, regs: HashMap::default(), slots: HashMap::default(), vns: HashMap::default(), tested: HashSet::default(), next: 0 };
     let routine = |v: Value| ROUTINES.get(v.as_fixnum() as usize).map_or("?", |r| r.0).to_string();
     let prim = |v: Value| fixpt_runtime::PRIMITIVES.get(v.as_fixnum() as usize).map_or("?", |d| d.name).to_string();
     // What RESULT was loaded from, for `global g; field k`: the global.

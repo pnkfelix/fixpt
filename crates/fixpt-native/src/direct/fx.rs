@@ -23,7 +23,7 @@
 
 use super::{Callout, Compiled, Compiling, DirectMachine, Field, Proc, GLOBAL_WRITES, OPS, ROUTINES};
 use fixpt_heap::{Heap, Value};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// A compile by FX-26 under way: `compile`'s driver, between the
 /// procedures FX-26 makes.
@@ -32,7 +32,7 @@ pub struct FxCompile {
     by_word: HashMap<u64, usize>,
     queue: Vec<usize>,
     resume: Option<usize>,
-    refused: std::collections::HashSet<u64>,
+    refused: fixpt_hash::HashSet<u64>,
     /// The words refused, as values, for `fx_park` to keep.
     refused_words: Vec<Value>,
     native_masks: HashMap<u64, Option<u8>>,
@@ -259,18 +259,18 @@ pub fn fx_begin(heap: &mut Heap, closure: Value) -> Result<FxCompile, String> {
     heap.inhibit_collection();
     let mut c = FxCompile {
         procs: Vec::new(),
-        by_word: HashMap::new(),
+        by_word: HashMap::default(),
         queue: Vec::new(),
         resume: None,
-        refused: std::collections::HashSet::new(),
+        refused: fixpt_hash::HashSet::default(),
         refused_words: Vec::new(),
-        native_masks: HashMap::new(),
-        slot_facts: HashMap::new(),
+        native_masks: HashMap::default(),
+        slot_facts: HashMap::default(),
         closure,
         first: 0,
         free: Vec::new(),
         values: Vec::new(),
-        value_ids: HashMap::new(),
+        value_ids: HashMap::default(),
         frees: vec![Vec::new()],
         current: None,
         failures: None,
@@ -392,7 +392,7 @@ fn fx_refuse(heap: &Heap, c: &mut FxCompile, p: usize, why: String) -> Result<()
     let mut refused = std::mem::take(&mut c.refused);
     refused.insert(c.procs[p].word.raw());
     c.refused_words.push(c.procs[p].word);
-    (c.procs, c.by_word, c.queue, c.resume, c.native_masks) = (Vec::new(), HashMap::new(), Vec::new(), None, HashMap::new());
+    (c.procs, c.by_word, c.queue, c.resume, c.native_masks) = (Vec::new(), HashMap::default(), Vec::new(), None, HashMap::default());
     c.refused = refused;
     c.started(heap)
 }
@@ -688,10 +688,10 @@ impl DirectMachine {
     pub fn compile_each(&mut self, heap: &Heap, closure: Value, one: bool) -> Result<Vec<Each>, String> {
         let mut callouts = std::mem::replace(&mut self.last, super::own_callouts().to_vec());
         callouts.truncate(super::OWN_CALLOUTS);
-        let mut c = Compiling { heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut callouts, resume: None, refused: std::collections::HashSet::new(), native_masks: HashMap::new(), slot_facts: &mut HashMap::new() };
+        let mut c = Compiling { heap, procs: Vec::new(), by_word: HashMap::default(), queue: Vec::new(), callouts: &mut callouts, resume: None, refused: fixpt_hash::HashSet::default(), native_masks: HashMap::default(), slot_facts: &mut HashMap::default() };
         let (word, _) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
         c.proc_of(word)?;
-        let mut failures = HashMap::new();
+        let mut failures = HashMap::default();
         while let Some(p) = c.queue.pop() {
             // What FX-26's driver asks first (`prepare_x64`), so that both
             // queue the same procedures, whichever fails where.
@@ -717,7 +717,7 @@ impl DirectMachine {
     #[doc(hidden)]
     pub fn fx_begin_each(&mut self, heap: &mut Heap, closure: Value, one: bool) -> Result<FxCompile, String> {
         let mut c = fx_begin(heap, closure)?;
-        c.failures = Some(HashMap::new());
+        c.failures = Some(HashMap::default());
         c.one = one;
         Ok(c)
     }

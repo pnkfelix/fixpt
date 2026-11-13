@@ -13,7 +13,7 @@ use crate::ast::{Atom, D, DVar, Effect, ExpId, Kind, ModItem, Ty, TyId};
 use crate::check::{Checker, Pick};
 use crate::error::{FxError, R};
 use fixpt_read::{Span, Sym};
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 
 impl Checker {
     /// `(module item …)`: each item checked in the scope of those before
@@ -154,7 +154,7 @@ impl Checker {
     fn included(&mut self, e: ExpId, span: Span, abs: Vec<(Sym, DVar)>, mut descs: Vec<(Sym, TyId)>, own: Vec<(Sym, TyId)>, from: &[(Sym, TyId)], at: Option<usize>) -> R<TyId> {
         let (mut out, mut path): (Vec<(Sym, TyId)>, Vec<Pick>) = (Vec::new(), Vec::new());
         let mut own_descs = std::mem::take(&mut descs);
-        let (mut fresh, mut map) = (Vec::new(), HashMap::new());
+        let (mut fresh, mut map) = (Vec::new(), HashMap::default());
         // The names so far, for lookups in constant time: an include of a
         // types file brings hundreds of each.
         let mut desc_at: HashMap<Sym, TyId> = own_descs.iter().map(|(n, t)| (*n, *t)).collect();
@@ -297,7 +297,7 @@ impl Checker {
     /// the FX-26 checker's `k-extended`.
     fn extended(&mut self, e: ExpId, span: Span, vals: &[(Sym, TyId)]) -> R<TyId> {
         let mut sides = Vec::new();
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         for (i, (_, t)) in vals.iter().enumerate() {
             match self.arena.get(self.arena.resolve(*t)).clone() {
                 Ty::Module { abs, descs, vals } => {
@@ -433,7 +433,7 @@ impl Checker {
         // A `define*` named by an item that is not a typed lambda, checked
         // now, as a value made as the module is: at its type as written,
         // and refused below if found to read more (Heist's, 2026-10-28).
-        let mut valued = std::collections::HashSet::new();
+        let mut valued = fixpt_hash::HashSet::default();
         for (i, item) in items.iter().enumerate() {
             if let ModItem::Val { init, .. } = item
                 && !lambdas.iter().any(|l| l.3 == i)
@@ -966,7 +966,7 @@ impl Checker {
         if abs.is_empty() || n.starts_with('%') {
             return t;
         }
-        let mut map: HashMap<DVar, D> = HashMap::new();
+        let mut map: HashMap<DVar, D> = HashMap::default();
         let mut fresh = Vec::new();
         for (a, v) in &abs {
             let named = self.interner.intern(&format!("{n}..{}", self.interner.name(*a)));
@@ -999,11 +999,11 @@ impl Checker {
             return Ok(t);
         }
         // Each effect selected, what its module says it is.
-        let mut given: HashMap<DVar, D> = HashMap::new();
+        let mut given: HashMap<DVar, D> = HashMap::default();
         for (v, (m, n)) in effects {
             given.insert(v, D::Effect(self.effect_selected(v, m, n, span)?));
         }
-        let mut sel = HashMap::new();
+        let mut sel = HashMap::default();
         for (m, n, node) in found {
             let shown = |c: &Checker| format!("`(select {} {})`", c.interner.name(m), c.interner.name(n));
             // A type name in a module with `include`s that nothing else
@@ -1243,7 +1243,7 @@ impl Checker {
             }
         };
         let mut stack = vec![t];
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some(t) = stack.pop() {
             let t = self.arena.resolve(t);
             if !seen.insert(t) {
@@ -1270,7 +1270,7 @@ impl Checker {
     /// checked where a `select` has just said what the function is.
     pub(crate) fn check_apps(&mut self, t: TyId, span: Span) -> R<()> {
         let mut stack = vec![t];
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some(t) = stack.pop() {
             let t = self.arena.resolve(t);
             if !seen.insert(t) {
@@ -1336,7 +1336,7 @@ impl Checker {
     /// Whether type variable `v` is somewhere in `t`.
     pub(crate) fn mentions_var(&self, t: TyId, v: DVar) -> bool {
         let mut stack = vec![t];
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         while let Some(t) = stack.pop() {
             let t = self.arena.resolve(t);
             if !seen.insert(t) {
@@ -1419,7 +1419,7 @@ impl Checker {
             return t;
         }
         let outer = std::mem::replace(&mut self.param_map, map.clone());
-        let r = self.subst(t, &HashMap::new());
+        let r = self.subst(t, &HashMap::default());
         self.param_map = outer;
         r
     }
@@ -1451,7 +1451,7 @@ impl Checker {
         if found.is_empty() {
             return Ok((params.to_vec(), result));
         }
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         for (k, x) in found {
             let named = match args.get(k).map(|a| self.arena.exp_at(*a).clone()) {
                 Some(crate::ast::Exp::Var(v)) => self.lookup(v).map(|t| (v, t)),

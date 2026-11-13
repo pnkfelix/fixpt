@@ -41,7 +41,7 @@ use fixpt_heap::Value;
 use fixpt_read::{FileId, Syntax};
 use fixpt_runtime::Runtime;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 const SUM: u8 = fixpt_heap::layout::kind("sum");
 const PRODUCT: u8 = fixpt_heap::layout::kind("product");
@@ -192,7 +192,7 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
         // Reading a session's global is reading the session, which its
         // forms' types say (`(read r)`), not part of the code's `E`.
         checker.globals_effects = false;
-        let mut state = State { checker, globals: Globals::with_prefix(&format!("fx26-session-{i}:")), generation: 0, seeds: Code::default(), seed_texts: Vec::new(), texts: HashMap::new(), kept: crate::ids::standard_state() };
+        let mut state = State { checker, globals: Globals::with_prefix(&format!("fx26-session-{i}:")), generation: 0, seeds: Code::default(), seed_texts: Vec::new(), texts: HashMap::default(), kept: crate::ids::standard_state() };
         let module = state.checker.interner.intern("stage-module");
         let depth = bind_step_names(&mut state.checker, reps.as_ref());
         let seed = define(&mut state, &format!("(define stage-module (the {mt} %fasl-value))"));

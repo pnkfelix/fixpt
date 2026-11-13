@@ -60,7 +60,7 @@
 
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 use std::rc::Rc;
 
 mod infer;
@@ -263,8 +263,8 @@ enum Action {
 /// standard.
 pub struct FileScope<'a> {
     pub shared: Sym,
-    pub values: std::collections::HashSet<Sym>,
-    pub types: std::collections::HashSet<Sym>,
+    pub values: fixpt_hash::HashSet<Sym>,
+    pub types: fixpt_hash::HashSet<Sym>,
     pub internal: HashMap<Sym, Sym>,
     pub is_standard: &'a dyn Fn(Sym) -> bool,
 }
@@ -534,7 +534,7 @@ impl Macros {
             .map_err(|e| FxError::at(e.span, format!("the kernel's syntax types: {}", e.message)))?;
         let mut k = Kernel::default();
         // `defn`, which the kernel's signatures name, and no macro's.
-        let mut named: HashMap<Sym, Rc<STy>> = HashMap::from([(interner.intern("defn"), Rc::new(STy::Defn))]);
+        let mut named: HashMap<Sym, Rc<STy>> = HashMap::from_iter([(interner.intern("defn"), Rc::new(STy::Defn))]);
         for f in &kernel_list(&forms, interner, "kernel-forms") {
             let items = f.as_proper_list().expect("a kernel entry");
             let what = interner.name(items[0].as_symbol().expect("a head")).to_string();
@@ -984,7 +984,7 @@ impl Macros {
         let place = |n: Sym| find_symbol(&c.pattern, n).map_or(c.pattern.span, |s| s.span);
         let sym = |s: &str, i: &mut Interner| Syntax::symbol(at, i.intern(s));
         let mut binders = m.poly.clone();
-        let mut binds: HashMap<Sym, Syntax> = HashMap::new();
+        let mut binds: HashMap<Sym, Syntax> = HashMap::default();
         // Each binder, a fresh name for the holes in its scope to be given.
         for (n, p) in &c.pvars {
             match &*p.core {
@@ -1127,7 +1127,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::new(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::new(), checking: false, withs: Box::default() };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::default(), checking: false, withs: Box::default() };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -1278,7 +1278,7 @@ impl Macros {
             },
             _ => (sig, false, false),
         };
-        let sig = self.sty(sig, interner, &HashMap::new(), &mut Vec::new())?;
+        let sig = self.sty(sig, interner, &HashMap::default(), &mut Vec::new())?;
         Ok((poly, sig, defn, desc))
     }
 
@@ -1298,7 +1298,7 @@ impl Macros {
         };
         // The pattern, aligned with the signature: each variable's type and
         // declared environment.
-        let none = HashMap::new();
+        let none = HashMap::default();
         let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
         // A `syntax-rules`' literals, each a name the signature has written
@@ -1324,7 +1324,7 @@ impl Macros {
             (true, Some((b, r))) => Some(exports(&p.eval(b, *r, pattern.span)?)),
             _ => None,
         };
-        let mut pvars: HashMap<Sym, PInfo> = HashMap::new();
+        let mut pvars: HashMap<Sym, PInfo> = HashMap::default();
         let mut order = Vec::new();
         for (at, env, many, depth) in found {
             let Kids::PVar(n) = p.nodes[at].kids else { continue };
@@ -1367,8 +1367,8 @@ impl Macros {
                 t.binders_under(x, h, &mut nested);
             }
         }
-        let mut actions = HashMap::new();
-        let mut uses: HashMap<Sym, usize> = HashMap::new();
+        let mut actions = HashMap::default();
+        let mut uses: HashMap<Sym, usize> = HashMap::default();
         for (at, env, many, depth) in found {
             let node = &t.nodes[at];
             let span = node.syn.span;
@@ -1520,7 +1520,7 @@ impl Macros {
         // Each typed hole's contract, its type read as a use reads the
         // template's types; none where it names the macro's own binders.
         let binders: Vec<Sym> = poly.iter().filter_map(|b| b.as_proper_list()?.first()?.as_symbol()).collect();
-        let mut contracts = HashMap::new();
+        let mut contracts = HashMap::default();
         for (n, info) in &pvars {
             let Some(ty) = info.hole.as_ref().and_then(|h| h.ty.clone()) else { continue };
             if !matches!(&*info.core, STy::Expr) || names_one_of(&ty, &binders) {
@@ -1680,15 +1680,15 @@ impl Macros {
     /// what a `with` or `include` binds, which the walk does not know yet.
     pub fn alpha_renamed(&mut self, form: &Syntax, interner: &mut Interner) -> R<Syntax> {
         self.ensure_kernel(interner)?;
-        let none = HashMap::new();
-        let mut renamed: HashMap<Vec<bool>, String> = HashMap::new();
+        let none = HashMap::default();
+        let mut renamed: HashMap<Vec<bool>, String> = HashMap::default();
         {
             let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
             let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
             let mut found = Vec::new();
             a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
             // The names definitions give, which other forms see.
-            let mut defined = HashSet::new();
+            let mut defined = HashSet::default();
             for node in &a.nodes {
                 if let (STy::Item | STy::Defn, Kids::Form(x)) = (&*node.core, &node.kids)
                     && let Some((b, r)) = &a.nodes[*x].export
@@ -1702,8 +1702,8 @@ impl Macros {
             }
             // Each reference's binder, innermost first; a name looked for
             // past a module's names, kept.
-            let mut target: HashMap<usize, usize> = HashMap::new();
-            let mut kept: HashSet<Sym> = HashSet::new();
+            let mut target: HashMap<usize, usize> = HashMap::default();
+            let mut kept: HashSet<Sym> = HashSet::default();
             for (at, env, _, _) in &found {
                 let Kids::Ref(n, Ns::Value, _) = a.nodes[*at].kids else { continue };
                 for level in env.levels() {
@@ -1755,11 +1755,11 @@ impl Macros {
             return self.expand_procedural(name, p, s, interner);
         }
         let (_, operands) = split(s).expect("a list");
-        let none = HashMap::new();
+        let none = HashMap::default();
         let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
         u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
         for c in &m.clauses {
-            let mut binds = HashMap::new();
+            let mut binds = HashMap::default();
             if !matches(&c.pattern, &operands, &c.names, &mut binds, interner) {
                 continue;
             }
@@ -3124,7 +3124,7 @@ impl Aligner<'_> {
             (Expr, Lambda) => true,
             (Data, Data) | (Type, Type) | (Label, Label) | (Kind, Kind) => return Ok(()),
             (Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn, _) | (_, Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn) => false,
-            _ => self.m.sub(have, want, &mut HashSet::new()),
+            _ => self.m.sub(have, want, &mut HashSet::default()),
         };
         if !fits {
             return Err(FxError::at(span, format!("`{name}` is placed where its syntax type is not one the form takes there")));
@@ -3516,7 +3516,7 @@ fn matches(p: &Syntax, s: &Syntax, names: &HashSet<Sym>, binds: &mut HashMap<Sym
         };
         let mut each = Vec::new();
         for e in &elems {
-            let mut b = HashMap::new();
+            let mut b = HashMap::default();
             if !matches(&x, e, names, &mut b, interner) {
                 return false;
             }

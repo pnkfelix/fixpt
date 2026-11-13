@@ -563,7 +563,7 @@ fn every_program_meant_to_run_checks() {
 /// expressions share one.
 #[test]
 fn effect_summaries_agree() {
-    use std::collections::HashMap;
+    use fixpt_hash::HashMap;
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut s = common::session();
     let (mut report, mut both, mut only_fx, mut only_rust) = (Vec::new(), 0, 0, 0);
@@ -582,7 +582,7 @@ fn effect_summaries_agree() {
         }
         {
             let Ok(Ok(_)) = s.check_with_own_checker(&program) else { continue };
-            let mut fx: HashMap<(u32, u32), i64> = HashMap::new();
+            let mut fx: HashMap<(u32, u32), i64> = HashMap::default();
             for (a, b, k) in s.own_effect_summaries().expect("notes") {
                 let e = fx.entry((a as u32, b as u32)).or_insert(k);
                 *e = (*e).max(k);
@@ -605,7 +605,7 @@ fn effect_summaries_agree() {
                 n += 1;
             }
             char_at[program.len()] = n;
-            let mut rust: HashMap<(u32, u32), i64> = HashMap::new();
+            let mut rust: HashMap<(u32, u32), i64> = HashMap::default();
             for ((f, a, b), k) in c.effect_summaries() {
                 if f != 0 {
                     continue;

@@ -19,7 +19,7 @@
 //!   integer; `#t`, `#f`.
 
 use crate::{Arg, Builder, Const, Rep};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::fmt::Write;
 
 /// Rep `rep`, readable.
@@ -104,7 +104,7 @@ fn quoted(s: &str) -> String {
 
 /// The rep `text` writes ([`write`]'s form), canonical; or why not.
 pub fn read(text: &str) -> Result<Rep, String> {
-    let mut p = Parser { s: text.as_bytes(), at: 0, b: Builder::new(), labels: HashMap::new(), holes: HashMap::new() };
+    let mut p = Parser { s: text.as_bytes(), at: 0, b: Builder::new(), labels: HashMap::default(), holes: HashMap::default() };
     p.space();
     let root = p.node()?;
     p.space();

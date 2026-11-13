@@ -18,7 +18,7 @@ use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::parse::DScope;
 use fixpt_read::{Sym, Syntax};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// What an effect function is given, of a description; none for a type.
 fn d_earg(d: D) -> Option<crate::ast::EArg> {

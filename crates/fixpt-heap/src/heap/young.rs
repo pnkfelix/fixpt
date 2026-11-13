@@ -24,7 +24,7 @@
 use super::{Copier, Heap, MAX_SEMI_WORDS, MEM_WORDS, NURSERY_BASE, NURSERY_MAX, each_field, read_head};
 use crate::layout;
 use crate::value::{Value, is_extension, is_header};
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// A card is 64 words, 512 bytes: word `i` of the heap's memory is on card
 /// `i >> CARD_SHIFT`.
@@ -183,12 +183,12 @@ impl Heap {
             from: NURSERY_BASE,
             to: old_top,
             free: 0,
-            owner: HashMap::new(),
+            owner: HashMap::default(),
             new: Vec::new(),
-            marked: HashSet::new(),
-            large_marks: HashSet::new(),
+            marked: HashSet::default(),
+            large_marks: HashSet::default(),
             large_gray: Vec::new(),
-            code_marks: HashSet::new(),
+            code_marks: HashSet::default(),
             code_gray: Vec::new(),
             weak_pairs: Vec::new(),
             regions: &mut self.regions,

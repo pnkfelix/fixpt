@@ -16,7 +16,7 @@ use crate::check::Checker;
 use crate::logic::{Expr, Formula};
 use fixpt_heap::layout::cellular::{operands, CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_NAME, GLOBAL_VALUE, PRIMITIVES, ROUTINES, WORD_CELL0};
 use fixpt_heap::{Heap, ObjType, Value};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// A term of the logic: what names a value at a cell boundary. A place
 /// (`Slot`, `Free`), a literal, a value the verifier made (`Made`, the
@@ -470,8 +470,8 @@ struct Masking {
     start: usize,
     end: usize,
     base: Option<usize>,
-    visible: std::collections::HashSet<crate::ast::Region>,
-    in_result: std::collections::HashSet<crate::ast::Region>,
+    visible: fixpt_hash::HashSet<crate::ast::Region>,
+    in_result: fixpt_hash::HashSet<crate::ast::Region>,
     valid: bool,
 }
 
@@ -810,7 +810,7 @@ impl Verifier<'_> {
         }
         let notes: HashMap<usize, &Vec<Prop>> = cert.notes.iter().map(|(k, p)| (*k, p)).collect();
         // The states waiting at each later cell, from branches to it.
-        let mut waiting: HashMap<usize, Vec<State>> = HashMap::new();
+        let mut waiting: HashMap<usize, Vec<State>> = HashMap::default();
         let mut cur = Some(entry.clone());
         let mut i = 0;
         while i < code.len() {
@@ -940,17 +940,17 @@ impl Verifier<'_> {
     fn masked(&mut self, code: &[Ins], cert: &Cert, slot_types: &[TyId]) -> Effect {
         let mut seen: Vec<TyId> = slot_types.iter().chain(&cert.frees).copied().collect();
         let mut named = Vec::new();
-        self.globals_named(code, &mut std::collections::HashSet::new(), &mut named);
+        self.globals_named(code, &mut fixpt_hash::HashSet::default(), &mut named);
         for g in named {
             if let Some(t) = self.certs.globals.get(&g) {
                 seen.push(*t);
             }
         }
-        let mut visible = std::collections::HashSet::new();
+        let mut visible = fixpt_hash::HashSet::default();
         for t in seen {
             self.c.regions_in(t, &mut visible);
         }
-        let mut in_result = std::collections::HashSet::new();
+        let mut in_result = fixpt_hash::HashSet::default();
         if let Some(r) = cert.result {
             self.c.regions_in(r, &mut in_result);
         }
@@ -961,7 +961,7 @@ impl Verifier<'_> {
     /// closures it makes, and theirs: as the checker masks an expression
     /// with the globals it names seen, whichever of its lambdas names them
     /// (`masked`; `TODO.md` §224, where a wait masked away leaves `spin`).
-    fn globals_named(&mut self, code: &[Ins], words: &mut std::collections::HashSet<u64>, out: &mut Vec<u64>) {
+    fn globals_named(&mut self, code: &[Ins], words: &mut fixpt_hash::HashSet<u64>, out: &mut Vec<u64>) {
         for ins in code {
             match ins.name {
                 Some("global" | "global!") => out.push(ins.ops[0].raw()),
@@ -1107,10 +1107,10 @@ impl Verifier<'_> {
                 self.out.failed.push(msg);
                 return Err(());
             }
-            let map = HashMap::from([(r, crate::ast::D::Region(crate::ast::Region::Frozen(into, !written)))]);
+            let map = HashMap::from_iter([(r, crate::ast::D::Region(crate::ast::Region::Frozen(into, !written)))]);
             return Ok(self.c.subst(t, &map));
         }
-        let mut in_t = std::collections::HashSet::new();
+        let mut in_t = fixpt_hash::HashSet::default();
         self.c.regions_in(t, &mut in_t);
         if in_t.contains(&region) {
             let msg = format!("{at}: a value of {} leaves its region's scope", self.show(t));
@@ -1596,7 +1596,7 @@ impl Verifier<'_> {
     /// What `(select $k t)` stands for, given values of `types` by
     /// position: for each that is a module, its abstract types, by name.
     fn selects(&mut self, types: &[TyId]) -> HashMap<(usize, fixpt_read::Sym), TyId> {
-        let mut given = HashMap::new();
+        let mut given = HashMap::default();
         for (k, t) in types.iter().enumerate() {
             if let Ty::Module { abs, descs, .. } = self.c.arena.get(self.c.arena.resolve(*t)).clone() {
                 for (a, w) in abs {

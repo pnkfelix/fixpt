@@ -22,7 +22,7 @@
 
 use crate::ast::{Arena, Desc, DescId};
 use crate::subtype::Rel;
-use std::collections::HashSet;
+use fixpt_hash::HashSet;
 
 /// Remove from `effect` every region that cannot escape.
 ///
@@ -37,12 +37,12 @@ pub fn erase_effect(
     visible: &[DescId],
 ) -> DescId {
     let mut in_effect = Vec::new();
-    regions_of(arena, effect, &mut HashSet::new(), &mut in_effect);
+    regions_of(arena, effect, &mut HashSet::default(), &mut in_effect);
     if in_effect.is_empty() {
         return effect;
     }
     let mut in_type = Vec::new();
-    regions_of(arena, result, &mut HashSet::new(), &mut in_type);
+    regions_of(arena, result, &mut HashSet::default(), &mut in_type);
 
     let mut current = effect;
     for r in in_effect {
@@ -83,7 +83,7 @@ pub fn erase_effect(
 /// rather than regions to offer.
 pub fn regions_in(arena: &Arena, id: DescId) -> Vec<DescId> {
     let mut out = Vec::new();
-    regions_of(arena, id, &mut HashSet::new(), &mut out);
+    regions_of(arena, id, &mut HashSet::default(), &mut out);
     out
 }
 

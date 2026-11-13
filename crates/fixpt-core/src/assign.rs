@@ -16,7 +16,7 @@
 
 use crate::ir::{Builder, LambdaInfo, Node, NodeId, Program, VarId};
 use fixpt_read::Span;
-use std::collections::HashSet;
+use fixpt_hash::HashSet;
 
 /// Rewrite `program` so that every assigned variable is boxed.
 ///
@@ -109,13 +109,13 @@ pub struct BoxPrims {
 /// them all and avoid the indirection on every recursive call. That is a real
 /// optimisation to make later; it is not needed for correctness.
 fn fix_captured(program: &Program) -> HashSet<VarId> {
-    let mut out = HashSet::new();
+    let mut out = HashSet::default();
     for id in 0..program.nodes.len() {
         let Node::Fix { vars, inits, .. } = program.node(NodeId(id as u32)) else {
             continue;
         };
         let bound: HashSet<VarId> = vars.iter().copied().collect();
-        let mut captured = HashSet::new();
+        let mut captured = HashSet::default();
         for init in inits.iter() {
             collect_captures(program, *init, &mut captured);
         }

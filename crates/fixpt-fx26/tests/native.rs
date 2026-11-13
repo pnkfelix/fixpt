@@ -14,7 +14,7 @@ use fixpt_scheme::Handle;
 /// Every word `word` reaches through its cells and operands.
 fn reachable(heap: &Heap, word: Value) -> Vec<Value> {
     let closure = kind("cellular-closure");
-    let (mut todo, mut seen, mut out) = (vec![word], std::collections::HashSet::new(), Vec::new());
+    let (mut todo, mut seen, mut out) = (vec![word], fixpt_hash::HashSet::default(), Vec::new());
     while let Some(w) = todo.pop() {
         if !seen.insert(w.raw()) {
             continue;

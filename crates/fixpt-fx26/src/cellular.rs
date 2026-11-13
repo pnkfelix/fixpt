@@ -10,7 +10,7 @@
 //! global's cell, or, for `letrec`'s, a box in a slot or free value.
 
 use crate::ast::{ArmBind, BlobletOp, Conv, Exp, ExpId, ModItem, TyId};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use crate::check::{Checker, Datum};
 use crate::top::Top;
 use fixpt_heap::layout::kind;
@@ -151,7 +151,7 @@ pub struct Compiler<'a> {
     genv: Env,
     /// The same by name: each name's globals, newest last, with each one's
     /// place in `genv`, so that finding a global is not a search of them all.
-    genv_index: std::collections::HashMap<Sym, Vec<(usize, Loc)>>,
+    genv_index: fixpt_hash::HashMap<Sym, Vec<(usize, Loc)>>,
     this: Option<This>,
     /// Whether each lambda also gets register code (PLAN.md 13h′), as its
     /// word's twin.
@@ -300,7 +300,7 @@ pub struct Compiler<'a> {
     /// the keys of the environment's `RLoc::Test`s.
     test_keys: Vec<(String, Vec<(u8, u64)>)>,
     /// Each expression's effect summary, by span, once asked.
-    summaries: Option<std::collections::HashMap<ExpId, u8>>,
+    summaries: Option<fixpt_hash::HashMap<ExpId, u8>>,
     /// The top-level definition whose body is being compiled: its name and
     /// arity.
     own_now: Option<(Sym, usize)>,
@@ -310,7 +310,7 @@ pub struct Compiler<'a> {
     tail_calls_leave: bool,
     /// The `(with %include …)`s of modules' items whose names the module
     /// binds once, where it is made (`included_names`): they bind nothing.
-    included_withs: std::collections::HashSet<ExpId>,
+    included_withs: fixpt_hash::HashSet<ExpId>,
 }
 
 /// A global procedure whose parameter `param` is only called (with
@@ -391,7 +391,7 @@ impl<'a> Compiler<'a> {
             reuse: Vec::new(),
             form_made: Vec::new(),
             lifts: Vec::new(),
-            lifted: HashMap::new(),
+            lifted: HashMap::default(),
             lifting_added: 0,
             declined: None,
             inlines: Vec::new(),
@@ -402,7 +402,7 @@ impl<'a> Compiler<'a> {
             module_members: None,
             modules: Vec::new(),
             specials: Vec::new(),
-            spec_copies: HashMap::new(),
+            spec_copies: HashMap::default(),
             plan_check: std::env::var_os("FIXPT_PLAN_CHECK").is_some(),
             plan: None,
             plan_mismatches: Vec::new(),
@@ -413,9 +413,9 @@ impl<'a> Compiler<'a> {
             plan_path: Vec::new(),
             spec: None,
             twins: Vec::new(),
-            standard_words: HashMap::new(),
-            const_globals: HashMap::new(),
-            module_consts: HashMap::new(),
+            standard_words: HashMap::default(),
+            const_globals: HashMap::default(),
+            module_consts: HashMap::default(),
             consts_now: Vec::new(),
             word_name: None,
             certs: None,
@@ -423,7 +423,7 @@ impl<'a> Compiler<'a> {
             last_notes: Vec::new(),
             ops: Vec::new(),
             last_ops: Vec::new(),
-            fact_of: HashMap::new(),
+            fact_of: HashMap::default(),
             last_facts: (Vec::new(), Vec::new()),
             gens: Vec::new(),
             last_gens: Vec::new(),
@@ -441,13 +441,13 @@ impl<'a> Compiler<'a> {
             bind_name: None,
             defining: None,
             assume: None,
-            writes: HashMap::new(),
+            writes: HashMap::default(),
             form_writes: Vec::new(),
             test_keys: Vec::new(),
             summaries: None,
             own_now: None,
             tail_calls_leave: false,
-            included_withs: std::collections::HashSet::new(),
+            included_withs: fixpt_hash::HashSet::default(),
         }
     }
 
@@ -526,10 +526,10 @@ impl<'a> Compiler<'a> {
         self.last_opens.clear();
         self.last_masks.clear();
         self.last_sources.clear();
-        let mut mask_starts: HashMap<usize, usize> = HashMap::new();
-        let mut source_starts: HashMap<usize, usize> = HashMap::new();
-        let mut gen_starts: HashMap<usize, usize> = HashMap::new();
-        let mut region_starts: HashMap<usize, usize> = HashMap::new();
+        let mut mask_starts: HashMap<usize, usize> = HashMap::default();
+        let mut source_starts: HashMap<usize, usize> = HashMap::default();
+        let mut gen_starts: HashMap<usize, usize> = HashMap::default();
+        let mut region_starts: HashMap<usize, usize> = HashMap::default();
         for i in items {
             match i {
                 Item::Cell(x) => cells.push(*x),

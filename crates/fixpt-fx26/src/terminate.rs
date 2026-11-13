@@ -20,7 +20,8 @@
 //! A member named anywhere but as the operator of a call escapes: something
 //! else may call it, with anything, so the group does not pass.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
+use fixpt_hash::HashSet;
 
 use crate::ast::{ArmBind, Exp, ExpId, Region, Ty, TyId};
 use fixpt_read::Sym;
@@ -210,7 +211,7 @@ impl Checker {
             calls: Vec::new(),
             unbounded: Vec::new(),
             passed: Vec::new(),
-            invariant: HashSet::new(),
+            invariant: HashSet::default(),
             escapes: None,
             arg_tys: Vec::new(),
         };

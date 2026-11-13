@@ -104,17 +104,17 @@ pub struct Fx26Session {
     /// The loads whose hidden globals this session's program has made, by
     /// key (`syn::set_shared_made`): forms compiled one by one make none of
     /// them again. Forgotten as a whole program begins.
-    shared_made: std::collections::HashSet<String>,
+    shared_made: fixpt_hash::HashSet<String>,
     /// The module files built in given a `.fasl` this session, or tried
     /// (`cache_built_ins`).
-    built_ins_cached: std::collections::HashSet<String>,
+    built_ins_cached: fixpt_hash::HashSet<String>,
     /// The file the forms run now are from, as a debugger's lines name it
     /// (`crate::sources`): set by a driver, as `fixpt run` does each file's.
     pub source_file: Option<crate::sources::File>,
     /// The form compiled next, as written, with where each datum went.
     source_form: Option<(String, Vec<(usize, usize, Span)>)>,
     /// Each module file loaded, as a source names it, made once.
-    source_loaded: std::collections::HashMap<FileId, crate::sources::File>,
+    source_loaded: fixpt_hash::HashMap<FileId, crate::sources::File>,
     /// How a redefinition that would break definitions is decided: asked of
     /// the driver, or, with none, `Redefine::Break`.
     pub redefine: Option<fn(&Redefinition) -> Redefine>,
@@ -126,7 +126,7 @@ pub struct Fx26Session {
     /// for an earlier form, rather than its lowering to Scheme.
     pub show_words: bool,
     /// The words shown so far, each as its disassembly.
-    words_shown: std::collections::HashSet<String>,
+    words_shown: fixpt_hash::HashSet<String>,
     /// The initial environment as the FX-26 reader read it, for the checker
     /// written in FX-26: read once, as it takes the reader a while.
     standard26: Option<fixpt_scheme::Handle>,
@@ -165,14 +165,14 @@ pub struct Fx26Session {
     program_record: Option<Vec<(usize, Top, String)>>,
     /// While so: the globals whose definitions ran, whose values are made,
     /// so that a definition that only reads them can run too.
-    program_ran: std::collections::HashSet<Sym>,
+    program_ran: fixpt_hash::HashSet<Sym>,
 }
 
 /// A program's `.fasl` read for its forms (`Fx26Session::program_fasl`):
 /// each definition kept, by its form's place, with its value's; and its
 /// image.
 struct ProgramFasl {
-    defs: std::collections::HashMap<usize, Vec<(crate::fasl::Def, usize)>>,
+    defs: fixpt_hash::HashMap<usize, Vec<(crate::fasl::Def, usize)>>,
     image: ProgramImage,
     /// Spliced: whether a form has run since the compiler written in FX-26
     /// was last asked whether the globals its code links to are still
@@ -182,7 +182,7 @@ struct ProgramFasl {
     broken: std::cell::Cell<bool>,
     /// The file's own abbreviations to check as they are named, each with
     /// what it was (`program_fasl`).
-    later: std::cell::RefCell<std::collections::HashMap<String, String>>,
+    later: std::cell::RefCell<fixpt_hash::HashMap<String, String>>,
     /// The names of all it keeps, what each is printed with to compare.
     alias_names: Vec<Sym>,
     /// Its definitions' types as one rep (`Header::reps`), and, once
@@ -191,11 +191,11 @@ struct ProgramFasl {
     /// the import could not be (`docs/research/heap-types.md`, step 5).
     reps: Option<Vec<u8>>,
     rep_aliases: Vec<(String, usize)>,
-    alias_digests: std::collections::HashMap<String, u64>,
+    alias_digests: fixpt_hash::HashMap<String, u64>,
     rust_rep: std::cell::RefCell<Option<Option<fixpt_reps::Rep>>>,
     /// Each abbreviation of `rep_aliases`, once looked at: its type here, if
     /// it means what it meant (its digest).
-    alias_types: std::cell::RefCell<std::collections::HashMap<String, Option<crate::ast::TyId>>>,
+    alias_types: std::cell::RefCell<fixpt_hash::HashMap<String, Option<crate::ast::TyId>>>,
     fx_types: std::cell::RefCell<Option<Option<Vec<i64>>>>,
 }
 
@@ -213,7 +213,7 @@ enum ProgramImage {
     Read {
         heap: fixpt_heap::Heap,
         values: Vec<fixpt_heap::Value>,
-        links: std::collections::HashMap<u64, crate::fasl::Link>,
+        links: fixpt_hash::HashMap<u64, crate::fasl::Link>,
         natives: Vec<fixpt_heap::Value>,
     },
 }
@@ -501,6 +501,7 @@ fn stamp_fixnum(digest: u64) -> i64 {
 fn process_stamp() -> i64 {
     use std::hash::{BuildHasher, Hasher};
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    // Seeded on purpose: a stamp no other process makes (`fixpt-hash`).
     thread_local! { static SEED: std::collections::hash_map::RandomState = std::collections::hash_map::RandomState::new(); }
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     SEED.with(|s| {
@@ -646,8 +647,8 @@ fn load_native_front_end_keeping(k: &NativeKeeping, heap: &mut fixpt_heap::Heap,
     let (pieces, standard, made_code) = if std::env::var_os("FIXPT_IMAGE_COPY").is_some() {
         let from = fixpt_heap::image::load_trusted(bytes).ok()?;
         let root = *from.roots_slice().first()?;
-        let code: std::collections::HashSet<u64> = list(&from, from.car(from.cdr(root))).iter().map(|c| c.raw()).collect();
-        let mut given = std::collections::HashMap::new();
+        let code: fixpt_hash::HashSet<u64> = list(&from, from.car(from.cdr(root))).iter().map(|c| c.raw()).collect();
+        let mut given = fixpt_hash::HashMap::default();
         if adapter != Value::FALSE {
             given.insert(from.car(from.cdr(from.cdr(root))).raw(), (k.adapter_code)(heap).ok()?);
         }
@@ -886,8 +887,8 @@ const CACHE_BUILDS: usize = 4;
 /// its writer gone.
 fn sweep_cache(dir: &std::path::Path) {
     let this = env!("FIXPT_BUILD_HASH");
-    let mut builds: std::collections::HashMap<String, (Option<std::time::SystemTime>, Vec<std::path::PathBuf>)> =
-        std::collections::HashMap::new();
+    let mut builds: fixpt_hash::HashMap<String, (Option<std::time::SystemTime>, Vec<std::path::PathBuf>)> =
+        fixpt_hash::HashMap::default();
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let Ok(m) = e.metadata() else { continue };
         let used = [m.accessed().ok(), m.modified().ok()].into_iter().flatten().max();
@@ -1237,7 +1238,7 @@ impl Fx26Session {
             built_ins_cached: Default::default(),
             source_file: None,
             source_form: None,
-            source_loaded: std::collections::HashMap::new(),
+            source_loaded: fixpt_hash::HashMap::default(),
             redefine: None,
             next_redefine: None,
             show_words: false,
@@ -2144,7 +2145,7 @@ impl Fx26Session {
         let compile = self.native_compiler.filter(|_| self.native_convention);
         let mut why = None;
         self.scheme.make(|m| {
-            let mut given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(p, h)| (p.raw(), m.get(*h))).collect();
+            let mut given: fixpt_hash::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(p, h)| (p.raw(), m.get(*h))).collect();
             let g = m.get(cell);
             let heap = m.heap();
             // Each keyword this heap's of its name.
@@ -2162,7 +2163,7 @@ impl Fx26Session {
                 }
             }
             // Its value, and the closures that were native, as this heap's.
-            let (copy, natives): (fixpt_heap::Value, std::collections::HashSet<u64>) = match (&read, &img) {
+            let (copy, natives): (fixpt_heap::Value, fixpt_hash::HashSet<u64>) = match (&read, &img) {
                 (Some((from, value, _, natives)), _) => {
                     let (copy, made) = heap.copy_graph_with(from, *value, |_| false, &given);
                     (copy, natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect())
@@ -2412,7 +2413,7 @@ impl Fx26Session {
         // is not yet (it selects from a module a form loads, say), checked
         // when a definition that names it is declared (`run_program_def`).
         let own: Vec<Sym> = self.checker.type_abbreviations(forms).into_iter().map(|(n, _)| n).collect();
-        let mut later = std::collections::HashMap::new();
+        let mut later = fixpt_hash::HashMap::default();
         let names = self.checker.fasl_alias_names(&header.aliases);
         let changed = self.checker.with_fasl_selects(|c| {
             for (n, t, digest) in &header.aliases {
@@ -2430,7 +2431,7 @@ impl Fx26Session {
         if let Some(n) = changed {
             return stale(self, &format!("the type `{n}` is not what it was"));
         }
-        let defined: std::collections::HashSet<String> = forms.iter().flat_map(|f| self.checker.defined_names(f)).map(|n| self.checker.interner.name(n).to_string()).collect();
+        let defined: fixpt_hash::HashSet<String> = forms.iter().flat_map(|f| self.checker.defined_names(f)).map(|n| self.checker.interner.name(n).to_string()).collect();
         self.checker.fasl_aliases_begin(self.checker.fasl_allowed_aliases(forms));
         let stale_use = self.stale_use(&header.defs, &defined);
         self.checker.fasl_aliases_end();
@@ -2474,7 +2475,7 @@ impl Fx26Session {
         if std::env::var_os("FIXPT_FASL_SAY").is_some() {
             self.checker.fasl_notes.push(format!("`{}` is read from `{}`", path.display(), fasl.display()));
         }
-        let mut defs: std::collections::HashMap<usize, Vec<(crate::fasl::Def, usize)>> = std::collections::HashMap::new();
+        let mut defs: fixpt_hash::HashMap<usize, Vec<(crate::fasl::Def, usize)>> = fixpt_hash::HashMap::default();
         for (i, d) in header.defs.into_iter().enumerate() {
             defs.entry(d.form).or_default().push((d, i));
         }
@@ -2510,7 +2511,7 @@ impl Fx26Session {
             return Err("its image is not its definitions'".into());
         }
         let links = crate::fasl::read_links(img.car(img.cdr(root)), |v| img.car(v), |v| img.cdr(v), globals)?;
-        let defined: std::collections::HashSet<Sym> = forms.iter().flat_map(|f| self.checker.defined_names(f)).collect();
+        let defined: fixpt_hash::HashSet<Sym> = forms.iter().flat_map(|f| self.checker.defined_names(f)).collect();
         self.own_pieces().map_err(|e| e.message)?;
         // Made first, to outlast the handles made meanwhile.
         let values = self.scheme.make(|_| fixpt_heap::Value::FALSE);
@@ -2545,7 +2546,7 @@ impl Fx26Session {
         })
     }
 
-    fn splice_program_in(&mut self, img: &fixpt_heap::image::Parts, links: &[(fixpt_heap::Value, crate::fasl::Link)], defined: &std::collections::HashSet<Sym>, values: fixpt_scheme::Handle) -> Result<bool, String> {
+    fn splice_program_in(&mut self, img: &fixpt_heap::image::Parts, links: &[(fixpt_heap::Value, crate::fasl::Link)], defined: &fixpt_hash::HashSet<Sym>, values: fixpt_scheme::Handle) -> Result<bool, String> {
         let sfail = |e: fixpt_scheme::SessionError| e.to_string();
         // Each global named: here, or made ahead.
         let (mut here, mut ahead): (Vec<(String, fixpt_scheme::Handle)>, Vec<String>) = Default::default();
@@ -2567,7 +2568,7 @@ impl Fx26Session {
         let compile = self.native_compiler.filter(|_| self.native_convention);
         let mut why = None;
         self.scheme.replace(values, |m| {
-            let mut cells: std::collections::HashMap<&str, fixpt_heap::Value> = here.iter().map(|(n, c)| (n.as_str(), m.get(*c))).collect();
+            let mut cells: fixpt_hash::HashMap<&str, fixpt_heap::Value> = here.iter().map(|(n, c)| (n.as_str(), m.get(*c))).collect();
             let mut l = m.get(made);
             let heap = m.heap();
             for n in &ahead {
@@ -2621,12 +2622,12 @@ impl Fx26Session {
     /// not one the file defines (`defined`), not here, or not at the type
     /// it had: its digest first (`fasl_use_digest`), each global's once;
     /// where that differs, printed as `fasl_program_type` prints it.
-    fn stale_use(&mut self, defs: &[crate::fasl::Def], defined: &std::collections::HashSet<String>) -> Option<String> {
+    fn stale_use(&mut self, defs: &[crate::fasl::Def], defined: &fixpt_hash::HashSet<String>) -> Option<String> {
         self.checker.with_fasl_selects(|c| Self::stale_use_in(c, defs, defined))
     }
 
-    fn stale_use_in(checker: &mut Checker, defs: &[crate::fasl::Def], defined: &std::collections::HashSet<String>) -> Option<String> {
-        let mut digests: std::collections::HashMap<crate::ast::TyId, u64> = std::collections::HashMap::new();
+    fn stale_use_in(checker: &mut Checker, defs: &[crate::fasl::Def], defined: &fixpt_hash::HashSet<String>) -> Option<String> {
+        let mut digests: fixpt_hash::HashMap<crate::ast::TyId, u64> = fixpt_hash::HashMap::default();
         for d in defs {
             for (u, t, digest) in &d.uses {
                 if defined.contains(u) {
@@ -2834,7 +2835,7 @@ impl Fx26Session {
             let mut adapters = Vec::new();
             let mut keywords = Vec::new();
             let mut todo: Vec<fixpt_heap::Value> = group.iter().map(|(_, at)| values[*at]).collect();
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = fixpt_hash::HashSet::default();
             while let Some(v) = todo.pop() {
                 if !v.is_ref() || v.is_suffix_ref() || !seen.insert(v.raw()) {
                     continue;
@@ -2865,7 +2866,7 @@ impl Fx26Session {
             let compile = s.native_compiler.filter(|_| s.native_convention);
             let mut no_adapter = false;
             s.scheme.make(|m| {
-                let mut given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(v, h)| (v.raw(), m.get(*h))).collect();
+                let mut given: fixpt_hash::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(v, h)| (v.raw(), m.get(*h))).collect();
                 let gs: Vec<fixpt_heap::Value> = cells.iter().map(|c| m.get(*c)).collect();
                 let heap = m.heap();
                 // Each keyword this heap's of its name.
@@ -2934,7 +2935,7 @@ impl Fx26Session {
         }
         // Each definition of a procedure the file makes once, of a name it
         // defines once, in a form that loads nothing.
-        let mut counts: std::collections::HashMap<Sym, usize> = std::collections::HashMap::new();
+        let mut counts: fixpt_hash::HashMap<Sym, usize> = fixpt_hash::HashMap::default();
         for f in &forms {
             for n in self.checker.defined_names(f) {
                 *counts.entry(n).or_default() += 1;
@@ -2952,7 +2953,7 @@ impl Fx26Session {
         let mut def_reps: Vec<Option<Vec<u8>>> = Vec::new();
         let mut names = Vec::new();
         self.checker.fasl_aliases_begin(self.checker.fasl_allowed_aliases(&forms));
-        let mut kept_names: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+        let mut kept_names: fixpt_hash::HashSet<Sym> = fixpt_hash::HashSet::default();
         for (i, top, printed) in &record {
             let said: Vec<String> = printed.lines().map(str::to_string).collect();
             let (bindings, rec) = match top {
@@ -3027,7 +3028,7 @@ impl Fx26Session {
         // Each definition notes those its type names, and those they name.
         let used = self.checker.fasl_aliases_end();
         let aliases = self.checker.fasl_alias_closure(used, &self.checker.fasl_allowed_aliases(&forms));
-        let kept: std::collections::HashMap<&str, &str> = aliases.iter().map(|(n, t, _)| (n.as_str(), t.as_str())).collect();
+        let kept: fixpt_hash::HashMap<&str, &str> = aliases.iter().map(|(n, t, _)| (n.as_str(), t.as_str())).collect();
         for d in &mut defs {
             let mut types: Vec<String> = crate::fasl::symbols_in(&d.ty).into_iter().filter(|w| kept.contains_key(w.as_str())).collect();
             let mut i = 0;
@@ -3095,7 +3096,7 @@ impl Fx26Session {
     /// than once (`counts`), of a type that does not read back as itself,
     /// or that uses a load's hidden global, which the forms that load it
     /// make as they are checked.
-    fn kept_binding(&mut self, b: (Sym, crate::ast::TyId, crate::ast::ExpId), counts: &std::collections::HashMap<Sym, usize>, rec: bool, value: Option<&[Sym]>) -> Option<(String, String, String, Vec<(String, String, u64)>)> {
+    fn kept_binding(&mut self, b: (Sym, crate::ast::TyId, crate::ast::ExpId), counts: &fixpt_hash::HashMap<Sym, usize>, rec: bool, value: Option<&[Sym]>) -> Option<(String, String, String, Vec<(String, String, u64)>)> {
         let (name, tid, exp) = b;
         if counts.get(&name) != Some(&1) || !(value.is_some() || Self::names_its_word(&self.checker, exp)) {
             return None;

@@ -17,7 +17,7 @@
 
 use fixpt_heap::layout::cellular::{GLOBAL_FIELDS, GLOBAL_NAME, WORD_NAME};
 use fixpt_heap::{Heap, ObjType, Value};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::fmt::Write as _;
 
 /// Every literal of a listing: first each is [`seen`](Literals::seen), in the

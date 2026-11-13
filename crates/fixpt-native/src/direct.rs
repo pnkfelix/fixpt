@@ -48,7 +48,7 @@ use crate::codespace::{CodeSpace, Offset};
 use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SELF, CODE_SOURCE, GLOBAL_FIELDS, GLOBAL_VALUE, GLOBAL_WRITES, ROUTINES, WORD_CELL0, WORD_TWIN};
 use fixpt_heap::layout::regcode::OPS;
 use fixpt_heap::{Heap, Value};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::mem::offset_of;
 
 mod reps;
@@ -543,13 +543,13 @@ enum Field {
 /// never say what the fields no longer are.
 struct Fields {
     list: Vec<Field>,
-    index: std::collections::HashMap<Field, usize>,
+    index: fixpt_hash::HashMap<Field, usize>,
     stale: bool,
 }
 
 impl Fields {
     fn new(list: Vec<Field>) -> Fields {
-        Fields { list, index: std::collections::HashMap::new(), stale: true }
+        Fields { list, index: fixpt_hash::HashMap::default(), stale: true }
     }
 
     /// Where `f` is, from 1: its first place, else a new one at the end.
@@ -758,7 +758,7 @@ thread_local! {
     /// the word's weak reference, and its code's, or none if the compiler
     /// declined it. An entry is the word's only while its weak reference
     /// still finds it there; one whose word moved or died is let go.
-    static NATIVE_OF_WORD: std::cell::RefCell<(HashMap<u64, (usize, Option<usize>)>, usize)> = std::cell::RefCell::new((HashMap::new(), 64));
+    static NATIVE_OF_WORD: std::cell::RefCell<(HashMap<u64, (usize, Option<usize>)>, usize)> = std::cell::RefCell::new((HashMap::default(), 64));
 }
 
 /// The native code of cellular closure `f`'s word, compiled the first time
@@ -1171,7 +1171,7 @@ pub struct Compiler {
 
 thread_local! {
     /// This thread's compiler state (`with_compiler`).
-    static COMPILER: std::cell::RefCell<Compiler> = std::cell::RefCell::new(Compiler { callouts: own_callouts().to_vec(), slot_facts: HashMap::new() });
+    static COMPILER: std::cell::RefCell<Compiler> = std::cell::RefCell::new(Compiler { callouts: own_callouts().to_vec(), slot_facts: HashMap::default() });
 }
 
 /// `f` of this thread's compiler state, apart from its machine: whether or
@@ -1337,9 +1337,9 @@ fn compile_with(cs: &mut Compiler, heap: &mut Heap, closure: Value) -> Result<Ve
     }
     // A global's procedure that cannot be compiled is called as what is
     // not native code, and the rest compiled again without it.
-    let mut refused = std::collections::HashSet::new();
+    let mut refused = fixpt_hash::HashSet::default();
     let (procs, first, free) = loop {
-        let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut cs.callouts, resume: None, refused, native_masks: HashMap::new(), slot_facts: &mut cs.slot_facts };
+        let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::default(), queue: Vec::new(), callouts: &mut cs.callouts, resume: None, refused, native_masks: HashMap::default(), slot_facts: &mut cs.slot_facts };
         let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
         let first = c.proc_of(word)?;
         let mut failed = None;
@@ -1988,7 +1988,7 @@ struct Compiling<'h> {
     resume: Option<usize>,
     /// Globals' procedures that could not be compiled (a word's raw
     /// value): called through their cells, as what is not native code.
-    refused: std::collections::HashSet<u64>,
+    refused: fixpt_hash::HashSet<u64>,
     /// What `native_params` found of each native closure's code, by the
     /// code bloblet: once a compile, not at every call.
     native_masks: HashMap<u64, Option<u8>>,
@@ -2414,7 +2414,7 @@ impl Compiling<'_> {
         // anything may collect. A read of the slot is then a move, as on
         // x86_64, where only REG1…REG3 are registers.
         let mut held: [Option<usize>; 9] = [None; 9];
-        let entered: std::collections::HashSet<usize> = if fast { Default::default() } else { a.fixups.iter().map(|&(_, l, _)| l.0).collect() };
+        let entered: fixpt_hash::HashSet<usize> = if fast { Default::default() } else { a.fixups.iter().map(|&(_, l, _)| l.0).collect() };
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
             let (unbox, check) = match si_at(to) {
                 Some(t) => (

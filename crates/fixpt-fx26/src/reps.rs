@@ -49,7 +49,7 @@ use crate::ast::{Atom, Conv, DVar, D, EArg, Effect, Kind, Named, Region, Size, S
 use crate::check::Checker;
 use crate::logic::{Expr, Formula};
 use fixpt_reps::{Arg, Builder, Const, Node, Rep};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// A type exported: its rep, and the variables its holes are, in order.
 /// The head of a `.fasl`'s definitions' types' rep's root
@@ -95,7 +95,7 @@ impl Checker {
     }
 
     fn export_with(&self, root: impl FnOnce(&mut Ex) -> Result<u32, String>) -> Result<Exported, String> {
-        let mut ex = Ex { c: self, b: Builder::new(), memo: HashMap::new(), gendefs: HashMap::new(), scope: Vec::new(), holes: HashMap::new(), hole_vars: Vec::new() };
+        let mut ex = Ex { c: self, b: Builder::new(), memo: HashMap::default(), gendefs: HashMap::default(), scope: Vec::new(), holes: HashMap::default(), hole_vars: Vec::new() };
         let root = root(&mut ex)?;
         let Ex { b, hole_vars, .. } = ex;
         let finished = b.finish(root)?;
@@ -130,7 +130,7 @@ impl Checker {
         }
         let gens: HashMap<u64, u32> = (0..self.generatives.len() as u32).map(|w| (generative_key(self, w), w)).collect();
         let before = self.generatives.len();
-        let mut im = Im { c: self, rep, holes: &[], gens, done: vec![None; rep.nodes.len()], links: vec![None; rep.nodes.len()], busy: vec![false; rep.nodes.len()], bound: HashMap::new() };
+        let mut im = Im { c: self, rep, holes: &[], gens, done: vec![None; rep.nodes.len()], links: vec![None; rep.nodes.len()], busy: vec![false; rep.nodes.len()], bound: HashMap::default() };
         for (j, t) in seeds {
             let k = Im::child(*root.args.get(*j).ok_or("a seed past the rep's types")?)?;
             im.done[k as usize] = Some(*t);
@@ -154,7 +154,7 @@ impl Checker {
         }
         let gens: HashMap<u64, u32> = (0..self.generatives.len() as u32).map(|w| (generative_key(self, w), w)).collect();
         let a = *root.args.first().ok_or("evidence of nothing")?;
-        let mut im = Im { c: self, rep, holes: &[], gens, done: vec![None; rep.nodes.len()], links: vec![None; rep.nodes.len()], busy: vec![false; rep.nodes.len()], bound: HashMap::new() };
+        let mut im = Im { c: self, rep, holes: &[], gens, done: vec![None; rep.nodes.len()], links: vec![None; rep.nodes.len()], busy: vec![false; rep.nodes.len()], bound: HashMap::default() };
         let k = Im::child(a)?;
         if rep.name(rep.nodes[k as usize].head) == "effect" {
             im.effect(a).map(D::Effect)
@@ -168,7 +168,7 @@ impl Checker {
             return Err(format!("{} holes, {} variables given", rep.holes.len(), holes.len()));
         }
         let gens: HashMap<u64, u32> = (0..self.generatives.len() as u32).map(|w| (generative_key(self, w), w)).collect();
-        let mut im = Im { c: self, rep, holes, gens, done: vec![None; rep.nodes.len()], links: vec![None; rep.nodes.len()], busy: vec![false; rep.nodes.len()], bound: HashMap::new() };
+        let mut im = Im { c: self, rep, holes, gens, done: vec![None; rep.nodes.len()], links: vec![None; rep.nodes.len()], busy: vec![false; rep.nodes.len()], bound: HashMap::default() };
         im.ty(0)
     }
 }

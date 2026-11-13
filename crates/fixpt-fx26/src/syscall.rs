@@ -17,7 +17,7 @@ use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::top::Top;
 use fixpt_read::{Datum, Span, Syntax};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// The prefix of a declaration's hidden global, whether the runtime has it.
 pub const AVAILABLE: &str = "%syscall-available:";
@@ -201,7 +201,7 @@ impl Checker {
             Ty::Poly { binders, body } => (binders, self.arena.resolve(body)),
             _ => (Vec::new(), t),
         };
-        let mut renamed = HashMap::new();
+        let mut renamed = HashMap::default();
         let mut written = Vec::new();
         for (i, (v, k)) in binders.iter().enumerate() {
             if *k != Kind::Region {

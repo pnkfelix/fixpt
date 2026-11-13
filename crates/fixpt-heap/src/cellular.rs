@@ -269,10 +269,10 @@ impl Heap {
     /// a copy that keeps the words but not their code
     /// (`copy_graph_with`'s `given`), as the front end's caches do, to be
     /// compiled again where they run.
-    pub fn word_codes_let_go(&self, roots: &[Value]) -> std::collections::HashMap<u64, Value> {
+    pub fn word_codes_let_go(&self, roots: &[Value]) -> crate::HashMap<u64, Value> {
         const { assert!(ROUTINE_DOCOL == 0) };
-        let mut codes = std::collections::HashMap::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut codes = crate::HashMap::default();
+        let mut seen = crate::HashSet::default();
         let mut todo = roots.to_vec();
         while let Some(v) = todo.pop() {
             if !v.is_ref() {

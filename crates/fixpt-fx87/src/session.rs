@@ -38,7 +38,7 @@ pub struct Fx87Session {
     pub printed: String,
     /// The names the initial environment bound. They live in the immutable
     /// region, so an application of one can be annotated as integrable.
-    standard: std::collections::HashSet<fixpt_read::Sym>,
+    standard: fixpt_hash::HashSet<fixpt_read::Sym>,
 }
 
 /// What checking and running one form produced.
@@ -52,7 +52,7 @@ pub struct Outcome {
 
 /// The names `runtime.scm` defines at its top level: `(define name …)` and
 /// `(define (name …) …)`.
-fn runtime_definitions() -> std::collections::HashSet<String> {
+fn runtime_definitions() -> fixpt_hash::HashSet<String> {
     RUNTIME
         .lines()
         .filter_map(|l| l.strip_prefix("(define "))

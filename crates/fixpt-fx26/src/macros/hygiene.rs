@@ -13,7 +13,7 @@ use super::procedural::{alias_base, alias_made};
 use super::{Aligner, Atom, Env, Free, Kids, Level, Macros, Mode, Ns, STy};
 use crate::error::R;
 use fixpt_read::{Datum, Interner, Sym, Syntax};
-use std::collections::{HashMap, HashSet};
+use fixpt_hash::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// Where a macro is defined, what its expansions' aliases are read in: the
@@ -49,7 +49,7 @@ impl Macros {
         }
         self.ensure_kernel(interner)?;
         let fx = interner.intern("#%fx");
-        let none = HashMap::new();
+        let none = HashMap::default();
         let mut parts: Vec<(Vec<bool>, fixpt_read::Span, Made)> = Vec::new();
         let mut made: Vec<(usize, Made)> = Vec::new();
         let mut defined = Vec::new();
@@ -60,7 +60,7 @@ impl Macros {
             let mut found = Vec::new();
             a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
             // What the form's definitions bind, the top level's.
-            let mut top = HashSet::new();
+            let mut top = HashSet::default();
             if let Kids::Form(x) = a.nodes[root].kids
                 && let Some((b, r)) = &a.nodes[x].export
             {
@@ -102,7 +102,7 @@ impl Macros {
             };
             // The binders at uses that would capture a name a file's own
             // macro introduces.
-            let mut captors: HashSet<usize> = HashSet::new();
+            let mut captors: HashSet<usize> = HashSet::default();
             for (at, env, _, _) in &found {
                 let Kids::Ref(n, ns, free) = a.nodes[*at].kids else { continue };
                 let Some(base) = alias_base(a.name(n)) else { continue };
@@ -148,7 +148,7 @@ impl Macros {
             }
             // Each captor renamed, and each reference to it.
             if !captors.is_empty() {
-                let mut fresh: HashMap<usize, String> = HashMap::new();
+                let mut fresh: HashMap<usize, String> = HashMap::default();
                 let mut sorted: Vec<usize> = captors.iter().copied().collect();
                 sorted.sort_by(|x, y| a.nodes[*x].path.iter().map(|s| !s).cmp(a.nodes[*y].path.iter().map(|s| !s)));
                 for b in sorted {
@@ -178,7 +178,7 @@ impl Macros {
         self.withs.captors = next_fresh;
         self.withs.shapes.aliases_defined.extend(defined);
         let (with, toplevel) = (interner.intern("with"), interner.intern("#%toplevel"));
-        let mut written: HashMap<Vec<bool>, Syntax> = HashMap::new();
+        let mut written: HashMap<Vec<bool>, Syntax> = HashMap::default();
         for (p, span, m) in parts {
             let s = match m {
                 Made::TopDesc(n) => Syntax::symbol(span, interner.intern(&format!("#%toplevel:{n}"))),

@@ -892,7 +892,7 @@ impl Compiling<'_> {
         // registers are made over (a conversion, a fused instruction) or
         // anything may collect. A read of the slot is then a move.
         let mut held: [Option<usize>; 4] = [None; 4];
-        let entered: std::collections::HashSet<usize> = if fast { Default::default() } else { a.fixups.iter().map(|&(_, l)| l).collect() };
+        let entered: fixpt_hash::HashSet<usize> = if fast { Default::default() } else { a.fixups.iter().map(|&(_, l)| l).collect() };
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
             let (unbox, check) = match si_at(to) {
                 Some(t) => (

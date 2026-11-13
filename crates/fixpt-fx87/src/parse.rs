@@ -35,7 +35,7 @@ use fixpt_read::{Datum, Interner, Num, Span, Sym, Syntax};
 #[derive(Clone, Default)]
 pub struct DScope {
     pub bound: Vec<Sym>,
-    pub subst: std::collections::HashMap<Sym, DescId>,
+    pub subst: fixpt_hash::HashMap<Sym, DescId>,
 }
 
 impl DScope {

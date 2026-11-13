@@ -6510,3 +6510,19 @@ one array index"), most never bound (the front end's quoted names). A
 slot made when a symbol is first bound would make the table some fifteen
 times smaller. Maybe: a major collection moving the run-time chunks that
 survive into the tables area (the user's).
+
+## 265. One prewarm's caches for debug and release alike (2026-11-12)
+
+A debug prewarm takes some 80 s, a release one 11 s; were the caches
+shared, a debug build would read the release one's. They are the same
+bytes now but for the build hash (`FIXPT_BUILD_HASH`, `fixpt-fx26/
+build.rs`), which keys each (a front-end image's or the reader's lowering's
+first 8 bytes, every name): the native front end's image differed run to
+run until the maps were unseeded (`fixpt-hash`; `native_image` listed its
+code in a seeded map's order), and with that, two cold debug prewarms and a
+release one, compared file by file, are the same past the key. Left: the
+build hash to leave out the profile's settings (`PROFILE`, `OPT_LEVEL`,
+`DEBUG`), keeping the sources, the lock file, the target and the features;
+and, so that sharing stays sound, a test that a debug and a release
+prewarm of the same sources make the same files (the user's): what would
+otherwise let a profile's difference in a cache's contents go unseen.

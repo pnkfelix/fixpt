@@ -65,7 +65,7 @@ fn fields(p: Local<'_>) -> Vec<Local<'_>> {
 
 /// Byte offset to character position, for text with non-ASCII in it: the
 /// program's, and each file it loaded ([`Chars::with_loaded`]).
-pub struct Chars(Vec<u32>, std::collections::HashMap<fixpt_read::FileId, Vec<u32>>);
+pub struct Chars(Vec<u32>, fixpt_hash::HashMap<fixpt_read::FileId, Vec<u32>>);
 
 impl Chars {
     pub fn of(text: &str) -> Chars {

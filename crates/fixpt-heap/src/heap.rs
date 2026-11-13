@@ -25,7 +25,7 @@ use crate::value::{
     ObjType, TAG_BLOBLET, TAG_FORWARD, TAG_HEADER, TAG_MASK, TAG_TRAILER, Value, header_bytes, header_is_large,
     header_kind, is_extension, is_header, make_header, make_large_header,
 };
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 mod code;
 mod intern;
@@ -421,7 +421,7 @@ pub struct Heap {
     tables: tables::Area,
     /// Rust-side name lookup. Keys are plain `String`s, so a collection cannot
     /// invalidate them.
-    symbol_index: HashMap<String, u32, std::hash::BuildHasherDefault<WordHasher>>,
+    symbol_index: SymbolIndex,
     /// A heap string's name, gathered to look it up (`intern_string`):
     /// kept, so that a symbol found costs no allocation.
     name_buf: String,
@@ -588,12 +588,12 @@ impl Heap {
             globals: tables::Table::default(),
             symbols: tables::Table::default(),
             tables: tables::Area::default(),
-            symbol_index: HashMap::default(),
+            symbol_index: SymbolIndex::default(),
             name_buf: String::new(),
             static_symbols: Vec::new(),
             image_symbols: Vec::new(),
             adapter_slot: None,
-            planned_writes: HashMap::new(),
+            planned_writes: HashMap::default(),
             gc_count: 0,
             gc_every: if cfg!(feature = "gc-stress") { 1 } else { 0 },
             gc_major_every: if cfg!(feature = "gc-stress") { 4 } else { 0 },
@@ -1932,7 +1932,7 @@ impl Heap {
     /// of this heap's code area, but for `from`'s shared stub, which is this
     /// heap's (`foreign_stub`).
     pub fn copy_graph_from(&mut self, from: &Heap, root: Value) -> Value {
-        self.copy_graph_with(from, root, |_| false, &HashMap::new()).0
+        self.copy_graph_with(from, root, |_| false, &HashMap::default()).0
     }
 
     /// The same, but each bloblet of `from`'s that `as_code` says made a
@@ -1943,7 +1943,7 @@ impl Heap {
     /// or given, by its raw bits in `from`. For native code kept in a cache
     /// (`TODO.md` §126).
     pub fn copy_graph_with(&mut self, from: &Heap, root: Value, as_code: impl Fn(Value) -> bool, given: &HashMap<u64, Value>) -> (Value, HashMap<u64, Value>) {
-        self.copy_graph_redirected(from, root, as_code, given, &HashMap::new())
+        self.copy_graph_redirected(from, root, as_code, given, &HashMap::default())
     }
 
     /// [`copy_graph_with`](Self::copy_graph_with), but each object of
@@ -2057,7 +2057,7 @@ impl Heap {
     /// does.
     pub fn copy_within(&mut self, root: Value, share: impl Fn(&Heap, Value) -> bool) -> (Value, usize) {
         use std::collections::hash_map::Entry;
-        let mut made: HashMap<u64, Value, std::hash::BuildHasherDefault<WordHasher>> = HashMap::default();
+        let mut made: std::collections::HashMap<u64, Value, std::hash::BuildHasherDefault<WordHasher>> = std::collections::HashMap::default();
         let mut order: Vec<Value> = Vec::new();
         let mut todo = vec![root];
         let mut words = 0;
@@ -2664,10 +2664,10 @@ impl Heap {
             free: 0,
             owner,
             new: vec![Vec::new(); reaps],
-            marked: HashSet::new(),
-            large_marks: HashSet::new(),
+            marked: HashSet::default(),
+            large_marks: HashSet::default(),
             large_gray: Vec::new(),
-            code_marks: HashSet::new(),
+            code_marks: HashSet::default(),
             code_gray: Vec::new(),
             weak_pairs: Vec::new(),
             regions: &mut self.regions,
@@ -3475,7 +3475,7 @@ impl Heap {
         for s in symbols {
             heap.table_push(Which::Symbols, relocate(s), true);
         }
-        heap.symbol_index = HashMap::with_capacity_and_hasher(heap.symbols.len, Default::default());
+        heap.symbol_index = SymbolIndex::with_capacity_and_hasher(heap.symbols.len, Default::default());
         for i in 0..heap.symbols.len {
             let name = heap.symbol_name(heap.table_get(Which::Symbols, i));
             heap.symbol_index.insert(name, i as u32);
@@ -3860,6 +3860,9 @@ fn fnv1a(s: &str) -> u64 {
 /// heap chose, or names the program and the runtime chose.
 #[derive(Default)]
 struct WordHasher(u64);
+
+/// The interned symbols' numbers by name (`Heap::symbol_index`).
+type SymbolIndex = std::collections::HashMap<String, u32, std::hash::BuildHasherDefault<WordHasher>>;
 
 impl std::hash::Hasher for WordHasher {
     fn finish(&self) -> u64 {

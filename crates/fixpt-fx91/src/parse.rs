@@ -11,7 +11,7 @@ use crate::ast::{AlphaId, Arena, Domain, Fx, FxId, Kind, LiteralValue};
 use crate::error::{FxError, R};
 use crate::syms::{Syms, KEYWORD_FIELDS};
 use fixpt_read::{Datum, Interner, Num, Span, Sym, Syntax};
-use std::collections::HashSet;
+use fixpt_hash::HashSet;
 
 pub struct Parser {
     pub arena: Arena,

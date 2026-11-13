@@ -26,7 +26,7 @@
 
 use crate::ast::{Arena, DoBinding, Exp, ExpId, TagClause};
 use fixpt_read::{Interner, Sym};
-use std::collections::HashSet;
+use fixpt_hash::HashSet;
 
 pub struct Eraser<'a> {
     arena: &'a Arena,
@@ -56,7 +56,7 @@ pub trait Purity {
 }
 
 pub fn erase(arena: &Arena, interner: &Interner, exp: ExpId) -> String {
-    erase_with(arena, interner, exp, &HashSet::new(), None)
+    erase_with(arena, interner, exp, &HashSet::default(), None)
 }
 
 /// Erase, annotating what the checker proved.

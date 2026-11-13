@@ -32,7 +32,7 @@ use super::{Heap, read_head, relocating};
 use crate::image::Parts;
 use crate::layout;
 use crate::value::{Value, is_extension, is_header, make_header};
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// A symbol's name and global slot: fields 0 and 2 of 3, before its
 /// trailer and the (empty) suffix it is pointed at (`Heap::alloc`).

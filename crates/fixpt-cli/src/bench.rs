@@ -623,7 +623,7 @@ fn assemble_registers(heap: &fixpt_heap::Heap, word: Value) -> Result<(), String
     use fixpt_native::cellular::{assemble_register_word, assemble_word};
     let closure = const { fixpt_heap::layout::kind("cellular-closure") };
     let vargs = const { fixpt_heap::layout::regcode::op("vargs") };
-    let (mut todo, mut seen) = (vec![word], std::collections::HashSet::new());
+    let (mut todo, mut seen) = (vec![word], fixpt_hash::HashSet::default());
     while let Some(w) = todo.pop() {
         if !seen.insert(w.raw()) {
             continue;

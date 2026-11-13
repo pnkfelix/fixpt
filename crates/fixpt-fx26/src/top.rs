@@ -86,7 +86,7 @@ pub struct Defining {
 struct Kept {
     env: usize,
     dscope: usize,
-    shared: (std::collections::HashMap<String, Sym>, std::collections::HashSet<Sym>),
+    shared: (fixpt_hash::HashMap<String, Sym>, fixpt_hash::HashSet<Sym>),
     defs: Option<(Vec<Definition>, Vec<(Vec<Sym>, Vec<Sym>)>)>,
     defs_len: (usize, usize),
     hoisted: usize,
@@ -1034,7 +1034,7 @@ impl Checker {
     /// `(except name …)`) are defined by their names; the names of all
     /// those not hidden are returned.
     #[allow(clippy::type_complexity)]
-    fn import_file_macros(&mut self, form: &Syntax, lib: Sym, filter: Option<&(bool, Vec<(Sym, Span)>)>) -> R<std::collections::HashSet<Sym>> {
+    fn import_file_macros(&mut self, form: &Syntax, lib: Sym, filter: Option<&(bool, Vec<(Sym, Span)>)>) -> R<fixpt_hash::HashSet<Sym>> {
         let usage = "`import-with-syntax` takes a name defined as `(load-module \"path\")`";
         let Some(path) = self.load_defs.get(&lib).cloned() else {
             return Err(FxError::at(form.span, format!("{usage}, and `{}` is not one", self.interner.name(lib))));
@@ -1081,8 +1081,8 @@ impl Checker {
         }
         let (values, types) = self.names_shown(&shown);
         let names: Vec<(Sym, bool)> = macros.iter().flat_map(|m| syntax_names(&m.0, &self.interner).unwrap_or_default().into_iter().map(|(n, _)| (n, m.1))).collect();
-        let internal: std::collections::HashMap<Sym, Sym> = names.iter().map(|(n, _)| (*n, self.interner.intern(&format!("%syntax:{key}:{}", self.interner.name(*n))))).collect();
-        let exported: std::collections::HashSet<Sym> = names.iter().filter(|(_, hidden)| !hidden).map(|(n, _)| *n).collect();
+        let internal: fixpt_hash::HashMap<Sym, Sym> = names.iter().map(|(n, _)| (*n, self.interner.intern(&format!("%syntax:{key}:{}", self.interner.name(*n))))).collect();
+        let exported: fixpt_hash::HashSet<Sym> = names.iter().filter(|(_, hidden)| !hidden).map(|(n, _)| *n).collect();
         let taken = |n: Sym| filter.is_none_or(|(only, names)| names.iter().any(|(m, _)| *m == n) == *only);
         let shared = self.interner.intern(&format!("%shared:{key}"));
         let mut defined = std::mem::take(&mut self.macros);
@@ -1103,8 +1103,8 @@ impl Checker {
     /// The values and the types and effects `forms` define, a module
     /// file's top-level forms expanded as they are read: what its module
     /// shows. An `include`'s are known only once it is checked: none.
-    fn names_shown(&self, forms: &[Syntax]) -> (std::collections::HashSet<Sym>, std::collections::HashSet<Sym>) {
-        let (mut values, mut types) = (std::collections::HashSet::new(), std::collections::HashSet::new());
+    fn names_shown(&self, forms: &[Syntax]) -> (fixpt_hash::HashSet<Sym>, fixpt_hash::HashSet<Sym>) {
+        let (mut values, mut types) = (fixpt_hash::HashSet::default(), fixpt_hash::HashSet::default());
         let named = |s: &Syntax| s.as_symbol().or_else(|| s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()));
         for f in forms {
             let items = f.as_proper_list().unwrap_or(&[]);
@@ -2081,7 +2081,7 @@ impl Checker {
     /// REPL's `,apropos` and `,help`.
     pub fn description_entries(&self) -> Vec<(Sym, &'static str, String)> {
         use crate::parse::DScope;
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = fixpt_hash::HashSet::default();
         let mut out = Vec::new();
         for (name, d) in self.dscope.iter().rev() {
             if !seen.insert(*name) {

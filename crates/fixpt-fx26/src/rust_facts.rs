@@ -12,7 +12,7 @@ use crate::check::{Checker, Datum};
 use crate::top::Top;
 use fixpt_heap::{Heap, Value};
 use fixpt_read::FileId;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// An expression's identity, as the product `k-at` is: where it starts and
 /// ends, in characters, and its place in the walk of the forms
@@ -73,7 +73,7 @@ impl FormFacts {
         let ours = |e: &ExpId| !only || kth.walked(*e);
         let mut facts: Vec<(At, &str, Noted)> = c.facts.datum.iter().filter(|(e, _)| ours(e)).map(|(e, d)| (place(*e), "n-datum", Noted::Datum(*d))).collect();
         // Each expression's effect summary: the greatest of its effects'.
-        let mut summaries: HashMap<At, i64> = HashMap::new();
+        let mut summaries: HashMap<At, i64> = HashMap::default();
         for (e, s) in c.effect_summaries_by_exp() {
             if ours(&e) {
                 let k = summaries.entry(place(e)).or_insert(s as i64);

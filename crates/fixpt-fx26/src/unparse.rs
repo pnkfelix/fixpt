@@ -2,7 +2,7 @@
 
 use crate::ast::{Atom, Effect, Region, Ty, TyId};
 use crate::check::Checker;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 impl Checker {
     /// A product's or sum's label as a type shows it: a keyword, `#:name`
@@ -39,7 +39,7 @@ impl Checker {
     /// `.fasl` shows it (`staged_text`): those a staged check must be given
     /// the evidence of.
     pub(crate) fn free_in_shown(&self, make: impl FnOnce(&Self) -> Vec<String>) -> Vec<crate::ast::DVar> {
-        *self.print_for_fasl.borrow_mut() = Some(HashMap::new());
+        *self.print_for_fasl.borrow_mut() = Some(HashMap::default());
         self.show_marks.set(true);
         let texts = make(self);
         self.show_marks.set(false);
@@ -346,12 +346,12 @@ impl Checker {
             }
             count = n;
         }
-        let mut first: HashMap<usize, usize> = HashMap::new();
+        let mut first: HashMap<usize, usize> = HashMap::default();
         for (i, c) in class.iter().enumerate() {
             first.entry(*c).or_insert(i);
         }
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        let mut number: HashMap<usize, usize> = HashMap::from([(class[0], 0)]);
+        let mut number: HashMap<usize, usize> = HashMap::from_iter([(class[0], 0)]);
         let mut queue = std::collections::VecDeque::from([class[0]]);
         while let Some(c) = queue.pop_front() {
             let i = first[&c];
@@ -474,7 +474,7 @@ impl Checker {
     /// nor the global whose line is printed (`print_self`); a description
     /// function, applied where it is used, not.
     fn module_selects(&self) -> HashMap<u64, Vec<(String, TyId)>> {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = fixpt_hash::HashSet::default();
         let mut bound = Vec::new();
         for i in (self.standard_len..self.env.len()).rev() {
             let (n, t) = self.env[i];
@@ -482,7 +482,7 @@ impl Checker {
                 bound.push((n, t));
             }
         }
-        let mut out: HashMap<u64, Vec<(String, TyId)>> = HashMap::new();
+        let mut out: HashMap<u64, Vec<(String, TyId)>> = HashMap::default();
         for (n, t) in bound.into_iter().rev() {
             let name = self.interner.name(n);
             if name.starts_with('%') || Some(n) == self.print_self.get() {
@@ -564,7 +564,7 @@ impl Checker {
         if count == order.len() {
             return None;
         }
-        let mut first: HashMap<usize, TyId> = HashMap::new();
+        let mut first: HashMap<usize, TyId> = HashMap::default();
         for (i, n) in order.iter().enumerate() {
             first.entry(class[i]).or_insert(*n);
         }
@@ -1004,7 +1004,7 @@ fn has_cycle(kids: &[Vec<usize>]) -> bool {
 
 /// Each of `xs` numbered by its first among them that is equal to it.
 fn numbered<'a, T: Eq + std::hash::Hash + 'a>(xs: impl Iterator<Item = &'a T>) -> Vec<usize> {
-    let mut seen: HashMap<&T, usize> = HashMap::new();
+    let mut seen: HashMap<&T, usize> = HashMap::default();
     xs.map(|x| {
         let n = seen.len();
         *seen.entry(x).or_insert(n)

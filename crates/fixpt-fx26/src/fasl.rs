@@ -24,7 +24,7 @@
 
 use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE, GLOBAL_FIELDS, GLOBAL_NAME, ROUTINE_DOCOL};
 use fixpt_heap::{CodePart, Heap, ObjType, Value};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
@@ -420,7 +420,7 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
     }
     let mut links: Vec<(Value, Link)> = Vec::new();
     let mut codes: Vec<Value> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = fixpt_hash::HashSet::default();
     let mut todo = vec![value];
     while let Some(v) = todo.pop() {
         if !v.is_ref() {
@@ -478,8 +478,8 @@ pub type Image = (Vec<u8>, Vec<String>);
 /// In `alone`, a placeholder for each of `links` (`(kind . arg)`, [`read_links`]):
 /// each by what it stands for, raw; their list; and the globals named,
 /// each placeholder `(0 . i)` naming the `i`th.
-fn placeholders(alone: &mut Heap, links: &[(Value, Link)]) -> (HashMap<u64, Value>, Value, Vec<String>) {
-    let mut given = HashMap::new();
+fn placeholders(alone: &mut Heap, links: &[(Value, Link)]) -> (fixpt_hash::HashMap<u64, Value>, Value, Vec<String>) {
+    let mut given = fixpt_hash::HashMap::default();
     let mut list = Value::NULL;
     let mut globals = Vec::new();
     for (v, link) in links.iter().rev() {
@@ -544,7 +544,7 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
     let mut adapted: Vec<(Value, Value)> = Vec::new();
     let mut compiled: Vec<(Value, Value, Vec<Value>)> = Vec::new();
     let mut codes: Vec<Value> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = fixpt_hash::HashSet::default();
     let mut todo = vec![value];
     while let Some(v) = todo.pop() {
         if !v.is_ref() {
@@ -604,7 +604,7 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
         }
         todo.extend(heap.bloblet_values(v));
     }
-    let mut redirect: HashMap<u64, Value> = adapted.iter().map(|(c, f)| (c.raw(), *f)).collect();
+    let mut redirect: fixpt_hash::HashMap<u64, Value> = adapted.iter().map(|(c, f)| (c.raw(), *f)).collect();
     let cellular_kind = const { fixpt_heap::layout::kind("cellular-closure") };
     for (c, word, free) in &compiled {
         let k = heap.make_bloblet(cellular_kind, free.len() + 1, 0, true);
@@ -648,9 +648,9 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
 /// native closure `compile` makes of it, wherever it is reached but in
 /// words (whose literals stay as they are): what the program's convention
 /// made of them. One `compile` declines stays cellular.
-pub fn native_procedures(heap: &mut Heap, value: Value, compile: crate::session::NativeCompiler, natives: &std::collections::HashSet<u64>) -> Value {
+pub fn native_procedures(heap: &mut Heap, value: Value, compile: crate::session::NativeCompiler, natives: &fixpt_hash::HashSet<u64>) -> Value {
     let inside = |h: &Heap, v: Value| !(v.is_bloblet() && (h.is_cellular_word(v) || h.is_register_word(v) || h.code_part(v).is_some()));
-    let mut made: HashMap<u64, Value> = HashMap::new();
+    let mut made: HashMap<u64, Value> = HashMap::default();
     for &c in natives {
         if let Ok(n) = compile(heap, Value::from_raw(c)) {
             made.insert(c, n);
@@ -700,7 +700,7 @@ fn word_code(heap: &Heap, v: Value) -> Option<Value> {
 /// Each word's compiled code, `codes`, given as 0 to a copy: the word's
 /// entry let go, `docol` (0) for a stack word, which runs its cells again,
 /// and 0 for a register word, which is compiled again.
-fn let_go_of_code(given: &mut HashMap<u64, Value>, codes: &[Value]) {
+fn let_go_of_code(given: &mut fixpt_hash::HashMap<u64, Value>, codes: &[Value]) {
     const { assert!(ROUTINE_DOCOL == 0) };
     for c in codes {
         given.insert(c.raw(), Value::fixnum(0));
@@ -710,7 +710,7 @@ fn let_go_of_code(given: &mut HashMap<u64, Value>, codes: &[Value]) {
 /// What `v` reaches, each object once, by `visit`, which says whether to go
 /// into it (a pair's car and cdr; a bloblet's fields).
 fn walk(heap: &Heap, root: Value, mut visit: impl FnMut(&Heap, Value) -> Result<bool, String>) -> Result<(), String> {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = fixpt_hash::HashSet::default();
     let mut todo = vec![root];
     while let Some(v) = todo.pop() {
         if !v.is_ref() {
@@ -940,7 +940,7 @@ impl crate::check::Checker {
         if names.len() != ptys.len() {
             return None;
         }
-        let mut vars = HashMap::new();
+        let mut vars = HashMap::default();
         for (i, (_, _, d)) in f.deps.iter().enumerate() {
             if let Some(g) = self.global_type(*d)
                 && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(g))
@@ -997,7 +997,7 @@ impl crate::check::Checker {
         use crate::ast::Ty;
         let f = self.shared_files.get(&name).ok_or("it was not loaded")?;
         let ty = f.ty.ok_or("its load was not checked")?;
-        let mut vars = HashMap::new();
+        let mut vars = HashMap::default();
         for (i, (_, _, d)) in f.deps.iter().enumerate() {
             if let Some(t) = self.global_type(*d)
                 && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(t))
@@ -1025,7 +1025,7 @@ impl crate::check::Checker {
     /// of no program but the standard environment to read: `stage`'s, at
     /// run time (`facts.staged`). A recursive type is a `mu`.
     pub fn staged_text(&self, t: crate::ast::TyId) -> String {
-        *self.print_for_fasl.borrow_mut() = Some(HashMap::new());
+        *self.print_for_fasl.borrow_mut() = Some(HashMap::default());
         let shown = self.show_ty(t);
         *self.print_for_fasl.borrow_mut() = None;
         shown
@@ -1033,7 +1033,7 @@ impl crate::check::Checker {
 
     /// The same of effect `e`.
     pub fn staged_effect_text(&self, e: &crate::ast::Effect) -> String {
-        *self.print_for_fasl.borrow_mut() = Some(HashMap::new());
+        *self.print_for_fasl.borrow_mut() = Some(HashMap::default());
         let shown = self.show_effect(e);
         *self.print_for_fasl.borrow_mut() = None;
         shown
@@ -1043,7 +1043,7 @@ impl crate::check::Checker {
     /// it: `(select global t)`, the innermost global's.
     fn select_names(&self) -> HashMap<crate::ast::DVar, String> {
         use crate::ast::Ty;
-        let mut vars = HashMap::new();
+        let mut vars = HashMap::default();
         for n in self.value_names() {
             if let Some(g) = self.global_type(n)
                 && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(g))
@@ -1407,7 +1407,7 @@ impl Tree {
     /// Each name a form of the text binds: a `poly`'s, `plambda`'s or
     /// `dlambda`'s binders, a `lambda`'s parameters, a `mu`'s name, a
     /// `moduleof`'s components, a named parameter `(x : T)`.
-    fn bound(&self, out: &mut std::collections::HashSet<String>) {
+    fn bound(&self, out: &mut fixpt_hash::HashSet<String>) {
         let Tree::List(l) = self else { return };
         let first = |t: &Tree| match t {
             Tree::List(b) => match b.first() {
@@ -1479,7 +1479,7 @@ fn place_of(head: Option<&str>, i: usize) -> Place {
 /// application of (`factored`), each parameter's kind by its place. None if
 /// such a name stands where its kind is not known.
 struct Skeleton<'a> {
-    open: &'a std::collections::HashSet<String>,
+    open: &'a fixpt_hash::HashSet<String>,
     /// Each parameter's argument and kind.
     leaves: Vec<(Tree, Place)>,
 }
@@ -1590,11 +1590,11 @@ impl Skeleton<'_> {
 /// node where it is read, as it was where it was made.
 pub fn factored(text: &str, prefix: &str, least: usize) -> Option<(Vec<String>, String)> {
     let tree = Tree::read(text)?;
-    let mut open = std::collections::HashSet::new();
+    let mut open = fixpt_hash::HashSet::default();
     tree.bound(&mut open);
     // Each subterm's skeleton, by its text and its parameters' kinds.
     type Key = (String, Vec<Place>);
-    fn skeleton(t: &Tree, open: &std::collections::HashSet<String>) -> Option<(Key, Tree, Vec<Tree>)> {
+    fn skeleton(t: &Tree, open: &fixpt_hash::HashSet<String>) -> Option<(Key, Tree, Vec<Tree>)> {
         if !t.head().is_some_and(|h| TYPE_HEADS.contains(&h)) {
             return None;
         }
@@ -1603,8 +1603,8 @@ pub fn factored(text: &str, prefix: &str, least: usize) -> Option<(Vec<String>, 
         let kinds = s.leaves.iter().map(|(_, k)| *k).collect();
         Some(((body.text(), kinds), body, s.leaves.into_iter().map(|(l, _)| l).collect()))
     }
-    let mut counts: HashMap<Key, (usize, Tree)> = HashMap::new();
-    fn count(t: &Tree, open: &std::collections::HashSet<String>, least: usize, counts: &mut HashMap<Key, (usize, Tree)>) {
+    let mut counts: HashMap<Key, (usize, Tree)> = HashMap::default();
+    fn count(t: &Tree, open: &fixpt_hash::HashSet<String>, least: usize, counts: &mut HashMap<Key, (usize, Tree)>) {
         let Tree::List(l) = t else { return };
         if let Some((key, body, _)) = skeleton(t, open)
             && key.0.len() >= least
@@ -1621,7 +1621,7 @@ pub fn factored(text: &str, prefix: &str, least: usize) -> Option<(Vec<String>, 
     chosen.sort_by(|a, b| a.0.0.len().cmp(&b.0.0.len()).then_with(|| a.0.cmp(&b.0)));
     let names: HashMap<Key, String> = chosen.iter().enumerate().map(|(i, (k, _))| (k.clone(), format!("{prefix}{}", i + 1))).collect();
     // Each subterm chosen, its family applied to its arguments.
-    fn named(t: &Tree, open: &std::collections::HashSet<String>, names: &HashMap<Key, String>, top: bool) -> Tree {
+    fn named(t: &Tree, open: &fixpt_hash::HashSet<String>, names: &HashMap<Key, String>, top: bool) -> Tree {
         let Tree::List(l) = t else { return t.clone() };
         if !top
             && let Some((key, _, args)) = skeleton(t, open)

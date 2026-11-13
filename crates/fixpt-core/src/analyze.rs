@@ -14,18 +14,18 @@
 //! whole pass is linear in program size rather than quadratic in nesting depth.
 
 use crate::ir::{LambdaId, Node, NodeId, Program, VarId};
-use std::collections::HashSet;
+use fixpt_hash::HashSet;
 
 pub fn analyze(program: &mut Program) {
     let mut a = Analysis {
         free_of_lambda: vec![None; program.lambdas.len()],
-        referenced: HashSet::new(),
-        assigned: HashSet::new(),
+        referenced: HashSet::default(),
+        assigned: HashSet::default(),
     };
 
     // Free variables of the top-level body, with nothing bound outside it.
     let mut top = FreeSet::default();
-    a.walk(program, program.body, &mut HashSet::new(), &mut top);
+    a.walk(program, program.body, &mut HashSet::default(), &mut top);
 
     for (i, f) in a.free_of_lambda.iter().enumerate() {
         program.lambdas[i].free = f.clone().unwrap_or_default().order;

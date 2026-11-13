@@ -807,7 +807,7 @@ mod tests {
 
     #[test]
     fn kinds_fit_and_are_distinct() {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = crate::HashSet::default();
         for k in KINDS {
             assert!((k.code as u64) <= H_KIND.max());
             assert_ne!(k.code, KIND_EXTENSION, "{} takes the extension code", k.name);

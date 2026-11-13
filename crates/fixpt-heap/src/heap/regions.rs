@@ -47,7 +47,7 @@
 //! An area used up is the heap being full: an error, not a fallback.
 
 use super::{Heap, ARENA_BASE, ARENA_WORDS, REAP_BASE, REAP_WORDS};
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 
 /// Words in a chunk: 64 KiB.
 pub(super) const CHUNK_WORDS: usize = 1 << 13;
@@ -132,12 +132,12 @@ impl Regions {
             large_free: Vec::new(),
             fresh: ARENA_BASE,
             reap_fresh: REAP_BASE,
-            owner: HashMap::new(),
-            large_of: HashMap::new(),
+            owner: HashMap::default(),
+            large_of: HashMap::default(),
             reap_free: Vec::new(),
             reap_large_free: Vec::new(),
-            quarantine: HashMap::new(),
-            quarantine_runs: HashMap::new(),
+            quarantine: HashMap::default(),
+            quarantine_runs: HashMap::default(),
             reap_taken: 0,
             target: None,
             words: 0,

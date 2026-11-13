@@ -4,7 +4,7 @@ use crate::datum::{Datum, Num, Syntax};
 use crate::intern::Interner;
 use crate::profile::{Brackets, SyntaxProfile, UnitSyntax};
 use crate::span::{FileId, Span};
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReadError {
@@ -84,7 +84,7 @@ impl<'a> Reader<'a> {
         profile: SyntaxProfile,
         interner: &'a mut Interner,
     ) -> Reader<'a> {
-        Reader { src, pos: 0, file, profile, interner, labels: HashMap::new() }
+        Reader { src, pos: 0, file, profile, interner, labels: HashMap::default() }
     }
 
     /// Read every datum in the source.

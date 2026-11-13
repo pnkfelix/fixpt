@@ -8,7 +8,8 @@
 //! is asked, the inequalities together, by Fourier–Motzkin elimination
 //! (N5c).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
+use fixpt_hash::HashSet;
 
 use crate::ast::{D, DVar, Exp, ExpId, Kind, Size, Ty, TyId};
 use fixpt_read::Sym;
@@ -84,7 +85,7 @@ impl Size {
 }
 
 /// `s` with `map`'s sizes for its variables.
-pub(crate) fn subst_size(s: &Size, map: &std::collections::HashMap<DVar, D>) -> Size {
+pub(crate) fn subst_size(s: &Size, map: &fixpt_hash::HashMap<DVar, D>) -> Size {
     let Some((_, t)) = parts(s) else { return Size::Finite };
     let mut out = s.clone();
     for v in t.keys() {
@@ -335,7 +336,7 @@ impl Checker {
     pub(crate) fn check_finite_sizes(
         &self,
         kinds: &[(DVar, Kind)],
-        map: &std::collections::HashMap<DVar, D>,
+        map: &fixpt_hash::HashMap<DVar, D>,
         body: TyId,
         span: fixpt_read::Span,
     ) -> crate::error::R<()> {
@@ -372,7 +373,7 @@ impl Checker {
         // `v` less a constant: every length it could stand for is a size.
         let alone = |s: &Size| matches!(s, Size::Lin { k, terms } if *k <= 0 && terms[..] == [(v, 1)]);
         let (mut bad, mut top) = (0, 0);
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         match self.arena.get(self.arena.resolve(body)).clone() {
             Ty::Subr { params, result, .. } => {
                 for p in params {
@@ -563,7 +564,7 @@ impl Checker {
         named.retain(|v| !self.is_module_var(*v));
         for v in &named {
             let mut bad = 0;
-            self.size_walk(t, Polarity::Pos, *v, &mut bad, &mut HashSet::new());
+            self.size_walk(t, Polarity::Pos, *v, &mut bad, &mut HashSet::default());
             if bad > 0 {
                 let name = self.interner.name(self.arena.dvar_name(*v)).to_string();
                 return Err(crate::error::FxError::at(
@@ -575,7 +576,7 @@ impl Checker {
                 ));
             }
         }
-        let map: std::collections::HashMap<DVar, D> = named.into_iter().map(|v| (v, D::Size(Size::Finite))).collect();
+        let map: fixpt_hash::HashMap<DVar, D> = named.into_iter().map(|v| (v, D::Size(Size::Finite))).collect();
         Ok(self.subst(t, &map))
     }
 }

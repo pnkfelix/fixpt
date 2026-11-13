@@ -1418,7 +1418,7 @@ impl Checker {
         if self.through_apps(slot, slot, &mut Default::default()) {
             return Err(FxError::at(span, "a recursive type must be built from a constructor, not only from names"));
         }
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = fixpt_hash::HashSet::default();
         let mut id = slot;
         loop {
             let next = match self.arena.get_raw(id) {
@@ -1463,7 +1463,7 @@ impl Checker {
     /// if its representation has a constructor at its head.
     fn named_head(&self, mut which: u32, args: &[D]) -> Option<TyId> {
         let mut args = args.to_vec();
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = fixpt_hash::HashSet::default();
         while seen.insert(which) {
             let g = &self.generatives[which as usize];
             let param = |t: TyId| match self.arena.get(self.arena.resolve(t)) {
@@ -2903,7 +2903,7 @@ impl Checker {
     /// within the form, and nothing refers to a name it does not write, so
     /// it captures nothing and nothing captures it.
     fn fresh_name(&mut self, base: &str, forms: &[Syntax]) -> Sym {
-        fn mentions(s: &Syntax, out: &mut std::collections::HashSet<Sym>) {
+        fn mentions(s: &Syntax, out: &mut fixpt_hash::HashSet<Sym>) {
             match &s.datum {
                 Datum::Symbol(x) => {
                     out.insert(*x);
@@ -2916,7 +2916,7 @@ impl Checker {
                 _ => {}
             }
         }
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = fixpt_hash::HashSet::default();
         forms.iter().for_each(|f| mentions(f, &mut seen));
         (0..)
             .map(|i| if i == 0 { base.to_string() } else { format!("{base}{i}") })
@@ -2961,7 +2961,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             Some(s) => (s, None),
             None => (self.fresh_name("%case-key", items), Some(self.parse_exp(key)?)),
         };
-        let (mut kind, mut seen) = (None, std::collections::HashSet::new());
+        let (mut kind, mut seen) = (None, fixpt_hash::HashSet::default());
         let mut arms = Vec::new();
         // Each datum's test, the value a tree sorts it by (if it has one)
         // and its clause, for `case_tree`.
@@ -3235,7 +3235,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         }
         let mut found = Vec::new();
         self.selects_in(t, &mut Default::default(), &mut found);
-        let mut sel = std::collections::HashMap::new();
+        let mut sel = fixpt_hash::HashMap::default();
         for (m, x, _) in found {
             if let Some(k) = names.iter().rposition(|n| *n == Some(m)) {
                 if let Some(&mt) = tys.get(k)
@@ -3251,7 +3251,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             return Ok(t);
         }
         let outer = std::mem::replace(&mut self.select_map, sel);
-        let r = self.subst(t, &std::collections::HashMap::new());
+        let r = self.subst(t, &fixpt_hash::HashMap::default());
         self.select_map = outer;
         Ok(r)
     }
@@ -3520,7 +3520,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     let Some((now, rest)) = args.split_at_checked(binders.len()) else {
                         return Err(FxError::at(span, format!("`{path}` makes a `poly` of {} description(s), and {} are given", binders.len(), args.len())));
                     };
-                    let mut map = std::collections::HashMap::new();
+                    let mut map = fixpt_hash::HashMap::default();
                     for ((v, k), a) in binders.iter().zip(now) {
                         let d = self.parse_d(a)?;
                         if !self.d_fits(&d, *k) {
@@ -3539,7 +3539,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     };
                     let mut found = Vec::new();
                     self.param_sels(result, &mut Default::default(), &mut found);
-                    let mut map = std::collections::HashMap::new();
+                    let mut map = fixpt_hash::HashMap::default();
                     for (k, x) in found {
                         let Some(m) = now[k].as_symbol() else {
                             return Err(FxError::at(now[k].span, format!("argument {} is a module the types `{path}` makes depend on: give it by name", k + 1)));

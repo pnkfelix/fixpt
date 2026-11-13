@@ -62,6 +62,6 @@ fn normalising_the_real_corpus_is_idempotent_and_keeps_distinctions() {
     // Sanity: the unification variables really did get renumbered somewhere.
     assert!(normalized.iter().any(|(_, t, _)| t.contains("*UNIF*-#0")));
     // And two structurally different types must stay different.
-    let unique: std::collections::HashSet<_> = normalized.iter().map(|(_, t, e)| (t, e)).collect();
+    let unique: fixpt_hash::HashSet<_> = normalized.iter().map(|(_, t, e)| (t, e)).collect();
     assert!(unique.len() > 50, "normalisation collapsed too much: {} distinct", unique.len());
 }

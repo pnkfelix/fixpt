@@ -27,7 +27,7 @@
 
 use crate::ast::{Arena, Desc, DescId};
 use fixpt_read::Sym;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// What each description constructor denotes.
 pub type DStore = HashMap<Sym, DescId>;
@@ -89,7 +89,7 @@ pub fn substitute(arena: &mut Arena, id: DescId, map: &HashMap<Sym, DescId>) -> 
     if map.is_empty() {
         return id;
     }
-    let mut memo = HashMap::new();
+    let mut memo = HashMap::default();
     copy(arena, id, map, &mut memo)
 }
 

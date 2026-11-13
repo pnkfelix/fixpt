@@ -15,7 +15,7 @@ use fixpt_read::{Datum, FileId, Interner, Num, Span, Syntax};
 use crate::front::Front;
 use fixpt_scheme::{Handle, Local, Session};
 use fixpt_scheme::eager::EagerReader;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// Read `text` with the FX-26 reader, already loaded into `scheme` (see
 /// [`crate::session::load_eager_reader`]), interning names in `interner`.
@@ -210,7 +210,7 @@ fn assemble_by_fx26(s: &mut Front, word: Handle) -> Result<(), String> {
 pub fn cell_words_reachable(heap: &fixpt_heap::Heap, word: Value) -> Vec<Value> {
     use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0};
     let closure = const { fixpt_heap::layout::kind("cellular-closure") };
-    let (mut todo, mut seen, mut found) = (vec![word], std::collections::HashSet::new(), Vec::new());
+    let (mut todo, mut seen, mut found) = (vec![word], fixpt_hash::HashSet::default(), Vec::new());
     while let Some(w) = todo.pop() {
         if !seen.insert(w.raw()) {
             continue;
@@ -873,11 +873,11 @@ thread_local! {
     /// makes none of them again, so that a form compiled alone, as the
     /// native convention compiles each, uses the one made in the program's
     /// convention (`Fx26Session::shared_made`).
-    static SHARED_MADE: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(Default::default());
+    static SHARED_MADE: std::cell::RefCell<fixpt_hash::HashSet<String>> = std::cell::RefCell::new(Default::default());
 }
 
 /// Set the loads the session has made (`SHARED_MADE`).
-pub fn set_shared_made(made: std::collections::HashSet<String>) {
+pub fn set_shared_made(made: fixpt_hash::HashSet<String>) {
     SHARED_MADE.with(|m| *m.borrow_mut() = made);
 }
 
@@ -886,7 +886,7 @@ thread_local! {
     /// the expression it was checked as (`Checker::fasl_load`), which the
     /// parser written in FX-26 is given for it in place of the file's
     /// forms.
-    static FASL_USED: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::new());
+    static FASL_USED: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::default());
 }
 
 /// Set the loads read from `.fasl`s (`FASL_USED`).
@@ -1085,7 +1085,7 @@ fn fx26_span(scheme: &mut Front, file: FileId, at: &dyn Fn(i64) -> u32, a: i64, 
         return Span::new(file, at(a), at(b));
     }
     let made = expansions_made(scheme);
-    Sources { file, at, made, done: HashMap::new() }.span(scheme, a, b)
+    Sources { file, at, made, done: HashMap::default() }.span(scheme, a, b)
 }
 
 /// The FX-26 expander's expansions, and those recorded as Rust's so far.
@@ -1142,9 +1142,9 @@ fn source_of(scheme: &mut Front, k: i64) -> (i64, i64) {
 /// name and its use's place, by its number.
 fn expansions_made(scheme: &mut Front) -> HashMap<i64, (String, i64, i64)> {
     if !crate::entries::bound(scheme, "expansions-made") {
-        return HashMap::new();
+        return HashMap::default();
     }
-    let Ok(list) = crate::entries::call(scheme, "expansions-made", &[]) else { return HashMap::new() };
+    let Ok(list) = crate::entries::call(scheme, "expansions-made", &[]) else { return HashMap::default() };
     scheme.view(|v| {
         let int = |x: Option<Local<'_>>| x.and_then(|x| x.fixnum()).unwrap_or(0);
         v.get(list)
@@ -1193,7 +1193,7 @@ fn loaded_files_at(scheme: &mut Front, file: FileId, text: &str, base: i64) -> R
     let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let mut list = scheme.make(|_| Value::NULL);
     let mut read = 0;
-    let mut seen = HashMap::new();
+    let mut seen = HashMap::default();
     let mut order = Vec::new();
     supply_loaded_in(scheme, file, text, base, base_dir, &mut read, &mut seen, &mut order, &mut list)?;
     Ok((list, order))

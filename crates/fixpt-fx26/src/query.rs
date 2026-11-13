@@ -12,7 +12,7 @@ use crate::ast::{Atom, D, Effect, Exp, ExpId, ModItem, Region, Ty, TyId};
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_read::{FileId, Span, Sym};
-use std::collections::HashSet;
+use fixpt_hash::HashSet;
 
 /// Where a program came from: a file's path, or the REPL's name for a form
 /// typed (`<fx26:3>`); its text; and the directory its `load-module`s are
@@ -183,7 +183,7 @@ fn definitions(c: &mut Checker, tops: &[(Top, Option<Span>)]) -> Vec<Def> {
         }
     }
     // The latest definition of each name.
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     named.reverse();
     named.retain(|(n, _, _)| seen.insert(*n));
     named.reverse();
@@ -585,7 +585,7 @@ fn want_of(c: &mut Checker, t: &str) -> Result<Want, String> {
 /// `(select m x)` before `m` was known is, put in (`typeat::named` does the
 /// same to print).
 fn as_checked(c: &mut Checker, t: TyId) -> TyId {
-    let mut map = std::collections::HashMap::new();
+    let mut map = fixpt_hash::HashMap::default();
     for ((m, e), v) in c.effect_selects.clone() {
         if let Ok(x) = c.selected_effect(m, e, Span::new(FileId(0), 0, 0)) {
             map.insert(v, D::Effect(x));
@@ -652,7 +652,7 @@ fn is_wanted(c: &mut Checker, t: TyId, want: &Want) -> bool {
 /// How a value of `t` holds what `want` names (`Holds`).
 fn holds(c: &mut Checker, t: TyId, want: &Want) -> Holds {
     let mut h = Holds::default();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     // Each type with whether the customer receives it (or gives it);
     // whether reaching it obliged the customer to make a `T`; and, of a `T`
     // the customer gives there, whether the exchange it is given in gives
@@ -708,7 +708,7 @@ fn holds(c: &mut Checker, t: TyId, want: &Want) -> Holds {
 /// Whether a value of `t` gives what `want` names, to whoever has it, in
 /// any way (`Holds::gives`, by polarity alone).
 fn gives(c: &mut Checker, t: TyId, want: &Want) -> bool {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut todo = vec![(t, true)];
     while let Some((t, positive)) = todo.pop() {
         let t = c.arena.resolve(t);
@@ -737,7 +737,7 @@ fn gives(c: &mut Checker, t: TyId, want: &Want) -> bool {
 /// names: it holds one as data, or a procedure in it returns one; not
 /// what a procedure in it is given.
 fn obliges(c: &mut Checker, t: TyId, want: &Want) -> bool {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut todo = vec![t];
     while let Some(t) = todo.pop() {
         let t = c.arena.resolve(t);
@@ -798,7 +798,7 @@ fn children(ty: &Ty) -> Vec<(TyId, Side)> {
 /// arrays, cells, pairs and bloblets not frozen, as far as its data goes;
 /// not into the procedures it holds, whose own state is theirs.
 fn mutable_regions(c: &Checker, t: TyId) -> HashSet<Region> {
-    let (mut out, mut seen, mut todo) = (HashSet::new(), HashSet::new(), vec![t]);
+    let (mut out, mut seen, mut todo) = (HashSet::default(), HashSet::default(), vec![t]);
     while let Some(t) = todo.pop() {
         let t = c.arena.resolve(t);
         if !seen.insert(t) {

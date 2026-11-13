@@ -14,7 +14,7 @@ use super::{Compiler, Env, Lift, Loc};
 use crate::ast::{ArmBind, Exp, ExpId, ModItem};
 use fixpt_heap::Value;
 use fixpt_read::Sym;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// A lambda as the walk decided it: its parameters, the name it is bound to
 /// in its `letrec` or module, and the names its closure captures, in order.

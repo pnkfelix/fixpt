@@ -17,7 +17,7 @@ use crate::top::Top;
 use fixpt_read::{Datum, Interner, Num, Syntax};
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use std::collections::HashMap;
+use fixpt_hash::HashMap;
 
 /// A reading: a digest of the session's state before it, `s`, and the
 /// trees `text` reads as, never 0; or none, if it does not read (the Rust
@@ -376,8 +376,8 @@ pub fn form_loads(c: &Checker, hoisted: &[&Top]) -> Vec<(String, String)> {
 /// structure, not by where it is written (a template's parts share a use's
 /// span, and an argument placed twice is one span at two places;
 /// `docs/research/loads-and-places.md`, "Decided: identity by position").
-pub(crate) fn subtrees(c: &Checker, roots: &[ExpId]) -> std::collections::HashSet<ExpId> {
-    let mut out = std::collections::HashSet::new();
+pub(crate) fn subtrees(c: &Checker, roots: &[ExpId]) -> fixpt_hash::HashSet<ExpId> {
+    let mut out = fixpt_hash::HashSet::default();
     let mut stack = roots.to_vec();
     while let Some(x) = stack.pop() {
         if out.insert(x) {

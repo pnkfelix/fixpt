@@ -16,7 +16,7 @@
 //! immortal one (code that is never collected: in the static area, an
 //! image's).
 
-use std::collections::HashMap;
+use crate::HashMap;
 
 /// Where provenance ids start: past every file's places, and past the keys
 /// the expander written in FX-26 gives the parts its templates make

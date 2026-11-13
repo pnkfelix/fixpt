@@ -118,8 +118,8 @@ thread_local! {
     /// (a checker numbers its own files, and one thread may run several):
     /// for saying where a span is when nothing else at hand knows, as a
     /// report of what was being checked when the stack ran low does.
-    static SOURCES: std::cell::RefCell<std::collections::HashMap<FileId, (Arc<str>, Arc<str>)>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
+    static SOURCES: std::cell::RefCell<fixpt_hash::HashMap<FileId, (Arc<str>, Arc<str>)>> =
+        std::cell::RefCell::new(fixpt_hash::HashMap::default());
 }
 
 /// Text `text`, read as file `file`, named `name`: what [`describe_source`]
