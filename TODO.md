@@ -2230,7 +2230,7 @@ provisional); a message of its own past the budget; head forms and
 greatest members kept on the node, and the answer cache, once measured
 on programs that use `anyof` (the front end has none yet).
 
-## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
+## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11; deferred: rounded or refused, the user's to decide)
 
 Since `fb86975` an integer literal checks as any fixed-width integer type
 it is in the range of. kayak also asked for a real literal checked
@@ -2322,12 +2322,15 @@ size.
 the first test programs (refused today, accepted after, both checkers
 agreeing), then the variant's result type in both parsers.
 
-## 84. I/O: what is left (kayak's request, 2026-10-12)
+## 84. I/O: what is left (kayak's request, 2026-10-12; deferred; to do: a note to kayak of our questions)
 
 All five stages are built (`DONE.md` §84): `u8`, `i8` and bytevectors;
 the `io` effects under one ordering rule, `write-out`, `write-err`,
 `exit`, `main` and the exit status; files; the clock and the arguments;
 the standard input. Left:
+- **A note to kayak, to write** (the user's, 2026-11-13: not now, but
+  owed): the questions below that wait on them, what we built in their
+  stead, and what is still missing, so that they confirm or ask.
 - **kayak to confirm** what was proposed back to them and built so: the
   allocating primitives taking a region; `io-error`'s kind a sum; bytes
   not UTF-8 a failure of their own kind; bytevectors written in place
@@ -4858,7 +4861,7 @@ table of stacks a name, as `Bindings` is). Indexes kept as names are
 bound, not a namespace partitioned: a module global and a value shadow
 each other by name.
 
-## 201. Heist's request: `stage` on native machines (the user's, 2026-10-31)
+## 201. Heist's request: `stage` on native machines (the user's, 2026-10-31; done 2026-11-01; left, low: staged code on `fx-regs-*-cellcc`)
 
 Heist's team reports `docs/requests/fixpt-stage-native.md` (in Heist's
 repository, `~/Dev/LangPlay/heist`; read it there, not changed). After
@@ -5135,7 +5138,7 @@ twins take is still there, unused. **Left**:
   machine's start gains what mapping a larger image costs (142 MB to 59
   for the default machine's, 3 ms of its start).
 
-## 211. Heist's R4: evaluating FX-26 inside the running editor (Heist's, 2026-11-01)
+## 211. Heist's R4: evaluating FX-26 inside the running editor (Heist's, 2026-11-01; 2–5 done; left: time slices, a resuming handler's delimiting, macros)
 
 Heist's `docs/fx26-for-yank.md`, "R4. Evaluating FX-26 inside the running
 editor", for Yank's `M-:`, `C-x C-e` and init file: a persistent
@@ -5686,7 +5689,7 @@ and how often. About 2.2 times slower when on; nothing assembled when off.
 Not yet: arm64's register words, native-convention procedures, stack code;
 a report from the CLI.
 
-## 237. REPL start checks and lowers the eager reader every time (the Mac team's, 2026-11-11)
+## 237. ~~REPL start checks and lowers the eager reader every time~~ (the Mac team's, 2026-11-11; done the same day, and since §262 the reader runs compiled)
 
 REPL start went from 0.10 s to 0.37 s since 10-28, on every machine, with no
 input: each start checks and lowers the eager reader from source
@@ -5723,7 +5726,7 @@ every file's shapes at each parse, `shapes-at!`, and the suite shapes the
 front end's files in every process that compiles it).
 
 
-## 239. The FX-26 shaping pass at a program's scale (the Mac team's, 2026-11-11)
+## 239. The FX-26 shaping pass at a program's scale (the Mac team's, 2026-11-11; 3.59 s to 2.20 s; deferred: doing less of it, or caching it)
 
 Step 2 (97400f83) made the FX-26 parse shape every top-level form and
 every file it loads, through the aligner and walk written for templates of
@@ -6227,7 +6230,7 @@ message, where a name a syntactic closure's output names is unbound,
 could say so: that the output is closed where the macro is defined, and
 `make-syntactic-closure` closes a part where it is used.
 
-## 257. The Mac team's notes on `table.fx`'s code and its listings (2026-11-12)
+## 257. The Mac team's notes on `table.fx`'s code and its listings (2026-11-12; 1, 14 and the `FileId` hashing done 2026-11-13; 8–13 are §255's; left: 2–7)
 
 From reading the code made of `bucket-of`. Measured since (2026-11-12, the
 bootstrap compile, release, natively): `table.fx` is 1.1% of samples, all
@@ -6276,6 +6279,15 @@ the raw places kept for profiles and `FIXPT_REG_RANGE`). And:
     stub of the cellular word code 1 was compiled from, found through the
     `CODE_SOURCE` field (`code_text`, `direct.rs`). Walk the fields after
     `CODE_SOURCE`, or label it "the source word's stub".
+
+Done (2026-11-13): item 1, `bucket-of` a hash's low bits (`bitwise-and`,
+in line natively in both compilers; the buckets the same, so no table
+moves); item 14, `code_text` walking a procedure's fields past
+`CODE_SOURCE`; and the `FileId` map `rust_facts` looks up twice a fact,
+by `IdHasher`. Left: 2 (only if a profile asks); 3, which wants §245's
+inlining of a module's generic procedures; 4, both register compilers,
+for a procedure of 1.1% of samples; 5–7, arm64's `direct.rs`, not to be
+written without a machine to run it on.
 
 Also seen in that profile, larger than all of the above: collection ~11%;
 SipHash of `FileId` keys ~6% (`hash_one::<&FileId>`, `sip::Hasher::write`;

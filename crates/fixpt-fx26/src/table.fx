@@ -28,6 +28,8 @@
     (subr (alloc r) ((key-hash k) (key-same k)) (table k v r))))
   (plambda ((r region)) (plambda ((k type) (v type))
     (lambda ((hash (key-hash k)) (same (key-same k)))
+      ;; Buckets a power of two, here and as `table-grow` doubles them, so
+      ;; that `bucket-of` takes a hash's low bits.
       (the (table k v r) (make-bloblet 0 hash same (make-array 8 nil) 0))))))
 
 ;;; The entry for `key` in a bucket, or nil.
@@ -40,12 +42,14 @@
             ((same (car (car b)) key) (car b))
             (else (bucket-find (cdr b) key same)))))))
 
-;;; Which bucket `key` belongs in, of `n`.
+;;; Which bucket `key` belongs in, of `n`, a power of two (`make-table`):
+;;; its hash's low bits, the bucket `modulo` gives, negative hashes too,
+;;; with no division (the Mac team's, `TODO.md` §257).
 (define bucket-of
   (poly ((r region)) (poly ((k type) (v type))
     (subr (read r) ((table k v r) k int) int)))
   (plambda ((r region)) (plambda ((k type) (v type))
-    (lambda ((t (table k v r)) (key k) (n int)) (modulo ((bloblet-ref t 0) key) n)))))
+    (lambda ((t (table k v r)) (key k) (n int)) (bitwise-and ((bloblet-ref t 0) key) (- n 1))))))
 
 ;;; The entry for `key` in `t`, or nil.
 (define table-entry
@@ -100,7 +104,8 @@
           (begin (rehash-bucket t (array-ref old i) (bloblet-ref t 2))
                  (rehash-array t old (+ i 1))))))))
 
-;;; Double the buckets once there are more entries than buckets.
+;;; Double the buckets once there are more entries than buckets: a power
+;;; of two still, as `bucket-of` needs.
 (define table-grow
   (poly ((r region)) (poly ((k type) (v type))
     (subr (maxeff (read @globals) spin (read r) (write r) (alloc r)) ((table k v r)) unit)))

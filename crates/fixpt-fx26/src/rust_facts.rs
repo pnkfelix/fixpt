@@ -59,7 +59,10 @@ impl FormFacts {
             kth.top(c, t);
         }
         let offsets = byte_offsets(text);
-        let files: HashMap<FileId, Vec<usize>> = c.loaded.values().map(|(_, t, f)| (*f, byte_offsets(t))).collect();
+        // Looked up twice a fact, hundreds of thousands of times for the
+        // front end: by `IdHasher`, not SipHash (the Mac team's profile,
+        // `TODO.md` §257, some 6%).
+        let files: crate::ast::IdMap<FileId, Vec<usize>> = c.loaded.values().map(|(_, t, f)| (*f, byte_offsets(t))).collect();
         let at = |f: FileId, byte: u32| -> i64 {
             match files.get(&f) {
                 Some(o) if f != file => LOAD_BASE_STEP * (f.0 as i64 - 1000) + o.partition_point(|&x| x < byte as usize) as i64,

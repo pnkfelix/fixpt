@@ -6770,8 +6770,11 @@ pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
             let _ = writeln!(out, "  {l}");
         }
         // What it calls, and makes closures of: code in its fields, and
-        // in the closures there.
-        for f in heap.bloblet_fields_from(code, 1) {
+        // in the closures there. A procedure's own (`CODE_SELF`) and the
+        // cellular word it was compiled from (`CODE_SOURCE`, whose stub is
+        // no callee: the Mac team's, `TODO.md` §257) left out.
+        let procedure = heap.bloblet_head(code).fields >= CODE_SOURCE && heap.bloblet_slot(code, CODE_SELF) == code;
+        for f in heap.bloblet_fields_from(code, if procedure { CODE_SOURCE + 1 } else { 1 }) {
             if heap.is_code_bloblet(f) {
                 todo.push(f);
             } else if f.is_bloblet() && heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("native-closure") } {
