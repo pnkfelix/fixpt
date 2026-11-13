@@ -720,6 +720,9 @@ fn prewarm() -> i32 {
         FX26_MACHINES.iter().find(|(_, run, m, c, _)| *run == "cellular" && (*c == Some("native")) == native && (native || c.is_none()) && unavailable(*m, *c).is_none()).map(|(n, ..)| *n)
     };
     let mut status = 0;
+    // Whether this run makes the caches, or finds them made: if it makes
+    // them, it says so after (`prewarm-BUILD.made-by`, below).
+    let cold = !fixpt_fx26::session::native_front_end_cached();
     // The front end's facts, as the Rust checker finds them for the
     // compiler written in FX-26 (`syn::prewarm_front_end_facts`), which
     // many tests compile it with: needing nothing above, from the start.
@@ -820,6 +823,17 @@ fn prewarm() -> i32 {
                 status = 1;
             }
         }
+    }
+    // Which profile made this build's caches, which a debug and a release
+    // build share (`TODO.md` §265): what a release test compares its own
+    // prewarm's with (`tests/shared_caches.rs`), so that it compares the
+    // two profiles' caches, not one's with itself.
+    if cold
+        && status == 0
+        && let Some(dir) = fixpt_fx26::fasl::cache_dir()
+    {
+        let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+        let _ = std::fs::write(dir.join(format!("prewarm-{}.made-by", fixpt_fx26::session::build_hash())), profile);
     }
     status
 }

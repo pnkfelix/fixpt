@@ -541,6 +541,19 @@ fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)
     Some((dir.join(format!("front-end-{build}-{kind}.img")), key.finish()))
 }
 
+/// This build's hash (`FIXPT_BUILD_HASH`, `build.rs`): what names and keys
+/// its caches, the same for a debug and a release build of the same sources.
+pub fn build_hash() -> &'static str {
+    env!("FIXPT_BUILD_HASH")
+}
+
+/// Whether the native front end's cache is there, and this build's: what
+/// `fixpt prewarm` finds before it makes anything.
+pub fn native_front_end_cached() -> bool {
+    let text = register_text(&crate::front_end(), &Fx26Session::FRONT_ENTRIES);
+    front_end_cache(&text, true).is_some_and(|(p, key)| fixpt_heap::Mapped::open(&p).ok().is_some_and(|b| b.get(..8).is_some_and(|k| k == key.to_le_bytes())))
+}
+
 /// The front end's compiled word `w`, copied out of `heap` into a heap of
 /// its own and written to `path` as an image after `key`: by a temporary
 /// file renamed, so that a reader never sees half of one; then the caches
@@ -905,6 +918,8 @@ fn sweep_cache(dir: &std::path::Path) {
                 b.0 = b.0.max(used);
                 b.1.push(e.path());
             }
+        } else if old && name.starts_with("prewarm-") {
+            let _ = std::fs::remove_file(e.path());
         } else if old && name.starts_with("built-in-") {
             let _ = std::fs::remove_dir_all(e.path());
         }

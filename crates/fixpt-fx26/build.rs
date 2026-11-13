@@ -4,9 +4,13 @@
 //! as in release.
 //!
 //! `FIXPT_BUILD_HASH`: a hash of the sources of every crate that makes or
-//! runs the front end's cache, and of the build (profile, target, features),
-//! which keys the cache (`front_end_cache`), so that every executable built
-//! from the same sources so shares one: the CLI and each test binary.
+//! runs the front end's cache, and of the build (target, features), which
+//! keys the cache (`front_end_cache`), so that every executable built from
+//! the same sources so shares one: the CLI and each test binary, of a debug
+//! build or a release one (`TODO.md` §265). Not the profile: a debug and a
+//! release prewarm make the same bytes (no map seeded, `fixpt-hash`), which
+//! a release test holds (`fixpt-cli`'s `tests/shared_caches.rs`), so a
+//! debug build reads the caches a release one made, and the other way.
 
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -15,6 +19,9 @@ use std::path::Path;
 /// this one, and what in each.
 const CRATES: [&str; 9] = ["fixpt-hash", "fixpt-read", "fixpt-heap", "fixpt-memmgmt", "fixpt-engine", "fixpt-runtime", "fixpt-scheme", "fixpt-native", "fixpt-fx26"];
 const PARTS: [&str; 4] = ["src", "stencils", "build.rs", "Cargo.toml"];
+/// What differs between a debug and a release build, left out of the hash:
+/// the profile's settings.
+const PROFILES: [&str; 2] = ["CARGO_CFG_DEBUG_ASSERTIONS", "CARGO_CFG_OVERFLOW_CHECKS"];
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(optimized)");
@@ -36,7 +43,7 @@ fn main() {
     println!("cargo::rerun-if-changed={}", lock.display());
     hash_tree(&lock, &mut h);
     let mut build: Vec<_> = std::env::vars()
-        .filter(|(k, _)| k.starts_with("CARGO_FEATURE_") || k.starts_with("CARGO_CFG_") || ["PROFILE", "OPT_LEVEL", "DEBUG", "TARGET"].contains(&k.as_str()))
+        .filter(|(k, _)| (k.starts_with("CARGO_FEATURE_") || k.starts_with("CARGO_CFG_") || k == "TARGET") && !PROFILES.contains(&k.as_str()))
         .collect();
     build.sort();
     build.hash(&mut h);
