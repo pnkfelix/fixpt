@@ -716,7 +716,8 @@
         (and (tagcase (car at) (pick-value (k) (= k i)) (else y #f))
              (k-identity? (cdr at) (+ i 1) n)))))
 ;; The first of `ps`, the parts shown, whose type mentions one of `gone`,
-;; the abstract types hidden: refused (the user's, 2026-10-09).
+;; the abstract types hidden: refused (the user's, 2026-10-09; kept so,
+;; 2026-11-13, `TODO.md` §69), the error saying the two ways out.
 (define k-hidden-escape (->* (k-parts k-parts int int) unit)
   (lambda (ps gone a b)
     (if (null? ps)
@@ -724,10 +725,12 @@
         (let ((v (k-first-mentioned (extract (car ps) 2) (k-part-ids gone))))
           (if (< v 0)
               (k-hidden-escape (cdr ps) gone a b)
-              (k-fail (k-cat5 "`" (symbol->string (extract (car ps) 1)) "`'s type mentions `"
-                              (symbol->string (k-part-named gone v))
-                              "`, which is hidden in this module")
-                      a b))))))
+              (let ((n (symbol->string (extract (car ps) 1)))
+                    (h (symbol->string (k-part-named gone v))))
+                (k-fail (k-cat5 (k-cat5 "`" n "`'s type mentions `" h
+                                        "`, which is hidden in this module")
+                                ": show `" h "`, or hide `" (string-append n "` as well"))
+                        a b)))))))
 (define k-part-ids (->* (k-parts) k-ids)
   (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 2) (k-part-ids (cdr ps))))))
 (define k-part-named (->* (k-parts int) symbol)

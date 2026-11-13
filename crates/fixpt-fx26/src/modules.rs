@@ -133,10 +133,8 @@ impl Checker {
         }
         for (n, t) in out.iter().chain(&descs) {
             if let Some((h, _)) = gone.iter().find(|(_, v)| self.mentions_var(*t, *v)) {
-                return Err(FxError::at(
-                    span,
-                    format!("`{}`'s type mentions `{}`, which is hidden in this module", self.interner.name(*n), self.interner.name(*h)),
-                ));
+                let (n, h) = (self.interner.name(*n), self.interner.name(*h));
+                return Err(FxError::at(span, format!("`{n}`'s type mentions `{h}`, which is hidden in this module: show `{h}`, or hide `{n}` as well")));
             }
         }
         if path.iter().enumerate().any(|(i, p)| *p != Pick::Value(i)) || path.len() != vals.len() {

@@ -10,6 +10,11 @@ families. Exploration only: nothing here is built.
 Citations are from memory unless they name a file; check them before
 relying on them.
 
+**Revisited 2026-11-13** (§6, the user's): generativity as a property of
+a type's *constructors*, existentialness of its *name*; a type may have
+only some constructors generative, its non-generative values a structural
+subtype of it.
+
 ## 1. FX-91's precedent
 
 From the report (`GiffordHistory/papers/fx91-report.pdf`, §§2.2.6, 2.2.9,
@@ -290,3 +295,171 @@ families. Generativity bears on that question in two separate ways.
    built changes, and let the non-regular-family prototype decide how
    much structural machinery GADTs need. Generative datatypes are the
    fallback that works in any case.
+
+## 6. Generativity per constructor, not per type (2026-11-13)
+
+From a discussion with the user while deciding `TODO.md` §69 (a hidden
+abstract type in an exported one: still refused). The user's idea, and an
+open question as far as we know; it revisits §2's framing, in which
+generativity belongs to a whole type. Nothing here is built. Citations are
+from memory.
+
+### 6.1 The claim
+
+"Generative versus existential" is posed as a choice between two ways a
+type gets its identity: a name made fresh where it is defined, or a name
+packed and hidden at an interface. Posed so, it presumes a nominal type
+system, in which a type's only identity is its name. Rossberg, Russo and
+Dreyer's *F-ing modules* (2010, 2014) show the two are one mechanism: ML's
+generativity is an existential unpacked at a particular point.
+
+With structural types in the picture, the two come apart into properties
+of different things (the user's):
+
+- **Existentialness is a property of a type's name**: whether, and where,
+  the type can be written. Scoping, hiding, `moduleof`'s abstract parts.
+- **Generativity is a property of a type's constructors**: whether a
+  value's constructor is one anyone can make, structurally (a tag), or one
+  made fresh, which only whoever holds it can apply.
+
+A type is then structural, made of constructors; some of them may be
+generated. And a type may be defined with **only some of its constructors
+generative**. The values built from its non-generative constructors alone
+form a subtype of it, structural and open to anyone; the generative ones
+are what only the holder of the constructor can add.
+
+### 6.2 What FX-26 has, and where this sits
+
+- Sums are structural: a one-tag sum is a constructor's singleton type, a
+  sum the union of its tags', related by width subtyping
+  (`structural-adts.md` §0, §1.1). Tags are global: anyone can make
+  `(sum circle 3)`.
+- `define-generative` wraps a whole type: a new name, opaque to
+  comparison, its conversions `up-t` and `down-t` the identity at run time
+  and in scope only inside its module (§2).
+- `structural-adts.md` concludes "structural by default;
+  `define-generative` as a wrapper where a type must mean more than its
+  structure", and lists what generativity still buys: unforgeability and
+  invariants, phantom indices, names in messages.
+- §2 pulls apart three things FX-91 bundled:
+  generativity, iso-recursion, hiding.
+
+This section moves generativity from the wrapper to the constructor. A type
+need not be all structural or all generative; its invariant-carrying
+parts can be generative while the rest stays structural, and the
+structural part is still a type anyone can build and match.
+
+### 6.3 An example
+
+Text bound for a page: a client may give raw text; only the escaper may
+say a piece is escaped.
+
+```
+;; `esc` generated: a constructor no one else has.
+(define-type page-text
+  (sumof (raw string)
+         (esc string)          ; generative: only the escaper makes these
+         (join (pairof page-text page-text))))
+```
+
+- `(sumof (raw string) (join …))`, the non-generative fragment, is a
+  subtype of `page-text`: what any client may build.
+- `(sumof (esc string) (join …))`, the fragment with no `raw`, is also a
+  subtype: text known escaped all through. A function that writes to the
+  page asks for it; the only way to get one is through the escaper.
+- Neither needs a type name of its own to be distinct: the generated
+  `esc` makes the difference. The invariant ("escaped") lives in a
+  constructor, which `structural-adts.md` §0 point 4 had left to whole
+  generative types.
+
+Both subtypes are width subtyping, which FX-26's sums have now.
+
+### 6.4 Consequences
+
+**Per constructor, three properties, not one.** What a whole generative
+type bundles separates:
+
+| property         | question                                     | today, for a whole type        |
+| ---------------- | -------------------------------------------- | ------------------------------ |
+| **identity**     | structural (a tag) or generated (fresh)?     | `define-generative`            |
+| **construction** | who may apply it?                            | `up-t` in scope, module only   |
+| **destruction**  | who may match on it?                         | `down-t` in scope, module only |
+
+Generated but exported constructors are distinct but forgeable by anyone
+who has them, as ML's exported exceptions are. Unforgeability is
+construction kept private; OCaml's `private` types are the converse
+(anyone may match, only the module may construct).
+
+**The serializable fragment falls out.** §3 splits
+data that can be printed, read and sent from a universe that includes
+generative types. Per constructor, a value is serial exactly when it was
+built from structural constructors alone, so the non-generative fragment
+of a type is its serializable subtype, with no separate kind to declare.
+
+**Identity is §203's question, asked of constructors.** When are two
+generations the same constructor: once per definition (static), once per
+distinct input (applicative), or once per evaluation (generative)? If the
+generation is pure in its inputs, which FX-26's effects can say, the
+answer can be "the same inputs, the same constructor": applicative
+functors derived from effects, not declared. The decision diagrams of
+§203 apply unchanged.
+
+**Dependent types, or singletons, at the edge.** If a generated
+constructor is a run-time value, a type that mentions it mentions a term.
+Keeping generation static (per definition, or per module binding's path,
+as `m..t` names an abstract type now) keeps type identity out of run
+time, as §2 chose for whole types.
+
+**§69, under this view.** The `extend` whose second module's `t` replaces
+the first's while a kept value mentions it (`modules/extend-abstract-
+replaced.fx`, refused) would lose nothing: `t` was a name for a structural
+type over the first module's generated constructor, which still exists
+and can be shown by where it was made. The `hide` case stays refused:
+there the programmer asked that the constructor not be named outside.
+
+### 6.5 Precedents
+
+- **Morris, *Protection in programming languages*** (CACM 1973): seals,
+  `createseal` giving a seal and unseal pair. A generated constructor and
+  its destructor are a seal, typed. Sumii and Pierce, *A bisimulation for
+  dynamic sealing* (POPL 2004), for its reasoning.
+- **ML's `exn`**: each `exception E` makes a fresh constructor of one open
+  type, fresh per evaluation inside a functor. A type of generated
+  constructors only.
+- **OCaml's extensible variants** (`type t += …`): the same, for any type.
+- **OCaml's polymorphic variants**: structural constructors, rows, width
+  subtyping. The non-generative half.
+- **OCaml's `private` types**: construction restricted, matching allowed.
+- **TypeScript's `unique symbol` brands**: a structural type system made
+  nominal where wanted by a generated symbol in a structural type.
+- **Pitts and Gabbay, FreshML**: fresh atoms as values, structural types
+  over them.
+- **Rossberg, *Generativity and dynamic opacity for abstract types***
+  (PPDP 2003): type names generated at run time.
+- **Sewell et al., Acute; Billings et al., HashCaml**: a type's name the
+  hash of what it declares: identity by content (`TODO.md` §203).
+- **Harper and Stone; Dreyer, Crary and Harper**: singleton kinds, and
+  the applicative and generative functor distinction this would derive.
+
+What we have not seen combined: one structural sum with generated and
+structural constructors side by side, its fragments related by width
+subtyping, and constructor identity decided by the effects of what made
+it.
+
+### 6.6 Open questions
+
+1. Syntax: a constructor marked generated in a `define-datatype` or a
+   `sumof` (`#:generative` per variant, as §2
+   sketched per type); and how construction and destruction are made
+   private (the module's scope, as `up-t` and `down-t` are now).
+2. Whether `define-generative` becomes sugar: a type of one generated
+   constructor, private both ways.
+3. Messages: a generated constructor's name, said with where it was made.
+4. Equi-recursion: a generated constructor is not a name to fold, so
+   iso-recursion (which §2 gets free from the wrapper)
+   would have to be had another way, or kept with the wrapper.
+5. Both checkers: constructor identity in the type node of a sum's tag,
+   and in the facts `tagcase` narrows by.
+6. Run time: whether a generated constructor needs a run-time identity
+   (a tag number per generation) or, being static, can be a tag like any
+   other, the distinction the checkers' alone.

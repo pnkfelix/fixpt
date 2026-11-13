@@ -1,4 +1,4 @@
-;; ! `w`'s type mentions `t`, which is hidden in this module
+;; ! `w`'s type mentions `t`, which is hidden in this module: show `t`, or hide `w` as well
 ;; A hidden `include` hides every name it takes in, the abstract types that
 ;; are the module's own now too (`TODO.md` §69); one an exported type
 ;; mentions is refused, as a hidden abstract type is.

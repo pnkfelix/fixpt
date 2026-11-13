@@ -14,6 +14,11 @@ takes apart only a product labelled 1, 2, …, a `(tupleof T …)`, built by
 `docs/research/examples/` are updated to `tupleof` and `tuple` and give
 what they gave before.
 
+**Since 2026-11-13**: `generative-types.md` §6 moves generativity from the
+wrapper this note recommends to individual constructors, so that a type's
+invariant-carrying constructors can be generative while the rest stays
+structural (§0, point 4 here).
+
 Sources are listed at the end with where each was read and how much of
 it. A claim marked *(from memory)* was not checked against a source.
 FX-26 facts cite files in this repository. Every FX-26 program quoted

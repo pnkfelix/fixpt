@@ -745,7 +745,9 @@ today's `data`, perhaps `serial` ≤ a top with functions and generative types, 
 wire) is one property; how the type itself is defined (PolyP's
 fixed points of one-parameter functors ≤ regular ≤ `type`, purely static,
 with casts of no run-time effect between definitions of the same
-structure) is another. `data` mixes them today. To do: name both, say how
+structure) is another. `data` mixes them today. Generativity per
+constructor (`docs/research/generative-types.md` §6, 2026-11-13)
+would make the serializable values a type's non-generative fragment. To do: name both, say how
 each is written in type expressions and how they compose, and where each
 is checked.
 
@@ -1750,16 +1752,20 @@ The conversion is done (`DONE.md` §68). Left from it:
   module as written is known, in both checkers, agreeing; then count the
   front end's `spin`s before and after.
 
-## 69. Combining modules: what is left (the user's, 2026-10-09; left: a hidden abstract type in an exported one, the existential reading, to decide)
+## 69. Combining modules: what is left (the user's, 2026-10-09; nothing to do: a hidden abstract type in an exported one stays refused, 2026-11-13)
 
 `(extend e0 e1)`, `(include m)` and `(hide item …)` are done (`DONE.md`
 §69), all made one way: a module of hidden items its values are taken
 from by path (a reshape, as a module given where fewer values are wanted
 is). Left:
 
-- A hidden abstract type in an exported one: refused for now (the
-  user's, 2026-10-09); abstract in the module's type, the existential
-  reading, could come later. Likewise an `extend` whose `e1` replaces an
+- A hidden abstract type in an exported one: refused (the user's,
+  2026-10-09; kept so 2026-11-13, the user's: shown, a generative type is
+  abstract outside all the same, and hidden it would be a type no client
+  could write, FX-26's definitions declaring their types). The refusal
+  says both ways out: show `t`, or hide `v` as well. The existential
+  reading, and the view that generativity is a constructor's property and
+  existentialness a name's: `docs/research/generative-types.md` §6. Likewise an `extend` whose `e1` replaces an
   abstract type of `e0`'s own that a value kept still mentions (`DONE.md`
   §69, `modules/extend-abstract-replaced.fx`).
 - Done (2026-10-11): an `include`'s types in scope inside the module;
@@ -4937,6 +4943,9 @@ known statically leaving the diagram unreduced, generative, which is safe.
 A way to state path-sensitive applicative sharing, near dependent types
 (the checker must know the conditions). Ordered by keys, so the same in
 every process; a DAG of nodes, so a rep. For this design to weigh.
+
+The same question asked of constructors, not types (the user's,
+2026-11-13): `docs/research/generative-types.md` §6.
 
 ## 204. `sexp-edit`: definitions inside a module file, and edits of many places (the user's, 2026-11-01)
 
