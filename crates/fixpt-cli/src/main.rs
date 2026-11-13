@@ -724,35 +724,45 @@ fn prewarm() -> i32 {
     // compiler written in FX-26 (`syn::prewarm_front_end_facts`), which
     // many tests compile it with: needing nothing above, from the start.
     let facts = std::thread::Builder::new().stack_size(256 << 20).spawn(fixpt_fx26::syn::prewarm_front_end_facts);
-    // The bootstrap program compiled by the compiler written in FX-26, as
-    // the tests of the native compilers compare it (`bootstrap_cache`): on
-    // the front end's register code, once that is cached, beside the rest.
-    let mut bootstrap = None;
-    for (what, native) in [("register code", false), ("native code", true)] {
-        if native {
-            bootstrap = Some(std::thread::spawn(fixpt_fx26::bootstrap_cache::prewarm));
-        }
-        let Some(machine) = first(native) else {
-            println!("; the front end's {what}: no machine here runs it");
-            continue;
-        };
-        let started = std::time::Instant::now();
-        let mut run = std::process::Command::new(&exe);
-        if !native {
-            run.env("FIXPT_FRONT_END_CELLULAR", "1");
-        }
-        match run.args(["--fx26-machine", machine, "eval", "0"]).output() {
-            Ok(out) if out.status.success() => println!("; the front end's {what} cached ({machine}), {:.1} s", started.elapsed().as_secs_f64()),
+    // And the bootstrap program's, which its compiles below want first.
+    let bootstrap_facts = std::thread::Builder::new().stack_size(256 << 20).spawn(fixpt_fx26::syn::prewarm_bootstrap_facts);
+    // The two front ends, each made by a run of its own, at once: neither
+    // needs the other's cache.
+    let children: Vec<_> = [("register code", false), ("native code", true)]
+        .into_iter()
+        .map(|(what, native)| {
+            let Some(machine) = first(native) else {
+                println!("; the front end's {what}: no machine here runs it");
+                return None;
+            };
+            let mut run = std::process::Command::new(&exe);
+            if !native {
+                run.env("FIXPT_FRONT_END_CELLULAR", "1");
+            }
+            let child = run.args(["--fx26-machine", machine, "eval", "0"]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped()).spawn();
+            Some((what, machine, std::time::Instant::now(), child))
+        })
+        .collect();
+    let [cellular, native] = <[_; 2]>::try_from(children).ok().expect("two front ends");
+    let waited = |made: Option<(&str, &str, std::time::Instant, std::io::Result<std::process::Child>)>, status: &mut i32| -> bool {
+        let Some((what, machine, started, child)) = made else { return false };
+        match child.and_then(|c| c.wait_with_output()) {
+            Ok(out) if out.status.success() => {
+                println!("; the front end's {what} cached ({machine}), {:.1} s", started.elapsed().as_secs_f64());
+                true
+            }
             Ok(out) => {
                 eprintln!("fixpt: prewarm: {machine} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
-                status = 1;
+                *status = 1;
+                false
             }
             Err(e) => {
                 eprintln!("fixpt: prewarm: cannot run {}: {e}", exe.display());
-                status = 1;
+                *status = 1;
+                false
             }
         }
-    }
+    };
     // The reader and parser, checked, licensed and lowered, as a REPL's
     // start loads them (`load_lowered`'s cache, `TODO.md` §237).
     let started = std::time::Instant::now();
@@ -773,6 +783,26 @@ fn prewarm() -> i32 {
             status = 1;
         }
     }
+    // The bootstrap program compiled by the compiler written in FX-26, as
+    // the tests of the native compilers compare it (`bootstrap_cache`): on
+    // the native front end once that is cached (its sessions read it in
+    // first, and run it twice as fast as the register code, with the same
+    // result), else on the register code once that is.
+    match bootstrap_facts.map_err(|e| e.to_string()).and_then(|t| t.join().unwrap_or_else(|_| Err("panicked".to_string()))) {
+        Ok(secs) => println!("; the bootstrap program's facts cached, {secs:.1} s"),
+        Err(e) => {
+            eprintln!("fixpt: prewarm: the bootstrap program's facts: {e}");
+            status = 1;
+        }
+    }
+    let bootstrap = if waited(native, &mut status) {
+        let b = std::thread::spawn(fixpt_fx26::bootstrap_cache::prewarm);
+        waited(cellular, &mut status);
+        b
+    } else {
+        waited(cellular, &mut status);
+        std::thread::spawn(fixpt_fx26::bootstrap_cache::prewarm)
+    };
     match facts.map_err(|e| e.to_string()).and_then(|t| t.join().unwrap_or_else(|_| Err("panicked".to_string()))) {
         Ok(secs) => println!("; the front end's facts cached, {secs:.1} s"),
         Err(e) => {
@@ -780,8 +810,8 @@ fn prewarm() -> i32 {
             status = 1;
         }
     }
-    let made = bootstrap.map(|t| t.join().unwrap_or_else(|_| vec![(false, Err("panicked".to_string()))]));
-    for (registers, took) in made.unwrap_or_default() {
+    let made = bootstrap.join().unwrap_or_else(|_| vec![(false, Err("panicked".to_string()))]);
+    for (registers, took) in made {
         let what = if registers { "with register code" } else { "as cellular words" };
         match took {
             Ok(secs) => println!("; the bootstrap program compiled {what}, cached, {secs:.1} s"),

@@ -650,8 +650,19 @@ pub fn rust_facts_in(scheme: &mut Front, file: FileId, text: &str, conv: crate::
 /// started together, find them rather than each checking the front end.
 /// How long it took, or why it failed.
 pub fn prewarm_front_end_facts() -> Result<f64, String> {
+    prewarm_facts(&crate::front_end())
+}
+
+/// The bootstrap program's facts, as its compile by the compiler written in
+/// FX-26 wants them (`bootstrap_cache`), found now and kept likewise: half
+/// of that compile's time, where its cache is cold.
+pub fn prewarm_bootstrap_facts() -> Result<f64, String> {
+    prewarm_facts(&crate::bootstrap_program())
+}
+
+fn prewarm_facts(text: &str) -> Result<f64, String> {
     let started = std::time::Instant::now();
-    form_facts(FileId(0), &crate::front_end(), crate::ast::Conv::Cellular, false).map_err(|e| e.message)?;
+    form_facts(FileId(0), text, crate::ast::Conv::Cellular, false).map_err(|e| e.message)?;
     Ok(started.elapsed().as_secs_f64())
 }
 
