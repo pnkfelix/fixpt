@@ -6171,7 +6171,7 @@ engine is made only where lowered code runs (`TODO.md` §252's host).
 Fixed: `load_code` and `lowered()` make the session ready by what it has
 bound (`scheme_ready`: the prelude's control and data, and the runtime).
 
-## 255. `,disassemble`'s names for a native closure's procedures (the Mac team's, 2026-11-11)
+## 255. `,disassemble`'s names for a native closure's procedures (the Mac team's, 2026-11-11; 1 and 2 done 2026-11-13; 3 is §250's)
 
 `,disassemble` prints a native closure's procedures under names like
 `lambda/lambda@1001:2257`, which tell a reader nothing. Two problems, and a
@@ -6212,6 +6212,28 @@ related bug:
 
 (Also to keep in mind: the Rust compiler's naming of the same procedures,
 `cellular.rs`'s, so that the two compilers name alike.)
+
+Done (2026-11-13), in both compilers alike:
+- 2: a module's member's word named for it on the plain path too, as a
+  `let`'s for what it binds (`c-bind-name`, `bind_name`): `symbol-hash`,
+  not `lambda`. And the outer `lambda/` was the thunk a definition whose
+  value is not a lambda is compiled in (`native_define`): named `define
+  NAME` now as a lambda's definition's thunk was, so a member of `m`
+  reads `define m/f@63`, of a loaded file `define %shared:lib.fx/f@…`.
+  A body the parsers wrapped in `(with %include …)` is still named for
+  the wrapper's place (the item's end, of no width): named for the body
+  inside, a macro-made body's place differed between the two compilers
+  (`modules/own-macros-params.fx`: `@1126899:906842624` and `@1002:459`),
+  §250's matter too.
+- 1: `fixpt_runtime::disasm::set_resolver`, installed by the CLI beside
+  the debugger's: each procedure's header says `FILE:LINE` by its first
+  cell's place, where sources are kept (by default where native code
+  runs); nothing where none is known (a REPL form has no file).
+- 3, found: a built-in module's places (`fx26:table.fx`, `@1219` for a
+  body at 1200) are characters of the text a native-convention session
+  compiles, the form written out after macros (`->*`'s expansion longer
+  than its use): §250's bug; so they say no `FILE:LINE` yet. A module
+  file read as a file (`lib.fx`) is placed right.
 
 ## 256. A syntactic closure's unbound name could say why (the user's, 2026-11-12)
 

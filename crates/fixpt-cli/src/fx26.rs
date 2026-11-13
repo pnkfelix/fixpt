@@ -177,6 +177,8 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
             fixpt_fx26::sources::want();
             fixpt_native::jitdebug::set_resolver(fixpt_fx26::sources::resolve);
             fixpt_native::jitdebug::set_describer(fixpt_fx26::sources::describe);
+            // And `,disassemble`'s, to say where each procedure was written.
+            fixpt_runtime::disasm::set_resolver(fixpt_fx26::sources::resolve);
         }
         // Each procedure's code made by the compiler written in FX-26.
         if by_fx26 {

@@ -3868,17 +3868,20 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         // A lambda's word named for the global, as a definition compiled
         // is (`c-define-lambda`), not for where it is in the thunk: so that
         // a profile, a disassembly or a fault says which procedure. The
-        // thunk's, compiled first, `define NAME`. The names let go after,
-        // if nothing took them. The lambda so named is the definition's
-        // (`compile-defining!`), whose global is written once after: so its
-        // calls of itself in tail position loop, as they do in a definition
-        // compiled whole.
+        // thunk's, compiled first, `define NAME`, whatever the value: the
+        // lambdas inside one that is not a lambda (a module's members) are
+        // named within it, `define NAME/member` (`TODO.md` §255), not
+        // `lambda/…`. The names let go after, if nothing took them. The
+        // lambda so named is the definition's (`compile-defining!`), whose
+        // global is written once after: so its calls of itself in tail
+        // position loop, as they do in a definition compiled whole.
         let name_word = |s: &mut Self, named: bool| {
             let ns = s.scheme.make(|m| {
                 let h = m.heap();
                 if named {
-                    let (thunk, n) = (h.intern(&format!("define {name}")), h.intern(name));
-                    let tail = h.cons(n, fixpt_heap::Value::NULL);
+                    let thunk = h.intern(&format!("define {name}"));
+                    let tail = if lambda { h.intern(name) } else { fixpt_heap::Value::NULL };
+                    let tail = if lambda { h.cons(tail, fixpt_heap::Value::NULL) } else { tail };
                     h.cons(thunk, tail)
                 } else {
                     fixpt_heap::Value::NULL
@@ -3887,7 +3890,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             crate::entries::call(&mut s.scheme, "compile-name-word!", &[ns])?;
             let defining = s.scheme.make(|m| {
                 let h = m.heap();
-                if named {
+                if named && lambda {
                     let n = h.intern(name);
                     h.cons(n, fixpt_heap::Value::NULL)
                 } else {
@@ -3896,9 +3899,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             });
             crate::entries::call(&mut s.scheme, "compile-defining!", &[defining]).map(|_| ())
         };
-        if lambda {
-            name_word(self, true).map_err(fail)?;
-        }
+        name_word(self, true).map_err(fail)?;
         let r = self.with_native_thunk(init, |rt, clo| match {
             let (start, compiled) = (std::time::Instant::now(), rt.compile_nanos);
             let ran = run(rt, clo, fuel);
@@ -3923,9 +3924,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
             (Err(e), Some((b, at))) => Err(b.said_in(e, at)),
             (r, _) => r,
         };
-        if lambda {
-            name_word(self, false).map_err(fail)?;
-        }
+        name_word(self, false).map_err(fail)?;
         if matches!(r, Ok(Ok(Ok(())))) {
             // A lambda, noted for inlining, as a definition compiled is.
             let sym = self.scheme.make(|m| m.heap().intern(name));

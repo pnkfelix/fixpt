@@ -224,7 +224,11 @@
           (let* ((v (car vs)) (n (extract v 1)) (x (extract v 2)) (k (extract v 3))
                  (ps (if (and (extract v 4) (c-names-any? x later))
                          (c-module-closure n x e later d c)
-                         (begin (c-exp x e d c #f)
+                         ;; Its word named for the member, as a `let`'s
+                         ;; for what it binds (`TODO.md` §255).
+                         (begin (set c-bind-name (the (listof symbol @k) (cons n nil)))
+                                (c-exp x e d c #f)
+                                (set c-bind-name nil)
                                 (if (= k 2) (c-note-member! n x e) #u)
                                 (the patches nil))))
                  (waits (c-waits-onto ws d ps))

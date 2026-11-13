@@ -1086,7 +1086,13 @@ impl<'a> Compiler<'a> {
                             let ps = self.module_closure(n, x, &inner, &later, d, code)?;
                             waiting.extend(ps.into_iter().map(|(j, s)| (d, j, s)));
                         } else {
-                            self.exp(x, &inner, d, code, false)?;
+                            // Its word named for the member, as a `let`'s
+                            // for what it binds (the Mac team's, `TODO.md`
+                            // §255), not `lambda`.
+                            self.bind_name = Some(n);
+                            let r = self.exp(x, &inner, d, code, false);
+                            self.bind_name = None;
+                            r?;
                             // A lambda naming no other member (the checks of
                             // size are where a re-export is seen, as the FX-26
                             // compiler's, whose come later in its files).

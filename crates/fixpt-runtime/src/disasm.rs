@@ -8,6 +8,28 @@ use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_NAME, ROU
 use fixpt_heap::{Heap, Value};
 use std::fmt::Write as _;
 
+/// What finds the file and line of a place in a source (`set_resolver`):
+/// the session's sources (`fixpt_fx26::sources::resolve`), above this
+/// crate, as the debugger's (`fixpt_native::jitdebug::set_resolver`).
+pub type Resolver = fn(u32, i64) -> Option<(String, u32)>;
+
+static RESOLVER: std::sync::OnceLock<Resolver> = std::sync::OnceLock::new();
+
+/// `r` says where each procedure shown was written (`TODO.md` §255).
+pub fn set_resolver(r: Resolver) {
+    let _ = RESOLVER.set(r);
+}
+
+/// Where register word `twin` was written, `FILE:LINE`, by its first cell
+/// with a place; none where no sources are kept (`FIXPT_JIT_DEBUG=0`) or
+/// none is known.
+fn written_at(heap: &Heap, twin: Value) -> Option<String> {
+    let resolve = RESOLVER.get()?;
+    let (id, places) = heap.register_places(twin)?;
+    let place = places.iter().map(|&(_, p)| p).find(|&p| p >= 0)?;
+    resolve(id, place).map(|(file, line)| format!("{file}:{line}"))
+}
+
 /// `v`, a cellular word or closure, shown; or why it is neither.
 pub fn disassemble(heap: &Heap, v: Value) -> String {
     disassemble_with(heap, v, None)
@@ -42,7 +64,8 @@ pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
         let twin = heap.bloblet_slot(w, WORD_TWIN);
         let fields = heap.bloblet_head(twin).fields;
         if heap.is_register_word(twin) {
-            let _ = writeln!(out, "\nprocedure {} ({} cells of register code):", name_of(heap, w), fields + 1 - WORD_CELL0);
+            let at = written_at(heap, twin).map_or(String::new(), |at| format!(", {at}"));
+            let _ = writeln!(out, "\nprocedure {} ({} cells of register code{at}):", name_of(heap, w), fields + 1 - WORD_CELL0);
             register_lines(heap, twin, &mut out, &mut todo, &mut Shown::Short);
         }
     }
