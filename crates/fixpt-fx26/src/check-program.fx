@@ -167,7 +167,7 @@
                  (if (null? ms)
                      #u
                      (let* ((n (car ms)) (t (k-lookup-raw n))
-                            (found (if (k-procedure? t) nil (k-kept-reading t ns nil))))
+                            (found (if (k-procedure? t) nil (extract (k-kept-reading t ns nil) 1))))
                        (if (null? found)
                            (kept (cdr ms))
                            (k-fail (k-kept-message (symbol->string n) (extract (car found) 2)
@@ -190,45 +190,50 @@
                            (string-append "it must say `spin`, and it is a " t)))))
 ;; What reaches itself through a global and says nothing of it.
 (define-type k-kept-found (listof (productof (1 int) (2 string)) acyclic))
+;; What a walk found, and the types it has walked, `seen` with its own.
+(define-type k-kept-walked (productof (1 k-kept-found) (2 k-ids)))
 ;; A procedure a value of type `t` keeps, kept in a global (a product's field,
 ;; a list's element, a module's value, what a ref holds, …), whose calls read
 ;; one of `ns`, or `@globals`, and that does not say `spin`: its
 ;; type and what it reads; none or one. Not what a procedure takes or gives,
-;; kept nowhere yet. `path`, the types walked to here (`kept_reading`).
+;; kept nowhere yet. `seen`, the types walked so far, each walked once, as
+;; `kept_reading` walks them: a type a walk reaches by two ways not walked
+;; again (passed down a walk only, it was, from every member of a module or
+;; a product, and the front end's are large).
 (define-rec
-  (k-kept-reading (->* (int k-names k-ids) k-kept-found)
-    (lambda (t ns path)
+  (k-kept-reading (->* (int k-names k-ids) k-kept-walked)
+    (lambda (t ns seen)
       (let ((t (k-resolve t)))
-        (if (k-has-id? path t)
-            (the k-kept-found nil)
-            (let ((path (the k-ids (cons t path)))
+        (if (k-has-id? seen t)
+            (product (1 (the k-kept-found nil)) (2 seen))
+            (let ((seen (the k-ids (cons t seen)))
                   (one (lambda ((x int)) (the k-ids (cons x nil)))))
               (tagcase (k-get t)
-                (ty-subr (e ps r cv spc) (k-kept-read t e ns))
-                (ty-poly (bs body) (k-kept-reading body ns path))
-                (ty-ref (a r) (k-kept-reading a ns path))
-                (ty-array (a z r) (k-kept-reading a ns path))
-                (ty-icell (a r) (k-kept-reading a ns path))
-                (ty-markkey (a r) (k-kept-reading a ns path))
-                (ty-nlist (a z r) (k-kept-reading a ns path))
-                (ty-pair (a b r nl) (k-kept-in (the k-ids (cons a (one b))) ns path))
-                (ty-bloblet (fs z r) (k-kept-in fs ns path))
-                (ty-product (ps) (k-kept-in (k-parts-types ps) ns path))
-                (ty-sum (ps) (k-kept-in (k-parts-types ps) ns path))
-                (ty-union (ms) (k-kept-in ms ns path))
-                (ty-allof (ms) (k-kept-in ms ns path))
-                (ty-module (abs ds vs) (k-kept-in (k-parts-types vs) ns path))
+                (ty-subr (e ps r cv spc) (product (1 (k-kept-read t e ns)) (2 seen)))
+                (ty-poly (bs body) (k-kept-reading body ns seen))
+                (ty-ref (a r) (k-kept-reading a ns seen))
+                (ty-array (a z r) (k-kept-reading a ns seen))
+                (ty-icell (a r) (k-kept-reading a ns seen))
+                (ty-markkey (a r) (k-kept-reading a ns seen))
+                (ty-nlist (a z r) (k-kept-reading a ns seen))
+                (ty-pair (a b r nl) (k-kept-in (the k-ids (cons a (one b))) ns seen))
+                (ty-bloblet (fs z r) (k-kept-in fs ns seen))
+                (ty-product (ps) (k-kept-in (k-parts-types ps) ns seen))
+                (ty-sum (ps) (k-kept-in (k-parts-types ps) ns seen))
+                (ty-union (ms) (k-kept-in ms ns seen))
+                (ty-allof (ms) (k-kept-in ms ns seen))
+                (ty-module (abs ds vs) (k-kept-in (k-parts-types vs) ns seen))
                 (ty-named (g ds)
                   (k-kept-in (the k-ids (cons (extract (k-gen-of g) 4) (k-desc-types ds)))
-                             ns path))
-                (ty-app (f ds) (k-kept-in (k-desc-types ds) ns path))
-                (else y (the k-kept-found nil))))))))
-  (k-kept-in (->* (k-ids k-names k-ids) k-kept-found)
-    (lambda (ts ns path)
+                             ns seen))
+                (ty-app (f ds) (k-kept-in (k-desc-types ds) ns seen))
+                (else y (product (1 (the k-kept-found nil)) (2 seen)))))))))
+  (k-kept-in (->* (k-ids k-names k-ids) k-kept-walked)
+    (lambda (ts ns seen)
       (if (null? ts)
-          (the k-kept-found nil)
-          (let ((x (k-kept-reading (car ts) ns path)))
-            (if (null? x) (k-kept-in (cdr ts) ns path) x))))))
+          (product (1 (the k-kept-found nil)) (2 seen))
+          (let ((x (k-kept-reading (car ts) ns seen)))
+            (if (null? (extract x 1)) (k-kept-in (cdr ts) ns (extract x 2)) x))))))
 ;; Procedure type `t`, of effect `e`, kept in a global: what of `ns` it reads,
 ;; or `@globals`, unless it says `spin`.
 (define k-kept-read (->* (int k-eff k-names) k-kept-found)

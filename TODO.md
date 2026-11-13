@@ -6526,3 +6526,26 @@ build hash to leave out the profile's settings (`PROFILE`, `OPT_LEVEL`,
 and, so that sharing stays sound, a test that a debug and a release
 prewarm of the same sources make the same files (the user's): what would
 otherwise let a profile's difference in a cache's contents go unseen.
+
+Done (2026-11-12): the build hash leaves out the profile; a cold prewarm
+says which profile made the caches (`prewarm-BUILD.made-by`), and
+`fixpt-cli`'s `tests/shared_caches.rs`, run on the other profile's caches,
+makes its own and holds them the same file by file. The steps: the
+release prewarm (some 11 s cold) and suite before a commit, the debug suite
+before a push with no debug prewarm of its own.
+
+## 266. A test of the checker's cost, not only of what it says (2026-11-12)
+
+The FX-26 checker's `k-kept-reading` walked a global's type with the path
+to it, not the types seen (the Rust checker's `kept_reading` keeps
+`seen`): a type reached two ways was walked again, every member of a
+module or a product walking what they share. The same answers (a walk
+cuts only cycles, and a revisit outside an ancestor comes after it), so
+no comparison of the two checkers could see it; but exponential on a
+diamond-shaped type, and some 40 % of the front end's check by the
+compiler compiled: `bootstrap::fixpoint` 117 s to 70 s, the release suite
+140 s to 114 s. Fixed (`seen` threaded through the walk). Left: a test of
+cost, a global keeping a value of a type forty diamonds deep checked by
+both checkers (2^40 steps by the old walk); and the checker's other walks
+with a `seen` or a path (`check-syntax`, `check-subst`, `check-print-parts`)
+looked at for the same shape.
