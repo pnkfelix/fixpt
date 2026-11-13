@@ -6544,10 +6544,15 @@ cuts only cycles, and a revisit outside an ancestor comes after it), so
 no comparison of the two checkers could see it; but exponential on a
 diamond-shaped type, and some 40 % of the front end's check by the
 compiler compiled: `bootstrap::fixpoint` 117 s to 70 s, the release suite
-140 s to 114 s. Fixed (`seen` threaded through the walk). Left: a test of
-cost, a global keeping a value of a type forty diamonds deep checked by
-both checkers (2^40 steps by the old walk); and the checker's other walks
-with a `seen` or a path (`check-syntax`, `check-subst`, `check-print-parts`)
+140 s to 114 s. Fixed (`seen` threaded through the walk). The test of cost
+(2026-11-12, the user's): `tests/check_cost.rs`, each of `tests/programs/
+cost/` a diamond forty deep made by a functor a macro applies again and
+again (products, pairs, sums, modules, a procedure at the bottom, a
+recursive type there, and an error found only past the whole diamond),
+checked by both checkers under a deadline (10 s release, 30 s debug; each
+takes some 0.1 s, 0.3 s): with the old walk, the first not checked in
+10 s. Writing it found §267. Left: the checker's other walks with a
+`seen` or a path (`check-syntax`, `check-subst`, `check-print-parts`)
 looked at for the same shape.
 
 ## 267. A call through `#%toplevel` lost its latent effect to masking (2026-11-12)
