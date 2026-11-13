@@ -650,6 +650,13 @@ impl Checker {
         self.with_as(e, m, body, None)
     }
 
+    /// The top level's binding of `n`, at `i` (`toplevel_pos`): its type,
+    /// as a test may have narrowed it, a shared global's strengthened.
+    pub(crate) fn toplevel_type(&mut self, n: Sym, i: usize) -> TyId {
+        let t = self.narrowed.iter().rev().find(|(x, b, _)| *x == n && *b == i).map_or(self.env[i].1, |(_, _, t)| *t);
+        if self.shared_globals.contains(&n) { self.strengthened(t) } else { t }
+    }
+
     /// `(with #%toplevel n)`: the top level's `n`, as it is here, whatever
     /// binds `n` between (`typed-macros.md`, item 5): its type, and what
     /// naming it does, as the plain `n` would there (`naming_effect`).
@@ -671,8 +678,7 @@ impl Checker {
         if let Some((_, why)) = self.broken.get(&n).filter(|(b, _)| *b == i) {
             return Err(FxError::at(span, format!("`{shown}` is broken, {why}: define it again to use it")));
         }
-        let t = self.narrowed.iter().rev().find(|(x, b, _)| *x == n && *b == i).map_or(self.env[i].1, |(_, _, t)| *t);
-        let t = if self.shared_globals.contains(&n) { self.strengthened(t) } else { t };
+        let t = self.toplevel_type(n, i);
         let mut eff = Effect::pure();
         if self.recursive.contains(&(n, t)) {
             eff.0.insert(crate::ast::Atom::Spin);

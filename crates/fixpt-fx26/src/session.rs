@@ -412,8 +412,8 @@ pub fn reader_licensed() -> Result<(), String> {
         && m.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok())
     {
         let tmp = m.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, b"licensed").is_ok() {
-            let _ = std::fs::rename(&tmp, &m);
+        if std::fs::write(&tmp, b"licensed").is_ok() && std::fs::rename(&tmp, &m).is_ok() {
+            note_made(&m);
         }
     }
     Ok(())
@@ -541,17 +541,23 @@ fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)
     Some((dir.join(format!("front-end-{build}-{kind}.img")), key.finish()))
 }
 
-/// This build's hash (`FIXPT_BUILD_HASH`, `build.rs`): what names and keys
-/// its caches, the same for a debug and a release build of the same sources.
+/// This build's hash (`FIXPT_BUILD_HASH`, `build.rs`), which names its
+/// front end's caches (`front-end-BUILD-…`): the same for a debug and a
+/// release build of the same sources.
 pub fn build_hash() -> &'static str {
     env!("FIXPT_BUILD_HASH")
 }
 
-/// Whether the native front end's cache is there, and this build's: what
-/// `fixpt prewarm` finds before it makes anything.
-pub fn native_front_end_cached() -> bool {
-    let text = register_text(&crate::front_end(), &Fx26Session::FRONT_ENTRIES);
-    front_end_cache(&text, true).is_some_and(|(p, key)| fixpt_heap::Mapped::open(&p).ok().is_some_and(|b| b.get(..8).is_some_and(|k| k == key.to_le_bytes())))
+/// Which profile made the cache at `path`, just written: `PATH.made-by`,
+/// `debug` or `release`. A debug and a release build share their caches
+/// (`TODO.md` §265), so that a test of one can compare its own with what
+/// the other made (`fixpt-cli`'s `tests/shared_caches.rs`). Any failure
+/// only means no note, and so no comparison of that file.
+pub(crate) fn note_made(path: &std::path::Path) {
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    let mut note = path.as_os_str().to_owned();
+    note.push(".made-by");
+    let _ = std::fs::write(note, profile);
 }
 
 /// The front end's compiled word `w`, copied out of `heap` into a heap of
@@ -871,8 +877,13 @@ fn write_cache(path: &std::path::Path, bytes: &[u8]) {
         return;
     }
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, path).is_err() {
-        let _ = std::fs::remove_file(&tmp);
+    if std::fs::write(&tmp, bytes).is_ok() {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => note_made(path),
+            Err(_) => {
+                let _ = std::fs::remove_file(&tmp);
+            }
+        }
     }
     sweep_cache(dir);
 }
@@ -918,8 +929,6 @@ fn sweep_cache(dir: &std::path::Path) {
                 b.0 = b.0.max(used);
                 b.1.push(e.path());
             }
-        } else if old && name.starts_with("prewarm-") {
-            let _ = std::fs::remove_file(e.path());
         } else if old && name.starts_with("built-in-") {
             let _ = std::fs::remove_dir_all(e.path());
         }

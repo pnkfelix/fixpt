@@ -1082,6 +1082,17 @@ impl Default for Checker {
     }
 }
 
+thread_local! {
+    /// While `mask` walks an expression (`free_into_in`), each `(with
+    /// #%toplevel n)` (`true`) and `(with #%fx n)` (`false`) in it: the
+    /// bindings they name, whose types' regions the expression sees, as a
+    /// name's type is not (another may bind the name where it is used).
+    /// Of the thread, not the checker: the walk is pure, so no other
+    /// `mask` runs inside it; and a field would make every checker, and
+    /// the frames that hold one, larger (`tests/stack.rs`).
+    static NAMED_REFS: std::cell::RefCell<Option<Vec<(bool, Sym)>>> = const { std::cell::RefCell::new(None) };
+}
+
 impl Checker {
     /// A checker with the initial environment of `crate::standard`.
     pub fn new() -> Checker {
@@ -3256,11 +3267,15 @@ impl Checker {
             return effect.clone();
         }
         let mut visible = HashSet::default();
-        for v in self.free_vars(e) {
+        NAMED_REFS.with(|r| *r.borrow_mut() = Some(Vec::new()));
+        let free = self.free_vars(e);
+        let named = NAMED_REFS.with(|r| r.borrow_mut().take()).unwrap_or_default();
+        for v in free {
             if let Some(t) = self.lookup(v) {
                 self.regions_in(t, &mut visible);
             }
         }
+        self.named_regions(named, &mut visible);
         let mut in_result = HashSet::default();
         self.regions_in(result, &mut in_result);
         let kept = Effect(effect.0.iter().copied().filter(|a| Self::mask_keeps(*a, &visible, &in_result)).collect());
@@ -3280,6 +3295,25 @@ impl Checker {
             self.facts.no_escape.insert(e);
         }
         kept
+    }
+
+    /// What `(with #%toplevel n)` or `(with #%fx n)` names is the top
+    /// level's or the standard binding, whatever binds `n` where it is
+    /// used: its type's regions are seen, not those of the `n` in scope
+    /// (`mask`). Out of line, so that the frames `mask` is inlined into
+    /// stay as they were.
+    #[inline(never)]
+    fn named_regions(&mut self, named: Vec<(bool, Sym)>, visible: &mut HashSet<Region>) {
+        for (toplevel, n) in named {
+            let t = match (toplevel, self.toplevel_pos(n)) {
+                (true, Some(i)) => Some(self.toplevel_type(n, i)),
+                (true, None) => None,
+                (false, _) => self.standard_type(n),
+            };
+            if let Some(t) = t {
+                self.regions_in(t, visible);
+            }
+        }
     }
 
     /// Whether masking keeps atom `a` of an expression's effect: its region
@@ -3427,14 +3461,20 @@ impl Checker {
             // so that what may be its values counts as free, unless the
             // module is an earlier item of one being ordered, a module as
             // written (`hazard_modules`).
-            // The standard `n`: nothing free.
-            &Exp::With { module, .. } if self.is_fx_module(module) => {}
-            // The top level's `n`: a use of it, whatever binds `n` here.
+            // The standard `n`: nothing free; for `mask`, the binding named.
+            &Exp::With { module, body } if self.is_fx_module(module) => {
+                if let Exp::Var(n) = *self.arena.exp_at(body) {
+                    NAMED_REFS.with(|r| r.borrow_mut().as_mut().map(|refs| refs.push((false, n))));
+                }
+            }
+            // The top level's `n`: a use of it, whatever binds `n` here;
+            // for `mask`, the binding named.
             &Exp::With { module, body } if self.is_toplevel_module(module) => {
-                if let Exp::Var(n) = *self.arena.exp_at(body)
-                    && !out.contains(&n)
-                {
-                    out.push(n);
+                if let Exp::Var(n) = *self.arena.exp_at(body) {
+                    NAMED_REFS.with(|r| r.borrow_mut().as_mut().map(|refs| refs.push((true, n))));
+                    if !out.contains(&n) {
+                        out.push(n);
+                    }
                 }
             }
             &Exp::With { module, body } => {

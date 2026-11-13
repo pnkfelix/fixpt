@@ -40,8 +40,8 @@ pub(crate) fn found(text: &str, conv: crate::ast::Conv, syscalls: bool, check: i
         && crate::reads::count() == reads
     {
         let tmp = at.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, found.to_bytes()).is_ok() {
-            let _ = std::fs::rename(&tmp, &at);
+        if std::fs::write(&tmp, found.to_bytes()).is_ok() && std::fs::rename(&tmp, &at).is_ok() {
+            crate::session::note_made(&at);
         }
         sweep(&at);
     }

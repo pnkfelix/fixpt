@@ -48,8 +48,8 @@ pub fn bootstrap_compiled(sc: &mut crate::front::Front, registers: bool) -> fixp
         let copy = alone.copy_graph_from(m.heap(), w);
         alone.push_root(copy);
         let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, fixpt_heap::image::dump_packed(&alone)).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
+        if std::fs::write(&tmp, fixpt_heap::image::dump_packed(&alone)).is_ok() && std::fs::rename(&tmp, &path).is_ok() {
+            crate::session::note_made(&path);
         }
         Value::NULL
     });

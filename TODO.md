@@ -6549,3 +6549,22 @@ cost, a global keeping a value of a type forty diamonds deep checked by
 both checkers (2^40 steps by the old walk); and the checker's other walks
 with a `seen` or a path (`check-syntax`, `check-subst`, `check-print-parts`)
 looked at for the same shape.
+
+## 267. A call through `#%toplevel` lost its latent effect to masking (2026-11-12)
+
+Found writing §266's test, whose macro calls its functor as `(with
+#%toplevel double)`: the FX-26 checker said `((with #%toplevel g) 1)` did
+less than `(g 1)`, `(alloc @heap)` gone, where `g`'s type said more than
+its body did. Masking: what an expression sees is its free variables'
+types, and the FX-26 walk (`k-unseen`) saw nothing through `#%toplevel` or
+`#%fx`, so a region only `g`'s type named was unseen, and what the call did
+there masked. The Rust walk took `n` as free, but looked it up where the
+call is, so a local `g` there hid the top level's: both checkers agreed,
+and were wrong. Now each sees the regions of the binding named (the top
+level's, the standard one), whatever binds the name where it is used
+(`k-unseen`; `mask`'s `named_regions`, its walk's names in a thread-local,
+not a field, which made every checker and `with_convention`'s frame
+larger). Test: `checker::a_call_through_the_top_level_keeps_its_latent_effect`,
+held to what each says, not only to their agreeing. The shared caches'
+makers noted file by file (`FILE.made-by`, `session::note_made`), not by a
+cold prewarm, which another process may have made them before.

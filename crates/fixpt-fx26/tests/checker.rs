@@ -758,3 +758,30 @@ fn a_made_procedure_is_native() {
     let r = both("(let ((f native-procedure)) 1)");
     assert!(r.is_err(), "{r:?}");
 }
+
+/// A call through `(with #%toplevel g)` does what a call of `g` does: its
+/// latent effect is the declared type's, and masking sees the regions of
+/// the binding it names, not of whatever binds `g` where it is used.
+/// Masked before, `(alloc @heap)` was lost: by the FX-26 checker always
+/// (its walk of what an expression sees saw nothing through `#%toplevel`),
+/// by both where a local `g` shadowed the top level's. Held for what each
+/// says, not only that they agree: in the shadowed case they agreed, and
+/// were wrong.
+#[test]
+fn a_call_through_the_top_level_keeps_its_latent_effect() {
+    let declared = "(define g (subr (alloc @heap) (int) int) (lambda (n) n))\n";
+    let functor = include_str!("checker/doubling-functor.fx");
+    let cases = [
+        // The body does less than its type says: the call, what the type does.
+        (format!("{declared}((with #%toplevel g) 1)"), "(maxeff (alloc @heap) (read (globals g)))"),
+        // A local `g` where the call is: the top level's is called.
+        (format!("{declared}(let ((g 5)) ((with #%toplevel g) g))"), "(maxeff (alloc @heap) (read (globals g)))"),
+        // A functor, a dependent procedure, as a macro's template calls one.
+        (format!("{functor}(define m1 ((with #%toplevel double) m0))"), "(maxeff (alloc @heap) (read (globals double m0)))"),
+    ];
+    for (program, effect) in cases {
+        let said = both(&program).unwrap_or_else(|e| panic!("refused: {e:?}\n{program}"));
+        let last = said.last().expect("a line");
+        assert!(last.ends_with(&canon(Ok(vec![format!("! {effect}")])).unwrap()[0]), "{last}, not ! {effect}:\n{program}");
+    }
+}

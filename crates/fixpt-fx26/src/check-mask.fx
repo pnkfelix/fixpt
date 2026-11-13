@@ -134,7 +134,16 @@
             (x-module (items a b abk abkr) (k-unseen-module items bound rs))
             (x-with (m body a b abk abkr)
               (if (k-named-module? m)
-                  rs
+                  ;; The top level's or the standard binding it names,
+                  ;; whatever binds the name here: its type's regions seen.
+                  (let ((t (tagcase body
+                             (x-var (n c d cdk cdkr)
+                               (if (k-fx-module? m)
+                                   (k-std-type n)
+                                   (let ((i (k-toplevel-index n)))
+                                     (if (>= i 0) (k-toplevel-type n i) -1))))
+                             (else y -1))))
+                    (if (< t 0) rs (k-drop-regions rs (k-regions-in t))))
                   (let ((o (k-unseen (x-var m a b abk abkr) bound rs)))
                     (k-unseen body (k-names-onto (k-with-names a b abk abkr) bound) o))))))))
   ;; The same walk of a module's items, every item's names bound, as a
