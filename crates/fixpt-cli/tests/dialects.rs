@@ -225,6 +225,37 @@ fn the_fx26_repl_disassembles_a_polymorphic_value_projected() {
     }
 }
 
+/// `,disassemble` of a native closure names a module's members for
+/// themselves and the definition they are in, and says where each was
+/// written (`TODO.md` §255): not `lambda/lambda@1001:2257`.
+#[test]
+fn the_fx26_repl_names_where_each_procedure_was_written() {
+    use std::io::Write as _;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("disassemble-names-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("made");
+    std::fs::write(dir.join("lib.fx"), ";; a file of one procedure\n(define g (subr pure (int) int) (lambda (x) (+ x 2)))\n").expect("written");
+    let mut child = Command::new(FIXPT)
+        .arg("repl")
+        .current_dir(&dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    let input = "(define m (module (define f (subr pure (int) int) (lambda (x) (+ x 1)))))\n\
+                 ,disassemble (with m f)\n\
+                 (define lm (load-module \"lib.fx\"))\n\
+                 ,disassemble (with lm g)\n";
+    child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
+    let out = child.wait_with_output().expect("finishes");
+    let (out, err) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.contains("procedure define m/f@"), "{out}\n{err}");
+    assert!(out.contains("procedure define %shared:lib.fx/g@"), "{out}\n{err}");
+    assert!(out.contains("of register code, lib.fx:2):"), "{out}\n{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A `nativecc` machine: procedure types are native unless they
 /// say otherwise, and `,native` shows a procedure's code in that convention
 /// and calls it; what it cannot compile yet it says.
