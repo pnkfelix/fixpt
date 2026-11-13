@@ -1750,7 +1750,7 @@ The conversion is done (`DONE.md` §68). Left from it:
   module as written is known, in both checkers, agreeing; then count the
   front end's `spin`s before and after.
 
-## 69. Combining modules: what is left (the user's, 2026-10-09: high priority)
+## 69. Combining modules: what is left (the user's, 2026-10-09; left: a hidden abstract type in an exported one, the existential reading, to decide)
 
 `(extend e0 e1)`, `(include m)` and `(hide item …)` are done (`DONE.md`
 §69), all made one way: a module of hidden items its values are taken
@@ -3028,11 +3028,19 @@ and z3 an uninterpreted function. Not yet:
   name, which a redefinition at another type would mislead (§117).
 
 
-## 121. Kayak's stage 0, to run faster (the user's, 2026-10-24: high priority)
+## 121. Kayak's stage 0, to run faster (the user's, 2026-10-24; target met the same day: 610 s to 17 s; 9.5 s on kayak `bce2244`, 2026-11-13)
 
 `docs/kayak-stage0-workload.md`: kayak's compiler compiling itself under
 `fixpt run` (`fx-regs-rsjit-nativecc`) takes about 610 s, and kayak's
-check waits for it; the target is 490 s or less. Only execution speed
+check waits for it; the target is 490 s or less.
+
+**Measured again 2026-11-13**, main at `dc65d595`, on a clone of kayak at
+`bce2244` (C396, which pins Fixpt `4e13016`; `d5840ee`, the pin before,
+is refused by today's checker, kayak C290's `spin`): 9.5 s a run, alone,
+its output kayak's `boot/src/kfx` byte for byte, and the same 9.5 s on
+the Fixpt kayak pins. The compiler is larger than at the 5 s of §126
+(29,894 lines joined). What is below is the history; nothing in it is
+waited on. Only execution speed
 counts (loading is about 1%).
 
 **Profiled 2026-10-24** (`perf`, `--call-graph fp`, main at `4738986d`):
