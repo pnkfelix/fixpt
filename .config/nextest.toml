@@ -5,3 +5,11 @@
 [[profile.default.overrides]]
 filter = 'test(=a_deadline_passed_over_is_not_waited_for)'
 threads-required = 'num-test-threads'
+
+# The debug-versus-release cache check (`fixpt-cli`'s `tests/shared_caches.rs`)
+# makes a whole prewarm of its own where the other profile made the caches,
+# some 90 s in a debug build: started first, so that it overlaps the whole
+# suite, not only its second half, and is not its long pole.
+[[profile.default.overrides]]
+filter = 'test(=a_debug_and_a_release_prewarm_make_the_same_caches)'
+priority = 100
