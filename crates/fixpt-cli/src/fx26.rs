@@ -1805,12 +1805,11 @@ impl crate::lineedit::Oracle for Oracle<'_> {
         let Some(p) = crate::speculate::partial(text, SyntaxProfile::FX26) else {
             return Vec::new();
         };
-        // Leave no trace: symbols read here are forgotten afterwards, so a
-        // typo never turns up as a completion.
-        let mark = self.session.checker.interner.len();
-        let notes = speculative_notes(self.session, text, &p);
-        self.session.checker.interner.truncate(mark);
-        notes
+        // Symbols read here stay interned, the heap's too: forgetting them
+        // reused their numbers, which the heap's syntax still held
+        // (`heap_syn::SymTable`). Completions are of names bound, which
+        // speculating takes back, so a typo still never turns up as one.
+        speculative_notes(self.session, text, &p)
     }
 }
 
@@ -1925,10 +1924,7 @@ mod speculative {
     use crate::lineedit::Oracle as _;
 
     fn notes_in(s: &mut Fx26Session, text: &str) -> Vec<Note> {
-        let before = s.checker.interner.len();
-        let notes = Oracle { session: s, reader: None }.notes(text);
-        assert_eq!(s.checker.interner.len(), before, "checking left symbols behind");
-        notes
+        Oracle { session: s, reader: None }.notes(text)
     }
 
     fn session() -> Fx26Session {
@@ -1937,6 +1933,17 @@ mod speculative {
 
     fn notes(text: &str) -> Vec<Note> {
         notes_in(&mut session(), text)
+    }
+
+    /// A keystroke's notes after another's: the symbols the first read are
+    /// not read back as the next one's names (when they were forgotten after
+    /// each keystroke, their numbers reused, `(define-syntax ` read the
+    /// macros' kernel with the first's symbols: "the kernel's list").
+    #[test]
+    fn a_keystrokes_symbols_are_not_the_next_ones() {
+        let mut s = session();
+        notes_in(&mut s, "(");
+        notes_in(&mut s, "(define-syntax ");
     }
 
     #[test]
