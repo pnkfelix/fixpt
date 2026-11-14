@@ -3338,20 +3338,32 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     }
 
     fn parse_moduleof_in(&mut self, span: fixpt_read::Span, comps: &[Syn]) -> R<TyId> {
-        let usage = "`(moduleof (abs t type) … (desc d type) … (val x type) …)`";
+        let usage = "`(moduleof (abs t type) … (desc d type) … (val x type) …)`, a label written apart from its binder `(abs #:t u type)`";
         let (mut abs, mut descs, mut vals): (Vec<(Sym, DVar)>, Vec<(Sym, TyId)>, Vec<(Sym, TyId)>) = (Vec::new(), Vec::new(), Vec::new());
         // Names given twice: as descriptions, or as values (a value may have
         // a type's name).
         let (mut seen, mut vseen): (Vec<Sym>, Vec<Sym>) = (Vec::new(), Vec::new());
         for c in comps {
             let parts = self.items(c, "a module component")?.to_vec();
-            let [head, name, what] = &parts[..] else {
-                return Err(FxError::at(c.span(), usage));
+            // `(abs #:t u type)`, `(desc #:d u D)`: the label `t`, which the
+            // module type exports, apart from the binder `u` the items after
+            // it name (`docs/research/typed-macros.md`, "a `moduleof`'s label
+            // and binder written apart"); `(val #:x T)`, a label so written.
+            let keyword = |s: &Syn| match s.view() {
+                V::Keyword(k) => Some(k),
+                _ => None,
+            };
+            let (head, name, binder, what) = match &parts[..] {
+                [head, label, binder, what] if keyword(label).is_some() && binder.sym().is_some() && self.head(&parts) != Some("val") => {
+                    (head, label, binder.sym(), what)
+                }
+                [head, name, what] => (head, name, None, what),
+                _ => return Err(FxError::at(c.span(), usage)),
             };
             // `(abs (t …) type)` names several; `(abs (f (a kind) …) type)`
             // is one constructor, its parameters' kinds given.
             let mut ctor: Option<Vec<Syn>> = None;
-            let names: Vec<Sym> = match (name.sym(), name.list().as_deref()) {
+            let names: Vec<Sym> = match (name.sym().or_else(|| keyword(name)), name.list().as_deref()) {
                 (Some(n), _) => vec![n],
                 (None, Some(ns)) if self.head(&parts) == Some("abs") && ns.iter().all(|n| n.sym().is_some()) => {
                     ns.iter().filter_map(|n| n.sym()).collect()
@@ -3391,29 +3403,31 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                         },
                     };
                     for n in names {
+                        // Named for its label, as it prints; in scope by its
+                        // binder's name.
                         let v = self.arena.dvar_of(n, kind);
                         if kind != Kind::Type {
                             self.abstract_funs.insert(v);
                         }
-                        self.dscope.push((n, DScope::Var(v, kind)));
+                        self.dscope.push((binder.unwrap_or(n), DScope::Var(v, kind)));
                         abs.push((n, v));
                     }
                 }
                 // `(desc e E)`, an effect, as a module's `define-effect` gives.
                 Some("desc") if self.effect_shaped(what) => {
                     let e = self.parse_effect(what)?;
-                    self.dscope.push((names[0], DScope::Eff(e.clone())));
+                    self.dscope.push((binder.unwrap_or(names[0]), DScope::Eff(e.clone())));
                     let d = self.effect_desc(e);
                     descs.push((names[0], d));
                 }
                 Some("desc") if self.head(&self.items(what, "").unwrap_or_default()) == Some("dlambda") => {
                     let f = self.parse_fun(what, None)?;
-                    self.dscope.push((names[0], DScope::Fun(f)));
+                    self.dscope.push((binder.unwrap_or(names[0]), DScope::Fun(f)));
                     descs.push((names[0], f));
                 }
                 Some("desc") => {
                     let t = self.parse_type_syn(what)?;
-                    self.dscope.push((names[0], DScope::Rec(t)));
+                    self.dscope.push((binder.unwrap_or(names[0]), DScope::Rec(t)));
                     descs.push((names[0], t));
                 }
                 Some("val") => vals.push((names[0], self.parse_type_syn(what)?)),

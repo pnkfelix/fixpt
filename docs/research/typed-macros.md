@@ -1746,3 +1746,30 @@ Open:
 - Keywords (decided: `#:tag`): a sum's tag at run time a keyword, as
   proposed, or still a symbol with keywords only in the source? And flat
   products, `(product #:n n #:reply c)`, or keep the pairs?
+
+## Decided: a `moduleof`'s label and binder written apart (2026-11-14)
+
+A `moduleof`'s `abs` and `desc` items name both a label, which the module
+type exports and `(select m t)` reads, and a binder, which the items after
+them refer to; a `val`'s name is a label alone. A template's binders are
+renamed fresh, its labels never, so one name doing both cannot be a
+template's: renamed, the label is lost; kept, a use's type placed in a
+later item is captured by it. The checkers already hold the two apart
+(`Ty::Module`'s abstract types are labels each with a variable of its
+own); the syntax could not say them apart. Decided (the user, 2026-11-14,
+after `#:as`, `#:inside`, `#:locally` and the like were weighed): **the
+label written as a keyword, the binder after it**, `(abs #:t u type)` and
+`(desc #:d u D)`, as keywords are names that are not variables; the
+later items say `u`, and outside `(select m t)` (or `(select m #:t)`) as
+ever. `(abs t type)` is both, as before, so no program changes; it also
+lets a hand-written type name an outer `t` beside its own label `t`.
+
+In a template, by the rule for labels in templates (keywords, or `label`
+pattern variables): `(abs #:t t type)`, its binder `t` renamed and its
+label kept; `(val #:zero t)`; a bare `(abs t type)` refused unless `t` is
+a name the use gives, which is the use's, label and binder alike. The
+list forms, several names or a constructor's parameters, not yet in a
+template (`(abs #:f f (=> (type) type))` says the same). Where programs'
+syntax is read the form is known (both checkers, both expanders' walks of
+descriptions, both shape walks); what the checkers print never writes it,
+a label being printed for itself.

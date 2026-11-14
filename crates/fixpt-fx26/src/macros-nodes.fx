@@ -9,7 +9,7 @@
 (define types-module ((proj (load-module "fx26:macros-types.fx") rs re rm rc rp)))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
-(import reader-types atom (type syn))
+(import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
@@ -291,3 +291,25 @@
 ;; with its environment, whether it is in a `many` part, and how many
 ;; ellipses it is under.
 (define-type found (listof (tupleof int env bool int) acyclic))
+
+;; Each name in `xs`, onto `out`: names a walk leaves unplaced.
+(define symbols-onto (->* (syns-a names) names)
+  (lambda (xs out)
+    (if (null? xs)
+        out
+        (symbols-onto (cdr xs)
+                      (tagcase (car xs)
+                        (lst (items d a b x) (symbols-onto items out))
+                        (dotted (items tail d a b x) (symbols-onto (cons tail items) out))
+                        (vec (items d a b x) (symbols-onto items out))
+                        (else y (if (syn-symbol? (car xs)) (cons (syn-symbol (car xs)) out)
+                                  out)))))))
+;; Whether `s` is `(with #%fx name)` or `(with #%toplevel name)`.
+(define standard-with? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b x)
+        (and (= (len items) 3) (syn-symbol? (nth items 1)) (syn-symbol? (nth items 2))
+             (or (string=? (syn-name (nth items 1)) "#%fx")
+                 (string=? (syn-name (nth items 1)) "#%toplevel"))))
+      (else y #f))))

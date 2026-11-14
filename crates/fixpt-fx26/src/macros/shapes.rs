@@ -879,7 +879,14 @@ impl<'a, 'm> Shaper<'a, 'm> {
                 for (k, m) in items.iter().enumerate().skip(1) {
                     let parts = m.list()?;
                     let word = parts.first()?.sym().map(|w| self.name(w))?;
-                    let names: Vec<Sym> = match (parts.get(1)?.sym(), parts.get(1)?.list()) {
+                    // A label written as a keyword, `(abs #:t u type)`: its
+                    // binder after it, its type one part further on.
+                    let keyword = match parts.get(1)?.view() {
+                        crate::heap_syn::V::Keyword(k) => Some(k),
+                        _ => None,
+                    };
+                    let at = if keyword.is_some() && word != "val" && parts.len() == 4 { 3 } else { 2 };
+                    let names: Vec<Sym> = match (parts.get(1)?.sym().or(keyword), parts.get(1)?.list()) {
                         (Some(n), _) => vec![n],
                         (None, Some(ns)) if word == "abs" => ns.iter().filter_map(|n| n.sym()).take(if ns.iter().all(|n| n.sym().is_some()) { usize::MAX } else { 1 }).collect(),
                         (None, Some(ns)) => vec![ns.first()?.sym()?],
@@ -887,13 +894,13 @@ impl<'a, 'm> Shaper<'a, 'm> {
                     };
                     match word {
                         "val" => {
-                            let t = e[k].and_then(|x| self.elem(x, 2));
+                            let t = e[k].and_then(|x| self.elem(x, at));
                             let s = t.and_then(|t| self.ty(t));
                             vals.push((names[0], s));
                         }
                         "abs" => descs.extend(names.into_iter().map(|n| (n, None))),
                         "desc" => {
-                            let t = e[k].and_then(|x| self.elem(x, 2));
+                            let t = e[k].and_then(|x| self.elem(x, at));
                             let s = t.and_then(|t| self.ty(t));
                             descs.push((names[0], s));
                         }

@@ -4369,10 +4369,13 @@ form revisited with the user, `docs/research/generative-types.md` §7
 #:unseal get`, ordinary bindings, required at once, no warning period:
 the user's). Built 2026-11-14, both front ends, a macro making it too
 (§7.6 there); Heist and Kayak rewrite their definitions, `#:seal up-t
-#:unseal down-t`. Then `moduleof` in templates, whose items' names
-are labels and binders at once (a label kept, its binder renamed: the
-checkers would need the two told apart), and a file's macro's
-descriptions with binders of its own.
+#:unseal down-t`. `moduleof` in templates, whose items' names are
+labels and binders at once: decided and built 2026-11-14, both front ends,
+the label written as a keyword apart from its binder, `(abs #:t u type)`
+(`typed-macros.md`, "a `moduleof`'s label and binder written apart"). Left
+of the second stage: a file's macro's descriptions with binders of its
+own; a template's `moduleof` of several names in one `abs`, or a
+constructor's parameters.
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`

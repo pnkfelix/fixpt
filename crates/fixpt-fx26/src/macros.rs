@@ -2549,7 +2549,6 @@ impl Aligner<'_> {
         }
         let head = items[0].sym().filter(|h| !self.pvars.contains_key(h)).map(|h| self.name(h).to_string());
         let kids = self.desc_kids(at, &items);
-        let not_yet = |what: &str| Err(fail(format!("{what} in a template's description: not yet")));
         match head.as_deref() {
             Some("poly" | "dlambda") if self.mode == Mode::Program && items.len() > 3 => {
                 let atoms = self.desc_binders(kids[1], &items[1])?;
@@ -2643,9 +2642,15 @@ impl Aligner<'_> {
                 }
                 Ok(())
             }
-            // A program's: each member's type in the scope of the abstract
-            // and transparent types before it, a value's name a label.
-            Some("moduleof") if self.mode == Mode::Program => {
+            // Each member's type in the scope of the abstract and
+            // transparent types before it, a value's name a label. An
+            // `abs`'s or `desc`'s label written as a keyword is apart from
+            // its binder, after it, `(abs #:t u type)`: a template's labels
+            // are written so, as labels in templates are, or are names a use
+            // gives (`typed-macros.md`, "a `moduleof`'s label and binder
+            // written apart").
+            Some("moduleof") => {
+                let template = self.mode != Mode::Program;
                 let mut atoms = Vec::new();
                 for (k, m) in kids[1..].iter().zip(&items[1..]) {
                     let parts = m.list().map(|l| l.to_vec()).unwrap_or_default();
@@ -2655,16 +2660,38 @@ impl Aligner<'_> {
                         continue;
                     }
                     let p = self.desc_kids(*k, &parts);
-                    for (q, x) in p[2..].iter().zip(&parts[2..]) {
-                        self.desc_scoped(*q, x, atoms.clone())?;
+                    let binds = matches!(word.as_deref(), Some("abs" | "desc"));
+                    let keyword = matches!(parts[1].view(), V::Keyword(_));
+                    let apart = binds && keyword && parts.len() == 4 && parts[2].sym().is_some();
+                    let given = parts[1].sym().filter(|n| self.pvars.contains_key(n));
+                    if template && !keyword && given.is_none() {
+                        return match (binds, parts[1].sym()) {
+                            (_, None) => Err(FxError::at(parts[1].at(), "a list of names in a template's `moduleof`: not yet")),
+                            (true, Some(_)) => Err(FxError::at(parts[1].at(), "a template's `abs` or `desc` writes its label as a keyword, its binder after it: `(abs #:t t type)`")),
+                            (false, Some(_)) => Err(FxError::at(parts[1].at(), "a template's `val` writes its label as a keyword: `(val #:x type)`")),
+                        };
                     }
-                    if matches!(word.as_deref(), Some("abs" | "desc")) && parts[1].sym().is_some() {
+                    // A value's label a use gives, placed.
+                    if let (Some(n), false) = (given, binds) {
+                        self.nodes[p[1]].core = Rc::new(STy::Label);
+                        self.nodes[p[1]].kids = Kids::PVar(n);
+                    }
+                    // An `abs`'s last part is a kind, of words alone: not a
+                    // description, nothing in it named.
+                    let first = if apart { 3 } else { 2 };
+                    if word.as_deref() != Some("abs") {
+                        for (q, x) in p[first..].iter().zip(&parts[first..]) {
+                            self.desc_scoped(*q, x, atoms.clone())?;
+                        }
+                    }
+                    if apart {
+                        atoms.push(self.desc_binder(p[2], &parts[2])?);
+                    } else if binds && parts[1].sym().is_some() {
                         atoms.push(self.desc_binder(p[1], &parts[1])?);
                     }
                 }
                 Ok(())
             }
-            Some("moduleof") => not_yet("a `moduleof`"),
             Some("subr" | "->" | "->*") => self.desc_subr(s, &items, &kids),
             Some(_) if self.word(items[0].sym().expect("a name"), true) => {
                 for (k, i) in kids[1..].iter().zip(&items[1..]) {

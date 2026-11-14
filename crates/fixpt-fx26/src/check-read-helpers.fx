@@ -37,7 +37,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-syntax) (include check-print-parts) (include check-env)
       (include check-subst) (include check-print) (include parser))
-(import check-read k-atom-head? k-sfail k-items k-any-typed-kind? k-arrow-syntax)
+(import check-read k-atom-head? k-sfail k-items k-any-typed-kind? k-arrow-syntax k-symbol-head)
 (import check-effects k-one k-insert)
 ;; Flat data, given on (`check-flat.fx`).
 (import check-flat k-flat-not-type k-flat-var-type? k-is-flat? k-parse-flat k-flat-code
@@ -47,7 +47,9 @@
 
 ;; A `dlambda` of no parameters, as an error says.
 (define k-dlambda-empty string "a `dlambda` takes at least one description")
-(define k-moduleof-usage string "`(moduleof (abs t type) … (desc d type) … (val x type) …)`")
+(define k-moduleof-usage string
+  (string-append "`(moduleof (abs t type) … (desc d type) … (val x type) …)`, a label written "
+                 "apart from its binder `(abs #:t u type)`"))
 (define k-abs-usage string
   "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")
 ;; Where `->*` is not a definition's signature.
@@ -272,34 +274,55 @@
               ((syn-symbol? (car items)) (k-ctor-param-kinds (cdr items) name))
               (else (k-sfail k-abs-ctor-usage name))))
       (else x nil))))
-;; A component's names: its name; or, an `abs`'s, the names in a list.
+;; A component's names: its name, or its label written as a keyword; or,
+;; an `abs`'s, the names in a list.
 (define k-component-names (->* (syn string) k-names)
   (lambda (name head)
     (if (syn-symbol? name)
         (the k-names (cons (syn-head name) nil))
         (tagcase name
-          (lst (items d a b xpn)
-            (cond ((not (string=? head "abs")) (k-sfail "a component's name" name))
-                  ((k-all-symbols? items) (k-syn-symbols items))
-                  ;; One constructor, its parameters' kinds given.
-                  (else (begin (k-abs-ctor-params name) (cons (syn-head (car items)) nil)))))
-          (else x (k-sfail "a component's name" name))))))
+          (atom (d a b xpn)
+            (if (keyword? d)
+                (the k-names (cons (keyword->symbol d) nil))
+                (k-sfail "a component's name" name)))
+          (else x (k-component-list name head))))))
+;; An `abs`'s names in a list, `(abs (t u) type)`; or one constructor's,
+;; its parameters' kinds given, `(abs (f (a kind)) type)`.
+(define k-component-list (->* (syn string) k-names)
+  (lambda (name head)
+    (tagcase name
+      (lst (items d a b xpn)
+        (cond ((not (string=? head "abs")) (k-sfail "a component's name" name))
+              ((k-all-symbols? items) (k-syn-symbols items))
+              (else (begin (k-abs-ctor-params name) (cons (syn-head (car items)) nil)))))
+      (else x (k-sfail "a component's name" name)))))
 ;; `seen` and `names`, each named once in component `c`.
 (define k-names-once (->* (k-names k-names syn) k-names)
   (lambda (names seen c)
     (cond ((null? names) seen)
           ((k-has-name? seen (car names)) (k-sfail (k-twice (symbol->string (car names))) c))
           (else (k-names-once (cdr names) (cons (car names) seen) c)))))
-;; Abstract types `names`, each a variable of kind `k`, in scope from here,
-;; onto `abs`; a type constructor among `k-abstract-funs`.
-(define k-abs-bound (->* (k-names int k-parts) k-parts)
-  (lambda (names k abs)
+;; Abstract types `names`, each a variable of kind `k`, in scope from here
+;; by its name, or by `binder` if it is one (not `%none`), onto `abs`; a type
+;; constructor among `k-abstract-funs`.
+(define k-abs-bound (->* (k-names int k-parts symbol) k-parts)
+  (lambda (names k abs binder)
     (if (null? names)
         abs
         (let* ((n (car names)) (v (k-new-dvar-of n k)))
           (begin (if (= k 2) #u (set k-abstract-funs (cons v (get k-abstract-funs))))
-                 (k-push-desc n (ds-var v k))
-                 (k-abs-bound (cdr names) k (cons (product (1 n) (2 v)) abs)))))))
+                 (k-push-desc (if (symbol=? binder '%none) n binder) (ds-var v k))
+                 (k-abs-bound (cdr names) k (cons (product (1 n) (2 v)) abs) binder))))))
+;; A component's binder written apart from its label, `(abs #:t u type)`,
+;; `(desc #:d u D)` (`docs/research/typed-macros.md`, "a `moduleof`'s label
+;; and binder written apart"): `u`; else `%none`, its name both.
+(define k-comp-binder (->* (k-syns) symbol)
+  (lambda (parts)
+    (if (and (= (k-length parts) 4) (not (string=? (k-symbol-head parts) "val"))
+             (tagcase (k-nth parts 1) (atom (d a b xpn) (keyword? d)) (else x #f))
+             (syn-symbol? (k-nth parts 2)))
+        (syn-head (k-nth parts 2))
+        '%none)))
 ;; `(name type)` onto `ps`.
 (define k-part-onto (->* (symbol int k-parts) k-parts)
   (lambda (n t ps) (cons (product (1 n) (2 t)) ps)))

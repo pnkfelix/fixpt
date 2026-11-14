@@ -261,8 +261,22 @@
                        k-names))
             (val k-abs-bound
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
-                       (k-names int k-parts)
+                       (k-names int k-parts symbol)
                        k-parts))
+            (val k-comp-binder
+                 (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin)
+                       (k-syns)
+                       symbol))
+            (val k-component-list
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (syn string)
+                       k-names))
             (val k-effect-shaped?
                  (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin)
                        (syn)

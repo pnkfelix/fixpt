@@ -851,7 +851,15 @@
                (word (if (and (not (null? parts)) (syn-symbol? (car parts))) (syn-name (car parts))
                          ""))
                (second (if (> (len parts) 1) (nth parts 1) (car ms)))
+               ;; A label written as a keyword, `(abs #:t u type)`: its binder
+               ;; after it, its type one part further on.
+               (at (if (and (syn-keyword? second) (not (string=? word "val")) (= (len parts) 4))
+                       3 2))
                (names (cond ((syn-symbol? second) (list (syn-symbol second)))
+                            ((syn-keyword? second)
+                             (tagcase second
+                               (atom (d a b x) (if (keyword? d) (list (keyword->symbol d)) nil))
+                               (else y nil)))
                             ((null? (proper-items second)) nil)
                             ((string=? word "abs")
                              (if (all-symbols? (proper-items second))
@@ -860,7 +868,7 @@
                             (else (symbols-of (list (car (proper-items second)))))))
                (t (lambda ()
                           (if (< x 0) nil
-                              (let ((y (elem x 2))) (if (< y 0) nil (ty-shape fail y)))))))
+                              (let ((y (elem x at))) (if (< y 0) nil (ty-shape fail y)))))))
           (cond
             ((or (< (len parts) 2) (and (null? names) (not (string=? word "abs")))) nil)
             ((string=? word "val")

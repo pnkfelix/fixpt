@@ -29,7 +29,7 @@
         makes-desc? makes k-pair k-nil k-pvar k-binder k-ref k-form k-desc k-seq k-other atom-at
         nnodes node-syn node-path node-core node-kids node-many? node-hole
         with-core with-kids with-import with-export with-many with-hole node-new
-        node-imports node-export
+        node-imports node-export symbols-onto standard-with?
         nodes-reset! repeated repeated! seq-depths repeated? cage-seqs cage-seq? int-member?
         desc-roots binds-nothing?
         pvar-of pvar? pvar-shape lv-rib lv-cage lv-earlier lv-shape program-walk unplaced
@@ -479,18 +479,6 @@
       (vec (items d a b x) (any-unquotes? items))
       (else y (and (syn-symbol? s) (or (string=? (syn-name s) "unquote")
                                        (string=? (syn-name s) "unquote-splicing")))))))
-;; Each name in `xs`, onto `out`: names a walk leaves unplaced.
-(define symbols-onto (->* (syns-a names) names)
-  (lambda (xs out)
-    (if (null? xs)
-        out
-        (symbols-onto (cdr xs)
-                      (tagcase (car xs)
-                        (lst (items d a b x) (symbols-onto items out))
-                        (dotted (items tail d a b x) (symbols-onto (cons tail items) out))
-                        (vec (items d a b x) (symbols-onto items out))
-                        (else y (if (syn-symbol? (car xs)) (cons (syn-symbol (car xs)) out)
-                                  out)))))))
 ;; The binding structure of a program's `module-parameters`' list `bs`:
 ;; each a value's binder, its type in the scope of those before it, or a
 ;; description's; each module not `qualified` included in the items, as the
@@ -570,15 +558,6 @@
     (cond ((null? named) nil)
           ((symbol=? n (extract (car named) 1)) (list (extract (car named) 2)))
           (else (sig-of n (cdr named))))))
-;; Whether `s` is `(with #%fx name)` or `(with #%toplevel name)`.
-(define standard-with? (->* (syn) bool)
-  (lambda (s)
-    (tagcase s
-      (lst (items d a b x)
-        (and (= (len items) 3) (syn-symbol? (nth items 1)) (syn-symbol? (nth items 2))
-             (or (string=? (syn-name (nth items 1)) "#%fx")
-                 (string=? (syn-name (nth items 1)) "#%toplevel"))))
-      (else y #f))))
 
 ;;; ------------------------------------------------------------ descriptions
 
@@ -625,10 +604,7 @@
 (define desc-items (->* (fails pvars int syn syns-a) unit)
   (lambda (fail ps at s items)
     (let* ((kids (desc-kids at items)) (h (car items))
-           (head (if (and (syn-symbol? h) (not (pvar? (syn-symbol h) ps))) (syn-name h) ""))
-           (not-yet (lambda ((what string))
-                      (fail-at fail (string-append what " in a template's description: not yet")
-                               s))))
+           (head (if (and (syn-symbol? h) (not (pvar? (syn-symbol h) ps))) (syn-name h) "")))
       (cond
         ;; A program's `poly` of several descriptions after its binders.
         ((and (or (string=? head "poly") (string=? head "dlambda")) (get program-walk)
@@ -665,11 +641,8 @@
         ((and (get program-walk)
               (or (string=? head "load-moduleof") (string=? head "load-input-moduleof")))
          (set unplaced (symbols-onto (cdr (cdr items)) (get unplaced))))
-        ;; A program's: each member's type in the scope of the abstract and
-        ;; transparent types before it, a value's name a label.
-        ((and (get program-walk) (string=? head "moduleof"))
-         (desc-members fail ps (cdr kids) (cdr items) nil))
-        ((string=? head "moduleof") (not-yet "a `moduleof`"))
+        ((string=? head "moduleof")
+         (desc-members fail ps (cdr kids) (cdr items) nil (not (get program-walk))))
         ((or (string=? head "subr") (string=? head "->") (string=? head "->*"))
          (desc-subr fail ps s items kids))
         ((and (not (string=? head "")) (desc-word? head #t))
@@ -798,27 +771,55 @@
         #u
         (begin (desc-scoped fail ps (car ks) (car xs) as)
                (desc-each-scoped fail ps (cdr ks) (cdr xs) as)))))
-;; A program's `moduleof`'s members `ms` at nodes `ks`: each's type in the
-;; scope of `as`, the abstract and transparent types before it.
-(define desc-members (->* (fails pvars (listof int acyclic) syns-a atms) unit)
-  (lambda (fail ps ks ms as)
+;; A `moduleof`'s members `ms` at nodes `ks`: each's type in the scope of
+;; `as`, the abstract and transparent types before it, a value's name a
+;; label; an `abs`'s or `desc`'s label written as a keyword apart from its
+;; binder after it, `(abs #:t u type)`, as a `template`'s are, or a name a
+;; use gives (`macros.rs`'s, `typed-macros.md`).
+(define desc-members (->* (fails pvars (listof int acyclic) syns-a atms bool) unit)
+  (lambda (fail ps ks ms as template)
     (if (or (null? ms) (null? ks))
         #u
         (let* ((parts (proper-items (car ms)))
                (word (if (and (not (null? parts)) (syn-symbol? (car parts)))
-                         (syn-name (car parts))
-                         "")))
+                         (syn-name (car parts)) "")))
           (if (< (len parts) 2)
-              (begin (desc fail ps (car ks) (car ms)) (desc-members fail ps (cdr ks) (cdr ms) as))
-              (let ((p (desc-kids (car ks) parts)))
+              (begin (desc fail ps (car ks) (car ms))
+                     (desc-members fail ps (cdr ks) (cdr ms) as template))
+              (let* ((p (desc-kids (car ks) parts)) (n (nth parts 1))
+                     (binds (or (string=? word "abs") (string=? word "desc")))
+                     (kw (syn-keyword? n))
+                     (apart (and binds kw (= (len parts) 4) (syn-symbol? (nth parts 2))))
+                     (given (and (syn-symbol? n) (pvar? (syn-symbol n) ps))))
                 (begin
-                  (desc-each-scoped fail ps (cdr (cdr p)) (cdr (cdr parts)) as)
+                  (cond ((or (not template) kw given) #u)
+                        ((not (syn-symbol? n))
+                         (fail-at fail "a list of names in a template's `moduleof`: not yet" n))
+                        (binds (fail-at fail (string-append "a template's `abs` or `desc` writes "
+                                                            "its label as a keyword, its binder "
+                                                            "after it: `(abs #:t t type)`")
+                                        n))
+                        (else (fail-at fail (string-append "a template's `val` writes its label "
+                                                           "as a keyword: `(val #:x type)`")
+                                       n)))
+                  ;; A value's label a use gives, placed.
+                  (if (and given (not binds))
+                      (begin (with-core (kid p 1) (s-label))
+                             (with-kids (kid p 1) (k-pvar (syn-symbol n))))
+                      #u)
+                  ;; An `abs`'s last part is a kind, of words alone.
+                  (if (string=? word "abs") #u
+                      (desc-each-scoped fail ps (if apart (cdr (cdr (cdr p))) (cdr (cdr p)))
+                                        (if apart (cdr (cdr (cdr parts))) (cdr (cdr parts))) as))
                   (desc-members fail ps (cdr ks) (cdr ms)
-                                (if (and (or (string=? word "abs") (string=? word "desc"))
-                                         (syn-symbol? (nth parts 1)))
-                                    (append as (the atms (list (desc-binder fail ps (kid p 1)
-                                                                 (nth parts 1)))))
-                                    as)))))))))
+                                (cond (apart (append as (the atms (list (desc-binder fail ps
+                                                                          (kid p 2)
+                                                                          (nth parts 2))))))
+                                      ((and binds (syn-symbol? n))
+                                       (append as (the atms (list (desc-binder fail ps (kid p 1)
+                                                                                n)))))
+                                      (else as))
+                                template))))))))
 ;; A procedure type, `(subr …)`, `(-> …)` or `(->* …)`, its parts `items`
 ;; at nodes `kids` (`macros.rs`'s `desc_subr`): each parameter named, `(x :
 ;; T)`, a value's binder in scope in the types after it, the result and the
