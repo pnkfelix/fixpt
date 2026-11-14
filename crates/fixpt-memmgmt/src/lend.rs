@@ -84,7 +84,7 @@ pub fn lend_pair<A: 'static, B: 'static, R>(a: &mut A, b: &mut B, f: impl FnOnce
 struct Unborrow(usize);
 
 impl Drop for Unborrow {
-    #[inline(always)]
+    #[inline]
     fn drop(&mut self) {
         STACK.with(|s| s.borrowed[self.0].set(false));
     }
@@ -93,7 +93,7 @@ impl Drop for Unborrow {
 /// The innermost lending of type `ty`, borrowed: where it is, its partner,
 /// and what ends the borrow. A panic if none is lent, or it is borrowed
 /// already. Not generic, so a build that optimizes nothing makes it once.
-#[inline(always)]
+#[inline]
 fn borrow(ty: TypeId, name: fn() -> &'static str) -> (*mut (), *mut (), Unborrow) {
     STACK.with(|s| {
         let mut k = s.depth.get();
@@ -114,7 +114,7 @@ fn borrow(ty: TypeId, name: fn() -> &'static str) -> (*mut (), *mut (), Unborrow
 
 /// `f` of the `T` lent innermost ([`lend`]); a panic if none is lent, or
 /// it is borrowed already (a `with_lent` of it inside one).
-#[inline(always)]
+#[inline]
 pub fn with_lent<T: 'static, R>(f: impl FnOnce(&mut T) -> R) -> R {
     let (at, _, _unborrow) = borrow(TypeId::of::<T>(), std::any::type_name::<T>);
     // SAFETY: `at` is the `&mut T` given to `lend`, whose call is running
@@ -129,7 +129,7 @@ pub fn with_lent<T: 'static, R>(f: impl FnOnce(&mut T) -> R) -> R {
 }
 
 /// `f` of the pair lent innermost ([`lend_pair`]), as [`with_lent`].
-#[inline(always)]
+#[inline]
 pub fn with_lent_pair<A: 'static, B: 'static, R>(f: impl FnOnce(&mut A, &mut B) -> R) -> R {
     let (at, and, _unborrow) = borrow(TypeId::of::<(A, B)>(), std::any::type_name::<(A, B)>);
     // SAFETY: as `with_lent`'s, for each of the two: `lend_pair` was given

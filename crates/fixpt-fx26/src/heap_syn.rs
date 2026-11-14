@@ -32,7 +32,7 @@ pub struct Era {
 }
 
 impl Era {
-    #[inline(always)]
+    #[inline]
     fn of(_heap: &Heap) -> Era {
         Era {
             #[cfg(debug_assertions)]
@@ -43,14 +43,14 @@ impl Era {
 
 impl Syn {
     /// `v`, a piece of `syn` in `heap`, taken now.
-    #[inline(always)]
+    #[inline]
     pub fn of(heap: &Heap, v: Value) -> Syn {
         Syn(v, Era::of(heap))
     }
 
     /// Its value, which `heap` holds still: a panic, in a build with debug
     /// assertions, if a collection came since it was taken.
-    #[inline(always)]
+    #[inline]
     fn value(self, _heap: &Heap) -> Value {
         #[cfg(debug_assertions)]
         assert_eq!(self.1.n, _heap.collections(), "a piece of syntax held past a collection: hold it by a handle (`Kept`)");
@@ -289,7 +289,7 @@ impl<'a> Rd<'a> {
     /// word's look, where the tags are known now (`SymTable::tags`), and
     /// else by its payload's length, whose header is found by looking past
     /// its fields.
-    #[inline(always)]
+    #[inline]
     fn variant(self, s: Syn) -> (Variant, Value) {
         let v = s.value(self.heap);
         let p = self.heap.sum_payload(v);
@@ -318,14 +318,14 @@ impl<'a> Rd<'a> {
     }
 
     /// `s`'s plain datum.
-    #[inline(always)]
+    #[inline]
     pub fn datum(self, s: Syn) -> Value {
         let (k, p) = self.variant(s);
         self.heap.product_field(p, k.len() - 3)
     }
 
     /// Where `s` is.
-    #[inline(always)]
+    #[inline]
     pub fn at(self, s: Syn) -> At {
         let (k, p) = self.variant(s);
         let n = k.len();
@@ -337,13 +337,13 @@ impl<'a> Rd<'a> {
     }
 
     /// Where `s` is, as the checker says it ([`span_of`]).
-    #[inline(always)]
+    #[inline]
     pub fn span(self, s: Syn) -> Span {
         span_of(self.at(s))
     }
 
     /// Symbol `v`, the checker's.
-    #[inline(always)]
+    #[inline]
     pub fn sym_of(self, v: Value) -> Sym {
         let slot = self.heap.symbol_global_slot(v);
         match self.syms.by_slot.get(slot).copied().flatten() {
@@ -353,7 +353,7 @@ impl<'a> Rd<'a> {
     }
 
     /// Whether `s` is an atom, and its datum if so.
-    #[inline(always)]
+    #[inline]
     fn atom(self, s: Syn) -> Option<Value> {
         let (k, p) = self.variant(s);
         (k == Variant::Atom).then(|| self.heap.product_field(p, 1))
@@ -365,7 +365,7 @@ impl<'a> Rd<'a> {
     }
 
     /// `s`'s symbol, if it is one.
-    #[inline(always)]
+    #[inline]
     pub fn sym(self, s: Syn) -> Option<Sym> {
         let d = self.atom(s)?;
         self.heap.is_a(d, ObjType::Symbol).then(|| self.sym_of(d))
@@ -380,7 +380,7 @@ impl<'a> Rd<'a> {
     }
 
     /// Whether `s` is `()`.
-    #[inline(always)]
+    #[inline]
     pub fn is_nil(self, s: Syn) -> bool {
         matches!(self.view_shallow(s), Shallow::List(items, None) if items.is_empty())
     }
@@ -452,7 +452,7 @@ impl<'a> Rd<'a> {
 
 impl Rd<'_> {
     /// What `s` is, looked at no deeper ([`Shape`]).
-    #[inline(always)]
+    #[inline]
     pub fn shape(self, s: Syn) -> Shape {
         let (k, p) = self.variant(s);
         match k {
@@ -474,7 +474,7 @@ impl Rd<'_> {
     }
 
     /// A list's first part, proper or dotted, if it has one.
-    #[inline(always)]
+    #[inline]
     pub fn head(self, s: Syn) -> Option<Syn> {
         let (k, p) = self.variant(s);
         if matches!(k, Variant::Atom | Variant::Vec) {
@@ -486,7 +486,7 @@ impl Rd<'_> {
 
     /// A list's parts, proper or dotted (`()`'s none), and its tail, read
     /// where they are ([`Items`]).
-    #[inline(always)]
+    #[inline]
     pub fn parts(self, s: Syn) -> Option<(Items, Option<Syn>)> {
         let (k, p) = self.variant(s);
         let items = Items { rest: Syn::of(self.heap, self.heap.product_field(p, 1)) };
@@ -537,7 +537,7 @@ pub struct Items {
 
 impl Iterator for Items {
     type Item = Syn;
-    #[inline(always)]
+    #[inline]
     fn next(&mut self) -> Option<Syn> {
         heap(|h| {
             let rest = self.rest.value(h);
@@ -561,7 +561,7 @@ enum Variant {
 
 impl Variant {
     /// Its payload's length: its parts, its datum, and its place's three.
-    #[inline(always)]
+    #[inline]
     fn len(self) -> usize {
         match self {
             Variant::Atom => 4,
@@ -920,7 +920,7 @@ pub fn lent() -> bool {
 }
 
 /// `f` of the syntax's reading, lent.
-#[inline(always)]
+#[inline]
 pub fn rd<R>(f: impl FnOnce(Rd) -> R) -> R {
     fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, R>(|heap, syms| f(Rd { heap, syms }))
 }
@@ -931,38 +931,38 @@ pub fn mk<R>(interner: &Interner, f: impl FnOnce(&mut Mk) -> R) -> R {
 }
 
 /// The heap lent, as [`with_syntax`] lends it.
-#[inline(always)]
+#[inline]
 fn heap<R>(f: impl FnOnce(&mut Heap) -> R) -> R {
     fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, R>(|heap, _| f(heap))
 }
 
 impl Syn {
     /// Where it is.
-    #[inline(always)]
+    #[inline]
     pub fn at(self) -> At {
         rd(|r| r.at(self))
     }
 
     /// Where it is, as the checker says it.
-    #[inline(always)]
+    #[inline]
     pub fn span(self) -> Span {
         span_of(self.at())
     }
 
     /// Its symbol, if it is one.
-    #[inline(always)]
+    #[inline]
     pub fn sym(self) -> Option<Sym> {
         rd(|r| r.sym(self))
     }
 
     /// A proper list's items (none for `()`), or none.
-    #[inline(always)]
+    #[inline]
     pub fn list(self) -> Option<Vec<Syn>> {
         rd(|r| r.list(self))
     }
 
     /// Whether it is `()`.
-    #[inline(always)]
+    #[inline]
     pub fn is_nil(self) -> bool {
         rd(|r| r.is_nil(self))
     }
@@ -973,27 +973,27 @@ impl Syn {
     }
 
     /// What it is, looked at no deeper ([`Shape`]).
-    #[inline(always)]
+    #[inline]
     pub fn shape(self) -> Shape {
         rd(|r| r.shape(self))
     }
 
     /// Its first part, if it is a list, proper or dotted, of one or more.
-    #[inline(always)]
+    #[inline]
     pub fn head(self) -> Option<Syn> {
         rd(|r| r.head(self))
     }
 
     /// Its first part's symbol, if it is a proper list whose first part is
     /// one: a form's head, as `list()` would find it.
-    #[inline(always)]
+    #[inline]
     pub fn head_sym(self) -> Option<Sym> {
         rd(|r| if r.shape(self) == Shape::List { r.head(self).and_then(|h| r.sym(h)) } else { None })
     }
 
     /// Its parts, if it is a proper list (`()`'s none), read as they are
     /// reached ([`Items`]).
-    #[inline(always)]
+    #[inline]
     pub fn items(self) -> Option<Items> {
         match rd(|r| r.parts(self))? {
             (items, None) => Some(items),
@@ -1002,7 +1002,7 @@ impl Syn {
     }
 
     /// Its parts and its tail, if it is a list, proper or dotted.
-    #[inline(always)]
+    #[inline]
     pub fn parts(self) -> Option<(Items, Option<Syn>)> {
         rd(|r| r.parts(self))
     }
