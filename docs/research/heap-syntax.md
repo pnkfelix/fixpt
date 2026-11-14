@@ -43,14 +43,20 @@ trait (`fixpt_read::Build`).
    billion times its number; each of a session's inputs after the one
    before), and its expansion. Characters, as FX-26 counts them: its
    strings are indexed by character (UTF-32 in the heap), so a place is
-   also an index into the text it read. Rust's `Span`s stay bytes: the
-   reader counts both, and `heap_syn::span_of` and `at_of` convert, by a
-   table of where each character starts, kept only for a text not all
-   ASCII (the user's, 2026-11-13). A text read on the side, apart from the
-   program (a type for the checker's tables, a file looked at before it
-   is loaded), has a base of its own, below every file's, so that its
-   places never convert by another text's table. Messages find file, line
-   and column from the session's table of texts and bases. A node a macro
+   also an index into the text it read. The Rust checker's spans are in
+   characters too (`fixpt_fx26::chars`; the user's, 2026-11-13):
+   `heap_syn::span_of` and `at_of` are its base's arithmetic and no more,
+   and what converts a span to bytes, line and column holds the text it
+   is in (a message's driver, a piece cut out). At first spans stayed
+   bytes, converted by a table of where each character starts, by base;
+   but the program's base, 0, was any text's read as file 0, and a
+   built-in module read so took the program's table (Kayak's report:
+   its `load-module` past the module's length "not read"). A text read on
+   the side, apart from the program (a type for the checker's tables, a
+   file looked at before it is loaded), has a base of its own, below
+   every file's. The Rust reader's errors, in bytes, are made characters
+   where it reads (`heap_syn`'s `read_at`). Messages find file, line and
+   column from the session's table of texts and bases. A node a macro
    made: its expansion, whose chain of uses the expander keeps, as FX-26's
    expander does.
 4. **Symbols are the heap's.** An atom's symbol is a heap symbol, compared

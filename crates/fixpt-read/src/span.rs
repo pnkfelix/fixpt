@@ -132,15 +132,18 @@ pub fn note_source(file: FileId, name: &str, text: Arc<str>) {
 
 /// Where `span` is, `name:line:col` and the start of its text, as
 /// [`note_source`] was told on this thread; none for a file it was not.
+/// Its offsets are characters, as the FX-26 front end's spans are, whose
+/// sources these are.
 pub fn describe_source(span: Span) -> Option<String> {
     SOURCES.with(|s| {
         let s = s.borrow();
         let (name, text) = s.get(&span.file)?;
-        let at = (span.start as usize).min(text.len());
+        let byte = |c: u32| text.char_indices().nth(c as usize).map_or(text.len(), |(b, _)| b);
+        let at = byte(span.start);
         let before = &text[..at];
         let line = before.matches('\n').count() + 1;
         let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
-        let end = (span.end as usize).clamp(at, text.len());
+        let end = byte(span.end).max(at);
         let mut snippet: String = text[at..end].chars().take(60).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
         if text[at..end].chars().count() > 60 {
             snippet.push_str(" …");

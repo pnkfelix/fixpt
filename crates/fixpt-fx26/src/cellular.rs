@@ -143,9 +143,10 @@ pub struct Compiler<'a> {
     /// Each expression's parent (`ids::parents`), made when first wanted:
     /// what lambdas are around one, for its certificate.
     parents: std::cell::OnceCell<crate::ast::IdMap<ExpId, ExpId>>,
-    /// The program's text, for naming each lambda by where its body starts,
-    /// in characters, as the compiler written in FX-26 does.
-    char_at: Vec<u32>,
+    /// How many characters the program's text has: a lambda is named by
+    /// where its body starts in it, in characters (as spans are,
+    /// `crate::chars`), as the compiler written in FX-26 names it.
+    chars: u32,
     labels: usize,
     /// The globals, as compiling has reached them.
     genv: Env,
@@ -376,16 +377,8 @@ impl<'a> Compiler<'a> {
     }
 
     pub fn new(heap: &'a mut Heap, c: &'a Checker, text: &str) -> Compiler<'a> {
-        let mut char_at = vec![0; text.len() + 1];
-        let mut n = 0;
-        for (b, ch) in text.char_indices() {
-            for x in &mut char_at[b..b + ch.len_utf8()] {
-                *x = n;
-            }
-            n += 1;
-        }
-        char_at[text.len()] = n;
-        Compiler { heap, c, parents: Default::default(), char_at, labels: 0, genv: Vec::new(), genv_index: Default::default(), this: None, registers: false,
+        let chars = text.chars().count() as u32;
+        Compiler { heap, c, parents: Default::default(), chars, labels: 0, genv: Vec::new(), genv_index: Default::default(), this: None, registers: false,
             register_report: Vec::new(),
             made: Vec::new(),
             reuse: Vec::new(),
@@ -1432,8 +1425,8 @@ impl<'a> Compiler<'a> {
         // profile can say which. (A body read from another file, a
         // module's, `load-module`: named for that file and where in it.)
         let span = self.c.arena.span_of(body);
-        let start = self.char_at.get(span.start as usize).copied().filter(|_| span.file.0 == 0).unwrap_or(u32::MAX);
-        let name = named.unwrap_or_else(|| match self.char_at.get(span.start as usize) {
+        let start = self.char_at(span).filter(|_| span.file.0 == 0).unwrap_or(u32::MAX);
+        let name = named.unwrap_or_else(|| match self.char_at(span) {
             Some(start) if span.file.0 == 0 => format!("{base}@{start}"),
             _ => format!("{base}@{}:{}", span.file.0, self.loaded_char_at(span)),
         });
@@ -1464,14 +1457,15 @@ impl<'a> Compiler<'a> {
     /// abstractions, ascriptions and conversions, which compile to nothing; and its
     /// region, when it is an `rlambda`.
     /// Where `span` starts in its module's file (`load-module`), in
-    /// characters, as the FX-26 compiler places it; in bytes if the file is
-    /// not one the checker read.
+    /// characters, as the FX-26 compiler places it.
     fn loaded_char_at(&self, span: fixpt_read::Span) -> u32 {
-        let text = self.c.loaded.values().find(|(_, _, f)| *f == span.file).map(|(_, t, _)| t.as_str());
-        match text {
-            Some(t) => t[..(span.start as usize).min(t.len())].chars().count() as u32,
-            None => span.start,
-        }
+        span.start
+    }
+
+    /// Where `span` starts in the program's text, in characters; none if
+    /// past its end.
+    fn char_at(&self, span: fixpt_read::Span) -> Option<u32> {
+        (span.start <= self.chars).then_some(span.start)
     }
 
     /// `(define name (with m f))`, `m` a top-level module whose member `f`
@@ -2299,7 +2293,7 @@ impl<'a> Compiler<'a> {
             lam_genv: c.genv,
         };
         let (gparams, gbody, genv_len) = (sp.params.clone(), sp.body, sp.genv_len);
-        let at_char = match self.char_at.get(span.start as usize) {
+        let at_char = match self.char_at(span) {
             Some(at) if span.file.0 == 0 => at.to_string(),
             _ => format!("{}:{}", span.file.0, span.start),
         };

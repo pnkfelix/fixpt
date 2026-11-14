@@ -15,7 +15,6 @@
 use fixpt_heap::layout::kind;
 use fixpt_heap::{Heap, ObjType, Value};
 use fixpt_read::{Build, Datum, FileId, Interner, Num, Place, Span, Sym};
-use std::sync::Arc;
 
 /// A piece of `syn`, in the heap; and, in a build with debug assertions,
 /// the heap's collections when it was taken, so that one held past a
@@ -177,20 +176,8 @@ impl SymTable {
 // ------------------------------------------------------------------ places
 
 thread_local! {
-    /// The texts places are in that are not all ASCII, by their bases: the
-    /// program's, a module file's, a text read on the side
-    /// (`docs/research/heap-syntax.md`). An ASCII text's characters are its
-    /// bytes, so it needs none.
-    static TEXTS: std::cell::RefCell<Vec<Text>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The side texts read so far ([`side_base`]).
     static SIDES: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
-}
-
-/// A text places are in: its base, and the byte where each of its
-/// characters starts, and its end.
-struct Text {
-    base: i64,
-    starts: Vec<u32>,
 }
 
 /// The base of file `file`'s places: the program's 0; a module file's, its
@@ -212,23 +199,6 @@ fn side_base() -> i64 {
         n.set(n.get() + 1);
         -n.get() * SIDE_STEP
     })
-}
-
-/// Text `text`, of file `file`, the one its places are in from now on.
-pub fn note_text(file: FileId, text: Arc<str>) {
-    note_at(base_of(file), &text);
-}
-
-/// Text `text`, the one the places past `base` are in.
-fn note_at(base: i64, text: &str) {
-    TEXTS.with(|t| {
-        let mut t = t.borrow_mut();
-        t.retain(|x| x.base != base);
-        if !text.is_ascii() {
-            let starts = text.char_indices().map(|(b, _)| b as u32).chain([text.len() as u32]).collect();
-            t.push(Text { base, starts });
-        }
-    });
 }
 
 /// The base of the text place `p` is in ([`file_base_at`]); the unplaced's,
@@ -253,26 +223,15 @@ fn file_base_at(p: i64) -> Option<(FileId, i64)> {
     }
 }
 
-/// Place `at`'s span: its file, by its base, and its bytes there. A place
-/// is a character past its file's base, as FX-26's reader counts; a span,
-/// bytes, as Rust's does: the same in an ASCII text, else by the text's
-/// table ([`note_text`]). [`at_of`]'s inverse.
+/// Place `at`'s span: its file, by its base, and its characters past it,
+/// as FX-26's reader counts them, and as the Rust checker's spans are
+/// (`crate::chars`). [`at_of`]'s inverse.
 pub fn span_of(at: At) -> Span {
     let Some((file, base)) = file_base_at(at.start) else {
         return Span { file: FileId(0), start: 0, end: 0, expansion: at.expansion };
     };
-    let (start, end) = TEXTS.with(|t| {
-        let t = t.borrow();
-        let byte = |p: i64| {
-            let c = (p - base).clamp(0, u32::MAX as i64);
-            match t.iter().find(|x| x.base == base) {
-                Some(x) => x.starts[(c as usize).min(x.starts.len() - 1)],
-                None => c as u32,
-            }
-        };
-        (byte(at.start), byte(at.end.max(at.start)))
-    });
-    Span { file, start, end, expansion: at.expansion }
+    let c = |p: i64| (p - base).clamp(0, u32::MAX as i64) as u32;
+    Span { file, start: c(at.start), end: c(at.end.max(at.start)), expansion: at.expansion }
 }
 
 // ------------------------------------------------------------------ reading
@@ -1148,15 +1107,7 @@ impl Syn {
 /// ([`span_of`]).
 pub fn at_of(s: Span) -> At {
     let base = base_of(s.file);
-    let (start, end) = TEXTS.with(|t| {
-        let t = t.borrow();
-        let char_at = |b: u32| match t.iter().find(|x| x.base == base) {
-            Some(x) => x.starts.partition_point(|&s| s <= b).max(1) as i64 - 1,
-            None => b as i64,
-        };
-        (char_at(s.start), char_at(s.end))
-    });
-    At { start: base + start, end: base + end, expansion: s.expansion }
+    At { start: base + s.start as i64, end: base + s.end as i64, expansion: s.expansion }
 }
 
 /// A piece of syntax held past code that runs: its place in a vector the
@@ -1330,7 +1281,7 @@ pub fn kept_count(heap: &Heap) -> usize {
 }
 
 /// `text`, of file `file`, read into `syn` by the Rust reader, its places
-/// past `file`'s base ([`base_of`]); its text noted ([`note_text`]).
+/// past `file`'s base ([`base_of`]).
 pub fn read_syn(text: &str, file: FileId, interner: &mut Interner) -> fixpt_read::ReadResult<Vec<Syn>> {
     read_syn_from(text, file, 0, interner)
 }
@@ -1338,22 +1289,24 @@ pub fn read_syn(text: &str, file: FileId, interner: &mut Interner) -> fixpt_read
 /// [`read_syn`] of the forms from byte `start` on, their places in all of
 /// `text`.
 pub fn read_syn_from(text: &str, file: FileId, start: usize, interner: &mut Interner) -> fixpt_read::ReadResult<Vec<Syn>> {
-    note_text(file, Arc::from(text));
-    read_syn_unnoted(text, file, start, interner)
-}
-
-/// [`read_syn_from`], its text noted already.
-fn read_syn_unnoted(text: &str, file: FileId, start: usize, interner: &mut Interner) -> fixpt_read::ReadResult<Vec<Syn>> {
     read_at(text, base_of(file), file, start, interner)
 }
 
-/// `text` read into `syn` from byte `start` on, its places past `base`.
+/// `text` read into `syn` from byte `start` on, its places past `base`;
+/// or why not, where, in its characters (`crate::chars`).
 fn read_at(text: &str, base: i64, file: FileId, start: usize, interner: &mut Interner) -> fixpt_read::ReadResult<Vec<Syn>> {
     fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, _>(|heap, syms| {
         let mut r = fixpt_read::Reader::with_builder(text, file, fixpt_read::SyntaxProfile::FX26, interner, HeapSyn::new(heap, syms, base));
         r.seek(start);
         r.read_all_built()
     })
+    .map_err(|e| in_chars(text, e))
+}
+
+/// A reader's error, its span in the characters of `text`, its bytes'.
+fn in_chars(text: &str, mut e: fixpt_read::ReadError) -> fixpt_read::ReadError {
+    e.span = crate::chars::of_bytes(text, e.span);
+    e
 }
 
 /// `text` read into `syn` on the side, apart from the program (a type
@@ -1361,31 +1314,25 @@ fn read_at(text: &str, base: i64, file: FileId, start: usize, interner: &mut Int
 /// looked at before it is loaded): its places past a base of its own, its
 /// spans file 0's, in it, which leaves the program's where they are.
 pub fn read_syn_side(text: &str, interner: &mut Interner) -> fixpt_read::ReadResult<Vec<Syn>> {
-    let base = side_base();
-    note_at(base, text);
-    read_at(text, base, FileId(0), 0, interner)
+    read_at(text, side_base(), FileId(0), 0, interner)
 }
 
 /// `f` of `text` read into `syn` on the side ([`read_syn_side`]), while
 /// its places are known; its text forgotten after, so that what is read
 /// again and again (a module file's loads, each form) keeps nothing.
 pub fn read_syn_passing<T>(text: &str, interner: &mut Interner, f: impl FnOnce(&[Syn], &Interner) -> T) -> fixpt_read::ReadResult<T> {
-    let base = side_base();
-    note_at(base, text);
-    let r = read_at(text, base, FileId(0), 0, interner).map(|forms| f(&forms, interner));
-    TEXTS.with(|t| t.borrow_mut().retain(|x| x.base != base));
-    r
+    read_at(text, side_base(), FileId(0), 0, interner).map(|forms| f(&forms, interner))
 }
 
 /// `text`'s first form read into `syn` on the side ([`read_syn_side`]):
 /// for what looks at a file's beginning only.
 pub fn read_syn_first(text: &str, interner: &mut Interner) -> fixpt_read::ReadResult<Option<Syn>> {
     let base = side_base();
-    note_at(base, text);
     fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, _>(|heap, syms| {
         let mut r = fixpt_read::Reader::with_builder(text, FileId(0), fixpt_read::SyntaxProfile::FX26, interner, HeapSyn::new(heap, syms, base));
         r.read_built()
     })
+    .map_err(|e| in_chars(text, e))
 }
 
 /// `f`, with syntax lent from a heap and table of its own: for reading a
@@ -1403,4 +1350,5 @@ pub fn read_syn_unplaced(text: &str, interner: &mut Interner) -> fixpt_read::Rea
         let mut r = fixpt_read::Reader::with_builder(text, FileId(0), fixpt_read::SyntaxProfile::FX26, interner, HeapSyn::new(heap, syms, UNPLACED));
         r.read_all_built()
     })
+    .map_err(|e| in_chars(text, e))
 }

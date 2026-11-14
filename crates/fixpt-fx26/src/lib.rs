@@ -19,6 +19,7 @@
 pub mod typed_cells;
 pub mod logic;
 pub mod ast;
+pub mod chars;
 pub mod debug_stack;
 
 /// The eager reader, written in FX-26: see the file's own header. A module
@@ -1087,13 +1088,17 @@ pub const FRONT_END_FILES: [(&str, &str); 2] = [
     ("conductor.fx", CONDUCTOR),
 ];
 
-/// Where byte `at` of [`front_end`] (or of [`bootstrap_program`]) is, as
+/// Where character `at` of [`front_end`] (or of [`bootstrap_program`]) is, as
 /// `file.fx:line:col`: for an error in the front end itself, which is
 /// read as one text.
 pub fn front_end_location(at: usize) -> String {
     let mut start = 0;
     let conductor = conductor();
-    let texts = FRONT_END_FILES.iter().map(|(n, t)| (*n, if *n == "conductor.fx" { conductor.as_str() } else { *t }));
+    let texts = || FRONT_END_FILES.iter().map(|(n, t)| (*n, if *n == "conductor.fx" { conductor.as_str() } else { *t }));
+    // A span's character, in the texts as one (`crate::chars`), by its byte.
+    let joined = texts().map(|(_, t)| t).chain([BOOTSTRAP]).collect::<Vec<_>>().join("\n");
+    let at = crate::chars::byte_at(&joined, at);
+    let texts = texts();
     for (name, text) in texts.chain([("bootstrap.fx", BOOTSTRAP)]) {
         if at <= start + text.len() {
             let (text, at, start) = if name == "conductor.fx" { (CONDUCTOR, start + conductor_offset(at - start), start) } else { (text, at, start) };

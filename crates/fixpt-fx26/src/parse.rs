@@ -3691,7 +3691,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         self.hidden = outer;
         let (params, items) = r.map_err(|e| at_file(e, self))?;
         // At the whole file: no other expression is there.
-        let whole = fixpt_read::Span::new(file, 0, text.len() as u32);
+        let whole = fixpt_read::Span::new(file, 0, text.chars().count() as u32);
         self.defined_twice(whole, &items).map_err(|e| at_file(e, self))?;
         let e = self.arena.exp(whole, Exp::Module(items));
         self.loaded.insert(e, (path.to_string(), text.clone(), file));
@@ -3794,9 +3794,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// Error `e`, in the file of `path` and `text`, said where `span`
     /// starts (the load's start: all the FX-26 parser keeps of it).
     fn said_in(e: FxError, span: fixpt_read::Span, path: &str, text: &str) -> FxError {
-        let before = &text[..(e.span.start as usize).min(text.len())];
-        let line = before.matches('\n').count() + 1;
-        let col = before.chars().rev().take_while(|c| *c != '\n').count() + 1;
+        let (line, col) = crate::chars::line_col(text, e.span.start as usize);
         FxError::at(fixpt_read::Span::new(span.file, span.start, span.start), format!("in `{path}`, {line}:{col}: {}", e.message))
     }
 

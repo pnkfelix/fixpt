@@ -98,12 +98,9 @@ fn place(text: &str, file: Option<&str>, sources: &Sources, cell: Option<usize>)
     if span.file.0 != 0 {
         return Some("in a loaded module".into());
     }
-    let (start, end) = (span.start as usize, (span.end as usize).min(text.len()));
-    let source: String = text.get(start..end)?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let source: String = crate::chars::slice(text, *span).split_whitespace().collect::<Vec<_>>().join(" ");
     let source = if source.chars().count() > 48 { format!("{}…", source.chars().take(47).collect::<String>()) } else { source };
-    let before = &text[..start];
-    let line = before.matches('\n').count() + 1;
-    let column = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+    let (line, column) = crate::chars::line_col(text, span.start as usize);
     Some(match file {
         Some(f) => format!("{f}:{line}:{column}, `{source}`"),
         None => format!("`{source}`"),

@@ -4487,39 +4487,40 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     /// forms' places are in the session's text, past every entry before.
     pub fn read_entry(&mut self, name: &str, text: &str) -> R<Vec<Form>> {
         let start = self.session_text.len();
+        self.entries.push((self.session_text.chars().count(), name.to_string()));
         self.session_text.push_str(text);
         self.session_text.push('\n');
-        self.entries.push((start, name.to_string()));
         checking(&mut self.checker, &mut self.scheme, |c| c.read_in_from(FileId(0), &self.session_text, start))
     }
 
     /// `text` read as the next entry would be, the session left as it was
-    /// (the REPL's reading as one types): its forms, and where it starts.
+    /// (the REPL's reading as one types): its forms, and where it starts,
+    /// in characters, as spans are (`crate::chars`).
     pub fn read_trial(&mut self, text: &str) -> R<(Vec<Form>, usize)> {
         let start = self.session_text.len();
         let whole = format!("{}{text}", self.session_text);
-        Ok((checking(&mut self.checker, &mut self.scheme, |c| c.read_in_from(FileId(0), &whole, start))?, start))
+        let chars = self.session_text.chars().count();
+        Ok((checking(&mut self.checker, &mut self.scheme, |c| c.read_in_from(FileId(0), &whole, start))?, chars))
     }
 
     /// Where `span`, of what an entry read, is: the entry's name, and the
     /// line and column there, each from 1.
     pub fn place(&self, span: fixpt_read::Span) -> (String, usize, usize) {
-        let at = (span.start as usize).min(self.session_text.len());
+        let at = span.start as usize;
         let k = self.entries.partition_point(|(s, _)| *s <= at).max(1) - 1;
         let Some((start, name)) = self.entries.get(k) else { return (String::from("<fx26>"), 1, 1) };
-        let before = &self.session_text[*start..at];
-        let line = before.matches('\n').count() + 1;
-        let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+        let text = &self.session_text[crate::chars::byte_at(&self.session_text, *start)..];
+        let (line, col) = crate::chars::line_col(text, at - start);
         (name.clone(), line, col)
     }
 
     /// The text of `span`, of what an entry read.
     pub fn session_text_at(&self, span: fixpt_read::Span) -> &str {
-        let n = self.session_text.len();
-        &self.session_text[(span.start as usize).min(n)..(span.end as usize).min(n)]
+        crate::chars::slice(&self.session_text, span)
     }
 
-    /// Where the entry that `span` is in starts in the session's text.
+    /// Where the entry that `span` is in starts in the session's text, in
+    /// characters, as spans are (`crate::chars`).
     pub fn entry_start(&self, span: fixpt_read::Span) -> usize {
         let k = self.entries.partition_point(|(s, _)| *s <= span.start as usize).max(1) - 1;
         self.entries.get(k).map_or(0, |(s, _)| *s)

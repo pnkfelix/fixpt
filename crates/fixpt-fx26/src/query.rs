@@ -248,9 +248,7 @@ fn place_of(c: &Checker, sources: &[Source], span: Span) -> String {
     } else {
         return "?".into();
     };
-    let at = (span.start as usize).min(text.len());
-    let line = text[..at].matches('\n').count() + 1;
-    let col = text[..at].rsplit('\n').next().unwrap_or("").chars().count() + 1;
+    let (line, col) = crate::chars::line_col(text, span.start as usize);
     format!("{name}:{line}:{col}")
 }
 
@@ -419,7 +417,7 @@ impl Program {
             return Ok(Context { file: span.file, span, point: None });
         }
         if let Some((file, _, text)) = file_named(around) {
-            return Ok(Context { file, span: Span::new(file, 0, text.len() as u32), point: None });
+            return Ok(Context { file, span: Span::new(file, 0, text.chars().count() as u32), point: None });
         }
         Err(format!("`around {around}`: no place `FILE:LINE:COL`, definition or file of that name in the program"))
     }

@@ -6,29 +6,18 @@
 //! the place is given, with its type, as `%fx26-type-at` says it: `START END
 //! TYPE`, or `error START END MESSAGE` for the first refusal, up to the
 //! form the place is in (what follows it is not checked). Places are in
-//! characters, as FX-26's strings count them; spans are bytes.
+//! characters, as FX-26's strings count them, and as spans are
+//! (`crate::chars`).
 
 use crate::check::Checker;
 use crate::top::Top;
 use fixpt_read::FileId;
 
-/// The byte offset of character `c` of `text` (its end, past the last).
-fn byte_of(text: &str, c: i64) -> usize {
-    if c <= 0 {
-        return 0;
-    }
-    text.char_indices().nth(c as usize).map(|(b, _)| b).unwrap_or(text.len())
-}
-
-/// The character offset of byte `b` of `text`.
-fn char_of(text: &str, b: usize) -> usize {
-    text[..b.min(text.len())].chars().count()
-}
 
 pub fn type_at(text: &str, pos: i64) -> String {
     let mut c = Checker::new();
     c.record_types = true;
-    let at = byte_of(text, pos);
+    let at = pos.max(0) as usize;
     // Checked up to the form the place is in: a definition sees only those
     // before it, so what comes after cannot change the type there, and a
     // mistake further down should not hide it.
@@ -48,7 +37,7 @@ pub fn type_at(text: &str, pos: i64) -> String {
     if let Err(e) = checked {
         let (a, b) = if e.span.file == FileId(0) { (e.span.start as usize, e.span.end as usize) } else { (0, 0) };
         let message = e.message.lines().next().unwrap_or("").to_string();
-        return format!("error {} {} {}", char_of(text, a), char_of(text, b), message);
+        return format!("error {a} {b} {message}");
     }
     let mut best: Option<(usize, usize, crate::ast::TyId)> = None;
     for (&e, &t) in c.facts.types.iter() {
@@ -62,7 +51,7 @@ pub fn type_at(text: &str, pos: i64) -> String {
         }
     }
     match best {
-        Some((a, b, t)) => format!("{} {} {}", char_of(text, a), char_of(text, b), named(&mut c, t)),
+        Some((a, b, t)) => format!("{a} {b} {}", named(&mut c, t)),
         None => format!("error {pos} {pos} no expression here"),
     }
 }

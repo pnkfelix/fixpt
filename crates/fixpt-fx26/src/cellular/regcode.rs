@@ -325,7 +325,7 @@ impl Compiler<'_> {
     /// Where `span` starts, as [`place_of`] says a place written in a text.
     fn span_place(&self, span: fixpt_read::Span) -> i64 {
         if span.file.0 == 0 {
-            self.char_at.get(span.start as usize).map_or(-1, |&c| c as i64)
+            self.char_at(span).map_or(-1, |c| c as i64)
         } else {
             1_000_000_000 * (span.file.0 as i64 - 1000) + self.loaded_char_at(span) as i64
         }

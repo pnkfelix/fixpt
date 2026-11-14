@@ -595,22 +595,13 @@ fn effect_summaries_agree() {
                     c.top_all(f).expect("checks");
                 }
             }
-            // Bytes to characters, as the FX-26 reader counts.
-            let mut char_at = vec![0u32; program.len() + 1];
-            let mut n = 0;
-            for (b, ch) in program.char_indices() {
-                for x in &mut char_at[b..b + ch.len_utf8()] {
-                    *x = n;
-                }
-                n += 1;
-            }
-            char_at[program.len()] = n;
+            // In characters, both, as FX-26 counts (`fixpt_fx26::chars`).
             let mut rust: HashMap<(u32, u32), i64> = HashMap::default();
             for ((f, a, b), k) in c.effect_summaries() {
                 if f != 0 {
                     continue;
                 }
-                let e = rust.entry((char_at[a as usize], char_at[b as usize])).or_insert(k as i64);
+                let e = rust.entry((a, b)).or_insert(k as i64);
                 *e = (*e).max(k as i64);
             }
             for (span, k) in &fx {

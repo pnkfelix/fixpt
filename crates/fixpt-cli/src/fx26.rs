@@ -15,12 +15,10 @@ use fixpt_fx26::{Checker, Top};
 use fixpt_fx26::heap_syn::Form;
 use fixpt_read::{FileId, SyntaxProfile};
 
-/// Line and column (both from 1) of byte `at` in `text`.
+/// The line and column of character `at` of `text`: a span's, in
+/// characters (`fixpt_fx26::chars`).
 fn line_col(text: &str, at: usize) -> (usize, usize) {
-    let before = &text[..at.min(text.len())];
-    let line = before.matches('\n').count() + 1;
-    let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
-    (line, col)
+    fixpt_fx26::chars::line_col(text, at)
 }
 
 /// `FILE LINE COL`, as `,at` takes it: the file's name may hold spaces;
@@ -657,9 +655,10 @@ pub fn repl(backend: Backend) -> i32 {
                 program.push('\n');
                 // What comes before it in its entry blank, so that its places
                 // are its own there.
+                // In characters, as spans are (`fixpt_fx26::chars`).
                 let entry = session.entry_start(form.span());
-                let start = (form.span().start as usize - entry).min(text.len());
-                let before: String = text[..start].chars().map(|c| if c == '\n' { c } else { ' ' }).collect();
+                let start = form.span().start as usize - entry;
+                let before: String = text.chars().take(start).map(|c| if c == '\n' { c } else { ' ' }).collect();
                 let own = before + session.session_text_at(form.span());
                 sources.push(fixpt_fx26::query::Source { name: name.clone(), text: own, base: session.checker.base_dir.clone() });
             }
@@ -1853,8 +1852,11 @@ fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::spec
     // and all of it is forgotten afterwards.
     let error = session.checking(|c| try_all(c, &forms, &mut |e| {
         // In what is typed, or (of a macro's template, typed before) not.
+        // In characters past `base` (`fixpt_fx26::chars`); `believe` and
+        // `char_span` take bytes of what is typed.
         let typed = e.span.start as usize >= base && e.span.file == FileId(0);
         let (start, end) = (e.span.start as usize - if typed { base } else { 0 }, e.span.end as usize - if typed { base } else { 0 });
+        let (start, end) = (fixpt_fx26::chars::byte_at(&p.closed, start), fixpt_fx26::chars::byte_at(&p.closed, end));
         (p.finished(text) || (typed && p.believe(start, end))).then(|| Note {
             span: if typed { char_span(text, start, end) } else { None },
             message: e.message.to_string(),

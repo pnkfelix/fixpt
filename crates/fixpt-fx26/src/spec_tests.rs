@@ -73,7 +73,7 @@ pub fn test_program(session: &mut Fx26Session, text: &str, runs: usize) -> Resul
     // Its definitions, then each expression of its own, apart: one in which
     // a specification does not hold is a counterexample, the program's.
     let forms = definitions_of(session, &checked)?;
-    let piece = |(f, _): &(fixpt_read::Span, bool)| &checked[f.start as usize..f.end as usize];
+    let piece = |(f, _): &(fixpt_read::Span, bool)| crate::chars::slice(&checked, *f);
     let (defs, exps): (Vec<_>, Vec<_>) = forms.iter().partition(|(_, defines)| *defines);
     let defs: String = defs.iter().map(|f| format!("{}\n", piece(f))).collect();
     let exps: Vec<String> = exps.iter().map(|f| piece(f).to_string()).collect();
@@ -163,7 +163,9 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
         if ps.len() != spec.params.len() {
             continue;
         }
-        let (first, last) = (body[0].span().start as usize, body[body.len() - 1].span().end as usize);
+        // Spans are in characters (`crate::chars`); the edits, bytes of `text`.
+        let b = |c: u32| crate::chars::byte_at(text, c as usize);
+        let (first, last) = (b(body[0].span().start), b(body[body.len() - 1].span().end));
         let checks = |which: &str, f: &Formula<Named>| format!("(if {} #u (error \"the {which} of {name} does not hold\"))", source(c, f, &ps));
         // The body's value at the result's type, as the type had it there.
         let result = match c.arena.get(c.arena.resolve(c.global_type(n).expect("typed"))) {
@@ -188,12 +190,12 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
         if let (false, &[_, _, ty, _]) = (called.is_empty(), &items[..]) {
             let bound: String = called.iter().map(|g| format!("({0} {0})", c.interner.name(*g))).collect::<Vec<_>>().join(" ");
             let (ty, lambda) = (ty.span(), lambda.span());
-            let ty = &text[ty.start as usize..ty.end as usize];
-            edits.push((lambda.start as usize, lambda.start as usize, format!("(let ({bound}) (letrec (({name} {ty} ")));
-            edits.push((lambda.end as usize, lambda.end as usize, format!(")) {name}))")));
+            let ty = crate::chars::slice(text, ty);
+            edits.push((b(lambda.start), b(lambda.start), format!("(let ({bound}) (letrec (({name} {ty} ")));
+            edits.push((b(lambda.end), b(lambda.end), format!(")) {name}))")));
         }
-        let end = f.span().end as usize;
-        let plain = format!("\n({head} {PLAIN}{name}{}", &text[items[1].span().end as usize..end]);
+        let end = b(f.span().end);
+        let plain = format!("\n({head} {PLAIN}{name}{}", &text[b(items[1].span().end)..end]);
         edits.push((end, end, plain));
     });
     edits.sort_by_key(|(a, b, _)| std::cmp::Reverse((*a, *b)));
@@ -454,7 +456,7 @@ fn callable(session: &Fx26Session, name: &str, params: &[String]) -> Option<(Vec
 pub fn replaying(session: &mut Fx26Session, text: &str) -> Result<Vec<(String, Vec<String>)>, String> {
     let (checked, defined) = instrumented(session, text)?;
     let forms = definitions_of(session, &checked)?;
-    let defs: String = forms.iter().filter(|(_, defines)| *defines).map(|(f, _)| format!("{}\n", &checked[f.start as usize..f.end as usize])).collect();
+    let defs: String = forms.iter().filter(|(_, defines)| *defines).map(|(f, _)| format!("{}\n", crate::chars::slice(&checked, *f))).collect();
     if let Err(e) = session.run_program(&defs).map_err(|e| e.message)? {
         return Err(format!("the program's definitions fail: {e}"));
     }

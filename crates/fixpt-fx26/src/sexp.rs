@@ -63,42 +63,12 @@ fn fields(p: Local<'_>) -> Vec<Local<'_>> {
     (0..).map_while(|i| p.value(i)).collect()
 }
 
-/// Byte offset to character position, for text with non-ASCII in it: the
-/// program's, and each file it loaded ([`Chars::with_loaded`]).
-pub struct Chars(Vec<u32>, fixpt_hash::HashMap<fixpt_read::FileId, Vec<u32>>);
-
-impl Chars {
-    pub fn of(text: &str) -> Chars {
-        Chars(Self::table(text), Default::default())
-    }
-    /// These, and the files `c` loaded, a span of one of them at its
-    /// character there.
-    pub fn with_loaded(mut self, c: &Checker) -> Chars {
-        self.1 = c.loaded.values().map(|(_, text, file)| (*file, Self::table(text))).collect();
-        self
-    }
-    fn table(text: &str) -> Vec<u32> {
-        let mut v = vec![0u32; text.len() + 1];
-        let mut c = 0u32;
-        for (i, ch) in text.char_indices() {
-            for b in 0..ch.len_utf8() {
-                v[i + b] = c;
-            }
-            c += 1;
-        }
-        v[text.len()] = c;
-        v
-    }
-    fn at(&self, file: fixpt_read::FileId, byte: u32) -> u32 {
-        self.1.get(&file).unwrap_or(&self.0)[byte as usize]
-    }
-}
-
 /// A top-level form the Rust side checked, in the shape of `parser.fx`'s
 /// `top`. `span` is the form's; `kth`, which of the expressions at its span
 /// each is, the program's forms walked in order.
-pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span, kth: &Kth) -> String {
-    let (a, b) = (chars.at(span.file, span.start), chars.at(span.file, span.end));
+pub fn show_top(c: &Checker, top: &Top, span: fixpt_read::Span, kth: &Kth) -> String {
+    // In characters, as FX-26's positions are, and spans (`crate::chars`).
+    let (a, b) = (span.start, span.end);
     match top {
         Top::Define { name, exp, typed, inferred, .. } => {
             // A `define*`'s type is a list of the type and the `define*`.
@@ -107,28 +77,28 @@ pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span, k
                 (true, _) => "(_)",
                 _ => "()",
             };
-            format!("(t-define {} {ty} {} {a} {b})", c.interner.name(*name), show_exp(c, chars, *exp, kth))
+            format!("(t-define {} {ty} {} {a} {b})", c.interner.name(*name), show_exp(c, *exp, kth))
         }
         Top::DefineRec { bindings, .. } => {
             let bs: Vec<String> =
-                bindings.iter().map(|(n, _, e)| format!("[{} _ {}]", c.interner.name(*n), show_exp(c, chars, *e, kth))).collect();
+                bindings.iter().map(|(n, _, e)| format!("[{} _ {}]", c.interner.name(*n), show_exp(c, *e, kth))).collect();
             format!("(t-define-rec ({}) {a} {b})", bs.join(" "))
         }
         Top::DefineType { .. } | Top::DefineTypeFamily { .. } => format!("(t-define-type _ _ {a} {b})"),
         Top::DefineGenerative { .. } => format!("(t-define-generative _ _ {a} {b})"),
         Top::DefineEffect { .. } => format!("(t-define-effect _ _ {a} {b})"),
         Top::DefineConvention { .. } => format!("(t-define-convention _ _ {a} {b})"),
-        Top::Exp(k) => format!("(t-exp {})", show_exp(c, chars, k.exp, kth)),
+        Top::Exp(k) => format!("(t-exp {})", show_exp(c, k.exp, kth)),
     }
 }
 
-fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
+fn show_exp(c: &Checker, e: ExpId, kth: &Kth) -> String {
     let sp = c.arena.span_of(e);
     // Its key, as the walk made it (`ids::Kth::key`).
     let (k, kr) = kth.key(e);
-    let (a, b) = (chars.at(sp.file, sp.start), format!("{} {k} {kr}", chars.at(sp.file, sp.end)));
+    let (a, b) = (sp.start, format!("{} {k} {kr}", sp.end));
     let name = |s| c.interner.name(s).to_string();
-    let go = |x: ExpId| show_exp(c, chars, x, kth);
+    let go = |x: ExpId| show_exp(c, x, kth);
     let list = |xs: Vec<String>| format!("({})", xs.join(" "));
     match c.arena.exp_at(e).clone() {
         Exp::Var(s) => format!("(e-var {} {a} {b})", name(s)),

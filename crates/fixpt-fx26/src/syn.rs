@@ -33,8 +33,8 @@ pub fn read_with_fx26_reader(scheme: &mut Session, checker: &mut crate::Checker,
         let call = |s: &mut Session, name: &str| {
             s.call_global(&format!("{READER_PREFIX}{name}"), &[st]).map_err(|e| fail(e.to_string()))
         };
-        let offsets = byte_offsets(text);
-        let at = |c: i64| offsets.get(c as usize).copied().unwrap_or(text.len()) as u32;
+        // A position FX-26 says, in characters, as the checker's spans are.
+        let at = |c: i64| c.clamp(0, u32::MAX as i64) as u32;
         let status = call(s, "eager-status")?;
         match s.view(|v| v.get(status).symbol_name()).as_deref() {
             Some("complete") => {}
@@ -47,11 +47,11 @@ pub fn read_with_fx26_reader(scheme: &mut Session, checker: &mut crate::Checker,
                 }));
             }
             _ => {
-                return Err(FxError::at(Span::new(file, text.len() as u32, text.len() as u32), "the text ends in the middle of a form"));
+                let end = text.chars().count() as u32;
+                return Err(FxError::at(Span::new(file, end, end), "the text ends in the middle of a form"));
             }
         }
         let syns = call(s, "eager-state-syntax")?;
-        crate::heap_syn::note_text(file, std::sync::Arc::from(text));
         let mut forms = Ok(Vec::new());
         s.make(|m| {
             let mut l = m.get(syns);
@@ -566,8 +566,8 @@ pub fn check_with_fx26_checker(scheme: &mut Front, standard: Handle, file: FileI
         lines(s, true).map_err(|e| fail(e.to_string()))?;
         let result = crate::entries::call(&mut *s, "check-program", &[standard, tops.tops]).map_err(|e| fail(e.to_string()))?;
         phase("checked");
-        let offsets = byte_offsets(text);
-        let at = |c: i64| offsets.get(c as usize).copied().unwrap_or(text.len()) as u32;
+        // A position FX-26 says, in characters, as the checker's spans are.
+        let at = |c: i64| c.clamp(0, u32::MAX as i64) as u32;
         let checked = s.view(|v| {
             let r = v.get(result);
             let tag = r.sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default();
@@ -628,7 +628,7 @@ pub fn read_to_syns_at(scheme: &mut Front, file: FileId, text: &str, at: i64) ->
         // unfinished read here has no one place to blame.
         let mut interner = fixpt_read::Interner::new();
         if let Err(e) = fixpt_read::Reader::new(text, file, fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() {
-            return Err(FxError::at(e.span, e.message));
+            return Err(FxError::at(crate::chars::of_bytes(text, e.span), e.message));
         }
         return Err(fail("the FX-26 reader did not read the whole text".into()));
     }
@@ -882,9 +882,8 @@ fn parse_syns_at(scheme: &mut Front, file: FileId, text: Option<(&str, i64)>, sy
     });
     if let Some((msg, a, b)) = err {
         let span = match text {
-            Some((text, base)) => {
-                let offsets = byte_offsets(text);
-                let at = |c: i64| offsets.get((c - base).max(0) as usize).copied().unwrap_or(text.len()) as u32;
+            Some((_, base)) => {
+                let at = |c: i64| (c - base).clamp(0, u32::MAX as i64) as u32;
                 fx26_span(scheme, file, &at, a, b)
             }
             None => handed_span(scheme, file, a, b),
@@ -1101,11 +1100,8 @@ fn supply_loaded_from(scheme: &mut Front, file: FileId, from: Loads<'_>) -> R<Ve
     crate::entries::call(&mut *scheme, "loaded-files!", &[list]).map_err(|e| fail(e.to_string()))?;
     let mut list = scheme.make(|_| Value::NULL);
     let char_at: Box<dyn Fn(u32) -> i64> = match from {
-        Loads::Text(text, base) => {
-            let offsets = byte_offsets(text);
-            Box::new(move |byte| base + offsets.partition_point(|&o| o < byte as usize) as i64)
-        }
-        Loads::Forms(..) => Box::new(move |byte| crate::heap_syn::at_of(Span::new(file, byte, byte)).start),
+        Loads::Text(_, base) => Box::new(move |c| base + c as i64),
+        Loads::Forms(..) => Box::new(move |c| crate::heap_syn::at_of(Span::new(file, c, c)).start),
     };
     for given in INCLUDES.with(|i| std::mem::take(&mut *i.borrow_mut())).into_iter().rev() {
         let mut fields = vec![scheme.make(|_| Value::fixnum(37))];
@@ -1323,8 +1319,7 @@ fn supply_loaded_in(
             if read.is_err() {
                 return Ok(());
             }
-            let offsets = byte_offsets(text);
-            Box::new(move |span| base + offsets.partition_point(|&o| o < span.start as usize) as i64)
+            Box::new(move |span| base + span.start as i64)
         }
         Loads::Forms(given) => {
             loads.extend_from_slice(given);
@@ -1387,9 +1382,7 @@ fn supply_loaded_in(
             Err(e) => (0, format!("cannot read `{path}`: {e}"), scheme.make(|_| Value::NULL), String::new()),
             Ok(ftext) => match read_to_syns_at(scheme, FileId(1001 + *read), &ftext, LOAD_BASE_STEP * (*read as i64 + 1)) {
                 Err(e) => {
-                    let before = &ftext[..(e.span.start as usize).min(ftext.len())];
-                    let line = before.matches('\n').count() + 1;
-                    let col = before.chars().rev().take_while(|c| *c != '\n').count() + 1;
+                    let (line, col) = crate::chars::line_col(&ftext, e.span.start as usize);
                     (0, format!("in `{path}`, {line}:{col}: {}", e.message), scheme.make(|_| Value::NULL), ftext)
                 }
                 Ok(syns) => {
@@ -1423,12 +1416,6 @@ struct Read {
 }
 
 /// The byte offset of each character, and of the end.
-fn byte_offsets(text: &str) -> Vec<usize> {
-    let mut v: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
-    v.push(text.len());
-    v
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

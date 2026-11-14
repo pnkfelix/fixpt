@@ -699,10 +699,7 @@ impl Checker {
         // As read for its shape, if it was: its places made this file's.
         let kept = at.and_then(|(at, _)| self.macros.forms_read(&at.display().to_string(), text));
         let mut forms = match kept {
-            Some(forms) => {
-                crate::heap_syn::note_text(file, std::sync::Arc::from(text));
-                forms.iter().map(|f| placed_in(f, file)).collect()
-            }
+            Some(forms) => forms.iter().map(|f| placed_in(f, file)).collect(),
             None => self.module_file_forms(file, text)?,
         };
         if let Some((at, input)) = at {
@@ -760,8 +757,10 @@ impl Checker {
     /// A built-in module file's items, `text`, as a module file is read
     /// (`module_file_forms`, `without_own_macros`), if it defines macros of
     /// its own; none if it does not, when its text is its items as written.
+    /// Read on the side (`read_syn_side`), not as file 0: its text is not
+    /// the program's, whose places file 0's text says while it is checked.
     pub(crate) fn built_in_items(&mut self, text: &str) -> R<Option<Vec<Syn>>> {
-        let read = crate::heap_syn::read_syn(text, FileId(0), &mut self.interner);
+        let read = crate::heap_syn::read_syn_side(text, &mut self.interner);
         let forms = read.map_err(|e| FxError::at(e.span, e.message))?;
         let defines = |s: &Syn| syntax_names(s, &self.interner).is_some();
         let own = forms.iter().any(|f| {
@@ -771,7 +770,7 @@ impl Checker {
         if !own {
             return Ok(None);
         }
-        let forms = self.module_file_forms(FileId(0), text)?;
+        let forms = self.module_file_forms_of(forms, text)?;
         self.without_own_macros(forms).map(Some)
     }
 
@@ -901,6 +900,12 @@ impl Checker {
     fn module_file_forms(&mut self, file: FileId, text: &str) -> R<Vec<Syn>> {
         let r = crate::heap_syn::read_syn(text, file, &mut self.interner);
         let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
+        self.module_file_forms_of(forms, text)
+    }
+
+    /// [`module_file_forms`](Self::module_file_forms) of `forms`, `text`
+    /// read already.
+    fn module_file_forms_of(&mut self, forms: Vec<Syn>, text: &str) -> R<Vec<Syn>> {
         let forms = forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>()?;
         self.file_own_expanded_syn(forms, text)
     }

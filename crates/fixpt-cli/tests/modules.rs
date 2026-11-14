@@ -141,3 +141,19 @@ fn module_programs_run_alike_in_every_mode() {
     assert!(runs.len() >= PROGRAMS.len() * MODES.iter().filter(|m| runs_here(m) && !m.contains(&"fx-cells-stencils-cellcc")).count(), "only {} runs", runs.len());
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// A built-in module's load far into a program is found where it is, by
+/// both checkers: the module's text, read on the side, leaves the
+/// program's places as they are. Read as file 0, its text took the
+/// program's places' table, and a load past the module's length
+/// (`conditions.fx`'s 2179 characters) was "not read" (Kayak's report,
+/// 2026-11-13). Of a program all ASCII, and of one that is not.
+#[test]
+fn a_built_in_load_past_the_modules_length_is_found() {
+    for before in ["", "; λ\n"] {
+        let text = format!("{before};{}\n(define c (load-module \"fx26:conditions.fx\"))\n42", "-".repeat(3000));
+        let out = Command::new(FIXPT).args(["eval", &text]).output().expect("fixpt runs");
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && stdout.contains("42 : int"), "{before:?}: {stdout}{stderr}");
+    }
+}

@@ -88,9 +88,10 @@ impl Wrapped {
         Wrapped { whole: format!("{prefix}{part}{suffix}"), skip, len: code.chars().count() as i64 }
     }
 
-    /// Where byte `b` of the whole is, in characters of the code.
-    pub(crate) fn place(&self, b: u32) -> i64 {
-        (self.whole[..(b as usize).min(self.whole.len())].chars().count() as i64 - self.skip).clamp(0, self.len)
+    /// Where character `c` of the whole is (a span's, `crate::chars`), in
+    /// characters of the code.
+    pub(crate) fn place(&self, c: u32) -> i64 {
+        (c as i64 - self.skip).clamp(0, self.len)
     }
 }
 

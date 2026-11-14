@@ -43,30 +43,24 @@ pub struct FormFacts {
 /// (`syn.rs`'s `LOAD_BASE_STEP`).
 const LOAD_BASE_STEP: i64 = 1_000_000_000;
 
-fn byte_offsets(text: &str) -> Vec<usize> {
-    let mut v: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
-    v.push(text.len());
-    v
-}
-
 impl FormFacts {
     /// Of `tops`, the forms of `text`, in `file`, as checker `c` checked
     /// them; with `only`, of their expressions alone (the checker holding
     /// others: a session's earlier forms, and a form checked again).
-    pub fn of(c: &Checker, tops: &[&Top], file: FileId, text: &str, only: bool) -> FormFacts {
+    pub fn of(c: &Checker, tops: &[&Top], file: FileId, _text: &str, only: bool) -> FormFacts {
         let mut kth = crate::ids::Kth::new();
         for t in tops {
             kth.top(c, t);
         }
-        let offsets = byte_offsets(text);
         // Looked up twice a fact, hundreds of thousands of times for the
         // front end: by `IdHasher`, not SipHash (the Mac team's profile,
-        // `TODO.md` §257, some 6%).
-        let files: crate::ast::IdMap<FileId, Vec<usize>> = c.loaded.values().map(|(_, t, f)| (*f, byte_offsets(t))).collect();
-        let at = |f: FileId, byte: u32| -> i64 {
+        // `TODO.md` §257, some 6%). A span is in characters, as FX-26's
+        // positions are (`crate::chars`): a loaded file's past its base.
+        let files: crate::ast::IdMap<FileId, ()> = c.loaded.values().map(|(_, _, f)| (*f, ())).collect();
+        let at = |f: FileId, ch: u32| -> i64 {
             match files.get(&f) {
-                Some(o) if f != file => LOAD_BASE_STEP * (f.0 as i64 - 1000) + o.partition_point(|&x| x < byte as usize) as i64,
-                _ => offsets.partition_point(|&o| o < byte as usize) as i64,
+                Some(()) if f != file => LOAD_BASE_STEP * (f.0 as i64 - 1000) + ch as i64,
+                _ => ch as i64,
             }
         };
         let place = |e: ExpId| {

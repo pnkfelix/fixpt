@@ -4,7 +4,7 @@
 use fixpt_engine::Backend;
 use fixpt_fx26::Checker;
 use fixpt_fx26::ids::Kth;
-use fixpt_fx26::sexp::{Chars, show_top};
+use fixpt_fx26::sexp::show_top;
 use fixpt_fx26::session::Fx26Session;
 use fixpt_read::FileId;
 
@@ -18,7 +18,6 @@ fn rust_trees(text: &str, base: i64) -> Vec<String> {
     c.declare_ahead(&forms).expect("declares");
     let mut c2 = Checker::new();
     let forms2 = c2.read_in(FileId(0), text).expect("reads");
-    let chars = Chars::of(text);
     // The forms as read, before the Rust checker expands any into several
     // (a `define-generative`'s conversions, each at its span): a form is
     // what the FX-26 parser takes as one, and what a reading folds.
@@ -54,8 +53,7 @@ fn rust_trees(text: &str, base: i64) -> Vec<String> {
             s = fixpt_fx26::ids::form_reading(s, &Default::default(), read[*i], &names, &loads);
             kth.form(&c2, s, &tops);
         }
-        let chars = chars.with_loaded(&c2);
-        forms.iter().flat_map(|(_, g)| g).map(|(t, span, _)| show_top(&c2, &chars, t, *span, &kth)).collect()
+        forms.iter().flat_map(|(_, g)| g).map(|(t, span, _)| show_top(&c2, t, *span, &kth)).collect()
     })
 }
 

@@ -165,27 +165,28 @@ fn same_syn(h: &fixpt_heap::Heap, a: fixpt_heap::Value, b: fixpt_heap::Value, pa
 }
 
 /// The heap's `syn`, looked at (`heap_syn::Rd`), is the Rust reader's
-/// `Syntax`: each piece's datum and its span, back from its place through
-/// the texts noted (`heap_syn::note_text`). For every program the tests read.
+/// `Syntax`: each piece's datum and its span, back from its place, the
+/// reader's bytes in characters (`fixpt_fx26::chars`). For every program
+/// the tests read.
 #[test]
 fn the_heap_syn_reads_back_as_the_rust_syntax() {
-    use fixpt_fx26::heap_syn::{note_text, HeapSyn, Rd, Syn, SymTable, V};
+    use fixpt_fx26::heap_syn::{HeapSyn, Rd, Syn, SymTable, V};
     use fixpt_read::{Datum, Syntax};
-    fn same(rd: Rd, s: Syn, x: &Syntax, name: &str) {
-        assert_eq!(rd.span(s), x.span, "{name}: a span");
+    fn same(rd: Rd, s: Syn, x: &Syntax, text: &str, name: &str) {
+        assert_eq!(rd.span(s), fixpt_fx26::chars::of_bytes(text, x.span), "{name}: a span");
         match (rd.view(s), &x.datum) {
             (V::List { items, tail }, Datum::List { items: xs, tail: xt }) => {
                 assert_eq!(items.len(), xs.len(), "{name}: a list's length at {:?}", x.span);
-                items.iter().zip(xs).for_each(|(a, b)| same(rd, *a, b, name));
+                items.iter().zip(xs).for_each(|(a, b)| same(rd, *a, b, text, name));
                 match (tail, xt) {
-                    (Some(a), Some(b)) => same(rd, a, b, name),
+                    (Some(a), Some(b)) => same(rd, a, b, text, name),
                     (None, None) => {}
                     _ => panic!("{name}: a tail at {:?}", x.span),
                 }
             }
             (V::Vector(items), Datum::Vector(xs)) => {
                 assert_eq!(items.len(), xs.len());
-                items.iter().zip(xs).for_each(|(a, b)| same(rd, *a, b, name));
+                items.iter().zip(xs).for_each(|(a, b)| same(rd, *a, b, text, name));
             }
             (V::Nil, Datum::Nil) => {}
             (V::Bool(a), Datum::Bool(b)) => assert_eq!(a, *b),
@@ -219,11 +220,10 @@ fn the_heap_syn_reads_back_as_the_rust_syntax() {
             drop(r);
             // The same text read as the reader's own trees, to hold them to.
             let trees = Reader::new(&text, FileId(0), SyntaxProfile::FX26, &mut interner).read_all().expect("read once");
-            note_text(FileId(0), text.as_str().into());
             let rd = Rd { heap: &heap, syms: &syms };
             assert_eq!(trees.len(), forms.len(), "{name}");
             for (x, s) in trees.iter().zip(&forms) {
-                same(rd, *s, x, &name);
+                same(rd, *s, x, &text, &name);
             }
             read += 1;
         }
@@ -232,16 +232,15 @@ fn the_heap_syn_reads_back_as_the_rust_syntax() {
 }
 
 /// A place past characters of more than one byte, as a message says it: the
-/// span of what is wrong, in the text's bytes, converted from the place's
-/// characters (`heap_syn::span_of`).
+/// span of what is wrong, in the text's characters, as the place is
+/// (`heap_syn::span_of`, `fixpt_fx26::chars`).
 #[test]
-fn a_place_past_wide_characters_is_said_in_bytes() {
+fn a_place_past_wide_characters_is_said_in_characters() {
     let text = ";; λ → ∀\n(define s string \"é\")\n(+ 1 s)\n";
     let e = match fixpt_fx26::session::compile_program_as(text, "fx:") {
         Err(e) => e,
         Ok(_) => panic!("`(+ 1 s)` adds a string"),
     };
-    let (start, end) = (e.span.start as usize, e.span.end as usize);
-    assert!(text.is_char_boundary(start) && text.is_char_boundary(end), "{start}..{end}: {}", e.message);
-    assert!(text[start..end].contains('s') && text[..start].ends_with("(+ 1 "), "{:?}: {}", &text[start..end], e.message);
+    let (piece, start) = (fixpt_fx26::chars::slice(text, e.span), fixpt_fx26::chars::byte_at(text, e.span.start as usize));
+    assert!(piece == "s" && text[..start].ends_with("(+ 1 "), "{piece:?}: {}", e.message);
 }
