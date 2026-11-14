@@ -1338,7 +1338,7 @@ pub fn read_syn_first(text: &str, interner: &mut Interner) -> fixpt_read::ReadRe
 /// piece of text with an interner of its own, no checker's, whose symbols
 /// are no world's. Nothing made in it outlives it.
 pub fn aside<R>(f: impl FnOnce() -> R) -> R {
-    let (mut heap, mut syms) = (Heap::new(), SymTable::default());
+    let (mut heap, mut syms) = (Heap::unfixed(), SymTable::default());
     with_syntax(&mut heap, &mut syms, f)
 }
 

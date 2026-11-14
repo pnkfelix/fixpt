@@ -1108,7 +1108,7 @@ fn lending<T>(world: &std::rc::Rc<std::cell::RefCell<crate::macros::SynWorld>>, 
     let (mut heap, mut syms) = {
         let mut w = world.borrow_mut();
         w.lending = true;
-        (w.heap.take().unwrap_or_else(|| Box::new(fixpt_heap::Heap::new())), std::mem::take(&mut w.syms))
+        (w.heap.take().unwrap_or_else(|| Box::new(fixpt_heap::Heap::unfixed())), std::mem::take(&mut w.syms))
     };
     if heap.collection_due() {
         heap.collect_due(&mut []);
@@ -1150,6 +1150,12 @@ impl Checker {
         }
         w.syms = Default::default();
         w.session = true;
+    }
+
+    /// Whether this checker's syntax is lent now (inside [`Checker::syn`]
+    /// or [`Checker::with_heap`]).
+    pub(crate) fn syntax_lent(&self) -> bool {
+        self.macros.withs.world.borrow().lending
     }
 
     /// `f`, with `heap`, its session's, lent for this checker's syntax

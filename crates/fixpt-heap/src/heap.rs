@@ -546,10 +546,24 @@ impl Heap {
         Heap::with_semispace(DEFAULT_SEMI_WORDS)
     }
 
+    /// A heap that is never at `FIXED_BASE`: for one that loads no image
+    /// and makes none (the Rust checker's syntax, a text read aside), so
+    /// that being made first it leaves that address to the heap that loads
+    /// the front end's image, spliced in place there, not copied.
+    pub fn unfixed() -> Heap {
+        Heap::with_semispace_fixed(DEFAULT_SEMI_WORDS, false)
+    }
+
     pub fn with_semispace(semi: usize) -> Heap {
+        Heap::with_semispace_fixed(semi, true)
+    }
+
+    /// A heap of semispaces of `semi` words: at `FIXED_BASE`, if `fixed`
+    /// and no other heap is.
+    fn with_semispace_fixed(semi: usize, fixed: bool) -> Heap {
         let semi = semi.max(1024);
         // The first heap at once at `FIXED_BASE`, if it can be there.
-        let fixed = !FIXED_TAKEN.swap(true, std::sync::atomic::Ordering::SeqCst);
+        let fixed = fixed && !FIXED_TAKEN.swap(true, std::sync::atomic::Ordering::SeqCst);
         let mem = fixed.then(|| fixpt_memmgmt::Words::new_at(MEM_WORDS, FIXED_BASE)).flatten();
         let at_fixed = mem.is_some();
         if fixed && !at_fixed {

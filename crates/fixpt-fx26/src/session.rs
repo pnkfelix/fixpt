@@ -28,7 +28,17 @@ pub const RUNTIME: &str = include_str!("runtime.scm");
 /// lent for its syntax (`Checker::with_heap`). Apart from the session, so
 /// that `f` may borrow the session's other fields.
 pub(crate) fn checking<T>(checker: &mut Checker, scheme: &mut crate::front::Front, f: impl FnOnce(&mut Checker) -> T) -> T {
-    checker.with_heap(&mut scheme.runtime_unrooted().heap, f)
+    let heap = &mut scheme.runtime_unrooted().heap;
+    // Before the outermost, a collection if one is due, as a checker's own
+    // heap has (`Checker::syn`): else what the Rust checker leaves, which
+    // only FX-26 code's safepoints would collect, grows the heap without
+    // bound where none runs. Every handle is a root, and the checker's
+    // syntax is held only by its handles (`Form`, `Kept`), whose global
+    // the heap updates.
+    if !checker.syntax_lent() && heap.collection_due() {
+        heap.collect_due(&mut []);
+    }
+    checker.with_heap(heap, f)
 }
 
 /// What the front end written in FX-26 is given of a form: a text, or the

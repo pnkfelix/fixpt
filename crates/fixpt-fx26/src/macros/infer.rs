@@ -1351,7 +1351,7 @@ mod tests {
         for path in &names {
             let text = std::fs::read_to_string(path).unwrap();
             let mut interner = Interner::default();
-            let (mut heap, mut syms) = (fixpt_heap::Heap::new(), crate::heap_syn::SymTable::default());
+            let (mut heap, mut syms) = (fixpt_heap::Heap::unfixed(), crate::heap_syn::SymTable::default());
             crate::heap_syn::with_syntax(&mut heap, &mut syms, || {
             let Ok(forms) = crate::heap_syn::read_syn(&text, fixpt_read::FileId(1), &mut interner) else { return };
             let mut m = Macros::default();

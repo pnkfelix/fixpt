@@ -3675,7 +3675,7 @@ fn in_expansion(s: &Syn, made: u32) -> Syn {
 mod tests {
     /// The kernel's list `list`'s names, read in a heap of the test's own.
     fn kernel_names(list: &str) -> Vec<String> {
-        let (mut heap, mut syms, mut interner) = (fixpt_heap::Heap::new(), crate::heap_syn::SymTable::default(), fixpt_read::Interner::default());
+        let (mut heap, mut syms, mut interner) = (fixpt_heap::Heap::unfixed(), crate::heap_syn::SymTable::default(), fixpt_read::Interner::default());
         crate::heap_syn::with_syntax(&mut heap, &mut syms, || {
             let forms = crate::heap_syn::read_syn_unplaced(super::KERNEL, &mut interner).expect("reads");
             super::kernel_list(&forms, &interner, list).iter().map(|w| interner.name(w.sym().expect("a name")).to_string()).collect()
