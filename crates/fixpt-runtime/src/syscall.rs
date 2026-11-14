@@ -31,9 +31,13 @@ pub static PROCEDURAL: std::sync::OnceLock<fn(&str) -> Result<String, String>> =
 /// (set empty, unsaid): read here for both front ends, so that they agree
 /// and say alike why a value is no limit.
 pub fn macro_limit(name: &str) -> Result<usize, String> {
-    let default = match name {
-        "USES" => 10_000,
-        "DEPTH" => 1_000,
+    // `RECHECK`: whether a use a template made is aligned with its
+    // signature again, 0 (no, the default) or 1 (`typed-macros.md`,
+    // "Decided: a use a template made is not aligned again").
+    let (default, least, most) = match name {
+        "USES" => (10_000, 1, 1_000_000_000),
+        "DEPTH" => (1_000, 1, 1_000_000_000),
+        "RECHECK" => (0, 0, 1),
         _ => return Err(format!("no limit of macro expansion is named `{name}`")),
     };
     let var = format!("FIXPT_MACRO_{name}");
@@ -41,7 +45,8 @@ pub fn macro_limit(name: &str) -> Result<usize, String> {
         None => Ok(default),
         Some(v) if v.to_str().is_some_and(|s| s.trim().is_empty()) => Ok(default),
         Some(v) => match v.to_str().map(str::trim).and_then(|s| s.parse::<usize>().ok()) {
-            Some(n) if (1..=1_000_000_000).contains(&n) => Ok(n),
+            Some(n) if (least..=most).contains(&n) => Ok(n),
+            _ if name == "RECHECK" => Err(format!("`{var}` is `{}`: it is 0 or 1", v.to_string_lossy())),
             _ => Err(format!("`{var}` is `{}`: a limit of macro expansion is a whole number from 1 to 1000000000", v.to_string_lossy())),
         },
     }

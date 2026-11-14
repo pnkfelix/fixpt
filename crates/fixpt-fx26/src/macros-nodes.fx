@@ -69,7 +69,9 @@
 ;; held to; where its macro is defined; and its `syntax-rules`'
 ;; trailmarks, each the binding it is (`macros.rs`'s `Clause`).
 (define-type contracts (listof (tupleof symbol syn) acyclic))
-(define-type clause (tupleof syn syn actions pvars contracts def-env marked))
+;; The last, its template's checked uses, by where each starts
+;; (`checked-uses`).
+(define-type clause (tupleof syn syn actions pvars contracts def-env marked (listof int acyclic)))
 (define-type clauses (listof clause acyclic))
 ;; A macro defined: its signature, its clauses, the binders of its
 ;; signature's `(poly (binder …) σ)`, if it has one, and what it makes (0 an

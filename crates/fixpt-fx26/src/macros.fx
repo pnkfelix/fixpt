@@ -52,7 +52,7 @@
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias respanned in-expansion use-entered? use-left!
-        chain-begun!)
+        chain-begun! checked-uses trust-if! use-aligned!)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names trailmark-form define-trailmark hide-marks!
@@ -74,8 +74,8 @@
 ;; says what is in scope there, and a reference to a pattern's binder is
 ;; where no other pattern binder may shadow it. `lits`, its `syntax-rules`'
 ;; literals.
-(define check-clause (->* (fails syn sty int syns-a names scopes) clause)
-  (lambda (fail c sig defn poly lits file)
+(define check-clause (->* (fails syn sty int syns-a names scopes symbol) clause)
+  (lambda (fail c sig defn poly lits file name)
     (let ((two (proper c)))
       (if (not (= (len two) 2))
           (begin (fail-at fail clause-usage c) (stub c))
@@ -84,11 +84,11 @@
                 (begin (fail-at fail clause-usage (car two)) (stub c))
                 (let* ((pattern (nth whole 1))
                        (pv (pattern-vars fail sig pattern defn lits)) (ps (extract pv 1))
-                       (template (nth two 1)))
-                  (tuple pattern template
-                         (template-actions fail ps template defn (extract pv 2) file) ps
-                         (contracts-of ps (binder-names poly) file)
-                         (clause-def-env fail c ps poly file) (marks-of lits)))))))))
+                       (template (nth two 1))
+                       (acts (template-actions fail ps template defn (extract pv 2) file)))
+                  (tuple pattern template acts ps (contracts-of ps (binder-names poly) file)
+                         (clause-def-env fail c ps poly file) (marks-of lits)
+                         (checked-uses name sig ps)))))))))
 ;; Where clause `c`'s macro is defined (`def-env-of-file`): refused where a
 ;; module file uses its own macro with a typed hole, whose contract is read
 ;; by a qualifier, which names no file's own items.
@@ -105,7 +105,7 @@
 (define stub (->* (syn) clause)
   (lambda (c)
     (tuple c c (the actions nil) (the pvars nil) (the contracts nil) (def-env-top)
-           (the marked nil))))
+           (the marked nil) (the (listof int acyclic) nil))))
 ;; Each typed hole's contract, its type read as a use reads the template's
 ;; types; none where it names the macro's own binders, which no use can
 ;; write.
@@ -455,7 +455,7 @@
     (let ((r (prompt parse-tag
                      (begin (set tried-checks (list (check-each pfail-at (extract w 4) (extract s 2)
                                                                (extract s 3) (extract s 1)
-                                                               (extract w 3) file)))
+                                                               (extract w 3) file (extract w 1))))
                             (p-ok nil))
                      (lambda (r) r))))
       (tagcase r (p-err (m x y) (the (listof clauses acyclic) nil))
@@ -501,15 +501,15 @@
                         (refit w file)))
                (s (if (null? alt) s0 (car alt)))
                (cs (check-each f (extract w 4) (extract s 2) (extract s 3) (extract s 1)
-                               (extract w 3) file)))
+                               (extract w 3) file (extract w 1))))
           (cons (tuple (extract w 1) (tuple (extract s 2) cs (extract s 1) (extract s 3)))
                 (checked-each fail (cdr ws) (cdr sigs) file))))))
-(define check-each (->* (fails syns-a sty int syns-a names scopes) clauses)
-  (lambda (fail cs sig defn poly lits file)
+(define check-each (->* (fails syns-a sty int syns-a names scopes symbol) clauses)
+  (lambda (fail cs sig defn poly lits file name)
     (if (null? cs)
         nil
-        (let ((c (check-clause fail (car cs) sig defn poly lits file)))
-          (cons c (check-each fail (cdr cs) sig defn poly lits file))))))
+        (let ((c (check-clause fail (car cs) sig defn poly lits file name)))
+          (cons c (check-each fail (cdr cs) sig defn poly lits file name))))))
 
 ;;; ------------------------------------------------------------ the session
 
@@ -729,7 +729,7 @@
                    (expand-procedural fail name s made)))
           (begin
             (nodes-reset!)
-            (align in-use 2 (the pvars nil) (extract m 1) operands -1 nil)
+            (use-aligned! in-use s (extract m 1) operands)
             (first-match fail name s operands (extract m 2)))))))
 ;; The pattern variables of `ps` that are names (`bvar`, `dvar`, `id`),
 ;; which match a name alone (a `label` may be a keyword).
@@ -798,7 +798,7 @@
          (let* ((a (source-key ta made)) (b (source-key tb made)))
            (transcribe-name c t (syn-symbol t) a b act bs made)))
         ((not (null? (list-items t)))
-         (let* ((a (source-key ta made))
+         (let* ((a (source-key ta made)) (tr (trust-if! c ta a made))
                 (xs (transcribe-items fail c (list-items t) path bs made))
                 (rest (tagcase t
                         (dotted (items tail d c2 e x)

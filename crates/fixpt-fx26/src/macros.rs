@@ -235,9 +235,9 @@ pub(crate) struct Mark {
 /// one before, past which one that changes each time is taken not to end
 /// (`Macros::enter`). 10000 and 1000, or as `FIXPT_MACRO_USES` and
 /// `FIXPT_MACRO_DEPTH` set them (`fixpt_runtime::syscall::macro_limit`).
-fn limits(at: &Syn) -> R<(usize, usize)> {
+fn limits(at: &Syn) -> R<(usize, usize, bool)> {
     let read = |name| fixpt_runtime::syscall::macro_limit(name).map_err(|why| FxError::at(at.at(), why));
-    Ok((read("USES")?, read("DEPTH")?))
+    Ok((read("USES")?, read("DEPTH")?, read("RECHECK")? == 1))
 }
 
 /// How many parts syntax `s` has, each list, pair's tail and atom one.
@@ -299,6 +299,13 @@ struct Clause {
     contracts: HashMap<Sym, Kept>,
     /// Where its macro is defined, what its aliases are read in.
     def_env: hygiene::DefEnv,
+    /// Its template's checked uses: each list whose head is a macro, its
+    /// operands aligned with that macro's signature as the definition
+    /// aligned the template, by where it starts; what transcription makes
+    /// there needs no alignment as it is expanded (`Withs::trusted`;
+    /// `typed-macros.md`, "Decided: a use a template made is not aligned
+    /// again").
+    checked_uses: HashSet<i64>,
 }
 
 /// What becomes of one of a template's parts: a name made fresh, one name
@@ -381,8 +388,15 @@ pub(crate) struct Withs {
     /// looked at (`Macros::enter`).
     pub(crate) chain: Vec<(Sym, Syn, Option<usize>)>,
     /// The limits of the expansion of the form the chain is in, its uses
-    /// and their depth (`limits`).
+    /// and their depth (`limits`); and whether a use a template made is
+    /// aligned again (`FIXPT_MACRO_RECHECK`).
     pub(crate) limits: (usize, usize),
+    pub(crate) recheck: bool,
+    /// The places of the uses this form's expansion has made at a
+    /// template's checked uses (`Clause::checked_uses`): each fits its
+    /// macro's signature, by the definition's alignment, and is not
+    /// aligned again.
+    pub(crate) trusted: HashSet<At>,
     /// The trailmarks defined, by name (`Mark`): the standard ones are the
     /// kernel's. Here, out of line: a `Macros` is moved whole, and is in the
     /// checker's frames.
@@ -1374,7 +1388,7 @@ impl Macros {
     /// Each of `w`'s clauses checked against signature `sig`.
     #[allow(clippy::too_many_arguments)]
     fn clauses_fit(&self, w: &Written, sig: &Rc<STy>, defn: bool, desc: bool, poly: &[Syn], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Clause>> {
-        w.clauses.iter().map(|c| self.clause(c, sig, defn, desc, poly, &w.lits, interner, file)).collect()
+        w.clauses.iter().map(|c| self.clause(w.name, c, sig, defn, desc, poly, &w.lits, interner, file)).collect()
     }
 
     /// A signature of unsigned macro `w`'s clauses' shapes whole, `(oneof
@@ -1563,7 +1577,7 @@ impl Macros {
     /// there, and a reference to a pattern's binder is where no other
     /// pattern binder may shadow it.
     #[allow(clippy::too_many_arguments)]
-    fn clause(&self, c: &Syn, sig: &Rc<STy>, defn: bool, desc: bool, poly: &[Syn], lits: &[Sym], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
+    fn clause(&self, name: Sym, c: &Syn, sig: &Rc<STy>, defn: bool, desc: bool, poly: &[Syn], lits: &[Sym], interner: &mut Interner, file: Option<&FileScope>) -> R<Clause> {
         let usage = "a clause is `((_ . pattern) template)`";
         let parts = c.list().ok_or_else(|| FxError::at(c.at(), usage))?;
         let [pattern, template] = &parts[..] else {
@@ -1771,7 +1785,17 @@ impl Macros {
                 return Err(FxError::at(template.at(), format!("this template defines {}, and its signature says its uses define {}", shown_exports(&made, interner), shown_exports(&declared, interner))));
             }
         }
+        let mut checked_uses = HashSet::default();
         for node in t.nodes.iter() {
+            // A use of a macro, its operands aligned with its signature: a
+            // checked use (`Clause::checked_uses`).
+            if let Kids::Form(_) = &node.kids
+                && let Some(h) = split(&node.syn).and_then(|(h, _)| h.sym())
+                && !pvars.contains_key(&h)
+                && self.defined.get(&h).is_some_and(|m| m.procedural.is_none() && !m.desc)
+            {
+                checked_uses.insert(node.syn.at().start);
+            }
             // A trailmark of the file's the template writes: by the name the
             // importer has it by.
             if let (Some(f), STy::Mark(..)) = (file, &*node.core)
@@ -1787,6 +1811,24 @@ impl Macros {
                 && let Some(i) = f.internal.get(&h)
             {
                 actions.insert(node.path.clone(), Action::MacroHead(*i));
+            }
+        }
+        // The macro's own uses in its template, which it is not yet defined
+        // to meet as one: each tried with its own signature, apart, the
+        // template's variables as theirs; checked if it fits, else left to
+        // be aligned as it is expanded, so that no definition is refused
+        // for it (`typed-macros.md`, "Decided: a use a template made is not
+        // aligned again").
+        for node in t.nodes.iter() {
+            if let Kids::Form(_) = &node.kids
+                && let Some((h, operands)) = split(&node.syn)
+                && h.sym() == Some(name)
+                && !pvars.contains_key(&name)
+            {
+                let mut a = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+                if a.align(sig, &operands, None, Vec::new()).is_ok() {
+                    checked_uses.insert(node.syn.at().start);
+                }
             }
         }
         // Each typed hole's contract, its type read as a use reads the
@@ -1818,7 +1860,7 @@ impl Macros {
             return Err(FxError::at(c.at(), format!("`{}`: a typed hole in a macro a file uses itself, not yet", interner.name(*n))));
         }
         let marks = lits.iter().filter_map(|n| Some((*n, self.mark_of(*n)?.id))).collect();
-        Ok(Clause { pattern: Kept::new(pattern), names, marks, template: Kept::new(*template), actions, pvars, contracts, def_env })
+        Ok(Clause { pattern: Kept::new(pattern), names, marks, template: Kept::new(*template), actions, pvars, contracts, def_env, checked_uses })
     }
 
     /// `form` with each use of a macro in it expanded, as each expands,
@@ -1827,7 +1869,9 @@ impl Macros {
         if self.defined.is_empty() {
             return Ok(form.clone());
         }
-        self.withs.limits = limits(form)?;
+        let (uses, depth, recheck) = limits(form)?;
+        (self.withs.limits, self.withs.recheck) = ((uses, depth), recheck);
+        self.withs.trusted.clear();
         let mut budget = self.withs.limits.0;
         self.withs.chain.clear();
         let out = self.expand_in(form, interner, &mut budget, &mut Vec::new())?;
@@ -1848,7 +1892,9 @@ impl Macros {
             return Ok(vec![self.expand(form, interner)?]);
         }
         let mut out = Vec::new();
-        self.withs.limits = limits(form)?;
+        let (uses, depth, recheck) = limits(form)?;
+        (self.withs.limits, self.withs.recheck) = ((uses, depth), recheck);
+        self.withs.trusted.clear();
         self.withs.chain.clear();
         self.expand_defn(form, interner, &mut { self.withs.limits.0 }, &mut out)?;
         Ok(out.into_iter().map(|f| f.placed(form.at())).collect())
@@ -2089,9 +2135,17 @@ impl Macros {
             return self.expand_procedural(name, p, s, interner);
         }
         let (_, operands) = split(s).expect("a list");
-        let none = HashMap::default();
-        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
-        u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
+        // A use a template made where its definition aligned one fits by
+        // that alignment (`typed-macros.md`, "Decided: a use a template made
+        // is not aligned again"); aligned again only if asked, and then a
+        // refusal is the binding-shape check's fault.
+        let trusted = self.withs.trusted.contains(&s.at());
+        if !trusted || self.withs.recheck {
+            let none = HashMap::default();
+            let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+            let fault = if trusted { " (a use a template made, which its macro's definition found fits: a fault in the binding-shape check, not in the program)" } else { "" };
+            u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}{fault}", interner.name(name), e.message)))?;
+        }
         for c in &m.clauses {
             let mut binds = HashMap::default();
             let mark_of = |n: Sym| self.mark_of(n).map(|m| m.id);
@@ -2270,6 +2324,10 @@ impl Macros {
                     None => None,
                 };
                 path.truncate(depth);
+                // A checked use's: trusted to fit, as it is expanded.
+                if made != 0 && c.checked_uses.contains(&t.at().start) {
+                    self.withs.trusted.insert(at);
+                }
                 Ok(list_of(at, out, tail))
             }
             _ => Ok(Syn::new(at, t.view().clone(), interner)),

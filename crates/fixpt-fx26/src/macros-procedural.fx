@@ -21,11 +21,11 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
-        syn-expansion len (type syns-a names))
+        syn-expansion len parse-tag p-ok p-err (type syns-a names presult))
 (import types-module reserved? desc-word? type-form? kernel-sigs kernel-definitions s-expr marks
         (type fails sty marked))
-(import align-module macro? defined def-env-top
-        (type macro clauses def-env def-envs macro-env scopes))
+(import align-module macro? defined def-env-top align node-syn node-kids nnodes makes pvar? split
+        nth k-form (type macro clause clauses def-env def-envs macro-env scopes pvars))
 (import types-module fail-at)
 (import match-module same-atom?)
 
@@ -156,6 +156,88 @@
     (if (= i (array-length from))
         #u
         (begin (array-set! to i (array-ref from i)) (copy-sources from to (+ i 1))))))
+;;; ------------------------------------------------------------ uses checked once
+
+;; A template's checked uses (`Clause::checked_uses`), by where each starts:
+;; each list its alignment (`template-actions`, just made) met as a use of a
+;; macro, its operands aligned with that one's signature; and each use of
+;; `name`, the macro being defined, whose operands fit its signature `sig`,
+;; tried apart, the pattern's variables `ps` as theirs, so that no
+;; definition is refused for one (`typed-macros.md`, "Decided: a use a
+;; template made is not aligned again").
+(define checked-uses (->* (symbol sty pvars) (listof int acyclic))
+  (lambda (name sig ps) (checked-from 0 (get nnodes) name sig ps nil)))
+(define checked-from (->* (int int symbol sty pvars (listof int acyclic)) (listof int acyclic))
+  (lambda (i n name sig ps out)
+    (if (= i n)
+        out
+        (let* ((s (node-syn i)) (parts (split s))
+               (h (if (or (null? parts) (not (syn-symbol? (car parts)))
+                          (pvar? (syn-symbol (car parts)) ps)
+                          (tagcase (node-kids i) (k-form (x) #f) (else y #t)))
+                      nil
+                      (list (syn-symbol (car parts)))))
+               (checked (and (not (null? h))
+                             (if (macro? (car h))
+                                 (or (= (makes (car h)) 0) (= (makes (car h)) 1))
+                                 (and (symbol=? (car h) name)
+                                      (fits-apart? sig (nth parts 1) ps))))))
+          (checked-from (+ i 1) n name sig ps (if checked (cons (syn-start s) out) out))))))
+(define fits-apart? (->* (sty syn pvars) bool)
+  (lambda (sig operands ps)
+    (tagcase (prompt parse-tag (begin (align pfail-apart 1 ps sig operands -1 nil) (p-ok nil))
+                     (lambda ((r presult)) r))
+      (p-err (why a b) #f)
+      (else y #t))))
+(define pfail-apart (->* (string int int) void)
+  (lambda (message a b) (abort-current-continuation parse-tag (p-err message a b))))
+;; Each key's part made at a template's checked use, by key, from
+;; `source-base`: what it makes fits its macro's signature.
+(define trusts (ref (arrayof bool rs) rs) (new (make-array 1024 #f)))
+;; Key `a`, made for template place `ta` of clause `c` by expansion `made`:
+;; trusted if `ta` is a checked use's.
+(define trust-if! (->* (clause int int int) unit)
+  (lambda (c ta a made)
+    (if (and (> made 0) (int-in? ta (extract c 8)))
+        (let ((i (- a source-base)))
+          (begin
+            (if (>= i (array-length (get trusts)))
+                (let ((bigger (the (arrayof bool rs) (make-array (* 2 (+ i 1)) #f))))
+                  (begin (copy-trusts (get trusts) bigger 0) (set trusts bigger)))
+                #u)
+            (array-set! (get trusts) i #t)))
+        #u)))
+(define copy-trusts (->* ((arrayof bool rs) (arrayof bool rs) int) unit)
+  (lambda (from to i)
+    (if (= i (array-length from))
+        #u
+        (begin (array-set! to i (array-ref from i)) (copy-trusts from to (+ i 1))))))
+(define int-in? (->* (int (listof int acyclic)) bool)
+  (lambda (x xs) (and (not (null? xs)) (or (= x (car xs)) (int-in? x (cdr xs))))))
+(define trusted-key? (->* (int) bool)
+  (lambda (k)
+    (let ((i (- k source-base)))
+      (and (>= i 0) (< i (array-length (get trusts))) (array-ref (get trusts) i)))))
+;; A use `s`'s operands aligned with its macro's signature `sig`, failing by
+;; `in-use`; not where the use is trusted (`trusted-key?`), unless
+;; `FIXPT_MACRO_RECHECK` asks, and then a refusal is the binding-shape
+;; check's fault, said so.
+(define use-aligned! (->* (fails syn sty syn) unit)
+  (lambda (in-use s sig operands)
+    (let ((trusted (trusted-key? (syn-start s))))
+      (if (and trusted (= (get recheck) 0))
+          #u
+          (begin
+            (align (if trusted
+                       (lambda ((msg string) (a int) (b int))
+                         (in-use (string-append msg " (a use a template made, which its macro's "
+                                                "definition found fits: a fault in the "
+                                                "binding-shape check, not in the program)")
+                                 a b))
+                       in-use)
+                   2 (the pvars nil) sig operands -1 nil)
+            #u)))))
+
 ;; How many keys have been made: the next one's number, from `source-base`.
 (define sources-made (->* () int) (lambda () (get nsources)))
 ;; Key `k`'s template place and expansion; a place that is no key, itself
@@ -593,6 +675,9 @@
 ;; `FIXPT_MACRO_DEPTH` set them.
 (define max-uses (ref int rs) (new 10000))
 (define max-depth (ref int rs) (new 1000))
+;; Whether a use a template made is aligned again, 1, or not, 0
+;; (`FIXPT_MACRO_RECHECK`; `use-aligned!`).
+(define recheck (ref int rs) (new 0))
 ;; Limit `name`, `USES` or `DEPTH`, as the runtime reads it; -1 where the
 ;; value set is none, said at `s`.
 (define limit-of (->* (fails syn string) int)
@@ -605,10 +690,11 @@
 ;; The uses it may expand, or -1 where a limit set is none.
 (define chain-begun! (->* (fails syn) int)
   (lambda (fail s)
-    (let* ((u (limit-of fail s "USES")) (d (if (< u 0) -1 (limit-of fail s "DEPTH"))))
+    (let* ((u (limit-of fail s "USES")) (d (if (< u 0) -1 (limit-of fail s "DEPTH")))
+           (r (if (< d 0) -1 (limit-of fail s "RECHECK"))))
       (begin (set chain nil) (set chain-depth 0)
-             (set max-uses u) (set max-depth d)
-             (if (< d 0) -1 u)))))
+             (set max-uses u) (set max-depth d) (set recheck r)
+             (if (< r 0) -1 u)))))
 (define use-left! (->* () unit)
   (lambda () (begin (set chain (cdr (get chain))) (set chain-depth (- (get chain-depth) 1)))))
 ;; A use of `n`, `s`, about to be expanded, `fuel` uses left: entered in the

@@ -2020,3 +2020,63 @@ Heist and Kayak: every `syntax-rules ()` is refused until rewritten (a
 script beside `name_conversions.py`), and Heist's few literals lists
 (`s7st/prelude.fx`'s `else` and `=>`, which are standard) become
 `#:trailmarks`.
+
+## Decided: a use a template made is not aligned again (2026-11-14, built)
+
+The user's ("Go for it", 2026-11-14), on what a use of a macro costs at
+expansion. A use is aligned with its macro's signature as it is
+expanded (`Aligner` in `Mode::Use`; mode 2 in FX-26): its parts' shapes
+checked, which part is an expression, a binder, whose scope; its result
+thrown away, only a refusal kept. A use a template made needs none of it.
+
+**The argument.** Herman's substitution (*A Theory of Typed Hygienic
+Macros*, ch. 4), for binding signatures as this prototype has them:
+
+1. A template is aligned where its macro is defined (`Mode::Template`,
+   mode 1), its pattern variables each of the syntax type its macro's
+   signature gives the pattern's part. A list there whose head is a macro
+   `n` (not a pattern variable) has its operands aligned with `n`'s
+   signature, each pattern variable met as its syntax type says. Such a
+   node is a *checked use*; its place in the template is recorded with
+   the clause.
+2. A use `u` of macro `m` either fits `m`'s signature by alignment (it was
+   written in the program, made by a procedural transformer, or not made
+   at a checked use), or is trusted by this argument. Its clause's pattern
+   binds each variable to a part of `u` of the part's syntax type: that is
+   what fitting the signature means, part by part.
+3. Transcription puts each part where its pattern variable is: so a
+   checked use's operands are the template's, with fitting parts in the
+   places whose types the definition's alignment assumed. By substitution
+   (alignment compositional in its parts: a variable of syntax type `τ`
+   aligns wherever any syntax of type `τ` would), the use made fits `n`'s
+   signature.
+4. By induction on expansion steps, from the uses the program writes,
+   every use expanded fits its signature, whether aligned or trusted. A
+   trusted use is never refused by an alignment, so skipping it changes
+   no expansion and no refusal.
+
+**What it relies on**, each held by construction elsewhere:
+- *The head means at expansion what it meant at definition*: a macro's
+  name is reserved, never rebound nor redefined; a local binder may not
+  shadow it (refused since 2026-11-07); a file's macro is renamed to the
+  importer's name for the same macro (`Action::MacroHead`).
+- *The set is the definition's*: a checked use is recorded only where the
+  template was aligned as a macro's use, so a macro defined after the
+  template, a pattern variable at the head, or a procedural macro (refused
+  in a template) leaves the use to be aligned.
+- *What the definition assumed of a variable is what the use's
+  alignment gave*: the clause the use expanded by is one the definition
+  aligned, its pattern's types the signature's.
+- *Parts a use writes are the use's*: a macro use inside a use's operand
+  is the program's or another template's, aligned or trusted on its own.
+
+**Built** in both front ends. The definition's aligner records each
+checked use's place (its list's start, which no other list of the
+template shares); transcription marks what it makes there (Rust: the
+made list's place, template place and expansion, in a set for the form;
+FX-26: its key's flag, beside the key's place and expansion); expansion
+aligns no marked use. `FIXPT_MACRO_RECHECK=1` aligns them all again, as
+before, and a marked use refused says so: a fault in the binding-shape
+check, not the program's (for finding one). What it saves: a use's
+alignment walks every part of it, so a macro recursing over a long list
+paid for the list at every step.

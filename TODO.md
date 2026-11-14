@@ -4384,9 +4384,17 @@ an error in a part a checked clause made is said to be a broken promise,
 the checker's fault (`typed-macros.md`, "Typed holes"). Left of it: typed
 parts in macros that make definitions (a module of the template's
 definitions as the check's stand-in, to design); typed and untyped parts
-in one macro; and, for every macro, a use a template made needs no
-alignment with its signature at expansion (Herman's substitution: the
-template was aligned where it was defined), to argue and build.
+in one macro. Built (2026-11-14, the user's "Go for it"): for every macro,
+a use a template made where its definition aligned it with the used
+macro's signature is not aligned again at expansion (Herman's
+substitution; `typed-macros.md`, "Decided: a use a template made is not
+aligned again", the argument and what it relies on), the macro's own
+uses tried apart with its own signature so that no definition is refused
+for one; both front ends; `FIXPT_MACRO_RECHECK=1` aligns them again, a
+refusal then said a fault in the binding-shape check. §231's `count`
+5000 deep: the Rust checker 31.5 s to 1.9, FX-26's 24.2 to 4.3; what is
+left, the copies §275 (c) would share. Test: `fixpt-cli/tests/macro_trust.rs`,
+every macro, procedural and imported macro program the same rechecked.
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`

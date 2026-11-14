@@ -11,6 +11,12 @@ const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 /// A nursery of 4096 words: a budget of 4096 / 2 / 64 = 32 cards.
 const NURSERY: &str = "4096";
 const BUDGET: u64 = 32;
+/// What a collection may scan past the budget: the collection is due once
+/// the budget is spent, and machine code meets that where it next calls in
+/// to allocate (the barrier sets its allocation limit to 0), so a store
+/// between may make a card more dirty (`TODO.md` §276). Here each store is
+/// followed by an allocation, the next `(list i)`.
+const SLACK: u64 = 2;
 
 /// Fresh lists stored into 1000 old references, 10 times over, on machine
 /// `m`: more cards made dirty, each time, than the budget.
@@ -32,8 +38,8 @@ fn bounded_on(m: &str) {
         .collect();
     assert!(cards.len() >= 10, "{m}: {} minor collections", cards.len());
     let most = cards.iter().copied().max().unwrap_or(0);
-    assert!(most <= BUDGET, "{m}: a minor collection scanned {most} dirty cards, past the budget of {BUDGET}");
-    assert!(cards.contains(&BUDGET), "{m}: no minor collection the budget's ({cards:?})");
+    assert!(most <= BUDGET + SLACK, "{m}: a minor collection scanned {most} dirty cards, past the budget of {BUDGET} and its slack");
+    assert!(cards.iter().any(|c| *c >= BUDGET), "{m}: no minor collection the budget's ({cards:?})");
 }
 
 macro_rules! on_each {
