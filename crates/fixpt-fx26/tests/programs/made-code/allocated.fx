@@ -87,7 +87,7 @@
 ;; the `bloblet` routine; `s` and `k` stored in its fields 0 and 1, each
 ;; store marking its card. Scratch: `x16` and `x17`, which no call keeps.
 (define* pack-code
-         (subr (maxeff (read @globals) (alloc @heap) spin) (convention) (listof int @heap))
+         (subr (maxeff (read @heap) (read @globals) (alloc @heap) spin) (convention) (listof int @heap))
   (lambda (c)
     (let* ((rg (extract c registers)) (vs (extract c values)) (fr (extract c frames))
            (rs (extract c routines)) (bl (extract rs bloblet)) (ba (extract c barrier))
