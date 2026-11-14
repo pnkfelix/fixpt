@@ -30,7 +30,7 @@
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn s-type
-        signature-made pure-hole? affine-kind? int-in? ellipsis? ellipsis-of proper-items
+        signature-made pure-hole? affine-kind? ellipsis? ellipsis-of proper-items
         name-kind?
         (type fails addr sty))
 (import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list
@@ -40,7 +40,7 @@
         node-export node-imports node-syn node-path node-core node-kids pvar-of pvar? nnodes
         act-rename act-alias
         seq-depths def-env-top env-empty env-levels
-        act-module-type act-standard-type desc-roots under
+        act-module-type act-standard-type under
         act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
@@ -327,9 +327,13 @@
                                           "template or given by a use: a top level's, not yet")
                       s)
              nil))
-          ;; A file's macro's description is read through the file's module
-          ;; whole (`type-actions`).
-          ((= free 1) (if (null? file) (list (act-alias)) nil))
+          ;; A file's macro's description names each type it writes free as
+          ;; the file has it, one name at a time: through the file's module,
+          ;; of a type it shows, or the standard environment (`macros.rs`'s).
+          ((= free 1) (cond ((null? file) (list (act-alias)))
+                            ((name-in? n (extract (car file) 3))
+                             (list (act-module-type (extract (car file) 1))))
+                            (else (list (act-standard-type)))))
           ((or (null? file) (name-in? n (extract (car file) 2)) (name-in? n (extract (car file) 5)))
            (list (act-alias)))
           (else
@@ -349,19 +353,13 @@
                                      "bound: which repetition's it is is not said")
                  s)
         #u)))
-;; A file's macro's descriptions, from node `i` to `n`, each read whole
-;; through the file's module or the standard environment, of those the
-;; template writes alone, with no binder of its own or part of a use's in
-;; them, for now; and a file's macro's use of another of its own.
+;; From node `i` to `n`, a file's macro's use of another of its own: that
+;; macro, by the name the importer has it by.
 (define type-actions (->* (fails int int scopes actions) actions)
   (lambda (fail i n file out)
     (if (= i n)
         out
-        (let* ((path (node-path i)) (kids (node-kids i))
-               (out2 (if (and (not (null? file)) (int-in? i (get desc-roots)))
-                         (cons (tuple path (type-action fail i file out)) out)
-                         out))
-               (head (form-head-of i)))
+        (let* ((path (node-path i)) (kids (node-kids i)) (out2 out) (head (form-head-of i)))
           (type-actions fail (+ i 1) n file
                         (if (and (not (null? file)) (tagcase kids (k-form (x) #t) (else y #f))
                                  (not (null? head))
@@ -369,29 +367,6 @@
                             (let ((h (car (internal-of (car head) (extract (car file) 4)))))
                               (cons (tuple path (act-macro-head h)) out2))
                             out2))))))
-;; The description at node `i`, a file's macro's, read whole: refused if it
-;; has a binder of the template's or a part a use gives in it (`out`'s).
-(define type-action (->* (fails int scopes actions) action)
-  (lambda (fail i file out)
-    (let ((s (node-syn i)) (open (open-node (under i) out)))
-      (begin
-        (if (null? open)
-            #u
-            (fail-at fail (string-append "a file's macro's description with a binder of its own "
-                                         "or a part a use gives in it: not yet")
-                     (node-syn (car open))))
-        (if (and (syn-symbol? s) (not (name-in? (syn-symbol s) (extract (car file) 3))))
-            (act-standard-type)
-            (act-module-type (extract (car file) 1)))))))
-(define open-node (->* ((listof int acyclic) actions) (listof int acyclic))
-  (lambda (ks out)
-    (cond ((null? ks) nil)
-          ((or (tagcase (node-kids (car ks)) (k-pvar (n) #t) (k-binder (n d) #t) (else y #f))
-               (let ((a (action-at (node-path (car ks)) out)))
-                 (and (not (null? a)) (tagcase (car a) (act-rename (p e) #t) (else z #f)))))
-           (list (car ks)))
-          (else (open-node (cdr ks) out)))))
-;; The name at the head of node `i`'s list, in a list of one.
 (define form-head-of (->* (int) (listof symbol acyclic))
   (lambda (i)
     (let ((items (proper (node-syn i))))

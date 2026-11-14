@@ -4372,10 +4372,12 @@ the user's). Built 2026-11-14, both front ends, a macro making it too
 #:unseal down-t`. `moduleof` in templates, whose items' names are
 labels and binders at once: decided and built 2026-11-14, both front ends,
 the label written as a keyword apart from its binder, `(abs #:t u type)`
-(`typed-macros.md`, "a `moduleof`'s label and binder written apart"). Left
-of the second stage: a file's macro's descriptions with binders of its
-own; a template's `moduleof` of several names in one `abs`, or a
-constructor's parameters.
+(`typed-macros.md`, "a `moduleof`'s label and binder written apart"). A
+file's macro's descriptions with binders of their own or a use's parts:
+built 2026-11-14, both front ends, each name the template writes free read
+as the file has it, one at a time. Left of the second stage: a template's
+`moduleof` of several names in one `abs`, or a constructor's parameters
+(`(abs #:f f (=> (type) type))` says the same).
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`

@@ -1022,7 +1022,11 @@ variable that is a name placed in a template never fits a list's shape
 Left for the second stage: `define-datatype` and `define-generative`
 (`define-datatype` since done as `define-data`, `datatype-macro.md`), a
 `subr`'s named parameters and specification (since built, 2026-11-08:
-`docs/fx26.md`), `moduleof`, a file's macro's descriptions with its own binders, a use's
+`docs/fx26.md`), `moduleof` (since built, 2026-11-14: "a `moduleof`'s label and
+binder written apart"), a file's macro's descriptions with its own binders (since
+built, 2026-11-14: each name it writes free read as the file has it, one at a
+time, `(select %shared:file t)` or `(select #%fx t)`, as a top level's are
+qualified, not the description whole), a use's
 type placed in the scope of a use's `dvar` without saying so, and typed
 macros' description parts. Tests: `macros/desc-*.fx`,
 `import-with-syntax/main-poly.fx`.

@@ -65,6 +65,20 @@ fn only_and_except_take_macros_and_names_alike() {
     }
 }
 
+/// A file's macro's descriptions with a binder of their own or a part a
+/// use gives in them: each name the template writes free read as the file
+/// has it, one at a time, its binders renamed, the use's parts as they are
+/// where it is used (`typed-macros.md`, "Decided: macros come with a file").
+#[test]
+fn a_files_macros_descriptions_hold_their_binders_and_a_uses_parts() {
+    for (name, want) in [("main-poly.fx", "4 : int"), ("main-pairs.fx", "16 : int")] {
+        for m in MACHINES {
+            let (out, err) = eval(m, name);
+            assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");
+        }
+    }
+}
+
 #[test]
 fn what_cannot_be_imported_is_refused() {
     let cases = [
@@ -75,7 +89,6 @@ fn what_cannot_be_imported_is_refused() {
         ("main-not-load.fx", "takes a name defined as `(load-module \"path\")`"),
         ("main-only-not-given.fx", "unbound variable `limit`"),
         ("main-only-hidden.fx", "`twice` is nothing `lib` gives"),
-        ("main-poly.fx", "a file's macro's description with a binder of its own or a part a use gives in it: not yet"),
         ("main-imports-in-file.fx", "`import-with-syntax` in a module file: not yet"),
     ];
     for (name, why) in cases {

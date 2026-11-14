@@ -1484,9 +1484,15 @@ impl Macros {
                             return Err(FxError::at(span, format!("`{}`, the module a template's `(with module name)` takes from, is bound by the template or given by a use: a top level's, not yet", interner.name(*n))));
                         }
                         (None, Free::Qualified, None) => Action::Alias,
-                        // A file's macro's description is read through the
-                        // file's module whole (below).
-                        (None, Free::Qualified, Some(_)) => continue,
+                        // A file's macro's description names each type it
+                        // writes free as the file has it: through the file's
+                        // module, of a type it shows, or the standard
+                        // environment, `(select #%fx t)`, which is all a
+                        // file sees; one name at a time, as a top level's
+                        // are qualified, so that the template's own binders
+                        // and a use's parts in it are left as they are.
+                        (None, Free::Qualified, Some(f)) if f.types.contains(n) => Action::ModuleType(f.shared),
+                        (None, Free::Qualified, Some(_)) => Action::StandardType,
                         (None, Free::Toplevel, None) => Action::Alias,
                         (None, Free::Toplevel, Some(f)) if f.values.contains(n) || (f.is_standard)(*n) => Action::Alias,
                         (None, Free::Toplevel, Some(_)) => {
@@ -1523,25 +1529,7 @@ impl Macros {
                 return Err(FxError::at(template.at(), format!("this template defines {}, and its signature says its uses define {}", shown_exports(&made, interner), shown_exports(&declared, interner))));
             }
         }
-        // A file's macro's descriptions, each read whole through the file's
-        // module or the standard environment: of those the template writes
-        // alone, with no binder of its own or part of a use's in them, for
-        // now.
-        for (i, node) in t.nodes.iter().enumerate() {
-            if let (Some(f), true) = (file, node.desc) {
-                let open = t.under(i).into_iter().find(|k| match t.nodes[*k].kids {
-                    Kids::PVar(_) | Kids::Binder(..) => true,
-                    _ => matches!(actions.get(&t.nodes[*k].path), Some(Action::Rename(..))),
-                });
-                if let Some(k) = open {
-                    return Err(FxError::at(t.nodes[k].syn.at(), "a file's macro's description with a binder of its own or a part a use gives in it: not yet"));
-                }
-                let action = match node.syn.sym() {
-                    Some(n) if !f.types.contains(&n) => Action::StandardType,
-                    _ => Action::ModuleType(f.shared),
-                };
-                actions.insert(node.path.clone(), action);
-            }
+        for node in t.nodes.iter() {
             // A use of another of the file's macros: that macro, by the
             // name the importer has it by.
             if let (Some(f), Kids::Form(_)) = (file, &node.kids)
