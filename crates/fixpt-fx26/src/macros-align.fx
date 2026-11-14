@@ -29,7 +29,7 @@
         makes-desc? makes k-pair k-nil k-pvar k-binder k-ref k-form k-desc k-seq k-other atom-at
         nnodes node-syn node-path node-core node-kids node-many? node-hole
         with-core with-kids with-import with-export with-many with-hole node-new
-        node-imports node-export symbols-onto standard-with? fitting not-definition sig-of kid
+        node-imports node-export symbols-onto standard-with?
         nodes-reset! repeated repeated! seq-depths repeated? cage-seqs cage-seq? int-member?
         desc-roots binds-nothing?
         pvar-of pvar? pvar-shape lv-rib lv-cage lv-earlier lv-shape program-walk unplaced
@@ -124,21 +124,6 @@
           (shown (lambda () (string-append "`" (show-syn s) "`"))))
       (tagcase t
         (s-mu (id) (fill fail mode ps at (mu-body id) s at))
-        ;; A signature of a member per clause (`macros.rs`'s): in a
-        ;; template, the one member it may fit; else the first it fits,
-        ;; which its expansion holds to be its clause's.
-        (s-clauses (ms)
-          (if (= mode 1)
-              (let ((fit (fitting ms s mode ps)))
-                (if (and (not (null? fit)) (null? (cdr fit)))
-                    (fill fail mode ps at (car fit) s at)
-                    (said (string-append (shown) ": which of this macro's clauses' signatures it "
-                                         "fits, each its own binding structure, is not known "
-                                         "where the template is checked: not yet"))))
-              (let ((fit (fitting ms s 2 ps)))
-                (if (null? fit)
-                    (said (string-append (shown) " fits none of this macro's clauses' signatures"))
-                    (fill fail mode ps at (car fit) s at)))))
         (s-union (ms)
           ;; A program's name that a form's word may be too, `else` or a
           ;; variable bound to `else`: the form's word, if a member writes it.
@@ -247,6 +232,13 @@
            (if (= mode 1) (with-kids at (k-binder (syn-symbol s) d)) #u))
           (else (fail-at fail (string-append "`" (show-syn s) "` is not a name that may be bound")
                          s)))))
+;; Those of `ms` that `s` fits.
+(define fitting (->* (stys syn int pvars) stys)
+  (lambda (ms s mode ps)
+    (cond ((null? ms) nil)
+          ((fits? (car ms) s mode (lambda ((n symbol)) (pvar-shape n ps)))
+           (cons (car ms) (fitting (cdr ms) s mode ps)))
+          (else (fitting (cdr ms) s mode ps)))))
 ;; A pattern variable written somewhere inside `s`, in a list of one.
 (define pvar-inside (->* (syn pvars) (listof symbol acyclic))
   (lambda (s ps)
@@ -552,12 +544,26 @@
   (lambda (fail ps at hd parts)
     (operands fail ps at (extract (car (macro-of (syn-symbol hd) (get defined))) 1)
               (nth parts 1))))
+(define not-definition (->* (fails syn string) unit)
+  (lambda (fail s what)
+    (fail-at fail (string-append "`" (show-syn s) "` is not a definition: a macro that makes "
+                                 "definitions makes " what)
+             s)))
 ;; The operands `rest` of the form at `at`, aligned with its signature.
 (define operands (->* (fails pvars int sty syn) unit)
   (lambda (fail ps at sig rest)
     (with-kids at (k-form (align fail 1 ps sig rest -1 (path+ (node-path at) #f))))))
+(define sig-of (->* (symbol named) stys)
+  (lambda (n named)
+    (cond ((null? named) nil)
+          ((symbol=? n (extract (car named) 1)) (list (extract (car named) 2)))
+          (else (sig-of n (cdr named))))))
+
 ;;; ------------------------------------------------------------ descriptions
 
+;; The `i`th of nodes `ks`.
+(define kid (->* ((listof int acyclic) int) int)
+  (lambda (ks i) (if (= i 0) (car ks) (kid (cdr ks) (- i 1)))))
 ;; Description `s`, which a template writes, at node `at`, aligned name by
 ;; name (`macros.rs`'s `Aligner::desc`): each name referred to in the
 ;; description namespace, the top level's if the template does not bind it;

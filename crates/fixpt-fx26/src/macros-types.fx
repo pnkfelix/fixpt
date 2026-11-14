@@ -58,8 +58,6 @@
   (s-expr) (s-bvar) (s-id) (s-data) (s-type) (s-label) (s-nil)
   (s-literal symbol) (s-pair sty sty) (s-import sty bind) (s-export sty bind)
   (s-mu int) (s-many sty) (s-union (listof sty acyclic)) (s-typed sty hole)
-  ;; `(clauses σ₁ …)`, a signature's whole, a member per clause (`macros.rs`).
-  (s-clauses (listof sty acyclic))
   ;; An expression that is a lambda, where a form wants one (`letrec`).
   (s-lambda)
   ;; A definition, where a template makes one (the kernel's `begin` of
@@ -294,12 +292,6 @@
                     (if (string=? head "import") (s-import body b) (s-export body b)))
                   (read-pair fail s parts named scope))))
            ((string=? head "mu") (read-mu fail s named scope))
-           ((string=? head "clauses")
-            (begin (fail-at fail (string-append "a syntax type: `(clauses σ …)` is a signature's "
-                                                "whole, one member for each clause, not a part "
-                                                "of one")
-                            s)
-                   (s-nil)))
            ((or (string=? head "union") (string=? head "oneof"))
             (let ((ms (read-each fail (cdr (proper-items s)) named scope)))
               (begin (if (any-overlap? ms)
@@ -863,7 +855,6 @@
           #t
           (tagcase u
             (s-union (ms) (any-fits? ms s mode pvar? depth))
-            (s-clauses (ms) (any-fits? ms s mode pvar? depth))
             (s-pair (a d)
               (let ((parts (split s)))
                 (and (not (null? parts))

@@ -18,7 +18,7 @@
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth datatype?
         expand-datatype (type syns-a names loaded-file) (effect parses))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty signature-made kind-of
-        read-each s-clauses s-nil (type fails sty))
+        (type fails sty))
 (import align-module nnodes node-syn node-core node-kids k-pvar defined (type clauses))
 
 ;; The name the importer has macro `n` by, of `m`'s, in a list of one.
@@ -379,18 +379,7 @@
 (define signature-of (->* (fails syn) signed)
   (lambda (fail s)
     (let* ((poly (signature-poly fail s)) (made (signature-made fail (extract poly 2))))
-      (tuple (extract poly 1) (signature-body fail (extract made 1)) (extract made 2)))))
-;; A signature's `σ`; or `(clauses σ₁ σ₂ …)`, a member for each clause, in
-;; order (`macros.rs`'s `signature`).
-(define signature-body (->* (fails syn) sty)
-  (lambda (fail s)
-    (let ((items (proper s)))
-      (if (and (not (null? items)) (syn-symbol? (car items))
-               (string=? (syn-name (car items)) "clauses"))
-          (if (null? (cdr items))
-              (begin (fail-at fail "`(clauses σ …)`, of a member for each clause" s) (s-nil))
-              (s-clauses (read-each fail (cdr items) nil nil)))
-          (read-sty fail s nil nil)))))
+      (tuple (extract poly 1) (read-sty fail (extract made 1) nil nil) (extract made 2)))))
 (define written-names (->* (writtens) names)
   (lambda (ws) (if (null? ws) nil (cons (extract (car ws) 1) (written-names (cdr ws))))))
 ;; A signature's `(poly ((name kind) …) σ)`: its binders and `σ`; else none

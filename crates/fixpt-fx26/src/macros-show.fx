@@ -42,7 +42,6 @@
         (s-many (x) (mk-list (list (sym "many") (show-sty x a b)) a b))
         (s-typed (x h) (show-sty x a b))
         (s-union (ms) (mk-list (cons (sym "oneof") (show-each ms a b)) a b))
-        (s-clauses (ms) (mk-list (cons (sym "clauses") (show-each ms a b)) a b))
         (s-mu (id) (show-mu id a b))))))
 (define show-each (->* (stys int int) syns-a)
   (lambda (ms a b) (if (null? ms) nil (cons (show-sty (car ms) a b) (show-each (cdr ms) a b)))))
@@ -213,7 +212,7 @@
     (and (syn-symbol? s)
          (let ((n (syn-name s)))
            (or (string=? n "import") (string=? n "export") (string=? n "union") (string=? n "oneof")
-               (string=? n "clauses") (string=? n "mu")
+               (string=? n "mu")
                (string=? n "many") (string=? n "literal"))))))
 ;; Items `xs`, the first first (`first`); a word of `sig-word?` past the
 ;; first, and a proper list's, starts its rest.

@@ -5401,12 +5401,14 @@ name)` (`macros/with-value.fx`, which binds by `define` instead).
 - Showing the signature inferred without a refusal: the REPL, `fixpt
   check`.
 - Clauses whose shapes overlap, as `syntax-rules` tries them in order:
-  built 2026-11-14, both front ends, a signature of a member per clause,
-  `(clauses σ₁ …)`, written or inferred where the merge by position fails
-  (`typed-macros.md`, "Decided: a signature per clause, chosen as the
-  clauses are"), and `union` written `oneof`. Not yet: a use in a template
-  that may fit more than one member (each candidate's binding structure
-  agreeing, the note's rule); `clauses` for values, a hypothetical there.
+  built 2026-11-14 as a signature of a member per clause, `(clauses σ₁
+  …)`, and taken out the same day (`typed-macros.md`, "Rejected: a
+  signature per clause": a use's binding structure is its syntax's and its
+  signature's, never its clause's). Inferred instead where shape tells the
+  clauses apart, a `oneof` of their whole shapes (`union` now written
+  `oneof`); overlapping clauses that place parts differently, refused. The
+  literal that overlaps a datum (`else` in Heist's `string-cases`): by
+  trailmarks, proposed there.
 
 ## 222. A `syntax-rules`' literals matched by meaning (found 2026-11-08)
 
@@ -6758,3 +6760,39 @@ the conversions' definitions reach the FX-26 checker apart from the
 `define-generative` that marks them its own (`k-inside`, set where the
 form is declared), or after the mark is taken. The REPL is likely the
 same. Not yet looked into.
+
+## 272. Two macros' `mu` signatures of one list, written from opposite ends, not taken (found 2026-11-14)
+
+Even/odd macros whose binding toggles, `define-syntax-rec`, run inferred
+(`=> 3`):
+
+```scheme
+(define-syntax-rec
+  (bnd (syntax-rules ()
+         ((_ () body) body)
+         ((_ ((x e) . rest) body) (let ((x e)) (seq rest body)))))
+  (seq (syntax-rules ()
+         ((_ () body) body)
+         ((_ (e . rest) body) (begin e (bnd rest body))))))
+(bnd ((a 1) (+ a 0) (b (+ a 1)) (+ b 0)) (+ a b))
+```
+
+Written, `bnd`'s list as `(mu b (oneof (export () (rho)) (export ((bvar
+expr) . (import (oneof (export () (rho)) (export (expr . b) (rho (D
+rib)))) (rho (AA var)))) (rho (AA var) (D rib)))))` and `seq`'s the same
+from its own end (`(mu s …)`, the expression first), each body `(import
+expr (rho (A rib)))`, as `fun.fx` writes formals: both written, `bnd`'s
+template is refused (`body` is placed in the scope of other bindings
+than its signature says it is); one written and one inferred, `rest` is
+placed where its syntax type is not one the form takes there. A guess:
+two `mu`s compared without unrolling, so one list read from its two ends
+is two types; or the signature above is wrong. Not yet looked into. A
+`define-syntax-rec` whose signatures cannot be written is a gap either
+way: a test of it, inferred and written, when fixed.
+
+## 273. A macro's signature shown (found 2026-11-14)
+
+§221's item, again: no command shows a macro's signature, written or inferred; the inferred
+one is printed only where it is refused. Wanted: the REPL (a `,sig m`)
+and `fixpt check` showing it, both front ends' the same text. Beside
+§230's expander trace.

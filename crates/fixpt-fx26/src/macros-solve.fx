@@ -29,9 +29,6 @@
         (type kd kds kinds pkinds ints sol binds-at spans placed placements unsigned
               unsigneds rules items cx mu-parts shape))
 (import show-module show-sty sig-text shown)
-(import files-module signature-of said-fail (type written writtens signed signed-opt))
-(define nodes-module (with align-module nodes-module))
-(import nodes-module (type clauses))
 (define exports-module (with files-module exports-module))
 (import exports-module (type exported))
 
@@ -718,7 +715,7 @@
           (let ((ms (clause-sigs u cs)))
             (if (or (null? ms) (not (same-made? (cdr ms) (made-of (car ms)))))
                 nil
-                (let ((union (mk-list (cons (mk-symbol "clauses" a b) (sig-bodies ms)) a b)))
+                (let ((union (mk-list (cons (mk-symbol "oneof" a b) (sig-bodies ms)) a b)))
                   (list (if (string=? (made-of (car ms)) "")
                             union
                             (mk-list (list (mk-symbol "->" a b) union
@@ -873,52 +870,3 @@
         nil
         (cons (placements-of cid (extract (car rs) 3) (nth-int makes (extract (car rs) 1)) s)
               (placed-each (cdr rs) makes (+ cid 1) s)))))
-
-;;; ------------------------------------------------------------ the signatures
-
-(define-type said (tupleof signed-opt (listof string acyclic)))
-(define unsigned-of (->* (writtens) unsigneds)
-  (lambda (ws)
-    (cond ((null? ws) nil)
-          ((null? (extract (car ws) 2))
-           (cons (tuple (extract (car ws) 1) (extract (car ws) 3) (extract (car ws) 4)
-                        (extract (car ws) 5))
-                 (unsigned-of (cdr ws))))
-          (else (unsigned-of (cdr ws))))))
-;; Each signature, the written one's, or the inferred one read, with how
-;; it is said where its macro is refused.
-(define inferred-each
-  (->* (fails writtens (listof signed-opt acyclic) syns-a) (listof said acyclic))
-  (lambda (fail ws written inferred)
-    (cond
-      ((null? ws) nil)
-      ((not (null? (car written)))
-       (cons (tuple (car written) (the (listof string acyclic) nil))
-             (inferred-each fail (cdr ws) (cdr written) inferred)))
-      (else
-       (let* ((n (symbol->string (extract (car ws) 1)))
-              ;; Not a signature: the union of its clauses' shapes whole,
-              ;; if that is one (`macros.rs`'s).
-              (alt (if (null? (tried-sig (car inferred))) (alt-sig (car ws)) nil))
-              (sig (if (null? alt) (car inferred) (car alt)))
-              (shown (sig-text sig))
-              (s (signature-of (said-fail fail n (sig-text (car inferred))) sig)))
-         (begin
-           (set defined (cons (tuple (extract (car ws) 1) (tuple (extract s 2) (the clauses nil)
-                                                                  (the syns-a nil) (extract s 3)))
-                              (get defined)))
-           (cons (tuple (the signed-opt (list s)) (the (listof string acyclic) (list shown)))
-                 (inferred-each fail (cdr ws) (cdr written) (cdr inferred)))))))))
-;; `s` read as a signature, none if it is not one.
-(define tried-sigs (ref (listof signed acyclic) rs) (new nil))
-(define tried-sig (->* (syn) (listof signed acyclic))
-  (lambda (s)
-    (let ((r (prompt parse-tag (begin (set tried-sigs (list (signature-of pfail-at s))) (p-ok nil))
-                     (lambda (r) r))))
-      (tagcase r (p-err (m x y) (the (listof signed acyclic) nil)) (p-ok (ts) (get tried-sigs))))))
-;; Unsigned macro `w`'s clauses' shapes whole, as a signature that is one
-;; (`by-clauses`); none if not.
-(define alt-sig (->* (written) syns-a)
-  (lambda (w)
-    (let ((alt (by-clauses (tuple (extract w 1) (extract w 3) (extract w 4) (extract w 5)))))
-      (if (or (null? alt) (null? (tried-sig (car alt)))) nil alt))))

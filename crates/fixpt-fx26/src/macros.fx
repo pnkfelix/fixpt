@@ -31,8 +31,8 @@
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn s-type
         signature-made pure-hole? affine-kind? ellipsis? ellipsis-of proper-items
-        name-kind? s-clauses fits?
-        (type fails addr sty stys))
+        name-kind?
+        (type fails addr sty))
 (import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list
         len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
 (import scopes-module walk placed evaluate levels-of binder-of)
@@ -49,8 +49,7 @@
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
         (type exported nested))
-(import solve-module infer sig-text by-clauses unsigned-of inferred-each tried-sig alt-sig
-        (type said))
+(import solve-module infer sig-text by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias)
@@ -404,6 +403,39 @@
       (begin
         (set defined (append made before))
         (written-names ws)))))
+(define-type said (tupleof signed-opt (listof string acyclic)))
+(define unsigned-of (->* (writtens) unsigneds)
+  (lambda (ws)
+    (cond ((null? ws) nil)
+          ((null? (extract (car ws) 2))
+           (cons (tuple (extract (car ws) 1) (extract (car ws) 3) (extract (car ws) 4)
+                        (extract (car ws) 5))
+                 (unsigned-of (cdr ws))))
+          (else (unsigned-of (cdr ws))))))
+;; Each signature, the written one's, or the inferred one read, with how
+;; it is said where its macro is refused.
+(define inferred-each
+  (->* (fails writtens (listof signed-opt acyclic) syns-a) (listof said acyclic))
+  (lambda (fail ws written inferred)
+    (cond
+      ((null? ws) nil)
+      ((not (null? (car written)))
+       (cons (tuple (car written) (the (listof string acyclic) nil))
+             (inferred-each fail (cdr ws) (cdr written) inferred)))
+      (else
+       (let* ((n (symbol->string (extract (car ws) 1)))
+              ;; Not a signature: the union of its clauses' shapes whole,
+              ;; if that is one (`macros.rs`'s).
+              (alt (if (null? (tried-sig (car inferred))) (alt-sig (car ws)) nil))
+              (sig (if (null? alt) (car inferred) (car alt)))
+              (shown (sig-text sig))
+              (s (signature-of (said-fail fail n (sig-text (car inferred))) sig)))
+         (begin
+           (set defined (cons (tuple (extract (car ws) 1) (tuple (extract s 2) (the clauses nil)
+                                                                  (the syns-a nil) (extract s 3)))
+                              (get defined)))
+           (cons (tuple (the signed-opt (list s)) (the (listof string acyclic) (list shown)))
+                 (inferred-each fail (cdr ws) (cdr written) (cdr inferred)))))))))
 ;; `w`'s clauses checked against signature `s`, none if one does not fit.
 (define tried-checks (ref (listof clauses acyclic) rs) (new nil))
 (define tried-check (->* (written signed scopes) (listof clauses acyclic))
@@ -428,6 +460,19 @@
                                                            (the syns-a nil) (extract (car s) 3)))
                                (get defined)))
             (if (null? (tried-check w (car s) file)) (begin (set defined was) nil) s))))))
+;; `s` read as a signature, none if it is not one.
+(define tried-sigs (ref (listof signed acyclic) rs) (new nil))
+(define tried-sig (->* (syn) (listof signed acyclic))
+  (lambda (s)
+    (let ((r (prompt parse-tag (begin (set tried-sigs (list (signature-of pfail-at s))) (p-ok nil))
+                     (lambda (r) r))))
+      (tagcase r (p-err (m x y) (the (listof signed acyclic) nil)) (p-ok (ts) (get tried-sigs))))))
+;; Unsigned macro `w`'s clauses' shapes whole, as a signature that is one
+;; (`by-clauses`); none if not.
+(define alt-sig (->* (written) syns-a)
+  (lambda (w)
+    (let ((alt (by-clauses (tuple (extract w 1) (extract w 3) (extract w 4) (extract w 5)))))
+      (if (or (null? alt) (null? (tried-sig (car alt)))) nil alt))))
 (define checked-each (->* (fails writtens (listof said acyclic) scopes) macro-env)
   (lambda (fail ws sigs file)
     (if (null? ws)
@@ -447,30 +492,12 @@
                                (extract w 3) file)))
           (cons (tuple (extract w 1) (tuple (extract s 2) cs (extract s 1) (extract s 3)))
                 (checked-each fail (cdr ws) (cdr sigs) file))))))
-;; Clauses `cs` checked against `sig`; a member of `clauses` each its own.
 (define check-each (->* (fails syns-a sty int syns-a names scopes) clauses)
   (lambda (fail cs sig defn poly lits file)
-    (tagcase sig
-      (s-clauses (ms)
-        (if (= (len-stys ms) (len cs))
-            (check-members fail cs ms defn poly lits file)
-            (begin (fail-at fail (string-append "a signature of `clauses` has a member for each "
-                                                "clause: here " (int->string (len-stys ms))
-                                                " for " (int->string (len cs)))
-                            (car cs))
-                   nil)))
-      (else y
-        (if (null? cs)
-            nil
-            (let ((c (check-clause fail (car cs) sig defn poly lits file)))
-              (cons c (check-each fail (cdr cs) sig defn poly lits file))))))))
-(define check-members (->* (fails syns-a stys int syns-a names scopes) clauses)
-  (lambda (fail cs ms defn poly lits file)
-    (if (or (null? cs) (null? ms))
+    (if (null? cs)
         nil
-        (cons (check-clause fail (car cs) (car ms) defn poly lits file)
-              (check-members fail (cdr cs) (cdr ms) defn poly lits file)))))
-(define len-stys (->* (stys) int) (lambda (ms) (if (null? ms) 0 (+ 1 (len-stys (cdr ms))))))
+        (let ((c (check-clause fail (car cs) sig defn poly lits file)))
+          (cons c (check-each fail (cdr cs) sig defn poly lits file))))))
 
 ;;; ------------------------------------------------------------ the session
 
@@ -674,13 +701,10 @@
           (let ((made (record-expansion name s)))
             (begin (def-env! made (extract (car (procedural-of name)) 3))
                    (expand-procedural fail name s made)))
-          ;; A signature of a member per clause: the use's clause's, by its
-          ;; pattern (`first-match`).
-          (let ((ms (tagcase (extract m 1) (s-clauses (xs) xs) (else y (the stys nil)))))
-            (begin
-              (nodes-reset!)
-              (if (null? ms) (begin (align in-use 2 nil (extract m 1) operands -1 nil) #u) #u)
-              (first-match fail name s operands (extract m 2) ms 0)))))))
+          (begin
+            (nodes-reset!)
+            (align in-use 2 (the pvars nil) (extract m 1) operands -1 nil)
+            (first-match fail name s operands (extract m 2)))))))
 ;; The pattern variables of `ps` that are names (`bvar`, `dvar`, `id`),
 ;; which match a name alone (a `label` may be a keyword).
 (define name-pvars (->* (pvars) names)
@@ -690,8 +714,8 @@
              (and (name-kind? k) (not (= k 5))))
            (cons (extract (car ps) 1) (name-pvars (cdr ps))))
           (else (name-pvars (cdr ps))))))
-(define first-match (->* (fails symbol syn syn clauses stys int) syn)
-  (lambda (fail name s operands cs ms i)
+(define first-match (->* (fails symbol syn syn clauses) syn)
+  (lambda (fail name s operands cs)
     (if (null? cs)
         (begin (fail-at fail (string-append "a use of `" (symbol->string name) "` that no clause "
                                             "of it matches")
@@ -699,9 +723,8 @@
                s)
         (let ((binds (matched (extract (car cs) 1) operands (name-pvars (extract (car cs) 4)) nil)))
           (if (null? binds)
-              (first-match fail name s operands (cdr cs) ms (+ i 1))
-              (let* ((member (if (null? ms) #u (clause-member fail name s operands ms i)))
-                     (made (record-expansion name s)) (shown (symbol->string name))
+              (first-match fail name s operands (cdr cs))
+              (let* ((made (record-expansion name s)) (shown (symbol->string name))
                      (noted (def-env! made (extract (car cs) 6)))
                      (in-use (lambda ((msg string) (a int) (b int))
                                (fail (string-append "a use of `" shown "`: " msg)
@@ -709,30 +732,6 @@
                 (transcribe in-use (car cs) (extract (car cs) 2) nil (car binds) made)))))))
 
 
-;; Use `s` of macro `name`, its operands of clause `i`'s pattern, aligned
-;; with that clause's member of `ms`; refused if they fit an earlier one
-;; first, the signature saying more than the patterns (`macros.rs`'s).
-(define clause-member (->* (fails symbol syn syn stys int) unit)
-  (lambda (fail name s operands ms i)
-    (let ((j (first-fit ms operands 0)) (shown (symbol->string name)))
-      (if (and (>= j 0) (not (= j i)))
-          (fail-at fail (string-append "a use of `" shown "` fits the signature of clause "
-                                       (int->string (+ j 1)) " first, and clause "
-                                       (int->string (+ i 1)) " is the one whose pattern it "
-                                       "matches: the signature says more than the patterns do")
-                   s)
-          (begin (nodes-reset!)
-                 (align (lambda ((msg string) (a int) (b int))
-                          (fail (string-append "a use of `" shown "`: " msg) a b))
-                        2 (the pvars nil) (nth-sty ms i) operands -1 nil)
-                 #u)))))
-(define first-fit (->* (stys syn int) int)
-  (lambda (ms s k)
-    (cond ((null? ms) -1)
-          ((fits? (car ms) s 2 (lambda ((n symbol)) 0)) k)
-          (else (first-fit (cdr ms) s (+ k 1))))))
-(define nth-sty (->* (stys int) sty)
-  (lambda (ms i) (if (= i 0) (car ms) (nth-sty (cdr ms) (- i 1)))))
 ;; Each binder's fresh name, by its path and the repetitions it is in; how
 ;; many times each repeated binder was repeated, by its path and the
 ;; repetitions around that; and the repetition of each ellipsis

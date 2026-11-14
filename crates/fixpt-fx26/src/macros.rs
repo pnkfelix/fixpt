@@ -14,7 +14,7 @@
 //!     | (σ . σ) | (σ …)                    a pair; a list, of pairs
 //!     | (σ … σ ...)                        a list ending in any number of σ
 //!     | (import σ β) | (export σ β)        Herman's σ↓β and σ↑β
-//!     | (mu v σ) | v | (union σ …)         recursion, alternatives
+//!     | (mu v σ) | v | (oneof σ …)         recursion, alternatives
 //!     | (literal name)                     a name written as it is (`else`)
 //!     | (many σ)                           placed any number of times
 //!     | (expr #:type T #:effect E)         a typed hole: of type at most `T`
@@ -108,10 +108,6 @@ pub(crate) enum STy {
     /// `(oneof σ …)`, written `union` too: one of members told apart by
     /// their shapes in the source.
     Union(Vec<Rc<STy>>),
-    /// `(clauses σ₁ σ₂ …)`, a signature's whole: one member per clause, in
-    /// order, a use governed by its clause's (`typed-macros.md`, "Decided: a
-    /// signature per clause, chosen as the clauses are").
-    Clauses(Vec<Rc<STy>>),
 }
 
 /// What a typed hole says: its type and its effect, each as written, if it
@@ -673,7 +669,6 @@ impl Macros {
                         }
                         STy::Union(ms)
                     }
-                    (Some("clauses"), _, None) => return Err(bad("`(clauses σ …)` is a signature's whole, one member for each clause, not a part of one")),
                     (Some("many"), [_, body], None) => STy::Many(self.sty(body, interner, named, mus)?),
                     // `(expr #:type T #:effect E)`, `(bvar #:type T)`: a list
                     // whose second is a keyword, which no syntax type is.
@@ -930,7 +925,7 @@ impl Macros {
         }
         let syn = || *s.expect("syntax where its shape is not `()`'s");
         match &**self.unfold(t) {
-            Union(ms) | Clauses(ms) => ms.iter().any(|m| self.fits_shaped(m, s, shape, mode, interner, pvars, depth)),
+            Union(ms) => ms.iter().any(|m| self.fits_shaped(m, s, shape, mode, interner, pvars, depth)),
             Pair(a, d) => match shape {
                 Shape::List | Shape::Dotted => {
                     let s = syn();
@@ -976,7 +971,7 @@ impl Macros {
             return self.fits_within(t, &whole(), mode, interner, pvars, depth);
         }
         match &**self.unfold(t) {
-            Union(ms) | Clauses(ms) => ms.iter().any(|m| self.fits_rest(m, rest, tail, span, mode, interner, pvars, depth)),
+            Union(ms) => ms.iter().any(|m| self.fits_rest(m, rest, tail, span, mode, interner, pvars, depth)),
             Pair(a, d) => depth == 0 || (self.fits_within(a, &x, mode, interner, pvars, depth - 1) && self.fits_rest(d, after, tail, span, mode, interner, pvars, depth - 1)),
             Nil | Literal(_) | Bvar | Dvar | Id | Label => false,
             Lambda => lambda_shaped(&whole(), interner),
@@ -1220,23 +1215,15 @@ impl Macros {
     /// Each of `w`'s clauses checked against signature `sig`.
     #[allow(clippy::too_many_arguments)]
     fn clauses_fit(&self, w: &Written, sig: &Rc<STy>, defn: bool, desc: bool, poly: &[Syn], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Clause>> {
-        // A member for each clause: each clause its own.
-        if let STy::Clauses(ms) = &**sig {
-            if ms.len() != w.clauses.len() {
-                let at = w.clauses.first().map_or(w.span, |c| c.at());
-                return Err(FxError::at(at, format!("a signature of `clauses` has a member for each clause: here {} for {}", ms.len(), w.clauses.len())));
-            }
-            return w.clauses.iter().zip(ms).map(|(c, m)| self.clause(c, m, defn, desc, poly, &w.lits, interner, file)).collect();
-        }
         w.clauses.iter().map(|c| self.clause(c, sig, defn, desc, poly, &w.lits, interner, file)).collect()
     }
 
-    /// A signature of a member for each of unsigned macro `w`'s clauses,
-    /// `(clauses σ₁ …)`, each clause's inferred alone: for when the one
-    /// inferred of them together, position by position, does not fit them,
-    /// the parts of one clause no longer told from another's (a literal of
-    /// one where another has a datum, a part one has and another not). None
-    /// for one clause, or clauses that make different things.
+    /// A signature of unsigned macro `w`'s clauses' shapes whole, `(oneof
+    /// σ₁ …)`, each clause's inferred alone: for when the one inferred of
+    /// them together, position by position, does not fit them, the parts of
+    /// one clause no longer told from another's (a literal of one where
+    /// another has a datum, a part one has and another not). None for one
+    /// clause, or clauses that make different things.
     fn by_clauses(&mut self, w: &Written, interner: &mut Interner) -> Option<Syn> {
         if w.clauses.len() < 2 {
             return None;
@@ -1257,7 +1244,7 @@ impl Macros {
             members.push(sigma);
         }
         let at = w.span;
-        let union = Syn::lst(at, std::iter::once(Syn::named(at, "clauses", interner)).chain(members).collect());
+        let union = Syn::lst(at, std::iter::once(Syn::named(at, "oneof", interner)).chain(members).collect());
         Some(match made.flatten() {
             Some(k) => Syn::lst(at, vec![Syn::named(at, "->", interner), union, Syn::symbol(at, k, interner)]),
             None => union,
@@ -1390,16 +1377,7 @@ impl Macros {
             },
             _ => (sig, false, false),
         };
-        // `(clauses σ₁ σ₂ …)`: a member for each clause, in order.
-        let members = sig.list().filter(|l| l.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "clauses"));
-        let sig = match members.as_deref() {
-            Some([_, ms @ ..]) if !ms.is_empty() => {
-                let ms = ms.iter().map(|m| self.sty(m, interner, &HashMap::default(), &mut Vec::new())).collect::<R<Vec<_>>>()?;
-                Rc::new(STy::Clauses(ms))
-            }
-            Some(_) => return Err(FxError::at(sig.at(), "`(clauses σ …)`, of a member for each clause")),
-            None => self.sty(&sig, interner, &HashMap::default(), &mut Vec::new())?,
-        };
+        let sig = self.sty(&sig, interner, &HashMap::default(), &mut Vec::new())?;
         Ok((poly, sig, defn, desc))
     }
 
@@ -1862,31 +1840,12 @@ impl Macros {
         }
         let (_, operands) = split(s).expect("a list");
         let none = HashMap::default();
-        // A signature of a member per clause: the use's clause's, the first
-        // whose pattern it matches (`clauses`).
-        let members = match &*m.sig {
-            STy::Clauses(ms) => Some(ms.clone()),
-            _ => None,
-        };
-        if members.is_none() {
-            let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
-            u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
-        }
-        for (i, c) in m.clauses.iter().enumerate() {
+        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
+        for c in &m.clauses {
             let mut binds = HashMap::default();
             if !matches(&c.pattern.get(), &operands, &c.names, &mut binds, interner) {
                 continue;
-            }
-            // Its clause's member, and the first it fits, as a program's
-            // walk took it: the same, or the signature says more than the
-            // clauses' patterns do.
-            if let Some(ms) = &members {
-                let first = ms.iter().position(|m| self.fits(m, &operands, Mode::Use, interner, &none));
-                if let Some(j) = first.filter(|j| *j != i) {
-                    return Err(FxError::at(s.at(), format!("a use of `{}` fits the signature of clause {} first, and clause {} is the one whose pattern it matches: the signature says more than the patterns do", interner.name(name), j + 1, i + 1)));
-                }
-                let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
-                u.align(&ms[i], &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
             }
             let made = fixpt_read::record_expansion(interner.name(name), s.span(), m.text.clone());
             self.withs.def_envs.insert(made, c.def_env.clone());
@@ -2204,29 +2163,6 @@ impl Aligner<'_> {
             STy::Mu(id) => {
                 let body = self.m.mus[*id].clone();
                 Ok(Some((at, body, s_owned, at)))
-            }
-            // A signature of a member per clause: a use whose syntax is known,
-            // the first member it fits, which its expansion holds to be its
-            // clause's (`Macros::expand_use`); in a template, the one member
-            // it may fit, refused if none, and, for now, if several.
-            STy::Clauses(ms) if self.mode != Mode::Template => match ms.iter().find(|m| self.m.fits(m, s, Mode::Use, self.interner, self.pvars)) {
-                Some(one) => {
-                    let one = one.clone();
-                    Ok(Some((at, one, s_owned, at)))
-                }
-                None => Err(fail(format!("`{}` fits none of this macro's clauses' signatures", self.show(s)))),
-            },
-            STy::Clauses(ms) => {
-                let fit: Vec<&Rc<STy>> = ms.iter().filter(|m| self.m.fits(m, s, self.mode, self.interner, self.pvars)).collect();
-                match &fit[..] {
-                    [one] => {
-                        let one = (*one).clone();
-                        Ok(Some((at, one, s_owned, at)))
-                    }
-                    [] if self.mode != Mode::Template => Err(fail(format!("`{}` fits none of this macro's clauses' signatures", self.show(s)))),
-                    // Its parts not known: which clause's it is, unsaid.
-                    _ => Err(fail(format!("`{}`: which of this macro's clauses' signatures it fits, each its own binding structure, is not known where the template is checked: not yet", self.show(s)))),
-                }
             }
             STy::Union(ms) => {
                 let mut fit: Vec<&Rc<STy>> = ms.iter().filter(|m| self.m.fits(m, s, self.mode, self.interner, self.pvars)).collect();
@@ -2658,8 +2594,7 @@ impl Aligner<'_> {
                 let what = if m.defn { "definitions" } else { "an expression" };
                 return Err(fail(format!("`{}` makes {what}, not a description", self.name(h))));
             }
-            let sig = m.sig.clone();
-            let (_, operands) = split(s).expect("a list");
+            let (sig, (_, operands)) = (m.sig.clone(), split(s).expect("a list"));
             let mut p = self.nodes[at].path.clone();
             p.push(false);
             let x = self.align(&sig, &operands, None, p)?;

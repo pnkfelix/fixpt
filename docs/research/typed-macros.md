@@ -1788,108 +1788,155 @@ gives `(union (literal hi) data)`, whose members are not told apart by
 shape. Built, both front ends: where the one merged so is no signature,
 or its clauses do not fit it, a member per clause, each clause inferred
 alone (`by_clauses`, `by-clauses`), is inferred instead. First as their
-union, `(union ((literal hi)) ((literal ho) expr))`, which does not take
-clauses that overlap; the same day, as `(clauses ((literal hi)) ((literal
-ho) expr))` ("Decided: a signature per clause, chosen as the clauses
-are"), which does. A macro whose clauses fit no signature inferred is refused
+`oneof`, `(oneof ((literal hi)) ((literal ho) expr))`, which does not take
+clauses that overlap (for a day as `(clauses …)`, which did: "Rejected: a
+signature per clause", below). A macro whose clauses fit no signature inferred is refused
 saying so on a line of its own, then what was inferred and how a
 signature is written (the user, 2026-11-14: the message read as a
 warning, and did not say how to be accepted).
 
 
-## Decided: a signature per clause, chosen as the clauses are, `clauses` (2026-11-14)
+## Rejected: a signature per clause, `clauses` (2026-11-14)
 
-The user's question: what would "an `allof` of a signature per clause"
-(above, "`anyof`, `oneof` and `allof`") be, in detail? Worked out here,
-for a decision. **Decided** (the user, 2026-11-14): not `allof`, which "is
-meant to be a way to state a uniform procedure that can be proven to have
-distinct implications for distinct domains"; a macro's clauses are
-several bodies, chosen in order: first called `cases`, then (the user's,
-the same day) **`clauses`**, since a reader of "cases" may take them for
-disjoint, as in "by cases" or `tagcase`, while a macro's clauses are known
-to be tried in order and to overlap. Decided with it (the user): signatures
-write `union` as `oneof`, its name elsewhere (`union` read as it for a
-while); one member per clause; whether a part a template gives may fit a
-member, by its syntax type alone.
+Built the same day (bf1fe904), then taken out (the user's question: is
+`clauses` "a design mistake, or at least a distraction"; "I worry that I
+am compromising the type system in the short term to accommodate the
+macro system"). `(clauses σ₁ σ₂ …)` was a member per clause, tried in
+order and overlapping, a use governed by its clause's member.
 
-### What a macro of several clauses is
+**The property it gave up**, which the design keeps: *a use's binding
+structure is a function of its syntax (the bindings of its identifiers
+included) and the macro's signature alone, never of which clause
+expands it.* With `clauses` it was a function of the clause, and so:
 
-Each clause has a signature of its own, σᵢ: its operands' shape and their
-binding structure (what each part binds, what is in scope where), and
-what it makes. A use expands by the first clause whose pattern matches
-(`syntax-rules`' order), so the clause that expands a use, and so the σᵢ
-it must be checked by, is the first that fits it. Four readings of a
-signature of several:
+- **A use in a template** (another macro's, or its own, recursive) could
+  not be checked where the template is: which clause takes it depends on
+  syntax not yet given. The rule proposed for it (each member it may fit,
+  checked against each, accepted if every one places its parts as the
+  template's signature says) needed coverage besides (`(my-or f rest
+  ...)` surely fits no one member: `(expr)` takes `rest` empty, `(expr
+  expr expr ...)` not), and still refused the case it was for:
 
-1. **`(oneof σ₁ σ₂ …)`**, today's `union`: the operands fit one member,
-   told apart by shape. Exact, but the clauses may not overlap: `my-or`'s
-   `(expr)` and `(expr expr ...)` both fit one operand.
-2. **`(anyof σ₁ σ₂ …)`**: the operands fit some member, perhaps several,
-   and which binding structure applies is not said. A signature says what
-   binds what; this one would not. Not proposed.
-3. **`(allof σ₁ σ₂ …)`**, as a procedure's (`fx26.md`, "One procedure with
-   several types"): there one body has every member's type, and a call
-   takes every member its arguments fit, its result the meet of theirs. A
-   macro's clauses are several bodies, and a use takes one, the first that
-   fits. Named `allof`, a macro's would mean something else than a
-   procedure's.
-4. **An ordered choice**, the members in the clauses' order, a use taken by
-   the first it fits: what the expansion does. Overlap is harmless, the
-   one that applies being the one whose clause expands the use. Proposed,
-   under a name of its own (below).
+  ```scheme
+  (define-syntax bind*
+    (syntax-rules ()
+      ((_ () body) body)
+      ((_ ((x e) . rest) body) (let ((x e)) (bind* rest body)))
+      ((_ (e . rest) body) (begin e (bind* rest body)))))
+  ```
 
-### The rules, for reading 4
+  whose members place `body` in different scopes, as `rest` begins with a
+  binding or not, and whether `(f 1)` binds `f` is the clauses' order.
+- **A use refused where it expands, not where it is checked**: the
+  member a use fits first had to be its clause's, checked at expansion
+  (`(bind (begin (f 1)) (f 2))`, `(x e)`'s pattern matching `begin` as
+  `x`, which no `bvar` is). A definition accepted, then a use refused for
+  the definition's sake.
 
-- **Written**: one member per clause, in order, `(clauses σ₁ σ₂ …)`; member
-  `i` is clause `i`'s, each
-  clause's template checked against its own member alone. A `oneof` inside
-  a member still says a choice within one operand, where the part's shape
-  says which (an optional part, `(oneof () (expr))`).
-- **Inferred**: each clause's signature inferred alone (`by_clauses`), the
-  `clauses` of them; the merge by position only where it fits, as now, since
-  one signature reads more simply than several.
-- **A use in the program**: its syntax concrete, the first member it fits
-  is the one, as its clause is; it is checked by that member's binding
-  structure.
-- **A use in a template** (another macro's, or the macro's own, recursive):
-  the hard part. Its operands are the template's syntax with pattern
-  variables in it, of known syntax types but unknown syntax: which member
-  it fits may not be known where the template is checked. Take as
-  candidates each member it may fit, in order, up to and including the
-  first it surely fits (none surely: refused, "may fit none"); the use is
-  checked against each candidate's binding structure, and is accepted only
-  if every candidate places its parts as the template's own signature
-  says. So whichever clause the expansion takes, the binding the template
-  promised holds. Where candidates disagree, refused, naming the members
-  that do.
-- **What a member exports** (a macro that makes definitions): each its
-  own; a use defines what its member says. A template's use, of several
-  candidates, defines what they all export alike, or is refused.
-- **Typed results** (item 7): each member its own, as a procedure's
-  `allof` members have their own results; a use's is its member's.
-- **Shown**: `(clauses σ₁ …)`, each member as a clause's signature is shown.
+**What it was for, and what takes it instead.** The user's examples,
+`((_ hi) …)` with `((_ ho expr) …)` and `((_ hi) …)` with `((_ 2 expr)
+…)`, need no `clauses`: one signature, a `oneof` of the clauses' whole
+shapes, told apart by shape ("Inferred signatures: clauses of different
+shapes", above). Clauses that bind differently do too, where shape tells
+them apart:
 
-### Open
+```scheme
+(define-syntax with1
+  (oneof ((literal bind) bvar expr (import expr (rho (AD var))))
+         (expr expr))
+  (syntax-rules (bind)
+    ((_ bind x e body) (let ((x e)) body))
+    ((_ e body) (begin e body))))
+```
 
-Decided above: the name, `oneof`, one member a clause, "may fit" by
-syntax type. Built first (2026-11-14): a use in a template that may fit
-more than one member is refused, not yet; one that may fit one alone, and
-surely does, is checked by it.
+and a choice that recurs goes inside a part, by `mu` (`my-let*`), or
+into which macro holds the part: even and odd, the binding toggling, each
+one signature (`define-syntax-rec`, inferred today; written, TODO §272):
 
-### Hypothetical: `clauses` for values, closed ad-hoc polymorphism
+```scheme
+(define-syntax-rec
+  (bnd (syntax-rules ()
+         ((_ () body) body)
+         ((_ ((x e) . rest) body) (let ((x e)) (seq rest body)))))
+  (seq (syntax-rules ()
+         ((_ () body) body)
+         ((_ (e . rest) body) (begin e (bnd rest body))))))
+```
 
-Recorded, not decided (the user asked whether it may see reuse). Read in
-the value language, `(clauses T₁ T₂ …)` would be a bundle of
-implementations, a body per member, a call governed by the first member
-its arguments fit: closed, statically resolved overloading, unlike
-`allof`'s one body of several types. A call of known argument types
-resolves where it is checked, compiled to that member's body. Its hard
-part is the one a template's use has here: polymorphic code calling it at
-a type variable cannot know which member applies; the rule above carries
-over (each member it may fit, up to the first it surely fits, agreeing),
-or the choice is passed in, as type classes' dictionaries are. To weigh:
-order against width subtyping (an argument fitting an earlier member by
-subtyping; or choice by specificity, Julia's and CLOS's, which needs "most
-specific" defined); closed, so no coherence problem across modules, and no
-case added later; a first-class use picking its member where it is given
-one type; and each member's latent effect its own.
+`bind*` done so: whether an element binds is said by its position, not
+by its shape and the clauses' order. **Refused**, then, and not missed:
+clauses whose patterns overlap and that place parts differently (`bind`;
+`infer-overlap.fx`'s `(_ (a b))` with `(_ e)`, the first taking apart an
+operand the second calls an `expr`). Kept: `oneof` (a signature's
+`union`, `union` still read). Gone: `allof` of a macro's (its members
+must agree where they overlap, which a `oneof` told apart already says),
+and the hypothetical `clauses` for values (closed overloading by order).
+
+**Literals, the overlap that remains.** Heist's `string-cases`
+(`heist/docs/requests/bench/macros/literal-overlap.fx`), `else` against a
+datum:
+
+```scheme
+(syntax-rules (else)
+  ((_ v (else d)) d)
+  ((_ v (k e) c ...) (if (string=? v k) e (string-cases v c ...))))
+```
+
+`else` is an identifier, so of an `expr`'s and a `bvar`'s shape: `(union
+(literal else) data)` is not told apart by shape. What tells it apart is
+a binding: trailmarks, next.
+
+
+## Proposed: trailmarks, a literal as a binding (2026-11-14)
+
+The user's (after keywords for literals, `#:else`, were weighed and not
+taken: "breaking all current cond is a tough pill to swallow"; the
+literals list kept, "I'm not yet convinced that it doesn't pay off"),
+after Racket: `else` and `=>` are bindings `racket/base` exports, syntax
+that refuses to be used alone ("else: not allowed as an expression"),
+`cond` telling them by binding (`free-identifier=?`), so that `(require
+(rename-in racket/base [else otherwise]))` makes `(cond … (otherwise x))`
+mean it; `syntax/parse` wants its `#:literals` bound (`#:datum-literals`
+the by-name kind). R6RS and R7RS export `else`, `=>`, `_` and `...` from
+their base libraries as "auxiliary syntax". The name, the user's: a
+**trailmark**, one of the marks along a trail that say which way it goes
+(not the post that offers the ways: `else` is one sign of a choice, not
+the choice).
+
+```scheme
+(define-syntax else (trailmark))
+(define-syntax =>   (trailmark "a `cond` clause's, before the procedure given the test"))
+```
+
+- **A transformer of its own kind**, beside `syntax-rules`, syntactic
+  closures and explicit renaming: bound by `define-syntax`, so exported,
+  imported and renamed as a macro is (a module's descriptions), no new
+  kind of component. Used alone, anywhere, refused: "`=>` is a trailmark,
+  not an expression: a `cond` clause's, before the procedure given the
+  test" (the string, if given, says where it belongs).
+- **A literals list names trailmarks**: `(syntax-rules (else) …)` wants
+  `else` bound to a trailmark where the macro is defined, and a use's
+  `else` matches if it is bound to that one (renamed, imported under
+  another name, it still does; shadowed by a `let`, it does not). A name
+  bound to no trailmark is refused: "`hi` names no trailmark here:
+  `(define-syntax hi (trailmark))`" (by name, as `#:datum-literals`, not
+  offered: no binding to tell it by).
+- **In a signature**, `(trailmark else)` where `(literal else)` is
+  written today: the identifier bound to that trailmark. **Disjoint from
+  `expr` and `data`**, a trailmark being neither, so `(oneof ((trailmark
+  else) expr) (expr expr))` is told apart: at a use by its identifiers'
+  bindings, known there; in a template by syntax types, a part of type
+  `expr` never being a trailmark. Not from `bvar`: a binder may be any
+  identifier, rebinding one how it is shadowed; refused there as not told
+  apart, as now.
+- **Hygiene**: a template's `else` is the macro definition's, renamed or
+  shadowed at the use or not.
+- **The kernel's `else` and `=>`** bound as trailmarks in the standard
+  environment, so a user's macro names them, every `cond` as it is. A
+  second step, later: the parsers telling the kernel forms' `else` by
+  binding, not name (a `cond` where `else` is a variable then reads it as
+  one; today it does not care).
+
+Both front ends. Tests: `string-cases`; a trailmark renamed on import and
+matched; shadowed and not; one used alone, refused; a literals list
+naming no trailmark, refused; `(trailmark else)` with a `bvar`, refused.

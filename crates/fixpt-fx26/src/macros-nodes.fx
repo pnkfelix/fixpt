@@ -313,24 +313,3 @@
              (or (string=? (syn-name (nth items 1)) "#%fx")
                  (string=? (syn-name (nth items 1)) "#%toplevel"))))
       (else y #f))))
-;; Those of `ms` that `s` fits.
-(define fitting (->* (stys syn int pvars) stys)
-  (lambda (ms s mode ps)
-    (cond ((null? ms) nil)
-          ((fits? (car ms) s mode (lambda ((n symbol)) (pvar-shape n ps)))
-           (cons (car ms) (fitting (cdr ms) s mode ps)))
-          (else (fitting (cdr ms) s mode ps)))))
-(define not-definition (->* (fails syn string) unit)
-  (lambda (fail s what)
-    (fail-at fail (string-append "`" (show-syn s) "` is not a definition: a macro that makes "
-                                 "definitions makes " what)
-             s)))
-(define sig-of (->* (symbol named) stys)
-  (lambda (n named)
-    (cond ((null? named) nil)
-          ((symbol=? n (extract (car named) 1)) (list (extract (car named) 2)))
-          (else (sig-of n (cdr named))))))
-
-;; The `i`th of nodes `ks`.
-(define kid (->* ((listof int acyclic) int) int)
-  (lambda (ks i) (if (= i 0) (car ks) (kid (cdr ks) (- i 1)))))
