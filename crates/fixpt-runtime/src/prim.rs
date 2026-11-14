@@ -3157,6 +3157,23 @@ prims! {
             Err(e) => fx26_io_result(rt, Err(e)),
         })
     });
+    // A variable of the process's environment: its value, `unset`, or
+    // `not-text` where it is no UTF-8. A name that cannot be one (empty,
+    // or with `=` or NUL in it) is never set.
+    "%fx26-get-environment-variable", 1, Some(1), simple!(|rt, a| {
+        let name = get_string(rt, a[0])?;
+        let value = if name.is_empty() || name.contains(['=', '\0']) { None } else { std::env::var_os(&name) };
+        Ok(match value {
+            None => fx26_sum(rt, "unset", Value::UNIT),
+            Some(v) => match v.into_string() {
+                Ok(s) => {
+                    let s = rt.heap.make_string(&s);
+                    fx26_sum(rt, "value", s)
+                }
+                Err(_) => fx26_sum(rt, "not-text", Value::UNIT),
+            },
+        })
+    });
     // The first process with news (Heist's F6): output to take, or an
     // end the program has not seen; -1 if none. In an arm `((process-news) p …)`.
     "%fx26-process-news", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.world.process_news())));
@@ -3360,6 +3377,18 @@ prims! {
         if n < 0 { return rt.fail("%gc-code-every! takes a count, 0 or more", &[a[0]]); }
         rt.heap.gc_code_every = n as u64;
         Ok(Value::UNSPECIFIED)
+    });
+    // A limit of macro expansion, for the expander written in FX-26
+    // (`%macros:limit`; `crate::syscall::macro_limit`, which the Rust
+    // expander reads too): `=` and the number, or `!` and why the value
+    // set is none.
+    "%fx26-macro-limit", 1, Some(1), simple!(|rt, a| {
+        let name = get_string(rt, a[0])?;
+        let answer = match crate::syscall::macro_limit(&name) {
+            Ok(n) => format!("={n}"),
+            Err(why) => format!("!{why}"),
+        };
+        Ok(rt.heap.make_string(&answer))
     });
 }
 

@@ -24,6 +24,29 @@ pub struct Syscall {
 /// or why not, out (`%fx26-expand-procedural`).
 pub static PROCEDURAL: std::sync::OnceLock<fn(&str) -> Result<String, String>> = std::sync::OnceLock::new();
 
+/// A limit of macro expansion (`TODO.md` §231), `name` `USES` (the uses
+/// one form's expansion may expand, 10000 unless said) or `DEPTH` (how
+/// deep they may be, each in the expansion of the one before, 1000 unless
+/// said), as `FIXPT_MACRO_<name>` sets it in the process's environment
+/// (set empty, unsaid): read here for both front ends, so that they agree
+/// and say alike why a value is no limit.
+pub fn macro_limit(name: &str) -> Result<usize, String> {
+    let default = match name {
+        "USES" => 10_000,
+        "DEPTH" => 1_000,
+        _ => return Err(format!("no limit of macro expansion is named `{name}`")),
+    };
+    let var = format!("FIXPT_MACRO_{name}");
+    match std::env::var_os(&var) {
+        None => Ok(default),
+        Some(v) if v.to_str().is_some_and(|s| s.trim().is_empty()) => Ok(default),
+        Some(v) => match v.to_str().map(str::trim).and_then(|s| s.parse::<usize>().ok()) {
+            Some(n) if (1..=1_000_000_000).contains(&n) => Ok(n),
+            _ => Err(format!("`{var}` is `{}`: a limit of macro expansion is a whole number from 1 to 1000000000", v.to_string_lossy())),
+        },
+    }
+}
+
 /// The most arguments a syscall takes.
 pub const MAX_ARGS: usize = 6;
 

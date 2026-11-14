@@ -251,6 +251,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // its last form's value or `!` and why not out. It only computes, and
     // gives the same for the same text.
     ("%macros:expand-procedural", "(subr spin (string) string)"),
+    ("%macros:limit", "(subr spin (string) string)"),
     ("list-dir", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (names (listof string r)) (failed io-error))))"),
     // Heist's (`FIXPT-CHANGES.md` F3): the checker's type of the innermost
     // expression of a program text at a character (`typeat.rs`). Reading the
@@ -343,6 +344,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // and a link's target.
     ("file-info", "(subr (io fs-read) (string) (sumof (info (productof (kind (sumof (file unit) (directory unit) (symlink unit) (other unit))) (size int) (modified int) (mode int))) (failed io-error)))"),
     ("read-symlink", "(subr (io fs-read) (string) (sumof (target string) (failed io-error)))"),
+    ("get-environment-variable", "(subr (io env-read) (string) (sumof (value string) (unset unit) (not-text unit)))"),
     ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
     // The heap dumped, and the procedure a resumed run starts by calling
     // (`fixpt resume`, `TODO.md` §189). It is not called here, so its

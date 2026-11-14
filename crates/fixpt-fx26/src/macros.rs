@@ -229,12 +229,16 @@ pub(crate) struct Mark {
 
 /// The standard environment's trailmarks, `else` and `=>`, and where each
 /// belongs; numbered from the top, apart from those a program defines.
-/// The uses of macros one form's expansion may expand: the fuel behind
-/// the check of a use that comes back to itself (`Macros::enter`).
-const MAX_USES: usize = 10_000;
-/// How deep uses may be, each in the expansion of the one before: past it,
-/// one that changes each time is taken not to end (`Macros::enter`).
-const MAX_DEPTH: usize = 1_000;
+/// The limits of one form's expansion, read as it begins (`Withs::limits`):
+/// the uses it may expand, the fuel behind the check of a use that comes
+/// back to itself; and how deep they may be, each in the expansion of the
+/// one before, past which one that changes each time is taken not to end
+/// (`Macros::enter`). 10000 and 1000, or as `FIXPT_MACRO_USES` and
+/// `FIXPT_MACRO_DEPTH` set them (`fixpt_runtime::syscall::macro_limit`).
+fn limits(at: &Syn) -> R<(usize, usize)> {
+    let read = |name| fixpt_runtime::syscall::macro_limit(name).map_err(|why| FxError::at(at.at(), why));
+    Ok((read("USES")?, read("DEPTH")?))
+}
 
 /// How many parts syntax `s` has, each list, pair's tail and atom one.
 fn syn_size(s: &Syn) -> usize {
@@ -376,6 +380,9 @@ pub(crate) struct Withs {
     /// its macro, its form, and how many parts the form has, once it is
     /// looked at (`Macros::enter`).
     pub(crate) chain: Vec<(Sym, Syn, Option<usize>)>,
+    /// The limits of the expansion of the form the chain is in, its uses
+    /// and their depth (`limits`).
+    pub(crate) limits: (usize, usize),
     /// The trailmarks defined, by name (`Mark`): the standard ones are the
     /// kernel's. Here, out of line: a `Macros` is moved whole, and is in the
     /// checker's frames.
@@ -1820,7 +1827,8 @@ impl Macros {
         if self.defined.is_empty() {
             return Ok(form.clone());
         }
-        let mut budget = MAX_USES;
+        self.withs.limits = limits(form)?;
+        let mut budget = self.withs.limits.0;
         self.withs.chain.clear();
         let out = self.expand_in(form, interner, &mut budget, &mut Vec::new())?;
         // A form of the program's is the text written for it, what a use
@@ -1840,8 +1848,9 @@ impl Macros {
             return Ok(vec![self.expand(form, interner)?]);
         }
         let mut out = Vec::new();
+        self.withs.limits = limits(form)?;
         self.withs.chain.clear();
-        self.expand_defn(form, interner, &mut { MAX_USES }, &mut out)?;
+        self.expand_defn(form, interner, &mut { self.withs.limits.0 }, &mut out)?;
         Ok(out.into_iter().map(|f| f.placed(form.at())).collect())
     }
 
@@ -1851,17 +1860,18 @@ impl Macros {
     /// unchanged, which expansion, deterministic, would come back to
     /// forever (`TODO.md` §231).
     fn enter(&mut self, h: Sym, s: &Syn, budget: &mut usize, interner: &Interner) -> R<()> {
+        let (max_uses, max_depth) = self.withs.limits;
         let chain = &mut self.withs.chain;
         let last = |chain: &[(Sym, Syn, Option<usize>)]| {
             let inside: Vec<String> = chain.iter().rev().take(4).map(|(n, ..)| format!("`{}`", interner.name(*n))).collect();
             if inside.is_empty() { String::new() } else { format!(", inside {}", inside.join(", ")) }
         };
         if *budget == 0 {
-            return Err(FxError::at(s.at(), format!("this macro's expansion does not end: {MAX_USES} uses expanded in one form, the last of `{}`{}", interner.name(h), last(chain))));
+            return Err(FxError::at(s.at(), format!("this macro's expansion does not end: {max_uses} uses expanded in one form, the last of `{}`{}", interner.name(h), last(chain))));
         }
         *budget -= 1;
-        if chain.len() == MAX_DEPTH {
-            return Err(FxError::at(s.at(), format!("this macro's expansion does not end: its uses are {MAX_DEPTH} deep, each in the expansion of the one before, the last of `{}`{}", interner.name(h), last(chain))));
+        if chain.len() == max_depth {
+            return Err(FxError::at(s.at(), format!("this macro's expansion does not end: its uses are {max_depth} deep, each in the expansion of the one before, the last of `{}`{}", interner.name(h), last(chain))));
         }
         // Its parts counted only where a use of the same macro is around
         // it, each once; compared, part by part, only with one as large.

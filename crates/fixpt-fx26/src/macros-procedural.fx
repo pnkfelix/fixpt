@@ -587,10 +587,28 @@
 (define chain (ref (listof link acyclic) rs) (new nil))
 (define chain-depth (ref int rs) (new 0))
 ;; The uses one form's expansion may expand, and how deep, each in the
-;; expansion of the one before (`MAX_USES`, `MAX_DEPTH`).
-(define max-uses int 10000)
-(define max-depth int 1000)
-(define chain-begun! (->* () unit) (lambda () (begin (set chain nil) (set chain-depth 0))))
+;; expansion of the one before (`macros.rs`'s `limits`).
+;; The limits of one form's expansion, read as it begins (`macros.rs`'s
+;; `limits`): 10000 and 1000, or as `FIXPT_MACRO_USES` and
+;; `FIXPT_MACRO_DEPTH` set them.
+(define max-uses (ref int rs) (new 10000))
+(define max-depth (ref int rs) (new 1000))
+;; Limit `name`, `USES` or `DEPTH`, as the runtime reads it; -1 where the
+;; value set is none, said at `s`.
+(define limit-of (->* (fails syn string) int)
+  (lambda (fail s name)
+    (let* ((a (%macros:limit name)) (rest (substring a 1 (string-length a))))
+      (if (char=? (string-ref a 0) #\=)
+          (parse-nat rest 10)
+          (begin (fail-at fail rest s) -1)))))
+;; One form's expansion begun, at `s`: its chain empty, its limits read.
+;; The uses it may expand, or -1 where a limit set is none.
+(define chain-begun! (->* (fails syn) int)
+  (lambda (fail s)
+    (let* ((u (limit-of fail s "USES")) (d (if (< u 0) -1 (limit-of fail s "DEPTH"))))
+      (begin (set chain nil) (set chain-depth 0)
+             (set max-uses u) (set max-depth d)
+             (if (< d 0) -1 u)))))
 (define use-left! (->* () unit)
   (lambda () (begin (set chain (cdr (get chain))) (set chain-depth (- (get chain-depth) 1)))))
 ;; A use of `n`, `s`, about to be expanded, `fuel` uses left: entered in the
@@ -604,13 +622,14 @@
       (cond
         ((= fuel 0)
          (begin (fail-at fail (string-append "this macro's expansion does not end: "
-                                             (int->string max-uses) " uses expanded in one form, "
-                                             "the last of " shown (inside-said ls 4 ""))
+                                             (int->string (get max-uses))
+                                             " uses expanded in one form, the last of "
+                                             shown (inside-said ls 4 ""))
                          s)
                 #f))
-        ((= (get chain-depth) max-depth)
+        ((= (get chain-depth) (get max-depth))
          (begin (fail-at fail (string-append "this macro's expansion does not end: its uses are "
-                                             (int->string max-depth) " deep, each in the "
+                                             (int->string (get max-depth)) " deep, each in the "
                                              "expansion of the one before, the last of " shown
                                              (inside-said ls 4 ""))
                          s)

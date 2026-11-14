@@ -52,7 +52,7 @@
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias respanned in-expansion use-entered? use-left!
-        chain-begun! max-uses)
+        chain-begun!)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names trailmark-form define-trailmark hide-marks!
@@ -589,10 +589,11 @@
   (lambda (fail form)
     (if (null? (get defined))
         form
-        (begin
-          (set budget max-uses)
-          (chain-begun!)
-          (at-place (expand-in fail form nil) (syn-start form) (syn-end form) 0)))))
+        (let ((n (chain-begun! fail form)))
+          (if (< n 0)
+              form
+              (begin (set budget n)
+                     (at-place (expand-in fail form nil) (syn-start form) (syn-end form) 0)))))))
 ;; Top-level form `form` expanded: a use of a macro that makes definitions,
 ;; the definitions it makes, in order, a `begin` of them spliced (as R7RS's
 ;; at the top level); each at `form`'s place, as `expand`'s, as a top-level
@@ -602,10 +603,11 @@
     (let ((items (list-items form)))
       (if (and (not (null? items)) (syn-symbol? (car items))
                (makes-top-defns? (syn-symbol (car items))))
-          (begin
-            (set budget max-uses)
-            (chain-begun!)
-            (at-places (expand-defn fail form) (syn-start form) (syn-end form)))
+          (let ((n (chain-begun! fail form)))
+            (if (< n 0)
+                (list form)
+                (begin (set budget n)
+                       (at-places (expand-defn fail form) (syn-start form) (syn-end form)))))
           (list (expand fail form))))))
 ;; `s`, where a definition is: a use of a macro that makes definitions, what
 ;; it makes; a `begin`, each of its; a definition, as `expand-in` expands

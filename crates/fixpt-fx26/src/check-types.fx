@@ -142,13 +142,14 @@
   (lambda (k)
     (case k ((0) "stdin") ((1) "stdout") ((2) "stderr") ((3) "fs-read") ((4) "fs-write")
             ((5) "clock") ((6) "args") ((7) "exit") ((8) "terminal") ((9) "native") ((10) "sys")
-            ((11) "process") ((12) "clock-read") ((13) "stdin-poll") (else "process-control"))))
+            ((11) "process") ((12) "clock-read") ((13) "stdin-poll") ((14) "process-control")
+            (else "env-read"))))
 (define k-io-kind-code (subr pure (string) int)
   (lambda (n)
     (case n (("stdin") 0) (("stdout") 1) (("stderr") 2) (("fs-read") 3) (("fs-write") 4)
             (("clock") 5) (("args") 6) (("exit") 7) (("terminal") 8) (("native") 9)
             (("sys") 10) (("process") 11) (("clock-read") 12) (("stdin-poll") 13)
-            (("process-control") 14)
+            (("process-control") 14) (("env-read") 15)
             (else -1))))
 ;; The kind an I/O kind is the part of that never waits, or -1 (`TODO.md`
 ;; §225; `IoKind::wider`): `clock-read` of `clock`, `stdin-poll` of `stdin`,
@@ -158,7 +159,7 @@
 (define k-io-kinds-shown string
   (string-append "`stdin`, `stdout`, `stderr`, `fs-read`, `fs-write`, `clock`, `args`, `exit`, "
                  "`terminal`, `native`, `sys`, `process`, `clock-read`, `stdin-poll`, "
-                 "`process-control`"))
+                 "`process-control`, `env-read`"))
 ;; The part of `ps` labelled `l`: its type (or what else it holds), or -1;
 ;; and where it is, from `i`, or -1. Once here, for every file of the
 ;; checker (`TODO.md` §188: eight of the one and three of the other were

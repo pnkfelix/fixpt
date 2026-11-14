@@ -156,10 +156,12 @@ pub enum IoKind {
     /// far, their status, news of any. Within `(io process)`, which waits
     /// for one to end, or to take what is written to it.
     ProcessControl,
+    /// Reading the process's environment, its variables (`get-environment-variable`).
+    EnvRead,
 }
 
 impl IoKind {
-    pub const ALL: [IoKind; 15] = [
+    pub const ALL: [IoKind; 16] = [
         IoKind::Stdin,
         IoKind::Stdout,
         IoKind::Stderr,
@@ -175,6 +177,7 @@ impl IoKind {
         IoKind::ClockRead,
         IoKind::StdinPoll,
         IoKind::ProcessControl,
+        IoKind::EnvRead,
     ];
     /// Its name, as `(io k)` writes it.
     pub fn name(self) -> &'static str {
@@ -194,6 +197,7 @@ impl IoKind {
             IoKind::ClockRead => "clock-read",
             IoKind::StdinPoll => "stdin-poll",
             IoKind::ProcessControl => "process-control",
+            IoKind::EnvRead => "env-read",
         }
     }
     /// The kind this one is part of, if it is part of one: the part that

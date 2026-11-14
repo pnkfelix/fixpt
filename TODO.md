@@ -5631,9 +5631,33 @@ expanded, so not one that comes back. Tests: `macros/loop-*.fx`,
 `procedural/returns-its-input.fx`, `quotes-its-input.fx`. Not yet: a
 form with a vector, a real, a ratio or a bytevector in it is never the
 same as another, atoms compared as a pattern matches them (such a use is
-caught by the depth instead); a depth of 1000 refuses a legitimate recursion deeper
-than that (a macro over a list of more than 1000 elements, one use
-each).
+caught by the depth instead).
+
+Both limits set by the environment (the user's, 2026-11-14: "I cannot
+predict how downstream consumers might use macros"): `FIXPT_MACRO_DEPTH`
+and `FIXPT_MACRO_USES`, each a whole number from 1 to 1000000000, set
+empty as unsaid, read for both front ends by one function
+(`fixpt_runtime::syscall::macro_limit`; FX-26's `%macros:limit`) as each
+form's expansion begins; another value refused at the form, "`FIXPT_MACRO_DEPTH`
+is `abc`: a limit of macro expansion is a whole number from 1 to
+1000000000". Tests: `fixpt-cli/tests/macro_limits.rs`. `%macros:limit`
+is the expander's own way in, so that a switch could set a limit later;
+a program reads the environment with `get-environment-variable`, of the
+effect `(io env-read)` (the user's, 2026-11-14; nothing sets a variable,
+which in Rust is unsafe while another thread may read them; tests:
+`fixpt-cli/tests/environment.rs`).
+
+Deeper than 1000 is slow (measured 2026-11-14, `(count 0 x …)`, one use
+per element, each dropping one: `fixpt check`, release): the Rust
+checker 0.41, 1.6, 6.8 s at 500, 1000, 2000 deep, quadratic, which this
+macro is (each step makes a list one shorter); FX-26's 0.75, 7.4, 56 s,
+nearly cubic; 5000 deep past 300 s, and 20000 deep the nursery full
+("the nursery is full: 2 words more", a panic, after 259 s). In a
+profile of 1000 deep the collector is 38% (minor 24%, major 14%),
+`append`'s `fronts` 14%. Not the chain: with its entries holding no form
+the times are the same. Not found yet what the extra factor is: what
+each minor collection walks that grows with the depth (the stack of
+expansions in progress, the regions), or what keeps each step's form.
 
 If deeper chains matter (the user's, 2026-11-14, weighed): the chain
 holds no copies, each entry a use the expander is still inside, so its

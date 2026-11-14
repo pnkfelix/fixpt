@@ -398,6 +398,7 @@
          (("f32-infinite?") "%fx26-f32-infinite?")
          (("flatarray-ref") "%fx26-flatarray-ref")
          (("terminal-size") "%fx26-terminal-size")
+         (("%macros:limit") "%fx26-macro-limit")
          (("%reify-effect") "%fx26-reify-effect")
          (("%reify-region") "%fx26-reify-region")
          (("process-start") "%fx26-process-start")
@@ -502,6 +503,7 @@
       ((24)
        (case n
          (("%session-eval-committed!") "%fx26-session-committed!")
+         (("get-environment-variable") "%fx26-get-environment-variable")
          (else "")))
       ((25)
        (case n

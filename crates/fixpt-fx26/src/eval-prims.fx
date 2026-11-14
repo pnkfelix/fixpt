@@ -477,6 +477,7 @@
       (prim! 'stdin-ready? (lambda (xs) (stdin-ready?)))
       (prim! '%macros:expand-procedural
              (lambda (xs) (%macros:expand-procedural (as-str (ev-arg xs 0)))))
+      (prim! '%macros:limit (lambda (xs) (%macros:limit (as-str (ev-arg xs 0)))))
       (prim! 'terminal-raw (lambda (xs) (ev-terminal-result (terminal-raw))))
       (prim! 'terminal-restore (lambda (xs) (ev-terminal-result (terminal-restore))))
       (prim! 'terminal-size
@@ -587,7 +588,13 @@
              (lambda (xs)
                (tagcase (read-symlink (as-str (ev-arg xs 0)))
                  (target t (the val (o-sum 'target (the val t))))
-                 (failed e (ev-io-failed e))))))))
+                 (failed e (ev-io-failed e)))))
+      (prim! 'get-environment-variable
+             (lambda (xs)
+               (tagcase (get-environment-variable (as-str (ev-arg xs 0)))
+                 (value v (the val (o-sum 'value (the val v))))
+                 (unset u (the val (o-sum 'unset the-unit)))
+                 (not-text u (the val (o-sum 'not-text the-unit)))))))))
 
 ;; `append`: the lists `xs`, all but the last copied, in front of it.
 (define ev-append (->* (vals) val)
