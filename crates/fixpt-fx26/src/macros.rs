@@ -2431,11 +2431,18 @@ impl Aligner<'_> {
                 // Taken apart, not copied: a long list's rest is not made
                 // again at each of its parts.
                 let (x, y) = split_owned(s_owned).expect("a list");
-                let path = self.nodes[at].path.clone();
-                let mut ap = path.clone();
-                ap.push(true);
-                let mut dp = path;
-                dp.push(false);
+                // A use's paths none: only its fit is wanted, and a list's
+                // part's path is as long as where it is (`TODO.md` §231).
+                let (ap, dp) = if self.mode == Mode::Use {
+                    (Vec::new(), Vec::new())
+                } else {
+                    let path = self.nodes[at].path.clone();
+                    let mut ap = path.clone();
+                    ap.push(true);
+                    let mut dp = path;
+                    dp.push(false);
+                    (ap, dp)
+                };
                 let x_at = self.node_new(a, &x, ap);
                 // The rest, its node made here and filled after the first
                 // part; a program's keeps only its place (what a rest is,

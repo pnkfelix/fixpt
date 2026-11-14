@@ -5647,17 +5647,25 @@ effect `(io env-read)` (the user's, 2026-11-14; nothing sets a variable,
 which in Rust is unsafe while another thread may read them; tests:
 `fixpt-cli/tests/environment.rs`).
 
-Deeper than 1000 is slow (measured 2026-11-14, `(count 0 x …)`, one use
-per element, each dropping one: `fixpt check`, release): the Rust
-checker 0.41, 1.6, 6.8 s at 500, 1000, 2000 deep, quadratic, which this
-macro is (each step makes a list one shorter); FX-26's 0.75, 7.4, 56 s,
-nearly cubic; 5000 deep past 300 s, and 20000 deep the nursery full
-("the nursery is full: 2 words more", a panic, after 259 s). In a
-profile of 1000 deep the collector is 38% (minor 24%, major 14%),
-`append`'s `fronts` 14%. Not the chain: with its entries holding no form
-the times are the same. Not found yet what the extra factor is: what
-each minor collection walks that grows with the depth (the stack of
-expansions in progress, the regions), or what keeps each step's form.
+Deeper than 1000 was slow (measured 2026-11-14, `(count 0 x …)`, one use
+per element, each dropping one: `fixpt check`, release): FX-26's checker
+0.75, 7.4, 56 s at 500, 1000, 2000 deep, nearly cubic; 5000 deep past
+300 s; 20000 deep the nursery full ("the nursery is full: 2 words more",
+a panic). Found (`FIXPT_GC_TRACE`, and `perf` with `FIXPT_PERF_MAP`): each
+minor collection copied nearly all of its nursery, 5.4 G words in all at
+2000 deep, of `append` in `addr+`, from `fill-shape`: a use aligned with
+its signature (mode 2) gave each node its path from the root, a list
+part's as long as where it is, made by appending, so O(n²) for a use of
+n parts. A use's paths are never read (`first-match` matches its syntax,
+and the nodes are reset before the next), so now none, in both front ends
+(the Rust aligner's a `Vec<bool>` cloned per part, the same, cheaper).
+After: FX-26 0.24, 0.93, 4.0, 26 s at 500, 1000, 2000, 5000 deep; Rust
+0.36, 1.4, 5.6, 35 s; both quadratic, what a use checked whole against
+its signature costs (`fits_rest`, `fits-within?`, and `mark_of`'s
+hashing); the collector 0.5 s of it at 2000, from 31 s. Not yet: the
+crash at 20000 deep, a panic where the heap should fail the run saying
+so; a program's walk (mode 3) in Rust still clones each part's path (FX-26
+keeps it innermost step first, one pair a step).
 
 If deeper chains matter (the user's, 2026-11-14, weighed): the chain
 holds no copies, each entry a use the expander is still inside, so its

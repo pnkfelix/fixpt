@@ -149,9 +149,10 @@
           (let ((parts (split s)))
             (if (null? parts)
                 (said (string-append (shown) " is not a list as this part must be"))
-                (let* ((path (node-path at))
-                       (x (align fail mode ps a (car parts) root (path+ path #t)))
-                       (y (align fail mode ps d (nth parts 1) root (path+ path #f))))
+                ;; A use's paths none: only its fit is wanted (TODO.md §231).
+                (let* ((path (node-path at)) (no (= mode 2))
+                       (x (align fail mode ps a (car parts) root (if no nil (path+ path #t))))
+                       (y (align fail mode ps d (nth parts 1) root (if no nil (path+ path #f)))))
                   (with-kids at (k-pair x y))))))
         (s-nil ()
           (if (syn-nil? s)
