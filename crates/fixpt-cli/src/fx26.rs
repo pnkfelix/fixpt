@@ -37,11 +37,29 @@ fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
         return e.message.to_string();
     }
     let mut out = format!("{}: {}", place(name, text, e.span), e.message);
+    let trace = fixpt_read::expansion_trace(e.span);
+    out.push_str(&promise_broken(&trace));
     // Text a macro's template made: each use that made it, innermost first.
-    for use_ in fixpt_read::expansion_trace(e.span) {
+    for use_ in trace {
         out.push_str(&format!("\n  in the expansion of `{}` at {}", use_.name, place(name, text, use_.at)));
     }
     out
+}
+
+/// Where an error is in what a typed macro's clause made, checked once
+/// where it was defined (`Expansion::typed`): a line saying that its check
+/// promised otherwise, so the fault is the checker's, not the program's
+/// (`docs/research/typed-macros.md`, "Typed holes": the expansions' check a
+/// safety net that tests the promise). The innermost such macro's. Else
+/// nothing.
+fn promise_broken(trace: &[fixpt_read::Expansion]) -> String {
+    match trace.iter().find(|u| u.typed) {
+        Some(u) => format!(
+            "\n  a broken promise: `{}` is a typed macro, its template checked once where it is defined, so what it makes should check; this is a fault in the checker, not in the program",
+            u.name
+        ),
+        None => String::new(),
+    }
 }
 
 /// `e`, an error in what the REPL read, said where it is in the session's
@@ -57,7 +75,9 @@ fn located_in(session: &Fx26Session, name: &str, text: &str, e: &fixpt_fx26::FxE
         format!("{n}:{line}:{col}")
     };
     let mut out = format!("{}: {}", at(e.span), e.message);
-    for use_ in fixpt_read::expansion_trace(e.span) {
+    let trace = fixpt_read::expansion_trace(e.span);
+    out.push_str(&promise_broken(&trace));
+    for use_ in trace {
         out.push_str(&format!("\n  in the expansion of `{}` at {}", use_.name, at(use_.at)));
     }
     out
@@ -1968,6 +1988,31 @@ mod speculative {
         let lines: Vec<String> = located("p.fx", text, &e).lines().map(String::from).collect();
         assert_eq!(lines[0], "p.fx:7:17: argument 2 is a bool, where a int is expected");
         assert_eq!(lines[1..], ["  in the expansion of `add-one` at p.fx:11:12", "  in the expansion of `twice-add` at p.fx:12:1"]);
+    }
+
+    /// An error in what a typed macro's clause made, which its check once,
+    /// where it was defined, promised would check, is said to be the
+    /// checker's fault (`typed-macros.md`, "Typed holes", the user's
+    /// 2026-11-14); one in what an untyped macro made, or in a use's own
+    /// expression, is the program's, as before.
+    #[test]
+    fn an_error_a_typed_macro_made_is_a_broken_promise() {
+        let text = "(foo 1) (trusty #t)";
+        let error_in = |typed: bool| {
+            let made = fixpt_read::record_expansion("trusty", fixpt_read::Span::new(FileId(0), 8, 19), None, typed);
+            let mut span = fixpt_read::Span::new(FileId(0), 1, 4);
+            span.expansion = made;
+            located("p.fx", text, &fixpt_fx26::FxError::at(span, "argument 1 is a bool, where a int is expected"))
+        };
+        let typed = error_in(true);
+        assert!(typed.contains("a broken promise: `trusty` is a typed macro") && typed.contains("in the expansion of `trusty`"), "{typed}");
+        let untyped = error_in(false);
+        assert!(!untyped.contains("broken promise") && untyped.contains("in the expansion of `trusty`"), "{untyped}");
+        // A use's expression held to its hole's type: the program's error.
+        let text = include_str!("../../fixpt-fx26/tests/programs/macros/typed-contract.fx");
+        let e = session().run_program(text).err().expect("refused");
+        let said = located("p.fx", text, &e);
+        assert!(said.contains("a int is expected here") && !said.contains("broken promise"), "{said}");
     }
 
     /// A macro defined in what is typed is used there, and is not defined

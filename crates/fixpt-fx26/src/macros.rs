@@ -2098,7 +2098,9 @@ impl Macros {
             if !matches(&c.pattern.get(), &operands, &(&c.names, &c.marks, &mark_of), &mut binds, interner) {
                 continue;
             }
-            let made = fixpt_read::record_expansion(interner.name(name), s.span(), m.text.clone());
+            // Of a clause checked once (`template_checks`): its promise kept.
+            let typed = c.pvars.iter().any(|(_, p)| p.hole.is_some());
+            let made = fixpt_read::record_expansion(interner.name(name), s.span(), m.text.clone(), typed);
             self.withs.def_envs.insert(made, c.def_env.clone());
             return self
                 .transcribe(c, &c.template.get(), &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), made, interner)
@@ -2111,7 +2113,7 @@ impl Macros {
     /// (`procedural::run`), what it gave read back at the use's place, a
     /// syntactic closure's opened (`procedural::closed`).
     fn expand_procedural(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, interner: &mut Interner) -> R<Syn> {
-        let made = fixpt_read::record_expansion(interner.name(name), s.span(), None);
+        let made = fixpt_read::record_expansion(interner.name(name), s.span(), None, false);
         self.withs.def_envs.insert(made, p.def_env.clone());
         let form = s.written(interner);
         let said = |e: String| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name)));

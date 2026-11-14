@@ -1178,7 +1178,7 @@ fn handed_span(scheme: &mut Front, file: FileId, a: i64, b: i64) -> Span {
 struct Sources<'a> {
     file: FileId,
     at: &'a dyn Fn(i64) -> u32,
-    made: HashMap<i64, (String, i64, i64)>,
+    made: HashMap<i64, (String, i64, i64, bool)>,
     done: HashMap<i64, u32>,
 }
 
@@ -1196,9 +1196,9 @@ impl Sources<'_> {
         if let Some(&r) = self.done.get(&x) {
             return r;
         }
-        let Some((name, a, b)) = self.made.get(&x).cloned() else { return 0 };
+        let Some((name, a, b, typed)) = self.made.get(&x).cloned() else { return 0 };
         let use_at = self.span(scheme, a, b);
-        let r = fixpt_read::record_expansion(&name, use_at, None);
+        let r = fixpt_read::record_expansion(&name, use_at, None, typed);
         self.done.insert(x, r);
         r
     }
@@ -1226,7 +1226,7 @@ fn source_of(scheme: &mut Front, k: i64) -> (i64, i64) {
 
 /// The FX-26 expander's expansions (`expansions-made`): each one's macro's
 /// name and its use's place, by its number.
-fn expansions_made(scheme: &mut Front) -> HashMap<i64, (String, i64, i64)> {
+fn expansions_made(scheme: &mut Front) -> HashMap<i64, (String, i64, i64, bool)> {
     if !crate::entries::bound(scheme, "expansions-made") {
         return HashMap::default();
     }
@@ -1237,7 +1237,11 @@ fn expansions_made(scheme: &mut Front) -> HashMap<i64, (String, i64, i64)> {
             .list()
             .unwrap_or_default()
             .into_iter()
-            .map(|e| (int(e.product_field(1)), (e.product_field(2).and_then(|n| n.symbol_name()).unwrap_or_default(), int(e.product_field(3)), int(e.product_field(4)))))
+            .map(|e| {
+                let name = e.product_field(2).and_then(|n| n.symbol_name()).unwrap_or_default();
+                let typed = e.product_field(5).is_some_and(|t| t.is_true());
+                (int(e.product_field(1)), (name, int(e.product_field(3)), int(e.product_field(4)), typed))
+            })
             .collect()
     })
 }

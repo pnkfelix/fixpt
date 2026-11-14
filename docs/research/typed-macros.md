@@ -821,8 +821,19 @@ The user's design, the step after the port (item 7 of the table above).
   its template check a type system for macros, its refusals of some safe
   macros the price, made fewer by what signatures can say. Its expansions
   are still checked, a safety net that tests the promise (a disagreement
-  is a bug in it), until it is trusted; then they need not be, and macros
-  in module types (item 10), known by their signatures alone, can be.
+  is a bug in it). They always will be (2026-11-14): an expansion is code
+  of the program, which both checkers check for what the compilers read
+  of it (each part's type and effect, its conversions, its regions), so
+  the net costs nothing to keep, and the promise buys no time. What it
+  buys is the error's meaning (decided, the user, 2026-11-14): one in a
+  part a checked clause made, not in a use's own expression, is a broken
+  promise, the checker's fault, said so ("a broken promise: `m` is a
+  typed macro, its template checked once where it is defined, so what it
+  makes should check; this is a fault in the checker, not in the
+  program"), told by its expansion's record (`fixpt_read::Expansion::typed`,
+  set by both expanders, compared between the checkers). Macros in module
+  types (item 10), known by their signatures alone, are what the promise
+  is for.
 - **What goes in a hole follows what its place requires** (the user's
   reading of the first such refusal, a hole where `letrec` wants a
   lambda): a syntax type, `lambda`, a narrower `expr` (a `lambda` or

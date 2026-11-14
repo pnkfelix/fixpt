@@ -383,7 +383,7 @@
                                           (keys (+ i 1) n))))))
                      (uses (subr (maxeff (alloc @k) (read @k) (write @k) (read @s) (read @globals)
                                          spin)
-                                 ((listof (tupleof int symbol int int) acyclic) int) unit)
+                                 ((listof (tupleof int symbol int int bool) acyclic) int) unit)
                            (lambda (xs known)
                              (if (or (null? xs) (< (extract (car xs) 1) known))
                                  #u

@@ -4378,6 +4378,15 @@ built 2026-11-14, both front ends, each name the template writes free read
 as the file has it, one at a time. Left of the second stage: a template's
 `moduleof` of several names in one `abs`, or a constructor's parameters
 (`(abs #:f f (=> (type) type))` says the same).
+The typed tier's promise (2026-11-14, the user's): its expansions are
+always checked (the compilers read what the checkers find in them), and
+an error in a part a checked clause made is said to be a broken promise,
+the checker's fault (`typed-macros.md`, "Typed holes"). Left of it: typed
+parts in macros that make definitions (a module of the template's
+definitions as the check's stand-in, to design); typed and untyped parts
+in one macro; and, for every macro, a use a template made needs no
+alignment with its signature at expansion (Herman's substitution: the
+template was aligned where it was defined), to argue and build.
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`

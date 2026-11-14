@@ -63,6 +63,11 @@ pub struct Expansion {
     pub name: String,
     pub at: Span,
     pub text: Option<Arc<str>>,
+    /// Whether its clause was checked once, where the macro was defined
+    /// (a typed macro's, `docs/research/typed-macros.md`, "Typed holes"):
+    /// what it made then checks, by that check's promise, so an error in
+    /// it is the checker's fault, not the program's.
+    pub typed: bool,
 }
 
 /// The uses of macros expanded, in this process, by number from 1, as
@@ -70,11 +75,11 @@ pub struct Expansion {
 /// goes, an error's included.
 static EXPANSIONS: std::sync::Mutex<Vec<Expansion>> = std::sync::Mutex::new(Vec::new());
 
-/// A use of macro `name` at `at`, expanded, the macro defined in `text`:
-/// its number.
-pub fn record_expansion(name: &str, at: Span, text: Option<Arc<str>>) -> u32 {
+/// A use of macro `name` at `at`, expanded, the macro defined in `text`,
+/// by a clause checked once where it was defined if `typed`: its number.
+pub fn record_expansion(name: &str, at: Span, text: Option<Arc<str>>, typed: bool) -> u32 {
     let mut all = EXPANSIONS.lock().expect("not poisoned");
-    all.push(Expansion { name: name.to_string(), at, text });
+    all.push(Expansion { name: name.to_string(), at, text, typed });
     all.len() as u32
 }
 

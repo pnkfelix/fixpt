@@ -564,18 +564,23 @@
 
 ;;; ------------------------------------------------------------ expanding
 
-;; Each expansion made, the last first: its number, its macro's name, and
-;; where its use is; `syn-expansion` says which made a part.
-(define-type expansions-made (listof (tupleof int symbol int int) acyclic))
+;; Each expansion made, the last first: its number, its macro's name, where
+;; its use is, and whether its clause was checked once (`Expansion::typed`);
+;; `syn-expansion` says which made a part.
+(define-type expansions-made (listof (tupleof int symbol int int bool) acyclic))
 (define expansions (ref expansions-made rs) (new nil))
 (define nexpansions (ref int rs) (new 0))
-(define record-expansion (->* (symbol syn) int)
-  (lambda (name s)
+(define record-expansion (->* (symbol syn bool) int)
+  (lambda (name s typed)
     (let ((n (+ (get nexpansions) 1)))
       (begin
         (set nexpansions n)
-        (set expansions (cons (tuple n name (syn-start s) (syn-end s)) (get expansions)))
+        (set expansions (cons (tuple n name (syn-start s) (syn-end s) typed) (get expansions)))
         n))))
+;; Whether a clause of pattern variables `ps` has a typed hole: checked once.
+(define holed? (->* (pvars) bool)
+  (lambda (ps)
+    (and (not (null? ps)) (or (not (null? (extract (extract (car ps) 2) 4))) (holed? (cdr ps))))))
 ;; For the driver, which says an error in an expansion at each use.
 (define expansions-given (->* () expansions-made) (lambda () (get expansions)))
 
@@ -719,7 +724,7 @@
            (in-use (lambda ((msg string) (a int) (b int))
                      (fail (string-append "a use of `" shown "`: " msg) a b))))
       (if (not (null? (procedural-of name)))
-          (let ((made (record-expansion name s)))
+          (let ((made (record-expansion name s #f)))
             (begin (def-env! made (extract (car (procedural-of name)) 3))
                    (expand-procedural fail name s made)))
           (begin
@@ -746,7 +751,8 @@
                               (extract (car cs) 7) nil)))
           (if (null? binds)
               (first-match fail name s operands (cdr cs))
-              (let* ((made (record-expansion name s)) (shown (symbol->string name))
+              (let* ((made (record-expansion name s (holed? (extract (car cs) 4))))
+                     (shown (symbol->string name))
                      (noted (def-env! made (extract (car cs) 6)))
                      (in-use (lambda ((msg string) (a int) (b int))
                                (fail (string-append "a use of `" shown "`: " msg)

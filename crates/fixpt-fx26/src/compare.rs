@@ -130,10 +130,11 @@ pub fn canonical_checked(r: Checked26) -> Checked26 {
 
 /// Whether two checkers' errors are one: their messages, where each is
 /// said, and the uses of macros that made the text there, each where it is
-/// (not the numbers the two expanders gave their expansions).
+/// and whether its clause was checked once (not the numbers the two
+/// expanders gave their expansions).
 pub fn same_error(a: &crate::FxError, b: &crate::FxError) -> bool {
     let place = |s: fixpt_read::Span| (s.file, s.start, s.end);
-    let uses = |s: fixpt_read::Span| fixpt_read::expansion_trace(s).into_iter().map(|u| (u.name, place(u.at))).collect::<Vec<_>>();
+    let uses = |s: fixpt_read::Span| fixpt_read::expansion_trace(s).into_iter().map(|u| (u.name, place(u.at), u.typed)).collect::<Vec<_>>();
     a.message == b.message && place(a.span) == place(b.span) && uses(a.span) == uses(b.span)
 }
 
