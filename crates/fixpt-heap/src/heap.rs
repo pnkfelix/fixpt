@@ -458,6 +458,9 @@ pub struct Heap {
     /// before the last collection, and `top` after it, to count allocation.
     pub gc_nanos: u64,
     pub words_allocated: u64,
+    /// Words allocated in the old space because the nursery was full
+    /// between two safepoints (`Heap::bump_old`).
+    pub words_spilled: u64,
     top_after_gc: usize,
     /// For the major collections' budget (`major_due`): `top` after the
     /// last; the most found live by one, across its spaces; and the code a
@@ -474,6 +477,10 @@ pub struct Heap {
     generational: bool,
     nursery_top: usize,
     nursery_words: usize,
+    /// Where the nursery ends, its words' most (`NATIVE_STACK_BASE`; less
+    /// in a test): past it an allocation goes to the old space
+    /// (`Heap::bump_old`).
+    nursery_end: usize,
     /// One byte per card of 64 words of `mem`: 1 where a store may have put
     /// a young reference since the last collection (the remembered set).
     /// Native code marks it at every store, whatever it stores.
@@ -616,6 +623,7 @@ impl Heap {
             words_copied: 0,
             gc_nanos: 0,
             words_allocated: 0,
+            words_spilled: 0,
             top_after_gc: 0,
             top_after_major: 0,
             peak_live: 0,
@@ -624,6 +632,7 @@ impl Heap {
             generational: nursery_words > 0,
             nursery_top: NURSERY_BASE,
             nursery_words: nursery_words.max(1024),
+            nursery_end: NATIVE_STACK_BASE,
             cards: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the card table"),
             old_cards: fixpt_memmgmt::Words::new(young::OLDER_CARDS / 8).expect("address space for the second card table"),
             static_code_slots: Vec::new(),
@@ -813,7 +822,9 @@ impl Heap {
         }
         if self.generational {
             let at = self.nursery_top;
-            assert!(at + n <= NATIVE_STACK_BASE, "the nursery is full: {n} words more");
+            if at + n > self.nursery_end {
+                return self.bump_old(n);
+            }
             self.nursery_top += n;
             return at;
         }
@@ -3958,6 +3969,36 @@ mod gen_tests {
                 assert_eq!(at - GEN.as_ptr() as usize, i >> GEN_SHIFT, "word {i}");
             }
         }
+    }
+
+    /// An allocation where the nursery is full, between two safepoints, in
+    /// the old space (`TODO.md` §275): its cards marked, so that a young
+    /// reference it was made with is moved on by the next minor collection.
+    #[test]
+    fn a_full_nursery_allocates_in_the_old_space() {
+        let mut h = Heap::new();
+        if !h.is_generational() {
+            return;
+        }
+        let young = h.cons(Value::fixnum(7), Value::NULL);
+        h.nursery_end = h.nursery_top + 8;
+        let mut filler = Value::NULL;
+        for _ in 0..4 {
+            filler = h.cons(Value::fixnum(1), filler);
+        }
+        let old = h.cons(young, Value::NULL);
+        assert_ne!(gen_of(h.ref_ix(old)), GEN_YOUNG, "made in the old space");
+        assert!(young::card_marked(&h, h.ix(old)));
+        assert!(h.words_spilled > 0);
+        h.verify_remembered().expect("each young reference in the old space on a dirty card");
+        let mut roots = [old, filler];
+        h.collect_young(&mut [&mut roots]);
+        let (old, filler) = (roots[0], roots[1]);
+        assert_eq!(h.car(h.car(old)), Value::fixnum(7));
+        assert_eq!(h.car(filler), Value::fixnum(1));
+        h.nursery_end = NATIVE_STACK_BASE;
+        let again = h.cons(Value::NULL, Value::NULL);
+        assert_eq!(gen_of(h.ref_ix(again)), GEN_YOUNG, "the nursery, collected, used again");
     }
 
     #[test]

@@ -70,6 +70,32 @@ pub(super) fn card_marked(h: &Heap, rel: usize) -> bool {
 }
 
 impl Heap {
+    /// `n` words in the old space, for an allocation where the nursery is
+    /// full: it collects only at a safepoint, and code that allocates
+    /// between two may make more than the nursery holds (`TODO.md` §275;
+    /// an expansion, which holds raw syntax, `fixpt_fx26::heap_syn`). What
+    /// fills the words may be young, written with no barrier, so each of
+    /// their cards is marked, a dirty card only scanned; and the crossing
+    /// map told where they start, as a promotion tells it. The next minor
+    /// collection takes the old space's top as it finds it.
+    pub(super) fn bump_old(&mut self, n: usize) -> usize {
+        if self.top + n > self.active + self.semi {
+            self.grow(self.top - self.active + n);
+        }
+        let (lo, at) = (self.active, self.top);
+        self.top += n;
+        let mut last = match at > lo {
+            true if (1..=CARD_WORDS).contains(&(byte(&self.crossing, (at - 1) >> CARD_SHIFT) as usize)) => (at - 1) >> CARD_SHIFT,
+            _ => usize::MAX,
+        };
+        cross(&mut self.crossing, &mut last, at, n);
+        for card in at >> CARD_SHIFT..=(at + n - 1) >> CARD_SHIFT {
+            set_byte(&mut self.cards, card, 1);
+        }
+        self.words_spilled += n as u64;
+        at
+    }
+
     /// The card of word `rel` marked: a young reference may be there.
     #[inline(always)]
     pub(super) fn mark_card(&mut self, rel: usize) {

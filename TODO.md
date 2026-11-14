@@ -6895,6 +6895,14 @@ variable took (`(count (+ n 1) . xs)`, a `lst` of items, each piece's
 plain datum beside it made from its parts'), so n uses each a part
 shorter make O(n²) words.
 
+(a) built (2026-11-14, the user's "I like your solution"): where the
+nursery is full, `Heap::bump` allocates in the old space
+(`Heap::bump_old`), each card the object covers marked and the crossing
+map told, `Heap::words_spilled` counting; test
+`a_full_nursery_allocates_in_the_old_space`. 20000 deep now runs until
+memory: 488 s, killed at the 32 GB cap the run had, everything the one
+form's expansion made kept. (b) and (c) are what would bound it.
+
 To decide (the user's question, 2026-11-14: do we build new syntax, or
 keep a template and its bindings until expansion ends): (a) at the
 least, no panic: an allocation where the nursery is full and nothing may
@@ -6927,5 +6935,11 @@ allocation limit set to the top; the preemption poll for a loop that
 stores and does not allocate): a bound by construction, at a load, test
 and branch for each store that marks a card, in `Heap::mark_card` and
 each machine's stores (x86_64, arm64, the cellular and direct
-backends). Recommended: (B). Beside it, the skim over clean cards is the
+backends). Chosen (the user, 2026-11-14): (B), one rule on every machine
+so that they collect at the same points, the native barriers made to
+mark as `Heap::set_slot` does (a card for a young value stored into an
+older area, the second table for an old one into the static or code
+area, the static code slots for code into the static area), not every
+store's card; thread-local counts, summed at safepoints, later.
+Beside it, the skim over clean cards is the
 old space's size over 512, bounded by a summary table if it ever shows.
