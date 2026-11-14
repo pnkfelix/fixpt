@@ -1202,8 +1202,8 @@ impl Macros {
                 Syn::lst(at, vec![sym("many", interner), b])
             }
             STy::Typed(b, _) => self.shown_sty(b, at, interner, names),
-            STy::Union(ms) => {
-                let mut items = vec![sym("union", interner)];
+            STy::Union(ms) | STy::Clauses(ms) => {
+                let mut items = vec![sym(if matches!(&**t, STy::Clauses(_)) { "clauses" } else { "oneof" }, interner)];
                 for m in ms {
                     items.push(self.shown_sty(m, at, interner, names));
                 }
@@ -1258,7 +1258,7 @@ impl Macros {
 /// run into its elements.
 pub(super) fn sig_text(s: &Syn, interner: &Interner) -> String {
     let V::List { items, tail } = &s.view() else { return s.written(interner) };
-    let words = ["import", "export", "union", "mu", "many", "literal"];
+    let words = ["import", "export", "union", "oneof", "clauses", "mu", "many", "literal"];
     let mut out = String::from("(");
     for (k, i) in items.iter().enumerate() {
         if k > 0 && tail.is_none() && i.sym().is_some_and(|w| words.contains(&interner.name(w))) {

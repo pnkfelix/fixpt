@@ -1786,28 +1786,31 @@ The inference merges a macro's clauses position by position: `((_ hi)
 `hi`'s clause no longer fits it; and `((_ hi) …)` with `((_ 2 expr) …)`
 gives `(union (literal hi) data)`, whose members are not told apart by
 shape. Built, both front ends: where the one merged so is no signature,
-or its clauses do not fit it, the union of the clauses' shapes whole,
-each clause inferred alone (`by_clauses`, `by-clauses`), `(union
-((literal hi)) ((literal ho) expr))`, is inferred instead, if it is one
-and they fit it. Not where the clauses overlap (`syntax-rules` tries them
-in order, and a union's members are told apart): for those, the note's
-proposal above, an `allof` of a signature per clause, which at a use
-needs nothing told apart, the use's syntax saying which clause applies;
-not decided. A macro whose clauses fit no signature inferred is refused
+or its clauses do not fit it, a member per clause, each clause inferred
+alone (`by_clauses`, `by-clauses`), is inferred instead. First as their
+union, `(union ((literal hi)) ((literal ho) expr))`, which does not take
+clauses that overlap; the same day, as `(clauses ((literal hi)) ((literal
+ho) expr))` ("Decided: a signature per clause, chosen as the clauses
+are"), which does. A macro whose clauses fit no signature inferred is refused
 saying so on a line of its own, then what was inferred and how a
 signature is written (the user, 2026-11-14: the message read as a
 warning, and did not say how to be accepted).
 
 
-## Proposed: a signature per clause, chosen as the clauses are (2026-11-14; its name decided)
+## Decided: a signature per clause, chosen as the clauses are, `clauses` (2026-11-14)
 
 The user's question: what would "an `allof` of a signature per clause"
 (above, "`anyof`, `oneof` and `allof`") be, in detail? Worked out here,
 for a decision. **Decided** (the user, 2026-11-14): not `allof`, which "is
 meant to be a way to state a uniform procedure that can be proven to have
 distinct implications for distinct domains"; a macro's clauses are
-several bodies, chosen in order: a **`cases`** construct. The rest below
-is proposed, not decided.
+several bodies, chosen in order: first called `cases`, then (the user's,
+the same day) **`clauses`**, since a reader of "cases" may take them for
+disjoint, as in "by cases" or `tagcase`, while a macro's clauses are known
+to be tried in order and to overlap. Decided with it (the user): signatures
+write `union` as `oneof`, its name elsewhere (`union` read as it for a
+while); one member per clause; whether a part a template gives may fit a
+member, by its syntax type alone.
 
 ### What a macro of several clauses is
 
@@ -1837,13 +1840,13 @@ signature of several:
 
 ### The rules, for reading 4
 
-- **Written**: one member per clause, in order, `(cases σ₁ σ₂ …)`; member
+- **Written**: one member per clause, in order, `(clauses σ₁ σ₂ …)`; member
   `i` is clause `i`'s, each
   clause's template checked against its own member alone. A `oneof` inside
   a member still says a choice within one operand, where the part's shape
   says which (an optional part, `(oneof () (expr))`).
 - **Inferred**: each clause's signature inferred alone (`by_clauses`), the
-  `cases` of them; the merge by position only where it fits, as now, since
+  `clauses` of them; the merge by position only where it fits, as now, since
   one signature reads more simply than several.
 - **A use in the program**: its syntax concrete, the first member it fits
   is the one, as its clause is; it is checked by that member's binding
@@ -1864,13 +1867,29 @@ signature of several:
   candidates, defines what they all export alike, or is refused.
 - **Typed results** (item 7): each member its own, as a procedure's
   `allof` members have their own results; a use's is its member's.
-- **Shown**: `(cases σ₁ …)`, each member as a clause's signature is shown.
+- **Shown**: `(clauses σ₁ …)`, each member as a clause's signature is shown.
 
 ### Open
 
-1. The name: `cases` (decided).
-2. Whether signatures' `union` is written `oneof`, its name elsewhere.
-3. Whether a member may be written for several clauses at once (`(cases σ₁
-   (σ₂ #:clauses 2))`), or always one each.
-4. "May fit" for a pattern variable: by its syntax type alone (an `expr`
-   may be anything; a `bvar` is a name), which is cautious and simple.
+Decided above: the name, `oneof`, one member a clause, "may fit" by
+syntax type. Built first (2026-11-14): a use in a template that may fit
+more than one member is refused, not yet; one that may fit one alone, and
+surely does, is checked by it.
+
+### Hypothetical: `clauses` for values, closed ad-hoc polymorphism
+
+Recorded, not decided (the user asked whether it may see reuse). Read in
+the value language, `(clauses T₁ T₂ …)` would be a bundle of
+implementations, a body per member, a call governed by the first member
+its arguments fit: closed, statically resolved overloading, unlike
+`allof`'s one body of several types. A call of known argument types
+resolves where it is checked, compiled to that member's body. Its hard
+part is the one a template's use has here: polymorphic code calling it at
+a type variable cannot know which member applies; the rule above carries
+over (each member it may fit, up to the first it surely fits, agreeing),
+or the choice is passed in, as type classes' dictionaries are. To weigh:
+order against width subtyping (an argument fitting an earlier member by
+subtyping; or choice by specificity, Julia's and CLOS's, which needs "most
+specific" defined); closed, so no coherence problem across modules, and no
+case added later; a first-class use picking its member where it is given
+one type; and each member's latent effect its own.
