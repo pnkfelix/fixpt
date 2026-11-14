@@ -111,26 +111,31 @@ fn module_programs_run_alike_in_every_mode() {
             runs.push((p, mode, want.clone(), forms.clone()));
         }
     }
-    // In parallel: each run starts the front end afresh.
+    // In parallel, each run starting the front end afresh; but a worker a
+    // core, not a thread a run: a hundred `fixpt`s at once, three pipes
+    // each, passed macOS's default of 256 open files ("Too many open files").
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
     let wrong: Vec<String> = std::thread::scope(|s| {
-        let handles: Vec<_> = runs
-            .iter()
-            .map(|(p, mode, want, forms)| {
-                s.spawn(move || {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                s.spawn(|| {
                     let mut wrong = Vec::new();
-                    let file = format!("{p}.fx");
-                    let eval: Vec<&str> = mode.iter().copied().chain(["eval", file.as_str()]).collect();
-                    match fixpt(&eval, "", &dir()) {
-                        Ok(out) if out.lines().filter(|l| !l.is_empty()).last().is_some_and(|l| l.starts_with(&format!("{want} :"))) => {}
-                        got => wrong.push(format!("{p} {mode:?}, eval: {got:?}, want {want}")),
-                    }
-                    if !AT_THE_REPL.contains(p) {
-                        return wrong;
-                    }
-                    let repl: Vec<&str> = ["--dialect", "fx26"].into_iter().chain(mode.iter().copied()).chain(["repl"]).collect();
-                    match fixpt(&repl, forms, &dir()) {
-                        Ok(out) if out.contains(&format!(" {want} : ")) => {}
-                        got => wrong.push(format!("{p} {mode:?}, repl: {got:?}, want {want}")),
+                    while let Some((p, mode, want, forms)) = runs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                        let file = format!("{p}.fx");
+                        let eval: Vec<&str> = mode.iter().copied().chain(["eval", file.as_str()]).collect();
+                        match fixpt(&eval, "", &dir()) {
+                            Ok(out) if out.lines().filter(|l| !l.is_empty()).last().is_some_and(|l| l.starts_with(&format!("{want} :"))) => {}
+                            got => wrong.push(format!("{p} {mode:?}, eval: {got:?}, want {want}")),
+                        }
+                        if !AT_THE_REPL.contains(p) {
+                            continue;
+                        }
+                        let repl: Vec<&str> = ["--dialect", "fx26"].into_iter().chain(mode.iter().copied()).chain(["repl"]).collect();
+                        match fixpt(&repl, forms, &dir()) {
+                            Ok(out) if out.contains(&format!(" {want} : ")) => {}
+                            got => wrong.push(format!("{p} {mode:?}, repl: {got:?}, want {want}")),
+                        }
                     }
                     wrong
                 })
