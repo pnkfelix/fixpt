@@ -570,3 +570,40 @@ fn fx26_reads_qualified_names() {
         assert!(err(SyntaxProfile::FX26, bad).contains("unknown `#` syntax"), "{bad}: {}", err(SyntaxProfile::FX26, bad));
     }
 }
+
+/// A builder of the characters' places only: each node, where it starts.
+struct Starts;
+
+impl fixpt_read::Build for Starts {
+    type Node = u32;
+    fn atom(&mut self, _: &mut Interner, at: fixpt_read::Place, _: &Datum) -> u32 {
+        at.start
+    }
+    fn list(&mut self, _: &mut Interner, at: fixpt_read::Place, _: Vec<u32>, _: Option<u32>) -> u32 {
+        at.start
+    }
+    fn vector(&mut self, _: &mut Interner, at: fixpt_read::Place, _: Vec<u32>) -> u32 {
+        at.start
+    }
+}
+
+/// A long text's characters' places are counted in time linear in it: once
+/// for the text, not once for each place, which a text of ASCII alone
+/// scanned whole each time (Heist's report, 2026-11-14: a 6 MB `.fasl`,
+/// some 3 minutes, its million nodes each scanning the text). Of a text all
+/// ASCII, and of one whose first other character is at its end; the places
+/// right in each.
+#[test]
+fn a_long_texts_places_are_counted_once() {
+    let forms = "(a bc (d 1) #(e)) ".repeat(80_000);
+    for tail in ["", "; λ\n"] {
+        let text = format!("{forms}(last){tail}");
+        let start = std::time::Instant::now();
+        let mut interner = Interner::new();
+        let mut r = fixpt_read::Reader::with_builder(&text, fixpt_read::FileId(0), SyntaxProfile::FX26, &mut interner, Starts);
+        let starts = r.read_all_built().expect("reads");
+        let took = start.elapsed();
+        assert_eq!(starts.last().copied(), Some(forms.len() as u32), "{tail:?}: the last form's place");
+        assert!(took.as_secs() < 15, "{tail:?}: {} kB read in {took:?}", text.len() / 1000);
+    }
+}

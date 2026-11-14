@@ -125,8 +125,8 @@ pub struct Reader<'a, B: Build = SyntaxBuild> {
     interner: &'a mut Interner,
     labels: HashMap<u64, Out<B>>,
     builder: B,
-    /// Each byte's character, where the text is not all ASCII: made the
-    /// first time a place is wanted ([`Build::CHARS`]).
+    /// Each byte's character, where the text is not all ASCII (none where
+    /// it is): made the first time a place is wanted ([`Build::CHARS`]).
     chars: Option<Vec<u32>>,
 }
 
@@ -196,11 +196,14 @@ impl<'a, B: Build> Reader<'a, B> {
     // ------------------------------------------------------------------ nodes
     /// The character at byte `b`, counted from the text's start.
     fn char_of(&mut self, b: u32) -> u32 {
-        if !B::CHARS || self.src.is_ascii() {
+        if !B::CHARS {
             return b;
         }
         let src = self.src;
         let table = self.chars.get_or_insert_with(|| {
+            if src.is_ascii() {
+                return Vec::new();
+            }
             let mut t = vec![0u32; src.len() + 1];
             let mut n = 0u32;
             for (i, c) in src.char_indices() {
@@ -212,7 +215,7 @@ impl<'a, B: Build> Reader<'a, B> {
             t[src.len()] = n;
             t
         });
-        table[b as usize]
+        if table.is_empty() { b } else { table[b as usize] }
     }
 
     fn place(&mut self, span: Span) -> Place {
