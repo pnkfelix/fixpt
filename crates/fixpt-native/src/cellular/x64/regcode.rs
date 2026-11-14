@@ -680,8 +680,7 @@ impl Asm {
                 self.jcc(Cond::Ne, slow);
                 self.e(mov(RDX, r1));
                 self.e(sub(RDX, r2));
-                self.e(store(m(RDX, -4), r3));
-                self.es(&card_mark(RDX, -4, ST, offset_of!(State, cards) as i32, RCX, X16));
+                self.es(&stored(RDX, -4, r3, ST, barrier_offsets(), RCX, X16));
                 self.value(RESULT, Value::UNSPECIFIED);
             }
             // `char-whitespace?` of an ASCII character: tab to carriage
@@ -986,10 +985,10 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                 if name == "global" {
                     a.e(load(RESULT, field(X16, 2)));
                 } else {
-                    a.e(store(field(X16, 2), RESULT));
+                    let at = field(X16, 2);
+                    a.es(&stored(X16, at.disp, RESULT, ST, barrier_offsets(), RCX, RDX));
                     // One more write, for the guards (`global-guard`).
                     a.e(alu_mi(Alu::Add, field(X16, GLOBAL_WRITES), Value::fixnum(1).raw() as i32));
-                    a.es(&card_mark(X16, -(4 + 8 * 2), ST, offset_of!(State, cards) as i32, RCX, RDX));
                 }
             }
             "reg" => {
@@ -1140,8 +1139,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
             "setfield" => {
                 let v = a.get(k(o(1)), T);
                 let mem = field(RESULT, k(o(0)));
-                a.e(store(mem, v));
-                a.es(&card_mark(RESULT, mem.disp, ST, offset_of!(State, cards) as i32, RCX, RDX));
+                a.es(&stored(RESULT, mem.disp, v, ST, barrier_offsets(), RCX, RDX));
             }
             "prim" | "lambda" | "cellular" => {
                 let (count, routine_n, at) = match name {

@@ -43,6 +43,9 @@
 (define n-st-words int 192)  ; a State field's offset
 (define n-st-regs int 776)  ; a State field's offset
 (define n-st-prim-call int 888)  ; a State field's offset
+(define n-st-gens int 896)  ; a State field's offset
+(define n-st-barrier int 904)  ; a State field's offset
+(define n-st-barrier-heap int 912)  ; a State field's offset
 (define n-false int 3)  ; a Value's bits
 (define n-true int 11)  ; a Value's bits
 (define n-prompt-mark int 51)  ; a Value's bits

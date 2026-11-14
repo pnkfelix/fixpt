@@ -806,8 +806,7 @@
       (da-jcc da-c-ne slow)
       (da-mov d-x11 dq-r1)
       (da-e (x86-alu da-sub d-x11 dq-r2))
-      (da-sto d-x11 -4 dq-r3)
-      (da-card-mark d-x11 -4 d-x13 d-x16)
+      (da-stored d-x11 -4 dq-r3 d-x13 d-x16)
       (da-imm d-result d-unspecified)
       (da-jmp done))))
 

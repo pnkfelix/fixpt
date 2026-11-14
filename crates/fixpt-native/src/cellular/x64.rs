@@ -77,6 +77,17 @@ fn field(reg: Reg, k: usize) -> Mem {
     m(reg, -(4 + 8 * k as i32))
 }
 
+/// Where the write barrier finds what it reads in `State` (`stored`).
+fn barrier_offsets() -> BarrierOffsets {
+    BarrierOffsets {
+        gens: offset_of!(State, gens) as i32,
+        cards: offset_of!(State, cards) as i32,
+        barrier: offset_of!(State, barrier) as i32,
+        barrier_heap: offset_of!(State, barrier_heap) as i32,
+        alloc_limit: offset_of!(State, alloc_limit) as i32,
+    }
+}
+
 #[derive(Copy, Clone)]
 struct Label(usize);
 
@@ -951,12 +962,12 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
                 a.push_ds(X15);
             } else {
                 a.pop_ds(X15);
-                a.e(store(field(X11, 2), X15));
+                let at = field(X11, 2);
+                let s = stored(X11, at.disp, X15, ST, barrier_offsets(), X13, X16);
+                a.code.extend_from_slice(&s);
+                a.last_jump = None;
                 // One more write, for the guards (`global-guard`).
                 a.e(alu_mi(Alu::Add, field(X11, fixpt_heap::layout::cellular::GLOBAL_WRITES), Value::fixnum(1).raw() as i32));
-                let mark = card_mark(X11, -(4 + 8 * 2), ST, offset_of!(State, cards) as i32, X13, X16);
-                a.code.extend_from_slice(&mark);
-                a.last_jump = None;
             }
             a.cont();
         }

@@ -112,7 +112,7 @@
             (val da-ubfx (subr da-assembles (int int int int) unit))
             (val da-check-reg (subr da-assembles (int int) unit))
             (val da-check-fixnum (subr da-assembles (int int) unit))
-            (val da-card-mark (subr da-assembles (int int int int) unit))
+            (val da-stored (subr da-assembles (int int int int int) unit))
             (val da-field-off (subr pure (int) int))
             (val da-header (subr pure (int int int) int))
             (val da-trailer (subr pure (int) int))

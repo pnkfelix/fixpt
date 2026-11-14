@@ -1,0 +1,10 @@
+;; Fresh lists stored into many old references, card after card.
+(define-type cell (ref (listof int acyclic) @h))
+(define make-cells (->* (int (listof cell @h)) (listof cell @h))
+  (lambda (n acc) (if (= n 0) acc (make-cells (- n 1) (cons (the cell (new nil)) acc)))))
+(define cells (listof cell @h) (make-cells 1000 nil))
+(define store-all (->* ((listof cell @h) int) int)
+  (lambda (cs i) (if (null? cs) i (begin (set (car cs) (list i)) (store-all (cdr cs) (+ i 1))))))
+(define rounds (->* (int int) int)
+  (lambda (k i) (if (= k 0) i (rounds (- k 1) (store-all cells i)))))
+(rounds 10 0)

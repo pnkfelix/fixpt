@@ -143,10 +143,9 @@
   (lambda (i)
     (begin
       (da-field d-x9 (dp-field (dp-cell-of (dp-oid i 0))))
-      (da-sto d-x9 (do-fld 2) d-result)
+      (da-stored d-x9 (do-fld 2) d-result d-x16 d-x17)
       ;; One more write, for the guards (`global-guard`).
-      (da-e (x86-alu-mi da-add d-x9 (do-fld d-global-writes) 8))
-      (da-card-mark d-x9 (do-fld 2) d-x16 d-x17))))
+      (da-e (x86-alu-mi da-add d-x9 (do-fld d-global-writes) 8)))))
 
 (define do-lexical (subr da-assembles (int) unit)
   (lambda (i)

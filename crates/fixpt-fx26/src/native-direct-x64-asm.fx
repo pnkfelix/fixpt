@@ -534,14 +534,11 @@
 (define da-check-fixnum (subr da-assembles (int int) unit)
   (lambda (r general) (da-check-reg (da-get r d-x16) general)))
 
-;; The card of the word at `[obj + disp]` marked (`x86_64::card_mark`).
-(define da-card-mark (subr da-assembles (int int int int) unit)
-  (lambda (obj disp t1 t2)
-    (begin
-      (da-e (x86-lea t1 obj disp))
-      (da-e (x86-shift-imm da-shr t1 9))
-      (da-ld t2 d-st d-st-cards)
-      (da-e (x86-store8-imm t2 t1 1 0 1)))))
+;; `v` stored at `[obj + disp]` with its write barrier (`x86_64::stored`).
+(define da-stored (subr da-assembles (int int int int int) unit)
+  (lambda (obj disp v t1 t2)
+    (da-e (x86-stored obj disp v d-st d-st-gens d-st-cards d-st-barrier d-st-barrier-heap
+                      d-st-alloc-limit t1 t2))))
 
 ;; Where field `k` of a bloblet is from its reference.
 (define da-field-off (subr pure (int) int) (lambda (k) (- 0 (+ 4 (* 8 k)))))

@@ -204,6 +204,10 @@ struct DState {
     /// x86_64's REG4…REG8 (`x64`), by number: that machine has registers
     /// for only three.
     regs: [u64; 9],
+    /// The write barrier's, as `State`'s (`TODO.md` §276).
+    gens: u64,
+    barrier: u64,
+    barrier_heap: u64,
 }
 
 /// What the stack cache did: overflows and collections, and the frames and
@@ -1512,6 +1516,9 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
         regions: Value::fixnum(rt.heap.live_regions() as i64).raw(),
         cards: rt.heap.card_table_address() as u64,
         region_table: rt.heap.region_table_address() as u64,
+        gens: rt.heap.gen_table_address() as u64,
+        barrier: crate::cellular::barrier_store as *const () as u64,
+        barrier_heap: &mut rt.heap as *mut fixpt_heap::Heap as u64,
         ..DState::default()
     };
     // Fuel in time slices (`DState::reserve`).

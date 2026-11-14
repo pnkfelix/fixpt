@@ -60,6 +60,9 @@
 (define d-st-overflow-code int 544)  ; a state field's offset
 (define d-st-reserve int 552)  ; a state field's offset
 (define d-st-regs int 584)  ; a state field's offset
+(define d-st-gens int 656)  ; a state field's offset
+(define d-st-barrier int 664)  ; a state field's offset
+(define d-st-barrier-heap int 672)  ; a state field's offset
 (define d-map-bits int 48)  ; a stack map's bits of values
 (define d-stub-frame int 32)  ; a stub's frame, in bytes
 (define d-control-frame int 64)  ; a control frame, in bytes

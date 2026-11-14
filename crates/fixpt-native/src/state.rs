@@ -109,4 +109,11 @@ pub struct State {
     /// by name and its operands in the word. Last, so that no field the
     /// FX-26 compilers' layouts name moves.
     pub prim_call: u64,
+    /// The write barrier's (`TODO.md` §276; `x86_64::stored`): the heap's
+    /// generation table, biased (`Heap::gen_table_address`); and where a
+    /// store the barrier leaves to the heap goes, `barrier_store`, with
+    /// the heap it is given.
+    pub gens: u64,
+    pub barrier: u64,
+    pub barrier_heap: u64,
 }

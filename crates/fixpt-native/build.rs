@@ -48,6 +48,7 @@ fn consts() -> String {
     c("TAG_PAIR", TAG_PAIR);
     c("TAG_BLOBLET", TAG_BLOBLET);
     c("TAG_TRAILER", TAG_TRAILER);
+    c("TAG_SUFFIX_REF", fixpt_heap::value::TAG_SUFFIX_REF);
     c("FALSE", Value::FALSE.raw());
     c("TRUE", Value::TRUE.raw());
     c("PROMPT_MARK", fixpt_engine::cellular::PROMPT_MARK.raw());

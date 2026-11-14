@@ -96,6 +96,18 @@ impl Heap {
         at
     }
 
+    /// The write barrier's mark, a young value stored at word `rel` of an
+    /// older area: its card, and one less of the budget if it was clean
+    /// (`Heap::card_budget`). Machine code does the same: where its card is
+    /// clean, it leaves the store to this.
+    #[inline(always)]
+    pub(super) fn barrier_card(&mut self, rel: usize) {
+        if byte(&self.cards, rel >> CARD_SHIFT) == 0 {
+            set_byte(&mut self.cards, rel >> CARD_SHIFT, 1);
+            self.card_budget -= 1;
+        }
+    }
+
     /// The card of word `rel` marked: a young reference may be there.
     #[inline(always)]
     pub(super) fn mark_card(&mut self, rel: usize) {
@@ -157,6 +169,7 @@ impl Heap {
         assert!(words > 0 || self.nursery_top == NURSERY_BASE, "the nursery is collected before it is turned off");
         self.generational = words > 0;
         self.nursery_words = words.max(1024);
+        self.card_budget = super::card_budget_of(self.nursery_words);
     }
 
     /// Words in the nursery now.
@@ -280,6 +293,7 @@ impl Heap {
             self.grow(self.top - self.active + self.nursery_words);
         }
         self.nursery_top = NURSERY_BASE;
+        self.card_budget = super::card_budget_of(self.nursery_words);
         self.minor_count += 1;
         self.words_copied += free as u64;
         self.minor_words_copied += free as u64;

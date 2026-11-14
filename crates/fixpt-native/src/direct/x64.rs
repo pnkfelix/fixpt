@@ -77,6 +77,17 @@ fn fld(r: Reg, k: usize) -> Mem {
     m(r, super::field_off(k) as i32)
 }
 
+/// Where the write barrier finds what it reads in `DState` (`stored`).
+fn barrier_offsets() -> BarrierOffsets {
+    BarrierOffsets {
+        gens: offset_of!(DState, gens) as i32,
+        cards: offset_of!(DState, cards) as i32,
+        barrier: offset_of!(DState, barrier) as i32,
+        barrier_heap: offset_of!(DState, barrier_heap) as i32,
+        alloc_limit: offset_of!(DState, alloc_limit) as i32,
+    }
+}
+
 /// Where `REGk` is (`RESULT` for 0): a register, or a word of the state.
 #[derive(Copy, Clone, PartialEq)]
 enum Loc {
@@ -1045,10 +1056,10 @@ impl Compiling<'_> {
                 "setglbl" => {
                     let f = self.field(p, Field::Cell(o(0)));
                     a.field(X9, f);
-                    a.e(store(fld(X9, 2), RESULT));
+                    let at = fld(X9, 2);
+                    a.es(&stored(X9, at.disp, RESULT, ST, barrier_offsets(), X16, X17));
                     // One more write, for the guards (`global-guard`).
                     a.e(alu_mi(Alu::Add, fld(X9, GLOBAL_WRITES), Value::fixnum(1).raw() as i32));
-                    a.es(&card_mark(X9, fld(X9, 2).disp, ST, offset_of!(DState, cards) as i32, X16, X17));
                 }
                 "lexical" => {
                     let from = match clo_slot.filter(|_| framed[i]) {
@@ -1311,8 +1322,9 @@ impl Compiling<'_> {
                 }
                 "setfield" => {
                     let off = super::field_off(k(o(0)));
-                    a.store_reg(m(RESULT, off as i32), k(o(1)), X11);
-                    a.es(&card_mark(RESULT, off as i32, ST, offset_of!(DState, cards) as i32, X16, X17));
+                    let v = a.get(k(o(1)), X11);
+                    let at = m(RESULT, off as i32);
+                    a.es(&stored(RESULT, at.disp, v, ST, barrier_offsets(), X16, X17));
                 }
                 // Control, on the native stack, as `procedure` does it.
                 "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "withmark-tail" | "abort" | "callcc" | "callcomp" | "ncallcc" | "ncallcomp" | "callone" | "ncallone" | "firstmark" | "currentmarks" | "marksof")) => {
@@ -2025,8 +2037,7 @@ impl Compiling<'_> {
                         a.jcc(Cond::Ne, slow);
                         a.e(mov(X11, r1));
                         a.e(sub(X11, r2));
-                        a.e(store(m(X11, -4), r3));
-                        a.es(&card_mark(X11, -4, ST, offset_of!(DState, cards) as i32, X13, X16));
+                        a.es(&stored(X11, -4, r3, ST, barrier_offsets(), X13, X16));
                         a.imm(RESULT, Value::UNSPECIFIED.raw());
                         a.jmp(done);
                     }
@@ -4092,7 +4103,7 @@ pub(super) fn fx26_direct_layout_of(intro: &[&str], regs: &[(&str, i64)], sig_in
     fields!(
         rust_sp, stack_top, stack_limit, fuel, trap, pc, args, callout, native_sp, fp, top, words, alloc_limit, aux, nargs, clo, delta, code_lo,
         ret_pc, resume_sp, resume_fp, resume_pc, resume_x0, regions, mark_ret, trap_stub, foreign, closure, cards, foreign_resume, region_table,
-        kept, bottom_link, bottom_ret, overflow, overflow_info, overflow_code, reserve, regs
+        kept, bottom_link, bottom_ret, overflow, overflow_info, overflow_code, reserve, regs, gens, barrier, barrier_heap
     );
     for (name, v, what) in [
         ("d-map-bits", super::MAP_BITS as i64, "a stack map's bits of values"),

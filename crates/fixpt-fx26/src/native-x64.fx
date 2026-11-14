@@ -763,14 +763,11 @@
              (begin (x-load n-x15 n-x11 (x-field 2)) (x-push-ds n-x15))
              (begin
                (x-pop-ds n-x15)
-               (x-store n-x11 (x-field 2) n-x15)
+               ;; The store with its write barrier (`x86_64::stored`).
+               (x-e (x86-stored n-x11 (x-field 2) n-x15 n-st n-st-gens n-st-cards n-st-barrier
+                                n-st-barrier-heap n-st-alloc-limit n-x13 n-x16))
                ;; One more write, for the guards (`global-guard`).
-               (x-e (x86-alu-mi x-add n-x11 (x-field global-writes) 8))
-               ;; The write barrier, as `x86_64::card_mark` makes it.
-               (x-lea n-x13 n-x11 (x-field 2))
-               (x-e (x86-shift-imm x-shr n-x13 9))
-               (x-load n-x16 n-st n-st-cards)
-               (x-e (x86-store8-imm n-x16 n-x13 1 0 1))))
+               (x-e (x86-alu-mi x-add n-x11 (x-field global-writes) 8))))
          (x-cont-code)))
       ((or (= n routine-call) (= n routine-tailcall) (= n routine-tcall) (= n routine-ttailcall))
        (x-call n))

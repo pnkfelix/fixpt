@@ -80,4 +80,7 @@
             (val x86-ucomis x86-op3)
             (val x86-cvtsi2sd x86-op2)
             (val x86-cvttsd2si x86-op2)
-            (val x86-round x86-op4)))
+            (val x86-round x86-op4)
+            (val x86-load8 x86-op3)
+            (val x86-stored
+                 (subr x86-encodes (int int int int int int int int int int int) x86-bytes))))

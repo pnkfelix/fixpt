@@ -268,4 +268,77 @@
 (define x86-round x86-op4
   (lambda (double d s mode)
     (append (x86-sse 102 0 (x86-b2 58 (if (= double 1) 11 10)) d s) (x86-b1 mode))))
+
+;;; ------------------------------------------------------------ the write barrier
+
+;; `movzx d, byte [base + disp]`.
+(define x86-load8 x86-op3 (lambda (d base disp) (x86-op-rm 0 (x86-b2 15 182) d base -1 1 disp)))
+;; `t`, an address, made its generation, as the biased table at
+;; `[st + gens]` says, its low seven bits.
+(define x86-gen-of x86-op3
+  (lambda (t st gens)
+    (append (x86-shift-imm 5 t 30)
+            (append (x86-alu-rm 0 t st gens) (append (x86-load8 t t 0) (x86-alu-imm 4 t 127))))))
+;; The heap's store of `v` at `[obj + disp]`, every caller-saved register
+;; kept, `rbx` the stack pointer across the call, the allocation limit it
+;; gives written back (`x86_64::stored`'s slow path).
+(define x86-pushes (subr x86-encodes (x86-bytes) x86-bytes)
+  (lambda (rs) (if (null? rs) nil (append (x86-push (car rs)) (x86-pushes (cdr rs))))))
+(define x86-pops (subr x86-encodes (x86-bytes) x86-bytes)
+  (lambda (rs) (if (null? rs) nil (append (x86-pops (cdr rs)) (x86-pop (car rs))))))
+;; The caller-saved registers, in the order pushed.
+(define x86-caller-saved (subr x86-encodes () x86-bytes)
+  (lambda ()
+    ;; cons-chain: in `@k`, the encoders' region, which `list` would not be
+    (cons 0 (cons 1 (cons 2 (cons 6 (cons 7 (cons 8 (cons 9 (cons 10 (cons 11 nil)))))))))))
+(define x86-barrier-call (subr x86-encodes (int int int int int int int int) x86-bytes)
+  (lambda (obj disp v st barrier heap limit t1)
+    (let ((saved (x86-caller-saved)) (pushes x86-pushes) (pops x86-pops))
+      (append (x86-lea t1 obj disp)
+       (append (pushes saved)
+        (append (x86-push 3)
+         (append (x86-push t1)
+          (append (x86-push v)
+           (append (x86-pop 2)
+            (append (x86-pop 6)
+             (append (x86-load 7 st heap)
+              (append (x86-mov 3 4)
+               (append (x86-alu-imm 4 4 -16)
+                (append (x86-call-m st barrier)
+                 (append (x86-mov 4 3)
+                  (append (x86-store st limit 0)
+                   (append (x86-pop 3) (pops saved))))))))))))))))))
+;; `v` stored at `[obj + disp]` with its write barrier, as
+;; `x86_64::stored` makes it (`TODO.md` §276): the store where the barrier
+;; needs nothing (the place young; `v` no reference, or no younger; `v`
+;; young and the place's card dirty), else the heap's store. The state's
+;; offsets of the generation table, the card table, the heap's store, its
+;; heap and the allocation limit; `t1`, `t2` scratch. Every jump 32-bit.
+(define x86-stored (subr x86-encodes (int int int int int int int int int int int) x86-bytes)
+  (lambda (obj disp v st gens cards barrier heap limit t1 t2)
+    (let* ((a (append (x86-lea t1 obj disp) (x86-gen-of t1 st gens)))
+           (b (append (x86-mov t2 v) (append (x86-alu-imm 4 t2 7) (x86-alu-imm 7 t2 1))))
+           (c (x86-alu-imm 7 t2 4))
+           (d (x86-alu-imm 7 t2 2))
+           (e (append (x86-mov t2 v) (append (x86-gen-of t2 st gens) (x86-alu 7 t1 t2))))
+           (f (x86-test t2 t2))
+           (g (append (x86-lea t1 obj disp)
+                      (append (x86-shift-imm 5 t1 9)
+                              (append (x86-alu-rm 0 t1 st cards)
+                                      (append (x86-load8 t1 t1 0) (x86-test t1 t1))))))
+           (h (x86-barrier-call obj disp v st barrier heap limit t1))
+           (j1 (+ (list-length a) 6)) (j2 (+ j1 (+ (list-length b) 6)))
+           (j3 (+ j2 (+ (list-length c) 6))) (j4 (+ j3 (+ (list-length d) 6))) (vg (+ j4 5))
+           (j6 (+ vg (+ (list-length e) 6))) (j7 (+ j6 (+ (list-length f) 6)))
+           (slow (+ j7 (+ (list-length g) 6))) (fast (+ slow (+ (list-length h) 5)))
+           (s (x86-store obj disp v)) (done (+ fast (list-length s))))
+      (append a (append (x86-jcc 4 (- fast j1))
+       (append b (append (x86-jcc 4 (- vg j2))
+        (append c (append (x86-jcc 4 (- vg j3))
+         (append d (append (x86-jcc 4 (- slow j4))
+          (append (x86-jmp (- fast vg))
+           (append e (append (x86-jcc 6 (- fast j6))
+            (append f (append (x86-jcc 5 (- slow j7))
+             (append g (append (x86-jcc 5 (- fast slow))
+              (append h (append (x86-jmp (- done fast)) s))))))))))))))))))))
 ))

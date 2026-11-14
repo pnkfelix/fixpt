@@ -700,6 +700,110 @@ pub fn card_mark(obj: Reg, disp: i32, st: Reg, cards_off: i32, t1: Reg, t2: Reg)
     out
 }
 
+/// A store with its write barrier (`TODO.md` §276): `v` stored at
+/// `[obj + disp]` where the barrier needs nothing (the
+/// place young; `v` no reference, or no younger than the place; `v` young
+/// and the place's card dirty already); else the store left to the heap,
+/// which marks and counts as `Heap::set_slot` does, every caller-saved
+/// register kept around the call (`State::barrier`, `barrier_heap`), the
+/// allocation limit it gives written back. The generation table and the
+/// card table biased, at `[st + gen]` and `[st + cards]`. `t1` and `t2`
+/// scratch, neither `obj`, `v` nor `st`; `st` callee-saved. Every jump
+/// 32-bit (`x86-stored` makes the same bytes).
+pub fn stored(obj: Reg, disp: i32, v: Reg, st: Reg, offs: BarrierOffsets, t1: Reg, t2: Reg) -> Vec<u8> {
+    assert!(![obj, v, st].contains(&t1) && ![obj, v, st].contains(&t2) && t1 != t2, "the barrier's scratch registers apart");
+    let mut out: Vec<u8> = Vec::new();
+    // Each jump's end in `out`, and its target: `0` the slow path, `1` the
+    // store, `2` past it, `3` the value's generation.
+    let mut fix: Vec<(usize, u8)> = Vec::new();
+    let mut jcc_to = |out: &mut Vec<u8>, c: Option<Cond>, to: u8| {
+        let ins = match c { Some(c) => jcc(c, 0), None => jmp(0) };
+        out.extend_from_slice(&ins);
+        fix.push((out.len(), to));
+    };
+    // The place's generation: young, nothing to do.
+    out.extend_from_slice(&lea(t1, m(obj, disp)));
+    out.extend_from_slice(&shr_imm(t1, 30));
+    out.extend_from_slice(&alu_rm(Alu::Add, t1, m(st, offs.gens)));
+    out.extend_from_slice(&load8(t1, m(t1, 0)));
+    out.extend_from_slice(&and_imm(t1, 0x7f));
+    jcc_to(&mut out, Some(Cond::E), 1);
+    // The value's tag: a pair or a bloblet, its address its generation's;
+    // a suffix ref, its owner's, which the heap finds; else no reference.
+    out.extend_from_slice(&mov(t2, v));
+    out.extend_from_slice(&and_imm(t2, 7));
+    out.extend_from_slice(&cmp_imm(t2, fixpt_heap::value::TAG_PAIR as i32));
+    jcc_to(&mut out, Some(Cond::E), 3);
+    out.extend_from_slice(&cmp_imm(t2, fixpt_heap::value::TAG_BLOBLET as i32));
+    jcc_to(&mut out, Some(Cond::E), 3);
+    out.extend_from_slice(&cmp_imm(t2, fixpt_heap::value::TAG_SUFFIX_REF as i32));
+    jcc_to(&mut out, Some(Cond::E), 0);
+    jcc_to(&mut out, None, 1);
+    let value_gen = out.len();
+    out.extend_from_slice(&mov(t2, v));
+    out.extend_from_slice(&shr_imm(t2, 30));
+    out.extend_from_slice(&alu_rm(Alu::Add, t2, m(st, offs.gens)));
+    out.extend_from_slice(&load8(t2, m(t2, 0)));
+    out.extend_from_slice(&and_imm(t2, 0x7f));
+    // No younger than the place: nothing. Not young: the heap's.
+    out.extend_from_slice(&cmp(t1, t2));
+    jcc_to(&mut out, Some(Cond::Be), 1);
+    out.extend_from_slice(&test(t2, t2));
+    jcc_to(&mut out, Some(Cond::Ne), 0);
+    // Young: the place's card dirty already, nothing more.
+    out.extend_from_slice(&lea(t1, m(obj, disp)));
+    out.extend_from_slice(&shr_imm(t1, 9));
+    out.extend_from_slice(&alu_rm(Alu::Add, t1, m(st, offs.cards)));
+    out.extend_from_slice(&load8(t1, m(t1, 0)));
+    out.extend_from_slice(&test(t1, t1));
+    jcc_to(&mut out, Some(Cond::Ne), 1);
+    // The heap's: every caller-saved register kept, `rbx` holding the
+    // stack pointer across the call, which is 16-aligned.
+    let slow = out.len();
+    const SAVED: [Reg; 9] = [RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11];
+    out.extend_from_slice(&lea(t1, m(obj, disp)));
+    for r in SAVED {
+        out.extend_from_slice(&push(r));
+    }
+    out.extend_from_slice(&push(RBX));
+    out.extend_from_slice(&push(t1));
+    out.extend_from_slice(&push(v));
+    out.extend_from_slice(&pop(RDX));
+    out.extend_from_slice(&pop(RSI));
+    out.extend_from_slice(&load(RDI, m(st, offs.barrier_heap)));
+    out.extend_from_slice(&mov(RBX, RSP));
+    out.extend_from_slice(&and_imm(RSP, -16));
+    out.extend_from_slice(&call_m(m(st, offs.barrier)));
+    out.extend_from_slice(&mov(RSP, RBX));
+    out.extend_from_slice(&store(m(st, offs.alloc_limit), RAX));
+    out.extend_from_slice(&pop(RBX));
+    for r in SAVED.iter().rev() {
+        out.extend_from_slice(&pop(*r));
+    }
+    jcc_to(&mut out, None, 2);
+    let fast = out.len();
+    out.extend_from_slice(&store(m(obj, disp), v));
+    let done = out.len();
+    for (end, to) in fix {
+        let target = [slow, fast, done, value_gen][to as usize];
+        let rel = (target as i64 - end as i64) as i32;
+        out[end - 4..end].copy_from_slice(&rel.to_le_bytes());
+    }
+    out
+}
+
+/// Where in a machine's state the write barrier finds what it reads
+/// (`stored`): the generation table, the card table, the heap and its
+/// store, and the allocation limit, in bytes.
+#[derive(Clone, Copy, Debug)]
+pub struct BarrierOffsets {
+    pub gens: i32,
+    pub cards: i32,
+    pub barrier: i32,
+    pub barrier_heap: i32,
+    pub alloc_limit: i32,
+}
+
 /// `mov byte [mem], imm`.
 pub fn store8_imm(mem: Mem, imm: u8) -> Ins {
     let mut i = op_rm(false, &[0xC6], 0, mem);

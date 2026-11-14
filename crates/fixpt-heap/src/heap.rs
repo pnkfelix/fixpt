@@ -331,6 +331,11 @@ pub(crate) fn gen_of(i: usize) -> u8 {
 // A suffix ref holds its owner's word index in 34 bits (`value.rs`): a
 // larger reservation would corrupt them, so it fails to build instead.
 const _: () = assert!(MEM_WORDS < 1 << crate::value::SUFFIX_OWNER_BITS);
+/// The cards the write barrier may make dirty between two collections, for
+/// a nursery of `words` (`Heap::card_budget`): half its words, in cards.
+const fn card_budget_of(words: usize) -> i64 {
+    ((words / 2) >> young::CARD_SHIFT) as i64
+}
 /// How many words the nursery takes before a safepoint collects it: 8 MB.
 /// Measured on the front end's self-compile (`docs/performance.md`); from
 /// 1M words up the times were about the same.
@@ -477,6 +482,13 @@ pub struct Heap {
     generational: bool,
     nursery_top: usize,
     nursery_words: usize,
+    /// The cards the write barrier may yet make dirty before a minor
+    /// collection is due (`TODO.md` §276): half a nursery's words of cards
+    /// after each collection, one less for each card a store of a young
+    /// value into an older area finds clean (`Heap::barrier_card`), so that
+    /// a minor collection's scan of the remembered set costs at most about
+    /// half its nursery's copy. Machine code counts by the same rule.
+    card_budget: i64,
     /// Where the nursery ends, its words' most (`NATIVE_STACK_BASE`; less
     /// in a test): past it an allocation goes to the old space
     /// (`Heap::bump_old`).
@@ -633,6 +645,7 @@ impl Heap {
             nursery_top: NURSERY_BASE,
             nursery_words: nursery_words.max(1024),
             nursery_end: NATIVE_STACK_BASE,
+            card_budget: card_budget_of(nursery_words.max(1024)),
             cards: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the card table"),
             old_cards: fixpt_memmgmt::Words::new(young::OLDER_CARDS / 8).expect("address space for the second card table"),
             static_code_slots: Vec::new(),
@@ -736,6 +749,14 @@ impl Heap {
         }
     }
 
+    /// For machine code whose write barrier leaves a store to the heap
+    /// (`TODO.md` §276): `v` stored at the word at address `at`, in bytes,
+    /// as [`set_slot`](Heap::set_slot) stores it, its barrier and all.
+    pub fn store_at_address(&mut self, at: u64, v: Value) {
+        let rel = (at / 8) as usize - self.base;
+        self.set_slot(rel, v);
+    }
+
     /// [`set_slot`](Heap::set_slot) of `v`, of generation `from`, at word
     /// `rel`, of the older generation `to`: what the barrier does then.
     #[inline]
@@ -756,7 +777,7 @@ impl Heap {
         // 5). (No mark for a young object in a heap with no nursery: none
         // is there.)
         match from & GEN_MASK {
-            GEN_YOUNG if self.generational => self.mark_card(rel),
+            GEN_YOUNG if self.generational => self.barrier_card(rel),
             GEN_YOUNG => {}
             GEN_CODE => self.remember_static_code(rel),
             _ => self.mark_old_card(rel),
@@ -2477,7 +2498,7 @@ impl Heap {
         // The stress policy's (`gc_every`): each period, of safepoints.
         let every = |n: u64| n > 0 && self.safepoints.is_multiple_of(n);
         let (forced, forced_major, forced_code) = (every(self.gc_every), every(self.gc_major_every), every(self.gc_code_every));
-        let nursery_full = self.generational && self.nursery_top - NURSERY_BASE >= self.nursery_words;
+        let nursery_full = self.generational && (self.nursery_top - NURSERY_BASE >= self.nursery_words || self.card_budget <= 0);
         self.due_code = self.code_due() || forced_code;
         self.due_major = full || self.due_code || forced_major || (forced && !self.generational);
         self.due_major || forced || nursery_full
@@ -2955,6 +2976,7 @@ impl Heap {
         phase.copied(free as u64);
         // The nursery emptied into the old space; no card of it dirty.
         self.nursery_top = NURSERY_BASE;
+        self.card_budget = card_budget_of(self.nursery_words);
         self.clear_cards(to, to + free);
         self.clear_cards(STATIC_BASE, self.immutable_top);
 
@@ -3004,7 +3026,7 @@ impl Heap {
     /// Rust machine.) 0 while the stress policy is on (`gc_every`), or
     /// collection is inhibited: then every allocation calls in.
     pub fn inline_limit(&self) -> usize {
-        if self.stressed() || self.inhibited > 0 {
+        if self.stressed() || self.inhibited > 0 || (self.generational && self.card_budget <= 0) {
             0
         } else if self.generational {
             NURSERY_BASE + self.nursery_words
@@ -3999,6 +4021,42 @@ mod gen_tests {
         h.nursery_end = NATIVE_STACK_BASE;
         let again = h.cons(Value::NULL, Value::NULL);
         assert_eq!(gen_of(h.ref_ix(again)), GEN_YOUNG, "the nursery, collected, used again");
+    }
+
+    /// The remembered set's budget (`TODO.md` §276): a store of a young
+    /// value onto a clean card of an older area takes one; onto a dirty
+    /// card, or of an old value, none; spent, a collection is due and
+    /// machine code calls in to allocate; a minor collection restores it.
+    #[test]
+    fn the_barrier_spends_the_card_budget_and_a_collection_restores_it() {
+        let mut h = Heap::new();
+        if !h.is_generational() {
+            return;
+        }
+        h.set_nursery(2048);
+        let budget = card_budget_of(2048);
+        assert_eq!(h.card_budget, budget);
+        let cards = budget as usize + 4;
+        let mut roots = [h.make_vector(cards << young::CARD_SHIFT, Value::NULL)];
+        h.collect_young(&mut [&mut roots]);
+        let old = roots[0];
+        assert_ne!(gen_of(h.ref_ix(old)), GEN_YOUNG);
+        // An old value, and a second store onto a dirty card: free.
+        h.obj_set(old, 0, old);
+        let young = h.cons(Value::NULL, Value::NULL);
+        h.obj_set(old, 0, young);
+        h.obj_set(old, 1, young);
+        assert_eq!(h.card_budget, budget - 1);
+        for c in 1..budget as usize {
+            let young = h.cons(Value::NULL, Value::NULL);
+            h.obj_set(old, c << young::CARD_SHIFT, young);
+        }
+        assert_eq!(h.card_budget, 0);
+        assert!(h.collection_due(), "the budget spent");
+        assert_eq!(h.inline_limit(), 0, "machine code calls in");
+        h.collect_young(&mut [&mut roots]);
+        assert_eq!(h.card_budget, budget);
+        assert!(!h.collection_due());
     }
 
     #[test]

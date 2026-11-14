@@ -51,6 +51,11 @@ unsafe fn wr(a: u64, v: u64) {
 }
 
 #[inline(always)]
+unsafe fn rd8(a: u64) -> u8 {
+    unsafe { *(a as *const u8) }
+}
+
+#[inline(always)]
 unsafe fn wr8(a: u64, v: u8) {
     unsafe { *(a as *mut u8) = v }
 }
@@ -347,16 +352,40 @@ routine!(st_global, |base, ip, cur, dsp, rsp, st, fp, w| {
     next!(base, ip - 8, cur, dsp, rsp, st, fp)
 });
 
+/// `v` stored at address `at` with its write barrier, as `x86_64::stored`
+/// decides (`TODO.md` §276): the store here where the barrier needs
+/// nothing (the place young; `v` no reference, or no younger; `v` young and
+/// the place's card dirty), else the heap's (`State::barrier`), and the
+/// allocation limit it gives kept.
+#[inline(always)]
+unsafe fn stored(st: *mut State, at: u64, v: u64) {
+    let gens = unsafe { (*st).gens };
+    let place = unsafe { rd8(gens.wrapping_add(at >> 30)) } & 0x7f;
+    let heap = place != 0
+        && match v & 7 {
+            TAG_PAIR | TAG_BLOBLET => {
+                let value = unsafe { rd8(gens.wrapping_add(v >> 30)) } & 0x7f;
+                place > value && (value != 0 || unsafe { rd8((*st).cards.wrapping_add(at >> 9)) } == 0)
+            }
+            TAG_SUFFIX_REF => true,
+            _ => false,
+        };
+    if heap {
+        let f = unsafe { core::mem::transmute::<u64, unsafe extern "C" fn(u64, u64, u64) -> u64>((*st).barrier) };
+        unsafe { (*st).alloc_limit = f((*st).barrier_heap, at, v) };
+    } else {
+        unsafe { wr(at, v) };
+    }
+}
+
 routine!(st_global_set, |base, ip, cur, dsp, rsp, st, fp, w| {
     let g = unsafe { rd(ip) };
     let at = base.wrapping_add(g).wrapping_sub(4 + 16);
-    unsafe { wr(at, rd(dsp)) };
+    unsafe { stored(st, at, rd(dsp)) };
     // One more write, for the guards (`global-guard`): field 4, two words
     // below field 2.
     let writes = at.wrapping_sub(16);
     unsafe { wr(writes, rd(writes).wrapping_add(8)) };
-    // The write barrier: the card of the word written marked.
-    unsafe { wr8((*st).cards.wrapping_add(at >> 9), 1) };
     next!(base, ip - 8, cur, dsp + 8, rsp, st, fp)
 });
 

@@ -69,14 +69,11 @@
           (rg-cell dst f)))))
 (define rg-value (subr (maxeff x-assembles spin) (int int) unit)
   (lambda (dst v) (x-e (x86-mov-imm dst v))))
-;; The write barrier, as `x86_64::card_mark` makes it.
-(define rg-card-mark (subr (maxeff x-assembles spin) (int int int int) unit)
-  (lambda (obj disp t1 t2)
-    (begin
-      (x-lea t1 obj disp)
-      (x-e (x86-shift-imm x-shr t1 9))
-      (x-load t2 n-st n-st-cards)
-      (x-e (x86-store8-imm t2 t1 1 0 1)))))
+;; `v` stored at `[obj + disp]` with its write barrier (`x86_64::stored`).
+(define rg-stored (subr (maxeff x-assembles spin) (int int int int int) unit)
+  (lambda (obj disp v t1 t2)
+    (x-e (x86-stored obj disp v n-st n-st-gens n-st-cards n-st-barrier n-st-barrier-heap
+                     n-st-alloc-limit t1 t2))))
 
 ;; `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
 ;; `RESULT` and `y`, as `int_fast` does them: whether this is one.
@@ -415,8 +412,7 @@
          (x-jcc x-c-ne slow)
          (x-mov r-rdx r-rdi)
          (x-alu x-sub r-rdx r-rsi)
-         (x-store r-rdx -4 r-r8)
-         (rg-card-mark r-rdx -4 r-rcx n-x16)
+         (rg-stored r-rdx -4 r-r8 r-rcx n-x16)
          (rg-value r-result r-unspecified)))
       ((string=? what "whitespace")
        (begin

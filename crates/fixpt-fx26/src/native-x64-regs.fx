@@ -598,9 +598,8 @@
       ((= op rop-setglbl)
        (begin
          (rg-cell n-x16 (rg-f i 0))
-         (x-store n-x16 (x-field 2) r-result)
-         (x-e (x86-alu-mi x-add n-x16 (x-field global-writes) 8))
-         (rg-card-mark n-x16 (x-field 2) r-rcx r-rdx)))
+         (rg-stored n-x16 (x-field 2) r-result r-rcx r-rdx)
+         (x-e (x86-alu-mi x-add n-x16 (x-field global-writes) 8))))
       ((= op rop-reg)
        (let ((r (rg-get (rg-k rw i 0) r-result))) (if (= r r-result) #u (x-mov r-result r))))
       ((= op rop-setreg) (rg-put (rg-k rw i 0) r-result))
@@ -640,7 +639,7 @@
       ((= op rop-field) (x-load r-result r-result (x-field (rg-k rw i 0))))
       ((= op rop-setfield)
        (let ((v (rg-get (rg-k rw i 1) r-t)) (disp (x-field (rg-k rw i 0))))
-         (begin (x-store r-result disp v) (rg-card-mark r-result disp r-rcx r-rdx))))
+         (rg-stored r-result disp v r-rcx r-rdx)))
       ((or (= op rop-prim) (= op rop-lambda) (= op rop-cellular)) (rg-callouts rw i op next))
       ((or (= op rop-invoke) (= op rop-tailinvoke)) (rg-invoke rw i op next))
       ;; A call of the procedure itself: a `call` of this word's own entry.

@@ -1170,7 +1170,8 @@ pub(crate) fn fx26_module_of(generator: &str, registers: &[(&str, i64)], extra: 
         ("n-st-code-lo", offset_of!(State, code_lo)), ("n-st-code-delta", offset_of!(State, code_delta)),
         ("n-st-top", offset_of!(State, top)), ("n-st-alloc-limit", offset_of!(State, alloc_limit)),
         ("n-st-words", offset_of!(State, words)), ("n-st-regs", offset_of!(State, regs)),
-        ("n-st-prim-call", offset_of!(State, prim_call)),
+        ("n-st-prim-call", offset_of!(State, prim_call)), ("n-st-gens", offset_of!(State, gens)),
+        ("n-st-barrier", offset_of!(State, barrier)), ("n-st-barrier-heap", offset_of!(State, barrier_heap)),
     ] {
         c(name, o as i64, "a State field's offset");
     }
@@ -1248,6 +1249,18 @@ extern "C" fn callout(st: *mut State, n: u64) -> u64 {
         CALLOUT_NANOS.with(|c| c.borrow_mut()[n as usize] += t.elapsed().as_nanos() as u64);
     }
     out
+}
+
+/// A store machine code's write barrier leaves to the heap (`TODO.md`
+/// §276): `v` at address `at`, as `Heap::set_slot` stores it, which marks
+/// what it marks and counts what it counts; what the allocation limit is
+/// now, for the caller's state, 0 if the remembered set's budget is spent.
+pub(crate) extern "C" fn barrier_store(heap: *mut fixpt_heap::Heap, at: u64, v: u64) -> u64 {
+    // SAFETY: the heap the machine runs on, which nothing else touches
+    // while its machine code runs (as `pure_call`'s runtime).
+    let heap = unsafe { &mut *heap };
+    heap.store_at_address(at, fixpt_heap::Value::from_raw(v));
+    heap.inline_limit() as u64
 }
 
 /// What `pure_call` gives: the value, and whether the primitive failed.
@@ -1781,6 +1794,9 @@ impl Stacks {
             prof_site: 0,
             prof_sp: 0,
             prim_call: prim_call as *const () as u64,
+            gens: heap.gen_table_address() as u64,
+            barrier: barrier_store as *const () as u64,
+            barrier_heap: heap as *mut Heap as u64,
         }
     }
 

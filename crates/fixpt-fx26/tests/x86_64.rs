@@ -108,6 +108,19 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
             }
         }
     }
+    // The write barrier (`TODO.md` §276).
+    for d in 0..16u8 {
+        for b in REGS {
+            add("x86-load8", vec![d as i64, b as i64, 0], x::load8(d, m(b, 0)));
+        }
+    }
+    let mut barriers: Vec<(String, Vec<i64>, Vec<u8>)> = Vec::new();
+    let offs = x::BarrierOffsets { gens: 1000, cards: 304, barrier: 1008, barrier_heap: 1016, alloc_limit: 200 };
+    for (obj, disp, v, t1, t2) in [(6u8, -20i32, 8u8, 1u8, 11u8), (2, -4, 13, 1, 11), (0, 12, 14, 1, 2), (10, -20, 0, 9, 14), (11, -4, 7, 1, 9)] {
+        let o = |n: i32| n as i64;
+        let args = vec![obj as i64, disp as i64, v as i64, 15, o(offs.gens), o(offs.cards), o(offs.barrier), o(offs.barrier_heap), o(offs.alloc_limit), t1 as i64, t2 as i64];
+        barriers.push(("x86-stored".into(), args, x::stored(obj, disp, v, 15, offs, t1, t2)));
+    }
     add("x86-cqo", vec![], x::cqo());
     add("x86-ret", vec![], x::ret());
     // The native convention's (`native-direct-x64.fx`).
@@ -170,6 +183,7 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
     for n in 0..40usize {
         cases.push(("x86-nops".into(), vec![n as i64], x::nops(n)));
     }
+    cases.extend(barriers);
     let mut wrong = Vec::new();
     for (name, args, want) in &cases {
         let got: Vec<u8> = s.scope(|sc| {
