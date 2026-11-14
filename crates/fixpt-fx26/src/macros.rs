@@ -1855,51 +1855,66 @@ impl Macros {
     }
 
     /// A use of `h`, `s`, about to be expanded, entered in the chain of uses
-    /// its expansion is inside (`Withs::chain`): refused, saying why, where
-    /// the expansions' fuel is spent, or where it is one of those uses,
-    /// unchanged, which expansion, deterministic, would come back to
-    /// forever (`TODO.md` §231).
+    /// its expansion is inside (`Withs::chain`); refused where a limit is
+    /// reached, the expansions' fuel spent or their depth, saying why
+    /// (`limit_error`). Nothing more is looked at here, so that a use costs
+    /// what its own expansion does (`TODO.md` §231).
     fn enter(&mut self, h: Sym, s: &Syn, budget: &mut usize, interner: &Interner) -> R<()> {
         let (max_uses, max_depth) = self.withs.limits;
-        let chain = &mut self.withs.chain;
         let last = |chain: &[(Sym, Syn, Option<usize>)]| {
             let inside: Vec<String> = chain.iter().rev().take(4).map(|(n, ..)| format!("`{}`", interner.name(*n))).collect();
             if inside.is_empty() { String::new() } else { format!(", inside {}", inside.join(", ")) }
         };
         if *budget == 0 {
-            return Err(FxError::at(s.at(), format!("this macro's expansion does not end: {max_uses} uses expanded in one form, the last of `{}`{}", interner.name(h), last(chain))));
+            let why = format!("this macro's expansion does not end: {max_uses} uses expanded in one form, the last of `{}`{}", interner.name(h), last(&self.withs.chain));
+            return Err(self.limit_error(h, s, why, interner));
         }
         *budget -= 1;
-        if chain.len() == max_depth {
-            return Err(FxError::at(s.at(), format!("this macro's expansion does not end: its uses are {max_depth} deep, each in the expansion of the one before, the last of `{}`{}", interner.name(h), last(chain))));
+        if self.withs.chain.len() == max_depth {
+            let why = format!("this macro's expansion does not end: its uses are {max_depth} deep, each in the expansion of the one before, the last of `{}`{}", interner.name(h), last(&self.withs.chain));
+            return Err(self.limit_error(h, s, why, interner));
         }
-        // Its parts counted only where a use of the same macro is around
-        // it, each once; compared, part by part, only with one as large.
-        let mut size = None;
-        if chain.iter().any(|(n, ..)| *n == h) {
-            let mine = syn_size(s);
-            let mut back = None;
-            for i in (0..chain.len()).rev() {
-                let (n, form, theirs) = &mut chain[i];
-                if *n == h && *theirs.get_or_insert_with(|| syn_size(form)) == mine && same_syntax(form, s) {
-                    back = Some(i);
-                    break;
-                }
+        self.withs.chain.push((h, s.clone(), None));
+        Ok(())
+    }
+
+    /// Why a limit was reached at use `s` of `h`, `why` unless the chain
+    /// says better: its first use (outermost first, `s` last) that is,
+    /// part by part, one of the same macro it is inside, which expansion,
+    /// deterministic (a transformer pure), would come back to forever:
+    /// "this use of `m` is one it was expanded from, unchanged[, through
+    /// …]", at that use, the one an eager check would have refused. Looked
+    /// for only here, on the way to an error, so that no use's expansion
+    /// pays for it: a form's parts counted (each once, kept in the chain)
+    /// only where one of its macro is around it, and compared only with one
+    /// as large.
+    fn limit_error(&mut self, h: Sym, s: &Syn, why: String, interner: &Interner) -> FxError {
+        let n = self.withs.chain.len();
+        let mut sizes: Vec<Option<usize>> = self.withs.chain.iter().map(|e| e.2).collect();
+        sizes.push(None);
+        let entry = |chain: &[(Sym, Syn, Option<usize>)], i: usize| if i == n { (h, s.clone()) } else { (chain[i].0, chain[i].1.clone()) };
+        for i in 1..=n {
+            let (hi, si) = entry(&self.withs.chain, i);
+            if !self.withs.chain[..i].iter().any(|(m, ..)| *m == hi) {
+                continue;
             }
-            if let Some(i) = back {
+            let mine = *sizes[i].get_or_insert_with(|| syn_size(&si));
+            for j in (0..i).rev() {
+                let (hj, sj) = entry(&self.withs.chain, j);
+                if hj != hi || *sizes[j].get_or_insert_with(|| syn_size(&sj)) != mine || !same_syntax(&sj, &si) {
+                    continue;
+                }
                 let mut through: Vec<Sym> = Vec::new();
-                for (n, ..) in &chain[i + 1..] {
-                    if !through.contains(n) {
-                        through.push(*n);
+                for (m, ..) in &self.withs.chain[j + 1..i] {
+                    if !through.contains(m) {
+                        through.push(*m);
                     }
                 }
-                let through = if through.is_empty() { String::new() } else { format!(", through {}", through.iter().map(|n| format!("`{}`", interner.name(*n))).collect::<Vec<_>>().join(", ")) };
-                return Err(FxError::at(s.at(), format!("this use of `{}` is one it was expanded from, unchanged{through}: its expansion would never end", interner.name(h))));
+                let through = if through.is_empty() { String::new() } else { format!(", through {}", through.iter().map(|m| format!("`{}`", interner.name(*m))).collect::<Vec<_>>().join(", ")) };
+                return FxError::at(si.at(), format!("this use of `{}` is one it was expanded from, unchanged{through}: its expansion would never end", interner.name(hi)));
             }
-            size = Some(mine);
         }
-        chain.push((h, s.clone(), size));
-        Ok(())
+        FxError::at(s.at(), why)
     }
 
     /// `s`, where a definition is: a use of a macro that makes definitions,

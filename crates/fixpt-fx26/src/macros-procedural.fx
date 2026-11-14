@@ -612,42 +612,64 @@
 (define use-left! (->* () unit)
   (lambda () (begin (set chain (cdr (get chain))) (set chain-depth (- (get chain-depth) 1)))))
 ;; A use of `n`, `s`, about to be expanded, `fuel` uses left: entered in the
-;; chain; or refused, saying why, where the fuel is spent, where the uses
-;; are too deep, or where it is one of those it is inside, unchanged, which
-;; expansion, deterministic, would come back to forever (`Macros::enter`,
-;; `TODO.md` §231). Whether it is entered.
+;; chain; or refused where a limit is reached, the fuel spent or the depth,
+;; saying why (`limit-failed`). Nothing more is looked at here
+;; (`Macros::enter`, `TODO.md` §231). Whether it is entered.
 (define use-entered? (->* (fails symbol syn int) bool)
   (lambda (fail n s fuel)
     (let ((ls (get chain)) (shown (string-append "`" (symbol->string n) "`")))
       (cond
         ((= fuel 0)
-         (begin (fail-at fail (string-append "this macro's expansion does not end: "
-                                             (int->string (get max-uses))
-                                             " uses expanded in one form, the last of "
-                                             shown (inside-said ls 4 ""))
-                         s)
-                #f))
+         (limit-failed fail n s ls (string-append "this macro's expansion does not end: "
+                                                  (int->string (get max-uses))
+                                                  " uses expanded in one form, the last of "
+                                                  shown (inside-said ls 4 ""))))
         ((= (get chain-depth) (get max-depth))
-         (begin (fail-at fail (string-append "this macro's expansion does not end: its uses are "
-                                             (int->string (get max-depth)) " deep, each in the "
-                                             "expansion of the one before, the last of " shown
-                                             (inside-said ls 4 ""))
-                         s)
-                #f))
+         (limit-failed fail n s ls
+                       (string-append "this macro's expansion does not end: its uses are "
+                                      (int->string (get max-depth)) " deep, each in the "
+                                      "expansion of the one before, the last of " shown
+                                      (inside-said ls 4 ""))))
         (else
-         ;; Its parts counted only where a use of the same macro is around
-         ;; it; compared, part by part, only with one as large.
-         (let* ((size (if (link-of? n ls) (syn-size s) -1))
-                (back (if (< size 0) nil (came-back n s size ls nil))))
-           (if (null? back)
-               (begin (set chain (cons (tuple n s size) ls))
-                      (set chain-depth (+ (get chain-depth) 1))
-                      #t)
-               (begin (fail-at fail (string-append "this use of " shown " is one it was expanded "
-                                                   "from, unchanged" (through-said (car back))
-                                                   ": its expansion would never end")
-                               s)
-                      #f))))))))
+         (begin (set chain (cons (tuple n s -1) ls))
+                (set chain-depth (+ (get chain-depth) 1))
+                #t))))))
+;; A limit reached at use `s` of `n`, inside `ls`: `why`, unless the chain
+;; says better, its outermost use that is, part by part, one of the same
+;; macro it is inside: "this use of `m` is one it was expanded from,
+;; unchanged[, through …]", at that use (`Macros::limit_error`). #f.
+(define limit-failed (->* (fails symbol syn (listof link acyclic) string) bool)
+  (lambda (fail n s ls why)
+    (let ((r (first-repeat (sized (cons (tuple n s -1) ls)))))
+      (begin
+        (if (null? r)
+            (fail-at fail why s)
+            (fail-at fail (string-append "this use of `" (symbol->string (extract (car r) 2))
+                                         "` is one it was expanded from, unchanged"
+                                         (through-said (extract (car r) 3))
+                                         ": its expansion would never end")
+                     (extract (car r) 1)))
+        #f))))
+;; `ls` (innermost first), each use's parts counted once where a use of its
+;; macro is around it, -1 where none is.
+(define sized (->* ((listof link acyclic)) (listof link acyclic))
+  (lambda (ls)
+    (if (null? ls)
+        nil
+        (let ((n (extract (car ls) 1)) (s (extract (car ls) 2)))
+          (cons (tuple n s (if (link-of? n (cdr ls)) (syn-size s) -1)) (sized (cdr ls)))))))
+;; The outermost use of `ls` (innermost first, each sized) that is one of
+;; those around it: it, its macro and the macros passed, in a list of one.
+(define first-repeat (->* ((listof link acyclic)) (listof (tupleof syn symbol names) acyclic))
+  (lambda (ls)
+    (if (null? ls)
+        nil
+        (let ((outer (first-repeat (cdr ls))))
+          (if (not (null? outer))
+              outer
+              (let* ((n (extract (car ls) 1)) (s (extract (car ls) 2)) (size (extract (car ls) 3))
+                     (back (if (< size 0) nil (came-back n s size (cdr ls) nil))))
+                (if (null? back) nil (list (tuple s n (car back))))))))))
 (define link-of? (->* (symbol (listof link acyclic)) bool)
   (lambda (n ls)
     (and (not (null? ls)) (or (symbol=? n (extract (car ls) 1)) (link-of? n (cdr ls))))))

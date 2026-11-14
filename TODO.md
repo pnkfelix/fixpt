@@ -5633,6 +5633,22 @@ form with a vector, a real, a ratio or a bytevector in it is never the
 same as another, atoms compared as a pattern matches them (such a use is
 caught by the depth instead).
 
+Looked for only when a limit is reached (the user's, 2026-11-14, on
+why a long list recursed over costs n² parts counted; built the same
+day): `Macros::enter` (`use-entered?`) keeps the chain and its counts and
+nothing more, and where the fuel is spent or the depth reached,
+`limit_error` (`limit-failed`) looks along the chain for its outermost use
+that is, part by part, one of the same macro it is inside: the use the
+check at each use refused, refused so, with the same message at the same
+place; else the limit's. Sound for the reason the check at each use was:
+expansion deterministic, a transformer pure (the user's), so a use that
+came back unchanged is still in the chain when the limit is reached, and
+the first such is the first the eager check met. Each entry's parts
+counted once there. What it costs: a loop runs to the limit first
+(`procedural/returns-its-input.fx` 0.95 s, from 0.11, its transformer run
+1000 times); what it saves: every expansion's count of its uses' parts.
+Brent's method and fingerprints (below) no longer needed for it.
+
 Both limits set by the environment (the user's, 2026-11-14: "I cannot
 predict how downstream consumers might use macros"): `FIXPT_MACRO_DEPTH`
 and `FIXPT_MACRO_USES`, each a whole number from 1 to 1000000000, set
