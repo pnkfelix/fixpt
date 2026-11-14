@@ -4,13 +4,13 @@
 ;; that makes a description, its values constructed by keywords.
 (define-syntax payload
   (-> (type ...) type)
-  (syntax-rules ()
+  (syntax-rules
     ((_) unit)
     ((_ f) f)
     ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
   (-> (dvar (label type ...) ...) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name (t field ...) ...) (define-type name (sumof (t (payload field ...)) ...)))))
 (define-data shape (#:circle int) (#:rect int int) (#:none))
 (define area (subr pure (shape) int)

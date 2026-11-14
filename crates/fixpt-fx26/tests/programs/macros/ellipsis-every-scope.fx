@@ -4,6 +4,6 @@
 ;; template puts every `e` in every `v`'s scope.
 (define-syntax m
   ((bvar (import expr (rho (A var)))) ...)
-  (syntax-rules ()
+  (syntax-rules
     ((_ (v e) ...) ((lambda ((v int) ...) (list e ...)) 1 ...))))
 (m (a b) (b a))

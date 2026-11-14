@@ -496,7 +496,7 @@ readable form to move to:
 (define-syntax let1
   ;; As named: ((x bvar) (e expr)) (body (in expr x))
   ((bvar expr) (import expr (rho (AA var))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ (x e) body) (let ((x e)) body))))
 ```
 
@@ -1051,7 +1051,7 @@ alone: per-constructor binding facts, a least fixpoint over all the sugar
 at once. Built here for Herman's whole signatures, the user's design
 choices (2026-11-08):
 
-- **Written** `(define-syntax name [σ] (syntax-rules (literal …) clause
+- **Written** `(define-syntax name [σ] (syntax-rules [#:trailmarks (name …)] clause
   …))`, the signature optional; `(define-syntax-rec (name [σ]
   (syntax-rules …)) …)` for macros whose templates use each other, as
   `define-rec` is for values. The clauses are always a transformer's (the
@@ -1141,7 +1141,7 @@ choices made with them the same day:
 ```scheme
 (define-syntax let1
   (syntax-contract ((x : bvar) (e : expr)) (body : expr (in (x hole))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ (y v) b) (let ((y v)) b))))
 ```
 
@@ -1819,7 +1819,7 @@ expands it.* With `clauses` it was a function of the clause, and so:
 
   ```scheme
   (define-syntax bind*
-    (syntax-rules ()
+    (syntax-rules
       ((_ () body) body)
       ((_ ((x e) . rest) body) (let ((x e)) (bind* rest body)))
       ((_ (e . rest) body) (begin e (bind* rest body)))))
@@ -1855,10 +1855,10 @@ one signature (`define-syntax-rec`, inferred today; written, TODO §272):
 
 ```scheme
 (define-syntax-rec
-  (bnd (syntax-rules ()
+  (bnd (syntax-rules
          ((_ () body) body)
          ((_ ((x e) . rest) body) (let ((x e)) (seq rest body)))))
-  (seq (syntax-rules ()
+  (seq (syntax-rules
          ((_ () body) body)
          ((_ (e . rest) body) (begin e (bnd rest body))))))
 ```
@@ -1887,7 +1887,7 @@ datum:
 a binding: trailmarks, next.
 
 
-## Proposed: trailmarks, a literal as a binding (2026-11-14)
+## Trailmarks, a literal as a binding (2026-11-14, built)
 
 The user's (after keywords for literals, `#:else`, were weighed and not
 taken: "breaking all current cond is a tough pill to swallow"; the
@@ -1914,29 +1914,98 @@ the choice).
   kind of component. Used alone, anywhere, refused: "`=>` is a trailmark,
   not an expression: a `cond` clause's, before the procedure given the
   test" (the string, if given, says where it belongs).
-- **A literals list names trailmarks**: `(syntax-rules (else) …)` wants
+- **The list of trailmarks, written only where there is one**:
+  `(syntax-rules #:trailmarks (else =>) clause …)`, as Racket's
+  `syntax-parse` writes `#:literals (…)`; `(syntax-rules clause …)`
+  otherwise. A leading `()`, today's empty list of literals, refused,
+  saying to drop it (the user's: the list is non-empty in about one
+  `syntax-rules` of a hundred, 2026-11-14: Fixpt's 7 of 217, all tests;
+  Heist's 3 of about 296, one outside its tests, `s7st/prelude.fx`'s `else`
+  and `=>`; Kayak's none of its own). Read without doubt: a clause is a
+  list of two whose head is a list, which neither `()` nor a keyword is.
+  The Scheme front ends keep R7RS's form.
+- **A trailmark list names trailmarks**: `#:trailmarks (else)` wants
   `else` bound to a trailmark where the macro is defined, and a use's
-  `else` matches if it is bound to that one (renamed, imported under
-  another name, it still does; shadowed by a `let`, it does not). A name
-  bound to no trailmark is refused: "`hi` names no trailmark here:
-  `(define-syntax hi (trailmark))`" (by name, as `#:datum-literals`, not
-  offered: no binding to tell it by).
+  `else` matches if it is bound to that one (a file's, imported, under
+  the name its importer has it by, still does). Bound means as a macro's
+  name is today: the expander finds macros by name, in one table, which a
+  `let` does not shadow (`(let ((foo 2)) foo)`, `foo` a macro, reads `(foo
+  2)` as its use: a hygiene gap of its own, not this design's); a
+  trailmark's identity is its definition. A name bound to no trailmark is refused:
+  "`hi` names no trailmark here: `(define-syntax hi (trailmark))`" (by
+  name, as `#:datum-literals`, not offered: no binding to tell it by).
 - **In a signature**, `(trailmark else)` where `(literal else)` is
   written today: the identifier bound to that trailmark. **Disjoint from
-  `expr` and `data`**, a trailmark being neither, so `(oneof ((trailmark
-  else) expr) (expr expr))` is told apart: at a use by its identifiers'
-  bindings, known there; in a template by syntax types, a part of type
-  `expr` never being a trailmark. Not from `bvar`: a binder may be any
-  identifier, rebinding one how it is shadowed; refused there as not told
-  apart, as now.
+  `expr`, `data` and `bvar`**: a trailmark is no expression and no datum,
+  and, bound by `define-syntax`, a macro's name, which a use's binder may
+  not be (today's rule: "`x` is a macro's name, which is not bound"). So
+  `(oneof ((trailmark else) expr) (expr expr))` is told apart: at a use
+  by its identifiers' bindings, known there; in a template by syntax
+  types, a part of type `expr` never being a trailmark. Today's
+  `(literal else)` is held apart from `expr` and `bvar` already, by name
+  alone (`Macros::overlap`), which is what a binding makes sound; and
+  from `data` not, which is `string-cases`' refusal.
 - **Hygiene**: a template's `else` is the macro definition's, renamed or
   shadowed at the use or not.
+- **The expander leaves a list headed by a trailmark alone**, not a use:
+  `cond`'s `(else x)` is the parser's to read (it walks every list, and
+  would otherwise take the clause for a use). Used where an expression
+  is, the checker's "unbound variable" names it a trailmark, with its
+  string (not yet: both checkers say "unbound variable `else`", which
+  would have the Rust and FX-26 checkers both told of trailmarks).
 - **The kernel's `else` and `=>`** bound as trailmarks in the standard
   environment, so a user's macro names them, every `cond` as it is. A
   second step, later: the parsers telling the kernel forms' `else` by
   binding, not name (a `cond` where `else` is a variable then reads it as
   one; today it does not care).
 
-Both front ends. Tests: `string-cases`; a trailmark renamed on import and
-matched; shadowed and not; one used alone, refused; a literals list
-naming no trailmark, refused; `(trailmark else)` with a `bvar`, refused.
+**As built** (both front ends, the same day). A trailmark is kept apart
+from the macros (`Macros::marks`; FX-26's `marks`, `macros-types.fx`), so
+the expander's walk, which finds uses by a list's head among the macros,
+leaves `(else x)` alone as it was; a macro defined with a trailmark's name
+hides it, and a trailmark defined with a macro's takes the name. Each is
+numbered where it is defined, apart from the fresh names (which both
+expanders count alike); the standard ones are the kernel's, so a file's
+scope, which has none of the program's, has them. A clause keeps each of
+its trailmarks' numbers where it is defined (`Clause::marks`), so a
+template of a file's, whose `via` is renamed to the name the importer has
+the file's by (`Action::Mark`, `act-mark`), matches it whatever the
+importer took. `else` and `=>` were reserved form words already
+(`top::KEYWORDS`: never a pattern variable or binder, matched by name),
+which they stay; shown in a signature, a reserved name is `(literal n)`
+but for those two, `(trailmark n)`. A pattern's trailmark name is never a
+pattern variable: where its signature has no `(trailmark n)` (nor a
+`oneof`), refused.
+
+`string-cases`, with its signature written, is taken:
+
+```scheme
+(define-syntax-rec
+  (string-cases ((many expr) . (mu l (oneof (((trailmark else) expr)) ((expr expr) . l))))
+                (syntax-rules #:trailmarks (else)
+                  ((_ v (else d)) d)
+                  ((_ v (k e) . rest) (if (string=? v k) e (string-cases v . rest))))))
+```
+
+and the type caught what R7RS's would not: with `c ...` for the rest and
+a clause's head `(oneof (trailmark else) expr)`, `k` may be `else`, placed
+in `(string=? v k)`, and is refused; R7RS's `string-cases` given `(else 1)`
+before another clause takes it for a test, `(string=? v else)`. A use with
+`else` not last is refused where it is used. Not yet: the inference finds
+no `mu` for it (it unrolls the clauses' list, as for `bnd`, TODO §272),
+and a pattern's `c ...` is not read against a `mu`'s list, so the rest is
+written dotted, `. rest`.
+
+Tests (`tests/programs/macros/trailmark-*.fx`; `import-with-syntax`'s
+`main-marks*.fx`): `string-cases` and `else` misplaced; a clause's head
+that may be `else` placed as an expression; a template writing another
+macro's trailmark; a file's, imported, and its template's with `only`; a
+name listed and bound to none; R7RS's `()` and literals list, each refused
+saying how it is written; a trailmark bound by a use, refused; `(literal
+hi)` for a trailmark, refused; a macro defined over one; one in a
+`define-syntax-rec`, and one saying a non-string.
+
+Heist and Kayak: every `syntax-rules ()` is refused until rewritten (a
+script beside `name_conversions.py`), and Heist's few literals lists
+(`s7st/prelude.fx`'s `else` and `=>`, which are standard) become
+`#:trailmarks`.

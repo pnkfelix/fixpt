@@ -5,6 +5,6 @@
 ;; `#%fx`, which that never is. Both refuse it where a `u8` is wanted.
 (define-syntax three
   ()
-  (syntax-rules ()
+  (syntax-rules
     ((_) (+ 1 2))))
 (the u8 (three))

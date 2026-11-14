@@ -3,6 +3,6 @@
 ;; where it is written, before it is expanded.
 (define-syntax call-rec
   (bvar (import lambda (rho (A var))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ f e) (letrec ((f (subr pure (int) int) e)) (f 3)))))
 (call-rec g 5)

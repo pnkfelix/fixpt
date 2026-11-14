@@ -5,7 +5,7 @@
 (define-syntax and-then
   ;; As named: ((e expr) (es (listof expr)))
   (expr . (mu es (union () (expr . es))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ e) e)
     ((_ e1 e2 . rest) (let ((t e1)) (if (eq? t #f) #f (and-then e2 . rest))))))
 (define* half (subr pure (int) maybe-int) (lambda (n) (if (= (remainder n 2) 0) (quotient n 2) #f)))

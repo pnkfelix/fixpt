@@ -3,6 +3,6 @@
 ;; what `a` refers to.
 (define-syntax k2
   (dvar dvar)
-  (syntax-rules ()
+  (syntax-rules
     ((_ a b) (plambda ((a type)) (plambda ((b type)) (lambda ((x a)) x))))))
 1

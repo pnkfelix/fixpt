@@ -3,7 +3,7 @@
 ;; `letrec` it stands for may (Heist's): a template's forms are read by
 ;; their heads, which no binding of the use's names.
 (define-syntax loop
-  (syntax-rules ()
+  (syntax-rules
     ((_ go eff ((x t i) ...) r body)
      (letrec ((go (subr eff (t ...) r) (lambda (x ...) body))) (go i ...)))))
 (define looped (subr spin (int) int)

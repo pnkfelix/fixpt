@@ -3,7 +3,7 @@
 ;; group.
 (define-syntax define-parity
   (-> (bvar bvar) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ ev od)
      (define-rec (ev (->* (int) bool) (lambda ((n int)) (if (= n 0) #t (od (- n 1)))))
                  (od (->* (int) bool) (lambda ((n int)) (if (= n 0) #f (ev (- n 1)))))))))

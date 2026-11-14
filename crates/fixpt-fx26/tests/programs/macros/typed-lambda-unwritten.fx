@@ -3,6 +3,6 @@
 (define-type fn (subr pure (int) int))
 (define-syntax call-rec
   ((bvar #:type fn) (import (lambda #:type fn) (rho (A var))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ f e) (letrec ((f fn e)) (f 3)))))
 1

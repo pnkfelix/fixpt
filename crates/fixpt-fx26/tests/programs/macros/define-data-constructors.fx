@@ -6,13 +6,13 @@
 ;; constructs by its keyword, a pattern variable at a list's head.
 (define-syntax payload
   (-> (type ...) type)
-  (syntax-rules ()
+  (syntax-rules
     ((_) unit)
     ((_ f) f)
     ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
   (-> (dvar (bvar label type ...) ...) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name (c t field ...) ...)
      (begin
        (define-type name (sumof (t (payload field ...)) ...))

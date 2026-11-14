@@ -4,7 +4,7 @@
 (define-type t int)
 (define-syntax counter-sig
   (-> (type) type)
-  (syntax-rules ()
+  (syntax-rules
     ((_ elem) (moduleof (abs #:t t type) (val #:empty t) (val #:add (subr pure (elem t) t))
                         (val #:size (subr pure (t) int))))))
 (define m (counter-sig t)

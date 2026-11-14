@@ -13,7 +13,7 @@
 (import reader-types atom lst dotted (type syn))
 (import parser-module syn-symbol? syn-name mk-list mk-symbol syn-datums syn->datum
         (type syns-a))
-(import types-module show-syn kind-of mu-body
+(import types-module show-syn kind-of mu-body reserved-sym? s-mark
         s-expr s-bvar s-id s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu
         s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib ring-at
         (type addr entries ring rings bind sty stys))
@@ -35,7 +35,12 @@
         (s-label () (sym "label")) (s-dvar () (sym "dvar")) (s-kind () (sym "kind"))
         (s-defn () (sym "defn")) (s-item () (sym "item"))
         (s-nil () (mk-list nil a b))
-        (s-literal (n) (mk-list (list (sym "literal") (atom n a b 0)) a b))
+        ;; A `syntax-rules`' trailmark, inferred as a word its pattern
+        ;; writes; a reserved name but the standard trailmarks, a kernel
+        ;; form's word.
+        (s-literal (n)
+          (mk-list (list (sym (if (word? n) "literal" "trailmark")) (atom n a b 0)) a b))
+        (s-mark (n i) (mk-list (list (sym "trailmark") (atom n a b 0)) a b))
         (s-pair (x y) (show-pair t nil a b))
         (s-import (x bd) (mk-list (list (sym "import") (show-sty x a b) (show-bind bd a b)) a b))
         (s-export (x bd) (mk-list (list (sym "export") (show-sty x a b) (show-bind bd a b)) a b))
@@ -212,8 +217,12 @@
     (and (syn-symbol? s)
          (let ((n (syn-name s)))
            (or (string=? n "import") (string=? n "export") (string=? n "union") (string=? n "oneof")
-               (string=? n "mu")
+               (string=? n "mu") (string=? n "trailmark")
                (string=? n "many") (string=? n "literal"))))))
+;; Whether `n` is a kernel form's word, as a signature shows it: reserved,
+;; and not one of the standard trailmarks, `else` and `=>`.
+(define word? (->* (symbol) bool)
+  (lambda (n) (and (reserved-sym? n) (not (symbol=? n 'else)) (not (symbol=? n '=>)))))
 ;; Items `xs`, the first first (`first`); a word of `sig-word?` past the
 ;; first, and a proper list's, starts its rest.
 (define sig-items (->* (syns-a bool int int) string)

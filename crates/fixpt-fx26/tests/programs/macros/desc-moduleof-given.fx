@@ -2,7 +2,7 @@
 ;; A label and binder the use gives, `(abs name type)`: the use's, both.
 (define-syntax box-sig
   (-> (dvar type) type)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name elem) (moduleof (abs name type)
                              (val #:get (subr pure (name) elem))
                              (val #:make (subr pure (elem) name))))))

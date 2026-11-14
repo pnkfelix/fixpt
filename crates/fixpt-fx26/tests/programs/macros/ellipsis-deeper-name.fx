@@ -4,6 +4,6 @@
 (define dbl (subr pure (int) int) (lambda (x) (* 2 x)))
 (define-syntax map-call
   (id expr ...)
-  (syntax-rules ()
+  (syntax-rules
     ((_ f e ...) (list (f e) ...))))
 (car (map-call dbl 1 2))

@@ -2,7 +2,7 @@
 ;; `(chain m0 (m1 m2 …))`: m1 is `double` applied to m0, m2 to m1, and on:
 ;; a type made of the one below, twice, at each level.
 (define-syntax chain
-  (syntax-rules ()
+  (syntax-rules
     ((_ a (b)) (define b ((with #%toplevel double) a)))
     ((_ a (b c . rest))
      (begin (define b ((with #%toplevel double) a)) (chain b (c . rest))))))

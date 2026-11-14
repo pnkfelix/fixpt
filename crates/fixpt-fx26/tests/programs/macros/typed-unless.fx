@@ -5,6 +5,6 @@
 (define-syntax unless
   (poly ((e effect))
     ((expr #:type bool #:effect pure) (expr #:type unit #:effect e)))
-  (syntax-rules ()
+  (syntax-rules
     ((_ c body) (if c #u body))))
 (unless (null? '()) #u)

@@ -3,7 +3,7 @@
 ;; type by how many parts it has.
 (define-syntax payload
   (-> (type ...) type)
-  (syntax-rules ()
+  (syntax-rules
     ((_) unit)
     ((_ f) f)
     ((_ f g ...) (tupleof f g ...))))

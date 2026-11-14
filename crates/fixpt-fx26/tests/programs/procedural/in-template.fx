@@ -3,5 +3,5 @@
 ;; could not say what the use binds.
 (define-syntax id
   (er-macro-transformer (lambda (form rename compare) (car (cdr form)))))
-(define-syntax wrap (syntax-rules () ((_ e) (id e))))
+(define-syntax wrap (syntax-rules ((_ e) (id e))))
 (wrap 1)

@@ -4701,7 +4701,7 @@ mod built_in_tests {
     /// module file is read on every other machine (`TODO.md` §248).
     #[test]
     fn a_built_in_files_own_macros_are_expanded_and_left_out() {
-        let text = "(hide (define-syntax twice (expr) (syntax-rules () ((_ e) (let ((v e)) (+ v v))))))\n(define four int (twice 2))\n";
+        let text = "(hide (define-syntax twice (expr) (syntax-rules ((_ e) (let ((v e)) (+ v v))))))\n(define four int (twice 2))\n";
         let mut c = Checker::new();
         let load = built_in_load_of("fx26:own.fx", text, Span::new(FileId(0), 0, 0), &mut c).expect("reads").expect("a load");
         assert!(load.expanded, "{}", load.text);

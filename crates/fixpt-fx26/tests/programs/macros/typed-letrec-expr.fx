@@ -4,6 +4,6 @@
 (define-syntax call-rec
   ((bvar #:type (subr pure (int) int))
    (import (expr #:type (subr pure (int) int)) (rho (A var))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ f e) (letrec ((f (subr pure (int) int) e)) (f 3)))))
 1

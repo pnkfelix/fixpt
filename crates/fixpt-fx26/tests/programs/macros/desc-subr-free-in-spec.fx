@@ -4,6 +4,6 @@
 ;; use gives the same name.
 (define-syntax define-capped
   (-> (bvar bvar) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name p) (define name (subr pure ((p : int)) int (requires (< p limit))) (lambda (x) x)))))
 (define-capped capped limit)

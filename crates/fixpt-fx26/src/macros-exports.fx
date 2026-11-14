@@ -19,12 +19,13 @@
 (import reader-types (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-symbol syn-name syn-expansion len nth
         (type names syns-a))
-(import types-module fail-at name-in? proper-items sorted-strings joined atm-var atm-rib-of
-        atm-lit addr=? (type fails atm atms strings addr))
+(import types-module fail-at name-in? proper-items atm-var atm-rib-of
+        atm-lit addr=? (type fails atm atms addr))
 (import match-module pattern-names addr-under?)
 (import scopes-module normal atm-in?)
 (import align-module node-kids node-syn pvar? makes-defns? lv-rib lv-cage lv-earlier lv-shape k-pair
-        k-form k-desc k-seq k-binder act-rename (type levels pvars actions))
+        k-form k-desc k-seq k-binder act-rename sorted-strings joined
+        (type levels pvars actions strings))
 
 ;;; ------------------------------------------------------------ exports
 

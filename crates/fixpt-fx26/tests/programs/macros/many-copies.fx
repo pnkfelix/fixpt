@@ -5,7 +5,7 @@
 (define-type opt (sumof (some int) (none unit)))
 (define-syntax both
   ((many expr))
-  (syntax-rules ()
+  (syntax-rules
     ((_ e) (list e e))))
 (let ((o (the opt (sum some 4))))
   (both (tagcase o (some v v) (none u 0))))

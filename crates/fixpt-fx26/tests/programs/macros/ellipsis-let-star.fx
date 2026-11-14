@@ -3,6 +3,6 @@
 ;; it, the body of them all; the template's binders fresh in each.
 (define-syntax listed*
   (expr ...)
-  (syntax-rules ()
+  (syntax-rules
     ((_ e ...) (let* ((t e) ...) (list t ...)))))
 (car (cdr (listed* 1 2 3)))

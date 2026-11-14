@@ -3,10 +3,10 @@
 ;; each use that made it, innermost first (`fixpt`'s `located`).
 (define-syntax add-one
   (expr)
-  (syntax-rules ()
+  (syntax-rules
     ((_ e) (+ e #t))))
 (define-syntax twice-add
   (expr)
-  (syntax-rules ()
+  (syntax-rules
     ((_ e) (add-one e))))
 (twice-add 3)

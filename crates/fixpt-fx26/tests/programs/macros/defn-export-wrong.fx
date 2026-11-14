@@ -2,5 +2,5 @@
 ;; A signature's export is held to what the template defines.
 (define-syntax define-two
   (-> (export (bvar bvar expr) (rho (A var) (AD var))) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ a b e) (define a e))))

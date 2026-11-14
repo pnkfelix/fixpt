@@ -3,7 +3,7 @@
 ;; use names is all the program sees of them.
 (define-syntax define-counter
   (-> (bvar bvar bvar) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ zero inc value)
      (begin (define-generative c int #:seal mk #:unseal get)
             (define zero c (mk 0))

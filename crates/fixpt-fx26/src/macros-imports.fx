@@ -12,8 +12,8 @@
         head-name import-usage in-loaded-as internal-names internal-of len load-base load-of
         load-path loaded-path loads macro-names macro-of macro? mk-list mk-symbol name-filter
         names-shown not-macros nth proper shown-names syn-end syn-start syn-symbol syn-symbol?
-        taken? without-load
-        (type fails file-macro files filter macro macro-env mades names scope syn syns-a))
+        taken? without-load marks
+        (type fails file-macro files filter macro macro-env mades names scope syn syns-a marked))
 
 ;; Notes a top-level `(define name (load-module "path"))`, the file
 ;; `import-with-syntax` of `name` reads; any other definition of `name`
@@ -111,13 +111,15 @@
 ;; `filter` takes by its own name too. The names of those not hidden.
 (define define-file (->* (fails (listof file-macro acyclic) scope (listof filter acyclic)) names)
   (lambda (fail ms scope filter)
-    (let ((program (get defined)))
+    (let ((program (get defined)) (program-marks (get marks)))
       (begin
         (set defined nil)
-        (let* ((made (define-each fail ms scope)) (own (get defined)))
+        (set marks nil)
+        (let* ((made (define-each fail ms scope)) (own (get defined)) (own-marks (get marks)))
           (begin
             (set defined program)
-            (give-each fail made own scope filter
+            (set marks program-marks)
+            (give-each fail made own own-marks scope filter
                        (if (null? ms) (atom '() 0 0 0) (extract (car ms) 1)))
             (shown-names made)))))))
 (define define-each (->* (fails (listof file-macro acyclic) scope) mades)
@@ -129,12 +131,25 @@
 (define hidden-as (->* (names bool) mades)
   (lambda (ns h) (if (null? ns) nil (cons (tuple (car ns) h) (hidden-as (cdr ns) h)))))
 (define give-each
-  (->* (fails mades macro-env scope (listof filter acyclic) syn) unit)
-  (lambda (fail made own scope filter first)
+  (->* (fails mades macro-env marked scope (listof filter acyclic) syn) unit)
+  (lambda (fail made own own-marks scope filter first)
     (if (null? made)
         #u
-        (let* ((n (extract (car made) 1)) (m (car (macro-of n own)))
+        (let* ((n (extract (car made) 1)) (k (own-mark n own-marks))
                (internal (car (internal-of n (extract scope 4)))))
+          (if (> k 0)
+              ;; A trailmark of the file's: bound as its macros are.
+              (begin
+                (if (and (not (extract (car made) 2)) (taken? n filter))
+                    (if (or (macro? n) (> (own-mark n (get marks)) 0))
+                        (fail-at fail (string-append "`" (symbol->string n) "` is defined already: "
+                                                     "a file's trailmark may not be defined again")
+                                 first)
+                        (set marks (cons (tuple n k) (get marks))))
+                    #u)
+                (set marks (cons (tuple internal k) (get marks)))
+                (give-each fail (cdr made) own own-marks scope filter first))
+          (let ((m (car (macro-of n own))))
           (begin
             (if (and (not (extract (car made) 2)) (taken? n filter))
                 (if (macro? n)
@@ -144,5 +159,11 @@
                     (set defined (cons (tuple n m) (get defined))))
                 #u)
             (set defined (cons (tuple internal m) (get defined)))
-            (give-each fail (cdr made) own scope filter first))))))
+            (give-each fail (cdr made) own own-marks scope filter first))))))))
+;; The trailmark `n` is in `ms`, defined there, or 0.
+(define own-mark (->* (symbol marked) int)
+  (lambda (n ms)
+    (cond ((null? ms) 0)
+          ((symbol=? n (extract (car ms) 1)) (extract (car ms) 2))
+          (else (own-mark n (cdr ms))))))
 

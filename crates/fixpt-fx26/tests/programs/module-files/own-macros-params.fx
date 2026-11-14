@@ -4,6 +4,6 @@
 ;; it means where the macro is defined: `one`, the parameter's, even inside
 ;; a binder `one` of the use's, which is renamed.
 (module-parameters ((m-base (load-moduleof "own-macros-base.fx"))))
-(define-syntax add-one (syntax-rules () ((_ e) (+ e one))))
+(define-syntax add-one (syntax-rules ((_ e) (+ e one))))
 (define g (subr pure (int) int) (lambda (n) (add-one n)))
 (define h (subr pure (int) int) (lambda (one) (add-one one)))

@@ -17,10 +17,9 @@
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
-        mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit sorted-strings
-        seq-elem seq-cage? peel ellipsis? ellipsis-of name-fit-of name-kind?
-        joined
-        (type fails addr entries ring rings bind sty stys named hole atm atms strings))
+        mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit marks mark-in
+        seq-elem seq-cage? peel ellipsis? ellipsis-of
+        (type fails addr entries ring rings bind sty stys named hole atm atms marked))
 ;; The environments the walk resolves names in (`macros-env-types.fx`): their
 ;; levels, and one implementation of them, whose `env` is abstract outside
 ;; it (`define-generative`), so that nothing here depends on how it keeps
@@ -49,7 +48,9 @@
 ;; another of the file's macros, by the name the importer has it by.
 (define-datatype action
   (act-rename addr int) (act-alias) (act-module-type symbol) (act-standard-type)
-  (act-macro-head symbol))
+  (act-macro-head symbol)
+  ;; A trailmark of a file's a template writes: the name the importer has it by.
+  (act-mark symbol))
 (define-type actions (listof (tupleof addr action) acyclic))
 ;; Where a macro is defined, what its expansions' aliases are read in
 ;; (`macros/hygiene.rs`'s `DefEnv`), by its kind: the top level (0); a file
@@ -65,9 +66,10 @@
 ;; by their paths in the template, the last made first; its pattern's
 ;; variables, in the order the pattern has them; each typed hole's type as
 ;; a use reads it, `(select #%toplevel T)`, which the use's expression is
-;; held to; and where its macro is defined (`macros.rs`'s `Clause`).
+;; held to; where its macro is defined; and its `syntax-rules`'
+;; trailmarks, each the binding it is (`macros.rs`'s `Clause`).
 (define-type contracts (listof (tupleof symbol syn) acyclic))
-(define-type clause (tupleof syn syn actions pvars contracts def-env))
+(define-type clause (tupleof syn syn actions pvars contracts def-env marked))
 (define-type clauses (listof clause acyclic))
 ;; A macro defined: its signature, its clauses, the binders of its
 ;; signature's `(poly (binder …) σ)`, if it has one, and what it makes (0 an
@@ -102,6 +104,39 @@
 (define-type scope
   (tupleof symbol names names (listof (tupleof symbol symbol) acyclic) names))
 (define-type scopes (listof scope acyclic))
+
+;; Strings, `xs` sorted onto `out`; and joined, `, ` between.
+(define-type strings (listof string acyclic))
+(define sorted-strings (->* (strings strings) strings)
+  (lambda (xs out) (if (null? xs) out (sorted-strings (cdr xs) (inserted (car xs) out)))))
+(define inserted (->* (string strings) strings)
+  (lambda (x ys)
+    (cond ((null? ys) (list x))
+          ((string<? x (car ys)) (cons x ys))
+          ((string=? x (car ys)) ys)
+          (else (cons (car ys) (inserted x (cdr ys)))))))
+(define joined (->* (strings) string)
+  (lambda (ss)
+    (if (null? (cdr ss)) (car ss) (string-append (car ss) ", " (joined (cdr ss))))))
+
+;;; ------------------------------------------------------------ matching
+
+;; Of union `t`'s members, the one a name is of, in a list of one, if one
+;; is; none else, or if `t` is no union.
+(define name-fit-of (->* (sty) stys)
+  (lambda (t)
+    (tagcase t
+      (s-union (ms)
+        (let ((names (names-of ms))) (if (and (not (null? names)) (null? (cdr names))) names nil)))
+      (else y nil))))
+(define names-of (->* (stys) stys)
+  (lambda (ms)
+    (cond ((null? ms) nil)
+          ((name-kind? (kind-of (unfold (car ms)))) (cons (car ms) (names-of (cdr ms))))
+          (else (names-of (cdr ms))))))
+;; Whether kind `k` is a name's: `bvar`, `dvar`, `id`, `label`.
+(define name-kind? (->* (int) bool)
+  (lambda (k) (or (= k 1) (= k 12) (= k 2) (= k 5))))
 
 ;;; ------------------------------------------------------------ nodes
 
@@ -279,6 +314,33 @@
   (lambda (n ps)
     (let ((p (pvar-of n ps)))
       (cond ((null? p) 0) ((name-kind? (kind-of (extract (car p) 1))) 1) (else 2)))))
+;; The trailmark name `n` is bound to, where it is read: its number, or 0
+;; (`macros.rs`'s `mark_of`); and so, `ds` the macros and `ms` the
+;; trailmarks, for `fits?`, as `pvar-shape`'s are, a trailmark's minus it.
+(define mark-now (->* (symbol) int) (lambda (n) (mark-code n (get defined) (get marks))))
+(define mark-code (->* (symbol macro-env marked) int)
+  (lambda (n ds ms) (if (null? (macro-of n ds)) (mark-in n ms) 0)))
+(define union? (->* (sty) bool) (lambda (t) (tagcase t (s-union (ms) #t) (else y #f))))
+;; Those of `ms` that `s` fits.
+(define fitting (->* (stys syn int pvars) stys)
+  (lambda (ms s mode ps)
+    (let ((ds (get defined)) (ks (get marks)))
+      (cond ((null? ms) nil)
+            ((fits? (car ms) s mode
+                    (lambda ((n symbol))
+                      (let ((p (pvar-shape n ps))) (if (> p 0) p (- 0 (mark-code n ds ks))))))
+             (cons (car ms) (fitting (cdr ms) s mode ps)))
+            (else (fitting (cdr ms) s mode ps))))))
+;; A pattern variable written somewhere inside `s`, in a list of one.
+(define pvar-inside (->* (syn pvars) (listof symbol acyclic))
+  (lambda (s ps)
+    (if (syn-symbol? s)
+        (if (pvar? (syn-symbol s) ps) (list (syn-symbol s)) nil)
+        (let ((parts (split s)))
+          (if (null? parts)
+              nil
+              (let ((first (pvar-inside (car parts) ps)))
+                (if (null? first) (pvar-inside (nth parts 1) ps) first)))))))
 
 
 ;;; ------------------------------------------------------------ binding

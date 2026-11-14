@@ -3,5 +3,5 @@
 ;; is bound.
 (define-syntax bad
   ((bvar expr) (import expr (rho (AA var))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ (a e) body) body)))

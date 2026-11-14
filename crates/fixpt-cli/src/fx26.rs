@@ -1975,7 +1975,7 @@ mod speculative {
     #[test]
     fn a_macro_typed_is_defined_for_it_alone() {
         let mut s = session();
-        let n = notes_in(&mut s, "(define-syntax m (expr) (syntax-rules () ((_ e) e))) (m 5)");
+        let n = notes_in(&mut s, "(define-syntax m (expr) (syntax-rules ((_ e) e))) (m 5)");
         assert!(n.iter().all(|n| !n.error), "{n:?}");
         assert!(notes_in(&mut s, "(m 5)").first().is_some_and(|n| n.error));
     }

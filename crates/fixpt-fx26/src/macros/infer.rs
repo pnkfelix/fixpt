@@ -1169,7 +1169,10 @@ impl Macros {
             STy::Kind => sym("kind", interner),
             STy::Defn => sym("defn", interner),
             STy::Nil => Syn::nil(at),
-            STy::Literal(n) => Syn::lst(at, vec![sym("literal", interner), Syn::symbol(at, *n, interner)]),
+            // A `syntax-rules`' trailmark, inferred as a word its pattern
+            // writes; a reserved name, a kernel form's word.
+            STy::Literal(n) if super::reserved(interner.name(*n)) && !super::STANDARD_MARKS.iter().any(|(m, _)| *m == interner.name(*n)) => Syn::lst(at, vec![sym("literal", interner), Syn::symbol(at, *n, interner)]),
+            STy::Literal(n) | STy::Mark(n, _) => Syn::lst(at, vec![sym("trailmark", interner), Syn::symbol(at, *n, interner)]),
             STy::Pair(..) => {
                 let mut items = Vec::new();
                 let mut cur = t.clone();
@@ -1258,7 +1261,7 @@ impl Macros {
 /// run into its elements.
 pub(super) fn sig_text(s: &Syn, interner: &Interner) -> String {
     let V::List { items, tail } = &s.view() else { return s.written(interner) };
-    let words = ["import", "export", "union", "oneof", "mu", "many", "literal"];
+    let words = ["import", "export", "union", "oneof", "mu", "many", "literal", "trailmark"];
     let mut out = String::from("(");
     for (k, i) in items.iter().enumerate() {
         if k > 0 && tail.is_none() && i.sym().is_some_and(|w| words.contains(&interner.name(w))) {
@@ -1325,20 +1328,6 @@ fn shown_bind(b: &Bind, at: At, interner: &mut Interner) -> Syn {
 mod tests {
     use super::*;
 
-    fn literals(s: &Syn, interner: &Interner, out: &mut Vec<Sym>) {
-        if let Some([h, n]) = s.list().as_deref()
-            && h.sym().is_some_and(|h| interner.name(h) == "literal")
-            && let Some(n) = n.sym()
-        {
-            out.push(n);
-            return;
-        }
-        if let V::List { items, tail } = &s.view() {
-            for i in items.iter().chain(tail.as_ref()) {
-                literals(i, interner, out);
-            }
-        }
-    }
 
     /// Each macro of the tests' programs whose signature is written, its
     /// signature inferred from its clauses alone, against the written one.
@@ -1361,7 +1350,7 @@ mod tests {
                 if !items.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "define-syntax") || items.len() != 4 {
                     continue;
                 }
-                let Some(rules) = items[3].list() else { continue };
+                let Some(rules) = items[3].list().filter(|r| r.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "syntax-rules")) else { continue };
                 let name = items[1].sym().unwrap();
                 let file = path.file_name().unwrap().to_string_lossy().to_string();
                 let label = format!("{file} {}", interner.name(name));
@@ -1377,9 +1366,8 @@ mod tests {
                     w = Syn::lst(f.at(), vec![Syn::named(f.at(), "->", &mut interner), w, Syn::named(f.at(), made, &mut interner)]);
                 }
                 let w = w.written(&interner);
-                let mut lits = Vec::new();
-                literals(&items[2], &interner, &mut lits);
-                let u = Unsigned { name, lits, clauses: rules[2..].to_vec(), span: f.at() };
+                let Ok((lits, clauses)) = crate::macros::rules_parts(&rules[1..], f.at(), &interner) else { continue };
+                let u = Unsigned { name, lits, clauses, span: f.at() };
                 match m.infer(&[u], &mut interner) {
                     Ok(s) => {
                         let i = s[0].written(&interner);

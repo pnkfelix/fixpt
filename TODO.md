@@ -5408,7 +5408,7 @@ name)` (`macros/with-value.fx`, which binds by `define` instead).
   clauses apart, a `oneof` of their whole shapes (`union` now written
   `oneof`); overlapping clauses that place parts differently, refused. The
   literal that overlaps a datum (`else` in Heist's `string-cases`): by
-  trailmarks, proposed there.
+  trailmarks, built (`typed-macros.md`, "Trailmarks").
 
 ## 222. A `syntax-rules`' literals matched by meaning (found 2026-11-08)
 
@@ -5436,7 +5436,7 @@ scope of every `v` and its signature says its own alone:
   (((export (bvar expr (import expr (rho (A var)))) (rho (A var))) ...)
    (import (expr expr) (rho (A rib)))
    (import expr (rho (A rib))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ ((v init step) ...) (test res) body)
      (letrec ((loop (subr spin (int int) int)
                     (lambda ((v int) ...) (if test res (begin body (loop step ...))))))
@@ -6768,10 +6768,10 @@ Even/odd macros whose binding toggles, `define-syntax-rec`, run inferred
 
 ```scheme
 (define-syntax-rec
-  (bnd (syntax-rules ()
+  (bnd (syntax-rules
          ((_ () body) body)
          ((_ ((x e) . rest) body) (let ((x e)) (seq rest body)))))
-  (seq (syntax-rules ()
+  (seq (syntax-rules
          ((_ () body) body)
          ((_ (e . rest) body) (begin e (bnd rest body))))))
 (bnd ((a 1) (+ a 0) (b (+ a 1)) (+ b 0)) (+ a b))
@@ -6796,3 +6796,18 @@ way: a test of it, inferred and written, when fixed.
 one is printed only where it is refused. Wanted: the REPL (a `,sig m`)
 and `fixpt check` showing it, both front ends' the same text. Beside
 §230's expander trace.
+
+## 274. Trailmarks: what is not yet (2026-11-14)
+
+Built (`typed-macros.md`, "Trailmarks"). Not yet:
+
+- A trailmark used where an expression is, `(+ else 1)`: both checkers say
+  "unbound variable `else`"; the design says "`else` is a trailmark, not
+  an expression: " and where it belongs (its string, which the Rust side
+  keeps, `Mark::said`, and FX-26's does not yet). Both checkers told of
+  the trailmarks for it.
+- The kernel forms' `else` and `=>` told by binding, not name, by both
+  parsers (a `cond` where `else` is a variable reads it as one).
+- `string-cases`' signature inferred: a `mu` of the clauses' list (§272's
+  kind), and a pattern's `c ...` read against a `mu`'s list.
+- Heist and Kayak rewritten: every `syntax-rules ()` refused until then.

@@ -94,7 +94,12 @@ pub(crate) enum STy {
     /// is made.
     Item,
     Nil,
+    /// A kernel form's word, `(literal else)`, matched by name: the
+    /// kernel's own signatures', and a reserved name's.
     Literal(Sym),
+    /// A trailmark, `(trailmark else)`: the name bound to the one whose
+    /// number is the second, matched by that binding (`Mark`).
+    Mark(Sym, usize),
     Pair(Rc<STy>, Rc<STy>),
     Import(Rc<STy>, Bind),
     Export(Rc<STy>, Bind),
@@ -209,6 +214,23 @@ struct Macro {
     procedural: Option<Rc<procedural::Procedural>>,
 }
 
+/// A trailmark, `(define-syntax else (trailmark ["where it belongs"]))`: a
+/// name bound as syntax that is used only as a form's sign, which a
+/// `syntax-rules`' `#:trailmarks` matches by its binding, never an
+/// expression nor a binder (`typed-macros.md`, "Trailmarks").
+/// Kept apart from the macros (`Macros::marks`): a list it heads is no use.
+#[derive(Debug)]
+pub(crate) struct Mark {
+    /// What tells it from any other: the binding, not the name.
+    id: usize,
+    /// Where it belongs, said where it is used alone.
+    said: Option<String>,
+}
+
+/// The standard environment's trailmarks, `else` and `=>`, and where each
+/// belongs; numbered from the top, apart from those a program defines.
+const STANDARD_MARKS: [(&str, &str); 2] = [("else", "a `cond`'s, `case`'s or `tagcase`'s last clause's"), ("=>", "a `cond` clause's, before the procedure given the test")];
+
 /// A clause: its pattern (of the operands), its template, and what is done
 /// to the template's names where it is transcribed, by their paths in it.
 #[derive(Debug)]
@@ -217,6 +239,9 @@ struct Clause {
     /// Its pattern variables that are names (`bvar`, `dvar`, `id`), which
     /// match a name alone (a `label` may be a keyword).
     names: HashSet<Sym>,
+    /// Its `syntax-rules`' trailmarks, each the binding it is, which a
+    /// use's name matches if it is bound to that one.
+    marks: HashMap<Sym, usize>,
     template: Kept,
     actions: HashMap<Vec<bool>, Action>,
     /// Its pattern's variables, in the order the pattern has them.
@@ -257,6 +282,9 @@ enum Action {
     ModuleType(Sym),
     StandardType,
     MacroHead(Sym),
+    /// A trailmark of a file's, written by a template: the name the
+    /// importer has it by.
+    Mark(Sym),
 }
 
 /// What a file's macros are defined in (`Macros::define_file`): the
@@ -301,6 +329,10 @@ pub struct Macros {
 /// knows of the modules forms open.
 #[derive(Clone, Default)]
 pub(crate) struct Withs {
+    /// The trailmarks defined, by name (`Mark`): the standard ones are the
+    /// kernel's. Here, out of line: a `Macros` is moved whole, and is in the
+    /// checker's frames.
+    pub(crate) marks: HashMap<Sym, Rc<Mark>>,
     /// By each `with` form's place, the macros used in its body by names
     /// written in the source, each with the use's place: refused there if
     /// the module gives a value of the name (`Checker::with_as`), which the
@@ -360,6 +392,9 @@ struct Kernel {
     /// `scope-forms`, for a program's walk alone; and its definitions.
     scope_forms: HashMap<String, Rc<STy>>,
     scope_definitions: HashMap<String, Rc<STy>>,
+    /// The standard environment's trailmarks (`STANDARD_MARKS`), which a
+    /// file sees too.
+    marks: HashMap<Sym, Rc<Mark>>,
 }
 
 /// The kernel's forms a template may use, with their binding structure
@@ -578,8 +613,26 @@ impl Macros {
         k.heads = names("description-heads", interner);
         k.words = names("description-words", interner);
         k.type_forms = names("type-forms", interner);
+        for (i, (n, said)) in STANDARD_MARKS.iter().enumerate() {
+            k.marks.insert(interner.intern(n), Rc::new(Mark { id: usize::MAX - i, said: Some(said.to_string()) }));
+        }
         self.k = Rc::new(k);
         Ok(())
+    }
+
+    /// The trailmark `name` is bound to, if it is one: defined, or the
+    /// standard environment's, unless a macro of that name hides it.
+    pub(crate) fn mark_of(&self, name: Sym) -> Option<&Rc<Mark>> {
+        if self.defined.contains_key(&name) {
+            return None;
+        }
+        self.withs.marks.get(&name).or_else(|| self.k.marks.get(&name))
+    }
+
+    /// Where trailmark `name` belongs, if it is one: what is said where it
+    /// is used alone.
+    pub fn trailmark(&self, name: Sym) -> Option<Option<&str>> {
+        self.mark_of(name).map(|m| m.said.as_deref())
     }
 
     /// Whether `name` is a macro defined.
@@ -681,7 +734,22 @@ impl Macros {
                         };
                         STy::Typed(Rc::new(core), hole)
                     }
-                    (Some("literal"), [_, n], None) => STy::Literal(n.sym().ok_or_else(|| bad("`(literal name)`"))?),
+                    // The kernel's words, as its signatures write them, and a
+                    // reserved name; a name a macro matches, a trailmark.
+                    (Some("literal"), [_, n], None) => {
+                        let n = n.sym().ok_or_else(|| bad("`(literal name)`"))?;
+                        if !self.k.forms.is_empty() && !reserved(interner.name(n)) {
+                            return Err(bad(&format!("`(literal {0})` is a kernel form's word; a name a macro's pattern matches is a trailmark's, `(trailmark {0})`", interner.name(n))));
+                        }
+                        STy::Literal(n)
+                    }
+                    (Some("trailmark"), [_, n], None) => {
+                        let n = n.sym().ok_or_else(|| bad("`(trailmark name)`"))?;
+                        match self.mark_of(n) {
+                            Some(m) => STy::Mark(n, m.id),
+                            None => return Err(bad(&no_trailmark(interner.name(n)))),
+                        }
+                    }
                     _ => {
                         let rest = match (items.len(), tail) {
                             (1, None) => Rc::new(STy::Nil),
@@ -872,6 +940,11 @@ impl Macros {
         match (&**a, &**b) {
             (Union(ms), _) => ms.iter().any(|m| self.overlap(m, b, depth)),
             (_, Union(ms)) => ms.iter().any(|m| self.overlap(a, m, depth)),
+            // A trailmark is itself: no expression, datum, binder or
+            // other trailmark; an `id` may be any name.
+            (Mark(_, x), Mark(_, y)) => x == y,
+            (Mark(..), Id) | (Id, Mark(..)) => true,
+            (Mark(..), _) | (_, Mark(..)) => false,
             (Literal(_), Expr | Bvar | Dvar) | (Expr | Bvar | Dvar, Literal(_)) => false,
             // A lambda is a list: no name, `()` or label, and any list.
             (Lambda, Literal(_) | Bvar | Dvar | Id | Nil | Label) | (Literal(_) | Bvar | Dvar | Id | Nil | Label, Lambda) => false,
@@ -914,13 +987,28 @@ impl Macros {
     fn fits_shaped(&self, t: &Rc<STy>, s: Option<&Syn>, shape: Shape, mode: Mode, interner: &Interner, pvars: &HashMap<Sym, PInfo>, depth: usize) -> bool {
         use STy::*;
         if let Shape::Symbol(n) = shape {
-            let lit = matches!(&**self.unfold(t), Literal(_));
+            let lit = matches!(&**self.unfold(t), Literal(_) | Mark(..));
             // A pattern variable placed fits anything but, if it is a name,
             // a list's shape, which a name never has.
             let name = pvars.get(&n).is_some_and(|p| matches!(&*p.core, Bvar | Dvar | Id | Label));
             let list = matches!(&**self.unfold(t), Pair(..) | Nil | Lambda);
-            if (mode == Mode::Pattern && !lit && interner.name(n) != "_") || (mode == Mode::Template && pvars.contains_key(&n) && !(name && list)) {
+            let mark = self.mark_of(n).is_some();
+            if (mode == Mode::Pattern && !lit && !mark && interner.name(n) != "_") || (mode == Mode::Template && pvars.contains_key(&n) && !(name && list)) {
                 return true;
+            }
+            // A trailmark, where a use, a pattern or a template writes one:
+            // itself, a kernel's word of its name, or an `id`; never an
+            // expression, a datum or a binder.
+            if matches!(mode, Mode::Use | Mode::Pattern | Mode::Template)
+                && let Some(m) = self.mark_of(n)
+            {
+                return match &**self.unfold(t) {
+                    Union(ms) => ms.iter().any(|x| self.fits_shaped(x, s, shape, mode, interner, pvars, depth)),
+                    Mark(_, id) => *id == m.id,
+                    Literal(x) => *x == n,
+                    Id => true,
+                    _ => false,
+                };
             }
         }
         let syn = || *s.expect("syntax where its shape is not `()`'s");
@@ -940,6 +1028,7 @@ impl Macros {
             },
             Nil => shape == Shape::Nil,
             Literal(n) => shape.sym() == Some(*n),
+            Mark(_, id) => shape.sym().and_then(|n| self.mark_of(n)).is_some_and(|m| m.id == *id),
             Bvar | Dvar => shape.sym().is_some_and(|n| mode == Mode::Program || !reserved(interner.name(n))),
             Id => shape.sym().is_some(),
             Label => matches!(shape, Shape::Keyword(_)) || (matches!(mode, Mode::Use | Mode::Program) && shape.sym().is_some()) || (mode == Mode::Program && shape == Shape::Atom && matches!(syn().view(), V::Number(_))),
@@ -973,14 +1062,14 @@ impl Macros {
         match &**self.unfold(t) {
             Union(ms) => ms.iter().any(|m| self.fits_rest(m, rest, tail, span, mode, interner, pvars, depth)),
             Pair(a, d) => depth == 0 || (self.fits_within(a, &x, mode, interner, pvars, depth - 1) && self.fits_rest(d, after, tail, span, mode, interner, pvars, depth - 1)),
-            Nil | Literal(_) | Bvar | Dvar | Id | Label => false,
+            Nil | Literal(_) | Mark(..) | Bvar | Dvar | Id | Label => false,
             Lambda => lambda_shaped(&whole(), interner),
             Expr | Defn | Data | Type | Kind | Item => true,
             Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
     }
 
-    /// `(define-syntax name [σ] (syntax-rules (literal …) ((_ . pattern)
+    /// `(define-syntax name [σ] (syntax-rules [#:trailmarks (name …)] ((_ . pattern)
     /// template) …))`, its signature written or inferred; or a
     /// `define-syntax-rec` of them: checked, and defined; their names. A template's free name is the top level's
     /// where the macro is used (`Action::Toplevel`).
@@ -1001,7 +1090,8 @@ impl Macros {
     /// left out a binder of the procedure's `plambda`. Checked as any
     /// definition is, by both checkers; none if no part is typed.
     pub fn template_checks(&mut self, name: Sym, interner: &mut Interner) -> R<Vec<Syn>> {
-        let m = self.defined[&name].clone();
+        // A trailmark has no templates.
+        let Some(m) = self.defined.get(&name).cloned() else { return Ok(Vec::new()) };
         let mut out = Vec::new();
         for c in &m.clauses {
             if c.pvars.iter().all(|(_, p)| p.hole.is_none()) {
@@ -1130,11 +1220,13 @@ impl Macros {
     /// program's.
     pub(crate) fn in_file_scope<T>(&mut self, text: &str, f: impl FnOnce(&mut Macros) -> T) -> T {
         let defined = std::mem::take(&mut self.defined);
+        let marks = std::mem::take(&mut self.withs.marks);
         let defined_at = std::mem::take(&mut self.defined_at);
         let def_env = std::mem::replace(&mut self.withs.def_env, hygiene::DefEnv::Within);
         let reading = self.reading.replace(std::sync::Arc::from(text));
         let r = f(self);
         self.defined = defined;
+        self.withs.marks = marks;
         self.defined_at = defined_at;
         self.withs.def_env = def_env;
         self.reading = reading;
@@ -1178,6 +1270,19 @@ impl Macros {
         self.fresh = own.fresh;
         defined?;
         for (name, hidden) in made {
+            // A trailmark of the file's: bound as its macros are.
+            if let Some(m) = own.withs.marks.get(&name).cloned() {
+                if !hidden && taken(name) {
+                    if self.defined.contains_key(&name) || self.withs.marks.contains_key(&name) {
+                        let shown = interner.name(name);
+                        return Err(FxError::at(forms[0].0.at(), format!("`{shown}` is defined already: a file's trailmark may not be defined again")));
+                    }
+                    self.withs.marks.insert(name, m.clone());
+                    self.defined_at.insert(name, at);
+                }
+                self.withs.marks.insert(scope.internal[&name], m);
+                continue;
+            }
             let m = own.defined[&name].clone();
             if !hidden && taken(name) {
                 if self.defined.contains_key(&name) {
@@ -1259,6 +1364,22 @@ impl Macros {
         if let Some(w) = ws.iter().find(|w| w.procedural.is_some()) {
             return Err(FxError::at(w.span, "a procedural macro is defined alone, by `define-syntax`"));
         }
+        // A trailmark: a binding of its own, apart from the macros.
+        if let [Written { name, mark: Some(said), .. }] = ws {
+            // Numbered apart from fresh names, which both expanders count
+            // alike.
+            static MARKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+            let id = MARKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.defined.remove(name);
+            self.withs.marks.insert(*name, Rc::new(Mark { id, said: said.clone() }));
+            return Ok(vec![*name]);
+        }
+        // A macro's `#:trailmarks`, each bound to one where it is defined.
+        for w in ws {
+            if let Some(n) = w.lits.iter().find(|n| self.mark_of(**n).is_none()) {
+                return Err(FxError::at(w.span, no_trailmark(interner.name(*n))));
+            }
+        }
         let mut sigs = Vec::new();
         for w in ws {
             let s = match &w.sig {
@@ -1338,6 +1459,7 @@ impl Macros {
         Ok(out
             .into_iter()
             .map(|(n, m)| {
+                self.withs.marks.remove(&n);
                 self.defined.insert(n, Rc::new(m));
                 n
             })
@@ -1406,12 +1528,12 @@ impl Macros {
         {
             for node in &p.nodes {
                 let Some(n) = node.syn.sym() else { continue };
-                let lit = matches!(&*node.core, STy::Literal(_));
-                if lit && !lits.contains(&n) && !reserved(interner.name(n)) {
-                    return Err(FxError::at(node.syn.at(), format!("`{}` is written as it is in the signature, `(literal {0})`, and is not among the `syntax-rules` literals", interner.name(n))));
+                let lit = matches!(&*node.core, STy::Literal(_) | STy::Mark(..));
+                if matches!(&*node.core, STy::Mark(..)) && !lits.contains(&n) {
+                    return Err(FxError::at(node.syn.at(), format!("`{}` is the trailmark the signature writes here, `(trailmark {0})`, and is not among the `syntax-rules`' `#:trailmarks`", interner.name(n))));
                 }
                 if !lit && matches!(node.kids, Kids::PVar(_)) && lits.contains(&n) {
-                    return Err(FxError::at(node.syn.at(), format!("`{}` is among the `syntax-rules` literals, and the signature has a part here, not `(literal {0})`", interner.name(n))));
+                    return Err(FxError::at(node.syn.at(), format!("`{}` is among the `syntax-rules`' `#:trailmarks`, and the signature has a part here, not `(trailmark {0})`", interner.name(n))));
                 }
             }
         }
@@ -1596,6 +1718,14 @@ impl Macros {
             }
         }
         for node in t.nodes.iter() {
+            // A trailmark of the file's the template writes: by the name the
+            // importer has it by.
+            if let (Some(f), STy::Mark(..)) = (file, &*node.core)
+                && let Some(n) = node.syn.sym()
+                && let Some(i) = f.internal.get(&n)
+            {
+                actions.insert(node.path.clone(), Action::Mark(*i));
+            }
             // A use of another of the file's macros: that macro, by the
             // name the importer has it by.
             if let (Some(f), Kids::Form(_)) = (file, &node.kids)
@@ -1633,7 +1763,8 @@ impl Macros {
         if matches!(def_env, hygiene::DefEnv::Within) && let Some(n) = contracts.keys().next() {
             return Err(FxError::at(c.at(), format!("`{}`: a typed hole in a macro a file uses itself, not yet", interner.name(*n))));
         }
-        Ok(Clause { pattern: Kept::new(pattern), names, template: Kept::new(*template), actions, pvars, contracts, def_env })
+        let marks = lits.iter().filter_map(|n| Some((*n, self.mark_of(*n)?.id))).collect();
+        Ok(Clause { pattern: Kept::new(pattern), names, marks, template: Kept::new(*template), actions, pvars, contracts, def_env })
     }
 
     /// `form` with each use of a macro in it expanded, as each expands,
@@ -1844,7 +1975,8 @@ impl Macros {
         u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}", interner.name(name), e.message)))?;
         for c in &m.clauses {
             let mut binds = HashMap::default();
-            if !matches(&c.pattern.get(), &operands, &c.names, &mut binds, interner) {
+            let mark_of = |n: Sym| self.mark_of(n).map(|m| m.id);
+            if !matches(&c.pattern.get(), &operands, &(&c.names, &c.marks, &mark_of), &mut binds, interner) {
                 continue;
             }
             let made = fixpt_read::record_expansion(interner.name(name), s.span(), m.text.clone());
@@ -1939,6 +2071,7 @@ impl Macros {
                         let a = interner.intern(&procedural::alias(interner.name(*n), made));
                         Syn::symbol(at, a, interner)
                     }
+                    Some(Action::Mark(i)) => Syn::symbol(at, *i, interner),
                     _ => Syn::new(at, t.view().clone(), interner),
                 })
             }
@@ -2105,9 +2238,15 @@ impl Aligner<'_> {
         let shape = s.shape();
         // A pattern's variable, or one placed in a template: at any type.
         if let Shape::Symbol(n) = shape {
-            let lit = matches!(&**self.m.unfold(t), STy::Literal(_));
+            let lit = matches!(&**self.m.unfold(t), STy::Literal(_) | STy::Mark(..));
+            // A trailmark's name in a pattern is the trailmark, where the
+            // signature writes it, and no variable.
+            let mark = self.mode == Mode::Pattern && self.m.mark_of(n).is_some();
+            if mark && !matches!(&**self.m.unfold(t), STy::Mark(..) | STy::Union(_)) {
+                return Err(fail(format!("`{}` is a trailmark, which a pattern matches where its signature writes `(trailmark {0})`, and no pattern variable", self.name(n))));
+            }
             let pvar = match self.mode {
-                Mode::Pattern => !lit && self.name(n) != "_" && self.name(n) != "...",
+                Mode::Pattern => !lit && !mark && self.name(n) != "_" && self.name(n) != "...",
                 Mode::Template => self.pvars.contains_key(&n),
                 Mode::Use | Mode::Program => false,
             };
@@ -2215,6 +2354,12 @@ impl Aligner<'_> {
                 Some(m) if m == *n => Ok(None),
                 _ => Err(fail(format!("`{}` where `{}` is written", self.show(s), self.name(*n)))),
             },
+            // A trailmark: a name bound to this one, where it is read (a
+            // pattern's and a template's, where the macro is defined).
+            STy::Mark(n, id) => match shape.sym() {
+                Some(m) if self.m.mark_of(m).is_some_and(|k| k.id == *id) => Ok(None),
+                _ => Err(fail(format!("`{}` where the trailmark `{}` is written", self.show(s), self.name(*n)))),
+            },
             // A program's binder: any name the checkers let it bind, which
             // they decide.
             STy::Bvar | STy::Dvar if self.mode == Mode::Program && shape.sym().is_some() => {
@@ -2225,6 +2370,7 @@ impl Aligner<'_> {
             }
             STy::Bvar | STy::Dvar => match shape.sym() {
                 Some(n) if self.m.defined.contains_key(&n) => Err(fail(format!("`{}` is a macro's name, which is not bound", self.name(n)))),
+                Some(n) if self.m.mark_of(n).is_some() => Err(fail(format!("`{}` is a trailmark, which is not bound", self.name(n)))),
                 // A value's binder a use gives: as a program's, any name the
                 // checkers let it bind, a keyword too (`fields`, Heist's),
                 // which a template's form, read by its head, does not see
@@ -3375,14 +3521,16 @@ struct Written {
     span: At,
     /// A procedural macro's transformer: its style, and the procedure.
     procedural: Option<(procedural::Style, Syn)>,
+    /// A trailmark, `(trailmark ["where it belongs"])`: what it says.
+    mark: Option<Option<String>>,
 }
 
 /// The macros `form` defines: a `define-syntax`'s one, or each of a
 /// `define-syntax-rec`'s, `(define-syntax-rec (name [σ] (syntax-rules …)) …)`,
 /// all defined together, so that each template may use any of them.
 fn written(form: &Syn, interner: &Interner) -> R<Vec<Written>> {
-    let usage = "`(define-syntax name [signature] (syntax-rules (literal …) ((_ . pattern) template) …))`";
-    let rec = "`(define-syntax-rec (name [signature] (syntax-rules (literal …) clause …)) …)`";
+    let usage = "`(define-syntax name [signature] (syntax-rules [#:trailmarks (name …)] ((_ . pattern) template) …))`";
+    let rec = "`(define-syntax-rec (name [signature] (syntax-rules [#:trailmarks (name …)] clause …)) …)`";
     let items = form.list().ok_or_else(|| FxError::at(form.at(), usage))?;
     if items.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "define-syntax-rec") {
         if items.len() < 2 {
@@ -3395,6 +3543,9 @@ fn written(form: &Syn, interner: &Interner) -> R<Vec<Written>> {
                 return Err(FxError::at(m.at(), rec));
             };
             let w = written_one(name, rest, m.at(), rec, interner)?;
+            if w.mark.is_some() {
+                return Err(FxError::at(m.at(), "a trailmark is defined alone, by `define-syntax`"));
+            }
             if out.iter().any(|o| o.name == w.name) {
                 return Err(FxError::at(name.at(), format!("`{}` is defined twice in this `define-syntax-rec`", interner.name(w.name))));
             }
@@ -3420,26 +3571,61 @@ fn written_one(name: &Syn, rest: &[Syn], at: At, usage: &str, interner: &Interne
         let [_, code] = &items[..] else {
             return Err(FxError::at(t.at(), format!("`({} procedure)`", interner.name(items[0].sym().expect("a head")))));
         };
-        return Ok(Written { name, sig: None, lits: Vec::new(), clauses: Vec::new(), span: at, procedural: Some((style, code.clone())) });
+        return Ok(Written { name, sig: None, lits: Vec::new(), clauses: Vec::new(), span: at, procedural: Some((style, code.clone())), mark: None });
+    }
+    // A trailmark: `(trailmark)`, or `(trailmark "where it belongs")`.
+    if let [t] = rest
+        && let Some(items) = t.list()
+        && items.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "trailmark")
+    {
+        let said = match &items[1..] {
+            [] => None,
+            [s] => match s.view() {
+                V::Str(text) => Some(text.to_string()),
+                _ => return Err(FxError::at(t.at(), "`(trailmark)`, or `(trailmark \"where it belongs\")`")),
+            },
+            _ => return Err(FxError::at(t.at(), "`(trailmark)`, or `(trailmark \"where it belongs\")`")),
+        };
+        return Ok(Written { name, sig: None, lits: Vec::new(), clauses: Vec::new(), span: at, procedural: None, mark: Some(said) });
     }
     let (sig, rules) = match rest {
         [r] if rules(r) => (None, r),
         [sig, r] if rules(r) => (Some(sig.clone()), r),
         // The clauses are a transformer's, which says how to read them.
         [_, c, ..] if c.list().is_some_and(|l| l.len() == 2) => {
-            return Err(FxError::at(c.at(), "a macro's clauses are a transformer's: `(syntax-rules (literal …) ((_ . pattern) template) …)`, after its signature if it is written"));
+            return Err(FxError::at(c.at(), "a macro's clauses are a transformer's: `(syntax-rules [#:trailmarks (name …)] ((_ . pattern) template) …)`, after its signature if it is written"));
         }
         _ => return Err(FxError::at(at, usage.to_string())),
     };
     let parts = rules.list().expect("a list");
-    let Some((lits, clauses)) = parts[1..].split_first() else {
-        return Err(FxError::at(rules.at(), "`(syntax-rules (literal …) ((_ . pattern) template) …)`"));
-    };
-    let lits = match &lits.view() {
-        V::Nil => Vec::new(),
-        _ => lits.list().and_then(|l| l.iter().map(|x| x.sym()).collect::<Option<Vec<_>>>()).ok_or_else(|| FxError::at(lits.at(), "a `syntax-rules`' literals are a list of names"))?,
-    };
-    Ok(Written { name, sig, lits, clauses: clauses.to_vec(), span: at, procedural: None })
+    let (lits, clauses) = rules_parts(&parts[1..], rules.at(), interner)?;
+    Ok(Written { name, sig, lits, clauses, span: at, procedural: None, mark: None })
+}
+
+/// A `syntax-rules`' parts after its head: the names its `#:trailmarks
+/// (name …)` lists, if it has one, and its clauses. A `()` or a list of
+/// names first, R7RS's literals, refused, saying how it is written now.
+pub(super) fn rules_parts(parts: &[Syn], at: At, interner: &Interner) -> R<(Vec<Sym>, Vec<Syn>)> {
+    let usage = "`(syntax-rules [#:trailmarks (name …)] ((_ . pattern) template) …)`";
+    match parts {
+        [k, names, clauses @ ..] if matches!(k.view(), V::Keyword(w) if interner.name(w) == "trailmarks") => {
+            let names = names.list().and_then(|l| l.iter().map(|x| x.sym()).collect::<Option<Vec<_>>>()).filter(|l| !l.is_empty()).ok_or_else(|| FxError::at(names.at(), "a `syntax-rules`' `#:trailmarks` are a list of names, one or more"))?;
+            Ok((names, clauses.to_vec()))
+        }
+        [k, ..] if matches!(k.view(), V::Keyword(_)) => Err(FxError::at(k.at(), usage)),
+        [first, ..] if matches!(first.view(), V::Nil) => Err(FxError::at(first.at(), "a `syntax-rules` has no list of literals: drop the `()` (names its patterns match are written `#:trailmarks (name …)`)")),
+        [first, ..] if first.list().is_some_and(|l| l.iter().all(|x| x.sym().is_some())) => {
+            let shown = first.written(interner);
+            Err(FxError::at(first.at(), format!("a `syntax-rules`' names its patterns match are its trailmarks: `#:trailmarks {shown}`, each defined `(define-syntax name (trailmark))`")))
+        }
+        [] => Err(FxError::at(at, usage)),
+        clauses => Ok((Vec::new(), clauses.to_vec())),
+    }
+}
+
+/// What is said of a name a macro takes for a trailmark that is none.
+fn no_trailmark(name: &str) -> String {
+    format!("`{name}` names no trailmark here: `(define-syntax {name} (trailmark))`")
 }
 
 fn bind(b: &Syn, interner: &Interner) -> R<Bind> {
@@ -3607,7 +3793,11 @@ fn list_of(at: At, mut items: Vec<Syn>, tail: Option<Syn>) -> Syn {
 /// Whether `s` matches pattern `p`, binding its variables in `binds`: a
 /// name the pattern variable (`_` anything), a form's name or a keyword
 /// itself.
-fn matches(p: &Syn, s: &Syn, names: &HashSet<Sym>, binds: &mut HashMap<Sym, Syn>, interner: &Interner) -> bool {
+/// `names`: the clause's pattern variables that are names, its trailmarks,
+/// and the trailmark each name is bound to where the use is.
+type MatchNames<'a> = (&'a HashSet<Sym>, &'a HashMap<Sym, usize>, &'a dyn Fn(Sym) -> Option<usize>);
+
+fn matches(p: &Syn, s: &Syn, names: &MatchNames, binds: &mut HashMap<Sym, Syn>, interner: &Interner) -> bool {
     // `(x ...)`: each element of a list by `x`, each of its pattern
     // variables then the list of what it matched.
     if let Some(x) = ellipsis(p, interner) {
@@ -3634,8 +3824,10 @@ fn matches(p: &Syn, s: &Syn, names: &HashSet<Sym>, binds: &mut HashMap<Sym, Syn>
     match &p.view() {
         V::Symbol(n) if interner.name(*n) == "_" => true,
         V::Symbol(n) if reserved(interner.name(*n)) => s.sym() == Some(*n),
+        // A trailmark: a name bound to the same one.
+        V::Symbol(n) if names.1.contains_key(n) => s.sym().and_then(names.2) == names.1.get(n).copied(),
         // A name's pattern variable matches a name alone.
-        V::Symbol(n) if names.contains(n) && s.sym().is_none() => false,
+        V::Symbol(n) if names.0.contains(n) && s.sym().is_none() => false,
         V::Symbol(n) => {
             binds.insert(*n, s.clone());
             true

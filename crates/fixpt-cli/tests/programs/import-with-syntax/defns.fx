@@ -4,5 +4,5 @@
 (define limit int 10)
 (define-syntax define-clamped
   (-> (bvar expr) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name e) (begin (define raw e) (define name (if (> raw limit) limit raw))))))

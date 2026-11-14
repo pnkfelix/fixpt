@@ -56,7 +56,7 @@
 ;; `s-typed`, an `expr` or `bvar` with its type or effect written.
 (define-datatype sty
   (s-expr) (s-bvar) (s-id) (s-data) (s-type) (s-label) (s-nil)
-  (s-literal symbol) (s-pair sty sty) (s-import sty bind) (s-export sty bind)
+  (s-literal symbol) (s-pair sty sty) (s-import sty bind) (s-export sty bind) (s-mark symbol int)
   (s-mu int) (s-many sty) (s-union (listof sty acyclic)) (s-typed sty hole)
   ;; An expression that is a lambda, where a form wants one (`letrec`).
   (s-lambda)
@@ -93,6 +93,21 @@
         #u
         (begin (array-set! to i (array-ref from i)) (copy-stys from to (+ i 1))))))
 (define mu-set! (->* (int sty) unit) (lambda (i t) (array-set! (get mus) i t)))
+;; The trailmarks defined (`macros.rs`'s `Mark`), the last first: each name's
+;; number, 0 where a macro of the name hides one; else the standard ones,
+;; `else` 1 and `=>` 2, which a file sees too.
+(define-type marked (listof (tupleof symbol int) acyclic))
+(define marks (ref marked rs) (new nil))
+(define mark-count (ref int rs) (new 2))
+;; What is said of a name a macro takes for a trailmark that is none.
+(define no-trailmark (->* (string) string)
+  (lambda (n)
+    (string-append "`" n "` names no trailmark here: `(define-syntax " n " (trailmark))`")))
+(define mark-in (->* (symbol marked) int)
+  (lambda (n ms)
+    (cond ((null? ms) (cond ((symbol=? n 'else) 1) ((symbol=? n '=>) 2) (else 0)))
+          ((symbol=? n (extract (car ms) 1)) (extract (car ms) 2))
+          (else (mark-in n (cdr ms))))))
 
 ;;; ------------------------------------------------------------ names
 
@@ -132,21 +147,6 @@
 (define name-in? (->* (symbol names) bool)
   (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (name-in? n (cdr ns))))))
 
-;; Strings, `xs` sorted onto `out`; and joined, `, ` between.
-(define-type strings (listof string acyclic))
-(define sorted-strings (->* (strings strings) strings)
-  (lambda (xs out) (if (null? xs) out (sorted-strings (cdr xs) (inserted (car xs) out)))))
-(define inserted (->* (string strings) strings)
-  (lambda (x ys)
-    (cond ((null? ys) (list x))
-          ((string<? x (car ys)) (cons x ys))
-          ((string=? x (car ys)) ys)
-          (else (cons (car ys) (inserted x (cdr ys)))))))
-(define joined (->* (strings) string)
-  (lambda (ss)
-    (if (null? (cdr ss)) (car ss) (string-append (car ss) ", " (joined (cdr ss))))))
-
-
 ;; Whether typed hole `h` (none or one) has its effect written `pure`.
 (define pure-hole? (->* ((listof hole acyclic)) bool)
   (lambda (h)
@@ -162,25 +162,6 @@
 ;; Whether `i` is one of `is`.
 (define int-in? (->* (int (listof int acyclic)) bool)
   (lambda (i is) (and (not (null? is)) (or (= i (car is)) (int-in? i (cdr is))))))
-
-;;; ------------------------------------------------------------ matching
-
-;; Of union `t`'s members, the one a name is of, in a list of one, if one
-;; is; none else, or if `t` is no union.
-(define name-fit-of (->* (sty) stys)
-  (lambda (t)
-    (tagcase t
-      (s-union (ms)
-        (let ((names (names-of ms))) (if (and (not (null? names)) (null? (cdr names))) names nil)))
-      (else y nil))))
-(define names-of (->* (stys) stys)
-  (lambda (ms)
-    (cond ((null? ms) nil)
-          ((name-kind? (kind-of (unfold (car ms)))) (cons (car ms) (names-of (cdr ms))))
-          (else (names-of (cdr ms))))))
-;; Whether kind `k` is a name's: `bvar`, `dvar`, `id`, `label`.
-(define name-kind? (->* (int) bool)
-  (lambda (k) (or (= k 1) (= k 12) (= k 2) (= k 5))))
 
 ;;; ------------------------------------------------------------ syntax
 
@@ -312,9 +293,30 @@
            ((and (string=? head "many") (= (len (proper-items s)) 2))
             (s-many (read-sty fail (nth (proper-items s) 1) named scope)))
            ((and (string=? head "literal") (= (len (proper-items s)) 2))
-            (if (syn-symbol? (nth (proper-items s) 1))
-                (s-literal (syn-symbol (nth (proper-items s) 1)))
-                (begin (fail-at fail "a syntax type: `(literal name)`" s) (s-nil))))
+            (let ((n (nth (proper-items s) 1)))
+              (cond ((not (syn-symbol? n))
+                     (begin (fail-at fail "a syntax type: `(literal name)`" s) (s-nil)))
+                    ;; The kernel's words, as its signatures write them, and
+                    ;; a reserved name; a name a macro matches, a trailmark.
+                    ((and (null? named) (not (reserved-syn? n)))
+                     (begin (fail-at fail (string-append "a syntax type: `(literal " (syn-name n)
+                                                         ")` is a kernel form's word; a name a "
+                                                         "macro's pattern matches is a "
+                                                         "trailmark's, `(trailmark " (syn-name n)
+                                                         ")`")
+                                     s)
+                            (s-nil)))
+                    (else (s-literal (syn-symbol n))))))
+           ((and (string=? head "trailmark") (= (len (proper-items s)) 2))
+            (let ((n (nth (proper-items s) 1)))
+              (cond ((not (syn-symbol? n))
+                     (begin (fail-at fail "a syntax type: `(trailmark name)`" s) (s-nil)))
+                    ((= (mark-in (syn-symbol n) (get marks)) 0)
+                     (begin (fail-at fail (string-append "a syntax type: "
+                                                         (no-trailmark (syn-name n)))
+                                     s)
+                            (s-nil)))
+                    (else (s-mark (syn-symbol n) (mark-in (syn-symbol n) (get marks)))))))
            (else (read-pair fail s parts named scope))))))))
 ;; The items of a list type ending in `σ ...`: the last `σ` repeated
 ;; (`macros.rs`'s `seq`), after the ones before it, each once.
@@ -779,22 +781,28 @@
     (and (not (null? ms)) (or (overlap? a (car ms) depth) (any-overlaps-of? a (cdr ms) depth)))))
 ;; A kind's number, for the cases of `overlap-base?`: 0 expr, 1 bvar, 2 id,
 ;; 3 data, 4 type, 5 label, 6 nil, 7 literal, 8 pair, 9 anything else, 10
-;; lambda, 11 defn, 12 dvar, 13 kind, 14 item.
+;; lambda, 11 defn, 12 dvar, 13 kind, 14 item, 15 trailmark.
 (define kind-of (->* (sty) int)
   (lambda (t)
     (tagcase t
       (s-expr () 0) (s-bvar () 1) (s-id () 2) (s-data () 3) (s-type () 4) (s-label () 5)
       (s-nil () 6) (s-literal (n) 7) (s-pair (a d) 8) (s-lambda () 10) (s-defn () 11)
-      (s-dvar () 12) (s-kind () 13) (s-item () 14) (else y 9))))
+      (s-dvar () 12) (s-kind () 13) (s-item () 14) (s-mark (n i) 15) (else y 9))))
 ;; Whether `k` is a kind of no parts: one of what `(Expr | Id | Data | Type
 ;; | Label | Bvar | Dvar | Kind | Lambda | Defn)` names in `macros.rs`.
 (define simple-kind? (->* (int) bool) (lambda (k) (or (< k 6) (> k 9))))
 (define literal-of (->* (sty) symbol)
   (lambda (t) (tagcase t (s-literal (n) n) (else y (string->symbol "")))))
+(define mark-of (->* (sty) int) (lambda (t) (tagcase t (s-mark (n i) i) (else y 0))))
 (define overlap-base? (->* (sty sty int) bool)
   (lambda (a b depth)
     (let ((ka (kind-of a)) (kb (kind-of b)))
       (cond
+        ;; A trailmark is itself: no expression, datum, binder or other
+        ;; trailmark; an `id` may be any name.
+        ((and (= ka 15) (= kb 15)) (= (mark-of a) (mark-of b)))
+        ((or (and (= ka 15) (= kb 2)) (and (= ka 2) (= kb 15))) #t)
+        ((or (= ka 15) (= kb 15)) #f)
         ((and (= ka 7) (or (= kb 0) (binder-kind? kb))) #f)
         ((and (= kb 7) (or (= ka 0) (binder-kind? ka))) #f)
         ;; A lambda is a list: no name, `()` or label, and any list.
@@ -830,7 +838,8 @@
 
 ;; Whether `s` has the shape of `t`, in `mode` (0 a pattern, 1 a template,
 ;; 2 a use, 3 a program's form after expansion): a pattern variable in a
-;; template (`pvar?` says 1 for a name's, 2 for another's, 0 for none) fits
+;; template (`pvar?` says 1 for a name's, 2 for another's, 0 for none, and
+;; of a trailmark's name minus its number, in any mode) fits
 ;; anything but, if it is a name, a list's shape; any name in a pattern
 ;; fits anything. No deeper than `fits-depth` lists: a `union`'s members
 ;; differ within `overlap?`'s depth, and a long list is not looked through
@@ -846,9 +855,18 @@
           ;; `(p ...)`, where a list of elements `p` fits may be.
           (let ((e (seq-elem (peel t))))
             (and (not (null? e)) (fits-within? (car e) (car x) mode pvar? depth)))
+      (if (and (syn-symbol? s) (< mode 3) (< (pvar? (syn-symbol s)) 0))
+          ;; A trailmark, where a use, a pattern or a template writes one:
+          ;; itself, a kernel's word of its name, or an `id`.
+          (tagcase u
+            (s-union (ms) (any-fits? ms s mode pvar? depth))
+            (s-mark (n i) (= i (- 0 (pvar? (syn-symbol s)))))
+            (s-literal (n) (symbol=? (syn-symbol s) n))
+            (s-id () #t)
+            (else y #f))
       (if (and (syn-symbol? s)
-               (or (and (= mode 0) (not (= (kind-of u) 7)) (not (string=? (syn-name s) "_"))
-                        (not (string=? (syn-name s) "...")))
+               (or (and (= mode 0) (not (= (kind-of u) 7)) (not (= (kind-of u) 15))
+                        (not (string=? (syn-name s) "_")) (not (string=? (syn-name s) "...")))
                    (and (= mode 1) (> (pvar? (syn-symbol s)) 0)
                         (not (and (= (pvar? (syn-symbol s)) 1)
                                   (or (= (kind-of u) 8) (= (kind-of u) 6) (= (kind-of u) 10)))))))
@@ -863,6 +881,7 @@
                               (fits-within? d (nth parts 1) mode pvar? (- depth 1)))))))
             (s-nil () (syn-nil? s))
             (s-literal (n) (and (syn-symbol? s) (symbol=? (syn-symbol s) n)))
+            (s-mark (n i) (and (syn-symbol? s) (= i (- 0 (pvar? (syn-symbol s))))))
             ;; A program's binder: any name the checkers let it bind.
             (s-bvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
             (s-dvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
@@ -872,7 +891,7 @@
             (s-expr () (and (or program? (not (reserved-syn? s))) (not (syn-nil? s))))
             (s-lambda () (lambda-shaped? s))
             (s-defn () (not (null? (split s))))
-            (else y #t)))))))
+            (else y #t))))))))
 (define any-fits? (->* (stys syn int (subr pure (symbol) int) int) bool)
   (lambda (ms s mode pvar? depth)
     (and (not (null? ms))
@@ -883,6 +902,7 @@
   (lambda (a b)
     (tagcase a
       (s-literal (n) (tagcase b (s-literal (m) (symbol=? n m)) (else y #f)))
+      (s-mark (n i) (= i (mark-of b)))
       (s-pair (x y) (tagcase b (s-pair (p q) (and (sty=? x p) (sty=? y q))) (else z #f)))
       (s-import (x p) (tagcase b (s-import (y q) (and (sty=? x y) (bind=? p q))) (else z #f)))
       (s-export (x p) (tagcase b (s-export (y q) (and (sty=? x y) (bind=? p q))) (else z #f)))
@@ -968,19 +988,3 @@
 (define any-sub? (->* (sty stys assumed) bool)
   (lambda (a ms more)
     (and (not (null? ms)) (or (sub? a (car ms) more) (any-sub? a (cdr ms) more)))))
-;; A signature's `(-> σ made)`: `σ`, and what it makes, 0 an expression,
-;; `expr`, 1 definitions, `defn`, 2 a description, `type`; else itself, an
-;; expression's.
-(define signature-made (->* (fails syn) (tupleof syn int))
-  (lambda (fail s)
-    (let ((items (proper-items s)))
-      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "->"))
-          (let ((made (if (syn-symbol? (nth items 2)) (syn-name (nth items 2)) "")))
-            (cond ((string=? made "defn") (tuple (nth items 1) 1))
-                  ((string=? made "type") (tuple (nth items 1) 2))
-                  ((string=? made "expr") (tuple (nth items 1) 0))
-                  (else (begin (fail-at fail (string-append "a signature `(-> σ made)` makes "
-                                                            "`expr`, `defn` or `type`")
-                                        (nth items 2))
-                               (tuple s 0)))))
-          (tuple s 0)))))

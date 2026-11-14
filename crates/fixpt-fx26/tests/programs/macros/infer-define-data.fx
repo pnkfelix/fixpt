@@ -2,12 +2,12 @@
 ;; `define-data` with constructor procedures, each signature inferred: a
 ;; description's macro by its `tupleof`, the definitions' by `begin`.
 (define-syntax payload
-  (syntax-rules ()
+  (syntax-rules
     ((_) unit)
     ((_ f) f)
     ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
-  (syntax-rules ()
+  (syntax-rules
     ((_ name (c t field ...) ...)
      (begin
        (define-type name (sumof (t (payload field ...)) ...))

@@ -20,21 +20,23 @@
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
-        mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit sorted-strings
-        seq-elem seq-cage? peel ellipsis? ellipsis-of name-fit-of name-kind?
-        joined
-        (type fails addr entries ring rings bind sty stys named hole atm atms strings))
+        s-mark
+        mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit
+        seq-elem seq-cage? peel ellipsis? ellipsis-of
+        (type fails addr entries ring rings bind sty stys named hole atm atms))
 (import nodes-module act-rename act-alias act-module-type
-        act-standard-type act-macro-head defined macro-of macro? makes-defns? makes-top-defns?
+        act-standard-type act-macro-head act-mark defined macro-of macro? makes-defns?
+        makes-top-defns?
         makes-desc? makes k-pair k-nil k-pvar k-binder k-ref k-form k-desc k-seq k-other atom-at
         nnodes node-syn node-path node-core node-kids node-many? node-hole
         with-core with-kids with-import with-export with-many with-hole node-new
         node-imports node-export symbols-onto standard-with?
         nodes-reset! repeated repeated! seq-depths repeated? cage-seqs cage-seq? int-member?
-        desc-roots binds-nothing?
+        desc-roots binds-nothing? sorted-strings joined name-fit-of name-kind? fitting pvar-inside
+        mark-now union?
         pvar-of pvar? pvar-shape lv-rib lv-cage lv-earlier lv-shape program-walk unplaced
         (type action actions contracts clause clauses macro macro-env scope scopes kids rooted holes
-              node pinfo pvars level levels found def-env def-envs env namer looked))
+              node pinfo pvars level levels found def-env def-envs env namer looked strings))
 (import nodes-module env-empty env-within env-lookup env-any-shape? env-levels binder-name)
 (import nodes-module def-env-top)
 
@@ -70,8 +72,15 @@
     (begin
       (with-core at t)
       ;; A pattern's variable, or one placed in a template: at any type.
-      (cond ((and (syn-symbol? s)
+      (cond ((and (= mode 0) (syn-symbol? s) (> (mark-now (syn-symbol s)) 0)
+                  (not (or (= (kind-of (unfold t)) 15) (union? (unfold t)))))
+             (fail-at fail (string-append "`" (syn-name s) "` is a trailmark, which a pattern "
+                                          "matches where its signature writes `(trailmark "
+                                          (syn-name s) ")`, and no pattern variable")
+                      s))
+            ((and (syn-symbol? s)
                   (or (and (= mode 0) (not (= (kind-of (unfold t)) 7))
+                           (not (= (kind-of (unfold t)) 15)) (= (mark-now (syn-symbol s)) 0)
                            (not (string=? (syn-name s) "_")) (not (ellipsis? s)))
                       (and (= mode 1) (pvar? (syn-symbol s) ps))))
              ;; A pattern's variable where a name or a list may be: the
@@ -152,6 +161,12 @@
           (if (and (syn-symbol? s) (symbol=? (syn-symbol s) n))
               #u
               (said (string-append (shown) " where `" (symbol->string n) "` is written"))))
+        ;; A trailmark: a name bound to this one, where it is read.
+        (s-mark (n i)
+          (if (and (syn-symbol? s) (= (mark-now (syn-symbol s)) i))
+              #u
+              (said (string-append (shown) " where the trailmark `" (symbol->string n)
+                                   "` is written"))))
         (s-bvar () (fill-binder fail mode at s #f))
         (s-dvar () (fill-binder fail mode at s #t))
         (s-kind () #u)
@@ -224,6 +239,8 @@
           ;; A program's binder: any name the checkers let it bind, which they
           ;; decide.
           ((and (syn-symbol? s) (= mode 3)) (with-kids at (k-binder (syn-symbol s) d)))
+          ((and (syn-symbol? s) (> (mark-now (syn-symbol s)) 0))
+           (fail-at fail (string-append "`" (syn-name s) "` is a trailmark, which is not bound") s))
           ;; A value's binder a use gives: as a program's, any name the
           ;; checkers let it bind, a keyword too (`fields`, Heist's), which a
           ;; template's form, read by its head, does not see bound.
@@ -232,24 +249,6 @@
            (if (= mode 1) (with-kids at (k-binder (syn-symbol s) d)) #u))
           (else (fail-at fail (string-append "`" (show-syn s) "` is not a name that may be bound")
                          s)))))
-;; Those of `ms` that `s` fits.
-(define fitting (->* (stys syn int pvars) stys)
-  (lambda (ms s mode ps)
-    (cond ((null? ms) nil)
-          ((fits? (car ms) s mode (lambda ((n symbol)) (pvar-shape n ps)))
-           (cons (car ms) (fitting (cdr ms) s mode ps)))
-          (else (fitting (cdr ms) s mode ps)))))
-;; A pattern variable written somewhere inside `s`, in a list of one.
-(define pvar-inside (->* (syn pvars) (listof symbol acyclic))
-  (lambda (s ps)
-    (if (syn-symbol? s)
-        (if (pvar? (syn-symbol s) ps) (list (syn-symbol s)) nil)
-        (let ((parts (split s)))
-          (if (null? parts)
-              nil
-              (let ((first (pvar-inside (car parts) ps)))
-                (if (null? first) (pvar-inside (nth parts 1) ps) first)))))))
-
 ;; A form in a template, at node `at`: a kernel form, a macro's use, or an
 ;; application, aligned with its signature; a definition's, if `defn`,
 ;; where a template makes definitions, else an expression's.

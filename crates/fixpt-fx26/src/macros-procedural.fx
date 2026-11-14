@@ -20,8 +20,8 @@
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
         syn-expansion len (type syns-a))
-(import types-module reserved? desc-word? type-form? kernel-sigs kernel-definitions s-expr
-        (type fails sty))
+(import types-module reserved? desc-word? type-form? kernel-sigs kernel-definitions s-expr marks
+        (type fails sty marked))
 (import align-module macro? defined def-env-top
         (type macro clauses def-env def-envs macro-env scopes))
 
@@ -523,16 +523,17 @@
 ;; procedural, defined, and macros defined where the file's items are; what
 ;; was, given back, for `file-scope-end!` (`Macros::in_file_scope`).
 (define-type scope-saved (tupleof macro-env (listof (tupleof symbol int string def-env) acyclic)
-                                  def-env))
+                                  def-env marked))
 (define file-scope-begin! (->* () scope-saved)
   (lambda ()
-    (let ((saved (tuple (get defined) (get procedurals) (get def-env-now))))
+    (let ((saved (tuple (get defined) (get procedurals) (get def-env-now) (get marks))))
       (begin (set defined nil) (set procedurals nil) (set def-env-now (tuple 2 'within nil))
+             (set marks nil)
              saved))))
 (define file-scope-end! (->* (scope-saved) unit)
   (lambda (s)
     (begin (set defined (extract s 1)) (set procedurals (extract s 2))
-           (set def-env-now (extract s 3)))))
+           (set def-env-now (extract s 3)) (set marks (extract s 4)))))
 ;; Where the macro each expansion's aliases are of was defined, by the
 ;; expansion's number, the last first; a template's check is expansion 0
 ;; (`macros.rs`'s `Withs::def_envs`). Given to the resolution after expansion
@@ -542,3 +543,33 @@
 (define def-env! (->* (int def-env) unit)
   (lambda (k h) (set def-envs (cons (tuple k h) (get def-envs)))))
 (define def-envs-given (->* () def-envs) (lambda () (get def-envs)))
+;; `s`, each part at `a`..`b` of expansion `x`: a hole's call, where the
+;; template has the hole.
+(define respanned (->* (syn int int int) syn)
+  (lambda (s a b x)
+    (tagcase s
+      (lst (items d c e y) (lst (respanned-each items a b x) d a b x))
+      (dotted (items tail d c e y)
+        (dotted (respanned-each items a b x) (respanned tail a b x) d a b x))
+      (vec (items d c e y) (vec (respanned-each items a b x) d a b x))
+      (atom (d c e y) (atom d a b x)))))
+(define respanned-each (->* (syns-a int int int) syns-a)
+  (lambda (xs a b x)
+    (if (null? xs) nil (cons (respanned (car xs) a b x) (respanned-each (cdr xs) a b x)))))
+;; `s`, each part of it at a key of its own for its place, in expansion
+;; `made`.
+(define in-expansion (->* (syn int) syn)
+  (lambda (s made)
+    (let ((a (source-key (syn-start s) made)))
+      (tagcase s
+        (lst (items d c e x)
+          (let* ((xs (each-in items made)) (b (source-key e made))) (lst xs d a b made)))
+        (dotted (items tail d c e x)
+          (let* ((xs (each-in items made)) (tl (in-expansion tail made)) (b (source-key e made)))
+            (dotted xs tl d a b made)))
+        (vec (items d c e x)
+          (let* ((xs (each-in items made)) (b (source-key e made))) (vec xs d a b made)))
+        (atom (d c e x) (atom d a (source-key e made) made))))))
+(define each-in (->* (syns-a int) syns-a)
+  (lambda (xs made)
+    (if (null? xs) nil (cons (in-expansion (car xs) made) (each-in (cdr xs) made)))))

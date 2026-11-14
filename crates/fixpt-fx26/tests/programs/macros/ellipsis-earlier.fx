@@ -4,6 +4,6 @@
 ;; which a name cannot say.
 (define-syntax summed
   (expr ...)
-  (syntax-rules ()
+  (syntax-rules
     ((_ e ...) (let* ((t 0) (t (+ t e)) ...) 0))))
 (summed 1 2 3)

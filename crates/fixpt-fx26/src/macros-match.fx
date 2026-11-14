@@ -15,7 +15,8 @@
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth mk-list
         (type syns-a names))
 (import types-module split syn-nil? reserved-syn? name-in? proper-items ellipsis? ellipsis-of
-        (type addr))
+        (type addr marked))
+(import align-module mark-now)
 
 ;;; ------------------------------------------------------------ matching
 
@@ -28,15 +29,16 @@
           (else (bound-of n (cdr bs))))))
 ;; Whether `s` matches pattern `p`, onto `bs`: its bindings, in a list of
 ;; one; none if not. A name is a pattern variable (`_` anything; one of
-;; `ns`, the names', a name alone), a form's name or a keyword itself.
-(define matched (->* (syn syn names binds) (listof binds acyclic))
-  (lambda (p s ns bs)
+;; `ns`, the names', a name alone), a form's name or a keyword itself, or
+;; one of `ks`, the clause's trailmarks, a name bound to the same one.
+(define matched (->* (syn syn names marked binds) (listof binds acyclic))
+  (lambda (p s ns ks bs)
     (cond
       ;; `(x ...)`: each element of a list by `x`, each of its pattern
       ;; variables then the list of what it matched.
       ((not (null? (ellipsis-of p)))
        (if (or (syn-nil? s) (not (null? (proper-items s))))
-           (let ((each (matched-each (car (ellipsis-of p)) (proper-items s) ns nil)))
+           (let ((each (matched-each (car (ellipsis-of p)) (proper-items s) ns ks nil)))
              (if (null? each)
                  nil
                  (list (seq-binds (pattern-names (car (ellipsis-of p))) (car each) s bs))))
@@ -45,6 +47,10 @@
        (cond ((string=? (syn-name p) "_") (list bs))
              ((reserved-syn? p)
               (if (and (syn-symbol? s) (symbol=? (syn-symbol s) (syn-symbol p))) (list bs) nil))
+             ((> (marked-id (syn-symbol p) ks) 0)
+              (if (and (syn-symbol? s) (= (mark-now (syn-symbol s)) (marked-id (syn-symbol p) ks)))
+                  (list bs)
+                  nil))
              ((and (name-in? (syn-symbol p) ns) (not (syn-symbol? s))) nil)
              (else (list (cons (tuple (syn-symbol p) s) bs)))))
       ((syn-nil? p) (if (syn-nil? s) (list bs) nil))
@@ -52,19 +58,28 @@
        (let ((ps (split p)) (ss (split s)))
          (if (null? ss)
              nil
-             (let ((first (matched (car ps) (car ss) ns bs)))
-               (if (null? first) nil (matched (nth ps 1) (nth ss 1) ns (car first)))))))
+             (let ((first (matched (car ps) (car ss) ns ks bs)))
+               (if (null? first) nil (matched (nth ps 1) (nth ss 1) ns ks (car first)))))))
       ((same-atom? p s) (list bs))
       (else nil))))
 ;; What each of `xs` matched by `x`, in order, onto `out` (reversed), in a
 ;; list of one; none if one does not match.
 (define matched-each
-  (->* (syn syns-a names (listof binds acyclic)) (listof (listof binds acyclic) acyclic))
-  (lambda (x xs ns out)
+  (->* (syn syns-a names marked (listof binds acyclic)) (listof (listof binds acyclic) acyclic))
+  (lambda (x xs ns ks out)
     (if (null? xs)
         (list (the (listof binds acyclic) (reverse out)))
-        (let ((one (matched x (car xs) ns nil)))
-          (if (null? one) nil (matched-each x (cdr xs) ns (cons (car one) out)))))))
+        (let ((one (matched x (car xs) ns ks nil)))
+          (if (null? one) nil (matched-each x (cdr xs) ns ks (cons (car one) out)))))))
+;; The trailmark name `n` is in `ks`, or 0; and each of names `ns` with the
+;; one it is bound to where it is read (`macros.rs`'s `Clause::marks`).
+(define marked-id (->* (symbol marked) int)
+  (lambda (n ks)
+    (cond ((null? ks) 0)
+          ((symbol=? n (extract (car ks) 1)) (extract (car ks) 2))
+          (else (marked-id n (cdr ks))))))
+(define marks-of (->* (names) marked)
+  (lambda (ns) (if (null? ns) nil (cons (tuple (car ns) (mark-now (car ns))) (marks-of (cdr ns))))))
 ;; `bs`, each of `ns` bound to the list of what each of `each` bound it to,
 ;; at `s`'s place.
 (define seq-binds (->* (names (listof binds acyclic) syn binds) binds)

@@ -30,10 +30,9 @@
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn s-type
-        signature-made pure-hole? affine-kind? ellipsis? ellipsis-of proper-items
-        name-kind?
-        (type fails addr sty))
-(import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list
+        pure-hole? affine-kind? ellipsis? ellipsis-of proper-items marks kind-of
+        (type fails addr sty marked))
+(import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list marks-of
         len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
 (import scopes-module walk placed evaluate levels-of binder-of)
 (import align-module defined macro-of macro? makes-defns? makes-top-defns? nodes-reset! align
@@ -41,8 +40,8 @@
         act-rename act-alias
         seq-depths def-env-top env-empty env-levels
         act-module-type act-standard-type under
-        act-macro-head atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
-        node-hole s-typed
+        act-macro-head act-mark atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
+        node-hole s-typed name-kind?
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
               found levels env def-env def-envs
               atms kids contracts holes))
@@ -52,10 +51,10 @@
 (import solve-module infer sig-text by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
-        source-key source-of sources-made alias)
+        source-key source-of sources-made alias respanned in-expansion)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
-        said-fail signed-each syntax-names
+        said-fail signed-each syntax-names trailmark-form define-trailmark hide-marks!
         (type written writtens signed signed-opt))
 (import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
         internal-of
@@ -88,7 +87,7 @@
                   (tuple pattern template
                          (template-actions fail ps template defn (extract pv 2) file) ps
                          (contracts-of ps (binder-names poly) file)
-                         (clause-def-env fail c ps poly file)))))))))
+                         (clause-def-env fail c ps poly file) (marks-of lits)))))))))
 ;; Where clause `c`'s macro is defined (`def-env-of-file`): refused where a
 ;; module file uses its own macro with a typed hole, whose contract is read
 ;; by a qualifier, which names no file's own items.
@@ -103,7 +102,9 @@
             #u)
         e))))
 (define stub (->* (syn) clause)
-  (lambda (c) (tuple c c (the actions nil) (the pvars nil) (the contracts nil) (def-env-top))))
+  (lambda (c)
+    (tuple c c (the actions nil) (the pvars nil) (the contracts nil) (def-env-top)
+           (the marked nil))))
 ;; Each typed hole's contract, its type read as a use reads the template's
 ;; types; none where it names the macro's own binders, which no use can
 ;; write.
@@ -359,7 +360,15 @@
   (lambda (fail i n file out)
     (if (= i n)
         out
-        (let* ((path (node-path i)) (kids (node-kids i)) (out2 out) (head (form-head-of i)))
+        (let* ((path (node-path i)) (kids (node-kids i)) (head (form-head-of i))
+               (s (node-syn i))
+               ;; A trailmark of the file's: by the name the importer has it by.
+               (out2 (if (and (not (null? file)) (= (kind-of (node-core i)) 15) (syn-symbol? s)
+                              (not (null? (internal-of (syn-symbol s) (extract (car file) 4)))))
+                         (cons (tuple path (act-mark (car (internal-of (syn-symbol s)
+                                                                       (extract (car file) 4)))))
+                               out)
+                         out)))
           (type-actions fail (+ i 1) n file
                         (if (and (not (null? file)) (tagcase kids (k-form (x) #t) (else y #f))
                                  (not (null? head))
@@ -388,9 +397,10 @@
     (let* ((before (get defined))
            (undo (lambda ((m string) (a int) (b int))
                    (begin (set defined before) (fail m a b)))))
-      (if (null? (procedural-form form))
-          (define-written undo (written-of undo form) file before)
-          (define-procedural fail form (def-env-of-file file))))))
+      (cond ((not (null? (trailmark-form form))) (define-trailmark fail form))
+            ((null? (procedural-form form))
+             (define-written undo (written-of undo form) file before))
+            (else (define-procedural fail form (def-env-of-file file)))))))
 ;; Each signature, written, or inferred together for those not written,
 ;; each defined first; then each macro's clauses checked, and defined.
 (define define-written (->* (fails writtens scopes macro-env) names)
@@ -402,6 +412,7 @@
            (made (checked-each fail ws sigs file)))
       (begin
         (set defined (append made before))
+        (hide-marks! (written-names ws))
         (written-names ws)))))
 (define-type said (tupleof signed-opt (listof string acyclic)))
 (define unsigned-of (->* (writtens) unsigneds)
@@ -511,7 +522,7 @@
 ;; And the globals defined, which no macro may be named (`globals`).
 ;; And the count of fresh names, so that a program begun in the standard
 ;; environment's state makes them as the Rust expander, begun anew, does.
-(define-type by-states (listof (tupleof int macro-env load-defs names int) acyclic))
+(define-type by-states (listof (tupleof int macro-env load-defs names int marked) acyclic))
 ;; Fresh names' count.
 (define fresh-count (ref int rs) (new 0))
 (define by-state (ref by-states rs) (new nil))
@@ -526,9 +537,11 @@
       (begin
         (set with-uses nil)
         (if (null? at)
-            (begin (set defined nil) (set loads nil) (set globals nil) (set fresh-count 0))
+            (begin (set defined nil) (set loads nil) (set globals nil) (set fresh-count 0)
+                   (set marks nil))
             (begin (set defined (extract (car at) 2)) (set loads (extract (car at) 3))
-                   (set globals (extract (car at) 4)) (set fresh-count (extract (car at) 5))))
+                   (set globals (extract (car at) 4)) (set fresh-count (extract (car at) 5))
+                   (set marks (extract (car at) 6))))
         (set globals-before (get globals))))))
 (define state-at (->* (int by-states) by-states)
   (lambda (s xs)
@@ -538,9 +551,10 @@
 (define macros-after! (->* (int) unit)
   (lambda (s)
     (if (and (null? (get defined)) (null? (get loads)) (null? (get globals))
-             (= (get fresh-count) 0))
+             (= (get fresh-count) 0) (null? (get marks)))
         #u
-        (set by-state (cons (tuple s (get defined) (get loads) (get globals) (get fresh-count))
+        (set by-state (cons (tuple s (get defined) (get loads) (get globals) (get fresh-count)
+                                   (get marks))
                             (get by-state))))))
 ;; Names `ns` defined as globals.
 (define globals! (->* (names) unit) (lambda (ns) (set globals (append ns (get globals)))))
@@ -721,7 +735,8 @@
                                             "of it matches")
                         s)
                s)
-        (let ((binds (matched (extract (car cs) 1) operands (name-pvars (extract (car cs) 4)) nil)))
+        (let ((binds (matched (extract (car cs) 1) operands (name-pvars (extract (car cs) 4))
+                              (extract (car cs) 7) nil)))
           (if (null? binds)
               (first-match fail name s operands (cdr cs))
               (let* ((made (record-expansion name s)) (shown (symbol->string name))
@@ -929,6 +944,7 @@
                 (act-rename (binder d) (atom (fresh-name n binder d) a b made))
                 (act-alias ()
                   (atom (string->symbol (alias (symbol->string n) made)) a b made))
+                (act-mark (i) (atom i a b made))
                 (else y (atom n a b made))))))))
 ;; The fresh name of the binder at `binder`, under `d` ellipses, in the
 ;; repetitions it is in, made the first time.
@@ -958,36 +974,6 @@
 ;; Whether a template is being transcribed for its check, its holes' calls
 ;; in place of a use's expressions (`template-checks`).
 (define checking (ref bool rs) (new #f))
-;; `s`, each part at `a`..`b` of expansion `x`: a hole's call, where the
-;; template has the hole.
-(define respanned (->* (syn int int int) syn)
-  (lambda (s a b x)
-    (tagcase s
-      (lst (items d c e y) (lst (respanned-each items a b x) d a b x))
-      (dotted (items tail d c e y)
-        (dotted (respanned-each items a b x) (respanned tail a b x) d a b x))
-      (vec (items d c e y) (vec (respanned-each items a b x) d a b x))
-      (atom (d c e y) (atom d a b x)))))
-(define respanned-each (->* (syns-a int int int) syns-a)
-  (lambda (xs a b x)
-    (if (null? xs) nil (cons (respanned (car xs) a b x) (respanned-each (cdr xs) a b x)))))
-;; `s`, each part of it at a key of its own for its place, in expansion
-;; `made`.
-(define in-expansion (->* (syn int) syn)
-  (lambda (s made)
-    (let ((a (source-key (syn-start s) made)))
-      (tagcase s
-        (lst (items d c e x)
-          (let* ((xs (each-in items made)) (b (source-key e made))) (lst xs d a b made)))
-        (dotted (items tail d c e x)
-          (let* ((xs (each-in items made)) (tl (in-expansion tail made)) (b (source-key e made)))
-            (dotted xs tl d a b made)))
-        (vec (items d c e x)
-          (let* ((xs (each-in items made)) (b (source-key e made))) (vec xs d a b made)))
-        (atom (d c e x) (atom d a (source-key e made) made))))))
-(define each-in (->* (syns-a int) syns-a)
-  (lambda (xs made)
-    (if (null? xs) nil (cons (in-expansion (car xs) made) (each-in (cdr xs) made)))))
 
 ;;; ------------------------------------------------------------ macros' names
 

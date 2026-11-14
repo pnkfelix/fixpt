@@ -3,6 +3,6 @@
 ;; times.
 (define-syntax pairs
   ((expr ...) (expr ...))
-  (syntax-rules ()
+  (syntax-rules
     ((_ (a ...) (b ...)) (let ((x a) ...) (let ((y b) ...) (list (+ x y) ...))))))
 (pairs (1 2) (3))

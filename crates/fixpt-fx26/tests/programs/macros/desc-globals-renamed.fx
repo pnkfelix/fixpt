@@ -3,7 +3,7 @@
 ;; is defined.
 (define-syntax define-counter
   (-> (bvar) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name)
      (begin (define count (ref int @heap) (new 100))
             (define name (subr (maxeff (read @heap) (read (globals count))) () int)

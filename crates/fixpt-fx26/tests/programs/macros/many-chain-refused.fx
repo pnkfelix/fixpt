@@ -4,9 +4,9 @@
 ;; its own.
 (define-syntax both
   ((many expr))
-  (syntax-rules ()
+  (syntax-rules
     ((_ e) (list e e))))
 (define-syntax once-they-say
   (expr)
-  (syntax-rules ()
+  (syntax-rules
     ((_ e) (both e))))

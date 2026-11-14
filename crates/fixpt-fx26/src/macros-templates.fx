@@ -31,7 +31,9 @@
 ;; of the procedure's `plambda`. Checked as any definition is.
 (define template-checks (->* (fails symbol) syns-a)
   (lambda (fail n)
-    (let ((m (car (macro-of n (get defined))))) (checks-of fail n m (extract m 2)))))
+    ;; A trailmark has no templates.
+    (let ((m (macro-of n (get defined))))
+      (if (null? m) nil (checks-of fail n (car m) (extract (car m) 2))))))
 (define checks-of (->* (fails symbol macro clauses) syns-a)
   (lambda (fail n m cs)
     (cond ((null? cs) nil)

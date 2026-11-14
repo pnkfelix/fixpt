@@ -2,5 +2,5 @@
 ;; The expression said to be outside `a`'s scope, placed inside it.
 (define-syntax leaky
   ((bvar expr) expr)
-  (syntax-rules ()
+  (syntax-rules
     ((_ (a e) body) (let ((a e)) body))))

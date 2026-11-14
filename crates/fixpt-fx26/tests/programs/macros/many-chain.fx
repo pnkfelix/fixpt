@@ -3,10 +3,10 @@
 ;; the opt-out is in every signature on the way.
 (define-syntax both
   ((many expr))
-  (syntax-rules ()
+  (syntax-rules
     ((_ e) (list e e))))
 (define-syntax both-again
   ((many expr))
-  (syntax-rules ()
+  (syntax-rules
     ((_ e) (both e))))
 (both-again (+ 3 4))

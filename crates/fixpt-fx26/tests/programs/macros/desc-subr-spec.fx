@@ -7,7 +7,7 @@
   (lambda (x) (< 0 x)))
 (define-syntax define-sum
   (-> (bvar bvar) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name a)
      (define name (subr pure ((a : int) (b : int)) int
                     (requires (and (<= 0 b) (implies (pos? a) (<= 0 b))))
@@ -15,7 +15,7 @@
        (lambda (x y) (+ x y))))))
 (define-syntax define-int-test
   (-> (bvar) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name) (define name (-> ((oneof int string)) (bool (then (shape 0 int)) (else))) int?))))
 (define-sum add a)
 (define-int-test int-test)

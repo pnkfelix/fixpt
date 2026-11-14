@@ -3,6 +3,6 @@
 ;; scope of both, which its signature says, `(rho (A place))`.
 (define-syntax with-arena
   (dvar (import expr (rho (A dvar))))
-  (syntax-rules ()
+  (syntax-rules
     ((_ p body) (letrena p body))))
 1

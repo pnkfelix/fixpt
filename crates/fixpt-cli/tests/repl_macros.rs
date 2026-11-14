@@ -21,10 +21,10 @@ fn repl(input: &str) -> String {
 /// what its template made is said in the entry that defined it.
 #[test]
 fn a_macro_is_used_in_a_later_entry() {
-    let def = "(define-syntax foo ((bvar expr) (import expr (rho (AA var)))) (syntax-rules () ((_ (x e) body) (let ((x e)) body))))\n";
-    let out = repl(&format!("{def}(foo (hey \"dude\") hey)\n(define-syntax bad (expr) (syntax-rules () ((_ e) (+ e #t))))\n(bad 3)\n"));
+    let def = "(define-syntax foo ((bvar expr) (import expr (rho (AA var)))) (syntax-rules ((_ (x e) body) (let ((x e)) body))))\n";
+    let out = repl(&format!("{def}(foo (hey \"dude\") hey)\n(define-syntax bad (expr) (syntax-rules ((_ e) (+ e #t))))\n(bad 3)\n"));
     assert!(out.contains("\"dude\" : string"), "{out}");
-    assert!(out.contains("<fx26:3>:1:56: argument 2 is a bool") && !out.contains("panicked"), "{out}");
+    assert!(out.contains("<fx26:3>:1:53: argument 2 is a bool") && !out.contains("panicked"), "{out}");
     assert!(out.contains("  in the expansion of `bad` at <fx26:4>:1:1"), "{out}");
 }
 
@@ -32,7 +32,7 @@ fn a_macro_is_used_in_a_later_entry() {
 /// definitions shown, its template's own made fresh for each use.
 #[test]
 fn a_macro_makes_definitions_in_later_entries() {
-    let def = "(define-syntax define-counter (-> (bvar) defn) (syntax-rules () ((_ name) (begin (define count (new 0)) (define name (lambda () (begin (set count (+ (get count) 1)) (get count))))))))\n";
+    let def = "(define-syntax define-counter (-> (bvar) defn) (syntax-rules ((_ name) (begin (define count (new 0)) (define name (lambda () (begin (set count (+ (get count) 1)) (get count))))))))\n";
     let out = repl(&format!("{def}(define-counter tick)\n(define-counter tock)\n(tick)\n(+ (tick) (tock))\n"));
     assert!(out.contains("tick : (subr") && out.contains("tock : (subr"), "{out}");
     assert!(out.contains("%count:1 : (ref int") && out.contains("%count:2 : (ref int"), "{out}");

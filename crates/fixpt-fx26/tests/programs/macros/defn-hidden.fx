@@ -3,7 +3,7 @@
 ;; are: the counter's `count` is its own, not the program's.
 (define-syntax define-counter
   (-> (bvar) defn)
-  (syntax-rules ()
+  (syntax-rules
     ((_ name)
      (begin (define count (new 0))
             (define name (lambda () (begin (set count (+ (get count) 1)) (get count))))))))

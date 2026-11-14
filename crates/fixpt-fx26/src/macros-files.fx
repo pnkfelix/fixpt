@@ -16,10 +16,11 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth datatype?
-        expand-datatype (type syns-a names loaded-file) (effect parses))
-(import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty signature-made kind-of
-        (type fails sty))
-(import align-module nnodes node-syn node-core node-kids k-pvar defined (type clauses))
+        expand-datatype syn-string? (type syns-a names loaded-file) (effect parses))
+(import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty kind-of syn-keyword?
+        keyword-name show-syn marks mark-count no-trailmark proper-items (type fails sty))
+(import align-module nnodes node-syn node-core node-kids k-pvar defined mark-now
+        (type clauses macro-env))
 
 ;; The name the importer has macro `n` by, of `m`'s, in a list of one.
 (define internal-of
@@ -271,9 +272,9 @@
 
 ;;; ------------------------------------------------------------ a macro written
 
-;; A `syntax-rules`' literals, `lits`, each a name the signature has written
-;; as it is, `(literal name)`, where the pattern has it; and no other: of
-;; the pattern's nodes from `i`.
+;; A `syntax-rules`' trailmarks, `lits`, each a name the signature writes,
+;; `(trailmark name)`, where the pattern has it; and no other: of the
+;; pattern's nodes from `i`.
 (define literals-said (->* (fails names int) unit)
   (lambda (fail lits i)
     (if (= i (get nnodes))
@@ -281,29 +282,32 @@
         (let ((s (node-syn i)))
           (begin
             (if (syn-symbol? s)
-                (let ((lit (= (kind-of (node-core i)) 7))
-                      (n (syn-symbol s)))
+                (let* ((k (kind-of (node-core i))) (lit (or (= k 7) (= k 15)))
+                       (n (syn-symbol s)))
                   (cond
-                    ((and lit (not (name-in? n lits)) (not (reserved? (syn-name s))))
-                     (fail-at fail (string-append "`" (syn-name s) "` is written as it is in the "
-                                                  "signature, `(literal " (syn-name s) ")`, and is "
-                                                  "not among the `syntax-rules` literals")
+                    ((and (= k 15) (not (name-in? n lits)))
+                     (fail-at fail (string-append "`" (syn-name s) "` is the trailmark the "
+                                                  "signature writes here, `(trailmark " (syn-name s)
+                                                  ")`, and is not among the `syntax-rules`' "
+                                                  "`#:trailmarks`")
                               s))
                     ((and (not lit) (tagcase (node-kids i) (k-pvar (m) #t) (else y #f))
                           (name-in? n lits))
-                     (fail-at fail (string-append "`" (syn-name s) "` is among the `syntax-rules` "
-                                                  "literals, and the signature has a part here, "
-                                                  "not `(literal " (syn-name s) ")`")
+                     (fail-at fail (string-append "`" (syn-name s) "` is among the `syntax-rules`' "
+                                                  "`#:trailmarks`, and the signature has a part "
+                                                  "here, not `(trailmark " (syn-name s) ")`")
                               s))
                     (else #u)))
                 #u)
             (literals-said fail lits (+ i 1)))))))
 ;; A macro's definition as written (`macros.rs`'s `written`).
 (define define-usage string
-  "`(define-syntax name [signature] (syntax-rules (literal …) ((_ . pattern) template) …))`")
+  (string-append "`(define-syntax name [signature] (syntax-rules [#:trailmarks (name …)] "
+                 "((_ . pattern) template) …))`"))
 (define rec-usage string
-  "`(define-syntax-rec (name [signature] (syntax-rules (literal …) clause …)) …)`")
-(define rules-usage string "`(syntax-rules (literal …) ((_ . pattern) template) …)`")
+  "`(define-syntax-rec (name [signature] (syntax-rules [#:trailmarks (name …)] clause …)) …)`")
+(define rules-usage string
+  "`(syntax-rules [#:trailmarks (name …)] ((_ . pattern) template) …)`")
 ;; A macro as its `define-syntax` writes it: its name, its signature if
 ;; written (none or one), its `syntax-rules`' literals and clauses, and the
 ;; form (or `define-syntax-rec`'s member) it is in.
@@ -345,6 +349,8 @@
       (cond
         ((or (not (syn-symbol? name)) (reserved-syn? name))
          (begin (fail-at fail (string-append usage ": a macro's name, not a form's") name) none))
+        ((and (= (len rest) 1) (trailmark? (car rest)))
+         (begin (fail-at fail "a trailmark is defined alone, by `define-syntax`" at) none))
         ((and (= (len rest) 1) (rules? (car rest)))
          (rules-written fail (syn-symbol name) nil (car rest) at))
         ((and (= (len rest) 2) (rules? (nth rest 1)))
@@ -357,17 +363,93 @@
         (else (begin (fail-at fail usage at) none))))))
 (define rules-written (->* (fails symbol syns-a syn syn) written)
   (lambda (fail n sig rules at)
-    (let ((parts (proper rules)))
-      (if (null? (cdr parts))
-          (begin (fail-at fail rules-usage rules) (tuple n sig (the names nil) (the syns-a nil) at))
-          (let ((lits (nth parts 1)))
-            (tuple n sig (literals-of fail lits) (cdr (cdr parts)) at))))))
-(define literals-of (->* (fails syn) names)
-  (lambda (fail lits)
-    (cond ((syn-nil? lits) nil)
-          ((and (not (null? (proper lits))) (all-names? (proper lits)))
-           (names-of-syns (proper lits)))
-          (else (begin (fail-at fail "a `syntax-rules`' literals are a list of names" lits) nil)))))
+    (let* ((rp (rules-parts fail (cdr (proper rules)) rules)) (lits (extract rp 1))
+           (unbound (names-only-unmarked lits)))
+      (begin
+        ;; Each of its `#:trailmarks` bound to one where it is defined.
+        (if (null? unbound)
+            #u
+            (fail-at fail (no-trailmark (symbol->string (car unbound))) at))
+        (tuple n sig lits (extract rp 2) at)))))
+(define names-only-unmarked (->* (names) names)
+  (lambda (ns)
+    (cond ((null? ns) nil)
+          ((= (mark-now (car ns)) 0) (list (car ns)))
+          (else (names-only-unmarked (cdr ns))))))
+;; A `syntax-rules`' parts after its head: the names its `#:trailmarks (name
+;; …)` lists, if it has one, and its clauses; a `()` or a list of names
+;; first, R7RS's literals, refused, saying how it is written now
+;; (`macros.rs`'s `rules_parts`).
+(define rules-parts (->* (fails syns-a syn) (tupleof names syns-a))
+  (lambda (fail parts rules)
+    (let ((none (tuple (the names nil) (the syns-a nil))))
+      (cond
+        ((null? parts) (begin (fail-at fail rules-usage rules) none))
+        ((and (syn-keyword? (car parts)) (string=? (keyword-name (car parts)) "trailmarks")
+              (not (null? (cdr parts))))
+         (let ((ns (proper (nth parts 1))))
+           (if (and (not (null? ns)) (all-names? ns))
+               (tuple (names-of-syns ns) (cdr (cdr parts)))
+               (begin (fail-at fail (string-append "a `syntax-rules`' `#:trailmarks` are a list "
+                                                   "of names, one or more")
+                               (nth parts 1))
+                      none))))
+        ((syn-keyword? (car parts)) (begin (fail-at fail rules-usage (car parts)) none))
+        ((syn-nil? (car parts))
+         (begin (fail-at fail (string-append "a `syntax-rules` has no list of literals: drop the "
+                                             "`()` (names its patterns match are written "
+                                             "`#:trailmarks (name …)`)")
+                         (car parts))
+                none))
+        ((and (not (null? (proper (car parts)))) (all-names? (proper (car parts))))
+         (begin (fail-at fail (string-append "a `syntax-rules`' names its patterns match are its "
+                                             "trailmarks: `#:trailmarks " (show-syn (car parts))
+                                             "`, each defined `(define-syntax name (trailmark))`")
+                         (car parts))
+                none))
+        (else (tuple (the names nil) parts))))))
+;; A trailmark's definition, `(define-syntax name (trailmark ["where it
+;; belongs"]))`: its transformer, in a list of one (`macros.rs`'s `Mark`).
+(define trailmark? (->* (syn) bool)
+  (lambda (t)
+    (let ((items (proper t)))
+      (and (not (null? items)) (syn-symbol? (car items))
+           (string=? (syn-name (car items)) "trailmark")))))
+(define trailmark-form (->* (syn) syns-a)
+  (lambda (form)
+    (let ((items (proper form)))
+      (if (and (= (len items) 3) (string=? (head-name form) "define-syntax")
+               (trailmark? (nth items 2)))
+          (list (nth items 2))
+          nil))))
+;; Trailmark `form` defined, apart from the macros, which no longer have its
+;; name: its name.
+(define define-trailmark (->* (fails syn) names)
+  (lambda (fail form)
+    (let* ((name (nth (proper form) 1)) (t (nth (proper form) 2)) (said (cdr (proper t))))
+      (cond
+        ((or (not (syn-symbol? name)) (reserved-syn? name))
+         (begin (fail-at fail (string-append define-usage ": a macro's name, not a form's") name)
+                nil))
+        ((not (or (null? said) (and (null? (cdr said)) (syn-string? (car said)))))
+         (begin (fail-at fail "`(trailmark)`, or `(trailmark \"where it belongs\")`" t) nil))
+        (else
+         (begin
+           (set defined (macros-but (syn-symbol name) (get defined)))
+           (set mark-count (+ (get mark-count) 1))
+           (set marks (cons (tuple (syn-symbol name) (get mark-count)) (get marks)))
+           (list (syn-symbol name))))))))
+(define macros-but (->* (symbol macro-env) macro-env)
+  (lambda (n ms)
+    (cond ((null? ms) nil)
+          ((symbol=? n (extract (car ms) 1)) (macros-but n (cdr ms)))
+          (else (cons (car ms) (macros-but n (cdr ms)))))))
+;; Macros `ns` defined: a trailmark of a name of theirs no longer is one.
+(define hide-marks! (->* (names) unit)
+  (lambda (ns)
+    (if (null? ns)
+        #u
+        (begin (set marks (cons (tuple (car ns) 0) (get marks))) (hide-marks! (cdr ns))))))
 (define all-names? (->* (syns-a) bool)
   (lambda (xs) (or (null? xs) (and (syn-symbol? (car xs)) (all-names? (cdr xs))))))
 (define names-of-syns (->* (syns-a) names)
@@ -430,3 +512,19 @@
                            "from its clauses does not fit them: " m "\n  inferred: " shown
                            "\n  write one: (define-syntax " n " SIGNATURE (syntax-rules …))")
             a b))))
+;; A signature's `(-> σ made)`: `σ`, and what it makes, 0 an expression,
+;; `expr`, 1 definitions, `defn`, 2 a description, `type`; else itself, an
+;; expression's.
+(define signature-made (->* (fails syn) (tupleof syn int))
+  (lambda (fail s)
+    (let ((items (proper-items s)))
+      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "->"))
+          (let ((made (if (syn-symbol? (nth items 2)) (syn-name (nth items 2)) "")))
+            (cond ((string=? made "defn") (tuple (nth items 1) 1))
+                  ((string=? made "type") (tuple (nth items 1) 2))
+                  ((string=? made "expr") (tuple (nth items 1) 0))
+                  (else (begin (fail-at fail (string-append "a signature `(-> σ made)` makes "
+                                                            "`expr`, `defn` or `type`")
+                                        (nth items 2))
+                               (tuple s 0)))))
+          (tuple s 0)))))

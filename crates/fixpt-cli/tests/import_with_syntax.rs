@@ -53,6 +53,19 @@ fn a_file_uses_its_own_macros() {
     }
 }
 
+/// A file's trailmark (`typed-macros.md`, "Trailmarks"): a use
+/// writes it by the name the importer has it by, and the file's templates
+/// write it whatever the importer takes.
+#[test]
+fn a_files_trailmark_is_its_own() {
+    for (name, want) in [("main-marks.fx", "(9 7) : "), ("main-marks-only.fx", "7 : int")] {
+        for m in MACHINES {
+            let (out, err) = eval(m, name);
+            assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");
+        }
+    }
+}
+
 #[test]
 fn only_and_except_take_macros_and_names_alike() {
     // A file of macros alone: its `include` gives nothing, and is nothing
