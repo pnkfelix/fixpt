@@ -420,10 +420,13 @@
                                                                  (extract s 1) (extract s 3)))
                                      (get defined)))
                   (cons (the signed-opt (list s)) (signed-each fail (cdr ws))))))))))
-;; How macro `n`'s refusal is said, its signature inferred, `shown`.
+;; How macro `n`'s refusal is said, its signature inferred, `shown`, not
+;; fitting its clauses: refused, said so on a line of its own, then what was
+;; inferred and how one is written (`macros.rs`'s `refused_inferred`).
 (define said-fail (->* (fails string string) fails)
   (lambda (fail n shown)
     (lambda ((m string) (a int) (b int))
-      (fail (string-append m "; `" n "`'s signature, inferred, is `" shown
-                           "`: write one if it means another")
+      (fail (string-append "`" n "` is refused: no signature is written, and the one inferred "
+                           "from its clauses does not fit them: " m "\n  inferred: " shown
+                           "\n  write one: (define-syntax " n " SIGNATURE (syntax-rules …))")
             a b))))

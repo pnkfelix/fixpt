@@ -1210,6 +1210,45 @@ impl Macros {
         r
     }
 
+    /// Each of `w`'s clauses checked against signature `sig`.
+    #[allow(clippy::too_many_arguments)]
+    fn clauses_fit(&self, w: &Written, sig: &Rc<STy>, defn: bool, desc: bool, poly: &[Syn], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Clause>> {
+        w.clauses.iter().map(|c| self.clause(c, sig, defn, desc, poly, &w.lits, interner, file)).collect()
+    }
+
+    /// A signature of unsigned macro `w`'s clauses' shapes whole, `(union
+    /// σ₁ …)`, each clause's inferred alone: for when the one inferred of
+    /// them together, position by position, does not fit them, the parts of
+    /// one clause no longer told from another's (a literal of one where
+    /// another has a datum, a part one has and another not). None for one
+    /// clause, or clauses that make different things.
+    fn by_clauses(&mut self, w: &Written, interner: &mut Interner) -> Option<Syn> {
+        if w.clauses.len() < 2 {
+            return None;
+        }
+        let (mut members, mut made): (Vec<Syn>, Option<Option<Sym>>) = (Vec::new(), None);
+        for c in &w.clauses {
+            let one = infer::Unsigned { name: w.name, lits: w.lits.clone(), clauses: vec![c.clone()], span: w.span };
+            let s = self.infer(&[one], interner).ok()?.pop()?;
+            let arrow = s.list().filter(|l| l.len() == 3 && l[0].sym().is_some_and(|h| interner.name(h) == "->"));
+            let (sigma, k) = match arrow.as_deref() {
+                Some([_, sigma, k]) => (sigma.clone(), k.sym()),
+                _ => (s, None),
+            };
+            if made.is_some_and(|m| m != k) {
+                return None;
+            }
+            made = Some(k);
+            members.push(sigma);
+        }
+        let at = w.span;
+        let union = Syn::lst(at, std::iter::once(Syn::named(at, "union", interner)).chain(members).collect());
+        Some(match made.flatten() {
+            Some(k) => Syn::lst(at, vec![Syn::named(at, "->", interner), union, Syn::symbol(at, k, interner)]),
+            None => union,
+        })
+    }
+
     fn define_written(&mut self, ws: &[Written], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Sym>> {
         if let [w @ Written { procedural: Some((style, code)), .. }] = ws {
             let def_env = self.def_env_of(file);
@@ -1243,8 +1282,19 @@ impl Macros {
                 let sig = made.next().expect("one each");
                 let shown = infer::sig_text(&sig, interner);
                 let name = interner.name(w.name).to_string();
-                let said = |e: FxError| FxError::at(e.span, format!("{}; `{name}`'s signature, inferred, is `{shown}`: write one if it means another", e.message));
-                let parsed = self.signature(&sig, interner).map_err(said)?;
+                let said = |e: FxError| FxError::at(e.span, refused_inferred(&name, &shown, &e.message));
+                // Not a signature (a union's members not told apart): the
+                // union of its clauses' shapes whole, if that is one.
+                let (parsed, shown) = match self.signature(&sig, interner) {
+                    Ok(p) => (p, shown),
+                    Err(e) => match self.by_clauses(w, interner) {
+                        Some(alt) => match self.signature(&alt, interner) {
+                            Ok(p) => (p, infer::sig_text(&alt, interner)),
+                            Err(_) => return Err(said(e)),
+                        },
+                        None => return Err(said(e)),
+                    },
+                };
                 self.defined.insert(w.name, Rc::new(Macro { sig: parsed.1.clone(), defn: parsed.2, desc: parsed.3, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: None }));
                 inferred.push((w.name, shown));
                 *s = Some(parsed);
@@ -1256,17 +1306,31 @@ impl Macros {
             if w.clauses.is_empty() {
                 return Err(FxError::at(w.span, "a macro has at least one clause"));
             }
-            let mut checked = Vec::new();
-            for c in &w.clauses {
-                let r = self.clause(c, &sig, defn, desc, &poly, &w.lits, interner, file);
-                match (r, inferred.iter().find(|(n, _)| *n == w.name)) {
-                    (Ok(c), _) => checked.push(c),
-                    (Err(e), None) => return Err(e),
-                    (Err(e), Some((_, shown))) => {
-                        return Err(FxError::at(e.span, format!("{}; `{}`'s signature, inferred, is `{shown}`: write one if it means another", e.message, interner.name(w.name))));
+            let checked = match self.clauses_fit(w, &sig, defn, desc, &poly, interner, file) {
+                Ok(checked) => (sig, defn, desc, checked),
+                Err(e) => match inferred.iter().find(|(n, _)| *n == w.name) {
+                    None => return Err(e),
+                    // Inferred: the union of its clauses' shapes whole, if
+                    // its clauses fit that, as they did not the one
+                    // inferred of them together, position by position.
+                    Some((_, shown)) => {
+                        let said = FxError::at(e.span, refused_inferred(interner.name(w.name), shown, &e.message));
+                        let Some(alt) = self.by_clauses(w, interner) else { return Err(said) };
+                        let Ok((_, alt, adefn, adesc)) = self.signature(&alt, interner) else { return Err(said) };
+                        let was = self.defined.insert(w.name, Rc::new(Macro { sig: alt.clone(), defn: adefn, desc: adesc, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: None }));
+                        match self.clauses_fit(w, &alt, adefn, adesc, &poly, interner, file) {
+                            Ok(checked) => (alt, adefn, adesc, checked),
+                            Err(_) => {
+                                if let Some(m) = was {
+                                    self.defined.insert(w.name, m);
+                                }
+                                return Err(said);
+                            }
+                        }
                     }
-                }
-            }
+                },
+            };
+            let (sig, defn, desc, checked) = checked;
             out.push((w.name, Macro { sig, defn, desc, poly: poly.iter().map(|p| Kept::new(*p)).collect(), clauses: checked, text: self.reading.clone(), procedural: None }));
         }
         Ok(out
@@ -3772,4 +3836,11 @@ mod tests {
         }
         assert!(missing.is_empty(), "forms `parse_exp` reads that are not keywords: {missing:?}");
     }
+}
+
+/// What macro `name`, its signature not written, is refused with, the one
+/// inferred, `shown`, not fitting its clauses, `why`: refused, said so on a
+/// line of its own, then what was inferred and how one is written.
+fn refused_inferred(name: &str, shown: &str, why: &str) -> String {
+    format!("`{name}` is refused: no signature is written, and the one inferred from its clauses does not fit them: {why}\n  inferred: {shown}\n  write one: (define-syntax {name} SIGNATURE (syntax-rules …))")
 }

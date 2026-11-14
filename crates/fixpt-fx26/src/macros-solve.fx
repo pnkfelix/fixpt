@@ -15,7 +15,7 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth mk-list
-        mk-symbol syn-datums syn->datum (type syns-a names))
+        mk-symbol syn-datums syn->datum parse-tag p-ok p-err pfail-at (type syns-a names))
 (import types-module fail-at split show-syn kind-of mu-body proper-items
         s-expr s-bvar s-id s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu
         s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib ring-at
@@ -702,6 +702,63 @@
       (begin
         (set defined saved)
         (made-sigs sigs makes us)))))
+;; A signature of unsigned macro `u`'s clauses' shapes whole, `(union σ₁
+;; …)`, each clause's inferred alone (`macros.rs`'s `by_clauses`): for when
+;; the one inferred of them together, position by position, does not fit
+;; them. None for one clause, clauses that make different things, or one
+;; not inferred alone.
+(define by-clauses (->* (unsigned) syns-a)
+  (lambda (u)
+    (let ((cs (extract u 3)) (a (syn-start (extract u 4))) (b (syn-end (extract u 4))))
+      (if (or (null? cs) (null? (cdr cs)))
+          nil
+          (let ((ms (clause-sigs u cs)))
+            (if (or (null? ms) (not (same-made? (cdr ms) (made-of (car ms)))))
+                nil
+                (let ((union (mk-list (cons (mk-symbol "union" a b) (sig-bodies ms)) a b)))
+                  (list (if (string=? (made-of (car ms)) "")
+                            union
+                            (mk-list (list (mk-symbol "->" a b) union
+                                           (mk-symbol (made-of (car ms)) a b))
+                                     a b))))))))))
+;; Each of clauses `cs`'s signature, inferred alone; none if one is not.
+(define clause-sigs (->* (unsigned syns-a) syns-a)
+  (lambda (u cs)
+    (if (null? cs)
+        nil
+        (let ((one (infer-caught (list (tuple (extract u 1) (extract u 2) (list (car cs))
+                                              (extract u 4))))))
+          (if (null? one)
+              nil
+              (let ((rest (clause-sigs u (cdr cs))))
+                (if (and (null? rest) (not (null? (cdr cs)))) nil (cons (car one) rest))))))))
+(define caught-sigs (ref syns-a rs) (new nil))
+;; `infer` of `us`, none if it fails: the macros defined as they were.
+(define infer-caught (->* (unsigneds) syns-a)
+  (lambda (us)
+    (let* ((saved (get defined))
+           (r (prompt parse-tag (begin (set caught-sigs (infer pfail-at us)) (p-ok nil))
+                      (lambda (r) r))))
+      (begin (set defined saved)
+             (tagcase r (p-err (m x y) (the syns-a nil)) (p-ok (ts) (get caught-sigs)))))))
+;; What a signature says its macro makes: `defn`, `type`, or "" (an
+;; expression); and its operands' part.
+(define arrow-parts (->* (syn) syns-a)
+  (lambda (s)
+    (let ((ps (proper-items s)))
+      (if (and (= (len ps) 3) (syn-symbol? (car ps)) (string=? (syn-name (car ps)) "->"))
+          ps
+          nil))))
+(define made-of (->* (syn) string)
+  (lambda (s) (let ((ps (arrow-parts s))) (if (null? ps) "" (syn-name (nth ps 2))))))
+(define same-made? (->* (syns-a string) bool)
+  (lambda (ms k) (or (null? ms) (and (string=? (made-of (car ms)) k) (same-made? (cdr ms) k)))))
+(define sig-bodies (->* (syns-a) syns-a)
+  (lambda (ms)
+    (if (null? ms)
+        nil
+        (cons (let ((ps (arrow-parts (car ms)))) (if (null? ps) (car ms) (nth ps 1)))
+              (sig-bodies (cdr ms))))))
 (define made-sigs (->* (syns-a ints unsigneds) syns-a)
   (lambda (sigs makes us)
     (if (null? sigs)

@@ -5400,6 +5400,12 @@ name)` (`macros/with-value.fx`, which binds by `define` instead).
   application.
 - Showing the signature inferred without a refusal: the REPL, `fixpt
   check`.
+- Clauses whose shapes overlap, as `syntax-rules` tries them in order: the
+  whole clauses' union is inferred where the merge by position fails
+  (2026-11-14, `typed-macros.md`, "Inferred signatures: clauses of
+  different shapes"), but a union's members are told apart; an `allof` of
+  a signature per clause would take them, not decided. And whether
+  signatures write `union` as `oneof`, its name elsewhere in FX-26.
 
 ## 222. A `syntax-rules`' literals matched by meaning (found 2026-11-08)
 

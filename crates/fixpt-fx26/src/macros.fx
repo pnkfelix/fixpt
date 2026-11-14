@@ -26,7 +26,7 @@
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn-expansion
         syn->datum len nth mk-list mk-symbol datatype? expand-datatype in-loaded-as load-base
-        (type syns-a names loaded-file) (effect parses))
+        parse-tag p-ok p-err pfail-at (type syns-a names loaded-file) (effect parses))
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn s-type
@@ -49,7 +49,7 @@
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
         (type exported nested))
-(import solve-module infer sig-text)
+(import solve-module infer sig-text by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias)
@@ -423,26 +423,73 @@
        (cons (tuple (car written) (the (listof string acyclic) nil))
              (inferred-each fail (cdr ws) (cdr written) inferred)))
       (else
-       (let* ((n (symbol->string (extract (car ws) 1))) (shown (sig-text (car inferred)))
-              (s (signature-of (said-fail fail n shown) (car inferred))))
+       (let* ((n (symbol->string (extract (car ws) 1)))
+              ;; Not a signature: the union of its clauses' shapes whole,
+              ;; if that is one (`macros.rs`'s).
+              (alt (if (null? (tried-sig (car inferred))) (alt-sig (car ws)) nil))
+              (sig (if (null? alt) (car inferred) (car alt)))
+              (shown (sig-text sig))
+              (s (signature-of (said-fail fail n (sig-text (car inferred))) sig)))
          (begin
            (set defined (cons (tuple (extract (car ws) 1) (tuple (extract s 2) (the clauses nil)
                                                                   (the syns-a nil) (extract s 3)))
                               (get defined)))
            (cons (tuple (the signed-opt (list s)) (the (listof string acyclic) (list shown)))
                  (inferred-each fail (cdr ws) (cdr written) (cdr inferred)))))))))
+;; `w`'s clauses checked against signature `s`, none if one does not fit.
+(define tried-checks (ref (listof clauses acyclic) rs) (new nil))
+(define tried-check (->* (written signed scopes) (listof clauses acyclic))
+  (lambda (w s file)
+    (let ((r (prompt parse-tag
+                     (begin (set tried-checks (list (check-each pfail-at (extract w 4) (extract s 2)
+                                                               (extract s 3) (extract s 1)
+                                                               (extract w 3) file)))
+                            (p-ok nil))
+                     (lambda (r) r))))
+      (tagcase r (p-err (m x y) (the (listof clauses acyclic) nil))
+        (p-ok (ts) (get tried-checks))))))
+;; Unsigned `w` defined anew by its clauses' shapes whole, if its clauses
+;; fit that signature; none, and as it was, if not.
+(define refit (->* (written scopes) (listof signed acyclic))
+  (lambda (w file)
+    (let* ((alt (alt-sig w)) (s (if (null? alt) nil (tried-sig (car alt)))) (was (get defined)))
+      (if (null? s)
+          nil
+          (begin
+            (set defined (cons (tuple (extract w 1) (tuple (extract (car s) 2) (the clauses nil)
+                                                           (the syns-a nil) (extract (car s) 3)))
+                               (get defined)))
+            (if (null? (tried-check w (car s) file)) (begin (set defined was) nil) s))))))
+;; `s` read as a signature, none if it is not one.
+(define tried-sigs (ref (listof signed acyclic) rs) (new nil))
+(define tried-sig (->* (syn) (listof signed acyclic))
+  (lambda (s)
+    (let ((r (prompt parse-tag (begin (set tried-sigs (list (signature-of pfail-at s))) (p-ok nil))
+                     (lambda (r) r))))
+      (tagcase r (p-err (m x y) (the (listof signed acyclic) nil)) (p-ok (ts) (get tried-sigs))))))
+;; Unsigned macro `w`'s clauses' shapes whole, as a signature that is one
+;; (`by-clauses`); none if not.
+(define alt-sig (->* (written) syns-a)
+  (lambda (w)
+    (let ((alt (by-clauses (tuple (extract w 1) (extract w 3) (extract w 4) (extract w 5)))))
+      (if (or (null? alt) (null? (tried-sig (car alt)))) nil alt))))
 (define checked-each (->* (fails writtens (listof said acyclic) scopes) macro-env)
   (lambda (fail ws sigs file)
     (if (null? ws)
         nil
-        (let* ((w (car ws)) (s (car (extract (car sigs) 1))) (shown (extract (car sigs) 2))
+        (let* ((w (car ws)) (s0 (car (extract (car sigs) 1))) (shown (extract (car sigs) 2))
                (f (if (null? shown) fail (said-fail fail (symbol->string (extract w 1))
                                                     (car shown))))
-               (cs (if (null? (extract w 4))
-                       (begin (fail-at fail "a macro has at least one clause" (extract w 5))
-                              (the clauses nil))
-                       (check-each f (extract w 4) (extract s 2) (extract s 3) (extract s 1)
-                                   (extract w 3) file))))
+               (empty (if (null? (extract w 4))
+                          (fail-at fail "a macro has at least one clause" (extract w 5))
+                          #u))
+               ;; Inferred, and its clauses not fitting it: the union of
+               ;; their shapes whole, if they fit that (`macros.rs`'s).
+               (alt (if (or (null? shown) (not (null? (tried-check w s0 file)))) nil
+                        (refit w file)))
+               (s (if (null? alt) s0 (car alt)))
+               (cs (check-each f (extract w 4) (extract s 2) (extract s 3) (extract s 1)
+                               (extract w 3) file)))
           (cons (tuple (extract w 1) (tuple (extract s 2) cs (extract s 1) (extract s 3)))
                 (checked-each fail (cdr ws) (cdr sigs) file))))))
 (define check-each (->* (fails syns-a sty int syns-a names scopes) clauses)

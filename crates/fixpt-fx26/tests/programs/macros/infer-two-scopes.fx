@@ -1,4 +1,4 @@
-;; ! is placed in the scope of other bindings than its signature says it is; `m`'s signature, inferred, is
+;; ! `m` is refused: no signature is written, and the one inferred from its clauses does not fit them: `body` is placed
 ;; A part placed in two scopes, which no signature says.
 (define-syntax m
   (syntax-rules ()
