@@ -24,14 +24,36 @@ MASK = (1 << 64) - 1
 MAP_BITS = 48
 
 
-def show(frame, word):
-    """Word `word` as FX-26 writes the value it is."""
-    v = frame.EvaluateExpression("(char *)((char *(*)(unsigned long)) fixpt_debug_show)(%dUL)" % (word & MASK))
+def symbol_addr(target, name):
+    """The address of symbol `name`, or 0 if none. Looking up by address
+    sidesteps lldb's Clang parser, which sees the inner closures of a
+    function under the same qualified name and refuses the call as
+    ambiguous (`fixpt_debug_show`, `fixpt_place_at`)."""
+    for sym in target.FindSymbols(name):
+        a = sym.symbol.GetStartAddress().GetLoadAddress(target)
+        if a != lldb.LLDB_INVALID_ADDRESS:
+            return a
+    return 0
+
+
+def call_u64_to_str(frame, fn_name, word):
+    """Call C function `fn_name(unsigned long) -> char *` by its symbol
+    address, and read the C string back."""
+    addr = symbol_addr(frame.GetThread().GetProcess().GetTarget(), fn_name)
+    if addr == 0:
+        return None, "symbol `%s` not found" % fn_name
+    v = frame.EvaluateExpression("((char *(*)(unsigned long)) %dUL)(%dUL)" % (addr, word & MASK))
     if not v.GetError().Success():
-        return "(not shown: %s)" % v.GetError().GetCString()
+        return None, v.GetError().GetCString()
     err = lldb.SBError()
     text = frame.GetThread().GetProcess().ReadCStringFromMemory(v.GetValueAsUnsigned(), 8192, err)
-    return text if err.Success() else "(not shown: %s)" % err.GetCString()
+    return (text, None) if err.Success() else (None, err.GetCString())
+
+
+def show(frame, word):
+    """Word `word` as FX-26 writes the value it is."""
+    text, err = call_u64_to_str(frame, "fixpt_debug_show", word)
+    return text if err is None else "(not shown: %s)" % err
 
 
 def read_u64(frame, addr):
@@ -89,9 +111,9 @@ def fx_frame(debugger, command, result, internal_dict):
     frame = debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame()
     # Code a macro made: its template and each use, the line table having
     # the use (`fixpt_place_at`, `docs/research/macro-provenance.md`).
-    made = frame.EvaluateExpression("(char *)((char *(*)(unsigned long)) fixpt_place_at)(%dUL)" % frame.GetPC()).GetSummary()
-    if made and made.strip('"'):
-        result.AppendMessage("  " + made.strip('"'))
+    made, _ = call_u64_to_str(frame, "fixpt_place_at", frame.GetPC())
+    if made and made.strip():
+        result.AppendMessage("  " + made.strip())
     got = frame_values(frame)
     if isinstance(got, str):
         result.AppendMessage(got)
