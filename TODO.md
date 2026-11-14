@@ -6969,6 +6969,22 @@ makes the budget the same everywhere, not the points; and
 `FIXPT_GC_SUMMARY`'s minor-collection time on the FX-26 machines came to
 nearly the whole run's (4.6 s of 4.7) where `FIXPT_GC_TRACE` says 0.01 ms
 each, to look into.
+
+The barrier in Rust split as machine code splits it (the user's,
+2026-11-14: so that a newcomer sees the two parts, and each has its
+invariants): `Heap::set_slot`, `#[inline(always)]`, the store and the
+test made in line, `barrier_needs_heap` (`#[inline(always)]`), which is
+`x86_64::stored`'s exactly; where it says so, the rest, `barrier_slow`
+(`#[inline(never)]`), its precondition the test's answer, checked in a
+build with debug assertions, so that a machine whose test is not the
+heap's is caught at its first store. Machine code's call in,
+`store_at_address`, stores and goes to the rest directly, its test made
+already. Found on the way: a heap not at `FIXED_BASE` was only
+page-aligned, and machine code finds a word's generation by its address
+shifted by 30, the heap by its index shifted by 27, which agree only at a
+multiple of a chunk (the edge test failed now and then, run beside
+others); a heap elsewhere is now reserved at a multiple of a chunk
+(`Words::new_aligned`), and the test makes a second heap to check it.
 Beside it, the skim over clean cards is the
 old space's size over 512, bounded by a summary table if it ever shows.
 

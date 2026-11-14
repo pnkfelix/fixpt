@@ -25,6 +25,41 @@ impl Words {
         (p != libc::MAP_FAILED).then_some(Words { base: p as *mut u64, len })
     }
 
+    /// The same, its first word's address a multiple of `align` bytes (a
+    /// power of two, a multiple of the page): reserved `align` bytes longer,
+    /// and what lies before the first such address and past the words
+    /// given back. Or none, if the system refuses the range.
+    pub fn new_aligned(len: usize, align: usize) -> Option<Words> {
+        assert!(align.is_power_of_two() && align >= 4096, "an alignment of whole pages, a power of two");
+        let bytes = len.checked_mul(8)?.max(8);
+        let span = bytes.checked_add(align)?;
+        // SAFETY: an anonymous mapping, which only this function holds
+        // until the part kept is given to the value made of it.
+        let p = unsafe {
+            libc::mmap(std::ptr::null_mut(), span, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_PRIVATE | libc::MAP_ANON, -1, 0)
+        };
+        if p == libc::MAP_FAILED {
+            return None;
+        }
+        let start = p as usize;
+        let at = (start + align - 1) & !(align - 1);
+        // Past the words, from the next page on.
+        let past = (at + bytes + 4095) & !4095;
+        let (head, tail) = (at - start, (start + span).saturating_sub(past));
+        // SAFETY: the parts of the mapping just made before `at` and from
+        // the page past the words kept, each whole pages (`align` a multiple
+        // of the page), which nothing refers to.
+        unsafe {
+            if head > 0 {
+                libc::munmap(p, head);
+            }
+            if tail > 0 {
+                libc::munmap(past as *mut libc::c_void, tail);
+            }
+        }
+        Some(Words { base: at as *mut u64, len })
+    }
+
     /// The same, at address `at` exactly; or none, if the system will not
     /// put them there (something is there already, or the address is past
     /// what the process may map). Nothing there is replaced.

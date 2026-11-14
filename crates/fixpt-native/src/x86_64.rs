@@ -700,14 +700,16 @@ pub fn card_mark(obj: Reg, disp: i32, st: Reg, cards_off: i32, t1: Reg, t2: Reg)
     out
 }
 
-/// A store with its write barrier (`TODO.md` §276): `v` stored at
-/// `[obj + disp]` where the barrier needs nothing (the
+/// A store with its write barrier (`TODO.md` §276), in the two parts
+/// `Heap::set_slot` has: in line, `Heap::barrier_needs_heap`'s test, and
+/// `v` stored at `[obj + disp]` where the barrier needs nothing (the
 /// place young; `v` no reference, or no younger than the place; `v` young
 /// and the place's card dirty already); else the store left to the heap,
 /// which marks and counts as `Heap::set_slot` does, every caller-saved
-/// register kept around the call (`State::barrier`, `barrier_heap`), the
+/// register kept around the call (`State::barrier`, `barrier_heap`;
+/// `Heap::store_at_address`, `Heap::barrier_slow` out of line), the
 /// allocation limit it gives written back. The generation table and the
-/// card table biased, at `[st + gen]` and `[st + cards]`. `t1` and `t2`
+/// card table biased, at `[st + gens]` and `[st + cards]`. `t1` and `t2`
 /// scratch, neither `obj`, `v` nor `st`; `st` callee-saved. Every jump
 /// 32-bit (`x86-stored` makes the same bytes).
 pub fn stored(obj: Reg, disp: i32, v: Reg, st: Reg, offs: BarrierOffsets, t1: Reg, t2: Reg) -> Vec<u8> {

@@ -96,6 +96,12 @@ impl Heap {
         at
     }
 
+    /// Whether the card of word `rel` is dirty (`Heap::barrier_needs_heap`).
+    #[inline(always)]
+    pub(super) fn card_dirty(&self, rel: usize) -> bool {
+        byte(&self.cards, rel >> CARD_SHIFT) != 0
+    }
+
     /// The write barrier's mark, a young value stored at word `rel` of an
     /// older area: its card, and one less of the budget if it was clean
     /// (`Heap::card_budget`). Machine code does the same: where its card is

@@ -588,7 +588,11 @@ impl Heap {
         if fixed && !at_fixed {
             FIXED_TAKEN.store(false, std::sync::atomic::Ordering::SeqCst);
         }
-        let mut mem = mem.or_else(|| fixpt_memmgmt::Words::new(MEM_WORDS)).expect("address space for the heap");
+        // Elsewhere at a multiple of a chunk of the generation table, as
+        // `FIXED_BASE` is: machine code finds a word's generation by its
+        // address (`gen_table_address`), which is its index's only so.
+        let mut mem = mem.or_else(|| fixpt_memmgmt::Words::new_aligned(MEM_WORDS, 8 << GEN_SHIFT)).expect("address space for the heap");
+        assert!((mem.words().as_ptr() as usize).is_multiple_of(8 << GEN_SHIFT), "the heap at a multiple of a generation chunk");
         // Each page of the semispaces is written as a collection first
         // copies there: in 4 KiB pages, a tenth of the front end's loading
         // was the system's faults (`docs/performance.md`).
@@ -731,35 +735,73 @@ impl Heap {
     pub fn slot(&self, rel: usize) -> Value {
         Value(self.word(rel))
     }
-    /// A value stored into word `rel` of an object: the write barrier
-    /// marks its card when it puts into an area what is in an area
-    /// collected more often (`older_to_younger`).
-    #[inline]
+    /// A value stored into word `rel` of an object, with the write barrier
+    /// (`TODO.md` §276) in its two parts, as every machine splits it: the
+    /// test made in line ([`barrier_needs_heap`](Heap::barrier_needs_heap),
+    /// which machine code makes as its own, `fixpt_native::x86_64::stored`),
+    /// and, where it says so, the rest, out of line
+    /// ([`barrier_slow`](Heap::barrier_slow), where machine code calls in).
+    #[inline(always)]
     pub fn set_slot(&mut self, rel: usize, v: Value) {
         self.set_word(rel, v.raw());
-        // An older place made to refer to something younger: by their
-        // generations, one byte each (`GEN`). The place's first: one in the
-        // nursery, as most are, is older than nothing, so one byte says so.
-        let to = gen_of(rel);
-        if to & GEN_MASK != GEN_YOUNG && v.is_ref() {
-            let from = gen_of(self.ref_ix(v));
-            if to & GEN_MASK > from & GEN_MASK {
-                self.older_to_younger(rel, to, from, v);
-            }
+        if self.barrier_needs_heap(rel, v) {
+            self.barrier_slow(rel, v);
         }
     }
 
-    /// For machine code whose write barrier leaves a store to the heap
-    /// (`TODO.md` §276): `v` stored at the word at address `at`, in bytes,
-    /// as [`set_slot`](Heap::set_slot) stores it, its barrier and all.
-    pub fn store_at_address(&mut self, at: u64, v: Value) {
-        let rel = (at / 8) as usize - self.base;
-        self.set_slot(rel, v);
+    /// The write barrier's test, made in line, the same on every machine:
+    /// whether a store of `v` at word `rel` needs more than the store. Not
+    /// where the place is young (most are: what was just made); nor where
+    /// `v` is no reference, or a pair's or a bloblet's no younger than the
+    /// place, each generation a byte of the table (`GEN`), its low seven
+    /// bits; nor where `v` is young and the place's card is dirty already.
+    /// A suffix ref's generation is its owner's, which the heap finds, so it
+    /// always needs the rest. (A place in the static area's immutable half,
+    /// whose card nothing marks, reaches the rest whenever it would matter.)
+    #[inline(always)]
+    fn barrier_needs_heap(&self, rel: usize, v: Value) -> bool {
+        let to = gen_of(rel) & GEN_MASK;
+        if to == GEN_YOUNG || !v.is_ref() {
+            return false;
+        }
+        if v.is_suffix_ref() {
+            return true;
+        }
+        let from = gen_of(self.ix(v)) & GEN_MASK;
+        to > from && (from != GEN_YOUNG || !self.card_dirty(rel))
     }
 
-    /// [`set_slot`](Heap::set_slot) of `v`, of generation `from`, at word
-    /// `rel`, of the older generation `to`: what the barrier does then.
-    #[inline]
+    /// The write barrier's rest, out of line, where every machine's test
+    /// sends a store (machine code by `barrier_store`, which stores `v`
+    /// first): by the place's generation and the value's, a card marked and
+    /// the budget taken from (`barrier_card`), the second table's card, the
+    /// static code slots, or an immutable place checked (`older_to_younger`).
+    /// Its precondition, that the test said so: in a build with debug
+    /// assertions, checked, so that a machine whose test is not the heap's
+    /// is caught at its first store.
+    #[inline(never)]
+    fn barrier_slow(&mut self, rel: usize, v: Value) {
+        debug_assert!(self.barrier_needs_heap(rel, v), "the barrier's rest reached where its test says nothing is needed: word {rel}, {v:?}");
+        let (to, from) = (gen_of(rel), gen_of(self.ref_ix(v)));
+        if to & GEN_MASK > from & GEN_MASK {
+            self.older_to_younger(rel, to, from, v);
+        }
+    }
+
+    /// For machine code whose write barrier's test sent a store to the heap
+    /// (`TODO.md` §276; `fixpt_native`'s `barrier_store`): `v` stored at the
+    /// word at address `at`, in bytes, and the barrier's rest. Its
+    /// precondition, [`barrier_slow`](Heap::barrier_slow)'s: the machine's
+    /// test, the heap's, said so.
+    pub fn store_at_address(&mut self, at: u64, v: Value) {
+        let rel = (at / 8) as usize - self.base;
+        self.set_word(rel, v.raw());
+        self.barrier_slow(rel, v);
+    }
+
+    /// The barrier's rest of `v`, of generation `from`, at word `rel`, of
+    /// the older generation `to`: what it does by them.
+    #[inline(always)]
     fn older_to_younger(&mut self, rel: usize, to: u8, from: u8, v: Value) {
         // What is immutable and static refers only to what never moves and
         // is never freed: the static area, and code an image brought.
@@ -3981,9 +4023,12 @@ mod gen_tests {
             }
         }
         assert_eq!(areas.last().map(|&(s, n, _)| s + n), Some(MEM_WORDS));
-        // The biased address of the machines: for a heap at any base, the
-        // byte for an address is the one `gen_of` reads for its word.
-        let h = Heap::new();
+        // The biased address of the machines: for a heap at any base it is
+        // given (`FIXED_BASE`, or one `Words::new_aligned` makes), the byte
+        // for an address is the one `gen_of` reads for its word; for a
+        // second heap, not at `FIXED_BASE`, too.
+        let (h, second) = (Heap::new(), Heap::new());
+        assert_eq!(second.base % (1 << GEN_SHIFT), 0, "a second heap at a multiple of a chunk too");
         for &(start, len, _) in &areas {
             for i in [start, start + len / 2, start + len - 1] {
                 let address = (h.base + i) << 3;
