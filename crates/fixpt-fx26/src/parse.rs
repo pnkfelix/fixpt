@@ -4494,7 +4494,7 @@ impl Checker {
         let outer = self.hidden.replace(((self.standard_len, self.env.len()), (self.standard_dscope, self.dscope.len())));
         let ty = self.parse_type_syn(&ty);
         self.hidden = outer;
-        Ok(self.arena.exp(span, Exp::Quote { datum: std::sync::Arc::new(x.to_syntax()), ty: ty? }))
+        Ok(self.arena.exp(span, Exp::Quote { datum: crate::heap_syn::Form::new(*x), ty: ty? }))
     }
 
     /// Whether each number in constant `x` is one every compiler makes: an

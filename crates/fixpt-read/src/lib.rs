@@ -25,7 +25,7 @@ pub use profile::{Brackets, SyntaxProfile, UnitSyntax};
 pub use reader::{Build, SyntaxBuild, Place, ReadError, ReadResult, Reader, form_status, FormStatus};
 pub use span::{describe_source, expansion, expansion_placed_in, expansion_trace, note_source, record_expansion, Expansion, FileId, SourceMap, Span};
 pub use reader::{match_delimiter, tokens, Token, TokenKind};
-pub use writer::{display_syntax, escape_symbol, write_syntax, write_syntax_mapped};
+pub use writer::{display_syntax, escape_symbol, write_atom, write_syntax, write_syntax_mapped};
 
 /// Read every datum in `text` under `profile`. The common entry point.
 pub fn read_string(

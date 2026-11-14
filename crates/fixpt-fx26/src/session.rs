@@ -1374,7 +1374,8 @@ impl Fx26Session {
 
     /// Check one top-level form and lower it, without running it.
     pub fn compile(&mut self, form: &Form) -> R<(Top, String)> {
-        compile_form(&mut self.checker, &mut self.globals, form).map(|(top, code)| (top, code.to_string()))
+        let globals = &mut self.globals;
+        checking(&mut self.checker, &mut self.scheme, |c| compile_form(c, globals, form)).map(|(top, code)| (top, code.to_string()))
     }
 
     /// Run `form` early, if the licence allows: check it without keeping
@@ -1999,7 +2000,8 @@ impl Fx26Session {
         debug_assert!(self.native_runner.is_none() || self.native_convention, "native code in the cellular convention");
         // And the closures cellular code makes then are made native (`nclosure`).
         debug_assert!(!self.native_convention || self.scheme.runtime_unrooted().adapt.is_some(), "no adapters in the native convention");
-        let code = lower_top(&self.checker, &mut self.globals, &top);
+        let globals = &mut self.globals;
+        let code = checking(&mut self.checker, &mut self.scheme, |c| lower_top(c, globals, &top));
         if self.strategy != Strategy::Lower {
             // A program's file being compiled to a `.fasl`: only a
             // procedure's definition, a type's and a load run; another
@@ -2411,7 +2413,7 @@ impl Fx26Session {
         let made = match checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), text)) {
             Ok(forms) if input => {
                 checking(&mut self.checker, &mut self.scheme, |c| {
-                    let maker = if one_exp { forms.first().map(|f| c.syntax_of(f)) } else { c.syn(|c| c.modules_made(&forms.iter().map(Form::get).collect::<Vec<_>>()).map(|m| m.to_syntax())) };
+                    let maker = if one_exp { forms.first().cloned() } else { c.syn(|c| c.modules_made(&forms.iter().map(Form::get).collect::<Vec<_>>()).map(Form::new)) };
                     maker.and_then(|m| c.fasl_made(name, &m)).unwrap_or_default()
                 })
             }
@@ -3290,11 +3292,13 @@ impl Fx26Session {
                 }
             }
         };
-        let syn = checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), &text).map(|mut fs| fs.pop().map(|f| c.syntax_of(&f)))).ok()??;
-        let init = match rec {
-            false => crate::fasl::fasl_value_at(&syn, &self.checker.interner),
-            true => crate::fasl::fasl_lambda_at(&syn, &self.checker.interner)?,
-        };
+        let init = checking(&mut self.checker, &mut self.scheme, |c| {
+            let ty = c.read_in(FileId(0), &text).ok()?.pop()?;
+            c.syn_ref(|c| match rec {
+                false => Some(crate::fasl::fasl_value_at(ty.get(), &c.interner)),
+                true => crate::fasl::fasl_lambda_at(ty.get(), &c.interner),
+            })
+        })?;
         // A value's making read globals, which its declaration reads too,
         // to have its effect; not under a `plambda`, which must be pure.
         let init = match value.filter(|_| !Self::names_its_word(&self.checker, exp)) {
@@ -3360,13 +3364,10 @@ impl Fx26Session {
     pub fn read_with_own_reader(&mut self, text: &str) -> R<Vec<Form>> {
         self.load_own_reader()?;
         self.scheme.set_step_limit(None);
-        let forms = crate::syn::read_with_fx26_reader(self.scheme.lowered(), &mut self.checker.interner, FileId(0), text);
+        let forms = crate::syn::read_with_fx26_reader(self.scheme.lowered(), &mut self.checker, FileId(0), text);
         self.scheme.set_step_limit(self.step_limit);
         let forms = forms?;
-        checking(&mut self.checker, &mut self.scheme, |c| {
-            let held = c.syn(|c| forms.iter().map(|f| Form::new(c.syn_of(f))).collect());
-            c.expand_forms(held)
-        })
+        checking(&mut self.checker, &mut self.scheme, |c| c.expand_forms(forms))
     }
 
     /// Parse `text` with the parser written in FX-26 (and its reader),
@@ -4572,7 +4573,7 @@ fn built_in_load_of(path: &str, text: &str, at: Span, c: &mut Checker) -> R<Opti
         return Ok(None);
     }
     let said = |e: FxError| FxError::at(at, format!("in `{path}`: {}", e.message));
-    let items = c.syn(|c| Ok::<_, FxError>(c.built_in_items(text)?.map(|items| items.iter().map(|i| fixpt_read::write_syntax(&i.to_syntax(), &c.interner)).collect::<Vec<_>>())));
+    let items = c.syn(|c| Ok::<_, FxError>(c.built_in_items(text)?.map(|items| items.iter().map(|i| i.written(&c.interner)).collect::<Vec<_>>())));
     let (body, expanded) = match items.map_err(said)? {
         None => (text.to_string(), false),
         Some(items) => (items.join("\n"), true),

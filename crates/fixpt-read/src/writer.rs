@@ -26,6 +26,14 @@ pub fn write_syntax_mapped(s: &Syntax, interner: &Interner) -> (String, Vec<(usi
     (out, map.unwrap_or_default())
 }
 
+/// An atom, `write`-style, onto `out`, as [`write_syntax`] writes it in a
+/// tree: for a tree of another kind's writer (the FX-26 front end's, of
+/// syntax in a heap), which walks lists and vectors itself.
+pub fn write_atom(out: &mut String, d: &Datum, interner: &Interner) {
+    assert!(!matches!(d, Datum::List { .. } | Datum::Vector(_)), "an atom");
+    put_datum(out, &Syntax::new(crate::Span::new(crate::FileId(0), 0, 0), d.clone()), interner, true, &mut None);
+}
+
 /// `display`-style: strings, characters and symbols rendered as their
 /// contents, with no escaping.
 pub fn display_syntax(s: &Syntax, interner: &Interner) -> String {

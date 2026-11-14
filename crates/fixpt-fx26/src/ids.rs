@@ -14,9 +14,9 @@
 use crate::ast::{Exp, ExpId, ModItem};
 use crate::check::Checker;
 use crate::top::Top;
-use fixpt_read::{Datum, Interner, Num, Syntax};
-use num_bigint::BigInt;
-use num_rational::BigRational;
+use crate::heap_syn::{Shape, Syn, V};
+use fixpt_heap::{ObjType, Value};
+use fixpt_read::Interner;
 use fixpt_hash::HashMap;
 
 /// A reading: a digest of the session's state before it, `s`, and the
@@ -27,9 +27,11 @@ use fixpt_hash::HashMap;
 /// that no space, comment, spelling or position tells two readings apart
 /// that mean the same: `readings.fx`'s `reading-of`, the same function.
 pub fn reading_of(s: i64, text: &str) -> Option<i64> {
-    let mut names = fixpt_read::Interner::new();
-    let trees = fixpt_read::Reader::new(text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut names).read_all().ok()?;
-    Some(trees_reading_of(s, &trees, &names))
+    let mut names = Interner::new();
+    crate::heap_syn::aside(|| {
+        let trees = crate::heap_syn::read_syn_unplaced(text, &mut names).ok()?;
+        Some(trees_reading_of(s, &trees, &names))
+    })
 }
 
 /// The switches a driver set that change what a check finds, as text, as
@@ -121,15 +123,17 @@ pub fn set_mode(m: Mode) -> bool {
 /// is set to, the form's trees, and each file the form loads first, by its
 /// key and its trees (or its text, if it does not read), in the order of
 /// the keys; never 0. The state after the form, which the next is read in.
-pub fn form_reading(s: i64, settings: &Settings, form: &Syntax, names: &Interner, loads: &[(String, String)]) -> i64 {
+///
+/// Of syntax lent (`crate::heap_syn`): the files it loads read there too.
+pub fn form_reading(s: i64, settings: &Settings, form: Syn, names: &Interner, loads: &[(String, String)]) -> i64 {
     let mut loads: Vec<&(String, String)> = loads.iter().collect();
     loads.sort_by(|a, b| a.0.cmp(&b.0));
     let h = fold_tree(fold_text(s & MASK, &settings.text()), form, names);
     let h = loads.iter().fold(h, |h, (key, file)| {
         let h = fold_run(h, 17, key);
         let mut names = Interner::new();
-        let h = match fixpt_read::Reader::new(file, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut names).read_all() {
-            Ok(trees) => trees.iter().fold(h, |h, t| fold_tree(h, t, &names)),
+        let h = match crate::heap_syn::read_syn_unplaced(file, &mut names) {
+            Ok(trees) => trees.into_iter().fold(h, |h, t| fold_tree(h, t, &names)),
             Err(_) => fold_text(h, file),
         };
         fold1(h, mark(0))
@@ -143,8 +147,10 @@ pub fn form_reading(s: i64, settings: &Settings, form: &Syntax, names: &Interner
 /// form leaves it as it was.
 pub fn forms_state(s: i64, settings: &Settings, text: &str, loads: &[Vec<(String, String)>]) -> Option<i64> {
     let mut names = Interner::new();
-    let forms = fixpt_read::Reader::new(text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut names).read_all().ok()?;
-    Some(forms.iter().enumerate().fold(s, |s, (i, f)| form_reading(s, settings, f, &names, loads.get(i).map_or(&[][..], |l| &l[..]))))
+    crate::heap_syn::aside(|| {
+        let forms = crate::heap_syn::read_syn_unplaced(text, &mut names).ok()?;
+        Some(forms.into_iter().enumerate().fold(s, |s, (i, f)| form_reading(s, settings, f, &names, loads.get(i).map_or(&[][..], |l| &l[..]))))
+    })
 }
 
 /// A session's state where its checker begins in the standard environment
@@ -177,8 +183,8 @@ impl State {
 }
 
 /// The reading of `trees`, read in `s`, their names in `names`.
-pub fn trees_reading_of(s: i64, trees: &[Syntax], names: &Interner) -> i64 {
-    let h = trees.iter().fold(s & MASK, |h, t| fold_tree(h, t, names));
+pub fn trees_reading_of(s: i64, trees: &[Syn], names: &Interner) -> i64 {
+    let h = trees.iter().fold(s & MASK, |h, t| fold_tree(h, *t, names));
     if h == 0 { 1 } else { h }
 }
 
@@ -210,43 +216,44 @@ fn fold_run(h: i64, m: i64, text: &str) -> i64 {
     fold1(fold_text(fold1(h, mark(m)), text), mark(0))
 }
 
-fn fold_tree(h: i64, t: &Syntax, names: &Interner) -> i64 {
-    let all = |h: i64, xs: &[Syntax]| xs.iter().fold(h, |h, x| fold_tree(h, x, names));
-    match &t.datum {
-        Datum::List { items, tail: None } => fold1(all(fold1(h, mark(1)), items), mark(2)),
-        Datum::List { items, tail: Some(tail) } => fold1(fold_tree(fold1(all(fold1(h, mark(3)), items), mark(4)), tail, names), mark(2)),
-        Datum::Vector(items) => fold1(all(fold1(h, mark(5)), items), mark(2)),
-        Datum::Nil => fold1(fold1(h, mark(1)), mark(2)),
-        Datum::Symbol(n) => fold_run(h, 6, names.name(*n)),
-        Datum::Keyword(n) => fold_run(h, 7, names.name(*n)),
-        Datum::Str(s) => fold_run(h, 8, s),
-        Datum::Char(c) => fold1(fold1(h, mark(9)), *c as i64),
-        Datum::Number(n @ (Num::Int(_) | Num::Big { .. })) => fold_run(h, 10, &integer(n).to_string()),
-        Datum::Number(Num::Real(x)) => fold_run(h, 11, &x.to_bits().to_string()),
-        Datum::Bool(b) => fold1(h, mark(if *b { 12 } else { 13 })),
-        Datum::Bytevector(bs) => fold1(bs.iter().fold(fold1(h, mark(14)), |h, b| fold1(h, *b as i64)), mark(0)),
-        // In lowest terms, as the FX-26 reader reads it and the Rust reader
-        // leaves it.
-        Datum::Number(Num::Ratio(a, b)) => {
-            let (a, b) = (integer(a), integer(b));
-            if b == BigInt::default() {
-                return fold1(h, mark(16));
+/// Tree `t` folded in, as `readings.fx`'s `fold-tree` folds it: an atom
+/// by what the reader made of it in the heap, as it has it (an integer
+/// first, so that `4/2` is `2`, as FX-26 reads it).
+fn fold_tree(h: i64, t: Syn, names: &Interner) -> i64 {
+    let all = |h: i64, xs: Vec<Syn>| xs.into_iter().fold(h, |h, x| fold_tree(h, x, names));
+    match t.shape() {
+        Shape::Nil => fold1(fold1(h, mark(1)), mark(2)),
+        Shape::List | Shape::Dotted | Shape::Vector => match t.view() {
+            V::List { items, tail: None } => fold1(all(fold1(h, mark(1)), items), mark(2)),
+            V::List { items, tail: Some(tail) } => fold1(fold_tree(fold1(all(fold1(h, mark(3)), items), mark(4)), tail, names), mark(2)),
+            V::Vector(items) => fold1(all(fold1(h, mark(5)), items), mark(2)),
+            _ => unreachable!("a list or a vector"),
+        },
+        Shape::Symbol(n) => fold_run(h, 6, names.name(n)),
+        Shape::Keyword(n) => fold_run(h, 7, names.name(n)),
+        _ => crate::heap_syn::rd(|r| {
+            let (heap, d) = (r.heap, crate::heap_syn::datum_of(r.heap, r.value(t)));
+            if d.is_fixnum() || heap.is_a(d, ObjType::Bignum) {
+                fold_run(h, 10, &fixpt_runtime::write_value(heap, d))
+            } else if heap.is_a(d, ObjType::Flonum) {
+                fold_run(h, 11, &heap.flonum_value(d).to_bits().to_string())
+            } else if heap.is_a(d, ObjType::Ratnum) {
+                let w = fixpt_runtime::write_value(heap, d);
+                let (a, b) = w.split_once('/').expect("a ratio written `a/b`");
+                fold_run(fold_run(h, 15, a), 15, b)
+            } else if heap.is_a(d, ObjType::String) {
+                fold_run(h, 8, &heap.string_to_rust(d))
+            } else if d.is_char() {
+                fold1(fold1(h, mark(9)), d.as_char() as i64)
+            } else if d == Value::TRUE || d == Value::FALSE {
+                fold1(h, mark(if d == Value::TRUE { 12 } else { 13 }))
+            } else if heap.is_a(d, ObjType::Bytevector) {
+                let bs = (0..heap.bytevector_len(d)).map(|i| heap.bytevector_ref(d, i));
+                fold1(bs.fold(fold1(h, mark(14)), |h, b| fold1(h, b as i64)), mark(0))
+            } else {
+                fold1(h, mark(16))
             }
-            let q = BigRational::new(a, b);
-            fold_run(fold_run(h, 15, &q.numer().to_string()), 15, &q.denom().to_string())
-        }
-    }
-}
-
-/// A number of the reader's that is an integer, as one.
-fn integer(n: &Num) -> BigInt {
-    match n {
-        Num::Int(n) => BigInt::from(*n),
-        Num::Big { negative, digits, radix } => {
-            let m = BigInt::parse_bytes(digits.as_bytes(), *radix).unwrap_or_default();
-            if *negative { -m } else { m }
-        }
-        Num::Ratio(..) | Num::Real(_) => BigInt::default(),
+        }),
     }
 }
 

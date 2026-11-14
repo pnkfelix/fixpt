@@ -8,18 +8,40 @@ use fixpt_read::{FileId, Reader, SyntaxProfile};
 
 mod common;
 
-/// Both readers on `text`, into the same interner, so the syntax compares
-/// whole: data, and every span. As read, not expanded: an expansion's
-/// renamed binders are new symbols each time.
+/// Both readers on `text`, into the same heap and interner, so the syntax
+/// compares whole: data, and every span. As read, not expanded: an
+/// expansion's renamed binders are new symbols each time.
 fn same_syntax(s: &mut Fx26Session, text: &str) {
-    s.load_own_reader().expect("loads");
-    let ours = fixpt_fx26::syn::read_with_fx26_reader(s.scheme.lowered(), &mut s.checker.interner, FileId(0), text)
-        .unwrap_or_else(|e| panic!("the FX-26 reader: {e}"));
-    let rust = Reader::new(text, FileId(0), SyntaxProfile::FX26, &mut s.checker.interner).read_all().expect("reads");
-    assert_eq!(ours.len(), rust.len(), "different numbers of forms");
-    for (a, b) in ours.iter().zip(&rust) {
-        assert_eq!(a, b, "the readers disagree");
+    use fixpt_fx26::heap_syn::{Syn, V};
+    fn same(a: Syn, b: Syn) {
+        assert_eq!(a.span(), b.span(), "the readers place `{:?}` apart", a.view());
+        match (a.view(), b.view()) {
+            (V::List { items, tail }, V::List { items: bs, tail: bt }) => {
+                assert_eq!(items.len(), bs.len(), "a list's length at {:?}", a.span());
+                items.into_iter().zip(bs).for_each(|(a, b)| same(a, b));
+                match (tail, bt) {
+                    (Some(a), Some(b)) => same(a, b),
+                    (None, None) => {}
+                    _ => panic!("a tail at {:?}", a.span()),
+                }
+            }
+            (V::Vector(items), V::Vector(bs)) => {
+                assert_eq!(items.len(), bs.len());
+                items.into_iter().zip(bs).for_each(|(a, b)| same(a, b));
+            }
+            (x, y) => assert_eq!(x, y, "the readers disagree at {:?}", a.span()),
+        }
     }
+    s.load_own_reader().expect("loads");
+    let ours = fixpt_fx26::syn::read_with_fx26_reader(s.scheme.lowered(), &mut s.checker, FileId(0), text)
+        .unwrap_or_else(|e| panic!("the FX-26 reader: {e}"));
+    s.checking(|c| {
+        let rust = fixpt_fx26::heap_syn::read_syn(text, FileId(0), &mut c.interner).expect("reads");
+        assert_eq!(ours.len(), rust.len(), "different numbers of forms");
+        for (a, b) in ours.iter().zip(rust) {
+            same(a.get(), b);
+        }
+    });
 }
 
 #[test]

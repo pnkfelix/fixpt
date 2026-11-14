@@ -78,7 +78,19 @@ trait (`fixpt_read::Build`).
    out as text (messages, `.fasl`s), in the spec tests, and for the forms
    FX-26's own reader reads (`syntax_of`, `syn_of`): stage 5's.
 5. `Syntax` gone from the FX-26 front end; the Rust checker timed on the
-   front end itself.
+   front end itself. Done 2026-11-13. Syntax is written as text by
+   `Syn::written` (the Rust reader's writer's atoms, `write_atom`). A
+   quote's constant is the quote's `Form` in the AST (the user's choice):
+   the lowering and the compilers read it where they run, the compilers
+   through `Checker::syn_in`, which lends the heap they compile into when
+   the checker's syntax is in it (a session's), so a session lowers inside
+   `checking`. What FX-26's own reader reads is the checker's as it is,
+   its symbols noted (`heap_syn::adopted`). A reading's digest
+   (`ids.rs`) folds `syn` read into a heap aside (the user's choice), its
+   atoms as the heap has them, as `readings.fx` folds them: `4/2` the
+   integer `2`. `Syntax` stays where it is not the front end's: the
+   Scheme the lowering makes (`Sx::syntax`), the other languages' front
+   ends, and tests that hold the readers to each other.
 
 The risk to watch: the Rust checker's speed, a heap's view dearer than a
 Rust tree. Measured after stage 2.

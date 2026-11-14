@@ -914,28 +914,36 @@ impl crate::check::Checker {
     /// shared, not written out, which for a file of many such parameters is
     /// most of its type), `E` and `R` the maker's effect and result. Named
     /// as `fasl_type` names a file loaded. None if `maker` is not so.
-    pub fn fasl_made(&self, name: fixpt_read::Sym, maker: &fixpt_read::Syntax) -> Option<String> {
+    pub fn fasl_made(&self, name: fixpt_read::Sym, maker: &crate::heap_syn::Form) -> Option<String> {
         use crate::ast::Ty;
+        use crate::heap_syn::Syn;
         let f = self.shared_files.get(&name)?;
         let Ty::Module { vals, .. } = self.arena.get(self.arena.resolve(f.ty?)).clone() else { return None };
         let [(_, mut t)] = vals[..] else { return None };
-        let w = |s: &fixpt_read::Syntax| fixpt_read::write_syntax(s, &self.interner);
-        let is = |s: &fixpt_read::Syntax, h: &str| s.as_symbol().is_some_and(|x| self.interner.name(x) == h);
-        let mut syn = maker;
-        let mut binders = None;
-        if let Some([head, bs, body]) = syn.as_proper_list()
-            && is(head, "plambda")
-        {
+        // The maker's binders and parameters, as it wrote them.
+        let (binders, names, params) = self.syn_ref(|c| {
+            let w = |s: Syn| s.written(&c.interner);
+            let is = |s: Syn, h: &str| s.sym().is_some_and(|x| c.interner.name(x) == h);
+            let mut syn = maker.get();
+            let mut binders = None;
+            if let Some(&[head, bs, body]) = syn.list().as_deref()
+                && is(head, "plambda")
+            {
+                binders = Some(w(bs));
+                syn = body;
+            }
+            let &[head, params, _body] = syn.list()?.as_slice() else { return None };
+            if !is(head, "lambda") {
+                return None;
+            }
+            let names: Vec<String> = params.list()?.iter().map(|p| Some(w(*p.list()?.first()?))).collect::<Option<_>>()?;
+            Some((binders, names, w(params)))
+        })?;
+        if binders.is_some() {
             let Ty::Poly { body: inner, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return None };
-            binders = Some(w(bs));
-            (syn, t) = (body, inner);
-        }
-        let [head, params, _body] = syn.as_proper_list()? else { return None };
-        if !is(head, "lambda") {
-            return None;
+            t = inner;
         }
         let Ty::Subr { effect, params: ptys, result, spec: None, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return None };
-        let names: Vec<String> = params.as_proper_list()?.iter().map(|p| Some(w(p.as_proper_list()?.first()?))).collect::<Option<_>>()?;
         if names.len() != ptys.len() {
             return None;
         }
@@ -969,7 +977,7 @@ impl crate::check::Checker {
         self.print_tys.borrow_mut().clear();
         *self.print_params.borrow_mut() = None;
         *self.print_for_fasl.borrow_mut() = None;
-        let lambda = format!("(lambda {} ((the {shown} %fasl-effects)))", w(params));
+        let lambda = format!("(lambda {params} ((the {shown} %fasl-effects)))");
         let made = match binders {
             Some(bs) => format!("(plambda {bs} {lambda})"),
             None => lambda,
@@ -1166,19 +1174,18 @@ impl crate::check::Checker {
 /// a type after selects from one (`(%p.1 : T)`), under a `plambda` of each
 /// `poly`'s binders. None if `ty` is no procedure's of a result alone (a
 /// specification's clauses after it, say).
-pub fn fasl_lambda_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) -> Option<String> {
-    let w = |s: &fixpt_read::Syntax| fixpt_read::write_syntax(s, interner);
-    let items = ty.as_proper_list()?;
-    let head = interner.name(items.first()?.as_symbol()?);
-    match (head, items) {
-        ("poly", [_, binders, body]) => Some(format!("(plambda {} {})", w(binders), fasl_lambda_at(body, interner)?)),
-        ("subr", [_, _, params, _]) | ("subr", [_, _, _, params, _]) => {
+pub fn fasl_lambda_at(ty: crate::heap_syn::Syn, interner: &fixpt_read::Interner) -> Option<String> {
+    let items = ty.list()?;
+    let head = interner.name(items.first()?.sym()?);
+    match (head, &items[..]) {
+        ("poly", &[_, binders, body]) => Some(format!("(plambda {} {})", binders.written(interner), fasl_lambda_at(body, interner)?)),
+        ("subr", &[_, _, params, _]) | ("subr", &[_, _, _, params, _]) => {
             let names: Vec<String> = params
-                .as_proper_list()?
+                .list()?
                 .iter()
                 .enumerate()
-                .map(|(i, p)| match p.as_proper_list() {
-                    Some([n, colon, _]) if colon.as_symbol().is_some_and(|c| interner.name(c) == ":") => w(n),
+                .map(|(i, p)| match p.list().as_deref() {
+                    Some(&[n, colon, _]) if colon.sym().is_some_and(|c| interner.name(c) == ":") => n.written(interner),
                     _ => format!("%a{}", i + 1),
                 })
                 .collect();
@@ -1193,10 +1200,10 @@ pub fn fasl_lambda_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) 
 /// `plambda` of each `poly`'s binders (a `poly`'s binder is no `poly`).
 /// Not `(the T %fasl-value)`, which would have both checkers read and
 /// resolve `T` again.
-pub fn fasl_value_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) -> String {
-    match ty.as_proper_list() {
-        Some([head, binders, body]) if head.as_symbol().is_some_and(|h| interner.name(h) == "poly") => {
-            format!("(plambda {} {})", fixpt_read::write_syntax(binders, interner), fasl_value_at(body, interner))
+pub fn fasl_value_at(ty: crate::heap_syn::Syn, interner: &fixpt_read::Interner) -> String {
+    match ty.list().as_deref() {
+        Some(&[head, binders, body]) if head.sym().is_some_and(|h| interner.name(h) == "poly") => {
+            format!("(plambda {} {})", binders.written(interner), fasl_value_at(body, interner))
         }
         _ => "%fasl-value".to_string(),
     }

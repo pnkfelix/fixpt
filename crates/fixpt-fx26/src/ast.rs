@@ -859,7 +859,7 @@ pub enum Exp {
     /// a constant, made once and interned, of type `ty`, `(listof datum
     /// acyclic)` for a proper list and `datum` else (TODO §229). Its atoms
     /// are literals, symbols and keywords, its integers fixnums.
-    Quote { datum: std::sync::Arc<fixpt_read::Syntax>, ty: TyId },
+    Quote { datum: crate::heap_syn::Form, ty: TyId },
     Unit,
     /// A parameter's type may be left out when the `lambda` is checked
     /// against a type that supplies it.

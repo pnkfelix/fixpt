@@ -67,6 +67,37 @@ impl Sx {
     }
 }
 
+/// Constant `x`, a quote's (`Exp::Quote`), as Scheme data, its syntax lent
+/// (`crate::heap_syn`): what the compilers make once (`quote_value`,
+/// `c-quote-cell`), and the lowering quotes.
+pub fn datum_sx(x: crate::heap_syn::Syn, interner: &Interner) -> Sx {
+    use crate::heap_syn::V;
+    match x.view() {
+        V::Bool(b) => Sx::Bool(b),
+        V::Char(c) => Sx::Char(c),
+        V::Nil => Sx::List(Vec::new()),
+        V::Number(fixpt_read::Num::Int(n)) => Sx::int(n),
+        V::Number(fixpt_read::Num::Real(f)) => Sx::Float(f),
+        V::Str(t) => Sx::Str(t),
+        // `#t` and `#f` are literals, as the FX-26 reader gives them.
+        V::Symbol(n) => match interner.name(n) {
+            "#t" => Sx::Bool(true),
+            "#f" => Sx::Bool(false),
+            name => Sx::sym(name),
+        },
+        V::Keyword(n) => Sx::Keyword(interner.name(n).to_string()),
+        V::List { items, tail } => {
+            let items = items.into_iter().map(|i| datum_sx(i, interner)).collect();
+            match tail {
+                Some(t) => Sx::Dotted(items, Box::new(datum_sx(t, interner))),
+                None => Sx::List(items),
+            }
+        }
+        V::Vector(items) => Sx::Vector(items.into_iter().map(|i| datum_sx(i, interner)).collect()),
+        V::Number(_) | V::Bytevector(_) => unreachable!("refused by the parser (`constant_atoms`)"),
+    }
+}
+
 /// A number the lowering wrote, as the reader reads it.
 fn number(text: &str) -> fixpt_read::Num {
     fixpt_read::reader::parse_number(text, 10, None).unwrap_or_else(|| panic!("`{text}` reads as a number"))

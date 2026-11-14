@@ -714,32 +714,8 @@ impl Lowerer<'_> {
 
     /// Constant `x`, a quote's (`Exp::Quote`), as Scheme data: what the
     /// compilers make once (`quote_value`, `c-quote-cell`).
-    fn datum_sx(&self, x: &fixpt_read::Syntax) -> Sx {
-        use fixpt_read::{Datum, Num};
-        match &x.datum {
-            Datum::Bool(b) => Sx::Bool(*b),
-            Datum::Char(c) => Sx::Char(*c),
-            Datum::Nil => Sx::List(Vec::new()),
-            Datum::Number(Num::Int(n)) => Sx::int(*n),
-            Datum::Number(Num::Real(f)) => Sx::Float(*f),
-            Datum::Str(t) => Sx::Str(t.clone()),
-            // `#t` and `#f` are literals, as the FX-26 reader gives them.
-            Datum::Symbol(n) => match self.c.interner.name(*n) {
-                "#t" => Sx::Bool(true),
-                "#f" => Sx::Bool(false),
-                name => Sx::sym(name),
-            },
-            Datum::Keyword(n) => Sx::Keyword(self.c.interner.name(*n).to_string()),
-            Datum::List { items, tail } => {
-                let items = items.iter().map(|i| self.datum_sx(i)).collect();
-                match tail {
-                    Some(t) => Sx::Dotted(items, Box::new(self.datum_sx(t))),
-                    None => Sx::List(items),
-                }
-            }
-            Datum::Vector(items) => Sx::Vector(items.iter().map(|i| self.datum_sx(i)).collect()),
-            Datum::Number(_) | Datum::Bytevector(_) => unreachable!("refused by the parser (`constant_atoms`)"),
-        }
+    fn datum_sx(&self, x: &crate::heap_syn::Form) -> Sx {
+        self.c.syn_ref(|c| crate::sx::datum_sx(x.get(), &c.interner))
     }
 
     fn body(&mut self, bound: &[Sym], e: ExpId) -> Sx {

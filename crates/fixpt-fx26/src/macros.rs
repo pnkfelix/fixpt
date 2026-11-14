@@ -1281,7 +1281,7 @@ impl Macros {
     /// Procedural macro `name`, its transformer `code` checked at its
     /// style's type in the transformers' session (`procedural::run`).
     fn define_procedural(&mut self, name: Sym, style: procedural::Style, code: &Syn, def_env: hygiene::DefEnv, interner: &mut Interner) -> R<Vec<Sym>> {
-        let text = fixpt_read::write_syntax(&code.to_syntax(), interner);
+        let text = code.written(interner);
         procedural::run(&procedural::checked(style, &text)).map_err(|e| FxError::at(code.at(), format!("`{}`'s transformer: {e}", interner.name(name))))?;
         let p = procedural::Procedural { style, code: text, def_env };
         let m = Macro { sig: Rc::new(STy::Expr), defn: false, desc: false, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: Some(Rc::new(p)) };
@@ -1808,7 +1808,7 @@ impl Macros {
     fn expand_procedural(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, interner: &mut Interner) -> R<Syn> {
         let made = fixpt_read::record_expansion(interner.name(name), s.span(), None);
         self.withs.def_envs.insert(made, p.def_env.clone());
-        let form = fixpt_read::write_syntax(&s.to_syntax(), interner);
+        let form = s.written(interner);
         let said = |e: String| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name)));
         let out = procedural::run(&procedural::applied(p.style, &p.code, &form, made)).map_err(said)?;
         let read = crate::heap_syn::read_syn_unplaced(&out, interner);
@@ -2895,7 +2895,7 @@ impl Aligner<'_> {
     }
 
     fn show(&self, s: &Syn) -> String {
-        fixpt_read::write_syntax(&s.to_syntax(), self.interner)
+        s.written(self.interner)
     }
 
     /// The tree under `at`, walked with environment `env` (innermost first):

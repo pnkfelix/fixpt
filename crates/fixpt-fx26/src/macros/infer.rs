@@ -570,7 +570,7 @@ impl Macros {
             }
             let (tys, mu_parts) = self.build(&parts, &sol);
             let shown: Vec<Syn> = tys.iter().zip(us).map(|(t, u)| self.shown_sty(t, u.span, interner, &mut Vec::new())).collect();
-            let strings: Vec<String> = shown.iter().map(|s| fixpt_read::write_syntax(&s.to_syntax(), interner)).collect();
+            let strings: Vec<String> = shown.iter().map(|s| s.written(interner)).collect();
             if last.as_ref().is_some_and(|(l, _)| *l == strings) {
                 return Ok(shown);
             }
@@ -1257,7 +1257,7 @@ impl Macros {
 /// `(bvar . (import expr (rho (A var))))`, which a list's printing would
 /// run into its elements.
 pub(super) fn sig_text(s: &Syn, interner: &Interner) -> String {
-    let V::List { items, tail } = &s.view() else { return fixpt_read::write_syntax(&s.to_syntax(), interner) };
+    let V::List { items, tail } = &s.view() else { return s.written(interner) };
     let words = ["import", "export", "union", "mu", "many", "literal"];
     let mut out = String::from("(");
     for (k, i) in items.iter().enumerate() {
@@ -1376,13 +1376,13 @@ mod tests {
                     let made = if defn { "defn" } else { "type" };
                     w = Syn::lst(f.at(), vec![Syn::named(f.at(), "->", &mut interner), w, Syn::named(f.at(), made, &mut interner)]);
                 }
-                let w = fixpt_read::write_syntax(&w.to_syntax(), &interner);
+                let w = w.written(&interner);
                 let mut lits = Vec::new();
                 literals(&items[2], &interner, &mut lits);
                 let u = Unsigned { name, lits, clauses: rules[2..].to_vec(), span: f.at() };
                 match m.infer(&[u], &mut interner) {
                     Ok(s) => {
-                        let i = fixpt_read::write_syntax(&s[0].to_syntax(), &interner);
+                        let i = s[0].written(&interner);
                         if i == w { same.push(label) } else { other.push(format!("{label}\n    written  {w}\n    inferred {i}")) }
                     }
                     Err(e) => failed.push(format!("{label}: {}", e.message)),

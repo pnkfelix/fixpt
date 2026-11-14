@@ -2991,49 +2991,45 @@ impl<'a> Compiler<'a> {
     /// Constant `x`, a quote's (`Exp::Quote`), made now and interned
     /// (`Heap::intern_datum`): the one object equal to it, at every copy of
     /// the quote and every quote of it. As `c-quote-cell`.
-    pub(crate) fn quote_value(&mut self, x: &fixpt_read::Syntax) -> Value {
-        let v = self.datum_value(x);
+    pub(crate) fn quote_value(&mut self, x: &crate::heap_syn::Form) -> Value {
+        let sx = self.c.syn_in(self.heap, |c| crate::sx::datum_sx(x.get(), &c.interner));
+        let v = self.datum_value(&sx);
         self.heap.intern_datum(v)
     }
 
     /// Datum `x` in the heap, as a reader makes it: its atoms those the
     /// parser lets a constant have (`Checker::constant_atoms`).
-    fn datum_value(&mut self, x: &fixpt_read::Syntax) -> Value {
-        use fixpt_read::{Datum as D, Num};
-        match &x.datum {
-            D::Bool(b) => Value::boolean(*b),
-            D::Char(c) => Value::char(*c),
-            D::Nil => Value::NULL,
-            D::Number(Num::Int(n)) => Value::fixnum(*n),
-            D::Number(Num::Real(f)) => self.heap.make_flonum(*f),
-            D::Str(t) => self.heap.make_string(t),
-            // `#t` and `#f` are literals, as the FX-26 reader gives them.
-            D::Symbol(n) => match self.c.interner.name(*n) {
-                "#t" => Value::TRUE,
-                "#f" => Value::FALSE,
-                name => self.heap.intern(name),
-            },
-            D::Keyword(n) => {
-                let s = self.heap.intern(self.c.interner.name(*n));
+    fn datum_value(&mut self, x: &crate::sx::Sx) -> Value {
+        use crate::sx::Sx;
+        match x {
+            Sx::Bool(b) => Value::boolean(*b),
+            Sx::Char(c) => Value::char(*c),
+            Sx::Int(n) => Value::fixnum(i64::try_from(*n).expect("a reader's integer")),
+            Sx::Float(f) => self.heap.make_flonum(*f),
+            Sx::Str(t) => self.heap.make_string(t),
+            Sx::Sym(name) => self.heap.intern(name),
+            Sx::Keyword(n) => {
+                let s = self.heap.intern(n);
                 self.heap.make_keyword(s)
             }
-            D::List { items, tail } => {
-                let mut acc = match tail {
-                    Some(t) => self.datum_value(t),
-                    None => Value::NULL,
-                };
-                for item in items.iter().rev() {
-                    let v = self.datum_value(item);
-                    acc = self.heap.cons(v, acc);
-                }
-                acc
+            Sx::List(items) => self.list_value(items, Value::NULL),
+            Sx::Dotted(items, tail) => {
+                let t = self.datum_value(tail);
+                self.list_value(items, t)
             }
-            D::Vector(items) => {
+            Sx::Vector(items) => {
                 let vs: Vec<Value> = items.iter().map(|i| self.datum_value(i)).collect();
                 self.heap.vector_from(&vs)
             }
-            D::Number(_) | D::Bytevector(_) => unreachable!("refused by the parser (`constant_atoms`)"),
         }
+    }
+
+    /// `items`, consed onto `tail`.
+    fn list_value(&mut self, items: &[crate::sx::Sx], tail: Value) -> Value {
+        items.iter().rev().fold(tail, |acc, item| {
+            let v = self.datum_value(item);
+            self.heap.cons(v, acc)
+        })
     }
 
     /// What `x` is, as constant data, where its names are `env`'s values:

@@ -137,6 +137,18 @@ struct FormSlots {
 
 impl SymTable {
     /// The heap's symbol of `s`, `interner`'s: interned, and noted.
+    /// Heap symbol `v` noted, as the checker's: of syntax a builder did
+    /// not make ([`adopted`]).
+    fn note(&mut self, heap: &Heap, v: Value, interner: &mut Interner) {
+        let slot = heap.symbol_global_slot(v);
+        if self.by_slot.len() <= slot {
+            self.by_slot.resize(slot + 1, None);
+        }
+        if self.by_slot[slot].is_none() {
+            self.by_slot[slot] = Some(interner.intern(&heap.symbol_name(v)));
+        }
+    }
+
     pub fn heap_symbol(&mut self, heap: &mut Heap, interner: &Interner, s: Sym) -> Value {
         let now = heap.collections();
         if self.by_sym.0 != now {
@@ -345,6 +357,11 @@ impl<'a> Rd<'a> {
     fn atom(self, s: Syn) -> Option<Value> {
         let (k, p) = self.variant(s);
         (k == Variant::Atom).then(|| self.heap.product_field(p, 1))
+    }
+
+    /// `s` itself, the heap's value.
+    pub fn value(self, s: Syn) -> Value {
+        s.value(self.heap)
     }
 
     /// `s`'s symbol, if it is one.
@@ -1081,10 +1098,39 @@ impl Syn {
         fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, Syn>(|heap, syms| Mk::with(heap, None, syms).at(self, at))
     }
 
-    /// It as the Rust reader's `Syntax`, spans and all.
-    pub fn to_syntax(self) -> fixpt_read::Syntax {
-        let span = self.span();
-        let datum = match self.view() {
+    /// It written, as the Rust reader's writer writes what it reads
+    /// (`fixpt_read::write_syntax`): for messages, and the texts the
+    /// front end makes of syntax (a `.fasl`'s, a test's).
+    pub fn written(self, interner: &Interner) -> String {
+        let mut out = String::new();
+        self.write_onto(&mut out, interner);
+        out
+    }
+
+    fn write_onto(self, out: &mut String, interner: &Interner) {
+        let all = |out: &mut String, items: Vec<Syn>| {
+            for (i, x) in items.into_iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                x.write_onto(out, interner);
+            }
+        };
+        let d = match self.view() {
+            V::List { items, tail } => {
+                out.push('(');
+                all(out, items);
+                if let Some(t) = tail {
+                    out.push_str(" . ");
+                    t.write_onto(out, interner);
+                }
+                return out.push(')');
+            }
+            V::Vector(items) => {
+                out.push_str("#(");
+                all(out, items);
+                return out.push(')');
+            }
             V::Bool(b) => Datum::Bool(b),
             V::Number(n) => Datum::Number(n),
             V::Char(c) => Datum::Char(c),
@@ -1092,36 +1138,9 @@ impl Syn {
             V::Symbol(s) => Datum::Symbol(s),
             V::Keyword(s) => Datum::Keyword(s),
             V::Nil => Datum::Nil,
-            V::List { items, tail } => Datum::List { items: items.into_iter().map(Syn::to_syntax).collect(), tail: tail.map(|t| Box::new(t.to_syntax())) },
-            V::Vector(items) => Datum::Vector(items.into_iter().map(Syn::to_syntax).collect()),
             V::Bytevector(b) => Datum::Bytevector(b),
         };
-        fixpt_read::Syntax::new(span, datum)
-    }
-
-    /// `Syntax` `s` as `syn`, at its places ([`at_of`]).
-    pub fn from_syntax(s: &fixpt_read::Syntax, interner: &Interner) -> Syn {
-        let at = at_of(s.span);
-        let v = match &s.datum {
-            Datum::Bool(b) => V::Bool(*b),
-            Datum::Number(n) => V::Number(n.clone()),
-            Datum::Char(c) => V::Char(*c),
-            Datum::Str(x) => V::Str(x.clone()),
-            Datum::Symbol(x) => V::Symbol(*x),
-            Datum::Keyword(x) => V::Keyword(*x),
-            Datum::Nil => V::Nil,
-            Datum::Bytevector(b) => V::Bytevector(b.clone()),
-            Datum::List { items, tail } => {
-                let items: Vec<Syn> = items.iter().map(|i| Syn::from_syntax(i, interner)).collect();
-                let tail = tail.as_deref().map(|t| Syn::from_syntax(t, interner));
-                return Syn::of_list(at, &items, tail);
-            }
-            Datum::Vector(items) => {
-                let items: Vec<Syn> = items.iter().map(|i| Syn::from_syntax(i, interner)).collect();
-                return mk(interner, |m| m.vector(at, &items));
-            }
-        };
-        Syn::new(at, v, interner)
+        fixpt_read::write_atom(out, &d, interner)
     }
 }
 
@@ -1266,6 +1285,41 @@ impl Form {
     pub fn span(&self) -> Span {
         span_of(self.0.at)
     }
+}
+
+/// `v`, `syn` that FX-26 made (its reader's), in the heap lent, as the
+/// checker's, as it is: each symbol in it noted ([`SymTable`]), so that it
+/// reads as what a builder made; or why not, an atom FX-26 does not read.
+pub fn adopted(v: Value, interner: &mut Interner) -> Result<Syn, String> {
+    fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, _>(|heap, syms| {
+        let s = Syn::of(heap, v);
+        let mut todo = vec![s];
+        while let Some(x) = todo.pop() {
+            let rd = Rd { heap: &*heap, syms: &*syms };
+            match rd.view_shallow(x) {
+                Shallow::List(items, tail) => todo.extend(items.into_iter().chain(tail)),
+                Shallow::Vector(items) => todo.extend(items),
+                Shallow::Atom => {
+                    let d = rd.atom(x).expect("an atom");
+                    let sym = if heap.is_a(d, ObjType::Symbol) {
+                        Some(d)
+                    } else if heap.is_keyword(d) {
+                        Some(heap.keyword_symbol(d))
+                    } else {
+                        None
+                    };
+                    let read = d.is_fixnum() || d == Value::TRUE || d == Value::FALSE || d.is_char()
+                        || [ObjType::String, ObjType::Bytevector, ObjType::Flonum, ObjType::Bignum].iter().any(|t| heap.is_a(d, *t));
+                    match sym {
+                        Some(v) => syms.note(heap, v, interner),
+                        None if read => {}
+                        None => return Err(format!("a datum FX-26 does not read: {}", fixpt_runtime::write_value(heap, d))),
+                    }
+                }
+            }
+        }
+        Ok(s)
+    })
 }
 
 /// How many pieces of syntax `heap` holds ([`Kept`]).

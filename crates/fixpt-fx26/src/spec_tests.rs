@@ -28,7 +28,8 @@
 use crate::ast::{Atom, Named, Spec, Ty, TyId};
 use crate::logic::{Expr, Formula};
 use crate::session::Fx26Session;
-use fixpt_read::{Datum, FileId};
+use crate::heap_syn::{Syn, V};
+use fixpt_read::FileId;
 
 /// What testing one procedure found.
 #[derive(Debug)]
@@ -71,13 +72,9 @@ pub fn test_program(session: &mut Fx26Session, text: &str, runs: usize) -> Resul
     let (checked, defined) = instrumented(session, text)?;
     // Its definitions, then each expression of its own, apart: one in which
     // a specification does not hold is a counterexample, the program's.
-    let forms: Vec<fixpt_read::Syntax> = session.checking(|c| c.read_in(FileId(0), &checked).map(|fs| fs.iter().map(|f| c.syntax_of(f)).collect())).map_err(|e| e.message)?;
-    let piece = |f: &fixpt_read::Syntax| &checked[f.span.start as usize..f.span.end as usize];
-    let defines = |f: &fixpt_read::Syntax| match &f.datum {
-        Datum::List { items, .. } => items.first().and_then(|h| h.as_symbol()).is_some_and(|h| session.checker.interner.name(h).starts_with("define")),
-        _ => false,
-    };
-    let (defs, exps): (Vec<&fixpt_read::Syntax>, Vec<&fixpt_read::Syntax>) = forms.iter().partition(|f| defines(f));
+    let forms = definitions_of(session, &checked)?;
+    let piece = |(f, _): &(fixpt_read::Span, bool)| &checked[f.start as usize..f.end as usize];
+    let (defs, exps): (Vec<_>, Vec<_>) = forms.iter().partition(|(_, defines)| *defines);
     let defs: String = defs.iter().map(|f| format!("{}\n", piece(f))).collect();
     let exps: Vec<String> = exps.iter().map(|f| piece(f).to_string()).collect();
     if let Err(e) = session.run_program(&defs).map_err(|e| e.message)? {
@@ -125,15 +122,15 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
             c.top_all(f).map_err(|e| e.message)?;
         }
     }
-    let forms: Vec<fixpt_read::Syntax> = forms.iter().map(|f| c.syntax_of(f)).collect();
     let mut names: Vec<(String, Vec<String>)> = Vec::new();
     // Each body replaced, by where it is; each copy, after its form.
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
-    for f in &forms {
-        let Datum::List { items, .. } = &f.datum else { continue };
-        let Some(head) = items.first().and_then(|h| h.as_symbol()) else { continue };
+    c.syn_ref(|c| for f in &forms {
+        let f = f.get();
+        let V::List { items, .. } = f.view() else { continue };
+        let Some(head) = items.first().and_then(|h| h.sym()) else { continue };
         let head = c.interner.name(head).to_string();
-        let (Some(n), true) = (items.get(1).and_then(|n| n.as_symbol()), matches!(head.as_str(), "define" | "define*")) else { continue };
+        let (Some(n), true) = (items.get(1).and_then(|n| n.sym()), matches!(head.as_str(), "define" | "define*")) else { continue };
         let name = c.interner.name(n).to_string();
         let k = match names.iter().position(|(m, _)| *m == name) {
             Some(k) => k,
@@ -143,18 +140,18 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
             }
         };
         let Some(lambda) = items.last() else { continue };
-        let Datum::List { items: parts, .. } = &lambda.datum else { continue };
+        let V::List { items: parts, .. } = lambda.view() else { continue };
         let ([lam, params, body @ ..], false) = (&parts[..], parts.len() < 3) else { continue };
-        if lam.as_symbol().map(|l| c.interner.name(l)) != Some("lambda") {
+        if lam.sym().map(|l| c.interner.name(l)) != Some("lambda") {
             continue;
         }
-        let ps: Vec<String> = match &params.datum {
-            Datum::Nil => Vec::new(),
-            Datum::List { items, tail: None } => items
+        let ps: Vec<String> = match params.view() {
+            V::Nil => Vec::new(),
+            V::List { items, tail: None } => items
                 .iter()
-                .map(|p| match &p.datum {
-                    Datum::Symbol(x) => Some(c.interner.name(*x).to_string()),
-                    Datum::List { items, .. } => items.first().and_then(|x| x.as_symbol()).map(|x| c.interner.name(x).to_string()),
+                .map(|p| match p.view() {
+                    V::Symbol(x) => Some(c.interner.name(x).to_string()),
+                    V::List { items, .. } => items.first().and_then(|x| x.sym()).map(|x| c.interner.name(x).to_string()),
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()
@@ -166,8 +163,8 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
         if ps.len() != spec.params.len() {
             continue;
         }
-        let (first, last) = (body[0].span.start as usize, body[body.len() - 1].span.end as usize);
-        let checks = |which: &str, f: &Formula<Named>| format!("(if {} #u (error \"the {which} of {name} does not hold\"))", source(&c, f, &ps));
+        let (first, last) = (body[0].span().start as usize, body[body.len() - 1].span().end as usize);
+        let checks = |which: &str, f: &Formula<Named>| format!("(if {} #u (error \"the {which} of {name} does not hold\"))", source(c, f, &ps));
         // The body's value at the result's type, as the type had it there.
         let result = match c.arena.get(c.arena.resolve(c.global_type(n).expect("typed"))) {
             crate::ast::Ty::Subr { result, .. } => c.show_ty(*result),
@@ -188,22 +185,34 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
         let mut called = Vec::new();
         calls_in(&spec.requires, &mut called);
         calls_in(&spec.ensures, &mut called);
-        if let (false, [_, _, ty, _]) = (called.is_empty(), &items[..]) {
+        if let (false, &[_, _, ty, _]) = (called.is_empty(), &items[..]) {
             let bound: String = called.iter().map(|g| format!("({0} {0})", c.interner.name(*g))).collect::<Vec<_>>().join(" ");
-            let ty = &text[ty.span.start as usize..ty.span.end as usize];
-            edits.push((lambda.span.start as usize, lambda.span.start as usize, format!("(let ({bound}) (letrec (({name} {ty} ")));
-            edits.push((lambda.span.end as usize, lambda.span.end as usize, format!(")) {name}))")));
+            let (ty, lambda) = (ty.span(), lambda.span());
+            let ty = &text[ty.start as usize..ty.end as usize];
+            edits.push((lambda.start as usize, lambda.start as usize, format!("(let ({bound}) (letrec (({name} {ty} ")));
+            edits.push((lambda.end as usize, lambda.end as usize, format!(")) {name}))")));
         }
-        let end = f.span.end as usize;
-        let plain = format!("\n({head} {PLAIN}{name}{}", &text[items[1].span.end as usize..end]);
+        let end = f.span().end as usize;
+        let plain = format!("\n({head} {PLAIN}{name}{}", &text[items[1].span().end as usize..end]);
         edits.push((end, end, plain));
-    }
+    });
     edits.sort_by_key(|(a, b, _)| std::cmp::Reverse((*a, *b)));
     let mut out = text.to_string();
     for (a, b, r) in edits {
         out.replace_range(a..b, &r);
     }
     Ok((out, names))
+}
+
+/// Each form of `text`, read in `session`: where it is, and whether it
+/// defines (its head a `define…`).
+fn definitions_of(session: &mut Fx26Session, text: &str) -> Result<Vec<(fixpt_read::Span, bool)>, String> {
+    session
+        .checking(|c| {
+            let forms = c.read_in(FileId(0), text)?;
+            Ok(forms.iter().map(|f| (f.span(), c.syn_ref(|c| f.get().head().and_then(Syn::sym).is_some_and(|h| c.interner.name(h).starts_with("define"))))).collect())
+        })
+        .map_err(|e: crate::FxError| e.message.into())
 }
 
 /// The logic functions `f` calls (`Named::Call`), each once, onto `out`.
@@ -444,12 +453,8 @@ fn callable(session: &Fx26Session, name: &str, params: &[String]) -> Option<(Vec
 /// it defines, each with its `lambda`'s parameters.
 pub fn replaying(session: &mut Fx26Session, text: &str) -> Result<Vec<(String, Vec<String>)>, String> {
     let (checked, defined) = instrumented(session, text)?;
-    let forms: Vec<fixpt_read::Syntax> = session.checking(|c| c.read_in(FileId(0), &checked).map(|fs| fs.iter().map(|f| c.syntax_of(f)).collect())).map_err(|e| e.message)?;
-    let defines = |f: &fixpt_read::Syntax| match &f.datum {
-        Datum::List { items, .. } => items.first().and_then(|h| h.as_symbol()).is_some_and(|h| session.checker.interner.name(h).starts_with("define")),
-        _ => false,
-    };
-    let defs: String = forms.iter().filter(|f| defines(f)).map(|f| format!("{}\n", &checked[f.span.start as usize..f.span.end as usize])).collect();
+    let forms = definitions_of(session, &checked)?;
+    let defs: String = forms.iter().filter(|(_, defines)| *defines).map(|(f, _)| format!("{}\n", &checked[f.start as usize..f.end as usize])).collect();
     if let Err(e) = session.run_program(&defs).map_err(|e| e.message)? {
         return Err(format!("the program's definitions fail: {e}"));
     }

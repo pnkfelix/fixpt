@@ -12,15 +12,18 @@ use crate::ids::State;
 use crate::session::READER_PREFIX;
 use fixpt_heap::Value;
 use crate::heap_syn::Syn;
-use fixpt_read::{Datum, FileId, Interner, Num, Span, Syntax};
+use fixpt_read::{FileId, Interner, Span};
 use crate::front::Front;
 use fixpt_scheme::{Handle, Local, Session};
 use fixpt_scheme::eager::EagerReader;
 use fixpt_hash::HashMap;
 
 /// Read `text` with the FX-26 reader, already loaded into `scheme` (see
-/// [`crate::session::load_eager_reader`]), interning names in `interner`.
-pub fn read_with_fx26_reader(scheme: &mut Session, interner: &mut Interner, file: FileId, text: &str) -> R<Vec<Syntax>> {
+/// [`crate::session::load_eager_reader`]): the `syn` it makes, as it is,
+/// the checker's forms, `checker` a session's of `scheme`'s heap
+/// (`Checker::in_session_heap`), its names noted
+/// ([`crate::heap_syn::adopted`]). Not expanded.
+pub fn read_with_fx26_reader(scheme: &mut Session, checker: &mut crate::Checker, file: FileId, text: &str) -> R<Vec<crate::heap_syn::Form>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut reader =
         EagerReader::attach_starting(scheme, READER_PREFIX, "eager-start-fx26").map_err(|e| fail(e.to_string()))?;
@@ -48,10 +51,23 @@ pub fn read_with_fx26_reader(scheme: &mut Session, interner: &mut Interner, file
             }
         }
         let syns = call(s, "eager-state-syntax")?;
-        s.view(|v| {
-            let items = v.get(syns).list().expect("a list");
-            items.into_iter().map(|x| to_syntax(interner, file, &at, x)).collect()
-        })
+        crate::heap_syn::note_text(file, std::sync::Arc::from(text));
+        let mut forms = Ok(Vec::new());
+        s.make(|m| {
+            let mut l = m.get(syns);
+            let heap = m.heap();
+            let mut items = Vec::new();
+            while l.is_pair() {
+                items.push(heap.car(l));
+                l = heap.cdr(l);
+            }
+            forms = checker.with_heap(heap, |c| {
+                let held = items.iter().map(|&v| crate::heap_syn::adopted(v, &mut c.interner).map(crate::heap_syn::Form::new));
+                held.collect::<Result<Vec<_>, _>>().map_err(|e| FxError::at(Span::new(file, 0, 0), e))
+            });
+            fixpt_heap::Value::NULL
+        });
+        forms
     })
 }
 
@@ -1411,82 +1427,6 @@ fn byte_offsets(text: &str) -> Vec<usize> {
     let mut v: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
     v.push(text.len());
     v
-}
-
-/// Value `i` (from 0) of a product: its field `i + 1`.
-fn part(product: Local<'_>, i: usize) -> Local<'_> {
-    product.value(i).expect("a product's field")
-}
-
-fn to_syntax(interner: &mut Interner, file: FileId, at: &dyn Fn(i64) -> u32, s: Local<'_>) -> R<Syntax> {
-    let tag = s.sum_tag().and_then(|t| t.symbol_name()).unwrap_or_default();
-    let p = s.sum_payload().expect("a sum");
-    let span = |a: Local<'_>, b: Local<'_>| Span::new(file, at(a.fixnum().unwrap_or(0)), at(b.fixnum().unwrap_or(0)));
-    let many = |interner: &mut Interner, list: Local<'_>| -> R<Vec<Syntax>> {
-        let items = list.list().expect("a list");
-        items.into_iter().map(|x| to_syntax(interner, file, at, x)).collect()
-    };
-    match tag.as_str() {
-        "atom" => {
-            let sp = span(part(p, 1), part(p, 2));
-            let d = atom(interner, part(p, 0)).ok_or_else(|| FxError::at(sp, "a datum FX-26 does not read"))?;
-            Ok(Syntax::new(sp, d))
-        }
-        "lst" => {
-            let sp = span(part(p, 2), part(p, 3));
-            let items = many(interner, part(p, 0))?;
-            Ok(if items.is_empty() { Syntax::new(sp, Datum::Nil) } else { Syntax::new(sp, Datum::List { items, tail: None }) })
-        }
-        "dotted" => {
-            let sp = span(part(p, 3), part(p, 4));
-            let items = many(interner, part(p, 0))?;
-            let tail = to_syntax(interner, file, at, part(p, 1))?;
-            Ok(Syntax::new(sp, Datum::List { items, tail: Some(Box::new(tail)) }))
-        }
-        "vec" => {
-            let sp = span(part(p, 2), part(p, 3));
-            Ok(Syntax::new(sp, Datum::Vector(many(interner, part(p, 0))?)))
-        }
-        other => unreachable!("the reader makes no `{other}`"),
-    }
-}
-
-/// A datum that is not a list, as the Rust reader would have it.
-fn atom(interner: &mut Interner, v: Local<'_>) -> Option<Datum> {
-    if let Some(n) = v.fixnum() {
-        return Some(Datum::Number(Num::Int(n)));
-    }
-    // A bignum: as the Rust reader has an integer, a word's if it fits one.
-    if v.obj_type() == Some(fixpt_heap::ObjType::Bignum) {
-        let written = v.write();
-        let (negative, digits) = match written.strip_prefix('-') {
-            Some(d) => (true, d.to_string()),
-            None => (false, written.clone()),
-        };
-        return Some(Datum::Number(match written.parse::<i64>() {
-            Ok(n) => Num::Int(n),
-            Err(_) => Num::Big { negative, digits, radix: 10 },
-        }));
-    }
-    if v.is_true() || v.is_false() {
-        return Some(Datum::Bool(v.is_true()));
-    }
-    if let Some(c) = v.char() {
-        return Some(Datum::Char(c));
-    }
-    if let Some(n) = v.symbol_name() {
-        return Some(Datum::Symbol(interner.intern(&n)));
-    }
-    if let Some(n) = v.keyword_name() {
-        return Some(Datum::Keyword(interner.intern(&n)));
-    }
-    if let Some(s) = v.string() {
-        return Some(Datum::Str(s));
-    }
-    if let Some(b) = v.bytevector() {
-        return Some(Datum::Bytevector(b));
-    }
-    v.flonum().map(|f| Datum::Number(Num::Real(f)))
 }
 
 #[cfg(test)]

@@ -1136,6 +1136,31 @@ impl Checker {
         lending(&self.macros.withs.world, || f(self))
     }
 
+    /// [`Checker::syn_ref`], where `heap` is the one code is compiled into:
+    /// a session's checker's syntax is in it, lent here ([`with_heap`]);
+    /// another's in its own, and `heap` not lent.
+    ///
+    /// [`with_heap`]: Checker::with_heap
+    pub(crate) fn syn_in<T>(&self, heap: &mut fixpt_heap::Heap, f: impl FnOnce(&Self) -> T) -> T {
+        let world = &self.macros.withs.world;
+        let (lent, session) = {
+            let w = world.borrow();
+            (w.lending, w.session)
+        };
+        if lent || !session {
+            return lending(world, || f(self));
+        }
+        let mut syms = {
+            let mut w = world.borrow_mut();
+            w.lending = true;
+            std::mem::take(&mut w.syms)
+        };
+        let r = crate::heap_syn::with_syntax(heap, &mut syms, || f(self));
+        let mut w = world.borrow_mut();
+        (w.lending, w.syms) = (false, syms);
+        r
+    }
+
     /// This checker's syntax made, from now on, in the heap of the session
     /// it is the checker of, which the session lends around each call
     /// ([`Checker::with_heap`]): so that what it reads and expands is the

@@ -23,38 +23,40 @@ fn rust_trees(text: &str, base: i64) -> Vec<String> {
     // (a `define-generative`'s conversions, each at its span): a form is
     // what the FX-26 parser takes as one, and what a reading folds.
     let mut names = fixpt_read::Interner::new();
-    let read = fixpt_read::Reader::new(text, FileId(0), fixpt_read::SyntaxProfile::FX26, &mut names).read_all().expect("reads");
-    let mut forms: Vec<(usize, Vec<_>)> = Vec::new();
-    for f in &forms2 {
-        let top = c2.top(f).unwrap_or_else(|e| panic!("checks: {e}"));
-        let fs = f.span();
-        let within = |r: &fixpt_read::Syntax| r.span.start <= fs.start && fs.end <= r.span.end;
-        let i = read.iter().position(within).unwrap_or_else(|| panic!("a form as read: {:?} in {text}", fs));
-        if forms.last().is_none_or(|(j, _)| *j != i) {
-            forms.push((i, Vec::new()));
+    fixpt_fx26::heap_syn::aside(|| {
+        let read = fixpt_fx26::heap_syn::read_syn(text, FileId(0), &mut names).expect("reads");
+        let mut forms: Vec<(usize, Vec<_>)> = Vec::new();
+        for f in &forms2 {
+            let top = c2.top(f).unwrap_or_else(|e| panic!("checks: {e}"));
+            let fs = f.span();
+            let within = |r: &fixpt_fx26::heap_syn::Syn| r.span().start <= fs.start && fs.end <= r.span().end;
+            let i = read.iter().position(within).unwrap_or_else(|| panic!("a form as read: {:?} in {text}", fs));
+            if forms.last().is_none_or(|(j, _)| *j != i) {
+                forms.push((i, Vec::new()));
+            }
+            // The hidden globals of the files it loads first, defined before
+            // all it makes.
+            let group = &mut forms.last_mut().expect("one").1;
+            let hoisted: Vec<_> = std::mem::take(&mut c2.hoisted).into_iter().map(|(t, h)| (t, h.span(), true)).collect();
+            let at = group.iter().position(|g: &(_, _, bool)| !g.2).unwrap_or(group.len());
+            group.splice(at..at, hoisted);
+            group.push((top, fs, false));
         }
-        // The hidden globals of the files it loads first, defined before
-        // all it makes.
-        let group = &mut forms.last_mut().expect("one").1;
-        let hoisted: Vec<_> = std::mem::take(&mut c2.hoisted).into_iter().map(|(t, h)| (t, h.span(), true)).collect();
-        let at = group.iter().position(|g: &(_, _, bool)| !g.2).unwrap_or(group.len());
-        group.splice(at..at, hoisted);
-        group.push((top, fs, false));
-    }
-    // Each expression's key, form by form, as the process's mode makes it:
-    // read in the standard environment's state, as the FX-26 parser here
-    // reads it (`syn::parse_to_trees`), after `base` the parser walked before.
-    let mut kth = Kth::keyed(fixpt_fx26::ids::mode(), base);
-    let mut s = fixpt_fx26::ids::standard_state();
-    for (i, group) in &forms {
-        let tops: Vec<_> = group.iter().map(|(t, _, _)| t).collect();
-        let hoisted: Vec<_> = group.iter().filter(|g| g.2).map(|(t, _, _)| t).collect();
-        let loads = fixpt_fx26::ids::form_loads(&c2, &hoisted);
-        s = fixpt_fx26::ids::form_reading(s, &Default::default(), &read[*i], &names, &loads);
-        kth.form(&c2, s, &tops);
-    }
-    let chars = chars.with_loaded(&c2);
-    forms.iter().flat_map(|(_, g)| g).map(|(t, span, _)| show_top(&c2, &chars, t, *span, &kth)).collect()
+        // Each expression's key, form by form, as the process's mode makes it:
+        // read in the standard environment's state, as the FX-26 parser here
+        // reads it (`syn::parse_to_trees`), after `base` the parser walked before.
+        let mut kth = Kth::keyed(fixpt_fx26::ids::mode(), base);
+        let mut s = fixpt_fx26::ids::standard_state();
+        for (i, group) in &forms {
+            let tops: Vec<_> = group.iter().map(|(t, _, _)| t).collect();
+            let hoisted: Vec<_> = group.iter().filter(|g| g.2).map(|(t, _, _)| t).collect();
+            let loads = fixpt_fx26::ids::form_loads(&c2, &hoisted);
+            s = fixpt_fx26::ids::form_reading(s, &Default::default(), read[*i], &names, &loads);
+            kth.form(&c2, s, &tops);
+        }
+        let chars = chars.with_loaded(&c2);
+        forms.iter().flat_map(|(_, g)| g).map(|(t, span, _)| show_top(&c2, &chars, t, *span, &kth)).collect()
+    })
 }
 
 /// `tree` without the FX-26 parser's marks of where a loaded file's

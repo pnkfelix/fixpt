@@ -23,7 +23,7 @@ use crate::ast::{Effect, Region, TyId};
 use crate::check::{Checked, Checker};
 use crate::error::{FxError, R};
 use crate::heap_syn::{Form, Syn, V};
-use fixpt_read::{FileId, Span, Sym, Syntax};
+use fixpt_read::{FileId, Span, Sym};
 
 /// What one top-level form did.
 #[derive(Clone, Debug)]
@@ -628,7 +628,7 @@ impl Checker {
             let r = self.syn(|c| {
                 let mut macros = std::mem::take(&mut c.macros);
                 let mut interner = std::mem::take(&mut c.interner);
-                let r = macros.alpha_renamed(&f, &mut interner).map(|s| fixpt_read::write_syntax(&s.to_syntax(), &interner));
+                let r = macros.alpha_renamed(&f, &mut interner).map(|s| s.written(&interner));
                 c.macros = macros;
                 c.interner = interner;
                 r
@@ -658,7 +658,7 @@ impl Checker {
             if f.list().as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).is_some_and(|h| self.interner.name(h) == "define-generative") {
                 made = 2;
             }
-            out.push(fixpt_read::write_syntax(&f.to_syntax(), &self.interner));
+            out.push(f.written(&self.interner));
         }
         Ok(out)
     }
@@ -782,8 +782,8 @@ impl Checker {
     /// first. A form the walk does not take is left as it is, for the
     /// checkers to say why.
     #[cfg(test)]
-    pub(crate) fn shapes_written(&mut self, form: &Form, top: bool) -> Syntax {
-        self.syn(|c| c.shapes_written_syn(form.get(), top).to_syntax())
+    pub(crate) fn shapes_written(&mut self, form: &Form, top: bool) -> Form {
+        self.syn(|c| Form::new(c.shapes_written_syn(form.get(), top)))
     }
 
     /// [`shapes_written`](Self::shapes_written) of syntax in the heap: with
@@ -1482,7 +1482,7 @@ impl Checker {
     /// (`keep_shapes_seen`); out of line, as `top`'s frame is small.
     #[inline(never)]
     fn shapes_noted(&mut self, form: &Syn, shaped: &Syn) {
-        let seen = (fixpt_read::write_syntax(&form.to_syntax(), &self.interner), fixpt_read::write_syntax(&shaped.to_syntax(), &self.interner));
+        let seen = (form.written(&self.interner), shaped.written(&self.interner));
         if let Some(s) = self.macros.shapes_seen() {
             s.push(seen);
         }
@@ -1515,7 +1515,7 @@ impl Checker {
     /// noted (`keep_shapes_seen`).
     pub(crate) fn declared_noted(&mut self, f: &Syn) {
         if self.macros.shapes_seen().is_some() {
-            let seen = (fixpt_read::write_syntax(&f.to_syntax(), &self.interner), String::new());
+            let seen = (f.written(&self.interner), String::new());
             self.macros.shapes_seen().as_mut().expect("kept").push(seen);
         }
     }
@@ -2173,7 +2173,7 @@ impl Checker {
                 DScope::Rec(t) => ("type", format!("{n} = {}", self.show_definition(*t))),
                 DScope::Abbrev { params, body } => {
                     let ps: Vec<String> = params.iter().map(|(p, k)| format!("({} {})", self.interner.name(*p), self.show_kind(*k))).collect();
-                    ("family", format!("({n} {}) = {}", ps.join(" "), self.syn_ref(|c| fixpt_read::write_syntax(&body.get().to_syntax(), &c.interner))))
+                    ("family", format!("({n} {}) = {}", ps.join(" "), self.syn_ref(|c| body.get().written(&c.interner))))
                 }
                 DScope::Eff(e) => ("effect", format!("{n} = {}", self.show_effect(e))),
                 DScope::Generative(g) => {
@@ -2540,25 +2540,13 @@ fn module_text(path: &str, at: &std::path::Path, span: fixpt_read::Span) -> R<St
     }
 }
 
-/// The front end's entry points of the Rust reader's `Syntax`, for drivers
-/// that hold forms between the code they run (sessions, the REPL, tests):
-/// each the `_syn` one of the form made `syn`, where syntax is lent. Until
-/// those hold syntax by handle (`docs/research/heap-syntax.md`, stage 4).
+/// The front end's entry points of forms held (`Form`), for drivers that
+/// hold forms between the code they run (sessions, the REPL, tests): each
+/// the `_syn` one of the form, where syntax is lent.
 impl Checker {
-    pub(crate) fn syn_of(&self, form: &Syntax) -> Syn {
-        Syn::from_syntax(form, &self.interner)
-    }
-
-    /// The form as the Rust reader's `Syntax`, copied: for a caller that
-    /// looks inside a form deeply (a driver's hints, a test), until none
-    /// does (`docs/research/heap-syntax.md`, stage 5).
-    pub fn syntax_of(&self, form: &Form) -> Syntax {
-        self.syn_ref(|_| form.get().to_syntax())
-    }
-
     /// The form written, as the reader reads it back.
     pub fn written(&self, form: &Form) -> String {
-        self.syn_ref(|c| fixpt_read::write_syntax(&form.get().to_syntax(), &c.interner))
+        self.syn_ref(|c| form.get().written(&c.interner))
     }
 
     /// A proper list form's items, held; none if it is not one.

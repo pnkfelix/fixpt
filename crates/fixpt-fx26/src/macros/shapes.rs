@@ -1260,6 +1260,7 @@ pub(crate) fn module_parameters_of(f: &Syn, interner: &Interner) -> Option<Vec<S
 #[cfg(test)]
 mod tests {
     use crate::Checker;
+    use crate::heap_syn::{Syn, V};
     use fixpt_read::FileId;
 
     /// Each form of `text`, its shapes written, checked: the forms as
@@ -1269,10 +1270,10 @@ mod tests {
         let mut out = Vec::new();
         for f in c.read_in(FileId(0), text).expect("reads") {
             let shaped = c.shapes_written(&f, true);
-            let shown = fixpt_read::write_syntax(&shaped, &c.interner);
+            let shown = c.written(&shaped);
             c.top(&f).unwrap_or_else(|e| panic!("`{shown}` checks: {}", e.message));
             let mut found = Vec::new();
-            opened(&shaped, &c, &mut found);
+            c.syn_ref(|c| opened(shaped.get(), &c.interner, &mut found));
             out.extend(found);
         }
         out
@@ -1280,16 +1281,16 @@ mod tests {
 
     /// Each `with`, `extend` and `include` in `s` with a shape written,
     /// written up to its shape.
-    fn opened(s: &fixpt_read::Syntax, c: &Checker, out: &mut Vec<String>) {
-        let Some(items) = s.as_proper_list() else { return };
-        if let [h, m, k, shape, ..] = items
-            && matches!(&k.datum, fixpt_read::Datum::Keyword(w) if c.interner.name(*w) == "relied")
+    fn opened(s: Syn, interner: &fixpt_read::Interner, out: &mut Vec<String>) {
+        let Some(items) = s.list() else { return };
+        if let &[h, m, k, shape, ..] = &items[..]
+            && matches!(k.view(), V::Keyword(w) if interner.name(w) == "relied")
         {
-            let w = |s| fixpt_read::write_syntax(s, &c.interner);
+            let w = |s: Syn| s.written(interner);
             out.push(format!("({} {} {})", w(h), w(m), w(shape)));
         }
         for i in items {
-            opened(i, c, out);
+            opened(i, interner, out);
         }
     }
 
@@ -1327,7 +1328,7 @@ mod tests {
         let forms = c.read_in(FileId(0), text).expect("reads");
         let shown: Vec<String> = forms.iter().map(|f| {
             let s = c.shapes_written(f, true);
-            fixpt_read::write_syntax(&s, &c.interner)
+            c.written(&s)
         }).collect();
         assert!(shown[1].contains("(with m #:relied ((x) ()) x)"), "{}", shown[1]);
         assert!(shown[2].contains("(with m #:relied |#f| x)"), "{}", shown[2]);
