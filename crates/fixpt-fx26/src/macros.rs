@@ -229,6 +229,49 @@ pub(crate) struct Mark {
 
 /// The standard environment's trailmarks, `else` and `=>`, and where each
 /// belongs; numbered from the top, apart from those a program defines.
+/// The uses of macros one form's expansion may expand: the fuel behind
+/// the check of a use that comes back to itself (`Macros::enter`).
+const MAX_USES: usize = 10_000;
+/// How deep uses may be, each in the expansion of the one before: past it,
+/// one that changes each time is taken not to end (`Macros::enter`).
+const MAX_DEPTH: usize = 1_000;
+
+/// How many parts syntax `s` has, each list, pair's tail and atom one.
+fn syn_size(s: &Syn) -> usize {
+    match s.parts() {
+        Some((items, tail)) => 1 + items.map(|x| syn_size(&x)).sum::<usize>() + tail.map_or(0, |t| syn_size(&t)),
+        None => 1,
+    }
+}
+
+/// Whether syntax `a` and `b` are the same, part by part, wherever each is.
+fn same_syntax(a: &Syn, b: &Syn) -> bool {
+    match (a.parts(), b.parts()) {
+        (Some((mut xs, xt)), Some((mut ys, yt))) => {
+            loop {
+                match (xs.next(), ys.next()) {
+                    (Some(x), Some(y)) if same_syntax(&x, &y) => {}
+                    (None, None) => break,
+                    _ => return false,
+                }
+            }
+            match (xt, yt) {
+                (Some(x), Some(y)) => same_syntax(&x, &y),
+                (None, None) => true,
+                _ => false,
+            }
+        }
+        // An atom, as a pattern's is matched (`macros-match.fx`'s
+        // `same-atom?`): a vector, a real, a ratio, a bignum or a
+        // bytevector never the same, as the FX-26 expander has it.
+        (None, None) => {
+            let v = a.view();
+            !matches!(v, V::Vector(_) | V::Bytevector(_) | V::Number(fixpt_read::Num::Real(_) | fixpt_read::Num::Ratio(..) | fixpt_read::Num::Big { .. })) && v == b.view()
+        }
+        _ => false,
+    }
+}
+
 const STANDARD_MARKS: [(&str, &str); 2] = [("else", "a `cond`'s, `case`'s or `tagcase`'s last clause's"), ("=>", "a `cond` clause's, before the procedure given the test")];
 
 /// A clause: its pattern (of the operands), its template, and what is done
@@ -329,6 +372,10 @@ pub struct Macros {
 /// knows of the modules forms open.
 #[derive(Clone, Default)]
 pub(crate) struct Withs {
+    /// The uses of macros the expansion is inside, the innermost last: each
+    /// its macro, its form, and how many parts the form has, once it is
+    /// looked at (`Macros::enter`).
+    pub(crate) chain: Vec<(Sym, Syn, Option<usize>)>,
     /// The trailmarks defined, by name (`Mark`): the standard ones are the
     /// kernel's. Here, out of line: a `Macros` is moved whole, and is in the
     /// checker's frames.
@@ -1773,7 +1820,8 @@ impl Macros {
         if self.defined.is_empty() {
             return Ok(form.clone());
         }
-        let mut budget = 10_000;
+        let mut budget = MAX_USES;
+        self.withs.chain.clear();
         let out = self.expand_in(form, interner, &mut budget, &mut Vec::new())?;
         // A form of the program's is the text written for it, what a use
         // made of it or not: the REPL takes the entry's text by it.
@@ -1792,8 +1840,56 @@ impl Macros {
             return Ok(vec![self.expand(form, interner)?]);
         }
         let mut out = Vec::new();
-        self.expand_defn(form, interner, &mut 10_000, &mut out)?;
+        self.withs.chain.clear();
+        self.expand_defn(form, interner, &mut { MAX_USES }, &mut out)?;
         Ok(out.into_iter().map(|f| f.placed(form.at())).collect())
+    }
+
+    /// A use of `h`, `s`, about to be expanded, entered in the chain of uses
+    /// its expansion is inside (`Withs::chain`): refused, saying why, where
+    /// the expansions' fuel is spent, or where it is one of those uses,
+    /// unchanged, which expansion, deterministic, would come back to
+    /// forever (`TODO.md` §231).
+    fn enter(&mut self, h: Sym, s: &Syn, budget: &mut usize, interner: &Interner) -> R<()> {
+        let chain = &mut self.withs.chain;
+        let last = |chain: &[(Sym, Syn, Option<usize>)]| {
+            let inside: Vec<String> = chain.iter().rev().take(4).map(|(n, ..)| format!("`{}`", interner.name(*n))).collect();
+            if inside.is_empty() { String::new() } else { format!(", inside {}", inside.join(", ")) }
+        };
+        if *budget == 0 {
+            return Err(FxError::at(s.at(), format!("this macro's expansion does not end: {MAX_USES} uses expanded in one form, the last of `{}`{}", interner.name(h), last(chain))));
+        }
+        *budget -= 1;
+        if chain.len() == MAX_DEPTH {
+            return Err(FxError::at(s.at(), format!("this macro's expansion does not end: its uses are {MAX_DEPTH} deep, each in the expansion of the one before, the last of `{}`{}", interner.name(h), last(chain))));
+        }
+        // Its parts counted only where a use of the same macro is around
+        // it, each once; compared, part by part, only with one as large.
+        let mut size = None;
+        if chain.iter().any(|(n, ..)| *n == h) {
+            let mine = syn_size(s);
+            let mut back = None;
+            for i in (0..chain.len()).rev() {
+                let (n, form, theirs) = &mut chain[i];
+                if *n == h && *theirs.get_or_insert_with(|| syn_size(form)) == mine && same_syntax(form, s) {
+                    back = Some(i);
+                    break;
+                }
+            }
+            if let Some(i) = back {
+                let mut through: Vec<Sym> = Vec::new();
+                for (n, ..) in &chain[i + 1..] {
+                    if !through.contains(n) {
+                        through.push(*n);
+                    }
+                }
+                let through = if through.is_empty() { String::new() } else { format!(", through {}", through.iter().map(|n| format!("`{}`", interner.name(*n))).collect::<Vec<_>>().join(", ")) };
+                return Err(FxError::at(s.at(), format!("this use of `{}` is one it was expanded from, unchanged{through}: its expansion would never end", interner.name(h))));
+            }
+            size = Some(mine);
+        }
+        chain.push((h, s.clone(), size));
+        Ok(())
     }
 
     /// `s`, where a definition is: a use of a macro that makes definitions,
@@ -1805,12 +1901,11 @@ impl Macros {
         if let Some(h) = head
             && let Some(m) = self.defined.get(&h).cloned()
         {
-            if *budget == 0 {
-                return Err(FxError::at(s.at(), "this macro's expansion does not end"));
-            }
-            *budget -= 1;
+            self.enter(h, s, budget, interner)?;
             let made = self.expand_use(h, &m, s, interner)?;
-            return self.expand_defn(&made, interner, budget, out);
+            let r = self.expand_defn(&made, interner, budget, out);
+            self.withs.chain.pop();
+            return r;
         }
         if head.is_some_and(|h| interner.name(h) == "begin") {
             for d in &items[1..] {
@@ -1835,10 +1930,7 @@ impl Macros {
             if m.defn {
                 return Err(FxError::at(s.at(), format!("`{}` makes definitions, which are made at the top level, not where an expression is", interner.name(h))));
             }
-            if *budget == 0 {
-                return Err(FxError::at(s.at(), "this macro's expansion does not end"));
-            }
-            *budget -= 1;
+            self.enter(h, s, budget, interner)?;
             // A name the program wrote (a template's is the macro, by
             // hygiene), in a `with`'s body.
             if items[0].at().expansion == 0 {
@@ -1847,7 +1939,9 @@ impl Macros {
                 }
             }
             let out = self.expand_use(h, &m, s, interner)?;
-            return self.expand_in(&out, interner, budget, withs);
+            let out = self.expand_in(&out, interner, budget, withs);
+            self.withs.chain.pop();
+            return out;
         }
         // A template's `(with m name)`: `m`'s `name`, or refused.
         if let (Some(h), None, [_, m, n]) = (head, tail, &items[..])

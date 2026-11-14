@@ -14,16 +14,20 @@
 (define infer-module (with solve-module infer-module))
 (define files-module (with infer-module files-module))
 (define align-module (with files-module align-module))
+(define exports-module (with files-module exports-module))
+(define match-module (with exports-module match-module))
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
-        syn-expansion len (type syns-a))
+        syn-expansion len (type syns-a names))
 (import types-module reserved? desc-word? type-form? kernel-sigs kernel-definitions s-expr marks
         (type fails sty marked))
 (import align-module macro? defined def-env-top
         (type macro clauses def-env def-envs macro-env scopes))
+(import types-module fail-at)
+(import match-module same-atom?)
 
 
 ;;; ------------------------------------------------------------ the programs
@@ -573,3 +577,122 @@
 (define each-in (->* (syns-a int) syns-a)
   (lambda (xs made)
     (if (null? xs) nil (cons (in-expansion (car xs) made) (each-in (cdr xs) made)))))
+
+;;; ------------------------------------------------------------ expansions that do not end
+
+;; The uses of macros the expansion is inside, the innermost first: each
+;; its macro, its form, and how many parts the form has, -1 if it was not
+;; counted; and how many there are (`macros.rs`'s `Withs::chain`).
+(define-type link (tupleof symbol syn int))
+(define chain (ref (listof link acyclic) rs) (new nil))
+(define chain-depth (ref int rs) (new 0))
+;; The uses one form's expansion may expand, and how deep, each in the
+;; expansion of the one before (`MAX_USES`, `MAX_DEPTH`).
+(define max-uses int 10000)
+(define max-depth int 1000)
+(define chain-begun! (->* () unit) (lambda () (begin (set chain nil) (set chain-depth 0))))
+(define use-left! (->* () unit)
+  (lambda () (begin (set chain (cdr (get chain))) (set chain-depth (- (get chain-depth) 1)))))
+;; A use of `n`, `s`, about to be expanded, `fuel` uses left: entered in the
+;; chain; or refused, saying why, where the fuel is spent, where the uses
+;; are too deep, or where it is one of those it is inside, unchanged, which
+;; expansion, deterministic, would come back to forever (`Macros::enter`,
+;; `TODO.md` §231). Whether it is entered.
+(define use-entered? (->* (fails symbol syn int) bool)
+  (lambda (fail n s fuel)
+    (let ((ls (get chain)) (shown (string-append "`" (symbol->string n) "`")))
+      (cond
+        ((= fuel 0)
+         (begin (fail-at fail (string-append "this macro's expansion does not end: "
+                                             (int->string max-uses) " uses expanded in one form, "
+                                             "the last of " shown (inside-said ls 4 ""))
+                         s)
+                #f))
+        ((= (get chain-depth) max-depth)
+         (begin (fail-at fail (string-append "this macro's expansion does not end: its uses are "
+                                             (int->string max-depth) " deep, each in the "
+                                             "expansion of the one before, the last of " shown
+                                             (inside-said ls 4 ""))
+                         s)
+                #f))
+        (else
+         ;; Its parts counted only where a use of the same macro is around
+         ;; it; compared, part by part, only with one as large.
+         (let* ((size (if (link-of? n ls) (syn-size s) -1))
+                (back (if (< size 0) nil (came-back n s size ls nil))))
+           (if (null? back)
+               (begin (set chain (cons (tuple n s size) ls))
+                      (set chain-depth (+ (get chain-depth) 1))
+                      #t)
+               (begin (fail-at fail (string-append "this use of " shown " is one it was expanded "
+                                                   "from, unchanged" (through-said (car back))
+                                                   ": its expansion would never end")
+                               s)
+                      #f))))))))
+(define link-of? (->* (symbol (listof link acyclic)) bool)
+  (lambda (n ls)
+    (and (not (null? ls)) (or (symbol=? n (extract (car ls) 1)) (link-of? n (cdr ls))))))
+;; The macros of the uses inside the one in `ls` that `s` is, of `n` and
+;; `size` parts, innermost first, in a list of one; none if it is none.
+(define came-back
+  (->* (symbol syn int (listof link acyclic) names) (listof names acyclic))
+  (lambda (n s size ls passed)
+    (cond ((null? ls) nil)
+          ((and (symbol=? n (extract (car ls) 1))
+                (= size (if (< (extract (car ls) 3) 0) (syn-size (extract (car ls) 2))
+                            (extract (car ls) 3)))
+                (syn-same? (extract (car ls) 2) s))
+           (list passed))
+          (else (came-back n s size (cdr ls) (cons (extract (car ls) 1) passed))))))
+;; `, through `a`, `b``: the macros passed, outermost first, each once.
+(define through-said (->* (names) string)
+  (lambda (ns)
+    (if (null? ns) "" (string-append ", through " (names-said (reverse (each-once ns nil)))))))
+(define each-once (->* (names names) names)
+  (lambda (ns seen)
+    (cond ((null? ns) seen)
+          ((name-seen? (car ns) seen) (each-once (cdr ns) seen))
+          (else (each-once (cdr ns) (cons (car ns) seen))))))
+(define name-seen? (->* (symbol names) bool)
+  (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (name-seen? n (cdr ns))))))
+(define names-said (->* (names) string)
+  (lambda (ns)
+    (if (null? (cdr ns))
+        (string-append "`" (symbol->string (car ns)) "`")
+        (string-append "`" (symbol->string (car ns)) "`, " (names-said (cdr ns))))))
+;; `, inside `a`, `b``: the macros of the `k` innermost uses of `ls`.
+(define inside-said (->* ((listof link acyclic) int string) string)
+  (lambda (ls k out)
+    (if (or (null? ls) (= k 0))
+        out
+        (inside-said (cdr ls) (- k 1)
+                     (string-append out (if (string=? out "") ", inside " ", ") "`"
+                                    (symbol->string (extract (car ls) 1)) "`")))))
+;; How many parts syntax `s` has, each list, pair's tail and atom one.
+(define syn-size (->* (syn) int)
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b x) (+ 1 (sizes items)))
+      (dotted (items tail d a b x) (+ 1 (+ (sizes items) (syn-size tail))))
+      (else y 1))))
+(define sizes (->* (syns-a) int)
+  (lambda (xs) (if (null? xs) 0 (+ (syn-size (car xs)) (sizes (cdr xs))))))
+;; Whether syntax `a` and `b` are the same, part by part, wherever each is.
+(define syn-same? (->* (syn syn) bool)
+  (lambda (a b)
+    (tagcase a
+      (lst (xs d c e x) (tagcase b (lst (ys d2 c2 e2 x2) (all-same? xs ys)) (else y #f)))
+      (dotted (xs t d c e x)
+        (tagcase b
+          (dotted (ys u d2 c2 e2 x2) (and (all-same? xs ys) (syn-same? t u)))
+          (else y #f)))
+      (atom (d c e x)
+        (if (syn-symbol? a)
+            (and (syn-symbol? b) (symbol=? (syn-symbol a) (syn-symbol b)))
+            (same-atom? a b)))
+      (else y #f))))
+(define all-same? (->* (syns-a syns-a) bool)
+  (lambda (xs ys)
+    (if (null? xs)
+        (null? ys)
+        (and (not (null? ys)) (syn-same? (car xs) (car ys)) (all-same? (cdr xs) (cdr ys))))))

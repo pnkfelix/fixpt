@@ -51,7 +51,8 @@
 (import solve-module infer sig-text by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
-        source-key source-of sources-made alias respanned in-expansion)
+        source-key source-of sources-made alias respanned in-expansion use-entered? use-left!
+        chain-begun! max-uses)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names trailmark-form define-trailmark hide-marks!
@@ -589,7 +590,8 @@
     (if (null? (get defined))
         form
         (begin
-          (set budget 10000)
+          (set budget max-uses)
+          (chain-begun!)
           (at-place (expand-in fail form nil) (syn-start form) (syn-end form) 0)))))
 ;; Top-level form `form` expanded: a use of a macro that makes definitions,
 ;; the definitions it makes, in order, a `begin` of them spliced (as R7RS's
@@ -601,7 +603,8 @@
       (if (and (not (null? items)) (syn-symbol? (car items))
                (makes-top-defns? (syn-symbol (car items))))
           (begin
-            (set budget 10000)
+            (set budget max-uses)
+            (chain-begun!)
             (at-places (expand-defn fail form) (syn-start form) (syn-end form)))
           (list (expand fail form))))))
 ;; `s`, where a definition is: a use of a macro that makes definitions, what
@@ -613,11 +616,12 @@
            (head (if (syn-symbol? hd) (syn-name hd) "")))
       (cond
         ((and (syn-symbol? hd) (macro? (syn-symbol hd)))
-         (if (= (get budget) 0)
-             (begin (fail-at fail "this macro's expansion does not end" s) nil)
+         (if (use-entered? fail (syn-symbol hd) s (get budget))
              (begin
                (set budget (- (get budget) 1))
-               (expand-defn fail (expand-use fail (syn-symbol hd) s)))))
+               (let ((made (expand-defn fail (expand-use fail (syn-symbol hd) s))))
+                 (begin (use-left!) made)))
+             nil))
         ((string=? head "begin") (expand-defns fail (cdr items)))
         (else (list (expand-in fail s nil)))))))
 (define expand-defns (->* (fails syns-a) syns-a)
@@ -647,14 +651,15 @@
                          s)
                 s))
         ((and (syn-symbol? hd) (macro? (syn-symbol hd)))
-         (if (= (get budget) 0)
-             (begin (fail-at fail "this macro's expansion does not end" s) s)
+         (if (use-entered? fail (syn-symbol hd) s (get budget))
              (begin
                (set budget (- (get budget) 1))
                ;; A name the program wrote (a template's is the macro, by
                ;; hygiene), in a `with`'s body.
                (if (= (syn-expansion hd) 0) (note-uses (syn-symbol hd) hd withs) #u)
-               (expand-in fail (expand-use fail (syn-symbol hd) s) withs))))
+               (let ((made (expand-in fail (expand-use fail (syn-symbol hd) s) withs)))
+                 (begin (use-left!) made)))
+             s))
         ;; A definition of a macro's name: refused, as a form's is.
         ((and (or (string=? head "define") (string=? head "define*"))
               (not (null? (cdr items))) (syn-symbol? (nth items 1))

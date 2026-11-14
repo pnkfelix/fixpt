@@ -5605,13 +5605,48 @@ output datum, say, behind a flag), an effect that only a debugging build
 grants, a transformer returning its notes beside its output, or something
 else. No shape is chosen yet.
 
-## 231. Catching obvious macro mistakes, a transformer that never ends (the user's, 2026-11-09)
+## 231. ~~Catching obvious macro mistakes, a transformer that never ends~~ (the user's, 2026-11-09; built 2026-11-14)
 
 Decided (the user, 2026-11-14): a cycle check, with fuel behind it. Each
 expansion chain keeps the (macro, form) pairs it has expanded; a use that
 comes back to one is refused, naming the macro, its definition and the
 chain; and a depth limit, its message naming the macro and the last
-uses, catches what changes each time. No static analysis yet. Not built.
+uses, catches what changes each time. No static analysis yet.
+
+Built, both front ends (`Macros::enter`; `macros-procedural.fx`'s
+`use-entered?`). The chain is the uses an expansion is inside, at its
+place or within what a use made; a use the same, part by part, as one of
+them of the same macro is refused at once, "this use of `m` is one it
+was expanded from, unchanged[, through `pong`]: its expansion would never
+end", the notes below it the expansions it is in, which name the
+definition's templates (expansion is deterministic, a transformer pure,
+so the same use expands the same way again). A form is counted, its
+parts, only where a use of its macro is around it, and compared part by
+part only with one as large, so a use that changes each time costs a
+count. Behind it, as before, 10000 uses for one form (now said: "…
+10000 uses expanded in one form, the last of `t`, inside `t`, …"), and a
+depth of 1000, each use in the expansion of the one before ("its uses are
+1000 deep, …"). A use quoted in the output, `(quote ,form)`, is not
+expanded, so not one that comes back. Tests: `macros/loop-*.fx`,
+`procedural/returns-its-input.fx`, `quotes-its-input.fx`. Not yet: a
+form with a vector, a real, a ratio or a bytevector in it is never the
+same as another, atoms compared as a pattern matches them (such a use is
+caught by the depth instead); a depth of 1000 refuses a legitimate recursion deeper
+than that (a macro over a list of more than 1000 elements, one use
+each).
+
+If deeper chains matter (the user's, 2026-11-14, weighed): the chain
+holds no copies, each entry a use the expander is still inside, so its
+storage is the recursion's; what costs is looking at each new use's form,
+in its size, which makes a form that grows each time quadratic. Two ways,
+not taken yet: Brent's cycle finding along the path of uses (each use
+compared with one checkpoint ancestor, moved as the depth since it
+doubles; a loop starting after μ uses, of period λ, caught within about
+2(μ+λ), so later, and "through …" from the period found), which saves the
+scan of same-macro ancestors but not the look at the form; and a
+fingerprint, each part's hash and size made once as syntax is read or
+transcribed, so a use's costs nothing, after which the depth could be
+10000 again (both front ends' syntax builders).
 Was: to discuss. An `sc-macro-transformer` can easily return its
 input `expr` as it is. The expander then expands the same form again,
 forever. Ruling out "the output contains the input" is too strong:
