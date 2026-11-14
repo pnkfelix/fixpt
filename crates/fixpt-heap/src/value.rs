@@ -96,22 +96,22 @@ impl Value {
     /// memory that holds a value (a frame slot, a machine's register). Raw
     /// bits that are no value (a bignum's limb, a float's bits) are never
     /// made a `Value`: `Heap::obj_set_word` stores them.
-    #[inline]
+    #[inline(always)]
     pub const fn from_raw(bits: u64) -> Value {
         Value(bits)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn raw(self) -> u64 {
         self.0
     }
-    #[inline]
+    #[inline(always)]
     pub const fn tag(self) -> u64 {
         self.0 & TAG_MASK
     }
 
     // ---------------------------------------------------------------- fixnums
     /// The fixnum `n`, which must fit in 61 bits (`try_fixnum` asks).
-    #[inline]
+    #[inline(always)]
     #[track_caller]
     pub fn fixnum(n: i64) -> Value {
         debug_assert!(n >= FIXNUM_MIN && n <= FIXNUM_MAX, "{n} is no fixnum's integer");
@@ -119,42 +119,42 @@ impl Value {
     }
     /// `n`'s low 61 bits as a fixnum, the rest dropped: for what wants a
     /// fixnum of any integer, as a hash does, never for an integer's value.
-    #[inline]
+    #[inline(always)]
     pub const fn fixnum_wrapping(n: i64) -> Value {
         Value((n as u64) << 3)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_fixnum(self) -> bool {
         self.tag() == TAG_FIXNUM
     }
-    #[inline]
+    #[inline(always)]
     #[track_caller]
     pub fn as_fixnum(self) -> i64 {
         debug_assert!(self.is_fixnum(), "as_fixnum of {self:?} ({:#x}), no fixnum", self.0);
         (self.0 as i64) >> 3
     }
     /// `None` when `n` does not fit in 61 bits, so callers can promote to a bignum.
-    #[inline]
+    #[inline(always)]
     pub const fn try_fixnum(n: i64) -> Option<Value> {
         if n >= FIXNUM_MIN && n <= FIXNUM_MAX { Some(Value::fixnum_wrapping(n)) } else { None }
     }
 
     // ------------------------------------------------------------- references
-    #[inline]
+    #[inline(always)]
     pub const fn pair(index: usize) -> Value {
         Value(((index as u64) << 3) | TAG_PAIR)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_pair(self) -> bool {
         self.tag() == TAG_PAIR
     }
     /// A pointer to a bloblet: the index of the start of its suffix, which is
     /// where every tagged pointer to a bloblet points (`docs/object-model.md`).
-    #[inline]
+    #[inline(always)]
     pub const fn bloblet(index: usize) -> Value {
         Value(((index as u64) << 3) | TAG_BLOBLET)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_bloblet(self) -> bool {
         self.tag() == TAG_BLOBLET
     }
@@ -162,14 +162,14 @@ impl Value {
     /// meaningful for references: a pair's cell, an object's header, a
     /// bloblet's suffix. (The heap finds its word as this less where its
     /// memory starts, `Heap::ix`.)
-    #[inline]
+    #[inline(always)]
     #[track_caller]
     pub fn index(self) -> usize {
         debug_assert!(matches!(self.tag(), TAG_PAIR | TAG_BLOBLET | TAG_FORWARD), "index of {self:?} ({:#x}), no pair, bloblet or forwarding pointer", self.0);
         (self.0 >> 3) as usize
     }
     /// True for anything the collector must trace.
-    #[inline]
+    #[inline(always)]
     pub const fn is_ref(self) -> bool {
         matches!(self.tag(), TAG_PAIR | TAG_BLOBLET | TAG_SUFFIX_REF)
     }
@@ -177,26 +177,26 @@ impl Value {
     /// A suffix ref to byte `offset` of the suffix whose start is word
     /// `owner` of the heap (`Heap::ix`); `None` if either does not fit. That
     /// the suffix has such a byte is the heap's to check (`Heap::suffix_ref`).
-    #[inline]
+    #[inline(always)]
     pub const fn suffix_ref(owner: usize, offset: usize) -> Option<Value> {
         if owner as u64 > SUFFIX_OWNER_MASK || offset >= SUFFIX_OFFSET_LIMIT {
             return None;
         }
         Some(Value(((offset as u64) << SUFFIX_OFFSET_SHIFT) | ((owner as u64) << 3) | TAG_SUFFIX_REF))
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_suffix_ref(self) -> bool {
         self.tag() == TAG_SUFFIX_REF
     }
     /// A suffix ref's owner: the word index of its suffix's start.
-    #[inline]
+    #[inline(always)]
     #[track_caller]
     pub fn owner(self) -> usize {
         debug_assert!(self.is_suffix_ref(), "owner of {self:?} ({:#x}), no suffix ref", self.0);
         ((self.0 >> 3) & SUFFIX_OWNER_MASK) as usize
     }
     /// A suffix ref's byte offset into its owner's suffix.
-    #[inline]
+    #[inline(always)]
     #[track_caller]
     pub fn offset(self) -> usize {
         debug_assert!(self.is_suffix_ref(), "offset of {self:?} ({:#x}), no suffix ref", self.0);
@@ -204,19 +204,19 @@ impl Value {
     }
 
     // ------------------------------------------------------------- immediates
-    #[inline]
+    #[inline(always)]
     const fn imm(subtag: u64, payload: u64) -> Value {
         Value((payload << IMM_PAYLOAD_SHIFT) | (subtag << IMM_SHIFT) | TAG_IMMEDIATE)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_immediate(self) -> bool {
         self.tag() == TAG_IMMEDIATE
     }
-    #[inline]
+    #[inline(always)]
     const fn subtag(self) -> u64 {
         (self.0 >> IMM_SHIFT) & IMM_MASK
     }
-    #[inline]
+    #[inline(always)]
     const fn is_imm(self, subtag: u64) -> bool {
         self.is_immediate() && self.subtag() == subtag
     }
@@ -236,49 +236,49 @@ impl Value {
     /// `letrec` restrictions get enforced.
     pub const UNBOUND: Value = Value::imm(IMM_UNBOUND, 0);
 
-    #[inline]
+    #[inline(always)]
     pub const fn boolean(b: bool) -> Value {
         if b { Value::TRUE } else { Value::FALSE }
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_false(self) -> bool {
         self.0 == Value::FALSE.0
     }
     /// Scheme truthiness: everything except `#f` is true.
-    #[inline]
+    #[inline(always)]
     pub const fn is_true(self) -> bool {
         self.0 != Value::FALSE.0
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_null(self) -> bool {
         self.is_imm(IMM_NULL)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_unit(self) -> bool {
         self.is_imm(IMM_UNIT)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_eof(self) -> bool {
         self.is_imm(IMM_EOF)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_unbound(self) -> bool {
         self.is_imm(IMM_UNBOUND)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_boolean(self) -> bool {
         self.is_imm(IMM_FALSE) || self.is_imm(IMM_TRUE)
     }
 
-    #[inline]
+    #[inline(always)]
     pub const fn char(c: char) -> Value {
         Value::imm(IMM_CHAR, c as u64)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_char(self) -> bool {
         self.is_imm(IMM_CHAR)
     }
-    #[inline]
+    #[inline(always)]
     #[track_caller]
     pub fn as_char(self) -> char {
         debug_assert!(self.is_char(), "as_char of {self:?}");
@@ -287,15 +287,15 @@ impl Value {
 
     /// An `f32`: its bits in bits 32..64, so that unboxing is one shift (or
     /// a 4-byte load of a word's upper half), under subtag 9.
-    #[inline]
+    #[inline(always)]
     pub const fn f32(x: f32) -> Value {
         Value::imm(IMM_F32, (x.to_bits() as u64) << (32 - IMM_PAYLOAD_SHIFT))
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_f32(self) -> bool {
         self.is_imm(IMM_F32)
     }
-    #[inline]
+    #[inline(always)]
     #[track_caller]
     pub fn as_f32(self) -> f32 {
         debug_assert!(self.is_f32(), "as_f32 of {self:?}");
@@ -304,15 +304,15 @@ impl Value {
 
     /// A call-out, `n` its number or its encoding ([`IMM_CALLOUT`]): read
     /// by native code as the word shifted right by [`Value::CALLOUT_SHIFT`].
-    #[inline]
+    #[inline(always)]
     pub const fn callout(n: u64) -> Value {
         Value::imm(IMM_CALLOUT, n)
     }
-    #[inline]
+    #[inline(always)]
     pub const fn is_callout(self) -> bool {
         self.is_imm(IMM_CALLOUT)
     }
-    #[inline]
+    #[inline(always)]
     #[track_caller]
     pub fn as_callout(self) -> u64 {
         debug_assert!(self.is_callout(), "as_callout of {self:?}");

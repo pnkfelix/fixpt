@@ -164,7 +164,7 @@ pub fn load(mut c: Checker, sources: &[Source]) -> Result<Program, String> {
                 continue;
             }
             let d = c.top_defining(f).map_err(|e| format!("{}: {}", place_of(&c, sources, e.span), e.message))?;
-            tops.extend(d.hoisted.into_iter().chain(d.run).map(|(t, form)| (t, Some(form.span))));
+            tops.extend(d.hoisted.into_iter().chain(d.run).map(|(t, form)| (t, Some(form.span()))));
         }
     }
     let defs = definitions(&mut c, &tops);

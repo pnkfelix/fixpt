@@ -15,7 +15,8 @@
 
 use super::{Aligner, Atom, Kids, Level, Macros, Mode, Ns, STy};
 use crate::error::{FxError, R};
-use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
+use fixpt_read::{Interner, Sym};
+use crate::heap_syn::{At, Kept, Syn, V};
 use fixpt_hash::HashMap;
 use std::rc::Rc;
 
@@ -80,13 +81,14 @@ impl Shape {
 pub(crate) struct FileShape {
     pub(crate) value: Option<Rc<Shape>>,
     pub(crate) module: Option<Rc<Shape>>,
-    /// What to write into its forms, by path (`with_written`).
-    written: Option<Rc<Written>>,
+    /// What to write into its forms, by path (`with_written`): held, as
+    /// it lasts past code that runs.
+    written: Option<Rc<HashMap<Vec<bool>, Option<Kept>>>>,
 }
 
 /// The shapes to write into a form, by the path of each form that opens a
 /// module: `None` where the module's shape is not known.
-type Written = HashMap<Vec<bool>, Option<Syntax>>;
+type Written = HashMap<Vec<bool>, Option<Syn>>;
 
 /// What a walk finds (`Macros::walked`).
 #[derive(Default)]
@@ -98,14 +100,14 @@ struct Walked {
 
 /// A file's forms as one form to walk: its one expression, `input`; or a
 /// `module` of them.
-fn file_form(forms: &[Syntax], input: bool, interner: &mut Interner) -> Option<Syntax> {
+fn file_form(forms: &[Syn], input: bool, interner: &mut Interner) -> Option<Syn> {
     match forms {
         [one] if input => Some(one.clone()),
         _ if input => None,
         [] => None,
         [first, ..] => {
-            let span = first.span;
-            Some(Syntax::list(span, std::iter::once(Syntax::symbol(span, interner.intern("module"))).chain(forms.iter().cloned()).collect()))
+            let span = first.at();
+            Some(Syn::lst(span, std::iter::once(Syn::named(span, "module", interner)).chain(forms.iter().cloned()).collect()))
         }
     }
 }
@@ -119,7 +121,7 @@ pub(crate) struct TopShapes {
     /// The form of each description whose shape was not known where it was
     /// defined, to read it again where it is used: types are declared ahead
     /// of the values they may name (`Checker::declare_ahead`).
-    desc_forms: HashMap<Sym, Syntax>,
+    desc_forms: HashMap<Sym, Kept>,
     /// How deep such forms are being read again, so that one that names
     /// itself ends.
     again: std::cell::Cell<usize>,
@@ -134,7 +136,7 @@ pub(crate) struct Known {
     dir: Option<std::path::PathBuf>,
     /// Each file's forms as they were read for its shape, by its path, for
     /// the parser to take rather than read the file again.
-    read: HashMap<String, (String, Vec<Syntax>)>,
+    read: HashMap<String, (String, Vec<Kept>)>,
     /// Each top-level form before and after its shapes were written, if
     /// they are kept (`Checker::keep_shapes_seen`).
     seen: Option<Vec<(String, String)>>,
@@ -144,7 +146,7 @@ pub(crate) struct Known {
     pub(crate) aliases_defined: fixpt_hash::HashSet<(Sym, bool)>,
     /// The shapes named by `define-syntax` (`(define-syntax s (modnames …))`,
     /// `binding-shapes.md`), each its `modnames` form, by its name.
-    named: HashMap<Sym, Syntax>,
+    named: HashMap<Sym, Kept>,
 }
 
 /// Where a binder's value comes from, for its shape: the expression it is
@@ -209,9 +211,9 @@ impl Asked {
     /// What it was asked and does not give, the checkers find for
     /// themselves (each reference whose name the module's type gives, held
     /// to this list).
-    fn written(&self, span: Span) -> Syntax {
-        let given = |l: &[(Sym, bool)]| Syntax::list(span, l.iter().filter(|(_, g)| *g).map(|(n, _)| Syntax::symbol(span, *n)).collect());
-        Syntax::list(span, vec![given(&self.vals), given(&self.descs)])
+    fn written(&self, span: At, interner: &Interner) -> Syn {
+        let given = |l: &[(Sym, bool)]| Syn::lst(span, l.iter().filter(|(_, g)| *g).map(|(n, _)| Syn::symbol(span, *n, interner)).collect());
+        Syn::lst(span, vec![given(&self.vals), given(&self.descs)])
     }
 }
 
@@ -250,39 +252,41 @@ pub(crate) fn load_key(dir: Option<&std::path::Path>, path: &str, input: bool) -
 
 /// The paths each `load-module`, `load-input`, `load-moduleof` and
 /// `load-input-moduleof` in `s` names, with whether it is an input's.
-pub(crate) fn loads_in(s: &Syntax, interner: &Interner, out: &mut Vec<(String, bool)>) {
-    let mut work = vec![s];
+pub(crate) fn loads_in(s: &Syn, interner: &Interner, out: &mut Vec<(String, bool)>) {
+    let mut work = vec![*s];
     while let Some(s) = work.pop() {
-        let Datum::List { items, tail } = &s.datum else { continue };
-        if let [h, p, ..] = &items[..]
-            && let (Some(h), Datum::Str(p)) = (h.as_symbol(), &p.datum)
+        let Some((items, tail)) = s.parts() else { continue };
+        let mut rest = items;
+        let (h, p) = (rest.next(), rest.next());
+        if let (Some(h), Some(p)) = (h.and_then(Syn::sym), p)
             && let Some(input) = match interner.name(h) {
                 "load-module" | "load-moduleof" => Some(false),
                 "load-input" | "load-input-moduleof" => Some(true),
                 _ => None,
             }
+            && let V::Str(p) = p.view()
         {
-            out.push((p.clone(), input));
+            out.push((p, input));
         }
-        work.extend(items.iter().chain(tail.as_deref()));
+        work.extend(items.chain(tail));
     }
 }
 
 /// `s` without the shapes written into it (`#:relied …`), as it was
 /// expanded: what a program's walk reads.
-pub(crate) fn unshaped(s: &Syntax, interner: &Interner) -> Syntax {
-    let Datum::List { items, tail } = &s.datum else { return s.clone() };
+pub(crate) fn unshaped(s: &Syn, interner: &Interner) -> Syn {
+    let V::List { items, tail } = &s.view() else { return s.clone() };
     let mut out = Vec::with_capacity(items.len());
     let mut k = 0;
     while k < items.len() {
-        if matches!(&items[k].datum, Datum::Keyword(w) if interner.name(*w) == "relied") && k == 2 {
+        if matches!(&items[k].view(), V::Keyword(w) if interner.name(*w) == "relied") && k == 2 {
             k += 2;
             continue;
         }
         out.push(unshaped(&items[k], interner));
         k += 1;
     }
-    Syntax::new(s.span, Datum::List { items: out, tail: tail.as_ref().map(|t| Box::new(unshaped(t, interner))) })
+    s.with_parts((items, *tail), &out, tail.as_ref().map(|t| unshaped(t, interner)))
 }
 
 /// The forms that bind what the module at their first operand gives.
@@ -342,8 +346,8 @@ impl<'a, 'm> Shaper<'a, 'm> {
         i.name(n)
     }
 
-    fn head(&self, s: &Syntax) -> Option<&'m str> {
-        s.as_proper_list()?.first()?.as_symbol().map(|h| self.name(h))
+    fn head(&self, s: &Syn) -> Option<&'m str> {
+        s.head_sym().map(|h| self.name(h))
     }
 
     /// What the checker's types say of `n` (`Global`), without its own
@@ -525,7 +529,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
     /// Top-level description `n`'s shape, its form read again now that
     /// what it names may be known.
     fn desc_again(&self, n: Sym) -> Option<Rc<Shape>> {
-        let form = self.top.desc_forms.get(&n)?;
+        let form = &self.top.desc_forms.get(&n)?.get();
         if self.top.again.get() > 4 {
             return None;
         }
@@ -554,7 +558,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
             return Some(Source::Typed(self.elem(d, 2)?));
         }
         let list = &self.a.nodes[q].syn;
-        let items = list.as_proper_list()?;
+        let items = list.list()?;
         match (self.head(list), i, items.len()) {
             (Some("define"), 1, 3) => Some(Source::Value(self.elem(q, 2)?)),
             (Some("define" | "define*"), 1, 4) => Some(Source::Typed(self.elem(q, 2)?)),
@@ -608,10 +612,10 @@ impl<'a, 'm> Shaper<'a, 'm> {
             let syn = &self.a.nodes[t].syn;
             // A procedure type by its name: its parameter, as the checker
             // has the type.
-            if let Some(n) = syn.as_symbol() {
+            if let Some(n) = syn.sym() {
                 return Some(Source::Param(n, k));
             }
-            let items = syn.as_proper_list()?;
+            let items = syn.list()?;
             let params = match self.head(syn)? {
                 // Each member a type of the procedure: its first's says,
                 // and the checker holds the others to the shape.
@@ -629,8 +633,8 @@ impl<'a, 'm> Shaper<'a, 'm> {
             };
             let p = self.elem(params, k)?;
             // A dependent parameter, `(c : T)`: its type.
-            return match self.a.nodes[p].syn.as_proper_list() {
-                Some([_, c, _]) if c.as_symbol().is_some_and(|c| self.name(c) == ":") => self.elem(p, 2).map(Source::Typed),
+            return match self.a.nodes[p].syn.list().as_deref() {
+                Some([_, c, _]) if c.sym().is_some_and(|c| self.name(c) == ":") => self.elem(p, 2).map(Source::Typed),
                 _ => Some(Source::Typed(p)),
             };
         }
@@ -692,13 +696,13 @@ impl<'a, 'm> Shaper<'a, 'm> {
             _ => {}
         }
         let syn = &node.syn;
-        let items = syn.as_proper_list()?;
+        let items = syn.list()?;
         let e = self.elems(at);
         let last = e.last().copied().flatten().filter(|_| items.len() > 1);
         match self.head(syn) {
             Some("module") => self.module(&e[1..]),
             Some(h @ ("load-module" | "load-input")) => {
-                let Datum::Str(p) = &items.get(1)?.datum else { return None };
+                let V::Str(p) = &items.get(1)?.view() else { return None };
                 let (_, key) = load_key(self.dir, p, h == "load-input");
                 self.files.get(&key)?.value.clone()
             }
@@ -716,8 +720,8 @@ impl<'a, 'm> Shaper<'a, 'm> {
                 Some(Rc::new(Shape::Module { vals, descs }))
             }
             // `(with #%toplevel name)`: the top level's.
-            Some("with") if items.len() == 3 && items[1].as_symbol().is_some_and(|m| self.name(m) == "#%toplevel") => {
-                self.top.vals.get(&items[2].as_symbol()?).cloned().flatten()
+            Some("with") if items.len() == 3 && items[1].sym().is_some_and(|m| self.name(m) == "#%toplevel") => {
+                self.top.vals.get(&items[2].sym()?).cloned().flatten()
             }
             Some("with" | "let" | "let*" | "letrec" | "begin" | "letregion" | "letfreeze" | "letrena" | "letreap" | "plambda" | "dlambda") => self.exp(last?),
             Some("proj") => self.exp(e.get(1).copied().flatten()?),
@@ -742,8 +746,8 @@ impl<'a, 'm> Shaper<'a, 'm> {
         let a = self.a;
         let mut out = Vec::new();
         for p in self.elems(ps) {
-            let t = p.and_then(|p| match a.nodes[p].syn.as_proper_list() {
-                Some([_, c, _]) if c.as_symbol().is_some_and(|c| self.name(c) == ":") => self.elem(p, 2),
+            let t = p.and_then(|p| match a.nodes[p].syn.list().as_deref() {
+                Some([_, c, _]) if c.sym().is_some_and(|c| self.name(c) == ":") => self.elem(p, 2),
                 _ => Some(p),
             });
             out.push(t.and_then(|t| self.ty(t)));
@@ -787,7 +791,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
             }
             let Kids::Form(f) = a.nodes[x].kids else { continue };
             let Some((b, r)) = &a.nodes[f].export else { continue };
-            let levels = a.eval(b, *r, a.nodes[x].syn.span).ok()?;
+            let levels = a.eval(b, *r, a.nodes[x].syn.at()).ok()?;
             let mut got = Members::default();
             for level in levels {
                 match level {
@@ -831,16 +835,17 @@ impl<'a, 'm> Shaper<'a, 'm> {
     /// value's name (`x`, `(val x)`), a module's with its own shape
     /// (`(modnames m member …)`), each description's (`(abs t)`, `(desc u)`,
     /// `(eff e)`).
-    fn modnames_shape(&self, members: &[Syntax]) -> Option<Rc<Shape>> {
+    fn modnames_shape(&self, members: &[Syn]) -> Option<Rc<Shape>> {
         let (mut vals, mut descs) = (Vec::new(), Vec::new());
         for m in members {
-            if let Some(n) = m.as_symbol() {
+            if let Some(n) = m.sym() {
                 vals.push((n, None));
                 continue;
             }
-            let [w, n, rest @ ..] = m.as_proper_list()? else { return None };
-            let n = n.as_symbol()?;
-            match self.name(w.as_symbol()?) {
+            let l = m.list()?;
+            let [w, n, rest @ ..] = &l[..] else { return None };
+            let n = n.sym()?;
+            match self.name(w.sym()?) {
                 "val" => vals.push((n, None)),
                 "modnames" => vals.push((n, self.modnames_shape(rest))),
                 "abs" | "desc" | "eff" => descs.push((n, None)),
@@ -857,14 +862,14 @@ impl<'a, 'm> Shaper<'a, 'm> {
             return self.reference(at, n, Ns::Desc);
         }
         // A template's free description name, the top level's, qualified.
-        if let Some(n) = node.syn.as_symbol()
+        if let Some(n) = node.syn.sym()
             && let Some(x) = self.name(n).strip_prefix("#%toplevel:")
         {
             let x = self.a.interner.get(x)?;
             return self.top.descs.get(&x).cloned().flatten().or_else(|| self.desc_again(x));
         }
         let syn = &node.syn;
-        let items = syn.as_proper_list()?;
+        let items = syn.list()?;
         let e = self.elems(at);
         match self.head(syn)? {
             // A shape written (`binding-shapes.md`): the names it gives.
@@ -872,12 +877,12 @@ impl<'a, 'm> Shaper<'a, 'm> {
             "moduleof" => {
                 let (mut vals, mut descs) = (Vec::new(), Vec::new());
                 for (k, m) in items.iter().enumerate().skip(1) {
-                    let parts = m.as_proper_list()?;
-                    let word = parts.first()?.as_symbol().map(|w| self.name(w))?;
-                    let names: Vec<Sym> = match (parts.get(1)?.as_symbol(), parts.get(1)?.as_proper_list()) {
+                    let parts = m.list()?;
+                    let word = parts.first()?.sym().map(|w| self.name(w))?;
+                    let names: Vec<Sym> = match (parts.get(1)?.sym(), parts.get(1)?.list()) {
                         (Some(n), _) => vec![n],
-                        (None, Some(ns)) if word == "abs" => ns.iter().filter_map(|n| n.as_symbol()).take(if ns.iter().all(|n| n.as_symbol().is_some()) { usize::MAX } else { 1 }).collect(),
-                        (None, Some(ns)) => vec![ns.first()?.as_symbol()?],
+                        (None, Some(ns)) if word == "abs" => ns.iter().filter_map(|n| n.sym()).take(if ns.iter().all(|n| n.sym().is_some()) { usize::MAX } else { 1 }).collect(),
+                        (None, Some(ns)) => vec![ns.first()?.sym()?],
                         _ => return None,
                     };
                     match word {
@@ -898,13 +903,13 @@ impl<'a, 'm> Shaper<'a, 'm> {
                 Some(Rc::new(Shape::Module { vals, descs }))
             }
             h @ ("load-moduleof" | "load-input-moduleof") => {
-                let Datum::Str(p) = &items.get(1)?.datum else { return None };
+                let V::Str(p) = &items.get(1)?.view() else { return None };
                 let (_, key) = load_key(self.dir, p, h == "load-input-moduleof");
                 self.files.get(&key)?.module.clone()
             }
             "restrict" => {
                 let Shape::Module { vals, descs } = &*self.ty(e.get(1).copied().flatten()?)? else { return None };
-                let kept: Vec<Sym> = items[2..].iter().filter_map(|n| n.as_symbol()).collect();
+                let kept: Vec<Sym> = items[2..].iter().filter_map(|n| n.sym()).collect();
                 Some(Rc::new(Shape::Module {
                     vals: vals.iter().filter(|(n, _)| kept.contains(n)).cloned().collect(),
                     descs: descs.iter().filter(|(n, _)| kept.contains(n)).cloned().collect(),
@@ -913,7 +918,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
             "poly" => self.ty(e.last().copied().flatten()?),
             // A type a module gives: its own shape, if it is a module's.
             "select" if items.len() == 3 => {
-                let n = items[2].as_symbol()?;
+                let n = items[2].sym()?;
                 self.exp(e[1]?)?.member(n, Ns::Desc)
             }
             "->" if items.len() == 3 => {
@@ -943,14 +948,14 @@ impl Macros {
     /// ((value …) (description …))`, or `#:relied #f` where the shape is not
     /// known (`binding-shapes.md`, step 2); and, at the top level, what its
     /// definitions bind kept for the forms after it.
-    pub(crate) fn shaped(&mut self, form: &Syntax, top: bool, dir: Option<std::path::PathBuf>, global: Global, interner: &Interner) -> R<Syntax> {
+    pub(crate) fn shaped(&mut self, form: &Syn, top: bool, dir: Option<std::path::PathBuf>, global: Global, interner: &Interner) -> R<Syn> {
         let outer = std::mem::replace(&mut self.withs.shapes.dir, dir);
         let r = self.shaped_from(form, top, global, interner);
         self.withs.shapes.dir = outer;
         r
     }
 
-    fn shaped_from(&mut self, form: &Syntax, top: bool, global: Global, interner: &Interner) -> R<Syntax> {
+    fn shaped_from(&mut self, form: &Syn, top: bool, global: Global, interner: &Interner) -> R<Syn> {
         let form = unshaped(form, interner);
         let walked = self.walked(&form, top, global, interner)?;
         for (n, ns, s) in walked.defined {
@@ -961,7 +966,7 @@ impl Macros {
                 }
                 Ns::Desc if s.is_none() => {
                     top.descs.insert(n, None);
-                    top.desc_forms.insert(n, form.clone());
+                    top.desc_forms.insert(n, Kept::new(form));
                 }
                 Ns::Desc => {
                     top.descs.insert(n, s);
@@ -975,7 +980,7 @@ impl Macros {
     /// Form `form`, walked: the shapes to write into it, by the path of
     /// each form that opens a module; its own shape, as an expression's;
     /// and, `top`, what its definitions bind, with their shapes.
-    fn walked(&self, form: &Syntax, top: bool, global: Global, interner: &Interner) -> R<Walked> {
+    fn walked(&self, form: &Syn, top: bool, global: Global, interner: &Interner) -> R<Walked> {
         let none = HashMap::default();
         let mut out = Walked::default();
         let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
@@ -999,13 +1004,13 @@ impl Macros {
             if !c.head(&node.syn).is_some_and(opens) || out.written.contains_key(&node.path) {
                 continue;
             }
-            let items = node.syn.as_proper_list().expect("a form");
-            if items.get(1).and_then(|m| m.as_symbol()).is_some_and(|m| matches!(c.name(m), "#%fx" | "#%toplevel")) {
+            let items = node.syn.list().expect("a form");
+            if items.get(1).and_then(|m| m.sym()).is_some_and(|m| matches!(c.name(m), "#%fx" | "#%toplevel")) {
                 continue;
             }
             let Some(m) = c.elem(k, 1) else { continue };
             let asked = c.asked.get(&m).cloned().unwrap_or_default();
-            let s = (!asked.unknown).then(|| asked.written(node.syn.span));
+            let s = (!asked.unknown).then(|| asked.written(node.syn.at(), interner));
             out.written.insert(node.path.clone(), s);
         }
         if !top {
@@ -1016,7 +1021,7 @@ impl Macros {
         if let (STy::Item, Kids::Form(x)) = (&*a.nodes[root].core, &a.nodes[root].kids)
             && let Some((b, r)) = &a.nodes[*x].export
         {
-            for level in a.eval(b, *r, form.span)? {
+            for level in a.eval(b, *r, form.at())? {
                 match level {
                     Level::Rib(atoms) => {
                         for atom in atoms.iter().cloned() {
@@ -1044,9 +1049,9 @@ impl Macros {
     /// loads' shapes known already), kept by its key (`load_key`), with
     /// what to write into its forms (`file_forms_shaped`). A file that does
     /// not walk has no shape, and the checkers say why where it is read.
-    pub(crate) fn file_shaped(&mut self, key: String, forms: &[Syntax], input: bool, dir: Option<std::path::PathBuf>, interner: &mut Interner) -> R<()> {
+    pub(crate) fn file_shaped(&mut self, key: String, forms: &[Syn], input: bool, dir: Option<std::path::PathBuf>, interner: &mut Interner) -> R<()> {
         self.ensure_kernel(interner)?;
-        let params = forms.first().is_some_and(|f| crate::parse::module_parameters_of(f, interner).is_some());
+        let params = forms.first().is_some_and(|f| module_parameters_of(f, interner).is_some());
         let Some(form) = file_form(forms, input && !params, interner) else {
             self.withs.shapes.files.insert(key, FileShape::default());
             return Ok(());
@@ -1063,19 +1068,20 @@ impl Macros {
             (false, Some(f)) if input && matches!(&*f, Shape::Fun { .. }) => (Some(f.clone()), f.result()),
             (false, m) => (m.clone(), m),
         };
-        self.withs.shapes.files.insert(key, FileShape { value, module, written: Some(Rc::new(walked.written)) });
+        let kept = walked.written.into_iter().map(|(p, s)| (p, s.map(Kept::new))).collect();
+        self.withs.shapes.files.insert(key, FileShape { value, module, written: Some(Rc::new(kept)) });
         Ok(())
     }
 
     /// A file's forms, `forms`, as it is read to be checked, with the
     /// shapes its walk found written in: kept from when its shape was
     /// found (`file_shaped`), or found now, read from directory `dir`.
-    pub(crate) fn file_forms_shaped(&mut self, key: &str, forms: Vec<Syntax>, input: bool, dir: Option<std::path::PathBuf>, interner: &mut Interner) -> Vec<Syntax> {
-        let params = forms.first().is_some_and(|f| crate::parse::module_parameters_of(f, interner).is_some());
+    pub(crate) fn file_forms_shaped(&mut self, key: &str, forms: Vec<Syn>, input: bool, dir: Option<std::path::PathBuf>, interner: &mut Interner) -> Vec<Syn> {
+        let params = forms.first().is_some_and(|f| module_parameters_of(f, interner).is_some());
         let wrapped = !(input && !params);
         let Some(form) = file_form(&forms, !wrapped, interner) else { return forms };
         let written = match self.withs.shapes.files.get(key).and_then(|f| f.written.clone()) {
-            Some(w) => w,
+            Some(w) => Rc::new(w.iter().map(|(p, s)| (p.clone(), s.map(Kept::get))).collect::<Written>()),
             None => {
                 let outer = std::mem::replace(&mut self.withs.shapes.dir, dir);
                 let walked = self.shapes_prepared(interner).and_then(|()| self.walked(&form, false, None, interner));
@@ -1090,7 +1096,7 @@ impl Macros {
             return forms;
         }
         let shaped = with_written(&form, &mut Vec::new(), &written, interner);
-        if wrapped { shaped.as_proper_list().expect("a module")[1..].to_vec() } else { vec![shaped] }
+        if wrapped { shaped.list().expect("a module")[1..].to_vec() } else { vec![shaped] }
     }
 
     /// What `shaped` needs made first, which it cannot make itself: the
@@ -1103,27 +1109,28 @@ impl Macros {
 
     /// The forms of the file at `at` as they were read for its shape, if
     /// they were, of the same text: taken, so read once.
-    pub(crate) fn forms_read(&mut self, at: &str, text: &str) -> Option<Vec<Syntax>> {
+    pub(crate) fn forms_read(&mut self, at: &str, text: &str) -> Option<Vec<Syn>> {
         let (read, forms) = self.withs.shapes.read.remove(at)?;
-        (read == text).then_some(forms)
+        (read == text).then(|| forms.into_iter().map(Kept::get).collect())
     }
 
     /// Keeps the forms of the file at `at`, as read for its shape.
-    pub(crate) fn keep_forms_read(&mut self, at: String, text: String, forms: Vec<Syntax>) {
-        self.withs.shapes.read.insert(at, (text, forms));
+    pub(crate) fn keep_forms_read(&mut self, at: String, text: String, forms: Vec<Syn>) {
+        self.withs.shapes.read.insert(at, (text, forms.into_iter().map(Kept::new).collect()));
     }
 
     /// `(define-syntax s (modnames …))`, `form`, if it is one: the shape
     /// named, its name given back; a macro of that name forgotten.
-    pub(crate) fn shape_defined(&mut self, form: &Syntax, interner: &Interner) -> Option<Sym> {
-        let [h, n, m] = form.as_proper_list()? else { return None };
-        let (h, n) = (h.as_symbol()?, n.as_symbol()?);
-        let head = m.as_proper_list()?.first()?.as_symbol()?;
+    pub(crate) fn shape_defined(&mut self, form: &Syn, interner: &Interner) -> Option<Sym> {
+        let l = form.list()?;
+        let [h, n, m] = &l[..] else { return None };
+        let (h, n) = (h.sym()?, n.sym()?);
+        let head = m.list()?.first()?.sym()?;
         if interner.name(h) != "define-syntax" || interner.name(head) != "modnames" {
             return None;
         }
         self.defined.remove(&n);
-        self.withs.shapes.named.insert(n, m.clone());
+        self.withs.shapes.named.insert(n, Kept::new(*m));
         Some(n)
     }
 
@@ -1138,28 +1145,29 @@ impl Macros {
     /// x (the (modnames …) e))`, which the checkers seal there
     /// (`Checker::the_sealed`); outside quotes. The first shape used as a
     /// form's head, refused.
-    pub(crate) fn sealed_written(&self, s: &Syntax, interner: &mut Interner) -> R<Syntax> {
-        let Datum::List { items, tail } = &s.datum else { return Ok(s.clone()) };
-        let head = items.first().and_then(|h| h.as_symbol());
+    pub(crate) fn sealed_written(&self, s: &Syn, interner: &mut Interner) -> R<Syn> {
+        let V::List { items, tail } = &s.view() else { return Ok(s.clone()) };
+        let head = items.first().and_then(|h| h.sym());
         let name = head.map(|h| interner.name(h).to_string()).unwrap_or_default();
         if matches!(name.as_str(), "quote" | "quasiquote" | "%datum") {
             return Ok(s.clone());
         }
         if let Some(h) = head.filter(|h| self.is_shape(*h)) {
-            return Err(FxError::at(s.span, format!("`{}` is a shape, not a macro: it is written as a `define`'s or `the`'s type", interner.name(h))));
+            return Err(FxError::at(s.at(), format!("`{}` is a shape, not a macro: it is written as a `define`'s or `the`'s type", interner.name(h))));
         }
+        let was_items = items;
         let mut items = items.iter().map(|i| self.sealed_written(i, interner)).collect::<R<Vec<_>>>()?;
         let modnames = interner.intern("modnames");
-        let shape_of = |t: &Syntax| -> Option<Syntax> {
-            let named = t.as_symbol().and_then(|n| self.withs.shapes.named.get(&n)).cloned();
-            let written = t.as_proper_list().and_then(|l| l.first()?.as_symbol()) == Some(modnames);
+        let shape_of = |t: &Syn| -> Option<Syn> {
+            let named = t.sym().and_then(|n| self.withs.shapes.named.get(&n)).map(|k| k.get());
+            let written = t.list().and_then(|l| l.first()?.sym()) == Some(modnames);
             named.or_else(|| written.then(|| t.clone()))
         };
         match (name.as_str(), &items[..]) {
             ("define", [_, x, t, e]) if tail.is_none() => {
                 if let Some(m) = shape_of(t) {
-                    let the = Syntax::symbol(s.span, interner.intern("the"));
-                    let sealed = Syntax::list(s.span, vec![the, m, e.clone()]);
+                    let the = Syn::named(s.at(), "the", interner);
+                    let sealed = Syn::lst(s.at(), vec![the, m, e.clone()]);
                     items = vec![items[0].clone(), x.clone(), sealed];
                 }
             }
@@ -1170,8 +1178,9 @@ impl Macros {
             }
             _ => {}
         }
-        let tail = tail.as_ref().map(|t| self.sealed_written(t, interner).map(Box::new)).transpose()?;
-        Ok(Syntax::new(s.span, Datum::List { items, tail }))
+        let was = tail;
+        let tail = tail.as_ref().map(|t| self.sealed_written(t, interner)).transpose()?;
+        Ok(s.with_parts((&was_items, *was), &items, tail))
     }
 
     /// The top-level forms noted, before and after their shapes were
@@ -1202,26 +1211,26 @@ impl Known {
 
 /// `s`, at `path`, with each shape of `written` written into the form at
 /// its path, after its first operand.
-fn with_written(s: &Syntax, path: &mut Vec<bool>, written: &Written, interner: &Interner) -> Syntax {
+fn with_written(s: &Syn, path: &mut Vec<bool>, written: &Written, interner: &Interner) -> Syn {
     let words = (interner.get("relied").expect("interned"), interner.get("#f").expect("interned"));
     with_written_in(s, path, written, interner, words)
 }
 
-fn with_written_in(s: &Syntax, path: &mut Vec<bool>, written: &Written, interner: &Interner, words: (Sym, Sym)) -> Syntax {
+fn with_written_in(s: &Syn, path: &mut Vec<bool>, written: &Written, interner: &Interner, words: (Sym, Sym)) -> Syn {
     let (shape, no) = words;
-    let Datum::List { items, tail } = &s.datum else { return s.clone() };
+    let V::List { items, tail } = &s.view() else { return s.clone() };
     let mut out = Vec::with_capacity(items.len() + 2);
     let depth = path.len();
     // Only a form that opens a module is looked up: a long list's paths
     // are long.
-    let opening = items.first().and_then(|h| h.as_symbol()).is_some_and(|h| opens(interner.name(h)));
+    let opening = items.first().and_then(|h| h.sym()).is_some_and(|h| opens(interner.name(h)));
     let written_here = if opening { written.get(&path[..depth]).cloned() } else { None };
     for (k, i) in items.iter().enumerate() {
         if k == 2
             && let Some(w) = &written_here
         {
-            out.push(Syntax::new(s.span, Datum::Keyword(shape)));
-            out.push(w.clone().unwrap_or_else(|| Syntax::symbol(s.span, no)));
+            out.push(Syn::new(s.at(), V::Keyword(shape), interner));
+            out.push(w.clone().unwrap_or_else(|| Syn::symbol(s.at(), no, interner)));
         }
         path.push(true);
         out.push(with_written_in(i, path, written, interner, words));
@@ -1231,12 +1240,21 @@ fn with_written_in(s: &Syntax, path: &mut Vec<bool>, written: &Written, interner
     if items.len() == 2
         && let Some(w) = &written_here
     {
-        out.push(Syntax::new(s.span, Datum::Keyword(shape)));
-        out.push(w.clone().unwrap_or_else(|| Syntax::symbol(s.span, no)));
+        out.push(Syn::new(s.at(), V::Keyword(shape), interner));
+        out.push(w.clone().unwrap_or_else(|| Syn::symbol(s.at(), no, interner)));
     }
-    let tail = tail.as_ref().map(|t| Box::new(with_written_in(t, path, written, interner, words)));
+    let new_tail = tail.as_ref().map(|t| with_written_in(t, path, written, interner, words));
     path.truncate(depth);
-    Syntax::new(s.span, Datum::List { items: out, tail })
+    s.with_parts((items, *tail), &out, new_tail)
+}
+
+/// `f`'s binders, if it is a `module-parameters` (as
+/// `parse::module_parameters_of` reads one).
+pub(crate) fn module_parameters_of(f: &Syn, interner: &Interner) -> Option<Vec<Syn>> {
+    match f.list()?.as_slice() {
+        [h, bs] if h.sym().is_some_and(|h| interner.name(h) == "module-parameters") => bs.list(),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

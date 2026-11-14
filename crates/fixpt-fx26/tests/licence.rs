@@ -42,12 +42,12 @@ fn session() -> Fx26Session {
 }
 
 fn speculate(s: &mut Fx26Session, text: &str) -> Speculation {
-    let forms = s.checker.read_in(fixpt_read::FileId(0), text).expect("reads");
+    let forms = s.checking(|c| c.read_in(fixpt_read::FileId(0), text)).expect("reads");
     s.speculate(&forms[0])
 }
 
 fn run(s: &mut Fx26Session, text: &str) {
-    let forms = s.checker.read_in(fixpt_read::FileId(0), text).expect("reads");
+    let forms = s.checking(|c| c.read_in(fixpt_read::FileId(0), text)).expect("reads");
     s.run(&forms[0]).expect("runs").value.expect("no error");
 }
 
@@ -69,7 +69,7 @@ fn an_unlicensed_expression_is_not_run() {
     assert_eq!(speculate(&mut s, "(set c 5)"), Speculation::NotLicensed("(write @c)".into()));
     assert_eq!(speculate(&mut s, "(get c)"), Speculation::NotLicensed("(read @c)".into()));
     run(&mut s, "(define* probe (subr (read @c) () int) (lambda () (get c)))");
-    let forms = s.checker.read_in(fixpt_read::FileId(0), "(probe)").expect("reads");
+    let forms = s.checking(|c| c.read_in(fixpt_read::FileId(0), "(probe)")).expect("reads");
     assert_eq!(s.run(&forms[0]).expect("runs").value, Ok(Some("1".into())), "the speculative write happened");
 }
 

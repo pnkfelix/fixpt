@@ -22,8 +22,8 @@
 use crate::ast::{Effect, Region, TyId};
 use crate::check::{Checked, Checker};
 use crate::error::{FxError, R};
-use fixpt_read::{FileId, Reader, Span, Sym, Syntax, SyntaxProfile};
-use std::rc::Rc;
+use crate::heap_syn::{Form, Syn, V};
+use fixpt_read::{FileId, Span, Sym, Syntax};
 
 /// What one top-level form did.
 #[derive(Clone, Debug)]
@@ -60,7 +60,7 @@ pub enum Top {
 #[derive(Clone, Debug)]
 pub struct Definition {
     pub names: Vec<Sym>,
-    pub form: Rc<Syntax>,
+    pub form: Form,
     pub uses: Vec<Sym>,
 }
 
@@ -73,10 +73,10 @@ pub struct Defining {
     /// take, each earlier definition that uses the name and still checks,
     /// defined again. With each, whether it assigns the globals its names
     /// have (a redefinition every use can take) rather than making new ones.
-    pub run: Vec<(Top, Rc<Syntax>)>,
+    pub run: Vec<(Top, Form)>,
     /// What runs before all that: the hidden globals of the files the form
     /// loads for the first time (`parse_load`), each defined.
-    pub hoisted: Vec<(Top, Rc<Syntax>)>,
+    pub hoisted: Vec<(Top, Form)>,
     /// The earlier definitions that no longer check, and why: broken, a use
     /// of one an error, until they are defined again.
     pub broken: Vec<(Vec<Sym>, String)>,
@@ -118,6 +118,8 @@ fn every_field_placed(c: &Checker) {
         hazard_items: _, broken: _, defs: _, outdated: _, poly_chain: _, inst_for: _,
         // The macros defined, as the forms are read, before any is checked
         // (`expand_forms`): a form tried and thrown away has defined none.
+        // With them, the heap their syntax is in (`Withs::world`): what a
+        // check thrown away made there is garbage.
         macros: _,
         // Put back by `truncate_env`, with the environment.
         known: _, global_slots: _, fixed_slots: _,
@@ -177,11 +179,11 @@ impl Checker {
     /// A form refused leaves nothing behind: not the files it loaded for
     /// the first time, which another try would take as loaded, with their
     /// hidden globals never made (`put_back`).
-    pub fn top_defining(&mut self, form: &Syntax) -> R<Defining> {
+    pub(crate) fn top_defining_syn(&mut self, form: &Syn) -> R<Defining> {
         // Its phase (`TODO.md` §252).
         let _phase = fixpt_memmgmt::phases::enter("rust-front");
         let kept = self.keep(false);
-        let r = match self.include_forms(form) {
+        let r = match self.include_forms_syn(form) {
             Ok(Some(forms)) => self.top_defining_each(&forms),
             Ok(None) => self.top_defining_kept(form),
             Err(e) => Err(e),
@@ -193,7 +195,7 @@ impl Checker {
     }
 
     /// `top_defining` of each of `forms`, in order, as one.
-    fn top_defining_each(&mut self, forms: &[Syntax]) -> R<Defining> {
+    fn top_defining_each(&mut self, forms: &[Syn]) -> R<Defining> {
         let mut all = Defining { run: Vec::new(), hoisted: Vec::new(), broken: Vec::new() };
         for f in forms {
             let d = self.top_defining_kept(f)?;
@@ -211,22 +213,22 @@ impl Checker {
     /// made an `import` here, where that is known: for a program run, the
     /// forms it is made are what the front end written in FX-26 is given
     /// (`Fx26Session::run`). `None` if `form` is no `include`.
-    pub fn include_forms(&mut self, form: &Syntax) -> R<Option<Vec<Syntax>>> {
+    pub(crate) fn include_forms_syn(&mut self, form: &Syn) -> R<Option<Vec<Syn>>> {
         let Some((name, vals, types, effects)) = self.include_names(form)? else { return Ok(None) };
-        let span = form.span;
-        let sym = |s: Sym| Syntax::symbol(span, s);
-        let word = |c: &mut Self, w: &str| Syntax::symbol(span, c.interner.intern(w));
-        let mut import = vec![word(self, "import"), sym(name)];
-        import.extend(vals.into_iter().map(sym));
+        let span = form.span();
+        let sym = |c: &Self, s: Sym| Syn::symbol(span, s, &c.interner);
+        let word = |c: &mut Self, w: &str| Syn::named(span, w, &mut c.interner);
+        let mut import = vec![word(self, "import"), sym(self, name)];
+        import.extend(vals.into_iter().map(|v| sym(self, v)));
         for (group, names) in [("type", types), ("effect", effects)] {
             if !names.is_empty() {
                 let mut g = vec![word(self, group)];
-                g.extend(names.into_iter().map(sym));
-                import.push(Syntax::list(span, g));
+                g.extend(names.into_iter().map(|n| sym(self, n)));
+                import.push(Syn::lst(span, g));
             }
         }
         let mut out = Vec::new();
-        self.expand_import(&Syntax::list(span, import), &mut out)?;
+        self.expand_import(&Syn::lst(span, import), &mut out)?;
         Ok(Some(out))
     }
 
@@ -236,23 +238,24 @@ impl Checker {
     /// (what `(import-with-syntax m (only n …))` gives of `m`'s module), each
     /// `n` a name it gives. `None` if `form` is no `include`.
     #[allow(clippy::type_complexity)]
-    pub fn include_names(&mut self, form: &Syntax) -> R<Option<(Sym, Vec<Sym>, Vec<Sym>, Vec<Sym>)>> {
-        let Some(items) = form.as_proper_list() else { return Ok(None) };
-        if !items.first().and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "include") {
+    pub fn include_names(&mut self, form: &Syn) -> R<Option<(Sym, Vec<Sym>, Vec<Sym>, Vec<Sym>)>> {
+        let listed = form.list();
+        let Some(items) = listed.as_deref() else { return Ok(None) };
+        if !items.first().and_then(|h| h.sym()).is_some_and(|h| self.interner.name(h) == "include") {
             return Ok(None);
         }
         let usage = "a top-level `include` names a module bound here: `(include m)`, or `(include m (only name …))` or `(except name …)`";
         let (m, filter) = match items {
             [_, m] => (m, None),
             [_, m, f] => (m, Some(self.name_filter(f, usage)?)),
-            _ => return Err(FxError::at(form.span, usage)),
+            _ => return Err(FxError::at(form.span(), usage)),
         };
-        let Some(name) = m.as_symbol() else { return Err(FxError::at(m.span, usage)) };
+        let Some(name) = m.sym() else { return Err(FxError::at(m.span(), usage)) };
         let Some(t) = self.lookup(name) else {
-            return Err(FxError::at(m.span, format!("unbound variable `{}`", self.interner.name(name))));
+            return Err(FxError::at(m.span(), format!("unbound variable `{}`", self.interner.name(name))));
         };
         let crate::ast::Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else {
-            return Err(FxError::at(m.span, format!("`include` includes a module, and `{}` is a {}", self.interner.name(name), self.show_ty(t))));
+            return Err(FxError::at(m.span(), format!("`include` includes a module, and `{}` is a {}", self.interner.name(name), self.show_ty(t))));
         };
         let shown = |c: &Self, n: &Sym| !c.interner.name(*n).starts_with('%');
         let mut types: Vec<Sym> = abs.iter().map(|(n, _)| *n).filter(|n| shown(self, n)).collect();
@@ -281,27 +284,28 @@ impl Checker {
     /// each with its place: which of what a module gives a top-level
     /// `include` or `import-with-syntax` takes.
     #[allow(clippy::type_complexity)]
-    fn name_filter(&self, f: &Syntax, usage: &str) -> R<(bool, Vec<(Sym, Span)>)> {
-        let items = f.as_proper_list().unwrap_or(&[]);
-        let only = match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
+    fn name_filter(&self, f: &Syn, usage: &str) -> R<(bool, Vec<(Sym, Span)>)> {
+        let listed = f.list();
+        let items = listed.as_deref().unwrap_or_default();
+        let only = match items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h)) {
             Some("only") => true,
             Some("except") => false,
-            _ => return Err(FxError::at(f.span, usage)),
+            _ => return Err(FxError::at(f.span(), usage)),
         };
-        let names = items[1..].iter().map(|n| n.as_symbol().map(|s| (s, n.span)).ok_or_else(|| FxError::at(n.span, usage))).collect::<R<_>>()?;
+        let names = items[1..].iter().map(|n| n.sym().map(|s| (s, n.span())).ok_or_else(|| FxError::at(n.span(), usage))).collect::<R<_>>()?;
         Ok((only, names))
     }
 
-    fn top_defining_kept(&mut self, form: &Syntax) -> R<Defining> {
-        let names = self.defined_names(form);
+    fn top_defining_kept(&mut self, form: &Syn) -> R<Defining> {
+        let names = self.defined_names_syn(form);
         // A macro's name defined, however (an `import`'s or `include`'s
         // definitions are made after expansion): refused, as a `define` of
         // one is as it is expanded. A macro of a name defined before it, in
         // a program expanded before it is checked: refused where it is (as
         // in the REPL, where it is defined after this is checked).
         for n in &names {
-            match self.macros.defined_before(*n, form.span) {
-                Some(Ok(())) => return Err(FxError::at(form.span, format!("`{}` is a macro's name, which is not defined again", self.interner.name(*n)))),
+            match self.macros.defined_before(*n, form.span()) {
+                Some(Ok(())) => return Err(FxError::at(form.span(), format!("`{}` is a macro's name, which is not defined again", self.interner.name(*n)))),
                 Some(Err(at)) => return Err(Self::macro_over_global(&self.interner, *n, at)),
                 None => {}
             }
@@ -310,7 +314,7 @@ impl Checker {
         let users = if olds.is_empty() || self.defer_reruns { Vec::new() } else { self.users_of(&names) };
         let direct = if olds.is_empty() || !self.defer_reruns { Vec::new() } else { self.direct_users_of(&names) };
         let before = std::mem::take(&mut self.hoisted);
-        let top = self.top(form);
+        let top = self.top_syn(form);
         // The hidden globals of the files it loads first, for the first time
         // (`parse_load`).
         let hoisted = std::mem::replace(&mut self.hoisted, before);
@@ -318,7 +322,7 @@ impl Checker {
         let assigns = !olds.is_empty() && self.fits_old(&top, &olds);
         set_assigns(&mut top, assigns);
         // One copy of the form, for both what runs and the definition kept.
-        let form = Rc::new(form.clone());
+        let form = Form::new(*form);
         self.record(&form, &top);
         let mut done = Defining { run: vec![(top, form)], hoisted, broken: Vec::new() };
         if olds.is_empty() || assigns {
@@ -333,7 +337,7 @@ impl Checker {
         let shown = |c: &Checker, ns: &[Sym]| ns.iter().map(|n| format!("`{}`", c.interner.name(*n))).collect::<Vec<_>>().join(", ");
         for u in users {
             let olds: Vec<(Sym, TyId)> = u.names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
-            let checked = self.top(&u.form);
+            let checked = self.top_syn(&u.form.get());
             match checked {
                 Ok(mut top) => {
                     let assigns = self.fits_old(&top, &olds);
@@ -355,18 +359,18 @@ impl Checker {
 
     /// Every top-level form `form` runs under redefinition, in order
     /// (`top_defining`): itself, and the definitions it runs again.
-    pub fn top_all(&mut self, form: &Syntax) -> R<Vec<Top>> {
-        let done = self.top_defining(form)?;
+    pub(crate) fn top_all_syn(&mut self, form: &Syn) -> R<Vec<Top>> {
+        let done = self.top_defining_syn(form)?;
         Ok(done.hoisted.into_iter().chain(done.run).map(|(t, _)| t).collect())
     }
 
     /// What `top_defining` would do with `form`, with nothing changed: for
     /// a driver to decide whether a redefinition that would break
     /// definitions goes ahead.
-    pub fn try_defining(&mut self, form: &Syntax) -> R<Defining> {
+    pub(crate) fn try_defining_syn(&mut self, form: &Syn) -> R<Defining> {
         let (mark, broken, defs, outdated) = (self.mark(), self.broken.clone(), self.defs.clone(), self.outdated.clone());
         let shared = (self.shared_loads.clone(), self.shared_globals.clone());
-        let r = self.top_defining(form);
+        let r = self.top_defining_syn(form);
         self.rollback(mark);
         (self.broken, self.defs, self.outdated) = (broken, defs, outdated);
         (self.shared_loads, self.shared_globals) = shared;
@@ -518,13 +522,14 @@ impl Checker {
 
     /// The names a form defines: `(define name …)`'s, and each of
     /// `(define-rec (name type lambda) …)`'s.
-    pub fn defined_names(&self, form: &Syntax) -> Vec<Sym> {
-        let Some(items) = form.as_proper_list() else { return Vec::new() };
-        match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
+    pub(crate) fn defined_names_syn(&self, form: &Syn) -> Vec<Sym> {
+        let listed = form.list();
+        let Some(items) = listed.as_deref() else { return Vec::new() };
+        match items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h)) {
             Some("define" | "define*" | "define-syscall" | "define-optional-syscall") => {
-                items.get(1).and_then(|n| n.as_symbol()).into_iter().collect()
+                items.get(1).and_then(|n| n.sym()).into_iter().collect()
             }
-            Some("define-rec") => items[1..].iter().filter_map(|b| b.as_proper_list()?.first()?.as_symbol()).collect(),
+            Some("define-rec") => items[1..].iter().filter_map(|b| b.list().as_deref()?.first()?.sym()).collect(),
             _ => Vec::new(),
         }
     }
@@ -565,7 +570,7 @@ impl Checker {
     /// The definitions out of date (`defer_reruns`), oldest first: each
     /// one's names, the names it uses that were defined again since, and
     /// its form, to run again.
-    pub fn outdated(&self) -> Vec<(Vec<Sym>, Vec<Sym>, Rc<Syntax>)> {
+    pub fn outdated(&self) -> Vec<(Vec<Sym>, Vec<Sym>, Form)> {
         self.defs
             .iter()
             .filter_map(|d| {
@@ -576,7 +581,7 @@ impl Checker {
     }
 
     /// `form`, checked as `top`, recorded as the definition of its names now.
-    fn record(&mut self, form: &Rc<Syntax>, top: &Top) {
+    fn record(&mut self, form: &Form, top: &Top) {
         let (names, exps): (Vec<Sym>, Vec<crate::ast::ExpId>) = match top {
             Top::Define { name, exp, .. } => (vec![*name], vec![*exp]),
             Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, _, e)| (*n, *e)).unzip(),
@@ -595,8 +600,8 @@ impl Checker {
 
     /// Read `text` in FX-26's lexical syntax (`SyntaxProfile::FX26`),
     /// recording spans against `file`.
-    pub fn read_in(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
-        self.read_in_from(file, text, 0)
+    pub(crate) fn read_in_syn(&mut self, file: FileId, text: &str) -> R<Vec<Syn>> {
+        self.read_in_from_syn(file, text, 0)
     }
 
     /// Program `text`, expanded (`read_in`), each local value binder and
@@ -605,7 +610,11 @@ impl Checker {
     /// forms, written, to be read again; so without the conversions a
     /// `define-generative` makes, which reading it makes again.
     pub fn alpha_renamed(&mut self, text: &str) -> R<Vec<String>> {
-        let forms = self.read_in(FileId(0), text)?;
+        self.syn(|c| c.alpha_renamed_syn(text))
+    }
+
+    fn alpha_renamed_syn(&mut self, text: &str) -> R<Vec<String>> {
+        let forms = self.read_in_syn(FileId(0), text)?;
         let mut out = Vec::new();
         let mut made = 0;
         for f in forms {
@@ -613,14 +622,17 @@ impl Checker {
                 made -= 1;
                 continue;
             }
-            if f.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "define-generative") {
+            if f.list().as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).is_some_and(|h| self.interner.name(h) == "define-generative") {
                 made = 2;
             }
-            let mut macros = std::mem::take(&mut self.macros);
-            let mut interner = std::mem::take(&mut self.interner);
-            let r = macros.alpha_renamed(&f, &mut interner).map(|s| fixpt_read::write_syntax(&s, &interner));
-            self.macros = macros;
-            self.interner = interner;
+            let r = self.syn(|c| {
+                let mut macros = std::mem::take(&mut c.macros);
+                let mut interner = std::mem::take(&mut c.interner);
+                let r = macros.alpha_renamed(&f, &mut interner).map(|s| fixpt_read::write_syntax(&s.to_syntax(), &interner));
+                c.macros = macros;
+                c.interner = interner;
+                r
+            });
             out.push(r?);
         }
         Ok(out)
@@ -631,7 +643,11 @@ impl Checker {
     /// `define-generative` makes: for giving the expander written in FX-26
     /// the forms this one walked (`tests/scopes.rs`).
     pub fn expanded_written(&mut self, text: &str) -> R<Vec<String>> {
-        let forms = self.read_in(FileId(0), text)?;
+        self.syn(|c| c.expanded_written_syn(text))
+    }
+
+    fn expanded_written_syn(&mut self, text: &str) -> R<Vec<String>> {
+        let forms = self.read_in_syn(FileId(0), text)?;
         let mut out = Vec::new();
         let mut made = 0;
         for f in forms {
@@ -639,10 +655,10 @@ impl Checker {
                 made -= 1;
                 continue;
             }
-            if f.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "define-generative") {
+            if f.list().as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).is_some_and(|h| self.interner.name(h) == "define-generative") {
                 made = 2;
             }
-            out.push(fixpt_read::write_syntax(&f, &self.interner));
+            out.push(fixpt_read::write_syntax(&f.to_syntax(), &self.interner));
         }
         Ok(out)
     }
@@ -650,22 +666,18 @@ impl Checker {
     /// The forms of `text` from byte `start` on, their places in all of
     /// `text`: a REPL's entry, in the session's text
     /// (`Fx26Session::read_entry`).
-    pub fn read_in_from(&mut self, file: FileId, text: &str, start: usize) -> R<Vec<Syntax>> {
+    pub(crate) fn read_in_from_syn(&mut self, file: FileId, text: &str, start: usize) -> R<Vec<Syn>> {
         // Its phase (`TODO.md` §252).
         let _phase = fixpt_memmgmt::phases::enter("rust-front");
         // Where its spans are, for what is said of the checks when the stack
         // runs low (`debug_stack`).
         #[cfg(debug_assertions)]
         fixpt_read::note_source(file, if file.0 == 0 { "<program>" } else { "<text>" }, text.into());
-        let mut interner = std::mem::take(&mut self.interner);
-        let mut reader = Reader::new(text, file, SyntaxProfile::FX26, &mut interner);
-        reader.seek(start);
-        let r = reader.read_all();
-        self.interner = interner;
+        let r = crate::heap_syn::read_syn_from(text, file, start, &mut self.interner);
         let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
         // The text, for the macros defined in it (their templates' places).
         self.macros.reading = Some(std::sync::Arc::from(text));
-        let r = self.expand_forms(forms);
+        let r = self.expand_forms_syn(forms);
         self.macros.reading = None;
         r
     }
@@ -676,20 +688,20 @@ impl Checker {
     /// `define-syntax`es (hidden or not), are no items: what
     /// `import-with-syntax` brings (`import_file_macros`); a use of one
     /// left, before its definition, is refused.
-    pub(crate) fn read_module_file(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
+    pub(crate) fn read_module_file(&mut self, file: FileId, text: &str) -> R<Vec<Syn>> {
         self.read_module_file_at(file, text, None)
     }
 
     /// `read_module_file`, of the file at `at` (an `input`'s, or not): its
     /// forms with the shapes of what they open written in, before anything
     /// else is made of them (`Macros::file_forms_shaped`).
-    pub(crate) fn read_module_file_at(&mut self, file: FileId, text: &str, at: Option<(&std::path::Path, bool)>) -> R<Vec<Syntax>> {
+    pub(crate) fn read_module_file_at(&mut self, file: FileId, text: &str, at: Option<(&std::path::Path, bool)>) -> R<Vec<Syn>> {
         // As read for its shape, if it was: its places made this file's.
         let kept = at.and_then(|(at, _)| self.macros.forms_read(&at.display().to_string(), text));
         let mut forms = match kept {
-            Some(mut forms) => {
-                forms.iter_mut().for_each(|f| placed_in(f, file));
-                forms
+            Some(forms) => {
+                crate::heap_syn::note_text(file, std::sync::Arc::from(text));
+                forms.iter().map(|f| placed_in(f, file)).collect()
             }
             None => self.module_file_forms(file, text)?,
         };
@@ -715,9 +727,9 @@ impl Checker {
     /// A module file's forms, `forms`, its own macros' uses expanded, without
     /// their definitions (`define-syntax`es, hidden or not), which are no
     /// items; refused if a use of one is left, which comes before it.
-    fn without_own_macros(&mut self, forms: Vec<Syntax>) -> R<Vec<Syntax>> {
-        let defines_syntax = |c: &Self, s: &Syntax| syntax_names(s, &c.interner).is_some();
-        let names_of = |c: &Self, s: &Syntax| syntax_names(s, &c.interner).unwrap_or_default().into_iter().map(|(n, _)| n);
+    fn without_own_macros(&mut self, forms: Vec<Syn>) -> R<Vec<Syn>> {
+        let defines_syntax = |c: &Self, s: &Syn| syntax_names(s, &c.interner).is_some();
+        let names_of = |c: &Self, s: &Syn| syntax_names(s, &c.interner).unwrap_or_default().into_iter().map(|(n, _)| n);
         let mut macros = Vec::new();
         let mut kept = Vec::new();
         for f in forms {
@@ -725,12 +737,12 @@ impl Checker {
                 macros.extend(names_of(self, &f));
                 continue;
             }
-            match f.as_proper_list() {
-                Some([h, items @ ..]) if h.as_symbol().is_some_and(|h| self.interner.name(h) == "hide") && items.iter().any(|i| defines_syntax(self, i)) => {
+            match f.list().as_deref() {
+                Some([h, items @ ..]) if h.sym().is_some_and(|h| self.interner.name(h) == "hide") && items.iter().any(|i| defines_syntax(self, i)) => {
                     macros.extend(items.iter().filter(|i| defines_syntax(self, i)).flat_map(|i| names_of(self, i)));
-                    let rest: Vec<Syntax> = std::iter::once(h.clone()).chain(items.iter().filter(|i| !defines_syntax(self, i)).cloned()).collect();
+                    let rest: Vec<Syn> = std::iter::once(h.clone()).chain(items.iter().filter(|i| !defines_syntax(self, i)).cloned()).collect();
                     if rest.len() > 1 {
-                        kept.push(Syntax::list(f.span, rest));
+                        kept.push(Syn::lst(f.span(), rest));
                     }
                 }
                 _ => kept.push(f),
@@ -748,15 +760,13 @@ impl Checker {
     /// A built-in module file's items, `text`, as a module file is read
     /// (`module_file_forms`, `without_own_macros`), if it defines macros of
     /// its own; none if it does not, when its text is its items as written.
-    pub(crate) fn built_in_items(&mut self, text: &str) -> R<Option<Vec<Syntax>>> {
-        let mut interner = std::mem::take(&mut self.interner);
-        let read = Reader::new(text, FileId(0), SyntaxProfile::FX26, &mut interner).read_all();
-        self.interner = interner;
+    pub(crate) fn built_in_items(&mut self, text: &str) -> R<Option<Vec<Syn>>> {
+        let read = crate::heap_syn::read_syn(text, FileId(0), &mut self.interner);
         let forms = read.map_err(|e| FxError::at(e.span, e.message))?;
-        let defines = |s: &Syntax| syntax_names(s, &self.interner).is_some();
+        let defines = |s: &Syn| syntax_names(s, &self.interner).is_some();
         let own = forms.iter().any(|f| {
             defines(f)
-                || matches!(f.as_proper_list(), Some([h, items @ ..]) if h.as_symbol().is_some_and(|h| self.interner.name(h) == "hide") && items.iter().any(defines))
+                || matches!(f.list().as_deref(), Some([h, items @ ..]) if h.sym().is_some_and(|h| self.interner.name(h) == "hide") && items.iter().any(defines))
         });
         if !own {
             return Ok(None);
@@ -771,20 +781,31 @@ impl Checker {
     /// `binding-shapes.md`, step 2), the files it loads read for theirs
     /// first. A form the walk does not take is left as it is, for the
     /// checkers to say why.
-    pub(crate) fn shapes_written(&mut self, form: &Syntax, top: bool) -> Syntax {
+    #[cfg(test)]
+    pub(crate) fn shapes_written(&mut self, form: &Form, top: bool) -> Syntax {
+        self.syn(|c| c.shapes_written_syn(form.get(), top).to_syntax())
+    }
+
+    /// [`shapes_written`](Self::shapes_written) of syntax in the heap: with
+    /// the heap lent (`syn`).
+    fn shapes_written_syn(&mut self, form: Syn, top: bool) -> Syn {
         let dir = self.base_dir.clone();
-        self.file_shapes_for(std::slice::from_ref(form), dir.clone());
+        let mut loads = Vec::new();
+        crate::macros::shapes::loads_in(&form, &self.interner, &mut loads);
+        self.file_shapes_of(loads, dir.clone());
         let mut macros = std::mem::take(&mut self.macros);
-        let r = macros.shapes_prepared(&mut self.interner).and_then(|()| {
+        let prepared = macros.shapes_prepared(&mut self.interner);
+        let c = &*self;
+        let r = prepared.and_then(|()| {
             let global = |n: Sym, ns: crate::macros::Ns, k: Option<usize>| match (ns, k) {
-                (crate::macros::Ns::Value, _) => self.lookup(n).and_then(|t| self.type_shape(t, 0)),
-                (crate::macros::Ns::Desc, None) => self.type_named(n).and_then(|t| self.type_shape(t, 0)),
-                (crate::macros::Ns::Desc, Some(k)) => self.type_named(n).and_then(|t| self.param_shape(t, k)),
+                (crate::macros::Ns::Value, _) => c.lookup(n).and_then(|t| c.type_shape(t, 0)),
+                (crate::macros::Ns::Desc, None) => c.type_named(n).and_then(|t| c.type_shape(t, 0)),
+                (crate::macros::Ns::Desc, Some(k)) => c.type_named(n).and_then(|t| c.param_shape(t, k)),
             };
-            macros.shaped(form, top, dir, Some(&global), &self.interner)
+            macros.shaped(&form, top, dir, Some(&global), &c.interner)
         });
         self.macros = macros;
-        r.unwrap_or_else(|_| form.clone())
+        r.unwrap_or(form)
     }
 
     /// The shape a module of type `t` has, as the type says it: its values'
@@ -824,11 +845,17 @@ impl Checker {
     /// of those they load, each read once (`Macros::file_shaped`). A file
     /// not read has none, which the checkers will say why of where it is
     /// loaded.
-    fn file_shapes_for(&mut self, forms: &[Syntax], dir: Option<std::path::PathBuf>) {
+    fn file_shapes_for(&mut self, forms: &[Syn], dir: Option<std::path::PathBuf>) {
         let mut loads = Vec::new();
         for f in forms {
             crate::macros::shapes::loads_in(f, &self.interner, &mut loads);
         }
+        self.file_shapes_of(loads, dir);
+    }
+
+    /// [`file_shapes_for`](Self::file_shapes_for) of the files `loads`
+    /// names (`loads_in`).
+    fn file_shapes_of(&mut self, loads: Vec<(String, bool)>, dir: Option<std::path::PathBuf>) {
         for (path, input) in loads {
             let (at, key) = crate::macros::shapes::load_key(dir.as_deref(), &path, input);
             if self.macros.file_shape_known(&key) {
@@ -842,20 +869,28 @@ impl Checker {
                     Err(_) => continue,
                 },
             };
-            let mut interner = std::mem::take(&mut self.interner);
-            let r = Reader::new(&text, FileId(0), SyntaxProfile::FX26, &mut interner).read_all();
-            self.interner = interner;
-            let Ok(forms) = r else { continue };
-            let Ok(forms) = forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>() else { continue };
-            let Ok(forms) = self.file_own_expanded(forms, &text) else { continue };
             let sub = at.parent().map(|d| d.to_path_buf());
-            self.file_shapes_for(&forms, sub.clone());
-            let mut macros = std::mem::take(&mut self.macros);
-            let mut interner = std::mem::take(&mut self.interner);
-            let _ = macros.file_shaped(key, &forms, input, sub, &mut interner);
-            macros.keep_forms_read(at.display().to_string(), text, forms);
-            self.macros = macros;
-            self.interner = interner;
+            // Read, sealed, its own macros expanded, and the files it loads
+            // shaped first, all on the syntax the expander reads.
+            self.syn(|c| {
+                let mut interner = std::mem::take(&mut c.interner);
+                let read = crate::heap_syn::read_syn_side(&text, &mut interner);
+                let sealed = read.ok().map(|forms| forms.iter().map(|f| c.macros.sealed_written(f, &mut interner)).collect::<R<Vec<_>>>());
+                c.interner = interner;
+                let Some(Ok(forms)) = sealed else { return };
+                let Ok(forms) = c.file_own_expanded_syn(forms, &text) else { return };
+                let mut loads = Vec::new();
+                for f in &forms {
+                    crate::macros::shapes::loads_in(f, &c.interner, &mut loads);
+                }
+                c.file_shapes_of(loads, sub.clone());
+                let mut macros = std::mem::take(&mut c.macros);
+                let mut interner = std::mem::take(&mut c.interner);
+                let _ = macros.file_shaped(key, &forms, input, sub, &mut interner);
+                macros.keep_forms_read(at.display().to_string(), text, forms);
+                c.macros = macros;
+                c.interner = interner;
+            });
         }
     }
 
@@ -863,13 +898,11 @@ impl Checker {
     /// written in (`sealed_written`), and its own macros' uses expanded
     /// (`file_own_expanded`). Apart from `read_module_file_at`, whose frame
     /// it would grow.
-    fn module_file_forms(&mut self, file: FileId, text: &str) -> R<Vec<Syntax>> {
-        let mut interner = std::mem::take(&mut self.interner);
-        let r = Reader::new(text, file, SyntaxProfile::FX26, &mut interner).read_all();
-        self.interner = interner;
+    fn module_file_forms(&mut self, file: FileId, text: &str) -> R<Vec<Syn>> {
+        let r = crate::heap_syn::read_syn(text, file, &mut self.interner);
         let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
         let forms = forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>()?;
-        self.file_own_expanded(forms, text)
+        self.file_own_expanded_syn(forms, text)
     }
 
     /// A module file's forms, `forms`, of `text`, with its own macros' uses
@@ -882,26 +915,26 @@ impl Checker {
     /// kept, which `import-with-syntax` reads; a shape's,
     /// `(define-syntax s (modnames …))`, no macro. Itself if it defines no
     /// macro.
-    pub(crate) fn file_own_expanded(&mut self, forms: Vec<Syntax>, text: &str) -> R<Vec<Syntax>> {
+    pub(crate) fn file_own_expanded_syn(&mut self, forms: Vec<Syn>, text: &str) -> R<Vec<Syn>> {
         let interner = &self.interner;
-        let head = |s: &Syntax| s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).map(|h| interner.name(h).to_string());
-        let shape = |s: &Syntax| matches!(s.as_proper_list(), Some([_, _, m]) if head(m).as_deref() == Some("modnames"));
-        let macro_of = |s: &Syntax| syntax_names(s, interner).is_some() && !shape(s);
-        let hidden = |s: &Syntax| head(s).as_deref() == Some("hide") && s.as_proper_list().is_some_and(|l| l[1..].iter().any(macro_of));
+        let head = |s: &Syn| s.list().and_then(|l| l.first().copied()).and_then(|h| h.sym()).map(|h| interner.name(h).to_string());
+        let shape = |s: &Syn| matches!(s.list().as_deref(), Some([_, _, m]) if head(m).as_deref() == Some("modnames"));
+        let macro_of = |s: &Syn| syn_names(s, interner).is_some() && !shape(s);
+        let hidden = |s: &Syn| head(s).as_deref() == Some("hide") && s.list().is_some_and(|l| l[1..].iter().any(macro_of));
         // Another file's macros: a program's alone, for now (as the FX-26
         // parser's `own-each`).
         if let Some(f) = forms.iter().find(|f| head(f).as_deref() == Some("import-with-syntax")) {
-            return Err(FxError::at(f.span, "`import-with-syntax` in a module file: not yet; a program's top level imports a file's macros (`binding-shapes.md`, step 4)"));
+            return Err(FxError::at(f.at(), "`import-with-syntax` in a module file: not yet; a program's top level imports a file's macros (`binding-shapes.md`, step 4)"));
         }
         if !forms.iter().any(|f| macro_of(f) || hidden(f)) {
             return Ok(forms);
         }
         let kinds: Vec<u8> = forms.iter().map(|f| if head(f).as_deref() == Some("module-parameters") || shape(f) { 0 } else if macro_of(f) { 1 } else if head(f).as_deref() == Some("hide") { 2 } else { 3 }).collect();
-        let marks: Vec<Vec<bool>> = forms.iter().map(|f| f.as_proper_list().map(|l| l.iter().map(macro_of).collect()).unwrap_or_default()).collect();
+        let marks: Vec<Vec<bool>> = forms.iter().map(|f| f.list().map(|l| l.iter().map(macro_of).collect()).unwrap_or_default()).collect();
         let mut macros = std::mem::take(&mut self.macros);
         let mut interner = std::mem::take(&mut self.interner);
         let r = macros.in_file_scope(text, |m| {
-            let expanded = |m: &mut crate::macros::Macros, f: &Syntax, out: &mut Vec<Syntax>, interner: &mut fixpt_read::Interner| -> R<()> {
+            let expanded = |m: &mut crate::macros::Macros, f: &Syn, out: &mut Vec<Syn>, interner: &mut fixpt_read::Interner| -> R<()> {
                 for f in m.expand_top(f, interner)? {
                     let f = m.sealed_written(&f, interner)?;
                     out.push(m.aliases_resolved(&f, interner)?);
@@ -917,17 +950,17 @@ impl Checker {
                         out.push(f);
                     }
                     2 => {
-                        let items = f.as_proper_list().expect("a `hide`");
-                        let mut kept = vec![items[0].clone()];
+                        let items = f.list().expect("a `hide`");
+                        let mut kept = vec![items[0]];
                         for (i, is_macro) in items.iter().zip(marks).skip(1) {
                             if is_macro {
                                 m.define(i, &mut interner)?;
-                                kept.push(i.clone());
+                                kept.push(*i);
                             } else {
                                 expanded(m, i, &mut kept, &mut interner)?;
                             }
                         }
-                        out.push(Syntax::list(f.span, kept));
+                        out.push(Syn::lst(f.at(), kept));
                     }
                     _ => expanded(m, &f, &mut out, &mut interner)?,
                 }
@@ -941,15 +974,15 @@ impl Checker {
 
     /// What is expanded as it is read (`define-datatype`), for forms read
     /// some other way: by the reader written in FX-26 (`crate::syn`).
-    pub fn expand_forms(&mut self, forms: Vec<Syntax>) -> R<Vec<Syntax>> {
+    pub(crate) fn expand_forms_syn(&mut self, forms: Vec<Syn>) -> R<Vec<Syn>> {
         let mut out = Vec::new();
         for f in forms {
             // `(hide form …)`: its forms, as if written there, a program
             // exporting nothing to hide them from.
-            if let Some([h, items @ ..]) = f.as_proper_list()
-                && h.as_symbol().is_some_and(|h| self.interner.name(h) == "hide")
+            if let Some([h, items @ ..]) = f.list().as_deref()
+                && h.sym().is_some_and(|h| self.interner.name(h) == "hide")
             {
-                out.extend(self.expand_forms(items.to_vec())?);
+                out.extend(self.expand_forms_syn(items.to_vec())?);
                 continue;
             }
             // `(import-with-syntax lib)`: the file's macros defined, and the
@@ -958,18 +991,18 @@ impl Checker {
             // `include`'s are the names not the file's macros.
             if let Some((lib, filter)) = self.import_with_syntax(&f)? {
                 let macros = self.import_file_macros(&f, lib, filter.as_ref())?;
-                let include = Syntax::symbol(f.span, self.interner.intern("include"));
-                let mut made = vec![include, Syntax::symbol(f.span, lib)];
+                let include = Syn::named(f.span(), "include", &mut self.interner);
+                let mut made = vec![include, Syn::symbol(f.span(), lib, &self.interner)];
                 if let Some((only, names)) = filter {
-                    let rest: Vec<Syntax> = names.into_iter().filter(|(n, _)| !macros.contains(n)).map(|(n, at)| Syntax::symbol(at, n)).collect();
+                    let rest: Vec<Syn> = names.into_iter().filter(|(n, _)| !macros.contains(n)).map(|(n, at)| Syn::symbol(at, n, &self.interner)).collect();
                     // `(only macro …)`: nothing else.
                     if only && rest.is_empty() {
                         continue;
                     }
-                    let word = Syntax::symbol(f.span, self.interner.intern(if only { "only" } else { "except" }));
-                    made.push(Syntax::list(f.span, std::iter::once(word).chain(rest).collect()));
+                    let word = Syn::named(f.span(), if only { "only" } else { "except" }, &mut self.interner);
+                    made.push(Syn::lst(f.span(), std::iter::once(word).chain(rest).collect()));
                 }
-                out.push(Syntax::list(f.span, made));
+                out.push(Syn::lst(f.span(), made));
                 continue;
             }
             // A macro defined, or each use of one expanded
@@ -988,31 +1021,33 @@ impl Checker {
     /// `(import-with-syntax lib)`'s `lib`, if `form` is one, and its
     /// `(only name …)` or `(except name …)`, if it has one.
     #[allow(clippy::type_complexity)]
-    fn import_with_syntax(&self, form: &Syntax) -> R<Option<(Sym, Option<(bool, Vec<(Sym, Span)>)>)>> {
-        let items = form.as_proper_list().unwrap_or(&[]);
-        if items.first().and_then(|h| h.as_symbol()).is_none_or(|h| self.interner.name(h) != "import-with-syntax") {
+    fn import_with_syntax(&self, form: &Syn) -> R<Option<(Sym, Option<(bool, Vec<(Sym, Span)>)>)>> {
+        let listed = form.list();
+        let items = listed.as_deref().unwrap_or_default();
+        if items.first().and_then(|h| h.sym()).is_none_or(|h| self.interner.name(h) != "import-with-syntax") {
             return Ok(None);
         }
         let usage = "`(import-with-syntax name)`, the name a module loaded by `load-module`, or `(import-with-syntax name (only name …))` or `(except name …)`";
         match items {
-            [_, lib] if lib.as_symbol().is_some() => Ok(Some((lib.as_symbol().unwrap(), None))),
-            [_, lib, f] if lib.as_symbol().is_some() => Ok(Some((lib.as_symbol().unwrap(), Some(self.name_filter(f, usage)?)))),
-            _ => Err(FxError::at(form.span, usage)),
+            [_, lib] if lib.sym().is_some() => Ok(Some((lib.sym().unwrap(), None))),
+            [_, lib, f] if lib.sym().is_some() => Ok(Some((lib.sym().unwrap(), Some(self.name_filter(f, usage)?)))),
+            _ => Err(FxError::at(form.span(), usage)),
         }
     }
 
     /// Notes a top-level `(define name (load-module "path"))`, the file
     /// `import-with-syntax` of `name` reads; any other definition of `name`
     /// forgets it.
-    fn note_load_def(&mut self, form: &Syntax) {
-        let items = form.as_proper_list().unwrap_or(&[]);
-        if items.first().and_then(|h| h.as_symbol()).is_none_or(|h| self.interner.name(h) != "define") {
+    fn note_load_def(&mut self, form: &Syn) {
+        let listed = form.list();
+        let items = listed.as_deref().unwrap_or_default();
+        if items.first().and_then(|h| h.sym()).is_none_or(|h| self.interner.name(h) != "define") {
             return;
         }
-        let Some(name) = items.get(1).and_then(|n| n.as_symbol()) else { return };
-        let path = items.last().and_then(|init| match init.as_proper_list() {
-            Some([h, p]) if h.as_symbol().is_some_and(|h| self.interner.name(h) == "load-module") => match &p.datum {
-                fixpt_read::Datum::Str(s) => Some(s.clone()),
+        let Some(name) = items.get(1).and_then(|n| n.sym()) else { return };
+        let path = items.last().and_then(|init| match init.list().as_deref() {
+            Some([h, p]) if h.sym().is_some_and(|h| self.interner.name(h) == "load-module") => match &p.view() {
+                V::Str(s) => Some(s.clone()),
                 _ => None,
             },
             _ => None,
@@ -1034,38 +1069,37 @@ impl Checker {
     /// `(except name …)`) are defined by their names; the names of all
     /// those not hidden are returned.
     #[allow(clippy::type_complexity)]
-    fn import_file_macros(&mut self, form: &Syntax, lib: Sym, filter: Option<&(bool, Vec<(Sym, Span)>)>) -> R<fixpt_hash::HashSet<Sym>> {
+    fn import_file_macros(&mut self, form: &Syn, lib: Sym, filter: Option<&(bool, Vec<(Sym, Span)>)>) -> R<fixpt_hash::HashSet<Sym>> {
         let usage = "`import-with-syntax` takes a name defined as `(load-module \"path\")`";
         let Some(path) = self.load_defs.get(&lib).cloned() else {
-            return Err(FxError::at(form.span, format!("{usage}, and `{}` is not one", self.interner.name(lib))));
+            return Err(FxError::at(form.span(), format!("{usage}, and `{}` is not one", self.interner.name(lib))));
         };
         let at = match &self.base_dir {
             Some(d) if std::path::Path::new(&path).is_relative() && crate::built_in_module(&path).is_none() => d.join(&path),
             _ => std::path::PathBuf::from(&path),
         };
         if crate::parse::takes_modules_at(&at, &path) {
-            return Err(FxError::at(form.span, format!("`{path}` takes module parameters: its macros cannot be imported, not yet")));
+            return Err(FxError::at(form.span(), format!("`{path}` takes module parameters: its macros cannot be imported, not yet")));
         }
         let key = at.display().to_string();
-        let text = module_text(&path, &at, form.span)?;
+        let text = module_text(&path, &at, form.span())?;
         self.macro_files += 1;
         let file = FileId(2_000_000 + self.macro_files);
-        self.load_sites.insert(file, (form.span, path.clone(), text.as_str().into()));
+        self.load_sites.insert(file, (form.span(), path.clone(), text.as_str().into()));
         #[cfg(debug_assertions)]
         fixpt_read::note_source(file, &path, text.as_str().into());
-        let mut interner = std::mem::take(&mut self.interner);
-        let read = Reader::new(&text, file, SyntaxProfile::FX26, &mut interner).read_all();
-        self.interner = interner;
+        let read = crate::heap_syn::read_syn(&text, file, &mut self.interner);
         let forms = read.map_err(|e| self.in_loaded(FxError::at(e.span, e.message), file))?;
         // Its macros, each with whether it is hidden; and what its module
         // shows, its definitions not hidden, as a module file's are read.
         let (mut macros, mut shown) = (Vec::new(), Vec::new());
         for f in forms {
-            let head = f.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
+            let listed = f.list();
+            let head = listed.as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).map(|h| self.interner.name(h).to_string());
             match head.as_deref() {
                 Some("define-syntax" | "define-syntax-rec") => macros.push((f, false)),
                 Some("hide") => {
-                    for item in f.as_proper_list().unwrap_or(&[]).iter().skip(1) {
+                    for item in f.list().as_deref().unwrap_or_default().iter().skip(1) {
                         if syntax_names(item, &self.interner).is_some() {
                             macros.push((item.clone(), true));
                         }
@@ -1085,17 +1119,20 @@ impl Checker {
         let exported: fixpt_hash::HashSet<Sym> = names.iter().filter(|(_, hidden)| !hidden).map(|(n, _)| *n).collect();
         let taken = |n: Sym| filter.is_none_or(|(only, names)| names.iter().any(|(m, _)| *m == n) == *only);
         let shared = self.interner.intern(&format!("%shared:{key}"));
-        let mut defined = std::mem::take(&mut self.macros);
-        let mut interner = std::mem::take(&mut self.interner);
-        let outer = defined.reading.replace(std::sync::Arc::from(text.as_str()));
-        let r = {
-            let is_standard = |s: Sym| self.standard_type(s).is_some();
-            let scope = crate::macros::FileScope { shared, values, types, internal, is_standard: &is_standard };
-            defined.define_file(&macros, &scope, &taken, form.span, &mut interner)
-        };
-        defined.reading = outer;
-        self.macros = defined;
-        self.interner = interner;
+        let r = self.syn(|c| {
+            let mut defined = std::mem::take(&mut c.macros);
+            let mut interner = std::mem::take(&mut c.interner);
+            let outer = defined.reading.replace(std::sync::Arc::from(text.as_str()));
+            let r = {
+                let is_standard = |s: Sym| c.standard_type(s).is_some();
+                let scope = crate::macros::FileScope { shared, values, types, internal, is_standard: &is_standard };
+                defined.define_file(&macros, &scope, &taken, crate::heap_syn::at_of(form.span()), &mut interner)
+            };
+            defined.reading = outer;
+            c.macros = defined;
+            c.interner = interner;
+            r
+        });
         r.map_err(|e| self.in_loaded(e, file))?;
         Ok(exported)
     }
@@ -1103,15 +1140,16 @@ impl Checker {
     /// The values and the types and effects `forms` define, a module
     /// file's top-level forms expanded as they are read: what its module
     /// shows. An `include`'s are known only once it is checked: none.
-    fn names_shown(&self, forms: &[Syntax]) -> (fixpt_hash::HashSet<Sym>, fixpt_hash::HashSet<Sym>) {
+    fn names_shown(&self, forms: &[Syn]) -> (fixpt_hash::HashSet<Sym>, fixpt_hash::HashSet<Sym>) {
         let (mut values, mut types) = (fixpt_hash::HashSet::default(), fixpt_hash::HashSet::default());
-        let named = |s: &Syntax| s.as_symbol().or_else(|| s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()));
+        let named = |s: &Syn| s.sym().or_else(|| s.list().as_deref().and_then(|l| l.first()).and_then(|h| h.sym()));
         for f in forms {
-            let items = f.as_proper_list().unwrap_or(&[]);
-            let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
+            let listed = f.list();
+            let items = listed.as_deref().unwrap_or_default();
+            let head = items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h));
             match head {
                 Some("define" | "define*") => values.extend(items.get(1).and_then(named)),
-                Some("define-rec") => values.extend(items.iter().skip(1).filter_map(|b| b.as_proper_list().and_then(|l| l.first()).and_then(|n| n.as_symbol()))),
+                Some("define-rec") => values.extend(items.iter().skip(1).filter_map(|b| b.list().as_deref().and_then(|l| l.first()).and_then(|n| n.sym()))),
                 Some("define-type" | "define-effect" | "define-generative") => types.extend(items.get(1).and_then(named)),
                 _ => {}
             }
@@ -1123,6 +1161,14 @@ impl Checker {
     /// what must leave none defined: the REPL's reading as one types.
     pub fn macros_kept(&self) -> crate::macros::Macros {
         self.macros.clone()
+    }
+
+    /// No macros, in this checker's syntax's heap: what is read under them
+    /// is that heap's, as what is read under the macros put back after.
+    pub fn macros_none(&self) -> crate::macros::Macros {
+        let mut none = crate::macros::Macros::default();
+        none.withs.world = self.macros.withs.world.clone();
+        none
     }
 
     pub fn macros_put_back(&mut self, kept: crate::macros::Macros) {
@@ -1138,24 +1184,25 @@ impl Checker {
     /// templates, once, there, expanded (`Macros::template_checks`); or
     /// `form` with the uses of the macros defined in it expanded
     /// (`crate::macros`).
-    fn macro_expanded(&mut self, form: Syntax) -> R<Vec<Syntax>> {
+    fn macro_expanded(&mut self, form: Syn) -> R<Vec<Syn>> {
         let names = syntax_names(&form, &self.interner);
         let defines = names.is_some();
         for (n, _) in names.unwrap_or_default() {
             if self.global_type(n).is_some() {
-                return Err(Self::macro_over_global(&self.interner, n, form.span));
+                return Err(Self::macro_over_global(&self.interner, n, form.span()));
             }
         }
-        let mut macros = std::mem::take(&mut self.macros);
-        let mut interner = std::mem::take(&mut self.interner);
+        self.syn(|c| {
+        let mut macros = std::mem::take(&mut c.macros);
+        let mut interner = std::mem::take(&mut c.interner);
         let r = if defines && macros.shape_defined(&form, &interner).is_some() {
             Ok(Vec::new())
         } else if defines {
             macros.define(&form, &mut interner).and_then(|ns| {
                 let mut out = Vec::new();
                 for n in ns {
-                    for c in macros.template_checks(n, &mut interner)? {
-                        let e = macros.expand(&c, &mut interner)?;
+                    for t in macros.template_checks(n, &mut interner)? {
+                        let e = macros.expand(&t, &mut interner)?;
                         out.push(macros.aliases_resolved(&e, &mut interner)?);
                     }
                 }
@@ -1171,9 +1218,10 @@ impl Checker {
                 fs.iter().map(|f| macros.sealed_written(f, &mut interner).and_then(|f| macros.aliases_resolved(&f, &mut interner))).collect()
             })
         };
-        self.macros = macros;
-        self.interner = interner;
+        c.macros = macros;
+        c.interner = interner;
         r
+        })
     }
 
     /// `(import m item …)`: what module `m` gives, by name, defined here,
@@ -1184,29 +1232,30 @@ impl Checker {
     /// e))`. Types and effects marked, as it is expanded as it is read,
     /// as `define-datatype` is, before any type is known; each form at its
     /// name. As `parser.fx`'s `expand-import`.
-    fn expand_import(&mut self, form: &Syntax, out: &mut Vec<Syntax>) -> R<()> {
+    fn expand_import(&mut self, form: &Syn, out: &mut Vec<Syn>) -> R<()> {
         let usage = "`(import module name … (type name …) (effect name …))`";
-        let items = form.as_proper_list().unwrap_or(&[]);
+        let listed = form.list();
+        let items = listed.as_deref().unwrap_or_default();
         let Some((m, names)) = items.get(1..).and_then(|r| r.split_first()) else {
-            return Err(FxError::at(form.span, usage));
+            return Err(FxError::at(form.span(), usage));
         };
-        if m.as_symbol().is_none() {
-            return Err(FxError::at(m.span, format!("{usage}: the module, named by a variable")));
+        if m.sym().is_none() {
+            return Err(FxError::at(m.span(), format!("{usage}: the module, named by a variable")));
         }
-        let mut one = |c: &mut Self, define: &str, wrap: &str, n: &Syntax| -> R<()> {
-            if n.as_symbol().is_none() {
-                return Err(FxError::at(n.span, format!("{usage}: a name")));
+        let mut one = |c: &mut Self, define: &str, wrap: &str, n: &Syn| -> R<()> {
+            if n.sym().is_none() {
+                return Err(FxError::at(n.span(), format!("{usage}: a name")));
             }
-            let sp = n.span;
-            let sym = |c: &mut Self, s: &str| Syntax::symbol(sp, c.interner.intern(s));
-            let got = Syntax::list(sp, vec![sym(c, wrap), m.clone(), n.clone()]);
-            out.push(Syntax::list(sp, vec![sym(c, define), n.clone(), got]));
+            let sp = n.span();
+            let sym = |c: &mut Self, s: &str| Syn::named(sp, s, &mut c.interner);
+            let got = Syn::lst(sp, vec![sym(c, wrap), m.clone(), n.clone()]);
+            out.push(Syn::lst(sp, vec![sym(c, define), n.clone(), got]));
             Ok(())
         };
         for n in names {
-            match n.as_proper_list() {
-                Some([h, ns @ ..]) if h.as_symbol().is_some_and(|h| matches!(self.interner.name(h), "type" | "effect")) => {
-                    let define = if self.interner.name(h.as_symbol().expect("a symbol")) == "type" { "define-type" } else { "define-effect" };
+            match n.list().as_deref() {
+                Some([h, ns @ ..]) if h.sym().is_some_and(|h| matches!(self.interner.name(h), "type" | "effect")) => {
+                    let define = if self.interner.name(h.sym().expect("a symbol")) == "type" { "define-type" } else { "define-effect" };
                     for t in ns {
                         one(self, define, "select", t)?;
                     }
@@ -1221,27 +1270,29 @@ impl Checker {
     /// alone reads, and its two conversions, each the identity:
     /// `(define up-name (poly (param …) (subr pure (rep) (name p …))) (lambda (x) x))`
     /// and `down-name` the other way. `false` if `form` is something else.
-    fn expand_generative(&mut self, form: &Syntax, out: &mut Vec<Syntax>) -> R<bool> {
-        let items = form.as_proper_list().unwrap_or(&[]);
-        if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) != Some("define-generative") {
+    fn expand_generative(&mut self, form: &Syn, out: &mut Vec<Syn>) -> R<bool> {
+        let listed = form.list();
+        let items = listed.as_deref().unwrap_or_default();
+        if items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h)) != Some("define-generative") {
             return Ok(false);
         }
-        let span = form.span;
+        let span = form.span();
         let usage = "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`";
         let [_, head, rep] = &items[..] else {
             return Err(FxError::at(span, usage));
         };
-        let (name, params) = match head.as_proper_list() {
+        let listed = head.list();
+        let (name, params) = match listed.as_deref() {
             Some([n, ps @ ..]) => (n.clone(), Some(ps.to_vec())),
             _ => (head.clone(), None),
         };
-        let Some(n) = name.as_symbol() else {
+        let Some(n) = name.sym() else {
             return Err(FxError::at(span, usage));
         };
         let n = self.interner.name(n).to_string();
-        let mut sym = |s: &str| Syntax::symbol(span, self.interner.intern(s));
-        let list = |items: Vec<Syntax>| {
-            if items.is_empty() { Syntax::new(span, fixpt_read::Datum::Nil) } else { Syntax::list(span, items) }
+        let mut sym = |s: &str| Syn::named(span, s, &mut self.interner);
+        let list = |items: Vec<Syn>| {
+            if items.is_empty() { Syn::nil(span) } else { Syn::lst(span, items) }
         };
         let (define, poly, subr, pure, lambda, x) = (sym("define"), sym("poly"), sym("subr"), sym("pure"), sym("lambda"), sym("x"));
         let (up, down) = (sym(&format!("up-{n}")), sym(&format!("down-{n}")));
@@ -1251,19 +1302,19 @@ impl Checker {
                 let mut bs = Vec::new();
                 let mut u = vec![name.clone()];
                 for p in ps {
-                    match p.as_proper_list() {
+                    match p.list().as_deref() {
                         Some([pn, k, ..]) => {
                             bs.push(list(vec![pn.clone(), k.clone()]));
                             u.push(pn.clone());
                         }
-                        _ => return Err(FxError::at(p.span, "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`")),
+                        _ => return Err(FxError::at(p.span(), "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`")),
                     }
                 }
                 (Some(bs), list(u))
             }
             None => (None, name.clone()),
         };
-        let conv = |from: &Syntax, to: &Syntax| {
+        let conv = |from: &Syn, to: &Syn| {
             let t = list(vec![subr.clone(), pure.clone(), list(vec![from.clone()]), to.clone()]);
             match &binders {
                 Some(bs) => list(vec![poly.clone(), list(bs.clone()), t]),
@@ -1286,8 +1337,9 @@ impl Checker {
     /// `(define-datatype (name (param kind) …) …)` has parameters: a type
     /// family, which its variants may mention with the same parameters, and
     /// constructors polymorphic in them.
-    pub(crate) fn expand_datatype(&mut self, form: Syntax, out: &mut Vec<Syntax>) -> R<()> {
-        let head = form.as_proper_list().and_then(|items| items.first()?.as_symbol());
+    pub(crate) fn expand_datatype(&mut self, form: Syn, out: &mut Vec<Syn>) -> R<()> {
+        let listed = form.list();
+        let head = listed.as_deref().and_then(|items| items.first()?.sym());
         match head.map(|h| self.interner.name(h)) {
             Some("import") => return self.expand_import(&form, out),
             Some("define-datatype") => {}
@@ -1296,18 +1348,20 @@ impl Checker {
                 return Ok(());
             }
         }
-        let items = form.as_proper_list().unwrap_or(&[]).to_vec();
-        let span = form.span;
+        let listed = form.list();
+        let items = listed.as_deref().unwrap_or_default().to_vec();
+        let span = form.span();
         let [_, name, variants @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(define-datatype name (tag type …) …)`"));
         };
         // The name, and the parameters, if it has any: `(name (param kind) …)`.
-        let (name, family) = match name.as_proper_list() {
-            Some([n, ps @ ..]) if n.as_symbol().is_some() => (n.clone(), Some(ps.to_vec())),
+        let listed = name.list();
+        let (name, family) = match listed.as_deref() {
+            Some([n, ps @ ..]) if n.sym().is_some() => (n.clone(), Some(ps.to_vec())),
             _ => (name.clone(), None),
         };
         let name = &name;
-        if name.as_symbol().is_none() || variants.is_empty() {
+        if name.sym().is_none() || variants.is_empty() {
             return Err(FxError::at(span, "`(define-datatype name (tag type …) …)`"));
         }
         // What the type is called where it is used: `name`, or `(name param …)`.
@@ -1315,14 +1369,14 @@ impl Checker {
         if let Some(ps) = &family {
             let mut u = vec![name.clone()];
             for p in ps {
-                match p.as_proper_list() {
-                    Some([n, _]) if n.as_symbol().is_some() => u.push(n.clone()),
-                    _ => return Err(FxError::at(p.span, "a parameter is `(name kind)`")),
+                match p.list().as_deref() {
+                    Some([n, _]) if n.sym().is_some() => u.push(n.clone()),
+                    _ => return Err(FxError::at(p.span(), "a parameter is `(name kind)`")),
                 }
             }
-            used = Syntax::list(span, u);
+            used = Syn::lst(span, u);
         }
-        let mut sym = |s: &str| Syntax::symbol(span, self.interner.intern(s));
+        let mut sym = |s: &str| Syn::named(span, s, &mut self.interner);
         let (define_type, define, sumof, productof, subr, pure, lambda, sum, product, poly) = (
             sym("define-type"),
             sym("define"),
@@ -1335,35 +1389,36 @@ impl Checker {
             sym("product"),
             sym("poly"),
         );
-        let int = |n: usize| Syntax::new(span, fixpt_read::Datum::Number(fixpt_read::Num::Int(n as i64)));
-        let list = |items: Vec<Syntax>| {
-            if items.is_empty() { Syntax::new(span, fixpt_read::Datum::Nil) } else { Syntax::list(span, items) }
+        let int = |n: usize| Syn::datum(span, V::Number(fixpt_read::Num::Int(n as i64)));
+        let list = |items: Vec<Syn>| {
+            if items.is_empty() { Syn::nil(span) } else { Syn::lst(span, items) }
         };
         let mut arms = vec![sumof];
         let mut ctors = Vec::new();
         for v in variants {
-            let mut parts = v.as_proper_list().unwrap_or(&[]).to_vec();
+            let listed = v.list();
+            let mut parts = listed.as_deref().unwrap_or_default().to_vec();
             // A tag written as a keyword, `(#:circle int)`, is its name: the
             // same label, and the constructor `circle`.
-            if let Some(fixpt_read::Datum::Keyword(k)) = parts.first().map(|t| &t.datum) {
-                parts[0] = Syntax::symbol(parts[0].span, *k);
+            if let Some(V::Keyword(k)) = parts.first().map(|t| t.view()) {
+                parts[0] = Syn::symbol(parts[0].at(), k, &self.interner);
             }
-            let Some((tag, members)) = parts.split_first().filter(|(t, _)| t.as_symbol().is_some()) else {
-                return Err(FxError::at(v.span, "a variant is `(tag type …)` or `(#:tag type …)`"));
+            let Some((tag, members)) = parts.split_first().filter(|(t, _)| t.sym().is_some()) else {
+                return Err(FxError::at(v.span(), "a variant is `(tag type …)` or `(#:tag type …)`"));
             };
             // `(define-datatype var (oneof symbol pat))` is one variant,
             // `oneof`, not the type `(oneof symbol pat)` (`TODO.md` §190).
-            let t = self.interner.name(tag.as_symbol().unwrap()).to_string();
+            let t = self.interner.name(tag.sym().unwrap()).to_string();
             if crate::parse::TYPE_FORMS.contains(&t.as_str()) {
-                let n = self.interner.name(name.as_symbol().unwrap());
-                return Err(FxError::at(v.span, crate::parse::variant_type_form(&t, n)));
+                let n = self.interner.name(name.sym().unwrap());
+                return Err(FxError::at(v.span(), crate::parse::variant_type_form(&t, n)));
             }
             let mut prod = vec![productof.clone()];
             let mut params = Vec::new();
             let mut fields = vec![product.clone()];
             for (i, m) in members.iter().enumerate() {
                 prod.push(list(vec![int(i + 1), m.clone()]));
-                let x = Syntax::symbol(span, self.interner.intern(&format!("%x{}", i + 1)));
+                let x = Syn::named(span, &format!("%x{}", i + 1), &mut self.interner);
                 params.push(x.clone());
                 fields.push(list(vec![int(i + 1), x]));
             }
@@ -1374,7 +1429,7 @@ impl Checker {
             }
             // At its variant: no two constructors' bodies at one place, as
             // the compilers tell lambdas apart by where their bodies are.
-            let body = Syntax::list(v.span, vec![sum.clone(), tag.clone(), list(fields)]);
+            let body = Syn::lst(v.span(), vec![sum.clone(), tag.clone(), list(fields)]);
             ctors.push(list(vec![define.clone(), tag.clone(), ty, list(vec![lambda.clone(), list(params), body])]));
         }
         let head = match &family {
@@ -1391,15 +1446,31 @@ impl Checker {
     }
 
     /// Check one top-level form, keeping what it defines.
-    pub fn top(&mut self, form: &Syntax) -> R<Top> {
+    pub(crate) fn top_syn(&mut self, form: &Syn) -> R<Top> {
         // Its phase (`TODO.md` §252).
         let _phase = fixpt_memmgmt::phases::enter("rust-front");
         // Where the top level ends as it begins: past it, what the form
         // binds (`toplevel_hidden`).
         let outer = self.form_began.replace((self.env.len(), self.dscope.len()));
-        let form = &self.sealed_written(form)?;
-        let shaped = self.shapes_written(form, true);
-        if self.macros.shapes_seen().is_some() {
+        // Its shapes written in, on the syntax the expander reads, made of
+        // `form` once and back once (`docs/research/heap-syntax.md`).
+        let made = (|| -> R<(Syn, Option<Syn>)> {
+            let mut interner = std::mem::take(&mut self.interner);
+            let sealed = self.macros.sealed_written(form, &mut interner);
+            self.interner = interner;
+            let sealed = sealed?;
+            let shaped = self.shapes_written_syn(sealed, true);
+            let noted = self.macros.shapes_seen().is_some().then_some(sealed);
+            Ok((shaped, noted))
+        })();
+        let (shaped, noted) = match made {
+            Ok(m) => m,
+            Err(e) => {
+                self.form_began = outer;
+                return Err(e);
+            }
+        };
+        if let Some(form) = &noted {
             self.shapes_noted(form, &shaped);
         }
         let r = self.top_here(&shaped);
@@ -1410,8 +1481,8 @@ impl Checker {
     /// Form `form` and `shaped`, it with its shapes written, noted
     /// (`keep_shapes_seen`); out of line, as `top`'s frame is small.
     #[inline(never)]
-    fn shapes_noted(&mut self, form: &Syntax, shaped: &Syntax) {
-        let seen = (fixpt_read::write_syntax(form, &self.interner), fixpt_read::write_syntax(shaped, &self.interner));
+    fn shapes_noted(&mut self, form: &Syn, shaped: &Syn) {
+        let seen = (fixpt_read::write_syntax(&form.to_syntax(), &self.interner), fixpt_read::write_syntax(&shaped.to_syntax(), &self.interner));
         if let Some(s) = self.macros.shapes_seen() {
             s.push(seen);
         }
@@ -1419,7 +1490,7 @@ impl Checker {
 
     /// Form `form` with each shape a name stands for written, and each
     /// `define` of a shape's type made a `the` of it (`Macros::sealed_written`).
-    pub(crate) fn sealed_written(&mut self, form: &Syntax) -> R<Syntax> {
+    pub(crate) fn sealed_written(&mut self, form: &Syn) -> R<Syn> {
         let mut interner = std::mem::take(&mut self.interner);
         let r = self.macros.sealed_written(form, &mut interner);
         self.interner = interner;
@@ -1442,9 +1513,9 @@ impl Checker {
 
     /// Form `f`, declared ahead, noted with no shapes written, if forms are
     /// noted (`keep_shapes_seen`).
-    pub(crate) fn declared_noted(&mut self, f: &Syntax) {
+    pub(crate) fn declared_noted(&mut self, f: &Syn) {
         if self.macros.shapes_seen().is_some() {
-            let seen = (fixpt_read::write_syntax(f, &self.interner), String::new());
+            let seen = (fixpt_read::write_syntax(&f.to_syntax(), &self.interner), String::new());
             self.macros.shapes_seen().as_mut().expect("kept").push(seen);
         }
     }
@@ -1452,27 +1523,28 @@ impl Checker {
     /// `top` of `form` as it is, its shapes not written again: for a test
     /// of what the checkers make of a shape that is wrong.
     #[cfg(test)]
-    pub(crate) fn top_as_shaped(&mut self, form: &Syntax) -> R<Top> {
+    pub(crate) fn top_as_shaped(&mut self, form: &Form) -> R<Top> {
         let outer = self.form_began.replace((self.env.len(), self.dscope.len()));
-        let r = self.top_here(form);
+        let r = self.syn(|c| c.top_here(&form.get()));
         self.form_began = outer;
         r
     }
 
-    fn top_here(&mut self, form: &Syntax) -> R<Top> {
+    fn top_here(&mut self, form: &Syn) -> R<Top> {
         // The files its types name, loaded first (`type_loads`).
         self.type_loads(form)?;
-        let items = form.as_proper_list().unwrap_or(&[]);
-        let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
+        let listed = form.list();
+        let items = listed.as_deref().unwrap_or_default();
+        let head = items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h));
         match head {
             Some("define" | "define*" | "define-rec") => {
                 let mark = self.mark();
                 let top = match head {
-                    Some("define") => self.sharing(items, |c| c.define(form.span, items, false)),
-                    Some("define*") => self.sharing(items, |c| c.define(form.span, items, true)),
-                    _ => self.define_rec(form.span, items),
+                    Some("define") => self.sharing(items, |c| c.define(form.span(), items, false)),
+                    Some("define*") => self.sharing(items, |c| c.define(form.span(), items, true)),
+                    _ => self.define_rec(form.span(), items),
                 }?;
-                if let Err(e) = self.no_reaching_itself(&top, form.span) {
+                if let Err(e) = self.no_reaching_itself(&top, form.span()) {
                     self.rollback(mark);
                     return Err(e);
                 }
@@ -1481,7 +1553,7 @@ impl Checker {
             Some("define-syscall" | "define-optional-syscall") => self.define_syscall(form, items, head == Some("define-syscall")),
             Some("define-effect") => {
                 let [_, name, def] = items else {
-                    return Err(FxError::at(form.span, "`(define-effect name effect)`"));
+                    return Err(FxError::at(form.span(), "`(define-effect name effect)`"));
                 };
                 let name = self.binder_name(name)?;
                 let effect = self.parse_effect(def)?;
@@ -1490,16 +1562,16 @@ impl Checker {
             }
             Some("define-convention") => {
                 let [_, name, clauses @ ..] = items else {
-                    return Err(FxError::at(form.span, "`(define-convention name clause …)`"));
+                    return Err(FxError::at(form.span(), "`(define-convention name clause …)`"));
                 };
                 let name = self.binder_name(name)?;
-                crate::convention::check(form.span, clauses, &|s| self.interner.name(s).to_string())?;
+                crate::convention::check(form.span(), clauses, &|s| self.interner.name(s).to_string())?;
                 self.dscope.push((name, crate::parse::DScope::ConvVal(crate::ast::Conv::Native)));
                 Ok(Top::DefineConvention { name })
             }
             Some("define-generative") => {
                 let [_, head, rep] = items else {
-                    return Err(FxError::at(form.span, "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`"));
+                    return Err(FxError::at(form.span(), "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`"));
                 };
                 let name = self.define_generative(head, rep)?;
                 // Only its own conversions, which follow, see inside it.
@@ -1512,28 +1584,28 @@ impl Checker {
             }
             Some("define-type") => {
                 let [_, name, def] = items else {
-                    return Err(FxError::at(form.span, "`(define-type name type)`"));
+                    return Err(FxError::at(form.span(), "`(define-type name type)`"));
                 };
-                if let Some([n, params @ ..]) = name.as_proper_list() {
+                if let Some([n, params @ ..]) = name.list().as_deref() {
                     let n = self.binder_name(n)?;
-                    let params = Syntax::list(name.span, params.to_vec());
+                    let params = Syn::lst(name.span(), params.to_vec());
                     self.define_type_family(n, &params, def)?;
                     return Ok(Top::DefineTypeFamily { name: n });
                 }
                 // `(define-type name (dlambda …))`: a name for a description
                 // function (`crate::kinds`).
-                if def.as_proper_list().and_then(|d| d.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "dlambda") {
+                if def.list().as_deref().and_then(|d| d.first()).and_then(|h| h.sym()).is_some_and(|h| self.interner.name(h) == "dlambda") {
                     let n = self.binder_name(name)?;
                     let f = self.parse_fun(def, None)?;
                     self.dscope.push((n, crate::parse::DScope::Fun(f)));
                     return Ok(Top::DefineTypeFamily { name: n });
                 }
                 let name = self.binder_name(name)?;
-                let ty = self.define_type(name, def, form.span)?;
+                let ty = self.define_type(name, def, form.span())?;
                 Ok(Top::DefineType { name, ty })
             }
             _ => {
-                let e = self.parse_exp(form)?;
+                let e = self.parse_exp_syn(form)?;
                 let (ty, effect) = self.synth(e)?;
                 Ok(Top::Exp(Checked { ty, effect, exp: e }))
             }
@@ -1552,8 +1624,8 @@ impl Checker {
         }
     }
 
-    fn binder_name(&self, s: &Syntax) -> R<Sym> {
-        s.as_symbol().ok_or_else(|| FxError::at(s.span, "expected a name"))
+    fn binder_name(&self, s: &Syn) -> R<Sym> {
+        s.sym().ok_or_else(|| FxError::at(s.span(), "expected a name"))
     }
 
     /// `(define name type init)`, or `(define name init)`. With `infer`,
@@ -1563,8 +1635,8 @@ impl Checker {
     /// A definition, which if of a hidden global, `%shared:` and a file's
     /// key (`parse_load`'s, or one the session gives alone), makes every
     /// later load of that key that global.
-    fn sharing(&mut self, items: &[Syntax], f: impl FnOnce(&mut Self) -> R<Top>) -> R<Top> {
-        let name = items.get(1).and_then(|n| n.as_symbol());
+    fn sharing(&mut self, items: &[Syn], f: impl FnOnce(&mut Self) -> R<Top>) -> R<Top> {
+        let name = items.get(1).and_then(|n| n.sym());
         let key = name.and_then(|n| self.interner.name(n).strip_prefix("%shared:").map(str::to_string));
         let r = f(self);
         if let (Ok(_), Some(key)) = (&r, key) {
@@ -1575,7 +1647,7 @@ impl Checker {
         r
     }
 
-    fn define(&mut self, span: Span, items: &[Syntax], infer: bool) -> R<Top> {
+    fn define(&mut self, span: Span, items: &[Syn], infer: bool) -> R<Top> {
         match items {
             [_, name, ty, init] => {
                 let name = self.binder_name(name)?;
@@ -1584,18 +1656,18 @@ impl Checker {
                 // `(->* (param …) result)`: its effect found from its body.
                 let star = self.written_arrow_star(ty);
                 if star && infer {
-                    return Err(FxError::at(written.span, "`define*` and `->*` each find what a procedure does: write one"));
+                    return Err(FxError::at(written.span(), "`define*` and `->*` each find what a procedure does: write one"));
                 }
                 self.arrow_star = star;
-                let ty = self.parse_type(ty)?;
-                let ty = self.resolve_selects(ty, written.span)?;
+                let ty = self.parse_type_syn(ty)?;
+                let ty = self.resolve_selects(ty, written.span())?;
                 // Checked as though it said it read any globals; what it
                 // reads is then taken from its body.
                 let declared = ty;
                 let ty = match infer {
                     false => ty,
                     true => self.with_latent(ty, &Effect::atom(crate::ast::Atom::Read(crate::ast::Region::Globals))).ok_or_else(|| {
-                        FxError::at(written.span, "`define*` finds what a procedure reads: its type is a `subr`")
+                        FxError::at(written.span(), "`define*` finds what a procedure reads: its type is a `subr`")
                     })?,
                 };
                 // A `proves` type: a lemma, once the body proves it.
@@ -1605,7 +1677,7 @@ impl Checker {
                 // (lambda ((x t)) x))` means what a `plambda` would.
                 let depth = self.dscope.len();
                 self.bind_signature(ty);
-                let e = self.parse_exp(init);
+                let e = self.parse_exp_syn(init);
                 self.dscope.truncate(depth);
                 let e = e?;
                 if infer && !self.is_lambda(e) {
@@ -1708,7 +1780,7 @@ impl Checker {
             }
             [_, name, init] => {
                 let name = self.binder_name(name)?;
-                let e = self.parse_exp(init)?;
+                let e = self.parse_exp_syn(init)?;
                 let (ty, effect) = self.synth(e)?;
                 if self.is_lambda(e) {
                     self.known.insert((name, self.env.len()));
@@ -1792,20 +1864,21 @@ impl Checker {
 
     /// `(define-rec (name type lambda) …)`: every name in scope first, then
     /// each lambda checked against its type.
-    fn define_rec(&mut self, span: Span, items: &[Syntax]) -> R<Top> {
+    fn define_rec(&mut self, span: Span, items: &[Syn]) -> R<Top> {
         let depth = self.env.len();
         let rdepth = self.recursive.len();
         let r = (|| {
             let mut parts = Vec::new();
             let mut marked = Vec::new();
             for b in &items[1..] {
-                let Some([name, ty, init]) = b.as_proper_list() else {
-                    return Err(FxError::at(b.span, "a define-rec binding is `(name type lambda)`"));
+                let listed = b.list();
+                let Some([name, ty, init]) = listed.as_deref() else {
+                    return Err(FxError::at(b.span(), "a define-rec binding is `(name type lambda)`"));
                 };
                 let name = self.binder_name(name)?;
-                let span = ty.span;
+                let span = ty.span();
                 self.arrow_star = self.written_arrow_star(ty);
-                let ty = self.parse_type(ty)?;
+                let ty = self.parse_type_syn(ty)?;
                 marked.push(self.arrow_star_tys.contains(&ty));
                 let ty = self.resolve_selects(ty, span)?;
                 self.push_global(name, ty);
@@ -1819,7 +1892,7 @@ impl Checker {
             for (name, ty, init) in parts {
                 let d = self.dscope.len();
                 self.bind_signature(ty);
-                let e = self.parse_exp(&init);
+                let e = self.parse_exp_syn(&init);
                 self.dscope.truncate(d);
                 let e = e?;
                 if !self.is_lambda(e) {
@@ -1860,13 +1933,13 @@ impl Checker {
         self.check(e, ty).map_err(|err| self.declared_error(name, ty, e, err))
     }
 
-    /// Check `form` as [`top`](Self::top) would, then forget it: nothing it
+    /// Check `form` as [`top`](Self::top_syn) would, then forget it: nothing it
     /// defines stays in scope and nothing it allocated stays in the arena.
     /// What checking-as-you-type needs, since a form half typed is not a form
     /// submitted. The caller restores the interner, which it owns.
-    pub fn try_top<T>(&mut self, form: &Syntax, then: impl FnOnce(&mut Checker, R<Top>) -> T) -> T {
+    pub(crate) fn try_top_syn<T>(&mut self, form: &Syn, then: impl FnOnce(&mut Checker, R<Top>) -> T) -> T {
         self.scratch(|c| {
-            let r = c.top(form);
+            let r = c.top_syn(form);
             then(c, r)
         })
     }
@@ -1874,14 +1947,18 @@ impl Checker {
     /// Check a whole program written as text, keeping its definitions, and
     /// return what its last expression checked to.
     pub fn check_program(&mut self, text: &str) -> R<Checked> {
-        let forms = self.read_in(FileId(0), text)?;
-        let done = self.declare_ahead(&forms)?;
+        self.syn(|c| c.check_program_syn(text))
+    }
+
+    fn check_program_syn(&mut self, text: &str) -> R<Checked> {
+        let forms = self.read_in_syn(FileId(0), text)?;
+        let done = self.declare_ahead_syn(&forms)?;
         let mut last = None;
         for (f, done) in forms.iter().zip(done) {
             if done {
                 continue;
             }
-            if let Top::Exp(c) = self.top(f)? {
+            if let Top::Exp(c) = self.top_syn(f)? {
                 last = Some(c);
             }
         }
@@ -1894,12 +1971,12 @@ impl Checker {
     /// procedures that call each other are a `define-rec`. Returns, for each
     /// form, whether it is finished with (the abbreviations are). The second
     /// pass is `top` on the rest, in order.
-    pub fn declare_ahead(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
+    pub(crate) fn declare_ahead_syn(&mut self, forms: &[Syn]) -> R<Vec<bool>> {
         // Each type abbreviation defined once, by name, is in scope before
         // any is read, so that types may name each other in any order.
-        let twice: Vec<Sym> = self.types_defined_again(forms).into_iter().map(|(n, _)| n).collect();
+        let twice: Vec<Sym> = self.types_defined_again_syn(forms).into_iter().map(|(n, _)| n).collect();
         let mut names: Vec<Sym> = Vec::new();
-        for (n, _) in self.type_abbreviations(forms) {
+        for (n, _) in self.type_abbreviations_syn(forms) {
             if !names.contains(&n) {
                 names.push(n);
             }
@@ -1924,20 +2001,21 @@ impl Checker {
 
     /// The simple type abbreviations `forms` define, `(define-type NAME
     /// TYPE)`, by name, in order, each as often as defined.
-    pub(crate) fn type_abbreviations(&self, forms: &[Syntax]) -> Vec<(Sym, Span)> {
+    pub(crate) fn type_abbreviations_syn(&self, forms: &[Syn]) -> Vec<(Sym, Span)> {
         let mut out = Vec::new();
         for f in forms.iter().take_while(|f| !self.is_include(f)) {
-            let items = f.as_proper_list().unwrap_or(&[]);
+            let listed = f.list();
+            let items = listed.as_deref().unwrap_or_default();
             // A description function, `(define-type f (dlambda …))`, is no
             // type to declare: it is read where it is defined.
-            let dlambda = |d: &Syntax| d.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "dlambda");
+            let dlambda = |d: &Syn| d.list().as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).is_some_and(|h| self.interner.name(h) == "dlambda");
             if let [h, n, d] = items
-                && h.as_symbol().is_some_and(|h| self.interner.name(h) == "define-type")
-                && let Some(n) = n.as_symbol()
+                && h.sym().is_some_and(|h| self.interner.name(h) == "define-type")
+                && let Some(n) = n.sym()
                 && !dlambda(d)
                 && !self.names_a_file(d)
             {
-                out.push((n, f.span));
+                out.push((n, f.span()));
             }
         }
         out
@@ -1948,10 +2026,10 @@ impl Checker {
     /// error (`TODO.md` §34): the program's values see only the last
     /// definition, as a module's could not, and `fixpt` warns of it
     /// ([`type_again_warning`](crate::top::type_again_warning)).
-    pub fn types_defined_again(&self, forms: &[Syntax]) -> Vec<(Sym, Span)> {
+    pub(crate) fn types_defined_again_syn(&self, forms: &[Syn]) -> Vec<(Sym, Span)> {
         let mut seen = Vec::new();
         let mut again: Vec<(Sym, Span)> = Vec::new();
-        for (n, span) in self.type_abbreviations(forms) {
+        for (n, span) in self.type_abbreviations_syn(forms) {
             if !seen.contains(&n) {
                 seen.push(n);
             } else if !again.iter().any(|(m, _)| *m == n) {
@@ -1965,23 +2043,24 @@ impl Checker {
     /// lack: none if they check; the names whose absence alone stops them,
     /// found by standing an `int` in for each as it is found missing; or
     /// `None` if something else is wrong. Nothing is kept.
-    pub fn missing_types(&mut self, forms: &[Syntax]) -> Option<Vec<Sym>> {
+    pub(crate) fn missing_types_syn(&mut self, forms: &[Syn]) -> Option<Vec<Sym>> {
         let mut missing: Vec<Sym> = Vec::new();
         for _ in 0..32 {
-            let span = forms.first()?.span;
-            let mut group: Vec<Syntax> = missing
+            let span = forms.first()?.span();
+            let mut group: Vec<Syn> = missing
                 .iter()
                 .map(|m| {
-                    let w = |c: &mut Checker, n: &str| Syntax::symbol(span, c.interner.intern(n));
-                    Syntax::list(span, vec![w(self, "define-type"), Syntax::symbol(span, *m), w(self, "int")])
+                    let w = |c: &mut Checker, n: &str| Syn::named(span, n, &mut c.interner);
+                    let (d, i) = (w(self, "define-type"), w(self, "int"));
+                    Syn::lst(span, vec![d, Syn::symbol(span, *m, &self.interner), i])
                 })
                 .collect();
             group.extend(forms.iter().cloned());
             let r = self.scratch(|c| -> R<()> {
-                let done = c.declare_ahead(&group)?;
+                let done = c.declare_ahead_syn(&group)?;
                 for (f, d) in group.iter().zip(done) {
                     if !d {
-                        c.top(f)?;
+                        c.top_syn(f)?;
                     }
                 }
                 Ok(())
@@ -2000,9 +2079,10 @@ impl Checker {
     /// Whether type `s` is read in order, not ahead: it names a file,
     /// `(load-moduleof "file" …)` or `(load-input-moduleof "file" …)`, or
     /// restricts a module type, `(restrict T …)`, which must be known first.
-    fn names_a_file(&self, s: &Syntax) -> bool {
-        let Some(items) = s.as_proper_list() else { return false };
-        match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
+    fn names_a_file(&self, s: &Syn) -> bool {
+        let listed = s.list();
+        let Some(items) = listed.as_deref() else { return false };
+        match items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h)) {
             Some("quote" | "quasiquote") => false,
             Some("load-moduleof" | "load-input-moduleof" | "restrict") => true,
             _ => items.iter().any(|x| self.names_a_file(x)),
@@ -2010,11 +2090,11 @@ impl Checker {
     }
 
     /// Whether `f` is a top-level `(include …)`.
-    fn is_include(&self, f: &Syntax) -> bool {
-        f.as_proper_list().and_then(|l| l.first()?.as_symbol()).is_some_and(|h| self.interner.name(h) == "include")
+    fn is_include(&self, f: &Syn) -> bool {
+        f.list().as_deref().and_then(|l| l.first()?.sym()).is_some_and(|h| self.interner.name(h) == "include")
     }
 
-    fn declare_each(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
+    fn declare_each(&mut self, forms: &[Syn]) -> R<Vec<bool>> {
         let mut done = Vec::new();
         // A top-level `include` ends what is declared ahead: the types it
         // gives are known only once it is checked, in order, so a type or
@@ -2023,15 +2103,16 @@ impl Checker {
         let mut included = false;
         for f in forms {
             included |= self.is_include(f);
-            let items = f.as_proper_list().unwrap_or(&[]);
-            let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
+            let listed = f.list();
+            let items = listed.as_deref().unwrap_or_default();
+            let head = items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h).to_string());
             match (head.as_deref(), items) {
                 _ if included => done.push(false),
                 // A type that names a file (`load-moduleof`) is read in
                 // order, as a definition is, its file loaded first.
                 (Some("define-type"), [_, _, d]) if self.names_a_file(d) => done.push(false),
                 (Some("define-type" | "define-generative" | "define-effect" | "define-convention"), _) => {
-                    self.top(f)?;
+                    self.top_syn(f)?;
                     done.push(true);
                 }
                 _ => done.push(false),
@@ -2092,7 +2173,7 @@ impl Checker {
                 DScope::Rec(t) => ("type", format!("{n} = {}", self.show_definition(*t))),
                 DScope::Abbrev { params, body } => {
                     let ps: Vec<String> = params.iter().map(|(p, k)| format!("({} {})", self.interner.name(*p), self.show_kind(*k))).collect();
-                    ("family", format!("({n} {}) = {}", ps.join(" "), fixpt_read::write_syntax(body, &self.interner)))
+                    ("family", format!("({n} {}) = {}", ps.join(" "), self.syn_ref(|c| fixpt_read::write_syntax(&body.get().to_syntax(), &c.interner))))
                 }
                 DScope::Eff(e) => ("effect", format!("{n} = {}", self.show_effect(e))),
                 DScope::Generative(g) => {
@@ -2262,15 +2343,15 @@ impl Checker {
     /// `items` must be, given the operator and the other arguments — as
     /// text, since the type is forgotten with the rest of the scratch work.
     /// A binder nothing has fixed yet shows as its own name.
-    pub fn describe_argument(&mut self, items: &[Syntax], index: usize) -> Option<String> {
+    pub(crate) fn describe_argument_syn(&mut self, items: &[Syn], index: usize) -> Option<String> {
         self.scratch(|c| {
-            let op = c.parse_exp(items.first()?).ok()?;
+            let op = c.parse_exp_syn(items.first()?).ok()?;
             let others: Vec<(usize, crate::ast::ExpId)> = items
                 .iter()
                 .enumerate()
                 .skip(1)
                 .filter(|(i, _)| *i != index)
-                .filter_map(|(i, s)| Some((i - 1, c.parse_exp(s).ok()?)))
+                .filter_map(|(i, s)| Some((i - 1, c.parse_exp_syn(s).ok()?)))
                 .collect();
             let t = c.argument_want(op, &others, index - 1)?;
             Some(c.show_ty(t))
@@ -2293,19 +2374,25 @@ pub(crate) struct Holes {
     pub tag: Sym,
 }
 
-/// Replace the first `,help` (or `,?`) in `s` by `hole`; where it was.
-fn mark_hole(s: &mut Syntax, interner: &fixpt_read::Interner, hole: Sym) -> Option<Span> {
-    use fixpt_read::Datum;
-    let Datum::List { items, tail } = &mut s.datum else { return None };
+/// `s` with the first `,help` (or `,?`) in it made `hole`; where it was.
+fn mark_hole(s: &Syn, interner: &fixpt_read::Interner, hole: Sym) -> Option<(Syn, Span)> {
+    let V::List { items, tail } = s.view() else { return None };
     if let [u, h] = &items[..]
         && tail.is_none()
-        && u.as_symbol().is_some_and(|u| interner.name(u) == "unquote")
-        && h.as_symbol().is_some_and(|h| matches!(interner.name(h), "help" | "?"))
+        && u.sym().is_some_and(|u| interner.name(u) == "unquote")
+        && h.sym().is_some_and(|h| matches!(interner.name(h), "help" | "?"))
     {
-        s.datum = Datum::Symbol(hole);
-        return Some(s.span);
+        return Some((Syn::symbol(s.at(), hole, interner), s.span()));
     }
-    items.iter_mut().chain(tail.as_deref_mut()).find_map(|i| mark_hole(i, interner, hole))
+    for (k, i) in items.iter().enumerate() {
+        if let Some((marked, at)) = mark_hole(i, interner, hole) {
+            let mut items = items.clone();
+            items[k] = marked;
+            return Some((Syn::of_list(s.at(), &items, tail), at));
+        }
+    }
+    let (marked, at) = mark_hole(&tail?, interner, hole)?;
+    Some((Syn::of_list(s.at(), &items, Some(marked)), at))
 }
 
 impl Checker {
@@ -2317,7 +2404,7 @@ impl Checker {
     /// `forms` are the same form written more than one way (with fillers
     /// after the hole, or not): the first that reaches the hole answers;
     /// else the narrowest refusal around the hole, of all of them.
-    pub fn describe_hole(&mut self, forms: &[Syntax]) -> Option<String> {
+    pub(crate) fn describe_hole_syn(&mut self, forms: &[Syn]) -> Option<String> {
         let holes = Holes {
             exp: self.interner.intern("%hole"),
             arm: self.interner.intern("%hole-arm"),
@@ -2326,11 +2413,10 @@ impl Checker {
         };
         let mut around: Option<FxError> = None;
         for form in forms {
-            let mut form = form.clone();
-            let Some(at) = mark_hole(&mut form, &self.interner, holes.exp) else { continue };
+            let Some((form, at)) = mark_hole(form, &self.interner, holes.exp) else { continue };
             self.holes = Some(holes);
             self.hole_hint = None;
-            let error = self.try_top(&form, |_, r| r.err());
+            let error = self.try_top_syn(&form, |_, r| r.err());
             self.holes = None;
             if let Some(hint) = self.hole_hint.take() {
                 return Some(hint);
@@ -2401,46 +2487,47 @@ pub fn type_again_warning(name: &str) -> String {
 
 /// The first use in `s` of one of `macros`, a list it heads: where, and
 /// which.
-fn uses_one_of(s: &Syntax, macros: &[Sym]) -> Option<(fixpt_read::Span, Sym)> {
-    let items = s.as_proper_list()?;
-    if let Some(h) = items.first().and_then(|h| h.as_symbol())
+fn uses_one_of(s: &Syn, macros: &[Sym]) -> Option<(fixpt_read::Span, Sym)> {
+    let items = s.items()?;
+    if let Some(h) = s.head_sym()
         && macros.contains(&h)
     {
-        return Some((s.span, h));
+        return Some((s.span(), h));
     }
-    items.iter().find_map(|x| uses_one_of(x, macros))
+    items.into_iter().find_map(|x| uses_one_of(&x, macros))
 }
 
 
 /// The macros `s` defines, each with its name's place, if it is a
 /// `define-syntax` or a `define-syntax-rec`.
-fn syntax_names(s: &Syntax, interner: &fixpt_read::Interner) -> Option<Vec<(Sym, Span)>> {
-    let items = s.as_proper_list()?;
-    let named = |n: &Syntax| n.as_symbol().map(|m| (m, n.span));
-    match interner.name(items.first()?.as_symbol()?) {
+fn syntax_names(s: &Syn, interner: &fixpt_read::Interner) -> Option<Vec<(Sym, Span)>> {
+    let listed = s.list();
+    let items = listed.as_deref()?;
+    let named = |n: &Syn| n.sym().map(|m| (m, n.span()));
+    match interner.name(items.first()?.sym()?) {
         "define-syntax" => Some(items.get(1).and_then(named).into_iter().collect()),
-        "define-syntax-rec" => Some(items[1..].iter().filter_map(|m| m.as_proper_list().and_then(|l| l.first()).and_then(named)).collect()),
+        "define-syntax-rec" => Some(items[1..].iter().filter_map(|m| m.list().as_deref().and_then(|l| l.first()).and_then(named)).collect()),
+        _ => None,
+    }
+}
+
+/// [`syntax_names`] of syntax in the heap.
+fn syn_names(s: &Syn, interner: &fixpt_read::Interner) -> Option<Vec<(Sym, crate::heap_syn::At)>> {
+    let items = s.list()?;
+    let named = |n: &Syn| n.sym().map(|m| (m, n.at()));
+    match interner.name(items.first()?.sym()?) {
+        "define-syntax" => Some(items.get(1).and_then(named).into_iter().collect()),
+        "define-syntax-rec" => Some(items[1..].iter().filter_map(|m| m.list().and_then(|l| l.first().copied()).as_ref().and_then(named)).collect()),
         _ => None,
     }
 }
 
 /// `s`, its places made places of `file`, in place.
-fn placed_in(s: &mut Syntax, file: FileId) {
-    s.span.file = file;
-    // The expansion that made it, if one did, read in the same reading:
-    // its use this file's too.
-    if s.span.expansion != 0 {
-        fixpt_read::expansion_placed_in(s.span.expansion, file);
-    }
-    if let fixpt_read::Datum::List { items, tail } = &mut s.datum {
-        items.iter_mut().for_each(|i| placed_in(i, file));
-        if let Some(t) = tail {
-            placed_in(t, file);
-        }
-    }
-    if let fixpt_read::Datum::Vector(items) = &mut s.datum {
-        items.iter_mut().for_each(|i| placed_in(i, file));
-    }
+fn placed_in(s: &Syn, file: FileId) -> Syn {
+    let from = crate::heap_syn::base_at(s.at().start);
+    // The expansion that made a part, if one did, read in the same
+    // reading: its use this file's too.
+    s.moved(crate::heap_syn::base_of(file) - from, &mut |e| fixpt_read::expansion_placed_in(e, file))
 }
 
 /// The text of module file `path`, at `at`: built in, or read (`reads`); or
@@ -2451,4 +2538,175 @@ fn module_text(path: &str, at: &std::path::Path, span: fixpt_read::Span) -> R<St
         Some(t) => Ok(t.to_string()),
         None => crate::reads::read_file(at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}"))),
     }
+}
+
+/// The front end's entry points of the Rust reader's `Syntax`, for drivers
+/// that hold forms between the code they run (sessions, the REPL, tests):
+/// each the `_syn` one of the form made `syn`, where syntax is lent. Until
+/// those hold syntax by handle (`docs/research/heap-syntax.md`, stage 4).
+impl Checker {
+    pub(crate) fn syn_of(&self, form: &Syntax) -> Syn {
+        Syn::from_syntax(form, &self.interner)
+    }
+
+    /// The form as the Rust reader's `Syntax`, copied: for a caller that
+    /// looks inside a form deeply (a driver's hints, a test), until none
+    /// does (`docs/research/heap-syntax.md`, stage 5).
+    pub fn syntax_of(&self, form: &Form) -> Syntax {
+        self.syn_ref(|_| form.get().to_syntax())
+    }
+
+    /// The form written, as the reader reads it back.
+    pub fn written(&self, form: &Form) -> String {
+        self.syn_ref(|c| fixpt_read::write_syntax(&form.get().to_syntax(), &c.interner))
+    }
+
+    /// A proper list form's items, held; none if it is not one.
+    pub fn items_of(&mut self, form: &Form) -> Option<Vec<Form>> {
+        self.syn(|_| Some(form.get().list()?.into_iter().map(Form::new).collect()))
+    }
+
+    /// A list form's head, if it is a symbol.
+    pub fn head_of(&self, form: &Form) -> Option<Sym> {
+        self.syn_ref(|_| form.get().head_sym())
+    }
+
+    /// A form's symbol, if it is one.
+    pub fn sym_of(&self, form: &Form) -> Option<Sym> {
+        self.syn_ref(|_| form.get().sym())
+    }
+
+    /// A form's string, if it is one.
+    pub fn string_of(&self, form: &Form) -> Option<String> {
+        self.syn_ref(|_| match form.get().shape() {
+            crate::heap_syn::Shape::Atom => match form.get().view() {
+                V::Str(t) => Some(t),
+                _ => None,
+            },
+            _ => None,
+        })
+    }
+
+    /// `(head part …)`, held, where `at` is: its head there, of no width;
+    /// a form a driver makes of the Rust checker's, a thunk of an
+    /// expression, say.
+    fn headed(&mut self, head: &str, parts: &[Syn], at: crate::heap_syn::At) -> Form {
+        let h = self.interner.intern(head);
+        self.syn(|c| {
+            let mut items = vec![Syn::new(at.synthetic(), V::Symbol(h), &c.interner)];
+            items.extend_from_slice(parts);
+            Form::new(Syn::of_list(at, &items, None))
+        })
+    }
+
+    /// `(lambda () exp)`, where `exp` is.
+    pub fn thunk_form(&mut self, exp: &Form) -> Form {
+        let at = exp.at();
+        let parts = self.syn(|c| vec![Syn::new(at.synthetic(), V::Nil, &c.interner), exp.get()]);
+        self.headed("lambda", &parts, at)
+    }
+
+    /// `(the ty exp)`, where `exp` is.
+    pub fn the_form(&mut self, ty: &Form, exp: &Form) -> Form {
+        let parts = self.syn(|_| vec![ty.get(), exp.get()]);
+        self.headed("the", &parts, exp.at())
+    }
+
+    /// [`Checker::top_defining_syn`].
+    pub fn top_defining(&mut self, form: &Form) -> R<Defining> {
+        self.syn(|c| c.top_defining_syn(&form.get()))
+    }
+
+    /// [`Checker::include_forms_syn`].
+    pub fn include_forms(&mut self, form: &Form) -> R<Option<Vec<Form>>> {
+        self.syn(|c| Ok(c.include_forms_syn(&form.get())?.map(|fs| fs.into_iter().map(Form::new).collect())))
+    }
+
+    /// [`Checker::top_all_syn`].
+    pub fn top_all(&mut self, form: &Form) -> R<Vec<Top>> {
+        self.syn(|c| c.top_all_syn(&form.get()))
+    }
+
+    /// [`Checker::try_defining_syn`].
+    pub fn try_defining(&mut self, form: &Form) -> R<Defining> {
+        self.syn(|c| c.try_defining_syn(&form.get()))
+    }
+
+    /// [`Checker::defined_names_syn`].
+    pub fn defined_names(&self, form: &Form) -> Vec<Sym> {
+        self.syn_ref(|c| c.defined_names_syn(&form.get()))
+    }
+
+    /// [`Checker::read_in_syn`], held.
+    pub fn read_in(&mut self, file: FileId, text: &str) -> R<Vec<Form>> {
+        self.syn(|c| Ok(c.read_in_syn(file, text)?.into_iter().map(Form::new).collect()))
+    }
+
+    /// [`Checker::read_in_from_syn`], held.
+    pub fn read_in_from(&mut self, file: FileId, text: &str, start: usize) -> R<Vec<Form>> {
+        self.syn(|c| Ok(c.read_in_from_syn(file, text, start)?.into_iter().map(Form::new).collect()))
+    }
+
+    /// [`Checker::expand_forms_syn`], held.
+    pub fn expand_forms(&mut self, forms: Vec<Form>) -> R<Vec<Form>> {
+        self.syn(|c| {
+            let fs = forms.iter().map(Form::get).collect();
+            Ok(c.expand_forms_syn(fs)?.into_iter().map(Form::new).collect())
+        })
+    }
+
+    /// [`Checker::top_syn`].
+    pub fn top(&mut self, form: &Form) -> R<Top> {
+        self.syn(|c| c.top_syn(&form.get()))
+    }
+
+    /// [`Checker::try_top_syn`].
+    pub fn try_top<T>(&mut self, form: &Form, then: impl FnOnce(&mut Checker, R<Top>) -> T) -> T {
+        self.syn(|c| c.try_top_syn(&form.get(), then))
+    }
+
+    /// [`Checker::declare_ahead_syn`].
+    pub fn declare_ahead(&mut self, forms: &[Form]) -> R<Vec<bool>> {
+        self.syn(|c| c.declare_ahead_syn(&gotten(forms)))
+    }
+
+    /// [`Checker::type_abbreviations_syn`].
+    pub(crate) fn type_abbreviations(&self, forms: &[Form]) -> Vec<(Sym, Span)> {
+        self.syn_ref(|c| c.type_abbreviations_syn(&gotten(forms)))
+    }
+
+    /// [`Checker::types_defined_again_syn`].
+    pub fn types_defined_again(&self, forms: &[Form]) -> Vec<(Sym, Span)> {
+        self.syn_ref(|c| c.types_defined_again_syn(&gotten(forms)))
+    }
+
+    /// [`Checker::missing_types_syn`].
+    pub fn missing_types(&mut self, forms: &[Form]) -> Option<Vec<Sym>> {
+        self.syn(|c| c.missing_types_syn(&gotten(forms)))
+    }
+
+    /// [`Checker::describe_argument_syn`].
+    pub fn describe_argument(&mut self, items: &[Form], index: usize) -> Option<String> {
+        self.syn(|c| c.describe_argument_syn(&gotten(items), index))
+    }
+
+    /// [`Checker::describe_hole_syn`].
+    pub fn describe_hole(&mut self, forms: &[Form]) -> Option<String> {
+        self.syn(|c| c.describe_hole_syn(&gotten(forms)))
+    }
+
+    /// [`Checker::parse_exp_syn`].
+    pub fn parse_exp(&mut self, s: &Form) -> R<crate::ast::ExpId> {
+        self.syn(|c| c.parse_exp_syn(&s.get()))
+    }
+
+    /// [`Checker::parse_type_syn`].
+    pub fn parse_type(&mut self, s: &Form) -> R<TyId> {
+        self.syn(|c| c.parse_type_syn(&s.get()))
+    }
+}
+
+/// Held forms' syntax, in the heap lent.
+fn gotten(forms: &[Form]) -> Vec<Syn> {
+    forms.iter().map(Form::get).collect()
 }

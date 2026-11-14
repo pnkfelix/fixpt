@@ -7,24 +7,25 @@
 //! the same (`check-program.fx`, `k-check-convention`), word for word.
 
 use crate::error::{FxError, R};
-use fixpt_read::{Datum, Num, Span, Sym, Syntax};
+use crate::heap_syn::{Syn, V};
+use fixpt_read::{Num, Span, Sym};
 
 const ATOMS: &str = "a convention's clause holds names, integers and lists";
 
 /// `s` printed as both checkers print a clause: atoms apart by one space,
 /// integers in decimal.
-fn text(s: &Syntax, name: &dyn Fn(Sym) -> String) -> R<String> {
-    match &s.datum {
+fn text(s: &Syn, name: &dyn Fn(Sym) -> String) -> R<String> {
+    match &s.view() {
         // Not `#t`, `#f` or `#u`, which the reader written in FX-26 reads
         // as names.
-        Datum::Symbol(x) if !name(*x).starts_with('#') => Ok(name(*x)),
-        Datum::Number(Num::Int(n)) => Ok(n.to_string()),
-        Datum::Nil => Ok("()".into()),
-        Datum::List { items, tail: None } => {
+        V::Symbol(x) if !name(*x).starts_with('#') => Ok(name(*x)),
+        V::Number(Num::Int(n)) => Ok(n.to_string()),
+        V::Nil => Ok("()".into()),
+        V::List { items, tail: None } => {
             let parts: R<Vec<String>> = items.iter().map(|x| text(x, name)).collect();
             Ok(format!("({})", parts?.join(" ")))
         }
-        _ => Err(FxError::at(s.span, ATOMS)),
+        _ => Err(FxError::at(s.span(), ATOMS)),
     }
 }
 
@@ -36,14 +37,15 @@ fn role_of(clause: &str) -> &str {
 
 /// Whether `clauses`, the form at `span`'s, declare the native convention;
 /// else why not, at the first clause, by role, that differs.
-pub fn check(span: Span, clauses: &[Syntax], name: &dyn Fn(Sym) -> String) -> R<()> {
+pub fn check(span: Span, clauses: &[Syn], name: &dyn Fn(Sym) -> String) -> R<()> {
     let mut ours: Vec<(String, String, Span)> = Vec::new();
     for c in clauses {
-        let role = match c.as_proper_list() {
-            Some([h, ..]) if h.as_symbol().is_some_and(|x| !name(x).starts_with('#')) => name(h.as_symbol().expect("a symbol")),
-            _ => return Err(FxError::at(c.span, "a convention's clause is `(role …)`")),
+        let listed = c.list();
+        let role = match listed.as_deref() {
+            Some([h, ..]) if h.sym().is_some_and(|x| !name(x).starts_with('#')) => name(h.sym().expect("a symbol")),
+            _ => return Err(FxError::at(c.span(), "a convention's clause is `(role …)`")),
         };
-        ours.push((role, text(c, name)?, c.span));
+        ours.push((role, text(c, name)?, c.span()));
     }
     ours.sort_by(|a, b| a.0.cmp(&b.0));
     for w in ours.windows(2) {

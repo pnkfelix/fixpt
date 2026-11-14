@@ -67,7 +67,7 @@ impl Head {
 }
 
 /// Read the head of the object whose main header is at `at` in `mem`.
-#[inline]
+#[inline(always)]
 fn read_head(mem: &[u64], at: usize) -> Head {
     let h = mem[at];
     debug_assert!(is_header(h) && !is_extension(h), "no main header at {at}");
@@ -155,7 +155,7 @@ fn update_weak_pairs(mem: &mut [u64], base: usize, weak_pairs: &[usize], from: u
     }
 }
 
-#[inline]
+#[inline(always)]
 fn find_main(mem: &[u64], p: usize) -> Result<usize, usize> {
     let w = mem[p - 1];
     match w & TAG_MASK {
@@ -683,7 +683,7 @@ impl Heap {
     }
 
     // ------------------------------------------------------------ raw word I/O
-    #[inline]
+    #[inline(always)]
     pub(crate) fn word(&self, rel: usize) -> u64 {
         self.mem.words()[rel]
     }
@@ -691,7 +691,7 @@ impl Heap {
     fn set_word(&mut self, rel: usize, w: u64) {
         self.mem.words_mut()[rel] = w;
     }
-    #[inline]
+    #[inline(always)]
     pub fn slot(&self, rel: usize) -> Value {
         Value(self.word(rel))
     }
@@ -895,12 +895,12 @@ impl Heap {
     }
 
     // -------------------------------------------------------------- accessors
-    #[inline]
+    #[inline(always)]
     pub fn car(&self, p: Value) -> Value {
         debug_assert!(p.is_pair());
         self.slot(self.ix(p))
     }
-    #[inline]
+    #[inline(always)]
     pub fn cdr(&self, p: Value) -> Value {
         debug_assert!(p.is_pair());
         self.slot(self.ix(p) + 1)
@@ -926,7 +926,7 @@ impl Heap {
     /// The main header's index, relative to the active space, for either
     /// kind of object pointer: an older one points at it, a bloblet pointer
     /// at the suffix after the fields.
-    #[inline]
+    #[inline(always)]
     fn main_of(&self, o: Value) -> usize {
         debug_assert!(o.is_bloblet(), "{o:?} is not an object");
         // The common case, inline: a trailer just before the suffix says how
@@ -978,6 +978,7 @@ impl Heap {
         debug_assert!(self.obj_len(o) == n, "{o:?} does not have {n} fields");
         self.set_slot(self.ix(o) - (n + 1 - j), v)
     }
+    #[inline(always)]
     pub fn is_a(&self, v: Value, ty: ObjType) -> bool {
         self.obj_type(v) == Some(ty)
     }
@@ -1537,12 +1538,14 @@ impl Heap {
     }
 
     /// The main header's index, relative to the active space.
+    #[inline(always)]
     fn bloblet_main(&self, v: Value) -> usize {
         debug_assert!(v.is_bloblet(), "{v:?} is not a bloblet");
         find_main(self.mem.words(), self.ix(v)).expect("no forwarding pointers outside a collection")
     }
 
     /// What a bloblet's header says.
+    #[inline(always)]
     pub fn bloblet_head(&self, v: Value) -> Head {
         read_head(self.mem.words(), self.bloblet_main(v))
     }
@@ -1566,13 +1569,14 @@ impl Heap {
     // constant of its layout (`TODO.md` §205; `fixpt_tidy::fields`).
 
     /// The field value `i` of bloblet `v` is: one load, field 1's tag.
-    #[inline]
+    #[inline(always)]
     fn value_field(&self, v: Value, i: usize) -> usize {
         let trailer = self.word(self.ix(v) - 1) & TAG_MASK == TAG_TRAILER;
         i + 1 + usize::from(trailer)
     }
 
     /// How many values bloblet `v` holds: its fields less its trailer.
+    #[inline(always)]
     pub fn bloblet_len(&self, v: Value) -> usize {
         let fields = self.bloblet_head(v).fields;
         fields - usize::from(fields > 0 && self.word(self.ix(v) - 1) & TAG_MASK == TAG_TRAILER)
@@ -1580,7 +1584,7 @@ impl Heap {
 
     /// Value `i` of bloblet `v`, from 0. Unchecked but for debug builds, as
     /// [`bloblet_slot`](Heap::bloblet_slot) is.
-    #[inline]
+    #[inline(always)]
     pub fn bloblet_value(&self, v: Value, i: usize) -> Value {
         debug_assert!(i < self.bloblet_len(v), "{v:?} has no value {i}");
         self.slot(self.ix(v) - self.value_field(v, i))
@@ -1633,7 +1637,7 @@ impl Heap {
     /// Product `v`'s field at position `n`, counted from 1 as FX-26 writes
     /// a product's fields, `(productof (1 a) (2 b))`, and as `(extract p
     /// n)` takes them: its value `n - 1`.
-    #[inline]
+    #[inline(always)]
     pub fn product_field(&self, v: Value, n: usize) -> Value {
         debug_assert!(n >= 1, "a product's fields are counted from 1");
         self.bloblet_value(v, n - 1)
@@ -1646,7 +1650,7 @@ impl Heap {
     }
 
     /// Sum `v`'s payload.
-    #[inline]
+    #[inline(always)]
     pub fn sum_payload(&self, v: Value) -> Value {
         self.bloblet_value(v, 1)
     }
@@ -2303,7 +2307,7 @@ impl Heap {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
         self.fixed(sym, 3, 0)
     }
-    #[inline]
+    #[inline(always)]
     pub fn symbol_global_slot(&self, sym: Value) -> usize {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
         self.fixed(sym, 3, 2).as_fixnum() as usize
@@ -2993,6 +2997,7 @@ impl Heap {
     }
 
     /// Collections made, minor and major.
+    #[inline(always)]
     pub fn collections(&self) -> u64 {
         self.gc_count + self.minor_count
     }

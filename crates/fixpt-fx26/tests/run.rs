@@ -19,7 +19,7 @@ fn run(program: &str) -> String {
 /// What the last form of `program` lowers to.
 fn code(program: &str) -> String {
     let mut s = Fx26Session::lowering(Backend::Ast).expect("starts");
-    let forms = s.checker.read_in(fixpt_read::FileId(0), program).expect("reads");
+    let forms = s.checking(|c| c.read_in(fixpt_read::FileId(0), program)).expect("reads");
     let mut last = String::new();
     for f in &forms {
         last = s.run(f).expect("checks").code.to_string();
@@ -191,8 +191,7 @@ fn the_compiler_uses_the_facts() {
     use fixpt_engine::compile::disassemble;
     let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
     let forms = s
-        .checker
-        .read_in(fixpt_read::FileId(0), "(define f (subr pure (int int) int) (lambda (a b) (+ a b)))")
+        .checking(|c| c.read_in(fixpt_read::FileId(0), "(define f (subr pure (int int) int) (lambda (a b) (+ a b)))"))
         .expect("reads");
     s.run(&forms[0]).expect("runs");
     let heap = &s.scheme.runtime_unrooted_ref().heap;
@@ -214,7 +213,7 @@ fn cellular_forms_show_their_new_words() {
     s.strategy = fixpt_fx26::session::Strategy::Cellular;
     s.show_words = true;
     let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/run/sq.fx")).unwrap();
-    let forms = s.checker.read_in(fixpt_read::FileId(0), &text).expect("reads");
+    let forms = s.checking(|c| c.read_in(fixpt_read::FileId(0), &text)).expect("reads");
     let codes: Vec<String> = forms.iter().map(|f| s.run(f).expect("runs").code.to_string()).collect();
     let words = |c: &str| c.lines().filter(|l| l.starts_with("word ")).map(|l| l.split(' ').nth(1).unwrap().to_string()).collect::<Vec<_>>();
     assert_eq!(words(&codes[0]), ["program", "sq"], "{}", codes[0]);
@@ -241,7 +240,7 @@ fn cellular_forms_stop_at_the_step_limit() {
         s.register_code = i == 2;
         s.scheme.runtime_unrooted().run_word = Some(m);
         s.set_step_limit(Some(100_000));
-        let forms = s.checker.read_in(fixpt_read::FileId(0), &text).expect("reads");
+        let forms = s.checking(|c| c.read_in(fixpt_read::FileId(0), &text)).expect("reads");
         let outs: Vec<_> = forms.iter().map(|f| s.run(f).expect("runs").value).collect();
         assert_eq!(outs.last(), Some(&Err("evaluation step limit exceeded".to_string())), "{name} on machine {i}");
     }
@@ -253,7 +252,7 @@ fn cellular_forms_stop_at_the_step_limit() {
 fn a_primitive_given_a_cyclic_list_fails_rather_than_loops() {
     for text in [include_str!("programs/diverge/cyclic-reverse.fx"), include_str!("programs/diverge/cyclic-list-string.fx")] {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        let forms = s.checker.read_in(fixpt_read::FileId(0), text).expect("reads");
+        let forms = s.checking(|c| c.read_in(fixpt_read::FileId(0), text)).expect("reads");
         let outs: Vec<_> = forms.iter().map(|f| s.run(f).expect("runs").value).collect();
         let last = outs.last().expect("a value").clone().expect_err("fails");
         assert!(last.contains("proper list"), "{last}");

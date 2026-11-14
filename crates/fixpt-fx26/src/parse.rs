@@ -9,7 +9,8 @@
 use crate::ast::{Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, Effect, Exp, ExpId, IoKind, Kind, ModItem, Region, RegionForm, Size, Ty, TyId, Variance};
 use crate::check::Checker;
 use crate::error::{FxError, R};
-use fixpt_read::{Datum, Sym, Syntax};
+use crate::heap_syn::{Syn, V};
+use fixpt_read::Sym;
 
 /// A fixnum's range, as the heap's (`fixpt_heap::Value::try_fixnum`): an
 /// integer literal past it is a bignum, made by arithmetic.
@@ -25,7 +26,7 @@ pub enum DScope {
     /// A name bound by `define-type` with parameters: a type abbreviation
     /// with holes, expanded at each use by parsing its body with the
     /// parameters bound to the descriptions given.
-    Abbrev { params: Vec<(Sym, Kind)>, body: Syntax },
+    Abbrev { params: Vec<(Sym, Kind)>, body: crate::heap_syn::Kept },
     /// A region given for an abbreviation's region parameter.
     Region(Region),
     /// A size given for an abbreviation's size parameter.
@@ -251,7 +252,7 @@ impl Checker {
     /// (innermost first): `((select m f) d …)` of the innermost, which,
     /// where `m` does not give `f`, is the next's, and so on out to what
     /// `s` means here otherwise, `outer`; as `with_selected` for a name.
-    fn with_applied(&mut self, s: &Syntax, withs: &[Sym], f: Sym, outer: Option<TyId>) -> R<TyId> {
+    fn with_applied(&mut self, s: &Syn, withs: &[Sym], f: Sym, outer: Option<TyId>) -> R<TyId> {
         let args = &self.items(s, "a type")?.to_vec()[1..];
         let mut t = outer;
         for m in withs.iter().rev() {
@@ -314,49 +315,49 @@ impl Checker {
         }
     }
 
-    pub(crate) fn read_qualified<T>(&mut self, s: &Syntax, read: impl FnOnce(&mut Self, &Syntax) -> R<T>) -> Option<R<T>> {
+    pub(crate) fn read_qualified<T>(&mut self, s: &Syn, read: impl FnOnce(&mut Self, &Syn) -> R<T>) -> Option<R<T>> {
         // (A procedural macro's alias is resolved as it is expanded:
         // `Macros::aliases_resolved`.)
-        let n = self.toplevel_unqualified(s.as_symbol()?)?;
-        Some(self.at_toplevel(|c| read(c, &Syntax::symbol(s.span, n))))
+        let n = self.toplevel_unqualified(s.sym()?)?;
+        Some(self.at_toplevel(|c| read(c, &Syn::symbol(s.span(), n, &c.interner))))
     }
 
-    fn items<'s>(&self, s: &'s Syntax, what: &str) -> R<&'s [Syntax]> {
-        s.as_proper_list().ok_or_else(|| FxError::at(s.span, format!("{what}: expected a list")))
+    fn items(&self, s: &Syn, what: &str) -> R<Vec<Syn>> {
+        s.list().ok_or_else(|| FxError::at(s.span(), format!("{what}: expected a list")))
     }
 
-    fn literal_int(&self, s: &Syntax) -> Option<i64> {
-        match &s.datum {
-            Datum::Number(fixpt_read::Num::Int(n)) => Some(*n),
+    fn literal_int(&self, s: &Syn) -> Option<i64> {
+        match &s.view() {
+            V::Number(fixpt_read::Num::Int(n)) => Some(*n),
             _ => None,
         }
     }
 
-    pub(crate) fn head(&self, items: &[Syntax]) -> Option<&str> {
-        items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h))
+    pub(crate) fn head(&self, items: &[Syn]) -> Option<&str> {
+        items.first().and_then(|h| h.sym()).map(|h| self.name(h))
     }
 
     // --------------------------------------------------------------- kinds
-    pub(crate) fn parse_kind(&mut self, s: &Syntax) -> R<Kind> {
+    pub(crate) fn parse_kind(&mut self, s: &Syn) -> R<Kind> {
         let usage = "a kind is `region`, `place`, `effect`, `type`, `data`, `sendable`, `flat`, `size`, `conv` or `(=> (kind …) kind)`";
         // `(=> (k1 … kn) k)`: a description function's (`crate::kinds`).
-        if let Some([head, ks, result]) = s.as_proper_list()
-            && head.as_symbol().is_some_and(|h| self.name(h) == "=>")
-            && let Some(ks) = ks.as_proper_list()
+        if let Some([head, ks, result]) = s.list().as_deref()
+            && head.sym().is_some_and(|h| self.name(h) == "=>")
+            && let Some(ks) = ks.list().as_deref()
             && !ks.is_empty()
         {
             let params = ks.iter().map(|k| self.parse_kind(k)).collect::<R<Vec<_>>>()?;
-            let at = result.span;
+            let at = result.span();
             let result = self.parse_kind(result)?;
             if matches!(result, Kind::Region | Kind::Place | Kind::Size | Kind::Conv) {
                 return Err(FxError::at(at, "a description function gives a type, an effect, or another description function"));
             }
             if result == Kind::Effect && params.iter().any(|k| matches!(k, Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat | Kind::Arrow(_))) {
-                return Err(FxError::at(s.span, "a description function to an effect takes regions, places, effects, sizes and conventions"));
+                return Err(FxError::at(s.span(), "a description function to an effect takes regions, places, effects, sizes and conventions"));
             }
             return Ok(self.arena.arrow(params, result));
         }
-        match s.as_symbol().map(|k| self.name(k)) {
+        match s.sym().map(|k| self.name(k)) {
             Some("region") => Ok(Kind::Region),
             Some("place") => Ok(Kind::Place),
             Some("effect") => Ok(Kind::Effect),
@@ -366,25 +367,25 @@ impl Checker {
             Some("flat") => Ok(Kind::Flat),
             Some("size") => Ok(Kind::Size),
             Some("conv") => Ok(Kind::Conv),
-            _ => Err(FxError::at(s.span, usage)),
+            _ => Err(FxError::at(s.span(), usage)),
         }
     }
 
     /// `(conv C)`: the convention `C`.
-    fn parse_conv_form(&mut self, s: &Syntax) -> R<Conv> {
-        match self.items(s, "`(conv convention)`")? {
+    fn parse_conv_form(&mut self, s: &Syn) -> R<Conv> {
+        match self.items(s, "`(conv convention)`")?.as_slice() {
             [_, c] => self.parse_conv(c),
-            _ => Err(FxError::at(s.span, "`(conv convention)`")),
+            _ => Err(FxError::at(s.span(), "`(conv convention)`")),
         }
     }
 
     /// A convention: `cellular`, `native`, `fx`, or a name bound as one.
-    pub(crate) fn parse_conv(&mut self, s: &Syntax) -> R<Conv> {
+    pub(crate) fn parse_conv(&mut self, s: &Syn) -> R<Conv> {
         if let Some(r) = self.read_qualified(s, Self::parse_conv) {
             return r;
         }
-        let Some(sym) = s.as_symbol() else {
-            return Err(FxError::at(s.span, "a convention is `cellular`, `native`, `fx`, or a name bound as one"));
+        let Some(sym) = s.sym() else {
+            return Err(FxError::at(s.span(), "a convention is `cellular`, `native`, `fx`, or a name bound as one"));
         };
         match self.name(sym) {
             "cellular" => Ok(Conv::Cellular),
@@ -393,29 +394,29 @@ impl Checker {
             _ => match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Conv)) => Ok(Conv::Var(v)),
                 Some(DScope::ConvVal(c)) => Ok(c),
-                _ => Err(FxError::at(s.span, format!("`{}` is not a convention", self.name(sym)))),
+                _ => Err(FxError::at(s.span(), format!("`{}` is not a convention", self.name(sym)))),
             },
         }
     }
 
     /// `((I K) …)`, binding each name for the rest of the parse.
-    pub(crate) fn parse_binders(&mut self, s: &Syntax) -> R<Vec<(DVar, Kind)>> {
+    pub(crate) fn parse_binders(&mut self, s: &Syn) -> R<Vec<(DVar, Kind)>> {
         let mut out = Vec::new();
-        for b in self.items(s, "binders")? {
-            let pair = self.items(b, "a binder")?;
+        for b in &self.items(s, "binders")? {
+            let pair = &self.items(b, "a binder")?[..];
             // A region binder marked `distinct`, last: one that aliases no
             // other region its procedure sees (`docs/research/
             // region-anti-aliasing.md`, (C)).
             let (pair, distinct) = match pair.split_last() {
-                Some((last, rest)) if rest.len() >= 2 && last.as_symbol().is_some_and(|x| self.name(x) == "distinct") => (rest, true),
+                Some((last, rest)) if rest.len() >= 2 && last.sym().is_some_and(|x| self.name(x) == "distinct") => (rest, true),
                 _ => (pair, false),
             };
             let (name, kind, bound) = match pair {
                 [name, kind] => (name, kind, None),
                 [name, kind, bound] => (name, kind, Some(bound)),
-                _ => return Err(FxError::at(b.span, "a binder is `(name kind)`, `(name region place)` or `(name data place)`, a region's perhaps `distinct` last")),
+                _ => return Err(FxError::at(b.span(), "a binder is `(name kind)`, `(name region place)` or `(name data place)`, a region's perhaps `distinct` last")),
             };
-            let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a binder's name"))?;
+            let name = name.sym().ok_or_else(|| FxError::at(name.span(), "a binder's name"))?;
             let kind = self.parse_kind(kind)?;
             // `(r region p)`: a region that won't outlive `p`, a place
             // bound before it. `(t data p)`: data at `p` or the heap
@@ -426,23 +427,23 @@ impl Checker {
             let bound = match bound {
                 Some(p) if matches!(kind, Kind::Region | Kind::Data) => Some(self.parse_place(p)?),
                 Some(p) if kind == Kind::Effect => {
-                    let form = self.items(p, "an effect binder's bound")?;
+                    let form = &self.items(p, "an effect binder's bound")?[..];
                     match form {
-                        [head, e] if head.as_symbol().is_some_and(|h| self.name(h) == "within") => within = Some(self.parse_effect(e)?),
-                        _ => return Err(FxError::at(p.span, "an effect binder's bound is `(within effect)`: `(name effect (within effect))`")),
+                        [head, e] if head.sym().is_some_and(|h| self.name(h) == "within") => within = Some(self.parse_effect(e)?),
+                        _ => return Err(FxError::at(p.span(), "an effect binder's bound is `(within effect)`: `(name effect (within effect))`")),
                     }
                     None
                 }
                 Some(p) => {
                     return Err(FxError::at(
-                        p.span,
+                        p.span(),
                         "only a region, data or effect binder has a bound: `(name region place)`, `(name data place)` or `(name effect (within effect))`",
                     ));
                 }
                 None => None,
             };
             if distinct && kind != Kind::Region {
-                return Err(FxError::at(b.span, "only a region binder is `distinct`"));
+                return Err(FxError::at(b.span(), "only a region binder is `distinct`"));
             }
             let v = self.arena.dvar_of(name, kind);
             if let Some(p) = bound {
@@ -463,28 +464,29 @@ impl Checker {
     // ------------------------------------------------------------- regions
     /// `@globals`, or `(globals g …)` as the regions of each `g`; `None` if
     /// `s` is neither.
-    fn globals_region(&self, s: &Syntax) -> R<Option<Vec<Region>>> {
-        if s.as_symbol().is_some_and(|x| self.name(x) == "@globals") {
+    fn globals_region(&self, s: &Syn) -> R<Option<Vec<Region>>> {
+        if s.sym().is_some_and(|x| self.name(x) == "@globals") {
             return Ok(Some(vec![Region::Globals]));
         }
-        let Some([head, names @ ..]) = s.as_proper_list() else { return Ok(None) };
-        if !head.as_symbol().is_some_and(|h| self.name(h) == "globals") {
+        let listed = s.list();
+        let Some([head, names @ ..]) = listed.as_deref() else { return Ok(None) };
+        if !head.sym().is_some_and(|h| self.name(h) == "globals") {
             return Ok(None);
         }
         if names.is_empty() {
-            return Err(FxError::at(s.span, "`(globals name …)`: at least one global"));
+            return Err(FxError::at(s.span(), "`(globals name …)`: at least one global"));
         }
-        names.iter().map(|n| n.as_symbol().map(Region::Global).ok_or_else(|| FxError::at(n.span, "a global's name"))).collect::<R<_>>().map(Some)
+        names.iter().map(|n| n.sym().map(Region::Global).ok_or_else(|| FxError::at(n.span(), "a global's name"))).collect::<R<_>>().map(Some)
     }
 
-    pub(crate) fn parse_region(&self, s: &Syntax) -> R<Region> {
+    pub(crate) fn parse_region(&self, s: &Syn) -> R<Region> {
         if self.globals_region(s)?.is_some() {
-            return Err(FxError::at(s.span, "globals are a region only in effects: `(read @globals)`, `(write (globals g))`"));
+            return Err(FxError::at(s.span(), "globals are a region only in effects: `(read @globals)`, `(write (globals g))`"));
         }
         // `(const p)`: data frozen into place `p`; `(acyclic p)`, and never
         // written, so with no cycle through it.
-        if let Some([head, p]) = s.as_proper_list()
-            && let Some(h) = head.as_symbol()
+        if let Some([head, p]) = s.list().as_deref()
+            && let Some(h) = head.sym()
             && matches!(self.name(h), "const" | "acyclic")
         {
             let acyclic = self.name(h) == "acyclic";
@@ -493,8 +495,8 @@ impl Checker {
                 _ => Region::Frozen(None, acyclic),
             });
         }
-        let Some(sym) = s.as_symbol() else {
-            return Err(FxError::at(s.span, "expected a region"));
+        let Some(sym) = s.sym() else {
+            return Err(FxError::at(s.span(), "expected a region"));
         };
         if self.name(sym).starts_with('@') {
             return Ok(self.region_constant(sym));
@@ -502,22 +504,22 @@ impl Checker {
         match self.name(sym) {
             "const" => return Ok(Region::Frozen(None, false)),
             "acyclic" => return Ok(Region::Frozen(None, true)),
-            "finite" => return Err(FxError::at(s.span, "`finite` is a size; data with no cycle through it is at `acyclic`")),
+            "finite" => return Err(FxError::at(s.span(), "`finite` is a size; data with no cycle through it is at `acyclic`")),
             "heap" => return Ok(Region::Heap),
             _ => {}
         }
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Region | Kind::Place)) => Ok(Region::Var(v)),
             Some(DScope::Region(r)) => Ok(r),
-            _ => Err(FxError::at(s.span, format!("`{}` is not a region", self.name(sym)))),
+            _ => Err(FxError::at(s.span(), format!("`{}` is not a region", self.name(sym)))),
         }
     }
 
     /// A place: a region that is one.
-    pub(crate) fn parse_place(&self, s: &Syntax) -> R<Region> {
+    pub(crate) fn parse_place(&self, s: &Syn) -> R<Region> {
         let r = self.parse_region(s)?;
         if !self.arena.is_place(r) {
-            return Err(FxError::at(s.span, format!("`{}` is not a place", self.show_region(r))));
+            return Err(FxError::at(s.span(), format!("`{}` is not a place", self.show_region(r))));
         }
         Ok(r)
     }
@@ -527,10 +529,10 @@ impl Checker {
     /// program's (`docs/research/native-conventions.md`). Or `(-> (param …)
     /// result)`: `(subr pure (param …) result)`. `clauses`, its
     /// specification's, if it has one.
-    fn parse_subr_form(&mut self, s: &Syntax, items: &[Syntax], clauses: &[Syntax]) -> R<TyId> {
+    fn parse_subr_form(&mut self, s: &Syn, items: &[Syn], clauses: &[Syn]) -> R<TyId> {
         if self.head(items) == Some("->") {
             let [_, params, result] = items else {
-                return Err(FxError::at(s.span, "`(-> (param …) result)`"));
+                return Err(FxError::at(s.span(), "`(-> (param …) result)`"));
             };
             return self.parse_subr_type(self.conv_default, Effect::pure(), params, result, clauses);
         }
@@ -542,7 +544,7 @@ impl Checker {
             [] => unreachable!("a head"),
         };
         let [effect, params, result] = rest else {
-            return Err(FxError::at(s.span, "`(subr effect (param …) result)`"));
+            return Err(FxError::at(s.span(), "`(subr effect (param …) result)`"));
         };
         let effect = self.parse_effect(effect)?;
         self.parse_subr_type(conv, effect, params, result, clauses)
@@ -550,9 +552,9 @@ impl Checker {
 
     /// A procedure type's parameters and result, after its convention and
     /// effect: `(subr …)`'s and `(-> …)`'s.
-    fn parse_subr_type(&mut self, conv: Conv, effect: Effect, params: &Syntax, result: &Syntax, clauses: &[Syntax]) -> R<TyId> {
-        let ps = match &params.datum {
-            Datum::Nil => Vec::new(),
+    fn parse_subr_type(&mut self, conv: Conv, effect: Effect, params: &Syn, result: &Syn, clauses: &[Syn]) -> R<TyId> {
+        let ps = match &params.view() {
+            V::Nil => Vec::new(),
             _ => self.items(params, "parameter types")?.to_vec(),
         };
         // A parameter may be named, `(name : type)`, for the types after
@@ -561,38 +563,39 @@ impl Checker {
         let mut names: Vec<Option<Sym>> = Vec::new();
         let mut params = Vec::new();
         for (i, p) in ps.iter().enumerate() {
-            let later: Vec<&Syntax> = ps[i + 1..].iter().chain([result]).chain(clauses).collect();
+            let later: Vec<&Syn> = ps[i + 1..].iter().chain([result]).chain(clauses).collect();
             self.misnamed_param(p, &later)?;
             let (name, t) = match self.named_param(p) {
                 Some((n, t)) => (Some(n), t),
                 None => (None, p.clone()),
             };
-            let read = self.parse_type(&t)?;
-            let read = self.select_params(read, &names, &params, t.span)?;
+            let read = self.parse_type_syn(&t)?;
+            let read = self.select_params(read, &names, &params, t.span())?;
             params.push(read);
             names.push(name);
         }
-        let result_span = result.span;
+        let result_span = result.span();
         // A test's result, `(bool …)`: here, and only here, a `bool` and
         // what it proves, an `ensures` of it.
-        let (result, spec) = match result.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()) {
+        let listed = result.list();
+        let (result, spec) = match listed.as_deref().and_then(|l| l.first()).and_then(|h| h.sym()) {
             Some(h) if self.name(h) == "bool" => {
                 let ensures = self.parse_proving(result, params.len())?;
                 let spec = crate::ast::Spec { params: names.clone(), result: None, requires: crate::logic::Formula::True, ensures };
                 (self.bool_, Some(std::rc::Rc::new(spec)))
             }
-            _ => (self.parse_type(result)?, None),
+            _ => (self.parse_type_syn(result)?, None),
         };
         let result = self.select_params(result, &names, &params, result_span)?;
         Ok(self.arena.ty(Ty::Subr { conv, effect, params, result, spec }))
     }
 
     // ------------------------------------------------------------- effects
-    pub(crate) fn parse_effect(&mut self, s: &Syntax) -> R<Effect> {
+    pub(crate) fn parse_effect(&mut self, s: &Syn) -> R<Effect> {
         if let Some(r) = self.read_qualified(s, Self::parse_effect) {
             return r;
         }
-        if let Some(sym) = s.as_symbol() {
+        if let Some(sym) = s.sym() {
             if self.name(sym) == "pure" {
                 return Ok(Effect::pure());
             }
@@ -635,7 +638,7 @@ impl Checker {
     }
 
     /// Effect name `sym`, as the description scope and `include`s say.
-    fn effect_name_read(&mut self, s: &Syntax, sym: Sym) -> R<Effect> {
+    fn effect_name_read(&mut self, s: &Syn, sym: Sym) -> R<Effect> {
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Effect)) => Ok(Effect::atom(Atom::Var(v))),
             Some(DScope::Eff(e)) => Ok(e),
@@ -645,24 +648,24 @@ impl Checker {
                 let inc = self.interner.intern("%include");
                 Ok(Effect::atom(Atom::Var(self.effect_select(inc, sym))))
             }
-            _ => Err(FxError::at(s.span, format!("`{}` is not an effect", self.name(sym)))),
+            _ => Err(FxError::at(s.span(), format!("`{}` is not an effect", self.name(sym)))),
         }
     }
 
-    fn parse_effect_list(&mut self, s: &Syntax) -> R<Effect> {
+    fn parse_effect_list(&mut self, s: &Syn) -> R<Effect> {
         let items = self.items(s, "an effect")?.to_vec();
         // `(select m e)`: module `m`'s effect `e`, found where the type it
         // is in is checked, as a type's `select` is (`resolve_selects`).
         if self.head(&items) == Some("select") {
             let [_, m, e] = &items[..] else {
-                return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
+                return Err(FxError::at(s.span(), "`(select module name)`: a module's name, and a component's"));
             };
-            let (Some(m), Some(e)) = (m.as_symbol(), e.as_symbol()) else {
-                return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
+            let (Some(m), Some(e)) = (m.sym(), e.sym()) else {
+                return Err(FxError::at(s.span(), "`(select module name)`: a module's name, and a component's"));
             };
             // `(select #%toplevel:m e)`: the top level's `m`'s, found here.
             if let Some(p) = self.toplevel_unqualified(m) {
-                return self.at_toplevel(|c| c.selected_effect(p, e, s.span));
+                return self.at_toplevel(|c| c.selected_effect(p, e, s.span()));
             }
             return Ok(Effect::atom(Atom::Var(self.effect_select(m, e))));
         }
@@ -674,12 +677,12 @@ impl Checker {
         let head = self.head(items).unwrap_or("");
         let atom = |c: fn(Region) -> Atom| -> R<Effect> {
             let [_, r] = items else {
-                return Err(FxError::at(s.span, format!("`({head} region)`")));
+                return Err(FxError::at(s.span(), format!("`({head} region)`")));
             };
             // Globals' bindings, which are only read and written.
             if let Some(gs) = self.globals_region(r)? {
                 if !matches!(head, "read" | "write") {
-                    return Err(FxError::at(r.span, format!("globals are only read and written, not `{head}`")));
+                    return Err(FxError::at(r.span(), format!("globals are only read and written, not `{head}`")));
                 }
                 return Ok(Effect(gs.into_iter().map(c).collect()));
             }
@@ -699,11 +702,11 @@ impl Checker {
             "io" => {
                 let kinds = || IoKind::ALL.map(|k| format!("`{}`", k.name())).join(", ");
                 let [_, k] = items else {
-                    return Err(FxError::at(s.span, format!("`(io kind)`, the kind one of {}", kinds())));
+                    return Err(FxError::at(s.span(), format!("`(io kind)`, the kind one of {}", kinds())));
                 };
-                match k.as_symbol().and_then(|k| IoKind::named(self.name(k))) {
+                match k.sym().and_then(|k| IoKind::named(self.name(k))) {
                     Some(k) => Ok(Effect::atom(Atom::Io(k))),
-                    None => Err(FxError::at(k.span, format!("an I/O effect's kind is one of {}", kinds()))),
+                    None => Err(FxError::at(k.span(), format!("an I/O effect's kind is one of {}", kinds()))),
                 }
             }
             "maxeff" => {
@@ -713,12 +716,12 @@ impl Checker {
                 }
                 Ok(e)
             }
-            _ => Err(FxError::at(s.span, "expected an effect")),
+            _ => Err(FxError::at(s.span(), "expected an effect")),
         }
     }
 
     // --------------------------------------------------------------- types
-    pub fn parse_type(&mut self, s: &Syntax) -> R<TyId> {
+    pub(crate) fn parse_type_syn(&mut self, s: &Syn) -> R<TyId> {
         let t = match std::mem::take(&mut self.arrow_star) {
             true => {
                 let t = self.parse_arrow_star(s)?;
@@ -729,35 +732,37 @@ impl Checker {
         };
         // Storage written: a procedure kept there may not reach itself
         // unsaid (`spin`).
-        if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "oneof" | "union" | "anyof" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
-            self.no_knot(t, s.span)?;
+        if matches!(self.head(&self.items(s, "a type").unwrap_or_default()), Some("ref" | "icell" | "pairof" | "listof" | "oneof" | "union" | "anyof" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
+            self.no_knot(t, s.span())?;
         }
         Ok(t)
     }
 
     /// The evidence a staging form is given, `(given g …)`, as the product
     /// its operator takes, `(product (1 g) …)`; none given, the empty one.
-    fn given(&mut self, given: Option<&Syntax>, span: fixpt_read::Span, usage: &str) -> R<Syntax> {
-        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+    fn given(&mut self, given: Option<&Syn>, span: fixpt_read::Span, usage: &str) -> R<Syn> {
+        let sym = |p: &mut Self, s: &str| Syn::named(span, s, &mut p.interner);
         let mut fields = vec![sym(self, "product")];
         if let Some(g) = given {
-            let items = match g.as_proper_list() {
-                Some([head, items @ ..]) if head.as_symbol().is_some_and(|h| self.name(h) == "given") => items.to_vec(),
-                _ => return Err(FxError::at(g.span, format!("evidence is given as `(given variable …)`: {usage}"))),
+            let listed = g.list();
+            let items = match listed.as_deref() {
+                Some([head, items @ ..]) if head.sym().is_some_and(|h| self.name(h) == "given") => items.to_vec(),
+                _ => return Err(FxError::at(g.span(), format!("evidence is given as `(given variable …)`: {usage}"))),
             };
             for (i, x) in items.iter().enumerate() {
-                if x.as_symbol().is_none() {
-                    return Err(FxError::at(x.span, "evidence is given as `(given variable …)`"));
+                if x.sym().is_none() {
+                    return Err(FxError::at(x.span(), "evidence is given as `(given variable …)`"));
                 }
-                fields.push(Syntax::list(x.span, vec![sym(self, &(i + 1).to_string()), x.clone()]));
+                fields.push(Syn::lst(x.span(), vec![sym(self, &(i + 1).to_string()), x.clone()]));
             }
         }
-        Ok(Syntax::list(span, fields))
+        Ok(Syn::lst(span, fields))
     }
 
     /// Whether signature `s` is `(->* …)`, under any `poly`s.
-    pub(crate) fn written_arrow_star(&self, s: &Syntax) -> bool {
-        let items = s.as_proper_list().unwrap_or(&[]);
+    pub(crate) fn written_arrow_star(&self, s: &Syn) -> bool {
+        let listed = s.list();
+        let items = listed.as_deref().unwrap_or(&[]);
         match (self.head(items), items) {
             (Some("->*"), _) => true,
             (Some("poly"), [_, _, body]) => self.written_arrow_star(body),
@@ -768,11 +773,11 @@ impl Checker {
     /// A definition's signature that may be `(->* (param …) result)`, under
     /// any `poly`s: read as `(subr pure (param …) result)`, the effect the
     /// definition then finds standing in for its own (`top.rs`).
-    fn parse_arrow_star(&mut self, s: &Syntax) -> R<TyId> {
+    fn parse_arrow_star(&mut self, s: &Syn) -> R<TyId> {
         let items = self.items(s, "a type")?.to_vec();
         match (self.head(&items), &items[..]) {
             (Some("->*"), [_, params, result]) => self.parse_subr_type(self.conv_default, Effect::pure(), params, result, &[]),
-            (Some("->*"), _) => Err(FxError::at(s.span, "`(->* (param …) result)`")),
+            (Some("->*"), _) => Err(FxError::at(s.span(), "`(->* (param …) result)`")),
             (Some("poly"), _) => {
                 self.arrow_star = true;
                 let t = self.parse_type_node(s);
@@ -783,13 +788,13 @@ impl Checker {
         }
     }
 
-    fn parse_type_node(&mut self, s: &Syntax) -> R<TyId> {
+    fn parse_type_node(&mut self, s: &Syn) -> R<TyId> {
         // `#%toplevel:t`, its `select`s found there too, as `(select
         // #%toplevel t)`'s are.
-        if let Some(r) = self.read_qualified(s, |c, n| c.parse_type_node(n).and_then(|t| c.resolve_selects(t, n.span))) {
+        if let Some(r) = self.read_qualified(s, |c, n| c.parse_type_node(n).and_then(|t| c.resolve_selects(t, n.span()))) {
             return r;
         }
-        if let Some(sym) = s.as_symbol() {
+        if let Some(sym) = s.sym() {
             let name = self.name(sym);
             if name == "void" {
                 return Ok(self.void);
@@ -827,7 +832,8 @@ impl Checker {
             return self.type_name_read(s, sym);
         }
         // `(f d …)` in `with` bodies: the modules' `f` first, as names alone.
-        let head = s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol());
+        let listed = s.list();
+        let head = listed.as_deref().and_then(|l| l.first()).and_then(|h| h.sym());
         if let Some(head) = head.filter(|h| !TYPE_FORMS.contains(&self.name(*h)) && !self.is_toplevel_qualified(*h)) {
             let (withs, given) = self.withs_reading(head);
             if let Some(m) = given {
@@ -846,15 +852,15 @@ impl Checker {
     }
 
     /// Type name `sym`, as the description scope and `include`s say.
-    fn type_name_read(&mut self, s: &Syntax, sym: Sym) -> R<TyId> {
+    fn type_name_read(&mut self, s: &Syn, sym: Sym) -> R<TyId> {
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Type | Kind::Data | Kind::Sendable)) => Ok(self.arena.ty(Ty::Var(v))),
             // A flat is no type: it is reached through a `blobref`.
-            Some(DScope::Var(_, Kind::Flat)) => Err(FxError::at(s.span, format!("`{}` is a flat, not a type", self.name(sym)))),
+            Some(DScope::Var(_, Kind::Flat)) => Err(FxError::at(s.span(), format!("`{}` is a flat, not a type", self.name(sym)))),
             // A family's flat parameter, a variable of kind `flat`, is no
             // type either.
             Some(DScope::Rec(t)) if matches!(self.arena.get(self.arena.resolve(t)), Ty::Var(v) if self.arena.dvar_kind_known(*v) == Some(Kind::Flat)) => {
-                Err(FxError::at(s.span, format!("`{}` is a flat, not a type", self.name(sym))))
+                Err(FxError::at(s.span(), format!("`{}` is a flat, not a type", self.name(sym))))
             }
             Some(DScope::Rec(t)) => Ok(t),
             Some(DScope::Generative(g)) => self.apply_generative(s, g, &[]),
@@ -863,39 +869,39 @@ impl Checker {
                 let k = self.fun_kind(f).unwrap_or(Kind::Type);
                 Err(self.not_applied(s, sym, k))
             }
-            _ if self.holes.is_some_and(|h| h.exp == sym) => Err(FxError::at(s.span, "expected a type")),
+            _ if self.holes.is_some_and(|h| h.exp == sym) => Err(FxError::at(s.span(), "expected a type")),
             // In a module with `include`s, the modules included's, found
             // when they are typed (`TODO.md` §69).
             _ if self.include_scope > 0 => {
                 let inc = self.interner.intern("%include");
                 Ok(self.arena.ty(Ty::Select(inc, sym)))
             }
-            _ => Err(FxError::at(s.span, format!("`{}` is not a type", self.name(sym)))),
+            _ => Err(FxError::at(s.span(), format!("`{}` is not a type", self.name(sym)))),
         }
     }
 
-    fn parse_type_list(&mut self, s: &Syntax) -> R<TyId> {
+    fn parse_type_list(&mut self, s: &Syn) -> R<TyId> {
         let items = self.items(s, "a type")?.to_vec();
         // `(#%toplevel:f d …)`: `f` the top level's, a function it binds or
         // else the type form of that name; `d …` read where they are.
-        if let Some(h) = items.first().and_then(|h| h.as_symbol()).filter(|h| self.is_toplevel_qualified(*h)) {
+        if let Some(h) = items.first().and_then(|h| h.sym()).filter(|h| self.is_toplevel_qualified(*h)) {
             let n = self.toplevel_unqualified(h).expect("qualified");
             let found = if TYPE_FORMS.contains(&self.name(n)) { None } else { self.at_toplevel(|c| c.lookup_desc(n)) };
             let mut plain = items.clone();
-            plain[0] = Syntax::symbol(items[0].span, n);
-            return self.parse_type_list_found(&Syntax::list(s.span, plain), found, true);
+            plain[0] = Syn::symbol(items[0].span(), n, &self.interner);
+            return self.parse_type_list_found(&Syn::lst(s.span(), plain), found, true);
         }
-        let found = items.first().and_then(|h| h.as_symbol()).filter(|h| !TYPE_FORMS.contains(&self.name(*h))).and_then(|h| self.lookup_desc(h));
+        let found = items.first().and_then(|h| h.sym()).filter(|h| !TYPE_FORMS.contains(&self.name(*h))).and_then(|h| self.lookup_desc(h));
         self.parse_type_list_found(s, found, false)
     }
 
     /// `parse_type_list` of `s`, its head bound to `found`, as the top level
     /// binds it if `toplevel` (so no module's `include`s consulted).
-    fn parse_type_list_found(&mut self, s: &Syntax, found: Option<DScope>, toplevel: bool) -> R<TyId> {
+    fn parse_type_list_found(&mut self, s: &Syn, found: Option<DScope>, toplevel: bool) -> R<TyId> {
         let items = self.items(s, "a type")?.to_vec();
-        if let Some(head) = items.first().and_then(|h| h.as_symbol()) {
+        if let Some(head) = items.first().and_then(|h| h.sym()) {
             match found {
-                Some(DScope::Abbrev { params, body }) => return self.expand_abbrev(s, head, &params, &body, &items[1..]),
+                Some(DScope::Abbrev { params, body }) => return self.expand_abbrev(s, head, &params, &body.get(), &items[1..]),
                 Some(DScope::Generative(g)) => return self.apply_generative(s, g, &items[1..]),
                 Some(DScope::Var(v, Kind::Arrow(_))) => {
                     let f = self.arena.ty(Ty::Var(v));
@@ -913,7 +919,7 @@ impl Checker {
         }
         // `((dlambda …) d …)` and `((select m f) d …)`: a function applied.
         if let Some(head) = items.first()
-            && head.as_proper_list().is_some()
+            && head.list().as_deref().is_some()
         {
             let f = self.parse_fun(head, None)?;
             return self.parse_app(s, f, &items[1..]);
@@ -927,8 +933,8 @@ impl Checker {
             // program's (`docs/research/native-conventions.md`).
             "subr" | "->" if items.len() > 3 && crate::specs::clause(self, items.last().expect("items")) => self.parse_type_subr_specified(s, &items),
             "subr" | "->" => self.parse_subr_form(s, &items, &[]),
-            "->*" => Err(FxError::at(s.span, ARROW_STAR_ONLY)),
-            "bool" => Err(FxError::at(s.span, "`(bool …)` is a procedure's result, and only that")),
+            "->*" => Err(FxError::at(s.span(), ARROW_STAR_ONLY)),
+            "bool" => Err(FxError::at(s.span(), "`(bool …)` is a procedure's result, and only that")),
             // `(proves (<= A B))`, or `(proves (poly (binder …) (<= A B)
             // (<= X Y) …))`: the type of a proof that `A ≤ B` (given each
             // `X ≤ Y`), a function from a coercion for each hypothesis and
@@ -966,27 +972,27 @@ impl Checker {
             "bloblet" => self.parse_type_bloblet(s, &items),
             // A flat sum with a key (`TODO.md` §77), so `define-type` may
             // name one.
-            "sumof" if items.get(1).is_some_and(|k| k.as_symbol().is_some()) => self.parse_flat(s),
+            "sumof" if items.get(1).is_some_and(|k| k.sym().is_some()) => self.parse_flat(s),
             // `(tupleof T1 T2 …)`, `(productof (1 T1) (2 T2) …)`.
             "tupleof" => {
-                let parts = items[1..].iter().enumerate().map(|(i, t)| Ok((self.interner.intern(&(i + 1).to_string()), self.parse_type(t)?))).collect::<R<Vec<_>>>()?;
+                let parts = items[1..].iter().enumerate().map(|(i, t)| Ok((self.interner.intern(&(i + 1).to_string()), self.parse_type_syn(t)?))).collect::<R<Vec<_>>>()?;
                 Ok(self.arena.ty(Ty::Product(parts)))
             }
             "productof" | "sumof" => self.parse_type_productof(&items),
             // `(moduleof (abs t type) … (desc d T) … (val x T) …)`: each
             // abstract type a binder, in scope in what follows it.
-            "moduleof" => self.parse_moduleof(s.span, &items[1..]),
+            "moduleof" => self.parse_moduleof(s.span(), &items[1..]),
             // `(select #%toplevel T)`: type `T` as the top level reads it,
             // whatever the form binds around it (a template's type, as it
             // expands: `typed-macros.md`, item 5); `(select #%fx T)`, as the
             // standard environment does.
-            "select" if matches!(items.get(1).and_then(|m| m.as_symbol()).map(|m| self.name(m)), Some("#%toplevel" | "#%fx")) => self.parse_type_select_qualified(s, &items),
+            "select" if matches!(items.get(1).and_then(|m| m.sym()).map(|m| self.name(m)), Some("#%toplevel" | "#%fx")) => self.parse_type_select_qualified(s, &items),
             // `(select m T)`, `T` a type, not a name: `T` read as a `with` of
             // module `m` reads types, over the standard environment's alone
             // (a file's macro's type, `m` the one value every load of the
             // file is: `typed-macros.md`, "Decided: macros come with a
             // file"), its `select`s resolved there.
-            "select" if matches!(&items[..], [_, m, t] if m.as_symbol().is_some() && t.as_symbol().is_none()) => self.parse_type_select_desc(s, &items),
+            "select" if matches!(&items[..], [_, m, t] if m.sym().is_some() && t.sym().is_none()) => self.parse_type_select_desc(s, &items),
             "select" => self.parse_type_select(s, &items),
             "arrayof" => self.parse_type_arrayof(s, &items),
             // `(narrayof type size region)`: an array of `size` elements.
@@ -1006,43 +1012,43 @@ impl Checker {
             "restrict" => self.restricted(s, &items),
             // `(modnames …)` names no types: only where a value supplies
             // them (`parse_the_form`).
-            "modnames" => Err(FxError::at(s.span, MODNAMES_WHERE)),
+            "modnames" => Err(FxError::at(s.span(), MODNAMES_WHERE)),
             "mark-key" => self.parse_type_mark_key(s, &items),
             // A name applied that is no description function: unbound, a
             // typo, or a type. In a module with `include`s, an unbound one
             // is the modules included's family, found when they are typed,
             // as a type's name is (`TODO.md` §69).
-            _ => match items.first().and_then(|h| h.as_symbol()) {
+            _ => match items.first().and_then(|h| h.sym()) {
                 Some(h) if !toplevel && self.include_scope > 0 && self.lookup_desc(h).is_none() => {
                     let inc = self.interner.intern("%include");
                     let f = self.arena.ty(Ty::Select(inc, h));
                     self.parse_app(s, f, &items[1..])
                 }
-                Some(h) => Err(FxError::at(s.span, format!("`{}` is not a description function", self.name(h)))),
-                None => Err(FxError::at(s.span, "expected a type")),
+                Some(h) => Err(FxError::at(s.span(), format!("`{}` is not a description function", self.name(h)))),
+                None => Err(FxError::at(s.span(), "expected a type")),
             },
         }
     }
 
     /// `(subr …)` or `(-> …)` with a specification after the result, of
     /// `parse_type_list_found`.
-    fn parse_type_subr_specified(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_subr_specified(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         // A specification after the result: the type without it,
         // then the clauses read against its parameters.
         let n = items.iter().rev().take_while(|c| crate::specs::clause(self, c)).count();
         let (plain, clauses) = items.split_at(items.len() - n);
         // (The parameters are second to last, in either form.)
         let params = plain[plain.len() - 2].clone();
-        let whole = Syntax { datum: Datum::List { items: plain.to_vec(), tail: None }, span: s.span };
+        let whole = Syn::lst(s.span(), plain.to_vec());
         let t = self.parse_subr_form(&whole, plain, clauses)?;
         self.specified(t, &params, clauses)
     }
 
     /// `(proves …)`, of `parse_type_list_found`.
-    fn parse_type_proves(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_proves(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let usage = "`(proves (<= type type))` or `(proves (poly ((name kind) …) (<= type type) (<= type type) …))`";
         let [_, prop] = &items[..] else {
-            return Err(FxError::at(s.span, usage));
+            return Err(FxError::at(s.span(), usage));
         };
         let depth = self.dscope.len();
         let r = self.parse_proves(prop, usage);
@@ -1051,26 +1057,26 @@ impl Checker {
     }
 
     /// `(poly …)`, of `parse_type_list_found`.
-    fn parse_type_poly(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_poly(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, binders, body] = &items[..] else {
-            return Err(FxError::at(s.span, "`(poly ((name kind) …) type)`"));
+            return Err(FxError::at(s.span(), "`(poly ((name kind) …) type)`"));
         };
         let depth = self.dscope.len();
         let binders = self.parse_binders(binders);
-        let body = binders.and_then(|b| Ok((b, self.parse_type(body)?)));
+        let body = binders.and_then(|b| Ok((b, self.parse_type_syn(body)?)));
         self.dscope.truncate(depth);
         let (binders, body) = body?;
         Ok(self.arena.ty(Ty::Poly { binders, body }))
     }
 
     /// `(nlist …)`, of `parse_type_list_found`.
-    fn parse_type_nlist(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_nlist(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let (t, size, place) = match &items[..] {
             [_, t, n] => (t, n, None),
             [_, t, n, p] => (t, n, Some(p)),
-            _ => return Err(FxError::at(s.span, "`(nlist type size)` or `(nlist type size place)`")),
+            _ => return Err(FxError::at(s.span(), "`(nlist type size)` or `(nlist type size place)`")),
         };
-        let elem = self.parse_type(t)?;
+        let elem = self.parse_type_syn(t)?;
         let size = self.parse_size(size)?;
         let region = match place {
             None => Region::Frozen(None, true),
@@ -1083,129 +1089,129 @@ impl Checker {
     }
 
     /// `(nat …)`, of `parse_type_list_found`.
-    fn parse_type_nat(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_nat(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, n] = &items[..] else {
-            return Err(FxError::at(s.span, "`(nat size)`"));
+            return Err(FxError::at(s.span(), "`(nat size)`"));
         };
         let size = self.parse_size(n)?;
         Ok(self.arena.ty(Ty::Nat(size)))
     }
 
     /// `(ref …)`, of `parse_type_list_found`.
-    fn parse_type_ref(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_ref(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, t, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(ref type region)`"));
+            return Err(FxError::at(s.span(), "`(ref type region)`"));
         };
-        let t = self.parse_type(t)?;
+        let t = self.parse_type_syn(t)?;
         let r = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::Ref(t, r)))
     }
 
     /// `(icell …)`, of `parse_type_list_found`.
-    fn parse_type_icell(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_icell(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, t, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(icell type region)`"));
+            return Err(FxError::at(s.span(), "`(icell type region)`"));
         };
-        let t = self.parse_type(t)?;
+        let t = self.parse_type_syn(t)?;
         let r = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::ICell(t, r)))
     }
 
     /// `(place …)`, of `parse_type_list_found`.
-    fn parse_type_place(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_place(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(place region)`"));
+            return Err(FxError::at(s.span(), "`(place region)`"));
         };
         let r = self.parse_place(r)?;
         Ok(self.arena.ty(Ty::Place(r)))
     }
 
     /// `(pairof …)`, of `parse_type_list_found`.
-    fn parse_type_pairof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_pairof(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, a, b, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(pairof type type region)`"));
+            return Err(FxError::at(s.span(), "`(pairof type type region)`"));
         };
-        let a = self.parse_type(a)?;
-        let b = self.parse_type(b)?;
+        let a = self.parse_type_syn(a)?;
+        let b = self.parse_type_syn(b)?;
         let r = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::Pair(a, b, r, false)))
     }
 
     /// `(oneof …)` / `(union …)`, of `parse_type_list_found`.
-    fn parse_type_oneof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_oneof(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         if items.len() < 3 {
-            return Err(FxError::at(s.span, "`(oneof type type …)`"));
+            return Err(FxError::at(s.span(), "`(oneof type type …)`"));
         }
         let mut members = Vec::new();
         for m in &items[1..] {
-            members.push(self.parse_type(m)?);
+            members.push(self.parse_type_syn(m)?);
         }
-        self.union_of(&members, s.span)
+        self.union_of(&members, s.span())
     }
 
     /// `(anyof …)`, of `parse_type_list_found`.
-    fn parse_type_anyof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_anyof(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         if items.len() < 3 {
-            return Err(FxError::at(s.span, "`(anyof type type …)`"));
+            return Err(FxError::at(s.span(), "`(anyof type type …)`"));
         }
         let mut members = Vec::new();
         for m in &items[1..] {
-            members.push(self.parse_type(m)?);
+            members.push(self.parse_type_syn(m)?);
         }
-        self.anyof_of(&members, s.span)
+        self.anyof_of(&members, s.span())
     }
 
     /// `(allof …)`, of `parse_type_list_found`.
-    fn parse_type_allof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_allof(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         if items.len() < 3 {
-            return Err(FxError::at(s.span, "`(allof (subr …) (subr …) …)`"));
+            return Err(FxError::at(s.span(), "`(allof (subr …) (subr …) …)`"));
         }
         let mut members = Vec::new();
         for m in &items[1..] {
-            let t = self.parse_type(m)?;
+            let t = self.parse_type_syn(m)?;
             let t = self.arena.resolve(t);
             match self.arena.get(t).clone() {
                 Ty::AllOf(ms) => members.extend(ms),
                 Ty::Subr { .. } | Ty::Product(_) => members.push(t),
                 _ => {
                     return Err(FxError::at(
-                        m.span,
+                        m.span(),
                         format!("a member of an `allof` is a `subr` type, or a product of them, and this is a {}", self.show_ty(t)),
                     ));
                 }
             }
         }
-        self.allof_of(&members, s.span)
+        self.allof_of(&members, s.span())
     }
 
     /// `(mu …)`, of `parse_type_list_found`.
-    fn parse_type_mu(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_mu(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, name, body] = &items[..] else {
-            return Err(FxError::at(s.span, "`(mu name type)`"));
+            return Err(FxError::at(s.span(), "`(mu name type)`"));
         };
-        let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+        let name = name.sym().ok_or_else(|| FxError::at(name.span(), "a name"))?;
         let depth = self.dscope.len();
         let slot = self.arena.ty(Ty::Link(None));
         self.dscope.push((name, DScope::Rec(slot)));
-        let t = self.parse_type(body);
+        let t = self.parse_type_syn(body);
         self.dscope.truncate(depth);
         self.arena.set_link(slot, t?);
-        self.grounded(slot, s.span)?;
+        self.grounded(slot, s.span())?;
         Ok(slot)
     }
 
     /// `(listof …)`, of `parse_type_list_found`.
-    fn parse_type_listof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_listof(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         // FX-87's `listof`: a pair whose tail is the list itself, or
         // the empty list, `nil`. Without a region, `acyclic`
         // (`TODO.md` §198).
         let (t, r) = match &items[..] {
             [_, t] => {
-                let acyclic = Syntax::symbol(s.span, self.interner.intern("acyclic"));
-                (self.parse_type(t)?, self.parse_region(&acyclic)?)
+                let acyclic = Syn::named(s.span(), "acyclic", &mut self.interner);
+                (self.parse_type_syn(t)?, self.parse_region(&acyclic)?)
             }
-            [_, t, r] => (self.parse_type(t)?, self.parse_region(r)?),
-            _ => return Err(FxError::at(s.span, "`(listof type [region])`")),
+            [_, t, r] => (self.parse_type_syn(t)?, self.parse_region(r)?),
+            _ => return Err(FxError::at(s.span(), "`(listof type [region])`")),
         };
         let slot = self.arena.ty(Ty::Link(None));
         let pair = self.arena.ty(Ty::Pair(t, slot, r, true));
@@ -1214,104 +1220,104 @@ impl Checker {
     }
 
     /// `(prompt-tag …)`, of `parse_type_list_found`.
-    fn parse_type_prompt_tag(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_prompt_tag(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, a, h, d, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(prompt-tag answer payload effect region)`"));
+            return Err(FxError::at(s.span(), "`(prompt-tag answer payload effect region)`"));
         };
-        let answer = self.parse_type(a)?;
-        let payload = self.parse_type(h)?;
+        let answer = self.parse_type_syn(a)?;
+        let payload = self.parse_type_syn(h)?;
         let effect = self.parse_effect(d)?;
         let region = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::PromptTag { answer, payload, effect, region }))
     }
 
     /// `(composable …)` / `(oneshot …)`, of `parse_type_list_found`.
-    fn parse_type_composable(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_composable(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let once = self.head(&items) == Some("oneshot");
         let [_, t, a, d, r] = &items[..] else {
             let head = if once { "oneshot" } else { "composable" };
-            return Err(FxError::at(s.span, format!("`({head} argument answer effect region)`")));
+            return Err(FxError::at(s.span(), format!("`({head} argument answer effect region)`")));
         };
-        let arg = self.parse_type(t)?;
-        let answer = self.parse_type(a)?;
+        let arg = self.parse_type_syn(t)?;
+        let answer = self.parse_type_syn(a)?;
         let effect = self.parse_effect(d)?;
         let region = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::Composable { arg, answer, effect, region, once }))
     }
 
     /// `(bloblet …)`, of `parse_type_list_found`.
-    fn parse_type_bloblet(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_bloblet(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, fields, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(bloblet (fields type …) region)`, or `(frozen type …)`"));
+            return Err(FxError::at(s.span(), "`(bloblet (fields type …) region)`, or `(frozen type …)`"));
         };
         let parts = self.items(fields, "`(fields type …)`")?.to_vec();
-        let frozen = match parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) {
+        let frozen = match parts.first().and_then(|h| h.sym()).map(|h| self.name(h)) {
             Some("fields") => false,
             Some("frozen") => true,
-            _ => return Err(FxError::at(fields.span, "`(fields type …)` or `(frozen type …)`")),
+            _ => return Err(FxError::at(fields.span(), "`(fields type …)` or `(frozen type …)`")),
         };
-        let fields = parts[1..].iter().map(|t| self.parse_type(t)).collect::<R<Vec<_>>>()?;
+        let fields = parts[1..].iter().map(|t| self.parse_type_syn(t)).collect::<R<Vec<_>>>()?;
         let region = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::Bloblet { fields, frozen, region }))
     }
 
     /// `(productof …)` / `(sumof …)`, of `parse_type_list_found`.
-    fn parse_type_productof(&mut self, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_productof(&mut self, items: &[Syn]) -> R<TyId> {
         let mut parts = Vec::new();
         for p in &items[1..] {
             let pair = self.items(p, "`(label type)`")?.to_vec();
             let [label, t] = &pair[..] else {
-                return Err(FxError::at(p.span, "`(label type)`"));
+                return Err(FxError::at(p.span(), "`(label type)`"));
             };
             let label = self.label(label)?;
             if parts.iter().any(|(l, _)| *l == label) {
-                return Err(FxError::at(p.span, format!("`{}` appears twice", self.name(label))));
+                return Err(FxError::at(p.span(), format!("`{}` appears twice", self.name(label))));
             }
-            parts.push((label, self.parse_type(t)?));
+            parts.push((label, self.parse_type_syn(t)?));
         }
         let product = self.head(&items) == Some("productof");
         Ok(self.arena.ty(if product { Ty::Product(parts) } else { Ty::Sum(parts) }))
     }
 
     /// `(select #%toplevel t)` or `(select #%fx t)`, of `parse_type_list_found`.
-    fn parse_type_select_qualified(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_select_qualified(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, m, t] = &items[..] else {
-            return Err(FxError::at(s.span, "`(select #%toplevel type)` or `(select #%fx type)`"));
+            return Err(FxError::at(s.span(), "`(select #%toplevel type)` or `(select #%fx type)`"));
         };
         // The modules its `select`s name found here too, not where the
         // type is checked (`resolve_selects`), as the top level has them.
-        let standard = m.as_symbol().is_some_and(|m| self.name(m) == "#%fx");
+        let standard = m.sym().is_some_and(|m| self.name(m) == "#%fx");
         let outer = self.hidden.replace(self.toplevel_hidden(standard));
-        let r = self.parse_type(t).and_then(|ty| self.resolve_selects(ty, s.span));
+        let r = self.parse_type_syn(t).and_then(|ty| self.resolve_selects(ty, s.span()));
         self.hidden = outer;
         r
     }
 
     /// `(select m t)`, `t` a description, not a name, of
     /// `parse_type_list_found`.
-    fn parse_type_select_desc(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
-        let (m, t) = (items[1].as_symbol().expect("matched"), &items[2]);
+    fn parse_type_select_desc(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
+        let (m, t) = (items[1].sym().expect("matched"), &items[2]);
         let outer = self.hidden.replace(self.toplevel_hidden(true));
-        let r = self.with_types_of(m, None, |c| c.parse_type(t)).and_then(|(ty, _)| self.resolve_selects(ty, s.span));
+        let r = self.with_types_of(m, None, |c| c.parse_type_syn(t)).and_then(|(ty, _)| self.resolve_selects(ty, s.span()));
         self.hidden = outer;
         r
     }
 
     /// `(select m t)`, of `parse_type_list_found`.
-    fn parse_type_select(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_select(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, m, n] = &items[..] else {
-            return Err(FxError::at(s.span, "`(select module name)`"));
+            return Err(FxError::at(s.span(), "`(select module name)`"));
         };
-        let (Some(m), Some(n)) = (m.as_symbol(), n.as_symbol()) else {
-            return Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's"));
+        let (Some(m), Some(n)) = (m.sym(), n.sym()) else {
+            return Err(FxError::at(s.span(), "`(select module name)`: a module's name, and a component's"));
         };
-        self.select_of(m, n, s.span)
+        self.select_of(m, n, s.span())
     }
 
     /// `(arrayof …)`, of `parse_type_list_found`.
-    fn parse_type_arrayof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_arrayof(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, t, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(arrayof type region)`"));
+            return Err(FxError::at(s.span(), "`(arrayof type region)`"));
         };
         // With a length, a literal or a size (`finite`, a size
         // variable, a sum of sizes), a flat array (`TODO.md` §77), so
@@ -1319,47 +1325,47 @@ impl Checker {
         if self.size_written(r) {
             return self.parse_flat(s);
         }
-        let t = self.parse_type(t)?;
+        let t = self.parse_type_syn(t)?;
         let r = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::Array(t, Size::Finite, r)))
     }
 
     /// `(narrayof …)`, of `parse_type_list_found`.
-    fn parse_type_narrayof(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_narrayof(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, t, n, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(narrayof type size region)`"));
+            return Err(FxError::at(s.span(), "`(narrayof type size region)`"));
         };
-        let t = self.parse_type(t)?;
+        let t = self.parse_type_syn(t)?;
         let n = self.parse_size(n)?;
         let r = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::Array(t, n, r)))
     }
 
     /// `(load-moduleof …)` / `(load-input-moduleof …)`, of `parse_type_list_found`.
-    fn parse_type_load_moduleof(&mut self, s: &Syntax, items: &[Syntax], loader: &str) -> R<TyId> {
+    fn parse_type_load_moduleof(&mut self, s: &Syn, items: &[Syn], loader: &str) -> R<TyId> {
         let input = loader == "load-input-moduleof";
         let usage = format!("`({loader} \"file\" argument …)`");
-        let Some(Datum::Str(path)) = items.get(1).map(|p| &p.datum) else {
-            return Err(FxError::at(s.span, usage));
+        let Some(V::Str(path)) = items.get(1).map(|p| p.view()) else {
+            return Err(FxError::at(s.span(), usage));
         };
         let path = path.clone();
-        let name = self.load_name(s.span, &path, input)?;
+        let name = self.load_name(s.span(), &path, input)?;
         let Some(made) = self.lookup(name) else {
-            return Err(FxError::at(s.span, format!("`{path}` is not loaded here")));
+            return Err(FxError::at(s.span(), format!("`{path}` is not loaded here")));
         };
         // A file of module parameters is loaded as a `load-input`
         // file is (`modules_made`), its global's key so.
         let input = input || self.name(name).starts_with("%shared:input:");
         let made = if input { self.module_val(made, "input").expect("a `load-input` file's module gives `input`") } else { made };
-        self.type_made(made, &items[2..], s.span, &path)
+        self.type_made(made, &items[2..], s.span(), &path)
     }
 
     /// `(mark-key …)`, of `parse_type_list_found`.
-    fn parse_type_mark_key(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_type_mark_key(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, t, r] = &items[..] else {
-            return Err(FxError::at(s.span, "`(mark-key type region)`"));
+            return Err(FxError::at(s.span(), "`(mark-key type region)`"));
         };
-        let t = self.parse_type(t)?;
+        let t = self.parse_type_syn(t)?;
         let r = self.parse_region(r)?;
         Ok(self.arena.ty(Ty::MarkKey(t, r)))
     }
@@ -1368,9 +1374,9 @@ impl Checker {
     /// `(dletrec ((name type) …) type)`: recursive types, as cycles in the
     /// arena. Each name gets a forwarding slot before any body is parsed, so
     /// the bodies — and each other — can refer to it.
-    fn parse_dletrec(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn parse_dletrec(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, bindings, body] = items else {
-            return Err(FxError::at(s.span, "`(dletrec ((name type) …) type)`"));
+            return Err(FxError::at(s.span(), "`(dletrec ((name type) …) type)`"));
         };
         let depth = self.dscope.len();
         let result = (|| {
@@ -1378,24 +1384,24 @@ impl Checker {
             for b in self.items(bindings, "dletrec bindings")?.to_vec() {
                 let pair = self.items(&b, "a dletrec binding")?.to_vec();
                 let [name, def] = &pair[..] else {
-                    return Err(FxError::at(b.span, "a dletrec binding is `(name type)`"));
+                    return Err(FxError::at(b.span(), "a dletrec binding is `(name type)`"));
                 };
-                let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+                let name = name.sym().ok_or_else(|| FxError::at(name.span(), "a name"))?;
                 let slot = self.arena.ty(Ty::Link(None));
                 self.dscope.push((name, DScope::Rec(slot)));
                 slots.push((slot, def.clone()));
             }
             for (slot, def) in &slots {
-                let t = self.parse_type(def)?;
+                let t = self.parse_type_syn(def)?;
                 self.arena.set_link(*slot, t);
             }
             for (slot, _) in &slots {
-                self.grounded(*slot, s.span)?;
+                self.grounded(*slot, s.span())?;
             }
             for (slot, _) in &slots {
-                self.no_knot(*slot, s.span)?;
+                self.no_knot(*slot, s.span())?;
             }
-            self.parse_type(body)
+            self.parse_type_syn(body)
         })();
         self.dscope.truncate(depth);
         result
@@ -1495,17 +1501,17 @@ impl Checker {
 
     /// `(define-type (name (param kind) …) type)`: bind a parametric
     /// abbreviation. Nothing is parsed until it is used.
-    pub(crate) fn define_type_family(&mut self, name: Sym, params: &Syntax, body: &Syntax) -> R<()> {
+    pub(crate) fn define_type_family(&mut self, name: Sym, params: &Syn, body: &Syn) -> R<()> {
         let mut ps = Vec::new();
         for p in self.items(params, "`(name kind)`")?.to_vec() {
             let pair = self.items(&p, "`(name kind)`")?.to_vec();
             let [n, k] = &pair[..] else {
-                return Err(FxError::at(p.span, "a parameter is `(name kind)`"));
+                return Err(FxError::at(p.span(), "a parameter is `(name kind)`"));
             };
-            let n = n.as_symbol().ok_or_else(|| FxError::at(n.span, "a parameter's name"))?;
+            let n = n.sym().ok_or_else(|| FxError::at(n.span(), "a parameter's name"))?;
             ps.push((n, self.parse_kind(k)?));
         }
-        self.dscope.push((name, DScope::Abbrev { params: ps, body: body.clone() }));
+        self.dscope.push((name, DScope::Abbrev { params: ps, body: crate::heap_syn::Kept::new(*body) }));
         Ok(())
     }
 
@@ -1515,13 +1521,13 @@ impl Checker {
     /// a knot, as `dletrec` ties. One with others expands again, so a
     /// family whose descriptions grow as it recurses never ends, and is
     /// stopped.
-    fn expand_abbrev(&mut self, s: &Syntax, name: Sym, params: &[(Sym, Kind)], body: &Syntax, args: &[Syntax]) -> R<TyId> {
+    fn expand_abbrev(&mut self, s: &Syn, name: Sym, params: &[(Sym, Kind)], body: &Syn, args: &[Syn]) -> R<TyId> {
         if args.len() != params.len() {
-            return Err(FxError::at(s.span, format!("`{}` takes {} description(s), and has {}", self.name(name), params.len(), args.len())));
+            return Err(FxError::at(s.span(), format!("`{}` takes {} description(s), and has {}", self.name(name), params.len(), args.len())));
         }
         if self.expanding > 64 {
             return Err(FxError::at(
-                s.span,
+                s.span(),
                 format!("`{}` expands without end: a type family may mention itself only with the same descriptions", self.name(name)),
             ));
         }
@@ -1530,7 +1536,7 @@ impl Checker {
         for ((p, k), a) in params.iter().zip(args) {
             let (d, arg) = match k {
                 Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat => {
-                    let t = if *k == Kind::Flat { self.parse_flat(a)? } else { self.parse_type(a)? };
+                    let t = if *k == Kind::Flat { self.parse_flat(a)? } else { self.parse_type_syn(a)? };
                     (DScope::Rec(t), crate::parse::FamilyArg::Ty(self.arena.resolve(t)))
                 }
                 Kind::Region | Kind::Place => {
@@ -1565,13 +1571,13 @@ impl Checker {
         let depth = self.dscope.len();
         self.dscope.extend(bound);
         self.expanding += 1;
-        let r = self.parse_type(body);
+        let r = self.parse_type_syn(body);
         self.expanding -= 1;
         self.dscope.truncate(depth);
         self.knots.pop();
         let t = r?;
         self.arena.set_link(slot, t);
-        self.grounded(slot, s.span)?;
+        self.grounded(slot, s.span())?;
         Ok(slot)
     }
 
@@ -1579,31 +1585,31 @@ impl Checker {
     /// variable, `(+ size …)`, or `(- size k)`.
     /// Whether `s` is written as a size, not a region: a natural literal,
     /// `finite`, a size variable or value, or `(+ …)` or `(- …)`.
-    pub(crate) fn size_written(&self, s: &Syntax) -> bool {
+    pub(crate) fn size_written(&self, s: &Syn) -> bool {
         if self.literal_int(s).is_some_and(|k| k >= 0) {
             return true;
         }
-        if let Some(x) = s.as_symbol() {
+        if let Some(x) = s.sym() {
             return self.name(x) == "finite" || matches!(self.lookup_desc(x), Some(DScope::Var(_, Kind::Size) | DScope::SizeVal(_)));
         }
-        matches!(s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).map(|h| self.name(h)), Some("+" | "-"))
+        matches!(s.list().as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).map(|h| self.name(h)), Some("+" | "-"))
     }
 
-    pub(crate) fn parse_size(&mut self, s: &Syntax) -> R<Size> {
+    pub(crate) fn parse_size(&mut self, s: &Syn) -> R<Size> {
         let usage = "a size is a natural number, `finite`, a size variable, `(+ size …)` or `(- size k)`";
         if let Some(n) = self.literal_int(s)
             && n >= 0
         {
             return Ok(Size::lit(n));
         }
-        if let Some(x) = s.as_symbol() {
+        if let Some(x) = s.sym() {
             if self.name(x) == "finite" {
                 return Ok(Size::Finite);
             }
             return match self.lookup_desc(x) {
                 Some(DScope::Var(v, Kind::Size)) => Ok(Size::var(v)),
                 Some(DScope::SizeVal(z)) => Ok(z),
-                _ => Err(FxError::at(s.span, usage)),
+                _ => Err(FxError::at(s.span(), usage)),
             };
         }
         let items = self.items(s, "a size")?.to_vec();
@@ -1620,28 +1626,28 @@ impl Checker {
                 let a = self.parse_size(a)?;
                 match self.literal_int(k) {
                     Some(k) if k >= 0 => Ok(a.plus(-k)),
-                    _ => Err(FxError::at(k.span, usage)),
+                    _ => Err(FxError::at(k.span(), usage)),
                 }
             }
-            _ => Err(FxError::at(s.span, usage)),
+            _ => Err(FxError::at(s.span(), usage)),
         }
     }
 
     /// What `(proves prop)` states: its type, with the lemma kept pending.
-    fn parse_proves(&mut self, prop: &Syntax, usage: &str) -> R<TyId> {
+    fn parse_proves(&mut self, prop: &Syn, usage: &str) -> R<TyId> {
         let items = self.items(prop, "a proposition")?.to_vec();
         let (binders, conclusion, hyps) = match self.head(&items).unwrap_or("") {
             "poly" => match &items[..] {
                 [_, bs, c, hs @ ..] => (self.parse_binders(bs)?, c.clone(), hs.to_vec()),
-                _ => return Err(FxError::at(prop.span, usage)),
+                _ => return Err(FxError::at(prop.span(), usage)),
             },
             "<=" => (Vec::new(), prop.clone(), Vec::new()),
-            _ => return Err(FxError::at(prop.span, usage)),
+            _ => return Err(FxError::at(prop.span(), usage)),
         };
-        let le = |c: &mut Checker, s: &Syntax| -> R<(TyId, TyId)> {
+        let le = |c: &mut Checker, s: &Syn| -> R<(TyId, TyId)> {
             match c.items(s, "a proposition")?.to_vec().as_slice() {
-                [h, a, b] if h.as_symbol().is_some_and(|h| c.name(h) == "<=") => Ok((c.parse_type(a)?, c.parse_type(b)?)),
-                _ => Err(FxError::at(s.span, "a proposition is `(<= type type)`")),
+                [h, a, b] if h.sym().is_some_and(|h| c.name(h) == "<=") => Ok((c.parse_type_syn(a)?, c.parse_type_syn(b)?)),
+                _ => Err(FxError::at(s.span(), "a proposition is `(<= type type)`")),
             }
         };
         let (lhs, rhs) = le(self, &conclusion)?;
@@ -1660,16 +1666,16 @@ impl Checker {
     }
 
     /// `(name d …)` for the `g`th generative type: a node, never expanded.
-    fn apply_generative(&mut self, s: &Syntax, g: u32, args: &[Syntax]) -> R<TyId> {
+    fn apply_generative(&mut self, s: &Syn, g: u32, args: &[Syn]) -> R<TyId> {
         let params = self.generatives[g as usize].params.clone();
         if args.len() != params.len() {
             let name = self.name(self.generatives[g as usize].name).to_string();
-            return Err(FxError::at(s.span, format!("`{name}` takes {} description(s), and has {}", params.len(), args.len())));
+            return Err(FxError::at(s.span(), format!("`{name}` takes {} description(s), and has {}", params.len(), args.len())));
         }
         let mut ds = Vec::new();
         for ((_, k), a) in params.iter().zip(args) {
             ds.push(match k {
-                Kind::Type | Kind::Data | Kind::Sendable => D::Type(self.parse_type(a)?),
+                Kind::Type | Kind::Data | Kind::Sendable => D::Type(self.parse_type_syn(a)?),
                 Kind::Flat => D::Type(self.parse_flat(a)?),
                 Kind::Region => D::Region(self.parse_region(a)?),
                 Kind::Place => D::Region(self.parse_place(a)?),
@@ -1681,7 +1687,7 @@ impl Checker {
         }
         let t = self.arena.ty(Ty::Named { which: g, args: ds });
         // What it holds may keep a procedure that reaches itself.
-        self.no_knot(t, s.span)?;
+        self.no_knot(t, s.span())?;
         Ok(t)
     }
 
@@ -1690,37 +1696,38 @@ impl Checker {
     /// itself, whose values are `rep`'s, converted by `up-name` and
     /// `down-name`. A parameter is invariant unless marked `+` (covariant)
     /// or `-` (contravariant), which `rep` must bear out.
-    pub(crate) fn define_generative(&mut self, head: &Syntax, rep: &Syntax) -> R<Sym> {
-        let (name, params) = match head.as_proper_list() {
+    pub(crate) fn define_generative(&mut self, head: &Syn, rep: &Syn) -> R<Sym> {
+        let listed = head.list();
+        let (name, params) = match listed.as_deref() {
             Some([n, ps @ ..]) => (n, ps.to_vec()),
             _ => (head, Vec::new()),
         };
-        let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a generative type's name"))?;
+        let name = name.sym().ok_or_else(|| FxError::at(name.span(), "a generative type's name"))?;
         let depth = self.dscope.len();
         let mut binders = Vec::new();
         let mut declared = Vec::new();
         for p in &params {
-            let (n, k, v) = match self.items(p, "a parameter")? {
+            let (n, k, v) = match self.items(p, "a parameter")?.as_slice() {
                 [n, k] => (n.clone(), k.clone(), Variance::Inv),
                 [n, k, v] => {
-                    let v = match v.as_symbol().map(|x| self.name(x)) {
+                    let v = match v.sym().map(|x| self.name(x)) {
                         Some("+") => Variance::Co,
                         Some("-") => Variance::Contra,
-                        _ => return Err(FxError::at(v.span, "a parameter's variance is `+` or `-`")),
+                        _ => return Err(FxError::at(v.span(), "a parameter's variance is `+` or `-`")),
                     };
                     (n.clone(), k.clone(), v)
                 }
-                _ => return Err(FxError::at(p.span, "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`")),
+                _ => return Err(FxError::at(p.span(), "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`")),
             };
-            let n = n.as_symbol().ok_or_else(|| FxError::at(n.span, "a parameter's name"))?;
+            let n = n.sym().ok_or_else(|| FxError::at(n.span(), "a parameter's name"))?;
             let kind = self.parse_kind(&k)?;
             if v != Variance::Inv && matches!(kind, Kind::Region | Kind::Place) {
                 self.dscope.truncate(depth);
-                return Err(FxError::at(p.span, "a region or place parameter is invariant: it names where data is"));
+                return Err(FxError::at(p.span(), "a region or place parameter is invariant: it names where data is"));
             }
             if v != Variance::Inv && matches!(kind, Kind::Arrow(_)) {
                 self.dscope.truncate(depth);
-                return Err(FxError::at(p.span, "a description function parameter is invariant"));
+                return Err(FxError::at(p.span(), "a description function parameter is invariant"));
             }
             let dv = self.arena.dvar_of(n, kind);
             self.dscope.push((n, DScope::Var(dv, kind)));
@@ -1732,11 +1739,11 @@ impl Checker {
         self.generatives.push(crate::check::Generative { name, params: binders, variance: declared, rep: slot });
         // In scope in its own representation: recursion through the name.
         self.dscope.push((name, DScope::Generative(g)));
-        let r = self.parse_type(rep);
+        let r = self.parse_type_syn(rep);
         self.dscope.truncate(depth);
         let r = r?;
         self.arena.set_link(slot, r);
-        self.check_variance(g, rep.span)?;
+        self.check_variance(g, rep.span())?;
         self.dscope.push((name, DScope::Generative(g)));
         Ok(name)
     }
@@ -1744,12 +1751,12 @@ impl Checker {
     /// `(define-type name type)`: `name` stands for the type from here on,
     /// and may appear in its own definition — a one-binding `dletrec` that
     /// stays in scope.
-    pub(crate) fn define_type(&mut self, name: Sym, def: &Syntax, span: fixpt_read::Span) -> R<TyId> {
+    pub(crate) fn define_type(&mut self, name: Sym, def: &Syn, span: fixpt_read::Span) -> R<TyId> {
         // Declared ahead: its slot is in scope already; fill it, and check
         // it grounded once every slot is filled.
         if let Some(i) = self.ahead.iter().position(|(n, _)| *n == name) {
             let (_, slot) = self.ahead.remove(i);
-            let t = self.parse_type(def)?;
+            let t = self.parse_type_syn(def)?;
             self.arena.set_link(slot, t);
             self.ahead_filled.push((slot, span));
             return Ok(slot);
@@ -1757,7 +1764,7 @@ impl Checker {
         let slot = self.arena.ty(Ty::Link(None));
         let depth = self.dscope.len();
         self.dscope.push((name, DScope::Rec(slot)));
-        let r = self.parse_type(def).and_then(|t| {
+        let r = self.parse_type_syn(def).and_then(|t| {
             self.arena.set_link(slot, t);
             self.grounded(slot, span)
         });
@@ -1781,12 +1788,12 @@ impl Checker {
 
     /// Whether `s` is written as an effect: `pure`, `spin`, a name bound
     /// to one, or one of `parse_effect`'s atoms or `maxeff`.
-    pub(crate) fn effect_shaped(&self, s: &Syntax) -> bool {
-        if let Some(sym) = s.as_symbol() {
+    pub(crate) fn effect_shaped(&self, s: &Syn) -> bool {
+        if let Some(sym) = s.sym() {
             return matches!(self.name(sym), "pure" | "spin" | "nondet" | "stage") || matches!(self.lookup_desc(sym), Some(DScope::Eff(_) | DScope::Var(_, Kind::Effect)));
         }
         matches!(
-            self.head(self.items(s, "").unwrap_or(&[])),
+            self.head(&self.items(s, "").unwrap_or_default()),
             Some("read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "init" | "send" | "receive" | "io" | "maxeff")
         )
     }
@@ -1795,7 +1802,7 @@ impl Checker {
     /// region, `pure` and `(read …)`, `(maxeff …)` and the like are effects —
     /// or, for a bare name, in how the name is bound; the checker confirms it
     /// against the binder when it sees the `poly` being projected.
-    pub(crate) fn parse_d(&mut self, s: &Syntax) -> R<D> {
+    pub(crate) fn parse_d(&mut self, s: &Syn) -> R<D> {
         if let Some(r) = self.read_qualified(s, Self::parse_d) {
             return r;
         }
@@ -1803,7 +1810,7 @@ impl Checker {
         if self.literal_int(s).is_some() {
             return Ok(D::Size(self.parse_size(s)?));
         }
-        if let Some(sym) = s.as_symbol() {
+        if let Some(sym) = s.sym() {
             let name = self.name(sym);
             if name.starts_with('@') {
                 return Ok(D::Region(self.region_constant(sym)));
@@ -1846,10 +1853,10 @@ impl Checker {
                 Some(DScope::Var(v, Kind::Conv)) => Ok(D::Conv(Conv::Var(v))),
                 Some(DScope::ConvVal(c)) => Ok(D::Conv(c)),
                 _ if matches!(name, "cellular" | "native" | "fx") => Ok(D::Conv(self.parse_conv(s)?)),
-                _ => Ok(D::Type(self.parse_type(s)?)),
+                _ => Ok(D::Type(self.parse_type_syn(s)?)),
             };
         }
-        let items = self.items(s, "a description")?;
+        let items = &self.items(s, "a description")?[..];
         let head = self.head(items).unwrap_or("").to_string();
         match head.as_str() {
             "dlambda" => Ok(D::Fun(self.parse_fun(s, None)?)),
@@ -1863,7 +1870,7 @@ impl Checker {
             // `(e d …)`, `e` a description function to an effect, applied:
             // an effect, as in an effect (`effect_app`), not a type.
             _ if self.names_effect_fun(&items) => Ok(D::Effect(self.parse_effect(s)?)),
-            _ => Ok(D::Type(self.parse_type(s)?)),
+            _ => Ok(D::Type(self.parse_type_syn(s)?)),
         }
     }
 
@@ -1918,38 +1925,38 @@ impl Checker {
         op(self, "+", vec![scaled, lo])
     }
 
-    pub fn parse_exp(&mut self, s: &Syntax) -> R<ExpId> {
-        let span = s.span;
+    pub(crate) fn parse_exp_syn(&mut self, s: &Syn) -> R<ExpId> {
+        let span = s.span();
         crate::debug_stack::enter("parse", span);
-        match &s.datum {
-            Datum::Number(fixpt_read::Num::Int(n)) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => return Ok(self.arena.exp(span, Exp::Int(*n))),
+        match &s.view() {
+            V::Number(fixpt_read::Num::Int(n)) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => return Ok(self.arena.exp(span, Exp::Int(*n))),
             // An integer literal past a fixnum: arithmetic on fixnums, which
             // every path does, bignums included (PLAN.md Q2).
-            Datum::Number(fixpt_read::Num::Int(n)) => {
+            V::Number(fixpt_read::Num::Int(n)) => {
                 let digits = (*n as i128).unsigned_abs().to_string();
                 return Ok(self.big_literal(*n < 0, &digits, 10, span));
             }
-            Datum::Number(fixpt_read::Num::Big { negative, digits, radix }) => return Ok(self.big_literal(*negative, digits, *radix, span)),
-            Datum::Str(t) => return Ok(self.arena.exp(span, Exp::Str(t.clone()))),
-            Datum::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
-            Datum::Char(c) => return Ok(self.arena.exp(span, Exp::Char(*c))),
-            Datum::Number(fixpt_read::Num::Real(x)) => return Ok(self.arena.exp(span, Exp::Float(*x))),
+            V::Number(fixpt_read::Num::Big { negative, digits, radix }) => return Ok(self.big_literal(*negative, digits, *radix, span)),
+            V::Str(t) => return Ok(self.arena.exp(span, Exp::Str(t.clone()))),
+            V::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
+            V::Char(c) => return Ok(self.arena.exp(span, Exp::Char(*c))),
+            V::Number(fixpt_read::Num::Real(x)) => return Ok(self.arena.exp(span, Exp::Float(*x))),
             // `#:name`, a keyword, evaluates to itself: the standard
             // `symbol->keyword` of the name, interned, so one object each
             // time (as the parser written in FX-26 rewrites it).
-            Datum::Keyword(sym) => {
+            V::Keyword(sym) => {
                 let fun = self.standard_ref_at(span, "symbol->keyword");
                 let name = self.arena.exp(span, Exp::Symbol(*sym));
                 return Ok(self.arena.exp(span, Exp::App { fun, args: vec![name] }));
             }
             // `#%toplevel:x`, `(with #%toplevel x)`: the top level's `x`.
-            Datum::Symbol(sym) if self.is_toplevel_qualified(*sym) => {
+            V::Symbol(sym) if self.is_toplevel_qualified(*sym) => {
                 let n = self.toplevel_unqualified(*sym).expect("qualified");
                 let (with, top) = (self.interner.intern("with"), self.interner.intern("#%toplevel"));
-                let whole = Syntax::list(span, vec![Syntax::symbol(span, with), Syntax::symbol(span, top), Syntax::symbol(span, n)]);
-                return self.parse_exp(&whole);
+                let whole = Syn::lst(span, vec![Syn::symbol(span, with, &self.interner), Syn::symbol(span, top, &self.interner), Syn::symbol(span, n, &self.interner)]);
+                return self.parse_exp_syn(&whole);
             }
-            Datum::Symbol(sym) => {
+            V::Symbol(sym) => {
                 // `#u` reads as a symbol; `#t` and `#f` did too in FX-87's
                 // profile, which FX-26 used to be read with.
                 let e = match self.name(*sym) {
@@ -1961,23 +1968,23 @@ impl Checker {
                 return Ok(self.arena.exp(span, e));
             }
             // `()` none, as the FX-26 parser says.
-            Datum::List { items, .. } if !items.is_empty() => {}
+            V::List { items, .. } if !items.is_empty() => {}
             _ => return Err(FxError::at(span, "not an expression in the FX-26 kernel")),
         }
-        let items = self.items(s, "an expression")?;
+        let items = &self.items(s, "an expression")?[..];
         // `(#:t e …)`, a sum constructed (`docs/research/datatype-macro.md`,
         // "Keyword constructors: decided"): `(sum #:t #u)` of none, `(sum
         // #:t e)` of one, `(sum #:t (tuple e …))` of more. A keyword
         // anywhere else is a keyword, which constructs nothing.
-        if matches!(items[0].datum, Datum::Keyword(_)) {
-            let sym = |p: &mut Self, n: &str| Syntax::symbol(span, p.interner.intern(n));
+        if matches!(items[0].view(), V::Keyword(_)) {
+            let sym = |p: &mut Self, n: &str| Syn::named(span, n, &mut p.interner);
             let payload = match &items[1..] {
                 [] => sym(self, "#u"),
                 [e] => e.clone(),
-                es => Syntax::list(span, std::iter::once(sym(self, "tuple")).chain(es.iter().cloned()).collect()),
+                es => Syn::lst(span, std::iter::once(sym(self, "tuple")).chain(es.iter().cloned()).collect()),
             };
-            let made = Syntax::list(span, vec![sym(self, "sum"), items[0].clone(), payload]);
-            return self.parse_exp(&made);
+            let made = Syn::lst(span, vec![sym(self, "sum"), items[0].clone(), payload]);
+            return self.parse_exp_syn(&made);
         }
         // Each form's own function, out of this one: every level of nesting
         // has this frame, which a debug build makes room in for every local
@@ -2026,7 +2033,7 @@ impl Checker {
             // the runtime has it.
             "syscall-available?" => {
                 let asked = self.syscall_available_form(s, items)?;
-                self.parse_exp(&asked)
+                self.parse_exp_syn(&asked)
             }
             // Processes and `par` (`processes.rs`).
             head @ ("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "attempt" | "attempt-within" | "pselect" | "icell-get" | "icell-put!") => {
@@ -2077,7 +2084,7 @@ impl Checker {
             "product" => self.parse_product_form(span, items),
             // `(tuple e1 e2 …)`, `(product (1 e1) (2 e2) …)`.
             "tuple" => {
-                let fields = items[1..].iter().enumerate().map(|(i, e)| Ok((self.interner.intern(&(i + 1).to_string()), self.parse_exp(e)?))).collect::<R<Vec<_>>>()?;
+                let fields = items[1..].iter().enumerate().map(|(i, e)| Ok((self.interner.intern(&(i + 1).to_string()), self.parse_exp_syn(e)?))).collect::<R<Vec<_>>>()?;
                 Ok(self.arena.exp(span, Exp::Product(fields)))
             }
             "extract" => self.parse_extract_form(span, items),
@@ -2096,7 +2103,7 @@ impl Checker {
     }
 
     /// `(lambda …)`, of `parse_exp`.
-    fn parse_lambda_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_lambda_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, params, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(lambda ((name type) …) body …)`"));
         };
@@ -2104,27 +2111,28 @@ impl Checker {
     }
 
     /// `(vlambda …)`, of `parse_exp`.
-    fn parse_vlambda_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_vlambda_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, param, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(vlambda name body …)` or `(vlambda (name type) body …)`"));
         };
-        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
-        let param = match param.as_proper_list() {
+        let sym = |p: &mut Self, s: &str| Syn::named(span, s, &mut p.interner);
+        let listed = param.list();
+        let param = match listed.as_deref() {
             Some([name, t]) => {
-                let list = Syntax::list(span, vec![sym(self, "listof"), t.clone(), sym(self, "acyclic")]);
-                Syntax::list(span, vec![name.clone(), list])
+                let list = Syn::lst(span, vec![sym(self, "listof"), t.clone(), sym(self, "acyclic")]);
+                Syn::lst(span, vec![name.clone(), list])
             }
-            _ if param.as_symbol().is_some() => param.clone(),
-            _ => return Err(FxError::at(param.span, "`(vlambda name body …)` or `(vlambda (name type) body …)`")),
+            _ if param.sym().is_some() => param.clone(),
+            _ => return Err(FxError::at(param.span(), "`(vlambda name body …)` or `(vlambda (name type) body …)`")),
         };
-        let mut lambda = vec![sym(self, "lambda"), Syntax::list(span, vec![param])];
+        let mut lambda = vec![sym(self, "lambda"), Syn::lst(span, vec![param])];
         lambda.extend(body.iter().cloned());
-        let call = Syntax::list(span, vec![sym(self, "%vlambda"), Syntax::list(span, lambda)]);
-        self.parse_exp(&call)
+        let call = Syn::lst(span, vec![sym(self, "%vlambda"), Syn::lst(span, lambda)]);
+        self.parse_exp_syn(&call)
     }
 
     /// `(stage …)` / `(session-check …)`, of `parse_exp`.
-    fn parse_stage_form(&mut self, span: fixpt_read::Span, items: &[Syntax], head: &str) -> R<ExpId> {
+    fn parse_stage_form(&mut self, span: fixpt_read::Span, items: &[Syn], head: &str) -> R<ExpId> {
         let (op, usage) = match head {
             "stage" => ("%stage", "`(stage module effect type code (procedure body …) (failure else …) (given evidence …))`, the last if any"),
             _ => ("%session-check", "`(session-check session effect type code (checked body …) (failure else …) (given evidence …))`, the last if any"),
@@ -2137,32 +2145,32 @@ impl Checker {
             return Err(FxError::at(span, usage));
         };
         let given = self.given(given, span, usage)?;
-        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+        let sym = |p: &mut Self, s: &str| Syn::named(span, s, &mut p.interner);
         // `E` as `(maxeff E)`, read as an effect: a name a `with` or a
         // module's parameter gives, or a `select`, is its effect, not
         // a type (as `parser-exps.fx`).
-        let e = Syntax::list(e.span, vec![sym(self, "maxeff"), e.clone()]);
+        let e = Syn::lst(e.span(), vec![sym(self, "maxeff"), e.clone()]);
         let descs = vec![e, r.clone()];
-        let arm = |p: &mut Self, tag: &str, a: &Syntax| -> R<Syntax> {
-            match a.as_proper_list() {
-                Some([name, body @ ..]) if name.as_symbol().is_some() && !body.is_empty() => {
+        let arm = |p: &mut Self, tag: &str, a: &Syn| -> R<Syn> {
+            match a.list().as_deref() {
+                Some([name, body @ ..]) if name.sym().is_some() && !body.is_empty() => {
                     let mut parts = vec![sym(p, tag), name.clone()];
                     parts.extend(body.iter().cloned());
-                    Ok(Syntax::list(a.span, parts))
+                    Ok(Syn::lst(a.span(), parts))
                 }
-                _ => Err(FxError::at(a.span, usage)),
+                _ => Err(FxError::at(a.span(), usage)),
             }
         };
         let (ok, failed) = (arm(self, "ok", ok)?, arm(self, "failed", failed)?);
         let mut proj = vec![sym(self, "proj"), sym(self, op)];
         proj.extend(descs);
-        let call = Syntax::list(span, vec![Syntax::list(span, proj), target.clone(), code.clone(), given]);
-        let form = Syntax::list(span, vec![sym(self, "tagcase"), call, ok, failed]);
-        self.parse_exp(&form)
+        let call = Syn::lst(span, vec![Syn::lst(span, proj), target.clone(), code.clone(), given]);
+        let form = Syn::lst(span, vec![sym(self, "tagcase"), call, ok, failed]);
+        self.parse_exp_syn(&form)
     }
 
     /// `(reify-effect …)` / `(reify-region …)` / `(reify-type …)`, of `parse_exp`.
-    fn parse_reify_form(&mut self, span: fixpt_read::Span, items: &[Syntax], head: &str) -> R<ExpId> {
+    fn parse_reify_form(&mut self, span: fixpt_read::Span, items: &[Syn], head: &str) -> R<ExpId> {
         let op = format!("%{head}");
         let usage = format!("`({} description (given evidence …))`, the last if any", &op[1..]);
         let (d, given) = match &items[..] {
@@ -2171,41 +2179,41 @@ impl Checker {
             _ => return Err(FxError::at(span, usage)),
         };
         let given = self.given(given, span, &usage)?;
-        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
-        let proj = Syntax::list(span, vec![sym(self, "proj"), sym(self, &op), d.clone()]);
-        let call = Syntax::list(span, vec![proj, given]);
-        self.parse_exp(&call)
+        let sym = |p: &mut Self, s: &str| Syn::named(span, s, &mut p.interner);
+        let proj = Syn::lst(span, vec![sym(self, "proj"), sym(self, &op), d.clone()]);
+        let call = Syn::lst(span, vec![proj, given]);
+        self.parse_exp_syn(&call)
     }
 
     /// `(session-commit! …)`, of `parse_exp`.
-    fn parse_session_commit_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_session_commit_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, sess, pending, decision] = &items[..] else {
             return Err(FxError::at(span, "`(session-commit! session pending decision)`"));
         };
-        let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
-        let list = |xs: Vec<Syntax>| Syntax::list(span, xs);
-        let bind = |p: &mut Self, n: &str, x: &Syntax| list(vec![sym(p, n), x.clone()]);
+        let sym = |p: &mut Self, s: &str| Syn::named(span, s, &mut p.interner);
+        let list = |xs: Vec<Syn>| Syn::lst(span, xs);
+        let bind = |p: &mut Self, n: &str, x: &Syn| list(vec![sym(p, n), x.clone()]);
         let bs = list(vec![bind(self, "%session", sess), bind(self, "%pending", pending), bind(self, "%decision", decision)]);
         let ready = list(vec![sym(self, "%session-ready"), sym(self, "%session"), sym(self, "%pending"), sym(self, "%decision")]);
         let committed = list(vec![sym(self, "%session-committed!"), sym(self, "%session"), sym(self, "%pending")]);
         let go = list(vec![sym(self, "go"), sym(self, "%run"), list(vec![sym(self, "begin"), list(vec![sym(self, "%run")]), committed])]);
         let failed = list(vec![sym(self, "failed"), sym(self, "%why"), list(vec![sym(self, "sum"), sym(self, "failed"), sym(self, "%why")])]);
         let form = list(vec![sym(self, "let"), bs, list(vec![sym(self, "tagcase"), ready, go, failed])]);
-        self.parse_exp(&form)
+        self.parse_exp_syn(&form)
     }
 
     /// `(rlambda …)`, of `parse_exp`.
-    fn parse_rlambda_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_rlambda_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, region, params, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(rlambda region ((name type) …) body …)`"));
         };
-        let region = self.parse_exp(region)?;
+        let region = self.parse_exp_syn(region)?;
         let lambda = self.parse_lambda(span, params, body)?;
         Ok(self.arena.exp(span, Exp::RLambda { region, lambda }))
     }
 
     /// `(plambda …)`, of `parse_exp`.
-    fn parse_plambda_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_plambda_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, binders, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(plambda ((name kind) …) body …)`"));
         };
@@ -2228,85 +2236,86 @@ impl Checker {
     }
 
     /// `(proj …)`, of `parse_exp`.
-    fn parse_proj_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_proj_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, body, args @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(proj expression description …)`"));
         };
         if args.is_empty() {
             return Err(FxError::at(span, "`proj` needs at least one description"));
         }
-        let body = self.parse_exp(body)?;
+        let body = self.parse_exp_syn(body)?;
         let args = args.iter().map(|a| self.parse_d(a)).collect::<R<Vec<_>>>()?;
         Ok(self.arena.exp(span, Exp::Proj { body, args }))
     }
 
     /// `(if …)`, of `parse_exp`.
-    fn parse_if_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_if_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, test, then, els] = &items[..] else {
             return Err(FxError::at(span, "`(if test then else)`"));
         };
-        let (test, then, els) = (self.parse_exp(test)?, self.parse_exp(then)?, self.parse_exp(els)?);
+        let (test, then, els) = (self.parse_exp_syn(test)?, self.parse_exp_syn(then)?, self.parse_exp_syn(els)?);
         Ok(self.arena.exp(span, Exp::If { test, then, els }))
     }
 
     /// `(letrec …)`, of `parse_exp`.
-    fn parse_letrec_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_letrec_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, bindings, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(letrec ((name type expression) …) body …)`"));
         };
         let mut out = Vec::new();
-        for b in self.items(bindings, "letrec bindings")? {
-            let parts = self.items(b, "a letrec binding")?;
+        for b in &self.items(bindings, "letrec bindings")? {
+            let parts = &self.items(b, "a letrec binding")?[..];
             let [name, ty, init] = &parts[..] else {
-                return Err(FxError::at(b.span, "a letrec binding is `(name type expression)`"));
+                return Err(FxError::at(b.span(), "a letrec binding is `(name type expression)`"));
             };
-            let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+            let name = name.sym().ok_or_else(|| FxError::at(name.span(), "a name"))?;
             self.arrow_star = self.written_arrow_star(ty);
-            out.push((name, self.parse_type(ty)?, self.parse_exp(init)?));
+            out.push((name, self.parse_type_syn(ty)?, self.parse_exp_syn(init)?));
         }
         let body = self.parse_body(span, body)?;
         Ok(self.arena.exp(span, Exp::Letrec { bindings: out, body }))
     }
 
     /// `(let …)`, of `parse_exp`.
-    fn parse_let_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_let_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, bindings, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(let ((name expression) …) body …)`"));
         };
         let mut out = Vec::new();
-        let bs = match &bindings.datum {
-            Datum::Nil => &[][..],
+        let bs = match &bindings.view() {
+            V::Nil => Vec::new(),
             _ => self.items(bindings, "let bindings")?,
         };
-        for b in bs {
-            let parts = self.items(b, "a let binding")?;
+        for b in &bs {
+            let parts = &self.items(b, "a let binding")?[..];
             let [name, init] = &parts[..] else {
-                return Err(FxError::at(b.span, "a let binding is `(name expression)`"));
+                return Err(FxError::at(b.span(), "a let binding is `(name expression)`"));
             };
-            let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-            out.push((name, self.parse_exp(init)?));
+            let name = name.sym().ok_or_else(|| FxError::at(name.span(), "a name"))?;
+            out.push((name, self.parse_exp_syn(init)?));
         }
         let body = self.parse_body(span, body)?;
         Ok(self.arena.exp(span, Exp::Let { bindings: out, body }))
     }
 
     /// `(confirm-length …)`, of `parse_exp`.
-    fn parse_confirm_length_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_confirm_length_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let usage = "`(confirm-length expression length (name body) else)`";
         let [_, e, n, arm, els] = &items[..] else {
             return Err(FxError::at(span, usage));
         };
         // A natural literal, or a variable holding a `nat`.
-        let k = match (self.literal_int(n), n.as_symbol()) {
+        let k = match (self.literal_int(n), n.sym()) {
             (Some(k), _) if k >= 0 => Exp::Int(k),
             (None, Some(v)) => Exp::Var(v),
-            _ => return Err(FxError::at(n.span, "a length is a natural number, or a variable holding one")),
+            _ => return Err(FxError::at(n.span(), "a length is a natural number, or a variable holding one")),
         };
-        let [x, body] = self.items(arm, usage)? else {
-            return Err(FxError::at(arm.span, usage));
+        let parts = self.items(arm, usage)?;
+        let [x, body] = &parts[..] else {
+            return Err(FxError::at(arm.span(), usage));
         };
-        let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
-        let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+        let x = x.sym().ok_or_else(|| FxError::at(x.span(), "a name"))?;
+        let (e, body, els) = (self.parse_exp_syn(e)?, self.parse_exp_syn(body)?, self.parse_exp_syn(els)?);
         let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
         let tmp = self.fresh_name("%confirm-value", &items);
         let a = self.arena.exp(span, Exp::Var(tmp));
@@ -2321,16 +2330,17 @@ impl Checker {
     }
 
     /// `(acyclic …)`, of `parse_exp`.
-    fn parse_acyclic_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_acyclic_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let usage = "`(acyclic expression (name body) else)`";
         let [_, e, arm, els] = &items[..] else {
             return Err(FxError::at(span, usage));
         };
-        let [x, body] = self.items(arm, usage)? else {
-            return Err(FxError::at(arm.span, usage));
+        let parts = self.items(arm, usage)?;
+        let [x, body] = &parts[..] else {
+            return Err(FxError::at(arm.span(), usage));
         };
-        let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
-        let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+        let x = x.sym().ok_or_else(|| FxError::at(x.span(), "a name"))?;
+        let (e, body, els) = (self.parse_exp_syn(e)?, self.parse_exp_syn(body)?, self.parse_exp_syn(els)?);
         let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
         let tmp = self.fresh_name("%acyclic-value", &items);
         let (test_f, test_a) = (var(self, "acyclic?"), self.arena.exp(span, Exp::Var(tmp)));
@@ -2343,16 +2353,17 @@ impl Checker {
     }
 
     /// `(confirm-nat …)`, of `parse_exp`.
-    fn parse_confirm_nat_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_confirm_nat_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let usage = "`(confirm-nat expression (name body) else)`";
         let [_, e, arm, els] = &items[..] else {
             return Err(FxError::at(span, usage));
         };
-        let [x, body] = self.items(arm, usage)? else {
-            return Err(FxError::at(arm.span, usage));
+        let parts = self.items(arm, usage)?;
+        let [x, body] = &parts[..] else {
+            return Err(FxError::at(arm.span(), usage));
         };
-        let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
-        let (e, body, els) = (self.parse_exp(e)?, self.parse_exp(body)?, self.parse_exp(els)?);
+        let x = x.sym().ok_or_else(|| FxError::at(x.span(), "a name"))?;
+        let (e, body, els) = (self.parse_exp_syn(e)?, self.parse_exp_syn(body)?, self.parse_exp_syn(els)?);
         let var = |c: &mut Checker, n: &str| c.standard_ref_at(span, n);
         let tmp = self.fresh_name("%nat-value", &items);
         let (test_f, test_a) = (var(self, "nat?"), self.arena.exp(span, Exp::Var(tmp)));
@@ -2365,11 +2376,11 @@ impl Checker {
     }
 
     /// `(and …)`, of `parse_exp`.
-    fn parse_and_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_and_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         // `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
         let mut out = self.arena.exp(span, Exp::Bool(true));
         for (i, x) in items[1..].iter().enumerate().rev() {
-            let x = self.parse_exp(x)?;
+            let x = self.parse_exp_syn(x)?;
             out = if i == items.len() - 2 {
                 x
             } else {
@@ -2381,12 +2392,12 @@ impl Checker {
     }
 
     /// `(or …)`, of `parse_exp`.
-    fn parse_or_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_or_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         // `(or a b …)`: `(if a #t (or b …))`, and `(or)` is `#f`. On
         // booleans only, so `#t` loses nothing.
         let mut out = self.arena.exp(span, Exp::Bool(false));
         for (i, x) in items[1..].iter().enumerate().rev() {
-            let x = self.parse_exp(x)?;
+            let x = self.parse_exp_syn(x)?;
             out = if i == items.len() - 2 {
                 x
             } else {
@@ -2398,22 +2409,22 @@ impl Checker {
     }
 
     /// `(let* …)`, of `parse_exp`.
-    fn parse_let_star_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_let_star_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, bindings, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(let* ((name expression) …) body …)`"));
         };
-        let bs = match &bindings.datum {
-            Datum::Nil => &[][..],
+        let bs = match &bindings.view() {
+            V::Nil => Vec::new(),
             _ => self.items(bindings, "let* bindings")?,
         };
         let mut parsed = Vec::new();
-        for b in bs {
-            let parts = self.items(b, "a let* binding")?;
+        for b in &bs {
+            let parts = &self.items(b, "a let* binding")?[..];
             let [name, init] = &parts[..] else {
-                return Err(FxError::at(b.span, "a let* binding is `(name expression)`"));
+                return Err(FxError::at(b.span(), "a let* binding is `(name expression)`"));
             };
-            let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-            parsed.push((name, self.parse_exp(init)?, b.span));
+            let name = name.sym().ok_or_else(|| FxError::at(name.span(), "a name"))?;
+            parsed.push((name, self.parse_exp_syn(init)?, b.span()));
         }
         let mut out = self.parse_body(span, body)?;
         for (name, init, bspan) in parsed.into_iter().rev() {
@@ -2426,7 +2437,7 @@ impl Checker {
     /// `(the (modnames …) e)` (`binding-shapes.md`): its type a slot, linked
     /// where it is checked to `e`'s type sealed to the names
     /// (`Checker::sealed`).
-    fn parse_the_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_the_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, ty, exp] = &items[..] else {
             return Err(FxError::at(span, "`(the type expression)`"));
         };
@@ -2436,66 +2447,67 @@ impl Checker {
                 self.arena.withs.sealed.insert(slot, names);
                 slot
             }
-            None => self.parse_type(ty)?,
+            None => self.parse_type_syn(ty)?,
         };
-        let exp = self.parse_exp(exp)?;
+        let exp = self.parse_exp_syn(exp)?;
         Ok(self.arena.exp(span, Exp::The { ty, exp }))
     }
 
     /// `(modnames member …)`'s members, if `s` is one: `x` or `(val x)`,
     /// `(abs t)`, `(desc u)`, `(eff e)`, `(modnames m member …)`.
-    fn modnames_read(&self, s: &Syntax) -> R<Option<Vec<crate::ast::ShapeMember>>> {
-        match s.as_proper_list() {
-            Some([h, members @ ..]) if h.as_symbol().is_some_and(|h| self.name(h) == "modnames") => Ok(Some(self.named_each(members)?)),
+    fn modnames_read(&self, s: &Syn) -> R<Option<Vec<crate::ast::ShapeMember>>> {
+        match s.list().as_deref() {
+            Some([h, members @ ..]) if h.sym().is_some_and(|h| self.name(h) == "modnames") => Ok(Some(self.named_each(members)?)),
             _ => Ok(None),
         }
     }
 
-    fn named_each(&self, members: &[Syntax]) -> R<Vec<crate::ast::ShapeMember>> {
+    fn named_each(&self, members: &[Syn]) -> R<Vec<crate::ast::ShapeMember>> {
         use crate::ast::ShapeMember as Named;
         let usage = "a `modnames` member is `x`, `(val x)`, `(abs t)`, `(desc u)`, `(eff e)` or `(modnames m member …)`";
         let mut out = Vec::new();
         for m in members {
-            if let Some(n) = m.as_symbol() {
-                out.push(Named::Val(n, m.span, None));
+            if let Some(n) = m.sym() {
+                out.push(Named::Val(n, m.span(), None));
                 continue;
             }
-            let Some([w, n, rest @ ..]) = m.as_proper_list() else { return Err(FxError::at(m.span, usage)) };
-            let (Some(w), Some(n)) = (w.as_symbol(), n.as_symbol()) else { return Err(FxError::at(m.span, usage)) };
+            let listed = m.list();
+            let Some([w, n, rest @ ..]) = listed.as_deref() else { return Err(FxError::at(m.span(), usage)) };
+            let (Some(w), Some(n)) = (w.sym(), n.sym()) else { return Err(FxError::at(m.span(), usage)) };
             out.push(match (self.name(w), rest) {
-                ("val", []) => Named::Val(n, m.span, None),
-                ("abs", []) => Named::Abs(n, m.span),
-                ("desc", []) => Named::Desc(n, m.span),
-                ("eff", []) => Named::Eff(n, m.span),
-                ("modnames", rest) => Named::Val(n, m.span, Some(self.named_each(rest)?)),
-                _ => return Err(FxError::at(m.span, usage)),
+                ("val", []) => Named::Val(n, m.span(), None),
+                ("abs", []) => Named::Abs(n, m.span()),
+                ("desc", []) => Named::Desc(n, m.span()),
+                ("eff", []) => Named::Eff(n, m.span()),
+                ("modnames", rest) => Named::Val(n, m.span(), Some(self.named_each(rest)?)),
+                _ => return Err(FxError::at(m.span(), usage)),
             });
         }
         Ok(out)
     }
 
     /// `(convention …)`, of `parse_exp`.
-    fn parse_convention_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_convention_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, conv, exp] = &items[..] else {
             return Err(FxError::at(span, "`(convention C expression)`"));
         };
         let conv = self.parse_conv(conv)?;
-        let exp = self.parse_exp(exp)?;
+        let exp = self.parse_exp_syn(exp)?;
         Ok(self.arena.exp(span, Exp::Convention { conv, exp }))
     }
 
     /// `(extend …)`, of `parse_exp`.
-    fn parse_extend_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_extend_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let usage = || FxError::at(span, "`(extend module module)`");
         let [_, e0, rest @ ..] = &items[..] else { return Err(usage()) };
         let (shape, rest) = self.written_shape(rest)?;
         let [e1] = rest else { return Err(usage()) };
         let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
-        let e0 = self.parse_exp(e0)?;
+        let e0 = self.parse_exp_syn(e0)?;
         if let Some(s) = shape.clone() {
             self.arena.withs.shaped.insert(e0, s);
         }
-        let (e1, past) = self.with_types_of(names[0], shape.clone().flatten(), |p| p.parse_exp(e1))?;
+        let (e1, past) = self.with_types_of(names[0], shape.clone().flatten(), |p| p.parse_exp_syn(e1))?;
         // Made at the form.
         let e1 = self.arena.exp(span, Exp::With { module: names[0], body: e1 });
         self.arena.withs.read_past.insert(e1, past);
@@ -2510,34 +2522,34 @@ impl Checker {
     }
 
     /// `(load-module …)` / `(load-input …)`, of `parse_exp`.
-    fn parse_load_module_form(&mut self, span: fixpt_read::Span, items: &[Syntax], loader: &str) -> R<ExpId> {
+    fn parse_load_module_form(&mut self, span: fixpt_read::Span, items: &[Syn], loader: &str) -> R<ExpId> {
         let input = loader == "load-input";
         let [_, path] = &items[..] else {
             return Err(FxError::at(span, format!("`({loader} \"file\")`")));
         };
-        let Datum::Str(path) = &path.datum else {
-            return Err(FxError::at(path.span, format!("`({loader} \"file\")`: the file's name, as a string")));
+        let V::Str(path) = &path.view() else {
+            return Err(FxError::at(path.span(), format!("`({loader} \"file\")`: the file's name, as a string")));
         };
         self.parse_load(span, path, input)
     }
 
     /// `(%loaded …)`, of `parse_exp`.
-    fn parse_loaded_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_loaded_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, key, path] = &items[..] else {
             return Err(FxError::at(span, "`(%loaded \"key\" \"path\")`"));
         };
-        let (Datum::Str(key), Datum::Str(path)) = (&key.datum, &path.datum) else {
+        let (V::Str(key), V::Str(path)) = (&key.view(), &path.view()) else {
             return Err(FxError::at(span, "`(%loaded \"key\" \"path\")`"));
         };
         self.parse_loaded(span, key, path)
     }
 
     /// `(with …)`, of `parse_exp`.
-    fn parse_with_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_with_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, m, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(with module body …)`"));
         };
-        let module = m.as_symbol().ok_or_else(|| FxError::at(m.span, "`with` opens a module named by a variable"))?;
+        let module = m.sym().ok_or_else(|| FxError::at(m.span(), "`with` opens a module named by a variable"))?;
         let (shape, body) = self.written_shape(body)?;
         let (body, past) = self.with_types_of(module, shape.clone().flatten(), |p| p.parse_body(span, body))?;
         let e = self.arena.exp(span, Exp::With { module, body });
@@ -2549,16 +2561,17 @@ impl Checker {
     }
 
     /// Whether `f` is `(include m)`, its shape written or not.
-    fn include_item(&self, f: &Syntax) -> bool {
-        matches!(f.as_proper_list(), Some([_, _, rest @ ..]) if self.written_shape(rest).is_ok_and(|(_, r)| r.is_empty()))
+    fn include_item(&self, f: &Syn) -> bool {
+        matches!(f.list().as_deref(), Some([_, _, rest @ ..]) if self.written_shape(rest).is_ok_and(|(_, r)| r.is_empty()))
     }
 
     /// `(include m #:relied S)`'s module, `m`, held to its shape where it is
     /// checked.
-    fn parse_include_item(&mut self, f: &Syntax) -> R<ExpId> {
-        let [_, m, rest @ ..] = f.as_proper_list().expect("an include") else { unreachable!("an include") };
+    fn parse_include_item(&mut self, f: &Syn) -> R<ExpId> {
+        let listed = f.list();
+        let [_, m, rest @ ..] = listed.as_deref().expect("an include") else { unreachable!("an include") };
         let (shape, _) = self.written_shape(rest)?;
-        let m = self.parse_exp(m)?;
+        let m = self.parse_exp_syn(m)?;
         if let Some(s) = shape {
             self.arena.withs.shaped.insert(m, s);
         }
@@ -2569,63 +2582,63 @@ impl Checker {
     /// a form that opens a module (`Macros::shaped`): the module's names,
     /// `((value …) (description …))`, or `#f` where they are not known;
     /// and what follows it.
-    pub(crate) fn written_shape<'s>(&self, rest: &'s [Syntax]) -> R<(Option<Option<crate::ast::Relied>>, &'s [Syntax])> {
+    pub(crate) fn written_shape<'s>(&self, rest: &'s [Syn]) -> R<(Option<Option<crate::ast::Relied>>, &'s [Syn])> {
         let [k, s, after @ ..] = rest else { return Ok((None, rest)) };
-        if !matches!(&k.datum, Datum::Keyword(w) if self.name(*w) == "relied") {
+        if !matches!(&k.view(), V::Keyword(w) if self.name(*w) == "relied") {
             return Ok((None, rest));
         }
-        if s.as_symbol().is_some_and(|f| self.name(f) == "#f") {
+        if s.sym().is_some_and(|f| self.name(f) == "#f") {
             return Ok((Some(None), after));
         }
-        let shape = self.shape_read(s).ok_or_else(|| FxError::at(s.span, "a module's shape: `((value …) (description …))`, the names it gives that the program asked of it"))?;
+        let shape = self.shape_read(s).ok_or_else(|| FxError::at(s.span(), "a module's shape: `((value …) (description …))`, the names it gives that the program asked of it"))?;
         Ok((Some(Some(shape)), after))
     }
 
     /// What a form relied on of a module, `s`, as `Asked::written`
     /// writes it: `((value …) (description …))`.
-    fn shape_read(&self, s: &Syntax) -> Option<crate::ast::Relied> {
-        let names = |l: &Syntax| -> Option<Vec<Sym>> {
-            let l: &[Syntax] = if matches!(l.datum, Datum::Nil) { &[] } else { l.as_proper_list()? };
-            l.iter().map(|n| n.as_symbol()).collect()
+    fn shape_read(&self, s: &Syn) -> Option<crate::ast::Relied> {
+        let names = |l: &Syn| -> Option<Vec<Sym>> {
+            let l: Vec<Syn> = if matches!(l.view(), V::Nil) { Vec::new() } else { l.list()? };
+            l.iter().map(|n| n.sym()).collect()
         };
-        match s.as_proper_list()? {
+        match s.list().as_deref()? {
             [v, d] => Some(crate::ast::Relied { vals: names(v)?, descs: names(d)? }),
             _ => None,
         }
     }
 
     /// `(product …)`, of `parse_exp`.
-    fn parse_product_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_product_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let mut fields = Vec::new();
         for p in &items[1..] {
             let pair = self.items(p, "`(label expression)`")?.to_vec();
             let [label, e] = &pair[..] else {
-                return Err(FxError::at(p.span, "`(product (label expression) …)`"));
+                return Err(FxError::at(p.span(), "`(product (label expression) …)`"));
             };
             let label = self.label(label)?;
             if fields.iter().any(|(l, _)| *l == label) {
-                return Err(FxError::at(p.span, format!("`{}` appears twice", self.name(label))));
+                return Err(FxError::at(p.span(), format!("`{}` appears twice", self.name(label))));
             }
-            fields.push((label, self.parse_exp(e)?));
+            fields.push((label, self.parse_exp_syn(e)?));
         }
         Ok(self.arena.exp(span, Exp::Product(fields)))
     }
 
     /// `(extract …)`, of `parse_exp`.
-    fn parse_extract_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_extract_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, e, label] = &items[..] else {
             return Err(FxError::at(span, "`(extract expression label)`"));
         };
         let label = self.label(label)?;
-        let e = self.parse_exp(e)?;
+        let e = self.parse_exp_syn(e)?;
         Ok(self.arena.exp(span, Exp::Extract(e, label)))
     }
 
     /// `(sum …)`, of `parse_exp`.
-    fn parse_sum_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_sum_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         // `(sum ⟨hole⟩)`: the hole is a tag; the payload, nothing yet.
         if let (Some(h), [_, tag]) = (self.holes, &items[..])
-            && tag.as_symbol() == Some(h.exp)
+            && tag.sym() == Some(h.exp)
         {
             let unit = self.arena.exp(span, Exp::Unit);
             return Ok(self.arena.exp(span, Exp::Sum(h.tag, unit)));
@@ -2634,23 +2647,24 @@ impl Checker {
             return Err(FxError::at(span, "`(sum tag expression)`"));
         };
         let tag = self.label(tag)?;
-        let e = self.parse_exp(e)?;
+        let e = self.parse_exp_syn(e)?;
         Ok(self.arena.exp(span, Exp::Sum(tag, e)))
     }
 
     /// `(letregion …)` / `(letfreeze …)` / `(letrena …)` / `(letreap …)`, of `parse_exp`.
-    fn parse_letregion_form(&mut self, span: fixpt_read::Span, items: &[Syntax], form: &str) -> R<ExpId> {
+    fn parse_letregion_form(&mut self, span: fixpt_read::Span, items: &[Syn], form: &str) -> R<ExpId> {
         let [_, name, body @ ..] = &items[..] else {
             return Err(FxError::at(span, format!("`({form} name body …)`")));
         };
         // `(letfreeze (r p) body …)` freezes into place `p`;
         // `(letfreeze r body …)` into the heap.
-        let (name, into) = match name.as_proper_list() {
+        let listed = name.list();
+        let (name, into) = match listed.as_deref() {
             Some([n, p]) if form == "letfreeze" => (n, Some(self.parse_place(p)?)),
             _ => (name, None),
         };
-        let name = name.as_symbol().filter(|n| !self.name(*n).starts_with('@')).ok_or_else(|| {
-            FxError::at(name.span, format!("a `{form}` binds a region variable's name, without `@`"))
+        let name = name.sym().filter(|n| !self.name(*n).starts_with('@')).ok_or_else(|| {
+            FxError::at(name.span(), format!("a `{form}` binds a region variable's name, without `@`"))
         })?;
         let form = match form {
             "letregion" => RegionForm::Region,
@@ -2686,41 +2700,41 @@ impl Checker {
     }
 
     /// `(prompt …)`, of `parse_exp`.
-    fn parse_prompt_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_prompt_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, tag, body, handler] = &items[..] else {
             return Err(FxError::at(span, "`(prompt tag body handler)`"));
         };
-        let (tag, body, handler) = (self.parse_exp(tag)?, self.parse_exp(body)?, self.parse_exp(handler)?);
+        let (tag, body, handler) = (self.parse_exp_syn(tag)?, self.parse_exp_syn(body)?, self.parse_exp_syn(handler)?);
         Ok(self.arena.exp(span, Exp::Prompt { tag, body, handler }))
     }
 
     /// An application, `(f arg …)`, of `parse_exp`.
-    fn parse_application_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
-        let fun = self.parse_exp(&items[0])?;
-        let args = items[1..].iter().map(|a| self.parse_exp(a)).collect::<R<Vec<_>>>()?;
+    fn parse_application_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
+        let fun = self.parse_exp_syn(&items[0])?;
+        let args = items[1..].iter().map(|a| self.parse_exp_syn(a)).collect::<R<Vec<_>>>()?;
         Ok(self.arena.exp(span, Exp::App { fun, args }))
     }
 
 
     /// `(cond (test e …) … (else e …))`: nested `if`s. FX has no unspecified
     /// value, so the `else` is required.
-    fn parse_cond(&mut self, span: fixpt_read::Span, clauses: &[Syntax]) -> R<ExpId> {
+    fn parse_cond(&mut self, span: fixpt_read::Span, clauses: &[Syn]) -> R<ExpId> {
         let Some((last, init)) = clauses.split_last() else {
             return Err(FxError::at(span, "a `cond` needs at least an `else` clause"));
         };
         let parts = self.items(last, "a cond clause")?.to_vec();
-        if parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) != Some("else") {
-            return Err(FxError::at(last.span, "a `cond` must end with an `else` clause: FX has no unspecified value"));
+        if parts.first().and_then(|h| h.sym()).map(|h| self.name(h)) != Some("else") {
+            return Err(FxError::at(last.span(), "a `cond` must end with an `else` clause: FX has no unspecified value"));
         }
-        let mut out = self.parse_body(last.span, &parts[1..])?;
+        let mut out = self.parse_body(last.span(), &parts[1..])?;
         for c in init.iter().rev() {
             let parts = self.items(c, "a cond clause")?.to_vec();
             let [test, body @ ..] = &parts[..] else {
-                return Err(FxError::at(c.span, "a cond clause is `(test expression …)`"));
+                return Err(FxError::at(c.span(), "a cond clause is `(test expression …)`"));
             };
-            let test = self.parse_exp(test)?;
-            let then = self.parse_body(c.span, body)?;
-            out = self.arena.exp(c.span, Exp::If { test, then, els: out });
+            let test = self.parse_exp_syn(test)?;
+            let then = self.parse_body(c.span(), body)?;
+            out = self.arena.exp(c.span(), Exp::If { test, then, els: out });
         }
         Ok(out)
     }
@@ -2740,7 +2754,7 @@ impl Checker {
     /// else))`, each arm's test its shape's standard predicate, which narrows
     /// the value for the arm and for those after it (a variable tested as it
     /// is). The `else` is required, as `case`'s is.
-    fn parse_typecase(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_typecase(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let usage = "`(typecase expression (shape name body) … (else name body))`";
         let [_, e, arms @ ..] = items else {
             return Err(FxError::at(span, usage));
@@ -2751,24 +2765,24 @@ impl Checker {
         // A variable, which nothing assigns, is tested as it is, so that
         // what each test narrows it to holds of it in the arms after; any
         // other expression is bound once.
-        let direct = e.as_symbol().filter(|s| !matches!(self.name(*s), "#t" | "#f" | "#u"));
+        let direct = e.sym().filter(|s| !matches!(self.name(*s), "#t" | "#f" | "#u"));
         let (tmp, e) = match direct {
             Some(s) => (s, None),
-            None => (self.fresh_name("%typecase-value", items), Some(self.parse_exp(e)?)),
+            None => (self.fresh_name("%typecase-value", items), Some(self.parse_exp_syn(e)?)),
         };
         let mut tests = Vec::new();
         for arm in init {
             let parts = self.items(arm, usage)?.to_vec();
             let [shape, x, body] = &parts[..] else {
-                return Err(FxError::at(arm.span, usage));
+                return Err(FxError::at(arm.span(), usage));
             };
-            let name = shape.as_symbol().map(|s| self.name(s).to_string());
+            let name = shape.sym().map(|s| self.name(s).to_string());
             let Some(pred) = name.and_then(|n| typecase_predicate(&n)) else {
                 let shapes: Vec<&str> = TYPECASE_SHAPES.iter().map(|(s, _)| *s).collect();
-                return Err(FxError::at(shape.span, format!("a shape `typecase` tests is one of {}", shapes.join(", "))));
+                return Err(FxError::at(shape.span(), format!("a shape `typecase` tests is one of {}", shapes.join(", "))));
             };
-            let x = x.as_symbol().ok_or_else(|| FxError::at(x.span, "a name"))?;
-            tests.push((pred, x, self.parse_exp(body)?, arm.span));
+            let x = x.sym().ok_or_else(|| FxError::at(x.span(), "a name"))?;
+            tests.push((pred, x, self.parse_exp_syn(body)?, arm.span()));
         }
         // `(else body)`, or `(else name body)`, `name` the value as what
         // the arms leave it.
@@ -2776,18 +2790,18 @@ impl Checker {
         let else_usage = "a `typecase` must end with an `else` clause, `(else body)` or `(else name body)`";
         let (head, name, body) = match &parts[..] {
             [head, body] => (head, None, body),
-            [head, name, body] => (head, Some(name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?), body),
-            _ => return Err(FxError::at(last.span, else_usage)),
+            [head, name, body] => (head, Some(name.sym().ok_or_else(|| FxError::at(name.span(), "a name"))?), body),
+            _ => return Err(FxError::at(last.span(), else_usage)),
         };
-        if head.as_symbol().map(|h| self.name(h)) != Some("else") {
-            return Err(FxError::at(last.span, else_usage));
+        if head.sym().map(|h| self.name(h)) != Some("else") {
+            return Err(FxError::at(last.span(), else_usage));
         }
         // Each arm's parts at the arm, as a `cond`'s clause's are: where an
         // arm is skipped under a member of an `allof`, that is all it skips.
-        let mut chain = self.parse_exp(body)?;
+        let mut chain = self.parse_exp_syn(body)?;
         if let Some(x) = name {
-            let v = self.arena.exp(last.span, Exp::Var(tmp));
-            chain = self.arena.exp(last.span, Exp::Let { bindings: vec![(x, v)], body: chain });
+            let v = self.arena.exp(last.span(), Exp::Var(tmp));
+            chain = self.arena.exp(last.span(), Exp::Let { bindings: vec![(x, v)], body: chain });
         }
         for (pred, x, body, at) in tests.into_iter().rev() {
             let f = self.standard_ref_at(at, pred);
@@ -2808,33 +2822,33 @@ impl Checker {
     /// true, each `Q` where false, a proposition `(shape i shape)` or `(not
     /// (shape i shape))`, `i` a parameter's number from 0; what it ensures
     /// (`crate::specs::latent`).
-    fn parse_proving(&mut self, s: &Syntax, n: usize) -> R<crate::logic::Formula<crate::ast::Named>> {
+    fn parse_proving(&mut self, s: &Syn, n: usize) -> R<crate::logic::Formula<crate::ast::Named>> {
         let usage = "`(bool (then proposition …) (else proposition …))`";
         let items = self.items(s, usage)?.to_vec();
         let [_, then, els] = &items[..] else {
-            return Err(FxError::at(s.span, usage));
+            return Err(FxError::at(s.span(), usage));
         };
         let then = self.parse_props(then, "then", n)?;
         let els = self.parse_props(els, "else", n)?;
         Ok(crate::specs::latent(&then, &els))
     }
 
-    fn parse_props(&mut self, s: &Syntax, which: &str, n: usize) -> R<Vec<crate::ast::Prop>> {
+    fn parse_props(&mut self, s: &Syn, which: &str, n: usize) -> R<Vec<crate::ast::Prop>> {
         let usage = format!("`({which} proposition …)`");
         let items = self.items(s, &usage)?.to_vec();
-        if items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) != Some(which) {
-            return Err(FxError::at(s.span, usage));
+        if items.first().and_then(|h| h.sym()).map(|h| self.name(h)) != Some(which) {
+            return Err(FxError::at(s.span(), usage));
         }
         items[1..].iter().map(|p| self.parse_prop(p, n)).collect()
     }
 
     /// A proposition (`crate::ast::Prop`), of a procedure of `n`
     /// parameters.
-    fn parse_prop(&mut self, p: &Syntax, n: usize) -> R<crate::ast::Prop> {
+    fn parse_prop(&mut self, p: &Syn, n: usize) -> R<crate::ast::Prop> {
         use crate::ast::{Prop, Rel};
         let usage = "a proposition: `(shape i shape)`, `(acyclic i)`, `(nat i)`, `(length i j)`, `(< a b)`, `(<= a b)`, `(= a b)`, or `(not …)` of a shape or an `=`";
         let parts = self.items(p, usage)?.to_vec();
-        let head = |c: &Self, x: &Syntax| x.as_symbol().map(|h| c.name(h).to_string());
+        let head = |c: &Self, x: &Syn| x.sym().map(|h| c.name(h).to_string());
         let (negated, form) = match &parts[..] {
             [h, inner] if head(self, h).as_deref() == Some("not") => (true, inner.clone()),
             _ => (false, p.clone()),
@@ -2846,7 +2860,7 @@ impl Checker {
                 let param = self.prop_param(i, n)?;
                 let Some(shape) = head(self, k).and_then(|k| crate::check::SHAPES.iter().position(|(s, _)| *s == k)) else {
                     let shapes: Vec<&str> = crate::check::SHAPES.iter().map(|(s, _)| *s).collect();
-                    return Err(FxError::at(k.span, format!("a shape, one of {}", shapes.join(", "))));
+                    return Err(FxError::at(k.span(), format!("a shape, one of {}", shapes.join(", "))));
                 };
                 Ok(Prop::Shape { param, shape, negated })
             }
@@ -2867,21 +2881,21 @@ impl Checker {
                 };
                 Ok(Prop::Rel { op, a, b })
             }
-            _ => Err(FxError::at(form.span, usage)),
+            _ => Err(FxError::at(form.span(), usage)),
         }
     }
 
     /// A parameter's number, from 0, of a procedure of `n`.
-    fn prop_param(&self, i: &Syntax, n: usize) -> R<usize> {
+    fn prop_param(&self, i: &Syn, n: usize) -> R<usize> {
         match self.literal_int(i).filter(|i| *i >= 0 && (*i as usize) < n) {
             Some(k) => Ok(k as usize),
-            None => Err(FxError::at(i.span, format!("a parameter's number, from 0 to {}", n as i64 - 1))),
+            None => Err(FxError::at(i.span(), format!("a parameter's number, from 0 to {}", n as i64 - 1))),
         }
     }
 
     /// A size in a proposition: a parameter's number, `(length i)` or
     /// `(lit k)`.
-    fn prop_term(&mut self, x: &Syntax, n: usize) -> R<crate::ast::Term> {
+    fn prop_term(&mut self, x: &Syn, n: usize) -> R<crate::ast::Term> {
         use crate::ast::Term;
         if self.literal_int(x).is_some() {
             return Ok(Term::Param(self.prop_param(x, n)?));
@@ -2889,12 +2903,12 @@ impl Checker {
         let usage = "a size: a parameter's number, `(length i)`, or `(lit k)`";
         let parts = self.items(x, usage)?.to_vec();
         match &parts[..] {
-            [h, i] if h.as_symbol().is_some_and(|h| self.name(h) == "length") => Ok(Term::Length(self.prop_param(i, n)?)),
-            [h, k] if h.as_symbol().is_some_and(|h| self.name(h) == "lit") => match self.literal_int(k).filter(|k| *k >= 0) {
+            [h, i] if h.sym().is_some_and(|h| self.name(h) == "length") => Ok(Term::Length(self.prop_param(i, n)?)),
+            [h, k] if h.sym().is_some_and(|h| self.name(h) == "lit") => match self.literal_int(k).filter(|k| *k >= 0) {
                 Some(k) => Ok(Term::Lit(k)),
-                None => Err(FxError::at(k.span, "a natural")),
+                None => Err(FxError::at(k.span(), "a natural")),
             },
-            _ => Err(FxError::at(x.span, usage)),
+            _ => Err(FxError::at(x.span(), usage)),
         }
     }
 
@@ -2902,17 +2916,17 @@ impl Checker {
     /// `base`, else `base1`, `base2` and so on. The variable's scope is
     /// within the form, and nothing refers to a name it does not write, so
     /// it captures nothing and nothing captures it.
-    fn fresh_name(&mut self, base: &str, forms: &[Syntax]) -> Sym {
-        fn mentions(s: &Syntax, out: &mut fixpt_hash::HashSet<Sym>) {
-            match &s.datum {
-                Datum::Symbol(x) => {
+    fn fresh_name(&mut self, base: &str, forms: &[Syn]) -> Sym {
+        fn mentions(s: &Syn, out: &mut fixpt_hash::HashSet<Sym>) {
+            match &s.view() {
+                V::Symbol(x) => {
                     out.insert(*x);
                 }
-                Datum::List { items, tail } => {
+                V::List { items, tail } => {
                     items.iter().for_each(|i| mentions(i, out));
                     tail.iter().for_each(|t| mentions(t, out));
                 }
-                Datum::Vector(items) => items.iter().for_each(|i| mentions(i, out)),
+                V::Vector(items) => items.iter().for_each(|i| mentions(i, out)),
                 _ => {}
             }
         }
@@ -2941,7 +2955,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// by its kind's equality: `=` on integers, `char=?`, `string=?`,
     /// `symbol=?`, `bool=?`. The data are of one kind and distinct, and the
     /// `else` is required, as `cond`'s is.
-    fn parse_case(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_case(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let usage = "`(case key ((datum …) expression …) … (else expression …))`";
         let [key, clauses @ ..] = items else {
             return Err(FxError::at(span, usage));
@@ -2950,16 +2964,16 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             return Err(FxError::at(span, "a `case` needs at least an `else` clause"));
         };
         let parts = self.items(last, "a case clause")?.to_vec();
-        if parts.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) != Some("else") {
-            return Err(FxError::at(last.span, "a `case` must end with an `else` clause: FX has no unspecified value"));
+        if parts.first().and_then(|h| h.sym()).map(|h| self.name(h)) != Some("else") {
+            return Err(FxError::at(last.span(), "a `case` must end with an `else` clause: FX has no unspecified value"));
         }
         // A variable, which nothing assigns, is compared as it is; any other
         // key is bound once.
-        let key_span = key.span;
-        let direct = key.as_symbol().filter(|s| !matches!(self.name(*s), "#t" | "#f" | "#u")).filter(|_| !init.is_empty());
+        let key_span = key.span();
+        let direct = key.sym().filter(|s| !matches!(self.name(*s), "#t" | "#f" | "#u")).filter(|_| !init.is_empty());
         let (tmp, key) = match direct {
             Some(s) => (s, None),
-            None => (self.fresh_name("%case-key", items), Some(self.parse_exp(key)?)),
+            None => (self.fresh_name("%case-key", items), Some(self.parse_exp_syn(key)?)),
         };
         let (mut kind, mut seen) = (None, fixpt_hash::HashSet::default());
         let mut arms = Vec::new();
@@ -2969,39 +2983,39 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         for c in init {
             let parts = self.items(c, "a case clause")?.to_vec();
             let [data, body @ ..] = &parts[..] else {
-                return Err(FxError::at(c.span, "a case clause is `((datum …) expression …)`"));
+                return Err(FxError::at(c.span(), "a case clause is `((datum …) expression …)`"));
             };
             let data = self.items(data, "a case clause's data, `(datum …)`")?.to_vec();
             if data.is_empty() {
-                return Err(FxError::at(c.span, "a case clause has at least one datum"));
+                return Err(FxError::at(c.span(), "a case clause has at least one datum"));
             }
             let mut tests = Vec::new();
             for d in &data {
                 let (k, eq, lit, text) = self.case_datum(d)?;
                 if *kind.get_or_insert(k) != k {
-                    return Err(FxError::at(d.span, "a `case`'s data are all of one kind: integers, characters, strings, symbols or booleans"));
+                    return Err(FxError::at(d.span(), "a `case`'s data are all of one kind: integers, characters, strings, symbols or booleans"));
                 }
                 if !seen.insert(text) {
-                    return Err(FxError::at(d.span, "a datum appears twice in this `case`"));
+                    return Err(FxError::at(d.span(), "a datum appears twice in this `case`"));
                 }
-                let f = self.standard_ref_at(d.span, eq);
+                let f = self.standard_ref_at(d.span(), eq);
                 let a = self.arena.exp(key_span, Exp::Var(tmp));
-                let test = self.arena.exp(d.span, Exp::App { fun: f, args: vec![a, lit] });
+                let test = self.arena.exp(d.span(), Exp::App { fun: f, args: vec![a, lit] });
                 tests.push(test);
                 entries.push((test, self.case_sort_key(k, d), arms.len()));
             }
-            arms.push((c.span, tests, body.to_vec()));
+            arms.push((c.span(), tests, body.to_vec()));
         }
         // The bodies first to last, then the `else`'s, as the FX-26 parser.
         let mut thens = Vec::new();
         for (cspan, _, body) in &arms {
             thens.push(self.parse_body(*cspan, body)?);
         }
-        let mut out = self.parse_body(last.span, &parts[1..])?;
+        let mut out = self.parse_body(last.span(), &parts[1..])?;
         // A clause per datum and an `else` of one atom: each leaf gives its
         // body, the `else` made again at each, with no index to search.
-        let atom_else = matches!(&parts[1..], [x] if !matches!(x.datum, Datum::List { .. } | Datum::Vector(_)));
-        let direct = (atom_else && entries.len() == arms.len()).then(|| (last.span, parts[1].clone()));
+        let atom_else = matches!(&parts[1..], [x] if !matches!(x.view(), V::List { .. } | V::Vector(_)));
+        let direct = (atom_else && entries.len() == arms.len()).then(|| (last.span(), parts[1].clone()));
         let tree_from = match (kind, direct.is_some()) {
             (Some(0), true) => Self::CASE_TREE_INTS,
             (Some(0), false) => Self::CASE_TREE_INTS_INDEXED,
@@ -3042,11 +3056,11 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// What a `case` tree sorts datum `d`, of kind `k`, by: an integer's
     /// value (a fixnum's), a string's or a symbol's hash, as the runtime
     /// computes them (`%string-hash`, `%symbol-hash`); none otherwise.
-    fn case_sort_key(&self, k: u8, d: &Syntax) -> Option<i64> {
-        match (k, &d.datum) {
-            (0, Datum::Number(fixpt_read::Num::Int(n))) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => Some(*n),
-            (2, Datum::Str(t)) => Some(fixpt_heap::heap::string_hash_of(t)),
-            (3, Datum::Symbol(x)) => Some(fixpt_heap::heap::symbol_hash_of(self.name(*x))),
+    fn case_sort_key(&self, k: u8, d: &Syn) -> Option<i64> {
+        match (k, &d.view()) {
+            (0, V::Number(fixpt_read::Num::Int(n))) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => Some(*n),
+            (2, V::Str(t)) => Some(fixpt_heap::heap::string_hash_of(t)),
+            (3, V::Symbol(x)) => Some(fixpt_heap::heap::symbol_hash_of(self.name(*x))),
             _ => None,
         }
     }
@@ -3060,13 +3074,13 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     fn case_tree(
         &mut self,
         span: fixpt_read::Span,
-        items: &[Syntax],
+        items: &[Syn],
         hash_op: Option<&str>,
         key_span: fixpt_read::Span,
         key: Sym,
         mut entries: Vec<(ExpId, Option<i64>, usize)>,
         bodies: Vec<ExpId>,
-        direct: Option<(fixpt_read::Span, Syntax)>,
+        direct: Option<(fixpt_read::Span, Syn)>,
     ) -> R<ExpId> {
         entries.sort_by_key(|e| e.1);
         let m = bodies.len() - 1;
@@ -3155,37 +3169,38 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
 
     /// A `case` datum: its kind, its kind's equality, its literal, and a
     /// text that tells it from the others.
-    fn case_datum(&mut self, d: &Syntax) -> R<(u8, &'static str, ExpId, String)> {
+    fn case_datum(&mut self, d: &Syn) -> R<(u8, &'static str, ExpId, String)> {
         let bad = "a `case` datum is an integer, a character, a string, a symbol or a boolean";
-        let (kind, eq, text) = match &d.datum {
-            Datum::Number(fixpt_read::Num::Int(n)) => (0, "=", format!("{n}")),
-            Datum::Number(fixpt_read::Num::Big { negative, digits, radix }) => {
+        let (kind, eq, text) = match &d.view() {
+            V::Number(fixpt_read::Num::Int(n)) => (0, "=", format!("{n}")),
+            V::Number(fixpt_read::Num::Big { negative, digits, radix }) => {
                 (0, "=", format!("{negative}:{radix}:{}", digits.trim_start_matches('0')))
             }
-            Datum::Char(c) => (1, "char=?", format!("{c}")),
-            Datum::Str(t) => (2, "string=?", t.clone()),
-            Datum::Bool(b) => (4, "bool=?", format!("{b}")),
-            Datum::Symbol(sym) => match self.name(*sym) {
+            V::Char(c) => (1, "char=?", format!("{c}")),
+            V::Str(t) => (2, "string=?", t.clone()),
+            V::Bool(b) => (4, "bool=?", format!("{b}")),
+            V::Symbol(sym) => match self.name(*sym) {
                 "#t" => (4, "bool=?", "true".to_string()),
                 "#f" => (4, "bool=?", "false".to_string()),
-                "#u" => return Err(FxError::at(d.span, bad)),
+                "#u" => return Err(FxError::at(d.span(), bad)),
                 n => {
                     let text = n.to_string();
-                    let lit = self.arena.exp(d.span, Exp::Symbol(*sym));
+                    let lit = self.arena.exp(d.span(), Exp::Symbol(*sym));
                     return Ok((3, "symbol=?", lit, text));
                 }
             },
-            _ => return Err(FxError::at(d.span, bad)),
+            _ => return Err(FxError::at(d.span(), bad)),
         };
-        Ok((kind, eq, self.parse_exp(d)?, text))
+        Ok((kind, eq, self.parse_exp_syn(d)?, text))
     }
 
     /// A procedure type's parameter written `(name type)`: its name and
     /// type, where `name` names no type or type form.
-    pub(crate) fn named_param(&self, p: &Syntax) -> Option<(Sym, Syntax)> {
-        let [n, colon, t] = p.as_proper_list()? else { return None };
-        (colon.as_symbol().map(|c| self.name(c)) == Some(":")).then_some(())?;
-        Some((n.as_symbol()?, t.clone()))
+    pub(crate) fn named_param(&self, p: &Syn) -> Option<(Sym, Syn)> {
+        let listed = p.list();
+        let [n, colon, t] = listed.as_deref()? else { return None };
+        (colon.sym().map(|c| self.name(c)) == Some(":")).then_some(())?;
+        Some((n.sym()?, t.clone()))
     }
 
     /// `(h t)`, parameter `p`, is `h` applied; refused, saying how to name
@@ -3193,9 +3208,10 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// (the parameters after it, the result, the specification's clauses)
     /// names `h`, as `(select h x)` or a proposition does; or where `h` is
     /// unknown and no module included or opened by `with` may give it.
-    fn misnamed_param(&self, p: &Syntax, later: &[&Syntax]) -> R<()> {
-        let Some([h, _]) = p.as_proper_list() else { return Ok(()) };
-        let Some(h) = h.as_symbol() else { return Ok(()) };
+    fn misnamed_param(&self, p: &Syn, later: &[&Syn]) -> R<()> {
+        let listed = p.list();
+        let Some([h, _]) = listed.as_deref() else { return Ok(()) };
+        let Some(h) = h.sym() else { return Ok(()) };
         let name = self.name(h);
         if TYPE_FORMS.contains(&name) || crate::top::KEYWORDS.contains(&name) || self.lookup_desc(h).is_some() || self.base.contains_key(&h) {
             return Ok(());
@@ -3203,21 +3219,22 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let fix = format!("to name a parameter, write `({name} : type)`");
         if let Some(used) = later.iter().find_map(|s| self.named_in(s, h)) {
             let what = if used.is_empty() { "what follows".to_string() } else { format!("`{used}` after it") };
-            return Err(FxError::at(p.span, format!("`({name} …)` applies `{name}`, but {what} names `{name}`: {fix}")));
+            return Err(FxError::at(p.span(), format!("`({name} …)` applies `{name}`, but {what} names `{name}`: {fix}")));
         }
         if self.include_scope == 0 && self.withs_over(h).is_empty() {
-            return Err(FxError::at(p.span, format!("`{name}` is not a description function: {fix}")));
+            return Err(FxError::at(p.span(), format!("`{name}` is not a description function: {fix}")));
         }
         Ok(())
     }
 
     /// Where `s` has `n` other than as a list's head: the list it is in,
     /// shown if all of it is names, else "".
-    fn named_in(&self, s: &Syntax, n: Sym) -> Option<String> {
-        let items = s.as_proper_list()?;
-        let skip = usize::from(items.first().is_some_and(|x| x.as_symbol().is_some()));
-        if items[skip..].iter().any(|x| x.as_symbol() == Some(n)) {
-            let names: Option<Vec<&str>> = items.iter().map(|x| x.as_symbol().map(|y| self.name(y))).collect();
+    fn named_in(&self, s: &Syn, n: Sym) -> Option<String> {
+        let listed = s.list();
+        let items = listed.as_deref()?;
+        let skip = usize::from(items.first().is_some_and(|x| x.sym().is_some()));
+        if items[skip..].iter().any(|x| x.sym() == Some(n)) {
+            let names: Option<Vec<&str>> = items.iter().map(|x| x.sym().map(|y| self.name(y))).collect();
             return Some(names.map_or(String::new(), |ns| format!("({})", ns.join(" "))));
         }
         items.iter().find_map(|x| self.named_in(x, n))
@@ -3259,7 +3276,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// A `moduleof`'s components (`docs/research/first-class-modules.md`):
     /// `(abs t type)` or `(abs (t …) type)`, `(desc d T)`, `(val x T)`, each
     /// name once; the abstract types in scope in what follows them.
-    fn parse_moduleof(&mut self, span: fixpt_read::Span, comps: &[Syntax]) -> R<TyId> {
+    fn parse_moduleof(&mut self, span: fixpt_read::Span, comps: &[Syn]) -> R<TyId> {
         let depth = self.dscope.len();
         let r = self.parse_moduleof_in(span, comps);
         self.dscope.truncate(depth);
@@ -3269,20 +3286,20 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// `(abs (f (a kind) …) type)`'s name and its parameters' kinds, unread:
     /// `(abs f (=> (kind …) type))`, as `define-generative` writes its
     /// parameters.
-    fn abs_ctor(&mut self, name: &Syntax, ns: &[Syntax]) -> R<(Sym, Vec<Syntax>)> {
-        let err = || FxError::at(name.span, ABS_CTOR_USAGE);
-        let Some(f) = ns[0].as_symbol() else { return Err(err()) };
+    fn abs_ctor(&mut self, name: &Syn, ns: &[Syn]) -> R<(Sym, Vec<Syn>)> {
+        let err = || FxError::at(name.span(), ABS_CTOR_USAGE);
+        let Some(f) = ns[0].sym() else { return Err(err()) };
         let mut ks = Vec::new();
         for p in &ns[1..] {
-            match p.as_proper_list() {
-                Some([n, k]) if n.as_symbol().is_some() => ks.push(k.clone()),
+            match p.list().as_deref() {
+                Some([n, k]) if n.sym().is_some() => ks.push(k.clone()),
                 _ => return Err(err()),
             }
         }
         Ok((f, ks))
     }
 
-    fn parse_moduleof_in(&mut self, span: fixpt_read::Span, comps: &[Syntax]) -> R<TyId> {
+    fn parse_moduleof_in(&mut self, span: fixpt_read::Span, comps: &[Syn]) -> R<TyId> {
         let usage = "`(moduleof (abs t type) … (desc d type) … (val x type) …)`";
         let (mut abs, mut descs, mut vals): (Vec<(Sym, DVar)>, Vec<(Sym, TyId)>, Vec<(Sym, TyId)>) = (Vec::new(), Vec::new(), Vec::new());
         // Names given twice: as descriptions, or as values (a value may have
@@ -3291,27 +3308,27 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         for c in comps {
             let parts = self.items(c, "a module component")?.to_vec();
             let [head, name, what] = &parts[..] else {
-                return Err(FxError::at(c.span, usage));
+                return Err(FxError::at(c.span(), usage));
             };
             // `(abs (t …) type)` names several; `(abs (f (a kind) …) type)`
             // is one constructor, its parameters' kinds given.
-            let mut ctor: Option<Vec<Syntax>> = None;
-            let names: Vec<Sym> = match (name.as_symbol(), name.as_proper_list()) {
+            let mut ctor: Option<Vec<Syn>> = None;
+            let names: Vec<Sym> = match (name.sym(), name.list().as_deref()) {
                 (Some(n), _) => vec![n],
-                (None, Some(ns)) if self.head(&parts) == Some("abs") && ns.iter().all(|n| n.as_symbol().is_some()) => {
-                    ns.iter().filter_map(|n| n.as_symbol()).collect()
+                (None, Some(ns)) if self.head(&parts) == Some("abs") && ns.iter().all(|n| n.sym().is_some()) => {
+                    ns.iter().filter_map(|n| n.sym()).collect()
                 }
                 (None, Some(ns)) if self.head(&parts) == Some("abs") => {
                     let (f, ks) = self.abs_ctor(name, ns)?;
                     ctor = Some(ks);
                     vec![f]
                 }
-                _ => return Err(FxError::at(name.span, "a component's name")),
+                _ => return Err(FxError::at(name.span(), "a component's name")),
             };
             let seen = if self.head(&parts) == Some("val") { &mut vseen } else { &mut seen };
             for n in &names {
                 if seen.contains(n) {
-                    return Err(FxError::at(c.span, format!("`{}` appears twice", self.name(*n))));
+                    return Err(FxError::at(c.span(), format!("`{}` appears twice", self.name(*n))));
                 }
                 seen.push(*n);
             }
@@ -3320,19 +3337,19 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     // A type, or a type constructor: a description function
                     // to a type (`crate::kinds`).
                     let ks = match ctor.take() {
-                        Some(ks) if what.as_symbol().map(|k| self.name(k)) == Some("type") => {
+                        Some(ks) if what.sym().map(|k| self.name(k)) == Some("type") => {
                             let ks = ks.iter().map(|k| self.parse_kind(k)).collect::<R<Vec<_>>>();
-                            Some(ks.map_err(|_| FxError::at(name.span, ABS_CTOR_USAGE))?)
+                            Some(ks.map_err(|_| FxError::at(name.span(), ABS_CTOR_USAGE))?)
                         }
-                        Some(_) => return Err(FxError::at(name.span, ABS_CTOR_USAGE)),
+                        Some(_) => return Err(FxError::at(name.span(), ABS_CTOR_USAGE)),
                         None => None,
                     };
-                    let kind = match what.as_symbol().map(|k| self.name(k)) {
+                    let kind = match what.sym().map(|k| self.name(k)) {
                         _ if ks.is_some() => self.arena.arrow(ks.unwrap_or_default(), Kind::Type),
                         Some("type") => Kind::Type,
                         _ => match self.parse_kind(what) {
                             Ok(k) if self.arena.arrow_parts(k).is_some_and(|(_, r)| r == Kind::Type) => k,
-                            _ => return Err(FxError::at(what.span, "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")),
+                            _ => return Err(FxError::at(what.span(), "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")),
                         },
                     };
                     for n in names {
@@ -3351,18 +3368,18 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     let d = self.effect_desc(e);
                     descs.push((names[0], d));
                 }
-                Some("desc") if self.head(&self.items(what, "").unwrap_or(&[]).to_vec()) == Some("dlambda") => {
+                Some("desc") if self.head(&self.items(what, "").unwrap_or_default()) == Some("dlambda") => {
                     let f = self.parse_fun(what, None)?;
                     self.dscope.push((names[0], DScope::Fun(f)));
                     descs.push((names[0], f));
                 }
                 Some("desc") => {
-                    let t = self.parse_type(what)?;
+                    let t = self.parse_type_syn(what)?;
                     self.dscope.push((names[0], DScope::Rec(t)));
                     descs.push((names[0], t));
                 }
-                Some("val") => vals.push((names[0], self.parse_type(what)?)),
-                _ => return Err(FxError::at(head.span, usage)),
+                Some("val") => vals.push((names[0], self.parse_type_syn(what)?)),
+                _ => return Err(FxError::at(head.span(), usage)),
             }
         }
         let _ = span;
@@ -3402,11 +3419,11 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             Some(n) => *n,
             None => {
                 let name = self.interner.intern(&format!("%shared:{key}"));
-                let sym = |c: &mut Self, s: &str| Syntax::symbol(span, c.interner.intern(s));
-                let str = |s: &str| Syntax::new(span, Datum::Str(s.to_string()));
-                let loaded = Syntax::list(span, vec![sym(self, "%loaded"), str(&key), str(path)]);
-                let form = Syntax::list(span, vec![sym(self, "define"), Syntax::symbol(span, name), loaded]);
-                let made = self.top_defining(&form)?;
+                let sym = |c: &mut Self, s: &str| Syn::named(span, s, &mut c.interner);
+                let str = |s: &str| Syn::datum(span, V::Str(s.to_string()));
+                let loaded = Syn::lst(span, vec![sym(self, "%loaded"), str(&key), str(path)]);
+                let form = Syn::lst(span, vec![sym(self, "define"), Syn::symbol(span, name, &self.interner), loaded]);
+                let made = self.top_defining_syn(&form)?;
                 for (top, _) in &made.run {
                     // Pure but for reading globals: the hidden globals of the
                     // files it loads, which never change.
@@ -3458,20 +3475,20 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// so a module of `T` fits it (`bare_name`), and a client may pass its
     /// values but not name its type. `T` must be known as a module's type
     /// where it is read: a `define-type` of one is read in order.
-    fn restricted(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+    fn restricted(&mut self, s: &Syn, items: &[Syn]) -> R<TyId> {
         let [_, t, names @ ..] = items else {
-            return Err(FxError::at(s.span, "`(restrict module-type name …)`"));
+            return Err(FxError::at(s.span(), "`(restrict module-type name …)`"));
         };
-        let t = self.parse_type(t)?;
+        let t = self.parse_type_syn(t)?;
         let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else {
-            return Err(FxError::at(s.span, format!("`restrict` restricts a module's type, and this is a {}", self.show_ty(t))));
+            return Err(FxError::at(s.span(), format!("`restrict` restricts a module's type, and this is a {}", self.show_ty(t))));
         };
         let mut kept = Vec::new();
         for n in names {
-            let Some(name) = n.as_symbol() else { return Err(FxError::at(n.span, "`restrict` keeps names")) };
+            let Some(name) = n.sym() else { return Err(FxError::at(n.span(), "`restrict` keeps names")) };
             let has = |ps: &[(Sym, TyId)]| ps.iter().any(|(m, _)| *m == name);
             if !(abs.iter().any(|(m, _)| *m == name) || has(&descs) || has(&vals)) {
-                return Err(FxError::at(n.span, format!("the module gives no `{}`", self.name(name))));
+                return Err(FxError::at(n.span(), format!("the module gives no `{}`", self.name(name))));
             }
             kept.push(name);
         }
@@ -3513,7 +3530,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// where the types after it select from it, as a call does (M5), its
     /// types those of that module. Done when the arguments are, and no
     /// procedure of no parameters is left: a module's type, or refused.
-    fn type_made(&mut self, mut t: TyId, mut args: &[Syntax], span: fixpt_read::Span, path: &str) -> R<TyId> {
+    fn type_made(&mut self, mut t: TyId, mut args: &[Syn], span: fixpt_read::Span, path: &str) -> R<TyId> {
         loop {
             match self.arena.get(self.arena.resolve(t)).clone() {
                 Ty::Poly { binders, body } if !args.is_empty() => {
@@ -3525,7 +3542,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                         let d = self.parse_d(a)?;
                         if !self.d_fits(&d, *k) {
                             let word = self.kind_word(*k);
-                            return Err(FxError::at(a.span, format!("`{}` is bound as a {word}, and the description given is not one", self.name(self.arena.dvar_name(*v)))));
+                            return Err(FxError::at(a.span(), format!("`{}` is bound as a {word}, and the description given is not one", self.name(self.arena.dvar_name(*v)))));
                         }
                         map.insert(*v, d);
                     }
@@ -3541,8 +3558,8 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     self.param_sels(result, &mut Default::default(), &mut found);
                     let mut map = fixpt_hash::HashMap::default();
                     for (k, x) in found {
-                        let Some(m) = now[k].as_symbol() else {
-                            return Err(FxError::at(now[k].span, format!("argument {} is a module the types `{path}` makes depend on: give it by name", k + 1)));
+                        let Some(m) = now[k].sym() else {
+                            return Err(FxError::at(now[k].span(), format!("argument {} is a module the types `{path}` makes depend on: give it by name", k + 1)));
                         };
                         map.insert((k, x), self.arena.ty(Ty::Select(m, x)));
                     }
@@ -3563,19 +3580,18 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// order: before the loads of its expressions, as the FX-26 parser
     /// takes them (`type-loaded`) and the driver reads them for it
     /// (`syn::load_modules_in`).
-    pub(crate) fn type_loads(&mut self, s: &Syntax) -> R<()> {
-        let Some(items) = s.as_proper_list() else { return Ok(()) };
-        match items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) {
+    pub(crate) fn type_loads(&mut self, s: &Syn) -> R<()> {
+        let Some(items) = s.items() else { return Ok(()) };
+        match s.head_sym().map(|h| self.name(h)) {
             Some("quote" | "quasiquote") => Ok(()),
             Some(loader @ ("load-moduleof" | "load-input-moduleof")) => {
                 let input = loader == "load-input-moduleof";
-                if let Some(Datum::Str(path)) = items.get(1).map(|p| &p.datum) {
-                    let path = path.clone();
-                    self.parse_load(s.span, &path, input)?;
+                if let Some(V::Str(path)) = items.clone().nth(1).map(|p| p.view()) {
+                    self.parse_load(s.span(), &path, input)?;
                 }
                 Ok(())
             }
-            _ => items.iter().try_for_each(|x| self.type_loads(x)),
+            _ => items.into_iter().try_for_each(|x| self.type_loads(&x)),
         }
     }
 
@@ -3651,16 +3667,16 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             match &forms[..] {
                 _ if made.is_some() => {
                     let one = made.expect("made");
-                    let item = Syntax::list(
-                        one.span,
-                        vec![Syntax::symbol(span, self.interner.intern("define")), Syntax::symbol(span, self.interner.intern("input")), one],
+                    let item = Syn::lst(
+                        one.span(),
+                        vec![Syn::named(span, "define", &mut self.interner), Syn::named(span, "input", &mut self.interner), one],
                     );
                     self.parse_module_in(&[item]).map(|items| (None, items))
                 }
                 [one] => {
-                    let item = Syntax::list(
-                        one.span,
-                        vec![Syntax::symbol(span, self.interner.intern("define")), Syntax::symbol(span, self.interner.intern("input")), one.clone()],
+                    let item = Syn::lst(
+                        one.span(),
+                        vec![Syn::named(span, "define", &mut self.interner), Syn::named(span, "input", &mut self.interner), one.clone()],
                     );
                     self.parse_module_in(&[item]).map(|items| (None, items))
                 }
@@ -3687,9 +3703,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             None => e,
             // `(module-parameters ())`, a module of state made once by a
             // `lambda` of none: no `plambda` of none around it (Heist's).
-            Some(binders) if binders.is_empty() => self.arena.exp(forms[0].span, Exp::Lambda { params: Vec::new(), body: e }),
+            Some(binders) if binders.is_empty() => self.arena.exp(forms[0].span(), Exp::Lambda { params: Vec::new(), body: e }),
             Some(binders) => {
-                let p = forms[0].span;
+                let p = forms[0].span();
                 let made = self.arena.exp(p, Exp::Lambda { params: Vec::new(), body: e });
                 self.arena.exp(p, Exp::PLambda { binders, body: made })
             }
@@ -3706,46 +3722,48 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     ///
     /// each module's values the items', hidden; no `plambda` with no kinds.
     /// None if the file has no module parameters.
-    pub(crate) fn modules_made(&mut self, forms: &[Syntax]) -> Option<Syntax> {
+    pub(crate) fn modules_made(&mut self, forms: &[Syn]) -> Option<Syn> {
         let (first, rest) = forms.split_first()?;
         let binders = module_parameters_of(first, &self.interner)?;
-        let (kinds, modules): (Vec<Syntax>, Vec<Syntax>) = binders.iter().cloned().partition(|b| binder_is_kind(b, &self.interner));
+        let (kinds, modules): (Vec<Syn>, Vec<Syn>) = binders.iter().cloned().partition(|b| binder_is_kind(b, &self.interner));
         if modules.is_empty() {
             return None;
         }
-        let at = first.span;
-        let sym = |c: &mut Self, s: &str| Syntax::symbol(at, c.interner.intern(s));
+        let at = first.span();
+        let sym = |c: &mut Self, s: &str| Syn::named(at, s, &mut c.interner);
         // Each included but those marked `qualified`; each a `lambda`'s
         // parameter, `(m T)`.
-        let included: Vec<&Syntax> = modules.iter().filter(|b| !matches!(b.as_proper_list(), Some([_, _, q]) if is_qualified(q, &self.interner))).collect();
-        let includes: Vec<Syntax> = included
+        let included: Vec<&Syn> = modules.iter().filter(|b| !matches!(b.list().as_deref(), Some([_, _, q]) if is_qualified(q, &self.interner))).collect();
+        let includes: Vec<Syn> = included
             .into_iter()
             .map(|b| {
-                let m = b.as_proper_list().expect("a binder")[0].clone();
-                Syntax::list(m.span, vec![sym(self, "include"), m])
+                let listed = b.list();
+                let m = listed.as_deref().expect("a binder")[0].clone();
+                Syn::lst(m.span(), vec![sym(self, "include"), m])
             })
             .collect();
-        let modules: Vec<Syntax> = modules.iter().map(|b| Syntax::list(b.span, b.as_proper_list().expect("a binder")[..2].to_vec())).collect();
-        let hide = Syntax::list(at, std::iter::once(sym(self, "hide")).chain(includes).collect());
-        let module = Syntax::list(at, [sym(self, "module"), hide].into_iter().chain(rest.iter().cloned()).collect());
-        let lambda = Syntax::list(at, vec![sym(self, "lambda"), Syntax::list(at, modules), module]);
+        let modules: Vec<Syn> = modules.iter().map(|b| Syn::lst(b.span(), b.list().as_deref().expect("a binder")[..2].to_vec())).collect();
+        let hide = Syn::lst(at, std::iter::once(sym(self, "hide")).chain(includes).collect());
+        let module = Syn::lst(at, [sym(self, "module"), hide].into_iter().chain(rest.iter().cloned()).collect());
+        let lambda = Syn::lst(at, vec![sym(self, "lambda"), Syn::lst(at, modules), module]);
         Some(match kinds.is_empty() {
             true => lambda,
-            false => Syntax::list(at, vec![sym(self, "plambda"), Syntax::list(at, kinds), lambda]),
+            false => Syn::lst(at, vec![sym(self, "plambda"), Syn::lst(at, kinds), lambda]),
         })
     }
 
     /// A module's file's parameters, if its first form is
     /// `(module-parameters ((name kind) …))`, bound for the rest of it as a
     /// `plambda`'s are; and its other forms.
-    fn module_parameters<'f>(&mut self, forms: &'f [Syntax]) -> R<(Option<Vec<(DVar, Kind)>>, &'f [Syntax])> {
+    fn module_parameters<'f>(&mut self, forms: &'f [Syn]) -> R<(Option<Vec<(DVar, Kind)>>, &'f [Syn])> {
         let Some((first, rest)) = forms.split_first() else { return Ok((None, forms)) };
-        let Some(items) = first.as_proper_list() else { return Ok((None, forms)) };
-        if !items.first().and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "module-parameters") {
+        let listed = first.list();
+        let Some(items) = listed.as_deref() else { return Ok((None, forms)) };
+        if !items.first().and_then(|h| h.sym()).is_some_and(|h| self.name(h) == "module-parameters") {
             return Ok((None, forms));
         }
         let [_, binders] = items else {
-            return Err(FxError::at(first.span, "`(module-parameters ((name kind) …))`"));
+            return Err(FxError::at(first.span(), "`(module-parameters ((name kind) …))`"));
         };
         let lives = self.lifetimes.len();
         let binders = self.parse_binders(binders)?;
@@ -3785,7 +3803,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// A `module`'s items, in order, each seeing those before it:
     /// `(define-generative t T)`, `(define-type d T)`, `(define x e)`,
     /// `(define x T e)` and `(define-rec (f T e) …)`.
-    fn parse_module(&mut self, span: fixpt_read::Span, forms: &[Syntax]) -> R<ExpId> {
+    fn parse_module(&mut self, span: fixpt_read::Span, forms: &[Syn]) -> R<ExpId> {
         // Its `define-datatype`s expanded, as a program's and a module
         // file's are (`expand_datatype`).
         let mut expanded = Vec::new();
@@ -3830,7 +3848,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// program's are (`declare_ahead`): each defined once, by name, in
     /// scope before any is read, so that they may name each other, and
     /// themselves, in any order; each checked grounded once all are.
-    fn parse_module_in(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
+    fn parse_module_in(&mut self, forms: &[Syn]) -> R<Vec<ModItem>> {
         // What its `include`s give, as the expander found, in scope outside
         // its own types (declared ahead, below) and inside what is outside
         // it: `(with %include …)`'s, as its values are (`with_includes`).
@@ -3860,14 +3878,14 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// What a module's `include`s, `forms`' (in `hide`s too), give, as the
     /// expander found (`#:relied`), together; none if one of them has no
     /// record.
-    fn includes_relied(&self, forms: &[Syntax]) -> Option<crate::ast::Relied> {
+    fn includes_relied(&self, forms: &[Syn]) -> Option<crate::ast::Relied> {
         let mut all = crate::ast::Relied { vals: Vec::new(), descs: Vec::new() };
         let mut any = false;
-        let mut work: Vec<&Syntax> = forms.iter().collect();
+        let mut work: Vec<Syn> = forms.to_vec();
         while let Some(f) = work.pop() {
-            let items = f.as_proper_list().unwrap_or(&[]);
-            match self.head(items) {
-                Some("hide") => work.extend(&items[1..]),
+            let items = f.list().unwrap_or_default();
+            match self.head(&items) {
+                Some("hide") => work.extend(items[1..].iter().copied()),
                 Some("include") => {
                     let (Some(Some(r)), _) = self.written_shape(&items[2..]).ok()? else { return None };
                     all.vals.extend(r.vals);
@@ -3880,16 +3898,17 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         any.then_some(all)
     }
 
-    fn parse_module_in_scope(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
+    fn parse_module_in_scope(&mut self, forms: &[Syn]) -> R<Vec<ModItem>> {
         let outer = (std::mem::take(&mut self.ahead), std::mem::take(&mut self.ahead_filled));
         let mut names: Vec<Sym> = Vec::new();
         let mut twice: Vec<Sym> = Vec::new();
         for f in forms {
-            let items = f.as_proper_list().unwrap_or(&[]);
+            let listed = f.list();
+            let items = listed.as_deref().unwrap_or(&[]);
             if let [h, n, d] = items
-                && h.as_symbol().is_some_and(|h| self.name(h) == "define-type")
-                && let Some(n) = n.as_symbol()
-                && self.head(d.as_proper_list().unwrap_or(&[])) != Some("dlambda")
+                && h.sym().is_some_and(|h| self.name(h) == "define-type")
+                && let Some(n) = n.sym()
+                && self.head(d.list().as_deref().unwrap_or(&[])) != Some("dlambda")
             {
                 if names.contains(&n) { twice.push(n) } else { names.push(n) }
             }
@@ -3910,14 +3929,14 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         r
     }
 
-    fn parse_module_items(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
+    fn parse_module_items(&mut self, forms: &[Syn]) -> R<Vec<ModItem>> {
         let outer_runs = std::mem::replace(&mut self.run_items, 0);
         let r = self.parse_module_items_counted(forms);
         self.run_items = outer_runs;
         r
     }
 
-    fn parse_module_items_counted(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
+    fn parse_module_items_counted(&mut self, forms: &[Syn]) -> R<Vec<ModItem>> {
         let mut out = Vec::new();
         // Each `(include m)`, and where each item's values are written (a
         // `define-rec`'s, each binding's), for `with_includes`.
@@ -3925,7 +3944,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         // The forms to read, the first last, each hidden or not (`(hide
         // item …)`, `TODO.md` §69): the module's own borrowed, not copied
         // (`TODO.md` §126), and what a `hide` expands to owned.
-        let work: Vec<(std::borrow::Cow<'_, Syntax>, bool)> = forms.iter().rev().map(|f| (std::borrow::Cow::Borrowed(f), false)).collect();
+        let work: Vec<(std::borrow::Cow<'_, Syn>, bool)> = forms.iter().rev().map(|f| (std::borrow::Cow::Borrowed(f), false)).collect();
         // A module with `include`s, in a `hide` or not: their types are in
         // scope in its items (`include_scope`).
         let includes_here = forms.iter().any(|f| self.includes_in(f));
@@ -3940,8 +3959,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     }
 
     /// Whether form `f` is an `(include m)`, or a `hide` holding one.
-    fn includes_in(&self, f: &Syntax) -> bool {
-        let items = f.as_proper_list().unwrap_or(&[]);
+    fn includes_in(&self, f: &Syn) -> bool {
+        let listed = f.list();
+        let items = listed.as_deref().unwrap_or(&[]);
         match self.head(items) {
             Some("include") => true,
             Some("hide") => items[1..].iter().any(|g| self.includes_in(g)),
@@ -3954,16 +3974,16 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     #[allow(clippy::type_complexity)]
     fn module_items_from(
         &mut self,
-        mut work: Vec<(std::borrow::Cow<'_, Syntax>, bool)>,
+        mut work: Vec<(std::borrow::Cow<'_, Syn>, bool)>,
         out: &mut Vec<ModItem>,
         includes: &mut Vec<(fixpt_read::Span, ExpId, bool)>,
         spans: &mut Vec<Vec<fixpt_read::Span>>,
     ) -> R<()> {
         while let Some((f, hidden)) = work.pop() {
-            let f: &Syntax = &f;
+            let f: &Syn = &f;
             // A string: a comment, read past (in a `hide` too, and among a
             // module file's forms).
-            if f.as_str().is_some() {
+            if matches!(f.view(), V::Str(_)) {
                 continue;
             }
             // An expression: run for what it does as the module is made, in
@@ -3972,12 +3992,12 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             if !is_item_form(f, &self.interner) {
                 let n = self.run_items;
                 self.run_items += 1;
-                let sym = |c: &mut Self, s: &str| Syntax::symbol(f.span, c.interner.intern(s));
-                let define = Syntax::list(f.span, vec![sym(self, "define"), sym(self, &format!("%run-{n}")), f.clone()]);
-                work.push((std::borrow::Cow::Owned(Syntax::list(f.span, vec![sym(self, "hide"), define])), hidden));
+                let sym = |c: &mut Self, s: &str| Syn::named(f.span(), s, &mut c.interner);
+                let define = Syn::lst(f.span(), vec![sym(self, "define"), sym(self, &format!("%run-{n}")), f.clone()]);
+                work.push((std::borrow::Cow::Owned(Syn::lst(f.span(), vec![sym(self, "hide"), define])), hidden));
                 continue;
             }
-            let parts = self.items(f, "a module's definition")?;
+            let parts = &self.items(f, "a module's definition")?[..];
             // `(hide item …)`: its items, their `define-datatype`s expanded,
             // each hidden.
             if self.head(&parts) == Some("hide") {
@@ -3991,14 +4011,15 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             // Its files named in types, loaded first (`type_loads`).
             self.type_loads(f)?;
             let before = out.len();
-            let name_of = |p: &Self, s: &Syntax| s.as_symbol().ok_or_else(|| FxError::at(s.span, "a name")).map(|n| (n, p.name(n).to_string()));
+            let name_of = |p: &Self, s: &Syn| s.sym().ok_or_else(|| FxError::at(s.span(), "a name")).map(|n| (n, p.name(n).to_string()));
             match (self.head(&parts), &parts[..]) {
                 (Some("define-generative"), [_, n, rep]) => {
                     // `(define-generative (t (p k) …) rep)`: a type
                     // constructor, its representation a function of the
                     // parameters (`crate::kinds`).
-                    let (n, params) = match n.as_proper_list() {
-                        Some([n, ps @ ..]) if !ps.is_empty() => (n, Some(Syntax::list(f.span, ps.to_vec()))),
+                    let listed = n.list();
+                    let (n, params) = match listed.as_deref() {
+                        Some([n, ps @ ..]) if !ps.is_empty() => (n, Some(Syn::lst(f.span(), ps.to_vec()))),
                         _ => (n, None),
                     };
                     let (name, text) = name_of(self, n)?;
@@ -4018,7 +4039,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     for (v, k) in &binders {
                         self.dscope.push((self.arena.dvar_name(*v), DScope::Var(*v, *k)));
                     }
-                    let rep = self.parse_type(rep);
+                    let rep = self.parse_type_syn(rep);
                     self.dscope.truncate(inner);
                     let rep = rep?;
                     let rep = if binders.is_empty() { rep } else { self.arena.ty(Ty::Lam { params: binders, body: D::Type(rep) }) };
@@ -4026,8 +4047,8 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     // Each conversion the identity, made as a closure is.
                     let x = self.interner.intern("x");
                     let identity = |p: &mut Self| {
-                        let body = p.arena.exp(f.span, Exp::Var(x));
-                        p.arena.exp(f.span, Exp::Lambda { params: vec![(x, None)], body })
+                        let body = p.arena.exp(f.span(), Exp::Var(x));
+                        p.arena.exp(f.span(), Exp::Lambda { params: vec![(x, None)], body })
                     };
                     let (up_fn, down_fn) = (identity(self), identity(self));
                     out.push(ModItem::Abs { name, var, rep, up, down, up_fn, down_fn });
@@ -4037,16 +4058,17 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 // what a `define-datatype` with parameters expands to, in a
                 // `load-module`'s file too (PLAN.md Q13, O15). As the FX-26
                 // parser's `parse-module-item`.
-                (Some("define-type"), [_, head, t]) if head.as_proper_list().is_some_and(|h| h.len() > 1) => {
-                    let h = head.as_proper_list().unwrap_or(&[]);
+                (Some("define-type"), [_, head, t]) if head.list().as_deref().is_some_and(|h| h.len() > 1) => {
+                    let listed = head.list();
+                    let h = listed.as_deref().unwrap_or(&[]);
                     let (name, _) = name_of(self, &h[0])?;
-                    let dlambda = Syntax::symbol(head.span, self.interner.intern("dlambda"));
-                    let fun = Syntax::list(f.span, vec![dlambda, Syntax::list(head.span, h[1..].to_vec()), t.clone()]);
+                    let dlambda = Syn::named(head.span(), "dlambda", &mut self.interner);
+                    let fun = Syn::lst(f.span(), vec![dlambda, Syn::lst(head.span(), h[1..].to_vec()), t.clone()]);
                     let ty = self.parse_fun(&fun, None)?;
                     self.dscope.push((name, DScope::Fun(ty)));
                     out.push(ModItem::Desc { name, ty });
                 }
-                (Some("define-type"), [_, n, t]) if self.head(t.as_proper_list().unwrap_or(&[])) == Some("dlambda") => {
+                (Some("define-type"), [_, n, t]) if self.head(t.list().as_deref().unwrap_or(&[])) == Some("dlambda") => {
                     let (name, _) = name_of(self, n)?;
                     let ty = self.parse_fun(t, None)?;
                     self.dscope.push((name, DScope::Fun(ty)));
@@ -4055,7 +4077,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 // As a program's: declared ahead, or a knot of its own.
                 (Some("define-type"), [_, n, t]) => {
                     let (name, _) = name_of(self, n)?;
-                    let ty = self.define_type(name, t, t.span)?;
+                    let ty = self.define_type(name, t, t.span())?;
                     out.push(ModItem::Desc { name, ty });
                 }
                 // `(define-effect e E)`: a transparent description of an
@@ -4070,7 +4092,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 }
                 (Some("define"), [_, n, init]) => {
                     let (name, _) = name_of(self, n)?;
-                    out.push(ModItem::Val { name, ty: None, init: self.parse_exp(init)?, infer: false });
+                    out.push(ModItem::Val { name, ty: None, init: self.parse_exp_syn(init)?, infer: false });
                 }
                 (Some(d @ ("define" | "define*")), [_, n, t, init]) => {
                     let infer = d == "define*";
@@ -4078,39 +4100,39 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     self.arrow_star = self.written_arrow_star(t);
                     if infer && self.arrow_star {
                         self.arrow_star = false;
-                        return Err(FxError::at(t.span, "`define*` and `->*` each find what a procedure does: write one"));
+                        return Err(FxError::at(t.span(), "`define*` and `->*` each find what a procedure does: write one"));
                     }
-                    let ty = self.parse_type(t)?;
-                    out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp(init)?, infer });
+                    let ty = self.parse_type_syn(t)?;
+                    out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp_syn(init)?, infer });
                 }
                 // `(include m)` (`TODO.md` §69): `m`'s values the module's own.
                 (Some("include"), [_, _, ..]) if self.include_item(f) => {
-                    includes.push((f.span, self.parse_include_item(f)?, hidden));
+                    includes.push((f.span(), self.parse_include_item(f)?, hidden));
                     continue;
                 }
                 (Some("define-rec"), [_, bs @ ..]) => {
                     let mut group = Vec::new();
-                    spans.push(bs.iter().map(|b| b.span).collect());
+                    spans.push(bs.iter().map(|b| b.span()).collect());
                     for b in bs {
                         let triple = self.items(b, "`(name type expression)`")?.to_vec();
                         let [n, t, init] = &triple[..] else {
-                            return Err(FxError::at(b.span, "`(define-rec (name type expression) …)`"));
+                            return Err(FxError::at(b.span(), "`(define-rec (name type expression) …)`"));
                         };
                         let (name, _) = name_of(self, n)?;
                         self.arrow_star = self.written_arrow_star(t);
-                        let ty = self.parse_type(t)?;
-                        group.push((name, ty, self.parse_exp(init)?));
+                        let ty = self.parse_type_syn(t)?;
+                        group.push((name, ty, self.parse_exp_syn(init)?));
                     }
                     out.push(ModItem::Rec(group));
                 }
                 _ => {
                     return Err(FxError::at(
-                        f.span,
+                        f.span(),
                         "a module holds `(define-generative t T)`, `(define-type d T)`, `(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, `(define-rec (f T e) …)`, `(include m)` and `(hide item …)`",
                     ));
                 }
             }
-            spans.resize(out.len(), vec![f.span]);
+            spans.resize(out.len(), vec![f.span()]);
             // Each name a hidden item defines, marked by a type of its own:
             // a type's `%hidden:name`, a value's `%hiddenv:name`, as a type
             // and a value may share a name; types, so that no compiler makes
@@ -4130,7 +4152,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     let name = self.interner.intern(&format!("{}{}", if value { "%hiddenv:" } else { "%hidden:" }, self.name(n)));
                     out.push(ModItem::Desc { name, ty: self.unit });
                 }
-                spans.resize(out.len(), vec![f.span]);
+                spans.resize(out.len(), vec![f.span()]);
             }
         }
         Ok(())
@@ -4218,11 +4240,11 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// A label or tag: a keyword, `#:name` (`docs/fx26.md`, "Keywords"), or
     /// the name bare, the same label; or a natural number, as a
     /// `define-datatype` numbers a variant's members.
-    pub(crate) fn label(&mut self, s: &Syntax) -> R<Sym> {
-        if let Datum::Keyword(x) = s.datum {
+    pub(crate) fn label(&mut self, s: &Syn) -> R<Sym> {
+        if let V::Keyword(x) = s.view() {
             return Ok(x);
         }
-        if let Some(x) = s.as_symbol() {
+        if let Some(x) = s.sym() {
             // A procedural macro's alias is its name: a label binds nothing.
             if let Some(base) = crate::macros::procedural::alias_base(self.name(x)) {
                 let base = base.to_string();
@@ -4232,62 +4254,62 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         }
         match self.literal_int(s) {
             Some(n) if n >= 0 => Ok(self.interner.intern(&n.to_string())),
-            _ => Err(FxError::at(s.span, "a label is a keyword, a name or a natural number")),
+            _ => Err(FxError::at(s.span(), "a label is a keyword, a name or a natural number")),
         }
     }
 
     /// `(tagcase e (tag x body…) … [(else y body…)])`.
-    fn parse_tagcase(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_tagcase(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let Some((scrutinee, clauses)) = items.split_first() else {
             return Err(FxError::at(span, "`(tagcase expression (tag name body …) …)`"));
         };
-        let scrutinee = self.parse_exp(scrutinee)?;
+        let scrutinee = self.parse_exp_syn(scrutinee)?;
         let mut arms: Vec<Arm> = Vec::new();
         let mut els = None;
         for (i, c) in clauses.iter().enumerate() {
             // An arm still to be written: an `else` whose body is the hole,
             // so that what it binds says which tags are left.
             if let Some(h) = self.holes
-                && c.as_symbol() == Some(h.exp)
+                && c.sym() == Some(h.exp)
             {
-                let body = self.arena.exp(c.span, Exp::Var(h.arm));
+                let body = self.arena.exp(c.span(), Exp::Var(h.arm));
                 els = Some((h.arm_var, body));
                 break;
             }
             let parts = self.items(c, "a tagcase arm")?.to_vec();
             let [tag, bind, body @ ..] = &parts[..] else {
-                return Err(FxError::at(c.span, "a tagcase arm is `(tag name body …)`"));
+                return Err(FxError::at(c.span(), "a tagcase arm is `(tag name body …)`"));
             };
             if body.is_empty() {
-                return Err(FxError::at(c.span, "a tagcase arm needs a body"));
+                return Err(FxError::at(c.span(), "a tagcase arm needs a body"));
             }
-            if tag.as_symbol().map(|t| self.name(t)) == Some("else") {
+            if tag.sym().map(|t| self.name(t)) == Some("else") {
                 if i + 1 != clauses.len() {
-                    return Err(FxError::at(c.span, "`else` must be the last arm"));
+                    return Err(FxError::at(c.span(), "`else` must be the last arm"));
                 }
-                let Some(y) = bind.as_symbol() else {
-                    return Err(FxError::at(bind.span, "`else` binds one name"));
+                let Some(y) = bind.sym() else {
+                    return Err(FxError::at(bind.span(), "`else` binds one name"));
                 };
-                els = Some((y, self.parse_body(c.span, body)?));
+                els = Some((y, self.parse_body(c.span(), body)?));
                 continue;
             }
             let tag = self.label(tag)?;
             if arms.iter().any(|a| a.tag == tag) {
-                return Err(FxError::at(c.span, format!("`{}` has two arms", self.name(tag))));
+                return Err(FxError::at(c.span(), format!("`{}` has two arms", self.name(tag))));
             }
-            let bind = match (bind.as_symbol(), &bind.datum) {
+            let bind = match (bind.sym(), &bind.view()) {
                 (Some(x), _) => ArmBind::Value(x),
-                (None, Datum::Nil) => ArmBind::Fields(Vec::new()),
+                (None, V::Nil) => ArmBind::Fields(Vec::new()),
                 _ => {
-                    let names = self.items(bind, "the names an arm binds")?;
+                    let names = &self.items(bind, "the names an arm binds")?[..];
                     let names = names
                         .iter()
-                        .map(|n| n.as_symbol().ok_or_else(|| FxError::at(n.span, "a name")))
+                        .map(|n| n.sym().ok_or_else(|| FxError::at(n.span(), "a name")))
                         .collect::<R<Vec<_>>>()?;
                     ArmBind::Fields(names)
                 }
             };
-            let body = self.parse_body(c.span, body)?;
+            let body = self.parse_body(c.span(), body)?;
             arms.push(Arm { tag, bind, body });
         }
         Ok(self.arena.exp(span, Exp::TagCase { scrutinee, arms, els }))
@@ -4295,26 +4317,26 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
 
     /// A bloblet form; see [`BlobletOp`].
     /// A `lambda`'s parameters and body, parsed.
-    fn parse_lambda(&mut self, span: fixpt_read::Span, params: &Syntax, body: &[Syntax]) -> R<ExpId> {
-        let params = match &params.datum {
-            Datum::Nil => Vec::new(),
+    fn parse_lambda(&mut self, span: fixpt_read::Span, params: &Syn, body: &[Syn]) -> R<ExpId> {
+        let params = match &params.view() {
+            V::Nil => Vec::new(),
             _ => self
                 .items(params, "parameters")?
                 .to_vec()
                 .iter()
                 .map(|p| {
-                    if self.holes.is_some_and(|h| p.as_symbol() == Some(h.exp)) {
-                        return Err(FxError::at(p.span, "a parameter is `name` or `(name type)`"));
+                    if self.holes.is_some_and(|h| p.sym() == Some(h.exp)) {
+                        return Err(FxError::at(p.span(), "a parameter is `name` or `(name type)`"));
                     }
-                    if let Some(name) = p.as_symbol() {
+                    if let Some(name) = p.sym() {
                         return Ok((name, None));
                     }
                     let pair = self.items(p, "a parameter")?.to_vec();
                     let [name, ty] = &pair[..] else {
-                        return Err(FxError::at(p.span, "a parameter is `name` or `(name type)`"));
+                        return Err(FxError::at(p.span(), "a parameter is `name` or `(name type)`"));
                     };
-                    let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
-                    Ok((name, Some(self.parse_type(ty)?)))
+                    let name = name.sym().ok_or_else(|| FxError::at(name.span(), "a name"))?;
+                    Ok((name, Some(self.parse_type_syn(ty)?)))
                 })
                 .collect::<R<Vec<_>>>()?,
         };
@@ -4322,20 +4344,20 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         Ok(self.arena.exp(span, Exp::Lambda { params, body }))
     }
 
-    fn parse_bloblet(&mut self, span: fixpt_read::Span, name: &str, args: &[Syntax]) -> R<ExpId> {
-        let index = |p: &Self, s: &Syntax| -> R<usize> {
+    fn parse_bloblet(&mut self, span: fixpt_read::Span, name: &str, args: &[Syn]) -> R<ExpId> {
+        let index = |p: &Self, s: &Syn| -> R<usize> {
             match p.literal_int(s) {
                 Some(i) if i >= 0 => Ok(i as usize),
-                _ => Err(FxError::at(s.span, "a field index is a literal, non-negative integer")),
+                _ => Err(FxError::at(s.span(), "a field index is a literal, non-negative integer")),
             }
         };
-        let (op, rest): (BlobletOp, &[Syntax]) = match (name, args) {
+        let (op, rest): (BlobletOp, &[Syn]) = match (name, args) {
             ("make-bloblet", [_, ..]) => (BlobletOp::Make, args),
             ("rmake-bloblet", [_, _, ..]) => (BlobletOp::RMake, args),
             ("bloblet-ref", [b, i]) => (BlobletOp::Ref(index(self, i)?), std::slice::from_ref(b)),
             ("bloblet-set!", [b, i, v]) => {
                 let i = index(self, i)?;
-                let args = vec![self.parse_exp(b)?, self.parse_exp(v)?];
+                let args = vec![self.parse_exp_syn(b)?, self.parse_exp_syn(v)?];
                 return Ok(self.arena.exp(span, Exp::Bloblet { op: BlobletOp::Set(i), args }));
             }
             ("bloblet-freeze", [_]) => (BlobletOp::Freeze, args),
@@ -4374,17 +4396,17 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 return Err(FxError::at(span, format!("`{shape}`")));
             }
         };
-        let args = rest.iter().map(|a| self.parse_exp(a)).collect::<R<Vec<_>>>()?;
+        let args = rest.iter().map(|a| self.parse_exp_syn(a)).collect::<R<Vec<_>>>()?;
         Ok(self.arena.exp(span, Exp::Bloblet { op, args }))
     }
 
     /// One or more expressions: an implicit `begin`.
-    fn parse_body(&mut self, span: fixpt_read::Span, forms: &[Syntax]) -> R<ExpId> {
+    fn parse_body(&mut self, span: fixpt_read::Span, forms: &[Syn]) -> R<ExpId> {
         match forms {
             [] => Err(FxError::at(span, "an empty body")),
-            [one] => self.parse_exp(one),
+            [one] => self.parse_exp_syn(one),
             many => {
-                let es = many.iter().map(|f| self.parse_exp(f)).collect::<R<Vec<_>>>()?;
+                let es = many.iter().map(|f| self.parse_exp_syn(f)).collect::<R<Vec<_>>>()?;
                 Ok(self.arena.exp(span, Exp::Begin(es)))
             }
         }
@@ -4396,7 +4418,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
 /// one atom, the body itself, the `else` (its syntax) made at each leaf.
 enum CaseLeaves<'a> {
     Index,
-    Bodies(&'a [ExpId], &'a (fixpt_read::Span, Syntax)),
+    Bodies(&'a [ExpId], &'a (fixpt_read::Span, Syn)),
 }
 
 /// The shapes `typecase` tests (`check::SHAPES`), each with its standard
@@ -4412,13 +4434,13 @@ impl Checker {
     /// nothing; a bare `'()` is the plain `nil`, an empty list of any type. A
     /// datum is immutable and acyclic, so building it anew each time differs
     /// from Scheme's constant only in identity.
-    pub(crate) fn quoted(&mut self, x: &Syntax, depth: Option<u32>) -> Syntax {
+    pub(crate) fn quoted(&mut self, x: &Syn, depth: Option<u32>) -> Syn {
         let built = self.quoted_in(x, depth);
-        match &x.datum {
-            Datum::List { .. } | Datum::Vector(_) | Datum::Bytevector(_) if self.unquoted(x, depth).is_none() => {
-                let the = self.named(x.span, "the");
-                let datum = self.named(x.span, "datum");
-                Syntax::list(x.span, vec![the, datum, built])
+        match &x.view() {
+            V::List { .. } | V::Vector(_) | V::Bytevector(_) if self.unquoted(x, depth).is_none() => {
+                let the = self.named(x.span(), "the");
+                let datum = self.named(x.span(), "datum");
+                Syn::lst(x.span(), vec![the, datum, built])
             }
             _ => built,
         }
@@ -4426,13 +4448,13 @@ impl Checker {
 
     /// `(quote x)`, `depth` none, or `(quasiquote x)`, `depth` 1, of
     /// `parse_exp`: what builds `x` (`quoted`).
-    fn parse_quote_form(&mut self, span: fixpt_read::Span, items: &[Syntax], depth: Option<u32>) -> R<ExpId> {
+    fn parse_quote_form(&mut self, span: fixpt_read::Span, items: &[Syn], depth: Option<u32>) -> R<ExpId> {
         match items {
-            [_, x] if depth.is_none() && x.as_symbol().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.as_symbol().expect("a symbol")))),
+            [_, x] if depth.is_none() && x.sym().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.sym().expect("a symbol")))),
             [_, x] => {
                 Self::no_bytevector(x)?;
                 let built = self.quoted(x, depth);
-                self.parse_exp(&built)
+                self.parse_exp_syn(&built)
             }
             _ if depth.is_none() => Err(FxError::at(span, "`(quote datum)`")),
             _ => Err(FxError::at(span, "`(quasiquote datum)`")),
@@ -4440,9 +4462,9 @@ impl Checker {
     }
 
     /// `(%datum x)`: list or vector `x` as a constant (`parse_datum_form`).
-    fn datum_node(&mut self, x: &Syntax) -> Syntax {
-        let d = self.named(x.span, "%datum");
-        Syntax::list(x.span, vec![d, x.clone()])
+    fn datum_node(&mut self, x: &Syn) -> Syn {
+        let d = self.named(x.span(), "%datum");
+        Syn::lst(x.span(), vec![d, x.clone()])
     }
 
     /// `(%datum x)`, which the quote rewrites make of a list or vector
@@ -4451,84 +4473,84 @@ impl Checker {
     /// (TODO §229). Of the standard `(listof datum acyclic)` if `x` is a
     /// proper list, else of the standard `datum`, whatever the program
     /// binds those names to. As `datum-form` in `parser-forms.fx`.
-    fn parse_datum_form(&mut self, span: fixpt_read::Span, items: &[Syntax]) -> R<ExpId> {
+    fn parse_datum_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let usage = "`(%datum list-or-vector)`";
         let [_, x] = items else {
             return Err(FxError::at(span, usage));
         };
-        let proper = match &x.datum {
-            Datum::List { items, tail } if !items.is_empty() => tail.is_none(),
-            Datum::Vector(_) => false,
-            _ => return Err(FxError::at(x.span, usage)),
+        let proper = match &x.view() {
+            V::List { items, tail } if !items.is_empty() => tail.is_none(),
+            V::Vector(_) => false,
+            _ => return Err(FxError::at(x.span(), usage)),
         };
         Self::no_bytevector(x)?;
         Self::constant_atoms(x)?;
         let ty = if proper {
             let (l, d, a) = (self.named(span, "listof"), self.named(span, "datum"), self.named(span, "acyclic"));
-            Syntax::list(span, vec![l, d, a])
+            Syn::lst(span, vec![l, d, a])
         } else {
             self.named(span, "datum")
         };
         let outer = self.hidden.replace(((self.standard_len, self.env.len()), (self.standard_dscope, self.dscope.len())));
-        let ty = self.parse_type(&ty);
+        let ty = self.parse_type_syn(&ty);
         self.hidden = outer;
-        Ok(self.arena.exp(span, Exp::Quote { datum: std::sync::Arc::new(x.clone()), ty: ty? }))
+        Ok(self.arena.exp(span, Exp::Quote { datum: std::sync::Arc::new(x.to_syntax()), ty: ty? }))
     }
 
     /// Whether each number in constant `x` is one every compiler makes: an
     /// integer a fixnum, or a float; no ratio. As `constant-atoms` in
     /// `parser-exps.fx`.
-    fn constant_atoms(x: &Syntax) -> R<()> {
-        match &x.datum {
-            Datum::Number(fixpt_read::Num::Int(n)) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => Ok(()),
-            Datum::Number(fixpt_read::Num::Real(_)) => Ok(()),
-            Datum::Number(_) => Err(FxError::at(x.span, "an integer past a fixnum, or a ratio, cannot be quoted in a list or vector yet")),
-            Datum::List { items, tail } => {
+    fn constant_atoms(x: &Syn) -> R<()> {
+        match &x.view() {
+            V::Number(fixpt_read::Num::Int(n)) if (FIXNUM_MIN..=FIXNUM_MAX).contains(n) => Ok(()),
+            V::Number(fixpt_read::Num::Real(_)) => Ok(()),
+            V::Number(_) => Err(FxError::at(x.span(), "an integer past a fixnum, or a ratio, cannot be quoted in a list or vector yet")),
+            V::List { items, tail } => {
                 items.iter().try_for_each(Self::constant_atoms)?;
-                tail.as_deref().map_or(Ok(()), Self::constant_atoms)
+                tail.as_ref().map_or(Ok(()), Self::constant_atoms)
             }
-            Datum::Vector(items) => items.iter().try_for_each(Self::constant_atoms),
+            V::Vector(items) => items.iter().try_for_each(Self::constant_atoms),
             _ => Ok(()),
         }
     }
 
     /// FX-26 has no way to read a bytevector's bytes, so the parser written
     /// in it could not build a quoted one: refused in both, for now.
-    fn no_bytevector(x: &Syntax) -> R<()> {
-        match &x.datum {
-            Datum::Bytevector(_) => Err(FxError::at(x.span, "a bytevector cannot be quoted yet")),
-            Datum::List { items, tail } => {
+    fn no_bytevector(x: &Syn) -> R<()> {
+        match &x.view() {
+            V::Bytevector(_) => Err(FxError::at(x.span(), "a bytevector cannot be quoted yet")),
+            V::List { items, tail } => {
                 items.iter().try_for_each(Self::no_bytevector)?;
-                tail.as_deref().map_or(Ok(()), Self::no_bytevector)
+                tail.as_ref().map_or(Ok(()), Self::no_bytevector)
             }
-            Datum::Vector(items) => items.iter().try_for_each(Self::no_bytevector),
+            V::Vector(items) => items.iter().try_for_each(Self::no_bytevector),
             _ => Ok(()),
         }
     }
 
-    fn named(&mut self, span: fixpt_read::Span, name: &str) -> Syntax {
+    fn named(&mut self, span: fixpt_read::Span, name: &str) -> Syn {
         let s = self.interner.intern(name);
-        Syntax::symbol(span, s)
+        Syn::symbol(span, s, &self.interner)
     }
 
     /// `(with #%fx name)`: the standard `name`, whatever a program binds it
     /// to.
-    fn standard_named(&mut self, span: fixpt_read::Span, name: &str) -> Syntax {
+    fn standard_named(&mut self, span: fixpt_read::Span, name: &str) -> Syn {
         let (with, fx, n) = (self.named(span, "with"), self.named(span, "#%fx"), self.named(span, name));
-        Syntax::list(span, vec![with, fx, n])
+        Syn::lst(span, vec![with, fx, n])
     }
 
-    fn call(&mut self, span: fixpt_read::Span, op: &str, mut args: Vec<Syntax>) -> Syntax {
+    fn call(&mut self, span: fixpt_read::Span, op: &str, mut args: Vec<Syn>) -> Syn {
         let mut items = vec![self.standard_named(span, op)];
         items.append(&mut args);
-        Syntax::list(span, items)
+        Syn::lst(span, items)
     }
 
     /// `(form e)`, where `form` is `unquote` or `unquote-splicing`: `e`.
-    fn unquote_of<'a>(&self, x: &'a Syntax, form: &str) -> Option<&'a Syntax> {
-        match &x.datum {
-            Datum::List { items, tail: None } => match &items[..] {
-                [h, e] if h.as_symbol().is_some_and(|h| self.name(h) == form) => Some(e),
+    fn unquote_of(&self, x: &Syn, form: &str) -> Option<Syn> {
+        match &x.view() {
+            V::List { items, tail: None } => match &items[..] {
+                [h, e] if h.sym().is_some_and(|h| self.name(h) == form) => Some(*e),
                 _ => None,
             },
             _ => None,
@@ -4536,38 +4558,38 @@ impl Checker {
     }
 
     /// `x`'s expression, if `x` is `(unquote e)` at depth 1.
-    fn unquoted<'a>(&self, x: &'a Syntax, depth: Option<u32>) -> Option<&'a Syntax> {
+    fn unquoted(&self, x: &Syn, depth: Option<u32>) -> Option<Syn> {
         if depth == Some(1) { self.unquote_of(x, "unquote") } else { None }
     }
 
     /// Whether no `unquote` or `unquote-splicing` at depth 1 is in `x`,
     /// quasiquoted at `depth`: then it is a constant.
-    fn unquote_free(&self, x: &Syntax, depth: Option<u32>) -> bool {
+    fn unquote_free(&self, x: &Syn, depth: Option<u32>) -> bool {
         if self.unquoted(x, depth).is_some() {
             return false;
         }
-        match &x.datum {
-            Datum::List { items, tail } => {
+        match &x.view() {
+            V::List { items, tail } => {
                 let inner = self.quasi_inner(items, depth);
                 items.iter().enumerate().all(|(i, item)| self.item_free(item, if i == 0 { depth } else { inner }))
-                    && tail.as_deref().is_none_or(|t| self.unquote_free(t, depth))
+                    && tail.as_ref().is_none_or(|t| self.unquote_free(t, depth))
             }
-            Datum::Vector(items) => items.iter().all(|item| self.item_free(item, depth)),
+            V::Vector(items) => items.iter().all(|item| self.item_free(item, depth)),
             _ => true,
         }
     }
 
     /// Whether list item `x`, at `depth`, is neither spliced nor reached by
     /// an `unquote`.
-    fn item_free(&self, x: &Syntax, depth: Option<u32>) -> bool {
+    fn item_free(&self, x: &Syn, depth: Option<u32>) -> bool {
         !(depth == Some(1) && self.unquote_of(x, "unquote-splicing").is_some()) && self.unquote_free(x, depth)
     }
 
     /// The depth a list's items after its head are at: a nested
     /// `quasiquote` deepens; an `unquote` (or `unquote-splicing`) not at
     /// depth 1 shallows.
-    fn quasi_inner(&self, items: &[Syntax], depth: Option<u32>) -> Option<u32> {
-        let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h));
+    fn quasi_inner(&self, items: &[Syn], depth: Option<u32>) -> Option<u32> {
+        let head = items.first().and_then(|h| h.sym()).map(|h| self.name(h));
         match (depth, head) {
             (Some(d), Some("quasiquote")) if items.len() == 2 => Some(d + 1),
             (Some(d), Some("unquote" | "unquote-splicing")) if items.len() == 2 && d > 1 => Some(d - 1),
@@ -4575,36 +4597,36 @@ impl Checker {
         }
     }
 
-    fn quoted_in(&mut self, x: &Syntax, depth: Option<u32>) -> Syntax {
-        let span = x.span;
+    fn quoted_in(&mut self, x: &Syn, depth: Option<u32>) -> Syn {
+        let span = x.span();
         if let Some(e) = self.unquoted(x, depth) {
             return e.clone();
         }
         // A list or vector a quote makes, or no unquote of a quasiquote
         // reaches, is a constant (`%datum`).
-        if matches!(&x.datum, Datum::List { items, .. } if !items.is_empty()) || matches!(x.datum, Datum::Vector(_)) {
+        if matches!(&x.view(), V::List { items, .. } if !items.is_empty()) || matches!(x.view(), V::Vector(_)) {
             if depth.is_none() || self.unquote_free(x, depth) {
                 return self.datum_node(x);
             }
         }
-        match &x.datum {
-            Datum::Symbol(s) => match self.name(*s) {
+        match &x.view() {
+            V::Symbol(s) => match self.name(*s) {
                 // `#t` and `#f` are literals, as the FX-26 reader gives them.
                 "#t" | "#f" => x.clone(),
                 _ => {
                     let q = self.named(span, "quote");
-                    Syntax::list(span, vec![q, x.clone()])
+                    Syn::lst(span, vec![q, x.clone()])
                 }
             },
-            Datum::Nil => self.named(span, "nil"),
-            Datum::Bool(_) | Datum::Number(_) | Datum::Char(_) | Datum::Str(_) | Datum::Keyword(_) => x.clone(),
-            Datum::List { items, tail } => {
+            V::Nil => self.named(span, "nil"),
+            V::Bool(_) | V::Number(_) | V::Char(_) | V::Str(_) | V::Keyword(_) => x.clone(),
+            V::List { items, tail } => {
                 let inner = self.quasi_inner(items, depth);
                 // Under a quasiquote, the items after the last that an
                 // unquote reaches, with the tail, are a constant: one quote
                 // (`k` the first of them), made once.
                 let mut k = items.len();
-                if depth.is_some() && tail.as_deref().is_none_or(|t| self.unquote_free(t, depth)) {
+                if depth.is_some() && tail.as_ref().is_none_or(|t| self.unquote_free(t, depth)) {
                     while k > 1 && self.item_free(&items[k - 1], inner) {
                         k -= 1;
                     }
@@ -4612,7 +4634,7 @@ impl Checker {
                 // `nil` at the list, each `cons` from its item, a constant
                 // suffix one `%datum` from its first item to the end.
                 let mut acc = if k < items.len() {
-                    let rest = Syntax::new(fixpt_read::Span { start: items[k].span.start, ..span }, Datum::List { items: items[k..].to_vec(), tail: tail.clone() });
+                    let rest = Syn::of_list(fixpt_read::Span { start: items[k].span().start, ..span }, &items[k..], *tail);
                     self.datum_node(&rest)
                 } else {
                     match tail {
@@ -4628,24 +4650,24 @@ impl Checker {
                         let the = self.named(span, "the");
                         let ty = {
                             let (l, d, a) = (self.named(span, "listof"), self.named(span, "datum"), self.named(span, "acyclic"));
-                            Syntax::list(span, vec![l, d, a])
+                            Syn::lst(span, vec![l, d, a])
                         };
-                        let rest = Syntax::list(span, vec![the, ty, acc]);
-                        acc = self.call(item.span, "append", vec![e.clone(), rest]);
+                        let rest = Syn::lst(span, vec![the, ty, acc]);
+                        acc = self.call(item.span(), "append", vec![e.clone(), rest]);
                         continue;
                     }
                     let q = self.quoted_in(item, d);
-                    acc = self.call(item.span, "cons", vec![q, acc]);
+                    acc = self.call(item.span(), "cons", vec![q, acc]);
                 }
                 acc
             }
-            Datum::Vector(items) => {
-                let list = Syntax::new(span, Datum::List { items: items.clone(), tail: None });
+            V::Vector(items) => {
+                let list = Syn::datum(span, V::List { items: items.clone(), tail: None });
                 let l = self.quoted_in(&list, depth);
                 self.call(span, "datum-list->vector", vec![l])
             }
             // Refused before (`no_bytevector`).
-            Datum::Bytevector(_) => x.clone(),
+            V::Bytevector(_) => x.clone(),
         }
     }
 }
@@ -4675,9 +4697,9 @@ fn typecase_predicate(shape: &str) -> Option<&'static str> {
 }
 
 /// The binders of `(module-parameters (binder …))`, if `f` is one.
-pub(crate) fn module_parameters_of(f: &Syntax, interner: &fixpt_read::Interner) -> Option<Vec<Syntax>> {
-    match f.as_proper_list()? {
-        [h, bs] if h.as_symbol().is_some_and(|h| interner.name(h) == "module-parameters") => Some(bs.as_proper_list()?.to_vec()),
+pub(crate) fn module_parameters_of(f: &Syn, interner: &fixpt_read::Interner) -> Option<Vec<Syn>> {
+    match f.list().as_deref()? {
+        [h, bs] if h.sym().is_some_and(|h| interner.name(h) == "module-parameters") => Some(bs.list().as_deref()?.to_vec()),
         _ => None,
     }
 }
@@ -4685,8 +4707,8 @@ pub(crate) fn module_parameters_of(f: &Syntax, interner: &fixpt_read::Interner) 
 /// Whether binder `b` of a `module-parameters` binds a description, `(name
 /// kind)` or `(r region p)`; else it is `(m T)` or `(m T qualified)`, a
 /// module parameter.
-pub(crate) fn binder_is_kind(b: &Syntax, interner: &fixpt_read::Interner) -> bool {
-    match b.as_proper_list() {
+pub(crate) fn binder_is_kind(b: &Syn, interner: &fixpt_read::Interner) -> bool {
+    match b.list().as_deref() {
         Some([_, k]) => is_kind_form(k, interner),
         Some([_, k, q]) => is_kind_form(k, interner) || !is_qualified(q, interner),
         _ => true,
@@ -4695,14 +4717,14 @@ pub(crate) fn binder_is_kind(b: &Syntax, interner: &fixpt_read::Interner) -> boo
 
 /// `qualified`, a module parameter's mark that it is not included: its
 /// names are reached by `with` or `import` (Heist's, 2026-10-28).
-fn is_qualified(q: &Syntax, interner: &fixpt_read::Interner) -> bool {
-    q.as_symbol().is_some_and(|q| interner.name(q) == "qualified")
+fn is_qualified(q: &Syn, interner: &fixpt_read::Interner) -> bool {
+    q.sym().is_some_and(|q| interner.name(q) == "qualified")
 }
 
-fn is_kind_form(k: &Syntax, interner: &fixpt_read::Interner) -> bool {
-    match k.as_proper_list() {
-        Some([h, ..]) => h.as_symbol().is_some_and(|h| interner.name(h) == "=>"),
-        _ => k.as_symbol().is_some_and(|k| {
+fn is_kind_form(k: &Syn, interner: &fixpt_read::Interner) -> bool {
+    match k.list().as_deref() {
+        Some([h, ..]) => h.sym().is_some_and(|h| interner.name(h) == "=>"),
+        _ => k.sym().is_some_and(|k| {
             matches!(interner.name(k), "region" | "place" | "effect" | "type" | "data" | "sendable" | "flat" | "size" | "conv")
         }),
     }
@@ -4710,7 +4732,7 @@ fn is_kind_form(k: &Syntax, interner: &fixpt_read::Interner) -> bool {
 
 /// Whether forms `forms` are a file of module parameters: its first form a
 /// `module-parameters` with a module among its binders.
-pub(crate) fn takes_modules(forms: &[Syntax], interner: &fixpt_read::Interner) -> bool {
+pub(crate) fn takes_modules(forms: &[Syn], interner: &fixpt_read::Interner) -> bool {
     forms
         .first()
         .and_then(|f| module_parameters_of(f, interner))
@@ -4734,20 +4756,20 @@ pub(crate) fn takes_modules_at(at: &std::path::Path, path: &str) -> bool {
         return false;
     }
     let mut interner = fixpt_read::Interner::new();
-    match fixpt_read::Reader::new(&text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read() {
-        Ok(Some(first)) => takes_modules(std::slice::from_ref(&first), &interner),
+    crate::heap_syn::aside(|| match crate::heap_syn::read_syn_first(&text, &mut interner) {
+        Ok(Some(first)) => takes_modules(&[first], &interner),
         _ => false,
-    }
+    })
 }
 
 /// Whether module item `f` is a form a module item may be, by its head
 /// (the parsers refuse it if it is not well made); else a list is an
 /// expression, run for what it does as the module is made. An atom is
 /// refused as it was.
-pub(crate) fn is_item_form(f: &Syntax, interner: &fixpt_read::Interner) -> bool {
-    match f.as_proper_list() {
+pub(crate) fn is_item_form(f: &Syn, interner: &fixpt_read::Interner) -> bool {
+    match f.list().as_deref() {
         Some([]) | None => true,
-        Some([h, ..]) => h.as_symbol().is_some_and(|h| {
+        Some([h, ..]) => h.sym().is_some_and(|h| {
             matches!(
                 interner.name(h),
                 "define-generative" | "define-type" | "define-effect" | "define" | "define*" | "include" | "define-rec" | "hide" | "define-datatype" | "import"

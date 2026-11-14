@@ -38,13 +38,38 @@ fn a_macros_code_is_at_its_use_by_fx26() {
     macro_lines_on("fx-regs-fxjit-nativecc");
 }
 
-fn macro_lines_on(machine: &str) {
-    let dir = std::env::temp_dir().join(format!("fixpt-jit-macro-{machine}-{}", std::process::id()));
+/// A macro's code beside other code (`TODO.md` §250): `again`'s, at its
+/// use, line 11, all of it; none at the call beside it, line 10, nor at the
+/// `lambda`, which the code was once placed at by its position in a text
+/// written out, matched to the form's.
+#[test]
+fn a_macros_code_is_not_at_its_neighbours() {
+    beside_lines_on("fx-regs-rsjit-nativecc");
+}
+
+/// The same where the compiler written in FX-26 makes the code.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn a_macros_code_is_not_at_its_neighbours_by_fx26() {
+    beside_lines_on("fx-regs-fxjit-nativecc");
+}
+
+fn beside_lines_on(machine: &str) {
+    let rows = rows_of(machine, "again.fx", include_str!("programs/jit-lines/again.fx"), "spin");
+    assert!(rows.contains(&11), "no row at `again`'s use: {rows:?}");
+    assert!(rows.iter().all(|l| (7..=11).contains(l)), "`spin` placed outside its body's lines 7 to 11: {rows:?}");
+    assert!(rows.windows(2).all(|w| w != [11, 10]), "`again`'s code placed at the call beside it: {rows:?}");
+}
+
+/// The lines of procedure `name`'s rows, in order, from `program` run
+/// (as file `file`) on `machine`.
+fn rows_of(machine: &str, file: &str, program: &str, name: &str) -> Vec<u32> {
+    let dir = std::env::temp_dir().join(format!("fixpt-jit-rows-{machine}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("macro.fx"), include_str!("programs/jit-lines/macro.fx")).unwrap();
+    std::fs::write(dir.join(file), program).unwrap();
     let lines = dir.join("lines.txt");
     let out = Command::new(FIXPT)
-        .args(["--fx26-machine", machine, "run", dir.join("macro.fx").to_str().unwrap()])
+        .args(["--fx26-machine", machine, "run", dir.join(file).to_str().unwrap()])
         .env("FIXPT_JIT_DEBUG", "frames")
         .env("FIXPT_LINES", &lines)
         .output()
@@ -52,13 +77,14 @@ fn macro_lines_on(machine: &str) {
     let written = std::fs::read_to_string(&lines).unwrap_or_default();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let rows: Vec<u32> = written
-        .lines()
-        .filter(|l| l.split(' ').next() == Some("f"))
-        .filter_map(|l| l.rsplit_once(':')?.1.parse().ok())
-        .collect();
-    assert!(!rows.is_empty(), "no rows for `f`:\n{written}");
-    assert!(rows.iter().all(|l| (4..=6).contains(l)), "`f` placed at {rows:?}, its template's lines among them:\n{written}");
+    let rows: Vec<u32> = written.lines().filter(|l| l.split(' ').next() == Some(name)).filter_map(|l| l.rsplit_once(':')?.1.parse().ok()).collect();
+    assert!(!rows.is_empty(), "no rows for `{name}`:\n{written}");
+    rows
+}
+
+fn macro_lines_on(machine: &str) {
+    let rows = rows_of(machine, "macro.fx", include_str!("programs/jit-lines/macro.fx"), "f");
+    assert!(rows.iter().all(|l| (4..=6).contains(l)), "`f` placed at {rows:?}, its template's lines among them");
 }
 
 fn lines_on(machine: &str) {

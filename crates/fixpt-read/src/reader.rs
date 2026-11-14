@@ -68,13 +68,66 @@ impl std::error::Error for ReadError {}
 
 pub type ReadResult<T> = Result<T, ReadError>;
 
-pub struct Reader<'a> {
+/// Where a datum read is: its span, in bytes, as the Rust front ends place
+/// it; and its characters, start and end, counted from the start of the
+/// text read, as FX-26's reader places its `syn` (`docs/research/
+/// heap-syntax.md`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Place {
+    pub span: Span,
+    pub start: u32,
+    pub end: u32,
+}
+
+/// What the reader builds, besides its [`Syntax`]: a node for each datum,
+/// made as the datum is read, from its parts' nodes (`docs/research/
+/// heap-syntax.md`: FX-26's `syn`, in the heap). An atom's datum is given
+/// whole; a list's and a vector's, as their items' nodes.
+pub trait Build {
+    type Node: Clone;
+    /// Whether the nodes want the characters' places ([`Place::start`]):
+    /// a reader that builds none counts none.
+    const CHARS: bool = true;
+    fn atom(&mut self, interner: &mut Interner, at: Place, datum: &Datum) -> Self::Node;
+    fn list(&mut self, interner: &mut Interner, at: Place, items: Vec<Self::Node>, tail: Option<Self::Node>) -> Self::Node;
+    fn vector(&mut self, interner: &mut Interner, at: Place, items: Vec<Self::Node>) -> Self::Node;
+}
+
+/// The builder of the reader's own trees, [`Syntax`]: what [`Reader::new`]
+/// reads.
+pub struct SyntaxBuild;
+
+impl Build for SyntaxBuild {
+    type Node = Syntax;
+    const CHARS: bool = false;
+    fn atom(&mut self, _: &mut Interner, at: Place, datum: &Datum) -> Syntax {
+        Syntax::new(at.span, datum.clone())
+    }
+    fn list(&mut self, _: &mut Interner, at: Place, items: Vec<Syntax>, tail: Option<Syntax>) -> Syntax {
+        if items.is_empty() && tail.is_none() {
+            return Syntax::new(at.span, Datum::Nil);
+        }
+        Syntax::new(at.span, Datum::List { items, tail: tail.map(Box::new) })
+    }
+    fn vector(&mut self, _: &mut Interner, at: Place, items: Vec<Syntax>) -> Syntax {
+        Syntax::new(at.span, Datum::Vector(items))
+    }
+}
+
+/// A datum read: the builder's node of it.
+type Out<B> = <B as Build>::Node;
+
+pub struct Reader<'a, B: Build = SyntaxBuild> {
     src: &'a str,
     pos: usize,
     file: FileId,
     profile: SyntaxProfile,
     interner: &'a mut Interner,
-    labels: HashMap<u64, Syntax>,
+    labels: HashMap<u64, Out<B>>,
+    builder: B,
+    /// Each byte's character, where the text is not all ASCII: made the
+    /// first time a place is wanted ([`Build::CHARS`]).
+    chars: Option<Vec<u32>>,
 }
 
 impl<'a> Reader<'a> {
@@ -84,13 +137,35 @@ impl<'a> Reader<'a> {
         profile: SyntaxProfile,
         interner: &'a mut Interner,
     ) -> Reader<'a> {
-        Reader { src, pos: 0, file, profile, interner, labels: HashMap::default() }
+        Reader::with_builder(src, file, profile, interner, SyntaxBuild)
     }
 
     /// Read every datum in the source.
     pub fn read_all(&mut self) -> ReadResult<Vec<Syntax>> {
+        self.read_all_built()
+    }
+
+    /// Read one datum, or `None` at end of input.
+    pub fn read(&mut self) -> ReadResult<Option<Syntax>> {
+        self.read_built()
+    }
+}
+
+impl<'a, B: Build> Reader<'a, B> {
+    /// A reader that builds `builder`'s nodes too ([`Reader::read_built`]).
+    pub fn with_builder(src: &'a str, file: FileId, profile: SyntaxProfile, interner: &'a mut Interner, builder: B) -> Reader<'a, B> {
+        Reader { src, pos: 0, file, profile, interner, labels: HashMap::default(), builder, chars: None }
+    }
+
+    /// The builder, given back.
+    pub fn into_builder(self) -> B {
+        self.builder
+    }
+
+    /// Read every datum in the source, each its node.
+    pub fn read_all_built(&mut self) -> ReadResult<Vec<Out<B>>> {
         let mut out = Vec::new();
-        while let Some(d) = self.read()? {
+        while let Some(d) = self.read_built()? {
             out.push(d);
         }
         Ok(out)
@@ -109,13 +184,58 @@ impl<'a> Reader<'a> {
         self.pos = offset;
     }
 
-    /// Read one datum, or `None` at end of input.
-    pub fn read(&mut self) -> ReadResult<Option<Syntax>> {
+    /// Read one datum, its node, or `None` at end of input.
+    pub fn read_built(&mut self) -> ReadResult<Option<Out<B>>> {
         self.skip_atmosphere()?;
         if self.peek().is_none() {
             return Ok(None);
         }
         self.read_datum().map(Some)
+    }
+
+    // ------------------------------------------------------------------ nodes
+    /// The character at byte `b`, counted from the text's start.
+    fn char_of(&mut self, b: u32) -> u32 {
+        if !B::CHARS || self.src.is_ascii() {
+            return b;
+        }
+        let src = self.src;
+        let table = self.chars.get_or_insert_with(|| {
+            let mut t = vec![0u32; src.len() + 1];
+            let mut n = 0u32;
+            for (i, c) in src.char_indices() {
+                for k in 0..c.len_utf8() {
+                    t[i + k] = n;
+                }
+                n += 1;
+            }
+            t[src.len()] = n;
+            t
+        });
+        table[b as usize]
+    }
+
+    fn place(&mut self, span: Span) -> Place {
+        let (start, end) = if B::CHARS { (self.char_of(span.start), self.char_of(span.end)) } else { (0, 0) };
+        Place { span, start, end }
+    }
+
+    /// An atom, `datum`, at `span`.
+    fn atom(&mut self, span: Span, datum: Datum) -> Out<B> {
+        let at = self.place(span);
+        self.builder.atom(self.interner, at, &datum)
+    }
+
+    /// A list of `items`, and `tail` if dotted, at `span`: `()` if neither.
+    fn list(&mut self, span: Span, items: Vec<Out<B>>, tail: Option<Out<B>>) -> Out<B> {
+        let at = self.place(span);
+        self.builder.list(self.interner, at, items, tail)
+    }
+
+    /// A vector of `items`, at `span`.
+    fn vector(&mut self, span: Span, items: Vec<Out<B>>) -> Out<B> {
+        let at = self.place(span);
+        self.builder.vector(self.interner, at, items)
     }
 
     // ------------------------------------------------------------- characters
@@ -204,7 +324,7 @@ impl<'a> Reader<'a> {
     }
 
     // ------------------------------------------------------------------ datum
-    fn read_datum(&mut self) -> ReadResult<Syntax> {
+    fn read_datum(&mut self) -> ReadResult<Out<B>> {
         self.skip_atmosphere()?;
         let start = self.pos;
         let c = match self.peek() {
@@ -257,12 +377,13 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_abbrev(&mut self, start: usize, name: &str) -> ReadResult<Syntax> {
+    fn read_abbrev(&mut self, start: usize, name: &str) -> ReadResult<Out<B>> {
         self.bump();
         let sym = self.interner.intern(name);
         let inner = self.read_datum()?;
         let span = self.span_from(start);
-        Ok(Syntax::list(span, vec![Syntax::symbol(Span::new(self.file, start as u32, start as u32 + 1), sym), inner]))
+        let head = self.atom(Span::new(self.file, start as u32, start as u32 + 1), Datum::Symbol(sym));
+        Ok(self.list(span, vec![head, inner], None))
     }
 
     /// Read a list body up to `close`. `prefix`, when given, is prepended as
@@ -272,12 +393,29 @@ impl<'a> Reader<'a> {
         start: usize,
         close: char,
         prefix: Option<crate::intern::Sym>,
-    ) -> ReadResult<Syntax> {
-        let mut items: Vec<Syntax> = Vec::new();
-        if let Some(p) = prefix {
-            items.push(Syntax::symbol(Span::new(self.file, start as u32, start as u32 + 1), p));
+    ) -> ReadResult<Out<B>> {
+        let (items, tail) = self.read_list_parts(start, close, prefix)?;
+        let span = self.span_from(start);
+        Ok(self.list(span, items, tail))
+    }
+
+    /// A vector's items, read past its `#(` up to its `)`.
+    fn read_items(&mut self, start: usize) -> ReadResult<Vec<Out<B>>> {
+        match self.read_list_parts(start, ')', None)? {
+            (items, None) => Ok(items),
+            (_, Some(_)) => Err(ReadError::at(self.span_from(start), "a vector cannot be a dotted list")),
         }
-        let mut tail: Option<Box<Syntax>> = None;
+    }
+
+    /// [`Reader::read_list`]'s items, and its tail if dotted.
+    #[allow(clippy::type_complexity)]
+    fn read_list_parts(&mut self, start: usize, close: char, prefix: Option<crate::intern::Sym>) -> ReadResult<(Vec<Out<B>>, Option<Out<B>>)> {
+        let mut items: Vec<Out<B>> = Vec::new();
+        if let Some(p) = prefix {
+            let head = self.atom(Span::new(self.file, start as u32, start as u32 + 1), Datum::Symbol(p));
+            items.push(head);
+        }
+        let mut tail: Option<Out<B>> = None;
         loop {
             self.skip_atmosphere()?;
             match self.peek() {
@@ -321,7 +459,7 @@ impl<'a> Reader<'a> {
                     if self.peek() == Some(close) {
                         return Err(ReadError::at(dot, "expected a datum after `.`"));
                     }
-                    tail = Some(Box::new(self.read_datum()?));
+                    tail = Some(self.read_datum()?);
                     self.skip_atmosphere()?;
                     match self.peek() {
                         Some(c) if c == close => {
@@ -345,11 +483,7 @@ impl<'a> Reader<'a> {
                 _ => items.push(self.read_datum()?),
             }
         }
-        let span = self.span_from(start);
-        if items.is_empty() && tail.is_none() {
-            return Ok(Syntax::new(span, Datum::Nil));
-        }
-        Ok(Syntax::new(span, Datum::List { items, tail }))
+        Ok((items, tail))
     }
 
     /// A `.` that is the dotted-pair marker, rather than the start of `.5` or
@@ -365,7 +499,7 @@ impl<'a> Reader<'a> {
     }
 
     // ---------------------------------------------------------------- strings
-    fn read_string(&mut self) -> ReadResult<Syntax> {
+    fn read_string(&mut self) -> ReadResult<Out<B>> {
         let start = self.pos;
         self.bump(); // opening quote
         let mut s = String::new();
@@ -428,11 +562,12 @@ impl<'a> Reader<'a> {
                 Some(c) => s.push(c),
             }
         }
-        Ok(Syntax::new(self.span_from(start), Datum::Str(s)))
+        let span = self.span_from(start);
+        Ok(self.atom(span, Datum::Str(s)))
     }
 
     // ------------------------------------------------------------- `#` syntax
-    fn read_hash(&mut self) -> ReadResult<Syntax> {
+    fn read_hash(&mut self) -> ReadResult<Out<B>> {
         let start = self.pos;
         self.bump(); // '#'
         let c = self
@@ -441,16 +576,9 @@ impl<'a> Reader<'a> {
         match c {
             '(' => {
                 self.bump();
-                let inner = self.read_list(start, ')', None)?;
-                let items = match inner.datum {
-                    Datum::Nil => Vec::new(),
-                    Datum::List { items, tail: None } => items,
-                    Datum::List { .. } => {
-                        return Err(ReadError::at(inner.span, "a vector cannot be a dotted list"));
-                    }
-                    _ => unreachable!("read_list yields Nil or List"),
-                };
-                Ok(Syntax::new(self.span_from(start), Datum::Vector(items)))
+                let items = self.read_items(start)?;
+                let span = self.span_from(start);
+                Ok(self.vector(span, items))
             }
             '\\' => self.read_char(start),
             't' | 'f' | 'T' | 'F' => self.read_boolean(start),
@@ -465,11 +593,12 @@ impl<'a> Reader<'a> {
                 if self.peek().is_none_or(|c| self.is_delimiter(c)) {
                     return Err(ReadError::at(self.span_from(start), "`#:` names nothing: a keyword is `#:name`"));
                 }
-                let name = self.read_atom()?;
-                let Datum::Symbol(sym) = name.datum else {
+                let (_, name) = self.read_atom_datum()?;
+                let Datum::Symbol(sym) = name else {
                     return Err(ReadError::at(self.span_from(start), "a keyword's name is a symbol's: `#:name`"));
                 };
-                Ok(Syntax::new(self.span_from(start), Datum::Keyword(sym)))
+                let span = self.span_from(start);
+                Ok(self.atom(span, Datum::Keyword(sym)))
             }
             '%' if self.profile.fx_module => {
                 // `#%fx`, the standard bindings' module; `#%toplevel`, the
@@ -481,7 +610,8 @@ impl<'a> Reader<'a> {
                 if word != "%fx" && word != "%toplevel" && !qualified {
                     return Err(ReadError::at(self.span_from(start), format!("unknown `#` syntax: `#{word}`")));
                 }
-                Ok(Syntax::symbol(self.span_from(start), self.interner.intern(&format!("#{word}"))))
+                let (span, sym) = (self.span_from(start), self.interner.intern(&format!("#{word}")));
+                Ok(self.atom(span, Datum::Symbol(sym)))
             }
             _ => {
                 self.bump();
@@ -490,7 +620,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_boolean(&mut self, start: usize) -> ReadResult<Syntax> {
+    fn read_boolean(&mut self, start: usize) -> ReadResult<Out<B>> {
         let word = self.take_while(|c, r| !r.is_delimiter(c));
         let lower = word.to_ascii_lowercase();
         let value = match lower.as_str() {
@@ -507,13 +637,13 @@ impl<'a> Reader<'a> {
         if self.profile.booleans_are_symbols {
             // FX-87: `literal-bool?` tests membership in `(|#f| |#t|)`.
             let s = self.interner.intern(if value { "#t" } else { "#f" });
-            Ok(Syntax::symbol(span, s))
+            Ok(self.atom(span, Datum::Symbol(s)))
         } else {
-            Ok(Syntax::new(span, Datum::Bool(value)))
+            Ok(self.atom(span, Datum::Bool(value)))
         }
     }
 
-    fn read_u(&mut self, start: usize) -> ReadResult<Syntax> {
+    fn read_u(&mut self, start: usize) -> ReadResult<Out<B>> {
         let lone_u = {
             let mut ahead = self.src[self.pos..].chars();
             ahead.next();
@@ -526,15 +656,15 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_unit(&mut self, start: usize) -> ReadResult<Syntax> {
+    fn read_unit(&mut self, start: usize) -> ReadResult<Out<B>> {
         self.bump(); // 'u'
         let span = self.span_from(start);
         // The exact spelling matters: FX-91 needs `#U`, FX-87 `#u`.
         let s = self.interner.intern(self.profile.unit_name);
-        Ok(Syntax::symbol(span, s))
+        Ok(self.atom(span, Datum::Symbol(s)))
     }
 
-    fn read_bytevector(&mut self, start: usize) -> ReadResult<Syntax> {
+    fn read_bytevector(&mut self, start: usize) -> ReadResult<Out<B>> {
         let word = self.take_while(|c, _| c == 'u' || c == 'U' || c.is_ascii_digit());
         if !word.eq_ignore_ascii_case("u8") {
             return Err(ReadError::at(
@@ -546,7 +676,14 @@ impl<'a> Reader<'a> {
             return Err(ReadError::at(self.here(), "expected `(` after `#u8`"));
         }
         self.bump();
-        let inner = self.read_list(start, ')', None)?;
+        // Its bytes read as the reader's own trees, whatever this one builds.
+        let inner = {
+            let mut r = Reader::new(self.src, self.file, self.profile, self.interner);
+            r.pos = self.pos;
+            let inner = r.read_list(start, ')', None)?;
+            self.pos = r.pos;
+            inner
+        };
         let items: Vec<Syntax> = match inner.datum {
             Datum::Nil => Vec::new(),
             Datum::List { items, tail: None } => items,
@@ -564,10 +701,11 @@ impl<'a> Reader<'a> {
                 }
             }
         }
-        Ok(Syntax::new(self.span_from(start), Datum::Bytevector(bytes)))
+        let span = self.span_from(start);
+        Ok(self.atom(span, Datum::Bytevector(bytes)))
     }
 
-    fn read_label(&mut self, start: usize) -> ReadResult<Syntax> {
+    fn read_label(&mut self, start: usize) -> ReadResult<Out<B>> {
         let digits = self.take_while(|c, _| c.is_ascii_digit());
         let n: u64 = digits
             .parse()
@@ -587,7 +725,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn read_char(&mut self, start: usize) -> ReadResult<Syntax> {
+    fn read_char(&mut self, start: usize) -> ReadResult<Out<B>> {
         self.bump(); // '\'
         let first = self
             .bump()
@@ -597,7 +735,7 @@ impl<'a> Reader<'a> {
         let rest = self.take_while(|c, r| !r.is_delimiter(c));
         let span = self.span_from(start);
         if rest.is_empty() {
-            return Ok(Syntax::new(span, Datum::Char(first)));
+            return Ok(self.atom(span, Datum::Char(first)));
         }
         let name: String = std::iter::once(first).chain(rest.chars()).collect();
         let lower = name.to_ascii_lowercase();
@@ -619,7 +757,7 @@ impl<'a> Reader<'a> {
             }
             _ => return Err(ReadError::at(span, format!("unknown character name `#\\{name}`"))),
         };
-        Ok(Syntax::new(span, Datum::Char(c)))
+        Ok(self.atom(span, Datum::Char(c)))
     }
 
     // ------------------------------------------------------------------ atoms
@@ -638,7 +776,13 @@ impl<'a> Reader<'a> {
     /// Read a symbol or a number. Which one it is can only be decided after the
     /// whole token is in hand: `+` is a symbol, `+1` is a number, `1+` is a
     /// symbol again.
-    fn read_atom(&mut self) -> ReadResult<Syntax> {
+    fn read_atom(&mut self) -> ReadResult<Out<B>> {
+        let (span, datum) = self.read_atom_datum()?;
+        Ok(self.atom(span, datum))
+    }
+
+    /// [`Reader::read_atom`]'s datum, and where it is, before it is built.
+    fn read_atom_datum(&mut self) -> ReadResult<(Span, Datum)> {
         let start = self.pos;
         // The common atom, with no `|…|` and no `\c`: its text a slice of
         // the source, no string made (`TODO.md` §126: a string for each
@@ -650,10 +794,10 @@ impl<'a> Reader<'a> {
             self.pos = end;
             let (text, span) = (&src[start..end], self.span_from(start));
             if let Some(n) = parse_number(text, 10, None) {
-                return Ok(Syntax::new(span, Datum::Number(n)));
+                return Ok((span, Datum::Number(n)));
             }
             let s = if self.profile.case_fold { self.interner.intern(&text.to_lowercase()) } else { self.interner.intern(text) };
-            return Ok(Syntax::symbol(span, s));
+            return Ok((span, Datum::Symbol(s)));
         }
         let mut text = String::new();
         // `escaped` records whether any part was written `|…|` or `\c`, which
@@ -706,11 +850,11 @@ impl<'a> Reader<'a> {
         if !escaped
             && let Some(n) = parse_number(&text, 10, None)
         {
-            return Ok(Syntax::new(span, Datum::Number(n)));
+            return Ok((span, Datum::Number(n)));
         }
         let name = if self.profile.case_fold && !escaped { text.to_lowercase() } else { text };
         let s = self.interner.intern(&name);
-        Ok(Syntax::symbol(span, s))
+        Ok((span, Datum::Symbol(s)))
     }
 }
 

@@ -193,13 +193,14 @@ What was built, where it differs from the above:
   the program's text.
 - **Readers**: `jitdebug`'s line tables take an id's use
   (`note_chain`, noted where code is placed, the heap at hand);
-  `fixpt_place_at` says the chain. The machines that compile a form from
-  its text written out (the CLI's sessions) place code at characters of
-  that text, mapped to the form's datums (`sources::resolve`): a datum a
-  macro made is now placed at its use, and `sources::describe` says its
-  chain; but that mapping is by position in the text, which for a form a
-  macro expanded is not always the datum the code came from (`TODO.md`
-  §250).
+  `fixpt_place_at` says the chain. The CLI's sessions once compiled a
+  form from its text written out, its code placed at characters of that
+  text mapped back to the form's datums by position, not always the datum
+  the code came from (`TODO.md` §250); they now hand the Rust expander's
+  forms to the front end written in FX-26 as `syn`, a part a template made
+  at its provenance's id (`heap_syn::Syn::handed`,
+  `docs/research/heap-syntax.md`), so their code is placed as the Rust
+  compiler's is, and `sources::resolve` takes a place where it is.
 
 Not yet (`TODO.md` §249): an image's and a `.fasl`'s words hold ids
 whose entries are not written beside them, so read in another process

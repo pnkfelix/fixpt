@@ -22,7 +22,8 @@
 
 use super::{ellipsis, exports, normal, reserved, split, Addr, Aligner, Atom, Bind, Delta, Env, Kids, Level, Macro, Macros, Mode, Ns, PInfo, Ring, STy};
 use crate::error::{FxError, R};
-use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
+use fixpt_read::{Interner, Sym};
+use crate::heap_syn::{At, Syn, V};
 use fixpt_hash::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -31,8 +32,8 @@ use std::rc::Rc;
 pub(super) struct Unsigned {
     pub name: Sym,
     pub lits: Vec<Sym>,
-    pub clauses: Vec<Syntax>,
-    pub span: Span,
+    pub clauses: Vec<Syn>,
+    pub span: At,
 }
 
 /// What a macro makes, as its templates say.
@@ -79,17 +80,17 @@ struct Part {
 #[derive(Clone)]
 struct Item {
     cid: usize,
-    syn: Syntax,
+    syn: Syn,
     depth: usize,
 }
 
 enum Class {
-    Seq(Syntax),
+    Seq(Syn),
     Wild,
     Lit(Sym),
     Var(Sym),
     Nil,
-    Pair(Syntax, Syntax),
+    Pair(Syn, Syn),
 }
 
 /// The shape of a group's macros' operands.
@@ -111,7 +112,7 @@ struct Parts {
     /// Each list by ellipsis that took in patterns written one by one, by
     /// the place of the first: one whose element turns out to be of more
     /// than one syntax type is not, next time.
-    absorbed: HashMap<usize, Span>,
+    absorbed: HashMap<usize, At>,
 }
 
 /// What a pattern variable's part is of: a syntax type, or a part of the
@@ -163,7 +164,7 @@ struct Sol {
     imports: HashMap<usize, Bind>,
     exports: HashMap<usize, Bind>,
     root_exports: HashMap<usize, Bind>,
-    sticky: HashSet<Span>,
+    sticky: HashSet<At>,
 }
 
 impl Parts {
@@ -243,15 +244,15 @@ impl Parts {
         if let Some(x) = ellipsis(&it.syn, interner) {
             return Ok(Class::Seq(x));
         }
-        Ok(match &it.syn.datum {
-            Datum::Symbol(n) => match interner.name(*n) {
+        Ok(match &it.syn.view() {
+            V::Symbol(n) => match interner.name(*n) {
                 "_" => Class::Wild,
-                "..." => return Err(FxError::at(it.syn.span, "`...` follows the part it repeats, last in a list")),
+                "..." => return Err(FxError::at(it.syn.at(), "`...` follows the part it repeats, last in a list")),
                 name if lits.contains(n) || reserved(name) => Class::Lit(*n),
                 _ => Class::Var(*n),
             },
-            Datum::Nil => Class::Nil,
-            Datum::List { .. } => {
+            V::Nil => Class::Nil,
+            V::List { .. } => {
                 let (a, d) = split(&it.syn).expect("a list");
                 Class::Pair(a, d)
             }
@@ -281,7 +282,7 @@ impl Parts {
             self.boundary.insert(e, id);
             self.parts[id].shape = Shape::Seq(e);
             if took {
-                self.absorbed.insert(id, items[0].syn.span);
+                self.absorbed.insert(id, items[0].syn.at());
             }
             return Ok(id);
         }
@@ -367,11 +368,11 @@ impl Parts {
             return Ok(None);
         }
         if took {
-            if cx.sticky.contains(&items[0].syn.span) {
+            if cx.sticky.contains(&items[0].syn.at()) {
                 return Ok(None);
             }
-            let known: Vec<&K> = elems.iter().filter_map(|e| match &e.syn.datum {
-                Datum::Symbol(n) => cx.pkinds.get(&(e.cid, *n)).filter(|k| matches!(k, K::Ty(_))),
+            let known: Vec<&K> = elems.iter().filter_map(|e| match &e.syn.view() {
+                V::Symbol(n) => cx.pkinds.get(&(e.cid, *n)).filter(|k| matches!(k, K::Ty(_))),
                 _ => None,
             }).collect();
             if known.iter().any(|a| known.iter().any(|b| !reconcile(a, b) && !reconcile(b, a))) {
@@ -419,7 +420,7 @@ struct Cx<'a> {
     lits: Vec<&'a [Sym]>,
     of: Vec<usize>,
     pkinds: &'a HashMap<(usize, Sym), K>,
-    sticky: &'a HashSet<Span>,
+    sticky: &'a HashSet<At>,
     interner: &'a Interner,
 }
 
@@ -502,16 +503,17 @@ impl Macros {
     /// The signatures of macros `us`, defined together, inferred: each as
     /// written, `(-> σ defn)` and `(-> σ type)` for what makes definitions
     /// or a description.
-    pub(super) fn infer(&mut self, us: &[Unsigned], interner: &mut Interner) -> R<Vec<Syntax>> {
+    pub(super) fn infer(&mut self, us: &[Unsigned], interner: &mut Interner) -> R<Vec<Syn>> {
         let usage = "a clause is `((_ . pattern) template)`";
         let mut clauses = Vec::new();
         for (mi, u) in us.iter().enumerate() {
             for c in &u.clauses {
-                let Some([p, t]) = c.as_proper_list() else {
-                    return Err(FxError::at(c.span, usage));
+                let listed = c.list();
+                let Some([p, t]) = listed.as_deref() else {
+                    return Err(FxError::at(c.at(), usage));
                 };
                 let Some((_, p)) = split(p) else {
-                    return Err(FxError::at(p.span, usage));
+                    return Err(FxError::at(p.at(), usage));
                 };
                 clauses.push((mi, p, t.clone()));
             }
@@ -534,16 +536,16 @@ impl Macros {
                 Makes::Expr => s,
                 _ => {
                     let made = if *m == Makes::Defn { "defn" } else { "type" };
-                    Syntax::list(u.span, vec![Syntax::symbol(u.span, interner.intern("->")), s, Syntax::symbol(u.span, interner.intern(made))])
+                    Syn::lst(u.span, vec![Syn::named(u.span, "->", interner), s, Syn::named(u.span, made, interner)])
                 }
             })
             .collect())
     }
 
-    fn infer_loop(&mut self, us: &[Unsigned], clauses: &[(usize, Syntax, Syntax)], makes: &[Makes], interner: &mut Interner) -> R<Vec<Syntax>> {
+    fn infer_loop(&mut self, us: &[Unsigned], clauses: &[(usize, Syn, Syn)], makes: &[Makes], interner: &mut Interner) -> R<Vec<Syn>> {
         let mut sol = Sol::default();
-        let mut sticky: HashSet<Span> = HashSet::default();
-        let mut last: Option<(Vec<String>, Vec<Syntax>)> = None;
+        let mut sticky: HashSet<At> = HashSet::default();
+        let mut last: Option<(Vec<String>, Vec<Syn>)> = None;
         let mut shape_was = String::new();
         let lits: Vec<&[Sym]> = us.iter().map(|u| &u.lits[..]).collect();
         let of: Vec<usize> = clauses.iter().map(|c| c.0).collect();
@@ -567,8 +569,8 @@ impl Macros {
                 shape_was = shape;
             }
             let (tys, mu_parts) = self.build(&parts, &sol);
-            let shown: Vec<Syntax> = tys.iter().zip(us).map(|(t, u)| self.shown_sty(t, u.span, interner, &mut Vec::new())).collect();
-            let strings: Vec<String> = shown.iter().map(|s| fixpt_read::write_syntax(s, interner)).collect();
+            let shown: Vec<Syn> = tys.iter().zip(us).map(|(t, u)| self.shown_sty(t, u.span, interner, &mut Vec::new())).collect();
+            let strings: Vec<String> = shown.iter().map(|s| fixpt_read::write_syntax(&s.to_syntax(), interner)).collect();
             if last.as_ref().is_some_and(|(l, _)| *l == strings) {
                 return Ok(shown);
             }
@@ -602,7 +604,7 @@ impl Macros {
     /// form or such a macro's use, a description; an expression's form, a
     /// literal, an expression; else (a name, an application) whatever
     /// another clause says, an expression if none does.
-    fn makes_all(&self, us: &[Unsigned], clauses: &[(usize, Syntax, Syntax)], interner: &Interner) -> R<Vec<Makes>> {
+    fn makes_all(&self, us: &[Unsigned], clauses: &[(usize, Syn, Syn)], interner: &Interner) -> R<Vec<Makes>> {
         let mut known: Vec<Option<Makes>> = vec![None; us.len()];
         for _ in 0..=us.len() {
             let mut next: Vec<Option<Makes>> = vec![None; us.len()];
@@ -611,7 +613,7 @@ impl Macros {
                 if let Some(k) = self.makes(t, &pv, us, &known, interner) {
                     match next[*mi] {
                         Some(j) if j != k => {
-                            return Err(FxError::at(t.span, format!("this template makes {}, and another of `{}`'s {}", k.said(), interner.name(us[*mi].name), j.said())));
+                            return Err(FxError::at(t.at(), format!("this template makes {}, and another of `{}`'s {}", k.said(), interner.name(us[*mi].name), j.said())));
                         }
                         _ => next[*mi] = Some(k),
                     }
@@ -625,12 +627,12 @@ impl Macros {
         Ok(known.into_iter().map(|k| k.unwrap_or(Makes::Expr)).collect())
     }
 
-    fn makes(&self, t: &Syntax, pv: &HashSet<Sym>, us: &[Unsigned], known: &[Option<Makes>], interner: &Interner) -> Option<Makes> {
-        match &t.datum {
-            Datum::Symbol(_) | Datum::Nil => None,
-            Datum::List { items, .. } => match &items[0].datum {
-                Datum::Symbol(h) if pv.contains(h) => None,
-                Datum::Symbol(h) => {
+    fn makes(&self, t: &Syn, pv: &HashSet<Sym>, us: &[Unsigned], known: &[Option<Makes>], interner: &Interner) -> Option<Makes> {
+        match &t.view() {
+            V::Symbol(_) | V::Nil => None,
+            V::List { items, .. } => match &items[0].view() {
+                V::Symbol(h) if pv.contains(h) => None,
+                V::Symbol(h) => {
                     if let Some(i) = us.iter().position(|u| u.name == *h) {
                         return known[i];
                     }
@@ -650,7 +652,7 @@ impl Macros {
                         _ => None,
                     }
                 }
-                Datum::Keyword(_) => Some(Makes::Expr),
+                V::Keyword(_) => Some(Makes::Expr),
                 _ => None,
             },
             _ => Some(Makes::Expr),
@@ -751,7 +753,7 @@ impl Macros {
     /// signature so far; and, if it makes definitions, what of what a use
     /// gives it defines.
     #[allow(clippy::type_complexity)]
-    fn placements(&self, parts: &Parts, sol: &Sol, cid: usize, template: &Syntax, made: Makes, interner: &Interner) -> R<(Vec<Placed>, Option<(Vec<Atom>, Vec<Sym>)>)> {
+    fn placements(&self, parts: &Parts, sol: &Sol, cid: usize, template: &Syn, made: Makes, interner: &Interner) -> R<(Vec<Placed>, Option<(Vec<Atom>, Vec<Sym>)>)> {
         // A pattern variable whose syntax type is not known yet taken for a
         // name, where a form takes a name or a list (`define-type`'s); if
         // the template is then refused, for anything.
@@ -759,7 +761,7 @@ impl Macros {
     }
 
     #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-    fn placed_as(&self, parts: &Parts, sol: &Sol, cid: usize, template: &Syntax, made: Makes, interner: &Interner, names: bool) -> R<(Vec<Placed>, Option<(Vec<Atom>, Vec<Sym>)>)> {
+    fn placed_as(&self, parts: &Parts, sol: &Sol, cid: usize, template: &Syn, made: Makes, interner: &Interner, names: bool) -> R<(Vec<Placed>, Option<(Vec<Atom>, Vec<Sym>)>)> {
         let mut pvars = HashMap::default();
         for (&(c, n), &p) in &parts.at {
             if c != cid {
@@ -787,7 +789,7 @@ impl Macros {
                 out.push(Placed { n, core: t.nodes[at].core.clone(), env: normal(&env.to_vec()), many, depth });
             }
         }
-        let defined = if made == Makes::Defn { Some(exports(&t.levels_of(root, template.span)?)) } else { None };
+        let defined = if made == Makes::Defn { Some(exports(&t.levels_of(root, template.at())?)) } else { None };
         Ok((out, defined))
     }
 
@@ -1150,10 +1152,10 @@ impl Macros {
         }
     }
 
-    /// Syntax type `t` as a signature writes it: a `mu` whose variable is
+    /// Syn type `t` as a signature writes it: a `mu` whose variable is
     /// used, or whose addresses are from it; a list by ellipsis, `(σ ...)`.
-    pub(super) fn shown_sty(&self, t: &Rc<STy>, at: Span, interner: &mut Interner, names: &mut Vec<(usize, Sym, bool)>) -> Syntax {
-        let sym = |s: &str, i: &mut Interner| Syntax::symbol(at, i.intern(s));
+    pub(super) fn shown_sty(&self, t: &Rc<STy>, at: At, interner: &mut Interner, names: &mut Vec<(usize, Sym, bool)>) -> Syn {
+        let sym = |s: &str, i: &mut Interner| Syn::named(at, s, i);
         match &**t {
             STy::Expr => sym("expr", interner),
             STy::Lambda => sym("lambda", interner),
@@ -1166,8 +1168,8 @@ impl Macros {
             STy::Dvar => sym("dvar", interner),
             STy::Kind => sym("kind", interner),
             STy::Defn => sym("defn", interner),
-            STy::Nil => Syntax::new(at, Datum::Nil),
-            STy::Literal(n) => Syntax::list(at, vec![sym("literal", interner), Syntax::symbol(at, *n)]),
+            STy::Nil => Syn::nil(at),
+            STy::Literal(n) => Syn::lst(at, vec![sym("literal", interner), Syn::symbol(at, *n, interner)]),
             STy::Pair(..) => {
                 let mut items = Vec::new();
                 let mut cur = t.clone();
@@ -1177,11 +1179,11 @@ impl Macros {
                             items.push(self.shown_sty(a, at, interner, names));
                             cur = d.clone();
                         }
-                        STy::Nil => return Syntax::list(at, items),
+                        STy::Nil => return Syn::lst(at, items),
                         STy::Mu(id) if !names.iter().any(|(j, ..)| j == id) && let Some(e) = self.seq_elem(*id) => {
                             items.push(self.shown_sty(&e, at, interner, names));
                             items.push(sym("...", interner));
-                            return Syntax::list(at, items);
+                            return Syn::lst(at, items);
                         }
                         _ => {
                             let tail = self.shown_sty(&cur, at, interner, names);
@@ -1193,11 +1195,11 @@ impl Macros {
             STy::Import(b, bind) | STy::Export(b, bind) => {
                 let head = if matches!(&**t, STy::Import(..)) { "import" } else { "export" };
                 let b = self.shown_sty(b, at, interner, names);
-                Syntax::list(at, vec![sym(head, interner), b, shown_bind(bind, at, interner)])
+                Syn::lst(at, vec![sym(head, interner), b, shown_bind(bind, at, interner)])
             }
             STy::Many(b) => {
                 let b = self.shown_sty(b, at, interner, names);
-                Syntax::list(at, vec![sym("many", interner), b])
+                Syn::lst(at, vec![sym("many", interner), b])
             }
             STy::Typed(b, _) => self.shown_sty(b, at, interner, names),
             STy::Union(ms) => {
@@ -1205,22 +1207,22 @@ impl Macros {
                 for m in ms {
                     items.push(self.shown_sty(m, at, interner, names));
                 }
-                Syntax::list(at, items)
+                Syn::lst(at, items)
             }
             STy::Mu(id) => {
                 if let Some(e) = names.iter_mut().find(|(j, ..)| j == id) {
                     e.2 = true;
-                    return Syntax::symbol(at, e.1);
+                    return Syn::symbol(at, e.1, interner);
                 }
                 if let Some(e) = self.seq_elem(*id) {
                     let e = self.shown_sty(&e, at, interner, names);
-                    return Syntax::list(at, vec![e, sym("...", interner)]);
+                    return Syn::lst(at, vec![e, sym("...", interner)]);
                 }
                 let v = interner.intern(&format!("m{}", names.len() + 1));
                 names.push((*id, v, false));
                 let body = self.shown_sty(&self.mus[*id].clone(), at, interner, names);
                 let (_, _, used) = names.pop().expect("pushed");
-                if used || open(&self.mus[*id]) { Syntax::list(at, vec![sym("mu", interner), Syntax::symbol(at, v), body]) } else { body }
+                if used || open(&self.mus[*id]) { Syn::lst(at, vec![sym("mu", interner), Syn::symbol(at, v, interner), body]) } else { body }
             }
         }
     }
@@ -1254,13 +1256,13 @@ impl Macros {
 /// `many` or literal that is a list's rest after a ` . `, as written,
 /// `(bvar . (import expr (rho (A var))))`, which a list's printing would
 /// run into its elements.
-pub(super) fn sig_text(s: &Syntax, interner: &Interner) -> String {
-    let Datum::List { items, tail } = &s.datum else { return fixpt_read::write_syntax(s, interner) };
+pub(super) fn sig_text(s: &Syn, interner: &Interner) -> String {
+    let V::List { items, tail } = &s.view() else { return fixpt_read::write_syntax(&s.to_syntax(), interner) };
     let words = ["import", "export", "union", "mu", "many", "literal"];
     let mut out = String::from("(");
     for (k, i) in items.iter().enumerate() {
-        if k > 0 && tail.is_none() && i.as_symbol().is_some_and(|w| words.contains(&interner.name(w))) {
-            let rest = Syntax::list(s.span, items[k..].to_vec());
+        if k > 0 && tail.is_none() && i.sym().is_some_and(|w| words.contains(&interner.name(w))) {
+            let rest = Syn::lst(s.at(), items[k..].to_vec());
             out.push_str(&format!(" . {})", sig_text(&rest, interner)));
             return out;
         }
@@ -1276,14 +1278,14 @@ pub(super) fn sig_text(s: &Syntax, interner: &Interner) -> String {
     out
 }
 
-fn shown_bind(b: &Bind, at: Span, interner: &mut Interner) -> Syntax {
-    let sym = |s: &str, i: &mut Interner| Syntax::symbol(at, i.intern(s));
+fn shown_bind(b: &Bind, at: At, interner: &mut Interner) -> Syn {
+    let sym = |s: &str, i: &mut Interner| Syn::named(at, s, i);
     let addr = |a: &Addr, i: &mut Interner| {
         if a.is_empty() {
-            Syntax::new(at, Datum::Nil)
+            Syn::nil(at)
         } else {
             let w: String = a.iter().rev().map(|s| if *s { 'A' } else { 'D' }).collect();
-            Syntax::symbol(at, i.intern(&w))
+            Syn::named(at, &w, i)
         }
     };
     let rib = |es: &[(Addr, Delta)], i: &mut Interner| {
@@ -1297,23 +1299,23 @@ fn shown_bind(b: &Bind, at: Span, interner: &mut Interner) -> Syntax {
                 Delta::Rib => "rib",
                 Delta::Env => "env",
             };
-            items.push(Syntax::list(at, vec![addr(a, i), sym(d, i)]));
+            items.push(Syn::lst(at, vec![addr(a, i), sym(d, i)]));
         }
-        Syntax::list(at, items)
+        Syn::lst(at, items)
     };
     match b {
         Bind::Rib(es) => rib(es, interner),
-        Bind::Shape(a) => Syntax::list(at, vec![sym("shape", interner), addr(a, interner)]),
+        Bind::Shape(a) => Syn::lst(at, vec![sym("shape", interner), addr(a, interner)]),
         Bind::Cage(rings) => {
             let mut items = vec![sym("cage", interner)];
             for r in rings {
                 items.push(match r {
                     Ring::Rib(es) => rib(es, interner),
-                    Ring::At(a) => Syntax::list(at, vec![sym("at", interner), addr(a, interner)]),
-                    Ring::Shape(a) => Syntax::list(at, vec![sym("shape", interner), addr(a, interner)]),
+                    Ring::At(a) => Syn::lst(at, vec![sym("at", interner), addr(a, interner)]),
+                    Ring::Shape(a) => Syn::lst(at, vec![sym("shape", interner), addr(a, interner)]),
                 });
             }
-            Syntax::list(at, items)
+            Syn::lst(at, items)
         }
         Bind::Direct(_) | Bind::Earlier(_) => rib(&[], interner),
     }
@@ -1323,16 +1325,16 @@ fn shown_bind(b: &Bind, at: Span, interner: &mut Interner) -> Syntax {
 mod tests {
     use super::*;
 
-    fn literals(s: &Syntax, interner: &Interner, out: &mut Vec<Sym>) {
-        if let Some([h, n]) = s.as_proper_list()
-            && h.as_symbol().is_some_and(|h| interner.name(h) == "literal")
-            && let Some(n) = n.as_symbol()
+    fn literals(s: &Syn, interner: &Interner, out: &mut Vec<Sym>) {
+        if let Some([h, n]) = s.list().as_deref()
+            && h.sym().is_some_and(|h| interner.name(h) == "literal")
+            && let Some(n) = n.sym()
         {
             out.push(n);
             return;
         }
-        if let Datum::List { items, tail } = &s.datum {
-            for i in items.iter().chain(tail.as_deref()) {
+        if let V::List { items, tail } = &s.view() {
+            for i in items.iter().chain(tail.as_ref()) {
                 literals(i, interner, out);
             }
         }
@@ -1349,16 +1351,18 @@ mod tests {
         for path in &names {
             let text = std::fs::read_to_string(path).unwrap();
             let mut interner = Interner::default();
-            let Ok(forms) = fixpt_read::Reader::new(&text, fixpt_read::FileId(1), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() else { continue };
+            let (mut heap, mut syms) = (fixpt_heap::Heap::new(), crate::heap_syn::SymTable::default());
+            crate::heap_syn::with_syntax(&mut heap, &mut syms, || {
+            let Ok(forms) = crate::heap_syn::read_syn(&text, fixpt_read::FileId(1), &mut interner) else { return };
             let mut m = Macros::default();
             m.ensure_kernel(&mut interner).unwrap();
             for f in &forms {
-                let Some(items) = f.as_proper_list() else { continue };
-                if !items.first().and_then(|h| h.as_symbol()).is_some_and(|h| interner.name(h) == "define-syntax") || items.len() != 4 {
+                let Some(items) = f.list() else { continue };
+                if !items.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "define-syntax") || items.len() != 4 {
                     continue;
                 }
-                let Some(rules) = items[3].as_proper_list() else { continue };
-                let name = items[1].as_symbol().unwrap();
+                let Some(rules) = items[3].list() else { continue };
+                let name = items[1].sym().unwrap();
                 let file = path.file_name().unwrap().to_string_lossy().to_string();
                 let label = format!("{file} {}", interner.name(name));
                 let Ok((poly, sty, defn, desc)) = m.signature(&items[2], &mut interner) else { continue };
@@ -1367,24 +1371,25 @@ mod tests {
                     let _ = m.define(f, &mut interner);
                     continue;
                 }
-                let mut w = m.shown_sty(&sty, f.span, &mut interner, &mut Vec::new());
+                let mut w = m.shown_sty(&sty, f.at(), &mut interner, &mut Vec::new());
                 if defn || desc {
                     let made = if defn { "defn" } else { "type" };
-                    w = Syntax::list(f.span, vec![Syntax::symbol(f.span, interner.intern("->")), w, Syntax::symbol(f.span, interner.intern(made))]);
+                    w = Syn::lst(f.at(), vec![Syn::named(f.at(), "->", &mut interner), w, Syn::named(f.at(), made, &mut interner)]);
                 }
-                let w = fixpt_read::write_syntax(&w, &interner);
+                let w = fixpt_read::write_syntax(&w.to_syntax(), &interner);
                 let mut lits = Vec::new();
                 literals(&items[2], &interner, &mut lits);
-                let u = Unsigned { name, lits, clauses: rules[2..].to_vec(), span: f.span };
+                let u = Unsigned { name, lits, clauses: rules[2..].to_vec(), span: f.at() };
                 match m.infer(&[u], &mut interner) {
                     Ok(s) => {
-                        let i = fixpt_read::write_syntax(&s[0], &interner);
+                        let i = fixpt_read::write_syntax(&s[0].to_syntax(), &interner);
                         if i == w { same.push(label) } else { other.push(format!("{label}\n    written  {w}\n    inferred {i}")) }
                     }
                     Err(e) => failed.push(format!("{label}: {}", e.message)),
                 }
                 let _ = m.define(f, &mut interner);
             }
+            });
         }
         println!("same ({}):\n  {}", same.len(), same.join("\n  "));
         println!("other ({}):\n  {}", other.len(), other.join("\n  "));

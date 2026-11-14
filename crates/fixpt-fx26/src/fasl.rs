@@ -831,7 +831,7 @@ impl crate::check::Checker {
         // directory: from their own `.fasl`s, if fresh.
         let dir = at.parent().map(|d| d.to_path_buf());
         let outer = std::mem::replace(&mut self.base_dir, dir.clone());
-        let names: crate::R<Vec<fixpt_read::Sym>> = header.deps.iter().map(|d| self.load_name(span, &d.path, d.input)).collect();
+        let names: crate::R<Vec<fixpt_read::Sym>> = self.syn(|c| header.deps.iter().map(|d| c.load_name(span, &d.path, d.input)).collect());
         self.base_dir = outer;
         let names = names?;
         for (d, n) in header.deps.iter().zip(&names) {
@@ -863,7 +863,7 @@ impl crate::check::Checker {
         let (depth, standard) = (self.dscope.len(), self.standard_dscope);
         let outer = self.hidden.replace(((0, 0), (standard, depth)));
         let outer_dir = std::mem::replace(&mut self.base_dir, dir);
-        let e = self.read_module_file(file, &text).and_then(|forms| self.parse_exp(&forms[0]));
+        let e = self.syn(|c| c.read_module_file(file, &text).and_then(|forms| c.parse_exp_syn(&forms[0])));
         self.base_dir = outer_dir;
         self.dscope.truncate(depth);
         self.hidden = outer;
@@ -1131,7 +1131,7 @@ impl crate::check::Checker {
     /// what its definition `form` would have made of it for a redefinition
     /// (`defs`): that form, which is checked again if a global it uses is
     /// redefined, and the globals it uses.
-    pub fn fasl_defined(&mut self, name: fixpt_read::Sym, form: std::rc::Rc<fixpt_read::Syntax>, uses: Vec<fixpt_read::Sym>) {
+    pub fn fasl_defined(&mut self, name: fixpt_read::Sym, form: crate::heap_syn::Form, uses: Vec<fixpt_read::Sym>) {
         if let Some(d) = self.defs.iter_mut().rev().find(|d| d.names.contains(&name)) {
             d.form = form;
             d.uses = uses;
@@ -1150,11 +1150,13 @@ impl crate::check::Checker {
 
     /// Type `text` read here, if it reads.
     pub fn fasl_parse_type(&mut self, text: &str) -> Option<crate::ast::TyId> {
-        let forms = self.read_module_file(fixpt_read::FileId(0), text).ok()?;
-        let depth = self.dscope.len();
-        let t = self.parse_type(forms.first()?);
-        self.dscope.truncate(depth);
-        t.ok()
+        self.syn(|c| {
+            let forms = c.read_module_file(fixpt_read::FileId(0), text).ok()?;
+            let depth = c.dscope.len();
+            let t = c.parse_type_syn(forms.first()?);
+            c.dscope.truncate(depth);
+            t.ok()
+        })
     }
 }
 
@@ -1206,7 +1208,7 @@ impl crate::check::Checker {
     /// where it is loaded, as here), the standard ones, and those an earlier
     /// file of the program defined that this one does not (each compared
     /// where the `.fasl` is read, after the files before it).
-    pub fn fasl_allowed_aliases(&self, forms: &[fixpt_read::Syntax]) -> Vec<fixpt_read::Sym> {
+    pub fn fasl_allowed_aliases(&self, forms: &[crate::heap_syn::Form]) -> Vec<fixpt_read::Sym> {
         let again: Vec<fixpt_read::Sym> = self.types_defined_again(forms).into_iter().map(|(n, _)| n).collect();
         let mut out: Vec<fixpt_read::Sym> = self.type_abbreviations(forms).into_iter().map(|(n, _)| n).filter(|n| !again.contains(n)).collect();
         let earlier = self.dscope.iter().filter(|(_, d)| matches!(d, crate::parse::DScope::Rec(_))).map(|(n, _)| *n);

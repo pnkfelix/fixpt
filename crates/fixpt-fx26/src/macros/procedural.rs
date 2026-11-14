@@ -22,7 +22,8 @@
 
 use std::cell::RefCell;
 
-use fixpt_read::{Datum, Interner, Span, Sym, Syntax};
+use fixpt_read::{Interner, Sym};
+use crate::heap_syn::{At, Syn, V};
 
 use crate::{FxError, R};
 
@@ -175,38 +176,38 @@ pub(crate) fn alias(x: &str, made: u32) -> String {
 /// environment `macro_env` (else the use's), each name an alias (expansion
 /// `made`'s) or as written; a closure's form in its own environment, its
 /// free names in the one around it; a quoted datum as it is.
-pub(crate) fn closed(s: &Syntax, macro_env: bool, made: u32, interner: &mut Interner) -> R<Syntax> {
-    match &s.datum {
-        Datum::Symbol(x) if macro_env => {
+pub(crate) fn closed(s: &Syn, macro_env: bool, made: u32, interner: &mut Interner) -> R<Syn> {
+    match &s.view() {
+        V::Symbol(x) if macro_env => {
             let n = alias(interner.name(*x), made);
-            Ok(Syntax::symbol(s.span, interner.intern(&n)))
+            Ok(Syn::named(s.at(), &n, interner))
         }
-        Datum::List { items, tail } => {
-            let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h).to_string());
+        V::List { items, tail } => {
+            let head = items.first().and_then(|h| h.sym()).map(|h| interner.name(h).to_string());
             if head.as_deref() == Some("quote") {
                 return Ok(s.clone());
             }
             if head.as_deref() == Some(CLOSURE) {
                 let [_, env, free, form] = &items[..] else {
-                    return Err(FxError::at(s.span, "a syntactic closure is `(%sc env (free …) form)`"));
+                    return Err(FxError::at(s.at(), "a syntactic closure is `(%sc env (free …) form)`"));
                 };
-                let inner = match env.as_symbol().map(|e| interner.name(e)) {
+                let inner = match env.sym().map(|e| interner.name(e)) {
                     Some(USE_ENV) => false,
                     Some(MACRO_ENV) => true,
-                    _ => return Err(FxError::at(env.span, "a syntactic closure's environment is one a transformer was given")),
+                    _ => return Err(FxError::at(env.at(), "a syntactic closure's environment is one a transformer was given")),
                 };
-                let free: Vec<Sym> = match &free.datum {
-                    Datum::Nil => Vec::new(),
-                    _ => free.as_proper_list().and_then(|l| l.iter().map(|x| x.as_symbol()).collect()).ok_or_else(|| FxError::at(free.span, "a syntactic closure's free names are a list of names"))?,
+                let free: Vec<Sym> = match &free.view() {
+                    V::Nil => Vec::new(),
+                    _ => free.list().and_then(|l| l.iter().map(|x| x.sym()).collect()).ok_or_else(|| FxError::at(free.at(), "a syntactic closure's free names are a list of names"))?,
                 };
                 return opened(form, inner, macro_env, &free, made, interner);
             }
             let items = items.iter().map(|i| closed(i, macro_env, made, interner)).collect::<R<Vec<_>>>()?;
             let tail = match tail {
-                Some(t) => Some(Box::new(closed(t, macro_env, made, interner)?)),
+                Some(t) => Some(closed(t, macro_env, made, interner)?),
                 None => None,
             };
-            Ok(Syntax::new(s.span, Datum::List { items, tail }))
+            Ok(Syn::of_list(s.at(), &items, tail))
         }
         _ => Ok(s.clone()),
     }
@@ -214,21 +215,21 @@ pub(crate) fn closed(s: &Syntax, macro_env: bool, made: u32, interner: &mut Inte
 
 /// A closure's form, `s`, closed in environment `inner`, its `free` names
 /// in `outer`.
-fn opened(s: &Syntax, inner: bool, outer: bool, free: &[Sym], made: u32, interner: &mut Interner) -> R<Syntax> {
-    match &s.datum {
-        Datum::Symbol(x) if free.contains(x) => closed(s, outer, made, interner),
-        Datum::Symbol(_) => closed(s, inner, made, interner),
-        Datum::List { items, tail } => {
-            let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h).to_string());
+fn opened(s: &Syn, inner: bool, outer: bool, free: &[Sym], made: u32, interner: &mut Interner) -> R<Syn> {
+    match &s.view() {
+        V::Symbol(x) if free.contains(x) => closed(s, outer, made, interner),
+        V::Symbol(_) => closed(s, inner, made, interner),
+        V::List { items, tail } => {
+            let head = items.first().and_then(|h| h.sym()).map(|h| interner.name(h).to_string());
             if matches!(head.as_deref(), Some("quote") | Some(CLOSURE)) {
                 return closed(s, inner, made, interner);
             }
             let items = items.iter().map(|i| opened(i, inner, outer, free, made, interner)).collect::<R<Vec<_>>>()?;
             let tail = match tail {
-                Some(t) => Some(Box::new(opened(t, inner, outer, free, made, interner)?)),
+                Some(t) => Some(opened(t, inner, outer, free, made, interner)?),
                 None => None,
             };
-            Ok(Syntax::new(s.span, Datum::List { items, tail }))
+            Ok(Syn::of_list(s.at(), &items, tail))
         }
         _ => Ok(s.clone()),
     }
@@ -238,62 +239,56 @@ fn opened(s: &Syntax, inner: bool, outer: bool, free: &[Sym], made: u32, interne
 /// the keyword (`is_keyword`: a form's, a description's word, a macro's),
 /// which nothing binds, so nothing could capture; and every alias quoted
 /// made its name, a symbol as data.
-pub(crate) fn keywords(s: &Syntax, is_keyword: &dyn Fn(&str) -> bool, interner: &mut Interner) -> Syntax {
-    match &s.datum {
-        Datum::Symbol(x) => match alias_base(interner.name(*x)) {
+pub(crate) fn keywords(s: &Syn, is_keyword: &dyn Fn(&str) -> bool, interner: &mut Interner) -> Syn {
+    match &s.view() {
+        V::Symbol(x) => match alias_base(interner.name(*x)) {
             Some(b) if is_keyword(b) => {
                 let b = b.to_string();
-                Syntax::symbol(s.span, interner.intern(&b))
+                Syn::named(s.at(), &b, interner)
             }
             _ => s.clone(),
         },
-        Datum::List { items, tail } => {
-            let quoted = items.first().and_then(|h| h.as_symbol()).is_some_and(|h| {
+        V::List { items, tail } => {
+            let quoted = items.first().and_then(|h| h.sym()).is_some_and(|h| {
                 let n = interner.name(h);
                 matches!(n, "quote" | "quasiquote") || alias_base(n).is_some_and(|b| matches!(b, "quote" | "quasiquote"))
             });
             if quoted {
-                return Syntax::new(s.span, Datum::List { items: items.iter().map(|i| unaliased(i, interner)).collect(), tail: tail.as_ref().map(|t| Box::new(unaliased(t, interner))) });
+                return Syn::of_list(s.at(), &items.iter().map(|i| unaliased(i, interner)).collect::<Vec<_>>(), tail.as_ref().map(|t| unaliased(t, interner)));
             }
-            Syntax::new(
-                s.span,
-                Datum::List { items: items.iter().map(|i| keywords(i, is_keyword, interner)).collect(), tail: tail.as_ref().map(|t| Box::new(keywords(t, is_keyword, interner))) },
-            )
+            Syn::of_list(s.at(), &items.iter().map(|i| keywords(i, is_keyword, interner)).collect::<Vec<_>>(), tail.as_ref().map(|t| keywords(t, is_keyword, interner)))
         }
-        Datum::Vector(xs) => Syntax::new(s.span, Datum::Vector(xs.iter().map(|i| keywords(i, is_keyword, interner)).collect())),
+        V::Vector(xs) => Syn::vector(s.at(), &xs.iter().map(|i| keywords(i, is_keyword, interner)).collect::<Vec<_>>()),
         _ => s.clone(),
     }
 }
 
 /// `s` with every alias its name.
-fn unaliased(s: &Syntax, interner: &mut Interner) -> Syntax {
-    match &s.datum {
-        Datum::Symbol(x) => match alias_base(interner.name(*x)) {
+fn unaliased(s: &Syn, interner: &mut Interner) -> Syn {
+    match &s.view() {
+        V::Symbol(x) => match alias_base(interner.name(*x)) {
             Some(b) => {
                 let b = b.to_string();
-                Syntax::symbol(s.span, interner.intern(&b))
+                Syn::named(s.at(), &b, interner)
             }
             None => s.clone(),
         },
-        Datum::List { items, tail } => {
-            Syntax::new(s.span, Datum::List { items: items.iter().map(|i| unaliased(i, interner)).collect(), tail: tail.as_ref().map(|t| Box::new(unaliased(t, interner))) })
+        V::List { items, tail } => {
+            Syn::of_list(s.at(), &items.iter().map(|i| unaliased(i, interner)).collect::<Vec<_>>(), tail.as_ref().map(|t| unaliased(t, interner)))
         }
-        Datum::Vector(xs) => Syntax::new(s.span, Datum::Vector(xs.iter().map(|i| unaliased(i, interner)).collect())),
+        V::Vector(xs) => Syn::vector(s.at(), &xs.iter().map(|i| unaliased(i, interner)).collect::<Vec<_>>()),
         _ => s.clone(),
     }
 }
 
 /// `s` at the use's place, `at`, of expansion `made`: what a transformer
 /// gave, read from text, placed where the use was.
-pub(crate) fn placed(s: &Syntax, at: Span, made: u32) -> Syntax {
-    let span = Span { expansion: made, ..at };
-    match &s.datum {
-        Datum::List { items, tail } => Syntax::new(
-            span,
-            Datum::List { items: items.iter().map(|i| placed(i, at, made)).collect(), tail: tail.as_ref().map(|t| Box::new(placed(t, at, made))) },
-        ),
-        Datum::Vector(xs) => Syntax::new(span, Datum::Vector(xs.iter().map(|i| placed(i, at, made)).collect())),
-        d => Syntax::new(span, d.clone()),
+pub(crate) fn placed(s: &Syn, at: At, made: u32) -> Syn {
+    let span = At { expansion: made, ..at };
+    match &s.view() {
+        V::List { items, tail } => Syn::of_list(span, &items.iter().map(|i| placed(i, at, made)).collect::<Vec<_>>(), tail.as_ref().map(|t| placed(t, at, made))),
+        V::Vector(xs) => Syn::vector(span, &xs.iter().map(|i| placed(i, at, made)).collect::<Vec<_>>()),
+        _ => s.placed(span),
     }
 }
 

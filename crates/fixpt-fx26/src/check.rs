@@ -28,7 +28,7 @@
 use crate::ast::{Arena, Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, EArg, Effect, Exp, ExpId, Kind, Region, RegionForm, Size, Ty, TyId, Variance};
 use crate::error::{FxError, R};
 use crate::parse::DScope;
-use fixpt_read::{Interner, Reader, Sym, Syntax, SyntaxProfile};
+use fixpt_read::{Interner, Sym};
 use fixpt_hash::{HashMap, HashSet};
 
 /// `vsubr`'s declaration: generative type 0, in both checkers.
@@ -596,7 +596,7 @@ pub struct Checker {
     /// The hidden globals' definitions made since the form being checked
     /// began, to run before it (`top_defining`; a driver calling `top`
     /// takes them).
-    pub hoisted: Vec<(crate::top::Top, std::rc::Rc<Syntax>)>,
+    pub hoisted: Vec<(crate::top::Top, crate::heap_syn::Form)>,
     /// Modules read from files: each one's path and text, and the file id
     /// its spans have.
     pub(crate) loaded: HashMap<ExpId, (String, String, fixpt_read::FileId)>,
@@ -1093,7 +1093,87 @@ thread_local! {
     static NAMED_REFS: std::cell::RefCell<Option<Vec<(bool, Sym)>>> = const { std::cell::RefCell::new(None) };
 }
 
+/// `f`, with `world`'s syntax lent ([`Checker::syn`]).
+fn lending<T>(world: &std::rc::Rc<std::cell::RefCell<crate::macros::SynWorld>>, f: impl FnOnce() -> T) -> T {
+    if world.borrow().lending {
+        return f();
+    }
+    assert!(!world.borrow().session, "a session's checker's syntax is in the session's heap, which its caller lends (`Fx26Session::checking`)");
+    // Another checker's syntax may be lent (this one run inside it: a
+    // procedural macro's transformer's session, a verifier's check): this
+    // lending hides it until it ends, and neither heap collects the
+    // other's. What must not happen, a lending of this checker's inside its
+    // own with its macros taken out (`std::mem::take`, a world of their
+    // own), nothing does: no code it runs with them taken comes back here.
+    let (mut heap, mut syms) = {
+        let mut w = world.borrow_mut();
+        w.lending = true;
+        (w.heap.take().unwrap_or_else(|| Box::new(fixpt_heap::Heap::new())), std::mem::take(&mut w.syms))
+    };
+    if heap.collection_due() {
+        heap.collect_due(&mut []);
+    }
+    let r = crate::heap_syn::with_syntax(&mut heap, &mut syms, f);
+    let mut w = world.borrow_mut();
+    (w.lending, w.heap, w.syms) = (false, Some(heap), syms);
+    r
+}
+
 impl Checker {
+    /// `f`, where syntax may be read and made (`crate::heap_syn`): the
+    /// checker's heap and its symbols' table lent to it, unless they are
+    /// lent already (a call inside one). Before the outermost, a collection
+    /// if one is due: no syntax is held then but by handles (`Kept`).
+    pub(crate) fn syn<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        // The macros' (`Withs::world`), which a copy of them put back
+        // shares: their handles are into its heap.
+        let world = self.macros.withs.world.clone();
+        lending(&world, || f(self))
+    }
+
+    /// [`Checker::syn`], for what only reads the checker.
+    pub(crate) fn syn_ref<T>(&self, f: impl FnOnce(&Self) -> T) -> T {
+        lending(&self.macros.withs.world, || f(self))
+    }
+
+    /// This checker's syntax made, from now on, in the heap of the session
+    /// it is the checker of, which the session lends around each call
+    /// ([`Checker::with_heap`]): so that what it reads and expands is the
+    /// session's to hand to the front end written in FX-26 as it is
+    /// (`docs/research/heap-syntax.md`). Before any of it is kept: the heap
+    /// it was made in, and its symbols' table, go.
+    pub fn in_session_heap(&mut self) {
+        let mut w = self.macros.withs.world.borrow_mut();
+        assert!(!w.lending, "not while its syntax is lent");
+        if let Some(heap) = w.heap.take() {
+            assert_eq!(crate::heap_syn::kept_count(&heap), 0, "syntax kept in the heap a checker was made in");
+        }
+        w.syms = Default::default();
+        w.session = true;
+    }
+
+    /// `f`, with `heap`, its session's, lent for this checker's syntax
+    /// ([`Checker::in_session_heap`]); unless it is lent already (a call
+    /// inside one). No collection here: the session's own come at its
+    /// safepoints, and find what is kept through its global (`Kept`).
+    pub fn with_heap<T>(&mut self, heap: &mut fixpt_heap::Heap, f: impl FnOnce(&mut Self) -> T) -> T {
+        let world = self.macros.withs.world.clone();
+        let mut syms = {
+            let mut w = world.borrow_mut();
+            if w.lending {
+                drop(w);
+                return f(self);
+            }
+            assert!(w.session, "a checker of its own heap");
+            w.lending = true;
+            std::mem::take(&mut w.syms)
+        };
+        let r = crate::heap_syn::with_syntax(heap, &mut syms, || f(self));
+        let mut w = world.borrow_mut();
+        (w.lending, w.syms) = (false, syms);
+        r
+    }
+
     /// A checker with the initial environment of `crate::standard`.
     pub fn new() -> Checker {
         Checker::with_convention(Conv::Cellular)
@@ -1282,13 +1362,17 @@ impl Checker {
         // their list). `vlambda` makes one; `apply` calls one on a list.
         c.arena.string_sym = Some(c.interner.intern("string"));
         for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING, EFFECTREP, REGIONREP, TYPEREP, EFFECTBOUND, TYPEBOUND] {
-            let forms = c.read(decl).expect("reads");
-            c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
+            c.syn(|c| {
+                let forms = c.read(decl).expect("reads");
+                c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
+            });
         }
         for (name, text) in STANDARD_TYPES {
-            let forms = c.read(text).expect("reads");
-            let sym = c.interner.intern(name);
-            c.define_type(sym, &forms[0], forms[0].span).unwrap_or_else(|e| panic!("`{name}` is wrong: {e}"));
+            c.syn(|c| {
+                let forms = c.read(text).expect("reads");
+                let sym = c.interner.intern(name);
+                c.define_type(sym, &forms[0], forms[0].span()).unwrap_or_else(|e| panic!("`{name}` is wrong: {e}"));
+            });
         }
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
@@ -1298,22 +1382,22 @@ impl Checker {
         c
     }
 
-    fn read(&mut self, text: &str) -> R<Vec<Syntax>> {
-        let mut interner = std::mem::take(&mut self.interner);
-        let r = Reader::new(text, fixpt_read::FileId(0), SyntaxProfile::FX26, &mut interner).read_all();
-        self.interner = interner;
-        r.map_err(|e| FxError::at(e.span, e.message))
+    /// `text` read, as file 0's, with syntax lent (`syn`).
+    fn read(&mut self, text: &str) -> R<Vec<crate::heap_syn::Syn>> {
+        crate::heap_syn::read_syn_side(text, &mut self.interner).map_err(|e| FxError::at(e.span, e.message))
     }
 
     /// Bind `name` to a value of the type written `ty` — how the initial
     /// environment is built, and how a test supplies an example's free
     /// variables.
     pub fn bind(&mut self, name: &str, ty: &str) -> R<()> {
-        let forms = self.read(ty)?;
-        let [form] = &forms[..] else {
-            return Err(FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0), "one type"));
-        };
-        let t = self.parse_type(form)?;
+        let t = self.syn(|c| {
+            let forms = c.read(ty)?;
+            let [form] = &forms[..] else {
+                return Err(FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0), "one type"));
+            };
+            c.parse_type_syn(form)
+        })?;
         let sym = self.interner.intern(name);
         self.env.push((sym, t));
         Ok(())
@@ -1321,11 +1405,13 @@ impl Checker {
 
     /// Check the one expression written `text`.
     pub fn check_str(&mut self, text: &str) -> R<Checked> {
-        let forms = self.read(text)?;
-        let [form] = &forms[..] else {
-            return Err(FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0), "one expression"));
-        };
-        let e = self.parse_exp(form)?;
+        let e = self.syn(|c| {
+            let forms = c.read(text)?;
+            let [form] = &forms[..] else {
+                return Err(FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0), "one expression"));
+            };
+            c.parse_exp_syn(form)
+        })?;
         let (ty, effect) = self.synth(e)?;
         Ok(Checked { ty, effect, exp: e })
     }
@@ -1390,23 +1476,29 @@ impl Checker {
 
     /// A type written as text, for comparing against.
     pub fn type_of_str(&mut self, text: &str) -> R<TyId> {
-        let forms = self.read(text)?;
-        let [form] = &forms[..] else {
-            return Err(FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0), "one type"));
-        };
-        self.parse_type(form)
+        self.syn(|c| {
+            let forms = c.read(text)?;
+            let [form] = &forms[..] else {
+                return Err(FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), 0, 0), "one type"));
+            };
+            c.parse_type_syn(form)
+        })
     }
 
     /// An effect written as text.
     pub fn effect_of_str(&mut self, text: &str) -> R<Effect> {
-        let forms = self.read(text)?;
-        self.parse_effect(&forms[0])
+        self.syn(|c| {
+            let forms = c.read(text)?;
+            c.parse_effect(&forms[0])
+        })
     }
 
     /// The region written as text.
     pub fn region_of_str(&mut self, text: &str) -> R<Region> {
-        let forms = self.read(text)?;
-        self.parse_region(&forms[0])
+        self.syn(|c| {
+            let forms = c.read(text)?;
+            c.parse_region(&forms[0])
+        })
     }
 
     pub(crate) fn bool_ty(&self) -> TyId {

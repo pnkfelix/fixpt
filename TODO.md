@@ -5985,7 +5985,7 @@ entries immortal; `copy_graph_from` carrying a word's entries. Later (the
 user's): the provenance as a heap object, weakly interned, once the
 binary has a portion in the heap's own format (§161, §242).
 
-## 250. The CLI's sessions place a macro's code by position in the form's text (found 2026-11-11)
+## 250. The CLI's sessions place a macro's code by position in the form's text (found 2026-11-11; done 2026-11-13)
 
 On the machines that compile a form from its text written out (the
 native convention's, `session.rs`), code is placed at characters of that
@@ -5997,6 +5997,13 @@ another datum: `(spin (+ n 1))`, made by `(again spin n)`, mapped to
 provenance there are only as good as that mapping. To place such code by
 the expanded form's own datums (their spans, expansion and all), or to
 give it provenance ids as the trees' compile does.
+
+Done (`docs/research/heap-syntax.md`, stage 4): the session hands the Rust
+expander's forms to the front end written in FX-26 as `syn`, in the
+session's heap, with no text between; a part a template made placed at its
+provenance's id (`Syn::handed`), as the Rust compiler's `place_of` places
+it. `sources.rs` resolves a place where it is, with no matching.
+`fixpt-cli`'s `tests/jit_lines.rs`, `a_macros_code_is_not_at_its_neighbours`.
 
 ## 251. What the compilers make of `table.fx`'s lookup (the user's, 2026-11-11)
 

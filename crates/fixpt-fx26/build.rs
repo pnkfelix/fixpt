@@ -1,5 +1,5 @@
 //! `cfg(optimized)`, for tests too slow without optimization: the ones that
-//! run every word of the front end are ignored in an unoptimized build, and
+//! run every word of the front end are ignored in a debug build, and
 //! run in an optimized one with debug assertions on (the `checked` profile)
 //! as in release.
 //!
@@ -25,7 +25,10 @@ const PROFILES: [&str; 2] = ["CARGO_CFG_DEBUG_ASSERTIONS", "CARGO_CFG_OVERFLOW_C
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(optimized)");
-    if std::env::var("OPT_LEVEL").is_ok_and(|o| o != "0") {
+    // By the profile, not this crate's `OPT_LEVEL`: a debug build optimizes
+    // this crate (`Cargo.toml`), but not the engine and runtime under it,
+    // and these tests take minutes there. `checked` inherits from release.
+    if std::env::var("PROFILE").is_ok_and(|p| p == "release") {
         println!("cargo::rustc-cfg=optimized");
     }
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("in crates/");

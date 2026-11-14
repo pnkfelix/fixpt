@@ -63,3 +63,9 @@ overflow-checks = true
 # leaves them (`fixpt-runtime`'s `tests/checks.rs` holds that it does).
 [profile.dev.package.fixpt-heap]
 opt-level = 1
+
+# The FX-26 front end likewise (the user's, 2026-11-13): it reads its
+# syntax through the heap's lendings and accessors, which unoptimized
+# cost the bootstrap program's check 40 s against 15 s at opt-level 1.
+[profile.dev.package.fixpt-fx26]
+opt-level = 1

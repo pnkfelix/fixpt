@@ -17,7 +17,7 @@
 use crate::ast::{Atom, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::check::{Checker, ADDR_INDEX, INBOX_INDEX, PROCESS_INDEX};
 use crate::error::{FxError, R};
-use fixpt_read::Syntax;
+use crate::heap_syn::{Syn, V};
 
 impl Checker {
     /// The forms of processes and `par`, each a call of a procedure of the
@@ -34,19 +34,19 @@ impl Checker {
     /// - `(attempt e h)`: `((with lib attempt1) (lambda () e) h)`.
     /// - `(attempt-within ms e h t)`: `((with lib attempt-within1) ms
     ///   (lambda () e) h t)`.
-    pub(crate) fn parse_process_form(&mut self, span: fixpt_read::Span, head: &str, items: &[Syntax]) -> R<ExpId> {
+    pub(crate) fn parse_process_form(&mut self, span: fixpt_read::Span, head: &str, items: &[Syn]) -> R<ExpId> {
         let lib = self.parse_load(span, crate::check::PROCESSES, false)?;
         let Exp::Var(lib) = *self.arena.exp_at(lib) else { unreachable!("a load is its hidden global") };
-        let sym = |c: &mut Self, s: &str| Syntax::symbol(span, c.interner.intern(s));
+        let sym = |c: &mut Self, s: &str| Syn::named(span, s, &mut c.interner);
         let op = |c: &mut Self, name: &str| {
             let with = sym(c, "with");
             let name = sym(c, name);
-            Syntax::list(span, vec![with, Syntax::symbol(span, lib), name])
+            Syn::lst(span, vec![with, Syn::symbol(span, lib, &c.interner), name])
         };
-        let call = |c: &mut Self, name: &str, args: &[Syntax]| {
+        let call = |c: &mut Self, name: &str, args: &[Syn]| {
             let mut v = vec![op(c, name)];
             v.extend(args.iter().cloned());
-            Syntax::list(span, v)
+            Syn::lst(span, v)
         };
         let usage = |shape: &str| FxError::at(span, format!("`{shape}`"));
         let expansion = match (head, items) {
@@ -74,12 +74,13 @@ impl Checker {
             ("spawn", _) => return Err(usage("(spawn (mailbox message-type place) body …)")),
             ("par", [_, bindings, body @ ..]) if !body.is_empty() => {
                 let shape = "(par ((name expression) …) body …)";
-                let Some(bs) = bindings.as_proper_list() else { return Err(usage(shape)) };
+                let listed = bindings.list();
+                let Some(bs) = listed.as_deref() else { return Err(usage(shape)) };
                 let mut parts = Vec::new();
                 for b in bs {
-                    match b.as_proper_list() {
-                        Some([x, e]) if x.as_symbol().is_some() => parts.push((x.clone(), e.clone(), b.span)),
-                        _ => return Err(FxError::at(b.span, "a `par` binding is `(name expression)`")),
+                    match b.list().as_deref() {
+                        Some([x, e]) if x.sym().is_some() => parts.push((x.clone(), e.clone(), b.span())),
+                        _ => return Err(FxError::at(b.span(), "a `par` binding is `(name expression)`")),
                     }
                 }
                 if parts.len() < 2 {
@@ -91,14 +92,14 @@ impl Checker {
             ("race", [_, branches @ ..]) if branches.len() >= 2 => self.race_expansion(span, lib, branches),
             ("race", _) => return Err(usage("(race expression expression …)")),
             ("attempt", [_, body, on_failure]) => {
-                let lambda = Syntax::symbol(body.span, self.interner.intern("lambda"));
-                let thunk = Syntax::list(body.span, vec![lambda, Syntax::new(body.span, fixpt_read::Datum::Nil), body.clone()]);
+                let lambda = Syn::named(body.span(), "lambda", &mut self.interner);
+                let thunk = Syn::lst(body.span(), vec![lambda, Syn::nil(body.span()), body.clone()]);
                 call(self, "attempt1", &[thunk, on_failure.clone()])
             }
             ("attempt", _) => return Err(usage("(attempt expression on-failure)")),
             ("attempt-within", [_, ms, body, on_failure, on_timeout]) => {
-                let lambda = Syntax::symbol(body.span, self.interner.intern("lambda"));
-                let thunk = Syntax::list(body.span, vec![lambda, Syntax::new(body.span, fixpt_read::Datum::Nil), body.clone()]);
+                let lambda = Syn::named(body.span(), "lambda", &mut self.interner);
+                let thunk = Syn::lst(body.span(), vec![lambda, Syn::nil(body.span()), body.clone()]);
                 call(self, "attempt-within1", &[ms.clone(), thunk, on_failure.clone(), on_timeout.clone()])
             }
             ("attempt-within", _) => return Err(usage("(attempt-within milliseconds expression on-failure on-timeout)")),
@@ -112,28 +113,29 @@ impl Checker {
             }
             _ => unreachable!("a form of processes"),
         };
-        self.parse_exp(&expansion)
+        self.parse_exp_syn(&expansion)
     }
 
     /// A process's body, `(spawn (box M r) body …)`'s: `(plambda ((r
     /// place)) (lambda ((box (inbox M r)) (r (place r))) body … #u))`.
-    fn process_body(&mut self, span: fixpt_read::Span, header: &Syntax, body: &[Syntax]) -> R<Syntax> {
-        let sym = |c: &mut Self, s: &str| Syntax::symbol(span, c.interner.intern(s));
+    fn process_body(&mut self, span: fixpt_read::Span, header: &Syn, body: &[Syn]) -> R<Syn> {
+        let sym = |c: &mut Self, s: &str| Syn::named(span, s, &mut c.interner);
         let shape = "`(spawn (mailbox message-type place) body …)`";
-        let Some([b, m, r]) = header.as_proper_list() else { return Err(FxError::at(span, shape)) };
-        if b.as_symbol().is_none() || r.as_symbol().is_none() {
+        let listed = header.list();
+        let Some([b, m, r]) = listed.as_deref() else { return Err(FxError::at(span, shape)) };
+        if b.sym().is_none() || r.sym().is_none() {
             return Err(FxError::at(span, shape));
         }
         let (place, inbox, lambda, plambda) = (sym(self, "place"), sym(self, "inbox"), sym(self, "lambda"), sym(self, "plambda"));
-        let inbox_t = Syntax::list(span, vec![inbox, m.clone(), r.clone()]);
-        let place_t = Syntax::list(span, vec![place.clone(), r.clone()]);
-        let params = Syntax::list(span, vec![Syntax::list(span, vec![b.clone(), inbox_t]), Syntax::list(span, vec![r.clone(), place_t])]);
+        let inbox_t = Syn::lst(span, vec![inbox, m.clone(), r.clone()]);
+        let place_t = Syn::lst(span, vec![place.clone(), r.clone()]);
+        let params = Syn::lst(span, vec![Syn::lst(span, vec![b.clone(), inbox_t]), Syn::lst(span, vec![r.clone(), place_t])]);
         let mut lam = vec![lambda, params];
         lam.extend(body.iter().cloned());
         lam.push(sym(self, "#u"));
-        let binder = Syntax::list(span, vec![Syntax::list(span, vec![r.clone(), place])]);
-        let lam = Syntax::list(span, lam);
-        Ok(Syntax::list(span, vec![plambda, binder, lam]))
+        let binder = Syn::lst(span, vec![Syn::lst(span, vec![r.clone(), place])]);
+        let lam = Syn::lst(span, lam);
+        Ok(Syn::lst(span, vec![plambda, binder, lam]))
     }
 
     /// `(par ((x1 e1) … (xn en)) body …)`: `(let ((%par tree)) (let ((x1
@@ -143,11 +145,11 @@ impl Checker {
     /// each branch is checked against all the others. What is made for a
     /// binding (its thunk, its `extract`s) is at the binding; the rest at
     /// the form.
-    fn par_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, parts: &[(Syntax, Syntax, fixpt_read::Span)], body: &[Syntax]) -> Syntax {
-        let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
-        let thunk = |c: &mut Self, sp: fixpt_read::Span, e: Syntax| {
+    fn par_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, parts: &[(Syn, Syn, fixpt_read::Span)], body: &[Syn]) -> Syn {
+        let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syn::named(sp, s, &mut c.interner);
+        let thunk = |c: &mut Self, sp: fixpt_read::Span, e: Syn| {
             let lambda = sym(c, sp, "lambda");
-            Syntax::list(sp, vec![lambda, Syntax::new(sp, fixpt_read::Datum::Nil), e])
+            Syn::lst(sp, vec![lambda, Syn::nil(sp), e])
         };
         let bindings: Vec<fixpt_read::Span> = parts.iter().map(|(_, _, b)| *b).collect();
         let n = parts.len();
@@ -155,51 +157,51 @@ impl Checker {
         let mut tree = thunk(self, bindings[n - 1], parts[n - 1].1.clone());
         for i in (0..n - 1).rev() {
             let b = bindings[i];
-            let op = Syntax::list(span, vec![sym(self, span, "with"), Syntax::symbol(span, lib), sym(self, span, "par2")]);
+            let op = Syn::lst(span, vec![sym(self, span, "with"), Syn::symbol(span, lib, &self.interner), sym(self, span, "par2")]);
             let first = thunk(self, b, parts[i].1.clone());
-            tree = Syntax::list(span, vec![op, first, tree]);
+            tree = Syn::lst(span, vec![op, first, tree]);
             if i > 0 {
                 tree = thunk(self, span, tree);
             }
         }
-        let p = Syntax::symbol(span, self.interner.intern("%par"));
+        let p = Syn::named(span, "%par", &mut self.interner);
         let extract = |c: &mut Self, sp: fixpt_read::Span, k: i64| {
             let e = sym(c, sp, "extract");
-            Syntax::list(sp, vec![e, p.clone(), Syntax::new(sp, fixpt_read::Datum::Number(fixpt_read::Num::Int(k)))])
+            Syn::lst(sp, vec![e, p.clone(), Syn::datum(sp, V::Number(fixpt_read::Num::Int(k)))])
         };
         // The innermost `let` first: the last two branches' values.
         let b = bindings[n - 2];
         let (x, y) = (parts[n - 2].0.clone(), parts[n - 1].0.clone());
         let (ex, ey) = (extract(self, b, 1), extract(self, b, 2));
-        let mut inner = vec![sym(self, span, "let"), Syntax::list(span, vec![Syntax::list(span, vec![x, ex]), Syntax::list(span, vec![y, ey])])];
+        let mut inner = vec![sym(self, span, "let"), Syn::lst(span, vec![Syn::lst(span, vec![x, ex]), Syn::lst(span, vec![y, ey])])];
         inner.extend(body.iter().cloned());
-        let mut out = Syntax::list(span, inner);
+        let mut out = Syn::lst(span, inner);
         for i in (0..n - 2).rev() {
             let b = bindings[i];
             let (ex, ep) = (extract(self, b, 1), extract(self, b, 2));
-            let binds = Syntax::list(span, vec![Syntax::list(span, vec![parts[i].0.clone(), ex]), Syntax::list(span, vec![p.clone(), ep])]);
-            out = Syntax::list(span, vec![sym(self, span, "let"), binds, out]);
+            let binds = Syn::lst(span, vec![Syn::lst(span, vec![parts[i].0.clone(), ex]), Syn::lst(span, vec![p.clone(), ep])]);
+            out = Syn::lst(span, vec![sym(self, span, "let"), binds, out]);
         }
-        let outer_bind = Syntax::list(span, vec![Syntax::list(span, vec![p.clone(), tree])]);
-        Syntax::list(span, vec![sym(self, span, "let"), outer_bind, out])
+        let outer_bind = Syn::lst(span, vec![Syn::lst(span, vec![p.clone(), tree])]);
+        Syn::lst(span, vec![sym(self, span, "let"), outer_bind, out])
     }
 
     /// `(race e1 … en)`: `((with lib race2) (lambda () e1) (lambda ()
     /// ((with lib race2) (lambda () e2) … (lambda () en))))`: a branch's
     /// thunk at its expression, the rest at the form.
-    fn race_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, es: &[Syntax]) -> Syntax {
-        let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
-        let thunk = |c: &mut Self, sp: fixpt_read::Span, e: Syntax| {
+    fn race_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, es: &[Syn]) -> Syn {
+        let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syn::named(sp, s, &mut c.interner);
+        let thunk = |c: &mut Self, sp: fixpt_read::Span, e: Syn| {
             let lambda = sym(c, sp, "lambda");
-            Syntax::list(sp, vec![lambda, Syntax::new(sp, fixpt_read::Datum::Nil), e])
+            Syn::lst(sp, vec![lambda, Syn::nil(sp), e])
         };
         let n = es.len();
-        let mut tree = thunk(self, es[n - 1].span, es[n - 1].clone());
+        let mut tree = thunk(self, es[n - 1].span(), es[n - 1].clone());
         for i in (0..n - 1).rev() {
             let e = &es[i];
-            let op = Syntax::list(span, vec![sym(self, span, "with"), Syntax::symbol(span, lib), sym(self, span, "race2")]);
-            let first = thunk(self, e.span, e.clone());
-            tree = Syntax::list(span, vec![op, first, tree]);
+            let op = Syn::lst(span, vec![sym(self, span, "with"), Syn::symbol(span, lib, &self.interner), sym(self, span, "race2")]);
+            let first = thunk(self, e.span(), e.clone());
+            tree = Syn::lst(span, vec![op, first, tree]);
             if i > 0 {
                 tree = thunk(self, span, tree);
             }
@@ -216,19 +218,21 @@ impl Checker {
     /// %sel-i)`, `(clock-event %sel-i)` or `(stdin-event %sel-i)`, through
     /// `lib`. An arm's event, test and `let` at the arm, its `W` at the
     /// `W`; the rest at the form.
-    fn select_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, arms: &[Syntax]) -> R<Syntax> {
-        let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
+    fn select_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, arms: &[Syn]) -> R<Syn> {
+        let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syn::named(sp, s, &mut c.interner);
         let shape = "a `pselect` arm is `((icell-get i-cell) name body …)`, `((receive mailbox) name body …)`, \
                      `((sleep-until time) name body …)`, `((read-byte) name body …)`, \
                      `((process-output process) name body …)`, `((process-exit process) name body …)` \
                      or `((process-news) name body …)`";
         let mut parts = Vec::new();
         for arm in arms {
-            let Some([w, x, body @ ..]) = arm.as_proper_list() else { return Err(FxError::at(arm.span, shape)) };
-            let ws = w.as_proper_list().unwrap_or_default();
-            let head = ws.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
+            let listed = arm.list();
+            let Some([w, x, body @ ..]) = listed.as_deref() else { return Err(FxError::at(arm.span(), shape)) };
+            let listed = w.list();
+            let ws = listed.as_deref().unwrap_or_default();
+            let head = ws.first().and_then(|h| h.sym()).map(|h| self.interner.name(h));
             let event = match (head, ws.len()) {
-                _ if x.as_symbol().is_none() || body.is_empty() => return Err(FxError::at(arm.span, shape)),
+                _ if x.sym().is_none() || body.is_empty() => return Err(FxError::at(arm.span(), shape)),
                 (Some("icell-get"), 2) => "cell-event",
                 (Some("receive"), 2) => "mailbox-event",
                 (Some("sleep-until"), 2) => "clock-event",
@@ -236,57 +240,58 @@ impl Checker {
                 (Some("process-output"), 2) => "process-output-event",
                 (Some("process-exit"), 2) => "process-exit-event",
                 (Some("process-news"), 1) => "process-news-event",
-                _ => return Err(FxError::at(arm.span, shape)),
+                _ => return Err(FxError::at(arm.span(), shape)),
             };
             let operand = match ws.get(1) {
                 Some(c) => c.clone(),
-                None => sym(self, w.span, "#u"),
+                None => sym(self, w.span(), "#u"),
             };
-            parts.push((arm.span, w.clone(), x.clone(), body.to_vec(), event, operand));
+            parts.push((arm.span(), w.clone(), x.clone(), body.to_vec(), event, operand));
         }
         let lib_op = |c: &mut Self, sp: fixpt_read::Span, name: &str| {
             let with = sym(c, sp, "with");
             let name = sym(c, sp, name);
-            Syntax::list(sp, vec![with, Syntax::symbol(sp, lib), name])
+            Syn::lst(sp, vec![with, Syn::symbol(sp, lib, &c.interner), name])
         };
         let n = parts.len();
-        let names: Vec<Syntax> = (0..n).map(|i| sym(self, span, &format!("%sel-{i}"))).collect();
+        let names: Vec<Syn> = (0..n).map(|i| sym(self, span, &format!("%sel-{i}"))).collect();
         // The events, joined from the last.
         let mut events = None;
         for (i, (arm, ..)) in parts.iter().enumerate().rev() {
-            let e = Syntax::list(*arm, vec![lib_op(self, *arm, parts[i].4), names[i].clone()]);
+            let e = Syn::lst(*arm, vec![lib_op(self, *arm, parts[i].4), names[i].clone()]);
             events = Some(match events {
                 None => e,
-                Some(rest) => Syntax::list(span, vec![lib_op(self, span, "or-event"), e, rest]),
+                Some(rest) => Syn::lst(span, vec![lib_op(self, span, "or-event"), e, rest]),
             });
         }
-        let sync = Syntax::list(span, vec![lib_op(self, span, "sync"), events.expect("an arm")]);
+        let sync = Syn::lst(span, vec![lib_op(self, span, "sync"), events.expect("an arm")]);
         let sel = sym(self, span, "%sel");
         // The arms, the last first.
         let mut out = None;
         for (i, (arm, w, x, body, ..)) in parts.iter().enumerate().rev() {
-            let ws = w.as_proper_list().expect("an arm's wait");
+            let listed = w.list();
+            let ws = listed.as_deref().expect("an arm's wait");
             let mut get = vec![ws[0].clone()];
             if ws.len() == 2 {
                 get.push(names[i].clone());
             }
-            let get = Syntax::list(w.span, get);
-            let mut l = vec![sym(self, *arm, "let"), Syntax::list(*arm, vec![Syntax::list(*arm, vec![x.clone(), get])])];
+            let get = Syn::lst(w.span(), get);
+            let mut l = vec![sym(self, *arm, "let"), Syn::lst(*arm, vec![Syn::lst(*arm, vec![x.clone(), get])])];
             l.extend(body.iter().cloned());
-            let this = Syntax::list(*arm, l);
+            let this = Syn::lst(*arm, l);
             out = Some(match out {
                 None => this,
                 Some(rest) => {
-                    let k = Syntax::new(*arm, fixpt_read::Datum::Number(fixpt_read::Num::Int(i as i64)));
-                    let test = Syntax::list(*arm, vec![sym(self, *arm, "="), sel.clone(), k]);
-                    Syntax::list(span, vec![sym(self, span, "if"), test, this, rest])
+                    let k = Syn::datum(*arm, V::Number(fixpt_read::Num::Int(i as i64)));
+                    let test = Syn::lst(*arm, vec![sym(self, *arm, "="), sel.clone(), k]);
+                    Syn::lst(span, vec![sym(self, span, "if"), test, this, rest])
                 }
             });
         }
         let let_ = sym(self, span, "let");
-        let inner = Syntax::list(span, vec![let_.clone(), Syntax::list(span, vec![Syntax::list(span, vec![sel, sync])]), out.expect("an arm")]);
-        let binds = parts.iter().enumerate().map(|(i, p)| Syntax::list(span, vec![names[i].clone(), p.5.clone()]));
-        Ok(Syntax::list(span, vec![let_, Syntax::list(span, binds.collect()), inner]))
+        let inner = Syn::lst(span, vec![let_.clone(), Syn::lst(span, vec![Syn::lst(span, vec![sel, sync])]), out.expect("an arm")]);
+        let binds = parts.iter().enumerate().map(|(i, p)| Syn::lst(span, vec![names[i].clone(), p.5.clone()]));
+        Ok(Syn::lst(span, vec![let_, Syn::lst(span, binds.collect()), inner]))
     }
 
     /// The procedure of the scheduler's that `fun` names, if it names one:

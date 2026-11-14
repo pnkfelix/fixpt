@@ -38,7 +38,7 @@ use crate::stage::{staged_parts, sx_value, Parts, Wrapped};
 use crate::sx::Code;
 use crate::top::Top;
 use fixpt_heap::Value;
-use fixpt_read::{FileId, Syntax};
+use fixpt_read::FileId;
 use fixpt_runtime::Runtime;
 use std::cell::RefCell;
 use fixpt_hash::HashMap;
@@ -288,7 +288,7 @@ pub(crate) fn step_expression(text: &str) -> Wrapped {
 
 
 /// `text`, read in a file of the session's own, kept: its forms.
-fn read(state: &mut State, text: &str) -> Result<(FileId, Vec<Syntax>), crate::FxError> {
+fn read(state: &mut State, text: &str) -> Result<(FileId, Vec<crate::heap_syn::Form>), crate::FxError> {
     let file = FileId(state.texts.len() as u32 + 1);
     state.texts.insert(file.0, text.to_string());
     Ok((file, state.checker.read_in(file, text)?))

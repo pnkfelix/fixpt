@@ -16,12 +16,51 @@ use crate::error::{FxError, R};
 use crate::lower::{Globals, lower};
 use crate::sx::{Code, Sx};
 use crate::top::Top;
-use fixpt_read::{FileId, Span, Sym, Syntax};
+use crate::heap_syn::Form;
+use fixpt_read::{FileId, Span, Sym};
 use fixpt_heap::layout::cellular::{GLOBAL_VALUE, GLOBAL_WRITES};
 use fixpt_scheme::Session;
 
 /// The FX-26 run-time environment, as Scheme.
 pub const RUNTIME: &str = include_str!("runtime.scm");
+
+/// `f` on `checker`, a session's, with the session's heap, `scheme`'s,
+/// lent for its syntax (`Checker::with_heap`). Apart from the session, so
+/// that `f` may borrow the session's other fields.
+pub(crate) fn checking<T>(checker: &mut Checker, scheme: &mut crate::front::Front, f: impl FnOnce(&mut Checker) -> T) -> T {
+    checker.with_heap(&mut scheme.runtime_unrooted().heap, f)
+}
+
+/// What the front end written in FX-26 is given of a form: a text, or the
+/// Rust checker's forms, handed over by whoever runs it, once it has what
+/// it runs loaded (`Fx26Session::handed`).
+#[derive(Clone, Copy)]
+enum Input<'a> {
+    Text(&'a str),
+    Forms(&'a [Form]),
+}
+
+impl<'a> Input<'a> {
+    /// It as the parse is given it: a text's places counted from `base`;
+    /// forms as `handed`, which [`Fx26Session::handed`] made of them.
+    fn given<'h>(self, handed: &'h Option<crate::syn::Handed>, base: i64) -> crate::syn::Given<'h>
+    where
+        'a: 'h,
+    {
+        match (self, handed) {
+            (Input::Text(text), _) => crate::syn::Given::Text(text, base),
+            (Input::Forms(_), Some(h)) => crate::syn::Given::Syn(h),
+            (Input::Forms(_), None) => unreachable!("forms handed before they are given"),
+        }
+    }
+}
+
+/// An expression made a procedure of no arguments (`with_native_thunk`):
+/// a text, or the Rust checker's form, handed over.
+enum Exp {
+    Text(String),
+    Form(Form),
+}
 
 /// Default evaluation budget for one form, as FX-87's.
 pub const DEFAULT_STEP_LIMIT: u64 = 20_000_000;
@@ -112,7 +151,6 @@ pub struct Fx26Session {
     /// (`crate::sources`): set by a driver, as `fixpt run` does each file's.
     pub source_file: Option<crate::sources::File>,
     /// The form compiled next, as written, with where each datum went.
-    source_form: Option<(String, Vec<(usize, usize, Span)>)>,
     /// Each module file loaded, as a source names it, made once.
     source_loaded: fixpt_hash::HashMap<FileId, crate::sources::File>,
     /// How a redefinition that would break definitions is decided: asked of
@@ -242,7 +280,7 @@ pub enum Speculation {
 /// it was read, and run with the entries that complete it.
 #[derive(Debug, Clone)]
 pub struct Pending {
-    pub forms: Vec<Syntax>,
+    pub forms: Vec<Form>,
     /// What it defines: types, and values (a datatype's constructors).
     pub defines: Vec<String>,
 }
@@ -260,7 +298,7 @@ pub enum Consider {
 
 /// Check and lower one top-level form, keeping what it defines, alone: not
 /// under redefinition (`compile_form_defining` is).
-pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(Top, Code)> {
+pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Form) -> R<(Top, Code)> {
     let before = std::mem::take(&mut checker.hoisted);
     let top = checker.top(form);
     // The hidden globals of the files it loads first, defined before it.
@@ -277,7 +315,7 @@ pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax)
 /// Check and lower one top-level form, under redefinition
 /// (`Checker::top_defining`): the Scheme for everything it makes run, in
 /// order, and what it broke.
-pub fn compile_form_defining(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(crate::top::Defining, Vec<Code>)> {
+pub fn compile_form_defining(checker: &mut Checker, globals: &mut Globals, form: &Form) -> R<(crate::top::Defining, Vec<Code>)> {
     let done = checker.top_defining(form)?;
     let code = done.hoisted.iter().chain(&done.run).map(|(top, _)| lower_top(checker, globals, top)).collect();
     Ok((done, code))
@@ -1267,8 +1305,10 @@ impl Fx26Session {
             scheme.runtime_unrooted().call_native.get_or_insert(fixpt_native::direct::call_native);
             scheme.runtime_unrooted().adapt.get_or_insert(fixpt_native::direct::adapt);
         }
+        let mut checker = if native { Checker::with_convention(crate::ast::Conv::Native) } else { Checker::new() };
+        checker.in_session_heap();
         Ok(Fx26Session {
-            checker: if native { Checker::with_convention(crate::ast::Conv::Native) } else { Checker::new() },
+            checker,
             scheme,
             globals: Globals::default(),
             strategy,
@@ -1291,7 +1331,6 @@ impl Fx26Session {
             shared_made: Default::default(),
             built_ins_cached: Default::default(),
             source_file: None,
-            source_form: None,
             source_loaded: fixpt_hash::HashMap::default(),
             redefine: None,
             next_redefine: None,
@@ -1324,7 +1363,7 @@ impl Fx26Session {
     }
 
     /// Check one top-level form and lower it, without running it.
-    pub fn compile(&mut self, form: &Syntax) -> R<(Top, String)> {
+    pub fn compile(&mut self, form: &Form) -> R<(Top, String)> {
         compile_form(&mut self.checker, &mut self.globals, form).map(|(top, code)| (top, code.to_string()))
     }
 
@@ -1334,15 +1373,15 @@ impl Fx26Session {
     /// leaves allocation, and effects on regions inference made fresh for
     /// this form alone, which masking has already removed. The run has a
     /// budget of its own, since speculation must not hang the editor.
-    pub fn speculate(&mut self, form: &Syntax) -> Speculation {
-        let code = self.checker.try_top(form, |c, r| match r {
+    pub fn speculate(&mut self, form: &Form) -> Speculation {
+        let code = checking(&mut self.checker, &mut self.scheme, |c| c.try_top(form, |c, r| match r {
             Err(e) => Err(Speculation::Rejected(e.message.into())),
             Ok(Top::Exp(k)) => match crate::licence::unlicensed(&k.effect, &[]) {
                 Some(a) => Err(Speculation::NotLicensed(c.show_atom(a))),
                 None => Ok(lower(c, &self.globals, k.exp)),
             },
             Ok(_) => Err(Speculation::NotAnExpression),
-        });
+        }));
         let code = match code {
             Ok(code) => code,
             Err(s) => return s,
@@ -1350,7 +1389,7 @@ impl Fx26Session {
         // Run as the session runs forms: the definitions before it are where
         // its strategy put them, not in the lowered program's globals.
         if self.strategy != Strategy::Lower {
-            return self.speculate_own(&fixpt_read::write_syntax(form, &self.checker.interner));
+            return self.speculate_own(form);
         }
         let limit = self.speculation_limit;
         self.scheme.set_step_limit(limit);
@@ -1370,20 +1409,20 @@ impl Fx26Session {
     /// pending: run alone if it checks alone, or if it defines no type; with
     /// them, if together they lack nothing; else wait, if it defines a type
     /// and only types are missing. Nothing is kept.
-    pub fn consider(&mut self, forms: &[Syntax]) -> Consider {
+    pub fn consider(&mut self, forms: &[Form]) -> Consider {
         let c = &mut self.checker;
-        let defines_type = forms.iter().any(|f| f.as_proper_list().and_then(|l| l.first()?.as_symbol()).is_some_and(|h| c.interner.name(h) == "define-type"));
+        let defines_type = checking(c, &mut self.scheme, |c| forms.iter().any(|f| c.head_of(f).is_some_and(|h| c.interner.name(h) == "define-type")));
         if !defines_type {
             return Consider::Run;
         }
-        let alone = c.missing_types(forms);
+        let alone = checking(c, &mut self.scheme, |c| c.missing_types(forms));
         if alone.as_ref().is_some_and(|m| m.is_empty()) {
             return Consider::Run;
         }
         let names = |c: &Checker, ms: Vec<Sym>| ms.into_iter().map(|m| c.interner.name(m).to_string()).collect::<Vec<_>>();
         if !self.pending.is_empty() {
-            let group: Vec<Syntax> = self.pending.iter().flat_map(|p| p.forms.iter().cloned()).chain(forms.iter().cloned()).collect();
-            match self.checker.missing_types(&group) {
+            let group: Vec<Form> = self.pending.iter().flat_map(|p| p.forms.iter().cloned()).chain(forms.iter().cloned()).collect();
+            match checking(&mut self.checker, &mut self.scheme, |c| c.missing_types(&group)) {
                 Some(m) if m.is_empty() => return Consider::Completes(self.pending.iter().flat_map(|p| p.defines.iter().cloned()).collect()),
                 Some(m) => return Consider::Pends(names(&self.checker, m)),
                 None => {}
@@ -1396,43 +1435,45 @@ impl Fx26Session {
     }
 
     /// `forms`, an entry `consider` said waits, held.
-    pub fn hold(&mut self, forms: &[Syntax]) {
-        let c = &self.checker;
-        let mut defines = Vec::new();
-        for f in forms {
-            let l = f.as_proper_list().unwrap_or(&[]);
-            match (l.first().and_then(|h| h.as_symbol()).map(|h| c.interner.name(h)), l.get(1).and_then(|n| n.as_symbol())) {
-                (Some("define-type"), Some(n)) => defines.push(c.interner.name(n).to_string()),
-                _ => defines.extend(c.defined_names(f).into_iter().map(|n| c.interner.name(n).to_string())),
+    pub fn hold(&mut self, forms: &[Form]) {
+        let defines = self.checking(|c| {
+            let mut defines = Vec::new();
+            for f in forms {
+                let l = c.items_of(f).unwrap_or_default();
+                match (l.first().and_then(|h| c.sym_of(h)).map(|h| c.interner.name(h)), l.get(1).and_then(|n| c.sym_of(n))) {
+                    (Some("define-type"), Some(n)) => defines.push(c.interner.name(n).to_string()),
+                    _ => defines.extend(c.defined_names(f).into_iter().map(|n| c.interner.name(n).to_string())),
+                }
             }
-        }
+            defines
+        });
         self.pending.push(Pending { forms: forms.to_vec(), defines });
     }
 
     /// The pending entries, and `forms` after them, run as a program's
     /// forms are; none pending after.
-    pub fn complete(&mut self, forms: &[Syntax]) -> R<Vec<R<Outcome>>> {
-        let group: Vec<Syntax> = std::mem::take(&mut self.pending).into_iter().flat_map(|p| p.forms).chain(forms.iter().cloned()).collect();
+    pub fn complete(&mut self, forms: &[Form]) -> R<Vec<R<Outcome>>> {
+        let group: Vec<Form> = std::mem::take(&mut self.pending).into_iter().flat_map(|p| p.forms).chain(forms.iter().cloned()).collect();
         self.run_forms(&group)
     }
 
     /// What the pending entries still lack, as `consider` would find it.
     pub fn awaiting(&mut self) -> Vec<String> {
-        let group: Vec<Syntax> = self.pending.iter().flat_map(|p| p.forms.iter().cloned()).collect();
+        let group: Vec<Form> = self.pending.iter().flat_map(|p| p.forms.iter().cloned()).collect();
         if group.is_empty() {
             return Vec::new();
         }
-        let m = self.checker.missing_types(&group).unwrap_or_default();
+        let m = checking(&mut self.checker, &mut self.scheme, |c| c.missing_types(&group)).unwrap_or_default();
         m.into_iter().map(|m| self.checker.interner.name(m).to_string()).collect()
     }
 
-    /// An expression (text), licensed, run early by the pieces written in
-    /// FX-26 as `run_checked` runs one, on the speculation budget: natively
-    /// if it can be, else as cellular code, or by the evaluator.
-    fn speculate_own(&mut self, text: &str) -> Speculation {
+    /// An expression, licensed, run early by the pieces written in FX-26 as
+    /// `run_checked` runs one, on the speculation budget: natively if it can
+    /// be, else as cellular code, or by the evaluator.
+    fn speculate_own(&mut self, form: &Form) -> Speculation {
         let saved = self.step_limit;
         self.step_limit = self.speculation_limit;
-        let r = self.run_expression_own(text);
+        let r = self.run_expression_own(form);
         self.step_limit = saved;
         self.scheme.set_step_limit(saved);
         self.scheme.scope(|s| s.runtime_unrooted().heap.regions_exit_to(0));
@@ -1443,20 +1484,21 @@ impl Fx26Session {
         }
     }
 
-    fn run_expression_own(&mut self, text: &str) -> R<Result<String, String>> {
+    fn run_expression_own(&mut self, form: &Form) -> R<Result<String, String>> {
         if let (Some(run), Strategy::Cellular) = (self.native_runner, self.strategy) {
             let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
             let written = |rt: &mut fixpt_runtime::Runtime, clo| match run(rt, clo, fuel) {
                 NativeRun::Ran(v) => Ok(v.map(|v| fixpt_runtime::write_value(&rt.heap, v))),
                 NativeRun::Declined(why) => Err(why),
             };
-            if let Ok(Ok(value)) = self.with_native_thunk(text, written)? {
+            if let Ok(Ok(value)) = self.with_native_thunk(&Exp::Form(form.clone()), written)? {
                 return Ok(value);
             }
         }
+        let forms = Input::Forms(std::slice::from_ref(form));
         let out = match self.strategy {
-            Strategy::Evaluate => self.eval_form(&format!("{text}\n"))?,
-            _ => self.compile_form_showing(&format!("{text}\n"), false)?.0,
+            Strategy::Evaluate => self.eval_form(forms)?,
+            _ => self.compile_form_showing(forms, false)?.0,
         };
         Ok(match out.strip_prefix("!! ") {
             Some(e) => Err(e.to_string()),
@@ -1467,22 +1509,21 @@ impl Fx26Session {
     /// Run the forms of a whole program, its type abbreviations first. One
     /// outcome per form still to run; the abbreviations are done in the
     /// first pass and have none. Redefinition is as at the REPL.
-    pub fn run_forms(&mut self, forms: &[Syntax]) -> R<Vec<R<Outcome>>> {
+    pub fn run_forms(&mut self, forms: &[Form]) -> R<Vec<R<Outcome>>> {
         self.checker.fasls = self.reads_fasls();
-        let done = self.checker.declare_ahead(forms)?;
+        let done = checking(&mut self.checker, &mut self.scheme, |c| c.declare_ahead(forms))?;
         // The type definitions, declared ahead, are the pieces written in
         // FX-26's too, first: all in one text, so that its checker declares
         // them ahead as well, and they may name each other.
         if self.strategy != Strategy::Lower {
-            let ahead: Vec<&Syntax> = forms.iter().zip(&done).filter(|(_, d)| **d).map(|(f, _)| f).collect();
-            let text: String = ahead.iter().map(|f| format!("{}\n", fixpt_read::write_syntax(f, &self.checker.interner))).collect();
-            if let (Some(first), false) = (ahead.first(), text.is_empty()) {
+            let ahead: Vec<Form> = forms.iter().zip(&done).filter(|(_, d)| **d).map(|(f, _)| f.clone()).collect();
+            if let Some(first) = ahead.first() {
                 let out = match self.strategy {
-                    Strategy::Evaluate => self.eval_form(&text)?,
-                    _ => self.compile_form_showing(&text, false)?.0,
+                    Strategy::Evaluate => self.eval_form(Input::Forms(&ahead))?,
+                    _ => self.compile_form_showing(Input::Forms(&ahead), false)?.0,
                 };
                 if let Some(e) = out.strip_prefix("!! ") {
-                    return Err(FxError::at(first.span, e.to_string()));
+                    return Err(FxError::at(first.span(), e.to_string()));
                 }
             }
         }
@@ -1490,10 +1531,10 @@ impl Fx26Session {
         // `up-` and `down-`, which have its span) the pieces written in
         // FX-26 made of it themselves, above, in its context. (A datatype's
         // constructors they are given as the reader made them.)
-        let generative = |f: &Syntax| {
-            f.as_proper_list().and_then(|l| l.first()?.as_symbol()).is_some_and(|h| self.checker.interner.name(h) == "define-generative")
-        };
-        let ahead: Vec<Span> = forms.iter().zip(&done).filter(|(f, d)| **d && generative(f)).map(|(f, _)| f.span).collect();
+        let ahead: Vec<Span> = checking(&mut self.checker, &mut self.scheme, |c| {
+            let generative = |f: &Form| c.head_of(f).is_some_and(|h| c.interner.name(h) == "define-generative");
+            forms.iter().zip(&done).filter(|(f, d)| **d && generative(f)).map(|(f, _)| f.span()).collect()
+        });
         // The program's `.fasl`, if it has a fresh one: its procedures'
         // definitions read from it, the rest of its forms run here.
         let fasl = match self.program_file.clone() {
@@ -1503,7 +1544,7 @@ impl Fx26Session {
         let mut outs = Vec::new();
         for (i, (f, done)) in forms.iter().zip(done).enumerate() {
             if !done {
-                self.own_made = self.strategy != Strategy::Lower && ahead.contains(&f.span);
+                self.own_made = self.strategy != Strategy::Lower && ahead.contains(&f.span());
                 let out = match fasl.as_ref().and_then(|p| Some((p, p.defs.get(&i)?))) {
                     Some((p, group)) => self.run_program_def(f, group, p).map(|o| vec![o]),
                     None => {
@@ -1542,8 +1583,8 @@ impl Fx26Session {
     /// `run`, each outcome: of a top-level `include`, the forms it is made
     /// (`include_forms`), each run as one, so that each front end is given
     /// them, until one fails; of any other form, its own.
-    pub fn run_each(&mut self, form: &Syntax) -> R<Vec<Outcome>> {
-        let Some(forms) = self.checker.include_forms(form)? else { return Ok(vec![self.run(form)?]) };
+    pub fn run_each(&mut self, form: &Form) -> R<Vec<Outcome>> {
+        let Some(forms) = checking(&mut self.checker, &mut self.scheme, |c| c.include_forms(form))? else { return Ok(vec![self.run(form)?]) };
         // Of a module that gives nothing, or `(include m (except name …))`
         // of all it gives (`import-with-syntax` of a file of macros alone,
         // Heist's): nothing done, nothing to show, as both checkers take it.
@@ -1567,23 +1608,23 @@ impl Fx26Session {
     /// which are given the form as text and read and parse it themselves.
     /// Checking comes first either way, so a form that does not check does
     /// not run.
-    pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
+    pub fn run(&mut self, form: &Form) -> R<Outcome> {
         self.checker.fasls = self.reads_fasls();
         // `(compile-file "path")`: the file's `.fasl` made, as `fixpt
         // compile-file` makes it (`compile_file`).
-        if let Some((path, program)) = compile_file_form(form, &self.checker) {
-            let made = self.compile_file(&path, program).map_err(|e| FxError::at(form.span, e))?;
+        if let Some((path, program)) = checking(&mut self.checker, &mut self.scheme, |c| compile_file_form(form, c)) {
+            let made = self.compile_file(&path, program).map_err(|e| FxError::at(form.span(), e))?;
             let printed = format!("; compiled `{path}` to `{}`\n", made.display());
-            let exp = self.checker.arena.exp(form.span, crate::ast::Exp::Unit);
+            let exp = self.checker.arena.exp(form.span(), crate::ast::Exp::Unit);
             let top = Top::Exp(crate::check::Checked { ty: self.checker.unit, effect: crate::ast::Effect::pure(), exp });
             return Ok(Outcome { top, code: Made::Nothing, printed, value: Ok(None) });
         }
         // A top-level `include`: its forms' outcomes, the last shown.
-        if self.checker.include_forms(form)?.is_some() {
+        if checking(&mut self.checker, &mut self.scheme, |c| c.include_forms(form))?.is_some() {
             let mut each = self.run_each(form)?;
             let printed: String = each.iter().map(|o| o.printed.as_str()).collect();
             let Some(mut last) = each.pop() else {
-                let exp = self.checker.arena.exp(form.span, crate::ast::Exp::Unit);
+                let exp = self.checker.arena.exp(form.span(), crate::ast::Exp::Unit);
                 let top = Top::Exp(crate::check::Checked { ty: self.checker.unit, effect: crate::ast::Effect::pure(), exp });
                 return Ok(Outcome { top, code: Made::Nothing, printed, value: Ok(None) });
             };
@@ -1609,9 +1650,9 @@ impl Fx26Session {
         out
     }
 
-    /// `text`, about to be compiled, as a source of the form last run, if
+    /// This session's texts as a source, for code about to be compiled, if
     /// sources are wanted (`crate::sources::wanted`): its number; else 0.
-    fn source_of(&mut self, text: &str) -> u32 {
+    fn source(&mut self) -> u32 {
         if !crate::sources::wanted() {
             return 0;
         }
@@ -1619,8 +1660,48 @@ impl Fx26Session {
             self.source_loaded.entry(*id).or_insert_with(|| std::rc::Rc::new((path.clone(), ftext.clone())));
         }
         let loaded = self.source_loaded.iter().map(|(id, f)| (*id, f.clone())).collect();
-        crate::sources::register(text, self.source_form.clone(), self.source_file.clone(), loaded)
+        crate::sources::register(self.source_file.clone(), loaded)
     }
+
+    /// `forms`, the Rust checker's, as the front end written in FX-26 is
+    /// handed them (`crate::syn::Handed`): their `syn`, in this session's
+    /// heap, held by a handle of the caller's scope.
+    fn hand(&mut self, forms: &[Form]) -> crate::syn::Handed {
+        let checker = &mut self.checker;
+        let mut loads = Vec::new();
+        let syns = self.scheme.make(|m| {
+            let parts: Vec<fixpt_heap::Value> = checker.with_heap(m.heap(), |c| {
+                let syns: Vec<crate::heap_syn::Syn> = forms.iter().map(Form::get).collect();
+                crate::syn::load_modules_in(&syns, &c.interner, &mut loads);
+                syns.iter().map(|s| s.handed().0).collect()
+            });
+            let h = m.heap();
+            parts.iter().rev().fold(fixpt_heap::Value::NULL, |l, &p| h.cons(p, l))
+        });
+        crate::syn::Handed { syns, loads }
+    }
+
+    /// `input`'s forms handed over, if it is forms ([`Self::hand`]): after
+    /// the pieces are loaded and the standard's state taken
+    /// (`own_pieces`, `next_standard`), whose handles last, in the scope
+    /// the caller lets go.
+    fn handed(&mut self, input: Input<'_>) -> Option<crate::syn::Handed> {
+        match input {
+            Input::Forms(forms) => Some(self.hand(forms)),
+            Input::Text(_) => None,
+        }
+    }
+
+    /// `f` of `forms` handed over ([`Self::hand`]); what it held let go
+    /// after. Only after the pieces are loaded ([`Self::handed`]).
+    fn handing<T>(&mut self, forms: &[Form], f: impl FnOnce(&mut Self, crate::syn::Given<'_>) -> T) -> T {
+        let mark = self.scheme.root_mark();
+        let handed = self.hand(forms);
+        let r = f(self, crate::syn::Given::Syn(&handed));
+        self.scheme.release_to(mark);
+        r
+    }
+
 
     /// A whole program begins with no process from one before.
     fn processes_forgotten(&mut self) {
@@ -1631,29 +1712,30 @@ impl Fx26Session {
     /// language says for files and the REPL alike. Only whether a
     /// redefinition that would break definitions goes ahead is the driver's
     /// to decide (`Redefine`): asked, or said ahead, before anything changes.
-    fn run_defining(&mut self, form: &Syntax) -> R<Outcome> {
-        let names = self.checker.defined_names(form);
+    fn run_defining(&mut self, form: &Form) -> R<Outcome> {
+        let names = checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(form));
         let shown = |c: &Checker, ns: &[Sym]| ns.iter().map(|n| format!("`{}`", c.interner.name(*n))).collect::<Vec<_>>().join(", ");
         if names.iter().any(|n| self.checker.global_type(*n).is_some())
-            && let Ok(trial) = self.checker.try_defining(form)
+            && let Ok(trial) = checking(&mut self.checker, &mut self.scheme, |c| c.try_defining(form))
             && !trial.broken.is_empty()
         {
+            let reruns: Vec<Vec<Sym>> = trial.run[1..].iter().map(|(_, f)| checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(f))).collect();
             let choice = self.next_redefine.take().unwrap_or_else(|| {
                 let q = Redefinition {
                     names: names.iter().map(|n| self.checker.interner.name(*n).to_string()).collect(),
                     breaking: trial.broken.iter().map(|(ns, why)| (shown(&self.checker, ns), why.clone())).collect(),
-                    rerun: trial.run[1..].iter().map(|(_, f)| shown(&self.checker, &self.checker.defined_names(f))).collect(),
+                    rerun: reruns.iter().map(|ns| shown(&self.checker, ns)).collect(),
                 };
                 self.redefine.map_or(Redefine::Break, |ask| ask(&q))
             });
             if choice == Redefine::Refuse {
                 let list: Vec<String> = trial.broken.iter().map(|(ns, why)| format!("{}: {why}", shown(&self.checker, ns))).collect();
-                return Err(FxError::at(form.span, format!("{} not redefined: it would break {}", shown(&self.checker, &names), list.join("; "))));
+                return Err(FxError::at(form.span(), format!("{} not redefined: it would break {}", shown(&self.checker, &names), list.join("; "))));
             }
         }
         let redefined = names.iter().any(|n| self.checker.global_type(*n).is_some());
-        let done = self.checker.top_defining(form)?;
-        let reran: Vec<Sym> = done.run[1..].iter().flat_map(|(_, f)| self.checker.defined_names(f)).collect();
+        let done = checking(&mut self.checker, &mut self.scheme, |c| c.top_defining(form))?;
+        let reran: Vec<Sym> = done.run[1..].iter().flat_map(|(_, f)| checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(f))).collect();
         let mut notes = String::new();
         // The hidden globals of the files it loads first, quietly.
         let mut first = String::new();
@@ -1688,7 +1770,8 @@ impl Fx26Session {
             if i == 0 {
                 out = Some(o);
             } else if let Err(e) = &o.value {
-                notes.push_str(&format!("; {} failed as it ran again: {e}\n", shown(&self.checker, &self.checker.defined_names(&f))));
+                let names = checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(&f));
+                notes.push_str(&format!("; {} failed as it ran again: {e}\n", shown(&self.checker, &names)));
             }
         }
         let mut out = out.expect("the form itself runs first");
@@ -1735,7 +1818,7 @@ impl Fx26Session {
     /// written in FX-26 do themselves as they compile the redefinition,
     /// but which the native convention's definitions and the lowering do
     /// here.
-    fn run_checked(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
+    fn run_checked(&mut self, top: Top, form: &Form, again: bool) -> R<Outcome> {
         // Each global it defines left its definition's stamp by the write
         // that defines it (`definition_stamps`).
         let assigns = matches!(&top, Top::Define { assigns: true, .. } | Top::DefineRec { assigns: true, .. });
@@ -1770,7 +1853,7 @@ impl Fx26Session {
     /// else one of this process's own, which no other session's code
     /// expects. A write when the program runs counts on from it (`setglbl`),
     /// so that a guard expecting the stamp fails after one.
-    fn definition_stamps(&mut self, top: &Top, form: &Syntax) -> Vec<(Sym, i64)> {
+    fn definition_stamps(&mut self, top: &Top, form: &Form) -> Vec<(Sym, i64)> {
         // Only compiled code keeps guards, and only the compiler written in
         // FX-26 finds its cells (`run_checked` loads it first).
         if self.strategy != Strategy::Cellular || !crate::entries::bound(&self.scheme, "compile-global-cell") {
@@ -1781,7 +1864,7 @@ impl Fx26Session {
             Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, t, _)| (*n, *t, None)).collect(),
             _ => return Vec::new(),
         };
-        let text = form_digest(form, &self.checker.interner);
+        let text = checking(&mut self.checker, &mut self.scheme, |c| form_digest(form, c));
         let mut out = Vec::new();
         for (name, ty, effect) in defined {
             if let Some(f) = self.checker.shared_files.get(&name) {
@@ -1897,7 +1980,7 @@ impl Fx26Session {
         r.map(|_| ()).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))
     }
 
-    fn run_checked_in(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
+    fn run_checked_in(&mut self, top: Top, form: &Form, again: bool) -> R<Outcome> {
         if self.strategy == Strategy::Lower {
             self.lowered();
         }
@@ -1926,7 +2009,7 @@ impl Fx26Session {
                     }
                     _ => {}
                 }
-                self.program_ran.extend(self.checker.defined_names(form));
+                self.program_ran.extend(checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(form)));
             }
             // A load read from its `.fasl`: its hidden global given the
             // value kept there, not made.
@@ -1952,13 +2035,6 @@ impl Fx26Session {
             if again && self.native_runner.is_none() {
                 return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: Ok(None) });
             }
-            let form_text = if crate::sources::wanted() {
-                let (text, map) = fixpt_read::write_syntax_mapped(form, &self.checker.interner);
-                self.source_form = Some((text.clone(), map));
-                text
-            } else {
-                fixpt_read::write_syntax(form, &self.checker.interner)
-            };
             // An expression, in the native convention: as a procedure of no
             // arguments, compiled and called; what the compiler declines
             // runs as cellular code, saying why.
@@ -1976,7 +2052,7 @@ impl Fx26Session {
                         NativeRun::Declined(why) => Err(why),
                     }
                 };
-                match self.with_native_thunk(&form_text, written)? {
+                match self.with_native_thunk(&Exp::Form(form.clone()), written)? {
                     Ok(Ok(value)) => {
                         return Ok(Outcome { top, code: Made::Nothing, printed: String::new(), value: value.map(Some) });
                     }
@@ -1987,7 +2063,7 @@ impl Fx26Session {
             // A definition, in the native convention: its global made, and
             // filled with its value, computed as an expression is.
             if let (Some(run), Top::Define { name, assigns, exp, .. }, Strategy::Cellular) = (self.native_runner, &top, self.strategy)
-                && let Some((ty, init)) = definition_init(form, &self.checker, *name)
+                && let Some((ty, init)) = checking(&mut self.checker, &mut self.scheme, |c| definition_init(form, c, *name))
             {
                 if *assigns {
                     self.keep_global(*name)?;
@@ -1996,21 +2072,21 @@ impl Fx26Session {
                 // Checked against the type the definition says, if it says
                 // one: a `lambda`'s parameters may be typed only by it.
                 let built_in = match ty {
-                    None => built_in_load(init, &mut self.checker)?,
+                    None => checking(&mut self.checker, &mut self.scheme, |c| built_in_load(&init, c))?,
                     Some(_) => None,
                 };
-                let w = |s: &Syntax| fixpt_read::write_syntax(s, &self.checker.interner);
-                let init = match ty {
-                    Some(t) => format!("(the {} {})", w(t), w(init)),
-                    None => built_in.as_ref().map(|b| b.text.clone()).unwrap_or_else(|| w(init)),
+                let init = match (ty, &built_in) {
+                    (Some(t), _) => Exp::Form(checking(&mut self.checker, &mut self.scheme, |c| c.the_form(&t, &init))),
+                    (None, Some(b)) => Exp::Text(b.text.clone()),
+                    (None, None) => Exp::Form(init.clone()),
                 };
                 // A module file built in, as its text: seen as built in.
                 if built_in.is_some() {
                     self.check_built_in(true)?;
                 }
                 let lambda = Self::names_its_word(&self.checker, *exp);
-                let in_file = built_in.as_ref().map(|b| (b, form.span));
-                let defined = self.native_define(&name, &format!("{form_text}\n"), &init, lambda, run, in_file);
+                let in_file = built_in.as_ref().map(|b| (b, form.span()));
+                let defined = self.native_define(&name, form, &init, lambda, run, in_file);
                 if built_in.is_some() {
                     self.check_built_in(false)?;
                 }
@@ -2026,9 +2102,10 @@ impl Fx26Session {
                 let n = self.checker.interner.intern(&name);
                 self.keep_global(n)?;
             }
+            let forms = Input::Forms(std::slice::from_ref(form));
             let (out, words) = match self.strategy {
-                Strategy::Evaluate => (self.eval_form(&format!("{form_text}\n"))?, None),
-                _ => self.compile_form_showing(&format!("{form_text}\n"), self.show_words)?,
+                Strategy::Evaluate => (self.eval_form(forms)?, None),
+                _ => self.compile_form_showing(forms, self.show_words)?,
             };
             // A form is compiled with every definition before it, so only
             // the words not shown before are this form's.
@@ -2122,17 +2199,16 @@ impl Fx26Session {
     /// each global its code names, this session's of that name (as the
     /// compiler would find it, compiling the file now); each file the file
     /// loads, its load here. Nothing of the file is compiled or run.
-    fn fasl_define(&mut self, name: Sym, form: &Syntax, fasl: &std::path::Path) -> R<Result<Option<String>, String>> {
+    fn fasl_define(&mut self, name: Sym, form: &Form, fasl: &std::path::Path) -> R<Result<Option<String>, String>> {
         self.own_pieces()?;
         let standard = self.next_standard()?;
-        let text = format!("{}\n", fixpt_read::write_syntax(form, &self.checker.interner));
-        self.released(|s| s.fasl_define_in(standard, name, &text, fasl))
+        self.handing(std::slice::from_ref(form), |s, given| s.released(|s| s.fasl_define_in(standard, name, given, fasl)))
     }
 
-    fn fasl_define_in(&mut self, standard: Option<fixpt_scheme::Handle>, name: Sym, text: &str, fasl: &std::path::Path) -> R<Result<Option<String>, String>> {
+    fn fasl_define_in(&mut self, standard: Option<fixpt_scheme::Handle>, name: Sym, given: crate::syn::Given<'_>, fasl: &std::path::Path) -> R<Result<Option<String>, String>> {
         let shown = self.checker.interner.name(name).to_string();
         let mut state = self.read_state(&standard);
-        let checked = crate::syn::check_only(&mut self.scheme, standard, &mut state, FileId(0), text)?;
+        let checked = crate::syn::check_only(&mut self.scheme, standard, &mut state, FileId(0), given)?;
         self.keep_state(state);
         if let Err(why) = checked {
             return Err(FxError::at(Span::new(FileId(0), 0, 0), format!("the checkers disagree: the Rust checker takes `{shown}`'s definition, and the one written in FX-26 refuses it: {why}")));
@@ -2298,11 +2374,13 @@ impl Fx26Session {
         let text = std::fs::read_to_string(&at).map_err(|e| format!("cannot read `{path}`: {e}"))?;
         // A file of one expression, not an item, is a `load-input`'s.
         let mut interner = fixpt_read::Interner::new();
-        let forms = fixpt_read::Reader::new(&text, FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().map_err(|e| format!("in `{path}`: {}", e.message))?;
-        let one_exp = matches!(&forms[..], [one] if !crate::parse::is_item_form(one, &interner));
+        let one_exp = crate::heap_syn::aside(|| -> Result<bool, String> {
+            let forms = crate::heap_syn::read_syn_side(&text, &mut interner).map_err(|e| format!("in `{path}`: {}", e.message))?;
+            Ok(matches!(&forms[..], [one] if !crate::parse::is_item_form(one, &interner)))
+        })?;
         let loader = if one_exp { "load-input" } else { "load-module" };
         let load = format!("({loader} {})", crate::fasl::string_literal(path));
-        let form = self.checker.read_in(FileId(0), &load).map_err(|e| e.message)?;
+        let form = checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), &load)).map_err(|e| e.message)?;
         let out = self.run(&form[0]).map_err(|e| e.message)?;
         out.value?;
         self.write_module_fasl(path, &at, &text, one_exp, &crate::fasl::path_for(&at))
@@ -2320,10 +2398,12 @@ impl Fx26Session {
         // Either named by the standard type abbreviations it uses, as the
         // file sees them.
         self.checker.fasl_aliases_begin(self.checker.fasl_standard_aliases());
-        let made = match self.checker.read_in(FileId(0), text) {
+        let made = match checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), text)) {
             Ok(forms) if input => {
-                let maker = if one_exp { forms.first().cloned() } else { self.checker.modules_made(&forms) };
-                maker.and_then(|m| self.checker.fasl_made(name, &m)).unwrap_or_default()
+                checking(&mut self.checker, &mut self.scheme, |c| {
+                    let maker = if one_exp { forms.first().map(|f| c.syntax_of(f)) } else { c.syn(|c| c.modules_made(&forms.iter().map(Form::get).collect::<Vec<_>>()).map(|m| m.to_syntax())) };
+                    maker.and_then(|m| c.fasl_made(name, &m)).unwrap_or_default()
+                })
             }
             _ => String::new(),
         };
@@ -2402,18 +2482,17 @@ impl Fx26Session {
     /// Definition `form`, checked by the checker written in FX-26 as the
     /// next form and its globals made, but not run: a program's file being
     /// compiled (`program_record`).
-    fn declare_only(&mut self, form: &Syntax) -> R<()> {
+    fn declare_only(&mut self, form: &Form) -> R<()> {
         self.own_pieces()?;
         let standard = self.next_standard()?;
-        let text = format!("{}\n", fixpt_read::write_syntax(form, &self.checker.interner));
-        let names = self.checker.defined_names(form);
-        self.released(|s| {
-            let fail = |e: fixpt_scheme::SessionError| FxError::at(form.span, e.to_string());
+        let names = checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(form));
+        self.handing(std::slice::from_ref(form), |s, given| s.released(|s| {
+            let fail = |e: fixpt_scheme::SessionError| FxError::at(form.span(), e.to_string());
             let mut state = s.read_state(&standard);
-            let checked = crate::syn::check_only(&mut s.scheme, standard, &mut state, FileId(0), &text)?;
+            let checked = crate::syn::check_only(&mut s.scheme, standard, &mut state, FileId(0), given)?;
             s.keep_state(state);
             if let Err(why) = checked {
-                return Err(FxError::at(form.span, format!("the checkers disagree: the Rust checker takes this definition, and the one written in FX-26 refuses it: {why}")));
+                return Err(FxError::at(form.span(), format!("the checkers disagree: the Rust checker takes this definition, and the one written in FX-26 refuses it: {why}")));
             }
             s.own_begun = true;
             for n in names {
@@ -2422,7 +2501,7 @@ impl Fx26Session {
                 crate::entries::call(&mut s.scheme, "compile-new-global", &[sym]).map_err(fail)?;
             }
             Ok(())
-        })
+        }))
     }
 
     /// Program file `path`'s `.fasl`, if it is fresh for `forms`, the file's:
@@ -2433,7 +2512,7 @@ impl Fx26Session {
     /// code is right for it. Whole or not at all: its procedures were
     /// compiled together, a call of one maybe made in line in another's
     /// code. A stale one said (`fasl_notes`).
-    fn program_fasl(&mut self, path: &std::path::Path, forms: &[Syntax]) -> Option<ProgramFasl> {
+    fn program_fasl(&mut self, path: &std::path::Path, forms: &[Form]) -> Option<ProgramFasl> {
         let fasl = crate::fasl::path_for(path);
         let bytes = crate::reads::map(&fasl).ok()?;
         let stale = |s: &mut Self, why: &str| {
@@ -2466,7 +2545,7 @@ impl Fx26Session {
         // Each abbreviation it names what it was; one the file defines that
         // is not yet (it selects from a module a form loads, say), checked
         // when a definition that names it is declared (`run_program_def`).
-        let own: Vec<Sym> = self.checker.type_abbreviations(forms).into_iter().map(|(n, _)| n).collect();
+        let own: Vec<Sym> = checking(&mut self.checker, &mut self.scheme, |c| c.type_abbreviations(forms)).into_iter().map(|(n, _)| n).collect();
         let mut later = fixpt_hash::HashMap::default();
         let names = self.checker.fasl_alias_names(&header.aliases);
         let changed = self.checker.with_fasl_selects(|c| {
@@ -2485,8 +2564,13 @@ impl Fx26Session {
         if let Some(n) = changed {
             return stale(self, &format!("the type `{n}` is not what it was"));
         }
-        let defined: fixpt_hash::HashSet<String> = forms.iter().flat_map(|f| self.checker.defined_names(f)).map(|n| self.checker.interner.name(n).to_string()).collect();
-        self.checker.fasl_aliases_begin(self.checker.fasl_allowed_aliases(forms));
+        let defined: fixpt_hash::HashSet<String> = checking(&mut self.checker, &mut self.scheme, |c| {
+            forms.iter().flat_map(|f| c.defined_names(f)).map(|n| c.interner.name(n).to_string()).collect()
+        });
+        checking(&mut self.checker, &mut self.scheme, |c| {
+            let aliases = c.fasl_allowed_aliases(forms);
+            c.fasl_aliases_begin(aliases)
+        });
         let stale_use = self.stale_use(&header.defs, &defined);
         self.checker.fasl_aliases_end();
         if let Some(why) = stale_use {
@@ -2494,7 +2578,7 @@ impl Fx26Session {
         }
         for d in &header.defs {
             let n = self.checker.interner.intern(&d.name);
-            if d.form >= forms.len() || !self.checker.defined_names(&forms[d.form]).contains(&n) {
+            if d.form >= forms.len() || !checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(&forms[d.form])).contains(&n) {
                 return stale(self, &format!("its definition of `{}` is not its form's", d.name));
             }
             if self.checker.global_type(n).is_some() {
@@ -2549,7 +2633,7 @@ impl Fx26Session {
     /// if a link cannot be known before its definition runs (a global
     /// neither here nor the file's, defined by an `include`, say), for the
     /// copy as each runs.
-    fn splice_program(&mut self, image: &[u8], globals: &[String], forms: &[Syntax], defs: &[crate::fasl::Def]) -> Result<Option<fixpt_scheme::Handle>, String> {
+    fn splice_program(&mut self, image: &[u8], globals: &[String], forms: &[Form], defs: &[crate::fasl::Def]) -> Result<Option<fixpt_scheme::Handle>, String> {
         let img = fixpt_heap::image::parts(image, false).map_err(|e| format!("its image: {e:?}"))?;
         let root = *img.roots.first().ok_or("its image has no root")?;
         if !root.is_pair() || !img.cdr(root).is_pair() {
@@ -2565,7 +2649,7 @@ impl Fx26Session {
             return Err("its image is not its definitions'".into());
         }
         let links = crate::fasl::read_links(img.car(img.cdr(root)), |v| img.car(v), |v| img.cdr(v), globals)?;
-        let defined: fixpt_hash::HashSet<Sym> = forms.iter().flat_map(|f| self.checker.defined_names(f)).collect();
+        let defined: fixpt_hash::HashSet<Sym> = forms.iter().flat_map(|f| checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(f))).collect();
         self.own_pieces().map_err(|e| e.message)?;
         // Made first, to outlast the handles made meanwhile.
         let values = self.scheme.make(|_| fixpt_heap::Value::FALSE);
@@ -2711,8 +2795,8 @@ impl Fx26Session {
     /// in, linked to the globals here by name, its procedures compiled
     /// natively in the native convention. From its source if a global its
     /// code was linked to has been made again since.
-    fn run_program_def(&mut self, form: &Syntax, group: &[(crate::fasl::Def, usize)], p: &ProgramFasl) -> R<Outcome> {
-        let fail = |m: String| FxError::at(form.span, m);
+    fn run_program_def(&mut self, form: &Form, group: &[(crate::fasl::Def, usize)], p: &ProgramFasl) -> R<Outcome> {
+        let fail = |m: String| FxError::at(form.span(), m);
         // Spliced, the globals its code links to still those, or this form
         // and those after run from their source.
         if matches!(p.image, ProgramImage::Spliced(_)) && p.unsure.replace(false) && !p.broken.get() && self.adopt_broken()? {
@@ -2781,12 +2865,12 @@ impl Fx26Session {
             let n = self.checker.interner.intern(n);
             self.checker.dscope.push((n, crate::parse::DScope::Rec(*t)));
         }
-        let decl = self.checker.read_in(form.span.file, &named_text);
-        let done = decl.and_then(|mut d| d.pop().ok_or_else(|| fail("a definition".into()))).and_then(|decl| self.checker.top_defining(&decl));
+        let decl = checking(&mut self.checker, &mut self.scheme, |c| c.read_in(form.span().file, &named_text));
+        let done = decl.and_then(|mut d| d.pop().ok_or_else(|| fail("a definition".into()))).and_then(|decl| checking(&mut self.checker, &mut self.scheme, |c| c.top_defining(&decl)));
         self.checker.dscope.truncate(depth);
         let done = done?;
         // The form, copied once for the group, as its run from source keeps it.
-        let kept = std::rc::Rc::new(form.clone());
+        let kept = form.clone();
         for (d, _) in group {
             let name = self.checker.interner.intern(&d.name);
             let uses = d.uses.iter().map(|(u, _, _)| self.checker.interner.intern(u)).collect();
@@ -2823,7 +2907,7 @@ impl Fx26Session {
         self.own_pieces()?;
         let standard = self.next_standard()?;
         let value = self.released(|s| -> R<String> {
-            let sfail = |e: fixpt_scheme::SessionError| FxError::at(form.span, e.to_string());
+            let sfail = |e: fixpt_scheme::SessionError| FxError::at(form.span(), e.to_string());
             // The checker written in FX-26 likewise, by rep where it can be
             // (it takes more forms, not a program's first), else by text.
             if standard.is_none() && !named.is_empty() {
@@ -2849,7 +2933,7 @@ impl Fx26Session {
                 Err(_) => {
                     let text = format!("{text}\n");
                     let mut state = s.read_state(&standard);
-                    let checked = crate::syn::check_only(&mut s.scheme, standard, &mut state, FileId(0), &text)?;
+                    let checked = crate::syn::check_only(&mut s.scheme, standard, &mut state, FileId(0), crate::syn::Given::Text(&text, 0))?;
                     s.keep_state(state);
                     checked
                 }
@@ -2977,7 +3061,7 @@ impl Fx26Session {
             _ => std::path::PathBuf::from(path),
         };
         let text = std::fs::read_to_string(&at).map_err(|e| format!("cannot read `{path}`: {e}"))?;
-        let forms = self.checker.read_in(FileId(0), &text).map_err(|e| format!("in `{path}`: {}", e.message))?;
+        let forms = checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), &text)).map_err(|e| format!("in `{path}`: {}", e.message))?;
         let outer = std::mem::replace(&mut self.checker.base_dir, at.parent().map(|d| d.to_path_buf()));
         self.program_ran = self.checker.value_names().into_iter().filter(|n| self.checker.global_type(*n).is_some()).collect();
         self.program_record = Some(Vec::new());
@@ -2991,22 +3075,25 @@ impl Fx26Session {
         // defines once, in a form that loads nothing.
         let mut counts: fixpt_hash::HashMap<Sym, usize> = fixpt_hash::HashMap::default();
         for f in &forms {
-            for n in self.checker.defined_names(f) {
+            for n in checking(&mut self.checker, &mut self.scheme, |c| c.defined_names(f)) {
                 *counts.entry(n).or_default() += 1;
             }
         }
-        let loads = |f: &Syntax, c: &Checker| {
-            let written = fixpt_read::write_syntax(f, &c.interner);
+        let loads = |f: &Form, c: &Checker| {
+            let written = c.written(f);
             ["load-module", "load-input", "compile-file"].iter().any(|w| written.contains(w))
         };
         // A form after a top-level `include` sees what it gives, and the
         // type abbreviations after it are not declared ahead: the form's.
-        let included = forms.iter().position(|f| self.checker.include_forms(f).is_ok_and(|i| i.is_some())).unwrap_or(forms.len());
+        let included = forms.iter().position(|f| checking(&mut self.checker, &mut self.scheme, |c| c.include_forms(f)).is_ok_and(|i| i.is_some())).unwrap_or(forms.len());
         let mut defs = Vec::new();
         // Each definition's type's own rep, combined into the file's below.
         let mut def_reps: Vec<Option<Vec<u8>>> = Vec::new();
         let mut names = Vec::new();
-        self.checker.fasl_aliases_begin(self.checker.fasl_allowed_aliases(&forms));
+        checking(&mut self.checker, &mut self.scheme, |c| {
+            let aliases = c.fasl_allowed_aliases(&forms);
+            c.fasl_aliases_begin(aliases)
+        });
         let mut kept_names: fixpt_hash::HashSet<Sym> = fixpt_hash::HashSet::default();
         for (i, top, printed) in &record {
             let said: Vec<String> = printed.lines().map(str::to_string).collect();
@@ -3032,9 +3119,12 @@ impl Fx26Session {
             // Of procedures, each defined once, in a form that loads nothing,
             // before an `include`, and proves no lemma (which a declaration
             // would not); a `define` written so, or a `define-rec`.
-            let written = definition_init(&forms[*i], &self.checker, bindings[0].0);
-            let proves = written.and_then(|(t, _)| t?.as_proper_list()?.first()?.as_symbol()).is_some_and(|h| self.checker.interner.name(h) == "proves");
-            if (!rec && written.is_none()) || proves || *i > included || loads(&forms[*i], &self.checker) {
+            let (written, proves, loaded) = checking(&mut self.checker, &mut self.scheme, |c| {
+                let written = definition_init(&forms[*i], c, bindings[0].0);
+                let proves = written.as_ref().and_then(|(t, _)| c.head_of(t.as_ref()?)).is_some_and(|h| c.interner.name(h) == "proves");
+                (written.is_some(), proves, loads(&forms[*i], c))
+            });
+            if (!rec && !written) || proves || *i > included || loaded {
                 continue;
             }
             let Some(kept) = bindings.iter().map(|b| self.kept_binding(*b, &counts, rec, value_ok.then_some(&reads[..]))).collect::<Option<Vec<_>>>() else { continue };
@@ -3048,14 +3138,14 @@ impl Fx26Session {
             // a variable).
             let mut reps: Vec<Option<Vec<u8>>> = Vec::new();
             let mut digests: Vec<u64> = Vec::new();
-            let checks = match self.checker.read_in(FileId(0), &decl).ok().and_then(|mut v| v.pop()) {
-                Some(d) => self.checker.try_defining(&d).is_ok_and(|done| {
+            let checks = match checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), &decl)).ok().and_then(|mut v| v.pop()) {
+                Some(d) => checking(&mut self.checker, &mut self.scheme, |c| c.try_defining(&d)).is_ok_and(|done| {
                     let tys: Vec<crate::ast::TyId> = match done.run.first() {
                         Some((Top::Define { ty, .. }, _)) => vec![*ty],
                         Some((Top::DefineRec { bindings, .. }, _)) => bindings.iter().map(|b| b.1).collect(),
                         _ => Vec::new(),
                     };
-                    let ok = tys.len() == kept.len() && tys.iter().zip(&kept).all(|(t, k)| self.checker.fasl_program_type(*t).as_deref() == Ok(k.1.as_str()));
+                    let ok = tys.len() == kept.len() && tys.iter().zip(&kept).all(|(t, k)| checking(&mut self.checker, &mut self.scheme, |c| c.fasl_program_type(*t)).as_deref() == Ok(k.1.as_str()));
                     if ok {
                         reps = tys.iter().map(|t| self.checker.export_ty(*t).ok().filter(|ex| ex.holes.is_empty()).map(|ex| fixpt_reps::binary::encode(&ex.rep))).collect();
                         digests = tys.iter().map(|t| self.checker.ty_digest(*t)).collect();
@@ -3069,7 +3159,7 @@ impl Fx26Session {
             }
             kept_names.extend(bindings.iter().map(|b| b.0));
             // And what its stamp is made of but the globals' write counts.
-            let text = form_digest(&forms[*i], &self.checker.interner);
+            let text = checking(&mut self.checker, &mut self.scheme, |c| form_digest(&forms[*i], c));
             for (n, (((name, ty, init, uses), rep), digest)) in kept.into_iter().zip(reps).zip(digests).enumerate() {
                 let said = if n == 0 { said.clone() } else { Vec::new() };
                 def_reps.push(rep);
@@ -3081,7 +3171,10 @@ impl Fx26Session {
         // (declared ahead) as the standard ones, to compare where it is read.
         // Each definition notes those its type names, and those they name.
         let used = self.checker.fasl_aliases_end();
-        let aliases = self.checker.fasl_alias_closure(used, &self.checker.fasl_allowed_aliases(&forms));
+        let aliases = checking(&mut self.checker, &mut self.scheme, |c| {
+            let allowed = c.fasl_allowed_aliases(&forms);
+            c.fasl_alias_closure(used, &allowed)
+        });
         let kept: fixpt_hash::HashMap<&str, &str> = aliases.iter().map(|(n, t, _)| (n.as_str(), t.as_str())).collect();
         for d in &mut defs {
             let mut types: Vec<String> = crate::fasl::symbols_in(&d.ty).into_iter().filter(|w| kept.contains_key(w.as_str())).collect();
@@ -3155,8 +3248,8 @@ impl Fx26Session {
         if counts.get(&name) != Some(&1) || !(value.is_some() || Self::names_its_word(&self.checker, exp)) {
             return None;
         }
-        let ty = self.checker.fasl_program_type(tid).ok()?;
-        if self.checker.fasl_reads_back(&ty).as_deref() != Some(ty.as_str()) {
+        let ty = checking(&mut self.checker, &mut self.scheme, |c| c.fasl_program_type(tid)).ok()?;
+        if checking(&mut self.checker, &mut self.scheme, |c| c.fasl_reads_back(&ty)).as_deref() != Some(ty.as_str()) {
             return None;
         }
         let used = self.checker.uses_of(name);
@@ -3179,7 +3272,7 @@ impl Fx26Session {
             true => ty.clone(),
             false => {
                 let kept = self.checker.print_aliases.borrow_mut().take();
-                let expanded = self.checker.fasl_program_type(tid);
+                let expanded = checking(&mut self.checker, &mut self.scheme, |c| c.fasl_program_type(tid));
                 *self.checker.print_aliases.borrow_mut() = kept;
                 match expanded.ok()? {
                     e if shaped(&e) => e,
@@ -3187,7 +3280,7 @@ impl Fx26Session {
                 }
             }
         };
-        let syn = self.checker.read_in(FileId(0), &text).ok()?.pop()?;
+        let syn = checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), &text).map(|mut fs| fs.pop().map(|f| c.syntax_of(&f)))).ok()??;
         let init = match rec {
             false => crate::fasl::fasl_value_at(&syn, &self.checker.interner),
             true => crate::fasl::fasl_lambda_at(&syn, &self.checker.interner)?,
@@ -3254,12 +3347,16 @@ impl Fx26Session {
     /// session the first time, rather than with the Rust reader. Reading a
     /// whole file is long work for it, so it reads with no step limit: it
     /// is licensed code, and a text ends.
-    pub fn read_with_own_reader(&mut self, text: &str) -> R<Vec<Syntax>> {
+    pub fn read_with_own_reader(&mut self, text: &str) -> R<Vec<Form>> {
         self.load_own_reader()?;
         self.scheme.set_step_limit(None);
         let forms = crate::syn::read_with_fx26_reader(self.scheme.lowered(), &mut self.checker.interner, FileId(0), text);
         self.scheme.set_step_limit(self.step_limit);
-        self.checker.expand_forms(forms?)
+        let forms = forms?;
+        checking(&mut self.checker, &mut self.scheme, |c| {
+            let held = c.syn(|c| forms.iter().map(|f| Form::new(c.syn_of(f))).collect());
+            c.expand_forms(held)
+        })
     }
 
     /// Parse `text` with the parser written in FX-26 (and its reader),
@@ -3302,17 +3399,24 @@ impl Fx26Session {
     /// positions past every text's before. As the compiler's forms are
     /// (`compile_form_showing`), where the evaluator once ran every
     /// definition before again with each form (`TODO.md` §96).
-    fn eval_form(&mut self, text: &str) -> R<String> {
+    fn eval_form(&mut self, input: Input<'_>) -> R<String> {
         self.own_pieces()?;
         let standard = self.next_standard()?;
         if standard.is_some() {
             self.eval_base = 0;
         }
+        // A text's places past every text's before; `syn`'s where they are.
         let base = self.eval_base;
-        self.eval_base += text.chars().count() as i64 + 1;
+        if let Input::Text(text) = input {
+            self.eval_base += text.chars().count() as i64 + 1;
+        }
+        let mark = self.scheme.root_mark();
+        let handed = self.handed(input);
+        let given = input.given(&handed, base);
         self.scheme.set_step_limit(None);
         let mut state = self.read_state(&standard);
-        let r = crate::syn::eval_more_with_fx26_evaluator(&mut self.scheme, standard, FileId(0), text, base, &mut state);
+        let r = crate::syn::eval_more_with_fx26_evaluator(&mut self.scheme, standard, FileId(0), given, &mut state);
+        self.scheme.release_to(mark);
         self.keep_state(state);
         self.scheme.set_step_limit(self.step_limit);
         self.own_begun |= !matches!(&r, Ok(out) if out.starts_with("!! check:"));
@@ -3372,6 +3476,7 @@ impl Fx26Session {
         let conv = if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular };
         if self.checker.conv_default != conv {
             self.checker = Checker::with_convention(conv);
+            self.checker.in_session_heap();
         }
         self.checker.globals_effects = self.globals_effects;
         self.checker.defer_reruns = self.defer_reruns;
@@ -3416,6 +3521,12 @@ impl Fx26Session {
     pub fn set_globals_effects(&mut self, on: bool) {
         self.globals_effects = on;
         self.checker.globals_effects = on;
+    }
+
+    /// `f` on this session's checker, with the session's heap lent for its
+    /// syntax ([`checking`]).
+    pub fn checking<T>(&mut self, f: impl FnOnce(&mut Checker) -> T) -> T {
+        checking(&mut self.checker, &mut self.scheme, f)
     }
 
     /// A checker with no program in it yet, set as this session's is.
@@ -3719,7 +3830,7 @@ impl Fx26Session {
         self.own_begun = true;
         for (path, text) in files {
             self.checker.base_dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf);
-            let (out, _) = self.compile_form_showing(text, false).map_err(|e| format!("{path}: {}", e.message))?;
+            let (out, _) = self.compile_form_showing(Input::Text(text), false).map_err(|e| format!("{path}: {}", e.message))?;
             if let Some(m) = out.strip_prefix("!! ") {
                 return Err(format!("{path}: {m}"));
             }
@@ -3783,19 +3894,27 @@ impl Fx26Session {
     /// compiled by the compiler written in FX-26 with register code: given
     /// to `f`, with the runtime (see [`crate::syn::with_last_value`]).
     pub fn with_global_value<T>(&mut self, name: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
-        self.with_last_value(&format!("{name}\n"), None, f)
+        self.with_last_value(Input::Text(&format!("{name}\n")), None, f)
     }
 
     /// The same for the value of expression `exp` (text) as a procedure of
     /// no arguments that computes it.
     pub fn with_thunk<T>(&mut self, exp: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
-        self.with_last_value(&format!("(lambda () {exp})\n"), None, f)
+        self.with_last_value(Input::Text(&format!("(lambda () {exp})\n")), None, f)
     }
 
-    /// The same, for the native runner: the thunk compiled first by the
-    /// compiler written in FX-26, if it compiles them (`native_fx`).
-    fn with_native_thunk<T>(&mut self, exp: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
-        self.with_last_value(&format!("(lambda () {exp})\n"), self.native_fx, f)
+    /// The same, for the native runner, of the Rust checker's expression,
+    /// handed over: the thunk compiled first by the compiler written in
+    /// FX-26, if it compiles them (`native_fx`).
+    fn with_native_thunk<T>(&mut self, exp: &Exp, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
+        let native = self.native_fx;
+        match exp {
+            Exp::Text(exp) => self.with_last_value(Input::Text(&format!("(lambda () {exp})\n")), native, f),
+            Exp::Form(exp) => {
+                let thunk = checking(&mut self.checker, &mut self.scheme, |c| c.thunk_form(exp));
+                self.with_last_value(Input::Forms(std::slice::from_ref(&thunk)), native, f)
+            }
+        }
     }
 
     /// Whether a definition of `x` names its word for its global, as the
@@ -3817,14 +3936,15 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     /// made by the compiler written in FX-26; `init` run as a procedure of
     /// no arguments, by `run`; and its value put in the global. What `run`
     /// did instead, if anything else.
-    fn native_define(&mut self, name: &str, form: &str, init: &str, lambda: bool, run: NativeRunner, in_file: Option<(&BuiltInLoad, Span)>) -> R<Result<(), NativeRun>> {
+    fn native_define(&mut self, name: &str, form: &Form, init: &Exp, lambda: bool, run: NativeRunner, in_file: Option<(&BuiltInLoad, Span)>) -> R<Result<(), NativeRun>> {
         self.own_pieces()?;
         let standard = self.next_standard()?;
         // What is loaded is loaded, above; the handles below are this
         // definition's, released at its end: kept, the global's cell would
         // keep each old definition alive, its code with it.
         let mark = self.scheme.root_mark();
-        let r = self.native_define_in(standard, name, form, init, lambda, run, in_file);
+        let handed = self.hand(std::slice::from_ref(form));
+        let r = self.native_define_in(standard, name, crate::syn::Given::Syn(&handed), init, lambda, run, in_file);
         self.scheme.release_to(mark);
         r
     }
@@ -3833,8 +3953,8 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         &mut self,
         standard: Option<fixpt_scheme::Handle>,
         name: &str,
-        form: &str,
-        init: &str,
+        form: crate::syn::Given<'_>,
+        init: &Exp,
         lambda: bool,
         run: NativeRunner,
         in_file: Option<(&BuiltInLoad, Span)>,
@@ -4100,7 +4220,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
 
     /// `text` checked and compiled as the next form of this session's
     /// program, and run: its value, to `f`.
-    fn with_last_value<T>(&mut self, text: &str, native: Option<NativeFx>, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
+    fn with_last_value<T>(&mut self, input: Input<'_>, native: Option<NativeFx>, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
         self.own_pieces()?;
         self.scheme.set_step_limit(None);
         let standard = self.next_standard()?;
@@ -4108,12 +4228,14 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         let on = s.scheme.make(|_| fixpt_heap::Value::TRUE);
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
         crate::entries::call(&mut s.scheme, "compile-registers!", &[on]).map_err(fail)?;
-        // Its register code said to come from `text`, a source
-        // (`crate::sources`): what this compile queues, made after, too, so
-        // until the next.
-        fixpt_heap::regcode::set_source(s.source_of(text));
+        // Its register code said to come from this session's texts, a
+        // source (`crate::sources`): what this compile queues, made after,
+        // too, so until the next.
+        fixpt_heap::regcode::set_source(s.source());
+        let handed = s.handed(input);
+        let given = input.given(&handed, 0);
         let mut state = s.read_state(&standard);
-        let r = crate::syn::with_last_value(&mut s.scheme, standard, &mut state, FileId(0), text, native, f);
+        let r = crate::syn::with_last_value(&mut s.scheme, standard, &mut state, FileId(0), given, native, f);
         s.keep_state(state);
         s.own_begun |= !matches!(&r, Ok(Err(m)) if m.starts_with("check:"));
         let off = s.scheme.make(|_| fixpt_heap::Value::boolean(s.register_code));
@@ -4295,10 +4417,10 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     /// `text`, one form, as the next of this session's program: checked
     /// after the forms before, compiled against the globals they made, and
     /// run; as [`compile_with_own_compiler_showing`](Self::compile_with_own_compiler_showing).
-    fn compile_form_showing(&mut self, text: &str, show: bool) -> R<(String, Option<String>)> {
+    fn compile_form_showing(&mut self, input: Input<'_>, show: bool) -> R<(String, Option<String>)> {
         self.own_pieces()?;
         let standard = self.next_standard()?;
-        let r = self.compile_showing_in(standard, text, show);
+        let r = self.compile_showing_in(standard, input, show);
         self.own_begun |= !matches!(&r, Ok((out, _)) if out.starts_with("!! check:"));
         r
     }
@@ -4314,18 +4436,20 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         // The compiler, too, sees none of the globals made before.
         crate::entries::call(&mut self.scheme, "compile-forget-globals!", &[])
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
-        self.compile_showing_in(Some(standard), text, show)
+        self.compile_showing_in(Some(standard), Input::Text(text), show)
     }
 
-    fn compile_showing_in(&mut self, standard: Option<fixpt_scheme::Handle>, text: &str, show: bool) -> R<(String, Option<String>)> {
+    fn compile_showing_in(&mut self, standard: Option<fixpt_scheme::Handle>, input: Input<'_>, show: bool) -> R<(String, Option<String>)> {
         self.own_pieces()?;
         self.released(|s| {
         s.scheme.set_step_limit(None);
         let on = s.scheme.make(|_| fixpt_heap::Value::boolean(s.register_code));
         crate::entries::call(&mut s.scheme, "compile-registers!", &[on])
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
+        let handed = s.handed(input);
+        let given = input.given(&handed, 0);
         let mut state = s.read_state(&standard);
-        let r = crate::syn::compile_with_fx26_compiler_showing(&mut s.scheme, standard, &mut state, FileId(0), text, show, s.step_limit);
+        let r = crate::syn::compile_with_fx26_compiler_showing(&mut s.scheme, standard, &mut state, FileId(0), given, show, s.step_limit);
         s.keep_state(state);
         s.scheme.set_step_limit(s.step_limit);
         r
@@ -4350,20 +4474,20 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
 
     /// A REPL's entry `text`, named `name`, read as the session's next: its
     /// forms' places are in the session's text, past every entry before.
-    pub fn read_entry(&mut self, name: &str, text: &str) -> R<Vec<Syntax>> {
+    pub fn read_entry(&mut self, name: &str, text: &str) -> R<Vec<Form>> {
         let start = self.session_text.len();
         self.session_text.push_str(text);
         self.session_text.push('\n');
         self.entries.push((start, name.to_string()));
-        self.checker.read_in_from(FileId(0), &self.session_text, start)
+        checking(&mut self.checker, &mut self.scheme, |c| c.read_in_from(FileId(0), &self.session_text, start))
     }
 
     /// `text` read as the next entry would be, the session left as it was
     /// (the REPL's reading as one types): its forms, and where it starts.
-    pub fn read_trial(&mut self, text: &str) -> R<(Vec<Syntax>, usize)> {
+    pub fn read_trial(&mut self, text: &str) -> R<(Vec<Form>, usize)> {
         let start = self.session_text.len();
         let whole = format!("{}{text}", self.session_text);
-        Ok((self.checker.read_in_from(FileId(0), &whole, start)?, start))
+        Ok((checking(&mut self.checker, &mut self.scheme, |c| c.read_in_from(FileId(0), &whole, start))?, start))
     }
 
     /// Where `span`, of what an entry read, is: the entry's name, and the
@@ -4394,7 +4518,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     /// definitions may refer to each other in any order: see
     /// `Checker::declare_ahead`.
     pub fn run_program(&mut self, text: &str) -> R<Result<String, String>> {
-        let forms = self.checker.read_in(FileId(0), text)?;
+        let forms = checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), text))?;
         let mut last = Ok(String::new());
         for out in self.run_forms(&forms)? {
             let out = out?;
@@ -4420,15 +4544,15 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
 /// defines macros of its own, expanded where it uses them and their
 /// definitions left out, as its load on any other machine reads it; else
 /// its text as written, so that a place in it is the file's.
-fn built_in_load(init: &Syntax, c: &mut Checker) -> R<Option<BuiltInLoad>> {
-    let fixpt_read::Datum::List { items, tail: None } = &init.datum else { return Ok(None) };
+fn built_in_load(init: &Form, c: &mut Checker) -> R<Option<BuiltInLoad>> {
+    let Some(items) = c.items_of(init) else { return Ok(None) };
     let [head, path] = &items[..] else { return Ok(None) };
-    if !head.as_symbol().is_some_and(|h| c.interner.name(h) == "load-module") {
+    if !c.sym_of(head).is_some_and(|h| c.interner.name(h) == "load-module") {
         return Ok(None);
     }
-    let fixpt_read::Datum::Str(path) = &path.datum else { return Ok(None) };
-    let Some(text) = crate::built_in_module(path) else { return Ok(None) };
-    built_in_load_of(path, text, init.span, c)
+    let Some(path) = c.string_of(path) else { return Ok(None) };
+    let Some(text) = crate::built_in_module(&path) else { return Ok(None) };
+    built_in_load_of(&path, text, init.span(), c)
 }
 
 /// [`built_in_load`] of the built-in file `path`, its text `text`, loaded at
@@ -4438,9 +4562,10 @@ fn built_in_load_of(path: &str, text: &str, at: Span, c: &mut Checker) -> R<Opti
         return Ok(None);
     }
     let said = |e: FxError| FxError::at(at, format!("in `{path}`: {}", e.message));
-    let (body, expanded) = match c.built_in_items(text).map_err(said)? {
+    let items = c.syn(|c| Ok::<_, FxError>(c.built_in_items(text)?.map(|items| items.iter().map(|i| fixpt_read::write_syntax(&i.to_syntax(), &c.interner)).collect::<Vec<_>>())));
+    let (body, expanded) = match items.map_err(said)? {
         None => (text.to_string(), false),
-        Some(items) => (items.iter().map(|i| fixpt_read::write_syntax(i, &c.interner)).collect::<Vec<_>>().join("\n"), true),
+        Some(items) => (items.join("\n"), true),
     };
     Ok(Some(BuiltInLoad { path: path.to_string(), text: format!("(module\n{body}\n)"), expanded }))
 }
@@ -4475,33 +4600,36 @@ impl BuiltInLoad {
 /// A definition's type, if it says one, and initializer, when `form` is
 /// `(define name [type] init)` of `name`; not one of the forms that define
 /// names of their own (`define-generative`'s coercions, say).
-fn definition_init<'f>(form: &'f Syntax, c: &Checker, name: Sym) -> Option<(Option<&'f Syntax>, &'f Syntax)> {
-    let fixpt_read::Datum::List { items, tail: None } = &form.datum else { return None };
-    let is = |s: &Syntax, n: &str| s.as_symbol().is_some_and(|x| c.interner.name(x) == n);
-    if !((is(items.first()?, "define") || is(items.first()?, "define*")) && is(items.get(1)?, c.interner.name(name))) {
+fn definition_init(form: &Form, c: &mut Checker, name: Sym) -> Option<(Option<Form>, Form)> {
+    let mut items = c.items_of(form)?;
+    let is = |c: &Checker, s: &Form, n: &str| c.sym_of(s).is_some_and(|x| c.interner.name(x) == n);
+    if !((is(c, items.first()?, "define") || is(c, items.first()?, "define*")) && is(c, items.get(1)?, c.interner.name(name))) {
         return None;
     }
     match items.len() {
-        3 => Some((None, &items[2])),
-        4 => Some((Some(&items[2]), &items[3])),
+        3 => items.pop().map(|init| (None, init)),
+        4 => {
+            let init = items.pop()?;
+            Some((items.pop(), init))
+        }
         _ => None,
     }
 }
 
 /// The path of `(compile-file "path")`, if `form` is one, and whether it
 /// is `(compile-file "path" program)`, a program's file.
-fn compile_file_form(form: &Syntax, c: &Checker) -> Option<(String, bool)> {
-    let fixpt_read::Datum::List { items, tail: None } = &form.datum else { return None };
+fn compile_file_form(form: &Form, c: &mut Checker) -> Option<(String, bool)> {
+    let items = c.items_of(form)?;
+    let is = |c: &Checker, s: &Form, n: &str| c.sym_of(s).is_some_and(|x| c.interner.name(x) == n);
     let (head, path, program) = match &items[..] {
         [head, path] => (head, path, false),
-        [head, path, kind] if kind.as_symbol().is_some_and(|k| c.interner.name(k) == "program") => (head, path, true),
+        [head, path, kind] if is(c, kind, "program") => (head, path, true),
         _ => return None,
     };
-    if !head.as_symbol().is_some_and(|h| c.interner.name(h) == "compile-file") {
+    if !is(c, head, "compile-file") {
         return None;
     }
-    let fixpt_read::Datum::Str(path) = &path.datum else { return None };
-    Some((path.clone(), program))
+    Some((c.string_of(path)?, program))
 }
 
 /// Reps `each` (binary forms, some none) as one rep of the types of those
@@ -4525,10 +4653,10 @@ fn combined_reps(each: &[Option<Vec<u8>>]) -> (Option<Vec<u8>>, Vec<Option<usize
 
 /// A definition's form's text's digest, as its stamp takes it
 /// (`definition_stamps`).
-fn form_digest(form: &Syntax, interner: &fixpt_read::Interner) -> u64 {
+fn form_digest(form: &Form, c: &Checker) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    fixpt_read::write_syntax(form, interner).hash(&mut h);
+    c.written(form).hash(&mut h);
     h.finish()
 }
 

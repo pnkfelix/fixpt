@@ -231,19 +231,6 @@ pub fn set_resolver(r: Resolver) {
     let _ = RESOLVER.set(r);
 }
 
-/// What says what made the code at a place that is no provenance's id, if
-/// a macro did (`set_describer`): a place in a text compiled whose datum a
-/// macro made, as the session's sources know it.
-pub type Describer = fn(u32, i64) -> Option<String>;
-
-static DESCRIBER: std::sync::OnceLock<Describer> = std::sync::OnceLock::new();
-
-/// `d` says what made the code at a place no provenance's id is
-/// (`fixpt_place_at`): the session's sources (`fixpt_fx26::sources::describe`).
-pub fn set_describer(d: Describer) {
-    let _ = DESCRIBER.set(d);
-}
-
 /// The provenances of the places pieces' lines hold
 /// (`fixpt_heap::provenance`), by id: noted where the code is placed, the
 /// heap at hand (`note_chain`), and read where a line or a frame is said,
@@ -292,8 +279,9 @@ fn place_at(pc: usize) -> Option<String> {
         let k = rows.partition_point(|&(o, _)| o <= off);
         (*source, rows.get(k.checked_sub(1)?)?.1)
     };
+    // A place no provenance's id is: code no macro made.
     if !fixpt_heap::provenance::is_provenance(place) {
-        return DESCRIBER.get().and_then(|d| d(source, place));
+        return None;
     }
     let chain = CHAINS.lock().unwrap_or_else(|e| e.into_inner()).get(&place).cloned();
     let Some(chain) = chain else { return Some("made by a macro, from where not known".into()) };

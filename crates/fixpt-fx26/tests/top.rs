@@ -102,10 +102,11 @@ fn trying_a_form_leaves_nothing_behind() {
 fn the_argument_a_subroutine_wants() {
     let mut c = Checker::new();
     let forms = c.read_in(FileId(0), "(+ 1 2) (cons 1 2)").expect("reads");
-    let items = |f: &fixpt_read::Syntax| f.as_proper_list().expect("a list").to_vec();
-    assert_eq!(c.describe_argument(&items(&forms[0]), 2).as_deref(), Some("int"));
+    let items0 = c.items_of(&forms[0]).expect("a list");
+    assert_eq!(c.describe_argument(&items0, 2).as_deref(), Some("int"));
     // Only what the other arguments determine is filled in.
-    assert_eq!(c.describe_argument(&items(&forms[1]), 2).as_deref(), Some("t2"));
+    let items1 = c.items_of(&forms[1]).expect("a list");
+    assert_eq!(c.describe_argument(&items1, 2).as_deref(), Some("t2"));
 }
 
 /// A form tried leaves no `->*` behind either: a type read from `->*` in

@@ -10,13 +10,14 @@ use crate::ast::{Named, Prop, Rel, Spec, Term, Ty, TyId};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::logic::{Expr, Formula};
-use fixpt_read::{Datum, Sym, Syntax};
+use crate::heap_syn::{Syn, V};
+use fixpt_read::Sym;
 use std::rc::Rc;
 
 /// Whether `s` is a specification's clause: `(requires …)` or `(ensures
 /// …)`.
-pub(crate) fn clause(c: &Checker, s: &Syntax) -> bool {
-    s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| matches!(c.name(h), "requires" | "ensures"))
+pub(crate) fn clause(c: &Checker, s: &Syn) -> bool {
+    s.list().as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).is_some_and(|h| matches!(c.name(h), "requires" | "ensures"))
 }
 
 /// What a proposition may name: each name, what it names, and its type.
@@ -44,30 +45,31 @@ impl Checker {
 
     /// `t`, a `subr` type just read from `params` (its parameters as
     /// written) and `clauses`, with the specification they say.
-    pub(crate) fn specified(&mut self, t: TyId, params: &Syntax, clauses: &[Syntax]) -> R<TyId> {
+    pub(crate) fn specified(&mut self, t: TyId, params: &Syn, clauses: &[Syn]) -> R<TyId> {
         let Ty::Subr { conv, effect, params: ps, result, spec: latent } = self.arena.get(t).clone() else { unreachable!("a subr just read") };
-        let written: Vec<Syntax> = match &params.datum {
-            Datum::Nil => Vec::new(),
-            _ => params.as_proper_list().map(|l| l.to_vec()).unwrap_or_default(),
+        let written: Vec<Syn> = match &params.view() {
+            V::Nil => Vec::new(),
+            _ => params.list().as_deref().map(|l| l.to_vec()).unwrap_or_default(),
         };
         let pnames: Vec<Option<Sym>> = written.iter().map(|p| self.named_param(p).map(|(n, _)| n)).collect();
         let names: Names = pnames.iter().zip(&ps).enumerate().filter_map(|(i, (n, t))| Some(((*n)?, Named::Param(i), *t))).collect();
         let (mut requires, mut ensures, mut rname) = (None, None, None);
         for c in clauses {
-            let items = c.as_proper_list().expect("a clause");
-            let head = self.name(items[0].as_symbol().expect("a clause")).to_string();
+            let listed = c.list();
+            let items = listed.as_deref().expect("a clause");
+            let head = self.name(items[0].sym().expect("a clause")).to_string();
             match (head.as_str(), &items[1..]) {
                 ("requires", [p]) if requires.is_none() && ensures.is_none() => requires = Some(self.spec_prop(p, &names)?),
                 ("ensures", [r, q]) if ensures.is_none() => {
-                    let Some(r) = r.as_symbol() else {
-                        return Err(FxError::at(r.span, "the result's name: `(ensures name proposition)`"));
+                    let Some(r) = r.sym() else {
+                        return Err(FxError::at(r.span(), "the result's name: `(ensures name proposition)`"));
                     };
                     let mut with_result = names.clone();
                     with_result.push((r, Named::Result, result));
                     ensures = Some(self.spec_prop(q, &with_result)?);
                     rname = Some(r);
                 }
-                _ => return Err(FxError::at(c.span, "a specification is `(requires proposition)`, then `(ensures name proposition)`, each at most once")),
+                _ => return Err(FxError::at(c.span(), "a specification is `(requires proposition)`, then `(ensures name proposition)`, each at most once")),
             }
         }
         // What a `(bool …)` result proves, first.
@@ -93,25 +95,26 @@ impl Checker {
     /// A proposition: `(< a b)`, `(<= a b)`, `(= a b)`, `(> a b)`, `(>=
     /// a b)` of integers; `(not p)`, `(and p …)`, `(or p …)`, `(implies p
     /// q)`; `#t`, `#f`; or a name of a `bool`.
-    fn spec_prop(&mut self, s: &Syntax, names: &Names) -> R<Formula<Named>> {
+    fn spec_prop(&mut self, s: &Syn, names: &Names) -> R<Formula<Named>> {
         let usage = "a proposition: `(< a b)`, `(<= a b)`, `(= a b)`, `(> a b)`, `(>= a b)`, `(not p)`, `(and p …)`, `(or p …)`, `(implies p q)`, `#t`, `#f`, or a `bool` named";
-        match &s.datum {
-            Datum::Bool(true) => return Ok(Formula::True),
-            Datum::Bool(false) => return Ok(Formula::False),
-            Datum::Symbol(x) => {
+        match &s.view() {
+            V::Bool(true) => return Ok(Formula::True),
+            V::Bool(false) => return Ok(Formula::False),
+            V::Symbol(x) => {
                 return match names.iter().find(|(n, ..)| n == x) {
                     Some((_, named, t)) if self.is_bool(*t) => Ok(Formula::Holds(named.clone())),
-                    Some(_) => Err(FxError::at(s.span, format!("`{}` is not a `bool`, so not a proposition", self.name(*x)))),
-                    None => Err(FxError::at(s.span, format!("`{}` names no parameter or result here", self.name(*x)))),
+                    Some(_) => Err(FxError::at(s.span(), format!("`{}` is not a `bool`, so not a proposition", self.name(*x)))),
+                    None => Err(FxError::at(s.span(), format!("`{}` names no parameter or result here", self.name(*x)))),
                 };
             }
             _ => {}
         }
-        let items = s.as_proper_list().ok_or_else(|| FxError::at(s.span, usage))?.to_vec();
-        let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h).to_string()).unwrap_or_default();
+        let listed = s.list();
+        let items = listed.as_deref().ok_or_else(|| FxError::at(s.span(), usage))?.to_vec();
+        let head = items.first().and_then(|h| h.sym()).map(|h| self.name(h).to_string()).unwrap_or_default();
         let args = items.get(1..).unwrap_or_default();
         let rel = |c: &mut Self, r: Rel, swap: bool| -> R<Formula<Named>> {
-            let [x, y] = args else { return Err(FxError::at(s.span, format!("`({head} a b)`"))) };
+            let [x, y] = args else { return Err(FxError::at(s.span(), format!("`({head} a b)`"))) };
             let (x, y) = (c.spec_expr(x, names)?, c.spec_expr(y, names)?);
             Ok(if swap { Formula::Rel(r, y, x) } else { Formula::Rel(r, x, y) })
         };
@@ -123,7 +126,7 @@ impl Checker {
             ">=" => rel(self, Rel::Le, true),
             "not" => match args {
                 [p] => Ok(Formula::Not(Box::new(self.spec_prop(p, names)?))),
-                _ => Err(FxError::at(s.span, "`(not p)`")),
+                _ => Err(FxError::at(s.span(), "`(not p)`")),
             },
             "and" | "or" => {
                 let ps = args.iter().map(|p| self.spec_prop(p, names)).collect::<R<Vec<_>>>()?;
@@ -131,17 +134,17 @@ impl Checker {
             }
             "implies" => match args {
                 [p, q] => Ok(Formula::Implies(Box::new(self.spec_prop(p, names)?), Box::new(self.spec_prop(q, names)?))),
-                _ => Err(FxError::at(s.span, "`(implies p q)`")),
+                _ => Err(FxError::at(s.span(), "`(implies p q)`")),
             },
             _ if self.spec_callee(&items).is_some() => Ok(Formula::Holds(self.spec_call(s, &items, names, true)?)),
-            _ => Err(FxError::at(s.span, usage)),
+            _ => Err(FxError::at(s.span(), usage)),
         }
     }
 
     /// Of `(f a …)`, `f`, if its innermost binding is a global's (a
     /// top-level definition's).
-    fn spec_callee(&self, items: &[Syntax]) -> Option<Sym> {
-        let f = items.first()?.as_symbol()?;
+    fn spec_callee(&self, items: &[Syn]) -> Option<Sym> {
+        let f = items.first()?.sym()?;
         self.env.rpos(f).is_some_and(|i| self.global_slots.contains(&i)).then_some(f)
     }
 
@@ -154,25 +157,25 @@ impl Checker {
     /// the checker written in FX-26 reads specifications before it has
     /// subtyping: a call is a function of the logic's whatever it is
     /// given, and a run checking it says.)
-    fn spec_call(&mut self, s: &Syntax, items: &[Syntax], names: &Names, bool: bool) -> R<Named> {
+    fn spec_call(&mut self, s: &Syn, items: &[Syn], names: &Names, bool: bool) -> R<Named> {
         let f = self.spec_callee(items).expect("a global");
         let fname = self.name(f).to_string();
         let t = self.env[self.env.rpos(f).expect("bound")].1;
         let Ty::Subr { effect, params, result, .. } = self.arena.get(self.arena.resolve(t)).clone() else {
-            return Err(FxError::at(s.span, format!("`{fname}` is called in a specification, and is no procedure")));
+            return Err(FxError::at(s.span(), format!("`{fname}` is called in a specification, and is no procedure")));
         };
         if !effect.is_pure() {
-            return Err(FxError::at(s.span, format!("`{fname}` is called in a specification, so must be `pure`")));
+            return Err(FxError::at(s.span(), format!("`{fname}` is called in a specification, so must be `pure`")));
         }
         if bool && !self.is_bool(result) {
-            return Err(FxError::at(s.span, format!("`{fname}` gives no `bool`, so is no proposition")));
+            return Err(FxError::at(s.span(), format!("`{fname}` gives no `bool`, so is no proposition")));
         }
         if !bool && !self.is_int(result) {
-            return Err(FxError::at(s.span, format!("`{fname}` gives no `int` or `nat`, so is no integer")));
+            return Err(FxError::at(s.span(), format!("`{fname}` gives no `int` or `nat`, so is no integer")));
         }
         let args = &items[1..];
         if args.len() != params.len() {
-            return Err(FxError::at(s.span, format!("`{fname}` takes {} arguments, not {}", params.len(), args.len())));
+            return Err(FxError::at(s.span(), format!("`{fname}` takes {} arguments, not {}", params.len(), args.len())));
         }
         let mut xs = Vec::new();
         for (a, p) in args.iter().zip(&params) {
@@ -180,9 +183,9 @@ impl Checker {
                 xs.push(self.spec_expr(a, names)?);
                 continue;
             }
-            let found = a.as_symbol().and_then(|x| names.iter().find(|(n, ..)| *n == x));
+            let found = a.sym().and_then(|x| names.iter().find(|(n, ..)| *n == x));
             let Some((_, named, _)) = found.cloned() else {
-                return Err(FxError::at(a.span, format!("an argument of `{fname}` in a specification: a parameter or the result, named")));
+                return Err(FxError::at(a.span(), format!("an argument of `{fname}` in a specification: a parameter or the result, named")));
             };
             xs.push(Expr::Atom(named));
         }
@@ -191,21 +194,22 @@ impl Checker {
 
     /// An integer: a literal, a name of an `int` or a `nat`, `(+ a …)`,
     /// `(- a)`, `(- a b …)`, `(* a …)`.
-    fn spec_expr(&mut self, s: &Syntax, names: &Names) -> R<Expr<Named>> {
+    fn spec_expr(&mut self, s: &Syn, names: &Names) -> R<Expr<Named>> {
         let usage = "an integer: a literal, an `int` or `nat` named, `(+ a …)`, `(- a b …)` or `(* a …)`";
-        match &s.datum {
-            Datum::Number(fixpt_read::Num::Int(k)) => return Ok(Expr::Lit(*k)),
-            Datum::Symbol(x) => {
+        match &s.view() {
+            V::Number(fixpt_read::Num::Int(k)) => return Ok(Expr::Lit(*k)),
+            V::Symbol(x) => {
                 return match names.iter().find(|(n, ..)| n == x) {
                     Some((_, named, t)) if self.is_int(*t) => Ok(Expr::Atom(named.clone())),
-                    Some(_) => Err(FxError::at(s.span, format!("`{}` is not an `int`", self.name(*x)))),
-                    None => Err(FxError::at(s.span, format!("`{}` names no parameter or result here", self.name(*x)))),
+                    Some(_) => Err(FxError::at(s.span(), format!("`{}` is not an `int`", self.name(*x)))),
+                    None => Err(FxError::at(s.span(), format!("`{}` names no parameter or result here", self.name(*x)))),
                 };
             }
             _ => {}
         }
-        let items = s.as_proper_list().ok_or_else(|| FxError::at(s.span, usage))?.to_vec();
-        let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h).to_string()).unwrap_or_default();
+        let listed = s.list();
+        let items = listed.as_deref().ok_or_else(|| FxError::at(s.span(), usage))?.to_vec();
+        let head = items.first().and_then(|h| h.sym()).map(|h| self.name(h).to_string()).unwrap_or_default();
         if !matches!(head.as_str(), "+" | "-" | "*") && self.spec_callee(&items).is_some() {
             return Ok(Expr::Atom(self.spec_call(s, &items, names, false)?));
         }
@@ -220,7 +224,7 @@ impl Checker {
             ("*", 1..) => Ok(fold(args, Expr::Mul)),
             ("-", 1) => Ok(Expr::Sub(Box::new(Expr::Lit(0)), Box::new(args.into_iter().next().expect("one")))),
             ("-", 2..) => Ok(fold(args, Expr::Sub)),
-            _ => Err(FxError::at(s.span, usage)),
+            _ => Err(FxError::at(s.span(), usage)),
         }
     }
 }

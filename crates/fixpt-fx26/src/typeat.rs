@@ -39,7 +39,7 @@ pub fn type_at(text: &str, pos: i64) -> String {
             if !done {
                 let _: Top = c.top(f)?;
             }
-            if f.span.file == FileId(0) && f.span.end as usize >= at {
+            if f.span().file == FileId(0) && f.span().end as usize >= at {
                 break;
             }
         }

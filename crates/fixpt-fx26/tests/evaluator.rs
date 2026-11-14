@@ -119,7 +119,7 @@ fn a_write_is_seen_by_the_next_form() {
     use fixpt_fx26::session::Strategy;
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.strategy = Strategy::Evaluate;
-    let forms = s.checker.read_in(fixpt_read::FileId(0), include_str!("programs/run/evaluator-writes.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(fixpt_read::FileId(0), include_str!("programs/run/evaluator-writes.fx"))).expect("reads");
     let last = s.run_forms(&forms).expect("runs").pop().expect("forms").expect("runs");
     assert_eq!(last.value, Ok(Some("21".to_string())));
 }

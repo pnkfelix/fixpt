@@ -18,7 +18,7 @@ pub fn check_with_rust_checker(c: &mut Checker, text: &str) -> Checked26 {
     for (f, done) in forms.iter().zip(done) {
         if done {
             // Declared ahead, not shaped: noted, its shapes none.
-            c.declared_noted(f);
+            c.syn(|c| c.declared_noted(&f.get()));
             continue;
         }
         // Not the hidden definitions of the files it loads (`hoisted`),
@@ -174,19 +174,20 @@ pub fn includes_given(c: &mut Checker, text: &str) -> Vec<crate::syn::IncludeGiv
     // reading it defines again (an `import-with-syntax`'s, refused as
     // defined already otherwise); those the check left, put back.
     let kept = c.macros_kept();
-    c.macros_put_back(Default::default());
+    c.macros_put_back(c.macros_none());
     let forms = c.read_in(FileId(0), text);
     c.macros_put_back(kept);
     let Ok(forms) = forms else { return Vec::new() };
     let mut out = Vec::new();
     for f in &forms {
-        match c.include_names(f) {
+        let span = f.span();
+        match c.syn(|c| c.include_names(&f.get())) {
             Ok(Some((_, vals, types, effects))) => {
                 let names = |ns: Vec<fixpt_read::Sym>| ns.iter().map(|n| c.interner.name(*n).to_string()).collect();
-                out.push(crate::syn::IncludeGiven { at: f.span.start, names: [names(vals), names(types), names(effects)], why: String::new(), why_at: f.span.start, why_end: f.span.end });
+                out.push(crate::syn::IncludeGiven { at: span.start, names: [names(vals), names(types), names(effects)], why: String::new(), why_at: span.start, why_end: span.end });
             }
             Ok(None) => {}
-            Err(e) => out.push(crate::syn::IncludeGiven { at: f.span.start, names: Default::default(), why: e.message.into(), why_at: e.span.start, why_end: e.span.end }),
+            Err(e) => out.push(crate::syn::IncludeGiven { at: span.start, names: Default::default(), why: e.message.into(), why_at: e.span.start, why_end: e.span.end }),
         }
     }
     out

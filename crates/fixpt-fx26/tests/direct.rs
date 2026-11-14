@@ -861,7 +861,7 @@ fn native_and_cellular_code_call_each_other() {
         s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
         s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
         s.scheme.runtime_unrooted().heap.gc_every = gc_every;
-        let forms = s.checker.read_in(FileId(0), include_str!("programs/native/mixed.fx")).expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/mixed.fx"))).expect("reads");
         let out: Vec<String> =
             s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{}{:?}", o.printed, o.value))).collect();
         // Native: `bump`, which stays cellular, is neither inlined nor
@@ -904,7 +904,7 @@ fn typed_calls_of_native_code() {
                 (stay-cellular (g 1))\n\
                 (define f (subr pure (int int) int) (lambda (a b) (let ((h +)) (h a b))))\n\
                 (f 1 2)";
-    let forms = s.checker.read_in(FileId(0), text).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), text)).expect("reads");
     let out: Vec<String> =
         s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{}{:?}", o.printed, o.value))).collect();
     assert!(out[1].ends_with("Ok(Some(\"2\"))"), "{out:?}");
@@ -921,7 +921,7 @@ fn far_fields_are_native_code() {
     let members: String = (0..40).map(|i| format!("(define a{i} int {i}) ")).collect();
     let text = format!("(define m (module {members}(define f (subr pure () int) (lambda () (+ a0 a39)))))\n\
                         (+ (with m a39) ((with m f)))");
-    let forms = s.checker.read_in(FileId(0), &text).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), &text)).expect("reads");
     let out: Vec<String> =
         s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{}{:?}", o.printed, o.value))).collect();
     assert_eq!(out[1], "Ok(Some(\"78\"))", "{out:?}");
@@ -938,10 +938,10 @@ fn speculation_reads_compiled_globals() {
     for native in [false, true] {
         let mut s = session(native);
         let defs = "(define-type t (sumof (x int) (y int)))\n(define x (sum x 3))";
-        let forms = s.checker.read_in(FileId(0), defs).expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), defs)).expect("reads");
         values_of(&mut s, &forms);
         let e = "((lambda ((f (subr (read (globals x)) (t) t))) (f (sum y 4))) (lambda ((y t)) x))";
-        let form = s.checker.read_in(FileId(0), e).expect("reads").remove(0);
+        let form = s.checking(|c| c.read_in(FileId(0), e)).expect("reads").remove(0);
         let early = s.speculate(&form);
         assert!(matches!(&early, Speculation::Value(_)), "native {native}: {early:?}");
         let ran = values_of(&mut s, &[form]);
@@ -954,7 +954,7 @@ fn speculation_reads_compiled_globals() {
 #[test]
 fn types_naming_each_other_run_compiled() {
     let mut s = session(true);
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/recursive/types-in-any-order.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/recursive/types-in-any-order.fx"))).expect("reads");
     let out = values_of(&mut s, &forms);
     assert!(out.last().is_some_and(|v| v.starts_with("(#<sum some>)")), "{out:?}");
 }
@@ -964,7 +964,7 @@ fn types_naming_each_other_run_compiled() {
 #[test]
 fn an_entry_waits_for_the_types_it_names() {
     use fixpt_fx26::session::{Consider, Fx26Session as S};
-    let entry = |s: &mut S, text: &str| s.checker.read_in(FileId(0), text).expect("reads");
+    let entry = |s: &mut S, text: &str| s.checking(|c| c.read_in(FileId(0), text)).expect("reads");
     for native in [None, Some(true)] {
         let mut s = match native {
             None => Fx26Session::with_backend(Backend::Bytecode).expect("starts"),
@@ -989,7 +989,7 @@ fn an_entry_waits_for_the_types_it_names() {
 }
 
 /// The values `forms` give, run in `s` (a failure as `error: …`).
-fn values_of(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> Vec<String> {
+fn values_of(s: &mut Fx26Session, forms: &[fixpt_fx26::heap_syn::Form]) -> Vec<String> {
     s.run_forms(forms)
         .expect("runs")
         .into_iter()
@@ -1002,7 +1002,7 @@ fn values_of(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> Vec<String> {
 
 /// Each form's value, as `values_of` gives them, and the names of the
 /// definitions that ran as cellular code, not native code, in order.
-fn values_and_fallbacks(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> (Vec<String>, Vec<String>) {
+fn values_and_fallbacks(s: &mut Fx26Session, forms: &[fixpt_fx26::heap_syn::Form]) -> (Vec<String>, Vec<String>) {
     let mut fell = Vec::new();
     let mut values = Vec::new();
     for o in s.run_forms(forms).expect("runs") {
@@ -1028,7 +1028,7 @@ fn values_and_fallbacks(s: &mut Fx26Session, forms: &[fixpt_read::Syntax]) -> (V
 /// (`programs/native/adapters.fx`). One native session serves the tests
 /// that follow too, `native_session_*`: each loads the front end.
 fn adapters_in(s: &mut Fx26Session) -> Vec<String> {
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/adapters.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/adapters.fx"))).expect("reads");
     // The last form, the deepest, collecting often.
     let (most, last) = forms.split_at(forms.len() - 1);
     let mut out = values_of(s, most);
@@ -1070,7 +1070,7 @@ fn conversions_make_adapters_in_cellular_code() {
 #[test]
 fn what_cellular_code_makes_is_native() {
     let mut s = session(true);
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/made-native.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/made-native.fx"))).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!(values, ["15", "#t", "5", "42", "500500"], "{fell:?}");
     for name in ["add5", "even", "plus", "(car fns)"] {
@@ -1114,13 +1114,13 @@ fn native_session_adapters_aborts_and_stack_maps() {
     assert_eq!(adapters_in(&mut s), ADAPTED, "adapters");
     // Native code bound to a global as compiled, the global redefined
     // after (`programs/native/redefined.fx`): the new definition, seen.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/redefined.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/redefined.fx"))).expect("reads");
     assert_eq!(values_of(&mut s, &forms), ["3", "201", "3", "201"], "redefined");
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/aborts.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/aborts.fx"))).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!(values, ["15", "105", "400200"], "aborts");
     assert_eq!(fell, ["in-cellular", "raise-cellular"], "only those that stay cellular do");
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/inlined-extract.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/inlined-extract.fx"))).expect("reads");
     for o in s.run_forms(&forms).expect("runs") {
         let o = o.expect("ran");
         assert!(!o.printed.contains("not in the native convention"), "{}", o.printed);
@@ -1128,7 +1128,7 @@ fn native_session_adapters_aborts_and_stack_maps() {
             assert_eq!(v.as_deref(), Ok("3000"));
         }
     }
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/dead-slot.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/dead-slot.fx"))).expect("reads");
     let (defs, runs) = forms.split_at(forms.len() - 2);
     for o in s.run_forms(defs).expect("runs") {
         assert!(o.is_ok_and(|o| !o.printed.contains("not in the native convention")), "defined natively");
@@ -1161,42 +1161,42 @@ fn native_session_adapters_aborts_and_stack_maps() {
     // under those collections (`programs/native/wide-frame.fx`).
     // The front end, lowered Scheme here, counts its own steps against the
     // limit too, and checking `wide`'s 70 bindings takes nearly 20 million.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/wide-frame.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/wide-frame.fx"))).expect("reads");
     s.set_step_limit(Some(40_000_000));
     assert_eq!(values_of(&mut s, &forms), ["2485", "37450000"], "wide frame");
     s.set_step_limit(Some(fixpt_fx26::session::DEFAULT_STEP_LIMIT));
     // More values than registers, the rest a list in the last register, under
     // those collections too.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/many-values.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/many-values.fx"))).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!(values, ["25", "1012", "-154", "119", "1025", "1001"], "many values");
     assert_eq!(fell, ["cell10", "from-cell"], "only those that stay cellular do");
     // `rcons` made inline, in regions' chunks, under those collections too.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/region-cons.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/region-cons.fx"))).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["500100000".to_string()], vec![]), "region-cons");
     // Deep recursion, under those collections too.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/deep.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/deep.fx"))).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["500000500000".to_string()], vec![]), "deep");
     // Variadic procedures, the count in a register, under those collections
     // too: none left as cellular code.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/variadic.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/variadic.fx"))).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!((values, fell), (vec!["60".into(), "1019".into(), "4140000".into()], vec![]), "variadic");
     // `f64`s passed raw to a procedure made native a form before, and,
     // once it is redefined, boxed through its cell (`TODO.md` §91).
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/raw-args-across-forms.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/raw-args-across-forms.fx"))).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!((values, fell), (vec!["250250".into(), "1000".into(), "500".into()], vec![]), "raw args across forms");
     // `list`, called and as a value, likewise.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/run/list.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/run/list.fx"))).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["5539".to_string()], vec![]), "list");
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/run/list-regions.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/run/list-regions.fx"))).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms).0.last().map(String::as_str), Some("54"), "list-regions");
     // `apply` copies a list that may be written (F11), and a cyclic one is an
     // error, as machine code too.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/run/apply-fresh.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/run/apply-fresh.fx"))).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms).0.last().map(String::as_str), Some("22"), "apply-fresh");
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/apply-cyclic.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/apply-cyclic.fx"))).expect("reads");
     let values = values_of(&mut s, &forms);
     assert!(values.last().is_some_and(|v| v.contains("expected a list")), "{values:?}");
 }
@@ -1215,7 +1215,7 @@ fn deep_recursion_through_the_stack_cache() {
     fixpt_native::direct::with_machine(|m| m.set_stack_words(4096, 1 << 26)).expect("a machine");
     let mut s = session(true);
     s.native_runner = Some(run_native_collecting);
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/deep-control.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/deep-control.fx"))).expect("reads");
     let before = fixpt_native::direct::stack_stats();
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!(values, ["5000049999", "1007", "50005", "60001", "60000"], "deep control");
@@ -1224,7 +1224,7 @@ fn deep_recursion_through_the_stack_cache() {
     // a thunk a mark in tail position called: the mark's frame moves with
     // the thunk's, which replaces it (it was 60087, with 87 marks too many).
     fixpt_native::direct::with_machine(|m| m.set_stack_words(4098, 1 << 26)).expect("a machine");
-    let forms = s.checker.read_in(FileId(0), "(level 30000)").expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), "(level 30000)")).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["60000".to_string()], vec![]), "tail marks");
     // Each program's frames went through the heap, and came back.
     let after = fixpt_native::direct::stack_stats();
@@ -1232,14 +1232,14 @@ fn deep_recursion_through_the_stack_cache() {
     // Composable continuations that cross machines, and marks read across
     // them (`TODO.md` §93, `programs/native/captures.fx`), on this small
     // cache too, so that frames each machine took are in its chain.
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/captures.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/captures.fx"))).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     let want = ["(10 10 10 10 343 343 343 343 16 16 60001 60001)", "(918 1215 1009 1009 1009)", "(77 88 158 157)"];
     assert_eq!(values, want, "captures");
     assert_eq!(fell, ["grab-c", "climb-c", "tail-c", "under-c", "grab-marks", "mark-c", "look-c", "in-c"], "only those that stay cellular do");
     // Whole continuations that cross machines, thrown and called again
     // (`TODO.md` §93, `programs/native/whole-captures.fx`).
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/whole-captures.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/whole-captures.fx"))).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!(values, ["(6 6 6 6 6 6 8 8)", "(413 413 413 413)"], "whole captures");
     assert_eq!(fell, ["throw-c", "via-c", "cap-c", "deep-c", "again-c", "keep-c"], "only those that stay cellular do");
@@ -1254,7 +1254,7 @@ fn deep_recursion_through_the_stack_cache() {
 fn crossings_too_deep_for_the_rust_stack_overflow() {
     let run = std::thread::Builder::new().stack_size(16 << 20).spawn(|| {
         let mut s = session(true);
-        let forms = s.checker.read_in(FileId(0), include_str!("programs/native/crossing-overflow.fx")).expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/crossing-overflow.fx"))).expect("reads");
         values_and_fallbacks(&mut s, &forms)
     });
     let (values, fell) = run.expect("spawns").join().expect("no crash");
@@ -1293,7 +1293,7 @@ fn raw_slots_through_the_stack_cache_and_collections() {
 #[test]
 fn quiet_boxes_are_collected_at_the_next_poll() {
     let mut s = session(true);
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/quiet-boxes.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/quiet-boxes.fx"))).expect("reads");
     let (defs, run) = forms.split_at(forms.len() - 1);
     for o in s.run_forms(defs).expect("runs") {
         assert!(o.is_ok_and(|o| !o.printed.contains("not in the native convention")), "defined natively");
@@ -1387,7 +1387,7 @@ fn run_native_stressed(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u6
 fn a_tag_moved_at_a_capture_across_machines_finds_its_prompt() {
     let mut s = session(true);
     s.native_runner = Some(run_native_collecting_always);
-    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/capture-across-collecting.fx")).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/native/capture-across-collecting.fx"))).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     // Each `1 + 3d`, `d` the cellular frames between (`captures.fx`).
     assert_eq!(values.last().map(String::as_str), Some("220"), "{values:?}");
@@ -1427,7 +1427,7 @@ fn control_on_native_frames() {
     s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
     for (name, want) in programs {
         let text = std::fs::read_to_string(format!("{}/tests/programs/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
-        let forms = s.checker.read_in(FileId(0), &text).expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), &text)).expect("reads");
         let (last, before) = forms.split_last().expect("a form");
         s.run_forms(before).expect("runs");
         let out = s.run(last).expect("checks");
@@ -1457,7 +1457,7 @@ fn every_test_program_runs_natively_as_cellular() {
         s.register_code = runner.is_some();
         s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
         s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
-        let forms = s.checker.read_in(FileId(0), text).ok()?;
+        let forms = s.checking(|c| c.read_in(FileId(0), text)).ok()?;
         Some(s.run_forms(&forms).ok()?.into_iter().map(|o| o.map(|o| (o.value, o.printed))).collect::<Vec<_>>())
     };
     // Every directory of programs but those that loop until a step limit
@@ -1518,13 +1518,13 @@ fn inlined_calls_see_a_redefinition() {
         } else {
             s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
         }
-        let forms = s.checker.read_in(FileId(0), include_str!("programs/redefine/compatible.fx")).expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/redefine/compatible.fx"))).expect("reads");
         let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{:?}", o.value))).collect();
         assert_eq!(out[2], "Ok(Some(\"4\"))", "native {native}: {out:?}");
         assert_eq!(s.inliners("f").expect("asks"), Ok(vec!["g".to_string()]), "native {native}");
         assert_eq!(out[4], "Ok(Some(\"202\"))", "native {native}: {out:?}");
         // A call specialized at a lambda, the same.
-        let forms = s.checker.read_in(FileId(0), include_str!("programs/redefine/specialized.fx")).expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), include_str!("programs/redefine/specialized.fx"))).expect("reads");
         let out: Vec<String> = s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| String::from(e.message), |o| format!("{:?}", o.value))).collect();
         assert_eq!((out[3].as_str(), out[5].as_str()), ("Ok(Some(\"36\"))", "Ok(Some(\"3036\"))"), "native {native}: {out:?}");
         assert_eq!(s.inliners("map1").expect("asks"), Ok(vec!["test".to_string()]), "native {native}");

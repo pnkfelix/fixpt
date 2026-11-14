@@ -11,6 +11,7 @@ use crate::error::{FxError, R};
 use crate::ids::State;
 use crate::session::READER_PREFIX;
 use fixpt_heap::Value;
+use crate::heap_syn::Syn;
 use fixpt_read::{Datum, FileId, Interner, Num, Span, Syntax};
 use crate::front::Front;
 use fixpt_scheme::{Handle, Local, Session};
@@ -74,7 +75,7 @@ pub fn parse_with_fx26_parser_from(scheme: &mut Front, file: FileId, text: &str)
 /// checker says the program runs (`checked-tops`, under redefinition): its
 /// value as Scheme would write it, or `!! ` and its error.
 pub fn eval_with_fx26_evaluator(scheme: &mut Front, standard: Handle, file: FileId, text: &str) -> R<String> {
-    eval_more_with_fx26_evaluator(scheme, Some(standard), file, text, 0, &mut State::begun())
+    eval_more_with_fx26_evaluator(scheme, Some(standard), file, Given::Text(text, 0), &mut State::begun())
 }
 
 /// [`eval_with_fx26_evaluator`], or, `standard` none, `text` as more of the
@@ -84,11 +85,11 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Front, standard: Handle, file: File
 /// checker says of a place is said of no other form's. Read in `state`,
 /// which it leaves the state after, if the checker keeps `text`
 /// ([`State`]).
-pub fn eval_more_with_fx26_evaluator(scheme: &mut Front, standard: Option<Handle>, file: FileId, text: &str, base: i64, state: &mut State) -> R<String> {
+pub fn eval_more_with_fx26_evaluator(scheme: &mut Front, standard: Option<Handle>, file: FileId, given: Given<'_>, state: &mut State) -> R<String> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let entry = if standard.is_some() { "run-checked" } else { "run-checked-more" };
     scheme.scope(|s| {
-        let parsed = parse_to_trees_at(s, file, text, base, state, standard.is_none())?;
+        let parsed = parse_to_trees_at(s, file, given, state, standard.is_none())?;
         let (tops, after) = (parsed.tops, parsed.after);
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = refusal(s, checked) {
@@ -112,7 +113,7 @@ pub fn eval_more_with_fx26_evaluator(scheme: &mut Front, standard: Option<Handle
 /// compiler written in FX-26, and run the word it makes on the cellular
 /// machine: the value, as Scheme writes it; or `!! ` and why it failed.
 pub fn compile_with_fx26_compiler(scheme: &mut Front, standard: Handle, file: FileId, text: &str) -> R<String> {
-    compile_with_fx26_compiler_showing(scheme, Some(standard), &mut State::begun(), file, text, false, None).map(|(out, _)| out)
+    compile_with_fx26_compiler_showing(scheme, Some(standard), &mut State::begun(), file, Given::Text(text, 0), false, None).map(|(out, _)| out)
 }
 
 /// The same, and, if `show`, the word made, and every word it reaches,
@@ -126,13 +127,13 @@ pub fn compile_with_fx26_compiler_showing(
     standard: Option<Handle>,
     state: &mut State,
     file: FileId,
-    text: &str,
+    given: Given<'_>,
     show: bool,
     steps: Option<u64>,
 ) -> R<(String, Option<String>)> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let parsed = parse_to_trees_at(s, file, text, 0, state, standard.is_none())?;
+        let parsed = parse_to_trees_at(s, file, given, state, standard.is_none())?;
         let (tops, after) = (parsed.tops, parsed.after);
         // Checked first, by the checker written in FX-26, which says where
         // each `extract`'s field is.
@@ -389,13 +390,13 @@ pub fn with_last_value<T>(
     standard: Option<Handle>,
     state: &mut State,
     file: FileId,
-    text: &str,
+    given: Given<'_>,
     native: Option<crate::session::NativeFx>,
     f: impl FnOnce(&mut fixpt_runtime::Runtime, Value) -> T,
 ) -> R<Result<T, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let parsed = parse_to_trees_at(s, file, text, 0, state, standard.is_none())?;
+        let parsed = parse_to_trees_at(s, file, given, state, standard.is_none())?;
         let (tops, after) = (parsed.tops, parsed.after);
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = refusal(s, checked) {
@@ -432,10 +433,10 @@ pub fn with_last_value<T>(
 /// without `standard`), and nothing more: what it found wrong, if anything.
 /// Read in `state`, which it leaves the state after, if the checker keeps
 /// `text` ([`State`]).
-pub fn check_only(scheme: &mut Front, standard: Option<Handle>, state: &mut State, file: FileId, text: &str) -> R<Result<(), String>> {
+pub fn check_only(scheme: &mut Front, standard: Option<Handle>, state: &mut State, file: FileId, given: Given<'_>) -> R<Result<(), String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     scheme.scope(|s| {
-        let parsed = parse_to_trees_at(s, file, text, 0, state, standard.is_none())?;
+        let parsed = parse_to_trees_at(s, file, given, state, standard.is_none())?;
         let (tops, after) = (parsed.tops, parsed.after);
         let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         Ok(match refusal(s, checked) {
@@ -761,7 +762,7 @@ fn word_of(scheme: &mut Front, result: Handle) -> R<Result<Handle, String>> {
 /// The parser's trees for `text`: a list of `top`s, as a handle in the
 /// caller's scope.
 fn parse_to_trees(scheme: &mut Front, file: FileId, text: &str) -> R<Parsed> {
-    parse_to_trees_at(scheme, file, text, 0, &State::begun(), false)
+    parse_to_trees_at(scheme, file, Given::Text(text, 0), &State::begun(), false)
 }
 
 /// What the parser written in FX-26 made of a text: its trees, and how it
@@ -780,22 +781,50 @@ pub struct Parsed {
 /// `globals`: whether the checker goes on from its state (checked by
 /// `check-more`, not `check-program`), its globals' shapes told the
 /// expander (`check-global-shapes!`).
-fn parse_to_trees_at(scheme: &mut Front, file: FileId, text: &str, base: i64, state: &State, globals: bool) -> R<Parsed> {
-    supply_loaded_at(scheme, file, text, base)?;
-    let syns = read_to_syns_at(scheme, file, text, base)?;
-    parse_syns_at(scheme, file, text, syns, base, state, globals)
+fn parse_to_trees_at(scheme: &mut Front, file: FileId, given: Given<'_>, state: &State, globals: bool) -> R<Parsed> {
+    match given {
+        Given::Text(text, base) => {
+            supply_loaded_at(scheme, file, text, base)?;
+            let syns = read_to_syns_at(scheme, file, text, base)?;
+            parse_syns_at(scheme, file, Some((text, base)), syns, state, globals)
+        }
+        Given::Syn(handed) => {
+            supply_loaded_from(scheme, file, Loads::Forms(&handed.loads))?;
+            parse_syns_at(scheme, file, None, handed.syns, state, globals)
+        }
+    }
+}
+
+/// What the front end written in FX-26 is given to parse: a text, which
+/// its reader reads, its places counted from a base; or the `syn` the
+/// Rust reader and expander made, handed as it is ([`Handed`]).
+#[derive(Clone, Copy)]
+pub enum Given<'a> {
+    Text(&'a str, i64),
+    Syn(&'a Handed),
+}
+
+/// Forms the Rust reader read and its expander expanded, as the front end
+/// written in FX-26 is handed them (`docs/research/heap-syntax.md`,
+/// `heap_syn::Syn::handed`): their `syn`, a list held by a handle, in the
+/// heap that runs that front end; and the files they load, where.
+pub struct Handed {
+    pub syns: Handle,
+    /// What the forms load ([`load_modules_in`]).
+    pub(crate) loads: Vec<Load>,
 }
 
 /// What the parser written in FX-26 makes of `syns`, read from `text`
 /// ([`read_to_syns`]): the program's trees, or where it is wrong; read in
 /// the standard environment's state, by the default switches.
 pub fn parse_syns(scheme: &mut Front, file: FileId, text: &str, syns: Handle) -> R<Parsed> {
-    parse_syns_at(scheme, file, text, syns, 0, &State::begun(), false)
+    parse_syns_at(scheme, file, Some((text, 0)), syns, &State::begun(), false)
 }
 
-/// [`parse_syns`], the positions read counted from `base`, read in `state`
-/// by the process's mode (`parser-types.fx`'s `keys`).
-fn parse_syns_at(scheme: &mut Front, file: FileId, text: &str, syns: Handle, base: i64, state: &State, globals: bool) -> R<Parsed> {
+/// [`parse_syns`], read in `state` by the process's mode
+/// (`parser-types.fx`'s `keys`): of `text`, its positions counted from a
+/// base; or, none, of `syn` handed over, placed where it is.
+fn parse_syns_at(scheme: &mut Front, file: FileId, text: Option<(&str, i64)>, syns: Handle, state: &State, globals: bool) -> R<Parsed> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mode = crate::ids::mode() as i64;
     let settings = state.settings.text();
@@ -836,9 +865,15 @@ fn parse_syns_at(scheme: &mut Front, file: FileId, text: &str, syns: Handle, bas
         (tag, err, k.product_field(2).and_then(|x| x.fixnum()).unwrap_or(0), k.product_field(3).and_then(|x| x.fixnum()).unwrap_or(0))
     });
     if let Some((msg, a, b)) = err {
-        let offsets = byte_offsets(text);
-        let at = |c: i64| offsets.get((c - base).max(0) as usize).copied().unwrap_or(text.len()) as u32;
-        return Err(FxError::at(fx26_span(scheme, file, &at, a, b), msg));
+        let span = match text {
+            Some((text, base)) => {
+                let offsets = byte_offsets(text);
+                let at = |c: i64| offsets.get((c - base).max(0) as usize).copied().unwrap_or(text.len()) as u32;
+                fx26_span(scheme, file, &at, a, b)
+            }
+            None => handed_span(scheme, file, a, b),
+        };
+        return Err(FxError::at(span, msg));
     }
     debug_assert_eq!(tag, "p-ok");
     let tops = scheme.make(|m| {
@@ -901,7 +936,7 @@ const LOAD_BASE_STEP: i64 = 1_000_000_000;
 /// A load found in a text: where it starts, its path as written, whether
 /// it is a `load-input`, and, a `(%loaded "key" "path")`'s, the file its key
 /// names, the path resolved.
-type Load = (u32, String, bool, Option<String>);
+pub(crate) type Load = (Span, String, bool, Option<String>);
 
 /// Each `(load-module "path")` in `forms`, in order: where it starts, and
 /// the path; and each form of processes or `par`, which loads the scheduler
@@ -911,7 +946,7 @@ type Load = (u32, String, bool, Option<String>);
 /// (`TODO.md` §92). A load found where the parsers find none would be a
 /// file read the Rust checker does not read, the numbering of the files
 /// after it moved.
-fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<Load>) {
+pub(crate) fn load_modules_in(forms: &[Syn], interner: &Interner, out: &mut Vec<Load>) {
     for f in forms {
         // The files its types name first, as the parsers load them
         // (`Checker::type_loads`, `type-loaded`).
@@ -922,13 +957,13 @@ fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<Load>) {
 
 /// Each `(load-moduleof "file" …)` and `(load-input-moduleof "file" …)` in
 /// `f`, outside quotations, in order.
-fn type_loads_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
-    let Some(items) = f.as_proper_list() else { return };
-    match items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h)) {
+fn type_loads_at(f: &Syn, interner: &Interner, out: &mut Vec<Load>) {
+    let Some(items) = f.list() else { return };
+    match items.first().and_then(|h| h.sym()).map(|h| interner.name(h)) {
         Some("quote" | "quasiquote") => {}
         Some(loader @ ("load-moduleof" | "load-input-moduleof")) => {
-            if let Some(Datum::Str(p)) = items.get(1).map(|p| &p.datum) {
-                out.push((f.span.start, p.to_string(), loader == "load-input-moduleof", None));
+            if let Some(p) = items.get(1).and_then(|p| string_of(*p)) {
+                out.push((f.span(), p.to_string(), loader == "load-input-moduleof", None));
             }
         }
         _ => items.iter().for_each(|x| type_loads_at(x, interner, out)),
@@ -936,45 +971,45 @@ fn type_loads_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
 }
 
 /// `load_modules_in` of one expression, or definition.
-fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
-    let Some(items) = f.as_proper_list() else { return };
-    let exps = |xs: &[Syntax], out: &mut Vec<Load>| xs.iter().for_each(|x| load_modules_at(x, interner, out));
+fn load_modules_at(f: &Syn, interner: &Interner, out: &mut Vec<Load>) {
+    let Some(items) = f.list() else { return };
+    let exps = |xs: &[Syn], out: &mut Vec<Load>| xs.iter().for_each(|x| load_modules_at(x, interner, out));
     // The last item of each list in `xs`: a binding's expression.
-    let inits = |xs: Option<&[Syntax]>, out: &mut Vec<Load>| {
+    let inits = |xs: Option<&[Syn]>, out: &mut Vec<Load>| {
         for b in xs.unwrap_or_default() {
-            if let Some([_, .., init]) = b.as_proper_list() {
+            if let Some([_, .., init]) = b.list().as_deref() {
                 load_modules_at(init, interner, out);
             }
         }
     };
     // Each clause of `xs` from item `k` on: an arm's body.
-    let arms = |xs: &[Syntax], k: usize, out: &mut Vec<Load>| {
+    let arms = |xs: &[Syn], k: usize, out: &mut Vec<Load>| {
         for c in xs {
-            if let Some(parts) = c.as_proper_list() {
+            if let Some(parts) = c.list() {
                 parts.get(k..).unwrap_or_default().iter().for_each(|x| load_modules_at(x, interner, out));
             }
         }
     };
-    if let [head, path] = items
-        && let Some(h) = head.as_symbol()
+    if let [head, path] = &items[..]
+        && let Some(h) = head.sym()
         && matches!(interner.name(h), "load-module" | "load-input")
-        && let Datum::Str(p) = &path.datum
+        && let Some(p) = string_of(*path)
     {
-        out.push((f.span.start, p.to_string(), interner.name(h) == "load-input", None));
+        out.push((f.span(), p.to_string(), interner.name(h) == "load-input", None));
     }
-    if let [head, key, path] = items
-        && head.as_symbol().is_some_and(|h| interner.name(h) == "%loaded")
-        && let (Datum::Str(k), Datum::Str(p)) = (&key.datum, &path.datum)
+    if let [head, key, path] = &items[..]
+        && head.sym().is_some_and(|h| interner.name(h) == "%loaded")
+        && let (Some(k), Some(p)) = (string_of(*key), string_of(*path))
     {
         let (input, file) = match k.strip_prefix("input:") {
             Some(f) => (true, f),
             None => (false, k.as_str()),
         };
-        out.push((f.span.start, p.to_string(), input, Some(file.to_string())));
+        out.push((f.span(), p.to_string(), input, Some(file.to_string())));
     }
-    let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h));
+    let head = items.first().and_then(|h| h.sym()).map(|h| interner.name(h));
     if matches!(head, Some("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "attempt" | "attempt-within" | "pselect" | "icell-get" | "icell-put!")) {
-        out.push((f.span.start, crate::check::PROCESSES.to_string(), false, None));
+        out.push((f.span(), crate::check::PROCESSES.to_string(), false, None));
     }
     let rest = items.get(1..).unwrap_or_default();
     let from = |k: usize| items.get(k..).unwrap_or_default();
@@ -990,7 +1025,7 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
         // Parameters, or a region's name, then a body.
         Some("lambda" | "plambda" | "letregion" | "letfreeze" | "letrena" | "letreap") => exps(from(2), out),
         Some("let" | "let*" | "letrec" | "letrec*" | "par") => {
-            inits(items.get(1).and_then(|b| b.as_proper_list()), out);
+            inits(items.get(1).and_then(|b| b.list()).as_deref(), out);
             exps(from(2), out);
         }
         // `(define name expression)`, `(define name type expression)`.
@@ -1009,7 +1044,18 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
             exps(&items[..items.len().min(3)], out);
             exps(from(4), out);
         }
-        _ => exps(items, out),
+        _ => exps(&items, out),
+    }
+}
+
+/// The string `s` is, if it is one.
+fn string_of(s: Syn) -> Option<String> {
+    match s.shape() {
+        crate::heap_syn::Shape::Atom => match s.view() {
+            crate::heap_syn::V::Str(t) => Some(t),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -1029,12 +1075,22 @@ pub fn supply_loaded(scheme: &mut Front, file: FileId, text: &str) -> R<()> {
 /// its text (or why it could not be read), in the order read: what a
 /// reading folds of them ([`crate::ids::read_in`]).
 fn supply_loaded_at(scheme: &mut Front, file: FileId, text: &str, base: i64) -> R<Vec<(String, String)>> {
+    supply_loaded_from(scheme, file, Loads::Text(text, base))
+}
+
+/// [`supply_loaded_at`], of the loads `from` has.
+fn supply_loaded_from(scheme: &mut Front, file: FileId, from: Loads<'_>) -> R<Vec<(String, String)>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    let (list, loads) = loaded_files_at(scheme, file, text, base)?;
+    let (list, loads) = loaded_files_at(scheme, file, from)?;
     crate::entries::call(&mut *scheme, "loaded-files!", &[list]).map_err(|e| fail(e.to_string()))?;
-    let offsets = byte_offsets(text);
     let mut list = scheme.make(|_| Value::NULL);
-    let char_at = |byte: u32| base + offsets.partition_point(|&o| o < byte as usize) as i64;
+    let char_at: Box<dyn Fn(u32) -> i64> = match from {
+        Loads::Text(text, base) => {
+            let offsets = byte_offsets(text);
+            Box::new(move |byte| base + offsets.partition_point(|&o| o < byte as usize) as i64)
+        }
+        Loads::Forms(..) => Box::new(move |byte| crate::heap_syn::at_of(Span::new(file, byte, byte)).start),
+    };
     for given in INCLUDES.with(|i| std::mem::take(&mut *i.borrow_mut())).into_iter().rev() {
         let mut fields = vec![scheme.make(|_| Value::fixnum(37))];
         fields.push(scheme.make(|_| Value::fixnum(char_at(given.at))));
@@ -1086,6 +1142,24 @@ fn fx26_span(scheme: &mut Front, file: FileId, at: &dyn Fn(i64) -> u32, a: i64, 
     }
     let made = expansions_made(scheme);
     Sources { file, at, made, done: HashMap::default() }.span(scheme, a, b)
+}
+
+/// The span of places `a`..`b` of `syn` handed over
+/// ([`Given::Syn`]): a part a template made, at its provenance's use
+/// site, the outermost, as the Rust checker says what a macro made is
+/// wrong at its use; a part the FX-26 expander made, by its keys
+/// ([`fx26_span`]); another, where it is (`heap_syn::span_of`).
+fn handed_span(scheme: &mut Front, file: FileId, a: i64, b: i64) -> Span {
+    let at = |p: i64| crate::heap_syn::span_of(crate::heap_syn::At { start: p, end: p, expansion: 0 });
+    if fixpt_heap::provenance::is_provenance(a) {
+        let used = scheme.runtime_unrooted().heap.provenance.chain(a).and_then(|c| c.last().copied());
+        return used.map_or(Span::new(file, 0, 0), at);
+    }
+    if a >= SOURCE_BASE || b >= SOURCE_BASE {
+        let to_byte = |c: i64| at(c).start;
+        return fx26_span(scheme, file, &to_byte, a, b);
+    }
+    crate::heap_syn::span_of(crate::heap_syn::At { start: a, end: b, expansion: 0 })
 }
 
 /// The FX-26 expander's expansions, and those recorded as Rust's so far.
@@ -1186,17 +1260,26 @@ pub fn set_standard_names(names: Vec<String>) {
 /// its own (`tests/bootstrap.rs`, whose front end reads the front end's
 /// built-in module files).
 pub fn loaded_files(scheme: &mut Front, file: FileId, text: &str) -> R<fixpt_scheme::Handle> {
-    loaded_files_at(scheme, file, text, 0).map(|(list, _)| list)
+    loaded_files_at(scheme, file, Loads::Text(text, 0)).map(|(list, _)| list)
 }
 
-fn loaded_files_at(scheme: &mut Front, file: FileId, text: &str, base: i64) -> R<(fixpt_scheme::Handle, Vec<(String, String)>)> {
+fn loaded_files_at(scheme: &mut Front, file: FileId, from: Loads<'_>) -> R<(fixpt_scheme::Handle, Vec<(String, String)>)> {
     let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let mut list = scheme.make(|_| Value::NULL);
     let mut read = 0;
     let mut seen = HashMap::default();
     let mut order = Vec::new();
-    supply_loaded_in(scheme, file, text, base, base_dir, &mut read, &mut seen, &mut order, &mut list)?;
+    supply_loaded_in(scheme, file, from, base_dir, &mut read, &mut seen, &mut order, &mut list)?;
     Ok((list, order))
+}
+
+/// Where the loads a parse is given are found: a text, read here, its
+/// positions counted from a base; or the forms the Rust checker read and
+/// expanded, handed to the parser as they are, placed where they are.
+#[derive(Clone, Copy)]
+enum Loads<'a> {
+    Text(&'a str, i64),
+    Forms(&'a [Load]),
 }
 
 /// [`supply_loaded`] for the `load-module`s of `text`, a program or a file
@@ -1206,8 +1289,7 @@ fn loaded_files_at(scheme: &mut Front, file: FileId, text: &str, base: i64) -> R
 fn supply_loaded_in(
     scheme: &mut Front,
     file: FileId,
-    text: &str,
-    base: i64,
+    from: Loads<'_>,
     dir: Option<std::path::PathBuf>,
     read: &mut u32,
     seen: &mut HashMap<String, Read>,
@@ -1215,14 +1297,24 @@ fn supply_loaded_in(
     list: &mut fixpt_scheme::Handle,
 ) -> R<()> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    let mut interner = Interner::new();
-    let Ok(forms) = fixpt_read::Reader::new(text, file, fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() else {
-        return Ok(());
-    };
     let mut loads = Vec::new();
-    load_modules_in(&forms, &interner, &mut loads);
-    let offsets = byte_offsets(text);
-    let char_at = |byte: u32| offsets.partition_point(|&o| o < byte as usize) as i64;
+    // Each load's place: in a text read here, its byte's; in forms handed
+    // over, its span's, in whichever file the form is.
+    let place: Box<dyn Fn(Span) -> i64> = match from {
+        Loads::Text(text, base) => {
+            let mut interner = Interner::new();
+            let read = crate::heap_syn::aside(|| crate::heap_syn::read_syn_passing(text, &mut interner, |forms, interner| load_modules_in(forms, interner, &mut loads)));
+            if read.is_err() {
+                return Ok(());
+            }
+            let offsets = byte_offsets(text);
+            Box::new(move |span| base + offsets.partition_point(|&o| o < span.start as usize) as i64)
+        }
+        Loads::Forms(given) => {
+            loads.extend_from_slice(given);
+            Box::new(|span| crate::heap_syn::at_of(span).start)
+        }
+    };
     for (start, path, input, resolved) in loads {
         let at = match (&resolved, &dir) {
             (Some(file), _) => std::path::PathBuf::from(file),
@@ -1241,7 +1333,7 @@ fn supply_loaded_in(
         let entry = |sc: &mut Front, list: &mut fixpt_scheme::Handle, r: &Read| -> R<()> {
             let fields = [
                 sc.make(|_| Value::fixnum(37)),
-                sc.make(|_| Value::fixnum(base + char_at(start))),
+                sc.make(|_| Value::fixnum(place(start))),
                 sc.make(|_| Value::fixnum(r.base)),
                 string(sc, &r.why),
                 string(sc, &path),
@@ -1297,7 +1389,7 @@ fn supply_loaded_in(
         seen.insert(shared, r);
         // The files it loads, from its directory, at its positions.
         if file_base > 0 {
-            supply_loaded_in(scheme, FileId(1000 + *read), &ftext, file_base, at.parent().map(|d| d.to_path_buf()), read, seen, order, list)?;
+            supply_loaded_in(scheme, FileId(1000 + *read), Loads::Text(&ftext, file_base), at.parent().map(|d| d.to_path_buf()), read, seen, order, list)?;
         }
     }
     Ok(())
@@ -1404,10 +1496,9 @@ mod tests {
     /// Where the loads' scan finds the scheduler loaded (`load_modules_in`).
     fn scheduler_loads(text: &str) -> Vec<u32> {
         let mut interner = Interner::new();
-        let forms = fixpt_read::Reader::new(text, FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().expect("reads");
         let mut out = Vec::new();
-        load_modules_in(&forms, &interner, &mut out);
-        out.into_iter().filter(|(_, p, _, _)| p == crate::check::PROCESSES).map(|(at, ..)| at).collect()
+        crate::heap_syn::aside(|| crate::heap_syn::read_syn_passing(text, &mut interner, |forms, interner| load_modules_in(forms, interner, &mut out))).expect("reads");
+        out.into_iter().filter(|(_, p, _, _)| p == crate::check::PROCESSES).map(|(at, ..)| at.start).collect()
     }
 
     /// A form's name bound, as a parameter, a variant, a type's effect or a

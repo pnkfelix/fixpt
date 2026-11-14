@@ -7,9 +7,10 @@
 //! exactly those differences, so the tokeniser, the list reader, the number
 //! parser and the string parser are shared rather than triplicated.
 //!
-//! The reader yields Rust-side [`Syntax`] trees carrying [`Span`]s. They are
-//! deliberately not heap values: errors get real source locations, and no
-//! front-end code can hold a `Value` across a collection.
+//! The reader yields Rust-side [`Syntax`] trees carrying [`Span`]s, and,
+//! given a [`Build`], a node of the builder's for each datum as it reads it:
+//! FX-26's front end builds its `syn` in the heap so (`docs/research/
+//! heap-syntax.md`).
 
 pub mod datum;
 pub mod intern;
@@ -21,7 +22,7 @@ pub mod writer;
 pub use datum::{Datum, Num, Syntax};
 pub use intern::{Interner, Sym};
 pub use profile::{Brackets, SyntaxProfile, UnitSyntax};
-pub use reader::{ReadError, ReadResult, Reader, form_status, FormStatus};
+pub use reader::{Build, SyntaxBuild, Place, ReadError, ReadResult, Reader, form_status, FormStatus};
 pub use span::{describe_source, expansion, expansion_placed_in, expansion_trace, note_source, record_expansion, Expansion, FileId, SourceMap, Span};
 pub use reader::{match_delimiter, tokens, Token, TokenKind};
 pub use writer::{display_syntax, escape_symbol, write_syntax, write_syntax_mapped};

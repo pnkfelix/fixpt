@@ -12,7 +12,8 @@ use crate::lineedit::{Line, LineReader, Note};
 use fixpt_engine::Backend;
 use fixpt_fx26::session::{Fx26Session, Outcome, Strategy};
 use fixpt_fx26::{Checker, Top};
-use fixpt_read::{Datum, FileId, Syntax, SyntaxProfile};
+use fixpt_fx26::heap_syn::Form;
+use fixpt_read::{FileId, SyntaxProfile};
 
 /// Line and column (both from 1) of byte `at` in `text`.
 fn line_col(text: &str, at: usize) -> (usize, usize) {
@@ -83,8 +84,8 @@ fn place(name: &str, text: &str, span: fixpt_read::Span) -> String {
 
 /// A warning, on the standard error, for each type a whole program defines
 /// more than once (`TODO.md` §34), at its second definition.
-fn warn_types_again(session: &Fx26Session, name: &str, text: &str, forms: &[Syntax]) {
-    for (n, span) in session.checker.types_defined_again(forms) {
+fn warn_types_again(session: &mut Fx26Session, name: &str, text: &str, forms: &[Form]) {
+    for (n, span) in session.checking(|c| c.types_defined_again(forms)) {
         let (line, col) = line_col(text, span.start as usize);
         eprintln!("fixpt: {name}:{line}:{col}: {}", fixpt_fx26::top::type_again_warning(session.checker.interner.name(n)));
     }
@@ -176,7 +177,6 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         if fixpt_native::jitdebug::enabled() {
             fixpt_fx26::sources::want();
             fixpt_native::jitdebug::set_resolver(fixpt_fx26::sources::resolve);
-            fixpt_native::jitdebug::set_describer(fixpt_fx26::sources::describe);
             // And `,disassemble`'s, to say where each procedure was written.
             fixpt_runtime::disasm::set_resolver(fixpt_fx26::sources::resolve);
         }
@@ -305,7 +305,7 @@ pub fn repl(backend: Backend) -> i32 {
             println!("{}", outdated_line(&outdated));
         }
         outdated_said = outdated;
-        reader.set_completions(known_names(&session.checker));
+        reader.set_completions(session.checking(|c| known_names(c)));
         let line = {
             let mut oracle = Oracle { session: &mut session, reader: eager.as_mut() };
             reader.read_with("fx26> ", if emacs { "" } else { "     | " }, &mut oracle, "")
@@ -328,7 +328,7 @@ pub fn repl(backend: Backend) -> i32 {
             continue;
         }
         if let Some(ask) = crate::help::parse(&text) {
-            crate::help::answer(&mut session.checker, &ask);
+            session.checking(|c| crate::help::answer(c, &ask));
             continue;
         }
         // `,redefine b|r`: what the next redefinition that would break
@@ -558,7 +558,7 @@ pub fn repl(backend: Backend) -> i32 {
                 // standing in for each binder: `proj` compiles to nothing,
                 // so the code shown is the same, and it is checked as
                 // written. (Its type not known, the error is the form's.)
-                match session.checker.stand_ins(e.trim()) {
+                match session.checking(|c| c.stand_ins(e.trim())) {
                     Ok((levels, places)) if !levels.is_empty() => {
                         let projected = levels.iter().fold(e.trim().to_string(), |x, ins| format!("(proj {x} {})", ins.join(" ")));
                         println!("; as {projected}: `proj` compiles to nothing");
@@ -636,7 +636,7 @@ pub fn repl(backend: Backend) -> i32 {
         // makes are each at the use's (`Macros::expand_top`), its text one.
         let mut last = None;
         for form in &forms {
-            if let Some(lines) = answer_hole(&mut session.checker, form) {
+            if let Some(lines) = session.checking(|c| answer_hole(c, form)) {
                 for l in lines {
                     println!("{l}");
                 }
@@ -652,15 +652,15 @@ pub fn repl(backend: Backend) -> i32 {
                 GcStats::of(&mut session).form_since(&b);
                 GcStats::end_form(&mut session, &b);
             }
-            if ran.is_ok() && last.replace(form.span) != Some(form.span) {
-                program += session.session_text_at(form.span);
+            if ran.is_ok() && last.replace(form.span()) != Some(form.span()) {
+                program += session.session_text_at(form.span());
                 program.push('\n');
                 // What comes before it in its entry blank, so that its places
                 // are its own there.
-                let entry = session.entry_start(form.span);
-                let start = (form.span.start as usize - entry).min(text.len());
+                let entry = session.entry_start(form.span());
+                let start = (form.span().start as usize - entry).min(text.len());
                 let before: String = text[..start].chars().map(|c| if c == '\n' { c } else { ' ' }).collect();
-                let own = before + session.session_text_at(form.span);
+                let own = before + session.session_text_at(form.span());
                 sources.push(fixpt_fx26::query::Source { name: name.clone(), text: own, base: session.checker.base_dir.clone() });
             }
             match ran {
@@ -706,7 +706,7 @@ fn pending_note(session: &mut Fx26Session, message: &str) -> Option<String> {
 }
 
 /// The entries waiting, with `forms`, run now that nothing is missing.
-fn complete_pending(session: &mut Fx26Session, forms: &[Syntax], names: &[String], name: &str, text: &str, show_code: bool) {
+fn complete_pending(session: &mut Fx26Session, forms: &[Form], names: &[String], name: &str, text: &str, show_code: bool) {
     match session.complete(forms) {
         Ok(outs) => {
             for o in outs {
@@ -976,7 +976,7 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
                 return 1;
             }
         };
-        let forms = match session.checker.read_in(FileId(0), &text) {
+        let forms = match session.checking(|c| c.read_in(FileId(0), &text)) {
             Ok(forms) => forms,
             Err(e) => {
                 eprintln!("fixpt: read error: {}", located(f, &text, &e));
@@ -984,7 +984,7 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
             }
         };
         // A file is a whole program: its definitions may come in any order.
-        warn_types_again(&session, f, &text, &forms);
+        warn_types_again(session, f, &text, &forms);
         // A load's path is from the directory of the file it is in, as
         // `fixpt eval`'s and `,load`'s are.
         let dir = std::path::Path::new(f).parent().map(|d| d.to_path_buf());
@@ -1025,7 +1025,7 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
     if session.checker.global_type(main).is_none() {
         return 0;
     }
-    let call = match session.checker.read_in(FileId(0), "(main)") {
+    let call = match session.checking(|c| c.read_in(FileId(0), "(main)")) {
         Ok(forms) => forms,
         Err(e) => {
             eprintln!("fixpt: {}", e.message);
@@ -1465,7 +1465,7 @@ impl GcStats {
 }
 
 fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool) -> i32 {
-    let forms = match session.checker.read_in(FileId(0), text) {
+    let forms = match session.checking(|c| c.read_in(FileId(0), text)) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("fixpt: read error: {}", located(name, text, &e));
@@ -1592,7 +1592,7 @@ pub fn eval(backend: Backend, text: &str) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
-    let forms = match session.checker.read_in(FileId(0), text) {
+    let forms = match session.checking(|c| c.read_in(FileId(0), text)) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("fixpt: read error: {}", located("<argument>", text, &e));
@@ -1742,27 +1742,26 @@ impl Search for Checker {
 // ----------------------------------------------- help inside an expression
 
 /// Where a `,help` hole is in `form`, if `form` is an application with one.
-fn hole_position(c: &Checker, form: &Syntax) -> Option<(Vec<Syntax>, usize)> {
-    let Datum::List { items, tail: None } = &form.datum else { return None };
-    let is_hole = |s: &Syntax| match &s.datum {
-        Datum::List { items, tail: None } if items.len() == 2 => matches!(
-            (&items[0].datum, &items[1].datum),
-            (Datum::Symbol(u), Datum::Symbol(h))
-                if c.interner.name(*u) == "unquote" && matches!(c.interner.name(*h), "help" | "?")
-        ),
+fn hole_position(c: &mut Checker, form: &Form) -> Option<(Vec<Form>, usize)> {
+    let items = c.items_of(form)?;
+    let is_hole = |c: &mut Checker, s: &Form| match c.items_of(s).as_deref() {
+        Some([u, h]) => {
+            let (u, h) = (c.sym_of(u), c.sym_of(h));
+            u.zip(h).is_some_and(|(u, h)| c.interner.name(u) == "unquote" && matches!(c.interner.name(h), "help" | "?"))
+        }
         _ => false,
     };
-    let at = items.iter().position(is_hole)?;
-    Some((items.clone(), at))
+    let at = (0..items.len()).find(|&i| is_hole(c, &items[i]))?;
+    Some((items, at))
 }
 
 /// The static answer to a hole: what the argument there must be.
-fn answer_hole(c: &mut Checker, form: &Syntax) -> Option<Vec<String>> {
+fn answer_hole(c: &mut Checker, form: &Form) -> Option<Vec<String>> {
     let (items, at) = hole_position(c, form)?;
     if at == 0 {
         return Some(vec!["; FX-26 answers a hole in argument position, not as the operator".into()]);
     }
-    let op = fixpt_read::write_syntax(&items[0], &c.interner);
+    let op = c.written(&items[0]);
     Some(match c.describe_argument(&items, at) {
         Some(t) => vec![format!("; the hole wants: {t}  (argument {at} of {op})")],
         None => vec![format!("; `{op}` is not a subroutine whose argument {at} can be known here")],
@@ -1850,10 +1849,9 @@ fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::spec
             return vec![Note { span: None, message, error: false }];
         }
     }
-    let c = &mut session.checker;
     // Each form is tried in the environment the ones before it would make,
     // and all of it is forgotten afterwards.
-    let error = try_all(c, &forms, &mut |e| {
+    let error = session.checking(|c| try_all(c, &forms, &mut |e| {
         // In what is typed, or (of a macro's template, typed before) not.
         let typed = e.span.start as usize >= base && e.span.file == FileId(0);
         let (start, end) = (e.span.start as usize - if typed { base } else { 0 }, e.span.end as usize - if typed { base } else { 0 });
@@ -1862,7 +1860,7 @@ fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::spec
             message: e.message.to_string(),
             error: true,
         })
-    });
+    }));
     if let Some(note) = error {
         return vec![note];
     }
@@ -1879,21 +1877,22 @@ fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::spec
         };
         return message.map(|message| vec![Note { span: None, message, error: false }]).unwrap_or_default();
     }
-    let c = &mut session.checker;
-    let hint = p.hole_form.as_ref().and_then(|h| {
-        let form = c.read_in(FileId(0), h).ok()?.into_iter().next()?;
-        let (items, at) = hole_position(c, &form)?;
-        let want = c.describe_argument(&items, at)?;
-        let op = fixpt_read::write_syntax(&items[0], &c.interner);
-        Some(format!("argument {at} of {op} wants {want}"))
-    });
-    // Else what the grammar and the types around the hole say goes there.
-    let hint = hint.or_else(|| {
-        let forms: Vec<Syntax> =
-            [&p.with_hole, &p.with_fill].into_iter().flatten().filter_map(|t| c.read_in(FileId(0), t).ok()?.into_iter().next()).collect();
-        let next = c.describe_hole(&forms)?;
-        // An operator could be anything; saying so says nothing.
-        (!(p.hole_first && next == "an expression")).then(|| format!("next: {next}"))
+    let hint = session.checking(|c| {
+        let hint = p.hole_form.as_ref().and_then(|h| {
+            let form = c.read_in(FileId(0), h).ok()?.into_iter().next()?;
+            let (items, at) = hole_position(c, &form)?;
+            let want = c.describe_argument(&items, at)?;
+            let op = c.written(&items[0]);
+            Some(format!("argument {at} of {op} wants {want}"))
+        });
+        // Else what the grammar and the types around the hole say goes there.
+        hint.or_else(|| {
+            let forms: Vec<Form> =
+                [&p.with_hole, &p.with_fill].into_iter().flatten().filter_map(|t| c.read_in(FileId(0), t).ok()?.into_iter().next()).collect();
+            let next = c.describe_hole(&forms)?;
+            // An operator could be anything; saying so says nothing.
+            (!(p.hole_first && next == "an expression")).then(|| format!("next: {next}"))
+        })
     });
     hint.map(|message| vec![Note { span: None, message, error: false }]).unwrap_or_default()
 }
@@ -1902,7 +1901,7 @@ fn speculative_notes_read(session: &mut Fx26Session, text: &str, p: &crate::spec
 /// nothing; the first error `judge` accepts is the answer.
 fn try_all(
     c: &mut Checker,
-    forms: &[Syntax],
+    forms: &[Form],
     judge: &mut dyn FnMut(&fixpt_fx26::FxError) -> Option<Note>,
 ) -> Option<Note> {
     let (first, rest) = forms.split_first()?;
@@ -1996,12 +1995,12 @@ mod speculative {
     #[test]
     fn an_unlicensed_expression_says_why_it_was_not_run() {
         let mut s = session();
-        let forms = s.checker.read_in(FileId(0), "(define c (ref int @c) (new 1))").expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), "(define c (ref int @c) (new 1))")).expect("reads");
         s.run(&forms[0]).expect("runs");
         assert_eq!(notes_in(&mut s, "(set c 5)")[0].message, "not run early: it may (write @c)");
-        let forms = s.checker.read_in(FileId(0), "(define* peek (subr (read @c) () int) (lambda () (get c)))").expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), "(define* peek (subr (read @c) () int) (lambda () (get c)))")).expect("reads");
         s.run(&forms[0]).expect("runs");
-        let forms = s.checker.read_in(FileId(0), "(peek)").expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), "(peek)")).expect("reads");
         assert_eq!(s.run(&forms[0]).expect("runs").value, Ok(Some("1".into())));
     }
 
@@ -2026,8 +2025,8 @@ mod speculative {
     fn next_after(text: &str) -> String {
         let mut s = session();
         let defs = "(define-type t (sumof (x int) (y int))) (define v (the t (sum x 3)))";
-        for f in s.checker.read_in(FileId(0), defs).expect("reads") {
-            s.checker.top(&f).expect("checks");
+        for f in s.checking(|c| c.read_in(FileId(0), defs)).expect("reads") {
+            s.checking(|c| c.top(&f)).expect("checks");
         }
         notes_in(&mut s, text).first().map(|n| n.message.clone()).unwrap_or_default()
     }
@@ -2066,7 +2065,7 @@ mod speculative {
         let mut s = session();
         let tree = "(define-datatype tree (leaf int) (node forest))";
         assert_eq!(notes_in(&mut s, tree)[0].message, "pending when entered, awaiting definitions of: `forest`");
-        let forms = s.checker.read_in(FileId(0), tree).expect("reads");
+        let forms = s.checking(|c| c.read_in(FileId(0), tree)).expect("reads");
         s.hold(&forms);
         assert_eq!(notes_in(&mut s, "(+ 1 ")[0].message.split(" wants ").next(), Some("argument 2 of +"), "other notes first");
         assert_eq!(notes_in(&mut s, "(")[0].message, "pending: `tree`, `leaf`, `node`, awaiting definitions of: `forest`");
@@ -2078,8 +2077,8 @@ mod speculative {
     fn a_definition_being_typed_is_not_kept() {
         let mut s = session();
         assert!(notes_in(&mut s, "(define z 4) (+ z 1)").is_empty());
-        let x = s.checker.read_in(FileId(0), "z").expect("reads");
-        assert!(s.checker.top(&x[0]).is_err(), "a definition typed but not entered was kept");
+        let x = s.checking(|c| c.read_in(FileId(0), "z")).expect("reads");
+        assert!(s.checking(|c| c.top(&x[0])).is_err(), "a definition typed but not entered was kept");
     }
 }
 

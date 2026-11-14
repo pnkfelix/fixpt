@@ -12,7 +12,8 @@
 use super::procedural::{alias_base, alias_made};
 use super::{Aligner, Atom, Env, Free, Kids, Level, Macros, Mode, Ns, STy};
 use crate::error::R;
-use fixpt_read::{Datum, Interner, Sym, Syntax};
+use fixpt_read::{Interner, Sym};
+use crate::heap_syn::{At, Syn, V};
 use fixpt_hash::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -43,14 +44,14 @@ enum Made {
 impl Macros {
     /// Form `form`, a top-level form after expansion, its free aliases
     /// made the names they stand for (above); itself if it has none.
-    pub(crate) fn aliases_resolved(&mut self, form: &Syntax, interner: &mut Interner) -> R<Syntax> {
+    pub(crate) fn aliases_resolved(&mut self, form: &Syn, interner: &mut Interner) -> R<Syn> {
         if !has_alias(form, interner) {
             return Ok(form.clone());
         }
         self.ensure_kernel(interner)?;
         let fx = interner.intern("#%fx");
         let none = HashMap::default();
-        let mut parts: Vec<(Vec<bool>, fixpt_read::Span, Made)> = Vec::new();
+        let mut parts: Vec<(Vec<bool>, At, Made)> = Vec::new();
         let mut made: Vec<(usize, Made)> = Vec::new();
         let mut defined = Vec::new();
         let mut next_fresh = self.withs.captors;
@@ -64,7 +65,7 @@ impl Macros {
             if let Kids::Form(x) = a.nodes[root].kids
                 && let Some((b, r)) = &a.nodes[x].export
             {
-                for level in a.eval(b, *r, form.span)? {
+                for level in a.eval(b, *r, form.at())? {
                     if let Level::Rib(atoms) = level {
                         top.extend(atoms.iter().filter_map(|x| if let Atom::Lit(t, _) = x { Some(*t) } else { None }));
                     }
@@ -128,7 +129,7 @@ impl Macros {
                             }
                             Ok(_) => {}
                             Err(()) => {
-                                let span = a.nodes[*at].syn.span;
+                                let span = a.nodes[*at].syn.at();
                                 return Err(crate::error::FxError::at(span, format!("`{base}`, which a macro of this file names, where a `with` or `include` around its use may give it: not yet")));
                             }
                         }
@@ -141,7 +142,7 @@ impl Macros {
                         Free::Plain => Made::Plain(base.to_string()),
                         // A file's macro writes its descriptions through
                         // its module whole (`Action::ModuleType`).
-                        _ => return Err(crate::error::FxError::at(a.nodes[*at].syn.span, format!("`{base}`: a file's macro's description named apart from its module, not yet"))),
+                        _ => return Err(crate::error::FxError::at(a.nodes[*at].syn.at(), format!("`{base}`: a file's macro's description named apart from its module, not yet"))),
                     },
                 };
                 made.push((*at, m));
@@ -169,7 +170,7 @@ impl Macros {
                 }
                 made.extend(fresh.into_iter().map(|(b, f)| (b, Made::Plain(f))));
             }
-            let at = |k: usize| (a.nodes[k].path.clone(), a.nodes[k].syn.span);
+            let at = |k: usize| (a.nodes[k].path.clone(), a.nodes[k].syn.at());
             for (r, m) in made {
                 let (p, sp) = at(r);
                 parts.push((p, sp, m));
@@ -178,18 +179,18 @@ impl Macros {
         self.withs.captors = next_fresh;
         self.withs.shapes.aliases_defined.extend(defined);
         let (with, toplevel) = (interner.intern("with"), interner.intern("#%toplevel"));
-        let mut written: HashMap<Vec<bool>, Syntax> = HashMap::default();
+        let mut written: HashMap<Vec<bool>, Syn> = HashMap::default();
         for (p, span, m) in parts {
             let s = match m {
-                Made::TopDesc(n) => Syntax::symbol(span, interner.intern(&format!("#%toplevel:{n}"))),
+                Made::TopDesc(n) => Syn::named(span, &format!("#%toplevel:{n}"), interner),
                 Made::TopValue(n) => {
                     let n = interner.intern(&n);
-                    Syntax::list(span, vec![Syntax::symbol(span, with), Syntax::symbol(span, toplevel), Syntax::symbol(span, n)])
+                    Syn::lst(span, vec![Syn::symbol(span, with, interner), Syn::symbol(span, toplevel, interner), Syn::symbol(span, n, interner)])
                 }
-                Made::Plain(n) => Syntax::symbol(span, interner.intern(&n)),
+                Made::Plain(n) => Syn::named(span, &n, interner),
                 Made::Of(m, n) => {
                     let n = interner.intern(&n);
-                    Syntax::list(span, vec![Syntax::symbol(span, with), Syntax::symbol(span, m), Syntax::symbol(span, n)])
+                    Syn::lst(span, vec![Syn::symbol(span, with, interner), Syn::symbol(span, m, interner), Syn::symbol(span, n, interner)])
                 }
             };
             written.insert(p, s);
@@ -211,11 +212,11 @@ fn top_made(free: Free, ns: Ns, base: &str) -> Made {
 }
 
 /// Whether `s` holds an alias, outside quotes.
-fn has_alias(s: &Syntax, interner: &Interner) -> bool {
-    match &s.datum {
-        Datum::Symbol(x) => alias_base(interner.name(*x)).is_some(),
-        Datum::List { items, tail } => {
-            let quoted = items.first().and_then(|h| h.as_symbol()).is_some_and(|h| matches!(interner.name(h), "quote" | "quasiquote" | "%datum"));
+fn has_alias(s: &Syn, interner: &Interner) -> bool {
+    match &s.view() {
+        V::Symbol(x) => alias_base(interner.name(*x)).is_some(),
+        V::List { items, tail } => {
+            let quoted = items.first().and_then(|h| h.sym()).is_some_and(|h| matches!(interner.name(h), "quote" | "quasiquote" | "%datum"));
             !quoted && (items.iter().any(|i| has_alias(i, interner)) || tail.as_ref().is_some_and(|t| has_alias(t, interner)))
         }
         _ => false,
@@ -223,12 +224,12 @@ fn has_alias(s: &Syntax, interner: &Interner) -> bool {
 }
 
 /// `s`, at `path`, with each part `written` holds at its path written so.
-fn written_at(s: &Syntax, path: &mut Vec<bool>, written: &HashMap<Vec<bool>, Syntax>) -> Syntax {
+fn written_at(s: &Syn, path: &mut Vec<bool>, written: &HashMap<Vec<bool>, Syn>) -> Syn {
     if let Some(w) = written.get(path) {
         return w.clone();
     }
-    match &s.datum {
-        Datum::List { items, tail } => {
+    match &s.view() {
+        V::List { items, tail } => {
             let depth = path.len();
             let mut out = Vec::with_capacity(items.len());
             for i in items {
@@ -237,9 +238,9 @@ fn written_at(s: &Syntax, path: &mut Vec<bool>, written: &HashMap<Vec<bool>, Syn
                 path.pop();
                 path.push(false);
             }
-            let tail = tail.as_ref().map(|t| Box::new(written_at(t, path, written)));
+            let tail = tail.as_ref().map(|t| written_at(t, path, written));
             path.truncate(depth);
-            Syntax::new(s.span, Datum::List { items: out, tail })
+            Syn::of_list(s.at(), &out, tail)
         }
         _ => s.clone(),
     }

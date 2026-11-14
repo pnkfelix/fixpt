@@ -10,7 +10,7 @@ use fixpt_read::FileId;
 
 /// Each form's value, or its error, and what the REPL said about it.
 fn run(s: &mut Fx26Session, text: &str) -> Vec<String> {
-    let forms = s.checker.read_in(FileId(0), text).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), text)).expect("reads");
     forms
         .iter()
         .map(|f| match s.run(f) {

@@ -71,7 +71,7 @@ pub fn test_program(session: &mut Fx26Session, text: &str, runs: usize) -> Resul
     let (checked, defined) = instrumented(session, text)?;
     // Its definitions, then each expression of its own, apart: one in which
     // a specification does not hold is a counterexample, the program's.
-    let forms = session.checker.read_in(FileId(0), &checked).map_err(|e| e.message)?;
+    let forms: Vec<fixpt_read::Syntax> = session.checking(|c| c.read_in(FileId(0), &checked).map(|fs| fs.iter().map(|f| c.syntax_of(f)).collect())).map_err(|e| e.message)?;
     let piece = |f: &fixpt_read::Syntax| &checked[f.span.start as usize..f.span.end as usize];
     let defines = |f: &fixpt_read::Syntax| match &f.datum {
         Datum::List { items, .. } => items.first().and_then(|h| h.as_symbol()).is_some_and(|h| session.checker.interner.name(h).starts_with("define")),
@@ -125,6 +125,7 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
             c.top_all(f).map_err(|e| e.message)?;
         }
     }
+    let forms: Vec<fixpt_read::Syntax> = forms.iter().map(|f| c.syntax_of(f)).collect();
     let mut names: Vec<(String, Vec<String>)> = Vec::new();
     // Each body replaced, by where it is; each copy, after its form.
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
@@ -443,7 +444,7 @@ fn callable(session: &Fx26Session, name: &str, params: &[String]) -> Option<(Vec
 /// it defines, each with its `lambda`'s parameters.
 pub fn replaying(session: &mut Fx26Session, text: &str) -> Result<Vec<(String, Vec<String>)>, String> {
     let (checked, defined) = instrumented(session, text)?;
-    let forms = session.checker.read_in(FileId(0), &checked).map_err(|e| e.message)?;
+    let forms: Vec<fixpt_read::Syntax> = session.checking(|c| c.read_in(FileId(0), &checked).map(|fs| fs.iter().map(|f| c.syntax_of(f)).collect())).map_err(|e| e.message)?;
     let defines = |f: &fixpt_read::Syntax| match &f.datum {
         Datum::List { items, .. } => items.first().and_then(|h| h.as_symbol()).is_some_and(|h| session.checker.interner.name(h).starts_with("define")),
         _ => false,

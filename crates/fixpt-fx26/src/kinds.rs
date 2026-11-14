@@ -17,7 +17,8 @@ use crate::ast::{D, DVar, Effect, Kind, Region, Size, Ty, TyId};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::parse::DScope;
-use fixpt_read::{Sym, Syntax};
+use crate::heap_syn::Syn;
+use fixpt_read::Sym;
 use fixpt_hash::HashMap;
 
 /// What an effect function is given, of a description; none for a type.
@@ -303,25 +304,25 @@ impl Checker {
     /// known) is wanted: a name bound to one, a type family's or generative
     /// type's name, a type form's name (`listof`), `(dlambda ((x k) …) d)`
     /// or `(select m f)`.
-    pub(crate) fn parse_fun(&mut self, s: &Syntax, want: Option<Kind>) -> R<TyId> {
+    pub(crate) fn parse_fun(&mut self, s: &Syn, want: Option<Kind>) -> R<TyId> {
         let f = self.parse_fun_node(s, want)?;
         if let Some(w) = want
             && let Some(got) = self.fun_kind(f)
             && got != w
         {
             return Err(FxError::at(
-                s.span,
+                s.span(),
                 format!("a description function of kind {} is wanted, and this is of kind {}", self.show_kind(w), self.show_kind(got)),
             ));
         }
         Ok(f)
     }
 
-    fn parse_fun_node(&mut self, s: &Syntax, want: Option<Kind>) -> R<TyId> {
+    fn parse_fun_node(&mut self, s: &Syn, want: Option<Kind>) -> R<TyId> {
         if let Some(r) = self.read_qualified(s, |c, n| c.parse_fun_node(n, want)) {
             return r;
         }
-        if let Some(sym) = s.as_symbol() {
+        if let Some(sym) = s.sym() {
             let name = self.interner.name(sym).to_string();
             let params: Option<Vec<(Sym, Kind)>> = match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Arrow(_))) => return Ok(self.arena.ty(Ty::Var(v))),
@@ -339,22 +340,23 @@ impl Checker {
             };
             return match params {
                 Some(ps) => self.fun_by_eta(s, &ps),
-                None => Err(FxError::at(s.span, format!("`{name}` is not a description function"))),
+                None => Err(FxError::at(s.span(), format!("`{name}` is not a description function"))),
             };
         }
         let usage = "a description function: a name, `(dlambda ((name kind) …) description)` or `(select module name)`";
-        let items = s.as_proper_list().ok_or_else(|| FxError::at(s.span, usage))?.to_vec();
-        let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
+        let listed = s.list();
+        let items = listed.as_deref().ok_or_else(|| FxError::at(s.span(), usage))?.to_vec();
+        let head = items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h).to_string());
         match head.as_deref() {
             Some("dlambda") => {
                 let [_, binders, body] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(dlambda ((name kind) …) description)`"));
+                    return Err(FxError::at(s.span(), "`(dlambda ((name kind) …) description)`"));
                 };
                 let result = want.and_then(|k| self.arena.arrow_parts(k).map(|(_, r)| r));
                 let depth = self.dscope.len();
                 let parsed = self.parse_binders(binders).and_then(|bs| {
                     if bs.is_empty() {
-                        return Err(FxError::at(binders.span, "a `dlambda` takes at least one description"));
+                        return Err(FxError::at(binders.span(), "a `dlambda` takes at least one description"));
                     }
                     let body = match result {
                         Some(k) => self.parse_desc_at(body, k)?,
@@ -367,15 +369,15 @@ impl Checker {
                 Ok(self.lam(bs, body))
             }
             // `(g d …)`, where `g` gives a description function.
-            Some(h) if h != "select" && items[0].as_symbol().is_some_and(|x| self.fun_sym(x)) => {
+            Some(h) if h != "select" && items[0].sym().is_some_and(|x| self.fun_sym(x)) => {
                 let g = self.parse_fun(&items[0], None)?;
                 let shown = self.show_fun(g);
                 let parts = self.fun_kind(g).and_then(|k| self.arena.arrow_parts(k).map(|(p, r)| (p.to_vec(), r)));
                 let Some((params, Kind::Arrow(_))) = parts else {
-                    return Err(FxError::at(s.span, format!("`{shown}` does not give a description function")));
+                    return Err(FxError::at(s.span(), format!("`{shown}` does not give a description function")));
                 };
                 if items.len() - 1 != params.len() {
-                    return Err(FxError::at(s.span, format!("`{shown}` takes {} description(s), and has {}", params.len(), items.len() - 1)));
+                    return Err(FxError::at(s.span(), format!("`{shown}` takes {} description(s), and has {}", params.len(), items.len() - 1)));
                 }
                 let mut ds = Vec::new();
                 for (a, k) in items[1..].iter().zip(params) {
@@ -383,20 +385,20 @@ impl Checker {
                 }
                 match self.apply_fun(g, ds) {
                     D::Fun(f) => Ok(f),
-                    _ => Err(FxError::at(s.span, format!("`{shown}` does not give a description function"))),
+                    _ => Err(FxError::at(s.span(), format!("`{shown}` does not give a description function"))),
                 }
             }
             Some("select") => match &items[..] {
-                [_, m, n] if m.as_symbol().is_some() && n.as_symbol().is_some() => self.select_of(m.as_symbol().expect("a name"), n.as_symbol().expect("a name"), s.span),
-                _ => Err(FxError::at(s.span, "`(select module name)`: a module's name, and a component's")),
+                [_, m, n] if m.sym().is_some() && n.sym().is_some() => self.select_of(m.sym().expect("a name"), n.sym().expect("a name"), s.span()),
+                _ => Err(FxError::at(s.span(), "`(select module name)`: a module's name, and a component's")),
             },
-            _ => Err(FxError::at(s.span, usage)),
+            _ => Err(FxError::at(s.span(), usage)),
         }
     }
 
     /// The function a type family, generative type or type form `s` is:
     /// `(dlambda ((p k) …) (s p …))`.
-    fn fun_by_eta(&mut self, s: &Syntax, params: &[(Sym, Kind)]) -> R<TyId> {
+    fn fun_by_eta(&mut self, s: &Syn, params: &[(Sym, Kind)]) -> R<TyId> {
         let depth = self.dscope.len();
         let mut bound = Vec::new();
         let mut applied = vec![s.clone()];
@@ -404,17 +406,17 @@ impl Checker {
             let v = self.arena.dvar_of(*n, *k);
             self.dscope.push((*n, DScope::Var(v, *k)));
             bound.push((v, *k));
-            applied.push(Syntax::symbol(s.span, *n));
+            applied.push(Syn::symbol(s.span(), *n, &self.interner));
         }
-        let t = self.parse_type(&Syntax::list(s.span, applied));
+        let t = self.parse_type_syn(&Syn::lst(s.span(), applied));
         self.dscope.truncate(depth);
         Ok(self.lam(bound, D::Type(t?)))
     }
 
     /// A description of kind `k`, as written.
-    pub(crate) fn parse_desc_at(&mut self, s: &Syntax, k: Kind) -> R<D> {
+    pub(crate) fn parse_desc_at(&mut self, s: &Syn, k: Kind) -> R<D> {
         Ok(match k {
-            Kind::Type | Kind::Data | Kind::Sendable => D::Type(self.parse_type(s)?),
+            Kind::Type | Kind::Data | Kind::Sendable => D::Type(self.parse_type_syn(s)?),
             Kind::Flat => D::Type(self.parse_flat(s)?),
             Kind::Region => D::Region(self.parse_region(s)?),
             Kind::Place => D::Region(self.parse_place(s)?),
@@ -428,36 +430,36 @@ impl Checker {
     /// A flat, as written (`Kind::Flat`): a scalar's name, `f64`, `f32`,
     /// `i32`, `u32`, `i64` or `u64`, as the type its bytes are read as; or a
     /// variable of kind `flat`, or a family's flat parameter.
-    pub(crate) fn parse_flat(&mut self, s: &Syntax) -> R<TyId> {
+    pub(crate) fn parse_flat(&mut self, s: &Syn) -> R<TyId> {
         let usage = "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, `(productof (label flat) …)`, `(sumof [key] (label flat) …)`, `(arrayof flat n)`, or a variable of kind `flat`";
-        if let Some(items) = s.as_proper_list() {
+        if let Some(items) = s.list().as_deref() {
             return self.parse_flat_list(s, items, usage);
         }
-        let Some(sym) = s.as_symbol() else { return Err(FxError::at(s.span, usage)) };
+        let Some(sym) = s.sym() else { return Err(FxError::at(s.span(), usage)) };
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Flat)) => return Ok(self.arena.ty(Ty::Var(v))),
             // A type named, read as a flat: its parts as `productof` and
             // `sumof` would have them (`TODO.md` §77).
             Some(DScope::Rec(t)) if self.is_flat(t) => {
                 return match self.flat_parts_wrong(t) {
-                    Some(why) => Err(FxError::at(s.span, why)),
+                    Some(why) => Err(FxError::at(s.span(), why)),
                     None => Ok(t),
                 };
             }
-            Some(_) => return Err(FxError::at(s.span, usage)),
+            Some(_) => return Err(FxError::at(s.span(), usage)),
             None => {}
         }
         if FLAT_SCALARS.contains(&self.interner.name(sym)) {
             return Ok(self.arena.ty(Ty::Base(sym)));
         }
-        Err(FxError::at(s.span, usage))
+        Err(FxError::at(s.span(), usage))
     }
 
     /// `(productof (label flat) …)`, its fields laid out in the order
     /// written; `(sumof [key] (label flat) …)`, a tag then the widest
     /// variant; or `(arrayof flat n)`, `n` a literal length.
-    fn parse_flat_list(&mut self, s: &Syntax, items: &[Syntax], usage: &str) -> R<TyId> {
-        let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
+    fn parse_flat_list(&mut self, s: &Syn, items: &[Syn], usage: &str) -> R<TyId> {
+        let head = items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h).to_string());
         match (head.as_deref(), items) {
             (Some("productof"), [_, ps @ ..]) => {
                 let parts = self.parse_flat_parts(ps, None)?;
@@ -465,7 +467,7 @@ impl Checker {
                 // it runs to the end of the suffix.
                 if let Some(i) = parts.iter().rev().skip(1).position(|(_, f)| !self.flat_sized(*f)) {
                     let at = parts.len() - 2 - i;
-                    return Err(FxError::at(ps[at].span, "only a flat product's last part may be of a length not known: it runs to the end of the suffix"));
+                    return Err(FxError::at(ps[at].span(), "only a flat product's last part may be of a length not known: it runs to the end of the suffix"));
                 }
                 Ok(self.arena.ty(Ty::Product(parts)))
             }
@@ -473,19 +475,19 @@ impl Checker {
             // they are; else the tag is an index into the owner's fields,
             // which hold the labels (`TODO.md` §77).
             (Some("sumof"), [_, ps @ ..]) => {
-                let key = match ps.first().and_then(|k| k.as_symbol()) {
+                let key = match ps.first().and_then(|k| k.sym()) {
                     Some(k) => match self.interner.name(k) {
                         "u8" => Some(1),
                         "u16" => Some(2),
                         "u32" => Some(4),
-                        _ => return Err(FxError::at(ps[0].span, "a flat sum's key is `u8`, `u16` or `u32`")),
+                        _ => return Err(FxError::at(ps[0].span(), "a flat sum's key is `u8`, `u16` or `u32`")),
                     },
                     None => None,
                 };
                 let ps = if key.is_some() { &ps[1..] } else { ps };
                 let parts = self.parse_flat_parts(ps, key)?;
                 if let Some(i) = parts.iter().position(|(_, f)| !self.flat_sized(*f)) {
-                    return Err(FxError::at(ps[i].span, "a flat sum's variant has a length of its own"));
+                    return Err(FxError::at(ps[i].span(), "a flat sum's variant has a length of its own"));
                 }
                 let sum = self.arena.ty(Ty::Sum(parts));
                 Ok(match key {
@@ -498,34 +500,35 @@ impl Checker {
             (Some("arrayof"), [_, fs, n]) => {
                 let f = self.parse_flat(fs)?;
                 if !self.flat_sized(f) {
-                    return Err(FxError::at(fs.span, "a flat array's element has a length of its own"));
+                    return Err(FxError::at(fs.span(), "a flat array's element has a length of its own"));
                 }
                 let size = match self.parse_size(n)? {
                     Size::Lin { k, terms } if terms.is_empty() && !(0..fixpt_heap::layout::FLAT_TO_THE_END).contains(&k) => {
-                        return Err(FxError::at(n.span, "a flat array's literal length is 0 to 268435454"));
+                        return Err(FxError::at(n.span(), "a flat array's literal length is 0 to 268435454"));
                     }
                     s => s,
                 };
                 Ok(self.arena.ty(Ty::Named { which: FLAT_ARRAYOF_INDEX, args: vec![D::Type(f), D::Size(size)] }))
             }
-            _ => Err(FxError::at(s.span, usage)),
+            _ => Err(FxError::at(s.span(), usage)),
         }
     }
 
     /// A flat product's or sum's `(label flat)`s; each label a number
     /// below `256^w` if the sum has a key `w` bytes wide.
-    fn parse_flat_parts(&mut self, ps: &[Syntax], key: Option<i64>) -> R<Vec<(Sym, TyId)>> {
+    fn parse_flat_parts(&mut self, ps: &[Syn], key: Option<i64>) -> R<Vec<(Sym, TyId)>> {
         let mut parts = Vec::new();
         for p in ps {
-            let Some([label, f]) = p.as_proper_list() else { return Err(FxError::at(p.span, "`(label flat)`")) };
+            let listed = p.list();
+            let Some([label, f]) = listed.as_deref() else { return Err(FxError::at(p.span(), "`(label flat)`")) };
             let l = self.label(label)?;
             if parts.iter().any(|(m, _)| *m == l) {
-                return Err(FxError::at(p.span, format!("`{}` appears twice", self.interner.name(l))));
+                return Err(FxError::at(p.span(), format!("`{}` appears twice", self.interner.name(l))));
             }
             if let Some(w) = key
                 && !self.interner.name(l).parse::<u64>().is_ok_and(|n| n >> (8 * w) == 0)
             {
-                return Err(FxError::at(label.span, format!("a label of a sum keyed by `u{}` is a number below 2^{}", 8 * w, 8 * w)));
+                return Err(FxError::at(label.span(), format!("a label of a sum keyed by `u{}` is a number below 2^{}", 8 * w, 8 * w)));
             }
             parts.push((l, self.parse_flat(f)?));
         }
@@ -715,7 +718,7 @@ impl Checker {
     /// kinds it takes; reduced, if it is a `dlambda`. Where `f`'s kind is
     /// not known yet (a `select`), what it is given is read by its shape,
     /// and checked once it is resolved.
-    pub(crate) fn parse_app(&mut self, s: &Syntax, f: TyId, args: &[Syntax]) -> R<TyId> {
+    pub(crate) fn parse_app(&mut self, s: &Syn, f: TyId, args: &[Syn]) -> R<TyId> {
         let parts = self.fun_kind(f).and_then(|k| self.arena.arrow_parts(k).map(|(p, r)| (p.to_vec(), r)));
         let Some((params, result)) = parts else {
             let ds = args.iter().map(|a| self.parse_d(a)).collect::<R<Vec<_>>>()?;
@@ -723,10 +726,10 @@ impl Checker {
         };
         // Shown only for a message: a family's whole body, else.
         if args.len() != params.len() {
-            return Err(FxError::at(s.span, format!("`{}` takes {} description(s), and has {}", self.show_fun(f), params.len(), args.len())));
+            return Err(FxError::at(s.span(), format!("`{}` takes {} description(s), and has {}", self.show_fun(f), params.len(), args.len())));
         }
         if !matches!(result, Kind::Type | Kind::Data) {
-            return Err(FxError::at(s.span, format!("`{}` gives a description of kind {}, not a type", self.show_fun(f), self.show_kind(result))));
+            return Err(FxError::at(s.span(), format!("`{}` gives a description of kind {}, not a type", self.show_fun(f), self.show_kind(result))));
         }
         let mut ds = Vec::new();
         for (a, k) in args.iter().zip(params) {
@@ -734,14 +737,14 @@ impl Checker {
         }
         match self.apply_fun(f, ds) {
             D::Type(t) => Ok(t),
-            _ => Err(FxError::at(s.span, format!("`{}` does not give a type", self.show_fun(f)))),
+            _ => Err(FxError::at(s.span(), format!("`{}` does not give a type", self.show_fun(f)))),
         }
     }
 
     /// Name `sym`, a description function, written where a type is wanted.
-    pub(crate) fn not_applied(&self, s: &Syntax, sym: Sym, k: Kind) -> FxError {
+    pub(crate) fn not_applied(&self, s: &Syn, sym: Sym, k: Kind) -> FxError {
         let n = self.interner.name(sym);
-        FxError::at(s.span, format!("`{n}` is a description function, of kind {}: it is applied, `({n} …)`", self.show_kind(k)))
+        FxError::at(s.span(), format!("`{n}` is a description function, of kind {}: it is applied, `({n} …)`", self.show_kind(k)))
     }
 
     /// A description function as it is written: its name, or its `dlambda`.
@@ -752,9 +755,9 @@ impl Checker {
     /// `(e d …)` in an effect, where `e` is a description function to an
     /// effect: its effect, reduced if it is a `dlambda`; `None` if `items`
     /// are not such an application.
-    pub(crate) fn effect_app(&mut self, s: &Syntax, items: &[Syntax]) -> R<Option<Effect>> {
+    pub(crate) fn effect_app(&mut self, s: &Syn, items: &[Syn]) -> R<Option<Effect>> {
         let Some(head) = items.first() else { return Ok(None) };
-        let f = match head.as_symbol() {
+        let f = match head.sym() {
             // An effect form, read by its name alone.
             Some(h) if crate::parse::EFFECT_HEADS.contains(&self.interner.name(h)) => return Ok(None),
             Some(h) => {
@@ -768,7 +771,7 @@ impl Checker {
                     _ => return Ok(None),
                 }
             }
-            None if head.as_proper_list().is_some_and(|l| l.first().and_then(|x| x.as_symbol()).is_some_and(|x| self.interner.name(x) == "dlambda")) => {
+            None if head.list().as_deref().is_some_and(|l| l.first().and_then(|x| x.sym()).is_some_and(|x| self.interner.name(x) == "dlambda")) => {
                 self.parse_fun(head, None)?
             }
             None => return Ok(None),
@@ -777,11 +780,11 @@ impl Checker {
         let parts = self.fun_kind(f).and_then(|k| self.arena.arrow_parts(k).map(|(p, r)| (p.to_vec(), r)));
         let Some((params, result)) = parts else { return Ok(None) };
         if result != Kind::Effect {
-            return Err(FxError::at(s.span, format!("`{shown}` gives a description of kind {}, not an effect", self.show_kind(result))));
+            return Err(FxError::at(s.span(), format!("`{shown}` gives a description of kind {}, not an effect", self.show_kind(result))));
         }
         let args = &items[1..];
         if args.len() != params.len() {
-            return Err(FxError::at(s.span, format!("`{shown}` takes {} description(s), and has {}", params.len(), args.len())));
+            return Err(FxError::at(s.span(), format!("`{shown}` takes {} description(s), and has {}", params.len(), args.len())));
         }
         let mut ds = Vec::new();
         for (a, k) in args.iter().zip(params) {
@@ -789,13 +792,13 @@ impl Checker {
         }
         match self.apply_fun(f, ds) {
             D::Effect(e) => Ok(Some(e)),
-            _ => Err(FxError::at(s.span, format!("`{shown}` does not give an effect"))),
+            _ => Err(FxError::at(s.span(), format!("`{shown}` does not give an effect"))),
         }
     }
 
     /// Whether `items`' head names a description function to an effect.
-    pub(crate) fn names_effect_fun(&mut self, items: &[Syntax]) -> bool {
-        let Some(h) = items.first().and_then(|h| h.as_symbol()) else { return false };
+    pub(crate) fn names_effect_fun(&mut self, items: &[Syn]) -> bool {
+        let Some(h) = items.first().and_then(|h| h.sym()) else { return false };
         let f = match self.lookup_desc(h) {
             Some(DScope::Var(v, Kind::Arrow(_))) => self.arena.ty(Ty::Var(v)),
             Some(DScope::Fun(f)) => f,

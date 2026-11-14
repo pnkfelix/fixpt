@@ -1173,6 +1173,7 @@ pub mod entries;
 pub mod front;
 pub mod bootstrap_cache;
 mod facts_cache;
+pub mod heap_syn;
 pub mod reads;
 mod terminate;
 pub mod cellular;
@@ -1215,7 +1216,8 @@ pub mod error {
     }
 
     impl FxError {
-        pub fn at(span: Span, message: impl Into<Message>) -> FxError {
+        pub fn at(span: impl Into<Span>, message: impl Into<Message>) -> FxError {
+            let span = span.into();
             FxError { span, message: message.into(), origin: None }
         }
 

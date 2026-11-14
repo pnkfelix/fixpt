@@ -6,35 +6,6 @@
 # each prologue saves `rbp`, so the reservation read moved by 8 bytes either
 # way to keep the stack aligned, and the entries were read again then
 # (`process_body` came over 4096 so: 4112).
-blobref_rule 4256
-check_node 4160
-expand_abbrev 4480
-expand_datatype 9408
-expand_generative 5392
-fasl_load 5712
-import_file_macros 5040
-included 4608
-module_items_from 11584
-par_expansion 6688
-parse_case 5488
-parse_d 4480
-parse_exp 4672
-parse_moduleof_in 5072
-parse_process_form 6336
-parse_session_commit_form 4512
-parse_typecase 4160
-process_body 4112
-rebuild 4432
-select_expansion 7616
-show_ty_body 7568
-sub_rules 8432
-synth_allof_call 5584
-synth_attempt 4384
-synth_bloblet 5424
-synth_lambda_as 4256
-synth_module_items 10816
-synth_tagcase 4736
-syscall_expansion 7352
-top_here 4928
-unify 5888
-with_convention 11464
+# Built at `opt-level = 1` in debug since 2026-11-13 (`Cargo.toml`): the
+# frames shrank, and all but one came under 4096.
+with_convention 8568

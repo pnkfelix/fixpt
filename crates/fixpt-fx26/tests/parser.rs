@@ -27,18 +27,19 @@ fn rust_trees(text: &str, base: i64) -> Vec<String> {
     let mut forms: Vec<(usize, Vec<_>)> = Vec::new();
     for f in &forms2 {
         let top = c2.top(f).unwrap_or_else(|e| panic!("checks: {e}"));
-        let within = |r: &fixpt_read::Syntax| r.span.start <= f.span.start && f.span.end <= r.span.end;
-        let i = read.iter().position(within).unwrap_or_else(|| panic!("a form as read: {:?} in {text}", f.span));
+        let fs = f.span();
+        let within = |r: &fixpt_read::Syntax| r.span.start <= fs.start && fs.end <= r.span.end;
+        let i = read.iter().position(within).unwrap_or_else(|| panic!("a form as read: {:?} in {text}", fs));
         if forms.last().is_none_or(|(j, _)| *j != i) {
             forms.push((i, Vec::new()));
         }
         // The hidden globals of the files it loads first, defined before
         // all it makes.
         let group = &mut forms.last_mut().expect("one").1;
-        let hoisted: Vec<_> = std::mem::take(&mut c2.hoisted).into_iter().map(|(t, h)| (t, h.span, true)).collect();
+        let hoisted: Vec<_> = std::mem::take(&mut c2.hoisted).into_iter().map(|(t, h)| (t, h.span(), true)).collect();
         let at = group.iter().position(|g: &(_, _, bool)| !g.2).unwrap_or(group.len());
         group.splice(at..at, hoisted);
-        group.push((top, f.span, false));
+        group.push((top, fs, false));
     }
     // Each expression's key, form by form, as the process's mode makes it:
     // read in the standard environment's state, as the FX-26 parser here

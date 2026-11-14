@@ -16,7 +16,8 @@ use crate::ast::{Atom, Effect, IoKind, Kind, Region, Ty, TyId, D};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::top::Top;
-use fixpt_read::{Datum, Span, Syntax};
+use crate::heap_syn::{Syn, V};
+use fixpt_read::Span;
 use fixpt_hash::HashMap;
 
 /// The prefix of a declaration's hidden global, whether the runtime has it.
@@ -48,10 +49,11 @@ pub fn valid_host(s: &str) -> bool {
 
 /// A syntax tree's text, as the canonical form prints it: atoms apart by
 /// one space, no other whitespace.
-pub fn text(s: &Syntax, name: &dyn Fn(fixpt_read::Sym) -> String) -> String {
-    match &s.datum {
-        Datum::Symbol(x) => name(*x),
-        Datum::List { items, .. } => {
+pub fn text(s: &Syn, name: &dyn Fn(fixpt_read::Sym) -> String) -> String {
+    match &s.view() {
+        V::Symbol(x) => name(*x),
+        V::Nil => "()".to_string(),
+        V::List { items, .. } => {
             let parts: Vec<String> = items.iter().map(|i| text(i, name)).collect();
             format!("({})", parts.join(" "))
         }
@@ -79,8 +81,8 @@ impl Checker {
     /// `(define-syscall name "host" type)` (`required`), or
     /// `(define-optional-syscall …)`: checked, then the definition it
     /// expands into, checked as a module file built in is.
-    pub(crate) fn define_syscall(&mut self, form: &Syntax, items: &[Syntax], required: bool) -> R<Top> {
-        let span = form.span;
+    pub(crate) fn define_syscall(&mut self, form: &Syn, items: &[Syn], required: bool) -> R<Top> {
+        let span = form.span();
         let what = if required { "define-syscall" } else { "define-optional-syscall" };
         if self.in_built_in == 0 && !self.syscalls {
             return Err(FxError::at(span, "syscalls are declared only by a runtime's own code"));
@@ -88,28 +90,28 @@ impl Checker {
         let [_, name, host, ty] = items else {
             return Err(FxError::at(span, format!("`({what} name \"host-name\" type)`")));
         };
-        let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "expected a name"))?;
-        let host_name = match &host.datum {
-            Datum::Str(h) if valid_host(h) => h.clone(),
-            _ => return Err(FxError::at(host.span, HOST)),
+        let name = name.sym().ok_or_else(|| FxError::at(name.span(), "expected a name"))?;
+        let host_name = match &host.view() {
+            V::Str(h) if valid_host(h) => h.clone(),
+            _ => return Err(FxError::at(host.span(), HOST)),
         };
-        let t = self.parse_type(ty)?;
+        let t = self.parse_type_syn(ty)?;
         let binders = match self.arena.get(self.arena.resolve(t)) {
             Ty::Poly { binders, .. } => binders.len(),
             _ => 0,
         };
         let names = self.syscall_names(binders);
-        let canonical = self.canonical(&names, t, ty.span, span)?;
+        let canonical = self.canonical(&names, t, ty.span(), span)?;
         let canonical_text = text(&canonical, &|s| self.interner.name(s).to_string());
         let companion = self.interner.intern(&format!("{AVAILABLE}{}", self.interner.name(name)));
         let (available, def) = self.syscall_expansion(&names, span, name, companion, &host_name, &canonical, &canonical_text, required);
         self.in_built_in += 1;
         // Whether the runtime has it, first, hidden as a loaded file's
         // global is (`hoisted`).
-        let first = self.top(&available);
+        let first = self.top_syn(&available);
         let top = first.and_then(|first| {
-            self.hoisted.push((first, std::rc::Rc::new(available)));
-            self.top(&def)
+            self.hoisted.push((first, crate::heap_syn::Form::new(available)));
+            self.top_syn(&def)
         });
         self.in_built_in -= 1;
         top
@@ -117,17 +119,17 @@ impl Checker {
 
     /// `(syscall-available? name)`, for `name` a syscall declared: its
     /// hidden global, whether the runtime has it.
-    pub(crate) fn syscall_available_form(&mut self, form: &Syntax, items: &[Syntax]) -> R<Syntax> {
+    pub(crate) fn syscall_available_form(&mut self, form: &Syn, items: &[Syn]) -> R<Syn> {
         let usage = "`syscall-available?` takes the name of a syscall declared";
         let [_, name] = items else {
-            return Err(FxError::at(form.span, usage));
+            return Err(FxError::at(form.span(), usage));
         };
-        let Some(n) = name.as_symbol() else { return Err(FxError::at(name.span, usage)) };
+        let Some(n) = name.sym() else { return Err(FxError::at(name.span(), usage)) };
         let companion = self.interner.intern(&format!("{AVAILABLE}{}", self.interner.name(n)));
         if self.lookup(companion).is_none() {
-            return Err(FxError::at(form.span, usage));
+            return Err(FxError::at(form.span(), usage));
         }
-        Ok(Syntax::symbol(form.span, companion))
+        Ok(Syn::symbol(form.span(), companion, &self.interner))
     }
 
     /// The definitions a declaration is, its type `canonical`, `TEXT`
@@ -150,22 +152,22 @@ impl Checker {
         name: fixpt_read::Sym,
         companion: fixpt_read::Sym,
         host: &str,
-        canonical: &Syntax,
+        canonical: &Syn,
         text: &str,
         required: bool,
-    ) -> (Syntax, Syntax) {
-        let sym = |s: &str| Syntax::symbol(span, names[s]);
-        let string = |s: &str| Syntax::new(span, Datum::Str(s.to_string()));
-        let list = |items: Vec<Syntax>| Syntax::list(span, items);
+    ) -> (Syn, Syn) {
+        let sym = |s: &str| Syn::symbol(span, names[s], &self.interner);
+        let string = |s: &str| Syn::datum(span, V::Str(s.to_string()));
+        let list = |items: Vec<Syn>| Syn::lst(span, items);
         let label = format!("syscall {} (\"{host}\")", self.interner.name(name));
-        let parts = |s: &Syntax| s.as_proper_list().expect("canonical").to_vec();
+        let parts = |s: &Syn| s.list().as_deref().expect("canonical").to_vec();
         let subr = match &parts(canonical)[..] {
-            [h, _, body] if h.as_symbol().is_some_and(|h| self.interner.name(h) == "poly") => body.clone(),
+            [h, _, body] if h.sym().is_some_and(|h| self.interner.name(h) == "poly") => body.clone(),
             _ => canonical.clone(),
         };
         let [_, _, params, result] = &parts(&subr)[..] else { unreachable!("a canonical `subr`") };
         let params = parts(params);
-        let xs: Vec<Syntax> = (1..=params.len()).map(|i| sym(&format!("x{i}"))).collect();
+        let xs: Vec<Syn> = (1..=params.len()).map(|i| sym(&format!("x{i}"))).collect();
         // The call at the declared effect: `%syscallN`'s, a binder, so given.
         let [_, effect, ..] = &parts(&subr)[..] else { unreachable!("a canonical `subr`") };
         let strings = [sym("string"), sym("string"), sym("string")].into_iter().chain(params.iter().cloned());
@@ -178,13 +180,13 @@ impl Checker {
         let available = match required {
             true => {
                 let check = list(vec![sym("%syscall-require"), string(&label), string(host), string(text)]);
-                list(vec![sym("begin"), check, Syntax::new(span, Datum::Bool(true))])
+                list(vec![sym("begin"), check, Syn::datum(span, V::Bool(true))])
             }
             false => list(vec![sym("%syscall-available?"), string(host), string(text)]),
         };
         (
-            list(vec![sym("define"), Syntax::symbol(span, companion), sym("bool"), available]),
-            list(vec![sym("define"), Syntax::symbol(span, name), canonical.clone(), value]),
+            list(vec![sym("define"), Syn::symbol(span, companion, &self.interner), sym("bool"), available]),
+            list(vec![sym("define"), Syn::symbol(span, name, &self.interner), canonical.clone(), value]),
         )
     }
 
@@ -192,9 +194,9 @@ impl Checker {
     /// "Syscalls"): every name expanded, effects flattened, deduplicated and
     /// sorted by their text, region binders `r1`, `r2`, … in order.
     /// Refused, at `at`, where it is not a syscall's type.
-    fn canonical(&self, names: &HashMap<String, fixpt_read::Sym>, t: TyId, at: Span, span: Span) -> R<Syntax> {
-        let sym = |s: &str| Syntax::symbol(span, names[s]);
-        let list = |items: Vec<Syntax>| Syntax::list(span, items);
+    fn canonical(&self, names: &HashMap<String, fixpt_read::Sym>, t: TyId, at: Span, span: Span) -> R<Syn> {
+        let sym = |s: &str| Syn::symbol(span, names[s], &self.interner);
+        let list = |items: Vec<Syn>| Syn::lst(span, items);
         let fail = |m: &str| FxError::at(at, m);
         let t = self.arena.resolve(t);
         let (binders, body) = match self.arena.get(t).clone() {
@@ -225,11 +227,11 @@ impl Checker {
             Region::Var(v) => renamed.get(&v).map(|n| sym(n)).ok_or_else(|| fail("a syscall's regions are its `poly`'s")),
             _ => Err(fail("a syscall's regions are its `poly`'s")),
         };
-        let crossing = |p: TyId| -> R<Syntax> {
+        let crossing = |p: TyId| -> R<Syn> {
             let p = self.arena.resolve(p);
             match self.arena.get(p).clone() {
                 Ty::Base(b) if ["int", "i64", "u64", "bool", "char", "unit", "string"].contains(&self.interner.name(b)) => {
-                    Ok(Syntax::symbol(span, b))
+                    Ok(Syn::symbol(span, b, &self.interner))
                 }
                 Ty::Named { which: crate::check::FLATARRAYOF_INDEX, args } => match &args[..] {
                     [D::Type(e), D::Region(r)]
@@ -260,11 +262,11 @@ impl Checker {
     fn canonical_effect(
         &self,
         effect: &Effect,
-        region: &dyn Fn(Region) -> R<Syntax>,
-        sym: &dyn Fn(&str) -> Syntax,
-        list: &dyn Fn(Vec<Syntax>) -> Syntax,
+        region: &dyn Fn(Region) -> R<Syn>,
+        sym: &dyn Fn(&str) -> Syn,
+        list: &dyn Fn(Vec<Syn>) -> Syn,
         fail: &dyn Fn(&str) -> FxError,
-    ) -> R<Syntax> {
+    ) -> R<Syn> {
         let mut atoms = Vec::new();
         for a in effect.0.iter() {
             atoms.push(match *a {
@@ -279,10 +281,10 @@ impl Checker {
             });
         }
         let name = |s: fixpt_read::Sym| self.interner.name(s).to_string();
-        let mut texts: Vec<(String, Syntax)> = atoms.into_iter().map(|a| (text(&a, &name), a)).collect();
+        let mut texts: Vec<(String, Syn)> = atoms.into_iter().map(|a| (text(&a, &name), a)).collect();
         texts.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
         texts.dedup_by(|a, b| a.0 == b.0);
-        let mut atoms: Vec<Syntax> = texts.into_iter().map(|(_, a)| a).collect();
+        let mut atoms: Vec<Syn> = texts.into_iter().map(|(_, a)| a).collect();
         Ok(match atoms.len() {
             0 => sym("pure"),
             1 => atoms.pop().expect("one"),

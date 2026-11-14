@@ -56,7 +56,12 @@ use fixpt_heap::Value;
 
 /// Convert a reader literal into a heap number.
 pub fn num_from_literal(rt: &mut Runtime, n: &fixpt_read::Num) -> Value {
-    lift(n).store(&mut rt.heap)
+    num_in_heap(&mut rt.heap, n)
+}
+
+/// Number literal `n` in `heap`, as [`num_from_literal`] makes it.
+pub fn num_in_heap(heap: &mut fixpt_heap::Heap, n: &fixpt_read::Num) -> Value {
+    lift(n).store(heap)
 }
 
 fn lift(n: &fixpt_read::Num) -> N {

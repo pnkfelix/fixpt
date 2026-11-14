@@ -93,7 +93,7 @@ fn native(text: &str) -> Result<String, String> {
     s.register_code = true;
     s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
     s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
-    let forms = s.checker.read_in(FileId(0), text).map_err(|e| String::from(e.message))?;
+    let forms = s.checking(|c| c.read_in(FileId(0), text)).map_err(|e| String::from(e.message))?;
     let mut last = Ok(String::new());
     for o in s.run_forms(&forms).map_err(|e| String::from(e.message))? {
         match o {
@@ -268,7 +268,7 @@ fn the_interference_table_both_checkers() {
 fn a_process_that_fails_fails_the_run() {
     let text = include_str!("programs/schedules/process-fails.fx");
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    let forms = s.checker.read_in(FileId(0), text).expect("reads");
+    let forms = s.checking(|c| c.read_in(FileId(0), text)).expect("reads");
     let outs: Vec<Result<Option<String>, String>> = forms.iter().map(|f| s.run(f).expect("checks").value).collect();
     assert!(outs[2].as_ref().is_err_and(|e| e.contains("an i-cell written twice")), "{outs:?}");
     assert_eq!(outs[3], Ok(Some("3".to_string())), "{outs:?}");

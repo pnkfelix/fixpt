@@ -6,6 +6,8 @@ use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 use fixpt_read::{FileId, Reader, SyntaxProfile};
 
+mod common;
+
 /// Both readers on `text`, into the same interner, so the syntax compares
 /// whole: data, and every span. As read, not expanded: an expansion's
 /// renamed binders are new symbols each time.
@@ -49,4 +51,175 @@ fn a_reading_error_says_where() {
     assert_eq!(err.span.start, 5);
     let err = s.read_with_own_reader("(a (b").expect_err("unfinished");
     assert!(err.message.contains("middle of a form"), "{}", err.message);
+}
+
+/// Both front ends' `syn` (`docs/research/heap-syntax.md`): what the Rust
+/// reader builds in the heap as it reads (`heap_syn::HeapSyn`) is what the
+/// reader written in FX-26 makes of the same text, field for field: each
+/// piece's variant, its plain datum, its place, its expansion. For every
+/// program the tests read, and every file of the front end: places in
+/// characters, both (a text not all ASCII among them).
+#[test]
+fn the_rust_reader_builds_the_syn_fx26_reads() {
+    let mut s = common::front_end_session();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
+    let mut texts: Vec<(String, String)> = Vec::new();
+    let mut todo = vec![dir];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).expect("a directory").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else if p.extension().is_some_and(|x| x == "fx") {
+                texts.push((p.display().to_string(), std::fs::read_to_string(&p).expect("readable")));
+            }
+        }
+    }
+    texts.extend(fixpt_fx26::FRONT_END_MODULES.iter().chain(&fixpt_fx26::FRONT_END_FILES).map(|(n, t)| (n.to_string(), t.to_string())));
+    texts.sort();
+    let mut compared = 0;
+    for (name, text) in &texts {
+        // What FX-26 reads, if it reads it: a text it refuses is the Rust
+        // reader's to refuse too, which `same_syntax` holds them to.
+        let mark = s.scheme.root_mark();
+        let Ok(theirs) = fixpt_fx26::syn::read_to_syns(&mut s.scheme, FileId(0), text) else {
+            s.scheme.release_to(mark);
+            continue;
+        };
+        let ours = s.scheme.make(|m| {
+            let mut interner = fixpt_read::Interner::new();
+            let mut syms = fixpt_fx26::heap_syn::SymTable::default();
+            let mut r = Reader::with_builder(text, FileId(0), SyntaxProfile::FX26, &mut interner, fixpt_fx26::heap_syn::HeapSyn::new(m.heap(), &mut syms, 0));
+            let forms: Vec<fixpt_heap::Value> = r.read_all_built().expect("reads").into_iter().map(|n| n.0).collect();
+            let heap = r.into_builder().heap;
+            forms.iter().rev().fold(fixpt_heap::Value::NULL, |l, &f| heap.cons(f, l))
+        });
+        let mut why = String::new();
+        s.scheme.make(|m| {
+            let (a, b) = (m.get(ours), m.get(theirs));
+            same_syn(m.heap(), a, b, "", &mut why);
+            fixpt_heap::Value::NULL
+        });
+        s.scheme.release_to(mark);
+        assert!(why.is_empty(), "{name}: {why}");
+        compared += 1;
+    }
+    assert!(compared > 300, "only {compared} texts compared");
+}
+
+/// Whether `a`, Rust's, and `b`, FX-26's, are the same `syn` data; if not,
+/// the first difference, at `path`, in `why`.
+fn same_syn(h: &fixpt_heap::Heap, a: fixpt_heap::Value, b: fixpt_heap::Value, path: &str, why: &mut String) -> bool {
+    let differ = |why: &mut String, what: String| {
+        *why = format!("at {path}: {what}");
+        false
+    };
+    if a.is_pair() && b.is_pair() {
+        return same_syn(h, h.car(a), h.car(b), &format!("{path}.car"), why) && same_syn(h, h.cdr(a), h.cdr(b), &format!("{path}.cdr"), why);
+    }
+    if h.is_sum(a) && h.is_sum(b) {
+        if h.sum_tag(a) != h.sum_tag(b) {
+            return differ(why, format!("{} and {}", fixpt_runtime::write_value(h, h.sum_tag(a)), fixpt_runtime::write_value(h, h.sum_tag(b))));
+        }
+        let tag = fixpt_runtime::write_value(h, h.sum_tag(a));
+        let (pa, pb) = (h.sum_payload(a), h.sum_payload(b));
+        let n = h.bloblet_len(pa);
+        if n != h.bloblet_len(pb) {
+            return differ(why, format!("{n} fields and {}", h.bloblet_len(pb)));
+        }
+        return (1..=n).all(|i| same_syn(h, h.product_field(pa, i), h.product_field(pb, i), &format!("{path}/{tag}.{i}"), why));
+    }
+    if h.is_product(a) && h.is_product(b) {
+        let (n, m) = (h.bloblet_len(a), h.bloblet_len(b));
+        if n != m {
+            return differ(why, format!("{n} fields and {m}"));
+        }
+        return (1..=n).all(|i| same_syn(h, h.product_field(a, i), h.product_field(b, i), &format!("{path}.{i}"), why));
+    }
+    if fixpt_runtime::equal::equal(h, a, b) {
+        return true;
+    }
+    differ(why, format!("{} and {}", fixpt_runtime::write_value(h, a), fixpt_runtime::write_value(h, b)))
+}
+
+/// The heap's `syn`, looked at (`heap_syn::Rd`), is the Rust reader's
+/// `Syntax`: each piece's datum and its span, back from its place through
+/// the texts noted (`heap_syn::note_text`). For every program the tests read.
+#[test]
+fn the_heap_syn_reads_back_as_the_rust_syntax() {
+    use fixpt_fx26::heap_syn::{note_text, HeapSyn, Rd, Syn, SymTable, V};
+    use fixpt_read::{Datum, Syntax};
+    fn same(rd: Rd, s: Syn, x: &Syntax, name: &str) {
+        assert_eq!(rd.span(s), x.span, "{name}: a span");
+        match (rd.view(s), &x.datum) {
+            (V::List { items, tail }, Datum::List { items: xs, tail: xt }) => {
+                assert_eq!(items.len(), xs.len(), "{name}: a list's length at {:?}", x.span);
+                items.iter().zip(xs).for_each(|(a, b)| same(rd, *a, b, name));
+                match (tail, xt) {
+                    (Some(a), Some(b)) => same(rd, a, b, name),
+                    (None, None) => {}
+                    _ => panic!("{name}: a tail at {:?}", x.span),
+                }
+            }
+            (V::Vector(items), Datum::Vector(xs)) => {
+                assert_eq!(items.len(), xs.len());
+                items.iter().zip(xs).for_each(|(a, b)| same(rd, *a, b, name));
+            }
+            (V::Nil, Datum::Nil) => {}
+            (V::Bool(a), Datum::Bool(b)) => assert_eq!(a, *b),
+            (V::Char(a), Datum::Char(b)) => assert_eq!(a, *b),
+            (V::Str(a), Datum::Str(b)) => assert_eq!(&a, b),
+            (V::Symbol(a), Datum::Symbol(b)) | (V::Keyword(a), Datum::Keyword(b)) => assert_eq!(a, *b, "{name}"),
+            (V::Bytevector(a), Datum::Bytevector(b)) => assert_eq!(&a, b),
+            (V::Number(a), Datum::Number(b)) => assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}"),
+            (a, b) => panic!("{name}: {a:?} and {b:?} at {:?}", x.span),
+        }
+    }
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
+    let mut todo = vec![dir];
+    let mut heap = fixpt_heap::Heap::new();
+    let mut read = 0;
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).expect("a directory").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+                continue;
+            }
+            if p.extension().is_none_or(|x| x != "fx") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&p).expect("readable");
+            let name = p.display().to_string();
+            let (mut interner, mut syms) = (fixpt_read::Interner::new(), SymTable::default());
+            let mut r = Reader::with_builder(&text, FileId(0), SyntaxProfile::FX26, &mut interner, HeapSyn::new(&mut heap, &mut syms, 0));
+            let Ok(forms) = r.read_all_built() else { continue };
+            drop(r);
+            // The same text read as the reader's own trees, to hold them to.
+            let trees = Reader::new(&text, FileId(0), SyntaxProfile::FX26, &mut interner).read_all().expect("read once");
+            note_text(FileId(0), text.as_str().into());
+            let rd = Rd { heap: &heap, syms: &syms };
+            assert_eq!(trees.len(), forms.len(), "{name}");
+            for (x, s) in trees.iter().zip(&forms) {
+                same(rd, *s, x, &name);
+            }
+            read += 1;
+        }
+    }
+    assert!(read > 300, "only {read} read");
+}
+
+/// A place past characters of more than one byte, as a message says it: the
+/// span of what is wrong, in the text's bytes, converted from the place's
+/// characters (`heap_syn::span_of`).
+#[test]
+fn a_place_past_wide_characters_is_said_in_bytes() {
+    let text = ";; λ → ∀\n(define s string \"é\")\n(+ 1 s)\n";
+    let e = match fixpt_fx26::session::compile_program_as(text, "fx:") {
+        Err(e) => e,
+        Ok(_) => panic!("`(+ 1 s)` adds a string"),
+    };
+    let (start, end) = (e.span.start as usize, e.span.end as usize);
+    assert!(text.is_char_boundary(start) && text.is_char_boundary(end), "{start}..{end}: {}", e.message);
+    assert!(text[start..end].contains('s') && text[..start].ends_with("(+ 1 "), "{:?}: {}", &text[start..end], e.message);
 }

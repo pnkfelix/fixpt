@@ -13,6 +13,7 @@
 
 pub mod alloc_profile;
 pub mod exec;
+pub mod lend;
 pub mod mapped;
 pub mod phases;
 pub mod reserve;
