@@ -6988,7 +6988,7 @@ others); a heap elsewhere is now reserved at a multiple of a chunk
 Beside it, the skim over clean cards is the
 old space's size over 512, bounded by a summary table if it ever shows.
 
-## 277. Nested calls of `append` checked in time exponential in their depth (found 2026-11-14)
+## 277. ~~Nested calls of `append` checked in time exponential in their depth~~ (found 2026-11-14; fixed the same day)
 
 Both checkers. `(append (cons 0 nil) (append (cons 1 nil) … nil))`, n
 deep, in one lambda: the FX-26 checker 0.009, 0.012, 0.025, 0.105,
@@ -6997,9 +6997,24 @@ level; the Rust checker 0.005, 0.006, 0.011, 0.030, 0.105 s. Found when
 `x86_64.fx`'s `x86-stored` (TODO §276), 17 deep, took the check of
 `x86_64.fx` from 0.03 s past 300 s, and the front end compiling itself
 (`bootstrap`'s fixpoints, `checker`'s every program, `made_code`) on the
-machines slower than native from seconds to over ten minutes. Written in
-a flat `let*` there, each `append` its own binding, it checks in 0.035 s.
-Not found yet: which part re-checks what it was given (an argument
-checked once to infer the instance of `append`'s type and again against
-it, at each level, would be 2^n); whether any polymorphic function nested
-so does it, or `append` alone. Wanted: linear, and a test of depth 30.
+machines slower than native from seconds to over ten minutes.
+
+An implementation bug, not the type system's (the user's question: a
+design flaw, a bug, or between). Narrowed (2026-11-14): nested `cons`,
+`+`, a monomorphic procedure, a `plambda` over a type, and one over a
+region and a type as `append`'s is, all flat at every depth; a
+monomorphic `vsubr` (`string-append`) flat; `append` of one argument,
+`(append (append … nil))`, exponential. So a polymorphic `vsubr` alone.
+The rule is the usual one: a polymorphic callee's arguments synthesized
+to instantiate it, then held to its instance, each argument looked at
+once, which `synth_subr_call` (`k-app-args`) does for a `subr` by taking
+what was found (`done`). Its `vsubr` case, written apart, never took
+them: it checked each argument again against the element type, so each
+level looked at what is below it twice. Fixed in both: the one step for
+an argument, found or checked, `Infer::argument` (`k-app-arg`), taken by
+both cases; 30 deep now 0.005 s and 0.010 s. The other users of `done`
+(`allof`'s calls, `instantiated`, the shapes' errors) take from it.
+Between design and bug only in that "each argument once" was the
+callers' convention, which one case did not keep; now the one function
+for an argument is what both cases call. Test:
+`tests/programs/listof/append-nested-deep.fx`, 40 deep.

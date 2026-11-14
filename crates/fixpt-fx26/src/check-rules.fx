@@ -402,7 +402,7 @@
           ;; Any number of arguments, each of the element type.
           ((not (null? variadic))
            (let ((v (car variadic)))
-             (k-app-result x f ft args (k-vapp-args args (extract v 2) 0 (extract rf 2))
+             (k-app-result x f ft args (k-vapp-args args (extract v 2) 0 done (extract rf 2))
                            (extract v 1) (extract v 3))))
           ((k-allof-type? ft) (k-allof-call x f ft args done rf k-synth k-app-result k-check))
           ((null? callee) (k-fail-ty "not a subroutine: " ft a b))
@@ -416,8 +416,7 @@
                (k-app-result x f ft args e (extract c 1) (extract c 3)))))))))
   (k-app-args (->* (kxs k-ids int k-done k-eff) k-eff)
     (lambda (args params i done e)
-      (if (null? args)
-          e
+      (if (null? args) e
           (let* ((t (array-ref (extract done 1) i))
                  (ae (k-app-arg (car args) (car params) i t (array-ref (extract done 2) i))))
             (k-app-args (cdr args) (cdr params) (+ i 1) done (k-union e ae))))))
@@ -434,12 +433,13 @@
                                              (k-spec-delta t p))
                               arg)
                    (begin (k-convert-at arg t (car c)) e)))))))
-  ;; A `vsubr` call's arguments, each checked as its element type `t`.
-  (k-vapp-args (->* (kxs int int k-eff) k-eff)
-    (lambda (args t i e)
-      (if (null? args)
-          e
-          (k-vapp-args (cdr args) t (+ i 1) (k-union e (k-check-argument (car args) t i))))))
+  ;; A `vsubr` call's arguments, of its element type `t`, as `k-app-args` (`TODO.md` §277).
+  (k-vapp-args (->* (kxs int int k-done k-eff) k-eff)
+    (lambda (args t i done e)
+      (if (null? args) e
+          (k-vapp-args (cdr args) t (+ i 1) done
+                       (k-union e (k-app-arg (car args) t i (array-ref (extract done 1) i)
+                                             (array-ref (extract done 2) i)))))))
   ;; An argument that failed to check is reported as that argument.
   (k-check-argument (->* (kx int int) k-eff)
     (lambda (arg p i) (extract (k-as-argument (lambda () (k-te p (k-check arg p))) arg i) 2)))

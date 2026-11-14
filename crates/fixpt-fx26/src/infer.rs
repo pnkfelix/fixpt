@@ -1528,19 +1528,44 @@ impl Checker {
         return Ok((self.finitized(t), eff));
     }
 
+    /// Argument `i`, `a`, of a call, for a parameter of type `p`: its
+    /// effect. Where it was found already (to instantiate the callee), of
+    /// type `t` and effect `eff`, that, converted if need be; else checked
+    /// against `p`. Each argument is so looked at once.
+    fn argument(&mut self, a: ExpId, i: usize, p: TyId, found: Option<(TyId, Effect)>) -> R<Effect> {
+        match found {
+            Some((t, eff)) => {
+                if !self.subtype(t, p) {
+                    let Some((c, n)) = self.conversion(t, p) else {
+                        return Err(FxError::at(
+                            self.arena.span_of(a),
+                            format!("argument {} is a {}, where a {} is expected{}", i + 1, self.show_ty(t), self.show_ty(p), self.spec_delta(t, p)),
+                        ));
+                    };
+                    self.convert_at(a, c, n);
+                }
+                Ok(eff)
+            }
+            None => self.check(a, p).map_err(|err| self.as_argument(err, a, i)),
+        }
+    }
+
     /// The call `e` of `fun`, of type `ft` (`callee`), effect `fe`, to
     /// `args`, those `done` already synthesized, of `synth_app_of`.
     #[allow(clippy::too_many_arguments)]
     fn synth_subr_call(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], ft: TyId, fe: Effect, mut done: Vec<Synthesised>, callee: Ty, span: fixpt_read::Span) -> R<(TyId, Effect)> {
         // A `vsubr` (generative type 0): any number of arguments, each of
-        // its element type.
+        // its element type; each found already, to instantiate it, taken
+        // as found, as a `subr`'s are (checked again, nested calls of
+        // `append` took time exponential in their depth: `TODO.md` §277).
         if let Ty::Named { which: 0, args: ds } = &callee
             && let [D::Effect(latent), D::Type(elem), D::Type(result)] = &ds[..]
         {
             let (latent, elem, result) = (latent.clone(), *elem, *result);
             let mut effect = fe;
             for (i, a) in args.iter().enumerate() {
-                effect = effect.union(&self.check(*a, elem).map_err(|err| self.as_argument(err, *a, i))?);
+                let found = done.get_mut(i).and_then(Option::take);
+                effect = effect.union(&self.argument(*a, i, elem, found)?);
             }
             let mut effect = effect.union(&latent);
             if self.may_spin(fun, ft, args) {
@@ -1573,22 +1598,8 @@ impl Checker {
         }
         let mut effect = fe;
         for (i, (a, p)) in args.iter().zip(&params).enumerate() {
-            let eff = match done[i].take() {
-                Some((t, eff)) => {
-                    if !self.subtype(t, *p) {
-                        let Some((c, n)) = self.conversion(t, *p) else {
-                            return Err(FxError::at(
-                                self.arena.span_of(*a),
-                                format!("argument {} is a {}, where a {} is expected{}", i + 1, self.show_ty(t), self.show_ty(*p), self.spec_delta(t, *p)),
-                            ));
-                        };
-                        self.convert_at(*a, c, n);
-                    }
-                    eff
-                }
-                None => self.check(*a, *p).map_err(|err| self.as_argument(err, *a, i))?,
-            };
-            effect = effect.union(&eff);
+            let found = done[i].take();
+            effect = effect.union(&self.argument(*a, i, *p, found)?);
         }
         let mut effect = effect.union(&latent);
         if self.may_spin(fun, ft, args) {
