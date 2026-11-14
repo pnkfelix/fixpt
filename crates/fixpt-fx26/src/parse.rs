@@ -1691,10 +1691,48 @@ impl Checker {
         Ok(t)
     }
 
+    /// `define-generative` form `items`'s parts: its head, its
+    /// representation, and its conversions' names, `#:seal mk #:unseal get`
+    /// (`docs/research/generative-types.md` §7), which it must name: no
+    /// name is made from the type's.
+    pub(crate) fn generative_parts(&mut self, items: &[Syn], span: fixpt_read::Span) -> R<(Syn, Syn, Syn, Syn)> {
+        let usage = "`(define-generative name type #:seal name #:unseal name)`, or `(define-generative (name (param kind) …) type …)`";
+        let (head, rep, rest) = match items {
+            [_, head, rep, rest @ ..] => (head, rep, rest),
+            _ => return Err(FxError::at(span, usage)),
+        };
+        let (mut seal, mut unseal) = (None, None);
+        let mut rest = rest.iter();
+        while let Some(k) = rest.next() {
+            let slot = match k.view() {
+                V::Keyword(w) if self.interner.name(w) == "seal" => &mut seal,
+                V::Keyword(w) if self.interner.name(w) == "unseal" => &mut unseal,
+                _ => return Err(FxError::at(k.span(), usage)),
+            };
+            match rest.next() {
+                Some(n) if n.sym().is_some() && slot.is_none() => *slot = Some(n.clone()),
+                _ => return Err(FxError::at(k.span(), usage)),
+            }
+        }
+        match (seal, unseal) {
+            (Some(s), Some(u)) => Ok((head.clone(), rep.clone(), s, u)),
+            (None, None) => {
+                let listed = head.list();
+                let name = match listed.as_deref() {
+                    Some([n, ..]) => n.clone(),
+                    _ => head.clone(),
+                };
+                let n = name.sym().ok_or_else(|| FxError::at(name.span(), "a generative type's name"))?;
+                Err(FxError::at(span, unnamed_conversions(self.interner.name(n))))
+            }
+            _ => Err(FxError::at(span, "a generative type's conversions are named both, `#:seal` and `#:unseal`: one alone, not yet")),
+        }
+    }
+
     /// `(define-generative (name (param kind [+|-]) …) rep)`, or with no
     /// parameters `(define-generative name rep)`: a new type, equal only to
-    /// itself, whose values are `rep`'s, converted by `up-name` and
-    /// `down-name`. A parameter is invariant unless marked `+` (covariant)
+    /// itself, whose values are `rep`'s, converted by the conversions its
+    /// form names ([`generative_parts`](Self::generative_parts)). A parameter is invariant unless marked `+` (covariant)
     /// or `-` (contravariant), which `rep` must bear out.
     pub(crate) fn define_generative(&mut self, head: &Syn, rep: &Syn) -> R<Sym> {
         let listed = head.list();
@@ -4011,7 +4049,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             let before = out.len();
             let name_of = |p: &Self, s: &Syn| s.sym().ok_or_else(|| FxError::at(s.span(), "a name")).map(|n| (n, p.name(n).to_string()));
             match (self.head(&parts), &parts[..]) {
-                (Some("define-generative"), [_, n, rep]) => {
+                (Some("define-generative"), [_, _, _, ..]) => {
+                    let (n, rep, seal, unseal) = self.generative_parts(&parts, f.span())?;
+                    let (n, rep) = (&n, &rep);
                     // `(define-generative (t (p k) …) rep)`: a type
                     // constructor, its representation a function of the
                     // parameters (`crate::kinds`).
@@ -4020,7 +4060,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                         Some([n, ps @ ..]) if !ps.is_empty() => (n, Some(Syn::lst(f.span(), ps.to_vec()))),
                         _ => (n, None),
                     };
-                    let (name, text) = name_of(self, n)?;
+                    let (name, _) = name_of(self, n)?;
                     let depth = self.dscope.len();
                     let binders = match &params {
                         Some(ps) => self.parse_binders(ps)?,
@@ -4041,7 +4081,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     self.dscope.truncate(inner);
                     let rep = rep?;
                     let rep = if binders.is_empty() { rep } else { self.arena.ty(Ty::Lam { params: binders, body: D::Type(rep) }) };
-                    let (up, down) = (self.interner.intern(&format!("up-{text}")), self.interner.intern(&format!("down-{text}")));
+                    let (up, down) = (seal.sym().expect("a name"), unseal.sym().expect("a name"));
                     // Each conversion the identity, made as a closure is.
                     let x = self.interner.intern("x");
                     let identity = |p: &mut Self| {
@@ -4799,4 +4839,11 @@ mod takes_modules_tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// What a `define-generative` naming no conversions is refused with
+/// (`docs/research/generative-types.md` §7): how to name them as they were.
+/// As the FX-26 parser's `generative-conversions` says it.
+pub(crate) fn unnamed_conversions(name: &str) -> String {
+    format!("a generative type names its conversions, `#:seal` and `#:unseal`: as they were, `(define-generative {name} … #:seal up-{name} #:unseal down-{name})`")
 }

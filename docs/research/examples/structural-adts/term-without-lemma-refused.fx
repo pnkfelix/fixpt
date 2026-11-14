@@ -4,7 +4,7 @@
 (define-generative (term (v type))
   (sumof (var v)
          (app (productof (f (term v)) (x (term v))))
-         (lam (term (maybe v)))))
+         (lam (term (maybe v)))) #:seal up-term #:unseal down-term)
 ;; \x. x, closed.
 (define id-term (term void)
   (up-term (sum lam (up-term (sum var (sum none #u))))))

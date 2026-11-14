@@ -8,7 +8,7 @@
 ;;;   count :: (a -> Int) -> Nest a -> Int
 (define-type (pair (a type)) (productof (l a) (r a)))
 (define-generative (nest (a type))
-  (sumof (none unit) (more (tupleof a (nest (pair a))))))
+  (sumof (none unit) (more (tupleof a (nest (pair a))))) #:seal up-nest #:unseal down-nest)
 (define* count (poly ((a type)) (subr spin ((subr pure (a) int) (nest a)) int))
   (lambda (f n)
     (tagcase (down-nest n)

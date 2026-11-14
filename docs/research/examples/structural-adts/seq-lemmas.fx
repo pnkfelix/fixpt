@@ -8,9 +8,9 @@
 ;;;   of one shape.
 (define-type (pair (a type)) (productof (l a) (r a)))
 (define-generative (seq (a type))
-  (sumof (nil unit) (cons (tupleof a (seq (pair a))))))
+  (sumof (nil unit) (cons (tupleof a (seq (pair a))))) #:seal up-seq #:unseal down-seq)
 (define-generative (seq2 (a type))
-  (sumof (nil unit) (cons (tupleof a (seq2 (pair a))))))
+  (sumof (nil unit) (cons (tupleof a (seq2 (pair a))))) #:seal up-seq2 #:unseal down-seq2)
 (define* seq-up (proves (poly ((a type) (b type)) (<= (seq a) (seq b)) (<= a b)))
   (lambda (f s)
     (up-seq (tagcase (down-seq s)

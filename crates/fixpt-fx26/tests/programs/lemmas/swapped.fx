@@ -1,5 +1,6 @@
 ; Rejected: the subtrees are swapped, so this is not the identity.
-(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a)))))
+(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a))))
+  #:seal up-tree #:unseal down-tree)
 (define bad (proves (poly ((a type) (b type)) (<= (tree a) (tree b)) (<= a b)))
   (lambda (f t)
     (up-tree (tagcase (down-tree t)

@@ -372,7 +372,6 @@
                        ((listof patches @k) int int code)
                        unit))
             (val c-count-letrec (subr (maxeff (read @globals) spin) (c-recs) int))
-            (val c-converter (subr (maxeff (read @globals) spin) (string symbol) symbol))
             (val c-field-set
                  (subr (maxeff (alloc @k) (read @globals) spin (read @k) (write @k))
                        (code int)

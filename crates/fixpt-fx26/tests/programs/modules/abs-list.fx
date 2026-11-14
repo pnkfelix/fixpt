@@ -2,8 +2,8 @@
 ;; Several abstract types at once; a description naming them.
 (define pair
   (module
-    (define-generative a int)
-    (define-generative b int)
+    (define-generative a int #:seal up-a #:unseal down-a)
+    (define-generative b int #:seal up-b #:unseal down-b)
     (define-type both (productof (x a) (y b)))
     (define make both (product (x (up-a 1)) (y (up-b 1))))
     (define total (subr pure (both) int)

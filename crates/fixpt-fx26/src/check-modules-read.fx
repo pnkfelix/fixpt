@@ -100,17 +100,15 @@
 (define k-items-kind (->* (mod-items) int)
   (lambda (items) (if (null? items) 0 (extract (car items) 1))))
 ;; The names a module's item defines as descriptions (`types`), or as values:
-;; a generative type's name is one, its two conversions values; as the Rust
-;; checker's `defined_twice` counts them.
+;; a generative type's name is one, its two conversions (the names after
+;; it, `generative-conversions`) values; as the Rust checker's
+;; `defined_twice` counts them.
 (define k-item-names (->* (mod-item bool) k-names)
   (lambda (it types)
     (let ((k (extract it 1)))
       (case k ((0)
-               (let* ((n (car (extract it 2))) (s (symbol->string n)))
-                 (if types
-                     (the k-names (list n))
-                     (the k-names (list (string->symbol (string-append "up-" s))
-                                        (string->symbol (string-append "down-" s)))))))
+               (let ((ns (extract it 2)))
+                 (if types (the k-names (list (car ns))) (the k-names (cdr ns)))))
               ((1) (if types (extract it 2) (the k-names nil)))
               (else (if types (the k-names nil) (extract it 2)))))))
 ;; The first name of `items`, in order, that one before it defines too, as a

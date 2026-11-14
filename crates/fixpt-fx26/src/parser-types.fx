@@ -135,9 +135,10 @@
   ;; `(define-optional-syscall …)`: whether required, and the whole form,
   ;; read by the checker alone, which expands it (`docs/research/syscalls.md`).
   (t-define-syscall bool syn int int)
-  ;; `(define-generative head rep)`: read by the checker alone; its two
-  ;; conversions follow it as definitions.
-  (t-define-generative syn syn int int)
+  ;; `(define-generative head rep …)`: read by the checker alone; its two
+  ;; conversions, named `names` (`seal`, `unseal`: `generative-conversions`),
+  ;; follow it as definitions.
+  (t-define-generative syn syn names int int)
   (t-exp exp))
 
 ;; The trees' lists: of expressions, a `lambda`'s parameters, a `letrec`'s

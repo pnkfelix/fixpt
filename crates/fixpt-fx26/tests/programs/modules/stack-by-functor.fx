@@ -24,7 +24,7 @@
 (define make-stack (subr pure ((elt : elt-sig)) (stack-of (select elt t)))
   (lambda ((elt elt-sig))
     (module
-      (define-generative stack (listof (select elt t) @heap))
+      (define-generative stack (listof (select elt t) @heap) #:seal up-stack #:unseal down-stack)
       (define empty stack (up-stack nil))
       (define is-empty (subr (read @heap) (stack) bool)
         (lambda (s) (null? (down-stack s))))

@@ -23,6 +23,47 @@
 ;; How a form here fails: the caller's `pfail-at`, as this file's instance
 ;; of `parser.fx` is not the caller's, and its prompt tag no prompt's.
 (define-type fails (subr parses (string int int) void))
+;; A `define-generative`'s conversions' names, from its parts after its
+;; type, `rest`, `#:seal mk #:unseal get` (`docs/research/generative-types.md`
+;; §7), which it must name. What is wrong said through `fail`, at `s`, the
+;; form, or at the part; as the Rust checker's `generative_parts`, its
+;; messages too.
+(define generative-conversions (->* (fails syns-a symbol syn) names)
+  (lambda (fail rest n s)
+    (let ((given (gen-named fail rest '%none '%none s)) (t (symbol->string n)))
+      (if (null? given)
+          (begin (fail-at-syn fail (string-append "a generative type names its conversions, "
+                                                  "`#:seal` and `#:unseal`: as they were, "
+                                                  "`(define-generative " t " … #:seal up-" t
+                                                  " #:unseal down-" t ")`")
+                              s)
+                 given)
+          given))))
+(define gen-usage
+  (string-append "`(define-generative name type #:seal name #:unseal name)`, or "
+                 "`(define-generative (name (param kind) …) type …)`"))
+(define keyword-named? (->* (syn symbol) bool)
+  (lambda (s k)
+    (tagcase s (atom (d a b x) (and (keyword? d) (symbol=? (keyword->symbol d) k))) (else y #f))))
+;; The names `rest`'s pairs give, `seal` and `unseal` so far (`%none` if
+;; not): both, or none.
+(define gen-named (->* (fails syns-a symbol symbol syn) names)
+  (lambda (fail rest seal unseal s)
+    (cond ((null? rest)
+           (cond ((and (symbol=? seal '%none) (symbol=? unseal '%none)) (the names nil))
+                 ((or (symbol=? seal '%none) (symbol=? unseal '%none))
+                  (fail-at-syn fail (string-append "a generative type's conversions are named "
+                                                   "both, `#:seal` and `#:unseal`: one alone, "
+                                                   "not yet")
+                               s))
+                 (else (the names (list seal unseal)))))
+          ((or (null? (cdr rest)) (not (syn-symbol? (car (cdr rest)))))
+           (fail-at-syn fail gen-usage (car rest)))
+          ((and (keyword-named? (car rest) 'seal) (symbol=? seal '%none))
+           (gen-named fail (cdr (cdr rest)) (syn-symbol (car (cdr rest))) unseal s))
+          ((and (keyword-named? (car rest) 'unseal) (symbol=? unseal '%none))
+           (gen-named fail (cdr (cdr rest)) seal (syn-symbol (car (cdr rest))) s))
+          (else (fail-at-syn fail gen-usage (car rest))))))
 ;; `items` as long as `n`, or at least `n`; else `shape` said, through `fail`.
 (define arity (->* (fails syns-a int string int int) unit)
   (lambda (fail items n shape a b) (if (= (len items) n) #u (fail shape a b))))

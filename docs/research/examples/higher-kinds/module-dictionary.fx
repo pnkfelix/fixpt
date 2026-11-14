@@ -18,7 +18,7 @@
 ;; Representation: a running count paired with the elements seen.
 (define list-backed
   (module
-    (define-generative t (pairof int (listof int @heap) @heap))
+    (define-generative t (pairof int (listof int @heap) @heap) #:seal up-t #:unseal down-t)
     (define empty t (up-t (cons 0 nil)))
     (define insert (subr (maxeff (alloc @heap) (read @heap)) (int t) t)
       (lambda (x s) (up-t (cons (+ 1 (car (down-t s))) (cons x (cdr (down-t s)))))))
@@ -30,7 +30,7 @@
 ;; `counter-like`'s `(alloc @heap)`/anything signature: sub-effecting.
 (define count-only
   (module
-    (define-generative t int)
+    (define-generative t int #:seal up-t #:unseal down-t)
     (define empty t (up-t 0))
     (define insert (subr pure (int t) t)
       (lambda (x s) (up-t (+ 1 (down-t s)))))

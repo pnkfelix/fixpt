@@ -2,7 +2,7 @@
 ;;; and `down-counter` see that a counter is an int.
 
 ;;; ---- counter.fx ----
-(define-generative counter int)
+(define-generative counter int #:seal up-counter #:unseal down-counter)
 (define zero counter (up-counter 0))
 (define* incr (subr pure (counter) counter) (lambda (c) (up-counter (+ (down-counter c) 1))))
 (define* value (subr pure (counter) int) (lambda (c) (down-counter c)))

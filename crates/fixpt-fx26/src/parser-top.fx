@@ -8,6 +8,8 @@
 ;; and what this file uses of them.
 (define parser-exps-module ((proj (load-module "fx26:parser-exps.fx") rs re rm rc rp)))
 (define parser-module (with parser-exps-module parser-module))
+(define forms-module (with parser-exps-module forms-module))
+(import forms-module generative-conversions)
 (define parser-ids-module (with parser-module parser-ids-module))
 (import parser-ids-module walk-of number-form walk-state walk-count walk-given walk-wrong
         walk-done! (type seen))
@@ -19,7 +21,7 @@
 (import reader-types lst (type syn))
 (import parser-module parse-tag syn-start syn-end pfail syn-symbol? syn-symbol syn-items len nth
         keep mk-list form-head form-of? datatype? mk-pure-subr mk-poly expand-datatype import?
-        expand-import e-var e-lambda t-define t-define-rec t-define-type t-define-effect
+        expand-import e-var e-lambda t-define t-define-rec t-define-type t-define-effect drop
         includes-given include-given-at mk-symbol syn-name loaded-error e-module pfail-at
         (type include-given)
         t-define-convention t-define-syscall t-define-generative t-exp p-ok p-err shared-taken
@@ -92,9 +94,10 @@
 (define append-tops (->* (top-list top-list) top-list)
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))
 
-;; `(define-generative head rep)`: the form, and its two conversions, each
-;; the identity: `(define up-name (poly (param …) (subr pure (rep) (name p
-;; …))) (lambda (x) x))`, and `down-name` the other way.
+;; `(define-generative head rep …)`: the form, and its two conversions,
+;; each the identity, named as the form names them
+;; (`generative-conversions`): `(define seal (poly (param …) (subr pure
+;; (rep) (name p …))) (lambda (x) x))`, and `unseal` the other way.
 (define generative? (->* (syn) bool)
   (lambda (s) (form-of? s 'define-generative)))
 ;; A parameter as a binder, its variance left out.
@@ -116,23 +119,24 @@
     (if (null? bs)
         nil
         (cons (car (syn-items (car bs) "a parameter")) (gen-names (cdr bs))))))
-;; A conversion, `prefix` and the name `n`, of type `ty`: the identity.
-(define gen-conversion (->* (string string syn exp int int) top)
-  (lambda (prefix n ty identity a b)
-    (t-define (string->symbol (string-append prefix n)) (the syns-a (cons ty nil)) identity a b)))
+;; A conversion, named `n`, of type `ty`: the identity.
+(define gen-conversion (->* (symbol syn exp int int) top)
+  (lambda (n ty identity a b)
+    (t-define n (the syns-a (cons ty nil)) identity a b)))
 (define parse-generative (->* (syn) top-list)
   (lambda (s)
     (let* ((items (syn-items s "a generative type")) (a (syn-start s)) (b (syn-end s))
            (usage (string-append "`(define-generative name type)` or "
                                  "`(define-generative (name (param kind) …) type)`")))
-      (if (not (= (len items) 3))
+      (if (< (len items) 3)
           (pfail usage s)
           (let* ((head (nth items 1))
                  (rep (nth items 2))
                  (family? (tagcase head (lst (hs d ha hb xpn) (not (null? hs))) (else x #f)))
                  (hs (if family? (syn-items head "a generative type's name") (the syns-a nil)))
                  (name (if family? (car hs) head))
-                 (n (if (syn-symbol? name) (symbol->string (syn-symbol name)) (pfail usage s)))
+                 (n (if (syn-symbol? name) (syn-symbol name) (pfail usage s)))
+                 (convs (generative-conversions pfail-at (drop items 3) n s))
                  (binders (if family? (gen-binders (cdr hs) a b) (the syns-a nil)))
                  (used (if family? (mk-list (cons name (gen-names binders)) a b) name))
                  (conv (lambda ((from syn) (to syn))
@@ -140,9 +144,9 @@
                            (if family? (mk-poly binders t a b) t))))
                  (x (product (1 'x) (2 (the syns-a nil))))
                  (identity (e-lambda (the param-list (cons x nil)) (e-var 'x a b 0 0) a b 0 0))
-                 (up (gen-conversion "up-" n (conv rep used) identity a b))
-                 (down (gen-conversion "down-" n (conv used rep) identity a b)))
-            (list (t-define-generative head rep a b) up down))))))
+                 (up (gen-conversion (car convs) (conv rep used) identity a b))
+                 (down (gen-conversion (car (cdr convs)) (conv used rep) identity a b)))
+            (list (t-define-generative head rep convs a b) up down))))))
 
 ;; Each of `xs`, parsed as a top-level form.
 (define parse-each-top (->* (syns-a) top-list)

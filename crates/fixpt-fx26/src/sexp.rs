@@ -85,7 +85,9 @@ pub fn show_top(c: &Checker, top: &Top, span: fixpt_read::Span, kth: &Kth) -> St
             format!("(t-define-rec ({}) {a} {b})", bs.join(" "))
         }
         Top::DefineType { .. } | Top::DefineTypeFamily { .. } => format!("(t-define-type _ _ {a} {b})"),
-        Top::DefineGenerative { .. } => format!("(t-define-generative _ _ {a} {b})"),
+        Top::DefineGenerative { seal, unseal, .. } => {
+            format!("(t-define-generative _ _ ({} {}) {a} {b})", c.interner.name(*seal), c.interner.name(*unseal))
+        }
         Top::DefineEffect { .. } => format!("(t-define-effect _ _ {a} {b})"),
         Top::DefineConvention { .. } => format!("(t-define-convention _ _ {a} {b})"),
         Top::Exp(k) => format!("(t-exp {})", show_exp(c, k.exp, kth)),
@@ -172,7 +174,10 @@ fn show_exp(c: &Checker, e: ExpId, kth: &Kth) -> String {
             let shown = items
                 .iter()
                 .map(|item| match item {
-                    ModItem::Abs { name: n, up_fn, down_fn, .. } => format!("[0 ({}) (_) ({} {})]", name(*n), go(*up_fn), go(*down_fn)),
+                    // Its names: the type's, then its conversions'.
+                    ModItem::Abs { name: n, up, down, up_fn, down_fn, .. } => {
+                        format!("[0 ({} {} {}) (_) ({} {})]", name(*n), name(*up), name(*down), go(*up_fn), go(*down_fn))
+                    }
                     // A `define-effect`'s types the effect and a mark.
                     ModItem::Desc { name: n, ty } => {
                         let ts = if c.desc_effect(*ty).is_some() { "(_ _)" } else { "(_)" };

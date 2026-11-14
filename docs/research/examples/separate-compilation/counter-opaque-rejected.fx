@@ -2,7 +2,7 @@
 ;;; an int, in whichever file the client is.
 
 ;;; ---- counter.fx ----
-(define-generative counter int)
+(define-generative counter int #:seal up-counter #:unseal down-counter)
 (define zero counter (up-counter 0))
 
 ;;; ---- client.fx ----

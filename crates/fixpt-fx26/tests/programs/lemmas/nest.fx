@@ -2,7 +2,7 @@
 ;;; lambda whose parameter says its type.
 (define-type (pair (a type)) (productof (l a) (r a)))
 (define-generative (nest (a type))
-  (sumof (none unit) (more (tupleof a (nest (pair a))))))
+  (sumof (none unit) (more (tupleof a (nest (pair a))))) #:seal up-nest #:unseal down-nest)
 (define* nest-up (proves (poly ((a type) (b type)) (<= (nest a) (nest b)) (<= a b)))
   (lambda (f n)
     (up-nest (tagcase (down-nest n)

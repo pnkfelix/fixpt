@@ -36,7 +36,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-errors) (include check-env) (include check-read)
       (include check-expect) (include tables))
-(import check-resolve k-conversion-name k-free-vars)
+(import check-resolve k-free-vars)
 
 ;; Whether item `it` is a definition of a lambda with a written type.
 (define k-lambda-item? (->* (k-item) bool)
@@ -124,11 +124,8 @@
     (if (null? items)
         out
         (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2))
-               (more (case k ((0)
-                              (let ((n (car ns)))
-                                (k-places-onto (the k-names (list (k-conversion-name "up-" n)
-                                                                  (k-conversion-name "down-" n)))
-                                               i out)))
+               ;; A generative type's conversions: the names after its own.
+               (more (case k ((0) (k-places-onto (cdr ns) i out))
                              ((2 3) (k-places-onto ns i out))
                              (else out))))
           (k-places-from (cdr items) (+ i 1) more)))))

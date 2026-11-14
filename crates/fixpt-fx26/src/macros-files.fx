@@ -168,7 +168,8 @@
             ((string=? head "define-rec")
              (names-shown (cdr forms) (append (rec-names (cdr items)) vs) ts))
             ((string=? head "define-generative")
-             (names-shown (cdr forms) (append (generative-values named) vs) (append named ts)))
+             (names-shown (cdr forms) (append (generative-values named (drop-n items 3)) vs)
+                          (append named ts)))
             ((or (string=? head "define-type") (string=? head "define-effect"))
              (names-shown (cdr forms) vs (append named ts)))
             (else (names-shown (cdr forms) vs ts)))))))
@@ -185,14 +186,19 @@
           ((and (not (null? (proper (car bs)))) (syn-symbol? (car (proper (car bs)))))
            (cons (syn-symbol (car (proper (car bs)))) (rec-names (cdr bs))))
           (else (rec-names (cdr bs))))))
-;; A generative type's conversions, `up-name` and `down-name`.
-(define generative-values (->* (names) names)
-  (lambda (ns)
-    (if (null? ns)
+;; A generative type's conversions: the names `rest`, its form's parts
+;; after its type, give (`#:seal mk #:unseal get`; the parser's
+;; `generative-conversions` says what is wrong with them).
+(define generative-values (->* (names syns-a) names)
+  (lambda (ns rest) (if (null? ns) nil (given-conversions rest))))
+(define given-conversions (->* (syns-a) names)
+  (lambda (rest)
+    (if (or (null? rest) (null? (cdr rest)))
         nil
-        (let ((n (symbol->string (car ns))))
-          (list (string->symbol (string-append "up-" n))
-                (string->symbol (string-append "down-" n)))))))
+        (let ((more (given-conversions (cdr (cdr rest)))))
+          (if (syn-symbol? (car (cdr rest))) (cons (syn-symbol (car (cdr rest))) more) more)))))
+(define drop-n (->* (syns-a int) syns-a)
+  (lambda (xs k) (if (or (= k 0) (null? xs)) xs (drop-n (cdr xs) (- k 1)))))
 (define macro-names (->* ((listof file-macro acyclic)) names)
   (lambda (ms)
     (if (null? ms)

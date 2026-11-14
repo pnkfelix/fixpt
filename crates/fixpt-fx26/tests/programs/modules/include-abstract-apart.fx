@@ -4,7 +4,7 @@
 (define make
   (subr pure (int) (moduleof (abs t type) (val z t) (val get (subr pure (t) int))))
   (lambda (n)
-    (module (define-generative t int)
+    (module (define-generative t int #:seal up-t #:unseal down-t)
             (define z t (up-t n))
             (define get (subr pure (t) int) (lambda (c) (down-t c))))))
 (define a (module (include (make 1))))

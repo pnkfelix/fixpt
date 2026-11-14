@@ -13,7 +13,7 @@
   (plambda ((f effect))
     (the sig-lazy-int
       (module
-        (define-generative susp (ref int @heap))
+        (define-generative susp (ref int @heap) #:seal up-susp #:unseal down-susp)
         (define delay (lambda ((cxn (subr f () int))) (up-susp (new (cxn)))))
         (define force (subr (maxeff f (read @heap)) (susp) int)
           (lambda ((s susp)) (get (down-susp s))))))))

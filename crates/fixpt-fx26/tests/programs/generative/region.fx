@@ -1,5 +1,5 @@
 ;;; A generative type over a region that ends: used inside it, it is fine.
-(define-generative (stack (t type) (r region)) (listof t r))
+(define-generative (stack (t type) (r region)) (listof t r) #:seal up-stack #:unseal down-stack)
 (define* f (subr pure () int)
   (lambda ()
     (letregion l

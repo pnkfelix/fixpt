@@ -1538,14 +1538,33 @@ impl Fx26Session {
                 }
             }
         }
-        // What the reader made of a `define-generative` declared ahead (its
-        // `up-` and `down-`, which have its span) the pieces written in
-        // FX-26 made of it themselves, above, in its context. (A datatype's
-        // constructors they are given as the reader made them.)
-        let ahead: Vec<Span> = checking(&mut self.checker, &mut self.scheme, |c| {
-            let generative = |f: &Form| c.head_of(f).is_some_and(|h| c.interner.name(h) == "define-generative");
-            forms.iter().zip(&done).filter(|(f, d)| **d && generative(f)).map(|(f, _)| f.span()).collect()
+        // What the reader made of a `define-generative` declared ahead, its
+        // conversions, the pieces written in FX-26 made of it themselves,
+        // above, in its context: by their names (`generative_parts`), not
+        // their places, which a macro's use gives every form it makes.
+        // (A datatype's constructors they are given as the reader made them.)
+        let ahead: Vec<Sym> = checking(&mut self.checker, &mut self.scheme, |c| {
+            let generative = |c: &Checker, f: &Form| c.head_of(f).is_some_and(|h| c.interner.name(h) == "define-generative");
+            let mut names = Vec::new();
+            for (f, d) in forms.iter().zip(&done) {
+                if !*d || !generative(c, f) {
+                    continue;
+                }
+                let parts = c.syn(|c| {
+                    let items = f.get().list().unwrap_or_default();
+                    c.generative_parts(&items, f.span()).map(|(_, _, s, u)| (s.sym(), u.sym()))
+                });
+                if let Ok((Some(s), Some(u))) = parts {
+                    names.extend([s, u]);
+                }
+            }
+            names
         });
+        let conversion = |c: &mut Checker, f: &Form| {
+            let items = c.items_of(f).unwrap_or_default();
+            let is_define = items.first().and_then(|h| c.sym_of(h)).is_some_and(|h| c.interner.name(h) == "define");
+            is_define && items.get(1).and_then(|n| c.sym_of(n)).is_some_and(|n| ahead.contains(&n))
+        };
         // The program's `.fasl`, if it has a fresh one: its procedures'
         // definitions read from it, the rest of its forms run here.
         let fasl = match self.program_file.clone() {
@@ -1555,7 +1574,7 @@ impl Fx26Session {
         let mut outs = Vec::new();
         for (i, (f, done)) in forms.iter().zip(done).enumerate() {
             if !done {
-                self.own_made = self.strategy != Strategy::Lower && ahead.contains(&f.span());
+                self.own_made = self.strategy != Strategy::Lower && checking(&mut self.checker, &mut self.scheme, |c| conversion(c, f));
                 let out = match fasl.as_ref().and_then(|p| Some((p, p.defs.get(&i)?))) {
                     Some((p, group)) => self.run_program_def(f, group, p).map(|o| vec![o]),
                     None => {

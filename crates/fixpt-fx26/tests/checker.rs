@@ -278,6 +278,33 @@ fn second_class_operations_are_named_only_to_call() {
     }
 }
 
+/// A `define-generative`'s conversions named (`docs/research/generative-types.md`
+/// §7): both, by `#:seal` and `#:unseal`, each once; naming neither is
+/// refused, saying how to name them as they were. Refused as
+/// the form is read, by both checkers alike, so not among
+/// `every_test_program`'s programs, which the FX-26 parser must read.
+#[test]
+fn a_generative_types_conversions_are_both_named() {
+    let usage = "`(define-generative name type #:seal name #:unseal name)`";
+    for (program, why) in [
+        ("(define-generative meters int) 1", "as they were, `(define-generative meters … #:seal up-meters #:unseal down-meters)`"),
+        ("(define m (module (define-generative (s (a type)) (listof a @heap)))) 1", "#:seal up-s #:unseal down-s"),
+        ("(define-generative meters int #:seal to-meters) 1", "one alone, not yet"),
+        ("(define-generative meters int #:seal to-meters #:open from-meters) 1", usage),
+        ("(define-generative meters int #:seal to-meters #:seal again) 1", usage),
+        ("(define-generative meters int #:seal to-meters #:unseal) 1", usage),
+        ("(define m (module (define-generative t int #:unseal get))) 1", "one alone, not yet"),
+    ] {
+        let fx = common::with_own(|s| match s.check_with_own_checker(program) {
+            Err(e) | Ok(Err(e)) => (String::from(e.message), e.span.start, e.span.end),
+            Ok(Ok(_)) => panic!("{program}: taken by the FX-26 front end"),
+        });
+        let rust = rust_check(program).expect_err(program);
+        assert_eq!(fx, rust, "the front ends refuse alike:\n{program}");
+        assert!(rust.0.contains(why), "{program}: {rust:?}");
+    }
+}
+
 /// `#%fx` (`TODO.md` §46): only `(with #%fx name)`, of a standard name;
 /// a second-class operation through it only as an operator; never bound.
 /// Both checkers say the same, as `every_test_program` compares.

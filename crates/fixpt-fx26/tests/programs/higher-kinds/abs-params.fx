@@ -11,7 +11,7 @@
             (val force (poly ((a type)) (subr (read @heap) ((susp a)) a)))))
 (define lazy sig-lazy
   (module
-    (define-generative (susp (a type)) (ref a @heap))
+    (define-generative (susp (a type)) (ref a @heap) #:seal up-susp #:unseal down-susp)
     (define delay (poly ((a type)) (subr (alloc @heap) ((subr pure () a)) (susp a)))
       (plambda ((a type)) (lambda (th) (up-susp (new (th))))))
     (define force (poly ((a type)) (subr (read @heap) ((susp a)) a))

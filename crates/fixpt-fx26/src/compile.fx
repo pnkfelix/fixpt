@@ -79,9 +79,6 @@
         (int->string at)
         (string-append (int->string (+ 1000 (quotient at load-base)))
                        ":" (int->string (remainder at load-base))))))
-;; An abstract type `n`'s conversion, `prefix` `up-` or `down-`.
-(define c-converter (->* (string symbol) symbol)
-  (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
 
 (define c-tag (prompt-tag cresult cresult (maxeff c-emits (read @t) spin) @y)
   (make-continuation-prompt-tag))
@@ -424,9 +421,8 @@
     (if (null? items)
         bound
         (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2))
-               (more (case k ((0)
-                              (the syms (cons (c-converter "down-" (car ns))
-                                              (cons (c-converter "up-" (car ns)) bound))))
+               ;; A generative type's conversions: the names after its own.
+               (more (case k ((0) (c-names (cdr ns) bound))
                              ((2 3) (c-names ns bound))
                              (else bound))))
           (c-module-bound (cdr items) more)))))

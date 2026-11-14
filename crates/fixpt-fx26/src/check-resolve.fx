@@ -649,18 +649,12 @@
   (lambda (bs bound)
     (if (null? bs) bound (k-let-names (cdr bs) (cons (extract (car bs) 1) bound)))))
 
-;; `up-t` and `down-t`, an abstract type `t`'s conversions, onto `bound`.
-(define k-conversion-name (->* (string symbol) symbol)
-  (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
-(define k-conversions-onto (->* (symbol k-names) k-names)
-  (lambda (n bound)
-    (cons (k-conversion-name "down-" n) (cons (k-conversion-name "up-" n) bound))))
 ;; The names an item binds for those after it, onto `bound`: an abstract
-;; type's conversions, a value's name, a group's.
+;; type's conversions (the names after its own), a value's name, a group's.
 (define k-item-bound (->* (k-item k-names) k-names)
   (lambda (it bound)
     (let ((k (extract it 1)) (ns (extract it 2)))
-      (cond ((= k 0) (k-conversions-onto (car ns) bound))
+      (cond ((= k 0) (k-names-onto (cdr ns) bound))
             ((or (= k 1) (< k 0) (> k 3)) bound)
             (else (k-names-onto ns bound))))))
 ;; Every name `items` define, onto `bound`.

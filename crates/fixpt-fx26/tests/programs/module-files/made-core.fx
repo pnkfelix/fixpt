@@ -2,7 +2,7 @@
 ;; transparent and abstract (`load-moduleof.fx`).
 (module-parameters ((ed region) (world effect)))
 (define-type counter (productof (state (ref int ed))))
-(define-generative ticket int)
+(define-generative ticket int #:seal up-ticket #:unseal down-ticket)
 (define issued (ref int ed) (new 0))
 (define spawn (subr (alloc ed) (int) counter) (lambda (n) (product (state (new n)))))
 (define peek (subr (read ed) (counter) int) (lambda (a) (get (extract a state))))

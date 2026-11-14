@@ -1,5 +1,5 @@
 ;; A module of each kind of name, one hidden, for `top-include/*.fx`.
-(define-generative t int)
+(define-generative t int #:seal up-t #:unseal down-t)
 (define-type pair-of-t (pairof t t @heap))
 (define-effect touches (read @heap))
 (hide (define secret int 41))

@@ -5,11 +5,12 @@
 ;; `plus`'s `e1` uses `counter`'s values.
 ;; `counter`, with an abstract type of its own.
 (define counter
-  (module (define-generative t int)
+  (module (define-generative t int #:seal up-t #:unseal down-t)
           (define zero t (up-t 0))
           (define next (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))
           (define value (subr pure (t) int) (lambda (c) (down-t c)))))
-(define other (module (define-generative t bool) (define yes t (up-t #t))))
+(define other (module (define-generative t bool #:seal up-t #:unseal down-t)
+  (define yes t (up-t #t))))
 (define both (extend counter other))
 (define plus (extend counter (module (define two (next (next zero))))))
 (- ((with counter value) ((with plus next) (with plus two)))

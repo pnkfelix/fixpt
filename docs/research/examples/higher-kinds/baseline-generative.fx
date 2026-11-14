@@ -8,7 +8,7 @@
 ;; `(a type)` is the only shape a binder's kind can take for a type
 ;; parameter (kinds are flat: region, place, effect, type, data, size,
 ;; conv — `crates/fixpt-fx26/src/ast.rs` `enum Kind`, line 17).
-(define-generative (bag (a type)) (listof a @heap))
+(define-generative (bag (a type)) (listof a @heap) #:seal up-bag #:unseal down-bag)
 
 (define make-bag
   (poly ((a type)) (subr (read (globals up-bag)) ((listof a @heap)) (bag a)))

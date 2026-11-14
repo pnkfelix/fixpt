@@ -3,7 +3,7 @@
 ;; expression's types have no identity to put in.
 (define counter
   (module
-    (define-generative t int)
+    (define-generative t int #:seal up-t #:unseal down-t)
     (define zero t (up-t 0))
     (define inc (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))))
 (define-type counters (moduleof (abs t type) (val zero t) (val inc (subr pure (t) t))))

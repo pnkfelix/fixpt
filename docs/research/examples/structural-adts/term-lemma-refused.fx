@@ -5,7 +5,7 @@
 (define-generative (term (v type))
   (sumof (var v)
          (app (tupleof (term v) (term v)))
-         (lam (term (maybe v)))))
+         (lam (term (maybe v)))) #:seal up-term #:unseal down-term)
 (define* term-up (proves (poly ((a type) (b type)) (<= (term a) (term b)) (<= a b)))
   (lambda (f t)
     (up-term (tagcase (down-term t)

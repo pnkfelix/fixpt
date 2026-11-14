@@ -161,7 +161,7 @@ fn the_parsers_agree_on_small_programs() {
         "(bloblet-ref (make-bloblet 0 1 2) 1)",
         "(letrec ((f (subr pure (int) int) (lambda (n) n))) (f 1))",
         "(proj (plambda ((r region)) (lambda () 1)) @q)",
-        "(define-generative (box (t type +)) (productof (v t))) (down-box (up-box (product (v 1))))",
+        "(define-generative (box (t type +)) (productof (v t)) #:seal up-box #:unseal down-box) (down-box (up-box (product (v 1))))",
         "(define f (subr pure ((listof int const)) int) (lambda (xs) (acyclic xs (ok 1) 0)))",
     ] {
         same_trees(&mut s, text);
@@ -212,7 +212,7 @@ fn module_parse_errors_agree() {
         "(module 5)",
         "(module (define-rec 5))",
         "(module (define-rec (f int)))",
-        "(module (define-generative (t) int))",
+        "(module (define-generative (t) int #:seal up-t #:unseal down-t))",
         "(module (define-type 3 int))",
         "(with (module (define x 1)) x)",
         "(with)",

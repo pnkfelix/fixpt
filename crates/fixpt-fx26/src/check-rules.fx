@@ -98,7 +98,7 @@
       (include check-sc-graphs) (include check-unions) (include check-modules-read)
       (include check-modules) (include check-mask) (include check-calls) (include check-bounds)
       (include check-holds) (include check-subtype) (include check-subst) (include check-processes))
-(import check-resolve k-as-subr k-callee-of k-conversion-name k-end k-free-vars k-rename k-start
+(import check-resolve k-as-subr k-callee-of k-end k-free-vars k-rename k-start
         k-at-of k-vsubr-parts k-entered k-left) (import check-logic k-spec-of k-spec-delta)
 (import check-allof k-allof-type? k-allof-lambda k-allof-call k-arm-dead? k-as-argument k-split-app
         k-branch-synth k-branch-check)
@@ -838,8 +838,8 @@
              (up-t (k-new-subr nil (the k-ids (cons rep nil)) t))
              (down-t (k-new-subr nil (the k-ids (cons t nil)) rep)))
         (begin
-          (k-bind (k-conversion-name "up-" n) (if (null? bs) up-t (k-ty-new (ty-poly bs up-t))))
-          (k-bind (k-conversion-name "down-" n)
+          (k-bind (car (cdr (extract it 2))) (if (null? bs) up-t (k-ty-new (ty-poly bs up-t))))
+          (k-bind (car (cdr (cdr (extract it 2))))
                   (if (null? bs) down-t (k-ty-new (ty-poly bs down-t))))
           (k-made-of (k-part-onto n v (extract made 1)) (extract made 2) (extract made 3)
                      (extract made 4))))))

@@ -45,7 +45,8 @@ pub enum Top {
     /// `(define-type (name (param kind) …) …)`: a parametric abbreviation.
     DefineTypeFamily { name: Sym },
     /// `(define-generative name rep)`: a new type.
-    DefineGenerative { name: Sym },
+    /// Its conversions too, as its form names them (`generative_parts`).
+    DefineGenerative { name: Sym, seal: Sym, unseal: Sym },
     /// `(define-effect name …)`: an abbreviation for an effect.
     DefineEffect { name: Sym, effect: Effect },
     /// `(define-convention name clause …)`: a name for the native
@@ -1273,8 +1274,9 @@ impl Checker {
 
     /// `(define-generative head rep)`: the form itself, which the checker
     /// alone reads, and its two conversions, each the identity:
-    /// `(define up-name (poly (param …) (subr pure (rep) (name p …))) (lambda (x) x))`
-    /// and `down-name` the other way. `false` if `form` is something else.
+    /// `(define seal (poly (param …) (subr pure (rep) (name p …))) (lambda (x) x))`
+    /// and `unseal` the other way, named as the form names them
+    /// (`Checker::generative_parts`). `false` if `form` is something else.
     fn expand_generative(&mut self, form: &Syn, out: &mut Vec<Syn>) -> R<bool> {
         let listed = form.list();
         let items = listed.as_deref().unwrap_or_default();
@@ -1283,24 +1285,21 @@ impl Checker {
         }
         let span = form.span();
         let usage = "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`";
-        let [_, head, rep] = &items[..] else {
-            return Err(FxError::at(span, usage));
-        };
+        let (head, rep, up, down) = self.generative_parts(items, span)?;
+        let (head, rep) = (&head, &rep);
         let listed = head.list();
         let (name, params) = match listed.as_deref() {
             Some([n, ps @ ..]) => (n.clone(), Some(ps.to_vec())),
             _ => (head.clone(), None),
         };
-        let Some(n) = name.sym() else {
+        if name.sym().is_none() {
             return Err(FxError::at(span, usage));
-        };
-        let n = self.interner.name(n).to_string();
+        }
         let mut sym = |s: &str| Syn::named(span, s, &mut self.interner);
         let list = |items: Vec<Syn>| {
             if items.is_empty() { Syn::nil(span) } else { Syn::lst(span, items) }
         };
         let (define, poly, subr, pure, lambda, x) = (sym("define"), sym("poly"), sym("subr"), sym("pure"), sym("lambda"), sym("x"));
-        let (up, down) = (sym(&format!("up-{n}")), sym(&format!("down-{n}")));
         // The binders, variance left out, and the type as it is used.
         let (binders, used) = match &params {
             Some(ps) => {
@@ -1575,17 +1574,14 @@ impl Checker {
                 Ok(Top::DefineConvention { name })
             }
             Some("define-generative") => {
-                let [_, head, rep] = items else {
-                    return Err(FxError::at(form.span(), "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`"));
-                };
-                let name = self.define_generative(head, rep)?;
+                let (head, rep, seal, unseal) = self.generative_parts(items, form.span())?;
+                let name = self.define_generative(&head, &rep)?;
                 // Only its own conversions, which follow, see inside it.
                 let which = crate::ast::last_id(self.generatives.len(), "generative types");
-                for side in ["up-", "down-"] {
-                    let n = self.interner.intern(&format!("{side}{}", self.interner.name(name)));
-                    self.inside.push((n, which));
-                }
-                Ok(Top::DefineGenerative { name })
+                let (seal, unseal) = (seal.sym().expect("a name"), unseal.sym().expect("a name"));
+                self.inside.push((seal, which));
+                self.inside.push((unseal, which));
+                Ok(Top::DefineGenerative { name, seal, unseal })
             }
             Some("define-type") => {
                 let [_, name, def] = items else {

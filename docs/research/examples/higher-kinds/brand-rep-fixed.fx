@@ -9,6 +9,6 @@
 ;; as-is: FX-26 requires one honest, declared `rep` per family, checked
 ;; once, with no unsafe escape hatch to let it vary per instantiation of
 ;; `f` the way OCaml's `%identity` does.
-(define-generative (app (f type) (a type)) a)
-(define-generative list-brand int)
+(define-generative (app (f type) (a type)) a #:seal up-app #:unseal down-app)
+(define-generative list-brand int #:seal up-list-brand #:unseal down-list-brand)
 ((proj down-app list-brand int) ((proj up-app list-brand int) 5))

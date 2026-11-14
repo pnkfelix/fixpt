@@ -1,6 +1,7 @@
 ;;; A lemma: if a ≤ b then (tree a) ≤ (tree b). Its proof rebuilds the tree it
 ;;; is given, tag for tag; nothing calls it, and the invariant tree widens.
-(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a)))))
+(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a))))
+  #:seal up-tree #:unseal down-tree)
 (define* tree-up (proves (poly ((a type) (b type)) (<= (tree a) (tree b)) (<= a b)))
   (lambda (f t)
     (up-tree (tagcase (down-tree t)

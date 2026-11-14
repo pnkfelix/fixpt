@@ -271,7 +271,10 @@
                                       "no signature says: not in a template")
                   s))
         (defn
-         (cond ((and macro (makes-defns? (syn-symbol hd))) (macro-operands fail ps at hd parts))
+         (cond ((and (string=? head "define-generative") (= (len (proper-items s)) 3))
+                (fail-at fail (string-append "a template's `define-generative` names its "
+                                             "conversions, `#:seal` and `#:unseal`") s))
+               ((and macro (makes-defns? (syn-symbol hd))) (macro-operands fail ps at hd parts))
                ((and macro (makes-desc? (syn-symbol hd)))
                 (not-definition fail s (string-append "them by a macro that makes definitions, "
                                                       "not a description's")))

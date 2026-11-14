@@ -2361,6 +2361,12 @@ impl Aligner<'_> {
             // a module's values or descriptions by what each is given, which
             // only the kind's word tells (`parse::binder_is_kind`).
             Some((_, "module-parameters")) if defn && self.mode == Mode::Program && items.len() == 2 => Some(self.parameters_sig(&items[1])),
+            // A `define-generative` names its conversions
+            // (`docs/research/generative-types.md` §7), said so here rather
+            // than as a form its signature does not fit.
+            Some((_, "define-generative")) if defn && self.mode == Mode::Template && items.len() == 3 && tail.is_none() => {
+                return Err(FxError::at(s.at(), "a template's `define-generative` names its conversions, `#:seal` and `#:unseal`"));
+            }
             Some((h, n)) if defn => match self.m.defined.get(&h) {
                 Some(m) if m.defn => Some(m.sig.clone()),
                 Some(m) if m.desc => return Err(not_one("them by a macro that makes definitions, not a description's")),

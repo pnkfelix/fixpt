@@ -3,8 +3,9 @@
 ;; definition its rep carries, a recursive one with a parameter too. Code
 ;; staged passes a value of one between the module's procedures; it cannot
 ;; take one apart, nor pass its representation for it.
-(define-generative id int)
-(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a)))))
+(define-generative id int #:seal up-id #:unseal down-id)
+(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a))))
+  #:seal up-tree #:unseal down-tree)
 (define rt
   (module (define make (subr (read (globals up-id)) (int) id) (lambda (n) (up-id n)))
           (define get (subr (read (globals down-id)) (id) int) (lambda (i) (down-id i)))

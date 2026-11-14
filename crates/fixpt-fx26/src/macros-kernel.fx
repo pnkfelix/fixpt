@@ -100,6 +100,14 @@
       (union (export (dvar (import type (rho (A dvar)))) (rho (A dvar)))
              (export ((dvar . dbinders) (import type (rho (AA dvar) (DA rib)))) (rho (AA dvar)))))
     (definition define-effect (export (dvar type) (rho (A dvar))))
+    ;; A generative type, its conversions named, `#:seal mk #:unseal get`,
+    ;; values each (`docs/research/generative-types.md` §7).
+    (definition define-generative
+      (union (export (dvar (import type (rho (A dvar))) label bvar label bvar)
+                     (rho (A dvar) (ADDD var) (ADDDDD var)))
+             (export ((dvar . dbinders) (import type (rho (AA dvar) (DA rib)))
+                      label bvar label bvar)
+                     (rho (AA dvar) (ADDD var) (ADDDDD var)))))
     (definition begin defns))))
 
 ;; The binding structure of the forms `kernel-forms` has not (yet), for a
@@ -200,9 +208,6 @@
     (form with (expr . (import exprs (shape A))))
     (form %datum (data))
     (form prompt (expr expr expr))
-    (definition define-generative
-      (union (export (dvar (import type (rho (A dvar)))) (rho (A dvar)))
-             (export ((dvar . dbinders) (import type (rho (AA dvar) (DA rib)))) (rho (AA dvar)))))
     (definition define-datatype
       (union (export (dvar . (import variants (rho (A dvar)))) (rho (A dvar) (D rib)))
              (export ((dvar . dbinders) . (import variants (rho (AA dvar) (DA rib))))

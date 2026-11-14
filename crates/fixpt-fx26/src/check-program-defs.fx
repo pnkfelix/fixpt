@@ -225,13 +225,13 @@
       (t-define-convention (name form a b)
         (let ((n (k-name-of name "expected a name")))
           (begin (k-check-convention form) (k-push-desc n (ds-conv (cv-native))))))
-      (t-define-generative (head rep a b)
+      (t-define-generative (head rep ns a b)
         (let* ((name (k-define-generative head rep))
-               (g (- (get k-ngens) 1))
-               (n (symbol->string name)))
-          ;; Only its own conversions, which follow, see inside it.
-          (set k-inside (cons (cons (k-prefixed "down-" n) g)
-                              (cons (cons (k-prefixed "up-" n) g) (get k-inside))))))
+               (g (- (get k-ngens) 1)))
+          ;; Only its own conversions, which follow, see inside it: named
+          ;; as the form names them (`generative-conversions`).
+          (set k-inside (cons (cons (car (cdr ns)) g)
+                              (cons (cons (car ns) g) (get k-inside))))))
       (else y #u))))
 
 (define k-declare-each (->* (k-tops) unit)

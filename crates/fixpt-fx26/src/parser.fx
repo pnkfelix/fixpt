@@ -412,16 +412,10 @@
              (cons (product (1 9) (2 (the names (list '%hinclude))) (3 (extract it 3))
                             (4 (extract it 4)))
                    rest))
+            ;; A generative type: its name, then its conversions'.
             ((= k 0)
-             (let ((t (symbol->string (car ns))))
-               (cons it (hidden-marks-of "%hidden:" (the names (list (car ns))) a b
-                                         (hidden-marks-of "%hiddenv:"
-                                                          (the names
-                                                               (list (string->symbol
-                                                                      (string-append "up-" t))
-                                                                     (string->symbol
-                                                                      (string-append "down-" t))))
-                                                          a b rest)))))
+             (cons it (hidden-marks-of "%hidden:" (the names (list (car ns))) a b
+                                       (hidden-marks-of "%hiddenv:" (cdr ns) a b rest))))
             (else (cons it (hidden-marks-of (if (= k 1) "%hidden:" "%hiddenv:") ns a b rest)))))))
 (define hidden-marks-of
   (->* (string names int int mod-items) mod-items)

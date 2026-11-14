@@ -226,7 +226,7 @@ fn a_program_fasl_is_stale_when_an_abbreviation_it_names_changed() {
 fn a_program_fasl_tells_apart_abstract_types_of_the_same_name() {
     let dir = scratch("selects");
     // Two files of the same name, whose abstract types are named alike.
-    let module = "(define-generative t int)\n(define zero t (up-t 0))\n(define value (subr pure (t) int) (lambda (v) (down-t v)))\n";
+    let module = "(define-generative t int #:seal up-t #:unseal down-t)\n(define zero t (up-t 0))\n(define value (subr pure (t) int) (lambda (v) (down-t v)))\n";
     for m in ["a", "c"] {
         std::fs::create_dir_all(dir.join(m)).expect("made");
         std::fs::write(dir.join(format!("{m}/m.fx")), module).expect("written");
@@ -284,7 +284,7 @@ fn a_fasls_keywords_are_the_loaders() {
 /// both.
 fn library(dir: &Path) {
     std::fs::create_dir_all(dir.join("lib")).expect("made");
-    std::fs::write(dir.join("lib/a.fx"), "(define-generative t int)\n(define zero t (up-t 0))\n(define value (subr pure (t) int) (lambda (v) (down-t v)))\n").expect("written");
+    std::fs::write(dir.join("lib/a.fx"), "(define-generative t int #:seal up-t #:unseal down-t)\n(define zero t (up-t 0))\n(define value (subr pure (t) int) (lambda (v) (down-t v)))\n").expect("written");
     std::fs::write(
         dir.join("lib/b.fx"),
         "(define a (load-module \"a.fx\"))\n(define bump (subr pure ((select a t)) int) (lambda (v) (+ 41 ((with a value) v))))\n",
@@ -304,7 +304,7 @@ fn a_stale_fasl_is_said_and_its_source_loaded() {
     assert!(ok && out.contains("41 : int"), "{out}{err}");
     assert_eq!(err.lines().filter(|l| l.contains("is read from")).count(), 2, "{err}");
     // `a.fx` changed: both stale, `b`'s as `a` is below it.
-    std::fs::write(dir.join("lib/a.fx"), "(define-generative t int)\n(define zero t (up-t 1))\n(define value (subr pure (t) int) (lambda (v) (down-t v)))\n").expect("written");
+    std::fs::write(dir.join("lib/a.fx"), "(define-generative t int #:seal up-t #:unseal down-t)\n(define zero t (up-t 1))\n(define value (subr pure (t) int) (lambda (v) (down-t v)))\n").expect("written");
     let (ok, out, err) = fixpt(&dir, &["eval", "main.fx"], &[]);
     assert!(ok && out.contains("42 : int"), "{out}{err}");
     assert!(err.contains("`lib/a.fasl` is stale (its source changed): `lib/a.fx` is loaded from its source"), "{err}");

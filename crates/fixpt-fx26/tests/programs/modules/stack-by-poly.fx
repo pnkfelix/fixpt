@@ -27,7 +27,7 @@
   (plambda ((a type))
     (lambda ()
       (module
-        (define-generative stack (listof a @heap))
+        (define-generative stack (listof a @heap) #:seal up-stack #:unseal down-stack)
         (define empty stack (up-stack nil))
         (define is-empty (subr (read @heap) (stack) bool)
           (lambda (s) (null? (down-stack s))))

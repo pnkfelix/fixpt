@@ -307,12 +307,6 @@
                          (go (cdr ns) (cdr ps) (bind1 (car ns) v e)))))))
         (go ns ps e)))))
 
-;; An abstract type `n`'s conversions' names.
-(define conversion-names (->* (string) names)
-  (lambda (n)
-    (the names (list (string->symbol (string-append "up-" n))
-                     (string->symbol (string-append "down-" n))))))
-
 ;; The names a module's items define, in order.
 (define module-names (->* (mod-items) names)
   (lambda (items)
@@ -320,7 +314,8 @@
         nil
         (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2))
                (rest (module-names (cdr items))))
-          (case k ((0) (append (conversion-names (symbol->string (car ns))) rest))
+          ;; A generative type's conversions: the names after its own.
+          (case k ((0) (append (cdr ns) rest))
                   ((2 3) (append ns rest))
                   (else rest))))))
 
@@ -568,7 +563,7 @@
           #u
           (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4)))
             (begin
-              (case k ((0) (fill-cells (conversion-names (symbol->string (car ns))) xs e))
+              (case k ((0) (fill-cells (cdr ns) xs e))
                       ((2 3) (fill-cells ns xs e))
                       (else #u))
               (fill-module (cdr items) e))))))

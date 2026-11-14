@@ -2,6 +2,6 @@
 ; list counted from zero is not one counted from one.
 (define-type zero (sumof (zero unit)))
 (define-type one (sumof (one unit)))
-(define-generative (counted (i type)) (listof int acyclic))
+(define-generative (counted (i type)) (listof int acyclic) #:seal up-counted #:unseal down-counted)
 (define from-zero (counted zero) (up-counted (list 0 1)))
 (define from-one (counted one) from-zero)

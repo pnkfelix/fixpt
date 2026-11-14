@@ -4,7 +4,7 @@
 ;; `counter`'s are one another's, both ways, and inside `more` `t` is it.
 ;; `counter`, with an abstract type of its own.
 (define counter
-  (module (define-generative t int)
+  (module (define-generative t int #:seal up-t #:unseal down-t)
           (define zero t (up-t 0))
           (define next (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))
           (define value (subr pure (t) int) (lambda (c) (down-t c)))))

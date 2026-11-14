@@ -173,8 +173,8 @@
         (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2)) (xs (extract it 4))
                (rest (c-module-values (cdr items))))
           (case k ((0)
-                   (c-mv-onto (c-converter "up-" (car ns)) (car xs) 0 #f
-                             (c-mv-onto (c-converter "down-" (car ns)) (car (cdr xs)) 0 #f rest)))
+                   (c-mv-onto (car (cdr ns)) (car xs) 0 #f
+                             (c-mv-onto (car (cdr (cdr ns))) (car (cdr xs)) 0 #f rest)))
                   ((2)
                    (let ((l (and (not (null? (extract it 3))) (c-checked-lambda? (car xs)))))
                      (c-mv-onto (car ns) (car xs) 2 l rest)))

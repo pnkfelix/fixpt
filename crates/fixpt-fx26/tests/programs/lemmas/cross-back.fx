@@ -1,6 +1,8 @@
 ; Rejected: the lemma goes one way only.
-(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a)))))
-(define-generative (tree2 (a type)) (sumof (leaf a) (node (tupleof (tree2 a) (tree2 a)))))
+(define-generative (tree (a type)) (sumof (leaf a) (node (tupleof (tree a) (tree a))))
+  #:seal up-tree #:unseal down-tree)
+(define-generative (tree2 (a type)) (sumof (leaf a) (node (tupleof (tree2 a) (tree2 a))))
+  #:seal up-tree2 #:unseal down-tree2)
 (define* t2 (proves (poly ((a type)) (<= (tree a) (tree2 a))))
   (lambda (t)
     (up-tree2 (tagcase (down-tree t)

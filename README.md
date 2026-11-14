@@ -196,10 +196,10 @@ a list of top-level definitions. It doesn't know it will be loaded as a
 module. `counter.fx` is
 
 ```scheme
-(define-generative t int)
-(define zero t (up-t 0))
-(define inc (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))
-(define value (subr pure (t) int) (lambda (c) (down-t c)))
+(define-generative t int #:seal seal-t #:unseal unseal-t)
+(define zero t (seal-t 0))
+(define inc (subr pure (t) t) (lambda (c) (seal-t (+ (unseal-t c) 1))))
+(define value (subr pure (t) int) (lambda (c) (unseal-t c)))
 ```
 
 and a program loads it, uses it with `with`, and passes it to a procedure

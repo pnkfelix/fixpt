@@ -130,7 +130,7 @@
 (define k-type-top-start (->* (top) int)
   (lambda (form)
     (tagcase form
-      (t-define-type (n d a b) a) (t-define-effect (n d a b) a) (t-define-generative (h r a b) a)
+      (t-define-type (n d a b) a) (t-define-effect (n d a b) a) (t-define-generative (h r ns a b) a)
       (t-define-convention (n f a b) a) (else y -1))))
 ;; Whether `form`, a type's or an effect's definition, is declared where it
 ;; is, not ahead: it names a file (`k-read-in-order?`), or is after a

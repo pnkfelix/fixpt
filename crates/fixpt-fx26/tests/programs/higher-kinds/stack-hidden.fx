@@ -9,7 +9,7 @@
             (val pop (poly ((a type)) (subr (read @heap) ((stack a)) (stack a))))))
 (define list-stack stack-sig
   (module
-    (define-generative (stack (a type)) (listof a @heap))
+    (define-generative (stack (a type)) (listof a @heap) #:seal up-stack #:unseal down-stack)
     (define empty (poly ((a type)) (stack a)) (plambda ((a type)) (up-stack nil)))
     (define is-empty (poly ((a type)) (subr (read @heap) ((stack a)) bool))
       (plambda ((a type)) (lambda (s) (null? (down-stack s)))))

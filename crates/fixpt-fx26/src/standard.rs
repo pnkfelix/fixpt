@@ -853,7 +853,12 @@ pub fn standard_text() -> String {
         crate::check::TYPEBOUND,
     ]
         .iter()
-        .map(|d| format!("(define-generative {d})\n"))
+        // Its conversions named as they were (`docs/research/generative-types.md`
+        // §7): the type's name, a declaration's first word.
+        .map(|d| {
+            let n = d.trim_start_matches('(').split_whitespace().next().expect("a name");
+            format!("(define-generative {d} #:seal up-{n} #:unseal down-{n})\n")
+        })
         .collect::<String>()
         + &crate::check::STANDARD_TYPES.iter().map(|(n, t)| format!("(define-type {n} {t})\n")).collect::<String>();
     decl + &ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect::<String>()

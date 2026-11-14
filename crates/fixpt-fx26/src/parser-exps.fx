@@ -19,7 +19,7 @@
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import forms-module process-form given-form processes input-items item-form? run-item run-count
-        datum-form fresh-name written-relied relied-word?)
+        datum-form fresh-name written-relied relied-word? generative-conversions)
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type data syn))
 (define syn->datum (with parser-module syn->datum))
@@ -36,7 +36,8 @@
         arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol mk-list quoted
         rec-names rec-types rec-inits module-usage loaded loaded-next-at in-loaded loaded-mark
         loaded-error loaded-params loaded-made mk-form dt-labelled without-syntax var-ref kw-head?
-        (type syns-a exp top exp-list mod-item mod-items letrec-list let-list arm-list loaded-file)
+        (type syns-a exp top exp-list mod-item mod-items letrec-list let-list arm-list loaded-file
+              names)
         (effect parses))
 ;; A `case`'s data by halving (`parser.fx`).
 (import parser-module case-tree-from case-sort-key case-sort case-entries-length case-exps-length
@@ -802,9 +803,11 @@
       (let* ((parts (syn-items f "a module's definition"))
              (n (len parts))
              (head (if (null? parts) '|()| (syn-head (car parts)))))
-        (cond ((and (symbol=? head 'define-generative) (= n 3))
+        (cond ((and (symbol=? head 'define-generative) (>= n 3))
                ;; `(define-generative (t (p k) …) T)`: a type constructor, its
                ;; head kept after its representation for the checker to read.
+               ;; Its names: the type's, then its conversions'
+               ;; (`generative-conversions`).
                (let* ((head (nth parts 1))
                       (hs (tagcase head (lst (xs d a b xpn) xs) (else x (the syns-a nil))))
                       (params? (and (not (null? hs)) (not (null? (cdr hs)))))
@@ -814,7 +817,10 @@
                       (ts (if params?
                               (the syns-a (list (nth parts 2) head))
                               (one-syn (nth parts 2)))))
-                 (mod-item-of 0 name ts (list up down))))
+                 (product (1 0)
+                          (2 (the names (cons name (generative-conversions pfail-at (drop parts 3)
+                                                                           name f))))
+                          (3 ts) (4 (the exp-list (list up down))))))
               ((and (symbol=? head 'define-type) (= n 3) (param-head? (nth parts 1)))
                (param-desc-item (syn-start f) (syn-end f) (nth parts 1) (nth parts 2)))
               ((and (symbol=? head 'define-type) (= n 3))

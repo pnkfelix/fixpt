@@ -27,7 +27,7 @@
 
 (define list-container
   (module
-    (define-generative f (=> type type))        ; PROPOSED: a generative
+    (define-generative f (=> type type) #:seal up-f #:unseal down-f)        ; PROPOSED: a generative
                                                   ; type CONSTRUCTOR, not
                                                   ; a generative type.
     (define empty (poly ((a type)) (f a)) (plambda ((a type)) (up-f nil)))

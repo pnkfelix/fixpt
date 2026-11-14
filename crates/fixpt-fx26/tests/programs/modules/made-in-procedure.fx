@@ -6,7 +6,7 @@
 (define make (subr pure (int) counters)
   (lambda (start)
     (module
-      (define-generative t int)
+      (define-generative t int #:seal up-t #:unseal down-t)
       (define zero t (up-t start))
       (define-rec
         (inc (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))

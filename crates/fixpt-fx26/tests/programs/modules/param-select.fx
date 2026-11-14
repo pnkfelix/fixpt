@@ -2,7 +2,7 @@
 ;; A parameter's type may name a module in scope.
 (define counter
   (module
-    (define-generative t int)
+    (define-generative t int #:seal up-t #:unseal down-t)
     (define zero t (up-t 0))
     (define inc (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))
     (define value (subr pure (t) int) (lambda (c) (down-t c)))))

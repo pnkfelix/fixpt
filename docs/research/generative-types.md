@@ -463,3 +463,96 @@ it.
 6. Run time: whether a generated constructor needs a run-time identity
    (a tag number per generation) or, being static, can be a tag like any
    other, the distinction the checkers' alone.
+
+## 7. Conversions without computed names (2026-11-14)
+
+From a discussion with the user, started by a macro that makes a
+`define-generative` (`TODO.md` §182, binders of descriptions' second
+stage). Decided (the user, 2026-11-14): the conversions are named where
+the type is defined, `#:seal` and `#:unseal`, ordinary bindings; no
+derived names, and no forms over the type; every definition must name
+them, at once, no warning period ("just force everyone to upgrade").
+Generative datatypes later.
+
+### 7.1 The problem
+
+`(define-generative t T)` binds three names: the type `t`, and the
+conversions `up-t` (`T` to `t`) and `down-t`, names made by gluing a
+prefix to `t`'s spelling. Hygiene rests on the expander knowing every
+binder from a form's signature (`typed-macros.md`, "Decided: signatures
+depend on their operands by address alone"), and these it cannot know: a
+use's `meters` makes a program's `up-meters` that the expander never saw
+bound; a template's own `t`, renamed `%t:5`, makes `up-%t:5`, and the
+template's `up-t` is not renamed with it. The binding structure depends
+on string computation, which the macro system keeps out, and the core
+language put it in.
+
+### 7.2 What the conversions are
+
+In §6's terms, `t` is an existential (a name hidden at an interface:
+outside its module, `(abs t type)`), and the conversions are the witness
+of the isomorphism with its representation: `up-t` a generative
+constructor, `down-t` its eliminator, which only whoever holds them can
+apply. A conversion is a capability. Today the checker holds to that
+exactly: `t` is opaque everywhere, its own module's items too (`(define z
+t 5)` in it is refused, both checkers); only the conversions' bodies see
+its representation, and where their names are in scope is where the type
+can be crossed. So the abstraction is enforced by nothing but ordinary
+scope, and a conversion's name is what carries the capability.
+
+### 7.3 The form
+
+`(define-generative t T #:seal mk #:unseal get)`: `mk` of type `(subr
+pure (T) t)` and `get` of `(subr pure (t) T)`, ordinary binders, in scope
+as any definition's (a module's items, or the top level after it). The
+module exports them or not, one direction or both, or passes them on;
+they are first-class, `(map mk xs)`. Both are named: neither is refused,
+saying how to name them as they were (`#:seal up-t #:unseal down-t`); one
+alone is refused, not yet: a type crossed one way only, `#:unseal get`
+alone, is open (7.7). A family, `(define-generative (stack (a type)) T #:seal mk #:unseal
+get)`, gives `mk` and `get` the family's `poly` types, as `up-stack` and
+`down-stack` have now.
+
+Considered and refused, so that nothing but scope enforces the
+abstraction (the user): forms over the type, `(seal t e)`, which would
+need a rule of their own, `t` resolved by lexical scope to its
+`define-generative` binder, since `t` is opaque even in its module (an
+earlier draft of this section argued the forms needed no rule, from a
+transparency inside the module that FX-26 does not have); a brand any
+code could convert, which would expose the representation; and `t`
+transparent inside its module, ML's way, which would lose generativity
+there and leave a top-level generative no boundary at all.
+
+### 7.4 Macros
+
+The named conversions are binders like any, a use's (`bvar`) or the
+template's, renamed fresh with it. The kernel's signature for
+`define-generative` exports the type's `dvar` and each conversion named.
+A derived name is never made in a template: a template's
+`define-generative` names its conversions or has none.
+
+### 7.5 Transition
+
+None (the user's): derived names went at once. Every definition names its
+conversions, a form naming neither refused with the names it would have
+had; Fixpt's own definitions given them explicitly, `#:seal up-t
+#:unseal down-t`, so that no call changed (116, by a script then
+`sexp-edit check`; the standard environment's generative types alike).
+Heist and Kayak rewrite theirs, some 220 definitions, the same way.
+
+### 7.6 Built (2026-11-14)
+
+Both front ends: the form's names stored where it is read (the Rust
+checker's `generative_parts`, the FX-26 parser's `generative-conversions`,
+a module item's names the type's then its conversions'), every phase
+reading them, none deriving them; the macro kernel's signature exporting
+the named conversions as values, so a template may make the form. Found on the way: a session told the conversions the FX-26 front end
+makes itself from the program's own forms by their places, which a macro's
+use gives every form it makes, so a macro's other definitions were dropped;
+now by their names.
+
+### 7.7 Open
+
+1. Generative datatypes (`define-datatype`, `define-data`): later, §6's
+   per-constructor view their own design.
+2. One conversion named alone, a type crossed one way only.

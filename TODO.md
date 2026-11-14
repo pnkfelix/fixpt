@@ -4362,6 +4362,17 @@ leaves: definitions of types and effects (binders of types, item 8); a
 template's sight of what another such macro's use defines (an `export` in
 its signature); typed parts, its template checked once; uses in a
 module's items; names a template constructs (`make-point`), if wanted.
+Binders of descriptions' second stage (2026-11-14): a macro making a
+`define-generative` met its conversions' computed names, `up-t`; the
+form revisited with the user, `docs/research/generative-types.md` §7
+(decided: the conversions named where the type is defined, `#:seal mk
+#:unseal get`, ordinary bindings, required at once, no warning period:
+the user's). Built 2026-11-14, both front ends, a macro making it too
+(§7.6 there); Heist and Kayak rewrite their definitions, `#:seal up-t
+#:unseal down-t`. Then `moduleof` in templates, whose items' names
+are labels and binders at once (a label kept, its binder renamed: the
+checkers would need the two told apart), and a file's macro's
+descriptions with binders of its own.
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
 Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`
@@ -5564,7 +5575,12 @@ machine's.
 
 ## 230. Debugging a procedural macro: what channels to give (the user's, 2026-11-09)
 
-To discuss, not decided. A transformer is a pure subroutine from datum to
+Decided (the user, 2026-11-14): both an expander trace and notes. A
+switch outside the transformer (an environment variable, a REPL command
+naming macros) makes the expander say each call's input and output datum
+with its place; and a transformer may return notes of its own beside its
+output, which the expander shows when asked. Not built. Was: to discuss.
+A transformer is a pure subroutine from datum to
 datum (§228): no I/O, no global state it may write, and its input a
 datum, so there is no 3-D syntax either. Every way a Schemer would see a
 transformer's intermediate steps, or just print while debugging one, is
@@ -5577,7 +5593,12 @@ else. No shape is chosen yet.
 
 ## 231. Catching obvious macro mistakes, a transformer that never ends (the user's, 2026-11-09)
 
-To discuss, not decided. An `sc-macro-transformer` can easily return its
+Decided (the user, 2026-11-14): a cycle check, with fuel behind it. Each
+expansion chain keeps the (macro, form) pairs it has expanded; a use that
+comes back to one is refused, naming the macro, its definition and the
+chain; and a depth limit, its message naming the macro and the last
+uses, catches what changes each time. No static analysis yet. Not built.
+Was: to discuss. An `sc-macro-transformer` can easily return its
 input `expr` as it is. The expander then expands the same form again,
 forever. Ruling out "the output contains the input" is too strong:
 `` `(quote ,expr) `` puts `expr` in the output legitimately, since it is
@@ -6712,3 +6733,16 @@ task itself was preempted, which is why a spinning first task let a
 sleeper wake. Now `main-wait` fires what is due each time round
 (`processes.fx`); op 30 returns at once when nothing waits on a timer, the
 input or a process. Test: `processes/race-deadline.fx`.
+
+## 271. A top-level `define-generative` run form by form (found 2026-11-14)
+
+`fixpt eval "(define-generative meters int) (define d meters (up-meters 5))
+(down-meters d)"` says the checkers disagree: the FX-26 checker refuses
+`up-meters`'s definition (`a meters is expected here, and this is a
+int`), not seeing it as the type's own conversion. The same text as a
+whole program (`fixpt check`, `fixpt run`) is taken, both agreeing. Found
+on fd18a6ec too, before heap syntax: not new. A guess: run form by form,
+the conversions' definitions reach the FX-26 checker apart from the
+`define-generative` that marks them its own (`k-inside`, set where the
+form is declared), or after the mark is taken. The REPL is likely the
+same. Not yet looked into.

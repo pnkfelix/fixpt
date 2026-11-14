@@ -98,7 +98,6 @@
         (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
               (int int)
               (listof k-callable acyclic)))
-   (val k-conversion-name (subr (maxeff (read @globals) spin) (string symbol) symbol))
    (val k-free-vars (subr (maxeff (alloc @t) (read @globals) spin (read @t)) (kx) k-names))
    (val k-rename
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
