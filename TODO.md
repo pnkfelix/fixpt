@@ -6941,5 +6941,49 @@ mark as `Heap::set_slot` does (a card for a young value stored into an
 older area, the second table for an old one into the static or code
 area, the static code slots for code into the static area), not every
 store's card; thread-local counts, summed at safepoints, later.
+
+Built (2026-11-14) for every machine on x86_64: `Heap::card_budget`,
+half a nursery's words of cards, one less for each clean card the
+barrier's mark makes dirty (`barrier_card`), a collection due and
+`inline_limit` 0 when it is spent, restored by each collection. Machine
+code tests as `set_slot` does (`x86_64::stored`; FX-26's `x86-stored`
+the same bytes, its oracle test): the place young, the value no
+reference, or no younger, or young onto a dirty card, and it stores
+inline; else the heap stores it (`State::barrier`, `barrier_store`,
+`Heap::store_at_address`), every caller-saved register kept, and the
+allocation limit it gives written back. At every x86_64 site of the
+cellular, register-code and direct compilers, Rust's and FX-26's, and the
+stencils' `global!`. Test: `fixpt-cli/tests/remembered_set.rs`, on each
+of the twelve machines no minor collection scanning more than the budget
+(32 cards for a nursery of 4096 words, which each reaches).
+
+Not yet: arm64 (the user's choice, 2026-11-14: x86_64 merged first). Its
+barriers still mark every store's card and count none, so the budget
+there is spent only by the Rust machines' stores; correct, a card marked
+too many only scanned. Its `stored`, Rust's and FX-26's, would be held
+equal byte for byte here, but no arm64 code runs on this machine: to be
+run on one before it merges. Found on the way: the machines never
+collected at the same points (they allocate differently: 330 to 518
+minor collections of one program at a 4096-word nursery), so one rule
+makes the budget the same everywhere, not the points; and
+`FIXPT_GC_SUMMARY`'s minor-collection time on the FX-26 machines came to
+nearly the whole run's (4.6 s of 4.7) where `FIXPT_GC_TRACE` says 0.01 ms
+each, to look into.
 Beside it, the skim over clean cards is the
 old space's size over 512, bounded by a summary table if it ever shows.
+
+## 277. Nested calls of `append` checked in time exponential in their depth (found 2026-11-14)
+
+Both checkers. `(append (cons 0 nil) (append (cons 1 nil) … nil))`, n
+deep, in one lambda: the FX-26 checker 0.009, 0.012, 0.025, 0.105,
+0.93 s at depths 4, 6, 8, 10, 12, about three times longer for each
+level; the Rust checker 0.005, 0.006, 0.011, 0.030, 0.105 s. Found when
+`x86_64.fx`'s `x86-stored` (TODO §276), 17 deep, took the check of
+`x86_64.fx` from 0.03 s past 300 s, and the front end compiling itself
+(`bootstrap`'s fixpoints, `checker`'s every program, `made_code`) on the
+machines slower than native from seconds to over ten minutes. Written in
+a flat `let*` there, each `append` its own binding, it checks in 0.035 s.
+Not found yet: which part re-checks what it was given (an argument
+checked once to infer the instance of `append`'s type and again against
+it, at each level, would be 2^n); whether any polymorphic function nested
+so does it, or `append` alone. Wanted: linear, and a test of depth 30.
