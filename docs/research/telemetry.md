@@ -576,7 +576,7 @@ column in a commit's bench table where time cannot.
 | `gc_nanos`                           | `Heap`                        | both kinds, `Instant` around each              | Wall-clock time; minor and major summed                                    |
 | `max_major_nanos`, `max_minor_nanos` | `Heap`                        | end of each collection of that kind            | The longest pause of each kind (stage 1, 2026-09-30)                       |
 | `peak_words`                         | `Heap`                        | start of each collection                       | Most words in use, sampled when the heap is fullest (stage 1)              |
-| `trace`                              | `Heap`                        | set by `FIXPT_GC_TRACE`                        | A line per collection on stderr: kind, pause, copied, in use (stage 1)     |
+| `trace`                              | `Heap`                        | set by `FIXPT_GC_TRACE`                        | A line per collection on stderr: kind, pause, copied, in use (stage 1), and the dirty cards it scanned, the remembered set's size (2026-11-14) |
 | `allocated()`                        | `Heap`                        | computed from `words_allocated` and the tops   | Nursery and semispace only; exact even with inline allocation              |
 | `region_words()`                     | `Heap` (regions.rs)           | at chunk turnover and region exit, plus fills  | Arenas and reaps together; no per-region total once a chunk is full        |
 | `region_in_use(h)`                   | `Heap`                        | computed                                       | Per live region; for a reap, after a collection, only what was reachable   |

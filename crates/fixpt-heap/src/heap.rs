@@ -2693,6 +2693,7 @@ impl Heap {
             trace_code: code,
             crossing: &mut self.crossing,
             last_card: usize::MAX,
+            cards_scanned: 0,
         };
 
         // `scan` and `c.free` are relative to `to`.
@@ -2881,7 +2882,7 @@ impl Heap {
                 *w = WEAK_DEAD;
             }
         }
-        let Copier { free, new, marked, large_marks, code_marks, .. } = c;
+        let Copier { free, new, marked, large_marks, code_marks, cards_scanned, .. } = c;
         if code {
             self.sweep_code(&code_marks);
             self.code_live = self.code.used();
@@ -2957,17 +2958,18 @@ impl Heap {
         let nanos = started.elapsed().as_nanos() as u64;
         self.gc_nanos += nanos;
         self.max_major_nanos = self.max_major_nanos.max(nanos);
-        self.traced("major", self.gc_count, nanos, free, before);
+        self.traced("major", self.gc_count, nanos, free, before, cards_scanned);
     }
 
     /// For `FIXPT_GC_TRACE`: a line for the collection just made, of `kind`
     /// and number `n`, which took `nanos` and copied `copied` words, the
-    /// heap having `before` words in use as it started.
-    pub(crate) fn traced(&self, kind: &str, n: u64, nanos: u64, copied: usize, before: usize) {
+    /// heap having `before` words in use as it started, and scanned `cards`
+    /// dirty cards (of 64 words each).
+    pub(crate) fn traced(&self, kind: &str, n: u64, nanos: u64, copied: usize, before: usize, cards: usize) {
         if self.trace {
             let m = |w: usize| w as f64 / 1e6;
             eprintln!(
-                "; gc {kind} {n}: {:.2} ms, {:.2} M words copied, {:.2} M in use before, {:.2} M after",
+                "; gc {kind} {n}: {:.2} ms, {:.2} M words copied, {:.2} M in use before, {:.2} M after, {cards} dirty cards",
                 nanos as f64 / 1e6,
                 m(copied),
                 m(before),
@@ -3706,6 +3708,9 @@ struct Copier<'r> {
     /// the card the last one started in.
     crossing: &'r mut fixpt_memmgmt::Words,
     last_card: usize,
+    /// The dirty cards scanned, of every table: the remembered set's size
+    /// this collection, for `FIXPT_GC_TRACE`.
+    cards_scanned: usize,
 }
 
 impl Copier<'_> {

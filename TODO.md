@@ -6878,3 +6878,54 @@ Built (`typed-macros.md`, "Trailmarks"). Not yet:
 - `string-cases`' signature inferred: a `mu` of the clauses' list (§272's
   kind), and a pattern's `c ...` read against a `mu`'s list.
 - Heist and Kayak rewritten: every `syntax-rules ()` refused until then.
+
+## 275. One form's expansion fills the syntax heap's nursery: a panic (found 2026-11-14)
+
+`(count 0 x …)` 20000 deep (TODO §231's measure; `FIXPT_MACRO_DEPTH`
+raised) ends in "the nursery is full: 2 words more", a panic in
+`Heap::bump`, after 88 s and 8.9 GB, from the Rust expander
+(`transcribe` → `heap_syn::Mk::list` → `Heap::cons`). The syntax heap
+collects only at safepoints, never in an allocation (`heap_syn.rs`), and
+one form's expansion has none, so everything it makes is kept until it
+ends; a generational heap's nursery is at most 2^30 words
+(`NURSERY_MAX`), and past it `bump` asserts. Not the nursery's size
+(2000 deep with `FIXPT_NURSERY=50000` runs). Why so much: each step's
+use is made anew, its list's items copied from the rest a pattern
+variable took (`(count (+ n 1) . xs)`, a `lst` of items, each piece's
+plain datum beside it made from its parts'), so n uses each a part
+shorter make O(n²) words.
+
+To decide (the user's question, 2026-11-14: do we build new syntax, or
+keep a template and its bindings until expansion ends): (a) at the
+least, no panic: an allocation where the nursery is full and nothing may
+collect goes to the old space, each card it covers marked (a dirty card
+only scanned more), or the run fails saying so; (b) a safepoint between
+uses, the form held by a handle (`Kept`), so that what an expansion made
+and no longer holds is collected; (c) syntax shared, not copied: a rest
+that a template writes whole kept as one piece (a `dotted` whose tail is
+the bound list), or a template and its bindings kept until read, which
+both front ends' syntax and their readers of it would have to take. And
+the uses a checked template makes need no check of their own (Herman's:
+each part is of an operand that fit), which with (c) would make this
+macro linear; §182's typed tier is where that argument belongs.
+
+## 276. A minor collection's cost bounded by the remembered set (the user's, 2026-11-14)
+
+The card table (64-word cards) is bounded only by the old space: a minor
+collection scans each dirty card, so its cost can grow as the tenured
+space does, not as the nursery. Wanted: promote, collect the nursery,
+before the dirty cards make a minor collection costly. `FIXPT_GC_TRACE`
+now says each collection's dirty cards. Measured on §231's deep macro,
+2000 deep: at most 1856 a collection (about 119 k words, an eighth of the
+nursery), on average 115 before §231's fix, 360 after. Two ways, to
+choose: (A) feedback, no change to the barrier: where the last minor
+collection scanned more than half a nursery's words of cards, the next
+comes sooner (the allocation limit lowered); a bound on average only.
+(B) the barrier counts each card it makes dirty, and past half a
+nursery's words asks for a collection at the next safepoint (the
+allocation limit set to the top; the preemption poll for a loop that
+stores and does not allocate): a bound by construction, at a load, test
+and branch for each store that marks a card, in `Heap::mark_card` and
+each machine's stores (x86_64, arm64, the cellular and direct
+backends). Recommended: (B). Beside it, the skim over clean cards is the
+old space's size over 512, bounded by a summary table if it ever shows.

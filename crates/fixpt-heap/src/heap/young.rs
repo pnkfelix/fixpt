@@ -196,6 +196,7 @@ impl Heap {
             trace_code: false,
             crossing: &mut self.crossing,
             last_card,
+            cards_scanned: 0,
         };
         macro_rules! fwd {
             ($v:expr) => {{
@@ -244,7 +245,7 @@ impl Heap {
         }
         super::update_weak(mem, self.base, &mut self.weak, NURSERY_BASE, true);
         super::update_weak_pairs(mem, self.base, &c.weak_pairs, NURSERY_BASE, true);
-        let free = c.free;
+        let (free, cards) = (c.free, c.cards_scanned);
         self.top = old_top + free;
         assert!(self.top - self.active <= MAX_SEMI_WORDS, "the old space is full");
         // Past the semispace (one made small): room for the next nursery's
@@ -262,7 +263,7 @@ impl Heap {
         self.gc_nanos += nanos;
         self.minor_nanos += nanos;
         self.max_minor_nanos = self.max_minor_nanos.max(nanos);
-        self.traced("minor", self.minor_count, nanos, free, before);
+        self.traced("minor", self.minor_count, nanos, free, before, cards);
         self.provenance_swept();
     }
 
@@ -376,6 +377,7 @@ pub(super) fn scan_dirty_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64]
         if byte(cards, card) == 0 && !older.as_ref().is_some_and(|o| o.dirty(false, card)) {
             continue;
         }
+        c.cards_scanned += 1;
         let mut kept = false;
         let (clo, chi) = (card << CARD_SHIFT, ((card + 1) << CARD_SHIFT).min(hi));
         // The object that covers the card's first word: from the last
@@ -563,6 +565,7 @@ pub(super) fn scan_code_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64],
         if byte(cards, this) == 0 && !older.dirty(false, this) {
             continue;
         }
+        c.cards_scanned += 1;
         let mut kept = false;
         let (clo, chi) = (this << CARD_SHIFT, (this + 1) << CARD_SHIFT);
         // From the last object that starts at or before the card.
