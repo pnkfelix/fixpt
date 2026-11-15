@@ -830,6 +830,11 @@ fn conductor_offset(at: usize) -> usize {
 /// [`FRONT_END_FILES`].
 pub const READER: &str = include_str!("reader.fx");
 
+/// What [`READER`] is followed by where it is loaded alone, not the whole
+/// front end (`session.rs`'s `reader_text`): its parser, which the
+/// conductor makes for each front end otherwise, and its entry points.
+pub const READER_ALONE: &str = include_str!("reader-alone.fx");
+
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.

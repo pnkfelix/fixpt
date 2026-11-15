@@ -425,10 +425,13 @@ pub fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
 }
 
 /// The reader and parser's text: the front end's files to `reader.fx`,
-/// the eager reader's among them.
+/// the eager reader's among them, and `reader-alone.fx`.
 fn reader_text() -> String {
     let parser = crate::FRONT_END_FILES.iter().position(|(n, _)| *n == "reader.fx").expect("listed");
-    crate::FRONT_END_FILES[..=parser].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n")
+    let mut texts: Vec<&str> = crate::FRONT_END_FILES[..=parser].iter().map(|(_, t)| *t).collect();
+    // Its parser and entry points, which the conductor has otherwise.
+    texts.push(crate::READER_ALONE);
+    texts.join("\n")
 }
 
 /// The eager reader's licence (`Checker::reader_licence`), checked of the

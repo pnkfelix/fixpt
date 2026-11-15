@@ -2557,7 +2557,7 @@ impl Macros {
             return None;
         }
         let datum = s.plain();
-        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, datum, made, true)).flatten()
+        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, datum, made)).flatten()
     }
 
     /// Transformer `p` called on use `s` in expansion `made` in the

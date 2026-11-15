@@ -2289,20 +2289,27 @@ transformers' session (`TODO.md` §228).
    heap (`%phase1:current`, its transformers by style and text) so that
    both expanders reach it: the one closure for both. What it gives is made
    syntax at the use's place (`syn-of-datum`, as `read-answer` of its text
-   makes it; `datum-vector->list` new for it). Only called, never defined
-   or made, from there: a definition is a parse of the namespace's front
-   end, whose parser and expander are files loaded once, every front end's
-   in the runtime, and a parse inside the program's parse would leave it the
-   namespace's state (between parses each reads its own by its key). So
-   the Rust expander defines, from its lending, and where it has not (a
-   transformer not yet defined, a namespace not made, the evaluator) the
-   call answers `apart` and the transformers' session runs it by text, as
-   before. An expansion is now a program's or a REPL entry's from its
-   reading (`Fx26Session::read_program`, `read_entry` end the one before),
-   so the FX-26 expander's calls in the runs of its forms find what the
-   Rust one defined reading it. Test: `tests/phase1.rs`. `fixpt check` and
-   the comparisons check the Rust side with a fresh checker, of its own
-   heap (§280), so their FX-26 calls go apart until it is the session's.
+   makes it; `datum-vector->list` new for it). An expansion is a
+   program's or a REPL entry's from its reading (`Fx26Session::read_program`,
+   `read_entry` end the one before). At first only called, never defined
+   or made, from the FX-26 side: a definition is a parse of the
+   namespace's front end, and every front end used one reader and parser,
+   with their state, so a parse inside the program's left it the
+   namespace's (`aif` unknown after one). Not that the files are loaded
+   once: each call of a module file's maker makes an instance of its own,
+   state and all; but `reader.fx` made one at top level, and the
+   conductor's `let*`, so every `make-front-end`, used it. *Fixed*
+   (2026-11-15, branch `per-instance-parser`): the conductor's `let*`
+   makes each front end's reader and parser itself, and re-exports what
+   Rust and `bootstrap.fx` call of the program's (`parse-program`,
+   `loaded-files!`, `expansions-made`, …); `reader.fx` keeps the makers,
+   for `licence.rs`, and a parser for its stateless helpers alone; and
+   where the reader is loaded alone (lowered, `reader_text`),
+   `reader-alone.fx` makes its one parser and names its entries. So the
+   FX-26 expander makes the namespace and defines in it from inside its
+   parse, as the Rust one does: a front end 2 ms more to make (a
+   namespace, 10 ms to 12), the front end's text 26 lines more. Tests:
+   `tests/phase1.rs`.
 6. The separate transformers' session gone. *Since stage 2 narrowed*:
    kept, for the checkers with no session of theirs (§280), until they
    have runtimes. *Built so* (2026-11-15): a session's checker defines its

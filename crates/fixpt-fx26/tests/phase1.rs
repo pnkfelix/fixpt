@@ -121,3 +121,22 @@ fn the_expander_written_in_fx26_calls_what_the_rust_one_defined() {
         assert!(fixpt_fx26::phase1::called_for_fx26() > before, "{name}: called in phase 1");
     }
 }
+
+/// The expander written in FX-26, checking a program nothing has read
+/// before, makes the namespace and defines each transformer there itself,
+/// inside its own parse: the namespace's front end has a parser of its own
+/// (the conductor makes each front end's), so the parse it is inside goes
+/// on as it was, its macros defined.
+#[test]
+fn the_expander_written_in_fx26_defines_in_phase_1_inside_its_parse() {
+    let dir = format!("{}/tests/programs/procedural", env!("CARGO_MANIFEST_DIR"));
+    for name in ["aif-er.fx", "twice-sc.fx", "twice-rsc.fx", "split-er.fx"] {
+        let mut s = session();
+        let text = std::fs::read_to_string(format!("{dir}/{name}")).expect("reads");
+        let (made, called) = (fixpt_fx26::phase1::made(), fixpt_fx26::phase1::called_for_fx26());
+        let checked = s.check_with_own_checker(&text).expect("checks");
+        assert!(checked.is_ok(), "{name}: {checked:?}");
+        assert!(fixpt_fx26::phase1::made() > made, "{name}: a namespace made");
+        assert!(fixpt_fx26::phase1::called_for_fx26() > called, "{name}: called in phase 1");
+    }
+}

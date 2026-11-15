@@ -15,6 +15,28 @@
          (readings ((proj (load-module "fx26:readings.fx") @s @e @m @c)))
          ;; The parser's types, for what a parse gives (`keyed`).
          (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+         ;; This front end's reader and parser, with their state, made here
+         ;; (`reader.fx`): each front end's its own, so that one's parse,
+         ;; inside another's (a phase-1 namespace's, `phase1.rs`), leaves the
+         ;; other's as it was.
+         (eager-reader ((proj make-eager-reader @s @e @m @c)))
+         (read-text-at (with eager-reader read-text-at))
+         (parser-top ((proj make-reader @s @e @m @c @p)))
+         (parse-program (with parser-top parse-program))
+         (parser-exps (with parser-top parser-exps-module))
+         (parser-module (with parser-exps parser-module))
+         (shapes-module (with parser-top shapes-module))
+         (macros-module (with parser-top macros-module))
+         (imports-module (with parser-top imports-module))
+         (walk-module (with shapes-module walk-module))
+         (read-text (with eager-reader read-text))
+         (loaded (with parser-module loaded))
+         (loaded-files! (with parser-module loaded-files!))
+         (includes-given! (with parser-module includes-given!))
+         (with-macro-uses (with macros-module with-uses-given))
+         (expansions-made (with macros-module expansions-given))
+         (macro-source (with macros-module source-of))
+         (macro-sources-made (with macros-module sources-made))
          ;; The checker's first file.
          (check-types ((load-input "fx26:check-types.fx") tables))
          ;; Effects.
@@ -742,7 +764,34 @@
                             (c-ok (w) (sum made w))
                             (c-err (m) (sum failed m)))))))))))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
-    (product (run-checked (with eval-core run-checked))
+    (product (parse-program parse-program)
+             (read-text-at read-text-at)
+             (loaded-files! loaded-files!)
+             (includes-given! includes-given!)
+             (standard-names! (with imports-module standard-names!))
+             (expansions-made expansions-made)
+             (macro-source macro-source)
+             ;; A program's forms after expansion, in `text`, each with its
+             ;; local value binders renamed as the expander's walk finds their
+             ;; scopes (`macros-walk.fx`): for `tests/scopes.rs`, which holds
+             ;; the walk to the Rust expander's.
+             (program-walked
+              (lambda ((text string))
+                (let ((read (read-text text)))
+                  (if (null? read)
+                      (the (listof string acyclic) nil)
+                      ((with walk-module walked-forms) (car read))))))
+             ;; And each with what each module it opens was relied on for
+             ;; written in (`macros-shapes.fx`'s `shaped`): for
+             ;; `tests/scopes.rs`, which holds the records to the Rust
+             ;; expander's.
+             (program-shaped
+              (lambda ((text string))
+                (let ((read (read-text text)))
+                  (if (null? read)
+                      (the (listof string acyclic) nil)
+                      ((with shapes-module shaped-forms) (car read) (get loaded))))))
+             (run-checked (with eval-core run-checked))
              (run-checked-more (with eval-core run-checked-more))
              (run-program (with eval-core run-program))
              (native-assemble (with native native-assemble))
@@ -836,6 +885,15 @@
                ;; phase-1 namespace's definition made (`phase1.rs`).
                (cell (extract fe compile-global-cell))))))
 
+(define parse-program (extract front-end-entries parse-program))
+(define read-text-at (extract front-end-entries read-text-at))
+(define loaded-files! (extract front-end-entries loaded-files!))
+(define includes-given! (extract front-end-entries includes-given!))
+(define standard-names! (extract front-end-entries standard-names!))
+(define expansions-made (extract front-end-entries expansions-made))
+(define macro-source (extract front-end-entries macro-source))
+(define program-walked (extract front-end-entries program-walked))
+(define program-shaped (extract front-end-entries program-shaped))
 (define run-checked (extract front-end-entries run-checked))
 (define run-checked-more (extract front-end-entries run-checked-more))
 (define run-program (extract front-end-entries run-program))

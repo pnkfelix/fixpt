@@ -21,61 +21,30 @@
 ;;; So it names only what they use: the rest of each module stays inside.
 
 (define make-reader (load-module "fx26:parser-top.fx"))
-(define parser-top-module ((proj make-reader @s @e @m @c @p)))
-(define parser-exps-module (with parser-top-module parser-exps-module))
-(define parser-module (with parser-exps-module parser-module))
-;; The eager reader, which the parser does not load (`syn.fx`).
+;; The parser's stateless helpers and constructors, for the conductor and
+;; `bootstrap.fx`: from an instance of `parser.fx` that nothing parses with.
+;; Each front end makes its own reader and parser, with their state (the
+;; conductor's `let*`): so one front end's parse is never another's, a
+;; `stage`'s, a session's or a phase-1 namespace's front end inside the
+;; program's (`phase1.rs`; `TODO.md` §280).
+(define parser-module ((proj (load-module "fx26:parser.fx") @s @e @m @c @p)))
+;; The eager reader, which the parser does not load (`syn.fx`): the REPL's,
+;; reading as one types, and `bootstrap.fx`'s.
 (define make-eager-reader (load-module "fx26:eager-reader.fx"))
 (define eager-reader-module ((proj make-eager-reader @s @e @m @c)))
 ;; From `eager-reader.fx`.
 (import eager-reader-module waiting advance need fail entry eager-feed eager-feed-string
         eager-state-kind eager-state-position eager-state-message eager-state-data
         eager-state-syntax eager-context eager-status eager-hole-closers eager-start
-        eager-start-fx26 read-text read-text-at atom lst dotted vec
+        eager-start-fx26 read-text atom lst dotted vec
         (type chars data syn syns state result word context closers)
         (effect marks parsing reads reading asks))
 ;; From `parser.fx`.
+;; What has no state: what does is each front end's own.
 (import parser-module len drop label keep arity e-var e-int e-bool e-str e-char e-float e-sym e-unit
         e-lambda e-app e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda
         e-the e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define
         t-define-rec t-define-type t-define-effect t-define-convention t-define-syscall
-        t-define-generative t-exp p-ok p-err quoted loaded loaded-files! includes-given!
+        t-define-generative t-exp p-ok p-err quoted
         (type names exp top)
         (effect parses))
-;; From `parser-top.fx`.
-(define parse-program (with parser-top-module parse-program))
-;; For a driver: the standard bindings' names, which a file's macro may name.
-(define macros-module (with parser-top-module macros-module))
-(define imports-module (with parser-top-module imports-module))
-(define standard-names! (with imports-module standard-names!))
-;; For the conductor: the macros each `with`'s body used, as the expander
-;; met them, for the checker (`k-macro-uses!`).
-(define with-macro-uses (with macros-module with-uses-given))
-;; For the driver: each expansion made, by its number, and where a key a
-;; template's part was given is (`syn.rs`'s `fx26_span`).
-(define expansions-made (with macros-module expansions-given))
-(define macro-source (with macros-module source-of))
-;; For the conductor, which copies what the register compiler needs of
-;; each key to its region (`regcode.fx`'s `r-key-given!`).
-(define macro-sources-made (with macros-module sources-made))
-;; A program's forms after expansion, in `text`, each with its local value
-;; binders renamed as the expander's walk finds their scopes
-;; (`macros-walk.fx`): for `tests/scopes.rs`, which holds the walk to the
-;; Rust expander's.
-(define shapes-module (with parser-top-module shapes-module))
-(define walk-module (with shapes-module walk-module))
-(define program-walked
-  (lambda ((text string))
-    (let ((read (read-text text)))
-      (if (null? read)
-          (the (listof string acyclic) nil)
-          ((with walk-module walked-forms) (car read))))))
-;; A program's forms after expansion, in `text`, each with what each module
-;; it opens was relied on for written in (`macros-shapes.fx`'s `shaped`):
-;; for `tests/scopes.rs`, which holds the records to the Rust expander's.
-(define program-shaped
-  (lambda ((text string))
-    (let ((read (read-text text)))
-      (if (null? read)
-          (the (listof string acyclic) nil)
-          ((with shapes-module shaped-forms) (car read) (get loaded))))))

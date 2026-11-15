@@ -73,14 +73,15 @@ fn a_session_runs_its_transformers_in_its_own_runtime() {
     assert!(run(&p, &[]).contains("(6 0)"));
 }
 
-/// The knob collects: a program of one transformer's call makes minor
-/// collections with it, none without (the front end warm).
+/// The knob collects: a program of two transformers' calls makes more
+/// minor collections with it than without (the front end warm; without
+/// it, what the FX-26 checker's phase-1 namespace allocates may make one).
 #[test]
 fn the_knob_collects() {
     let p = std::path::PathBuf::from(format!("{}/../fixpt-fx26/tests/programs/procedural/aif-er.fx", env!("CARGO_MANIFEST_DIR")));
     let minors = |env: &[(&str, &str)]| checked(&p, env).lines().filter(|l| l.contains("gc minor")).count();
     // The first run after a build compiles the front end, which collects.
     checked(&p, &[]);
-    assert_eq!(minors(&[("FIXPT_GC_TRACE", "1")]), 0);
-    assert!(minors(&[("FIXPT_GC_TRACE", "1"), ("FIXPT_LENT_COLLECT", "1")]) > 0);
+    let (quiet, asked) = (minors(&[("FIXPT_GC_TRACE", "1")]), minors(&[("FIXPT_GC_TRACE", "1"), ("FIXPT_LENT_COLLECT", "1")]));
+    assert!(asked > quiet, "{quiet} minor collections, {asked} with the knob");
 }
