@@ -56,3 +56,23 @@ fn a_recheck_that_is_neither_0_nor_1_is_refused() {
     let said = checked(&p, "2");
     assert!(said.contains("`FIXPT_MACRO_RECHECK` is `2`: it is 0 or 1"), "{said}");
 }
+
+/// A procedural macro's contract held to by default, and not where
+/// `FIXPT_MACRO_CONTRACTS=0` says (`typed-macros.md`, "Decided: procedural
+/// macros checked by their contracts"): a transformer that places its body
+/// outside the binder its contract says is refused; let be, the body's `x`
+/// is the global's.
+#[test]
+fn contracts_are_held_to_unless_turned_off() {
+    let p = format!("{}/../fixpt-fx26/tests/programs/procedural/contract-scope.fx", env!("CARGO_MANIFEST_DIR"));
+    let run = |contracts: &str| {
+        let out = Command::new(FIXPT).args(["eval", &p]).env("FIXPT_MACRO_CONTRACTS", contracts).output().expect("runs");
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr)
+    };
+    let held = run("1");
+    assert!(held.contains("its expansion places `x` where its contract does not put it in `x`'s scope"), "{held}");
+    let off = run("0");
+    assert!(off.lines().last().is_some_and(|l| l.starts_with("104 : int")), "{off}");
+    let wrong = run("yes");
+    assert!(wrong.contains("`FIXPT_MACRO_CONTRACTS` is `yes`: it is 0 or 1"), "{wrong}");
+}

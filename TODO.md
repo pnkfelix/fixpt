@@ -5577,6 +5577,18 @@ program's own definitions (phases); contracts, checked at each expansion
 (the note's proposal); a transformer run each use is checked again each
 use, which a definition's compiled transformer kept would not need.
 
+
+Contracts (2026-11-14, the user's: "take the syntax-rules shapes on
+macros and apply them to procedural macros", checked as expansion
+commuting with α-renaming): built, both front ends. A contract is the
+signature, as `syntax-rules` writes it; the use aligned with it; each
+expansion run again with the use's binders fresh through their scopes,
+held to placement and commutation, by default (`FIXPT_MACRO_CONTRACTS=0`
+not). `typed-macros.md`, "Decided: procedural macros checked by their
+contracts". Next there: contracts for macros that make definitions or
+descriptions; then the transformer in the front end's heap, phases kept
+apart by namespace, and `for-syntax` imports (decided with the user, in
+that order).
 ## 229. ~~A quoted list's length is how deep every phase recurses~~ (found and done 2026-11-09)
 
 Both parsers rewrote `'(a b c …)` as `(cons a (cons b (cons c … nil)))`, so

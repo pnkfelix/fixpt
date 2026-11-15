@@ -10,7 +10,8 @@
 ;;; gives on (`solve-module`), for `macros.fx`.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define solve-module ((proj (load-module "fx26:macros-solve.fx") rs re rm rc rp)))
+(define contracts-module ((proj (load-module "fx26:macros-contracts.fx") rs re rm rc rp)))
+(define solve-module (with contracts-module solve-module))
 (define infer-module (with solve-module infer-module))
 (define files-module (with infer-module files-module))
 (define align-module (with files-module align-module))
@@ -18,6 +19,7 @@
 (define match-module (with exports-module match-module))
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
+(define scopes-module (with exports-module scopes-module))
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
@@ -25,7 +27,11 @@
 (import types-module reserved? desc-word? type-form? kernel-sigs kernel-definitions s-expr marks
         (type fails sty marked))
 (import align-module macro? defined def-env-top align node-syn node-kids nnodes makes pvar? split
-        nth k-form (type macro clause clauses def-env def-envs macro-env scopes pvars))
+        nth k-form nodes-reset! node-core node-hole env-empty env-levels lv-rib lv-earlier k-pvar
+        k-binder k-ref program-walk
+        (type macro clause clauses def-env def-envs macro-env scopes pvars levels found))
+(import files-module signature-of)
+(import contracts-module contract-renames renamed-use contract-held syn-same? (type renames))
 (import types-module fail-at)
 (import match-module same-atom?)
 
@@ -156,6 +162,43 @@
     (if (= i (array-length from))
         #u
         (begin (array-set! to i (array-ref from i)) (copy-sources from to (+ i 1))))))
+;;; ------------------------------------------------------------ contracts
+
+;; A use `s` of procedural macro `name`, in expansion `made`: expanded, and
+;; held to its contract if it has one (`Macros::contract_expanded`;
+;; `typed-macros.md`, "Decided: procedural macros checked by their
+;; contracts"): the use aligned with it; then, unless
+;; `FIXPT_MACRO_CONTRACTS=0`, the transformer run on it and on it with each
+;; binder's name fresh throughout its scope, the second's fresh names where
+;; their binders' scopes are (placement), and, named back, the first
+;; (commutation). The first is the expansion.
+(define procedural-expanded (->* (fails symbol syn int) syn)
+  (lambda (fail name s made)
+    (let* ((shown (string-append "a use of `" (symbol->string name) "`: "))
+           (in-use (lambda ((m string) (a int) (b int)) (fail (string-append shown m) a b)))
+           (refused (lambda ((m string)) (fail (string-append shown m) (syn-start s) (syn-end s))))
+           (sig (extract (car (macro-of-defined name (get defined))) 1))
+           (contract (extract (car (procedural-of name)) 4))
+           (operands (nth (split s) 1)))
+      (if (not contract)
+          (expand-procedural fail name s made)
+          (begin
+            (nodes-reset!)
+            (align in-use 2 (the pvars nil) sig operands -1 nil)
+            (let ((out (expand-procedural fail name s made)))
+              (if (= (get contracts) 0)
+                  out
+                  (let* ((r (contract-renames in-use sig operands)) (fresh (extract r 2)))
+                    (if (null? fresh)
+                        out
+                        (let ((out2 (expand-procedural fail name (renamed-use s (extract r 1))
+                                                       made)))
+                          (begin (contract-held in-use s out out2 fresh made) out)))))))))))
+(define macro-of-defined (->* (symbol macro-env) (listof macro acyclic))
+  (lambda (n ms)
+    (cond ((null? ms) nil)
+          ((symbol=? n (extract (car ms) 1)) (list (extract (car ms) 2)))
+          (else (macro-of-defined n (cdr ms))))))
 ;;; ------------------------------------------------------------ uses checked once
 
 ;; A template's checked uses (`Clause::checked_uses`), by where each starts:
@@ -522,31 +565,46 @@
 
 ;; Each procedural macro, by its name: its style, and its transformer as
 ;; text; the last defined first.
-(define procedurals (ref (listof (tupleof symbol int string def-env) acyclic) rs) (new nil))
-(define procedural-of (->* (symbol) (listof (tupleof int string def-env) acyclic))
-  (lambda (n) (procedural-in n (get procedurals))))
+;; And whether its signature is written, its contract
+;; (`procedural::Procedural::contract`).
+(define-type procedural (tupleof symbol int string def-env bool))
+(define procedurals (ref (listof procedural acyclic) rs) (new nil))
+(define procedural-of (->* (symbol) (listof (tupleof int string def-env bool) acyclic))
+  (lambda (n)
+    ;; Only while `defined` has it so (it, not `procedurals`, is what a
+    ;; state saves and gives back, `macros-at!`): one that makes `3`, or one
+    ;; of a contract, which has no clauses; a `syntax-rules` macro since
+    ;; defined of the name is not one.
+    (let ((m (macro-of-defined n (get defined))))
+      (if (and (not (null? m)) (or (= (extract (car m) 4) 3) (null? (extract (car m) 2))))
+          (procedural-in n (get procedurals))
+          nil))))
 (define procedural-in
-  (->* (symbol (listof (tupleof symbol int string def-env) acyclic))
-       (listof (tupleof int string def-env) acyclic))
+  (->* (symbol (listof procedural acyclic)) (listof (tupleof int string def-env bool) acyclic))
   (lambda (n ps)
     (cond ((null? ps) nil)
           ((symbol=? n (extract (car ps) 1))
-           (list (tuple (extract (car ps) 2) (extract (car ps) 3) (extract (car ps) 4))))
+           (list (tuple (extract (car ps) 2) (extract (car ps) 3) (extract (car ps) 4)
+                        (extract (car ps) 5))))
           (else (procedural-in n (cdr ps))))))
-;; `(define-syntax name (STYLE proc))`, its parts: the name, the style and
-;; the procedure, in a list of one; none if `form` is not one.
-(define procedural-form (->* (syn) (listof (tupleof syn int syn) acyclic))
+;; `(define-syntax name [σ] (STYLE proc))`, its parts: the name, the style,
+;; the procedure, and its contract if written; in a list of one; none if
+;; `form` is not one.
+(define procedural-form (->* (syn) (listof (tupleof syn int syn syns-a) acyclic))
   (lambda (form)
     (tagcase form
       (lst (items d a b x)
-        (if (and (= (len items) 3) (string=? (head-of items) "define-syntax"))
-            (tagcase (car (cdr (cdr items)))
-              (lst (parts d2 a2 b2 x2)
-                (let ((s (style-named (head-of parts))))
-                  (if (and (>= s 0) (= (length parts) 2))
-                      (list (tuple (car (cdr items)) s (car (cdr parts))))
-                      nil)))
-              (else y nil))
+        (if (and (or (= (len items) 3) (= (len items) 4))
+                 (string=? (head-of items) "define-syntax"))
+            (let ((t (if (= (len items) 4) (nth items 3) (nth items 2)))
+                  (sig (if (= (len items) 4) (list (nth items 2)) nil)))
+              (tagcase t
+                (lst (parts d2 a2 b2 x2)
+                  (let ((s (style-named (head-of parts))))
+                    (if (and (>= s 0) (= (length parts) 2))
+                        (list (tuple (car (cdr items)) s (car (cdr parts)) sig))
+                        nil)))
+                (else y nil)))
             nil))
       (else y nil))))
 ;; `(define-syntax name (STYLE proc))`, `form`, defined, its transformer
@@ -556,19 +614,35 @@
 (define define-procedural (->* (fails syn def-env) (listof symbol acyclic))
   (lambda (fail form e)
     (let* ((p (car (procedural-form form))) (name (extract p 1)) (code (extract p 3))
-           (text (syn-text code)))
+           (text (syn-text code))
+           ;; Its contract: an expression's, of untyped parts, yet.
+           (signed (if (null? (extract p 4)) nil (list (signature-of fail (car (extract p 4))))))
+           (sig (if (null? signed) (s-expr) (extract (car signed) 2))))
       (cond
         ((or (not (syn-symbol? name)) (reserved? (syn-name name)))
          (begin (fail "a macro's name, not a form's" (syn-start name) (syn-end name)) nil))
+        ((and (not (null? signed))
+              (or (not (null? (extract (car signed) 1))) (not (= (extract (car signed) 3) 0))))
+         (begin (fail-at fail (string-append "`" (syn-name name) "`'s contract: a procedural "
+                                             "macro's is an expression's, of untyped parts, not "
+                                             "yet another")
+                         (car (extract p 4)))
+                nil))
         (else
          (tagcase (run (checked-text (extract p 2) text))
            (ok v
              (begin
                (set procedurals
-                    (cons (tuple (syn-symbol name) (extract p 2) text e) (get procedurals)))
+                    (cons (tuple (syn-symbol name) (extract p 2) text e (not (null? signed)))
+                          (get procedurals)))
+               ;; With a contract, an expression's macro by its signature,
+               ;; which a template's alignment takes as a `syntax-rules`
+               ;; one's; with none, one that makes `3`, whose binding
+               ;; structure nothing says.
                (set defined
                     (cons (tuple (syn-symbol name)
-                                 (the macro (tuple (s-expr) (the clauses nil) (the syns-a nil) 3)))
+                                 (the macro (tuple sig (the clauses nil) (the syns-a nil)
+                                                   (if (null? signed) 3 0))))
                           (get defined)))
                (list (syn-symbol name))))
            (failed why
@@ -608,8 +682,7 @@
 ;; A module file's own macros' scope begun: none of these macros, nor any
 ;; procedural, defined, and macros defined where the file's items are; what
 ;; was, given back, for `file-scope-end!` (`Macros::in_file_scope`).
-(define-type scope-saved (tupleof macro-env (listof (tupleof symbol int string def-env) acyclic)
-                                  def-env marked))
+(define-type scope-saved (tupleof macro-env (listof procedural acyclic) def-env marked))
 (define file-scope-begin! (->* () scope-saved)
   (lambda ()
     (let ((saved (tuple (get defined) (get procedurals) (get def-env-now) (get marks))))
@@ -676,8 +749,10 @@
 (define max-uses (ref int rs) (new 10000))
 (define max-depth (ref int rs) (new 1000))
 ;; Whether a use a template made is aligned again, 1, or not, 0
-;; (`FIXPT_MACRO_RECHECK`; `use-aligned!`).
+;; (`FIXPT_MACRO_RECHECK`; `use-aligned!`); whether a procedural macro's
+;; expansions are held to its contract (`FIXPT_MACRO_CONTRACTS`).
 (define recheck (ref int rs) (new 0))
+(define contracts (ref int rs) (new 1))
 ;; Limit `name`, `USES` or `DEPTH`, as the runtime reads it; -1 where the
 ;; value set is none, said at `s`.
 (define limit-of (->* (fails syn string) int)
@@ -691,10 +766,11 @@
 (define chain-begun! (->* (fails syn) int)
   (lambda (fail s)
     (let* ((u (limit-of fail s "USES")) (d (if (< u 0) -1 (limit-of fail s "DEPTH")))
-           (r (if (< d 0) -1 (limit-of fail s "RECHECK"))))
+           (r (if (< d 0) -1 (limit-of fail s "RECHECK")))
+           (c (if (< r 0) -1 (limit-of fail s "CONTRACTS"))))
       (begin (set chain nil) (set chain-depth 0)
-             (set max-uses u) (set max-depth d) (set recheck r)
-             (if (< r 0) -1 u)))))
+             (set max-uses u) (set max-depth d) (set recheck r) (set contracts c)
+             (if (< c 0) -1 u)))))
 (define use-left! (->* () unit)
   (lambda () (begin (set chain (cdr (get chain))) (set chain-depth (- (get chain-depth) 1)))))
 ;; A use of `n`, `s`, about to be expanded, `fuel` uses left: entered in the
@@ -804,22 +880,3 @@
       (else y 1))))
 (define sizes (->* (syns-a) int)
   (lambda (xs) (if (null? xs) 0 (+ (syn-size (car xs)) (sizes (cdr xs))))))
-;; Whether syntax `a` and `b` are the same, part by part, wherever each is.
-(define syn-same? (->* (syn syn) bool)
-  (lambda (a b)
-    (tagcase a
-      (lst (xs d c e x) (tagcase b (lst (ys d2 c2 e2 x2) (all-same? xs ys)) (else y #f)))
-      (dotted (xs t d c e x)
-        (tagcase b
-          (dotted (ys u d2 c2 e2 x2) (and (all-same? xs ys) (syn-same? t u)))
-          (else y #f)))
-      (atom (d c e x)
-        (if (syn-symbol? a)
-            (and (syn-symbol? b) (symbol=? (syn-symbol a) (syn-symbol b)))
-            (same-atom? a b)))
-      (else y #f))))
-(define all-same? (->* (syns-a syns-a) bool)
-  (lambda (xs ys)
-    (if (null? xs)
-        (null? ys)
-        (and (not (null? ys)) (syn-same? (car xs) (car ys)) (all-same? (cdr xs) (cdr ys))))))

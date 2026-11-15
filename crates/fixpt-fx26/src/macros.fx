@@ -52,7 +52,7 @@
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias respanned in-expansion use-entered? use-left!
-        chain-begun! checked-uses trust-if! use-aligned!)
+        chain-begun! checked-uses trust-if! use-aligned! procedural-expanded)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names trailmark-form define-trailmark hide-marks!
@@ -726,7 +726,7 @@
       (if (not (null? (procedural-of name)))
           (let ((made (record-expansion name s #f)))
             (begin (def-env! made (extract (car (procedural-of name)) 3))
-                   (expand-procedural fail name s made)))
+                   (procedural-expanded fail name s made)))
           (begin
             (nodes-reset!)
             (use-aligned! in-use s (extract m 1) operands)

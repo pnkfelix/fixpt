@@ -2275,6 +2275,18 @@ impl Macros {
         let renamed = renamed_use(&operands, &parts, interner);
         let use2 = Syn::of_list(s.at(), &[head], Some(renamed));
         let out2 = self.procedural_run(name, p, &use2, made, interner)?;
+        // An alias of a fresh name, `%~N:x′` (a name the transformer wrote
+        // where its macro is defined, closed so), is fresh too, of this
+        // expansion `N`, the same in both runs: each with its name and, for
+        // the way back, its original's alias.
+        let mut back = fresh.clone();
+        let mut fresh = fresh;
+        for (to, orig) in fresh.clone() {
+            let a = interner.intern(&format!("%~{made}:{}", interner.name(to)));
+            let b = interner.intern(&format!("%~{made}:{}", interner.name(orig)));
+            fresh.insert(a, orig);
+            back.insert(a, b);
+        }
         // Placement: each fresh name a binder, or a reference in the scope
         // of one, as the walk of the output finds them.
         let none = HashMap::default();
@@ -2306,7 +2318,7 @@ impl Macros {
             }
         }
         // Commutation: with each fresh name named back, the first output.
-        let back = renamed_syn(&out2, &fresh, interner);
+        let back = renamed_syn(&out2, &back, interner);
         if !same_syntax(&back, &out) {
             return Err(refused("its expansion depends on how its use's bound names are spelled"));
         }

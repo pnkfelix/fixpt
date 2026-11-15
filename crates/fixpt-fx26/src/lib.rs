@@ -542,6 +542,9 @@ pub const MACROS_SOLVE: &str = include_str!("macros-solve.fx");
 /// Procedural macros, a prototype (`TODO.md` §228), on top of
 /// [`MACROS_SOLVE`].
 pub const MACROS_PROCEDURAL: &str = include_str!("macros-procedural.fx");
+/// A procedural macro's contract checked at a use, under [`MACROS_PROCEDURAL`],
+/// on top of [`MACROS_SOLVE`].
+pub const MACROS_CONTRACTS: &str = include_str!("macros-contracts.fx");
 
 /// A use matched against a clause's pattern (`macros.rs`'s `matches`).
 pub const MACROS_MATCH: &str = include_str!("macros-match.fx");
@@ -830,7 +833,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 225] = [
+pub const FRONT_END_MODULES: [(&str, &str); 226] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -906,6 +909,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 225] = [
     ("macros-show.fx", MACROS_SHOW),
     ("macros-solve.fx", MACROS_SOLVE),
     ("macros-procedural.fx", MACROS_PROCEDURAL),
+    ("macros-contracts.fx", MACROS_CONTRACTS),
     ("macros.fx", MACROS),
     ("macros-templates.fx", MACROS_TEMPLATES),
     ("macros-imports.fx", MACROS_IMPORTS),

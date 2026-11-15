@@ -2144,6 +2144,20 @@ contract, whose binding structure nothing says, so `O′`'s scopes cannot
 be known ("a procedural macro in a checked expansion has a contract"), as
 a template refuses one.
 
+**Built** (2026-11-14), both front ends (Rust: `Macros::contract_expanded`,
+`contract_renames`; FX-26: `macros-contracts.fx`, under
+`macros-procedural.fx`, which runs the transformer). Placement walks the
+second output in a program's mode, where a binder is its node, and an
+alias of a fresh name, `%~N:x′` (a name the transformer wrote where its
+macro is defined, as a syntactic-closure transformer writes the use's
+binder), is fresh too, both runs of the same expansion `N`. A procedural
+macro with a contract may be used in a `syntax-rules` template, which its
+signature lets the template's alignment take as any macro's. Tests:
+`tests/programs/procedural/contract-*.fx` (the use refused; a part placed
+outside its scope; a transformer that reads a binder's spelling; a good
+one by explicit renaming, by syntactic closures, and in a template);
+`fixpt-cli/tests/macro_trust.rs` (the switch).
+
 **Not yet:** procedural macros that make definitions or descriptions
 (their contracts' exports); a transformer in the front end's heap, with
 phases kept apart by namespace (a phase-1 namespace of its own, made anew
