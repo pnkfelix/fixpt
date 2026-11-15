@@ -7079,3 +7079,24 @@ Between design and bug only in that "each argument once" was the
 callers' convention, which one case did not keep; now the one function
 for an argument is what both cases call. Test:
 `tests/programs/listof/append-nested-deep.fx`, 40 deep.
+
+## 278. A transformer's call may collect: the Rust front end's syntax in an arena (the user's, 2026-11-14)
+
+Running a procedural macro's transformer in the front end's heap (§228,
+being built) was first to inhibit collection for each call, the Rust
+expander holding raw `Syn` (`heap_syn.rs`'s header): a stopgap, since a
+transformer that allocates much grows the heap without reclaiming
+anything until it returns. `heap-syntax.md`'s decision 1 had said
+handles across code that runs, a transformer's call named; but traced
+(2026-11-14), the frames that can reach a call are the expander's seven
+(`expand`, `expand_top`, `expand_in`, `expand_defn`, `expand_use`,
+`expand_procedural`, `contract_expanded`) and above them some fifty entry
+points holding a program's forms raw, each a hole if missed.
+
+Decided (the user's, 2026-11-14): the Rust front end's syntax in an
+arena, one per reading (`regions.rs`: chunks that never move, traced as
+roots); nothing else points into it (a transformer is given a datum in
+the heap); at the reading's end what handles hold copied out and the
+arena ended. `typed-macros.md`, "Decided: transformers in the front end's
+heap", decision 3 and stage 1. Left: an arena is scanned whole by each
+collection while it lives; cards for it if that shows.

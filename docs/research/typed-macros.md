@@ -2169,3 +2169,79 @@ phases kept apart by namespace (a phase-1 namespace of its own, made anew
 for each program's expansion), and then modules imported for expansion
 (Racket's `for-syntax`), which would let a part's identity, not only a
 binder's name, be followed through the output.
+
+## Decided: transformers in the front end's heap (2026-11-14, being built)
+
+The user's order: after contracts, a procedural macro's transformer run
+in the heap the expander's syntax is in, phases kept apart by namespace
+(Racket's way, not by heaps), then `for-syntax` imports. Its first step is
+built: a transformer compiled once, where its macro is defined
+(`procedural::define`), called at each use (`apply`), in the separate
+transformers' session (`TODO.md` §228).
+
+**What the code is (surveyed 2026-11-14).**
+- A session's checker keeps its syntax in the session's runtime heap
+  (`Checker::in_session_heap`), which its caller lends around each check
+  (`Fx26Session::checking`, `Checker::with_heap`): only the heap and the
+  symbols' table are lent, never the `Runtime`, so nothing in an
+  expansion can run code.
+- Many checkers have no runtime at all: `fixpt check`'s Rust checker
+  (`Fx26Session::fresh_checker`, `compare::check_with_rust_checker`),
+  `check_reps`, `query`, `Checker::new()`, and the runtime's sessions'
+  own (`sessions::State`), each a bare heap (`Heap::unfixed()`).
+- The expander written in FX-26 runs in the program session's runtime, as
+  front-end calls (`entries::call`), outside `checking`; its transformer's
+  call is a leaf primitive (`%fx26-expand-procedural`) that goes out to
+  the separate session.
+- A precedent: the Scheme expander runs its transformers in the program's
+  runtime with collection held off (`fixpt-scheme/src/procmacro.rs`).
+
+**Decided (the user, 2026-11-14):**
+1. *Every checker a runtime*, so that both expanders run each transformer
+   in one runtime and agree by construction, and a part's identity is
+   kept everywhere: a checker with none is given its session's, or one of
+   its own, its syntax in that runtime's heap.
+2. *Phase 1, a namespace of its own* in that runtime, made anew for each
+   program's expansion: the standard environment, and nothing of phase
+   0; a transformer defined there where its macro is defined, called on
+   each use's datum.
+3. *The Rust front end's syntax in an arena, one per reading* (the
+   user's choice, 2026-11-14, in place of collection inhibited during
+   each call, `TODO.md` §278): an arena's chunks never move and are
+   traced as roots (`fixpt-heap`'s `regions.rs`), so a raw `Syn` stays
+   valid through any collection a transformer's call makes, and the
+   reading's code keeps holding raw values. Handles throughout instead
+   were weighed and left: the frames that can reach a transformer's call
+   are the expander's seven but above them some fifty entry points that
+   hold a program's forms raw (`expand_forms_syn`'s, a module file's),
+   each a hole if missed. Sound because nothing outside the arena points
+   into it but the reading's own frames and handles: a transformer is
+   given its use as a datum in the heap (4), never the arena's syntax,
+   and what it gives is made syntax in the arena before anything can
+   collect. At the reading's end what handles hold (templates, a quote's
+   `Form`, a session's forms) is copied out into the heap, the handles
+   moved to the copies, and the arena ended (the user's choice: (a), a
+   bounded arena, over (b), one kept while any handle into it lives).
+4. *What a transformer sees*: datums, as now, the identity of a use's
+   compound parts kept beside them for the expander's errors.
+
+**Stages, each its own commit on a branch:**
+1. The Rust front end's syntax in an arena: a reading enters one in the
+   heap its syntax is in, builds its `syn` there (the reader, the
+   expander, the conversions), and at its end copies out what handles
+   hold and ends it. Tested with a collection forced where a
+   transformer's call will be (a knob, as `FIXPT_GC_STRESS` is).
+2. Every checker in a runtime: `fresh_checker` and the bare checkers
+   given their session's runtime (or one of their own), their syntax in
+   its heap; `compare::check_with_rust_checker` and its callers given the
+   session.
+3. A phase-1 namespace: a narrow Rust API over the runtime's sessions
+   (`sessions.rs`), or a namespace of globals by prefix as theirs are:
+   make it, define FX-26 code in it, call its procedure on a value.
+4. The Rust expander's transformer call through it: the runtime reached
+   from inside an expansion, collection allowed, the datum built in the
+   heap from the arena's syntax and the answer made syntax in the arena,
+   no text.
+5. The expander written in FX-26 through it: its primitive re-entrant
+   (`reenters!`), calling the phase-1 procedure in its own runtime.
+6. The separate transformers' session gone.

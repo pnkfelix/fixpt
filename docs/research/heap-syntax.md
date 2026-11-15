@@ -29,9 +29,14 @@ trait (`fixpt_read::Build`).
 1. **Values within a phase, handles across code that runs.** The heap
    collects only at safepoints, never in an allocation, so the reader, the
    expander and the parser hold raw `Value`s through a view of the heap.
-   Wherever FX-26 code runs between (a session's forms; a procedural
-   macro's transformer, mid-expansion) and whatever lasts from one form to
-   the next (macros' definitions and templates), they hold handles.
+   Wherever FX-26 code runs between (a session's forms) and whatever lasts
+   from one form to the next (macros' definitions and templates), they
+   hold handles. A procedural macro's transformer, run mid-expansion, was
+   first named here too; but the frames that can reach it hold a whole
+   program's forms raw, so instead (the user's, 2026-11-14) a reading
+   builds its syntax in an arena that no collection moves, and copies out
+   what handles hold at its end (`typed-macros.md`, "Decided: transformers
+   in the front end's heap", decision 3; `TODO.md` §278).
 2. **The heap is the one that runs the code.** In a session, the session's;
    the checker is handed it at its reading entry points rather than owning
    one, so that what it expands is handed over with nothing copied; its
