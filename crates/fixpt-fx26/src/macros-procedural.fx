@@ -49,15 +49,30 @@
 ;; The request that defines a transformer, `code`, where its macro is
 ;; defined: checked at its style's type and compiled, once, for its uses to
 ;; call (`procedural::define`, which the Rust expander calls itself).
-(define checked-text (->* (int string) string)
-  (lambda (s code) (string-append "%define " (int->string s) "\n" code)))
+(define checked-text (->* (int string (listof string acyclic)) string)
+  (lambda (s code fs)
+    (string-append "%define " (int->string s) " " (int->string (length fs)) "\n"
+                   (forms-given fs) code)))
+;; Phase-1 forms `fs`, each its length in characters on a line of its own
+;; and its text, as a request gives them (`procedural::asked`).
+(define forms-given (->* ((listof string acyclic)) string)
+  (lambda (fs)
+    (if (null? fs)
+        ""
+        (string-append (int->string (string-length (car fs))) "\n" (car fs)
+                       (forms-given (cdr fs))))))
+;; The request that checks phase-1 forms `fs`, in force from a
+;; `begin-for-syntax` on.
+(define forms-text (->* ((listof string acyclic)) string)
+  (lambda (fs) (string-append "%forms " (int->string (length fs)) "\n" (forms-given fs))))
 ;; The request that runs one on `form` (as text), in expansion `made`: the
 ;; transformer checked and compiled at its first use, then called
 ;; (`procedural::apply`, which the Rust expander calls itself).
-(define applied-text (->* (int string string int) string)
-  (lambda (s code form made)
+(define applied-text (->* (int string string int (listof string acyclic)) string)
+  (lambda (s code form made fs)
     (string-append "%apply " (int->string s) " " (int->string made) " "
-                   (int->string (string-length code)) "\n" code form)))
+                   (int->string (string-length code)) " " (int->string (length fs)) "\n"
+                   (forms-given fs) code form)))
 ;; The runtime's answer to `code`: what it gave (`=`), or why not (`!`),
 ;; in a sum.
 (define run (->* (string) (sumof (ok string) (failed string)))
@@ -554,9 +569,29 @@
 ;; text; the last defined first.
 ;; And whether its signature is written, its contract
 ;; (`procedural::Procedural::contract`).
-(define-type procedural (tupleof symbol int string def-env bool))
+(define-type procedural (tupleof symbol int string def-env bool (listof string acyclic)))
 (define procedurals (ref (listof procedural acyclic) rs) (new nil))
-(define procedural-of (->* (symbol) (listof (tupleof int string def-env bool) acyclic))
+;; The phase-1 forms in force (`begin-for-syntax`'s texts, in order), each
+;; transformer defined now running where they are (`phase1.rs`): its own,
+;; the sixth of its `procedural`.
+(define phase1-forms (ref (listof string acyclic) rs) (new nil))
+(define phase1-forms-now (->* () (listof string acyclic)) (lambda () (get phase1-forms)))
+(define phase1-forms! (->* ((listof string acyclic)) unit) (lambda (fs) (set phase1-forms fs)))
+;; `(begin-for-syntax form …)`, `s`: its forms in force from now on, checked,
+;; compiled and run in their namespace now, so that one refused is refused
+;; here, as the Rust expander refuses it (`Macros::for_syntax`).
+(define for-syntax! (->* (fails syn) unit)
+  (lambda (fail s)
+    (let ((fs (append (get phase1-forms)
+                      (syns-texts (tagcase s (lst (items d a b x) (cdr items)) (else y nil))))))
+      (tagcase (run (forms-text fs))
+        (ok v (set phase1-forms fs))
+        (failed why
+          (fail (string-append "`begin-for-syntax`: " why) (syn-start s) (syn-end s)))))))
+(define syns-texts (->* (syns-a) (listof string acyclic))
+  (lambda (xs) (if (null? xs) nil (cons (syn-text (car xs)) (syns-texts (cdr xs))))))
+(define procedural-of
+  (->* (symbol) (listof (tupleof int string def-env bool (listof string acyclic)) acyclic))
   (lambda (n)
     ;; Only while `defined` has it so (it, not `procedurals`, is what a
     ;; state saves and gives back, `macros-at!`): one that makes `3`, or one
@@ -567,12 +602,13 @@
           (procedural-in n (get procedurals))
           nil))))
 (define procedural-in
-  (->* (symbol (listof procedural acyclic)) (listof (tupleof int string def-env bool) acyclic))
+  (->* (symbol (listof procedural acyclic))
+       (listof (tupleof int string def-env bool (listof string acyclic)) acyclic))
   (lambda (n ps)
     (cond ((null? ps) nil)
           ((symbol=? n (extract (car ps) 1))
            (list (tuple (extract (car ps) 2) (extract (car ps) 3) (extract (car ps) 4)
-                        (extract (car ps) 5))))
+                        (extract (car ps) 5) (extract (car ps) 6))))
           (else (procedural-in n (cdr ps))))))
 ;; `(define-syntax name [σ] (STYLE proc))`, its parts: the name, the style,
 ;; the procedure, and its contract if written; in a list of one; none if
@@ -616,11 +652,12 @@
                          (car (extract p 4)))
                 nil))
         (else
-         (tagcase (run (checked-text (extract p 2) text))
+         (tagcase (run (checked-text (extract p 2) text (get phase1-forms)))
            (ok v
              (begin
                (set procedurals
-                    (cons (tuple (syn-symbol name) (extract p 2) text e (not (null? signed)))
+                    (cons (tuple (syn-symbol name) (extract p 2) text e (not (null? signed))
+                                 (get phase1-forms))
                           (get procedurals)))
                ;; With a contract, an expression's macro by its signature,
                ;; which a template's alignment takes as a `syntax-rules`
@@ -653,11 +690,11 @@
       ;; the Rust expander calls it in (`phase1.rs`): what it gives made
       ;; syntax at the use's place, no text between; apart, by text, where
       ;; the runtime has none.
-      (tagcase (%macros:call-procedural style (extract p 2) (syn->datum s) made)
+      (tagcase (%macros:call-procedural style (extract p 2) (syn->datum s) made (extract p 5))
         (ok d (opened (syn-of-datum d (new-source-key a made) (new-source-key b made) made)))
         (failed why (begin (in-use (string-append "its transformer: " why)) s))
         (apart u
-          (tagcase (run (applied-text style (extract p 2) (syn-text s) made))
+          (tagcase (run (applied-text style (extract p 2) (syn-text s) made (extract p 5)))
             (failed why (begin (in-use (string-append "its transformer: " why)) s))
             (ok out
               (let ((read (read-answer out (new-source-key a made) (new-source-key b made) made)))
@@ -702,17 +739,21 @@
 ;; A module file's own macros' scope begun: none of these macros, nor any
 ;; procedural, defined, and macros defined where the file's items are; what
 ;; was, given back, for `file-scope-end!` (`Macros::in_file_scope`).
-(define-type scope-saved (tupleof macro-env (listof procedural acyclic) def-env marked))
+(define-type scope-saved
+  (tupleof macro-env (listof procedural acyclic) def-env marked (listof string acyclic)))
 (define file-scope-begin! (->* () scope-saved)
   (lambda ()
-    (let ((saved (tuple (get defined) (get procedurals) (get def-env-now) (get marks))))
+    (let ((saved (tuple (get defined) (get procedurals) (get def-env-now) (get marks)
+                        (get phase1-forms))))
       (begin (set defined nil) (set procedurals nil) (set def-env-now (tuple 2 'within nil))
+             (set phase1-forms nil)
              (set marks nil)
              saved))))
 (define file-scope-end! (->* (scope-saved) unit)
   (lambda (s)
     (begin (set defined (extract s 1)) (set procedurals (extract s 2))
-           (set def-env-now (extract s 3)) (set marks (extract s 4)))))
+           (set def-env-now (extract s 3)) (set marks (extract s 4))
+           (set phase1-forms (extract s 5)))))
 ;; Where the macro each expansion's aliases are of was defined, by the
 ;; expansion's number, the last first; a template's check is expansion 0
 ;; (`macros.rs`'s `Withs::def_envs`). Given to the resolution after expansion

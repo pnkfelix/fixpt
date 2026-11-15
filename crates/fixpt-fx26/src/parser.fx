@@ -912,10 +912,11 @@
           ((syn-nil? (car ps)) (e-lambda (the param-list nil) m a b 0 0))
           (else (e-plambda (car ps) (e-lambda (the param-list nil) m a b 0 0) a b 0 0)))))
 ;; A module file's forms without its macros, `define-syntax`es (hidden
-;; or not), which are no items: what `import-with-syntax` brings (the Rust
-;; checker's `read_module_file`). Each use of one after it is expanded
-;; already (`parser-top.fx`'s `loaded-own-expanded!`): one left is used
-;; before its file defines it, and refused.
+;; or not), and its `begin-for-syntax`es, which are no items: what
+;; `import-with-syntax` brings (the Rust checker's `read_module_file`).
+;; Each use of one after it is expanded already (`parser-top.fx`'s
+;; `loaded-own-expanded!`): one left is used before its file defines it,
+;; and refused.
 (define without-syntax (->* (syns-a) syns-a)
   (lambda (forms)
     (letrec ((names-of (subr (maxeff (read @globals) spin parses)
@@ -934,8 +935,10 @@
              (kept (subr (maxeff (read @globals) spin parses) (syns-a) syns-a)
                (lambda (xs)
                  (cond ((null? xs) nil)
+                       ;; And its phase-1 forms, phase 1's (`begin-for-syntax`).
                        ((or (syntax-form-of? (car xs) 'define-syntax)
-                            (syntax-form-of? (car xs) 'define-syntax-rec))
+                            (syntax-form-of? (car xs) 'define-syntax-rec)
+                            (syntax-form-of? (car xs) 'begin-for-syntax))
                         (kept (cdr xs)))
                        ((syntax-form-of? (car xs) 'hide)
                         (let ((items (kept (cdr (syn-items (car xs) "")))))

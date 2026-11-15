@@ -3392,11 +3392,12 @@ prims! {
     });
     // A procedural macro's transformer called, for the expander written in
     // FX-26 (`%macros:call-procedural`; `TODO.md` §278): its style, its
-    // text, the use's datum and the expansion; in the expansion's phase-1
+    // text, the use's datum, the expansion and the phase-1 forms in force
+    // where it was defined; in the expansion's phase-1
     // namespace, which the Rust expander calls it in too, so both run the
     // one closure. `(sum ok datum)`, `(sum failed why)`, or `(sum apart #u)`
     // where there is none (`Runtime::procedural`).
-    "%fx26-call-procedural", 4, Some(4), reenters!(|rt, a| {
+    "%fx26-call-procedural", 5, Some(5), reenters!(|rt, a| {
         let made = match rt.procedural {
             Some(f) => f(rt, a),
             None => Ok(fx26_sum(rt, "apart", Value::UNIT)),

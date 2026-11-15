@@ -490,6 +490,9 @@ pub struct Macros {
 /// knows of the modules forms open.
 #[derive(Clone, Default)]
 pub(crate) struct Withs {
+    /// The phase-1 forms in force (`begin-for-syntax`'s texts, in order),
+    /// each transformer defined now running where they are (`phase1.rs`).
+    pub(crate) phase1: Rc<Vec<String>>,
     /// The uses of macros the expansion is inside, the innermost last: each
     /// its macro, its form, and how many parts the form has, once it is
     /// looked at (`Macros::enter`).
@@ -1402,7 +1405,9 @@ impl Macros {
         let defined_at = std::mem::take(&mut self.defined_at);
         let def_env = std::mem::replace(&mut self.withs.def_env, hygiene::DefEnv::Within);
         let reading = self.reading.replace(std::sync::Arc::from(text));
+        let phase1 = std::mem::take(&mut self.withs.phase1);
         let r = f(self);
+        self.withs.phase1 = phase1;
         self.defined = defined;
         self.withs.marks = marks;
         self.defined_at = defined_at;
@@ -1436,6 +1441,14 @@ impl Macros {
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
+            // The file's phase-1 forms, in force for its macros after them.
+            if form.head_sym().is_some_and(|h| interner.name(h) == "begin-for-syntax") {
+                if let Err(e) = own.for_syntax(form, interner) {
+                    defined = Err(e);
+                    break;
+                }
+                continue;
+            }
             match own.define_in(form, interner, Some(scope)) {
                 Ok(ns) => made.extend(ns.into_iter().map(|n| (n, *hidden))),
                 Err(e) => {
@@ -1660,14 +1673,15 @@ impl Macros {
             }
         };
         let text = code.written(interner);
+        let phase1 = self.withs.phase1.clone();
         // A session's checker's in the expansion's namespace (`phase1.rs`),
         // where its uses call it; another's in the transformers' session.
-        let defined = match self.phase1_define(style, &text) {
+        let defined = match self.phase1_define(style, &text, &phase1) {
             Some(d) => d,
-            None => procedural::define(style, &text).map(|_| ()),
+            None => procedural::define(style, &text, &phase1).map(|_| ()),
         };
         defined.map_err(|e| FxError::at(code.at(), format!("`{}`'s transformer: {e}", interner.name(name))))?;
-        let p = procedural::Procedural { style, code: text, def_env, contract: contract.is_some() };
+        let p = procedural::Procedural { style, code: text, def_env, contract: contract.is_some(), phase1 };
         let sig = contract.unwrap_or_else(|| Rc::new(STy::Expr));
         let m = Macro { sig, defn: false, desc: false, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: Some(Rc::new(p)) };
         self.defined.insert(name, Rc::new(m));
@@ -2535,15 +2549,35 @@ impl Macros {
     /// Transformer `code`, of `style`, defined in the phase-1 namespace of
     /// the runtime lent with the syntax, where it is defined: none where no
     /// runtime is lent, or it has no phase 1.
-    fn phase1_define(&mut self, style: procedural::Style, code: &str) -> Option<Result<(), String>> {
+    fn phase1_define(&mut self, style: procedural::Style, code: &str, forms: &[String]) -> Option<Result<(), String>> {
         if !self.withs.world.borrow().session {
             return None;
         }
         crate::heap_syn::with_runtime(|rt| {
-            let ph = crate::phase1::Phase1::current(rt).ok()?;
-            Some(ph.transformer(rt, style.ty(), &procedural::key(style, code), &procedural::helpers(code)).map(|_| ()))
+            crate::phase1::Phase1::current(rt).ok()?;
+            Some(crate::phase1::Phase1::current_for(rt, forms).and_then(|ph| ph.transformer(rt, style.ty(), &procedural::key(style, code), &procedural::helpers(code)).map(|_| ())))
         })
         .flatten()
+    }
+
+    /// `(begin-for-syntax form …)`, `s`: its forms in force from now on, for
+    /// each transformer defined after (`Withs::phase1`), checked, compiled
+    /// and run in their namespace now, so that one refused is refused here
+    /// (in the session's runtime if it is lent, else the transformers'
+    /// session). Phase 1's alone: nothing of it is the program's.
+    pub(crate) fn for_syntax(&mut self, s: &Syn, interner: &mut Interner) -> R<()> {
+        let items = s.list().unwrap_or_default();
+        let mut forms = (*self.withs.phase1).clone();
+        forms.extend(items.iter().skip(1).map(|f| f.written(interner)));
+        let session = self.withs.world.borrow().session;
+        let lent = session.then(|| crate::heap_syn::with_runtime(|rt| crate::phase1::Phase1::current(rt).ok().map(|_| crate::phase1::Phase1::current_for(rt, &forms).map(|_| ())))).flatten().flatten();
+        let made = match lent {
+            Some(made) => made,
+            None => procedural::with_forms_checked(&forms),
+        };
+        made.map_err(|e| FxError::at(s.at(), format!("`begin-for-syntax`: {e}")))?;
+        self.withs.phase1 = Rc::new(forms);
+        Ok(())
     }
 
     /// Transformer `p` called on use `s` in expansion `made` in the phase-1
@@ -2557,7 +2591,7 @@ impl Macros {
             return None;
         }
         let datum = s.plain();
-        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, datum, made)).flatten()
+        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, &p.phase1, datum, made)).flatten()
     }
 
     /// Transformer `p` called on use `s` in expansion `made` in the
@@ -2571,7 +2605,7 @@ impl Macros {
             crate::heap_syn::collect_young_if_asked();
         }
         let datum = s.plain();
-        let out = crate::heap_syn::with_heap(|h| procedural::apply_copied(p.style, &p.code, made, h, datum))?;
+        let out = crate::heap_syn::with_heap(|h| procedural::apply_copied(p.style, &p.code, &p.phase1, made, h, datum))?;
         Ok(if own { crate::heap_syn::collect_young_if_asked_keeping(out) } else { out })
     }
 

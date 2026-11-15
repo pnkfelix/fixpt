@@ -45,7 +45,7 @@
 (import imports-module import-file-macros note-load-def!)
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
         syntax-names imports-syntax? globals! global-before? macro? later-macro-site def-envs-given
-        file-scope-begin! file-scope-end! source-of)
+        file-scope-begin! file-scope-end! source-of for-syntax? for-syntax!)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -242,6 +242,9 @@
           ((defines-syntax? written)
            (begin (global-macro written)
                   (macro-checks (define-macro pfail-at written nil))))
+          ;; Phase 1's forms, in force for the transformers defined after:
+          ;; nothing of the program's.
+          ((for-syntax? written) (begin (for-syntax! pfail-at written) nil))
           ;; A file's macros, and the `include` of the rest.
           ((imports-syntax? written)
            (let ((inc (import-file-macros pfail-at written (get loaded))))
@@ -598,7 +601,7 @@
 (define own-macros? (->* (syns-a) bool)
   (lambda (xs)
     (and (not (null? xs))
-         (or (own-macro? (car xs))
+         (or (own-macro? (car xs)) (for-syntax? (car xs))
              (and (form-of? (car xs) 'hide) (own-macros? (cdr (syn-items (car xs) ""))))
              (own-macros? (cdr xs))))))
 (define own-macro? (->* (syn) bool)
@@ -617,6 +620,10 @@
                                              (syn-start x) (syn-end x))
                                    nil))
                            ((own-macro? x) (begin (define-macro pfail-at x nil) (list x)))
+                           ;; Phase 1's, in force for the file's macros after;
+                           ;; kept for an importer's, as its macros are, and
+                           ;; no item of its module's (`file-items`).
+                           ((for-syntax? x) (begin (for-syntax! pfail-at x) (list x)))
                            ((form-of? x 'hide)
                             (let ((items (syn-items x "")))
                               (list (mk-list (cons (car items) (own-each (cdr items)))

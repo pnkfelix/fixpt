@@ -12,7 +12,7 @@
         head-name import-usage in-loaded-as internal-names internal-of len load-base load-of
         load-path loaded-path loads macro-names macro-of macro? mk-list mk-symbol name-filter
         names-shown not-macros nth proper shown-names syn-end syn-start syn-symbol syn-symbol?
-        taken? without-load marks
+        taken? without-load marks for-syntax? for-syntax! phase1-forms-now phase1-forms!
         (type fails file-macro files filter macro macro-env mades names scope syn syns-a marked))
 
 ;; Notes a top-level `(define name (load-module "path"))`, the file
@@ -111,14 +111,17 @@
 ;; `filter` takes by its own name too. The names of those not hidden.
 (define define-file (->* (fails (listof file-macro acyclic) scope (listof filter acyclic)) names)
   (lambda (fail ms scope filter)
-    (let ((program (get defined)) (program-marks (get marks)))
+    (let ((program (get defined)) (program-marks (get marks)) (program-phase1 (phase1-forms-now)))
       (begin
         (set defined nil)
         (set marks nil)
+        ;; The file's phase-1 forms its own, for its macros alone.
+        (phase1-forms! nil)
         (let* ((made (define-each fail ms scope)) (own (get defined)) (own-marks (get marks)))
           (begin
             (set defined program)
             (set marks program-marks)
+            (phase1-forms! program-phase1)
             (give-each fail made own own-marks scope filter
                        (if (null? ms) (atom '() 0 0 0) (extract (car ms) 1)))
             (shown-names made)))))))
@@ -126,8 +129,10 @@
   (lambda (fail ms scope)
     (if (null? ms)
         nil
-        (let ((ns (define-macro fail (extract (car ms) 1) (list scope))))
-          (append (hidden-as ns (extract (car ms) 2)) (define-each fail (cdr ms) scope))))))
+        (if (for-syntax? (extract (car ms) 1))
+            (begin (for-syntax! fail (extract (car ms) 1)) (define-each fail (cdr ms) scope))
+            (let ((ns (define-macro fail (extract (car ms) 1) (list scope))))
+              (append (hidden-as ns (extract (car ms) 2)) (define-each fail (cdr ms) scope)))))))
 (define hidden-as (->* (names bool) mades)
   (lambda (ns h) (if (null? ns) nil (cons (tuple (car ns) h) (hidden-as (cdr ns) h)))))
 (define give-each

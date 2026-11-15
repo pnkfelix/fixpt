@@ -735,6 +735,10 @@ impl Checker {
                 macros.extend(names_of(self, &f));
                 continue;
             }
+            // Phase 1's: no item of the module's.
+            if f.head_sym().is_some_and(|h| self.interner.name(h) == "begin-for-syntax") {
+                continue;
+            }
             match f.list().as_deref() {
                 Some([h, items @ ..]) if h.sym().is_some_and(|h| self.interner.name(h) == "hide") && items.iter().any(|i| defines_syntax(self, i)) => {
                     macros.extend(items.iter().filter(|i| defines_syntax(self, i)).flat_map(|i| names_of(self, i)));
@@ -935,7 +939,18 @@ impl Checker {
         if !forms.iter().any(|f| macro_of(f) || hidden(f)) {
             return Ok(forms);
         }
-        let kinds: Vec<u8> = forms.iter().map(|f| if head(f).as_deref() == Some("module-parameters") || shape(f) { 0 } else if macro_of(f) { 1 } else if head(f).as_deref() == Some("hide") { 2 } else { 3 }).collect();
+        let kinds: Vec<u8> = forms
+            .iter()
+            .map(|f| match head(f).as_deref() {
+                Some("module-parameters") => 0,
+                _ if shape(f) => 0,
+                _ if macro_of(f) => 1,
+                Some("hide") => 2,
+                // Phase 1's forms, in force for the file's macros after them.
+                Some("begin-for-syntax") => 4,
+                _ => 3,
+            })
+            .collect();
         let marks: Vec<Vec<bool>> = forms.iter().map(|f| f.list().map(|l| l.iter().map(macro_of).collect()).unwrap_or_default()).collect();
         let mut macros = std::mem::take(&mut self.macros);
         let mut interner = std::mem::take(&mut self.interner);
@@ -968,6 +983,10 @@ impl Checker {
                         }
                         out.push(Syn::lst(f.at(), kept));
                     }
+                    4 => {
+                        m.for_syntax(&f, &mut interner)?;
+                        out.push(f);
+                    }
                     _ => expanded(m, &f, &mut out, &mut interner)?,
                 }
             }
@@ -989,6 +1008,19 @@ impl Checker {
                 && h.sym().is_some_and(|h| self.interner.name(h) == "hide")
             {
                 out.extend(self.expand_forms_syn(items.to_vec())?);
+                continue;
+            }
+            // `(begin-for-syntax form …)`: phase 1's, its forms in force for
+            // the transformers defined after it; nothing of the program's.
+            if f.head_sym().is_some_and(|h| self.interner.name(h) == "begin-for-syntax") {
+                self.syn(|c| {
+                    let mut macros = std::mem::take(&mut c.macros);
+                    let mut interner = std::mem::take(&mut c.interner);
+                    let r = macros.for_syntax(&f, &mut interner);
+                    c.macros = macros;
+                    c.interner = interner;
+                    r
+                })?;
                 continue;
             }
             // `(import-with-syntax lib)`: the file's macros defined, and the
@@ -1103,7 +1135,8 @@ impl Checker {
             let listed = f.list();
             let head = listed.as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).map(|h| self.interner.name(h).to_string());
             match head.as_deref() {
-                Some("define-syntax" | "define-syntax-rec") => macros.push((f, false)),
+                // Its phase-1 forms too, in order among them, for its macros.
+                Some("define-syntax" | "define-syntax-rec" | "begin-for-syntax") => macros.push((f, false)),
                 Some("hide") => {
                     for item in f.list().as_deref().unwrap_or_default().iter().skip(1) {
                         if syntax_names(item, &self.interner).is_some() {

@@ -252,8 +252,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // gives the same for the same text.
     ("%macros:expand-procedural", "(subr spin (string) string)"),
     // A transformer called on a use's datum in the expansion's phase-1
-    // namespace (`phase1.rs`): its style, text, the datum and the expansion.
-    ("%macros:call-procedural", "(subr spin (int string datum int) (sumof (ok datum) (failed string) (apart unit)))"),
+    // namespace (`phase1.rs`): its style, text, the datum, the expansion, and
+    // the phase-1 forms in force where it was defined.
+    ("%macros:call-procedural", "(subr spin (int string datum int (listof string acyclic)) (sumof (ok datum) (failed string) (apart unit)))"),
     ("%macros:limit", "(subr spin (string) string)"),
     ("list-dir", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (names (listof string r)) (failed io-error))))"),
     // Heist's (`FIXPT-CHANGES.md` F3): the checker's type of the innermost

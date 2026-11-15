@@ -29,9 +29,11 @@ use fixpt_heap::Value;
 use fixpt_runtime::Runtime;
 
 /// The conductor's entry that makes the front end, and the fields of what
-/// it makes, from 1: a step, and a name's global.
+/// it makes, from 1: a step, whether reading a global is an effect, and a
+/// name's global.
 const MAKE: &str = "fx26-native:make-session-compiler";
 const E_STEP: usize = 4;
+const E_GLOBALS_EFFECTS: usize = 6;
 const E_CELL: usize = 9;
 
 /// How `session-step` checks: the first, in the standard environment, only
@@ -39,8 +41,19 @@ const E_CELL: usize = 9;
 const FIRST: i64 = 0;
 const MORE: i64 = 1;
 
-/// The global that holds the runtime's current namespace, an expansion's.
+/// The global that holds the runtime's current namespace, an expansion's
+/// (and, after it, `:DIGEST`, each of its namespaces of phase-1 forms).
 const CURRENT: &str = "%phase1:current";
+/// The global listing the expansion's namespaces of phase-1 forms.
+const ALL: &str = "%phase1:current:all";
+
+/// Phase-1 forms `forms`'s digest: what names their namespace.
+pub(crate) fn forms_digest(forms: &[String]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    forms.hash(&mut h);
+    h.finish()
+}
 
 /// What every transformer sees besides the standard environment.
 const PRELUDE: &str = include_str!("macros/procedural-prelude.fx");
@@ -81,19 +94,73 @@ impl Phase1 {
 
     /// The runtime's current namespace, an expansion's: made if it has none.
     pub fn current(rt: &mut Runtime) -> Result<Phase1, String> {
-        let p = Phase1 { global: CURRENT.to_string() };
-        if crate::stage::global(rt, CURRENT).is_some_and(|v| v != Value::FALSE) {
-            return Ok(p);
-        }
-        Phase1::made_at(rt, CURRENT.to_string())
+        Phase1::current_for(rt, &[])
     }
 
-    /// The runtime's current namespace ended, if it has one: an
+    /// The expansion's namespace of the phase-1 forms `forms`
+    /// (`begin-for-syntax`'s, in order), made if it has none: the standard
+    /// environment, the prelude, then `forms`, defined there. A transformer
+    /// runs in the namespace of the forms in force where it was defined, so
+    /// that what it names is what was there, whatever was defined after or
+    /// in another file (`docs/research/typed-macros.md`, "for-syntax").
+    pub fn current_for(rt: &mut Runtime, forms: &[String]) -> Result<Phase1, String> {
+        let global = if forms.is_empty() { CURRENT.to_string() } else { format!("{CURRENT}:{:016x}", forms_digest(forms)) };
+        if crate::stage::global(rt, &global).is_some_and(|v| v != Value::FALSE) {
+            return Ok(Phase1 { global });
+        }
+        let p = Phase1::made_at(rt, global.clone())?;
+        // Each made one's global listed, for the expansion's end.
+        let name = rt.heap.make_string(&global);
+        let base = rt.heap.push_root(name);
+        let all = crate::stage::global(rt, ALL).unwrap_or(Value::NULL);
+        let l = rt.heap.cons(rt.heap.root_at(base), all);
+        rt.heap.pop_roots_to(base);
+        let sym = rt.heap.intern(ALL);
+        let slot = rt.heap.symbol_global_slot(sym);
+        rt.heap.set_global(slot, l);
+        if let Err(e) = p.define_forms(rt, forms) {
+            let sym = rt.heap.intern(&global);
+            let slot = rt.heap.symbol_global_slot(sym);
+            rt.heap.set_global(slot, Value::FALSE);
+            return Err(e);
+        }
+        Ok(p)
+    }
+
+    /// A namespace of its own made in `rt` ([`Phase1::new`]), `forms`
+    /// defined in it: the transformers' session's, for those forms.
+    pub fn with_forms(rt: &mut Runtime, forms: &[String]) -> Result<Phase1, String> {
+        let p = Phase1::new(rt)?;
+        p.define_forms(rt, forms)?;
+        Ok(p)
+    }
+
+    /// Phase-1 forms `forms` checked, compiled and run in the namespace,
+    /// in order; or why one was refused.
+    fn define_forms(&self, rt: &mut Runtime, forms: &[String]) -> Result<(), String> {
+        for f in forms {
+            self.run(rt, &format!("{f}\n"), MORE)?;
+        }
+        Ok(())
+    }
+
+    /// The runtime's current namespaces ended, if it has any: an
     /// expansion's end (`Fx26Session::expansion`).
     pub fn end_current(rt: &mut Runtime) {
-        if crate::stage::global(rt, CURRENT).is_some_and(|v| v != Value::FALSE) {
-            Phase1 { global: CURRENT.to_string() }.end(rt);
+        let mut l = crate::stage::global(rt, ALL).unwrap_or(Value::NULL);
+        let mut globals = vec![CURRENT.to_string()];
+        while l.is_pair() {
+            globals.push(rt.heap.string_to_rust(rt.heap.car(l)));
+            l = rt.heap.cdr(l);
         }
+        for g in globals {
+            if crate::stage::global(rt, &g).is_some_and(|v| v != Value::FALSE) {
+                Phase1 { global: g }.end(rt);
+            }
+        }
+        let sym = rt.heap.intern(ALL);
+        let slot = rt.heap.symbol_global_slot(sym);
+        rt.heap.set_global(slot, Value::NULL);
     }
 
     /// The transformer of `key` (its style and text) defined in the
@@ -149,6 +216,11 @@ impl Phase1 {
         let sym = rt.heap.intern(&p.global);
         let slot = rt.heap.symbol_global_slot(sym);
         rt.heap.set_global(slot, fe);
+        // Reading a global is no effect here: a namespace is made for one
+        // list of phase-1 forms, and a global of it, once defined, is never
+        // another (another list is another namespace). So a transformer that
+        // names a `begin-for-syntax`'s helper is of its style's type.
+        p.call_entry(rt, E_GLOBALS_EFFECTS, &[Value::FALSE])?;
         // The first step begins the checker in the standard environment, and
         // only checks; the prelude is the next, compiled.
         p.run(rt, "(define %phase1 unit #u)\n", FIRST).map_err(|e| format!("phase 1's start: {e}"))?;
@@ -268,12 +340,23 @@ fn on_cellular<T>(rt: &mut Runtime, f: impl FnOnce(&mut Runtime) -> T) -> T {
 /// parse of the namespace's own front end, whose reader, parser and
 /// expander, with their state, are its own (the conductor makes them for
 /// each front end), so the parse it is inside is left as it was.
-pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural::Style, code: &str, datum: Value, made: u32) -> Option<Result<Value, String>> {
+pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural::Style, code: &str, forms: &[String], datum: Value, made: u32) -> Option<Result<Value, String>> {
     use crate::macros::procedural;
     let base = rt.heap.push_root(datum);
     let out = (|| {
         let key = procedural::key(style, code);
-        let ph = Phase1::current(rt).ok()?;
+        // No phase 1 here at all (its front end not compiled, or the
+        // standard environment not read): apart. A phase-1 form refused:
+        // the transformer's failure.
+        let plain = Phase1::current(rt).ok()?;
+        let ph = if forms.is_empty() {
+            plain
+        } else {
+            match Phase1::current_for(rt, forms) {
+                Ok(ph) => ph,
+                Err(e) => return Some(Err(e)),
+            }
+        };
         let global = match ph.transformer(rt, style.ty(), &key, &procedural::helpers(code)) {
             Ok(g) => g,
             Err(e) => return Some(Err(e)),
@@ -320,7 +403,8 @@ pub(crate) fn call_transformer(rt: &mut Runtime, ph: &Phase1, global: &str, styl
 /// What `%fx26-call-procedural` does (`Runtime::procedural`), for the
 /// expander written in FX-26: its arguments a style (0 explicit renaming, 1
 /// syntactic closures, 2 reversed), the transformer's text, the use's
-/// datum and the expansion; `(sum ok datum)`, what the transformer gave, or
+/// datum, the expansion, and the phase-1 forms in force where it was
+/// defined (a list of texts, `begin-for-syntax`'s); `(sum ok datum)`, what the transformer gave, or
 /// `(sum failed why)`. In the expansion's namespace, made and the
 /// transformer defined there if they are not yet; else, where the runtime
 /// has no phase 1, in the transformers' session, the datum and what it gave
@@ -334,12 +418,19 @@ pub fn call_procedural(rt: &mut Runtime, a: &[Value]) -> Result<Value, String> {
     };
     let code = rt.heap.string_to_rust(a[1]);
     let made = a[3].as_fixnum() as u32;
-    let out = match run_transformer(rt, style, &code, a[2], made) {
+    // The phase-1 forms in force where it was defined, a list of texts.
+    let mut forms = Vec::new();
+    let mut l = a[4];
+    while l.is_pair() {
+        forms.push(rt.heap.string_to_rust(rt.heap.car(l)));
+        l = rt.heap.cdr(l);
+    }
+    let out = match run_transformer(rt, style, &code, &forms, a[2], made) {
         Some(out) => {
             CALLED.with(|c| c.set(c.get() + 1));
             out
         }
-        None => crate::macros::procedural::apply_copied(style, &code, made, &mut rt.heap, a[2]),
+        None => crate::macros::procedural::apply_copied(style, &code, &forms, made, &mut rt.heap, a[2]),
     };
     Ok(match out {
         Ok(v) => crate::sessions::sum(rt, "ok", v),

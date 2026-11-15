@@ -53,6 +53,16 @@ fn a_file_uses_its_own_macros() {
     }
 }
 
+/// A file's phase-1 forms (`begin-for-syntax`) are its own macros': its
+/// `scale` for its macro, the importer's own `scale` for the importer's.
+#[test]
+fn a_files_phase_1_is_its_own() {
+    for m in MACHINES {
+        let (out, err) = eval(m, "main-for-syntax.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("1044 : ")), "{m}: {out}{err}");
+    }
+}
+
 /// A file's trailmark (`typed-macros.md`, "Trailmarks"): a use
 /// writes it by the name the importer has it by, and the file's templates
 /// write it whatever the importer takes.

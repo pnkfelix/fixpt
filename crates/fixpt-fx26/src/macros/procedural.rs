@@ -74,6 +74,9 @@ pub(crate) struct Procedural {
     /// Whether its signature is written, its contract: its uses aligned
     /// with it, its expansions held to it (`Macros::contract_expanded`).
     pub contract: bool,
+    /// The phase-1 forms in force where it is defined (`begin-for-syntax`'s
+    /// texts, in order), whose namespace it runs in (`phase1.rs`).
+    pub phase1: std::rc::Rc<Vec<String>>,
 }
 
 /// The syntactic environments a syntactic-closure transformer is given and
@@ -92,7 +95,7 @@ thread_local! {
     /// session's namespace has not the transformer, which it may not define
     /// there (`phase1::run_transformer`). This runtime's front end is its
     /// own, so a definition here, inside a parse of another's, is apart.
-    static SESSION: RefCell<Option<(crate::session::Fx26Session, crate::phase1::Phase1)>> = const { RefCell::new(None) };
+    static SESSION: RefCell<Option<(crate::session::Fx26Session, fixpt_hash::HashMap<u64, crate::phase1::Phase1>)>> = RefCell::new(None);
 }
 
 /// A transformer's key in a namespace: its style and text.
@@ -100,20 +103,30 @@ pub(crate) fn key(style: Style, code: &str) -> String {
     format!("{style:?}\n{code}")
 }
 
-/// `f` of the transformers' session's runtime and namespace, made at the
-/// first; apart from the session whose check or run asks (`crossing::apart`).
-fn with_session<T>(f: impl FnOnce(&mut fixpt_runtime::Runtime, &crate::phase1::Phase1) -> Result<T, String>) -> Result<T, String> {
+/// `f` of the transformers' session's runtime and its namespace of the
+/// phase-1 forms `forms` (one for each list of them, its forms defined in
+/// it: `phase1::Phase1::with_forms`), made at the first; apart from the
+/// session whose check or run asks (`crossing::apart`).
+fn with_session<T>(forms: &[String], f: impl FnOnce(&mut fixpt_runtime::Runtime, &crate::phase1::Phase1) -> Result<T, String>) -> Result<T, String> {
     fixpt_runtime::crossing::apart(|| {
         SESSION.with(|s| {
             let mut s = s.borrow_mut();
             if s.is_none() {
                 let mut made = crate::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).map_err(|e| e.message)?;
                 made.strategy = crate::session::Strategy::Cellular;
-                let p = made.phase1().map_err(|e| format!("the transformers' namespace: {}", e.message))?;
-                *s = Some((made, p));
+                // Its front end loaded and the standard environment read,
+                // which each namespace is made of.
+                made.phase1().map_err(|e| format!("the transformers' namespace: {}", e.message))?.end(made.scheme.runtime_unrooted());
+                *s = Some((made, fixpt_hash::HashMap::default()));
             }
-            let (session, p) = s.as_mut().expect("made");
-            f(session.scheme.runtime_unrooted(), p)
+            let (session, spaces) = s.as_mut().expect("made");
+            let rt = session.scheme.runtime_unrooted();
+            let digest = crate::phase1::forms_digest(forms);
+            if !spaces.contains_key(&digest) {
+                let p = crate::phase1::Phase1::with_forms(rt, forms)?;
+                spaces.insert(digest, p);
+            }
+            f(rt, &spaces[&digest])
         })
     })
 }
@@ -123,16 +136,23 @@ fn with_session<T>(f: impl FnOnce(&mut fixpt_runtime::Runtime, &crate::phase1::P
 /// once; its global. Both front ends define each macro, and agree; a
 /// session's checker defines its in its own namespace instead
 /// (`Macros::define_procedural`).
-pub(crate) fn define(style: Style, code: &str) -> Result<String, String> {
-    with_session(|rt, p| p.transformer(rt, style.ty(), &key(style, code), &helpers(code)))
+pub(crate) fn define(style: Style, code: &str, forms: &[String]) -> Result<String, String> {
+    with_session(forms, |rt, p| p.transformer(rt, style.ty(), &key(style, code), &helpers(code)))
+}
+
+/// Phase-1 forms `forms` checked, compiled and run in the transformers'
+/// session, in a namespace of theirs (`Macros::for_syntax`).
+pub(crate) fn with_forms_checked(forms: &[String]) -> Result<(), String> {
+    with_session(forms, |_, _| Ok(()))
 }
 
 /// Transformer `code`, of `style`, called in the transformers' session on
-/// datum `v` of `heap`, copied there, in expansion `made`: what it gave,
+/// datum `v` of `heap`, copied there, in expansion `made`, in its namespace
+/// of the phase-1 forms `forms` in force where it was defined: what it gave,
 /// copied into `heap` (`heap_syn::copy_datum`), no text between; or why
 /// not. Defined there if it is not, as in a session made since.
-pub(crate) fn apply_copied(style: Style, code: &str, made: u32, heap: &mut fixpt_heap::Heap, v: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
-    let out = with_session(|rt, p| {
+pub(crate) fn apply_copied(style: Style, code: &str, forms: &[String], made: u32, heap: &mut fixpt_heap::Heap, v: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
+    let out = with_session(forms, |rt, p| {
         let d = crate::heap_syn::copy_datum(heap, v, &mut rt.heap)?;
         let base = rt.heap.push_root(d);
         let g = p.transformer(rt, style.ty(), &key(style, code), &helpers(code));
@@ -146,8 +166,9 @@ pub(crate) fn apply_copied(style: Style, code: &str, made: u32, heap: &mut fixpt
 
 /// What the expander written in FX-26 asks, through the runtime (only
 /// where no namespace answers it: the evaluator's, `%macros:call-procedural`
-/// answering `apart` there): `%define STYLE\n` and then a transformer's
-/// text, to `define`; or `%apply STYLE MADE LENGTH\n` and then the
+/// answering `apart` there): `%define STYLE N\n`, N phase-1 forms each as
+/// `LENGTH\n` and its text, and then a transformer's text, to `define`; or
+/// `%apply STYLE MADE LENGTH N\n`, the N forms so, and then the
 /// transformer's text, `LENGTH` characters, and the form's, to run it on
 /// the form read in the transformers' session, its answer written.
 fn asked(request: &str) -> Result<String, String> {
@@ -156,21 +177,48 @@ fn asked(request: &str) -> Result<String, String> {
         1 => Style::Sc,
         _ => Style::Rsc,
     };
+    // `n` forms, each its length in characters on a line of its own and its
+    // text, at the start of `body`: them, and what is after.
+    let forms_of = |n: usize, mut body: &str| -> Result<(Vec<String>, String), String> {
+        let mut forms = Vec::new();
+        for _ in 0..n {
+            let (len, rest) = body.split_once('\n').ok_or("a malformed transformer request")?;
+            let len = len.parse::<usize>().map_err(|_| "a malformed transformer request")?;
+            let split = rest.char_indices().nth(len).map_or(rest.len(), |(i, _)| i);
+            forms.push(rest[..split].to_string());
+            body = &rest[split..];
+        }
+        Ok((forms, body.to_string()))
+    };
+    // `%forms N\n` and N phase-1 forms: checked, compiled and run in their
+    // namespace (`for-syntax!`, the expander written in FX-26's).
+    if let Some(rest) = request.strip_prefix("%forms ") {
+        let (head, body) = rest.split_once('\n').ok_or("a malformed transformer request")?;
+        let n = head.parse::<usize>().map_err(|_| "a malformed transformer request")?;
+        let (forms, _) = forms_of(n, body)?;
+        return with_forms_checked(&forms).map(|_| "#u".to_string());
+    }
     if let Some(rest) = request.strip_prefix("%define ") {
-        let (head, code) = rest.split_once('\n').ok_or("a malformed transformer request")?;
-        let style = head.parse::<usize>().map_err(|_| "a malformed transformer request")?;
-        return define(style_of(style), code).map(|_| "#u".to_string());
+        let (head, body) = rest.split_once('\n').ok_or("a malformed transformer request")?;
+        let mut words = head.split(' ').map(|w| w.parse::<usize>());
+        let (Some(Ok(style)), Some(Ok(n))) = (words.next(), words.next()) else {
+            return Err("a malformed transformer request".into());
+        };
+        let (forms, code) = forms_of(n, body)?;
+        return define(style_of(style), &code, &forms).map(|_| "#u".to_string());
     }
     let Some(rest) = request.strip_prefix("%apply ") else { return Err("not a transformer request".into()) };
     let (head, body) = rest.split_once('\n').ok_or("a malformed transformer request")?;
     let mut words = head.split(' ').map(|w| w.parse::<usize>());
-    let (Some(Ok(style)), Some(Ok(made)), Some(Ok(length))) = (words.next(), words.next(), words.next()) else {
+    let (Some(Ok(style)), Some(Ok(made)), Some(Ok(length)), Some(Ok(n))) = (words.next(), words.next(), words.next(), words.next()) else {
         return Err("a malformed transformer request".into());
     };
+    let (forms, body) = forms_of(n, body)?;
+    let body = body.as_str();
     let style = style_of(style);
     let split = body.char_indices().nth(length).map_or(body.len(), |(i, _)| i);
     let (code, form) = (&body[..split], &body[split..]);
-    with_session(|rt, p| {
+    with_session(&forms, |rt, p| {
         let mut interner = std::mem::take(&mut rt.interner);
         let read = fixpt_read::Reader::new(form, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read();
         rt.interner = interner;

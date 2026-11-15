@@ -2310,6 +2310,23 @@ transformers' session (`TODO.md` §228).
    parse, as the Rust one does: a front end 2 ms more to make (a
    namespace, 10 ms to 12), the front end's text 26 lines more. Tests:
    `tests/phase1.rs`.
+7. `for-syntax` (*built*, 2026-11-15; the user's shape): `(begin-for-syntax
+   form …)` at top level, its forms any top-level forms, phase 1's, in force
+   for the transformers defined after. Each transformer keeps the forms in
+   force where it was defined (`Procedural::phase1`, FX-26's `procedural`'s
+   sixth), and runs in a namespace made for exactly those
+   (`Phase1::current_for`, `%phase1:current:DIGEST`; in the transformers'
+   session, one for each list): so a file's are its macros' alone, and no
+   redefinition after changes a closure compiled before, by construction;
+   no replay of a file's forms into its importer. The forms are checked
+   where they are, in their namespace (`Macros::for_syntax`, FX-26's
+   `for-syntax!` by a `%forms` request). A namespace's globals, once
+   defined, are never others, so reading one is no effect there
+   (`check-globals-effects!` off): a transformer that calls a helper is of
+   its style's type. The list goes with a REPL's state (`by-state`'s
+   seventh) and a file's scope (`in_file_scope`, `define-file`,
+   `scope-saved`). A module file's are no items (`without_own_macros`,
+   `without-syntax`, `file-items`). Not yet: phases above 1, a body's.
 6. The separate transformers' session gone. *Since stage 2 narrowed*:
    kept, for the checkers with no session of theirs (§280), until they
    have runtimes. *Built so* (2026-11-15): a session's checker defines its

@@ -40,6 +40,12 @@
       (and (not (null? items)) (syn-symbol? (car items))
            (or (string=? (syn-name (car items)) "define-syntax")
                (string=? (syn-name (car items)) "define-syntax-rec"))))))
+;; Whether `s` is a `begin-for-syntax`, phase 1's forms (`macros-procedural.fx`).
+(define for-syntax? (->* (syn) bool)
+  (lambda (s)
+    (let ((items (proper s)))
+      (and (not (null? items)) (syn-symbol? (car items))
+           (string=? (syn-name (car items)) "begin-for-syntax")))))
 ;; The macros `s`, a `define-syntax` or a `define-syntax-rec`, defines.
 (define syntax-names (->* (syn) names)
   (lambda (s)
@@ -126,12 +132,13 @@
           ((and (string=? (extract (car fs) 4) path) (> (extract (car fs) 2) 0))
            (the files (list (car fs))))
           (else (loaded-path path (cdr fs))))))
-;; A file's macros, each with whether it is hidden, in order.
+;; A file's macros, each with whether it is hidden, in order; and its
+;; `begin-for-syntax`es among them, in force for the macros after each.
 (define-type file-macro (tupleof syn bool))
 (define file-syntax (->* (syns-a) (listof file-macro acyclic))
   (lambda (forms)
     (cond ((null? forms) nil)
-          ((defines-syntax? (car forms))
+          ((or (defines-syntax? (car forms)) (for-syntax? (car forms)))
            (cons (tuple (car forms) #f) (file-syntax (cdr forms))))
           ((hide-form? (car forms))
            (append (hidden-syntax (cdr (proper (car forms)))) (file-syntax (cdr forms))))
@@ -149,7 +156,8 @@
 (define file-items (->* (syns-a) syns-a)
   (lambda (forms)
     (cond ((null? forms) nil)
-          ((or (defines-syntax? (car forms)) (hide-form? (car forms))) (file-items (cdr forms)))
+          ((or (defines-syntax? (car forms)) (for-syntax? (car forms)) (hide-form? (car forms)))
+           (file-items (cdr forms)))
           ((datatype? (car forms))
            (append (expand-datatype (car forms)) (file-items (cdr forms))))
           (else (cons (car forms) (file-items (cdr forms)))))))

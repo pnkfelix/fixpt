@@ -50,6 +50,7 @@
         (type exported nested))
 (import solve-module infer sig-text by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
+        phase1-forms-now phase1-forms! for-syntax!
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias respanned in-expansion use-entered? use-left!
         chain-begun! checked-uses trust-if! use-aligned! procedural-expanded)
@@ -57,8 +58,8 @@
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names trailmark-form define-trailmark hide-marks!
         (type written writtens signed signed-opt))
-(import files-module proper name-in? defines-syntax? head-name load-path without-load load-of
-        internal-of
+(import files-module proper name-in? defines-syntax? for-syntax? head-name load-path without-load
+        load-of internal-of
         imports-syntax? import-usage name-filter all-names listed? not-macros loaded-path
         file-syntax hidden-syntax hide-form? file-items names-shown defined-name rec-names
         generative-values macro-names internal-names taken? shown-names macro-sites load-noted
@@ -523,7 +524,8 @@
 ;; And the globals defined, which no macro may be named (`globals`).
 ;; And the count of fresh names, so that a program begun in the standard
 ;; environment's state makes them as the Rust expander, begun anew, does.
-(define-type by-states (listof (tupleof int macro-env load-defs names int marked) acyclic))
+(define-type by-states
+  (listof (tupleof int macro-env load-defs names int marked (listof string acyclic)) acyclic))
 ;; Fresh names' count.
 (define fresh-count (ref int rs) (new 0))
 (define by-state (ref by-states rs) (new nil))
@@ -539,10 +541,10 @@
         (set with-uses nil)
         (if (null? at)
             (begin (set defined nil) (set loads nil) (set globals nil) (set fresh-count 0)
-                   (set marks nil))
+                   (set marks nil) (phase1-forms! nil))
             (begin (set defined (extract (car at) 2)) (set loads (extract (car at) 3))
                    (set globals (extract (car at) 4)) (set fresh-count (extract (car at) 5))
-                   (set marks (extract (car at) 6))))
+                   (set marks (extract (car at) 6)) (phase1-forms! (extract (car at) 7))))
         (set globals-before (get globals))))))
 (define state-at (->* (int by-states) by-states)
   (lambda (s xs)
@@ -552,10 +554,10 @@
 (define macros-after! (->* (int) unit)
   (lambda (s)
     (if (and (null? (get defined)) (null? (get loads)) (null? (get globals))
-             (= (get fresh-count) 0) (null? (get marks)))
+             (= (get fresh-count) 0) (null? (get marks)) (null? (phase1-forms-now)))
         #u
         (set by-state (cons (tuple s (get defined) (get loads) (get globals) (get fresh-count)
-                                   (get marks))
+                                   (get marks) (phase1-forms-now))
                             (get by-state))))))
 ;; Names `ns` defined as globals.
 (define globals! (->* (names) unit) (lambda (ns) (set globals (append ns (get globals)))))
