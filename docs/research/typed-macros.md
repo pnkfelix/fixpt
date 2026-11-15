@@ -2237,7 +2237,11 @@ transformers' session (`TODO.md` §228).
 2. Every checker in a runtime: `fresh_checker` and the bare checkers
    given their session's runtime (or one of their own), their syntax in
    its heap; `compare::check_with_rust_checker` and its callers given the
-   session.
+   session. *Narrowed* (the user's, 2026-11-15, `TODO.md` §280): a session
+   of each checker's own doubled the suites; a session's checker is in its
+   runtime's heap already, and the others keep their own heaps, their
+   transformers run in the transformers' session on a datum copied heap
+   to heap. Nothing built.
 3. A phase-1 namespace: a narrow Rust API over the runtime's sessions
    (`sessions.rs`), or a namespace of globals by prefix as theirs are:
    make it, define FX-26 code in it, call its procedure on a value.
@@ -2247,4 +2251,6 @@ transformers' session (`TODO.md` §228).
    text.
 5. The expander written in FX-26 through it: its primitive re-entrant
    (`reenters!`), calling the phase-1 procedure in its own runtime.
-6. The separate transformers' session gone.
+6. The separate transformers' session gone. *Since stage 2 narrowed*:
+   kept, for the checkers with no session of theirs (§280), until they
+   have runtimes.

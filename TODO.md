@@ -7108,3 +7108,46 @@ tenured; a major one due waits for the lending's end. `typed-macros.md`,
 Left, if `FIXPT_GC_TRACE` shows majors deferred long or the old space
 growing much in lendings: a space of syntax's own (static ≫ code ≫ tables
 ≫ syntax ≫ old ≫ nursery), so that a major collection may run in one.
+
+Stage 1 built (2026-11-14, branch `shared-heap`); its card marks counted
+apart from the barrier's (2026-11-15, §276). Stage 2 narrowed (the
+user's, 2026-11-15): a session's checker's syntax is in its session's
+runtime's heap already (`Checker::in_session_heap`), and is the one whose
+transformers will run there (stages 4, 5); every other checker keeps a
+heap of its own, its transformers run in the transformers' session, the
+datum copied from heap to heap, not as text (§280).
+
+## 279. A session made without copying the front end's image (2026-11-15)
+
+Each `Fx26Session` copies the native front end's image (72 MB, mapped
+from `~/.cache/fixpt`) into its own heap (`Heap::splice_image_from`,
+relocated) and scans it whole for what moves (`remember_moving`, the top
+of a profile of `fixpt run` of one line: about half the session's
+making, with the copy's page faults). Measured: about 16 ms and 40 MB of
+RSS a session on a quiet machine; in a release suite (2026-11-15, counted
+by a temporary hook, not committed) about 10,000 sessions, about 220 s
+summed over 32 threads, at most some 7 s of the 80 s: the first of each
+process 45 ms on average (2,957 of them, most the CLI tests' `fixpt`
+processes), a later one 11 ms. To weigh: the image mapped at one fixed
+address every heap leaves free, read-only and shared (no relocation, no
+copy, no scan: its references to what moves remembered in the image
+itself), or one position-independent. A design in `fixpt-heap`'s layout,
+to discuss before building. It would also make §280's runtimes cheap.
+
+## 280. Runtimes for the checkers that have none (2026-11-15)
+
+Every checker a runtime (`typed-macros.md`, decision 1) was tried
+unshared (2026-11-15): a session of each checker's own, made at its first
+lending (its construction's syntax, the standard types', in a heap of its
+own, let go). Release suite 79 s to 171 s, debug 142 s to 390 s: a
+session per checker, and the corpus tests make one per program (`fixpt
+check` of one program made 5 sessions, where it made 2: 0.12 s to 0.19).
+Reverted; left for later:
+- `Fx26Session::fresh_checker`'s checkers (`compare`, `query`,
+  `check_reps`, `spec_tests`) on their session's runtime: each use lent
+  the session's heap (`Checker::with_heap`), their signatures given the
+  session; they hold the checker long (`query::load`'s, `answer` later).
+- The runtime's sessions' checkers (`sessions.rs`) in `rt`'s heap,
+  their checks lent it (`tried` has `rt`).
+- `Checker::new()`'s: a runtime of the thread's, or of each, once §279
+  makes a session cheap.
