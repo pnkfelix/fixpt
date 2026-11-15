@@ -485,7 +485,7 @@
            (let ((r (signature-of fail (syntax-sig-of (extract (car es) 2)))))
              (begin (if (null? (extract r 1))
                         (syntax-read! (extract (car es) 2) (extract r 2) (extract r 3))
-                        (fail-at fail "a `(syntax σ)` entry's signature has no `poly`, not yet"
+                        (fail-at fail "a `(macro σ made)` entry's signature has no `poly`, not yet"
                                  (syntax-sig-of (extract (car es) 2))))
                     (syntax-sigs-read! fail (cdr es)))))
           (else (syntax-sigs-read! fail (cdr es))))))
@@ -553,14 +553,15 @@
                            "from its clauses does not fit them: " m "\n  inferred: " shown
                            "\n  write one: (define-syntax " n " SIGNATURE (syntax-rules …))")
             a b))))
-;; A signature's `(-> σ made)`: `σ`, and what it makes, 0 an expression,
+;; A signature's `(macro σ made)`: `σ`, and what it makes, 0 an expression,
 ;; `expr`, 1 definitions, `defn`, 2 a description, `desc`; always written.
-;; `(-> σ (defn (ℓ δ) …))`: definitions, `(export σ (rho (ℓ δ) …))`
+;; `(macro σ (defn (ℓ δ) …))`: definitions, `(export σ (rho (ℓ δ) …))`
 ;; (`macros.rs`'s `signature`).
 (define signature-made (->* (fails syn) (tupleof syn int))
   (lambda (fail s)
     (let ((items (proper-items s)))
-      (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "->"))
+      (if (and (= (len items) 3) (syn-symbol? (car items))
+               (string=? (syn-name (car items)) "macro"))
           (let* ((m (nth items 2)) (ms (proper-items m))
                  (made (cond ((syn-symbol? m) (syn-name m))
                              ((and (pair? ms) (syn-symbol? (car ms))
@@ -571,13 +572,17 @@
                   ((string=? made "(defn") (tuple (defined-in fail (nth items 1) m (cdr ms)) 1))
                   ((string=? made "desc") (tuple (nth items 1) 2))
                   ((string=? made "expr") (tuple (nth items 1) 0))
-                  (else (begin (fail-at fail (string-append "a signature `(-> σ made)` "
+                  (else (begin (fail-at fail (string-append "a signature `(macro σ made)` "
                                                             "makes `expr`, `defn`, `(defn (ℓ "
                                                             "δ) …)` or `desc`")
                                         (nth items 2))
                                (tuple s 0)))))
-          (begin (fail-at fail (string-append "a signature is `(-> σ made)`, what its uses make "
-                                              "written: `expr`, `defn`, `(defn (ℓ δ) …)` or "
-                                              "`desc`")
+          (begin (fail-at fail (if (and (pair? items) (syn-symbol? (car items))
+                                        (string=? (syn-name (car items)) "->"))
+                                   (string-append "a macro's signature is `(macro σ made)`: `->` "
+                                                  "is a procedure's type")
+                                   (string-append "a signature is `(macro σ made)`, what its uses "
+                                                  "make written: `expr`, `defn`, `(defn (ℓ δ) …)` "
+                                                  "or `desc`"))
                           s)
                  (tuple s 0))))))

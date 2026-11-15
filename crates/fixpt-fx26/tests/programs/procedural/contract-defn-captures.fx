@@ -2,7 +2,7 @@
 ;; A name the transformer writes, not renamed: the program's, which nothing
 ;; says the use defines.
 (define-syntax define-const
-  (-> (bvar expr) (defn (A var)))
+  (macro (bvar expr) (defn (A var)))
   (er-macro-transformer
     (lambda (form rename compare)
       `(,(rename 'begin) (,(rename 'define) helper int 1)

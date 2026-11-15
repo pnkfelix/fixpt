@@ -583,7 +583,7 @@
 (define made-syntax-taken! (->* () names)
   (lambda () (let ((ns (get made-syntax))) (begin (set made-syntax nil) ns))))
 ;; Use `s` of macro `name`, its expansion done: each macro its signature
-;; says a use defines, `(ℓ (syntax σ))` in what it makes, defined by the
+;; says a use defines, `(ℓ (macro σ made))` in what it makes, defined by the
 ;; expansion (`made-syntax` from `from` on), and of signature `σ`
 ;; (`Macros::syntax_held`).
 (define syntax-held (->* (fails symbol syn int) unit)

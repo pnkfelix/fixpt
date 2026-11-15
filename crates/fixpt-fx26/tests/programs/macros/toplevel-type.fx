@@ -3,7 +3,7 @@
 ;; `(select #%toplevel idx)`: the `define-type`'s `int`, not the type
 ;; variable `idx` the use's `plambda` binds.
 (define-type idx int)
-(define-syntax as-idx (-> (expr) expr)
+(define-syntax as-idx (macro (expr) expr)
   (syntax-rules
     ((_ e) (the idx e))))
 (define g (poly ((idx type)) (subr pure (idx) int))

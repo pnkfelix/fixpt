@@ -82,7 +82,7 @@
     ;; pattern variable's (a `label`).
     (form %construct (label . exprs))
     ;; The definitions a template may make, a macro's whose signature says
-    ;; `(-> σ defn)`, each exporting what it defines: a value, seeing those
+    ;; `(macro σ defn)`, each exporting what it defines: a value, seeing those
     ;; before it, `(define x T lambda)` and `define*` itself, a `define-rec`
     ;; group the whole group; a `begin`'s, each in the scope of those before
     ;; it. The address `()` is the part the annotation is on. A definition's

@@ -3,10 +3,10 @@
 ;; signature says it places it any number of times, without saying so of
 ;; its own.
 (define-syntax both
-  (-> ((many expr)) expr)
+  (macro ((many expr)) expr)
   (syntax-rules
     ((_ e) (list e e))))
 (define-syntax once-they-say
-  (-> (expr) expr)
+  (macro (expr) expr)
   (syntax-rules
     ((_ e) (both e))))

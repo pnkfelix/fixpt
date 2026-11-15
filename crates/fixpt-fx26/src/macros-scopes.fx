@@ -472,7 +472,7 @@
                         rest)))))))
 ;; How each pending list is read by the scopes the walk found, `fs`
 ;; (`Aligner::heads_read`), the first found first: a use of a macro if its
-;; head's innermost binder is what a `(syntax σ)` entry binds, a pattern
+;; head's innermost binder is what a `(macro σ made)` entry binds, a pattern
 ;; variable or a template's binder at that part of a use (its δ, in a list
 ;; of one); else an application (none). Each with its node, and its
 ;; binder, if a template's, in a list of one.

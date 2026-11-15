@@ -693,7 +693,7 @@
 ;;; ------------------------------------------------------------ inferring
 
 ;; The signatures of macros `us`, defined together, inferred: each as
-;; written, `(-> σ defn)` and `(-> σ desc)` for what makes definitions or a
+;; written, `(macro σ defn)` and `(macro σ desc)` for what makes definitions or a
 ;; description (`infer.rs`'s `infer`).
 (define infer (->* (fails unsigneds) syns-a)
   (lambda (fail us)
@@ -719,7 +719,7 @@
                   ;; What it makes a word: `expr`, `defn` or `desc`.
                   (if (string=? (made-of (car ms)) "")
                       nil
-                      (list (mk-list (list (mk-symbol "->" a b) union
+                      (list (mk-list (list (mk-symbol "macro" a b) union
                                            (mk-symbol (made-of (car ms)) a b))
                                      a b))))))))))
 ;; Each of clauses `cs`'s signature, inferred alone; none if one is not.
@@ -747,7 +747,7 @@
 (define arrow-parts (->* (syn) syns-a)
   (lambda (s)
     (let ((ps (proper-items s)))
-      (if (and (= (len ps) 3) (syn-symbol? (car ps)) (string=? (syn-name (car ps)) "->"))
+      (if (and (= (len ps) 3) (syn-symbol? (car ps)) (string=? (syn-name (car ps)) "macro"))
           ps
           nil))))
 (define made-of (->* (syn) string)
@@ -766,11 +766,11 @@
         nil
         (let* ((u (car us)) (a (syn-start (extract u 4))) (b (syn-end (extract u 4))))
           (cons (cond ((= (car makes) 1) (defn-arrow (car sigs) a b))
-                      (else (mk-list (list (mk-symbol "->" a b) (car sigs)
+                      (else (mk-list (list (mk-symbol "macro" a b) (car sigs)
                                            (mk-symbol (if (= (car makes) 0) "expr" "desc") a b))
                                      a b)))
                 (made-sigs (cdr sigs) (cdr makes) (cdr us)))))))
-;; The signature of operands `s` making definitions, as written: `(-> σ (defn
+;; The signature of operands `s` making definitions, as written: `(macro σ (defn
 ;; (ℓ δ) …))` of `(export σ (rho (ℓ δ) …))`, else `(-> s defn)` (`macros.rs`'s
 ;; `defn_arrow`).
 (define defn-arrow (->* (syn int int) syn)
@@ -780,9 +780,9 @@
                     (proper-items (nth ps 2))
                     nil)))
       (if (null? rho)
-          (mk-list (list (mk-symbol "->" a b) s (mk-symbol "defn" a b)) a b)
+          (mk-list (list (mk-symbol "macro" a b) s (mk-symbol "defn" a b)) a b)
           (let ((made (mk-list (cons (mk-symbol "defn" a b) (cdr rho)) a b)))
-            (mk-list (list (mk-symbol "->" a b) (nth ps 1) made) a b))))))
+            (mk-list (list (mk-symbol "macro" a b) (nth ps 1) made) a b))))))
 (define head-is? (->* (syn string) bool)
   (lambda (s h)
     (let ((ps (proper-items s)))

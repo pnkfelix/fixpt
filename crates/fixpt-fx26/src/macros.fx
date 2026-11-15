@@ -134,7 +134,7 @@
 ;; The pattern, aligned with the signature: each variable's type and
 ;; declared environment. A macro that makes definitions (`defn`) has no
 ;; typed parts: what each use defines is checked where it is. And what
-;; such a macro's uses define, if its signature says (`(-> (export σ β)
+;; such a macro's uses define, if its signature says (`(macro (export σ β)
 ;; defn)`), in a list of one: what a template using it sees, and what its
 ;; own template is held to.
 (define pattern-vars (->* (fails sty syn int names) (tupleof pvars (listof exported acyclic)))

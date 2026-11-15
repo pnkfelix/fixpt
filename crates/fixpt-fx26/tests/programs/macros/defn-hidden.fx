@@ -2,7 +2,7 @@
 ;; A definition the template writes is made fresh, as its other binders
 ;; are: the counter's `count` is its own, not the program's.
 (define-syntax define-counter
-  (-> (bvar) defn)
+  (macro (bvar) defn)
   (syntax-rules
     ((_ name)
      (begin (define count (new 0))

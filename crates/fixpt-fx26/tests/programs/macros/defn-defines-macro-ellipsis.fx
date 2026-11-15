@@ -2,7 +2,7 @@
 ;; The defined macro's ellipsis, written `(... ...)` (R7RS): every `...` in
 ;; a template is the template's own.
 (define-syntax def-lister
-  (-> (bvar) defn)
+  (macro (bvar) defn)
   (syntax-rules
     ((_ name) (define-syntax name (syntax-rules ((_ e (... ...)) (list e (... ...))))))))
 (def-lister all)

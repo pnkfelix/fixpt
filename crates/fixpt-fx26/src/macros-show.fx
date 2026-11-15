@@ -190,9 +190,7 @@
         nil
         (cons (mk-list (list (show-addr (extract (car es) 1) a b)
                              (let ((d (extract (car es) 2)))
-                               (if (>= d 100)
-                                   (mk-list (list (mk-symbol "syntax" a b) (syntax-sig-of d)) a b)
-                                   (mk-symbol (delta-name d) a b))))
+                               (if (>= d 100) (syntax-sig-of d) (mk-symbol (delta-name d) a b))))
                        a b)
               (show-entries (cdr es) a b)))))
 (define delta-name (->* (int) string)

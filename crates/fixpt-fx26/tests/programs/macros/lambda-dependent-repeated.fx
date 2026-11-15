@@ -2,7 +2,7 @@
 ;; A repeated parameter whose type names it: the repetition before's,
 ;; which a name cannot say.
 (define-syntax chained
-  (-> (expr ...) expr)
+  (macro (expr ...) expr)
   (syntax-rules
     ((_ e ...) ((lambda ((p (select p t)) ...) 0) e ...))))
 (chained 1 2)

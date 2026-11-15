@@ -77,7 +77,7 @@
 (define-type clauses (listof clause acyclic))
 ;; A macro defined: its signature, its clauses, the binders of its
 ;; signature's `(poly (binder …) σ)`, if it has one, and what it makes (0 an
-;; expression, 1 definitions, `(-> σ defn)`, 2 a description, `(-> σ desc)`).
+;; expression, 1 definitions, `(macro σ defn)`, 2 a description, `(macro σ desc)`).
 (define-type macro (tupleof sty clauses syns-a int))
 (define-type macro-env (listof (tupleof symbol macro) acyclic))
 ;; The macros defined, each by the name it is used by, the last defined
@@ -614,7 +614,7 @@
 
 ;; Whether the template being checked uses a macro whose uses define a macro
 ;; (`Aligner::heads`); how each list read so far as a use of one is, by its
-;; place, with that `(syntax σ)` entry's δ; and the lists found pending,
+;; place, with that `(macro σ made)` entry's δ; and the lists found pending,
 ;; each with whether a definition is there, the first found last
 ;; (`Aligner::pending`). `macros-scopes.fx`'s `aligned-heads` reads them.
 (define heads-on (ref bool rs) (new #f))
@@ -626,7 +626,7 @@
 (define pending-in? (->* (int (listof (tupleof int bool) acyclic)) bool)
   (lambda (at ps)
     (and (not (null? ps)) (or (= at (extract (car ps) 1)) (pending-in? at (cdr ps))))))
-;; How list `s` is read so far: the δ of the `(syntax σ)` entry whose macro
+;; How list `s` is read so far: the δ of the `(macro σ made)` entry whose macro
 ;; it is a use of, in a list of one; none, an application.
 (define head-read (->* (syn) (listof int acyclic))
   (lambda (s) (head-at (syn-start s) (syn-end s) (get heads))))
@@ -635,7 +635,7 @@
     (cond ((null? hs) nil)
           ((and (= a (extract (car hs) 1)) (= b (extract (car hs) 2))) (list (extract (car hs) 3)))
           (else (head-at a b (cdr hs))))))
-;; Each `(syntax σ)` entry's signature, by its δ, read where the signature it
+;; Each `(macro σ made)` entry's signature, by its δ, read where the signature it
 ;; is in is (`macros-files.fx`'s `signature-of`): its syntax type, and what
 ;; it makes.
 (define syntax-read (ref (listof (tupleof int sty int) acyclic) rs) (new nil))
@@ -649,7 +649,7 @@
     (cond ((null? xs) nil)
           ((= d (extract (car xs) 1)) (list (tuple (extract (car xs) 2) (extract (car xs) 3))))
           (else (syntax-read-in d (cdr xs))))))
-;; Whether `h`, at a list's head in a template, may be a name a `(syntax σ)`
+;; Whether `h`, at a list's head in a template, may be a name a `(macro σ made)`
 ;; entry binds: no macro's, form's or trailmark's, and no pattern
 ;; variable's but a binder's (`Aligner::unknown_head`).
 (define unknown-head? (->* (fails symbol pvars) bool)
@@ -662,7 +662,7 @@
                  (not (null? (sig-of h (scope-sigs fail))))
                  (not (null? (sig-of h (scope-definitions fail)))))))))
 ;; Whether template `s` uses a macro whose signature says its uses define a
-;; macro, `(ℓ (syntax σ))` (`Macros::uses_syntax_macro`).
+;; macro, `(ℓ (macro σ made))` (`Macros::uses_syntax_macro`).
 (define uses-syntax-macro? (->* (syn) bool)
   (lambda (s)
     (let ((items (proper-items s)))

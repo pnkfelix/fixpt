@@ -3,6 +3,6 @@
 ;; where it is used.
 (define limit int 10)
 (define-syntax define-clamper
-  (-> (bvar) defn)
+  (macro (bvar) defn)
   (syntax-rules
     ((_ name) (define-syntax name (syntax-rules ((_ e) (if (> e limit) limit e)))))))

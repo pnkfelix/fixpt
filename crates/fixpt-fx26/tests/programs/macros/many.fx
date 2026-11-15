@@ -2,7 +2,7 @@
 ;; `(many expr)`: placed twice, and run twice, as the signature says it may.
 (define-syntax both
   ;; As named: ((e (many expr)))
-  (-> ((many expr)) expr)
+  (macro ((many expr)) expr)
   (syntax-rules
     ((_ e) (list e e))))
 (let ((c (new 0)))

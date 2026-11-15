@@ -2,7 +2,7 @@
 ;; A procedural macro whose contract says its uses define a macro, of a
 ;; signature: its expansion held to it.
 (define-syntax def-const-macro
-  (-> (bvar expr) (defn (A (syntax (-> () expr)))))
+  (macro (bvar expr) (defn (A (macro () expr))))
   (er-macro-transformer
     (lambda (form rename compare)
       `(,(rename 'define-syntax) ,(car (cdr form))

@@ -6,7 +6,7 @@
 (define-syntax fun
   ;; As named: ((fs (formals)) (body (in expr fs))), formals as
   ;; (union nil (exports ((x bvar) (t type) . (in (xs formals) x)) (rib x xs))).
-  (-> ((mu f (union (export () (rho))
+  (macro ((mu f (union (export () (rho))
                 (export ((bvar desc) . (import f (rho (AA var)))) (rho (AA var) (D rib)))))
    (import expr (rho (A rib)))) expr)
   (syntax-rules

@@ -56,7 +56,7 @@ fn a_depth_said_bounds_a_use_that_ends() {
 
 #[test]
 fn a_depth_said_is_the_limit() {
-    let p = file("loop.fx", "(define-syntax m (-> (expr) expr) (syntax-rules ((_ e) (m (+ e 1)))))\n(m 1)\n");
+    let p = file("loop.fx", "(define-syntax m (macro (expr) expr) (syntax-rules ((_ e) (m (+ e 1)))))\n(m 1)\n");
     for how in ["run", "check"] {
         let (said, ok) = fixpt(how, &p, &[("FIXPT_MACRO_DEPTH", "50")]);
         assert!(!ok && said.contains("its uses are 50 deep, each in the expansion of the one before"), "{how}: {said}");

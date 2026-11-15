@@ -4,14 +4,14 @@
 ;; the top level's there (`+`), whatever binds it where the defined macro is
 ;; used.
 (define-syntax def-counter
-  (-> (bvar) defn)
+  (macro (bvar) defn)
   (syntax-rules
     ((_ name)
      (begin (define count (new 0))
             (define-syntax name
               (syntax-rules ((_) (begin (set count (+ (get count) 1)) (get count)))))))))
 (define-syntax def-adder
-  (-> (bvar (many expr)) defn)
+  (macro (bvar (many expr)) defn)
   (syntax-rules
     ((_ name k) (define-syntax name (syntax-rules ((_ e) (+ e k)))))))
 (define count 100)

@@ -7,7 +7,7 @@
   (module (define-type t int)
           (define less (subr pure (t t) bool) (lambda (a b) (< a b)))))
 (define-syntax define-first
-  (-> (bvar) defn)
+  (macro (bvar) defn)
   (syntax-rules
     ((_ name)
      (define name (subr pure ((o : ordered) (select o t) (select o t)) (select o t))

@@ -2499,3 +2499,15 @@ user:
    what a use of a macro given as an operand would need; and a signature's
    result is written apart from its operands, so a macro's own signature
    can appear on either side.
+5. **`macro`, not `->`** (the user's, 2026-11-15): a macro's signature is
+   `(macro σ made)`. A contract maps source syntax to source syntax, before
+   any type is: not a procedure's type (`->`, `subr`), a higher kind (`=>`)
+   or a quantifier (`poly`), and a signature may hold procedure types (a
+   typed hole's `#:type`), so one arrow for both read ambiguously. A
+   macro's binder's kind is its signature itself, `(ℓ (macro σ made))`, as
+   `(ℓ var)` is a value's; were macros operands one day, `(macro σ made)`
+   on the left of a signature would say a part is one, no new word.
+   `(-> …)` refused, "`->` is a procedure's type"; `(syntax …)` entries
+   refused, saying how they are written now. *Built*, both front ends;
+   every signature rewritten by script. (This section's notation above is
+   as it was written then.)

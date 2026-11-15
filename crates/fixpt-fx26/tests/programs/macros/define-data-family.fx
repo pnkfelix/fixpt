@@ -3,13 +3,13 @@
 ;; stretch): its parameters, which the use names, in scope in its
 ;; variants' types; a recursive one, a list.
 (define-syntax payload
-  (-> (desc ...) desc)
+  (macro (desc ...) desc)
   (syntax-rules
     ((_) unit)
     ((_ f) f)
     ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
-  (-> ((union dvar (dvar (dvar kind) ...)) (label desc ...) ...) defn)
+  (macro ((union dvar (dvar (dvar kind) ...)) (label desc ...) ...) defn)
   (syntax-rules
     ((_ (name (p k) ...) (t field ...) ...)
      (define-type (name (p k) ...) (sumof (t (payload field ...)) ...)))

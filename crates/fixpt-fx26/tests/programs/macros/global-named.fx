@@ -4,7 +4,7 @@
 ;; own `helper` (`typed-macros.md`, item 5).
 (define helper 3)
 (define-syntax use-helper
-  (-> () expr)
+  (macro () expr)
   (syntax-rules
     ((_) helper)))
 (let ((helper 99)) (use-helper))

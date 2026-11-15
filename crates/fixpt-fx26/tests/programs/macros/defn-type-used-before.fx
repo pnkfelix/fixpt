@@ -3,7 +3,7 @@
 ;; declared ahead, the use's among them.
 (define xs ints (list 1))
 (define-syntax define-ints
-  (-> (dvar) defn)
+  (macro (dvar) defn)
   (syntax-rules
     ((_ t) (define-type t (listof int)))))
 (define-ints ints)

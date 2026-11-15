@@ -40,12 +40,12 @@
 //! taken as placed more than once, so the opt-out is said all the way up
 //! a chain of macros (`docs/research/typed-macros.md`).
 //!
-//! A macro whose signature is `(-> σ desc)` makes a description: its uses
+//! A macro whose signature is `(macro σ desc)` makes a description: its uses
 //! are where a description is, in a template's descriptions too, its
 //! template a description (`docs/research/datatype-macro.md`, "Keyword
 //! constructors: decided", 7).
 //!
-//! A macro whose signature is `(-> σ defn)` makes definitions
+//! A macro whose signature is `(macro σ defn)` makes definitions
 //! (`typed-macros.md`, item 9): its template is one of the kernel's, or a
 //! `begin` of them, spliced where it is used, at the top level alone
 //! (`Macros::expand_top`). A name a use gives is defined under that name,
@@ -179,9 +179,9 @@ pub(crate) enum Delta {
     Place,
     Rib,
     Env,
-    /// A macro's binder, `(syntax σ)`, the defined macro's signature as
+    /// A macro's binder, `(macro σ made)`, the defined macro's signature as
     /// written: a value's name, in scope as `var`'s is; what a use defines
-    /// (`(defn (ℓ (syntax σ)))`), its expansion held to it
+    /// (`(defn (ℓ (macro σ made)))`), its expansion held to it
     /// (`Macros::syntax_held`).
     Syntax(Kept),
 }
@@ -215,9 +215,9 @@ enum Free {
 #[derive(Debug)]
 pub(crate) struct Macro {
     sig: Rc<STy>,
-    /// Whether it makes definitions, `(-> σ defn)`.
+    /// Whether it makes definitions, `(macro σ defn)`.
     defn: bool,
-    /// Whether it makes a description, `(-> σ desc)`.
+    /// Whether it makes a description, `(macro σ desc)`.
     desc: bool,
     /// The binders of its signature's `(poly (binder …) σ)`, if it has one.
     poly: Vec<Kept>,
@@ -527,7 +527,7 @@ pub struct Macros {
     checking: bool,
 }
 
-/// A `(syntax σ)` entry's signature read: its syntax type, and whether it
+/// A `(macro σ made)` entry's signature read: its syntax type, and whether it
 /// makes definitions, or a description.
 pub(crate) type SyntaxSig = (Rc<STy>, bool, bool);
 
@@ -578,7 +578,7 @@ pub(crate) struct Withs {
     /// globals, as it does a written one, and undoes them if the form is
     /// refused (`Macros::made_undone`).
     pub(crate) made_syntax: Vec<MadeSyntax>,
-    /// Each `(syntax σ)` entry's signature, read where the signature it is
+    /// Each `(macro σ made)` entry's signature, read where the signature it is
     /// in is (`Macros::signature`): what a template reads a use of the
     /// macro it binds by (`Aligner::heads_read`). Out of line, as all of
     /// this is: a `Macros` is held in frames.
@@ -700,7 +700,7 @@ struct Node {
     desc: bool,
     /// Whether an ellipsis follows it, so that it is repeated.
     repeated: bool,
-    /// Whether it is a list whose head a `(syntax σ)` entry may bind, read
+    /// Whether it is a list whose head a `(macro σ made)` entry may bind, read
     /// by its scope (`Aligner::pending`): its environment found.
     head: bool,
     kids: Kids,
@@ -815,7 +815,7 @@ struct Aligner<'m> {
     unplaced: Vec<Sym>,
     /// The parts left to fill (`run`).
     work: Vec<Step>,
-    /// How each list whose head a `(syntax σ)` entry may bind is read so
+    /// How each list whose head a `(macro σ made)` entry may bind is read so
     /// far, by its syntax, if the template uses a macro with one
     /// (`Macros::template_aligned`); and the lists found so, each with
     /// whether a definition is there.
@@ -823,7 +823,7 @@ struct Aligner<'m> {
     pending: Vec<(usize, bool)>,
 }
 
-/// How a template reads a list whose head a `(syntax σ)` entry may bind:
+/// How a template reads a list whose head a `(macro σ made)` entry may bind:
 /// a use of the macro of that entry's signature, or an application.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Head {
@@ -956,7 +956,7 @@ impl Macros {
                         let body = self.sty(body, interner, named, mus)?;
                         let b = bind(b, interner)?;
                         if head == Some("import") && matches!(&b, Bind::Rib(es) if es.iter().any(|e| matches!(e.1, Delta::Syntax(_)))) {
-                            return Err(bad("`(syntax σ)` says what a use defines, in what its signature makes, `(defn (ℓ (syntax σ)))`"));
+                            return Err(bad("a macro's binder, `(macro σ made)`, says what a use defines, in what its signature makes, `(defn (ℓ (macro σ made)))`"));
                         }
                         if head == Some("import") { STy::Import(body, b) } else { STy::Export(body, b) }
                     }
@@ -1611,7 +1611,7 @@ impl Macros {
         for c in &w.clauses {
             let one = infer::Unsigned { name: w.name, lits: w.lits.clone(), clauses: vec![c.clone()], span: w.span };
             let s = self.infer(&[one], interner).ok()?.pop()?;
-            let arrow = s.list().filter(|l| l.len() == 3 && l[0].sym().is_some_and(|h| interner.name(h) == "->"));
+            let arrow = s.list().filter(|l| l.len() == 3 && l[0].sym().is_some_and(|h| interner.name(h) == "macro"));
             // What it makes a word: `expr`, `defn` or `desc`.
             let (sigma, k) = match arrow.as_deref() {
                 Some([_, sigma, k]) if k.sym().is_some() => (sigma.clone(), k.sym()),
@@ -1626,7 +1626,7 @@ impl Macros {
         let at = w.span;
         let union = Syn::lst(at, std::iter::once(Syn::named(at, "oneof", interner)).chain(members).collect());
         let k = Syn::symbol(at, made.flatten()?, interner);
-        Some(Syn::lst(at, vec![Syn::named(at, "->", interner), union, k]))
+        Some(Syn::lst(at, vec![Syn::named(at, "macro", interner), union, k]))
     }
 
     fn define_written(&mut self, ws: &[Written], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Sym>> {
@@ -1781,15 +1781,15 @@ impl Macros {
             }
             _ => (Vec::new(), *sig),
         };
-        // `(-> σ expr)`: of what its uses make, an expression; `(-> σ
-        // defn)`, definitions; `(-> σ desc)`, a description (a type, an
+        // `(macro σ expr)`: of what its uses make, an expression; `(macro σ
+        // defn)`, definitions; `(macro σ desc)`, a description (a type, an
         // effect, a region, …). Always written (the user's, 2026-11-15:
         // what a use makes is said, as a procedure's result is).
-        // `(-> σ (defn (ℓ δ) …))`:
+        // `(macro σ (defn (ℓ δ) …))`:
         // definitions, a use's defining what the rib says of its parts,
-        // `(-> (export σ (rho (ℓ δ) …)) defn)`, which is read the same.
+        // `(macro (export σ (rho (ℓ δ) …)) defn)`, which is read the same.
         let (sig, defn, desc) = match sig.list().as_deref() {
-            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "->") && made.list().is_some_and(|l| l.first().and_then(|d| d.sym()).is_some_and(|d| interner.name(d) == "defn")) => {
+            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "macro") && made.list().is_some_and(|l| l.first().and_then(|d| d.sym()).is_some_and(|d| interner.name(d) == "defn")) => {
                 let entries = made.list().expect("a list")[1..].to_vec();
                 if entries.is_empty() {
                     (*body, true, false)
@@ -1802,13 +1802,14 @@ impl Macros {
                     (Syn::lst(at, vec![Syn::named(at, "export", interner), *body, rho]), true, false)
                 }
             }
-            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "->") => match made.sym().map(|m| interner.name(m)) {
+            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "macro") => match made.sym().map(|m| interner.name(m)) {
                 Some("defn") => (*body, true, false),
                 Some("desc") => (*body, false, true),
                 Some("expr") => (*body, false, false),
-                _ => return Err(FxError::at(made.at(), "a signature `(-> σ made)` makes `expr`, `defn`, `(defn (ℓ δ) …)` or `desc`")),
+                _ => return Err(FxError::at(made.at(), "a signature `(macro σ made)` makes `expr`, `defn`, `(defn (ℓ δ) …)` or `desc`")),
             },
-            _ => return Err(FxError::at(sig.at(), "a signature is `(-> σ made)`, what its uses make written: `expr`, `defn`, `(defn (ℓ δ) …)` or `desc`")),
+            Some([h, ..]) if h.sym().is_some_and(|h| interner.name(h) == "->") => return Err(FxError::at(sig.at(), "a macro's signature is `(macro σ made)`: `->` is a procedure's type")),
+            _ => return Err(FxError::at(sig.at(), "a signature is `(macro σ made)`, what its uses make written: `expr`, `defn`, `(defn (ℓ δ) …)` or `desc`")),
         };
         let sig = self.sty(&sig, interner, &HashMap::default(), &mut Vec::new())?;
         // Each macro it says a use defines, its signature read now.
@@ -1819,7 +1820,7 @@ impl Macros {
                 {
                     let (p, t, d, e) = self.signature(&k.get(), interner)?;
                     if !p.is_empty() {
-                        return Err(FxError::at(k.get().at(), "a `(syntax σ)` entry's signature has no `poly`, not yet"));
+                        return Err(FxError::at(k.get().at(), "a macro's binder's signature has no `poly`, not yet"));
                     }
                     self.withs.syntax_sigs.insert(*k, (t, d, e));
                 }
@@ -1865,7 +1866,7 @@ impl Macros {
         let mut found = Vec::new();
         p.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
         // What a use of a macro that makes definitions says it defines, if
-        // its signature says (`(-> σ (defn (ℓ δ) …))`): what a template
+        // its signature says (`(macro σ (defn (ℓ δ) …))`): what a template
         // using it sees, and what its own template is held to.
         let declared = match (defn, &p.nodes[root].export) {
             (true, Some((b, r))) => Some(exports(&p.eval(b, *r, pattern.at())?)),
@@ -1893,7 +1894,7 @@ impl Macros {
         }
         // The template, an expression or definitions, aligned with the
         // kernel's forms' signatures and the macros'.
-        // Where it uses a macro whose uses define a macro, `(syntax σ)`, each
+        // Where it uses a macro whose uses define a macro, `(macro σ made)`, each
         // list whose head such an entry may bind read by its scope, to a
         // fixed point (`typed-macros.md`, "Decided: a template's heads read
         // by their scope, to a fixed point"): aligned, walked, each pending
@@ -2021,7 +2022,7 @@ impl Macros {
                         && let Some((_, m)) = nested.iter().find(|(b, _)| b == n)
                     {
                         let (n, m) = (interner.name(*n), interner.name(*m));
-                        return Err(FxError::at(span, format!("`{n}` is bound in a use of `{m}`, whose signature does not say its uses define it: say so (`(-> σ (defn (ℓ δ) …))`), or write `(with #%toplevel {n})` for the top level's")));
+                        return Err(FxError::at(span, format!("`{n}` is bound in a use of `{m}`, whose signature does not say its uses define it: say so (`(macro σ (defn (ℓ δ) …))`), or write `(with #%toplevel {n})` for the top level's")));
                     }
                     // A binder repeated, referred to under fewer ellipses
                     // than it is: which repetition's is not said.
@@ -2330,7 +2331,7 @@ impl Macros {
     }
 
     /// Whether template `s` uses a macro whose signature says its uses
-    /// define a macro, `(ℓ (syntax σ))`.
+    /// define a macro, `(ℓ (macro σ made))`.
     fn uses_syntax_macro(&self, s: &Syn) -> bool {
         let Some(items) = s.list() else { return false };
         let defines = items.first().and_then(|h| h.sym()).and_then(|h| self.defined.get(&h)).is_some_and(|m| matches!(&*m.sig, STy::Export(_, Bind::Rib(es)) if es.iter().any(|e| matches!(e.1, Delta::Syntax(_)))));
@@ -2338,7 +2339,7 @@ impl Macros {
     }
 
     /// Use `s` of macro `name`, `m`, its expansion done: each macro its
-    /// signature says a use defines, `(ℓ (syntax σ))` in what it makes,
+    /// signature says a use defines, `(ℓ (macro σ made))` in what it makes,
     /// defined by the expansion (`Withs::made_syntax` from `from` on), and
     /// of signature `σ`, so that what is said of its uses ahead holds.
     fn syntax_held(&mut self, name: Sym, m: &Macro, s: &Syn, from: usize, interner: &mut Interner) -> R<()> {
@@ -3577,7 +3578,7 @@ impl Aligner<'_> {
     fn form(&mut self, at: usize, s: &Syn, defn: bool) -> R<Option<(Rc<STy>, Vec<bool>, bool)>> {
         let V::List { items, tail } = &s.view() else { unreachable!("a list") };
         let head = items[0].sym().filter(|h| !self.pvars.contains_key(h));
-        // A list whose head a `(syntax σ)` entry may bind: pending, read by
+        // A list whose head a `(macro σ made)` entry may bind: pending, read by
         // its scope (`Macros::template_aligned`), a use of that macro by
         // `σ` once its binder is found one, else an application (where a
         // definition is, unread until then).
@@ -4232,7 +4233,7 @@ impl Aligner<'_> {
     }
 
     /// How each pending list is read by the scopes the walk found, `found`:
-    /// a use of a macro if its head's innermost binder is what a `(syntax σ)`
+    /// a use of a macro if its head's innermost binder is what a `(macro σ made)`
     /// entry binds, a pattern variable or a template's binder at that part
     /// of a use; else an application. Each with its node, and its binder if
     /// a template's.
@@ -4791,10 +4792,10 @@ pub(super) fn rules_parts(parts: &[Syn], at: At, interner: &Interner) -> R<(Vec<
     }
 }
 
-/// The signature of operands `s` making definitions, as written: `(-> σ
+/// The signature of operands `s` making definitions, as written: `(macro σ
 /// (defn (ℓ δ) …))` of `(export σ (rho (ℓ δ) …))`, else `(-> s defn)`.
 fn defn_arrow(s: Syn, at: At, interner: &mut Interner) -> Syn {
-    let arrow = Syn::named(at, "->", interner);
+    let arrow = Syn::named(at, "macro", interner);
     let defn = Syn::named(at, "defn", interner);
     if let Some([e, body, b]) = s.list().as_deref()
         && e.sym().is_some_and(|e| interner.name(e) == "export")
@@ -4820,7 +4821,9 @@ fn bind(b: &Syn, interner: &Interner) -> R<Bind> {
         entries
             .iter()
             .map(|e| match e.list().as_deref() {
-                Some([a, d]) if d.list().is_some_and(|l| l.len() == 2 && l[0].sym().is_some_and(|h| interner.name(h) == "syntax")) => Ok((addr(a, interner)?, Delta::Syntax(Kept::new(d.list().expect("a list")[1])))),
+                // A macro's binder: its kind the macro's signature.
+                Some([a, d]) if d.list().is_some_and(|l| l.len() == 3 && l[0].sym().is_some_and(|h| interner.name(h) == "macro")) => Ok((addr(a, interner)?, Delta::Syntax(Kept::new(*d)))),
+                Some([_, d]) if d.list().is_some_and(|l| l.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "syntax")) => Err(FxError::at(d.at(), "a macro's binder is written with its signature, `(ℓ (macro σ made))`, not `(syntax …)`")),
                 Some([a, d]) => {
                     let d = match d.sym().map(|d| interner.name(d)) {
                         Some("none") => Delta::None,
@@ -4829,7 +4832,7 @@ fn bind(b: &Syn, interner: &Interner) -> R<Bind> {
                         Some("place") => Delta::Place,
                         Some("rib") => Delta::Rib,
                         Some("env") => Delta::Env,
-                        _ => return Err(FxError::at(d.at(), "δ is `none`, `var`, `dvar`, `place`, `rib`, `env` or `(syntax σ)`")),
+                        _ => return Err(FxError::at(d.at(), "δ is `none`, `var`, `dvar`, `place`, `rib`, `env` or a macro's signature, `(macro σ made)`")),
                     };
                     Ok((addr(a, interner)?, d))
                 }

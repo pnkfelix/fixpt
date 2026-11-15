@@ -4,7 +4,7 @@
 (define-type maybe-int (oneof false int))
 (define-syntax and-then
   ;; As named: ((e expr) (es (listof expr)))
-  (-> (expr . (mu es (union () (expr . es)))) expr)
+  (macro (expr . (mu es (union () (expr . es)))) expr)
   (syntax-rules
     ((_ e) e)
     ((_ e1 e2 . rest) (let ((t e1)) (if (eq? t #f) #f (and-then e2 . rest))))))

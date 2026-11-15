@@ -359,7 +359,7 @@
         (else
          (with-kids at (k-form (align fail 1 ps (car (sig-of '%app kernel)) s -1
                                       (node-path at)))))))))
-;; A list whose head a `(syntax σ)` entry may bind, at `at`: pending, read by
+;; A list whose head a `(macro σ made)` entry may bind, at `at`: pending, read by
 ;; its scope (`macros-scopes.fx`'s `aligned-heads`), a use of that macro by
 ;; its signature once its binder is found one, else an application (where a
 ;; definition is, unread until then, exporting nothing).

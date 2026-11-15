@@ -274,10 +274,11 @@
                         (b (read-bind fail (nth args 2))))
                     (cond ((not (string=? head "import")) (s-export body b))
                           ((tagcase b (bind-rib (es) (syntax-entry? es)) (else y #f))
-                           (begin (fail-at fail (string-append "a syntax type: `(syntax σ)` says "
+                           (begin (fail-at fail (string-append "a syntax type: a macro's "
+                                                               "binder, `(macro σ made)`, says "
                                                                "what a use defines, in what its "
                                                                "signature makes, `(defn (ℓ "
-                                                               "(syntax σ)))`")
+                                                               "(macro σ made)))`")
                                            s)
                                   (s-import body b)))
                           (else (s-import body b))))
@@ -661,18 +662,25 @@
                     (read-rib fail (cdr es)))
               (begin (fail-at fail bind-usage (car es)) (the entries nil)))))))
 ;; δ, by number: 0 `none`, 1 `var`, 2 `rib`, 3 `env`, 4 `dvar`, 5 `place`;
-;; 100 + k `(syntax σ)`, a macro's binder (`Delta::Syntax`), `σ` the `k`th
-;; of `syntax-sigs`, as written.
+;; 100 + k a macro's binder, its signature `(macro σ made)` (`Delta::Syntax`)
+;; the `k`th of `syntax-sigs`, as written.
 (define read-delta (->* (fails syn) int)
   (lambda (fail d)
     (let ((n (if (syn-symbol? d) (syn-name d) "")) (ds (proper-items d)))
       (cond ((string=? n "none") 0) ((string=? n "var") 1) ((string=? n "rib") 2)
             ((string=? n "env") 3) ((string=? n "dvar") 4) ((string=? n "place") 5)
-            ((and (= (len ds) 2) (syn-symbol? (car ds)) (string=? (syn-name (car ds)) "syntax"))
+            ;; A macro's binder: its kind the macro's signature.
+            ((and (= (len ds) 3) (syn-symbol? (car ds)) (string=? (syn-name (car ds)) "macro"))
              (let ((k (len (get syntax-sigs))))
-               (begin (set syntax-sigs (append (get syntax-sigs) (list (nth ds 1)))) (+ 100 k))))
+               (begin (set syntax-sigs (append (get syntax-sigs) (list d))) (+ 100 k))))
+            ((and (pair? ds) (syn-symbol? (car ds)) (string=? (syn-name (car ds)) "syntax"))
+             (begin (fail-at fail (string-append "a macro's binder is written with its signature, "
+                                                 "`(ℓ (macro σ made))`, not `(syntax …)`")
+                             d)
+                    0))
             (else (begin (fail-at fail (string-append "δ is `none`, `var`, `dvar`, `place`, "
-                                                      "`rib`, `env` or `(syntax σ)`")
+                                                      "`rib`, `env` or a macro's signature, "
+                                                      "`(macro σ made)`")
                                   d)
                          0))))))
 (define syntax-sigs (ref syns-a rs) (new nil))

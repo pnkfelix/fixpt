@@ -4,7 +4,7 @@
 (define-syntax my-let*
   ;; As named: (union nil (exports ((x bvar) (e expr) (cs (in clauses x))) (cage cs x)))
   ;; for the clauses, and the body in their scope: (body (in expr cs)).
-  (-> ((mu c (union (export () (cage))
+  (macro ((mu c (union (export () (cage))
                 (export ((bvar expr) . (import c (rho (AA var))))
                         (cage (at D) (rho (AA var))))))
    (import expr (cage (at A)))) expr)

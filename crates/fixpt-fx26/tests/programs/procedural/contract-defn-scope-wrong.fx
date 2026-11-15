@@ -3,7 +3,7 @@
 ;; contract does not put it in: a use whose expression names a global of
 ;; that spelling reads the definition's.
 (define-syntax define-pair
-  (-> (bvar bvar expr) (defn (A var) (AD var)))
+  (macro (bvar bvar expr) (defn (A var) (AD var)))
   (er-macro-transformer
     (lambda (form rename compare)
       (let ((a (car (cdr form))) (b (car (cdr (cdr form)))) (e (car (cdr (cdr (cdr form))))))

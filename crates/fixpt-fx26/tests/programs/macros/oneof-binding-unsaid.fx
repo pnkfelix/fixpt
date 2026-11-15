@@ -3,7 +3,7 @@
 ;; `x`'s scope, which the first member does not say.
 (define-syntax bind (trailmark))
 (define-syntax with1
-  (-> (oneof ((trailmark bind) bvar expr expr)
+  (macro (oneof ((trailmark bind) bvar expr expr)
          (expr expr)) expr)
   (syntax-rules #:trailmarks (bind)
     ((_ bind x e body) (let ((x e)) body))
