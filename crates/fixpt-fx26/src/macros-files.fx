@@ -554,9 +554,9 @@
                            "\n  write one: (define-syntax " n " SIGNATURE (syntax-rules …))")
             a b))))
 ;; A signature's `(-> σ made)`: `σ`, and what it makes, 0 an expression,
-;; `expr`, 1 definitions, `defn`, 2 a description, `type`; else itself, an
-;; expression's. `(-> σ (defn (ℓ δ) …))`: definitions, `(export σ (rho (ℓ δ)
-;; …))` (`macros.rs`'s `signature`).
+;; `expr`, 1 definitions, `defn`, 2 a description, `desc`; always written.
+;; `(-> σ (defn (ℓ δ) …))`: definitions, `(export σ (rho (ℓ δ) …))`
+;; (`macros.rs`'s `signature`).
 (define signature-made (->* (fails syn) (tupleof syn int))
   (lambda (fail s)
     (let ((items (proper-items s)))
@@ -569,10 +569,15 @@
                              (else ""))))
             (cond ((string=? made "defn") (tuple (nth items 1) 1))
                   ((string=? made "(defn") (tuple (defined-in fail (nth items 1) m (cdr ms)) 1))
-                  ((string=? made "type") (tuple (nth items 1) 2))
+                  ((string=? made "desc") (tuple (nth items 1) 2))
                   ((string=? made "expr") (tuple (nth items 1) 0))
-                  (else (begin (fail-at fail (string-append "a signature `(-> σ made)` makes "
-                                                            "`expr`, `defn` or `type`")
+                  (else (begin (fail-at fail (string-append "a signature `(-> σ made)` "
+                                                            "makes `expr`, `defn`, `(defn (ℓ "
+                                                            "δ) …)` or `desc`")
                                         (nth items 2))
                                (tuple s 0)))))
-          (tuple s 0)))))
+          (begin (fail-at fail (string-append "a signature is `(-> σ made)`, what its uses make "
+                                              "written: `expr`, `defn`, `(defn (ℓ δ) …)` or "
+                                              "`desc`")
+                          s)
+                 (tuple s 0))))))

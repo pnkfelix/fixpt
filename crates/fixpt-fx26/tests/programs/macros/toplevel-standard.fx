@@ -3,7 +3,7 @@
 ;; own `string-length`, which redefines it. `(with #%fx string-length)` is
 ;; the standard one, whatever the top level does.
 (define string-length (subr pure (string) int) (lambda (s) 42))
-(define-syntax size-of (expr)
+(define-syntax size-of (-> (expr) expr)
   (syntax-rules
     ((_ e) (let ((s e)) (+ (* 100 (string-length s)) ((with #%fx string-length) s))))))
 (size-of "abc")

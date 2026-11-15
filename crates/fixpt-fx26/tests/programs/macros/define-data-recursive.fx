@@ -2,7 +2,7 @@
 ;; A datatype whose variants name it, by `define-data`: a type's name is in
 ;; scope in itself.
 (define-syntax payload
-  (-> (type ...) type)
+  (-> (type ...) desc)
   (syntax-rules
     ((_) unit)
     ((_ f) f)

@@ -40,7 +40,7 @@
 //! taken as placed more than once, so the opt-out is said all the way up
 //! a chain of macros (`docs/research/typed-macros.md`).
 //!
-//! A macro whose signature is `(-> σ type)` makes a description: its uses
+//! A macro whose signature is `(-> σ desc)` makes a description: its uses
 //! are where a description is, in a template's descriptions too, its
 //! template a description (`docs/research/datatype-macro.md`, "Keyword
 //! constructors: decided", 7).
@@ -217,7 +217,7 @@ pub(crate) struct Macro {
     sig: Rc<STy>,
     /// Whether it makes definitions, `(-> σ defn)`.
     defn: bool,
-    /// Whether it makes a description, `(-> σ type)`.
+    /// Whether it makes a description, `(-> σ desc)`.
     desc: bool,
     /// The binders of its signature's `(poly (binder …) σ)`, if it has one.
     poly: Vec<Kept>,
@@ -1609,9 +1609,10 @@ impl Macros {
             let one = infer::Unsigned { name: w.name, lits: w.lits.clone(), clauses: vec![c.clone()], span: w.span };
             let s = self.infer(&[one], interner).ok()?.pop()?;
             let arrow = s.list().filter(|l| l.len() == 3 && l[0].sym().is_some_and(|h| interner.name(h) == "->"));
+            // What it makes a word: `expr`, `defn` or `desc`.
             let (sigma, k) = match arrow.as_deref() {
-                Some([_, sigma, k]) => (sigma.clone(), k.sym()),
-                _ => (s, None),
+                Some([_, sigma, k]) if k.sym().is_some() => (sigma.clone(), k.sym()),
+                _ => return None,
             };
             if made.is_some_and(|m| m != k) {
                 return None;
@@ -1621,10 +1622,8 @@ impl Macros {
         }
         let at = w.span;
         let union = Syn::lst(at, std::iter::once(Syn::named(at, "oneof", interner)).chain(members).collect());
-        Some(match made.flatten() {
-            Some(k) => Syn::lst(at, vec![Syn::named(at, "->", interner), union, Syn::symbol(at, k, interner)]),
-            None => union,
-        })
+        let k = Syn::symbol(at, made.flatten()?, interner);
+        Some(Syn::lst(at, vec![Syn::named(at, "->", interner), union, k]))
     }
 
     fn define_written(&mut self, ws: &[Written], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Sym>> {
@@ -1779,8 +1778,11 @@ impl Macros {
             }
             _ => (Vec::new(), *sig),
         };
-        // `(-> σ defn)`: of what it makes, definitions; `(-> σ type)`, a
-        // description; `(-> σ expr)`, as `σ`. `(-> σ (defn (ℓ δ) …))`:
+        // `(-> σ expr)`: of what its uses make, an expression; `(-> σ
+        // defn)`, definitions; `(-> σ desc)`, a description (a type, an
+        // effect, a region, …). Always written (the user's, 2026-11-15:
+        // what a use makes is said, as a procedure's result is).
+        // `(-> σ (defn (ℓ δ) …))`:
         // definitions, a use's defining what the rib says of its parts,
         // `(-> (export σ (rho (ℓ δ) …)) defn)`, which is read the same.
         let (sig, defn, desc) = match sig.list().as_deref() {
@@ -1799,11 +1801,11 @@ impl Macros {
             }
             Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "->") => match made.sym().map(|m| interner.name(m)) {
                 Some("defn") => (*body, true, false),
-                Some("type") => (*body, false, true),
+                Some("desc") => (*body, false, true),
                 Some("expr") => (*body, false, false),
-                _ => return Err(FxError::at(made.at(), "a signature `(-> σ made)` makes `expr`, `defn` or `type`")),
+                _ => return Err(FxError::at(made.at(), "a signature `(-> σ made)` makes `expr`, `defn`, `(defn (ℓ δ) …)` or `desc`")),
             },
-            _ => (sig, false, false),
+            _ => return Err(FxError::at(sig.at(), "a signature is `(-> σ made)`, what its uses make written: `expr`, `defn`, `(defn (ℓ δ) …)` or `desc`")),
         };
         let sig = self.sty(&sig, interner, &HashMap::default(), &mut Vec::new())?;
         // Each macro it says a use defines, its signature read now.

@@ -21,10 +21,10 @@ fn repl(input: &str) -> String {
 /// what its template made is said in the entry that defined it.
 #[test]
 fn a_macro_is_used_in_a_later_entry() {
-    let def = "(define-syntax foo ((bvar expr) (import expr (rho (AA var)))) (syntax-rules ((_ (x e) body) (let ((x e)) body))))\n";
-    let out = repl(&format!("{def}(foo (hey \"dude\") hey)\n(define-syntax bad (expr) (syntax-rules ((_ e) (+ e #t))))\n(bad 3)\n"));
+    let def = "(define-syntax foo (-> ((bvar expr) (import expr (rho (AA var)))) expr) (syntax-rules ((_ (x e) body) (let ((x e)) body))))\n";
+    let out = repl(&format!("{def}(foo (hey \"dude\") hey)\n(define-syntax bad (-> (expr) expr) (syntax-rules ((_ e) (+ e #t))))\n(bad 3)\n"));
     assert!(out.contains("\"dude\" : string"), "{out}");
-    assert!(out.contains("<fx26:3>:1:53: argument 2 is a bool") && !out.contains("panicked"), "{out}");
+    assert!(out.contains("<fx26:3>:1:63: argument 2 is a bool") && !out.contains("panicked"), "{out}");
     assert!(out.contains("  in the expansion of `bad` at <fx26:4>:1:1"), "{out}");
 }
 

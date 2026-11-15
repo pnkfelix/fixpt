@@ -501,7 +501,7 @@ fn open(t: &STy) -> bool {
 
 impl Macros {
     /// The signatures of macros `us`, defined together, inferred: each as
-    /// written, `(-> σ defn)` and `(-> σ type)` for what makes definitions
+    /// written, `(-> σ defn)` and `(-> σ desc)` for what makes definitions
     /// or a description.
     pub(super) fn infer(&mut self, us: &[Unsigned], interner: &mut Interner) -> R<Vec<Syn>> {
         let usage = "a clause is `((_ . pattern) template)`";
@@ -533,9 +533,9 @@ impl Macros {
             .zip(&makes)
             .zip(us)
             .map(|((s, m), u)| match m {
-                Makes::Expr => s,
+                Makes::Expr => Syn::lst(u.span, vec![Syn::named(u.span, "->", interner), s, Syn::named(u.span, "expr", interner)]),
                 Makes::Defn => super::defn_arrow(s, u.span, interner),
-                Makes::Type => Syn::lst(u.span, vec![Syn::named(u.span, "->", interner), s, Syn::named(u.span, "type", interner)]),
+                Makes::Type => Syn::lst(u.span, vec![Syn::named(u.span, "->", interner), s, Syn::named(u.span, "desc", interner)]),
             })
             .collect())
     }
@@ -1368,8 +1368,9 @@ mod tests {
                 let mut w = m.shown_sty(&sty, f.at(), &mut interner, &mut Vec::new());
                 if defn {
                     w = crate::macros::defn_arrow(w, f.at(), &mut interner);
-                } else if desc {
-                    w = Syn::lst(f.at(), vec![Syn::named(f.at(), "->", &mut interner), w, Syn::named(f.at(), "type", &mut interner)]);
+                } else {
+                    let made = if desc { "desc" } else { "expr" };
+                    w = Syn::lst(f.at(), vec![Syn::named(f.at(), "->", &mut interner), w, Syn::named(f.at(), made, &mut interner)]);
                 }
                 let w = w.written(&interner);
                 let Ok((lits, clauses)) = crate::macros::rules_parts(&rules[1..], f.at(), &interner) else { continue };

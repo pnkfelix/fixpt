@@ -3,7 +3,7 @@
 ;; writes `(trailmark name)`.
 (define-syntax in (trailmark))
 (define-syntax for-sum
-  (bvar expr (expr ...) expr)
+  (-> (bvar expr (expr ...) expr) expr)
   (syntax-rules #:trailmarks (in)
     ((_ x in (a ...) body) (list (let ((x a)) body) ...))))
 1

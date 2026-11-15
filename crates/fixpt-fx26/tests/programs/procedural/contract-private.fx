@@ -3,7 +3,7 @@
 ;; `y`: the two runs bind differently named names alike, so its expansion
 ;; is the same up to its binders' names, and kept.
 (define-syntax let1
-  ((bvar expr) (import expr (rho (AA var))))
+  (-> ((bvar expr) (import expr (rho (AA var)))) expr)
   (er-macro-transformer
     (lambda (form rename compare)
       (let* ((xe (car (cdr form))) (body (car (cdr (cdr form)))) (b (car xe))

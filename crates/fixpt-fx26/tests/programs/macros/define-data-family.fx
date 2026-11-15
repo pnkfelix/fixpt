@@ -3,7 +3,7 @@
 ;; stretch): its parameters, which the use names, in scope in its
 ;; variants' types; a recursive one, a list.
 (define-syntax payload
-  (-> (type ...) type)
+  (-> (type ...) desc)
   (syntax-rules
     ((_) unit)
     ((_ f) f)

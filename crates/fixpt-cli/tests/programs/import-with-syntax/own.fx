@@ -3,8 +3,9 @@
 ;; whatever a binder around the use calls the same; that binder is renamed.
 (define limit int 10)
 (hide (define secret int 7))
-(define-syntax capped (expr) (syntax-rules ((_ e) (let ((v e)) (if (< v limit) v limit)))))
-(hide (define-syntax plus-secret (expr) (syntax-rules ((_ e) (+ e secret)))))
+(define-syntax capped (-> (expr) expr)
+  (syntax-rules ((_ e) (let ((v e)) (if (< v limit) v limit)))))
+(hide (define-syntax plus-secret (-> (expr) expr) (syntax-rules ((_ e) (+ e secret)))))
 (define-syntax define-twice (-> (bvar expr) defn)
   (syntax-rules ((_ n e) (begin (define raw e) (define n (+ (capped raw) (capped raw)))))))
 (define a int (capped 3))

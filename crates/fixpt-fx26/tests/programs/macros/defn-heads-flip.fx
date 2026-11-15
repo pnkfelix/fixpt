@@ -8,12 +8,15 @@
 (define-syntax def-mk
   (-> (bvar)
       (defn (A (syntax (-> (bvar)
-                           (defn (A (syntax ((bvar expr) (import expr (rho (AA var))))))))))))
+                           (defn (A (syntax
+                                     (-> ((bvar expr) (import expr (rho (AA var)))) expr)))))))))
   (syntax-rules
     ((_ name)
-     (define-syntax name (-> (bvar) (defn (A (syntax ((bvar expr) (import expr (rho (AA var))))))))
+     (define-syntax name
+       (-> (bvar)
+                (defn (A (syntax (-> ((bvar expr) (import expr (rho (AA var)))) expr)))))
        (syntax-rules
-         ((_ n) (define-syntax n ((bvar expr) (import expr (rho (AA var))))
+         ((_ n) (define-syntax n (-> ((bvar expr) (import expr (rho (AA var)))) expr)
                   (syntax-rules ((_ (x e) body) (let ((x e)) body))))))))))
 (define-syntax twisted
   (-> (bvar) (defn (A var)))

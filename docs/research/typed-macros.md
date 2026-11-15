@@ -2470,3 +2470,30 @@ Tests: `macros/defn-heads-*.fx`: a use then the macro it defines, one that
 makes definitions, a `lambda` binding the name again (its parameter), three
 levels found in two rounds, and a flip refused. The earlier "not yet" above
 (a template that uses such a macro and then the one it defines) is this.
+
+## Decided: a signature always says what its uses make (2026-11-15)
+
+The user's reading: the signatures looked odd because they left their
+result implicit, every use once making an expression; now a use makes an
+expression, a description, definitions, or a macro's definition (the last
+where binding information has to be in the result). So, decided with the
+user:
+
+1. **Always written:** `(-> σ made)`, `made` one of `expr`, `defn`, `(defn
+   (ℓ δ) …)` or `desc`; a bare `σ` refused, "a signature is `(-> σ made)`,
+   what its uses make written". Inferred signatures are shown so. *Built*,
+   both front ends; every test's and example's signature rewritten (a
+   script over the `define-syntax` forms, the `(syntax σ)` entries' too).
+2. **`desc`, not `type`,** for what makes a description: it covers types,
+   effects, regions and the rest. *Built.* (A signature's operand of a
+   description is still written `type`, a separate question.)
+3. **No FX types on what definitions define:** `(ℓ var)` says a value is
+   defined, not its type (the user: too many cases want it inferred).
+4. **Macros as operands, not yet; nothing to rule them out.** A truly
+   higher-order signature would let an operand be a macro, `(syntax σ)` on
+   the left of the arrow. What is built leaves room: `(syntax σ)` is a δ,
+   refused in an import "not yet" rather than by its grammar; a template
+   reads a head by its binder's scope (the fixed point above), which is
+   what a use of a macro given as an operand would need; and a signature's
+   result is written apart from its operands, so a macro's own signature
+   can appear on either side.

@@ -3,7 +3,7 @@
 ;; transformer's own `y-tmp` captures it, and a use whose binder is spelled
 ;; otherwise would not.
 (define-syntax let1
-  ((bvar expr) (import expr (rho (AA var))))
+  (-> ((bvar expr) (import expr (rho (AA var)))) expr)
   (er-macro-transformer
     (lambda (form rename compare)
       (let* ((xe (car (cdr form))) (body (car (cdr (cdr form)))) (b (car xe))

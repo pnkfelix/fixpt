@@ -693,7 +693,7 @@
 ;;; ------------------------------------------------------------ inferring
 
 ;; The signatures of macros `us`, defined together, inferred: each as
-;; written, `(-> σ defn)` and `(-> σ type)` for what makes definitions or a
+;; written, `(-> σ defn)` and `(-> σ desc)` for what makes definitions or a
 ;; description (`infer.rs`'s `infer`).
 (define infer (->* (fails unsigneds) syns-a)
   (lambda (fail us)
@@ -716,9 +716,10 @@
             (if (or (null? ms) (not (same-made? (cdr ms) (made-of (car ms)))))
                 nil
                 (let ((union (mk-list (cons (mk-symbol "oneof" a b) (sig-bodies ms)) a b)))
-                  (list (if (string=? (made-of (car ms)) "")
-                            union
-                            (mk-list (list (mk-symbol "->" a b) union
+                  ;; What it makes a word: `expr`, `defn` or `desc`.
+                  (if (string=? (made-of (car ms)) "")
+                      nil
+                      (list (mk-list (list (mk-symbol "->" a b) union
                                            (mk-symbol (made-of (car ms)) a b))
                                      a b))))))))))
 ;; Each of clauses `cs`'s signature, inferred alone; none if one is not.
@@ -764,9 +765,9 @@
     (if (null? sigs)
         nil
         (let* ((u (car us)) (a (syn-start (extract u 4))) (b (syn-end (extract u 4))))
-          (cons (cond ((= (car makes) 0) (car sigs))
-                      ((= (car makes) 1) (defn-arrow (car sigs) a b))
-                      (else (mk-list (list (mk-symbol "->" a b) (car sigs) (mk-symbol "type" a b))
+          (cons (cond ((= (car makes) 1) (defn-arrow (car sigs) a b))
+                      (else (mk-list (list (mk-symbol "->" a b) (car sigs)
+                                           (mk-symbol (if (= (car makes) 0) "expr" "desc") a b))
                                      a b)))
                 (made-sigs (cdr sigs) (cdr makes) (cdr us)))))))
 ;; The signature of operands `s` making definitions, as written: `(-> σ (defn

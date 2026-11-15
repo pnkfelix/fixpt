@@ -77,7 +77,7 @@
 (define-type clauses (listof clause acyclic))
 ;; A macro defined: its signature, its clauses, the binders of its
 ;; signature's `(poly (binder …) σ)`, if it has one, and what it makes (0 an
-;; expression, 1 definitions, `(-> σ defn)`, 2 a description, `(-> σ type)`).
+;; expression, 1 definitions, `(-> σ defn)`, 2 a description, `(-> σ desc)`).
 (define-type macro (tupleof sty clauses syns-a int))
 (define-type macro-env (listof (tupleof symbol macro) acyclic))
 ;; The macros defined, each by the name it is used by, the last defined

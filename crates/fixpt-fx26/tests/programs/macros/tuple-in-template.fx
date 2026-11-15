@@ -2,11 +2,11 @@
 ;; A template's `tuple`, and a keyword constructing in a template, written
 ;; or a pattern variable's.
 (define-syntax point
-  (expr expr)
+  (-> (expr expr) expr)
   (syntax-rules
     ((_ a b) (#:pt (tuple a b)))))
 (define-syntax tagged
-  (label expr)
+  (-> (label expr) expr)
   (syntax-rules
     ((_ t e) (t e))))
 (define-type p (sumof (#:pt (tupleof int int))))

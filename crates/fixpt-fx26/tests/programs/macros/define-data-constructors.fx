@@ -5,7 +5,7 @@
 ;; `begin` (each definition in the scope of those before it); each
 ;; constructs by its keyword, a pattern variable at a list's head.
 (define-syntax payload
-  (-> (type ...) type)
+  (-> (type ...) desc)
   (syntax-rules
     ((_) unit)
     ((_ f) f)

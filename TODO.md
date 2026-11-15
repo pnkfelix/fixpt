@@ -5627,10 +5627,9 @@ a table hashed by a datum's interned parts, as the heap does (0.4 s).
 Left: the datum boundary for procedural transformers (§228) can hand these
 constants over as they are.
 
-Left from the stack work: the methods `frame-debt.txt` lists, the recursive
-first (`sub_rules`, `show_ty_body`, `unify`, `module_items_from`,
-`synth_module_items`); and the checker written in FX-26, whose depth is each
-machine's.
+Left from the stack work: the checker written in FX-26, whose depth is each
+machine's. (The frame debts are taken out, 2026-11-15: at opt-level 1 in a
+debug build they held nothing the stack budgets do not.)
 
 ## 230. Debugging a procedural macro: what channels to give (the user's, 2026-11-09)
 

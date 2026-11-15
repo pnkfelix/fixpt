@@ -164,10 +164,12 @@ What there is, for the next time:
   The crate has no unsafe code, so its functions are called by their Rust
   names (`fixpt_fx26::debug_stack::fixpt_shadow_report()`), not exported.
 - **Budgets** (`crates/fixpt-fx26/tests/stack.rs`): the front end checked on
-  a thread of 3 MiB, calls nested 100 deep in 2 MiB, and each checker
-  method's debug frame read from the test's own executable (its symbols,
-  then its prologue's `sub`s; x86_64 Linux) against `frame-debt.txt`: over
-  4 KiB only with an entry, never above it.
+  a thread of 3 MiB, and calls nested 100 deep in 2 MiB. Each checker
+  method's debug frame was held to `frame-debt.txt` too, read from the
+  test's own executable; taken out (the user's, 2026-11-15) once the front
+  end was built at opt-level 1 in a debug build, whose frames are nearly a
+  release build's: what such a ratchet held moved with what overflows
+  nothing.
 
 What it found besides the frames: a quoted list is rewritten as nested
 `cons` calls, so its length is how deep every phase recurses

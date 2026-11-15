@@ -3,7 +3,7 @@
 ;; datatype as a macro, each variant's type chosen by its arity by a macro
 ;; that makes a description, its values constructed by keywords.
 (define-syntax payload
-  (-> (type ...) type)
+  (-> (type ...) desc)
   (syntax-rules
     ((_) unit)
     ((_ f) f)
