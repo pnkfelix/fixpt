@@ -3479,6 +3479,15 @@ impl Fx26Session {
         Ok(h)
     }
 
+    /// A phase-1 namespace in this session's runtime (`phase1.rs`): the
+    /// front end loaded and the standard environment read first, as the
+    /// namespace's front end is made of the one and given the other.
+    pub fn phase1(&mut self) -> R<crate::phase1::Phase1> {
+        self.own_pieces()?;
+        self.standard26()?;
+        crate::phase1::Phase1::new(self.scheme.runtime_unrooted()).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))
+    }
+
     /// What `stage` checks and compiles with, as this program's forms are
     /// (`stage.rs`), once the standard environment is read: where the
     /// front end is compiled.

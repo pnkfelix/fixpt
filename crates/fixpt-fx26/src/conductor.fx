@@ -831,7 +831,10 @@
                (redefines (extract fe check-redefines))
                ;; And what the last step runs, by name (a session on the
                ;; evaluator, which runs their texts).
-               (runs (extract fe checked-run-names))))))
+               (runs (extract fe checked-run-names))
+               ;; And a name's global, in a list, if it has one: what a
+               ;; phase-1 namespace's definition made (`phase1.rs`).
+               (cell (extract fe compile-global-cell))))))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-checked-more (extract front-end-entries run-checked-more))

@@ -2245,6 +2245,18 @@ transformers' session (`TODO.md` §228).
 3. A phase-1 namespace: a narrow Rust API over the runtime's sessions
    (`sessions.rs`), or a namespace of globals by prefix as theirs are:
    make it, define FX-26 code in it, call its procedure on a value.
+   *Built* (2026-11-15, `phase1.rs`): a front end of its own, the
+   conductor's `make-session-compiler`'s, as a session's on the checker
+   written in FX-26 is (`sessions26.rs`), its checker begun in the
+   standard environment, the transformers' prelude its first definitions,
+   its compiler's globals its own (a new field, `cell`, finds one); held
+   by a global of its own, `%phase1:N`. Its code cellular words whatever
+   the program's machine, run on the cellular machine written in Rust,
+   which every session's runtime has. `Fx26Session::phase1` makes one;
+   `define`, `value`, `call`, `end`. Made anew for each program's
+   expansion, each REPL entry's its own (the user's, 2026-11-15): about
+   10 ms to make, a transformer's definition about 0.3 ms. Test:
+   `tests/phase1.rs`.
 4. The Rust expander's transformer call through it: the runtime reached
    from inside an expansion, minor collections allowed, the datum built
    in the heap from the syntax and the answer made syntax, tenured, no

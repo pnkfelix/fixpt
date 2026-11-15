@@ -661,8 +661,10 @@ pub struct Checker {
     /// The definitions out of date (`defer_reruns`): each one's names, and
     /// the names it uses that were defined again since, at new globals.
     pub(crate) outdated: Vec<(Vec<Sym>, Vec<Sym>)>,
-    /// Whether naming a global reads its binding, `(read (globals g))`, as
-    /// the language will say once every program says so (off until then).
+    /// Whether naming a global reads its binding, `(read (globals g))`, in
+    /// the effect of the code that names it: on, as the language says; off
+    /// in a runtime's session (`sessions.rs`), whose steps' types say they
+    /// read the session.
     pub globals_effects: bool,
     /// Whether to keep the operand types of standard operations
     /// instantiated (`NodeFacts::operand_types`): for measuring what types

@@ -1,0 +1,75 @@
+//! A phase-1 namespace (`phase1.rs`; `docs/research/typed-macros.md`,
+//! "Decided: transformers in the front end's heap", stage 3): made in a
+//! session's runtime, a transformer defined in it and called on a datum
+//! there, its answer a value of that heap; two namespaces apart.
+
+use fixpt_fx26::session::Fx26Session;
+
+const SC: &str = "(subr spin (datum symbol) datum)";
+
+fn session() -> Fx26Session {
+    Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("a session")
+}
+
+/// `(NAME 5)`, as a reader makes it, in `rt`'s heap.
+fn use_of(rt: &mut fixpt_runtime::Runtime, name: &str) -> fixpt_heap::Value {
+    let head = rt.heap.intern(name);
+    let base = rt.heap.push_root(head);
+    let tail = rt.heap.cons(fixpt_heap::Value::fixnum(5), fixpt_heap::Value::NULL);
+    let head = rt.heap.root_at(base);
+    rt.heap.pop_roots_to(base);
+    rt.heap.cons(head, tail)
+}
+
+#[test]
+fn a_transformer_defined_in_phase_1_is_called_on_a_datum_of_the_heap() {
+    let mut s = session();
+    let p = s.phase1().unwrap_or_else(|e| panic!("phase 1: {e}"));
+    let rt = s.scheme.runtime_unrooted();
+    p.define(rt, "inc", SC, "(lambda (form env) `(+ ,(car (cdr form)) 1))").unwrap_or_else(|e| panic!("defined: {e}"));
+    let form = use_of(rt, "inc");
+    let env = rt.heap.intern("%env:use");
+    let out = p.call(rt, "inc", &[form, env]).unwrap_or_else(|e| panic!("called: {e}"));
+    assert_eq!(fixpt_runtime::write_value(&rt.heap, out), "(+ 5 1)");
+    // The prelude's procedures are there for a transformer to use: bound
+    // around its `lambda`, as `procedural::helpers` binds them, read where it
+    // is defined, so that its type reads no global.
+    let closes = "(let ((make-syntactic-closure %make-syntactic-closure))\n\
+                  (lambda (form env) (make-syntactic-closure env '() (car (cdr form)))))";
+    p.define(rt, "closes", SC, closes).unwrap_or_else(|e| panic!("defined: {e}"));
+    let form = use_of(rt, "closes");
+    let env = rt.heap.intern("%env:use");
+    let out = p.call(rt, "closes", &[form, env]).unwrap_or_else(|e| panic!("called: {e}"));
+    assert!(fixpt_runtime::write_value(&rt.heap, out).starts_with("(%sc "), "a syntactic closure");
+    p.end(rt);
+}
+
+#[test]
+fn a_definition_phase_1_refuses_says_why() {
+    let mut s = session();
+    let p = s.phase1().unwrap_or_else(|e| panic!("phase 1: {e}"));
+    let rt = s.scheme.runtime_unrooted();
+    let e = p.define(rt, "bad", SC, "(lambda (form env) (+ form 1))").expect_err("ill-typed");
+    assert!(!e.is_empty(), "a message");
+    // Naming a global reads it, as in a program: not of a `spin` type.
+    let e = p.define(rt, "reads", SC, "(lambda (form env) (%make-syntactic-closure env '() form))").expect_err("reads a global");
+    assert!(e.contains("(read (globals %make-syntactic-closure))"), "{e}");
+    p.end(rt);
+}
+
+#[test]
+fn two_namespaces_are_apart() {
+    let mut s = session();
+    let one = s.phase1().unwrap_or_else(|e| panic!("phase 1: {e}"));
+    let two = s.phase1().unwrap_or_else(|e| panic!("phase 1: {e}"));
+    let rt = s.scheme.runtime_unrooted();
+    one.define(rt, "only-here", SC, "(lambda (form env) form)").unwrap_or_else(|e| panic!("defined: {e}"));
+    assert!(one.value(rt, "only-here").is_some());
+    assert!(two.value(rt, "only-here").is_none(), "another namespace's definition");
+    // Nor is phase 0's: the program's globals are not phase 1's.
+    s.run_program("(define phase-zero int 1)").expect("runs").expect("checks");
+    let rt = s.scheme.runtime_unrooted();
+    assert!(two.value(rt, "phase-zero").is_none(), "the program's global");
+    one.end(rt);
+    two.end(rt);
+}
