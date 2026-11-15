@@ -2205,32 +2205,35 @@ transformers' session (`TODO.md` §228).
    program's expansion: the standard environment, and nothing of phase
    0; a transformer defined there where its macro is defined, called on
    each use's datum.
-3. *The Rust front end's syntax in an arena, one per reading* (the
-   user's choice, 2026-11-14, in place of collection inhibited during
-   each call, `TODO.md` §278): an arena's chunks never move and are
-   traced as roots (`fixpt-heap`'s `regions.rs`), so a raw `Syn` stays
-   valid through any collection a transformer's call makes, and the
-   reading's code keeps holding raw values. Handles throughout instead
-   were weighed and left: the frames that can reach a transformer's call
-   are the expander's seven but above them some fifty entry points that
-   hold a program's forms raw (`expand_forms_syn`'s, a module file's),
-   each a hole if missed. Sound because nothing outside the arena points
-   into it but the reading's own frames and handles: a transformer is
-   given its use as a datum in the heap (4), never the arena's syntax,
-   and what it gives is made syntax in the arena before anything can
-   collect. At the reading's end what handles hold (templates, a quote's
-   `Form`, a session's forms) is copied out into the heap, the handles
-   moved to the copies, and the arena ended (the user's choice: (a), a
-   bounded arena, over (b), one kept while any handle into it lives).
+3. *The Rust front end's syntax tenured, collections minor while it is
+   lent* (the user's, 2026-11-14, in place of collection inhibited during
+   each call, `TODO.md` §278): the builder (`heap_syn`'s `Mk`) allocates
+   in the old space, as the nursery's spill does (its cards marked), and
+   while syntax is lent a collection is of the nursery alone, which moves
+   nothing tenured; a major one due waits for the lending's end. So a raw
+   `Syn` a Rust frame holds is valid through any collection a
+   transformer's call makes, and handles, `hand` and the session's forms
+   are as they are: one heap. Syntax FX-26 made (`adopted`) is copied
+   into the old space; what a transformer gives is made syntax there as
+   soon as it returns. A heap with no nursery (`FIXPT_NURSERY=0`, tests)
+   holds collection off while syntax is lent. Weighed and left: handles
+   throughout (the frames that can reach a transformer's call are the
+   expander's seven but above them some fifty entry points that hold a
+   program's forms raw, each a hole if missed); an arena per reading
+   (what lasts copied out, and back in, or a second arena kept); a space
+   of syntax's own, between the tables and the old space (static ≫ code
+   ≫ tables ≫ syntax ≫ old ≫ nursery), which would let a major collection
+   run during a lending: its remembered set, generation, barrier case and
+   collection, built if majors deferred show (`FIXPT_GC_TRACE`).
 4. *What a transformer sees*: datums, as now, the identity of a use's
    compound parts kept beside them for the expander's errors.
 
 **Stages, each its own commit on a branch:**
-1. The Rust front end's syntax in an arena: a reading enters one in the
-   heap its syntax is in, builds its `syn` there (the reader, the
-   expander, the conversions), and at its end copies out what handles
-   hold and ends it. Tested with a collection forced where a
-   transformer's call will be (a knob, as `FIXPT_GC_STRESS` is).
+1. The Rust front end's syntax tenured: `Mk` allocating in the old space,
+   collections of the nursery alone while syntax is lent, `adopted`
+   copying into the old space; in a build with debug assertions, each
+   raw `Syn` used in a lending checked tenured. Tested with a minor
+   collection forced inside a lending.
 2. Every checker in a runtime: `fresh_checker` and the bare checkers
    given their session's runtime (or one of their own), their syntax in
    its heap; `compare::check_with_rust_checker` and its callers given the
@@ -2239,9 +2242,9 @@ transformers' session (`TODO.md` §228).
    (`sessions.rs`), or a namespace of globals by prefix as theirs are:
    make it, define FX-26 code in it, call its procedure on a value.
 4. The Rust expander's transformer call through it: the runtime reached
-   from inside an expansion, collection allowed, the datum built in the
-   heap from the arena's syntax and the answer made syntax in the arena,
-   no text.
+   from inside an expansion, minor collections allowed, the datum built
+   in the heap from the syntax and the answer made syntax, tenured, no
+   text.
 5. The expander written in FX-26 through it: its primitive re-entrant
    (`reenters!`), calling the phase-1 procedure in its own runtime.
 6. The separate transformers' session gone.

@@ -79,6 +79,14 @@ impl Heap {
     /// map told where they start, as a promotion tells it. The next minor
     /// collection takes the old space's top as it finds it.
     pub(super) fn bump_old(&mut self, n: usize) -> usize {
+        self.words_spilled += n as u64;
+        self.bump_old_words(n, true)
+    }
+
+    /// `n` words in the old space, as [`bump_old`](Heap::bump_old)
+    /// places them, uncounted; their cards marked if `mark`, else the
+    /// caller's to remember (`Heap::tenured_ranges`).
+    pub(super) fn bump_old_words(&mut self, n: usize, mark: bool) -> usize {
         if self.top + n > self.active + self.semi {
             self.grow(self.top - self.active + n);
         }
@@ -89,10 +97,11 @@ impl Heap {
             _ => usize::MAX,
         };
         cross(&mut self.crossing, &mut last, at, n);
-        for card in at >> CARD_SHIFT..=(at + n - 1) >> CARD_SHIFT {
-            set_byte(&mut self.cards, card, 1);
+        if mark {
+            for card in at >> CARD_SHIFT..=(at + n - 1) >> CARD_SHIFT {
+                set_byte(&mut self.cards, card, 1);
+            }
         }
-        self.words_spilled += n as u64;
         at
     }
 
@@ -215,6 +224,7 @@ impl Heap {
         self.words_allocated += young as u64;
         let (lo, old_top) = (self.active, self.top);
         let regions: Vec<(usize, usize)> = self.regions.ranges().collect();
+        let tenured = std::mem::take(&mut self.tenured_ranges);
         // The first object promoted starts the card of the old top's last
         // word only if none starts there already.
         let last_card = match old_top > lo {
@@ -265,7 +275,9 @@ impl Heap {
         }
         // What the regions hold: scanned whole, since machine code fills
         // what it allocates there without marking cards.
-        for (from, to) in regions {
+        // And what was allocated tenured since the last collection, whose
+        // cards were left clean (`tenured_ranges`).
+        for (from, to) in regions.into_iter().chain(tenured) {
             let mut at = from;
             while at < to {
                 at += Self::scan_one(mem, at, &mut c);
@@ -351,8 +363,10 @@ impl Heap {
         let code = self.code.parts.each_ref().map(|p| (p.base, p.top));
         let young = |v: Value| v.is_ref() && is_young(self.ref_ix(v));
         let tables = (super::TABLES_BASE, self.tables.top);
+        // A field in what was allocated tenured is remembered by its range.
+        let tenured = |f: usize| self.tenured_ranges.iter().any(|&(lo, hi)| (lo..hi).contains(&f));
         for (lo, hi) in [(self.active, self.top), (super::STATIC_MUTABLE_BASE, self.static_top), tables, code[0], code[1]] {
-            self.verify_remembered_in(lo, hi, |f, v| young(v) && byte(&self.cards, f >> CARD_SHIFT) == 0)?;
+            self.verify_remembered_in(lo, hi, |f, v| young(v) && byte(&self.cards, f >> CARD_SHIFT) == 0 && !tenured(f))?;
         }
         let neither = |f: usize| byte(&self.cards, f >> CARD_SHIFT) == 0 && byte(&self.old_cards, (f >> CARD_SHIFT) - OLDER_CARD_0) == 0;
         for (lo, hi) in [tables, code[0], code[1]] {

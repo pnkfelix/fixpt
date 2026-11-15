@@ -2512,7 +2512,15 @@ impl Macros {
     fn procedural_run(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, made: u32, interner: &mut Interner) -> R<Syn> {
         let form = s.written(interner);
         let said = |e: String| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name)));
+        // Where the call will collect, in the front end's heap (`TODO.md`
+        // §278): a test's, of a checker's own heap.
+        if !self.withs.world.borrow().session {
+            crate::heap_syn::collect_young_if_asked();
+        }
         let out = procedural::apply(p.style, &p.code, &form, made).map_err(said)?;
+        if !self.withs.world.borrow().session {
+            crate::heap_syn::collect_young_if_asked();
+        }
         let read = crate::heap_syn::read_syn_unplaced(&out, interner);
         let read = read.map_err(|e| FxError::at(s.at(), format!("a use of `{}`: what its transformer gave, `{out}`, is not read: {}", interner.name(name), e.message)))?;
         let [one] = &read[..] else {

@@ -416,6 +416,28 @@ pub struct Heap {
     /// transformer while its half-built program holds constants. Growing
     /// never moves anything, so those `Value`s stay valid.
     inhibited: u32,
+    /// While positive, a collection is of the nursery alone, which moves
+    /// nothing older; a major one due waits, and asked for is a minor one
+    /// (in a heap with no nursery, none at all, the heap grows). For the
+    /// Rust front end's syntax, which is tenured ([`tenure_enter`]) and
+    /// held raw while it is lent, across a procedural macro's transformer
+    /// (`fixpt_fx26::heap_syn`; `TODO.md` §278).
+    ///
+    /// [`tenure_enter`]: Heap::tenure_enter
+    young_only: u32,
+    /// While positive, what is allocated is in the old space, not the
+    /// nursery, its cards marked as a spill's are ([`young_only_enter`]).
+    ///
+    /// [`young_only_enter`]: Heap::young_only_enter
+    tenuring: u32,
+    /// Words allocated in the old space while tenuring.
+    pub words_tenured: u64,
+    /// Where the old space was allocated in while tenuring, since the last
+    /// collection, `(start, end)`, those that follow one another one: their
+    /// cards left clean, since this is allocation and not the barrier's
+    /// stores, which the card budget counts; scanned whole by the next
+    /// minor collection instead, as a region is.
+    pub(crate) tenured_ranges: Vec<(usize, usize)>,
     /// Global variable slots, indexed by a symbol's global-slot field: a
     /// table of chunks (`tables`, `TODO.md` §264).
     globals: tables::Table,
@@ -622,6 +644,10 @@ impl Heap {
                 s
             },
             inhibited: 0,
+            young_only: 0,
+            tenuring: 0,
+            words_tenured: 0,
+            tenured_ranges: Vec::new(),
             globals: tables::Table::default(),
             symbols: tables::Table::default(),
             tables: tables::Area::default(),
@@ -884,6 +910,15 @@ impl Heap {
             return at;
         }
         if self.generational {
+            if self.tenuring > 0 {
+                let at = self.bump_old_words(n, false);
+                self.words_tenured += n as u64;
+                match self.tenured_ranges.last_mut() {
+                    Some((_, end)) if *end == at => *end = at + n,
+                    _ => self.tenured_ranges.push((at, at + n)),
+                }
+                return at;
+            }
             let at = self.nursery_top;
             if at + n > self.nursery_end {
                 return self.bump_old(n);
@@ -2475,6 +2510,47 @@ impl Heap {
         self.inhibited -= 1;
     }
 
+    /// Collections of the nursery alone until the matching
+    /// [`young_only_exit`](Heap::young_only_exit) (`young_only`).
+    pub fn young_only_enter(&mut self) {
+        self.young_only += 1;
+    }
+
+    pub fn young_only_exit(&mut self) {
+        self.young_only -= 1;
+    }
+
+    /// Whether collections are of the nursery alone now.
+    pub fn is_young_only(&self) -> bool {
+        self.young_only > 0
+    }
+
+    /// Allocation in the old space until the matching
+    /// [`tenure_exit`](Heap::tenure_exit) (`tenuring`).
+    #[inline(always)]
+    pub fn tenure_enter(&mut self) {
+        self.tenuring += 1;
+    }
+
+    #[inline(always)]
+    pub fn tenure_exit(&mut self) {
+        self.tenuring -= 1;
+    }
+
+    /// Major collections made (a minor one moves nothing older than the
+    /// nursery).
+    #[inline(always)]
+    pub fn majors(&self) -> u64 {
+        self.gc_count
+    }
+
+    /// Whether reference `v` is to the nursery, which a minor collection
+    /// moves.
+    #[inline(always)]
+    pub fn is_young_ref(&self, v: Value) -> bool {
+        v.is_ref() && v.index() >= self.base && young::is_young(self.ix(v))
+    }
+
     /// Whether collection is held off ([`inhibit_collection`](Heap::inhibit_collection)).
     pub fn collection_inhibited(&self) -> bool {
         self.inhibited > 0
@@ -2532,10 +2608,10 @@ impl Heap {
     /// machine whose roots cost something to gather, which it gathers only
     /// then.
     pub fn collection_due(&mut self) -> bool {
-        if self.inhibited > 0 {
+        if self.inhibited > 0 || (self.young_only > 0 && !self.generational) {
             return false;
         }
-        let full = self.major_due();
+        let full = self.major_due() && self.young_only == 0;
         self.safepoints += 1;
         // The stress policy's (`gc_every`): each period, of safepoints.
         let every = |n: u64| n > 0 && self.safepoints.is_multiple_of(n);
@@ -2543,6 +2619,9 @@ impl Heap {
         let nursery_full = self.generational && (self.nursery_top - NURSERY_BASE >= self.nursery_words || self.card_budget <= 0);
         self.due_code = self.code_due() || forced_code;
         self.due_major = full || self.due_code || forced_major || (forced && !self.generational);
+        if self.young_only > 0 {
+            (self.due_code, self.due_major) = (false, false);
+        }
         self.due_major || forced || nursery_full
     }
 
@@ -2728,6 +2807,15 @@ impl Heap {
     /// `code`, a mark and sweep of the code area. Compacts, which is also
     /// what makes a dumped image contiguous and relocation-free.
     fn collect_major(&mut self, extra_roots: &mut [&mut [Value]], code: bool) {
+        // Nothing older than the nursery moves now (`young_only`).
+        if self.young_only > 0 {
+            if self.generational {
+                self.collect_minor(extra_roots);
+            }
+            return;
+        }
+        // Everything is traced, and moves: no range is left.
+        self.tenured_ranges.clear();
         self.assert_not_in_leaf("a major collection");
         let started = std::time::Instant::now();
         // The mutator's phase paused (`TODO.md` §252).

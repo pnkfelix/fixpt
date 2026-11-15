@@ -10,20 +10,26 @@
 //!
 //! Raw values: the heap collects only at safepoints, never in an
 //! allocation, so a reading, an expansion and a parse hold them ([`Rd`],
-//! [`Mk`]); what lasts past code that runs is held by a handle.
+//! [`Mk`]); what lasts past code that runs is held by a handle. And what
+//! is made is tenured, in the old space ([`Mk`]), while lent
+//! ([`with_syntax`]) a collection is of the nursery alone, so a raw value
+//! held across a procedural macro's transformer, which may collect, is
+//! still good (`docs/research/typed-macros.md`, "Decided: transformers in
+//! the front end's heap", decision 3).
 
 use fixpt_heap::layout::kind;
 use fixpt_heap::{Heap, ObjType, Value};
 use fixpt_read::{Build, Datum, FileId, Interner, Num, Place, Span, Sym};
 
-/// A piece of `syn`, in the heap; and, in a build with debug assertions,
-/// the heap's collections when it was taken, so that one held past a
-/// collection is caught where it is used, not read as what moved there.
+/// A piece of `syn`, in the heap's old space; and, in a build with debug
+/// assertions, the heap's major collections when it was taken, so that one
+/// held past one is caught where it is used, not read as what moved there.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Syn(pub Value, Era);
 
-/// How many collections the heap had made when a [`Syn`] was taken: a
-/// build with debug assertions's, nothing in another.
+/// How many major collections the heap had made when a [`Syn`] was taken:
+/// a build with debug assertions's, nothing in another. A minor one moves
+/// nothing tenured.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Era {
     #[cfg(debug_assertions)]
@@ -35,7 +41,7 @@ impl Era {
     fn of(_heap: &Heap) -> Era {
         Era {
             #[cfg(debug_assertions)]
-            n: _heap.collections(),
+            n: _heap.majors(),
         }
     }
 }
@@ -48,11 +54,15 @@ impl Syn {
     }
 
     /// Its value, which `heap` holds still: a panic, in a build with debug
-    /// assertions, if a collection came since it was taken.
+    /// assertions, if a major collection came since it was taken, or if it
+    /// is in the nursery, which a minor one moves.
     #[inline(always)]
     fn value(self, _heap: &Heap) -> Value {
         #[cfg(debug_assertions)]
-        assert_eq!(self.1.n, _heap.collections(), "a piece of syntax held past a collection: hold it by a handle (`Kept`)");
+        {
+            assert_eq!(self.1.n, _heap.majors(), "a piece of syntax held past a major collection: hold it by a handle (`Kept`)");
+            assert!(!_heap.is_young_ref(self.0), "a piece of syntax in the nursery: syntax is made tenured (`Mk`), FX-26's copied there (`adopted`)");
+        }
         self.0
     }
 }
@@ -561,6 +571,8 @@ impl<'a> Mk<'a> {
 
     /// Making, with no names: of lists and vectors, and atoms not symbols.
     fn with(heap: &'a mut Heap, interner: Option<&'a Interner>, syms: &'a mut SymTable) -> Mk<'a> {
+        // What it makes, in the old space, until it drops.
+        heap.tenure_enter();
         let now = heap.collections();
         let tags = match syms.tags {
             Some((n, tags)) if n == now => tags,
@@ -794,6 +806,12 @@ impl<'a> Mk<'a> {
     }
 }
 
+impl Drop for Mk<'_> {
+    fn drop(&mut self) {
+        self.heap.tenure_exit();
+    }
+}
+
 const ATOM: usize = 0;
 const LST: usize = 1;
 const DOTTED: usize = 2;
@@ -870,7 +888,22 @@ pub fn with_syntax<R>(heap: &mut Heap, syms: &mut SymTable, f: impl FnOnce() -> 
         }
         syms.forms.free.borrow_mut().extend(dropped);
     }
-    fixpt_memmgmt::lend::lend_pair(heap, syms, f)
+    // Its syntax held raw: nothing tenured moves until it ends.
+    heap.young_only_enter();
+    let r = fixpt_memmgmt::lend::lend_pair(heap, syms, f);
+    heap.young_only_exit();
+    r
+}
+
+/// A minor collection of the heap lent, now, if `FIXPT_LENT_COLLECT=1`:
+/// for the tests, where a procedural macro's transformer's call will be
+/// able to collect (`TODO.md` §278). Only in a heap whose roots are its
+/// own (a checker's, not a session's, whose runtime has more).
+pub fn collect_young_if_asked() {
+    static ASKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ASKED.get_or_init(|| std::env::var("FIXPT_LENT_COLLECT").is_ok_and(|v| v == "1")) {
+        heap(|h| h.collect_young(&mut []));
+    }
 }
 
 /// Whether syntax may be read and made now ([`with_syntax`]).
@@ -1243,6 +1276,11 @@ impl Form {
 /// reads as what a builder made; or why not, an atom FX-26 does not read.
 pub fn adopted(v: Value, interner: &mut Interner) -> Result<Syn, String> {
     fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, _>(|heap, syms| {
+        // Copied into the old space, what is in the nursery, as syntax is
+        // made: symbols shared, which are the heap's by identity.
+        heap.tenure_enter();
+        let (v, _) = heap.copy_within(v, |h, x| !h.is_young_ref(x) || (x.is_bloblet() && (h.is_a(x, ObjType::Symbol) || h.is_keyword(x))));
+        heap.tenure_exit();
         let s = Syn::of(heap, v);
         let mut todo = vec![s];
         while let Some(x) = todo.pop() {

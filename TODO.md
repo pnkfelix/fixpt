@@ -7080,7 +7080,7 @@ callers' convention, which one case did not keep; now the one function
 for an argument is what both cases call. Test:
 `tests/programs/listof/append-nested-deep.fx`, 40 deep.
 
-## 278. A transformer's call may collect: the Rust front end's syntax in an arena (the user's, 2026-11-14)
+## 278. A transformer's call may collect: the Rust front end's syntax tenured (the user's, 2026-11-14)
 
 Running a procedural macro's transformer in the front end's heap (§228,
 being built) was first to inhibit collection for each call, the Rust
@@ -7093,10 +7093,10 @@ handles across code that runs, a transformer's call named; but traced
 `expand_procedural`, `contract_expanded`) and above them some fifty entry
 points holding a program's forms raw, each a hole if missed.
 
-Decided (the user's, 2026-11-14): the Rust front end's syntax in an
-arena, one per reading (`regions.rs`: chunks that never move, traced as
-roots); nothing else points into it (a transformer is given a datum in
-the heap); at the reading's end what handles hold copied out and the
-arena ended. `typed-macros.md`, "Decided: transformers in the front end's
-heap", decision 3 and stage 1. Left: an arena is scanned whole by each
-collection while it lives; cards for it if that shows.
+Decided (the user's, 2026-11-14): syntax allocated in the old space, and
+while it is lent collections of the nursery alone, which move nothing
+tenured; a major one due waits for the lending's end. `typed-macros.md`,
+"Decided: transformers in the front end's heap", decision 3 and stage 1.
+Left, if `FIXPT_GC_TRACE` shows majors deferred long or the old space
+growing much in lendings: a space of syntax's own (static ≫ code ≫ tables
+≫ syntax ≫ old ≫ nursery), so that a major collection may run in one.

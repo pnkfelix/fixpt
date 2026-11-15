@@ -149,3 +149,60 @@ fn young_references_in_code_bloblets_are_found_by_their_cards() {
     }
     h.verify().unwrap();
 }
+
+/// Tenured allocation (`Heap::tenure_enter`) and collections of the
+/// nursery alone (`Heap::young_only_enter`), together what the Rust front
+/// end's syntax is held raw by across a procedural macro's transformer
+/// (`TODO.md` §278): what is made tenured stays where it is through any
+/// collection asked for then, a major one too, while the nursery's
+/// garbage is reclaimed; a young value it refers to, found by its card.
+#[test]
+fn tenured_values_stay_put_while_collections_are_young_only() {
+    let mut h = heap();
+    let young = h.cons(Value::fixnum(7), Value::NULL);
+    h.tenure_enter();
+    let held = h.cons(young, Value::NULL);
+    h.tenure_exit();
+    assert!(!h.is_young_ref(held), "made in the old space");
+    assert!(h.is_young_ref(young));
+    let (majors, minors) = (h.majors(), h.minor_count);
+    h.young_only_enter();
+    let _garbage = list(&mut h, 1000);
+    h.collect(&mut []);
+    h.collect_old(&mut []);
+    assert_eq!(h.majors(), majors, "no major collection while young-only");
+    assert_eq!(h.minor_count, minors + 2, "each asked for, a minor one");
+    assert_eq!(h.nursery_used(), 0, "the nursery's garbage reclaimed");
+    // Held raw across them: where it was, its young part found and moved.
+    let promoted = h.car(held);
+    assert!(!h.is_young_ref(promoted));
+    assert_eq!(h.car(promoted), Value::fixnum(7));
+    // A major collection each safepoint, by the stress policy: none now.
+    h.gc_major_every = 1;
+    for _ in 0..3000 {
+        h.cons(Value::NULL, Value::NULL);
+    }
+    assert!(h.collection_due(), "the nursery full");
+    h.collect_due(&mut []);
+    assert_eq!(h.majors(), majors, "a major one due waits");
+    h.gc_major_every = 0;
+    h.young_only_exit();
+    h.verify().unwrap();
+}
+
+/// A heap with no nursery collects nothing while young-only: the heap
+/// grows instead.
+#[test]
+fn a_heap_with_no_nursery_holds_collection_off_while_young_only() {
+    let mut h = Heap::new();
+    h.set_nursery(0);
+    h.young_only_enter();
+    for _ in 0..10_000 {
+        h.cons(Value::NULL, Value::NULL);
+    }
+    let n = h.collections();
+    assert!(!h.collection_due());
+    h.collect(&mut []);
+    assert_eq!(h.collections(), n);
+    h.young_only_exit();
+}
