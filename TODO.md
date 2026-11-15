@@ -7016,7 +7016,15 @@ allocation limit it gives written back. At every x86_64 site of the
 cellular, register-code and direct compilers, Rust's and FX-26's, and the
 stencils' `global!`. Test: `fixpt-cli/tests/remembered_set.rs`, on each
 of the twelve machines no minor collection scanning more than the budget
-(32 cards for a nursery of 4096 words, which each reaches).
+(32 cards for a nursery of 4096 words, which each reaches). The cards
+it counts are those of the barrier's mark (2026-11-15): a card's byte is
+`CARD_BARRIER` where the barrier made it dirty and spent the budget,
+`CARD_OTHER` where anything else did (allocation in the old space, a
+spill's or the Rust front end's syntax tenured, §278; what was put there
+with no barrier), each only onto a clean card, so the order of a store
+and an allocation on one card does not matter; `FIXPT_GC_TRACE` gives
+both counts. An arm64 barrier, which marks unconditionally, will need to
+test first, as x86_64's does.
 
 Not yet: arm64 (the user's choice, 2026-11-14: x86_64 merged first). Its
 barriers still mark every store's card and count none, so the budget

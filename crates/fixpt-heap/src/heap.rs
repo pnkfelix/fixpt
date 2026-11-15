@@ -432,12 +432,6 @@ pub struct Heap {
     tenuring: u32,
     /// Words allocated in the old space while tenuring.
     pub words_tenured: u64,
-    /// Where the old space was allocated in while tenuring, since the last
-    /// collection, `(start, end)`, those that follow one another one: their
-    /// cards left clean, since this is allocation and not the barrier's
-    /// stores, which the card budget counts; scanned whole by the next
-    /// minor collection instead, as a region is.
-    pub(crate) tenured_ranges: Vec<(usize, usize)>,
     /// Global variable slots, indexed by a symbol's global-slot field: a
     /// table of chunks (`tables`, `TODO.md` §264).
     globals: tables::Table,
@@ -647,7 +641,6 @@ impl Heap {
             young_only: 0,
             tenuring: 0,
             words_tenured: 0,
-            tenured_ranges: Vec::new(),
             globals: tables::Table::default(),
             symbols: tables::Table::default(),
             tables: tables::Area::default(),
@@ -911,13 +904,8 @@ impl Heap {
         }
         if self.generational {
             if self.tenuring > 0 {
-                let at = self.bump_old_words(n, false);
                 self.words_tenured += n as u64;
-                match self.tenured_ranges.last_mut() {
-                    Some((_, end)) if *end == at => *end = at + n,
-                    _ => self.tenured_ranges.push((at, at + n)),
-                }
-                return at;
+                return self.bump_old_words(n);
             }
             let at = self.nursery_top;
             if at + n > self.nursery_end {
@@ -2814,8 +2802,6 @@ impl Heap {
             }
             return;
         }
-        // Everything is traced, and moves: no range is left.
-        self.tenured_ranges.clear();
         self.assert_not_in_leaf("a major collection");
         let started = std::time::Instant::now();
         // The mutator's phase paused (`TODO.md` §252).
@@ -2856,6 +2842,7 @@ impl Heap {
             crossing: &mut self.crossing,
             last_card: usize::MAX,
             cards_scanned: 0,
+            barrier_cards: 0,
         };
 
         // `scan` and `c.free` are relative to `to`.
@@ -3044,7 +3031,7 @@ impl Heap {
                 *w = WEAK_DEAD;
             }
         }
-        let Copier { free, new, marked, large_marks, code_marks, cards_scanned, .. } = c;
+        let Copier { free, new, marked, large_marks, code_marks, cards_scanned, barrier_cards, .. } = c;
         if code {
             self.sweep_code(&code_marks);
             self.code_live = self.code.used();
@@ -3121,18 +3108,20 @@ impl Heap {
         let nanos = started.elapsed().as_nanos() as u64;
         self.gc_nanos += nanos;
         self.max_major_nanos = self.max_major_nanos.max(nanos);
-        self.traced("major", self.gc_count, nanos, free, before, cards_scanned);
+        self.traced("major", self.gc_count, nanos, free, before, (cards_scanned, barrier_cards));
     }
 
     /// For `FIXPT_GC_TRACE`: a line for the collection just made, of `kind`
     /// and number `n`, which took `nanos` and copied `copied` words, the
     /// heap having `before` words in use as it started, and scanned `cards`
-    /// dirty cards (of 64 words each).
-    pub(crate) fn traced(&self, kind: &str, n: u64, nanos: u64, copied: usize, before: usize, cards: usize) {
+    /// dirty cards (of 64 words each), the first count every one, the
+    /// second those of the barrier's mark, which the card budget bounds.
+    pub(crate) fn traced(&self, kind: &str, n: u64, nanos: u64, copied: usize, before: usize, cards: (usize, usize)) {
+        let (cards, barrier) = cards;
         if self.trace {
             let m = |w: usize| w as f64 / 1e6;
             eprintln!(
-                "; gc {kind} {n}: {:.2} ms, {:.2} M words copied, {:.2} M in use before, {:.2} M after, {cards} dirty cards",
+                "; gc {kind} {n}: {:.2} ms, {:.2} M words copied, {:.2} M in use before, {:.2} M after, {cards} dirty cards, {barrier} the barrier's",
                 nanos as f64 / 1e6,
                 m(copied),
                 m(before),
@@ -3874,6 +3863,9 @@ struct Copier<'r> {
     /// The dirty cards scanned, of every table: the remembered set's size
     /// this collection, for `FIXPT_GC_TRACE`.
     cards_scanned: usize,
+    /// Of those, the first table's of the barrier's mark (`CARD_BARRIER`):
+    /// the card budget spent.
+    barrier_cards: usize,
 }
 
 impl Copier<'_> {

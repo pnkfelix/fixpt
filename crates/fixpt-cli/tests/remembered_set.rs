@@ -8,7 +8,10 @@ use std::process::Command;
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
 
-/// A nursery of 4096 words: a budget of 4096 / 2 / 64 = 32 cards.
+/// A nursery of 4096 words: a budget of 4096 / 2 / 64 = 32 cards. What a
+/// collection scans of the barrier's mark is counted, as the budget is: not
+/// the cards allocation in the old space marked (a spill's, or the front
+/// end's syntax, tenured), which spent none of it.
 const NURSERY: &str = "4096";
 const BUDGET: u64 = 32;
 /// What a collection may scan past the budget: the collection is due once
@@ -34,7 +37,7 @@ fn bounded_on(m: &str) {
     let cards: Vec<u64> = stderr
         .lines()
         .filter(|l| l.starts_with("; gc minor"))
-        .filter_map(|l| l.strip_suffix(" dirty cards")?.rsplit(' ').next()?.parse().ok())
+        .filter_map(|l| l.strip_suffix(" the barrier's")?.rsplit(' ').next()?.parse().ok())
         .collect();
     assert!(cards.len() >= 10, "{m}: {} minor collections", cards.len());
     let most = cards.iter().copied().max().unwrap_or(0);

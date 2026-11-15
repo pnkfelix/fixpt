@@ -30,6 +30,17 @@ use crate::{HashMap, HashSet};
 /// `i >> CARD_SHIFT`.
 pub(super) const CARD_SHIFT: usize = 6;
 const CARD_WORDS: usize = 1 << CARD_SHIFT;
+/// A dirty card's byte: the write barrier's mark, made where the card was
+/// clean, one of the card budget spent (`Heap::barrier_card`).
+const CARD_BARRIER: u8 = 1;
+/// A dirty card's byte: any other mark (allocation in the old space, a
+/// spill's or what is tenured; what was put there with no barrier), made
+/// only where the card was clean, and none of the budget spent. A card goes
+/// from clean to one of the two and back to clean only when it is scanned,
+/// so the cards of the barrier's mark a collection finds are the budget it
+/// spent, whatever order the stores and the allocation came in. The barrier
+/// in machine code tests for any mark, as `Heap::barrier_card` does.
+const CARD_OTHER: u8 = 2;
 /// Cards over the whole of the heap's memory (the table's bytes, and the
 /// crossing map's, which knows the semispaces' and the static area's).
 pub(super) const CARDS: usize = MEM_WORDS >> CARD_SHIFT;
@@ -80,13 +91,13 @@ impl Heap {
     /// collection takes the old space's top as it finds it.
     pub(super) fn bump_old(&mut self, n: usize) -> usize {
         self.words_spilled += n as u64;
-        self.bump_old_words(n, true)
+        self.bump_old_words(n)
     }
 
     /// `n` words in the old space, as [`bump_old`](Heap::bump_old)
-    /// places them, uncounted; their cards marked if `mark`, else the
-    /// caller's to remember (`Heap::tenured_ranges`).
-    pub(super) fn bump_old_words(&mut self, n: usize, mark: bool) -> usize {
+    /// places them, uncounted; their cards marked, not the barrier's mark
+    /// (`CARD_OTHER`).
+    pub(super) fn bump_old_words(&mut self, n: usize) -> usize {
         if self.top + n > self.active + self.semi {
             self.grow(self.top - self.active + n);
         }
@@ -97,10 +108,8 @@ impl Heap {
             _ => usize::MAX,
         };
         cross(&mut self.crossing, &mut last, at, n);
-        if mark {
-            for card in at >> CARD_SHIFT..=(at + n - 1) >> CARD_SHIFT {
-                set_byte(&mut self.cards, card, 1);
-            }
+        for card in at >> CARD_SHIFT..=(at + n - 1) >> CARD_SHIFT {
+            mark_other(&mut self.cards, card);
         }
         at
     }
@@ -118,15 +127,16 @@ impl Heap {
     #[inline(always)]
     pub(super) fn barrier_card(&mut self, rel: usize) {
         if byte(&self.cards, rel >> CARD_SHIFT) == 0 {
-            set_byte(&mut self.cards, rel >> CARD_SHIFT, 1);
+            set_byte(&mut self.cards, rel >> CARD_SHIFT, CARD_BARRIER);
             self.card_budget -= 1;
         }
     }
 
-    /// The card of word `rel` marked: a young reference may be there.
+    /// The card of word `rel` marked: a young reference may be there; not
+    /// the barrier's mark (`CARD_OTHER`).
     #[inline(always)]
     pub(super) fn mark_card(&mut self, rel: usize) {
-        set_byte(&mut self.cards, rel >> CARD_SHIFT, 1);
+        mark_other(&mut self.cards, rel >> CARD_SHIFT);
     }
 
     /// The second table's card of word `rel`, of an area older than the old
@@ -224,7 +234,6 @@ impl Heap {
         self.words_allocated += young as u64;
         let (lo, old_top) = (self.active, self.top);
         let regions: Vec<(usize, usize)> = self.regions.ranges().collect();
-        let tenured = std::mem::take(&mut self.tenured_ranges);
         // The first object promoted starts the card of the old top's last
         // word only if none starts there already.
         let last_card = match old_top > lo {
@@ -252,6 +261,7 @@ impl Heap {
             crossing: &mut self.crossing,
             last_card,
             cards_scanned: 0,
+            barrier_cards: 0,
         };
         macro_rules! fwd {
             ($v:expr) => {{
@@ -275,9 +285,7 @@ impl Heap {
         }
         // What the regions hold: scanned whole, since machine code fills
         // what it allocates there without marking cards.
-        // And what was allocated tenured since the last collection, whose
-        // cards were left clean (`tenured_ranges`).
-        for (from, to) in regions.into_iter().chain(tenured) {
+        for (from, to) in regions {
             let mut at = from;
             while at < to {
                 at += Self::scan_one(mem, at, &mut c);
@@ -302,7 +310,7 @@ impl Heap {
         }
         super::update_weak(mem, self.base, &mut self.weak, NURSERY_BASE, true);
         super::update_weak_pairs(mem, self.base, &c.weak_pairs, NURSERY_BASE, true);
-        let (free, cards) = (c.free, c.cards_scanned);
+        let (free, cards) = (c.free, (c.cards_scanned, c.barrier_cards));
         self.top = old_top + free;
         assert!(self.top - self.active <= MAX_SEMI_WORDS, "the old space is full");
         // Past the semispace (one made small): room for the next nursery's
@@ -363,10 +371,8 @@ impl Heap {
         let code = self.code.parts.each_ref().map(|p| (p.base, p.top));
         let young = |v: Value| v.is_ref() && is_young(self.ref_ix(v));
         let tables = (super::TABLES_BASE, self.tables.top);
-        // A field in what was allocated tenured is remembered by its range.
-        let tenured = |f: usize| self.tenured_ranges.iter().any(|&(lo, hi)| (lo..hi).contains(&f));
         for (lo, hi) in [(self.active, self.top), (super::STATIC_MUTABLE_BASE, self.static_top), tables, code[0], code[1]] {
-            self.verify_remembered_in(lo, hi, |f, v| young(v) && byte(&self.cards, f >> CARD_SHIFT) == 0 && !tenured(f))?;
+            self.verify_remembered_in(lo, hi, |f, v| young(v) && byte(&self.cards, f >> CARD_SHIFT) == 0)?;
         }
         let neither = |f: usize| byte(&self.cards, f >> CARD_SHIFT) == 0 && byte(&self.old_cards, (f >> CARD_SHIFT) - OLDER_CARD_0) == 0;
         for (lo, hi) in [tables, code[0], code[1]] {
@@ -438,6 +444,7 @@ pub(super) fn scan_dirty_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64]
             continue;
         }
         c.cards_scanned += 1;
+        c.barrier_cards += usize::from(byte(cards, card) == CARD_BARRIER);
         let mut kept = false;
         let (clo, chi) = (card << CARD_SHIFT, ((card + 1) << CARD_SHIFT).min(hi));
         // The object that covers the card's first word: from the last
@@ -588,6 +595,14 @@ impl OlderScan<'_> {
     }
 }
 
+/// Card `card` marked `CARD_OTHER`, unless it is dirty already.
+#[inline(always)]
+fn mark_other(cards: &mut fixpt_memmgmt::Words, card: usize) {
+    if byte(cards, card) == 0 {
+        set_byte(cards, card, CARD_OTHER);
+    }
+}
+
 /// From `card`, on an eight's boundary, how many cards before `end` are
 /// clean in `cards`, eight at a time, if any: what a minor collection, which
 /// scans only the first table's, skips, over one borrow of the table (the
@@ -626,6 +641,7 @@ pub(super) fn scan_code_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64],
             continue;
         }
         c.cards_scanned += 1;
+        c.barrier_cards += usize::from(byte(cards, this) == CARD_BARRIER);
         let mut kept = false;
         let (clo, chi) = (this << CARD_SHIFT, (this + 1) << CARD_SHIFT);
         // From the last object that starts at or before the card.
