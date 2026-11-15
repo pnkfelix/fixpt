@@ -52,10 +52,12 @@ fn a_definition_phase_1_refuses_says_why() {
     let rt = s.scheme.runtime_unrooted();
     let e = p.define(rt, "bad", SC, "(lambda (form env) (+ form 1))").expect_err("ill-typed");
     assert!(!e.is_empty(), "a message");
-    // Naming a global of phase 1 is no effect: a namespace's globals, once
-    // defined, are never others (`phase1.rs`), so a transformer may call a
-    // helper and be of its style's type.
-    p.define(rt, "reads", SC, "(lambda (form env) (%make-syntactic-closure env '() form))").unwrap_or_else(|e| panic!("defined: {e}"));
+    // Naming a global reads it, as in a program: not of a `spin` type, but
+    // of a transformer's, which may read phase 1's globals.
+    let e = p.define(rt, "reads", SC, "(lambda (form env) (%make-syntactic-closure env '() form))").expect_err("reads a global");
+    assert!(e.contains("(read (globals %make-syntactic-closure))"), "{e}");
+    let style = "(subr (maxeff (read @globals) spin) (datum symbol) datum)";
+    p.define(rt, "reads", style, "(lambda (form env) (%make-syntactic-closure env '() form))").unwrap_or_else(|e| panic!("defined: {e}"));
     p.end(rt);
 }
 

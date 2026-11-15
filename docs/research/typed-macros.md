@@ -2320,10 +2320,11 @@ transformers' session (`TODO.md` §228).
    redefinition after changes a closure compiled before, by construction;
    no replay of a file's forms into its importer. The forms are checked
    where they are, in their namespace (`Macros::for_syntax`, FX-26's
-   `for-syntax!` by a `%forms` request). A namespace's globals, once
-   defined, are never others, so reading one is no effect there
-   (`check-globals-effects!` off): a transformer that calls a helper is of
-   its style's type. The list goes with a REPL's state (`by-state`'s
+   `for-syntax!` by a `%forms` request). A transformer's type lets it read
+   phase 1's globals, `(maxeff (read @globals) spin)` (the user's, in place
+   of reading a global made no effect in phase 1): honest, programs' rule,
+   and enough, since in a namespace a global once defined is never another,
+   and reading a binding reads no state. The list goes with a REPL's state (`by-state`'s
    seventh) and a file's scope (`in_file_scope`, `define-file`,
    `scope-saved`). A module file's are no items (`without_own_macros`,
    `without-syntax`, `file-items`). Not yet: phases above 1, a body's.

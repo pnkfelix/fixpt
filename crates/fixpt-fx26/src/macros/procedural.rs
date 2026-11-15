@@ -54,12 +54,17 @@ impl Style {
     }
 
     /// The type a transformer of this style is checked at.
+    /// The type its transformer is checked at: it may not end, and may
+    /// read phase 1's globals (`(read @globals)`), the prelude's and its
+    /// `begin-for-syntax`'s, which in its namespace, once defined, are never
+    /// others (`phase1.rs`); nothing more, no state of any region written
+    /// or read, so it is deterministic, as its contract needs.
     pub(crate) fn ty(self) -> &'static str {
         match self {
             Style::Er => {
-                "(subr spin (datum (subr pure (symbol) symbol) (subr spin (symbol symbol) bool)) datum)"
+                "(subr (maxeff (read @globals) spin) (datum (subr pure (symbol) symbol) (subr spin (symbol symbol) bool)) datum)"
             }
-            Style::Sc | Style::Rsc => "(subr spin (datum symbol) datum)",
+            Style::Sc | Style::Rsc => "(subr (maxeff (read @globals) spin) (datum symbol) datum)",
         }
     }
 }

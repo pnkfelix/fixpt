@@ -7206,3 +7206,19 @@ that reached another's state would touch a region it does not own, and be
 refused. Mostly mechanical, but wide: the front end's files name their
 regions in effect annotations throughout, and each module maker's region
 arguments would take the state's.
+## 283. Phase 1 as Flatt's: a module's compile-time instance shared, and transformers that write it (the user's, 2026-11-15: less expressive first)
+
+`begin-for-syntax` (2026-11-15) runs each transformer in a namespace made
+for the phase-1 forms in force where it was defined, and a transformer's
+type allows it to read phase 1's globals and nothing more. Flatt's
+"Composable and Compilable Macros: You Want It When?" (ICFP 2002,
+`~/Dev/LangPlay/papers/`) agrees on what is fresh (each compilation's
+compile-time code run afresh) and kept apart (each phase's instances), but
+shares more: a module `require-for-syntax`ed by two in one compilation is
+one instance there, and a transformer may write its state, as his
+`define-record` does (`register-def`, a compile-time table later
+expansions read). Wanted, if programs need it: a namespace per expansion
+holding each module's instance once, by module (not a namespace per list
+of forms), and a transformer's effect that may write phase-1 state, the
+contracts' determinism argued again for it.
+

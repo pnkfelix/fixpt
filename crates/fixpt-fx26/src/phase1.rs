@@ -29,11 +29,9 @@ use fixpt_heap::Value;
 use fixpt_runtime::Runtime;
 
 /// The conductor's entry that makes the front end, and the fields of what
-/// it makes, from 1: a step, whether reading a global is an effect, and a
-/// name's global.
+/// it makes, from 1: a step, and a name's global.
 const MAKE: &str = "fx26-native:make-session-compiler";
 const E_STEP: usize = 4;
-const E_GLOBALS_EFFECTS: usize = 6;
 const E_CELL: usize = 9;
 
 /// How `session-step` checks: the first, in the standard environment, only
@@ -216,11 +214,6 @@ impl Phase1 {
         let sym = rt.heap.intern(&p.global);
         let slot = rt.heap.symbol_global_slot(sym);
         rt.heap.set_global(slot, fe);
-        // Reading a global is no effect here: a namespace is made for one
-        // list of phase-1 forms, and a global of it, once defined, is never
-        // another (another list is another namespace). So a transformer that
-        // names a `begin-for-syntax`'s helper is of its style's type.
-        p.call_entry(rt, E_GLOBALS_EFFECTS, &[Value::FALSE])?;
         // The first step begins the checker in the standard environment, and
         // only checks; the prelude is the next, compiled.
         p.run(rt, "(define %phase1 unit #u)\n", FIRST).map_err(|e| format!("phase 1's start: {e}"))?;
