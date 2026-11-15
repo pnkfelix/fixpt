@@ -1301,6 +1301,7 @@ impl Fx26Session {
         scheme.runtime_unrooted().stage_lower = Some(crate::stage::lower_staged);
         scheme.runtime_unrooted().stage_check = Some(crate::stage::check_staged);
         scheme.runtime_unrooted().sessions = Some(crate::sessions::op);
+        scheme.runtime_unrooted().procedural = Some(crate::phase1::call_procedural);
         // The front end run as register code (`front_end_compiled`), read
         // back from its cache, on the hand register machine (where no
         // machine code runs, the cellular machine written in Rust): lowered,
@@ -1530,11 +1531,13 @@ impl Fx26Session {
         self.expansion(|s| s.run_forms_expanded(forms))
     }
 
-    /// `f`, an entry of this session's (a whole program, or a REPL entry,
-    /// `run_forms`, `run_each`, `run`; or what its driver checks, a program's
-    /// reading, `checking`): one expansion, whose phase-1 namespace ends
-    /// with it (`phase1.rs`), each entry's its own (the user's, 2026-11-15).
-    /// An entry inside another is the outer's.
+    /// `f`, an entry of this session's (`run_forms`, `run_each`, `run`, or
+    /// what its driver checks, `checking`), where its forms are expanded: the
+    /// front end ready first, for a phase-1 namespace to be made of it. An
+    /// expansion is a program's, or a REPL entry's, from its reading on
+    /// (`read_program`, `read_entry`, which end the one before: `phase1.rs`;
+    /// the user's, 2026-11-15): its reading and the runs of its forms, in
+    /// which the expander written in FX-26 calls what the Rust one defined.
     fn expansion<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
         // What a namespace is made of, ready before anything is expanded: the
         // front end (which a session that does not lower its forms loads for
@@ -1546,13 +1549,14 @@ impl Fx26Session {
         self.entries_running += 1;
         let out = f(self);
         self.entries_running -= 1;
-        if self.entries_running == 0 {
-            let ns = self.checker.macros.withs.world.borrow_mut().phase1.take();
-            if let Some((p, _)) = ns {
-                p.end(self.scheme.runtime_unrooted());
-            }
-        }
         out
+    }
+
+    /// A program's text, read: a new expansion, the phase-1 namespace of
+    /// the one before ended ([`Self::expansion`]); its forms.
+    pub fn read_program(&mut self, file: FileId, text: &str) -> R<Vec<Form>> {
+        crate::phase1::Phase1::end_current(self.scheme.runtime_unrooted());
+        self.checking(|c| c.read_in(file, text))
     }
 
     fn run_forms_expanded(&mut self, forms: &[Form]) -> R<Vec<R<Outcome>>> {
@@ -4563,7 +4567,10 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         self.entries.push((self.session_text.chars().count(), name.to_string()));
         self.session_text.push_str(text);
         self.session_text.push('\n');
-        checking(&mut self.checker, &mut self.scheme, |c| c.read_in_from(FileId(0), &self.session_text, start))
+        // A new expansion (`expansion`), the namespace of the one before ended.
+        crate::phase1::Phase1::end_current(self.scheme.runtime_unrooted());
+        let whole = self.session_text.clone();
+        self.expansion(|s| checking(&mut s.checker, &mut s.scheme, |c| c.read_in_from(FileId(0), &whole, start)))
     }
 
     /// `text` read as the next entry would be, the session left as it was
@@ -4603,7 +4610,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
     /// definitions may refer to each other in any order: see
     /// `Checker::declare_ahead`.
     pub fn run_program(&mut self, text: &str) -> R<Result<String, String>> {
-        let forms = checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), text))?;
+        let forms = self.read_program(FileId(0), text)?;
         let mut last = Ok(String::new());
         for out in self.run_forms(&forms)? {
             let out = out?;

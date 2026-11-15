@@ -644,17 +644,50 @@
     (let* ((p (car (procedural-of name))) (style (extract p 1))
            (a (syn-start s)) (b (syn-end s))
            (in-use (lambda ((m string))
-                    (fail (string-append "a use of `" (symbol->string name) "`: " m) a b))))
-      (tagcase (run (applied-text style (extract p 2) (syn-text s) made))
+                    (fail (string-append "a use of `" (symbol->string name) "`: " m) a b)))
+           (opened (lambda ((at syn))
+                     (keywords fail (cond ((= style 1) (closed fail at #t made))
+                                          ((= style 2) (closed fail at #f made))
+                                          (else at))))))
+      ;; In the expansion's phase-1 namespace, on the use's datum, the one
+      ;; the Rust expander calls it in (`phase1.rs`): what it gives made
+      ;; syntax at the use's place, no text between; apart, by text, where
+      ;; the runtime has none.
+      (tagcase (%macros:call-procedural style (extract p 2) (syn->datum s) made)
+        (ok d (opened (syn-of-datum d (new-source-key a made) (new-source-key b made) made)))
         (failed why (begin (in-use (string-append "its transformer: " why)) s))
-        (ok out
-          (let ((read (read-answer out (new-source-key a made) (new-source-key b made) made)))
-            (if (null? read)
-                (begin (in-use (string-append "its transformer gave `" out "`, not one form")) s)
-                (let ((opened (cond ((= style 1) (closed fail (car read) #t made))
-                                    ((= style 2) (closed fail (car read) #f made))
-                                    (else (car read)))))
-                  (keywords fail opened)))))))))
+        (apart u
+          (tagcase (run (applied-text style (extract p 2) (syn-text s) made))
+            (failed why (begin (in-use (string-append "its transformer: " why)) s))
+            (ok out
+              (let ((read (read-answer out (new-source-key a made) (new-source-key b made) made)))
+                (if (null? read)
+                    (begin (in-use (string-append "its transformer gave `" out "`, not one form"))
+                           s)
+                    (opened (car read)))))))))))
+;; Datum `d` as syntax, each part at `a`..`b` of expansion `x`: what
+;; `read-answer` of its text makes, with no text between (`heap_syn`'s
+;; `syn_of_datum`, the Rust expander's).
+(define syn-of-datum (->* (datum int int int) syn)
+  (lambda (d a b x)
+    (cond ((vector? d)
+           (vec (syns-of-datum (datum-vector->list d) a b x) d a b x))
+          ((pair? d) (syn-of-list d nil a b x))
+          ((null? d) (lst nil d a b x))
+          (else (atom d a b x)))))
+(define syn-of-list (->* (datum syns-a int int int) syn)
+  (lambda (whole out a b x) (syn-of-rest whole whole out a b x)))
+;; The list `whole`, its parts before `l` made, newest first, `out`.
+(define syn-of-rest (->* (datum datum syns-a int int int) syn)
+  (lambda (whole l out a b x)
+    (if (pair? l)
+        (syn-of-rest whole (cdr l) (cons (syn-of-datum (car l) a b x) out) a b x)
+        (if (null? l)
+            (lst (reverse out) whole a b x)
+            (dotted (reverse out) (syn-of-datum l a b x) whole a b x)))))
+(define syns-of-datum (->* (datum int int int) syns-a)
+  (lambda (l a b x)
+    (if (pair? l) (cons (syn-of-datum (car l) a b x) (syns-of-datum (cdr l) a b x)) nil)))
 
 ;;; ------------------------------------------------------------ definition environments
 

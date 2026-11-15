@@ -16,7 +16,13 @@
 //! runs them, so that both agree.
 //!
 //! The front end is held by a global of the namespace's own (`%phase1:N`),
-//! which a collection updates; [`Phase1::end`] lets it go.
+//! which a collection updates; [`Phase1::end`] lets it go. An expansion's
+//! is the runtime's current one, `%phase1:current` ([`Phase1::current`]),
+//! which both front ends' expanders call their transformers in
+//! ([`run_transformer`]: the Rust expander's from inside its lending, the
+//! one written in FX-26's by `%fx26-call-procedural`), each transformer
+//! defined there once, by its style and text (`%phase1:current:defined`):
+//! so that both run the one compiled closure, and agree by construction.
 
 use crate::stage::Wrapped;
 use fixpt_heap::Value;
@@ -33,12 +39,23 @@ const E_CELL: usize = 9;
 const FIRST: i64 = 0;
 const MORE: i64 = 1;
 
+/// The global that holds the runtime's current namespace, an expansion's.
+const CURRENT: &str = "%phase1:current";
+
 /// What every transformer sees besides the standard environment.
 const PRELUDE: &str = include_str!("macros/procedural-prelude.fx");
 
 thread_local! {
     /// The namespaces made on this thread: each one's global its own.
     static MADE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The expander written in FX-26's calls answered in a namespace.
+    static CALLED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many of the expander written in FX-26's transformers' calls this
+/// thread answered in a phase-1 namespace (`call_procedural`): for tests.
+pub fn called_for_fx26() -> u64 {
+    CALLED.with(|c| c.get())
 }
 
 /// How many namespaces this thread has made: for tests, that each
@@ -58,10 +75,88 @@ impl Phase1 {
     /// transformers' prelude defined in it; or why not (a session whose
     /// front end is not compiled, which `stage` cannot use either).
     pub fn new(rt: &mut Runtime) -> Result<Phase1, String> {
+        let n = MADE.with(|m| m.get());
+        Phase1::made_at(rt, format!("%phase1:{n}"))
+    }
+
+    /// The runtime's current namespace, an expansion's: made if it has none.
+    pub fn current(rt: &mut Runtime) -> Result<Phase1, String> {
+        let p = Phase1 { global: CURRENT.to_string() };
+        if crate::stage::global(rt, CURRENT).is_some_and(|v| v != Value::FALSE) {
+            return Ok(p);
+        }
+        Phase1::made_at(rt, CURRENT.to_string())
+    }
+
+    /// The runtime's current namespace ended, if it has one: an
+    /// expansion's end (`Fx26Session::expansion`).
+    pub fn end_current(rt: &mut Runtime) {
+        if crate::stage::global(rt, CURRENT).is_some_and(|v| v != Value::FALSE) {
+            Phase1 { global: CURRENT.to_string() }.end(rt);
+        }
+    }
+
+    /// The runtime's current namespace, if it has one.
+    pub fn existing(rt: &mut Runtime) -> Option<Phase1> {
+        crate::stage::global(rt, CURRENT).is_some_and(|v| v != Value::FALSE).then(|| Phase1 { global: CURRENT.to_string() })
+    }
+
+    /// The transformer of `key` (its style and text) defined in the
+    /// namespace, its global, if it is; and how many are.
+    fn defined_of(&self, rt: &mut Runtime, key: &str) -> (Option<String>, usize) {
+        let defined = format!("{}:defined", self.global);
+        // `((key . name) …)`, the newest first.
+        let mut l = crate::stage::global(rt, &defined).unwrap_or(Value::NULL);
+        let mut n = 0;
+        while l.is_pair() {
+            let entry = rt.heap.car(l);
+            if rt.heap.string_to_rust(rt.heap.car(entry)) == key {
+                return (Some(rt.heap.symbol_name(rt.heap.cdr(entry))), n);
+            }
+            n += 1;
+            l = rt.heap.cdr(l);
+        }
+        (None, n)
+    }
+
+    /// The transformer of `key` defined in the namespace, its global, if
+    /// it is ([`Phase1::transformer`]).
+    pub fn defined(&self, rt: &mut Runtime, key: &str) -> Option<String> {
+        self.defined_of(rt, key).0
+    }
+
+    /// Transformer `code`, of style `ty` (`key` its style and text), defined
+    /// in the namespace if it is not yet, `procedural::helpers` around it: the
+    /// global it is; or why it was not defined.
+    pub fn transformer(&self, rt: &mut Runtime, ty: &str, key: &str, code: &str) -> Result<String, String> {
+        let defined = format!("{}:defined", self.global);
+        let (n, count) = self.defined_of(rt, key);
+        if let Some(n) = n {
+            return Ok(n);
+        }
+        let name = format!("%transformer:{count}");
+        self.define(rt, &name, ty, code)?;
+        let k = rt.heap.make_string(key);
+        let base = rt.heap.push_root(k);
+        let sym = rt.heap.intern(&name);
+        let entry = rt.heap.cons(rt.heap.root_at(base), sym);
+        rt.heap.push_root(entry);
+        let old = crate::stage::global(rt, &defined).unwrap_or(Value::NULL);
+        let entry = rt.heap.root_at(base + 1);
+        let l = rt.heap.cons(entry, old);
+        rt.heap.pop_roots_to(base);
+        let dsym = rt.heap.intern(&defined);
+        let slot = rt.heap.symbol_global_slot(dsym);
+        rt.heap.set_global(slot, l);
+        Ok(name)
+    }
+
+    /// A namespace made at global `global`.
+    fn made_at(rt: &mut Runtime, global: String) -> Result<Phase1, String> {
         let make = crate::stage::global(rt, MAKE).ok_or("phase 1 needs the front end compiled")?;
         let fe = fixpt_runtime::prim::call_front_end(rt, make, &[])?;
-        let n = MADE.with(|m| m.replace(m.get() + 1));
-        let p = Phase1 { global: format!("%phase1:{n}") };
+        MADE.with(|m| m.set(m.get() + 1));
+        let p = Phase1 { global };
         let sym = rt.heap.intern(&p.global);
         let slot = rt.heap.symbol_global_slot(sym);
         rt.heap.set_global(slot, fe);
@@ -99,14 +194,19 @@ impl Phase1 {
         let args: Vec<Value> = (0..args.len()).map(|i| rt.heap.root_at(base + i)).collect();
         rt.heap.pop_roots_to(base);
         let f = f.ok_or_else(|| format!("phase 1 has no `{name}`"))?;
+        // Its failure said as the transformer's own, as the transformers'
+        // session says it, not as the machine's.
         on_cellular(rt, |rt| fixpt_runtime::prim::enter_word(rt, f, &args))
+            .map_err(|e| e.strip_prefix("cellular word: ").map_or(e.clone(), str::to_string))
     }
 
     /// The namespace let go: its front end, and what it defined, garbage.
     pub fn end(self, rt: &mut Runtime) {
-        let sym = rt.heap.intern(&self.global);
-        let slot = rt.heap.symbol_global_slot(sym);
-        rt.heap.set_global(slot, Value::FALSE);
+        for g in [self.global.clone(), format!("{}:defined", self.global)] {
+            let sym = rt.heap.intern(&g);
+            let slot = rt.heap.symbol_global_slot(sym);
+            rt.heap.set_global(slot, Value::FALSE);
+        }
     }
 
     fn front_end(&self, rt: &mut Runtime) -> Value {
@@ -165,4 +265,91 @@ fn on_cellular<T>(rt: &mut Runtime, f: impl FnOnce(&mut Runtime) -> T) -> T {
     let out = f(rt);
     rt.run_word = run;
     out
+}
+
+/// Transformer `code`, of `style`, called on `datum` in expansion `made`, in
+/// `rt`'s current namespace ([`Phase1::current`]), the namespace made and
+/// the transformer defined there if they are not yet and `defining`: what
+/// it gave, raw (its caller makes it syntax before anything collects); or
+/// why it failed. None where `rt` has no phase 1 (its front end not
+/// compiled), or, not `defining`, where it would have to be made or
+/// defined, which the transformers' session runs it apart for, by text.
+/// Both front ends' expanders call it, so both run the one closure.
+///
+/// Only the Rust expander defines (`defining`), from its lending, outside
+/// any run of the front end: a definition is a parse of the namespace's own
+/// front end, whose parser and expander are the files loaded once, every
+/// front end's in the runtime, and a parse inside the parse of the program
+/// the one written in FX-26 is expanding would leave it the namespace's
+/// state. Between parses it is harmless: each reads its state by its key.
+pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural::Style, code: &str, datum: Value, made: u32, defining: bool) -> Option<Result<Value, String>> {
+    use crate::macros::procedural::{self, Style};
+    let base = rt.heap.push_root(datum);
+    let out = (|| {
+        let key = format!("{style:?}\n{code}");
+        let (ph, global) = if defining {
+            let ph = Phase1::current(rt).ok()?;
+            match ph.transformer(rt, style.ty(), &key, &procedural::helpers(code)) {
+                Ok(g) => (ph, g),
+                Err(e) => return Some(Err(e)),
+            }
+        } else {
+            let ph = Phase1::existing(rt)?;
+            let g = ph.defined(rt, &key)?;
+            (ph, g)
+        };
+        let second = match style {
+            Style::Er => match ph.call(rt, "%er-renamer", &[Value::fixnum(made as i64)]) {
+                Ok(r) => r,
+                Err(e) => return Some(Err(e)),
+            },
+            Style::Sc => rt.heap.intern(procedural::USE_ENV),
+            Style::Rsc => rt.heap.intern(procedural::MACRO_ENV),
+        };
+        rt.heap.push_root(second);
+        if let Style::Er = style {
+            let compare = ph.value(rt, "%er-compare").unwrap_or(Value::FALSE);
+            rt.heap.push_root(compare);
+        }
+        // Where a transformer's call collects (`TODO.md` §278): a test's, on
+        // either side of it, what it is given and gives rooted; the Rust
+        // expander's syntax tenured, moved by neither.
+        crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
+        let args: Vec<Value> = (base..rt.heap.root_count()).map(|i| rt.heap.root_at(i)).collect();
+        let out = ph.call(rt, &global, &args);
+        Some(out.map(|v| {
+            let at = rt.heap.push_root(v);
+            crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
+            rt.heap.root_at(at)
+        }))
+    })();
+    rt.heap.pop_roots_to(base);
+    out
+}
+
+/// What `%fx26-call-procedural` does (`Runtime::procedural`), for the
+/// expander written in FX-26: its arguments a style (0 explicit renaming, 1
+/// syntactic closures, 2 reversed), the transformer's text, the use's
+/// datum and the expansion; `(sum ok datum)`, what the transformer gave,
+/// `(sum failed why)`, or `(sum apart #u)` where the runtime has no phase 1.
+pub fn call_procedural(rt: &mut Runtime, a: &[Value]) -> Result<Value, String> {
+    use crate::macros::procedural::Style;
+    let style = match a[0].as_fixnum() {
+        0 => Style::Er,
+        1 => Style::Sc,
+        _ => Style::Rsc,
+    };
+    let code = rt.heap.string_to_rust(a[1]);
+    let made = a[3].as_fixnum() as u32;
+    Ok(match run_transformer(rt, style, &code, a[2], made, false) {
+        Some(Ok(v)) => {
+            CALLED.with(|c| c.set(c.get() + 1));
+            crate::sessions::sum(rt, "ok", v)
+        }
+        Some(Err(why)) => {
+            let why = rt.heap.make_string(&why);
+            crate::sessions::sum(rt, "failed", why)
+        }
+        None => crate::sessions::sum(rt, "apart", Value::UNIT),
+    })
 }

@@ -547,11 +547,6 @@ pub(crate) struct Withs {
 #[derive(Default)]
 pub(crate) struct SynWorld {
     pub(crate) heap: Option<Box<fixpt_heap::Heap>>,
-    /// A session's checker's phase-1 namespace, for the expansion now
-    /// (`phase1.rs`): made at its first transformer's call, ended when the
-    /// session's entry ends (`Fx26Session::expansion`); each transformer
-    /// defined in it by its style and text, the global it is.
-    pub(crate) phase1: Option<(crate::phase1::Phase1, HashMap<(procedural::Style, String), String>)>,
     pub(crate) syms: crate::heap_syn::SymTable,
     pub(crate) lending: bool,
     pub(crate) session: bool,
@@ -2537,62 +2532,11 @@ impl Macros {
     /// no runtime is lent (a checker's own heap), or it has no phase 1 (its
     /// front end not compiled), where the transformers' session runs it.
     fn phase1_run(&mut self, p: &procedural::Procedural, s: &Syn, made: u32) -> Option<Result<fixpt_heap::Value, String>> {
-        let world = self.withs.world.clone();
-        if !world.borrow().session {
+        if !self.withs.world.borrow().session {
             return None;
         }
         let datum = s.plain();
-        // Out of the world for the call, which runs code: put back after.
-        let mut ns = world.borrow_mut().phase1.take();
-        let out = crate::heap_syn::with_runtime(|rt| -> Option<Result<fixpt_heap::Value, String>> {
-            if ns.is_none() {
-                ns = Some((crate::phase1::Phase1::new(rt).ok()?, HashMap::default()));
-            }
-            let (ph, defined) = ns.as_mut().expect("made");
-            let key = (p.style, p.code.clone());
-            let global = match defined.get(&key) {
-                Some(g) => g.clone(),
-                None => {
-                    let g = format!("%transformer:{}", defined.len());
-                    if let Err(e) = ph.define(rt, &g, p.style.ty(), &procedural::helpers(&p.code)) {
-                        return Some(Err(e));
-                    }
-                    defined.insert(key, g.clone());
-                    g
-                }
-            };
-            let base = rt.heap.push_root(datum);
-            let second = match p.style {
-                procedural::Style::Er => match ph.call(rt, "%er-renamer", &[fixpt_heap::Value::fixnum(made as i64)]) {
-                    Ok(r) => r,
-                    Err(e) => return Some(Err(e)),
-                },
-                procedural::Style::Sc => rt.heap.intern(procedural::USE_ENV),
-                procedural::Style::Rsc => rt.heap.intern(procedural::MACRO_ENV),
-            };
-            rt.heap.push_root(second);
-            if let procedural::Style::Er = p.style {
-                let compare = ph.value(rt, "%er-compare").unwrap_or(fixpt_heap::Value::FALSE);
-                rt.heap.push_root(compare);
-            }
-            // Where a transformer's call collects (`TODO.md` §278): a
-            // test's, on either side of it, what it is given and gives
-            // rooted; the expander's syntax tenured, moved by neither.
-            crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
-            let args: Vec<fixpt_heap::Value> = (base..rt.heap.root_count()).map(|i| rt.heap.root_at(i)).collect();
-            rt.heap.pop_roots_to(base);
-            let out = ph.call(rt, &global, &args);
-            Some(out.map(|v| {
-                let at = rt.heap.push_root(v);
-                crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
-                let v = rt.heap.root_at(at);
-                rt.heap.pop_roots_to(at);
-                v
-            }))
-        })
-        .flatten();
-        world.borrow_mut().phase1 = ns;
-        out
+        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, datum, made, true)).flatten()
     }
 
     /// [`Macros::procedural_run`] in the transformers' session apart, by

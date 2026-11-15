@@ -251,6 +251,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // its last form's value or `!` and why not out. It only computes, and
     // gives the same for the same text.
     ("%macros:expand-procedural", "(subr spin (string) string)"),
+    // A transformer called on a use's datum in the expansion's phase-1
+    // namespace (`phase1.rs`): its style, text, the datum and the expansion.
+    ("%macros:call-procedural", "(subr spin (int string datum int) (sumof (ok datum) (failed string) (apart unit)))"),
     ("%macros:limit", "(subr spin (string) string)"),
     ("list-dir", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (names (listof string r)) (failed io-error))))"),
     // Heist's (`FIXPT-CHANGES.md` F3): the checker's type of the innermost
@@ -551,6 +554,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("datum-list", "(poly ((r region)) (subr (read r) ((listof datum r)) datum))"),
     ("datum-dotted", "(poly ((r region)) (subr (read r) ((listof datum r) datum) datum))"),
     ("datum-list->vector", "(subr pure (datum) datum)"),
+    // A vector datum's items, a list datum: `datum-list->vector`'s inverse.
+    ("datum-vector->list", "(subr pure (datum) datum)"),
     ("datum-list->bytevector", "(subr pure (datum) datum)"),
     ("datum-byte?", "(subr pure (datum) bool)"),
     // A bytevector datum's length and bytes, which `bytevector?` narrows

@@ -477,6 +477,8 @@
       (prim! 'stdin-ready? (lambda (xs) (stdin-ready?)))
       (prim! '%macros:expand-procedural
              (lambda (xs) (%macros:expand-procedural (as-str (ev-arg xs 0)))))
+      ;; No phase-1 namespace here: its expander's transformers run apart.
+      (prim! '%macros:call-procedural (lambda (xs) (the val (o-sum 'apart the-unit))))
       (prim! '%macros:limit (lambda (xs) (%macros:limit (as-str (ev-arg xs 0)))))
       (prim! 'terminal-raw (lambda (xs) (ev-terminal-result (terminal-raw))))
       (prim! 'terminal-restore (lambda (xs) (ev-terminal-result (terminal-restore))))
@@ -916,6 +918,11 @@
         (prim! 'datum-dotted (lambda (xs) (ev-onto (ev-arg xs 0) (ev-arg xs 1))))
         (prim! 'datum-list->vector
                (lambda (xs) (the val (o-vec (ev-list-array (ev-arg xs 0))))))
+        (prim! 'datum-vector->list
+               (lambda (xs)
+                 (tagcase (as-other (ev-arg xs 0) "a vector")
+                   (o-vec (a) (ev-array-list a (- (array-length a) 1) nil))
+                   (else y (efail-expected "a vector")))))
         (prim! 'datum-list->bytevector
                (lambda (xs)
                  (let* ((v (ev-arg xs 0))

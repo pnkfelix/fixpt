@@ -995,7 +995,7 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
                 return 1;
             }
         };
-        let forms = match session.checking(|c| c.read_in(FileId(0), &text)) {
+        let forms = match session.read_program(FileId(0), &text) {
             Ok(forms) => forms,
             Err(e) => {
                 eprintln!("fixpt: read error: {}", located(f, &text, &e));
@@ -1484,7 +1484,7 @@ impl GcStats {
 }
 
 fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool) -> i32 {
-    let forms = match session.checking(|c| c.read_in(FileId(0), text)) {
+    let forms = match session.read_program(FileId(0), text) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("fixpt: read error: {}", located(name, text, &e));
@@ -1611,7 +1611,7 @@ pub fn eval(backend: Backend, text: &str) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
-    let forms = match session.checking(|c| c.read_in(FileId(0), text)) {
+    let forms = match session.read_program(FileId(0), text) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("fixpt: read error: {}", located("<argument>", text, &e));

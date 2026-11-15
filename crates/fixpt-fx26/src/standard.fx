@@ -474,6 +474,7 @@
          (("%session-eval-make") "%fx26-make-session")
          (("bytevector-u8-set!") "%fx26-bytevector-u8-set!")
          (("datum-list->vector") "list->vector")
+         (("datum-vector->list") "vector->list")
          (("datum-proper-list?") "%fx26-list?")
          (else "")))
       ((19)
@@ -496,6 +497,7 @@
          (else "")))
       ((23)
        (case n
+         (("%macros:call-procedural") "%fx26-call-procedural")
          (("%session-eval-redefines") "%fx26-session-redefines")
          (("datum-bytevector-length") "bytevector-length")
          (("runtime-primitive-arity") "%runtime-primitive-arity")

@@ -7151,6 +7151,12 @@ Reverted; left for later:
   their checks lent it (`tried` has `rt`).
 - `Checker::new()`'s: a runtime of the thread's, or of each, once §279
   makes a session cheap.
+- The expander written in FX-26 defining in phase 1 itself (stage 5:
+  it only calls what the Rust expander defined, else `apart`): the
+  parser and expander of every front end in a runtime are files loaded
+  once (§68's files not yet converted), so a definition's parse inside the
+  program's would leave the program's parse the namespace's state; to be
+  each front end instance's own, or the state saved around the definition.
 - Meanwhile their transformers run in the transformers' session by text
   (the use written, what it gave read back): to be a copy of the datum
   from heap to heap, and back, as was decided (2026-11-15) and not yet

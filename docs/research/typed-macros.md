@@ -2283,6 +2283,26 @@ transformers' session (`TODO.md` §228).
    output; that it ran in the session's runtime).
 5. The expander written in FX-26 through it: its primitive re-entrant
    (`reenters!`), calling the phase-1 procedure in its own runtime.
+   *Built* (2026-11-15): `%macros:call-procedural` (`%fx26-call-procedural`,
+   `Runtime::procedural`, `phase1::call_procedural`) calls a transformer on
+   the use's datum in the runtime's current namespace, which moved into the
+   heap (`%phase1:current`, its transformers by style and text) so that
+   both expanders reach it: the one closure for both. What it gives is made
+   syntax at the use's place (`syn-of-datum`, as `read-answer` of its text
+   makes it; `datum-vector->list` new for it). Only called, never defined
+   or made, from there: a definition is a parse of the namespace's front
+   end, whose parser and expander are files loaded once, every front end's
+   in the runtime, and a parse inside the program's parse would leave it the
+   namespace's state (between parses each reads its own by its key). So
+   the Rust expander defines, from its lending, and where it has not (a
+   transformer not yet defined, a namespace not made, the evaluator) the
+   call answers `apart` and the transformers' session runs it by text, as
+   before. An expansion is now a program's or a REPL entry's from its
+   reading (`Fx26Session::read_program`, `read_entry` end the one before),
+   so the FX-26 expander's calls in the runs of its forms find what the
+   Rust one defined reading it. Test: `tests/phase1.rs`. `fixpt check` and
+   the comparisons check the Rust side with a fresh checker, of its own
+   heap (§280), so their FX-26 calls go apart until it is the session's.
 6. The separate transformers' session gone. *Since stage 2 narrowed*:
    kept, for the checkers with no session of theirs (§280), until they
    have runtimes.

@@ -75,14 +75,14 @@ fn two_namespaces_are_apart() {
     two.end(rt);
 }
 
-/// Each entry, as the REPL makes one (read, then each form run), is an
-/// expansion of its own: its transformers called in a namespace made for
-/// it, and none for an entry with no transformer's call.
+/// Each program read, then each of its forms run (as `fixpt run` and the
+/// REPL's entries are), is an expansion of its own: its transformers called
+/// in a namespace made for it, and none for one with no transformer's call.
 #[test]
 fn each_entry_has_a_namespace_of_its_own() {
     let mut s = session();
     let entry = |s: &mut Fx26Session, k: u32, text: &str| -> String {
-        let forms = s.checking(|c| c.read_in(FileId(k), text)).expect("reads");
+        let forms = s.read_program(FileId(k), text).expect("reads");
         let mut last = String::new();
         for f in &forms {
             for o in s.run_each(f).expect("runs") {
@@ -103,4 +103,21 @@ fn each_entry_has_a_namespace_of_its_own() {
     assert!(two > one, "another for the next");
     assert!(entry(&mut s, 4, "(+ 1 1)").contains('2'));
     assert_eq!(fixpt_fx26::phase1::made(), two, "none for an entry with no call");
+}
+
+/// The expander written in FX-26, checking a program the session's Rust
+/// checker has read in the same expansion, calls the transformers the Rust
+/// expander defined, the same closures: and both checkers agree.
+#[test]
+fn the_expander_written_in_fx26_calls_what_the_rust_one_defined() {
+    let mut s = session();
+    let dir = format!("{}/tests/programs/procedural", env!("CARGO_MANIFEST_DIR"));
+    for name in ["aif-er.fx", "twice-sc.fx", "twice-rsc.fx", "split-er.fx"] {
+        let text = std::fs::read_to_string(format!("{dir}/{name}")).expect("reads");
+        s.read_program(FileId(0), &text).expect("the Rust checker reads it");
+        let before = fixpt_fx26::phase1::called_for_fx26();
+        let checked = s.check_with_own_checker(&text).expect("checks");
+        assert!(checked.is_ok(), "{name}: {checked:?}");
+        assert!(fixpt_fx26::phase1::called_for_fx26() > before, "{name}: called in phase 1");
+    }
 }

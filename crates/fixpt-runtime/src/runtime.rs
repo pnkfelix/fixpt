@@ -76,6 +76,10 @@ pub struct Runtime {
     /// How sessions' primitives (`%fx26-session-…`) do what needs a
     /// checker (`fixpt-fx26` installs it): by the operation's name.
     pub sessions: Option<Sessions>,
+    /// How `%fx26-call-procedural` calls a procedural macro's transformer
+    /// for the expander written in FX-26, in the expansion's phase-1
+    /// namespace (`fixpt-fx26` installs it: `phase1::call_procedural`).
+    pub procedural: Option<Procedural>,
     /// How the procedure staged code makes is compiled as the program's
     /// own procedures are, where they are native code (`stage`, Heist's
     /// request, `TODO.md` §201; the CLI installs it, by the machine's
@@ -140,6 +144,8 @@ pub type StageCheck = fn(&mut Runtime, &str, &crate::evidence::Given, Option<fix
 /// A session's operation, by name, on its arguments: what the primitive
 /// gives, or why it could not try, which the program sees as a refusal.
 pub type Sessions = fn(&mut Runtime, &str, &[Value]) -> Result<Value, String>;
+/// [`Runtime::procedural`]: the primitive's arguments, its value.
+pub type Procedural = fn(&mut Runtime, &[Value]) -> Result<Value, String>;
 
 /// See [`Runtime::stage_native`]: the cellular closure, compiled.
 pub type StageNative = fn(&mut Runtime, Value) -> Result<Value, String>;
@@ -223,6 +229,7 @@ impl Runtime {
             stage_lower: None,
             stage_check: None,
             sessions: None,
+            procedural: None,
             dump_heap: None,
             stage_native: None,
             word_fuel: u64::MAX,
@@ -319,6 +326,7 @@ impl Runtime {
             stage_lower: None,
             stage_check: None,
             sessions: None,
+            procedural: None,
             dump_heap: None,
             stage_native: None,
             word_fuel: u64::MAX,
