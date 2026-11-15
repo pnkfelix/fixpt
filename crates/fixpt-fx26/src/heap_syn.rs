@@ -135,6 +135,11 @@ pub struct SymTable {
     /// The slots of the forms held in this heap ([`Form`]): those whose
     /// last copy dropped, let go at the next lending, and those let go.
     forms: std::rc::Rc<FormSlots>,
+    /// Which vector its held syntax is in ([`Kept`], [`Form`]): 0 the
+    /// heap's own, `%syntax-kept`; else one of its own, `%syntax-kept:N`,
+    /// which [`kept_release`] lets go whole (a fresh checker's in its
+    /// session's heap, `Fx26Session::fresh`).
+    kept: u32,
 }
 
 /// The slots of a heap's forms ([`SymTable::forms`]).
@@ -145,6 +150,17 @@ struct FormSlots {
 }
 
 impl SymTable {
+    /// A table whose held syntax is in a vector of its own (`kept`).
+    pub fn with_own_kept() -> SymTable {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+        SymTable { kept: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed), ..SymTable::default() }
+    }
+
+    /// Which vector its held syntax is in.
+    pub fn kept_id(&self) -> u32 {
+        self.kept
+    }
+
     /// The heap's symbol of `s`, `interner`'s: interned, and noted.
     /// Heap symbol `v` noted, as the checker's: of syntax a builder did
     /// not make ([`adopted`]).
@@ -1021,7 +1037,7 @@ pub fn with_syntax_in<R>(rt: &mut fixpt_runtime::Runtime, syms: &mut SymTable, f
 fn lending_begun(heap: &mut Heap, syms: &mut SymTable) {
     let dropped = std::mem::take(&mut *syms.forms.dropped.borrow_mut());
     if !dropped.is_empty() {
-        let v = kept_vector(heap);
+        let v = kept_vector(heap, syms.kept);
         for &i in &dropped {
             heap.obj_set(v, i, Value::FALSE);
         }
@@ -1324,35 +1340,53 @@ pub fn at_of(s: Span) -> At {
 }
 
 /// A piece of syntax held past code that runs: its place in a vector the
-/// heap holds as a global, `%syntax-kept`, which a collection updates.
+/// heap holds as a global, `%syntax-kept` (or its table's own, `SymTable`'s
+/// `kept`, which it says), which a collection updates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Kept(usize);
+pub struct Kept(usize, u32);
 
 const KEPT: &str = "%syntax-kept";
 
 impl Kept {
     /// `s`, held.
     pub fn new(s: Syn) -> Kept {
-        heap(|heap| {
+        fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, _>(|heap, syms| {
             let v = s.value(heap);
-            Kept(kept_push(heap, v))
+            Kept(kept_push(heap, syms.kept, v), syms.kept)
         })
     }
 
-    /// What is held.
+    /// What is held: refused in another table's lending.
     pub fn get(self) -> Syn {
-        heap(|heap| {
-            let kept = kept_vector(heap);
+        fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, _>(|heap, syms| {
+            assert_eq!(syms.kept, self.1, "syntax kept by another table's checker");
+            let kept = kept_vector(heap, self.1);
             let v = heap.obj_ref(kept, self.0);
             Syn::of(heap, v)
         })
     }
 }
 
-/// The vector the held syntax is in, `%syntax-kept`'s value, made the
-/// first time: slot 0 says how many slots are taken.
-fn kept_vector(heap: &mut Heap) -> Value {
-    let sym = heap.intern(KEPT);
+/// The global holding vector `id` of held syntax ([`SymTable`]'s `kept`).
+fn kept_name(id: u32) -> String {
+    if id == 0 { KEPT.to_string() } else { format!("{KEPT}:{id}") }
+}
+
+/// Vector `id` of held syntax let go whole: its table's checker is done,
+/// none of its syntax held any more (`Fx26Session::fresh`).
+pub fn kept_release(heap: &mut Heap, id: u32) {
+    assert_ne!(id, 0, "the heap's own vector of held syntax");
+    if let Some(sym) = heap.interned(&kept_name(id)) {
+        let slot = heap.symbol_global_slot(sym);
+        heap.set_global(slot, Value::FALSE);
+    }
+}
+
+/// The vector the held syntax of table `id` is in, its global's value
+/// ([`kept_name`]), made the first time: slot 0 says how many slots are
+/// taken.
+fn kept_vector(heap: &mut Heap, id: u32) -> Value {
+    let sym = heap.intern(&kept_name(id));
     let slot = heap.symbol_global_slot(sym);
     let v = heap.global(slot);
     if heap.is_a(v, ObjType::Vector) {
@@ -1366,8 +1400,8 @@ fn kept_vector(heap: &mut Heap) -> Value {
 
 /// `x` held in a slot of its own, the vector grown if it is full: the
 /// slot's number.
-fn kept_push(heap: &mut Heap, x: Value) -> usize {
-    let mut v = kept_vector(heap);
+fn kept_push(heap: &mut Heap, id: u32, x: Value) -> usize {
+    let mut v = kept_vector(heap, id);
     let n = heap.obj_ref(v, 0).as_fixnum() as usize;
     if n + 1 >= heap.obj_len(v) {
         let len = heap.obj_len(v);
@@ -1376,7 +1410,7 @@ fn kept_push(heap: &mut Heap, x: Value) -> usize {
             let y = heap.obj_ref(v, i);
             heap.obj_set(w, i, y);
         }
-        let sym = heap.intern(KEPT);
+        let sym = heap.intern(&kept_name(id));
         let slot = heap.symbol_global_slot(sym);
         heap.set_global(slot, w);
         v = w;
@@ -1420,11 +1454,11 @@ impl Form {
             let freed = syms.forms.free.borrow_mut().pop();
             let slot = match freed {
                 Some(i) => {
-                    let kept = kept_vector(heap);
+                    let kept = kept_vector(heap, syms.kept);
                     heap.obj_set(kept, i, v);
                     i
                 }
-                None => kept_push(heap, v),
+                None => kept_push(heap, syms.kept, v),
             };
             Form(std::rc::Rc::new(Held { slot, at, slots: syms.forms.clone() }))
         })
@@ -1434,7 +1468,7 @@ impl Form {
     pub fn get(&self) -> Syn {
         fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, _>(|heap, syms| {
             assert!(std::rc::Rc::ptr_eq(&syms.forms, &self.0.slots), "a form of another heap's syntax");
-            let kept = kept_vector(heap);
+            let kept = kept_vector(heap, syms.kept);
             let v = heap.obj_ref(kept, self.0.slot);
             Syn::of(heap, v)
         })

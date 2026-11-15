@@ -502,7 +502,7 @@ pub fn repl(backend: Backend) -> i32 {
                 }
                 continue;
             }
-            match answer_query(&session, &sources, arg) {
+            match answer_query(&mut session, &sources, arg) {
                 Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
                 Err(e) => println!("; {e}"),
             }
@@ -1083,11 +1083,11 @@ pub fn query_files(backend: Backend, paths: &[String], query: &str) -> i32 {
             }
         }
     }
-    let session = match start(backend) {
+    let mut session = match start(backend) {
         Ok(s) => s,
         Err(code) => return code,
     };
-    match answer_query(&session, &sources, query) {
+    match answer_query(&mut session, &sources, query) {
         Ok(lines) => {
             lines.iter().for_each(|l| println!("{l}"));
             0
@@ -1102,10 +1102,9 @@ pub fn query_files(backend: Backend, paths: &[String], query: &str) -> i32 {
 /// `query` asked of `sources`, checked again as `session`'s checker is
 /// set: a line for each answer, definite ones first, or a line saying
 /// there are none.
-fn answer_query(session: &Fx26Session, sources: &[fixpt_fx26::query::Source], query: &str) -> Result<Vec<String>, String> {
+fn answer_query(session: &mut Fx26Session, sources: &[fixpt_fx26::query::Source], query: &str) -> Result<Vec<String>, String> {
     let (q, around) = fixpt_fx26::query::parse(query)?;
-    let mut p = fixpt_fx26::query::load(session.fresh_checker(), sources)?;
-    let hits = p.answer(&q, around.as_deref())?;
+    let hits = session.fresh(|c| fixpt_fx26::query::load(c, sources)?.answer(&q, around.as_deref()))?;
     if hits.is_empty() {
         return Ok(vec![format!("; no definition answers `{}`", query.trim())]);
     }
@@ -1268,11 +1267,13 @@ pub fn check_reps(backend: Backend, name: &str, text: &str, readable: bool) -> i
         Err(code) => return code,
     };
     session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
-    let mut c = session.fresh_checker();
-    let (rust, refused) = fixpt_fx26::compare::rust_reps(&mut c, text);
     // The FX-26 checker's, if it takes the whole program, told of the
     // `include`s as `both_checkers` tells it.
-    fixpt_fx26::compare::tell_front_end(&mut c, text);
+    let (rust, refused) = session.fresh(|mut c| {
+        let reps = fixpt_fx26::compare::rust_reps(&mut c, text);
+        fixpt_fx26::compare::tell_front_end(&mut c, text);
+        reps
+    });
     let ours = match session.check_with_own_checker(text) {
         Ok(Ok(_)) => session.own_checked_reps().unwrap_or_default(),
         _ => Vec::new(),

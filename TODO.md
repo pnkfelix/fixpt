@@ -7143,10 +7143,16 @@ own, let go). Release suite 79 s to 171 s, debug 142 s to 390 s: a
 session per checker, and the corpus tests make one per program (`fixpt
 check` of one program made 5 sessions, where it made 2: 0.12 s to 0.19).
 Reverted; left for later:
-- `Fx26Session::fresh_checker`'s checkers (`compare`, `query`,
-  `check_reps`, `spec_tests`) on their session's runtime: each use lent
-  the session's heap (`Checker::with_heap`), their signatures given the
-  session; they hold the checker long (`query::load`'s, `answer` later).
+- ~~`Fx26Session::fresh_checker`'s checkers (`compare`, `query`,
+  `check_reps`, `spec_tests`) on their session's runtime~~: done
+  (2026-11-15): `Fx26Session::fresh` gives `f` a checker of the session's
+  heap, the runtime lent around it (`Checker::in_runtime`), a program's
+  expansion; its held syntax in a vector of its own
+  (`SymTable::with_own_kept`; a `Kept` says whose), let go whole after
+  (`heap_syn::kept_release`). So `fixpt check` and the comparisons call
+  both checkers' transformers in one namespace (`tests/phase1.rs`). Left
+  of its own heap: `compare::both_compilers_declining`, whose checker the
+  Rust compiler is given outside a lending, and which runs none.
 - The runtime's sessions' checkers (`sessions.rs`) in `rt`'s heap,
   their checks lent it (`tried` has `rt`).
 - `Checker::new()`'s: a runtime of the thread's, or of each, once §279

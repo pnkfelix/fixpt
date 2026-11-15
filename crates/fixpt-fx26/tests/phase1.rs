@@ -140,3 +140,23 @@ fn the_expander_written_in_fx26_defines_in_phase_1_inside_its_parse() {
         assert!(fixpt_fx26::phase1::called_for_fx26() > called, "{name}: called in phase 1");
     }
 }
+
+/// Both checkers on a program (`fixpt check`, the comparisons): the Rust one
+/// a fresh checker of the session's heap (`Fx26Session::fresh`), so both
+/// call their transformers in one namespace, made once: the same closures.
+#[test]
+fn both_checkers_call_their_transformers_in_one_namespace() {
+    let dir = format!("{}/tests/programs/procedural", env!("CARGO_MANIFEST_DIR"));
+    let mut s = session();
+    // The transformers' session, which the FX-26 expander's definitions are
+    // checked in, made first: its namespace, once a thread, not counted.
+    let first = std::fs::read_to_string(format!("{dir}/twice-rsc.fx")).expect("reads");
+    fixpt_fx26::compare::both_checkers(&mut s, &first).expect("checks");
+    for name in ["aif-er.fx", "twice-sc.fx", "split-er.fx"] {
+        let text = std::fs::read_to_string(format!("{dir}/{name}")).expect("reads");
+        let made = fixpt_fx26::phase1::made();
+        let (fx26, rust) = fixpt_fx26::compare::both_checkers(&mut s, &text).expect("checks");
+        assert!(matches!((&fx26, &rust), (Ok(a), Ok(b)) if a == b), "{name}: {fx26:?} {rust:?}");
+        assert_eq!(fixpt_fx26::phase1::made(), made + 1, "{name}: one namespace for both");
+    }
+}

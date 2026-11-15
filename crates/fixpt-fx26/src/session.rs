@@ -3620,7 +3620,33 @@ impl Fx26Session {
         self.expansion(|s| checking(&mut s.checker, &mut s.scheme, f))
     }
 
-    /// A checker with no program in it yet, set as this session's is.
+    /// `f` of a checker with no program in it yet, set as this session's is
+    /// ([`Self::fresh_checker`]), its syntax in this session's heap and the
+    /// session's runtime lent around `f`: so that its procedural macros'
+    /// transformers run in the session's phase-1 namespace, which the
+    /// expander written in FX-26 calls them in too (`phase1.rs`; `TODO.md`
+    /// §280). A program's expansion: the namespace of the one before ended
+    /// first. What it held of its syntax let go after, whole.
+    pub fn fresh<T>(&mut self, f: impl FnOnce(Checker) -> T) -> T {
+        let mut c = self.fresh_checker();
+        c.in_session_heap();
+        let kept = c.own_kept();
+        crate::phase1::Phase1::end_current(self.scheme.runtime_unrooted());
+        let out = self.expansion(|s| {
+            let rt = s.scheme.runtime_unrooted();
+            if rt.heap.collection_due() {
+                rt.heap.collect_due(&mut []);
+            }
+            c.in_runtime(rt, f)
+        });
+        crate::heap_syn::kept_release(&mut self.scheme.runtime_unrooted().heap, kept);
+        out
+    }
+
+    /// A checker with no program in it yet, set as this session's is, of a
+    /// heap of its own: its procedural macros' transformers run in the
+    /// transformers' session. Where a session's runtime cannot be lent
+    /// around its uses ([`Self::fresh`] otherwise).
     pub fn fresh_checker(&self) -> Checker {
         let mut c = Checker::with_convention(if self.native_convention { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
         c.globals_effects = self.globals_effects;

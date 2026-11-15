@@ -90,8 +90,7 @@ fn agree_seen(dir: &str, prefix: &str, made: fn(&str) -> String, seen: fn(&str) 
         let text = made(&std::fs::read_to_string(&path).unwrap());
         s.checker.base_dir = path.parent().map(|d| d.to_path_buf());
         fixpt_fx26::syn::set_load_base(path.parent().map(|d| d.to_path_buf()));
-        let mut c = s.fresh_checker();
-        let rust = compare::canonical_checked(compare::check_with_rust_checker(&mut c, &text));
+        let rust = s.fresh(|mut c| compare::canonical_checked(compare::check_with_rust_checker(&mut c, &text)));
         let fx26 = match compare::both_checkers(&mut s, &text) {
             Ok((fx26, _)) => fx26,
             Err(e) => Err(e),

@@ -145,11 +145,15 @@ pub fn both_checkers(s: &mut Fx26Session, text: &str) -> R<(Checked26, Checked26
     // With `FIXPT_TIME_PHASES` set, how long each checker took.
     let timing = std::env::var_os("FIXPT_TIME_PHASES").is_some();
     let started = std::time::Instant::now();
-    let mut c = s.fresh_checker();
-    let rust = canonical_checked(check_with_rust_checker(&mut c, text));
     // The Rust checker first, so that the FX-26 front end can be told what
-    // each top-level `include` gives, which only a checker knows.
-    tell_front_end(&mut c, text);
+    // each top-level `include` gives, which only a checker knows; of the
+    // session's heap, its transformers in the session's phase-1 namespace,
+    // which the FX-26 one's are called in too.
+    let rust = s.fresh(|mut c| {
+        let rust = canonical_checked(check_with_rust_checker(&mut c, text));
+        tell_front_end(&mut c, text);
+        rust
+    });
     let between = std::time::Instant::now();
     let fx26 = canonical_checked(s.check_with_own_checker(text)?);
     if timing {

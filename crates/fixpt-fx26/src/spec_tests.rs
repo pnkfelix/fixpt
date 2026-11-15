@@ -113,8 +113,12 @@ const PLAIN: &str = "%plain-";
 /// …)) %r)))`; and, after it, a copy of the definition as written, named
 /// `%plain-NAME`. With the names the program defines, in order, each with
 /// its `lambda`'s parameters' names, if it is one.
-fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(String, Vec<String>)>), String> {
-    let mut c = session.fresh_checker();
+fn instrumented(session: &mut Fx26Session, text: &str) -> Result<(String, Vec<(String, Vec<String>)>), String> {
+    session.fresh(|mut c| instrumented_by(&mut c, text))
+}
+
+/// [`instrumented`], checked by `c`.
+fn instrumented_by(c: &mut crate::check::Checker, text: &str) -> Result<(String, Vec<(String, Vec<String>)>), String> {
     let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
     let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
     for (f, done) in forms.iter().zip(done) {

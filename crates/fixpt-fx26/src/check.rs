@@ -1228,6 +1228,34 @@ impl Checker {
         r
     }
 
+    /// `f` of this checker, a session's, with `rt`'s heap lent for its
+    /// syntax and `rt` with it ([`Checker::with_runtime`]), given to `f` to
+    /// keep or drop: a fresh checker of the session's (`Fx26Session::fresh`).
+    pub fn in_runtime<T>(self, rt: &mut fixpt_runtime::Runtime, f: impl FnOnce(Checker) -> T) -> T {
+        let world = self.macros.withs.world.clone();
+        let mut syms = {
+            let mut w = world.borrow_mut();
+            assert!(w.session && !w.lending, "a session's checker, its syntax not lent");
+            w.lending = true;
+            std::mem::take(&mut w.syms)
+        };
+        let r = crate::heap_syn::with_syntax_in(rt, &mut syms, || f(self));
+        let mut w = world.borrow_mut();
+        (w.lending, w.syms) = (false, syms);
+        r
+    }
+
+    /// Its syntax held from now on in a vector of its own in the heap it is
+    /// lent (`heap_syn::SymTable::with_own_kept`), which its user lets go
+    /// whole when it is done (`heap_syn::kept_release`): that vector's id.
+    /// Before any of its syntax is held.
+    pub fn own_kept(&mut self) -> u32 {
+        let mut w = self.macros.withs.world.borrow_mut();
+        assert!(!w.lending, "not while its syntax is lent");
+        w.syms = crate::heap_syn::SymTable::with_own_kept();
+        w.syms.kept_id()
+    }
+
     /// A checker with the initial environment of `crate::standard`.
     pub fn new() -> Checker {
         Checker::with_convention(Conv::Cellular)
