@@ -2305,4 +2305,16 @@ transformers' session (`TODO.md` §228).
    heap (§280), so their FX-26 calls go apart until it is the session's.
 6. The separate transformers' session gone. *Since stage 2 narrowed*:
    kept, for the checkers with no session of theirs (§280), until they
-   have runtimes.
+   have runtimes. *Built so* (2026-11-15): a session's checker defines its
+   transformers in its expansion's namespace too, so it never reaches the
+   transformers' session. That session is a phase-1 namespace of its own
+   runtime (`procedural::with_session`), for a checker of its own heap, a
+   lowering session, and the expander written in FX-26 where its session's
+   namespace has not the transformer (`phase1::call_procedural`): the use's
+   datum copied into its heap, what the transformer gave copied back
+   (`heap_syn::copy_datum`, `procedural::apply_copied`), no text either way.
+   Every transformer is checked and compiled by a phase-1 namespace, the
+   same machinery in either runtime. Text is left to the evaluator written
+   in FX-26 alone (its `%macros:call-procedural` answers `apart`: its
+   values are not the runtime's), whose `%apply` request reads the form and
+   writes the answer in the transformers' session.

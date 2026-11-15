@@ -7157,11 +7157,11 @@ Reverted; left for later:
   once (§68's files not yet converted), so a definition's parse inside the
   program's would leave the program's parse the namespace's state; to be
   each front end instance's own, or the state saved around the definition.
-- Meanwhile their transformers run in the transformers' session by text
-  (the use written, what it gave read back): to be a copy of the datum
-  from heap to heap, and back, as was decided (2026-11-15) and not yet
-  built; and a lowering session's (`Strategy::Lower`), which has no
-  phase 1 (its front end not compiled).
+- Meanwhile their transformers run in the transformers' session, a
+  phase-1 namespace of its own runtime, the datum copied from heap to heap
+  and back (built 2026-11-15, stage 6), as a lowering session's
+  (`Strategy::Lower`, no phase 1, its front end not compiled) and the
+  FX-26 expander's where its session's namespace has not the transformer.
 
 ## 281. A major collection during a transformer's call: young-only mode taken out? (the user's question, 2026-11-15)
 

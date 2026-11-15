@@ -4,10 +4,13 @@
 //! `(sc-macro-transformer proc)` and `(rsc-macro-transformer proc)`, each
 //! `proc` an FX-26 procedure over `datum`s.
 //!
-//! A transformer is checked and run, at each use, by an FX-26 session of its
-//! own (`run`), in the standard environment and this prelude alone: what the
-//! program defines is not there as it expands. Its answer, a datum, comes
-//! back as text, read at the use's place.
+//! A transformer is checked where its macro is defined and called at each
+//! use in a phase-1 namespace (`phase1.rs`), in the standard environment and
+//! this prelude alone: what the program defines is not there as it expands.
+//! A session's expansion's own, in its runtime, which both expanders call
+//! it in; else the transformers' session's (`apply_copied`). It is given
+//! the use's datum and gives one, made syntax at the use's place, with no
+//! text between (`heap_syn::syn_of_datum`, `copy_datum`).
 //!
 //! Hygiene is by aliases, one spelling for both systems: `%~N:x` is `x` as
 //! where the macro was defined, made by expansion `N`. An alias the expansion
@@ -23,7 +26,7 @@
 use std::cell::RefCell;
 
 use fixpt_read::{Interner, Sym};
-use crate::heap_syn::{At, Syn, V};
+use crate::heap_syn::{Syn, V};
 
 use crate::{FxError, R};
 
@@ -80,52 +83,73 @@ pub(crate) const MACRO_ENV: &str = "%env:macro";
 /// A syntactic closure as a datum: `(%sc env (free …) form)`.
 const CLOSURE: &str = "%sc";
 
-/// What every transformer sees besides the standard environment.
-const PRELUDE: &str = include_str!("procedural-prelude.fx");
-
 thread_local! {
-    /// The session transformers run in, made at the first and kept.
-    static SESSION: RefCell<Option<crate::session::Fx26Session>> = const { RefCell::new(None) };
-    /// Each transformer defined in it, by its style and text: the global
-    /// it is (`apply`), checked and compiled once, not at every use.
-    static COMPILED: RefCell<fixpt_hash::HashMap<(Style, String), String>> = RefCell::new(fixpt_hash::HashMap::default());
+    /// The transformers' session: a session of its own, made at the first
+    /// and kept, and a phase-1 namespace in its runtime (`phase1.rs`), each
+    /// transformer defined there once, by its style and text. For what has
+    /// no namespace of its own to run one in: a checker of its own heap, a
+    /// lowering session, and the expander written in FX-26 where its
+    /// session's namespace has not the transformer, which it may not define
+    /// there (`phase1::run_transformer`). This runtime's front end is its
+    /// own, so a definition here, inside a parse of another's, is apart.
+    static SESSION: RefCell<Option<(crate::session::Fx26Session, crate::phase1::Phase1)>> = const { RefCell::new(None) };
+}
+
+/// A transformer's key in a namespace: its style and text.
+pub(crate) fn key(style: Style, code: &str) -> String {
+    format!("{style:?}\n{code}")
+}
+
+/// `f` of the transformers' session's runtime and namespace, made at the
+/// first; apart from the session whose check or run asks (`crossing::apart`).
+fn with_session<T>(f: impl FnOnce(&mut fixpt_runtime::Runtime, &crate::phase1::Phase1) -> Result<T, String>) -> Result<T, String> {
+    fixpt_runtime::crossing::apart(|| {
+        SESSION.with(|s| {
+            let mut s = s.borrow_mut();
+            if s.is_none() {
+                let mut made = crate::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).map_err(|e| e.message)?;
+                made.strategy = crate::session::Strategy::Cellular;
+                let p = made.phase1().map_err(|e| format!("the transformers' namespace: {}", e.message))?;
+                *s = Some((made, p));
+            }
+            let (session, p) = s.as_mut().expect("made");
+            f(session.scheme.runtime_unrooted(), p)
+        })
+    })
 }
 
 /// Transformer `code`, of `style`, defined in the transformers' session
 /// where its macro is defined: checked at its style's type and compiled,
-/// once, a global (`%transformer:k`) its uses call (`apply`); its name. One
-/// of the same style and text, defined already, is that one: both front
-/// ends define each macro, and agree.
+/// once; its global. Both front ends define each macro, and agree; a
+/// session's checker defines its in its own namespace instead
+/// (`Macros::define_procedural`).
 pub(crate) fn define(style: Style, code: &str) -> Result<String, String> {
-    let key = (style, code.to_string());
-    if let Some(n) = COMPILED.with(|c| c.borrow().get(&key).cloned()) {
-        return Ok(n);
-    }
-    let n = format!("%transformer:{}", COMPILED.with(|c| c.borrow().len()));
-    run(&format!("(define {n} {} {})", style.ty(), helpers(code)))?;
-    COMPILED.with(|c| c.borrow_mut().insert(key, n.clone()));
-    Ok(n)
+    with_session(|rt, p| p.transformer(rt, style.ty(), &key(style, code), &helpers(code)))
 }
 
-/// Transformer `code`, of `style`, run on `form` (as text), in expansion
-/// `made`: what it gave, printed as `write` does; or why not. Its global
-/// called, defined where its macro was (`define`; defined here if it is
-/// not, as in a session made since: `TODO.md` §228). Both front ends run
-/// their transformers so, the one written in FX-26 by a request (`run`'s
-/// `%apply`), so that they agree.
-pub(crate) fn apply(style: Style, code: &str, form: &str, made: u32) -> Result<String, String> {
-    let name = define(style, code)?;
-    run(&match style {
-        Style::Er => format!("({name} (quote {form}) (%er-renamer {made}) %er-compare)"),
-        Style::Sc => format!("({name} (quote {form}) (quote {USE_ENV}))"),
-        Style::Rsc => format!("({name} (quote {form}) (quote {MACRO_ENV}))"),
-    })
+/// Transformer `code`, of `style`, called in the transformers' session on
+/// datum `v` of `heap`, copied there, in expansion `made`: what it gave,
+/// copied into `heap` (`heap_syn::copy_datum`), no text between; or why
+/// not. Defined there if it is not, as in a session made since.
+pub(crate) fn apply_copied(style: Style, code: &str, made: u32, heap: &mut fixpt_heap::Heap, v: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
+    let out = with_session(|rt, p| {
+        let d = crate::heap_syn::copy_datum(heap, v, &mut rt.heap)?;
+        let base = rt.heap.push_root(d);
+        let g = p.transformer(rt, style.ty(), &key(style, code), &helpers(code));
+        let d = rt.heap.root_at(base);
+        rt.heap.pop_roots_to(base);
+        let out = crate::phase1::call_transformer(rt, p, &g?, style, d, made)?;
+        crate::heap_syn::copy_datum(&rt.heap, out, heap)
+    });
+    out
 }
 
-/// What the expander written in FX-26 asks, through the runtime: a program
-/// to run; `%define STYLE\n` and then a transformer's text, to `define`;
-/// or `%apply STYLE MADE LENGTH\n` and then the transformer's text,
-/// `LENGTH` characters, and the form's, to `apply`.
+/// What the expander written in FX-26 asks, through the runtime (only
+/// where no namespace answers it: the evaluator's, `%macros:call-procedural`
+/// answering `apart` there): `%define STYLE\n` and then a transformer's
+/// text, to `define`; or `%apply STYLE MADE LENGTH\n` and then the
+/// transformer's text, `LENGTH` characters, and the form's, to run it on
+/// the form read in the transformers' session, its answer written.
 fn asked(request: &str) -> Result<String, String> {
     let style_of = |n: usize| match n {
         0 => Style::Er,
@@ -137,7 +161,7 @@ fn asked(request: &str) -> Result<String, String> {
         let style = head.parse::<usize>().map_err(|_| "a malformed transformer request")?;
         return define(style_of(style), code).map(|_| "#u".to_string());
     }
-    let Some(rest) = request.strip_prefix("%apply ") else { return run(request) };
+    let Some(rest) = request.strip_prefix("%apply ") else { return Err("not a transformer request".into()) };
     let (head, body) = rest.split_once('\n').ok_or("a malformed transformer request")?;
     let mut words = head.split(' ').map(|w| w.parse::<usize>());
     let (Some(Ok(style)), Some(Ok(made)), Some(Ok(length))) = (words.next(), words.next(), words.next()) else {
@@ -145,45 +169,29 @@ fn asked(request: &str) -> Result<String, String> {
     };
     let style = style_of(style);
     let split = body.char_indices().nth(length).map_or(body.len(), |(i, _)| i);
-    apply(style, &body[..split], &body[split..], made as u32)
+    let (code, form) = (&body[..split], &body[split..]);
+    with_session(|rt, p| {
+        let mut interner = std::mem::take(&mut rt.interner);
+        let read = fixpt_read::Reader::new(form, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read();
+        rt.interner = interner;
+        let d = match read {
+            Ok(Some(d)) => fixpt_runtime::port::syntax_to_value(rt, &d),
+            _ => return Err("the form is not read".into()),
+        };
+        let base = rt.heap.push_root(d);
+        let g = p.transformer(rt, style.ty(), &key(style, code), &helpers(code));
+        let d = rt.heap.root_at(base);
+        rt.heap.pop_roots_to(base);
+        let out = crate::phase1::call_transformer(rt, p, &g?, style, d, made as u32)?;
+        Ok(fixpt_runtime::write_value(&rt.heap, out))
+    })
 }
 
-/// `run` made what the runtime's syscall for the expander written in
+/// `asked` made what the runtime's syscall for the expander written in
 /// FX-26 calls (`fixpt_runtime::syscall::PROCEDURAL`).
 pub fn install() {
     let _ = fixpt_runtime::syscall::PROCEDURAL.set(asked);
 }
-
-/// FX-26 program `code` run in the transformers' session: the last form's
-/// value, printed as `write` does; or why not. Apart from the session whose
-/// check asked for it (`crossing::apart`): a session, and a heap, of its
-/// own, which may be asked inside a call of that session's native code.
-pub fn run(code: &str) -> Result<String, String> {
-    fixpt_runtime::crossing::apart(|| run_apart(code))
-}
-
-fn run_apart(code: &str) -> Result<String, String> {
-    SESSION.with(|s| {
-        let mut s = s.borrow_mut();
-        if s.is_none() {
-            let mut made = crate::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).map_err(|e| e.message)?;
-            // Compiled and run on the cellular machine, not lowered: so that
-            // a program's macros, as it is checked, need no Scheme engine.
-            made.strategy = crate::session::Strategy::Cellular;
-            match made.run_program(PRELUDE) {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => return Err(format!("the transformers' prelude: {e}")),
-                Err(e) => return Err(format!("the transformers' prelude: {}", e.message)),
-            }
-            *s = Some(made);
-        }
-        match s.as_mut().expect("made").run_program(code) {
-            Ok(r) => r,
-            Err(e) => Err(e.message.into()),
-        }
-    })
-}
-
 
 /// `code` with the prelude's procedures bound around it, as locals.
 pub(crate) fn helpers(code: &str) -> String {
@@ -326,17 +334,6 @@ fn unaliased(s: &Syn, interner: &mut Interner) -> Syn {
         }
         V::Vector(xs) => Syn::vector(s.at(), &xs.iter().map(|i| unaliased(i, interner)).collect::<Vec<_>>()),
         _ => s.clone(),
-    }
-}
-
-/// `s` at the use's place, `at`, of expansion `made`: what a transformer
-/// gave, read from text, placed where the use was.
-pub(crate) fn placed(s: &Syn, at: At, made: u32) -> Syn {
-    let span = At { expansion: made, ..at };
-    match &s.view() {
-        V::List { items, tail } => Syn::of_list(span, &items.iter().map(|i| placed(i, at, made)).collect::<Vec<_>>(), tail.as_ref().map(|t| placed(t, at, made))),
-        V::Vector(xs) => Syn::vector(span, &xs.iter().map(|i| placed(i, at, made)).collect::<Vec<_>>()),
-        _ => s.placed(span),
     }
 }
 

@@ -561,6 +561,62 @@ fn is_read_atom(heap: &Heap, d: Value) -> bool {
         || [ObjType::Symbol, ObjType::String, ObjType::Bytevector, ObjType::Flonum, ObjType::Bignum].iter().any(|t| heap.is_a(d, *t))
 }
 
+/// Datum `v` of heap `from` copied into heap `to`, what the reader makes
+/// of its text, written, read there: symbols and keywords by their names,
+/// numbers by their values. Nothing collects as it is made (`Heap`
+/// allocates, never collects), so neither `v` nor what is made moves
+/// meanwhile. A procedural macro's datum given to the transformers' session
+/// and its answer given back, between heaps, no text between (`TODO.md`
+/// §280). Or why it is no datum: a part of it is not.
+pub fn copy_datum(from: &Heap, v: Value, to: &mut Heap) -> Result<Value, String> {
+    if v.is_pair() {
+        let (mut items, mut x) = (Vec::new(), v);
+        while x.is_pair() {
+            items.push(copy_datum(from, from.car(x), to)?);
+            x = from.cdr(x);
+        }
+        let mut out = copy_datum(from, x, to)?;
+        for i in items.into_iter().rev() {
+            out = to.cons(i, out);
+        }
+        return Ok(out);
+    }
+    if from.is_a(v, ObjType::Vector) {
+        let items = (0..from.obj_len(v)).map(|i| copy_datum(from, from.obj_ref(v, i), to)).collect::<Result<Vec<_>, _>>()?;
+        let out = to.make_vector(items.len(), Value::FALSE);
+        for (i, x) in items.into_iter().enumerate() {
+            to.obj_set(out, i, x);
+        }
+        return Ok(out);
+    }
+    if v == Value::NULL || v == Value::TRUE || v == Value::FALSE || v.is_char() || v.is_fixnum() {
+        return Ok(v);
+    }
+    if !is_read_atom(from, v) {
+        return Err(format!("`{}` is no datum", fixpt_runtime::write_value(from, v)));
+    }
+    Ok(if from.is_a(v, ObjType::Symbol) {
+        to.intern(&from.symbol_name(v))
+    } else if from.is_keyword(v) {
+        let sym = to.intern(&from.symbol_name(from.keyword_symbol(v)));
+        to.make_keyword(sym)
+    } else if from.is_a(v, ObjType::String) {
+        to.make_string(&from.string_to_rust(v))
+    } else if from.is_a(v, ObjType::Bytevector) {
+        to.make_bytevector(&(0..from.bytevector_len(v)).map(|i| from.bytevector_ref(v, i)).collect::<Vec<u8>>())
+    } else if from.is_a(v, ObjType::Flonum) {
+        fixpt_runtime::num_in_heap(to, &Num::Real(from.flonum_value(v)))
+    } else {
+        // A bignum, by its digits, as the reader makes one.
+        let w = fixpt_runtime::write_value(from, v);
+        let (negative, digits) = match w.strip_prefix('-') {
+            Some(x) => (true, x.to_string()),
+            None => (false, w.clone()),
+        };
+        fixpt_runtime::num_in_heap(to, &Num::Big { negative, digits, radix: 10 })
+    })
+}
+
 /// Datum `v`, of the heap lent, as syntax, each part at `at`: what
 /// [`read_syn_unplaced`] of its text, written, makes, placed there
 /// (`procedural::placed`); with no text between. What a procedural macro's
@@ -992,6 +1048,20 @@ pub fn collect_young_if_asked() {
     }
 }
 
+/// [`collect_young_if_asked`], `v` rooted across it: its place after.
+pub fn collect_young_if_asked_keeping(v: Value) -> Value {
+    if !lent_collect_asked() {
+        return v;
+    }
+    heap(|h| {
+        let base = h.push_root(v);
+        h.collect_young(&mut []);
+        let v = h.root_at(base);
+        h.pop_roots_to(base);
+        v
+    })
+}
+
 /// [`collect_young_if_asked`] of `heap`, a session's runtime's, the
 /// runtime borrowed from the syntax's lending ([`with_runtime`]), every
 /// value its caller holds rooted.
@@ -1024,6 +1094,10 @@ pub fn mk<R>(interner: &Interner, f: impl FnOnce(&mut Mk) -> R) -> R {
 
 /// The heap lent, as [`with_syntax`] lends it.
 #[inline(always)]
+pub(crate) fn with_heap<R>(f: impl FnOnce(&mut Heap) -> R) -> R {
+    heap(f)
+}
+
 fn heap<R>(f: impl FnOnce(&mut Heap) -> R) -> R {
     fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, R>(|heap, _| f(heap))
 }

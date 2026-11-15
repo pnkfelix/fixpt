@@ -1660,7 +1660,13 @@ impl Macros {
             }
         };
         let text = code.written(interner);
-        procedural::define(style, &text).map_err(|e| FxError::at(code.at(), format!("`{}`'s transformer: {e}", interner.name(name))))?;
+        // A session's checker's in the expansion's namespace (`phase1.rs`),
+        // where its uses call it; another's in the transformers' session.
+        let defined = match self.phase1_define(style, &text) {
+            Some(d) => d,
+            None => procedural::define(style, &text).map(|_| ()),
+        };
+        defined.map_err(|e| FxError::at(code.at(), format!("`{}`'s transformer: {e}", interner.name(name))))?;
         let p = procedural::Procedural { style, code: text, def_env, contract: contract.is_some() };
         let sig = contract.unwrap_or_else(|| Rc::new(STy::Expr));
         let m = Macro { sig, defn: false, desc: false, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: Some(Rc::new(p)) };
@@ -2511,18 +2517,33 @@ impl Macros {
     /// closure's opened.
     fn procedural_run(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, made: u32, interner: &mut Interner) -> R<Syn> {
         // In the runtime the syntax is in, if the session lent it: in the
-        // expansion's phase-1 namespace, on the use's datum, what it gives
-        // made syntax at once, no text between (`TODO.md` §278, stage 4).
-        let at = match self.phase1_run(p, s, made) {
-            Some(out) => {
-                let out = out.map_err(|e| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name))))?;
-                let placed = At { expansion: made, ..s.at() };
-                crate::heap_syn::syn_of_datum(out, placed, interner)
-                    .map_err(|e| FxError::at(s.at(), format!("a use of `{}`: what its transformer gave is not syntax: {e}", interner.name(name))))?
-            }
-            None => self.procedural_apart(name, p, s, made, interner)?,
+        // expansion's phase-1 namespace; else in the transformers' session,
+        // the datum and what it gave copied between the heaps. On the use's
+        // datum, what it gives made syntax at once, no text between either
+        // way (`TODO.md` §278, stages 4 and 6).
+        let out = match self.phase1_run(p, s, made) {
+            Some(out) => out,
+            None => self.procedural_apart(p, s, made),
         };
+        let out = out.map_err(|e| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name))))?;
+        let placed = At { expansion: made, ..s.at() };
+        let at = crate::heap_syn::syn_of_datum(out, placed, interner)
+            .map_err(|e| FxError::at(s.at(), format!("a use of `{}`: what its transformer gave is not syntax: {e}", interner.name(name))))?;
         self.procedural_opened(p, at, made, interner)
+    }
+
+    /// Transformer `code`, of `style`, defined in the phase-1 namespace of
+    /// the runtime lent with the syntax, where it is defined: none where no
+    /// runtime is lent, or it has no phase 1.
+    fn phase1_define(&mut self, style: procedural::Style, code: &str) -> Option<Result<(), String>> {
+        if !self.withs.world.borrow().session {
+            return None;
+        }
+        crate::heap_syn::with_runtime(|rt| {
+            let ph = crate::phase1::Phase1::current(rt).ok()?;
+            Some(ph.transformer(rt, style.ty(), &procedural::key(style, code), &procedural::helpers(code)).map(|_| ()))
+        })
+        .flatten()
     }
 
     /// Transformer `p` called on use `s` in expansion `made` in the phase-1
@@ -2530,7 +2551,7 @@ impl Macros {
     /// the transformer defined in it if they are not yet: its value, raw
     /// (nothing collects before the caller makes it syntax); or none where
     /// no runtime is lent (a checker's own heap), or it has no phase 1 (its
-    /// front end not compiled), where the transformers' session runs it.
+    /// front end not compiled).
     fn phase1_run(&mut self, p: &procedural::Procedural, s: &Syn, made: u32) -> Option<Result<fixpt_heap::Value, String>> {
         if !self.withs.world.borrow().session {
             return None;
@@ -2539,26 +2560,19 @@ impl Macros {
         crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, datum, made, true)).flatten()
     }
 
-    /// [`Macros::procedural_run`] in the transformers' session apart, by
-    /// text: the use written, what the transformer gave read back, placed.
-    fn procedural_apart(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, made: u32, interner: &mut Interner) -> R<Syn> {
-        let form = s.written(interner);
-        let said = |e: String| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name)));
+    /// Transformer `p` called on use `s` in expansion `made` in the
+    /// transformers' session, its datum copied there and what it gave
+    /// copied back into the heap lent (`procedural::apply_copied`): raw.
+    fn procedural_apart(&mut self, p: &procedural::Procedural, s: &Syn, made: u32) -> Result<fixpt_heap::Value, String> {
+        let own = !self.withs.world.borrow().session;
         // Where the call will collect, in the front end's heap (`TODO.md`
-        // §278): a test's, of a checker's own heap.
-        if !self.withs.world.borrow().session {
+        // §278): a test's, of a checker's own heap, the datum tenured.
+        if own {
             crate::heap_syn::collect_young_if_asked();
         }
-        let out = procedural::apply(p.style, &p.code, &form, made).map_err(said)?;
-        if !self.withs.world.borrow().session {
-            crate::heap_syn::collect_young_if_asked();
-        }
-        let read = crate::heap_syn::read_syn_unplaced(&out, interner);
-        let read = read.map_err(|e| FxError::at(s.at(), format!("a use of `{}`: what its transformer gave, `{out}`, is not read: {}", interner.name(name), e.message)))?;
-        let [one] = &read[..] else {
-            return Err(FxError::at(s.at(), format!("a use of `{}`: its transformer gave `{out}`, not one form", interner.name(name))));
-        };
-        Ok(procedural::placed(one, s.at(), made))
+        let datum = s.plain();
+        let out = crate::heap_syn::with_heap(|h| procedural::apply_copied(p.style, &p.code, made, h, datum))?;
+        Ok(if own { crate::heap_syn::collect_young_if_asked_keeping(out) } else { out })
     }
 
     /// What transformer `p` gave, made syntax at the use's place in

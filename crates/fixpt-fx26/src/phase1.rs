@@ -283,10 +283,10 @@ fn on_cellular<T>(rt: &mut Runtime, f: impl FnOnce(&mut Runtime) -> T) -> T {
 /// the one written in FX-26 is expanding would leave it the namespace's
 /// state. Between parses it is harmless: each reads its state by its key.
 pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural::Style, code: &str, datum: Value, made: u32, defining: bool) -> Option<Result<Value, String>> {
-    use crate::macros::procedural::{self, Style};
+    use crate::macros::procedural;
     let base = rt.heap.push_root(datum);
     let out = (|| {
-        let key = format!("{style:?}\n{code}");
+        let key = procedural::key(style, code);
         let (ph, global) = if defining {
             let ph = Phase1::current(rt).ok()?;
             match ph.transformer(rt, style.ty(), &key, &procedural::helpers(code)) {
@@ -298,11 +298,23 @@ pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural
             let g = ph.defined(rt, &key)?;
             (ph, g)
         };
+        let d = rt.heap.root_at(base);
+        Some(call_transformer(rt, &ph, &global, style, d, made))
+    })();
+    rt.heap.pop_roots_to(base);
+    out
+}
+
+/// Transformer `global` of namespace `ph`, of `style`, called on `datum` in
+/// expansion `made`: what it gave, raw; or why it failed. Its second
+/// argument and third as its style has them (a renamer of the expansion and
+/// a comparer; or the use's or the macro's environment).
+pub(crate) fn call_transformer(rt: &mut Runtime, ph: &Phase1, global: &str, style: crate::macros::procedural::Style, datum: Value, made: u32) -> Result<Value, String> {
+    use crate::macros::procedural::{self, Style};
+    let base = rt.heap.push_root(datum);
+    let out = (|| {
         let second = match style {
-            Style::Er => match ph.call(rt, "%er-renamer", &[Value::fixnum(made as i64)]) {
-                Ok(r) => r,
-                Err(e) => return Some(Err(e)),
-            },
+            Style::Er => ph.call(rt, "%er-renamer", &[Value::fixnum(made as i64)])?,
             Style::Sc => rt.heap.intern(procedural::USE_ENV),
             Style::Rsc => rt.heap.intern(procedural::MACRO_ENV),
         };
@@ -316,12 +328,10 @@ pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural
         // expander's syntax tenured, moved by neither.
         crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
         let args: Vec<Value> = (base..rt.heap.root_count()).map(|i| rt.heap.root_at(i)).collect();
-        let out = ph.call(rt, &global, &args);
-        Some(out.map(|v| {
-            let at = rt.heap.push_root(v);
-            crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
-            rt.heap.root_at(at)
-        }))
+        let out = ph.call(rt, global, &args)?;
+        let at = rt.heap.push_root(out);
+        crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
+        Ok(rt.heap.root_at(at))
     })();
     rt.heap.pop_roots_to(base);
     out
@@ -330,8 +340,11 @@ pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural
 /// What `%fx26-call-procedural` does (`Runtime::procedural`), for the
 /// expander written in FX-26: its arguments a style (0 explicit renaming, 1
 /// syntactic closures, 2 reversed), the transformer's text, the use's
-/// datum and the expansion; `(sum ok datum)`, what the transformer gave,
-/// `(sum failed why)`, or `(sum apart #u)` where the runtime has no phase 1.
+/// datum and the expansion; `(sum ok datum)`, what the transformer gave, or
+/// `(sum failed why)`. In the expansion's namespace if it has the
+/// transformer, which the expander written in FX-26 may not define
+/// (`run_transformer`); else in the transformers' session, the datum and
+/// what it gave copied between the heaps (`procedural::apply_copied`).
 pub fn call_procedural(rt: &mut Runtime, a: &[Value]) -> Result<Value, String> {
     use crate::macros::procedural::Style;
     let style = match a[0].as_fixnum() {
@@ -341,15 +354,18 @@ pub fn call_procedural(rt: &mut Runtime, a: &[Value]) -> Result<Value, String> {
     };
     let code = rt.heap.string_to_rust(a[1]);
     let made = a[3].as_fixnum() as u32;
-    Ok(match run_transformer(rt, style, &code, a[2], made, false) {
-        Some(Ok(v)) => {
+    let out = match run_transformer(rt, style, &code, a[2], made, false) {
+        Some(out) => {
             CALLED.with(|c| c.set(c.get() + 1));
-            crate::sessions::sum(rt, "ok", v)
+            out
         }
-        Some(Err(why)) => {
+        None => crate::macros::procedural::apply_copied(style, &code, made, &mut rt.heap, a[2]),
+    };
+    Ok(match out {
+        Ok(v) => crate::sessions::sum(rt, "ok", v),
+        Err(why) => {
             let why = rt.heap.make_string(&why);
             crate::sessions::sum(rt, "failed", why)
         }
-        None => crate::sessions::sum(rt, "apart", Value::UNIT),
     })
 }
