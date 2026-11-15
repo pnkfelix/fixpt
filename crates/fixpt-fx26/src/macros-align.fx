@@ -20,7 +20,7 @@
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
-        s-mark
+        s-mark s-rules
         mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit
         seq-elem seq-cage? peel ellipsis? ellipsis-of
         (type fails addr entries ring rings bind sty stys named hole atm atms))
@@ -38,7 +38,8 @@
         (type action actions contracts clause clauses macro macro-env scope scopes kids rooted holes
               node pinfo pvars level levels found def-env def-envs env namer looked strings))
 (import nodes-module env-empty env-within env-lookup env-any-shape? env-levels binder-name addr+
-        parameters-sig)
+        parameters-sig rules-word? rules-items define-syntax-sig rules-dots rules-procedural
+        any-ellipsis?)
 (import nodes-module def-env-top)
 
 ;;; ------------------------------------------------------------ aligning
@@ -89,11 +90,36 @@
                (if (null? one)
                    (with-kids at (k-pvar (syn-symbol s)))
                    (fill fail mode ps at (car one) s root))))
+            ((= (kind-of t) 16) (fill-rules fail mode ps at s root))
             ((and (< mode 2) (not (null? (ellipsis-of s))))
              (fill-seq fail mode ps at t s (car (ellipsis-of s))))
             ((and (< mode 2) (ellipsis? s))
              (fail-at fail "`...` follows the part it repeats, last in a list" s))
             (else (fill-shape fail mode ps at t s root))))))
+;; Transformer `s` a template writes, at `at` (`s-rules`, `Aligner::rules`):
+;; each name a reference, but a word (`rules-word?`); a list, its parts so;
+;; `(... ...)` the defined macro's ellipsis, a quoted datum as it is.
+;; Nothing of it in another mode, where it is the defined macro's alone.
+(define fill-rules (->* (fails int pvars int syn int) unit)
+  (lambda (fail mode ps at s root)
+    (let ((items (rules-items s)))
+      (cond ((not (= mode 1)) #u)
+            ((syn-symbol? s)
+             (begin (with-many at)
+                    (cond ((ellipsis? s) (fail-at fail rules-dots s))
+                          ((rules-word? fail (syn-symbol s)) #u)
+                          (else (with-kids at (k-ref (syn-symbol s) #f 4))))))
+            ((syn-nil? s) (begin (with-many at) (with-kids at (k-nil))))
+            ((null? items) (with-many at))
+            ((and (= (len items) 2) (proper? s) (ellipsis? (car items)) (ellipsis? (nth items 1)))
+             (with-many at))
+            ((ellipsis? (car items))
+             (fail-at fail "`(... template)` other than `(... ...)`: not yet" s))
+            ((any-ellipsis? items) (fail-at fail rules-dots s))
+            ((and (syn-symbol? (car items)) (string=? (syn-name (car items)) "quote"))
+             (begin (with-many at) (fill fail mode ps at (s-data) s root)))
+            (else (begin (with-many at)
+                         (fill fail mode ps at (s-pair (s-rules) (s-rules)) s root)))))))
 ;; `(x ...)` at `at`, a pattern's or a template's: `x` aligned with the
 ;; element type of list type `t`, repeated; the list exports what each
 ;; element does.
@@ -491,6 +517,16 @@
            (macro (macro? n)))
       (cond ((and program (symbol=? n 'module-parameters) (= (len items) 2))
              (operands-as fail 3 ps at (parameters-sig (nth items 1)) (nth parts 1)))
+            ;; `(define-syntax name [σ] transformer)` an expansion makes
+            ;; (`define-syntax-sig`), a `syntax-rules` one in a template.
+            ((and (symbol=? n 'define-syntax) (proper? s) (or (= (len items) 3) (= (len items) 4)))
+             (let* ((t (nth items (- (len items) 1))) (ts (proper-items t)))
+               (if (and (not program)
+                        (not (and (pair? ts) (syn-symbol? (car ts))
+                                  (string=? (syn-name (car ts)) "syntax-rules"))))
+                   (fail-at fail rules-procedural t)
+                   (operands-as fail mode ps at (define-syntax-sig (= (len items) 4))
+                                (nth parts 1)))))
             ((and (not program) (symbol=? n 'define-generative) (= (len items) 3))
              (fail-at fail (string-append "a template's `define-generative` names its "
                                           "conversions, `#:seal` and `#:unseal`") s))

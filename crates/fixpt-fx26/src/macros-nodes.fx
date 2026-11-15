@@ -17,9 +17,9 @@
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
-        ring-shape
+        ring-shape s-rules
         mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit marks mark-in
-        seq-elem seq-cage? peel ellipsis? ellipsis-of
+        seq-elem seq-cage? peel ellipsis? ellipsis-of type-form?
         (type fails addr entries ring rings bind sty stys named hole atm atms marked))
 ;; The environments the walk resolves names in (`macros-env-types.fx`): their
 ;; levels, and one implementation of them, whose `env` is abstract outside
@@ -437,3 +437,43 @@
           (and (syn-symbol? k)
                (name-in? (syn-symbol k)
                          (list 'region 'place 'effect 'type 'data 'sendable 'flat 'size 'conv)))))))
+
+;;; ------------------------------------------------------------ a defined macro's words
+
+;; Whether `n`, in a macro's transformer a template writes, is a word, not a
+;; name it refers to: `_`, a form's or a description's word, a macro's
+;; definition's, a macro's or a trailmark's name (`Aligner::rules`).
+(define rules-word? (->* (fails symbol) bool)
+  (lambda (fail n)
+    (let ((name (symbol->string n)))
+      (or (string=? name "_") (reserved? name)
+          (not (null? (sig-of-name n (kernel-sigs fail))))
+          (not (null? (sig-of-name n (kernel-definitions fail))))
+          (desc-word? name #t) (type-form? name)
+          (name-in? n (list 'else '=> 'quote 'quasiquote 'unquote 'unquote-splicing 'syntax-rules
+                            'trailmark 'er-macro-transformer 'sc-macro-transformer
+                            'rsc-macro-transformer))
+          (macro? n) (> (mark-now n) 0)))))
+(define sig-of-name (->* (symbol named) (listof sty acyclic))
+  (lambda (n ts)
+    (cond ((null? ts) nil) ((symbol=? n (extract (car ts) 1)) (list (extract (car ts) 2)))
+          (else (sig-of-name n (cdr ts))))))
+;; A list's items, a dotted one's before its tail; none of another.
+(define rules-items (->* (syn) syns-a)
+  (lambda (s)
+    (tagcase s (lst (items d a b x) items) (dotted (items t d a b x) items) (else y nil))))
+(define any-ellipsis? (->* (syns-a) bool)
+  (lambda (xs) (and (not (null? xs)) (or (ellipsis? (car xs)) (any-ellipsis? (cdr xs))))))
+(define rules-dots string
+  (string-append "`...` in a macro a template defines is the template's (R7RS), and repeats "
+                 "nothing here: the defined macro's is written `(... ...)`"))
+(define rules-procedural string
+  (string-append "a template's `define-syntax` defines a `syntax-rules` macro: a procedural "
+                 "one's transformer is phase 1's code, not yet in a template"))
+;; `define-syntax`'s operands' binding structure, with a signature if
+;; `signed`: `(export (bvar [data] rules) (rho (A var)))`.
+(define define-syntax-sig (->* (bool) sty)
+  (lambda (signed)
+    (let ((rest (s-pair (s-rules) (s-nil))))
+      (s-export (s-pair (s-bvar) (if signed (s-pair (s-data) rest) rest))
+                (bind-rib (list (tuple (list #t) 1)))))))

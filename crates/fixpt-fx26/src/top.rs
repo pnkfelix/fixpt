@@ -1045,7 +1045,7 @@ impl Checker {
             }
             // A macro defined, or each use of one expanded
             // (`crate::macros`): before anything else sees the form.
-            for f in self.macro_expanded(f)? {
+            for f in self.macro_expanded(f, &out)? {
                 self.note_load_def(&f);
                 if self.expand_generative(&f, &mut out)? {
                     continue;
@@ -1223,7 +1223,7 @@ impl Checker {
     /// templates, once, there, expanded (`Macros::template_checks`); or
     /// `form` with the uses of the macros defined in it expanded
     /// (`crate::macros`).
-    fn macro_expanded(&mut self, form: Syn) -> R<Vec<Syn>> {
+    fn macro_expanded(&mut self, form: Syn, before: &[Syn]) -> R<Vec<Syn>> {
         let names = syntax_names(&form, &self.interner);
         let defines = names.is_some();
         for (n, _) in names.unwrap_or_default() {
@@ -1257,8 +1257,21 @@ impl Checker {
                 fs.iter().map(|f| macros.sealed_written(f, &mut interner).and_then(|f| macros.aliases_resolved(&f, &mut interner))).collect()
             })
         };
+        // A macro its expansion defined, of a global's name, one before or
+        // one the forms before it in the program define: refused there, as
+        // the expander written in FX-26 refuses it, which expands a form
+        // only once those before it are read.
+        let made = std::mem::take(&mut macros.withs.made_syntax);
         c.macros = macros;
         c.interner = interner;
+        let earlier = |c: &Self, n: Sym| before.iter().any(|f| c.defined_names_syn(f).contains(&n));
+        let r = r.and_then(|out| match made.iter().find(|(n, ..)| c.global_type(*n).is_some() || earlier(c, *n)) {
+            Some((n, ..)) => Err(Self::macro_over_global(&c.interner, *n, form.span())),
+            None => Ok(out),
+        });
+        if r.is_err() {
+            c.macros.made_undone(made);
+        }
         r
         })
     }
@@ -2534,7 +2547,7 @@ fn uses_one_of(s: &Syn, macros: &[Sym]) -> Option<(fixpt_read::Span, Sym)> {
 
 /// The macros `s` defines, each with its name's place, if it is a
 /// `define-syntax` or a `define-syntax-rec`.
-fn syntax_names(s: &Syn, interner: &fixpt_read::Interner) -> Option<Vec<(Sym, Span)>> {
+pub(crate) fn syntax_names(s: &Syn, interner: &fixpt_read::Interner) -> Option<Vec<(Sym, Span)>> {
     let listed = s.list();
     let items = listed.as_deref()?;
     let named = |n: &Syn| n.sym().map(|m| (m, n.span()));

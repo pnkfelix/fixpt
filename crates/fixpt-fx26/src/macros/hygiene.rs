@@ -205,7 +205,7 @@ impl Macros {
 /// `with`'s module, by its namespace `ns`.
 fn top_made(free: Free, ns: Ns, base: &str) -> Made {
     match (free, ns) {
-        (Free::Toplevel, _) | (Free::Bound, Ns::Value) => Made::TopValue(base.to_string()),
+        (Free::Toplevel | Free::Inner, _) | (Free::Bound, Ns::Value) => Made::TopValue(base.to_string()),
         (Free::Qualified, _) | (Free::Bound, Ns::Desc) => Made::TopDesc(base.to_string()),
         (Free::Plain, _) => Made::Plain(base.to_string()),
     }

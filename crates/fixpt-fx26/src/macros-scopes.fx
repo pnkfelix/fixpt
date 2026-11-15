@@ -277,7 +277,10 @@
              (and (= kh 13) (= kw 13)))
          #u)
         (else
-         (let ((fits (cond ((and (= kh 0) (= kw 0)) #t)
+         ;; In a macro the template defines, whose own check is the defined
+         ;; macro's, where it is defined.
+         (let ((fits (cond ((= kw 16) #t)
+                           ((and (= kh 0) (= kw 0)) #t)
                            ((and (= kh 10) (or (= kw 10) (= kw 0))) #t)
                            ((and (= kh 0) (= kw 10)) #t)
                            ((and (= kh 2) (or (= kw 0) (= kw 2))) #t)

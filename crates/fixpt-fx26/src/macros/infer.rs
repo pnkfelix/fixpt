@@ -1166,6 +1166,7 @@ impl Macros {
             STy::Dvar => sym("dvar", interner),
             STy::Kind => sym("kind", interner),
             STy::Defn => sym("defn", interner),
+            STy::Rules => unreachable!("no signature's"),
             STy::Nil => Syn::nil(at),
             // A `syntax-rules`' trailmark, inferred as a word its pattern
             // writes; a reserved name, a kernel form's word.

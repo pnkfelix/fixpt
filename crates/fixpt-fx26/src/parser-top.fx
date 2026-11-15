@@ -44,6 +44,7 @@
 (import templates-module template-checks)
 (import imports-module import-file-macros note-load-def!)
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
+        made-syntax-taken! global-now?
         syntax-names imports-syntax? globals! global-before? macro? later-macro-site def-envs-given
         file-scope-begin! file-scope-end! source-of for-syntax? for-syntax!)
 ;; `(define name type expression)` or `(define name expression)`; for a
@@ -250,7 +251,11 @@
            (let ((inc (import-file-macros pfail-at written (get loaded))))
              (if (null? inc) (the top-list nil) (parse-made (car inc)))))
           ((form-of? written 'hide) (tops-made (cdr (syn-items written ""))))
-          (else (expanded-tops (expand-top pfail-at written))))))
+          ;; A macro its expansion defined: held to the globals, as a written
+          ;; one is, its templates checked after its definitions.
+          (else (let* ((xs (expand-top pfail-at written)) (ms (made-syntax-taken!))
+                       (taken (globals-taken-now ms written)) (tops (expanded-tops xs)))
+                  (append-tops tops (macro-checks ms)))))))
 (define tops-made (->* (syns-a) top-list)
   (lambda (xs)
     (if (null? xs) nil (let ((made (top-made (car xs)))) (append-tops made (tops-made (cdr xs)))))))
@@ -331,6 +336,16 @@
                                  "` is defined already: a macro may not take its name")
                   s))
           (else (globals-taken (cdr ns) s)))))
+;; Each of macros `ns`, an expansion's at `s`, of a global's name, before
+;; or of the forms before it: refused there (`Checker::macro_expanded`).
+(define globals-taken-now (->* (names syn) unit)
+  (lambda (ns s)
+    (cond ((null? ns) #u)
+          ((global-now? (car ns))
+           (pfail (string-append "`" (symbol->string (car ns))
+                                 "` is defined already: a macro may not take its name")
+                  s))
+          (else (globals-taken-now (cdr ns) s)))))
 ;; Tops `ts`, each definition's names noted as globals, until one of them
 ;; is a macro's: as the Rust checker refuses it where it is checked
 ;; (`top_defining_kept`), a form refused there, said where the macro is if

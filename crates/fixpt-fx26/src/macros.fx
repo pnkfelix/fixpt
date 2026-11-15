@@ -47,12 +47,13 @@
               atms kids contracts holes))
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
-        (type exported nested))
+        binder-depths depth-of repeated-ref (type exported nested depths))
 (import solve-module infer sig-text by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         phase1-forms-now phase1-forms! for-syntax!
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
-        source-key source-of sources-made alias respanned in-expansion use-entered? use-left!
+        source-key source-of sources-made alias alias-base respanned in-expansion use-entered?
+        use-left!
         chain-begun! checked-uses trust-if! use-aligned! procedural-expanded)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
@@ -240,18 +241,6 @@
                                                  (else z #f)))))
                (else y #f))
              (says-times? (cdr ks) depth ps acts)))))
-;; Each template binder the walk found, with how many ellipses it is under.
-(define-type depths (listof (tupleof int int) acyclic))
-(define binder-depths (->* (found) depths)
-  (lambda (fs)
-    (cond ((null? fs) nil)
-          ((tagcase (node-kids (extract (car fs) 1)) (k-binder (n d) #t) (else y #f))
-           (cons (tuple (extract (car fs) 1) (extract (car fs) 4)) (binder-depths (cdr fs))))
-          (else (binder-depths (cdr fs))))))
-(define depth-of (->* (int depths) int)
-  (lambda (b ds)
-    (cond ((null? ds) 0) ((= b (extract (car ds) 1)) (extract (car ds) 2))
-          (else (depth-of b (cdr ds))))))
 ;; The actions for what the walk found, onto `out`; `uses`, the affine
 ;; pattern variables placed so far; `bd`, the binders' depths.
 (define name-actions (->* (fails pvars found scopes actions names nested depths) actions)
@@ -323,6 +312,11 @@
   (lambda (fail n b free file s bd)
     (cond ((not (null? b)) (list (act-rename (node-path (car b)) (depth-of (car b) bd))))
           ((= free 2) nil)
+          ;; A name a macro's template defined this one with, an alias
+          ;; already: what it names where that macro is defined, kept.
+          ((and (not (= free 3)) (not (string=? (alias-base (symbol->string n)) ""))) nil)
+          ;; A name in a macro the template defines (`s-rules`): its alias.
+          ((= free 4) (list (act-alias)))
           ((= free 3)
            (begin
              (fail-at fail (string-append "`" (symbol->string n) "`, the module a template's "
@@ -346,16 +340,6 @@
                                           "names only those, as they are where it is imported")
                       s)
              (list (act-alias)))))))
-;; A binder `b` (none or one) repeated, referred to under `depth`, fewer
-;; ellipses than it is under: which repetition's is not said.
-(define repeated-ref (->* (fails symbol (listof int acyclic) int depths syn) unit)
-  (lambda (fail n b depth bd s)
-    (if (and (not (null? b)) (> (depth-of (car b) bd) depth))
-        (fail-at fail (string-append "`" (symbol->string n) "` is bound in each repetition of a "
-                                     "part, and referred to under fewer ellipses than it is "
-                                     "bound: which repetition's it is is not said")
-                 s)
-        #u)))
 ;; From node `i` to `n`, a file's macro's use of another of its own: that
 ;; macro, by the name the importer has it by.
 (define type-actions (->* (fails int int scopes actions) actions)
@@ -365,7 +349,8 @@
         (let* ((path (node-path i)) (kids (node-kids i)) (head (form-head-of i))
                (s (node-syn i))
                ;; A trailmark of the file's: by the name the importer has it by.
-               (out2 (if (and (not (null? file)) (= (kind-of (node-core i)) 15) (syn-symbol? s)
+               (out2 (if (and (not (null? file)) (syn-symbol? s)
+                              (or (= (kind-of (node-core i)) 15) (= (kind-of (node-core i)) 16))
                               (not (null? (internal-of (syn-symbol s) (extract (car file) 4)))))
                          (cons (tuple path (act-mark (car (internal-of (syn-symbol s)
                                                                        (extract (car file) 4)))))
@@ -561,8 +546,10 @@
                             (get by-state))))))
 ;; Names `ns` defined as globals.
 (define globals! (->* (names) unit) (lambda (ns) (set globals (append ns (get globals)))))
-;; Whether `n` was a global before this parse.
+;; Whether `n` was a global before this parse; or is one, of those so far.
 (define global-before? (->* (symbol) bool) (lambda (n) (name-in? n (get globals-before))))
+(define global-now? (->* (symbol) bool)
+  (lambda (n) (or (global-before? n) (name-in? n (get globals)))))
 
 ;;; ------------------------------------------------------------ expanding
 
@@ -610,7 +597,7 @@
     (let ((items (list-items form)))
       (if (and (not (null? items)) (syn-symbol? (car items))
                (makes-top-defns? (syn-symbol (car items))))
-          (let ((n (chain-begun! fail form)))
+          (let ((n (begin (set made-syntax nil) (chain-begun! fail form))))
             (if (< n 0)
                 (list form)
                 (begin (set budget n)
@@ -632,7 +619,15 @@
                  (begin (use-left!) made)))
              nil))
         ((string=? head "begin") (expand-defns fail (cdr items)))
+        ;; A macro an expansion defines: defined now, for what comes after;
+        ;; its names noted for the parser (`made-syntax-taken!`).
+        ((or (string=? head "define-syntax") (string=? head "define-syntax-rec"))
+         (begin (set made-syntax (append (get made-syntax) (define-macro fail s nil))) nil))
         (else (list (expand-in fail s nil)))))))
+;; The macros the last top-level form's expansion defined, `made_syntax`.
+(define made-syntax (ref names rs) (new nil))
+(define made-syntax-taken! (->* () names)
+  (lambda () (let ((ns (get made-syntax))) (begin (set made-syntax nil) ns))))
 (define expand-defns (->* (fails syns-a) syns-a)
   (lambda (fail xs)
     (if (null? xs) nil (append (expand-defn fail (car xs)) (expand-defns fail (cdr xs))))))
@@ -799,6 +794,11 @@
         ((syn-symbol? t)
          (let* ((a (source-key ta made)) (b (source-key tb made)))
            (transcribe-name c t (syn-symbol t) a b act bs made)))
+        ;; `(... ...)`, the ellipsis of a macro the template defines.
+        ((tagcase t
+           (lst (xs d a b x) (and (= (len xs) 2) (ellipsis? (car xs)) (ellipsis? (nth xs 1))))
+           (else y #f))
+         (atom (string->symbol "...") (source-key ta made) (source-key tb made) made))
         ((not (null? (list-items t)))
          (let* ((a (source-key ta made)) (tr (trust-if! c ta a made))
                 (xs (transcribe-items fail c (list-items t) path bs made))

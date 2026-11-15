@@ -68,7 +68,9 @@
   ;; A module's item, as a program's walk takes one (`scope-forms`): a
   ;; definition, a string (a comment), or an expression run as the module
   ;; is made.
-  (s-item))
+  (s-item)
+  ;; A macro's transformer a template writes (`macros.rs`'s `STy::Rules`).
+  (s-rules))
 (define-type stys (listof sty acyclic))
 
 ;; Each `mu`'s body, by its number: the program's, and every file's
@@ -787,7 +789,8 @@
     (tagcase t
       (s-expr () 0) (s-bvar () 1) (s-id () 2) (s-data () 3) (s-type () 4) (s-label () 5)
       (s-nil () 6) (s-literal (n) 7) (s-pair (a d) 8) (s-lambda () 10) (s-defn () 11)
-      (s-dvar () 12) (s-kind () 13) (s-item () 14) (s-mark (n i) 15) (else y 9))))
+      (s-dvar () 12) (s-kind () 13) (s-item () 14) (s-mark (n i) 15) (s-rules () 16)
+      (else y 9))))
 ;; Whether `k` is a kind of no parts: one of what `(Expr | Id | Data | Type
 ;; | Label | Bvar | Dvar | Kind | Lambda | Defn)` names in `macros.rs`.
 (define simple-kind? (->* (int) bool) (lambda (k) (or (< k 6) (> k 9))))

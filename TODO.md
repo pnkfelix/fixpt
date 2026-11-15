@@ -7222,3 +7222,15 @@ holding each module's instance once, by module (not a namespace per list
 of forms), and a transformer's effect that may write phase-1 state, the
 contracts' determinism argued again for it.
 
+## 284. Delimiters a programmer chooses, in place of anonymous and points-free conventions (the user's, 2026-11-15: revisit later)
+
+A macro whose template is a `syntax-rules` of its own takes R7RS's rule for
+now: every `...` in a template is the outer macro's, and the inner's is
+written `(... ...)`. The user would rather revisit this and other choices
+that lean on anonymous, positional or points-free notation (`...` itself,
+signatures' addresses `AD`, `_` for a pattern's head): their own leaning is
+toward delimiters the programmer names, as a shell's here-document's
+`<<END`. Candidates when this is taken up: an ellipsis named per
+`syntax-rules`, which R7RS itself allows (`(syntax-rules ::: (literal …)
+rule …)`, §4.3.2), so that an inner macro's names its own, parts named in
+signatures in place of addresses, and how each reads in both front ends.

@@ -25,7 +25,7 @@
 (import scopes-module normal atm-in?)
 (import align-module node-kids node-syn pvar? makes-defns? lv-rib lv-cage lv-earlier lv-shape k-pair
         k-form k-desc k-seq k-binder act-rename sorted-strings joined
-        (type levels pvars actions strings))
+        (type levels pvars actions strings found))
 
 ;;; ------------------------------------------------------------ exports
 
@@ -193,3 +193,28 @@
                                       (syn-start hd) (syn-end hd) #f)
                                (get with-uses)))
           (note-uses n hd (cdr withs))))))
+
+;;; ------------------------------------------------------------ binders' depths
+
+;; Each template binder the walk found, with how many ellipses it is under.
+(define-type depths (listof (tupleof int int) acyclic))
+(define binder-depths (->* (found) depths)
+  (lambda (fs)
+    (cond ((null? fs) nil)
+          ((tagcase (node-kids (extract (car fs) 1)) (k-binder (n d) #t) (else y #f))
+           (cons (tuple (extract (car fs) 1) (extract (car fs) 4)) (binder-depths (cdr fs))))
+          (else (binder-depths (cdr fs))))))
+(define depth-of (->* (int depths) int)
+  (lambda (b ds)
+    (cond ((null? ds) 0) ((= b (extract (car ds) 1)) (extract (car ds) 2))
+          (else (depth-of b (cdr ds))))))
+;; A binder `b` (none or one) repeated, referred to under `depth`, fewer
+;; ellipses than it is under: which repetition's is not said.
+(define repeated-ref (->* (fails symbol (listof int acyclic) int depths syn) unit)
+  (lambda (fail n b depth bd s)
+    (if (and (not (null? b)) (> (depth-of (car b) bd) depth))
+        (fail-at fail (string-append "`" (symbol->string n) "` is bound in each repetition of a "
+                                     "part, and referred to under fewer ellipses than it is "
+                                     "bound: which repetition's it is is not said")
+                 s)
+        #u)))

@@ -519,13 +519,16 @@
               (opened-each fail (cdr xs) inner outer free made)))))
 
 ;; Whether `n` is a keyword's name, which nothing binds: a form's, a
-;; description's word, a macro's (`Macros::expand_procedural`'s).
+;; description's word, a macro's definition's, a macro's
+;; (`Macros::procedural_opened`'s).
 (define keyword-name? (->* (fails string) bool)
   (lambda (fail n)
     (or (reserved? n) (desc-word? n #t) (type-form? n)
         (named? n (kernel-sigs fail)) (named? n (kernel-definitions fail))
         (string=? n "else") (string=? n "=>") (string=? n "quote") (string=? n "quasiquote")
         (string=? n "unquote") (string=? n "unquote-splicing")
+        ;; A macro's definition's words (`transformer_word`).
+        (string=? n "syntax-rules") (string=? n "trailmark") (>= (style-named n) 0)
         (macro? (string->symbol n)))))
 (define named? (->* (string (listof (tupleof symbol sty) acyclic)) bool)
   (lambda (n ns)

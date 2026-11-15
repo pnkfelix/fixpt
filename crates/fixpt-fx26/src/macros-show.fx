@@ -33,7 +33,7 @@
         (s-expr () (sym "expr")) (s-lambda () (sym "lambda")) (s-bvar () (sym "bvar"))
         (s-id () (sym "id")) (s-data () (sym "data")) (s-type () (sym "type"))
         (s-label () (sym "label")) (s-dvar () (sym "dvar")) (s-kind () (sym "kind"))
-        (s-defn () (sym "defn")) (s-item () (sym "item"))
+        (s-defn () (sym "defn")) (s-item () (sym "item")) (s-rules () (sym "rules"))
         (s-nil () (mk-list nil a b))
         ;; A `syntax-rules`' trailmark, inferred as a word its pattern
         ;; writes; a reserved name but the standard trailmarks, a kernel

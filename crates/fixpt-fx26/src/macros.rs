@@ -89,6 +89,13 @@ pub(crate) enum STy {
     /// A definition, where a template makes one (the kernel's `begin` of
     /// them); no part of a signature, for now.
     Defn,
+    /// A macro's transformer a template writes, the `syntax-rules` of a
+    /// `define-syntax` it makes: each name in it a reference, renamed where
+    /// the template binds it, else the expansion's alias, so that it means
+    /// what it does where the template's macro is defined; a pattern
+    /// variable placed in it placed any number of times; its `...` the
+    /// template's, the defined macro's written `(... ...)` (R7RS).
+    Rules,
     /// A module's item, as a program's walk takes one (`scope-forms`): a
     /// definition, a string (a comment), or an expression run as the module
     /// is made.
@@ -191,6 +198,9 @@ pub(crate) enum Ns {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Free {
     Toplevel,
+    /// A name in a macro's transformer a template writes (`STy::Rules`):
+    /// the expansion's alias, whatever it names.
+    Inner,
     Qualified,
     Plain,
     Bound,
@@ -198,7 +208,7 @@ enum Free {
 
 /// A macro defined: its signature and clauses.
 #[derive(Debug)]
-struct Macro {
+pub(crate) struct Macro {
     sig: Rc<STy>,
     /// Whether it makes definitions, `(-> σ defn)`.
     defn: bool,
@@ -486,6 +496,10 @@ pub struct Macros {
     checking: bool,
 }
 
+/// A macro an expansion defined: its name, where, and the macro the name
+/// was before, if any.
+pub(crate) type MadeSyntax = (Sym, At, Option<Rc<Macro>>);
+
 /// What the expander saw of `with`s, for the checkers, and the shapes it
 /// knows of the modules forms open.
 #[derive(Clone, Default)]
@@ -524,6 +538,11 @@ pub(crate) struct Withs {
     /// (`Checker::with_as`), which would otherwise be what it is where the
     /// macro is used, a binding there capturing it.
     pub(crate) projections: HashMap<Span, (Sym, Span)>,
+    /// The macros an expansion defined (`Macros::expand_defn`), each with
+    /// where, and what its name was before: the driver holds each to the
+    /// globals, as it does a written one, and undoes them if the form is
+    /// refused (`Macros::made_undone`).
+    pub(crate) made_syntax: Vec<MadeSyntax>,
     /// The shapes known (`shapes`): the top level's names', files'.
     shapes: shapes::Known,
     /// Where the macro each expansion's aliases are of was defined, by the
@@ -1216,7 +1235,7 @@ impl Macros {
             Expr => (mode == Mode::Program || !shape.sym().is_some_and(|n| reserved(interner.name(n)))) && shape != Shape::Nil,
             Lambda => shape == Shape::List && lambda_shaped(&syn(), interner),
             Defn => matches!(shape, Shape::List | Shape::Dotted),
-            Data | Type | Kind | Item => true,
+            Data | Type | Kind | Item | Rules => true,
             Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
     }
@@ -1245,7 +1264,7 @@ impl Macros {
             Pair(a, d) => depth == 0 || (self.fits_within(a, &x, mode, interner, pvars, depth - 1) && self.fits_rest(d, after, tail, span, mode, interner, pvars, depth - 1)),
             Nil | Literal(_) | Mark(..) | Bvar | Dvar | Id | Label => false,
             Lambda => lambda_shaped(&whole(), interner),
-            Expr | Defn | Data | Type | Kind | Item => true,
+            Expr | Defn | Data | Type | Kind | Item | Rules => true,
             Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
         }
     }
@@ -1894,6 +1913,11 @@ impl Macros {
                     let action = match (bound, free, file) {
                         (Some(b), _, _) => Action::Rename(t.nodes[b].path.clone(), binder_depth.get(&b).copied().unwrap_or(0)),
                         (None, Free::Plain, _) => continue,
+                        // A name a macro's template defined this one with,
+                        // an alias already: what it names where that
+                        // macro is defined, kept.
+                        (None, Free::Toplevel | Free::Qualified | Free::Inner, _) if procedural::alias_base(interner.name(*n)).is_some() => continue,
+                        (None, Free::Inner, _) => Action::Alias,
                         (None, Free::Bound, _) => {
                             return Err(FxError::at(span, format!("`{}`, the module a template's `(with module name)` takes from, is bound by the template or given by a use: a top level's, not yet", interner.name(*n))));
                         }
@@ -1956,7 +1980,7 @@ impl Macros {
             }
             // A trailmark of the file's the template writes: by the name the
             // importer has it by.
-            if let (Some(f), STy::Mark(..)) = (file, &*node.core)
+            if let (Some(f), STy::Mark(..) | STy::Rules) = (file, &*node.core)
                 && let Some(n) = node.syn.sym()
                 && let Some(i) = f.internal.get(&n)
             {
@@ -2054,7 +2078,20 @@ impl Macros {
         (self.withs.limits, self.withs.recheck, self.withs.contracts) = ((uses, depth), recheck, contracts);
         self.withs.trusted.clear();
         self.withs.chain.clear();
+        self.withs.made_syntax.clear();
         self.expand_defn(form, interner, &mut { self.withs.limits.0 }, &mut out)?;
+        // A macro it defined is defined where the use is, as a program
+        // expanded before it is checked holds its names to the globals
+        // (`defined_before`); its templates' checks after the definitions,
+        // each expanded as a form of its own.
+        let made: Vec<Sym> = self.withs.made_syntax.iter().map(|m| m.0).collect();
+        for n in made {
+            self.defined_at.insert(n, form.at());
+            for t in self.template_checks(n, interner)? {
+                let e = self.expand(&t, interner)?;
+                out.push(self.aliases_resolved(&e, interner)?);
+            }
+        }
         Ok(out.into_iter().map(|f| f.placed(form.at())).collect())
     }
 
@@ -2142,8 +2179,31 @@ impl Macros {
             }
             return Ok(());
         }
+        // A macro an expansion defines: defined now, for what comes after;
+        // its names noted, for its templates' checks after the form's
+        // definitions (`expand_top`) and for the driver to hold to the
+        // globals (`Withs::made_syntax`).
+        if head.is_some_and(|h| matches!(interner.name(h), "define-syntax" | "define-syntax-rec")) {
+            let before: Vec<(Sym, Option<Rc<Macro>>)> = crate::top::syntax_names(s, interner).unwrap_or_default().into_iter().map(|(n, _)| (n, self.defined.get(&n).cloned())).collect();
+            for n in self.define(s, interner)? {
+                let was = before.iter().find(|(b, _)| *b == n).and_then(|(_, m)| m.clone());
+                self.withs.made_syntax.push((n, s.at(), was));
+            }
+            return Ok(());
+        }
         out.push(self.expand_in(s, interner, budget, &mut Vec::new())?);
         Ok(())
+    }
+
+    /// The macros a refused form's expansion defined, undone: each name what
+    /// it was before.
+    pub(crate) fn made_undone(&mut self, made: Vec<MadeSyntax>) {
+        for (n, _, was) in made.into_iter().rev() {
+            match was {
+                Some(m) => self.defined.insert(n, m),
+                None => self.defined.remove(&n),
+            };
+        }
     }
 
     /// `withs`: the places of the `with` forms whose bodies `s` is in.
@@ -2724,6 +2784,7 @@ impl Macros {
                 || self.k.type_forms.contains(n)
                 || reserved(n)
                 || matches!(n, "else" | "=>" | "quote" | "quasiquote" | "unquote" | "unquote-splicing")
+                || transformer_word(n)
                 || defined.contains(n)
         };
         Ok(procedural::keywords(&opened, &is_keyword, interner))
@@ -2782,6 +2843,8 @@ impl Macros {
                     _ => Syn::new(at, t.view().clone(), interner),
                 })
             }
+            // `(... ...)`, the ellipsis of a macro the template defines.
+            V::List { items, tail } if items.len() == 2 && tail.is_none() && is_ellipsis(&items[0], interner) && is_ellipsis(&items[1], interner) => Ok(Syn::new(at, items[0].view().clone(), interner)),
             V::List { items, tail } => {
                 let head = match c.actions.get(&*path) {
                     Some(Action::MacroHead(h)) => Some(*h),
@@ -2878,6 +2941,66 @@ impl Aligner<'_> {
         let at = self.node_new(t, s, path);
         self.fill(at, t, s, root.unwrap_or(at))?;
         Ok(at)
+    }
+
+    /// Transformer `s_owned` a template writes, at node `at` (`STy::Rules`):
+    /// each name a reference, but a form's word, `_`, a macro's or a
+    /// trailmark's name; a list, its parts so; `(... ...)` the defined
+    /// macro's ellipsis, a quoted datum as it is. Nothing of it in another
+    /// mode, where it is the defined macro's alone.
+    fn rules(&mut self, at: usize, s_owned: Syn, root: usize) -> R<Option<Step>> {
+        if self.mode != Mode::Template {
+            return Ok(None);
+        }
+        self.nodes[at].many = true;
+        let s = &s_owned;
+        let fail = |why: &str| FxError::at(s.at(), why.to_string());
+        let dots = "`...` in a macro a template defines is the template's (R7RS), and repeats nothing here: the defined macro's is written `(... ...)`";
+        match s.view() {
+            V::Symbol(n) => {
+                let name = self.name(n);
+                if name == "..." {
+                    return Err(fail(dots));
+                }
+                let k = &self.m.k;
+                let word = name == "_"
+                    || reserved(name)
+                    || k.forms.contains_key(name)
+                    || k.definitions.contains_key(name)
+                    || self.word(n, true)
+                    || k.type_forms.contains(name)
+                    || matches!(name, "else" | "=>" | "quote" | "quasiquote" | "unquote" | "unquote-splicing")
+                    || transformer_word(name)
+                    || self.m.defined.contains_key(&n)
+                    || self.m.mark_of(n).is_some();
+                if !word {
+                    self.nodes[at].kids = Kids::Ref(n, Ns::Value, Free::Inner);
+                }
+                Ok(None)
+            }
+            V::List { items, tail } => {
+                let is_dots = |x: &Syn| is_ellipsis(x, self.interner);
+                if items.len() == 2 && tail.is_none() && is_dots(&items[0]) && is_dots(&items[1]) {
+                    return Ok(None);
+                }
+                if is_dots(&items[0]) {
+                    return Err(fail("`(... template)` other than `(... ...)`: not yet"));
+                }
+                if items.iter().any(is_dots) {
+                    return Err(fail(dots));
+                }
+                if items[0].sym().is_some_and(|h| self.name(h) == "quote") {
+                    return Ok(Some((at, Rc::new(STy::Data), s_owned, root)));
+                }
+                let r = Rc::new(STy::Rules);
+                Ok(Some((at, Rc::new(STy::Pair(r.clone(), r)), s_owned, root)))
+            }
+            V::Nil => {
+                self.nodes[at].kids = Kids::Nil;
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
     }
 
     /// A node for `s`, at `path`, of type `t`, to be filled.
@@ -2977,6 +3100,9 @@ impl Aligner<'_> {
                 return Ok(None);
             }
         }
+        if matches!(&**t, STy::Rules) {
+            return self.rules(at, s_owned, root);
+        }
         // `(p ...)`, a pattern's or a template's: `p` aligned with the list's
         // element type, repeated; the list exports what each element does.
         if matches!(self.mode, Mode::Pattern | Mode::Template) && let Some(x) = ellipsis(s, self.interner) {
@@ -3010,6 +3136,7 @@ impl Aligner<'_> {
             return Err(fail("`...` follows the part it repeats, last in a list".into()));
         }
         match &**t {
+            STy::Rules => unreachable!("taken above"),
             STy::Mu(id) => {
                 let body = self.m.mus[*id].clone();
                 Ok(Some((at, body, s_owned, at)))
@@ -3284,6 +3411,23 @@ impl Aligner<'_> {
             // than as a form its signature does not fit.
             Some((_, "define-generative")) if defn && self.mode == Mode::Template && items.len() == 3 && tail.is_none() => {
                 return Err(FxError::at(s.at(), "a template's `define-generative` names its conversions, `#:seal` and `#:unseal`"));
+            }
+            // `(define-syntax name [σ] transformer)` an expansion makes: its
+            // name a binder it exports, its signature a datum, its
+            // transformer a template's macro (`STy::Rules`), a `syntax-rules`
+            // one in a template (a procedural one's code is phase 1's).
+            Some((_, "define-syntax")) if defn && tail.is_none() && matches!(items.len(), 3 | 4) => {
+                let t = items[items.len() - 1];
+                let rules = t.list().and_then(|l| l.first().and_then(|h| h.sym())).is_some_and(|h| self.name(h) == "syntax-rules");
+                if self.mode == Mode::Template && !rules {
+                    return Err(FxError::at(t.at(), "a template's `define-syntax` defines a `syntax-rules` macro: a procedural one's transformer is phase 1's code, not yet in a template"));
+                }
+                let nil = Rc::new(STy::Nil);
+                let mut rest = Rc::new(STy::Pair(Rc::new(STy::Rules), nil));
+                if items.len() == 4 {
+                    rest = Rc::new(STy::Pair(Rc::new(STy::Data), rest));
+                }
+                Some(Rc::new(STy::Export(Rc::new(STy::Pair(Rc::new(STy::Bvar), rest)), Bind::Rib(vec![(vec![true], Delta::Var)]))))
             }
             Some((h, n)) if defn => match self.m.defined.get(&h) {
                 Some(m) if m.defn => Some(m.sig.clone()),
@@ -4122,6 +4266,9 @@ impl Aligner<'_> {
             }
             (Expr, Lambda) => true,
             (Data, Data) | (Type, Type) | (Label, Label) | (Kind, Kind) => return Ok(()),
+            // In a macro the template defines, whose own check is the
+            // defined macro's, where it is defined.
+            (_, Rules) => true,
             (Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn, _) | (_, Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn) => false,
             _ => self.m.sub(have, want, &mut HashSet::default()),
         };
@@ -4515,6 +4662,12 @@ fn guarded(t: &STy, id: usize) -> bool {
 /// a variable.
 fn reserved(name: &str) -> bool {
     crate::top::KEYWORDS.contains(&name) || name == "#%fx" || name == "#%toplevel" || name == "define-syntax" || name == "define-syntax-rec"
+}
+
+/// Whether `name` is a word of a macro's definition: `syntax-rules`, a
+/// procedural transformer's style, a trailmark's.
+fn transformer_word(name: &str) -> bool {
+    matches!(name, "syntax-rules" | "trailmark") || procedural::Style::named(name).is_some()
 }
 
 /// `split` of `s`, which is taken: its rest shared, not copied.

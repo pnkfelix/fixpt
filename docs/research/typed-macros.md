@@ -2376,6 +2376,29 @@ Decided with them:
   by a template or a transformer defines its macro for the forms after,
   in both expanders; the kernel gives `define-syntax` a binding structure
   for templates (its name a binder, in the syntax namespace).
+  *Built*, both front ends (2026-11-15), as decided with the user:
+  - `...` in a template is the template's own (R7RS), the defined macro's
+    written `(... ...)`; a bare one in the defined macro refused. Delimiters
+    the programmer names, later: `TODO.md` §284.
+  - The defined macro's names mean what they do where the outermost
+    `define-syntax` is (the user's): a name the template binds, its fresh
+    one; any other the expansion's alias (`STy::Rules`, `Free::Inner`;
+    FX-26's `s-rules`, free 4), which the defined macro's own check keeps
+    as it is. So a file's macro's defined macro reads the file's names
+    (`fixpt-cli` `import_with_syntax.rs`). A trailmarks list says what a
+    pattern matches, nothing of a template's names.
+  - A use's part placed in the defined macro is placed where it may be
+    more than once, its signature `(many …)` if an expression.
+  - In a template, a `syntax-rules` macro only. A procedural one's
+    transformer is phase-1 code: the template's own code in it would be
+    checked at phase 1, and a use's part placed in it only where the
+    signature says that part is phase-1 code (say `(expr #:phase 1)`),
+    since its author wrote it at phase 0 (the user's point: phases are a
+    tower, Flatt's). A transformer's output may define a procedural one.
+  - A made macro is defined where the use is, held to the globals there,
+    those before the program and those the forms before it define; a form
+    refused undoes the macros it made (`made_undone`).
+  Tests: `macros/defn-defines-macro*.fx`, `procedural/defines-macro.fx`.
 - **The defined macro's shape**: an entry `(ℓ (syntax σm))`, `σm` a
   signature. A later use of the name the part gives is aligned with `σm`
   from the contract alone, in a template too, without running anything;

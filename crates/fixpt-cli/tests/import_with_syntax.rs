@@ -39,6 +39,16 @@ fn a_files_macro_makes_definitions() {
     }
 }
 
+/// A file's macro that defines a macro: the defined macro's free names the
+/// file's, where the macro that defines it is defined.
+#[test]
+fn a_files_macro_defines_a_macro_of_its_names() {
+    for m in MACHINES {
+        let (out, err) = eval(m, "main-defines-macro.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("13 : int")), "{m}: {out}{err}");
+    }
+}
+
 /// A module file's own macros, used in it (`binding-shapes.md`, step 3;
 /// Heist's (a)): their templates' free names the file's items, hidden or
 /// not, a binder around a use that would capture one renamed; and where
