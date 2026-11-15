@@ -3,13 +3,13 @@
 ;; datatype as a macro, each variant's type chosen by its arity by a macro
 ;; that makes a description, its values constructed by keywords.
 (define-syntax payload
-  (-> (type ...) desc)
+  (-> (desc ...) desc)
   (syntax-rules
     ((_) unit)
     ((_ f) f)
     ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
-  (-> (dvar (label type ...) ...) defn)
+  (-> (dvar (label desc ...) ...) defn)
   (syntax-rules
     ((_ name (t field ...) ...) (define-type name (sumof (t (payload field ...)) ...)))))
 (define-data shape (#:circle int) (#:rect int int) (#:none))

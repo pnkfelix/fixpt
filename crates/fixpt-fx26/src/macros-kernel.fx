@@ -16,7 +16,7 @@
     ;; earlier one).
     (define formals (mu f (union (export () (rho))
                                  (export (bvar . (import f (rho (A var)))) (rho (A var) (D rib)))
-                                 (export ((bvar type) . (import f (rho (AA var))))
+                                 (export ((bvar desc) . (import f (rho (AA var))))
                                          (rho (AA var) (D rib))))))
     (define let-bindings (mu b (union (export () (rho))
                                       (export ((bvar expr) . b) (rho (AA var) (D rib))))))
@@ -27,19 +27,19 @@
                                               (cage (at D) (rho (AA var)))))))
     ;; Each bound to a lambda, as the checkers take one.
     (define letrec-bindings (mu b (union (export () (rho))
-                                         (export ((bvar type lambda) . b) (rho (AA var) (D rib))))))
+                                         (export ((bvar desc lambda) . b) (rho (AA var) (D rib))))))
     ;; A `define-rec`'s, each lambda in the scope of its type's `poly`s'
     ;; binders, as a definition's is (`Checker::bind_signature`).
     (define defrec-bindings
       (mu b (union (export () (rho))
-                   (export ((bvar type (import lambda (rho (ADA rib)))) . b)
+                   (export ((bvar desc (import lambda (rho (ADA rib)))) . b)
                            (rho (AA var) (D rib))))))
     ;; A description's binders, `((name kind) …)`, a third the binder's place
     ;; or `distinct`; each in the scope of those before it.
     (define dbinders (mu b (union (export () (rho))
                                   (export ((dvar kind) . b) (rho (AA dvar) (D rib)))
-                                  (export ((dvar kind type) . b) (rho (AA dvar) (D rib))))))
-    (define descs (mu ds (union () (type . ds))))
+                                  (export ((dvar kind desc) . b) (rho (AA dvar) (D rib))))))
+    (define descs (mu ds (union () (desc . ds))))
     ;; A `tagcase` arm, `(#:tag x body …)` or `(else x body …)`: `x` in scope in
     ;; the body.
     (define arms (mu a (union ()
@@ -58,7 +58,7 @@
     (form and exprs)
     (form or exprs)
     (form quote (data))
-    (form the (type expr))
+    (form the (desc expr))
     (form sum (label expr))
     (form extract (expr label))
     (form product fields)
@@ -73,7 +73,7 @@
     ;; closure is made in a place.
     (form letregion (dvar . (import exprs (rho (A dvar)))))
     (form letfreeze (union (dvar . (import exprs (rho (A dvar))))
-                           ((dvar type) . (import exprs (rho (AA dvar))))))
+                           ((dvar desc) . (import exprs (rho (AA dvar))))))
     (form letrena (dvar . (import exprs (rho (A place)))))
     (form letreap (dvar . (import exprs (rho (A place)))))
     (form rlambda (expr formals . (import exprs (rho (AD rib)))))
@@ -90,22 +90,22 @@
     (define defns (mu d (union (export () (cage))
                                (export (defn . (import d (cage (at A)))) (cage (at D) (at A))))))
     (definition define (union (export (bvar expr) (rho (A var)))
-                              (export (bvar type (import expr (rho (A var) (AD rib))))
+                              (export (bvar desc (import expr (rho (A var) (AD rib))))
                                       (rho (A var)))))
-    (definition define* (export (bvar type (import lambda (rho (A var) (AD rib)))) (rho (A var))))
+    (definition define* (export (bvar desc (import lambda (rho (A var) (AD rib)))) (rho (A var))))
     (definition define-rec (import defrec-bindings (rho (() rib))))
     ;; A type, its name in scope in itself (types are declared ahead), a
     ;; family's parameters too; an effect.
     (definition define-type
-      (union (export (dvar (import type (rho (A dvar)))) (rho (A dvar)))
-             (export ((dvar . dbinders) (import type (rho (AA dvar) (DA rib)))) (rho (AA dvar)))))
-    (definition define-effect (export (dvar type) (rho (A dvar))))
+      (union (export (dvar (import desc (rho (A dvar)))) (rho (A dvar)))
+             (export ((dvar . dbinders) (import desc (rho (AA dvar) (DA rib)))) (rho (AA dvar)))))
+    (definition define-effect (export (dvar desc) (rho (A dvar))))
     ;; A generative type, its conversions named, `#:seal mk #:unseal get`,
     ;; values each (`docs/research/generative-types.md` §7).
     (definition define-generative
-      (union (export (dvar (import type (rho (A dvar))) label bvar label bvar)
+      (union (export (dvar (import desc (rho (A dvar))) label bvar label bvar)
                      (rho (A dvar) (ADDD var) (ADDDDD var)))
-             (export ((dvar . dbinders) (import type (rho (AA dvar) (DA rib)))
+             (export ((dvar . dbinders) (import desc (rho (AA dvar) (DA rib)))
                       label bvar label bvar)
                      (rho (AA dvar) (ADDD var) (ADDDDD var)))))
     (definition begin defns))))
@@ -149,12 +149,12 @@
     (define select-arm (union ((data . exprs) bvar . (import exprs (rho (AD var))))))
     (define select-arms (mu a (union () (select-arm . a))))
     (form vlambda (union (bvar . (import exprs (rho (A var))))
-                         ((bvar type) . (import exprs (rho (AA var))))))
-    (form stage (expr type type expr clause clause . given-opt))
-    (form session-check (expr type type expr clause clause . given-opt))
-    (form reify-effect (type . given-opt))
-    (form reify-region (type . given-opt))
-    (form reify-type (type . given-opt))
+                         ((bvar desc) . (import exprs (rho (AA var))))))
+    (form stage (expr desc desc expr clause clause . given-opt))
+    (form session-check (expr desc desc expr clause clause . given-opt))
+    (form reify-effect (desc . given-opt))
+    (form reify-region (desc . given-opt))
+    (form reify-type (desc . given-opt))
     (form session-commit! (expr expr expr))
     (form syscall-available? (data))
     (form send (expr expr))
@@ -165,9 +165,9 @@
     ;; `(spawn (mailbox message-type place) body …)`: the mailbox and the
     ;; place (a description, and a value of it) in the body, the place in
     ;; the message's type.
-    (form spawn (union ((bvar (import type (rho (ADDA place))) dvar)
+    (form spawn (union ((bvar (import desc (rho (ADDA place))) dvar)
                         . (import exprs (rho (AA var) (ADDA place))))))
-    (form spawn-monitored (union (expr expr (bvar (import type (rho (ADDADD place))) dvar)
+    (form spawn-monitored (union (expr expr (bvar (import desc (rho (ADDADD place))) dvar)
                                        . (import exprs (rho (AADD var) (ADDADD place))))))
     (form par (let-bindings . (import exprs (rho (A rib)))))
     (form race exprs)
@@ -180,7 +180,7 @@
     (form confirm-length (expr expr arm1 expr))
     (form acyclic (expr arm1 expr))
     (form confirm-nat (expr arm1 expr))
-    (form convention (type expr))
+    (form convention (desc expr))
     (form make-bloblet exprs)
     (form rmake-bloblet exprs)
     (form bloblet-ref exprs)
@@ -213,8 +213,8 @@
              (export ((dvar . dbinders) . (import variants (rho (AA dvar) (DA rib))))
                      (rho (AA dvar) (D rib)))))
     (definition define-convention (export (dvar . data) (rho (A dvar))))
-    (definition define-syscall (export (bvar data type) (rho (A var))))
-    (definition define-optional-syscall (export (bvar data type) (rho (A var))))
+    (definition define-syscall (export (bvar data desc) (rho (A var))))
+    (definition define-optional-syscall (export (bvar data desc) (rho (A var))))
     (definition include (union (export (expr) (shape A)) (export (expr data) (shape A))))
     (definition import (export (id . import-names) (rho (D rib))))
     (definition hide items)

@@ -3,7 +3,7 @@
 ;; type that is the use's own `t`: not captured, its binder renamed.
 (define-type t int)
 (define-syntax counter-sig
-  (-> (type) desc)
+  (-> (desc) desc)
   (syntax-rules
     ((_ elem) (moduleof (abs #:t t type) (val #:empty t) (val #:add (subr pure (elem t) t))
                         (val #:size (subr pure (t) int))))))

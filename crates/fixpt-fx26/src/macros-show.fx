@@ -31,7 +31,7 @@
     (let ((sym (lambda ((s string)) (mk-symbol s a b))))
       (tagcase t
         (s-expr () (sym "expr")) (s-lambda () (sym "lambda")) (s-bvar () (sym "bvar"))
-        (s-id () (sym "id")) (s-data () (sym "data")) (s-type () (sym "type"))
+        (s-id () (sym "id")) (s-data () (sym "data")) (s-type () (sym "desc"))
         (s-label () (sym "label")) (s-dvar () (sym "dvar")) (s-kind () (sym "kind"))
         (s-defn () (sym "defn")) (s-item () (sym "item")) (s-rules () (sym "rules"))
         (s-nil () (mk-list nil a b))

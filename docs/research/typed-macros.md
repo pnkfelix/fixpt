@@ -2485,8 +2485,10 @@ user:
    both front ends; every test's and example's signature rewritten (a
    script over the `define-syntax` forms, the `(syntax σ)` entries' too).
 2. **`desc`, not `type`,** for what makes a description: it covers types,
-   effects, regions and the rest. *Built.* (A signature's operand of a
-   description is still written `type`, a separate question.)
+   effects, regions and the rest. *Built.* So is a signature's part that
+   is a description, `desc`, not `type` (the user's: kinds are checked
+   after expansion, as types are), the kernel's signatures too; `type`
+   refused there, saying so.
 3. **No FX types on what definitions define:** `(ℓ var)` says a value is
    defined, not its type (the user: too many cases want it inferred).
 4. **Macros as operands, not yet; nothing to rule them out.** A truly

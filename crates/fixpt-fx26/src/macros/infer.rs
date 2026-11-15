@@ -1161,7 +1161,7 @@ impl Macros {
             STy::Bvar => sym("bvar", interner),
             STy::Id => sym("id", interner),
             STy::Data => sym("data", interner),
-            STy::Type => sym("type", interner),
+            STy::Type => sym("desc", interner),
             STy::Label => sym("label", interner),
             STy::Dvar => sym("dvar", interner),
             STy::Kind => sym("kind", interner),

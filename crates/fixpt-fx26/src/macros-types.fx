@@ -546,14 +546,22 @@
                   (case n
                     ((expr) (s-expr)) ((bvar) (s-bvar)) ((id) (s-id)) ((data) (s-data))
                     ((lambda) (s-lambda))
-                    ((type) (s-type)) ((label) (s-label)) ((dvar) (s-dvar)) ((kind) (s-kind))
+                    ;; A description, kinded after expansion as an
+                    ;; expression is typed.
+                    ((desc) (s-type)) ((label) (s-label)) ((dvar) (s-dvar)) ((kind) (s-kind))
                     ((item) (s-item))
+                    ((type)
+                     (begin (fail-at fail (string-append "a syntax type: a part that is a "
+                                                         "description is written `desc`, not "
+                                                         "`type`")
+                                     s)
+                            (s-nil)))
                     (else
                      (begin
                        (fail-at fail (string-append "a syntax type: `" (symbol->string n) "` is "
-                                                    "none (`expr`, `bvar`, `id`, `data`, `type`, "
-                                                    "`label`, `lambda`, `dvar`, `kind`, or a "
-                                                    "`mu`'s variable)")
+                                                    "none (`expr`, `bvar`, `id`, `data`, `desc`, "
+                                                    "`label`, `lambda`, `dvar`, `kind`, `item`, "
+                                                    "or a `mu`'s variable)")
                                 s)
                        (s-nil))))
                   (car t))))))))
@@ -851,7 +859,7 @@
         ((and (or (binder-kind? ka) (= ka 2)) (or (binder-kind? kb) (= kb 2))) #t)
         (else #f)))))
 ;; Whether kind `k` is a binder's, `bvar` or `dvar`; one any syntax may be
-;; of, `expr`, `data`, `type`, `kind` or `defn`.
+;; of, `expr`, `data`, `desc`, `kind` or `defn`.
 (define binder-kind? (->* (int) bool) (lambda (k) (or (= k 1) (= k 12))))
 (define any-kind? (->* (int) bool)
   (lambda (k) (or (= k 0) (= k 3) (= k 4) (= k 11) (= k 13) (= k 14))))

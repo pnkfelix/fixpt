@@ -928,12 +928,15 @@ impl Macros {
                         "bvar" => STy::Bvar,
                         "id" => STy::Id,
                         "data" => STy::Data,
-                        "type" => STy::Type,
+                        // A description, kinded after expansion as an
+                        // expression is typed (the user's, 2026-11-15).
+                        "desc" => STy::Type,
+                        "type" => return Err(bad("a part that is a description is written `desc`, not `type`")),
                         "label" => STy::Label,
                         "dvar" => STy::Dvar,
                         "kind" => STy::Kind,
                         "item" => STy::Item,
-                        other => return Err(bad(&format!("`{other}` is none (`expr`, `bvar`, `id`, `data`, `type`, `label`, `lambda`, `dvar`, `kind`, `item`, or a `mu`'s variable)"))),
+                        other => return Err(bad(&format!("`{other}` is none (`expr`, `bvar`, `id`, `data`, `desc`, `label`, `lambda`, `dvar`, `kind`, `item`, or a `mu`'s variable)"))),
                     }
                 }
             }
