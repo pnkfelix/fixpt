@@ -68,6 +68,9 @@ pub(crate) struct Procedural {
     pub style: Style,
     pub code: String,
     pub def_env: super::hygiene::DefEnv,
+    /// Whether its signature is written, its contract: its uses aligned
+    /// with it, its expansions held to it (`Macros::contract_expanded`).
+    pub contract: bool,
 }
 
 /// The syntactic environments a syntactic-closure transformer is given and

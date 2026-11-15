@@ -2080,3 +2080,73 @@ before, and a marked use refused says so: a fault in the binding-shape
 check, not the program's (for finding one). What it saves: a use's
 alignment walks every part of it, so a macro recursing over a long list
 paid for the list at every step.
+
+## Decided: procedural macros checked by their contracts (2026-11-14)
+
+The user's: "take the syntax-rules shapes on macros and apply them to
+procedural macros", checked as each use expands, by seeing whether
+expansion commutes with α-renaming the use. Decided with the user
+(2026-11-14):
+
+- **Written** as a `syntax-rules` macro's is, in the same place:
+  `(define-syntax m σ (er-macro-transformer …))`, and `sc-` and `rsc-`
+  alike. Any signature `syntax-rules` takes, in its notation, and any
+  notation added later. None is inferred (there are no clauses to infer
+  it from).
+- **Unannotated, a procedural macro promises nothing**, as before: its
+  expansion is checked as any code is.
+- **Checked by default**; `FIXPT_MACRO_CONTRACTS=0` turns the checks off.
+  What they cost is the step's own: two runs of the transformer, an
+  alignment of one output, a comparison; never the expansion's whole.
+
+**The checks, at each use `u` of a macro with contract `σ`:**
+
+1. *The use, by its contract*, before the transformer runs: aligned with
+   `σ` as a `syntax-rules` use is, refused as one is.
+2. *Its binders and their scopes.* The use's parts, at the signature's
+   leaves (each `expr`, `bvar`, …), made pattern variables, aligned and
+   walked as a pattern is: for each binder part, the parts in its scope.
+3. *Run twice.* `O`, the transformer's output on `u`; `O′`, on `u′`: `u`
+   with each binder's name `x` made a fresh name `x′`, at the binder and
+   throughout each part in its scope (a part in scope renamed uniformly,
+   whatever it binds inside: with `x′` fresh, that keeps it α-equivalent,
+   so nothing in a part need be understood). A part outside the scope is
+   left as written: `(let1 x x body)`'s second `x` is an outer one.
+4. *Placement.* `O′` aligned as a template is, with the kernel's forms and
+   the other macros' signatures (nothing expanded), and walked: each `x′`
+   a binder, or a reference in a binder `x′`'s scope. One free, or bound
+   by another, is a part the transformer placed outside the scope its
+   contract gives it: refused, "`m`'s expansion places `x` where its
+   contract does not put it in `x`'s scope".
+5. *Commutation.* `O′` with each `x′` made `x` again, and the aliases'
+   numbers (`%~N:`) made one, the same as `O`: else the transformer
+   depends on how a bound name is spelled (compares it, builds a name of
+   it, orders by it): refused, "`m`'s expansion depends on how its use's
+   bound names are spelled".
+
+Both refused at the use, naming the macro. `O` is the expansion, then
+expanded as before (its uses aligned, its code checked).
+
+**Why these two.** Commutation alone misses a part placed outside its
+scope (`x′` is put where `x` was, and comes back the same); placement
+alone misses a transformer that reads names. Together they hold a
+procedural macro, one use at a time, to what `syntax-rules` gets by
+construction once (Herman: α-equivalent uses, α-equivalent expansions;
+each binder's scope the one its signature says).
+
+**What it relies on.** A transformer is pure (FX-26's effects say so) and
+deterministic, so its two runs differ only by what the renaming changed.
+The transformer sees the use's parts as data and may look inside them;
+whatever it does with a bound name's spelling, the commutation check sees.
+
+**Refused, not skipped:** an output that uses a procedural macro with no
+contract, whose binding structure nothing says, so `O′`'s scopes cannot
+be known ("a procedural macro in a checked expansion has a contract"), as
+a template refuses one.
+
+**Not yet:** procedural macros that make definitions or descriptions
+(their contracts' exports); a transformer in the front end's heap, with
+phases kept apart by namespace (a phase-1 namespace of its own, made anew
+for each program's expansion), and then modules imported for expansion
+(Racket's `for-syntax`), which would let a part's identity, not only a
+binder's name, be followed through the output.

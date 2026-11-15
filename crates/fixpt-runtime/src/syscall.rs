@@ -38,6 +38,10 @@ pub fn macro_limit(name: &str) -> Result<usize, String> {
         "USES" => (10_000, 1, 1_000_000_000),
         "DEPTH" => (1_000, 1, 1_000_000_000),
         "RECHECK" => (0, 0, 1),
+        // `CONTRACTS`: whether a procedural macro's expansion is held to its
+        // contract, 1 (the default) or 0 (`typed-macros.md`, "Decided:
+        // procedural macros checked by their contracts").
+        "CONTRACTS" => (1, 0, 1),
         _ => return Err(format!("no limit of macro expansion is named `{name}`")),
     };
     let var = format!("FIXPT_MACRO_{name}");
@@ -46,7 +50,7 @@ pub fn macro_limit(name: &str) -> Result<usize, String> {
         Some(v) if v.to_str().is_some_and(|s| s.trim().is_empty()) => Ok(default),
         Some(v) => match v.to_str().map(str::trim).and_then(|s| s.parse::<usize>().ok()) {
             Some(n) if (least..=most).contains(&n) => Ok(n),
-            _ if name == "RECHECK" => Err(format!("`{var}` is `{}`: it is 0 or 1", v.to_string_lossy())),
+            _ if matches!(name, "RECHECK" | "CONTRACTS") => Err(format!("`{var}` is `{}`: it is 0 or 1", v.to_string_lossy())),
             _ => Err(format!("`{var}` is `{}`: a limit of macro expansion is a whole number from 1 to 1000000000", v.to_string_lossy())),
         },
     }
