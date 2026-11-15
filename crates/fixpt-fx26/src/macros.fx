@@ -54,7 +54,8 @@
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias alias-base respanned in-expansion use-entered?
         use-left!
-        chain-begun! checked-uses trust-if! use-aligned! procedural-expanded)
+        chain-begun! checked-uses trust-if! use-aligned! procedural-expanded made-syntax-reset!
+        made-syntax-add! made-syntax-count made-syntax-taken! syntax-held)
 (import infer-module (type unsigned unsigneds))
 (import files-module written-of signature-of written-names literals-said binder-names names-any?
         said-fail signed-each syntax-names trailmark-form define-trailmark hide-marks!
@@ -597,7 +598,7 @@
     (let ((items (list-items form)))
       (if (and (not (null? items)) (syn-symbol? (car items))
                (makes-top-defns? (syn-symbol (car items))))
-          (let ((n (begin (set made-syntax nil) (chain-begun! fail form))))
+          (let ((n (begin (made-syntax-reset!) (chain-begun! fail form))))
             (if (< n 0)
                 (list form)
                 (begin (set budget n)
@@ -615,19 +616,16 @@
          (if (use-entered? fail (syn-symbol hd) s (get budget))
              (begin
                (set budget (- (get budget) 1))
-               (let ((made (expand-defn fail (expand-use fail (syn-symbol hd) s))))
-                 (begin (use-left!) made)))
+               (let* ((from (made-syntax-count))
+                      (made (expand-defn fail (expand-use fail (syn-symbol hd) s))))
+                 (begin (syntax-held fail (syn-symbol hd) s from) (use-left!) made)))
              nil))
         ((string=? head "begin") (expand-defns fail (cdr items)))
         ;; A macro an expansion defines: defined now, for what comes after;
         ;; its names noted for the parser (`made-syntax-taken!`).
         ((or (string=? head "define-syntax") (string=? head "define-syntax-rec"))
-         (begin (set made-syntax (append (get made-syntax) (define-macro fail s nil))) nil))
+         (begin (made-syntax-add! (define-macro fail s nil)) nil))
         (else (list (expand-in fail s nil)))))))
-;; The macros the last top-level form's expansion defined, `made_syntax`.
-(define made-syntax (ref names rs) (new nil))
-(define made-syntax-taken! (->* () names)
-  (lambda () (let ((ns (get made-syntax))) (begin (set made-syntax nil) ns))))
 (define expand-defns (->* (fails syns-a) syns-a)
   (lambda (fail xs)
     (if (null? xs) nil (append (expand-defn fail (car xs)) (expand-defns fail (cdr xs))))))

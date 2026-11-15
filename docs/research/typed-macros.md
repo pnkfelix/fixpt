@@ -2404,3 +2404,16 @@ Decided with them:
   from the contract alone, in a template too, without running anything;
   and the expansion must define it with a signature that fits `σm`
   (written, inferred for `syntax-rules`, a contract if procedural).
+  *Built*, both front ends (2026-11-15): `(ℓ (syntax σ))` in a `rho`
+  binds a value's name, as `var` does (`Delta::Syntax`, the signature as
+  written; FX-26's δ 100 + its place in `syntax-sigs`); in an import,
+  refused. A use's expansion done, each name such an entry gives is defined
+  by it as a macro whose signature is `σ`'s: the same syntax type (each a
+  subtype of the other), what it makes the same, neither `poly`, not a
+  procedural macro of no contract (`syntax_held`, `syntax-held`). So the
+  name's uses after the use may be read by `σ` alone. *Not yet*: a
+  template that uses such a macro and then the macro it defines, aligned
+  by `σ` there, without running anything (the template's alignment knows a
+  macro by its name, before its walk knows what is in scope).
+  Tests: `macros/defn-defines-macro-said*.fx`, `defn-syntax-import.fx`,
+  `procedural/contract-defn-macro.fx`.

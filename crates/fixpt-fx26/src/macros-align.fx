@@ -15,7 +15,7 @@
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth syn-string?
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
-        fits? sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
+        sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
         scope-sigs scope-definitions syn-number? s-item bind-shape ring-shape
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind

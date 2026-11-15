@@ -137,13 +137,14 @@
                     ((= delta 3) (begin (env-in-rib fail ts) rest))
                     (else rest))))))))
 ;; Whether δ `delta` binds a variable: a value's, a description's, or both.
-(define binder-delta? (->* (int) bool) (lambda (delta) (or (= delta 1) (= delta 4) (= delta 5))))
+(define binder-delta? (->* (int) bool)
+  (lambda (delta) (or (= delta 1) (= delta 4) (= delta 5) (>= delta 100))))
 ;; What the binder at node `t` binds, which the signature says binds a value
 ;; (δ 1), a description (4) or both, a place (5): refused if it binds what
 ;; the signature does not say.
 (define binder-atms (->* (fails int int) atms)
   (lambda (fail t delta)
-    (let* ((d (not (= delta 1)))
+    (let* ((d (and (not (= delta 1)) (< delta 100)))
            (desc? (tagcase (node-kids t)
                     (k-binder (n e) e)
                     (k-pvar (n) (= (kind-of (node-core t)) 12))

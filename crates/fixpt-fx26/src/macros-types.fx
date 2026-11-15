@@ -272,7 +272,15 @@
               (if (= (len args) 3)
                   (let ((body (read-sty fail (nth args 1) named scope))
                         (b (read-bind fail (nth args 2))))
-                    (if (string=? head "import") (s-import body b) (s-export body b)))
+                    (cond ((not (string=? head "import")) (s-export body b))
+                          ((tagcase b (bind-rib (es) (syntax-entry? es)) (else y #f))
+                           (begin (fail-at fail (string-append "a syntax type: `(syntax σ)` says "
+                                                               "what a use defines, in what its "
+                                                               "signature makes, `(defn (ℓ "
+                                                               "(syntax σ)))`")
+                                           s)
+                                  (s-import body b)))
+                          (else (s-import body b))))
                   (read-pair fail s parts named scope))))
            ((string=? head "mu") (read-mu fail s named scope))
            ((or (string=? head "union") (string=? head "oneof"))
@@ -644,13 +652,27 @@
               (cons (tuple (read-addr fail (car parts)) (read-delta fail (nth parts 1)))
                     (read-rib fail (cdr es)))
               (begin (fail-at fail bind-usage (car es)) (the entries nil)))))))
+;; δ, by number: 0 `none`, 1 `var`, 2 `rib`, 3 `env`, 4 `dvar`, 5 `place`;
+;; 100 + k `(syntax σ)`, a macro's binder (`Delta::Syntax`), `σ` the `k`th
+;; of `syntax-sigs`, as written.
 (define read-delta (->* (fails syn) int)
   (lambda (fail d)
-    (let ((n (if (syn-symbol? d) (syn-name d) "")))
+    (let ((n (if (syn-symbol? d) (syn-name d) "")) (ds (proper-items d)))
       (cond ((string=? n "none") 0) ((string=? n "var") 1) ((string=? n "rib") 2)
             ((string=? n "env") 3) ((string=? n "dvar") 4) ((string=? n "place") 5)
-            (else (begin (fail-at fail "δ is `none`, `var`, `dvar`, `place`, `rib` or `env`" d)
+            ((and (= (len ds) 2) (syn-symbol? (car ds)) (string=? (syn-name (car ds)) "syntax"))
+             (let ((k (len (get syntax-sigs))))
+               (begin (set syntax-sigs (append (get syntax-sigs) (list (nth ds 1)))) (+ 100 k))))
+            (else (begin (fail-at fail (string-append "δ is `none`, `var`, `dvar`, `place`, "
+                                                      "`rib`, `env` or `(syntax σ)`")
+                                  d)
                          0))))))
+(define syntax-sigs (ref syns-a rs) (new nil))
+;; The signature a macro's binder's δ `d` says, as written.
+(define syntax-sig-of (->* (int) syn) (lambda (d) (nth (get syntax-sigs) (- d 100))))
+;; Whether one of entries `es` is a macro's binder's.
+(define syntax-entry? (->* (entries) bool)
+  (lambda (es) (and (not (null? es)) (or (>= (extract (car es) 2) 100) (syntax-entry? (cdr es))))))
 ;; An address, `A`s and `D`s read right to left, or `()`, none: its steps,
 ;; first first.
 (define read-addr (->* (fails syn) addr)
@@ -838,67 +860,6 @@
   (lambda (ms)
     (and (not (null? ms))
          (or (any-overlaps-of? (car ms) (cdr ms) 6) (any-overlap? (cdr ms))))))
-
-;; Whether `s` has the shape of `t`, in `mode` (0 a pattern, 1 a template,
-;; 2 a use, 3 a program's form after expansion): a pattern variable in a
-;; template (`pvar?` says 1 for a name's, 2 for another's, 0 for none, and
-;; of a trailmark's name minus its number, in any mode) fits
-;; anything but, if it is a name, a list's shape; any name in a pattern
-;; fits anything. No deeper than `fits-depth` lists: a `union`'s members
-;; differ within `overlap?`'s depth, and a long list is not looked through
-;; at each of its parts (`macros.rs`'s `FITS_DEPTH`).
-(define fits-depth int 8)
-(define fits? (->* (sty syn int (subr pure (symbol) int)) bool)
-  (lambda (t s mode pvar?) (fits-within? t s mode pvar? fits-depth)))
-(define fits-within? (->* (sty syn int (subr pure (symbol) int) int) bool)
-  (lambda (t s mode pvar? depth)
-    (let ((u (unfold t)) (x (if (>= mode 2) (the syns-a nil) (ellipsis-of s)))
-          (program? (= mode 3)))
-      (if (not (null? x))
-          ;; `(p ...)`, where a list of elements `p` fits may be.
-          (let ((e (seq-elem (peel t))))
-            (and (not (null? e)) (fits-within? (car e) (car x) mode pvar? depth)))
-      (if (and (syn-symbol? s) (< mode 3) (< (pvar? (syn-symbol s)) 0))
-          ;; A trailmark, where a use, a pattern or a template writes one:
-          ;; itself, a kernel's word of its name, or an `id`.
-          (tagcase u
-            (s-union (ms) (any-fits? ms s mode pvar? depth))
-            (s-mark (n i) (= i (- 0 (pvar? (syn-symbol s)))))
-            (s-literal (n) (symbol=? (syn-symbol s) n))
-            (s-id () #t)
-            (else y #f))
-      (if (and (syn-symbol? s)
-               (or (and (= mode 0) (not (= (kind-of u) 7)) (not (= (kind-of u) 15))
-                        (not (string=? (syn-name s) "_")) (not (string=? (syn-name s) "...")))
-                   (and (= mode 1) (> (pvar? (syn-symbol s)) 0)
-                        (not (and (= (pvar? (syn-symbol s)) 1)
-                                  (or (= (kind-of u) 8) (= (kind-of u) 6) (= (kind-of u) 10)))))))
-          #t
-          (tagcase u
-            (s-union (ms) (any-fits? ms s mode pvar? depth))
-            (s-pair (a d)
-              (let ((parts (split s)))
-                (and (not (null? parts))
-                     (or (= depth 0)
-                         (and (fits-within? a (car parts) mode pvar? (- depth 1))
-                              (fits-within? d (nth parts 1) mode pvar? (- depth 1)))))))
-            (s-nil () (syn-nil? s))
-            (s-literal (n) (and (syn-symbol? s) (symbol=? (syn-symbol s) n)))
-            (s-mark (n i) (and (syn-symbol? s) (= i (- 0 (pvar? (syn-symbol s))))))
-            ;; A program's binder: any name the checkers let it bind.
-            (s-bvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
-            (s-dvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
-            (s-id () (syn-symbol? s))
-            (s-label () (or (syn-keyword? s) (and (>= mode 2) (syn-symbol? s))
-                            (and program? (syn-number? s))))
-            (s-expr () (and (or program? (not (reserved-syn? s))) (not (syn-nil? s))))
-            (s-lambda () (lambda-shaped? s))
-            (s-defn () (not (null? (split s))))
-            (else y #t))))))))
-(define any-fits? (->* (stys syn int (subr pure (symbol) int) int) bool)
-  (lambda (ms s mode pvar? depth)
-    (and (not (null? ms))
-         (or (fits-within? (car ms) s mode pvar? depth) (any-fits? (cdr ms) s mode pvar? depth)))))
 
 ;; Whether two types are the same, structurally (a `mu` by its number).
 (define sty=? (->* (sty sty) bool)

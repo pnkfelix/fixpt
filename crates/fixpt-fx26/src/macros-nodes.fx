@@ -13,7 +13,8 @@
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
-        fits? sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
+        sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
+        syn-number? s-mark s-lambda s-defn
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
@@ -477,3 +478,66 @@
     (let ((rest (s-pair (s-rules) (s-nil))))
       (s-export (s-pair (s-bvar) (if signed (s-pair (s-data) rest) rest))
                 (bind-rib (list (tuple (list #t) 1)))))))
+
+;;; ------------------------------------------------------------ shapes
+
+;; Whether `s` has the shape of `t`, in `mode` (0 a pattern, 1 a template,
+;; 2 a use, 3 a program's form after expansion): a pattern variable in a
+;; template (`pvar?` says 1 for a name's, 2 for another's, 0 for none, and
+;; of a trailmark's name minus its number, in any mode) fits
+;; anything but, if it is a name, a list's shape; any name in a pattern
+;; fits anything. No deeper than `fits-depth` lists: a `union`'s members
+;; differ within `overlap?`'s depth, and a long list is not looked through
+;; at each of its parts (`macros.rs`'s `FITS_DEPTH`).
+(define fits-depth int 8)
+(define fits? (->* (sty syn int (subr pure (symbol) int)) bool)
+  (lambda (t s mode pvar?) (fits-within? t s mode pvar? fits-depth)))
+(define fits-within? (->* (sty syn int (subr pure (symbol) int) int) bool)
+  (lambda (t s mode pvar? depth)
+    (let ((u (unfold t)) (x (if (>= mode 2) (the syns-a nil) (ellipsis-of s)))
+          (program? (= mode 3)))
+      (if (not (null? x))
+          ;; `(p ...)`, where a list of elements `p` fits may be.
+          (let ((e (seq-elem (peel t))))
+            (and (not (null? e)) (fits-within? (car e) (car x) mode pvar? depth)))
+      (if (and (syn-symbol? s) (< mode 3) (< (pvar? (syn-symbol s)) 0))
+          ;; A trailmark, where a use, a pattern or a template writes one:
+          ;; itself, a kernel's word of its name, or an `id`.
+          (tagcase u
+            (s-union (ms) (any-fits? ms s mode pvar? depth))
+            (s-mark (n i) (= i (- 0 (pvar? (syn-symbol s)))))
+            (s-literal (n) (symbol=? (syn-symbol s) n))
+            (s-id () #t)
+            (else y #f))
+      (if (and (syn-symbol? s)
+               (or (and (= mode 0) (not (= (kind-of u) 7)) (not (= (kind-of u) 15))
+                        (not (string=? (syn-name s) "_")) (not (string=? (syn-name s) "...")))
+                   (and (= mode 1) (> (pvar? (syn-symbol s)) 0)
+                        (not (and (= (pvar? (syn-symbol s)) 1)
+                                  (or (= (kind-of u) 8) (= (kind-of u) 6) (= (kind-of u) 10)))))))
+          #t
+          (tagcase u
+            (s-union (ms) (any-fits? ms s mode pvar? depth))
+            (s-pair (a d)
+              (let ((parts (split s)))
+                (and (not (null? parts))
+                     (or (= depth 0)
+                         (and (fits-within? a (car parts) mode pvar? (- depth 1))
+                              (fits-within? d (nth parts 1) mode pvar? (- depth 1)))))))
+            (s-nil () (syn-nil? s))
+            (s-literal (n) (and (syn-symbol? s) (symbol=? (syn-symbol s) n)))
+            (s-mark (n i) (and (syn-symbol? s) (= i (- 0 (pvar? (syn-symbol s))))))
+            ;; A program's binder: any name the checkers let it bind.
+            (s-bvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
+            (s-dvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
+            (s-id () (syn-symbol? s))
+            (s-label () (or (syn-keyword? s) (and (>= mode 2) (syn-symbol? s))
+                            (and program? (syn-number? s))))
+            (s-expr () (and (or program? (not (reserved-syn? s))) (not (syn-nil? s))))
+            (s-lambda () (lambda-shaped? s))
+            (s-defn () (not (null? (split s))))
+            (else y #t))))))))
+(define any-fits? (->* (stys syn int (subr pure (symbol) int) int) bool)
+  (lambda (ms s mode pvar? depth)
+    (and (not (null? ms))
+         (or (fits-within? (car ms) s mode pvar? depth) (any-fits? (cdr ms) s mode pvar? depth)))))

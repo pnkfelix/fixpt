@@ -32,6 +32,7 @@
         (type macro clause clauses def-env def-envs macro-env scopes pvars levels found))
 (import files-module signature-of)
 (import contracts-module contract-renames renamed-use contract-held defined-held syn-same?
+        made-syntax-reset! made-syntax-add! made-syntax-count made-syntax-taken! syntax-held
         (type renames))
 (import types-module fail-at)
 (import match-module same-atom?)

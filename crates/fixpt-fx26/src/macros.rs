@@ -179,6 +179,11 @@ pub(crate) enum Delta {
     Place,
     Rib,
     Env,
+    /// A macro's binder, `(syntax σ)`, the defined macro's signature as
+    /// written: a value's name, in scope as `var`'s is; what a use defines
+    /// (`(defn (ℓ (syntax σ)))`), its expansion held to it
+    /// (`Macros::syntax_held`).
+    Syntax(Kept),
 }
 
 /// A template's namespaces: values, and descriptions (types, effects,
@@ -895,6 +900,9 @@ impl Macros {
                     (Some("import" | "export"), [_, body, b], None) => {
                         let body = self.sty(body, interner, named, mus)?;
                         let b = bind(b, interner)?;
+                        if head == Some("import") && matches!(&b, Bind::Rib(es) if es.iter().any(|e| matches!(e.1, Delta::Syntax(_)))) {
+                            return Err(bad("`(syntax σ)` says what a use defines, in what its signature makes, `(defn (ℓ (syntax σ)))`"));
+                        }
                         if head == Some("import") { STy::Import(body, b) } else { STy::Export(body, b) }
                     }
                     (Some("mu"), [_, v, body], None) => {
@@ -2168,8 +2176,9 @@ impl Macros {
             && let Some(m) = self.defined.get(&h).cloned()
         {
             self.enter(h, s, budget, interner)?;
+            let from = self.withs.made_syntax.len();
             let made = self.expand_use(h, &m, s, interner)?;
-            let r = self.expand_defn(&made, interner, budget, out);
+            let r = self.expand_defn(&made, interner, budget, out).and_then(|()| self.syntax_held(h, &m, s, from, interner));
             self.withs.chain.pop();
             return r;
         }
@@ -2192,6 +2201,38 @@ impl Macros {
             return Ok(());
         }
         out.push(self.expand_in(s, interner, budget, &mut Vec::new())?);
+        Ok(())
+    }
+
+    /// Use `s` of macro `name`, `m`, its expansion done: each macro its
+    /// signature says a use defines, `(ℓ (syntax σ))` in what it makes,
+    /// defined by the expansion (`Withs::made_syntax` from `from` on), and
+    /// of signature `σ`, so that what is said of its uses ahead holds.
+    fn syntax_held(&mut self, name: Sym, m: &Macro, s: &Syn, from: usize, interner: &mut Interner) -> R<()> {
+        let STy::Export(_, Bind::Rib(es)) = &*m.sig else { return Ok(()) };
+        let (_, operands) = split(s).expect("a list");
+        for (addr, d) in es {
+            let Delta::Syntax(k) = d else { continue };
+            let said = k.get();
+            let shown = said.written(interner);
+            let user = interner.name(name).to_string();
+            let refused = |why: String| FxError::at(s.at(), format!("a use of `{user}`: {why}"));
+            let part = addr.iter().try_fold(operands, |x, car| split(&x).map(|(a, d)| if *car { a } else { d }));
+            let Some(n) = part.and_then(|p| p.sym()) else {
+                return Err(refused(format!("its signature says a macro of `{shown}` is defined at a part that is not a name")));
+            };
+            let x = interner.name(n).to_string();
+            if !self.withs.made_syntax[from..].iter().any(|d| d.0 == n) {
+                return Err(refused(format!("its signature says it defines `{x}`, a macro of `{shown}`, and its expansion does not")));
+            }
+            let (poly, want, defn, desc) = self.signature(&said, interner)?;
+            let have = self.defined[&n].clone();
+            let opaque = have.procedural.as_ref().is_some_and(|p| !p.contract);
+            let same = !opaque && poly.is_empty() && have.poly.is_empty() && have.defn == defn && have.desc == desc && self.sub(&have.sig, &want, &mut HashSet::default()) && self.sub(&want, &have.sig, &mut HashSet::default());
+            if !same {
+                return Err(refused(format!("its signature says `{x}` is a macro of `{shown}`, and its expansion defines one of another signature")));
+            }
+        }
         Ok(())
     }
 
@@ -4109,9 +4150,9 @@ impl Aligner<'_> {
             let value = !matches!(&*node.core, STy::Dvar);
             match (delta, &node.kids) {
                 (Delta::None, _) => {}
-                (Delta::Var, Kids::PVar(n)) if value => out.push(Atom::Var(*n, Ns::Value, 0)),
-                (Delta::Var, Kids::Binder(_, Ns::Value)) => out.push(Atom::Lit(t, Ns::Value)),
-                (Delta::Var, _) => return Err(FxError::at(node.syn.at(), "the signature says a value's binder is here")),
+                (Delta::Var | Delta::Syntax(_), Kids::PVar(n)) if value => out.push(Atom::Var(*n, Ns::Value, 0)),
+                (Delta::Var | Delta::Syntax(_), Kids::Binder(_, Ns::Value)) => out.push(Atom::Lit(t, Ns::Value)),
+                (Delta::Var | Delta::Syntax(_), _) => return Err(FxError::at(node.syn.at(), "the signature says a value's binder is here")),
                 (Delta::Dvar | Delta::Place, Kids::PVar(n)) if !value => {
                     out.push(Atom::Var(*n, Ns::Desc, 0));
                     if *delta == Delta::Place {
@@ -4537,6 +4578,7 @@ fn bind(b: &Syn, interner: &Interner) -> R<Bind> {
         entries
             .iter()
             .map(|e| match e.list().as_deref() {
+                Some([a, d]) if d.list().is_some_and(|l| l.len() == 2 && l[0].sym().is_some_and(|h| interner.name(h) == "syntax")) => Ok((addr(a, interner)?, Delta::Syntax(Kept::new(d.list().expect("a list")[1])))),
                 Some([a, d]) => {
                     let d = match d.sym().map(|d| interner.name(d)) {
                         Some("none") => Delta::None,
@@ -4545,7 +4587,7 @@ fn bind(b: &Syn, interner: &Interner) -> R<Bind> {
                         Some("place") => Delta::Place,
                         Some("rib") => Delta::Rib,
                         Some("env") => Delta::Env,
-                        _ => return Err(FxError::at(d.at(), "δ is `none`, `var`, `dvar`, `place`, `rib` or `env`")),
+                        _ => return Err(FxError::at(d.at(), "δ is `none`, `var`, `dvar`, `place`, `rib`, `env` or `(syntax σ)`")),
                     };
                     Ok((addr(a, interner)?, d))
                 }

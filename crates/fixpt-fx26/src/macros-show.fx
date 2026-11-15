@@ -16,7 +16,7 @@
 (import types-module show-syn kind-of mu-body reserved-sym? s-mark
         s-expr s-bvar s-id s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu
         s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib ring-at
-        (type addr entries ring rings bind sty stys))
+        syntax-sig-of (type addr entries ring rings bind sty stys))
 (import infer-module open?)
 
 ;;; ------------------------------------------------------------ written
@@ -189,7 +189,10 @@
     (if (null? es)
         nil
         (cons (mk-list (list (show-addr (extract (car es) 1) a b)
-                             (mk-symbol (delta-name (extract (car es) 2)) a b))
+                             (let ((d (extract (car es) 2)))
+                               (if (>= d 100)
+                                   (mk-list (list (mk-symbol "syntax" a b) (syntax-sig-of d)) a b)
+                                   (mk-symbol (delta-name d) a b))))
                        a b)
               (show-entries (cdr es) a b)))))
 (define delta-name (->* (int) string)

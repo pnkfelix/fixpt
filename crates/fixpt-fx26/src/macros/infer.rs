@@ -1293,7 +1293,13 @@ fn shown_bind(b: &Bind, at: At, interner: &mut Interner) -> Syn {
     let rib = |es: &[(Addr, Delta)], i: &mut Interner| {
         let mut items = vec![sym("rho", i)];
         for (a, d) in es {
+            if let Delta::Syntax(k) = d {
+                let shown = Syn::lst(at, vec![sym("syntax", i), k.get()]);
+                items.push(Syn::lst(at, vec![addr(a, i), shown]));
+                continue;
+            }
             let d = match d {
+                Delta::Syntax(_) => unreachable!("shown above"),
                 Delta::None => "none",
                 Delta::Var => "var",
                 Delta::Dvar => "dvar",

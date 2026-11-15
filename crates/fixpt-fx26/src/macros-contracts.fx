@@ -19,12 +19,13 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
-        syn-expansion len nth (type syns-a))
-(import types-module fail-at s-expr s-defn split kind-of atm-var atm-lit atm-rib-of
-        (type fails sty atms))
+        syn-expansion len nth (type syns-a names))
+(import types-module fail-at s-expr s-defn split kind-of atm-var atm-lit atm-rib-of show-syn sub?
+        syntax-sig-of bind-rib s-export (type fails sty atms entries addr))
+(import files-module signature-of)
 (import align-module align node-syn node-kids node-core node-hole node-export nnodes nodes-reset!
-        env-empty env-levels lv-rib lv-earlier k-pvar k-binder k-ref k-form program-walk
-        (type pvars levels found env))
+        env-empty env-levels lv-rib lv-earlier k-pvar k-binder k-ref k-form program-walk defined
+        macro-of (type pvars levels found env))
 (import scopes-module walk evaluate)
 (import exports-module exports-of)
 (import match-module same-atom?)
@@ -568,3 +569,77 @@
                              (if (named-in? (tuple m d) out) out (cons (tuple m d) out)))
                            (else y out)))
                        (else y out))))))
+
+;;; ------------------------------------------------------------ macros an expansion defines
+
+;; The macros the last top-level form's expansion defined, in order
+;; (`Withs::made_syntax`): for the parser, which holds each to the globals
+;; and checks its templates (`made-syntax-taken!`).
+(define made-syntax (ref names rs) (new nil))
+(define made-syntax-reset! (->* () unit) (lambda () (set made-syntax nil)))
+(define made-syntax-add! (->* (names) unit)
+  (lambda (ns) (set made-syntax (append (get made-syntax) ns))))
+(define made-syntax-count (->* () int) (lambda () (length (get made-syntax))))
+(define made-syntax-taken! (->* () names)
+  (lambda () (let ((ns (get made-syntax))) (begin (set made-syntax nil) ns))))
+;; Use `s` of macro `name`, its expansion done: each macro its signature
+;; says a use defines, `(ℓ (syntax σ))` in what it makes, defined by the
+;; expansion (`made-syntax` from `from` on), and of signature `σ`
+;; (`Macros::syntax_held`).
+(define syntax-held (->* (fails symbol syn int) unit)
+  (lambda (fail name s from)
+    (let ((m (macro-of name (get defined))))
+      (if (null? m)
+          #u
+          (tagcase (extract (car m) 1)
+            (s-export (body b)
+              (tagcase b (bind-rib (es) (syntax-held-each fail name s from es)) (else y #u)))
+            (else y #u))))))
+(define syntax-held-each (->* (fails symbol syn int entries) unit)
+  (lambda (fail name s from es)
+    (if (null? es)
+        #u
+        (let ((d (extract (car es) 2)))
+          (if (< d 100)
+              (syntax-held-each fail name s from (cdr es))
+              (let* ((said (syntax-sig-of d)) (shown (show-syn said))
+                     (part (syn-at-addr (nth (split s) 1) (extract (car es) 1)))
+                     (x (if (and (not (null? part)) (syn-symbol? (car part)))
+                            (syn-name (car part))
+                            ""))
+                     (refused (lambda ((m string))
+                                (fail (string-append "a use of `" (symbol->string name) "`: " m)
+                                      (syn-start s) (syn-end s)))))
+                (cond ((string=? x "")
+                       (refused (string-append "its signature says a macro of `" shown "` is "
+                                               "defined at a part that is not a name")))
+                      ((not (name-in-from? (string->symbol x) (get made-syntax) from))
+                       (refused (string-append "its signature says it defines `" x "`, a macro "
+                                               "of `" shown "`, and its expansion does not")))
+                      ((not (same-signature? fail (string->symbol x) said))
+                       (refused (string-append "its signature says `" x "` is a macro of `"
+                                               shown "`, and its expansion defines one of "
+                                               "another signature")))
+                      (else (syntax-held-each fail name s from (cdr es))))))))))
+;; The part of `s` at address `a`, in a list of one; none if there is none.
+(define syn-at-addr (->* (syn addr) syns-a)
+  (lambda (s a)
+    (cond ((null? a) (list s))
+          ((null? (split s)) nil)
+          (else (syn-at-addr (if (car a) (car (split s)) (nth (split s) 1)) (cdr a))))))
+;; Whether `n` is among `ns` from the `k`th on.
+(define name-in-from? (->* (symbol names int) bool)
+  (lambda (n ns k)
+    (cond ((null? ns) #f)
+          ((> k 0) (name-in-from? n (cdr ns) (- k 1)))
+          (else (or (symbol=? n (car ns)) (name-in-from? n (cdr ns) 0))))))
+;; Whether macro `n`'s signature is the one `said` writes: the same syntax
+;; type, each a subtype of the other, of the same made, none `poly`, and no
+;; procedural macro's of no contract.
+(define same-signature? (->* (fails symbol syn) bool)
+  (lambda (fail n said)
+    (let ((have (car (macro-of n (get defined)))) (want (signature-of fail said)))
+      (and (null? (extract want 1)) (null? (extract have 3))
+           (= (extract have 4) (extract want 3))
+           (sub? (extract have 1) (extract want 2) nil)
+           (sub? (extract want 2) (extract have 1) nil)))))
