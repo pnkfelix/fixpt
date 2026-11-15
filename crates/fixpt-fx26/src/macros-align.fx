@@ -37,7 +37,8 @@
         pvar-of pvar? pvar-shape lv-rib lv-cage lv-earlier lv-shape program-walk unplaced
         (type action actions contracts clause clauses macro macro-env scope scopes kids rooted holes
               node pinfo pvars level levels found def-env def-envs env namer looked strings))
-(import nodes-module env-empty env-within env-lookup env-any-shape? env-levels binder-name)
+(import nodes-module env-empty env-within env-lookup env-any-shape? env-levels binder-name addr+
+        parameters-sig)
 (import nodes-module def-env-top)
 
 ;;; ------------------------------------------------------------ aligning
@@ -54,7 +55,6 @@
 ;; be long); a template's, in order. A signature's address, `addr+`.
 (define path+ (->* (addr bool) addr)
   (lambda (p step) (if (get program-walk) (cons step p) (addr+ p step))))
-(define addr+ (->* (addr bool) addr) (lambda (p step) (append p (the addr (list step)))))
 
 (define fill (->* (fails int pvars int sty syn int) unit)
   (lambda (fail mode ps at t s root)
@@ -270,21 +270,7 @@
          (fail-at fail (string-append "`" head "` is a procedural macro, whose binding structure "
                                       "no signature says: not in a template")
                   s))
-        (defn
-         (cond ((and (string=? head "define-generative") (= (len (proper-items s)) 3))
-                (fail-at fail (string-append "a template's `define-generative` names its "
-                                             "conversions, `#:seal` and `#:unseal`") s))
-               ((and macro (makes-defns? (syn-symbol hd))) (macro-operands fail ps at hd parts))
-               ((and macro (makes-desc? (syn-symbol hd)))
-                (not-definition fail s (string-append "them by a macro that makes definitions, "
-                                                      "not a description's")))
-               (macro (not-definition fail s (string-append "them by a macro that makes "
-                                                            "definitions, not an expression's")))
-               ((and (not (string=? head "")) (not (null? (sig-of (string->symbol head) defs))))
-                (operands fail ps at (car (sig-of (string->symbol head) defs)) (nth parts 1)))
-               (else (not-definition fail s (string-append "`define`, `define*`, `define-rec`, a "
-                                                           "`begin` of them, or a use of another "
-                                                           "such")))))
+        (defn (defn-form fail ps at s 1))
         ;; A keyword at a list's head constructs, a tag written or placed.
         ((constructs? hd ps)
          (with-kids at (k-form (align fail 1 ps (car (sig-of '%construct kernel)) s -1
@@ -324,7 +310,8 @@
                                              "`(with #%toplevel name)` (one opening a module over "
                                              "a body waits for scopes of a module's names)")
                          s))))
-        (macro (macro-operands fail ps at hd parts))
+        (macro (operands-as fail 1 ps at (extract (car (macro-of (syn-symbol hd) (get defined))) 1)
+                            (nth parts 1)))
         ((and (not (string=? head "")) (not (string=? (substring head 0 1) "%"))
               (not (null? (sig-of (string->symbol head) kernel))))
          (operands fail ps at (car (sig-of (string->symbol head) kernel)) (nth parts 1)))
@@ -383,14 +370,11 @@
            (kernel (kernel-sigs fail)) (sforms (scope-sigs fail))
            (defs (kernel-definitions fail)) (sdefs (scope-definitions fail)))
       (cond
-        (defn
-         (cond ((and (symbol=? n 'module-parameters) (= (len (proper-items s)) 2))
-                (operands-as fail 3 ps at (parameters-sig (nth (proper-items s) 1)) (nth parts 1)))
-               ((not (null? (sig-of n defs))) (operands-as fail 3 ps at (car (sig-of n defs))
-                                                (nth parts 1)))
-               ((not (null? (sig-of n sdefs)))
-                (operands-as fail 3 ps at (car (sig-of n sdefs)) (nth parts 1)))
-               (else (not-definition fail s "a definition of the kernel's"))))
+        ((and (macro? n) (= (makes n) 3))
+         (fail-at fail (string-append "`" (symbol->string n) "` is a procedural macro, whose "
+                                      "binding structure no signature says: not in a template")
+                  s))
+        (defn (defn-form fail ps at s 3))
         ((syn-keyword? hd)
          (with-kids at (k-form (align fail 3 ps (car (sig-of '%construct kernel)) s -1
                                       (node-path at)))))
@@ -398,6 +382,16 @@
          (with-kids at (k-desc (unquoted fail ps (nth (proper-items s) 1)
                                          (path+ (path+ (node-path at) #f) #t) 1 nil))))
         ((and (symbol=? n 'with) (standard-with? s)) #u)
+        ((and (macro? n) (makes-defns? n))
+         (fail-at fail (string-append "`" (symbol->string n) "` makes definitions, which are made "
+                                      "at the top level, not where an expression is")
+                  s))
+        ((and (macro? n) (makes-desc? n))
+         (fail-at fail (string-append "`" (symbol->string n) "` makes a description, not an "
+                                      "expression")
+                  s))
+        ((macro? n) (operands-as fail 3 ps at (extract (car (macro-of n (get defined))) 1)
+                                 (nth parts 1)))
         ((not (null? (sig-of n sforms)))
          (operands-as fail 3 ps at (car (sig-of n sforms)) (nth parts 1)))
         ;; Of the kernel's, not one the expander writes, `%app` or
@@ -466,8 +460,6 @@
                         (unquoted-onto fail ps (car items) (path+ path #t) depth kids)))))
 (define falses (->* (addr int) addr)
   (lambda (path k) (if (= k 0) path (falses (path+ path #f) (- k 1)))))
-(define addr-falses (->* (addr int) addr)
-  (lambda (a k) (if (= k 0) a (addr-falses (addr+ a #f) (- k 1)))))
 ;; Whether one of `xs` has an `unquote` or `unquote-splicing` in it.
 (define any-unquotes? (->* (syns-a) bool)
   (lambda (xs) (and (not (null? xs)) (or (unquotes? (car xs)) (any-unquotes? (cdr xs))))))
@@ -479,59 +471,6 @@
       (vec (items d a b x) (any-unquotes? items))
       (else y (and (syn-symbol? s) (or (string=? (syn-name s) "unquote")
                                        (string=? (syn-name s) "unquote-splicing")))))))
-;; The binding structure of a program's `module-parameters`' list `bs`:
-;; each a value's binder, its type in the scope of those before it, or a
-;; description's; each module not `qualified` included in the items, as the
-;; checkers make the file (`macros.rs`'s `parameters_sig`).
-(define parameters-sig (->* (syn) sty)
-  (lambda (bs)
-    (let ((ps (proper-items bs)))
-      (s-export (s-pair (parameters-list ps) (s-nil))
-                (bind-cage (cons (ring-rib (parameter-entries ps 0)) (parameter-shapes ps 0)))))))
-(define parameters-list (->* (syns-a) sty)
-  (lambda (ps)
-    (if (null? ps)
-        (s-nil)
-        (s-pair (s-union (list (if (binder-is-kind? (car ps))
-                                   (s-export (s-pair (s-dvar) (s-data))
-                                             (bind-rib (list (tuple (list #t) 4))))
-                                   (s-export (s-pair (s-bvar) (s-pair (s-type) (s-data)))
-                                             (bind-rib (list (tuple (list #t) 1)))))))
-                (parameters-list (cdr ps))))))
-(define parameter-entries (->* (syns-a int) entries)
-  (lambda (ps k)
-    (if (null? ps)
-        nil
-        (cons (tuple (cons #t (addr+ (addr-falses nil k) #t)) 2)
-              (parameter-entries (cdr ps) (+ k 1))))))
-(define parameter-shapes (->* (syns-a int) rings)
-  (lambda (ps k)
-    (cond ((null? ps) nil)
-          ((or (binder-is-kind? (car ps)) (not (= (len (proper-items (car ps))) 2)))
-           (parameter-shapes (cdr ps) (+ k 1)))
-          (else (cons (ring-shape (cons #t (addr+ (addr+ (addr-falses nil k) #t) #t)))
-                      (parameter-shapes (cdr ps) (+ k 1)))))))
-;; Whether module parameter `b` binds a description, `(name kind)` or `(r
-;; region p)`; else it is `(m T)` or `(m T qualified)`, a module
-;; (`parse::binder_is_kind`).
-(define binder-is-kind? (->* (syn) bool)
-  (lambda (b)
-    (let ((parts (proper-items b)))
-      (cond ((= (len parts) 2) (kind-form? (nth parts 1)))
-            ((= (len parts) 3)
-             (or (kind-form? (nth parts 1))
-                 (not (and (syn-symbol? (nth parts 2)) (string=? (syn-name (nth parts 2))
-                                                         "qualified")))))
-            (else #t)))))
-(define kind-form? (->* (syn) bool)
-  (lambda (k)
-    (let ((parts (proper-items k)))
-      (if (not (null? parts))
-          (and (syn-symbol? (car parts)) (string=? (syn-name (car parts)) "=>"))
-          (and (syn-symbol? k)
-               (name-in? (syn-symbol k)
-                         (list 'region 'place 'effect 'type 'data 'sendable 'flat 'size 'conv)))))))
-
 ;; Whether a list headed by `hd` constructs: a keyword, or a pattern
 ;; variable of a `label`.
 (define constructs? (->* (syn pvars) bool)
@@ -539,11 +478,36 @@
     (or (syn-keyword? hd)
         (and (syn-symbol? hd) (pvar? (syn-symbol hd) ps)
              (= (kind-of (extract (car (pvar-of (syn-symbol hd) ps)) 1)) 5)))))
-;; The operands of the use of macro `hd` at `at`, aligned with its signature.
-(define macro-operands (->* (fails pvars int syn syns-a) unit)
-  (lambda (fail ps at hd parts)
-    (operands fail ps at (extract (car (macro-of (syn-symbol hd) (get defined))) 1)
-              (nth parts 1))))
+;; A definition's form `s` at `at`, a template's (`mode` 1) or a program's
+;; (3): its binding structure, a macro's that makes definitions by its
+;; signature (`macros.rs`'s `Aligner::form`).
+(define defn-form (->* (fails pvars int syn int) unit)
+  (lambda (fail ps at s mode)
+    (let* ((parts (split s)) (hd (car parts)) (items (proper-items s)) (program (= mode 3))
+           (n (if (and (syn-symbol? hd) (not (pvar? (syn-symbol hd) ps)))
+                  (syn-symbol hd)
+                  (string->symbol "")))
+           (defs (kernel-definitions fail)) (sdefs (if program (scope-definitions fail) nil))
+           (macro (macro? n)))
+      (cond ((and program (symbol=? n 'module-parameters) (= (len items) 2))
+             (operands-as fail 3 ps at (parameters-sig (nth items 1)) (nth parts 1)))
+            ((and (not program) (symbol=? n 'define-generative) (= (len items) 3))
+             (fail-at fail (string-append "a template's `define-generative` names its "
+                                          "conversions, `#:seal` and `#:unseal`") s))
+            ((and macro (makes-defns? n))
+             (operands-as fail mode ps at (extract (car (macro-of n (get defined))) 1)
+                          (nth parts 1)))
+            ((and macro (makes-desc? n))
+             (not-definition fail s "them by a macro that makes definitions, not a description's"))
+            (macro
+             (not-definition fail s "them by a macro that makes definitions, not an expression's"))
+            ((not (null? (sig-of n defs))) (operands-as fail mode ps at (car (sig-of n defs))
+                                                        (nth parts 1)))
+            ((not (null? (sig-of n sdefs))) (operands-as fail mode ps at (car (sig-of n sdefs))
+                                                         (nth parts 1)))
+            (else (not-definition fail s (string-append "`define`, `define*`, `define-rec`, a "
+                                                        "`begin` of them, or a use of another "
+                                                        "such")))))))
 (define not-definition (->* (fails syn string) unit)
   (lambda (fail s what)
     (fail-at fail (string-append "`" (show-syn s) "` is not a definition: a macro that makes "

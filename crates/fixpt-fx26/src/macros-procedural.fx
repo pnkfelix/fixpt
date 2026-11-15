@@ -24,14 +24,15 @@
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
         syn-expansion len parse-tag p-ok p-err (type syns-a names presult))
-(import types-module reserved? desc-word? type-form? kernel-sigs kernel-definitions s-expr marks
-        (type fails sty marked))
+(import types-module reserved? desc-word? type-form? kernel-sigs kernel-definitions s-expr s-defn
+        marks (type fails sty marked))
 (import align-module macro? defined def-env-top align node-syn node-kids nnodes makes pvar? split
         nth k-form nodes-reset! node-core node-hole env-empty env-levels lv-rib lv-earlier k-pvar
         k-binder k-ref program-walk
         (type macro clause clauses def-env def-envs macro-env scopes pvars levels found))
 (import files-module signature-of)
-(import contracts-module contract-renames renamed-use contract-held syn-same? (type renames))
+(import contracts-module contract-renames renamed-use contract-held defined-held syn-same?
+        (type renames))
 (import types-module fail-at)
 (import match-module same-atom?)
 
@@ -173,13 +174,19 @@
 ;; `FIXPT_MACRO_CONTRACTS=0`, the transformer run on it and on it with each
 ;; binder's name fresh throughout its scope, the second's fresh names where
 ;; their binders' scopes are (placement), and, named back, the first
-;; (commutation). The first is the expansion.
+;; (commutation). The first is the expansion. Of a contract that makes
+;; definitions, the expansion is definitions, and defines of the use's names
+;; exactly those it says (`defined-held`); a name it defines is a binder,
+;; renamed as any other.
 (define procedural-expanded (->* (fails symbol syn int) syn)
   (lambda (fail name s made)
     (let* ((shown (string-append "a use of `" (symbol->string name) "`: "))
            (in-use (lambda ((m string) (a int) (b int)) (fail (string-append shown m) a b)))
-           (refused (lambda ((m string)) (fail (string-append shown m) (syn-start s) (syn-end s))))
-           (sig (extract (car (macro-of-defined name (get defined))) 1))
+           (at-use (lambda ((m string) (a int) (b int))
+                     (fail (string-append shown m) (syn-start s) (syn-end s))))
+           (m (car (macro-of-defined name (get defined))))
+           (sig (extract m 1))
+           (defn (= (extract m 4) 1))
            (contract (extract (car (procedural-of name)) 4))
            (operands (nth (split s) 1)))
       (if (not contract)
@@ -190,12 +197,19 @@
             (let ((out (expand-procedural fail name s made)))
               (if (= (get contracts) 0)
                   out
-                  (let* ((r (contract-renames in-use sig operands)) (fresh (extract r 2)))
+                  (let* ((held (if defn
+                                   (begin (defined-held at-use sig operands out made)
+                                          (nodes-reset!)
+                                          (align in-use 2 (the pvars nil) sig operands -1 nil))
+                                   0))
+                         (r (contract-renames in-use sig operands)) (fresh (extract r 2)))
                     (if (null? fresh)
                         out
                         (let ((out2 (expand-procedural fail name
                                                        (renamed-use in-use s (extract r 1)) made)))
-                          (begin (contract-held in-use s out out2 fresh made) out)))))))))))
+                          (begin (contract-held in-use s out out2 fresh made
+                                                (if defn (s-defn) (s-expr)))
+                                 out)))))))))))
 (define macro-of-defined (->* (symbol macro-env) (listof macro acyclic))
   (lambda (n ms)
     (cond ((null? ms) nil)
@@ -638,17 +652,17 @@
   (lambda (fail form e)
     (let* ((p (car (procedural-form form))) (name (extract p 1)) (code (extract p 3))
            (text (syn-text code))
-           ;; Its contract: an expression's, of untyped parts, yet.
+           ;; Its contract: an expression's or definitions', of untyped parts, yet.
            (signed (if (null? (extract p 4)) nil (list (signature-of fail (car (extract p 4))))))
            (sig (if (null? signed) (s-expr) (extract (car signed) 2))))
       (cond
         ((or (not (syn-symbol? name)) (reserved? (syn-name name)))
          (begin (fail "a macro's name, not a form's" (syn-start name) (syn-end name)) nil))
         ((and (not (null? signed))
-              (or (not (null? (extract (car signed) 1))) (not (= (extract (car signed) 3) 0))))
+              (or (not (null? (extract (car signed) 1))) (= (extract (car signed) 3) 2)))
          (begin (fail-at fail (string-append "`" (syn-name name) "`'s contract: a procedural "
-                                             "macro's is an expression's, of untyped parts, not "
-                                             "yet another")
+                                             "macro's is an expression's or definitions', of "
+                                             "untyped parts, not yet another")
                          (car (extract p 4)))
                 nil))
         (else
@@ -659,14 +673,14 @@
                     (cons (tuple (syn-symbol name) (extract p 2) text e (not (null? signed))
                                  (get phase1-forms))
                           (get procedurals)))
-               ;; With a contract, an expression's macro by its signature,
+               ;; With a contract, a macro by its signature (an expression's or definitions'),
                ;; which a template's alignment takes as a `syntax-rules`
                ;; one's; with none, one that makes `3`, whose binding
                ;; structure nothing says.
                (set defined
                     (cons (tuple (syn-symbol name)
                                  (the macro (tuple sig (the clauses nil) (the syns-a nil)
-                                                   (if (null? signed) 3 0))))
+                                                   (if (null? signed) 3 (extract (car signed) 3)))))
                           (get defined)))
                (list (syn-symbol name))))
            (failed why

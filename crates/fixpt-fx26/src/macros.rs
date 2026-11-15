@@ -1660,16 +1660,16 @@ impl Macros {
     /// Procedural macro `name`, its transformer `code` checked at its
     /// style's type in the transformers' session (`procedural::run`).
     fn define_procedural(&mut self, name: Sym, style: procedural::Style, code: &Syn, sig: Option<&Syn>, def_env: hygiene::DefEnv, interner: &mut Interner) -> R<Vec<Sym>> {
-        // Its contract, a signature as a `syntax-rules` macro's is written,
-        // of an expression's parts alone, yet.
-        let contract = match sig {
-            None => None,
+        // Its contract, a signature as a `syntax-rules` macro's is written:
+        // an expression's or definitions', of untyped parts, yet.
+        let (contract, defn) = match sig {
+            None => (None, false),
             Some(written) => {
                 let (poly, sig, defn, desc) = self.signature(written, interner)?;
-                if defn || desc || !poly.is_empty() {
-                    return Err(FxError::at(written.at(), format!("`{}`'s contract: a procedural macro's is an expression's, of untyped parts, not yet another", interner.name(name))));
+                if desc || !poly.is_empty() {
+                    return Err(FxError::at(written.at(), format!("`{}`'s contract: a procedural macro's is an expression's or definitions', of untyped parts, not yet another", interner.name(name))));
                 }
-                Some(sig)
+                (Some(sig), defn)
             }
         };
         let text = code.written(interner);
@@ -1683,7 +1683,7 @@ impl Macros {
         defined.map_err(|e| FxError::at(code.at(), format!("`{}`'s transformer: {e}", interner.name(name))))?;
         let p = procedural::Procedural { style, code: text, def_env, contract: contract.is_some(), phase1 };
         let sig = contract.unwrap_or_else(|| Rc::new(STy::Expr));
-        let m = Macro { sig, defn: false, desc: false, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: Some(Rc::new(p)) };
+        let m = Macro { sig, defn, desc: false, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: Some(Rc::new(p)) };
         self.defined.insert(name, Rc::new(m));
         Ok(vec![name])
     }
@@ -2291,7 +2291,7 @@ impl Macros {
     fn expand_use(&mut self, name: Sym, m: &Macro, s: &Syn, interner: &mut Interner) -> R<Syn> {
         if let Some(p) = &m.procedural {
             if p.contract {
-                return self.contract_expanded(name, &m.sig, p, s, interner);
+                return self.contract_expanded(name, &m.sig, m.defn, p, s, interner);
             }
             return self.expand_procedural(name, p, s, interner);
         }
@@ -2340,8 +2340,11 @@ impl Macros {
     /// transformer run on it, and again on it with each binder's name made
     /// fresh throughout its scope. The second's fresh names where their
     /// binders' scopes are (placement); with them named back, the first
-    /// (commutation). The first is the expansion.
-    fn contract_expanded(&mut self, name: Sym, sig: &Rc<STy>, p: &procedural::Procedural, s: &Syn, interner: &mut Interner) -> R<Syn> {
+    /// (commutation). The first is the expansion. Of a contract that makes
+    /// definitions (`defn`), the expansion is definitions, and defines of
+    /// the use's names exactly those it says (`defined_held`); a name it
+    /// defines is a binder, renamed as any other.
+    fn contract_expanded(&mut self, name: Sym, sig: &Rc<STy>, defn: bool, p: &procedural::Procedural, s: &Syn, interner: &mut Interner) -> R<Syn> {
         let shown = interner.name(name).to_string();
         let refused = |why: &str| FxError::at(s.at(), format!("a use of `{shown}`: {why}"));
         let (head, operands) = split(s).expect("a list");
@@ -2353,6 +2356,10 @@ impl Macros {
         let out = self.procedural_run(name, p, s, made, interner)?;
         if !self.withs.contracts {
             return Ok(out);
+        }
+        let made_ty = Rc::new(if defn { STy::Defn } else { STy::Expr });
+        if defn {
+            self.defined_held(sig, &operands, &out, made, interner).map_err(|e| refused(&e.message))?;
         }
         let (parts, fresh) = self.contract_renames(sig, &operands, interner).map_err(|e| refused(&e.message))?;
         if fresh.is_empty() {
@@ -2383,7 +2390,7 @@ impl Macros {
         // aligned (nothing expanded) and compared node by node, a reference
         // by the binder that binds it, or by its name if free.
         let ours = |e: FxError| refused(&format!("its expansion: {}", e.message));
-        let (a, b) = (self.alpha_nodes(&out, interner).map_err(ours)?, self.alpha_nodes(&out2, interner).map_err(ours)?);
+        let (a, b) = (self.alpha_nodes(&out, &made_ty, interner).map_err(ours)?, self.alpha_nodes(&out2, &made_ty, interner).map_err(ours)?);
         if alpha_same(&a, &b) {
             return Ok(out);
         }
@@ -2431,10 +2438,10 @@ impl Macros {
     /// Output `s`'s nodes, aligned as a program's form is (nothing
     /// expanded, its macros' uses by their signatures) and walked, each as
     /// α-equivalence takes it (`AlphaNode`).
-    fn alpha_nodes(&self, s: &Syn, interner: &mut Interner) -> R<Vec<AlphaNode>> {
+    fn alpha_nodes(&self, s: &Syn, made: &Rc<STy>, interner: &mut Interner) -> R<Vec<AlphaNode>> {
         let none = HashMap::default();
         let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
-        let root = a.align(&Rc::new(STy::Expr), s, None, Vec::new())?;
+        let root = a.align(made, s, None, Vec::new())?;
         let mut found = Vec::new();
         a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
         let envs: HashMap<usize, Env> = found.into_iter().map(|(i, env, _, _)| (i, env)).collect();
@@ -2467,23 +2474,8 @@ impl Macros {
     /// variable's environment the binders in scope where it is.
     #[allow(clippy::type_complexity)]
     fn contract_renames(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(HashMap<u64, (HashMap<Sym, Sym>, Rc<STy>, Syn)>, HashMap<Sym, Sym>)> {
+        let (pattern, parts) = self.contract_pattern(sig, operands, interner)?;
         let none = HashMap::default();
-        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
-        u.align(sig, operands, None, Vec::new())?;
-        let leaf = |t: &STy| matches!(t, STy::Expr | STy::Lambda | STy::Bvar | STy::Dvar | STy::Id | STy::Data | STy::Type | STy::Label | STy::Kind | STy::Defn | STy::Item);
-        let mut leaves: HashSet<u64> = HashSet::default();
-        for n in &u.nodes {
-            if n.hole.is_some() {
-                return Err(FxError::at(n.syn.at(), "a procedural macro's contract of typed parts: not yet"));
-            }
-            if leaf(&n.core) {
-                leaves.insert(n.syn.0.raw());
-            }
-        }
-        drop(u);
-        // The pattern: each leaf a variable of its own.
-        let mut parts: Vec<Syn> = Vec::new();
-        let pattern = pseudo_pattern(operands, &leaves, &mut parts, interner);
         let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
         let mut found = Vec::new();
@@ -2539,6 +2531,96 @@ impl Macros {
             }
         }
         Ok((out, fresh))
+    }
+
+    /// Definitions `out`, what a transformer made of use operands
+    /// `operands` in expansion `made`, held to contract `sig`: definitions,
+    /// aligned as a program's are, that define of the use's names exactly
+    /// those the contract says its uses define; any other name they define
+    /// their own, an alias of the expansion (`%~N:x`), which nothing outside
+    /// it names.
+    fn defined_held(&self, sig: &Rc<STy>, operands: &Syn, out: &Syn, made: u32, interner: &mut Interner) -> R<()> {
+        let none = HashMap::default();
+        let not_yet = |at: &Syn| FxError::at(at.at(), "a contract whose uses define what a part of theirs defines: not yet");
+        // What the contract says a use defines, of its names.
+        let (pattern, parts) = self.contract_pattern(sig, operands, interner)?;
+        let mut said: Vec<(Sym, Ns)> = Vec::new();
+        {
+            let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+            let root = p.align(sig, &pattern, None, Vec::new())?;
+            p.walk(root, &Env::default(), false, 0, &mut Vec::new(), &mut Vec::new())?;
+            if let Some((b, r)) = p.nodes[root].export.clone() {
+                let (atoms, cages) = exports(&p.eval(&b, r, pattern.at())?);
+                if !cages.is_empty() {
+                    return Err(not_yet(operands));
+                }
+                for a in atoms {
+                    match a {
+                        Atom::Var(n, ns, _) => {
+                            let k = p.interner.name(n).strip_prefix("%part:").and_then(|k| k.parse::<usize>().ok()).expect("a part");
+                            said.push((parts[k].sym().ok_or_else(|| FxError::at(parts[k].at(), "a binder that is not a name"))?, ns));
+                        }
+                        Atom::RibOf(_) => return Err(not_yet(operands)),
+                        Atom::Lit(..) => {}
+                    }
+                }
+            }
+        }
+        // What the expansion defines.
+        let mut defines: Vec<(Sym, Ns)> = Vec::new();
+        {
+            let ours = |e: FxError| FxError::at(e.span, format!("its expansion: {}", e.message));
+            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+            let root = a.align(&Rc::new(STy::Defn), out, None, Vec::new()).map_err(ours)?;
+            a.walk(root, &Env::default(), false, 0, &mut Vec::new(), &mut Vec::new()).map_err(ours)?;
+            for i in 0..a.nodes.len() {
+                let (STy::Item | STy::Defn, Kids::Form(x)) = (&*a.nodes[i].core, &a.nodes[i].kids) else { continue };
+                let Some((b, r)) = a.nodes[*x].export.clone() else { continue };
+                for level in a.eval(&b, r, a.nodes[i].syn.at()).map_err(ours)? {
+                    let Level::Rib(atoms) = level else { continue };
+                    for t in atoms.iter() {
+                        if let Atom::Lit(t, ns) = t
+                            && let Kids::Binder(n, _) = a.nodes[*t].kids
+                            && !defines.contains(&(n, *ns))
+                        {
+                            defines.push((n, *ns));
+                        }
+                    }
+                }
+            }
+        }
+        let own = format!("%~{made}:");
+        if let Some((n, _)) = defines.iter().find(|d| !said.contains(d) && !interner.name(d.0).starts_with(&own)) {
+            return Err(FxError::at(out.at(), format!("its expansion defines `{}`, which its contract does not say a use defines, nor is it its own (an alias, as `rename` makes one)", interner.name(*n))));
+        }
+        if let Some((n, _)) = said.iter().find(|d| !defines.contains(d)) {
+            return Err(FxError::at(out.at(), format!("its contract says a use defines `{}`, and its expansion does not", interner.name(*n))));
+        }
+        Ok(())
+    }
+
+    /// Use operands `operands` as a pattern of contract `sig`: each of the
+    /// use's parts at a leaf of the signature a pattern variable of its own,
+    /// `%part:k`, the part `parts[k]`.
+    fn contract_pattern(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(Syn, Vec<Syn>)> {
+        let none = HashMap::default();
+        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        u.align(sig, operands, None, Vec::new())?;
+        let leaf = |t: &STy| matches!(t, STy::Expr | STy::Lambda | STy::Bvar | STy::Dvar | STy::Id | STy::Data | STy::Type | STy::Label | STy::Kind | STy::Defn | STy::Item);
+        let mut leaves: HashSet<u64> = HashSet::default();
+        for n in &u.nodes {
+            if n.hole.is_some() {
+                return Err(FxError::at(n.syn.at(), "a procedural macro's contract of typed parts: not yet"));
+            }
+            if leaf(&n.core) {
+                leaves.insert(n.syn.0.raw());
+            }
+        }
+        drop(u);
+        // The pattern: each leaf a variable of its own.
+        let mut parts: Vec<Syn> = Vec::new();
+        let pattern = pseudo_pattern(operands, &leaves, &mut parts, interner);
+        Ok((pattern, parts))
     }
 
     /// Procedural macro `name`'s transformer run on use `s`, by expansion

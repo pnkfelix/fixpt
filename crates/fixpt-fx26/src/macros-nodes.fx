@@ -17,6 +17,7 @@
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
+        ring-shape
         mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit marks mark-in
         seq-elem seq-cage? peel ellipsis? ellipsis-of
         (type fails addr entries ring rings bind sty stys named hole atm atms marked))
@@ -377,3 +378,62 @@
              (or (string=? (syn-name (nth items 1)) "#%fx")
                  (string=? (syn-name (nth items 1)) "#%toplevel"))))
       (else y #f))))
+
+;;; ------------------------------------------------------------ module parameters
+
+;; Address `p` and one step more, a car's (`#t`) or a cdr's.
+(define addr+ (->* (addr bool) addr) (lambda (p step) (append p (the addr (list step)))))
+(define addr-falses (->* (addr int) addr)
+  (lambda (a k) (if (= k 0) a (addr-falses (addr+ a #f) (- k 1)))))
+;; The binding structure of a program's `module-parameters`' list `bs`:
+;; each a value's binder, its type in the scope of those before it, or a
+;; description's; each module not `qualified` included in the items, as the
+;; checkers make the file (`macros.rs`'s `parameters_sig`).
+(define parameters-sig (->* (syn) sty)
+  (lambda (bs)
+    (let ((ps (proper-items bs)))
+      (s-export (s-pair (parameters-list ps) (s-nil))
+                (bind-cage (cons (ring-rib (parameter-entries ps 0)) (parameter-shapes ps 0)))))))
+(define parameters-list (->* (syns-a) sty)
+  (lambda (ps)
+    (if (null? ps)
+        (s-nil)
+        (s-pair (s-union (list (if (binder-is-kind? (car ps))
+                                   (s-export (s-pair (s-dvar) (s-data))
+                                             (bind-rib (list (tuple (list #t) 4))))
+                                   (s-export (s-pair (s-bvar) (s-pair (s-type) (s-data)))
+                                             (bind-rib (list (tuple (list #t) 1)))))))
+                (parameters-list (cdr ps))))))
+(define parameter-entries (->* (syns-a int) entries)
+  (lambda (ps k)
+    (if (null? ps)
+        nil
+        (cons (tuple (cons #t (addr+ (addr-falses nil k) #t)) 2)
+              (parameter-entries (cdr ps) (+ k 1))))))
+(define parameter-shapes (->* (syns-a int) rings)
+  (lambda (ps k)
+    (cond ((null? ps) nil)
+          ((or (binder-is-kind? (car ps)) (not (= (len (proper-items (car ps))) 2)))
+           (parameter-shapes (cdr ps) (+ k 1)))
+          (else (cons (ring-shape (cons #t (addr+ (addr+ (addr-falses nil k) #t) #t)))
+                      (parameter-shapes (cdr ps) (+ k 1)))))))
+;; Whether module parameter `b` binds a description, `(name kind)` or `(r
+;; region p)`; else it is `(m T)` or `(m T qualified)`, a module
+;; (`parse::binder_is_kind`).
+(define binder-is-kind? (->* (syn) bool)
+  (lambda (b)
+    (let ((parts (proper-items b)))
+      (cond ((= (len parts) 2) (kind-form? (nth parts 1)))
+            ((= (len parts) 3)
+             (or (kind-form? (nth parts 1))
+                 (not (and (syn-symbol? (nth parts 2)) (string=? (syn-name (nth parts 2))
+                                                         "qualified")))))
+            (else #t)))))
+(define kind-form? (->* (syn) bool)
+  (lambda (k)
+    (let ((parts (proper-items k)))
+      (if (not (null? parts))
+          (and (syn-symbol? (car parts)) (string=? (syn-name (car parts)) "=>"))
+          (and (syn-symbol? k)
+               (name-in? (syn-symbol k)
+                         (list 'region 'place 'effect 'type 'data 'sendable 'flat 'size 'conv)))))))

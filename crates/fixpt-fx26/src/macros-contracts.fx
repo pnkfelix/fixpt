@@ -20,11 +20,13 @@
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
         syn-expansion len nth (type syns-a))
-(import types-module fail-at s-expr split (type fails sty atms))
-(import align-module align node-syn node-kids node-core node-hole nnodes nodes-reset! env-empty
-        env-levels lv-rib lv-earlier k-pvar k-binder k-ref program-walk
+(import types-module fail-at s-expr s-defn split kind-of atm-var atm-lit atm-rib-of
+        (type fails sty atms))
+(import align-module align node-syn node-kids node-core node-hole node-export nnodes nodes-reset!
+        env-empty env-levels lv-rib lv-earlier k-pvar k-binder k-ref k-form program-walk
         (type pvars levels found env))
-(import scopes-module walk)
+(import scopes-module walk evaluate)
+(import exports-module exports-of)
 (import match-module same-atom?)
 
 (define-type renames (listof (tupleof symbol symbol) acyclic))
@@ -335,10 +337,10 @@
 ;; by its name, any other part as it is (`Macros::alpha_nodes`).
 (define-type anode (tupleof int (listof int acyclic) (listof symbol acyclic) (listof syn acyclic)))
 (define-type anodes (listof anode acyclic))
-(define alpha-nodes (->* (fails syn) anodes)
-  (lambda (fail s)
+(define alpha-nodes (->* (fails syn sty) anodes)
+  (lambda (fail s made)
     (let* ((root (begin (nodes-reset!) (set program-walk #t)
-                        (align fail 3 (the pvars nil) (s-expr) s -1 nil)))
+                        (align fail 3 (the pvars nil) made s -1 nil)))
            (found (walk fail root env-empty #f 0)))
       (begin (set program-walk #f) (anodes-from 0 (get nnodes) found nil)))))
 (define anodes-from (->* (int int found anodes) anodes)
@@ -391,11 +393,11 @@
 ;; at use `s`, by `in-use`: a fresh name of `fresh`, or its alias of
 ;; expansion `made` (`%~N:x′`), free in `out2`, placed outside its binder's
 ;; scope; else a name read (`Macros::contract_expanded`).
-(define contract-held (->* (fails syn syn syn renames int) unit)
-  (lambda (in-use s out out2 fresh made)
+(define contract-held (->* (fails syn syn syn renames int sty) unit)
+  (lambda (in-use s out out2 fresh made ty)
     (let* ((ours (lambda ((m string) (a int) (b int))
                    (in-use (string-append "its expansion: " m) (syn-start s) (syn-end s))))
-           (a (alpha-nodes ours out)) (b (alpha-nodes ours out2)))
+           (a (alpha-nodes ours out ty)) (b (alpha-nodes ours out2 ty)))
       (if (alpha-same? a b)
           #u
           (let ((x (escaped b fresh made)))
@@ -441,3 +443,128 @@
     (if (null? xs)
         (null? ys)
         (and (not (null? ys)) (syn-same? (car xs) (car ys)) (all-same? (cdr xs) (cdr ys))))))
+
+;;; ------------------------------------------------------------ definitions
+
+;; Names, each with whether a description's.
+(define-type named-ns (listof (tupleof symbol bool) acyclic))
+;; Definitions `out`, what a transformer made of use operands `operands` in
+;; expansion `made`, held to contract `sig` (`Macros::defined_held`):
+;; definitions, aligned as a program's are, that define of the use's names
+;; exactly those the contract says its uses define; any other name they
+;; define their own, an alias of the expansion (`%~N:x`). Refused at `out`.
+(define defined-held (->* (fails sty syn syn int) unit)
+  (lambda (fail sig operands out made)
+    (let* ((said (contract-said fail sig operands))
+           (ours (lambda ((m string) (a int) (b int))
+                   (fail (string-append "its expansion: " m) a b)))
+           (defines (expansion-defines ours out))
+           (own (string-append "%~" (int->string made) ":"))
+           (extra (named-not-in defines said own))
+           (missing (named-not-in said defines "")))
+      (cond ((not (null? extra))
+             (fail-at fail (string-append "its expansion defines `" (symbol->string (car extra))
+                                          "`, which its contract does not say a use defines, "
+                                          "nor is it its own (an alias, as `rename` makes one)")
+                      out))
+            ((not (null? missing))
+             (fail-at fail (string-append "its contract says a use defines `"
+                                          (symbol->string (car missing))
+                                          "`, and its expansion does not")
+                      out))
+            (else #u)))))
+;; The first of `xs` that `ys` has not, nor, if `own` is not empty, is
+;; spelled from it; in a list of one.
+(define named-not-in (->* (named-ns named-ns string) (listof symbol acyclic))
+  (lambda (xs ys own)
+    (cond ((null? xs) nil)
+          ((or (named-in? (car xs) ys) (own-name? (extract (car xs) 1) own))
+           (named-not-in (cdr xs) ys own))
+          (else (list (extract (car xs) 1))))))
+(define named-in? (->* ((tupleof symbol bool) named-ns) bool)
+  (lambda (x ys)
+    (and (not (null? ys))
+         (or (and (symbol=? (extract x 1) (extract (car ys) 1))
+                  (eq? (extract x 2) (extract (car ys) 2)))
+             (named-in? x (cdr ys))))))
+(define own-name? (->* (symbol string) bool)
+  (lambda (n own)
+    (let ((s (symbol->string n)) (k (string-length own)))
+      (and (> k 0) (>= (string-length s) k) (string=? (substring s 0 k) own)))))
+;; What contract `sig` says a use of operands `operands` defines, of the
+;; use's names: the use aligned, then made a pattern, each leaf a part, whose
+;; export is evaluated.
+(define contract-said (->* (fails sty syn) named-ns)
+  (lambda (fail sig operands)
+    (let* ((use (begin (nodes-reset!) (align fail 2 (the pvars nil) sig operands -1 nil)))
+           (leaves (leaves-of fail 0 (get nnodes) nil))
+           (made (begin (set pseudo-parts nil) (pseudo-pattern operands leaves)))
+           (parts (the syns-a (reverse (get pseudo-parts))))
+           (root (begin (nodes-reset!) (align fail 0 (the pvars nil) sig made -1 nil)))
+           (found (walk fail root env-empty #f 0))
+           (e (node-export root)))
+      (if (null? e)
+          nil
+          (let ((x (exports-of (evaluate fail (extract (car e) 1) (extract (car e) 2) made))))
+            (if (null? (extract x 2))
+                (said-names fail (extract x 1) parts operands)
+                (begin (said-not-yet fail operands) nil)))))))
+(define said-not-yet (->* (fails syn) unit)
+  (lambda (fail at)
+    (fail-at fail "a contract whose uses define what a part of theirs defines: not yet" at)))
+(define said-names (->* (fails atms syns-a syn) named-ns)
+  (lambda (fail as parts at)
+    (if (null? as)
+        nil
+        (tagcase (car as)
+          (atm-var (b d g)
+            (let ((p (nth parts (part-number b))))
+              (if (syn-symbol? p)
+                  (cons (tuple (syn-symbol p) d) (said-names fail (cdr as) parts at))
+                  (begin (fail-at fail "a binder that is not a name" p) nil))))
+          (atm-rib-of (n) (begin (said-not-yet fail at) nil))
+          (atm-lit (i d) (said-names fail (cdr as) parts at))))))
+;; What definitions `out` define, aligned as a program's are: each binder a
+;; definition's form exports, by its name.
+(define expansion-defines (->* (fails syn) named-ns)
+  (lambda (fail out)
+    (let* ((root (begin (nodes-reset!) (set program-walk #t)
+                        (align fail 3 (the pvars nil) (s-defn) out -1 nil)))
+           (found (walk fail root env-empty #f 0))
+           (ds (defines-from fail 0 (get nnodes) nil)))
+      (begin (set program-walk #f) ds))))
+(define defines-from (->* (fails int int named-ns) named-ns)
+  (lambda (fail i n out)
+    (if (= i n)
+        out
+        (defines-from fail (+ i 1) n
+          (let ((k (kind-of (node-core i))))
+            (if (or (= k 14) (= k 11))
+                (tagcase (node-kids i)
+                  (k-form (x)
+                    (let ((ex (node-export x)))
+                      (if (null? ex)
+                          out
+                          (level-defines (evaluate fail (extract (car ex) 1) (extract (car ex) 2)
+                                                   (node-syn i))
+                                         out))))
+                  (else y out))
+                out))))))
+(define level-defines (->* (levels named-ns) named-ns)
+  (lambda (ls out)
+    (if (null? ls)
+        out
+        (level-defines (cdr ls)
+                       (tagcase (car ls) (lv-rib (as) (atm-defines as out)) (else y out))))))
+(define atm-defines (->* (atms named-ns) named-ns)
+  (lambda (as out)
+    (if (null? as)
+        out
+        (atm-defines (cdr as)
+                     (tagcase (car as)
+                       (atm-lit (b d)
+                         (tagcase (node-kids b)
+                           (k-binder (m e)
+                             (if (named-in? (tuple m d) out) out (cons (tuple m d) out)))
+                           (else y out)))
+                       (else y out))))))

@@ -2366,6 +2366,12 @@ Decided with them:
   defines its own, an alias, `%~N:x`, which nothing outside names); and
   commutation, as an expression's contract's, a defined name counted as a
   binder whose scope is the rest of the program.
+  *Built*, both front ends (`defined_held`, FX-26's `defined-held`):
+  `procedural/contract-defn*.fx`. On the way, FX-26's walk of a program's
+  form read a macro's use as an application, where Rust's reads it by the
+  macro's signature (an expansion a contract checks may hold one): now as
+  Rust's, its definitions' branch shared with a template's (`defn-form`).
+  A contract whose uses define what a part defines (a ribcage): not yet.
 - **A macro may define a macro**: a `define-syntax` made at the top level
   by a template or a transformer defines its macro for the forms after,
   in both expanders; the kernel gives `define-syntax` a binding structure
