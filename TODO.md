@@ -7183,3 +7183,20 @@ The mode itself is small (two counters, a branch in `collection_due`,
 lendings show (`FIXPT_GC_TRACE`, a major due at a lending's end), and
 how long and how much the old space grows meanwhile; if they do, the
 syntax space.
+
+## 282. Each front end's state in a region of its own, so that the types say no front end shares another's (the user's, 2026-11-15)
+
+Every front end instance (`conductor.fx`'s `make-front-end`: `stage`'s, a
+runtime session's, a phase-1 namespace's) keeps its reader's, parser's and
+checker's state in the same named regions, `@s @e @m @c @p` and `@t`. So a
+front end that used another's parser (as every one used `reader.fx`'s
+until 2026-11-15, §280) is as well typed as one that makes its own: the
+effects say what kind of state is touched, not whose. Instead of a tidy
+rule naming the stateful instances (weighed and left): `make-front-end`
+over a fresh region for its state, its reader, parser and checker made in
+it, and its result's latent effect licensed as `licence.rs` licenses the
+eager reader's, its own region and what it is given alone. A front end
+that reached another's state would touch a region it does not own, and be
+refused. Mostly mechanical, but wide: the front end's files name their
+regions in effect annotations throughout, and each module maker's region
+arguments would take the state's.
