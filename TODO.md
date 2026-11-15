@@ -7233,3 +7233,50 @@ toward delimiters the programmer names, as a shell's here-document's
 `syntax-rules`, which R7RS itself allows (`(syntax-rules ::: (literal …)
 rule …)`, §4.3.2), so that an inner macro's names its own, parts named in
 signatures in place of addresses, and how each reads in both front ends.
+## 285. A template that defines a procedural macro: its use's parts at phase 1 (the user's, 2026-11-15)
+
+A template's `define-syntax` defines a `syntax-rules` macro only, for now
+("a procedural one's transformer is phase 1's code, not yet in a
+template"); a transformer's output may define either. The user's point:
+phases are a tower (Flatt's), so a phase-0 template may make phase-1 code.
+Wanted: the template's own code in the transformer checked at phase 1, its
+free names the outer macro's phase-1 namespace's (its `begin-for-syntax`
+forms), none of the phase-0 names the template binds; and a use's part
+placed there only where the signature says that part is phase-1 code (say
+`(expr #:phase 1)`), since its author wrote it at phase 0, in the use's
+scope. A transformer inside a transformer, phase 2, waits with §283.
+`typed-macros.md`, "Decided: what a definition macro defines, said in what
+it makes".
+
+## 286. Macros as operands: `(macro σ made)` on the left of a signature (the user's, 2026-11-15: not yet, nothing to rule it out)
+
+A truly higher-order signature: a part a use gives that is a macro of a
+signature, which the template uses. Its notation is there already: a
+macro's binder's kind is its signature, `(ℓ (macro σ made))`, so `(macro σ
+made)` as a part would say a part is one. What it needs: what a use is
+checked for about the macro it gives (its own signature the one said, as
+`syntax_held` holds a defined one), and a template's uses of it aligned
+by `σ`, which the fixed point of heads by scope already does for a macro a
+nested use defines (`typed-macros.md`, "Decided: a template's heads read by
+their scope, to a fixed point"). `(macro σ made)` is refused in an import
+"not yet", never by the grammar.
+
+## 287. A module file's own top level using a macro-defining macro (found 2026-11-15, untested)
+
+A file's top-level `define-syntax`es are its macros (`import_file_macros`
+collects them by their forms, `file_own_expanded_syn`), but a macro a
+use of a macro-defining macro makes at the file's top level is made by an
+expansion, not written: whether `import-with-syntax` exports it, and
+whether the file's own later forms see it, is not tested. Test both front
+ends; if it is not exported, decide whether it should be (as a written one
+is) or say so where it is made.
+
+## 288. The old `(macro (export σ β) defn)` taken out (2026-11-15)
+
+Stage 1 of "Decided: what a definition macro defines, said in what it
+makes" (`typed-macros.md`) moved what a use defines into the result,
+`(macro σ (defn (ℓ δ) …))`, and kept `(export σ (rho …))` around the parts
+with `defn` read the same, "for a while", both at once refused. The rewrite
+scripts of 2026-11-15 left it where tests write it (`defn-export-given.fx`
+keeps one on purpose). Take it out: refuse it saying how it is written now,
+the test of the synonym made the test of that refusal, both front ends.
