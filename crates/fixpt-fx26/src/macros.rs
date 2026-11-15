@@ -1700,8 +1700,23 @@ impl Macros {
             _ => (Vec::new(), *sig),
         };
         // `(-> σ defn)`: of what it makes, definitions; `(-> σ type)`, a
-        // description; `(-> σ expr)`, as `σ`.
+        // description; `(-> σ expr)`, as `σ`. `(-> σ (defn (ℓ δ) …))`:
+        // definitions, a use's defining what the rib says of its parts,
+        // `(-> (export σ (rho (ℓ δ) …)) defn)`, which is read the same.
         let (sig, defn, desc) = match sig.list().as_deref() {
+            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "->") && made.list().is_some_and(|l| l.first().and_then(|d| d.sym()).is_some_and(|d| interner.name(d) == "defn")) => {
+                let entries = made.list().expect("a list")[1..].to_vec();
+                if entries.is_empty() {
+                    (*body, true, false)
+                } else {
+                    if body.list().and_then(|l| l.first().and_then(|e| e.sym())).is_some_and(|e| interner.name(e) == "export") {
+                        return Err(FxError::at(body.at(), "what a use defines is said once, in what it makes, `(defn (ℓ δ) …)`, not by an `export` around its parts too"));
+                    }
+                    let at = made.at();
+                    let rho = Syn::lst(at, std::iter::once(Syn::named(at, "rho", interner)).chain(entries).collect());
+                    (Syn::lst(at, vec![Syn::named(at, "export", interner), *body, rho]), true, false)
+                }
+            }
             Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "->") => match made.sym().map(|m| interner.name(m)) {
                 Some("defn") => (*body, true, false),
                 Some("type") => (*body, false, true),
@@ -1751,7 +1766,7 @@ impl Macros {
         let mut found = Vec::new();
         p.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
         // What a use of a macro that makes definitions says it defines, if
-        // its signature says (`(-> (export σ β) defn)`): what a template
+        // its signature says (`(-> σ (defn (ℓ δ) …))`): what a template
         // using it sees, and what its own template is held to.
         let declared = match (defn, &p.nodes[root].export) {
             (true, Some((b, r))) => Some(exports(&p.eval(b, *r, pattern.at())?)),
@@ -1867,7 +1882,7 @@ impl Macros {
                         && let Some((_, m)) = nested.iter().find(|(b, _)| b == n)
                     {
                         let (n, m) = (interner.name(*n), interner.name(*m));
-                        return Err(FxError::at(span, format!("`{n}` is bound in a use of `{m}`, whose signature does not say its uses define it: say so (`(-> (export σ β) defn)`), or write `(with #%toplevel {n})` for the top level's")));
+                        return Err(FxError::at(span, format!("`{n}` is bound in a use of `{m}`, whose signature does not say its uses define it: say so (`(-> σ (defn (ℓ δ) …))`), or write `(with #%toplevel {n})` for the top level's")));
                     }
                     // A binder repeated, referred to under fewer ellipses
                     // than it is: which repetition's is not said.
@@ -4262,6 +4277,22 @@ pub(super) fn rules_parts(parts: &[Syn], at: At, interner: &Interner) -> R<(Vec<
         [] => Err(FxError::at(at, usage)),
         clauses => Ok((Vec::new(), clauses.to_vec())),
     }
+}
+
+/// The signature of operands `s` making definitions, as written: `(-> σ
+/// (defn (ℓ δ) …))` of `(export σ (rho (ℓ δ) …))`, else `(-> s defn)`.
+fn defn_arrow(s: Syn, at: At, interner: &mut Interner) -> Syn {
+    let arrow = Syn::named(at, "->", interner);
+    let defn = Syn::named(at, "defn", interner);
+    if let Some([e, body, b]) = s.list().as_deref()
+        && e.sym().is_some_and(|e| interner.name(e) == "export")
+        && let Some(rho) = b.list()
+        && rho.first().and_then(|r| r.sym()).is_some_and(|r| interner.name(r) == "rho")
+    {
+        let made = Syn::lst(at, std::iter::once(defn).chain(rho[1..].iter().copied()).collect());
+        return Syn::lst(at, vec![arrow, *body, made]);
+    }
+    Syn::lst(at, vec![arrow, s, defn])
 }
 
 /// What is said of a name a macro takes for a trailmark that is none.

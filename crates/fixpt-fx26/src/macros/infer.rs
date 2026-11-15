@@ -534,10 +534,8 @@ impl Macros {
             .zip(us)
             .map(|((s, m), u)| match m {
                 Makes::Expr => s,
-                _ => {
-                    let made = if *m == Makes::Defn { "defn" } else { "type" };
-                    Syn::lst(u.span, vec![Syn::named(u.span, "->", interner), s, Syn::named(u.span, made, interner)])
-                }
+                Makes::Defn => super::defn_arrow(s, u.span, interner),
+                Makes::Type => Syn::lst(u.span, vec![Syn::named(u.span, "->", interner), s, Syn::named(u.span, "type", interner)]),
             })
             .collect())
     }
@@ -1361,9 +1359,10 @@ mod tests {
                     continue;
                 }
                 let mut w = m.shown_sty(&sty, f.at(), &mut interner, &mut Vec::new());
-                if defn || desc {
-                    let made = if defn { "defn" } else { "type" };
-                    w = Syn::lst(f.at(), vec![Syn::named(f.at(), "->", &mut interner), w, Syn::named(f.at(), made, &mut interner)]);
+                if defn {
+                    w = crate::macros::defn_arrow(w, f.at(), &mut interner);
+                } else if desc {
+                    w = Syn::lst(f.at(), vec![Syn::named(f.at(), "->", &mut interner), w, Syn::named(f.at(), "type", &mut interner)]);
                 }
                 let w = w.written(&interner);
                 let Ok((lits, clauses)) = crate::macros::rules_parts(&rules[1..], f.at(), &interner) else { continue };

@@ -128,7 +128,7 @@
           (let ((n (symbol->string n)))
             (fail-at fail (string-append "`" n "` is bound in a use of `" (symbol->string (car m))
                                          "`, whose signature does not say its uses define it: "
-                                         "say so (`(-> (export σ β) defn)`), or write `(with "
+                                         "say so (`(-> σ (defn (ℓ δ) …))`), or write `(with "
                                          "#%toplevel " n ")` for the top level's")
                      s))
           #u))))

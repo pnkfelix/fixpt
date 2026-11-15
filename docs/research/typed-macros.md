@@ -2343,3 +2343,35 @@ transformers' session (`TODO.md` §228).
    in FX-26 alone (its `%macros:call-procedural` answers `apart`: its
    values are not the runtime's), whose `%apply` request reads the form and
    writes the answer in the transformers' session.
+
+## Decided: what a definition macro defines, said in what it makes (2026-11-15)
+
+The user's: a macro that makes definitions should say what they are in its
+result, and a macro that defines a macro should carry the defined macro's
+shape ("The defn surely must carry the shape of the macro it defines?").
+Decided with them:
+
+- **Written** `(-> σ (defn (ℓ δ) …))`: a use defines, of its parts, what
+  the entries say, each a part's address and what it binds there, as a
+  `rho`'s. `(-> (bvar expr) (defn (A var)))` defines its first part, a
+  value. Plain `defn`, as before, defines nothing a template sees (the
+  program sees what it defines). The old `(-> (export σ (rho …)) defn)` is
+  read as the same, for a while; both at once is refused, "said once".
+  Inferred signatures are shown the new way (`defn_arrow`, `defn-arrow`).
+  *Built*, both front ends: `macros/defn-export*.fx`.
+- **A procedural macro's contract may make definitions**, `(-> σ defn)`
+  and `(-> σ (defn …))`, its uses only where definitions are. Each use's
+  expansion checked, unless `FIXPT_MACRO_CONTRACTS=0`: definitions only;
+  of the use's parts, exactly the entries' defined (any other name it
+  defines its own, an alias, `%~N:x`, which nothing outside names); and
+  commutation, as an expression's contract's, a defined name counted as a
+  binder whose scope is the rest of the program.
+- **A macro may define a macro**: a `define-syntax` made at the top level
+  by a template or a transformer defines its macro for the forms after,
+  in both expanders; the kernel gives `define-syntax` a binding structure
+  for templates (its name a binder, in the syntax namespace).
+- **The defined macro's shape**: an entry `(ℓ (syntax σm))`, `σm` a
+  signature. A later use of the name the part gives is aligned with `σm`
+  from the contract alone, in a template too, without running anything;
+  and the expansion must define it with a signature that fits `σm`
+  (written, inferred for `syntax-rules`, a contract if procedural).

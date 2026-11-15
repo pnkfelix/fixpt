@@ -16,7 +16,8 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth datatype?
-        expand-datatype syn-string? (type syns-a names loaded-file) (effect parses))
+        mk-list mk-symbol expand-datatype syn-string? (type syns-a names loaded-file)
+        (effect parses))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty kind-of syn-keyword?
         keyword-name show-syn marks mark-count no-trailmark proper-items (type fails sty))
 (import align-module nnodes node-syn node-core node-kids k-pvar defined mark-now
@@ -510,6 +511,20 @@
                                                                  (extract s 1) (extract s 3)))
                                      (get defined)))
                   (cons (the signed-opt (list s)) (signed-each fail (cdr ws))))))))))
+;; Operands `body` of a signature whose result is `made`, `(defn entry …)`:
+;; `body`, defining `entries`, `(export body (rho entry …))`.
+(define defined-in (->* (fails syn syn syns-a) syn)
+  (lambda (fail body made entries)
+    (let ((bs (proper-items body)) (a (syn-start made)) (b (syn-end made)))
+      (cond ((null? entries) body)
+            ((and (pair? bs) (syn-symbol? (car bs)) (string=? (syn-name (car bs)) "export"))
+             (begin (fail-at fail (string-append "what a use defines is said once, in what it "
+                                                 "makes, `(defn (ℓ δ) …)`, not by an `export` "
+                                                 "around its parts too")
+                             body)
+                    body))
+            (else (let ((rho (mk-list (cons (mk-symbol "rho" a b) entries) a b)))
+                    (mk-list (list (mk-symbol "export" a b) body rho) a b)))))))
 ;; How macro `n`'s refusal is said, its signature inferred, `shown`, not
 ;; fitting its clauses: refused, said so on a line of its own, then what was
 ;; inferred and how one is written (`macros.rs`'s `refused_inferred`).
@@ -522,13 +537,20 @@
             a b))))
 ;; A signature's `(-> σ made)`: `σ`, and what it makes, 0 an expression,
 ;; `expr`, 1 definitions, `defn`, 2 a description, `type`; else itself, an
-;; expression's.
+;; expression's. `(-> σ (defn (ℓ δ) …))`: definitions, `(export σ (rho (ℓ δ)
+;; …))` (`macros.rs`'s `signature`).
 (define signature-made (->* (fails syn) (tupleof syn int))
   (lambda (fail s)
     (let ((items (proper-items s)))
       (if (and (= (len items) 3) (syn-symbol? (car items)) (string=? (syn-name (car items)) "->"))
-          (let ((made (if (syn-symbol? (nth items 2)) (syn-name (nth items 2)) "")))
+          (let* ((m (nth items 2)) (ms (proper-items m))
+                 (made (cond ((syn-symbol? m) (syn-name m))
+                             ((and (pair? ms) (syn-symbol? (car ms))
+                                   (string=? (syn-name (car ms)) "defn"))
+                              "(defn")
+                             (else ""))))
             (cond ((string=? made "defn") (tuple (nth items 1) 1))
+                  ((string=? made "(defn") (tuple (defined-in fail (nth items 1) m (cdr ms)) 1))
                   ((string=? made "type") (tuple (nth items 1) 2))
                   ((string=? made "expr") (tuple (nth items 1) 0))
                   (else (begin (fail-at fail (string-append "a signature `(-> σ made)` makes "
