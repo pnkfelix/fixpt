@@ -11,14 +11,17 @@
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
 (import reader-types (type syn))
-(import types-module fail-at kind-of unfold simple-kind? sub? atm-var atm-rib-of atm-lit
+(import parser-module syn-start syn-end syn-symbol? syn-symbol (type syns-a))
+(import types-module fail-at kind-of unfold simple-kind? sub? atm-var atm-rib-of atm-lit show-syn
+        split
         bind-rib bind-cage bind-direct bind-earlier bind-shape ring-rib ring-at ring-shape
         (type fails addr entries rings bind sty atm atms))
 (import align-module node-export node-imports node-syn node-core node-kids node-many? repeated?
         seq-depths
         cage-seq? program-walk lv-rib lv-cage lv-earlier lv-shape k-pair k-pvar k-binder k-ref
         k-form k-desc k-seq
-        env-within binder-name
+        env-within binder-name align nodes-reset! nnodes heads pending pending-node? head-read
+        env-empty env-levels
         (type level levels found rooted pinfo pvars env))
 
 ;;; ------------------------------------------------------------ binding
@@ -31,8 +34,12 @@
     (let* ((many (or many0 (node-many? at)))
            (depth (if (repeated? at) (+ depth0 1) depth0))
            (noted (if (repeated? at) (set seq-depths (cons (tuple at depth) (get seq-depths))) #u))
-           (env2 (imported fail (node-imports at) env (node-syn at))))
-      (tagcase (node-kids at)
+           (env2 (imported fail (node-imports at) env (node-syn at)))
+           ;; A pending list's scope, for its head (`Node::head`).
+           (head (if (and (not (null? (get pending))) (pending-node? at))
+                     (the found (list (tuple at env2 many depth)))
+                     nil)))
+      (append head (tagcase (node-kids at)
         (k-pair (x y) (append (walk fail x env2 many depth) (walk fail y env2 many depth)))
         (k-form (x) (walk fail x env2 many depth))
         ;; An element of a ribcage's list, in the scope of what the
@@ -42,7 +49,7 @@
         (k-pvar (n) (the found (list (tuple at env2 many depth))))
         (k-binder (n d) (the found (list (tuple at env2 many depth))))
         (k-ref (n d free) (the found (list (tuple at env2 many depth))))
-        (else y (the found nil))))))
+        (else y (the found nil)))))))
 (define walk-each (->* (fails (listof int acyclic) env bool int) found)
   (lambda (fail xs env many depth)
     (if (null? xs)
@@ -420,3 +427,135 @@
           (else (cons (car bs) (without a (cdr bs)))))))
 (define len-atms (->* (atms) int)
   (lambda (as) (if (null? as) 0 (+ 1 (len-atms (cdr as))))))
+
+;;; ------------------------------------------------------------ heads read by scope
+
+;; Template `template`, of type `made`, aligned and walked, each pending list
+;; read by its scope, to a fixed point (`typed-macros.md`, "Decided: a
+;; template's heads read by their scope, to a fixed point"; `clause`'s): its
+;; root, what the walk found, and each pending list's reading (`heads-read`).
+;; Each macro reading kept (`heads`); one an application may become a macro
+;; in a later round, never the other way: refused.
+(define-type head-reading (tupleof int (listof int acyclic) (listof int acyclic)))
+(define-type head-readings (listof head-reading acyclic))
+(define aligned-heads (->* (fails pvars sty syn) (tupleof int found head-readings))
+  (lambda (fail ps made template)
+    (let* ((root (begin (nodes-reset!) (align fail 1 ps made template -1 nil)))
+           (found (walk fail root env-empty #f 0))
+           (read (if (null? (get pending)) (the head-readings nil) (heads-read fail found)))
+           (new (new-heads fail read)))
+      (if (null? new)
+          (tuple root found read)
+          (begin (set heads (append (get heads) new)) (aligned-heads fail ps made template))))))
+;; The macro readings of `rs` not yet kept, each by its list's place; a
+;; reading kept that is now another, refused.
+(define new-heads (->* (fails head-readings) (listof (tupleof int int int) acyclic))
+  (lambda (fail rs)
+    (if (null? rs)
+        nil
+        (let* ((s (node-syn (extract (car rs) 1))) (was (head-read s)) (now (extract (car rs) 2))
+               (said (lambda ((r (listof int acyclic)))
+                       (if (null? r)
+                           "an application"
+                           "a use of the macro a use before it defines")))
+               (rest (new-heads fail (cdr rs))))
+          (cond ((and (null? was) (null? now)) rest)
+                ((null? was) (cons (tuple (syn-start s) (syn-end s) (car now)) rest))
+                ((and (not (null? now)) (= (car was) (car now))) rest)
+                (else
+                 (begin (fail-at fail (string-append "this template's scopes have no one reading: `"
+                                                     (show-syn s) "`, headed by `"
+                                                     (symbol->string (syn-symbol (car (split s))))
+                                                     "`, is read as " (said was) " and then as "
+                                                     (said now))
+                                 s)
+                        rest)))))))
+;; How each pending list is read by the scopes the walk found, `fs`
+;; (`Aligner::heads_read`), the first found first: a use of a macro if its
+;; head's innermost binder is what a `(syntax σ)` entry binds, a pattern
+;; variable or a template's binder at that part of a use (its δ, in a list
+;; of one); else an application (none). Each with its node, and its
+;; binder, if a template's, in a list of one.
+(define heads-read (->* (fails found) head-readings)
+  (lambda (fail fs)
+    (let ((sx (syntax-binders fail 0 (get nnodes) nil)))
+      (readings-of fail (reverse (get pending)) fs sx))))
+(define-type syntax-binder (tupleof bool symbol int int))
+(define syntax-binders (->* (fails int int (listof syntax-binder acyclic))
+                            (listof syntax-binder acyclic))
+  (lambda (fail i n out)
+    (if (= i n)
+        out
+        (syntax-binders fail (+ i 1) n
+          (let ((ex (node-export i)))
+            (if (null? ex)
+                out
+                (tagcase (extract (car ex) 1)
+                  (bind-rib (es) (syntax-entries fail es (extract (car ex) 2) (node-syn i) out))
+                  (else y out))))))))
+(define syntax-entries (->* (fails entries int syn (listof syntax-binder acyclic))
+                            (listof syntax-binder acyclic))
+  (lambda (fail es root s out)
+    (if (null? es)
+        out
+        (let ((d (extract (car es) 2)) (rest (syntax-entries fail (cdr es) root s out)))
+          (if (< d 100)
+              rest
+              (let ((t (nav fail root (extract (car es) 1) s)))
+                (tagcase (node-kids t)
+                  (k-pvar (m) (cons (tuple #t m 0 d) rest))
+                  (k-binder (m e) (if e rest (cons (tuple #f m t d) rest)))
+                  (else y rest))))))))
+(define readings-of (->* (fails (listof (tupleof int bool) acyclic) found
+                           (listof syntax-binder acyclic))
+                       head-readings)
+  (lambda (fail ps fs sx)
+    (if (null? ps)
+        nil
+        (let* ((at (extract (car ps) 1))
+               (h (syn-symbol (car (split (node-syn at)))))
+               (env (found-env at fs))
+               (r (head-binder h (env-levels env) sx)))
+          (cons (tuple at (extract r 1) (extract r 2)) (readings-of fail (cdr ps) fs sx))))))
+(define found-env (->* (int found) env)
+  (lambda (at fs)
+    (cond ((null? fs) env-empty) ((= at (extract (car fs) 1)) (extract (car fs) 2))
+          (else (found-env at (cdr fs))))))
+;; Head `h`'s innermost binder in `ls`: its reading, and its node if a
+;; template's binder.
+(define head-binder (->* (symbol levels (listof syntax-binder acyclic))
+                         (tupleof (listof int acyclic) (listof int acyclic)))
+  (lambda (h ls sx)
+    (if (null? ls)
+        (tuple (the (listof int acyclic) nil) (the (listof int acyclic) nil))
+        (let ((as (tagcase (car ls) (lv-rib (as) as) (lv-earlier (as) as) (else y nil))))
+          (let ((r (atoms-binder h as sx)))
+            (if (null? r) (head-binder h (cdr ls) sx) (car r)))))))
+(define atoms-binder (->* (symbol atms (listof syntax-binder acyclic))
+                          (listof (tupleof (listof int acyclic) (listof int acyclic)) acyclic))
+  (lambda (h as sx)
+    (if (null? as)
+        nil
+        (tagcase (car as)
+          (atm-var (m d g)
+            (if (and (symbol=? m h) (not d))
+                (list (tuple (syntax-of-pvar h sx) (the (listof int acyclic) nil)))
+                (atoms-binder h (cdr as) sx)))
+          (atm-lit (b d)
+            (tagcase (node-kids b)
+              (k-binder (m e)
+                (if (and (symbol=? m h) (not d))
+                    (list (tuple (syntax-of-node b sx) (list b)))
+                    (atoms-binder h (cdr as) sx)))
+              (else y (atoms-binder h (cdr as) sx))))
+          (else y (atoms-binder h (cdr as) sx))))))
+(define syntax-of-pvar (->* (symbol (listof syntax-binder acyclic)) (listof int acyclic))
+  (lambda (n sx)
+    (cond ((null? sx) nil)
+          ((and (extract (car sx) 1) (symbol=? n (extract (car sx) 2))) (list (extract (car sx) 4)))
+          (else (syntax-of-pvar n (cdr sx))))))
+(define syntax-of-node (->* (int (listof syntax-binder acyclic)) (listof int acyclic))
+  (lambda (b sx)
+    (cond ((null? sx) nil)
+          ((and (not (extract (car sx) 1)) (= b (extract (car sx) 3))) (list (extract (car sx) 4)))
+          (else (syntax-of-node b (cdr sx))))))

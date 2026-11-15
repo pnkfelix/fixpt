@@ -990,7 +990,7 @@ impl Macros {
     fn walked(&self, form: &Syn, top: bool, global: Global, interner: &Interner) -> R<Walked> {
         let none = HashMap::default();
         let mut out = Walked::default();
-        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         let t = Rc::new(if top { STy::Item } else { STy::Expr });
         let root = a.align(&t, form, None, Vec::new())?;
         let mut found = Vec::new();

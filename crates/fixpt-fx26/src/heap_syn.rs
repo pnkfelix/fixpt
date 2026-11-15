@@ -1342,7 +1342,7 @@ pub fn at_of(s: Span) -> At {
 /// A piece of syntax held past code that runs: its place in a vector the
 /// heap holds as a global, `%syntax-kept` (or its table's own, `SymTable`'s
 /// `kept`, which it says), which a collection updates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Kept(usize, u32);
 
 const KEPT: &str = "%syntax-kept";

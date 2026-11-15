@@ -56,7 +56,7 @@ impl Macros {
         let mut defined = Vec::new();
         let mut next_fresh = self.withs.captors;
         {
-            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
             let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
             let mut found = Vec::new();
             a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;

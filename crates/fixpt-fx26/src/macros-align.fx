@@ -39,7 +39,9 @@
               node pinfo pvars level levels found def-env def-envs env namer looked strings))
 (import nodes-module env-empty env-within env-lookup env-any-shape? env-levels binder-name addr+
         parameters-sig rules-word? rules-items define-syntax-sig rules-dots rules-procedural
-        any-ellipsis?)
+        any-ellipsis? rules-define-sig rules-define? rules-escape sig-of percent-named unquotes?
+        any-unquotes? constructs? defines? heads-on head-read pending! syntax-sig-read
+        syntax-read! unknown-head? heads pending pending-node? uses-syntax-macro?)
 (import nodes-module def-env-top)
 
 ;;; ------------------------------------------------------------ aligning
@@ -113,11 +115,12 @@
             ((null? items) (with-many at))
             ((and (= (len items) 2) (proper? s) (ellipsis? (car items)) (ellipsis? (nth items 1)))
              (with-many at))
-            ((ellipsis? (car items))
-             (fail-at fail "`(... template)` other than `(... ...)`: not yet" s))
+            ((ellipsis? (car items)) (fail-at fail rules-escape s))
             ((any-ellipsis? items) (fail-at fail rules-dots s))
             ((and (syn-symbol? (car items)) (string=? (syn-name (car items)) "quote"))
              (begin (with-many at) (fill fail mode ps at (s-data) s root)))
+            ((rules-define? s)
+             (begin (with-many at) (fill fail mode ps at (rules-define-sig) s root)))
             (else (begin (with-many at)
                          (fill fail mode ps at (s-pair (s-rules) (s-rules)) s root)))))))
 ;; `(x ...)` at `at`, a pattern's or a template's: `x` aligned with the
@@ -290,6 +293,8 @@
            (kernel (kernel-sigs fail)) (defs (kernel-definitions fail))
            (macro (and (not (string=? head "")) (macro? (syn-symbol hd)))))
       (cond
+        ((and (get heads-on) (syn-symbol? hd) (unknown-head? fail (syn-symbol hd) ps))
+         (pending-form fail ps at s defn))
         ;; A procedural macro (`macros-procedural.fx`): no signature says
         ;; what it binds.
         ((and macro (= (makes (syn-symbol hd)) 3))
@@ -354,6 +359,36 @@
         (else
          (with-kids at (k-form (align fail 1 ps (car (sig-of '%app kernel)) s -1
                                       (node-path at)))))))))
+;; A list whose head a `(syntax σ)` entry may bind, at `at`: pending, read by
+;; its scope (`macros-scopes.fx`'s `aligned-heads`), a use of that macro by
+;; its signature once its binder is found one, else an application (where a
+;; definition is, unread until then, exporting nothing).
+(define pending-form (->* (fails pvars int syn bool) unit)
+  (lambda (fail ps at s defn)
+    (let ((read (head-read s)) (n (syn-name (car (split s)))))
+      (begin
+        (pending! at defn)
+        (cond ((not (null? read))
+               (let* ((t (car (syntax-sig-read (car read)))) (made (extract t 2)))
+                 (cond ((and (not defn) (= made 1))
+                        (fail-at fail (string-append "`" n "` makes definitions, which are made "
+                                                     "at the top level, not where an expression "
+                                                     "is")
+                                 s))
+                       ((and (not defn) (= made 2))
+                        (fail-at fail (string-append "`" n "` makes a description, not an "
+                                                     "expression")
+                                 s))
+                       ((and defn (= made 2))
+                        (not-definition fail s (string-append "them by a macro that makes "
+                                                              "definitions, not a description's")))
+                       ((and defn (= made 0))
+                        (not-definition fail s (string-append "them by a macro that makes "
+                                                              "definitions, not an expression's")))
+                       (else (operands fail ps at (extract t 1) (nth (split s) 1))))))
+              (defn (with-export at (bind-rib nil) at))
+              (else (with-kids at (k-form (align fail 1 ps (car (sig-of '%app (kernel-sigs fail))) s
+                                                 -1 (node-path at))))))))))
 ;; Whether nodes of `mode` are written, their binders and references found:
 ;; a template's, a program's.
 (define writes? (->* (int) bool) (lambda (mode) (or (= mode 1) (= mode 3))))
@@ -372,20 +407,6 @@
           ((syn-nil? s) (fail-at fail "`()` is not an expression" s))
           ((not (null? (split s))) (form fail ps at s #f))
           (else #u))))
-;; Whether `s` is a definition, by its head: a `begin` one if all it holds
-;; are (`macros.rs`'s `defines`).
-(define defines? (->* (fails syn) bool)
-  (lambda (fail s)
-    (let* ((items (proper-items s))
-           (head (if (and (not (null? items)) (syn-symbol? (car items))) (syn-name (car items))
-                   "")))
-      (cond ((string=? head "") #f)
-            ((string=? head "begin") (and (not (null? (cdr items))) (all-define? fail (cdr items))))
-            (else (let ((n (syn-symbol (car items))))
-                    (or (not (null? (sig-of n (kernel-definitions fail))))
-                        (not (null? (sig-of n (scope-definitions fail)))))))))))
-(define all-define? (->* (fails syns-a) bool)
-  (lambda (fail xs) (or (null? xs) (and (defines? fail (car xs)) (all-define? fail (cdr xs))))))
 ;; A program's form at `at`: its binding structure, the kernel's or
 ;; `scope-forms`'; a reserved word at its head with none, an application,
 ;; as the checkers take it (`macros.rs`'s `Aligner::form`, `Mode::Program`).
@@ -426,22 +447,6 @@
          (operands-as fail 3 ps at (car (sig-of n kernel)) (nth parts 1)))
         (else (with-kids at (k-form (align fail 3 ps (car (sig-of '%app kernel)) s -1
                                             (node-path at)))))))))
-;; The names of `kernel`'s forms that start with `%`, found once.
-(define percent-named (->* (named) names)
-  (lambda (kernel)
-    (begin
-      (if (get percent-found) #u
-          (begin (set percent-names (percent-of kernel)) (set percent-found #t)))
-      (get percent-names))))
-(define percent-found (ref bool rs) (new #f))
-(define percent-names (ref names rs) (new nil))
-(define percent-of (->* (named) names)
-  (lambda (ns)
-    (cond ((null? ns) nil)
-          ((let ((h (symbol->string (extract (car ns) 1))))
-             (and (> (string-length h) 0) (string=? (substring h 0 1) "%")))
-           (cons (extract (car ns) 1) (percent-of (cdr ns))))
-          (else (percent-of (cdr ns))))))
 ;; The operands `rest` of the form at `at`, aligned with its signature, in
 ;; `mode`.
 (define operands-as (->* (fails int pvars int sty syn) unit)
@@ -486,24 +491,6 @@
                         (unquoted-onto fail ps (car items) (path+ path #t) depth kids)))))
 (define falses (->* (addr int) addr)
   (lambda (path k) (if (= k 0) path (falses (path+ path #f) (- k 1)))))
-;; Whether one of `xs` has an `unquote` or `unquote-splicing` in it.
-(define any-unquotes? (->* (syns-a) bool)
-  (lambda (xs) (and (not (null? xs)) (or (unquotes? (car xs)) (any-unquotes? (cdr xs))))))
-(define unquotes? (->* (syn) bool)
-  (lambda (s)
-    (tagcase s
-      (lst (items d a b x) (any-unquotes? items))
-      (dotted (items tail d a b x) (or (any-unquotes? items) (unquotes? tail)))
-      (vec (items d a b x) (any-unquotes? items))
-      (else y (and (syn-symbol? s) (or (string=? (syn-name s) "unquote")
-                                       (string=? (syn-name s) "unquote-splicing")))))))
-;; Whether a list headed by `hd` constructs: a keyword, or a pattern
-;; variable of a `label`.
-(define constructs? (->* (syn pvars) bool)
-  (lambda (hd ps)
-    (or (syn-keyword? hd)
-        (and (syn-symbol? hd) (pvar? (syn-symbol hd) ps)
-             (= (kind-of (extract (car (pvar-of (syn-symbol hd) ps)) 1)) 5)))))
 ;; A definition's form `s` at `at`, a template's (`mode` 1) or a program's
 ;; (3): its binding structure, a macro's that makes definitions by its
 ;; signature (`macros.rs`'s `Aligner::form`).
@@ -553,11 +540,6 @@
 (define operands (->* (fails pvars int sty syn) unit)
   (lambda (fail ps at sig rest)
     (with-kids at (k-form (align fail 1 ps sig rest -1 (path+ (node-path at) #f))))))
-(define sig-of (->* (symbol named) stys)
-  (lambda (n named)
-    (cond ((null? named) nil)
-          ((symbol=? n (extract (car named) 1)) (list (extract (car named) 2)))
-          (else (sig-of n (cdr named))))))
 
 ;;; ------------------------------------------------------------ descriptions
 

@@ -2417,3 +2417,56 @@ Decided with them:
   macro by its name, before its walk knows what is in scope).
   Tests: `macros/defn-defines-macro-said*.fx`, `defn-syntax-import.fx`,
   `procedural/contract-defn-macro.fx`.
+
+## Decided: a template's heads read by their scope, to a fixed point (2026-11-15)
+
+A template that uses a macro whose uses define a macro, `(defn (ℓ (syntax
+σ)))`, and then that macro, `(begin (def-adder name 5) (define y (name
+10)))`, must read `(name 10)` as a use of it, by `σ`, before anything runs:
+else its binding structure is misread (a part the defined macro binds read
+as a reference). Whether a head is a macro is then a question of scope, not
+of the global table of macros; and our alignment reads a form's shape before
+the walk finds scopes. Not a fault of the signatures: `σ` in what a use
+makes is what lets it be answered ahead at all (an untyped expander answers
+it only by expanding, Racket's by expanding a body's definitions first).
+
+Decided with the user: no rule against shadowing (Herman's binding
+structure already says what `(lambda (name) (name 3))` means, `name` the
+parameter); scope tracked during alignment, to a fixed point:
+
+1. **Pending heads.** Where the template uses a macro whose signature has
+   a `(syntax σ)` entry, a list with a name at its head that is no form's
+   or macro's is pending: aligned as an application where an expression
+   is, left unread where a definition is.
+2. **Each round,** after the walk: each pending head read by its innermost
+   binder in scope, a macro if that binder is what a `(syntax σ)` entry
+   binds (a pattern variable or a template's binder at that part of a
+   nested use), so aligned by `σ`; else an application (or, where a
+   definition is, refused as no definition). New macro readings: aligned
+   again, and walked again.
+3. **No flips.** A head read as a macro is read so in every later round,
+   or the template is refused: its scopes have no one reading, said with
+   the head and the readings. One read as an application may become a
+   macro later, as the macros found give scope (a use of a macro a use
+   defines, whose own definition a use not yet read makes: found in the
+   round after). So each round adds a macro reading or is the last: the
+   loop ends, in at most as many rounds as heads; its last walk's scopes
+   are what every head was read by; and each round reads every pending
+   head from one walk, so no order of heads matters. Starting from every
+   head an application, it finds the least reading, not necessarily the
+   only one.
+4. A head read as a macro the template's binder names is renamed with it;
+   its use is checked, so trusted when expanded, as the defined macro is
+   held to `σ` (`syntax_held`).
+
+*Built*, both front ends (2026-11-15): `Macros::clause`'s loop over
+`Aligner::heads` and `pending` (`heads_read`; FX-26's `aligned-heads`,
+`heads-read` in macros-scopes.fx, `pending-form` in macros-align.fx,
+`heads-done` in macros-exports.fx). Each `(syntax σ)`'s signature is read
+where the signature it is in is (`syntax_sigs`; FX-26's `syntax-read`), and
+two are the same if they write the same (`bind_same`, `delta=?`). A
+`define-syntax` in a defined macro's template keeps its signature a datum.
+Tests: `macros/defn-heads-*.fx`: a use then the macro it defines, one that
+makes definitions, a `lambda` binding the name again (its parameter), three
+levels found in two rounds, and a flip refused. The earlier "not yet" above
+(a template that uses such a macro and then the one it defines) is this.

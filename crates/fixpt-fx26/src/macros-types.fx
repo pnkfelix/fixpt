@@ -905,8 +905,15 @@
         (null? fs)
         (and (not (null? fs))
              (addr=? (extract (car es) 1) (extract (car fs) 1))
-             (= (extract (car es) 2) (extract (car fs) 2))
+             (delta=? (extract (car es) 2) (extract (car fs) 2))
              (entries=? (cdr es) (cdr fs))))))
+;; Whether two δs say the same: two macros' binders, by what their
+;; signatures write (`bind_same`).
+(define delta=? (->* (int int) bool)
+  (lambda (d e)
+    (or (= d e)
+        (and (>= d 100) (>= e 100)
+             (string=? (show-syn (syntax-sig-of d)) (show-syn (syntax-sig-of e)))))))
 (define addr=? (->* (addr addr) bool)
   (lambda (a b)
     (if (null? a)

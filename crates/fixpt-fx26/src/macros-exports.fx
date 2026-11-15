@@ -22,9 +22,10 @@
 (import types-module fail-at name-in? proper-items atm-var atm-rib-of
         atm-lit addr=? (type fails atm atms addr))
 (import match-module pattern-names addr-under?)
-(import scopes-module normal atm-in?)
+(import scopes-module normal atm-in? (type head-readings))
 (import align-module node-kids node-syn pvar? makes-defns? lv-rib lv-cage lv-earlier lv-shape k-pair
-        k-form k-desc k-seq k-binder act-rename sorted-strings joined
+        k-form k-desc k-seq k-binder act-rename sorted-strings joined pending node-path
+        not-definition
         (type levels pvars actions strings found))
 
 ;;; ------------------------------------------------------------ exports
@@ -218,3 +219,39 @@
                                      "bound: which repetition's it is is not said")
                  s)
         #u)))
+
+;;; ------------------------------------------------------------ heads read by scope
+
+;; The pending lists' readings `rs` (`macros-scopes.fx`'s `aligned-heads`),
+;; done: one where a definition is, read as no macro's use, refused as no
+;; definition; each read as a use, checked (`heads-checked`), its head, a
+;; template's binder, renamed with it (`clause`'s). `bd`, the binders'
+;; depths; the actions to add.
+(define heads-checked (ref (listof int acyclic) rs) (new nil))
+(define heads-done (->* (fails head-readings depths) actions)
+  (lambda (fail rs bd)
+    (begin (set heads-checked nil) (heads-done-each fail rs bd))))
+(define heads-done-each (->* (fails head-readings depths) actions)
+  (lambda (fail rs bd)
+    (if (null? rs)
+        nil
+        (let* ((at (extract (car rs) 1)) (s (node-syn at)) (b (extract (car rs) 3)))
+          (cond ((and (null? (extract (car rs) 2)) (pending-defn? at (get pending)))
+                 (begin (not-definition fail s (string-append "`define`, `define*`, `define-rec`, "
+                                                              "a `begin` of them, or a use of "
+                                                              "another such"))
+                        nil))
+                ((null? (extract (car rs) 2)) (heads-done-each fail (cdr rs) bd))
+                (else
+                 (begin
+                   (set heads-checked (cons (syn-start s) (get heads-checked)))
+                   (let ((rest (heads-done-each fail (cdr rs) bd)))
+                     (if (null? b)
+                         rest
+                         (cons (tuple (append (node-path at) (the addr (list #t)))
+                                      (act-rename (node-path (car b)) (depth-of (car b) bd)))
+                               rest))))))))))
+(define pending-defn? (->* (int (listof (tupleof int bool) acyclic)) bool)
+  (lambda (at ps)
+    (and (not (null? ps))
+         (or (and (= at (extract (car ps) 1)) (extract (car ps) 2)) (pending-defn? at (cdr ps))))))

@@ -34,20 +34,20 @@
         (type fails addr sty marked))
 (import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list marks-of
         len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
-(import scopes-module walk placed evaluate levels-of binder-of)
+(import scopes-module walk placed evaluate levels-of binder-of aligned-heads)
 (import align-module defined macro-of macro? makes-defns? makes-top-defns? nodes-reset! align
         node-export node-imports node-syn node-path node-core node-kids pvar-of pvar? nnodes
         act-rename act-alias
         seq-depths def-env-top env-empty env-levels
         act-module-type act-standard-type under
         act-macro-head act-mark atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
-        node-hole s-typed name-kind?
+        node-hole s-typed name-kind? heads heads-on uses-syntax-macro?
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
               found levels env def-env def-envs
               atms kids contracts holes))
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
-        binder-depths depth-of repeated-ref (type exported nested depths))
+        binder-depths depth-of repeated-ref heads-done (type exported nested depths))
 (import solve-module infer sig-text by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         phase1-forms-now phase1-forms! for-syntax!
@@ -195,12 +195,14 @@
   (->* (fails pvars syn int (listof exported acyclic) scopes) actions)
   (lambda (fail ps template defn declared file)
     (begin
-      (nodes-reset!)
+      (set heads nil)
+      (set heads-on (uses-syntax-macro? template))
       (let* ((made (cond ((= defn 1) (s-defn)) ((= defn 2) (s-type)) (else (s-expr))))
-             (root (align fail 1 ps made template -1 nil))
-             (found (walk fail root env-empty #f 0))
+             (r (aligned-heads fail ps made template)) (root (extract r 1)) (found (extract r 2))
+             (done (begin (set heads-on #f) (heads-done fail (extract r 3) (binder-depths found))))
              (nested (nested-binders 0 (get nnodes) ps))
-             (named (name-actions fail ps found file nil nil nested (binder-depths found))))
+             (named (append done (name-actions fail ps found file nil nil nested
+                                               (binder-depths found)))))
         (begin
           ;; Each part a template repeats says how many times: a pattern
           ;; variable in it that the pattern has under as many ellipses, or

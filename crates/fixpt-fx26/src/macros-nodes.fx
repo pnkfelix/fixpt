@@ -14,13 +14,13 @@
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
         sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
-        syn-number? s-mark s-lambda s-defn
+        syn-number? s-mark s-lambda s-defn scope-definitions scope-sigs
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         ring-shape s-rules
         mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit marks mark-in
-        seq-elem seq-cage? peel ellipsis? ellipsis-of type-form?
+        seq-elem seq-cage? peel ellipsis? ellipsis-of type-form? syntax-entry?
         (type fails addr entries ring rings bind sty stys named hole atm atms marked))
 ;; The environments the walk resolves names in (`macros-env-types.fx`): their
 ;; levels, and one implementation of them, whose `env` is abstract outside
@@ -253,7 +253,7 @@
 (define nodes-reset! (->* () unit)
   (lambda ()
     (begin (set nnodes 0) (set desc-roots nil) (set repeated nil) (set seq-depths nil)
-           (set cage-seqs nil))))
+           (set cage-seqs nil) (set pending nil))))
 ;; The nodes an ellipsis follows, so that each is repeated; and, as a walk
 ;; finds them, each with how many ellipses it is under, itself counted, the
 ;; last found first (`macros.rs`'s `Node::repeated`, `walk`'s `seqs`).
@@ -541,3 +541,137 @@
   (lambda (ms s mode pvar? depth)
     (and (not (null? ms))
          (or (fits-within? (car ms) s mode pvar? depth) (any-fits? (cdr ms) s mode pvar? depth)))))
+;; A `define-syntax` with a signature in a transformer a template writes:
+;; its signature a datum.
+(define rules-define-sig (->* () sty)
+  (lambda ()
+    (s-pair (s-rules) (s-pair (s-rules) (s-pair (s-data) (s-pair (s-rules) (s-nil)))))))
+;; Whether `s` is a `define-syntax` with a signature.
+(define rules-define? (->* (syn) bool)
+  (lambda (s)
+    (let ((items (proper-items s)))
+      (and (= (len items) 4) (syn-symbol? (car items))
+           (string=? (syn-name (car items)) "define-syntax")))))
+(define rules-escape string "`(... template)` other than `(... ...)`: not yet")
+
+;;; ------------------------------------------------------------ forms' words
+
+(define sig-of (->* (symbol named) stys)
+  (lambda (n named)
+    (cond ((null? named) nil)
+          ((symbol=? n (extract (car named) 1)) (list (extract (car named) 2)))
+          (else (sig-of n (cdr named))))))
+;; The names of `kernel`'s forms that start with `%`, found once.
+(define percent-named (->* (named) names)
+  (lambda (kernel)
+    (begin
+      (if (get percent-found) #u
+          (begin (set percent-names (percent-of kernel)) (set percent-found #t)))
+      (get percent-names))))
+(define percent-found (ref bool rs) (new #f))
+(define percent-names (ref names rs) (new nil))
+(define percent-of (->* (named) names)
+  (lambda (ns)
+    (cond ((null? ns) nil)
+          ((let ((h (symbol->string (extract (car ns) 1))))
+             (and (> (string-length h) 0) (string=? (substring h 0 1) "%")))
+           (cons (extract (car ns) 1) (percent-of (cdr ns))))
+          (else (percent-of (cdr ns))))))
+;; Whether one of `xs` has an `unquote` or `unquote-splicing` in it.
+(define any-unquotes? (->* (syns-a) bool)
+  (lambda (xs) (and (not (null? xs)) (or (unquotes? (car xs)) (any-unquotes? (cdr xs))))))
+(define unquotes? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b x) (any-unquotes? items))
+      (dotted (items tail d a b x) (or (any-unquotes? items) (unquotes? tail)))
+      (vec (items d a b x) (any-unquotes? items))
+      (else y (and (syn-symbol? s) (or (string=? (syn-name s) "unquote")
+                                       (string=? (syn-name s) "unquote-splicing")))))))
+;; Whether a list headed by `hd` constructs: a keyword, or a pattern
+;; variable of a `label`.
+(define constructs? (->* (syn pvars) bool)
+  (lambda (hd ps)
+    (or (syn-keyword? hd)
+        (and (syn-symbol? hd) (pvar? (syn-symbol hd) ps)
+             (= (kind-of (extract (car (pvar-of (syn-symbol hd) ps)) 1)) 5)))))
+;; Whether `s` is a definition, by its head: a `begin` one if all it holds
+;; are (`macros.rs`'s `defines`).
+(define defines? (->* (fails syn) bool)
+  (lambda (fail s)
+    (let* ((items (proper-items s))
+           (head (if (and (not (null? items)) (syn-symbol? (car items))) (syn-name (car items))
+                   "")))
+      (cond ((string=? head "") #f)
+            ((string=? head "begin") (and (not (null? (cdr items))) (all-define? fail (cdr items))))
+            (else (let ((n (syn-symbol (car items))))
+                    (or (not (null? (sig-of n (kernel-definitions fail))))
+                        (not (null? (sig-of n (scope-definitions fail)))))))))))
+(define all-define? (->* (fails syns-a) bool)
+  (lambda (fail xs) (or (null? xs) (and (defines? fail (car xs)) (all-define? fail (cdr xs))))))
+
+;;; ------------------------------------------------------------ heads read by scope
+
+;; Whether the template being checked uses a macro whose uses define a macro
+;; (`Aligner::heads`); how each list read so far as a use of one is, by its
+;; place, with that `(syntax σ)` entry's δ; and the lists found pending,
+;; each with whether a definition is there, the first found last
+;; (`Aligner::pending`). `macros-scopes.fx`'s `aligned-heads` reads them.
+(define heads-on (ref bool rs) (new #f))
+(define heads (ref (listof (tupleof int int int) acyclic) rs) (new nil))
+(define pending (ref (listof (tupleof int bool) acyclic) rs) (new nil))
+(define pending! (->* (int bool) unit)
+  (lambda (at defn) (set pending (cons (tuple at defn) (get pending)))))
+(define pending-node? (->* (int) bool) (lambda (at) (pending-in? at (get pending))))
+(define pending-in? (->* (int (listof (tupleof int bool) acyclic)) bool)
+  (lambda (at ps)
+    (and (not (null? ps)) (or (= at (extract (car ps) 1)) (pending-in? at (cdr ps))))))
+;; How list `s` is read so far: the δ of the `(syntax σ)` entry whose macro
+;; it is a use of, in a list of one; none, an application.
+(define head-read (->* (syn) (listof int acyclic))
+  (lambda (s) (head-at (syn-start s) (syn-end s) (get heads))))
+(define head-at (->* (int int (listof (tupleof int int int) acyclic)) (listof int acyclic))
+  (lambda (a b hs)
+    (cond ((null? hs) nil)
+          ((and (= a (extract (car hs) 1)) (= b (extract (car hs) 2))) (list (extract (car hs) 3)))
+          (else (head-at a b (cdr hs))))))
+;; Each `(syntax σ)` entry's signature, by its δ, read where the signature it
+;; is in is (`macros-files.fx`'s `signature-of`): its syntax type, and what
+;; it makes.
+(define syntax-read (ref (listof (tupleof int sty int) acyclic) rs) (new nil))
+(define syntax-read! (->* (int sty int) unit)
+  (lambda (d t made) (set syntax-read (cons (tuple d t made) (get syntax-read)))))
+(define syntax-sig-read (->* (int) (listof (tupleof sty int) acyclic))
+  (lambda (d) (syntax-read-in d (get syntax-read))))
+(define syntax-read-in
+  (->* (int (listof (tupleof int sty int) acyclic)) (listof (tupleof sty int) acyclic))
+  (lambda (d xs)
+    (cond ((null? xs) nil)
+          ((= d (extract (car xs) 1)) (list (tuple (extract (car xs) 2) (extract (car xs) 3))))
+          (else (syntax-read-in d (cdr xs))))))
+;; Whether `h`, at a list's head in a template, may be a name a `(syntax σ)`
+;; entry binds: no macro's, form's or trailmark's, and no pattern
+;; variable's but a binder's (`Aligner::unknown_head`).
+(define unknown-head? (->* (fails symbol pvars) bool)
+  (lambda (fail h ps)
+    (if (pvar? h ps)
+        (= (kind-of (extract (car (pvar-of h ps)) 1)) 1)
+        (not (or (reserved? (symbol->string h)) (macro? h) (> (mark-now h) 0)
+                 (not (null? (sig-of h (kernel-sigs fail))))
+                 (not (null? (sig-of h (kernel-definitions fail))))
+                 (not (null? (sig-of h (scope-sigs fail))))
+                 (not (null? (sig-of h (scope-definitions fail)))))))))
+;; Whether template `s` uses a macro whose signature says its uses define a
+;; macro, `(ℓ (syntax σ))` (`Macros::uses_syntax_macro`).
+(define uses-syntax-macro? (->* (syn) bool)
+  (lambda (s)
+    (let ((items (proper-items s)))
+      (and (not (null? items))
+           (or (and (syn-symbol? (car items)) (macro? (syn-symbol (car items)))
+                    (tagcase (extract (car (macro-of (syn-symbol (car items)) (get defined))) 1)
+                      (s-export (b x) (tagcase x (bind-rib (es) (syntax-entry? es)) (else y #f)))
+                      (else y #f)))
+               (any-uses-syntax-macro? items))))))
+(define any-uses-syntax-macro? (->* (syns-a) bool)
+  (lambda (xs)
+    (and (not (null? xs)) (or (uses-syntax-macro? (car xs)) (any-uses-syntax-macro? (cdr xs))))))

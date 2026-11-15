@@ -772,7 +772,7 @@ impl Macros {
             };
             pvars.insert(n, PInfo { core, declared: Vec::new(), many: false, hole: None, depth: parts.depth[&(c, n)] });
         }
-        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         let ty = Rc::new(match made {
             Makes::Defn => STy::Defn,
             Makes::Type => STy::Type,

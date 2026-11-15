@@ -19,9 +19,10 @@
         mk-list mk-symbol expand-datatype syn-string? (type syns-a names loaded-file)
         (effect parses))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty kind-of syn-keyword?
-        keyword-name show-syn marks mark-count no-trailmark proper-items (type fails sty))
-(import align-module nnodes node-syn node-core node-kids k-pvar defined mark-now
-        (type clauses macro-env))
+        keyword-name show-syn marks mark-count no-trailmark proper-items s-export bind-rib
+        syntax-sig-of (type fails sty entries))
+(import align-module nnodes node-syn node-core node-kids k-pvar defined mark-now syntax-read!
+        syntax-sig-read (type clauses macro-env))
 
 ;; The name the importer has macro `n` by, of `m`'s, in a list of one.
 (define internal-of
@@ -469,8 +470,25 @@
 (define-type signed (tupleof syns-a sty int))
 (define signature-of (->* (fails syn) signed)
   (lambda (fail s)
-    (let* ((poly (signature-poly fail s)) (made (signature-made fail (extract poly 2))))
-      (tuple (extract poly 1) (read-sty fail (extract made 1) nil nil) (extract made 2)))))
+    (let* ((poly (signature-poly fail s)) (made (signature-made fail (extract poly 2)))
+           (t (read-sty fail (extract made 1) nil nil)))
+      (begin
+        ;; Each macro it says a use defines, its signature read now.
+        (tagcase t
+          (s-export (b x) (tagcase x (bind-rib (es) (syntax-sigs-read! fail es)) (else y #u)))
+          (else y #u))
+        (tuple (extract poly 1) t (extract made 2))))))
+(define syntax-sigs-read! (->* (fails entries) unit)
+  (lambda (fail es)
+    (cond ((null? es) #u)
+          ((and (>= (extract (car es) 2) 100) (null? (syntax-sig-read (extract (car es) 2))))
+           (let ((r (signature-of fail (syntax-sig-of (extract (car es) 2)))))
+             (begin (if (null? (extract r 1))
+                        (syntax-read! (extract (car es) 2) (extract r 2) (extract r 3))
+                        (fail-at fail "a `(syntax σ)` entry's signature has no `poly`, not yet"
+                                 (syntax-sig-of (extract (car es) 2))))
+                    (syntax-sigs-read! fail (cdr es)))))
+          (else (syntax-sigs-read! fail (cdr es))))))
 (define written-names (->* (writtens) names)
   (lambda (ws) (if (null? ws) nil (cons (extract (car ws) 1) (written-names (cdr ws))))))
 ;; A signature's `(poly ((name kind) …) σ)`: its binders and `σ`; else none

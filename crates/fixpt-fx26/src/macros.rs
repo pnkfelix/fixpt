@@ -371,6 +371,32 @@ fn syn_size(s: &Syn) -> usize {
 }
 
 /// Whether syntax `a` and `b` are the same, part by part, wherever each is.
+/// Whether bindings `p` and `q` say the same: two macros' binders, by what
+/// their signatures write.
+fn bind_same(p: &Bind, q: &Bind) -> bool {
+    let rib = |a: &[(Addr, Delta)], b: &[(Addr, Delta)]| {
+        a.len() == b.len()
+            && a.iter().zip(b).all(|((x, d), (y, e))| {
+                x == y
+                    && match (d, e) {
+                        (Delta::Syntax(k), Delta::Syntax(l)) => k == l || same_syntax(&k.get(), &l.get()),
+                        _ => d == e,
+                    }
+            })
+    };
+    match (p, q) {
+        (Bind::Rib(a), Bind::Rib(b)) => rib(a, b),
+        (Bind::Cage(a), Bind::Cage(b)) => {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(x, y)| match (x, y) {
+                    (Ring::Rib(x), Ring::Rib(y)) => rib(x, y),
+                    _ => x == y,
+                })
+        }
+        _ => p == q,
+    }
+}
+
 fn same_syntax(a: &Syn, b: &Syn) -> bool {
     match (a.parts(), b.parts()) {
         (Some((mut xs, xt)), Some((mut ys, yt))) => {
@@ -501,6 +527,10 @@ pub struct Macros {
     checking: bool,
 }
 
+/// A `(syntax σ)` entry's signature read: its syntax type, and whether it
+/// makes definitions, or a description.
+pub(crate) type SyntaxSig = (Rc<STy>, bool, bool);
+
 /// A macro an expansion defined: its name, where, and the macro the name
 /// was before, if any.
 pub(crate) type MadeSyntax = (Sym, At, Option<Rc<Macro>>);
@@ -548,6 +578,11 @@ pub(crate) struct Withs {
     /// globals, as it does a written one, and undoes them if the form is
     /// refused (`Macros::made_undone`).
     pub(crate) made_syntax: Vec<MadeSyntax>,
+    /// Each `(syntax σ)` entry's signature, read where the signature it is
+    /// in is (`Macros::signature`): what a template reads a use of the
+    /// macro it binds by (`Aligner::heads_read`). Out of line, as all of
+    /// this is: a `Macros` is held in frames.
+    pub(crate) syntax_sigs: HashMap<Kept, SyntaxSig>,
     /// The shapes known (`shapes`): the top level's names', files'.
     shapes: shapes::Known,
     /// Where the macro each expansion's aliases are of was defined, by the
@@ -665,6 +700,9 @@ struct Node {
     desc: bool,
     /// Whether an ellipsis follows it, so that it is repeated.
     repeated: bool,
+    /// Whether it is a list whose head a `(syntax σ)` entry may bind, read
+    /// by its scope (`Aligner::pending`): its environment found.
+    head: bool,
     kids: Kids,
 }
 
@@ -777,6 +815,20 @@ struct Aligner<'m> {
     unplaced: Vec<Sym>,
     /// The parts left to fill (`run`).
     work: Vec<Step>,
+    /// How each list whose head a `(syntax σ)` entry may bind is read so
+    /// far, by its syntax, if the template uses a macro with one
+    /// (`Macros::template_aligned`); and the lists found so, each with
+    /// whether a definition is there.
+    heads: Option<&'m HashMap<u64, Head>>,
+    pending: Vec<(usize, bool)>,
+}
+
+/// How a template reads a list whose head a `(syntax σ)` entry may bind:
+/// a use of the macro of that entry's signature, or an application.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Head {
+    Macro(Kept),
+    Application,
 }
 
 /// A part to fill: its node, its type, its syntax, and the node its
@@ -1464,7 +1516,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::default(), checking: false, withs: Box::default() };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::default(), checking: false, withs: Box::new(Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), ..Withs::default() }) };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -1485,6 +1537,7 @@ impl Macros {
             }
         }
         self.mus = std::mem::take(&mut own.mus);
+        self.withs.syntax_sigs = std::mem::take(&mut own.withs.syntax_sigs);
         self.fresh = own.fresh;
         defined?;
         for (name, hidden) in made {
@@ -1753,6 +1806,20 @@ impl Macros {
             _ => (sig, false, false),
         };
         let sig = self.sty(&sig, interner, &HashMap::default(), &mut Vec::new())?;
+        // Each macro it says a use defines, its signature read now.
+        if let STy::Export(_, Bind::Rib(es)) = &*sig {
+            for (_, d) in es {
+                if let Delta::Syntax(k) = d
+                    && !self.withs.syntax_sigs.contains_key(k)
+                {
+                    let (p, t, d, e) = self.signature(&k.get(), interner)?;
+                    if !p.is_empty() {
+                        return Err(FxError::at(k.get().at(), "a `(syntax σ)` entry's signature has no `poly`, not yet"));
+                    }
+                    self.withs.syntax_sigs.insert(*k, (t, d, e));
+                }
+            }
+        }
         Ok((poly, sig, defn, desc))
     }
 
@@ -1774,7 +1841,7 @@ impl Macros {
         // The pattern, aligned with the signature: each variable's type and
         // declared environment.
         let none = HashMap::default();
-        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
         // A `syntax-rules`' literals, each a name the signature has written
         // as it is, `(literal name)`, where the pattern has it; and no other.
@@ -1821,11 +1888,51 @@ impl Macros {
         }
         // The template, an expression or definitions, aligned with the
         // kernel's forms' signatures and the macros'.
-        let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
-        let made = if defn { STy::Defn } else if desc { STy::Type } else { STy::Expr };
-        let root = t.align(&Rc::new(made), template, None, Vec::new())?;
-        let (mut found, mut seqs) = (Vec::new(), Vec::new());
-        t.walk(root, &Env::default(), false, 0, &mut found, &mut seqs)?;
+        // Where it uses a macro whose uses define a macro, `(syntax σ)`, each
+        // list whose head such an entry may bind read by its scope, to a
+        // fixed point (`typed-macros.md`, "Decided: a template's heads read
+        // by their scope, to a fixed point"): aligned, walked, each pending
+        // head read by its binder, until no reading is new; one read twice
+        // otherwise refused.
+        let made = Rc::new(if defn { STy::Defn } else if desc { STy::Type } else { STy::Expr });
+        let scoped = self.uses_syntax_macro(template);
+        let mut heads: HashMap<u64, Head> = HashMap::default();
+        let (t, root, found, seqs, read) = loop {
+            let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: scoped.then_some(&heads), pending: Vec::new() };
+            let root = t.align(&made, template, None, Vec::new())?;
+            let (mut found, mut seqs) = (Vec::new(), Vec::new());
+            t.walk(root, &Env::default(), false, 0, &mut found, &mut seqs)?;
+            let read = if t.pending.is_empty() { Vec::new() } else { t.heads_read(&found)? };
+            // Each macro reading kept; one an application may become a
+            // macro as the macros found give scope, never the other way.
+            let mut new = Vec::new();
+            for (at, h, _) in &read {
+                let syn = t.nodes[*at].syn;
+                match heads.get(&syn.0.raw()) {
+                    None if matches!(h, Head::Macro(_)) => new.push((syn.0.raw(), *h)),
+                    None => {}
+                    Some(was) if was != h => {
+                        let n = syn.list().and_then(|l| l.first().and_then(|x| x.sym())).map(|x| t.name(x).to_string()).unwrap_or_default();
+                        let said = |h: &Head| if matches!(h, Head::Macro(_)) { "a use of the macro a use before it defines" } else { "an application" };
+                        return Err(FxError::at(syn.at(), format!("this template's scopes have no one reading: `{}`, headed by `{n}`, is read as {} and then as {}", t.show(&syn), said(was), said(h))));
+                    }
+                    Some(_) => {}
+                }
+            }
+            if new.is_empty() {
+                break (t, root, found, seqs, read);
+            }
+            drop(t);
+            heads.extend(new);
+        };
+        // A pending list where a definition is, read as no macro's use: no
+        // definition.
+        for (at, h, _) in &read {
+            if matches!(h, Head::Application) && t.pending.iter().any(|(p, d)| p == at && *d) {
+                let syn = t.nodes[*at].syn;
+                return Err(FxError::at(syn.at(), format!("`{}` is not a definition: a macro that makes definitions makes `define`, `define*`, `define-rec`, a `begin` of them, or a use of another such", t.show(&syn))));
+            }
+        }
         // How many ellipses each of the template's binders is under: a
         // binder repeated is made fresh in each repetition.
         let binder_depth: HashMap<usize, usize> = found.iter().filter(|f| matches!(t.nodes[f.0].kids, Kids::Binder(..))).map(|f| (f.0, f.3)).collect();
@@ -1976,6 +2083,19 @@ impl Macros {
             }
         }
         let mut checked_uses = HashSet::default();
+        // A list read as a use of the macro a nested use defines: checked,
+        // by its signature, which the defined macro is held to; its head, a
+        // template's binder, renamed with it.
+        for (at, h, b) in &read {
+            if let Head::Macro(_) = h {
+                checked_uses.insert(t.nodes[*at].syn.at().start);
+                if let Some(b) = b {
+                    let mut head = t.nodes[*at].path.clone();
+                    head.push(true);
+                    actions.insert(head, Action::Rename(t.nodes[*b].path.clone(), binder_depth.get(b).copied().unwrap_or(0)));
+                }
+            }
+        }
         for node in t.nodes.iter() {
             // A use of a macro, its operands aligned with its signature: a
             // checked use (`Clause::checked_uses`).
@@ -2015,7 +2135,7 @@ impl Macros {
                 && h.sym() == Some(name)
                 && !pvars.contains_key(&name)
             {
-                let mut a = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+                let mut a = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
                 if a.align(sig, &operands, None, Vec::new()).is_ok() {
                     checked_uses.insert(node.syn.at().start);
                 }
@@ -2204,6 +2324,14 @@ impl Macros {
         Ok(())
     }
 
+    /// Whether template `s` uses a macro whose signature says its uses
+    /// define a macro, `(ℓ (syntax σ))`.
+    fn uses_syntax_macro(&self, s: &Syn) -> bool {
+        let Some(items) = s.list() else { return false };
+        let defines = items.first().and_then(|h| h.sym()).and_then(|h| self.defined.get(&h)).is_some_and(|m| matches!(&*m.sig, STy::Export(_, Bind::Rib(es)) if es.iter().any(|e| matches!(e.1, Delta::Syntax(_)))));
+        defines || items.iter().any(|x| self.uses_syntax_macro(x))
+    }
+
     /// Use `s` of macro `name`, `m`, its expansion done: each macro its
     /// signature says a use defines, `(ℓ (syntax σ))` in what it makes,
     /// defined by the expansion (`Withs::made_syntax` from `from` on), and
@@ -2322,7 +2450,7 @@ impl Macros {
         let none = HashMap::default();
         let mut renamed: HashMap<Vec<bool>, String> = HashMap::default();
         {
-            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
             let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
             let mut found = Vec::new();
             a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
@@ -2404,7 +2532,7 @@ impl Macros {
         let trusted = self.withs.trusted.contains(&s.at());
         if !trusted || self.withs.recheck {
             let none = HashMap::default();
-            let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+            let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
             let fault = if trusted { " (a use a template made, which its macro's definition found fits: a fault in the binding-shape check, not in the program)" } else { "" };
             u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}{fault}", interner.name(name), e.message)))?;
         }
@@ -2450,7 +2578,7 @@ impl Macros {
         let refused = |why: &str| FxError::at(s.at(), format!("a use of `{shown}`: {why}"));
         let (head, operands) = split(s).expect("a list");
         let none = HashMap::default();
-        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         u.align(sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{shown}`: {}", e.message)))?;
         let made = fixpt_read::record_expansion(&shown, s.span(), None, false);
         self.withs.def_envs.insert(made, p.def_env.clone());
@@ -2520,7 +2648,7 @@ impl Macros {
     /// as they are.
     fn references_renamed(&self, part: &Syn, core: &Rc<STy>, renames: &HashMap<Sym, Sym>, interner: &mut Interner) -> R<Syn> {
         let none = HashMap::default();
-        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         let root = a.align(core, part, None, Vec::new())?;
         let mut found = Vec::new();
         a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
@@ -2541,7 +2669,7 @@ impl Macros {
     /// α-equivalence takes it (`AlphaNode`).
     fn alpha_nodes(&self, s: &Syn, made: &Rc<STy>, interner: &mut Interner) -> R<Vec<AlphaNode>> {
         let none = HashMap::default();
-        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         let root = a.align(made, s, None, Vec::new())?;
         let mut found = Vec::new();
         a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
@@ -2577,7 +2705,7 @@ impl Macros {
     fn contract_renames(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(HashMap<u64, (HashMap<Sym, Sym>, Rc<STy>, Syn)>, HashMap<Sym, Sym>)> {
         let (pattern, parts) = self.contract_pattern(sig, operands, interner)?;
         let none = HashMap::default();
-        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         let root = p.align(sig, &pattern, None, Vec::new())?;
         let mut found = Vec::new();
         p.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
@@ -2647,7 +2775,7 @@ impl Macros {
         let (pattern, parts) = self.contract_pattern(sig, operands, interner)?;
         let mut said: Vec<(Sym, Ns)> = Vec::new();
         {
-            let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+            let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
             let root = p.align(sig, &pattern, None, Vec::new())?;
             p.walk(root, &Env::default(), false, 0, &mut Vec::new(), &mut Vec::new())?;
             if let Some((b, r)) = p.nodes[root].export.clone() {
@@ -2671,7 +2799,7 @@ impl Macros {
         let mut defines: Vec<(Sym, Ns)> = Vec::new();
         {
             let ours = |e: FxError| FxError::at(e.span, format!("its expansion: {}", e.message));
-            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
             let root = a.align(&Rc::new(STy::Defn), out, None, Vec::new()).map_err(ours)?;
             a.walk(root, &Env::default(), false, 0, &mut Vec::new(), &mut Vec::new()).map_err(ours)?;
             for i in 0..a.nodes.len() {
@@ -2705,7 +2833,7 @@ impl Macros {
     /// `%part:k`, the part `parts[k]`.
     fn contract_pattern(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(Syn, Vec<Syn>)> {
         let none = HashMap::default();
-        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         u.align(sig, operands, None, Vec::new())?;
         let leaf = |t: &STy| matches!(t, STy::Expr | STy::Lambda | STy::Bvar | STy::Dvar | STy::Id | STy::Data | STy::Type | STy::Label | STy::Kind | STy::Defn | STy::Item);
         let mut leaves: HashSet<u64> = HashSet::default();
@@ -3034,6 +3162,12 @@ impl Aligner<'_> {
                     return Ok(Some((at, Rc::new(STy::Data), s_owned, root)));
                 }
                 let r = Rc::new(STy::Rules);
+                // A `define-syntax` in it: its signature a datum.
+                if items.len() == 4 && tail.is_none() && items[0].sym().is_some_and(|h| self.name(h) == "define-syntax") {
+                    let nil = Rc::new(STy::Nil);
+                    let rest = Rc::new(STy::Pair(Rc::new(STy::Data), Rc::new(STy::Pair(r.clone(), nil))));
+                    return Ok(Some((at, Rc::new(STy::Pair(r.clone(), Rc::new(STy::Pair(r, rest)))), s_owned, root)));
+                }
                 Ok(Some((at, Rc::new(STy::Pair(r.clone(), r)), s_owned, root)))
             }
             V::Nil => {
@@ -3048,7 +3182,7 @@ impl Aligner<'_> {
     fn node_new(&mut self, t: &Rc<STy>, s: &Syn, path: Vec<bool>) -> usize {
         let at = self.nodes.len();
         // The node's syntax is the form's own, shared, not a copy.
-        self.nodes.push(Node { syn: *s, path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
+        self.nodes.push(Node { syn: *s, path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, head: false, kids: Kids::Other });
         at
     }
 
@@ -3224,7 +3358,7 @@ impl Aligner<'_> {
                 // its parts say).
                 let rest = self.nodes.len();
                 let syn = if self.mode == Mode::Program { Syn::nil(y.at()) } else { y.clone() };
-                self.nodes.push(Node { syn, path: dp, core: d.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
+                self.nodes.push(Node { syn, path: dp, core: d.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, head: false, kids: Kids::Other });
                 self.nodes[at].kids = Kids::Pair(x_at, rest);
                 self.work.push((rest, d.clone(), y, root));
                 Ok(Some((x_at, a.clone(), x, root)))
@@ -3438,6 +3572,40 @@ impl Aligner<'_> {
     fn form(&mut self, at: usize, s: &Syn, defn: bool) -> R<Option<(Rc<STy>, Vec<bool>, bool)>> {
         let V::List { items, tail } = &s.view() else { unreachable!("a list") };
         let head = items[0].sym().filter(|h| !self.pvars.contains_key(h));
+        // A list whose head a `(syntax σ)` entry may bind: pending, read by
+        // its scope (`Macros::template_aligned`), a use of that macro by
+        // `σ` once its binder is found one, else an application (where a
+        // definition is, unread until then).
+        if let Some(heads) = self.heads
+            && let Some(h) = items[0].sym()
+            && self.unknown_head(h)
+        {
+            self.nodes[at].head = true;
+            self.pending.push((at, defn));
+            match heads.get(&s.0.raw()) {
+                Some(Head::Macro(k)) => {
+                    let (sig, mdefn, mdesc) = self.m.withs.syntax_sigs[k].clone();
+                    let n = self.name(h);
+                    let not_one = |what: &str| FxError::at(s.at(), format!("`{}` is not a definition: a macro that makes definitions makes {what}", self.show(s)));
+                    match (defn, mdefn, mdesc) {
+                        (false, true, _) => return Err(FxError::at(s.at(), format!("`{n}` makes definitions, which are made at the top level, not where an expression is"))),
+                        (false, _, true) => return Err(FxError::at(s.at(), format!("`{n}` makes a description, not an expression"))),
+                        (true, _, true) => return Err(not_one("them by a macro that makes definitions, not a description's")),
+                        (true, false, _) => return Err(not_one("them by a macro that makes definitions, not an expression's")),
+                        _ => {}
+                    }
+                    let mut p = self.nodes[at].path.clone();
+                    p.push(false);
+                    return Ok(Some((sig, p, true)));
+                }
+                // Unread, it exports nothing yet.
+                _ if defn => {
+                    self.nodes[at].export = Some((Bind::Rib(Vec::new()), at));
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
         let not_one = |what: &str| FxError::at(s.at(), format!("`{}` is not a definition: a macro that makes definitions makes {what}", self.show(s)));
         let sig = match head.map(|h| (h, self.name(h))) {
             Some((h, _)) if self.m.defined.get(&h).is_some_and(|m| m.procedural.as_ref().is_some_and(|p| !p.contract)) => {
@@ -3941,7 +4109,7 @@ impl Aligner<'_> {
             let mut p = path.clone();
             p.push(true);
             kids.push(self.nodes.len());
-            self.nodes.push(Node { syn: i.clone(), path: p, core: Rc::new(STy::Type), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, kids: Kids::Other });
+            self.nodes.push(Node { syn: i.clone(), path: p, core: Rc::new(STy::Type), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, head: false, kids: Kids::Other });
             path.push(false);
         }
         if repeated && let Some(&k) = kids.last() {
@@ -4038,6 +4206,72 @@ impl Aligner<'_> {
         None
     }
 
+    /// Whether `h`, at a list's head in a template, may be a name a `(syntax
+    /// σ)` entry binds: no macro's, form's or trailmark's, and no pattern
+    /// variable's but a binder's.
+    fn unknown_head(&self, h: Sym) -> bool {
+        let n = self.name(h);
+        let k = &self.m.k;
+        match self.pvars.get(&h) {
+            Some(p) => matches!(&*p.core, STy::Bvar),
+            None => {
+                !reserved(n)
+                    && !self.m.defined.contains_key(&h)
+                    && self.m.mark_of(h).is_none()
+                    && !k.forms.contains_key(n)
+                    && !k.definitions.contains_key(n)
+                    && !k.scope_forms.contains_key(n)
+                    && !k.scope_definitions.contains_key(n)
+            }
+        }
+    }
+
+    /// How each pending list is read by the scopes the walk found, `found`:
+    /// a use of a macro if its head's innermost binder is what a `(syntax σ)`
+    /// entry binds, a pattern variable or a template's binder at that part
+    /// of a use; else an application. Each with its node, and its binder if
+    /// a template's.
+    fn heads_read(&self, found: &Found) -> R<Vec<(usize, Head, Option<usize>)>> {
+        let mut by_pvar: HashMap<Sym, Kept> = HashMap::default();
+        let mut by_node: HashMap<usize, Kept> = HashMap::default();
+        for node in &self.nodes {
+            let Some((Bind::Rib(es), root)) = &node.export else { continue };
+            for (addr, d) in es {
+                let Delta::Syntax(k) = d else { continue };
+                let t = self.nav(*root, addr, node.syn.at())?;
+                match self.nodes[t].kids {
+                    Kids::PVar(n) => _ = by_pvar.insert(n, *k),
+                    Kids::Binder(_, Ns::Value) => _ = by_node.insert(t, *k),
+                    _ => {}
+                }
+            }
+        }
+        let envs: HashMap<usize, &Env> = found.iter().map(|(i, env, ..)| (*i, env)).collect();
+        let mut out = Vec::new();
+        for (at, _) in &self.pending {
+            let h = self.nodes[*at].syn.list().and_then(|l| l.first().and_then(|h| h.sym())).expect("a head");
+            let mut read = (Head::Application, None);
+            'levels: for level in envs[at].levels() {
+                let (Level::Rib(atoms) | Level::Earlier(atoms)) = level else { continue };
+                for x in atoms.iter() {
+                    match x {
+                        Atom::Var(m, Ns::Value, _) if *m == h => {
+                            read = (by_pvar.get(m).map_or(Head::Application, |k| Head::Macro(*k)), None);
+                            break 'levels;
+                        }
+                        Atom::Lit(b, Ns::Value) if matches!(self.nodes[*b].kids, Kids::Binder(m, _) if m == h) => {
+                            read = (by_node.get(b).map_or(Head::Application, |k| Head::Macro(*k)), Some(*b));
+                            break 'levels;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            out.push((*at, read.0, read.1));
+        }
+        Ok(out)
+    }
+
     /// A pattern variable written somewhere inside `s`.
     fn pvar_in(&self, s: &Syn) -> Option<Sym> {
         match &s.view() {
@@ -4067,6 +4301,9 @@ impl Aligner<'_> {
             }
             for (b, root) in &node.imports {
                 env = env.within(self.eval(b, *root, node.syn.at())?);
+            }
+            if node.head {
+                found.push((at, env.clone(), many, depth));
             }
             match &node.kids {
                 Kids::Pair(x, y) => {
@@ -4363,7 +4600,7 @@ impl Macros {
         }
         assumed.insert(key);
         match (&**a, &**b) {
-            (Import(x, p), Import(y, q)) | (Export(x, p), Export(y, q)) => p == q && self.sub(x, y, assumed),
+            (Import(x, p), Import(y, q)) | (Export(x, p), Export(y, q)) => bind_same(p, q) && self.sub(x, y, assumed),
             (Many(x), _) | (Typed(x, _), _) => self.sub(x, b, assumed),
             (_, Many(y)) | (_, Typed(y, _)) => self.sub(a, y, assumed),
             (Mu(i), _) => self.sub(&self.mus[*i], b, assumed),

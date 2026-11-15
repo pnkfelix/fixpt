@@ -36,6 +36,7 @@
         (type renames))
 (import types-module fail-at)
 (import match-module same-atom?)
+(import exports-module heads-checked)
 
 
 ;;; ------------------------------------------------------------ the programs
@@ -226,7 +227,7 @@
 ;; definition is refused for one (`typed-macros.md`, "Decided: a use a
 ;; template made is not aligned again").
 (define checked-uses (->* (symbol sty pvars) (listof int acyclic))
-  (lambda (name sig ps) (checked-from 0 (get nnodes) name sig ps nil)))
+  (lambda (name sig ps) (append (get heads-checked) (checked-from 0 (get nnodes) name sig ps nil))))
 (define checked-from (->* (int int symbol sty pvars (listof int acyclic)) (listof int acyclic))
   (lambda (i n name sig ps out)
     (if (= i n)
