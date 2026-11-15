@@ -23,7 +23,7 @@
 (import types-module fail-at s-expr split (type fails sty atms))
 (import align-module align node-syn node-kids node-core node-hole nnodes nodes-reset! env-empty
         env-levels lv-rib lv-earlier k-pvar k-binder k-ref program-walk
-        (type pvars levels found))
+        (type pvars levels found env))
 (import scopes-module walk)
 (import match-module same-atom?)
 
@@ -31,7 +31,7 @@
 ;; Parts' places; binders' names by part; what is renamed in each part.
 (define-type places (listof (tupleof int int) acyclic))
 (define-type numbered (listof (tupleof int symbol) acyclic))
-(define-type renamings (listof (tupleof int int renames) acyclic))
+(define-type renamings (listof (tupleof int int renames sty) acyclic))
 ;; The parts of use operands `operands`, aligned with contract `sig` (just
 ;; now: the nodes are the use's), that a binder's scope reaches: each by its
 ;; place, with what is renamed in it, its binders' names each to a fresh
@@ -107,7 +107,7 @@
           -1))))
 ;; Each pattern variable the walk found: its part, whether a binder, and the
 ;; binders (as pattern variables) in its scope, innermost first.
-(define-type part-var (tupleof int bool (listof symbol acyclic)))
+(define-type part-var (tupleof int bool (listof symbol acyclic) sty))
 (define part-vars (->* (fails found syns-a (listof part-var acyclic)) (listof part-var acyclic))
   (lambda (fail fs parts out)
     (if (null? fs)
@@ -121,7 +121,8 @@
                             (list (tuple k (tagcase (node-core at) (s-bvar () #t) (s-dvar () #t)
                                              (else y #f))
                                          (scope-binders fail (env-levels (extract (car fs) 2))
-                                                        (nth parts k) nil))))))
+                                                        (nth parts k) nil)
+                                         (node-core at))))))
                     (else y nil))))
           (part-vars fail (cdr fs) parts (if (null? v) out (cons (car v) out)))))))
 (define scope-binders (->* (fails levels syn (listof symbol acyclic)) (listof symbol acyclic))
@@ -194,7 +195,10 @@
                (rs (scope-renames (extract (car vs) 3) bs fs own))
                (p (nth parts k)))
           (part-renames (cdr vs) parts bs fs
-                        (if (null? rs) out (cons (tuple (syn-start p) (syn-end p) rs) out)))))))
+                        (if (null? rs)
+                            out
+                            (cons (tuple (syn-start p) (syn-end p) rs (extract (car vs) 4))
+                                  out)))))))
 (define scope-renames
   (->* ((listof symbol acyclic) numbered
         numbered renames)
@@ -227,97 +231,197 @@
 (define renamed-each (->* (syns-a renames) syns-a)
   (lambda (xs rs) (if (null? xs) nil (cons (syn-renamed (car xs) rs) (renamed-each (cdr xs) rs)))))
 ;; Use `s`, each part `ps` has by its place renamed as it says.
-(define renamed-use (->* (syn renamings) syn)
-  (lambda (s ps)
+;; Use `s` α-renamed: each part `ps` has, by its place, a binder's its fresh
+;; name, any other's references to the binders in whose scope it is, as
+;; the part's own binding structure finds them (`references-renamed`).
+(define renamed-use (->* (fails syn renamings) syn)
+  (lambda (fail s ps)
     (let ((r (part-renames-at (syn-start s) (syn-end s) ps)))
       (if (not (null? r))
-          (syn-renamed s (car r))
+          (tagcase (extract (car r) 2)
+            (s-bvar () (syn-renamed s (extract (car r) 1)))
+            (s-dvar () (syn-renamed s (extract (car r) 1)))
+            (else y (references-renamed fail s (extract (car r) 2) (extract (car r) 1))))
           (tagcase s
             (lst (items d a b x)
-              (let ((xs (renamed-use-each items ps))) (lst xs (syn-datums xs) a b x)))
+              (let ((xs (renamed-use-each fail items ps))) (lst xs (syn-datums xs) a b x)))
             (dotted (items tail d a b x)
-              (let ((xs (renamed-use-each items ps)) (tl (renamed-use tail ps)))
+              (let ((xs (renamed-use-each fail items ps)) (tl (renamed-use fail tail ps)))
                 (dotted xs tl (datum-dotted (syn-datums xs) (syn->datum tl)) a b x)))
             (else y s))))))
-(define renamed-use-each (->* (syns-a renamings) syns-a)
-  (lambda (xs ps)
-    (if (null? xs) nil (cons (renamed-use (car xs) ps) (renamed-use-each (cdr xs) ps)))))
-(define part-renames-at (->* (int int renamings) (listof renames acyclic))
+(define renamed-use-each (->* (fails syns-a renamings) syns-a)
+  (lambda (fail xs ps)
+    (if (null? xs) nil (cons (renamed-use fail (car xs) ps) (renamed-use-each fail (cdr xs) ps)))))
+(define part-renames-at (->* (int int renamings) (listof (tupleof renames sty) acyclic))
   (lambda (a b ps)
     (cond ((null? ps) nil)
-          ((and (= a (extract (car ps) 1)) (= b (extract (car ps) 2))) (list (extract (car ps) 3)))
+          ((and (= a (extract (car ps) 1)) (= b (extract (car ps) 2)))
+           (list (tuple (extract (car ps) 3) (extract (car ps) 4))))
           (else (part-renames-at a b (cdr ps))))))
-;; Output `out2`'s fresh names each a binder, or a reference in the scope of
-;; one, as its program's walk finds them; else refused at use `s`.
-(define placed-in-scopes (->* (fails syn syn renames) unit)
-  (lambda (in-use s out2 fresh)
-    (let* ((fail (lambda ((m string) (a int) (b int))
-                   (in-use (string-append "its expansion: " m) (syn-start s) (syn-end s))))
-           (root (begin (nodes-reset!) (set program-walk #t)
-                        (align fail 3 (the pvars nil) (s-expr) out2 -1 nil)))
+;; Part `part`, of syntax type `core`, each free reference in it to a name
+;; `rs` names renamed, as its own binding structure finds them (aligned as
+;; a program's form is, its macros' uses by their signatures); its binders,
+;; and what it quotes, as they are (`Macros::references_renamed`). By
+;; place: two references at one place are one template's part, alike.
+(define references-renamed (->* (fails syn sty renames) syn)
+  (lambda (fail part core rs)
+    (let* ((root (begin (nodes-reset!) (set program-walk #t)
+                        (align fail 3 (the pvars nil) core part -1 nil)))
+           (found (walk fail root env-empty #f 0))
+           (at (begin (set program-walk #f) (free-refs found rs nil))))
+      (syn-renamed-at part at))))
+(define-type placed-renames (listof (tupleof int int symbol) acyclic))
+(define free-refs (->* (found renames placed-renames) placed-renames)
+  (lambda (fs rs out)
+    (if (null? fs)
+        out
+        (free-refs (cdr fs) rs
+                   (tagcase (node-kids (extract (car fs) 1))
+                     (k-ref (n d f)
+                       (let ((to (renamed-to n rs)) (s (node-syn (extract (car fs) 1))))
+                         (if (or (null? to)
+                                 (not (= (bound-by (env-levels (extract (car fs) 2)) n d) -1)))
+                             out
+                             (cons (tuple (syn-start s) (syn-end s) (car to)) out))))
+                     (else y out))))))
+;; `s`, each symbol at a place `at` has made the name it says.
+(define syn-renamed-at (->* (syn placed-renames) syn)
+  (lambda (s at)
+    (tagcase s
+      (atom (d a b x)
+        (let ((to (placed-at a b at)))
+          (if (and (syn-symbol? s) (not (null? to))) (atom (car to) a b x) s)))
+      (lst (items d a b x) (let ((xs (renamed-at-each items at))) (lst xs (syn-datums xs) a b x)))
+      (dotted (items tail d a b x)
+        (let ((xs (renamed-at-each items at)) (tl (syn-renamed-at tail at)))
+          (dotted xs tl (datum-dotted (syn-datums xs) (syn->datum tl)) a b x)))
+      (vec (items d a b x)
+        (let ((xs (renamed-at-each items at)))
+          (vec xs (datum-list->vector (syn-datums xs)) a b x))))))
+(define renamed-at-each (->* (syns-a placed-renames) syns-a)
+  (lambda (xs at)
+    (if (null? xs) nil (cons (syn-renamed-at (car xs) at) (renamed-at-each (cdr xs) at)))))
+(define placed-at (->* (int int placed-renames) (listof symbol acyclic))
+  (lambda (a b at)
+    (cond ((null? at) nil)
+          ((and (= a (extract (car at) 1)) (= b (extract (car at) 2))) (list (extract (car at) 3)))
+          (else (placed-at a b (cdr at))))))
+;; The binder node a reference to `n` (of a description's if `d`) is bound
+;; by in `ls`, the innermost; -2 for a pattern's binder, -1 for none.
+(define bound-by (->* (levels symbol bool) int)
+  (lambda (ls n d)
+    (if (null? ls)
+        -1
+        (let ((b (tagcase (car ls)
+                   (lv-rib (as) (bound-in as n d))
+                   (lv-earlier (as) (bound-in as n d))
+                   (else y -1))))
+          (if (= b -1) (bound-by (cdr ls) n d) b)))))
+(define bound-in (->* (atms symbol bool) int)
+  (lambda (as n d)
+    (if (null? as)
+        -1
+        (let ((b (tagcase (car as)
+                   (atm-lit (i e)
+                     (tagcase (node-kids i)
+                       (k-binder (m e2) (if (and (symbol=? m n) (eq? e2 d)) i -1))
+                       (else y -1)))
+                   (atm-var (m e g) (if (and (symbol=? m n) (eq? e d)) -2 -1))
+                   (else y -1))))
+          (if (= b -1) (bound-in (cdr as) n d) b)))))
+;; Output `s`'s nodes, aligned as a program's form is (nothing expanded) and
+;; walked, each as α-equivalence takes it: its kind, the nodes under it by
+;; number, a binder whatever its name, a reference by its binder or, free,
+;; by its name, any other part as it is (`Macros::alpha_nodes`).
+(define-type anode (tupleof int (listof int acyclic) (listof symbol acyclic) (listof syn acyclic)))
+(define-type anodes (listof anode acyclic))
+(define alpha-nodes (->* (fails syn) anodes)
+  (lambda (fail s)
+    (let* ((root (begin (nodes-reset!) (set program-walk #t)
+                        (align fail 3 (the pvars nil) (s-expr) s -1 nil)))
            (found (walk fail root env-empty #f 0)))
-      (begin (set program-walk #f) (refs-bound in-use s found fresh)))))
-(define refs-bound (->* (fails syn found renames) unit)
-  (lambda (in-use s fs fresh)
-    (if (null? fs)
-        #u
-        (begin
-          (tagcase (node-kids (extract (car fs) 1))
-            (k-ref (n d f)
-              (let ((original (renamed-to n fresh)))
-                (if (or (null? original) (levels-bind? (env-levels (extract (car fs) 2)) n))
-                    #u
-                    (in-use (string-append "its expansion places `" (symbol->string (car original))
-                                           "` where its contract does not put it in `"
-                                           (symbol->string (car original)) "`'s scope")
-                            (syn-start s) (syn-end s)))))
-            (else y #u))
-          (refs-bound in-use s (cdr fs) fresh)))))
-(define levels-bind? (->* (levels symbol) bool)
-  (lambda (ls n)
-    (and (not (null? ls))
-         (or (tagcase (car ls)
-               (lv-rib (as) (atoms-bind? as n))
-               (lv-earlier (as) (atoms-bind? as n))
-               (else y #f))
-             (levels-bind? (cdr ls) n)))))
-(define atoms-bind? (->* (atms symbol) bool)
-  (lambda (as n)
-    (and (not (null? as))
-         (or (tagcase (car as)
-               (atm-var (b d g) (symbol=? b n))
-               (atm-lit (i d) (tagcase (node-kids i) (k-binder (m e) (symbol=? m n)) (else y #f)))
-               (else y #f))
-             (atoms-bind? (cdr as) n)))))
-
-;; Output `out2`, the transformer's of the renamed use, held to output
-;; `out`, its of the use: its fresh names where their binders' scopes are
-;; (`placed-in-scopes`), and, each named back, `out` itself; else refused
-;; at use `s`, by `in-use`.
+      (begin (set program-walk #f) (anodes-from 0 (get nnodes) found nil)))))
+(define anodes-from (->* (int int found anodes) anodes)
+  (lambda (i n fs out)
+    (if (= i n)
+        (the anodes (reverse out))
+        (anodes-from (+ i 1) n fs (cons (anode-of i fs) out)))))
+(define anode-of (->* (int found) anode)
+  (lambda (i fs)
+    (let ((none (the (listof symbol acyclic) nil)) (no (the (listof syn acyclic) nil))
+          (bit (lambda ((d bool)) (if d 1 0))))
+      (tagcase (node-kids i)
+        (k-pair (x y) (tuple 0 (list x y) none no))
+        (k-nil () (tuple 1 nil none no))
+        (k-binder (m d) (tuple 2 (list (bit d)) none no))
+        (k-ref (m d f)
+          (let ((b (bound-by (env-levels (env-at i fs)) m d)))
+            (if (= b -1) (tuple 4 (list (bit d)) (list m) no) (tuple 3 (list b) none no))))
+        (k-desc (xs) (tuple 5 xs none no))
+        (k-seq (x) (tuple 6 (list x) none no))
+        (k-form (x) (tuple 7 (list x) none no))
+        (else y (tuple 8 nil none (list (node-syn i))))))))
+(define env-at (->* (int found) env)
+  (lambda (i fs)
+    (cond ((null? fs) env-empty)
+          ((= i (extract (car fs) 1)) (extract (car fs) 2))
+          (else (env-at i (cdr fs))))))
+(define alpha-same? (->* (anodes anodes) bool)
+  (lambda (as bs)
+    (cond ((null? as) (null? bs))
+          ((null? bs) #f)
+          (else (and (anode-same? (car as) (car bs)) (alpha-same? (cdr as) (cdr bs)))))))
+(define anode-same? (->* (anode anode) bool)
+  (lambda (a b)
+    (and (= (extract a 1) (extract b 1)) (ints-same? (extract a 2) (extract b 2))
+         (names-same? (extract a 3) (extract b 3))
+         (or (null? (extract a 4))
+             (and (not (null? (extract b 4)))
+                  (syn-same? (car (extract a 4)) (car (extract b 4))))))))
+(define ints-same? (->* ((listof int acyclic) (listof int acyclic)) bool)
+  (lambda (xs ys)
+    (cond ((null? xs) (null? ys)) ((null? ys) #f)
+          (else (and (= (car xs) (car ys)) (ints-same? (cdr xs) (cdr ys)))))))
+(define names-same? (->* ((listof symbol acyclic) (listof symbol acyclic)) bool)
+  (lambda (xs ys)
+    (cond ((null? xs) (null? ys)) ((null? ys) #f)
+          (else (and (symbol=? (car xs) (car ys)) (names-same? (cdr xs) (cdr ys)))))))
+;; Output `out2`, the transformer's of the α-renamed use, held to output
+;; `out`, its of the use: the same up to their binders' names; else refused
+;; at use `s`, by `in-use`: a fresh name of `fresh`, or its alias of
+;; expansion `made` (`%~N:x′`), free in `out2`, placed outside its binder's
+;; scope; else a name read (`Macros::contract_expanded`).
 (define contract-held (->* (fails syn syn syn renames int) unit)
-  (lambda (in-use s out out2 fresh0 made)
-    (let ((fresh (append fresh0 (aliased fresh0 made #f)))
-          (back (append fresh0 (aliased fresh0 made #t))))
-     (begin
-      (placed-in-scopes in-use s out2 fresh)
-      (if (syn-same? (syn-renamed out2 back) out)
+  (lambda (in-use s out out2 fresh made)
+    (let* ((ours (lambda ((m string) (a int) (b int))
+                   (in-use (string-append "its expansion: " m) (syn-start s) (syn-end s))))
+           (a (alpha-nodes ours out)) (b (alpha-nodes ours out2)))
+      (if (alpha-same? a b)
           #u
-          (in-use "its expansion depends on how its use's bound names are spelled"
-                  (syn-start s) (syn-end s)))))))
-;; Of each fresh name of `fs`, its alias of expansion `made`, `%~N:x′` (a
-;; name the transformer wrote where its macro is defined, closed so), fresh
-;; too: with the original's alias if `back`, else the original
-;; (`Macros::contract_expanded`).
-(define aliased (->* (renames int bool) renames)
-  (lambda (fs made back)
-    (if (null? fs)
+          (let ((x (escaped b fresh made)))
+            (in-use (if (null? x)
+                        "its expansion depends on how its use's bound names are spelled"
+                        (string-append "its expansion places `" (symbol->string (car x))
+                                       "` where its contract does not put it in `"
+                                       (symbol->string (car x)) "`'s scope"))
+                    (syn-start s) (syn-end s)))))))
+(define escaped (->* (anodes renames int) (listof symbol acyclic))
+  (lambda (ns fresh made)
+    (if (null? ns)
         nil
-        (let ((at (lambda ((n symbol))
-                    (string->symbol (string-append "%~" (int->string made) ":"
-                                                   (symbol->string n))))))
-          (cons (tuple (at (extract (car fs) 1))
-                       (if back (at (extract (car fs) 2)) (extract (car fs) 2)))
-                (aliased (cdr fs) made back))))))
+        (let ((x (if (and (= (extract (car ns) 1) 4) (not (null? (extract (car ns) 3))))
+                     (fresh-of (car (extract (car ns) 3)) fresh made)
+                     nil)))
+          (if (null? x) (escaped (cdr ns) fresh made) x)))))
+(define fresh-of (->* (symbol renames int) (listof symbol acyclic))
+  (lambda (n fresh made)
+    (cond ((null? fresh) nil)
+          ((or (symbol=? n (extract (car fresh) 1))
+               (string=? (symbol->string n)
+                         (string-append "%~" (int->string made) ":"
+                                        (symbol->string (extract (car fresh) 1)))))
+           (list (extract (car fresh) 2)))
+          (else (fresh-of n (cdr fresh) made)))))
 ;; Whether syntax `a` and `b` are the same, part by part, wherever each is.
 (define syn-same? (->* (syn syn) bool)
   (lambda (a b)

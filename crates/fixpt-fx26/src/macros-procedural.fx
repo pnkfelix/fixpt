@@ -191,8 +191,8 @@
                   (let* ((r (contract-renames in-use sig operands)) (fresh (extract r 2)))
                     (if (null? fresh)
                         out
-                        (let ((out2 (expand-procedural fail name (renamed-use s (extract r 1))
-                                                       made)))
+                        (let ((out2 (expand-procedural fail name
+                                                       (renamed-use in-use s (extract r 1)) made)))
                           (begin (contract-held in-use s out out2 fresh made) out)))))))))))
 (define macro-of-defined (->* (symbol macro-env) (listof macro acyclic))
   (lambda (n ms)

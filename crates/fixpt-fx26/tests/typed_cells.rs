@@ -255,7 +255,10 @@ fn latent_effects_shard(k: usize) {
             eprintln!("  {k}");
         }
     }
-    assert!(made > 10000 / common::SHARDS, "too few weakened: {made}");
+    // A shard's part of the corpus, which programs added shift (shards are
+    // by place in the sorted list): half an even share, so that a shard that
+    // lost its programs is caught, not one a few short of the mean.
+    assert!(made > 10000 / common::SHARDS / 2, "too few weakened: {made}");
     assert!(by_masks.is_empty(), "weakened, and verified for the masks alone:\n{}", by_masks.join("\n"));
     let reads: Vec<&String> = kept.iter().filter(|k| k.contains(": Read(Global(")).collect();
     assert!(reads.is_empty(), "a global's read left out, and verified:\n{reads:?}");
@@ -430,7 +433,7 @@ fn words_verified_shard(k: usize) {
     assert!(t.failed.is_empty(), "type VCs failed: {}", t.failed.len());
     assert!(t.open == 0, "VCs left open: {}", t.open);
     assert!(t.stopped.is_empty(), "words stopped in: {:?}", t.stopped);
-    assert!(t.verified + gaps.len() == t.words && t.words > 5000 / common::SHARDS, "{} of {} words verified", t.verified, t.words);
+    assert!(t.verified + gaps.len() == t.words && t.words > 5000 / common::SHARDS / 2, "{} of {} words verified", t.verified, t.words);
 }
 
 /// Programs that state propositions (`requires`, `ensures`; the note's

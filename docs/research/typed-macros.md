@@ -2099,63 +2099,68 @@ expansion commutes with α-renaming the use. Decided with the user
   What they cost is the step's own: two runs of the transformer, an
   alignment of one output, a comparison; never the expansion's whole.
 
-**The checks, at each use `u` of a macro with contract `σ`:**
+**The check, at each use `u` of a macro with contract `σ`**: the user's
+own statement of it, α-rename(expand(u)) = expand(α-rename(u)), up to
+α-equivalence (2026-11-14; a first build compared the outputs by mapping
+fresh names back, syntactically, and needed a check of placement beside
+it and a special case for aliases, which this form needs neither of):
 
 1. *The use, by its contract*, before the transformer runs: aligned with
    `σ` as a `syntax-rules` use is, refused as one is.
 2. *Its binders and their scopes.* The use's parts, at the signature's
    leaves (each `expr`, `bvar`, …), made pattern variables, aligned and
    walked as a pattern is: for each binder part, the parts in its scope.
-3. *Run twice.* `O`, the transformer's output on `u`; `O′`, on `u′`: `u`
-   with each binder's name `x` made a fresh name `x′`, at the binder and
-   throughout each part in its scope (a part in scope renamed uniformly,
-   whatever it binds inside: with `x′` fresh, that keeps it α-equivalent,
-   so nothing in a part need be understood). A part outside the scope is
-   left as written: `(let1 x x body)`'s second `x` is an outer one.
-4. *Placement.* `O′` aligned as a template is, with the kernel's forms and
-   the other macros' signatures (nothing expanded), and walked: each `x′`
-   a binder, or a reference in a binder `x′`'s scope. One free, or bound
-   by another, is a part the transformer placed outside the scope its
-   contract gives it: refused, "`m`'s expansion places `x` where its
-   contract does not put it in `x`'s scope".
-5. *Commutation.* `O′` with each `x′` made `x` again, and the aliases'
-   numbers (`%~N:`) made one, the same as `O`: else the transformer
-   depends on how a bound name is spelled (compares it, builds a name of
-   it, orders by it): refused, "`m`'s expansion depends on how its use's
-   bound names are spelled".
+3. *The use α-renamed.* Each binder part its fresh name `x′`; in each part
+   in its scope, the references to it, as that part's own binding
+   structure finds them (aligned as a program's form is, its macros' uses
+   read by their signatures, nothing expanded): a name the part quotes, or
+   binds itself, or gives a macro as data, is left as written. A part
+   holding a use of a procedural macro with no contract, whose binding
+   structure nothing says, cannot be renamed so, and the use is refused
+   ("its contract cannot be checked: …"; the user's choice).
+4. *Both run, and compared up to α.* `O` on `u`, `O′` on `u′`, the same
+   expansion number (so its aliases are spelled alike); each aligned as a
+   program's form is and walked, and compared node by node: the same kind
+   and the same nodes under it, a binder whatever its name, a reference by
+   the node of the binder that binds it or, free, by its name, any other
+   part the same. Else refused: where `O′` has a fresh name, or an alias
+   of one (`%~N:x′`), free, "`m`'s expansion places `x` where its
+   contract does not put it in `x`'s scope"; else "`m`'s expansion depends
+   on how its use's bound names are spelled".
 
 Both refused at the use, naming the macro. `O` is the expansion, then
 expanded as before (its uses aligned, its code checked).
 
-**Why these two.** Commutation alone misses a part placed outside its
-scope (`x′` is put where `x` was, and comes back the same); placement
-alone misses a transformer that reads names. Together they hold a
-procedural macro, one use at a time, to what `syntax-rules` gets by
-construction once (Herman: α-equivalent uses, α-equivalent expansions;
-each binder's scope the one its signature says).
+**What α-equivalence gives.** A part placed outside its binder's scope
+leaves `x` free in `O` and `x′` free in `O′`, and free names are compared
+by name: caught with no check of its own. A transformer that reads a
+name builds different trees. One that names a binder of its own after the
+use's (`y-tmp` of `y`) builds α-equivalent ones, and is kept, unless what
+it names captures one of the use's free names (a global `y-tmp` in the
+body), which binds differently in the two runs, and is refused. Herman's
+property, held one use at a time: α-equivalent uses, α-equivalent
+expansions.
 
 **What it relies on.** A transformer is pure (FX-26's effects say so) and
 deterministic, so its two runs differ only by what the renaming changed.
-The transformer sees the use's parts as data and may look inside them;
-whatever it does with a bound name's spelling, the commutation check sees.
+The transformer sees the use's parts as data and may look inside them.
 
 **Refused, not skipped:** an output that uses a procedural macro with no
-contract, whose binding structure nothing says, so `O′`'s scopes cannot
-be known ("a procedural macro in a checked expansion has a contract"), as
-a template refuses one.
+contract, whose binding structure nothing says ("its expansion: …").
 
 **Built** (2026-11-14), both front ends (Rust: `Macros::contract_expanded`,
-`contract_renames`; FX-26: `macros-contracts.fx`, under
-`macros-procedural.fx`, which runs the transformer). Placement walks the
-second output in a program's mode, where a binder is its node, and an
-alias of a fresh name, `%~N:x′` (a name the transformer wrote where its
-macro is defined, as a syntactic-closure transformer writes the use's
-binder), is fresh too, both runs of the same expansion `N`. A procedural
-macro with a contract may be used in a `syntax-rules` template, which its
-signature lets the template's alignment take as any macro's. Tests:
+`contract_renames`, `references_renamed`, `alpha_nodes`; FX-26:
+`macros-contracts.fx`, under `macros-procedural.fx`, which runs the
+transformer; FX-26 renames a part's references by place, as it has no
+identity of syntax to go by: two references at one place are one
+template's part, renamed alike). A procedural macro with a contract may be
+used in a `syntax-rules` template, which its signature lets the
+template's alignment take as any macro's. Tests:
 `tests/programs/procedural/contract-*.fx` (the use refused; a part placed
-outside its scope; a transformer that reads a binder's spelling; a good
-one by explicit renaming, by syntactic closures, and in a template);
+outside its scope; a transformer that reads a binder's spelling; one that
+names its own binder after the use's, kept, and refused where that
+captures; a use that quotes its binder's name; good ones by explicit
+renaming, by syntactic closures, and in a template);
 `fixpt-cli/tests/macro_trust.rs` (the switch).
 
 **Not yet:** procedural macros that make definitions or descriptions

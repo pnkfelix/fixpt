@@ -258,20 +258,72 @@ fn pseudo_pattern(s: &Syn, leaves: &HashSet<u64>, parts: &mut Vec<Syn>, interner
     }
 }
 
-/// Use operands `s`, each part `parts` has (by its value) renamed as it
-/// says, throughout.
-fn renamed_use(s: &Syn, parts: &HashMap<u64, HashMap<Sym, Sym>>, interner: &mut Interner) -> Syn {
-    if let Some(r) = parts.get(&s.0.raw()) {
-        return renamed_syn(s, r, interner);
+/// Use operands `s`, each of its parts `done` has (by its value) what it
+/// says instead.
+fn substituted(s: &Syn, done: &HashMap<u64, Syn>) -> Syn {
+    if let Some(r) = done.get(&s.0.raw()) {
+        return *r;
     }
     match s.view() {
         V::List { items, tail } => {
-            let items: Vec<Syn> = items.iter().map(|x| renamed_use(x, parts, interner)).collect();
-            let tail = tail.map(|t| renamed_use(&t, parts, interner));
+            let items: Vec<Syn> = items.iter().map(|x| substituted(x, done)).collect();
+            let tail = tail.map(|t| substituted(&t, done));
             Syn::of_list(s.at(), &items, tail)
         }
         _ => *s,
     }
+}
+
+/// `s`, each symbol among `at` (by its value) made the name it maps to.
+fn renamed_at(s: &Syn, at: &HashMap<u64, Sym>, interner: &mut Interner) -> Syn {
+    if let Some(to) = at.get(&s.0.raw()) {
+        return Syn::symbol(s.at(), *to, interner);
+    }
+    match s.view() {
+        V::List { items, tail } => {
+            let items: Vec<Syn> = items.iter().map(|x| renamed_at(x, at, interner)).collect();
+            let tail = tail.map(|t| renamed_at(&t, at, interner));
+            Syn::of_list(s.at(), &items, tail)
+        }
+        V::Vector(items) => {
+            let items: Vec<Syn> = items.iter().map(|x| renamed_at(x, at, interner)).collect();
+            Syn::new(s.at(), V::Vector(items), interner)
+        }
+        _ => *s,
+    }
+}
+
+/// A node of an expansion, as α-equivalence takes it (`Macros::alpha_nodes`):
+/// its kind and the nodes under it, by number; a binder whatever its name
+/// (of a description's, or a value's); a reference by the binder that binds
+/// it, or by its name if free; any other part as it is.
+enum AlphaNode {
+    Pair(usize, usize),
+    Nil,
+    Binder(bool),
+    Bound(usize),
+    Free(Sym, bool),
+    Desc(Vec<usize>),
+    Seq(usize, bool),
+    Form(usize),
+    Other(Syn),
+}
+
+/// Whether two expansions' nodes are the same up to their binders' names.
+fn alpha_same(a: &[AlphaNode], b: &[AlphaNode]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| match (x, y) {
+            (AlphaNode::Pair(p, q), AlphaNode::Pair(r, s)) => p == r && q == s,
+            (AlphaNode::Nil, AlphaNode::Nil) => true,
+            (AlphaNode::Binder(d), AlphaNode::Binder(e)) => d == e,
+            (AlphaNode::Bound(i), AlphaNode::Bound(j)) => i == j,
+            (AlphaNode::Free(n, d), AlphaNode::Free(m, e)) => n == m && d == e,
+            (AlphaNode::Desc(xs), AlphaNode::Desc(ys)) => xs == ys,
+            (AlphaNode::Seq(i, m), AlphaNode::Seq(j, n)) => i == j && m == n,
+            (AlphaNode::Form(i), AlphaNode::Form(j)) => i == j,
+            (AlphaNode::Other(s), AlphaNode::Other(r)) => same_syntax(s, r),
+            _ => false,
+        })
 }
 
 /// `s` with each symbol `renames` names made what it names, everywhere in
@@ -2271,58 +2323,104 @@ impl Macros {
         if fresh.is_empty() {
             return Ok(out);
         }
-        // The use, each part in a binder's scope renamed throughout.
-        let renamed = renamed_use(&operands, &parts, interner);
-        let use2 = Syn::of_list(s.at(), &[head], Some(renamed));
-        let out2 = self.procedural_run(name, p, &use2, made, interner)?;
-        // An alias of a fresh name, `%~N:x′` (a name the transformer wrote
-        // where its macro is defined, closed so), is fresh too, of this
-        // expansion `N`, the same in both runs: each with its name and, for
-        // the way back, its original's alias.
-        let mut back = fresh.clone();
-        let mut fresh = fresh;
-        for (to, orig) in fresh.clone() {
-            let a = interner.intern(&format!("%~{made}:{}", interner.name(to)));
-            let b = interner.intern(&format!("%~{made}:{}", interner.name(orig)));
-            fresh.insert(a, orig);
-            back.insert(a, b);
+        // The use α-renamed: each binder part its fresh name; in each part
+        // in a binder's scope, the references to it, as the part's own
+        // binding structure finds them (its macros' uses read by their
+        // signatures), and nothing else of it.
+        let mut done: HashMap<u64, Syn> = HashMap::default();
+        for (raw, (renames, core, part)) in &parts {
+            let r = if matches!(**core, STy::Bvar | STy::Dvar) {
+                renamed_syn(part, renames, interner)
+            } else {
+                self.references_renamed(part, core, renames, interner).map_err(|e| {
+                    if e.message.contains("is a procedural macro, whose binding structure no signature says") {
+                        refused("its contract cannot be checked: a part of it holds a use of a procedural macro with no contract")
+                    } else {
+                        refused(&e.message)
+                    }
+                })?
+            };
+            done.insert(*raw, r);
         }
-        // Placement: each fresh name a binder, or a reference in the scope
-        // of one, as the walk of the output finds them.
+        let use2 = Syn::of_list(s.at(), &[head], Some(substituted(&operands, &done)));
+        let out2 = self.procedural_run(name, p, &use2, made, interner)?;
+        // The two expansions the same up to their own binders' names: each
+        // aligned (nothing expanded) and compared node by node, a reference
+        // by the binder that binds it, or by its name if free.
+        let ours = |e: FxError| refused(&format!("its expansion: {}", e.message));
+        let (a, b) = (self.alpha_nodes(&out, interner).map_err(ours)?, self.alpha_nodes(&out2, interner).map_err(ours)?);
+        if alpha_same(&a, &b) {
+            return Ok(out);
+        }
+        // Which way it is not: a fresh name, or its alias (`%~N:x′`, a name
+        // the transformer wrote where its macro is defined), free in the
+        // second, placed outside its binder's scope; else the transformer
+        // read a name.
+        let escaped = b.iter().find_map(|n| match n {
+            AlphaNode::Free(x, _) => fresh.get(x).copied().or_else(|| {
+                let name = interner.name(*x);
+                let base = name.strip_prefix(&format!("%~{made}:"))?;
+                fresh.iter().find(|(f, _)| interner.name(**f) == base).map(|(_, o)| *o)
+            }),
+            _ => None,
+        });
+        Err(match escaped {
+            Some(x) => refused(&format!("its expansion places `{}` where its contract does not put it in `{0}`'s scope", interner.name(x))),
+            None => refused("its expansion depends on how its use's bound names are spelled"),
+        })
+    }
+
+    /// Part `part` of a use, of syntax type `core`, each free reference in
+    /// it to a name `renames` names made what it names, as the part's own
+    /// binding structure finds them (aligned as a program's form is, its
+    /// macros' uses by their signatures); its binders, and what it quotes,
+    /// as they are.
+    fn references_renamed(&self, part: &Syn, core: &Rc<STy>, renames: &HashMap<Sym, Sym>, interner: &mut Interner) -> R<Syn> {
         let none = HashMap::default();
         let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
-        let root = a.align(&Rc::new(STy::Expr), &out2, None, Vec::new()).map_err(|e| {
-            if e.message.contains("is a procedural macro, whose binding structure no signature says") {
-                refused(&format!("its expansion uses a procedural macro with no contract, so its scopes cannot be known: {}", e.message))
-            } else {
-                refused(&format!("its expansion: {}", e.message))
-            }
-        })?;
+        let root = a.align(core, part, None, Vec::new())?;
         let mut found = Vec::new();
-        a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new()).map_err(|e| refused(&format!("its expansion: {}", e.message)))?;
-        for (at, env, _, _) in &found {
-            let Kids::Ref(n, _, _) = a.nodes[*at].kids else { continue };
-            let Some(original) = fresh.get(&n) else { continue };
-            // In a program's walk a binder is its node (`Atom::Lit`).
-            let names = |x: &Atom| match x {
-                Atom::Var(b, _, _) => *b == n,
-                Atom::Lit(i, _) => matches!(a.nodes[*i].kids, Kids::Binder(b, _) if b == n),
-                Atom::RibOf(_) => false,
-            };
-            let bound = env.to_vec().iter().any(|level| match level {
-                Level::Rib(atoms) | Level::Earlier(atoms) => atoms.iter().any(names),
-                _ => false,
-            });
-            if !bound {
-                return Err(refused(&format!("its expansion places `{}` where its contract does not put it in `{0}`'s scope", interner.name(*original))));
+        a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
+        let mut at: HashMap<u64, Sym> = HashMap::default();
+        for (i, env, _, _) in &found {
+            if let Kids::Ref(n, ns, _) = a.nodes[*i].kids
+                && let Some(to) = renames.get(&n)
+                && a.bound_by(env, n, ns).is_none()
+            {
+                at.insert(a.nodes[*i].syn.0.raw(), *to);
             }
         }
-        // Commutation: with each fresh name named back, the first output.
-        let back = renamed_syn(&out2, &back, interner);
-        if !same_syntax(&back, &out) {
-            return Err(refused("its expansion depends on how its use's bound names are spelled"));
-        }
-        Ok(out)
+        Ok(renamed_at(part, &at, interner))
+    }
+
+    /// Output `s`'s nodes, aligned as a program's form is (nothing
+    /// expanded, its macros' uses by their signatures) and walked, each as
+    /// α-equivalence takes it (`AlphaNode`).
+    fn alpha_nodes(&self, s: &Syn, interner: &mut Interner) -> R<Vec<AlphaNode>> {
+        let none = HashMap::default();
+        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
+        let root = a.align(&Rc::new(STy::Expr), s, None, Vec::new())?;
+        let mut found = Vec::new();
+        a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
+        let envs: HashMap<usize, Env> = found.into_iter().map(|(i, env, _, _)| (i, env)).collect();
+        Ok(a.nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| match &n.kids {
+                Kids::Pair(x, y) => AlphaNode::Pair(*x, *y),
+                Kids::Nil => AlphaNode::Nil,
+                Kids::PVar(_) => AlphaNode::Other(n.syn),
+                Kids::Binder(_, ns) => AlphaNode::Binder(*ns == Ns::Desc),
+                Kids::Ref(x, ns, _) => match envs.get(&i).and_then(|env| a.bound_by(env, *x, *ns)) {
+                    Some(b) => AlphaNode::Bound(b),
+                    None => AlphaNode::Free(*x, *ns == Ns::Desc),
+                },
+                Kids::Desc(xs) => AlphaNode::Desc(xs.clone()),
+                Kids::Seq(x, m) => AlphaNode::Seq(*x, *m),
+                Kids::Form(x) => AlphaNode::Form(*x),
+                Kids::Other => AlphaNode::Other(n.syn),
+            })
+            .collect())
     }
 
     /// The parts of use operands `operands`, aligned with contract `sig`,
@@ -2333,7 +2431,7 @@ impl Macros {
     /// made a pattern variable, the pattern aligned and walked, each
     /// variable's environment the binders in scope where it is.
     #[allow(clippy::type_complexity)]
-    fn contract_renames(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(HashMap<u64, HashMap<Sym, Sym>>, HashMap<Sym, Sym>)> {
+    fn contract_renames(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(HashMap<u64, (HashMap<Sym, Sym>, Rc<STy>, Syn)>, HashMap<Sym, Sym>)> {
         let none = HashMap::default();
         let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new() };
         u.align(sig, operands, None, Vec::new())?;
@@ -2358,7 +2456,7 @@ impl Macros {
         let part_of = |n: Sym, i: &Interner| i.name(n).strip_prefix("%part:").and_then(|k| k.parse::<usize>().ok());
         let mut binders: HashMap<Sym, Sym> = HashMap::default();
         let mut fresh: HashMap<Sym, Sym> = HashMap::default();
-        let mut scoped: Vec<(usize, Vec<Sym>)> = Vec::new();
+        let mut scoped: Vec<(usize, Vec<Sym>, Rc<STy>)> = Vec::new();
         for (at, env, _, _) in &found {
             let Kids::PVar(n) = p.nodes[*at].kids else { continue };
             let Some(k) = part_of(n, p.interner) else { continue };
@@ -2380,7 +2478,7 @@ impl Macros {
                     _ => return Err(FxError::at(parts[k].at(), "a part in the scope of a ribcage or a module: not yet in a procedural macro's contract")),
                 }
             }
-            scoped.push((k, in_scope));
+            scoped.push((k, in_scope, p.nodes[*at].core.clone()));
         }
         // Each binder a fresh name; each part, what is renamed in it.
         let mut fresh_of: HashMap<Sym, Sym> = HashMap::default();
@@ -2390,8 +2488,8 @@ impl Macros {
             fresh_of.insert(*b, to);
             fresh.insert(to, *x);
         }
-        let mut out: HashMap<u64, HashMap<Sym, Sym>> = HashMap::default();
-        for (k, in_scope) in scoped {
+        let mut out: HashMap<u64, (HashMap<Sym, Sym>, Rc<STy>, Syn)> = HashMap::default();
+        for (k, in_scope, core) in scoped {
             let mut renames: HashMap<Sym, Sym> = HashMap::default();
             // A binder part renames its own name.
             if let Some(to) = binders.keys().find(|b| part_of(**b, interner) == Some(k)).and_then(|b| fresh_of.get(b)) {
@@ -2402,7 +2500,7 @@ impl Macros {
                 renames.entry(*x).or_insert(*to);
             }
             if !renames.is_empty() {
-                out.insert(parts[k].0.raw(), renames);
+                out.insert(parts[k].0.raw(), (renames, core, parts[k]));
             }
         }
         Ok((out, fresh))
@@ -3545,6 +3643,23 @@ impl Aligner<'_> {
             }
             at = kids[2];
         }
+    }
+
+    /// The binder node that binds a reference to `n`, of namespace `ns`, in
+    /// environment `env`, the innermost: in a program's walk, a binder is
+    /// its node (`Atom::Lit`). None if the reference is free there.
+    fn bound_by(&self, env: &Env, n: Sym, ns: Ns) -> Option<usize> {
+        for level in env.to_vec() {
+            let (Level::Rib(atoms) | Level::Earlier(atoms)) = &level else { continue };
+            for x in atoms.iter() {
+                match x {
+                    Atom::Lit(i, _) if matches!(self.nodes[*i].kids, Kids::Binder(m, d) if m == n && d == ns) => return Some(*i),
+                    Atom::Var(b, d, _) if *b == n && *d == ns => return Some(usize::MAX),
+                    _ => {}
+                }
+            }
+        }
+        None
     }
 
     /// A pattern variable written somewhere inside `s`.
