@@ -5588,7 +5588,23 @@ not). `typed-macros.md`, "Decided: procedural macros checked by their
 contracts". Next there: contracts for macros that make definitions or
 descriptions; then the transformer in the front end's heap, phases kept
 apart by namespace, and `for-syntax` imports (decided with the user, in
-that order).
+that order; the user's, 2026-11-14: the heap first, since it settles what
+a transformer sees).
+
+A transformer compiled once (2026-11-14, the heap's first step): each use
+used to run, in the transformers' session, `((the T code) (quote form)
+…)`, the transformer's whole text checked and compiled again. Now
+`procedural::define` defines it there where its macro is defined (in place
+of the check that compiled it and threw it away; the user's question), a
+global of its style's type, `%transformer:k`, keyed by its style and text
+(both front ends define each macro: the second finds the first), and
+`procedural::apply` calls it on each use's form; the expander written in FX-26 asks for the same by its
+`%macros:expand-procedural`, requests (`%define STYLE`, the text; `%apply
+STYLE MADE LENGTH`, the text, the form) in place of programs, so both front ends run the one
+compiled transformer. `procedural/returns-its-input.fx` (1000 runs before
+its limit) 0.95 s to 0.53. What is left of each run is the call's own
+program, read, checked and compiled, and the answer printed and read back:
+what the transformer in the front end's heap would save.
 ## 229. ~~A quoted list's length is how deep every phase recurses~~ (found and done 2026-11-09)
 
 Both parsers rewrote `'(a b c …)` as `(cons a (cons b (cons c … nil)))`, so

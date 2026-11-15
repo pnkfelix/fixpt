@@ -46,31 +46,18 @@
           ((string=? n "sc-macro-transformer") 1)
           ((string=? n "rsc-macro-transformer") 2)
           (else -1))))
-;; The type a transformer of style `s` is checked at.
-(define style-type (->* (int) string)
-  (lambda (s)
-    (if (= s 0)
-        (string-append "(subr spin (datum (subr pure (symbol) symbol) "
-                       "(subr spin (symbol symbol) bool)) datum)")
-        "(subr spin (datum symbol) datum)")))
-;; `code` with the prelude's procedures bound around it, as locals.
-(define helpers (->* (string) string)
-  (lambda (code)
-    (string-append "(let ((make-syntactic-closure %make-syntactic-closure) "
-                   "(identifier? %identifier?) (identifier=? %identifier=?)) "
-                   code ")")))
-;; The program that checks a transformer.
+;; The request that defines a transformer, `code`, where its macro is
+;; defined: checked at its style's type and compiled, once, for its uses to
+;; call (`procedural::define`, which the Rust expander calls itself).
 (define checked-text (->* (int string) string)
-  (lambda (s code)
-    (string-append "(begin (the " (style-type s) " " (helpers code) ") #u)")))
-;; The program that runs one on `form` (as text), in expansion `made`.
+  (lambda (s code) (string-append "%define " (int->string s) "\n" code)))
+;; The request that runs one on `form` (as text), in expansion `made`: the
+;; transformer checked and compiled at its first use, then called
+;; (`procedural::apply`, which the Rust expander calls itself).
 (define applied-text (->* (int string string int) string)
   (lambda (s code form made)
-    (let ((head (string-append "((the " (style-type s) " " (helpers code) ") (quote " form ") ")))
-      (cond ((= s 0)
-             (string-append head "(%er-renamer " (int->string made) ") %er-compare)"))
-            ((= s 1) (string-append head "(quote %env:use))"))
-            (else (string-append head "(quote %env:macro))"))))))
+    (string-append "%apply " (int->string s) " " (int->string made) " "
+                   (int->string (string-length code)) "\n" code form)))
 ;; The runtime's answer to `code`: what it gave (`=`), or why not (`!`),
 ;; in a sum.
 (define run (->* (string) (sumof (ok string) (failed string)))

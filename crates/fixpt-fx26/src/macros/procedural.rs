@@ -28,7 +28,7 @@ use crate::heap_syn::{At, Syn, V};
 use crate::{FxError, R};
 
 /// Which transformer a procedural macro has.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Style {
     /// `(er-macro-transformer (lambda (form rename compare) …))`.
     Er,
@@ -86,12 +86,72 @@ const PRELUDE: &str = include_str!("procedural-prelude.fx");
 thread_local! {
     /// The session transformers run in, made at the first and kept.
     static SESSION: RefCell<Option<crate::session::Fx26Session>> = const { RefCell::new(None) };
+    /// Each transformer defined in it, by its style and text: the global
+    /// it is (`apply`), checked and compiled once, not at every use.
+    static COMPILED: RefCell<fixpt_hash::HashMap<(Style, String), String>> = RefCell::new(fixpt_hash::HashMap::default());
+}
+
+/// Transformer `code`, of `style`, defined in the transformers' session
+/// where its macro is defined: checked at its style's type and compiled,
+/// once, a global (`%transformer:k`) its uses call (`apply`); its name. One
+/// of the same style and text, defined already, is that one: both front
+/// ends define each macro, and agree.
+pub(crate) fn define(style: Style, code: &str) -> Result<String, String> {
+    let key = (style, code.to_string());
+    if let Some(n) = COMPILED.with(|c| c.borrow().get(&key).cloned()) {
+        return Ok(n);
+    }
+    let n = format!("%transformer:{}", COMPILED.with(|c| c.borrow().len()));
+    run(&format!("(define {n} {} {})", style.ty(), helpers(code)))?;
+    COMPILED.with(|c| c.borrow_mut().insert(key, n.clone()));
+    Ok(n)
+}
+
+/// Transformer `code`, of `style`, run on `form` (as text), in expansion
+/// `made`: what it gave, printed as `write` does; or why not. Its global
+/// called, defined where its macro was (`define`; defined here if it is
+/// not, as in a session made since: `TODO.md` §228). Both front ends run
+/// their transformers so, the one written in FX-26 by a request (`run`'s
+/// `%apply`), so that they agree.
+pub(crate) fn apply(style: Style, code: &str, form: &str, made: u32) -> Result<String, String> {
+    let name = define(style, code)?;
+    run(&match style {
+        Style::Er => format!("({name} (quote {form}) (%er-renamer {made}) %er-compare)"),
+        Style::Sc => format!("({name} (quote {form}) (quote {USE_ENV}))"),
+        Style::Rsc => format!("({name} (quote {form}) (quote {MACRO_ENV}))"),
+    })
+}
+
+/// What the expander written in FX-26 asks, through the runtime: a program
+/// to run; `%define STYLE\n` and then a transformer's text, to `define`;
+/// or `%apply STYLE MADE LENGTH\n` and then the transformer's text,
+/// `LENGTH` characters, and the form's, to `apply`.
+fn asked(request: &str) -> Result<String, String> {
+    let style_of = |n: usize| match n {
+        0 => Style::Er,
+        1 => Style::Sc,
+        _ => Style::Rsc,
+    };
+    if let Some(rest) = request.strip_prefix("%define ") {
+        let (head, code) = rest.split_once('\n').ok_or("a malformed transformer request")?;
+        let style = head.parse::<usize>().map_err(|_| "a malformed transformer request")?;
+        return define(style_of(style), code).map(|_| "#u".to_string());
+    }
+    let Some(rest) = request.strip_prefix("%apply ") else { return run(request) };
+    let (head, body) = rest.split_once('\n').ok_or("a malformed transformer request")?;
+    let mut words = head.split(' ').map(|w| w.parse::<usize>());
+    let (Some(Ok(style)), Some(Ok(made)), Some(Ok(length))) = (words.next(), words.next(), words.next()) else {
+        return Err("a malformed transformer request".into());
+    };
+    let style = style_of(style);
+    let split = body.char_indices().nth(length).map_or(body.len(), |(i, _)| i);
+    apply(style, &body[..split], &body[split..], made as u32)
 }
 
 /// `run` made what the runtime's syscall for the expander written in
 /// FX-26 calls (`fixpt_runtime::syscall::PROCEDURAL`).
 pub fn install() {
-    let _ = fixpt_runtime::syscall::PROCEDURAL.set(run);
+    let _ = fixpt_runtime::syscall::PROCEDURAL.set(asked);
 }
 
 /// FX-26 program `code` run in the transformers' session: the last form's
@@ -124,10 +184,6 @@ fn run_apart(code: &str) -> Result<String, String> {
     })
 }
 
-/// The program that checks a transformer, `code`, at its style's type.
-pub(crate) fn checked(style: Style, code: &str) -> String {
-    format!("(begin (the {} {}) #u)", style.ty(), helpers(code))
-}
 
 /// `code` with the prelude's procedures bound around it, as locals.
 fn helpers(code: &str) -> String {
@@ -136,17 +192,6 @@ fn helpers(code: &str) -> String {
     )
 }
 
-/// The program that runs a transformer, `code`, on `form` (as text), in
-/// expansion `made`.
-pub(crate) fn applied(style: Style, code: &str, form: &str, made: u32) -> String {
-    let t = style.ty();
-    let code = helpers(code);
-    match style {
-        Style::Er => format!("((the {t} {code}) (quote {form}) (%er-renamer {made}) %er-compare)"),
-        Style::Sc => format!("((the {t} {code}) (quote {form}) (quote {USE_ENV}))"),
-        Style::Rsc => format!("((the {t} {code}) (quote {form}) (quote {MACRO_ENV}))"),
-    }
-}
 
 /// `x`'s name as where its alias's macro was defined, if `x` is an alias:
 /// every `%~N:` taken off.

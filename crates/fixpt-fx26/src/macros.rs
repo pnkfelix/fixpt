@@ -1660,7 +1660,7 @@ impl Macros {
             }
         };
         let text = code.written(interner);
-        procedural::run(&procedural::checked(style, &text)).map_err(|e| FxError::at(code.at(), format!("`{}`'s transformer: {e}", interner.name(name))))?;
+        procedural::define(style, &text).map_err(|e| FxError::at(code.at(), format!("`{}`'s transformer: {e}", interner.name(name))))?;
         let p = procedural::Procedural { style, code: text, def_env, contract: contract.is_some() };
         let sig = contract.unwrap_or_else(|| Rc::new(STy::Expr));
         let m = Macro { sig, defn: false, desc: false, poly: Vec::new(), clauses: Vec::new(), text: None, procedural: Some(Rc::new(p)) };
@@ -2512,7 +2512,7 @@ impl Macros {
     fn procedural_run(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, made: u32, interner: &mut Interner) -> R<Syn> {
         let form = s.written(interner);
         let said = |e: String| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name)));
-        let out = procedural::run(&procedural::applied(p.style, &p.code, &form, made)).map_err(said)?;
+        let out = procedural::apply(p.style, &p.code, &form, made).map_err(said)?;
         let read = crate::heap_syn::read_syn_unplaced(&out, interner);
         let read = read.map_err(|e| FxError::at(s.at(), format!("a use of `{}`: what its transformer gave, `{out}`, is not read: {}", interner.name(name), e.message)))?;
         let [one] = &read[..] else {
