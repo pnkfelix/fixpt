@@ -19,13 +19,35 @@ const DEEPEST: usize = 16;
 /// The lendings in force, innermost last, each its type, where it is (and
 /// where its partner is, for a pair, [`lend_pair`]), and whether it is
 /// borrowed now: a fixed stack of cells, so that a borrow is a look at a
-/// few cells, no allocation and no `RefCell`.
+/// few cells, no allocation and no `RefCell`. A pair lent with its first's
+/// owner ([`lend_owned`]): `at` is the owner, its type `owner`, and
+/// `project` finds the first in it at each borrow, as [`Project`] does.
 struct Stack {
     depth: Cell<usize>,
     ty: [Cell<Option<TypeId>>; DEEPEST],
     at: [Cell<*mut ()>; DEEPEST],
     and: [Cell<*mut ()>; DEEPEST],
     borrowed: [Cell<bool>; DEEPEST],
+    owner: [Cell<Option<TypeId>>; DEEPEST],
+    project: [Cell<Option<Project>>; DEEPEST],
+}
+
+/// How a lending's owner gives the part of it lent: the owner, and the
+/// owner's own function that finds it (`fn(&mut O) -> &mut A`, as a
+/// pointer), to the part.
+#[derive(Clone, Copy)]
+struct Project(unsafe fn(*mut (), *const ()) -> *mut (), *const ());
+
+/// [`Project`]'s first, for owner `O` and part `A`: `f` given `o`.
+///
+/// # Safety
+/// `o` is a live `O`, borrowed for the call; `f` an `fn(&mut O) -> &mut A`.
+unsafe fn project<O, A>(o: *mut (), f: *const ()) -> *mut () {
+    // SAFETY: `f` was made of an `fn(&mut O) -> &mut A` (`lend_owned`), and
+    // `o` is the live `O` its lending was given, borrowed now.
+    let f: fn(&mut O) -> &mut A = unsafe { std::mem::transmute(f) };
+    let o = unsafe { &mut *o.cast::<O>() };
+    (f(o) as *mut A).cast()
 }
 
 thread_local! {
@@ -36,6 +58,8 @@ thread_local! {
             at: [const { Cell::new(std::ptr::null_mut()) }; DEEPEST],
             and: [const { Cell::new(std::ptr::null_mut()) }; DEEPEST],
             borrowed: [const { Cell::new(false) }; DEEPEST],
+            owner: [const { Cell::new(None) }; DEEPEST],
+            project: [const { Cell::new(None) }; DEEPEST],
         }
     };
 }
@@ -61,6 +85,8 @@ fn push(ty: TypeId, at: *mut (), and: *mut ()) -> usize {
         s.at[d].set(at);
         s.and[d].set(and);
         s.borrowed[d].set(false);
+        s.owner[d].set(None);
+        s.project[d].set(None);
         s.depth.set(d + 1);
         d
     })
@@ -78,6 +104,55 @@ pub fn lend<T: 'static, R>(t: &mut T, f: impl FnOnce() -> R) -> R {
 pub fn lend_pair<A: 'static, B: 'static, R>(a: &mut A, b: &mut B, f: impl FnOnce() -> R) -> R {
     let _unlend = Unlend(push(TypeId::of::<(A, B)>(), (a as *mut A).cast(), (b as *mut B).cast()));
     f()
+}
+
+/// `a`, which `owner` holds (`part` finds it there), and `b` lent together
+/// while `f` runs, as [`lend_pair`] lends them; and `owner` too, by
+/// [`with_owner`], to the code that runs inside: one lending, of one
+/// borrow at a time, so that `a` and its owner are never both borrowed. The
+/// part is found in the owner at each borrow, not kept apart from it.
+pub fn lend_owned<O: 'static, A: 'static, B: 'static, R>(owner: &mut O, part: fn(&mut O) -> &mut A, b: &mut B, f: impl FnOnce() -> R) -> R {
+    let k = push(TypeId::of::<(A, B)>(), (owner as *mut O).cast(), (b as *mut B).cast());
+    let _unlend = Unlend(k);
+    STACK.with(|s| {
+        s.owner[k].set(Some(TypeId::of::<O>()));
+        s.project[k].set(Some(Project(project::<O, A>, part as *const ())));
+    });
+    f()
+}
+
+/// `f` of the owner of the innermost lending of the pair `(A, B)`, if it
+/// was lent with one of type `O` ([`lend_owned`]), borrowed for the call as
+/// the pair is by [`with_lent_pair`]: none if that lending has no owner, or
+/// a panic if none is lent or it is borrowed already.
+pub fn with_owner<A: 'static, B: 'static, O: 'static, R>(f: impl FnOnce(&mut O) -> R) -> Option<R> {
+    let ty = TypeId::of::<(A, B)>();
+    let k = STACK.with(|s| {
+        let mut k = s.depth.get();
+        loop {
+            if k == 0 {
+                panic!("no {} is lent", std::any::type_name::<(A, B)>());
+            }
+            k -= 1;
+            if s.ty[k].get() == Some(ty) {
+                return k;
+            }
+        }
+    });
+    let (at, _unborrow) = STACK.with(|s| {
+        if s.owner[k].get() != Some(TypeId::of::<O>()) {
+            return None;
+        }
+        assert!(!s.borrowed[k].get(), "the {} lent is borrowed already", std::any::type_name::<(A, B)>());
+        s.borrowed[k].set(true);
+        Some((s.at[k].get(), Unborrow(k)))
+    })?;
+    // SAFETY: `at` is the `&mut O` given to `lend_owned`, whose call is
+    // running, so the `O` is alive and its lender cannot use it meanwhile;
+    // and `borrowed`, set until this call ends, keeps every other borrow of
+    // this lending away: of the part (`with_lent_pair`, which finds it in
+    // the owner) as of the owner.
+    Some(f(unsafe { &mut *at.cast::<O>() }))
 }
 
 /// Clears the borrow [`borrow`] took, however its call ends.
@@ -108,7 +183,13 @@ fn borrow(ty: TypeId, name: fn() -> &'static str) -> (*mut (), *mut (), Unborrow
         }
         assert!(!s.borrowed[k].get(), "the {} lent is borrowed already", name());
         s.borrowed[k].set(true);
-        (s.at[k].get(), s.and[k].get(), Unborrow(k))
+        let at = match s.project[k].get() {
+            // SAFETY: an owner's lending (`lend_owned`): `at` is the owner,
+            // alive while it runs, and borrowed now, by this borrow alone.
+            Some(Project(p, f)) => unsafe { p(s.at[k].get(), f) },
+            None => s.at[k].get(),
+        };
+        (at, s.and[k].get(), Unborrow(k))
     })
 }
 
@@ -189,6 +270,43 @@ mod tests {
         }));
         assert_eq!((a, b), (2, 'y'));
         assert!(!is_lent_pair::<u32, char>());
+    }
+
+    struct Owner {
+        part: u32,
+        other: u32,
+    }
+
+    #[test]
+    fn an_owned_part_and_its_owner_are_borrowed_in_turn() {
+        let mut o = Owner { part: 1, other: 10 };
+        let mut b = 'x';
+        lend_owned(&mut o, |o: &mut Owner| &mut o.part, &mut b, || {
+            with_lent_pair(|p: &mut u32, _: &mut char| *p += 1);
+            let seen = with_owner::<u32, char, Owner, _>(|o| {
+                o.other += o.part;
+                o.part
+            });
+            assert_eq!(seen, Some(2));
+            with_lent_pair(|p: &mut u32, _: &mut char| *p += 1);
+        });
+        assert_eq!((o.part, o.other), (3, 12));
+    }
+
+    #[test]
+    #[should_panic(expected = "borrowed already")]
+    fn the_owner_is_refused_while_its_part_is_borrowed() {
+        let mut o = Owner { part: 1, other: 0 };
+        let mut b = 'x';
+        lend_owned(&mut o, |o: &mut Owner| &mut o.part, &mut b, || {
+            with_lent_pair(|_: &mut u32, _: &mut char| with_owner::<u32, char, Owner, _>(|_| ()));
+        });
+    }
+
+    #[test]
+    fn a_lending_with_no_owner_gives_none() {
+        let (mut a, mut b) = (1u32, 'x');
+        lend_pair(&mut a, &mut b, || assert!(with_owner::<u32, char, Owner, _>(|_| ()).is_none()));
     }
 
     #[test]

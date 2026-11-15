@@ -51,7 +51,7 @@ impl Style {
     }
 
     /// The type a transformer of this style is checked at.
-    fn ty(self) -> &'static str {
+    pub(crate) fn ty(self) -> &'static str {
         match self {
             Style::Er => {
                 "(subr spin (datum (subr pure (symbol) symbol) (subr spin (symbol symbol) bool)) datum)"
@@ -186,7 +186,7 @@ fn run_apart(code: &str) -> Result<String, String> {
 
 
 /// `code` with the prelude's procedures bound around it, as locals.
-fn helpers(code: &str) -> String {
+pub(crate) fn helpers(code: &str) -> String {
     format!(
         "(let ((make-syntactic-closure %make-syntactic-closure) (identifier? %identifier?) (identifier=? %identifier=?)) {code})"
     )

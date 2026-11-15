@@ -380,41 +380,43 @@ impl<'a> Rd<'a> {
             Shallow::List(items, None) if items.is_empty() => V::Nil,
             Shallow::List(items, tail) => V::List { items, tail },
             Shallow::Vector(items) => V::Vector(items),
-            Shallow::Atom => {
-                let h = self.heap;
-                let d = self.atom(s).expect("an atom");
-                if d == Value::TRUE || d == Value::FALSE {
-                    V::Bool(d == Value::TRUE)
-                } else if d.is_char() {
-                    V::Char(d.as_char())
-                } else if d.is_fixnum() {
-                    V::Number(Num::Int(d.as_fixnum()))
-                } else if h.is_a(d, ObjType::Symbol) {
-                    V::Symbol(self.sym_of(d))
-                } else if h.is_a(d, ObjType::String) {
-                    V::Str(h.string_to_rust(d))
-                } else if h.is_a(d, ObjType::Bytevector) {
-                    V::Bytevector((0..h.bytevector_len(d)).map(|i| h.bytevector_ref(d, i)).collect())
-                } else if h.is_a(d, ObjType::Flonum) {
-                    V::Number(Num::Real(h.flonum_value(d)))
-                } else if h.is_a(d, ObjType::Bignum) {
-                    // As the Rust reader has an integer: a word's if it
-                    // fits one, a fixnum's or not.
-                    let w = fixpt_runtime::write_value(h, d);
-                    if let Ok(n) = w.parse::<i64>() {
-                        return V::Number(Num::Int(n));
-                    }
-                    let (negative, digits) = match w.strip_prefix('-') {
-                        Some(x) => (true, x.to_string()),
-                        None => (false, w.clone()),
-                    };
-                    V::Number(Num::Big { negative, digits, radix: 10 })
-                } else if h.is_keyword(d) {
-                    V::Keyword(self.sym_of(h.keyword_symbol(d)))
-                } else {
-                    unreachable!("an atom FX-26 does not read: {}", fixpt_runtime::write_value(h, d))
-                }
+            Shallow::Atom => self.atom_view(self.atom(s).expect("an atom")),
+        }
+    }
+
+    /// Atom `d`, a datum FX-26 reads, its symbols noted, looked at.
+    fn atom_view(self, d: Value) -> V {
+        let h = self.heap;
+        if d == Value::TRUE || d == Value::FALSE {
+            V::Bool(d == Value::TRUE)
+        } else if d.is_char() {
+            V::Char(d.as_char())
+        } else if d.is_fixnum() {
+            V::Number(Num::Int(d.as_fixnum()))
+        } else if h.is_a(d, ObjType::Symbol) {
+            V::Symbol(self.sym_of(d))
+        } else if h.is_a(d, ObjType::String) {
+            V::Str(h.string_to_rust(d))
+        } else if h.is_a(d, ObjType::Bytevector) {
+            V::Bytevector((0..h.bytevector_len(d)).map(|i| h.bytevector_ref(d, i)).collect())
+        } else if h.is_a(d, ObjType::Flonum) {
+            V::Number(Num::Real(h.flonum_value(d)))
+        } else if h.is_a(d, ObjType::Bignum) {
+            // As the Rust reader has an integer: a word's if it
+            // fits one, a fixnum's or not.
+            let w = fixpt_runtime::write_value(h, d);
+            if let Ok(n) = w.parse::<i64>() {
+                return V::Number(Num::Int(n));
             }
+            let (negative, digits) = match w.strip_prefix('-') {
+                Some(x) => (true, x.to_string()),
+                None => (false, w.clone()),
+            };
+            V::Number(Num::Big { negative, digits, radix: 10 })
+        } else if h.is_keyword(d) {
+            V::Keyword(self.sym_of(h.keyword_symbol(d)))
+        } else {
+            unreachable!("an atom FX-26 does not read: {}", fixpt_runtime::write_value(h, d))
         }
     }
 }
@@ -551,6 +553,68 @@ enum Shallow {
 pub fn datum_of(heap: &Heap, s: Value) -> Value {
     let p = heap.sum_payload(s);
     heap.product_field(p, heap.bloblet_len(p) - 3)
+}
+
+/// Whether `d` is an atom FX-26 reads, as [`Rd::atom_view`] looks at one.
+fn is_read_atom(heap: &Heap, d: Value) -> bool {
+    d == Value::TRUE || d == Value::FALSE || d.is_char() || d.is_fixnum() || heap.is_keyword(d)
+        || [ObjType::Symbol, ObjType::String, ObjType::Bytevector, ObjType::Flonum, ObjType::Bignum].iter().any(|t| heap.is_a(d, *t))
+}
+
+/// Datum `v`, of the heap lent, as syntax, each part at `at`: what
+/// [`read_syn_unplaced`] of its text, written, makes, placed there
+/// (`procedural::placed`); with no text between. What a procedural macro's
+/// transformer gave, called in the heap its use's syntax is in (`TODO.md`
+/// §278). Or why it is no datum the reader makes: a part of it is not.
+pub fn syn_of_datum(v: Value, at: At, interner: &mut Interner) -> Result<Syn, String> {
+    fixpt_memmgmt::lend::with_lent_pair::<Heap, SymTable, _>(|heap, syms| {
+        // Its symbols noted first, as the reader's builder notes each it
+        // makes: `Mk` holds the names, not to be added to meanwhile.
+        fn note(heap: &Heap, syms: &mut SymTable, v: Value, interner: &mut Interner) -> Result<(), String> {
+            let mut v = v;
+            while v.is_pair() {
+                note(heap, syms, heap.car(v), interner)?;
+                v = heap.cdr(v);
+            }
+            if heap.is_a(v, ObjType::Vector) {
+                return (0..heap.obj_len(v)).try_for_each(|i| note(heap, syms, heap.obj_ref(v, i), interner));
+            }
+            if v == Value::NULL {
+                return Ok(());
+            }
+            if !is_read_atom(heap, v) {
+                return Err(format!("`{}` is no datum", fixpt_runtime::write_value(heap, v)));
+            }
+            if heap.is_a(v, ObjType::Symbol) {
+                syms.note(heap, v, interner);
+            } else if heap.is_keyword(v) {
+                syms.note(heap, heap.keyword_symbol(v), interner);
+            }
+            Ok(())
+        }
+        note(heap, syms, v, interner)?;
+        // Nothing collects as it is made (`Mk` allocates, never collects), so
+        // `v` and its parts stay where they are.
+        fn build(mk: &mut Mk<'_>, v: Value, at: At) -> Syn {
+            if mk.heap.is_a(v, ObjType::Vector) {
+                let items: Vec<Syn> = (0..mk.heap.obj_len(v)).map(|i| build(mk, mk.heap.obj_ref(v, i), at)).collect();
+                return mk.vector(at, &items);
+            }
+            if !v.is_pair() && v != Value::NULL {
+                let view = mk.rd().atom_view(v);
+                return mk.atom(at, &view);
+            }
+            let (mut items, mut x) = (Vec::new(), v);
+            while x.is_pair() {
+                items.push(build(mk, mk.heap.car(x), at));
+                x = mk.heap.cdr(x);
+            }
+            let tail = (x != Value::NULL).then(|| build(mk, x, at));
+            mk.list(at, &items, tail)
+        }
+        let mut mk = Mk::new(heap, interner, syms);
+        Ok(build(&mut mk, v, at))
+    })
 }
 
 // ----------------------------------------------------------------- building
@@ -878,8 +942,27 @@ impl Build for HeapSyn<'_> {
 /// `f`, with `heap` and `syms` lent to it (`fixpt_memmgmt::lend`): where
 /// [`Syn`]'s methods reach them, a front end's phase.
 pub fn with_syntax<R>(heap: &mut Heap, syms: &mut SymTable, f: impl FnOnce() -> R) -> R {
-    // The forms let go since the last: their slots emptied, to be held
-    // again.
+    lending_begun(heap, syms);
+    let r = fixpt_memmgmt::lend::lend_pair(heap, syms, f);
+    heap.young_only_exit();
+    r
+}
+
+/// [`with_syntax`] of `rt`'s heap, and `rt` lent with it, its owner
+/// ([`fixpt_memmgmt::lend::lend_owned`]): so that code inside may run code
+/// in `rt` ([`with_runtime`]), between its uses of the syntax, never during
+/// one. A session's checker's (`Fx26Session::checking`).
+pub fn with_syntax_in<R>(rt: &mut fixpt_runtime::Runtime, syms: &mut SymTable, f: impl FnOnce() -> R) -> R {
+    lending_begun(&mut rt.heap, syms);
+    let r = fixpt_memmgmt::lend::lend_owned(rt, |rt: &mut fixpt_runtime::Runtime| &mut rt.heap, syms, f);
+    rt.heap.young_only_exit();
+    r
+}
+
+/// What a lending of `heap` begins with: the forms let go since the last
+/// their slots emptied, to be held again; and collections of the nursery
+/// alone, its syntax held raw, so that nothing tenured moves until it ends.
+fn lending_begun(heap: &mut Heap, syms: &mut SymTable) {
     let dropped = std::mem::take(&mut *syms.forms.dropped.borrow_mut());
     if !dropped.is_empty() {
         let v = kept_vector(heap);
@@ -888,11 +971,15 @@ pub fn with_syntax<R>(heap: &mut Heap, syms: &mut SymTable, f: impl FnOnce() -> 
         }
         syms.forms.free.borrow_mut().extend(dropped);
     }
-    // Its syntax held raw: nothing tenured moves until it ends.
     heap.young_only_enter();
-    let r = fixpt_memmgmt::lend::lend_pair(heap, syms, f);
-    heap.young_only_exit();
-    r
+}
+
+/// `f` of the runtime whose heap the syntax lent is in, if it was lent with
+/// it ([`with_syntax_in`]): no syntax read or made meanwhile, which a
+/// borrow of the heap would be (refused, a panic). Each raw `Syn` held
+/// across it stays good: what `f`'s code collects is the nursery alone.
+pub fn with_runtime<R>(f: impl FnOnce(&mut fixpt_runtime::Runtime) -> R) -> Option<R> {
+    fixpt_memmgmt::lend::with_owner::<Heap, SymTable, fixpt_runtime::Runtime, R>(f)
 }
 
 /// A minor collection of the heap lent, now, if `FIXPT_LENT_COLLECT=1`:
@@ -900,10 +987,23 @@ pub fn with_syntax<R>(heap: &mut Heap, syms: &mut SymTable, f: impl FnOnce() -> 
 /// able to collect (`TODO.md` §278). Only in a heap whose roots are its
 /// own (a checker's, not a session's, whose runtime has more).
 pub fn collect_young_if_asked() {
-    static ASKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *ASKED.get_or_init(|| std::env::var("FIXPT_LENT_COLLECT").is_ok_and(|v| v == "1")) {
+    if lent_collect_asked() {
         heap(|h| h.collect_young(&mut []));
     }
+}
+
+/// [`collect_young_if_asked`] of `heap`, a session's runtime's, the
+/// runtime borrowed from the syntax's lending ([`with_runtime`]), every
+/// value its caller holds rooted.
+pub fn collect_young_if_asked_in(heap: &mut Heap) {
+    if lent_collect_asked() {
+        heap.collect_young(&mut []);
+    }
+}
+
+fn lent_collect_asked() -> bool {
+    static ASKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ASKED.get_or_init(|| std::env::var("FIXPT_LENT_COLLECT").is_ok_and(|v| v == "1"))
 }
 
 /// Whether syntax may be read and made now ([`with_syntax`]).
@@ -962,6 +1062,12 @@ impl Syn {
     /// It, looked at.
     pub fn view(self) -> V {
         rd(|r| r.view(self))
+    }
+
+    /// Its plain datum, the heap's value: what it reads as, its places and
+    /// expansions not in it. Raw: good while its syntax is (`Syn::value`).
+    pub fn plain(self) -> Value {
+        rd(|r| r.datum(self))
     }
 
     /// What it is, looked at no deeper ([`Shape`]).

@@ -547,6 +547,11 @@ pub(crate) struct Withs {
 #[derive(Default)]
 pub(crate) struct SynWorld {
     pub(crate) heap: Option<Box<fixpt_heap::Heap>>,
+    /// A session's checker's phase-1 namespace, for the expansion now
+    /// (`phase1.rs`): made at its first transformer's call, ended when the
+    /// session's entry ends (`Fx26Session::expansion`); each transformer
+    /// defined in it by its style and text, the global it is.
+    pub(crate) phase1: Option<(crate::phase1::Phase1, HashMap<(procedural::Style, String), String>)>,
     pub(crate) syms: crate::heap_syn::SymTable,
     pub(crate) lending: bool,
     pub(crate) session: bool,
@@ -2510,6 +2515,89 @@ impl Macros {
     /// `made`: what it gave, read back at the use's place, a syntactic
     /// closure's opened.
     fn procedural_run(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, made: u32, interner: &mut Interner) -> R<Syn> {
+        // In the runtime the syntax is in, if the session lent it: in the
+        // expansion's phase-1 namespace, on the use's datum, what it gives
+        // made syntax at once, no text between (`TODO.md` §278, stage 4).
+        let at = match self.phase1_run(p, s, made) {
+            Some(out) => {
+                let out = out.map_err(|e| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name))))?;
+                let placed = At { expansion: made, ..s.at() };
+                crate::heap_syn::syn_of_datum(out, placed, interner)
+                    .map_err(|e| FxError::at(s.at(), format!("a use of `{}`: what its transformer gave is not syntax: {e}", interner.name(name))))?
+            }
+            None => self.procedural_apart(name, p, s, made, interner)?,
+        };
+        self.procedural_opened(p, at, made, interner)
+    }
+
+    /// Transformer `p` called on use `s` in expansion `made` in the phase-1
+    /// namespace of the runtime lent with the syntax (`phase1.rs`), made and
+    /// the transformer defined in it if they are not yet: its value, raw
+    /// (nothing collects before the caller makes it syntax); or none where
+    /// no runtime is lent (a checker's own heap), or it has no phase 1 (its
+    /// front end not compiled), where the transformers' session runs it.
+    fn phase1_run(&mut self, p: &procedural::Procedural, s: &Syn, made: u32) -> Option<Result<fixpt_heap::Value, String>> {
+        let world = self.withs.world.clone();
+        if !world.borrow().session {
+            return None;
+        }
+        let datum = s.plain();
+        // Out of the world for the call, which runs code: put back after.
+        let mut ns = world.borrow_mut().phase1.take();
+        let out = crate::heap_syn::with_runtime(|rt| -> Option<Result<fixpt_heap::Value, String>> {
+            if ns.is_none() {
+                ns = Some((crate::phase1::Phase1::new(rt).ok()?, HashMap::default()));
+            }
+            let (ph, defined) = ns.as_mut().expect("made");
+            let key = (p.style, p.code.clone());
+            let global = match defined.get(&key) {
+                Some(g) => g.clone(),
+                None => {
+                    let g = format!("%transformer:{}", defined.len());
+                    if let Err(e) = ph.define(rt, &g, p.style.ty(), &procedural::helpers(&p.code)) {
+                        return Some(Err(e));
+                    }
+                    defined.insert(key, g.clone());
+                    g
+                }
+            };
+            let base = rt.heap.push_root(datum);
+            let second = match p.style {
+                procedural::Style::Er => match ph.call(rt, "%er-renamer", &[fixpt_heap::Value::fixnum(made as i64)]) {
+                    Ok(r) => r,
+                    Err(e) => return Some(Err(e)),
+                },
+                procedural::Style::Sc => rt.heap.intern(procedural::USE_ENV),
+                procedural::Style::Rsc => rt.heap.intern(procedural::MACRO_ENV),
+            };
+            rt.heap.push_root(second);
+            if let procedural::Style::Er = p.style {
+                let compare = ph.value(rt, "%er-compare").unwrap_or(fixpt_heap::Value::FALSE);
+                rt.heap.push_root(compare);
+            }
+            // Where a transformer's call collects (`TODO.md` §278): a
+            // test's, on either side of it, what it is given and gives
+            // rooted; the expander's syntax tenured, moved by neither.
+            crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
+            let args: Vec<fixpt_heap::Value> = (base..rt.heap.root_count()).map(|i| rt.heap.root_at(i)).collect();
+            rt.heap.pop_roots_to(base);
+            let out = ph.call(rt, &global, &args);
+            Some(out.map(|v| {
+                let at = rt.heap.push_root(v);
+                crate::heap_syn::collect_young_if_asked_in(&mut rt.heap);
+                let v = rt.heap.root_at(at);
+                rt.heap.pop_roots_to(at);
+                v
+            }))
+        })
+        .flatten();
+        world.borrow_mut().phase1 = ns;
+        out
+    }
+
+    /// [`Macros::procedural_run`] in the transformers' session apart, by
+    /// text: the use written, what the transformer gave read back, placed.
+    fn procedural_apart(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, made: u32, interner: &mut Interner) -> R<Syn> {
         let form = s.written(interner);
         let said = |e: String| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name)));
         // Where the call will collect, in the front end's heap (`TODO.md`
@@ -2526,7 +2614,13 @@ impl Macros {
         let [one] = &read[..] else {
             return Err(FxError::at(s.at(), format!("a use of `{}`: its transformer gave `{out}`, not one form", interner.name(name))));
         };
-        let at = procedural::placed(one, s.at(), made);
+        Ok(procedural::placed(one, s.at(), made))
+    }
+
+    /// What transformer `p` gave, made syntax at the use's place in
+    /// expansion `made`, `at`: a syntactic closure's opened
+    /// (`procedural::closed`), and the keywords in it taken as keywords.
+    fn procedural_opened(&mut self, p: &procedural::Procedural, at: Syn, made: u32, interner: &mut Interner) -> R<Syn> {
         let opened = match p.style {
             procedural::Style::Er => at,
             procedural::Style::Sc => procedural::closed(&at, true, made, interner)?,

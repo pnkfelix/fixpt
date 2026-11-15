@@ -1207,6 +1207,27 @@ impl Checker {
         r
     }
 
+    /// [`Checker::with_heap`] of `rt`'s heap, `rt` lent with it, so that
+    /// a procedural macro's transformer runs in `rt`, between the checker's
+    /// uses of its syntax (`heap_syn::with_syntax_in`).
+    pub fn with_runtime<T>(&mut self, rt: &mut fixpt_runtime::Runtime, f: impl FnOnce(&mut Self) -> T) -> T {
+        let world = self.macros.withs.world.clone();
+        let mut syms = {
+            let mut w = world.borrow_mut();
+            if w.lending {
+                drop(w);
+                return f(self);
+            }
+            assert!(w.session, "a checker of its own heap");
+            w.lending = true;
+            std::mem::take(&mut w.syms)
+        };
+        let r = crate::heap_syn::with_syntax_in(rt, &mut syms, || f(self));
+        let mut w = world.borrow_mut();
+        (w.lending, w.syms) = (false, syms);
+        r
+    }
+
     /// A checker with the initial environment of `crate::standard`.
     pub fn new() -> Checker {
         Checker::with_convention(Conv::Cellular)

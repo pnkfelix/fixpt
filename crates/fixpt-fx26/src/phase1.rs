@@ -41,6 +41,12 @@ thread_local! {
     static MADE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
+/// How many namespaces this thread has made: for tests, that each
+/// expansion has its own.
+pub fn made() -> u64 {
+    MADE.with(|m| m.get())
+}
+
 /// A phase-1 namespace ([`self`]): the name of the global that holds its
 /// front end.
 pub struct Phase1 {

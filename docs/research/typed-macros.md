@@ -2260,7 +2260,27 @@ transformers' session (`TODO.md` §228).
 4. The Rust expander's transformer call through it: the runtime reached
    from inside an expansion, minor collections allowed, the datum built
    in the heap from the syntax and the answer made syntax, tenured, no
-   text.
+   text. *Built* (2026-11-15): the runtime reached by the syntax's
+   lending, which a session's `checking` makes with its owner
+   (`lend::lend_owned`, `heap_syn::with_syntax_in`): one borrow flag for
+   the heap and the runtime that holds it, so that a transformer's call
+   (`heap_syn::with_runtime`) and a use of the syntax are never at once,
+   the heap found in the runtime at each borrow (the user's, 2026-11-15,
+   in place of `&Runtime` and cells: everything that runs code mutates).
+   The datum is the use's syntax's own plain datum, as it is
+   (`Syn::plain`); what the transformer gives made syntax at the use's
+   place (`heap_syn::syn_of_datum`, as reading its text and `placed`
+   make it), then closed and its keywords taken as before. The namespace
+   is the checker's world's (`SynWorld::phase1`), made at the first call
+   of an expansion; an expansion is an entry of the session's
+   (`Fx26Session::expansion`: `run_forms`, `run_each`, `run`, and its
+   `checking`, where a program is read and its macros expanded), the
+   front end and the standard environment readied at the outermost. A
+   checker of its own heap, and a lowering session, have no runtime lent
+   or no phase 1: the transformers' session runs theirs, by text, as
+   before (§280). Tests: `tests/phase1.rs` (a namespace per entry),
+   `fixpt-cli/tests/lent_collect.rs` (collected inside the call, the same
+   output; that it ran in the session's runtime).
 5. The expander written in FX-26 through it: its primitive re-entrant
    (`reenters!`), calling the phase-1 procedure in its own runtime.
 6. The separate transformers' session gone. *Since stage 2 narrowed*:

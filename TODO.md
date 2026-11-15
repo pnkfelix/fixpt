@@ -7151,3 +7151,31 @@ Reverted; left for later:
   their checks lent it (`tried` has `rt`).
 - `Checker::new()`'s: a runtime of the thread's, or of each, once §279
   makes a session cheap.
+- Meanwhile their transformers run in the transformers' session by text
+  (the use written, what it gave read back): to be a copy of the datum
+  from heap to heap, and back, as was decided (2026-11-15) and not yet
+  built; and a lowering session's (`Strategy::Lower`), which has no
+  phase 1 (its front end not compiled).
+
+## 281. A major collection during a transformer's call: young-only mode taken out? (the user's question, 2026-11-15)
+
+While syntax is lent, collections are of the nursery alone (§278,
+`Heap::young_only_enter`), so that the expander's raw `Syn`, held by its
+frames and the some fifty entry points above them, stays good through a
+transformer's call; a major collection due waits for the lending's end.
+Taking the mode out would let a long transformer's run collect the old
+space, but a major collection moves every tenured object, the syntax
+among them, so one of these would be needed instead:
+- handles throughout, every frame that can reach a call holding its
+  syntax rooted (weighed and left in §278: the fifty entry points);
+- a space of syntax's own, between the tables and the old space, that a
+  major collection of the old space does not move: its own collection, a
+  remembered set of what it refers to younger, a generation, a barrier
+  case (§278's way out);
+- syntax pinned where it is by the major collection, awkward in a copying
+  one, and in effect the space above without its bookkeeping.
+The mode itself is small (two counters, a branch in `collection_due`,
+`collect_major`, `bump`). To look into: whether majors deferred during
+lendings show (`FIXPT_GC_TRACE`, a major due at a lending's end), and
+how long and how much the old space grows meanwhile; if they do, the
+syntax space.

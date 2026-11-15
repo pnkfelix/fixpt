@@ -4,6 +4,7 @@
 //! there, its answer a value of that heap; two namespaces apart.
 
 use fixpt_fx26::session::Fx26Session;
+use fixpt_read::FileId;
 
 const SC: &str = "(subr spin (datum symbol) datum)";
 
@@ -72,4 +73,34 @@ fn two_namespaces_are_apart() {
     assert!(two.value(rt, "phase-zero").is_none(), "the program's global");
     one.end(rt);
     two.end(rt);
+}
+
+/// Each entry, as the REPL makes one (read, then each form run), is an
+/// expansion of its own: its transformers called in a namespace made for
+/// it, and none for an entry with no transformer's call.
+#[test]
+fn each_entry_has_a_namespace_of_its_own() {
+    let mut s = session();
+    let entry = |s: &mut Fx26Session, k: u32, text: &str| -> String {
+        let forms = s.checking(|c| c.read_in(FileId(k), text)).expect("reads");
+        let mut last = String::new();
+        for f in &forms {
+            for o in s.run_each(f).expect("runs") {
+                last = format!("{:?}", o.value);
+            }
+        }
+        last
+    };
+    let twice = "(define-syntax twice (sc-macro-transformer (lambda (form env) \
+                 (let ((e (make-syntactic-closure env '() (car (cdr form))))) `(+ ,e ,e)))))";
+    entry(&mut s, 1, twice);
+    let defined = fixpt_fx26::phase1::made();
+    assert!(entry(&mut s, 2, "(twice 4)").contains('8'));
+    let one = fixpt_fx26::phase1::made();
+    assert!(one > defined, "a namespace for the entry that uses it");
+    assert!(entry(&mut s, 3, "(+ (twice 1) (twice 2))").contains('6'));
+    let two = fixpt_fx26::phase1::made();
+    assert!(two > one, "another for the next");
+    assert!(entry(&mut s, 4, "(+ 1 1)").contains('2'));
+    assert_eq!(fixpt_fx26::phase1::made(), two, "none for an entry with no call");
 }

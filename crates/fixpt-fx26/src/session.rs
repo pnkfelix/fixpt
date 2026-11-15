@@ -28,7 +28,8 @@ pub const RUNTIME: &str = include_str!("runtime.scm");
 /// lent for its syntax (`Checker::with_heap`). Apart from the session, so
 /// that `f` may borrow the session's other fields.
 pub(crate) fn checking<T>(checker: &mut Checker, scheme: &mut crate::front::Front, f: impl FnOnce(&mut Checker) -> T) -> T {
-    let heap = &mut scheme.runtime_unrooted().heap;
+    let rt = scheme.runtime_unrooted();
+    let heap = &mut rt.heap;
     // Before the outermost, a collection if one is due, as a checker's own
     // heap has (`Checker::syn`): else what the Rust checker leaves, which
     // only FX-26 code's safepoints would collect, grows the heap without
@@ -38,7 +39,9 @@ pub(crate) fn checking<T>(checker: &mut Checker, scheme: &mut crate::front::Fron
     if !checker.syntax_lent() && heap.collection_due() {
         heap.collect_due(&mut []);
     }
-    checker.with_heap(heap, f)
+    // The runtime lent with it: a procedural macro's transformer runs there
+    // (`phase1.rs`; `TODO.md` §278).
+    checker.with_runtime(rt, f)
 }
 
 /// What the front end written in FX-26 is given of a form: a text, or the
@@ -116,6 +119,8 @@ pub struct Fx26Session {
     globals_effects: bool,
     /// Whether re-runs wait (`set_defer_reruns`).
     defer_reruns: bool,
+    /// How many entries are running, one inside another (`expansion`).
+    entries_running: u32,
     /// Whether the FX-26 checker holds aside its last check's breaks
     /// (`Session::hold_breaks`).
     breaks_held: bool,
@@ -1333,6 +1338,7 @@ impl Fx26Session {
             native_fx: None,
             globals_effects: true,
             defer_reruns: false,
+            entries_running: 0,
             breaks_held: false,
             own_made: false,
             own_begun: false,
@@ -1521,6 +1527,35 @@ impl Fx26Session {
     /// outcome per form still to run; the abbreviations are done in the
     /// first pass and have none. Redefinition is as at the REPL.
     pub fn run_forms(&mut self, forms: &[Form]) -> R<Vec<R<Outcome>>> {
+        self.expansion(|s| s.run_forms_expanded(forms))
+    }
+
+    /// `f`, an entry of this session's (a whole program, or a REPL entry,
+    /// `run_forms`, `run_each`, `run`; or what its driver checks, a program's
+    /// reading, `checking`): one expansion, whose phase-1 namespace ends
+    /// with it (`phase1.rs`), each entry's its own (the user's, 2026-11-15).
+    /// An entry inside another is the outer's.
+    fn expansion<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        // What a namespace is made of, ready before anything is expanded: the
+        // front end (which a session that does not lower its forms loads for
+        // its first anyway) and the standard environment as it reads it. A
+        // lowering session has none, and its transformers run apart.
+        if self.entries_running == 0 && self.strategy != Strategy::Lower && self.own_pieces().is_ok() {
+            let _ = self.standard26();
+        }
+        self.entries_running += 1;
+        let out = f(self);
+        self.entries_running -= 1;
+        if self.entries_running == 0 {
+            let ns = self.checker.macros.withs.world.borrow_mut().phase1.take();
+            if let Some((p, _)) = ns {
+                p.end(self.scheme.runtime_unrooted());
+            }
+        }
+        out
+    }
+
+    fn run_forms_expanded(&mut self, forms: &[Form]) -> R<Vec<R<Outcome>>> {
         self.checker.fasls = self.reads_fasls();
         let done = checking(&mut self.checker, &mut self.scheme, |c| c.declare_ahead(forms))?;
         // The type definitions, declared ahead, are the pieces written in
@@ -1614,6 +1649,10 @@ impl Fx26Session {
     /// (`include_forms`), each run as one, so that each front end is given
     /// them, until one fails; of any other form, its own.
     pub fn run_each(&mut self, form: &Form) -> R<Vec<Outcome>> {
+        self.expansion(|s| s.run_each_expanded(form))
+    }
+
+    fn run_each_expanded(&mut self, form: &Form) -> R<Vec<Outcome>> {
         let Some(forms) = checking(&mut self.checker, &mut self.scheme, |c| c.include_forms(form))? else { return Ok(vec![self.run(form)?]) };
         // Of a module that gives nothing, or `(include m (except name …))`
         // of all it gives (`import-with-syntax` of a file of macros alone,
@@ -1639,6 +1678,10 @@ impl Fx26Session {
     /// Checking comes first either way, so a form that does not check does
     /// not run.
     pub fn run(&mut self, form: &Form) -> R<Outcome> {
+        self.expansion(|s| s.run_expanded(form))
+    }
+
+    fn run_expanded(&mut self, form: &Form) -> R<Outcome> {
         self.checker.fasls = self.reads_fasls();
         // `(compile-file "path")`: the file's `.fasl` made, as `fixpt
         // compile-file` makes it (`compile_file`).
@@ -3565,7 +3608,9 @@ impl Fx26Session {
     /// `f` on this session's checker, with the session's heap lent for its
     /// syntax ([`checking`]).
     pub fn checking<T>(&mut self, f: impl FnOnce(&mut Checker) -> T) -> T {
-        checking(&mut self.checker, &mut self.scheme, f)
+        // An entry: what it reads is expanded (a program's macros are
+        // expanded as it is read), its phase-1 namespace its own.
+        self.expansion(|s| checking(&mut s.checker, &mut s.scheme, f))
     }
 
     /// A checker with no program in it yet, set as this session's is.
