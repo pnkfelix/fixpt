@@ -7302,3 +7302,16 @@ already a binding paired with the node its addresses are from
 the elaboration saying which; its scope still the walk's, of written
 bindings, and the shadow restriction as for any import. Both front ends,
 and `do` written as a test, both checkers.
+
+## 290. The expander's other program-wide numbers, for a form's expansion cached (Kayak's `INCR_IMPED.md`, 2026-11-16)
+
+Fresh names are numbered within each form (`typed-macros.md`, "Fresh
+names per form"). Still program-wide, and in a form's output: the
+expansions' numbers (in positions, and in aliases' names `%~N:x`) and the
+source keys (`source-base` and on); and the `mu` table, a signature's
+`mu`s by index into it, which a macro could keep as its own. And a
+session's texts placed one after another by length (`Session::eval_base`,
+its REPL's text one), where a module file's places are its own from its
+load's base, whatever the size of those before. Each, when a cache of
+Kayak's needs it.
+

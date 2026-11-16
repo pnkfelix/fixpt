@@ -55,6 +55,7 @@ impl Macros {
         let mut made: Vec<(usize, Made)> = Vec::new();
         let mut defined = Vec::new();
         let mut next_fresh = self.withs.captors;
+        let key = self.withs.form_key.clone();
         {
             let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
             let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
@@ -155,9 +156,9 @@ impl Macros {
                 for b in sorted {
                     let Kids::Binder(n, _) = a.nodes[b].kids else { unreachable!("a binder") };
                     next_fresh += 1;
-                    // Spelled apart from a template's fresh names, `%x:N`,
+                    // Spelled apart from a template's fresh names, `%x:K.N`,
                     // and counted apart, as the FX-26 one counts them.
-                    fresh.insert(b, format!("%{}~{}", a.name(n), next_fresh));
+                    fresh.insert(b, format!("%{}~{key}.{next_fresh}", a.name(n)));
                 }
                 for (at, env, _, _) in &found {
                     let Kids::Ref(n, ns, _) = a.nodes[*at].kids else { continue };

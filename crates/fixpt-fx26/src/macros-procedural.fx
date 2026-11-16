@@ -596,6 +596,15 @@
 (define phase1-forms (ref (listof string acyclic) rs) (new nil))
 (define phase1-forms-now (->* () (listof string acyclic)) (lambda () (get phase1-forms)))
 (define phase1-forms! (->* ((listof string acyclic)) unit) (lambda (fs) (set phase1-forms fs)))
+;; Both, as a session's state after a form keeps them (`by-state`): a state
+;; read again has its own transformers, not a later form's of their names.
+(define-type phase1-state (tupleof (listof string acyclic) (listof procedural acyclic)))
+(define phase1-state-now (->* () phase1-state)
+  (lambda () (tuple (get phase1-forms) (get procedurals))))
+(define phase1-state! (->* (phase1-state) unit)
+  (lambda (s) (begin (set phase1-forms (extract s 1)) (set procedurals (extract s 2)))))
+(define phase1-none? (->* () bool)
+  (lambda () (and (null? (get phase1-forms)) (null? (get procedurals)))))
 ;; `(begin-for-syntax form …)`, `s`: its forms in force from now on, checked,
 ;; compiled and run in their namespace now, so that one refused is refused
 ;; here, as the Rust expander refuses it (`Macros::for_syntax`).

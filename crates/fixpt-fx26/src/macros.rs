@@ -591,9 +591,16 @@ pub(crate) struct Withs {
     /// expansion's number (`hygiene::DefEnv`); a template's check is
     /// expansion 0.
     pub(crate) def_envs: HashMap<u32, hygiene::DefEnv>,
-    /// How many binders at uses the resolution renamed, which would have
-    /// captured a name a module file's own macro introduces (`%x~N`).
+    /// How many binders at uses the resolution renamed in this form, which
+    /// would have captured a name a module file's own macro introduces
+    /// (`%x~K.N`).
     pub(crate) captors: usize,
+    /// The top-level form's key, which every name it makes fresh carries
+    /// (`Macros::form_begin`); each key's hash, with how many forms had it;
+    /// whether the forms are a module file's.
+    pub(crate) form_key: String,
+    pub(crate) keys_seen: HashMap<i64, u32>,
+    pub(crate) in_module: bool,
     /// Where the macros defined now are, unless a file's scope is given:
     /// the top level, or a module file's items, as its own macros are
     /// (`Checker::file_own_expanded`).
@@ -1327,6 +1334,34 @@ impl Macros {
         }
     }
 
+    /// Top-level form `form` begun: the names it makes fresh are `%x:K.N`,
+    /// `K` its key, `N` counted from 1 within it. Its key is a hash of what
+    /// was written (`syn_hash`) and, past the first form of that hash, how
+    /// many came before it, `H-1`, …: no two forms' keys are one, so neither
+    /// are their names, and a form's names are of it and the macros it uses
+    /// alone (FX-26's `macros-fresh.fx`, alike).
+    pub(crate) fn form_begin(&mut self, form: &Syn, interner: &Interner) {
+        let h = syn_hash(form, interner);
+        let seen = self.withs.keys_seen.entry(h).or_insert(0);
+        let n = *seen;
+        *seen += 1;
+        let m = if self.withs.in_module { "m" } else { "" };
+        self.withs.form_key = if n == 0 { format!("{m}{h}") } else { format!("{m}{h}-{n}") };
+        self.fresh = 0;
+        self.withs.captors = 0;
+        // What is kept within one form as at any form's start, whatever a
+        // failure before left (FX-26's `form-begun!`, alike): the macros an
+        // expansion defined, none yet; no template's check under way.
+        self.withs.made_syntax.clear();
+        self.checking = false;
+    }
+
+    /// The next fresh name's tag, `K.N`.
+    fn fresh_tag(&mut self) -> String {
+        self.fresh += 1;
+        format!("{}.{}", self.withs.form_key, self.fresh)
+    }
+
     /// `(define-syntax name [σ] (syntax-rules [#:trailmarks (name …)] ((_ . pattern)
     /// template) …))`, its signature written or inferred; or a
     /// `define-syntax-rec` of them: checked, and defined; their names. A template's free name is the top level's
@@ -1373,8 +1408,7 @@ impl Macros {
             match &*p.core {
                 STy::Expr | STy::Lambda => {}
                 STy::Bvar => {
-                    self.fresh += 1;
-                    let f = format!("%{}:{}", shown(*n, interner), self.fresh);
+                    let f = format!("%{}:{}", shown(*n, interner), self.fresh_tag());
                     binds.insert(*n, sym(&f, interner));
                 }
                 _ => {
@@ -1436,8 +1470,7 @@ impl Macros {
             };
             let ty = part(&h.ty.map(Kept::get), "type", interner);
             let effect = if lambda { sym("pure", interner) } else { part(&h.effect.map(Kept::get), "effect", interner) };
-            self.fresh += 1;
-            let hole = sym(&format!("%h:{}:{}", shown(*n, interner), self.fresh), interner);
+            let hole = sym(&format!("%h:{}:{}", shown(*n, interner), self.fresh_tag()), interner);
             let args: Vec<Syn> = scope.iter().map(|(_, t)| t.clone()).collect();
             let subr = Syn::lst(at, vec![sym("subr", interner), effect, list_of(at, args, None), ty]);
             params.push(Syn::lst(at, vec![hole.clone(), subr]));
@@ -1450,8 +1483,7 @@ impl Macros {
                     let mut params = Vec::new();
                     let mut names = vec![call];
                     for a in arg_types {
-                        self.fresh += 1;
-                        let v = sym(&format!("%a:{}", self.fresh), interner);
+                        let v = sym(&format!("%a:{}", self.fresh_tag()), interner);
                         params.push(Syn::lst(at, vec![v.clone(), a]));
                         names.push(v);
                     }
@@ -1466,8 +1498,7 @@ impl Macros {
         self.checking = false;
         let lambda = Syn::lst(at, vec![sym("lambda", interner), list_of(at, params, None), body]);
         let made = if binders.is_empty() { lambda } else { Syn::lst(at, vec![sym("plambda", interner), Syn::lst(at, binders), lambda]) };
-        self.fresh += 1;
-        let hidden = sym(&format!("%template:{}:{}", shown(name, interner), self.fresh), interner);
+        let hidden = sym(&format!("%template:{}:{}", shown(name, interner), self.fresh_tag()), interner);
         Ok(Syn::lst(at, vec![sym("define", interner), hidden, made]))
     }
 
@@ -1483,7 +1514,10 @@ impl Macros {
         let def_env = std::mem::replace(&mut self.withs.def_env, hygiene::DefEnv::Within);
         let reading = self.reading.replace(std::sync::Arc::from(text));
         let phase1 = std::mem::take(&mut self.withs.phase1);
+        // The file's forms' keys its own (`form_begin`); the form's put back.
+        let named = (std::mem::take(&mut self.withs.form_key), self.fresh, self.withs.captors, std::mem::take(&mut self.withs.keys_seen), std::mem::replace(&mut self.withs.in_module, true));
         let r = f(self);
+        (self.withs.form_key, self.fresh, self.withs.captors, self.withs.keys_seen, self.withs.in_module) = named;
         self.withs.phase1 = phase1;
         self.defined = defined;
         self.withs.marks = marks;
@@ -1514,7 +1548,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::default(), checking: false, withs: Box::new(Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), ..Withs::default() }) };
+        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::default(), checking: false, withs: Box::new(Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), ..Withs::default() }) };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -3005,8 +3039,8 @@ impl Macros {
                         let name = match fresh.fresh.get(&key) {
                             Some(f) => *f,
                             None => {
-                                self.fresh += 1;
-                                let f = interner.intern(&format!("%{}:{}", interner.name(*n), self.fresh));
+                                let tag = self.fresh_tag();
+                                let f = interner.intern(&format!("%{}:{}", interner.name(*n), tag));
                                 fresh.fresh.insert(key, f);
                                 f
                             }
@@ -5276,6 +5310,24 @@ fn shown_inferred(sig: &Syn, w: &Written, interner: &mut Interner) -> String {
     match shown::in_shapes(sig, w.clauses.first(), interner) {
         Some(c) => infer::sig_text(&c, interner),
         None => infer::sig_text(sig, interner),
+    }
+}
+
+/// A hash of `s`'s symbols, strings and shape, any other atom its kind
+/// alone, below 2³¹ - 1 (FX-26's `syn-hash`, alike): a top-level form's
+/// key (`Macros::form_begin`).
+fn syn_hash(s: &Syn, interner: &Interner) -> i64 {
+    const P: i64 = 2_147_483_647;
+    let mix = |h: i64, x: i64| (h * 65599 + x) % P;
+    let all = |h: i64, xs: &[Syn]| xs.iter().fold(h, |h, x| mix(h, syn_hash(x, interner)));
+    match s.view() {
+        V::Symbol(x) => mix(1, fixpt_heap::heap::string_hash_of(interner.name(x)) % P),
+        V::Str(t) => mix(2, fixpt_heap::heap::string_hash_of(&t) % P),
+        V::Nil => 4,
+        V::List { items, tail: None } => all(4, &items),
+        V::List { items, tail: Some(t) } => mix(all(5, &items), syn_hash(&t, interner)),
+        V::Vector(items) => all(6, &items),
+        _ => 3,
     }
 }
 

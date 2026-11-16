@@ -7,6 +7,8 @@
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define shaper-module ((proj (load-module "fx26:macros-shaper.fx") rs re rm rc rp)))
 (define walk-module (with shaper-module walk-module))
+(define fresh-module ((proj (load-module "fx26:macros-fresh.fx") rs re rm rc rp)))
+(import fresh-module captor-tag)
 (define scopes-module (with walk-module scopes-module))
 (define align-module (with scopes-module align-module))
 (define types-module (with align-module types-module))
@@ -660,24 +662,20 @@
         nil
         (append (tagcase (car as) (atm-lit (b d) (list b)) (else y nil))
                 (atms-binders (cdr as))))))
-;; Each captor, `cs`, with its fresh name, `%x~N`: spelled apart from a
-;; template's fresh names, which another count makes.
+;; Each captor, `cs`, with its fresh name, `%x~K.N`: spelled apart from a
+;; template's fresh names, which another count makes (`captor-tag`).
 (define-type captors (listof (tupleof int symbol) acyclic))
-(define captors-made (ref int rs) (new 0))
 (define captors-named (->* (ints captors) captors)
   (lambda (cs out)
     (if (null? cs)
         out
         (tagcase (node-kids (car cs))
           (k-binder (n e)
-            (begin
-              (set captors-made (+ (get captors-made) 1))
-              (captors-named (cdr cs)
-                             (cons (tuple (car cs)
-                                          (string->symbol
-                                           (string-append "%" (symbol->string n) "~"
-                                                          (int->string (get captors-made)))))
-                                   out))))
+            (captors-named (cdr cs)
+                           (cons (tuple (car cs)
+                                        (string->symbol
+                                         (string-append "%" (symbol->string n) "~" (captor-tag))))
+                                 out)))
           (else y (captors-named (cdr cs) out))))))
 ;; Each captor of `fresh` written as its fresh name, onto `out`.
 (define binders-renamed (->* (captors parts) parts)

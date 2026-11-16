@@ -42,6 +42,21 @@
 (define templates-module (with imports-module templates-module))
 (define macros-module (with templates-module macros-module))
 (import templates-module template-checks)
+(define fresh-module (with macros-module fresh-module))
+(import fresh-module form-begin! fresh-scope-begin! fresh-scope-end!)
+(define nodes-module ((proj (load-module "fx26:macros-nodes.fx") rs re rm rc rp)))
+(define facts-module ((proj (load-module "fx26:macros-facts.fx") rs re rm rc rp)))
+(import nodes-module program-walk heads-on)
+(import facts-module open)
+(import macros-module checking)
+;; Top-level form `s` begun: its key (`form-begin!`); and what the expander
+;; keeps within one form as at any form's start, whatever a failure before
+;; left (`Macros::form_begin`): the macros an expansion defined, none yet,
+;; and its flags of one walk, one template's check, one fact's shape.
+(define form-begun! (->* (syn) unit)
+  (lambda (s)
+    (begin (form-begin! s) (made-syntax-taken!) (set program-walk #f) (set heads-on #f)
+           (set open nil) (set checking #f))))
 (import imports-module import-file-macros note-load-def!)
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
         made-syntax-taken! global-now?
@@ -238,24 +253,26 @@
 ;; still, of one reading.
 (define top-made (->* (syn) top-list)
   (lambda (written)
-    (cond ((shape-definition? written)
-           (begin (global-macro written) (shape-defined! written) nil))
-          ((defines-syntax? written)
-           (begin (global-macro written)
-                  (macro-checks (define-macro pfail-at written nil))))
-          ;; Phase 1's forms, in force for the transformers defined after:
-          ;; nothing of the program's.
-          ((for-syntax? written) (begin (for-syntax! pfail-at written) nil))
-          ;; A file's macros, and the `include` of the rest.
-          ((imports-syntax? written)
-           (let ((inc (import-file-macros pfail-at written (get loaded))))
-             (if (null? inc) (the top-list nil) (parse-made (car inc)))))
-          ((form-of? written 'hide) (tops-made (cdr (syn-items written ""))))
-          ;; A macro its expansion defined: held to the globals, as a written
-          ;; one is, its templates checked after its definitions.
-          (else (let* ((xs (expand-top pfail-at written)) (ms (made-syntax-taken!))
-                       (taken (globals-taken-now ms written)) (tops (expanded-tops xs)))
-                  (append-tops tops (macro-checks ms)))))))
+    (begin
+     (form-begun! written)
+     (cond ((shape-definition? written)
+            (begin (global-macro written) (shape-defined! written) nil))
+           ((defines-syntax? written)
+            (begin (global-macro written)
+                   (macro-checks (define-macro pfail-at written nil))))
+           ;; Phase 1's forms, in force for the transformers defined after:
+           ;; nothing of the program's.
+           ((for-syntax? written) (begin (for-syntax! pfail-at written) nil))
+           ;; A file's macros, and the `include` of the rest.
+           ((imports-syntax? written)
+            (let ((inc (import-file-macros pfail-at written (get loaded))))
+              (if (null? inc) (the top-list nil) (parse-made (car inc)))))
+           ((form-of? written 'hide) (tops-made (cdr (syn-items written ""))))
+           ;; A macro its expansion defined: held to the globals, as a written
+           ;; one is, its templates checked after its definitions.
+           (else (let* ((xs (expand-top pfail-at written)) (ms (made-syntax-taken!))
+                        (taken (globals-taken-now ms written)) (tops (expanded-tops xs)))
+                   (append-tops tops (macro-checks ms))))))))
 (define tops-made (->* (syns-a) top-list)
   (lambda (xs)
     (if (null? xs) nil (let ((made (top-made (car xs)))) (append-tops made (tops-made (cdr xs)))))))
@@ -588,10 +605,10 @@
     (if (or (<= (extract f 2) 0) (extract f 8)
             (not (or (own-macros? (extract f 5)) (imports-syntax-in? (extract f 5)))))
         f
-        (let* ((saved (file-scope-begin!))
+        (let* ((saved (file-scope-begin!)) (named (fresh-scope-begin!))
                (r (prompt parse-tag (begin (set own-out (own-each (extract f 5))) (p-ok nil))
                           (lambda ((r presult)) r)))
-               (ended (file-scope-end! saved)))
+               (ended (begin (fresh-scope-end! named) (file-scope-end! saved))))
           (tagcase r
             ;; Its forms as read, which its shape is found from; the
             ;; error said where it is loaded (`parse-load-file`).
@@ -626,24 +643,26 @@
     (if (null? xs)
         nil
         (let* ((x (car xs))
-               (made (cond ((or (form-of? x 'module-parameters) (shape-definition? x)) (list x))
-                           ((form-of? x 'import-with-syntax)
-                            (begin (pfail-at (string-append "`import-with-syntax` in a module "
-                                                            "file: not yet; a program's top "
-                                                            "level imports a file's macros "
-                                                            "(`binding-shapes.md`, step 4)")
-                                             (syn-start x) (syn-end x))
-                                   nil))
-                           ((own-macro? x) (begin (define-macro pfail-at x nil) (list x)))
-                           ;; Phase 1's, in force for the file's macros after;
-                           ;; kept for an importer's, as its macros are, and
-                           ;; no item of its module's (`file-items`).
-                           ((for-syntax? x) (begin (for-syntax! pfail-at x) (list x)))
-                           ((form-of? x 'hide)
-                            (let ((items (syn-items x "")))
-                              (list (mk-list (cons (car items) (own-each (cdr items)))
-                                             (syn-start x) (syn-end x)))))
-                           (else (own-expanded (expand-top pfail-at x))))))
+               (made (begin
+                      (form-begun! x)
+                      (cond ((or (form-of? x 'module-parameters) (shape-definition? x)) (list x))
+                            ((form-of? x 'import-with-syntax)
+                             (begin (pfail-at (string-append "`import-with-syntax` in a module "
+                                                             "file: not yet; a program's top "
+                                                             "level imports a file's macros "
+                                                             "(`binding-shapes.md`, step 4)")
+                                              (syn-start x) (syn-end x))
+                                    nil))
+                            ((own-macro? x) (begin (define-macro pfail-at x nil) (list x)))
+                            ;; Phase 1's, in force for the file's macros after;
+                            ;; kept for an importer's, as its macros are, and
+                            ;; no item of its module's (`file-items`).
+                            ((for-syntax? x) (begin (for-syntax! pfail-at x) (list x)))
+                            ((form-of? x 'hide)
+                             (let ((items (syn-items x "")))
+                               (list (mk-list (cons (car items) (own-each (cdr items)))
+                                              (syn-start x) (syn-end x)))))
+                            (else (own-expanded (expand-top pfail-at x)))))))
           (append made (own-each (cdr xs)))))))
 (define own-expanded (->* (syns-a) syns-a)
   (lambda (xs)

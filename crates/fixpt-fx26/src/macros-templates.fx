@@ -18,7 +18,9 @@
 (import types-module fail-at split (type fails))
 (import align-module defined macro-of pvar-of atm-var lv-rib
         (type macro clause clauses pvars levels atms))
-(import macros-module transcribe checking fresh-count list-at bound-of def-env! (type binds))
+(import macros-module transcribe checking list-at bound-of def-env! (type binds))
+(define fresh-module (with macros-module fresh-module))
+(import fresh-module fresh-tag)
 
 ;;; ------------------------------------------------------------ checking templates
 
@@ -62,8 +64,7 @@
 ;; A name made fresh: `prefix` and the count.
 (define fresh-symbol (->* (string) symbol)
   (lambda (prefix)
-    (begin (set fresh-count (+ (get fresh-count) 1))
-           (string->symbol (string-append prefix (int->string (get fresh-count)))))))
+    (string->symbol (string-append prefix (fresh-tag)))))
 ;; Where pattern variable `n` is in clause `c`'s pattern (else the pattern).
 (define pattern-place (->* (clause symbol) syn)
   (lambda (c n)

@@ -35,6 +35,20 @@ fn a_macro_makes_definitions_in_later_entries() {
     let def = "(define-syntax define-counter (macro (_ bvar) defn) (syntax-rules ((_ name) (begin (define count (new 0)) (define name (lambda () (begin (set count (+ (get count) 1)) (get count))))))))\n";
     let out = repl(&format!("{def}(define-counter tick)\n(define-counter tock)\n(tick)\n(+ (tick) (tock))\n"));
     assert!(out.contains("tick : (subr") && out.contains("tock : (subr"), "{out}");
-    assert!(out.contains("%count:1 : (ref int") && out.contains("%count:2 : (ref int"), "{out}");
+    // Each use's own, named by its form's key (`Macros::form_begin`).
+    let counts: Vec<&str> = out.lines().filter_map(|l| l.split(" : (ref int").next().filter(|_| l.contains(" : (ref int"))?.rsplit(' ').next()).collect();
+    assert!(counts.len() >= 2 && counts.iter().all(|c| c.starts_with("%count:") && c.ends_with(".1")) && counts[0] != counts[1], "{out}");
     assert!(out.contains("3 : int") && !out.contains("panicked"), "{out}");
+}
+
+/// A module file's own expansion that made a macro (`own.fx`'s
+/// `(define-clamper clamp)`) leaves nothing to the entry that loads it: an
+/// earlier entry's global `clamp` stays the session's, the load not refused
+/// "`clamp` is defined already" (the macros an expansion made, none at each
+/// form's start: `Macros::form_begin`, FX-26's `form-begun!`).
+#[test]
+fn a_files_own_made_macro_is_not_the_loaders() {
+    let own = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/import-with-syntax/own.fx");
+    let out = repl(&format!("(define clamp 7)\n(define lib (load-module \"{own}\"))\n(with lib clamped)\nclamp\n"));
+    assert!(!out.contains("defined already") && out.contains("10 : int") && out.contains("7 : int ! (read (globals clamp))"), "{out}");
 }

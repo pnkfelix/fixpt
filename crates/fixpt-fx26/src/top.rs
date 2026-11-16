@@ -964,6 +964,9 @@ impl Checker {
             };
             let mut out = Vec::new();
             for ((f, kind), marks) in forms.into_iter().zip(kinds).zip(marks) {
+                // As the program's forms (`expand_forms_syn`), a `hide`'s
+                // and each of its forms'.
+                m.form_begin(&f, &interner);
                 match kind {
                     0 => out.push(f),
                     1 => {
@@ -974,6 +977,7 @@ impl Checker {
                         let items = f.list().expect("a `hide`");
                         let mut kept = vec![items[0]];
                         for (i, is_macro) in items.iter().zip(marks).skip(1) {
+                            m.form_begin(i, &interner);
                             if is_macro {
                                 m.define(i, &mut interner)?;
                                 kept.push(*i);
@@ -1002,6 +1006,9 @@ impl Checker {
     pub(crate) fn expand_forms_syn(&mut self, forms: Vec<Syn>) -> R<Vec<Syn>> {
         let mut out = Vec::new();
         for f in forms {
+            // Its key, which the names its expansion makes carry
+            // (`Macros::form_begin`), a `hide`'s and each of its forms'.
+            self.macros.form_begin(&f, &self.interner);
             // `(hide form …)`: its forms, as if written there, a program
             // exporting nothing to hide them from.
             if let Some([h, items @ ..]) = f.list().as_deref()

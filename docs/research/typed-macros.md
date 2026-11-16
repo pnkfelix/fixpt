@@ -874,7 +874,8 @@ circa R5RS").
 - **Hygiene, Herman's exports**: a name a use gives, a `bvar` part, is
   defined under that name, the program's; one the template writes is made
   fresh, as its other binders are, so nothing outside can name it, and
-  each use has its own (`%count:1`, `%count:2`). A reference the template
+  each use has its own (`%count:K.1`, `%count:K′.1`, each form's key
+  its own: "Fresh names per form"). A reference the template
   makes to a use's name is held to the shadow restriction, so a second
   definition's expression in the scope of the first's name says so in its
   signature: `(bvar expr bvar (import expr (rho (A var))))`.
@@ -2713,3 +2714,56 @@ may be shared without its users depending on how it is built inside; and
 nest, so saying them all is the choice of one level or nested
 (shadowing) that `export` against `export*` writes, which reaching inside
 would make unsaid.
+
+## Fresh names per form, and the expander's state between forms (2026-11-16)
+
+Kayak's port of the FX-26 expander caches each top-level form's
+expansion (its `INCR_IMPED.md`, entries 1 and 2), which program-wide
+numbering defeated: a form's fresh names were `%x:N`, `N` counting every
+name made since the program began, so editing an early form renamed the
+binders of every later one, and no two forms could be expanded apart.
+
+**Fresh names.** Each top-level form is begun (`Macros::form_begin`;
+FX-26's `form-begin!`, `macros-fresh.fx`) before anything of it is
+expanded or defined, a `hide` and each of its forms, a module file's own
+forms each: its names are `%x:K.N` (and `%h:…:K.N`, `%a:K.N`,
+`%template:m:K.N`, a renamed captor `%x~K.N`), `N` counted from 1 within
+the form. `K` is a hash of what was written, below 2³¹ − 1, of its
+symbols' and strings' characters (`string-hash`) and its shape, any other
+atom its kind alone, alike in both front ends (`syn_hash`, `syn-hash`);
+and, past the first form of that hash, how many came before it, `H-1`,
+`H-2`. So no two forms' keys are one, a hash's collision included, and so
+neither are their names, by construction; a form's names are of it and
+the macros it uses alone, unless an identical form (or a colliding one)
+comes before it. A module file's own forms are keyed apart, `mH`, with a
+count of hashes of their own, the program's put back after
+(`in_file_scope`; `fresh-scope-begin!`). A session keeps the hashes seen
+in its state after each form, where it kept the count (`by-state`).
+
+**What carries from one form to the next.** Audited in FX-26 (the Rust
+expander keeps the same in `Macros`):
+- *Carried, kept per state for a session*: the macros defined, the load
+  definitions, the globals, the trailmarks, the phase-1 forms and the
+  procedural transformers (`by-state`, the transformers added now: a
+  state read again had a later form's transformer of the same name), the
+  hashes seen; the shapes (`shapes-by-state`).
+- *Carried, only growing, keys never reused*: the `mu` table and the
+  `(macro …)` binders' signatures (by index, from stored signatures), the
+  trailmarks' numbers (identity alone), the expansions and their numbers,
+  the source keys, the trusted sources, the definition environments by
+  expansion, the aliases defined. Safe for a session read again; for a
+  cache, inputs: the expansion numbers and source keys are in a form's
+  output (its positions, the aliases' names `%~N:x`), so a cached
+  expansion is renumbered or replayed at the same counts (TODO §290).
+- *Scratch*, reset before it is read: the nodes, the inference tables,
+  the transcription's own, the shaper's arrays, the limits.
+
+Found by the audit, and fixed: what a form keeps within itself, as at any
+form's start, whatever a failure before left (`form-begun!`, and
+`Macros::form_begin` alike): the macros an expansion defined, which a
+module file's own expansion left to the loading form, refused in a
+session where an earlier entry defined a global of that name ("`clamp` is
+defined already": `repl_macros.rs`, `a_files_own_made_macro_is_not_the_loaders`);
+and the flags of one walk, one template's check and one fact's shape
+(`program-walk`, `heads-on`, `checking`, `open`), which a failure caught
+in a module file, or ending a session's entry, could leave set.

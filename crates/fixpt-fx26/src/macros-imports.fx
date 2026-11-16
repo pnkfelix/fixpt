@@ -12,8 +12,10 @@
         head-name import-usage in-loaded-as internal-names internal-of len load-base load-of
         load-path loaded-path loads macro-names macro-of macro? mk-list mk-symbol name-filter
         names-shown not-macros nth proper shown-names syn-end syn-start syn-symbol syn-symbol?
-        taken? without-load marks for-syntax? for-syntax! phase1-forms-now phase1-forms!
+        taken? without-load marks for-syntax? for-syntax!
         (type fails file-macro files filter macro macro-env mades names scope syn syns-a marked))
+(define procedural-module (with macros-module procedural-module))
+(import procedural-module phase1-forms-now phase1-forms!)
 
 ;; Notes a top-level `(define name (load-module "path"))`, the file
 ;; `import-with-syntax` of `name` reads; any other definition of `name`

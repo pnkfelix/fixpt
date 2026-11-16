@@ -50,10 +50,10 @@
         binder-depths depth-of repeated-ref heads-done (type exported nested depths))
 (import solve-module infer sig-shown by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
-        phase1-forms-now phase1-forms! for-syntax!
+        phase1-state-now phase1-state! phase1-none? for-syntax!
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias alias-base respanned in-expansion use-entered?
-        use-left!
+        use-left! (type phase1-state)
         chain-begun! checked-uses trust-if! use-aligned! procedural-expanded made-syntax-reset!
         made-syntax-add! made-syntax-count made-syntax-taken! syntax-held)
 (import infer-module (type unsigned unsigneds))
@@ -510,12 +510,12 @@
 ;; session's, or anything read again (`typed-macros.md`, the port's
 ;; decision 3). Only where there are some.
 ;; And the globals defined, which no macro may be named (`globals`).
-;; And the count of fresh names, so that a program begun in the standard
-;; environment's state makes them as the Rust expander, begun anew, does.
+;; And the forms' keys' hashes, so that a program begun in the standard
+;; environment's state names as the Rust expander, begun anew, does.
+(define fresh-module ((proj (load-module "fx26:macros-fresh.fx") rs re rm rc rp)))
+(import fresh-module fresh-tag seen-now seen! (type seen-keys))
 (define-type by-states
-  (listof (tupleof int macro-env load-defs names int marked (listof string acyclic)) acyclic))
-;; Fresh names' count.
-(define fresh-count (ref int rs) (new 0))
+  (listof (tupleof int macro-env load-defs names seen-keys marked phase1-state) acyclic))
 (define by-state (ref by-states rs) (new nil))
 ;; The globals the forms read so far define, and those the forms before
 ;; this parse did (`Checker::global_type` as a program is expanded, before
@@ -528,11 +528,11 @@
       (begin
         (set with-uses nil)
         (if (null? at)
-            (begin (set defined nil) (set loads nil) (set globals nil) (set fresh-count 0)
-                   (set marks nil) (phase1-forms! nil))
+            (begin (set defined nil) (set loads nil) (set globals nil) (seen! nil)
+                   (set marks nil) (phase1-state! (tuple nil nil)))
             (begin (set defined (extract (car at) 2)) (set loads (extract (car at) 3))
-                   (set globals (extract (car at) 4)) (set fresh-count (extract (car at) 5))
-                   (set marks (extract (car at) 6)) (phase1-forms! (extract (car at) 7))))
+                   (set globals (extract (car at) 4)) (seen! (extract (car at) 5))
+                   (set marks (extract (car at) 6)) (phase1-state! (extract (car at) 7))))
         (set globals-before (get globals))))))
 (define state-at (->* (int by-states) by-states)
   (lambda (s xs)
@@ -542,10 +542,10 @@
 (define macros-after! (->* (int) unit)
   (lambda (s)
     (if (and (null? (get defined)) (null? (get loads)) (null? (get globals))
-             (= (get fresh-count) 0) (null? (get marks)) (null? (phase1-forms-now)))
+             (null? (seen-now)) (null? (get marks)) (phase1-none?))
         #u
-        (set by-state (cons (tuple s (get defined) (get loads) (get globals) (get fresh-count)
-                                   (get marks) (phase1-forms-now))
+        (set by-state (cons (tuple s (get defined) (get loads) (get globals) (seen-now)
+                                   (get marks) (phase1-state-now))
                             (get by-state))))))
 ;; Names `ns` defined as globals.
 (define globals! (->* (names) unit) (lambda (ns) (set globals (append ns (get globals)))))
@@ -967,11 +967,8 @@
   (lambda (n binder d)
     (let* ((is (ints-prefix (get iters) d)) (known (fresh-of binder is (get fresh))))
       (if (null? known)
-          (begin
-            (set fresh-count (+ (get fresh-count) 1))
-            (let ((f (string->symbol (string-append "%" (symbol->string n) ":"
-                                                    (int->string (get fresh-count))))))
-              (begin (set fresh (cons (tuple binder is f) (get fresh))) f)))
+          (let ((f (string->symbol (string-append "%" (symbol->string n) ":" (fresh-tag)))))
+            (begin (set fresh (cons (tuple binder is f) (get fresh))) f))
           (car known)))))
 (define fresh-of (->* (addr (listof int acyclic) freshes) (listof symbol acyclic))
   (lambda (p is fs)
