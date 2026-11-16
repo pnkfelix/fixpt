@@ -21,7 +21,7 @@
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         s-mark s-rules
-        mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit
+        unfold-mu addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit
         seq-elem seq-cage? peel ellipsis? ellipsis-of
         (type fails addr entries ring rings bind sty stys named hole atm atms))
 (import nodes-module act-rename act-alias act-module-type
@@ -161,7 +161,7 @@
           ;; Written only if refused: `s` may be large.
           (shown (lambda () (string-append "`" (show-syn s) "`"))))
       (tagcase t
-        (s-mu (id) (fill fail mode ps at (mu-body id) s at))
+        (s-mu (b r p) (fill fail mode ps at (unfold-mu t) s at))
         (s-union (ms)
           ;; A program's name that a form's word may be too, `else` or a
           ;; variable bound to `else`: the form's word, if a member writes it.
@@ -350,7 +350,7 @@
         ;; nothing (`bloblet-ref`, `TODO.md` §247).
         ((and (not (string=? head ""))
               (let ((sig (sig-of (string->symbol head) (scope-sigs fail))))
-                (and (not (null? sig)) (binds-nothing? (car sig) nil))))
+                (and (not (null? sig)) (binds-nothing? (car sig)))))
          (operands fail ps at (car (sig-of (string->symbol head) (scope-sigs fail))) (nth parts 1)))
         ((and (not (string=? head "")) (reserved? head))
          (fail-at fail (string-append "the prototype does not know `" head "`'s binding "

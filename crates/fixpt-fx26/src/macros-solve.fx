@@ -18,7 +18,7 @@
 (import reader-types atom lst dotted (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth mk-list
         mk-symbol syn-datums syn->datum parse-tag p-ok p-err pfail-at (type syns-a names))
-(import types-module fail-at split show-syn kind-of mu-body proper-items
+(import types-module fail-at split show-syn kind-of proper-items
         s-expr s-bvar s-id s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu
         s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib ring-at
         bind-direct bind-earlier atm-var atm-rib-of atm-lit
@@ -26,10 +26,10 @@
 (import align-module defined lv-rib lv-cage lv-earlier lv-shape (type macro macro-env levels))
 (import infer-module shape-of path-of region leaf? union? boundary-of var-of var-part regions
         via inner int-in? int-assoc found-vars parts-reset! merge roots fingerprint sol-empty
-        build built-mus placements-of combine scoped? affine? kind-at pkind-of kd-ty kd-ref
+        build built-round placements-of combine scoped? affine? kind-at pkind-of kd-ty kd-ref
         makes-all absorbed nparts open? sh-seq sh-union sh-leaf
         (type kd kds kinds pkinds ints sol binds-at spans placed placements unsigned
-              unsigneds rules items cx mu-parts shape))
+              unsigneds rules items cx shape))
 (import show-module show-sty sig-text shown)
 (define exports-module (with files-module exports-module))
 (import exports-module (type exported))
@@ -425,17 +425,11 @@
 (define classify (->* (sty) kds)
   (lambda (core)
     (tagcase core
-      (s-mu (id)
-        (let ((p (part-of-mu id (get built-mus))))
-          (cond ((null? p) (list (kd-ty core)))
-                ((leaf? (car p)) nil)
-                (else (list (kd-ref (car p)))))))
+      (s-mu (b r p)
+        (cond ((not (= r (get built-round))) (list (kd-ty core)))
+              ((leaf? p) nil)
+              (else (list (kd-ref p)))))
       (else y (list (kd-ty core))))))
-(define part-of-mu (->* (int mu-parts) ints)
-  (lambda (id xs)
-    (cond ((null? xs) nil)
-          ((= id (extract (car xs) 2)) (list (extract (car xs) 1)))
-          (else (part-of-mu id (cdr xs))))))
 (define pkinds-each (->* (by-clause int pkinds) pkinds)
   (lambda (ps cid out)
     (if (null? ps)
@@ -829,7 +823,7 @@
                  (made-roots (begin (set roots (roots-each fail us rs 0 c)) #u))
                  (shape (fingerprint))
                  (s (if (string=? shape shape-was) s0 (fresh-sol (extract s0 2))))
-                 (tys (build s))
+                 (tys (build s n))
                  (shown (show-each-sig tys us))
                  (strings (texts shown)))
             (if (and (not (null? last)) (strings=? (extract (car last) 1) strings))

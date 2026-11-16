@@ -13,10 +13,10 @@
 (import reader-types atom lst dotted (type syn))
 (import parser-module syn-symbol? syn-name mk-list mk-symbol syn-datums syn->datum
         (type syns-a))
-(import types-module show-syn kind-of mu-body reserved-sym? s-mark
+(import types-module show-syn kind-of lowered reserved-sym? s-mark
         s-expr s-bvar s-id s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu
-        s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib ring-at
-        syntax-sig-of (type addr entries ring rings bind sty stys))
+        s-var s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib
+        ring-at syntax-sig-of (type addr entries ring rings bind sty stys))
 (import infer-module open?)
 
 ;;; ------------------------------------------------------------ written
@@ -24,8 +24,8 @@
 ;; Syntax type `t` as a signature writes it, at `a`..`b` (`infer.rs`'s
 ;; `shown_sty`): a `mu` whose variable is used, or whose addresses are
 ;; from it; a list by ellipsis, `(σ ...)`. `shown`, the `mu`s being
-;; written, each with its variable and whether it is used.
-(define shown (ref (listof (tupleof int string bool) acyclic) rs) (new nil))
+;; written, the innermost first, each its variable and whether it is used.
+(define shown (ref (listof (tupleof string bool) acyclic) rs) (new nil))
 (define show-sty (->* (sty int int) syn)
   (lambda (t a b)
     (let ((sym (lambda ((s string)) (mk-symbol s a b))))
@@ -47,7 +47,8 @@
         (s-many (x) (mk-list (list (sym "many") (show-sty x a b)) a b))
         (s-typed (x h) (show-sty x a b))
         (s-union (ms) (mk-list (cons (sym "oneof") (show-each ms a b)) a b))
-        (s-mu (id) (show-mu id a b))))))
+        (s-var (j) (begin (set shown (used! j (get shown))) (sym (extract (nth-shown j) 1))))
+        (s-mu (x r p) (show-mu t a b))))))
 (define show-each (->* (stys int int) syns-a)
   (lambda (ms a b) (if (null? ms) nil (cons (show-sty (car ms) a b) (show-each (cdr ms) a b)))))
 (define show-pair (->* (sty syns-a int int) syn)
@@ -55,8 +56,8 @@
     (tagcase cur
       (s-pair (x y) (show-pair y (append items (the syns-a (list (show-sty x a b)))) a b))
       (s-nil () (mk-list items a b))
-      (s-mu (id)
-        (let ((e (if (null? (shown-of id (get shown))) (listed-elem id) nil)))
+      (s-mu (x r p)
+        (let ((e (listed-elem cur)))
           (if (null? e)
               (joined-list items (show-sty cur a b) a b)
               (mk-list (append items
@@ -73,55 +74,55 @@
                 a b 0))
       (else y
         (if (null? xs) t (dotted xs t (datum-dotted (syn-datums xs) (syn->datum t)) a b 0))))))
-(define shown-of (->* (int (listof (tupleof int string bool) acyclic)) (listof string acyclic))
-  (lambda (id xs)
-    (cond ((null? xs) nil)
-          ((= id (extract (car xs) 1)) (list (extract (car xs) 2)))
-          (else (shown-of id (cdr xs))))))
-(define used! (->* (int (listof (tupleof int string bool) acyclic))
-                   (listof (tupleof int string bool) acyclic))
-  (lambda (id xs)
-    (cond ((null? xs) nil)
-          ((= id (extract (car xs) 1)) (cons (tuple id (extract (car xs) 2) #t) (cdr xs)))
-          (else (cons (car xs) (used! id (cdr xs)))))))
-(define len-shown (->* ((listof (tupleof int string bool) acyclic)) int)
+(define nth-shown (->* (int) (tupleof string bool))
+  (lambda (j) (nth-of j (get shown))))
+(define nth-of (->* (int (listof (tupleof string bool) acyclic)) (tupleof string bool))
+  (lambda (j xs) (if (= j 0) (car xs) (nth-of (- j 1) (cdr xs)))))
+(define used! (->* (int (listof (tupleof string bool) acyclic))
+                   (listof (tupleof string bool) acyclic))
+  (lambda (j xs)
+    (if (= j 0)
+        (cons (tuple (extract (car xs) 1) #t) (cdr xs))
+        (cons (car xs) (used! (- j 1) (cdr xs))))))
+(define len-shown (->* ((listof (tupleof string bool) acyclic)) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (len-shown (cdr xs))))))
-(define show-mu (->* (int int int) syn)
-  (lambda (id a b)
-    (let ((v (shown-of id (get shown))))
-      (if (not (null? v))
-          (begin (set shown (used! id (get shown))) (mk-symbol (car v) a b))
-          (let ((e (listed-elem id)))
-            (if (not (null? e))
-                (mk-list (list (show-sty (car e) a b) (mk-symbol "..." a b)) a b)
-                (let ((name (string-append "m" (int->string (+ (len-shown (get shown)) 1)))))
-                  (begin
-                    (set shown (cons (tuple id name #f) (get shown)))
-                    (let* ((body (show-sty (mu-body id) a b)) (used (extract (car (get shown)) 3)))
-                      (begin
-                        (set shown (cdr (get shown)))
-                        (if (or used (open? (mu-body id)))
-                            (mk-list (list (mk-symbol "mu" a b) (mk-symbol name a b) body) a b)
-                            body)))))))))))
-;; The element of `mu` `id`, in a list of one, if it is a list as `(σ ...)`
-;; writes one (`seq-type`): its element as written.
-(define listed-elem (->* (int) stys)
-  (lambda (id)
-    (tagcase (mu-body id)
-      (s-union (ms)
-        (if (and (not (null? ms)) (not (null? (cdr ms))) (null? (cdr (cdr ms))))
-            (listed-of id (car ms) (car (cdr ms)))
-            nil))
-      (else y nil))))
-(define tail-of? (->* (int sty) bool)
-  (lambda (id d) (tagcase d (s-mu (j) (= j id)) (else y #f))))
-(define listed-of (->* (int sty sty) stys)
-  (lambda (id nil-m pair-m)
+(define show-mu (->* (sty int int) syn)
+  (lambda (t a b)
+    (let ((e (listed-elem t)) (body (tagcase t (s-mu (x r p) x) (else y t))))
+      (if (not (null? e))
+          (mk-list (list (show-sty (car e) a b) (mk-symbol "..." a b)) a b)
+          (let ((name (string-append "m" (int->string (+ (len-shown (get shown)) 1)))))
+            (begin
+              (set shown (cons (tuple name #f) (get shown)))
+              (let* ((shown-body (show-sty body a b)) (used (extract (car (get shown)) 2)))
+                (begin
+                  (set shown (cdr (get shown)))
+                  (if (or used (open? body))
+                      (mk-list (list (mk-symbol "mu" a b) (mk-symbol name a b) shown-body) a b)
+                      shown-body)))))))))
+;; The element of `mu` `t`, in a list of one, if it is a list as `(σ ...)`
+;; writes one (`seq-type`) and its element does not refer to it: its
+;; element as written, outside the list's `mu`.
+(define listed-elem (->* (sty) stys)
+  (lambda (t)
+    (let ((e (tagcase t
+               (s-mu (x r p)
+                 (tagcase x
+                   (s-union (ms)
+                     (if (and (not (null? ms)) (not (null? (cdr ms))) (null? (cdr (cdr ms))))
+                         (listed-of (car ms) (car (cdr ms)))
+                         nil))
+                   (else y nil)))
+               (else y nil))))
+      (if (null? e) nil (lowered (car e))))))
+(define tail-of? (->* (sty) bool) (lambda (d) (tagcase d (s-var (j) (= j 0)) (else y #f))))
+(define listed-of (->* (sty sty) stys)
+  (lambda (nil-m pair-m)
     (tagcase nil-m
       (s-nil ()
         (tagcase pair-m
           (s-pair (e d)
-            (if (and (tail-of? id d)
+            (if (and (tail-of? d)
                      (tagcase e (s-bvar () #f) (s-dvar () #f) (s-export (x bd) #f) (else y #t)))
                 (list e)
                 nil))
@@ -132,7 +133,7 @@
             (if (and (= (kind-of n) 6) (no-entries? none))
                 (tagcase p
                   (s-pair (e d)
-                    (if (tail-of? id d)
+                    (if (tail-of? d)
                         (tagcase e
                           ;; An element's own export not a rib's: the pair's the element's.
                           (s-export (x bd) (if (both-ribs? both) (list e) nil))

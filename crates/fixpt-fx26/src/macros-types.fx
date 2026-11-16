@@ -52,12 +52,15 @@
 ;; What a typed hole says (`macros.rs`'s `Hole`): its type and its effect,
 ;; each as written, in a list of one, or none if it is left out.
 (define-type hole (tupleof syns-a syns-a))
-;; A syntax type. A `mu` is by its number in `mus`, its variable the same;
+;; A syntax type (`macros.rs`'s `STy`). A `mu`, `(s-mu body round part)`,
+;; a value compared by its structure, its variable `(s-var n)` by how many
+;; `mu`s are between them (de Bruijn's numbering), 0 the innermost; its
+;; round and part, of a signature being inferred (`build`), else -1.
 ;; `s-typed`, an `expr` or `bvar` with its type or effect written.
 (define-datatype sty
   (s-expr) (s-bvar) (s-id) (s-data) (s-type) (s-label) (s-nil)
   (s-literal symbol) (s-pair sty sty) (s-import sty bind) (s-export sty bind) (s-mark symbol int)
-  (s-mu int) (s-many sty) (s-union (listof sty acyclic)) (s-typed sty hole)
+  (s-mu sty int int) (s-var int) (s-many sty) (s-union (listof sty acyclic)) (s-typed sty hole)
   ;; An expression that is a lambda, where a form wants one (`letrec`).
   (s-lambda)
   ;; A definition, where a template makes one (the kernel's `begin` of
@@ -73,28 +76,62 @@
   (s-rules))
 (define-type stys (listof sty acyclic))
 
-;; Each `mu`'s body, by its number: the program's, and every file's
-;; macros', which refer to them by number.
-(define mus (ref (arrayof sty rs) rs) (new (make-array 64 (s-nil))))
-(define nmus (ref int rs) (new 0))
-(define mu-body (->* (int) sty) (lambda (i) (array-ref (get mus) i)))
-;; A new `mu`, its body not yet read: its number.
-(define mu-new (->* () int)
-  (lambda ()
-    (let ((n (get nmus)))
-      (begin
-        (if (= n (array-length (get mus)))
-            (let ((bigger (the (arrayof sty rs) (make-array (* 2 n) (s-nil)))))
-              (begin (copy-stys (get mus) bigger 0) (set mus bigger)))
-            #u)
-        (set nmus (+ n 1))
-        n))))
-(define copy-stys (->* ((arrayof sty rs) (arrayof sty rs) int) unit)
-  (lambda (from to i)
-    (if (= i (array-length from))
-        #u
-        (begin (array-set! to i (array-ref from i)) (copy-stys from to (+ i 1))))))
-(define mu-set! (->* (int sty) unit) (lambda (i t) (array-set! (get mus) i t)))
+;; Of `t`, under `k` `mu`s more than it is, each variable `j` changed as
+;; `op` says, in a list of one; none if none is (what is not is shared). Op
+;; 0 raises one `k` or more out by `d`; 1 replaces `k`'s by `x` and lowers
+;; those further out, as its `mu` is gone; 2 closes one `k` or more out, by
+;; `env`'s `mu`s (closed, the innermost first); 3 finds one that is `k`.
+(define vars-map (->* (sty int int int sty stys) stys)
+  (lambda (t k op d x env)
+    (tagcase t
+      (s-var (j)
+        (cond ((< j k) nil)
+              ((= op 0) (list (s-var (+ j d))))
+              ((= op 2) (list (nth-sty env (- j k))))
+              ((= op 3) (if (= j k) (list t) nil))
+              ((> j k) (list (s-var (- j 1))))
+              ((= k 0) (list x))
+              (else (list (shift x k 0)))))
+      (s-mu (b r p) (one-var (vars-map b (+ k 1) op d x env) (lambda ((c sty)) (s-mu c r p))))
+      (s-pair (a b)
+        (let ((a2 (vars-map a k op d x env)) (b2 (vars-map b k op d x env)))
+          (if (and (null? a2) (null? b2)) nil (list (s-pair (or-same a2 a) (or-same b2 b))))))
+      (s-import (b y) (one-var (vars-map b k op d x env) (lambda ((c sty)) (s-import c y))))
+      (s-export (b y) (one-var (vars-map b k op d x env) (lambda ((c sty)) (s-export c y))))
+      (s-many (b) (one-var (vars-map b k op d x env) (lambda ((c sty)) (s-many c))))
+      (s-typed (b h) (one-var (vars-map b k op d x env) (lambda ((c sty)) (s-typed c h))))
+      (s-union (ms)
+        (let ((c (vars-map-each ms k op d x env))) (if (null? c) nil (list (s-union (car c))))))
+      (else y nil))))
+(define one-var (->* (stys (-> (sty) sty)) stys)
+  (lambda (c f) (if (null? c) nil (list (f (car c))))))
+(define or-same (->* (stys sty) sty) (lambda (c t) (if (null? c) t (car c))))
+(define vars-map-each (->* (stys int int int sty stys) (listof stys acyclic))
+  (lambda (ms k op d x env)
+    (if (null? ms)
+        nil
+        (let ((m (vars-map (car ms) k op d x env)) (r (vars-map-each (cdr ms) k op d x env)))
+          (if (and (null? m) (null? r))
+              nil
+              (list (cons (or-same m (car ms)) (if (null? r) (cdr ms) (car r)))))))))
+(define nth-sty (->* (stys int) sty)
+  (lambda (xs i) (if (= i 0) (car xs) (nth-sty (cdr xs) (- i 1)))))
+;; `t` placed under `d` `mu`s more, its variables `k` or more out raised.
+(define shift (->* (sty int int) sty) (lambda (t d k) (or-same (vars-map t k 0 d t nil) t)))
+;; `t`, under the `mu` `k` around it, `x` for its variable, that `mu` gone.
+(define subst (->* (sty int sty) sty) (lambda (t k x) (or-same (vars-map t k 1 0 x nil) t)))
+;; `mu` `t` unfolded once: its body, its variable `t` again.
+(define unfold-mu (->* (sty) sty)
+  (lambda (t) (tagcase t (s-mu (b r p) (subst b 0 t)) (else y t))))
+;; `t` closed by the `mu`s `env` around it, closed, the innermost first.
+(define closed-by (->* (sty stys) sty) (lambda (t env) (or-same (vars-map t 0 2 0 t env) t)))
+;; Whether `t` refers to a `mu` `k` or more out from it; to the one `k`.
+(define free-at? (->* (sty int) bool) (lambda (t k) (not (null? (vars-map t k 0 1 t nil)))))
+(define refers? (->* (sty int) bool) (lambda (t k) (not (null? (vars-map t k 3 0 t nil)))))
+;; `t`, under one `mu` it does not refer to, without it, in a list of one;
+;; none if it refers to it.
+(define lowered (->* (sty) stys)
+  (lambda (t) (if (refers? t 0) nil (list (subst t 0 (s-nil))))))
 ;; The trailmarks defined (`macros.rs`'s `Mark`), the last first: each name's
 ;; number, 0 where a macro of the name hides one; else the standard ones,
 ;; `else` 1 and `=>` 2, which a file sees too.
@@ -111,44 +148,6 @@
           ((symbol=? n (extract (car ms) 1)) (extract (car ms) 2))
           (else (mark-in n (cdr ms))))))
 
-;;; ------------------------------------------------------------ names
-
-;; Whether `name` is a form's, `#%fx`, `#%toplevel` or `define-syntax`: never
-;; bound, so never a binder or a variable.
-(define reserved? (->* (string) bool)
-  (lambda (name) (reserved-sym? (string->symbol name))))
-(define reserved-sym? (->* (symbol) bool)
-  (lambda (n)
-    (or (symbol=? n '|#%fx|) (symbol=? n '|#%toplevel|) (symbol=? n 'define-syntax)
-        (symbol=? n 'define-syntax-rec)
-        (words-have? n (with kernel reserved-words)))))
-;; Whether `name` is one of words `ws`: compared as symbols, no word's name
-;; copied to a string.
-(define word-in? (->* (string datum) bool)
-  (lambda (name ws) (words-have? (string->symbol name) ws)))
-(define words-have? (->* (symbol datum) bool)
-  (lambda (n ws)
-    (and (pair? ws)
-         (or (and (symbol? (car ws)) (symbol=? n (car ws))) (words-have? n (cdr ws))))))
-;; Whether `name` is a word of descriptions (the kernel's): one read
-;; anywhere (`pure`, `heap`, a region constant `@r`, or a name already
-;; `#%`'s), or, `head`, one a list's head may be (`subr`, `listof`).
-(define desc-word? (->* (string bool) bool)
-  (lambda (name head)
-    (or (and (> (string-length name) 0) (char=? (string-ref name 0) #\@))
-        (and (> (string-length name) 1) (string=? (substring name 0 2) "#%"))
-        (word-in? name (with kernel description-words))
-        (and head (word-in? name (with kernel description-heads))))))
-;; Whether `name` is a type form's head (the kernel's `type-forms`), whose
-;; template makes a description.
-(define type-form? (->* (string) bool)
-  (lambda (name) (word-in? name (with kernel type-forms))))
-;; Whether `s` is a name, and a reserved one.
-(define reserved-syn? (->* (syn) bool)
-  (lambda (s) (and (syn-symbol? s) (reserved-sym? (syn-symbol s)))))
-(define name-in? (->* (symbol names) bool)
-  (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (name-in? n (cdr ns))))))
-
 ;; Whether typed hole `h` (none or one) has its effect written `pure`.
 (define pure-hole? (->* ((listof hole acyclic)) bool)
   (lambda (h)
@@ -161,97 +160,33 @@
   (lambda (t)
     (let ((k (kind-of t)))
       (not (or (= k 1) (= k 2) (= k 5) (= k 3) (= k 4) (= k 12) (= k 13))))))
-;; Whether `i` is one of `is`.
-(define int-in? (->* (int (listof int acyclic)) bool)
-  (lambda (i is) (and (not (null? is)) (or (= i (car is)) (int-in? i (cdr is))))))
 
 ;;; ------------------------------------------------------------ syntax
 
-;; Whether `s` is `()`.
-(define syn-nil? (->* (syn) bool)
-  (lambda (s)
-    (tagcase s
-      (atom (d a b x) (null? d))
-      (lst (items d a b x) (null? items))
-      (else y #f))))
-;; Whether `s` is a keyword, `#:name`.
-(define syn-keyword? (->* (syn) bool)
-  (lambda (s) (tagcase s (atom (d a b x) (keyword? d)) (else y #f))))
-;; Whether `s` is an integer, as a program's label by position may be.
-(define syn-number? (->* (syn) bool)
-  (lambda (s) (tagcase s (atom (d a b x) (datum-int? d)) (else y #f))))
-;; A list's car and cdr, the cdr a list of the rest (or the tail), in a list
-;; of two; none if `s` is no pair.
-(define split (->* (syn) syns-a)
-  (lambda (s)
-    (tagcase s
-      (lst (items d a b x)
-        (if (null? items)
-            nil
-            (list (car items)
-                  (if (null? (cdr items))
-                      (atom '() a b x)
-                      (lst (cdr items) (if (pair? d) (cdr d) d) a b x)))))
-      (dotted (items tail d a b x)
-        (list (car items)
-              (if (null? (cdr items))
-                  tail
-                  (dotted (cdr items) tail (if (pair? d) (cdr d) d) a b x))))
-      (else y nil))))
-;; `d`, a datum, as syntax at no place.
-(define datum->syn (->* (datum) syn)
-  (lambda (d)
-    (if (pair? d)
-        (let ((parts (datum-parts d)))
-          (if (null? (cdr parts))
-              (lst (car parts) d 0 0 0)
-              (dotted (car parts) (car (car (cdr parts))) d 0 0 0)))
-        (atom d 0 0 0))))
-;; A pair's elements as syntax, and its tail if it is not `()`, in a list.
-(define datum-parts (->* (datum) (listof syns-a acyclic))
-  (lambda (d)
-    (letrec ((go (subr (maxeff (read @globals) spin) (datum) syns-a)
-               (lambda (x) (if (pair? x) (cons (datum->syn (car x)) (go (cdr x))) nil)))
-             (end (subr (maxeff (read @globals) spin) (datum) datum)
-               (lambda (x) (if (pair? x) (end (cdr x)) x))))
-      (let ((e (end d)))
-        (if (null? e)
-            (list (go d))
-            (list (go d) (the syns-a (list (atom e 0 0 0)))))))))
-
-;; `s` written as the Rust front end's `write_syntax` writes it, for what
-;; is said of it.
-(define show-syn (->* (syn) string)
-  (lambda (s)
-    (tagcase s
-      (lst (items d a b x) (if (null? items) "()" (string-append "(" (show-each items) ")")))
-      (dotted (items tail d a b x)
-        (string-append "(" (show-each items) " . " (show-syn tail) ")"))
-      (vec (items d a b x) (string-append "#(" (show-each items) ")"))
-      (atom (d a b x) (show-datum d)))))
-(define show-each (->* (syns-a) string)
-  (lambda (xs)
-    (cond ((null? xs) "")
-          ((null? (cdr xs)) (show-syn (car xs)))
-          (else (string-append (show-syn (car xs)) " " (show-each (cdr xs)))))))
-(define show-datum (->* (datum) string)
-  (lambda (d)
-    (cond ((null? d) "()")
-          ((symbol? d) (symbol->string d))
-          ((keyword? d) (string-append "#:" (symbol->string (keyword->symbol d))))
-          ((string? d) (string-append "\"" d "\""))
-          ((char? d) (string-append "#\\" (char->string d)))
-          ((int? d) (int->string d))
-          ((f64? d) (f64->string d))
-          ((bool? d) (if d "#t" "#f"))
-          (else "…"))))
+(define syntax-module ((proj (load-module "fx26:macros-syntax.fx") rs re rm rc rp)))
+(define syn-nil? (with syntax-module syn-nil?))
+(define syn-keyword? (with syntax-module syn-keyword?))
+(define syn-number? (with syntax-module syn-number?))
+(define split (with syntax-module split))
+(define show-syn (with syntax-module show-syn))
+(define datum->syn (with syntax-module datum->syn))
+(define reserved? (with syntax-module reserved?))
+(define reserved-sym? (with syntax-module reserved-sym?))
+(define word-in? (with syntax-module word-in?))
+(define words-have? (with syntax-module words-have?))
+(define desc-word? (with syntax-module desc-word?))
+(define type-form? (with syntax-module type-form?))
+(define reserved-syn? (with syntax-module reserved-syn?))
+(define name-in? (with syntax-module name-in?))
+(define int-in? (with syntax-module int-in?))
 
 ;;; ------------------------------------------------------------ reading
 
 ;; Syntax type `s`, read: `named`'s names (the kernel's abbreviations), and
-;; the `mu` variables in scope, innermost first.
+;; the `mu` variables in scope, innermost first, each `#f` that of a list by
+;; ellipsis, which no name refers to.
 (define-type named (listof (tupleof symbol sty) acyclic))
-(define-type mu-scope (listof (tupleof symbol int) acyclic))
+(define-type mu-scope (listof (tupleof symbol bool) acyclic))
 (define read-sty (->* (fails syn named mu-scope) sty)
   (lambda (fail s named scope)
     (cond
@@ -266,7 +201,7 @@
            ;; `(σ … σ ...)`: a list ending in any number of the last `σ`.
            ((let ((items (proper-items s)))
               (and (>= (len items) 2) (ellipsis? (nth items (- (len items) 1)))))
-            (read-seq-list fail (proper-items s) named scope))
+            (read-seq-list fail s (proper-items s) named scope))
            ((or (string=? head "import") (string=? head "export"))
             (let ((args (proper-items s)))
               (if (= (len args) 3)
@@ -285,13 +220,11 @@
            ((string=? head "mu") (read-mu fail s named scope))
            ((or (string=? head "union") (string=? head "oneof"))
             (let ((ms (read-each fail (cdr (proper-items s)) named scope)))
-              (begin (if (any-overlap? ms)
-                         (fail-at fail (string-append "a syntax type: a `oneof`'s members must be "
-                                                      "told apart by their shapes in the source "
-                                                      "(an `expr` may be anything)")
-                                  s)
-                         #u)
-                     (s-union ms))))
+              ;; Members that refer to a `mu` around them, checked when it
+              ;; is read whole (`mu-read`).
+              (begin
+                (if (and (not (any-free? ms)) (any-overlap? ms)) (fail-at fail oneof-apart s) #u)
+                (s-union ms))))
            ;; `(expr #:type T #:effect E)`, `(bvar #:type T)`: a list whose
            ;; second is a keyword, which no syntax type is.
            ((and (or (string=? head "expr") (string=? head "bvar") (string=? head "lambda"))
@@ -329,37 +262,69 @@
                     (else (s-mark (syn-symbol n) (mark-in (syn-symbol n) (get marks)))))))
            (else (read-pair fail s parts named scope))))))))
 ;; The items of a list type ending in `σ ...`: the last `σ` repeated
-;; (`macros.rs`'s `seq`), after the ones before it, each once.
-(define read-seq-list (->* (fails syns-a named mu-scope) sty)
-  (lambda (fail items named scope)
+;; (`macros.rs`'s `seq`), read under its `mu`, after the ones before it,
+;; each once; `s` the whole.
+(define read-seq-list (->* (fails syn syns-a named mu-scope) sty)
+  (lambda (fail s items named scope)
     (if (null? (cdr (cdr items)))
-        (seq-type (read-sty fail (car items) named scope))
+        (mu-read fail (seq-type (read-sty fail (car items) named
+                                          (cons (tuple (string->symbol "") #f) scope)))
+                 s scope)
         (let ((first (read-sty fail (car items) named scope)))
-          (s-pair first (read-seq-list fail (cdr items) named scope))))))
+          (s-pair first (read-seq-list fail s (cdr items) named scope))))))
+;; `mu` `t`, read at `s` under `scope`: if it is closed, each `oneof` in it
+;; whose members refer to a `mu` around them, which its reading left, its
+;; members closed, told apart by their shapes (`macros.rs`'s `mu_read`).
+(define mu-read (->* (fails sty syn mu-scope) sty)
+  (lambda (fail t s scope)
+    (begin (if (and (null? scope) (not (oneofs-apart? t nil))) (fail-at fail oneof-apart s) #u)
+           t)))
+(define oneof-apart string
+  (string-append "a syntax type: a `oneof`'s members must be told apart by their shapes in the "
+                 "source (an `expr` may be anything)"))
+;; Whether, of `t` under the `mu`s `env` (closed, the innermost first),
+;; each `oneof` whose members refer to one of them has them apart.
+(define oneofs-apart? (->* (sty stys) bool)
+  (lambda (t env)
+    (tagcase t
+      (s-mu (b r p) (oneofs-apart? b (cons (closed-by t env) env)))
+      (s-union (ms)
+        (and (or (not (any-free? ms)) (not (any-overlap? (closed-each ms env))))
+             (all-apart? ms env)))
+      (s-pair (a d) (and (oneofs-apart? a env) (oneofs-apart? d env)))
+      (s-import (b x) (oneofs-apart? b env)) (s-export (b x) (oneofs-apart? b env))
+      (s-many (b) (oneofs-apart? b env)) (s-typed (b h) (oneofs-apart? b env))
+      (else y #t))))
+(define all-apart? (->* (stys stys) bool)
+  (lambda (ms env) (or (null? ms) (and (oneofs-apart? (car ms) env) (all-apart? (cdr ms) env)))))
+(define any-free? (->* (stys) bool)
+  (lambda (ms) (and (not (null? ms)) (or (free-at? (car ms) 0) (any-free? (cdr ms))))))
+(define closed-each (->* (stys stys) stys)
+  (lambda (ms env) (if (null? ms) nil (cons (closed-by (car ms) env) (closed-each (cdr ms) env)))))
 ;; `(elem ...)`: `(mu l (union () (elem . l)))`, and if `elem` exports,
 ;; each element's export together, as a `let`'s bindings do; a binder
 ;; alone, `bvar` or `dvar`, exports itself.
 (define seq-type (->* (sty) sty)
   (lambda (elem0)
-    (let* ((elem (tagcase elem0
-                   (s-bvar () (s-export elem0 (bind-rib (list (tuple (the addr nil) 1)))))
-                   (s-dvar () (s-export elem0 (bind-rib (list (tuple (the addr nil) 4)))))
-                   (else y elem0)))
-           (id (mu-new)))
-      (begin (mu-set! id (s-union (seq-body elem id))) (s-mu id)))))
-;; List `mu` `id`'s members: `()`, and the pair of `elem` and the list; an element exporting a
-;; rib, the pair its entries from the pair's root, `(A …)`, then the rest's, `(D rib)`: an
-;; element written out is in the pair's region (`macros.rs`'s `seq_members`).
-(define seq-body (->* (sty int) stys)
-  (lambda (elem id)
+    (let ((elem (tagcase elem0
+                  (s-bvar () (s-export elem0 (bind-rib (list (tuple (the addr nil) 1)))))
+                  (s-dvar () (s-export elem0 (bind-rib (list (tuple (the addr nil) 4)))))
+                  (else y elem0))))
+      (s-mu (s-union (seq-body elem)) -1 -1))))
+;; A list's `mu`'s body, `elem` under it: `()`, and the pair of `elem` and the list; an
+;; element exporting a rib, the pair its entries from the pair's root, `(A …)`, then the
+;; rest's, `(D rib)`: an element written out is in the pair's region (`macros.rs`'s
+;; `seq_members`).
+(define seq-body (->* (sty) stys)
+  (lambda (elem)
     (let ((none (s-export (s-nil) (bind-rib nil))) (d (tuple (the addr (list #f)) 2)))
       (tagcase elem
         (s-export (e bd)
           (tagcase bd
-            (bind-rib (es) (list none (s-export (s-pair e (s-mu id)) (bind-rib (cars-at es d)))))
-            (else y (list none (s-export (s-pair elem (s-mu id))
+            (bind-rib (es) (list none (s-export (s-pair e (s-var 0)) (bind-rib (cars-at es d)))))
+            (else y (list none (s-export (s-pair elem (s-var 0))
                                          (bind-rib (list (tuple (the addr (list #t)) 2) d)))))))
-        (else y (list (s-nil) (s-pair elem (s-mu id))))))))
+        (else y (list (s-nil) (s-pair elem (s-var 0))))))))
 (define cars-at (->* (entries (tupleof addr int)) entries)
   (lambda (es d)
     (if (null? es) (list d)
@@ -376,10 +341,15 @@
     (let ((caged (cage-seq-elem t)))
       (if (null? caged)
           (tagcase t
-            (s-mu (id)
-              (tagcase (mu-body id) (s-union (ms) (seq-members ms id nil #f)) (else y nil)))
+            (s-mu (b r p)
+              (tagcase b (s-union (ms) (out-of-mu (seq-members ms nil #f) t)) (else y nil)))
             (else y nil))
           caged))))
+;; Elements `es`, found under list `mu` `t`, in a list of one, outside it.
+(define out-of-mu (->* (stys sty) stys)
+  (lambda (es t) (if (null? es) nil (list (subst (car es) 0 t)))))
+;; Whether `r`, under a list's `mu`, is the list.
+(define itself? (->* (sty) bool) (lambda (r) (tagcase r (s-var (j) (= j 0)) (else y #f))))
 (define seq-cage? (->* (sty) bool)
   (lambda (t)
     (or (not (null? (cage-seq-elem t))) (and (seq-scoped? t) (not (null? (seq-elem t)))))))
@@ -391,32 +361,33 @@
 (define cage-seq-elem (->* (sty) stys)
   (lambda (t)
     (tagcase t
-      (s-mu (id) (tagcase (mu-body id) (s-union (ms) (cage-members ms id nil #f)) (else y nil)))
+      (s-mu (b r p)
+        (tagcase b (s-union (ms) (out-of-mu (cage-members ms nil #f) t)) (else y nil)))
       (else y nil))))
-(define cage-members (->* (stys int stys bool) stys)
-  (lambda (ms id es none)
+(define cage-members (->* (stys stys bool) stys)
+  (lambda (ms es none)
     (if (null? ms)
         (if (and none (not (null? es)) (null? (cdr es))) es nil)
         (tagcase (car ms)
           (s-export (core b)
             (tagcase b
               (bind-cage (rings)
-                (cond ((and (null? rings) (= (kind-of core) 6)) (cage-members (cdr ms) id es #t))
+                (cond ((and (null? rings) (= (kind-of core) 6)) (cage-members (cdr ms) es #t))
                       ((null? rings) nil)
                       (else
-                       (let ((e (cage-pair core rings id)))
-                         (if (null? e) nil (cage-members (cdr ms) id (cons (car e) es) none))))))
+                       (let ((e (cage-pair core rings)))
+                         (if (null? e) nil (cage-members (cdr ms) (cons (car e) es) none))))))
               (else y nil)))
           (else y nil)))))
-;; Pair type `core` of a ribcage's list `id`, which exports `rings`: its
+;; Pair type `core` of a ribcage's list, under its `mu`, which exports `rings`: its
 ;; element, with what it exports, in a list of one; none if it is not one.
-(define cage-pair (->* (sty rings int) stys)
-  (lambda (core rings id)
+(define cage-pair (->* (sty rings) stys)
+  (lambda (core rings)
     (tagcase core
       (s-pair (a d)
         (tagcase d
           (s-import (r inner)
-            (if (and (tagcase r (s-mu (j) (= j id)) (else y #f)) (not (null? (cdr rings)))
+            (if (and (itself? r) (not (null? (cdr rings)))
                      (null? (cdr (cdr rings)))
                      (tagcase (car rings) (ring-at (x) (addr=? x (list #f))) (else y #f)))
                 (let ((own (car (cdr rings))))
@@ -444,8 +415,8 @@
           (else nil))))
 ;; Of members `ms`, from the first: the elements found so far `es`, the last
 ;; first, and whether `()` is one of them.
-(define seq-members (->* (stys int stys bool) stys)
-  (lambda (ms id es none)
+(define seq-members (->* (stys stys bool) stys)
+  (lambda (ms es none)
     (if (null? ms)
         (cond ((or (null? es) (not none)) nil)
               ((null? (cdr es)) es)
@@ -456,23 +427,23 @@
                       (s-import (b x) nil)
                       (else y (list (the entries nil))))))
           (cond ((null? own) nil)
-                ((= (kind-of core) 6) (seq-members (cdr ms) id es #t))
+                ((= (kind-of core) 6) (seq-members (cdr ms) es #t))
                 (else
                  (tagcase core
                    (s-pair (a d)
-                     (if (seq-rest? m d id)
-                         (seq-members (cdr ms) id (cons (with-own a (car own)) es) none)
+                     (if (seq-rest? m d)
+                         (seq-members (cdr ms) (cons (with-own a (car own)) es) none)
                          nil))
                    (else y nil))))))))
 ;; Whether `d`, member `m`'s pair's rest, is list `id` itself, perhaps in
 ;; the scope of what the pair's element binds (a `lambda`'s parameters,
 ;; each in the later ones' types: `seq-scoped?`).
-(define seq-rest? (->* (sty sty int) bool)
-  (lambda (m d id)
+(define seq-rest? (->* (sty sty) bool)
+  (lambda (m d)
     (tagcase d
-      (s-mu (j) (= j id))
+      (s-var (j) (= j 0))
       (s-import (r b)
-        (and (tagcase r (s-mu (j) (= j id)) (else y #f))
+        (and (itself? r)
              (tagcase b
                (bind-rib (fs)
                  (tagcase m
@@ -493,7 +464,7 @@
 (define seq-scoped? (->* (sty) bool)
   (lambda (t)
     (tagcase t
-      (s-mu (id) (tagcase (mu-body id) (s-union (ms) (rest-imported? ms)) (else y #f)))
+      (s-mu (b r p) (tagcase b (s-union (ms) (rest-imported? ms)) (else y #f)))
       (else y #f))))
 (define rest-imported? (->* (stys) bool)
   (lambda (ms)
@@ -550,7 +521,7 @@
     (let ((n (syn-symbol s)))
       (let ((mu (scope-of n scope)))
         (if (>= mu 0)
-            (s-mu mu)
+            (s-var mu)
             (let ((t (named-of n named)))
               (if (null? t)
                   (case n
@@ -578,8 +549,8 @@
 (define scope-of (->* (symbol mu-scope) int)
   (lambda (n scope)
     (cond ((null? scope) -1)
-          ((symbol=? n (extract (car scope) 1)) (extract (car scope) 2))
-          (else (scope-of n (cdr scope))))))
+          ((and (extract (car scope) 2) (symbol=? n (extract (car scope) 1))) 0)
+          (else (let ((i (scope-of n (cdr scope)))) (if (< i 0) i (+ i 1)))))))
 (define named-of (->* (symbol named) stys)
   (lambda (n named)
     (cond ((null? named) nil)
@@ -590,18 +561,16 @@
   (lambda (fail s named scope)
     (let ((args (proper-items s)))
       (if (and (= (len args) 3) (syn-symbol? (nth args 1)))
-          (let* ((id (mu-new))
-                 (body (read-sty fail (nth args 2) named
-                                 (cons (tuple (syn-symbol (nth args 1)) id) scope))))
+          (let ((body (read-sty fail (nth args 2) named
+                                (cons (tuple (syn-symbol (nth args 1)) #t) scope))))
             (begin
-              (if (guarded? body id)
+              (if (guarded? body 0)
                   #u
                   (fail-at fail (string-append "a syntax type: a `mu`'s variable is used where no "
                                                "pair is around it (Herman's types are "
                                                "contractive)")
                            s))
-              (mu-set! id body)
-              (s-mu id)))
+              (mu-read fail (s-mu body -1 -1) s scope)))
           (begin (fail-at fail "a syntax type: `(mu variable type)`" s) (s-nil))))))
 ;; Whether `s` is a proper list of one or more.
 (define proper? (->* (syn) bool)
@@ -809,13 +778,15 @@
     (tagcase t
       (s-import (b x) (unfold b)) (s-export (b x) (unfold b)) (s-many (b) (unfold b))
       (s-typed (b h) (unfold b))
-      (s-mu (id) (unfold (mu-body id)))
+      (s-mu (b r p) (unfold (unfold-mu t)))
       (else y t))))
-;; Whether `t` uses `mu` `id`'s variable only under a pair.
+;; Whether `t` uses the variable of the `mu` `id` around it only under a
+;; pair, a `mu` inside it looked into too: none unfolds to itself.
 (define guarded? (->* (sty int) bool)
   (lambda (t id)
     (tagcase t
-      (s-mu (j) (not (= j id)))
+      (s-var (j) (not (= j id)))
+      (s-mu (b r p) (guarded? b (+ id 1)))
       (s-import (b x) (guarded? b id)) (s-export (b x) (guarded? b id)) (s-many (b) (guarded? b id))
       (s-typed (b h) (guarded? b id))
       (s-union (ms) (all-guarded? ms id))
@@ -899,7 +870,7 @@
     (and (not (null? ms))
          (or (any-overlaps-of? (car ms) (cdr ms) 6) (any-overlap? (cdr ms))))))
 
-;; Whether two types are the same, structurally (a `mu` by its number).
+;; Whether two types are the same, structurally.
 (define sty=? (->* (sty sty) bool)
   (lambda (a b)
     (tagcase a
@@ -908,7 +879,8 @@
       (s-pair (x y) (tagcase b (s-pair (p q) (and (sty=? x p) (sty=? y q))) (else z #f)))
       (s-import (x p) (tagcase b (s-import (y q) (and (sty=? x y) (bind=? p q))) (else z #f)))
       (s-export (x p) (tagcase b (s-export (y q) (and (sty=? x y) (bind=? p q))) (else z #f)))
-      (s-mu (i) (tagcase b (s-mu (j) (= i j)) (else y #f)))
+      (s-mu (x r p) (tagcase b (s-mu (y q o) (and (= r q) (= p o) (sty=? x y))) (else z #f)))
+      (s-var (i) (tagcase b (s-var (j) (= i j)) (else y #f)))
       (s-many (x) (tagcase b (s-many (y) (sty=? x y)) (else z #f)))
       (s-typed (x h) (tagcase b (s-typed (y g) (sty=? x y)) (else z #f)))
       (s-union (ms) (tagcase b (s-union (ns) (all-sty=? ms ns)) (else y #f)))
@@ -959,26 +931,28 @@
         (and (not (null? b)) (eq? (car a) (car b)) (addr=? (cdr a) (cdr b))))))
 
 ;; Whether syntax of type `a` is all of type `b`, binding structure alike:
-;; coinductive, as FX-26's recursive types are, each pair compared assumed
-;; (`assumed`) while it is, by structure.
+;; coinductive, as FX-26's recursive types are, each pair a `mu` is of
+;; assumed (`assumed`) while it is compared, by structure: the types a `mu`
+;; unfolds to are finitely many, so the pairs are (`macros.rs`'s `sub`).
 (define-type assumed (listof (tupleof sty sty) acyclic))
 (define sub? (->* (sty sty assumed) bool)
   (lambda (a b assumed)
-    (if (or (sty=? a b) (assumed? a b assumed))
+    (if (or (sty=? a b) (and (or (mu? a) (mu? b)) (assumed? a b assumed)))
         #t
-        (let ((more (the assumed (cons (tuple a b) assumed))))
+        (let ((more (if (or (mu? a) (mu? b)) (the assumed (cons (tuple a b) assumed)) assumed)))
           (tagcase a
             (s-many (x) (sub? x b more))
             (s-typed (x h) (sub? x b more))
-            (s-mu (i) (sub? (mu-body i) b more))
+            (s-mu (x r p) (sub? (unfold-mu a) b more))
             (s-union (ms) (all-sub? ms b more))
             (else y
               (tagcase b
                 (s-many (x) (sub? a x more))
                 (s-typed (x h) (sub? a x more))
-                (s-mu (j) (sub? a (mu-body j) more))
+                (s-mu (x r p) (sub? a (unfold-mu b) more))
                 (s-union (ms) (any-sub? a ms more))
                 (else z (sub-base? a b more)))))))))
+(define mu? (->* (sty) bool) (lambda (t) (tagcase t (s-mu (b r p) #t) (else y #f))))
 (define sub-base? (->* (sty sty assumed) bool)
   (lambda (a b more)
     (tagcase a

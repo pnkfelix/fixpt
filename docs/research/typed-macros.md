@@ -2747,8 +2747,8 @@ expander keeps the same in `Macros`):
   procedural transformers (`by-state`, the transformers added now: a
   state read again had a later form's transformer of the same name), the
   hashes seen; the shapes (`shapes-by-state`).
-- *Carried, only growing, keys never reused*: the `mu` table and the
-  `(macro …)` binders' signatures (by index, from stored signatures), the
+- *Carried, only growing, keys never reused*: the `mu` table (gone
+  since: "`mu`s as values", below) and the `(macro …)` binders' signatures (by index, from stored signatures), the
   trailmarks' numbers (identity alone), the expansions and their numbers,
   the source keys, the trusted sources, the definition environments by
   expansion, the aliases defined. Safe for a session read again; for a
@@ -2767,3 +2767,69 @@ defined already": `repl_macros.rs`, `a_files_own_made_macro_is_not_the_loaders`)
 and the flags of one walk, one template's check and one fact's shape
 (`program-walk`, `heads-on`, `checking`, `open`), which a failure caught
 in a module file, or ending a session's entry, could leave set.
+
+## Decided: `mu`s as values, no table (2026-11-16)
+
+A recursive syntax type was `Mu(n)`, `n` an index into one program-wide
+table of bodies (`Macros::mus`; FX-26's `mus` array), each signature read
+or inferred adding to it: a macro's signature depended on what was read
+before it, defining it again the same way gave other numbers, and a
+file's macros moved the table in and out (`define_file`). For a cache of a
+form's expansion (TODO §290) the user chose, of three ways (a table keyed
+by form; one per macro; none), none: a `mu` is a value.
+
+**The representation.** `Mu(body, tag)`, its variable `Var(k)` by how many
+`mu`s are between it and its own, 0 the innermost (de Bruijn's numbering;
+FX-26's `(s-mu body round part)`, `(s-var k)`). Two types are one when
+their structures are (derived equality; `sty=?`), so a signature is a
+value of what was written alone: read after others, or again, it is the
+one read first (`infer::tests::a_signature_is_of_what_is_written_alone`).
+A list by ellipsis, `(σ ...)`, is a `mu` of its own, which no name refers
+to: `σ` is read under it (a scope entry of no name), so its variables
+count it.
+
+**Unfolding** is substitution: `mu` `t` unfolded is its body with `t` for
+its variable and those further out lowered (`unfold_mu`, `subst`; FX-26's
+`unfold-mu`, `vars-map`). What has no variable that changes is shared, not
+copied, so an unfolding rebuilds only the paths to its variables. A
+signature is closed, and every walk into a `mu` (alignment, fitting,
+overlap, the element of a list, subtyping) unfolds it, so each type a walk
+reaches is closed too; what looks at a body without unfolding it (whether
+the variable is guarded, whether it binds nothing, how it is shown) keeps
+count of the `mu`s around instead.
+
+**Subtyping** stays coinductive: each pair of which one is a `mu` is
+assumed while it is compared, now by structure (it was by pointer, the
+table's bodies one object each). An unfolding makes new objects, but the
+types a closed `mu` unfolds to are finitely many (Brandt and Henglein), so
+the assumed pairs are, and the comparison ends.
+
+**Inference** made a `mu` for each part it had to refer to (a list by
+ellipsis, a `union`, a part not known yet) and referred to it by number,
+from anywhere: a part's type could name another part's `mu` that was not
+around it. Now a part refers to a `mu` around it by its variable, and to
+one that is not by writing it there whole (`part_ty`, `mu_ty`; FX-26's
+alike): each reference goes through a part with a `mu`, so the writing
+ends. Where a template places a pattern variable, inference asks of which
+part its type is (`solve`'s `classify`): a `mu` inference made carries its
+part and the round, its *tag*. A signature read has none, and the one
+inferred is shown, and the text read back, so no tag outlives its round.
+
+**Found doing it, and fixed** (both front ends):
+- A `oneof`'s members were told apart as they were read, a `mu` around
+  them taken, while its body was read, for `()` (the table's entry before
+  it was filled): `(mu es (union (expr) (expr . es)))` was refused, `es`
+  taken for `()`, and `(mu es (union () (expr . es) (expr expr . es)))`
+  let through, though `(expr . es)` and `(expr expr . es)` may be the same
+  syntax. Now members that refer to a `mu` around them are told apart
+  once the outermost one is read whole, each closed by the `mu`s around it
+  (`mu_read`, `oneofs_apart`; FX-26's `mu-read`, `oneofs-apart?`), at that
+  `mu`'s place (`macros/oneof-under-mu.fx`, `oneof-under-mu-overlap.fx`).
+- Whether a `mu`'s variable is under a pair looked at its body alone, not
+  into a `mu` in it: `(mu a (mu b a))`, which unfolds to itself and never
+  to syntax, was let through. Now `guarded` looks into each `mu` in the
+  body, counting it (`macros/mu-nested-unguarded.fx`).
+
+FX-26's `macros-types.fx` gave its syntax helpers and names
+(`syn-nil?`, `split`, `show-syn`, `reserved?`, …) to a file of their own,
+`macros-syntax.fx`, which it loads and re-exports, for room.

@@ -547,7 +547,7 @@ impl Macros {
         let mut shape_was = String::new();
         let lits: Vec<&[Sym]> = us.iter().map(|u| &u.lits[..]).collect();
         let of: Vec<usize> = clauses.iter().map(|c| c.0).collect();
-        for _ in 0..16 {
+        for round in 0..16 {
             let parts = {
                 let cx = Cx { lits: lits.clone(), of: of.clone(), pkinds: &sol.pkinds, sticky: &sticky, interner };
                 let mut ps = Parts::default();
@@ -566,7 +566,7 @@ impl Macros {
                 sol = Sol { pkinds, ..Sol::default() };
                 shape_was = shape;
             }
-            let (tys, mu_parts) = self.build(&parts, &sol);
+            let tys = self.build(&parts, &sol, round);
             let shown: Vec<Syn> = tys.iter().zip(us).map(|(t, u)| self.shown_sty(t, u.span, interner, &mut Vec::new())).collect();
             let strings: Vec<String> = shown.iter().map(|s| s.written(interner)).collect();
             if last.as_ref().is_some_and(|(l, _)| *l == strings) {
@@ -590,7 +590,7 @@ impl Macros {
                     }
                 }
             }
-            sol = self.solve(&parts, &placed, &made, &sol, &mu_parts, makes, &of);
+            sol = self.solve(&parts, &placed, &made, &sol, round, makes, &of);
             sticky.extend(sol.sticky.iter().copied());
             last = Some((strings, shown));
         }
@@ -658,55 +658,74 @@ impl Macros {
     }
 
     /// The signature so far, of each macro, from `sol`: its syntax types,
-    /// and each `mu` made for a list by ellipsis, a `union`, or a part of a
-    /// syntax type not known yet, by its part.
-    fn build(&mut self, parts: &Parts, sol: &Sol) -> (Vec<Rc<STy>>, HashMap<usize, usize>) {
-        let mut mu_of = HashMap::default();
-        for (p, part) in parts.parts.iter().enumerate() {
-            if matches!(part.shape, Shape::Seq(_) | Shape::Union(_)) || (part.shape == Shape::Leaf && !sol.kinds.contains_key(&p)) {
-                mu_of.insert(p, self.mus.len());
-                self.mus.push(Rc::new(STy::Nil));
-            }
-        }
+    /// each `mu` (`has_mu`) tagged with round `round` and its part
+    /// (`STy::Mu`), so that where a template places it says of what part it
+    /// is (`solve`).
+    fn build(&self, parts: &Parts, sol: &Sol, round: usize) -> Vec<Rc<STy>> {
         let mut tys = Vec::new();
         for (mi, &r) in parts.roots.iter().enumerate() {
-            let t = self.part_ty(parts, sol, r, &mu_of);
+            let t = self.part_ty(parts, sol, r, round, &mut Vec::new());
             tys.push(match sol.root_exports.get(&mi) {
                 Some(b) => Rc::new(STy::Export(t, b.clone())),
                 None => t,
             });
         }
-        let mu_parts = mu_of.into_iter().map(|(p, id)| (id, p)).collect();
-        (tys, mu_parts)
+        tys
     }
 
-    fn part_ty(&mut self, parts: &Parts, sol: &Sol, p: usize, mu_of: &HashMap<usize, usize>) -> Rc<STy> {
-        let base = match parts.parts[p].shape.clone() {
-            Shape::Nil => Rc::new(STy::Nil),
-            Shape::Lit(n) => Rc::new(STy::Literal(n)),
-            Shape::Pair(a, d) => Rc::new(STy::Pair(self.part_ty(parts, sol, a, mu_of), self.part_ty(parts, sol, d, mu_of))),
-            Shape::Leaf => match sol.kinds.get(&p) {
+    /// Whether part `p` is a `mu` of its own: a list by ellipsis, a `union`,
+    /// or a part of a syntax type not known yet.
+    fn has_mu(parts: &Parts, sol: &Sol, p: usize) -> bool {
+        matches!(parts.parts[p].shape, Shape::Seq(_) | Shape::Union(_)) || (parts.parts[p].shape == Shape::Leaf && !sol.kinds.contains_key(&p))
+    }
+
+    /// Part `p`'s type, under the `mu`s of parts `around`, the innermost
+    /// last: one of them referred to by its variable, another part's `mu`
+    /// written where it is referred to.
+    fn part_ty(&self, parts: &Parts, sol: &Sol, p: usize, round: usize, around: &mut Vec<usize>) -> Rc<STy> {
+        let base = if Self::has_mu(parts, sol, p) { self.mu_ty(parts, sol, p, round, around) } else {
+            match parts.parts[p].shape.clone() {
+                Shape::Nil => Rc::new(STy::Nil),
+                Shape::Lit(n) => Rc::new(STy::Literal(n)),
+                Shape::Pair(a, d) => Rc::new(STy::Pair(self.part_ty(parts, sol, a, round, around), self.part_ty(parts, sol, d, round, around))),
+                Shape::Leaf => match sol.kinds.get(&p) {
                     Some(K::Ty(t)) => match &**t {
-                        STy::Pair(..) | STy::Mu(_) | STy::Union(_) | STy::Import(..) | STy::Export(..) | STy::Many(_) | STy::Typed(..) if open(t) => {
-                            let id = self.mus.len();
-                            self.mus.push(t.clone());
-                            Rc::new(STy::Mu(id))
-                        }
-                        STy::Pair(..) | STy::Mu(_) | STy::Union(_) | STy::Import(..) | STy::Export(..) | STy::Many(_) | STy::Typed(..) => t.clone(),
+                        // Its annotations' addresses from its own root.
+                        STy::Pair(..) | STy::Mu(..) | STy::Union(_) | STy::Import(..) | STy::Export(..) | STy::Many(_) | STy::Typed(..) if open(t) => Rc::new(STy::Mu(t.clone(), None)),
+                        STy::Pair(..) | STy::Mu(..) | STy::Union(_) | STy::Import(..) | STy::Export(..) | STy::Many(_) | STy::Typed(..) => t.clone(),
                         simple => Rc::new(simple.clone()),
                     },
-                Some(K::Ref(q)) => Rc::new(STy::Mu(mu_of[q])),
-                // Not known: anything, by a `mu` of its own, which says
-                // where it is placed is this part.
-                None => {
-                    let id = mu_of[&p];
-                    self.mus[id] = Rc::new(STy::Data);
-                    Rc::new(STy::Mu(id))
-                }
-            },
+                    Some(K::Ref(q)) => match around.iter().rposition(|a| a == q) {
+                        Some(i) => Rc::new(STy::Var(around.len() - 1 - i)),
+                        None => self.mu_ty(parts, sol, *q, round, around),
+                    },
+                    None => unreachable!("a `mu` of its own"),
+                },
+                Shape::Seq(_) | Shape::Union(_) => unreachable!("a `mu` of its own"),
+            }
+        };
+        let t = if sol.many.contains(&p) { Rc::new(STy::Many(base)) } else { base };
+        match sol.imports.get(&p) {
+            Some(b) => Rc::new(STy::Import(t, b.clone())),
+            None => t,
+        }
+    }
+
+    /// The `mu` of part `p`, `has_mu`, under those of `around`.
+    fn mu_ty(&self, parts: &Parts, sol: &Sol, p: usize, round: usize, around: &mut Vec<usize>) -> Rc<STy> {
+        around.push(p);
+        let body = self.mu_body(parts, sol, p, round, around);
+        around.pop();
+        Rc::new(STy::Mu(body, Some((round, p))))
+    }
+
+    fn mu_body(&self, parts: &Parts, sol: &Sol, p: usize, round: usize, around: &mut Vec<usize>) -> Rc<STy> {
+        match parts.parts[p].shape.clone() {
+            // Not known: anything, by a `mu` of its own, which says where
+            // it is placed is this part.
+            Shape::Leaf => Rc::new(STy::Data),
             Shape::Seq(e) => {
-                let id = mu_of[&p];
-                let elem = self.part_ty(parts, sol, e, mu_of);
+                let elem = self.part_ty(parts, sol, e, round, around);
                 // As `Macros::seq` makes `(elem ...)`.
                 let elem = match (sol.exports.get(&e), &*elem) {
                     (Some(b), _) => Rc::new(STy::Export(elem, b.clone())),
@@ -714,29 +733,22 @@ impl Macros {
                     (None, STy::Dvar) => Rc::new(STy::Export(elem, Bind::Rib(vec![(Vec::new(), Delta::Dvar)]))),
                     _ => elem,
                 };
-                self.mus[id] = Rc::new(STy::Union(crate::macros::seq_members(&elem, id)));
-                Rc::new(STy::Mu(id))
+                Rc::new(STy::Union(crate::macros::seq_members(&elem)))
             }
             Shape::Union(ms) => {
-                let id = mu_of[&p];
                 let members = ms
                     .iter()
                     .map(|m| {
-                        let t = self.part_ty(parts, sol, *m, mu_of);
+                        let t = self.part_ty(parts, sol, *m, round, around);
                         match sol.exports.get(m) {
                             Some(b) => Rc::new(STy::Export(t, b.clone())),
                             None => t,
                         }
                     })
                     .collect();
-                self.mus[id] = Rc::new(STy::Union(members));
-                Rc::new(STy::Mu(id))
+                Rc::new(STy::Union(members))
             }
-        };
-        let t = if sol.many.contains(&p) { Rc::new(STy::Many(base)) } else { base };
-        match sol.imports.get(&p) {
-            Some(b) => Rc::new(STy::Import(t, b.clone())),
-            None => t,
+            _ => unreachable!("no `mu` of its own"),
         }
     }
 
@@ -787,14 +799,15 @@ impl Macros {
     /// What the templates' placements say of each part: its syntax type,
     /// whether `many`, and the scopes, as imports and exports.
     #[allow(clippy::too_many_arguments)]
-    fn solve(&self, parts: &Parts, placed: &[Option<Vec<Placed>>], made: &[Option<(Vec<Atom>, Vec<Sym>)>], prev: &Sol, mu_parts: &HashMap<usize, usize>, makes: &[Makes], of: &[usize]) -> Sol {
+    fn solve(&self, parts: &Parts, placed: &[Option<Vec<Placed>>], made: &[Option<(Vec<Atom>, Vec<Sym>)>], prev: &Sol, round: usize, makes: &[Makes], of: &[usize]) -> Sol {
         let mut sol = Sol::default();
         // A part of the signature so far: a list by ellipsis or a `union`,
         // itself; one whose syntax type is not known yet, none.
         let classify = |core: &Rc<STy>| -> Option<K> {
-            if let STy::Mu(id) = &**core
-                && let Some(&q) = mu_parts.get(id)
+            if let STy::Mu(_, Some((r, q))) = &**core
+                && *r == round
             {
+                let q = *q;
                 return (parts.parts[q].shape != Shape::Leaf).then_some(K::Ref(q));
             }
             Some(K::Ty(core.clone()))
@@ -1145,7 +1158,7 @@ impl Macros {
 
     /// Syn type `t` as a signature writes it: a `mu` whose variable is
     /// used, or whose addresses are from it; a list by ellipsis, `(σ ...)`.
-    pub(super) fn shown_sty(&self, t: &Rc<STy>, at: At, interner: &mut Interner, names: &mut Vec<(usize, Sym, bool)>) -> Syn {
+    pub(super) fn shown_sty(&self, t: &Rc<STy>, at: At, interner: &mut Interner, names: &mut Vec<(Sym, bool)>) -> Syn {
         let sym = |s: &str, i: &mut Interner| Syn::named(at, s, i);
         match &**t {
             STy::Expr => sym("expr", interner),
@@ -1175,7 +1188,7 @@ impl Macros {
                             cur = d.clone();
                         }
                         STy::Nil => return Syn::lst(at, items),
-                        STy::Mu(id) if !names.iter().any(|(j, ..)| j == id) && let Some(e) = self.seq_elem(*id) => {
+                        STy::Mu(..) if let Some(e) = seq_elem(&cur) => {
                             items.push(self.shown_sty(&e, at, interner, names));
                             items.push(sym("...", interner));
                             return Syn::lst(at, items);
@@ -1204,30 +1217,40 @@ impl Macros {
                 }
                 Syn::lst(at, items)
             }
-            STy::Mu(id) => {
-                if let Some(e) = names.iter_mut().find(|(j, ..)| j == id) {
-                    e.2 = true;
-                    return Syn::symbol(at, e.1, interner);
-                }
-                if let Some(e) = self.seq_elem(*id) {
+            STy::Var(j) => {
+                let i = names.len() - 1 - j;
+                names[i].1 = true;
+                Syn::symbol(at, names[i].0, interner)
+            }
+            STy::Mu(b, _) => {
+                if let Some(e) = seq_elem(t) {
                     let e = self.shown_sty(&e, at, interner, names);
                     return Syn::lst(at, vec![e, sym("...", interner)]);
                 }
                 let v = interner.intern(&format!("m{}", names.len() + 1));
-                names.push((*id, v, false));
-                let body = self.shown_sty(&self.mus[*id].clone(), at, interner, names);
-                let (_, _, used) = names.pop().expect("pushed");
-                if used || open(&self.mus[*id]) { Syn::lst(at, vec![sym("mu", interner), Syn::symbol(at, v, interner), body]) } else { body }
+                names.push((v, false));
+                let body = self.shown_sty(b, at, interner, names);
+                let (_, used) = names.pop().expect("pushed");
+                if used || open(b) { Syn::lst(at, vec![sym("mu", interner), Syn::symbol(at, v, interner), body]) } else { body }
             }
         }
     }
 
-    /// The element of `mu` `id`, if it is a list as `(σ ...)` writes one
-    /// (`Macros::seq`): its element as written.
-    fn seq_elem(&self, id: usize) -> Option<Rc<STy>> {
-        let STy::Union(ms) = &*self.mus[id] else { return None };
+}
+
+/// The element of `mu` `t`, if it is a list as `(σ ...)` writes one
+/// (`macros.rs`'s `seq`), and its element does not refer to it: its element
+/// as written, outside the list's `mu`.
+fn seq_elem(t: &Rc<STy>) -> Option<Rc<STy>> {
+    let e = seq_elem_under(t)?;
+    super::lowered(&e)
+}
+
+fn seq_elem_under(t: &Rc<STy>) -> Option<Rc<STy>> {
+        let STy::Mu(b, _) = &**t else { return None };
+        let STy::Union(ms) = &**b else { return None };
         let [nil, pair] = &ms[..] else { return None };
-        let tail = |d: &Rc<STy>| matches!(&**d, STy::Mu(j) if *j == id);
+        let tail = |d: &Rc<STy>| matches!(&**d, STy::Var(0));
         match (&**nil, &**pair) {
             (STy::Nil, STy::Pair(e, d)) if tail(d) && !matches!(&**e, STy::Bvar | STy::Dvar | STy::Export(..)) => Some(e.clone()),
             (STy::Export(n, Bind::Rib(none)), STy::Export(p, Bind::Rib(both))) if matches!(&**n, STy::Nil) && none.is_empty() => {
@@ -1257,7 +1280,6 @@ impl Macros {
             }
             _ => None,
         }
-    }
 }
 
 /// Signature `s` as a message says it: each annotation, `union`, `mu`,
@@ -1343,6 +1365,28 @@ fn shown_bind(b: &Bind, at: At, interner: &mut Interner) -> Syn {
 mod tests {
     use super::*;
 
+
+    /// A signature read is a value of what was written alone: read after
+    /// others, or again, it is the one read first (its `mu`s by their
+    /// structure, no table's numbers: `TODO.md` §290).
+    #[test]
+    fn a_signature_is_of_what_is_written_alone() {
+        let mut interner = Interner::default();
+        let (mut heap, mut syms) = (fixpt_heap::Heap::unfixed(), crate::heap_syn::SymTable::default());
+        crate::heap_syn::with_syntax(&mut heap, &mut syms, || {
+            let text = "(macro (_ . (mu es (union (expr) (expr . es)))) expr) (macro (_ expr . (mu es (union () (expr . es)))) expr)";
+            let forms = crate::heap_syn::read_syn_side(text, &mut interner).unwrap();
+            let read = |m: &mut Macros, f: &Syn, interner: &mut Interner| m.signature(f, interner).unwrap().1;
+            let mut alone = Macros::default();
+            alone.ensure_kernel(&mut interner).unwrap();
+            let first = read(&mut alone, &forms[0], &mut interner);
+            let mut after = Macros::default();
+            after.ensure_kernel(&mut interner).unwrap();
+            read(&mut after, &forms[1], &mut interner);
+            assert_eq!(read(&mut after, &forms[0], &mut interner), first);
+            assert_eq!(read(&mut after, &forms[0], &mut interner), first);
+        });
+    }
 
     /// Each macro of the tests' programs whose signature is written, its
     /// signature inferred from its clauses alone, against the written one.

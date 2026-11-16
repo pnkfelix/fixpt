@@ -19,7 +19,7 @@
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
         ring-shape s-rules
-        mu-body addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit marks mark-in
+        addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit marks mark-in
         seq-elem seq-cage? peel ellipsis? ellipsis-of type-form? syntax-entry?
         (type fails addr entries ring rings bind sty stys named hole atm atms marked))
 ;; The environments the walk resolves names in (`macros-env-types.fx`): their
@@ -278,23 +278,23 @@
 ;; Whether signature `t` binds nothing, as a template may use one of
 ;; `scope-forms` (`bloblet-ref`'s, `TODO.md` §247): no `import` or `export`
 ;; in it, so neither a module's item nor its names (`item`, `(shape A)`),
-;; which a program's walk alone knows; `mu`s seen through once (`seen`). As
-;; `macros.rs`'s `binds_nothing`.
-(define binds-nothing? (->* (sty (listof int acyclic)) bool)
-  (lambda (t seen)
+;; which a program's walk alone knows; a `mu`'s body once, its variable
+;; what is around it. As `macros.rs`'s `binds_nothing`.
+(define binds-nothing? (->* (sty) bool)
+  (lambda (t)
     (tagcase t
       (s-item () #f)
       (s-import (b x) #f)
       (s-export (b x) #f)
-      (s-pair (a d) (and (binds-nothing? a seen) (binds-nothing? d seen)))
-      (s-many (b) (binds-nothing? b seen))
-      (s-typed (b h) (binds-nothing? b seen))
-      (s-union (ms) (all-bind-nothing? ms seen))
-      (s-mu (id) (or (int-member? id seen) (binds-nothing? (mu-body id) (cons id seen))))
+      (s-pair (a d) (and (binds-nothing? a) (binds-nothing? d)))
+      (s-many (b) (binds-nothing? b))
+      (s-typed (b h) (binds-nothing? b))
+      (s-union (ms) (all-bind-nothing? ms))
+      (s-mu (b r p) (binds-nothing? b))
       (else y #t))))
-(define all-bind-nothing? (->* (stys (listof int acyclic)) bool)
-  (lambda (ms seen)
-    (or (null? ms) (and (binds-nothing? (car ms) seen) (all-bind-nothing? (cdr ms) seen)))))
+(define all-bind-nothing? (->* (stys) bool)
+  (lambda (ms)
+    (or (null? ms) (and (binds-nothing? (car ms)) (all-bind-nothing? (cdr ms))))))
 ;; The nodes of the descriptions a template writes, whole (`macros.rs`'s
 ;; `Node::desc`).
 (define desc-roots (ref (listof int acyclic) rs) (new nil))

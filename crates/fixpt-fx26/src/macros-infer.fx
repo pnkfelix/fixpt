@@ -24,8 +24,8 @@
         mk-symbol syn-datums syn->datum parse-tag p-ok p-err pfail-at
         (type syns-a names presult) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? reserved? ellipsis-of proper-items
-        name-in? show-syn kind-of sty=? mu-new mu-set! mu-body type-form? kernel-sigs seq-body
-        s-expr s-bvar s-id s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu
+        name-in? show-syn kind-of sty=? type-form? kernel-sigs seq-body
+        s-expr s-bvar s-id s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-var
         s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib ring-at
         bind-direct bind-earlier atm-var atm-rib-of atm-lit
         (type fails addr entries ring rings bind sty stys atm atms))
@@ -498,7 +498,7 @@
 (define compound? (->* (sty) bool)
   (lambda (t)
     (tagcase t
-      (s-pair (a d) #t) (s-mu (i) #t) (s-union (ms) #t) (s-import (b x) #t) (s-export (b x) #t)
+      (s-pair (a d) #t) (s-mu (x r p) #t) (s-union (ms) #t) (s-import (b x) #t) (s-export (b x) #t)
       (s-many (b) #t) (s-typed (b h) #t) (else y #f))))
 
 ;;; ------------------------------------------------------------ what it makes
@@ -647,74 +647,76 @@
           ((= p (extract (car bs) 1)) (list (extract (car bs) 2)))
           (else (bind-at p (cdr bs))))))
 
-;; Each macro's signature so far, from `s`: its syntax types, and each `mu`
-;; made for a list by ellipsis, a `union`, or a part not known yet, by its
-;; part (`infer.rs`'s `build`).
-(define-type mu-parts (listof (tupleof int int) acyclic))
-(define built-mus (ref mu-parts rs) (new nil))
-(define build (->* (sol) stys)
-  (lambda (s)
-    (begin
-      (set built-mus nil)
-      (alloc-mus! 0 s)
-      (build-roots (get roots) 0 s))))
-(define alloc-mus! (->* (int sol) unit)
+;; Each macro's signature so far, from `s`, in round `n`: its syntax types,
+;; each `mu` tagged with the round and its part, so that where a template
+;; places it says of what part it is (`solve`'s `classify`; `infer.rs`'s
+;; `build`).
+(define built-round (ref int rs) (new 0))
+(define build (->* (sol int) stys)
+  (lambda (s n) (begin (set built-round n) (build-roots (get roots) 0 s))))
+;; Whether part `p` is a `mu` of its own: a list by ellipsis, a `union`, or a
+;; part not known yet.
+(define has-mu? (->* (int sol) bool)
   (lambda (p s)
-    (if (= p (get nparts))
-        #u
-        (begin
-          (if (or (tagcase (shape-of p) (sh-seq (e) #t) (sh-union (ms) #t) (else y #f))
-                  (and (leaf? p) (null? (kind-at p (extract s 1)))))
-              (set built-mus (cons (tuple p (mu-new)) (get built-mus)))
-              #u)
-          (alloc-mus! (+ p 1) s)))))
-(define mu-of (->* (int) int) (lambda (p) (car (int-assoc p (get built-mus)))))
+    (or (tagcase (shape-of p) (sh-seq (e) #t) (sh-union (ms) #t) (else y #f))
+        (and (leaf? p) (null? (kind-at p (extract s 1)))))))
 (define build-roots (->* (ints int sol) stys)
   (lambda (rs mi s)
     (if (null? rs)
         nil
-        (let* ((t (part-ty (car rs) s)) (e (bind-at mi (extract s 6))))
+        (let* ((t (part-ty (car rs) s nil)) (e (bind-at mi (extract s 6))))
           (cons (if (null? e) t (s-export t (car e))) (build-roots (cdr rs) (+ mi 1) s))))))
-(define part-ty (->* (int sol) sty)
-  (lambda (p s)
+;; Part `p`'s type, under the `mu`s of parts `around`, the innermost first:
+;; one of them referred to by its variable, another part's `mu` written
+;; where it is referred to.
+(define part-ty (->* (int sol ints) sty)
+  (lambda (p s around)
     (let* ((base
-            (tagcase (shape-of p)
-              (sh-nil () (s-nil))
-              (sh-lit (n) (s-literal n))
-              (sh-pair (a d) (s-pair (part-ty a s) (part-ty d s)))
-              (sh-leaf ()
-                (let ((k (kind-at p (extract s 1))))
-                  (if (null? k)
-                      ;; Not known: anything, by a `mu` of its own.
-                      (let ((id (mu-of p))) (begin (mu-set! id (s-data)) (s-mu id)))
-                      (tagcase (car k)
-                        (kd-ref (q) (s-mu (mu-of q)))
-                        (kd-ty (t)
-                          (if (and (compound? t) (open? t))
-                              (let ((id (mu-new))) (begin (mu-set! id t) (s-mu id)))
-                              t))))))
-              (sh-seq (e) (seq-ty p e s))
-              (sh-union (ms)
-                (let ((id (mu-of p)))
-                  (begin (mu-set! id (s-union (members-ty ms s))) (s-mu id))))))
+            (if (has-mu? p s)
+                (mu-ty p s around)
+                (tagcase (shape-of p)
+                  (sh-nil () (s-nil))
+                  (sh-lit (n) (s-literal n))
+                  (sh-pair (a d) (s-pair (part-ty a s around) (part-ty d s around)))
+                  (else y
+                    (tagcase (car (kind-at p (extract s 1)))
+                      (kd-ref (q)
+                        (let ((i (position-of q around 0)))
+                          (if (< i 0) (mu-ty q s around) (s-var i))))
+                      ;; Its annotations' addresses from its own root.
+                      (kd-ty (t) (if (and (compound? t) (open? t)) (s-mu t -1 -1) t)))))))
            (t (if (int-in? p (extract s 3)) (s-many base) base))
            (i (bind-at p (extract s 4))))
       (if (null? i) t (s-import t (car i))))))
-(define members-ty (->* (ints sol) stys)
-  (lambda (ms s)
+(define position-of (->* (int ints int) int)
+  (lambda (q xs i)
+    (cond ((null? xs) -1) ((= q (car xs)) i) (else (position-of q (cdr xs) (+ i 1))))))
+;; The `mu` of part `p`, `has-mu?`, under those of `around`.
+(define mu-ty (->* (int sol ints) sty)
+  (lambda (p s around)
+    (let ((in (cons p around)))
+      (s-mu (tagcase (shape-of p)
+              (sh-seq (e) (seq-ty e s in))
+              (sh-union (ms) (s-union (members-ty ms s in)))
+              ;; Not known: anything, by a `mu` of its own, which says
+              ;; where it is placed is this part.
+              (else y (s-data)))
+            (get built-round) p))))
+(define members-ty (->* (ints sol ints) stys)
+  (lambda (ms s around)
     (if (null? ms)
         nil
-        (let* ((t (part-ty (car ms) s)) (e (bind-at (car ms) (extract s 5))))
-          (cons (if (null? e) t (s-export t (car e))) (members-ty (cdr ms) s))))))
-;; As `seq-type` makes `(elem ...)`.
-(define seq-ty (->* (int int sol) sty)
-  (lambda (p e s)
-    (let* ((id (mu-of p)) (t (part-ty e s)) (x (bind-at e (extract s 5)))
+        (let* ((t (part-ty (car ms) s around)) (e (bind-at (car ms) (extract s 5))))
+          (cons (if (null? e) t (s-export t (car e))) (members-ty (cdr ms) s around))))))
+;; As `seq-type` makes `(elem ...)`, its body.
+(define seq-ty (->* (int sol ints) sty)
+  (lambda (e s around)
+    (let* ((t (part-ty e s around)) (x (bind-at e (extract s 5)))
            (elem (cond ((not (null? x)) (s-export t (car x)))
                        ((= (kind-of t) 1) (s-export t (bind-rib (list (tuple (the addr nil) 1)))))
                        ((= (kind-of t) 12) (s-export t (bind-rib (list (tuple (the addr nil) 4)))))
                        (else t))))
-      (begin (mu-set! id (s-union (seq-body elem id))) (s-mu id)))))
+      (s-union (seq-body elem)))))
 
 ;;; ------------------------------------------------------------ placements
 

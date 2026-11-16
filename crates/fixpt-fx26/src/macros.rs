@@ -112,8 +112,15 @@ pub(crate) enum STy {
     Pair(Rc<STy>, Rc<STy>),
     Import(Rc<STy>, Bind),
     Export(Rc<STy>, Bind),
-    /// A `mu`, by its number in `Macros::mus`; and its variable, the same.
-    Mu(usize),
+    /// `(mu v σ)`: `σ`, each `Var` in it that refers to this `mu` the
+    /// whole again. A value, compared by its structure: no table, nothing
+    /// of what was read before it. Its tag, of a signature being inferred
+    /// alone: the round and the part it is made for (`infer.rs`'s `build`),
+    /// which a signature read never has.
+    Mu(Rc<STy>, Option<(usize, usize)>),
+    /// A `mu`'s variable, by how many `mu`s are between it and its own
+    /// (de Bruijn's numbering): 0 the innermost around it.
+    Var(usize),
     /// What may be placed any number of times.
     Many(Rc<STy>),
     /// An `expr` or `bvar` with its type, effect or both written: a typed
@@ -508,7 +515,6 @@ pub struct FileScope<'a> {
 /// checking templates. Cloned to be put back (`Checker::macros_kept`).
 #[derive(Clone, Default)]
 pub struct Macros {
-    mus: Vec<Rc<STy>>,
     /// The kernel's tables, read once and shared (`ensure_kernel`).
     k: Rc<Kernel>,
     defined: HashMap<Sym, Rc<Macro>>,
@@ -857,7 +863,7 @@ impl Macros {
             let items = f.list().expect("a kernel entry");
             let what = interner.name(items[0].sym().expect("a head")).to_string();
             let name = items[1].sym().expect("a name");
-            let t = self.sty(&items[2], interner, &named, &mut Vec::new())?;
+            let t = self.sty(&items[2], interner, &named)?;
             match what.as_str() {
                 "define" => _ = named.insert(name, t),
                 "definition" => _ = k.definitions.insert(interner.name(name).to_string(), t),
@@ -868,7 +874,7 @@ impl Macros {
             let items = f.list().expect("a scope entry");
             let what = interner.name(items[0].sym().expect("a head")).to_string();
             let name = items[1].sym().expect("a name");
-            let t = self.sty(&items[2], interner, &named, &mut Vec::new())?;
+            let t = self.sty(&items[2], interner, &named)?;
             match what.as_str() {
                 "define" => _ = named.insert(name, t),
                 "definition" => _ = k.scope_definitions.insert(interner.name(name).to_string(), t),
@@ -919,15 +925,52 @@ impl Macros {
         })
     }
 
-    /// A syntax type read: `named`'s names (the kernel's abbreviations), and
-    /// the `mu` variables in scope, innermost last.
-    fn sty(&mut self, s: &Syn, interner: &Interner, named: &HashMap<Sym, Rc<STy>>, mus: &mut Vec<(Sym, usize)>) -> R<Rc<STy>> {
+    /// A syntax type read, `named`'s names the kernel's abbreviations.
+    fn sty(&mut self, s: &Syn, interner: &Interner, named: &HashMap<Sym, Rc<STy>>) -> R<Rc<STy>> {
+        self.sty_in(s, interner, named, &mut Vec::new())
+    }
+
+    /// `mu` `t`, read whole, at `at`: each `oneof` in it whose members
+    /// refer to a `mu` around them, which its reading left (`sty_in`), its
+    /// members closed, told apart by their shapes.
+    fn mu_read(&self, t: Rc<STy>, at: At) -> R<Rc<STy>> {
+        if self.oneofs_apart(&t, &mut Vec::new()) { Ok(t) } else { Err(FxError::at(at, format!("a syntax type: {ONEOF_APART}"))) }
+    }
+
+    /// Whether, of `t` under the `mu`s `env` (closed, the innermost last),
+    /// each `oneof` whose members refer to one of them has them apart.
+    fn oneofs_apart(&self, t: &Rc<STy>, env: &mut Vec<Rc<STy>>) -> bool {
+        match &**t {
+            STy::Mu(b, _) => {
+                env.push(closed_by(t, env));
+                let r = self.oneofs_apart(b, env);
+                env.pop();
+                r
+            }
+            STy::Union(ms) => {
+                if ms.iter().any(|m| has_free(m, 0)) {
+                    let closed: Vec<Rc<STy>> = ms.iter().map(|m| closed_by(m, env)).collect();
+                    if any_overlap(self, &closed) {
+                        return false;
+                    }
+                }
+                ms.iter().all(|m| self.oneofs_apart(m, env))
+            }
+            STy::Pair(a, d) => self.oneofs_apart(a, env) && self.oneofs_apart(d, env),
+            STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) | STy::Typed(b, _) => self.oneofs_apart(b, env),
+            _ => true,
+        }
+    }
+
+    /// `sty`'s reading, the `mu` variables in scope `mus`, the innermost
+    /// last (none, a list's by ellipsis).
+    fn sty_in(&mut self, s: &Syn, interner: &Interner, named: &HashMap<Sym, Rc<STy>>, mus: &mut Vec<Option<Sym>>) -> R<Rc<STy>> {
         let bad = |why: &str| FxError::at(s.at(), format!("a syntax type: {why}"));
         let t = match &s.view() {
             V::Nil => STy::Nil,
             V::Symbol(n) => {
-                if let Some((_, id)) = mus.iter().rev().find(|(v, _)| v == n) {
-                    STy::Mu(*id)
+                if let Some(i) = mus.iter().rev().position(|v| *v == Some(*n)) {
+                    STy::Var(i)
                 } else if let Some(t) = named.get(n) {
                     return Ok(t.clone());
                 } else {
@@ -951,10 +994,16 @@ impl Macros {
             }
             // `(σ … σ ...)`: a list ending in any number of the last `σ`.
             V::List { items, tail: None } if items.len() >= 2 && is_ellipsis(&items[items.len() - 1], interner) => {
-                let elem = self.sty(&items[items.len() - 2], interner, named, mus)?;
-                let mut t = self.seq(elem);
+                // Read under the list's own `mu`, which no name refers to.
+                mus.push(None);
+                let elem = self.sty_in(&items[items.len() - 2], interner, named, mus);
+                mus.pop();
+                let mut t = seq(elem?);
+                if mus.is_empty() {
+                    t = self.mu_read(t, s.at())?;
+                }
                 for x in items[..items.len() - 2].iter().rev() {
-                    t = Rc::new(STy::Pair(self.sty(x, interner, named, mus)?, t));
+                    t = Rc::new(STy::Pair(self.sty_in(x, interner, named, mus)?, t));
                 }
                 return Ok(t);
             }
@@ -962,7 +1011,7 @@ impl Macros {
                 let head = items[0].sym().map(|h| interner.name(h));
                 match (head, &items[..], tail) {
                     (Some("import" | "export"), [_, body, b], None) => {
-                        let body = self.sty(body, interner, named, mus)?;
+                        let body = self.sty_in(body, interner, named, mus)?;
                         let b = bind(b, interner)?;
                         if head == Some("import") && matches!(&b, Bind::Rib(es) if es.iter().any(|e| matches!(e.1, Delta::Syntax(_)))) {
                             return Err(bad("a macro's binder, `(macro …)`, says what a use defines, in what its signature makes, `(defn D …)`"));
@@ -971,30 +1020,26 @@ impl Macros {
                     }
                     (Some("mu"), [_, v, body], None) => {
                         let v = v.sym().ok_or_else(|| bad("`(mu variable type)`"))?;
-                        let id = self.mus.len();
-                        self.mus.push(Rc::new(STy::Nil));
-                        mus.push((v, id));
-                        let body = self.sty(body, interner, named, mus);
+                        mus.push(Some(v));
+                        let body = self.sty_in(body, interner, named, mus);
                         mus.pop();
                         let body = body?;
-                        if !guarded(&body, id) {
+                        if !guarded(&body, 0) {
                             return Err(bad("a `mu`'s variable is used where no pair is around it (Herman's types are contractive)"));
                         }
-                        self.mus[id] = body;
-                        STy::Mu(id)
+                        let t = Rc::new(STy::Mu(body, None));
+                        return if mus.is_empty() { self.mu_read(t, s.at()) } else { Ok(t) };
                     }
                     (Some("union" | "oneof"), [_, ms @ ..], None) => {
-                        let ms = ms.iter().map(|m| self.sty(m, interner, named, mus)).collect::<R<Vec<_>>>()?;
-                        for (i, a) in ms.iter().enumerate() {
-                            for b in &ms[i + 1..] {
-                                if self.overlap(a, b, OVERLAP_DEPTH) {
-                                    return Err(bad("a `oneof`'s members must be told apart by their shapes in the source (an `expr` may be anything)"));
-                                }
-                            }
+                        let ms = ms.iter().map(|m| self.sty_in(m, interner, named, mus)).collect::<R<Vec<_>>>()?;
+                        // Members that refer to a `mu` around them, checked
+                        // when it is read whole (`mu_read`).
+                        if !ms.iter().any(|m| has_free(m, 0)) && any_overlap(self, &ms) {
+                            return Err(bad(ONEOF_APART));
                         }
                         STy::Union(ms)
                     }
-                    (Some("many"), [_, body], None) => STy::Many(self.sty(body, interner, named, mus)?),
+                    (Some("many"), [_, body], None) => STy::Many(self.sty_in(body, interner, named, mus)?),
                     // `(expr #:type T #:effect E)`, `(bvar #:type T)`: a list
                     // whose second is a keyword, which no syntax type is.
                     (Some(kind @ ("expr" | "bvar" | "lambda")), [_, k, ..], None) if matches!(k.view(), V::Keyword(_)) => {
@@ -1025,10 +1070,10 @@ impl Macros {
                     _ => {
                         let rest = match (items.len(), tail) {
                             (1, None) => Rc::new(STy::Nil),
-                            (1, Some(t)) => self.sty(t, interner, named, mus)?,
-                            _ => self.sty(&Syn::of_list(s.at(), &items[1..].to_vec(), tail.clone()), interner, named, mus)?,
+                            (1, Some(t)) => self.sty_in(t, interner, named, mus)?,
+                            _ => self.sty_in(&Syn::of_list(s.at(), &items[1..].to_vec(), tail.clone()), interner, named, mus)?,
                         };
-                        STy::Pair(self.sty(&items[0], interner, named, mus)?, rest)
+                        STy::Pair(self.sty_in(&items[0], interner, named, mus)?, rest)
                     }
                 }
             }
@@ -1037,20 +1082,6 @@ impl Macros {
         Ok(Rc::new(t))
     }
 
-    /// `(elem ...)`: `(mu l (union () (elem . l)))`, and if `elem` exports,
-    /// each element's export together, as a `let`'s bindings do; a binder
-    /// alone, `bvar` or `dvar`, exports itself.
-    fn seq(&mut self, elem: Rc<STy>) -> Rc<STy> {
-        let elem = match &*elem {
-            STy::Bvar => Rc::new(STy::Export(elem, Bind::Rib(vec![(Vec::new(), Delta::Var)]))),
-            STy::Dvar => Rc::new(STy::Export(elem, Bind::Rib(vec![(Vec::new(), Delta::Dvar)]))),
-            _ => elem,
-        };
-        let id = self.mus.len();
-        self.mus.push(Rc::new(STy::Nil));
-        self.mus[id] = Rc::new(STy::Union(seq_members(&elem, id)));
-        Rc::new(STy::Mu(id))
-    }
 
     /// The type of an element of list type `t`, if a template or pattern may
     /// give its elements by ellipsis, and whether each is in the scope of
@@ -1062,9 +1093,9 @@ impl Macros {
     /// ribcage (a `let*`'s, a `begin`'s definitions). Each pair's element,
     /// with the part of the pair's export that is its.
     fn seq_of(&self, t: &Rc<STy>) -> Option<(Rc<STy>, bool)> {
-        let STy::Mu(id) = &**t else { return None };
-        let STy::Union(ms) = &*self.mus[*id] else { return None };
-        if let Some(elem) = self.cage_seq_of(*id, ms) {
+        let body = unfolded(t)?;
+        let STy::Union(ms) = &*body else { return None };
+        if let Some(elem) = self.cage_seq_of(t, ms) {
             return Some((elem, true));
         }
         let (mut elems, mut nil, mut scoped) = (Vec::new(), false, false);
@@ -1084,7 +1115,7 @@ impl Macros {
             };
             match &**core {
                 STy::Nil => nil = true,
-                STy::Pair(a, _) if matches!(&**rest, STy::Mu(j) if j == id) => {
+                STy::Pair(a, _) if same(rest, t) => {
                     if let Some(fs) = inner {
                         let mine: Vec<(Addr, Delta)> = entries.into_iter().flatten().filter(|(addr, _)| addr.first() == Some(&true)).cloned().collect();
                         if *fs != mine {
@@ -1124,7 +1155,7 @@ impl Macros {
     /// in the scope of what the element binds, `β`, which is also the
     /// list's innermost rib or ribcage, `β'`, after the rest's. The element
     /// type, with what it exports.
-    fn cage_seq_of(&self, id: usize, ms: &[Rc<STy>]) -> Option<Rc<STy>> {
+    fn cage_seq_of(&self, t: &Rc<STy>, ms: &[Rc<STy>]) -> Option<Rc<STy>> {
         let (mut elems, mut nil) = (Vec::new(), false);
         for m in ms {
             let STy::Export(core, Bind::Cage(rings)) = &**m else { return None };
@@ -1132,7 +1163,7 @@ impl Macros {
                 (STy::Nil, []) => nil = true,
                 (STy::Pair(a, d), [Ring::At(rest), own]) if rest == &vec![false] => {
                     let STy::Import(r, inner) = &**d else { return None };
-                    if !matches!(&**r, STy::Mu(j) if *j == id) {
+                    if !same(r, t) {
                         return None;
                     }
                     // What the rest is in the scope of is the element's own.
@@ -1169,30 +1200,25 @@ impl Macros {
     /// Whether signature `t` binds nothing, as a template may use one of
     /// `scope-forms` (`bloblet-ref`'s, `TODO.md` §247): no `import` or
     /// `export` in it, so neither a module's item nor its names (`item`,
-    /// `(shape A)`), which a program's walk alone knows; `mu`s seen through
-    /// once (`seen`).
-    fn binds_nothing(&self, t: &STy, seen: &mut Vec<usize>) -> bool {
+    /// `(shape A)`), which a program's walk alone knows; a `mu`'s body
+    /// once, its variable what is around it.
+    fn binds_nothing(&self, t: &STy) -> bool {
         match t {
             STy::Item | STy::Import(..) | STy::Export(..) => false,
-            STy::Pair(a, d) => self.binds_nothing(a, seen) && self.binds_nothing(d, seen),
-            STy::Many(b) | STy::Typed(b, _) => self.binds_nothing(b, seen),
-            STy::Union(ms) => ms.iter().all(|m| self.binds_nothing(m, seen)),
-            STy::Mu(id) if seen.contains(id) => true,
-            STy::Mu(id) => {
-                seen.push(*id);
-                self.binds_nothing(&self.mus[*id], seen)
-            }
+            STy::Pair(a, d) => self.binds_nothing(a) && self.binds_nothing(d),
+            STy::Many(b) | STy::Typed(b, _) | STy::Mu(b, _) => self.binds_nothing(b),
+            STy::Union(ms) => ms.iter().all(|m| self.binds_nothing(m)),
             _ => true,
         }
     }
 
     /// The type at `t`, its annotations, `mu`s and unions seen through
     /// to what is under them (for overlap and fit).
-    fn unfold<'a>(&'a self, t: &'a Rc<STy>) -> &'a Rc<STy> {
+    fn unfold(&self, t: &Rc<STy>) -> Rc<STy> {
         match &**t {
             STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) | STy::Typed(b, _) => self.unfold(b),
-            STy::Mu(id) => self.unfold(&self.mus[*id]),
-            _ => t,
+            STy::Mu(..) => self.unfold(&unfold_mu(t)),
+            _ => t.clone(),
         }
     }
 
@@ -1201,7 +1227,7 @@ impl Macros {
     /// at to `depth` pairs, past which they are taken to overlap.
     fn overlap(&self, a: &Rc<STy>, b: &Rc<STy>, depth: usize) -> bool {
         use STy::*;
-        let (a, b) = (self.unfold(a), self.unfold(b));
+        let (a, b) = (&self.unfold(a), &self.unfold(b));
         match (&**a, &**b) {
             (Union(ms), _) => ms.iter().any(|m| self.overlap(m, b, depth)),
             (_, Union(ms)) => ms.iter().any(|m| self.overlap(a, m, depth)),
@@ -1252,11 +1278,11 @@ impl Macros {
     fn fits_shaped(&self, t: &Rc<STy>, s: Option<&Syn>, shape: Shape, mode: Mode, interner: &Interner, pvars: &HashMap<Sym, PInfo>, depth: usize) -> bool {
         use STy::*;
         if let Shape::Symbol(n) = shape {
-            let lit = matches!(&**self.unfold(t), Literal(_) | Mark(..));
+            let lit = matches!(&*self.unfold(t), Literal(_) | Mark(..));
             // A pattern variable placed fits anything but, if it is a name,
             // a list's shape, which a name never has.
             let name = pvars.get(&n).is_some_and(|p| matches!(&*p.core, Bvar | Dvar | Id | Label));
-            let list = matches!(&**self.unfold(t), Pair(..) | Nil | Lambda);
+            let list = matches!(&*self.unfold(t), Pair(..) | Nil | Lambda);
             let mark = self.mark_of(n).is_some();
             if (mode == Mode::Pattern && !lit && !mark && interner.name(n) != "_") || (mode == Mode::Template && pvars.contains_key(&n) && !(name && list)) {
                 return true;
@@ -1267,7 +1293,7 @@ impl Macros {
             if matches!(mode, Mode::Use | Mode::Pattern | Mode::Template)
                 && let Some(m) = self.mark_of(n)
             {
-                return match &**self.unfold(t) {
+                return match &*self.unfold(t) {
                     Union(ms) => ms.iter().any(|x| self.fits_shaped(x, s, shape, mode, interner, pvars, depth)),
                     Mark(_, id) => *id == m.id,
                     Literal(x) => *x == n,
@@ -1277,7 +1303,7 @@ impl Macros {
             }
         }
         let syn = || *s.expect("syntax where its shape is not `()`'s");
-        match &**self.unfold(t) {
+        match &*self.unfold(t) {
             Union(ms) => ms.iter().any(|m| self.fits_shaped(m, s, shape, mode, interner, pvars, depth)),
             Pair(a, d) => match shape {
                 Shape::List | Shape::Dotted => {
@@ -1301,7 +1327,7 @@ impl Macros {
             Lambda => shape == Shape::List && lambda_shaped(&syn(), interner),
             Defn => matches!(shape, Shape::List | Shape::Dotted),
             Data | Type | Kind | Item | Rules => true,
-            Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
+            Import(..) | Export(..) | Mu(..) | Many(_) | Typed(..) | Var(_) => unreachable!("unfolded, closed"),
         }
     }
 
@@ -1324,13 +1350,13 @@ impl Macros {
         if matches!(mode, Mode::Pattern | Mode::Template) {
             return self.fits_within(t, &whole(), mode, interner, pvars, depth);
         }
-        match &**self.unfold(t) {
+        match &*self.unfold(t) {
             Union(ms) => ms.iter().any(|m| self.fits_rest(m, rest, tail, span, mode, interner, pvars, depth)),
             Pair(a, d) => depth == 0 || (self.fits_within(a, &x, mode, interner, pvars, depth - 1) && self.fits_rest(d, after, tail, span, mode, interner, pvars, depth - 1)),
             Nil | Literal(_) | Mark(..) | Bvar | Dvar | Id | Label => false,
             Lambda => lambda_shaped(&whole(), interner),
             Expr | Defn | Data | Type | Kind | Item | Rules => true,
-            Import(..) | Export(..) | Mu(_) | Many(_) | Typed(..) => unreachable!("unfolded"),
+            Import(..) | Export(..) | Mu(..) | Many(_) | Typed(..) | Var(_) => unreachable!("unfolded, closed"),
         }
     }
 
@@ -1548,7 +1574,7 @@ impl Macros {
         // as its templates name them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { mus: std::mem::take(&mut self.mus), k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::default(), checking: false, withs: Box::new(Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), ..Withs::default() }) };
+        let mut own = Macros { k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::default(), checking: false, withs: Box::new(Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), ..Withs::default() }) };
         let mut made = Vec::new();
         let mut defined = Ok(());
         for (form, hidden) in forms {
@@ -1568,7 +1594,6 @@ impl Macros {
                 }
             }
         }
-        self.mus = std::mem::take(&mut own.mus);
         self.withs.syntax_sigs = std::mem::take(&mut own.withs.syntax_sigs);
         self.fresh = own.fresh;
         defined?;
@@ -1848,7 +1873,7 @@ impl Macros {
         if addressed && let Some(a) = lettered(&sig, interner) {
             return Err(FxError::at(a.at(), format!("`{}` is an address in Herman's letters: {PATH_USAGE}", a.written(interner))));
         }
-        let sig = self.sty(&sig, interner, &HashMap::default(), &mut Vec::new())?;
+        let sig = self.sty(&sig, interner, &HashMap::default())?;
         // Each macro it says a use defines, its signature read now.
         if let STy::Export(_, Bind::Rib(es)) = &*sig {
             for (_, d) in es {
@@ -2399,7 +2424,7 @@ impl Macros {
             let (poly, want, defn, desc) = self.signature(&said, interner)?;
             let have = self.defined[&n].clone();
             let opaque = have.procedural.as_ref().is_some_and(|p| !p.contract);
-            let same = !opaque && poly.is_empty() && have.poly.is_empty() && have.defn == defn && have.desc == desc && self.sub(&have.sig, &want, &mut HashSet::default()) && self.sub(&want, &have.sig, &mut HashSet::default());
+            let same = !opaque && poly.is_empty() && have.poly.is_empty() && have.defn == defn && have.desc == desc && self.sub(&have.sig, &want, &mut Vec::new()) && self.sub(&want, &have.sig, &mut Vec::new());
             if !same {
                 return Err(refused(format!("its signature says `{x}` is a macro of `{shown}`, and its expansion defines one of another signature")));
             }
@@ -3290,11 +3315,11 @@ impl Aligner<'_> {
         let shape = s.shape();
         // A pattern's variable, or one placed in a template: at any type.
         if let Shape::Symbol(n) = shape {
-            let lit = matches!(&**self.m.unfold(t), STy::Literal(_) | STy::Mark(..));
+            let lit = matches!(&*self.m.unfold(t), STy::Literal(_) | STy::Mark(..));
             // A trailmark's name in a pattern is the trailmark, where the
             // signature writes it, and no variable.
             let mark = self.mode == Mode::Pattern && self.m.mark_of(n).is_some();
-            if mark && !matches!(&**self.m.unfold(t), STy::Mark(..) | STy::Union(_)) {
+            if mark && !matches!(&*self.m.unfold(t), STy::Mark(..) | STy::Union(_)) {
                 return Err(fail(format!("`{}` is a trailmark, which a pattern matches where its signature writes `(trailmark {0})`, and no pattern variable", self.name(n))));
             }
             let pvar = match self.mode {
@@ -3306,9 +3331,9 @@ impl Aligner<'_> {
                 // A pattern's variable where a name or a list may be: the
                 // name's shape, if one member is a name's.
                 if self.mode == Mode::Pattern
-                    && let STy::Union(ms) = &**self.m.unfold(t)
+                    && let STy::Union(ms) = &*self.m.unfold(t)
                 {
-                    let names: Vec<&Rc<STy>> = ms.iter().filter(|m| matches!(&**self.m.unfold(m), STy::Bvar | STy::Dvar | STy::Id | STy::Label)).collect();
+                    let names: Vec<&Rc<STy>> = ms.iter().filter(|m| matches!(&*self.m.unfold(m), STy::Bvar | STy::Dvar | STy::Id | STy::Label)).collect();
                     if let [one] = &names[..] {
                         let one = (*one).clone();
                         return Ok(Some((at, one, s_owned, root)));
@@ -3355,10 +3380,8 @@ impl Aligner<'_> {
         }
         match &**t {
             STy::Rules => unreachable!("taken above"),
-            STy::Mu(id) => {
-                let body = self.m.mus[*id].clone();
-                Ok(Some((at, body, s_owned, at)))
-            }
+            STy::Var(_) => unreachable!("a signature closed"),
+            STy::Mu(..) => Ok(Some((at, unfold_mu(t), s_owned, at))),
             STy::Union(ms) => {
                 let mut fit: Vec<&Rc<STy>> = ms.iter().filter(|m| self.m.fits(m, s, self.mode, self.interner, self.pvars)).collect();
                 // A program's name that a form's word may be too, `else`
@@ -3746,7 +3769,7 @@ impl Aligner<'_> {
             // walk; in a template too, if it binds nothing (`bloblet-ref`,
             // `TODO.md` §247).
             Some((_, n))
-                if self.m.k.scope_forms.get(n).is_some_and(|t| self.mode == Mode::Program || self.m.binds_nothing(t, &mut Vec::new())) =>
+                if self.m.k.scope_forms.get(n).is_some_and(|t| self.mode == Mode::Program || self.m.binds_nothing(t)) =>
             {
                 Some(self.m.k.scope_forms[n].clone())
             }
@@ -4571,7 +4594,7 @@ impl Aligner<'_> {
         let name = self.name(n);
         let have = &info.core;
         let want_u = self.m.unfold(want);
-        let fits = match (&**have, &**want_u) {
+        let fits = match (&**have, &*want_u) {
             (Bvar, Bvar) | (Dvar, Dvar) => return Ok(()),
             // A pattern's binder referred to, a value's or a description's.
             (Bvar, Expr | Id) => return self.in_scope(n, Ns::Value, env, span),
@@ -4591,7 +4614,7 @@ impl Aligner<'_> {
             // defined macro's, where it is defined.
             (_, Rules) => true,
             (Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn, _) | (_, Expr | Id | Data | Type | Label | Bvar | Dvar | Kind | Lambda | Defn) => false,
-            _ => self.m.sub(have, want, &mut HashSet::default()),
+            _ => self.m.sub(have, want, &mut Vec::new()),
         };
         if !fits {
             return Err(FxError::at(span, format!("`{name}` is placed where its syntax type is not one the form takes there")));
@@ -4634,20 +4657,27 @@ impl Aligner<'_> {
 
 impl Macros {
     /// Whether syntax of type `a` is all of type `b`, binding structure
-    /// alike: coinductive, as FX-26's recursive types are.
-    fn sub(&self, a: &Rc<STy>, b: &Rc<STy>, assumed: &mut HashSet<(usize, usize)>) -> bool {
+    /// alike: coinductive, as FX-26's recursive types are, each pair a `mu`
+    /// is of assumed while it is compared (`assumed`), by structure: the
+    /// types a `mu` unfolds to are finitely many (Brandt and Henglein), so
+    /// the pairs are.
+    fn sub(&self, a: &Rc<STy>, b: &Rc<STy>, assumed: &mut Vec<(Rc<STy>, Rc<STy>)>) -> bool {
         use STy::*;
-        let key = (Rc::as_ptr(a) as usize, Rc::as_ptr(b) as usize);
-        if Rc::ptr_eq(a, b) || assumed.contains(&key) {
+        if same(a, b) {
             return true;
         }
-        assumed.insert(key);
+        if matches!((&**a, &**b), (Mu(..), _) | (_, Mu(..))) {
+            if assumed.iter().any(|(x, y)| same(x, a) && same(y, b)) {
+                return true;
+            }
+            assumed.push((a.clone(), b.clone()));
+        }
         match (&**a, &**b) {
             (Import(x, p), Import(y, q)) | (Export(x, p), Export(y, q)) => bind_same(p, q) && self.sub(x, y, assumed),
             (Many(x), _) | (Typed(x, _), _) => self.sub(x, b, assumed),
             (_, Many(y)) | (_, Typed(y, _)) => self.sub(a, y, assumed),
-            (Mu(i), _) => self.sub(&self.mus[*i], b, assumed),
-            (_, Mu(j)) => self.sub(a, &self.mus[*j], assumed),
+            (Mu(..), _) => self.sub(&unfold_mu(a), b, assumed),
+            (_, Mu(..)) => self.sub(a, &unfold_mu(b), assumed),
             (Union(ms), _) => ms.iter().all(|m| self.sub(m, b, assumed)),
             (_, Union(ms)) => ms.iter().any(|m| self.sub(a, m, assumed)),
             (Import(..) | Export(..), _) | (_, Import(..) | Export(..)) => false,
@@ -5012,14 +5042,129 @@ fn binder_is_kind(b: &Syn, interner: &Interner) -> bool {
     }
 }
 
-/// Whether `t` uses `mu` `id`'s variable only under a pair.
-fn guarded(t: &STy, id: usize) -> bool {
+/// Whether `t` uses the variable of the `mu` `k` around it only under a
+/// pair, a `mu` inside it looked into too: none unfolds to itself.
+fn guarded(t: &STy, k: usize) -> bool {
     match t {
-        STy::Mu(j) => *j != id,
-        STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) | STy::Typed(b, _) => guarded(b, id),
-        STy::Union(ms) => ms.iter().all(|m| guarded(m, id)),
+        STy::Var(j) => *j != k,
+        STy::Mu(b, _) => guarded(b, k + 1),
+        STy::Import(b, _) | STy::Export(b, _) | STy::Many(b) | STy::Typed(b, _) => guarded(b, k),
+        STy::Union(ms) => ms.iter().all(|m| guarded(m, k)),
         _ => true,
     }
+}
+
+/// `(elem ...)`: `(mu l (union () (elem . l)))`, `elem` read under the
+/// `mu`; and if `elem` exports, each element's export together, as a
+/// `let`'s bindings do; a binder alone, `bvar` or `dvar`, exports itself.
+fn seq(elem: Rc<STy>) -> Rc<STy> {
+    let elem = match &*elem {
+        STy::Bvar => Rc::new(STy::Export(elem, Bind::Rib(vec![(Vec::new(), Delta::Var)]))),
+        STy::Dvar => Rc::new(STy::Export(elem, Bind::Rib(vec![(Vec::new(), Delta::Dvar)]))),
+        _ => elem,
+    };
+    Rc::new(STy::Mu(Rc::new(STy::Union(seq_members(&elem))), None))
+}
+
+const ONEOF_APART: &str = "a `oneof`'s members must be told apart by their shapes in the source (an `expr` may be anything)";
+
+/// Whether two of `ms` may be of the same syntax.
+fn any_overlap(m: &Macros, ms: &[Rc<STy>]) -> bool {
+    ms.iter().enumerate().any(|(i, a)| ms[i + 1..].iter().any(|b| m.overlap(a, b, OVERLAP_DEPTH)))
+}
+
+/// Whether `t` refers to a `mu` `k` or more out from it.
+fn has_free(t: &Rc<STy>, k: usize) -> bool {
+    let found = std::cell::Cell::new(false);
+    map_vars(t, k, &|j, k| {
+        if j >= k {
+            found.set(true);
+        }
+        None
+    });
+    found.get()
+}
+
+/// `t`, under the `mu`s `env` (closed, the innermost last), closed: each
+/// variable that refers to one of them that `mu`.
+fn closed_by(t: &Rc<STy>, env: &[Rc<STy>]) -> Rc<STy> {
+    map_vars(t, 0, &|j, k| (j >= k).then(|| env[env.len() - 1 - (j - k)].clone())).unwrap_or_else(|| t.clone())
+}
+
+/// Whether `a` and `b` are one type: the same, or alike in structure.
+pub(crate) fn same(a: &Rc<STy>, b: &Rc<STy>) -> bool {
+    Rc::ptr_eq(a, b) || a == b
+}
+
+/// `t` with each variable `k` or more `mu`s out raised by `d`: as it is
+/// placed under `d` `mu`s more. What has none of them is shared.
+pub(crate) fn shift(t: &Rc<STy>, d: usize, k: usize) -> Rc<STy> {
+    map_vars(t, k, &|j, k| (j >= k).then(|| Rc::new(STy::Var(j + d)))).unwrap_or_else(|| t.clone())
+}
+
+/// `t` with the variable of the `mu` `k` around it replaced by `s`, and
+/// those further out lowered by one, as that `mu` is gone.
+fn subst(t: &Rc<STy>, k: usize, s: &Rc<STy>) -> Rc<STy> {
+    map_vars(t, k, &|j, k| match j.cmp(&k) {
+        std::cmp::Ordering::Equal if k == 0 => Some(s.clone()),
+        std::cmp::Ordering::Equal => Some(shift(s, k, 0)),
+        std::cmp::Ordering::Greater => Some(Rc::new(STy::Var(j - 1))),
+        std::cmp::Ordering::Less => None,
+    })
+    .unwrap_or_else(|| t.clone())
+}
+
+/// `t` with each variable `j`, under `k` `mu`s more than `t` is, as `f`
+/// says, if it says one changes; none if none does.
+fn map_vars(t: &Rc<STy>, k: usize, f: &dyn Fn(usize, usize) -> Option<Rc<STy>>) -> Option<Rc<STy>> {
+    let one = |b: &Rc<STy>, k: usize| map_vars(b, k, f);
+    Some(Rc::new(match &**t {
+        STy::Var(j) => return f(*j, k),
+        STy::Mu(b, tag) => STy::Mu(one(b, k + 1)?, *tag),
+        STy::Pair(a, d) => match (one(a, k), one(d, k)) {
+            (None, None) => return None,
+            (a2, d2) => STy::Pair(a2.unwrap_or_else(|| a.clone()), d2.unwrap_or_else(|| d.clone())),
+        },
+        STy::Import(b, x) => STy::Import(one(b, k)?, x.clone()),
+        STy::Export(b, x) => STy::Export(one(b, k)?, x.clone()),
+        STy::Many(b) => STy::Many(one(b, k)?),
+        STy::Typed(b, h) => STy::Typed(one(b, k)?, h.clone()),
+        STy::Union(ms) => {
+            let each: Vec<Option<Rc<STy>>> = ms.iter().map(|m| one(m, k)).collect();
+            if each.iter().all(Option::is_none) {
+                return None;
+            }
+            STy::Union(each.into_iter().zip(ms).map(|(m2, m)| m2.unwrap_or_else(|| m.clone())).collect())
+        }
+        _ => return None,
+    }))
+}
+
+/// `mu` `t` unfolded once: its body, its variable `t` again.
+pub(crate) fn unfold_mu(t: &Rc<STy>) -> Rc<STy> {
+    unfolded(t).unwrap_or_else(|| t.clone())
+}
+
+/// `t` unfolded once, if it is a `mu`.
+pub(crate) fn unfolded(t: &Rc<STy>) -> Option<Rc<STy>> {
+    match &**t {
+        STy::Mu(b, _) => Some(subst(b, 0, t)),
+        _ => None,
+    }
+}
+
+/// `t`, under one `mu` it does not refer to, without it: none if it does.
+pub(crate) fn lowered(t: &Rc<STy>) -> Option<Rc<STy>> {
+    let refers = std::cell::Cell::new(false);
+    let r = map_vars(t, 0, &|j, k| match j.cmp(&k) {
+        std::cmp::Ordering::Equal => {
+            refers.set(true);
+            None
+        }
+        std::cmp::Ordering::Greater => Some(Rc::new(STy::Var(j - 1))),
+        std::cmp::Ordering::Less => None,
+    });
+    if refers.get() { None } else { Some(r.unwrap_or_else(|| t.clone())) }
 }
 
 /// A form's name, `#%fx` or `#%toplevel`: never bound, so never a binder or
@@ -5331,14 +5476,14 @@ fn syn_hash(s: &Syn, interner: &Interner) -> i64 {
     }
 }
 
-/// `(elem ...)`'s members, list `mu` `id`'s: `()`, and the pair of an
+/// `(elem ...)`'s members, its `mu`'s body, `elem` under it: `()`, and the pair of an
 /// element and the list. An element that exports a rib, the pair exports
 /// its entries, each said from the pair's root, `(A …)`, then the rest's,
 /// `(D rib)`: an address is from its region's root, and an element written
 /// out is in the pair's region (an element given by ellipsis is a region of
 /// its own, which `seq_of` gives back its export as said from it).
-pub(crate) fn seq_members(elem: &Rc<STy>, id: usize) -> Vec<Rc<STy>> {
-    let rest = Rc::new(STy::Mu(id));
+pub(crate) fn seq_members(elem: &Rc<STy>) -> Vec<Rc<STy>> {
+    let rest = Rc::new(STy::Var(0));
     let none = || Rc::new(STy::Export(Rc::new(STy::Nil), Bind::Rib(Vec::new())));
     match &**elem {
         STy::Export(e, Bind::Rib(es)) => {

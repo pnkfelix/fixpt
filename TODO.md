@@ -7308,8 +7308,10 @@ and `do` written as a test, both checkers.
 Fresh names are numbered within each form (`typed-macros.md`, "Fresh
 names per form"). Still program-wide, and in a form's output: the
 expansions' numbers (in positions, and in aliases' names `%~N:x`) and the
-source keys (`source-base` and on); and the `mu` table, a signature's
-`mu`s by index into it, which a macro could keep as its own. And a
+source keys (`source-base` and on). (The `mu` table, a signature's
+`mu`s by index into it, is gone: a `mu` is a value, its variable by de
+Bruijn's numbering, `typed-macros.md`, "Decided: `mu`s as values, no
+table".) And a
 session's texts placed one after another by length (`Session::eval_base`,
 its REPL's text one), where a module file's places are its own from its
 load's base, whatever the size of those before. Each, when a cache of
