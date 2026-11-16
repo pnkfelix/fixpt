@@ -2,7 +2,7 @@
 ;; A clause's head that may be `else` placed as an expression: refused, as
 ;; `(string=? v else)` would be.
 (define-syntax-rec
-  (string-cases (macro (expr ((oneof (trailmark else) expr) expr) ...) expr)
+  (string-cases (macro (_ expr ((oneof (trailmark else) expr) expr) ...) expr)
                 (syntax-rules #:trailmarks (else)
                   ((_ v (else d)) d)
                   ((_ v (k e) c ...) (if (string=? v k) e (string-cases v c ...))))))

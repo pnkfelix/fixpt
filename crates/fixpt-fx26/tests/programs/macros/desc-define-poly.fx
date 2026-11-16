@@ -3,7 +3,7 @@
 ;; the template's made fresh in both: not the top level's `a`.
 (define-type a bool)
 (define-syntax def-id
-  (macro (bvar) defn)
+  (macro (_ bvar) defn)
   (syntax-rules
     ((_ name) (define name (poly ((a type)) (subr pure (a) a)) (lambda ((x a)) x)))))
 (def-id ident)

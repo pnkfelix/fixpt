@@ -2,7 +2,7 @@
 ;; A parameter named, repeated, whose type names it: the repetition
 ;; before's, which a name cannot say.
 (define-syntax chain
-  (macro (bvar desc ...) defn)
+  (macro (_ bvar desc ...) defn)
   (syntax-rules
     ((_ name f ...) (define name (subr pure ((m : (select m t)) ...) int) (lambda (x) 0)))))
 (chain c int int)

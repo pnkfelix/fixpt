@@ -3,7 +3,7 @@
 ;; it is in the scope of: the body's `x` would be the global's, 100. Its
 ;; renamed run leaves the fresh name free.
 (define-syntax let1
-  (macro ((bvar expr) (import expr (rho (AA var)))) expr)
+  (macro (_ (p1 @ bvar expr) p2 @ expr) expr (bind p1 in p2))
   (er-macro-transformer
     (lambda (form rename compare)
       (let ((xe (car (cdr form))) (body (car (cdr (cdr form)))))

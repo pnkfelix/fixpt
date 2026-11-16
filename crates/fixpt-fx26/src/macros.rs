@@ -64,6 +64,7 @@ use crate::heap_syn::{At, Kept, Shape, Syn, V};
 use fixpt_hash::{HashMap, HashSet};
 use std::rc::Rc;
 
+mod contract;
 mod infer;
 pub(crate) mod shapes;
 pub(crate) mod hygiene;
@@ -956,7 +957,7 @@ impl Macros {
                         let body = self.sty(body, interner, named, mus)?;
                         let b = bind(b, interner)?;
                         if head == Some("import") && matches!(&b, Bind::Rib(es) if es.iter().any(|e| matches!(e.1, Delta::Syntax(_)))) {
-                            return Err(bad("a macro's binder, `(macro σ made)`, says what a use defines, in what its signature makes, `(defn (ℓ (macro σ made)))`"));
+                            return Err(bad("a macro's binder, `(macro …)`, says what a use defines, in what its signature makes, `(defn D …)`"));
                         }
                         if head == Some("import") { STy::Import(body, b) } else { STy::Export(body, b) }
                     }
@@ -1611,7 +1612,7 @@ impl Macros {
         for c in &w.clauses {
             let one = infer::Unsigned { name: w.name, lits: w.lits.clone(), clauses: vec![c.clone()], span: w.span };
             let s = self.infer(&[one], interner).ok()?.pop()?;
-            let arrow = s.list().filter(|l| l.len() == 3 && l[0].sym().is_some_and(|h| interner.name(h) == "macro"));
+            let arrow = s.list().filter(|l| l.len() == 3 && l[0].sym().is_some_and(|h| interner.name(h) == ADDRESSED));
             // What it makes a word: `expr`, `defn` or `desc`.
             let (sigma, k) = match arrow.as_deref() {
                 Some([_, sigma, k]) if k.sym().is_some() => (sigma.clone(), k.sym()),
@@ -1626,7 +1627,7 @@ impl Macros {
         let at = w.span;
         let union = Syn::lst(at, std::iter::once(Syn::named(at, "oneof", interner)).chain(members).collect());
         let k = Syn::symbol(at, made.flatten()?, interner);
-        Some(Syn::lst(at, vec![Syn::named(at, "macro", interner), union, k]))
+        Some(Syn::lst(at, vec![Syn::named(at, ADDRESSED, interner), union, k]))
     }
 
     fn define_written(&mut self, ws: &[Written], interner: &mut Interner, file: Option<&FileScope>) -> R<Vec<Sym>> {
@@ -1788,8 +1789,12 @@ impl Macros {
         // `(macro σ (defn (ℓ δ) …))`:
         // definitions, a use's defining what the rib says of its parts,
         // `(macro (export σ (rho (ℓ δ) …)) defn)`, which is read the same.
+        // In shapes and facts: elaborated to Herman's form, which is read.
+        let sig = if contract::is_contract(&sig, interner) { contract::elaborated(&sig, interner)? } else { sig };
+        // Herman's form, as `macro/addressed` writes it: its addresses paths.
+        let addressed = sig.list().and_then(|l| l.first().and_then(|h| h.sym())).is_some_and(|h| interner.name(h) == "macro/addressed");
         let (sig, defn, desc) = match sig.list().as_deref() {
-            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "macro") && made.list().is_some_and(|l| l.first().and_then(|d| d.sym()).is_some_and(|d| interner.name(d) == "defn")) => {
+            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "macro/addressed") && made.list().is_some_and(|l| l.first().and_then(|d| d.sym()).is_some_and(|d| interner.name(d) == "defn")) => {
                 let entries = made.list().expect("a list")[1..].to_vec();
                 if entries.is_empty() {
                     (*body, true, false)
@@ -1802,15 +1807,19 @@ impl Macros {
                     (Syn::lst(at, vec![Syn::named(at, "export", interner), *body, rho]), true, false)
                 }
             }
-            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "macro") => match made.sym().map(|m| interner.name(m)) {
+            Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "macro/addressed") => match made.sym().map(|m| interner.name(m)) {
                 Some("defn") => (*body, true, false),
                 Some("desc") => (*body, false, true),
                 Some("expr") => (*body, false, false),
-                _ => return Err(FxError::at(made.at(), "a signature `(macro σ made)` makes `expr`, `defn`, `(defn (ℓ δ) …)` or `desc`")),
+                _ => return Err(FxError::at(made.at(), "what a signature's uses make is `expr`, `defn`, `(defn D …)` or `desc`")),
             },
-            Some([h, ..]) if h.sym().is_some_and(|h| interner.name(h) == "->") => return Err(FxError::at(sig.at(), "a macro's signature is `(macro σ made)`: `->` is a procedure's type")),
-            _ => return Err(FxError::at(sig.at(), "a signature is `(macro σ made)`, what its uses make written: `expr`, `defn`, `(defn (ℓ δ) …)` or `desc`")),
+            Some([h, ..]) if h.sym().is_some_and(|h| interner.name(h) == "->") => return Err(FxError::at(sig.at(), "a macro's signature is `(macro (_ part …) made fact …)`: `->` is a procedure's type")),
+            Some([h, ..]) if h.sym().is_some_and(|h| interner.name(h) == "macro") => return Err(FxError::at(sig.at(), "a signature in shapes and facts is `(macro (_ part …) made fact …)`; Herman's, `(macro/addressed σ made)`")),
+            _ => return Err(FxError::at(sig.at(), "a signature is `(macro (_ part …) made fact …)`, what its uses make written: `expr`, `defn`, `(defn D …)` or `desc`")),
         };
+        if addressed && let Some(a) = lettered(&sig, interner) {
+            return Err(FxError::at(a.at(), format!("`{}` is an address in Herman's letters: {PATH_USAGE}", a.written(interner))));
+        }
         let sig = self.sty(&sig, interner, &HashMap::default(), &mut Vec::new())?;
         // Each macro it says a use defines, its signature read now.
         if let STy::Export(_, Bind::Rib(es)) = &*sig {
@@ -4795,7 +4804,7 @@ pub(super) fn rules_parts(parts: &[Syn], at: At, interner: &Interner) -> R<(Vec<
 /// The signature of operands `s` making definitions, as written: `(macro σ
 /// (defn (ℓ δ) …))` of `(export σ (rho (ℓ δ) …))`, else `(-> s defn)`.
 fn defn_arrow(s: Syn, at: At, interner: &mut Interner) -> Syn {
-    let arrow = Syn::named(at, "macro", interner);
+    let arrow = Syn::named(at, ADDRESSED, interner);
     let defn = Syn::named(at, "defn", interner);
     if let Some([e, body, b]) = s.list().as_deref()
         && e.sym().is_some_and(|e| interner.name(e) == "export")
@@ -4822,8 +4831,8 @@ fn bind(b: &Syn, interner: &Interner) -> R<Bind> {
             .iter()
             .map(|e| match e.list().as_deref() {
                 // A macro's binder: its kind the macro's signature.
-                Some([a, d]) if d.list().is_some_and(|l| l.len() == 3 && l[0].sym().is_some_and(|h| interner.name(h) == "macro")) => Ok((addr(a, interner)?, Delta::Syntax(Kept::new(*d)))),
-                Some([_, d]) if d.list().is_some_and(|l| l.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "syntax")) => Err(FxError::at(d.at(), "a macro's binder is written with its signature, `(ℓ (macro σ made))`, not `(syntax …)`")),
+                Some([a, d]) if d.list().is_some_and(|l| l.len() >= 3 && l[0].sym().is_some_and(|h| addressed_head(interner.name(h)))) => Ok((addr(a, interner)?, Delta::Syntax(Kept::new(*d)))),
+                Some([_, d]) if d.list().is_some_and(|l| l.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "syntax")) => Err(FxError::at(d.at(), "a macro's binder is written with its signature, `(macro …)`, not `(syntax …)`")),
                 Some([a, d]) => {
                     let d = match d.sym().map(|d| interner.name(d)) {
                         Some("none") => Delta::None,
@@ -4891,11 +4900,51 @@ fn addr(a: &Syn, interner: &Interner) -> R<Addr> {
     if matches!(a.view(), V::Nil) {
         return Ok(Vec::new());
     }
+    // `(path #:a #:d …)`: its steps from the root, first first.
+    if let Some(items) = a.list()
+        && items.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "path")
+    {
+        return items[1..]
+            .iter()
+            .map(|k| match k.view() {
+                V::Keyword(w) if interner.name(w) == "a" => Ok(true),
+                V::Keyword(w) if interner.name(w) == "d" => Ok(false),
+                _ => Err(FxError::at(k.at(), PATH_USAGE)),
+            })
+            .collect();
+    }
     let name = a.sym().map(|a| interner.name(a)).filter(|n| !n.is_empty() && n.chars().all(|c| c == 'A' || c == 'D'));
     let Some(name) = name else {
-        return Err(FxError::at(a.at(), "an address is a word of `A` (car) and `D` (cdr), read right to left"));
+        return Err(FxError::at(a.at(), PATH_USAGE));
     };
     Ok(name.chars().rev().map(|c| c == 'A').collect())
+}
+
+/// What an address is, said where one is not.
+const PATH_USAGE: &str = "an address is `(path #:a #:d …)`, its steps from the root, `#:a` the car and `#:d` the cdr";
+
+/// Herman's form of a signature, as an inferred one is shown, for now.
+const ADDRESSED: &str = "macro/addressed";
+
+/// Whether `h` heads a signature: `macro`, in shapes and facts, or
+/// `macro/addressed`, Herman's (`typed-macros.md`, "Decided: signatures in
+/// shapes and facts").
+fn addressed_head(h: &str) -> bool {
+    matches!(h, "macro/addressed" | "macro")
+}
+
+/// An address of signature `s` written as Herman's letters, `AAD`, which
+/// the kernel's own signatures keep and a program's write `(path …)`.
+fn lettered(s: &Syn, interner: &Interner) -> Option<Syn> {
+    let items = s.list()?;
+    let head = items.first().and_then(|h| h.sym()).map(|h| interner.name(h));
+    let word = |a: &Syn| a.sym().is_some_and(|n| interner.name(n).chars().all(|c| c == 'A' || c == 'D'));
+    let found = match head {
+        Some("rho" | "defn") => items[1..].iter().find_map(|e| e.list().and_then(|l| l.first().copied()).filter(word)),
+        Some("at" | "shape") => items.get(1).copied().filter(word),
+        _ => None,
+    };
+    found.or_else(|| items.iter().find_map(|x| lettered(x, interner)))
 }
 
 /// `s`, at `path`, each symbol at a path of `renamed` renamed so.

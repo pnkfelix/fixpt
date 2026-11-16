@@ -275,10 +275,9 @@
                     (cond ((not (string=? head "import")) (s-export body b))
                           ((tagcase b (bind-rib (es) (syntax-entry? es)) (else y #f))
                            (begin (fail-at fail (string-append "a syntax type: a macro's "
-                                                               "binder, `(macro σ made)`, says "
-                                                               "what a use defines, in what its "
-                                                               "signature makes, `(defn (ℓ "
-                                                               "(macro σ made)))`")
+                                                               "binder, `(macro …)`, says what a "
+                                                               "use defines, in what its "
+                                                               "signature makes, `(defn D …)`")
                                            s)
                                   (s-import body b)))
                           (else (s-import body b))))
@@ -670,12 +669,14 @@
       (cond ((string=? n "none") 0) ((string=? n "var") 1) ((string=? n "rib") 2)
             ((string=? n "env") 3) ((string=? n "dvar") 4) ((string=? n "place") 5)
             ;; A macro's binder: its kind the macro's signature.
-            ((and (= (len ds) 3) (syn-symbol? (car ds)) (string=? (syn-name (car ds)) "macro"))
+            ((and (>= (len ds) 3) (syn-symbol? (car ds))
+                  (or (string=? (syn-name (car ds)) "macro/addressed")
+                      (string=? (syn-name (car ds)) "macro")))
              (let ((k (len (get syntax-sigs))))
                (begin (set syntax-sigs (append (get syntax-sigs) (list d))) (+ 100 k))))
             ((and (pair? ds) (syn-symbol? (car ds)) (string=? (syn-name (car ds)) "syntax"))
              (begin (fail-at fail (string-append "a macro's binder is written with its signature, "
-                                                 "`(ℓ (macro σ made))`, not `(syntax …)`")
+                                                 "`(macro …)`, not `(syntax …)`")
                              d)
                     0))
             (else (begin (fail-at fail (string-append "δ is `none`, `var`, `dvar`, `place`, "
@@ -696,12 +697,23 @@
     (let ((name (if (syn-symbol? a) (syn-name a) "")))
       (cond
         ((syn-nil? a) nil)
+        ;; `(path #:a #:d …)`: its steps from the root, first first.
+        ((let ((ps (proper-items a))) (and (pair? ps) (syn-symbol? (car ps))
+                                           (string=? (syn-name (car ps)) "path")))
+         (path-steps fail (cdr (proper-items a))))
         ((and (> (string-length name) 0) (a-or-d? name 0)) (steps name 0 nil))
-        (else
-         (begin (fail-at fail (string-append "an address is a word of `A` (car) and `D` (cdr), "
-                                             "read right to left")
-                         a)
-                (the addr nil)))))))
+        (else (begin (fail-at fail path-usage a) (the addr nil)))))))
+(define path-usage string
+  (string-append "an address is `(path #:a #:d …)`, its steps from the root, `#:a` the car "
+                 "and `#:d` the cdr"))
+(define path-steps (->* (fails syns-a) addr)
+  (lambda (fail ks)
+    (if (null? ks)
+        nil
+        (let ((k (keyword-name (car ks))))
+          (cond ((string=? k "a") (cons #t (path-steps fail (cdr ks))))
+                ((string=? k "d") (cons #f (path-steps fail (cdr ks))))
+                (else (begin (fail-at fail path-usage (car ks)) (the addr nil))))))))
 (define a-or-d? (->* (string int) bool)
   (lambda (s i)
     (or (= i (string-length s))

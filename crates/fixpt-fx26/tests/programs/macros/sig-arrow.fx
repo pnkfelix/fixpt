@@ -1,4 +1,4 @@
-;; ! a macro's signature is `(macro σ made)`: `->` is a procedure's type
+;; ! a macro's signature is `(macro (_ part …) made fact …)`: `->` is a procedure's type
 ;; A macro's signature written as a procedure's type.
 (define-syntax twice
   (-> (expr) expr)

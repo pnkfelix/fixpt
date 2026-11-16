@@ -1,7 +1,7 @@
 ;; => 2
 ;; Recursion over what an ellipsis gives: `or` of any number of parts.
 (define-syntax my-or
-  (macro (expr ...) expr)
+  (macro (_ expr ...) expr)
   (syntax-rules
     ((_) #f)
     ((_ e) e)

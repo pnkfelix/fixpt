@@ -2,7 +2,7 @@
 ;; A name in `(globals …)` the template binds, made fresh there as where it
 ;; is defined.
 (define-syntax define-counter
-  (macro (bvar) defn)
+  (macro (_ bvar) defn)
   (syntax-rules
     ((_ name)
      (begin (define count (ref int @heap) (new 100))

@@ -2,11 +2,11 @@
 ;; An error in text a template made: said where the template wrote it, then
 ;; each use that made it, innermost first (`fixpt`'s `located`).
 (define-syntax add-one
-  (macro (expr) expr)
+  (macro (_ expr) expr)
   (syntax-rules
     ((_ e) (+ e #t))))
 (define-syntax twice-add
-  (macro (expr) expr)
+  (macro (_ expr) expr)
   (syntax-rules
     ((_ e) (add-one e))))
 (twice-add 3)

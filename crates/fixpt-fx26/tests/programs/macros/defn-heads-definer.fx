@@ -2,11 +2,11 @@
 ;; The defined macro makes definitions: where a definition is, its use read
 ;; as one, what it defines seen after it; its name the template's own.
 (define-syntax def-definer
-  (macro (bvar) (defn (A (macro (bvar expr) (defn (A var))))))
+  (macro (_ name @ bvar) (defn (name (macro (_ p1 @ bvar expr) (defn p1)))))
   (syntax-rules
     ((_ name) (define-syntax name (syntax-rules ((_ x e) (define x e)))))))
 (define-syntax via
-  (macro (bvar) (defn (A var)))
+  (macro (_ v @ bvar) (defn v))
   (syntax-rules
     ((_ v) (begin (def-definer my-def) (my-def w 3) (define v (+ w 1))))))
 (via four)

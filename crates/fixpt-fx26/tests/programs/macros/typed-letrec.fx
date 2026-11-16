@@ -4,8 +4,10 @@
 ;; Given the recursive binding, the hole may call it: the template says it
 ;; may not end (`spin`), as it must for every lambda a use may give it.
 (define-syntax call-rec
-  (macro ((bvar #:type (subr spin (int) int))
-   (import (lambda #:type (subr spin (int) int)) (rho (A var)))) expr)
+  (macro (_ f @ (bvar #:type (subr spin (int) int))
+            e @ (lambda #:type (subr spin (int) int)))
+         expr
+    (bind f in e))
   (syntax-rules
     ((_ f e) (letrec ((f (subr spin (int) int) e)) (f 3)))))
 (call-rec g (lambda ((n int)) n))

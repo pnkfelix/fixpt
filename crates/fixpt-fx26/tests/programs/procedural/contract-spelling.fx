@@ -2,7 +2,7 @@
 ;; A transformer that reads its binder's name: a binder spelled `x` gives
 ;; one expansion, any other another. Renamed, the use expands otherwise.
 (define-syntax let1
-  (macro ((bvar expr) (import expr (rho (AA var)))) expr)
+  (macro (_ (p1 @ bvar expr) p2 @ expr) expr (bind p1 in p2))
   (er-macro-transformer
     (lambda (form rename compare)
       (let* ((xe (car (cdr form))) (body (car (cdr (cdr form)))) (b (car xe)))

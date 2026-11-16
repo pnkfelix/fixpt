@@ -2,7 +2,7 @@
 ;; A contract on a syntactic-closure transformer: the body closed in the
 ;; use's environment, the binder as the use wrote it, the rest the macro's.
 (define-syntax let1
-  (macro ((bvar expr) (import expr (rho (AA var)))) expr)
+  (macro (_ (p1 @ bvar expr) p2 @ expr) expr (bind p1 in p2))
   (sc-macro-transformer
     (lambda (form env)
       (let ((xe (car (cdr form))) (body (car (cdr (cdr form)))))

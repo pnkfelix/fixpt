@@ -3,6 +3,6 @@
 ;; names this file's.
 (define limit int 10)
 (define-syntax define-clamped
-  (macro (bvar expr) defn)
+  (macro (_ bvar expr) defn)
   (syntax-rules
     ((_ name e) (begin (define raw e) (define name (if (> raw limit) limit raw))))))

@@ -3,7 +3,7 @@
 ;; names are this file's: `limit` its own, whatever the importer's is.
 (define limit int 10)
 (hide (define secret int 7))
-(define-syntax clamp (macro (expr) expr)
+(define-syntax clamp (macro (_ expr) expr)
   (syntax-rules ((_ e) (let ((v e)) (if (> v limit) limit v)))))
-(hide (define-syntax twice (macro (expr) expr) (syntax-rules ((_ e) (let ((w e)) (+ w w))))))
-(define-syntax clamp2 (macro (expr) expr) (syntax-rules ((_ e) (twice (clamp e)))))
+(hide (define-syntax twice (macro (_ expr) expr) (syntax-rules ((_ e) (let ((w e)) (+ w w))))))
+(define-syntax clamp2 (macro (_ expr) expr) (syntax-rules ((_ e) (twice (clamp e)))))

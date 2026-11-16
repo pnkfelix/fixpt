@@ -1,7 +1,7 @@
 ;; => 2
 ;; A type a use names, defined under that name.
 (define-syntax define-ints
-  (macro (dvar) defn)
+  (macro (_ dvar) defn)
   (syntax-rules
     ((_ t) (define-type t (listof int)))))
 (define-ints ints)

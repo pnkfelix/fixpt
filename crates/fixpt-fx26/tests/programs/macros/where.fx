@@ -3,7 +3,7 @@
 ;; addresses its sibling (car of car of cdr, `AAD`).
 (define-syntax where
   ;; As named: ((body (in expr x)) ((x bvar) (e expr)))
-  (macro ((import expr (rho (AAD var))) (bvar expr)) expr)
+  (macro (_ body @ expr (x @ bvar expr)) expr (bind x in body))
   (syntax-rules
     ((_ body (x e)) (let ((x e)) body))))
 (where (* x 4) (x 3))

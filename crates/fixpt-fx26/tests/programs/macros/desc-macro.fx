@@ -2,7 +2,7 @@
 ;; A macro that makes a description, used where a type is: a payload's
 ;; type by how many parts it has.
 (define-syntax payload
-  (macro (desc ...) desc)
+  (macro (_ desc ...) desc)
   (syntax-rules
     ((_) unit)
     ((_ f) f)

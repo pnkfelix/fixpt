@@ -2,7 +2,7 @@
 ;; `hide` at a program's top level: its forms as if written there, a
 ;; program exporting nothing to hide them from; so a module file's text,
 ;; its own hidden macros among it, runs as a program.
-(hide (define-syntax twice (macro (expr) expr) (syntax-rules ((_ a) (let ((x a)) (+ x x)))))
+(hide (define-syntax twice (macro (_ expr) expr) (syntax-rules ((_ a) (let ((x a)) (+ x x)))))
       (define base int 5))
-(hide (define-syntax plus-base (macro (expr) expr) (syntax-rules ((_ a) (+ a base)))))
+(hide (define-syntax plus-base (macro (_ expr) expr) (syntax-rules ((_ a) (+ a base)))))
 (twice (plus-base 1))

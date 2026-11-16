@@ -3,14 +3,15 @@
 ;; the scope of what comes after it, which may bind its name again, a
 ;; ribcage (`rec-alternating.fx`), as `seq`'s signature, inferred, says.
 (define-syntax-rec
-  (bnd (macro ((mu b (oneof (export () (rho))
-                           (export ((bvar expr)
-                                    . (import (oneof (export () (rho))
-                                                     (export (expr . b) (rho (D rib))))
-                                              (rho (AA var))))
-                                   (rho (AA var) (D rib)))))
-               (import expr (rho (A rib))))
-              expr)
+  (bnd (macro (letrec-shape ((binds (union (end ())
+                                          (bnd ((x @ bvar e @ expr) rest @ . exprs)
+                                            (bind x in rest)
+                                            (export x rest))))
+                             (exprs (union (end ())
+                                           (seq (expr rest @ . binds) (export rest)))))
+                (_ cs @ binds body @ expr))
+              expr
+         (bind cs in body))
        (syntax-rules
          ((_ () body) body)
          ((_ ((x e) . rest) body) (let ((x e)) (seq rest body)))))

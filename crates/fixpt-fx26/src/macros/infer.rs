@@ -533,9 +533,9 @@ impl Macros {
             .zip(&makes)
             .zip(us)
             .map(|((s, m), u)| match m {
-                Makes::Expr => Syn::lst(u.span, vec![Syn::named(u.span, "macro", interner), s, Syn::named(u.span, "expr", interner)]),
+                Makes::Expr => Syn::lst(u.span, vec![Syn::named(u.span, super::ADDRESSED, interner), s, Syn::named(u.span, "expr", interner)]),
                 Makes::Defn => super::defn_arrow(s, u.span, interner),
-                Makes::Type => Syn::lst(u.span, vec![Syn::named(u.span, "macro", interner), s, Syn::named(u.span, "desc", interner)]),
+                Makes::Type => Syn::lst(u.span, vec![Syn::named(u.span, super::ADDRESSED, interner), s, Syn::named(u.span, "desc", interner)]),
             })
             .collect())
     }
@@ -1282,12 +1282,17 @@ pub(super) fn sig_text(s: &Syn, interner: &Interner) -> String {
 
 fn shown_bind(b: &Bind, at: At, interner: &mut Interner) -> Syn {
     let sym = |s: &str, i: &mut Interner| Syn::named(at, s, i);
+    // `(path #:a #:d …)`, its steps from the root, first first.
     let addr = |a: &Addr, i: &mut Interner| {
         if a.is_empty() {
             Syn::nil(at)
         } else {
-            let w: String = a.iter().rev().map(|s| if *s { 'A' } else { 'D' }).collect();
-            Syn::named(at, &w, i)
+            let mut items = vec![sym("path", i)];
+            for s in a {
+                let k = i.intern(if *s { "a" } else { "d" });
+                items.push(Syn::new(at, crate::heap_syn::V::Keyword(k), i));
+            }
+            Syn::lst(at, items)
         }
     };
     let rib = |es: &[(Addr, Delta)], i: &mut Interner| {
@@ -1369,7 +1374,7 @@ mod tests {
                     w = crate::macros::defn_arrow(w, f.at(), &mut interner);
                 } else {
                     let made = if desc { "desc" } else { "expr" };
-                    w = Syn::lst(f.at(), vec![Syn::named(f.at(), "macro", &mut interner), w, Syn::named(f.at(), made, &mut interner)]);
+                    w = Syn::lst(f.at(), vec![Syn::named(f.at(), crate::macros::ADDRESSED, &mut interner), w, Syn::named(f.at(), made, &mut interner)]);
                 }
                 let w = w.written(&interner);
                 let Ok((lits, clauses)) = crate::macros::rules_parts(&rules[1..], f.at(), &interner) else { continue };

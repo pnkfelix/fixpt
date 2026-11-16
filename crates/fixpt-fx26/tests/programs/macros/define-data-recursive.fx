@@ -2,13 +2,13 @@
 ;; A datatype whose variants name it, by `define-data`: a type's name is in
 ;; scope in itself.
 (define-syntax payload
-  (macro (desc ...) desc)
+  (macro (_ desc ...) desc)
   (syntax-rules
     ((_) unit)
     ((_ f) f)
     ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
-  (macro (dvar (label desc ...) ...) defn)
+  (macro (_ dvar (label desc ...) ...) defn)
   (syntax-rules
     ((_ name (t field ...) ...) (define-type name (sumof (t (payload field ...)) ...)))))
 (define-data tree (#:leaf int) (#:node tree tree))

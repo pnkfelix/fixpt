@@ -9,7 +9,9 @@
 ;;; expander's parts are one.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define exports-module ((proj (load-module "fx26:macros-exports.fx") rs re rm rc rp)))
+(define facts-module ((proj (load-module "fx26:macros-facts.fx") rs re rm rc rp)))
+(define exports-module (with facts-module exports-module))
+(import facts-module contract? elaborated)
 (define align-module (with exports-module align-module))
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
@@ -20,7 +22,7 @@
         (effect parses))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty kind-of syn-keyword?
         keyword-name show-syn marks mark-count no-trailmark proper-items s-export bind-rib
-        syntax-sig-of (type fails sty entries))
+        path-usage syntax-sig-of (type fails sty entries))
 (import align-module nnodes node-syn node-core node-kids k-pvar defined mark-now syntax-read!
         syntax-sig-read (type clauses macro-env))
 
@@ -469,8 +471,23 @@
 ;; description).
 (define-type signed (tupleof syns-a sty int))
 (define signature-of (->* (fails syn) signed)
-  (lambda (fail s)
-    (let* ((poly (signature-poly fail s)) (made (signature-made fail (extract poly 2)))
+  (lambda (fail s0)
+    (let* ((poly0 (signature-poly fail s0))
+           ;; In shapes and facts: elaborated to Herman's form, which is read.
+           (poly (if (contract? (extract poly0 2))
+                     (tuple (extract poly0 1) (elaborated fail (extract poly0 2)))
+                     poly0))
+           (sig (extract poly 2)) (sigs (proper-items sig))
+           (lettered (if (and (pair? sigs) (syn-symbol? (car sigs))
+                              (string=? (syn-name (car sigs)) "macro/addressed"))
+                         (lettered-in sig)
+                         nil))
+           (said (if (null? lettered)
+                     #u
+                     (fail-at fail (string-append "`" (show-syn (car lettered)) "` is an address "
+                                                  "in Herman's letters: " path-usage)
+                              (car lettered))))
+           (made (signature-made fail (extract poly 2)))
            (t (read-sty fail (extract made 1) nil nil)))
       (begin
         ;; Each macro it says a use defines, its signature read now.
@@ -543,6 +560,38 @@
                     body))
             (else (let ((rho (mk-list (cons (mk-symbol "rho" a b) entries) a b)))
                     (mk-list (list (mk-symbol "export" a b) body rho) a b)))))))
+;; An address of signature `s` written as Herman's letters, `AAD`, in a list
+;; of one: the kernel's own signatures keep them, a program's write `(path
+;; …)` (`macros.rs`'s `lettered`).
+(define lettered-in (->* (syn) syns-a)
+  (lambda (s)
+    (let* ((items (proper-items s))
+           (head (if (and (pair? items) (syn-symbol? (car items))) (syn-name (car items)) ""))
+           (here (cond ((or (string=? head "rho") (string=? head "defn"))
+                        (lettered-entries (cdr items)))
+                       ((and (or (string=? head "at") (string=? head "shape")) (= (len items) 2)
+                             (letters? (nth items 1)))
+                        (list (nth items 1)))
+                       (else nil))))
+      (if (null? here) (lettered-each items) here))))
+(define lettered-each (->* (syns-a) syns-a)
+  (lambda (xs)
+    (if (null? xs)
+        nil
+        (let ((r (lettered-in (car xs)))) (if (null? r) (lettered-each (cdr xs)) r)))))
+(define lettered-entries (->* (syns-a) syns-a)
+  (lambda (es)
+    (cond ((null? es) nil)
+          ((and (pair? (proper-items (car es))) (letters? (car (proper-items (car es)))))
+           (list (car (proper-items (car es)))))
+          (else (lettered-entries (cdr es))))))
+(define letters? (->* (syn) bool)
+  (lambda (a) (and (syn-symbol? a) (letters-from? (syn-name a) 0))))
+(define letters-from? (->* (string int) bool)
+  (lambda (n i)
+    (or (= i (string-length n))
+        (and (or (char=? (string-ref n i) #\A) (char=? (string-ref n i) #\D))
+             (letters-from? n (+ i 1))))))
 ;; How macro `n`'s refusal is said, its signature inferred, `shown`, not
 ;; fitting its clauses: refused, said so on a line of its own, then what was
 ;; inferred and how one is written (`macros.rs`'s `refused_inferred`).
@@ -553,15 +602,16 @@
                            "from its clauses does not fit them: " m "\n  inferred: " shown
                            "\n  write one: (define-syntax " n " SIGNATURE (syntax-rules …))")
             a b))))
-;; A signature's `(macro σ made)`: `σ`, and what it makes, 0 an expression,
-;; `expr`, 1 definitions, `defn`, 2 a description, `desc`; always written.
-;; `(macro σ (defn (ℓ δ) …))`: definitions, `(export σ (rho (ℓ δ) …))`
+;; A signature in Herman's form, `(macro/addressed σ made)`, as one in shapes
+;; and facts is elaborated to: `σ`, and what it makes, 0 an expression,
+;; `expr`, 1 definitions, `defn`, 2 a description, `desc`. `(macro/addressed
+;; σ (defn (ℓ δ) …))`: definitions, `(export σ (rho (ℓ δ) …))`
 ;; (`macros.rs`'s `signature`).
 (define signature-made (->* (fails syn) (tupleof syn int))
   (lambda (fail s)
     (let ((items (proper-items s)))
       (if (and (= (len items) 3) (syn-symbol? (car items))
-               (string=? (syn-name (car items)) "macro"))
+               (string=? (syn-name (car items)) "macro/addressed"))
           (let* ((m (nth items 2)) (ms (proper-items m))
                  (made (cond ((syn-symbol? m) (syn-name m))
                              ((and (pair? ms) (syn-symbol? (car ms))
@@ -572,17 +622,22 @@
                   ((string=? made "(defn") (tuple (defined-in fail (nth items 1) m (cdr ms)) 1))
                   ((string=? made "desc") (tuple (nth items 1) 2))
                   ((string=? made "expr") (tuple (nth items 1) 0))
-                  (else (begin (fail-at fail (string-append "a signature `(macro σ made)` "
-                                                            "makes `expr`, `defn`, `(defn (ℓ "
-                                                            "δ) …)` or `desc`")
+                  (else (begin (fail-at fail (string-append "what a signature's uses make is "
+                                                            "`expr`, `defn`, `(defn D …)` or "
+                                                            "`desc`")
                                         (nth items 2))
                                (tuple s 0)))))
-          (begin (fail-at fail (if (and (pair? items) (syn-symbol? (car items))
-                                        (string=? (syn-name (car items)) "->"))
-                                   (string-append "a macro's signature is `(macro σ made)`: `->` "
-                                                  "is a procedure's type")
-                                   (string-append "a signature is `(macro σ made)`, what its uses "
-                                                  "make written: `expr`, `defn`, `(defn (ℓ δ) …)` "
-                                                  "or `desc`"))
-                          s)
-                 (tuple s 0))))))
+          (let ((h (if (and (pair? items) (syn-symbol? (car items))) (syn-name (car items)) "")))
+            (begin (fail-at fail (cond ((string=? h "->")
+                                        (string-append "a macro's signature is `(macro (_ part …) "
+                                                       "made fact …)`: `->` is a procedure's type"))
+                                       ((string=? h "macro")
+                                        (string-append "a signature in shapes and facts is `(macro "
+                                                       "(_ part …) made fact …)`; Herman's, "
+                                                       "`(macro/addressed σ made)`"))
+                                       (else
+                                        (string-append "a signature is `(macro (_ part …) made "
+                                                       "fact …)`, what its uses make written: "
+                                                       "`expr`, `defn`, `(defn D …)` or `desc`")))
+                            s)
+                   (tuple s 0)))))))

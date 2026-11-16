@@ -2,7 +2,7 @@
 ;; A family the template names, the top level's, whatever the use binds of
 ;; its name.
 (define-type (box (a type)) (listof a))
-(define-syntax boxed (macro (expr) expr)
+(define-syntax boxed (macro (_ expr) expr)
   (syntax-rules
     ((_ e) (length (the (box int) e)))))
 (define g (poly ((box (=> (type) type))) (subr pure () nat))

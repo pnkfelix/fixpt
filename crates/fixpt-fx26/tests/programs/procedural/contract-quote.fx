@@ -3,7 +3,7 @@
 ;; to the binder are, and what it quotes is not, so the expansion is held
 ;; to a use α-equivalent to it.
 (define-syntax let1
-  (macro ((bvar expr) (import expr (rho (AA var)))) expr)
+  (macro (_ (p1 @ bvar expr) p2 @ expr) expr (bind p1 in p2))
   (er-macro-transformer
     (lambda (form rename compare)
       (let ((xe (car (cdr form))) (body (car (cdr (cdr form)))))

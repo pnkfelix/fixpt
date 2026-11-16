@@ -4,7 +4,7 @@
 ;; in the defined macro's template is placed where it may be more than
 ;; once, so its signature says `many`.
 (define-syntax def-adder
-  (macro (bvar (many expr)) defn)
+  (macro (_ bvar (many expr)) defn)
   (syntax-rules
     ((_ name k) (define-syntax name (syntax-rules ((_ e) (+ e k)))))))
 (def-adder add5 5)

@@ -2,22 +2,23 @@
 ;; A head read as a macro's use, then, once a use around it is read as one
 ;; of a macro that binds its name, as an application: refused.
 (define-syntax def-adder
-  (macro (bvar (many expr)) (defn (A (macro (expr) expr))))
+  (macro (_ name @ bvar (many expr)) (defn (name (macro (_ expr) expr))))
   (syntax-rules
     ((_ name k) (define-syntax name (syntax-rules ((_ e) (+ e k)))))))
 (define-syntax def-mk
-  (macro (bvar)
-      (defn (A (macro (bvar)
-                           (defn (A (macro ((bvar expr) (import expr (rho (AA var)))) expr)))))))
+  (macro (_ name @ bvar)
+         (defn (name (macro (_ n @ bvar)
+                            (defn (n (macro (_ (x @ bvar e @ expr) body @ expr) expr
+                                       (bind x in body))))))))
   (syntax-rules
     ((_ name)
      (define-syntax name
-       (macro (bvar)
-                (defn (A (macro ((bvar expr) (import expr (rho (AA var)))) expr))))
+       (macro (_ n @ bvar)
+              (defn (n (macro (_ (x @ bvar e @ expr) body @ expr) expr (bind x in body)))))
        (syntax-rules
-         ((_ n) (define-syntax n (macro ((bvar expr) (import expr (rho (AA var)))) expr)
+         ((_ n) (define-syntax n (macro (_ (x @ bvar e @ expr) body @ expr) expr (bind x in body))
                   (syntax-rules ((_ (x e) body) (let ((x e)) body))))))))))
 (define-syntax twisted
-  (macro (bvar) (defn (A var)))
+  (macro (_ v @ bvar) (defn v))
   (syntax-rules
     ((_ v) (begin (def-adder m 5) (def-mk mk) (mk lt) (define v (lt (m 1) (m 2)))))))

@@ -3,7 +3,7 @@
 ;; use's own `tmp`.
 (define-syntax swap!
   ;; As named: ((a id) (b id))
-  (macro (id id) expr)
+  (macro (_ id id) expr)
   (syntax-rules
     ((_ a b) (let ((tmp (get a))) (begin (set a (get b)) (set b tmp))))))
 (let ((tmp (new 1)) (other (new 2)))

@@ -4,7 +4,7 @@
 ;; over its holes; polymorphic in the body's effect.
 (define-syntax unless
   (poly ((e effect))
-    (macro ((expr #:type bool #:effect pure) (expr #:type unit #:effect e)) expr))
+    (macro (_ (expr #:type bool #:effect pure) (expr #:type unit #:effect e)) expr))
   (syntax-rules
     ((_ c body) (if c #u body))))
 (unless (null? '()) #u)

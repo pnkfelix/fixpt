@@ -2511,3 +2511,85 @@ user:
    refused, saying how they are written now. *Built*, both front ends;
    every signature rewritten by script. (This section's notation above is
    as it was written then.)
+
+## Decided: signatures in shapes and facts, notation C revived (2026-11-15)
+
+The user's: Herman's addresses (`A`, `AA`, `ADA`) will not survive code
+review; a signature names the parts it speaks of, as Rust's `x @ pat`
+does, and says their scopes of those names. Notation C of "Three notations,
+side by side" (above, 2026-11-08: shapes and facts, after Pombrio,
+Krishnamurthi and Wand), brought up to date, decided with the user. Whether
+`do` (TODO §223) is a gap that matters is found by building it, not by
+waiting for a better notation.
+
+```text
+signature ::= (macro SHAPE MADE FACT …)          C
+            | (macro/addressed σ MADE)           Herman's, by paths
+            | (poly ((t kind) …) signature)
+SHAPE     ::= (letrec-shape ((name NODE-OR-UNION) …) TOP) | TOP
+TOP       ::= (_ PART …)                         as a `syntax-rules` pattern
+NODE      ::= (node-name TREE FACT …)
+UNION     ::= (union NODE …)
+TREE      ::= the shape of a part: PART, or a list of them
+PART      ::= name @ σ | σ                       labelled, or not
+            | … name @ . σ                       a list's tail, labelled
+σ         ::= expr | bvar | id | data | desc | label | lambda | dvar | kind
+            | () | (PART …) | (PART … . σ) | (PART ...) …
+            | (many σ) | (literal n) | (trailmark n) | typed holes
+            | a `letrec-shape` name
+FACT      ::= (bind L in L)                      L's insides see what the
+                                                 other provides (down)
+            | (export L …)                       the node provides each's,
+                                                 one level (`let`'s)
+            | (export* L …)                      nested, each inside those
+                                                 before (`let*`'s)
+L         ::= label | (label ...)                every repetition's, one level
+MADE      ::= expr | desc | defn
+            | (defn D …)                         what a use defines
+D         ::= label | (label (macro …))          a value's binder; a macro's,
+                                                 of that signature
+```
+
+- **Labels without parentheses** (the user's): in a list, `name @ σ` is one
+  part, the `@` marking the triple. A list's tail labelled is `name @ . σ`,
+  the label before the dot (the user's choice over parenthesizing it): the
+  reader takes one datum after a dot, and `(… rest @ . clauses)` reads
+  today. A lone `@` is no region's name (those are `@r`, one token), so it
+  is free in a shape.
+- **Facts after the shape**, about the labels of their node's region
+  alone (a node, a `union`'s member, a `mu`'s body, an ellipsis' element);
+  a label is its node's, not a pattern variable, so clauses name their
+  variables as they please. `export` and `export*` are what told §272's
+  one rib from its ribcage, in words.
+- **What a use defines** is said in what it makes, `(defn D …)`, its
+  labels; the top node has no `export` of its own.
+- **Elaborated, the checker unchanged:** each label its part's address from
+  its region's root; `bind` an import on the part, `export` a rib's
+  export, `export*` a ribcage's; δ from the part (a `bvar` `var`, a
+  `dvar` `dvar`, a part of a named shape `rib` or its ribcage `(at ℓ)`),
+  a `union`'s members' exports of one kind, an empty one where a member
+  says none.
+- **Herman's form stays writable,** less conveniently: `(macro/addressed
+  σ MADE)`, each address a path from the root, first step first, `(path
+  #:d #:a #:a)` for what was `AAD` (read right to left, as `cadr` is). The
+  kernel's own signatures keep the letters (no program writes them).
+- **Printed** in C, an inferred signature's labels the first clause's
+  pattern variables where it has them, else `p1`, `p2`, …; written back,
+  the same signature (a property to test).
+- **Built** (2026-11-15), both front ends: C elaborated syntax to syntax
+  (`macros/contract.rs`; FX-26's `macros-facts.fx`, between
+  `macros-exports.fx` and `macros-files.fx`), then read as Herman's form;
+  `macro/addressed` with paths, its letters refused (the kernel's own keep
+  them); `macro` C alone, Herman's under it refused, saying both. Every
+  test's signature moved to C by a script (a part a scope or `defn` names
+  labelled by the first clause's pattern variable there), the recursive
+  ones and a `oneof` with a binding member by hand; Herman's kept where
+  the test is of it (`sig-addressed.fx`, `sig-letters.fx`, the `export`
+  synonym, `desc-delta-mismatch.fx`, `defn-syntax-import.fx`). A macro's
+  binder keeps its signature as written, so a message says it so. Each
+  repeated element's own scope, as `ellipsis-own-scope.fx` needs, is a
+  named node: `(letrec-shape ((pair (each (v @ bvar e @ expr) (bind v in
+  e)))) (_ pair ...))`. *Not yet*: inferred signatures printed in C (they
+  are shown in Herman's form, `macro/addressed`, for now); `do` (TODO
+  §223); a fact binding in a repeated part, a repeated part in a repeated
+  part.

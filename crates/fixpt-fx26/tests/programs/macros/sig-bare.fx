@@ -1,4 +1,4 @@
-;; ! a signature is `(macro σ made)`, what its uses make written
+;; ! a signature is `(macro (_ part …) made fact …)`, what its uses make written
 ;; A signature that leaves what its uses make unsaid.
 (define-syntax twice
   (expr)

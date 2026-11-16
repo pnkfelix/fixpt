@@ -7,7 +7,7 @@
           (define less (subr pure (t t) bool) (lambda (a b) (< a b)))))
 (define more (subr pure (int) int) (lambda (x) x))
 (define-syntax call-more
-  (macro (id expr) expr)
+  (macro (_ id expr) expr)
   (syntax-rules
     ((_ m e) ((with m more) e))))
 (call-more int-order 1)

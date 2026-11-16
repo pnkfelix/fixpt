@@ -197,11 +197,15 @@
   (lambda (d)
     (cond ((= d 0) "none") ((= d 1) "var") ((= d 2) "rib") ((= d 3) "env") ((= d 4) "dvar")
           (else "place"))))
+;; `(path #:a #:d …)`, its steps from the root, first first.
 (define show-addr (->* (addr int int) syn)
-  (lambda (x a b) (if (null? x) (mk-list nil a b) (mk-symbol (addr-letters x "") a b))))
-(define addr-letters (->* (addr string) string)
-  (lambda (x out)
-   (if (null? x) out (addr-letters (cdr x) (string-append (if (car x) "A" "D") out)))))
+  (lambda (x a b)
+    (if (null? x) (mk-list nil a b) (mk-list (cons (mk-symbol "path" a b) (path-keys x a b)) a b))))
+(define path-keys (->* (addr int int) syns-a)
+  (lambda (x a b)
+    (if (null? x)
+        nil
+        (cons (atom (symbol->keyword (if (car x) 'a 'd)) a b 0) (path-keys (cdr x) a b)))))
 
 ;; Signature `s` as a message says it (`infer.rs`'s `sig_text`): each
 ;; annotation, `union`, `mu`, `many` or literal that is a list's rest after

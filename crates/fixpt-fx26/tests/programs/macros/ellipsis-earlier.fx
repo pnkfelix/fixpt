@@ -3,7 +3,7 @@
 ;; first repetition the clause before, in the others the repetition before,
 ;; which a name cannot say.
 (define-syntax summed
-  (macro (expr ...) expr)
+  (macro (_ expr ...) expr)
   (syntax-rules
     ((_ e ...) (let* ((t 0) (t (+ t e)) ...) 0))))
 (summed 1 2 3)

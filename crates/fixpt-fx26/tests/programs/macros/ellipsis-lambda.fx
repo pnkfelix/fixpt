@@ -1,7 +1,7 @@
 ;; => 1
 ;; A list of binders, repeated, binds each of them: a `lambda`'s parameters.
 (define-syntax lam
-  (macro (bvar ...) expr)
+  (macro (_ bvar ...) expr)
   (syntax-rules
     ((_ x ...) (lambda (x ...) 1))))
 (define f (subr pure (int int) int) (lam a b))

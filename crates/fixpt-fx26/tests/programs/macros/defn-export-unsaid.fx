@@ -2,10 +2,10 @@
 ;; What a nested use defines unsaid by its signature: refused, not read at
 ;; the top level, which the template would seem to mean.
 (define-syntax define-const
-  (macro (bvar expr) defn)
+  (macro (_ bvar expr) defn)
   (syntax-rules
     ((_ n e) (define n e))))
 (define-syntax define-via
-  (macro (bvar) defn)
+  (macro (_ bvar) defn)
   (syntax-rules
     ((_ name) (begin (define-const x 1) (define name x)))))

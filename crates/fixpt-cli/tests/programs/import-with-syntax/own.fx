@@ -3,10 +3,10 @@
 ;; whatever a binder around the use calls the same; that binder is renamed.
 (define limit int 10)
 (hide (define secret int 7))
-(define-syntax capped (macro (expr) expr)
+(define-syntax capped (macro (_ expr) expr)
   (syntax-rules ((_ e) (let ((v e)) (if (< v limit) v limit)))))
-(hide (define-syntax plus-secret (macro (expr) expr) (syntax-rules ((_ e) (+ e secret)))))
-(define-syntax define-twice (macro (bvar expr) defn)
+(hide (define-syntax plus-secret (macro (_ expr) expr) (syntax-rules ((_ e) (+ e secret)))))
+(define-syntax define-twice (macro (_ bvar expr) defn)
   (syntax-rules ((_ n e) (begin (define raw e) (define n (+ (capped raw) (capped raw)))))))
 (define a int (capped 3))
 ;; The use's `limit`, 100, is not the template's, 10.

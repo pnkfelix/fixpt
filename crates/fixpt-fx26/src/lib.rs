@@ -553,6 +553,10 @@ pub const MACROS_MATCH: &str = include_str!("macros-match.fx");
 /// nested uses bind (`macros.rs`'s `exports`, `binders_under`).
 pub const MACROS_EXPORTS: &str = include_str!("macros-exports.fx");
 
+/// A signature in shapes and facts elaborated to Herman's form
+/// (`macros/contract.rs`'s), on top of [`MACROS_EXPORTS`].
+pub const MACROS_FACTS: &str = include_str!("macros-facts.fx");
+
 /// What the expander reads of a file's macros and of the forms ahead, which
 /// holds no state of its own (`macros.rs`'s `import_file_macros`).
 pub const MACROS_FILES: &str = include_str!("macros-files.fx");
@@ -838,7 +842,7 @@ pub const READER_ALONE: &str = include_str!("reader-alone.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 226] = [
+pub const FRONT_END_MODULES: [(&str, &str); 227] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -909,6 +913,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 226] = [
     ("macros-shapes.fx", MACROS_SHAPES),
     ("macros-match.fx", MACROS_MATCH),
     ("macros-exports.fx", MACROS_EXPORTS),
+    ("macros-facts.fx", MACROS_FACTS),
     ("macros-files.fx", MACROS_FILES),
     ("macros-infer.fx", MACROS_INFER),
     ("macros-show.fx", MACROS_SHOW),

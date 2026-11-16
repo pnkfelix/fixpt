@@ -7,11 +7,11 @@
   (module (define-type t int)
           (define less (subr pure (t t) bool) (lambda (a b) (< a b)))))
 (define-syntax max-fn
-  (macro () expr)
+  (macro (_) expr)
   (syntax-rules
     ((_) (lambda ((o ordered) (a (select o t)) (b (select o t))) (if ((with o less) a b) b a)))))
 (define-syntax less-of
-  (macro (id expr expr) expr)
+  (macro (_ id expr expr) expr)
   (syntax-rules
     ((_ m x y) ((with m less) x y))))
 (define max-of (subr pure ((o : ordered) (select o t) (select o t)) (select o t)) (max-fn))

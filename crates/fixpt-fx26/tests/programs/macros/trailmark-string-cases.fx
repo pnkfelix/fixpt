@@ -6,7 +6,7 @@
 ;; "Trailmarks").
 (define-syntax-rec
   (string-cases
-   (macro ((many expr) . (mu l (oneof (((trailmark else) expr)) ((expr expr) . l)))) expr)
+   (macro (_ (many expr) . (mu l (oneof (((trailmark else) expr)) ((expr expr) . l)))) expr)
                 (syntax-rules #:trailmarks (else)
                   ((_ v (else d)) d)
                   ((_ v (k e) . rest) (if (string=? v k) e (string-cases v . rest))))))

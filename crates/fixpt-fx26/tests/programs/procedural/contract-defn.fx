@@ -5,14 +5,14 @@
 ;; helper of its own an alias; and a `syntax-rules` template that uses it
 ;; sees the name defined.
 (define-syntax define-const
-  (macro (bvar expr) (defn (A var)))
+  (macro (_ p1 @ bvar expr) (defn p1))
   (er-macro-transformer
     (lambda (form rename compare)
       `(,(rename 'begin)
          (,(rename 'define) ,(rename 'v) int ,(car (cdr (cdr form))))
          (,(rename 'define) ,(car (cdr form)) int (,(rename '+) ,(rename 'v) 1))))))
 (define-syntax define-via
-  (macro (bvar) defn)
+  (macro (_ bvar) defn)
   (syntax-rules
     ((_ name) (begin (define-const x 4) (define name (+ x 5))))))
 (define-const seven 6)

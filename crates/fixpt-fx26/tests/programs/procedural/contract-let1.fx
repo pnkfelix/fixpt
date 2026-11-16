@@ -5,7 +5,7 @@
 ;; again with the binder renamed, `body` in its scope, `e` not.
 (define-syntax let1
   ;; As named: ((x bvar) (e expr)) (body (in expr x))
-  (macro ((bvar expr) (import expr (rho (AA var)))) expr)
+  (macro (_ (p1 @ bvar expr) p2 @ expr) expr (bind p1 in p2))
   (er-macro-transformer
     (lambda (form rename compare)
       (let ((xe (car (cdr form))) (body (car (cdr (cdr form)))))

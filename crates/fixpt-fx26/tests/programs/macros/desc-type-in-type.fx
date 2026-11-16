@@ -1,6 +1,6 @@
 ;; => 2
 ;; A use's type placed inside a template's type.
-(define-syntax as-list (macro (desc expr) expr)
+(define-syntax as-list (macro (_ desc expr) expr)
   (syntax-rules
     ((_ t e) (length (the (listof t) e)))))
 (as-list int (list 1 2))

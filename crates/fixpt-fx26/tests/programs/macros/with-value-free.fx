@@ -4,7 +4,7 @@
   (module (define-type t int)
           (define less (subr pure (t t) bool) (lambda (a b) (< a b)))))
 (define-syntax less?
-  (macro (expr expr) expr)
+  (macro (_ expr expr) expr)
   (syntax-rules
     ((_ x y) ((with int-order less) x y))))
 (less? 1 2)

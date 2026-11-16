@@ -6,7 +6,7 @@
 (define pos? (subr pure ((x : int)) bool (ensures r (or (not r) (< 0 x))))
   (lambda (x) (< 0 x)))
 (define-syntax define-sum
-  (macro (bvar bvar) defn)
+  (macro (_ bvar bvar) defn)
   (syntax-rules
     ((_ name a)
      (define name (subr pure ((a : int) (b : int)) int
@@ -14,7 +14,7 @@
                     (ensures r (<= a r)))
        (lambda (x y) (+ x y))))))
 (define-syntax define-int-test
-  (macro (bvar) defn)
+  (macro (_ bvar) defn)
   (syntax-rules
     ((_ name) (define name (-> ((oneof int string)) (bool (then (shape 0 int)) (else))) int?))))
 (define-sum add a)

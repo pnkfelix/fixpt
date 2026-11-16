@@ -3,7 +3,7 @@
 ;; it, in the body's scope.
 ;; As named: ((p dvar) (body (in expr p p-value)))
 (define-syntax with-arena
-  (macro (dvar (import expr (rho (A place)))) expr)
+  (macro (_ p @ place body @ expr) expr (bind p in body))
   (syntax-rules
     ((_ p body) (letrena p body))))
 (with-arena a (car (the (listof int a) (rcons a 3 nil))))

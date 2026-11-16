@@ -2,7 +2,7 @@
 ;; A `define-rec` group a use names: each member in the scope of the whole
 ;; group.
 (define-syntax define-parity
-  (macro (bvar bvar) defn)
+  (macro (_ bvar bvar) defn)
   (syntax-rules
     ((_ ev od)
      (define-rec (ev (->* (int) bool) (lambda ((n int)) (if (= n 0) #t (od (- n 1)))))

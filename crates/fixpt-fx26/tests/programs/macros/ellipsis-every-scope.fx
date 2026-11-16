@@ -3,7 +3,9 @@
 ;; (`TODO.md` §223). The signature says each `e` sees its own `v`; the
 ;; template puts every `e` in every `v`'s scope.
 (define-syntax m
-  (macro ((bvar (import expr (rho (A var)))) ...) expr)
+  (macro (letrec-shape ((pair (each (v @ bvar e @ expr) (bind v in e))))
+           (_ pair ...))
+         expr)
   (syntax-rules
     ((_ (v e) ...) ((lambda ((v int) ...) (list e ...)) 1 ...))))
 (m (a b) (b a))
