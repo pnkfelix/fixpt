@@ -6888,7 +6888,9 @@ the conversions' definitions reach the FX-26 checker apart from the
 form is declared), or after the mark is taken. The REPL is likely the
 same. Not yet looked into.
 
-## 272. Two macros' `mu` signatures of one list, written from opposite ends, not taken (found 2026-11-14)
+## 272. Two macros' `mu` signatures of one list, written from opposite ends, not taken (found 2026-11-14; *resolved* 2026-11-15: the signature was wrong)
+
+*Resolved* (2026-11-15, the user asking whether the recursive types' comparison is at fault): it is not. The signature below says the list's binders one rib, `(rho (AA var) (D rib))`; but each binder is in the scope of what comes after it, which may bind its name again, a ribcage, `(cage (at D) (rho (AA var)))`, as the signatures inferred say. Written so, from either end, both written or either inferred, they are taken, in both front ends: one list read from its two ends is one type, its `mu`s compared unrolled. The refusals below were right. Tests: `macros/rec-alternating*.fx`.
 
 Even/odd macros whose binding toggles, `define-syntax-rec`, run inferred
 (`=> 3`):
