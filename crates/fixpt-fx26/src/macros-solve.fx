@@ -1,12 +1,14 @@
 ;;; Typed hygienic macros, in FX-26: what a signature inferred says of the
 ;;; scopes, from where the templates place each part (`infer.rs`'s
 ;;; `solve`), and the iterations to the signature that says the same twice
-;;; (`infer`). On top of `macros-show.fx`, how one is written, and through
+;;; (`infer`). On top of `macros-shown.fx`, how one is shown, and through
 ;;; it `macros-infer.fx`, which it gives on (`infer-module`), so that
 ;;; `macros.fx` takes one instance of each through it.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-(define show-module ((proj (load-module "fx26:macros-show.fx") rs re rm rc rp)))
+(define shown-module ((proj (load-module "fx26:macros-shown.fx") rs re rm rc rp)))
+(define show-module (with shown-module show-module))
+(import shown-module in-shapes)
 (define infer-module (with show-module infer-module))
 (define files-module (with infer-module files-module))
 (define align-module (with files-module align-module))
@@ -31,6 +33,14 @@
 (import show-module show-sty sig-text shown)
 (define exports-module (with files-module exports-module))
 (import exports-module (type exported))
+
+;; Signature `sig`, inferred for a macro whose clauses are `cs`, as a message says it: in shapes
+;; and facts, labelled by its first clause's pattern, if one says it; else in Herman's form
+;; (`macros.rs`'s `shown_inferred`).
+(define sig-shown (->* (syns-a syn) string)
+  (lambda (cs sig)
+    (let ((c (in-shapes sig (if (null? cs) nil (list (car cs))))))
+      (sig-text (if (null? c) sig (car c))))))
 
 ;;; ------------------------------------------------------------ scopes
 

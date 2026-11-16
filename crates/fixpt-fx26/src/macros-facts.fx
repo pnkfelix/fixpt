@@ -14,7 +14,7 @@
 (import reader-types atom lst dotted (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum len
         nth mk-list mk-symbol (type syns-a names))
-(import types-module fail-at split syn-nil? syn-keyword? proper-items (type fails))
+(import types-module fail-at split syn-nil? syn-keyword? proper-items show-syn (type fails))
 
 ;; What a labelled part gives a `bind` or an `export` (`contract.rs`'s
 ;; `Gives`): 0 nothing, 1 a value's binder, 2 a description's, 3 a place's,
@@ -587,8 +587,20 @@
   (lambda (fail sigma xs)
     (if (null? xs)
         sigma
-        (let* ((p (extract (car xs) 1)) (same (adds-at p xs)) (rest (adds-not-at p xs)))
+        (let* ((p (extract (car xs) 1)) (same (distinct-from (adds-at p xs) nil))
+               (rest (adds-not-at p xs)))
           (elements-annotated fail (element-annotated fail sigma p same) rest)))))
+;; Entries `xs`, each once, the first kept, past those `seen`: however many
+;; facts name `(v ...)`, an element exports `v` once.
+(define distinct-from (->* (syns-a syns-a) syns-a)
+  (lambda (xs seen)
+    (cond ((null? xs) nil)
+          ((syn-in? (car xs) seen) (distinct-from (cdr xs) seen))
+          (else (cons (car xs) (distinct-from (cdr xs) (cons (car xs) seen)))))))
+(define syn-in? (->* (syn syns-a) bool)
+  (lambda (x ys)
+    (and (not (null? ys))
+         (or (string=? (show-syn x) (show-syn (car ys))) (syn-in? x (cdr ys))))))
 (define adds-at (->* (steps adds) syns-a)
   (lambda (p xs)
     (cond ((null? xs) nil)

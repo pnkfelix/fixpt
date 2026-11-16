@@ -7263,15 +7263,18 @@ nested use defines (`typed-macros.md`, "Decided: a template's heads read by
 their scope, to a fixed point"). `(macro σ made)` is refused in an import
 "not yet", never by the grammar.
 
-## 287. A module file's own top level using a macro-defining macro (found 2026-11-15, untested)
+## 287. A module file's own top level using a macro-defining macro (found 2026-11-15; its own use tested 2026-11-16, its export open)
 
 A file's top-level `define-syntax`es are its macros (`import_file_macros`
 collects them by their forms, `file_own_expanded_syn`), but a macro a
 use of a macro-defining macro makes at the file's top level is made by an
-expansion, not written: whether `import-with-syntax` exports it, and
-whether the file's own later forms see it, is not tested. Test both front
-ends; if it is not exported, decide whether it should be (as a written one
-is) or say so where it is made.
+expansion, not written. Tested (2026-11-16, both front ends, every
+machine): the file's own later forms see it (`import-with-syntax/own.fx`,
+`clamp`, its `limit` the file's). Not exported: a program that imports the
+file with `import-with-syntax` and uses `clamp` is refused, "unbound
+variable `clamp`", in both front ends alike. To decide: export it, as a
+written one is (hidden if its use is in a `hide`), or refuse its use from
+outside saying where it is made, not that it is unbound.
 
 ## 288. The old `(macro (export σ β) defn)` taken out (2026-11-15)
 

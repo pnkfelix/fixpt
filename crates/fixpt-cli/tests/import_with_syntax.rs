@@ -55,7 +55,7 @@ fn a_files_macro_defines_a_macro_of_its_names() {
 /// the file is imported, as before.
 #[test]
 fn a_file_uses_its_own_macros() {
-    for (name, want) in [("main-own.fx", "(3 10 8 8) : "), ("main-within.fx", "32 : int"), ("main-procedural.fx", "66 : int")] {
+    for (name, want) in [("main-own.fx", "(3 10 8 8 10) : "), ("main-within.fx", "32 : int"), ("main-procedural.fx", "66 : int")] {
         for m in MACHINES {
             let (out, err) = eval(m, name);
             assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");

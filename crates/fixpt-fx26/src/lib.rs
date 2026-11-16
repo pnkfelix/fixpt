@@ -535,6 +535,9 @@ pub const MACROS_INFER: &str = include_str!("macros-infer.fx");
 /// A signature inferred, as written and as a message says it
 /// (`macros/infer.rs`'s `shown_sty`, `sig_text`), on top of [`MACROS_INFER`].
 pub const MACROS_SHOW: &str = include_str!("macros-show.fx");
+/// A signature inferred shown in shapes and facts, if one says it
+/// (`macros/shown.rs`), on top of [`MACROS_SHOW`].
+pub const MACROS_SHOWN: &str = include_str!("macros-shown.fx");
 
 /// Signatures inferred: the scopes and the iterations (`macros/infer.rs`'s
 /// second half), on top of [`MACROS_SHOW`].
@@ -842,7 +845,7 @@ pub const READER_ALONE: &str = include_str!("reader-alone.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 227] = [
+pub const FRONT_END_MODULES: [(&str, &str); 228] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -917,6 +920,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 227] = [
     ("macros-files.fx", MACROS_FILES),
     ("macros-infer.fx", MACROS_INFER),
     ("macros-show.fx", MACROS_SHOW),
+    ("macros-shown.fx", MACROS_SHOWN),
     ("macros-solve.fx", MACROS_SOLVE),
     ("macros-procedural.fx", MACROS_PROCEDURAL),
     ("macros-contracts.fx", MACROS_CONTRACTS),

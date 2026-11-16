@@ -66,6 +66,7 @@ use std::rc::Rc;
 
 mod contract;
 mod infer;
+mod shown;
 pub(crate) mod shapes;
 pub(crate) mod hygiene;
 pub(crate) mod procedural;
@@ -1677,7 +1678,7 @@ impl Macros {
                     continue;
                 }
                 let sig = made.next().expect("one each");
-                let shown = infer::sig_text(&sig, interner);
+                let shown = shown_inferred(&sig, w, interner);
                 let name = interner.name(w.name).to_string();
                 let said = |e: FxError| FxError::at(e.span, refused_inferred(&name, &shown, &e.message));
                 // Not a signature (a union's members not told apart): the
@@ -1686,7 +1687,7 @@ impl Macros {
                     Ok(p) => (p, shown),
                     Err(e) => match self.by_clauses(w, interner) {
                         Some(alt) => match self.signature(&alt, interner) {
-                            Ok(p) => (p, infer::sig_text(&alt, interner)),
+                            Ok(p) => (p, shown_inferred(&alt, w, interner)),
                             Err(_) => return Err(said(e)),
                         },
                         None => return Err(said(e)),
@@ -5272,6 +5273,16 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "forms `parse_exp` reads that are not keywords: {missing:?}");
+    }
+}
+
+/// Signature `sig`, inferred for `w`, as a message says it: in shapes and
+/// facts, labelled by `w`'s first clause's pattern, if one says it; else in
+/// Herman's form (`macros/shown.rs`).
+fn shown_inferred(sig: &Syn, w: &Written, interner: &mut Interner) -> String {
+    match shown::in_shapes(sig, w.clauses.first(), interner) {
+        Some(c) => infer::sig_text(&c, interner),
+        None => infer::sig_text(sig, interner),
     }
 }
 

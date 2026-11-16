@@ -2589,10 +2589,34 @@ D         ::= label | (label (macro …))          a value's binder; a macro's,
   binder keeps its signature as written, so a message says it so. Each
   repeated element's own scope, as `ellipsis-own-scope.fx` needs, was a
   named node, `(letrec-shape ((pair (each (v @ bvar e @ expr) (bind v in
-  e)))) (_ pair ...))`; now a fact under `...` (below). *Not yet*:
-  inferred signatures printed in C (they are shown in Herman's form,
-  `macro/addressed`, for now); `do` (TODO §223, §289); a repeated part in
-  a repeated part.
+  e)))) (_ pair ...))`; now a fact under `...` (below). Inferred
+  signatures are printed in C (2026-11-16, below). *Not yet*: `do` (TODO
+  §223, §289); a repeated part in a repeated part.
+
+## Inferred signatures shown in shapes and facts (2026-11-16)
+
+A signature inferred, Herman's form, is shown in C (`macros/shown.rs`,
+`macros-shown.fx`): each import a `bind` on the part it is on, a named
+node's export an `export` or `export*`, a repeated element's import `(bind
+v in e) ...`, an element's export what a fact's `(v ...)` names, each `mu`
+a `letrec-shape`'s shape. A part is labelled only if a fact or what a use
+defines names it, by the first clause's pattern variable at its place if
+it is free, else `p1`, `p2`, …. What is shown is elaborated back and
+compared with the signature inferred, list tails flattened; if they differ,
+it is shown in Herman's form, so a signature shown in C always means the
+one inferred. Of the test programs' macros, 208 of 215 inferred are shown
+in C. The 7 not: an import of two rings, `(cage (rho …) (rho …))`, which a
+`bind`, one level, does not say; a list's rib in what a use defines,
+`(defn ((path #:d) rib))`, which `(defn (v ...))` would; an export at the
+top with `defn`, the old synonym's; an import on the operands' root, which
+only a labelled tail could name, `(_ all @ . σ)`; a labelled tail that is
+a list, which the reader reads as the list's parts, `(x @ . (a b))` as `(x
+@ a b)`.
+
+Found doing it: `(v ...)` named by two facts, as `letrec` needs, `(bind (f
+...) in bs) (bind (f ...) in body)`, made each element export `f` twice,
+and its signature was refused. Now an element exports each label once,
+however many facts name it (`facts-every-twice.fx`).
 
 ## Decided: facts under an ellipsis, each repetition's (2026-11-15)
 

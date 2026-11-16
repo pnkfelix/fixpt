@@ -380,17 +380,13 @@ impl Cx<'_> {
                         return Err(FxError::at(m.at(), "a fact binding in a repeated part is each repetition's: followed by `...`"));
                     };
                     let (b, adds) = self.bound(l, labels, false)?;
-                    for (ep, e) in adds {
-                        elements.entry(ep).or_default().push(e);
-                    }
+                    self.add_elements(&mut elements, adds);
                     imports.push((tp, b));
                 }
                 (Some("export"), [_, ls @ ..]) if !top => {
                     for l in ls {
                         let (entry, adds) = self.entry(l, labels, false)?;
-                        for (ep, e) in adds {
-                            elements.entry(ep).or_default().push(e);
-                        }
+                        self.add_elements(&mut elements, adds);
                         rib.push(entry);
                     }
                 }
@@ -398,9 +394,7 @@ impl Cx<'_> {
                     let mut rs = Vec::new();
                     for l in ls {
                         let (ring, adds) = self.entry(l, labels, true)?;
-                        for (ep, e) in adds {
-                            elements.entry(ep).or_default().push(e);
-                        }
+                        self.add_elements(&mut elements, adds);
                         rs.push(ring);
                     }
                     // Innermost first: the last written.
@@ -437,6 +431,18 @@ impl Cx<'_> {
             sigma = self.annotate(sigma, &[], "export", b)?;
         }
         Ok(sigma)
+    }
+
+    /// What repeated elements must export, `adds`, by the list's path,
+    /// onto `elements`: each entry once, however many facts name `(v ...)`.
+    fn add_elements(&self, elements: &mut HashMap<Vec<bool>, Vec<Syn>>, adds: Vec<(Vec<bool>, Syn)>) {
+        for (ep, e) in adds {
+            let es = elements.entry(ep).or_default();
+            let w = e.written(self.interner);
+            if !es.iter().any(|x| x.written(self.interner) == w) {
+                es.push(e);
+            }
+        }
     }
 
     /// A fact under `...`, `(bind v in e) ...`, each repetition's: `v` and

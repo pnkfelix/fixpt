@@ -14,3 +14,9 @@
 ;; The parameter `secret` is 1, the file's hidden one 7.
 (define c int ((lambda ((secret int)) (plus-secret secret)) 1))
 (define-twice d 4)
+;; A macro this file's own use of a macro that defines one makes (TODO §287), used by a later
+;; form: its `limit` the file's, 10.
+(define-syntax define-clamper (macro (_ bvar) defn)
+  (syntax-rules ((_ n) (define-syntax n (syntax-rules ((_ x) (if (> x limit) limit x)))))))
+(define-clamper clamp)
+(define clamped int (clamp 50))

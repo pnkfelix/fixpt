@@ -48,7 +48,7 @@
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
         drivers-of renames-under with-uses with-uses-given note-projection note-uses
         binder-depths depth-of repeated-ref heads-done (type exported nested depths))
-(import solve-module infer sig-text by-clauses)
+(import solve-module infer sig-shown by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
         phase1-forms-now phase1-forms! for-syntax!
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
@@ -424,13 +424,13 @@
        (cons (tuple (car written) (the (listof string acyclic) nil))
              (inferred-each fail (cdr ws) (cdr written) inferred)))
       (else
-       (let* ((n (symbol->string (extract (car ws) 1)))
+       (let* ((n (symbol->string (extract (car ws) 1))) (cs (extract (car ws) 4))
               ;; Not a signature: the union of its clauses' shapes whole,
               ;; if that is one (`macros.rs`'s).
               (alt (if (null? (tried-sig (car inferred))) (alt-sig (car ws)) nil))
               (sig (if (null? alt) (car inferred) (car alt)))
-              (shown (sig-text sig))
-              (s (signature-of (said-fail fail n (sig-text (car inferred))) sig)))
+              (shown (sig-shown cs sig))
+              (s (signature-of (said-fail fail n (sig-shown cs (car inferred))) sig)))
          (begin
            (set defined (cons (tuple (extract (car ws) 1) (tuple (extract s 2) (the clauses nil)
                                                                   (the syns-a nil) (extract s 3)))
