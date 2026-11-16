@@ -714,14 +714,7 @@ impl Macros {
                     (None, STy::Dvar) => Rc::new(STy::Export(elem, Bind::Rib(vec![(Vec::new(), Delta::Dvar)]))),
                     _ => elem,
                 };
-                let pair = Rc::new(STy::Pair(elem.clone(), Rc::new(STy::Mu(id))));
-                let body = if matches!(&*elem, STy::Export(..)) {
-                    let none = Rc::new(STy::Export(Rc::new(STy::Nil), Bind::Rib(Vec::new())));
-                    vec![none, Rc::new(STy::Export(pair, Bind::Rib(vec![(vec![true], Delta::Rib), (vec![false], Delta::Rib)])))]
-                } else {
-                    vec![Rc::new(STy::Nil), pair]
-                };
-                self.mus[id] = Rc::new(STy::Union(body));
+                self.mus[id] = Rc::new(STy::Union(crate::macros::seq_members(&elem, id)));
                 Rc::new(STy::Mu(id))
             }
             Shape::Union(ms) => {
@@ -1237,16 +1230,29 @@ impl Macros {
         let tail = |d: &Rc<STy>| matches!(&**d, STy::Mu(j) if *j == id);
         match (&**nil, &**pair) {
             (STy::Nil, STy::Pair(e, d)) if tail(d) && !matches!(&**e, STy::Bvar | STy::Dvar | STy::Export(..)) => Some(e.clone()),
-            (STy::Export(n, Bind::Rib(none)), STy::Export(p, Bind::Rib(both))) if matches!(&**n, STy::Nil) && none.is_empty() && *both == vec![(vec![true], Delta::Rib), (vec![false], Delta::Rib)] => {
+            (STy::Export(n, Bind::Rib(none)), STy::Export(p, Bind::Rib(both))) if matches!(&**n, STy::Nil) && none.is_empty() => {
                 let STy::Pair(e, d) = &**p else { return None };
                 if !tail(d) {
                     return None;
                 }
-                match &**e {
-                    STy::Export(x, Bind::Rib(es)) if matches!(&**x, STy::Bvar) && *es == vec![(Vec::new(), Delta::Var)] => Some(x.clone()),
-                    STy::Export(x, Bind::Rib(es)) if matches!(&**x, STy::Dvar) && *es == vec![(Vec::new(), Delta::Dvar)] => Some(x.clone()),
-                    STy::Export(..) => Some(e.clone()),
+                // An element's own export not a rib's: the pair's the
+                // element's, whole.
+                if matches!(&**e, STy::Export(..)) {
+                    return (*both == vec![(vec![true], Delta::Rib), (vec![false], Delta::Rib)]).then(|| e.clone());
+                }
+                // A rib's: its entries the pair's, from the pair's root,
+                // then the rest's (`seq_members`).
+                let (last, own) = both.split_last()?;
+                if *last != (vec![false], Delta::Rib) {
+                    return None;
+                }
+                let own: Vec<(Addr, Delta)> = own.iter().map(|(a, d)| match a.split_first() {
+                    Some((true, r)) => Some((r.to_vec(), d.clone())),
                     _ => None,
+                }).collect::<Option<_>>()?;
+                match (&**e, &own[..]) {
+                    (STy::Bvar, [(a, Delta::Var)]) | (STy::Dvar, [(a, Delta::Dvar)]) if a.is_empty() => Some(e.clone()),
+                    _ => Some(Rc::new(STy::Export(e.clone(), Bind::Rib(own)))),
                 }
             }
             _ => None,

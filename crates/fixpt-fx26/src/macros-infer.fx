@@ -24,7 +24,7 @@
         mk-symbol syn-datums syn->datum parse-tag p-ok p-err pfail-at
         (type syns-a names presult) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? reserved? ellipsis-of proper-items
-        name-in? show-syn kind-of sty=? mu-new mu-set! mu-body type-form? kernel-sigs
+        name-in? show-syn kind-of sty=? mu-new mu-set! mu-body type-form? kernel-sigs seq-body
         s-expr s-bvar s-id s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu
         s-many s-union s-typed s-lambda s-defn s-dvar s-kind bind-rib bind-cage ring-rib ring-at
         bind-direct bind-earlier atm-var atm-rib-of atm-lit
@@ -713,17 +713,8 @@
            (elem (cond ((not (null? x)) (s-export t (car x)))
                        ((= (kind-of t) 1) (s-export t (bind-rib (list (tuple (the addr nil) 1)))))
                        ((= (kind-of t) 12) (s-export t (bind-rib (list (tuple (the addr nil) 4)))))
-                       (else t)))
-           (pair (s-pair elem (s-mu id))))
-      (begin
-        (mu-set! id (s-union (tagcase elem
-                               (s-export (b y)
-                                 (list (s-export (s-nil) (bind-rib nil))
-                                       (s-export pair (bind-rib (list (tuple (the addr (list #t)) 2)
-                                                                      (tuple (the addr (list #f))
-                                                                             2))))))
-                               (else z (list (s-nil) pair)))))
-        (s-mu id)))))
+                       (else t))))
+      (begin (mu-set! id (s-union (seq-body elem id))) (s-mu id)))))
 
 ;;; ------------------------------------------------------------ placements
 

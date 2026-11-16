@@ -57,8 +57,12 @@
                  s)
           (let* ((operands (list-with (cdr (extract parts 1)) (extract parts 2) a b))
                  (r (tree fail operands nil nil))
-                 (sigma (facts fail (extract r 1) (cdr (cdr (cdr items))) (extract r 2) #t))
-                 (made (made-of fail (nth items 2) (extract r 2)))
+                 ;; What a use defines first: each element's export for a `(v ...)`
+                 ;; there before the facts'.
+                 (m (made-of fail (nth items 2) (extract r 2)))
+                 (sigma (facts fail (extract r 1) (cdr (cdr (cdr items))) (extract r 2) #t
+                               (extract m 2)))
+                 (made (extract m 1))
                  (out (mk-list (list (mk-symbol "macro/addressed" a b) sigma made) a b)))
             (begin (set named saved) out))))))
 ;; A list's parts, and its tail (none, or one).
@@ -324,18 +328,19 @@
       (if (< (len items) 2)
           (begin (fail-at fail "a node is `(node-name tree fact …)`" node) node)
           (let ((r (tree fail (nth items 1) nil nil)))
-            (facts fail (extract r 1) (cdr (cdr items)) (extract r 2) #f))))))
+            (facts fail (extract r 1) (cdr (cdr items)) (extract r 2) #f nil))))))
 
 ;;; ------------------------------------------------------------ facts
 
 ;; Facts `fs` of a region whose labels are `ls`, on its syntax type `sigma`
 ;; (`contract.rs`'s `facts`): each `bind` an import on the part it names,
-;; `export`s and `export*`s the region's export (none at a signature's top).
+;; `export`s and `export*`s the region's export (none at a signature's top); `pre`, what
+;; repeated elements export for what a use defines, first.
 (define-type adds (listof (tupleof steps syn) acyclic))
-(define facts (->* (fails syn syns-a labels bool) syn)
-  (lambda (fail sigma fs ls top)
+(define facts (->* (fails syn syns-a labels bool adds) syn)
+  (lambda (fail sigma fs ls top pre)
     (let* ((e (each-facts fail fs ls nil nil))
-           (r (facts-each fail (extract e 1) ls top nil nil nil nil (the adds nil)))
+           (r (facts-each fail (extract e 1) ls top nil nil nil nil (reverse pre)))
            (imports (extract r 1)) (rib (extract r 2)) (rings (extract r 3)) (elems (extract r 5))
            (a (syn-start sigma)) (b (syn-end sigma))
            ;; Each repetition's facts, inside its element; then each element
@@ -633,32 +638,59 @@
 
 ;;; ------------------------------------------------------------ what is made
 
-;; `MADE`: `(defn D …)` Herman's, each label its path.
-(define made-of (->* (fails syn labels) syn)
+;; `MADE`: `(defn D …)` Herman's, each label its path, `(label ...)` every repetition's, the
+;; list's rib; and what each repeated element must export for it, by the list's path.
+(define made-of (->* (fails syn labels) (tupleof syn adds))
   (lambda (fail m ls)
     (if (not (head-is? m "defn"))
-        m
-        (mk-list (cons (car (proper-items m)) (made-entries fail (cdr (proper-items m)) ls))
-                 (syn-start m) (syn-end m)))))
-(define made-entries (->* (fails syns-a labels) syns-a)
-  (lambda (fail ds ls)
+        (tuple m (the adds nil))
+        (let ((r (made-entries fail (cdr (proper-items m)) ls nil nil)))
+          (tuple (mk-list (cons (car (proper-items m)) (extract r 1)) (syn-start m) (syn-end m))
+                 (extract r 2))))))
+;; Entries `ds` onto `out`, adds onto `adds`, the last first.
+(define made-entries (->* (fails syns-a labels syns-a adds) (tupleof syns-a adds))
+  (lambda (fail ds ls out adds)
     (if (null? ds)
-        nil
+        (tuple (reverse out) (reverse adds))
         (let* ((d (car ds)) (two (proper-items d)) (pair (= (len two) 2))
+               (every (and pair (sym-is? (nth two 1) "...")))
                (n (if pair (car two) d)) (a (syn-start d)) (b (syn-end d))
-               (found (if (syn-symbol? n) (label-of (syn-symbol n) ls) nil))
-               (rest (made-entries fail (cdr ds) ls)))
+               (found (if (syn-symbol? n) (label-of (syn-symbol n) ls) nil)))
           (cond
+            ((and every (not (syn-symbol? n)))
+             (begin (fail-at fail (string-append "every repetition's macro binder, `((label "
+                                                 "(macro …)) ...)`: not yet")
+                             d)
+                    (made-entries fail (cdr ds) ls out adds)))
+            ;; `(label ...)`: every repetition's, as a fact names it.
+            (every
+             (let ((e (entry fail d ls #f)))
+               (made-entries fail (cdr ds) ls (cons (extract e 1) out)
+                             (append (reverse (extract e 2)) adds))))
             ((not (syn-symbol? n))
-             (begin (fail-at fail "what a use defines is a label, or `(label (macro …))`" n) rest))
-            ((or (null? found) (= (extract (car found) 2) 1))
+             (begin (fail-at fail (string-append "what a use defines is a label, `(label ...)` "
+                                                 "or `(label (macro …))`")
+                             n)
+                    (made-entries fail (cdr ds) ls out adds)))
+            ((null? found)
              (begin (fail-at fail (string-append "`" (syn-name n) "` labels no part of this "
                                                  "signature's top")
                              n)
-                    rest))
+                    (made-entries fail (cdr ds) ls out adds)))
+            ((= (extract (car found) 2) 1)
+             (begin (fail-at fail (string-append "`" (syn-name n) "` is a repeated part's: `("
+                                                 (syn-name n) " ...)`, every repetition's")
+                             n)
+                    (made-entries fail (cdr ds) ls out adds)))
             (pair
-             (let ((sig (nth two 1)))
-               ;; A macro's binder: its signature as written, read where it is.
-               (cons (mk-list (list (path-syn (extract (car found) 3) a b) sig) a b) rest)))
-            (else (cons (rib-entry fail a b (extract (car found) 3) (extract (car found) 5))
-                        rest)))))))
+             ;; A macro's binder: its signature as written, read where it is.
+             (made-entries fail (cdr ds) ls
+                           (cons (mk-list (list (path-syn (extract (car found) 3) a b) (nth two 1))
+                                          a b)
+                                 out)
+                           adds))
+            (else (made-entries fail (cdr ds) ls
+                                (cons (rib-entry fail a b (extract (car found) 3)
+                                                 (extract (car found) 5))
+                                      out)
+                                adds)))))))

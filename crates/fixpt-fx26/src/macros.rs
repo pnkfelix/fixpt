@@ -1041,14 +1041,7 @@ impl Macros {
         };
         let id = self.mus.len();
         self.mus.push(Rc::new(STy::Nil));
-        let pair = Rc::new(STy::Pair(elem.clone(), Rc::new(STy::Mu(id))));
-        let body = if matches!(&*elem, STy::Export(..)) {
-            let none = Rc::new(STy::Export(Rc::new(STy::Nil), Bind::Rib(Vec::new())));
-            vec![none, Rc::new(STy::Export(pair, Bind::Rib(vec![(vec![true], Delta::Rib), (vec![false], Delta::Rib)])))]
-        } else {
-            vec![Rc::new(STy::Nil), pair]
-        };
-        self.mus[id] = Rc::new(STy::Union(body));
+        self.mus[id] = Rc::new(STy::Union(seq_members(&elem, id)));
         Rc::new(STy::Mu(id))
     }
 
@@ -5283,6 +5276,29 @@ fn shown_inferred(sig: &Syn, w: &Written, interner: &mut Interner) -> String {
     match shown::in_shapes(sig, w.clauses.first(), interner) {
         Some(c) => infer::sig_text(&c, interner),
         None => infer::sig_text(sig, interner),
+    }
+}
+
+/// `(elem ...)`'s members, list `mu` `id`'s: `()`, and the pair of an
+/// element and the list. An element that exports a rib, the pair exports
+/// its entries, each said from the pair's root, `(A …)`, then the rest's,
+/// `(D rib)`: an address is from its region's root, and an element written
+/// out is in the pair's region (an element given by ellipsis is a region of
+/// its own, which `seq_of` gives back its export as said from it).
+pub(crate) fn seq_members(elem: &Rc<STy>, id: usize) -> Vec<Rc<STy>> {
+    let rest = Rc::new(STy::Mu(id));
+    let none = || Rc::new(STy::Export(Rc::new(STy::Nil), Bind::Rib(Vec::new())));
+    match &**elem {
+        STy::Export(e, Bind::Rib(es)) => {
+            let mut both: Vec<(Addr, Delta)> = es.iter().map(|(a, d)| (std::iter::once(true).chain(a.iter().copied()).collect(), d.clone())).collect();
+            both.push((vec![false], Delta::Rib));
+            vec![none(), Rc::new(STy::Export(Rc::new(STy::Pair(e.clone(), rest)), Bind::Rib(both)))]
+        }
+        STy::Export(..) => {
+            let pair = Rc::new(STy::Pair(elem.clone(), rest));
+            vec![none(), Rc::new(STy::Export(pair, Bind::Rib(vec![(vec![true], Delta::Rib), (vec![false], Delta::Rib)])))]
+        }
+        _ => vec![Rc::new(STy::Nil), Rc::new(STy::Pair(elem.clone(), rest))],
     }
 }
 

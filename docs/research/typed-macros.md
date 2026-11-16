@@ -2548,6 +2548,7 @@ MADE      ::= expr | desc | defn
             | (defn D …)                         what a use defines
 D         ::= label | (label (macro …))          a value's binder; a macro's,
                                                  of that signature
+            | (label ...)                        every repetition's (2026-11-16)
 ```
 
 - **Labels without parentheses** (the user's): in a list, `name @ σ` is one
@@ -2604,14 +2605,33 @@ defines names it, by the first clause's pattern variable at its place if
 it is free, else `p1`, `p2`, …. What is shown is elaborated back and
 compared with the signature inferred, list tails flattened; if they differ,
 it is shown in Herman's form, so a signature shown in C always means the
-one inferred. Of the test programs' macros, 208 of 215 inferred are shown
-in C. The 7 not: an import of two rings, `(cage (rho …) (rho …))`, which a
-`bind`, one level, does not say; a list's rib in what a use defines,
-`(defn ((path #:d) rib))`, which `(defn (v ...))` would; an export at the
-top with `defn`, the old synonym's; an import on the operands' root, which
-only a labelled tail could name, `(_ all @ . σ)`; a labelled tail that is
-a list, which the reader reads as the list's parts, `(x @ . (a b))` as `(x
-@ a b)`.
+one inferred. Of the test programs' macros, 216 of 223 inferred are shown
+in C (208 of 215 before `(defn (c ...))`, below). The 7 not: an import of
+two rings, `(cage (rho …) (rho …))`, which a `bind`, one level, does not
+say; an export at the top with `defn`, the old synonym's; an import on the
+operands' root, which only a labelled tail could name, `(_ all @ . σ)`; a
+labelled tail that is a list, which the reader reads as the list's parts,
+`(x @ . (a b))` as `(x @ a b)`.
+
+What a use defines, every repetition's, `(defn name (c ...))` (2026-11-16,
+the user's go-ahead): as a fact's `(c ...)`, the list's rib, each element
+exporting its `c`, `define-data`'s constructors, which Herman's form said,
+`(defn ((path #:a) dvar) ((path #:d) rib))`, and C could not; a template
+using `define-data` now sees the constructors its use defines
+(`defn-every.fx`). Elaborated first, its elements' exports before the
+facts'. Refused: `(x ...)` of a label not repeated, a repeated label named
+bare, `((m (macro …)) ...)` (not yet).
+
+Found doing it, both front ends: a list by ellipsis whose elements export
+was checked wrongly where a template writes its elements out, `(my-let ((a
+1) (b 2)) …)`, refused "the signature says a value's binder is here": the
+list's type, `(mu l (union () (export (elem . l) (rho (A rib) (D rib)))))`,
+kept each element's export said from the element, right where the element
+is given by ellipsis (its own region) and wrong where it is written out,
+inside the pair's region. Now the pair exports the element's entries said
+from the pair's root, `(A …)`, then the rest's (`seq_members`, FX-26's
+`seq-body`), as an address is from its region's root; `seq_of` gives the
+element's export back for ellipsis (`ellipsis-written-out.fx`).
 
 Found doing it: `(v ...)` named by two facts, as `letrec` needs, `(bind (f
 ...) in bs) (bind (f ...) in body)`, made each element export `f` twice,

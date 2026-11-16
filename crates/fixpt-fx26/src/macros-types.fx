@@ -345,16 +345,26 @@
                    (s-bvar () (s-export elem0 (bind-rib (list (tuple (the addr nil) 1)))))
                    (s-dvar () (s-export elem0 (bind-rib (list (tuple (the addr nil) 4)))))
                    (else y elem0)))
-           (id (mu-new)) (pair (s-pair elem (s-mu id))))
-      (begin
-        (mu-set! id (s-union (tagcase elem
-                               (s-export (b x)
-                                 (list (s-export (s-nil) (bind-rib nil))
-                                       (s-export pair (bind-rib (list (tuple (the addr (list #t)) 2)
-                                                                      (tuple (the addr (list #f))
-                                                                             2))))))
-                               (else y (list (s-nil) pair)))))
-        (s-mu id)))))
+           (id (mu-new)))
+      (begin (mu-set! id (s-union (seq-body elem id))) (s-mu id)))))
+;; List `mu` `id`'s members: `()`, and the pair of `elem` and the list; an element exporting a
+;; rib, the pair its entries from the pair's root, `(A …)`, then the rest's, `(D rib)`: an
+;; element written out is in the pair's region (`macros.rs`'s `seq_members`).
+(define seq-body (->* (sty int) stys)
+  (lambda (elem id)
+    (let ((none (s-export (s-nil) (bind-rib nil))) (d (tuple (the addr (list #f)) 2)))
+      (tagcase elem
+        (s-export (e bd)
+          (tagcase bd
+            (bind-rib (es) (list none (s-export (s-pair e (s-mu id)) (bind-rib (cars-at es d)))))
+            (else y (list none (s-export (s-pair elem (s-mu id))
+                                         (bind-rib (list (tuple (the addr (list #t)) 2) d)))))))
+        (else y (list (s-nil) (s-pair elem (s-mu id))))))))
+(define cars-at (->* (entries (tupleof addr int)) entries)
+  (lambda (es d)
+    (if (null? es) (list d)
+        (cons (tuple (the addr (cons #t (extract (car es) 1))) (extract (car es) 2))
+              (cars-at (cdr es) d)))))
 ;; The type of an element of list type `t`, in a list of one, if a template
 ;; or pattern may give its elements by ellipsis: a `mu` of `()` and of pairs
 ;; of an element and itself, which binds no more than what each element

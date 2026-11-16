@@ -14,7 +14,7 @@
 //! PART  ::= name @ σ | σ | … name @ . σ (a tail)
 //! FACT  ::= (bind L in name) | (export L …) | (export* L …)
 //! L     ::= label | (label ...)
-//! MADE  ::= expr | desc | defn | (defn D …)   D ::= label | (label SIGNATURE)
+//! MADE  ::= expr | desc | defn | (defn D …)   D ::= label | (label ...) | (label SIGNATURE)
 //! ```
 
 use crate::error::{FxError, R};
@@ -87,9 +87,10 @@ pub(crate) fn elaborated(s: &Syn, interner: &mut Interner) -> R<Syn> {
     let operands = list_of(top.at(), &parts[1..], tail);
     let mut labels = HashMap::default();
     let mut sigma = cx.tree(&operands, Vec::new(), &mut labels, &mut Vec::new())?;
-    let mut exports = Vec::new();
-    sigma = cx.facts(sigma, facts, &labels, true, &mut exports)?;
-    let made = cx.made(&made, &labels)?;
+    // What a use defines first: each element's export for a `(v ...)`
+    // there before the facts'.
+    let (made, adds) = cx.made(&made, &labels)?;
+    sigma = cx.facts(sigma, facts, &labels, true, adds)?;
     let head = Syn::named(at, "macro/addressed", cx.interner);
     Ok(Syn::lst(at, vec![head, sigma, made]))
 }
@@ -343,19 +344,20 @@ impl Cx<'_> {
         let items = node.list().filter(|l| l.len() >= 2).ok_or_else(|| FxError::at(node.at(), "a node is `(node-name tree fact …)`"))?;
         let mut labels = HashMap::default();
         let sigma = self.tree(&items[1], Vec::new(), &mut labels, &mut Vec::new())?;
-        let mut exports = Vec::new();
-        self.facts(sigma, &items[2..], &labels, false, &mut exports)
+        self.facts(sigma, &items[2..], &labels, false, Vec::new())
     }
 
     /// Facts `fs` of a region whose labels are `labels`, on its syntax type
     /// `sigma`: each `bind` an import on the part it names, `export`s and
     /// `export*`s the region's export (none at a signature's top, `top`:
-    /// what a use defines is said in what it makes).
-    fn facts(&mut self, sigma: Syn, fs: &[Syn], labels: &HashMap<Sym, Label>, top: bool, _exports: &mut Vec<Syn>) -> R<Syn> {
+    /// what a use defines is said in what it makes); `pre`, what repeated
+    /// elements export for what a use defines, first.
+    fn facts(&mut self, sigma: Syn, fs: &[Syn], labels: &HashMap<Sym, Label>, top: bool, pre: Vec<(Vec<bool>, Syn)>) -> R<Syn> {
         let mut imports: Vec<(Vec<bool>, Syn)> = Vec::new();
         let mut rib: Vec<Syn> = Vec::new();
         let mut rings: Option<Vec<Syn>> = None;
         let mut elements: HashMap<Vec<bool>, Vec<Syn>> = HashMap::default();
+        self.add_elements(&mut elements, pre);
         // Each repetition's facts, `(bind v in e) ...`: by the list's path,
         // the part's in the element, the binding.
         let mut each: Vec<(Vec<bool>, Vec<bool>, Syn)> = Vec::new();
@@ -625,21 +627,38 @@ impl Cx<'_> {
         Ok(cons(at, car, cdr))
     }
 
-    /// `MADE`: `(defn D …)` Herman's, each label its path.
-    fn made(&mut self, m: &Syn, labels: &HashMap<Sym, Label>) -> R<Syn> {
-        let Some(items) = m.list() else { return Ok(*m) };
+    /// `MADE`: `(defn D …)` Herman's, each label its path, `(label ...)`
+    /// every repetition's, the list's rib; and what each repeated element
+    /// must export for it, by the list's path.
+    fn made(&mut self, m: &Syn, labels: &HashMap<Sym, Label>) -> R<(Syn, Vec<(Vec<bool>, Syn)>)> {
+        let Some(items) = m.list() else { return Ok((*m, Vec::new())) };
         if !items.first().and_then(|h| h.sym()).is_some_and(|h| self.name(h) == "defn") {
-            return Ok(*m);
+            return Ok((*m, Vec::new()));
         }
         let mut out = vec![items[0]];
+        let mut adds = Vec::new();
         for d in &items[1..] {
+            // `(label ...)`: every repetition's, as a fact names it.
+            if let Some([n, dots]) = d.list().as_deref()
+                && self.dots(dots)
+            {
+                if n.sym().is_none() {
+                    return Err(FxError::at(d.at(), "every repetition's macro binder, `((label (macro …)) ...)`: not yet"));
+                }
+                let (e, more) = self.entry(d, labels, false)?;
+                adds.extend(more);
+                out.push(e);
+                continue;
+            }
             let (n, sig) = match d.list().as_deref() {
                 Some([n, sig]) => (*n, Some(*sig)),
                 _ => (*d, None),
             };
-            let name = n.sym().ok_or_else(|| FxError::at(n.at(), "what a use defines is a label, or `(label (macro …))`"))?;
-            let Some(Label::Here(p, g)) = labels.get(&name).cloned() else {
-                return Err(FxError::at(n.at(), format!("`{}` labels no part of this signature's top", self.name(name))));
+            let name = n.sym().ok_or_else(|| FxError::at(n.at(), "what a use defines is a label, `(label ...)` or `(label (macro …))`"))?;
+            let (p, g) = match labels.get(&name).cloned() {
+                Some(Label::Here(p, g)) => (p, g),
+                Some(Label::Repeated(..)) => return Err(FxError::at(n.at(), format!("`{0}` is a repeated part's: `({0} ...)`, every repetition's", self.name(name)))),
+                None => return Err(FxError::at(n.at(), format!("`{}` labels no part of this signature's top", self.name(name)))),
             };
             let at = d.at();
             let path = self.path(at, &p);
@@ -655,7 +674,7 @@ impl Cx<'_> {
             };
             out.push(Syn::lst(at, vec![path, delta]));
         }
-        Ok(Syn::lst(m.at(), out))
+        Ok((Syn::lst(m.at(), out), adds))
     }
 }
 

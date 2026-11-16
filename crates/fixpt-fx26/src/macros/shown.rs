@@ -622,6 +622,6 @@ mod tests {
         assert!(wrong.is_empty(), "{}", wrong.join("\n"));
         // As many as when this was built: those Herman's form alone says,
         // `typed-macros.md`'s seven.
-        assert!(shapes.len() >= 208, "only {} in shapes and facts", shapes.len());
+        assert!(shapes.len() >= 216, "only {} in shapes and facts", shapes.len());
     }
 }

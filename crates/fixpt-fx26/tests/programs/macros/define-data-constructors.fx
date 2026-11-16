@@ -11,7 +11,7 @@
     ((_ f) f)
     ((_ f g ...) (tupleof f g ...))))
 (define-syntax define-data
-  (macro (_ dvar (bvar label desc ...) ...) defn)
+  (macro (_ name @ dvar (c @ bvar label desc ...) ...) (defn name (c ...)))
   (syntax-rules
     ((_ name (c t field ...) ...)
      (begin

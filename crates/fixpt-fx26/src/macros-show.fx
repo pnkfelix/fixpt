@@ -129,21 +129,41 @@
       (s-export (n none)
         (tagcase pair-m
           (s-export (p both)
-            (if (and (= (kind-of n) 6) (no-entries? none) (both-ribs? both))
+            (if (and (= (kind-of n) 6) (no-entries? none))
                 (tagcase p
                   (s-pair (e d)
                     (if (tail-of? id d)
                         (tagcase e
-                          (s-export (x bd)
-                            (cond ((and (= (kind-of x) 1) (self-entry? bd 1)) (list x))
-                                  ((and (= (kind-of x) 12) (self-entry? bd 4)) (list x))
-                                  (else (list e))))
-                          (else y nil))
+                          ;; An element's own export not a rib's: the pair's the element's.
+                          (s-export (x bd) (if (both-ribs? both) (list e) nil))
+                          (else y (rebased-elem e both)))
                         nil))
                   (else y nil))
                 nil))
           (else y nil)))
       (else y nil))))
+;; Element `e` of a list whose pair exports `both`, the element's entries from the pair's root,
+;; then the rest's, `(D rib)` (`seq-body`), in a list of one (`infer.rs`'s `seq_elem`).
+(define rebased-elem (->* (sty bind) stys)
+  (lambda (e both)
+    (tagcase both
+      (bind-rib (es)
+        (let ((own (own-of es)))
+          (cond ((null? own) nil)
+                ((and (= (kind-of e) 1) (self-entry? (bind-rib (car own)) 1)) (list e))
+                ((and (= (kind-of e) 12) (self-entry? (bind-rib (car own)) 4)) (list e))
+                (else (list (s-export e (bind-rib (car own))))))))
+      (else y nil))))
+(define own-of (->* (entries) (listof entries acyclic))
+  (lambda (es)
+    (cond ((null? es) nil)
+          ((null? (cdr es)) (if (entry-is? (car es) (list #f) 2) (list (the entries nil)) nil))
+          ((and (not (null? (extract (car es) 1))) (car (extract (car es) 1)))
+           (let ((r (own-of (cdr es))))
+             (if (null? r)
+                 nil
+                 (list (cons (tuple (cdr (extract (car es) 1)) (extract (car es) 2)) (car r))))))
+          (else nil))))
 (define no-entries? (->* (bind) bool)
   (lambda (bd) (tagcase bd (bind-rib (es) (null? es)) (else y #f))))
 (define both-ribs? (->* (bind) bool)
