@@ -2587,9 +2587,85 @@ D         ::= label | (label (macro …))          a value's binder; a macro's,
   the test is of it (`sig-addressed.fx`, `sig-letters.fx`, the `export`
   synonym, `desc-delta-mismatch.fx`, `defn-syntax-import.fx`). A macro's
   binder keeps its signature as written, so a message says it so. Each
-  repeated element's own scope, as `ellipsis-own-scope.fx` needs, is a
-  named node: `(letrec-shape ((pair (each (v @ bvar e @ expr) (bind v in
-  e)))) (_ pair ...))`. *Not yet*: inferred signatures printed in C (they
-  are shown in Herman's form, `macro/addressed`, for now); `do` (TODO
-  §223); a fact binding in a repeated part, a repeated part in a repeated
-  part.
+  repeated element's own scope, as `ellipsis-own-scope.fx` needs, was a
+  named node, `(letrec-shape ((pair (each (v @ bvar e @ expr) (bind v in
+  e)))) (_ pair ...))`; now a fact under `...` (below). *Not yet*:
+  inferred signatures printed in C (they are shown in Herman's form,
+  `macro/addressed`, for now); `do` (TODO §223, §289); a repeated part in
+  a repeated part.
+
+## Decided: facts under an ellipsis, each repetition's (2026-11-15)
+
+The user's question: shapes now name parts in their middle (`x @ σ`), so
+why must a fact that speaks inside a repeated part name that part's shape
+(`ellipsis-own-scope.fx`'s `pair` node)? Because a fact outside a list by
+ellipsis names its labels only all together, `(x ...)`, every
+repetition's; `(bind v in e)` there would not say whether `e` is one
+repetition's or all of them, and is refused.
+
+Terms, by an example. In `(_ ((v @ bvar init @ expr step @ expr) ...) …)`
+the repeated part is `(v @ bvar init @ expr step @ expr)`; each repetition
+of it is an **element**, the sequence of them the **list**. In a use
+`(do ((i 0 (+ i 1)) (j 10 (- j 1))) …)` the list is `((i 0 (+ i 1)) (j 10
+(- j 1)))`, its first element `(i 0 (+ i 1))`. In Herman's system an
+element is a region of its own: an annotation's addresses inside it are
+from the element's root, so it names the element's parts alone.
+
+The user's answer to the question is R7RS's own: a fact followed by `...`
+holds of each repetition, as a template's part does, its labels repeated
+once named bare, each repetition's.
+
+```scheme
+(macro (_ (v @ bvar e @ expr) ...) expr
+  (bind v in e) ...)                ; each e sees its own v
+```
+
+Under `k` ellipses, a label repeated `k` times is named bare (each
+repetition's), one repeated fewer is the one around it, and `(x ...)` is
+every repetition's of what is repeated once more.
+
+Two steps, the first all notation:
+
+1. **A fact under `...` whose labels are all one element's.** It is
+   elaborated into the element: an import on the part it names, addressed
+   from the element's root, as Herman's form says it already (`((bvar
+   (import expr (rho ((path #:a) var)))) ...)`). The named node
+   `ellipsis-own-scope.fx` needed is no longer needed. *Built*
+   (2026-11-15), both front ends (`each_bound`, FX-26's `each-bound`): a
+   fact followed by `...` is each repetition's, a `bind` of one list's
+   element's labels, elaborated into the element before what it exports;
+   one that names what is outside its repetition refused, "not yet (TODO
+   §289)"; an `export` under `...` refused (a list exports every
+   repetition's, `(export (x ...))`); under two `...`, not yet. A plain
+   fact naming a repeated label bare says both ways. Tests:
+   `macros/ellipsis-own-scope.fx`, `ellipsis-every-scope.fx`,
+   `facts-each-*.fx`.
+2. **A fact under `...` that also names what is outside its element**:
+   every repetition's `(v ...)`, or a label of the list's region.
+   Scheme's `do` is the case: each `step` sees every `v`, no `init` does,
+
+   ```scheme
+   (macro (_ ((v @ bvar init @ expr step @ expr) ...) (test @ expr res @ expr ...)
+             body @ expr ...)
+          expr
+     (bind (v ...) in step) ...
+     (bind (v ...) in test) …)
+   ```
+
+   which Herman's form cannot say: an import inside an element is
+   addressed from the element's root, and what the whole list gives is
+   one region up; an import on the whole list puts `init` in scope too
+   (TODO §223). It needs an import addressed from an outer region's root,
+   carried down into the element (our aligner's imports already pair a
+   binding with the node its addresses are from: that node an outer
+   region's). Its scope is still the walk's, of written bindings. *Not
+   yet*: TODO §289.
+
+**A named shape's insides stay its own** (decided with the user): a fact
+outside a `letrec-shape`'s node reaches what it gives only through its
+`export` or `export*`, as a module's names are its interface, so a shape
+may be shared without its users depending on how it is built inside; and
+"every `x` in `s`" under recursion is one `x` an unfolding, at depths that
+nest, so saying them all is the choice of one level or nested
+(shadowing) that `export` against `export*` writes, which reaching inside
+would make unsaid.

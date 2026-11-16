@@ -356,14 +356,28 @@ impl Cx<'_> {
         let mut rib: Vec<Syn> = Vec::new();
         let mut rings: Option<Vec<Syn>> = None;
         let mut elements: HashMap<Vec<bool>, Vec<Syn>> = HashMap::default();
-        for f in fs {
+        // Each repetition's facts, `(bind v in e) ...`: by the list's path,
+        // the part's in the element, the binding.
+        let mut each: Vec<(Vec<bool>, Vec<bool>, Syn)> = Vec::new();
+        let mut i = 0;
+        while i < fs.len() {
+            let f = &fs[i];
+            i += 1;
+            if fs.get(i).is_some_and(|x| self.dots(x)) {
+                if fs.get(i + 1).is_some_and(|x| self.dots(x)) {
+                    return Err(FxError::at(fs[i + 1].at(), "a fact under more than one `...`: not yet"));
+                }
+                each.push(self.each_bound(f, labels)?);
+                i += 1;
+                continue;
+            }
             let items = f.list().unwrap_or_default();
             let head = items.first().and_then(|h| h.sym()).map(|h| self.name(h));
             match (head.as_deref(), &items[..]) {
                 (Some("bind"), [_, l, kw, m]) if kw.sym().is_some_and(|k| self.name(k) == "in") => {
                     let target = m.sym().and_then(|m| labels.get(&m).cloned()).ok_or_else(|| FxError::at(m.at(), "`(bind L in name)`: `name` a label of this node"))?;
                     let Label::Here(tp, _) = target else {
-                        return Err(FxError::at(m.at(), "a fact binding in a repeated part: not yet"));
+                        return Err(FxError::at(m.at(), "a fact binding in a repeated part is each repetition's: followed by `...`"));
                     };
                     let (b, adds) = self.bound(l, labels, false)?;
                     for (ep, e) in adds {
@@ -398,7 +412,11 @@ impl Cx<'_> {
             }
         }
         let mut sigma = sigma;
-        // Each repeated element exporting what a fact says of its labels.
+        // Each repetition's facts, inside its element; then each element
+        // exporting what a fact says of its labels.
+        for (lp, tp, b) in each {
+            sigma = self.annotate_in_element(sigma, &lp, &tp, b)?;
+        }
         for (ep, entries) in elements {
             sigma = self.annotate_element(sigma, &ep, entries)?;
         }
@@ -419,6 +437,62 @@ impl Cx<'_> {
             sigma = self.annotate(sigma, &[], "export", b)?;
         }
         Ok(sigma)
+    }
+
+    /// A fact under `...`, `(bind v in e) ...`, each repetition's: `v` and
+    /// `e` labels of one list's element, each the repetition's own; the
+    /// list's path, `e`'s in the element, and what it imports there,
+    /// addressed from the element's root. One that names what is outside
+    /// its repetition (every repetition's, `(v ...)`, or a label around the
+    /// list) needs an import from an outer region's root: not yet (§289).
+    fn each_bound(&mut self, f: &Syn, labels: &HashMap<Sym, Label>) -> R<(Vec<bool>, Vec<bool>, Syn)> {
+        let items = f.list().unwrap_or_default();
+        let (l, m) = match &items[..] {
+            [h, l, kw, m] if h.sym().is_some_and(|h| self.name(h) == "bind") && kw.sym().is_some_and(|k| self.name(k) == "in") => (*l, *m),
+            _ => return Err(FxError::at(f.at(), "a fact under `...` is a `bind`, each repetition's: what a list exports is every repetition's, `(export (x ...))`")),
+        };
+        let outside = |at: &Syn| FxError::at(at.at(), "a fact under `...` that names what is outside its repetition: not yet (TODO §289)");
+        let repeated = |x: &Syn, this: &Self| -> R<(Sym, Vec<bool>, Vec<bool>, Gives)> {
+            let n = x.sym().ok_or_else(|| outside(x))?;
+            match labels.get(&n) {
+                Some(Label::Repeated(lp, ep, g)) => Ok((n, lp.clone(), ep.clone(), *g)),
+                Some(Label::Here(..)) => Err(outside(x)),
+                None => Err(FxError::at(x.at(), format!("`{}` labels no part of this node", this.name(n)))),
+            }
+        };
+        let (ln, llp, lep, g) = repeated(&l, self)?;
+        let (_, mlp, mep, _) = repeated(&m, self)?;
+        if llp != mlp {
+            return Err(FxError::at(f.at(), "a fact under `...` names one list's repetition: these are of two lists"));
+        }
+        if g == Gives::Nothing {
+            return Err(FxError::at(l.at(), format!("`{}` labels a part that binds nothing", self.name(ln))));
+        }
+        let at = f.at();
+        let b = if g == Gives::Cage {
+            let (cage, a) = (self.sym(at, "cage"), self.sym(at, "at"));
+            let p = self.path(at, &lep);
+            Syn::lst(at, vec![cage, Syn::lst(at, vec![a, p])])
+        } else {
+            let rho = self.sym(at, "rho");
+            let e = self.rib_entry(at, &lep, g)?;
+            Syn::lst(at, vec![rho, e])
+        };
+        Ok((llp, mep, b))
+    }
+
+    /// `sigma` with the part at `path` of the repeated element of the list
+    /// at `list` imported `b`, addressed from the element's root.
+    fn annotate_in_element(&mut self, sigma: Syn, list: &[bool], path: &[bool], b: Syn) -> R<Syn> {
+        let at = sigma.at();
+        let Some((first, rest)) = list.split_first() else {
+            let (elem, dots) = sigma.split().ok_or_else(|| FxError::at(at, "a repeated part not found in its tree"))?;
+            let elem = self.annotate(elem, path, "import", b)?;
+            return Ok(cons(at, elem, dots));
+        };
+        let (car, cdr) = sigma.split().ok_or_else(|| FxError::at(at, "a repeated part not found in its tree"))?;
+        let (car, cdr) = if *first { (self.annotate_in_element(car, rest, path, b)?, cdr) } else { (car, self.annotate_in_element(cdr, rest, path, b)?) };
+        Ok(cons(at, car, cdr))
     }
 
     /// What `(bind L in …)` imports: one level of `L`'s, a ribcage if it
@@ -463,7 +537,7 @@ impl Cx<'_> {
                 (lp, Gives::Rib)
             }
             (Label::Here(..), true) => return Err(FxError::at(at, format!("`{}` is not repeated: named alone, not `({0} ...)`", self.name(name)))),
-            (Label::Repeated(..), false) => return Err(FxError::at(at, format!("`{}` is a repeated part's: `({0} ...)`, every repetition's", self.name(name)))),
+            (Label::Repeated(..), false) => return Err(FxError::at(at, format!("`{}` is a repeated part's: `({0} ...)`, every repetition's, or a fact under `...`, each repetition's", self.name(name)))),
         };
         if gives == Gives::Nothing {
             return Err(FxError::at(at, format!("`{}` labels a part that binds nothing", self.name(name))));

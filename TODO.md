@@ -7282,3 +7282,20 @@ with `defn` read the same, "for a while", both at once refused. The rewrite
 scripts of 2026-11-15 left it where tests write it (`defn-export-given.fx`
 keeps one on purpose). Take it out: refuse it saying how it is written now,
 the test of the synonym made the test of that refusal, both front ends.
+
+## 289. A fact under `...` that names what is outside its repetition: imports from an outer region's root (the user's, 2026-11-15)
+
+Facts under an ellipsis (`typed-macros.md`, "Decided: facts under an
+ellipsis, each repetition's") hold of each repetition; those whose labels
+are all one element's are built, elaborated into the element. Wanted: one
+that also names what is outside its element, every repetition's `(v ...)`
+or a label of the list's region, as Scheme's `do` needs (each `step` sees
+every `v`, no `init` does: §223), `(bind (v ...) in step) ...`. Herman's
+form cannot say it: an import inside an element is addressed from the
+element's root. Underneath, an import whose addresses are from an outer
+region's root, carried down into the element: the aligner's imports are
+already a binding paired with the node its addresses are from
+(`Node::imports`, FX-26's `with-import`), so that node an outer region's,
+the elaboration saying which; its scope still the walk's, of written
+bindings, and the shadow restriction as for any import. Both front ends,
+and `do` written as a test, both checkers.

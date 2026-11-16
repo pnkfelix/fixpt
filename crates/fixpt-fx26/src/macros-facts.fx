@@ -334,10 +334,14 @@
 (define-type adds (listof (tupleof steps syn) acyclic))
 (define facts (->* (fails syn syns-a labels bool) syn)
   (lambda (fail sigma fs ls top)
-    (let* ((r (facts-each fail fs ls top nil nil nil nil (the adds nil)))
+    (let* ((e (each-facts fail fs ls nil nil))
+           (r (facts-each fail (extract e 1) ls top nil nil nil nil (the adds nil)))
            (imports (extract r 1)) (rib (extract r 2)) (rings (extract r 3)) (elems (extract r 5))
            (a (syn-start sigma)) (b (syn-end sigma))
-           (s1 (elements-annotated fail sigma (reverse elems)))
+           ;; Each repetition's facts, inside its element; then each element
+           ;; exporting what a fact says of its labels.
+           (s0 (each-annotated fail sigma (reverse (extract e 2))))
+           (s1 (elements-annotated fail s0 (reverse elems)))
            (s2 (imports-annotated fail s1 (reverse imports))))
       (cond ((and (not (null? rib)) (not (null? (extract r 4))))
              (begin (fail-at fail (string-append "a node exports one level, `export`, or nested "
@@ -350,6 +354,90 @@
             ((not (null? (extract r 4)))
              (annotate fail s2 nil "export" (mk-list (cons (mk-symbol "cage" a b) rings) a b)))
             (else s2)))))
+;; Facts `fs` parted: those of the node, and each repetition's, `(bind v in
+;; e) ...` (by the list's path, `e`'s in the element, the binding; the last
+;; first), as `contract.rs`'s `facts` parts them.
+(define-type eaches (listof (tupleof steps steps syn) acyclic))
+(define each-facts (->* (fails syns-a labels syns-a eaches) (tupleof syns-a eaches))
+  (lambda (fail fs ls out each)
+    (cond ((null? fs) (tuple (reverse out) each))
+          ((and (not (null? (cdr fs))) (sym-is? (car (cdr fs)) "..."))
+           (begin
+             (if (and (not (null? (cdr (cdr fs)))) (sym-is? (car (cdr (cdr fs))) "..."))
+                 (fail-at fail "a fact under more than one `...`: not yet" (car (cdr (cdr fs))))
+                 #u)
+             (let ((e (each-bound fail (car fs) ls)))
+               (each-facts fail (cdr (cdr fs)) ls out (if (null? e) each (cons (car e) each))))))
+          (else (each-facts fail (cdr fs) ls (cons (car fs) out) each)))))
+;; A fact under `...`, `(bind v in e) ...`, each repetition's: `v` and `e`
+;; labels of one list's element, each the repetition's own; the list's
+;; path, `e`'s in the element, and what it imports there, addressed from the
+;; element's root, in a list of one (`contract.rs`'s `each_bound`). One that
+;; names what is outside its repetition needs an import from an outer
+;; region's root: not yet (§289).
+(define each-bound (->* (fails syn labels) eaches)
+  (lambda (fail f ls)
+    (let ((items (proper-items f)) (a (syn-start f)) (b (syn-end f))
+          (outside (string-append "a fact under `...` that names what is outside its "
+                                  "repetition: not yet (TODO §289)")))
+      (if (not (and (head-is? f "bind") (= (len items) 4) (sym-is? (nth items 2) "in")))
+          (begin (fail-at fail (string-append "a fact under `...` is a `bind`, each repetition's: "
+                                              "what a list exports is every repetition's, `(export "
+                                              "(x ...))`")
+                          f)
+                 nil)
+          (let* ((l (nth items 1)) (m (nth items 3))
+                 (ll (if (syn-symbol? l) (label-of (syn-symbol l) ls) nil))
+                 (ml (if (syn-symbol? m) (label-of (syn-symbol m) ls) nil)))
+            (cond
+              ((and (syn-symbol? l) (null? ll))
+               (begin (fail-at fail (string-append "`" (syn-name l) "` labels no part of this "
+                                                   "node")
+                               l)
+                      nil))
+              ((or (null? ll) (= (extract (car ll) 2) 0)) (begin (fail-at fail outside l) nil))
+              ((and (syn-symbol? m) (null? ml))
+               (begin (fail-at fail (string-append "`" (syn-name m) "` labels no part of this "
+                                                   "node")
+                               m)
+                      nil))
+              ((or (null? ml) (= (extract (car ml) 2) 0)) (begin (fail-at fail outside m) nil))
+              ((not (steps=? (extract (car ll) 3) (extract (car ml) 3)))
+               (begin (fail-at fail (string-append "a fact under `...` names one list's "
+                                                   "repetition: these are of two lists")
+                               f)
+                      nil))
+              ((= (extract (car ll) 5) 0)
+               (begin (fail-at fail (string-append "`" (syn-name l) "` labels a part that binds "
+                                                   "nothing")
+                               l)
+                      nil))
+              (else
+               (let* ((g (extract (car ll) 5)) (ep (extract (car ll) 4))
+                      (bd (if (= g 5)
+                              (mk-list (list (mk-symbol "cage" a b)
+                                             (mk-list (list (mk-symbol "at" a b) (path-syn ep a b))
+                                                      a b))
+                                       a b)
+                              (mk-list (list (mk-symbol "rho" a b) (rib-entry fail a b ep g))
+                                       a b))))
+                 (list (tuple (extract (car ll) 3) (extract (car ml) 4) bd))))))))))
+;; `sigma` with each repetition's facts `xs` made: the part a fact names in
+;; the repeated element of the list at its path imported its binding.
+(define each-annotated (->* (fails syn eaches) syn)
+  (lambda (fail sigma xs)
+    (if (null? xs)
+        sigma
+        (each-annotated fail (in-element fail sigma (extract (car xs) 1) (extract (car xs) 2)
+                                         (extract (car xs) 3))
+                        (cdr xs)))))
+(define in-element (->* (fails syn steps steps syn) syn)
+  (lambda (fail sigma lp p bd)
+    (let ((ps (split sigma)))
+      (cond ((null? ps) (begin (fail-at fail "a repeated part not found in its tree" sigma) sigma))
+            ((null? lp) (cons-syn (annotate fail (car ps) p "import" bd) (nth ps 1) sigma))
+            ((car lp) (cons-syn (in-element fail (car ps) (cdr lp) p bd) (nth ps 1) sigma))
+            (else (cons-syn (car ps) (in-element fail (nth ps 1) (cdr lp) p bd) sigma))))))
 ;; The facts read: imports (by path, the last first), a rib's entries (the
 ;; last first), a ribcage's rings (innermost first), whether there is one,
 ;; each repeated element's entries (by the list's path, the last first).
@@ -368,7 +456,9 @@
                       (begin (fail-at fail "`(bind L in name)`: `name` a label of this node" m)
                              (tuple imports rib rings star elems)))
                      ((= (extract (car target) 2) 1)
-                      (begin (fail-at fail "a fact binding in a repeated part: not yet" m)
+                      (begin (fail-at fail (string-append "a fact binding in a repeated part is "
+                                                          "each repetition's: followed by `...`")
+                                      m)
                              (tuple imports rib rings star elems)))
                      (else
                       (let ((e (bound fail (nth items 1) ls)))
@@ -435,7 +525,8 @@
                       none))
               ((and (= (extract (car found) 2) 1) (not rep))
                (begin (fail-at fail (string-append "`" name "` is a repeated part's: `(" name
-                                                   " ...)`, every repetition's")
+                                                   " ...)`, every repetition's, or a fact under "
+                                                   "`...`, each repetition's")
                                l)
                       none))
               (else
