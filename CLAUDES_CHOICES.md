@@ -4413,13 +4413,29 @@ The user read the paper as supporting the distribution. Mine:
   splice that must write a text's word copies its code instead of mapping
   it.
 
+## An interned symbol's name a text (2026-11-17)
+
+- **An image numbers its texts from 0, in the order it holds them**,
+  not by the numbers of the process that made it: a process holding no
+  text when it loads one (each `fixpt` run, its front end) numbers them
+  alike, so none of their words is written, no page of the mapped static
+  area is copied for it (433 page faults otherwise, the front end's) and
+  its code stays mapped; and an image is the same bytes whatever its
+  maker numbered before. The section's numbers must be 0, 1, 2 and on.
+- **The lazy index of an image's symbols by hash is gone**: a load
+  interns every text anyway (it must, to know each one's number), so the
+  index by text number is made at once, a word inserted for each.
+- **A splice that fails at a symbol undoes what it did for the symbols
+  before**, as it does for a wrong reference later: an index entry left
+  would name a table place that has no symbol.
+
 ## Gensyms in the heap, and one kind of handle for every symbol (2026-11-17)
 
 - **A symbol stays three fields**, since compiled code reads the hash at
   its offset; an uninterned one's field 0 is a record (`[name, prefix,
   seed, handle]`; a prefix alone, the user's: every fresh name's tag is
   spelled before its seed) instead of its name, so whether a symbol is
-  interned is whether its field 0 is a string. Every uninterned symbol is
+  interned is whether its field 0 is a text (a string, before step 2). Every uninterned symbol is
   one, `make_uninterned_symbol`'s too (its name the prefix, no seed).
 - **A gensym's hash is made from its parts**, not its name's text: it is
   equal to itself alone (the user's choice of identity), so nothing asks

@@ -1,10 +1,10 @@
 //! Texts (`Value::text`, `fixpt_memmgmt::texts`) in a heap's image: an image
 //! carries the texts its words, roots and globals name, and a load or a
 //! splice gives each the number it has in the loading process, writing the
-//! words that hold one where that number is another. A text's number is
-//! the process's own, so a load in this process finds each as it was; one
-//! in a process that made other texts first (a child of this test's) finds
-//! them elsewhere.
+//! words that hold one where that number is another. An image numbers its
+//! texts from 0, in the order it holds them, so a process that holds no
+//! text yet (a child of this test's) numbers them so too, writing nothing;
+//! one that made other texts first finds them elsewhere.
 
 use fixpt_heap::{Heap, Value, image, layout};
 
@@ -84,8 +84,9 @@ fn an_images_texts_come_back() {
     for dump in [image::dump_packed, image::dump_mappable, image::dump_static] {
         let bytes = an_image(dump);
         let img = image::parts(&bytes, true).unwrap();
-        assert_eq!(img.texts.texts.len(), 3, "each text once");
-        assert!(img.texts.numbers().is_none(), "in this process, each its number");
+        // Its three, and its global's symbol's name.
+        assert_eq!(img.texts.texts.len(), 4, "each text once");
+        assert!(img.texts.texts.iter().any(|&(_, t)| t == "texts-image:global"));
         loaded_and_checked(&bytes);
         spliced_and_checked(&bytes);
     }
@@ -96,7 +97,8 @@ fn a_texts_section_that_is_not_utf8_is_refused() {
     let mut bytes = an_image(image::dump_packed);
     let t = image::sections(&bytes).unwrap().into_iter().find(|t| t.kind == image::TEXTS).unwrap();
     // The section ends with the texts' bytes: `λ`'s two among them.
-    let at = t.offset + t.bytes - " beta".len() - 1;
+    let section = &bytes[t.offset..t.offset + t.bytes];
+    let at = t.offset + section.windows(TEXTS[1].len()).position(|w| w == TEXTS[1].as_bytes()).unwrap() + "texts-image:".len() + 1;
     assert_eq!(bytes[at], "λ".as_bytes()[1]);
     bytes[at] = 0xff;
     match image::load_trusted(&bytes) {
@@ -106,21 +108,24 @@ fn a_texts_section_that_is_not_utf8_is_refused() {
 }
 
 /// The image made here, loaded in a child process that made other texts
-/// first ([`a_child_loads_texts_numbered_otherwise`]).
+/// first, and in one that made none ([`a_child_loads_texts_numbered_otherwise`]).
 #[test]
 fn an_image_made_elsewhere_names_its_texts_by_their_numbers_here() {
     for (k, dump) in [image::dump_packed, image::dump_static].into_iter().enumerate() {
-        let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("texts-image-{}-{k}.img", std::process::id()));
-        std::fs::write(&path, an_image(dump)).unwrap();
-        let out = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "a_child_loads_texts_numbered_otherwise", "--nocapture", "--test-threads=1"])
-            .env("FIXPT_TEXTS_CHILD", &path)
-            .output()
-            .unwrap();
-        let _ = std::fs::remove_file(&path);
-        let said = String::from_utf8_lossy(&out.stdout);
-        assert!(out.status.success() && said.contains("1 passed"), "the child: {said}{}", String::from_utf8_lossy(&out.stderr));
-        assert!(said.contains("texts-child: renumbered"), "the child ran the check: {said}");
+        for first in ["0", "1000"] {
+            let path = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("texts-image-{}-{k}-{first}.img", std::process::id()));
+            std::fs::write(&path, an_image(dump)).unwrap();
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "a_child_loads_texts_numbered_otherwise", "--nocapture", "--test-threads=1"])
+                .env("FIXPT_TEXTS_CHILD", &path)
+                .env("FIXPT_TEXTS_CHILD_FIRST", first)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_file(&path);
+            let said = String::from_utf8_lossy(&out.stdout);
+            assert!(out.status.success() && said.contains("1 passed"), "the child: {said}{}", String::from_utf8_lossy(&out.stderr));
+            assert!(said.contains(&format!("texts-child: {first} first")), "the child ran the check: {said}");
+        }
     }
 }
 
@@ -128,12 +133,16 @@ fn an_image_made_elsewhere_names_its_texts_by_their_numbers_here() {
 #[test]
 fn a_child_loads_texts_numbered_otherwise() {
     let Some(path) = std::env::var_os("FIXPT_TEXTS_CHILD") else { return };
-    for i in 0..1000 {
+    let first: u32 = std::env::var("FIXPT_TEXTS_CHILD_FIRST").unwrap().parse().unwrap();
+    assert_eq!(fixpt_memmgmt::texts::count(), 0, "no text made before");
+    for i in 0..first {
         Value::text(&format!("texts-child:first-{i}"));
     }
     let bytes = std::fs::read(path).unwrap();
-    assert!(image::parts(&bytes, true).unwrap().texts.numbers().is_some(), "numbered otherwise here");
+    // With none made before, each text the number it has in the image:
+    // none of its words written.
+    assert_eq!(image::parts(&bytes, true).unwrap().texts.numbers().is_some(), first > 0, "numbered otherwise here");
     loaded_and_checked(&bytes);
     spliced_and_checked(&bytes);
-    println!("texts-child: renumbered");
+    println!("texts-child: {first} first");
 }

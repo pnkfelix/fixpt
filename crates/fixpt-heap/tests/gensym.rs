@@ -175,3 +175,54 @@ fn copying_keeps_an_uninterned_symbol_uninterned() {
     assert!(c.is_uninterned_symbol(v));
     assert_eq!(c.symbol_name(v), "x");
 }
+
+/// An interned symbol's name is a text of the process's, the one its name
+/// is, through both collections, every dump, a load and both splices;
+/// a splice into a heap that has the name finds that heap's symbol.
+#[test]
+fn an_interned_symbols_name_is_a_text() {
+    let n = fixpt_memmgmt::texts::intern("names-test:x");
+    let mut h = Heap::new();
+    let x = h.intern("names-test:x");
+    assert_eq!(h.symbol_text(x), Some(n));
+    assert_eq!(h.intern_text(n), x);
+    let mut keep = [x];
+    h.collect_young(&mut [&mut keep]);
+    h.collect(&mut [&mut keep]);
+    let x = keep[0];
+    assert_eq!((h.symbol_text(x), h.symbol_name(x)), (Some(n), "names-test:x".into()));
+    assert_eq!(h.interned("names-test:x"), Some(x));
+    assert_eq!(h.interned("names-test:none"), None);
+    h.push_root(x);
+    for dump in [image::dump_packed, image::dump_mappable, image::dump_static] {
+        let bytes = dump(&h);
+        let back = image::load(&bytes).unwrap();
+        let y = back.root_at(0);
+        assert_eq!((back.symbol_text(y), back.interned("names-test:x")), (Some(n), Some(y)));
+        let img = image::parts(&bytes, true).unwrap();
+        let mut empty = Heap::new();
+        let y = empty.splice_image(&img, &[]).unwrap()[0];
+        assert_eq!((empty.symbol_text(y), empty.interned("names-test:x")), (Some(n), Some(y)));
+        empty.verify().unwrap();
+        let mut holding = Heap::new();
+        let mine = holding.intern("names-test:x");
+        let y = holding.splice_image(&img, &[]).unwrap()[0];
+        assert_eq!(y, mine, "this heap's symbol of the name");
+        holding.verify().unwrap();
+    }
+}
+
+/// `symbol->string`'s: a new string each time, of an interned symbol's
+/// name or a gensym's.
+#[test]
+fn a_symbols_string_is_new_each_time() {
+    let mut h = Heap::new();
+    let x = h.intern("x");
+    let g = h.make_gensym("%:1:", x);
+    for s in [x, g] {
+        let (a, b) = (h.symbol_to_string(s), h.symbol_to_string(s));
+        assert_ne!(a, b);
+        assert_eq!(h.string_to_rust(a), h.symbol_name(s));
+        assert_eq!(h.string_to_rust(b), h.symbol_name(s));
+    }
+}

@@ -347,6 +347,16 @@ Symbols have both, as a special case. FX-87 and FX-91 had the general one
   dictionary), gives the existing node or makes one with `unique`; its
   effect `(alloc @uniqueof)` and the table's region's.
 - Weak references, or an interning table keeps every node it made alive.
+- One effect with `gensym`'s (`TODO.md` §292, 2026-11-17): `@uniqueof`
+  and FX-91's `init` are what `gensym` is, an allocation of no region,
+  which no `letregion` discharges and no compiler merges or duplicates;
+  `gensym` the symbol case of `unique`, the atom renamed to fit. Weighed
+  with the user, 2026-11-17: a marker intersection `(and t unique)`
+  instead would have no introduction but a generative one, and every
+  type-directed copy of `t` (`r_const`, `apply`'s sharing, §17) would
+  have to know it; `(uniqueof t)` opaque, represented as a fresh `t`
+  itself where `t` is heap-allocated, costs as little and needs none of
+  them to.
   The heap has them since 2026-10-05 (`Heap::weak_add`, for collecting the
   REPL's code); FX-26 does not yet.
 
@@ -3723,7 +3733,9 @@ Left, in order:
    symbols has its symbols' names neither read nor hashed at the load,
    but kept by their hashes (`image_symbols`, the symbol's own field) and
    looked up when first asked for (`intern`, `interned`), compared in
-   place (`string_is`); and the immutable half given no crossing map,
+   place (`string_is`). (Replaced 2026-11-17, `TODO.md` §292 step 2: a
+   symbol's name is a text, which the load interns, an image's 9,884 in
+   0.65 ms; the index by text number made at once.) And the immutable half given no crossing map,
    which only a dirty card's scan reads. An empty program 36.0 ms to
    33.5 ms, release; 8% fewer instructions. And no fixup visited where
    nothing of the heap's stands for the image's (each is then where it was
@@ -7376,6 +7388,20 @@ Kayak's quadratic ER chains (C446) may key ER requests as it keys
 syntactic closures'. The rest below, the names filled in when printed,
 waits on the `Text` unification (2026-11-17's plan: symbol names in a
 non-moving `Text` area, the `Interner` a view of the heap's symbols).
+
+Step 2, 2026-11-17: an interned symbol's name is a text
+(`Heap::intern_text`, `symbol_text`), the heap's `symbol_index` keyed by
+its number, `copy_graph` and a splice finding a heap's symbol by it, no
+name read as a string; `symbol->string` makes its string from the text
+(`symbol_to_string`). An image (version 13) numbers its texts from 0, in
+the order it holds them, so a process that holds none yet when it loads
+one, as `fixpt` does its front end, numbers them alike and writes none of
+their words (its code still mapped; one text-renumbered splice maps its
+code too, where no text is in it). The front end's 9,884 names interned
+at its load (`texts::intern_all`, one lock): an empty program 31.0 ms to
+32.0 ms, release. Left, if it matters: an image carrying its texts'
+index, which a process holding none could take as its own, nothing
+hashed (it must then be trusted, or checked at the cost it saves).
 
 Step 1 of that, 2026-11-17: the process's texts (`fixpt_memmgmt::texts`),
 UTF-8, each once, never changed, moved or freed, read as `&'static str`;

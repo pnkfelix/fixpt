@@ -88,8 +88,9 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// Version 10 has a call-out as the call-out itself, encoded, the same in
 /// every machine, not a number in the table of the machine that made it.
 /// Version 11 is a table of sections (`TODO.md` §165). Version 12 has a
-/// section of the texts it names (`Value::text`), and where.
-pub const VERSION: u32 = 12;
+/// section of the texts it names (`Value::text`), and where. Version 13 has
+/// an interned symbol's name a text, not a string.
+pub const VERSION: u32 = 13;
 const HEADER_BYTES: usize = 32;
 const SECTION_BYTES: usize = 48;
 
@@ -196,7 +197,7 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
     // Its active semispace the first, whichever it is, or, made static,
     // each object in the static area's half it belongs in: an image loads
     // there.
-    let (words, [immutable, statics], globals, symbols, roots, code) = if old_static {
+    let (mut words, [mut immutable, mut statics], mut globals, symbols, mut roots, mut code) = if old_static {
         let (mut halves, globals, symbols, roots, mut code) = heap.image_split_static(base);
         // The immutable half and each part of the code to a page's end, by
         // an empty bloblet as long as the rest: mapped read-only, each ends
@@ -217,7 +218,36 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
     };
     let [stubbed_at, native_at] = crate::heap::code_part_bases();
     let (fixups, text_places) = crate::heap::image_fixups(&[(0, &words), (immutable_at, &immutable), (mutable_at, &statics), (stubbed_at, &code[0].0), (native_at, &code[1].0)], &symbols);
-    let texts = texts_section(&text_places, globals.iter().chain(&roots));
+    // Its texts numbered from 0 in the order the image holds them, as a
+    // process that holds none yet numbers them reading it: there, nothing
+    // is written (`ImageTexts::numbers`); and the image is the same
+    // whatever this process numbered before.
+    let mut order: Vec<u32> = Vec::new();
+    let mut compact: crate::HashMap<u32, u32> = crate::HashMap::default();
+    let mut number = |n: u32| {
+        *compact.entry(n).or_insert_with(|| {
+            order.push(n);
+            order.len() as u32 - 1
+        })
+    };
+    let text_places: Vec<usize> = {
+        let [stubbed, native] = &mut code;
+        let mut spaces = [(0, &mut words), (immutable_at, &mut immutable), (mutable_at, &mut statics), (stubbed_at, &mut stubbed.0), (native_at, &mut native.0)];
+        text_places
+            .into_iter()
+            .map(|(at, n)| {
+                let (from, ws) = spaces.iter_mut().find(|(from, ws)| (*from..*from + ws.len()).contains(&at)).expect("a text's place in a space");
+                ws[at - *from] = Value::text_numbered(number(n)).raw();
+                at
+            })
+            .collect()
+    };
+    for v in globals.iter_mut().chain(&mut roots) {
+        if let Some(n) = v.text_number() {
+            *v = Value::text_numbered(number(n));
+        }
+    }
+    let texts = texts_section(&text_places, &order);
     let le = |out: &mut Vec<u8>, ws: &mut dyn Iterator<Item = u64>| {
         for w in ws {
             out.extend_from_slice(&w.to_le_bytes());
@@ -279,30 +309,24 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
     out
 }
 
-/// The texts section of an image whose words hold texts at `places` (each
-/// with its number), and whose roots and globals are `values` (the texts
-/// among them listed too, at no place: they are mapped where they are
-/// read).
-fn texts_section<'v>(places: &[(usize, u32)], values: impl Iterator<Item = &'v Value>) -> Vec<u8> {
-    let mut numbers: Vec<u32> = places.iter().map(|&(_, n)| n).chain(values.filter_map(|v| v.text_number())).collect();
-    numbers.sort_unstable();
-    numbers.dedup();
-    let texts: Vec<(u32, &str)> = numbers
-        .into_iter()
-        .map(|n| (n, fixpt_memmgmt::texts::get(n).unwrap_or_else(|| panic!("a text #{n} the process has not, in a heap it made"))))
-        .collect();
+/// The texts section of an image whose words hold texts at `places`, and
+/// whose texts are `order`, the image's text `i` this process's `order[i]`
+/// (its roots' and globals' among them, at no place: they are mapped where
+/// they are read).
+fn texts_section(places: &[usize], order: &[u32]) -> Vec<u8> {
+    let texts: Vec<&str> = order.iter().map(|&n| fixpt_memmgmt::texts::get(n).unwrap_or_else(|| panic!("a text #{n} the process has not, in a heap it made"))).collect();
     let mut out = Vec::new();
     let mut put = |w: u64| out.extend_from_slice(&w.to_le_bytes());
     put(texts.len() as u64);
-    for &(n, t) in &texts {
-        put(n as u64);
+    for (i, t) in texts.iter().enumerate() {
+        put(i as u64);
         put(t.len() as u64);
     }
     put(places.len() as u64);
-    for &(at, _) in places {
+    for &at in places {
         put(at as u64);
     }
-    for (_, t) in &texts {
+    for t in &texts {
         out.extend_from_slice(t.as_bytes());
     }
     out
@@ -343,8 +367,8 @@ impl ImageTexts<'_> {
             let t = at.checked_add(len).and_then(|e| b.get(at..e)).ok_or_else(|| bad("a text past its end"))?;
             at += len;
             let t = std::str::from_utf8(t).map_err(|_| bad("a text not UTF-8"))?;
-            if texts.last().is_some_and(|&(j, _)| j >= k) {
-                return Err(bad("its numbers out of order"));
+            if k as usize != texts.len() {
+                return Err(bad("its numbers not 0, 1, 2 and on"));
             }
             texts.push((k, t));
         }
@@ -354,21 +378,22 @@ impl ImageTexts<'_> {
         Ok(ImageTexts { texts, places })
     }
 
-    /// Each text's number in this process, by its number in the image's;
-    /// none if every one is the same here (nothing to write). Each text
-    /// made here if it was not.
-    pub fn numbers(&self) -> Option<crate::HashMap<u32, u32>> {
-        let here: Vec<(u32, u32)> = self.texts.iter().map(|&(k, t)| (k, fixpt_memmgmt::texts::intern(t))).collect();
-        here.iter().any(|(k, h)| k != h).then(|| here.into_iter().collect())
+    /// Each text's number in this process, by its number in the image's
+    /// (its index); none if every one is the same here (nothing to write),
+    /// as where the process held no text before it read the image's. Each
+    /// text made here if it was not.
+    pub fn numbers(&self) -> Option<Vec<u32>> {
+        let here = fixpt_memmgmt::texts::intern_all(self.texts.iter().map(|&(_, t)| t));
+        here.iter().enumerate().any(|(k, &h)| k as u32 != h).then_some(here)
     }
 }
 
 /// `v`, a text of an image's, as the text it is here (`numbers`, from
 /// [`ImageTexts::numbers`]); anything else as it is. An error for a text
 /// the image does not carry.
-pub fn retext(numbers: &crate::HashMap<u32, u32>, v: Value) -> Result<Value, String> {
+pub fn retext(numbers: &[u32], v: Value) -> Result<Value, String> {
     match v.text_number() {
-        Some(k) => numbers.get(&k).map(|&n| Value::text_numbered(n)).ok_or_else(|| format!("a text #{k} the image does not carry")),
+        Some(k) => numbers.get(k as usize).map(|&n| Value::text_numbered(n)).ok_or_else(|| format!("a text #{k} the image does not carry")),
         None => Ok(v),
     }
 }
