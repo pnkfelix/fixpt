@@ -590,6 +590,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("datum-int?", "(subr pure (datum) (bool (then (shape 0 int)) (else)))"),
     ("int->string", "(subr pure (int) string)"),
     ("string->symbol", "(subr pure (string) symbol)"),
+    // A symbol equal to itself alone, its name `prefix` then the seed's
+    // (`TODO.md` §292): its own effect, so no compiler makes two of one
+    // call, or one of two.
+    ("gensym", "(subr gensym (string symbol) symbol)"),
     ("symbol->string", "(subr pure (symbol) string)"),
     ("symbol=?", "(subr pure (symbol symbol) bool)"),
     // Keywords, `#:name` (`docs/fx26.md`, "Keywords"): the keyword of a

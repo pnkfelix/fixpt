@@ -688,6 +688,7 @@
             ((string=? n "spin") (de (k-one (a-spin))))
             ((string=? n "nondet") (de (k-one (a-nondet))))
             ((string=? n "stage") (de (k-one (a-stage))))
+            ((string=? n "gensym") (de (k-one (a-gensym))))
             ((string=? n "const") (dr (r-frozen -1 #f)))
             ((string=? n "acyclic") (dr (r-frozen -1 #t)))
             ((string=? n "finite") (dz (sz-finite)))

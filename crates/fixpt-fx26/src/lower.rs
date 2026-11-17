@@ -50,7 +50,7 @@ pub(crate) fn total_operation(name: &str) -> bool {
         "sum?", "product?", "vector?", "bytevector?", "keyword?", "bitwise-and", "bitwise-ior", "bitwise-xor", "bitwise-not",
         "string-append", "string-length", "string=?", "string<?", "string<=?", "string>?", "string>=?", "char=?",
         "char<?", "char<=?", "char>?", "char>=?", "char->integer", "char-upcase", "char-downcase", "symbol->string",
-        "string->symbol", "symbol=?", "symbol->keyword", "keyword->symbol", "int->f64", "int->f32", "f64->string", "f32->string", "f32->f64", "f64->f32",
+        "string->symbol", "gensym", "symbol=?", "symbol->keyword", "keyword->symbol", "int->f64", "int->f32", "f64->string", "f32->string", "f32->f64", "f64->f32",
         "string-hash", "char-in?", "wcell-nil", "wcell-unit", "wglobal=?",
     ];
     // What is lowered to the identity (`wcell-int` and its kin) does nothing.
@@ -444,6 +444,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("int->string", "number->string", false),
     ("string->symbol", "string->symbol", true),
     ("symbol->string", "symbol->string", true),
+    ("gensym", "%fx26-gensym", false),
     ("symbol=?", "eq?", false),
     ("symbol->keyword", "%fx26-symbol->keyword", false),
     ("keyword->symbol", "%fx26-keyword->symbol", false),

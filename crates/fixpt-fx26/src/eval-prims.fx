@@ -184,6 +184,7 @@
       (prim! 'string-hash (lambda (xs) (string-hash (as-str (ev-arg xs 0)))))
       (prim! 'string->symbol (lambda (xs) (string->symbol (as-str (ev-arg xs 0)))))
       (prim! 'symbol->string (lambda (xs) (symbol->string (as-sym (ev-arg xs 0)))))
+      (prim! 'gensym (lambda (xs) (gensym (as-str (ev-arg xs 0)) (as-sym (ev-arg xs 1)))))
       (prim! 'symbol=? (lambda (xs) (symbol=? (as-sym (ev-arg xs 0)) (as-sym (ev-arg xs 1)))))
       (prim! 'symbol->keyword (lambda (xs) (symbol->keyword (as-sym (ev-arg xs 0)))))
       (prim! 'keyword->symbol (lambda (xs) (keyword->symbol (as-keyword (ev-arg xs 0)))))

@@ -608,6 +608,9 @@ impl Checker {
             if self.name(sym) == "stage" {
                 return Ok(Effect::atom(Atom::Stage));
             }
+            if self.name(sym) == "gensym" {
+                return Ok(Effect::atom(Atom::Gensym));
+            }
             let (withs, given) = self.withs_reading(sym);
             if let Some(m) = given {
                 let e = Effect::atom(Atom::Var(self.effect_select(m, sym)));
@@ -1837,7 +1840,7 @@ impl Checker {
     /// to one, or one of `parse_effect`'s atoms or `maxeff`.
     pub(crate) fn effect_shaped(&self, s: &Syn) -> bool {
         if let Some(sym) = s.sym() {
-            return matches!(self.name(sym), "pure" | "spin" | "nondet" | "stage") || matches!(self.lookup_desc(sym), Some(DScope::Eff(_) | DScope::Var(_, Kind::Effect)));
+            return matches!(self.name(sym), "pure" | "spin" | "nondet" | "stage" | "gensym") || matches!(self.lookup_desc(sym), Some(DScope::Eff(_) | DScope::Var(_, Kind::Effect)));
         }
         matches!(
             self.head(&self.items(s, "").unwrap_or_default()),
@@ -1873,6 +1876,9 @@ impl Checker {
             }
             if name == "stage" {
                 return Ok(D::Effect(Effect::atom(Atom::Stage)));
+            }
+            if name == "gensym" {
+                return Ok(D::Effect(Effect::atom(Atom::Gensym)));
             }
             if name == "const" {
                 return Ok(D::Region(Region::Frozen(None, false)));

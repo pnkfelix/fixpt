@@ -7405,13 +7405,14 @@ the user, 2026-11-17:
   one), for lookup, not identity. A gensym is no immutable datum a
   compiler may rebuild: shared, never remade (`copy_graph` and literals
   to check). `string->symbol` stays `pure`.
-- **An effect of its own.** The maker is `(subr gensym (symbol string
-  string) symbol)` (seed, prefix, suffix): `gensym` a nullary effect, as
-  `alloc` for the optimizers (no call duplicated or merged, an unused one
-  dropped, reordered freely), but of no region, so no `letregion`
-  discharges it.
-- **Seeded, named lazily.** A gensym records its seed, prefix and suffix;
-  its pretty name (`display`, `symbol->string`) is built from them when
+- **An effect of its own.** The maker is `(subr gensym (string symbol)
+  symbol)` (prefix, seed; a prefix alone, the user's: every fresh name's
+  tag spelled before its seed, `%:K.N:x` for `%x:K.N`): `gensym` a
+  nullary effect, as `alloc` for the optimizers (no call duplicated or
+  merged, an unused one dropped, reordered freely), but of no region, so
+  no `letregion` discharges it.
+- **Seeded, named lazily.** A gensym records its prefix and seed; its
+  pretty name (`display`, `symbol->string`) is built from them when
   first asked for, deterministic, from no counter. Its hash is computed
   when it is made, without building the name.
 - **Uniform handles.** The Rust side holds one kind of handle, an entry

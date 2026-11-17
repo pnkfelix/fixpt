@@ -5607,7 +5607,7 @@ impl Checker {
                         vs.insert(v);
                     }
                 }
-                Atom::Spin | Atom::Io(_) | Atom::Nondet | Atom::Stage => {}
+                Atom::Spin | Atom::Io(_) | Atom::Nondet | Atom::Stage | Atom::Gensym => {}
             }
         }
     }
@@ -5689,6 +5689,7 @@ pub(crate) fn subst_effect(e: &Effect, map: &HashMap<DVar, D>, arena: &crate::as
             Atom::Io(k) => Effect::atom(Atom::Io(k)),
             Atom::Nondet => Effect::atom(Atom::Nondet),
             Atom::Stage => Effect::atom(Atom::Stage),
+            Atom::Gensym => Effect::atom(Atom::Gensym),
             // An effect function applied: given what it is substituted by,
             // reduced if that is a `dlambda`.
             Atom::App(n) => {
@@ -6419,6 +6420,7 @@ impl BinderEnv {
                     Atom::Receive(x) => Atom::Receive(r(x)),
                     Atom::Nondet => Atom::Nondet,
                     Atom::Stage => Atom::Stage,
+                    Atom::Gensym => Atom::Gensym,
                     Atom::Spin => Atom::Spin,
                     Atom::Io(k) => Atom::Io(k),
                     // Its variable, and what it was given, as named here.

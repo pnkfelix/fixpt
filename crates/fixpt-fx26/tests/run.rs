@@ -270,3 +270,16 @@ fn fixed_width_64_literals_run() {
 fn fixed_width_literals_run() {
     assert_eq!(run(include_str!("programs/sizes/fixed-width-literals.fx")), "8");
 }
+
+/// `gensym`'s symbols, each equal to itself alone, named by their prefix
+/// and seed (`programs/run/gensym.fx`; `TODO.md` §292); and making one is
+/// an effect of its own, which a `pure` procedure has not, refused by both
+/// checkers alike.
+#[test]
+fn a_gensym_is_itself_alone_and_making_one_is_an_effect() {
+    assert_eq!(run(include_str!("programs/run/gensym.fx")), "(#t #f #f #t #t #t)");
+    let mut s = Fx26Session::lowering(Backend::Bytecode).expect("starts");
+    let refused = s.run_program("(define f (subr pure (symbol) symbol) (lambda (x) (gensym \"g\" x)))");
+    let e = refused.err().map(|e| e.message.to_string()).unwrap_or_default();
+    assert!(e.contains("it has gensym") && !e.contains("checkers disagree"), "{e}");
+}

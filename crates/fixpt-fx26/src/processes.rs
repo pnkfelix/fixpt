@@ -408,6 +408,8 @@ impl Checker {
             Atom::Send(_) | Atom::Init(_) | Atom::Await(_) | Atom::Io(_) | Atom::Spin | Atom::Nondet | Atom::Stage => true,
             Atom::Read(r) => r.is_globals() || matches!(r, Region::Frozen(None, _)),
             Atom::Alloc(r) => matches!(r, Region::Const(_) | Region::Heap),
+            // Made in the heap, as an allocation there is.
+            Atom::Gensym => true,
             _ => false,
         }
     }
@@ -759,7 +761,7 @@ impl Checker {
 
     fn interferes(&self, a: Atom, b: Atom) -> bool {
         let unknown = |a: Atom| matches!(a, Atom::Var(_) | Atom::App(_));
-        let harmless = |a: Atom| matches!(a, Atom::Alloc(_) | Atom::Spin | Atom::Nondet);
+        let harmless = |a: Atom| matches!(a, Atom::Alloc(_) | Atom::Gensym | Atom::Spin | Atom::Nondet);
         if unknown(a) {
             return !harmless(b);
         }

@@ -368,6 +368,7 @@ impl Ex<'_> {
                 }
                 Atom::Nondet => self.node("nondet", vec![]),
                 Atom::Stage => self.node("stage", vec![]),
+                Atom::Gensym => self.node("gensym", vec![]),
                 Atom::Var(v) => self.var(v),
                 Atom::App(n) => {
                     let (head, args) = self.c.arena.effect_apps.parts(n);
@@ -854,6 +855,7 @@ impl Im<'_, '_> {
                 }
                 "nondet" => Atom::Nondet,
                 "stage" => Atom::Stage,
+                "gensym" => Atom::Gensym,
                 "eapp" => {
                     let head = self.var(args[0])?;
                     let eargs = args[1..].iter().map(|x| self.earg(*x)).collect::<Result<Vec<_>, _>>()?;

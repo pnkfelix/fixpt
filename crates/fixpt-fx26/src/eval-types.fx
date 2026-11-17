@@ -40,7 +40,7 @@
 
 (define-effect runs
   (maxeff stores (read @x) (write @x) (alloc @x) io-any scheduling parses reading (read @c)
-          (alloc @c)))
+          (alloc @c) gensym))
 
 (define-effect evals (maxeff runs (goto @x) (comefrom @x) spin))
 

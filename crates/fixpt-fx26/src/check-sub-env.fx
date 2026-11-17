@@ -141,6 +141,7 @@
                     (a-spin () x)
                     (a-nondet () x)
                     (a-stage () x)
+                    (a-gensym () x)
                     (a-io (k) x)
                     (a-var (v) (a-var (k-benv-var env v)))
                     ;; Its variable, and what it was given, as named here.

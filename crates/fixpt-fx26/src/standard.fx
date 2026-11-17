@@ -151,6 +151,7 @@
          (("assert") "%fx26-assert")
          (("assume") "%fx26-assume")
          (("append") "append")
+         (("gensym") "%fx26-gensym")
          (("%sched") "%fx26-sched")
          (else "")))
       ((7)

@@ -4417,7 +4417,8 @@ The user read the paper as supporting the distribution. Mine:
 
 - **A symbol stays three fields**, since compiled code reads the hash at
   its offset; an uninterned one's field 0 is a record (`[name, prefix,
-  seed, suffix, handle]`) instead of its name, so whether a symbol is
+  seed, handle]`; a prefix alone, the user's: every fresh name's tag is
+  spelled before its seed) instead of its name, so whether a symbol is
   interned is whether its field 0 is a string. Every uninterned symbol is
   one, `make_uninterned_symbol`'s too (its name the prefix, no seed).
 - **A gensym's hash is made from its parts**, not its name's text: it is

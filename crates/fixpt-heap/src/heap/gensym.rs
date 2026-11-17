@@ -4,8 +4,8 @@
 //! A symbol is three fields, `[name, hash, global-slot]`, wherever it is
 //! made (compiled code reads the hash at its offset). An interned symbol's
 //! name is its string. An uninterned one's field 0 is a record instead,
-//! `[name, prefix, seed, suffix, handle]`: its name is `prefix`, then
-//! `seed`'s name if `seed` is a symbol, then `suffix`, made the first time
+//! `[name, prefix, seed, handle]`: its name is `prefix`, then `seed`'s
+//! name if `seed` is a symbol, made the first time
 //! it is asked for and kept in `name` (`#f` until then), so a gensym that is
 //! never printed never has one, and the name is the same whenever it is
 //! made, from no counter. A gensym is equal to itself alone (`eq?`,
@@ -32,53 +32,50 @@ use super::*;
 const R_NAME: usize = 0;
 const R_PREFIX: usize = 1;
 const R_SEED: usize = 2;
-const R_SUFFIX: usize = 3;
-const R_HANDLE: usize = 4;
-const R_LEN: usize = 5;
+const R_HANDLE: usize = 3;
+const R_LEN: usize = 4;
 
 /// The first handle of an uninterned symbol: `UNINTERNED_HANDLES + j` is
 /// `sym_handles[j]`'s; an interned symbol's handle is below it.
 pub const UNINTERNED_HANDLES: u32 = 1 << 31;
 
 impl Heap {
-    /// A symbol `eq?` to no other, named `prefix`, then `seed`'s name, then
-    /// `suffix`, its name made when first asked for (a gensym; `seed` a
-    /// symbol, kept for the name and for what reads it, `fresh_seed`).
-    pub fn make_gensym(&mut self, prefix: &str, seed: Value, suffix: &str) -> Value {
+    /// A symbol `eq?` to no other, named `prefix`, then `seed`'s name, its
+    /// name made when first asked for (a gensym; `seed` a symbol, kept for
+    /// the name and for what reads it, [`gensym_parts`](Heap::gensym_parts)).
+    pub fn make_gensym(&mut self, prefix: &str, seed: Value) -> Value {
         debug_assert!(self.is_a(seed, ObjType::Symbol));
-        let (p, s) = (self.make_string(prefix), self.make_string(suffix));
-        self.gensym_of(p, seed, s)
+        let p = self.make_string(prefix);
+        self.gensym_of(p, seed)
     }
 
-    /// [`make_gensym`](Heap::make_gensym) of heap strings `prefix` and
-    /// `suffix`, copied (the gensym's name is what they say now).
-    pub fn make_gensym_of_strings(&mut self, prefix: Value, seed: Value, suffix: Value) -> Value {
+    /// [`make_gensym`](Heap::make_gensym) of heap string `prefix`, copied
+    /// (the gensym's name is what it says now).
+    pub fn make_gensym_of_string(&mut self, prefix: Value, seed: Value) -> Value {
         debug_assert!(self.is_a(seed, ObjType::Symbol));
         let p = self.string_append(&[prefix]);
-        let s = self.string_append(&[suffix]);
-        self.gensym_of(p, seed, s)
+        self.gensym_of(p, seed)
     }
 
     /// A symbol `eq?` to no other, not even the interned symbol `name`: to
     /// carry an identifier's identity into Scheme code (a procedural
     /// macro's input) and back. It has no global slot.
     pub fn make_uninterned_symbol(&mut self, name: &str) -> Value {
-        let (p, s) = (self.make_string(name), self.make_string(""));
-        self.gensym_of(p, Value::FALSE, s)
+        let p = self.make_string(name);
+        self.gensym_of(p, Value::FALSE)
     }
 
-    /// An uninterned symbol of strings `prefix` and `suffix`, which are its
-    /// own, and seed `seed`.
-    fn gensym_of(&mut self, prefix: Value, seed: Value, suffix: Value) -> Value {
+    /// An uninterned symbol of string `prefix`, which is its own, and seed
+    /// `seed`.
+    fn gensym_of(&mut self, prefix: Value, seed: Value) -> Value {
         let seed_hash = if seed.is_ref() { self.fixed(seed, 3, 1).as_fixnum() as u64 } else { 0 };
-        let h = (self.string_fnv(prefix) ^ seed_hash.rotate_left(17)).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ self.string_fnv(suffix);
+        let h = (self.string_fnv(prefix) ^ seed_hash.rotate_left(17)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         // As long as anything holds it: not in a region, which may end
         // while it is held (no `letregion` discharges making one).
         let region = self.regions.target.take();
         let record = self.make_vector(R_LEN, Value::FALSE);
         self.obj_set(record, R_PREFIX, prefix);
         self.obj_set(record, R_SEED, seed);
-        self.obj_set(record, R_SUFFIX, suffix);
         let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
         self.regions.target = region;
         self.obj_set(sym, 0, record);
@@ -99,10 +96,10 @@ impl Heap {
         (!self.is_a(r, ObjType::String)).then_some(r)
     }
 
-    /// An uninterned symbol's seed and the strings before and after it.
-    pub fn gensym_parts(&self, sym: Value) -> Option<(Value, Value, Value)> {
+    /// An uninterned symbol's prefix, a string, and seed (`#f` if none).
+    pub fn gensym_parts(&self, sym: Value) -> Option<(Value, Value)> {
         let r = self.record(sym)?;
-        Some((self.obj_ref(r, R_PREFIX), self.obj_ref(r, R_SEED), self.obj_ref(r, R_SUFFIX)))
+        Some((self.obj_ref(r, R_PREFIX), self.obj_ref(r, R_SEED)))
     }
 
     /// Symbol `sym`'s name, made where it has none yet (and not kept: see
@@ -117,9 +114,6 @@ impl Heap {
     /// Symbol `sym`'s name onto `out`.
     pub fn symbol_name_into(&self, sym: Value, out: &mut String) {
         let mut sym = sym;
-        // A seed's seed's, ..., each's suffix after: kept to be written
-        // last, the innermost first.
-        let mut after = Vec::new();
         loop {
             let Some(r) = self.record(sym) else {
                 self.string_into(self.fixed(sym, 3, 0), out);
@@ -131,15 +125,11 @@ impl Heap {
                 break;
             }
             self.string_into(self.obj_ref(r, R_PREFIX), out);
-            after.push(self.obj_ref(r, R_SUFFIX));
             let seed = self.obj_ref(r, R_SEED);
             if !seed.is_ref() {
                 break;
             }
             sym = seed;
-        }
-        for s in after.into_iter().rev() {
-            self.string_into(s, out);
         }
     }
 

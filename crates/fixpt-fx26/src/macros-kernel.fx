@@ -267,4 +267,5 @@
     oneshot pairof place poly productof prompt-tag proves ref select subr sumof tupleof bool oneof
     union anyof allof -> ->* restrict modnames)))
 (define description-words datum
-  (quote (void pure spin nondet stage heap const acyclic finite cellular native fx distinct)))
+  (quote (void pure spin nondet stage gensym heap const acyclic finite cellular native fx
+          distinct)))

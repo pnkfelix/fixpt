@@ -3128,6 +3128,13 @@ prims! {
         Ok(rt.heap.keyword_symbol(a[0]))
     });
     "%fx26-keyword?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.is_keyword(a[0]))));
+    // FX-26's `gensym` (`TODO.md` §292): a symbol equal to itself alone,
+    // named `prefix` then the seed's name when first asked (`Heap::make_gensym`).
+    "%fx26-gensym", 2, Some(2), simple!(|rt, a| {
+        if !rt.heap.is_a(a[0], ObjType::String) { return rt.type_error("a string", a[0]); }
+        if !rt.heap.is_a(a[1], ObjType::Symbol) { return rt.type_error("a symbol", a[1]); }
+        Ok(rt.heap.make_gensym_of_string(a[0], a[1]))
+    });
     // Files (Heist's, `FIXPT-CHANGES.md` F5), as SRFI 170 names them: what
     // a path is (a link not followed), and a link's target. A path as the
     // working directory resolves it; a failure an `io-error`. Changing

@@ -487,7 +487,8 @@
         (a-io (k) (tagcase b (a-io (j) #t) (else y #f)))
         (else y #f)))))
 (define k-harmless? (->* (k-atom) bool)
-  (lambda (a) (tagcase a (a-alloc (r) #t) (a-spin () #t) (a-nondet () #t) (else y #f))))
+  (lambda (a) (tagcase a (a-alloc (r) #t) (a-gensym () #t) (a-spin () #t) (a-nondet () #t)
+                         (else y #f))))
 
 ;;; ------------------------------------------------------------ #%fx
 

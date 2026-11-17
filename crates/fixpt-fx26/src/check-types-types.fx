@@ -41,6 +41,8 @@
   (a-nondet)
   ;; What makes code the program can run (`stage`, `docs/research/eval.md`).
   (a-stage)
+  ;; What makes a symbol equal to itself alone, a gensym (`TODO.md` §292).
+  (a-gensym)
   (a-var int)
   ;; `(e d …)`: a description function to an effect, a variable, applied
   ;; to descriptions, none a type (`check-kinds.fx`): an unknown effect, as

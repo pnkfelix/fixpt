@@ -167,6 +167,7 @@ impl Checker {
             Atom::Spin => return "spin".to_string(),
             Atom::Nondet => return "nondet".to_string(),
             Atom::Stage => return "stage".to_string(),
+            Atom::Gensym => return "gensym".to_string(),
             Atom::Io(k) => return format!("(io {})", k.name()),
             Atom::App(n) => {
                 let (head, args) = self.arena.effect_apps.parts(n);

@@ -214,14 +214,15 @@
            (else y #f)))))
 
 ;; Whether atom `a` is one a process may have that is seen outside it: a
-;; send, a fill or an await, I/O, `spin`, `nondet`, reading globals'
+;; send, a fill or an await, I/O, `spin`, `nondet`, `stage`, a gensym
+;; made, reading globals'
 ;; bindings or data frozen in the heap, allocating at a region that is no
 ;; place (a constant, or the heap) (the Rust checker's `crossing_atom`).
 (define k-crossing-atom? (->* (k-atom) bool)
   (lambda (a)
     (tagcase a
       (a-send (r) #t) (a-init (r) #t) (a-await (r) #t) (a-io (k) #t) (a-spin () #t) (a-nondet () #t)
-      (a-stage () #t)
+      (a-stage () #t) (a-gensym () #t)
       (a-read (r)
         (tagcase r (r-global (g) #t) (r-globals () #t) (r-frozen (p f) (< p 0)) (else y #f)))
       (a-alloc (r) (tagcase r (r-const (n) #t) (r-fresh (i n) #t) (r-heap () #t) (else y #f)))

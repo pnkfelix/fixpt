@@ -255,6 +255,11 @@ pub enum Atom {
     /// what it may run is not what it was. No region, so nothing masks it,
     /// as `spin`; to the compilers, "anything else", as I/O.
     Stage,
+    /// Makes a symbol equal to itself alone, a gensym (`TODO.md` §292):
+    /// as `alloc` to the compilers (no call of it duplicated or merged,
+    /// an unused one dropped, reordered freely), but of no region, so
+    /// nothing masks it, as `spin`.
+    Gensym,
     /// An effect variable.
     Var(DVar),
     /// `(e d …)`: a description function to an effect, a variable, applied
@@ -331,7 +336,7 @@ impl Atom {
             | Atom::Init(r)
             | Atom::Send(r)
             | Atom::Receive(r) => Some(r),
-            Atom::Var(_) | Atom::Spin | Atom::Io(_) | Atom::Nondet | Atom::Stage | Atom::App(_) => None,
+            Atom::Var(_) | Atom::Spin | Atom::Io(_) | Atom::Nondet | Atom::Stage | Atom::Gensym | Atom::App(_) => None,
         }
     }
 }
