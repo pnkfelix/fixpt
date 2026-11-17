@@ -3,8 +3,7 @@
 //!
 //! A symbol is three fields, `[name, hash, global-slot]`, wherever it is
 //! made (compiled code reads the hash at its offset). An interned symbol's
-//! name is a text of the process's (`Value::text`). An uninterned one's
-//! field 0 is a record instead,
+//! name is its string. An uninterned one's field 0 is a record instead,
 //! `[name, prefix, seed, handle]`: its name is `prefix`, then `seed`'s
 //! name if `seed` is a symbol, made the first time
 //! it is asked for and kept in `name` (`#f` until then), so a gensym that is
@@ -88,13 +87,13 @@ impl Heap {
     /// Whether symbol `sym` is uninterned (its field 0 a record).
     #[inline]
     pub fn is_uninterned_symbol(&self, sym: Value) -> bool {
-        self.is_a(sym, ObjType::Symbol) && !self.fixed(sym, 3, 0).is_text()
+        self.is_a(sym, ObjType::Symbol) && !self.is_a(self.fixed(sym, 3, 0), ObjType::String)
     }
 
     /// An uninterned symbol's record.
     fn record(&self, sym: Value) -> Option<Value> {
         let r = self.fixed(sym, 3, 0);
-        (!r.is_text()).then_some(r)
+        (!self.is_a(r, ObjType::String)).then_some(r)
     }
 
     /// An uninterned symbol's prefix, a string, and seed (`#f` if none).
@@ -117,7 +116,7 @@ impl Heap {
         let mut sym = sym;
         loop {
             let Some(r) = self.record(sym) else {
-                out.push_str(self.interned_name(sym));
+                self.string_into(self.fixed(sym, 3, 0), out);
                 break;
             };
             let name = self.obj_ref(r, R_NAME);
@@ -134,28 +133,13 @@ impl Heap {
         }
     }
 
-    /// Interned symbol `sym`'s name, where the process keeps it.
-    #[inline]
-    fn interned_name(&self, sym: Value) -> &'static str {
-        self.fixed(sym, 3, 0).as_text().expect("an interned symbol's name is a text")
-    }
-
-    /// Symbol `sym`'s name, a new string (`symbol->string`).
-    pub fn symbol_to_string(&mut self, sym: Value) -> Value {
-        debug_assert!(self.is_a(sym, ObjType::Symbol));
-        if self.record(sym).is_none() {
-            return self.make_string(self.interned_name(sym));
-        }
-        let name = self.symbol_name_string(sym);
-        self.string_append(&[name])
-    }
-
-    /// A string that is symbol `sym`'s name: an uninterned one's own, made
-    /// and kept if it had none (but where its record cannot be written,
-    /// the static area's), not to be written; an interned one's, made.
+    /// The string that is symbol `sym`'s name, itself, made and kept if it
+    /// had none (but where its record cannot be written, the static
+    /// area's): the symbol's, not to be written (`symbol->string` copies
+    /// it).
     pub fn symbol_name_string(&mut self, sym: Value) -> Value {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
-        let Some(r) = self.record(sym) else { return self.make_string(self.interned_name(sym)) };
+        let Some(r) = self.record(sym) else { return self.fixed(sym, 3, 0) };
         let name = self.obj_ref(r, R_NAME);
         if name.is_ref() {
             return name;
@@ -168,14 +152,16 @@ impl Heap {
         s
     }
 
-    /// Two symbols' names compared, as `string_cmp`, by code points (UTF-8's
-    /// order is theirs), with nothing copied where both are interned.
+    /// Two symbols' names compared, as `string_cmp`, with nothing copied
+    /// where both are interned.
     pub fn symbol_cmp(&self, a: Value, b: Value) -> std::cmp::Ordering {
         debug_assert!(self.is_a(a, ObjType::Symbol) && self.is_a(b, ObjType::Symbol));
-        match (self.record(a), self.record(b)) {
-            (None, None) => self.interned_name(a).cmp(self.interned_name(b)),
-            _ => self.symbol_name(a).cmp(&self.symbol_name(b)),
+        let (x, y) = (self.fixed(a, 3, 0), self.fixed(b, 3, 0));
+        if self.is_a(x, ObjType::String) && self.is_a(y, ObjType::String) {
+            return self.string_cmp(x, y);
         }
+        // By code points, as `string_cmp`: UTF-8's order is theirs.
+        self.symbol_name(a).cmp(&self.symbol_name(b))
     }
 
     // ------------------------------------------------------------ handles

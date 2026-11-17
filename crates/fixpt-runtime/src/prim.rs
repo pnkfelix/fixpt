@@ -1304,7 +1304,9 @@ prims! {
     // ---- symbols ----
     "symbol->string", 1, Some(1), simple!(|rt, a| {
         if !rt.heap.is_a(a[0], ObjType::Symbol) { return rt.type_error("a symbol", a[0]); }
-        Ok(rt.heap.symbol_to_string(a[0]))
+        // A copy of the name, in the heap: no string of Rust's between.
+        let name = rt.heap.symbol_name_string(a[0]);
+        Ok(rt.heap.string_append(&[name]))
     });
     "string->symbol", 1, Some(1), simple!(|rt, a| {
         if !rt.heap.is_a(a[0], ObjType::String) { return rt.type_error("a string", a[0]); }

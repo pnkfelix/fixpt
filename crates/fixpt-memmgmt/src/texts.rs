@@ -19,10 +19,11 @@
 //! process made before; nothing written, compared for order or hashed into
 //! a name may use one (an image carries its texts and where their numbers
 //! are, `fixpt-heap`'s `image`). Nothing is freed, so what is kept here is
-//! only what lived as long as the process already: an interned symbol's
-//! name, never a string, nor an uninterned symbol's (a gensym's, a hygienic
-//! rename's), which a program makes as it runs. No primitive makes a text
-//! of a program's string.
+//! only what lives as long as the process already. That is not an interned
+//! symbol's name: an interned symbol lives as long as its heap, and heaps
+//! end (a session's, a scratch read's, a test's), so its name stays the
+//! heap's to free (`TODO.md` §292, the user's, 2026-11-17). Nothing makes a
+//! text yet; no primitive makes one of a program's string.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{OnceLock, RwLock};
@@ -116,40 +117,23 @@ pub fn intern(text: &str) -> u32 {
     // A poisoned lock is as good as any: what a panic left half done is
     // past the count, unread, and written over by the next text.
     let mut ix = s.index.write().unwrap_or_else(|e| e.into_inner());
-    ix.intern(s, text)
-}
-
-/// [`intern`] of each of `texts`, in order, under one lock: an image's, as
-/// it is read.
-pub fn intern_all<'t>(texts: impl ExactSizeIterator<Item = &'t str>) -> Vec<u32> {
-    let s = store();
-    let mut ix = s.index.write().unwrap_or_else(|e| e.into_inner());
-    ix.numbers.reserve(texts.len());
-    texts.map(|t| ix.intern(s, t)).collect()
-}
-
-impl Index {
-    /// `text`'s number, made if it had none, the write lock held (`self`).
-    fn intern(&mut self, s: &Store, text: &str) -> u32 {
-        if let Some(&n) = self.numbers.get(text) {
-            return n;
-        }
-        let ix = self;
-        let n = s.count.load(Ordering::Relaxed) as usize;
-        let end = ix.used + text.len();
-        assert!(n < COUNT_MAX && end <= BYTES_MAX, "the process's texts are full ({n} texts, {} bytes)", ix.used);
-        // SAFETY: past every byte and end readable (`used`, `n`), and within
-        // the store; the write lock held, so no one else writes.
-        unsafe {
-            std::ptr::copy_nonoverlapping(text.as_ptr(), s.bytes.add(ix.used), text.len());
-            *s.ends.add(n) = end as u64;
-        }
-        s.count.store(n as u32 + 1, Ordering::Release);
-        ix.used = end;
-        let kept = get(n as u32).expect("readable now");
-        ix.numbers.insert(kept, n as u32);
-        n as u32
+    if let Some(&n) = ix.numbers.get(text) {
+        return n;
     }
+    let n = s.count.load(Ordering::Relaxed) as usize;
+    let end = ix.used + text.len();
+    assert!(n < COUNT_MAX && end <= BYTES_MAX, "the process's texts are full ({n} texts, {} bytes)", ix.used);
+    // SAFETY: past every byte and end readable (`used`, `n`), and within
+    // the store; the write lock held, so no one else writes.
+    unsafe {
+        std::ptr::copy_nonoverlapping(text.as_ptr(), s.bytes.add(ix.used), text.len());
+        *s.ends.add(n) = end as u64;
+    }
+    s.count.store(n as u32 + 1, Ordering::Release);
+    ix.used = end;
+    let kept = get(n as u32).expect("readable now");
+    ix.numbers.insert(kept, n as u32);
+    n as u32
 }
 
 /// How many texts there are: each number below it is one.

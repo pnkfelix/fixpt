@@ -450,8 +450,7 @@ pub const fn is_header(w: u64) -> bool {
 pub enum ObjType {
     /// `[charlen, packed u32 code points, 2 per word]`
     String = 1,
-    /// `[name, hash, global-slot]`: an interned one's name a text (`Value::text`), an
-    /// uninterned one's field 0 a record (`heap/gensym.rs`)
+    /// `[name:String, hash, global-slot]`
     Symbol = 2,
     /// `[elems…]`
     Vector = 3,
