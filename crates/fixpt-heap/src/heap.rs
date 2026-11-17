@@ -28,6 +28,8 @@ use crate::value::{
 use crate::{HashMap, HashSet};
 
 mod code;
+mod gensym;
+pub use gensym::UNINTERNED_HANDLES;
 mod intern;
 mod regions;
 mod splice;
@@ -399,6 +401,12 @@ pub struct Heap {
 
     /// Explicit roots held by native code across a safepoint.
     roots: Vec<Value>,
+    /// The uninterned symbols the Rust side holds a handle of, by the
+    /// handle (`gensym`): roots, as `roots` are.
+    sym_handles: Vec<Value>,
+    /// Their handles, of those whose record is in the static area, which
+    /// is not written (`gensym`): keyed by the symbol, which never moves.
+    static_sym_handles: HashMap<u64, u32>,
     /// Weak references ([`weak_add`](Heap::weak_add)): each collection
     /// moves an entry on with its object, or, if the object died, clears
     /// it (to [`WEAK_DEAD`]). What a collection does not move (the code
@@ -630,6 +638,8 @@ impl Heap {
             immutable_top: STATIC_BASE,
             static_top: STATIC_MUTABLE_BASE,
             roots: Vec::new(),
+            sym_handles: Vec::new(),
+            static_sym_handles: HashMap::default(),
             weak: Vec::new(),
             weak_free: Vec::new(),
             serial: {
@@ -2101,7 +2111,7 @@ impl Heap {
                 todo.extend([from.car(v), from.cdr(v)]);
                 continue;
             }
-            if from.is_a(v, ObjType::Symbol) && from.interned(&from.symbol_name(v)).is_some() {
+            if from.is_interned_symbol(v) {
                 let name = from.symbol_name(v);
                 slot.insert(self.intern(&name));
                 continue;
@@ -2379,19 +2389,6 @@ impl Heap {
         sym
     }
 
-    /// A symbol with this name that is `eq?` to no other — not even to the
-    /// interned symbol of the same name. It has no global slot: it exists to
-    /// carry an identifier's identity into Scheme code (a procedural macro's
-    /// input) and back, never to name a variable at run time.
-    pub fn make_uninterned_symbol(&mut self, name: &str) -> Value {
-        let s = self.make_string(name);
-        let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
-        self.obj_set(sym, 0, s);
-        self.obj_set(sym, 1, Value::fixnum_wrapping(fnv1a(name) as i64 & i64::MAX));
-        self.obj_set(sym, 2, Value::fixnum(-1));
-        sym
-    }
-
     pub fn is_interned_symbol(&self, sym: Value) -> bool {
         self.is_a(sym, ObjType::Symbol) && self.fixed(sym, 3, 2).as_fixnum() >= 0
     }
@@ -2402,22 +2399,6 @@ impl Heap {
         self.interned(name)
     }
 
-    /// Two symbols' names compared, as `string_cmp`, with nothing copied.
-    pub fn symbol_cmp(&self, a: Value, b: Value) -> std::cmp::Ordering {
-        debug_assert!(self.is_a(a, ObjType::Symbol) && self.is_a(b, ObjType::Symbol));
-        self.string_cmp(self.fixed(a, 3, 0), self.fixed(b, 3, 0))
-    }
-        pub fn symbol_name(&self, sym: Value) -> String {
-        debug_assert!(self.is_a(sym, ObjType::Symbol));
-        self.string_to_rust(self.fixed(sym, 3, 0))
-    }
-    /// The string that is symbol `sym`'s name, itself: the symbol's, not
-    /// to be written (`symbol->string` copies it).
-    #[inline]
-    pub fn symbol_name_string(&self, sym: Value) -> Value {
-        debug_assert!(self.is_a(sym, ObjType::Symbol));
-        self.fixed(sym, 3, 0)
-    }
     #[inline(always)]
     pub fn symbol_global_slot(&self, sym: Value) -> usize {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
@@ -2546,7 +2527,8 @@ impl Heap {
 
     /// Every Value the heap itself roots, for `sro`.
     pub(crate) fn roots_for_sro(&self) -> Vec<Value> {
-        self.roots.iter().copied().chain(self.table_values(Which::Globals)).chain(self.table_values(Which::Symbols)).collect()
+        let symbols = self.table_values(Which::Symbols);
+        self.roots.iter().copied().chain(self.table_values(Which::Globals)).chain(symbols).chain(self.sym_handles.iter().copied()).collect()
     }
 
     // ------------------------------------------------------------ native roots
@@ -2882,6 +2864,9 @@ impl Heap {
 
         for i in 0..self.roots.len() {
             self.roots[i] = fwd!(self.roots[i]);
+        }
+        for i in 0..self.sym_handles.len() {
+            self.sym_handles[i] = fwd!(self.sym_handles[i]);
         }
         // The tables' chunks of the heap's own (`tables`), as roots; the
         // tables area's are scanned below.

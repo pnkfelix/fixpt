@@ -4412,3 +4412,23 @@ The user read the paper as supporting the distribution. Mine:
   same order, writes nothing. Code mapped from the file is read-only, so a
   splice that must write a text's word copies its code instead of mapping
   it.
+
+## Gensyms in the heap, and one kind of handle for every symbol (2026-11-17)
+
+- **A symbol stays three fields**, since compiled code reads the hash at
+  its offset; an uninterned one's field 0 is a record (`[name, prefix,
+  seed, suffix, handle]`) instead of its name, so whether a symbol is
+  interned is whether its field 0 is a string. Every uninterned symbol is
+  one, `make_uninterned_symbol`'s too (its name the prefix, no seed).
+- **A gensym's hash is made from its parts**, not its name's text: it is
+  equal to itself alone (the user's choice of identity), so nothing asks
+  it to hash as the interned symbol of its spelling, and the name is not
+  made to hash it.
+- **An uninterned symbol's handle is recorded in its record, as a hint**,
+  taken only if the handle table's entry there is that symbol: so a
+  record copied into another heap or an image, or one whose handle was
+  released, names nothing wrongly, and a release truncates the table
+  without visiting a symbol. Where the record is the static area's, which
+  is not written, the handle is kept beside, by the symbol's address.
+- **A gensym is made outside any region**, as an interned symbol is: no
+  `letregion` discharges making one, so one may outlive any region.

@@ -272,7 +272,7 @@ impl Heap {
         // Nor the globals and the symbols, each slot of them: only the
         // tables' young chunks of the heap's own, and what an old one or
         // one of the tables area refers to by its card (`tables`).
-        for r in self.roots.iter_mut() {
+        for r in self.roots.iter_mut().chain(self.sym_handles.iter_mut()) {
             *r = fwd!(*r);
         }
         for chunk in self.globals.chunks.iter_mut().chain(self.symbols.chunks.iter_mut()) {

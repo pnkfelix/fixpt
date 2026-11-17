@@ -7383,12 +7383,56 @@ a heap's `Text` value an immediate of a text's number (`Value::text`); an
 image's texts section (version 12), its words renumbered where a load's
 process numbers its texts otherwise. Next: a heap symbol's name a `Text`,
 the heap's `symbol_index` by text number (step 2), then the `Interner`'s
-`Sym` a text's number (step 3) and `SymTable` gone (step 4). The texts
+`Sym` a handle into the heap's symbols table, the Rust side holding heap
+symbols and storing no names of its own (step 3), and `SymTable` gone
+(step 4). The texts
 are never freed, so a text is made only of what lived as long already: an
 interned symbol's name. Uninterned symbols' names and strings stay out, and
 no primitive makes one (the user's question, 2026-11-17). One lifetime does
 grow: a checker session's names, its own `Interner`'s until step 3, then
 the process's.
+
+Fresh names first (the user's, 2026-11-17): every fresh name is interned
+today, so permanent (measured: about 350 bytes each, four per use of an
+ER `swap!`, two per use of a `syntax-rules` one, linear in uses). They
+become gensyms before the expanders' names reach the texts. Settled with
+the user, 2026-11-17:
+
+- **Identity.** `symbol=?` is identity for every symbol: an interned
+  one's is its name's, a gensym equals itself alone, never an interned
+  symbol of its spelling. An expansion shares its gensyms by tables of
+  its own (FX-26's `fresh`/`fresh-of`; ER's `rename` and `tagged` need
+  one), for lookup, not identity. A gensym is no immutable datum a
+  compiler may rebuild: shared, never remade (`copy_graph` and literals
+  to check). `string->symbol` stays `pure`.
+- **An effect of its own.** The maker is `(subr gensym (symbol string
+  string) symbol)` (seed, prefix, suffix): `gensym` a nullary effect, as
+  `alloc` for the optimizers (no call duplicated or merged, an unused one
+  dropped, reordered freely), but of no region, so no `letregion`
+  discharges it.
+- **Seeded, named lazily.** A gensym records its seed, prefix and suffix;
+  its pretty name (`display`, `symbol->string`) is built from them when
+  first asked for, deterministic, from no counter. Its hash is computed
+  when it is made, without building the name.
+- **Uniform handles.** The Rust side holds one kind of handle, an entry
+  of the heap's symbols table, which each symbol records (one canonical
+  handle a symbol). An interned symbol's entry is permanent; a gensym's
+  is made the first time it crosses to Rust, the table traced as roots,
+  and released when the session drops its forms.
+- **Round trips (Chez's `#{pretty unique}`).** By default no unique name
+  is made: `write` gives `#{pretty}`, one `read` of a datum makes one
+  gensym of each, an image's gensyms are its own, and each load or read
+  makes new ones, so no gensym of one run is ever taken for another's.
+  Identity across runs is opted into: a build key (base a hash of the
+  runtime's identity and the key; distinct keys the build's duty) or
+  random (128 bits from the system, once a process; no time, no machine).
+  Then `write` and a dump give `#{pretty unique}`, the unique name filled
+  in then, and the reader and loader find a gensym by it in a weak table.
+
+Order (the user's "Yes"): (a) the heap's seeded gensym and the uniform
+handle table, the FX-26 maker; (b) `Text` steps 2 and 3; (c) the round
+trips' reader syntax and table, then FX-26's expander's fresh names
+gensyms, then Rust's, fields read where `%alias-base` parses prefixes.
 
 Chez Scheme's trick: a gensym is an uninterned symbol allocated with a tag
 saying its printed name is not yet made. Allocating one touches no shared
