@@ -2729,13 +2729,17 @@ expanded or defined, a `hide` and each of its forms, a module file's own
 forms each: its names are `%x:K.N` (and `%h:…:K.N`, `%a:K.N`,
 `%template:m:K.N`, a renamed captor `%x~K.N`), `N` counted from 1 within
 the form. `K` is a hash of what was written, below 2³¹ − 1, of its
-symbols' and strings' characters (`string-hash`) and its shape, any other
-atom its kind alone, alike in both front ends (`syn_hash`, `syn-hash`);
+shape and every atom by its value: a symbol's, string's or keyword's
+characters (`string-hash`), an integer's value, a real's text as
+`f64->string` writes it, a character's code, a boolean (an atom was once
+its kind alone, so `(check 1)` and `(check 2)` were one key counted twice,
+and putting one before the other renamed the other's names: Kayak's
+INCR_IMPED.md §5), alike in both front ends (`syn_hash`, `syn-hash`);
 and, past the first form of that hash, how many came before it, `H-1`,
 `H-2`. So no two forms' keys are one, a hash's collision included, and so
 neither are their names, by construction; a form's names are of it and
 the macros it uses alone, unless an identical form (or a colliding one)
-comes before it. A module file's own forms are keyed apart, `mH`, with a
+comes before it. A module file's own forms are keyed apart, `m{F}mH`, with a
 count of hashes of their own, the program's put back after
 (`in_file_scope`; `fresh-scope-begin!`). A session keeps the hashes seen
 in its state after each form, where it kept the count (`by-state`).

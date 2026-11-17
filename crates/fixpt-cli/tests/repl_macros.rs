@@ -71,3 +71,24 @@ fn a_procedural_macros_alias_is_of_its_form() {
     assert!(aliases(&alone).len() == 1 && aliases(&alone) == aliases(&after), "{alone}\n{after}");
     assert!(aliases(&alone)[0].ends_with(".1:n (base int)") && !after.contains("differs"), "{alone}\n{after}");
 }
+
+/// A form's key hashes every atom by its value (`syn_hash`, `syn-hash`),
+/// numbers too, so `(check 1)` and `(check 2)` have keys apart: putting one
+/// before the other names neither's fresh names otherwise (Kayak's
+/// INCR_IMPED.md §5; a number was its kind alone, the two forms one key
+/// counted twice, `K` and `K-1`). Alike in both checkers.
+#[test]
+fn a_forms_key_is_of_its_numbers_too() {
+    let check = |text: &str| {
+        let out = Command::new(FIXPT).args(["check", "--reps=text", text]).output().expect("runs");
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    };
+    let def = "(define-syntax check (macro (_ expr) defn) (syntax-rules ((_ v) (define seen v))))\n";
+    let ab = check(&format!("{def}(check 1)\n(check 2)\n(check 1.5)\n(check #\\a)\n"));
+    let ba = check(&format!("{def}(check #\\a)\n(check 1.5)\n(check 2)\n(check 1)\n"));
+    let seen = |out: &str| out.lines().filter(|l| l.starts_with("%seen:")).map(|l| l.split(' ').next().unwrap_or("").to_string()).collect::<Vec<_>>();
+    let (mut a, b) = (seen(&ab), seen(&ba));
+    assert!(a.len() == 4 && a.iter().all(|n| n.ends_with(".1") && !n.contains('-')), "{ab}");
+    a.reverse();
+    assert!(a == b && !ab.contains("differs") && !ba.contains("differs"), "{ab}\n{ba}");
+}

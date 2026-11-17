@@ -1,7 +1,7 @@
 ;;; The names the expander makes fresh, numbered within each top-level form
 ;;; (`macros.rs`'s `Macros::form_begin`, alike): `%x:K.N`, `K` the form's
 ;;; key, `N` the count of names it made so far. A form's key is a hash of
-;;; what was written (`syn-hash`), and, past the first form of that hash,
+;;; what was written (`syn-hash`, every atom by its value), and, past the first form of that hash,
 ;;; how many came before it, `H-1`, `H-2`: two forms' keys are never one, so
 ;;; neither are their names, and a form's names are of it and the macros it
 ;;; uses alone, not of how many names the forms before it made. A module
@@ -29,20 +29,28 @@
 (define keys-seen (ref seen-keys rs) (new nil))
 (define module-prefix (ref string rs) (new ""))
 
-;; A hash of `s`'s symbols, strings and shape, as the Rust one's
-;; (`macros.rs`'s `syn_hash`): any other atom is its kind alone.
+;; A hash of `s`'s atoms and shape, as the Rust one's (`macros.rs`'s
+;; `syn_hash`): a number by its value (a real by its text), a character by
+;; its code, so `(check 1)` and `(check 2)` have keys apart (Kayak's
+;; INCR_IMPED.md §5).
 (define hash-p int 2147483647)
 (define mix (->* (int int) int) (lambda (h x) (remainder (+ (* h 65599) x) hash-p)))
 (define syn-hash (->* (syn) int)
   (lambda (s)
     (tagcase s
       (atom (d a b x)
-        (cond ((symbol? d) (mix 1 (remainder (string-hash (symbol->string d)) hash-p)))
-              ((string? d) (mix 2 (remainder (string-hash d) hash-p)))
+        (cond ((symbol? d) (mix 1 (text-hash (symbol->string d))))
+              ((string? d) (mix 2 (text-hash d)))
+              ((int? d) (mix 7 (modulo d hash-p)))
+              ((f64? d) (mix 8 (text-hash (f64->string d))))
+              ((char? d) (mix 9 (char->integer d)))
+              ((bool? d) (mix 10 (if d 1 0)))
+              ((keyword? d) (mix 11 (text-hash (symbol->string (keyword->symbol d)))))
               (else 3)))
       (lst (xs d a b x) (syns-hash 4 xs))
       (dotted (xs t d a b x) (mix (syns-hash 5 xs) (syn-hash t)))
       (vec (xs d a b x) (syns-hash 6 xs)))))
+(define text-hash (->* (string) int) (lambda (t) (remainder (string-hash t) hash-p)))
 (define syns-hash (->* (int syns-a) int)
   (lambda (h xs) (if (null? xs) h (syns-hash (mix h (syn-hash (car xs))) (cdr xs)))))
 

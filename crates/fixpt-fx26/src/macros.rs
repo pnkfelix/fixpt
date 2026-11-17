@@ -5611,21 +5611,45 @@ fn shown_inferred(sig: &Syn, w: &Written, interner: &mut Interner) -> String {
     }
 }
 
-/// A hash of `s`'s symbols, strings and shape, any other atom its kind
-/// alone, below 2³¹ - 1 (FX-26's `syn-hash`, alike): a top-level form's
-/// key (`Macros::form_begin`).
+/// A hash of `s`'s atoms and shape, each atom by its value, below 2³¹ - 1
+/// (FX-26's `syn-hash`, alike): a top-level form's key
+/// (`Macros::form_begin`). Numbers count too, so that `(check 1)` and
+/// `(check 2)` are not one key counted twice (Kayak's INCR_IMPED.md §5).
 fn syn_hash(s: &Syn, interner: &Interner) -> i64 {
     const P: i64 = 2_147_483_647;
     let mix = |h: i64, x: i64| (h * 65599 + x) % P;
     let all = |h: i64, xs: &[Syn]| xs.iter().fold(h, |h, x| mix(h, syn_hash(x, interner)));
+    let text = |t: &str| fixpt_heap::heap::string_hash_of(t) % P;
     match s.view() {
-        V::Symbol(x) => mix(1, fixpt_heap::heap::string_hash_of(interner.name(x)) % P),
-        V::Str(t) => mix(2, fixpt_heap::heap::string_hash_of(&t) % P),
+        V::Symbol(x) => mix(1, text(interner.name(x))),
+        V::Str(t) => mix(2, text(&t)),
         V::Nil => 4,
         V::List { items, tail: None } => all(4, &items),
         V::List { items, tail: Some(t) } => mix(all(5, &items), syn_hash(&t, interner)),
         V::Vector(items) => all(6, &items),
-        _ => 3,
+        V::Number(n) => num_hash(&n),
+        V::Char(c) => mix(9, c as i64),
+        V::Bool(b) => mix(10, b as i64),
+        V::Keyword(x) => mix(11, text(interner.name(x))),
+        V::Bytevector(bs) => bs.iter().fold(12, |h, b| mix(h, *b as i64)),
+    }
+}
+
+/// A number's part of [`syn_hash`]: an integer its value modulo the hash's
+/// prime, as FX-26's `modulo` (a bignum's alike), a real its text as
+/// `f64->string` writes it.
+fn num_hash(n: &fixpt_read::Num) -> i64 {
+    use fixpt_read::Num;
+    const P: i64 = 2_147_483_647;
+    let mix = |h: i64, x: i64| (h * 65599 + x) % P;
+    match n {
+        Num::Int(i) => mix(7, i.rem_euclid(P)),
+        Num::Big { negative, digits, radix } => {
+            let v = digits.chars().fold(0i64, |v, c| (v * *radix as i64 + c.to_digit(*radix).unwrap_or(0) as i64) % P);
+            mix(7, if *negative { (P - v) % P } else { v })
+        }
+        Num::Ratio(a, b) => mix(mix(13, num_hash(a)), num_hash(b)),
+        Num::Real(x) => mix(8, fixpt_heap::heap::string_hash_of(&fixpt_runtime::num::format_flonum(*x)) % P),
     }
 }
 
