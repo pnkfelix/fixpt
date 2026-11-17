@@ -7377,6 +7377,19 @@ syntactic closures'. The rest below, the names filled in when printed,
 waits on the `Text` unification (2026-11-17's plan: symbol names in a
 non-moving `Text` area, the `Interner` a view of the heap's symbols).
 
+Step 1 of that, 2026-11-17: the process's texts (`fixpt_memmgmt::texts`),
+UTF-8, each once, never changed, moved or freed, read as `&'static str`;
+a heap's `Text` value an immediate of a text's number (`Value::text`); an
+image's texts section (version 12), its words renumbered where a load's
+process numbers its texts otherwise. Next: a heap symbol's name a `Text`,
+the heap's `symbol_index` by text number (step 2), then the `Interner`'s
+`Sym` a text's number (step 3) and `SymTable` gone (step 4). The texts
+are never freed, so a text is made only of what lived as long already: an
+interned symbol's name. Uninterned symbols' names and strings stay out, and
+no primitive makes one (the user's question, 2026-11-17). One lifetime does
+grow: a checker session's names, its own `Interner`'s until step 3, then
+the process's.
+
 Chez Scheme's trick: a gensym is an uninterned symbol allocated with a tag
 saying its printed name is not yet made. Allocating one touches no shared
 state. Only printing it for the first time (or `symbol->string`, or

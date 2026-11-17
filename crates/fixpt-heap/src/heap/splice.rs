@@ -135,6 +135,10 @@ impl Heap {
             self.start_code_area();
         }
         let moves = Moves { regions };
+        // Its texts by their numbers here, where any is another: their
+        // words written, so its code not mapped, which is read-only.
+        let numbers = img.texts.numbers();
+        let map_code = map_code && numbers.is_none();
         let sources = [img.words, img.immutable, img.statics, img.code[0].0, img.code[1].0];
         // The static area mapped, in place, rather than copied: the
         // immutable half writable until the splice is done (a symbol's slot
@@ -251,7 +255,13 @@ impl Heap {
         let unknown = std::cell::Cell::new(None);
         let map = |v: Value| -> Value {
             if !v.is_ref() {
-                return v;
+                return match &numbers {
+                    Some(m) => crate::image::retext(m, v).unwrap_or_else(|why| {
+                        unknown.set(Some(why));
+                        v
+                    }),
+                    None => v,
+                };
             }
             if v.is_suffix_ref() {
                 if let Some(&to) = owners().get(&v.owner()) {
@@ -287,6 +297,13 @@ impl Heap {
             if !instead.is_empty() {
                 let mem = self.mem.words_mut();
                 for &f in &img.fixups {
+                    field(mem, f);
+                }
+            }
+            // Its texts' words, where their numbers here are others.
+            if numbers.is_some() {
+                let mem = self.mem.words_mut();
+                for &f in &img.texts.places {
                     field(mem, f);
                 }
             }

@@ -128,6 +128,18 @@ fn put(
                 }
                 return;
             }
+            // A text (`Value::text`): the text, written as a string is,
+            // marked as no string.
+            _ if let Some(t) = v.as_text() => {
+                if write {
+                    out.push_str("#<text ");
+                    put_string(out, t);
+                    out.push('>');
+                } else {
+                    out.push_str(t);
+                }
+                return;
+            }
             _ => "#<immediate>",
         });
         return;

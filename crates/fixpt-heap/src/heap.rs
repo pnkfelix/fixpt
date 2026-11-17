@@ -3561,7 +3561,7 @@ impl Heap {
         symbols: Vec<Value>,
         roots: Vec<Value>,
     ) -> Result<Heap, String> {
-        Self::from_image_with_code(words.len(), |w| w.copy_from_slice(words), [&[], &[]], Default::default(), globals, symbols, roots, 0, &[])
+        Self::from_image_with_code(words.len(), |w| w.copy_from_slice(words), [&[], &[]], Default::default(), globals, symbols, roots, 0, &[], &Default::default())
     }
 
     /// The same, with the code area an image carries (`image_code`), and
@@ -3577,6 +3577,7 @@ impl Heap {
         roots: Vec<Value>,
         image_base: usize,
         fixups: &[usize],
+        texts: &crate::image::ImageTexts,
     ) -> Result<Heap, String> {
         let mut semi = DEFAULT_SEMI_WORDS;
         while semi < n_words {
@@ -3625,6 +3626,18 @@ impl Heap {
                 *w = relocate(Value(*w)).raw();
             }
         }
+        // Its texts by their numbers here, where any is another.
+        let numbers = texts.numbers();
+        if let Some(numbers) = &numbers {
+            for &p in &texts.places {
+                let w = match code::part_of(p) {
+                    Some((k, i)) => &mut code[k].0[i],
+                    None => &mut heap.mem.words_mut()[p],
+                };
+                *w = crate::image::retext(numbers, Value(*w))?.raw();
+            }
+        }
+        let retext = |v: Value| numbers.as_ref().map_or(Ok(v), |m| crate::image::retext(m, v));
         heap.top = n_words;
         // What the image holds counts as live, not as allocated.
         heap.budget_from(n_words);
@@ -3632,7 +3645,7 @@ impl Heap {
         heap.cross_all(STATIC_BASE, heap.immutable_top);
         heap.cross_all(STATIC_MUTABLE_BASE, heap.static_top);
         heap.remember_moving(STATIC_MUTABLE_BASE, heap.static_top);
-        heap.roots = roots.into_iter().map(relocate).collect();
+        heap.roots = roots.into_iter().map(|r| retext(relocate(r))).collect::<Result<_, _>>()?;
         heap.code_from_image(code)?;
         // What its code refers to that moves remembered, as by the barrier.
         for (lo, hi) in heap.code.parts.each_ref().map(|p| (p.base, p.top)) {
@@ -3643,7 +3656,7 @@ impl Heap {
         }
         // The tables, the image's: in the tables area.
         for g in globals {
-            heap.table_push(Which::Globals, relocate(g), true);
+            heap.table_push(Which::Globals, retext(relocate(g))?, true);
         }
         for s in symbols {
             heap.table_push(Which::Symbols, relocate(s), true);
@@ -3970,18 +3983,23 @@ pub(crate) fn each_field(words: &[u64], at: usize, mut f: impl FnMut(usize, Valu
 /// still write (`TODO.md` §160): each reference to one of its interned
 /// `symbols`, which may be the reader's own. Where in it: the live region's words from
 /// 0, the code area's at their place in the heap's memory.
-pub(crate) fn image_fixups(spaces: &[(usize, &[u64])], symbols: &[Value]) -> Vec<usize> {
+///
+/// And where they hold a text (`Value::text`), whose number is the
+/// process's: a load in another names it by the number it has there.
+pub(crate) fn image_fixups(spaces: &[(usize, &[u64])], symbols: &[Value]) -> (Vec<usize>, Vec<(usize, u32)>) {
     let symbols: HashSet<u64> = symbols.iter().map(|s| s.raw()).collect();
-    let mut out = Vec::new();
+    let (mut out, mut texts) = (Vec::new(), Vec::new());
     let mut note = |at: usize, v: Value| {
         if v.is_ref() && !v.is_suffix_ref() && symbols.contains(&v.raw()) {
             out.push(at);
+        } else if let Some(n) = v.text_number() {
+            texts.push((at, n));
         }
     };
     for &(place, words) in spaces {
         each_field(words, place, &mut note);
     }
-    out
+    (out, texts)
 }
 
 /// Every reference in `words`, a sequence of objects and pairs as a

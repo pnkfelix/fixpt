@@ -4395,3 +4395,20 @@ The user read the paper as supporting the distribution. Mine:
   union's members is a name's, and then matches a name alone, so that a
   variable typed as a name is never given a list; a `label` may also be a
   keyword, so labels are not held to names when matching.
+
+## The process's texts, step 1 of symbol names stored once (2026-11-17)
+
+- **A text's bytes are in memory of `fixpt-memmgmt`'s own**, which only
+  appending a `&str` writes, not in the heap's words: any safe code of
+  `fixpt-heap` may write a heap word, so a `str` view of heap words would
+  rest on that code's discipline, not on construction. A `Text` value is
+  an immediate (subtag 11) carrying the text's number, so nothing of it is
+  in the heap for a collection to move or a write to change. (The user
+  chose one store for the process, deduplicated, over one for each heap.)
+- **An image carries the texts its words name, and their words' places**
+  (a `TEXTS` section, version 12), rather than all the process's texts:
+  a load interns each, and writes a place only where the number here is
+  another; so a load in a process that made the same texts first, in the
+  same order, writes nothing. Code mapped from the file is read-only, so a
+  splice that must write a text's word copies its code instead of mapping
+  it.

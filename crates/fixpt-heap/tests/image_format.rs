@@ -54,8 +54,9 @@ fn a_mappable_image_has_its_spaces_on_pages_and_a_packed_one_not() {
 fn a_section_of_a_space_this_heap_has_not_is_refused() {
     let mut bytes = image::dump_packed(&a_heap());
     // The old space's section made one of a space no heap here has: its
-    // entry's space field, the second u32 of the second entry.
-    let at = 32 + 48 + 4;
+    // entry's space field, the second u32 of its entry.
+    let k = image::sections(&bytes).unwrap().iter().position(|t| t.kind == image::WORDS && t.space == image::OLD).unwrap();
+    let at = 32 + 48 * k + 4;
     bytes[at..at + 4].copy_from_slice(&99u32.to_le_bytes());
     let body = bytes.len() - 4;
     let crc = image::crc32(&bytes[..body]);

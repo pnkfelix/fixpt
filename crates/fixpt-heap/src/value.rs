@@ -80,6 +80,11 @@ const IMM_F32: u64 = 9;
 /// encoded, which a loader numbers in its own machine. Tagged so that either
 /// is known wherever it is, and nothing else is taken for one.
 const IMM_CALLOUT: u64 = 10;
+/// A text (`fixpt_memmgmt::texts`): its number in the process's texts, which
+/// hold each once, so that two are `eq?` exactly when their texts are equal.
+/// An image carries the texts its words name and where (`image`), since a
+/// number is the process's alone.
+const IMM_TEXT: u64 = 11;
 
 const IMM_SHIFT: u32 = 3;
 const IMM_MASK: u64 = 0b1_1111;
@@ -321,6 +326,33 @@ impl Value {
     /// How far a call-out's word is shifted right for its number.
     pub const CALLOUT_SHIFT: u32 = IMM_PAYLOAD_SHIFT;
 
+    /// The text `text` ([`IMM_TEXT`]): kept by the process once, and
+    /// read where it is kept.
+    pub fn text(text: &str) -> Value {
+        Value::text_numbered(fixpt_memmgmt::texts::intern(text))
+    }
+    /// The text whose number in the process's texts is `n`, which may be
+    /// none: [`Value::as_text`] says.
+    #[inline(always)]
+    pub const fn text_numbered(n: u32) -> Value {
+        Value::imm(IMM_TEXT, n as u64)
+    }
+    #[inline(always)]
+    pub const fn is_text(self) -> bool {
+        self.is_imm(IMM_TEXT)
+    }
+    /// Its number in the process's texts, if it is a text.
+    #[inline(always)]
+    pub const fn text_number(self) -> Option<u32> {
+        if self.is_text() { Some((self.0 >> IMM_PAYLOAD_SHIFT) as u32) } else { None }
+    }
+    /// Its text, where the process keeps it, if it is a text: none for a
+    /// number that is none of the process's.
+    #[inline]
+    pub fn as_text(self) -> Option<&'static str> {
+        fixpt_memmgmt::texts::get(self.text_number()?)
+    }
+
     // --------------------------------------------------------- GC-private bits
     #[inline]
     pub(crate) const fn forward(index: usize) -> Value {
@@ -352,6 +384,10 @@ impl fmt::Debug for Value {
                 IMM_CHAR => write!(f, "#\\{}", self.as_char()),
                 IMM_F32 => write!(f, "{}f32", self.as_f32()),
                 IMM_CALLOUT => write!(f, "#<callout {}>", self.as_callout()),
+                IMM_TEXT => match self.as_text() {
+                    Some(t) => write!(f, "#<text {t:?}>"),
+                    None => write!(f, "#<text #{}>", self.0 >> IMM_PAYLOAD_SHIFT),
+                },
                 s => write!(f, "#<immediate {s}>"),
             },
             TAG_FORWARD => write!(f, "#<forward @{}>", self.index()),

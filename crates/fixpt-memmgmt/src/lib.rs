@@ -17,6 +17,7 @@ pub mod lend;
 pub mod mapped;
 pub mod phases;
 pub mod reserve;
+pub mod texts;
 pub mod words;
 
 pub use exec::ExecView;

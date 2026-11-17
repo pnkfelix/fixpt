@@ -53,6 +53,16 @@
 //! in the table's order, its free blocks' count and its free blocks (start
 //! and length, u64 each): room in a space that holds no object.
 //! ```
+//!
+//! ```text
+//! the texts (`Value::text`): how many (u64); each one's number where the
+//! image was made and its length in bytes (u64 each), by number; how many
+//! words hold one (u64), and their places (u64 each); then the texts'
+//! bytes, UTF-8, one after another. A text's number is the process's
+//! (`fixpt_memmgmt::texts`): a load gives each text the number it has in
+//! the loading process, and writes the words that hold it only where that
+//! is another.
+//! ```
 
 use crate::heap::Heap;
 use crate::value::Value;
@@ -77,8 +87,9 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// fixups (`TODO.md` §160): loaded at the same base, nothing else moves.
 /// Version 10 has a call-out as the call-out itself, encoded, the same in
 /// every machine, not a number in the table of the machine that made it.
-/// Version 11 is a table of sections (`TODO.md` §165).
-pub const VERSION: u32 = 11;
+/// Version 11 is a table of sections (`TODO.md` §165). Version 12 has a
+/// section of the texts it names (`Value::text`), and where.
+pub const VERSION: u32 = 12;
 const HEADER_BYTES: usize = 32;
 const SECTION_BYTES: usize = 48;
 
@@ -90,9 +101,11 @@ pub const MOVES: u32 = 1;
 pub const WRITTEN: u32 = 2;
 pub const RUNS: u32 = 4;
 
-/// The kinds of section: the metadata, or a space's words.
+/// The kinds of section: the metadata, a space's words, or the texts its
+/// words and roots name ([`ImageTexts`]).
 pub const META: u32 = 1;
 pub const WORDS: u32 = 2;
+pub const TEXTS: u32 = 3;
 
 /// The spaces of a heap a word section may be of. A space a reader does not
 /// know is refused, not ignored: its words would be lost.
@@ -203,7 +216,8 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
         (words, heap.image_static(base, 0), globals, symbols, roots, heap.image_code(base, 0))
     };
     let [stubbed_at, native_at] = crate::heap::code_part_bases();
-    let fixups = crate::heap::image_fixups(&[(0, &words), (immutable_at, &immutable), (mutable_at, &statics), (stubbed_at, &code[0].0), (native_at, &code[1].0)], &symbols);
+    let (fixups, text_places) = crate::heap::image_fixups(&[(0, &words), (immutable_at, &immutable), (mutable_at, &statics), (stubbed_at, &code[0].0), (native_at, &code[1].0)], &symbols);
+    let texts = texts_section(&text_places, globals.iter().chain(&roots));
     let le = |out: &mut Vec<u8>, ws: &mut dyn Iterator<Item = u64>| {
         for w in ws {
             out.extend_from_slice(&w.to_le_bytes());
@@ -227,10 +241,12 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
     for (.., free) in &spaces {
         le(&mut meta, &mut std::iter::once(free.len() as u64).chain(free.iter().flat_map(|&(s, n)| [s as u64, n as u64])));
     }
-    let n = 1 + spaces.len();
+    let n = 2 + spaces.len();
     let mut at = HEADER_BYTES + n * SECTION_BYTES;
     let mut table = vec![Section { kind: META, space: 0, what: 0, align: 0, offset: at, bytes: meta.len(), place: 0, extent: 0 }];
     at += meta.len();
+    table.push(Section { kind: TEXTS, space: 0, what: 0, align: 0, offset: at, bytes: texts.len(), place: 0, extent: 0 });
+    at += texts.len();
     let align = if aligned { PAGE.trailing_zeros() } else { 0 };
     for &(space, what, place, extent, ws, _) in &spaces {
         at = at.div_ceil(1 << align) << align;
@@ -253,13 +269,108 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
         }
     }
     out.extend_from_slice(&meta);
-    for (t, (.., ws, _)) in table[1..].iter().zip(&spaces) {
+    out.extend_from_slice(&texts);
+    for (t, (.., ws, _)) in table[2..].iter().zip(&spaces) {
         out.resize(t.offset, 0);
         le(&mut out, &mut ws.iter().copied());
     }
     let crc = crc32(&out);
     out.extend_from_slice(&crc.to_le_bytes());
     out
+}
+
+/// The texts section of an image whose words hold texts at `places` (each
+/// with its number), and whose roots and globals are `values` (the texts
+/// among them listed too, at no place: they are mapped where they are
+/// read).
+fn texts_section<'v>(places: &[(usize, u32)], values: impl Iterator<Item = &'v Value>) -> Vec<u8> {
+    let mut numbers: Vec<u32> = places.iter().map(|&(_, n)| n).chain(values.filter_map(|v| v.text_number())).collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    let texts: Vec<(u32, &str)> = numbers
+        .into_iter()
+        .map(|n| (n, fixpt_memmgmt::texts::get(n).unwrap_or_else(|| panic!("a text #{n} the process has not, in a heap it made"))))
+        .collect();
+    let mut out = Vec::new();
+    let mut put = |w: u64| out.extend_from_slice(&w.to_le_bytes());
+    put(texts.len() as u64);
+    for &(n, t) in &texts {
+        put(n as u64);
+        put(t.len() as u64);
+    }
+    put(places.len() as u64);
+    for &(at, _) in places {
+        put(at as u64);
+    }
+    for (_, t) in &texts {
+        out.extend_from_slice(t.as_bytes());
+    }
+    out
+}
+
+/// The texts an image's words and roots name (its texts section): each by
+/// its number where the image was made; and the places of the words that
+/// hold one.
+#[derive(Default)]
+pub struct ImageTexts<'a> {
+    pub texts: Vec<(u32, &'a str)>,
+    pub places: Vec<usize>,
+}
+
+impl ImageTexts<'_> {
+    /// The section's bytes read: each text UTF-8, the numbers in order.
+    fn read(b: &[u8]) -> Result<ImageTexts<'_>, ImageError> {
+        let bad = |m: &str| ImageError::Malformed(format!("the texts section: {m}"));
+        let mut at = 0;
+        let mut word = || -> Result<u64, ImageError> {
+            let w = b.get(at..at + 8).ok_or_else(|| bad("it ends early"))?;
+            at += 8;
+            Ok(u64::from_le_bytes(w.try_into().unwrap()))
+        };
+        let n = word()? as usize;
+        let mut heads = Vec::with_capacity(n.min(b.len() / 16));
+        for _ in 0..n {
+            let (k, len) = (word()?, word()?);
+            heads.push((u32::try_from(k).map_err(|_| bad("a number past a text's"))?, len as usize));
+        }
+        let m = word()? as usize;
+        let mut places = Vec::with_capacity(m.min(b.len() / 8));
+        for _ in 0..m {
+            places.push(word()? as usize);
+        }
+        let mut texts = Vec::with_capacity(heads.len());
+        for (k, len) in heads {
+            let t = at.checked_add(len).and_then(|e| b.get(at..e)).ok_or_else(|| bad("a text past its end"))?;
+            at += len;
+            let t = std::str::from_utf8(t).map_err(|_| bad("a text not UTF-8"))?;
+            if texts.last().is_some_and(|&(j, _)| j >= k) {
+                return Err(bad("its numbers out of order"));
+            }
+            texts.push((k, t));
+        }
+        if at != b.len() {
+            return Err(bad("bytes past its texts"));
+        }
+        Ok(ImageTexts { texts, places })
+    }
+
+    /// Each text's number in this process, by its number in the image's;
+    /// none if every one is the same here (nothing to write). Each text
+    /// made here if it was not.
+    pub fn numbers(&self) -> Option<crate::HashMap<u32, u32>> {
+        let here: Vec<(u32, u32)> = self.texts.iter().map(|&(k, t)| (k, fixpt_memmgmt::texts::intern(t))).collect();
+        here.iter().any(|(k, h)| k != h).then(|| here.into_iter().collect())
+    }
+}
+
+/// `v`, a text of an image's, as the text it is here (`numbers`, from
+/// [`ImageTexts::numbers`]); anything else as it is. An error for a text
+/// the image does not carry.
+pub fn retext(numbers: &crate::HashMap<u32, u32>, v: Value) -> Result<Value, String> {
+    match v.text_number() {
+        Some(k) => numbers.get(&k).map(|&n| Value::text_numbered(n)).ok_or_else(|| format!("a text #{k} the image does not carry")),
+        None => Ok(v),
+    }
 }
 
 /// An image's section table, read: each section, within the image, its
@@ -343,6 +454,8 @@ pub struct Parts<'a> {
     pub base: usize,
     /// The words a load at `base` still writes, by place.
     pub fixups: Vec<usize>,
+    /// The texts its words and roots name, and where its words do.
+    pub texts: ImageTexts<'a>,
 }
 
 impl Parts<'_> {
@@ -476,17 +589,26 @@ pub fn parts(bytes: &[u8], check: bool) -> Result<Parts<'_>, ImageError> {
     if !fixups.iter().all(|&f| inside(f)) {
         return Err(ImageError::Malformed("a fixup outside the image".into()));
     }
-    Ok(Parts { words, immutable, statics, globals, symbols, roots, code, base, fixups })
+    let mut texts = table.iter().filter(|t| t.kind == TEXTS);
+    let texts = match (texts.next(), texts.next()) {
+        (None, _) => ImageTexts::default(),
+        (Some(t), None) => ImageTexts::read(&bytes[t.offset..t.offset + t.bytes])?,
+        (Some(_), Some(_)) => return Err(ImageError::Malformed("two texts sections".into())),
+    };
+    if !texts.places.iter().all(|&f| inside(f)) {
+        return Err(ImageError::Malformed("a text's place outside the image".into()));
+    }
+    Ok(Parts { words, immutable, statics, globals, symbols, roots, code, base, fixups, texts })
 }
 
 fn load_checking(bytes: &[u8], check: bool) -> Result<Heap, ImageError> {
-    let Parts { words, immutable, statics, globals, symbols, roots, code, base, fixups } = parts(bytes, check)?;
+    let Parts { words, immutable, statics, globals, symbols, roots, code, base, fixups, texts } = parts(bytes, check)?;
     let code = code.map(|(w, free)| (words_of(w), free));
     let heap = Heap::from_image_with_code(words.len() / 8, |w| {
         for (w, b) in w.iter_mut().zip(words.chunks_exact(8)) {
             *w = u64::from_le_bytes(b.try_into().unwrap());
         }
-    }, [&words_of(immutable), &words_of(statics)], code, globals, symbols, roots, base, &fixups).map_err(ImageError::Malformed)?;
+    }, [&words_of(immutable), &words_of(statics)], code, globals, symbols, roots, base, &fixups, &texts).map_err(ImageError::Malformed)?;
     if check {
         heap.verify().map_err(ImageError::Malformed)?;
     }

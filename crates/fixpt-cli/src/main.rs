@@ -1519,6 +1519,7 @@ fn image_command(args: &[String]) -> i32 {
                     for t in image::sections(img).unwrap_or_default() {
                         let space = match (t.kind, t.space) {
                             (image::META, _) => "metadata",
+                            (image::TEXTS, _) => "texts",
                             (_, image::OLD) => "old space",
                             (_, image::CODE_STUBBED) => "code, stubbed",
                             (_, image::CODE_NATIVE) => "code, native",
