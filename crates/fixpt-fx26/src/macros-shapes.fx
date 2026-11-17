@@ -590,7 +590,7 @@
     (if (not (alias-in? x))
         x
         (let* ((w (walked fail x #t)) (root (extract w 1)) (found (extract w 2))
-               (made (aliases-written fail found hs (root-binders fail root x)
+               (made (aliases-written fail found hs (root-binders fail root x) x
                                       (tuple (the parts nil) (the ints nil))))
                (fresh (captors-named (extract made 2) nil tag))
                (written (append (captors-renamed found fresh (binders-renamed fresh nil))
@@ -617,43 +617,84 @@
 ;; form's own definitions, which are the file's items).
 (define-type parts (listof (tupleof addr syn) acyclic))
 (define-type written-of (tupleof parts ints))
-(define aliases-written (->* (fails found def-envs ints written-of) written-of)
-  (lambda (fail fs hs top out)
+(define aliases-written (->* (fails found def-envs ints syn written-of) written-of)
+  (lambda (fail fs hs top x out)
     (if (null? fs)
         out
         (aliases-written
-          fail (cdr fs) hs top
+          fail (cdr fs) hs top x
           (let ((at (extract (car fs) 1)) (env (extract (car fs) 2)))
             (tagcase (node-kids at)
               (k-ref (n d free)
                 (let* ((base (alias-base (symbol->string n)))
                        (h (def-env-of (alias-made (symbol->string n)) hs))
-                       (within (= (extract h 1) 2)))
+                       (within (= (extract h 1) 2))
+                       (inst (instance-named? base free h)))
                   (if (or (string=? base "") (bound-in? n d env)
                           (and (not within) (alias-defined? n d)))
                       out
                       (let ((parts (cons (tuple (node-path at)
                                                 (alias-written fail base d free h (node-syn at)))
                                          (extract out 1))))
-                        (if within
-                            (tuple parts (captor-noted fail (captor-of (string->symbol base) d env)
-                                                       top base (node-syn at) (extract out 2)))
-                            (tuple parts (extract out 2)))))))
+                        (cond
+                          (within
+                           (tuple parts (captor-noted fail (captor-of (string->symbol base) d env)
+                                                      top base #f (node-syn at) x (extract out 2))))
+                          (inst
+                           (tuple parts (captor-noted fail (captor-of (extract h 2) #f env) top
+                                                      (symbol->string (extract h 2)) #t x x
+                                                      (extract out 2))))
+                          (else (tuple parts (extract out 2))))))))
               (else y out)))))))
+;; Whether alias `base`, written as `free` says, names the instance a file's
+;; macro is defined in, `h` (kind 3): one of its values, `(with lib name)`,
+;; or `lib` as a type's module, `(select lib T)` (`act-instance-type`).
+(define instance-named? (->* (string int def-env) bool)
+  (lambda (base free h)
+    (and (= (extract h 1) 3)
+         (or (and (= free 0) (name-in? (string->symbol base) (extract h 3)))
+             (and (= free 1) (string=? base (symbol->string (extract h 2))))))))
 ;; Binder `c` (`captor-of`'s) onto `cs`, if it captures `base`, which a
-;; module file's own macro introduces at `s`: not if it is none, or one of
-;; `top`; refused where a module's names come first, which may give it.
-(define captor-noted (->* (fails int ints string syn ints) ints)
-  (lambda (fail c top base s cs)
+;; module file's own macro introduces at `s`, or the instance an imported
+;; macro names, if `inst`, in form `s`: not if it is none, or one of `top`;
+;; refused where a module's names come first, which may give it, or inside a
+;; `module` of form `x`, where it may be an item, which its name labels.
+(define captor-noted (->* (fails int ints string bool syn syn ints) ints)
+  (lambda (fail c top base inst s x cs)
     (cond ((= c -1) cs)
+          ((and (>= c 0) (not (int-in? c top)) (within-module? x (reverse (node-path c))))
+           (begin (fail-at fail (string-append "`" base "`, which an expansion here names as its "
+                                               "macro has it, is bound inside a `module` around "
+                                               "the use, where renaming it may change what the "
+                                               "module gives: not yet")
+                           s)
+                  cs))
           ((= c -2)
-           (begin (fail-at fail (string-append "`" base "`, which a macro of this file names, "
+           (begin (fail-at fail (string-append "`" base
+                                               (if inst
+                                                   "`, the instance an imported macro names, "
+                                                   "`, which a macro of this file names, ")
                                                "where a `with` or `include` around its use may "
                                                "give it: not yet")
                            s)
                   cs))
           ((or (int-in? c top) (int-in? c cs)) cs)
           (else (cons c cs)))))
+;; Whether path `p`, in `s`, outermost step first, is inside a `(module …)`
+;; of it, not its head (`hygiene.rs`'s `within_module`).
+(define within-module? (->* (syn addr) bool)
+  (lambda (s p)
+    (let ((items (tagcase s (lst (xs d a b y) xs) (else y nil))) (k (cdrs-of p 0)))
+      (cond ((null? items) #f)
+            ((and (not (null? p)) (syn-symbol? (car items))
+                  (string=? (syn-name (car items)) "module"))
+             #t)
+            ((or (null? (list-tail-of p k)) (>= k (len items))) #f)
+            (else (within-module? (nth items k) (list-tail-of p (+ k 1))))))))
+(define cdrs-of (->* (addr int) int)
+  (lambda (p k) (if (or (null? p) (car p)) k (cdrs-of (cdr p) (+ k 1)))))
+(define list-tail-of (->* (addr int) addr)
+  (lambda (p k) (if (= k 0) p (list-tail-of (cdr p) (- k 1)))))
 (define int-in? (->* (int ints) bool)
   (lambda (k ks) (and (not (null? ks)) (or (= k (car ks)) (int-in? k (cdr ks))))))
 ;; The binder `n` (a description's if `d`) refers to in `env`, innermost
@@ -752,6 +793,7 @@
         (else
           (cond ((and (= free 0) (name-in? (string->symbol base) (extract h 3)))
                  (with-of (symbol->string (extract h 2))))
+                ((instance-named? base free h) (mk-symbol base a b))
                 ((= free 0) (with-of "#%fx"))
                 ((= free 2) (mk-symbol base a b))
                 ;; A file's macro writes its descriptions through its module

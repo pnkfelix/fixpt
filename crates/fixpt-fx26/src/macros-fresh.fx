@@ -115,6 +115,12 @@
                      key))
            (f (mix 2 (remainder (string-hash path) hash-p))))
       (string-append "m" (int->string f) (if imported "mm" "m")))))
+;; The prefix of the keys of the uses an importer of an instance, `lib`, of a
+;; file expands, of the file's, `prefix`: `m{F}mm{G}m`, `G` a hash of `lib`
+;; as a symbol's, so that two instances' are apart (`instance_prefix`).
+(define instance-prefix (->* (string symbol) string)
+  (lambda (prefix lib)
+    (string-append prefix (int->string (mix 1 (text-hash (symbol->string lib)))) "m")))
 ;; A module file's forms begun, their keys of `prefix`: their own; what is
 ;; given back puts the program's back (`fresh-scope-end!`).
 (define-type fresh-saved (tupleof string int int seen-keys string int tags))

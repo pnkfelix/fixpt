@@ -612,10 +612,12 @@ pub struct Checker {
     /// driver supplies them to the parser written in FX-26 (`syn.rs`).
     pub(crate) files_read: u32,
     /// Each top-level name defined as `(load-module "path")` so far, its
-    /// path as written: what `(import-with-syntax name)` reads the macros
-    /// of (`import_file_macros`). And how many files have been read so, each
-    /// a file id of its own, apart from the loads'.
-    pub(crate) load_defs: HashMap<Sym, String>,
+    /// path as written, or as an instance of the file, `((proj
+    /// (load-module "path") arg …))`, with whether it is one
+    /// (`binding-shapes.md`, step 4 (c)): what `(import-with-syntax name)`
+    /// reads the macros of (`import_file_macros`). And how many files have
+    /// been read so, each a file id of its own, apart from the loads'.
+    pub(crate) load_defs: HashMap<Sym, (String, bool)>,
     pub(crate) macro_files: u32,
     /// Where a `load-module`'s relative path is from: the program's own
     /// directory, when it was read from a file; else the current one.

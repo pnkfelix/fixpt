@@ -46,10 +46,12 @@
 ;; path and each reference to it; a free name its alias, `%~K.N:n`, which
 ;; the resolution after expansion makes the name where the macro is defined
 ;; (`macros-shapes.fx`'s `aliases-resolved`); a file's macro's description read whole through
-;; the file's module or the standard environment, by `select`; a use of
+;; the file's module or the standard environment, by `select`, or an instance's, its
+;; name an alias (`InstanceType`, step 4 (c)); a use of
 ;; another of the file's macros, by the name the importer has it by.
 (define-datatype action
-  (act-rename addr int) (act-alias) (act-module-type symbol) (act-standard-type)
+  (act-rename addr int) (act-alias) (act-module-type symbol) (act-instance-type symbol)
+  (act-standard-type)
   (act-macro-head symbol)
   ;; A trailmark of a file's a template writes: the name the importer has it by.
   (act-mark symbol))
@@ -58,7 +60,9 @@
 ;; (`macros/hygiene.rs`'s `DefEnv`), by its kind: the top level (0); a file
 ;; as its importer has it (1), its hidden global `%shared:key` and the
 ;; values its module shows (its other names the standard environment's); or
-;; a module file's items, as its own macros see them (2). A type of its
+;; a module file's items, as its own macros see them (2); or a file as an
+;; importer of an instance of it has it (3), the instance's name in place of
+;; `%shared:key`, which a binder at a use is kept from capturing. A type of its
 ;; structure, the same in each instance of the expander's files
 ;; (`macros.fx`'s `def-envs`).
 (define-type def-env (tupleof int symbol names))

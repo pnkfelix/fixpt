@@ -751,7 +751,7 @@ is the same as repeated `expand-once` steps. What keeps it within reach:
   number by something intrinsic (the use's place) or quotient by (marks
   equal up to renumbering). A gap noted, not yet closed.
 
-## Step 4 (2026-11-16, (b) built 2026-11-17): `import-with-syntax` in module files
+## Step 4 (2026-11-16, (b) and (c) built 2026-11-17): `import-with-syntax` in module files
 
 Today a module file that uses `import-with-syntax` is refused ("`import-with-syntax`
 in a module file: not yet": `top.rs`'s `file_own_expanded_syn`, `parser-top.fx`'s
@@ -910,6 +910,58 @@ level, where `lib` is a global or an item. A process that loads its own instance
 in its body, as Kayak's REPL front would (`closed-code.md`), still has no macros
 of that instance. Macros bound by a local `let` would be stage 5's `with` and
 `include` bringing macros. That is not proposed here.
+
+### (c), as built (2026-11-17)
+
+Both front ends; `import-with-syntax/counter.fx`, `main-instances.fx`
+(two instances, each's macros naming its own count, written and made, and
+a `let` of `a` at a use renamed), and the refusals beside it. What the
+plan above did not say, found building it:
+
+- **At a program's top level only.** In a module file, the instance is an
+  item, and the rest of what it gives would be `(include lib …)`, which a
+  module's `include`, made before its items, cannot be: refused there
+  (`` `a` is an instance of a file with module parameters: a module file
+  cannot import its macros, not yet ``; `Checker::load_in_file`,
+  `instance-loaded`). So no file gives an instance's macros on.
+- **Re-export needs paths the language does not have.** `(with (with
+  %shared:midkey lib) x)` and `(select (with …) T)` cannot be written:
+  `with` and `select` take a variable (`kinds.rs`, "`(select module
+  name)`: a module's name"; `` `with` opens a module named by a
+  variable ``). Nor can `mid` name the instance by an alias of its own,
+  `(define %inst lib)`: a variable bound to a module names its abstract
+  types for itself (`%inst..t`, not `lib..t`). So the re-export above
+  waits for module paths in `with` and `select`, a change of the language
+  to discuss first.
+- **An instance's macros are its own.** Two instances of one file have
+  one file key, so their macros' names for an importer are
+  `%syntax:key@lib:name` and the keys of the uses an importer expands
+  again `m{F}mm{G}m…`, `G` a hash of `lib` (`instance_prefix`;
+  `instance-prefix`): else the second import's would take the first's
+  place, and a macro of `b`'s that uses another of the file's would reach
+  `a`'s.
+- **`lib` kept from capture.** A file value's alias is `(with lib name)`
+  and a type's module, in `(select ALIAS T)`, an alias of `lib` too
+  (`Action::InstanceType`; `act-instance-type`), so both are resolved where
+  the use is: a binder there that would capture `lib` is renamed
+  (`DefEnv::File { instance: true }`; definition environment kind 3), and
+  where a `with` or `include` around the use may give a `lib`, refused,
+  said at the form (the alias is in the file's text, which each front end
+  places apart).
+- **A captor inside a `module`, refused, for a file's own macros too.**
+  Renaming a binder that is a `module`'s item renames its label, changing
+  what the module gives: `(module (define limit int 3) … (clamp 50))` in a
+  file whose `clamp` names its `limit` made the module's item
+  `%limit~…`, so `(with m limit)` silently meant the file's. Found
+  building (c); it was so for `DefEnv::Within` since step 3. Now a captor
+  inside a `module` is refused (`within_module`; `within-module?`), a
+  `let` there of the name too, which is more than needed, until a module
+  item's label can be written apart from its binder.
+- **A plain load of a file with parameters** was let through before when
+  its parameters were regions or places alone (the check looked for module
+  parameters, `takes_modules_at`), failing later at the `include` with a
+  type error. Now any `module-parameters` refuses it, saying to import an
+  instance (`takes_parameters_at`).
 
 ### Both front ends
 

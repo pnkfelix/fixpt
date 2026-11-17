@@ -4794,6 +4794,19 @@ pub(crate) fn takes_modules(forms: &[Syn], interner: &fixpt_read::Interner) -> b
 /// Whether the file at `at`, `path` as written, is a file of module
 /// parameters, read apart (as the driver reads it, `syn::supply_loaded_in`).
 pub(crate) fn takes_modules_at(at: &std::path::Path, path: &str) -> bool {
+    first_form_at(at, path, takes_modules)
+}
+
+/// Whether the file at `at`, `path` as written, takes parameters of any
+/// kind: its first form a `module-parameters`, so that what it loads as is
+/// no module, until applied (`binding-shapes.md`, step 4 (c)).
+pub(crate) fn takes_parameters_at(at: &std::path::Path, path: &str) -> bool {
+    first_form_at(at, path, |forms, interner| forms.first().and_then(|f| module_parameters_of(f, interner)).is_some())
+}
+
+/// `test` of the first form of the file at `at`, `path` as written, read
+/// apart: false if it has none, or no `module-parameters` in it.
+fn first_form_at(at: &std::path::Path, path: &str, test: impl Fn(&[Syn], &fixpt_read::Interner) -> bool) -> bool {
     let text = match crate::built_in_module(path) {
         Some(t) => t.to_string(),
         None => match crate::reads::read_file(at) {
@@ -4809,7 +4822,7 @@ pub(crate) fn takes_modules_at(at: &std::path::Path, path: &str) -> bool {
     }
     let mut interner = fixpt_read::Interner::new();
     crate::heap_syn::aside(|| match crate::heap_syn::read_syn_first(&text, &mut interner) {
-        Ok(Some(first)) => takes_modules(&[first], &interner),
+        Ok(Some(first)) => test(&[first], &interner),
         _ => false,
     })
 }

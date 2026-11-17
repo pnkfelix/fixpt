@@ -491,6 +491,10 @@ enum Action {
     /// defined (`hygiene`).
     Alias,
     ModuleType(Sym),
+    /// A type of a file's, its macros imported of an instance of it, `lib`
+    /// (`binding-shapes.md`, step 4 (c)): `(select lib T)`, `lib` an alias,
+    /// so that a binder at the use is kept from capturing it (`hygiene`).
+    InstanceType(Sym),
     StandardType,
     MacroHead(Sym),
     /// A trailmark of a file's, written by a template: the name the
@@ -499,12 +503,14 @@ enum Action {
 }
 
 /// What a file's macros are defined in (`Macros::define_file`): the
-/// hidden global every load of the file is, `%shared:key`; the values and
+/// hidden global every load of the file is, `%shared:key`, or the instance
+/// of it, if `instance` (`binding-shapes.md`, step 4 (c)); the values and
 /// types its module shows; each of its macros' names, and the name the
 /// importer has it by, which no program writes; and which names are
 /// standard.
 pub struct FileScope<'a> {
     pub shared: Sym,
+    pub instance: bool,
     pub values: fixpt_hash::HashSet<Sym>,
     pub types: fixpt_hash::HashSet<Sym>,
     pub internal: HashMap<Sym, Sym>,
@@ -553,6 +559,16 @@ pub fn file_prefix(key: &str, imported: bool) -> String {
     let path = key.strip_prefix("input:").unwrap_or(key);
     let f = (2 * 65599 + fixpt_heap::heap::string_hash_of(path) % P) % P;
     format!("m{f}m{}", if imported { "m" } else { "" })
+}
+
+/// The prefix of the keys of the uses an importer of an instance, `lib`,
+/// of a file expands, of the file's, `prefix` (`m{F}mm`): `m{F}mm{G}m`, `G`
+/// a hash of `lib` as a symbol's (`syn_hash`), so that two instances' are
+/// apart (FX-26's `instance-prefix`, alike).
+pub fn instance_prefix(prefix: &str, lib: &str) -> String {
+    const P: i64 = 2_147_483_647;
+    let g = (65599 + fixpt_heap::heap::string_hash_of(lib) % P) % P;
+    format!("{prefix}{g}m")
 }
 
 /// The macros defined, and the syntax types of the kernel's forms, for
@@ -1623,7 +1639,7 @@ impl Macros {
     fn def_env_of(&self, file: Option<&FileScope>) -> hygiene::DefEnv {
         match file {
             None => self.withs.def_env.clone(),
-            Some(f) => hygiene::DefEnv::File { shared: f.shared, values: Rc::new(f.values.clone()) },
+            Some(f) => hygiene::DefEnv::File { shared: f.shared, values: Rc::new(f.values.clone()), instance: f.instance },
         }
     }
 
@@ -1632,24 +1648,33 @@ impl Macros {
     /// it, as its templates name them, with the macros of the files it
     /// imports and those its top-level uses make (`TODO.md` §287); then
     /// each by the name the importer has it by (`%syntax:key:name`, an
-    /// imported one's its own file's), and each the file gives (not hidden,
+    /// imported one's its own file's; of an instance, `instance`,
+    /// `%syntax:key@lib:name`, its uses' keys `m{F}mm{G}m`, `G` a hash of
+    /// `lib`, so that two instances' are apart: step 4 (c)), and each the
+    /// file gives (not hidden,
     /// nor brought by a hidden import) that `taken` takes by its own name
     /// too: what `(import-with-syntax lib)` brings (`(only name …)`,
     /// `(except name …)`; `binding-shapes.md`, step 4). The names it gives,
     /// each with the name the importer has it by. `at`: the
     /// `import-with-syntax`.
-    pub fn define_file(&mut self, file: &FileMacros, is_standard: &dyn Fn(Sym) -> bool, taken: &dyn Fn(Sym) -> bool, at: At, interner: &mut Interner) -> R<Vec<(Sym, Sym)>> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn define_file(&mut self, file: &FileMacros, instance: Option<Sym>, is_standard: &dyn Fn(Sym) -> bool, taken: &dyn Fn(Sym) -> bool, at: At, interner: &mut Interner) -> R<Vec<(Sym, Sym)>> {
         self.ensure_kernel(interner)?;
         // The file's macros defined among themselves, by their names in it,
         // as its templates name them; a use expanded where the file's items
         // are as its importer has them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let def_env = hygiene::DefEnv::File { shared: file.shared, values: Rc::new(file.values.clone()) };
-        let withs = Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), module_prefix: file.prefix.clone(), def_env, ..Withs::default() };
+        let shared = instance.unwrap_or(file.shared);
+        let def_env = hygiene::DefEnv::File { shared, values: Rc::new(file.values.clone()), instance: instance.is_some() };
+        let (key, prefix) = match instance {
+            Some(lib) => (format!("{}@{}", file.key, interner.name(lib)), instance_prefix(&file.prefix, interner.name(lib))),
+            None => (file.key.clone(), file.prefix.clone()),
+        };
+        let withs = Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), module_prefix: prefix, def_env, ..Withs::default() };
         let mut own = Macros { k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: Some(file.text.clone()), defined_at: HashMap::default(), checking: false, withs: Box::new(withs) };
         let internal_of = |n: Sym, interner: &mut Interner| {
-            let name = format!("%syntax:{}:{}", file.key, interner.name(n));
+            let name = format!("%syntax:{key}:{}", interner.name(n));
             interner.intern(&name)
         };
         // Each name the importer has a macro of the file's by: its written
@@ -1685,7 +1710,7 @@ impl Macros {
                     // The file's phase-1 forms, in force for its macros after them.
                     FileEntry::Syntax(form, _) if form.head_sym().is_some_and(|h| interner.name(h) == "begin-for-syntax") => own.for_syntax(form, interner)?,
                     FileEntry::Syntax(form, hidden) => {
-                        let scope = FileScope { shared: file.shared, values: file.values.clone(), types: file.types.clone(), internal: internal.clone(), is_standard };
+                        let scope = FileScope { shared, instance: instance.is_some(), values: file.values.clone(), types: file.types.clone(), internal: internal.clone(), is_standard };
                         for n in own.define_in(form, interner, Some(&scope))? {
                             by_internal(&mut own, n, internal[&n]);
                             given.push((n, *hidden));
@@ -1693,7 +1718,7 @@ impl Macros {
                     }
                     FileEntry::Import(lib, filter, hidden) => {
                         let takes = |n: Sym| filter.as_ref().is_none_or(|(only, names)| names.contains(&n) == *only);
-                        for (n, i) in own.define_file(lib, is_standard, &takes, at, interner)? {
+                        for (n, i) in own.define_file(lib, None, is_standard, &takes, at, interner)? {
                             if takes(n) {
                                 internal.insert(n, i);
                                 given.push((n, *hidden));
@@ -2265,6 +2290,7 @@ impl Macros {
                         // file sees; one name at a time, as a top level's
                         // are qualified, so that the template's own binders
                         // and a use's parts in it are left as they are.
+                        (None, Free::Qualified, Some(f)) if f.types.contains(n) && f.instance => Action::InstanceType(f.shared),
                         (None, Free::Qualified, Some(f)) if f.types.contains(n) => Action::ModuleType(f.shared),
                         (None, Free::Qualified, Some(_)) => Action::StandardType,
                         (None, Free::Toplevel, None) => Action::Alias,
@@ -3193,6 +3219,7 @@ impl Macros {
         let typed = match c.actions.get(&*path) {
             Some(Action::StandardType) => Some(interner.intern("#%fx")),
             Some(Action::ModuleType(m)) => Some(*m),
+            Some(Action::InstanceType(m)) => Some(interner.intern(&procedural::alias(interner.name(*m), &self.tag_of(made)))),
             _ => None,
         };
         if let Some(m) = typed {

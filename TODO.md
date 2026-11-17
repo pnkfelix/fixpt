@@ -7334,3 +7334,23 @@ another by length (`Session::eval_base`, its REPL's text one), where a
 module file's places are its own from its load's base, whatever the size
 of those before. Each, when a cache of Kayak's needs it.
 
+
+## 291. An instance's macros given on, and a module item's label apart from its binder (found 2026-11-17, building `binding-shapes.md`'s step 4 (c))
+
+Step 4 (c) imports the macros of an instance of a file with module
+parameters at a program's top level alone ("(c), as built"). Two things
+wait, each a change of the language to discuss first:
+
+- **Module paths.** For a module file to import an instance's macros and
+  give them on, a template must reach the instance through the file:
+  `(with (with mid lib) x)`, `(select (with mid lib) T)`. `with` and
+  `select` take a variable, and an alias, `(define %inst lib)`, would name
+  the instance's abstract types for itself (`%inst..t`). A path whose
+  abstract types are the instance's (`mid.lib.t`) is what is missing; then
+  a module file's import of an instance, whose values' `include` would be
+  of an item, needs its own form too.
+- **A module item's label apart from its binder**, as a `moduleof`'s `abs`
+  and `desc` items have (`(abs #:t u type)`): `(define #:limit %limit~… 3)`.
+  With it, a captor that is a `module`'s item could be renamed and keep
+  what the module gives; until then it is refused (`within_module`;
+  `within-module?`), for a file's own macros and an instance's alike.

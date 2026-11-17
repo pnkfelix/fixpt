@@ -8,7 +8,7 @@
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define templates-module ((proj (load-module "fx26:macros-templates.fx") rs re rm rc rp)))
 (define macros-module (with templates-module macros-module))
-(import macros-module atom define-macro defined fail-at file-items file-syntax forms-module
+(import macros-module atom define-macro defined fail-at file-items file-syntax
         head-name import-usage in-loaded-as internal-names internal-of len load-base load-of
         load-path loaded-path loads macro-names macro-of macro? mk-list mk-symbol name-filter
         names-shown not-macros nth proper shown-names syn-end syn-start syn-symbol syn-symbol?
@@ -17,28 +17,40 @@
 (define procedural-module (with macros-module procedural-module))
 (import procedural-module phase1-forms-now phase1-forms! def-env-is def-env-now!)
 (define fresh-module (with macros-module fresh-module))
-(import fresh-module file-prefix file-keys-begin! file-keys-end! use-begin! use-end! form-begin!)
+(import fresh-module file-prefix instance-prefix file-keys-begin! file-keys-end! use-begin! use-end!
+        form-begin!)
 (import macros-module expand-top made-syntax-taken! makes-top-defns? imports-syntax? hide-form?
         defines-syntax? name-in?)
 (define files-module (with macros-module files-module))
-(import files-module read-at)
+(import files-module read-at def-path instance-path)
 (define parser-module (with macros-module parser-module))
 (import parser-module (type loaded-file))
 
 ;; Notes a top-level `(define name (load-module "path"))`, the file
-;; `import-with-syntax` of `name` reads; any other definition of `name`
-;; forgets it (`Checker::note_load_def`).
+;; `import-with-syntax` of `name` reads, or `(define name ((proj (load-module
+;; "path") arg …)))`, an instance of it, which `instances` notes; any other
+;; definition of `name` forgets it (`Checker::note_load_def`).
 (define note-load-def! (->* (syn) unit)
   (lambda (form)
     (let ((items (proper form)))
       (if (and (>= (len items) 3) (string=? (head-name form) "define") (syn-symbol? (nth items 1)))
           (let* ((n (syn-symbol (nth items 1)))
-                 (path (load-path (nth items (- (len items) 1))))
-                 (kept (without-load n (get loads))))
-            (set loads (if (and (not (null? path)) (<= (len items) 4))
-                           (cons (tuple n (car path)) kept)
-                           kept)))
+                 (init (nth items (- (len items) 1)))
+                 (path (def-path init))
+                 (kept (without-load n (get loads)))
+                 (ok (and (not (null? path)) (<= (len items) 4))))
+            (begin
+              (set loads (if ok (cons (tuple n (car path)) kept) kept))
+              (set instances (if (and ok (not (null? (instance-path init))))
+                                 (cons n (without-name n (get instances)))
+                                 (without-name n (get instances))))))
           #u))))
+(define instances (ref names rs) (new nil))
+(define without-name (->* (symbol names) names)
+  (lambda (n ns)
+    (cond ((null? ns) nil)
+          ((symbol=? n (car ns)) (without-name n (cdr ns)))
+          (else (cons (car ns) (without-name n (cdr ns)))))))
 
 ;; The standard bindings' names, which a file's macro may name: what the
 ;; driver says, as the Rust checker has them (`standard-names!`).
@@ -89,7 +101,8 @@
                 (let ((f (loaded-path (car path) fs)))
                   (if (null? f)
                       (begin (fail-at fail (string-append "cannot read `" (car path) "`") form) nil)
-                      (let ((g (given-names (file-macros-of fail form (car f) filter fs))))
+                      (let* ((inst (if (name-in? lib (get instances)) (list lib) nil))
+                             (g (given-names (file-macros-of fail form (car f) filter fs inst))))
                         (begin (set imported (taken-names g filter))
                                (include-of (mk-symbol (symbol->string lib) a b) filter g
                                            a b)))))))))))
@@ -121,11 +134,26 @@
                              nil))
                  (load (load-of-file (syn-symbol (nth items 1)) ls))
                  (f (if (null? load) nil (read-at (syn-start (car load)) fs))))
-            (if (null? f)
-                (begin (fail-at fail (not-load (syn-symbol (nth items 1))) form) nil)
-                (include-of (mk-symbol (string-append "%shared:" (extract (car f) 7)) a b) filter
-                            (given-names (file-macros-of fail form (car f) filter fs))
-                            a b)))))))
+            (cond
+              ((not (null? (instance-loaded (syn-symbol (nth items 1)) ls)))
+               (begin (fail-at fail (instance-in-file (syn-symbol (nth items 1))) form) nil))
+              ((null? f) (begin (fail-at fail (not-load (syn-symbol (nth items 1))) form) nil))
+              (else
+               (include-of (mk-symbol (string-append "%shared:" (extract (car f) 7)) a b) filter
+                           (given-names (file-macros-of fail form (car f) filter fs nil))
+                           a b))))))))
+;; Whether a module file's `lib`, of its loads `ls`, is an instance of a file
+;; with module parameters, whose macros a module file cannot import: its
+;; values' `include` would be of an item (`Checker::load_in_file`). Its
+;; load, in a list of one.
+(define instance-loaded (->* (symbol file-loads) syns-a)
+  (lambda (lib ls)
+    (let ((l (load-of-file lib ls)))
+      (if (and (not (null? l)) (not (null? (instance-path (car l))))) l nil))))
+(define instance-in-file (->* (symbol) string)
+  (lambda (lib)
+    (string-append "`" (symbol->string lib) "` is an instance of a file with module parameters: "
+                   "a module file cannot import its macros, not yet")))
 ;; A module file's `(define name (load-module "path"))`s so far, the last
 ;; first, each with its load, which the driver read it by where it starts.
 (define-type file-loads (listof (tupleof symbol syn) acyclic))
@@ -134,7 +162,7 @@
     (let ((items (proper x)))
       (if (and (>= (len items) 3) (string=? (head-name x) "define") (syn-symbol? (nth items 1)))
           (let ((n (syn-symbol (nth items 1))) (init (nth items (- (len items) 1))))
-            (if (and (not (null? (load-path init))) (<= (len items) 4))
+            (if (and (not (null? (def-path init))) (<= (len items) 4))
                 (cons (tuple n init) (without-file-load n ls))
                 (without-file-load n ls)))
           ls))))
@@ -180,13 +208,16 @@
 
 ;; The macros of the file read as `f`, which `form` imports: each defined
 ;; as the file means it (`define-file`); the macros it gives
-;; (`Checker::file_macros_at`).
-(define file-macros-of (->* (fails syn loaded-file (listof filter acyclic) files) given)
-  (lambda (fail form f filter fs)
+;; (`Checker::file_macros_at`). `inst`: the instance of it imported, if any,
+;; in a list of one (`binding-shapes.md`, step 4 (c)).
+(define file-macros-of (->* (fails syn loaded-file (listof filter acyclic) files names) given)
+  (lambda (fail form f filter fs inst)
     (let ((forms (raw-forms f)) (path (extract f 4)))
-      (if ((with forms-module takes-modules?) forms)
-          (begin (fail-at fail (string-append "`" path "` takes module parameters: its macros "
-                                              "cannot be imported, not yet")
+      (if (and (null? inst) (not (null? forms))
+               (string=? (head-name (car forms)) "module-parameters"))
+          (begin (fail-at fail (string-append "`" path "` takes module parameters: import the "
+                                              "macros of an instance of it, `(define name ((proj "
+                                              "(load-module \"" path "\") arg …)))`")
                           form)
                  nil)
           (let* ((key (extract f 7)) (base (extract f 2))
@@ -198,10 +229,19 @@
                                 (fail m x y))))
                  (ms (file-syntax forms))
                  (shown (names-shown (file-items forms) nil nil))
-                 (internal (internal-names key (macro-names ms)))
-                 (scope (tuple (string->symbol (string-append "%shared:" key)) (extract shown 1)
-                               (extract shown 2) internal (get standard-names))))
-            (define-file in-file forms scope filter fs key
+                 ;; An instance's macros by names of their own, and its uses'
+                 ;; keys (`instance-prefix`), so that two instances' are apart.
+                 (ikey (if (null? inst) key (string-append key "@" (symbol->string (car inst)))))
+                 (prefix (if (null? inst)
+                             (file-prefix key #t)
+                             (instance-prefix (file-prefix key #t) (car inst))))
+                 (internal (internal-names ikey (macro-names ms)))
+                 (shared (if (null? inst)
+                             (string->symbol (string-append "%shared:" key))
+                             (car inst)))
+                 (scope (tuple shared (extract shown 1) (extract shown 2) internal
+                               (get standard-names))))
+            (define-file in-file forms scope filter fs ikey prefix (if (null? inst) 1 3)
                          (if (null? ms) form (extract (car ms) 1))))))))
 
 ;; A file's macros, of its forms `forms`, defined as the file means them
@@ -212,16 +252,17 @@
 ;; are as its importer has them; then each by the name the importer has it
 ;; by, and each it gives (not hidden, nor of a hidden import) that `filter`
 ;; takes by its own name too (`Macros::define_file`). The macros it gives.
-(define define-file (->* (fails syns-a scope (listof filter acyclic) files string syn) given)
-  (lambda (fail forms scope filter fs key first)
+(define define-file
+  (->* (fails syns-a scope (listof filter acyclic) files string string int syn) given)
+  (lambda (fail forms scope filter fs key prefix kind first)
     (let ((program (get defined)) (program-marks (get marks)) (program-phase1 (phase1-forms-now))
-          (program-env (def-env-is)) (keys (file-keys-begin! (file-prefix key #t))))
+          (program-env (def-env-is)) (keys (file-keys-begin! prefix)))
       (begin
         (set defined nil)
         (set marks nil)
         ;; The file's phase-1 forms its own, for its macros alone.
         (phase1-forms! nil)
-        (def-env-now! (tuple 1 (extract scope 1) (extract scope 2)))
+        (def-env-now! (tuple kind (extract scope 1) (extract scope 2)))
         (let* ((st (define-forms fail forms #f scope fs key (tuple (extract scope 4) nil nil)))
                (own (get defined)) (own-marks (get marks)))
           (begin
@@ -269,12 +310,16 @@
                        (file-of (syn-symbol (nth items 1)) ls fs)
                        nil)))
            (if (null? f)
-               (begin (fail-at fail (if (and (>= (len items) 2) (syn-symbol? (nth items 1)))
-                                        (not-load (syn-symbol (nth items 1)))
-                                        import-usage)
+               (begin (fail-at fail (cond ((not (and (>= (len items) 2)
+                                                     (syn-symbol? (nth items 1))))
+                                           import-usage)
+                                          ((not (null? (instance-loaded (syn-symbol (nth items 1))
+                                                                        ls)))
+                                           (instance-in-file (syn-symbol (nth items 1))))
+                                          (else (not-load (syn-symbol (nth items 1)))))
                                x)
                       st)
-               (let ((g (taken-given (file-macros-of fail x (car f) filter fs) filter)))
+               (let ((g (taken-given (file-macros-of fail x (car f) filter fs nil) filter)))
                  (tuple (append g internal) (onto-mades (given-names g) h made) ls)))))
         ;; A use of a macro that makes definitions, which may make macros.
         ((let ((items (proper x)))

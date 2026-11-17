@@ -20,7 +20,10 @@ use std::rc::Rc;
 /// Where a macro is defined, what its expansions' aliases are read in: the
 /// top level; a file, `%shared:key` the hidden global every load of it is
 /// and the values its module shows (its other names the standard
-/// environment's, which a file's macro's check has held them to).
+/// environment's, which a file's macro's check has held them to); or, if
+/// `instance`, the importer's instance of the file in place of `%shared:key`
+/// (`binding-shapes.md`, step 4 (c)), a binder at the use that would
+/// capture its name renamed, as for a module file's items below.
 /// Or a module file's items, as the file's own macros see them, which no
 /// qualifier names: an alias becomes the plain name, and a binder at the
 /// use that would capture it is renamed (`Checker::file_own_expanded`).
@@ -28,7 +31,7 @@ use std::rc::Rc;
 pub(crate) enum DefEnv {
     #[default]
     Top,
-    File { shared: Sym, values: Rc<HashSet<Sym>> },
+    File { shared: Sym, values: Rc<HashSet<Sym>>, instance: bool },
     Within,
 }
 
@@ -118,26 +121,51 @@ impl Macros {
                 // Where its macro is defined: so written, which nothing
                 // around it captures; in a file's own, the plain name, its
                 // captor at the use renamed.
+                // A binder at the use that would capture `x`, a value's or
+                // `ns`'s, which the macro's expansion names as written:
+                // noted, to be renamed.
+                // Refused where a module's names come first, which may give
+                // it: at the alias, in a module file; an instance's, at the
+                // form, the alias in another file's text.
+                let mut captured = |x: Sym, ns: Ns, inst: bool| -> R<()> {
+                    match innermost(env, x, ns) {
+                        // A `module`'s item, whose name is its label too, is
+                        // not renamed: that would change what the module gives.
+                        Ok(Some(b)) if !top.contains(&b) && within_module(form, &a.nodes[b].path, a.interner) => {
+                            let span = if inst { form.at() } else { a.nodes[*at].syn.at() };
+                            return Err(crate::error::FxError::at(span, format!("`{}`, which an expansion here names as its macro has it, is bound inside a `module` around the use, where renaming it may change what the module gives: not yet", a.interner.name(x))));
+                        }
+                        Ok(Some(b)) if !top.contains(&b) => {
+                            captors.insert(b);
+                        }
+                        Ok(_) => {}
+                        Err(()) => {
+                            let (span, what) = if inst { (form.at(), "the instance an imported macro names") } else { (a.nodes[*at].syn.at(), "which a macro of this file names") };
+                            return Err(crate::error::FxError::at(span, format!("`{}`, {what}, where a `with` or `include` around its use may give it: not yet", a.interner.name(x))));
+                        }
+                    }
+                    Ok(())
+                };
                 let m = match def_env {
                     Some(DefEnv::Within) => {
-                        let captor = match a.interner.get(base) {
-                            Some(x) => innermost(env, x, ns),
-                            None => Ok(None),
-                        };
-                        match captor {
-                            Ok(Some(b)) if !top.contains(&b) => {
-                                captors.insert(b);
-                            }
-                            Ok(_) => {}
-                            Err(()) => {
-                                let span = a.nodes[*at].syn.at();
-                                return Err(crate::error::FxError::at(span, format!("`{base}`, which a macro of this file names, where a `with` or `include` around its use may give it: not yet")));
-                            }
+                        if let Some(x) = a.interner.get(base) {
+                            captured(x, ns, false)?;
                         }
                         Made::Plain(base.to_string())
                     }
                     None | Some(DefEnv::Top) => top_made(free, ns, base),
-                    Some(DefEnv::File { shared, values }) => match free {
+                    // An instance's value, `(with lib name)`, and its name
+                    // as a type's module, `(select lib T)` (`InstanceType`):
+                    // `lib` the importer's, which nothing at the use captures.
+                    Some(DefEnv::File { shared, values, instance: true }) if free == Free::Toplevel && a.interner.get(base).is_some_and(|v| values.contains(&v)) => {
+                        captured(*shared, Ns::Value, true)?;
+                        Made::Of(*shared, base.to_string())
+                    }
+                    Some(DefEnv::File { shared, instance: true, .. }) if free == Free::Qualified && a.interner.get(base) == Some(*shared) => {
+                        captured(*shared, Ns::Value, true)?;
+                        Made::Plain(base.to_string())
+                    }
+                    Some(DefEnv::File { shared, values, .. }) => match free {
                         Free::Toplevel if a.interner.get(base).is_some_and(|v| values.contains(&v)) => Made::Of(*shared, base.to_string()),
                         Free::Toplevel => Made::Of(fx, base.to_string()),
                         Free::Plain => Made::Plain(base.to_string()),
@@ -225,6 +253,22 @@ fn has_alias(s: &Syn, interner: &Interner) -> bool {
 }
 
 /// `s`, at `path`, with each part `written` holds at its path written so.
+/// Whether `path`, in `form`, is inside a `(module …)` of it, not its head
+/// (FX-26's `within-module?`, alike): a binder there may be an item, which
+/// its name labels.
+fn within_module(form: &Syn, path: &[bool], interner: &Interner) -> bool {
+    let (mut s, mut p) = (*form, path);
+    loop {
+        let Some(items) = s.list() else { return false };
+        if !p.is_empty() && items.first().and_then(|h| h.sym()).is_some_and(|h| interner.name(h) == "module") {
+            return true;
+        }
+        let k = p.iter().take_while(|b| !**b).count();
+        let Some(next) = items.get(k).filter(|_| k < p.len()) else { return false };
+        (s, p) = (*next, &p[k + 1..]);
+    }
+}
+
 fn written_at(s: &Syn, path: &mut Vec<bool>, written: &HashMap<Vec<bool>, Syn>) -> Syn {
     if let Some(w) = written.get(path) {
         return w.clone();

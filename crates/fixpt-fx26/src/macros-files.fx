@@ -86,6 +86,18 @@
                (string=? (syn-name (car items)) "load-module"))
           (tagcase (nth items 1) (atom (d a b x) (if (string? d) (list d) nil)) (else y nil))
           nil))))
+;; An instance's, `((proj (load-module "path") arg …))`, in a list of one
+;; (`binding-shapes.md`, step 4 (c); `Checker::load_def_of`).
+(define instance-path (->* (syn) (listof string acyclic))
+  (lambda (s)
+    (let* ((items (proper s)) (applied (if (= (len items) 1) (proper (car items)) nil)))
+      (if (and (>= (len applied) 2) (syn-symbol? (car applied))
+               (string=? (syn-name (car applied)) "proj"))
+          (load-path (nth applied 1))
+          nil))))
+;; A load's or an instance's path, in a list of one.
+(define def-path (->* (syn) (listof string acyclic))
+  (lambda (s) (let ((p (load-path s))) (if (null? p) (instance-path s) p))))
 (define without-load (->* (symbol load-defs) load-defs)
   (lambda (n ls)
     (cond ((null? ls) nil)
@@ -252,7 +264,7 @@
     (let ((items (proper x)))
       (if (and (>= (len items) 3) (string=? (head-name x) "define") (syn-symbol? (nth items 1)))
           (let* ((n (syn-symbol (nth items 1)))
-                 (path (load-path (nth items (- (len items) 1))))
+                 (path (def-path (nth items (- (len items) 1))))
                  (kept (without-load n ls)))
             (if (and (not (null? path)) (<= (len items) 4)) (cons (tuple n (car path)) kept) kept))
           ls))))

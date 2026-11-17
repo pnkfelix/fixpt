@@ -37,9 +37,8 @@
 (import scopes-module walk placed evaluate levels-of binder-of aligned-heads)
 (import align-module defined macro-of macro? makes-defns? makes-top-defns? nodes-reset! align
         node-export node-imports node-syn node-path node-core node-kids pvar-of pvar? nnodes
-        act-rename act-alias
-        seq-depths def-env-top env-empty env-levels
-        act-module-type act-standard-type under
+        act-rename act-alias seq-depths def-env-top env-empty env-levels
+        act-module-type act-instance-type act-standard-type under
         act-macro-head act-mark atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed name-kind? heads heads-on uses-syntax-macro?
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
@@ -332,7 +331,9 @@
           ;; of a type it shows, or the standard environment (`macros.rs`'s).
           ((= free 1) (cond ((null? file) (list (act-alias)))
                             ((name-in? n (extract (car file) 3))
-                             (list (act-module-type (extract (car file) 1))))
+                             (list (if (= (extract (def-env-of-file file) 1) 3)
+                                       (act-instance-type (extract (car file) 1))
+                                       (act-module-type (extract (car file) 1)))))
                             (else (list (act-standard-type)))))
           ((or (null? file) (name-in? n (extract (car file) 2)) (name-in? n (extract (car file) 5)))
            (list (act-alias)))
@@ -789,6 +790,7 @@
                       (tagcase (car act)
                         (act-standard-type () "#%fx")
                         (act-module-type (m) (symbol->string m))
+                        (act-instance-type (m) (alias (symbol->string m) made))
                         (else y "")))))
       (cond
         ((not (string=? typed "")) (selected (string->symbol typed) t made))

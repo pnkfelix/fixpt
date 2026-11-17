@@ -136,6 +136,18 @@ fn a_files_made_macro_is_given_on() {
     }
 }
 
+/// The macros of instances of a file with module parameters
+/// (`binding-shapes.md`, step 4 (c)): each names its own instance, by its
+/// name, which a binder at a use does not capture; two instances' macros,
+/// written or made, apart.
+#[test]
+fn an_instances_macros_name_it() {
+    for m in MACHINES {
+        let (out, err) = eval(m, "main-instances.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("(206 12 5) : ")), "{m}: {out}{err}");
+    }
+}
+
 #[test]
 fn what_cannot_be_imported_is_refused() {
     let cases = [
@@ -151,6 +163,11 @@ fn what_cannot_be_imported_is_refused() {
         ("main-makes-hidden.fx", "unbound variable `cap`"),
         ("main-imports-global-before.fx", "`clamp` is defined already: a macro may not take its name"),
         ("main-makes-global-before.fx", "`clamp` is defined already: a macro may not take its name"),
+        ("main-instance-plain.fx", "`counter.fx` takes module parameters: import the macros of an instance of it"),
+        ("main-instance-with.fx", "`a`, the instance an imported macro names, where a `with` or `include` around its use may give it: not yet"),
+        ("main-instance-module.fx", "`a`, which an expansion here names as its macro has it, is bound inside a `module` around the use"),
+        ("main-own-module.fx", "`limit`, which an expansion here names as its macro has it, is bound inside a `module` around the use"),
+        ("main-instance-in-file.fx", "`a` is an instance of a file with module parameters: a module file cannot import its macros, not yet"),
     ];
     for (name, why) in cases {
         let (out, err) = eval("rs-scheme-vm", name);

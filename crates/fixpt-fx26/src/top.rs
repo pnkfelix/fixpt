@@ -959,7 +959,7 @@ impl Checker {
         // name the file defines before it by `load-module`, from its
         // directory.
         let dir = at.and_then(|a| a.parent()).map(|d| d.to_path_buf()).or_else(|| self.base_dir.clone());
-        let mut loads: fixpt_hash::HashMap<Sym, String> = fixpt_hash::HashMap::default();
+        let mut loads: fixpt_hash::HashMap<Sym, (String, bool)> = fixpt_hash::HashMap::default();
         let mut read: fixpt_hash::HashMap<(usize, usize), Imported> = fixpt_hash::HashMap::default();
         for (i, f) in forms.iter().enumerate() {
             let items: Vec<(usize, Syn)> = if kinds[i] == 2 { f.list().unwrap_or_default()[1..].iter().enumerate().map(|(j, x)| (j + 1, *x)).collect() } else { vec![(0, *f)] };
@@ -971,10 +971,8 @@ impl Checker {
                     };
                 }
                 if let Some((lib, filter)) = self.import_with_syntax(&x)? {
-                    let Some(path) = loads.get(&lib).cloned() else {
-                        return Err(FxError::at(x.span(), format!("`import-with-syntax` takes a name defined as `(load-module \"path\")`, and `{}` is not one", self.interner.name(lib))));
-                    };
-                    let file = self.file_macros_at(x.span(), &path, dir.clone())?;
+                    let path = self.load_in_file(&x, lib, &loads)?;
+                    let file = self.file_macros_at(x.span(), &path, dir.clone(), false)?;
                     read.insert((i, j), Imported { file, filter });
                 }
             }
@@ -995,7 +993,7 @@ impl Checker {
             // the rest, if any.
             let imported = |m: &mut crate::macros::Macros, f: &Syn, i: &Imported, out: &mut Vec<Syn>, interner: &mut fixpt_read::Interner| -> R<()> {
                 let taken = |n: Sym| i.filter.as_ref().is_none_or(|(only, names)| names.iter().any(|(x, _)| *x == n) == *only);
-                let given = m.define_file(&i.file, &is_standard, &taken, crate::heap_syn::at_of(f.span()), interner)?;
+                let given = m.define_file(&i.file, None, &is_standard, &taken, crate::heap_syn::at_of(f.span()), interner)?;
                 let given: fixpt_hash::HashSet<Sym> = given.into_iter().map(|(n, _)| n).collect();
                 // A module's `include` is made before its items, so of the
                 // hidden global every load of `lib`'s file is, which `lib`
@@ -1130,21 +1128,46 @@ impl Checker {
         }
     }
 
+    /// The file `lib` names in a module file, of its loads `loads`, so
+    /// far, for its `import-with-syntax`, `form`: one it loads, not an
+    /// instance of one with module parameters, whose macros a module file
+    /// cannot import (step 4 (c): its values' `include` would be of an
+    /// item, which a module's `include` is made before).
+    fn load_in_file(&self, form: &Syn, lib: Sym, loads: &fixpt_hash::HashMap<Sym, (String, bool)>) -> R<String> {
+        match loads.get(&lib) {
+            Some((p, false)) => Ok(p.clone()),
+            Some((_, true)) => Err(FxError::at(form.span(), format!("`{}` is an instance of a file with module parameters: a module file cannot import its macros, not yet", self.interner.name(lib)))),
+            None => Err(FxError::at(form.span(), format!("`import-with-syntax` takes a name defined as `(load-module \"path\")`, and `{}` is not one", self.interner.name(lib)))),
+        }
+    }
+
     /// The name a `define` defines, if `form` is one, with its file's path
-    /// if it is `(define name (load-module "path"))`.
-    fn load_def_of(&self, form: &Syn) -> Option<(Sym, Option<String>)> {
+    /// if it is `(define name (load-module "path"))`, or an instance of
+    /// the file, `(define name ((proj (load-module "path") arg …)))`
+    /// (`binding-shapes.md`, step 4 (c)), with whether it is.
+    fn load_def_of(&self, form: &Syn) -> Option<(Sym, Option<(String, bool)>)> {
         let listed = form.list();
         let items = listed.as_deref().unwrap_or_default();
         if items.first().and_then(|h| h.sym()).is_none_or(|h| self.interner.name(h) != "define") {
             return None;
         }
         let name = items.get(1).and_then(|n| n.sym())?;
-        let path = items.last().and_then(|init| match init.list().as_deref() {
+        let loaded = |init: &Syn| match init.list().as_deref() {
             Some([h, p]) if h.sym().is_some_and(|h| self.interner.name(h) == "load-module") => match &p.view() {
                 V::Str(s) => Some(s.clone()),
                 _ => None,
             },
             _ => None,
+        };
+        let path = items.last().and_then(|init| match loaded(init) {
+            Some(p) => Some((p, false)),
+            None => match init.list().as_deref() {
+                Some([applied]) => match applied.list().as_deref() {
+                    Some([h, m, ..]) if h.sym().is_some_and(|h| self.interner.name(h) == "proj") => loaded(m).map(|p| (p, true)),
+                    _ => None,
+                },
+                _ => None,
+            },
         });
         Some((name, path.filter(|_| items.len() <= 4)))
     }
@@ -1158,17 +1181,18 @@ impl Checker {
     #[allow(clippy::type_complexity)]
     fn import_file_macros(&mut self, form: &Syn, lib: Sym, filter: Option<&(bool, Vec<(Sym, Span)>)>) -> R<fixpt_hash::HashSet<Sym>> {
         let usage = "`import-with-syntax` takes a name defined as `(load-module \"path\")`";
-        let Some(path) = self.load_defs.get(&lib).cloned() else {
+        let Some((path, instance)) = self.load_defs.get(&lib).cloned() else {
             return Err(FxError::at(form.span(), format!("{usage}, and `{}` is not one", self.interner.name(lib))));
         };
-        let file = self.file_macros_at(form.span(), &path, self.base_dir.clone())?;
+        let file = self.file_macros_at(form.span(), &path, self.base_dir.clone(), instance)?;
+        let instance = instance.then_some(lib);
         let taken = |n: Sym| filter.is_none_or(|(only, names)| names.iter().any(|(m, _)| *m == n) == *only);
         let r = self.syn(|c| {
             let mut defined = std::mem::take(&mut c.macros);
             let mut interner = std::mem::take(&mut c.interner);
             let r = {
                 let is_standard = |s: Sym| c.standard_type(s).is_some();
-                defined.define_file(&file, &is_standard, &taken, crate::heap_syn::at_of(form.span()), &mut interner)
+                defined.define_file(&file, instance, &is_standard, &taken, crate::heap_syn::at_of(form.span()), &mut interner)
             };
             c.macros = defined;
             c.interner = interner;
@@ -1192,11 +1216,11 @@ impl Checker {
     /// before them, from its directory), and its top-level uses, which may
     /// make macros (`TODO.md` §287), in order; and what its module shows,
     /// its definitions not hidden, as a module file's are read.
-    fn file_macros_at(&mut self, site: Span, path: &str, dir: Option<std::path::PathBuf>) -> R<Rc<crate::macros::FileMacros>> {
+    fn file_macros_at(&mut self, site: Span, path: &str, dir: Option<std::path::PathBuf>, instance: bool) -> R<Rc<crate::macros::FileMacros>> {
         use crate::macros::FileEntry;
         let (at, key) = crate::macros::shapes::load_key(dir.as_deref(), path, false);
-        if crate::parse::takes_modules_at(&at, path) {
-            return Err(FxError::at(site, format!("`{path}` takes module parameters: its macros cannot be imported, not yet")));
+        if !instance && crate::parse::takes_parameters_at(&at, path) {
+            return Err(FxError::at(site, format!("`{path}` takes module parameters: import the macros of an instance of it, `(define name ((proj (load-module \"{path}\") arg …)))`")));
         }
         let text = module_text(path, &at, site)?;
         self.macro_files += 1;
@@ -1208,7 +1232,7 @@ impl Checker {
         let forms = read.map_err(|e| self.in_loaded(FxError::at(e.span, e.message), file))?;
         let sub = at.parent().map(|d| d.to_path_buf());
         let (mut entries, mut shown) = (Vec::new(), Vec::new());
-        let mut loads: fixpt_hash::HashMap<Sym, String> = fixpt_hash::HashMap::default();
+        let mut loads: fixpt_hash::HashMap<Sym, (String, bool)> = fixpt_hash::HashMap::default();
         let r = (|| -> R<()> {
             for f in forms {
                 let listed = f.list();
@@ -1224,10 +1248,8 @@ impl Checker {
                         };
                     }
                     if let Some((lib, filter)) = self.import_with_syntax(&x)? {
-                        let Some(p) = loads.get(&lib).cloned() else {
-                            return Err(FxError::at(x.span(), format!("`import-with-syntax` takes a name defined as `(load-module \"path\")`, and `{}` is not one", self.interner.name(lib))));
-                        };
-                        let lib = self.file_macros_at(x.span(), &p, sub.clone())?;
+                        let p = self.load_in_file(&x, lib, &loads)?;
+                        let lib = self.file_macros_at(x.span(), &p, sub.clone(), false)?;
                         let filter = filter.map(|(only, names)| (only, names.into_iter().map(|(n, _)| n).collect()));
                         entries.push(FileEntry::Import(lib, filter, hidden));
                         continue;
