@@ -8,7 +8,7 @@
 (define shaper-module ((proj (load-module "fx26:macros-shaper.fx") rs re rm rc rp)))
 (define walk-module (with shaper-module walk-module))
 (define fresh-module ((proj (load-module "fx26:macros-fresh.fx") rs re rm rc rp)))
-(import fresh-module captor-tag)
+(import fresh-module tag-char?)
 (define scopes-module (with walk-module scopes-module))
 (define align-module (with scopes-module align-module))
 (define types-module (with align-module types-module))
@@ -16,7 +16,8 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted (type syn))
 (import parser-module parse-tag p-ok p-err syn-symbol? syn-symbol syn-name mk-symbol mk-list len nth
-        syn-string? syn-string syn-datums (type syns-a presult loaded-file loaded-files))
+        syn-string? syn-string syn-datums (type syns-a presult loaded-file loaded-files)
+        (effect parses))
 (import types-module proper-items fail-at name-in? (type fails addr atms))
 (import align-module node-export node-imports node-syn node-kids node-path nnodes program-walk
         lv-rib lv-shape
@@ -557,22 +558,25 @@
 
 ;; Hygiene, one mechanism (`binding-shapes.md`, step 3; `macros/hygiene.rs`):
 ;; top-level form `x`, after expansion, each alias an expansion left free,
-;; `%~N:x`, made the name it stands for where its macro is defined
+;; `%~K.N:x`, made the name it stands for where its macro is defined
 ;; (`def-env-of`): a top-level macro's the top level's, written so (`(with
 ;; #%toplevel x)`, `#%toplevel:x`); a file's macro's the file's value,
 ;; `(with %shared:key x)`, else the standard one, `(with #%fx x)`; a module
 ;; file's own macro's the plain name, a binder at the use that would capture
 ;; it renamed, `%x~N`, and each reference to that binder; an alias the
 ;; expansion bound, here or at the top level before, a name of its own.
-;; Itself if it has no alias. No alias reaches the checker.
-(define aliases-resolved (->* (fails syn def-envs) syn)
-  (lambda (fail x hs)
+;; Itself if it has no alias. No alias reaches the checker. A captor's tag
+;; is `tag`'s, the expander's (`macros-fresh.fx`'s `captor-tag`), whose
+;; instance this one is not.
+(define-type tagger (subr parses () string))
+(define aliases-resolved (->* (fails syn def-envs tagger) syn)
+  (lambda (fail x hs tag)
     (if (not (alias-in? x))
         x
         (let* ((w (walked fail x #t)) (root (extract w 1)) (found (extract w 2))
                (made (aliases-written fail found hs (root-binders fail root x)
                                       (tuple (the parts nil) (the ints nil))))
-               (fresh (captors-named (extract made 2) nil))
+               (fresh (captors-named (extract made 2) nil tag))
                (written (append (captors-renamed found fresh (binders-renamed fresh nil))
                                 (extract made 1))))
           (begin (aliases-defined-in fail root x)
@@ -665,8 +669,8 @@
 ;; Each captor, `cs`, with its fresh name, `%x~K.N`: spelled apart from a
 ;; template's fresh names, which another count makes (`captor-tag`).
 (define-type captors (listof (tupleof int symbol) acyclic))
-(define captors-named (->* (ints captors) captors)
-  (lambda (cs out)
+(define captors-named (->* (ints captors tagger) captors)
+  (lambda (cs out tag)
     (if (null? cs)
         out
         (tagcase (node-kids (car cs))
@@ -674,9 +678,10 @@
             (captors-named (cdr cs)
                            (cons (tuple (car cs)
                                         (string->symbol
-                                         (string-append "%" (symbol->string n) "~" (captor-tag))))
-                                 out)))
-          (else y (captors-named (cdr cs) out))))))
+                                         (string-append "%" (symbol->string n) "~" (tag))))
+                                 out)
+                           tag))
+          (else y (captors-named (cdr cs) out tag))))))
 ;; Each captor of `fresh` written as its fresh name, onto `out`.
 (define binders-renamed (->* (captors parts) parts)
   (lambda (fresh out)
@@ -740,26 +745,23 @@
                                                      "named apart from its module, not yet")
                                  s)
                         s))))))))
-;; Where expansion `k`'s macro was defined, of `hs`: the top level if none
-;; is said.
-(define def-env-of (->* (int def-envs) def-env)
+;; Where the expansion of tag `k` had its macro defined, of `hs`: the top
+;; level if none is said.
+(define def-env-of (->* (string def-envs) def-env)
   (lambda (k hs)
     (cond ((null? hs) (def-env-top))
-          ((= k (extract (car hs) 1)) (extract (car hs) 2))
+          ((string=? k (extract (car hs) 1)) (extract (car hs) 2))
           (else (def-env-of k (cdr hs))))))
-;; The expansion that made alias `x`, its outermost `%~N:`'s `N`; else 0.
-(define alias-made (->* (string) int)
+;; The tag of the expansion that made alias `x`, its outermost `%~T:`'s
+;; `T`; else "".
+(define alias-made (->* (string) string)
   (lambda (x)
     (let ((c (if (and (> (string-length x) 2) (string=? (substring x 0 2) "%~"))
                  (digits-end x 2)
                  -1)))
-      (if (> c 2) (digits-value x 2 c 0) 0))))
-(define digits-value (->* (string int int int) int)
-  (lambda (s i end acc)
-    (if (>= i end)
-        acc
-        (digits-value s (+ i 1) end
-                      (+ (* acc 10) (- (char->integer (string-ref s i)) (char->integer #\0)))))))
+      (if (and (> c 2) (< c (string-length x)) (char=? (string-ref x c) #\:))
+          (substring x 2 c)
+          ""))))
 ;; Whether a binder in `env` binds `n`, a description's if `d`.
 (define bound-in? (->* (symbol bool env) bool)
   (lambda (n d env) (bound-from? n d env 0)))
@@ -854,7 +856,7 @@
           ((addr=? p (extract (car ws) 1)) (list (extract (car ws) 2)))
           (else (part-at p (cdr ws))))))
 ;; `x`'s name as where its alias's macro was defined, if it is an alias
-;; (`%~N:x`): every `%~N:` taken off; else "" (`macros-procedural.fx`'s).
+;; (`%~K.N:x`): every `%~K.N:` taken off; else "" (`macros-procedural.fx`'s).
 (define alias-base (->* (string) string)
   (lambda (n) (alias-base-from n #f)))
 (define alias-base-from (->* (string bool) string)
@@ -867,4 +869,4 @@
           (if any n "")))))
 (define digits-end (->* (string int) int)
   (lambda (s i)
-    (if (and (< i (string-length s)) (char-numeric? (string-ref s i))) (digits-end s (+ i 1)) i)))
+    (if (and (< i (string-length s)) (tag-char? (string-ref s i))) (digits-end s (+ i 1)) i)))

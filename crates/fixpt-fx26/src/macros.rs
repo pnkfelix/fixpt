@@ -467,7 +467,7 @@ struct Clause {
 
 /// What becomes of one of a template's parts: a name made fresh, one name
 /// for the binder found at a path and for each reference to it; a name
-/// free in the template, its alias, `%~N:name`, which the resolution after
+/// free in the template, its alias, `%~K.N:name`, which the resolution after
 /// expansion makes the name where the macro is defined, nothing at the use
 /// capturing it (`hygiene`): a top-level macro's the top level's, `(with
 /// #%toplevel name)` or, a description's, `#%toplevel:name`
@@ -486,7 +486,7 @@ struct Clause {
 enum Action {
     /// The binder's path, and how many ellipses it is under.
     Rename(Vec<bool>, usize),
-    /// A name free in the template: its alias, `%~N:name`, which the
+    /// A name free in the template: its alias, `%~K.N:name`, which the
     /// resolution after expansion makes the name where the macro is
     /// defined (`hygiene`).
     Alias,
@@ -594,9 +594,14 @@ pub(crate) struct Withs {
     /// The shapes known (`shapes`): the top level's names', files'.
     shapes: shapes::Known,
     /// Where the macro each expansion's aliases are of was defined, by the
-    /// expansion's number (`hygiene::DefEnv`); a template's check is
-    /// expansion 0.
-    pub(crate) def_envs: HashMap<u32, hygiene::DefEnv>,
+    /// expansion's tag (`hygiene::DefEnv`); a template's check's is `0`.
+    pub(crate) def_envs: HashMap<String, hygiene::DefEnv>,
+    /// Each expansion's tag, by its number (`Macros::expansion_begun`):
+    /// `K.N`, the form's key and how many expansions of it so far, `N`, so
+    /// that its aliases, `%~K.N:x`, are of the form and the macros it uses
+    /// alone, not of how many expansions the forms before it made.
+    pub(crate) tags: HashMap<u32, String>,
+    pub(crate) expanded: u32,
     /// How many binders at uses the resolution renamed in this form, which
     /// would have captured a name a module file's own macro introduces
     /// (`%x~K.N`).
@@ -1375,6 +1380,7 @@ impl Macros {
         self.withs.form_key = if n == 0 { format!("{m}{h}") } else { format!("{m}{h}-{n}") };
         self.fresh = 0;
         self.withs.captors = 0;
+        self.withs.expanded = 0;
         // What is kept within one form as at any form's start, whatever a
         // failure before left (FX-26's `form-begun!`, alike): the macros an
         // expansion defined, none yet; no template's check under way.
@@ -1386,6 +1392,20 @@ impl Macros {
     fn fresh_tag(&mut self) -> String {
         self.fresh += 1;
         format!("{}.{}", self.withs.form_key, self.fresh)
+    }
+
+    /// Expansion `made` begun, of a macro defined where `def_env` says: its
+    /// tag, `K.N`, counted apart from the fresh names' (`Withs::tags`).
+    fn expansion_begun(&mut self, made: u32, def_env: hygiene::DefEnv) {
+        self.withs.expanded += 1;
+        let tag = format!("{}.{}", self.withs.form_key, self.withs.expanded);
+        self.withs.def_envs.insert(tag.clone(), def_env);
+        self.withs.tags.insert(made, tag);
+    }
+
+    /// Expansion `made`'s tag; a template's check's (`made` 0), `0`.
+    pub(crate) fn tag_of(&self, made: u32) -> String {
+        self.withs.tags.get(&made).cloned().unwrap_or_else(|| "0".to_string())
     }
 
     /// `(define-syntax name [σ] (syntax-rules [#:trailmarks (name …)] ((_ . pattern)
@@ -1519,7 +1539,7 @@ impl Macros {
             binds.insert(*n, stand_in);
         }
         self.checking = true;
-        self.withs.def_envs.insert(0, c.def_env.clone());
+        self.withs.def_envs.insert("0".to_string(), c.def_env.clone());
         let body = self.transcribe(c, &template, &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), 0, interner)?;
         self.checking = false;
         let lambda = Syn::lst(at, vec![sym("lambda", interner), list_of(at, params, None), body]);
@@ -1541,9 +1561,9 @@ impl Macros {
         let reading = self.reading.replace(std::sync::Arc::from(text));
         let phase1 = std::mem::take(&mut self.withs.phase1);
         // The file's forms' keys its own (`form_begin`); the form's put back.
-        let named = (std::mem::take(&mut self.withs.form_key), self.fresh, self.withs.captors, std::mem::take(&mut self.withs.keys_seen), std::mem::replace(&mut self.withs.in_module, true));
+        let named = (std::mem::take(&mut self.withs.form_key), self.fresh, self.withs.captors, self.withs.expanded, std::mem::take(&mut self.withs.keys_seen), std::mem::replace(&mut self.withs.in_module, true));
         let r = f(self);
-        (self.withs.form_key, self.fresh, self.withs.captors, self.withs.keys_seen, self.withs.in_module) = named;
+        (self.withs.form_key, self.fresh, self.withs.captors, self.withs.expanded, self.withs.keys_seen, self.withs.in_module) = named;
         self.withs.phase1 = phase1;
         self.defined = defined;
         self.withs.marks = marks;
@@ -2613,7 +2633,7 @@ impl Macros {
             // Of a clause checked once (`template_checks`): its promise kept.
             let typed = c.pvars.iter().any(|(_, p)| p.hole.is_some());
             let made = fixpt_read::record_expansion(interner.name(name), s.span(), m.text.clone(), typed);
-            self.withs.def_envs.insert(made, c.def_env.clone());
+            self.expansion_begun(made, c.def_env.clone());
             return self
                 .transcribe(c, &c.template.get(), &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), made, interner)
                 .map_err(|e| FxError::at(s.at(), format!("a use of `{}`: {}", interner.name(name), e.message)));
@@ -2626,7 +2646,7 @@ impl Macros {
     /// syntactic closure's opened (`procedural::closed`).
     fn expand_procedural(&mut self, name: Sym, p: &procedural::Procedural, s: &Syn, interner: &mut Interner) -> R<Syn> {
         let made = fixpt_read::record_expansion(interner.name(name), s.span(), None, false);
-        self.withs.def_envs.insert(made, p.def_env.clone());
+        self.expansion_begun(made, p.def_env.clone());
         self.procedural_run(name, p, s, made, interner)
     }
 
@@ -2649,7 +2669,7 @@ impl Macros {
         let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         u.align(sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{shown}`: {}", e.message)))?;
         let made = fixpt_read::record_expansion(&shown, s.span(), None, false);
-        self.withs.def_envs.insert(made, p.def_env.clone());
+        self.expansion_begun(made, p.def_env.clone());
         let out = self.procedural_run(name, p, s, made, interner)?;
         if !self.withs.contracts {
             return Ok(out);
@@ -2691,14 +2711,14 @@ impl Macros {
         if alpha_same(&a, &b) {
             return Ok(out);
         }
-        // Which way it is not: a fresh name, or its alias (`%~N:x′`, a name
+        // Which way it is not: a fresh name, or its alias (`%~K.N:x′`, a name
         // the transformer wrote where its macro is defined), free in the
         // second, placed outside its binder's scope; else the transformer
         // read a name.
         let escaped = b.iter().find_map(|n| match n {
             AlphaNode::Free(x, _) => fresh.get(x).copied().or_else(|| {
                 let name = interner.name(*x);
-                let base = name.strip_prefix(&format!("%~{made}:"))?;
+                let base = name.strip_prefix(&format!("%~{}:", self.tag_of(made)))?;
                 fresh.iter().find(|(f, _)| interner.name(**f) == base).map(|(_, o)| *o)
             }),
             _ => None,
@@ -2834,7 +2854,7 @@ impl Macros {
     /// `operands` in expansion `made`, held to contract `sig`: definitions,
     /// aligned as a program's are, that define of the use's names exactly
     /// those the contract says its uses define; any other name they define
-    /// their own, an alias of the expansion (`%~N:x`), which nothing outside
+    /// their own, an alias of the expansion (`%~K.N:x`), which nothing outside
     /// it names.
     fn defined_held(&self, sig: &Rc<STy>, operands: &Syn, out: &Syn, made: u32, interner: &mut Interner) -> R<()> {
         let none = HashMap::default();
@@ -2886,7 +2906,7 @@ impl Macros {
                 }
             }
         }
-        let own = format!("%~{made}:");
+        let own = format!("%~{}:", self.tag_of(made));
         if let Some((n, _)) = defines.iter().find(|d| !said.contains(d) && !interner.name(d.0).starts_with(&own)) {
             return Err(FxError::at(out.at(), format!("its expansion defines `{}`, which its contract does not say a use defines, nor is it its own (an alias, as `rename` makes one)", interner.name(*n))));
         }
@@ -2984,8 +3004,8 @@ impl Macros {
         if !self.withs.world.borrow().session {
             return None;
         }
-        let datum = s.plain();
-        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, &p.phase1, datum, made)).flatten()
+        let (datum, tag) = (s.plain(), self.tag_of(made));
+        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, &p.phase1, datum, &tag)).flatten()
     }
 
     /// Transformer `p` called on use `s` in expansion `made` in the
@@ -2998,8 +3018,8 @@ impl Macros {
         if own {
             crate::heap_syn::collect_young_if_asked();
         }
-        let datum = s.plain();
-        let out = crate::heap_syn::with_heap(|h| procedural::apply_copied(p.style, &p.code, &p.phase1, made, h, datum))?;
+        let (datum, tag) = (s.plain(), self.tag_of(made));
+        let out = crate::heap_syn::with_heap(|h| procedural::apply_copied(p.style, &p.code, &p.phase1, &tag, h, datum))?;
         Ok(if own { crate::heap_syn::collect_young_if_asked_keeping(out) } else { out })
     }
 
@@ -3009,8 +3029,8 @@ impl Macros {
     fn procedural_opened(&mut self, p: &procedural::Procedural, at: Syn, made: u32, interner: &mut Interner) -> R<Syn> {
         let opened = match p.style {
             procedural::Style::Er => at,
-            procedural::Style::Sc => procedural::closed(&at, true, made, interner)?,
-            procedural::Style::Rsc => procedural::closed(&at, false, made, interner)?,
+            procedural::Style::Sc => procedural::closed(&at, true, &self.tag_of(made), interner)?,
+            procedural::Style::Rsc => procedural::closed(&at, false, &self.tag_of(made), interner)?,
         };
         let defined: HashSet<String> = self.defined.keys().map(|k| interner.name(*k).to_string()).collect();
         let is_keyword = |n: &str| {
@@ -3073,7 +3093,7 @@ impl Macros {
                         Syn::symbol(at, name, interner)
                     }
                     Some(Action::Alias) => {
-                        let a = interner.intern(&procedural::alias(interner.name(*n), made));
+                        let a = interner.intern(&procedural::alias(interner.name(*n), &self.tag_of(made)));
                         Syn::symbol(at, a, interner)
                     }
                     Some(Action::Mark(i)) => Syn::symbol(at, *i, interner),

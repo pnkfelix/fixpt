@@ -512,8 +512,8 @@
 ;; And the globals defined, which no macro may be named (`globals`).
 ;; And the forms' keys' hashes, so that a program begun in the standard
 ;; environment's state names as the Rust expander, begun anew, does.
-(define fresh-module ((proj (load-module "fx26:macros-fresh.fx") rs re rm rc rp)))
-(import fresh-module fresh-tag seen-now seen! (type seen-keys))
+(define fresh-module (with procedural-module fresh-module))
+(import fresh-module fresh-tag expansion-begun! seen-now seen! (type seen-keys))
 (define-type by-states
   (listof (tupleof int macro-env load-defs names seen-keys marked phase1-state) acyclic))
 (define by-state (ref by-states rs) (new nil))
@@ -568,6 +568,7 @@
       (begin
         (set nexpansions n)
         (set expansions (cons (tuple n name (syn-start s) (syn-end s) typed) (get expansions)))
+        (expansion-begun! n)
         n))))
 ;; Whether a clause of pattern variables `ps` has a typed hole: checked once.
 (define holed? (->* (pvars) bool)

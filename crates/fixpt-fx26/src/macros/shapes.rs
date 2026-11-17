@@ -140,7 +140,7 @@ pub(crate) struct Known {
     /// Each top-level form before and after its shapes were written, if
     /// they are kept (`Checker::keep_shapes_seen`).
     seen: Option<Vec<(String, String)>>,
-    /// Each alias an expansion defined at the top level (`(define %~N:x
+    /// Each alias an expansion defined at the top level (`(define %~K.N:x
     /// …)`), a description's if marked: a name of its own wherever later
     /// forms name it (`Macros::aliases_resolved`).
     pub(crate) aliases_defined: fixpt_hash::HashSet<(Sym, bool)>,

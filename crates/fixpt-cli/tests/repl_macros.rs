@@ -52,3 +52,22 @@ fn a_files_own_made_macro_is_not_the_loaders() {
     let out = repl(&format!("(define clamp 7)\n(define lib (load-module \"{own}\"))\n(with lib clamped)\nclamp\n"));
     assert!(!out.contains("defined already") && out.contains("10 : int") && out.contains("7 : int ! (read (globals clamp))"), "{out}");
 }
+
+/// A procedural macro's alias, `%~K.N:x`, is of its form and the
+/// expansions in it alone (`Macros::expansion_begun`): a use's global is
+/// spelled the same whatever the forms before it expanded, and alike in
+/// both checkers (it was `%~N:x`, `N` the session's count).
+#[test]
+fn a_procedural_macros_alias_is_of_its_form() {
+    let check = |text: &str| {
+        let out = Command::new(FIXPT).args(["check", "--reps=text", text]).output().expect("runs");
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    };
+    let counter = "(define-syntax counter (er-macro-transformer (lambda (form rename compare) `(,(rename 'begin) (,(rename 'define) ,(rename 'n) 1)))))\n";
+    let other = "(define-syntax one (er-macro-transformer (lambda (form rename compare) 1)))\n(define two (+ (one) (one)))\n";
+    let alone = check(&format!("{counter}(counter)\n"));
+    let after = check(&format!("{counter}{other}(counter)\n"));
+    let aliases = |out: &str| out.lines().filter(|l| l.starts_with("%~")).map(str::to_string).collect::<Vec<_>>();
+    assert!(aliases(&alone).len() == 1 && aliases(&alone) == aliases(&after), "{alone}\n{after}");
+    assert!(aliases(&alone)[0].ends_with(".1:n (base int)") && !after.contains("differs"), "{alone}\n{after}");
+}

@@ -269,23 +269,15 @@ fn a_file_is_shaped() {
 }
 
 /// Form text `t` read and written again by the Rust reader, its strings
-/// emptied and its aliases' expansion numbers taken out: two writers'
-/// spellings of one form alike (the FX-26 one escapes nothing in a string),
-/// and two expansions' counts (`%~N:x` is `%~:x`) the same.
+/// emptied: two writers' spellings of one form alike (the FX-26 one escapes
+/// nothing in a string). Aliases, `%~K.N:x`, are spelled alike by both
+/// expanders, of the form and its expansions, so are left as they are.
 fn normal(t: &str) -> String {
     let mut interner = fixpt_read::Interner::default();
-    let written = match fixpt_read::Reader::new(t, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() {
+    match fixpt_read::Reader::new(t, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() {
         Ok(forms) => forms.iter().map(|f| fixpt_read::write_syntax(&unstrung(f), &interner)).collect::<Vec<_>>().join(" "),
         Err(_) => t.to_string(),
-    };
-    let mut out = String::new();
-    let mut rest = written.as_str();
-    while let Some(i) = rest.find("%~") {
-        out.push_str(&rest[..i + 2]);
-        rest = rest[i + 2..].trim_start_matches(|c: char| c.is_ascii_digit());
     }
-    out.push_str(rest);
-    out
 }
 
 /// `s` with each string empty.

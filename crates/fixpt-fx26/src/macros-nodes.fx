@@ -43,7 +43,7 @@
 
 ;; What becomes of one of a template's parts where it is transcribed
 ;; (`macros.rs`'s `Action`): a name made fresh, one for the binder at a
-;; path and each reference to it; a free name its alias, `%~N:n`, which
+;; path and each reference to it; a free name its alias, `%~K.N:n`, which
 ;; the resolution after expansion makes the name where the macro is defined
 ;; (`macros-shapes.fx`'s `aliases-resolved`); a file's macro's description read whole through
 ;; the file's module or the standard environment, by `select`; a use of
@@ -63,7 +63,7 @@
 ;; (`macros.fx`'s `def-envs`).
 (define-type def-env (tupleof int symbol names))
 (define def-env-top (->* () def-env) (lambda () (tuple 0 'top (the names nil))))
-(define-type def-envs (listof (tupleof int def-env) acyclic))
+(define-type def-envs (listof (tupleof string def-env) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
 ;; by their paths in the template, the last made first; its pattern's
 ;; variables, in the order the pattern has them; each typed hole's type as

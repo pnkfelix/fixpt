@@ -1,6 +1,6 @@
 //! Hygiene, one mechanism (`docs/research/binding-shapes.md`, step 3):
 //! after a form is expanded, each name an expansion introduced and left
-//! free, an alias `%~N:x` (`procedural::alias_base`), made the name it
+//! free, an alias `%~K.N:x` (`procedural::alias_base`), made the name it
 //! stands for where its macro is defined (`DefEnv`), by the program's walk:
 //! a top-level macro's, the top level's `x`, written so (`(with #%toplevel
 //! x)`, `#%toplevel:x`); a file's macro's, the file's value `(with
@@ -108,7 +108,7 @@ impl Macros {
             for (at, env, _, _) in &found {
                 let Kids::Ref(n, ns, free) = a.nodes[*at].kids else { continue };
                 let Some(base) = alias_base(a.name(n)) else { continue };
-                let def_env = alias_made(a.name(n)).and_then(|k| a.m.withs.def_envs.get(&k));
+                let def_env = alias_made(a.name(n)).and_then(|k| a.m.withs.def_envs.get(k));
                 // Bound by the expansion, here or at the top level before.
                 let bound = env.levels().any(|l| matches!(l, Level::Rib(atoms) | Level::Earlier(atoms) if binder_named(atoms, n, ns).is_some()));
                 let global = !matches!(def_env, Some(DefEnv::Within)) && a.m.withs.shapes.top_has(n, ns == Ns::Desc);

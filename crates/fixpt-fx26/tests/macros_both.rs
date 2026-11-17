@@ -14,24 +14,12 @@ fn both_expanders_agree_on_macro_programs() {
 }
 
 /// Procedural macros (`TODO.md` §228): both expanders run the transformers
-/// alike, and decide their aliases alike.
+/// alike, and decide their aliases alike, spelled alike: `%~K.N:x`, of the
+/// form and its count of expansions, not of the session's (whose count the
+/// two front ends, each in a session of its own here, did not share).
 #[test]
 fn both_expanders_agree_on_procedural_macros() {
-    agree_seen(&format!("{}/tests/programs/procedural", env!("CARGO_MANIFEST_DIR")), "", |t| t.to_string(), unnumbered);
-}
-
-/// `s` with each alias's expansion number taken out (`%~N:x` is `%~:x`):
-/// which expansion made it is the session's count, and the two front ends
-/// count in sessions of their own here.
-fn unnumbered(s: &str) -> String {
-    let mut out = String::new();
-    let mut rest = s;
-    while let Some(i) = rest.find("%~") {
-        out.push_str(&rest[..i + 2]);
-        rest = rest[i + 2..].trim_start_matches(|c: char| c.is_ascii_digit());
-    }
-    out.push_str(rest);
-    out
+    agree_seen(&format!("{}/tests/programs/procedural", env!("CARGO_MANIFEST_DIR")), "", |t| t.to_string(), |s| s.to_string());
 }
 
 /// The programs of `fixpt-cli`'s `import-with-syntax` tests, `main*.fx`

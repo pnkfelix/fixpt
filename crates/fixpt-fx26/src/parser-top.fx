@@ -43,7 +43,7 @@
 (define macros-module (with templates-module macros-module))
 (import templates-module template-checks)
 (define fresh-module (with macros-module fresh-module))
-(import fresh-module form-begin! fresh-scope-begin! fresh-scope-end!)
+(import fresh-module form-begin! fresh-scope-begin! fresh-scope-end! captor-tag)
 (define nodes-module ((proj (load-module "fx26:macros-nodes.fx") rs re rm rc rp)))
 (define facts-module ((proj (load-module "fx26:macros-facts.fx") rs re rm rc rp)))
 (import nodes-module program-walk heads-on)
@@ -297,7 +297,7 @@
     (if (or (form-of? x 'include) (import? x) (datatype? x))
         x
         (let ((shaped (top-shaped (aliases-resolved pfail-at (sealed-written pfail-at x)
-                                                    (def-envs-given)))))
+                                                    (def-envs-given) captor-tag))))
           (begin (files-written!) shaped)))))
 ;; The hidden globals of the files loaded, `ts`, each noted with its file's
 ;; shape (`shared-shaped!`), for the forms after: its definition is made,
@@ -337,7 +337,7 @@
     (if (null? cs)
         nil
         (append-tops (parse-made (aliases-resolved pfail-at (expand pfail-at (car cs))
-                                                   (def-envs-given)))
+                                                   (def-envs-given) captor-tag))
                      (parse-checks (cdr cs))))))
 ;; A `define-syntax` (or `define-syntax-rec`) of a name a form before this
 ;; parse defined as a global: refused, where it is
@@ -448,7 +448,7 @@
 ;;; ------------------------------------------------------------ aliases
 
 ;; A procedural macro's aliases (`macros-procedural.fx`; `TODO.md` §228),
-;; decided where both the checker and the compiler read them: `%~N:x`, which
+;; decided where both the checker and the compiler read them: `%~K.N:x`, which
 ;; an expansion bound, is a name of its own; one it left free is the top
 ;; level's `x`, `(with #%toplevel x)` (`aliases.rs`). The aliases the top
 ;; level defined so far, in the session: each read alone, as a REPL's entry
@@ -668,7 +668,8 @@
   (lambda (xs)
     (if (null? xs)
         nil
-        (cons (aliases-resolved pfail-at (sealed-written pfail-at (car xs)) (def-envs-given))
+        (cons (aliases-resolved pfail-at (sealed-written pfail-at (car xs)) (def-envs-given)
+                                captor-tag)
               (own-expanded (cdr xs))))))
 
 ;; The entry point: a program's forms, as read, read with `keys` (the mode,

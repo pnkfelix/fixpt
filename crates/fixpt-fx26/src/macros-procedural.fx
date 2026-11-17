@@ -21,6 +21,8 @@
 (define parser-module (with types-module parser-module))
 (define scopes-module (with exports-module scopes-module))
 (define reader-types (with parser-module reader-types))
+(define fresh-module (with contracts-module fresh-module))
+(import fresh-module tag-of tag-char?)
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
         syn-expansion len parse-tag p-ok p-err (type syns-a names presult))
@@ -68,12 +70,12 @@
 ;; `begin-for-syntax` on.
 (define forms-text (->* ((listof string acyclic)) string)
   (lambda (fs) (string-append "%forms " (int->string (length fs)) "\n" (forms-given fs))))
-;; The request that runs one on `form` (as text), in expansion `made`: the
+;; The request that runs one on `form` (as text), in expansion `made`, by its tag: the
 ;; transformer checked and compiled at its first use, then called
 ;; (`procedural::apply`, which the Rust expander calls itself).
 (define applied-text (->* (int string string int (listof string acyclic)) string)
   (lambda (s code form made fs)
-    (string-append "%apply " (int->string s) " " (int->string made) " "
+    (string-append "%apply " (int->string s) " " (tag-of made) " "
                    (int->string (string-length code)) " " (int->string (length fs)) "\n"
                    (forms-given fs) code form)))
 ;; The runtime's answer to `code`: what it gave (`=`), or why not (`!`),
@@ -419,7 +421,7 @@
 ;;; ------------------------------------------------------------ aliases
 
 ;; `x`'s name as where its alias's macro was defined, if it is an alias
-;; (`%~N:x`): every `%~N:` taken off; else "".
+;; (`%~T:x`, `T` its expansion's tag): every `%~T:` taken off; else "".
 (define alias-base (->* (string) string)
   (lambda (n) (alias-base-from n #f)))
 (define alias-base-from (->* (string bool) string)
@@ -432,9 +434,10 @@
           (if any n "")))))
 (define digits-end (->* (string int) int)
   (lambda (s i)
-    (if (and (< i (string-length s)) (char-numeric? (string-ref s i))) (digits-end s (+ i 1)) i)))
+    (if (and (< i (string-length s)) (tag-char? (string-ref s i))) (digits-end s (+ i 1)) i)))
+;; `n`'s alias, of expansion `made`, by its tag.
 (define alias (->* (string int) string)
-  (lambda (n made) (string-append "%~" (int->string made) ":" n)))
+  (lambda (n made) (string-append "%~" (tag-of made) ":" n)))
 
 ;; What a syntactic-closure transformer gave, `s`, its closures opened: in
 ;; the macro's environment (`macro-env`), each name an alias of expansion
@@ -718,7 +721,8 @@
       ;; the Rust expander calls it in (`phase1.rs`): what it gives made
       ;; syntax at the use's place, no text between; apart, by text, where
       ;; the runtime has none.
-      (tagcase (%macros:call-procedural style (extract p 2) (syn->datum s) made (extract p 5))
+      (tagcase (%macros:call-procedural style (extract p 2) (syn->datum s) (tag-of made)
+                                        (extract p 5))
         (ok d (opened (syn-of-datum d (new-source-key a made) (new-source-key b made) made)))
         (failed why (begin (in-use (string-append "its transformer: " why)) s))
         (apart u
@@ -783,13 +787,13 @@
            (set def-env-now (extract s 3)) (set marks (extract s 4))
            (set phase1-forms (extract s 5)))))
 ;; Where the macro each expansion's aliases are of was defined, by the
-;; expansion's number, the last first; a template's check is expansion 0
+;; expansion's tag (`tag-of`), the last first; a template's check's is `0`
 ;; (`macros.rs`'s `Withs::def_envs`). Given to the resolution after expansion
 ;; (`macros-shapes.fx`'s `aliases-resolved`), which another instance of the
 ;; expander's files reads.
 (define def-envs (ref def-envs rs) (new nil))
 (define def-env! (->* (int def-env) unit)
-  (lambda (k h) (set def-envs (cons (tuple k h) (get def-envs)))))
+  (lambda (k h) (set def-envs (cons (tuple (tag-of k) h) (get def-envs)))))
 (define def-envs-given (->* () def-envs) (lambda () (get def-envs)))
 ;; `s`, each part at `a`..`b` of expansion `x`: a hole's call, where the
 ;; template has the hole.

@@ -118,7 +118,7 @@
                (if (keyword? d) (keyword->symbol d) (pfail label-usage s)))
              (else x (pfail label-usage s)))))))
 (define label-usage string "a label is a keyword, a name or a natural number")
-;; Name `n`, a procedural macro's alias `%~N:x` its name `x`.
+;; Name `n`, a procedural macro's alias `%~K.N:x` its name `x`.
 (define label-name (->* (string) string)
   (lambda (n)
     (let ((c (if (and (> (string-length n) 2) (string=? (substring n 0 2) "%~"))
@@ -129,7 +129,9 @@
           n))))
 (define label-digits-end (->* (string int) int)
   (lambda (s i)
-    (if (and (< i (string-length s)) (char-numeric? (string-ref s i)))
+    (if (and (< i (string-length s))
+             (let ((c (string-ref s i)))
+               (or (char-numeric? c) (char=? c #\.) (char=? c #\-) (char=? c #\m))))
         (label-digits-end s (+ i 1))
         i)))
 

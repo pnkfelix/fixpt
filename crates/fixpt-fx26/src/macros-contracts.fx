@@ -17,6 +17,10 @@
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
+;; The names the expander makes fresh, and its expansions' tags: the one
+;; instance, which `macros-procedural.fx` and `macros.fx` take from here.
+(define fresh-module ((proj (load-module "fx26:macros-fresh.fx") rs re rm rc rp)))
+(import fresh-module tag-of)
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
         syn-expansion len nth (type syns-a names))
@@ -392,7 +396,7 @@
 ;; Output `out2`, the transformer's of the α-renamed use, held to output
 ;; `out`, its of the use: the same up to their binders' names; else refused
 ;; at use `s`, by `in-use`: a fresh name of `fresh`, or its alias of
-;; expansion `made` (`%~N:x′`), free in `out2`, placed outside its binder's
+;; expansion `made` (`%~K.N:x′`), free in `out2`, placed outside its binder's
 ;; scope; else a name read (`Macros::contract_expanded`).
 (define contract-held (->* (fails syn syn syn renames int sty) unit)
   (lambda (in-use s out out2 fresh made ty)
@@ -421,7 +425,7 @@
     (cond ((null? fresh) nil)
           ((or (symbol=? n (extract (car fresh) 1))
                (string=? (symbol->string n)
-                         (string-append "%~" (int->string made) ":"
+                         (string-append "%~" (tag-of made) ":"
                                         (symbol->string (extract (car fresh) 1)))))
            (list (extract (car fresh) 2)))
           (else (fresh-of n (cdr fresh) made)))))
@@ -453,14 +457,14 @@
 ;; expansion `made`, held to contract `sig` (`Macros::defined_held`):
 ;; definitions, aligned as a program's are, that define of the use's names
 ;; exactly those the contract says its uses define; any other name they
-;; define their own, an alias of the expansion (`%~N:x`). Refused at `out`.
+;; define their own, an alias of the expansion (`%~K.N:x`). Refused at `out`.
 (define defined-held (->* (fails sty syn syn int) unit)
   (lambda (fail sig operands out made)
     (let* ((said (contract-said fail sig operands))
            (ours (lambda ((m string) (a int) (b int))
                    (fail (string-append "its expansion: " m) a b)))
            (defines (expansion-defines ours out))
-           (own (string-append "%~" (int->string made) ":"))
+           (own (string-append "%~" (tag-of made) ":"))
            (extra (named-not-in defines said own))
            (missing (named-not-in said defines "")))
       (cond ((not (null? extra))

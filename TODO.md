@@ -7306,14 +7306,17 @@ and `do` written as a test, both checkers.
 ## 290. The expander's other program-wide numbers, for a form's expansion cached (Kayak's `INCR_IMPED.md`, 2026-11-16)
 
 Fresh names are numbered within each form (`typed-macros.md`, "Fresh
-names per form"). Still program-wide, and in a form's output: the
-expansions' numbers (in positions, and in aliases' names `%~N:x`) and the
-source keys (`source-base` and on). (The `mu` table, a signature's
-`mu`s by index into it, is gone: a `mu` is a value, its variable by de
-Bruijn's numbering, `typed-macros.md`, "Decided: `mu`s as values, no
-table".) And a
-session's texts placed one after another by length (`Session::eval_base`,
-its REPL's text one), where a module file's places are its own from its
-load's base, whatever the size of those before. Each, when a cache of
-Kayak's needs it.
+names per form"), and so are a procedural macro's aliases, `%~K.N:x`
+("Aliases per form"); the `mu` table is gone ("Decided: `mu`s as values,
+no table"). Still program-wide, and in a form's output, though nothing
+but provenance reads them now: the expansions' numbers (a syntax's
+`expansion`, `Span::expansion`, the register compiler's uses) and the
+source keys (`source-base` and on: a made part's place, the trusted uses).
+A cache keeps a form's share of each table and numbers it afresh where it
+replays, or a per-form provenance is designed (keys must nest, a list's
+around its parts', and tell apart what an ellipsis repeats), when Kayak's
+driver says which it needs. And a session's texts placed one after
+another by length (`Session::eval_base`, its REPL's text one), where a
+module file's places are its own from its load's base, whatever the size
+of those before. Each, when a cache of Kayak's needs it.
 

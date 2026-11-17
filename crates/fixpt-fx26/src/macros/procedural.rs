@@ -12,8 +12,9 @@
 //! the use's datum and gives one, made syntax at the use's place, with no
 //! text between (`heap_syn::syn_of_datum`, `copy_datum`).
 //!
-//! Hygiene is by aliases, one spelling for both systems: `%~N:x` is `x` as
-//! where the macro was defined, made by expansion `N`. An alias the expansion
+//! Hygiene is by aliases, one spelling for both systems: `%~K.N:x` is `x` as
+//! where the macro was defined, made by the `N`th expansion of the form of
+//! key `K` (`Macros::expansion_begun`). An alias the expansion
 //! binds is a name of its own, which nothing the use wrote can capture; one
 //! it leaves free is the top level's `x` (`#%toplevel:x`); one at a form's
 //! head that names a form, or as a label, or quoted, is `x`
@@ -156,14 +157,14 @@ pub(crate) fn with_forms_checked(forms: &[String]) -> Result<(), String> {
 /// of the phase-1 forms `forms` in force where it was defined: what it gave,
 /// copied into `heap` (`heap_syn::copy_datum`), no text between; or why
 /// not. Defined there if it is not, as in a session made since.
-pub(crate) fn apply_copied(style: Style, code: &str, forms: &[String], made: u32, heap: &mut fixpt_heap::Heap, v: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
+pub(crate) fn apply_copied(style: Style, code: &str, forms: &[String], tag: &str, heap: &mut fixpt_heap::Heap, v: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
     let out = with_session(forms, |rt, p| {
         let d = crate::heap_syn::copy_datum(heap, v, &mut rt.heap)?;
         let base = rt.heap.push_root(d);
         let g = p.transformer(rt, style.ty(), &key(style, code), &helpers(code));
         let d = rt.heap.root_at(base);
         rt.heap.pop_roots_to(base);
-        let out = crate::phase1::call_transformer(rt, p, &g?, style, d, made)?;
+        let out = crate::phase1::call_transformer(rt, p, &g?, style, d, tag)?;
         crate::heap_syn::copy_datum(&rt.heap, out, heap)
     });
     out
@@ -214,8 +215,14 @@ fn asked(request: &str) -> Result<String, String> {
     }
     let Some(rest) = request.strip_prefix("%apply ") else { return Err("not a transformer request".into()) };
     let (head, body) = rest.split_once('\n').ok_or("a malformed transformer request")?;
-    let mut words = head.split(' ').map(|w| w.parse::<usize>());
-    let (Some(Ok(style)), Some(Ok(made)), Some(Ok(length)), Some(Ok(n))) = (words.next(), words.next(), words.next(), words.next()) else {
+    // Its style, the expansion's tag (`K.N`), its code's length, how many
+    // phase-1 forms.
+    let mut words = head.split(' ');
+    let mut number = || words.next().map(|w| w.parse::<usize>());
+    let style = number();
+    let made = words.next().map(str::to_string);
+    let mut number = || words.next().map(|w| w.parse::<usize>());
+    let (Some(Ok(style)), Some(made), Some(Ok(length)), Some(Ok(n))) = (style, made, number(), number()) else {
         return Err("a malformed transformer request".into());
     };
     let (forms, body) = forms_of(n, body)?;
@@ -235,7 +242,7 @@ fn asked(request: &str) -> Result<String, String> {
         let g = p.transformer(rt, style.ty(), &key(style, code), &helpers(code));
         let d = rt.heap.root_at(base);
         rt.heap.pop_roots_to(base);
-        let out = crate::phase1::call_transformer(rt, p, &g?, style, d, made as u32)?;
+        let out = crate::phase1::call_transformer(rt, p, &g?, style, d, &made)?;
         Ok(fixpt_runtime::write_value(&rt.heap, out))
     })
 }
@@ -255,13 +262,13 @@ pub(crate) fn helpers(code: &str) -> String {
 
 
 /// `x`'s name as where its alias's macro was defined, if `x` is an alias:
-/// every `%~N:` taken off.
+/// every `%~K.N:` taken off.
 pub fn alias_base(x: &str) -> Option<&str> {
     let mut s = x;
     let mut any = false;
     while let Some(rest) = s.strip_prefix("%~") {
         let Some(c) = rest.find(':') else { break };
-        if c == 0 || !rest[..c].bytes().all(|b| b.is_ascii_digit()) {
+        if c == 0 || !rest[..c].bytes().all(tag_byte) {
             break;
         }
         s = &rest[c + 1..];
@@ -270,25 +277,33 @@ pub fn alias_base(x: &str) -> Option<&str> {
     any.then_some(s)
 }
 
-/// The expansion that made alias `x`, its outermost `%~N:`'s `N`.
-pub(crate) fn alias_made(x: &str) -> Option<u32> {
-    let rest = x.strip_prefix("%~")?;
-    rest[..rest.find(':')?].parse().ok()
+/// Whether `b` may be in an expansion's tag, `K.N` (`Macros::expansion_begun`):
+/// a form's key, `H`, `H-1` or `mH`, and a count.
+fn tag_byte(b: u8) -> bool {
+    b.is_ascii_digit() || matches!(b, b'.' | b'-' | b'm')
 }
 
-/// `x`'s alias, made by expansion `made`.
-pub(crate) fn alias(x: &str, made: u32) -> String {
-    format!("%~{made}:{x}")
+/// The tag of the expansion that made alias `x`, its outermost `%~T:`'s
+/// `T`.
+pub(crate) fn alias_made(x: &str) -> Option<&str> {
+    let rest = x.strip_prefix("%~")?;
+    let t = &rest[..rest.find(':')?];
+    (!t.is_empty() && t.bytes().all(tag_byte)).then_some(t)
+}
+
+/// `x`'s alias, made by the expansion of tag `tag`.
+pub(crate) fn alias(x: &str, tag: &str) -> String {
+    format!("%~{tag}:{x}")
 }
 
 /// What a syntactic-closure transformer gave, `s`, its closures opened: in
 /// environment `macro_env` (else the use's), each name an alias (expansion
-/// `made`'s) or as written; a closure's form in its own environment, its
+/// of tag `tag`) or as written; a closure's form in its own environment, its
 /// free names in the one around it; a quoted datum as it is.
-pub(crate) fn closed(s: &Syn, macro_env: bool, made: u32, interner: &mut Interner) -> R<Syn> {
+pub(crate) fn closed(s: &Syn, macro_env: bool, tag: &str, interner: &mut Interner) -> R<Syn> {
     match &s.view() {
         V::Symbol(x) if macro_env => {
-            let n = alias(interner.name(*x), made);
+            let n = alias(interner.name(*x), tag);
             Ok(Syn::named(s.at(), &n, interner))
         }
         V::List { items, tail } => {
@@ -309,11 +324,11 @@ pub(crate) fn closed(s: &Syn, macro_env: bool, made: u32, interner: &mut Interne
                     V::Nil => Vec::new(),
                     _ => free.list().and_then(|l| l.iter().map(|x| x.sym()).collect()).ok_or_else(|| FxError::at(free.at(), "a syntactic closure's free names are a list of names"))?,
                 };
-                return opened(form, inner, macro_env, &free, made, interner);
+                return opened(form, inner, macro_env, &free, tag, interner);
             }
-            let items = items.iter().map(|i| closed(i, macro_env, made, interner)).collect::<R<Vec<_>>>()?;
+            let items = items.iter().map(|i| closed(i, macro_env, tag, interner)).collect::<R<Vec<_>>>()?;
             let tail = match tail {
-                Some(t) => Some(closed(t, macro_env, made, interner)?),
+                Some(t) => Some(closed(t, macro_env, tag, interner)?),
                 None => None,
             };
             Ok(Syn::of_list(s.at(), &items, tail))
@@ -324,18 +339,18 @@ pub(crate) fn closed(s: &Syn, macro_env: bool, made: u32, interner: &mut Interne
 
 /// A closure's form, `s`, closed in environment `inner`, its `free` names
 /// in `outer`.
-fn opened(s: &Syn, inner: bool, outer: bool, free: &[Sym], made: u32, interner: &mut Interner) -> R<Syn> {
+fn opened(s: &Syn, inner: bool, outer: bool, free: &[Sym], tag: &str, interner: &mut Interner) -> R<Syn> {
     match &s.view() {
-        V::Symbol(x) if free.contains(x) => closed(s, outer, made, interner),
-        V::Symbol(_) => closed(s, inner, made, interner),
+        V::Symbol(x) if free.contains(x) => closed(s, outer, tag, interner),
+        V::Symbol(_) => closed(s, inner, tag, interner),
         V::List { items, tail } => {
             let head = items.first().and_then(|h| h.sym()).map(|h| interner.name(h).to_string());
             if matches!(head.as_deref(), Some("quote") | Some(CLOSURE)) {
-                return closed(s, inner, made, interner);
+                return closed(s, inner, tag, interner);
             }
-            let items = items.iter().map(|i| opened(i, inner, outer, free, made, interner)).collect::<R<Vec<_>>>()?;
+            let items = items.iter().map(|i| opened(i, inner, outer, free, tag, interner)).collect::<R<Vec<_>>>()?;
             let tail = match tail {
-                Some(t) => Some(opened(t, inner, outer, free, made, interner)?),
+                Some(t) => Some(opened(t, inner, outer, free, tag, interner)?),
                 None => None,
             };
             Ok(Syn::of_list(s.at(), &items, tail))
@@ -401,7 +416,9 @@ mod tests {
         assert_eq!(alias_base("let"), None);
         assert_eq!(alias_base("%x:3"), None);
         assert_eq!(alias_base("%~:x"), None);
-        assert_eq!(alias_made("%~7:%~3:x"), Some(7));
+        assert_eq!(alias_made("%~7:%~3:x"), Some("7"));
+        assert_eq!(alias_base("%~m12-1.4:%~5.2:x"), Some("x"));
+        assert_eq!(alias_made("%~m12-1.4:%~5.2:x"), Some("m12-1.4"));
         assert_eq!(alias_made("x"), None);
     }
 }

@@ -2833,3 +2833,45 @@ inferred is shown, and the text read back, so no tag outlives its round.
 FX-26's `macros-types.fx` gave its syntax helpers and names
 (`syn-nil?`, `split`, `show-syn`, `reserved?`, …) to a file of their own,
 `macros-syntax.fx`, which it loads and re-exports, for room.
+
+## Aliases per form (2026-11-16)
+
+A procedural macro's names are aliases, `%~N:x`: `x` as where its macro
+was defined, made by expansion `N`, the session's count of every macro's
+use (in the Rust front end, the process's). An alias that a definition
+binds at the top level is a global's name, so the program the checker
+and the compiler saw depended on how many expansions the forms before it
+made, as fresh names did before "Fresh names per form"; and hygiene found
+the macro's definition environment by `N`.
+
+Now an expansion has a tag, `K.N`: its form's key and how many expansions
+of that form came before it and it, counted apart from the fresh names
+(`Macros::expansion_begun`; FX-26's `expansion-begun!`, `macros-fresh.fx`),
+saved and put back around a module file's own forms as the names' count
+is. Its aliases are `%~K.N:x`, and the definition environments are by tag
+(`Withs::def_envs`; `def-envs`); a template's check's tag is `0`. The tag
+reaches the transformer's runtime, which ER's `rename` spells with
+(`%er-renamer`, given a symbol; `%macros:call-procedural` and the
+`%apply` request, a string), so one spelling is made in one place for
+each. An alias is read as one by its prefix, `%~T:`, `T` of digits, `.`,
+`-` and `m` (`procedural::alias_base`; FX-26's alike in each reader of
+them). The two front ends now spell an alias alike, so `macros_both.rs`
+compares procedural programs as they are, no longer with the numbers taken
+out (`repl_macros.rs`, `a_procedural_macros_alias_is_of_its_form`).
+
+The expansion's number stays, for provenance alone: which use made a part
+(`Span::expansion`, a syntax's `expansion`), what is said of an error in
+it, and the register compiler's record of uses; so do the source keys,
+made parts' places. TODO §290 says what a cache does with them.
+
+Found doing it, and fixed: FX-26's expander files are more than one
+instance, and modules share an instance only as they are handed one
+(`with`). `macros-shapes.fx` (another instance, as `def-envs` is handed to
+its `aliases-resolved` already) loaded `macros-fresh.fx` itself, so the
+captors it renamed (`%x~K.N`, "Fresh names per form") were spelled from an
+instance no form began: `%x~.N`, counted across the program, unique but
+not of the form. Now `aliases-resolved` is handed the expander's
+`captor-tag`; and the one instance of `macros-fresh.fx` is made by
+`macros-contracts.fx`, which `macros-procedural.fx`, `macros.fx` and the
+parser take it from.
+
