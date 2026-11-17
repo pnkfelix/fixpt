@@ -616,7 +616,7 @@
         ;; shadow it; a module's, the top level's.
         ((string=? head "globals") (desc-values fail ps (cdr kids) 2))
         ((string=? head "select")
-         (desc-values fail ps (if (null? (cdr kids)) nil (list (kid kids 1))) 1))
+         (if (null? (cdr kids)) #u (select-path fail ps (kid kids 1) (nth items 1))))
         ;; A file's module type, given descriptions and module values, which
         ;; a name alone does not tell apart: the checker decides by what
         ;; binds it, so a program's walk leaves the names unplaced.
@@ -940,6 +940,18 @@
                                         (k-ref (syn-symbol s) #f free)))
                 (desc-values fail ps (cdr ks) free))
               (fail-at fail "a name" s))))))
+;; A `select`'s module at node `at`: a name, as `desc-values` reads one, or a
+;; path to a module, `(with m x)`, its base `m` read as a `select`'s module
+;; is and `x` the label of a value of it (`macros.rs`'s `select_path`).
+(define select-path (->* (fails pvars int syn) unit)
+  (lambda (fail ps at s)
+    (if (syn-symbol? s)
+        (desc-values fail ps (list at) 1)
+        (let ((items (proper-items s)))
+          (if (and (= (len items) 3) (syn-symbol? (car items))
+                   (string=? (syn-name (car items)) "with") (syn-symbol? (nth items 2)))
+              (select-path fail ps (kid (desc-kids at items) 1) (nth items 1))
+              (fail-at fail "a module's name, or a path to one, `(with module name)`" s))))))
 ;; The binders of the `poly`s at the top of the description at node `at`,
 ;; outermost first (`Checker::bind_signature`'s).
 (define poly-binders (->* (int pvars) atms)

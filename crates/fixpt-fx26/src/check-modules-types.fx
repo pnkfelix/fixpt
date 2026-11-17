@@ -14,6 +14,7 @@
 ;; Abstract types `abs` renamed for a binding, each `prefix` and its name:
 ;; the new ones, and what each old one becomes.
 (define-type k-renamed (productof (1 k-parts) (2 k-map)))
+(import check-types-types (type k-anchors k-anchor-paths k-path-at))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -119,6 +120,16 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int)
                        bool))
+            (val k-with-anchored
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-ids) k-ids))
+            (val k-module-path-type
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (kx)
+                       k-path-at))
+            (val k-kept-here
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-path-at)
+                       int))
             (val k-the-sealed
                  (subr (maxeff checks spin)
                        (kx int (subr (maxeff checks spin) (kx) k-te)

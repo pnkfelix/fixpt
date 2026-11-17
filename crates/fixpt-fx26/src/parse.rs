@@ -658,10 +658,10 @@ impl Checker {
         // is in is checked, as a type's `select` is (`resolve_selects`).
         if self.head(&items) == Some("select") {
             let [_, m, e] = &items[..] else {
-                return Err(FxError::at(s.span(), "`(select module name)`: a module's name, and a component's"));
+                return Err(FxError::at(s.span(), "`(select module name)`: a module's name, or a path to one, and a component's"));
             };
-            let (Some(m), Some(e)) = (m.sym(), e.sym()) else {
-                return Err(FxError::at(s.span(), "`(select module name)`: a module's name, and a component's"));
+            let (Some(m), Some(e)) = (self.selected_module(m)?, e.sym()) else {
+                return Err(FxError::at(s.span(), "`(select module name)`: a module's name, or a path to one, and a component's"));
             };
             // `(select #%toplevel:m e)`: the top level's `m`'s, found here.
             if let Some(p) = self.toplevel_unqualified(m) {
@@ -1308,10 +1308,19 @@ impl Checker {
         let [_, m, n] = &items[..] else {
             return Err(FxError::at(s.span(), "`(select module name)`"));
         };
-        let (Some(m), Some(n)) = (m.sym(), n.sym()) else {
-            return Err(FxError::at(s.span(), "`(select module name)`: a module's name, and a component's"));
+        let (Some(m), Some(n)) = (self.selected_module(m)?, n.sym()) else {
+            return Err(FxError::at(s.span(), "`(select module name)`: a module's name, or a path to one, and a component's"));
         };
         self.select_of(m, n, s.span())
+    }
+
+    /// The module a `select` names: a variable, or a path's name
+    /// (`module_named`).
+    pub(crate) fn selected_module(&mut self, m: &Syn) -> R<Option<Sym>> {
+        match m.sym() {
+            Some(m) => Ok(Some(m)),
+            None => self.module_named(m),
+        }
     }
 
     /// `(arrayof …)`, of `parse_type_list_found`.
@@ -2582,12 +2591,25 @@ impl Checker {
         self.parse_loaded(span, key, path)
     }
 
-    /// `(with …)`, of `parse_exp`.
+    /// `(with …)`, of `parse_exp`. Its module a variable, or a path to a
+    /// module, `(with m x)`: a `let` of it, its binder `%with:(with m x)`,
+    /// around the `with` of that, the binding keeping the path's types
+    /// (`Checker::module_path_type`).
     fn parse_with_form(&mut self, span: fixpt_read::Span, items: &[Syn]) -> R<ExpId> {
         let [_, m, body @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(with module body …)`"));
         };
-        let module = m.sym().ok_or_else(|| FxError::at(m.span(), "`with` opens a module named by a variable"))?;
+        let path = match m.sym() {
+            Some(_) => None,
+            None => match self.module_named(m)? {
+                Some(p) => Some(p),
+                None => return Err(FxError::at(m.span(), "`with` opens a module named by a variable, or by a path to one, `(with module name)`")),
+            },
+        };
+        let module = match path {
+            Some(p) => self.interner.intern(&format!("%with:{}", self.path_shown(p))),
+            None => m.sym().expect("a name"),
+        };
         let (shape, body) = self.written_shape(body)?;
         let (body, past) = self.with_types_of(module, shape.clone().flatten(), |p| p.parse_body(span, body))?;
         let e = self.arena.exp(span, Exp::With { module, body });
@@ -2595,7 +2617,49 @@ impl Checker {
             self.arena.withs.opened.insert(e, s);
         }
         self.arena.withs.read_past.insert(e, past);
-        Ok(e)
+        if path.is_none() {
+            return Ok(e);
+        }
+        let init = self.parse_exp_syn(m)?;
+        Ok(self.arena.exp(span, Exp::Let { bindings: vec![(module, init)], body: e }))
+    }
+
+    /// A module named by a path, `(with m x)`, `m` a variable or a path,
+    /// `x` a value of it: the path's own name, `%path:(with m x)`, kept
+    /// with its parts (`WithTables::paths`); none if `s` is a variable or
+    /// no path. A path's every module is a value bound once, so each is
+    /// the same module wherever the path is read in its base's scope.
+    pub(crate) fn module_named(&mut self, s: &Syn) -> R<Option<Sym>> {
+        let Some(items) = s.list() else { return Ok(None) };
+        let [h, m, rest @ ..] = &items[..] else { return Ok(None) };
+        if !h.sym().is_some_and(|h| self.name(h) == "with") {
+            return Ok(None);
+        }
+        // The expander's record of what the path's module gives
+        // (`#:relied`): held where the path is read, which says if the
+        // module gives `x`.
+        let (_, rest) = self.written_shape(rest)?;
+        let [x] = rest else { return Ok(None) };
+        let Some(x) = x.sym() else { return Ok(None) };
+        let m = match m.sym() {
+            Some(m) if matches!(self.name(m), "#%fx" | "#%toplevel") => return Ok(None),
+            Some(m) => m,
+            None => match self.module_named(m)? {
+                Some(p) => p,
+                None => return Ok(None),
+            },
+        };
+        let shown = format!("(with {} {})", self.path_shown(m), self.name(x));
+        let p = self.interner.intern(&format!("%path:{shown}"));
+        self.arena.withs.paths.insert(p, (m, x));
+        Ok(Some(p))
+    }
+
+    /// A module's name as written: a path's `(with m x)`, a variable's
+    /// itself.
+    pub(crate) fn path_shown(&self, m: Sym) -> String {
+        let n = self.name(m);
+        n.strip_prefix("%path:").or_else(|| n.strip_prefix("%with:")).unwrap_or(n).to_string()
     }
 
     /// Whether `f` is `(include m)`, its shape written or not.

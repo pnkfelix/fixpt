@@ -334,7 +334,7 @@
   (lambda (vs inner a b)
     (if (null? vs)
         #u
-        (let ((v (k-first-mentioned (extract (car vs) 2) inner)))
+        (let ((v (k-first-mentioned (extract (car vs) 2) (k-with-anchored inner))))
           (if (< v 0)
               (k-vals-known (cdr vs) inner a b)
               (k-fail (k-cat5 "`" (symbol->string (extract (car vs) 1)) "`'s type mentions `"

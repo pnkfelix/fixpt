@@ -196,7 +196,7 @@
                                (read @t)
                                (write @t)
                                spin)
-                       (syn k-syns)
+                       (symbol syn k-syns)
                        (listof k-eff acyclic)))
             (val k-globals-region
                  (subr (maxeff (alloc @t)

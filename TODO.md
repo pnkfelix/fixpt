@@ -7344,11 +7344,22 @@ wait, each a change of the language to discuss first:
 - **Module paths.** For a module file to import an instance's macros and
   give them on, a template must reach the instance through the file:
   `(with (with mid lib) x)`, `(select (with mid lib) T)`. `with` and
-  `select` take a variable, and an alias, `(define %inst lib)`, would name
-  the instance's abstract types for itself (`%inst..t`). A path whose
-  abstract types are the instance's (`mid.lib.t`) is what is missing; then
-  a module file's import of an instance, whose values' `include` would be
-  of an item, needs its own form too.
+  `select` took a variable, and an alias, `(define %inst lib)`, would name
+  the instance's abstract types for itself (`%inst..t`). Done 2026-11-17
+  (the user's go-ahead): paths in `with` and `select`, their abstract
+  types their base's (`mid.lib..t`), kept by a `let` or `define` of a path
+  (`docs/fx26.md`, "A *path* to a module"). Left: a template's `with`
+  takes a module's name alone (`Aligner`'s template `with`;
+  `macros.fx`'s), and a module file's import of an instance, whose
+  values' `include` would be of an item, needs its own form; then the
+  re-export. And `fixpt verify` has no rule for a path: a value a path
+  reaches is, to the checkers, of the path's types (`mid.a..t`), and to
+  the verifier of the module's own abstract `t`, so it refuses such words
+  (`typed_cells.rs`'s `KNOWN_GAPS`: `modules/path-with.fx`,
+  `path-deep.fx`); it never takes one wrongly. Its rule would be the
+  checkers': a value that is a binding's component, by its term (`(field k
+  b)` of the slot or global the binding is), at the binding's names for
+  it.
 - **A module item's label apart from its binder**, as a `moduleof`'s `abs`
   and `desc` items have (`(abs #:t u type)`): `(define #:limit %limit~… 3)`.
   With it, a captor that is a `module`'s item could be renamed and keep

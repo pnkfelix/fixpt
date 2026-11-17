@@ -171,6 +171,20 @@
   ;; `false`: `#f` alone, below `bool`, of `bool`'s shape.
   (ty-false))
 (define-type k-map (listof (pairof int k-desc @t) acyclic))
+;; A module path's module and the value of it taken; each path's, by its
+;; name (`check-read-helpers.fx`'s `k-module-paths`).
+(define-type k-sym-pair (pairof symbol symbol @t))
+(define-type k-path-entries (listof (pairof symbol k-sym-pair @t) acyclic))
+;; Each binding's module type that holds a module with abstract types, and
+;; each a path bound reaches: the type, the binding's anchor, the path, the
+;; binding's depth (`check-modules.fx`'s `k-name-module`, `k-kept-here`).
+(define-type k-anchors (listof (productof (1 int) (2 int) (3 string) (4 int)) acyclic))
+;; A path's module type (-1 if none), and the anchor its paths read on from
+;; (-1 if none) and its path (`k-module-path-type`).
+(define-type k-path-at (productof (1 int) (2 int) (3 string)))
+;; The abstract types of each module a path from a binding reaches, by the
+;; binding's anchor and the path.
+(define-type k-anchor-paths (listof (productof (1 int) (2 string) (3 k-parts)) acyclic))
 ;; What a description name means where it is used.
 (define-datatype k-ds
   ;; A name `define-generative` bound: the `n`th generative type.
@@ -377,6 +391,8 @@
    (val k-io-wider (subr pure (int) int))
    (val k-io-kinds-shown string)
    (val k-ty-new
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-ty) int))
+   (val k-ty-push
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-ty) int))
    (val k-string-as-named (subr pure (k-ty k-ty) k-ty))
    (val k-certified (ref (listof (pairof symbol int @t) acyclic) @t))

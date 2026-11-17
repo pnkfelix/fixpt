@@ -208,14 +208,78 @@
   (lambda (b) (k-dvar-name (extract b 1))))
 (define k-binder-names (->* (k-binders) k-names)
   (lambda (bs) (if (null? bs) nil (cons (k-binder-name (car bs)) (k-binder-names (cdr bs))))))
-;; `(select m t)`: as written, for checking to resolve where `m` is bound.
+;; `(select m t)`: as written, for checking to resolve where `m` is bound;
+;; `m` a variable, or a path to a module (`k-module-named`).
 (define k-parse-select (->* (syn k-syns) int)
   (lambda (s items)
-    (cond ((not (= (k-length items) 3)) (k-sfail "`(select module name)`" s))
-          ((and (syn-symbol? (k-nth items 1)) (syn-symbol? (k-nth items 2)))
-           (k-ty-new (ty-select (k-toplevel-qualified (syn-head (k-nth items 1)))
-                                (syn-head (k-nth items 2)))))
-          (else (k-sfail "`(select module name)`: a module's name, and a component's" s)))))
+    (let ((m (if (= (k-length items) 3) (k-selected-module (k-nth items 1)) '||)))
+      (cond ((not (= (k-length items) 3)) (k-sfail "`(select module name)`" s))
+            ((and (not (symbol=? m '||)) (syn-symbol? (k-nth items 2)))
+             (k-ty-new (ty-select m (syn-head (k-nth items 2)))))
+            (else (k-sfail k-select-usage s))))))
+(define k-select-usage string
+  "`(select module name)`: a module's name, or a path to one, and a component's")
+;; The module a `select` names: a variable, or a path's name
+;; (`k-module-named`); `||` if neither.
+(define k-selected-module (->* (syn) symbol)
+  (lambda (m) (if (syn-symbol? m) (k-toplevel-qualified (syn-head m)) (k-module-named m))))
+;; Each module path a `select` names, by the name it is given,
+;; `%path:(with m x)`: its module and the value of it taken.
+(define k-select-paths (ref k-path-entries @t) (new nil))
+;; The module and value of path `p`, in a list; none if `p` is no path.
+(define k-module-path-of (->* (symbol) (listof k-sym-pair acyclic))
+  (lambda (p) (k-select-path-find (get k-select-paths) p)))
+(define k-select-path-find (->* (k-path-entries symbol) (listof k-sym-pair acyclic))
+  (lambda (es p)
+    (cond ((null? es) nil)
+          ((symbol=? (car (car es)) p) (list (cdr (car es))))
+          (else (k-select-path-find (cdr es) p)))))
+;; A module's name as written: a path's `(with m x)`, a variable's itself.
+(define k-module-path-shown (->* (symbol) string)
+  (lambda (m)
+    (let ((n (symbol->string m)))
+      (if (and (> (string-length n) 6)
+               (or (string=? (substring n 0 6) "%path:") (string=? (substring n 0 6) "%with:")))
+          (substring n 6 (string-length n))
+          n))))
+;; A module named by a path, `(with m x)`, `m` a variable or a path, `x` a
+;; value of it: the path's own name, `%path:(with m x)`, kept with its parts
+;; (`k-select-paths`); `||` if `s` is no path. A path's every module is a value
+;; bound once, so each is the same module wherever the path is read in its
+;; base's scope. As the Rust parser's `module_named`.
+(define k-module-named (->* (syn) symbol)
+  (lambda (s)
+    (tagcase s
+      (lst (xs d a b x)
+        (let ((items (k-unrelied xs)))
+          (if (and (= (k-length items) 3) (syn-symbol? (car items))
+                   (string=? (syn-name (car items)) "with") (syn-symbol? (k-nth items 2)))
+              (let* ((m0 (k-nth items 1)) (n0 (if (syn-symbol? m0) (syn-name m0) ""))
+                     (m (cond ((or (string=? n0 "#%fx") (string=? n0 "#%toplevel")) '||)
+                              ((syn-symbol? m0) (syn-head m0))
+                              (else (k-module-named m0)))))
+                (if (symbol=? m '||)
+                    '||
+                    (let* ((x (syn-head (k-nth items 2)))
+                           (p (string->symbol (k-cat5 "%path:(with " (k-module-path-shown m) " "
+                                                      (symbol->string x) ")"))))
+                      (begin (if (null? (k-module-path-of p))
+                                 (set k-select-paths
+                                      (cons (cons p (cons m x)) (get k-select-paths)))
+                                 #u)
+                             p))))
+              '||)))
+      (else y '||))))
+;; A `with`'s items without the record the expander wrote after its module
+;; (`#:relied S`).
+(define k-unrelied (->* (k-syns) k-syns)
+  (lambda (items)
+    (if (and (= (k-length items) 5)
+             (tagcase (k-nth items 2)
+               (atom (d a b x) (and (keyword? d) (symbol=? (keyword->symbol d) 'relied)))
+               (else y #f)))
+        (cons (car items) (cons (k-nth items 1) (cdr (cdr (cdr (cdr items))))))
+        items)))
 ;; Function `f`, given `have` descriptions at `s`, where it takes `want`.
 (define k-arity-fail (->* (int int int syn) void)
   (lambda (f want have s) (k-sfail (k-fun-arity-message f want have) s)))

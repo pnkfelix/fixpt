@@ -469,11 +469,17 @@ impl Checker {
             if self.is_lambda(*init) {
                 self.known.insert((*n, base + i));
             }
-            bound.push((*n, t));
+            // A path to a module keeps the path's types (`module_path_type`).
+            bound.push((*n, t, self.module_path_type(*init)));
         }
         let depth = self.env.len();
         let named = self.skolems.len();
-        for ((n, t), (_, init)) in bound.into_iter().zip(bindings.iter()) {
+        for ((n, t, kept), (_, init)) in bound.into_iter().zip(bindings.iter()) {
+            if let Some((k, at)) = kept {
+                let k = self.kept_here(k, at);
+                self.env.push((n, k));
+                continue;
+            }
             let opened_from = self.skolems.len();
             let opened = self.name_nat(n, t);
             if self.record_types && opened != t {

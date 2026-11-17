@@ -98,6 +98,14 @@ Sheldon allows any expression whose effect has no reads in a select, and
 compares them as text. Paths alone are the first stage; general pure
 expressions, `((f 2) .. t)`, wait for a need.
 
+(2026-11-17, built: a variable alone at first; now a path, written
+`(with p n)` as the expression that reaches it is, in `with` and
+`select`. Each module a binding holds is named for it, `m.n..t`, when a
+path first reads it, and only for that binding; a `let` or `define` of a path keeps the path's types, ML's
+strengthening, where Sheldon's `let` rule had made every `let`-bound
+module opaque; a binding of anything else is opaque still. `docs/fx26.md`,
+"A *path* to a module".)
+
 ### Dependent subroutines: functors
 
 A parameter's type may mention an earlier parameter, and the result may

@@ -82,6 +82,10 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-bindings)
                        unit))
+            (val k-bind-lets
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-bindings k-let-bs)
+                       unit))
             (val k-naming-effect
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (symbol int)

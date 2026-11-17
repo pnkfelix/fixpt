@@ -1,0 +1,11 @@
+;; ! argument 1 is a m..t, where a counter..t is expected
+;; A `let`-bound module is opaque, its type its own (Sheldon, LFP90
+;; §2.1.4), where what it is bound to is no path to a module: `m` may be
+;; `counter`, but nothing the checker reads says so.
+(define counter
+  (module
+    (define-generative t int #:seal up-t #:unseal down-t)
+    (define zero t (up-t 0))
+    (define inc (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))
+    (define value (subr pure (t) int) (lambda (c) (down-t c)))))
+(let ((m (if #t counter counter))) ((with counter value) (with m zero)))

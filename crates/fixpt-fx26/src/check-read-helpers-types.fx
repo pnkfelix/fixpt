@@ -27,6 +27,7 @@
         (kx int)
         k-te))
 (define-type k-size (select check-types-types k-size))
+(import check-types-types (type k-sym-pair k-path-entries))
 (define-type check-read-helpers-sig
   (moduleof (val k-lam
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -304,4 +305,15 @@
                  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
                                spin)
                        (syn k-syns)
-                       k-eff))))
+                       k-eff))
+            (val k-select-paths (ref k-path-entries @t))
+            (val k-module-path-of
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (symbol)
+                       (listof k-sym-pair acyclic)))
+            (val k-module-path-shown
+                 (subr (maxeff (alloc @t) (read @globals) spin) (symbol) string))
+            (val k-selected-module
+                 (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) (write @t) spin)
+                       (syn)
+                       symbol))))

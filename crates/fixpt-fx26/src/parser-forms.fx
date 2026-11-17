@@ -607,6 +607,42 @@
 (define relied-usage string
   (string-append "a module's shape: `((value …) (description …))`, "
                  "the names it gives that the program asked of it"))
+;; The module a `with` opens, `s`: a variable, or a path to a module
+;; (`path-written`), the binder of the `let` of it around the `with`,
+;; `%with:(with m x)`; a failure if neither (`parse_with_form`).
+(define with-module (->* (fails syn) symbol)
+  (lambda (fail s)
+    (let ((p (path-written s)))
+      (cond ((not (string=? p "")) (string->symbol (string-append "%with:" p)))
+            ((syn-symbol? s) (syn-head s))
+            (else (begin (fail-at-syn fail (string-append "`with` opens a module named by a "
+                                                          "variable, or by a path to one, "
+                                                          "`(with module name)`")
+                                      s)
+                         '||))))))
+;; A path to a module, `(with m x)`, `m` a variable or a path, `x` a value
+;; of it, as written, the expander's records in it left out (`#:relied`);
+;; "" if `s` is no path (`parse.rs`'s `module_named`).
+(define path-written (->* (syn) string)
+  (lambda (s)
+    (tagcase s
+      (lst (xs d a b xpn)
+        (let ((items (if (and (= (len xs) 5) (relied-word? (nth xs 2)))
+                         (cons (car xs) (cons (nth xs 1) (drop xs 4)))
+                         xs)))
+          (if (and (= (len items) 3) (string=? (syn-name (car items)) "with")
+                   (syn-symbol? (nth items 2)))
+              (let* ((m (nth items 1)) (n (syn-name m))
+                     (base (cond ((or (string=? n "#%fx") (string=? n "#%toplevel")) "")
+                                 ((syn-symbol? m) n)
+                                 (else (path-written m)))))
+                (if (string=? base "")
+                    ""
+                    (string-append (string-append "(with " base)
+                                   (string-append " " (string-append (syn-name (nth items 2))
+                                                                     ")")))))
+              "")))
+      (else y ""))))
 (define relied-word? (->* (syn) bool)
   (lambda (s)
     (tagcase s

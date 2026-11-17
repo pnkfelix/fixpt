@@ -151,30 +151,244 @@
 ;; Parts `ps`, each type with `m` for its binders.
 (define k-subst-each (->* (k-parts k-map) k-parts) (lambda (ps m) (k-subst-all ps m)))
 ;; A module's type, bound to `name`: its abstract types renamed for this
-;; binding, each `name..t`, kept until the binding's scope ends. Any other
-;; type as it is; and a hidden item's (`%extend-0`, …), the module's own
-;; making, whose module keeps the names it has (`TODO.md` §69).
+;; binding, each `name..t`, kept until the binding's scope ends; and, if it
+;; holds a module that has abstract types, an anchor for the binding
+;; (`k-module-anchors`), which the names of those a path reaches are made
+;; for when it is read (`k-component`). Any other type as it is; and a
+;; hidden item's (`%extend-0`, …), the module's own making, whose module
+;; keeps the names it has (`TODO.md` §69).
 (define k-name-module (->* (symbol int) int)
   (lambda (name t)
     (tagcase (k-get (k-resolve t))
       (ty-module (abs ds vs)
-        (let ((n (k-binding-shown name)))
-          (if (or (null? abs) (string=? (substring n 0 1) "%"))
+        (let ((n (k-binding-shown name)) (holds (k-holds-abstract? vs)))
+          (if (or (string=? (substring n 0 1) "%") (and (null? abs) (not holds)))
             t
+            ;; Of no other binding, whatever it is made of (`k-ty-push`, not
+            ;; interned): its anchor is its own (`k-anchor!`).
             (let* ((r (k-rename-abs (string-append n "..") abs))
-                   (ds2 (k-subst-each ds (extract r 2)))
-                   (vs2 (k-subst-each vs (extract r 2))))
-              (k-ty-new (ty-module (extract r 1) ds2 vs2))))))
+                   (named (k-ty-push (ty-module (extract r 1) (k-subst-each ds (extract r 2))
+                                                (k-subst-each vs (extract r 2))))))
+              (begin
+                (if holds
+                    ;; Bound as long as the binding, as its own names are.
+                    ;; The binding about to be made, at `k-depth`, as each
+                    ;; caller makes it.
+                    (let ((anchor (k-new-dvar-of (string->symbol n) 2)))
+                      (begin (set k-skolems (cons anchor (get k-skolems)))
+                             (set k-module-vars (cons anchor (get k-module-vars)))
+                             (k-anchor! named anchor n)))
+                    #u)
+                named)))))
       (else y t))))
+(define k-anchor! (->* (int int string) unit)
+  (lambda (t anchor path)
+    (set k-module-anchors
+         (cons (product (1 t) (2 anchor) (3 path) (4 (get k-depth))) (get k-module-anchors)))))
+;; Type `t`'s entry of `k-module-anchors`, in a list; none if it has none.
+(define k-anchor-of (->* (int) k-anchors)
+  (lambda (t) (k-anchor-find (get k-module-anchors) t)))
+(define k-anchor-find (->* (k-anchors int) k-anchors)
+  (lambda (es t)
+    (cond ((null? es) nil)
+          ((= (extract (car es) 1) t) (list (car es)))
+          (else (k-anchor-find (cdr es) t)))))
+;; The variables a path from the binding of one of the anchors among `vs`
+;; was read at: bound as long as it, though made later (`k-component`).
+(define k-anchored (->* (k-ids) k-ids)
+  (lambda (vs) (k-anchored-in (get k-module-paths) vs)))
+(define k-anchored-in (->* (k-anchor-paths k-ids) k-ids)
+  (lambda (ps vs)
+    (cond ((null? ps) nil)
+          ((k-has-id? vs (extract (car ps) 1))
+           (append (k-part-vars (extract (car ps) 3)) (k-anchored-in (cdr ps) vs)))
+          (else (k-anchored-in (cdr ps) vs)))))
+(define k-part-vars (->* (k-parts) k-ids)
+  (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 2) (k-part-vars (cdr ps))))))
+;; `vs` and the variables of paths from the anchors among them.
+(define k-with-anchored (->* (k-ids) k-ids)
+  (lambda (vs) (append vs (k-anchored vs))))
+;; Whether a value of `vs` is a module that has abstract types, or holds one
+;; that has: each type looked at once, however many paths lead to it.
+(define k-holds-abstract? (->* (k-parts) bool)
+  (lambda (vs)
+    (let* ((seen (k-new-seen)) (r (k-abstract-within? vs seen)))
+      (begin (k-seen-done! seen) r))))
+(define k-abstract-within? (->* (k-parts k-seen) bool)
+  (lambda (vs seen)
+    (and (not (null? vs))
+         (or (let ((t (k-resolve (extract (car vs) 2))))
+               (and (not (k-seen? seen t))
+                    (tagcase (k-get t)
+                      (ty-module (abs ds ws) (or (not (null? abs)) (k-abstract-within? ws seen)))
+                      (else y #f))))
+             (k-abstract-within? (cdr vs) seen)))))
+;; Variable `w` as a description: a type, or a description function.
+(define k-var-desc (->* (int) k-desc)
+  (lambda (w) (if (= (k-dvar-kind w) 2) (dt (k-ty-new (ty-var w))) (df (k-ty-new (ty-var w))))))
+;; What a binding of `x` keeps, if `x` is a path to a module, a variable
+;; bound to one or `(with p y)` of a path `p` (as the parser makes one,
+;; `(let ((%with:p p)) (with %with:p y))` for a longer): its type with its
+;; abstract types the ones the path's base was bound with (`m..t`,
+;; `m.y..t`), transparent, so that the binding names the same types the path
+;; does; with the anchor its paths read on from, if any, for the binding made
+;; of it (`k-kept-here`). Its type -1 for anything else, which a binding
+;; names for itself (`k-name-module`). As the Rust checker's
+;; `module_path_type`.
+(define k-module-path-type (->* (kx) k-path-at)
+  (lambda (x)
+    (tagcase x
+      (x-var (m a b k kr) (k-module-path-base m))
+      (x-with (m body a b k kr) (k-module-path-step (k-module-path-base m) body))
+      (x-let (bs body a b k kr)
+        (if (and (not (null? bs)) (null? (cdr bs)))
+            (tagcase body
+              (x-with (m w a2 b2 k2 kr2)
+                (if (symbol=? m (extract (car bs) 1))
+                    (k-module-path-step (k-module-path-type (extract (car bs) 2)) w)
+                    k-no-path))
+              (else y k-no-path))
+            k-no-path))
+      (else y k-no-path))))
+(define k-no-path k-path-at (product (1 -1) (2 -1) (3 "")))
+;; Value `body` names of the module `p` reaches, as `k-component` reaches it.
+(define k-module-path-step (->* (k-path-at kx) k-path-at)
+  (lambda (p body)
+    (tagcase body
+      (x-var (y a b k kr) (if (< (extract p 1) 0) k-no-path (k-component p y)))
+      (else z k-no-path))))
+;; Module type `t`, a path's, `at` its anchor, for the binding about to be
+;; made at `k-depth`: a type of its own, anchored there, so that a path from
+;; that binding reads on as from the path.
+(define k-kept-here (->* (k-path-at) int)
+  (lambda (p)
+    (if (< (extract p 2) 0)
+        (extract p 1)
+        (let ((s (k-ty-push (k-get (k-resolve (extract p 1))))))
+          (begin (k-anchor! s (extract p 2) (extract p 3)) s)))))
+;; Variable `m`'s module type, as a path starts from it, transparent
+;; (`k-module-opened`); and the anchor of its binding, if its binding made it
+;; (`k-name-module`, `k-kept-here`) and is in scope: an anchor is the
+;; binding's at its depth only while the binding's scope lasts, and a value
+;; of that type bound otherwise (a `with`'s, a module's item) is a module of
+;; that type, not that binding's.
+(define k-module-path-base (->* (symbol) k-path-at)
+  (lambda (m)
+    (let ((t (if (k-named-module? m) -1 (k-lookup m))))
+      (if (< t 0)
+          k-no-path
+          (tagcase (k-get (k-resolve t))
+            (ty-module (abs ds vs)
+              (let* ((o (k-module-opened t)) (a (k-anchor-of t))
+                     (live (and (not (null? a))
+                                (= (k-bound-depth m) (extract (car a) 4))
+                                (k-has-id? (get k-skolems) (extract (car a) 2)))))
+                (product (1 o) (2 (if live (extract (car a) 2) -1))
+                         (3 (if live (extract (car a) 3) "")))))
+            (else y k-no-path))))))
+;; Module type `t` of a binding, its abstract types (each a variable a
+;; binding made, `k-module-vars`) as descriptions: transparent; -1 if one is
+;; not such a variable (a module's own, unbound), or `t` is -1.
+(define k-module-opened (->* (int) int)
+  (lambda (t)
+    (if (< t 0)
+        t
+        (tagcase (k-get (k-resolve t))
+          (ty-module (abs ds vs)
+            (cond ((null? abs) t)
+                  ((k-all-module-vars? abs) (k-ty-new (ty-module nil (k-abs-shown abs ds) vs)))
+                  (else -1)))
+          (else y -1)))))
+(define k-all-module-vars? (->* (k-parts) bool)
+  (lambda (abs)
+    (or (null? abs) (and (k-module-var? (extract (car abs) 2)) (k-all-module-vars? (cdr abs))))))
+;; Value `x` of the module `p` reaches, as a path reaches it, `p`'s anchor
+;; the binding's the path is from: a module, its abstract types, if it has
+;; any, variables of their own for this path, `m.x..t`, made the first time
+;; the path is read (`k-module-paths`) and bound as long as the binding
+;; (`k-anchored`), transparent. A module's value is the same module wherever
+;; it is reached from one binding, so its abstract types are too; a value of
+;; such a type reached otherwise keeps them abstract. None if it gives no
+;; module `x`, or one whose types no binding named. As the Rust checker's
+;; `component`.
+(define k-component (->* (k-path-at symbol) k-path-at)
+  (lambda (p x)
+    (tagcase (k-get (k-resolve (extract p 1)))
+      (ty-module (abs0 ds0 vs0)
+        (let ((c (k-part-find vs0 x)))
+          (if (< c 0)
+              k-no-path
+              (tagcase (k-get (k-resolve c))
+                (ty-module (abs ds vs)
+                  (cond ((and (null? abs) (not (k-holds-abstract? vs)))
+                         (product (1 c) (2 -1) (3 "")))
+                        ((< (extract p 2) 0) k-no-path)
+                        (else (k-component-named p x abs ds vs))))
+                (else y k-no-path)))))
+      (else y k-no-path))))
+(define k-component-named (->* (k-path-at symbol k-parts k-parts k-parts) k-path-at)
+  (lambda (p x abs ds vs)
+    (let* ((anchor (extract p 2)) (path (k-cat3 (extract p 3) "." (symbol->string x)))
+           (made (k-path-made anchor path abs))
+           (m (k-path-made-map abs made)))
+      (product (1 (k-ty-new (ty-module nil (append (k-abs-shown made nil) (k-subst-each ds m))
+                                       (k-subst-each vs m))))
+               (2 anchor) (3 path)))))
+;; The variables path `path` from the binding of `anchor` reads abstract
+;; types `abs` at, each `path..t`: made the first time.
+(define k-path-made (->* (int string k-parts) k-parts)
+  (lambda (anchor path abs)
+    (let ((found (k-path-find (get k-module-paths) anchor path)))
+      (if (null? found)
+          (let ((made (k-rename-abs (string-append path "..") abs)))
+            (begin
+              ;; Not among `k-skolems`: bound as long as the anchor.
+              (set k-skolems (k-drop-ids (get k-skolems) (k-part-vars (extract made 1))))
+              (set k-module-paths (cons (product (1 anchor) (2 path) (3 (extract made 1)))
+                                        (get k-module-paths)))
+              (extract made 1)))
+          (car found)))))
+(define k-path-find (->* (k-anchor-paths int string) (listof k-parts acyclic))
+  (lambda (ps anchor path)
+    (cond ((null? ps) nil)
+          ((and (= (extract (car ps) 1) anchor) (string=? (extract (car ps) 2) path))
+           (list (extract (car ps) 3)))
+          (else (k-path-find (cdr ps) anchor path)))))
+;; `ids` without the first `n` of `vs`, which `k-rename-abs` put on top.
+(define k-drop-ids (->* (k-ids k-ids) k-ids)
+  (lambda (ids vs) (if (null? vs) ids (k-drop-ids (cdr ids) (cdr vs)))))
+;; Each of binders `abs` to the variable of `made` of its name.
+(define k-path-made-map (->* (k-parts k-parts) k-map)
+  (lambda (abs made)
+    (if (null? abs)
+        nil
+        (cons (cons (extract (car abs) 2) (k-var-desc (extract (car made) 2)))
+              (k-path-made-map (cdr abs) (cdr made))))))
+;; The module type `select`'s `m` names: a variable's as it is bound, or a
+;; path's (`%path:(with p x)`, `k-select-paths`), its abstract types its
+;; base's (`k-module-path-type`), found from the base as bound here. As the
+;; Rust checker's `module_at`.
+(define k-module-at (->* (symbol) int)
+  (lambda (m)
+    (if (null? (k-module-path-of m)) (k-lookup-module m) (extract (k-select-path m) 1))))
+(define k-select-path (->* (symbol) k-path-at)
+  (lambda (m)
+    (let ((p (k-module-path-of m)))
+      (if (null? p)
+          (k-module-path-base m)
+          (let ((q (k-select-path (car (car p)))))
+            (if (< (extract q 1) 0) k-no-path (k-component q (cdr (car p)))))))))
 ;; What a binding's abstract types are named for: its name; a load's hidden
 ;; global's, its file's, `x.fx`, which every binding of a load of it shares
-;; (`k-lookup-used`).
+;; (`k-lookup-used`); a path's (`%with:(with m x)`), the path.
 (define k-binding-shown (->* (symbol) string)
   (lambda (name)
     (let ((n (symbol->string name)))
-      (if (and (> (string-length n) 8) (string=? (substring n 0 8) "%shared:"))
-          (k-unprefixed (k-after-slashes (substring n 8 (string-length n))))
-          n))))
+      (cond ((and (> (string-length n) 8) (string=? (substring n 0 8) "%shared:"))
+             (k-unprefixed (k-after-slashes (substring n 8 (string-length n)))))
+            ((and (> (string-length n) 6) (string=? (substring n 0 6) "%with:"))
+             (substring n 6 (string-length n)))
+            (else n)))))
 ;; `key` after its last `/`, each found by `string-search`.
 (define k-after-slashes (->* (string) string)
   (lambda (key)
@@ -200,7 +414,7 @@
           (else (k-escaping t (cdr vs))))))
 (define k-unescaped (->* (int k-ids int int) k-ids)
   (lambda (t vs a b)
-    (let ((v (k-escaping t vs)))
+    (let ((v (k-escaping t (k-with-anchored vs))))
       (if (< v 0)
           (k-sizes-of vs)
           (k-fail (k-cat5 "this is a " (k-show-ty t) ", and `" (k-dvar-string v)
@@ -225,7 +439,7 @@
                    " is not an effect, nor one a module included gives")))
 ;; `(select m n)`, as an error shows it.
 (define k-select-shown (->* (symbol symbol) string)
-  (lambda (m n) (k-cat5 "`(select " (symbol->string m) " " (symbol->string n) ")`")))
+  (lambda (m n) (k-cat5 "`(select " (k-module-path-shown m) " " (symbol->string n) ")`")))
 ;; What `(select m n)` is, `m` a module bound to a type of abstract types
 ;; `abs` and descriptions `ds`: its abstract type `n`, or its description;
 ;; an error at `a`..`b` if it has neither. -3 if it is a `with`'s applied,
@@ -252,12 +466,21 @@
                                     " is not a type, nor one a module opened by `with` gives")
                      a b))
             ((symbol=? m '%include) (k-fail (k-not-included n) a b))
-            (else (k-fail (k-cat5 (k-select-shown m n) ": `" (symbol->string m) "` has no type `"
+            (else (k-fail (k-cat5 (k-select-shown m n) ": `" (k-module-path-shown m)
+                                  "` has no type `"
                                   (string-append (symbol->string n) "`"))
                           a b))))))
+;; Why `(select m n)` names nothing: `m` unbound, or a path that reaches no
+;; module whose types a binding named.
+(define k-unselected (->* (symbol symbol) string)
+  (lambda (m n)
+    (if (null? (k-module-path-of m))
+        (string-append (k-select-prefix m n) "` is not bound here")
+        (k-cat3 (k-select-prefix m n) "` is no path to a module from a variable bound to one,"
+                " a module of each step"))))
 ;; What an error about `(select m n)` starts with; made only for an error.
 (define k-select-prefix (->* (symbol symbol) string)
-  (lambda (m n) (k-cat3 (k-select-shown m n) ": `" (symbol->string m))))
+  (lambda (m n) (k-cat3 (k-select-shown m n) ": `" (k-module-path-shown m))))
 ;; A global module's type, as `select` node `node` names it: that node from
 ;; now on, linked to `to`, so that whatever leads to it is not rebuilt, and
 ;; is shared, and shown by its name. Not a family, which is read as the
@@ -307,11 +530,11 @@
     (if (null? found)
         nil
         (let* ((m (extract (car found) 1)) (n (extract (car found) 2))
-               (mt (k-lookup-module m))
+               (mt (k-module-at m))
                (to (if (< mt 0)
                        (if (symbol=? m '%include)
                            (k-fail (k-not-included n) a b)
-                           (k-fail (string-append (k-select-prefix m n) "` is not bound here") a b))
+                           (k-fail (k-unselected m n) a b))
                        (tagcase (k-get mt)
                          (ty-module (abs ds vs)
                            (k-select-component m n abs ds (extract (car found) 3) a b))
@@ -522,11 +745,11 @@
 ;; at `a`..`b`.
 (define k-selected-effect (->* (symbol symbol int int) k-eff)
   (lambda (m e a b)
-    (let ((mt (k-lookup-module m)))
+    (let ((mt (k-module-at m)))
       (if (< mt 0)
           (begin (k-fail (if (symbol=? m '%include)
                              (k-not-included-effect e)
-                             (string-append (k-select-prefix m e) "` is not bound here"))
+                             (k-unselected m e))
                          a b)
                  (the k-eff nil))
           (tagcase (k-get mt)
@@ -552,7 +775,7 @@
     (let ((fall (k-with-effect-fall v)))
       (if (null? fall)
           (k-selected-effect m e a b)
-          (let* ((mt (k-lookup-module m))
+          (let* ((mt (k-module-at m))
                  (given (if (< mt 0)
                             (the (listof k-eff acyclic) nil)
                             (tagcase (k-get mt)

@@ -289,6 +289,17 @@ pub struct Generative {
     pub rep: TyId,
 }
 
+/// A binding's anchor (`Checker::name_module`), as a module type of it
+/// has it: the variable, among `skolems`, bound as long as the binding; the
+/// path the type is at, `m` or `m.x`; and the binding's slot in `env`, so
+/// that a value of the type bound otherwise is not taken for the binding.
+#[derive(Clone, Debug)]
+pub(crate) struct Anchor {
+    pub(crate) anchor: DVar,
+    pub(crate) path: String,
+    pub(crate) slot: usize,
+}
+
 pub struct Checker {
     pub arena: Arena,
     pub interner: Interner,
@@ -451,6 +462,18 @@ pub struct Checker {
     /// Of those, the ones made for a module's abstract types as it was
     /// bound (`Checker::name_module`): not forgotten, but kept from leaving.
     pub(crate) module_vars: HashSet<DVar>,
+    /// Each binding's module type that holds a module with abstract types,
+    /// and each a path bound reaches (`Checker::name_module`,
+    /// `Checker::kept_here`): its binding's anchor. Read only where a path
+    /// starts, at a variable, and only if that variable is the binding
+    /// (`Checker::path_base`).
+    pub(crate) module_anchors: HashMap<TyId, Anchor>,
+    /// The abstract types of each module a path from a binding reaches,
+    /// by the binding's anchor and the path, made when it is first read.
+    pub(crate) module_paths: HashMap<(DVar, String), Vec<DVar>>,
+    /// Of each anchor, those variables: bound as long as it, so held to
+    /// its scope where it ends (`Checker::anchored`).
+    pub(crate) anchored_vars: HashMap<DVar, Vec<DVar>>,
     /// The description-function variables that are a module's abstract
     /// type constructors, whose representations no one outside can see:
     /// what is given to one is kept, cautiously, everywhere (`knot_in`).
@@ -1373,6 +1396,9 @@ impl Checker {
             skolems: Vec::new(),
             to_end_sizes: HashSet::default(),
             module_vars: HashSet::default(),
+            module_anchors: HashMap::default(),
+            module_paths: HashMap::default(),
+            anchored_vars: HashMap::default(),
             abstract_funs: HashSet::default(),
             effect_selects: Vec::new(),
             with_effect_fallback: HashMap::default(),
@@ -3148,11 +3174,17 @@ impl Checker {
             if self.is_lambda(*init) {
                 self.known.insert((*n, base + i));
             }
-            bound.push((*n, t));
+            // A path to a module keeps the path's types (`module_path_type`).
+            bound.push((*n, t, self.module_path_type(*init)));
         }
         let depth = self.env.len();
         let named = self.skolems.len();
-        for ((n, t), (_, init)) in bound.into_iter().zip(bindings.iter()) {
+        for ((n, t, kept), (_, init)) in bound.into_iter().zip(bindings.iter()) {
+            if let Some((k, at)) = kept {
+                let k = self.kept_here(k, at);
+                self.env.push((n, k));
+                continue;
+            }
             let opened_from = self.skolems.len();
             let opened = self.name_nat(n, t);
             if self.record_types && opened != t {
@@ -3352,6 +3384,12 @@ impl Checker {
     /// Bind `name`, at top level, to a value of type `t`: a global.
     pub(crate) fn push_global(&mut self, name: Sym, t: TyId) {
         let t = self.name_module(name, t);
+        self.push_global_kept(name, t);
+    }
+
+    /// Bind `name`, at top level, to a value of type `t` as it is: a path's
+    /// (`module_path_type`), or one named already.
+    pub(crate) fn push_global_kept(&mut self, name: Sym, t: TyId) {
         self.global_slots.insert(self.env.len());
         self.env.push((name, t));
         self.link_aliases(name);

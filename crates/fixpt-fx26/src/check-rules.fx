@@ -177,7 +177,7 @@
         (x-let (bs body a b abk abkr)
           (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
             (begin
-              (k-bind-named (extract inits 1))
+              (k-bind-lets (extract inits 1) bs)
               (k-note-let-lambdas bs)
               (let ((rb (k-synth body)))
                 (begin
@@ -647,7 +647,7 @@
           (x-let (bs body xa xb xaxbk xaxbkr)
             (let* ((inits (k-synth-lets bs)) (saved (k-mark)) (named (get k-skolems)))
               (begin
-                (k-bind-named (extract inits 1))
+                (k-bind-lets (extract inits 1) bs)
                 (k-note-let-lambdas bs)
                 (let ((e (k-check body expected)))
                   (begin (k-unbind-to saved)

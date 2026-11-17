@@ -382,9 +382,16 @@ fn every_directory_surveyed() {
 /// word); a variable of a `poly` type given where one is wanted, the
 /// checker instantiating it at the binders it generalizes over, which the
 /// verifier wraps in another `poly` instead (`go`; a local's as well, and a
-/// global's since `TODO.md` §211, 5, let one be read there).
+/// global's since `TODO.md` §211, 5, let one be read there); and a value a
+/// path to a module reaches, which the checkers take at the path's types,
+/// `mid.a..t` (`docs/fx26.md`, "A *path* to a module"), where the verifier
+/// sees the module's own abstract `t`, having no rule for a path (`TODO.md`
+/// §291).
 const KNOWN_GAPS: &[&str] = &[
     "higher-kinds/poly-global-read.fx `go`",
+    "modules/path-deep.fx `lambda@590`",
+    "modules/path-deep.fx `program`",
+    "modules/path-with.fx `program`",
     "native/raw-args.fx `given`",
     "redefine/knot-spin.fx `f`",
     "redefine/knot-spin.fx `h`",

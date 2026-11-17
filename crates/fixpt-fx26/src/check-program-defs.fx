@@ -618,17 +618,23 @@
   (lambda (name init a b)
     (let* ((x (k-resolve-top-exp init (list name)))
            (u (set k-last-uses (k-free-into x nil nil)))
-           (r (k-synth x)))
-      (begin (if (and (k-shared-name? name) (not (k-reads-globals-only? (extract r 2))))
-                 (k-fail (k-shared-impure (extract r 2)) a b)
-                 #u)
-             (k-bind-named-global name (extract r 1))
-             (if (k-lambda? x) (k-note-known name 0) #u)
+           (r (k-synth x))
+           (pure (if (and (k-shared-name? name) (not (k-reads-globals-only? (extract r 2))))
+                     (k-fail (k-shared-impure (extract r 2)) a b)
+                     #u))
+           ;; A path to a module keeps the path's types
+           ;; (`k-module-path-type`), and is shown so.
+           (kept (k-module-path-type x))
+           (t (if (< (extract kept 1) 0)
+                  (begin (k-bind-named-global name (extract r 1)) (extract r 1))
+                  (let ((k (k-kept-here kept)))
+                    (begin (k-bind-global name k) (k-link-aliases name (get k-dscope)) k)))))
+      (begin (if (k-lambda? x) (k-note-known name 0) #u)
              ;; No line for a file's hidden global, which the program does
              ;; not name.
              (if (k-shared-name? name)
                  nil
-                 (cons (k-define-line name (extract r 1) (extract r 2)) nil))))))
+                 (cons (k-define-line name t (extract r 2)) nil))))))
 ;; One top-level form's lines: what each definition and expression is. The
 ;; description scope as it begins, the top level's (`k-form-dscope`).
 (define k-top-lines (->* (top) k-out)

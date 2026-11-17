@@ -216,6 +216,25 @@
                      (k-ty-new (ty-array e (k-size-var v) r)))))
           (else w t)))
       (else y t))))
+;; Bind each of a `let`'s, `bs` their expressions, the first first: one
+;; whose expression is a path to a module at the path's type
+;; (`k-module-path-type`), each found before any is bound; any other as
+;; `k-bind-named` binds it.
+(define k-bind-lets (->* (k-bindings k-let-bs) unit)
+  (lambda (ts bs) (k-bind-kept ts (k-paths-kept bs))))
+(define k-paths-kept (->* (k-let-bs) (listof k-path-at acyclic))
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (cons (k-module-path-type (extract (car bs) 2)) (k-paths-kept (cdr bs))))))
+;; Each anchored where it is bound (`k-kept-here`).
+(define k-bind-kept (->* (k-bindings (listof k-path-at acyclic)) unit)
+  (lambda (ts kept)
+    (if (null? ts)
+        #u
+        (let ((n (car (car ts))) (t (cdr (car ts))) (p (car kept)))
+          (begin (k-bind n (if (< (extract p 1) 0) (k-name-nat n t) (k-kept-here p)))
+                 (k-bind-kept (cdr ts) (cdr kept)))))))
 ;; Bind each, the first first, a `nat` of no known size given one.
 (define k-bind-named (->* (k-bindings) unit)
   (lambda (bs)

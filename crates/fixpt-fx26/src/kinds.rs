@@ -389,8 +389,11 @@ impl Checker {
                 }
             }
             Some("select") => match &items[..] {
-                [_, m, n] if m.sym().is_some() && n.sym().is_some() => self.select_of(m.sym().expect("a name"), n.sym().expect("a name"), s.span()),
-                _ => Err(FxError::at(s.span(), "`(select module name)`: a module's name, and a component's")),
+                [_, m, n] if n.sym().is_some() => match self.selected_module(m)? {
+                    Some(m) => self.select_of(m, n.sym().expect("a name"), s.span()),
+                    None => Err(FxError::at(s.span(), "`(select module name)`: a module's name, or a path to one, and a component's")),
+                },
+                _ => Err(FxError::at(s.span(), "`(select module name)`: a module's name, or a path to one, and a component's")),
             },
             _ => Err(FxError::at(s.span(), usage)),
         }

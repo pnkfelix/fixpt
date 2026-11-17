@@ -85,7 +85,10 @@
                ;; `(select m e)`: module `m`'s effect `e`, found where the
                ;; type it is in is checked, as a type's `select` is.
                (selected (if (string=? head "select")
-                             (k-effect-selected s items)
+                             (k-effect-selected (if (= (k-length items) 3)
+                                                    (k-selected-module (k-nth items 1))
+                                                    '||)
+                                                s items)
                              (the (listof k-eff acyclic) nil)))
                ;; `(e d …)`: a description function to an effect, applied.
                (applied (if (null? selected) (k-parse-effect-app s items) selected)))

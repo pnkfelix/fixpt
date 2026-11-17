@@ -819,6 +819,11 @@ pub struct WithTables {
     /// frame of what they give, if each has its record (`None` if not):
     /// one for each such module, so that one's is never an outer one's.
     pub include_frames: Vec<Option<usize>>,
+    /// Each module path a `select` or `with` names (`(with m x)`, `m` a
+    /// variable or a path), by the name the parser gives it,
+    /// `%path:(with m x)`: its module and the value of it taken
+    /// (`Checker::path_module`).
+    pub paths: fixpt_hash::HashMap<Sym, (Sym, Sym)>,
 }
 
 /// What the expander relied on of a module, before its type was known

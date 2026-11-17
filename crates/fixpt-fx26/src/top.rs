@@ -113,7 +113,7 @@ fn every_field_placed(c: &Checker) {
         waits_spun: _,
         generatives: _, transparent: _, inside: _, conversions: _, lemmas: _, pending_lemma: _, certified: _,
         certified_nats: _, certified_lengths: _, narrowed: _, path_narrowed: _, closure_depth: _, pending_unions: _,
-        checked_call: _, skolems: _, to_end_sizes: _, module_vars: _, abstract_funs: _, effect_selects: _,
+        checked_call: _, skolems: _, to_end_sizes: _, module_vars: _, module_anchors: _, module_paths: _, anchored_vars: _, abstract_funs: _, effect_selects: _,
         with_effect_fallback: _, subst_keep: _, select_map: _, param_map: _, size_facts: _, operator_at: _,
         hidden: _, form_began: _, shared_loads: _, shared_files: _, reading_deps: _, loading: _, include_scope: _, run_items: _, with_depth: _, shared_globals: _, hoisted: _,
         loaded: _, in_built_in: _, load_sites: _, files_read: _, load_defs: _, macro_files: _, ahead: _, ahead_filled: _, hazard_modules: _,
@@ -1933,7 +1933,19 @@ impl Checker {
                 if self.is_lambda(e) {
                     self.known.insert((name, self.env.len()));
                 }
-                self.push_global(name, ty);
+                // A path to a module keeps the path's types (`module_path_type`),
+                // and is shown so.
+                let ty = match self.module_path_type(e) {
+                    Some((kept, at)) => {
+                        let kept = self.kept_here(kept, at);
+                        self.push_global_kept(name, kept);
+                        kept
+                    }
+                    None => {
+                        self.push_global(name, ty);
+                        ty
+                    }
+                };
                 Ok(Top::Define { name, ty, effect, exp: e, typed: false, inferred: false, recursive: false, assigns: false })
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),
@@ -2464,6 +2476,10 @@ impl Checker {
         self.path_narrowed.truncate(path_narrowed);
         self.pending_unions.truncate(pending_unions);
         self.skolems.truncate(skolems);
+        // Keyed by ids a reset may give again: those made since go.
+        self.module_anchors.retain(|t, a| m.has_ty(*t) && m.has_dvar(a.anchor));
+        self.module_paths.retain(|(a, _), _| m.has_dvar(*a));
+        self.anchored_vars.retain(|a, _| m.has_dvar(*a));
         self.effect_selects.truncate(effect_selects);
         self.size_facts.truncate(size_facts);
         self.ahead.truncate(ahead);

@@ -1,9 +1,10 @@
 ;; ! not known outside the scope where the module is named
-;; A module's abstract type may not leave the scope of its name.
+;; A module's abstract type may not leave the scope of its name (one bound
+;; to no path to a module, whose types are its own).
 (define counter
   (module
     (define-generative t int #:seal up-t #:unseal down-t)
     (define zero t (up-t 0))
     (define inc (subr pure (t) t) (lambda (c) (up-t (+ (down-t c) 1))))
     (define value (subr pure (t) int) (lambda (c) (down-t c)))))
-(let ((m counter)) (with m zero))
+(let ((m (if #t counter counter))) (with m zero))

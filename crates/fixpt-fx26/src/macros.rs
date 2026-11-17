@@ -4151,6 +4151,10 @@ impl Aligner<'_> {
                 let free = if h == "select" { Free::Qualified } else { Free::Plain };
                 for &k in names {
                     let syn = self.nodes[k].syn.clone();
+                    if h == "select" && syn.sym().is_none() {
+                        self.select_path(k, &syn)?;
+                        continue;
+                    }
                     let Some(n) = syn.sym() else {
                         return Err(FxError::at(syn.at(), "a name"));
                     };
@@ -4363,6 +4367,28 @@ impl Aligner<'_> {
         }
         self.nodes[at].kids = Kids::Desc(kids.clone());
         kids
+    }
+
+    /// A `select`'s module at node `at`: a name, as above, or a path to a
+    /// module, `(with m x)`, its base `m` read as a `select`'s module is
+    /// and `x` the label of a value of it (`docs/fx26.md`, "A *path* to a
+    /// module").
+    fn select_path(&mut self, at: usize, s: &Syn) -> R<()> {
+        if let Some(n) = s.sym() {
+            self.nodes[at].core = Rc::new(STy::Id);
+            self.nodes[at].kids = if self.pvars.contains_key(&n) { Kids::PVar(n) } else { Kids::Ref(n, Ns::Value, Free::Qualified) };
+            return Ok(());
+        }
+        let items = match &s.view() {
+            V::List { items, tail: None } => items.clone(),
+            _ => Vec::new(),
+        };
+        let is_path = matches!(&items[..], [h, _, x] if h.sym().is_some_and(|h| self.name(h) == "with") && x.sym().is_some());
+        if !is_path {
+            return Err(FxError::at(s.at(), "a module's name, or a path to one, `(with module name)`"));
+        }
+        let kids = self.desc_kids(at, &items);
+        self.select_path(kids[1], &items[1])
     }
 
     /// Description `s` at node `at`, in the scope of `atoms`.

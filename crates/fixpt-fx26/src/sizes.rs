@@ -553,8 +553,10 @@ impl Checker {
         }
         let mut named: Vec<DVar> = self.skolems.drain(depth..).collect();
         // A module's abstract type cannot be forgotten: nothing may leave
-        // its binding's scope still mentioning it.
-        if let Some(v) = named.iter().find(|v| self.is_module_var(**v) && self.mentions_var(t, **v)) {
+        // its binding's scope still mentioning it, nor one a path from the
+        // binding was read at (`anchored`).
+        let paths = self.anchored(&named);
+        if let Some(v) = named.iter().chain(&paths).find(|v| self.is_module_var(**v) && self.mentions_var(t, **v)) {
             let name = self.interner.name(self.arena.dvar_name(*v)).to_string();
             return Err(crate::error::FxError::at(
                 span,

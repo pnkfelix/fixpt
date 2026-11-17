@@ -10,7 +10,7 @@
 //! mention its abstract types (`forget_nats`, which also forgets sizes).
 
 use crate::ast::{Atom, D, DVar, Effect, ExpId, Kind, ModItem, Ty, TyId};
-use crate::check::{Checker, Pick};
+use crate::check::{Anchor, Checker, Pick};
 use crate::error::{FxError, R};
 use fixpt_read::{Span, Sym};
 use fixpt_hash::{HashMap, HashSet};
@@ -57,7 +57,8 @@ impl Checker {
             }
             // A component's module, bound inside, has abstract types no one
             // outside can name.
-            let inner: Vec<DVar> = self.skolems[named..].to_vec();
+            let mut inner: Vec<DVar> = self.skolems[named..].to_vec();
+            inner.extend(self.anchored(&inner));
             for (n, t) in &vals {
                 if let Some(v) = inner.iter().find(|v| self.mentions_var(*t, **v)) {
                     let shown = self.interner.name(self.arena.dvar_name(*v)).to_string();
@@ -860,7 +861,7 @@ impl Checker {
             let msg = match self.interner.name(m) {
                 // `extend`'s `(with %extend-0 e1)` (`parse.rs`).
                 "%extend-0" => format!("`extend` extends a module by a module, and its first is a {}", self.show_ty(mt)),
-                m => format!("`with` opens a module, and `{m}` is a {}", self.show_ty(mt)),
+                _ => format!("`with` opens a module, and `{}` is a {}", self.path_shown(m), self.show_ty(mt)),
             };
             return Err(FxError::at(span, msg));
         };
@@ -955,42 +956,240 @@ impl Checker {
     }
 
     /// A module's type, bound to `name`: its abstract types renamed for this
-    /// binding, each `name..t`, kept until the binding's scope ends. Any
-    /// other type as it is.
+    /// binding, each `name..t`, kept until the binding's scope ends; and,
+    /// if it holds a module that has abstract types, an anchor for the
+    /// binding (`module_anchors`), which the names of those a path reaches
+    /// are made for when it is read (`component`). Any other type as it
+    /// is. The binding is the one about to be made, at `env.len()`, as
+    /// each caller makes it.
     pub(crate) fn name_module(&mut self, name: Sym, t: TyId) -> TyId {
         let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else { return t };
         // A hidden item's (`%extend-0`, …), the module's own making, keeps
         // the names its module has (`TODO.md` §69); a load's hidden global
         // names them for its file, `x.fx..t`, which every binding of a load
-        // of it shares (`strengthened`).
-        let n = match self.interner.name(name).strip_prefix("%shared:") {
-            Some(key) => key.rsplit('/').next().unwrap_or(key).trim_start_matches("input:").to_string(),
-            None => self.interner.name(name).to_string(),
+        // of it shares (`strengthened`); a path's, by the path.
+        let n = self.interner.name(name);
+        let n = match (n.strip_prefix("%shared:"), n.strip_prefix("%with:")) {
+            (Some(key), _) => key.rsplit('/').next().unwrap_or(key).trim_start_matches("input:").to_string(),
+            (_, Some(path)) => path.to_string(),
+            _ => n.to_string(),
         };
-        if abs.is_empty() || n.starts_with('%') {
+        let holds = self.holds_abstract(&vals);
+        if n.starts_with('%') || (abs.is_empty() && !holds) {
             return t;
         }
         let mut map: HashMap<DVar, D> = HashMap::default();
         let mut fresh = Vec::new();
         for (a, v) in &abs {
-            let named = self.interner.intern(&format!("{n}..{}", self.interner.name(*a)));
-            let kind = self.arena.dvar_kind(*v);
-            let w = self.arena.dvar_of(named, kind);
+            let w = self.module_var(&format!("{n}..{}", self.interner.name(*a)), *v);
             self.skolems.push(w);
-            self.module_vars.insert(w);
-            let d = match kind {
-                Kind::Type => D::Type(self.arena.ty(Ty::Var(w))),
-                _ => {
-                    self.abstract_funs.insert(w);
-                    D::Fun(self.arena.ty(Ty::Var(w)))
-                }
-            };
-            map.insert(*v, d);
+            map.insert(*v, self.var_desc(w));
             fresh.push((*a, w));
         }
         let descs = descs.iter().map(|(d, x)| (*d, self.subst(*x, &map))).collect();
         let vals = vals.iter().map(|(x, y)| (*x, self.subst(*y, &map))).collect();
-        self.arena.ty(Ty::Module { abs: fresh, descs, vals })
+        let named = self.arena.ty(Ty::Module { abs: fresh, descs, vals });
+        if holds {
+            // Bound as long as the binding, as its own names are.
+            let anchor = self.arena.dvar_of(self.interner.intern(&n), Kind::Type);
+            self.skolems.push(anchor);
+            self.module_vars.insert(anchor);
+            let slot = self.env.len();
+            self.module_anchors.insert(named, Anchor { anchor, path: n, slot });
+        }
+        named
+    }
+
+    /// A variable of `v`'s kind, `named`, among the module's abstract
+    /// types (`module_vars`).
+    fn module_var(&mut self, named: &str, v: DVar) -> DVar {
+        let named = self.interner.intern(named);
+        let kind = self.arena.dvar_kind(v);
+        let w = self.arena.dvar_of(named, kind);
+        self.module_vars.insert(w);
+        if kind != Kind::Type {
+            self.abstract_funs.insert(w);
+        }
+        w
+    }
+
+    /// Variable `w` as a description, a type or a description function.
+    fn var_desc(&mut self, w: DVar) -> D {
+        let t = self.arena.ty(Ty::Var(w));
+        if self.arena.dvar_kind(w) == Kind::Type { D::Type(t) } else { D::Fun(t) }
+    }
+
+    /// Whether a value of `vals` is a module that has abstract types, or
+    /// holds one that has: each type looked at once, however many paths
+    /// lead to it.
+    fn holds_abstract(&self, vals: &[(Sym, TyId)]) -> bool {
+        let mut seen: HashMap<TyId, bool> = HashMap::default();
+        vals.iter().any(|(_, t)| self.abstract_within(*t, &mut seen))
+    }
+
+    fn abstract_within(&self, t: TyId, seen: &mut HashMap<TyId, bool>) -> bool {
+        let t = self.arena.resolve(t);
+        if let Some(b) = seen.get(&t) {
+            return *b;
+        }
+        seen.insert(t, false);
+        let b = match self.arena.get(t) {
+            Ty::Module { abs, vals, .. } => !abs.is_empty() || vals.iter().any(|(_, x)| self.abstract_within(*x, seen)),
+            _ => false,
+        };
+        seen.insert(t, b);
+        b
+    }
+
+    /// The variables a path from the binding of `anchor` was read at:
+    /// bound as long as it, though made later (`component`).
+    pub(crate) fn anchored(&self, named: &[DVar]) -> Vec<DVar> {
+        named.iter().filter_map(|v| self.anchored_vars.get(v)).flatten().copied().collect()
+    }
+
+    /// What a binding of `e` keeps, if `e` is a path to a module, a
+    /// variable bound to one or `(with p x)` of a path `p` (as the parser
+    /// makes one, `(let ((%with:p p)) (with %with:p x))` for a longer):
+    /// its type with its abstract types the ones the path's base was bound
+    /// with (`m..t`, `m.x..t`), transparent, so that the binding names the
+    /// same types the path does. None for anything else, which a binding
+    /// names for itself (`name_module`). With the anchor its paths read on
+    /// from, if any, for the binding made of it (`kept_here`).
+    pub(crate) fn module_path_type(&mut self, e: ExpId) -> Option<(TyId, Option<(DVar, String)>)> {
+        self.path_reached(e)
+    }
+
+    /// The module path `e` reaches, if it is one, and the anchor its paths
+    /// read on from, if any.
+    fn path_reached(&mut self, e: ExpId) -> Option<(TyId, Option<(DVar, String)>)> {
+        match self.arena.exp_at(e).clone() {
+            crate::ast::Exp::Var(m) => self.path_base(m),
+            crate::ast::Exp::With { module, body } => {
+                let crate::ast::Exp::Var(x) = *self.arena.exp_at(body) else { return None };
+                let (t, at) = self.path_base(module)?;
+                self.component(t, at, x)
+            }
+            crate::ast::Exp::Let { bindings, body } => {
+                let [(p, init)] = bindings[..] else { return None };
+                let crate::ast::Exp::With { module, body } = *self.arena.exp_at(body) else { return None };
+                let crate::ast::Exp::Var(x) = *self.arena.exp_at(body) else { return None };
+                if module != p {
+                    return None;
+                }
+                let (t, at) = self.path_reached(init)?;
+                self.component(t, at, x)
+            }
+            _ => None,
+        }
+    }
+
+    /// Module type `t`, a path's, `at` its anchor, for the binding about
+    /// to be made at `env.len()`: a type of its own, anchored there, so
+    /// that a path from that binding reads on as from the path.
+    pub(crate) fn kept_here(&mut self, t: TyId, at: Option<(DVar, String)>) -> TyId {
+        let Some((anchor, path)) = at else { return t };
+        let copy = self.arena.get(self.arena.resolve(t)).clone();
+        let s = self.arena.ty(copy);
+        let slot = self.env.len();
+        self.module_anchors.insert(s, Anchor { anchor, path, slot });
+        s
+    }
+
+    /// Variable `m`'s module type, as a path starts from it, transparent
+    /// (`opened`); and the anchor of its binding, if its binding made it
+    /// (`name_module`, `kept_here`) and is in scope: an anchor is the
+    /// binding's at its slot only while the binding's scope lasts, and a
+    /// value of that type bound otherwise (a `with`'s, a module's item) is
+    /// a module of that type, not that binding's.
+    fn path_base(&mut self, m: Sym) -> Option<(TyId, Option<(DVar, String)>)> {
+        if self.is_toplevel_module(m) || self.is_fx_module(m) {
+            return None;
+        }
+        let t = self.lookup(m)?;
+        let slot = self.env.rpos(m);
+        let at = self.module_anchors.get(&t).filter(|a| Some(a.slot) == slot && self.skolems.contains(&a.anchor)).map(|a| (a.anchor, a.path.clone()));
+        let t = if self.shared_globals.contains(&m) { self.strengthened(t) } else { t };
+        matches!(self.arena.get(self.arena.resolve(t)), Ty::Module { .. }).then_some(())?;
+        Some((self.opened(t)?, at))
+    }
+
+    /// Module type `t` of a binding, its abstract types (each a variable a
+    /// binding made, `module_vars`) as descriptions: transparent. None if
+    /// one is not such a variable (a module's own, unbound).
+    fn opened(&mut self, t: TyId) -> Option<TyId> {
+        let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return None };
+        if !abs.iter().all(|(_, v)| self.is_module_var(*v)) {
+            return None;
+        }
+        Some(self.strengthened(t))
+    }
+
+    /// Value `x` of a module of type `t`, as a path reaches it, `at` the
+    /// anchor of the binding the path is from: a module, its abstract
+    /// types, if it has any, variables of their own for this path,
+    /// `m.x..t`, made the first time the path is read (`module_paths`) and
+    /// bound as long as the binding (`anchored_vars`), transparent. A
+    /// module's value is the same module wherever it is reached from one
+    /// binding, so its abstract types are too; a value of such a type
+    /// reached otherwise keeps them abstract. None if `t` gives no module
+    /// `x`, or one whose types no binding named.
+    fn component(&mut self, t: TyId, at: Option<(DVar, String)>, x: Sym) -> Option<(TyId, Option<(DVar, String)>)> {
+        let Ty::Module { vals, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return None };
+        let (_, c) = vals.iter().find(|(n, _)| *n == x)?;
+        let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(*c)).clone() else { return None };
+        if abs.is_empty() && !self.holds_abstract(&vals) {
+            return Some((*c, None));
+        }
+        let (anchor, base) = at?;
+        let path = format!("{base}.{}", self.interner.name(x));
+        let made = match self.module_paths.get(&(anchor, path.clone())) {
+            Some(ws) => ws.clone(),
+            None => {
+                let ws: Vec<DVar> = abs.iter().map(|(a, v)| self.module_var(&format!("{path}..{}", self.interner.name(*a)), *v)).collect();
+                self.anchored_vars.entry(anchor).or_default().extend(ws.iter().copied());
+                self.module_paths.insert((anchor, path.clone()), ws.clone());
+                ws
+            }
+        };
+        let mut map: HashMap<DVar, D> = HashMap::default();
+        let mut shown = Vec::new();
+        for ((a, v), w) in abs.iter().zip(&made) {
+            map.insert(*v, self.var_desc(*w));
+            shown.push((*a, self.arena.ty(Ty::Var(*w))));
+        }
+        shown.extend(descs.iter().map(|(d, y)| (*d, self.subst(*y, &map))));
+        let vals = vals.iter().map(|(y, z)| (*y, self.subst(*z, &map))).collect();
+        Some((self.arena.ty(Ty::Module { abs: Vec::new(), descs: shown, vals }), Some((anchor, path))))
+    }
+
+    /// The module type `select`'s `m` names: a variable's as it is bound,
+    /// or a path's (`%path:(with p x)`, `WithTables::paths`), its abstract
+    /// types its base's (`module_path_type`), found from the base as bound
+    /// here.
+    pub(crate) fn module_at(&mut self, m: Sym) -> Option<TyId> {
+        if !self.arena.withs.paths.contains_key(&m) {
+            return self.lookup(m);
+        }
+        self.select_path(m).map(|(t, _)| t)
+    }
+
+    fn select_path(&mut self, m: Sym) -> Option<(TyId, Option<(DVar, String)>)> {
+        match self.arena.withs.paths.get(&m).copied() {
+            Some((p, x)) => {
+                let (t, at) = self.select_path(p)?;
+                self.component(t, at, x)
+            }
+            None => self.path_base(m),
+        }
+    }
+
+    /// Why `(select m …)`, shown as `shown`, names nothing: `m` unbound, or
+    /// a path that reaches no module whose types a binding named.
+    fn unselected(&self, shown: &str, m: Sym) -> String {
+        match self.arena.withs.paths.get(&m) {
+            Some(_) => format!("{shown}: `{}` is no path to a module from a variable bound to one, a module of each step", self.path_shown(m)),
+            None => format!("{shown}: `{}` is not bound here", self.interner.name(m)),
+        }
     }
 
     /// `t` with each `(select m n)` in it replaced by what it is: `m`'s
@@ -1009,20 +1208,20 @@ impl Checker {
         }
         let mut sel = HashMap::default();
         for (m, n, node) in found {
-            let shown = |c: &Checker| format!("`(select {} {})`", c.interner.name(m), c.interner.name(n));
+            let shown = |c: &Checker| format!("`(select {} {})`", c.path_shown(m), c.interner.name(n));
             // A type name in a module with `include`s that nothing else
             // defines (`include_scope`): said of the name, not of the
             // hidden `%include`.
             let included = self.interner.name(m) == "%include";
             let not_included = |c: &Checker| format!("`{}` is not a type, nor one a module included gives", c.interner.name(n));
-            let Some(mt) = self.lookup(m) else {
+            let Some(mt) = self.module_at(m) else {
                 if included {
                     return Err(FxError::at(span, not_included(self)));
                 }
-                return Err(FxError::at(span, format!("{}: `{}` is not bound here", shown(self), self.interner.name(m))));
+                return Err(FxError::at(span, self.unselected(&shown(self), m)));
             };
             let Ty::Module { abs, descs, .. } = self.arena.get(self.arena.resolve(mt)).clone() else {
-                return Err(FxError::at(span, format!("{}: `{}` is a {}, not a module", shown(self), self.interner.name(m), self.show_ty(mt))));
+                return Err(FxError::at(span, format!("{}: `{}` is a {}, not a module", shown(self), self.path_shown(m), self.show_ty(mt))));
             };
             let to = match (abs.iter().find(|(a, _)| *a == n), descs.iter().find(|(d, _)| *d == n)) {
                 (Some((_, v)), _) => self.arena.ty(Ty::Var(*v)),
@@ -1046,7 +1245,7 @@ impl Checker {
                 },
                 (None, None) if included => return Err(FxError::at(span, not_included(self))),
                 (None, None) => {
-                    return Err(FxError::at(span, format!("{}: `{}` has no type `{}`", shown(self), self.interner.name(m), self.interner.name(n))));
+                    return Err(FxError::at(span, format!("{}: `{}` has no type `{}`", shown(self), self.path_shown(m), self.interner.name(n))));
                 }
             };
             self.link_global_select(m, node, to);
@@ -1168,7 +1367,7 @@ impl Checker {
         let Some(outer) = self.with_effect_fallback.get(&v).cloned() else {
             return self.selected_effect(m, e, span);
         };
-        let given = self.lookup(m).and_then(|mt| match self.arena.get(self.arena.resolve(mt)).clone() {
+        let given = self.module_at(m).and_then(|mt| match self.arena.get(self.arena.resolve(mt)).clone() {
             Ty::Module { descs, .. } => descs.iter().find(|(d, _)| *d == e).and_then(|(_, d)| self.desc_effect(*d)),
             _ => None,
         });
@@ -1195,24 +1394,24 @@ impl Checker {
     /// Module `m`'s effect `e`, as its type says, `m` bound here; or an
     /// error at `span`.
     pub(crate) fn selected_effect(&mut self, m: Sym, e: Sym, span: Span) -> R<Effect> {
-        let shown = |c: &Checker| format!("`(select {} {})`", c.interner.name(m), c.interner.name(e));
+        let shown = |c: &Checker| format!("`(select {} {})`", c.path_shown(m), c.interner.name(e));
         // An effect name in a module with `include`s that nothing else
         // defines (`include_scope`): said of the name.
         let not_included = |c: &Checker| format!("`{}` is not an effect, nor one a module included gives", c.interner.name(e));
         let included = self.interner.name(m) == "%include";
-        let Some(mt) = self.lookup(m) else {
+        let Some(mt) = self.module_at(m) else {
             if included {
                 return Err(FxError::at(span, not_included(self)));
             }
-            return Err(FxError::at(span, format!("{}: `{}` is not bound here", shown(self), self.interner.name(m))));
+            return Err(FxError::at(span, self.unselected(&shown(self), m)));
         };
         let Ty::Module { descs, .. } = self.arena.get(self.arena.resolve(mt)).clone() else {
-            return Err(FxError::at(span, format!("{}: `{}` is a {}, not a module", shown(self), self.interner.name(m), self.show_ty(mt))));
+            return Err(FxError::at(span, format!("{}: `{}` is a {}, not a module", shown(self), self.path_shown(m), self.show_ty(mt))));
         };
         match descs.iter().find(|(d, _)| *d == e).and_then(|(_, d)| self.desc_effect(*d)) {
             Some(x) => Ok(x),
             None if included => Err(FxError::at(span, not_included(self))),
-            None => Err(FxError::at(span, format!("{}: `{}` has no effect `{}`", shown(self), self.interner.name(m), self.interner.name(e)))),
+            None => Err(FxError::at(span, format!("{}: `{}` has no effect `{}`", shown(self), self.path_shown(m), self.interner.name(e)))),
         }
     }
 

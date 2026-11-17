@@ -4,7 +4,9 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-ds k-ids k-names k-at k-conv k-descs syn) (effect kstate checks))
+(import check-types-types (type k-ds k-ids k-names k-at k-conv k-descs syn k-parts k-anchors
+                                k-anchor-paths)
+        (effect kstate checks))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Bindings, as lists of them are passed around.
@@ -181,6 +183,10 @@
    (val k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
    (val k-lookup-used
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (symbol) int))
+   (val k-abs-shown
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+              (k-parts k-parts)
+              k-parts))
    (val k-bind
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (symbol int)
@@ -228,6 +234,9 @@
    (val k-global? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
    (val k-fixed? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
    (val k-module-vars (ref k-ids @t))
+   (val k-bound-depth (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
+   (val k-module-anchors (ref k-anchors @t))
+   (val k-module-paths (ref k-anchor-paths @t))
    (val k-select-map (ref k-selects @t))
    (val k-string int)
    (val k-char int)

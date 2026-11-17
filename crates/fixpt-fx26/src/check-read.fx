@@ -456,13 +456,18 @@
 ;; description function of no parameters giving it.
 (define k-effect-desc (->* (k-eff) int)
   (lambda (e) (k-ty-new (ty-lam nil (de e)))))
-;; `(select m e)` as an effect, in a list: the variable for it.
-(define k-effect-selected (->* (syn k-syns) (listof k-eff acyclic))
-  (lambda (s items)
-    (if (and (= (k-length items) 3) (syn-symbol? (k-nth items 1)) (syn-symbol? (k-nth items 2)))
-        (let ((m (k-toplevel-qualified (syn-head (k-nth items 1)))) (e (syn-head (k-nth items 2))))
+;; `(select m e)` as an effect, in a list: the variable for it; `m` the
+;; module it names, a variable or a path's name (`k-selected-module`), `||`
+;; if none.
+(define k-effect-selected (->* (symbol syn k-syns) (listof k-eff acyclic))
+  (lambda (m s items)
+    (if (and (= (k-length items) 3) (not (symbol=? m '||)) (syn-symbol? (k-nth items 2)))
+        (let ((e (syn-head (k-nth items 2))))
           (the (listof k-eff acyclic) (list (k-one (a-var (k-effect-select m e))))))
-        (begin (k-sfail "`(select module name)`: a module's name, and a component's" s) nil))))
+        (begin (k-sfail (string-append "`(select module name)`: a module's name, or a path to "
+                                       "one, and a component's")
+                        s)
+               nil))))
 
 ;;; ------------------------------------------------------------ types kept as themselves
 

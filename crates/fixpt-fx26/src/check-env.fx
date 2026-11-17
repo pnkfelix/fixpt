@@ -345,6 +345,9 @@
   (lambda (flags s)
     (table-set! (get flags) s (the (listof bool acyclic) (cons #f (table-ref (get flags) s nil))))))
 ;; The depth of a new innermost binding of `s`, the next.
+;; The depth `s`'s innermost binding was made at; -1 if it has none.
+(define k-bound-depth (->* (symbol) int)
+  (lambda (s) (let ((ds (table-ref (get k-depths) s nil))) (if (null? ds) -1 (car ds)))))
 (define k-push-depth (->* (symbol) unit)
   (lambda (s)
     (let ((ds (table-ref (get k-depths) s nil)))
@@ -837,6 +840,15 @@
 ;; The type variables made for modules' abstract types as each module was
 ;; bound (`k-name-module`): not forgotten, but kept from leaving.
 (define k-module-vars (ref k-ids @t) (new nil))
+;; Each binding's module type that holds a module with abstract types, and
+;; each a path from one reaches: its binding's anchor, a variable among
+;; `k-skolems` bound as long as it, and the path, `m.x`
+;; (`check-modules.fx`'s `k-name-module`, `k-component`). Of ids a reset
+;; gives again, so reset with it.
+(define k-module-anchors (ref k-anchors @t) (new nil))
+;; The abstract types of each module a path from a binding reaches, by the
+;; binding's anchor and the path, made when it is first read.
+(define k-module-paths (ref k-anchor-paths @t) (new nil))
 (define k-select-map (ref k-selects @t) (new nil))
 (define k-select-in (->* (k-selects symbol symbol int) int)
   (lambda (ss m n t)

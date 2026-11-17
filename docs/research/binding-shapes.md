@@ -932,7 +932,12 @@ plan above did not say, found building it:
   `(define %inst lib)`: a variable bound to a module names its abstract
   types for itself (`%inst..t`, not `lib..t`). So the re-export above
   waits for module paths in `with` and `select`, a change of the language
-  to discuss first.
+  to discuss first. (2026-11-17, the user's go-ahead: paths are in,
+  `(with (with mid a) x)`, `(select (with mid a) T)`, a path's abstract
+  types its base's, `mid.a..t`, and a `let` or `define` of a path keeps
+  them; `docs/fx26.md`, "A *path* to a module". The re-export is still
+  not built: a template's `with` takes a module's name alone, and a module
+  file's import of an instance needs its own form; TODO §291.)
 - **An instance's macros are its own.** Two instances of one file have
   one file key, so their macros' names for an importer are
   `%syntax:key@lib:name` and the keys of the uses an importer expands

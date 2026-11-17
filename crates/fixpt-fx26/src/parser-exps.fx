@@ -1,17 +1,12 @@
 ;;; The FX-26 parser, in FX-26: expressions, and `(load-module "file")`
-;;; (`docs/research/first-class-modules.md`, M7), as the Rust parser's
-;;; `parse_load_module` reads it: the file's forms a module's items, as an
-;;; inline module's are (`parse-module-items`: its `define-datatype`s
-;;; expanded, its `define-generative`s left a module's own); one recursive
-;;; group, since a module is an expression and a file's items hold them.
-;;; After `parser.fx`.
-;;;
-;;; FX-26 code reads no files: the driver reads each file a program's
-;;; `load-module`s name, with the reader written in FX-26, before the
-;;; program is parsed (`loaded-files!`), as a system call would. A file's
-;;; positions are its own, each moved past the program's by its base, a
-;;; multiple of `load-base`, so that what is said of a place in it can say
-;;; which file and where.
+;;; (`docs/research/first-class-modules.md`, M7), as the Rust parser's `parse_load_module` reads it:
+;;; the file's forms a module's items, as an inline module's are (`parse-module-items`: its
+;;; `define-datatype`s expanded, its `define-generative`s left a module's own); one recursive group,
+;;; since a module is an expression and a file's items hold them. After `parser.fx`. FX-26 code
+;;; reads no files: the driver reads each file a program's `load-module`s name, with the reader
+;;; written in FX-26, before the program is parsed (`loaded-files!`), as a system call would. A
+;;; file's positions are its own, each moved past the program's by its base, a multiple of
+;;; `load-base`, so that what is said of a place in it can say which file and where.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 ;; The parser's first part at these regions, the reader's types in it, and
@@ -19,7 +14,7 @@
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import forms-module process-form given-form processes input-items item-form? run-item run-count
-        datum-form fresh-name written-relied relied-word? generative-conversions)
+        datum-form fresh-name written-relied relied-word? generative-conversions with-module)
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type data syn))
 (define syn->datum (with parser-module syn->datum))
@@ -421,14 +416,15 @@
                 (parse-loaded (syn-string (nth items 2)) (input-key? (syn-string (nth items 1)))
                               #t a b)))
         ;; What the expander relied on of the module written after it
-        ;; (`#:relied`, `written-relied`).
+        ;; (`#:relied`, `written-relied`); a path to a module, `(with m x)`,
+        ;; a `let` of it around the `with` of its binder (`with-module`).
         ((with)
-         (begin (at-least items 2 "`(with module body …)`" a b)
-                (if (syn-symbol? (nth items 1))
-                    (let ((r (written-relied pfail-at (drop items 2))))
-                      (e-with (syn-symbol (nth items 1)) (parse-body (extract r 2) a b) a b 0 0
-                              (extract r 1)))
-                    (pfail "`with` opens a module named by a variable" (nth items 1)))))
+         (let* ((m (begin (at-least items 2 "`(with module body …)`" a b)
+                          (with-module pfail-at (nth items 1))))
+                (r (written-relied pfail-at (drop items 2)))
+                (w (e-with m (parse-body (extract r 2) a b) a b 0 0 (extract r 1))))
+           (if (syn-symbol? (nth items 1)) w
+               (e-let (list (product (1 m) (2 (parse-exp (nth items 1))))) w a b 0 0))))
         (else
          (cond ((region-form? head) (parse-region-form items head a b))
                ((bloblet-form? head) (parse-bloblet head (cdr items) a b))
