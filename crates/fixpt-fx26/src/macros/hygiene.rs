@@ -11,6 +11,7 @@
 
 use super::procedural::{alias_base, alias_made};
 use super::{Aligner, Atom, Env, Free, Kids, Level, Macros, Mode, Ns, STy};
+use super::paths::Path;
 use crate::error::R;
 use fixpt_read::{Interner, Sym};
 use crate::heap_syn::{At, Syn, V};
@@ -54,14 +55,14 @@ impl Macros {
         self.ensure_kernel(interner)?;
         let fx = interner.intern("#%fx");
         let none = HashMap::default();
-        let mut parts: Vec<(Vec<bool>, At, Made)> = Vec::new();
+        let mut parts: Vec<(Path, At, Made)> = Vec::new();
         let mut made: Vec<(usize, Made)> = Vec::new();
         let mut defined = Vec::new();
         let mut next_fresh = self.withs.captors;
         let key = self.withs.form_key.clone();
         {
             let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-            let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
+            let root = a.align(&Rc::new(STy::Item), form, None, Path::ROOT)?;
             let mut found = Vec::new();
             a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
             // What the form's definitions bind, the top level's.
@@ -131,7 +132,7 @@ impl Macros {
                     match innermost(env, x, ns) {
                         // A `module`'s item, whose name is its label too, is
                         // not renamed: that would change what the module gives.
-                        Ok(Some(b)) if !top.contains(&b) && within_module(form, &a.nodes[b].path, a.interner) => {
+                        Ok(Some(b)) if !top.contains(&b) && within_module(form, &a.nodes[b].path.steps(), a.interner) => {
                             let span = if inst { form.at() } else { a.nodes[*at].syn.at() };
                             return Err(crate::error::FxError::at(span, format!("`{}`, which an expansion here names as its macro has it, is bound inside a `module` around the use, where renaming it may change what the module gives: not yet", a.interner.name(x))));
                         }
@@ -180,7 +181,7 @@ impl Macros {
             if !captors.is_empty() {
                 let mut fresh: HashMap<usize, String> = HashMap::default();
                 let mut sorted: Vec<usize> = captors.iter().copied().collect();
-                sorted.sort_by(|x, y| a.nodes[*x].path.iter().map(|s| !s).cmp(a.nodes[*y].path.iter().map(|s| !s)));
+                super::sort_by_path(&mut sorted, |x| a.nodes[x].path, form);
                 for b in sorted {
                     let Kids::Binder(n, _) = a.nodes[b].kids else { unreachable!("a binder") };
                     next_fresh += 1;
@@ -199,7 +200,7 @@ impl Macros {
                 }
                 made.extend(fresh.into_iter().map(|(b, f)| (b, Made::Plain(f))));
             }
-            let at = |k: usize| (a.nodes[k].path.clone(), a.nodes[k].syn.at());
+            let at = |k: usize| (a.nodes[k].path, a.nodes[k].syn.at());
             for (r, m) in made {
                 let (p, sp) = at(r);
                 parts.push((p, sp, m));
@@ -208,7 +209,7 @@ impl Macros {
         self.withs.captors = next_fresh;
         self.withs.shapes.aliases_defined.extend(defined);
         let (with, toplevel) = (interner.intern("with"), interner.intern("#%toplevel"));
-        let mut written: HashMap<Vec<bool>, Syn> = HashMap::default();
+        let mut written: HashMap<Path, Syn> = HashMap::default();
         for (p, span, m) in parts {
             let s = match m {
                 Made::TopDesc(n) => Syn::named(span, &format!("#%toplevel:{n}"), interner),
@@ -224,7 +225,7 @@ impl Macros {
             };
             written.insert(p, s);
         }
-        Ok(written_at(form, &mut Vec::new(), &written))
+        Ok(written_at(form, Path::ROOT, &written))
     }
 }
 
@@ -252,7 +253,6 @@ fn has_alias(s: &Syn, interner: &Interner) -> bool {
     }
 }
 
-/// `s`, at `path`, with each part `written` holds at its path written so.
 /// Whether `path`, in `form`, is inside a `(module …)` of it, not its head
 /// (FX-26's `within-module?`, alike): a binder there may be an item, which
 /// its name labels.
@@ -269,22 +269,21 @@ fn within_module(form: &Syn, path: &[bool], interner: &Interner) -> bool {
     }
 }
 
-fn written_at(s: &Syn, path: &mut Vec<bool>, written: &HashMap<Vec<bool>, Syn>) -> Syn {
-    if let Some(w) = written.get(path) {
+/// `s`, at `path`, with each part `written` holds at its path written so.
+fn written_at(s: &Syn, path: Path, written: &HashMap<Path, Syn>) -> Syn {
+    if let Some(w) = written.get(&path) {
         return w.clone();
     }
     match &s.view() {
         V::List { items, tail } => {
-            let depth = path.len();
+            // Each item's path, the car of the cdrs before it.
+            let mut rest = path;
             let mut out = Vec::with_capacity(items.len());
             for i in items {
-                path.push(true);
-                out.push(written_at(i, path, written));
-                path.pop();
-                path.push(false);
+                out.push(written_at(i, rest.push(true), written));
+                rest = rest.push(false);
             }
-            let tail = tail.as_ref().map(|t| written_at(t, path, written));
-            path.truncate(depth);
+            let tail = tail.as_ref().map(|t| written_at(t, rest, written));
             Syn::of_list(s.at(), &out, tail)
         }
         _ => s.clone(),

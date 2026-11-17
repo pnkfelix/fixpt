@@ -21,6 +21,7 @@
 //! decides which macros need none written, never what is safe.
 
 use super::{ellipsis, exports, normal, reserved, split, Addr, Aligner, Atom, Bind, Delta, Env, Kids, Level, Macro, Macros, Mode, Ns, PInfo, Ring, STy};
+use super::paths::Path;
 use crate::error::{FxError, R};
 use fixpt_read::{Interner, Sym};
 use crate::heap_syn::{At, Syn, V};
@@ -783,7 +784,7 @@ impl Macros {
             Makes::Type => STy::Type,
             Makes::Expr => STy::Expr,
         });
-        let root = t.align(&ty, template, None, Vec::new())?;
+        let root = t.align(&ty, template, None, Path::ROOT)?;
         let (mut found, mut seqs) = (Vec::new(), Vec::new());
         t.walk(root, &Env::default(), false, 0, &mut found, &mut seqs)?;
         let mut out = Vec::new();

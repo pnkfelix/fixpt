@@ -14,6 +14,7 @@
 //! a function's result's, its body's or its type's.
 
 use super::{Aligner, Atom, Kids, Level, Macros, Mode, Ns, STy};
+use super::paths::Path;
 use crate::error::{FxError, R};
 use fixpt_read::{Interner, Sym};
 use crate::heap_syn::{At, Kept, Syn, V};
@@ -83,12 +84,12 @@ pub(crate) struct FileShape {
     pub(crate) module: Option<Rc<Shape>>,
     /// What to write into its forms, by path (`with_written`): held, as
     /// it lasts past code that runs.
-    written: Option<Rc<HashMap<Vec<bool>, Option<Kept>>>>,
+    written: Option<Rc<HashMap<Path, Option<Kept>>>>,
 }
 
 /// The shapes to write into a form, by the path of each form that opens a
 /// module: `None` where the module's shape is not known.
-type Written = HashMap<Vec<bool>, Option<Syn>>;
+type Written = HashMap<Path, Option<Syn>>;
 
 /// What a walk finds (`Macros::walked`).
 #[derive(Default)]
@@ -446,7 +447,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
                     // it gives; nor is an `include`'s of what any includes,
                     // as the checkers make the modules included before the
                     // items.
-                    Segment::Shape(m, _) if self.a.nodes[at].path.starts_with(&self.a.nodes[*m].path) => {}
+                    Segment::Shape(m, _) if self.a.nodes[at].path.starts_with(self.a.nodes[*m].path) => {}
                     Segment::Shape(_, true) if self.in_included[at] => {}
                     // What the module gives: asked, and the answer kept, as
                     // what the form that opens it relies on.
@@ -989,7 +990,7 @@ impl Macros {
                 }
             }
         }
-        Ok(with_written(&form, &mut Vec::new(), &walked.written, interner))
+        Ok(with_written(&form, Path::ROOT, &walked.written, interner))
     }
 
     /// Form `form`, walked: the shapes to write into it, by the path of
@@ -1000,7 +1001,7 @@ impl Macros {
         let mut out = Walked::default();
         let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         let t = Rc::new(if top { STy::Item } else { STy::Expr });
-        let root = a.align(&t, form, None, Vec::new())?;
+        let root = a.align(&t, form, None, Path::ROOT)?;
         let mut found = Vec::new();
         a.walk(root, &super::Env::default(), false, 0, &mut found, &mut Vec::new())?;
         let empty = TopShapes::default();
@@ -1026,7 +1027,7 @@ impl Macros {
             let Some(m) = c.elem(k, 1) else { continue };
             let asked = c.asked.get(&m).cloned().unwrap_or_default();
             let s = (!asked.unknown).then(|| asked.written(node.syn.at(), interner));
-            out.written.insert(node.path.clone(), s);
+            out.written.insert(node.path, s);
         }
         if !top {
             out.shape = c.exp(root);
@@ -1110,7 +1111,7 @@ impl Macros {
         if self.shapes_prepared(interner).is_err() {
             return forms;
         }
-        let shaped = with_written(&form, &mut Vec::new(), &written, interner);
+        let shaped = with_written(&form, Path::ROOT, &written, interner);
         if wrapped { shaped.list().expect("a module")[1..].to_vec() } else { vec![shaped] }
     }
 
@@ -1226,20 +1227,19 @@ impl Known {
 
 /// `s`, at `path`, with each shape of `written` written into the form at
 /// its path, after its first operand.
-fn with_written(s: &Syn, path: &mut Vec<bool>, written: &Written, interner: &Interner) -> Syn {
+fn with_written(s: &Syn, path: Path, written: &Written, interner: &Interner) -> Syn {
     let words = (interner.get("relied").expect("interned"), interner.get("#f").expect("interned"));
     with_written_in(s, path, written, interner, words)
 }
 
-fn with_written_in(s: &Syn, path: &mut Vec<bool>, written: &Written, interner: &Interner, words: (Sym, Sym)) -> Syn {
+fn with_written_in(s: &Syn, path: Path, written: &Written, interner: &Interner, words: (Sym, Sym)) -> Syn {
     let (shape, no) = words;
     let V::List { items, tail } = &s.view() else { return s.clone() };
     let mut out = Vec::with_capacity(items.len() + 2);
-    let depth = path.len();
-    // Only a form that opens a module is looked up: a long list's paths
-    // are long.
     let opening = items.first().and_then(|h| h.sym()).is_some_and(|h| opens(interner.name(h)));
-    let written_here = if opening { written.get(&path[..depth]).cloned() } else { None };
+    let written_here = if opening { written.get(&path).cloned() } else { None };
+    // Each item's path, the car of the cdrs before it.
+    let mut rest = path;
     for (k, i) in items.iter().enumerate() {
         if k == 2
             && let Some(w) = &written_here
@@ -1247,10 +1247,8 @@ fn with_written_in(s: &Syn, path: &mut Vec<bool>, written: &Written, interner: &
             out.push(Syn::new(s.at(), V::Keyword(shape), interner));
             out.push(w.clone().unwrap_or_else(|| Syn::symbol(s.at(), no, interner)));
         }
-        path.push(true);
-        out.push(with_written_in(i, path, written, interner, words));
-        path.pop();
-        path.push(false);
+        out.push(with_written_in(i, rest.push(true), written, interner, words));
+        rest = rest.push(false);
     }
     if items.len() == 2
         && let Some(w) = &written_here
@@ -1258,8 +1256,7 @@ fn with_written_in(s: &Syn, path: &mut Vec<bool>, written: &Written, interner: &
         out.push(Syn::new(s.at(), V::Keyword(shape), interner));
         out.push(w.clone().unwrap_or_else(|| Syn::symbol(s.at(), no, interner)));
     }
-    let new_tail = tail.as_ref().map(|t| with_written_in(t, path, written, interner, words));
-    path.truncate(depth);
+    let new_tail = tail.as_ref().map(|t| with_written_in(t, rest, written, interner, words));
     s.with_parts((items, *tail), &out, new_tail)
 }
 

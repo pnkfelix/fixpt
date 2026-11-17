@@ -63,9 +63,11 @@ use fixpt_read::{Interner, Span, Sym};
 use crate::heap_syn::{At, Kept, Shape, Syn, V};
 use fixpt_hash::{HashMap, HashSet};
 use std::rc::Rc;
+use paths::Path;
 
 mod contract;
 mod infer;
+pub(crate) mod paths;
 mod shown;
 pub(crate) mod shapes;
 pub(crate) mod hygiene;
@@ -447,7 +449,7 @@ struct Clause {
     /// use's name matches if it is bound to that one.
     marks: HashMap<Sym, usize>,
     template: Kept,
-    actions: HashMap<Vec<bool>, Action>,
+    actions: HashMap<Path, Action>,
     /// Its pattern's variables, in the order the pattern has them.
     pvars: Vec<(Sym, PInfo)>,
     /// Each typed hole's type, as a use reads it (`(select #%toplevel T)`),
@@ -485,7 +487,7 @@ struct Clause {
 #[derive(Clone, Debug)]
 enum Action {
     /// The binder's path, and how many ellipses it is under.
-    Rename(Vec<bool>, usize),
+    Rename(Path, usize),
     /// A name free in the template: its alias, `%~K.N:name`, which the
     /// resolution after expansion makes the name where the macro is
     /// defined (`hygiene`).
@@ -745,8 +747,8 @@ fn kernel_list(forms: &[Syn], interner: &Interner, name: &str) -> Vec<Syn> {
 /// binder was repeated, by its path and the repetitions around that.
 #[derive(Default)]
 struct Made {
-    fresh: HashMap<(Vec<bool>, Vec<usize>), Sym>,
-    counts: HashMap<(Vec<bool>, Vec<usize>), usize>,
+    fresh: HashMap<(Path, Vec<usize>), Sym>,
+    counts: HashMap<(Path, Vec<usize>), usize>,
 }
 
 /// Where a syntax type is aligned with syntax: a macro's pattern, a
@@ -766,7 +768,7 @@ enum Mode {
 struct Node {
     syn: Syn,
     /// Its path from the template's (or pattern's) root.
-    path: Vec<bool>,
+    path: Path,
     /// The type at it, its annotations taken off.
     core: Rc<STy>,
     /// Its imports, outermost first, and its export, each with the root its
@@ -1601,7 +1603,7 @@ impl Macros {
         }
         self.checking = true;
         self.withs.def_envs.insert("0".to_string(), c.def_env.clone());
-        let body = self.transcribe(c, &template, &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), 0, interner)?;
+        let body = self.transcribe(c, &template, Path::ROOT, &binds, &mut Made::default(), &mut Vec::new(), 0, interner)?;
         self.checking = false;
         let lambda = Syn::lst(at, vec![sym("lambda", interner), list_of(at, params, None), body]);
         let made = if binders.is_empty() { lambda } else { Syn::lst(at, vec![sym("plambda", interner), Syn::lst(at, binders), lambda]) };
@@ -2088,7 +2090,7 @@ impl Macros {
         // declared environment.
         let none = HashMap::default();
         let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-        let root = p.align(sig, &pattern, None, Vec::new())?;
+        let root = p.align(sig, &pattern, None, Path::ROOT)?;
         // A `syntax-rules`' literals, each a name the signature has written
         // as it is, `(literal name)`, where the pattern has it; and no other.
         {
@@ -2145,7 +2147,7 @@ impl Macros {
         let mut heads: HashMap<u64, Head> = HashMap::default();
         let (t, root, found, seqs, read) = loop {
             let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: scoped.then_some(&heads), pending: Vec::new() };
-            let root = t.align(&made, template, None, Vec::new())?;
+            let root = t.align(&made, template, None, Path::ROOT)?;
             let (mut found, mut seqs) = (Vec::new(), Vec::new());
             t.walk(root, &Env::default(), false, 0, &mut found, &mut seqs)?;
             let read = if t.pending.is_empty() { Vec::new() } else { t.heads_read(&found)? };
@@ -2337,8 +2339,7 @@ impl Macros {
             if let Head::Macro(_) = h {
                 checked_uses.insert(t.nodes[*at].syn.at().start);
                 if let Some(b) = b {
-                    let mut head = t.nodes[*at].path.clone();
-                    head.push(true);
+                    let head = t.nodes[*at].path.push(true);
                     actions.insert(head, Action::Rename(t.nodes[*b].path.clone(), binder_depth.get(b).copied().unwrap_or(0)));
                 }
             }
@@ -2383,7 +2384,7 @@ impl Macros {
                 && !pvars.contains_key(&name)
             {
                 let mut a = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-                if a.align(sig, &operands, None, Vec::new()).is_ok() {
+                if a.align(sig, &operands, None, Path::ROOT).is_ok() {
                     checked_uses.insert(node.syn.at().start);
                 }
             }
@@ -2695,10 +2696,10 @@ impl Macros {
     pub fn alpha_renamed(&mut self, form: &Syn, interner: &mut Interner) -> R<Syn> {
         self.ensure_kernel(interner)?;
         let none = HashMap::default();
-        let mut renamed: HashMap<Vec<bool>, String> = HashMap::default();
+        let mut renamed: HashMap<Path, String> = HashMap::default();
         {
             let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-            let root = a.align(&Rc::new(STy::Item), form, None, Vec::new())?;
+            let root = a.align(&Rc::new(STy::Item), form, None, Path::ROOT)?;
             let mut found = Vec::new();
             a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
             // The names definitions give, which other forms see.
@@ -2747,19 +2748,19 @@ impl Macros {
             let mut binders: Vec<usize> = (0..a.nodes.len())
                 .filter(|t| matches!(a.nodes[*t].kids, Kids::Binder(n, Ns::Value) if !defined.contains(t) && !kept.contains(&n)))
                 .collect();
-            binders.sort_by(|x, y| a.nodes[*x].path.iter().map(|s| !s).cmp(a.nodes[*y].path.iter().map(|s| !s)));
+            sort_by_path(&mut binders, |t| a.nodes[t].path, form);
             binders.dedup_by(|x, y| a.nodes[*x].path == a.nodes[*y].path);
             for (k, t) in binders.into_iter().enumerate() {
                 let Kids::Binder(n, _) = a.nodes[t].kids else { unreachable!("a binder") };
-                renamed.insert(a.nodes[t].path.clone(), format!("{}%{}", a.name(n), k + 1));
+                renamed.insert(a.nodes[t].path, format!("{}%{}", a.name(n), k + 1));
             }
             for (at, b) in &target {
                 if let Some(name) = renamed.get(&a.nodes[*b].path).cloned() {
-                    renamed.insert(a.nodes[*at].path.clone(), name);
+                    renamed.insert(a.nodes[*at].path, name);
                 }
             }
         }
-        Ok(rename_paths(form, &mut Vec::new(), &renamed, interner))
+        Ok(rename_paths(form, Path::ROOT, &renamed, interner))
     }
 
     /// A use of macro `name`, parsed by its signature, then the first clause
@@ -2781,7 +2782,7 @@ impl Macros {
             let none = HashMap::default();
             let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
             let fault = if trusted { " (a use a template made, which its macro's definition found fits: a fault in the binding-shape check, not in the program)" } else { "" };
-            u.align(&m.sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}{fault}", interner.name(name), e.message)))?;
+            u.align(&m.sig, &operands, None, Path::ROOT).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}{fault}", interner.name(name), e.message)))?;
         }
         for c in &m.clauses {
             let mut binds = HashMap::default();
@@ -2794,7 +2795,7 @@ impl Macros {
             let made = fixpt_read::record_expansion(interner.name(name), s.span(), m.text.clone(), typed);
             self.expansion_begun(made, c.def_env.clone());
             return self
-                .transcribe(c, &c.template.get(), &mut Vec::new(), &binds, &mut Made::default(), &mut Vec::new(), made, interner)
+                .transcribe(c, &c.template.get(), Path::ROOT, &binds, &mut Made::default(), &mut Vec::new(), made, interner)
                 .map_err(|e| FxError::at(s.at(), format!("a use of `{}`: {}", interner.name(name), e.message)));
         }
         Err(FxError::at(s.at(), format!("a use of `{}` that no clause of it matches", interner.name(name))))
@@ -2826,7 +2827,7 @@ impl Macros {
         let (head, operands) = split(s).expect("a list");
         let none = HashMap::default();
         let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-        u.align(sig, &operands, None, Vec::new()).map_err(|e| FxError::at(e.span, format!("a use of `{shown}`: {}", e.message)))?;
+        u.align(sig, &operands, None, Path::ROOT).map_err(|e| FxError::at(e.span, format!("a use of `{shown}`: {}", e.message)))?;
         let made = fixpt_read::record_expansion(&shown, s.span(), None, false);
         self.expansion_begun(made, p.def_env.clone());
         let out = self.procedural_run(name, p, s, made, interner)?;
@@ -2896,7 +2897,7 @@ impl Macros {
     fn references_renamed(&self, part: &Syn, core: &Rc<STy>, renames: &HashMap<Sym, Sym>, interner: &mut Interner) -> R<Syn> {
         let none = HashMap::default();
         let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-        let root = a.align(core, part, None, Vec::new())?;
+        let root = a.align(core, part, None, Path::ROOT)?;
         let mut found = Vec::new();
         a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
         let mut at: HashMap<u64, Sym> = HashMap::default();
@@ -2917,7 +2918,7 @@ impl Macros {
     fn alpha_nodes(&self, s: &Syn, made: &Rc<STy>, interner: &mut Interner) -> R<Vec<AlphaNode>> {
         let none = HashMap::default();
         let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-        let root = a.align(made, s, None, Vec::new())?;
+        let root = a.align(made, s, None, Path::ROOT)?;
         let mut found = Vec::new();
         a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
         let envs: HashMap<usize, Env> = found.into_iter().map(|(i, env, _, _)| (i, env)).collect();
@@ -2953,7 +2954,7 @@ impl Macros {
         let (pattern, parts) = self.contract_pattern(sig, operands, interner)?;
         let none = HashMap::default();
         let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-        let root = p.align(sig, &pattern, None, Vec::new())?;
+        let root = p.align(sig, &pattern, None, Path::ROOT)?;
         let mut found = Vec::new();
         p.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
         let part_of = |n: Sym, i: &Interner| i.name(n).strip_prefix("%part:").and_then(|k| k.parse::<usize>().ok());
@@ -3023,7 +3024,7 @@ impl Macros {
         let mut said: Vec<(Sym, Ns)> = Vec::new();
         {
             let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-            let root = p.align(sig, &pattern, None, Vec::new())?;
+            let root = p.align(sig, &pattern, None, Path::ROOT)?;
             p.walk(root, &Env::default(), false, 0, &mut Vec::new(), &mut Vec::new())?;
             if let Some((b, r)) = p.nodes[root].export.clone() {
                 let (atoms, cages) = exports(&p.eval(&b, r, pattern.at())?);
@@ -3047,7 +3048,7 @@ impl Macros {
         {
             let ours = |e: FxError| FxError::at(e.span, format!("its expansion: {}", e.message));
             let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-            let root = a.align(&Rc::new(STy::Defn), out, None, Vec::new()).map_err(ours)?;
+            let root = a.align(&Rc::new(STy::Defn), out, None, Path::ROOT).map_err(ours)?;
             a.walk(root, &Env::default(), false, 0, &mut Vec::new(), &mut Vec::new()).map_err(ours)?;
             for i in 0..a.nodes.len() {
                 let (STy::Item | STy::Defn, Kids::Form(x)) = (&*a.nodes[i].core, &a.nodes[i].kids) else { continue };
@@ -3081,7 +3082,7 @@ impl Macros {
     fn contract_pattern(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(Syn, Vec<Syn>)> {
         let none = HashMap::default();
         let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-        u.align(sig, operands, None, Vec::new())?;
+        u.align(sig, operands, None, Path::ROOT)?;
         let leaf = |t: &STy| matches!(t, STy::Expr | STy::Lambda | STy::Bvar | STy::Dvar | STy::Id | STy::Data | STy::Type | STy::Label | STy::Kind | STy::Defn | STy::Item);
         let mut leaves: HashSet<u64> = HashSet::default();
         for n in &u.nodes {
@@ -3214,9 +3215,9 @@ impl Macros {
     /// repetition of each ellipsis it is under, outermost first; a binder's
     /// fresh name is by its path and the repetitions it is in.
     #[allow(clippy::too_many_arguments)]
-    fn transcribe(&mut self, c: &Clause, t: &Syn, path: &mut Vec<bool>, binds: &HashMap<Sym, Syn>, fresh: &mut Made, iters: &mut Vec<usize>, made: u32, interner: &mut Interner) -> R<Syn> {
+    fn transcribe(&mut self, c: &Clause, t: &Syn, path: Path, binds: &HashMap<Sym, Syn>, fresh: &mut Made, iters: &mut Vec<usize>, made: u32, interner: &mut Interner) -> R<Syn> {
         let at = t.at().in_expansion(made);
-        let typed = match c.actions.get(&*path) {
+        let typed = match c.actions.get(&path) {
             Some(Action::StandardType) => Some(interner.intern("#%fx")),
             Some(Action::ModuleType(m)) => Some(*m),
             Some(Action::InstanceType(m)) => Some(interner.intern(&procedural::alias(interner.name(*m), &self.tag_of(made)))),
@@ -3238,9 +3239,9 @@ impl Macros {
                         None => b.clone(),
                     });
                 }
-                Ok(match c.actions.get(&*path) {
+                Ok(match c.actions.get(&path) {
                     Some(Action::Rename(binder, depth)) => {
-                        let key = (binder.clone(), iters[..(*depth).min(iters.len())].to_vec());
+                        let key = (*binder, iters[..(*depth).min(iters.len())].to_vec());
                         let name = match fresh.fresh.get(&key) {
                             Some(f) => *f,
                             None => {
@@ -3263,15 +3264,16 @@ impl Macros {
             // `(... ...)`, the ellipsis of a macro the template defines.
             V::List { items, tail } if items.len() == 2 && tail.is_none() && is_ellipsis(&items[0], interner) && is_ellipsis(&items[1], interner) => Ok(Syn::new(at, items[0].view().clone(), interner)),
             V::List { items, tail } => {
-                let head = match c.actions.get(&*path) {
+                let head = match c.actions.get(&path) {
                     Some(Action::MacroHead(h)) => Some(*h),
                     _ => None,
                 };
-                let depth = path.len();
+                // Each item's path, the car of the cdrs before it.
+                let mut rest = path;
                 let mut out = Vec::new();
                 let mut i = 0;
                 while i < items.len() {
-                    path.push(true);
+                    let item = rest.push(true);
                     // `p ...`: `p` once for each element of what the use gave
                     // of the pattern variables in it under more ellipses than
                     // this, together.
@@ -3284,11 +3286,11 @@ impl Macros {
                         }
                         // The binders of the template's repeated in it,
                         // and those it refers to that were repeated before.
-                        let under: Vec<(&Vec<bool>, &Vec<bool>)> = c
+                        let under: Vec<(&Path, &Path)> = c
                             .actions
                             .iter()
                             .filter_map(|(at, a)| match a {
-                                Action::Rename(b, d) if *d > iters.len() && at.starts_with(path) => Some((at, b)),
+                                Action::Rename(b, d) if *d > iters.len() && at.starts_with(item) => Some((at, b)),
                                 _ => None,
                             })
                             .collect();
@@ -3313,29 +3315,25 @@ impl Macros {
                                 each.insert(*n, l[r].clone());
                             }
                             iters.push(r);
-                            let x = self.transcribe(c, &items[i], path, &each, fresh, iters, made, interner);
+                            let x = self.transcribe(c, &items[i], item, &each, fresh, iters, made, interner);
                             iters.pop();
                             out.push(x?);
                         }
-                        path.pop();
-                        path.push(false);
-                        path.push(false);
+                        rest = rest.push(false).push(false);
                         i += 2;
                         continue;
                     }
-                    out.push(self.transcribe(c, &items[i], path, binds, fresh, iters, made, interner)?);
-                    path.pop();
-                    path.push(false);
+                    out.push(self.transcribe(c, &items[i], item, binds, fresh, iters, made, interner)?);
+                    rest = rest.push(false);
                     i += 1;
                 }
                 if let Some(h) = head {
                     out[0] = Syn::symbol(out[0].at(), h, interner);
                 }
                 let tail = match tail {
-                    Some(x) => Some(self.transcribe(c, x, path, binds, fresh, iters, made, interner)?),
+                    Some(x) => Some(self.transcribe(c, x, rest, binds, fresh, iters, made, interner)?),
                     None => None,
                 };
-                path.truncate(depth);
                 // A checked use's: trusted to fit, as it is expanded.
                 if made != 0 && c.checked_uses.contains(&t.at().start) {
                     self.withs.trusted.insert(at);
@@ -3354,7 +3352,7 @@ impl Aligner<'_> {
 
     /// `s`, at `path`, aligned with type `t`; `root`, the node its
     /// addresses are from, if not itself.
-    fn align(&mut self, t: &Rc<STy>, s: &Syn, root: Option<usize>, path: Vec<bool>) -> R<usize> {
+    fn align(&mut self, t: &Rc<STy>, s: &Syn, root: Option<usize>, path: Path) -> R<usize> {
         let at = self.node_new(t, s, path);
         self.fill(at, t, s, root.unwrap_or(at))?;
         Ok(at)
@@ -3427,7 +3425,7 @@ impl Aligner<'_> {
     }
 
     /// A node for `s`, at `path`, of type `t`, to be filled.
-    fn node_new(&mut self, t: &Rc<STy>, s: &Syn, path: Vec<bool>) -> usize {
+    fn node_new(&mut self, t: &Rc<STy>, s: &Syn, path: Path) -> usize {
         let at = self.nodes.len();
         // The node's syntax is the form's own, shared, not a copy.
         self.nodes.push(Node { syn: *s, path, core: t.clone(), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, head: false, kids: Kids::Other });
@@ -3532,8 +3530,7 @@ impl Aligner<'_> {
             let Some((elem, cage)) = self.m.seq_of(t) else {
                 return Err(fail(format!("`{}` repeats a part by `...` where the form takes no list of them", self.show(s))));
             };
-            let mut p = self.nodes[at].path.clone();
-            p.push(true);
+            let p = self.nodes[at].path.push(true);
             let e = self.align(&elem, &x, None, p)?;
             self.nodes[e].repeated = true;
             // A pattern variable where elements of more than one shape may
@@ -3589,14 +3586,10 @@ impl Aligner<'_> {
                 // A use's paths none: only its fit is wanted, and a list's
                 // part's path is as long as where it is (`TODO.md` §231).
                 let (ap, dp) = if self.mode == Mode::Use {
-                    (Vec::new(), Vec::new())
+                    (Path::ROOT, Path::ROOT)
                 } else {
-                    let path = self.nodes[at].path.clone();
-                    let mut ap = path.clone();
-                    ap.push(true);
-                    let mut dp = path;
-                    dp.push(false);
-                    (ap, dp)
+                    let path = self.nodes[at].path;
+                    (path.push(true), path.push(false))
                 };
                 let x_at = self.node_new(a, &x, ap);
                 // The rest, its node made here and filled after the first
@@ -3735,13 +3728,12 @@ impl Aligner<'_> {
     /// The expressions a quasiquote's datum `s`, at `path`, unquotes at
     /// `depth` 1, each aligned, onto `kids`: a nested `quasiquote` deepens,
     /// an `unquote` or `unquote-splicing` shallows, as R7RS counts.
-    fn unquoted(&mut self, s: &Syn, path: Vec<bool>, depth: u32, kids: &mut Vec<usize>) -> R<()> {
+    fn unquoted(&mut self, s: &Syn, path: Path, depth: u32, kids: &mut Vec<usize>) -> R<()> {
         match &s.view() {
             V::List { items, tail } => {
                 let head = items[0].sym().map(|h| self.name(h).to_string());
                 if items.len() == 2 && tail.is_none() {
-                    let mut inner = path.clone();
-                    inner.extend([false, true]);
+                    let inner = path.extend(&[false, true]);
                     match head.as_deref() {
                         Some("unquote" | "unquote-splicing") if depth == 1 => {
                             kids.push(self.align(&Rc::new(STy::Expr), &items[1], None, inner)?);
@@ -3754,10 +3746,8 @@ impl Aligner<'_> {
                 }
                 let mut p = path;
                 for i in items {
-                    let mut ip = p.clone();
-                    ip.push(true);
-                    self.unquoted(i, ip, depth, kids)?;
-                    p.push(false);
+                    self.unquoted(i, p.push(true), depth, kids)?;
+                    p = p.push(false);
                 }
                 match tail {
                     Some(t) => self.unquoted(t, p, depth, kids),
@@ -3815,7 +3805,7 @@ impl Aligner<'_> {
     /// `defn`, where a template makes definitions, else an expression's.
     /// What it aligns next, if anything: the type, the path, and whether
     /// it is the form's operands (else the whole form).
-    fn form(&mut self, at: usize, s: &Syn, defn: bool) -> R<Option<(Rc<STy>, Vec<bool>, bool)>> {
+    fn form(&mut self, at: usize, s: &Syn, defn: bool) -> R<Option<(Rc<STy>, Path, bool)>> {
         let V::List { items, tail } = &s.view() else { unreachable!("a list") };
         let head = items[0].sym().filter(|h| !self.pvars.contains_key(h));
         // A list whose head a `(macro σ made)` entry may bind: pending, read by
@@ -3840,8 +3830,7 @@ impl Aligner<'_> {
                         (true, false, _) => return Err(not_one("them by a macro that makes definitions, not an expression's")),
                         _ => {}
                     }
-                    let mut p = self.nodes[at].path.clone();
-                    p.push(false);
+                    let p = self.nodes[at].path.push(false);
                     return Ok(Some((sig, p, true)));
                 }
                 // Unread, it exports nothing yet.
@@ -3905,8 +3894,7 @@ impl Aligner<'_> {
             }
             Some((_, "quasiquote")) if self.mode == Mode::Program => {
                 let [_, x] = &items[..] else { return Err(FxError::at(s.at(), "`(quasiquote datum)`")) };
-                let mut p = self.nodes[at].path.clone();
-                p.extend([false, true]);
+                let p = self.nodes[at].path.extend(&[false, true]);
                 let mut kids = Vec::new();
                 self.unquoted(x, p, 1, &mut kids)?;
                 self.nodes[at].kids = Kids::Desc(kids);
@@ -3931,8 +3919,7 @@ impl Aligner<'_> {
                 {
                     let sig = Rc::new(STy::Pair(Rc::new(STy::Id), Rc::new(STy::Pair(Rc::new(STy::Data), Rc::new(STy::Nil)))));
                     let (_, operands) = split(s).expect("a list");
-                    let mut p = self.nodes[at].path.clone();
-                    p.push(false);
+                    let p = self.nodes[at].path.push(false);
                     let x = self.align(&sig, &operands, None, p)?;
                     if let Kids::Pair(m, _) = self.nodes[x].kids
                         && let Kids::Ref(n, ns, _) = self.nodes[m].kids
@@ -3971,11 +3958,7 @@ impl Aligner<'_> {
         // no stack.
         Ok(Some(match sig {
             _ if construct && !defn => (self.m.k.forms["%construct"].clone(), path, false),
-            Some(sig) => {
-                let mut p = path;
-                p.push(false);
-                (sig, p, true)
-            }
+            Some(sig) => (sig, path.push(false), true),
             None => (self.m.k.forms["%app"].clone(), path, false),
         }))
     }
@@ -4058,8 +4041,7 @@ impl Aligner<'_> {
                 return Err(fail(format!("`{}` makes {what}, not a description", self.name(h))));
             }
             let (sig, (_, operands)) = (m.sig.clone(), split(s).expect("a list"));
-            let mut p = self.nodes[at].path.clone();
-            p.push(false);
+            let p = self.nodes[at].path.push(false);
             let x = self.align(&sig, &operands, None, p)?;
             self.nodes[at].kids = Kids::Form(x);
             return Ok(());
@@ -4350,17 +4332,15 @@ impl Aligner<'_> {
     /// A node for each of `items`, the parts of the list at node `at`, at
     /// their paths in it: `at`'s kids.
     fn desc_kids(&mut self, at: usize, items: &[Syn]) -> Vec<usize> {
-        let mut path = self.nodes[at].path.clone();
+        let mut path = self.nodes[at].path;
         let mut kids = Vec::new();
         // `p ...` last: `p` repeated, the `...` no part of its own.
         let repeated = items.len() >= 2 && is_ellipsis(&items[items.len() - 1], self.interner);
         let items = if repeated { &items[..items.len() - 1] } else { items };
         for i in items {
-            let mut p = path.clone();
-            p.push(true);
             kids.push(self.nodes.len());
-            self.nodes.push(Node { syn: i.clone(), path: p, core: Rc::new(STy::Type), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, head: false, kids: Kids::Other });
-            path.push(false);
+            self.nodes.push(Node { syn: i.clone(), path: path.push(true), core: Rc::new(STy::Type), imports: Vec::new(), export: None, many: false, hole: None, desc: false, repeated: false, head: false, kids: Kids::Other });
+            path = path.push(false);
         }
         if repeated && let Some(&k) = kids.last() {
             self.nodes[k].repeated = true;
@@ -5212,25 +5192,55 @@ fn lettered(s: &Syn, interner: &Interner) -> Option<Syn> {
 }
 
 /// `s`, at `path`, each symbol at a path of `renamed` renamed so.
-fn rename_paths(s: &Syn, path: &mut Vec<bool>, renamed: &HashMap<Vec<bool>, String>, interner: &mut Interner) -> Syn {
-    if let Some(n) = renamed.get(path) {
+fn rename_paths(s: &Syn, path: Path, renamed: &HashMap<Path, String>, interner: &mut Interner) -> Syn {
+    if let Some(n) = renamed.get(&path) {
         return Syn::named(s.at(), n, interner);
     }
     match &s.view() {
         V::List { items, tail } => {
-            let depth = path.len();
+            // Each item's path, the car of the cdrs before it.
+            let mut rest = path;
             let mut out = Vec::new();
             for i in items {
-                path.push(true);
-                out.push(rename_paths(i, path, renamed, interner));
-                path.pop();
-                path.push(false);
+                out.push(rename_paths(i, rest.push(true), renamed, interner));
+                rest = rest.push(false);
             }
-            let tail = tail.as_ref().map(|t| rename_paths(t, path, renamed, interner));
-            path.truncate(depth);
+            let tail = tail.as_ref().map(|t| rename_paths(t, rest, renamed, interner));
             Syn::of_list(s.at(), &out, tail)
         }
         _ => s.clone(),
+    }
+}
+
+/// `nodes` sorted by their paths in `form` (`path_of`), as their steps
+/// sort, a car before a cdr (`true` before `false`): a part before what
+/// follows it, a list's first part before its rest. That is the order a
+/// walk of `form` meets them, so each path is numbered once by the walk,
+/// not compared step by step (`paths.rs`); a path the walk does not meet
+/// (none, as the aligner makes them) by its steps.
+pub(crate) fn sort_by_path(nodes: &mut [usize], path_of: impl Fn(usize) -> Path, form: &Syn) {
+    fn walk(s: &Syn, path: Path, out: &mut HashMap<Path, usize>) {
+        let n = out.len();
+        out.insert(path, n);
+        if let V::List { items, tail } = &s.view() {
+            let mut rest = path;
+            for i in items {
+                walk(i, rest.push(true), out);
+                rest = rest.push(false);
+                let n = out.len();
+                out.insert(rest, n);
+            }
+            if let Some(t) = tail {
+                walk(t, rest, out);
+            }
+        }
+    }
+    let mut order = HashMap::default();
+    walk(form, Path::ROOT, &mut order);
+    if nodes.iter().all(|k| order.contains_key(&path_of(*k))) {
+        nodes.sort_by_key(|k| order[&path_of(*k)]);
+    } else {
+        nodes.sort_by_cached_key(|k| path_of(*k).steps().iter().map(|s| !s).collect::<Vec<bool>>());
     }
 }
 
