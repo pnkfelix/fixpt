@@ -157,14 +157,14 @@ pub(crate) fn with_forms_checked(forms: &[String]) -> Result<(), String> {
 /// of the phase-1 forms `forms` in force where it was defined: what it gave,
 /// copied into `heap` (`heap_syn::copy_datum`), no text between; or why
 /// not. Defined there if it is not, as in a session made since.
-pub(crate) fn apply_copied(style: Style, code: &str, forms: &[String], tag: &str, heap: &mut fixpt_heap::Heap, v: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
+pub(crate) fn apply_copied(style: Style, code: &str, forms: &[String], heap: &mut fixpt_heap::Heap, v: fixpt_heap::Value) -> Result<fixpt_heap::Value, String> {
     let out = with_session(forms, |rt, p| {
         let d = crate::heap_syn::copy_datum(heap, v, &mut rt.heap)?;
         let base = rt.heap.push_root(d);
         let g = p.transformer(rt, style.ty(), &key(style, code), &helpers(code));
         let d = rt.heap.root_at(base);
         rt.heap.pop_roots_to(base);
-        let out = crate::phase1::call_transformer(rt, p, &g?, style, d, tag)?;
+        let out = crate::phase1::call_transformer(rt, p, &g?, style, d)?;
         crate::heap_syn::copy_datum(&rt.heap, out, heap)
     });
     out
@@ -215,14 +215,15 @@ fn asked(request: &str) -> Result<String, String> {
     }
     let Some(rest) = request.strip_prefix("%apply ") else { return Err("not a transformer request".into()) };
     let (head, body) = rest.split_once('\n').ok_or("a malformed transformer request")?;
-    // Its style, the expansion's tag (`K.N`), its code's length, how many
-    // phase-1 forms.
+    // Its style, the expansion's tag (`K.N`, which no transformer is given:
+    // `0`, the field kept for those that write it), its code's length, how
+    // many phase-1 forms.
     let mut words = head.split(' ');
     let mut number = || words.next().map(|w| w.parse::<usize>());
     let style = number();
-    let made = words.next().map(str::to_string);
+    let made = words.next();
     let mut number = || words.next().map(|w| w.parse::<usize>());
-    let (Some(Ok(style)), Some(made), Some(Ok(length)), Some(Ok(n))) = (style, made, number(), number()) else {
+    let (Some(Ok(style)), Some(_), Some(Ok(length)), Some(Ok(n))) = (style, made, number(), number()) else {
         return Err("a malformed transformer request".into());
     };
     let (forms, body) = forms_of(n, body)?;
@@ -242,7 +243,7 @@ fn asked(request: &str) -> Result<String, String> {
         let g = p.transformer(rt, style.ty(), &key(style, code), &helpers(code));
         let d = rt.heap.root_at(base);
         rt.heap.pop_roots_to(base);
-        let out = crate::phase1::call_transformer(rt, p, &g?, style, d, &made)?;
+        let out = crate::phase1::call_transformer(rt, p, &g?, style, d)?;
         Ok(fixpt_runtime::write_value(&rt.heap, out))
     })
 }
@@ -260,6 +261,49 @@ pub(crate) fn helpers(code: &str) -> String {
     )
 }
 
+
+/// What an explicit-renaming transformer gave, `s`, each name its `rename`
+/// made (`%~:x`, the prelude's `%er-rename`) an alias of the expansion of
+/// tag `tag`, `%~K.N:x` (`tagged_name`): the transformer is given nothing
+/// of the expansion that calls it, so what it gives is the same whatever
+/// expansion calls it, and the expander, which knows the expansion, makes
+/// its aliases; as a syntactic closure's are made where it is opened
+/// (`closed`). A quoted datum's too, as `rename` made them there before; a
+/// vector's left as it is, as `closed` leaves one (data, nothing a name in
+/// it binds or refers to).
+pub(crate) fn tagged(s: &Syn, tag: &str, interner: &mut Interner) -> Syn {
+    match &s.view() {
+        V::Symbol(x) => match tagged_name(interner.name(*x), tag) {
+            Some(n) => Syn::named(s.at(), &n, interner),
+            None => s.clone(),
+        },
+        V::List { items, tail } => {
+            let out: Vec<Syn> = items.iter().map(|i| tagged(i, tag, interner)).collect();
+            let new_tail = tail.as_ref().map(|t| tagged(t, tag, interner));
+            s.with_parts((items, *tail), &out, new_tail)
+        }
+        _ => s.clone(),
+    }
+}
+
+/// Name `x`, each `%~:` at its start (before its name, among the tags of
+/// the aliases it is of) `%~TAG:`; none if it has none.
+pub(crate) fn tagged_name(x: &str, tag: &str) -> Option<String> {
+    let (mut s, mut out, mut any) = (x, String::new(), false);
+    while let Some(rest) = s.strip_prefix("%~") {
+        let Some(c) = rest.find(':') else { break };
+        let t = &rest[..c];
+        if !t.bytes().all(tag_byte) {
+            break;
+        }
+        any |= t.is_empty();
+        out.push_str("%~");
+        out.push_str(if t.is_empty() { tag } else { t });
+        out.push(':');
+        s = &rest[c + 1..];
+    }
+    any.then(|| out + s)
+}
 
 /// `x`'s name as where its alias's macro was defined, if `x` is an alias:
 /// every `%~K.N:` taken off.
@@ -407,7 +451,20 @@ fn unaliased(s: &Syn, interner: &mut Interner) -> Syn {
 
 #[cfg(test)]
 mod tests {
-    use super::{alias_base, alias_made};
+    use super::{alias_base, alias_made, tagged_name};
+
+    /// What `rename` made, `%~:x`, an alias of the expansion after the call:
+    /// each empty tag among a name's aliases', none else.
+    #[test]
+    fn a_renamed_name_is_tagged_after_the_call() {
+        assert_eq!(tagged_name("%~:x", "5.1").as_deref(), Some("%~5.1:x"));
+        assert_eq!(tagged_name("%~:%~3.2:x", "5.1").as_deref(), Some("%~5.1:%~3.2:x"));
+        assert_eq!(tagged_name("%~:%~:x", "5.1").as_deref(), Some("%~5.1:%~5.1:x"));
+        assert_eq!(tagged_name("%~3.2:x", "5.1"), None);
+        assert_eq!(tagged_name("x", "5.1"), None);
+        assert_eq!(tagged_name("%~ab:x", "5.1"), None);
+        assert_eq!(tagged_name("%~x", "5.1"), None);
+    }
 
     #[test]
     fn an_alias_is_its_base_name_marked() {

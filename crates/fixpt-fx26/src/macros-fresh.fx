@@ -13,7 +13,7 @@
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
-(import parser-module (type syns-a))
+(import parser-module syn-datums syn->datum (type syns-a))
 
 ;; The form's key, the names it made, the binders the resolution renamed
 ;; (`%x~K.N`, `macros-shapes.fx`), its expansions, each by its number with
@@ -101,6 +101,45 @@
 ;; `m{F}mH` or `m{F}mmH`, and a count.
 (define tag-char? (->* (char) bool)
   (lambda (c) (or (char-numeric? c) (char=? c #\.) (char=? c #\-) (char=? c #\m))))
+
+;; What an explicit-renaming transformer gave, `s`, each name its `rename`
+;; made (`%~:x`, the prelude's `%er-rename`) an alias of expansion `made`,
+;; `%~K.N:x`: the transformer is given nothing of the expansion that calls
+;; it, so what it gives is the same whatever expansion calls it, and the
+;; expander makes its aliases, as a syntactic closure's are made where it is
+;; opened. A quoted datum's too; a vector's left as it is. As
+;; `procedural::tagged`.
+(define tagged (->* (syn int) syn)
+  (lambda (s made)
+    (tagcase s
+      (atom (d a b x)
+        (if (symbol? d)
+            (let ((n (tagged-name (symbol->string d) 0 (tag-of made) "" #f)))
+              (if (string=? n "") s (atom (string->symbol n) a b x)))
+            s))
+      (lst (items d a b x)
+        (let ((xs (tagged-each items made))) (lst xs (syn-datums xs) a b x)))
+      (dotted (items tail d a b x)
+        (let ((xs (tagged-each items made)) (t (tagged tail made)))
+          (dotted xs t (datum-dotted (syn-datums xs) (syn->datum t)) a b x)))
+      (vec (items d a b x) s))))
+(define tagged-each (->* (syns-a int) syns-a)
+  (lambda (xs made) (if (null? xs) nil (cons (tagged (car xs) made) (tagged-each (cdr xs) made)))))
+;; Name `n` from `i`, each `%~:` at its start `%~TAG:`, after `out`; "" if it
+;; has none (`any`). As `procedural::tagged_name`.
+(define tagged-name (->* (string int string string bool) string)
+  (lambda (n i tag out any)
+    (let ((c (if (and (<= (+ i 2) (string-length n)) (string=? (substring n i (+ i 2)) "%~"))
+                 (tag-end n (+ i 2))
+                 -1)))
+      (if (and (>= c 0) (< c (string-length n)) (char=? (string-ref n c) #\:))
+          (let* ((t (substring n (+ i 2) c))
+                 (seg (string-append "%~" (string-append (if (string=? t "") tag t) ":"))))
+            (tagged-name n (+ c 1) tag (string-append out seg) (or any (string=? t ""))))
+          (if any (string-append out (substring n i (string-length n))) "")))))
+(define tag-end (->* (string int) int)
+  (lambda (s i)
+    (if (and (< i (string-length s)) (tag-char? (string-ref s i))) (tag-end s (+ i 1)) i)))
 
 ;; The prefix of the keys of the forms of the module file of key `key`
 ;; (`input:` or not): `m{F}m` for its own expansion, `m{F}mm` for the uses

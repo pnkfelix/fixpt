@@ -22,15 +22,13 @@
                            (base (string->symbol (substring s (+ c 1) (string-length s))))))
                      x)))))
     base))
-;; ER's `rename`, for the expansion of tag `n` (`K.N`): `x` as where the
-;; macro was defined.
-(define %er-renamer (subr pure (symbol) (subr pure (symbol) symbol))
-  (lambda (n)
-    (lambda (x)
-      (string->symbol
-       (string-append "%~"
-                      (string-append (symbol->string n)
-                                     (string-append ":" (symbol->string x))))))))
+;; ER's `rename`: `x` as where the macro was defined, `%~:x`, an alias of
+;; no expansion yet; the expander makes it one of the expansion that called
+;; the transformer, `%~K.N:x`, in what it gave (`procedural::tagged`), so
+;; that the transformer is given nothing of the expansion, and what it gives
+;; is the same whatever expansion calls it.
+(define %er-rename (subr pure (symbol) symbol)
+  (lambda (x) (string->symbol (string-append "%~:" (symbol->string x)))))
 ;; ER's `compare`: two names the same, aliases as their names.
 (define %er-compare (subr spin (symbol symbol) bool)
   (let ((base %alias-base)) (lambda (a b) (symbol=? (base a) (base b)))))

@@ -22,7 +22,7 @@
 (define scopes-module (with exports-module scopes-module))
 (define reader-types (with parser-module reader-types))
 (define fresh-module (with contracts-module fresh-module))
-(import fresh-module tag-of tag-char?)
+(import fresh-module tag-of tag-char? tagged)
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
         syn-expansion len parse-tag p-ok p-err (type syns-a names presult))
@@ -70,12 +70,14 @@
 ;; `begin-for-syntax` on.
 (define forms-text (->* ((listof string acyclic)) string)
   (lambda (fs) (string-append "%forms " (int->string (length fs)) "\n" (forms-given fs))))
-;; The request that runs one on `form` (as text), in expansion `made`, by its tag: the
+;; The request that runs one on `form` (as text), in expansion `made`: the
 ;; transformer checked and compiled at its first use, then called
-;; (`procedural::apply`, which the Rust expander calls itself).
+;; (`procedural::apply`, which the Rust expander calls itself). Its tag field
+;; `0`: no transformer is given the expansion's (`tagged`), so a request is
+;; the same whatever expansion makes it.
 (define applied-text (->* (int string string int (listof string acyclic)) string)
   (lambda (s code form made fs)
-    (string-append "%apply " (int->string s) " " (tag-of made) " "
+    (string-append "%apply " (int->string s) " 0 "
                    (int->string (string-length code)) " " (int->string (length fs)) "\n"
                    (forms-given fs) code form)))
 ;; The runtime's answer to `code`: what it gave (`=`), or why not (`!`),
@@ -716,7 +718,7 @@
            (opened (lambda ((at syn))
                      (keywords fail (cond ((= style 1) (closed fail at #t made))
                                           ((= style 2) (closed fail at #f made))
-                                          (else at))))))
+                                          (else (tagged at made)))))))
       ;; In the expansion's phase-1 namespace, on the use's datum, the one
       ;; the Rust expander calls it in (`phase1.rs`): what it gives made
       ;; syntax at the use's place, no text between; apart, by text, where

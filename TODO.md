@@ -7368,6 +7368,15 @@ wait, each a change of the language to discuss first:
 
 ## 292. Fast, unsynchronized gensyms: a symbol's name filled in when first printed (the user's, 2026-11-17)
 
+Done of it, 2026-11-17: ER's `rename` takes no tag. It gives `%~:x`, and
+the expander makes it `%~K.N:x` in what the transformer gave
+(`procedural::tagged`; FX-26's `tagged`), so a transformer is given
+nothing of the expansion, and the `%apply` request's tag field is `0`:
+Kayak's quadratic ER chains (C446) may key ER requests as it keys
+syntactic closures'. The rest below, the names filled in when printed,
+waits on the `Text` unification (2026-11-17's plan: symbol names in a
+non-moving `Text` area, the `Interner` a view of the heap's symbols).
+
 Chez Scheme's trick: a gensym is an uninterned symbol allocated with a tag
 saying its printed name is not yet made. Allocating one touches no shared
 state. Only printing it for the first time (or `symbol->string`, or

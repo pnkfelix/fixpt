@@ -2854,10 +2854,19 @@ of that form came before it and it, counted apart from the fresh names
 saved and put back around a module file's own forms as the names' count
 is. Its aliases are `%~K.N:x`, and the definition environments are by tag
 (`Withs::def_envs`; `def-envs`); a template's check's tag is `0`. The tag
-reaches the transformer's runtime, which ER's `rename` spells with
-(`%er-renamer`, given a symbol; `%macros:call-procedural` and the
-`%apply` request, a string), so one spelling is made in one place for
-each. An alias is read as one by its prefix, `%~T:`, `T` of digits, `.`,
+reached the transformer's runtime, which ER's `rename` spelled with; since
+2026-11-17 (TODO §292, the user's) it does not: `rename` gives `%~:x`, an
+alias of no expansion yet (the prelude's `%er-rename`), and the expander
+makes each one in what the transformer gave an alias of the expansion that
+called it, `%~K.N:x` (`procedural::tagged`; FX-26's `tagged`,
+`macros-fresh.fx`), as a syntactic closure's aliases are made where it is
+opened. So a transformer is given nothing of the expansion that calls it,
+and what it gives is the same whatever expansion calls it: an expander
+that keeps a transformer's answers by the request (Kayak's, keyed by the
+`%apply` request's text, C446) may keep one for every use alike, the
+request's tag field now always `0`. A vector's names are left as they
+are, as a syntactic closure's are; a quoted alias is its name, as ever.
+An alias is read as one by its prefix, `%~T:`, `T` of digits, `.`,
 `-` and `m` (`procedural::alias_base`; FX-26's alike in each reader of
 them). The two front ends now spell an alias alike, so `macros_both.rs`
 compares procedural programs as they are, no longer with the numbers taken

@@ -3109,9 +3109,9 @@ impl Macros {
         // the datum and what it gave copied between the heaps. On the use's
         // datum, what it gives made syntax at once, no text between either
         // way (`TODO.md` §278, stages 4 and 6).
-        let out = match self.phase1_run(p, s, made) {
+        let out = match self.phase1_run(p, s) {
             Some(out) => out,
-            None => self.procedural_apart(p, s, made),
+            None => self.procedural_apart(p, s),
         };
         let out = out.map_err(|e| FxError::at(s.at(), format!("a use of `{}`: its transformer: {e}", interner.name(name))))?;
         let placed = At { expansion: made, ..s.at() };
@@ -3160,26 +3160,26 @@ impl Macros {
     /// (nothing collects before the caller makes it syntax); or none where
     /// no runtime is lent (a checker's own heap), or it has no phase 1 (its
     /// front end not compiled).
-    fn phase1_run(&mut self, p: &procedural::Procedural, s: &Syn, made: u32) -> Option<Result<fixpt_heap::Value, String>> {
+    fn phase1_run(&mut self, p: &procedural::Procedural, s: &Syn) -> Option<Result<fixpt_heap::Value, String>> {
         if !self.withs.world.borrow().session {
             return None;
         }
-        let (datum, tag) = (s.plain(), self.tag_of(made));
-        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, &p.phase1, datum, &tag)).flatten()
+        let datum = s.plain();
+        crate::heap_syn::with_runtime(|rt| crate::phase1::run_transformer(rt, p.style, &p.code, &p.phase1, datum)).flatten()
     }
 
     /// Transformer `p` called on use `s` in expansion `made` in the
     /// transformers' session, its datum copied there and what it gave
     /// copied back into the heap lent (`procedural::apply_copied`): raw.
-    fn procedural_apart(&mut self, p: &procedural::Procedural, s: &Syn, made: u32) -> Result<fixpt_heap::Value, String> {
+    fn procedural_apart(&mut self, p: &procedural::Procedural, s: &Syn) -> Result<fixpt_heap::Value, String> {
         let own = !self.withs.world.borrow().session;
         // Where the call will collect, in the front end's heap (`TODO.md`
         // §278): a test's, of a checker's own heap, the datum tenured.
         if own {
             crate::heap_syn::collect_young_if_asked();
         }
-        let (datum, tag) = (s.plain(), self.tag_of(made));
-        let out = crate::heap_syn::with_heap(|h| procedural::apply_copied(p.style, &p.code, &p.phase1, &tag, h, datum))?;
+        let datum = s.plain();
+        let out = crate::heap_syn::with_heap(|h| procedural::apply_copied(p.style, &p.code, &p.phase1, h, datum))?;
         Ok(if own { crate::heap_syn::collect_young_if_asked_keeping(out) } else { out })
     }
 
@@ -3188,7 +3188,7 @@ impl Macros {
     /// (`procedural::closed`), and the keywords in it taken as keywords.
     fn procedural_opened(&mut self, p: &procedural::Procedural, at: Syn, made: u32, interner: &mut Interner) -> R<Syn> {
         let opened = match p.style {
-            procedural::Style::Er => at,
+            procedural::Style::Er => procedural::tagged(&at, &self.tag_of(made), interner),
             procedural::Style::Sc => procedural::closed(&at, true, &self.tag_of(made), interner)?,
             procedural::Style::Rsc => procedural::closed(&at, false, &self.tag_of(made), interner)?,
         };

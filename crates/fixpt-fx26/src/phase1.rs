@@ -333,7 +333,7 @@ fn on_cellular<T>(rt: &mut Runtime, f: impl FnOnce(&mut Runtime) -> T) -> T {
 /// parse of the namespace's own front end, whose reader, parser and
 /// expander, with their state, are its own (the conductor makes them for
 /// each front end), so the parse it is inside is left as it was.
-pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural::Style, code: &str, forms: &[String], datum: Value, tag: &str) -> Option<Result<Value, String>> {
+pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural::Style, code: &str, forms: &[String], datum: Value) -> Option<Result<Value, String>> {
     use crate::macros::procedural;
     let base = rt.heap.push_root(datum);
     let out = (|| {
@@ -355,7 +355,7 @@ pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural
             Err(e) => return Some(Err(e)),
         };
         let d = rt.heap.root_at(base);
-        Some(call_transformer(rt, &ph, &global, style, d, tag))
+        Some(call_transformer(rt, &ph, &global, style, d))
     })();
     rt.heap.pop_roots_to(base);
     out
@@ -365,15 +365,12 @@ pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural
 /// expansion `made`: what it gave, raw; or why it failed. Its second
 /// argument and third as its style has them (a renamer of the expansion and
 /// a comparer; or the use's or the macro's environment).
-pub(crate) fn call_transformer(rt: &mut Runtime, ph: &Phase1, global: &str, style: crate::macros::procedural::Style, datum: Value, tag: &str) -> Result<Value, String> {
+pub(crate) fn call_transformer(rt: &mut Runtime, ph: &Phase1, global: &str, style: crate::macros::procedural::Style, datum: Value) -> Result<Value, String> {
     use crate::macros::procedural::{self, Style};
     let base = rt.heap.push_root(datum);
     let out = (|| {
         let second = match style {
-            Style::Er => {
-                let tag = rt.heap.intern(tag);
-                ph.call(rt, "%er-renamer", &[tag])?
-            }
+            Style::Er => ph.value(rt, "%er-rename").ok_or("no `%er-rename` in phase 1")?,
             Style::Sc => rt.heap.intern(procedural::USE_ENV),
             Style::Rsc => rt.heap.intern(procedural::MACRO_ENV),
         };
@@ -399,7 +396,9 @@ pub(crate) fn call_transformer(rt: &mut Runtime, ph: &Phase1, global: &str, styl
 /// What `%fx26-call-procedural` does (`Runtime::procedural`), for the
 /// expander written in FX-26: its arguments a style (0 explicit renaming, 1
 /// syntactic closures, 2 reversed), the transformer's text, the use's
-/// datum, the expansion's tag (`K.N`), and the phase-1 forms in force where it was
+/// datum, the expansion's tag (`K.N`, which no transformer is given now:
+/// the expander makes `rename`'s aliases its own, `procedural::tagged`),
+/// and the phase-1 forms in force where it was
 /// defined (a list of texts, `begin-for-syntax`'s); `(sum ok datum)`, what the transformer gave, or
 /// `(sum failed why)`. In the expansion's namespace, made and the
 /// transformer defined there if they are not yet; else, where the runtime
@@ -413,7 +412,6 @@ pub fn call_procedural(rt: &mut Runtime, a: &[Value]) -> Result<Value, String> {
         _ => Style::Rsc,
     };
     let code = rt.heap.string_to_rust(a[1]);
-    let tag = rt.heap.string_to_rust(a[3]);
     // The phase-1 forms in force where it was defined, a list of texts.
     let mut forms = Vec::new();
     let mut l = a[4];
@@ -421,12 +419,12 @@ pub fn call_procedural(rt: &mut Runtime, a: &[Value]) -> Result<Value, String> {
         forms.push(rt.heap.string_to_rust(rt.heap.car(l)));
         l = rt.heap.cdr(l);
     }
-    let out = match run_transformer(rt, style, &code, &forms, a[2], &tag) {
+    let out = match run_transformer(rt, style, &code, &forms, a[2]) {
         Some(out) => {
             CALLED.with(|c| c.set(c.get() + 1));
             out
         }
-        None => crate::macros::procedural::apply_copied(style, &code, &forms, &tag, &mut rt.heap, a[2]),
+        None => crate::macros::procedural::apply_copied(style, &code, &forms, &mut rt.heap, a[2]),
     };
     Ok(match out {
         Ok(v) => crate::sessions::sum(rt, "ok", v),
