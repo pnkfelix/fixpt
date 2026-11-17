@@ -3976,6 +3976,9 @@ impl Fx26Session {
         // A `load-module`'s path is from where the Rust checker's is.
         crate::syn::set_load_base(self.checker.base_dir.clone());
         crate::syn::set_shared_made(self.shared_made.clone());
+        // The standard bindings' names, which a file's macro may name, as
+        // a module file's `import-with-syntax` reads them.
+        crate::syn::set_standard_names(self.checker.standard_names());
         let fasls = self.checker.shared_files.values().filter_map(|f| Some((f.key.clone(), f.fasl.as_ref()?.1.clone()))).collect();
         crate::syn::set_fasl_used(fasls);
         // The reader lowered is the eager reader's alone, loaded when it is

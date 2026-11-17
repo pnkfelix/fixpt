@@ -286,12 +286,28 @@
           (begin
             (set file-shapes (cons (tuple key (the shapes nil) (the shapes nil) (extract f 5))
                                    (get file-shapes)))
-            (cond ((<= (extract f 2) 0) #u)
+            (cond ((<= (extract f 2) 0)
+                   ;; A file a form before made, read too where a file that
+                   ;; loads it imports a file's macros (`syn.rs`'s
+                   ;; `supply_loaded_in`): as that reading is.
+                   (let ((g (file-read-keyed (extract f 7) (get files-given))))
+                     (if (null? g)
+                         #u
+                         (begin
+                           (loads-shaped! (loads-in-each (extract (car g) 5) nil))
+                           (file-kept! key (extract (car g) 5) input?)))))
                   ((extract f 8) (fasl-kept! key (extract f 5) input?))
                   (else
                    (begin
                      (loads-shaped! (loads-in-each (extract f 5) nil))
                      (file-kept! key (extract f 5) input?)))))))))
+;; The file of key `key` read, in `fs`: in a list of one.
+(define file-read-keyed (->* (string loaded-files) loaded-files)
+  (lambda (key fs)
+    (cond ((null? fs) nil)
+          ((and (string=? (extract (car fs) 7) key) (> (extract (car fs) 2) 0))
+           (the loaded-files (list (car fs))))
+          (else (file-read-keyed key (cdr fs))))))
 ;; A file read from its `.fasl`, its forms the one expression the Rust
 ;; checker read it as (`(the T %fasl-value)`; a file of parameters', a
 ;; function of them; an input's, a module of the item `input`): its shape

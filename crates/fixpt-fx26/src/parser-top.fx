@@ -43,7 +43,7 @@
 (define macros-module (with templates-module macros-module))
 (import templates-module template-checks)
 (define fresh-module (with macros-module fresh-module))
-(import fresh-module form-begin! fresh-scope-begin! fresh-scope-end! captor-tag)
+(import fresh-module form-begin! fresh-scope-begin! fresh-scope-end! captor-tag file-prefix)
 (define nodes-module ((proj (load-module "fx26:macros-nodes.fx") rs re rm rc rp)))
 (define facts-module ((proj (load-module "fx26:macros-facts.fx") rs re rm rc rp)))
 (import nodes-module program-walk heads-on)
@@ -57,7 +57,9 @@
   (lambda (s)
     (begin (form-begin! s) (made-syntax-taken!) (set program-walk #f) (set heads-on #f)
            (set open nil) (set checking #f))))
-(import imports-module import-file-macros note-load-def!)
+(import imports-module import-file-macros note-load-def! import-in-file file-load-noted raw-files!
+        raw-loaded imported-names
+        (type file-loads))
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
         made-syntax-taken! global-now?
         syntax-names imports-syntax? globals! global-before? macro? later-macro-site def-envs-given
@@ -264,8 +266,11 @@
            ;; nothing of the program's.
            ((for-syntax? written) (begin (for-syntax! pfail-at written) nil))
            ;; A file's macros, and the `include` of the rest.
+           ;; Each macro it defines held to the globals, as an expansion's
+           ;; is: one a file's use makes is not seen ahead (`bad-name`).
            ((imports-syntax? written)
-            (let ((inc (import-file-macros pfail-at written (get loaded))))
+            (let* ((inc (import-file-macros pfail-at written (get loaded)))
+                   (taken (globals-taken-now (imported-names) written)))
               (if (null? inc) (the top-list nil) (parse-made (car inc)))))
            ((form-of? written 'hide) (tops-made (cdr (syn-items written ""))))
            ;; A macro its expansion defined: held to the globals, as a written
@@ -392,7 +397,7 @@
   (lambda (ns later)
     (if (null? ns)
         nil
-        (let ((site (later-macro-site (car ns) later (get loaded))))
+        (let ((site (later-macro-site (car ns) later (raw-loaded (get loaded)))))
           (if (or (not (null? site)) (macro? (car ns)))
               (list (product (1 (car ns)) (2 site)))
               (bad-name (cdr ns) later))))))
@@ -583,14 +588,21 @@
 ;; `define-syntax`, hidden or not, defined in order where the file's items
 ;; are (`file-scope-begin!`), and the items after it expanded by them, each
 ;; name a template leaves free the file's item or standard binding of that
-;; name, a binder at the use that would capture it renamed. Its
-;; `define-syntax`es kept; a shape's no macro. Once for each file, both
-;; lists of them alike; a file whose expansion fails keeps why, which its
-;; load says.
+;; name, a binder at the use that would capture it renamed. Each
+;; `import-with-syntax`, hidden or not, of a name the file defines before
+;; it by `load-module`, defines the macros of that file it takes there,
+;; each as that file means it, and is the `include` of the rest
+;; (`binding-shapes.md`, step 4; Heist's (b)). Its `define-syntax`es kept; a
+;; shape's no macro. Once for each file, both lists of them alike; a file
+;; whose expansion fails keeps why, which its load says. The forms each
+;; file changed was read as kept, for an importer (`raw-files!`).
 (define loaded-own-expanded! (->* () unit)
   (lambda ()
-    (let ((fs (files-own-expanded (get loaded))))
-      (begin (set loaded fs) (set loaded-next (same-files (get loaded-next) fs))))))
+    ;; None of a parse before's, whose bases are this one's too.
+    (let ((fs (begin (set raw-kept nil) (raw-files! nil) (files-own-expanded (get loaded)))))
+      (begin (raw-files! (get raw-kept))
+             (set loaded fs) (set loaded-next (same-files (get loaded-next) fs))))))
+(define raw-kept (ref (listof (tupleof int syns-a) acyclic) rs) (new nil))
 (define files-own-expanded (->* (loaded-files) loaded-files)
   (lambda (fs)
     (if (null? fs) nil (cons (file-own-expanded (car fs)) (files-own-expanded (cdr fs))))))
@@ -605,7 +617,11 @@
     (if (or (<= (extract f 2) 0) (extract f 8)
             (not (or (own-macros? (extract f 5)) (imports-syntax-in? (extract f 5)))))
         f
-        (let* ((saved (file-scope-begin!)) (named (fresh-scope-begin!))
+        (let* ((saved (file-scope-begin!))
+               (named (fresh-scope-begin! (file-prefix (extract f 7) #f)))
+               (loads (begin (set own-loads nil)
+                             (set raw-kept (cons (tuple (extract f 2) (extract f 5))
+                                                 (get raw-kept)))))
                (r (prompt parse-tag (begin (set own-out (own-each (extract f 5))) (p-ok nil))
                           (lambda ((r presult)) r)))
                (ended (begin (fresh-scope-end! named) (file-scope-end! saved))))
@@ -624,11 +640,16 @@
               (product (1 (extract f 1)) (2 (extract f 2)) (3 (extract f 3)) (4 (extract f 4))
                        (5 (get own-out)) (6 (extract f 6)) (7 (extract f 7)) (8 #f))))))))
 (define own-out (ref syns-a rs) (new nil))
-;; Whether forms `xs` import a file's macros (`import-with-syntax`), which a
-;; module file may not yet (`own-each`).
+;; The file's `(define name (load-module "path"))`s so far (`file-loads`).
+(define own-loads (ref file-loads rs) (new nil))
+;; Whether forms `xs` import a file's macros (`import-with-syntax`), hidden
+;; or not.
 (define imports-syntax-in? (->* (syns-a) bool)
-  (lambda (xs) (and (not (null? xs)) (or (form-of? (car xs) 'import-with-syntax)
-                                        (imports-syntax-in? (cdr xs))))))
+  (lambda (xs) (and (not (null? xs))
+                    (or (form-of? (car xs) 'import-with-syntax)
+                        (and (form-of? (car xs) 'hide)
+                             (imports-syntax-in? (cdr (syn-items (car xs) ""))))
+                        (imports-syntax-in? (cdr xs))))))
 ;; Whether forms `xs` define a macro, hidden or not.
 (define own-macros? (->* (syns-a) bool)
   (lambda (xs)
@@ -645,14 +666,10 @@
         (let* ((x (car xs))
                (made (begin
                       (form-begun! x)
+                      (set own-loads (file-load-noted x (get own-loads)))
                       (cond ((or (form-of? x 'module-parameters) (shape-definition? x)) (list x))
                             ((form-of? x 'import-with-syntax)
-                             (begin (pfail-at (string-append "`import-with-syntax` in a module "
-                                                             "file: not yet; a program's top "
-                                                             "level imports a file's macros "
-                                                             "(`binding-shapes.md`, step 4)")
-                                              (syn-start x) (syn-end x))
-                                    nil))
+                             (import-in-file pfail-at x (get own-loads) (get loaded)))
                             ((own-macro? x) (begin (define-macro pfail-at x nil) (list x)))
                             ;; Phase 1's, in force for the file's macros after;
                             ;; kept for an importer's, as its macros are, and

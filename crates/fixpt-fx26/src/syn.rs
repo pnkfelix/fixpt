@@ -1314,6 +1314,7 @@ fn supply_loaded_in(
 ) -> R<()> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut loads = Vec::new();
+    let imports_syntax = matches!(from, Loads::Text(text, _) if text.contains("import-with-syntax"));
     // Each load's place: in a text read here, its byte's; in forms handed
     // over, its span's, in whichever file the form is.
     let place: Box<dyn Fn(Span) -> i64> = match from {
@@ -1345,10 +1346,10 @@ fn supply_loaded_in(
         let input = input || redirected;
         let key = if redirected { format!("input:{}", at.display()) } else { at.display().to_string() };
         let string = |sc: &mut Front, t: &str| sc.make(|m| m.heap().string_from_chars(&t.chars().collect::<Vec<_>>()));
-        let entry = |sc: &mut Front, list: &mut fixpt_scheme::Handle, r: &Read| -> R<()> {
+        let entry_at = |sc: &mut Front, list: &mut fixpt_scheme::Handle, r: &Read, here: i64| -> R<()> {
             let fields = [
                 sc.make(|_| Value::fixnum(37)),
-                sc.make(|_| Value::fixnum(place(start))),
+                sc.make(|_| Value::fixnum(here)),
                 sc.make(|_| Value::fixnum(r.base)),
                 string(sc, &r.why),
                 string(sc, &path),
@@ -1361,6 +1362,7 @@ fn supply_loaded_in(
             *list = cons(sc, one, *list).map_err(|e| fail(e.to_string()))?;
             Ok(())
         };
+        let entry = |sc: &mut Front, list: &mut fixpt_scheme::Handle, r: &Read| entry_at(sc, list, r, place(start));
         let shared = if input && !redirected { format!("input:{key}") } else { key.clone() };
         if let Some(r) = seen.get(&shared) {
             entry(scheme, list, r)?;
@@ -1373,6 +1375,17 @@ fn supply_loaded_in(
             order.push((shared.clone(), String::new()));
             let nil = scheme.make(|_| Value::NULL);
             entry(scheme, list, &Read { base: -1, why: String::new(), syns: nil, text: String::new(), fasl: false })?;
+            // A file that imports a file's macros reads its forms, its own
+            // and those of the files it imports (`macros-imports.fx`'s
+            // `file-of`): so read, at no form's place, which no load meets.
+            if imports_syntax && crate::built_in_module(&path).is_none() {
+                let Ok(ftext) = crate::reads::read_file(&at) else { continue };
+                let Ok(syns) = read_to_syns_at(scheme, FileId(1001 + *read), &ftext, LOAD_BASE_STEP * (*read as i64 + 1)) else { continue };
+                *read += 1;
+                let file_base = LOAD_BASE_STEP * *read as i64;
+                entry_at(scheme, list, &Read { base: file_base, why: String::new(), syns, text: ftext.clone(), fasl: false }, -2)?;
+                supply_loaded_in(scheme, FileId(1000 + *read), Loads::Text(&ftext, file_base), at.parent().map(|d| d.to_path_buf()), read, seen, order, list)?;
+            }
             continue;
         }
         // A module file built in (`fx26:…`) is its text, not a file's; one

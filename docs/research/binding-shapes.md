@@ -750,3 +750,200 @@ is the same as repeated `expand-once` steps. What keeps it within reach:
   numbered in the order they happen today, which a proof would have to
   number by something intrinsic (the use's place) or quotient by (marks
   equal up to renumbering). A gap noted, not yet closed.
+
+## Step 4 (2026-11-16, (b) built 2026-11-17): `import-with-syntax` in module files
+
+Today a module file that uses `import-with-syntax` is refused ("`import-with-syntax`
+in a module file: not yet": `top.rs`'s `file_own_expanded_syn`, `parser-top.fx`'s
+`own-each`), and so is importing the macros of a file with module parameters
+(`import_file_macros`: "takes module parameters: its macros cannot be imported,
+not yet"). This step lifts both. It changes one thing the 2026-11-10 answers said:
+they had a module file's imported macros "scoped to that file". Instead, a module
+file gives on what it imports unless the import is in a `hide` (the user's,
+2026-11-16). That is how `include` and `import` already behave, and how a file's
+own `define-syntax` behaves.
+
+### (b) A module file imports a file's macros
+
+**The form.** A module file may write `(import-with-syntax lib)`, or `(… (only
+name …))` or `(… (except name …))`, at its top level or inside a `hide`. `lib` is
+a name the file defines earlier as `(define lib (load-module "path"))`, hidden or
+not, of a file without module parameters (for files with parameters, see (c)).
+
+**In the file.** The macros taken are defined where the import is, in the file's
+own scope (`Macros::in_file_scope`), as one of its own `define-syntax`es would be.
+The file's later forms are expanded by them. Each macro means what it meant in
+`lib` (`FileScope`: its free names are `(with %shared:libkey name)`, its types
+`(select %shared:libkey T)`), so nothing in the importing file can capture them.
+The rest of what `lib` gives is an `include`, as at a program's top level,
+but of `%shared:libkey`, the hidden global every load of the file is,
+which `lib` is too: a module's `include` is made before its items, so it
+cannot be of `lib` (as built; `(hide (include …))` for a hidden import).
+
+**What the file gives on.** When a program, or another file, imports the
+importing file `mid` with `import-with-syntax`, `mid`'s macros are:
+
+- its own `define-syntax`es, as today;
+- the macros made by uses of macro-defining macros at its top level (below);
+- the macros each of its imports took, unless that import is hidden.
+
+Under the hood, each `mid` macro has the name `%syntax:midkey:name`
+(`scope.internal`), so mid's templates can use it whatever the importer has bound.
+An imported macro keeps `lib`'s internal name, `%syntax:libkey:name`, and `lib`'s
+meaning. So a macro re-exported from `lib` through `mid` is the same macro in
+`mid` and in its importer. And a template of `mid`'s that uses a macro of `lib`'s,
+hidden or not, still reaches it from any importer (`Action::MacroHead`, by the
+internal name).
+
+**Why the templates still work in the final importer.** `%shared:libkey` is a
+program-wide global, whoever loads `lib`. A load inside a module file defines it
+too: every load is hoisted to the program's top level (`parse_load`, `hoisted`).
+It is defined before the form that loads `mid`, and so before any form that uses
+a macro of `lib`'s. No new global is needed.
+
+**Names given twice.** A name `mid` would give twice is refused, as `include`
+refuses one ("`x` is defined twice in this module"). That covers two imports, an
+import and one of `mid`'s own macros, or an import's macro and a value. The final
+importer's `only` and `except` take from all of `mid`'s macros alike, its own and
+re-exported, as they take from its values.
+
+**§287 settled by the same rule.** A macro made at a file's top level by a use of
+a macro-defining macro is given on as a written one is, and kept to the file if
+the use is inside a `hide`. To do this, an importer has to know what a file's
+expansion makes, not only what it writes. So reading a file's macros becomes the
+file's own expansion (`file_own_expanded_syn`), done once per file key. Today
+`import_file_macros` instead collects the written `define-syntax` forms. The
+expansion's output is the record of the file's macros, in order:
+- its `define-syntax`es, written or made, each marked hidden or not;
+- its `begin-for-syntax`es;
+- its imports, each with its filter and whether it is hidden.
+
+`define_file` then defines them under the file's `FileScope`. A made macro's
+form, as the expansion leaves it with its aliases resolved, names `mid`'s items
+by their plain names, which `FileScope` reads as `(with %shared:midkey name)`.
+This has to be checked by a test, not assumed. Keeping the record by file key is
+also what a cache would keep (`cache-aggressively`).
+
+**Hidden names, as today.** A template may name only what its file's module
+shows, because the module's run-time product holds only those values
+(`FileScope.values`). This step keeps that rule for re-exported macros too.
+
+### (b), as built (2026-11-17)
+
+Both front ends; `import-with-syntax/imports-in-file.fx`, `imports-hidden.fx`,
+`makes.fx` and the programs that import them. What the plan above did not
+say, found building it:
+
+- **A file's forms' keys are of the file.** A definition environment is
+  kept by its expansion's tag, `K.N`, and a module file's forms were keyed
+  `mH` by their text alone, so two files with a form written alike had
+  one tag. Harmless while every macro used in a file was its own (each
+  environment the file's, `Within`); not once a file uses an imported one:
+  two files writing `(define-clamper clamp)`, each importing its own
+  `define-clamper`, would make two `clamp`s whose names were resolved by
+  whichever file was read last. Now a module file's keys are `m{F}mH`, `F`
+  a hash of its key (`Macros::file_prefix`; FX-26's `file-prefix`), and the
+  uses an importer expands again (below) `m{F}mmH`, apart from the file's
+  own expansion's.
+- **A macro a file's use makes (§287)** is defined for an importer by
+  expanding that use again, in the file's scope as the importer has it
+  (`FileEntry::Use`; FX-26's `define-form`): its template then names the
+  file's items through `%shared:key`, as a written one's does, and the
+  importer keeps the definition environments of those expansions.
+- **What an importer reads of a file** is the file as written: Rust reads
+  its text again (`file_macros_at`, the entries recursive through its
+  imports); FX-26 keeps each file's forms as read beside the ones its own
+  expansion made (`raw-files!`, cleared at each parse, whose bases repeat).
+- **A file a form before made** is handed to FX-26's parser with no forms
+  (base -1). A file that imports macros needs them: the driver reads such
+  a file again for it, at no form's place, which no load meets, and FX-26
+  finds it by its key (`supply_loaded_in`; `read-at`, `file-read-keyed`).
+- **A file's hidden global has its file's shape** in the Rust checker's
+  walk of a module file, which has no top level to find it in
+  (`Shaper::shared`), as FX-26's `shared-shaped!` already had it.
+- **The standard names** a file's macro may name are told FX-26 by a
+  session too (`own_pieces`), not only by `fixpt check`.
+- **Diamonds** (the user's, 2026-11-17): refused, as for values; an
+  importer leaves one out with `except` (`rename` and `prefix` are not
+  built).
+- **Held to the globals.** A macro an import defines, of a name a global
+  before it has, is refused at the import, as a written one's: FX-26's scan
+  ahead (`later-macro-site`) follows a file's imports (`forms-give?`) but
+  cannot see a made macro, so FX-26 holds each macro an import defines to
+  the globals there too.
+
+### (c) Macros of a file with module parameters
+
+**The form.** `lib` may be a module instance:
+
+```
+(define lib ((proj (load-module "f") @r)))   ; or with module arguments
+(import-with-syntax lib)
+```
+
+`lib` must be defined by exactly this form, `proj` arguments and all, so that the
+expander knows which file `lib` is an instance of. It may be written at a
+program's top level or a module file's.
+
+**What a template means.** A template's free name that is one of the file's
+values expands to `(with lib name)`, and its types to `(select lib T)`. Here
+`lib` is the importer's binding, not a `%shared:` global: each instance has its
+own state. A binder at a use that would capture `lib` is renamed, as a file's own
+macros rename one that would capture an item (`DefEnv::Within`). A shadowing
+`lib` at the use cannot change what the template means.
+
+**Re-export, the instance's path.** An imported macro of (c) carries the path by
+which its importer reaches the instance. In the file that imports it, the path
+is `lib`. When `mid` gives the macro on, its own importer reaches the instance
+through `mid`:
+- `(with %shared:midkey lib)` if `mid` has no module parameters;
+- `(with m lib)` if the importer reached `mid` as the instance `m` (`m` itself
+  being a (c) import).
+
+Each re-export adds one step to the path. If `lib` is hidden in `mid`, there is
+no path, and an import that gives the macros on is refused where it is written:
+"`twice` names `lib`'s instance, which this file hides: show `lib`, or hide the
+import". The fix is one the user can choose.
+
+**Not covered: an instance made inside a process's body.** (c) imports at a top
+level, where `lib` is a global or an item. A process that loads its own instance
+in its body, as Kayak's REPL front would (`closed-code.md`), still has no macros
+of that instance. Macros bound by a local `let` would be stage 5's `with` and
+`include` bringing macros. That is not proposed here.
+
+### Both front ends
+
+The Rust front end changes `file_own_expanded_syn` (no refusal; an import's
+macros defined in the file's scope), `import_file_macros` (from the file's
+expansion's record, recursive through imports, (c)'s instance and paths) and
+`define_file` (an imported macro's internal name kept, a (c) path). FX-26 changes
+`parser-top.fx`'s `own-each` and `loaded-own-expanded!` and `macros-imports.fx`
+alike, with the same refusals in the same words. `macros_both.rs` compares the
+two front ends on every new test.
+
+### Tests
+
+- (b) A module file uses a macro it imports, and so does a program that loads the
+  file but does not import its macros.
+- (b) A program imports `mid` and uses `lib`'s macro, re-exported by `mid`;
+  `(hide (import-with-syntax lib))` in `mid` makes that use "unbound".
+- (b) A template of `mid`'s uses `lib`'s macro, hidden in `mid`, from a program
+  that binds the macro's name to something else.
+- (b) A name given twice by `mid`, refused; `only`/`except` over a re-export.
+- §287: `import-with-syntax/own.fx`'s `clamp` used from an importer, and kept to
+  the file when its making use is in a `hide`.
+- (c) Two instances, each importing its macros, keep their state apart; a use
+  inside a binder named `lib` still means the instance.
+- (c) A re-export through `mid`, by `%shared:midkey`, and refused with `lib`
+  hidden.
+
+### Open, for the user
+
+1. **Diamonds.** A program that imports `a` and `b`, both re-exporting `lib`'s
+   `twice`, gets the same macro twice. The rule above refuses it, as `include`
+   refuses `lib`'s values arriving by both. Accepting a macro that arrives twice
+   by the same internal name is safe, but then macros and values would differ.
+   Proposed: refuse for now, alike for both. *Decided (the user, 2026-11-17):
+   refuse, an importer restricting one with `except`.*
+2. **Order.** (b) and §287 first, as one commit; (c) after, as another, since it
+   is the larger change. *Decided (the user, 2026-11-17); (b) built.*

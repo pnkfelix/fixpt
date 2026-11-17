@@ -352,6 +352,14 @@ impl<'a, 'm> Shaper<'a, 'm> {
 
     /// What the checker's types say of `n` (`Global`), without its own
     /// names.
+    /// The shape of a file's hidden global, `%shared:key`, which a file's
+    /// macro names its file's values through, where no top level has it (a
+    /// module file's own walk): its file's (FX-26's `shared-shaped!`).
+    fn shared(&self, n: Sym) -> Option<Rc<Shape>> {
+        let key = self.name(n).strip_prefix("%shared:")?;
+        self.files.get(key)?.value.clone()
+    }
+
     fn global_of(&self, n: Sym, ns: Ns, k: Option<usize>) -> Option<Rc<Shape>> {
         self.global.and_then(|g| g(n, ns, k)).map(|s| self.own(&s))
     }
@@ -658,7 +666,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
             // A top-level name: as its definition's walk found it, or as
             // the checker found its type, which a definition read from a
             // fasl, or a file's hidden global, has alone.
-            Res::Free(n, Ns::Value) => self.top.vals.get(&n).cloned().flatten().or_else(|| self.global_of(n, Ns::Value, None)),
+            Res::Free(n, Ns::Value) => self.top.vals.get(&n).cloned().flatten().or_else(|| self.global_of(n, Ns::Value, None)).or_else(|| self.shared(n)),
             Res::Free(n, Ns::Desc) => match self.top.descs.get(&n).cloned().flatten() {
                 Some(s) => Some(s),
                 None => self.desc_again(n).or_else(|| self.global_of(n, Ns::Desc, None)),

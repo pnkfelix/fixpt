@@ -511,6 +511,50 @@ pub struct FileScope<'a> {
     pub is_standard: &'a dyn Fn(Sym) -> bool,
 }
 
+/// What `import-with-syntax` of a file reads of it, in order
+/// (`Macros::define_file`; `binding-shapes.md`, step 4): its macros
+/// written, the files whose macros it imports, and the uses at its top
+/// level that may make macros, each with whether a `hide` holds it.
+pub enum FileEntry {
+    /// A `define-syntax`, `define-syntax-rec` or `begin-for-syntax`.
+    Syntax(Syn, bool),
+    /// An `import-with-syntax` of the file it reads, with its `(only …)`
+    /// or `(except …)`, if any.
+    Import(Rc<FileMacros>, Option<(bool, Vec<Sym>)>, bool),
+    /// A form at the file's top level, which a use of a macro of the
+    /// file's that makes definitions may make macros of (`TODO.md` §287).
+    Use(Syn, bool),
+}
+
+/// A file's macros, as `import-with-syntax` reads them (`FileEntry`): the
+/// hidden global every load of the file is, `%shared:key`, the values
+/// and types its module shows, the key the importer names its macros by
+/// (`%syntax:key:name`), the keys of the forms its uses expand as at an
+/// import (`m{F}mm`, apart from its own expansion's, `m{F}m`), and its
+/// text, which their places are in.
+pub struct FileMacros {
+    pub shared: Sym,
+    pub values: HashSet<Sym>,
+    pub types: HashSet<Sym>,
+    pub key: String,
+    pub prefix: String,
+    pub text: std::sync::Arc<str>,
+    pub entries: Vec<FileEntry>,
+}
+
+/// The prefix of a module file's forms' keys (`Macros::form_begin`), of
+/// its key, `key`, `input:` or not: `m{F}m` for its own expansion, `m{F}mm`
+/// for the uses an importer expands (`define_file`), `F` a hash of the
+/// key as a string's (`syn_hash`), so that no two files' forms, nor a
+/// file's and an importer's, have one key, nor so their expansions' tags,
+/// which their definition environments are kept by.
+pub fn file_prefix(key: &str, imported: bool) -> String {
+    const P: i64 = 2_147_483_647;
+    let path = key.strip_prefix("input:").unwrap_or(key);
+    let f = (2 * 65599 + fixpt_heap::heap::string_hash_of(path) % P) % P;
+    format!("m{f}m{}", if imported { "m" } else { "" })
+}
+
 /// The macros defined, and the syntax types of the kernel's forms, for
 /// checking templates. Cloned to be put back (`Checker::macros_kept`).
 #[derive(Clone, Default)]
@@ -608,10 +652,11 @@ pub(crate) struct Withs {
     pub(crate) captors: usize,
     /// The top-level form's key, which every name it makes fresh carries
     /// (`Macros::form_begin`); each key's hash, with how many forms had it;
-    /// whether the forms are a module file's.
+    /// the prefix of a module file's forms' keys, none for a program's
+    /// (`file_prefix`).
     pub(crate) form_key: String,
     pub(crate) keys_seen: HashMap<i64, u32>,
-    pub(crate) in_module: bool,
+    pub(crate) module_prefix: String,
     /// Where the macros defined now are, unless a file's scope is given:
     /// the top level, or a module file's items, as its own macros are
     /// (`Checker::file_own_expanded`).
@@ -1376,7 +1421,7 @@ impl Macros {
         let seen = self.withs.keys_seen.entry(h).or_insert(0);
         let n = *seen;
         *seen += 1;
-        let m = if self.withs.in_module { "m" } else { "" };
+        let m = &self.withs.module_prefix;
         self.withs.form_key = if n == 0 { format!("{m}{h}") } else { format!("{m}{h}-{n}") };
         self.fresh = 0;
         self.withs.captors = 0;
@@ -1553,7 +1598,7 @@ impl Macros {
     /// (`hygiene::DefEnv::Within`), read from `text`; these put back after.
     /// A file sees the standard environment alone, no macro of the
     /// program's.
-    pub(crate) fn in_file_scope<T>(&mut self, text: &str, f: impl FnOnce(&mut Macros) -> T) -> T {
+    pub(crate) fn in_file_scope<T>(&mut self, text: &str, prefix: String, f: impl FnOnce(&mut Macros) -> T) -> T {
         let defined = std::mem::take(&mut self.defined);
         let marks = std::mem::take(&mut self.withs.marks);
         let defined_at = std::mem::take(&mut self.defined_at);
@@ -1561,9 +1606,9 @@ impl Macros {
         let reading = self.reading.replace(std::sync::Arc::from(text));
         let phase1 = std::mem::take(&mut self.withs.phase1);
         // The file's forms' keys its own (`form_begin`); the form's put back.
-        let named = (std::mem::take(&mut self.withs.form_key), self.fresh, self.withs.captors, self.withs.expanded, std::mem::take(&mut self.withs.keys_seen), std::mem::replace(&mut self.withs.in_module, true));
+        let named = (std::mem::take(&mut self.withs.form_key), self.fresh, self.withs.captors, self.withs.expanded, std::mem::take(&mut self.withs.keys_seen), std::mem::replace(&mut self.withs.module_prefix, prefix));
         let r = f(self);
-        (self.withs.form_key, self.fresh, self.withs.captors, self.withs.expanded, self.withs.keys_seen, self.withs.in_module) = named;
+        (self.withs.form_key, self.fresh, self.withs.captors, self.withs.expanded, self.withs.keys_seen, self.withs.module_prefix) = named;
         self.withs.phase1 = phase1;
         self.defined = defined;
         self.withs.marks = marks;
@@ -1582,67 +1627,155 @@ impl Macros {
         }
     }
 
-    /// A file's macros, `forms` its `define-syntax`es (each with whether it
-    /// is hidden), defined as the file means them (`FileScope`), each by
-    /// the name the importer has it by, `scope.internal`'s, and each not
-    /// hidden that `taken` takes by its own name too: what `(import-with-syntax
-    /// lib)` brings (`(only name …)`, `(except name …)`).
-    /// `at`: the `import-with-syntax`.
-    pub fn define_file(&mut self, forms: &[(Syn, bool)], scope: &FileScope, taken: &dyn Fn(Sym) -> bool, at: At, interner: &mut Interner) -> R<()> {
+    /// A file's macros, `file`'s entries (`FileEntry`), defined as the file
+    /// means them (`FileScope`): among themselves first, by their names in
+    /// it, as its templates name them, with the macros of the files it
+    /// imports and those its top-level uses make (`TODO.md` §287); then
+    /// each by the name the importer has it by (`%syntax:key:name`, an
+    /// imported one's its own file's), and each the file gives (not hidden,
+    /// nor brought by a hidden import) that `taken` takes by its own name
+    /// too: what `(import-with-syntax lib)` brings (`(only name …)`,
+    /// `(except name …)`; `binding-shapes.md`, step 4). The names it gives,
+    /// each with the name the importer has it by. `at`: the
+    /// `import-with-syntax`.
+    pub fn define_file(&mut self, file: &FileMacros, is_standard: &dyn Fn(Sym) -> bool, taken: &dyn Fn(Sym) -> bool, at: At, interner: &mut Interner) -> R<Vec<(Sym, Sym)>> {
         self.ensure_kernel(interner)?;
         // The file's macros defined among themselves, by their names in it,
-        // as its templates name them.
+        // as its templates name them; a use expanded where the file's items
+        // are as its importer has them.
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
-        let mut own = Macros { k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: self.reading.clone(), defined_at: HashMap::default(), checking: false, withs: Box::new(Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), ..Withs::default() }) };
-        let mut made = Vec::new();
-        let mut defined = Ok(());
-        for (form, hidden) in forms {
-            // The file's phase-1 forms, in force for its macros after them.
-            if form.head_sym().is_some_and(|h| interner.name(h) == "begin-for-syntax") {
-                if let Err(e) = own.for_syntax(form, interner) {
-                    defined = Err(e);
-                    break;
-                }
-                continue;
-            }
-            match own.define_in(form, interner, Some(scope)) {
-                Ok(ns) => made.extend(ns.into_iter().map(|n| (n, *hidden))),
-                Err(e) => {
-                    defined = Err(e);
-                    break;
+        let def_env = hygiene::DefEnv::File { shared: file.shared, values: Rc::new(file.values.clone()) };
+        let withs = Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), module_prefix: file.prefix.clone(), def_env, ..Withs::default() };
+        let mut own = Macros { k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: Some(file.text.clone()), defined_at: HashMap::default(), checking: false, withs: Box::new(withs) };
+        let internal_of = |n: Sym, interner: &mut Interner| {
+            let name = format!("%syntax:{}:{}", file.key, interner.name(n));
+            interner.intern(&name)
+        };
+        // Each name the importer has a macro of the file's by: its written
+        // ones' first, which a template may name before it is defined.
+        let mut internal: HashMap<Sym, Sym> = HashMap::default();
+        for e in &file.entries {
+            if let FileEntry::Syntax(f, _) = e {
+                for (n, _) in crate::top::syntax_names(f, interner).unwrap_or_default() {
+                    let i = internal_of(n, interner);
+                    internal.insert(n, i);
                 }
             }
         }
+        // A macro of the file's, its own or brought, by the name the
+        // importer has it by too, for its uses that the file's expand.
+        let by_internal = |own: &mut Macros, n: Sym, i: Sym| {
+            if let Some(m) = own.withs.marks.get(&n).cloned() {
+                own.withs.marks.insert(i, m);
+            } else if let Some(m) = own.defined.get(&n).cloned() {
+                own.defined.insert(i, m);
+            }
+        };
+        // Where a name given twice is said: the file's first macro, if any.
+        let first = file.entries.iter().find_map(|e| match e {
+            FileEntry::Syntax(f, _) => Some(f.at()),
+            _ => None,
+        });
+        // Each name the file gives, with whether it is hidden.
+        let mut given: Vec<(Sym, bool)> = Vec::new();
+        let mut defined = || -> R<()> {
+            for e in &file.entries {
+                match e {
+                    // The file's phase-1 forms, in force for its macros after them.
+                    FileEntry::Syntax(form, _) if form.head_sym().is_some_and(|h| interner.name(h) == "begin-for-syntax") => own.for_syntax(form, interner)?,
+                    FileEntry::Syntax(form, hidden) => {
+                        let scope = FileScope { shared: file.shared, values: file.values.clone(), types: file.types.clone(), internal: internal.clone(), is_standard };
+                        for n in own.define_in(form, interner, Some(&scope))? {
+                            by_internal(&mut own, n, internal[&n]);
+                            given.push((n, *hidden));
+                        }
+                    }
+                    FileEntry::Import(lib, filter, hidden) => {
+                        let takes = |n: Sym| filter.as_ref().is_none_or(|(only, names)| names.contains(&n) == *only);
+                        for (n, i) in own.define_file(lib, is_standard, &takes, at, interner)? {
+                            if takes(n) {
+                                internal.insert(n, i);
+                                given.push((n, *hidden));
+                            }
+                        }
+                    }
+                    // A use of a macro that makes definitions, which may make
+                    // macros: expanded as a form of its own, of a key apart
+                    // (`file_prefix`), the names it defines but macros the
+                    // file's module's already.
+                    FileEntry::Use(form, hidden) => {
+                        let head = form.list().and_then(|l| l.first().copied()).and_then(|h| h.sym());
+                        if !head.is_some_and(|h| own.defined.get(&h).is_some_and(|m| m.defn || m.procedural.is_some())) {
+                            continue;
+                        }
+                        let saved = (own.withs.form_key.clone(), own.fresh, own.withs.captors, own.withs.expanded);
+                        own.form_begin(form, interner);
+                        let r = own.expand_top(form, interner);
+                        let made: Vec<Sym> = own.withs.made_syntax.iter().map(|m| m.0).collect();
+                        (own.withs.form_key, own.fresh, own.withs.captors, own.withs.expanded) = saved;
+                        r?;
+                        for n in made {
+                            let i = internal_of(n, interner);
+                            internal.insert(n, i);
+                            by_internal(&mut own, n, i);
+                            given.push((n, *hidden));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        };
+        let r = defined();
         self.withs.syntax_sigs = std::mem::take(&mut own.withs.syntax_sigs);
         self.fresh = own.fresh;
-        defined?;
-        for (name, hidden) in made {
+        r?;
+        // What its uses' expansions' aliases are resolved by, and every
+        // macro of the file's by the name the importer has it by, hidden or
+        // not, which those it gives may expand to.
+        self.withs.def_envs.extend(std::mem::take(&mut own.withs.def_envs));
+        for (n, m) in &own.defined {
+            if interner.name(*n).starts_with("%syntax:") {
+                self.defined.insert(*n, m.clone());
+            }
+        }
+        for (n, m) in &own.withs.marks {
+            if interner.name(*n).starts_with("%syntax:") {
+                self.withs.marks.insert(*n, m.clone());
+            }
+        }
+        let first = first.unwrap_or(at);
+        let mut out = Vec::new();
+        let mut seen = HashSet::default();
+        for (name, hidden) in given {
+            let shown = interner.name(name).to_string();
+            if !seen.insert(name) {
+                return Err(FxError::at(first, format!("`{shown}` is a macro this file gives twice")));
+            }
+            if hidden {
+                continue;
+            }
+            out.push((name, internal[&name]));
+            if !taken(name) {
+                continue;
+            }
             // A trailmark of the file's: bound as its macros are.
             if let Some(m) = own.withs.marks.get(&name).cloned() {
-                if !hidden && taken(name) {
-                    if self.defined.contains_key(&name) || self.withs.marks.contains_key(&name) {
-                        let shown = interner.name(name);
-                        return Err(FxError::at(forms[0].0.at(), format!("`{shown}` is defined already: a file's trailmark may not be defined again")));
-                    }
-                    self.withs.marks.insert(name, m.clone());
-                    self.defined_at.insert(name, at);
+                if self.defined.contains_key(&name) || self.withs.marks.contains_key(&name) {
+                    return Err(FxError::at(first, format!("`{shown}` is defined already: a file's trailmark may not be defined again")));
                 }
-                self.withs.marks.insert(scope.internal[&name], m);
+                self.withs.marks.insert(name, m);
+                self.defined_at.insert(name, at);
                 continue;
             }
             let m = own.defined[&name].clone();
-            if !hidden && taken(name) {
-                if self.defined.contains_key(&name) {
-                    let shown = interner.name(name);
-                    return Err(FxError::at(forms[0].0.at(), format!("`{shown}` is a macro defined already: a file's may not be defined again")));
-                }
-                self.defined.insert(name, m.clone());
-                self.defined_at.insert(name, at);
+            if self.defined.contains_key(&name) {
+                return Err(FxError::at(first, format!("`{shown}` is a macro defined already: a file's may not be defined again")));
             }
-            self.defined.insert(scope.internal[&name], m);
+            self.defined.insert(name, m);
+            self.defined_at.insert(name, at);
         }
-        Ok(())
+        Ok(out)
     }
 
     /// `define`, in a file's scope if `file` is given: the macros' names.

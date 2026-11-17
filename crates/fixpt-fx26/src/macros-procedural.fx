@@ -768,6 +768,8 @@
         (get def-env-now)
         (tuple 1 (extract (car file) 1) (extract (car file) 2)))))
 (define def-env-now (ref def-env rs) (new (def-env-top)))
+(define def-env-is (->* () def-env) (lambda () (get def-env-now)))
+(define def-env-now! (->* (def-env) unit) (lambda (h) (set def-env-now h)))
 ;; A module file's own macros' scope begun: none of these macros, nor any
 ;; procedural, defined, and macros defined where the file's items are; what
 ;; was, given back, for `file-scope-end!` (`Macros::in_file_scope`).

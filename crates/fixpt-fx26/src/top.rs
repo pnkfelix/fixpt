@@ -24,6 +24,7 @@ use crate::check::{Checked, Checker};
 use crate::error::{FxError, R};
 use crate::heap_syn::{Form, Syn, V};
 use fixpt_read::{FileId, Span, Sym};
+use std::rc::Rc;
 
 /// What one top-level form did.
 #[derive(Clone, Debug)]
@@ -701,7 +702,7 @@ impl Checker {
         let kept = at.and_then(|(at, _)| self.macros.forms_read(&at.display().to_string(), text));
         let mut forms = match kept {
             Some(forms) => forms.iter().map(|f| placed_in(f, file)).collect(),
-            None => self.module_file_forms(file, text)?,
+            None => self.module_file_forms(file, text, at.map(|(at, _)| at))?,
         };
         if let Some((at, input)) = at {
             let params = forms.first().is_some_and(|f| crate::parse::module_parameters_of(f, &self.interner).is_some());
@@ -775,7 +776,7 @@ impl Checker {
         if !own {
             return Ok(None);
         }
-        let forms = self.module_file_forms_of(forms, text)?;
+        let forms = self.module_file_forms_of(forms, text, None)?;
         self.without_own_macros(forms).map(Some)
     }
 
@@ -882,7 +883,7 @@ impl Checker {
                 let sealed = read.ok().map(|forms| forms.iter().map(|f| c.macros.sealed_written(f, &mut interner)).collect::<R<Vec<_>>>());
                 c.interner = interner;
                 let Some(Ok(forms)) = sealed else { return };
-                let Ok(forms) = c.file_own_expanded_syn(forms, &text) else { return };
+                let Ok(forms) = c.file_own_expanded_syn(forms, &text, Some(&at)) else { return };
                 let mut loads = Vec::new();
                 for f in &forms {
                     crate::macros::shapes::loads_in(f, &c.interner, &mut loads);
@@ -902,41 +903,41 @@ impl Checker {
     /// written in (`sealed_written`), and its own macros' uses expanded
     /// (`file_own_expanded`). Apart from `read_module_file_at`, whose frame
     /// it would grow.
-    fn module_file_forms(&mut self, file: FileId, text: &str) -> R<Vec<Syn>> {
+    fn module_file_forms(&mut self, file: FileId, text: &str, at: Option<&std::path::Path>) -> R<Vec<Syn>> {
         let r = crate::heap_syn::read_syn(text, file, &mut self.interner);
         let forms = r.map_err(|e| FxError::at(e.span, e.message))?;
-        self.module_file_forms_of(forms, text)
+        self.module_file_forms_of(forms, text, at)
     }
 
     /// [`module_file_forms`](Self::module_file_forms) of `forms`, `text`
-    /// read already.
-    fn module_file_forms_of(&mut self, forms: Vec<Syn>, text: &str) -> R<Vec<Syn>> {
+    /// read already, the file's at `at` if known.
+    fn module_file_forms_of(&mut self, forms: Vec<Syn>, text: &str, at: Option<&std::path::Path>) -> R<Vec<Syn>> {
         let forms = forms.iter().map(|f| self.sealed_written(f)).collect::<R<Vec<_>>>()?;
-        self.file_own_expanded_syn(forms, text)
+        self.file_own_expanded_syn(forms, text, at)
     }
 
-    /// A module file's forms, `forms`, of `text`, with its own macros' uses
-    /// expanded (`binding-shapes.md`, step 3; Heist's (a)): each
-    /// `define-syntax`, hidden or not, defined in order where the file's
-    /// items are (`Macros::in_file_scope`), and the items after it
-    /// expanded by them, each name a template leaves free the file's item
-    /// or standard binding of that name, a binder at the use that would
-    /// capture it renamed (`hygiene::DefEnv::Within`). Its `define-syntax`es
-    /// kept, which `import-with-syntax` reads; a shape's,
-    /// `(define-syntax s (modnames …))`, no macro. Itself if it defines no
-    /// macro.
-    pub(crate) fn file_own_expanded_syn(&mut self, forms: Vec<Syn>, text: &str) -> R<Vec<Syn>> {
+    /// A module file's forms, `forms`, of `text`, the file's at `at` if
+    /// known, with its own macros' uses expanded (`binding-shapes.md`, step
+    /// 3; Heist's (a)): each `define-syntax`, hidden or not, defined in order
+    /// where the file's items are (`Macros::in_file_scope`), and the items
+    /// after it expanded by them, each name a template leaves free the
+    /// file's item or standard binding of that name, a binder at the use
+    /// that would capture it renamed (`hygiene::DefEnv::Within`). Each
+    /// `import-with-syntax`, hidden or not, of a name the file defines
+    /// before it as `(define lib (load-module "path"))`, defines the
+    /// macros of `lib`'s file it takes there, each as that file means it,
+    /// and is the `include` of the rest (step 4; Heist's (b)). Its
+    /// `define-syntax`es kept, which `import-with-syntax` reads; a shape's,
+    /// `(define-syntax s (modnames …))`, no macro. Itself if it defines or
+    /// imports no macro.
+    pub(crate) fn file_own_expanded_syn(&mut self, forms: Vec<Syn>, text: &str, at: Option<&std::path::Path>) -> R<Vec<Syn>> {
         let interner = &self.interner;
         let head = |s: &Syn| s.list().and_then(|l| l.first().copied()).and_then(|h| h.sym()).map(|h| interner.name(h).to_string());
         let shape = |s: &Syn| matches!(s.list().as_deref(), Some([_, _, m]) if head(m).as_deref() == Some("modnames"));
         let macro_of = |s: &Syn| syn_names(s, interner).is_some() && !shape(s);
-        let hidden = |s: &Syn| head(s).as_deref() == Some("hide") && s.list().is_some_and(|l| l[1..].iter().any(macro_of));
-        // Another file's macros: a program's alone, for now (as the FX-26
-        // parser's `own-each`).
-        if let Some(f) = forms.iter().find(|f| head(f).as_deref() == Some("import-with-syntax")) {
-            return Err(FxError::at(f.at(), "`import-with-syntax` in a module file: not yet; a program's top level imports a file's macros (`binding-shapes.md`, step 4)"));
-        }
-        if !forms.iter().any(|f| macro_of(f) || hidden(f)) {
+        let imports = |s: &Syn| head(s).as_deref() == Some("import-with-syntax");
+        let hidden = |s: &Syn| head(s).as_deref() == Some("hide") && s.list().is_some_and(|l| l[1..].iter().any(|i| macro_of(i) || imports(i)));
+        if !forms.iter().any(|f| macro_of(f) || imports(f) || hidden(f)) {
             return Ok(forms);
         }
         let kinds: Vec<u8> = forms
@@ -948,13 +949,41 @@ impl Checker {
                 Some("hide") => 2,
                 // Phase 1's forms, in force for the file's macros after them.
                 Some("begin-for-syntax") => 4,
+                Some("import-with-syntax") => 5,
                 _ => 3,
             })
             .collect();
         let marks: Vec<Vec<bool>> = forms.iter().map(|f| f.list().map(|l| l.iter().map(macro_of).collect()).unwrap_or_default()).collect();
+        // The files its `import-with-syntax`es read, each by where it is,
+        // `(form, item)` (an item of a `hide`, else 0), read first: each of a
+        // name the file defines before it by `load-module`, from its
+        // directory.
+        let dir = at.and_then(|a| a.parent()).map(|d| d.to_path_buf()).or_else(|| self.base_dir.clone());
+        let mut loads: fixpt_hash::HashMap<Sym, String> = fixpt_hash::HashMap::default();
+        let mut read: fixpt_hash::HashMap<(usize, usize), Imported> = fixpt_hash::HashMap::default();
+        for (i, f) in forms.iter().enumerate() {
+            let items: Vec<(usize, Syn)> = if kinds[i] == 2 { f.list().unwrap_or_default()[1..].iter().enumerate().map(|(j, x)| (j + 1, *x)).collect() } else { vec![(0, *f)] };
+            for (j, x) in items {
+                if let Some((n, path)) = self.load_def_of(&x) {
+                    match path {
+                        Some(p) => loads.insert(n, p),
+                        None => loads.remove(&n),
+                    };
+                }
+                if let Some((lib, filter)) = self.import_with_syntax(&x)? {
+                    let Some(path) = loads.get(&lib).cloned() else {
+                        return Err(FxError::at(x.span(), format!("`import-with-syntax` takes a name defined as `(load-module \"path\")`, and `{}` is not one", self.interner.name(lib))));
+                    };
+                    let file = self.file_macros_at(x.span(), &path, dir.clone())?;
+                    read.insert((i, j), Imported { file, filter });
+                }
+            }
+        }
+        let prefix = crate::macros::file_prefix(&at.map(|a| a.display().to_string()).unwrap_or_default(), false);
         let mut macros = std::mem::take(&mut self.macros);
         let mut interner = std::mem::take(&mut self.interner);
-        let r = macros.in_file_scope(text, |m| {
+        let is_standard = |s: Sym| self.standard_type(s).is_some();
+        let r = macros.in_file_scope(text, prefix, |m| {
             let expanded = |m: &mut crate::macros::Macros, f: &Syn, out: &mut Vec<Syn>, interner: &mut fixpt_read::Interner| -> R<()> {
                 for f in m.expand_top(f, interner)? {
                     let f = m.sealed_written(&f, interner)?;
@@ -962,8 +991,21 @@ impl Checker {
                 }
                 Ok(())
             };
+            // An `import-with-syntax`'s macros defined, and the `include` of
+            // the rest, if any.
+            let imported = |m: &mut crate::macros::Macros, f: &Syn, i: &Imported, out: &mut Vec<Syn>, interner: &mut fixpt_read::Interner| -> R<()> {
+                let taken = |n: Sym| i.filter.as_ref().is_none_or(|(only, names)| names.iter().any(|(x, _)| *x == n) == *only);
+                let given = m.define_file(&i.file, &is_standard, &taken, crate::heap_syn::at_of(f.span()), interner)?;
+                let given: fixpt_hash::HashSet<Sym> = given.into_iter().map(|(n, _)| n).collect();
+                // A module's `include` is made before its items, so of the
+                // hidden global every load of `lib`'s file is, which `lib`
+                // is too, by its name, its abstract types `lib`'s.
+                let shared = Syn::symbol(f.span(), i.file.shared, interner);
+                out.extend(include_of(f.span(), shared, i.filter.as_ref(), &given, interner));
+                Ok(())
+            };
             let mut out = Vec::new();
-            for ((f, kind), marks) in forms.into_iter().zip(kinds).zip(marks) {
+            for (n, ((f, kind), marks)) in forms.into_iter().zip(kinds).zip(marks).enumerate() {
                 // As the program's forms (`expand_forms_syn`), a `hide`'s
                 // and each of its forms'.
                 m.form_begin(&f, &interner);
@@ -976,11 +1018,13 @@ impl Checker {
                     2 => {
                         let items = f.list().expect("a `hide`");
                         let mut kept = vec![items[0]];
-                        for (i, is_macro) in items.iter().zip(marks).skip(1) {
+                        for (j, (i, is_macro)) in items.iter().zip(marks).enumerate().skip(1) {
                             m.form_begin(i, &interner);
                             if is_macro {
                                 m.define(i, &mut interner)?;
                                 kept.push(*i);
+                            } else if let Some(imp) = read.get(&(n, j)) {
+                                imported(m, i, imp, &mut kept, &mut interner)?;
                             } else {
                                 expanded(m, i, &mut kept, &mut interner)?;
                             }
@@ -991,6 +1035,7 @@ impl Checker {
                         m.for_syntax(&f, &mut interner)?;
                         out.push(f);
                     }
+                    5 => imported(m, &f, &read[&(n, 0)], &mut out, &mut interner)?,
                     _ => expanded(m, &f, &mut out, &mut interner)?,
                 }
             }
@@ -998,7 +1043,7 @@ impl Checker {
         });
         self.macros = macros;
         self.interner = interner;
-        r
+        r.map_err(|e| self.in_any_loaded(e))
     }
 
     /// What is expanded as it is read (`define-datatype`), for forms read
@@ -1036,18 +1081,8 @@ impl Checker {
             // `include`'s are the names not the file's macros.
             if let Some((lib, filter)) = self.import_with_syntax(&f)? {
                 let macros = self.import_file_macros(&f, lib, filter.as_ref())?;
-                let include = Syn::named(f.span(), "include", &mut self.interner);
-                let mut made = vec![include, Syn::symbol(f.span(), lib, &self.interner)];
-                if let Some((only, names)) = filter {
-                    let rest: Vec<Syn> = names.into_iter().filter(|(n, _)| !macros.contains(n)).map(|(n, at)| Syn::symbol(at, n, &self.interner)).collect();
-                    // `(only macro …)`: nothing else.
-                    if only && rest.is_empty() {
-                        continue;
-                    }
-                    let word = Syn::named(f.span(), if only { "only" } else { "except" }, &mut self.interner);
-                    made.push(Syn::lst(f.span(), std::iter::once(word).chain(rest).collect()));
-                }
-                out.push(Syn::lst(f.span(), made));
+                let lib = Syn::symbol(f.span(), lib, &self.interner);
+                out.extend(include_of(f.span(), lib, filter.as_ref(), &macros, &mut self.interner));
                 continue;
             }
             // A macro defined, or each use of one expanded
@@ -1084,12 +1119,26 @@ impl Checker {
     /// `import-with-syntax` of `name` reads; any other definition of `name`
     /// forgets it.
     fn note_load_def(&mut self, form: &Syn) {
+        match self.load_def_of(form) {
+            Some((name, Some(p))) => {
+                self.load_defs.insert(name, p);
+            }
+            Some((name, None)) => {
+                self.load_defs.remove(&name);
+            }
+            None => {}
+        }
+    }
+
+    /// The name a `define` defines, if `form` is one, with its file's path
+    /// if it is `(define name (load-module "path"))`.
+    fn load_def_of(&self, form: &Syn) -> Option<(Sym, Option<String>)> {
         let listed = form.list();
         let items = listed.as_deref().unwrap_or_default();
         if items.first().and_then(|h| h.sym()).is_none_or(|h| self.interner.name(h) != "define") {
-            return;
+            return None;
         }
-        let Some(name) = items.get(1).and_then(|n| n.sym()) else { return };
+        let name = items.get(1).and_then(|n| n.sym())?;
         let path = items.last().and_then(|init| match init.list().as_deref() {
             Some([h, p]) if h.sym().is_some_and(|h| self.interner.name(h) == "load-module") => match &p.view() {
                 V::Str(s) => Some(s.clone()),
@@ -1097,90 +1146,113 @@ impl Checker {
             },
             _ => None,
         });
-        match path {
-            Some(p) if items.len() <= 4 => {
-                self.load_defs.insert(name, p);
-            }
-            _ => {
-                self.load_defs.remove(&name);
-            }
-        }
+        Some((name, path.filter(|_| items.len() <= 4)))
     }
 
     /// The macros of the file `lib` names (`(define lib (load-module
     /// "path"))`) defined, each as the file means it (`Macros::define_file`;
     /// `typed-macros.md`, "Decided: macros come with a file").
-    /// Of its macros not hidden, those `filter` takes (`(only name …)` or
+    /// Of the macros it gives, those `filter` takes (`(only name …)` or
     /// `(except name …)`) are defined by their names; the names of all
-    /// those not hidden are returned.
+    /// those it gives are returned.
     #[allow(clippy::type_complexity)]
     fn import_file_macros(&mut self, form: &Syn, lib: Sym, filter: Option<&(bool, Vec<(Sym, Span)>)>) -> R<fixpt_hash::HashSet<Sym>> {
         let usage = "`import-with-syntax` takes a name defined as `(load-module \"path\")`";
         let Some(path) = self.load_defs.get(&lib).cloned() else {
             return Err(FxError::at(form.span(), format!("{usage}, and `{}` is not one", self.interner.name(lib))));
         };
-        let at = match &self.base_dir {
-            Some(d) if std::path::Path::new(&path).is_relative() && crate::built_in_module(&path).is_none() => d.join(&path),
-            _ => std::path::PathBuf::from(&path),
-        };
-        if crate::parse::takes_modules_at(&at, &path) {
-            return Err(FxError::at(form.span(), format!("`{path}` takes module parameters: its macros cannot be imported, not yet")));
-        }
-        let key = at.display().to_string();
-        let text = module_text(&path, &at, form.span())?;
-        self.macro_files += 1;
-        let file = FileId(2_000_000 + self.macro_files);
-        self.load_sites.insert(file, (form.span(), path.clone(), text.as_str().into()));
-        #[cfg(debug_assertions)]
-        fixpt_read::note_source(file, &path, text.as_str().into());
-        let read = crate::heap_syn::read_syn(&text, file, &mut self.interner);
-        let forms = read.map_err(|e| self.in_loaded(FxError::at(e.span, e.message), file))?;
-        // Its macros, each with whether it is hidden; and what its module
-        // shows, its definitions not hidden, as a module file's are read.
-        let (mut macros, mut shown) = (Vec::new(), Vec::new());
-        for f in forms {
-            let listed = f.list();
-            let head = listed.as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).map(|h| self.interner.name(h).to_string());
-            match head.as_deref() {
-                // Its phase-1 forms too, in order among them, for its macros.
-                Some("define-syntax" | "define-syntax-rec" | "begin-for-syntax") => macros.push((f, false)),
-                Some("hide") => {
-                    for item in f.list().as_deref().unwrap_or_default().iter().skip(1) {
-                        if syntax_names(item, &self.interner).is_some() {
-                            macros.push((item.clone(), true));
-                        }
-                    }
-                }
-                _ => {
-                    if self.expand_generative(&f, &mut shown)? {
-                        continue;
-                    }
-                    self.expand_datatype(f, &mut shown)?;
-                }
-            }
-        }
-        let (values, types) = self.names_shown(&shown);
-        let names: Vec<(Sym, bool)> = macros.iter().flat_map(|m| syntax_names(&m.0, &self.interner).unwrap_or_default().into_iter().map(|(n, _)| (n, m.1))).collect();
-        let internal: fixpt_hash::HashMap<Sym, Sym> = names.iter().map(|(n, _)| (*n, self.interner.intern(&format!("%syntax:{key}:{}", self.interner.name(*n))))).collect();
-        let exported: fixpt_hash::HashSet<Sym> = names.iter().filter(|(_, hidden)| !hidden).map(|(n, _)| *n).collect();
+        let file = self.file_macros_at(form.span(), &path, self.base_dir.clone())?;
         let taken = |n: Sym| filter.is_none_or(|(only, names)| names.iter().any(|(m, _)| *m == n) == *only);
-        let shared = self.interner.intern(&format!("%shared:{key}"));
         let r = self.syn(|c| {
             let mut defined = std::mem::take(&mut c.macros);
             let mut interner = std::mem::take(&mut c.interner);
-            let outer = defined.reading.replace(std::sync::Arc::from(text.as_str()));
             let r = {
                 let is_standard = |s: Sym| c.standard_type(s).is_some();
-                let scope = crate::macros::FileScope { shared, values, types, internal, is_standard: &is_standard };
-                defined.define_file(&macros, &scope, &taken, crate::heap_syn::at_of(form.span()), &mut interner)
+                defined.define_file(&file, &is_standard, &taken, crate::heap_syn::at_of(form.span()), &mut interner)
             };
-            defined.reading = outer;
             c.macros = defined;
             c.interner = interner;
             r
         });
+        let given = r.map_err(|e| self.in_any_loaded(e))?;
+        Ok(given.into_iter().map(|(n, _)| n).collect())
+    }
+
+    /// Error `e`, said where the file it is in is loaded, if it is in one
+    /// (`in_loaded`).
+    fn in_any_loaded(&self, e: FxError) -> FxError {
+        let file = e.span.file;
+        if self.load_sites.contains_key(&file) { self.in_loaded(e, file) } else { e }
+    }
+
+    /// What `import-with-syntax` reads of the file at `path`, from `dir`,
+    /// a load of it at `site` (`crate::macros::FileMacros`): its macros,
+    /// hidden or not, its phase-1 forms, the files its own
+    /// `import-with-syntax`es read (of names it defines by `load-module`
+    /// before them, from its directory), and its top-level uses, which may
+    /// make macros (`TODO.md` §287), in order; and what its module shows,
+    /// its definitions not hidden, as a module file's are read.
+    fn file_macros_at(&mut self, site: Span, path: &str, dir: Option<std::path::PathBuf>) -> R<Rc<crate::macros::FileMacros>> {
+        use crate::macros::FileEntry;
+        let (at, key) = crate::macros::shapes::load_key(dir.as_deref(), path, false);
+        if crate::parse::takes_modules_at(&at, path) {
+            return Err(FxError::at(site, format!("`{path}` takes module parameters: its macros cannot be imported, not yet")));
+        }
+        let text = module_text(path, &at, site)?;
+        self.macro_files += 1;
+        let file = FileId(2_000_000 + self.macro_files);
+        self.load_sites.insert(file, (site, path.to_string(), text.as_str().into()));
+        #[cfg(debug_assertions)]
+        fixpt_read::note_source(file, path, text.as_str().into());
+        let read = crate::heap_syn::read_syn(&text, file, &mut self.interner);
+        let forms = read.map_err(|e| self.in_loaded(FxError::at(e.span, e.message), file))?;
+        let sub = at.parent().map(|d| d.to_path_buf());
+        let (mut entries, mut shown) = (Vec::new(), Vec::new());
+        let mut loads: fixpt_hash::HashMap<Sym, String> = fixpt_hash::HashMap::default();
+        let r = (|| -> R<()> {
+            for f in forms {
+                let listed = f.list();
+                let head = listed.as_deref().and_then(|l| l.first()).and_then(|h| h.sym()).map(|h| self.interner.name(h).to_string());
+                let hidden = head.as_deref() == Some("hide");
+                let items: Vec<Syn> = if hidden { listed.as_deref().unwrap_or_default()[1..].to_vec() } else { vec![f] };
+                for x in items {
+                    let h = x.head_sym().map(|h| self.interner.name(h).to_string());
+                    if let Some((n, p)) = self.load_def_of(&x) {
+                        match p {
+                            Some(p) => loads.insert(n, p),
+                            None => loads.remove(&n),
+                        };
+                    }
+                    if let Some((lib, filter)) = self.import_with_syntax(&x)? {
+                        let Some(p) = loads.get(&lib).cloned() else {
+                            return Err(FxError::at(x.span(), format!("`import-with-syntax` takes a name defined as `(load-module \"path\")`, and `{}` is not one", self.interner.name(lib))));
+                        };
+                        let lib = self.file_macros_at(x.span(), &p, sub.clone())?;
+                        let filter = filter.map(|(only, names)| (only, names.into_iter().map(|(n, _)| n).collect()));
+                        entries.push(FileEntry::Import(lib, filter, hidden));
+                        continue;
+                    }
+                    // Its phase-1 forms too, in order among them, for its macros.
+                    if h.as_deref() == Some("begin-for-syntax") || syntax_names(&x, &self.interner).is_some() {
+                        entries.push(FileEntry::Syntax(x, hidden));
+                        continue;
+                    }
+                    entries.push(FileEntry::Use(x, hidden));
+                    if !hidden {
+                        if self.expand_generative(&x, &mut shown)? {
+                            continue;
+                        }
+                        self.expand_datatype(x, &mut shown)?;
+                    }
+                }
+            }
+            Ok(())
+        })();
         r.map_err(|e| self.in_loaded(e, file))?;
-        Ok(exported)
+        let (values, types) = self.names_shown(&shown);
+        let shared = self.interner.intern(&format!("%shared:{key}"));
+        let text: std::sync::Arc<str> = text.as_str().into();
+        Ok(Rc::new(crate::macros::FileMacros { shared, values, types, prefix: crate::macros::file_prefix(&key, true), key, text, entries }))
     }
 
     /// The values and the types and effects `forms` define, a module
@@ -2751,4 +2823,29 @@ impl Checker {
 /// Held forms' syntax, in the heap lent.
 fn gotten(forms: &[Form]) -> Vec<Syn> {
     forms.iter().map(Form::get).collect()
+}
+
+/// An `import-with-syntax` in a module file (`file_own_expanded_syn`): what
+/// it reads of the file, and its `(only …)` or `(except …)`, if any.
+struct Imported {
+    file: Rc<crate::macros::FileMacros>,
+    filter: Option<(bool, Vec<(Sym, Span)>)>,
+}
+
+/// The `include` that gives the rest of what `(import-with-syntax lib …)`
+/// brings, at `span`, of module `lib`: of the names `filter` lists, those
+/// not `macros`; none if `(only …)` names macros alone.
+#[allow(clippy::type_complexity)]
+fn include_of(span: Span, lib: Syn, filter: Option<&(bool, Vec<(Sym, Span)>)>, macros: &fixpt_hash::HashSet<Sym>, interner: &mut fixpt_read::Interner) -> Option<Syn> {
+    let include = Syn::named(span, "include", interner);
+    let mut made = vec![include, lib];
+    if let Some((only, names)) = filter {
+        let rest: Vec<Syn> = names.iter().filter(|(n, _)| !macros.contains(n)).map(|(n, at)| Syn::symbol(*at, *n, interner)).collect();
+        if *only && rest.is_empty() {
+            return None;
+        }
+        let word = Syn::named(span, if *only { "only" } else { "except" }, interner);
+        made.push(Syn::lst(span, std::iter::once(word).chain(rest).collect()));
+    }
+    Some(Syn::lst(span, made))
 }

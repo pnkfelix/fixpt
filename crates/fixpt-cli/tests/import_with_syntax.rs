@@ -112,6 +112,30 @@ fn a_files_macros_descriptions_hold_their_binders_and_a_uses_parts() {
     }
 }
 
+/// A module file's `import-with-syntax` (`binding-shapes.md`, step 4;
+/// Heist's (b)): the macros it takes used in the file, each as its own file
+/// means it, and given on unless the import is hidden, as the file's own
+/// are; `only` taking of them alike.
+#[test]
+fn a_module_file_imports_a_files_macros() {
+    for (name, want) in [("main-imports-in-file.fx", "(6 10 10) : "), ("main-imports-hidden.fx", "(4 12 0) : "), ("main-imports-only.fx", "10 : int")] {
+        for m in MACHINES {
+            let (out, err) = eval(m, name);
+            assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");
+        }
+    }
+}
+
+/// A macro a module file's own use of a macro that defines one makes (TODO
+/// §287): given on as a written one is, its names the file's.
+#[test]
+fn a_files_made_macro_is_given_on() {
+    for m in MACHINES {
+        let (out, err) = eval(m, "main-makes.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("(10 3 10) : ")), "{m}: {out}{err}");
+    }
+}
+
 #[test]
 fn what_cannot_be_imported_is_refused() {
     let cases = [
@@ -122,7 +146,11 @@ fn what_cannot_be_imported_is_refused() {
         ("main-not-load.fx", "takes a name defined as `(load-module \"path\")`"),
         ("main-only-not-given.fx", "unbound variable `limit`"),
         ("main-only-hidden.fx", "`twice` is nothing `lib` gives"),
-        ("main-imports-in-file.fx", "`import-with-syntax` in a module file: not yet"),
+        ("main-imports-hidden-not-given.fx", "unbound variable `twice`"),
+        ("main-imports-twice.fx", "`twice` is a macro this file gives twice"),
+        ("main-makes-hidden.fx", "unbound variable `cap`"),
+        ("main-imports-global-before.fx", "`clamp` is defined already: a macro may not take its name"),
+        ("main-makes-global-before.fx", "`clamp` is defined already: a macro may not take its name"),
     ];
     for (name, why) in cases {
         let (out, err) = eval("rs-scheme-vm", name);

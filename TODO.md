@@ -7263,7 +7263,7 @@ nested use defines (`typed-macros.md`, "Decided: a template's heads read by
 their scope, to a fixed point"). `(macro σ made)` is refused in an import
 "not yet", never by the grammar.
 
-## 287. A module file's own top level using a macro-defining macro (found 2026-11-15; its own use tested 2026-11-16, its export open)
+## 287. A module file's own top level using a macro-defining macro (found 2026-11-15; its own use tested 2026-11-16; exported 2026-11-17)
 
 A file's top-level `define-syntax`es are its macros (`import_file_macros`
 collects them by their forms, `file_own_expanded_syn`), but a macro a
@@ -7275,6 +7275,20 @@ file with `import-with-syntax` and uses `clamp` is refused, "unbound
 variable `clamp`", in both front ends alike. To decide: export it, as a
 written one is (hidden if its use is in a `hide`), or refuse its use from
 outside saying where it is made, not that it is unbound.
+
+Decided and built (2026-11-17, the user's: `binding-shapes.md`, step 4):
+exported as a written one is, kept to the file if its use is in a `hide`.
+An importer expands each top-level use of the file's of a macro that
+makes definitions again, in the file's scope as the importer has it
+(`Macros::define_file`'s `FileEntry::Use`; FX-26's `define-form`), its
+form's key the file's apart (`m{F}mm…`, `file_prefix`), and takes the
+macros it makes (`import-with-syntax/makes.fx`). A global of a made
+macro's name defined before the import: FX-26's scan ahead for a later
+form that makes a name a macro (`later-macro-site`, as the Rust checker's
+`defined_before` sees it) does not see one a file's use makes, so FX-26
+holds each macro an import defines to the globals at the import itself
+(`top-made`), refused as the Rust checker refuses it, where the import is
+(`main-makes-global-before.fx`).
 
 ## 288. The old `(macro (export σ β) defn)` taken out (2026-11-15)
 
