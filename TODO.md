@@ -7365,3 +7365,42 @@ wait, each a change of the language to discuss first:
   With it, a captor that is a `module`'s item could be renamed and keep
   what the module gives; until then it is refused (`within_module`;
   `within-module?`), for a file's own macros and an instance's alike.
+
+## 292. Fast, unsynchronized gensyms: a symbol's name filled in when first printed (the user's, 2026-11-17)
+
+Chez Scheme's trick: a gensym is an uninterned symbol allocated with a tag
+saying its printed name is not yet made. Allocating one touches no shared
+state. Only printing it for the first time (or `symbol->string`, or
+writing it out) fills in the name, and that is what takes the
+synchronized counter. Most gensyms are never printed, so most never pay.
+
+For us: keep every symbol's name in an I-cell (`(icell string R)`), for
+uniformity. An interned symbol's cell is written when the symbol is made;
+a gensym's stays empty until first output. `symbol=?` stays identity, and
+uninterned symbols already exist (`Interner::uninterned`).
+
+Where it would help: ER's `rename` (`%er-renamer`,
+`macros/procedural-prelude.fx`) now builds `%~K.N:x` with two
+`string-append`s and a `string->symbol` for every name a transformer
+renames, interning each in the one table. Kayak finds `er-syntax-transformer`
+slow; this may be part of why. Maybe elsewhere too: `fresh-name`, the
+expander's captor renames, `alias`.
+
+To settle first:
+
+- **Deterministic names.** A renamed name's text is part of what the
+  checkers and compilers see, and of a form's cache key: it must not depend
+  on how many forms came before or on the order things were printed (TODO
+  §290, "Aliases per form"; Kayak's `INCR_IMPED.md` §5). So the name filled
+  in on output cannot come from a process-wide counter. It should come from
+  something the symbol already carries: its expansion's tag `K.N` and the
+  name it renames, `x`, as `%~K.N:x` is made now, with only the string
+  building and interning deferred.
+- **Identity across the boundary.** ER's `rename` must give the same symbol
+  for the same `x` in one expansion (`(eq? (rename 'x) (rename 'x))`). Today
+  interning does that; a lazily named gensym needs a per-expansion table
+  instead, which is unsynchronized because an expansion is one thread's.
+- **What crosses to the Rust side.** Aliases are read back as strings by the
+  Rust expander and checker (`%alias-base`, the readers of `%~…` names).
+  Each crossing is an output that fills in the name, so first measure where
+  the time actually goes.
