@@ -106,9 +106,9 @@ an independent implementation in Rust that bootstraps it. A further
 relational model finder, a bounded model checker, a control-flow
 analysis) and 50,000 lines in an \fx{} subset that compiles to safe
 Rust---its own compiler, which reproduces itself byte for byte, and a
-second implementation of the language---serve as evidence. We describe the design, report
-what the effect system cost and bought in those programs, and give an
-honest account of its soundness: a paper proof of the memory fragment,
+second implementation of the language---serve as evidence. We describe the design, say for each effect what consumes it and
+where nothing yet does, report what the effect system cost and bought
+in those programs, and give an account of its soundness: a paper proof of the memory fragment,
 and eighteen holes found and closed along the way, most of them in the
 termination effect.
 \end{abstract}
@@ -144,19 +144,79 @@ with a rule of design that the original did not have:
 \begin{quote}
 \emph{An effect is in the language only if something acts on it.}
 \end{quote}
-The rule cuts both ways. It kept out effects that would only have
-decorated signatures, and it forced each effect that was admitted to
-earn its place by being consumed: by the checker (which refuses a
-program), by a compiler (which removes or specialises code), by the
-run-time system (which chooses a representation), or by a tool (which
-decides what it may run). We call the general pattern \emph{effects as
-licences}: an effect bound is a permission, granted by the type system,
-for some agent other than the programmer to do something it otherwise
-could not.
 
-\paragraph{The language.} \fx{} is an S-expression language with
-explicit signatures on definitions and bidirectional checking inside
-them. Its effects are finite sets of atoms. Beyond FX-87's \cd{read},
+\paragraph{What ``acts on'' means.} Every effect in every effect system
+is acted on in a trivial sense: the type checker rejects a program
+whose body does more than its signature says. We do not count that.
+We say a component \emph{acts on} an effect atom $a$ when it makes a
+decision about a program---to transform it, to run it early, to run
+parts of it concurrently, to abandon it part-way, to choose a
+representation for it---and that decision is correct only because the
+program's effect does, or does not, contain $a$. The effect is the
+\emph{input to a decision someone other than the type checker makes}.
+We call such a decision procedure a \emph{consumer} of the effect, and
+the pattern \emph{effects as licences}: an effect bound is a
+permission, established by the checker, for a consumer to do something
+that would otherwise be unsound.
+
+Table~\ref{tab:consumers} applies the test to each effect \fx{} has.
+It is the paper's thesis in one table, and we have tried to fill it in
+without flattery. Most rows have several consumers. Some do not. We
+found no consumer that tells most of the sixteen kinds of I/O effect
+apart: parallel evaluation, the REPL and the cancellation forms treat
+every I/O effect alike, so the kinds presently serve documentation and
+search only. The nondeterminism effect has one thin consumer. By the
+paper's own rule these are the weakest parts of the design, and we say
+so here rather than leave a reviewer to find it.
+
+\begin{table}[t]
+\caption{What acts on each effect, beyond the subsumption check.
+Section numbers say where each consumer is described.}
+\label{tab:consumers}
+\small
+\begin{tabular}{@{}p{0.23\linewidth}p{0.73\linewidth}@{}}
+\toprule
+effect & consumers, and the decision each makes\\
+\midrule
+read, write, allocate\newline on a region &
+\emph{masking}: drop the effect where the region is private (\S\ref{sec:core});
+\emph{parallel evaluation}: branches may run concurrently if their effects do not conflict (\S\ref{sec:conc});
+\emph{speculation}: the REPL may run code early (\S\ref{sec:licences});
+\emph{cancellation}: a computation that writes nothing outside itself may be abandoned (\S\ref{sec:conc});
+\emph{narrowing}: a fact learned by a test survives until a write to the region it was read through (\S\ref{sec:core});
+\emph{compiler}: allocation in an arena region is an inline pointer bump (\S\ref{sec:compiler-licence})\\[3pt]
+capture or invoke a\newline continuation &
+\emph{Rust translation}: chooses plain, \cd{Result}-returning or \cd{async} function (\S\ref{sec:kayak});
+\emph{arenas}: a region may be freed on exit only if no captured continuation can re-enter it;
+\emph{parallel evaluation} and \emph{cancellation}: refuse code that can jump out\\[3pt]
+may not terminate &
+\emph{code removal}: an unused call is deleted only if it is pure \emph{and} terminates (\S\ref{sec:compiler-licence});
+\emph{specifications}: any pure, terminating procedure may be used in a logical formula;
+\emph{speculation}: needs a step budget where present\\[3pt]
+send, receive; wait on or fill a write-once cell &
+\emph{parallel evaluation}; \emph{speculation}; \emph{cancellation};
+\emph{Rust translation}: closure types gain \cd{Send + Sync}\\[3pt]
+read or write a named global variable &
+\emph{redefinition}: which earlier definitions a redefinition invalidates (\S\ref{sec:core});
+\emph{compiler}: one guarded entry per procedure body where globals cannot change under it (\S\ref{sec:compiler-licence});
+\emph{modules}: loading may be shared because it only reads globals (\S\ref{sec:macros})\\[3pt]
+I/O (sixteen kinds) &
+\emph{parallel evaluation}, \emph{speculation}, \emph{cancellation}: all refuse or sequence any I/O.
+\textbf{Gap:} nothing we found distinguishes most kinds from one another\\[3pt]
+nondeterminism &
+\emph{speculation} refuses it. \textbf{Gap:} otherwise it is a statement to the reader that results may vary between runs\\[3pt]
+generates code at run time &
+\emph{speculation} refuses it\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The language.} \fx{} is a statically typed, strict,
+impure functional language. Its concrete syntax is the parenthesised
+prefix notation of Lisp (\S\ref{sec:overview} explains how to read it);
+nothing in the design depends on that choice. Definitions carry
+explicit signatures, and types inside a definition are found by
+bidirectional checking. Its effects are finite sets of atoms. Beyond FX-87's \cd{read},
 \cd{write} and \cd{alloc} on regions, it has: \cd{spin}, the effect of
 code that may not terminate, checked by the size-change
 principle~\cite{size-change}; \cd{goto} and \cd{comefrom}, the control
@@ -170,7 +230,7 @@ untagged unions narrowed by tests~\cite{typed-scheme}, intersections of
 procedure types, first-class modules with dependent procedure types
 after Sheldon and Gifford~\cite{sheldon-gifford}, and macros whose
 signatures are Herman's binding-structure types~\cite{herman-thesis},
-inferred for \cd{syntax-rules} definitions.
+inferred for macros defined by pattern and template.
 
 \paragraph{The evidence.} A language design paper stands on what was
 built with the language. We have three bodies of code
@@ -185,7 +245,7 @@ built with the language. We have three bodies of code
   must agree, and both compilers' output is compared.
 \item \textbf{Heist}, 38,202 lines of application programs written by
   a client project separate from the language's own: an
-  Emacs-lineage editor, an R7RS Scheme compiled to \fx{} by staging, a
+  Emacs-style text editor, an implementation of standard Scheme, a
   CDCL SAT and SMT solver, a relational model finder after Alloy, a
   bounded model checker, and a control-flow analysis.
 \item \textbf{Kayak}, which defines KFX, a subset of \fx{} in which every
@@ -213,27 +273,45 @@ built with the language. We have three bodies of code
   cross process boundaries select \cd{Send + Sync}; with a compiler
   that bootstraps through it.
 \item Typed hygienic macros in a typed language (\S\ref{sec:macros}),
-  with signatures written as shapes and binding facts, inferred for
-  \cd{syntax-rules} macros, and checked at definitions and uses.
+  with signatures written as shapes and binding facts, inferred for pattern-and-template macros, and checked at definitions and uses.
 \item A self-hosted implementation kept in lockstep with a second one
-  (\S\ref{sec:impl}), and an evaluation (\S\ref{sec:eval}) on 125,000
-  lines of \fx{}, including measurements of how effects are actually
+  (\S\ref{sec:impl}), and an experience report (\S\ref{sec:eval}) from 125,000
+  lines of \fx{}, including counts of how effects are actually
   written in application code.
 \item An account of soundness as practised (\S\ref{sec:soundness}): what
   is proved, what is conjectured, the eighteen holes found, and why
   eight of them were in one effect.
 \end{enumerate}
 
-We are explicit throughout about status. \fx{} is eight weeks of
-design old at the time of writing; several of its features are
-prototypes; its metatheory is on paper for a fragment only; and its
-performance has not yet been compared with other systems under
-controlled conditions. \S\ref{sec:threats} lists what a reader should
-not conclude.
+\paragraph{What this paper is not.} It is not a performance
+evaluation: no \fx{} program has been timed against another language's
+implementation under controlled conditions, and we make no claim about
+its speed relative to any. It is not a soundness proof: the metatheory
+is on paper, for a fragment. \fx{} is eight weeks of design old at the
+time of writing and several features are prototypes. The paper's
+evidence is that the design could be implemented in itself, twice
+over, and used for sizeable programs; \S\ref{sec:eval} reports that
+experience and says at its head what may and may not be concluded
+from it.
 
 %% ------------------------------------------------------------------
 \section{FX-26 by Example}
 \label{sec:overview}
+
+\paragraph{Reading the notation.} Programs and types are written in
+prefix form: \cd{(f a b)} applies \cd{f}, and
+\cd{(define $x$ $T$ $e$)} defines $x$ with type $T$ and value $e$.
+The type \cd{(subr $F$ ($T_1 \ldots$) $T$)} is a function from
+$T_1 \ldots$ to $T$ whose calls have effect $F$; \cd{(maxeff $F_1$
+$F_2$)} is the union of two effects and \cd{pure} is none. A name
+beginning \cd{@} is a region: a static name for a set of mutable
+locations. \cd{(ref int @a)} is a mutable cell holding an integer in
+region \cd{@a}, made by \cd{new} and used by \cd{get} and \cd{set}.
+\cd{(the $T$ $e$)} is a type ascription, \cd{letrec} binds local
+recursive functions, and \cd{\#u} is the unit value. After each
+definition or expression the system prints its value, its type, and
+after \cd{!} its effect.
+
 
 \paragraph{Masking: local state is an implementation detail.}
 The following procedure allocates a reference cell and writes it a
@@ -252,7 +330,7 @@ hundred times.
 sum-to : (subr pure (int) int) ! pure
 5050 : int ! (read (globals sum-to))
 \end{lstlisting}
-The system prints each form's value, type and effect. The signature of
+The signature of
 \cd{sum-to} says \cd{pure}, and the checker accepts it: the cell lives
 at region \cd{@a}; no free variable of the \cd{let} has a type
 mentioning \cd{@a}, and neither does its result; so the allocation,
@@ -283,7 +361,10 @@ is expected here, and this is a (subr spin (int int) int)
 \paragraph{Control is typed.} Capturing a continuation has a
 \cd{comefrom} effect and invoking one a \cd{goto}, each on a
 region~\cite{jouvelot-gifford}. They are masked like memory effects, so
-a procedure that uses an escape internally is still pure:
+a procedure that uses an escape internally is still pure. Below,
+\cd{cwcc} (``call with current continuation'') passes its argument the
+rest of the computation as a function \cd{k}; calling \cd{k} with 41
+makes 41 the result of the \cd{cwcc} expression:
 \begin{lstlisting}[style=out]
 42 : int ! pure                  ; (+ 1 (cwcc (lambda (k) (k 41))))
 \end{lstlisting}
@@ -299,7 +380,9 @@ where a run-time test tells its members apart; a test narrows.
                    (if (null? x) 0 (+ (leaves (car x)) (leaves (cdr x))))))))
     leaves))
 \end{lstlisting}
-Here \cd{int?} narrows \cd{x}; \cd{(cdr x)} is a list of trees and so,
+The type says a tree is an integer or a list of trees (\cd{car} and
+\cd{cdr} are a list's head and tail). The test \cd{int?} narrows
+\cd{x}; the tail \cd{(cdr x)} is a list of trees and so,
 by subtyping through the \cd{mu}, a tree; and \cd{leaves} is \cd{pure}
 because a list at the region \cd{acyclic} is finite, so descent into
 its parts terminates. The three features---regions, recursive subtyping
@@ -485,8 +568,8 @@ fail or silently keep the old code.
 \cd{spin} is an atom with no region, so nothing masks it. A call within
 a recursive group has \cd{spin} unless the group passes the size-change
 test of Lee, Jones and Ben-Amram~\cite{size-change}, with three
-measures: \emph{parts} (the payload of a \cd{tagcase} arm, a field, or
-the \cd{car} or \cd{cdr} of a pair at an \cd{acyclic} region);
+measures: \emph{parts} (the payload bound by a pattern match on a sum, a field, or
+the head or tail of a list at an \cd{acyclic} region);
 \emph{down} (an integer decreased by a literal under a test bounding it
 below); and \emph{up} (increased by a literal under a bound above).
 This is enough for list and tree traversals, counting loops, mutual
@@ -500,7 +583,7 @@ Recursion is not the only way to loop, and the remaining sources of
 (\S\ref{sec:soundness}). \cd{spin} is also charged for self-application
 through a type recursive in a parameter position; for a procedure
 stored in mutable storage at a region its own latent effect reads
-(Landin's knot); for a procedure that reaches itself through a global;
+(recursion through the store); for a procedure that reaches itself through a global;
 and for \cd{cwcc} unless its receiver only calls the continuation while
 the capture is live.
 
@@ -554,7 +637,10 @@ binders may be bounded, \cd{($e$ effect (within $E$))}.
 \subsection{Delimited Control}
 
 Prompts, composable continuations and continuation marks follow
-SRFI~226's operators. A prompt tag's type
+the design of Racket's control operators. A \emph{prompt} marks a
+point on the stack; a computation may abort to the nearest prompt with
+a given tag, or capture the stack up to it as a function. A prompt
+tag's type
 \cd{(prompt-tag $A$ $H$ $D$ $R$)} fixes the answer type $A$, the
 handler's argument $H$, a bound $D$ on what delimited computations may
 do, and a region $R$ for its control effects; fixing the answer type in
@@ -638,7 +724,7 @@ convention.''
 
 Compilation is not erasure. In the path that lowers to Scheme, facts
 travel with code as quoted \cd{\%fx-note} claims in the style of
-Twobit's annotations~\cite{twobit}, each with a \emph{basis}:
+an earlier Scheme compiler's annotations~\cite{twobit}, each with a \emph{basis}:
 \cd{checked}, \cd{inferred} or \cd{asserted}. Only a checked claim
 licenses removing code, a property pinned by a test.
 \begin{lstlisting}[style=out]
@@ -647,7 +733,7 @@ fx26> (+ 1 2)
 ;        (%fx26-add 1 2))
 \end{lstlisting}
 In the native compilers, types select unchecked instruction sequences
-(a call without a closure test; \cd{car} as one load; integer addition
+(a call without a closure test; a list's head as one load; integer addition
 without a tag test). Effects contribute \emph{summaries}: both checkers
 compute for each procedure a level describing whether it can redefine
 globals, and where it cannot, the compiler emits a \emph{version} of
@@ -658,7 +744,7 @@ inline pointer bump into an arena freed on exit.
 
 \subsection{Staging and Verification}
 
-\cd{(stage $m$ $E$ $R$ $\mathit{code}$ \ldots)} turns a datum into a
+\cd{(stage $m$ $E$ $R$ $\mathit{code}$ \ldots)} turns a quoted expression (data) into a
 procedure of type \cd{(subr $E$ () $R$)} by running the checker and
 compiler on it at run time against a module $m$ of bindings; code that
 does not check at that type is refused as a value, not an exception.
@@ -717,10 +803,9 @@ named for its file (\cd{counter.fx..t}) and two loads agree on it;
 this is sound because making a module must be pure but for reading
 globals. The ML tradition reached the same condition by another
 route~\cite{leroy-applicative,f-ing}. Files compile separately to
-\cd{.fasl} files that store the type the load was checked at, the files
+object files that store the type the load was checked at, the files
 it loads, and its value, with staleness decided by transitive source
-digests; 342 test programs give the same results from \cd{.fasl} as
-from source.
+digests; 342 test programs give the same results compiled separately as from source.
 
 \subsection{Macros with Binding-Structure Signatures}
 
@@ -728,7 +813,7 @@ FX had no macros. \fx{} has hygienic ones whose signatures say what a
 use's parts are and how they bind, following Herman's theory of typed
 hygienic macros~\cite{herman-wand,herman-thesis}. A signature is
 \cd{(macro $\mathit{shape}$ $\mathit{made}$ $\mathit{fact}\ldots$)}:
-the shape is written as a \cd{syntax-rules} pattern with parts labelled
+the shape is written as a pattern (in the notation of Scheme's \cd{syntax-rules}) with parts labelled
 \cd{$\mathit{name}$ @ $\sigma$}; \emph{made} says whether a use makes an
 expression, a description, or definitions; and facts state binding.
 \begin{lstlisting}
@@ -749,7 +834,7 @@ Because a macro's signature is its binder's kind, signatures are not
 procedure types: a contract maps syntax to syntax before any type is
 assigned.
 
-For \cd{syntax-rules} macros the signature is \emph{inferred}, after
+For macros defined by pattern and template the signature is \emph{inferred}, after
 Pombrio, Krishnamurthi and Wand~\cite{inferring-scope}, and then
 checked as a written one would be, so inference is sound by
 construction. Of 125 test macros with written signatures the inferred
@@ -775,7 +860,7 @@ depend on how many expansions earlier forms performed---a requirement
 that came from Kayak's incremental compiler. Both front ends implement
 the expander and are held equal on every macro test. The macro system
 is the newest part of the language and is labelled a prototype;
-\S\ref{sec:threats} lists its limits.
+\S\ref{sec:eval} lists its limits.
 
 %% ------------------------------------------------------------------
 \section{Implementation}
@@ -790,7 +875,7 @@ is the newest part of the language and is labelled a prototype;
 \node[box] (src) {source};
 \node[box, right=of src] (read) {reader\\parser\\expander};
 \node[box, right=of read] (chk) {checker};
-\node[box, right=of chk] (cw) {cellular\\words};
+\node[box, right=of chk] (cw) {threaded\\code};
 \node[box, right=of cw] (rc) {register\\code};
 \node[box, right=of rc] (nat) {arm64 /\\x86-64};
 \node[box, below=7mm of cw] (interp) {interpreters,\\stencils};
@@ -808,7 +893,7 @@ is the newest part of the language and is labelled a prototype;
       fit=(read)(chk)(cw)(rc)(nat),
       label={[font=\footnotesize]above:each stage implemented twice: in Rust and in \fx, outputs compared}] {};
 \end{tikzpicture}
-\Description{A pipeline from source through reader, checker, cellular words and register code to machine code.}
+\Description{A pipeline from source through reader, checker, threaded code and register code to machine code.}
 \caption{The Fixpt pipeline. Twelve named ``machines'' select a path
 through it and which implementation performs each step.}
 \label{fig:pipeline}
@@ -829,14 +914,12 @@ source of bugs in both, and of specification: a feature is not done
 until two programs written from one description agree about it.
 
 \paragraph{Bootstrap.} The Rust compiler compiles the \fx{} front end
-to register code and native code once and caches the result as a heap
-image (21~MB) keyed by a hash of the front end's source. Thereafter
+to register code and native code once and caches the result as a saved image of the heap (21~MB) keyed by a hash of the front end's source. Thereafter
 programs are read, checked and compiled by the \fx{} front end; an
 empty program runs in 50~ms. A fixed-point test checks that the
 front end compiled by itself reproduces itself.
 
-\paragraph{Code.} The checker's output is compiled to \emph{cellular
-words}, a threaded stack code, and from there to \emph{register code}
+\paragraph{Code.} The checker's output is compiled to a \emph{threaded code} for a stack machine, and from there to \emph{register code}
 with values in machine registers, and to native arm64 or x86-64 with
 ordinary call frames. Twelve machines are kept runnable: the default
 native one; interpreters of the threaded code in Rust and in
@@ -851,7 +934,7 @@ threaded code through adapters.
 \paragraph{Run time.} Values are 64-bit words with a three-bit tag.
 The collector, in Rust, is a Cheney copying collector with a nursery
 and a card-marking barrier; \cd{letrena} and \cd{letreap} regions are
-arenas outside it. \cd{int} is arbitrary precision with a fixnum fast
+arenas outside it. \cd{int} is arbitrary precision with a machine-word fast
 path; fixed-width integers and floats are unboxed in registers. The
 substrate is a Scheme engine that also hosts faithful
 re-implementations of FX-87 and FX-91, which pass conformance corpora
@@ -873,7 +956,7 @@ Fixpt front end (in \fx) & files & lines\\
 checker & 104 & 32,529\\
 native code generators & 38 & 18,263\\
 macro expander & 27 & 13,288\\
-compiler to cellular words & 17 & 5,603\\
+compiler to threaded code & 17 & 5,603\\
 register code & 14 & 5,203\\
 parser, module loader & 7 & 4,036\\
 evaluator & 5 & 2,744\\
@@ -892,7 +975,7 @@ Heist (applications) & lines\\
 \midrule
 ratfink, bounded model checker & 9,603\\
 editor & 8,611\\
-s7st, R7RS Scheme & 6,413\\
+s7st, a Scheme implementation & 6,413\\
 combo, SAT/SMT solver & 5,750\\
 cfa, control-flow analysis & 3,423\\
 casing, relational model finder & 2,725\\
@@ -902,7 +985,7 @@ Kayak (in KFX) & \\
 \midrule
 KFX-to-Rust compiler & 24,755\\
 \fx{} implementation & 16,133\\
-cellular machine, tiers & 9,712\\
+threaded-code machine, tiers & 9,712\\
 \bottomrule
 \end{tabular}
 \end{minipage}
@@ -984,7 +1067,7 @@ made Kayak Fixpt's most demanding performance client and drove that
 figure to 9.5~s (\S\ref{sec:perf}).
 
 Of 286 Fixpt test programs surveyed when KFX began, it accepted one;
-the commonest first refusals were bignum \cd{int} (48 programs),
+the commonest first refusals were arbitrary-precision \cd{int} (48 programs),
 \cd{define*} (43) and untyped definitions (36). It now accepts 194,
 each agreeing with Fixpt's answer when run. K1 is tested, not proved,
 and batches of adversarial probes (about 200 programs) repeatedly found
@@ -993,7 +1076,7 @@ holes in it; the known remaining gaps are documented.
 \paragraph{A second implementation.} Kayak also contains an
 implementation of full \fx{} written in KFX: a checker, an interpreter
 with a copying collector written in KFX, ports of Fixpt's compilers to
-cellular words and register code, six execution tiers, and a REPL
+threaded code and register code, six execution tiers, and a REPL
 written as \fx{} processes. Of 541 programs Fixpt's checkers accept,
 Kayak's checker prints the same types for 423; of 386 Fixpt refuses,
 Kayak accepts none; its register-code compiler emits words identical to
@@ -1001,24 +1084,42 @@ Fixpt's for 910 procedures of 917. \fx{} thus has three checkers
 written by reading one description.
 
 %% ------------------------------------------------------------------
-\section{Evaluation}
+\section{Experience}
 \label{sec:eval}
 
-We ask four questions.
-\textbf{RQ1}: Can large programs be written under the discipline, and
-what do their effect signatures look like?
-\textbf{RQ2}: What did the effect system catch, cost and enable in
-those programs?
-\textbf{RQ3}: How fast is the code, and what do types, effects and
-regions contribute?
-\textbf{RQ4}: How does application performance compare with the
-systems the applications were ported from?
+This section reports what happened when \fx{} was used. It is an
+experience report, and we state its limits before its contents.
+
+\paragraph{What may be concluded.} That the discipline scales to
+programs of tens of thousands of lines, including its own
+implementation; how effect signatures are written when it does; what
+the recorded costs to programmers were; and, for our own execution
+strategies compared with one another, where the time goes.
+
+\paragraph{What may not.}
+\emph{Nothing here measures \fx{} against another language.} No
+benchmark was timed on another implementation under controlled
+conditions. The only external comparisons (\S\ref{sec:apps}) are two
+applications against one Scheme system. Hardware is recorded only as
+an Apple arm64 machine early on and a shared 128-core x86-64 Linux
+machine later; runs are best-of-three or single, without variance;
+optimisations were measured one at a time on eight small programs.
+\emph{Nothing here measures programmer productivity or defects
+prevented.} The applications were written by one author over three
+weeks; the notes we draw on are qualitative; we have no measurement of
+annotation overhead per line and no record of how often the checker
+refused a program rightly or wrongly. The counts of
+Table~\ref{tab:usage} describe one author's style.
+\emph{The language is not finished.} Macros are a prototype (no local
+macro bindings; soundness of signatures argued, not proved);
+refinement of types by pattern matching on constructors, polymorphic
+members of intersections, and static checking of one-shot
+continuations are not built.
 
 All figures are as recorded in the three repositories at the commits of
-Table~\ref{tab:sizes}, with the date of each measurement; \S\ref{sec:threats}
-discusses their limits.
+Table~\ref{tab:sizes}, with the date of each measurement.
 
-\subsection{RQ1: Programs and Their Signatures}
+\subsection{Programs and Their Signatures}
 \label{sec:heist}
 
 Table~\ref{tab:sizes} lists the code. Fixpt's own tests comprise 1,290
@@ -1034,7 +1135,7 @@ of a Scheme CDCL/simplex/bit-blasting solver, to which it is
 byte-identical on 800 fuzzed scripts; the model finder of Alloy~6's
 semantics~\cite{alloy} (82 of 90 commands agree with Alloy 6.2.0, two
 differ by design, six are inexpressible there); the Scheme passes
-thirteen of the R7RS library test suites of Larceny, the \cd{base}
+thirteen library test suites for the Scheme standard, the \cd{base}
 library's 1,078 tests among them.
 
 \begin{table}[t]
@@ -1064,7 +1165,7 @@ application source (tests excluded; comments and strings stripped).}
 \toprule
 form & uses\\
 \midrule
-\cd{tagcase} & 1,301\\
+\cd{tagcase} (match on a sum) & 1,301\\
 \cd{load-module}, \cd{load-moduleof} & 464\\
 \cd{define-syntax} & 70\\
 \cd{poly} / \cd{plambda} & 53 / 52\\
@@ -1112,7 +1213,7 @@ its own actors over \cd{pselect}); recursive types arrive through named
 (the Scheme's \cd{call/cc}, \cd{dynamic-wind} and time slices; the
 model checker's backtracking) carry the weight.
 
-\subsection{RQ2: What the Discipline Caught, Cost and Enabled}
+\subsection{What the Discipline Enabled, Cost and Caught}
 
 \paragraph{Enabled.} Besides rollback by \cd{attempt}
 (\S\ref{sec:conc}), the control-flow analysis benefits directly from
@@ -1153,7 +1254,7 @@ monitors; the \cd{io} effect family with errors as values (so that
 KFX's invariant stays checkable for programs that perform I/O); a
 syscall interface; code a program makes; and \cd{distinct} regions.
 
-\subsection{RQ3: Performance of Generated Code}
+\subsection{Execution Strategies Compared with One Another}
 \label{sec:perf}
 
 \begin{table}[t]
@@ -1161,8 +1262,7 @@ syscall interface; code a program makes; and \cd{distinct} regions.
 per-commit benchmarks on seven of the machines; arm64, 2026-09-28.
 ``Lowered'' is Scheme on the bytecode VM; ``rust'' and ``hand'' are
 interpreters of threaded code; ``compiled'' is threaded code compiled
-to machine code; ``registers'' is register code in the cellular
-calling convention; ``native'' uses machine call frames.}
+to machine code; ``registers'' is register code in the threaded machine's calling convention; ``native'' uses machine call frames.}
 \label{tab:machines}
 \small
 \begin{tabular}{@{}lrrrrrrr@{}}
@@ -1181,8 +1281,11 @@ tak & 51.6 & 78.0 & 6.6 & 8.7 & 4.5 & 1.7 & 1.2\\
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:machines} is the most recent complete table across
-machines. The spread from a bytecode VM to native code is 5--380
+Fixpt can run a program twelve ways, from a bytecode interpreter to
+native code. Table~\ref{tab:machines} compares seven of them on eight
+small programs; it is the most recent complete such table, and it says
+how much each stage of compilation contributes, not how \fx{} compares
+with anything else. The spread from a bytecode VM to native code is 5--380
 times on these programs; the stencil machine does not improve on the
 hand-written threaded interpreter; register code is where most of the
 gain arrives. (Two outliers in the ``native'' column, \cd{captures}
@@ -1214,11 +1317,10 @@ and \emph{not} built: common-subexpression elimination of pure calls
 loop-invariant lifting (3). We report these because the rule of
 \S\ref{sec:intro} applies to optimisations too.
 
-\paragraph{Suites.} We ported 53 of the 75 programs of Larceny's R7RS
-benchmark suite (the rest need floating point or file I/O not then
+\paragraph{Suites.} We ported 53 of the 75 programs of a standard Scheme benchmark suite (the rest need floating point or file I/O not then
 available) and 46 programs from MLton's benchmarks, OCaml's test-suite
 classics and Sandmark's Benchmarks Game. The ports were used to
-find performance cliffs---bignum \cd{int} without a fixnum fast path;
+find performance cliffs---arbitrary-precision \cd{int} without a machine-word fast path;
 sums and products built out of line (\cd{mlton/peek} improved 4.8
 times)---rather than timed under controlled conditions; the recorded
 single-run times include one to three seconds of start-up that has
@@ -1226,12 +1328,11 @@ since been removed, and we do not tabulate them.
 
 \paragraph{Compile time.} Compiling itself (2026-10-02, then-current
 sizes), the \fx{} checker took 1,385~ms against 394~ms for the Rust
-checker on the same input (3.5 times), the \fx{} compiler to cellular
-words 757~ms against 70~ms (11 times), and the \fx{} code generator
+checker on the same input (3.5 times), the \fx{} compiler to threaded code 757~ms against 70~ms (11 times), and the \fx{} code generator
 979~ms against 7~ms. Self-hosting is paid for; the price is in the
 open. Kayak's 30,000-line compiler is the standing workload: checking,
 compiling and running it as stage~0 went from 610~s to 9.5~s in three
-weeks; in an earlier measurement it loaded from its \cd{.fasl} in
+weeks; in an earlier measurement it loaded from its compiled form in
 1.15~s against 3.30~s from source.
 
 \paragraph{KFX as Rust.} On the day KFX first ran the per-commit
@@ -1241,13 +1342,15 @@ in 5.4 against 6.0, and \cd{closures} in 21 against 14 (closures are
 leaked \cd{dyn Fn}). Records with declared layout matched hand-written
 \cd{\#[repr(C)]} Rust (10.5 and 5.0~ms against 10.4 and 4.9).
 
-\subsection{RQ4: Applications against Their Originals}
+\subsection{Two Applications against a Scheme System}
+\label{sec:apps}
 
 \begin{table}[t]
 \caption{Heist applications against the Scheme systems they were
 ported from or compete with. Left: the SAT/SMT solver against its
-original running on Larceny (2026-10-28, x86-64 Linux). Right: the
-R7RS Scheme, as a CEK interpreter and compiled to \fx{} by \cd{stage},
+original running on Larceny, a native-code Scheme compiler (2026-10-28,
+x86-64 Linux). Right: Heist's Scheme, as an interpreter and compiling
+to \fx{} at run time by \cd{stage},
 against Larceny's interpreter and compiler (2026-10-31; ms).}
 \label{tab:apps}
 \small
@@ -1270,7 +1373,7 @@ start-up & 0.05 s & 0.29 s\\
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
  & \multicolumn{2}{c}{s7st on \fx} & \multicolumn{2}{c}{Larceny}\\
- & CEK & staged & interp. & compiled\\
+  & interp. & staged & interp. & compiled\\
 \midrule
 \cd{(fib 25)} & 49.5 & 7.1 & 11.3 & 0.5\\
 \cd{(tak 18 12 6)} & 12.0 & 1.7 & 4.0 & 0.1\\
@@ -1283,7 +1386,7 @@ countdown, $10^7$ & 661.9 & 243.8 & 244.1 & 6.6\\
 \end{minipage}
 \end{table}
 
-Table~\ref{tab:apps} gives the two comparisons that exist. The solver,
+Table~\ref{tab:apps} gives the only two comparisons with another system that exist. The solver,
 a statically typed port performing the same search, is 1.4 to 3 times
 slower than its dynamically typed original on a mature native-code
 Scheme. The Scheme implemented \emph{in} \fx{} is, once it compiles to
@@ -1295,33 +1398,7 @@ isolated key, against 1.5~ms recorded for its predecessor on Larceny,
 with \cd{attempt} around each command costing 1.7~$\mu$s. The model
 finder runs its 90 cross-check commands in 17~s; the control-flow
 analysis covers the editor's 9,855 notes in 1.8~s including start-up.
-Start-up from \cd{.fasl} files is 0.1--1.2~s per program (median of
-20), or 30~ms from a heap image.
-
-\subsection{Threats to Validity}
-\label{sec:threats}
-
-\emph{Performance.} No benchmark was timed against another language
-implementation under controlled conditions; hardware is recorded only
-as an arm64 Mac early on and a 128-core shared x86-64 Linux machine
-later; runs are best-of-three or single, without variance; the suite
-tables are stale; and optimisations were measured one at a time on
-eight small programs, not ablated on the suites. Table~\ref{tab:machines}
-compares our machines with one another only. Nothing here supports a
-claim about \fx's speed relative to OCaml, MLton, Chez Scheme or Rust.
-
-\emph{Experience.} The applications were written by one author over
-three weeks, and the notes on which \S\ref{sec:heist} draws are
-qualitative. We have no measurement of annotation overhead per line,
-no line counts for the original systems other than the editor, and no
-record of checker refusals during development. The usage counts of
-Table~\ref{tab:usage} describe one author's style.
-
-\emph{Language.} Macros are a prototype: no local macro bindings, one
-phase above run time, and hygiene and signature soundness argued rather
-than proved. GADT-style refinement, polymorphic members of
-intersections, and static checking of one-shot continuations are not
-built. Soundness is the subject of the next section.
+Start-up from separately compiled files is 0.1--1.2~s per program (median of 20), or 30~ms from a saved image of the heap.
 
 %% ------------------------------------------------------------------
 \section{Soundness, as Practised}

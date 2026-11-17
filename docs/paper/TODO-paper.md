@@ -4,13 +4,45 @@
 alone, at Fixpt `0585488`, Kayak `f59ac8cd` and Heist `18efce5`. Every
 number in it comes from a file in one of them. This list is what a PLDI
 paper would normally contain that the repositories do not, so the draft
-either says so (§8.5, §9) or leaves it out. Each item is a task for the
+either says so (the head of §8, and §9) or leaves it out. Each item is a task for the
 Fixpt team; the priority is how much a reviewer would mind.
 
 Build: `pdflatex fx26 && bibtex fx26 && pdflatex fx26 && pdflatex fx26`
 (TeX Live with `acmart`, `texlive-science`, `cm-super`).
 
+## 0. The thesis itself (do these first)
+
+The paper's claim is "an effect is in the language only if something
+acts on it", defined in §1 as: a component other than the type checker
+makes a decision that is correct only because of the effect. Table 1
+lists, per effect, the consumers found in the repositories.
+
+0a. **Check Table 1 (high).** It was assembled from the docs, not from
+    the code. Each cell needs someone who knows the implementation to
+    confirm it or strike it, and to add consumers that were missed.
+0b. **The I/O kinds (high).** Sixteen kinds of `(io k)` exist; the only
+    distinctions found in use are the non-waiting sub-kinds. `par`, the
+    licence rule and cancellability treat all I/O alike. Either name
+    the consumer that needs each kind (a sandbox policy? `fixpt query`?
+    capability-style restriction of staged or loaded code?) or the
+    paper must concede that the kinds break its own rule, as the draft
+    now does.
+0c. **`nondet` (high).** Its only consumer found is the licence rule's
+    refusal. Is there another (replay, testing, memoisation, `par`)?
+0d. **`spin` (medium).** Confirm that code removal and the
+    specification language really require its absence, with a test
+    that fails if they do not.
+0e. **A reader outside the Lisp community (high).** The draft now has a
+    notation primer (§2) and avoids Scheme-specific terms, but every
+    example is still S-expressions. Have someone from the ML/Rust side
+    read §1-§4 cold and mark where they stop following. Consider
+    showing one example beside its equivalent in an ML-like notation.
+
 ## A. Evaluation (most of what reviewers will ask for)
+
+The draft no longer calls §8 an evaluation: it is headed "Experience"
+and opens with what may and may not be concluded. Items 1-5 are what
+it would take to call it an evaluation again.
 
 1. **Baselines (high).** No benchmark has ever been timed on another
    implementation. Run scheme-bench on Larceny (its home), Chez and
@@ -19,7 +51,7 @@ Build: `pdflatex fx26 && bibtex fx26 && pdflatex fx26 && pdflatex fx26`
 2. **Hardware and OS (high).** No CPU model, core count used, RAM or OS
    version is recorded anywhere ("the development machine", "a 128-core
    shared machine"). The platform also moved from arm64 macOS to x86_64
-   Linux without re-baselining; Table 4 is arm64 from 2026-09-28.
+   Linux without re-baselining; Table 5 is arm64 from 2026-09-28.
 3. **Fresh, complete tables (high).** The last full per-machine table
    is 2026-09-28; scheme-bench and mllang-bench were last run in full on
    2026-09-29/10-12 and include 1.8-3.5 s of start-up. Re-run all three
@@ -67,7 +99,7 @@ Build: `pdflatex fx26 && bibtex fx26 && pdflatex fx26 && pdflatex fx26`
 ## B. Case studies (Heist)
 
 15. **Annotation overhead (high).** No measurement of signature
-    characters or lines against code, per program. Table 3's counts
+    characters or lines against code, per program. Table 4's counts
     were made for this draft with a script; the team should own and
     check one (and decide how `define-effect` bodies are classified:
     the draft says every named effect of the five programs includes
