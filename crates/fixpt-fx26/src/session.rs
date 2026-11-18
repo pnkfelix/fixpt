@@ -2479,14 +2479,23 @@ impl Fx26Session {
         // Either named by the standard type abbreviations it uses, as the
         // file sees them.
         self.checker.fasl_aliases_begin(self.checker.fasl_standard_aliases());
-        let made = match checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), text)) {
-            Ok(forms) if input => {
-                checking(&mut self.checker, &mut self.scheme, |c| {
-                    let maker = if one_exp { forms.first().cloned() } else { c.syn(|c| c.modules_made(&forms.iter().map(Form::get).collect::<Vec<_>>()).map(Form::new)) };
-                    maker.and_then(|m| c.fasl_made(name, &m)).unwrap_or_default()
+        // Its text read as it is, nothing expanded: the maker is its
+        // parameters and the rest as written. Not read as a program's forms
+        // are (`read_in`), which would define its macros at the session's
+        // top level, for the next file compiled to see (TODO §294: a file's
+        // own `iterate` taken for one of these, its read refused, and its
+        // whole type written instead of its maker's).
+        let made = match input {
+            true => checking(&mut self.checker, &mut self.scheme, |c| {
+                c.syn(|c| {
+                    let forms = c.read_plain(text).ok()?;
+                    let maker = if one_exp { forms.first().cloned() } else { c.modules_made(&forms) };
+                    maker.map(Form::new)
                 })
-            }
-            _ => String::new(),
+                .and_then(|m| c.fasl_made(name, &m))
+                .unwrap_or_default()
+            }),
+            false => String::new(),
         };
         let ty = match made.is_empty() {
             true => self.checker.fasl_type(name).map_err(|e| format!("`{path}`'s type cannot be kept: {e}")),

@@ -1526,6 +1526,12 @@ impl Checker {
         c.standard_dscope = c.dscope.len();
     }
 
+    /// `text` read as it is, nothing expanded, as file 0's, with syntax lent
+    /// (`syn`).
+    pub(crate) fn read_plain(&mut self, text: &str) -> R<Vec<crate::heap_syn::Syn>> {
+        self.read(text)
+    }
+
     /// `text` read, as file 0's, with syntax lent (`syn`).
     fn read(&mut self, text: &str) -> R<Vec<crate::heap_syn::Syn>> {
         crate::heap_syn::read_syn_side(text, &mut self.interner).map_err(|e| FxError::at(e.span, e.message))

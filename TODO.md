@@ -7653,3 +7653,46 @@ Expected: a file's `.fasl` the same whatever else the call compiles; its
 type line, if wanted at all, no larger than alone. Heist has a script
 that copies the files to a temporary directory and prints both sizes,
 and can send it with the ratfink, kit and combo sources. Not bisected.
+
+Found, 2026-11-18 (ratfink copied from `~/Dev/LangPlay/heist`, read only):
+three causes, the first fixed, two to discuss.
+- **Its macros left at the session's top level (fixed).** `compile-file`
+  read a file's text for its maker as a program's forms are read
+  (`read_in`), which expands as it reads, in the session's checker: so it
+  defined the file's macros at the session's top level. `fx26.fx` has a
+  macro `loop`; `main.fx`'s own `iterate`, binding `loop` as a name, was
+  refused when `main.fx`'s text was read next ("`loop` is a macro's
+  name"), no maker was made, and its whole type was written instead, each
+  parameter's `moduleof` spelt out (5.98 MB). Now its text is read as it
+  is, nothing expanded (`Checker::read_plain`): the maker is its
+  parameters and the rest as written.
+- **Its loads, transitive or not, by how they were read.** A file's
+  `.fasl` must name each file whose hidden global its type or maker
+  mentions, those it loads through another too (`layer3.fx`'s type reads
+  `layer1.fx`'s, loaded by `layer2.fx`), or that global is written by its
+  key where it was compiled (`%shared:module-files/layer1.fx`), which is
+  another where it is read. They are named only by accident: a fresh
+  `.fasl` read while another file is read loads its own loads in that
+  file's frame (`reading_deps`), so they are the reader's too; a file read
+  from source loads them in a frame of its own, so they are not. So
+  `main.fasl` compiled after `fx26.fx` from source named not
+  `fx26.fx`'s loads (`table.fx`, `table-types.fx`, `kit/chars.fx`), and
+  compiled alone, reading `fx26.fasl`, did; and a type of a transitive
+  load's global, compiled beside its source, is written by its key. (A
+  frame of a `.fasl`'s own, tried first, broke `modules/load-layers.fx`
+  read from `.fasl`s: taken out.) Wanted: each file's loads closed, a
+  file's its own and each of theirs, whatever read them; to settle first,
+  the path a transitive load is written by, as the file's loader finds it
+  from the file's own directory (a load's path is its own file's now).
+- **Places in code numbered by the session.** A place in register code
+  is `1_000_000_000 * (file - 1000) + char`, the file by the order the
+  checker read it (`files_read`); so `main.fasl` compiled after `fx26.fx`
+  says its file is another number (37 bytes differ, as 3 for 2), and a
+  `.fasl` read where files were read in another order may name another
+  file in a place it reports. §290's kind of number: a `.fasl` would keep
+  its places by a table of its own files, renumbered where it is read.
+
+Measured: `main.fasl` about 505 KB either way (was 5,984,499 bytes
+compiled with `fx26.fx`); `fixpt run ratfink.fx` 0.72 s from it, 0.77 s
+from source. Test: fasl.rs, a `.fasl` keeps its maker whatever was
+compiled before it.

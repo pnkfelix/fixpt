@@ -352,6 +352,35 @@ fn a_maker_keeps_its_parameters_types_named() {
     assert!(made.contains("(subr pure ((listof int acyclic) (select m-a ints)) (select m-a ints))"), "{made}");
 }
 
+/// A file's `.fasl` keeps its maker whatever the same `compile-file`
+/// compiled before it (Heist's report, TODO §294): `together-b.fx`'s maker
+/// kept, its type not written out whole, though `together-a.fx`, compiled
+/// first, has a macro `loop` that `together-b.fx`'s own macro binds as a
+/// name. (Its loads differ yet, as `together-c.fx`'s is or is not among
+/// them: TODO §294.)
+#[test]
+fn a_fasl_keeps_its_maker_whatever_was_compiled_before_it() {
+    let top = scratch("together");
+    copy_dirs(&top, &["module-files"]);
+    let dir = top.join("module-files");
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "together-c.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    // Its header: what it says of its type and maker.
+    let header = || -> Vec<String> {
+        let fasl = String::from_utf8_lossy(&std::fs::read(dir.join("together-b.fasl")).expect("read")).to_string();
+        fasl.lines().filter(|l| ["type ", "made "].iter().any(|k| l.starts_with(k))).map(str::to_string).collect()
+    };
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "together-a.fx", "together-b.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    let together = header();
+    assert!(together.iter().any(|l| l.starts_with("made (")), "{together:?}");
+    assert!(together.iter().any(|l| l == "type "), "{together:?}");
+    std::fs::remove_file(dir.join("together-b.fasl")).expect("removed");
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "together-b.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    assert_eq!(header(), together);
+}
+
 #[test]
 fn a_description_function_reads_back_from_a_fasl_read_from_one() {
     // `u.fx` compiled with `t.fx` read from its `.fasl`: `tt`'s `bucket` in
