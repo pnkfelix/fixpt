@@ -210,7 +210,7 @@ impl Host {
     /// which use it at once.
     pub fn global_value_raw(&self, name: &str) -> Option<Value> {
         let sym = self.rt.heap.intern_existing(name)?;
-        let v = self.rt.heap.global(self.rt.heap.symbol_global_slot(sym));
+        let v = self.rt.heap.global_of(sym);
         if v.is_unbound() { None } else { Some(v) }
     }
 

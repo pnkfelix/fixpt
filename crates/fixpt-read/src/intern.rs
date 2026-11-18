@@ -14,10 +14,10 @@
 //! a name for printing, in no space, so that reading its name gives
 //! another symbol.
 
-use fixpt_memmgmt::names::{Holder, Owner};
+use fixpt_memmgmt::names::{Holder, NameId, Owner, SpaceId};
 
-/// A symbol: a name's number in its interner's space, or, from
-/// [`UNINTERNED`] up, an uninterned symbol of its interner's. In a debug
+/// A symbol: a name of its interner's space, which the interner holds, or an
+/// uninterned symbol of its interner's: told apart within, by its number. In a debug
 /// build it carries its space's id too, checked where it is read, so that
 /// one interner's `Sym` read by an interner of another space is refused,
 /// not taken for another name.
@@ -25,28 +25,21 @@ use fixpt_memmgmt::names::{Holder, Owner};
 pub struct Sym {
     n: u32,
     #[cfg(debug_assertions)]
-    space: u32,
+    space: SpaceId,
 }
 
 /// The first number of an uninterned symbol.
 const UNINTERNED: u32 = 1 << 31;
 
 impl Sym {
-    /// Its number: a name's in its space (below `1 << 31`), or an
-    /// uninterned symbol's of its interner's.
-    #[inline]
-    pub fn index(self) -> u32 {
-        self.n
-    }
-
-    /// The symbol of name number `n` of `names` (a heap symbol's,
+    /// The symbol of name `n` of `names` (a heap symbol's,
     /// `Heap::symbol_text`): the `Sym` an interner of those names has for
-    /// it, which reads it only while it holds it ([`Interner::of_number`]).
+    /// it, which reads it only while it holds it ([`Interner::of_name`]).
     #[inline]
-    pub fn of_names(n: u32, names: &Owner) -> Sym {
+    pub fn of_names(n: NameId, names: &Owner) -> Sym {
         let _ = names;
         Sym {
-            n,
+            n: n.bits(),
             #[cfg(debug_assertions)]
             space: names.id(),
         }
@@ -85,7 +78,12 @@ impl Interner {
     }
 
     #[inline]
-    fn sym(&self, n: u32) -> Sym {
+    fn sym(&self, n: NameId) -> Sym {
+        self.sym_numbered(n.bits())
+    }
+
+    #[inline]
+    fn sym_numbered(&self, n: u32) -> Sym {
         Sym {
             n,
             #[cfg(debug_assertions)]
@@ -111,9 +109,9 @@ impl Interner {
         s
     }
 
-    /// The symbol of name number `n` of this interner's space (a heap
-    /// symbol's, `Heap::symbol_text`), held: none if it is no name there.
-    pub fn of_number(&mut self, n: u32) -> Option<Sym> {
+    /// The symbol of name `n` of this interner's space (a heap symbol's,
+    /// `Heap::symbol_text`), held: none if it is no name there.
+    pub fn of_name(&mut self, n: NameId) -> Option<Sym> {
         if self.names.holds(n) {
             return Some(self.sym(n));
         }
@@ -132,7 +130,7 @@ impl Interner {
     pub fn uninterned(&mut self, name: &str) -> Sym {
         let i = u32::try_from(self.uninterned.len()).ok().filter(|&i| i < UNINTERNED).expect("too many uninterned symbols");
         self.uninterned.push(name.to_string());
-        let s = self.sym(UNINTERNED + i);
+        let s = self.sym_numbered(UNINTERNED + i);
         self.made.push(s);
         s
     }
@@ -170,7 +168,17 @@ impl Interner {
         if s.n >= UNINTERNED {
             return &self.uninterned[(s.n - UNINTERNED) as usize];
         }
-        self.names.get(s.n).unwrap_or_else(|| panic!("{s:?}: no symbol this interner holds"))
+        self.names.held_name(s.n).and_then(|n| self.names.get(n)).unwrap_or_else(|| panic!("{s:?}: no symbol this interner holds"))
+    }
+
+    /// Interned symbol `s`'s name, which this interner holds: none if `s` is
+    /// uninterned.
+    pub fn name_id(&self, s: Sym) -> Option<NameId> {
+        self.mine(s);
+        if s.n >= UNINTERNED {
+            return None;
+        }
+        Some(self.names.held_name(s.n).unwrap_or_else(|| panic!("{s:?}: no symbol this interner holds")))
     }
 
     /// Whether this interner's names are `names`' (a heap's).
@@ -231,8 +239,8 @@ mod tests {
         let n = o.intern("shared");
         let (mut a, mut b) = (Interner::of_names(&o), Interner::of_names(&o));
         let (x, y) = (a.intern("shared"), b.intern("shared"));
-        assert_eq!((x, y.index()), (y, n));
-        assert_eq!(a.of_number(n), Some(x));
+        assert_eq!((x, b.name_id(y)), (y, Some(n)));
+        assert_eq!(a.of_name(n), Some(x));
         assert!(a.is_of(&o) && !Interner::new().is_of(&o));
         assert_eq!(b.get("other"), None);
     }

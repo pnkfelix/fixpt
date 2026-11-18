@@ -33,10 +33,12 @@ pub use gensym::UNINTERNED_HANDLES;
 mod intern;
 mod regions;
 mod splice;
+mod symref;
+pub use symref::SymbolRef;
 mod tables;
 mod young;
 
-use tables::Which;
+use tables::{Place, Which};
 pub use code::CodePart;
 pub use regions::REGION_SLOTS;
 
@@ -455,14 +457,16 @@ pub struct Heap {
     /// (`Value::text_numbered`; `fixpt_memmgmt::names`): its own, freed with
     /// it.
     names: fixpt_memmgmt::names::Owner,
+    /// How many `SymbolRef`s pin each symbol's place (`symref`).
+    pins: std::rc::Rc<symref::Pins>,
     /// A heap string's name, gathered to look it up (`intern_string`):
     /// kept, so that a symbol found costs no allocation.
     name_buf: String,
     /// `intern_static`'s: each name's address, and its symbol's index.
-    static_symbols: Vec<(usize, u32)>,
+    static_symbols: Vec<(usize, SymbolRef)>,
     /// The global slot holding the native adapters' shared code, once one
     /// is made (`set_adapter_code`).
-    adapter_slot: Option<usize>,
+    adapter_slot: Option<SymbolRef>,
     /// The count of writes a global's cell made next starts at, by its
     /// name (`plan_global_writes`): what a session plans for a definition,
     /// so that its one write leaves its stamp.
@@ -666,6 +670,7 @@ impl Heap {
             names: fixpt_memmgmt::names::Owner::new(),
             name_buf: String::new(),
             static_symbols: Vec::new(),
+            pins: Default::default(),
             adapter_slot: None,
             planned_writes: HashMap::default(),
             gc_count: 0,
@@ -2340,24 +2345,18 @@ impl Heap {
     // ----------------------------------------------------------------- symbols
     /// The symbol `name`, if it has been interned; making none.
     pub fn interned(&self, name: &str) -> Option<Value> {
-        self.symbol_number(name).map(|i| self.table_get(Which::Symbols, i as usize))
+        self.symbol_place(name).map(|i| self.table_get(Which::Symbols, i.index()))
     }
 
     /// Where `name`'s symbol is in `symbols`, if it is interned: by its
     /// name's number, if the heap has the name, making none.
-    fn symbol_number(&self, name: &str) -> Option<u32> {
+    fn symbol_place(&self, name: &str) -> Option<Place> {
         self.symbol_index.get(&self.names.find(name)?).copied()
-    }
-
-    /// The text `text`, a name of this heap's (`fixpt_memmgmt::names`): an
-    /// immediate whose number is the name's here, and nothing elsewhere.
-    pub fn text(&self, text: &str) -> Value {
-        Value::text_numbered(self.names.intern(text))
     }
 
     /// Text `v`'s text, if it is a text and a name of this heap's.
     pub fn text_of(&self, v: Value) -> Option<&str> {
-        self.names.get(v.text_number()?)
+        self.names.get(self.names.name(v.text_number()?)?)
     }
 
     /// The heap's names (`fixpt_memmgmt::names`): what an interner of them
@@ -2369,8 +2368,8 @@ impl Heap {
 
     /// Interned symbol `sym`'s name: its number in the heap's names.
     #[inline]
-    pub fn symbol_text(&self, sym: Value) -> Option<u32> {
-        self.fixed(sym, 3, 0).text_number()
+    pub fn symbol_text(&self, sym: Value) -> Option<fixpt_memmgmt::names::NameId> {
+        self.names.name(self.fixed(sym, 3, 0).text_number()?)
     }
 
     /// Whether string `o` holds `text`, compared in place.
@@ -2391,12 +2390,12 @@ impl Heap {
     /// is kept, one comparison among a few, not by hashing it.
     pub fn intern_static(&mut self, name: &'static str) -> Value {
         let key = name.as_ptr() as usize ^ name.len() << 48;
-        if let Some(&(_, i)) = self.static_symbols.iter().find(|(k, _)| *k == key) {
-            return self.table_get(Which::Symbols, i as usize);
+        if let Some((_, r)) = self.static_symbols.iter().find(|(k, _)| *k == key) {
+            return self.table_get(Which::Symbols, r.place().index());
         }
         let v = self.intern(name);
-        let i = self.symbol_number(name).expect("interned just now");
-        self.static_symbols.push((key, i));
+        let r = self.symbol_ref(v);
+        self.static_symbols.push((key, r));
         v
     }
 
@@ -2422,20 +2421,20 @@ impl Heap {
     }
 
     /// The interned symbol of the heap's name `n`.
-    pub fn intern_text(&mut self, n: u32) -> Value {
+    pub fn intern_text(&mut self, n: fixpt_memmgmt::names::NameId) -> Value {
         if let Some(&i) = self.symbol_index.get(&n) {
-            return self.table_get(Which::Symbols, i as usize);
+            return self.table_get(Which::Symbols, i.index());
         }
         let hash = symbol_hash_of(self.names.get(n).expect("a name of the heap's"));
         // As long as the heap lives: not in a region, which may end.
         let region = self.regions.target.take();
         let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
         self.regions.target = region;
-        self.obj_set(sym, 0, Value::text_numbered(n));
+        self.obj_set(sym, 0, Value::text_numbered(n.bits()));
         self.obj_set(sym, 1, Value::fixnum(hash));
         let slot = self.table_push(Which::Globals, Value::UNBOUND, false);
         self.obj_set(sym, 2, Value::fixnum(slot as i64));
-        let idx = self.table_push(Which::Symbols, sym, false) as u32;
+        let idx = Place::new(self.table_push(Which::Symbols, sym, false));
         self.symbol_index.insert(n, idx);
         sym
     }
@@ -2450,17 +2449,65 @@ impl Heap {
         self.interned(name)
     }
 
+    /// Interned symbol `sym`'s place, its global's slot: within the heap
+    /// only, for the call it is got in. The Rust side holds a place by a
+    /// [`SymbolRef`] ([`symbol_ref`](Heap::symbol_ref)).
     #[inline(always)]
-    pub fn symbol_global_slot(&self, sym: Value) -> usize {
+    pub(crate) fn symbol_global_slot(&self, sym: Value) -> usize {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
         self.fixed(sym, 3, 2).as_fixnum() as usize
+    }
+
+    /// Interned symbol `sym`, held: its place pinned while the ref lives.
+    pub fn symbol_ref(&self, sym: Value) -> SymbolRef {
+        assert!(self.is_interned_symbol(sym), "a ref to a symbol not interned");
+        self.pins.pin(Place::new(self.symbol_global_slot(sym)))
+    }
+
+    /// The symbol `r` holds, which must be of this heap.
+    #[inline]
+    pub fn symbol_of(&self, r: &SymbolRef) -> Value {
+        assert!(r.of(&self.pins), "a symbol ref of another heap");
+        self.table_get(Which::Symbols, r.place().index())
+    }
+
+    /// How many symbols' places refs pin now.
+    pub fn symbols_pinned(&self) -> usize {
+        self.pins.count()
+    }
+
+    /// Interned symbol `sym`'s global's value (`Value::UNBOUND` if unbound).
+    #[inline]
+    pub fn global_of(&self, sym: Value) -> Value {
+        self.table_get(Which::Globals, self.symbol_global_slot(sym))
+    }
+
+    /// Set interned symbol `sym`'s global.
+    #[inline]
+    pub fn set_global_of(&mut self, sym: Value, v: Value) {
+        let slot = self.symbol_global_slot(sym);
+        self.table_set(Which::Globals, slot, v);
+    }
+
+    /// The global of the symbol `r` holds.
+    #[inline]
+    pub fn global_at(&self, r: &SymbolRef) -> Value {
+        assert!(r.of(&self.pins), "a symbol ref of another heap");
+        self.table_get(Which::Globals, r.place().index())
+    }
+
+    /// Set the global of the symbol `r` holds.
+    #[inline]
+    pub fn set_global_at(&mut self, r: &SymbolRef, v: Value) {
+        assert!(r.of(&self.pins), "a symbol ref of another heap");
+        self.table_set(Which::Globals, r.place().index(), v);
     }
 
     /// The code every adapter to the native convention shares
     /// (`fixpt-native`'s `adapt`), once made: a code bloblet, which never
     /// moves, held in a global of its own, so that it lives as the heap does.
     pub fn adapter_code(&self) -> Option<Value> {
-        self.adapter_slot.map(|s| self.table_get(Which::Globals, s))
+        self.adapter_slot.as_ref().map(|r| self.global_at(r))
     }
     /// The next cell made for global `name` starts its count of writes at
     /// `n` (`layout::cellular::GLOBAL_WRITES`), not 0: a session's plan for
@@ -2480,9 +2527,8 @@ impl Heap {
     }
     pub fn set_adapter_code(&mut self, code: Value) {
         let sym = self.intern("%fx26-adapter-code");
-        let slot = self.symbol_global_slot(sym);
-        self.table_set(Which::Globals, slot, code);
-        self.adapter_slot = Some(slot);
+        self.set_global_of(sym, code);
+        self.adapter_slot = Some(self.symbol_ref(sym));
     }
 
     /// An adapter to the native convention over `f`: a native closure of
@@ -2510,12 +2556,15 @@ impl Heap {
         (native && self.bloblet_slot(v, CLOSURE_WORD) == code).then(|| self.bloblet_slot(v, CLOSURE_FREE0))
     }
 
+    /// The global in slot `slot`: a number a word of code holds beside its
+    /// symbol, which keeps it (else [`global_of`](Heap::global_of),
+    /// [`global_at`](Heap::global_at)).
     #[inline]
-    pub fn global(&self, slot: usize) -> Value {
+    pub(crate) fn global(&self, slot: usize) -> Value {
         self.table_get(Which::Globals, slot)
     }
     #[inline]
-    pub fn set_global(&mut self, slot: usize, v: Value) {
+    pub(crate) fn set_global(&mut self, slot: usize, v: Value) {
         self.table_set(Which::Globals, slot, v);
     }
 
@@ -3593,10 +3642,6 @@ impl Heap {
         self.table_values(Which::Symbols)
     }
 
-    /// Interned symbol number `i`.
-    pub fn symbol_at(&self, i: usize) -> Value {
-        self.table_get(Which::Symbols, i)
-    }
 
     /// Rebuild a heap from a dumped image. `words` is the live region; the
     /// references inside it are already base-relative, so nothing is relocated.
@@ -3709,7 +3754,7 @@ impl Heap {
         heap.symbol_index = SymbolIndex::with_capacity_and_hasher(heap.symbols.len, Default::default());
         for i in 0..heap.symbols.len {
             let n = heap.symbol_text(heap.table_get(Which::Symbols, i)).ok_or("an interned symbol named by no text")?;
-            heap.symbol_index.insert(n, i as u32);
+            heap.symbol_index.insert(n, Place::new(i));
         }
         heap.code_stub_found();
         Ok(heap)
@@ -4120,7 +4165,7 @@ fn fnv1a(s: &str) -> u64 {
 struct WordHasher(u64);
 
 /// The interned symbols' numbers by their names' texts (`Heap::symbol_index`).
-type SymbolIndex = std::collections::HashMap<u32, u32, std::hash::BuildHasherDefault<WordHasher>>;
+type SymbolIndex = std::collections::HashMap<fixpt_memmgmt::names::NameId, Place, std::hash::BuildHasherDefault<WordHasher>>;
 
 impl std::hash::Hasher for WordHasher {
     fn finish(&self) -> u64 {

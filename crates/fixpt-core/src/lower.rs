@@ -29,9 +29,9 @@
 //! ```text
 //! Const      [CONST, value]
 //! Local      [LOCAL, depth, index, name]
-//! Global     [GLOBAL, slot, name]
+//! Global     [GLOBAL, name]
 //! SetLocal   [SET_LOCAL, depth, index, name, expr]
-//! SetGlobal  [SET_GLOBAL, slot, name, expr]
+//! SetGlobal  [SET_GLOBAL, name, expr]
 //! If         [IF, test, then, else]
 //! Seq        [SEQ, n, e₀ … eₙ₋₁]
 //! Let        [LET, n, body, init₀ … initₙ₋₁]
@@ -242,7 +242,6 @@ impl Lowerer<'_> {
                 let name = self.global_name(g);
                 let at = words.len();
                 words.push(Value::fixnum(TAG_GLOBAL));
-                words.push(Value::fixnum(g.0 as i64));
                 words.push(name);
                 at
             }
@@ -263,7 +262,6 @@ impl Lowerer<'_> {
                 let name = self.global_name(g);
                 let at = words.len();
                 words.push(Value::fixnum(TAG_SET_GLOBAL));
-                words.push(Value::fixnum(g.0 as i64));
                 words.push(name);
                 words.push(Value::fixnum(expr as i64));
                 at
@@ -349,14 +347,8 @@ impl Lowerer<'_> {
         self.code_for(info.name, &info.params, info.rest, info.body)
     }
 
-    /// A global's printable name, for the "unbound variable" message.
+    /// Global `g`'s heap symbol, by which the code reads and sets it.
     fn global_name(&mut self, g: crate::ir::GlobalId) -> Value {
-        for i in 0..self.heap.symbol_count() {
-            let sym = self.heap.symbol_at(i);
-            if self.heap.symbol_global_slot(sym) == g.index() {
-                return sym;
-            }
-        }
-        Value::FALSE
+        g.symbol(self.heap, self.interner)
     }
 }

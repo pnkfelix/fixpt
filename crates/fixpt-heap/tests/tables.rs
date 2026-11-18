@@ -30,8 +30,8 @@ fn sum(h: &Heap, mut l: Value) -> i64 {
 /// The value of global `name`.
 fn global(h: &mut Heap, name: &str) -> Value {
     let sym = h.intern(name);
-    let slot = h.symbol_global_slot(sym);
-    h.global(slot)
+    let slot = h.symbol_ref(sym);
+    h.global_at(&slot)
 }
 
 /// The sum of the list global `name` holds.
@@ -42,8 +42,8 @@ fn gsum(h: &mut Heap, name: &str) -> i64 {
 
 fn set(h: &mut Heap, name: &str, v: Value) {
     let sym = h.intern(name);
-    let slot = h.symbol_global_slot(sym);
-    h.set_global(slot, v);
+    let slot = h.symbol_ref(sym);
+    h.set_global_at(&slot, v);
 }
 
 /// Enough symbols that each table spans three chunks.
@@ -89,7 +89,7 @@ fn a_global_keeps_what_it_holds_through_every_collection() {
     // Every symbol still itself, found by its name, in its place.
     for i in 0..MANY {
         let sym = h.intern(&format!("g{i}"));
-        assert_eq!(h.symbol_at(i), sym, "symbol {i}");
+        assert_eq!(h.symbols()[i], sym, "symbol {i}");
         assert_eq!(h.symbol_name(sym), format!("g{i}"));
     }
     assert_eq!((h.symbol_count(), h.global_count()), (MANY, MANY));
@@ -113,7 +113,7 @@ fn a_symbol_interned_in_a_region_outlives_it() {
     for i in 0..syms.len() {
         let again = h.intern(&format!("r{i}"));
         assert_eq!(h.symbol_name(again), format!("r{i}"));
-        assert_eq!(h.symbol_at(i), again);
+        assert_eq!(h.symbols()[i], again);
     }
     assert_eq!(gsum(&mut h, "r599"), 15);
 }
@@ -128,8 +128,8 @@ fn a_minor_collection_looks_at_no_global_it_need_not() {
         h.verify_barrier = false;
         for i in 0..n {
             let s = h.intern(&format!("s{i}"));
-            let slot = h.symbol_global_slot(s);
-            h.set_global(slot, Value::fixnum(i as i64));
+            let slot = h.symbol_ref(s);
+            h.set_global_at(&slot, Value::fixnum(i as i64));
         }
         h.collect_young(&mut []);
         let started = std::time::Instant::now();
@@ -161,7 +161,7 @@ fn an_image_carries_the_tables() {
         assert_eq!(gsum(&mut loaded, "g7"), 5050);
         assert_eq!(global(&mut loaded, "g2000"), Value::fixnum(42));
         for i in [0, 255, 256, MANY - 1] {
-            assert_eq!(loaded.symbol_name(loaded.symbol_at(i)), format!("g{i}"));
+            assert_eq!(loaded.symbol_name(loaded.symbols()[i]), format!("g{i}"));
         }
         // Its own chunks, not the image's: an image of it is no larger. (A
         // heap read from a static image is not made one again.)
@@ -177,7 +177,7 @@ fn an_image_carries_the_tables() {
             loaded.intern(&format!("new{i}"));
         }
         assert_eq!(loaded.tables_area_words(), (words, chunks));
-        assert_eq!(loaded.symbol_name(loaded.symbol_at(MANY + 299)), "new299");
+        assert_eq!(loaded.symbol_name(loaded.symbols()[MANY + 299]), "new299");
         // Still collected as any heap's.
         let young = list(&mut loaded, 10);
         set(&mut loaded, "g7", young);
@@ -195,8 +195,8 @@ fn an_image_spliced_beside_a_heaps_own_tables() {
         img.intern(&format!("i{i}"));
     }
     let shared = img.intern("shared");
-    let slot = img.symbol_global_slot(shared);
-    img.set_global(slot, Value::fixnum(7));
+    let slot = img.symbol_ref(shared);
+    img.set_global_at(&slot, Value::fixnum(7));
     let l = list(&mut img, 30);
     img.push_root(l);
     img.collect(&mut []);

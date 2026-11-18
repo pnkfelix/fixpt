@@ -887,7 +887,7 @@ fn dump_bytes(heap: &mut fixpt_heap::Heap, standard: fixpt_heap::Value, start: f
     let mut entries = Vec::new();
     for n in Fx26Session::FRONT_ENTRIES {
         let sym = heap.intern(&format!("fx26-native:{n}"));
-        let v = heap.global(heap.symbol_global_slot(sym));
+        let v = heap.global_of(sym);
         if v.is_unbound() {
             heap.pop_roots_to(base);
             return Err("the front end is not loaded".into());
@@ -1034,8 +1034,8 @@ fn set_entries(heap: &mut fixpt_heap::Heap, pieces: fixpt_heap::Value, entries: 
     for (i, name) in entries.iter().enumerate() {
         let piece = heap.product_field(pieces, i + 1);
         let sym = heap.intern(&format!("{native}{name}"));
-        let slot = heap.symbol_global_slot(sym);
-        heap.set_global(slot, piece);
+        let slot = heap.symbol_ref(sym);
+        heap.set_global_at(&slot, piece);
     }
 }
 
@@ -1280,8 +1280,8 @@ impl Fx26Session {
                 let b = fixpt_heap::Mapped::open(&path).ok()?;
                 let (pieces, start) = load_native_front_end_keeping(&k, heap, &b)?;
                 let sym = heap.intern(DUMP_START);
-                let slot = heap.symbol_global_slot(sym);
-                heap.set_global(slot, start);
+                let slot = heap.symbol_ref(sym);
+                heap.set_global_at(&slot, start);
                 return Some(pieces);
             }
             let text = register_text(&crate::front_end(), &Self::FRONT_ENTRIES);
@@ -3960,7 +3960,7 @@ impl Fx26Session {
         }
         let rt = self.scheme.runtime_unrooted();
         let sym = rt.heap.intern(DUMP_START);
-        let mut start = rt.heap.global(rt.heap.symbol_global_slot(sym));
+        let mut start = rt.heap.global_of(sym);
         if rt.heap.is_interned_symbol(start) {
             let name = rt.heap.symbol_name(start);
             let cell = self.global_cell(&name).map_err(|e| e.message)?.ok_or_else(|| format!("the program defines no `{name}`"))?;

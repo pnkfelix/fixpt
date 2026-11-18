@@ -288,14 +288,22 @@ impl Parts {
             return Ok(id);
         }
         // Each shape the patterns have here, in the order first written.
+        #[derive(PartialEq)]
+        enum Tag {
+            Nil,
+            Pair,
+            Seq,
+            Var,
+            Lit(Sym),
+        }
         let tag = |c: &Class| match c {
-            Class::Nil => 0,
-            Class::Pair(..) => 1,
-            Class::Seq(_) => 2,
-            Class::Var(_) | Class::Wild => 3,
-            Class::Lit(n) => 4 + n.index() as usize,
+            Class::Nil => Tag::Nil,
+            Class::Pair(..) => Tag::Pair,
+            Class::Seq(_) => Tag::Seq,
+            Class::Var(_) | Class::Wild => Tag::Var,
+            Class::Lit(n) => Tag::Lit(*n),
         };
-        let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+        let mut groups: Vec<(Tag, Vec<usize>)> = Vec::new();
         for (k, c) in classes.iter().enumerate() {
             match groups.iter_mut().find(|(t, _)| *t == tag(c)) {
                 Some((_, g)) => g.push(k),

@@ -19,7 +19,7 @@ fn global(rt: &Runtime, name: &str) -> Value {
         .heap
         .intern_existing(name)
         .unwrap_or_else(|| panic!("{name} is interned"));
-    rt.heap.global(rt.heap.symbol_global_slot(sym))
+    rt.heap.global_of(sym)
 }
 
 #[test]

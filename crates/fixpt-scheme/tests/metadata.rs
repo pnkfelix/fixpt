@@ -55,7 +55,7 @@ fn only_a_checked_claim_is_acted_on() {
         let mut s = Session::with_backend(Backend::Bytecode);
         s.eval_str("<t>", &format!("(define (f a b) {src})")).expect("compiles");
         let sym = s.runtime_unrooted_ref().heap.intern_existing("f").expect("defined");
-        let v = s.runtime_unrooted_ref().heap.global(s.runtime_unrooted_ref().heap.symbol_global_slot(sym));
+        let v = s.runtime_unrooted_ref().heap.global_of(sym);
         let code = s.runtime_unrooted_ref().heap.closure_code(v);
         assert!(s.runtime_unrooted_ref().heap.is_a(code, ObjType::Code));
         disassemble(&s.runtime_unrooted_ref().heap, code)

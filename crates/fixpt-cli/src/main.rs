@@ -1419,7 +1419,7 @@ impl help::Helpful for SchemeHelp<'_> {
         }
         let heap = &self.0.runtime_unrooted_ref().heap;
         if let Some(sym) = heap.intern_existing(name) {
-            let v = heap.global(heap.symbol_global_slot(sym));
+            let v = heap.global_of(sym);
             if !v.is_unbound() && out.is_empty() {
                 out.push(match arity_of_closure(self.0, v) {
                     Some(text) => format!("{name} — a procedure, {text}"),
@@ -1481,7 +1481,7 @@ pub fn bound_names(session: &Session) -> Vec<String> {
     let symbols: Vec<fixpt_heap::Value> = heap.symbols();
     symbols
         .into_iter()
-        .filter(|s| !heap.global(heap.symbol_global_slot(*s)).is_unbound())
+        .filter(|s| !heap.global_of(*s).is_unbound())
         .map(|s| heap.symbol_name(s))
         .filter(|n| !n.starts_with('%'))
         .collect()

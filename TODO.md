@@ -7442,8 +7442,30 @@ of them kept. (Said here before, and wrong: that a module file's world
 blocked this. Its interner was the importer's, but the panic was the
 construction order.) A scratch heap stacked on the session's is what a
 `letreap` is (`Heap::reap_enter`), if one is ever wanted: measured first.
-Next: step 5, the symbols table weak (but symbols with bound globals)
-and the names sweep.
+
+Step 5 (the user's design, 2026-11-18). "Weak but symbols with bound
+globals", as first planned, is unsound: a symbol's place is its identity,
+its global's slot and its handle, and the Rust side kept that number bare
+(`fixpt-engine`'s cached slot of `raise`, unbound while the prelude is
+read; `static_symbols`; the scheduler's; the IR's `GlobalId`), so a place
+freed and given again would be read as another global. The user's rule:
+no number of indefinite extent; an owning handle or a rooted value, and
+a newtype the owning crate alone makes. Its first parts, 2026-11-18: the
+Rust side holds a symbol by a `SymbolRef` (`Heap::symbol_ref`), an
+`Rc`-shared pin of its place, which it reads and sets the global through
+(`global_at`) and never sees; a global it reads once by the symbol
+(`global_of`, `set_global_of`); the raw slot accessors are the heap's
+alone. Code holds the symbol, not its place: the Rust engine's words
+(`GLOBAL k`, `SET_GLOBAL k`, the lowered `[GLOBAL name]`), as cellular
+and native code hold a global's cell, which holds its symbol; the IR's
+`GlobalId` is the global's name (a `Sym`), the expander's environment
+binding globals by name. A name is a `NameId` (`fixpt_memmgmt::names`),
+a space a `SpaceId`, a table's position a `Place` (the heap's); a text
+value is made and read in the heap alone, only as a symbol's name; the
+names index's several-of-a-hash an enum, not a sentinel. Next: the
+symbols table weak (a symbol nothing reaches or pins, its global unbound,
+freed at a major collection, its place given again) and the names sweep;
+then `Sym`'s own representation, symbol handles owning, freeing on drop.
 
 Step 2 as first done (a4be71eb, reverted, 2026-11-17): an interned
 symbol's name a text of that store, its `symbol_index` by text number.

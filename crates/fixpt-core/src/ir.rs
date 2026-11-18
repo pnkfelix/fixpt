@@ -66,12 +66,22 @@ index_type!(
     /// An entry in [`Program::consts`].
     ConstId
 );
-index_type!(
-    /// A global variable slot in the heap's global array. Resolved once, at
-    /// expansion time, so a global reference is an array index rather than a
-    /// symbol lookup.
-    GlobalId
-);
+/// A global variable: its name, an interned symbol of the runtime's interner
+/// (of its heap's names). Code made of it holds the heap's symbol of that
+/// name, by which the global is read and set: no number of the heap's.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct GlobalId(pub Sym);
+
+impl GlobalId {
+    /// Its heap symbol in `heap`: by its name there if `interner` is of the
+    /// heap's names (a runtime's), else by its text.
+    pub fn symbol(self, heap: &mut fixpt_heap::Heap, interner: &fixpt_read::Interner) -> fixpt_heap::Value {
+        match interner.is_of(heap.names()).then(|| interner.name_id(self.0)).flatten() {
+            Some(n) => heap.intern_text(n),
+            None => heap.intern(interner.name(self.0)),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct VarInfo {

@@ -35,7 +35,9 @@ pub enum Frame {
     FixInit { fix: u32, index: u32, saved: u32 },
     /// `acc` is the value to assign.
     AssignLocal { node: u32, saved: u32 },
-    AssignGlobal { slot: u32, saved: u32 },
+    /// `acc` is the value to assign to the global its `SET_GLOBAL` node
+    /// names.
+    AssignGlobal { node: u32, saved: u32 },
     /// `acc` is the producer's result in `call-with-values`; the consumer is at
     /// `saved + 2`.
     Consume { saved: u32 },
@@ -76,8 +78,8 @@ impl Frame {
             Frame::AssignLocal { node, saved } => {
                 [TAG_ASSIGN_LOCAL, node as u64, 0, saved as u64]
             }
-            Frame::AssignGlobal { slot, saved } => {
-                [TAG_ASSIGN_GLOBAL, slot as u64, 0, saved as u64]
+            Frame::AssignGlobal { node, saved } => {
+                [TAG_ASSIGN_GLOBAL, node as u64, 0, saved as u64]
             }
             Frame::Consume { saved } => [TAG_CONSUME, 0, 0, saved as u64],
         }
@@ -109,7 +111,7 @@ impl Frame {
             TAG_LET => Frame::LetInit { let_: a, collected: b, saved: s },
             TAG_FIX => Frame::FixInit { fix: a, index: b, saved: s },
             TAG_ASSIGN_LOCAL => Frame::AssignLocal { node: a, saved: s },
-            TAG_ASSIGN_GLOBAL => Frame::AssignGlobal { slot: a, saved: s },
+            TAG_ASSIGN_GLOBAL => Frame::AssignGlobal { node: a, saved: s },
             TAG_CONSUME => Frame::Consume { saved: s },
             _ => return None,
         })

@@ -478,8 +478,8 @@ impl Session {
         };
         let k = self.host.runtime_unrooted().heap.obj_ref(hole, 1);
         let slot_sym = self.host.runtime_unrooted().heap.intern("%resuming");
-        let slot = self.host.runtime_unrooted().heap.symbol_global_slot(slot_sym);
-        self.host.runtime_unrooted().heap.set_global(slot, k);
+        let slot = self.host.runtime_unrooted().heap.symbol_ref(slot_sym);
+        self.host.runtime_unrooted().heap.set_global_at(&slot, k);
         let span = value.span;
         let sym = |s: &mut Session, name: &str| fixpt_read::Syntax {
             span,
@@ -574,8 +574,8 @@ pub fn install_primitives(rt: &mut Runtime) {
                 None => Value::FALSE,
             },
         );
-        let slot = rt.heap.symbol_global_slot(name);
-        rt.heap.set_global(slot, obj);
+        let slot = rt.heap.symbol_ref(name);
+        rt.heap.set_global_at(&slot, obj);
     }
     debug_assert!(prim::lookup("car").is_some());
 }

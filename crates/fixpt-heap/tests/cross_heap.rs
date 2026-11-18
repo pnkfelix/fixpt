@@ -66,8 +66,8 @@ mod stores {
         });
         refused(|b, t| {
             let g = b.intern("cross-heap:g");
-            let slot = b.symbol_global_slot(g);
-            b.set_global(slot, t);
+            let slot = b.symbol_ref(g);
+            b.set_global_at(&slot, t);
         });
     }
 

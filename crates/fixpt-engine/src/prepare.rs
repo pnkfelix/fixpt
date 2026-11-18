@@ -37,7 +37,7 @@ pub struct Prepared {
     thunk_root: Option<usize>,
     /// Cached global slots of the prelude procedures the engines call back
     /// into — `raise`, the continuation-application hook, and so on.
-    slots: Vec<(&'static str, usize)>,
+    slots: Vec<(&'static str, fixpt_heap::SymbolRef)>,
 }
 
 impl Prepared {
@@ -124,16 +124,16 @@ impl Prepared {
     /// still unbound. The slot is cached; the value is not, since the prelude
     /// may still be defining it.
     pub fn global(&mut self, heap: &mut Heap, name: &'static str) -> Option<Value> {
-        let slot = match self.slots.iter().find(|(n, _)| *n == name) {
-            Some(&(_, s)) => s,
+        let v = match self.slots.iter().find(|(n, _)| *n == name) {
+            Some((_, r)) => heap.global_at(r),
             None => {
                 let sym = heap.intern(name);
-                let s = heap.symbol_global_slot(sym);
-                self.slots.push((name, s));
-                s
+                let r = heap.symbol_ref(sym);
+                let v = heap.global_at(&r);
+                self.slots.push((name, r));
+                v
             }
         };
-        let v = heap.global(slot);
         if v.is_unbound() { None } else { Some(v) }
     }
 }

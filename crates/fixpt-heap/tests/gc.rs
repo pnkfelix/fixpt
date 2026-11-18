@@ -172,17 +172,17 @@ fn raw_payloads_are_never_traced_as_references() {
 fn symbols_stay_interned_across_collection() {
     let mut heap = Heap::new();
     let a = heap.intern("with");
-    let slot = heap.symbol_global_slot(a);
+    let slot = heap.symbol_ref(a);
     let m = heap.intern("moduleof");
-    heap.set_global(slot, m);
+    heap.set_global_at(&slot, m);
 
     let mut roots: Vec<Value> = vec![];
     gc(&mut heap, &mut roots);
 
     let a2 = heap.intern("with");
     assert_eq!(heap.symbol_name(a2), "with");
-    assert_eq!(heap.symbol_global_slot(a2), slot, "interning must be stable across a collection");
-    assert_eq!(heap.symbol_name(heap.global(slot)), "moduleof");
+    assert_eq!(heap.symbol_ref(a2), slot, "interning must be stable across a collection");
+    assert_eq!(heap.symbol_name(heap.global_at(&slot)), "moduleof");
 }
 
 #[test]
@@ -292,8 +292,8 @@ fn image_roundtrip_preserves_the_whole_heap() {
     let sym = heap.intern("moduleof");
     let s = heap.make_string("FX-91");
     let list = heap.list_from(&[Value::fixnum(1), Value::fixnum(2), s, sym]);
-    let slot = heap.symbol_global_slot(sym);
-    heap.set_global(slot, list);
+    let slot = heap.symbol_ref(sym);
+    heap.set_global_at(&slot, list);
 
     let mut roots = vec![list];
     gc(&mut heap, &mut roots);
@@ -303,7 +303,7 @@ fn image_roundtrip_preserves_the_whole_heap() {
     let restored = image::load(&bytes).expect("image loads");
     restored.verify().unwrap();
 
-    let list2 = restored.global(slot);
+    let list2 = restored.global_of(restored.intern_existing("moduleof").unwrap());
     assert_eq!(snapshot(&restored, list2, 16), before);
     assert_eq!(restored.symbol_name(restored.intern_existing("moduleof").unwrap()), "moduleof");
 }
@@ -335,8 +335,8 @@ fn embedded_image_is_found_after_an_executable() {
     let mut heap = Heap::new();
     let s = heap.make_string("embedded");
     let greeting = heap.intern("greeting");
-    let slot = heap.symbol_global_slot(greeting);
-    heap.set_global(slot, s);
+    let slot = heap.symbol_ref(greeting);
+    heap.set_global_at(&slot, s);
     let img = image::dump_packed(&heap);
 
     let fake_exe = b"\x7fELF this is pretending to be a runtime binary".to_vec();
@@ -345,7 +345,7 @@ fn embedded_image_is_found_after_an_executable() {
     let found = image::extract_embedded(&combined).expect("trailer located");
     assert_eq!(found, &img[..]);
     let restored = image::load(found).unwrap();
-    assert_eq!(restored.string_to_rust(restored.global(slot)), "embedded");
+    assert_eq!(restored.string_to_rust(restored.global_of(restored.intern_existing("greeting").unwrap())), "embedded");
 
     // A plain runtime with no appended image must simply report none.
     assert!(image::extract_embedded(&fake_exe).is_none());

@@ -70,7 +70,7 @@ fn spliced_and_checked(mut h: Heap) {
         assert_eq!(h.bloblet_slot(code, 2), shared);
         let fresh = h.car(h.cdr(rest));
         assert_eq!(h.intern_existing("only-in-the-image"), Some(fresh), "a new one is interned here");
-        assert_ne!(h.symbol_global_slot(fresh), h.symbol_global_slot(shared));
+        assert_ne!(h.symbol_ref(fresh), h.symbol_ref(shared));
         let rest = h.cdr(h.cdr(rest));
         assert_eq!(h.string_to_rust(h.car(rest)), "text");
         assert_eq!(h.cdr(rest), Value::fixnum(42));

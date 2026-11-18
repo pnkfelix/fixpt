@@ -114,12 +114,12 @@ impl Phase1 {
         let l = rt.heap.cons(rt.heap.root_at(base), all);
         rt.heap.pop_roots_to(base);
         let sym = rt.heap.intern(ALL);
-        let slot = rt.heap.symbol_global_slot(sym);
-        rt.heap.set_global(slot, l);
+        let slot = rt.heap.symbol_ref(sym);
+        rt.heap.set_global_at(&slot, l);
         if let Err(e) = p.define_forms(rt, forms) {
             let sym = rt.heap.intern(&global);
-            let slot = rt.heap.symbol_global_slot(sym);
-            rt.heap.set_global(slot, Value::FALSE);
+            let slot = rt.heap.symbol_ref(sym);
+            rt.heap.set_global_at(&slot, Value::FALSE);
             return Err(e);
         }
         Ok(p)
@@ -157,8 +157,8 @@ impl Phase1 {
             }
         }
         let sym = rt.heap.intern(ALL);
-        let slot = rt.heap.symbol_global_slot(sym);
-        rt.heap.set_global(slot, Value::NULL);
+        let slot = rt.heap.symbol_ref(sym);
+        rt.heap.set_global_at(&slot, Value::NULL);
     }
 
     /// The transformer of `key` (its style and text) defined in the
@@ -200,8 +200,8 @@ impl Phase1 {
         let l = rt.heap.cons(entry, old);
         rt.heap.pop_roots_to(base);
         let dsym = rt.heap.intern(&defined);
-        let slot = rt.heap.symbol_global_slot(dsym);
-        rt.heap.set_global(slot, l);
+        let slot = rt.heap.symbol_ref(dsym);
+        rt.heap.set_global_at(&slot, l);
         Ok(name)
     }
 
@@ -212,8 +212,8 @@ impl Phase1 {
         MADE.with(|m| m.set(m.get() + 1));
         let p = Phase1 { global };
         let sym = rt.heap.intern(&p.global);
-        let slot = rt.heap.symbol_global_slot(sym);
-        rt.heap.set_global(slot, fe);
+        let slot = rt.heap.symbol_ref(sym);
+        rt.heap.set_global_at(&slot, fe);
         // The first step begins the checker in the standard environment, and
         // only checks; the prelude is the next, compiled.
         p.run(rt, "(define %phase1 unit #u)\n", FIRST).map_err(|e| format!("phase 1's start: {e}"))?;
@@ -258,14 +258,14 @@ impl Phase1 {
     pub fn end(self, rt: &mut Runtime) {
         for g in [self.global.clone(), format!("{}:defined", self.global)] {
             let sym = rt.heap.intern(&g);
-            let slot = rt.heap.symbol_global_slot(sym);
-            rt.heap.set_global(slot, Value::FALSE);
+            let slot = rt.heap.symbol_ref(sym);
+            rt.heap.set_global_at(&slot, Value::FALSE);
         }
     }
 
     fn front_end(&self, rt: &mut Runtime) -> Value {
         let sym = rt.heap.intern(&self.global);
-        rt.heap.global(rt.heap.symbol_global_slot(sym))
+        rt.heap.global_of(sym)
     }
 
     /// Entry `i` of the namespace's front end, called with `args`.

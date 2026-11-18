@@ -240,13 +240,13 @@ fn bloblets_travel_in_heap_images() {
     let b = h.make_bloblet(KIND, 1, 4, true);
     h.set_bloblet_bytes(b, 0, b"code").unwrap();
     let sym = h.intern("the-bloblet");
-    let slot = h.symbol_global_slot(sym);
-    h.set_global(slot, b);
+    let slot = h.symbol_ref(sym);
+    h.set_global_at(&slot, b);
     h.collect(&mut []);
     let bytes = image::dump_packed(&h);
     let loaded = image::load(&bytes).expect("loads");
     loaded.verify().expect("sound");
-    let b = loaded.global(loaded.symbol_global_slot(loaded.intern_existing("the-bloblet").unwrap()));
+    let b = loaded.global_of(loaded.intern_existing("the-bloblet").unwrap());
     assert_eq!(loaded.bloblet_bytes(b), b"code");
     assert!(loaded.bloblet_has_trailer(b));
 }

@@ -588,10 +588,14 @@ impl<'a> Expander<'a> {
     }
 
     pub(crate) fn global(&mut self, sym: Sym) -> GlobalId {
-        let name = self.rt.interner.name(sym).to_string();
-        let s = self.rt.heap.intern(&name);
-        let slot = self.rt.heap.symbol_global_slot(s);
-        let g = GlobalId(slot as u32);
+        // By its plain name, an alias's too.
+        let plain = if self.rt.interner.is_uninterned(sym) {
+            let name = self.rt.interner.name(sym).to_string();
+            self.rt.interner.intern(&name)
+        } else {
+            sym
+        };
+        let g = GlobalId(plain);
         self.env.bind_top(sym, Binding::Global(g));
         g
     }

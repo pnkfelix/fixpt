@@ -2514,8 +2514,8 @@ fn stage_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value) 
     // Scheme that calls it, `READER_PREFIX`), by its global's slot, read at
     // each call: a collection while FX-26 runs may move what it holds.
     let sym = rt.heap.intern(&format!("fx26-native:{}", DIRECT_FX.1));
-    let slot = rt.heap.symbol_global_slot(sym);
-    if rt.heap.global(slot).is_unbound() {
+    let slot = rt.heap.symbol_ref(sym);
+    if rt.heap.global_at(&slot).is_unbound() {
         return Err("the compiler written in FX-26 is not loaded".into());
     }
     // Collection held off from here to the end but while FX-26 runs, when
@@ -2548,7 +2548,7 @@ fn stage_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value) 
         heap.push_root(errors);
         fx_park(heap, &mut c);
         let args = [rt.heap.root_at(base), rt.heap.root_at(base + 1), rt.heap.root_at(base + 2)];
-        let make = rt.heap.global(slot);
+        let make = rt.heap.global_at(&slot);
         let made = fixpt_runtime::prim::call_front_end(rt, make, &args);
         // Read before the compile takes its values back, which allocates
         // nothing, but before anything else does; then the roots let go,

@@ -58,7 +58,7 @@ pub(crate) fn flags(rt: &mut Runtime) -> Option<(bool, bool)> {
 
 pub(crate) fn global(rt: &mut Runtime, name: &str) -> Option<Value> {
     let sym = rt.heap.intern(name);
-    let v = rt.heap.global(rt.heap.symbol_global_slot(sym));
+    let v = rt.heap.global_of(sym);
     (!v.is_unbound()).then_some(v)
 }
 
@@ -67,8 +67,8 @@ fn set_global(rt: &mut Runtime, name: &str, v: Value) {
     let sym = rt.heap.intern(name);
     let v = rt.heap.root_at(base);
     rt.heap.pop_roots_to(base);
-    let slot = rt.heap.symbol_global_slot(sym);
-    rt.heap.set_global(slot, v);
+    let slot = rt.heap.symbol_ref(sym);
+    rt.heap.set_global_at(&slot, v);
 }
 
 /// A program's code wrapped as every machine checks it: the text, where

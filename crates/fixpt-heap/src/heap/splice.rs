@@ -26,7 +26,7 @@
 //! (`save_native_front_end`).
 
 use super::code::{PART_BASES, in_code_area};
-use super::tables::Which;
+use super::tables::{Place, Which};
 use super::young::is_young;
 use super::{Heap, read_head, relocating};
 use crate::image::Parts;
@@ -208,7 +208,7 @@ impl Heap {
                     Some(m) => crate::image::retext(m, name)?,
                     None => name,
                 };
-                Ok((at_s, name.text_number().ok_or("an interned symbol of the image's named by no text")?))
+                Ok((at_s, name.text_number().and_then(|n| self.names().name(n)).ok_or("an interned symbol of the image's named by no text")?))
             });
             let (at_s, n) = match place {
                 Ok(p) => p,
@@ -231,7 +231,7 @@ impl Heap {
                 }
             }
             if let Some(&i) = self.symbol_index.get(&n) {
-                let i = i as usize;
+                let i = i.index();
                 let sym = if i < symbols { self.table_get(Which::Symbols, i) } else { new_symbols[i - symbols] };
                 instead.insert(s.raw(), sym);
                 continue;
@@ -244,8 +244,7 @@ impl Heap {
             if self.mem.words()[at_s - SYMBOL_SLOT] != w {
                 self.mem.words_mut()[at_s - SYMBOL_SLOT] = w;
             }
-            let i = (symbols + new_symbols.len()) as u32;
-            self.symbol_index.insert(n, i);
+            self.symbol_index.insert(n, Place::new(symbols + new_symbols.len()));
             added.push(n);
             new_symbols.push(moved(s).expect("moved above"));
         }

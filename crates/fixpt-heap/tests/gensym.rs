@@ -184,7 +184,7 @@ fn an_interned_symbols_name_is_a_text() {
     let mut h = Heap::new();
     let x = h.intern("names-test:x");
     let n = h.symbol_text(x).expect("a text");
-    assert_eq!(h.text_of(fixpt_heap::Value::text_numbered(n)), Some("names-test:x"));
+    assert_eq!(h.names().get(n), Some("names-test:x"));
     assert_eq!(h.intern_text(n), x);
     let mut keep = [x];
     h.collect_young(&mut [&mut keep]);

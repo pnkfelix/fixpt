@@ -1,8 +1,8 @@
-//! Texts (`Heap::text`, a heap's names, `fixpt_memmgmt::names`) in a heap's
-//! image: an image carries the texts its words, roots and globals name, and
-//! a load or a splice gives each the number it has among the names of the
-//! heap it goes into, writing the words that hold one where that number is
-//! another. An image numbers its texts from 0, in the order it holds them,
+//! Texts (a heap's names, `fixpt_memmgmt::names`, each an interned symbol's
+//! name, as only a symbol holds one) in a heap's image: an image carries the
+//! texts its symbols name, and a load or a splice gives each the number it
+//! has among the names of the heap it goes into, writing the words that hold
+//! one where that number is another. An image numbers its texts from 0, in the order it holds them,
 //! so a heap that holds no name yet numbers them so too, writing nothing;
 //! one that holds others finds them elsewhere.
 
@@ -10,12 +10,12 @@ use fixpt_heap::{Heap, Value, image, layout};
 
 const TEXTS: [&str; 3] = ["texts-image:alpha", "texts-image:λ beta", ""];
 
-/// A heap holding `(t0 t1 code . t2)` as its root, `code` a code bloblet
-/// whose field is `t0`, a text in the static area too where `statics`, and
-/// `t1` in a global; dumped as `dump` does.
+/// A heap holding `(t0 t1 code . t2)` as its root, each `t` the symbol of
+/// a text, `code` a code bloblet whose field is `t0`, and `t1` in a global;
+/// dumped as `dump` does.
 fn an_image(dump: fn(&Heap) -> Vec<u8>) -> Vec<u8> {
     let mut h = Heap::new();
-    let [t0, t1, t2] = TEXTS.map(|t| h.text(t));
+    let [t0, t1, t2] = TEXTS.map(|t| h.intern(t));
     let code = h.make_code_bloblet(layout::kind("bloblet"), 1, 8, false);
     h.set_bloblet_slot(code, 1, t0);
     let l = h.cons(code, t2);
@@ -23,21 +23,22 @@ fn an_image(dump: fn(&Heap) -> Vec<u8>) -> Vec<u8> {
     let l = h.cons(t0, l);
     h.push_root(l);
     let g = h.intern("texts-image:global");
-    let slot = h.symbol_global_slot(g);
-    h.set_global(slot, t1);
+    let slot = h.symbol_ref(g);
+    h.set_global_at(&slot, t1);
     dump(&h)
 }
 
 /// What [`an_image`] put in, in `h` with its root `l`.
 fn check(h: &Heap, l: Value) {
+    let sym = |t: &str| h.intern_existing(t).expect("interned");
     let t0 = h.car(l);
-    assert_eq!(h.text_of(t0), Some(TEXTS[0]));
-    assert_eq!(t0, h.text(TEXTS[0]), "the name this heap has");
-    assert_eq!(h.text_of(h.car(h.cdr(l))), Some(TEXTS[1]));
+    assert_eq!(h.symbol_name(t0), TEXTS[0]);
+    assert_eq!(t0, sym(TEXTS[0]), "the symbol this heap has");
+    assert_eq!(h.symbol_name(h.car(h.cdr(l))), TEXTS[1]);
     let code = h.car(h.cdr(h.cdr(l)));
     assert!(h.is_code_bloblet(code));
-    assert_eq!(h.bloblet_slot(code, 1), h.text(TEXTS[0]), "in the code area too");
-    assert_eq!(h.cdr(h.cdr(h.cdr(l))), h.text(TEXTS[2]));
+    assert_eq!(h.bloblet_slot(code, 1), sym(TEXTS[0]), "in the code area too");
+    assert_eq!(h.cdr(h.cdr(h.cdr(l))), sym(TEXTS[2]));
 }
 
 fn loaded_and_checked(bytes: &[u8]) {
@@ -46,7 +47,7 @@ fn loaded_and_checked(bytes: &[u8]) {
         let l = h.root_at(0);
         check(&h, l);
         let g = h.intern_existing("texts-image:global").expect("its global's symbol");
-        assert_eq!(h.global(h.symbol_global_slot(g)), h.text(TEXTS[1]), "a global's text");
+        assert_eq!(h.global_of(g), h.intern_existing(TEXTS[1]).unwrap(), "a global's symbol");
         h.collect(&mut []);
         h.verify().unwrap();
     }
@@ -66,7 +67,7 @@ fn spliced_and_checked(bytes: &[u8]) {
     drop(h);
     let mut h = Heap::new();
     // Something here first, so that the image is not put where it was.
-    let t = h.text("texts-image:mine");
+    let t = h.intern("texts-image:mine");
     let mine = h.cons(t, Value::NULL);
     let r0 = h.push_root(mine);
     let roots = h.splice_image(&img, &[]).unwrap();
@@ -74,7 +75,7 @@ fn spliced_and_checked(bytes: &[u8]) {
     let r1 = h.push_root(roots[0]);
     for _ in 0..2 {
         check(&h, h.root_at(r1));
-        assert_eq!(h.text_of(h.car(h.root_at(r0))), Some("texts-image:mine"));
+        assert_eq!(h.symbol_name(h.car(h.root_at(r0))), "texts-image:mine");
         h.collect(&mut []);
         h.verify().unwrap();
     }
@@ -119,7 +120,7 @@ fn an_images_texts_are_numbered_in_the_heap_it_goes_into() {
         assert!(img.texts.numbers(&Heap::new()).is_none(), "a heap of no names: each its number");
         let mut others = Heap::new();
         for i in 0..1000 {
-            others.text(&format!("texts-other:{i}"));
+            others.intern(&format!("texts-other:{i}"));
         }
         assert!(img.texts.numbers(&others).is_some(), "numbered otherwise there");
         let roots = others.splice_image(&img, &[]).unwrap();

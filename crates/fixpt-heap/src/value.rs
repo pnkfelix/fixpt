@@ -331,7 +331,7 @@ impl Value {
     /// `Heap::text`, `Heap::text_of`): a word of that heap's, and nothing
     /// apart from it.
     #[inline(always)]
-    pub const fn text_numbered(n: u32) -> Value {
+    pub(crate) const fn text_numbered(n: u32) -> Value {
         Value::imm(IMM_TEXT, n as u64)
     }
     #[inline(always)]
@@ -340,7 +340,7 @@ impl Value {
     }
     /// Its number in its heap's names, if it is a text.
     #[inline(always)]
-    pub const fn text_number(self) -> Option<u32> {
+    pub(crate) const fn text_number(self) -> Option<u32> {
         if self.is_text() { Some((self.0 >> IMM_PAYLOAD_SHIFT) as u32) } else { None }
     }
 

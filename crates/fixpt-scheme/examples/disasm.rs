@@ -6,8 +6,8 @@ use fixpt_scheme::Session;
 
 fn show(s: &mut Session, name: &str) {
     let sym = s.runtime_unrooted_ref().heap.intern_existing(name).expect("defined");
-    let slot = s.runtime_unrooted_ref().heap.symbol_global_slot(sym);
-    let v = s.runtime_unrooted_ref().heap.global(slot);
+    let slot = s.runtime_unrooted_ref().heap.symbol_ref(sym);
+    let v = s.runtime_unrooted_ref().heap.global_at(&slot);
     assert!(s.runtime_unrooted_ref().heap.is_a(v, ObjType::Closure), "{name} is not a closure");
     let code = s.runtime_unrooted_ref().heap.closure_code(v);
     println!("{}", disassemble(&s.runtime_unrooted_ref().heap, code));
@@ -22,7 +22,7 @@ fn histogram(s: &Session) -> (Vec<(String, usize)>, usize, usize) {
     // in their constant vectors.
     let mut todo: Vec<fixpt_heap::Value> = Vec::new();
     for sym in heap.symbols() {
-        let v = heap.global(heap.symbol_global_slot(sym));
+        let v = heap.global_of(sym);
         if heap.is_a(v, ObjType::Closure) {
             todo.push(heap.closure_code(v));
         }

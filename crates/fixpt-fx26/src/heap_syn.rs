@@ -163,7 +163,7 @@ impl SymTable {
     fn note(&mut self, heap: &Heap, v: Value, interner: &mut Interner) {
         of_heaps(heap, interner);
         let n = heap.symbol_text(v).expect("an interned symbol in syntax");
-        interner.of_number(n).expect("a name of the heap's");
+        interner.of_name(n).expect("a name of the heap's");
     }
 
     /// The heap's symbol of `s`, `interner`'s, which is of the heap's names.
@@ -171,8 +171,7 @@ impl SymTable {
         of_heaps(heap, interner);
         assert!(!interner.is_uninterned(s), "an uninterned symbol in syntax: `{}`", interner.name(s));
         // The name the interner holds (which refuses another space's `Sym`).
-        let _ = interner.name(s);
-        heap.intern_text(s.index())
+        heap.intern_text(interner.name_id(s).expect("interned"))
     }
 }
 
@@ -1360,8 +1359,8 @@ fn kept_name(id: u32) -> String {
 pub fn kept_release(heap: &mut Heap, id: u32) {
     assert_ne!(id, 0, "the heap's own vector of held syntax");
     if let Some(sym) = heap.interned(&kept_name(id)) {
-        let slot = heap.symbol_global_slot(sym);
-        heap.set_global(slot, Value::FALSE);
+        let slot = heap.symbol_ref(sym);
+        heap.set_global_at(&slot, Value::FALSE);
     }
 }
 
@@ -1370,14 +1369,14 @@ pub fn kept_release(heap: &mut Heap, id: u32) {
 /// taken.
 fn kept_vector(heap: &mut Heap, id: u32) -> Value {
     let sym = heap.intern(&kept_name(id));
-    let slot = heap.symbol_global_slot(sym);
-    let v = heap.global(slot);
+    let slot = heap.symbol_ref(sym);
+    let v = heap.global_at(&slot);
     if heap.is_a(v, ObjType::Vector) {
         return v;
     }
     let v = heap.make_vector(64, Value::FALSE);
     heap.obj_set(v, 0, Value::fixnum(0));
-    heap.set_global(slot, v);
+    heap.set_global_at(&slot, v);
     v
 }
 
@@ -1394,8 +1393,8 @@ fn kept_push(heap: &mut Heap, id: u32, x: Value) -> usize {
             heap.obj_set(w, i, y);
         }
         let sym = heap.intern(&kept_name(id));
-        let slot = heap.symbol_global_slot(sym);
-        heap.set_global(slot, w);
+        let slot = heap.symbol_ref(sym);
+        heap.set_global_at(&slot, w);
         v = w;
     }
     heap.obj_set(v, n + 1, x);
@@ -1511,7 +1510,7 @@ pub fn adopted(v: Value, interner: &mut Interner) -> Result<Syn, String> {
 /// How many pieces of syntax `heap` holds ([`Kept`]).
 pub fn kept_count(heap: &Heap) -> usize {
     let Some(sym) = heap.interned(KEPT) else { return 0 };
-    let v = heap.global(heap.symbol_global_slot(sym));
+    let v = heap.global_of(sym);
     if heap.is_a(v, ObjType::Vector) { heap.obj_ref(v, 0).as_fixnum() as usize } else { 0 }
 }
 

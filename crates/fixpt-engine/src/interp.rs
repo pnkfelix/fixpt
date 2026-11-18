@@ -263,15 +263,10 @@ impl Interp {
                 Ok(Control::Return)
             }
             TAG_GLOBAL => {
-                let slot = self.offset(rt, at + 1) as usize;
-                let v = rt.heap.global(slot);
+                let name = self.word(rt, at + 1);
+                let v = rt.heap.global_of(name);
                 if v.is_unbound() {
-                    let name = self.word(rt, at + 2);
-                    let text = if rt.heap.is_a(name, ObjType::Symbol) {
-                        rt.heap.symbol_name(name)
-                    } else {
-                        format!("#<global {slot}>")
-                    };
+                    let text = rt.heap.symbol_name(name);
                     return rt.fail(&format!("unbound variable: {text}"), &[]);
                 }
                 self.set_acc(v);
@@ -283,10 +278,9 @@ impl Interp {
                 Ok(Control::Eval(self.offset(rt, at + 4)))
             }
             TAG_SET_GLOBAL => {
-                let slot = self.offset(rt, at + 1);
                 let saved = self.save(rt);
-                self.frames.push(Frame::AssignGlobal { slot, saved });
-                Ok(Control::Eval(self.offset(rt, at + 3)))
+                self.frames.push(Frame::AssignGlobal { node: at, saved });
+                Ok(Control::Eval(self.offset(rt, at + 2)))
             }
             TAG_IF => {
                 let then = self.offset(rt, at + 2);
@@ -400,9 +394,10 @@ impl Interp {
                 self.set_acc(Value::UNSPECIFIED);
                 Ok(Control::Return)
             }
-            Frame::AssignGlobal { slot, saved } => {
+            Frame::AssignGlobal { node, saved } => {
                 let v = self.acc();
-                rt.heap.set_global(slot as usize, v);
+                let name = self.word(rt, node + 1);
+                rt.heap.set_global_of(name, v);
                 self.stack.truncate(saved as usize);
                 self.set_acc(Value::UNSPECIFIED);
                 Ok(Control::Return)

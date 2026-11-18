@@ -40,6 +40,23 @@ pub(super) struct Table {
     pub(super) len: usize,
 }
 
+/// A position in the tables: an interned symbol's in the symbols table, and
+/// its global's in the globals table, the same (they grow together). The
+/// heap's alone: the Rust side holds a symbol, or a `SymbolRef`, never this.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub(crate) struct Place(u32);
+
+impl Place {
+    #[inline]
+    pub(crate) fn new(i: usize) -> Place {
+        Place(u32::try_from(i).expect("a table of fewer than 2^32 slots"))
+    }
+    #[inline]
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// Which of the heap's two tables.
 #[derive(Clone, Copy)]
 pub(super) enum Which {

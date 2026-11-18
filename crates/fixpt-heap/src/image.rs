@@ -64,6 +64,7 @@
 //! is another (none, into a heap holding no name yet).
 //! ```
 
+use fixpt_memmgmt::names::NameId;
 use crate::heap::Heap;
 use crate::value::Value;
 
@@ -314,7 +315,7 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
 /// name `order[i]` (its roots' and globals' among them, at no place: they
 /// are mapped where they are read).
 fn texts_section(heap: &Heap, places: &[usize], order: &[u32]) -> Vec<u8> {
-    let texts: Vec<&str> = order.iter().map(|&n| heap.names().get(n).unwrap_or_else(|| panic!("a text #{n} that is no name of the heap's"))).collect();
+    let texts: Vec<&str> = order.iter().map(|&n| heap.names().name(n).and_then(|n| heap.names().get(n)).unwrap_or_else(|| panic!("a text #{n} that is no name of the heap's"))).collect();
     let mut out = Vec::new();
     let mut put = |w: u64| out.extend_from_slice(&w.to_le_bytes());
     put(texts.len() as u64);
@@ -382,18 +383,18 @@ impl ImageTexts<'_> {
     /// image's (its index); none if every one is the same there (nothing to
     /// write), as where the heap held no name before it read the image's.
     /// Each made a name there if it was not.
-    pub fn numbers(&self, heap: &Heap) -> Option<Vec<u32>> {
+    pub fn numbers(&self, heap: &Heap) -> Option<Vec<NameId>> {
         let here = heap.names().intern_all(self.texts.iter().map(|&(_, t)| t));
-        here.iter().enumerate().any(|(k, &h)| k as u32 != h).then_some(here)
+        here.iter().enumerate().any(|(k, &h)| k as u32 != h.bits()).then_some(here)
     }
 }
 
 /// `v`, a text of an image's, as the text it is here (`numbers`, from
 /// [`ImageTexts::numbers`]); anything else as it is. An error for a text
 /// the image does not carry.
-pub fn retext(numbers: &[u32], v: Value) -> Result<Value, String> {
+pub fn retext(numbers: &[NameId], v: Value) -> Result<Value, String> {
     match v.text_number() {
-        Some(k) => numbers.get(k as usize).map(|&n| Value::text_numbered(n)).ok_or_else(|| format!("a text #{k} the image does not carry")),
+        Some(k) => numbers.get(k as usize).map(|&n| Value::text_numbered(n.bits())).ok_or_else(|| format!("a text #{k} the image does not carry")),
         None => Ok(v),
     }
 }

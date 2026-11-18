@@ -17,8 +17,10 @@
 //!
 //! So a `&str` borrowed from the owner or a holder is of a name that stays
 //! as it is until the borrow ends. The memory itself lives as long as the
-//! owner or a holder does. A name's number is reused once it is freed: a
-//! number is no name's for good, only while something holds it.
+//! owner or a holder does. A name's number ([`NameId`]) is reused once it is
+//! freed: it is no name's for good, only while something holds it, so it is
+//! kept by what holds the name (a holder, or the owner's heap, in a word of
+//! its own), never apart from it.
 //!
 //! One thread's: an owner and its holders are not `Send`, so nothing here is
 //! read on one thread while another writes it.
@@ -43,12 +45,31 @@ struct Place {
     len: u32,
 }
 
+/// A name of a space: its number there, for its holder or owner (its heap,
+/// in a word of its own: [`bits`](NameId::bits), [`Owner::name`]) to read
+/// it by, while it holds it.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct NameId(u32);
+
+impl NameId {
+    /// Its number, for the owner's heap to keep in a word of its own (a
+    /// symbol's name), read back by [`Owner::name`]. Below `1 << 30`.
+    #[inline]
+    pub fn bits(self) -> u32 {
+        self.0
+    }
+}
+
+/// Which space names are of, among those the process made: never another's.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct SpaceId(u32);
+
 /// The next space's [`Owner::id`].
 static NEXT_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
 
 struct Space {
     /// Which space this is, among those the process made.
-    id: u32,
+    id: SpaceId,
     state: RefCell<State>,
 }
 
@@ -68,10 +89,8 @@ struct State {
     /// holders hold it.
     live: Vec<bool>,
     held: Vec<u32>,
-    /// Each name by its text's hash: the number of that hash, or [`MANY`]
-    /// where two names have one, their numbers then in `many`.
-    index: ByHash<u32>,
-    many: ByHash<Vec<u32>>,
+    /// Each name by its text's hash.
+    index: ByHash<Hashed>,
     /// Numbers freed, to be made again; and the places of names freed, by
     /// length, to be written again by a name as long.
     free_numbers: Vec<u32>,
@@ -81,13 +100,13 @@ struct State {
 /// A map keyed by a name's hash, which is its own hash: not hashed again
 /// (by `fixpt_hash`'s SipHash, which a profile of loading the front end's
 /// names found at 1.3% of a run).
-type ByHash<V> = std::collections::HashMap<u64, V, std::hash::BuildHasherDefault<Hashed>>;
+type ByHash<V> = std::collections::HashMap<u64, V, std::hash::BuildHasherDefault<AsIs>>;
 
 /// The hasher of [`ByHash`]: the key, as it is.
 #[derive(Default)]
-struct Hashed(u64);
+struct AsIs(u64);
 
-impl std::hash::Hasher for Hashed {
+impl std::hash::Hasher for AsIs {
     fn finish(&self) -> u64 {
         self.0
     }
@@ -101,32 +120,33 @@ impl std::hash::Hasher for Hashed {
     }
 }
 
-/// In the index, where names of one hash are several (`State::many`).
-const MANY: u32 = u32::MAX;
+/// The names of one hash: one, as nearly always, or several.
+enum Hashed {
+    One(u32),
+    Many(Vec<u32>),
+}
 
 impl State {
     /// The numbers of the names of hash `h`.
     fn hashed(&self, h: u64) -> &[u32] {
         match self.index.get(&h) {
             None => &[],
-            Some(&MANY) => &self.many[&h],
-            Some(n) => std::slice::from_ref(n),
+            Some(Hashed::One(n)) => std::slice::from_ref(n),
+            Some(Hashed::Many(ns)) => ns,
         }
     }
 
     /// The numbers of hash `h` made `ns`.
     fn set_hashed(&mut self, h: u64, ns: Vec<u32>) {
-        self.many.remove(&h);
         match ns.as_slice() {
             [] => {
                 self.index.remove(&h);
             }
             [n] => {
-                self.index.insert(h, *n);
+                self.index.insert(h, Hashed::One(*n));
             }
             _ => {
-                self.index.insert(h, MANY);
-                self.many.insert(h, ns);
+                self.index.insert(h, Hashed::Many(ns));
             }
         }
     }
@@ -154,7 +174,7 @@ fn hash(text: &str) -> u64 {
 
 impl Space {
     fn new() -> Space {
-        Space { id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed), state: RefCell::default() }
+        Space { id: SpaceId(NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)), state: RefCell::default() }
     }
 
     /// Where `len` bytes more go: a chunk and a place in it, past every
@@ -242,7 +262,7 @@ impl Space {
         st.places[n as usize] = Place { chunk, start, len };
         st.live[n as usize] = true;
         if !st.index.contains_key(&h) {
-            st.index.insert(h, n);
+            st.index.insert(h, Hashed::One(n));
         } else {
             let ns = st.hashed(h).iter().copied().chain([n]).collect();
             st.set_hashed(h, ns);
@@ -285,33 +305,39 @@ impl Owner {
         Owner(Rc::new(Space::new()))
     }
 
-    /// The number of the name `text`: its own, made now if it had none. It
-    /// lives until a sweep frees it.
-    pub fn intern(&self, text: &str) -> u32 {
-        self.0.intern(text)
+    /// The name `text`: its own, made now if it had none. It lives until a
+    /// sweep frees it.
+    pub fn intern(&self, text: &str) -> NameId {
+        NameId(self.0.intern(text))
     }
 
-    /// The number of the name `text`, if it is one; making none.
-    pub fn find(&self, text: &str) -> Option<u32> {
-        self.0.find(text)
+    /// The name `text`, if it is one; making none.
+    pub fn find(&self, text: &str) -> Option<NameId> {
+        self.0.find(text).map(NameId)
     }
 
     /// [`intern`](Owner::intern) of each of `texts`, room made for them
     /// first: an image's, as it is read.
-    pub fn intern_all<'t>(&self, texts: impl ExactSizeIterator<Item = &'t str>) -> Vec<u32> {
+    pub fn intern_all<'t>(&self, texts: impl ExactSizeIterator<Item = &'t str>) -> Vec<NameId> {
         self.0.reserve(texts.len());
-        texts.map(|t| self.0.intern(t)).collect()
+        texts.map(|t| NameId(self.0.intern(t))).collect()
     }
 
-    /// Name `n`, if it is one: as long as the owner is borrowed, no sweep
-    /// frees it.
-    pub fn get(&self, n: u32) -> Option<&str> {
-        self.0.text(n)
+    /// Name `n`'s text, if it is a name: as long as the owner is borrowed,
+    /// no sweep frees it.
+    pub fn get(&self, n: NameId) -> Option<&str> {
+        self.0.text(n.0)
     }
 
-    /// Which space this is, among those the process made: what a name's
-    /// number is a number of.
-    pub fn id(&self) -> u32 {
+    /// The name whose [`bits`](NameId::bits) are `bits`, if it is one now:
+    /// what the owner's heap kept in a word of its own.
+    #[inline]
+    pub fn name(&self, bits: u32) -> Option<NameId> {
+        self.0.state.borrow().live.get(bits as usize).copied().unwrap_or(false).then_some(NameId(bits))
+    }
+
+    /// Which space this is, among those the process made.
+    pub fn id(&self) -> SpaceId {
         self.0.id
     }
 
@@ -322,11 +348,11 @@ impl Owner {
 
     /// Every name not kept by `keep` and held by no holder, freed: how
     /// many.
-    pub fn sweep(&mut self, mut keep: impl FnMut(u32) -> bool) -> usize {
+    pub fn sweep(&mut self, mut keep: impl FnMut(NameId) -> bool) -> usize {
         let mut st = self.0.state.borrow_mut();
         let mut freed = 0;
         for n in 0..st.count {
-            if st.live[n as usize] && st.held[n as usize] == 0 && !keep(n) {
+            if st.live[n as usize] && st.held[n as usize] == 0 && !keep(NameId(n)) {
                 Space::free(&mut st, n);
                 freed += 1;
             }
@@ -344,10 +370,10 @@ impl Owner {
 /// through it, and kept from every sweep until it lets them go.
 pub struct Holder {
     space: Rc<Space>,
-    /// Whether it holds each number, by number; and the numbers it holds,
-    /// in the order it took them.
+    /// Whether it holds each number, by number; and the names it holds, in
+    /// the order it took them.
     mine: Vec<bool>,
-    order: Vec<u32>,
+    order: Vec<NameId>,
 }
 
 impl Holder {
@@ -356,39 +382,46 @@ impl Holder {
         Owner::new().holder()
     }
 
-    /// The number of the name `text`, made if it had none, held.
-    pub fn hold_text(&mut self, text: &str) -> u32 {
+    /// The name `text`, made if it had none, held.
+    pub fn hold_text(&mut self, text: &str) -> NameId {
         self.hold_text_new(text).0
     }
 
     /// [`hold_text`](Holder::hold_text), and whether this took it now (it
     /// held it not before).
-    pub fn hold_text_new(&mut self, text: &str) -> (u32, bool) {
-        let n = self.space.intern(text);
+    pub fn hold_text_new(&mut self, text: &str) -> (NameId, bool) {
+        let n = NameId(self.space.intern(text));
         let new = !self.holds(n);
         self.take(n);
         (n, new)
     }
 
-    /// The number of the name `text`, if it is one this holds.
-    pub fn find(&self, text: &str) -> Option<u32> {
-        self.space.find(text).filter(|&n| self.holds(n))
+    /// The name `text`, if it is one this holds.
+    pub fn find(&self, text: &str) -> Option<NameId> {
+        self.space.find(text).map(NameId).filter(|&n| self.holds(n))
     }
 
     /// Name `n` held, if it is a name: whether it is.
-    pub fn hold(&mut self, n: u32) -> bool {
-        if self.space.text(n).is_none() {
+    pub fn hold(&mut self, n: NameId) -> bool {
+        if self.space.text(n.0).is_none() {
             return false;
         }
         self.take(n);
         true
     }
 
-    fn take(&mut self, n: u32) {
+    /// The name whose [`bits`](NameId::bits) are `bits`, if this holds it.
+    #[inline]
+    pub fn held_name(&self, bits: u32) -> Option<NameId> {
+        let n = NameId(bits);
+        self.holds(n).then_some(n)
+    }
+
+    fn take(&mut self, n: NameId) {
         if self.holds(n) {
             return;
         }
-        let i = n as usize;
+        let i = n.0 as usize;
         if self.mine.len() <= i {
             self.mine.resize(i + 1, false);
         }
@@ -399,18 +432,18 @@ impl Holder {
 
     /// Whether this holds name `n`.
     #[inline]
-    pub fn holds(&self, n: u32) -> bool {
-        self.mine.get(n as usize).copied().unwrap_or(false)
+    pub fn holds(&self, n: NameId) -> bool {
+        self.mine.get(n.0 as usize).copied().unwrap_or(false)
     }
 
-    /// Name `n`, if this holds it: as long as this is borrowed, it holds
-    /// it still, so no sweep frees it.
+    /// Name `n`'s text, if this holds it: as long as this is borrowed, it
+    /// holds it still, so no sweep frees it.
     #[inline]
-    pub fn get(&self, n: u32) -> Option<&str> {
+    pub fn get(&self, n: NameId) -> Option<&str> {
         if !self.holds(n) {
             return None;
         }
-        self.space.text(n)
+        self.space.text(n.0)
     }
 
     /// How many names this holds: what [`release_to`](Holder::release_to)
@@ -424,7 +457,7 @@ impl Holder {
     }
 
     /// The names held, in the order this took them.
-    pub fn held(&self) -> &[u32] {
+    pub fn held(&self) -> &[NameId] {
         &self.order
     }
 
@@ -436,13 +469,13 @@ impl Holder {
         }
         let mut st = self.space.state.borrow_mut();
         for n in self.order.drain(len..) {
-            self.mine[n as usize] = false;
-            st.held[n as usize] -= 1;
+            self.mine[n.0 as usize] = false;
+            st.held[n.0 as usize] -= 1;
         }
     }
 
     /// Which space its names are of ([`Owner::id`]).
-    pub fn space_id(&self) -> u32 {
+    pub fn space_id(&self) -> SpaceId {
         self.space.id
     }
 
@@ -479,7 +512,7 @@ mod tests {
         assert_eq!((o.find("λx"), o.find("none")), (Some(b), None));
         assert_eq!(o.get(o.intern("")), Some(""));
         assert!(std::ptr::eq(o.get(a).unwrap(), o.get(a).unwrap()), "kept, not copied");
-        assert_eq!(o.get(o.count()), None);
+        assert_eq!(o.name(o.count()), None);
     }
 
     #[test]
@@ -557,15 +590,14 @@ mod collisions {
             let mut st = o.0.state.borrow_mut();
             let (ha, hb) = (hash("a"), hash("b"));
             st.index.remove(&hb);
-            st.set_hashed(ha, vec![a, b]);
-            st.index.remove(&hb);
+            st.set_hashed(ha, vec![a.0, b.0]);
         }
-        assert_eq!(o.0.state.borrow().hashed(hash("a")), &[a, b]);
-        assert_eq!(o.0.find("a"), Some(a));
+        assert_eq!(o.0.state.borrow().hashed(hash("a")), &[a.0, b.0]);
+        assert_eq!(o.find("a"), Some(a));
         let mut h = o.holder();
         h.hold(b);
         o.sweep(|_| false);
-        assert_eq!(o.0.state.borrow().hashed(hash("a")), &[b]);
+        assert_eq!(o.0.state.borrow().hashed(hash("a")), &[b.0]);
         assert_eq!(o.get(b), Some("b"));
     }
 }

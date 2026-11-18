@@ -8,7 +8,7 @@ fn disasm(src: &str) -> String {
     let mut s = Session::with_backend(Backend::Bytecode);
     s.eval_str("<x>", &format!("(define (f a b) {src})")).expect("compiles");
     let sym = s.runtime_unrooted_ref().heap.intern_existing("f").expect("defined");
-    let v = s.runtime_unrooted_ref().heap.global(s.runtime_unrooted_ref().heap.symbol_global_slot(sym));
+    let v = s.runtime_unrooted_ref().heap.global_of(sym);
     let code = s.runtime_unrooted_ref().heap.closure_code(v);
     assert!(s.runtime_unrooted_ref().heap.is_a(code, ObjType::Code));
     disassemble(&s.runtime_unrooted_ref().heap, code)
@@ -36,7 +36,7 @@ fn main() {
         let mut s = Session::with_backend(Backend::Bytecode);
         s.eval_str("<x>", &format!("(define (fx) {})", out.code)).expect("compiles");
         let sym = s.runtime_unrooted_ref().heap.intern_existing("fx").expect("defined");
-        let v = s.runtime_unrooted_ref().heap.global(s.runtime_unrooted_ref().heap.symbol_global_slot(sym));
+        let v = s.runtime_unrooted_ref().heap.global_of(sym);
         print!("{}", disassemble(&s.runtime_unrooted_ref().heap, s.runtime_unrooted_ref().heap.closure_code(v)));
     }
 

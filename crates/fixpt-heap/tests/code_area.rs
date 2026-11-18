@@ -197,12 +197,12 @@ fn an_image_carries_the_code_area() {
     let word = heap.make_cellular_word(name, &[exit]).expect("a word");
     let pair = heap.cons(word, Value::fixnum(3));
     let c = heap.make_closure(pair, &[]);
-    let slot = heap.symbol_global_slot(name);
-    heap.set_global(slot, c);
+    let slot = heap.symbol_ref(name);
+    heap.set_global_at(&slot, c);
     heap.collect(&mut []);
     let mut back = fixpt_heap::image::load(&fixpt_heap::image::dump_packed(&heap)).expect("loads");
     let name = back.intern("w");
-    let c = back.global(back.symbol_global_slot(name));
+    let c = back.global_of(name);
     let word = back.car(back.closure_code(c));
     assert_eq!(back.code_part(word), Some(CodePart::Stubbed));
     assert!(back.is_cellular_word(word));

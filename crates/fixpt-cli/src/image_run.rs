@@ -64,8 +64,8 @@ pub fn run_entry(heap: Heap, entry: &str, argv: &[String]) -> i32 {
         eprintln!("fixpt: this image defines no `{entry}`");
         return 1;
     };
-    let slot = rt.heap.symbol_global_slot(sym);
-    let proc = rt.heap.global(slot);
+    let slot = rt.heap.symbol_ref(sym);
+    let proc = rt.heap.global_at(&slot);
     if proc.is_unbound() {
         eprintln!("fixpt: this image defines no `{entry}`");
         return 1;

@@ -356,17 +356,12 @@ impl Vm {
                 self.stack.push(v);
             }
             op::GLOBAL => {
-                let g = self.word(rt, self.pc + 1);
-                let k = self.word(rt, self.pc + 2);
-                self.pc += 3;
-                let v = rt.heap.global(g as usize);
+                let k = self.word(rt, self.pc + 1);
+                self.pc += 2;
+                let name = self.konst(rt, k);
+                let v = rt.heap.global_of(name);
                 if v.is_unbound() {
-                    let name = self.konst(rt, k);
-                    let text = if rt.heap.is_a(name, ObjType::Symbol) {
-                        rt.heap.symbol_name(name)
-                    } else {
-                        format!("#<global {g}>")
-                    };
+                    let text = rt.heap.symbol_name(name);
                     return rt.fail(&format!("unbound variable: {text}"), &[]);
                 }
                 self.stack.push(v);
@@ -385,10 +380,11 @@ impl Vm {
                 self.stack.push(Value::UNSPECIFIED);
             }
             op::SET_GLOBAL => {
-                let g = self.word(rt, self.pc + 1);
+                let k = self.word(rt, self.pc + 1);
                 self.pc += 2;
                 let v = self.stack.pop().expect("set! has a value");
-                rt.heap.set_global(g as usize, v);
+                let name = self.konst(rt, k);
+                rt.heap.set_global_of(name, v);
                 self.stack.push(Value::UNSPECIFIED);
             }
             op::CLEAR => {

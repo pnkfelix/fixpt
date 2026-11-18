@@ -25,7 +25,7 @@ pub use cellular::{Shots, NATIVE_CONT_INNER, NATIVE_CONT_LEN, NATIVE_CONT_MARK, 
 pub use sro::{Referrer, Referrers, SroKind};
 pub mod value;
 
-pub use heap::{BlobletError, CodePart, Head, Heap, UNINTERNED_HANDLES};
+pub use heap::{BlobletError, CodePart, Head, Heap, SymbolRef, UNINTERNED_HANDLES};
 
 /// The heap's maps and sets, unseeded (`fixpt-hash`).
 pub use fixpt_hash::{HashMap, HashSet, Unseeded};

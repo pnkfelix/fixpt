@@ -119,7 +119,7 @@ impl Expander<'_> {
 
     fn global_value(&mut self, name: &str) -> Option<Value> {
         let s = self.rt.heap.intern_existing(name)?;
-        let v = self.rt.heap.global(self.rt.heap.symbol_global_slot(s));
+        let v = self.rt.heap.global_of(s);
         if v.is_unbound() { None } else { Some(v) }
     }
 

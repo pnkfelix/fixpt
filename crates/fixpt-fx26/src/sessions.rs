@@ -208,8 +208,8 @@ fn seeded<T>(rt: &mut Runtime, base: usize, parts: &Parts, mode: Mode, f: impl F
         } else if mode == Mode::Lowered {
             let global = state.globals.define(&state.checker, module);
             let sym = rt.heap.intern(&global);
-            let slot = rt.heap.symbol_global_slot(sym);
-            rt.heap.set_global(slot, m);
+            let slot = rt.heap.symbol_ref(sym);
+            rt.heap.set_global_at(&slot, m);
         }
         let vals = match state.checker.global_type(module).map(|t| state.checker.arena.get(state.checker.arena.resolve(t)).clone()) {
             Some(crate::ast::Ty::Module { vals, .. }) => vals.iter().map(|(n, _)| state.checker.interner.name(*n).to_string()).collect::<Vec<_>>(),

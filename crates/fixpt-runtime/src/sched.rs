@@ -154,14 +154,14 @@ pub mod op {
 /// The state's vector, made if there is none yet.
 fn state(heap: &mut Heap) -> Value {
     let sym = heap.intern_static(STATE);
-    let slot = heap.symbol_global_slot(sym);
-    let s = heap.global(slot);
+    let slot = heap.symbol_ref(sym);
+    let s = heap.global_at(&slot);
     if heap.is_a(s, fixpt_heap::ObjType::Vector) {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
     let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::NULL, Value::NULL, Value::NULL, Value::NULL, Value::NULL]);
-    heap.set_global(slot, s);
+    heap.set_global_at(&slot, s);
     s
 }
 
@@ -176,7 +176,7 @@ pub fn prompt_tag(heap: &Heap) -> Option<Value> {
 /// must not allocate.
 fn state_if_any(heap: &Heap) -> Option<Value> {
     let sym = heap.interned(STATE)?;
-    let s = heap.global(heap.symbol_global_slot(sym));
+    let s = heap.global_of(sym);
     heap.is_a(s, fixpt_heap::ObjType::Vector).then_some(s)
 }
 

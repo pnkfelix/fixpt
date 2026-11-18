@@ -196,7 +196,7 @@ fn the_compiler_uses_the_facts() {
     s.run(&forms[0]).expect("runs");
     let heap = &s.scheme.runtime_unrooted_ref().heap;
     let sym = heap.intern_existing("fx:f").expect("defined");
-    let closure = heap.global(heap.symbol_global_slot(sym));
+    let closure = heap.global_of(sym);
     let code = heap.closure_code(closure);
     assert!(heap.is_a(code, fixpt_heap::ObjType::Code));
     let listing = disassemble(heap, code);

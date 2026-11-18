@@ -53,13 +53,14 @@ pub mod op {
     pub const LOCAL: u32 = 1;
     /// `FREE i k` — push capture `i` of the running closure.
     pub const FREE: u32 = 2;
-    /// `GLOBAL g k` — push global `g`.
+    /// `GLOBAL k` — push the global of symbol `consts[k]`.
     pub const GLOBAL: u32 = 3;
     /// `STORE i` — pop into frame slot `i`, leaving nothing.
     pub const STORE: u32 = 4;
     /// `SET_LOCAL i` — pop into frame slot `i`, push unspecified.
     pub const SET_LOCAL: u32 = 5;
-    /// `SET_GLOBAL g` — pop into global `g`, push unspecified.
+    /// `SET_GLOBAL k` — pop into the global of symbol `consts[k]`, push
+    /// unspecified.
     pub const SET_GLOBAL: u32 = 6;
     /// `CLOSURE k` — `consts[k]` is a `Code`; capture its `CODE_FREE` values
     /// from the top of the stack.
@@ -89,9 +90,9 @@ pub mod op {
     pub fn len(opcode: u32) -> usize {
         match opcode {
             POP | RETURN | MAKE_BOX | BOX_SET => 1,
-            CONST | STORE | SET_LOCAL | SET_GLOBAL | CLOSURE | JUMP | JUMP_FALSE | CALL
-            | TAIL_CALL | BOX_REF => 2,
-            LOCAL | FREE | GLOBAL | PRIM | CLEAR => 3,
+            CONST | STORE | SET_LOCAL | GLOBAL | SET_GLOBAL | CLOSURE | JUMP | JUMP_FALSE
+            | CALL | TAIL_CALL | BOX_REF => 2,
+            LOCAL | FREE | PRIM | CLEAR => 3,
             _ => 1,
         }
     }
@@ -157,7 +158,6 @@ pub fn compile(
         heap,
         interner,
         program: &converted,
-        global_names: HashMap::default(),
         boxes: prims,
     };
     c.code_for(None, &[], None, converted.body)
@@ -167,7 +167,6 @@ struct Compiler<'a> {
     heap: &'a mut Heap,
     interner: &'a Interner,
     program: &'a Program,
-    global_names: HashMap<usize, Value>,
     boxes: BoxPrims,
 }
 
@@ -292,22 +291,10 @@ impl Compiler<'_> {
         self.heap.intern(&text)
     }
 
-    /// The symbol a global slot belongs to, for error messages. Cached: the
-    /// heap's symbol table has no reverse index, and a REPL recompiles often.
-    fn global_name(&mut self, slot: usize) -> Value {
-        if let Some(v) = self.global_names.get(&slot) {
-            return *v;
-        }
-        let mut found = Value::FALSE;
-        for i in 0..self.heap.symbol_count() {
-            let sym = self.heap.symbol_at(i);
-            if self.heap.symbol_global_slot(sym) == slot {
-                found = sym;
-                break;
-            }
-        }
-        self.global_names.insert(slot, found);
-        found
+    /// Global `g`'s heap symbol, which the code holds and reads and sets
+    /// the global by.
+    fn global_name(&mut self, g: fixpt_core::GlobalId) -> Value {
+        g.symbol(self.heap, self.interner)
     }
 
     /// Compile `node`, leaving its value on the stack.
@@ -332,9 +319,9 @@ impl Compiler<'_> {
                 }
             }
             Node::GlobalRef(g) => {
-                let name = self.global_name(g.index());
+                let name = self.global_name(g);
                 let k = s.constant(name);
-                s.emit(&[op::GLOBAL, g.0, k]);
+                s.emit(&[op::GLOBAL, k]);
             }
             Node::Set(v, e) => {
                 self.expr(s, e, false)?;
@@ -352,7 +339,9 @@ impl Compiler<'_> {
             }
             Node::GlobalSet(g, e) => {
                 self.expr(s, e, false)?;
-                s.emit(&[op::SET_GLOBAL, g.0]);
+                let name = self.global_name(g);
+                let k = s.constant(name);
+                s.emit(&[op::SET_GLOBAL, k]);
             }
             Node::If(test, then, els) => {
                 self.expr(s, test, false)?;
