@@ -7881,6 +7881,12 @@ cannot be made from its directory was refused, "cannot read `macros.fx`",
 until deleted by hand. Now it is stale, its file read from source
 (`fasl_load`). Tests: fasl.rs (a parameter chain importing macros compiles
 in its length; a `.fasl` whose load cannot be made is stale).
+(3, entry 13 of Heist's should-work note) A program's `import-with-syntax`
+read its file from the working directory: `fixpt run prog/main.fx`, and
+`compile-file` of a program's file, read its forms, which expands their
+macros, before setting its directory, set for running alone. Now from its
+reading on (`fx26.rs`'s run, `compile_program_file`). Test:
+import_with_syntax.rs (a program's import reads from its directory).
 
 ## 299. A stale `.fasl` answered by its caller (the user's, 2026-11-18)
 

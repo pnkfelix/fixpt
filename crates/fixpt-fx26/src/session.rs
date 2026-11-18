@@ -3151,8 +3151,16 @@ impl Fx26Session {
             _ => std::path::PathBuf::from(path),
         };
         let text = std::fs::read_to_string(&at).map_err(|e| format!("cannot read `{path}`: {e}"))?;
-        let forms = checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), &text)).map_err(|e| format!("in `{path}`: {}", e.message))?;
+        // Its loads from its directory, from its reading on: an
+        // `import-with-syntax` is read as its forms are.
         let outer = std::mem::replace(&mut self.checker.base_dir, at.parent().map(|d| d.to_path_buf()));
+        let forms = match checking(&mut self.checker, &mut self.scheme, |c| c.read_in(FileId(0), &text)) {
+            Ok(forms) => forms,
+            Err(e) => {
+                self.checker.base_dir = outer;
+                return Err(format!("in `{path}`: {}", e.message));
+            }
+        };
         self.program_ran = self.checker.value_names().into_iter().filter(|n| self.checker.global_type(*n).is_some()).collect();
         self.program_record = Some(Vec::new());
         let ran = self.run_forms(&forms);

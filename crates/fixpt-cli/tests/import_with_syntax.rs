@@ -174,3 +174,28 @@ fn what_cannot_be_imported_is_refused() {
         assert!(err.contains(why) || out.contains(why), "{name}: {out}{err}");
     }
 }
+
+/// A program's `import-with-syntax` reads its file from the program's
+/// directory, not the working directory (Heist's report, 2026-11-18: `fixpt
+/// run prog/main.fx` read `lib.fx` from where it was run, its forms read,
+/// and their macros expanded, before the directory was set): run, and its
+/// file compiled, from the directory above it.
+#[test]
+fn a_programs_import_reads_from_its_directory() {
+    let dir = std::env::temp_dir().join(format!("fixpt-iws-dir-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("prog")).expect("made");
+    std::fs::write(dir.join("prog/lib.fx"), "(define-syntax twice (macro (_ expr) expr) (syntax-rules ((_ e) (let ((x e)) (+ x x)))))\n").expect("written");
+    std::fs::write(
+        dir.join("prog/main.fx"),
+        "(define lib (load-module \"lib.fx\"))\n(import-with-syntax lib)\n(define main (subr pure () int) (lambda () (twice 21)))\n",
+    )
+    .expect("written");
+    for m in MACHINES {
+        let out = Command::new(FIXPT).args(["--machine", m, "run", "prog/main.fx"]).current_dir(&dir).output().expect("runs");
+        assert_eq!(out.status.code(), Some(42), "{m}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let out = Command::new(FIXPT).args(["compile-file", "prog/main.fx"]).current_dir(&dir).output().expect("runs");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -995,19 +995,22 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
                 return 1;
             }
         };
+        // A load's path is from the directory of the file it is in, as
+        // `fixpt eval`'s and `,load`'s are: from its reading on, for an
+        // `import-with-syntax` is read as its forms are (Heist's report,
+        // 2026-11-18: read from the working directory).
+        let dir = std::path::Path::new(f).parent().map(|d| d.to_path_buf());
+        let outer = std::mem::replace(&mut session.checker.base_dir, dir);
         let forms = match session.read_program(FileId(0), &text) {
             Ok(forms) => forms,
             Err(e) => {
+                session.checker.base_dir = outer;
                 eprintln!("fixpt: read error: {}", located(f, &text, &e));
                 return 1;
             }
         };
         // A file is a whole program: its definitions may come in any order.
         warn_types_again(session, f, &text, &forms);
-        // A load's path is from the directory of the file it is in, as
-        // `fixpt eval`'s and `,load`'s are.
-        let dir = std::path::Path::new(f).parent().map(|d| d.to_path_buf());
-        let outer = std::mem::replace(&mut session.checker.base_dir, dir);
         let path = canonical(f);
         session.source_file = Some(std::rc::Rc::new((path, text.clone())));
         session.program_file = Some(std::path::PathBuf::from(f));
