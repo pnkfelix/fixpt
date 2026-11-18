@@ -58,12 +58,68 @@ struct State {
     /// holders hold it.
     live: Vec<bool>,
     held: Vec<u32>,
-    /// Each name by its text's hash: the numbers of that hash.
-    index: HashMap<u64, Vec<u32>>,
+    /// Each name by its text's hash: the number of that hash, or [`MANY`]
+    /// where two names have one, their numbers then in `many`.
+    index: ByHash<u32>,
+    many: ByHash<Vec<u32>>,
     /// Numbers freed, to be made again; and the places of names freed, by
     /// length, to be written again by a name as long.
     free_numbers: Vec<u32>,
     free_bytes: HashMap<u64, Vec<u64>>,
+}
+
+/// A map keyed by a name's hash, which is its own hash: not hashed again
+/// (by `fixpt_hash`'s SipHash, which a profile of loading the front end's
+/// names found at 1.3% of a run).
+type ByHash<V> = std::collections::HashMap<u64, V, std::hash::BuildHasherDefault<Hashed>>;
+
+/// The hasher of [`ByHash`]: the key, as it is.
+#[derive(Default)]
+struct Hashed(u64);
+
+impl std::hash::Hasher for Hashed {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0 << 8) | b as u64;
+        }
+    }
+    fn write_u64(&mut self, x: u64) {
+        self.0 = x;
+    }
+}
+
+/// In the index, where names of one hash are several (`State::many`).
+const MANY: u32 = u32::MAX;
+
+impl State {
+    /// The numbers of the names of hash `h`.
+    fn hashed(&self, h: u64) -> &[u32] {
+        match self.index.get(&h) {
+            None => &[],
+            Some(&MANY) => &self.many[&h],
+            Some(n) => std::slice::from_ref(n),
+        }
+    }
+
+    /// The numbers of hash `h` made `ns`.
+    fn set_hashed(&mut self, h: u64, ns: Vec<u32>) {
+        self.many.remove(&h);
+        match ns.as_slice() {
+            [] => {
+                self.index.remove(&h);
+            }
+            [n] => {
+                self.index.insert(h, *n);
+            }
+            _ => {
+                self.index.insert(h, MANY);
+                self.many.insert(h, ns);
+            }
+        }
+    }
 }
 
 /// `len` bytes of address space, readable and writable, zero; the process
@@ -124,8 +180,7 @@ impl Space {
     /// The number of the name `text`, if it is one.
     fn find(&self, text: &str) -> Option<u32> {
         let st = self.state.borrow();
-        let ns = st.index.get(&hash(text))?;
-        ns.iter().copied().find(|&n| self.text_unchecked(n) == text)
+        st.hashed(hash(text)).iter().copied().find(|&n| self.text_unchecked(n) == text)
     }
 
     /// Name `n`'s text, `n` live, the state borrowed by the caller.
@@ -173,20 +228,30 @@ impl Space {
             *self.places.add(n as usize) = Place { start, len };
         }
         st.live[n as usize] = true;
-        st.index.entry(hash(text)).or_default().push(n);
+        let h = hash(text);
+        if !st.index.contains_key(&h) {
+            st.index.insert(h, n);
+        } else {
+            let ns = st.hashed(h).iter().copied().chain([n]).collect();
+            st.set_hashed(h, ns);
+        }
         n
+    }
+
+    /// Room made for `more` names more: an image's, about to be interned.
+    fn reserve(&self, more: usize) {
+        let mut st = self.state.borrow_mut();
+        st.index.reserve(more);
+        st.live.reserve(more);
+        st.held.reserve(more);
     }
 
     /// Name `n` freed, its number and its bytes to be made again.
     fn free(&self, st: &mut State, n: u32) {
         let text = self.text_unchecked(n);
         let h = hash(text);
-        if let Some(ns) = st.index.get_mut(&h) {
-            ns.retain(|&m| m != n);
-            if ns.is_empty() {
-                st.index.remove(&h);
-            }
-        }
+        let rest = st.hashed(h).iter().copied().filter(|&m| m != n).collect();
+        st.set_hashed(h, rest);
         // SAFETY: `n` is live until now: its place as written.
         let p = unsafe { *self.places.add(n as usize) };
         st.live[n as usize] = false;
@@ -218,6 +283,13 @@ impl Owner {
     /// The number of the name `text`, if it is one; making none.
     pub fn find(&self, text: &str) -> Option<u32> {
         self.0.find(text)
+    }
+
+    /// [`intern`](Owner::intern) of each of `texts`, room made for them
+    /// first: an image's, as it is read.
+    pub fn intern_all<'t>(&self, texts: impl ExactSizeIterator<Item = &'t str>) -> Vec<u32> {
+        self.0.reserve(texts.len());
+        texts.map(|t| self.0.intern(t)).collect()
     }
 
     /// Name `n`, if it is one: as long as the owner is borrowed, no sweep
@@ -438,5 +510,33 @@ mod tests {
         let mut h = Holder::new();
         let n = h.hold_text("alone");
         assert_eq!(h.get(n), Some("alone"));
+    }
+}
+
+#[cfg(test)]
+mod collisions {
+    use super::*;
+
+    /// Two names of one hash, as the index keeps them: each found, and
+    /// either freed, the other kept.
+    #[test]
+    fn names_of_one_hash() {
+        let mut o = Owner::new();
+        let (a, b) = (o.intern("a"), o.intern("b"));
+        {
+            // Made to share a hash, as two names may.
+            let mut st = o.0.state.borrow_mut();
+            let (ha, hb) = (hash("a"), hash("b"));
+            st.index.remove(&hb);
+            st.set_hashed(ha, vec![a, b]);
+            st.index.remove(&hb);
+        }
+        assert_eq!(o.0.state.borrow().hashed(hash("a")), &[a, b]);
+        assert_eq!(o.0.find("a"), Some(a));
+        let mut h = o.holder();
+        h.hold(b);
+        o.sweep(|_| false);
+        assert_eq!(o.0.state.borrow().hashed(hash("a")), &[b]);
+        assert_eq!(o.get(b), Some("b"));
     }
 }

@@ -128,9 +128,9 @@ fn put(
                 }
                 return;
             }
-            // A text (`Value::text`): the text, written as a string is,
+            // A text (`Heap::text`): the text, written as a string is,
             // marked as no string.
-            _ if let Some(t) = v.as_text() => {
+            _ if let Some(t) = heap.text_of(v) => {
                 if write {
                     out.push_str("#<text ");
                     put_string(out, t);

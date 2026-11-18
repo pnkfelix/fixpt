@@ -18,7 +18,6 @@ pub mod mapped;
 pub mod names;
 pub mod phases;
 pub mod reserve;
-pub mod texts;
 pub mod words;
 
 pub use exec::ExecView;

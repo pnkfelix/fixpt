@@ -448,20 +448,18 @@ pub struct Heap {
     symbols: tables::Table,
     /// Where an image's chunks of the two tables are (`tables`).
     tables: tables::Area,
-    /// Rust-side name lookup. Keys are plain `String`s, so a collection cannot
-    /// invalidate them.
+    /// The interned symbols' places by their names, the names' texts'
+    /// numbers (`fixpt_memmgmt::texts`): words a collection does not move.
     symbol_index: SymbolIndex,
+    /// The names of its interned symbols, and of any other text it holds
+    /// (`Value::text_numbered`; `fixpt_memmgmt::names`): its own, freed with
+    /// it.
+    names: fixpt_memmgmt::names::Owner,
     /// A heap string's name, gathered to look it up (`intern_string`):
     /// kept, so that a symbol found costs no allocation.
     name_buf: String,
     /// `intern_static`'s: each name's address, and its symbol's index.
     static_symbols: Vec<(usize, u32)>,
-    /// The symbols an image spliced into an empty heap brought, by their
-    /// names' hashes (`symbol_hash_of`, the symbol's own field), sorted:
-    /// each name looked up there when first asked for and then kept in
-    /// `symbol_index`, rather than every name made a `String` and hashed at
-    /// the load (`TODO.md` §160 item 4; `splice_image`).
-    image_symbols: Vec<(i64, u32)>,
     /// The global slot holding the native adapters' shared code, once one
     /// is made (`set_adapter_code`).
     adapter_slot: Option<usize>,
@@ -655,9 +653,9 @@ impl Heap {
             symbols: tables::Table::default(),
             tables: tables::Area::default(),
             symbol_index: SymbolIndex::default(),
+            names: fixpt_memmgmt::names::Owner::new(),
             name_buf: String::new(),
             static_symbols: Vec::new(),
-            image_symbols: Vec::new(),
             adapter_slot: None,
             planned_writes: HashMap::default(),
             gc_count: 0,
@@ -2142,9 +2140,9 @@ impl Heap {
                 todo.extend([from.car(v), from.cdr(v)]);
                 continue;
             }
-            if from.is_interned_symbol(v) {
-                let name = from.symbol_name(v);
-                slot.insert(self.intern(&name));
+            if let Some(name) = from.is_interned_symbol(v).then(|| from.symbol_text(v).and_then(|n| from.names.get(n))).flatten() {
+                // Its name this heap's: by its text, the numbers each heap's own.
+                slot.insert(self.intern(name));
                 continue;
             }
             if v == from.code.stub {
@@ -2335,26 +2333,32 @@ impl Heap {
         self.symbol_number(name).map(|i| self.table_get(Which::Symbols, i as usize))
     }
 
-    /// Where `name`'s symbol is in `symbols`, if it is interned: in
-    /// `symbol_index`, or among an image's not yet asked for
-    /// (`image_symbols`).
+    /// Where `name`'s symbol is in `symbols`, if it is interned: by its
+    /// name's number, if the heap has the name, making none.
     fn symbol_number(&self, name: &str) -> Option<u32> {
-        self.symbol_index.get(name).copied().or_else(|| self.image_symbol(name))
+        self.symbol_index.get(&self.names.find(name)?).copied()
     }
 
-    /// `name`'s symbol among those an image brought (`image_symbols`): by
-    /// its hash, then its name compared, nothing made.
-    fn image_symbol(&self, name: &str) -> Option<u32> {
-        if self.image_symbols.is_empty() {
-            return None;
-        }
-        let h = symbol_hash_of(name);
-        let from = self.image_symbols.partition_point(|&(k, _)| k < h);
-        self.image_symbols[from..]
-            .iter()
-            .take_while(|&&(k, _)| k == h)
-            .map(|&(_, i)| i)
-            .find(|&i| self.string_is(self.obj_ref(self.table_get(Which::Symbols, i as usize), 0), name))
+    /// The text `text`, a name of this heap's (`fixpt_memmgmt::names`): an
+    /// immediate whose number is the name's here, and nothing elsewhere.
+    pub fn text(&self, text: &str) -> Value {
+        Value::text_numbered(self.names.intern(text))
+    }
+
+    /// Text `v`'s text, if it is a text and a name of this heap's.
+    pub fn text_of(&self, v: Value) -> Option<&str> {
+        self.names.get(v.text_number()?)
+    }
+
+    /// The heap's names (`fixpt_memmgmt::names`).
+    pub(crate) fn names(&self) -> &fixpt_memmgmt::names::Owner {
+        &self.names
+    }
+
+    /// Interned symbol `sym`'s name: its number in the heap's names.
+    #[inline]
+    pub fn symbol_text(&self, sym: Value) -> Option<u32> {
+        self.fixed(sym, 3, 0).text_number()
     }
 
     /// Whether string `o` holds `text`, compared in place.
@@ -2384,8 +2388,6 @@ impl Heap {
         v
     }
 
-    /// Symbol payload: `[name:String, hash, global-slot]`. The global slot is
-    /// allocated eagerly so a global reference is one array index, not a lookup.
     /// `intern` of the name heap string `s` holds: found without making a
     /// string of Rust's, if it is interned already.
     pub fn intern_string(&mut self, s: Value) -> Value {
@@ -2397,26 +2399,32 @@ impl Heap {
         sym
     }
 
+    /// The interned symbol `name`: `[name, hash, global-slot]`, its name
+    /// a text, a name of the heap's own (`fixpt_memmgmt::names`), kept
+    /// once there as long as the heap keeps it; the global slot allocated
+    /// eagerly, so that a global reference is one array index, not a
+    /// lookup.
     pub fn intern(&mut self, name: &str) -> Value {
-        if let Some(&i) = self.symbol_index.get(name) {
+        let n = self.names.intern(name);
+        self.intern_text(n)
+    }
+
+    /// The interned symbol of the heap's name `n`.
+    pub fn intern_text(&mut self, n: u32) -> Value {
+        if let Some(&i) = self.symbol_index.get(&n) {
             return self.table_get(Which::Symbols, i as usize);
         }
-        // An image's, asked for the first time: kept where it is found next.
-        if let Some(i) = self.image_symbol(name) {
-            self.symbol_index.insert(name.to_string(), i);
-            return self.table_get(Which::Symbols, i as usize);
-        }
+        let hash = symbol_hash_of(self.names.get(n).expect("a name of the heap's"));
         // As long as the heap lives: not in a region, which may end.
         let region = self.regions.target.take();
-        let s = self.make_string(name);
         let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
         self.regions.target = region;
-        self.obj_set(sym, 0, s);
-        self.obj_set(sym, 1, Value::fixnum(symbol_hash_of(name)));
+        self.obj_set(sym, 0, Value::text_numbered(n));
+        self.obj_set(sym, 1, Value::fixnum(hash));
         let slot = self.table_push(Which::Globals, Value::UNBOUND, false);
         self.obj_set(sym, 2, Value::fixnum(slot as i64));
         let idx = self.table_push(Which::Symbols, sym, false) as u32;
-        self.symbol_index.insert(name.to_string(), idx);
+        self.symbol_index.insert(n, idx);
         sym
     }
 
@@ -3450,19 +3458,17 @@ impl Heap {
                 at += n;
             }
         }
-        // The interned symbols and their names first in the immutable half,
-        // together: what a load reads of every symbol (its hash, `splice`)
-        // and of many names (jitdebug's) is then on a few pages, not on
-        // most of the half (the front end's: 153 pages, not 1,604). An
+        // The interned symbols first in the immutable half, together: what
+        // a load reads of every symbol (its name's text and its hash,
+        // `splice`) is then on a few pages, not on most of the half (the
+        // front end's, with their names: 153 pages, not 1,604). An
         // object by a reference to it, as `goes` finds it below.
         let mut first = vec![false; objects.len()];
         let object_of = |i: usize| objects.partition_point(|&(at, _, _)| at < i).checked_sub(1);
         for sym in self.table_values(Which::Symbols) {
-            for v in [sym, self.obj_ref(sym, 0)] {
-                let i = v.index() - self.base;
-                if let Some(k) = object_of(i).filter(|&k| objects[k].2 == 0 && i <= objects[k].0 + objects[k].1) {
-                    first[k] = true;
-                }
+            let i = sym.index() - self.base;
+            if let Some(k) = object_of(i).filter(|&k| objects[k].2 == 0 && i <= objects[k].0 + objects[k].1) {
+                first[k] = true;
             }
         }
         // Each object, where it is and where it goes, by where it is.
@@ -3654,7 +3660,7 @@ impl Heap {
             }
         }
         // Its texts by their numbers here, where any is another.
-        let numbers = texts.numbers();
+        let numbers = texts.numbers(&heap);
         if let Some(numbers) = &numbers {
             for &p in &texts.places {
                 let w = match code::part_of(p) {
@@ -3690,8 +3696,8 @@ impl Heap {
         }
         heap.symbol_index = SymbolIndex::with_capacity_and_hasher(heap.symbols.len, Default::default());
         for i in 0..heap.symbols.len {
-            let name = heap.symbol_name(heap.table_get(Which::Symbols, i));
-            heap.symbol_index.insert(name, i as u32);
+            let n = heap.symbol_text(heap.table_get(Which::Symbols, i)).ok_or("an interned symbol named by no text")?;
+            heap.symbol_index.insert(n, i as u32);
         }
         heap.code_stub_found();
         Ok(heap)
@@ -4101,8 +4107,8 @@ fn fnv1a(s: &str) -> u64 {
 #[derive(Default)]
 struct WordHasher(u64);
 
-/// The interned symbols' numbers by name (`Heap::symbol_index`).
-type SymbolIndex = std::collections::HashMap<String, u32, std::hash::BuildHasherDefault<WordHasher>>;
+/// The interned symbols' numbers by their names' texts (`Heap::symbol_index`).
+type SymbolIndex = std::collections::HashMap<u32, u32, std::hash::BuildHasherDefault<WordHasher>>;
 
 impl std::hash::Hasher for WordHasher {
     fn finish(&self) -> u64 {
@@ -4122,6 +4128,9 @@ impl std::hash::Hasher for WordHasher {
     }
     fn write_u64(&mut self, x: u64) {
         self.0 = (self.0 ^ x).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+    fn write_u32(&mut self, x: u32) {
+        self.write_u64(x as u64);
     }
 }
 

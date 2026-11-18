@@ -37,7 +37,6 @@ use crate::HashMap;
 /// A symbol's name and global slot: fields 0 and 2 of 3, before its
 /// trailer and the (empty) suffix it is pointed at (`Heap::alloc`).
 const SYMBOL_NAME: usize = 4;
-const SYMBOL_HASH: usize = 3;
 const SYMBOL_SLOT: usize = 2;
 
 /// Where the image's words go: each of its regions (the live region, the
@@ -136,9 +135,12 @@ impl Heap {
         }
         let moves = Moves { regions };
         // Its texts by their numbers here, where any is another: their
-        // words written, so its code not mapped, which is read-only.
-        let numbers = img.texts.numbers();
-        let map_code = map_code && numbers.is_none();
+        // words written, so its code not mapped, which is read-only, if
+        // any is in its code (none is where symbols alone are named by
+        // texts: their names are in the static area, mapped privately).
+        let numbers = img.texts.numbers(self);
+        let texts_in_code = || img.texts.places.iter().any(|&f| moves.regions[3..].iter().any(|&(from, _, n)| (from..from + n).contains(&f)));
+        let map_code = map_code && (numbers.is_none() || !texts_in_code());
         let sources = [img.words, img.immutable, img.statics, img.code[0].0, img.code[1].0];
         // The static area mapped, in place, rather than copied: the
         // immutable half writable until the splice is done (a symbol's slot
@@ -186,28 +188,36 @@ impl Heap {
         // What stands for objects of the image's, by their values there: not
         // by where they are alone, since a bloblet of no suffix is pointed
         // at one past its fields, where the next object, a pair say, is.
-        let (symbols, globals, image_symbols, mut added) = (self.symbols.len, self.globals.len, self.image_symbols.len(), Vec::new());
+        let (symbols, globals, mut added) = (self.symbols.len, self.globals.len, Vec::new());
         // The image's symbols that are new here, and as many globals: put
         // in the tables (their chunks the tables area's) once the image is
         // in place, nothing made meanwhile.
         let mut new_symbols: Vec<Value> = Vec::new();
         let mut instead: HashMap<u64, Value> = given.iter().map(|&(v, to)| (v.raw(), to)).collect();
         let mut stub = None;
-        // Into a heap of no symbols yet, none of the image's can be one of
-        // this heap's: their names are not read, but looked up by their
-        // hashes when first asked for (`image_symbols`).
-        let fresh = symbols == 0 && self.image_symbols.is_empty();
-        let stub_hash = super::symbol_hash_of("%fx26-foreign-stub");
+        let stub_text = self.names().find("%fx26-foreign-stub");
+        // What is wrong with the image's symbols, if anything: what was
+        // done for them undone, as for any other wrong reference below.
+        let mut bad = None;
         for &s in &img.symbols {
-            let at_s = moves.index(s.index() - ib).ok_or("a symbol outside the image")?;
-            let hash = Value(self.mem.words()[at_s - SYMBOL_HASH]).as_fixnum();
-            let name = if fresh && hash != stub_hash {
-                None
-            } else {
-                let name = moved(Value(self.mem.words()[at_s - SYMBOL_NAME])).ok_or("a symbol's name outside the image")?;
-                Some(self.string_to_rust(name))
+            // The symbol's place here, and its name, a text, by its number
+            // here.
+            let place = moves.index(s.index() - ib).ok_or_else(|| "a symbol outside the image".to_string()).and_then(|at_s| {
+                let name = Value(self.mem.words()[at_s - SYMBOL_NAME]);
+                let name = match &numbers {
+                    Some(m) => crate::image::retext(m, name)?,
+                    None => name,
+                };
+                Ok((at_s, name.text_number().ok_or("an interned symbol of the image's named by no text")?))
+            });
+            let (at_s, n) = match place {
+                Ok(p) => p,
+                Err(why) => {
+                    bad = Some(why);
+                    break;
+                }
             };
-            if name.as_deref() == Some("%fx26-foreign-stub") {
+            if Some(n) == stub_text {
                 let slot = Value(img.word(s.index() - ib - SYMBOL_SLOT)).as_fixnum() as usize;
                 if let Some(old) = img.globals.get(slot).filter(|w| w.is_ref() && in_code_area(w.index() - ib)) {
                     // This heap's stub stands for the image's; else the
@@ -220,7 +230,7 @@ impl Heap {
                     }
                 }
             }
-            if let Some(i) = name.as_deref().and_then(|n| self.symbol_number(n)) {
+            if let Some(&i) = self.symbol_index.get(&n) {
                 let i = i as usize;
                 let sym = if i < symbols { self.table_get(Which::Symbols, i) } else { new_symbols[i - symbols] };
                 instead.insert(s.raw(), sym);
@@ -235,16 +245,17 @@ impl Heap {
                 self.mem.words_mut()[at_s - SYMBOL_SLOT] = w;
             }
             let i = (symbols + new_symbols.len()) as u32;
-            match name {
-                Some(name) if !fresh => {
-                    self.symbol_index.insert(name.clone(), i);
-                    added.push(name);
-                }
-                _ => self.image_symbols.push((hash, i)),
-            }
+            self.symbol_index.insert(n, i);
+            added.push(n);
             new_symbols.push(moved(s).expect("moved above"));
         }
-        self.image_symbols.sort_unstable();
+        if let Some(why) = bad {
+            for n in added {
+                self.symbol_index.remove(&n);
+            }
+            (self.top, self.immutable_top, self.static_top) = (old_top, old_immutable_top, old_static_top);
+            return Err(why);
+        }
 
         // A suffix ref's owner, a bloblet, is by where it is in the image:
         // made when one is first met.
@@ -329,10 +340,9 @@ impl Heap {
         }
         if let Some(why) = unknown.take() {
             // Undone: nothing refers to the words past the top.
-            for name in added {
-                self.symbol_index.remove(&name);
+            for n in added {
+                self.symbol_index.remove(&n);
             }
-            self.image_symbols.truncate(image_symbols);
             (self.top, self.immutable_top, self.static_top) = (old_top, old_immutable_top, old_static_top);
             return Err(why);
         }

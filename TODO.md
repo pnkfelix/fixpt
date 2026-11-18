@@ -7399,6 +7399,20 @@ symbols and storing no names of its own (step 3), and `SymTable` gone
 are never freed, so a text is made only of what lives as long as the
 process already, and no primitive makes one.
 
+Redone under the heap's management (the user's design, 2026-11-17: names
+are heap-managed, the collector freeing a name once nothing holds it).
+Step 1, 84d65d27: `fixpt_memmgmt::names`, a heap's names (`Owner`), read
+as `&str` through it or a `Holder`, freed by a sweep that frees nothing
+held. Step 2, 2026-11-17: an interned symbol's name a name of its heap's
+(`Heap::text`, `text_of`, `intern_text`), the symbol index by its
+number, an image's texts numbered in its own order so a heap holding no
+name yet writes none of their words (the front end, at each run: 31.0 ms
+to 31.7 ms), copying to another heap by text; the process's texts store
+removed. Next: step 3, the `Interner` a `Holder` of its heap's names, a
+`Sym` a name's number checked by its heap's serial, effects printed by
+name, `truncate` letting names go; step 4, `SymTable` gone; step 5, the
+symbols table weak (but symbols with bound globals) and the names sweep.
+
 Step 2 as first done (a4be71eb, reverted, 2026-11-17): an interned
 symbol's name a text of that store, its `symbol_index` by text number.
 Wrong: an interned symbol lives as long as its heap, not the process, and

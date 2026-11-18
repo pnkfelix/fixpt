@@ -4417,6 +4417,21 @@ The user read the paper as supporting the distribution. Mine:
   lives as long as the process; it lives as long as its heap. The store
   per process was chosen on that claim; it holds nothing now.
 
+## A heap's names, its own (2026-11-17)
+
+- **Names in memory of their own, owned by the heap, not heap objects in
+  its words**: a collection moves objects, and any heap code may write a
+  heap word, so a `&str` over one would rest on discipline. The heap frees
+  a name by a sweep that takes it `&mut` and frees none a holder holds, so
+  a `&str` borrowed from the heap or an interner is sound by construction,
+  and the Rust side's call sites stay as they are.
+- **`Rc`, not `Arc`**: a heap and its interners are one thread's, so a
+  name is read with no lock; a heap is no longer `Send`, which nothing
+  needed.
+- **The names index keyed by the name's FNV hash, not hashed again**, one
+  number for a hash, collisions apart: profiled, SipHash on those keys was
+  1.3% of a run, and an entry for each name of a `Vec` page faults.
+
 ## A collection refuses a reference into another heap (2026-11-17)
 
 - **At the collection, before the store**: the one place every reference
