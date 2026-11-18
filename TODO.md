@@ -7348,6 +7348,12 @@ driver says which it needs. And a session's texts placed one after
 another by length (`Session::eval_base`, its REPL's text one), where a
 module file's places are its own from its load's base, whatever the size
 of those before. Each, when a cache of Kayak's needs it.
+Found 2026-11-18 (§294): a place's file number is the FX-26 front end's,
+counted within one handing of forms from 1, where the session's sources
+(`Session::source`, the debugger's lines) and the Rust checker count files
+session-wide: two numberings, which agree only where a session reads its
+files in one handing. One numbering, the same in both parsers and kept by
+a `.fasl` (a table of its files), is what §294's places wait on.
 
 
 ## 291. An instance's macros given on, and a module item's label apart from its binder (found 2026-11-17, building `binding-shapes.md`'s step 4 (c))
@@ -7706,6 +7712,26 @@ three causes, the first fixed, two to discuss.
   `.fasl` read where files were read in another order may name another
   file in a place it reports. §290's kind of number: a `.fasl` would keep
   its places by a table of its own files, renumbered where it is read.
+  Tried 2026-11-18 (the user's way: no renumbering, the `.fasl` a table
+  of the numbers its places use to their files' paths, which a loader
+  registers as its code's source, `crate::sources`, each loaded register
+  word's source set to it; the word's source made four fixed bytes for
+  that), and stopped, not committed (the patch kept, the session's
+  scratchpad `q2-places-wip.patch`). What it found: a place's file number
+  is not the Rust checker's (`files_read`, session-wide) but the front end
+  written in FX-26's, by the files read in one handing of forms, from 1
+  (`syn.rs`'s `LOAD_BASE_STEP * read`): `compile-file other.fx helper.fx`
+  places both files' code in "file 1". So such a table must be made of
+  that handing's own list of files (`syn.rs`), not `Checker::file_paths`;
+  and within one session two files read in different handings may share a
+  number, while its source (`Session::source`) is keyed by the Rust
+  checker's: likely wrong lines in a session already, where its files are
+  read across forms (the jit-lines tests read all in one; not shown yet).
+  And a native `.fasl`'s code is kept as compiled, so no lines are made for
+  it where it is read at all: a place in a `.fasl` matters only where its
+  words are compiled as it is loaded (`--cellular`, or the other
+  convention). Left for §290: one numbering of files for places, the two
+  parsers' the same, before a `.fasl` keeps them.
 
 Measured: `main.fasl` about 505 KB either way (was 5,984,499 bytes
 compiled with `fx26.fx`); `fixpt run ratfink.fx` 0.72 s from it, 0.77 s
@@ -7821,3 +7847,15 @@ To make what a `with` brings into scope obvious, where today a body
    Kayak's compiler, 122 in Kayak's tests. Left to look at apart:
    `include`, which brings a module's names into a module's items, and a
    template's `with`.
+
+## 297. Byte-identical `.fasl`s, for hermetic builds (the user's, 2026-11-18: later, if wanted)
+
+A `.fasl` now says the same thing whatever else its `compile-file`
+compiled (§294: its loads, type and maker), but not in the same bytes:
+numbers of the compiling session's stay in it, the places' files (§290,
+§294) and the image's digest that follows from them. Nothing depends on
+the bytes, so this is not wanted now (the user's: extra complexity and
+overhead not needed yet). It may be the right answer for hermetic or
+reproducible builds: then an option of `compile-file`, or a variable of
+the environment, asking that a `.fasl` hold nothing of its session's,
+each such number made the file's own as it is written.
