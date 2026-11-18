@@ -1655,7 +1655,7 @@ impl Macros {
     fn def_env_of(&self, file: Option<&FileScope>) -> hygiene::DefEnv {
         match file {
             None => self.withs.def_env.clone(),
-            Some(f) => hygiene::DefEnv::File { shared: f.shared, values: Rc::new(f.values.clone()), instance: f.instance },
+            Some(f) => hygiene::DefEnv::File { shared: f.shared, values: Rc::new(f.values.clone()), instance: f.instance, internal: Rc::new(f.internal.clone()) },
         }
     }
 
@@ -1682,7 +1682,7 @@ impl Macros {
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
         let shared = instance.unwrap_or(file.shared);
-        let def_env = hygiene::DefEnv::File { shared, values: Rc::new(file.values.clone()), instance: instance.is_some() };
+        let def_env = hygiene::DefEnv::File { shared, values: Rc::new(file.values.clone()), instance: instance.is_some(), internal: Rc::default() };
         let (key, prefix) = match instance {
             Some(lib) => (format!("{}@{}", file.key, interner.name(lib)), instance_prefix(&file.prefix, interner.name(lib))),
             None => (file.key.clone(), file.prefix.clone()),
@@ -3302,6 +3302,17 @@ impl Macros {
             procedural::Style::Er => procedural::tagged(&at, &self.tag_of(made), interner),
             procedural::Style::Sc => procedural::closed(&at, true, &self.tag_of(made), interner)?,
             procedural::Style::Rsc => procedural::closed(&at, false, &self.tag_of(made), interner)?,
+        };
+        // A name the transformer renamed that is another of its file's
+        // macros: that macro, by the name the importer has it by (Heist's
+        // report, 2026-11-18: else a standard name, `(with #%fx name)`).
+        let opened = match &p.def_env {
+            hygiene::DefEnv::File { internal, .. } if !internal.is_empty() => {
+                let tag = self.tag_of(made);
+                let renames: HashMap<Sym, Sym> = internal.iter().map(|(n, i)| (interner.intern(&procedural::alias(interner.name(*n), &tag)), *i)).collect();
+                renamed_syn(&opened, &renames, interner)
+            }
+            _ => opened,
         };
         let defined: HashSet<String> = self.defined.keys().map(|k| interner.name(*k).to_string()).collect();
         let is_keyword = |n: &str| {

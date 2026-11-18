@@ -32,7 +32,10 @@ use std::rc::Rc;
 pub(crate) enum DefEnv {
     #[default]
     Top,
-    File { shared: Sym, values: Rc<HashSet<Sym>>, instance: bool },
+    /// And, `internal`, each of the file's macros, by its name there, as
+    /// its importer has it (`%syntax:key:name`): what a transformer's
+    /// renamed name that is one means (`Macros::procedural_opened`).
+    File { shared: Sym, values: Rc<HashSet<Sym>>, instance: bool, internal: Rc<HashMap<Sym, Sym>> },
     Within,
 }
 
@@ -155,7 +158,7 @@ impl Macros {
                     // An instance's value, `(with lib name)`, and its name
                     // as a type's module, `(select lib T)` (`InstanceType`):
                     // `lib` the importer's, which nothing at the use captures.
-                    Some(DefEnv::File { shared, values, instance: true }) if free == Free::Toplevel && a.interner.get(base).is_some_and(|v| values.contains(&v)) => {
+                    Some(DefEnv::File { shared, values, instance: true, .. }) if free == Free::Toplevel && a.interner.get(base).is_some_and(|v| values.contains(&v)) => {
                         captured(*shared, Ns::Value, true)?;
                         Made::Of(*shared, base.to_string())
                     }

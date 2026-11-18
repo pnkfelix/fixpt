@@ -15,7 +15,8 @@
         taken? without-load marks for-syntax? for-syntax!
         (type fails file-macro files filter macro macro-env mades names scope syn syns-a marked))
 (define procedural-module (with macros-module procedural-module))
-(import procedural-module phase1-forms-now phase1-forms! def-env-is def-env-now!)
+(import procedural-module phase1-forms-now phase1-forms! def-env-is def-env-now! procedurals
+        (type procedural))
 (define fresh-module (with macros-module fresh-module))
 (import fresh-module file-prefix instance-prefix file-keys-begin! file-keys-end! use-begin! use-end!
         form-begin!)
@@ -262,7 +263,7 @@
         (set marks nil)
         ;; The file's phase-1 forms its own, for its macros alone.
         (phase1-forms! nil)
-        (def-env-now! (tuple kind (extract scope 1) (extract scope 2)))
+        (def-env-now! (tuple kind (extract scope 1) (extract scope 2) (extract scope 4)))
         (let* ((st (define-forms fail forms #f scope fs key (tuple (extract scope 4) nil nil)))
                (own (get defined)) (own-marks (get marks)))
           (begin
@@ -352,7 +353,11 @@
           (begin
             (cond ((null? i) #u)
                   ((> k 0) (set marks (cons (tuple (car i) k) (get marks))))
-                  ((not (null? m)) (set defined (cons (tuple (car i) (car m)) (get defined))))
+                  ((not (null? m))
+                   (begin (set defined (cons (tuple (car i) (car m)) (get defined)))
+                          ;; A procedural one's transformer by that name too
+                          ;; (Heist's report, 2026-11-18).
+                          (procedural-as! (car ns) (car i))))
                   (else #u))
             (by-internal-each (cdr ns) internal))))))
 ;; Of a file's macros, `own`, those by the name the importer has them by.
@@ -417,4 +422,21 @@
     (cond ((null? ms) 0)
           ((symbol=? n (extract (car ms) 1)) (extract (car ms) 2))
           (else (own-mark n (cdr ms))))))
-
+;; Procedural macro `n`'s transformer kept by name `i` too: a file's macro,
+;; by the name its importer has it by (`macros-imports.fx`'s
+;; `by-internal-each`), so that a use by that name runs it, not taken for a
+;; `syntax-rules` macro of no clauses.
+(define procedural-as! (->* (symbol symbol) unit)
+  (lambda (n i)
+    (let ((p (procedural-entry n (get procedurals))))
+      (if (null? p)
+          #u
+          (let ((e (car p)))
+            (set procedurals (cons (tuple i (extract e 2) (extract e 3) (extract e 4) (extract e 5)
+                                          (extract e 6))
+                                   (get procedurals))))))))
+(define procedural-entry (->* (symbol (listof procedural acyclic)) (listof procedural acyclic))
+  (lambda (n ps)
+    (cond ((null? ps) nil)
+          ((symbol=? n (extract (car ps) 1)) (list (car ps)))
+          (else (procedural-entry n (cdr ps))))))

@@ -641,3 +641,38 @@
            (= (extract have 4) (extract want 3))
            (sub? (extract have 1) (extract want 2) nil)
            (sub? (extract want 2) (extract have 1) nil)))))
+
+;; Each of `internal`'s macros, a file's by its name there, that `s`, what
+;; a transformer gave in expansion `tag` (its number), names as renamed: by
+;; the name the importer has it by (`macros-procedural.fx`'s
+;; `expand-procedural`, `Macros::procedural_opened`; Heist's report,
+;; 2026-11-18).
+(define file-macros (->* (syn (listof (tupleof symbol symbol) acyclic) int) syn)
+  (lambda (s internal tag)
+    (if (null? internal)
+        s
+        (tagcase s
+          (atom (d a b x)
+            (if (symbol? d)
+                (let ((i (renamed-macro (symbol->string d) internal tag)))
+                  (if (null? i) s (atom (car i) a b x)))
+                s))
+          (lst (items d a b x)
+            (let ((xs (file-macros-each items internal tag))) (lst xs (syn-datums xs) a b x)))
+          (dotted (items t d a b x)
+            (let ((xs (file-macros-each items internal tag)) (u (file-macros t internal tag)))
+              (dotted xs u (datum-dotted (syn-datums xs) (syn->datum u)) a b x)))
+          (vec (items d a b x) s)))))
+(define file-macros-each (->* (syns-a (listof (tupleof symbol symbol) acyclic) int) syns-a)
+  (lambda (xs internal tag)
+    (if (null? xs)
+        nil
+        (cons (file-macros (car xs) internal tag) (file-macros-each (cdr xs) internal tag)))))
+(define renamed-macro
+  (->* (string (listof (tupleof symbol symbol) acyclic) int) (listof symbol acyclic))
+  (lambda (n internal tag)
+    (cond ((null? internal) nil)
+          ((string=? n (string-append "%~" (tag-of tag) ":"
+                                      (symbol->string (extract (car internal) 1))))
+           (list (extract (car internal) 2)))
+          (else (renamed-macro n (cdr internal) tag)))))

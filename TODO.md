@@ -7887,6 +7887,19 @@ read its file from the working directory: `fixpt run prog/main.fx`, and
 macros, before setting its directory, set for running alone. Now from its
 reading on (`fx26.rs`'s run, `compile_program_file`). Test:
 import_with_syntax.rs (a program's import reads from its directory).
+(4, Heist's `fixpt-macro-imports-2.md`, items 1 and 2) A file's macro whose
+expansion uses another of its file's, a procedural one, imported only by
+the name the importer gives it (`%syntax:key:pw`): in a module file, a
+`syntax-rules` template's use of it was taken by the expander written in
+FX-26 for a `syntax-rules` macro of no clauses, its transformer kept by the
+file's name alone (now by the importer's too, `procedural-as!`); and a
+transformer's renamed name of it (`(rename 'pw)`) was taken for a standard
+name, `(with #%fx pw)`, at a top level and in a module file (now the
+importer's name for it, by the file's macros' map each of its macros'
+environment carries: `DefEnv::File`'s `internal`, `def-env`'s fourth;
+`procedural_opened`, `file-macros`). Test: import_with_syntax.rs (a file's
+macro expanding to its procedural one). Their item 3, the macros of a file
+with module parameters imported of a module parameter, is §300.
 
 ## 299. A stale `.fasl` answered by its caller (the user's, 2026-11-18)
 
@@ -7922,3 +7935,20 @@ session's method taking its text, made a procedure and given to
 mark key around code that checks code (`session-check`, `stage`), each
 staging form's lowering reading it (`first-mark`) and passing it on, in
 every place those forms are handled.
+
+## 300. A module file importing the macros of a module parameter (Heist's `fixpt-macro-imports-2.md`, item 3, 2026-11-18)
+
+Heist's editor: `frame.fx` takes module parameters, and so does each of
+the 7 files that would use a `define-frame-command` macro, each receiving
+`frame.fx`'s instance as a parameter of its own (`(m-frame (load-moduleof
+"frame.fx" …))`). The macro must be `frame.fx`'s (its template names
+`frame-action` and `frame`, which `frame.fx` defines), imported of the
+instance the parameter is: `(import-with-syntax m-frame)`. Refused today,
+as is an instance made at a top level, `((load-module "lib.fx") base)`
+(only `(proj …)` of regions is taken). This is `binding-shapes.md`'s
+"Macros in shapes", Bawden's case: a parameter's declared `moduleof`
+(a `load-moduleof` of a file) names the file, so which macro definitions
+its instance's macros are is known before checking, and a template's free
+names reach the instance through the parameter, `(with m-frame x)`. To
+design (the user's), with Heist's second wish: an instance made at a top
+level, `((load-module "f") m …)`.

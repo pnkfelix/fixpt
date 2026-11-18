@@ -65,8 +65,9 @@
 ;; `%shared:key`, which a binder at a use is kept from capturing. A type of its
 ;; structure, the same in each instance of the expander's files
 ;; (`macros.fx`'s `def-envs`).
-(define-type def-env (tupleof int symbol names))
-(define def-env-top (->* () def-env) (lambda () (tuple 0 'top (the names nil))))
+(define-type def-env (tupleof int symbol names (listof (tupleof symbol symbol) acyclic)))
+(define def-env-top (->* () def-env)
+  (lambda () (tuple 0 'top (the names nil) (the (listof (tupleof symbol symbol) acyclic) nil))))
 (define-type def-envs (listof (tupleof string def-env) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
 ;; by their paths in the template, the last made first; its pattern's

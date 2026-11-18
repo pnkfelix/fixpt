@@ -34,7 +34,8 @@
         (type macro clause clauses def-env def-envs macro-env scopes pvars levels found))
 (import files-module signature-of)
 (import contracts-module contract-renames renamed-use contract-held defined-held syn-same?
-        made-syntax-reset! made-syntax-add! made-syntax-count made-syntax-taken! syntax-held
+        file-macros made-syntax-reset! made-syntax-add! made-syntax-count made-syntax-taken!
+        syntax-held
         (type renames))
 (import types-module fail-at)
 (import match-module same-atom?)
@@ -716,9 +717,10 @@
            (in-use (lambda ((m string))
                     (fail (string-append "a use of `" (symbol->string name) "`: " m) a b)))
            (opened (lambda ((at syn))
-                     (keywords fail (cond ((= style 1) (closed fail at #t made))
-                                          ((= style 2) (closed fail at #f made))
-                                          (else (tagged at made)))))))
+                     (keywords fail (file-macros (cond ((= style 1) (closed fail at #t made))
+                                                       ((= style 2) (closed fail at #f made))
+                                                       (else (tagged at made)))
+                                                 (extract (extract p 3) 4) made)))))
       ;; In the expansion's phase-1 namespace, on the use's datum, the one
       ;; the Rust expander calls it in (`phase1.rs`): what it gives made
       ;; syntax at the use's place, no text between; apart, by text, where
@@ -769,7 +771,7 @@
     (if (null? file)
         (get def-env-now)
         (tuple (if (= (extract (get def-env-now) 1) 3) 3 1) (extract (car file) 1)
-               (extract (car file) 2)))))
+               (extract (car file) 2) (extract (car file) 4)))))
 (define def-env-now (ref def-env rs) (new (def-env-top)))
 (define def-env-is (->* () def-env) (lambda () (get def-env-now)))
 (define def-env-now! (->* (def-env) unit) (lambda (h) (set def-env-now h)))
@@ -782,7 +784,7 @@
   (lambda ()
     (let ((saved (tuple (get defined) (get procedurals) (get def-env-now) (get marks)
                         (get phase1-forms))))
-      (begin (set defined nil) (set procedurals nil) (set def-env-now (tuple 2 'within nil))
+      (begin (set defined nil) (set procedurals nil) (set def-env-now (tuple 2 'within nil nil))
              (set phase1-forms nil)
              (set marks nil)
              saved))))

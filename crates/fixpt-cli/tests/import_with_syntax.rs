@@ -199,3 +199,24 @@ fn a_programs_import_reads_from_its_directory() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A file's macro whose expansion uses another of its file's, a procedural
+/// one, which the importer has only by the name it gives it (Heist's report,
+/// 2026-11-18): a `syntax-rules` template's use of it in a module file (the
+/// expander written in FX-26 took it for a `syntax-rules` macro of no
+/// clauses), and a transformer's renamed name of it, at a program's top
+/// level and in a module file (it was taken for a standard name). Each
+/// expands to the file's macro, on every machine, both checkers agreeing.
+#[test]
+fn a_files_macro_expanding_to_its_procedural_one() {
+    for name in ["main-via-module.fx", "main-via-er.fx", "main-via-er-module.fx"] {
+        for m in MACHINES {
+            let (out, err) = eval(m, name);
+            assert!(out.lines().last().is_some_and(|l| l.starts_with("7 : int")), "{name} on {m}: {out}{err}");
+        }
+        let path = format!("{}/tests/programs/import-with-syntax/{name}", env!("CARGO_MANIFEST_DIR"));
+        let out = Command::new(FIXPT).args(["check", &path]).output().expect("runs");
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains("both checkers agree"), "{name}: {said}{}", String::from_utf8_lossy(&out.stderr));
+    }
+}
