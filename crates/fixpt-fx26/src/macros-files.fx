@@ -209,9 +209,9 @@
 ;; forms `forms`: the last of them, if it is one, `(define %frame:F (let
 ;; (…) (module (define x %fr:x) …)))`, as its name and the values it
 ;; holds; else `'-` and none.
-(define frame-of (->* (syns-a) (tupleof symbol names))
+(define frame-of (->* (syns-a) (tupleof symbol names names))
   (lambda (forms)
-    (cond ((null? forms) (tuple '- (the names nil)))
+    (cond ((null? forms) (tuple '- (the names nil) (the names nil)))
           ((not (null? (cdr forms))) (frame-of (cdr forms)))
           (else
            (let* ((items (proper (car forms)))
@@ -220,18 +220,33 @@
              (if (and (string=? (head-name (car forms)) "define") (> (string-length s) 7)
                       (string=? (substring s 0 7) "%frame:"))
                  (let ((inner (proper (nth items 2))))
-                   (tuple (car named)
-                          (if (< (len inner) 3) nil (frame-held (proper (nth inner 2))))))
-                 (tuple '- (the names nil))))))))
+                   (if (< (len inner) 3)
+                       (tuple (car named) (the names nil) (the names nil))
+                       (tuple (car named) (frame-held (proper (nth inner 2)) "define")
+                              (frame-descs (proper (nth inner 2))))))
+                 (tuple '- (the names nil) (the names nil))))))))
 ;; The values `(module (define x …) …)`, `xs`'s, defines.
-(define frame-held (->* (syns-a) names)
-  (lambda (xs)
+(define frame-held (->* (syns-a string) names)
+  (lambda (xs head)
     (cond ((null? xs) nil)
-          ((string=? (head-name (car xs)) "define")
+          ((string=? (head-name (car xs)) head)
            (let ((items (proper (car xs))))
              (append (if (< (len items) 2) nil (defined-name (nth items 1)))
-                     (frame-held (cdr xs)))))
-          (else (frame-held (cdr xs))))))
+                     (frame-held (cdr xs) head))))
+          (else (frame-held (cdr xs) head)))))
+;; The descriptions the frame's module items `xs` alias, each by its own
+;; name: `(define-type %ft:t t)`'s `t`, `(define-effect (%ft:e …) …)`'s `e`.
+(define frame-descs (->* (syns-a) names)
+  (lambda (xs)
+    (unaliased (append (frame-held xs "define-type") (frame-held xs "define-effect")))))
+(define unaliased (->* (names) names)
+  (lambda (ns)
+    (if (null? ns)
+        nil
+        (let ((s (symbol->string (car ns))))
+          (if (and (> (string-length s) 4) (string=? (substring s 0 4) "%ft:"))
+              (cons (string->symbol (substring s 4 (string-length s))) (unaliased (cdr ns)))
+              (unaliased (cdr ns)))))))
 (define rec-names (->* (syns-a) names)
   (lambda (bs)
     (cond ((null? bs) nil)

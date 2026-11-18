@@ -58,7 +58,7 @@
     (begin (form-begin! s) (made-syntax-taken!) (set program-walk #f) (set heads-on #f)
            (set open nil) (set checking #f))))
 (import imports-module import-file-macros note-load-def! import-in-file file-load-noted raw-files!
-        raw-loaded imported-names
+        raw-loaded imported-names params-loaded
         (type file-loads))
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
         made-syntax-taken! global-now?
@@ -619,7 +619,7 @@
         f
         (let* ((saved (file-scope-begin!))
                (named (fresh-scope-begin! (file-prefix (extract f 7) #f)))
-               (loads (begin (set own-loads nil)
+               (loads (begin (set own-loads nil) (set own-params nil) (set own-hidden #f)
                              (set raw-kept (cons (tuple (extract f 2) (extract f 5))
                                                  (get raw-kept)))))
                (r (prompt parse-tag (begin (set own-out (own-each (extract f 5))) (p-ok nil))
@@ -642,6 +642,10 @@
 (define own-out (ref syns-a rs) (new nil))
 ;; The file's `(define name (load-module "path"))`s so far (`file-loads`).
 (define own-loads (ref file-loads rs) (new nil))
+;; The file's module parameters an instance of a file is given as
+;; (`params-loaded`), and whether the form read is in a `hide`.
+(define own-params (ref file-loads rs) (new nil))
+(define own-hidden (ref bool rs) (new #f))
 ;; Whether forms `xs` import a file's macros (`import-with-syntax`), hidden
 ;; or not.
 (define imports-syntax-in? (->* (syns-a) bool)
@@ -667,18 +671,23 @@
                (made (begin
                       (form-begun! x)
                       (set own-loads (file-load-noted x (get own-loads)))
-                      (cond ((or (form-of? x 'module-parameters) (shape-definition? x)) (list x))
+                      (cond ((form-of? x 'module-parameters)
+                             (begin (set own-params (params-loaded x)) (list x)))
+                            ((shape-definition? x) (list x))
                             ((form-of? x 'import-with-syntax)
-                             (import-in-file pfail-at x (get own-loads) (get loaded)))
+                             (import-in-file pfail-at x (get own-loads) (get loaded)
+                                             (get own-params) (get own-hidden)))
                             ((own-macro? x) (begin (define-macro pfail-at x nil) (list x)))
                             ;; Phase 1's, in force for the file's macros after;
                             ;; kept for an importer's, as its macros are, and
                             ;; no item of its module's (`file-items`).
                             ((for-syntax? x) (begin (for-syntax! pfail-at x) (list x)))
                             ((form-of? x 'hide)
-                             (let ((items (syn-items x "")))
-                               (list (mk-list (cons (car items) (own-each (cdr items)))
-                                              (syn-start x) (syn-end x)))))
+                             (let* ((items (syn-items x ""))
+                                    (inner (begin (set own-hidden #t) (own-each (cdr items)))))
+                               (begin (set own-hidden #f)
+                                      (list (mk-list (cons (car items) inner)
+                                                     (syn-start x) (syn-end x))))))
                             (else (own-expanded (expand-top pfail-at x)))))))
           (append made (own-each (cdr xs)))))))
 (define own-expanded (->* (syns-a) syns-a)

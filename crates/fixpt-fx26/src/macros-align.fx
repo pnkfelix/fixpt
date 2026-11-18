@@ -24,7 +24,7 @@
         unfold-mu addr=? name-in? proper-items desc-word? atm-var atm-rib-of atm-lit
         seq-elem seq-cage? peel ellipsis? ellipsis-of
         (type fails addr entries ring rings bind sty stys named hole atm atms))
-(import nodes-module act-rename act-alias act-module-type act-instance-type
+(import nodes-module act-rename act-alias act-module-type act-instance-type act-frame-type
         act-standard-type act-macro-head act-mark defined macro-of macro? makes-defns?
         makes-top-defns?
         makes-desc? makes k-pair k-nil k-pvar k-binder k-ref k-form k-desc k-seq k-other atom-at

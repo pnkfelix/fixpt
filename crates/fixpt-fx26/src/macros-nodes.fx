@@ -51,6 +51,9 @@
 ;; another of the file's macros, by the name the importer has it by.
 (define-datatype action
   (act-rename addr int) (act-alias) (act-module-type symbol) (act-instance-type symbol)
+  ;; A description a file's frame holds: `(select (with lib frame) %ft:T)`,
+  ;; `lib` an alias if an instance's (`macros.rs`'s `FrameType`).
+  (act-frame-type symbol symbol bool)
   (act-standard-type)
   (act-macro-head symbol)
   ;; A trailmark of a file's a template writes: the name the importer has it by.
@@ -69,11 +72,12 @@
 ;; if it has none). A type of its structure, the same in each instance of
 ;; the expander's files (`macros.fx`'s `def-envs`).
 (define-type def-env
-  (tupleof int symbol names (listof (tupleof symbol symbol) acyclic) symbol names))
+  (tupleof int symbol names (listof (tupleof symbol symbol) acyclic) symbol names
+           names))
 (define def-env-top (->* () def-env)
   (lambda ()
     (tuple 0 'top (the names nil) (the (listof (tupleof symbol symbol) acyclic) nil) '-
-           (the names nil))))
+           (the names nil) (the names nil))))
 (define-type def-envs (listof (tupleof string def-env) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
 ;; by their paths in the template, the last made first; its pattern's
@@ -118,7 +122,7 @@
 ;; it by; the standard names; and its frame, its name and the values it
 ;; holds (`TODO.md` §300). None for a program's own.
 (define-type scope
-  (tupleof symbol names names (listof (tupleof symbol symbol) acyclic) names symbol names))
+  (tupleof symbol names names (listof (tupleof symbol symbol) acyclic) names symbol names names))
 (define-type scopes (listof scope acyclic))
 
 ;; Strings, `xs` sorted onto `out`; and joined, `, ` between.

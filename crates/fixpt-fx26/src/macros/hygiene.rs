@@ -167,9 +167,9 @@ impl Macros {
                         captured(*shared, Ns::Value, true)?;
                         Made::Of(*shared, base.to_string())
                     }
-                    Some(DefEnv::File { shared, instance: true, frame: frame @ Some((f, _)), .. }) if free == Free::Toplevel && a.interner.get(base).is_some_and(|v| super::frame_holds(frame, v)) => {
+                    Some(DefEnv::File { shared, instance: true, frame: frame @ Some(f), .. }) if free == Free::Toplevel && a.interner.get(base).is_some_and(|v| super::frame_holds(frame, v)) => {
                         captured(*shared, Ns::Value, true)?;
-                        Made::Framed(*shared, *f, base.to_string())
+                        Made::Framed(*shared, f.name, base.to_string())
                     }
                     Some(DefEnv::File { shared, instance: true, .. }) if free == Free::Qualified && a.interner.get(base) == Some(*shared) => {
                         captured(*shared, Ns::Value, true)?;
@@ -177,7 +177,7 @@ impl Macros {
                     }
                     Some(DefEnv::File { shared, values, frame, .. }) => match free {
                         Free::Toplevel if a.interner.get(base).is_some_and(|v| values.contains(&v)) => Made::Of(*shared, base.to_string()),
-                        Free::Toplevel if let Some((f, _)) = frame.as_ref().filter(|_| a.interner.get(base).is_some_and(|v| super::frame_holds(frame, v))) => Made::Framed(*shared, *f, base.to_string()),
+                        Free::Toplevel if let Some(f) = frame.as_ref().filter(|_| a.interner.get(base).is_some_and(|v| super::frame_holds(frame, v))) => Made::Framed(*shared, f.name, base.to_string()),
                         Free::Toplevel => Made::Of(fx, base.to_string()),
                         Free::Plain => Made::Plain(base.to_string()),
                         // A file's macro writes its descriptions through

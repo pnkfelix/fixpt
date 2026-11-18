@@ -8008,4 +8008,23 @@ can be reached: a procedural macro's frame keeps every hidden value, a
 shapes keep `%frame:` names (`Macros::own`). Later, if wanted: the frame
 made by the front end written in FX-26 itself, which needs a file whose
 macros are imported expanded and shaped before its importer is (the Rust
-checker's order), not after every file's own expansion. Next: step 3.
+checker's order), not after every file's own expansion.
+
+Built 2026-11-18, step 3, a parameter's macros, and the frame's
+descriptions. `(hide (import-with-syntax m))` of a module parameter `(m
+(load-moduleof "f" …))` defines `f`'s macros as that instance has them
+(`define_file`'s `instance`; FX-26 `import-in-file`'s `ps`, `params-loaded`),
+no `include`; refused outside a `hide`. The frame holds the descriptions too
+(Heist's `lib.fx` names a type its parameter gives it), each by an alias
+of its own, `%ft:T` (a module's `define-type T T` would name itself):
+`(define-type %ft:t t)`, `(define-effect %ft:e e)`, `(define-type (%ft:f
+(p k) …) (f p …))`, its kind read from the definition, the file's own or
+its parameter's file's (`Checker::desc_alias`; an `import`'s `(type t)`
+taken for a type's); a template's name of one is `(select (with lib
+%frame:F) %ft:T)` (`Action::FrameType`; FX-26 `act-frame-type`,
+`frame-selected`). Kept for now (the user's, 2026-11-18, after asking
+whether to forbid a parameter's macros instead; Heist's first wish).
+
+Step 4, an instance made at a top level, `((load-module "f") m …)`, taken
+as `(proj …)`'s is: deferred (the user's, 2026-11-18), as Heist's files
+are module files and it was their lesser wish.

@@ -125,17 +125,25 @@
 ;; file means it, and the rest the `include` of the hidden global every
 ;; load of `lib`'s file is, which `lib` is too, by its name, a module's
 ;; `include` being made before its items (`Checker::file_own_expanded_syn`).
-(define import-in-file (->* (fails syn file-loads files) syns-a)
-  (lambda (fail form ls fs)
+(define import-in-file (->* (fails syn file-loads files file-loads bool) syns-a)
+  (lambda (fail form ls fs ps hidden)
     (let* ((items (proper form)) (a (syn-start form)) (b (syn-end form)))
       (if (not (and (or (= (len items) 2) (= (len items) 3)) (syn-symbol? (nth items 1))))
           (begin (fail-at fail import-usage form) nil)
           (let* ((filter (if (= (len items) 3)
                              (the (listof filter acyclic) (list (name-filter fail (nth items 2))))
                              nil))
-                 (load (load-of-file (syn-symbol (nth items 1)) ls))
+                 (lib (syn-symbol (nth items 1)))
+                 (param (if (null? (load-of-file lib ls)) (load-of-file lib ps) nil))
+                 (load (if (null? param) (load-of-file lib ls) param))
                  (f (if (null? load) nil (read-at (syn-start (car load)) fs))))
             (cond
+              ;; A module parameter's: in a `hide` alone, its macros alone,
+              ;; as that instance has them (`TODO.md` §300, step 3).
+              ((and (not (null? param)) (not hidden))
+               (begin (fail-at fail (param-not-hidden lib) form) nil))
+              ((and (not (null? param)) (not (null? f)))
+               (begin (file-macros-of fail form (car f) filter fs (list lib)) nil))
               ((not (null? (instance-loaded (syn-symbol (nth items 1)) ls)))
                (begin (fail-at fail (instance-in-file (syn-symbol (nth items 1))) form) nil))
               ((null? f) (begin (fail-at fail (not-load (syn-symbol (nth items 1))) form) nil))
@@ -143,6 +151,27 @@
                (include-of (mk-symbol (string-append "%shared:" (extract (car f) 7)) a b) filter
                            (given-names (file-macros-of fail form (car f) filter fs nil))
                            a b))))))))
+;; Why a module parameter's macros are imported in a `hide` alone.
+(define param-not-hidden (->* (symbol) string)
+  (lambda (m)
+    (let ((s (symbol->string m)))
+      (string-append "`" s "` is a module parameter of this file, which no importer of it "
+                     "sees: import its macros in a `hide`, `(hide (import-with-syntax " s "))`"))))
+;; A module file's module parameters given an instance of a file, `(m
+;; (load-moduleof "path" …))`, of its `module-parameters` form `x`,
+;; each with its type, which the driver read the file by where it starts.
+(define params-loaded (->* (syn) file-loads)
+  (lambda (x)
+    (let ((items (proper x))) (if (< (len items) 2) nil (param-loads (proper (nth items 1)))))))
+(define param-loads (->* (syns-a) file-loads)
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (let ((b (proper (car bs))))
+          (if (and (>= (len b) 2) (syn-symbol? (car b))
+                   (string=? (head-name (nth b 1)) "load-moduleof"))
+              (cons (tuple (syn-symbol (car b)) (nth b 1)) (param-loads (cdr bs)))
+              (param-loads (cdr bs)))))))
 ;; Whether a module file's `lib`, of its loads `ls`, is an instance of a file
 ;; with module parameters, whose macros a module file cannot import: its
 ;; values' `include` would be of an item (`Checker::load_in_file`). Its
@@ -242,7 +271,8 @@
                              (car inst)))
                  (frame (frame-of forms))
                  (scope (tuple shared (extract shown 1) (extract shown 2) internal
-                               (get standard-names) (extract frame 1) (extract frame 2))))
+                               (get standard-names) (extract frame 1) (extract frame 2)
+                               (extract frame 3))))
             (define-file in-file forms scope filter fs ikey prefix (if (null? inst) 1 3)
                          (if (null? ms) form (extract (car ms) 1))))))))
 
@@ -265,7 +295,7 @@
         ;; The file's phase-1 forms its own, for its macros alone.
         (phase1-forms! nil)
         (def-env-now! (tuple kind (extract scope 1) (extract scope 2) (extract scope 4)
-                            (extract scope 6) (extract scope 7)))
+                            (extract scope 6) (extract scope 7) (extract scope 8)))
         (let* ((st (define-forms fail forms #f scope fs key (tuple (extract scope 4) nil nil)))
                (own (get defined)) (own-marks (get marks)))
           (begin
@@ -302,7 +332,7 @@
          (let ((ns (define-macro fail x (list (tuple (extract scope 1) (extract scope 2)
                                                     (extract scope 3) internal
                                                     (extract scope 5) (extract scope 6)
-                                                    (extract scope 7))))))
+                                                    (extract scope 7) (extract scope 8))))))
            (begin (by-internal-each ns internal)
                   (tuple internal (onto-mades ns h made) ls))))
         ((imports-syntax? x)

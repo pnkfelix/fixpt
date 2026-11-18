@@ -264,11 +264,13 @@ fn a_module_files_frame_holds_what_its_macros_may_reach() {
 /// procedural transformer that passes `rename` to a helper, which renames
 /// it (what a name means is the renaming's own, wherever it is called); and
 /// a hidden value of a standard binding's name, which is the file's, not
-/// the standard one (it was taken for the standard one). On every machine,
+/// the standard one (it was taken for the standard one); a type it hides,
+/// by its alias in the frame, `%ft:name`. On every machine,
 /// both checkers agreeing.
 #[test]
 fn a_files_macro_reaches_what_the_file_hides() {
-    for (name, want) in [("main-frame-rules.fx", "42 : int"), ("main-frame-er.fx", "5 : int"), ("main-frame-shadow.fx", "99 : int")] {
+    let cases = [("main-frame-rules.fx", "42 : int"), ("main-frame-er.fx", "5 : int"), ("main-frame-shadow.fx", "99 : int"), ("main-frame-type.fx", "6 : int")];
+    for (name, want) in cases {
         for m in MACHINES {
             let (out, err) = eval(m, name);
             assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");
@@ -278,4 +280,40 @@ fn a_files_macro_reaches_what_the_file_hides() {
         let said = String::from_utf8_lossy(&out.stdout);
         assert!(said.contains("both checkers agree"), "{name}: {said}{}", String::from_utf8_lossy(&out.stderr));
     }
+}
+
+/// A module parameter's macros, `(hide (import-with-syntax m))` (Heist's
+/// report, 2026-11-18, item 3; `TODO.md` §300, step 3): `m` given an
+/// instance of a file with module parameters, `(load-moduleof "lib.fx"
+/// m-base)`, its macros meaning that instance's names: a type its
+/// parameter gives it, and a value it hides, through its frame. On every
+/// machine, both checkers agreeing; from `.fasl`s too. Not in a `hide`:
+/// refused, as no importer of the file sees its parameter.
+#[test]
+fn a_module_parameters_macros_are_imported_in_a_hide() {
+    for m in MACHINES {
+        let (out, err) = eval(m, "param/main-param.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("11 : int")), "on {m}: {out}{err}");
+    }
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/import-with-syntax/param");
+    let out = Command::new(FIXPT).args(["check", "main-param.fx"]).current_dir(&from).output().expect("runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("both checkers agree"), "{said}{}", String::from_utf8_lossy(&out.stderr));
+    let (out, err) = eval("rs-scheme-vm", "param/main-shown.fx");
+    assert!(err.contains("`m-lib` is a module parameter of this file, which no importer of it sees"), "{out}{err}");
+    // From `.fasl`s, copied, as they are written beside their files.
+    let dir = std::env::temp_dir().join(format!("fixpt-iws-param-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("made");
+    for name in ["base.fx", "lib.fx", "user-param.fx", "main-param.fx"] {
+        std::fs::copy(from.join(name), dir.join(name)).expect("copied");
+    }
+    for name in ["base.fx", "lib.fx", "user-param.fx"] {
+        let out = Command::new(FIXPT).args(["compile-file", name]).current_dir(&dir).output().expect("runs");
+        assert!(out.status.success(), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let out = Command::new(FIXPT).args(["check", "main-param.fx"]).current_dir(&dir).output().expect("runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("both checkers agree") && said.contains("int ! (read (globals user))"), "{said}{}", String::from_utf8_lossy(&out.stderr));
+    let _ = std::fs::remove_dir_all(&dir);
 }

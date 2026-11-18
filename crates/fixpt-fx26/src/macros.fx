@@ -39,7 +39,7 @@
 (import align-module defined macro-of macro? makes-defns? makes-top-defns? makes-desc? nodes-reset!
         align node-export node-imports node-syn node-path node-core node-kids pvar-of pvar? nnodes
         act-rename act-alias seq-depths def-env-top env-empty env-levels
-        act-module-type act-instance-type act-standard-type under
+        act-module-type act-instance-type act-frame-type act-standard-type under
         act-macro-head act-mark atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
         node-hole s-typed name-kind? heads heads-on uses-syntax-macro?
         (type action actions clause clauses macro macro-env scope scopes pinfo pvars
@@ -53,7 +53,7 @@
         phase1-state-now phase1-state! phase1-none? for-syntax!
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias alias-base respanned in-expansion use-entered?
-        use-left! (type phase1-state)
+        use-left! frame-selected (type phase1-state)
         chain-begun! checked-uses trust-if! use-aligned! procedural-expanded made-syntax-reset!
         made-syntax-add! made-syntax-count made-syntax-taken! syntax-held)
 (import infer-module (type unsigned unsigneds))
@@ -335,6 +335,9 @@
                              (list (if (= (extract (def-env-of-file file) 1) 3)
                                        (act-instance-type (extract (car file) 1))
                                        (act-module-type (extract (car file) 1)))))
+                            ((name-in? n (extract (car file) 8))
+                             (list (act-frame-type (extract (car file) 1) (extract (car file) 6)
+                                                   (= (extract (def-env-of-file file) 1) 3))))
                             (else (list (act-standard-type)))))
           ((or (null? file) (name-in? n (extract (car file) 2)) (name-in? n (extract (car file) 7))
                (name-in? n (extract (car file) 5)))
@@ -786,9 +789,11 @@
                         (act-standard-type () "#%fx")
                         (act-module-type (m) (symbol->string m))
                         (act-instance-type (m) (alias (symbol->string m) made))
-                        (else y "")))))
+                        (else y ""))))
+           (framed (frame-selected act t made)))
       (cond
         ((not (string=? typed "")) (selected (string->symbol typed) t made))
+        ((not (null? framed)) (car framed))
         ((syn-symbol? t)
          (let* ((a (source-key ta made)) (b (source-key tb made)))
            (transcribe-name c t (syn-symbol t) a b act bs made)))

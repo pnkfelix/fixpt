@@ -774,6 +774,9 @@ impl Checker {
         if !any {
             return None;
         }
+        // Each description it hides, and what its parameters bring, with
+        // the item that aliases it in the frame (`desc_alias`).
+        let mut descs: Vec<(String, String)> = hidden.iter().flat_map(|x| self.desc_alias(x)).collect();
         let mut bound: Vec<String> = Vec::new();
         for x in &hidden {
             let parts = x.list().unwrap_or_default();
@@ -804,6 +807,7 @@ impl Checker {
                     let key = crate::macros::shapes::load_key(dir, &p, input).1;
                     let vals = self.macros.file_module_values(&key)?;
                     bound.extend(vals.into_iter().map(|n| self.interner.name(n).to_string()));
+                    descs.extend(self.macros.desc_aliases(&key)?.iter().cloned());
                 }
                 (Some("moduleof"), _) => {
                     for e in &parts[1..] {
@@ -822,12 +826,69 @@ impl Checker {
                 kept.push(n);
             }
         }
-        if kept.is_empty() {
+        let mut aliases: Vec<String> = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
+        for (n, alias) in descs {
+            if !n.starts_with('%') && (procedural || written.contains(&n)) && !seen.contains(&n) {
+                seen.push(n);
+                aliases.push(alias);
+            }
+        }
+        if kept.is_empty() && aliases.is_empty() {
             return None;
         }
         let binds: Vec<String> = kept.iter().map(|n| format!("(%fr:{n} {n})")).collect();
-        let defs: Vec<String> = kept.iter().map(|n| format!("(define {n} %fr:{n})")).collect();
+        let defs: Vec<String> = kept.iter().map(|n| format!("(define {n} %fr:{n})")).chain(aliases).collect();
         Some(format!("(define {} (let ({}) (module {})))", crate::macros::shapes::frame_name(text), binds.join(" "), defs.join(" ")))
+    }
+
+    /// The descriptions module file forms `forms` show (each form as the
+    /// parser reads it, a `define-datatype`'s and an `import`'s expanded),
+    /// each with its alias in a frame (`desc_alias`).
+    fn desc_aliases_shown(&mut self, forms: &[Syn]) -> Vec<(String, String)> {
+        let mut shown = Vec::new();
+        for f in forms {
+            let h = f.head_sym().map(|h| self.interner.name(h).to_string());
+            if !matches!(h.as_deref(), Some("hide" | "module-parameters")) && syntax_names(f, &self.interner).is_none() {
+                let _ = self.expand_datatype(*f, &mut shown);
+            }
+        }
+        shown.iter().flat_map(|x| self.desc_alias(x)).collect()
+    }
+
+    /// The description definition `x` defines, if it is one, with the item
+    /// that aliases it in a frame (`TODO.md` §300), named `%ft:name` (a
+    /// module's `define-type` names itself): `(define-type %ft:t t)`, of a
+    /// type; `(define-effect %ft:e e)`, of an effect; and of a function of
+    /// descriptions, `(define-type (%ft:f (p k) …) (f p …))`. An
+    /// `import`'s `(type t)` is taken for a type's.
+    fn desc_alias(&self, x: &Syn) -> Option<(String, String)> {
+        let parts = x.list()?;
+        let head = parts.first()?.sym().map(|h| self.interner.name(h).to_string())?;
+        let (define, target) = match head.as_str() {
+            "define-type" | "define-generative" => ("define-type", parts.get(1)?),
+            "define-effect" => ("define-effect", parts.get(1)?),
+            _ => return None,
+        };
+        // Its parameters: `(name (p k) …)`'s, or a `dlambda`'s.
+        let (n, params): (Sym, Vec<Syn>) = match (target.sym(), target.list()) {
+            (Some(n), _) => {
+                let dl = parts.get(2).and_then(|d| d.list()).filter(|l| l.first().and_then(|h| h.sym()).is_some_and(|h| self.interner.name(h) == "dlambda"));
+                (n, dl.and_then(|l| l.get(1).and_then(|ps| ps.list())).unwrap_or_default())
+            }
+            (None, Some(l)) => (l.first()?.sym()?, l[1..].to_vec()),
+            _ => return None,
+        };
+        let n = self.interner.name(n).to_string();
+        if params.is_empty() {
+            return Some((n.clone(), format!("({define} %ft:{n} {n})")));
+        }
+        let mut names = Vec::new();
+        for p in &params {
+            names.push(self.interner.name(p.list()?.first()?.sym()?).to_string());
+        }
+        let ps: Vec<String> = params.iter().map(|p| p.written(&self.interner)).collect();
+        Some((n.clone(), format!("({define} (%ft:{n} {}) ({n} {}))", ps.join(" "), names.join(" "))))
     }
 
     /// Module file `at`'s forms, `forms`, of text `text`, with its frame
@@ -1034,6 +1095,8 @@ impl Checker {
                 }
                 c.file_shapes_of(loads, sub.clone());
                 let forms = c.framed(&at, &text, forms, None);
+                let aliases = c.desc_aliases_shown(&forms);
+                c.macros.keep_desc_aliases(key.clone(), aliases);
                 let mut macros = std::mem::take(&mut c.macros);
                 let mut interner = std::mem::take(&mut c.interner);
                 let _ = macros.file_shaped(key, &forms, input, sub, &mut interner);
@@ -1106,6 +1169,23 @@ impl Checker {
         let dir = at.and_then(|a| a.parent()).map(|d| d.to_path_buf()).or_else(|| self.base_dir.clone());
         let mut loads: fixpt_hash::HashMap<Sym, (String, bool)> = fixpt_hash::HashMap::default();
         let mut read: fixpt_hash::HashMap<(usize, usize), Imported> = fixpt_hash::HashMap::default();
+        // Its module parameters an instance of a file is given as, `(m
+        // (load-moduleof "path" …))`, by name: whose macros a `(hide
+        // (import-with-syntax m))` imports, as that instance has them.
+        let params: fixpt_hash::HashMap<Sym, String> = forms
+            .first()
+            .and_then(|f| crate::parse::module_parameters_of(f, &self.interner))
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|b| {
+                let listed = b.list();
+                let [m, t, ..] = listed.as_deref()? else { return None };
+                let parts = t.list()?;
+                (parts.first()?.sym().map(|h| self.interner.name(h)) == Some("load-moduleof")).then_some(())?;
+                let V::Str(p) = parts.get(1)?.view() else { return None };
+                Some((m.sym()?, p))
+            })
+            .collect();
         for (i, f) in forms.iter().enumerate() {
             let items: Vec<(usize, Syn)> = if kinds[i] == 2 { f.list().unwrap_or_default()[1..].iter().enumerate().map(|(j, x)| (j + 1, *x)).collect() } else { vec![(0, *f)] };
             for (j, x) in items {
@@ -1116,9 +1196,20 @@ impl Checker {
                     };
                 }
                 if let Some((lib, filter)) = self.import_with_syntax(&x)? {
+                    if let Some(path) = params.get(&lib).filter(|_| !loads.contains_key(&lib)) {
+                        // Not given on: the parameter is this file's, which
+                        // no importer of it sees (§291's re-export).
+                        if j == 0 {
+                            let m = self.interner.name(lib);
+                            return Err(FxError::at(x.span(), format!("`{m}` is a module parameter of this file, which no importer of it sees: import its macros in a `hide`, `(hide (import-with-syntax {m}))`")));
+                        }
+                        let file = self.file_macros_at(x.span(), path, dir.clone(), true)?;
+                        read.insert((i, j), Imported { file, filter, instance: Some(lib) });
+                        continue;
+                    }
                     let path = self.load_in_file(&x, lib, &loads)?;
                     let file = self.file_macros_at(x.span(), &path, dir.clone(), false)?;
-                    read.insert((i, j), Imported { file, filter });
+                    read.insert((i, j), Imported { file, filter, instance: None });
                 }
             }
         }
@@ -1138,7 +1229,12 @@ impl Checker {
             // the rest, if any.
             let imported = |m: &mut crate::macros::Macros, f: &Syn, i: &Imported, out: &mut Vec<Syn>, interner: &mut fixpt_read::Interner| -> R<()> {
                 let taken = |n: Sym| i.filter.as_ref().is_none_or(|(only, names)| names.iter().any(|(x, _)| *x == n) == *only);
-                let given = m.define_file(&i.file, None, &is_standard, &taken, crate::heap_syn::at_of(f.span()), interner)?;
+                let given = m.define_file(&i.file, i.instance, &is_standard, &taken, crate::heap_syn::at_of(f.span()), interner)?;
+                // A module parameter's: its macros alone, its values seen
+                // as the parameter's declaration says.
+                if i.instance.is_some() {
+                    return Ok(());
+                }
                 let given: fixpt_hash::HashSet<Sym> = given.into_iter().map(|(n, _)| n).collect();
                 // A module's `include` is made before its items, so of the
                 // hidden global every load of `lib`'s file is, which `lib`
@@ -1419,9 +1515,10 @@ impl Checker {
         let (values, types) = self.names_shown(&shown);
         // Its frame, as the checker made it where the file's shape was found.
         self.file_shapes_of(vec![(path.to_string(), false)], dir);
-        let frame = crate::syn::frame_of(&at, &text).and_then(|f| crate::macros::shapes::frame_names(&f)).map(|(n, kept)| {
-            let kept: fixpt_hash::HashSet<Sym> = kept.iter().map(|k| self.interner.intern(k)).collect();
-            (self.interner.intern(&n), Rc::new(kept))
+        let frame = crate::syn::frame_of(&at, &text).and_then(|f| crate::macros::shapes::frame_names(&f)).map(|(n, vals, descs)| {
+            let mut set = |xs: Vec<String>| xs.iter().map(|k| self.interner.intern(k)).collect::<fixpt_hash::HashSet<Sym>>();
+            let (values, descs) = (set(vals), set(descs));
+            Rc::new(crate::macros::FrameOf { name: self.interner.intern(&n), values, descs })
         });
         let shared = self.interner.intern(&format!("%shared:{key}"));
         let text: std::sync::Arc<str> = text.as_str().into();
@@ -3019,6 +3116,9 @@ fn gotten(forms: &[Form]) -> Vec<Syn> {
 struct Imported {
     file: Rc<crate::macros::FileMacros>,
     filter: Option<(bool, Vec<(Sym, Span)>)>,
+    /// The module parameter whose macros these are, an instance of the file
+    /// (`TODO.md` §300, step 3): its macros alone, no `include`.
+    instance: Option<Sym>,
 }
 
 /// The `include` that gives the rest of what `(import-with-syntax lib …)`

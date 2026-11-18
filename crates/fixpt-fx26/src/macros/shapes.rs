@@ -138,6 +138,9 @@ pub(crate) struct Known {
     /// Each file's forms as they were read for its shape, by its path, for
     /// the parser to take rather than read the file again.
     read: HashMap<String, (String, Vec<Kept>)>,
+    /// Each file's shown descriptions, by its key, each with the item that
+    /// is a frame's alias of it (`Checker::desc_alias`).
+    desc_aliases: HashMap<String, Vec<(String, String)>>,
     /// Each top-level form before and after its shapes were written, if
     /// they are kept (`Checker::keep_shapes_seen`).
     seen: Option<Vec<(String, String)>>,
@@ -252,8 +255,9 @@ pub(crate) fn load_key(dir: Option<&std::path::Path>, path: &str, input: bool) -
 }
 
 /// The frame named in `frame`, a frame's text (`Checker::frame_text`):
-/// its name, and the names it keeps, in order.
-pub(crate) fn frame_names(frame: &str) -> Option<(String, Vec<String>)> {
+/// its name, the values it keeps, and the descriptions, by their own names
+/// (each kept as `%ft:name`).
+pub(crate) fn frame_names(frame: &str) -> Option<(String, Vec<String>, Vec<String>)> {
     use fixpt_read::Datum;
     let mut interner = Interner::new();
     let mut sources = fixpt_read::SourceMap::default();
@@ -269,7 +273,19 @@ pub(crate) fn frame_names(frame: &str) -> Option<(String, Vec<String>)> {
     let def = items(&read.first()?.datum);
     let n = name(&def.get(1)?.datum)?;
     let module = items(&items(&def.get(2)?.datum).get(2)?.datum);
-    Some((n, module[1..].iter().filter_map(|d| items(&d.datum).get(1).and_then(|x| name(&x.datum))).collect()))
+    let (mut vals, mut descs) = (Vec::new(), Vec::new());
+    for d in &module[1..] {
+        let parts = items(&d.datum);
+        let head = parts.first().and_then(|h| name(&h.datum));
+        // A description's alias names it `%ft:name`, or `(%ft:name (p k) …)`.
+        let named = parts.get(1).and_then(|x| name(&x.datum).or_else(|| items(&x.datum).first().and_then(|y| name(&y.datum))));
+        match (head.as_deref(), named) {
+            (Some("define"), Some(x)) => vals.push(x),
+            (Some("define-type" | "define-effect"), Some(x)) => descs.extend(x.strip_prefix("%ft:").map(str::to_string)),
+            _ => {}
+        }
+    }
+    Some((n, vals, descs))
 }
 
 /// The name of the frame of the module file of text `text`
@@ -1114,6 +1130,17 @@ impl Macros {
         let kept = walked.written.into_iter().map(|(p, s)| (p, s.map(Kept::new))).collect();
         self.withs.shapes.files.insert(key, FileShape { value, module, written: Some(Rc::new(kept)) });
         Ok(())
+    }
+
+    /// The aliases of the descriptions the file of key `key` shows
+    /// (`Checker::desc_alias`), if they are known.
+    pub(crate) fn desc_aliases(&self, key: &str) -> Option<&[(String, String)]> {
+        self.withs.shapes.desc_aliases.get(key).map(Vec::as_slice)
+    }
+
+    /// Keep the aliases of the descriptions the file of key `key` shows.
+    pub(crate) fn keep_desc_aliases(&mut self, key: String, aliases: Vec<(String, String)>) {
+        self.withs.shapes.desc_aliases.insert(key, aliases);
     }
 
     /// The names of the values the module of the file of key `key` (`load_key`)

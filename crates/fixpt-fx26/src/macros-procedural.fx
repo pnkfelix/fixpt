@@ -31,7 +31,9 @@
 (import align-module macro? defined def-env-top align node-syn node-kids nnodes makes pvar? split
         nth k-form nodes-reset! node-core node-hole env-empty env-levels lv-rib lv-earlier k-pvar
         k-binder k-ref program-walk
-        (type macro clause clauses def-env def-envs macro-env scopes pvars levels found))
+        act-frame-type (type macro clause clauses def-env def-envs macro-env scopes pvars levels
+                             found action))
+(import scopes-module list-at)
 (import files-module signature-of)
 (import contracts-module contract-renames renamed-use contract-held defined-held syn-same?
         file-macros made-syntax-reset! made-syntax-add! made-syntax-count made-syntax-taken!
@@ -772,7 +774,7 @@
         (get def-env-now)
         (tuple (if (= (extract (get def-env-now) 1) 3) 3 1) (extract (car file) 1)
                (extract (car file) 2) (extract (car file) 4) (extract (car file) 6)
-               (extract (car file) 7)))))
+               (extract (car file) 7) (extract (car file) 8)))))
 (define def-env-now (ref def-env rs) (new (def-env-top)))
 (define def-env-is (->* () def-env) (lambda () (get def-env-now)))
 (define def-env-now! (->* (def-env) unit) (lambda (h) (set def-env-now h)))
@@ -786,7 +788,7 @@
     (let ((saved (tuple (get defined) (get procedurals) (get def-env-now) (get marks)
                         (get phase1-forms))))
       (begin (set defined nil) (set procedurals nil)
-             (set def-env-now (tuple 2 'within nil nil '- nil))
+             (set def-env-now (tuple 2 'within nil nil '- nil nil))
              (set phase1-forms nil)
              (set marks nil)
              saved))))
@@ -831,6 +833,20 @@
         (vec (items d c e x)
           (let* ((xs (each-in items made)) (b (source-key e made))) (vec xs d a b made)))
         (atom (d c e x) (atom d a (source-key e made) made))))))
+;; `t`, a description a file's frame holds (`act`): `(select (with lib frame) %ft:t)`.
+(define frame-selected (->* ((listof action acyclic) syn int) (listof syn acyclic))
+  (lambda (act t made)
+    (if (or (null? act) (not (syn-symbol? t)))
+        nil
+        (tagcase (car act)
+          (act-frame-type (m f i)
+            (let* ((a (source-key (syn-start t) made)) (b (source-key (syn-end t) made))
+                   (at (lambda ((s symbol)) (atom s a b made)))
+                   (lib (at (if i (string->symbol (alias (symbol->string m) made)) m)))
+                   (w (list-at a b made (list (at 'with) lib (at f)) nil))
+                   (ft (at (string->symbol (string-append "%ft:" (syn-name t))))))
+              (list (list-at a b made (list (at 'select) w ft) nil))))
+          (else y nil)))))
 (define each-in (->* (syns-a int) syns-a)
   (lambda (xs made)
     (if (null? xs) nil (cons (in-expansion (car xs) made) (each-in (cdr xs) made)))))

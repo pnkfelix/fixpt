@@ -497,6 +497,10 @@ enum Action {
     /// (`binding-shapes.md`, step 4 (c)): `(select lib T)`, `lib` an alias,
     /// so that a binder at the use is kept from capturing it (`hygiene`).
     InstanceType(Sym),
+    /// A description a file's frame holds (`TODO.md` §300): `(select (with
+    /// lib frame) %ft:T)`, `lib` the file's module, an alias if it is an
+    /// instance's, as `InstanceType`'s.
+    FrameType(Sym, Sym, bool),
     StandardType,
     MacroHead(Sym),
     /// A trailmark of a file's, written by a template: the name the
@@ -521,13 +525,26 @@ pub struct FileScope<'a> {
 }
 
 /// A module file's frame (`TODO.md` §300; `Checker::frame_text`), if it
-/// has one: its member's name, and the values it holds, which the file does
-/// not show and its macros' expansions may reach, through it.
-pub type Frame = Option<(Sym, Rc<HashSet<Sym>>)>;
+/// has one: its member's name, and the values and the descriptions it
+/// holds, which the file does not show and its macros' expansions may
+/// reach, through it (a description by its alias there, `%ft:name`).
+pub type Frame = Option<Rc<FrameOf>>;
 
-/// Whether frame `frame` holds `n`.
+#[derive(Debug)]
+pub struct FrameOf {
+    pub name: Sym,
+    pub values: HashSet<Sym>,
+    pub descs: HashSet<Sym>,
+}
+
+/// Whether frame `frame` holds value `n`.
 pub(crate) fn frame_holds(frame: &Frame, n: Sym) -> bool {
-    frame.as_ref().is_some_and(|(_, kept)| kept.contains(&n))
+    frame.as_ref().is_some_and(|f| f.values.contains(&n))
+}
+
+/// Whether frame `frame` holds description `n`.
+pub(crate) fn frame_holds_desc(frame: &Frame, n: Sym) -> bool {
+    frame.as_ref().is_some_and(|f| f.descs.contains(&n))
 }
 
 /// What `import-with-syntax` of a file reads of it, in order
@@ -2323,6 +2340,7 @@ impl Macros {
                         // and a use's parts in it are left as they are.
                         (None, Free::Qualified, Some(f)) if f.types.contains(n) && f.instance => Action::InstanceType(f.shared),
                         (None, Free::Qualified, Some(f)) if f.types.contains(n) => Action::ModuleType(f.shared),
+                        (None, Free::Qualified, Some(f)) if frame_holds_desc(&f.frame, *n) => Action::FrameType(f.shared, f.frame.as_ref().map(|r| r.name).expect("a frame"), f.instance),
                         (None, Free::Qualified, Some(_)) => Action::StandardType,
                         (None, Free::Toplevel, None) => Action::Alias,
                         (None, Free::Toplevel, Some(f)) if f.values.contains(n) || frame_holds(&f.frame, *n) || (f.is_standard)(*n) => Action::Alias,
@@ -3359,6 +3377,13 @@ impl Macros {
         };
         if let Some(m) = typed {
             return Ok(selected(m, t, made, interner));
+        }
+        if let (Some(Action::FrameType(m, frame, instance)), Some(n)) = (c.actions.get(&path), t.sym()) {
+            let m = if *instance { interner.intern(&procedural::alias(interner.name(*m), &self.tag_of(made))) } else { *m };
+            let (select, with) = (interner.intern("select"), interner.intern("with"));
+            let alias = interner.intern(&format!("%ft:{}", interner.name(n)));
+            let module = Syn::lst(at, vec![Syn::symbol(at, with, interner), Syn::symbol(at, m, interner), Syn::symbol(at, *frame, interner)]);
+            return Ok(Syn::lst(at, vec![Syn::symbol(at, select, interner), module, Syn::symbol(at, alias, interner)]));
         }
         match &t.view() {
             V::Symbol(n) => {
