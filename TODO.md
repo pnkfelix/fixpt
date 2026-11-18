@@ -7542,9 +7542,14 @@ the user, 2026-11-17:
   is made the first time it crosses to Rust, the table traced as roots,
   and released when the session drops its forms.
 - **Round trips (Chez's `#{pretty unique}`).** By default no unique name
-  is made: `write` gives `#{pretty}`, one `read` of a datum makes one
-  gensym of each, an image's gensyms are its own, and each load or read
-  makes new ones, so no gensym of one run is ever taken for another's.
+  is made: `write` gives `#{pretty}`, `pretty` its printed name alone,
+  no identity. Sharing within a datum by datum labels (the user's,
+  2026-11-18): a gensym written more than once is `#1=#{pretty}` first
+  and `#1#` after; one written once, `#{pretty}`. Each `#{pretty}` read
+  makes a new gensym, none found by its spelling: two gensyms of one
+  printed name (two expansions' renames of one `x` under one tag) stay
+  two. An image's gensyms are its own, and each load or read makes new
+  ones, so no gensym of one run is ever taken for another's.
   Identity across runs is opted into: a build key (base a hash of the
   runtime's identity and the key; distinct keys the build's duty) or
   random (128 bits from the system, once a process; no time, no machine).
