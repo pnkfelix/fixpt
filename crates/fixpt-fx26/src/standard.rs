@@ -350,6 +350,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("read-symlink", "(subr (io fs-read) (string) (sumof (target string) (failed io-error)))"),
     ("get-environment-variable", "(subr (io env-read) (string) (sumof (value string) (unset unit) (not-text unit)))"),
     ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
+    ("write-file-unflushed", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
     // The heap dumped, and the procedure a resumed run starts by calling
     // (`fixpt resume`, `TODO.md` §189). It is not called here, so its
     // effect is none of this one's.

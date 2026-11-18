@@ -89,6 +89,26 @@ fn files_written_listed_and_read() {
     }
 }
 
+/// `write-file-unflushed` (Kayak's, 2026-11-18), in a directory of each
+/// machine's own: a file written long, then short, reads back the short
+/// alone, no file of its left beside it; one in a directory that is not
+/// there `not-found`.
+#[test]
+fn a_file_replaced_unflushed() {
+    let path = format!("{}/tests/programs/io/files-unflushed.fx", env!("CARGO_MANIFEST_DIR"));
+    for m in MACHINES {
+        let dir = std::env::temp_dir().join(format!("fixpt-io-unflushed-{m}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let out = output(Command::new(FIXPT).args(["--fx26-machine", m, "run", &path]).current_dir(&dir).stdin(Stdio::null()));
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert_eq!((out.status.code(), stdout.as_ref()), (Some(7), "short\n"), "{m}: {stderr}");
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        assert_eq!(left, ["c.txt"], "{m}");
+        std::fs::remove_dir_all(&dir).expect("removed");
+    }
+}
+
 /// Files (Heist's `FIXPT-CHANGES.md` F5), in a directory of each
 /// machine's own: what each path is, a link not followed, and a link's
 /// target.

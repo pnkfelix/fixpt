@@ -489,6 +489,7 @@
          (else "")))
       ((20)
        (case n
+         (("write-file-unflushed") "%fx26-write-file-unflushed")
          (("datum-bytevector-ref") "bytevector-u8-ref")
          (("set-register-twin-at") "%set-register-twin")
          (else "")))

@@ -1600,7 +1600,7 @@ prims! {
         let path = get_string(rt, a[0])?;
         let n = bytevector_in(rt, a[1])?;
         let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[1], i)).collect();
-        let r = crate::world::replace_file(&path, &bytes);
+        let r = crate::world::replace_file(&path, &bytes, crate::world::Flush::Durable);
         Ok(fx26_io_result(rt, r))
     });
     // The standard input (stage 5): a line, the end, or a failure.
@@ -3411,6 +3411,16 @@ prims! {
             Ok(v) => Ok(v),
             Err(why) => rt.fail(&format!("a transformer's call: {why}"), &[]),
         }
+    });
+    // `write-file`, nothing flushed to the disk before the rename (Kayak's,
+    // 2026-11-18): atomic, not durable. Last, so that no primitive's number
+    // moves.
+    "%fx26-write-file-unflushed", 2, Some(2), simple!(|rt, a| {
+        let path = get_string(rt, a[0])?;
+        let n = bytevector_in(rt, a[1])?;
+        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[1], i)).collect();
+        let r = crate::world::replace_file(&path, &bytes, crate::world::Flush::Unflushed);
+        Ok(fx26_io_result(rt, r))
     });
 }
 

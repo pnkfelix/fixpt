@@ -542,6 +542,10 @@
       (prim! 'write-file
              (lambda (xs)
                (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1))))))
+      (prim! 'write-file-unflushed
+             (lambda (xs)
+               (ev-io-result
+                (write-file-unflushed (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1))))))
       ;; The evaluator's heap is no program's a resumed run could start
       ;; (`TODO.md` §189): a dump fails here.
       (prim! 'dump-heap!

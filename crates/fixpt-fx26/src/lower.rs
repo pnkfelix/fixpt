@@ -256,6 +256,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("get-environment-variable", "%fx26-get-environment-variable", true),
     ("list-dir", "%fx26-list-dir", true),
     ("write-file", "%fx26-write-file", true),
+    ("write-file-unflushed", "%fx26-write-file-unflushed", true),
     ("make-bytevector", "make-bytevector", true),
     ("bytevector-length", "bytevector-length", true),
     ("bytevector-u8-ref", "bytevector-u8-ref", true),

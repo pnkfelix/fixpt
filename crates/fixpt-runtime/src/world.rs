@@ -270,10 +270,23 @@ pub fn read_symlink(path: &str) -> std::io::Result<String> {
         .map_err(|t| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("a target that is not UTF-8: {t:?}")))
 }
 
+/// Whether a file's new contents reach the disk before it is replaced
+/// ([`replace_file`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Flush {
+    /// Flushed first: after a crash the file holds the old contents or the
+    /// new (`write-file`).
+    Durable,
+    /// Not: after a crash it may hold the old, the new, nothing, or be
+    /// missing, as the system wrote back or did not (`write-file-unflushed`,
+    /// Kayak's, 2026-11-18: caches each checked as it is read).
+    Unflushed,
+}
+
 /// File `path` replaced by `bytes` whole, atomically: written to a file
-/// beside it, flushed to the disk, and renamed over it, so that a reader
-/// sees the old contents or the new, never part of either.
-pub fn replace_file(path: &str, bytes: &[u8]) -> std::io::Result<()> {
+/// beside it, flushed to the disk if `flush` says so, and renamed over it,
+/// so that a reader sees the old contents or the new, never part of either.
+pub fn replace_file(path: &str, bytes: &[u8], flush: Flush) -> std::io::Result<()> {
     let target = std::path::Path::new(path);
     let name = target.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("no file name in {path:?}")))?;
     let mut temp_name = std::ffi::OsString::from(".");
@@ -283,7 +296,10 @@ pub fn replace_file(path: &str, bytes: &[u8]) -> std::io::Result<()> {
     let written = (|| {
         let mut f = std::fs::File::create(&temp)?;
         f.write_all(bytes)?;
-        f.sync_all()
+        match flush {
+            Flush::Durable => f.sync_all(),
+            Flush::Unflushed => Ok(()),
+        }
     })();
     match written.and_then(|()| std::fs::rename(&temp, target)) {
         Ok(()) => Ok(()),
