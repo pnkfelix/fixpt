@@ -170,9 +170,13 @@ pub struct SharedFile {
     pub fasl: Option<(PathBuf, String)>,
 }
 
-/// The name a type in a `.fasl` gives the hidden global of its `i`th load.
-pub fn dep_name(i: usize) -> String {
-    format!("%fasl-dep:{i}")
+/// The name a type in a `.fasl` gives the hidden global of a load, by its
+/// route: `%fasl-dep:i`, its `i`th load; `%fasl-dep:i.j…`, the `j`th load
+/// of that, and so on (`TODO.md` §294), as the loader finds it whatever
+/// read each.
+fn route_name(route: &[usize]) -> String {
+    let steps: Vec<String> = route.iter().map(|i| i.to_string()).collect();
+    format!("%fasl-dep:{}", steps.join("."))
 }
 
 /// The `.fasl` beside the file at `source`.
@@ -839,14 +843,13 @@ impl crate::check::Checker {
                 return stale(self, &format!("`{}` changed", d.path));
             }
         }
-        let mut ty = if header.made.is_empty() { format!("(the {} %fasl-value)", header.ty) } else { header.made.clone() };
-        for (i, n) in names.iter().enumerate().rev() {
-            let name = self.interner.name(*n).to_string();
-            if !symbol_reads(&name) {
-                return stale(self, &format!("`{}` has a name that does not read as a symbol", header.deps[i].path));
-            }
-            ty = ty.replace(&dep_name(i), &name);
-        }
+        let ty = if header.made.is_empty() { format!("(the {} %fasl-value)", header.ty) } else { header.made.clone() };
+        // Each load named by its route, `%fasl-dep:i.j…`, the global the
+        // route reaches from the loads just made (`route_name`).
+        let ty = match self.routes_resolved(&ty, &names) {
+            Ok(ty) => ty,
+            Err(why) => return stale(self, &why),
+        };
         let loads: String = header
             .deps
             .iter()
@@ -885,6 +888,35 @@ impl crate::check::Checker {
         let kept = SharedFile { key: key.to_string(), path: at.to_path_buf(), input, source, stamp: header.stamp, deps, ty: None, fasl: Some((fasl, text)) };
         self.shared_files.insert(name, kept);
         Ok(Some(e))
+    }
+}
+
+impl crate::check::Checker {
+    /// `text` with each route it names (`route_name`) the hidden global it
+    /// reaches from `loads`, a `.fasl`'s loads' globals, through each one's
+    /// own loads; or why one reaches none.
+    fn routes_resolved(&self, text: &str, loads: &[fixpt_read::Sym]) -> Result<String, String> {
+        const PREFIX: &str = "%fasl-dep:";
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(i) = rest.find(PREFIX) {
+            out.push_str(&rest[..i]);
+            let after = &rest[i + PREFIX.len()..];
+            let end = after.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(after.len());
+            let route = &after[..end];
+            let mut steps = route.split('.').map(|k| k.parse::<usize>().ok());
+            let first = steps.next().flatten().and_then(|k| loads.get(k).copied());
+            let reached = steps.try_fold(first, |at, k| Some(at.and_then(|at| self.shared_files.get(&at)?.deps.get(k?).map(|d| d.2))));
+            let Some(Some(n)) = reached else { return Err(format!("its type names a load it does not have, `{PREFIX}{route}`")) };
+            let name = self.interner.name(n);
+            if !symbol_reads(name) {
+                return Err(format!("`{name}` does not read as a symbol"));
+            }
+            out.push_str(name);
+            rest = &after[end..];
+        }
+        out.push_str(rest);
+        Ok(out)
     }
 }
 
@@ -947,13 +979,14 @@ impl crate::check::Checker {
         if names.len() != ptys.len() {
             return None;
         }
+        let routes = self.fasl_routes(f);
         let mut vars = HashMap::default();
-        for (i, (_, _, d)) in f.deps.iter().enumerate() {
+        for (d, r) in &routes {
             if let Some(g) = self.global_type(*d)
                 && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(g))
             {
                 for (n, v) in abs {
-                    vars.insert(*v, format!("(select {} {})", dep_name(i), self.interner.name(*n)));
+                    vars.entry(*v).or_insert_with(|| format!("(select {r} {})", self.interner.name(*n)));
                 }
             }
         }
@@ -989,8 +1022,8 @@ impl crate::check::Checker {
             Some((defs, made)) => format!("(module (hide {}) (define input {made}))", defs.join(" ")),
             None => format!("(module (define input {made}))"),
         };
-        for (i, (_, _, d)) in f.deps.iter().enumerate() {
-            text = replace_symbol(&text, self.interner.name(*d), &dep_name(i));
+        for (d, r) in &routes {
+            text = replace_symbol(&text, self.interner.name(*d), r);
         }
         (!text.contains('\n')).then_some(text)
     }
@@ -999,26 +1032,27 @@ impl crate::check::Checker {
     /// `.fasl` keeps it, to be read where it is loaded: no name in scope
     /// used for a type; each abstract type of a file it loads a `select` of
     /// that load, and that load's hidden global named by its place, each
-    /// `%fasl-dep:i` ([`dep_name`]), which the loader names as it names it.
+    /// `%fasl-dep:i…` ([`route_name`]), which the loader names as it names it.
     pub fn fasl_type(&self, name: fixpt_read::Sym) -> Result<String, String> {
         use crate::ast::Ty;
         let f = self.shared_files.get(&name).ok_or("it was not loaded")?;
         let ty = f.ty.ok_or("its load was not checked")?;
+        let routes = self.fasl_routes(f);
         let mut vars = HashMap::default();
-        for (i, (_, _, d)) in f.deps.iter().enumerate() {
-            if let Some(t) = self.global_type(*d)
-                && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(t))
+        for (d, r) in &routes {
+            if let Some(g) = self.global_type(*d)
+                && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(g))
             {
                 for (n, v) in abs {
-                    vars.insert(*v, format!("(select {} {})", dep_name(i), self.interner.name(*n)));
+                    vars.entry(*v).or_insert_with(|| format!("(select {r} {})", self.interner.name(*n)));
                 }
             }
         }
         *self.print_for_fasl.borrow_mut() = Some(vars);
         let mut shown = self.show_ty(ty);
         *self.print_for_fasl.borrow_mut() = None;
-        for (i, (_, _, d)) in f.deps.iter().enumerate() {
-            shown = replace_symbol(&shown, self.interner.name(*d), &dep_name(i));
+        for (d, r) in &routes {
+            shown = replace_symbol(&shown, self.interner.name(*d), r);
         }
         if shown.contains('\n') {
             return Err("its type prints on more than one line".into());
@@ -1028,6 +1062,27 @@ impl crate::check::Checker {
 }
 
 impl crate::check::Checker {
+    /// Each file `f` loads, its own loads and each of theirs, by the
+    /// shortest route to it (`route_name`): what its `.fasl`'s type and
+    /// maker name each by, whatever read each, so that a type of a load's
+    /// load reads where the `.fasl` is read (`TODO.md` §294). Its own loads
+    /// first, as `%fasl-dep:i`.
+    fn fasl_routes(&self, f: &SharedFile) -> Vec<(fixpt_read::Sym, String)> {
+        let mut out: Vec<(fixpt_read::Sym, String)> = Vec::new();
+        let mut seen: fixpt_hash::HashSet<fixpt_read::Sym> = fixpt_hash::HashSet::default();
+        let mut work: std::collections::VecDeque<(fixpt_read::Sym, Vec<usize>)> = f.deps.iter().enumerate().map(|(i, (_, _, d))| (*d, vec![i])).collect();
+        while let Some((d, route)) = work.pop_front() {
+            if !seen.insert(d) {
+                continue;
+            }
+            if let Some(g) = self.shared_files.get(&d) {
+                work.extend(g.deps.iter().enumerate().map(|(j, (_, _, e))| (*e, [route.clone(), vec![j]].concat())));
+            }
+            out.push((d, route_name(&route)));
+        }
+        out
+    }
+
     /// Type `t` printed whole, no name in scope used for it, for a checker
     /// of no program but the standard environment to read: `stage`'s, at
     /// run time (`facts.staged`). A recursive type is a `mu`.

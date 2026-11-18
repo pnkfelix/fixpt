@@ -352,12 +352,12 @@ fn a_maker_keeps_its_parameters_types_named() {
     assert!(made.contains("(subr pure ((listof int acyclic) (select m-a ints)) (select m-a ints))"), "{made}");
 }
 
-/// A file's `.fasl` keeps its maker whatever the same `compile-file`
-/// compiled before it (Heist's report, TODO §294): `together-b.fx`'s maker
-/// kept, its type not written out whole, though `together-a.fx`, compiled
-/// first, has a macro `loop` that `together-b.fx`'s own macro binds as a
-/// name. (Its loads differ yet, as `together-c.fx`'s is or is not among
-/// them: TODO §294.)
+/// A file's `.fasl` keeps its maker and its loads whatever the same
+/// `compile-file` compiled before it (Heist's report, TODO §294):
+/// `together-b.fx`'s maker kept, its type not written out whole, though
+/// `together-a.fx`, compiled first, has a macro `loop` that
+/// `together-b.fx`'s own macro binds as a name; and its loads its own,
+/// whether `together-a.fx` was read from source or from its `.fasl`.
 #[test]
 fn a_fasl_keeps_its_maker_whatever_was_compiled_before_it() {
     let top = scratch("together");
@@ -368,7 +368,7 @@ fn a_fasl_keeps_its_maker_whatever_was_compiled_before_it() {
     // Its header: what it says of its type and maker.
     let header = || -> Vec<String> {
         let fasl = String::from_utf8_lossy(&std::fs::read(dir.join("together-b.fasl")).expect("read")).to_string();
-        fasl.lines().filter(|l| ["type ", "made "].iter().any(|k| l.starts_with(k))).map(str::to_string).collect()
+        fasl.lines().filter(|l| ["dep ", "type ", "made "].iter().any(|k| l.starts_with(k))).map(str::to_string).collect()
     };
     let (ok, out, err) = fixpt(&dir, &["compile-file", "together-a.fx", "together-b.fx"], &[]);
     assert!(ok, "{out}{err}");
@@ -379,6 +379,35 @@ fn a_fasl_keeps_its_maker_whatever_was_compiled_before_it() {
     let (ok, out, err) = fixpt(&dir, &["compile-file", "together-b.fx"], &[]);
     assert!(ok, "{out}{err}");
     assert_eq!(header(), together);
+}
+
+/// A type that names a load's load (`layer3.fx`'s names `layer1.fx`'s,
+/// which `layer2.fx` loads) names it by its route, `%fasl-dep:0.0`, never
+/// by its key where it was compiled (TODO §294): `layer3.fasl` the same
+/// compiled alone or after the files it loads, and the program that loads
+/// it, read from it, the same.
+#[test]
+fn a_load_of_a_load_is_named_by_its_route() {
+    let top = scratch("routes");
+    copy_dirs(&top, &["module-files", "modules"]);
+    let dir = top.join("module-files");
+    let header = || -> Vec<String> {
+        let fasl = String::from_utf8_lossy(&std::fs::read(dir.join("layer3.fasl")).expect("read")).to_string();
+        fasl.lines().filter(|l| ["dep ", "type ", "made "].iter().any(|k| l.starts_with(k))).map(str::to_string).collect()
+    };
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "layer3.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    let alone = header();
+    assert!(alone.iter().any(|l| l.starts_with("type ") && l.contains("%fasl-dep:0.0")), "{alone:?}");
+    assert!(!alone.iter().any(|l| l.contains("%shared:")), "{alone:?}");
+    for f in ["layer3.fasl"] {
+        std::fs::remove_file(dir.join(f)).expect("removed");
+    }
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "layer1.fx", "layer2.fx", "layer3.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    assert_eq!(header(), alone);
+    let (ok, out, err) = fixpt(&top.join("modules"), &["eval", "load-layers.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ok && out.lines().last().is_some_and(|l| l.starts_with("6 : int")) && err.contains("is read from") && !err.contains("stale"), "{out}{err}");
 }
 
 #[test]

@@ -7689,6 +7689,16 @@ three causes, the first fixed, two to discuss.
   file's its own and each of theirs, whatever read them; to settle first,
   the path a transitive load is written by, as the file's loader finds it
   from the file's own directory (a load's path is its own file's now).
+  Done 2026-11-18 (the user's choice of routes, over paths closed): a
+  file's loads are its own, read from source or from a `.fasl`
+  (`parse_load_kept` gives a `.fasl`'s read its frame too), and a type or
+  maker names a load's load by its route, `%fasl-dep:i.j…`, the `j`th load
+  of its `i`th (`fasl::route_name`, `fasl_routes`), which the loader
+  follows through each load's own (`routes_resolved`). `layer3.fasl`'s
+  type names `layer1.fx`'s module `%fasl-dep:0.0`; ratfink's `main.fasl`
+  the same loads, type and maker compiled alone or after `fx26.fx`, 505,352
+  bytes either way. Tests: fasl.rs (a load of a load named by its route;
+  a `.fasl` keeps its loads whatever was compiled before it).
 - **Places in code numbered by the session.** A place in register code
   is `1_000_000_000 * (file - 1000) + char`, the file by the order the
   checker read it (`files_read`); so `main.fasl` compiled after `fx26.fx`

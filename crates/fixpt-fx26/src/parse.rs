@@ -3750,10 +3750,16 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         };
         let source = crate::fasl::digest(&text);
         let name = self.interner.intern(&format!("%shared:{key}"));
-        if self.fasls
-            && let Some(e) = self.fasl_load(span, key, path, at, input, source)?
-        {
-            return Ok(e);
+        // Its loads its own, read from source or from its `.fasl`: never the
+        // file's that reads it (`TODO.md` §294), whose `.fasl` names a load's
+        // loads by their routes (`fasl::route_name`).
+        if self.fasls {
+            self.reading_deps.push(Vec::new());
+            let r = self.fasl_load(span, key, path, at, input, source);
+            self.reading_deps.pop();
+            if let Some(e) = r? {
+                return Ok(e);
+            }
         }
         self.reading_deps.push(Vec::new());
         let r = self.parse_load_file(span, path, at, input, text);
