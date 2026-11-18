@@ -641,8 +641,10 @@ pub(crate) struct Withs {
     /// By each `(with m name)` form's place that a template wrote, the name
     /// and its place: refused there if the module gives no value of it
     /// (`Checker::with_as`), which would otherwise be what it is where the
-    /// macro is used, a binding there capturing it.
-    pub(crate) projections: HashMap<Span, (Sym, Span)>,
+    /// macro is used, a binding there capturing it. And each a path wrote,
+    /// `a::b::c` (`TODO.md` §296), the same: the path to that name its name,
+    /// and `true`.
+    pub(crate) projections: HashMap<Span, (Sym, Span, bool)>,
     /// The macros an expansion defined (`Macros::expand_defn`), each with
     /// where, and what its name was before: the driver holds each to the
     /// globals, as it does a written one, and undoes them if the form is
@@ -2436,7 +2438,7 @@ impl Macros {
     /// `form` with each use of a macro in it expanded, as each expands,
     /// until none is left; quoted data left as it is.
     pub fn expand(&mut self, form: &Syn, interner: &mut Interner) -> R<Syn> {
-        if self.defined.is_empty() {
+        if self.defined.is_empty() && !names_path(form, interner) {
             return Ok(form.clone());
         }
         let (uses, depth, recheck, contracts) = limits(form)?;
@@ -2652,7 +2654,7 @@ impl Macros {
     /// wrote is the macro, whatever is bound at the use (hygiene); a
     /// template's own binders are fresh names, which bind no macro's.
     fn expand_region(&mut self, s: &Syn, core: &Rc<STy>, bound: &Rc<HashSet<Sym>>, interner: &mut Interner, budget: &mut usize, withs: &mut Vec<At>) -> R<Syn> {
-        let uses = if self.names_macro(s, interner) { self.uses_found(s, core, bound, interner)? } else { HashMap::default() };
+        let uses = if self.names_macro(s, interner) || names_path(s, interner) { self.uses_found(s, core, bound, interner)? } else { HashMap::default() };
         self.expand_at(s, Path::ROOT, &uses, interner, budget, withs)
     }
 
@@ -2672,30 +2674,80 @@ impl Macros {
     /// names bound around it: each by its path, with the macros' names
     /// bound around it, as the walk of `s` finds them, each use whole
     /// (`Aligner::program`).
-    fn uses_found(&mut self, s: &Syn, core: &Rc<STy>, bound: &Rc<HashSet<Sym>>, interner: &mut Interner) -> R<HashMap<Path, Rc<HashSet<Sym>>>> {
+    fn uses_found(&mut self, s: &Syn, core: &Rc<STy>, bound: &Rc<HashSet<Sym>>, interner: &mut Interner) -> R<HashMap<Path, Part>> {
         self.ensure_kernel(interner)?;
         let none = HashMap::default();
         let (a, _, _, read) = Aligner::program(self, interner, &none, core, s, true, bound)?;
         let apps = a.apps.as_ref().expect("read by scope");
-        Ok(read
+        let mut out: HashMap<Path, Part> = read
             .into_iter()
             .filter(|(at, _)| !apps.contains(&a.nodes[*at].path))
             .map(|(at, here)| {
                 let names = if here.is_empty() { bound.clone() } else { Rc::new(bound.iter().copied().chain(here).collect()) };
-                (a.nodes[at].path, names)
+                (a.nodes[at].path, Part::Use(names))
             })
-            .collect())
+            .collect();
+        // Each path, `a::b::c`, where a value or a description is named
+        // (`TODO.md` §296); none where a name is bound.
+        for node in &a.nodes {
+            match node.kids {
+                Kids::Ref(n, ns, _) if path_named(a.name(n)) => _ = out.insert(node.path, Part::Path(ns)),
+                Kids::Binder(n, _) if path_named(a.name(n)) => {
+                    return Err(FxError::at(node.syn.at(), format!("`{}` is a path, `module::name`, not a name that may be bound", a.name(n))));
+                }
+                _ => {}
+            }
+        }
+        Ok(out)
+    }
+
+    /// Path `s`, `a::b::c`, named `n`, where a value is (`ns`, a value's) or
+    /// a description: `(with (with a b) c)`, or `(select (with a b) c)`
+    /// (`TODO.md` §296), each `with` at the part of `s` it reads and noted,
+    /// for the checkers to refuse if its module gives no value of its name,
+    /// as a template's (`Withs::projections`): each name of a path is of
+    /// the module before it, never one bound around it.
+    fn path_written(&mut self, s: &Syn, n: Sym, ns: Ns, interner: &mut Interner) -> R<Syn> {
+        let name = interner.name(n).to_string();
+        let parts: Vec<&str> = name.split("::").collect();
+        if parts.iter().any(|p| p.is_empty()) {
+            return Err(FxError::at(s.at(), format!("`{name}` is not a path: a path is names joined by `::`, `module::name`")));
+        }
+        let at = s.at();
+        // The place of the path's first `k` characters, and from `k` on.
+        let upto = |k: usize| At { end: at.start + k as i64, ..at };
+        let from = |k: usize| At { start: at.start + k as i64, ..at };
+        let mut out = Syn::named(upto(parts[0].chars().count()), parts[0], interner);
+        let mut len = parts[0].chars().count();
+        for (k, p) in parts[1..].iter().enumerate() {
+            let last = k + 2 == parts.len();
+            let start = len + 2;
+            len = start + p.chars().count();
+            let x = Syn::named(At { end: at.start + len as i64, ..from(start) }, p, interner);
+            if last && ns == Ns::Desc {
+                out = Syn::lst(upto(len), vec![Syn::named(upto(len), "select", interner), out, x]);
+                break;
+            }
+            let whole: String = name.chars().take(len).collect();
+            let f = Syn::lst(upto(len), vec![Syn::named(upto(len), "with", interner), out, x]);
+            self.withs.projections.insert(f.span(), (interner.intern(&whole), x.span(), true));
+            out = f;
+        }
+        Ok(out)
     }
 
     /// `s`, at `path` in what `uses_found` read: each use there expanded,
     /// and what it makes, in what is bound around it.
-    fn expand_at(&mut self, s: &Syn, path: Path, uses: &HashMap<Path, Rc<HashSet<Sym>>>, interner: &mut Interner, budget: &mut usize, withs: &mut Vec<At>) -> R<Syn> {
+    fn expand_at(&mut self, s: &Syn, path: Path, uses: &HashMap<Path, Part>, interner: &mut Interner, budget: &mut usize, withs: &mut Vec<At>) -> R<Syn> {
+        if let (V::Symbol(n), Some(Part::Path(ns))) = (s.view(), uses.get(&path)) {
+            return self.path_written(s, n, *ns, interner);
+        }
         let V::List { items, tail } = &s.view() else { return Ok(s.clone()) };
         let head = items[0].sym();
         if head.is_some_and(|h| interner.name(h) == "quote") {
             return Ok(s.clone());
         }
-        if let Some(bound) = uses.get(&path) {
+        if let Some(Part::Use(bound)) = uses.get(&path) {
             let h = head.expect("a macro's name");
             let m = self.defined[&h].clone();
             if m.defn {
@@ -2721,7 +2773,7 @@ impl Macros {
             && let (Some(m), Some(x)) = (m.sym(), n.sym())
             && !matches!(interner.name(m), "#%fx" | "#%toplevel")
         {
-            self.withs.projections.insert(s.span(), (x, n.span()));
+            self.withs.projections.insert(s.span(), (x, n.span(), false));
         }
         // A definition of a macro's name: refused, as a form's is.
         if let (Some(h), Some(n)) = (head, items.get(1).and_then(|n| n.sym()))
@@ -5350,6 +5402,31 @@ fn lettered(s: &Syn, interner: &Interner) -> Option<Syn> {
 }
 
 /// `s`, at `path`, each symbol at a path of `renamed` renamed so.
+/// What `Macros::uses_found` finds at a path: a use of a macro, with the
+/// macros' names bound around it; or a path, `a::b::c`, naming a value or
+/// a description.
+enum Part {
+    Use(Rc<HashSet<Sym>>),
+    Path(Ns),
+}
+
+/// Whether `name` is a path, `a::b::c` (`TODO.md` §296): a program's, not
+/// a name of the expander's own (`%…`).
+fn path_named(name: &str) -> bool {
+    !name.starts_with('%') && name.contains("::")
+}
+
+/// Whether a path is written in `s`, outside a quoted datum.
+fn names_path(s: &Syn, interner: &Interner) -> bool {
+    match &s.view() {
+        V::Symbol(n) => path_named(interner.name(*n)),
+        V::List { items, tail } => {
+            !items[0].sym().is_some_and(|h| interner.name(h) == "quote") && (items.iter().any(|i| names_path(i, interner)) || tail.as_ref().is_some_and(|t| names_path(t, interner)))
+        }
+        _ => false,
+    }
+}
+
 fn rename_paths(s: &Syn, path: Path, renamed: &HashMap<Path, String>, interner: &mut Interner) -> Syn {
     if let Some(n) = renamed.get(&path) {
         return Syn::named(s.at(), n, interner);

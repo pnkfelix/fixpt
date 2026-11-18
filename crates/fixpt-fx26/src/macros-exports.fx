@@ -16,9 +16,9 @@
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
-(import reader-types (type syn))
+(import reader-types atom lst (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-symbol syn-name syn-expansion len nth
-        (type names syns-a))
+        syn-datums (type names syns-a))
 (import types-module fail-at name-in? proper-items atm-var atm-rib-of
         atm-lit addr=? (type fails atm atms addr))
 (import match-module pattern-names addr-under?)
@@ -165,11 +165,12 @@
 (define-type places (listof (tupleof int int) acyclic))
 ;; By each `with` form's place, the macros used in its body by names the
 ;; program wrote, each with the use's place (`Macros::with_uses`): the
-;; checker refuses the `with` if its module gives a value of the name. And,
-;; `#t` last, a template's `(with m name)`, with the name's place
+;; checker refuses the `with` if its module gives a value of the name (0
+;; last). And, 1 last, a template's `(with m name)`, with the name's place
 ;; (`Macros::projections`): refused if the module gives no value of it,
-;; which would otherwise be what it is where the macro is used.
-(define-type uses (listof (tupleof int int symbol int int bool) acyclic))
+;; which would otherwise be what it is where the macro is used; 2, a path's
+;; `with`, its path to the name for the name, the same (`TODO.md` §296).
+(define-type uses (listof (tupleof int int symbol int int int) acyclic))
 (define with-uses (ref uses rs) (new nil))
 ;; For the checker: this parse's, in the order the expander met them.
 (define with-uses-given (->* () uses) (lambda () (reverse (get with-uses))))
@@ -181,7 +182,7 @@
              (syn-symbol? (nth items 2)) (not (string=? (syn-name (nth items 1)) "#%fx"))
              (not (string=? (syn-name (nth items 1)) "#%toplevel")))
         (set with-uses (cons (tuple (syn-start s) (syn-end s) (syn-symbol (nth items 2))
-                                    (syn-start (nth items 2)) (syn-end (nth items 2)) #t)
+                                    (syn-start (nth items 2)) (syn-end (nth items 2)) 1)
                              (get with-uses)))
         #u)))
 ;; The uses of macro `n`, at `hd`, noted in each `with` around it.
@@ -191,9 +192,50 @@
         #u
         (begin
           (set with-uses (cons (tuple (extract (car withs) 1) (extract (car withs) 2) n
-                                      (syn-start hd) (syn-end hd) #f)
+                                      (syn-start hd) (syn-end hd) 0)
                                (get with-uses)))
           (note-uses n hd (cdr withs))))))
+;; Path `s`, `a::b::c`, a symbol, where a value is (a description, if `d`):
+;; `(with (with a b) c)`, or `(select (with a b) c)` (`TODO.md` §296), each
+;; `with` at the part of `s` it reads and noted (2, its path to its name for
+;; the name), for the checker to refuse if its module gives no value of the
+;; name, as a template's: each name of a path is of the module before it,
+;; never one bound around it (`Macros::path_written`).
+(define path-written (->* (fails syn bool) syn)
+  (lambda (fail s d)
+    (let ((k (string-search (syn-name s) "::" 0)))
+      (if (= k 0)
+          (path-refused fail s)
+          (path-from fail s d (named-at (substring (syn-name s) 0 k) 0 k s) k)))))
+;; `out`, the first `len` characters of path `s` read; the rest read on.
+(define path-from (->* (fails syn bool syn int) syn)
+  (lambda (fail s d out len)
+    (let* ((n (syn-name s)) (start (+ len 2)) (k (string-search n "::" start))
+           (end (if (< k 0) (string-length n) k))
+           (x (named-at (substring n start end) start end s)))
+      (cond ((= start end) (path-refused fail s))
+            ((and (< k 0) d) (list-of (list (named-at "select" 0 end s) out x) end s))
+            (else
+             (let ((f (list-of (list (named-at "with" 0 end s) out x) end s)))
+               (begin
+                 (set with-uses (cons (tuple (syn-start f) (syn-end f)
+                                             (string->symbol (substring n 0 end)) (syn-start x)
+                                             (syn-end x) 2)
+                                      (get with-uses)))
+                 (if (< k 0) f (path-from fail s d f end)))))))))
+(define path-refused (->* (fails syn) syn)
+  (lambda (fail s)
+    (begin (fail-at fail (string-append "`" (syn-name s) "` is not a path: a path is names joined "
+                                        "by `::`, `module::name`")
+                    s)
+           s)))
+;; Name `n` at characters `a` to `b` of `s`, of its expansion.
+(define named-at (->* (string int int syn) syn)
+  (lambda (n a b s)
+    (atom (string->symbol n) (+ (syn-start s) a) (+ (syn-start s) b) (syn-expansion s))))
+;; Items `xs` as a list at the first `b` characters of `s`.
+(define list-of (->* (syns-a int syn) syn)
+  (lambda (xs b s) (lst xs (syn-datums xs) (syn-start s) (+ (syn-start s) b) (syn-expansion s))))
 
 ;;; ------------------------------------------------------------ binders' depths
 

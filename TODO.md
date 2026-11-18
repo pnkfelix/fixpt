@@ -7783,6 +7783,18 @@ To make what a `with` brings into scope obvious, where today a body
    t)`; `m..t`, the name a binding's abstract types have, is another
    thing and stays. At a head, `(m::f x)` is a use of `m`'s macro `f` where
    `m`'s shape says `f` is one, by its binding shape. Both front ends.
+   Built (2026-11-18), both front ends, but the head's macro: the expander
+   writes a path where its walk finds a name referred to, a value's or a
+   description's (`Macros::uses_found`, `path_written`; `macros-scopes.fx`,
+   `macros-exports.fx`'s `path-written`), each `with` noted as a
+   template's `(with m name)` is, so the checkers refuse a name its module
+   does not give, saying the path, never taking one from outside (a `with`
+   whose body is a name looks there otherwise). At an operator a path is
+   the value; a macro in a module's shape waits for those (binding-shapes'
+   "Macros in shapes"). `fixpt verify` has no rule for a path still
+   (§291's `KNOWN_GAPS`, `colons.fx` with them). Tests: modules/colons.fx,
+   colons-macro.fx, colons-missing.fx, colons-outer.fx, colons-binder.fx,
+   colons-empty.fx.
 2. **`(with m #:binding (id1 id2) body)`** once `::` is in and Kayak has
    taken it up: a `with` whose body is more than a name lists the names it
    takes, each one the module must give; `(with m x)`, a selection,

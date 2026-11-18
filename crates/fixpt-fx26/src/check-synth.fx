@@ -114,7 +114,7 @@
 ;; By each `with` form's place, the macros its body uses by names the
 ;; program wrote, each with the use's place (`macros.fx`'s `with-uses`),
 ;; as the conductor says for the program parsed (`k-macro-uses!`).
-(define-type k-macro-uses (listof (tupleof int int symbol int int bool) acyclic))
+(define-type k-macro-uses (listof (tupleof int int symbol int int int) acyclic))
 (define k-macro-uses (ref k-macro-uses @t) (new nil))
 (define k-macro-uses! (->* (k-macro-uses) unit) (lambda (us) (set k-macro-uses us)))
 ;; `k-with-used` of `(with m …)` at `a`..`b`, its module's values `ps`, once
@@ -127,15 +127,13 @@
 (define k-macro-clash (->* (k-parts k-macro-uses int int symbol) unit)
   (lambda (ps us a b m)
     (cond ((null? us) #u)
-          ;; A template's `(with m name)` (`#t`): a value `m` gives, never
-          ;; what `name` is where the macro is used.
-          ((and (= (extract (car us) 1) a) (= (extract (car us) 2) b) (extract (car us) 6)
-                (not (k-part-named? ps (extract (car us) 3))))
-           (let ((n (symbol->string (extract (car us) 3))) (shown (symbol->string m)))
-             (k-fail (string-append "`" shown "` gives no value `" n "`, which a template's `(with "
-                                    shown " " n ")` takes from it alone")
-                     (extract (car us) 4) (extract (car us) 5))))
-          ((and (= (extract (car us) 1) a) (= (extract (car us) 2) b) (extract (car us) 6))
+          ;; A template's `(with m name)` (1), or a path's (2, its path to
+          ;; the name for the name, `TODO.md` §296): a value `m` gives,
+          ;; never what `name` is where the macro or the path is.
+          ((and (= (extract (car us) 1) a) (= (extract (car us) 2) b) (> (extract (car us) 6) 0)
+                (not (k-part-named? ps (string->symbol (k-said-name (car us))))))
+           (k-fail (k-projection-said (car us) m) (extract (car us) 4) (extract (car us) 5)))
+          ((and (= (extract (car us) 1) a) (= (extract (car us) 2) b) (> (extract (car us) 6) 0))
            (k-macro-clash ps (cdr us) a b m))
           ((and (= (extract (car us) 1) a) (= (extract (car us) 2) b)
                 (k-part-named? ps (extract (car us) 3)))
@@ -145,6 +143,23 @@
                                   "call")
                    (extract (car us) 4) (extract (car us) 5)))
           (else (k-macro-clash ps (cdr us) a b m)))))
+;; The name a projection `u` takes: a path's last (after its last `::`).
+(define k-said-name (->* ((tupleof int int symbol int int int)) string)
+  (lambda (u)
+    (let ((n (symbol->string (extract u 3))))
+      (if (= (extract u 6) 2) (substring n (+ (k-last-colons n 0 -1) 2) (string-length n)) n))))
+(define k-last-colons (->* (string int int) int)
+  (lambda (n i found)
+    (let ((k (string-search n "::" i))) (if (< k 0) found (k-last-colons n (+ k 1) k)))))
+;; Why projection `u`, of module `m`, is refused.
+(define k-projection-said (->* ((tupleof int int symbol int int int) symbol) string)
+  (lambda (u m)
+    (let ((n (k-said-name u)) (whole (symbol->string (extract u 3))))
+      (if (= (extract u 6) 2)
+          (string-append "`" (substring whole 0 (k-last-colons whole 0 -1)) "` gives no value `" n
+                         "`, which the path `" whole "` takes from it alone")
+          (string-append "`" (symbol->string m) "` gives no value `" n "`, which a template's "
+                         "`(with " (symbol->string m) " " n ")` takes from it alone")))))
 (define k-part-named? (->* (k-parts symbol) bool)
   (lambda (ps n)
     (and (not (null? ps)) (or (symbol=? n (extract (car ps) 1)) (k-part-named? (cdr ps) n)))))

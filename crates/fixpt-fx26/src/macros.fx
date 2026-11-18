@@ -35,7 +35,7 @@
 (import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list marks-of
         len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
 (import scopes-module walk placed evaluate levels-of binder-of aligned-heads uses-found names-macro?
-        uses-in uses-past list-at rebuilt at-place at-places (type uses))
+        uses-in uses-past list-at rebuilt at-place at-places part-here pt-use pt-path (type uses))
 (import align-module defined macro-of macro? makes-defns? makes-top-defns? makes-desc? nodes-reset!
         align node-export node-imports node-syn node-path node-core node-kids pvar-of pvar? nnodes
         act-rename act-alias seq-depths def-env-top env-empty env-levels
@@ -46,7 +46,7 @@
               found levels env def-env def-envs
               atms kids contracts holes))
 (import exports-module exports-of exports=? shown-exports nested-binders unsaid-nested
-        drivers-of renames-under with-uses with-uses-given note-projection note-uses
+        drivers-of renames-under with-uses with-uses-given note-projection note-uses path-written
         binder-depths depth-of repeated-ref heads-done (type exported nested depths))
 (import solve-module infer sig-shown by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
@@ -587,7 +587,7 @@
 ;; the place written for it, whatever a use made of it.
 (define expand (->* (fails syn) syn)
   (lambda (fail form)
-    (if (null? (get defined))
+    (if (and (null? (get defined)) (not (names-macro? form)))
         form
         (let ((n (chain-begun! fail form)))
           (if (< n 0)
@@ -645,17 +645,20 @@
 (define expand-region (->* (fails syn sty names places) syn)
   (lambda (fail s core bound withs)
     (expand-at fail s (if (names-macro? s) (uses-found fail core s bound) nil) withs)))
-;; `s`, where uses `us` are found from (`uses-found`): each expanded.
+;; `s`, where uses `us` are found from (`uses-found`): each use expanded,
+;; each path written (`path-written`).
 (define expand-at (->* (fails syn uses places) syn)
   (lambda (fail s us withs)
     (let* ((items (list-items s)) (hd (if (null? items) s (car items)))
            (head (if (syn-symbol? hd) (syn-name hd) ""))
            (noted (if (string=? head "with") (note-projection s items hd) #u)))
       (cond
+        ((not (null? (part-here us)))
+         (tagcase (car (part-here us))
+           (pt-use (bound) (expand-one fail s (syn-symbol hd) bound withs))
+           (pt-path (d) (path-written fail s d))))
         ((null? items) s)
         ((string=? head "quote") s)
-        ((and (not (null? us)) (null? (extract (car us) 1)))
-         (expand-one fail s (syn-symbol hd) (extract (car us) 2) withs))
         ;; A definition of a macro's name: refused, as a form's is.
         ((and (or (string=? head "define") (string=? head "define*"))
               (not (null? (cdr items))) (syn-symbol? (nth items 1))

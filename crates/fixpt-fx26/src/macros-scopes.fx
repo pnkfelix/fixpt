@@ -649,11 +649,52 @@
 ;; `Macros::uses_found`): each by its place, the indices of the items it is
 ;; in, list by list from `s` (`index-path`), in the order they are written,
 ;; with the macros' names bound around it that the program wrote in it.
+;; And each path, `a::b::c`, where a value or a description is named
+;; (`TODO.md` §296); none where a name is bound.
 (define-type ixs (listof int acyclic))
-(define-type uses (listof (tupleof ixs names) acyclic))
+;; What is found at a place: a use of a macro, with the macros' names bound
+;; around it; or a path, naming a description if `#t`, else a value
+;; (`macros.rs`'s `Part`).
+(define-datatype part (pt-use names) (pt-path bool))
+(define-type uses (listof (tupleof ixs part) acyclic))
 (define uses-found (->* (fails sty syn names) uses)
   (lambda (fail core s bound)
-    (uses-sorted (uses-of (extract (program-scoped fail core s #t bound) 3) bound nil))))
+    (let ((read (extract (program-scoped fail core s #t bound) 3)))
+      (uses-sorted (path-parts fail 0 (get nnodes) (uses-of read bound nil))))))
+;; Each path from node `i` to `n`, onto `out`: a reference's; a binder's,
+;; refused.
+(define path-parts (->* (fails int int uses) uses)
+  (lambda (fail i n out)
+    (if (>= i n)
+        out
+        (path-parts fail (+ i 1) n
+                    (tagcase (node-kids i)
+                      (k-ref (x d free)
+                        (if (path-named? (symbol->string x))
+                            (cons (tuple (index-path (node-path i)) (pt-path d)) out)
+                            out))
+                      (k-binder (x d)
+                        (if (path-named? (symbol->string x))
+                            (begin
+                              (fail-at fail (string-append "`" (symbol->string x) "` is a path, "
+                                                           "`module::name`, not a name that may "
+                                                           "be bound")
+                                       (node-syn i))
+                              out)
+                            out))
+                      (else y out))))))
+;; Whether `n` is a path, `a::b::c`: a program's, not a name of the
+;; expander's own (`%…`).
+(define path-named? (->* (string) bool)
+  (lambda (n)
+    (and (> (string-length n) 0) (not (char=? (string-ref n 0) #\%))
+         (>= (string-search n "::" 0) 0))))
+;; The part found here, of uses `us` from here: in a list of one.
+(define part-here (->* (uses) (listof part acyclic))
+  (lambda (us)
+    (if (and (not (null? us)) (null? (extract (car us) 1)))
+        (list (extract (car us) 2))
+        nil)))
 (define uses-of (->* (heads-read names uses) uses)
   (lambda (rs bound out)
     (if (null? rs)
@@ -663,8 +704,8 @@
                      out
                      (let ((at (extract (car rs) 1)))
                        (cons (tuple (index-path (node-path at))
-                                    (names-bound (macro-names-in (node-syn at) nil)
-                                                 (extract (car rs) 3) bound))
+                                    (pt-use (names-bound (macro-names-in (node-syn at) nil)
+                                                         (extract (car rs) 3) bound)))
                              out)))))))
 ;; `bound`, and those of `ns` that `env` binds.
 (define names-bound (->* (names env names) names)
@@ -687,7 +728,8 @@
             out)))))
 (define macro-names-each (->* (syns-a names) names)
   (lambda (xs out) (if (null? xs) out (macro-names-each (cdr xs) (macro-names-in (car xs) out)))))
-;; Whether a macro's name is written in `s`, outside a quoted datum.
+;; Whether a macro's name or a path is written in `s`, outside a quoted
+;; datum.
 (define names-macro? (->* (syn) bool)
   (lambda (s)
     (tagcase s
@@ -695,7 +737,9 @@
       (dotted (items t d a b x)
         (and (not (quote-headed? items)) (or (any-names-macro? items) (names-macro? t))))
       (vec (items d a b x) #f)
-      (atom (d a b x) (and (syn-symbol? s) (macro? (syn-symbol s)))))))
+      (atom (d a b x)
+        (and (syn-symbol? s)
+             (or (macro? (syn-symbol s)) (path-named? (symbol->string (syn-symbol s)))))))))
 (define any-names-macro? (->* (syns-a) bool)
   (lambda (xs) (and (not (null? xs)) (or (names-macro? (car xs)) (any-names-macro? (cdr xs))))))
 (define quote-headed? (->* (syns-a) bool)

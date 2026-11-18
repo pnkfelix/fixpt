@@ -373,7 +373,7 @@
                        (int kxs k-regions)
                        k-maybe-ty))
             (val k-macro-uses!
-                 (subr (write @t) ((listof (tupleof int int symbol int int bool) acyclic)) unit))
+                 (subr (write @t) ((listof (tupleof int int symbol int int int) acyclic)) unit))
             (val k-with-used-at
                  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
                                spin)

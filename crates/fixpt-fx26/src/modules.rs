@@ -876,11 +876,22 @@ impl Checker {
         }
         // A template's `(with m name)`: a value `m` gives, never what `name`
         // is where the macro is used.
-        if let Some((n, at)) = self.macros.withs.projections.get(&span)
-            && !vals.iter().any(|(v, _)| v == n)
-        {
-            let (n, shown) = (self.interner.name(*n), self.interner.name(m));
-            return Err(FxError::at(*at, format!("`{shown}` gives no value `{n}`, which a template's `(with {shown} {n})` takes from it alone")));
+        // A path's, `a::b::c` (`TODO.md` §296), the same: of the module
+        // before it alone.
+        if let Some(&(n, at, path)) = self.macros.withs.projections.get(&span) {
+            let whole = self.interner.name(n).to_string();
+            let (module, x) = match whole.rsplit_once("::") {
+                Some((module, x)) if path => (module.to_string(), self.interner.intern(x)),
+                _ => (self.interner.name(m).to_string(), n),
+            };
+            if !vals.iter().any(|(v, _)| *v == x) {
+                let shown = self.interner.name(x);
+                return Err(FxError::at(at, if path {
+                    format!("`{module}` gives no value `{shown}`, which the path `{whole}` takes from it alone")
+                } else {
+                    format!("`{module}` gives no value `{shown}`, which a template's `(with {module} {shown})` takes from it alone")
+                }));
+            }
         }
         let mut free = self.free_vars(body);
         // An include's names are the module's own, bound where `%include`
