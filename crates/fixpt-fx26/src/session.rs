@@ -1324,10 +1324,9 @@ impl Fx26Session {
             scheme.runtime_unrooted().call_native.get_or_insert(fixpt_native::direct::call_native);
             scheme.runtime_unrooted().adapt.get_or_insert(fixpt_native::direct::adapt);
         }
-        // Of the session's heap's names, the syntax it reads its.
+        // Its syntax in the session's heap, of its names, from the start.
         let conv = if native { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular };
-        let mut checker = Checker::of_names(conv, scheme.runtime_unrooted().heap.names());
-        checker.in_session_heap();
+        let checker = Checker::in_heap(conv, &mut scheme.runtime_unrooted().heap);
         Ok(Fx26Session {
             checker,
             scheme,
@@ -3565,8 +3564,7 @@ impl Fx26Session {
         // (`with_backend_preloaded_in`), kept: nothing is checked yet.
         let conv = if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular };
         if self.checker.conv_default != conv {
-            self.checker = Checker::of_names(conv, self.scheme.runtime_unrooted().heap.names());
-            self.checker.in_session_heap();
+            self.checker = Checker::in_heap(conv, &mut self.scheme.runtime_unrooted().heap);
         }
         self.checker.globals_effects = self.globals_effects;
         self.checker.defer_reruns = self.defer_reruns;
@@ -3631,9 +3629,8 @@ impl Fx26Session {
     pub fn fresh<T>(&mut self, f: impl FnOnce(Checker) -> T) -> T {
         let conv = if self.native_convention { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular };
         // Of the session heap's names, whose syntax it reads.
-        let mut c = Checker::of_names(conv, self.scheme.runtime_unrooted().heap.names());
+        let mut c = Checker::in_heap(conv, &mut self.scheme.runtime_unrooted().heap);
         self.set_fresh(&mut c);
-        c.in_session_heap();
         let kept = c.own_kept();
         crate::phase1::Phase1::end_current(self.scheme.runtime_unrooted());
         let out = self.expansion(|s| {

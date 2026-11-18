@@ -38,6 +38,19 @@ impl Sym {
     pub fn index(self) -> u32 {
         self.n
     }
+
+    /// The symbol of name number `n` of `names` (a heap symbol's,
+    /// `Heap::symbol_text`): the `Sym` an interner of those names has for
+    /// it, which reads it only while it holds it ([`Interner::of_number`]).
+    #[inline]
+    pub fn of_names(n: u32, names: &Owner) -> Sym {
+        let _ = names;
+        Sym {
+            n,
+            #[cfg(debug_assertions)]
+            space: names.id(),
+        }
+    }
 }
 
 pub struct Interner {

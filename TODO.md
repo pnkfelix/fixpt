@@ -7427,15 +7427,23 @@ its interner made of its names, so its symbols go by number: `aside`
 gives its closure an interner of its scratch heap's names; a checker
 makes its names first, its syntax heap made of them
 (`Heap::unfixed_with_names`); a fresh checker, and one made again for a
-convention, of the session heap's. `SymTable`'s maps stay, by name, for
-the one heap that cannot: a module file's own macros' world
-(`Withs::default()` in `macros.rs`, "a world of their own"), a heap of
-its own read through the importer's interner, the two exchanging `Sym`s.
-To remove them, one of: that world's syntax in the importer's heap (its
-lending nested in the importer's, which the world apart avoids); or one
-names space owned by several heaps, a sweep then asking each. Next: step
-5, the symbols table weak (but symbols with bound globals) and the names
-sweep.
+convention, of the session heap's. Its rest, 2026-11-17: one heap for a
+checker and all it reads and expands (the user's: "keep everything in
+one heap"), so `SymTable`'s maps are gone and every symbol of syntax is
+its interner's by its number, asserted. A session's checker is made in
+the session's heap from the start (`Checker::in_heap`; it was made in a
+heap of its own, lent to read the standard environment before its
+names were set, then moved: a checker's interner then not of the heap
+its syntax was first made in). A module file's macros share their
+importer's world, so the handles its macros keep are into the
+importer's heap, not one of their own. An `aside` keeps a heap of its
+own: its readings are a closure's alone, of names of their own, nothing
+of them kept. (Said here before, and wrong: that a module file's world
+blocked this. Its interner was the importer's, but the panic was the
+construction order.) A scratch heap stacked on the session's is what a
+`letreap` is (`Heap::reap_enter`), if one is ever wanted: measured first.
+Next: step 5, the symbols table weak (but symbols with bound globals)
+and the names sweep.
 
 Step 2 as first done (a4be71eb, reverted, 2026-11-17): an interned
 symbol's name a text of that store, its `symbol_index` by text number.

@@ -1676,7 +1676,7 @@ impl Macros {
             Some(lib) => (format!("{}@{}", file.key, interner.name(lib)), instance_prefix(&file.prefix, interner.name(lib))),
             None => (file.key.clone(), file.prefix.clone()),
         };
-        let withs = Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), module_prefix: prefix, def_env, ..Withs::default() };
+        let withs = Withs { syntax_sigs: std::mem::take(&mut self.withs.syntax_sigs), form_key: self.withs.form_key.clone(), module_prefix: prefix, def_env, world: self.withs.world.clone(), ..Withs::default() };
         let mut own = Macros { k: self.k.clone(), defined: HashMap::default(), fresh: self.fresh, reading: Some(file.text.clone()), defined_at: HashMap::default(), checking: false, withs: Box::new(withs) };
         let internal_of = |n: Sym, interner: &mut Interner| {
             let name = format!("%syntax:{key}:{}", interner.name(n));

@@ -1103,6 +1103,13 @@ pub struct Checked {
     pub exp: ExpId,
 }
 
+/// Where a checker's syntax is: a heap of its own, made of these names, its
+/// interner's, when first wanted; or its session's heap, lent to it.
+enum Home<'h> {
+    Own(fixpt_memmgmt::names::Owner),
+    Session(&'h mut fixpt_heap::Heap),
+}
+
 impl Default for Checker {
     fn default() -> Checker {
         Checker::new()
@@ -1135,11 +1142,9 @@ fn lending<T>(world: &std::rc::Rc<std::cell::RefCell<crate::macros::SynWorld>>, 
     let (mut heap, mut syms) = {
         let mut w = world.borrow_mut();
         w.lending = true;
-        let names = w.names.take();
-        // Of the checker's names, where they are its (a world of its own,
-        // a module file's macros', has none: of names of its own, its
-        // symbols the interner's by their names).
-        (w.heap.take().unwrap_or_else(|| Box::new(names.map_or_else(fixpt_heap::Heap::unfixed, fixpt_heap::Heap::unfixed_with_names))), std::mem::take(&mut w.syms))
+        // Of the checker's names, its interner's (`Checker::with_convention`).
+        let heap = w.heap.take().unwrap_or_else(|| Box::new(fixpt_heap::Heap::unfixed_with_names(w.names.take().expect("a checker's names, which its syntax heap is made with"))));
+        (heap, std::mem::take(&mut w.syms))
     };
     if heap.collection_due() {
         heap.collect_due(&mut []);
@@ -1190,22 +1195,6 @@ impl Checker {
         let mut w = world.borrow_mut();
         (w.lending, w.syms) = (false, syms);
         r
-    }
-
-    /// This checker's syntax made, from now on, in the heap of the session
-    /// it is the checker of, which the session lends around each call
-    /// ([`Checker::with_heap`]): so that what it reads and expands is the
-    /// session's to hand to the front end written in FX-26 as it is
-    /// (`docs/research/heap-syntax.md`). Before any of it is kept: the heap
-    /// it was made in, and its symbols' table, go.
-    pub fn in_session_heap(&mut self) {
-        let mut w = self.macros.withs.world.borrow_mut();
-        assert!(!w.lending, "not while its syntax is lent");
-        if let Some(heap) = w.heap.take() {
-            assert_eq!(crate::heap_syn::kept_count(&heap), 0, "syntax kept in the heap a checker was made in");
-        }
-        w.syms = Default::default();
-        w.session = true;
     }
 
     /// Whether this checker's syntax is lent now (inside [`Checker::syn`]
@@ -1297,19 +1286,22 @@ impl Checker {
         // Its names made first, its syntax heap made of them when first
         // wanted: a symbol of its syntax its `Sym` by its number.
         let names = fixpt_memmgmt::names::Owner::new();
-        let c = Checker::with_interner(conv, Interner::of_names(&names));
-        c.macros.withs.world.borrow_mut().names = Some(names);
-        c
+        let interner = Interner::of_names(&names);
+        Checker::with_interner(conv, interner, Home::Own(names))
     }
 
-    /// [`with_convention`](Checker::with_convention), its names `names`, a
-    /// heap's (the session's, whose syntax it reads): a name kept once, and
-    /// a symbol of the heap's its `Sym` by its number.
-    pub fn of_names(conv: Conv, names: &fixpt_memmgmt::names::Owner) -> Checker {
-        Checker::with_interner(conv, Interner::of_names(names))
+    /// [`with_convention`](Checker::with_convention), its syntax in `heap`,
+    /// its session's, from the start, and its interner of `heap`'s names:
+    /// so that what it reads and expands is the session's to hand to the
+    /// front end written in FX-26 as it is (`docs/research/heap-syntax.md`),
+    /// and a symbol of `heap`'s is its `Sym` by its number. The session
+    /// lends `heap` around each later use ([`Checker::with_heap`]).
+    pub fn in_heap(conv: Conv, heap: &mut fixpt_heap::Heap) -> Checker {
+        let interner = Interner::of_names(heap.names());
+        Checker::with_interner(conv, interner, Home::Session(heap))
     }
 
-    fn with_interner(conv: Conv, interner: Interner) -> Checker {
+    fn with_interner(conv: Conv, interner: Interner, home: Home) -> Checker {
         let mut interner = interner;
         let mut arena = Arena::default();
         let mut base = HashMap::default();
@@ -1486,6 +1478,29 @@ impl Checker {
             global_slots: HashSet::default(),
             fixed_slots: HashSet::default(),
         };
+        match home {
+            Home::Own(names) => {
+                c.macros.withs.world.borrow_mut().names = Some(names);
+                c.standard();
+            }
+            Home::Session(heap) => {
+                let mut syms = {
+                    let mut w = c.macros.withs.world.borrow_mut();
+                    (w.session, w.lending) = (true, true);
+                    std::mem::take(&mut w.syms)
+                };
+                crate::heap_syn::with_syntax(heap, &mut syms, || c.standard());
+                let mut w = c.macros.withs.world.borrow_mut();
+                (w.lending, w.syms) = (false, syms);
+            }
+        }
+        c
+    }
+
+    /// The standard environment's types and bindings, with its syntax lent
+    /// or a heap of its own to lend.
+    fn standard(&mut self) {
+        let c = self;
         // FX-87's variadic procedure type, `(vsubr E T R)`: the first
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
@@ -1509,7 +1524,6 @@ impl Checker {
         }
         c.standard_len = c.env.len();
         c.standard_dscope = c.dscope.len();
-        c
     }
 
     /// `text` read, as file 0's, with syntax lent (`syn`).

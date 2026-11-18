@@ -21,7 +21,7 @@ use fixpt_hash::HashMap;
 /// Read `text` with the FX-26 reader, already loaded into `scheme` (see
 /// [`crate::session::load_eager_reader`]): the `syn` it makes, as it is,
 /// the checker's forms, `checker` a session's of `scheme`'s heap
-/// (`Checker::in_session_heap`), its names noted
+/// (`Checker::in_heap`), its names noted
 /// ([`crate::heap_syn::adopted`]). Not expanded.
 pub fn read_with_fx26_reader(scheme: &mut Session, checker: &mut crate::Checker, file: FileId, text: &str) -> R<Vec<crate::heap_syn::Form>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);

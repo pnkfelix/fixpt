@@ -118,20 +118,17 @@ pub enum V {
     Bytevector(Vec<u8>),
 }
 
-/// The heap's symbols as the checker's: by each symbol's global slot,
-/// which is its own and never moves. Filled where syntax is given a
-/// symbol (the reader's builder, [`Mk`]), so that every symbol in syntax is
-/// here: one missing is a symbol made past them, which [`Rd::sym`] says.
+/// What a heap's syntax keeps beside it. Its symbols are the checker's by
+/// their names' numbers, its interner's names the heap's
+/// (`Interner::of_names`): a symbol's `Sym` its name's number, which the
+/// interner holds once syntax is given the symbol (the reader's builder,
+/// [`Mk`], [`note`](SymTable::note)); one it does not hold is a symbol made
+/// past them, which the interner refuses.
 #[derive(Default, Clone)]
 pub struct SymTable {
-    /// By global slot, which are dense: no hashing.
-    by_slot: Vec<Option<Sym>>,
     /// `syn`'s four tags, interned, and the collections when they were:
     /// good until the next.
     tags: Option<(u64, [Value; 4])>,
-    /// Each symbol given to syntax, the heap's, by its number, and the
-    /// collections when they were: good until the next.
-    by_sym: (u64, Vec<Option<Value>>),
     /// The slots of the forms held in this heap ([`Form`]): those whose
     /// last copy dropped, let go at the next lending, and those let go.
     forms: std::rc::Rc<FormSlots>,
@@ -161,46 +158,29 @@ impl SymTable {
         self.kept
     }
 
-    /// The heap's symbol of `s`, `interner`'s: interned, and noted.
-    /// Heap symbol `v` noted, as the checker's: of syntax a builder did
-    /// not make ([`adopted`]).
+    /// Heap symbol `v` noted, as the checker's: its name held by
+    /// `interner`, which is of the heap's names.
     fn note(&mut self, heap: &Heap, v: Value, interner: &mut Interner) {
-        let slot = heap.symbol_global_slot(v);
-        if self.by_slot.len() <= slot {
-            self.by_slot.resize(slot + 1, None);
-        }
-        if self.by_slot[slot].is_none() {
-            // By its name's number where the interner is of the heap's
-            // names; else by its name.
-            let of_heap = interner.is_of(heap.names()).then(|| heap.symbol_text(v).and_then(|n| interner.of_number(n))).flatten();
-            self.by_slot[slot] = Some(of_heap.unwrap_or_else(|| interner.intern(&heap.symbol_name(v))));
-        }
+        of_heaps(heap, interner);
+        let n = heap.symbol_text(v).expect("an interned symbol in syntax");
+        interner.of_number(n).expect("a name of the heap's");
     }
 
+    /// The heap's symbol of `s`, `interner`'s, which is of the heap's names.
     pub fn heap_symbol(&mut self, heap: &mut Heap, interner: &Interner, s: Sym) -> Value {
-        let now = heap.collections();
-        if self.by_sym.0 != now {
-            self.by_sym = (now, Vec::new());
-        }
-        if let Some(Some(v)) = self.by_sym.1.get(s.index() as usize) {
-            return *v;
-        }
-        debug_assert!(!interner.is_uninterned(s), "an uninterned symbol in syntax: `{}`", interner.name(s));
-        // By its number where the interner is of the heap's names; else by
-        // its name.
-        let v = if interner.is_of(heap.names()) { heap.intern_text(s.index()) } else { heap.intern(interner.name(s)) };
-        let slot = heap.symbol_global_slot(v);
-        if self.by_slot.len() <= slot {
-            self.by_slot.resize(slot + 1, None);
-        }
-        self.by_slot[slot] = Some(s);
-        let k = s.index() as usize;
-        if self.by_sym.1.len() <= k {
-            self.by_sym.1.resize(k + 1, None);
-        }
-        self.by_sym.1[k] = Some(v);
-        v
+        of_heaps(heap, interner);
+        assert!(!interner.is_uninterned(s), "an uninterned symbol in syntax: `{}`", interner.name(s));
+        // The name the interner holds (which refuses another space's `Sym`).
+        let _ = interner.name(s);
+        heap.intern_text(s.index())
     }
+}
+
+/// That `interner` is of `heap`'s names, as the checker's symbols are the
+/// heap's by their numbers ([`SymTable`]): never taken for another's.
+#[inline]
+fn of_heaps(heap: &Heap, interner: &Interner) {
+    assert!(interner.is_of(heap.names()), "syntax in a heap whose names are not its interner's");
 }
 
 // ------------------------------------------------------------------ places
@@ -334,10 +314,9 @@ impl<'a> Rd<'a> {
     /// Symbol `v`, the checker's.
     #[inline(always)]
     pub fn sym_of(self, v: Value) -> Sym {
-        let slot = self.heap.symbol_global_slot(v);
-        match self.syms.by_slot.get(slot).copied().flatten() {
-            Some(s) => s,
-            None => panic!("a symbol in syntax that no builder made: `{}`", self.heap.symbol_name(v)),
+        match self.heap.symbol_text(v) {
+            Some(n) => Sym::of_names(n, self.heap.names()),
+            None => panic!("an uninterned symbol in syntax: `{}`", self.heap.symbol_name(v)),
         }
     }
 
