@@ -791,6 +791,32 @@ pub fn read_image(bytes: &[u8], globals: &[String]) -> Result<Read, String> {
     Ok((heap, value, links, natives))
 }
 
+/// What the front end's policy answers of `.fasl` `fasl`, of file `file`,
+/// not used for `why`, of `kind`, `setting` the driver's answer
+/// (`conductor.fx`'s `stale-fasl-answer`, `TODO.md` §299): none where no
+/// front end's runtime is lent, or it has none.
+fn stale_answer_asked(fasl: &Path, file: &Path, why: &str, kind: Staleness, setting: StaleAnswer) -> Option<StaleAnswer> {
+    crate::heap_syn::with_runtime(|rt| {
+        let sym = rt.heap.interned("fx26-native:stale-fasl-answer")?;
+        let f = rt.heap.global_of(sym);
+        if f == Value::UNBOUND {
+            return None;
+        }
+        let base = rt.heap.push_root(f);
+        for s in [fasl.display().to_string(), file.display().to_string(), why.to_string()] {
+            let v = rt.heap.make_string(&s);
+            rt.heap.push_root(v);
+        }
+        let args = [rt.heap.root_at(base + 1), rt.heap.root_at(base + 2), rt.heap.root_at(base + 3), Value::boolean(kind == Staleness::Suspicious), Value::boolean(setting == StaleAnswer::Refuse)];
+        let f = rt.heap.root_at(base);
+        rt.heap.pop_roots_to(base);
+        let out = fixpt_runtime::prim::enter_front_end(rt, f, &args).ok()?;
+        let tag = rt.heap.sum_tag(out);
+        Some(if rt.heap.symbol_name(tag) == "refuse" { StaleAnswer::Refuse } else { StaleAnswer::Source })
+    })
+    .flatten()
+}
+
 /// `s` as an FX-26 string literal.
 pub(crate) fn string_literal(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
@@ -824,10 +850,17 @@ impl crate::check::Checker {
             if built_in {
                 return Ok(None);
             }
-            if kind == Staleness::Suspicious && c.suspicious_fasl == StaleAnswer::Refuse {
+            // The driver's setting's answer, then the front end's policy's,
+            // where a front end is (`conductor.fx`'s `stale-fasl-answer`).
+            let setting = if kind == Staleness::Suspicious { c.suspicious_fasl } else { StaleAnswer::Source };
+            let answer = stale_answer_asked(&fasl, at, why, kind, setting).unwrap_or(setting);
+            if answer == StaleAnswer::Refuse {
                 return Err(crate::FxError::at(
                     span,
-                    format!("`{}` is not as a build left it ({why}): delete it to load `{path}` from its source, or set FIXPT_STALE_FASL=source", fasl.display()),
+                    match kind {
+                        Staleness::Suspicious => format!("`{}` is not as a build left it ({why}): delete it to load `{path}` from its source, or set FIXPT_STALE_FASL=source", fasl.display()),
+                        Staleness::Expected => format!("`{}` is stale ({why}), and this front end's policy refuses it: `{path}` is not loaded", fasl.display()),
+                    },
                 ));
             }
             c.fasl_notes.push(format!("`{}` is stale ({why}): `{path}` is loaded from its source", fasl.display()));

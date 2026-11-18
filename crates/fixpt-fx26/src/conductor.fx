@@ -8,6 +8,16 @@
 ;;; only what Rust calls of them is named at top level: a module bound at
 ;;; top level has its whole type shown, and the types of modules are large.
 
+
+;; What a `.fasl` not used is answered (`TODO.md` §299): its file read from
+;; source, or its load refused, saying why. A policy is given the `.fasl`,
+;; its file, why it is not used, whether that says it is not as a build left
+;; it (a bug's, or a build's damage) rather than out of date, and what the
+;; driver's setting answers (`fasl.rs`'s `StaleAnswer`); stderr is all it
+;; may write (the user's, 2026-11-18).
+(define-type stale-answer (sumof (source unit) (refuse unit)))
+(define-type stale-policy (subr (io stderr) (string string string bool bool) stale-answer))
+
 (define front-end-entries
   (let* (;; Hash tables, a module file of no state.
          (tables (load-module "fx26:table.fx"))
@@ -542,6 +552,14 @@
          ;; each standard environment given.
          (standard-made
           (the (ref (listof (productof (1 (listof syn acyclic)) (2 int)) acyclic) @t) (new nil)))
+         ;; The policy in force: at first, what the driver's setting
+         ;; answers; a REPL's, or a driver's, once one is given
+         ;; (`stale-fasl-policy!`).
+         (stale-fasl-policy
+          (the (ref stale-policy @t)
+               (new (lambda ((fasl string) (file string) (why string) (suspicious bool)
+                             (refuse bool))
+                      (if refuse (the stale-answer (sum refuse #u)) (sum source #u))))))
          (begun
           (lambda ((standard (listof syn acyclic)))
             (let ((made (get standard-made)))
@@ -766,6 +784,12 @@
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (parse-program parse-program)
              (read-text-at read-text-at)
+             ;; A stale `.fasl`'s answer, by the policy in force; and that
+             ;; policy replaced (`fasl.rs`'s `fasl_load`, `TODO.md` §299).
+             (stale-fasl-answer
+              (lambda ((fasl string) (file string) (why string) (suspicious bool) (refuse bool))
+                ((get stale-fasl-policy) fasl file why suspicious refuse)))
+             (stale-fasl-policy! (lambda ((p stale-policy)) (set stale-fasl-policy p)))
              (loaded-files! loaded-files!)
              (includes-given! includes-given!)
              (standard-names! (with imports-module standard-names!))
@@ -887,6 +911,8 @@
 
 (define parse-program (extract front-end-entries parse-program))
 (define read-text-at (extract front-end-entries read-text-at))
+(define stale-fasl-answer (extract front-end-entries stale-fasl-answer))
+(define stale-fasl-policy! (extract front-end-entries stale-fasl-policy!))
 (define loaded-files! (extract front-end-entries loaded-files!))
 (define includes-given! (extract front-end-entries includes-given!))
 (define standard-names! (extract front-end-entries standard-names!))

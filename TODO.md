@@ -7899,11 +7899,20 @@ driver's setting, reads the source), a refusal saying what to do (delete
 it, or the variable). Module files' `.fasl`s; a program's (`,load`'s) as
 before, each reason read from source.
 
-Left, to discuss where it is asked: FX-26 code is on the stack where a
-`.fasl` is read only where it checks code itself (`session-check`,
-`stage`), not in `conductor.fx`, which makes the front end, nor the REPL,
-which is Rust's (`fixpt-cli`'s `fx26.rs`). There, a handler `(subr (io
-stderr) (stale-fasl) (sumof (source unit) (refuse unit)))` found by a
-mark key around the call (`with-mark`, `first-mark`), the stale `.fasl` a
-value (its path, its file, its reason as a sum, which kind); the REPL a
-command (`,stale-fasl source|refuse`) setting the checker's answer.
+Built 2026-11-18, the front end's policy: `conductor.fx`'s
+`stale-policy`, `(subr (io stderr) (string string string bool bool)
+stale-answer)`, given the `.fasl`, its file, why, whether suspicious and
+the driver's setting's answer, `stale-answer` `(sumof (source unit)
+(refuse unit))`; at first the setting's answer; entries
+`stale-fasl-answer`, which the checker asks through the runtime lent it
+(`fasl.rs`'s `stale_answer_asked`), wherever a front end is, and
+`stale-fasl-policy!`, which replaces it. A refusal of one out of date says
+the policy refused it.
+
+Left: a driver's or a REPL's way to give a policy written in FX-26 (a
+session's method taking its text, made a procedure and given to
+`stale-fasl-policy!`), and its test, the answer changed by it. And later
+(the user's, 2026-11-18: plausible, saved for later), a handler found by a
+mark key around code that checks code (`session-check`, `stage`), each
+staging form's lowering reading it (`first-mark`) and passing it on, in
+every place those forms are handled.
