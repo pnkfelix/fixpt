@@ -770,8 +770,12 @@ The user's design, the reasons in the conversation that led to it:
   was defined":
   - a file sees the standard environment alone, so a file's macro's free
     standard name is `(with #%fx name)`, not the importer's top level; a
-    name neither the file's module shows nor standard is refused where the
-    file defines the macro;
+    value the file hides is reached through its frame, `(with (with
+    %shared:key %frame:F) name)`, before any standard name (`TODO.md` §300:
+    a shown member of the file's own holding every value it hides if a
+    macro of it is procedural, else those its macros' text names); a name
+    neither the file defines nor standard is refused where the file
+    defines the macro;
   - a type a file's macro writes is read through the file's module, `(select
     %shared:key T)`, `T` a whole type read as a `with` of the module reads
     types over the standard environment's alone (both checkers);

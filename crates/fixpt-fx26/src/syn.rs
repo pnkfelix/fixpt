@@ -939,12 +939,45 @@ thread_local! {
     static FASL_USED: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::default());
 }
 
+/// Each module file's frame (`TODO.md` §300), by its text's digest and its
+/// directory made whole (`frame_key`): the text of the item the Rust checker
+/// read after its forms (`Checker::frame_text`), which the parser written in
+/// FX-26 is given after its text, and an importer of its macros reads them
+/// by. The process's, not a thread's, as the front ends may check on threads
+/// of their own; what a file's text and directory give, the same wherever.
+static FRAMES: std::sync::Mutex<Option<HashMap<(u64, String), String>>> = std::sync::Mutex::new(None);
+
+/// A module file's key among the frames: its text's digest, and its
+/// directory, however spelled, made whole, where its module parameters'
+/// files are read from.
+fn frame_key(at: &std::path::Path, text: &str) -> (u64, String) {
+    let dir = at.parent().map(|d| std::fs::canonicalize(d).unwrap_or_else(|_| d.to_path_buf()).display().to_string()).unwrap_or_default();
+    (crate::fasl::digest(text), dir)
+}
+
+/// The frame the Rust checker made of the module file at `at`, of text `text`.
+pub(crate) fn frame_made(at: &std::path::Path, text: &str, frame: String) {
+    let mut frames = FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+    frames.get_or_insert_with(HashMap::default).insert(frame_key(at, text), frame);
+}
+
+/// The frame of the module file at `at`, of text `text`, if the Rust checker
+/// made one (`frame_made`).
+pub(crate) fn frame_of(at: &std::path::Path, text: &str) -> Option<String> {
+    let frames = FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+    frames.as_ref()?.get(&frame_key(at, text)).cloned()
+}
+
 /// The text of the module file at `at` as the parser written in FX-26 is
-/// given it: its own, and its frame after it, if it has one, as the Rust
-/// checker reads it (`shapes::frame_text_of`, `Checker::framed`).
+/// given it: its own, and its frame after it, if it has one
+/// (`Checker::framed`): made now if no checker read the file before, and it
+/// may define a macro (`Checker::frame_made_for`).
 fn file_text(at: &std::path::Path) -> std::io::Result<String> {
     let t = crate::reads::read_file(at)?;
-    Ok(match crate::macros::shapes::frame_text_of(at, &t) {
+    if t.contains("define-syntax") && frame_of(at, &t).is_none() {
+        crate::Checker::frame_made_for(at);
+    }
+    Ok(match frame_of(at, &t) {
         Some(frame) => format!("{t}\n{frame}"),
         None => t,
     })

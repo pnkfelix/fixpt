@@ -653,6 +653,7 @@
   (lambda (base free h)
     (and (= (extract h 1) 3)
          (or (and (= free 0) (name-in? (string->symbol base) (extract h 3)))
+             (and (= free 0) (name-in? (string->symbol base) (extract h 6)))
              (and (= free 1) (string=? base (symbol->string (extract h 2))))))))
 ;; Binder `c` (`captor-of`'s) onto `cs`, if it captures `base`, which a
 ;; module file's own macro introduces at `s`, or the instance an imported
@@ -793,6 +794,15 @@
         (else
           (cond ((and (= free 0) (name-in? (string->symbol base) (extract h 3)))
                  (with-of (symbol->string (extract h 2))))
+                ;; One of its frame's, through its frame (`TODO.md` §300).
+                ((and (= free 0) (name-in? (string->symbol base) (extract h 6)))
+                 (mk-list (list (mk-symbol "with" a b)
+                                (mk-list (list (mk-symbol "with" a b)
+                                               (mk-symbol (symbol->string (extract h 2)) a b)
+                                               (mk-symbol (symbol->string (extract h 5)) a b))
+                                         a b)
+                                (mk-symbol base a b))
+                          a b))
                 ((instance-named? base free h) (mk-symbol base a b))
                 ((= free 0) (with-of "#%fx"))
                 ((= free 2) (mk-symbol base a b))

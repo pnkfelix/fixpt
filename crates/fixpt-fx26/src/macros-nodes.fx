@@ -62,12 +62,18 @@
 ;; values its module shows (its other names the standard environment's); or
 ;; a module file's items, as its own macros see them (2); or a file as an
 ;; importer of an instance of it has it (3), the instance's name in place of
-;; `%shared:key`, which a binder at a use is kept from capturing. A type of its
-;; structure, the same in each instance of the expander's files
-;; (`macros.fx`'s `def-envs`).
-(define-type def-env (tupleof int symbol names (listof (tupleof symbol symbol) acyclic)))
+;; `%shared:key`, which a binder at a use is kept from capturing. Then each
+;; of the file's macros' names and the name the importer has it by; and its
+;; frame (`TODO.md` §300), its name and the values it holds, which a name it
+;; does not show reaches before the standard environment's (`'-` and none,
+;; if it has none). A type of its structure, the same in each instance of
+;; the expander's files (`macros.fx`'s `def-envs`).
+(define-type def-env
+  (tupleof int symbol names (listof (tupleof symbol symbol) acyclic) symbol names))
 (define def-env-top (->* () def-env)
-  (lambda () (tuple 0 'top (the names nil) (the (listof (tupleof symbol symbol) acyclic) nil))))
+  (lambda ()
+    (tuple 0 'top (the names nil) (the (listof (tupleof symbol symbol) acyclic) nil) '-
+           (the names nil))))
 (define-type def-envs (listof (tupleof string def-env) acyclic))
 ;; A clause: its pattern (of the operands), its template, and its actions,
 ;; by their paths in the template, the last made first; its pattern's
@@ -109,9 +115,10 @@
 ;; What a file's macros are defined in (`macros.rs`'s `FileScope`): the
 ;; hidden global every load of the file is; the values and the types its
 ;; module shows; each of its macros' names, and the name the importer has
-;; it by; and the standard names. None for a program's own.
+;; it by; the standard names; and its frame, its name and the values it
+;; holds (`TODO.md` §300). None for a program's own.
 (define-type scope
-  (tupleof symbol names names (listof (tupleof symbol symbol) acyclic) names))
+  (tupleof symbol names names (listof (tupleof symbol symbol) acyclic) names symbol names))
 (define-type scopes (listof scope acyclic))
 
 ;; Strings, `xs` sorted onto `out`; and joined, `, ` between.

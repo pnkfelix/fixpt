@@ -516,7 +516,18 @@ pub struct FileScope<'a> {
     pub values: fixpt_hash::HashSet<Sym>,
     pub types: fixpt_hash::HashSet<Sym>,
     pub internal: HashMap<Sym, Sym>,
+    pub frame: Frame,
     pub is_standard: &'a dyn Fn(Sym) -> bool,
+}
+
+/// A module file's frame (`TODO.md` §300; `Checker::frame_text`), if it
+/// has one: its member's name, and the values it holds, which the file does
+/// not show and its macros' expansions may reach, through it.
+pub type Frame = Option<(Sym, Rc<HashSet<Sym>>)>;
+
+/// Whether frame `frame` holds `n`.
+pub(crate) fn frame_holds(frame: &Frame, n: Sym) -> bool {
+    frame.as_ref().is_some_and(|(_, kept)| kept.contains(&n))
 }
 
 /// What `import-with-syntax` of a file reads of it, in order
@@ -544,6 +555,7 @@ pub struct FileMacros {
     pub shared: Sym,
     pub values: HashSet<Sym>,
     pub types: HashSet<Sym>,
+    pub frame: Frame,
     pub key: String,
     pub prefix: String,
     pub text: std::sync::Arc<str>,
@@ -1655,7 +1667,7 @@ impl Macros {
     fn def_env_of(&self, file: Option<&FileScope>) -> hygiene::DefEnv {
         match file {
             None => self.withs.def_env.clone(),
-            Some(f) => hygiene::DefEnv::File { shared: f.shared, values: Rc::new(f.values.clone()), instance: f.instance, internal: Rc::new(f.internal.clone()) },
+            Some(f) => hygiene::DefEnv::File { shared: f.shared, values: Rc::new(f.values.clone()), instance: f.instance, internal: Rc::new(f.internal.clone()), frame: f.frame.clone() },
         }
     }
 
@@ -1682,7 +1694,7 @@ impl Macros {
         // Its recursive syntax types go on from the program's, which take
         // them back: the signatures refer to them by place.
         let shared = instance.unwrap_or(file.shared);
-        let def_env = hygiene::DefEnv::File { shared, values: Rc::new(file.values.clone()), instance: instance.is_some(), internal: Rc::default() };
+        let def_env = hygiene::DefEnv::File { shared, values: Rc::new(file.values.clone()), instance: instance.is_some(), internal: Rc::default(), frame: file.frame.clone() };
         let (key, prefix) = match instance {
             Some(lib) => (format!("{}@{}", file.key, interner.name(lib)), instance_prefix(&file.prefix, interner.name(lib))),
             None => (file.key.clone(), file.prefix.clone()),
@@ -1726,7 +1738,7 @@ impl Macros {
                     // The file's phase-1 forms, in force for its macros after them.
                     FileEntry::Syntax(form, _) if form.head_sym().is_some_and(|h| interner.name(h) == "begin-for-syntax") => own.for_syntax(form, interner)?,
                     FileEntry::Syntax(form, hidden) => {
-                        let scope = FileScope { shared, instance: instance.is_some(), values: file.values.clone(), types: file.types.clone(), internal: internal.clone(), is_standard };
+                        let scope = FileScope { shared, instance: instance.is_some(), values: file.values.clone(), types: file.types.clone(), internal: internal.clone(), frame: file.frame.clone(), is_standard };
                         for n in own.define_in(form, interner, Some(&scope))? {
                             by_internal(&mut own, n, internal[&n]);
                             given.push((n, *hidden));
@@ -2313,11 +2325,11 @@ impl Macros {
                         (None, Free::Qualified, Some(f)) if f.types.contains(n) => Action::ModuleType(f.shared),
                         (None, Free::Qualified, Some(_)) => Action::StandardType,
                         (None, Free::Toplevel, None) => Action::Alias,
-                        (None, Free::Toplevel, Some(f)) if f.values.contains(n) || (f.is_standard)(*n) => Action::Alias,
+                        (None, Free::Toplevel, Some(f)) if f.values.contains(n) || frame_holds(&f.frame, *n) || (f.is_standard)(*n) => Action::Alias,
                         (None, Free::Toplevel, Some(_)) => {
                             return Err(FxError::at(
                                 span,
-                                format!("`{}` is neither a value the file's module shows nor a standard binding: a file's macro names only those, as they are where it is imported", interner.name(*n)),
+                                format!("`{}` is neither a value the file defines nor a standard binding: a file's macro names only those, as they are where it is imported", interner.name(*n)),
                             ));
                         }
                     };

@@ -205,6 +205,33 @@
           ((and (not (null? (proper s))) (syn-symbol? (car (proper s))))
            (list (syn-symbol (car (proper s)))))
           (else nil))))
+;; A module file's frame (`Checker::frame_text`, `TODO.md` §300), of its
+;; forms `forms`: the last of them, if it is one, `(define %frame:F (let
+;; (…) (module (define x %fr:x) …)))`, as its name and the values it
+;; holds; else `'-` and none.
+(define frame-of (->* (syns-a) (tupleof symbol names))
+  (lambda (forms)
+    (cond ((null? forms) (tuple '- (the names nil)))
+          ((not (null? (cdr forms))) (frame-of (cdr forms)))
+          (else
+           (let* ((items (proper (car forms)))
+                  (named (if (< (len items) 3) nil (defined-name (nth items 1))))
+                  (s (if (null? named) "" (symbol->string (car named)))))
+             (if (and (string=? (head-name (car forms)) "define") (> (string-length s) 7)
+                      (string=? (substring s 0 7) "%frame:"))
+                 (let ((inner (proper (nth items 2))))
+                   (tuple (car named)
+                          (if (< (len inner) 3) nil (frame-held (proper (nth inner 2))))))
+                 (tuple '- (the names nil))))))))
+;; The values `(module (define x …) …)`, `xs`'s, defines.
+(define frame-held (->* (syns-a) names)
+  (lambda (xs)
+    (cond ((null? xs) nil)
+          ((string=? (head-name (car xs)) "define")
+           (let ((items (proper (car xs))))
+             (append (if (< (len items) 2) nil (defined-name (nth items 1)))
+                     (frame-held (cdr xs)))))
+          (else (frame-held (cdr xs))))))
 (define rec-names (->* (syns-a) names)
   (lambda (bs)
     (cond ((null? bs) nil)

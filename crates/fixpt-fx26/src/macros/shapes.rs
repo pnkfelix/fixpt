@@ -251,127 +251,29 @@ pub(crate) fn load_key(dir: Option<&std::path::Path>, path: &str, input: bool) -
     (at, key)
 }
 
-/// The frame of the module file at `at`, of text `text` (`TODO.md` §300),
-/// as the text of one more item after its own, if any of its forms defines
-/// a macro and its macros may reach hidden values: `(define %frame:F (let
-/// ((%fr:x x) …) (module (define x %fr:x) …)))`, a shown member of a name
-/// of the file's own (`frame_name`), holding the values its expansions may
-/// reach that the file does not show. Every one if a macro of it is
-/// procedural, whose transformer may rename any name and pass `rename` to
-/// code no reader sees; else those its macros' text names. A hidden value
-/// is one of its `hide`n definitions, or a name a module parameter not
-/// `qualified` brings: what the parameter's `(load-moduleof "f" …)` file
-/// defines outside a `hide`, or what its `(moduleof (val n …) …)` names.
-/// Of texts alone, read here apart from any checker, so that the Rust
-/// checker (`Checker::framed`) and the parser written in FX-26, handed the
-/// file's text with it (`syn::file_text`), read the same.
-pub(crate) fn frame_text_of(at: &std::path::Path, text: &str) -> Option<String> {
-    use fixpt_read::{Datum, Syntax};
-    fn read(text: &str, interner: &mut Interner) -> Vec<Syntax> {
-        let mut sources = fixpt_read::SourceMap::default();
-        fixpt_read::read_string(&mut sources, interner, "frame", text, fixpt_read::SyntaxProfile::FX26).unwrap_or_default()
-    }
-    fn items(s: &Syntax) -> &[Syntax] {
-        match &s.datum {
-            Datum::List { items, .. } => items,
-            _ => &[],
-        }
-    }
-    fn name(s: &Syntax, interner: &Interner) -> Option<String> {
-        match &s.datum {
-            Datum::Symbol(n) => Some(interner.name(*n).to_string()),
-            _ => None,
-        }
-    }
-    fn head(s: &Syntax, interner: &Interner) -> Option<String> {
-        items(s).first().and_then(|h| name(h, interner))
-    }
-    fn symbols(s: &Syntax, interner: &Interner, out: &mut fixpt_hash::HashSet<String>) {
-        match &s.datum {
-            Datum::Symbol(n) => _ = out.insert(interner.name(*n).to_string()),
-            Datum::List { items, tail } => items.iter().chain(tail.as_deref()).for_each(|i| symbols(i, interner, out)),
-            Datum::Vector(items) => items.iter().for_each(|i| symbols(i, interner, out)),
-            _ => {}
-        }
-    }
-    // The values a definition defines: a `define`'s, a `define*`'s, each of
-    // a `define-rec`'s.
-    fn defined(x: &Syntax, interner: &Interner) -> Vec<String> {
-        let parts = items(x);
-        match head(x, interner).as_deref() {
-            Some("define" | "define*") => parts.get(1).and_then(|n| name(n, interner)).into_iter().collect(),
-            Some("define-rec") => parts[1..].iter().filter_map(|b| items(b).first().and_then(|n| name(n, interner))).collect(),
-            _ => Vec::new(),
-        }
-    }
+/// The frame named in `frame`, a frame's text (`Checker::frame_text`):
+/// its name, and the names it keeps, in order.
+pub(crate) fn frame_names(frame: &str) -> Option<(String, Vec<String>)> {
+    use fixpt_read::Datum;
     let mut interner = Interner::new();
-    let forms = read(text, &mut interner);
-    let (mut any, mut procedural, mut written) = (false, false, fixpt_hash::HashSet::default());
-    let mut own_hidden: Vec<String> = Vec::new();
-    for f in &forms {
-        let hidden = head(f, &interner).as_deref() == Some("hide");
-        let xs: &[Syntax] = if hidden { &items(f)[1..] } else { std::slice::from_ref(f) };
-        for x in xs {
-            match head(x, &interner).as_deref() {
-                Some("define-syntax" | "define-syntax-rec") => {
-                    any = true;
-                    procedural |= items(x).last().and_then(|t| head(t, &interner)).is_none_or(|h| h != "syntax-rules");
-                    symbols(x, &interner, &mut written);
-                }
-                _ if hidden => own_hidden.extend(defined(x, &interner)),
-                _ => {}
-            }
-        }
-    }
-    if !any {
-        return None;
-    }
-    // What each module parameter not `qualified` brings.
-    let dir = at.parent();
-    let mut brought: Vec<String> = Vec::new();
-    let params = forms.first().filter(|f| head(f, &interner).as_deref() == Some("module-parameters")).and_then(|f| items(f).get(1)).map(items).unwrap_or_default();
-    for b in params {
-        let [_, t] = items(b) else { continue };
-        match (head(t, &interner).as_deref(), items(t).get(1).map(|p| &p.datum)) {
-            (Some("load-moduleof"), Some(Datum::Str(p))) => {
-                let path = load_key(dir, p, false).0;
-                let other = match crate::built_in_module(p) {
-                    Some(t) => t.to_string(),
-                    None => crate::reads::read_file(&path).unwrap_or_default(),
-                };
-                let mut inner = Interner::new();
-                for g in read(&other, &mut inner) {
-                    if head(&g, &inner).as_deref() != Some("hide") {
-                        brought.extend(defined(&g, &inner));
-                    }
-                }
-            }
-            (Some("moduleof"), _) => {
-                for e in &items(t)[1..] {
-                    if head(e, &interner).as_deref() == Some("val") {
-                        brought.extend(items(e).get(1).and_then(|n| name(n, &interner)));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut kept: Vec<String> = Vec::new();
-    for n in own_hidden.into_iter().chain(brought) {
-        if !n.starts_with('%') && (procedural || written.contains(&n)) && !kept.contains(&n) {
-            kept.push(n);
-        }
-    }
-    if kept.is_empty() {
-        return None;
-    }
-    let binds: Vec<String> = kept.iter().map(|n| format!("(%fr:{n} {n})")).collect();
-    let defs: Vec<String> = kept.iter().map(|n| format!("(define {n} %fr:{n})")).collect();
-    Some(format!("(define {} (let ({}) (module {})))", frame_name(text), binds.join(" "), defs.join(" ")))
+    let mut sources = fixpt_read::SourceMap::default();
+    let read = fixpt_read::read_string(&mut sources, &mut interner, "frame", frame, fixpt_read::SyntaxProfile::FX26).ok()?;
+    let items = |d: &Datum| match d {
+        Datum::List { items, .. } => items.clone(),
+        _ => Vec::new(),
+    };
+    let name = |d: &Datum| match d {
+        Datum::Symbol(n) => Some(interner.name(*n).to_string()),
+        _ => None,
+    };
+    let def = items(&read.first()?.datum);
+    let n = name(&def.get(1)?.datum)?;
+    let module = items(&items(&def.get(2)?.datum).get(2)?.datum);
+    Some((n, module[1..].iter().filter_map(|d| items(&d.datum).get(1).and_then(|x| name(&x.datum))).collect()))
 }
 
 /// The name of the frame of the module file of text `text`
-/// (`Macros::frame_text`): its own, so that no two files' meet where an
+/// (`Checker::frame_text`): its own, so that no two files' meet where an
 /// `include` brings them; and of its text, not of where it is read from, so
 /// that it is the same from its source and from its `.fasl`, wherever.
 pub(crate) fn frame_name(text: &str) -> String {
@@ -493,7 +395,8 @@ impl<'a, 'm> Shaper<'a, 'm> {
     }
 
     /// Shape `s` without the checkers' own names (`%…`), which no program
-    /// reads, as a type has them.
+    /// reads, as a type has them; but a file's frame (`%frame:…`, `TODO.md`
+    /// §300), which its macros' expansions read.
     fn own(&self, s: &Rc<Shape>) -> Rc<Shape> {
         match &**s {
             Shape::Fun { params, result } => Rc::new(Shape::Fun {
@@ -501,7 +404,7 @@ impl<'a, 'm> Shaper<'a, 'm> {
                 result: result.as_ref().map(|r| self.own(r)),
             }),
             Shape::Module { vals, descs } => {
-                let mine = |n: &Sym| !self.name(*n).starts_with('%');
+                let mine = |n: &Sym| !self.name(*n).starts_with('%') || self.name(*n).starts_with("%frame:");
                 Rc::new(Shape::Module {
                     vals: vals.iter().filter(|(n, _)| mine(n)).map(|(n, x)| (*n, x.as_ref().map(|x| self.own(x)))).collect(),
                     descs: descs.iter().filter(|(n, _)| mine(n)).cloned().collect(),
@@ -1211,6 +1114,15 @@ impl Macros {
         let kept = walked.written.into_iter().map(|(p, s)| (p, s.map(Kept::new))).collect();
         self.withs.shapes.files.insert(key, FileShape { value, module, written: Some(Rc::new(kept)) });
         Ok(())
+    }
+
+    /// The names of the values the module of the file of key `key` (`load_key`)
+    /// gives, if its shape is known.
+    pub(crate) fn file_module_values(&self, key: &str) -> Option<Vec<Sym>> {
+        match self.withs.shapes.files.get(key)?.module.as_deref()? {
+            Shape::Module { vals, .. } => Some(vals.iter().map(|(n, _)| *n).collect()),
+            Shape::Fun { .. } => None,
+        }
     }
 
     /// A file's forms, `forms`, as it is read to be checked, with the

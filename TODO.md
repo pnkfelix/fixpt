@@ -7989,9 +7989,23 @@ hidden value if a macro of the file is procedural; else those its macros'
 text names. A name a file's macro means resolves shown, then frame, then
 (a name the file binds but does not keep) refused, then standard.
 
-Built 2026-11-18, step 1, the frame: `shapes::frame_text_of`, read from
-the file's text and its parameters' files' texts, apart from any checker;
-the Rust checker reads it after the file's forms (`Checker::framed`), and
-the parser written in FX-26 is handed the file's text with it
-(`syn::file_text`), so both checkers, the compilers and `.fasl`s see the
-same member. Next: step 2, a file's macros' names resolved through it.
+Built 2026-11-18, step 1, the frame; step 2, a file's macros' names
+resolved through it. The Rust checker makes it (`Checker::frame_text`),
+from the file's forms its own macros' uses expanded (a hidden
+`define-datatype`'s and `import`'s expanded too) and its parameters' files'
+shapes, where it shapes the file (`file_shapes_of`) and reads it
+(`read_module_file_at`), kept by the text's digest and directory
+(`syn::frame_made`); the parser written in FX-26 is handed the file's text
+with it (`syn::file_text`), made then by a checker of its own if none read
+the file before (`Checker::frame_made_for`: a test may run the FX-26
+checker first). A file's macro's name it does not show resolves `(with
+(with inst %frame:F) x)` if the frame holds it, before any standard name
+(`DefEnv::File`'s `frame`; FX-26 `def-env`'s fifth and sixth, the scope's
+sixth and seventh, `frame-of`, `alias-written`); a template's name the
+frame holds is no longer refused. Nothing the file binds and does not keep
+can be reached: a procedural macro's frame keeps every hidden value, a
+`syntax-rules` one's every name its macros' text writes. The expander's
+shapes keep `%frame:` names (`Macros::own`). Later, if wanted: the frame
+made by the front end written in FX-26 itself, which needs a file whose
+macros are imported expanded and shaped before its importer is (the Rust
+checker's order), not after every file's own expansion. Next: step 3.

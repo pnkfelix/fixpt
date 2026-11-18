@@ -35,7 +35,10 @@ pub(crate) enum DefEnv {
     /// And, `internal`, each of the file's macros, by its name there, as
     /// its importer has it (`%syntax:key:name`): what a transformer's
     /// renamed name that is one means (`Macros::procedural_opened`).
-    File { shared: Sym, values: Rc<HashSet<Sym>>, instance: bool, internal: Rc<HashMap<Sym, Sym>> },
+    /// And `frame`, the file's frame, whose values a name it does not show
+    /// that its macros write reaches, `(with (with shared frame) x)`, before
+    /// any standard one (`TODO.md` §300).
+    File { shared: Sym, values: Rc<HashSet<Sym>>, instance: bool, internal: Rc<HashMap<Sym, Sym>>, frame: super::Frame },
     Within,
 }
 
@@ -45,6 +48,8 @@ enum Made {
     TopValue(String),
     TopDesc(String),
     Of(Sym, String),
+    /// A value of a module's frame, `(with (with m frame) x)`.
+    Framed(Sym, Sym, String),
     Plain(String),
 }
 
@@ -162,12 +167,17 @@ impl Macros {
                         captured(*shared, Ns::Value, true)?;
                         Made::Of(*shared, base.to_string())
                     }
+                    Some(DefEnv::File { shared, instance: true, frame: frame @ Some((f, _)), .. }) if free == Free::Toplevel && a.interner.get(base).is_some_and(|v| super::frame_holds(frame, v)) => {
+                        captured(*shared, Ns::Value, true)?;
+                        Made::Framed(*shared, *f, base.to_string())
+                    }
                     Some(DefEnv::File { shared, instance: true, .. }) if free == Free::Qualified && a.interner.get(base) == Some(*shared) => {
                         captured(*shared, Ns::Value, true)?;
                         Made::Plain(base.to_string())
                     }
-                    Some(DefEnv::File { shared, values, .. }) => match free {
+                    Some(DefEnv::File { shared, values, frame, .. }) => match free {
                         Free::Toplevel if a.interner.get(base).is_some_and(|v| values.contains(&v)) => Made::Of(*shared, base.to_string()),
+                        Free::Toplevel if let Some((f, _)) = frame.as_ref().filter(|_| a.interner.get(base).is_some_and(|v| super::frame_holds(frame, v))) => Made::Framed(*shared, *f, base.to_string()),
                         Free::Toplevel => Made::Of(fx, base.to_string()),
                         Free::Plain => Made::Plain(base.to_string()),
                         // A file's macro writes its descriptions through
@@ -221,6 +231,11 @@ impl Macros {
                 Made::Of(m, n) => {
                     let n = interner.intern(&n);
                     Syn::lst(span, vec![Syn::symbol(span, with, interner), Syn::symbol(span, m, interner), Syn::symbol(span, n, interner)])
+                }
+                Made::Framed(m, f, n) => {
+                    let n = interner.intern(&n);
+                    let inner = Syn::lst(span, vec![Syn::symbol(span, with, interner), Syn::symbol(span, m, interner), Syn::symbol(span, f, interner)]);
+                    Syn::lst(span, vec![Syn::symbol(span, with, interner), inner, Syn::symbol(span, n, interner)])
                 }
             };
             written.insert(p, s);

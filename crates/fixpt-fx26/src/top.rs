@@ -724,8 +724,114 @@ impl Checker {
         Ok(out)
     }
 
+    /// The frame of the module file of text `text` whose forms are `forms`,
+    /// its own macros' uses expanded, read from directory `dir` (`TODO.md`
+    /// §300), as the text of one more item after its own, if any of its
+    /// forms defines a macro and its macros may reach hidden values:
+    /// `(define %frame:F (let ((%fr:x x) …) (module (define x %fr:x) …)))`,
+    /// a shown member of a name of the file's own (`shapes::frame_name`),
+    /// holding the values its expansions may reach that the file does not
+    /// show. Every one if a macro of it is procedural, whose transformer may
+    /// rename any name and pass `rename` to code no reader sees; else those
+    /// its macros' text names. A hidden value is every one the file binds
+    /// in a `hide` (each form as the parser reads it, a `define-datatype`'s
+    /// and an `import`'s expanded: a `define`, `define*`, `define-rec`, a
+    /// `define-generative`'s conversions), or that a module parameter not
+    /// `qualified` brings: what its `load-moduleof` file's module gives, by
+    /// its shape, or what its `moduleof` names. Made here alone, and handed
+    /// to the parser written in FX-26 as text (`syn::frame_made`), so both
+    /// checkers read the same.
+    fn frame_text(&mut self, text: &str, forms: &[Syn], dir: Option<&std::path::Path>) -> Option<String> {
+        let name = |c: &Self, s: &Syn| s.sym().map(|n| c.interner.name(n).to_string());
+        let head = |c: &Self, s: &Syn| s.head_sym().map(|n| c.interner.name(n).to_string());
+        fn symbols(s: &Syn, interner: &fixpt_read::Interner, out: &mut fixpt_hash::HashSet<String>) {
+            match s.view() {
+                crate::heap_syn::V::Symbol(n) => _ = out.insert(interner.name(n).to_string()),
+                crate::heap_syn::V::List { items, tail } => items.iter().chain(tail.as_ref()).for_each(|i| symbols(i, interner, out)),
+                crate::heap_syn::V::Vector(items) => items.iter().for_each(|i| symbols(i, interner, out)),
+                _ => {}
+            }
+        }
+        let (mut any, mut procedural, mut written) = (false, false, fixpt_hash::HashSet::default());
+        let mut hidden: Vec<Syn> = Vec::new();
+        for f in forms {
+            let listed = f.list();
+            let is_hide = head(self, f).as_deref() == Some("hide");
+            let xs: Vec<Syn> = if is_hide { listed.as_deref().unwrap_or_default()[1..].to_vec() } else { vec![*f] };
+            for x in xs {
+                if syntax_names(&x, &self.interner).is_some() {
+                    any = true;
+                    let parts = x.list().unwrap_or_default();
+                    procedural |= parts.last().and_then(|t| head(self, t)).is_none_or(|h| h != "syntax-rules");
+                    symbols(&x, &self.interner, &mut written);
+                } else if is_hide {
+                    if self.expand_datatype(x, &mut hidden).is_err() {
+                        return None;
+                    }
+                }
+            }
+        }
+        if !any {
+            return None;
+        }
+        let mut bound: Vec<String> = Vec::new();
+        for x in &hidden {
+            let parts = x.list().unwrap_or_default();
+            match head(self, x).as_deref() {
+                Some("define" | "define*") => bound.extend(parts.get(1).and_then(|n| name(self, n))),
+                Some("define-rec") => bound.extend(parts[1..].iter().filter_map(|b| b.list().and_then(|l| l.first().and_then(|n| name(self, n))))),
+                Some("define-generative") => {
+                    for w in parts.windows(2) {
+                        if matches!(w[0].view(), crate::heap_syn::V::Keyword(k) if matches!(self.interner.name(k), "seal" | "unseal")) {
+                            bound.extend(name(self, &w[1]));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // What each module parameter not `qualified` brings.
+        for b in forms.first().and_then(|f| crate::parse::module_parameters_of(f, &self.interner)).unwrap_or_default() {
+            if crate::parse::binder_is_kind(&b, &self.interner) {
+                continue;
+            }
+            let listed = b.list();
+            let Some([_, t]) = listed.as_deref() else { continue };
+            let parts = t.list().unwrap_or_default();
+            match (head(self, t).as_deref(), parts.get(1).map(|p| p.view())) {
+                (Some("load-moduleof" | "load-input-moduleof"), Some(crate::heap_syn::V::Str(p))) => {
+                    let input = head(self, t).as_deref() == Some("load-input-moduleof");
+                    let key = crate::macros::shapes::load_key(dir, &p, input).1;
+                    let vals = self.macros.file_module_values(&key)?;
+                    bound.extend(vals.into_iter().map(|n| self.interner.name(n).to_string()));
+                }
+                (Some("moduleof"), _) => {
+                    for e in &parts[1..] {
+                        let el = e.list().unwrap_or_default();
+                        if head(self, e).as_deref() == Some("val") {
+                            bound.extend(el.get(1).and_then(|n| name(self, n)));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut kept: Vec<String> = Vec::new();
+        for n in bound {
+            if !n.starts_with('%') && (procedural || written.contains(&n)) && !kept.contains(&n) {
+                kept.push(n);
+            }
+        }
+        if kept.is_empty() {
+            return None;
+        }
+        let binds: Vec<String> = kept.iter().map(|n| format!("(%fr:{n} {n})")).collect();
+        let defs: Vec<String> = kept.iter().map(|n| format!("(define {n} %fr:{n})")).collect();
+        Some(format!("(define {} (let ({}) (module {})))", crate::macros::shapes::frame_name(text), binds.join(" "), defs.join(" ")))
+    }
+
     /// Module file `at`'s forms, `forms`, of text `text`, with its frame
-    /// last, if it has one (`shapes::frame_text_of`, `TODO.md` §300) and
+    /// last, if it has one (`Checker::frame_text`, `TODO.md` §300) and
     /// they have it not yet: read as if after its text, at the places the
     /// parser written in FX-26 reads it at, which is handed the file's text
     /// with it (`syn::file_text`), and placed in `file` if given.
@@ -735,7 +841,8 @@ impl Checker {
         if has {
             return forms;
         }
-        let Some(frame) = crate::macros::shapes::frame_text_of(at, text) else { return forms };
+        let Some(frame) = self.frame_text(text, &forms, at.parent()) else { return forms };
+        crate::syn::frame_made(at, text, frame.clone());
         let whole = format!("{text}\n{frame}");
         let start = text.len() + 1;
         let read = self.syn(|c| crate::heap_syn::read_syn_side_from(&whole, start, &mut c.interner));
@@ -881,6 +988,18 @@ impl Checker {
             crate::macros::shapes::loads_in(f, &self.interner, &mut loads);
         }
         self.file_shapes_of(loads, dir);
+    }
+
+    /// The frame of the module file at `at` made, by a checker of its own
+    /// reading it as a load of it is read (`file_shapes_of`, `framed`), for a
+    /// reading that needs it before any checker read the file: the parser
+    /// written in FX-26 handed it (`syn::file_text`) with no Rust checker
+    /// before it, as a test may run it.
+    pub(crate) fn frame_made_for(at: &std::path::Path) {
+        let mut c = Checker::new();
+        let dir = at.parent().map(|d| d.to_path_buf());
+        c.base_dir = dir.clone();
+        c.file_shapes_of(vec![(at.display().to_string(), false)], dir);
     }
 
     /// [`file_shapes_for`](Self::file_shapes_for) of the files `loads`
@@ -1298,9 +1417,15 @@ impl Checker {
         })();
         r.map_err(|e| self.in_loaded(e, file))?;
         let (values, types) = self.names_shown(&shown);
+        // Its frame, as the checker made it where the file's shape was found.
+        self.file_shapes_of(vec![(path.to_string(), false)], dir);
+        let frame = crate::syn::frame_of(&at, &text).and_then(|f| crate::macros::shapes::frame_names(&f)).map(|(n, kept)| {
+            let kept: fixpt_hash::HashSet<Sym> = kept.iter().map(|k| self.interner.intern(k)).collect();
+            (self.interner.intern(&n), Rc::new(kept))
+        });
         let shared = self.interner.intern(&format!("%shared:{key}"));
         let text: std::sync::Arc<str> = text.as_str().into();
-        Ok(Rc::new(crate::macros::FileMacros { shared, values, types, prefix: crate::macros::file_prefix(&key, true), key, text, entries }))
+        Ok(Rc::new(crate::macros::FileMacros { shared, values, types, frame, prefix: crate::macros::file_prefix(&key, true), key, text, entries }))
     }
 
     /// The values and the types and effects `forms` define, a module

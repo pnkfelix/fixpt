@@ -151,7 +151,7 @@ fn an_instances_macros_name_it() {
 #[test]
 fn what_cannot_be_imported_is_refused() {
     let cases = [
-        ("main-secret.fx", "`hidden` is neither a value the file's module shows nor a standard binding"),
+        ("main-secret.fx", "`nowhere` is neither a value the file defines nor a standard binding"),
         ("main-own-before.fx", "`one` is a macro of this file used before the file defines it"),
         ("main-own-with.fx", "where a `with` or `include` around its use may give it: not yet"),
         ("main-own-typed.fx", "a typed hole in a macro a file uses itself, not yet"),
@@ -257,4 +257,25 @@ fn a_module_files_frame_holds_what_its_macros_may_reach() {
         assert!(frame(shapes[3]).is_some_and(|f| f.starts_with("(moduleof (val own int) (val core-helper (subr pure (int) int)))")), "{round}: {}", shapes[3]);
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A file's macro's expansion reaches a value the file hides, through its
+/// frame (`TODO.md` §300): a `syntax-rules` template's name of it; a
+/// procedural transformer that passes `rename` to a helper, which renames
+/// it (what a name means is the renaming's own, wherever it is called); and
+/// a hidden value of a standard binding's name, which is the file's, not
+/// the standard one (it was taken for the standard one). On every machine,
+/// both checkers agreeing.
+#[test]
+fn a_files_macro_reaches_what_the_file_hides() {
+    for (name, want) in [("main-frame-rules.fx", "42 : int"), ("main-frame-er.fx", "5 : int"), ("main-frame-shadow.fx", "99 : int")] {
+        for m in MACHINES {
+            let (out, err) = eval(m, name);
+            assert!(out.lines().last().is_some_and(|l| l.starts_with(want)), "{name} on {m}: {out}{err}");
+        }
+        let path = format!("{}/tests/programs/import-with-syntax/{name}", env!("CARGO_MANIFEST_DIR"));
+        let out = Command::new(FIXPT).args(["check", &path]).output().expect("runs");
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains("both checkers agree"), "{name}: {said}{}", String::from_utf8_lossy(&out.stderr));
+    }
 }

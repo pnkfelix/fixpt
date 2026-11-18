@@ -65,7 +65,7 @@
         imports-syntax? import-usage name-filter all-names listed? not-macros loaded-path
         file-syntax hidden-syntax hide-form? file-items names-shown defined-name rec-names
         generative-values macro-names internal-names taken? shown-names macro-sites load-noted
-        brings? shown-syntax lenient-filter names-only
+        frame-of brings? shown-syntax lenient-filter names-only
         (type load-defs filter files mades file-macro places))
 
 ;;; ------------------------------------------------------------ clauses
@@ -336,12 +336,13 @@
                                        (act-instance-type (extract (car file) 1))
                                        (act-module-type (extract (car file) 1)))))
                             (else (list (act-standard-type)))))
-          ((or (null? file) (name-in? n (extract (car file) 2)) (name-in? n (extract (car file) 5)))
+          ((or (null? file) (name-in? n (extract (car file) 2)) (name-in? n (extract (car file) 7))
+               (name-in? n (extract (car file) 5)))
            (list (act-alias)))
           (else
            (begin
-             (fail-at fail (string-append "`" (symbol->string n) "` is neither a value the file's "
-                                          "module shows nor a standard binding: a file's macro "
+             (fail-at fail (string-append "`" (symbol->string n) "` is neither a value the file "
+                                          "defines nor a standard binding: a file's macro "
                                           "names only those, as they are where it is imported")
                       s)
              (list (act-alias)))))))

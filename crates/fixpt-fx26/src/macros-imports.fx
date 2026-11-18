@@ -12,7 +12,7 @@
         head-name import-usage in-loaded-as internal-names internal-of len load-base load-of
         load-path loaded-path loads macro-names macro-of macro? mk-list mk-symbol name-filter
         names-shown not-macros nth proper shown-names syn-end syn-start syn-symbol syn-symbol?
-        taken? without-load marks for-syntax? for-syntax!
+        taken? without-load marks for-syntax? for-syntax! frame-of
         (type fails file-macro files filter macro macro-env mades names scope syn syns-a marked))
 (define procedural-module (with macros-module procedural-module))
 (import procedural-module phase1-forms-now phase1-forms! def-env-is def-env-now! procedurals
@@ -240,8 +240,9 @@
                  (shared (if (null? inst)
                              (string->symbol (string-append "%shared:" key))
                              (car inst)))
+                 (frame (frame-of forms))
                  (scope (tuple shared (extract shown 1) (extract shown 2) internal
-                               (get standard-names))))
+                               (get standard-names) (extract frame 1) (extract frame 2))))
             (define-file in-file forms scope filter fs ikey prefix (if (null? inst) 1 3)
                          (if (null? ms) form (extract (car ms) 1))))))))
 
@@ -263,7 +264,8 @@
         (set marks nil)
         ;; The file's phase-1 forms its own, for its macros alone.
         (phase1-forms! nil)
-        (def-env-now! (tuple kind (extract scope 1) (extract scope 2) (extract scope 4)))
+        (def-env-now! (tuple kind (extract scope 1) (extract scope 2) (extract scope 4)
+                            (extract scope 6) (extract scope 7)))
         (let* ((st (define-forms fail forms #f scope fs key (tuple (extract scope 4) nil nil)))
                (own (get defined)) (own-marks (get marks)))
           (begin
@@ -299,7 +301,8 @@
         ((defines-syntax? x)
          (let ((ns (define-macro fail x (list (tuple (extract scope 1) (extract scope 2)
                                                     (extract scope 3) internal
-                                                    (extract scope 5))))))
+                                                    (extract scope 5) (extract scope 6)
+                                                    (extract scope 7))))))
            (begin (by-internal-each ns internal)
                   (tuple internal (onto-mades ns h made) ls))))
         ((imports-syntax? x)
