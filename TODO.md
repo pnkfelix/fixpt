@@ -7696,3 +7696,41 @@ Measured: `main.fasl` about 505 KB either way (was 5,984,499 bytes
 compiled with `fx26.fx`); `fixpt run ratfink.fx` 0.72 s from it, 0.77 s
 from source. Test: fasl.rs, a `.fasl` keeps its maker whatever was
 compiled before it.
+
+## 295. Local binders and macro names, and `with` and macros (the user's, 2026-11-18: to revisit)
+
+Today a macro's name is reserved: no binder may bind it, nor any
+definition define it (`typed-macros.md`, "Not yet", 2026-11-07; the
+alignment's "`x` is a macro's name, which is not bound", both front
+ends). Never meant, the user's: that a `let` or `lambda` binder, or a
+name a macro's use passes to be bound (`(iterate loop …)`, binding
+`loop`), is refused because some macro of that name is in the
+top-level scope. That is anti-modular: a macro defined at a top level
+breaks binders written elsewhere, which never meant it (found by §294,
+where a file's macros leaked to the session's top level). And it leaves
+a gap: `(let ((foo 2)) foo)`, `foo` a macro, reads the body's `foo` as
+its use, the `let` shadowing nothing (`typed-macros.md`, trailmarks).
+
+Why it was held: a `with` binds what its module gives, which the
+expander cannot see, its module's type known only to the checker; so
+`(with m (clamp x))`, `m` giving a value `clamp` and `clamp` a macro, is
+either a call of the value or a use of the macro, and the expander must
+decide before the checker knows (refused since 2026-11-07: "`clamp` is a
+macro here, and `m` gives a value of that name"). And checked uses rely
+on a head meaning at expansion what it meant where the macro was defined
+(`typed-macros.md`, "What it relies on").
+
+To discuss:
+- Lexical binders (`let`, `lambda`, `letrec`, a use's binders) shadow a
+  macro in their scope, as in R7RS and Herman's: the expander sees each,
+  so nothing is undecided. What the checked-use argument needs then: a
+  head is the macro where no binder in scope shadows it.
+- `with`, whose bindings the expander cannot see: the user's intuition,
+  second-class signatures declared where a `with` (or a module parameter)
+  is, so its names are known before checking ("shades of C header
+  files"); or a `with` naming what it binds; or what a `moduleof` the
+  expander can read already says (a file's `load-moduleof`, its maker's
+  type); or the refusal kept for `with` alone.
+- Definitions at a top level of a macro's name (a global named as a
+  macro, a later `define-syntax` of a global's name): what `docs/fx26.md`,
+  "Redefinition", says of each.
