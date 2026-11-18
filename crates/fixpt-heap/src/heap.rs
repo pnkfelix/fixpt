@@ -760,6 +760,30 @@ impl Heap {
     fn set_word(&mut self, rel: usize, w: u64) {
         self.mem.words_mut()[rel] = w;
     }
+
+    /// Whether this heap may hold `v` (`TODO.md` §293): no reference, or a
+    /// reference to a word of its memory. A suffix ref's owner is a word
+    /// index of whichever heap reads it, so another heap's cannot be told
+    /// apart by where it points: only one whose owner is no bloblet of this
+    /// heap's whose suffix covers it is caught.
+    pub fn may_hold(&self, v: Value) -> bool {
+        if !v.is_ref() {
+            return true;
+        }
+        if v.is_suffix_ref() {
+            return self.check_ref(v, 0).is_ok();
+        }
+        v.index().wrapping_sub(self.base) < MEM_WORDS
+    }
+
+    /// [`may_hold`](Heap::may_hold), in a debug build: where a value enters
+    /// the heap, a store, a constructor's fields, a root.
+    #[inline(always)]
+    fn debug_held(&self, v: Value) {
+        if cfg!(debug_assertions) && !self.may_hold(v) {
+            another_heaps_stored(v, self.base);
+        }
+    }
     #[inline(always)]
     pub fn slot(&self, rel: usize) -> Value {
         Value(self.word(rel))
@@ -772,6 +796,7 @@ impl Heap {
     /// ([`barrier_slow`](Heap::barrier_slow), where machine code calls in).
     #[inline(always)]
     pub fn set_slot(&mut self, rel: usize, v: Value) {
+        self.debug_held(v);
         self.set_word(rel, v.raw());
         if self.barrier_needs_heap(rel, v) {
             self.barrier_slow(rel, v);
@@ -823,6 +848,7 @@ impl Heap {
     /// precondition, [`barrier_slow`](Heap::barrier_slow)'s: the machine's
     /// test, the heap's, said so.
     pub fn store_at_address(&mut self, at: u64, v: Value) {
+        self.debug_held(v);
         let rel = (at / 8) as usize - self.base;
         self.set_word(rel, v.raw());
         self.barrier_slow(rel, v);
@@ -967,6 +993,9 @@ impl Heap {
     /// type's is `8 * len` suffix bytes. Either way the payload starts one
     /// word after the main header, which is all the accessors below rely on.
     pub fn alloc(&mut self, ty: ObjType, len: usize, fill: Value) -> Value {
+        if ty.payload_is_scanned() {
+            self.debug_held(fill);
+        }
         let (fields, bytes) = if ty.payload_is_scanned() { (len, 0) } else { (0, len * 8) };
         assert!(bytes as u64 <= layout::H_BYTES.max(), "an object's suffix is limited to 4 GiB");
         if fields == 0 {
@@ -1009,6 +1038,8 @@ impl Heap {
     }
 
     pub fn cons(&mut self, car: Value, cdr: Value) -> Value {
+        self.debug_held(car);
+        self.debug_held(cdr);
         let at = self.bump(2);
         self.set_word(at, car.raw());
         self.set_word(at + 1, cdr.raw());
@@ -2535,6 +2566,7 @@ impl Heap {
     /// Root `v` for the duration of a native operation that spans a safepoint.
     /// Returns the depth to unwind to.
     pub fn push_root(&mut self, v: Value) -> usize {
+        self.debug_held(v);
         self.roots.push(v);
         self.roots.len() - 1
     }
@@ -2546,6 +2578,7 @@ impl Heap {
         self.roots[depth]
     }
     pub fn set_root_at(&mut self, depth: usize, v: Value) {
+        self.debug_held(v);
         self.roots[depth] = v;
     }
     pub fn pop_roots_to(&mut self, depth: usize) {
@@ -3898,6 +3931,14 @@ impl Copier<'_> {
         self.crossed(at, n);
         at
     }
+}
+
+/// A store into the heap at `base` of `v`, a reference to none of its words,
+/// or a suffix ref to no byte of its bloblets' (`Heap::debug_held`).
+#[cold]
+#[inline(never)]
+fn another_heaps_stored(v: Value, base: usize) -> ! {
+    panic!("{v:?} stored in the heap at word {base:#x}: a reference to no object of this heap's (another heap's, which nothing here keeps alive, or a suffix ref past its owner)")
 }
 
 /// A collection that met reference `v`, not to the memory of the heap at

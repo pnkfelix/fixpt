@@ -7513,15 +7513,25 @@ the symbols' handles): a reference to no word of the heap's memory is a
 panic. One compare where every traced reference is classified; no suite
 test met one.
 
+And in a debug build, where a value enters a heap (`Heap::may_hold`,
+`debug_held`): every store through `set_slot` (so `obj_set`, `set_car`,
+`set_cdr`, `set_bloblet_slot`, the tables, the globals), machine code's
+barrier's rest (`store_at_address`), `cons`'s and `alloc`'s fields, the
+roots pushed or set, an uninterned symbol's handle made.
+
 Left:
-- **A store's check.** Refused where it is made, not at the next
-  collection: `set_slot`, `table_set`, `alloc`'s fill, the roots pushed,
-  and the paths that write words raw (bulk copies, `set_word`, the image
-  loaders) audited. Measure the write barrier's cost first.
-- **Suffix refs.** Their owner is a word index of their heap's memory, not
-  an address, so another heap's cannot be told from this one's: a store's
-  check cannot either. Only a heap's identity in the value, or in a
-  handle, would.
+- **A release build's store check**, if its cost on the write barrier is
+  small enough to measure as none.
+- **Paths that write words raw**: the image loaders and splices (checked
+  by `verify` where tests run it, the references they write their own by
+  construction), `copy_within`'s copies, machine code's stores that its
+  barrier's test does not send to the heap (a value machine code holds
+  came from the heap, or from Rust through a checked store or root).
+- **Suffix refs are as sound as any reference that stays in its heap**
+  (`copy_graph` and a splice rebuild them, never copying one raw); but
+  their owner is a word index of whichever heap reads it, not an address,
+  so one that strays is caught only where it names no bloblet's byte
+  here: elsewhere it names another object silently.
 - **Handles on the Rust side.** A symbol's handle, and any `Value` the Rust
   side keeps, names no heap: the names redesign (§292) to brand them with
   their heap's serial, checked.

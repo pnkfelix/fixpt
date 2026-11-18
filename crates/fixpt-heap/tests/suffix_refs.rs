@@ -234,6 +234,12 @@ fn the_verifier_refuses_a_suffix_ref_past_its_owner() {
     h.verify().unwrap();
     let r = h.obj_ref(roots[0], 0);
     let bad = Value::suffix_ref(r.owner(), 8).unwrap();
+    // A debug build refuses the store itself (`Heap::may_hold`).
+    if cfg!(debug_assertions) {
+        let said = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| h.obj_set(roots[0], 0, bad))).expect_err("refused");
+        assert!(said.downcast_ref::<String>().is_some_and(|m| m.contains("stored in the heap")));
+        return;
+    }
     h.obj_set(roots[0], 0, bad);
     let e = h.verify().unwrap_err();
     assert!(e.contains("past its owner's 8 bytes"), "{e}");

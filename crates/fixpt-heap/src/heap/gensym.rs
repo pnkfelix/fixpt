@@ -180,6 +180,7 @@ impl Heap {
         }
         let j = self.sym_handles.len();
         assert!(j < UNINTERNED_HANDLES as usize, "too many symbols held");
+        self.debug_held(sym);
         self.sym_handles.push(sym);
         if self.is_static(r) {
             self.static_sym_handles.insert(sym.raw(), j as u32);
