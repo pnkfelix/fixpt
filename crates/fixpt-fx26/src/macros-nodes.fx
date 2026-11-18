@@ -182,6 +182,9 @@
 (define node-manys (ref (arrayof bool rs) rs) (new (make-array 256 #f)))
 (define node-kidss (ref (arrayof kids rs) rs) (new (make-array 256 (k-other))))
 (define node-holes (ref (arrayof holes rs) rs) (new (make-array 256 (the holes nil))))
+;; Whether each node is a pending list's (`pending!`), so that a walk asks
+;; in one step (`macros.rs`'s `Node::head`).
+(define node-heads (ref (arrayof bool rs) rs) (new (make-array 256 #f)))
 (define nnodes (ref int rs) (new 0))
 (define node-syn (->* (int) syn) (lambda (i) (array-ref (get node-syns) i)))
 (define node-path (->* (int) addr) (lambda (i) (array-ref (get node-paths) i)))
@@ -219,6 +222,7 @@
         (array-set! (get node-kidss) i (k-other))
         (array-set! (get node-holes) i (the holes nil))
         (array-set! (get repeated-marks) i #f)
+        (array-set! (get node-heads) i #f)
         i))))
 ;; Each field's array, twice as long.
 (define nodes-grown! (->* () unit)
@@ -232,7 +236,8 @@
       (set node-manys (array-grown (get node-manys) #f))
       (set node-kidss (array-grown (get node-kidss) (k-other)))
       (set node-holes (array-grown (get node-holes) (the holes nil)))
-      (set repeated-marks (array-grown (get repeated-marks) #f)))))
+      (set repeated-marks (array-grown (get repeated-marks) #f))
+      (set node-heads (array-grown (get node-heads) #f)))))
 ;; `a`, in an array twice as long, the rest `fill`.
 (define array-grown
   (poly ((t type)) (subr (maxeff (read rs) (write rs) (alloc rs) spin) ((arrayof t rs) t)
@@ -253,11 +258,22 @@
 ;; quasiquoted vector, a `load-moduleof`'s arguments).
 (define program-walk (ref bool rs) (new #f))
 (define unplaced (ref names rs) (new nil))
+;; A program's form read by its scopes (`macros-scopes.fx`'s
+;; `program-scoped`; `macros.rs`'s `Aligner::program`, `TODO.md` §295):
+;; whether it is, the paths of the lists a macro's name heads read as
+;; applications so far, their heads bound around them, and whether any
+;; other such list, a use, is aligned no further (where a form is expanded)
+;; or by its signature. Each such list pending.
+(define scoped-on (ref bool rs) (new #f))
+(define scoped-apps (ref (listof addr acyclic) rs) (new nil))
+(define scoped-whole (ref bool rs) (new #f))
+(define addr-in? (->* (addr (listof addr acyclic)) bool)
+  (lambda (p ps) (and (not (null? ps)) (or (addr=? p (car ps)) (addr-in? p (cdr ps))))))
 ;; The nodes forgotten, for another alignment.
 (define nodes-reset! (->* () unit)
   (lambda ()
     (begin (set nnodes 0) (set desc-roots nil) (set repeated nil) (set seq-depths nil)
-           (set cage-seqs nil) (set pending nil))))
+           (set cage-seqs nil) (set pending nil) (set scoped-on #f))))
 ;; The nodes an ellipsis follows, so that each is repeated; and, as a walk
 ;; finds them, each with how many ellipses it is under, itself counted, the
 ;; last found first (`macros.rs`'s `Node::repeated`, `walk`'s `seqs`).
@@ -625,11 +641,9 @@
 (define heads (ref (listof (tupleof int int int) acyclic) rs) (new nil))
 (define pending (ref (listof (tupleof int bool) acyclic) rs) (new nil))
 (define pending! (->* (int bool) unit)
-  (lambda (at defn) (set pending (cons (tuple at defn) (get pending)))))
-(define pending-node? (->* (int) bool) (lambda (at) (pending-in? at (get pending))))
-(define pending-in? (->* (int (listof (tupleof int bool) acyclic)) bool)
-  (lambda (at ps)
-    (and (not (null? ps)) (or (= at (extract (car ps) 1)) (pending-in? at (cdr ps))))))
+  (lambda (at defn)
+    (begin (array-set! (get node-heads) at #t) (set pending (cons (tuple at defn) (get pending))))))
+(define pending-node? (->* (int) bool) (lambda (at) (array-ref (get node-heads) at)))
 ;; How list `s` is read so far: the δ of the `(macro σ made)` entry whose macro
 ;; it is a use of, in a list of one; none, an application.
 (define head-read (->* (syn) (listof int acyclic))
@@ -679,3 +693,24 @@
 (define any-uses-syntax-macro? (->* (syns-a) bool)
   (lambda (xs)
     (and (not (null? xs)) (or (uses-syntax-macro? (car xs)) (any-uses-syntax-macro? (cdr xs))))))
+(define logic-word? (->* (string) bool)
+  (lambda (h)
+    (or (string=? h "<") (string=? h "<=") (string=? h "=") (string=? h ">") (string=? h ">=")
+        (string=? h "not") (string=? h "and") (string=? h "or") (string=? h "implies")
+        (string=? h "+") (string=? h "-") (string=? h "*"))))
+;; The nodes under node `at`, itself first.
+(define under (->* (int) (listof int acyclic))
+  (lambda (at)
+    (cons at (tagcase (node-kids at)
+               (k-pair (x y) (append (under x) (under y)))
+               (k-form (x) (under x))
+               (k-seq (x) (under x))
+               (k-desc (xs) (under-each xs))
+               (else y (the (listof int acyclic) nil))))))
+(define under-each (->* ((listof int acyclic)) (listof int acyclic))
+  (lambda (xs) (if (null? xs) nil (append (under (car xs)) (under-each (cdr xs))))))
+;; The `i`th of nodes `ks`.
+(define kid (->* ((listof int acyclic) int) int)
+  (lambda (ks i) (if (= i 0) (car ks) (kid (cdr ks) (- i 1)))))
+(define len-kids (->* ((listof int acyclic)) int)
+  (lambda (ks) (if (null? ks) 0 (+ 1 (len-kids (cdr ks))))))

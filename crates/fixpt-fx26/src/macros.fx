@@ -30,13 +30,14 @@
 ;; The module files' forms (`parser-forms.fx`): whether a file takes modules.
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import types-module fail-at split syn-nil? reserved? reserved-syn? read-sty s-expr s-defn s-type
-        pure-hole? affine-kind? ellipsis? ellipsis-of proper-items marks kind-of
+        s-item pure-hole? affine-kind? ellipsis? ellipsis-of proper-items marks kind-of
         (type fails addr sty marked))
 (import match-module bound-of matched pattern-names list-items odd-length nth-name nth-list marks-of
         len-ints addr-under? ints=? all-ints? ints-prefix (type binds))
-(import scopes-module walk placed evaluate levels-of binder-of aligned-heads)
-(import align-module defined macro-of macro? makes-defns? makes-top-defns? nodes-reset! align
-        node-export node-imports node-syn node-path node-core node-kids pvar-of pvar? nnodes
+(import scopes-module walk placed evaluate levels-of binder-of aligned-heads uses-found names-macro?
+        uses-in uses-past list-at rebuilt at-place at-places (type uses))
+(import align-module defined macro-of macro? makes-defns? makes-top-defns? makes-desc? nodes-reset!
+        align node-export node-imports node-syn node-path node-core node-kids pvar-of pvar? nnodes
         act-rename act-alias seq-depths def-env-top env-empty env-levels
         act-module-type act-instance-type act-standard-type under
         act-macro-head act-mark atm-lit lv-rib k-pvar k-binder k-ref k-form k-other
@@ -633,39 +634,28 @@
 (define expand-defns (->* (fails syns-a) syns-a)
   (lambda (fail xs)
     (if (null? xs) nil (append (expand-defn fail (car xs)) (expand-defns fail (cdr xs))))))
-(define at-places (->* (syns-a int int) syns-a)
-  (lambda (xs a b) (if (null? xs) nil (cons (at-place (car xs) a b 0) (at-places (cdr xs) a b)))))
-;; `s` at `a`..`b`, of expansion `x`.
-(define at-place (->* (syn int int int) syn)
-  (lambda (s a b x)
-    (tagcase s
-      (atom (d c e y) (atom d a b x))
-      (lst (items d c e y) (lst items d a b x))
-      (dotted (items tail d c e y) (dotted items tail d a b x))
-      (vec (items d c e y) (vec items d a b x)))))
 (define expand-in (->* (fails syn places) syn)
-  (lambda (fail s withs)
+  (lambda (fail s withs) (expand-region fail s (s-item) nil withs)))
+;; `s`, of syntax type `core`, expanded: each use of a macro in it, as its
+;; walk finds them, expanded, and what that makes in its turn, each where
+;; it is, in what is bound around it (`macros.rs`'s `expand_region`,
+;; `TODO.md` §295): a list a macro's name heads is no use where the program
+;; wrote the head and a binder around it binds the name. `bound`: the
+;; macros' names bound around `s`; `withs`, the `with`s it is in.
+(define expand-region (->* (fails syn sty names places) syn)
+  (lambda (fail s core bound withs)
+    (expand-at fail s (if (names-macro? s) (uses-found fail core s bound) nil) withs)))
+;; `s`, where uses `us` are found from (`uses-found`): each expanded.
+(define expand-at (->* (fails syn uses places) syn)
+  (lambda (fail s us withs)
     (let* ((items (list-items s)) (hd (if (null? items) s (car items)))
            (head (if (syn-symbol? hd) (syn-name hd) ""))
            (noted (if (string=? head "with") (note-projection s items hd) #u)))
       (cond
         ((null? items) s)
         ((string=? head "quote") s)
-        ((and (syn-symbol? hd) (makes-defns? (syn-symbol hd)))
-         (begin (fail-at fail (string-append "`" head "` makes definitions, which are made at the "
-                                             "top level, not where an expression is")
-                         s)
-                s))
-        ((and (syn-symbol? hd) (macro? (syn-symbol hd)))
-         (if (use-entered? fail (syn-symbol hd) s (get budget))
-             (begin
-               (set budget (- (get budget) 1))
-               ;; A name the program wrote (a template's is the macro, by
-               ;; hygiene), in a `with`'s body.
-               (if (= (syn-expansion hd) 0) (note-uses (syn-symbol hd) hd withs) #u)
-               (let ((made (expand-in fail (expand-use fail (syn-symbol hd) s) withs)))
-                 (begin (use-left!) made)))
-             s))
+        ((and (not (null? us)) (null? (extract (car us) 1)))
+         (expand-one fail s (syn-symbol hd) (extract (car us) 2) withs))
         ;; A definition of a macro's name: refused, as a form's is.
         ((and (or (string=? head "define") (string=? head "define*"))
               (not (null? (cdr items))) (syn-symbol? (nth items 1))
@@ -674,44 +664,45 @@
                                              "which is not defined again")
                          (nth items 1))
                 s))
-        (else (rebuilt s (expand-items fail items 0 (string=? head "with") s withs)
-                       (expand-tail fail s withs)))))))
-;; Items from the `k`th, each expanded; in a `with`'s body (from the third)
-;; noted as in it.
-(define expand-items (->* (fails syns-a int bool syn places) syns-a)
-  (lambda (fail xs k with s withs)
+        (else (rebuilt s (expand-items fail items 0 us (string=? head "with") s withs)
+                       (expand-tail fail s (len items) us withs)))))))
+;; Use `s` of macro `h` expanded, and what it makes in its turn, `bound` the
+;; macros' names bound around it.
+(define expand-one (->* (fails syn symbol names places) syn)
+  (lambda (fail s h bound withs)
+    (let ((hd (car (list-items s))))
+      (cond
+        ((makes-defns? h)
+         (begin (fail-at fail (string-append "`" (syn-name hd) "` makes definitions, which are "
+                                             "made at the top level, not where an expression is")
+                         s)
+                s))
+        ((use-entered? fail h s (get budget))
+         (begin
+           (set budget (- (get budget) 1))
+           ;; A name the program wrote (a template's is the macro, by
+           ;; hygiene), in a `with`'s body.
+           (if (= (syn-expansion hd) 0) (note-uses h hd withs) #u)
+           (let ((made (expand-region fail (expand-use fail h s)
+                                      (if (makes-desc? h) (s-type) (s-expr)) bound withs)))
+             (begin (use-left!) made))))
+        (else s)))))
+;; Items from the `k`th, each expanded, `us` the uses in them; in a `with`'s
+;; body (from the third) noted as in it.
+(define expand-items (->* (fails syns-a int uses bool syn places) syns-a)
+  (lambda (fail xs k us with s withs)
     (if (null? xs)
         nil
-        (let ((x (expand-in fail (car xs)
+        (let ((x (expand-at fail (car xs) (uses-in k us)
                             (if (and with (>= k 2))
                                 (cons (tuple (syn-start s) (syn-end s)) withs)
                                 withs))))
-          (cons x (expand-items fail (cdr xs) (+ k 1) with s withs))))))
-(define expand-tail (->* (fails syn places) syns-a)
-  (lambda (fail s withs)
-    (tagcase s (dotted (items t d a b x) (list (expand-in fail t withs))) (else y nil))))
-;; `s`, a list, with items `xs` and, if it is dotted, tail `t`.
-(define rebuilt (->* (syn syns-a syns-a) syn)
-  (lambda (s xs t)
-    (list-at (syn-start s) (syn-end s) (syn-expansion s) xs t)))
-;; Items `xs` and a tail (none, or one), as one list at `a`..`b` of
-;; expansion `x`: a tail that is a list joined to it, an empty one dropped.
-(define list-at (->* (int int int syns-a syns-a) syn)
-  (lambda (a b x xs t)
-    (cond
-      ;; `()`, as the reader reads it: a list of none.
-      ((and (null? t) (null? xs)) (lst nil '() a b x))
-      ((null? t) (lst xs (syn-datums xs) a b x))
-      ((syn-nil? (car t)) (list-at a b x xs nil))
-      (else
-       (tagcase (car t)
-         (lst (more d c e y) (list-at a b x (append xs more) nil))
-         (dotted (more tail d c e y) (list-at a b x (append xs more) (list tail)))
-         (else z
-           (if (null? xs)
-               (car t)
-               (dotted xs (car t) (datum-dotted (syn-datums xs) (syn->datum (car t)))
-                       a b x))))))))
+          (cons x (expand-items fail (cdr xs) (+ k 1) (uses-past k us) with s withs))))))
+(define expand-tail (->* (fails syn int uses places) syns-a)
+  (lambda (fail s k us withs)
+    (tagcase s
+      (dotted (items t d a b x) (list (expand-at fail t (uses-in (- -1 k) us) withs)))
+      (else y nil))))
 
 ;; A use of macro `name`, `s`, parsed by its signature, then the first
 ;; clause whose pattern matches it transcribed.

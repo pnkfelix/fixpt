@@ -10,10 +10,11 @@
 (define types-module (with align-module types-module))
 (define parser-module (with types-module parser-module))
 (define reader-types (with parser-module reader-types))
-(import reader-types (type syn))
-(import parser-module syn-start syn-end syn-symbol? syn-symbol (type syns-a))
+(import reader-types atom lst dotted vec (type syn))
+(import parser-module syn-start syn-end syn-symbol? syn-symbol syn-expansion syn-name syn-datums
+        syn->datum (type syns-a names))
 (import types-module fail-at kind-of unfold simple-kind? sub? atm-var atm-rib-of atm-lit show-syn
-        split
+        split syn-nil? name-in? addr=?
         bind-rib bind-cage bind-direct bind-earlier bind-shape ring-rib ring-at ring-shape
         (type fails addr entries rings bind sty atm atms))
 (import align-module node-export node-imports node-syn node-core node-kids node-many? repeated?
@@ -21,7 +22,8 @@
         cage-seq? program-walk lv-rib lv-cage lv-earlier lv-shape k-pair k-pvar k-binder k-ref
         k-form k-desc k-seq
         env-within binder-name align nodes-reset! nnodes heads pending pending-node? head-read
-        env-empty env-levels
+        env-empty env-levels env-lookup unplaced node-path macro? makes-desc? scoped-on scoped-apps
+        scoped-whole addr-in?
         (type level levels found rooted pinfo pvars env))
 
 ;;; ------------------------------------------------------------ binding
@@ -559,3 +561,219 @@
     (cond ((null? sx) nil)
           ((and (not (extract (car sx) 1)) (= b (extract (car sx) 3))) (list (extract (car sx) 4)))
           (else (syntax-of-node b (cdr sx))))))
+
+;;; ------------------------------------------------------------ a program read by its scopes
+
+;; Program form `s`, of syntax type `core`, aligned and walked, each list a
+;; macro's name heads read by its scope (`macros.rs`'s `Aligner::program`,
+;; `TODO.md` §295): an application where the program wrote its head (a
+;; template's is its macro, by hygiene), it makes no description, and a
+;; binder around it binds the name, or `bound` has it (the macros' names
+;; bound around `s`); else a use, whole if `whole` (where a form is
+;; expanded), else by its signature. Read to a fixed point: each list read
+;; otherwise than it is now, with none such around it, read anew, as what
+;; binds a head is read by the lists around it alone; so each round
+;; settles one for good, and it ends. Its root, what the walk found, and
+;; each such list's node, whether it is read an application, and its
+;; environment.
+(define-type heads-read (listof (tupleof int bool env) acyclic))
+(define program-scoped (->* (fails sty syn bool names) (tupleof int found heads-read))
+  (lambda (fail core s whole bound)
+    (begin (set scoped-apps nil) (set scoped-whole whole) (program-scoped-from fail core s bound))))
+(define program-scoped-from (->* (fails sty syn names) (tupleof int found heads-read))
+  (lambda (fail core s bound)
+    (let* ((root (begin (nodes-reset!) (set unplaced nil) (set program-walk #t) (set scoped-on #t)
+                        (align fail 3 (the pvars nil) core s -1 nil)))
+           (found (walk fail root env-empty #f 0))
+           (read (begin (set program-walk #f) (set scoped-on #f) (heads-bound found bound nil)))
+           (changed (heads-changed read nil)))
+      (if (null? changed)
+          (tuple root found read)
+          (begin (set scoped-apps (apps-toggled changed changed (get scoped-apps)))
+                 (program-scoped-from fail core s bound))))))
+;; Each pending list the walk found, `fs`: its node, whether its head is
+;; bound around it, and its environment.
+(define heads-bound (->* (found names heads-read) heads-read)
+  (lambda (fs bound out)
+    (if (null? fs)
+        out
+        (heads-bound (cdr fs) bound
+                     (let ((at (extract (car fs) 1)) (env (extract (car fs) 2)))
+                       (if (pending-node? at)
+                           (cons (tuple at (head-bound? at env bound) env) out)
+                           out))))))
+(define head-bound? (->* (int env names) bool)
+  (lambda (at env bound)
+    (let* ((hd (car (split (node-syn at)))) (h (syn-symbol hd)))
+      (and (= (syn-expansion hd) 0) (not (makes-desc? h))
+           (or (name-in? h bound) (bound-in? h env 0))))))
+;; Whether value `n` is bound in `env` from its `from`th group on, past any
+;; module's names.
+(define bound-in? (->* (symbol env int) bool)
+  (lambda (n env from)
+    (let ((l (env-lookup env n #f from binder-name)))
+      (case (extract l 1) ((0) #t) ((1) (bound-in? n env (extract l 3))) (else #f)))))
+;; The paths of the lists of `rs` read otherwise than they are now.
+(define heads-changed (->* (heads-read (listof addr acyclic)) (listof addr acyclic))
+  (lambda (rs out)
+    (cond ((null? rs) out)
+          ((eq? (extract (car rs) 2) (addr-in? (node-path (extract (car rs) 1)) (get scoped-apps)))
+           (heads-changed (cdr rs) out))
+          (else (heads-changed (cdr rs) (cons (node-path (extract (car rs) 1)) out))))))
+;; `apps`, each of `ps` around which none of `all` is read anew.
+(define apps-toggled
+  (->* ((listof addr acyclic) (listof addr acyclic) (listof addr acyclic)) (listof addr acyclic))
+  (lambda (ps all apps)
+    (cond ((null? ps) apps)
+          ((around-any? (car ps) all) (apps-toggled (cdr ps) all apps))
+          ((addr-in? (car ps) apps) (apps-toggled (cdr ps) all (addr-without (car ps) apps)))
+          (else (apps-toggled (cdr ps) all (cons (car ps) apps))))))
+(define around-any? (->* (addr (listof addr acyclic)) bool)
+  (lambda (p qs) (and (not (null? qs)) (or (addr-around? (car qs) p) (around-any? p (cdr qs))))))
+;; Whether the list at path `q` is around another at `p`: a program walk's
+;; paths are kept innermost step first, so `q` ends `p`.
+(define addr-around? (->* (addr addr) bool)
+  (lambda (q p)
+    (let ((d (- (addr-len p) (addr-len q)))) (and (> d 0) (addr=? q (addr-drop p d))))))
+(define addr-len (->* (addr) int) (lambda (p) (if (null? p) 0 (+ 1 (addr-len (cdr p))))))
+(define addr-drop (->* (addr int) addr)
+  (lambda (p k) (if (= k 0) p (addr-drop (cdr p) (- k 1)))))
+(define addr-without (->* (addr (listof addr acyclic)) (listof addr acyclic))
+  (lambda (p ps)
+    (cond ((null? ps) nil)
+          ((addr=? p (car ps)) (cdr ps))
+          (else (cons (car ps) (addr-without p (cdr ps)))))))
+
+;; The uses of macros in `s`, of type `core`, `bound` the macros' names
+;; bound around it, as the walk finds them, each whole (`program-scoped`;
+;; `Macros::uses_found`): each by its place, the indices of the items it is
+;; in, list by list from `s` (`index-path`), in the order they are written,
+;; with the macros' names bound around it that the program wrote in it.
+(define-type ixs (listof int acyclic))
+(define-type uses (listof (tupleof ixs names) acyclic))
+(define uses-found (->* (fails sty syn names) uses)
+  (lambda (fail core s bound)
+    (uses-sorted (uses-of (extract (program-scoped fail core s #t bound) 3) bound nil))))
+(define uses-of (->* (heads-read names uses) uses)
+  (lambda (rs bound out)
+    (if (null? rs)
+        out
+        (uses-of (cdr rs) bound
+                 (if (extract (car rs) 2)
+                     out
+                     (let ((at (extract (car rs) 1)))
+                       (cons (tuple (index-path (node-path at))
+                                    (names-bound (macro-names-in (node-syn at) nil)
+                                                 (extract (car rs) 3) bound))
+                             out)))))))
+;; `bound`, and those of `ns` that `env` binds.
+(define names-bound (->* (names env names) names)
+  (lambda (ns env bound)
+    (cond ((null? ns) bound)
+          ((and (not (name-in? (car ns) bound)) (bound-in? (car ns) env 0))
+           (cons (car ns) (names-bound (cdr ns) env bound)))
+          (else (names-bound (cdr ns) env bound)))))
+;; The macros' names the program wrote in `s`, onto `out`, each once.
+(define macro-names-in (->* (syn names) names)
+  (lambda (s out)
+    (tagcase s
+      (lst (items d a b x) (macro-names-each items out))
+      (dotted (items t d a b x) (macro-names-each items (macro-names-in t out)))
+      (vec (items d a b x) out)
+      (atom (d a b x)
+        (if (and (syn-symbol? s) (= x 0) (macro? (syn-symbol s))
+                 (not (name-in? (syn-symbol s) out)))
+            (cons (syn-symbol s) out)
+            out)))))
+(define macro-names-each (->* (syns-a names) names)
+  (lambda (xs out) (if (null? xs) out (macro-names-each (cdr xs) (macro-names-in (car xs) out)))))
+;; Whether a macro's name is written in `s`, outside a quoted datum.
+(define names-macro? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b x) (and (not (quote-headed? items)) (any-names-macro? items)))
+      (dotted (items t d a b x)
+        (and (not (quote-headed? items)) (or (any-names-macro? items) (names-macro? t))))
+      (vec (items d a b x) #f)
+      (atom (d a b x) (and (syn-symbol? s) (macro? (syn-symbol s)))))))
+(define any-names-macro? (->* (syns-a) bool)
+  (lambda (xs) (and (not (null? xs)) (or (names-macro? (car xs)) (any-names-macro? (cdr xs))))))
+(define quote-headed? (->* (syns-a) bool)
+  (lambda (xs)
+    (and (not (null? xs)) (syn-symbol? (car xs)) (string=? (syn-name (car xs)) "quote"))))
+;; Path `p`, a program walk's (innermost step first), as the indices of the
+;; items it goes through, list by list, outermost first; a list's tail
+;; after `k` items, `-1 - k`.
+(define index-path (->* (addr) ixs) (lambda (p) (indices (reverse p) 0)))
+(define indices (->* (addr int) ixs)
+  (lambda (steps k)
+    (cond ((null? steps) (if (= k 0) nil (list (- -1 k))))
+          ((car steps) (cons k (indices (cdr steps) 0)))
+          (else (indices (cdr steps) (+ k 1))))))
+;; Uses `us` in the order they are written, by their index paths.
+(define uses-sorted (->* (uses) uses)
+  (lambda (us)
+    (if (or (null? us) (null? (cdr us)))
+        us
+        (let ((h (halves us nil nil)))
+          (uses-merged (uses-sorted (extract h 1)) (uses-sorted (extract h 2)))))))
+(define halves (->* (uses uses uses) (tupleof uses uses))
+  (lambda (us a b) (if (null? us) (tuple a b) (halves (cdr us) b (cons (car us) a)))))
+(define uses-merged (->* (uses uses) uses)
+  (lambda (a b)
+    (cond ((null? a) b)
+          ((null? b) a)
+          ((ixs<? (extract (car b) 1) (extract (car a) 1)) (cons (car b) (uses-merged a (cdr b))))
+          (else (cons (car a) (uses-merged (cdr a) b))))))
+(define ixs<? (->* (ixs ixs) bool)
+  (lambda (p q)
+    (cond ((null? q) #f)
+          ((null? p) #t)
+          ((= (car p) (car q)) (ixs<? (cdr p) (cdr q)))
+          (else (< (ix-order (car p)) (ix-order (car q)))))))
+;; An index's place among a list's parts: its items in order, then its tail.
+(define ix-order (->* (int) int) (lambda (i) (if (< i 0) (+ (* 2 (- -1 i)) 1) (* 2 i))))
+;; Of uses `us`, in order, those in the item of index `k` (or the tail, a
+;; negative one) first, each by its path from it; and those after them.
+(define uses-in (->* (int uses) uses)
+  (lambda (k us)
+    (if (uses-at? k us)
+        (cons (tuple (cdr (extract (car us) 1)) (extract (car us) 2)) (uses-in k (cdr us)))
+        nil)))
+(define uses-past (->* (int uses) uses)
+  (lambda (k us) (if (uses-at? k us) (uses-past k (cdr us)) us)))
+(define uses-at? (->* (int uses) bool)
+  (lambda (k us)
+    (and (not (null? us)) (not (null? (extract (car us) 1))) (= (car (extract (car us) 1)) k))))
+(define at-places (->* (syns-a int int) syns-a)
+  (lambda (xs a b) (if (null? xs) nil (cons (at-place (car xs) a b 0) (at-places (cdr xs) a b)))))
+;; `s` at `a`..`b`, of expansion `x`.
+(define at-place (->* (syn int int int) syn)
+  (lambda (s a b x)
+    (tagcase s
+      (atom (d c e y) (atom d a b x))
+      (lst (items d c e y) (lst items d a b x))
+      (dotted (items tail d c e y) (dotted items tail d a b x))
+      (vec (items d c e y) (vec items d a b x)))))
+;; `s`, a list, with items `xs` and, if it is dotted, tail `t`.
+(define rebuilt (->* (syn syns-a syns-a) syn)
+  (lambda (s xs t)
+    (list-at (syn-start s) (syn-end s) (syn-expansion s) xs t)))
+;; Items `xs` and a tail (none, or one), as one list at `a`..`b` of
+;; expansion `x`: a tail that is a list joined to it, an empty one dropped.
+(define list-at (->* (int int int syns-a syns-a) syn)
+  (lambda (a b x xs t)
+    (cond
+      ;; `()`, as the reader reads it: a list of none.
+      ((and (null? t) (null? xs)) (lst nil '() a b x))
+      ((null? t) (lst xs (syn-datums xs) a b x))
+      ((syn-nil? (car t)) (list-at a b x xs nil))
+      (else
+       (tagcase (car t)
+         (lst (more d c e y) (list-at a b x (append xs more) nil))
+         (dotted (more tail d c e y) (list-at a b x (append xs more) (list tail)))
+         (else z
+           (if (null? xs)
+               (car t)
+               (dotted xs (car t) (datum-dotted (syn-datums xs) (syn->datum (car t)))
+                       a b x))))))))

@@ -24,22 +24,17 @@
         k-desc k-seq atm-lit
         env-empty env-lookup binder-name
         (type level levels found rooted env))
-(import scopes-module walk evaluate)
+(import scopes-module walk evaluate program-scoped)
 
 ;;; ------------------------------------------------------------ a program's walk
 
-;; Program `form`, after expansion, aligned and walked: its root node, and
-;; what the walk found, each binder and name referred to with its
-;; environment.
+;; Program `form`, after expansion, aligned and walked, its heads read by
+;; their scopes (`program-scoped`): its root node, and what the walk found,
+;; each binder and name referred to with its environment.
 (define walked (->* (fails syn bool) (tupleof int found))
   (lambda (fail form top)
-    (begin
-      (set program-walk #t)
-      (nodes-reset!)
-      (set unplaced nil)
-      (let* ((root (align fail 3 nil (if top (s-item) (s-expr)) form -1 nil))
-             (found (walk fail root env-empty #f 0)))
-        (begin (set program-walk #f) (tuple root found))))))
+    (let ((r (program-scoped fail (if top (s-item) (s-expr)) form #f nil)))
+      (tuple (extract r 1) (extract r 2)))))
 
 ;; Each of `forms`, a program's after expansion, its local value binders
 ;; renamed as the walk finds their scopes, written (`macros.rs`'s

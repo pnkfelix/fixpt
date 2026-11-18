@@ -7734,3 +7734,63 @@ To discuss:
 - Definitions at a top level of a macro's name (a global named as a
   macro, a later `define-syntax` of a global's name): what `docs/fx26.md`,
   "Redefinition", says of each.
+
+Decided (the user, 2026-11-18): the first part, lexical binders shadowing
+a macro, built first, in both front ends; `with` made explicit about what
+it binds instead, in steps (§296). Measured for it: of the `with`s whose
+body is more than a name, 89 in Fixpt's FX-26 tests bring 228 names, 10
+shadowing something outside (the standard `get`, and `clamp`, the test of
+the refusal); 58 in Kayak's compiler (`bce2244`) bring 6,931, 120 of them
+bound outside as well (11 names: `digits-value`, `poly-type?`,
+`made-here?` at its top level, the rest a nested `with`'s or a local's),
+none used in the body. Every `with` in Fixpt's corpus, Kayak's and
+ratfink has a shape read from the syntax or a type already written.
+
+Built (2026-11-18), the first part, both front ends: a list a macro's
+name heads is read by its scope, as the program's walk finds it
+(`Aligner::program`; `macros-scopes.fx`'s `program-scoped`): an
+application where the program wrote the head (a template's is its macro,
+by hygiene, its own binders fresh names), it makes no description, and a
+binder around it binds the name (a `let`'s, a `lambda`'s, a use's by its
+signature); else a use. Read to a fixed point, each list read anew only
+where none around it is, so each round settles one for good. The
+expander finds a form's uses so, each whole, expands each, and reads
+what it makes in its turn with the macros' names bound around the use
+(`Macros::expand_region`; `expand-region`); every program walk reads
+heads the same way (the walks after expansion, a contract's checks). A
+use's binder may be a macro's name; a template's own may not, not yet,
+nor a definition of one; `with` as before (§296). Kayak's stage 0
+(`bce2244`): 9.7 s, as before, its output the same. Tests:
+let-shadows-macro.fx, use-binds-loop.fx, use-binds-macro-name.fx (was
+bind-macro-name.fx's refusal), template-head-hygienic.fx,
+template-binds-macro-name.fx.
+
+## 296. `::` paths, then `with` naming what it binds (the user's, 2026-11-18)
+
+To make what a `with` brings into scope obvious, where today a body
+`with` binds every name its module gives (Kayak's compiler: 67 of its 75
+`with`s open a body, of modules of hundreds of names). Two steps:
+
+1. **`id1::id2::id3`**, short for the path `(with (with id1 id2) id3)`:
+   each element must come from the one before it, refused otherwise (the
+   path form's rule, §291; not `(with id1 (with id2 id3))`, which would
+   find an `id2` from outside where `id1` has none). No identifier in
+   Fixpt's corpus, Kayak's or ratfink has `::` in it (2026-11-18). Split
+   by the expander, not the reader, where the alignment says a name is an
+   expression or a type: a quoted symbol, or a macro's operand of the
+   datum shape, stays one symbol; a binder written so is refused. In a
+   type position, `m::t` is `(select m t)`, `a::b::t` `(select (with a b)
+   t)`; `m..t`, the name a binding's abstract types have, is another
+   thing and stays. At a head, `(m::f x)` is a use of `m`'s macro `f` where
+   `m`'s shape says `f` is one, by its binding shape. Both front ends.
+2. **`(with m #:binding (id1 id2) body)`** once `::` is in and Kayak has
+   taken it up: a `with` whose body is more than a name lists the names it
+   takes, each one the module must give; `(with m x)`, a selection,
+   stays, as `m::x` may expand to it. The expander then needs of a
+   module's shape only which listed names are macros, and their binding
+   shapes (the user's leaning: a module's signature gives its macros). The
+   rewrite is mechanical: the checker records which of a module's names
+   each body uses (`with_vals`); 101 such `with`s in Fixpt's corpus, 67 in
+   Kayak's compiler, 122 in Kayak's tests. Left to look at apart:
+   `include`, which brings a module's names into a module's items, and a
+   template's `with`.

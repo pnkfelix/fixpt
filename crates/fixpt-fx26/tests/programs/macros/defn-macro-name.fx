@@ -1,4 +1,4 @@
-;; ! `define-const` is a macro's name, which is not bound
+;; ! `define-const` is a macro's name, which is not defined again
 (define-syntax define-const
   (macro (_ bvar expr) defn)
   (syntax-rules

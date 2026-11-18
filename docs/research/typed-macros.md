@@ -553,10 +553,11 @@ turn.
   "`#%toplevel`".
 
 **Not yet:**
-- A macro's name may not be bound or defined at all, as a form's may not
-  (Herman lets a local binder shadow a macro); a use binding one is
-  refused, and a definition of one, however made (an `import`'s, a
-  top-level `include`'s), and a macro of a global's name.
+- A macro's name may not be defined, however made (an `import`'s, a
+  top-level `include`'s), nor a macro of a global's name, nor bound by a
+  template's own binder. A local binder, a `let`'s, a `lambda`'s or a
+  use's, shadows it where it binds, as Herman's do (2026-11-18, `TODO.md`
+  §295): a list it heads there, the program's, is an application.
 - A `with` binds what its module gives, which the expander cannot see:
   a macro used in its body, by a name the program wrote, of which the
   module gives a value is refused when the `with` is checked
@@ -761,7 +762,8 @@ The user's design, the reasons in the conversation that led to it:
   named there; a later redefinition of `lib` changes none of them.
 - **Not this**: a local binding shadowing a macro's name (Herman's), whose
   interaction with `with` is open (a `with` may bind a value of a macro's
-  name, which the expander cannot see); designed after.
+  name, which the expander cannot see); designed after. Built 2026-11-18
+  but for `with` (`TODO.md` §295, §296).
 - **Built** (2026-11-07), in the Rust expander (`Checker::import_file_macros`,
   `Macros::define_file`), which both front ends' checkers then see the
   expansion of; what follows from "a template means what it meant where it
@@ -1949,8 +1951,8 @@ the choice).
 - **In a signature**, `(trailmark else)` where `(literal else)` is
   written today: the identifier bound to that trailmark. **Disjoint from
   `expr`, `data` and `bvar`**: a trailmark is no expression and no datum,
-  and, bound by `define-syntax`, a macro's name, which a use's binder may
-  not be (today's rule: "`x` is a macro's name, which is not bound"). So
+  and, bound by `define-syntax`, a trailmark, which a use's binder may
+  not be ("`x` is a trailmark, which is not bound"). So
   `(oneof ((trailmark else) expr) (expr expr))` is told apart: at a use
   by its identifiers' bindings, known there; in a template by syntax
   types, a part of type `expr` never being a trailmark. Today's
@@ -2058,9 +2060,11 @@ Macros*, ch. 4), for binding signatures as this prototype has them:
 
 **What it relies on**, each held by construction elsewhere:
 - *The head means at expansion what it meant at definition*: a macro's
-  name is reserved, never rebound nor redefined; a local binder may not
-  shadow it (refused since 2026-11-07); a file's macro is renamed to the
-  importer's name for the same macro (`Action::MacroHead`).
+  name is never redefined; a head a template writes is its macro wherever
+  the use is, a binder there shadowing only heads the program wrote, and a
+  template's own binders being fresh names (2026-11-18, `TODO.md` §295;
+  before, a local binder of a macro's name was refused); a file's macro is
+  renamed to the importer's name for the same macro (`Action::MacroHead`).
 - *The set is the definition's*: a checked use is recorded only where the
   template was aligned as a macro's use, so a macro defined after the
   template, a pattern variable at the head, or a procedural macro (refused

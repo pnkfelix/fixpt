@@ -10,7 +10,7 @@
 //! reaches the checkers.
 
 use super::procedural::{alias_base, alias_made};
-use super::{Aligner, Atom, Env, Free, Kids, Level, Macros, Mode, Ns, STy};
+use super::{Aligner, Atom, Env, Free, Kids, Level, Macros, Ns, STy};
 use super::paths::Path;
 use crate::error::R;
 use fixpt_read::{Interner, Sym};
@@ -61,10 +61,7 @@ impl Macros {
         let mut next_fresh = self.withs.captors;
         let key = self.withs.form_key.clone();
         {
-            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-            let root = a.align(&Rc::new(STy::Item), form, None, Path::ROOT)?;
-            let mut found = Vec::new();
-            a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
+            let (a, root, found, _) = Aligner::program(self, interner, &none, &Rc::new(STy::Item), form, false, &HashSet::default())?;
             // What the form's definitions bind, the top level's.
             let mut top = HashSet::default();
             if let Kids::Form(x) = a.nodes[root].kids

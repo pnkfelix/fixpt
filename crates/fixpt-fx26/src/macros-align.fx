@@ -42,7 +42,8 @@
         any-ellipsis? rules-define-sig rules-define? rules-escape sig-of percent-named unquotes?
         any-unquotes? constructs? defines? heads-on head-read pending! syntax-sig-read
         syntax-read! unknown-head? heads pending pending-node? uses-syntax-macro?)
-(import nodes-module def-env-top)
+(import nodes-module def-env-top under under-each logic-word? scoped-on scoped-apps scoped-whole
+        addr-in? kid len-kids)
 
 ;;; ------------------------------------------------------------ aligning
 
@@ -260,10 +261,11 @@
                 (said (string-append "pattern variable `" (symbol->string (car inside))
                                      "` inside a quoted datum: only a whole one is placed"))
                 #u)))))))
-;; A binder at `at`, of a description if `d`, else of a value.
+;; A binder at `at`, of a description if `d`, else of a value: a macro's name
+;; a use's or a program's, which it shadows, not a template's yet (§295).
 (define fill-binder (->* (fails int int syn bool) unit)
   (lambda (fail mode at s d)
-    (cond ((and (syn-symbol? s) (macro? (syn-symbol s)))
+    (cond ((and (syn-symbol? s) (= mode 1) (macro? (syn-symbol s)))
            (fail-at fail (string-append "`" (syn-name s) "` is a macro's name, which is not bound")
                     s))
           ;; A program's binder: any name the checkers let it bind, which they
@@ -417,6 +419,7 @@
            (kernel (kernel-sigs fail)) (sforms (scope-sigs fail))
            (defs (kernel-definitions fail)) (sdefs (scope-definitions fail)))
       (cond
+        ((and (get scoped-on) (macro? n) (scoped-read! fail ps at s defn)) #u)
         ((and (macro? n) (= (makes n) 3))
          (fail-at fail (string-append "`" (symbol->string n) "` is a procedural macro, whose "
                                       "binding structure no signature says: not in a template")
@@ -447,6 +450,24 @@
          (operands-as fail 3 ps at (car (sig-of n kernel)) (nth parts 1)))
         (else (with-kids at (k-form (align fail 3 ps (car (sig-of '%app kernel)) s -1
                                             (node-path at)))))))))
+;; A list a macro's name heads at `at`, where a program's form is read by
+;; its scopes (`scoped-on`; `Aligner::form`): pending; an application if
+;; read so, or a use whole where a form is expanded (done, #t); else a use
+;; by its signature (#f).
+(define scoped-read! (->* (fails pvars int syn bool) bool)
+  (lambda (fail ps at s defn)
+    (let ((app (begin (pending! at defn) (addr-in? (node-path at) (get scoped-apps)))))
+      (cond ((and app defn) (begin (not-definition fail s definitions-said) #t))
+            (app (let ((app-sig (car (sig-of '%app (kernel-sigs fail)))))
+                   (begin (with-kids at (k-form (align fail 3 ps app-sig s -1 (node-path at))))
+                          #t)))
+            ((get scoped-whole) (begin (use-whole! at defn) #t))
+            (else #f)))))
+;; A macro's use at `at`, where a form is expanded: its parts aligned no
+;; further; where a definition is, defining nothing the form's walk sees.
+(define use-whole! (->* (int bool) unit)
+  (lambda (at defn)
+    (begin (with-kids at (k-other)) (if defn (with-export at (bind-rib nil) at) #u))))
 ;; The operands `rest` of the form at `at`, aligned with its signature, in
 ;; `mode`.
 (define operands-as (->* (fails int pvars int sty syn) unit)
@@ -528,9 +549,10 @@
                                                         (nth parts 1)))
             ((not (null? (sig-of n sdefs))) (operands-as fail mode ps at (car (sig-of n sdefs))
                                                          (nth parts 1)))
-            (else (not-definition fail s (string-append "`define`, `define*`, `define-rec`, a "
-                                                        "`begin` of them, or a use of another "
-                                                        "such")))))))
+            (else (not-definition fail s definitions-said))))))
+(define definitions-said string
+  (string-append "`define`, `define*`, `define-rec`, a `begin` of them, or a use of another "
+                 "such"))
 (define not-definition (->* (fails syn string) unit)
   (lambda (fail s what)
     (fail-at fail (string-append "`" (show-syn s) "` is not a definition: a macro that makes "
@@ -543,9 +565,6 @@
 
 ;;; ------------------------------------------------------------ descriptions
 
-;; The `i`th of nodes `ks`.
-(define kid (->* ((listof int acyclic) int) int)
-  (lambda (ks i) (if (= i 0) (car ks) (kid (cdr ks) (- i 1)))))
 ;; Description `s`, which a template writes, at node `at`, aligned name by
 ;; name (`macros.rs`'s `Aligner::desc`): each name referred to in the
 ;; description namespace, the top level's if the template does not bind it;
@@ -573,16 +592,21 @@
         (desc-use fail ps at s (syn-symbol (car items)))
         (desc-items fail ps at s items))))
 ;; A macro's use where a description is: its operands aligned with its
-;; signature, if it makes a description.
+;; signature, if it makes a description; where a form is expanded, whole,
+;; as in `scoped-read!`.
 (define desc-use (->* (fails pvars int syn symbol) unit)
   (lambda (fail ps at s n)
-    (if (makes-desc? n)
-        (with-kids at (k-form (align fail 1 ps (extract (car (macro-of n (get defined))) 1)
-                                     (nth (split s) 1) -1 (path+ (node-path at) #f))))
-        (fail-at fail (string-append "`" (symbol->string n) "` makes "
-                                     (if (makes-defns? n) "definitions" "an expression")
-                                     ", not a description")
-                 s))))
+    (cond
+      ((and (get scoped-on) (get scoped-whole) (makes-desc? n))
+       (begin (pending! at #f) (use-whole! at #f)))
+      ((makes-desc? n)
+       (with-kids at (k-form (align fail 1 ps (extract (car (macro-of n (get defined))) 1)
+                                    (nth (split s) 1) -1 (path+ (node-path at) #f)))))
+      (else
+       (fail-at fail (string-append "`" (symbol->string n) "` makes "
+                                    (if (makes-defns? n) "definitions" "an expression")
+                                    ", not a description")
+                s)))))
 (define desc-items (->* (fails pvars int syn syns-a) unit)
   (lambda (fail ps at s items)
     (let* ((kids (desc-kids at items)) (h (car items))
@@ -817,8 +841,6 @@
                                        "result)`, then a specification's clauses")
                    s)
           (desc-subr-parts fail ps kids items 0 (- plain 2) nil)))))
-(define len-kids (->* ((listof int acyclic)) int)
-  (lambda (ks) (if (null? ks) 0 (+ 1 (len-kids (cdr ks))))))
 (define spec-clause? (->* (syn) bool)
   (lambda (c)
     (let ((parts (proper-items c)))
@@ -920,11 +942,6 @@
     (if (or (null? ks) (null? xs))
         #u
         (begin (spec fail ps (car ks) (car xs)) (spec-each fail ps (cdr ks) (cdr xs))))))
-(define logic-word? (->* (string) bool)
-  (lambda (h)
-    (or (string=? h "<") (string=? h "<=") (string=? h "=") (string=? h ">") (string=? h ">=")
-        (string=? h "not") (string=? h "and") (string=? h "or") (string=? h "implies")
-        (string=? h "+") (string=? h "-") (string=? h "*"))))
 ;; Names of values at nodes `ks`, each the top level's if free (`free` 1)
 ;; or as written (2), or a pattern variable placed.
 (define desc-values (->* (fails pvars (listof int acyclic) int) unit)
@@ -980,14 +997,3 @@
                 (k-binder (n d) (cons (atm-lit (car parts) #t) rest))
                 (else y rest)))
             (else y rest))))))
-;; The nodes under node `at`, itself first.
-(define under (->* (int) (listof int acyclic))
-  (lambda (at)
-    (cons at (tagcase (node-kids at)
-               (k-pair (x y) (append (under x) (under y)))
-               (k-form (x) (under x))
-               (k-seq (x) (under x))
-               (k-desc (xs) (under-each xs))
-               (else y (the (listof int acyclic) nil))))))
-(define under-each (->* ((listof int acyclic)) (listof int acyclic))
-  (lambda (xs) (if (null? xs) nil (append (under (car xs)) (under-each (cdr xs))))))

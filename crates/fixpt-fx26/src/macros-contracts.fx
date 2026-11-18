@@ -30,7 +30,7 @@
 (import align-module align node-syn node-kids node-core node-hole node-export nnodes nodes-reset!
         env-empty env-levels lv-rib lv-earlier k-pvar k-binder k-ref k-form program-walk defined
         macro-of (type pvars levels found env))
-(import scopes-module walk evaluate)
+(import scopes-module walk evaluate program-scoped)
 (import exports-module exports-of)
 (import match-module same-atom?)
 
@@ -272,10 +272,8 @@
 ;; place: two references at one place are one template's part, alike.
 (define references-renamed (->* (fails syn sty renames) syn)
   (lambda (fail part core rs)
-    (let* ((root (begin (nodes-reset!) (set program-walk #t)
-                        (align fail 3 (the pvars nil) core part -1 nil)))
-           (found (walk fail root env-empty #f 0))
-           (at (begin (set program-walk #f) (free-refs found rs nil))))
+    (let* ((found (extract (program-scoped fail core part #f nil) 2))
+           (at (free-refs found rs nil)))
       (syn-renamed-at part at))))
 (define-type placed-renames (listof (tupleof int int symbol) acyclic))
 (define free-refs (->* (found renames placed-renames) placed-renames)
@@ -344,10 +342,8 @@
 (define-type anodes (listof anode acyclic))
 (define alpha-nodes (->* (fails syn sty) anodes)
   (lambda (fail s made)
-    (let* ((root (begin (nodes-reset!) (set program-walk #t)
-                        (align fail 3 (the pvars nil) made s -1 nil)))
-           (found (walk fail root env-empty #f 0)))
-      (begin (set program-walk #f) (anodes-from 0 (get nnodes) found nil)))))
+    (let ((found (extract (program-scoped fail made s #f nil) 2)))
+      (anodes-from 0 (get nnodes) found nil))))
 (define anodes-from (->* (int int found anodes) anodes)
   (lambda (i n fs out)
     (if (= i n)
@@ -533,10 +529,8 @@
 ;; definition's form exports, by its name.
 (define expansion-defines (->* (fails syn) named-ns)
   (lambda (fail out)
-    (let* ((root (begin (nodes-reset!) (set program-walk #t)
-                        (align fail 3 (the pvars nil) (s-defn) out -1 nil)))
-           (found (walk fail root env-empty #f 0))
-           (ds (defines-from fail 0 (get nnodes) nil)))
+    (let* ((scoped (program-scoped fail (s-defn) out #f nil))
+           (ds (begin (set program-walk #t) (defines-from fail 0 (get nnodes) nil))))
       (begin (set program-walk #f) ds))))
 (define defines-from (->* (fails int int named-ns) named-ns)
   (lambda (fail i n out)

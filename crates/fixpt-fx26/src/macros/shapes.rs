@@ -13,7 +13,7 @@
 //! module parameters); a `the`'s, its type's; a `moduleof`'s, its members';
 //! a function's result's, its body's or its type's.
 
-use super::{Aligner, Atom, Kids, Level, Macros, Mode, Ns, STy};
+use super::{Aligner, Atom, Kids, Level, Macros, Ns, STy};
 use super::paths::Path;
 use crate::error::{FxError, R};
 use fixpt_read::{Interner, Sym};
@@ -999,11 +999,8 @@ impl Macros {
     fn walked(&self, form: &Syn, top: bool, global: Global, interner: &Interner) -> R<Walked> {
         let none = HashMap::default();
         let mut out = Walked::default();
-        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
         let t = Rc::new(if top { STy::Item } else { STy::Expr });
-        let root = a.align(&t, form, None, Path::ROOT)?;
-        let mut found = Vec::new();
-        a.walk(root, &super::Env::default(), false, 0, &mut found, &mut Vec::new())?;
+        let (a, root, found, _) = Aligner::program(self, interner, &none, &t, form, false, &fixpt_hash::HashSet::default())?;
         let empty = TopShapes::default();
         let tops = if top { &self.withs.shapes.top } else { &empty };
         let mut c = Shaper::new(&a, &found, tops, &self.withs.shapes.files, self.withs.shapes.dir.as_deref(), global.filter(|_| top));

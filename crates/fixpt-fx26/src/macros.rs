@@ -907,6 +907,15 @@ struct Aligner<'m> {
     /// whether a definition is there.
     heads: Option<&'m HashMap<u64, Head>>,
     pending: Vec<(usize, bool)>,
+    /// A program's form read by its scopes (`Aligner::program`): the lists
+    /// a macro's name heads read as applications so far, by their paths,
+    /// their heads bound around them; any other such list a use. Each
+    /// such list pending, for the walk to find what binds its head.
+    apps: Option<HashSet<Path>>,
+    /// Where a form is expanded (`Macros::uses_found`): a use whole, its
+    /// parts aligned no further (its expansion is, in its turn); else by
+    /// its signature.
+    whole: bool,
 }
 
 /// How a template reads a list whose head a `(macro σ made)` entry may bind:
@@ -2092,7 +2101,7 @@ impl Macros {
         // The pattern, aligned with the signature: each variable's type and
         // declared environment.
         let none = HashMap::default();
-        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
+        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new(), apps: None, whole: false };
         let root = p.align(sig, &pattern, None, Path::ROOT)?;
         // A `syntax-rules`' literals, each a name the signature has written
         // as it is, `(literal name)`, where the pattern has it; and no other.
@@ -2149,7 +2158,7 @@ impl Macros {
         let scoped = self.uses_syntax_macro(template);
         let mut heads: HashMap<u64, Head> = HashMap::default();
         let (t, root, found, seqs, read) = loop {
-            let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: scoped.then_some(&heads), pending: Vec::new() };
+            let mut t = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: scoped.then_some(&heads), pending: Vec::new(), apps: None, whole: false };
             let root = t.align(&made, template, None, Path::ROOT)?;
             let (mut found, mut seqs) = (Vec::new(), Vec::new());
             t.walk(root, &Env::default(), false, 0, &mut found, &mut seqs)?;
@@ -2386,7 +2395,7 @@ impl Macros {
                 && h.sym() == Some(name)
                 && !pvars.contains_key(&name)
             {
-                let mut a = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
+                let mut a = Aligner { m: self, interner, mode: Mode::Template, pvars: &pvars, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new(), apps: None, whole: false };
                 if a.align(sig, &operands, None, Path::ROOT).is_ok() {
                     checked_uses.insert(node.syn.at().start);
                 }
@@ -2626,16 +2635,69 @@ impl Macros {
         }
     }
 
-    /// `withs`: the places of the `with` forms whose bodies `s` is in.
+    /// Form `s`, a program's item, expanded; `withs`: the places of the
+    /// `with` forms whose bodies `s` is in.
     fn expand_in(&mut self, s: &Syn, interner: &mut Interner, budget: &mut usize, withs: &mut Vec<At>) -> R<Syn> {
+        self.expand_region(s, &Rc::new(STy::Item), &Rc::new(HashSet::default()), interner, budget, withs)
+    }
+
+    /// `s`, of signature `core`, expanded: each use of a macro in it, as
+    /// its walk finds them, expanded, and what that makes in its turn,
+    /// each where it is, in what is bound around it (`TODO.md` §295). A
+    /// list a macro's name heads is no use where a binder around it binds
+    /// the name (a `let`'s, a `lambda`'s, a use's whose signature says
+    /// so), the program wrote the head, and it is no description's: an
+    /// application, as R7RS and Herman's have it. `bound`: the macros'
+    /// names bound around `s` by what is around it. A head a template
+    /// wrote is the macro, whatever is bound at the use (hygiene); a
+    /// template's own binders are fresh names, which bind no macro's.
+    fn expand_region(&mut self, s: &Syn, core: &Rc<STy>, bound: &Rc<HashSet<Sym>>, interner: &mut Interner, budget: &mut usize, withs: &mut Vec<At>) -> R<Syn> {
+        let uses = if self.names_macro(s, interner) { self.uses_found(s, core, bound, interner)? } else { HashMap::default() };
+        self.expand_at(s, Path::ROOT, &uses, interner, budget, withs)
+    }
+
+    /// Whether a macro's name is written in `s`, outside a quoted datum.
+    fn names_macro(&self, s: &Syn, interner: &Interner) -> bool {
+        match &s.view() {
+            V::Symbol(n) => self.defined.contains_key(n),
+            V::List { items, tail } => {
+                !items[0].sym().is_some_and(|h| interner.name(h) == "quote")
+                    && (items.iter().any(|i| self.names_macro(i, interner)) || tail.as_ref().is_some_and(|t| self.names_macro(t, interner)))
+            }
+            _ => false,
+        }
+    }
+
+    /// The uses of macros in `s`, of signature `core`, `bound` the macros'
+    /// names bound around it: each by its path, with the macros' names
+    /// bound around it, as the walk of `s` finds them, each use whole
+    /// (`Aligner::program`).
+    fn uses_found(&mut self, s: &Syn, core: &Rc<STy>, bound: &Rc<HashSet<Sym>>, interner: &mut Interner) -> R<HashMap<Path, Rc<HashSet<Sym>>>> {
+        self.ensure_kernel(interner)?;
+        let none = HashMap::default();
+        let (a, _, _, read) = Aligner::program(self, interner, &none, core, s, true, bound)?;
+        let apps = a.apps.as_ref().expect("read by scope");
+        Ok(read
+            .into_iter()
+            .filter(|(at, _)| !apps.contains(&a.nodes[*at].path))
+            .map(|(at, here)| {
+                let names = if here.is_empty() { bound.clone() } else { Rc::new(bound.iter().copied().chain(here).collect()) };
+                (a.nodes[at].path, names)
+            })
+            .collect())
+    }
+
+    /// `s`, at `path` in what `uses_found` read: each use there expanded,
+    /// and what it makes, in what is bound around it.
+    fn expand_at(&mut self, s: &Syn, path: Path, uses: &HashMap<Path, Rc<HashSet<Sym>>>, interner: &mut Interner, budget: &mut usize, withs: &mut Vec<At>) -> R<Syn> {
         let V::List { items, tail } = &s.view() else { return Ok(s.clone()) };
         let head = items[0].sym();
         if head.is_some_and(|h| interner.name(h) == "quote") {
             return Ok(s.clone());
         }
-        if let Some(h) = head
-            && let Some(m) = self.defined.get(&h).cloned()
-        {
+        if let Some(bound) = uses.get(&path) {
+            let h = head.expect("a macro's name");
+            let m = self.defined[&h].clone();
             if m.defn {
                 return Err(FxError::at(s.at(), format!("`{}` makes definitions, which are made at the top level, not where an expression is", interner.name(h))));
             }
@@ -2647,8 +2709,8 @@ impl Macros {
                     self.withs.with_uses.entry(w.span()).or_default().push((h, items[0].span()));
                 }
             }
-            let out = self.expand_use(h, &m, s, interner)?;
-            let out = self.expand_in(&out, interner, budget, withs);
+            let core = Rc::new(if m.desc { STy::Type } else { STy::Expr });
+            let out = self.expand_use(h, &m, s, interner).and_then(|out| self.expand_region(&out, &core, bound, interner, budget, withs));
             self.withs.chain.pop();
             return out;
         }
@@ -2671,23 +2733,25 @@ impl Macros {
         // `(with m body …)`: its body in it.
         let with = head.is_some_and(|h| interner.name(h) == "with");
         let mut out = Vec::new();
+        // Each item's path, the car of the cdrs before it.
+        let mut rest = path;
         for (k, i) in items.iter().enumerate() {
             let inside = with && k >= 2;
             if inside {
                 withs.push(s.at());
             }
-            let r = self.expand_in(i, interner, budget, withs);
+            let r = self.expand_at(i, rest.push(true), uses, interner, budget, withs);
             if inside {
                 withs.pop();
             }
             out.push(r?);
+            rest = rest.push(false);
         }
-        let items = out;
         let tail = match tail {
-            Some(t) => Some(self.expand_in(t, interner, budget, withs)?),
+            Some(t) => Some(self.expand_at(t, rest, uses, interner, budget, withs)?),
             None => None,
         };
-        Ok(Syn::of_list(s.at(), &items, tail))
+        Ok(Syn::of_list(s.at(), &out, tail))
     }
 
     /// Form `form`, a program's after expansion, each local value binder
@@ -2701,10 +2765,7 @@ impl Macros {
         let none = HashMap::default();
         let mut renamed: HashMap<Path, String> = HashMap::default();
         {
-            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-            let root = a.align(&Rc::new(STy::Item), form, None, Path::ROOT)?;
-            let mut found = Vec::new();
-            a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
+            let (a, _, found, _) = Aligner::program(self, interner, &none, &Rc::new(STy::Item), form, false, &HashSet::default())?;
             // The names definitions give, which other forms see.
             let mut defined = HashSet::default();
             for node in &a.nodes {
@@ -2783,7 +2844,7 @@ impl Macros {
         let trusted = self.withs.trusted.contains(&s.at());
         if !trusted || self.withs.recheck {
             let none = HashMap::default();
-            let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
+            let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new(), apps: None, whole: false };
             let fault = if trusted { " (a use a template made, which its macro's definition found fits: a fault in the binding-shape check, not in the program)" } else { "" };
             u.align(&m.sig, &operands, None, Path::ROOT).map_err(|e| FxError::at(e.span, format!("a use of `{}`: {}{fault}", interner.name(name), e.message)))?;
         }
@@ -2829,7 +2890,7 @@ impl Macros {
         let refused = |why: &str| FxError::at(s.at(), format!("a use of `{shown}`: {why}"));
         let (head, operands) = split(s).expect("a list");
         let none = HashMap::default();
-        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
+        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new(), apps: None, whole: false };
         u.align(sig, &operands, None, Path::ROOT).map_err(|e| FxError::at(e.span, format!("a use of `{shown}`: {}", e.message)))?;
         let made = fixpt_read::record_expansion(&shown, s.span(), None, false);
         self.expansion_begun(made, p.def_env.clone());
@@ -2899,10 +2960,7 @@ impl Macros {
     /// as they are.
     fn references_renamed(&self, part: &Syn, core: &Rc<STy>, renames: &HashMap<Sym, Sym>, interner: &mut Interner) -> R<Syn> {
         let none = HashMap::default();
-        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-        let root = a.align(core, part, None, Path::ROOT)?;
-        let mut found = Vec::new();
-        a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
+        let (a, _, found, _) = Aligner::program(self, interner, &none, core, part, false, &HashSet::default())?;
         let mut at: HashMap<u64, Sym> = HashMap::default();
         for (i, env, _, _) in &found {
             if let Kids::Ref(n, ns, _) = a.nodes[*i].kids
@@ -2920,10 +2978,7 @@ impl Macros {
     /// α-equivalence takes it (`AlphaNode`).
     fn alpha_nodes(&self, s: &Syn, made: &Rc<STy>, interner: &mut Interner) -> R<Vec<AlphaNode>> {
         let none = HashMap::default();
-        let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-        let root = a.align(made, s, None, Path::ROOT)?;
-        let mut found = Vec::new();
-        a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
+        let (a, _, found, _) = Aligner::program(self, interner, &none, made, s, false, &HashSet::default())?;
         let envs: HashMap<usize, Env> = found.into_iter().map(|(i, env, _, _)| (i, env)).collect();
         Ok(a.nodes
             .iter()
@@ -2956,7 +3011,7 @@ impl Macros {
     fn contract_renames(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(HashMap<u64, (HashMap<Sym, Sym>, Rc<STy>, Syn)>, HashMap<Sym, Sym>)> {
         let (pattern, parts) = self.contract_pattern(sig, operands, interner)?;
         let none = HashMap::default();
-        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
+        let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new(), apps: None, whole: false };
         let root = p.align(sig, &pattern, None, Path::ROOT)?;
         let mut found = Vec::new();
         p.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
@@ -3026,7 +3081,7 @@ impl Macros {
         let (pattern, parts) = self.contract_pattern(sig, operands, interner)?;
         let mut said: Vec<(Sym, Ns)> = Vec::new();
         {
-            let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
+            let mut p = Aligner { m: self, interner, mode: Mode::Pattern, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new(), apps: None, whole: false };
             let root = p.align(sig, &pattern, None, Path::ROOT)?;
             p.walk(root, &Env::default(), false, 0, &mut Vec::new(), &mut Vec::new())?;
             if let Some((b, r)) = p.nodes[root].export.clone() {
@@ -3050,9 +3105,7 @@ impl Macros {
         let mut defines: Vec<(Sym, Ns)> = Vec::new();
         {
             let ours = |e: FxError| FxError::at(e.span, format!("its expansion: {}", e.message));
-            let mut a = Aligner { m: self, interner, mode: Mode::Program, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
-            let root = a.align(&Rc::new(STy::Defn), out, None, Path::ROOT).map_err(ours)?;
-            a.walk(root, &Env::default(), false, 0, &mut Vec::new(), &mut Vec::new()).map_err(ours)?;
+            let (a, _, _, _) = Aligner::program(self, interner, &none, &Rc::new(STy::Defn), out, false, &HashSet::default()).map_err(ours)?;
             for i in 0..a.nodes.len() {
                 let (STy::Item | STy::Defn, Kids::Form(x)) = (&*a.nodes[i].core, &a.nodes[i].kids) else { continue };
                 let Some((b, r)) = a.nodes[*x].export.clone() else { continue };
@@ -3084,7 +3137,7 @@ impl Macros {
     /// `%part:k`, the part `parts[k]`.
     fn contract_pattern(&self, sig: &Rc<STy>, operands: &Syn, interner: &mut Interner) -> R<(Syn, Vec<Syn>)> {
         let none = HashMap::default();
-        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new() };
+        let mut u = Aligner { m: self, interner, mode: Mode::Use, pvars: &none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new(), apps: None, whole: false };
         u.align(sig, operands, None, Path::ROOT)?;
         let leaf = |t: &STy| matches!(t, STy::Expr | STy::Lambda | STy::Bvar | STy::Dvar | STy::Id | STy::Data | STy::Type | STy::Label | STy::Kind | STy::Defn | STy::Item);
         let mut leaves: HashSet<u64> = HashSet::default();
@@ -3630,8 +3683,10 @@ impl Aligner<'_> {
                 self.nodes[at].kids = Kids::Binder(n, ns);
                 Ok(None)
             }
+            // A use's binder may be a macro's name, which it shadows where
+            // it binds (`TODO.md` §295); a template's own may not, not yet.
             STy::Bvar | STy::Dvar => match shape.sym() {
-                Some(n) if self.m.defined.contains_key(&n) => Err(fail(format!("`{}` is a macro's name, which is not bound", self.name(n)))),
+                Some(n) if self.mode == Mode::Template && self.m.defined.contains_key(&n) => Err(fail(format!("`{}` is a macro's name, which is not bound", self.name(n)))),
                 Some(n) if self.m.mark_of(n).is_some() => Err(fail(format!("`{}` is a trailmark, which is not bound", self.name(n)))),
                 // A value's binder a use gives: as a program's, any name the
                 // checkers let it bind, a keyword too (`fields`, Heist's),
@@ -3811,6 +3866,25 @@ impl Aligner<'_> {
     fn form(&mut self, at: usize, s: &Syn, defn: bool) -> R<Option<(Rc<STy>, Path, bool)>> {
         let V::List { items, tail } = &s.view() else { unreachable!("a list") };
         let head = items[0].sym().filter(|h| !self.pvars.contains_key(h));
+        // Where a form is expanded: a list a macro's name heads, a use,
+        // whole (pending, for the walk to say what binds its head around
+        // it), unless read as an application, its head bound around it.
+        let head = match (&self.apps, head) {
+            (Some(apps), Some(h)) if self.m.defined.contains_key(&h) => {
+                let app = apps.contains(&self.nodes[at].path);
+                self.nodes[at].head = true;
+                self.pending.push((at, defn));
+                if app {
+                    None
+                } else if self.whole {
+                    self.use_whole(at, defn);
+                    return Ok(None);
+                } else {
+                    head
+                }
+            }
+            _ => head,
+        };
         // A list whose head a `(macro σ made)` entry may bind: pending, read by
         // its scope (`Macros::template_aligned`), a use of that macro by
         // `σ` once its binder is found one, else an application (where a
@@ -3966,6 +4040,80 @@ impl Aligner<'_> {
         }))
     }
 
+    /// A macro's use at node `at`, where a form is expanded: whole, its
+    /// parts not aligned; where a definition is, defining nothing the
+    /// form's walk sees (what it defines is seen once it is expanded).
+    fn use_whole(&mut self, at: usize, defn: bool) {
+        self.nodes[at].kids = Kids::Other;
+        if defn {
+            self.nodes[at].export = Some((Bind::Rib(Vec::new()), at));
+        }
+    }
+
+    /// Program form `s`, of signature `core`, aligned and walked, each list
+    /// a macro's name heads read by its scope (`TODO.md` §295): an
+    /// application where the program wrote its head (a template's is its
+    /// macro, by hygiene), it is no description's, and a binder around it
+    /// binds the name, or `bound` has it (the macros' names bound around
+    /// `s`); else a use, `whole` (where a form is expanded) or by its
+    /// signature. Read to a fixed point: aligned, walked, and each list read
+    /// otherwise than it is now, with none such around it, read anew, as
+    /// what binds a head is read by the lists around it alone; so each
+    /// round settles at least one for good, and it ends.
+    #[allow(clippy::type_complexity)]
+    fn program<'a>(m: &'a Macros, interner: &'a Interner, none: &'a HashMap<Sym, PInfo>, core: &Rc<STy>, s: &Syn, whole: bool, bound: &HashSet<Sym>) -> R<(Aligner<'a>, usize, Found, Vec<(usize, Vec<Sym>)>)> {
+        let mut apps: HashSet<Path> = HashSet::default();
+        loop {
+            let mut a = Aligner { m, interner, mode: Mode::Program, pvars: none, nodes: Vec::new(), unplaced: Vec::new(), work: Vec::new(), heads: None, pending: Vec::new(), apps: Some(apps), whole };
+            let root = a.align(core, s, None, Path::ROOT)?;
+            let mut found = Vec::new();
+            a.walk(root, &Env::default(), false, 0, &mut found, &mut Vec::new())?;
+            let read = a.heads_bound(&found, bound);
+            let apps_now = a.apps.as_ref().expect("read by scope");
+            let changed: Vec<Path> = read.iter().filter(|(at, here)| {
+                let node = &a.nodes[*at];
+                let items = node.syn.list().expect("a list");
+                let h = items[0].sym().expect("a macro's name");
+                let app = items[0].at().expansion == 0 && !m.defined[&h].desc && (bound.contains(&h) || here.contains(&h));
+                app != apps_now.contains(&node.path)
+            }).map(|(at, _)| a.nodes[*at].path).collect();
+            if changed.is_empty() {
+                return Ok((a, root, found, read));
+            }
+            apps = a.apps.take().expect("read by scope");
+            for p in &changed {
+                if !changed.iter().any(|q| q != p && p.starts_with(*q)) && !apps.remove(p) {
+                    apps.insert(*p);
+                }
+            }
+        }
+    }
+
+    /// Each pending list, with the macros' names a binder around it binds,
+    /// by the walk's `found`.
+    fn heads_bound(&self, found: &Found, bound: &HashSet<Sym>) -> Vec<(usize, Vec<Sym>)> {
+        let envs: HashMap<usize, &Env> = found.iter().filter(|f| self.nodes[f.0].head).map(|(i, env, ..)| (*i, env)).collect();
+        let mut out = Vec::new();
+        for (at, _) in &self.pending {
+            let mut here: Vec<Sym> = Vec::new();
+            for level in envs[at].levels() {
+                let (Level::Rib(atoms) | Level::Earlier(atoms)) = level else { continue };
+                for x in atoms.iter() {
+                    if let Atom::Lit(b, Ns::Value) = x
+                        && let Kids::Binder(n, _) = self.nodes[*b].kids
+                        && self.m.defined.contains_key(&n)
+                        && !bound.contains(&n)
+                        && !here.contains(&n)
+                    {
+                        here.push(n);
+                    }
+                }
+            }
+            out.push((*at, here));
+        }
+        out
+    }
+
     /// `form` of `s`, which is taken: what it aligns next, its operands
     /// moved out of it, not copied, at every form a program nests.
     fn form_owned(&mut self, at: usize, s: Syn, defn: bool) -> R<Option<Step>> {
@@ -4039,6 +4187,13 @@ impl Aligner<'_> {
         if let Some(h) = items[0].sym().filter(|h| !self.pvars.contains_key(h))
             && let Some(m) = self.m.defined.get(&h)
         {
+            // Where a form is expanded, a use whole, as in `form`.
+            if self.whole && m.desc {
+                self.nodes[at].head = true;
+                self.pending.push((at, false));
+                self.use_whole(at, false);
+                return Ok(());
+            }
             if !m.desc {
                 let what = if m.defn { "definitions" } else { "an expression" };
                 return Err(fail(format!("`{}` makes {what}, not a description", self.name(h))));
