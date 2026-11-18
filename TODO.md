@@ -7952,3 +7952,46 @@ its instance's macros are is known before checking, and a template's free
 names reach the instance through the parameter, `(with m-frame x)`. To
 design (the user's), with Heist's second wish: an instance made at a top
 level, `((load-module "f") m …)`.
+
+Decided (the user's, 2026-11-18), after discussion:
+- A module parameter's macros: `(hide (import-with-syntax m-frame))` in
+  the file that has the parameter, refused outside a `hide` (they are not
+  given on: `m-frame` is that file's parameter, which no importer of it
+  sees; giving them on is §291's re-export). Macros only: how the
+  parameter's values are seen is its declaration's (included, or
+  `qualified`).
+- Expansions reach the hidden members of the file a macro is defined in,
+  as syntactic closures carry their environment (Bawden and Rees 1988),
+  at run time as Bawden's frames (POPL 2000): a free name of a template
+  that its file does not show becomes a closed reference to a member of
+  the instance it reaches, `(%member m-frame k)`, the expansion carrying a
+  table of what each `k` is (the definition it names, its type in the
+  file's terms), which the checkers are given as they are given the
+  expander's other tables (`Withs::projections`, `with-uses`); not a
+  written path, no `%hidden:` name in a type a program writes. An instance
+  of a file whose macros need such members carries one more member, a
+  record of exactly those values, Bawden's frame, `k` a slot of it; the
+  checker's type of the file has it, unwritten, so no module without it
+  passes for one with it. Not 3-D syntax: the instance is made at run
+  time (`m-frame` a parameter), so no value could be put in an expansion.
+  A procedural macro's renamed name of a hidden member not kept: refused,
+  for now. Steps: the frame and its types (both checkers, the compilers,
+  `.fasl`s, the verifier); the closed references and their table (both
+  expanders); a parameter's macros imported; an instance made at a top
+  level, `((load-module "f") m …)`, taken as `(proj …)`'s is.
+
+Refined (the user's, 2026-11-18): a transformer may pass `rename` to code
+no reader of the file sees, so what a name means must be the renaming's
+own, and the environment it closes over complete. So the frame is an
+ordinary shown member of its own name, `%frame:F` (`F` a hash of the
+file's text), `(let ((%fr:x x) …) (module (define x %fr:x) …))`: every
+hidden value if a macro of the file is procedural; else those its macros'
+text names. A name a file's macro means resolves shown, then frame, then
+(a name the file binds but does not keep) refused, then standard.
+
+Built 2026-11-18, step 1, the frame: `shapes::frame_text_of`, read from
+the file's text and its parameters' files' texts, apart from any checker;
+the Rust checker reads it after the file's forms (`Checker::framed`), and
+the parser written in FX-26 is handed the file's text with it
+(`syn::file_text`), so both checkers, the compilers and `.fasl`s see the
+same member. Next: step 2, a file's macros' names resolved through it.

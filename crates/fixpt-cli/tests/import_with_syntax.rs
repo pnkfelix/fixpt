@@ -220,3 +220,41 @@ fn a_files_macro_expanding_to_its_procedural_one() {
         assert!(said.contains("both checkers agree"), "{name}: {said}{}", String::from_utf8_lossy(&out.stderr));
     }
 }
+
+/// A module file that defines macros has a frame (`TODO.md` §300), a shown
+/// member of its own name, `%frame:…`, holding the values its expansions may
+/// reach that it does not show: its `hide`n ones and those its module
+/// parameters bring. Those its `syntax-rules` templates name, if its macros
+/// are all such; every one, if one is procedural. A file of no macros has
+/// none. Both checkers agree, and each file's frame is the same read from
+/// its `.fasl` (`programs/import-with-syntax/frame`, copied, as `.fasl`s are
+/// written beside them).
+#[test]
+fn a_module_files_frame_holds_what_its_macros_may_reach() {
+    let dir = std::env::temp_dir().join(format!("fixpt-iws-frame-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("made");
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/import-with-syntax/frame");
+    for name in ["core.fx", "rules.fx", "er.fx", "plain.fx", "param.fx", "main.fx"] {
+        std::fs::copy(from.join(name), dir.join(name)).expect("copied");
+    }
+    let frame = |l: &str| l.split("(val %frame:").nth(1).map(|r| r.split_once(' ').map(|(_, f)| f.to_string()).unwrap_or_default());
+    for round in ["source", "fasl"] {
+        if round == "fasl" {
+            for name in ["rules.fx", "er.fx", "plain.fx", "core.fx", "param.fx"] {
+                let out = Command::new(FIXPT).args(["compile-file", name]).current_dir(&dir).output().expect("runs");
+                assert!(out.status.success(), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+            }
+        }
+        let out = Command::new(FIXPT).args(["check", "main.fx"]).current_dir(&dir).output().expect("runs");
+        let said = String::from_utf8_lossy(&out.stdout).to_string();
+        assert!(said.contains("both checkers agree"), "{round}: {said}{}", String::from_utf8_lossy(&out.stderr));
+        let shapes: Vec<&str> = said.lines().filter(|l| l.starts_with("(moduleof")).collect();
+        assert_eq!(shapes.len(), 4, "{round}: {said}");
+        assert_eq!(frame(shapes[0]).as_deref(), Some("(moduleof (val named int)))) ! (read (globals rules))"), "{round}: {}", shapes[0]);
+        assert!(frame(shapes[1]).is_some_and(|f| f.starts_with("(moduleof (val a int) (val b int))")), "{round}: {}", shapes[1]);
+        assert_eq!(frame(shapes[2]), None, "{round}: {}", shapes[2]);
+        assert!(frame(shapes[3]).is_some_and(|f| f.starts_with("(moduleof (val own int) (val core-helper (subr pure (int) int)))")), "{round}: {}", shapes[3]);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

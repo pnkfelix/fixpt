@@ -1551,6 +1551,12 @@ pub fn read_syn_side(text: &str, interner: &mut Interner) -> fixpt_read::ReadRes
     read_at(text, side_base(), FileId(0), 0, interner)
 }
 
+/// [`read_syn_side`] of `text` from byte `start` on, its places those
+/// of the whole text.
+pub fn read_syn_side_from(text: &str, start: usize, interner: &mut Interner) -> fixpt_read::ReadResult<Vec<Syn>> {
+    read_at(text, side_base(), FileId(0), start, interner)
+}
+
 /// `f` of `text` read into `syn` on the side ([`read_syn_side`]), while
 /// its places are known; its text forgotten after, so that what is read
 /// again and again (a module file's loads, each form) keeps nothing.

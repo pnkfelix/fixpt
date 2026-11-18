@@ -251,6 +251,133 @@ pub(crate) fn load_key(dir: Option<&std::path::Path>, path: &str, input: bool) -
     (at, key)
 }
 
+/// The frame of the module file at `at`, of text `text` (`TODO.md` §300),
+/// as the text of one more item after its own, if any of its forms defines
+/// a macro and its macros may reach hidden values: `(define %frame:F (let
+/// ((%fr:x x) …) (module (define x %fr:x) …)))`, a shown member of a name
+/// of the file's own (`frame_name`), holding the values its expansions may
+/// reach that the file does not show. Every one if a macro of it is
+/// procedural, whose transformer may rename any name and pass `rename` to
+/// code no reader sees; else those its macros' text names. A hidden value
+/// is one of its `hide`n definitions, or a name a module parameter not
+/// `qualified` brings: what the parameter's `(load-moduleof "f" …)` file
+/// defines outside a `hide`, or what its `(moduleof (val n …) …)` names.
+/// Of texts alone, read here apart from any checker, so that the Rust
+/// checker (`Checker::framed`) and the parser written in FX-26, handed the
+/// file's text with it (`syn::file_text`), read the same.
+pub(crate) fn frame_text_of(at: &std::path::Path, text: &str) -> Option<String> {
+    use fixpt_read::{Datum, Syntax};
+    fn read(text: &str, interner: &mut Interner) -> Vec<Syntax> {
+        let mut sources = fixpt_read::SourceMap::default();
+        fixpt_read::read_string(&mut sources, interner, "frame", text, fixpt_read::SyntaxProfile::FX26).unwrap_or_default()
+    }
+    fn items(s: &Syntax) -> &[Syntax] {
+        match &s.datum {
+            Datum::List { items, .. } => items,
+            _ => &[],
+        }
+    }
+    fn name(s: &Syntax, interner: &Interner) -> Option<String> {
+        match &s.datum {
+            Datum::Symbol(n) => Some(interner.name(*n).to_string()),
+            _ => None,
+        }
+    }
+    fn head(s: &Syntax, interner: &Interner) -> Option<String> {
+        items(s).first().and_then(|h| name(h, interner))
+    }
+    fn symbols(s: &Syntax, interner: &Interner, out: &mut fixpt_hash::HashSet<String>) {
+        match &s.datum {
+            Datum::Symbol(n) => _ = out.insert(interner.name(*n).to_string()),
+            Datum::List { items, tail } => items.iter().chain(tail.as_deref()).for_each(|i| symbols(i, interner, out)),
+            Datum::Vector(items) => items.iter().for_each(|i| symbols(i, interner, out)),
+            _ => {}
+        }
+    }
+    // The values a definition defines: a `define`'s, a `define*`'s, each of
+    // a `define-rec`'s.
+    fn defined(x: &Syntax, interner: &Interner) -> Vec<String> {
+        let parts = items(x);
+        match head(x, interner).as_deref() {
+            Some("define" | "define*") => parts.get(1).and_then(|n| name(n, interner)).into_iter().collect(),
+            Some("define-rec") => parts[1..].iter().filter_map(|b| items(b).first().and_then(|n| name(n, interner))).collect(),
+            _ => Vec::new(),
+        }
+    }
+    let mut interner = Interner::new();
+    let forms = read(text, &mut interner);
+    let (mut any, mut procedural, mut written) = (false, false, fixpt_hash::HashSet::default());
+    let mut own_hidden: Vec<String> = Vec::new();
+    for f in &forms {
+        let hidden = head(f, &interner).as_deref() == Some("hide");
+        let xs: &[Syntax] = if hidden { &items(f)[1..] } else { std::slice::from_ref(f) };
+        for x in xs {
+            match head(x, &interner).as_deref() {
+                Some("define-syntax" | "define-syntax-rec") => {
+                    any = true;
+                    procedural |= items(x).last().and_then(|t| head(t, &interner)).is_none_or(|h| h != "syntax-rules");
+                    symbols(x, &interner, &mut written);
+                }
+                _ if hidden => own_hidden.extend(defined(x, &interner)),
+                _ => {}
+            }
+        }
+    }
+    if !any {
+        return None;
+    }
+    // What each module parameter not `qualified` brings.
+    let dir = at.parent();
+    let mut brought: Vec<String> = Vec::new();
+    let params = forms.first().filter(|f| head(f, &interner).as_deref() == Some("module-parameters")).and_then(|f| items(f).get(1)).map(items).unwrap_or_default();
+    for b in params {
+        let [_, t] = items(b) else { continue };
+        match (head(t, &interner).as_deref(), items(t).get(1).map(|p| &p.datum)) {
+            (Some("load-moduleof"), Some(Datum::Str(p))) => {
+                let path = load_key(dir, p, false).0;
+                let other = match crate::built_in_module(p) {
+                    Some(t) => t.to_string(),
+                    None => crate::reads::read_file(&path).unwrap_or_default(),
+                };
+                let mut inner = Interner::new();
+                for g in read(&other, &mut inner) {
+                    if head(&g, &inner).as_deref() != Some("hide") {
+                        brought.extend(defined(&g, &inner));
+                    }
+                }
+            }
+            (Some("moduleof"), _) => {
+                for e in &items(t)[1..] {
+                    if head(e, &interner).as_deref() == Some("val") {
+                        brought.extend(items(e).get(1).and_then(|n| name(n, &interner)));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut kept: Vec<String> = Vec::new();
+    for n in own_hidden.into_iter().chain(brought) {
+        if !n.starts_with('%') && (procedural || written.contains(&n)) && !kept.contains(&n) {
+            kept.push(n);
+        }
+    }
+    if kept.is_empty() {
+        return None;
+    }
+    let binds: Vec<String> = kept.iter().map(|n| format!("(%fr:{n} {n})")).collect();
+    let defs: Vec<String> = kept.iter().map(|n| format!("(define {n} %fr:{n})")).collect();
+    Some(format!("(define {} (let ({}) (module {})))", frame_name(text), binds.join(" "), defs.join(" ")))
+}
+
+/// The name of the frame of the module file of text `text`
+/// (`Macros::frame_text`): its own, so that no two files' meet where an
+/// `include` brings them; and of its text, not of where it is read from, so
+/// that it is the same from its source and from its `.fasl`, wherever.
+pub(crate) fn frame_name(text: &str) -> String {
+    format!("%frame:{:016x}", crate::fasl::digest(text))
+}
+
 /// The paths each `load-module`, `load-input`, `load-moduleof` and
 /// `load-input-moduleof` in `s` names, with whether it is an input's.
 pub(crate) fn loads_in(s: &Syn, interner: &Interner, out: &mut Vec<(String, bool)>) {

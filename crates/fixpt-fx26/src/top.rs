@@ -709,6 +709,7 @@ impl Checker {
             let key = format!("{}{}", if input && !params { "input:" } else { "" }, at.display());
             let dir = at.parent().map(|d| d.to_path_buf());
             self.file_shapes_for(&forms, dir.clone());
+            forms = self.framed(at, text, forms, Some(file));
             let mut macros = std::mem::take(&mut self.macros);
             let mut interner = std::mem::take(&mut self.interner);
             forms = macros.file_forms_shaped(&key, forms, input, dir, &mut interner);
@@ -721,6 +722,30 @@ impl Checker {
             self.expand_datatype(f, &mut out)?;
         }
         Ok(out)
+    }
+
+    /// Module file `at`'s forms, `forms`, of text `text`, with its frame
+    /// last, if it has one (`shapes::frame_text_of`, `TODO.md` §300) and
+    /// they have it not yet: read as if after its text, at the places the
+    /// parser written in FX-26 reads it at, which is handed the file's text
+    /// with it (`syn::file_text`), and placed in `file` if given.
+    fn framed(&mut self, at: &std::path::Path, text: &str, mut forms: Vec<Syn>, file: Option<FileId>) -> Vec<Syn> {
+        let name = crate::macros::shapes::frame_name(text);
+        let has = forms.last().and_then(|f| f.list()).is_some_and(|l| l.len() == 3 && l[1].sym().is_some_and(|n| self.interner.name(n) == name));
+        if has {
+            return forms;
+        }
+        let Some(frame) = crate::macros::shapes::frame_text_of(at, text) else { return forms };
+        let whole = format!("{text}\n{frame}");
+        let start = text.len() + 1;
+        let read = self.syn(|c| crate::heap_syn::read_syn_side_from(&whole, start, &mut c.interner));
+        if let Ok(frame) = read {
+            forms.extend(frame.iter().map(|f| match file {
+                Some(file) => placed_in(f, file),
+                None => *f,
+            }));
+        }
+        forms
     }
 
     /// A module file's forms, `forms`, its own macros' uses expanded, without
@@ -889,6 +914,7 @@ impl Checker {
                     crate::macros::shapes::loads_in(f, &c.interner, &mut loads);
                 }
                 c.file_shapes_of(loads, sub.clone());
+                let forms = c.framed(&at, &text, forms, None);
                 let mut macros = std::mem::take(&mut c.macros);
                 let mut interner = std::mem::take(&mut c.interner);
                 let _ = macros.file_shaped(key, &forms, input, sub, &mut interner);

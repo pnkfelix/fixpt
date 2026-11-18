@@ -939,6 +939,17 @@ thread_local! {
     static FASL_USED: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::default());
 }
 
+/// The text of the module file at `at` as the parser written in FX-26 is
+/// given it: its own, and its frame after it, if it has one, as the Rust
+/// checker reads it (`shapes::frame_text_of`, `Checker::framed`).
+fn file_text(at: &std::path::Path) -> std::io::Result<String> {
+    let t = crate::reads::read_file(at)?;
+    Ok(match crate::macros::shapes::frame_text_of(at, &t) {
+        Some(frame) => format!("{t}\n{frame}"),
+        None => t,
+    })
+}
+
 /// Set the loads read from `.fasl`s (`FASL_USED`).
 pub fn set_fasl_used(used: HashMap<String, String>) {
     FASL_USED.with(|f| *f.borrow_mut() = used);
@@ -1392,7 +1403,7 @@ fn supply_loaded_in(
             // parameter of the next read each below it twice as often as
             // the one above).
             if imports_syntax && crate::built_in_module(&path).is_none() && seen.forms_read.insert(shared.clone()) {
-                let Ok(ftext) = crate::reads::read_file(&at) else { continue };
+                let Ok(ftext) = file_text(&at) else { continue };
                 let Ok(syns) = read_to_syns_at(scheme, FileId(1001 + *read), &ftext, LOAD_BASE_STEP * (*read as i64 + 1)) else { continue };
                 *read += 1;
                 let file_base = LOAD_BASE_STEP * *read as i64;
@@ -1406,7 +1417,7 @@ fn supply_loaded_in(
         let fasl = FASL_USED.with(|f| f.borrow().get(&shared).cloned());
         let contents = |at: &std::path::Path| match (fasl.as_deref(), crate::built_in_module(&path)) {
             (Some(t), _) | (None, Some(t)) => Ok(t.to_string()),
-            (None, None) => crate::reads::read_file(at),
+            (None, None) => file_text(at),
         };
         let (file_base, why, syns, ftext) = match contents(&at) {
             Err(e) => (0, format!("cannot read `{path}`: {e}"), scheme.make(|_| Value::NULL), String::new()),
