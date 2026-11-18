@@ -3228,7 +3228,16 @@ impl Heap {
     /// [`copy_out`](Self::copy_out) of a pair or a bloblet pointer.
     #[inline(always)]
     fn copy_out_object(mem: &mut [u64], c: &mut Copier, v: Value) -> Value {
-        let i = v.index() - c.base;
+        // Every reference a collection traces is to this heap's memory: one
+        // past it is another heap's (each heap's memory its own address
+        // space, `MEM_WORDS` words), never followed, nor kept alive, so it
+        // would dangle once that heap is dropped. Refused where it is met,
+        // a minor collection's too, rather than taken for a reference an
+        // ended region left.
+        let i = v.index().wrapping_sub(c.base);
+        if i >= MEM_WORDS {
+            another_heaps(v, c.base);
+        }
         let young = young::is_young(i);
         // A minor collection copies the nursery's objects, and only them.
         if c.minor && !young {
@@ -3889,6 +3898,14 @@ impl Copier<'_> {
         self.crossed(at, n);
         at
     }
+}
+
+/// A collection that met reference `v`, not to the memory of the heap at
+/// `base`: another heap's, or none's (`Heap::copy_out_object`).
+#[cold]
+#[inline(never)]
+fn another_heaps(v: Value, base: usize) -> ! {
+    panic!("a collection traced {v:?}, a reference to no word of this heap's (its memory at word {base:#x}, {MEM_WORDS:#x} words): another heap's object, which nothing here keeps alive")
 }
 
 /// Whether word `i` of the heap's memory is in the static area.

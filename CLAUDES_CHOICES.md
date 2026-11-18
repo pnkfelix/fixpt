@@ -4417,6 +4417,15 @@ The user read the paper as supporting the distribution. Mine:
   lives as long as the process; it lives as long as its heap. The store
   per process was chosen on that claim; it holds nothing now.
 
+## A collection refuses a reference into another heap (2026-11-17)
+
+- **At the collection, before the store**: the one place every reference
+  a heap holds passes through, with one compare where it is classified
+  already; a store's check is left (`TODO.md` §293), its cost on the write
+  barrier to measure. A reference past the heap's memory is a panic, not
+  an error returned: nothing a program does can make one, so one is a bug
+  of the runtime's.
+
 ## Gensyms in the heap, and one kind of handle for every symbol (2026-11-17)
 
 - **A symbol stays three fields**, since compiled code reads the hash at

@@ -7493,3 +7493,35 @@ To settle first:
   Rust expander and checker (`%alias-base`, the readers of `%~…` names).
   Each crossing is an output that fills in the name, so first measure where
   the time actually goes.
+
+## 293. No reference into another heap (the user's, 2026-11-17)
+
+A `Value` says nothing of which heap it is a reference into, and several
+heaps live in a process at once (a session's each, a transformer's, a
+checker's own syntax heap, scratch heaps for a read, the heaps an image is
+staged in), each its own address space of `MEM_WORDS` words. Copying
+between them is always explicit (`copy_graph`, a splice's `given`, an
+image), but nothing stopped a store of one heap's reference into another,
+and a collection took such a reference for one an ended region left:
+never followed, never keeping the other heap's object alive, so it
+dangles once that heap is dropped, and reads another's object once a new
+heap takes the address space.
+
+Done, 2026-11-17: a collection refuses one where it meets it
+(`Heap::copy_out_object`, both collectors, every root, card, table and
+the symbols' handles): a reference to no word of the heap's memory is a
+panic. One compare where every traced reference is classified; no suite
+test met one.
+
+Left:
+- **A store's check.** Refused where it is made, not at the next
+  collection: `set_slot`, `table_set`, `alloc`'s fill, the roots pushed,
+  and the paths that write words raw (bulk copies, `set_word`, the image
+  loaders) audited. Measure the write barrier's cost first.
+- **Suffix refs.** Their owner is a word index of their heap's memory, not
+  an address, so another heap's cannot be told from this one's: a store's
+  check cannot either. Only a heap's identity in the value, or in a
+  handle, would.
+- **Handles on the Rust side.** A symbol's handle, and any `Value` the Rust
+  side keeps, names no heap: the names redesign (§292) to brand them with
+  their heap's serial, checked.
