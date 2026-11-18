@@ -193,7 +193,8 @@ impl Runtime {
     pub fn new_preloaded(preload: impl FnOnce(&mut Heap) -> Option<Value>) -> Runtime {
         let mut heap = Heap::new();
         let given = preload(&mut heap);
-        let mut interner = Interner::new();
+        // Of the heap's names: a name kept once for both.
+        let mut interner = Interner::of_names(heap.names());
         interner.intern("error-object");
 
         // `[name:Symbol, field-names:Vector]`
@@ -306,8 +307,8 @@ impl Runtime {
     /// front end on top.
     pub fn from_heap(heap: fixpt_heap::Heap) -> Runtime {
         Runtime {
+            interner: Interner::of_names(heap.names()),
             heap,
-            interner: Interner::new(),
             sources: SourceMap::new(),
             out: Sink::Stdout,
             world: crate::world::World::default(),

@@ -170,7 +170,10 @@ impl SymTable {
             self.by_slot.resize(slot + 1, None);
         }
         if self.by_slot[slot].is_none() {
-            self.by_slot[slot] = Some(interner.intern(&heap.symbol_name(v)));
+            // By its name's number where the interner is of the heap's
+            // names; else by its name.
+            let of_heap = interner.is_of(heap.names()).then(|| heap.symbol_text(v).and_then(|n| interner.of_number(n))).flatten();
+            self.by_slot[slot] = Some(of_heap.unwrap_or_else(|| interner.intern(&heap.symbol_name(v))));
         }
     }
 
@@ -182,9 +185,10 @@ impl SymTable {
         if let Some(Some(v)) = self.by_sym.1.get(s.index() as usize) {
             return *v;
         }
-        let name = interner.name(s);
-        debug_assert_eq!(interner.get(name), Some(s), "an uninterned symbol in syntax: `{name}`");
-        let v = heap.intern(name);
+        debug_assert!(!interner.is_uninterned(s), "an uninterned symbol in syntax: `{}`", interner.name(s));
+        // By its number where the interner is of the heap's names; else by
+        // its name.
+        let v = if interner.is_of(heap.names()) { heap.intern_text(s.index()) } else { heap.intern(interner.name(s)) };
         let slot = heap.symbol_global_slot(v);
         if self.by_slot.len() <= slot {
             self.by_slot.resize(slot + 1, None);

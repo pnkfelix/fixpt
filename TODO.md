@@ -7416,11 +7416,14 @@ debug build a `Sym` carries its space's id, refused by an interner of
 another (which found `ids::form_reading` folding a loaded file's trees,
 read in the form's syntax, with another interner: the form's `Sym`s
 read as other names). The names space in chunks, not 8 GB of address
-space each. Next: the FX-26 session's interners made of its heap's
-names, so a name is kept once (`SymTable`'s `note` and `heap_symbol` by
-number); effects printed by name if the order shows; step 4, `SymTable`
-gone; step 5, the symbols table weak (but symbols with bound globals)
-and the names sweep.
+space each. Its second, 2026-11-17: a runtime's interner of its heap's
+names (`Runtime::new_preloaded`, `from_heap`), and the FX-26 session's
+checker of the session heap's (`Checker::of_names`), so a name is kept
+once for the heap and both; `SymTable`'s `note` and `heap_symbol` by the
+name's number where the interner is of the heap's names, by its text
+elsewhere (a scratch heap's, a fresh checker's). No printed order
+changed. Next: step 4, `SymTable` gone; step 5, the symbols table weak
+(but symbols with bound globals) and the names sweep.
 
 Step 2 as first done (a4be71eb, reverted, 2026-11-17): an interned
 symbol's name a text of that store, its `symbol_index` by text number.

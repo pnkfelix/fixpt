@@ -1324,7 +1324,9 @@ impl Fx26Session {
             scheme.runtime_unrooted().call_native.get_or_insert(fixpt_native::direct::call_native);
             scheme.runtime_unrooted().adapt.get_or_insert(fixpt_native::direct::adapt);
         }
-        let mut checker = if native { Checker::with_convention(crate::ast::Conv::Native) } else { Checker::new() };
+        // Of the session's heap's names, the syntax it reads its.
+        let conv = if native { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular };
+        let mut checker = Checker::of_names(conv, scheme.runtime_unrooted().heap.names());
         checker.in_session_heap();
         Ok(Fx26Session {
             checker,

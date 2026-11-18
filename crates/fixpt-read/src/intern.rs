@@ -90,12 +90,11 @@ impl Interner {
     }
 
     pub fn intern(&mut self, name: &str) -> Sym {
-        if let Some(n) = self.names.find(name) {
-            return self.sym(n);
-        }
-        let n = self.names.hold_text(name);
+        let (n, new) = self.names.hold_text_new(name);
         let s = self.sym(n);
-        self.made.push(s);
+        if new {
+            self.made.push(s);
+        }
         s
     }
 

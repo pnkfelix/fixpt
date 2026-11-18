@@ -1290,7 +1290,18 @@ impl Checker {
     /// type that names none has it, the standard environment's included
     /// (a `nativecc` machine's).
     pub fn with_convention(conv: Conv) -> Checker {
-        let mut interner = Interner::new();
+        Checker::with_interner(conv, Interner::new())
+    }
+
+    /// [`with_convention`](Checker::with_convention), its names `names`, a
+    /// heap's (the session's, whose syntax it reads): a name kept once, and
+    /// a symbol of the heap's its `Sym` by its number.
+    pub fn of_names(conv: Conv, names: &fixpt_memmgmt::names::Owner) -> Checker {
+        Checker::with_interner(conv, Interner::of_names(names))
+    }
+
+    fn with_interner(conv: Conv, interner: Interner) -> Checker {
+        let mut interner = interner;
         let mut arena = Arena::default();
         let mut base = HashMap::default();
         let mut basic = |name: &str| {

@@ -200,13 +200,19 @@ impl Space {
 
     /// The number of the name `text`, if it is one.
     fn find(&self, text: &str) -> Option<u32> {
+        self.find_hashed(text, hash(text))
+    }
+
+    /// [`find`](Space::find), its hash `h` given.
+    fn find_hashed(&self, text: &str, h: u64) -> Option<u32> {
         let st = self.state.borrow();
-        st.hashed(hash(text)).iter().copied().find(|&n| Self::at(&st, st.places[n as usize]) == text)
+        st.hashed(h).iter().copied().find(|&n| Self::at(&st, st.places[n as usize]) == text)
     }
 
     /// The number of the name `text`: its own, made now if it had none.
     fn intern(&self, text: &str) -> u32 {
-        if let Some(n) = self.find(text) {
+        let h = hash(text);
+        if let Some(n) = self.find_hashed(text, h) {
             return n;
         }
         let mut st = self.state.borrow_mut();
@@ -235,7 +241,6 @@ impl Space {
         unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), st.chunks[chunk as usize].0.add(start as usize), text.len()) };
         st.places[n as usize] = Place { chunk, start, len };
         st.live[n as usize] = true;
-        let h = hash(text);
         if !st.index.contains_key(&h) {
             st.index.insert(h, n);
         } else {
@@ -353,9 +358,16 @@ impl Holder {
 
     /// The number of the name `text`, made if it had none, held.
     pub fn hold_text(&mut self, text: &str) -> u32 {
+        self.hold_text_new(text).0
+    }
+
+    /// [`hold_text`](Holder::hold_text), and whether this took it now (it
+    /// held it not before).
+    pub fn hold_text_new(&mut self, text: &str) -> (u32, bool) {
         let n = self.space.intern(text);
+        let new = !self.holds(n);
         self.take(n);
-        n
+        (n, new)
     }
 
     /// The number of the name `text`, if it is one this holds.

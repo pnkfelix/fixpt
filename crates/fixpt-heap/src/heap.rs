@@ -2350,8 +2350,10 @@ impl Heap {
         self.names.get(v.text_number()?)
     }
 
-    /// The heap's names (`fixpt_memmgmt::names`).
-    pub(crate) fn names(&self) -> &fixpt_memmgmt::names::Owner {
+    /// The heap's names (`fixpt_memmgmt::names`): what an interner of them
+    /// is made of (`fixpt_read::Interner::of_names`), its `Sym`s their
+    /// numbers, a symbol's ([`symbol_text`](Heap::symbol_text)).
+    pub fn names(&self) -> &fixpt_memmgmt::names::Owner {
         &self.names
     }
 
