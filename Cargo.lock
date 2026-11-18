@@ -136,6 +136,7 @@ name = "fixpt-read"
 version = "0.1.0"
 dependencies = [
  "fixpt-hash",
+ "fixpt-memmgmt",
 ]
 
 [[package]]

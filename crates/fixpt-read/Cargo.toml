@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 fixpt-hash = { path = "../fixpt-hash" }
+fixpt-memmgmt = { path = "../fixpt-memmgmt" }
 
 [lints]
 workspace = true

@@ -28,23 +28,27 @@ use std::rc::Rc;
 
 use fixpt_hash::HashMap;
 
-/// The most bytes of names, and the most names, a space may hold: address
-/// space reserved once, pages committed by the system as first written.
-const BYTES_MAX: usize = 1 << 32;
-const COUNT_MAX: usize = 1 << 28;
+/// The most names a space may hold.
+const COUNT_MAX: usize = 1 << 30;
+/// A space's first chunk of bytes; each next one twice the last, to
+/// `CHUNK_MAX`, and a name longer than a chunk in one of its own.
+const CHUNK_MIN: usize = 1 << 12;
+const CHUNK_MAX: usize = 1 << 20;
 
-/// Where name `n` is: its first byte, and how many.
+/// Where name `n` is: its chunk, its first byte there, and how many.
 #[derive(Clone, Copy, Default)]
 struct Place {
-    start: u64,
-    len: u64,
+    chunk: u32,
+    start: u32,
+    len: u32,
 }
 
+/// The next space's [`Owner::id`].
+static NEXT_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
 struct Space {
-    /// The names' bytes.
-    bytes: *mut u8,
-    /// Each number's place, `COUNT_MAX` of them reserved.
-    places: *mut Place,
+    /// Which space this is, among those the process made.
+    id: u32,
     state: RefCell<State>,
 }
 
@@ -52,8 +56,14 @@ struct Space {
 struct State {
     /// The numbers made so far: each below it is a name, or free.
     count: u32,
-    /// Bytes used, from the start.
-    used: usize,
+    /// Each number's place.
+    places: Vec<Place>,
+    /// The names' bytes: chunks allocated once each, never moved nor
+    /// freed before the space (each a `Box<[u8]>`, kept as its raw parts
+    /// so that writing past a name read borrows nothing of it); and how
+    /// much of the last is used.
+    chunks: Vec<(*mut u8, usize)>,
+    fill: usize,
     /// Each number's: whether it is a name now (not free), and how many
     /// holders hold it.
     live: Vec<bool>,
@@ -65,7 +75,7 @@ struct State {
     /// Numbers freed, to be made again; and the places of names freed, by
     /// length, to be written again by a name as long.
     free_numbers: Vec<u32>,
-    free_bytes: HashMap<u64, Vec<u64>>,
+    free_bytes: HashMap<u32, Vec<(u32, u32)>>,
 }
 
 /// A map keyed by a name's hash, which is its own hash: not hashed again
@@ -122,26 +132,13 @@ impl State {
     }
 }
 
-/// `len` bytes of address space, readable and writable, zero; the process
-/// stops if the system refuses them.
-fn map(len: usize) -> *mut u8 {
-    #[cfg(target_os = "linux")]
-    let flags = libc::MAP_PRIVATE | libc::MAP_ANON | libc::MAP_NORESERVE;
-    #[cfg(not(target_os = "linux"))]
-    let flags = libc::MAP_PRIVATE | libc::MAP_ANON;
-    // SAFETY: an anonymous mapping, used only through its space.
-    let p = unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
-    assert!(p != libc::MAP_FAILED, "no address space for a heap's names ({len} bytes)");
-    p as *mut u8
-}
-
 impl Drop for Space {
     fn drop(&mut self) {
-        // SAFETY: the two mappings `map` made, of these lengths; nothing
-        // borrows from them, as their space is being dropped.
-        unsafe {
-            libc::munmap(self.bytes as *mut libc::c_void, BYTES_MAX);
-            libc::munmap(self.places as *mut libc::c_void, COUNT_MAX * std::mem::size_of::<Place>());
+        for &(p, len) in &self.state.get_mut().chunks {
+            // SAFETY: each chunk is a `Box<[u8]>` of `len` bytes made into
+            // its raw parts (`Space::room`); nothing borrows from it, as its
+            // space is being dropped.
+            drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(p, len)) });
         }
     }
 }
@@ -157,7 +154,33 @@ fn hash(text: &str) -> u64 {
 
 impl Space {
     fn new() -> Space {
-        Space { bytes: map(BYTES_MAX), places: map(COUNT_MAX * std::mem::size_of::<Place>()) as *mut Place, state: RefCell::default() }
+        Space { id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed), state: RefCell::default() }
+    }
+
+    /// Where `len` bytes more go: a chunk and a place in it, past every
+    /// byte used there, a chunk made if the last has no room.
+    fn room(st: &mut State, len: usize) -> (u32, u32) {
+        let last = st.chunks.last().map_or(0, |&(_, n)| n);
+        if st.chunks.is_empty() || st.fill + len > last {
+            let n = if st.chunks.is_empty() { CHUNK_MIN } else { (last * 2).min(CHUNK_MAX) }.max(len);
+            let chunk = Box::into_raw(vec![0u8; n].into_boxed_slice());
+            st.chunks.push((chunk as *mut u8, n));
+            st.fill = 0;
+        }
+        let at = st.fill;
+        st.fill += len;
+        ((st.chunks.len() - 1) as u32, at as u32)
+    }
+
+    /// The bytes at place `p`, as a `str`. The caller knows they are a
+    /// live name's, so are UTF-8 and stay as they are while it borrows
+    /// them (the module's doc).
+    fn at(st: &State, p: Place) -> &str {
+        let (chunk, _) = st.chunks[p.chunk as usize];
+        // SAFETY: the place is within its chunk, which lives as long as the
+        // space and never moves; its bytes a name's, copied from a `str`,
+        // not written while the name is live.
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(chunk.add(p.start as usize), p.len as usize)) }
     }
 
     /// Name `n`'s text, if it is a name now. The `&str` is the caller's to
@@ -168,28 +191,17 @@ impl Space {
         if !st.live.get(n as usize).copied().unwrap_or(false) {
             return None;
         }
-        // SAFETY: `n` is below the count (it is live), so its place was
-        // written when it was made and is not written while it is live.
-        let p = unsafe { *self.places.add(n as usize) };
-        // SAFETY: those bytes are the name's, copied from a `str`, within
-        // `bytes`, and not written while the name is live: the module's
-        // doc.
-        Some(unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.bytes.add(p.start as usize), p.len as usize)) })
+        let text = Self::at(&st, st.places[n as usize]);
+        // SAFETY: the chunk's bytes live as long as the space, which `self`
+        // borrows, not the state's borrow: no longer than that, and while
+        // the name is live (the caller's bound, the module's doc).
+        Some(unsafe { &*(text as *const str) })
     }
 
     /// The number of the name `text`, if it is one.
     fn find(&self, text: &str) -> Option<u32> {
         let st = self.state.borrow();
-        st.hashed(hash(text)).iter().copied().find(|&n| self.text_unchecked(n) == text)
-    }
-
-    /// Name `n`'s text, `n` live, the state borrowed by the caller.
-    fn text_unchecked(&self, n: u32) -> &str {
-        // SAFETY: as `text`'s; the caller knows `n` is live.
-        unsafe {
-            let p = *self.places.add(n as usize);
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.bytes.add(p.start as usize), p.len as usize))
-        }
+        st.hashed(hash(text)).iter().copied().find(|&n| Self::at(&st, st.places[n as usize]) == text)
     }
 
     /// The number of the name `text`: its own, made now if it had none.
@@ -198,16 +210,11 @@ impl Space {
             return n;
         }
         let mut st = self.state.borrow_mut();
-        let len = text.len() as u64;
+        let len = u32::try_from(text.len()).expect("a name of fewer than 4 GiB");
         // Where its bytes go: a freed name's as long, or past every byte.
-        let start = match st.free_bytes.get_mut(&len).and_then(|v| v.pop()) {
-            Some(s) => s,
-            None => {
-                let s = st.used as u64;
-                assert!(st.used + text.len() <= BYTES_MAX, "a heap's names are full ({} bytes)", st.used);
-                st.used += text.len();
-                s
-            }
+        let (chunk, start) = match st.free_bytes.get_mut(&len).and_then(|v| v.pop()) {
+            Some(at) => at,
+            None => Self::room(&mut st, text.len()),
         };
         let n = match st.free_numbers.pop() {
             Some(n) => n,
@@ -217,16 +224,16 @@ impl Space {
                 st.count += 1;
                 st.live.push(false);
                 st.held.push(0);
+                st.places.push(Place::default());
                 n
             }
         };
-        // SAFETY: `start..start + len` is no live name's (past every byte
-        // used, or a freed name's), and `n`'s place no live name's; both
-        // within their mappings.
-        unsafe {
-            std::ptr::copy_nonoverlapping(text.as_ptr(), self.bytes.add(start as usize), text.len());
-            *self.places.add(n as usize) = Place { start, len };
-        }
+        // SAFETY: `start..start + len` of the chunk is no live name's (past
+        // every byte used there, or a freed name's), within the chunk; it
+        // is written through the chunk's raw pointer, borrowing nothing of
+        // what is read elsewhere in it.
+        unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), st.chunks[chunk as usize].0.add(start as usize), text.len()) };
+        st.places[n as usize] = Place { chunk, start, len };
         st.live[n as usize] = true;
         let h = hash(text);
         if !st.index.contains_key(&h) {
@@ -244,19 +251,18 @@ impl Space {
         st.index.reserve(more);
         st.live.reserve(more);
         st.held.reserve(more);
+        st.places.reserve(more);
     }
 
     /// Name `n` freed, its number and its bytes to be made again.
-    fn free(&self, st: &mut State, n: u32) {
-        let text = self.text_unchecked(n);
-        let h = hash(text);
+    fn free(st: &mut State, n: u32) {
+        let p = st.places[n as usize];
+        let h = hash(Self::at(st, p));
         let rest = st.hashed(h).iter().copied().filter(|&m| m != n).collect();
         st.set_hashed(h, rest);
-        // SAFETY: `n` is live until now: its place as written.
-        let p = unsafe { *self.places.add(n as usize) };
         st.live[n as usize] = false;
         st.free_numbers.push(n);
-        st.free_bytes.entry(p.len).or_default().push(p.start);
+        st.free_bytes.entry(p.len).or_default().push((p.chunk, p.start));
     }
 }
 
@@ -298,6 +304,12 @@ impl Owner {
         self.0.text(n)
     }
 
+    /// Which space this is, among those the process made: what a name's
+    /// number is a number of.
+    pub fn id(&self) -> u32 {
+        self.0.id
+    }
+
     /// How many numbers have been made: each name's is below it.
     pub fn count(&self) -> u32 {
         self.0.state.borrow().count
@@ -310,7 +322,7 @@ impl Owner {
         let mut freed = 0;
         for n in 0..st.count {
             if st.live[n as usize] && st.held[n as usize] == 0 && !keep(n) {
-                self.0.free(&mut st, n);
+                Space::free(&mut st, n);
                 freed += 1;
             }
         }
@@ -415,6 +427,11 @@ impl Holder {
             self.mine[n as usize] = false;
             st.held[n as usize] -= 1;
         }
+    }
+
+    /// Which space its names are of ([`Owner::id`]).
+    pub fn space_id(&self) -> u32 {
+        self.space.id
     }
 
     /// Whether `other` holds names of the same space as this.

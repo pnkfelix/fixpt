@@ -293,7 +293,7 @@ impl Parts {
             Class::Pair(..) => 1,
             Class::Seq(_) => 2,
             Class::Var(_) | Class::Wild => 3,
-            Class::Lit(n) => 4 + n.0 as usize,
+            Class::Lit(n) => 4 + n.index() as usize,
         };
         let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
         for (k, c) in classes.iter().enumerate() {

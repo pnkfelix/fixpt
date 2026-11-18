@@ -131,11 +131,16 @@ pub fn form_reading(s: i64, settings: &Settings, form: Syn, names: &Interner, lo
     let h = fold_tree(fold_text(s & MASK, &settings.text()), form, names);
     let h = loads.iter().fold(h, |h, (key, file)| {
         let h = fold_run(h, 17, key);
-        let mut names = Interner::new();
-        let h = match crate::heap_syn::read_syn_unplaced(file, &mut names) {
-            Ok(trees) => trees.into_iter().fold(h, |h, t| fold_tree(h, t, &names)),
-            Err(_) => fold_text(h, file),
-        };
+        // In syntax of its own, as its interner is: in the form's, a
+        // symbol the form has is the form's interner's `Sym`, which this
+        // file's interner would read as another name.
+        let h = crate::heap_syn::aside(|| {
+            let mut names = Interner::new();
+            match crate::heap_syn::read_syn_unplaced(file, &mut names) {
+                Ok(trees) => trees.into_iter().fold(h, |h, t| fold_tree(h, t, &names)),
+                Err(_) => fold_text(h, file),
+            }
+        });
         fold1(h, mark(0))
     });
     if h == 0 { 1 } else { h }

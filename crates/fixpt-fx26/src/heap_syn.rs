@@ -179,7 +179,7 @@ impl SymTable {
         if self.by_sym.0 != now {
             self.by_sym = (now, Vec::new());
         }
-        if let Some(Some(v)) = self.by_sym.1.get(s.0 as usize) {
+        if let Some(Some(v)) = self.by_sym.1.get(s.index() as usize) {
             return *v;
         }
         let name = interner.name(s);
@@ -190,7 +190,7 @@ impl SymTable {
             self.by_slot.resize(slot + 1, None);
         }
         self.by_slot[slot] = Some(s);
-        let k = s.0 as usize;
+        let k = s.index() as usize;
         if self.by_sym.1.len() <= k {
             self.by_sym.1.resize(k + 1, None);
         }

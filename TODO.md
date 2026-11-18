@@ -7408,10 +7408,19 @@ held. Step 2, 2026-11-17: an interned symbol's name a name of its heap's
 number, an image's texts numbered in its own order so a heap holding no
 name yet writes none of their words (the front end, at each run: 31.0 ms
 to 31.7 ms), copying to another heap by text; the process's texts store
-removed. Next: step 3, the `Interner` a `Holder` of its heap's names, a
-`Sym` a name's number checked by its heap's serial, effects printed by
-name, `truncate` letting names go; step 4, `SymTable` gone; step 5, the
-symbols table weak (but symbols with bound globals) and the names sweep.
+removed. Step 3's first part, 2026-11-17: the `Interner` a `Holder` of names
+(`fixpt-read`'s `intern.rs`), its own space or a heap's
+(`Interner::of_names`), a `Sym` a name's number there, uninterned ones
+the interner's own past `1 << 31`, `truncate` letting names go; in a
+debug build a `Sym` carries its space's id, refused by an interner of
+another (which found `ids::form_reading` folding a loaded file's trees,
+read in the form's syntax, with another interner: the form's `Sym`s
+read as other names). The names space in chunks, not 8 GB of address
+space each. Next: the FX-26 session's interners made of its heap's
+names, so a name is kept once (`SymTable`'s `note` and `heap_symbol` by
+number); effects printed by name if the order shows; step 4, `SymTable`
+gone; step 5, the symbols table weak (but symbols with bound globals)
+and the names sweep.
 
 Step 2 as first done (a4be71eb, reverted, 2026-11-17): an interned
 symbol's name a text of that store, its `symbol_index` by text number.
