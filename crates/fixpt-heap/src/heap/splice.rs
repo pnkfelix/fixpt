@@ -199,7 +199,7 @@ impl Heap {
         // What is wrong with the image's symbols, if anything: what was
         // done for them undone, as for any other wrong reference below.
         let mut bad = None;
-        for &s in &img.symbols {
+        for &s in img.symbols.iter().filter(|&&s| s != Value::FREE_PLACE) {
             // The symbol's place here, and its name, a text, by its number
             // here.
             let place = moves.index(s.index() - ib).ok_or_else(|| "a symbol outside the image".to_string()).and_then(|at_s| {

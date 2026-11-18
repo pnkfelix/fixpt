@@ -7462,10 +7462,22 @@ and native code hold a global's cell, which holds its symbol; the IR's
 binding globals by name. A name is a `NameId` (`fixpt_memmgmt::names`),
 a space a `SpaceId`, a table's position a `Place` (the heap's); a text
 value is made and read in the heap alone, only as a symbol's name; the
-names index's several-of-a-hash an enum, not a sentinel. Next: the
-symbols table weak (a symbol nothing reaches or pins, its global unbound,
-freed at a major collection, its place given again) and the names sweep;
-then `Sym`'s own representation, symbol handles owning, freeing on drop.
+names index's several-of-a-hash an enum, not a sentinel. The symbols
+table weak, 2026-11-18: at a major collection, a symbol nothing pins, its
+global unbound, that the collection moves, is taken out of the table
+(`Value::FREE_PLACE` there, the heap's alone) and kept only if the
+collection reaches it another way (`weaken_symbols`, `weak_moved`);
+else freed, its place given to the next symbol made (`free_places`),
+and every name no symbol has and no holder holds then swept. A minor
+collection keeps every symbol. An interned symbol's handle pins it. An
+image (version 14) carries free places; a load takes them up, a splice
+skips them. A text or a free place stored anywhere but where the heap
+writes it is refused in a debug build (`debug_held`); the heap's own
+writes of them go through the write barrier unchecked
+(`store_barriered`), never around it: a barrier may need the value
+overwritten (a snapshot at the beginning records it if it was a
+reference), not only the one stored (the user's warning, 2026-11-18).
+Next: `Sym`'s own representation, symbol handles owning, freeing on drop.
 
 Step 2 as first done (a4be71eb, reverted, 2026-11-17): an interned
 symbol's name a text of that store, its `symbol_index` by text number.
@@ -7603,3 +7615,33 @@ Left:
 - **Handles on the Rust side.** A symbol's handle, and any `Value` the Rust
   side keeps, names no heap: the names redesign (§292) to brand them with
   their heap's serial, checked.
+
+## 294. A module file's `.fasl` larger when compiled beside a file it loads (Heist's report, 2026-11-18; after the interning and any remaining macro work)
+
+Seen at 05854885 (x86_64, native code, fasl format 3), in ratfink, a
+symbolic executor in FX-26 of about 19 module files. Its top module file,
+`main.fx`, takes 18 module parameters, each `(m-x (load-moduleof "x.fx"
+m-core ...))`, the last `(m-fx26 (load-moduleof "fx26.fx" m-core m-print
+m-syntax m-numbers m-reader m-library))`; a driver, `ratfink.fx`, loads it.
+
+- `fixpt compile-file fx26.fx main.fx` (the others compiled already):
+  `main.fasl` 5,990,441 bytes. `fixpt compile-file main.fx` alone:
+  515,879. Every other `.fasl` the same either way. `check.fx` with
+  `main.fx` does not; `fx26.fx` and `main.fx` is the smallest pair that
+  does; the whole program in one call gives the 6 MB one too.
+- Line 30 of the big one, a `type` line, is 5,482,760 bytes: `type
+  (moduleof (val input (subr (read (globals %fasl-dep:1 %fasl-dep:2))
+  ((moduleof (desc rf-st (maxeff ...)) (desc rf-eff (maxeff ...)) ...`.
+  In the small one the line is `type ` and nothing. Otherwise the same:
+  headers, dep lines, code sections of the same sizes. So compiled
+  together, `main.fx`'s whole interface seems written out, each
+  parameter's `moduleof` expanded inline, likely again and again down
+  the chain of parameters that take earlier ones.
+- `fixpt run ratfink.fx`: 6.3 to 6.6 s with the big `.fasl`, 0.7 s from
+  source, 0.64 s with the small; the same results. (Their earlier
+  "fixpt-fasl-run" report blamed the 18 parameters: wrong, it was this.)
+
+Expected: a file's `.fasl` the same whatever else the call compiles; its
+type line, if wanted at all, no larger than alone. Heist has a script
+that copies the files to a temporary directory and prints both sizes,
+and can send it with the ratfink, kit and combo sources. Not bisected.

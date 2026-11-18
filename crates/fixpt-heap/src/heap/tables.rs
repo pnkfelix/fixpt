@@ -116,10 +116,17 @@ impl Heap {
         self.bloblet_slot(chunk, k)
     }
 
-    /// Slot `i` of table `t` made `v`, through the write barrier.
+    /// Slot `i` of table `t` made `v`, through the write barrier; a free
+    /// place's mark, which no store elsewhere may write (`Heap::debug_held`),
+    /// through it too, unchecked (`Heap::store_barriered`).
     #[inline(always)]
     pub(super) fn table_set(&mut self, t: Which, i: usize, v: Value) {
         let (chunk, k) = self.table(t).place(i);
+        if v == Value::FREE_PLACE {
+            let at = self.ix(chunk) - k;
+            self.store_barriered(at, v);
+            return;
+        }
         self.set_bloblet_slot(chunk, k, v);
     }
 

@@ -199,6 +199,12 @@ impl Heap {
             let i = self.fixed(sym, 3, 2).as_fixnum();
             assert!((0..UNINTERNED_HANDLES as i64).contains(&i), "an interned symbol's place");
             debug_assert_eq!(self.table_get(Which::Symbols, i as usize), sym);
+            // Its place the handle: pinned from now on, so no collection
+            // gives it another symbol.
+            let r = self.symbol_ref(sym);
+            if !self.handle_refs.contains(&r) {
+                self.handle_refs.push(r);
+            }
             return i as u32;
         };
         if let Some(h) = self.uninterned_handle(sym, r) {
@@ -234,7 +240,7 @@ impl Heap {
     /// The symbol handle `h` names, if any.
     pub fn handle_symbol(&self, h: u32) -> Option<Value> {
         if h < UNINTERNED_HANDLES {
-            ((h as usize) < self.symbols.len).then(|| self.table_get(Which::Symbols, h as usize))
+            ((h as usize) < self.symbols.len).then(|| self.table_get(Which::Symbols, h as usize)).filter(|&s| s != Value::FREE_PLACE)
         } else {
             self.sym_handles.get((h - UNINTERNED_HANDLES) as usize).copied()
         }

@@ -86,6 +86,9 @@ const IMM_CALLOUT: u64 = 10;
 /// its words name and where (`image`), and copying to another heap makes it
 /// that heap's name.
 const IMM_TEXT: u64 = 11;
+/// A place of the symbols table no symbol has now ([`Value::FREE_PLACE`]):
+/// the heap's alone.
+const IMM_FREE_PLACE: u64 = 12;
 
 const IMM_SHIFT: u32 = 3;
 const IMM_MASK: u64 = 0b1_1111;
@@ -241,6 +244,9 @@ impl Value {
     /// initialiser runs; referencing one is an error, which is how R7RS
     /// `letrec` restrictions get enforced.
     pub const UNBOUND: Value = Value::imm(IMM_UNBOUND, 0);
+    /// What the symbols table holds where a symbol was freed, until a symbol
+    /// is given its place again: the heap's alone, in no other word.
+    pub(crate) const FREE_PLACE: Value = Value::imm(IMM_FREE_PLACE, 0);
 
     #[inline(always)]
     pub const fn boolean(b: bool) -> Value {
@@ -376,6 +382,7 @@ impl fmt::Debug for Value {
                 IMM_F32 => write!(f, "{}f32", self.as_f32()),
                 IMM_CALLOUT => write!(f, "#<callout {}>", self.as_callout()),
                 IMM_TEXT => write!(f, "#<text #{}>", self.0 >> IMM_PAYLOAD_SHIFT),
+                IMM_FREE_PLACE => write!(f, "#<free place>"),
                 s => write!(f, "#<immediate {s}>"),
             },
             TAG_FORWARD => write!(f, "#<forward @{}>", self.index()),

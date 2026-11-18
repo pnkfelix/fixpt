@@ -90,8 +90,9 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// every machine, not a number in the table of the machine that made it.
 /// Version 11 is a table of sections (`TODO.md` §165). Version 12 has a
 /// section of the texts it names (`Value::text`), and where. Version 13 has
-/// an interned symbol's name a text, not a string.
-pub const VERSION: u32 = 13;
+/// an interned symbol's name a text, not a string. Version 14's symbols
+/// table may have free places (`TODO.md` §292, step 5).
+pub const VERSION: u32 = 14;
 const HEADER_BYTES: usize = 32;
 const SECTION_BYTES: usize = 48;
 

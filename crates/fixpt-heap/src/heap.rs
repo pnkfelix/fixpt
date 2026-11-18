@@ -459,6 +459,12 @@ pub struct Heap {
     names: fixpt_memmgmt::names::Owner,
     /// How many `SymbolRef`s pin each symbol's place (`symref`).
     pins: std::rc::Rc<symref::Pins>,
+    /// The places of the symbols table freed (`Value::FREE_PLACE` there),
+    /// to be given again.
+    free_places: Vec<Place>,
+    /// The interned symbols the Rust side holds a handle of
+    /// (`symbol_handle`), held so.
+    handle_refs: Vec<SymbolRef>,
     /// A heap string's name, gathered to look it up (`intern_string`):
     /// kept, so that a symbol found costs no allocation.
     name_buf: String,
@@ -671,6 +677,8 @@ impl Heap {
             name_buf: String::new(),
             static_symbols: Vec::new(),
             pins: Default::default(),
+            free_places: Vec::new(),
+            handle_refs: Vec::new(),
             adapter_slot: None,
             planned_writes: HashMap::default(),
             gc_count: 0,
@@ -757,7 +765,7 @@ impl Heap {
     }
     #[inline]
     pub fn symbol_count(&self) -> usize {
-        self.symbols.len
+        self.symbols.len - self.free_places.len()
     }
     #[inline]
     pub fn global_count(&self) -> usize {
@@ -796,6 +804,9 @@ impl Heap {
         if cfg!(debug_assertions) && !self.may_hold(v) {
             another_heaps_stored(v, self.base);
         }
+        // A text is a symbol's name alone, which the heap writes itself: so
+        // that the names a collection keeps are its symbols' (`weaken_symbols`).
+        debug_assert!(!v.is_text() && v != Value::FREE_PLACE, "{v:?} stored: a text or a free place is a symbol table's alone");
     }
     #[inline(always)]
     pub fn slot(&self, rel: usize) -> Value {
@@ -810,6 +821,17 @@ impl Heap {
     #[inline(always)]
     pub fn set_slot(&mut self, rel: usize, v: Value) {
         self.debug_held(v);
+        self.store_barriered(rel, v);
+    }
+
+    /// `v` stored at word `rel`, through the write barrier, `v` not checked
+    /// (`debug_held`): for what the heap alone writes, a symbol's name (a
+    /// text), a free place's mark. Every store over a word of an object's
+    /// goes through here, an immediate's too: a barrier may need what it
+    /// overwrites (a snapshot at the beginning would record the old value
+    /// if it was a reference), not only what it stores.
+    #[inline(always)]
+    pub(crate) fn store_barriered(&mut self, rel: usize, v: Value) {
         self.set_word(rel, v.raw());
         if self.barrier_needs_heap(rel, v) {
             self.barrier_slow(rel, v);
@@ -2430,12 +2452,28 @@ impl Heap {
         let region = self.regions.target.take();
         let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
         self.regions.target = region;
-        self.obj_set(sym, 0, Value::text_numbered(n.bits()));
+        // Its name written as only the heap writes a text: no store refuses
+        // it (`debug_held`).
+        let at = self.payload_base(sym);
+        self.store_barriered(at, Value::text_numbered(n.bits()));
         self.obj_set(sym, 1, Value::fixnum(hash));
-        let slot = self.table_push(Which::Globals, Value::UNBOUND, false);
-        self.obj_set(sym, 2, Value::fixnum(slot as i64));
-        let idx = Place::new(self.table_push(Which::Symbols, sym, false));
-        self.symbol_index.insert(n, idx);
+        // A place freed, else a new one, with its global (unbound, as a
+        // freed place's is).
+        let place = match self.free_places.pop() {
+            Some(p) => {
+                debug_assert!(self.table_get(Which::Globals, p.index()).is_unbound(), "a freed place's global bound");
+                self.table_set(Which::Symbols, p.index(), sym);
+                p
+            }
+            None => {
+                let slot = self.table_push(Which::Globals, Value::UNBOUND, false);
+                let p = Place::new(self.table_push(Which::Symbols, sym, false));
+                debug_assert_eq!(slot, p.index(), "the tables grow together");
+                p
+            }
+        };
+        self.obj_set(sym, 2, Value::fixnum(place.index() as i64));
+        self.symbol_index.insert(n, place);
         sym
     }
 
@@ -2875,6 +2913,46 @@ impl Heap {
         self.collect_major(extra_roots, false);
     }
 
+    /// The interned symbols only the symbols table may need, each taken out
+    /// of it for a major collection (`Value::FREE_PLACE` in its place), with
+    /// its place and name: one nothing pins (`SymbolRef`), its global unbound,
+    /// that a collection moves (an image's static ones are kept). What the
+    /// collection finds no other way to is freed after
+    /// ([`symbols_weakened`](Heap::symbols_weakened)).
+    fn weaken_symbols(&mut self) -> Vec<(Place, Value, fixpt_memmgmt::names::NameId)> {
+        let mut out = Vec::new();
+        for i in 0..self.symbols.len {
+            let s = self.table_get(Which::Symbols, i);
+            let place = Place::new(i);
+            if s == Value::FREE_PLACE || self.pins.pinned(place) || !self.table_get(Which::Globals, i).is_unbound() || !self.moves(s) {
+                continue;
+            }
+            let n = self.symbol_text(s).expect("an interned symbol's name");
+            self.table_set(Which::Symbols, i, Value::FREE_PLACE);
+            out.push((place, s, n));
+        }
+        out
+    }
+
+    /// After a major collection: each symbol [`weaken_symbols`] took out
+    /// put back where it is now, or, if nothing reached it (`survived` says
+    /// [`WEAK_DEAD`]), freed: its name no longer its, its place to be given
+    /// again. Then every name no symbol has and no holder holds is freed.
+    ///
+    /// [`weaken_symbols`]: Heap::weaken_symbols
+    fn symbols_weakened(&mut self, weak: Vec<(Place, Value, fixpt_memmgmt::names::NameId)>, survived: Vec<Value>) {
+        for ((place, _, n), now) in weak.into_iter().zip(survived) {
+            if now == WEAK_DEAD {
+                self.symbol_index.remove(&n);
+                self.free_places.push(place);
+            } else {
+                self.table_set(Which::Symbols, place.index(), now);
+            }
+        }
+        let index = &self.symbol_index;
+        self.names.sweep(|n| index.contains_key(&n));
+    }
+
     /// Cheney semispace copy of the old space and the nursery, and, if
     /// `code`, a mark and sweep of the code area. Compacts, which is also
     /// what makes a dumped image contiguous and relocation-free.
@@ -2903,6 +2981,9 @@ impl Heap {
         if code {
             self.tables_all_dirty();
         }
+        // The symbols only the table holds, out of it while the collection
+        // runs: those it finds no other way to are freed after.
+        let weak_symbols = self.weaken_symbols();
         let mem = self.mem.words_mut();
         let reaps = self.regions.live.len();
         let arenas: Vec<(usize, usize)> = self.regions.arena_ranges().collect();
@@ -3105,6 +3186,7 @@ impl Heap {
         }
         update_weak(mem, self.base, &mut self.weak, from, false);
         update_weak_pairs(mem, self.base, &c.weak_pairs, from, false);
+        let survived: Vec<Value> = weak_symbols.iter().map(|&(_, s, _)| weak_moved(mem, self.base, s, from, false)).collect();
         // The code area's bloblets never move, so the update above keeps a
         // weak reference to one; one not found live is swept just below (in
         // a code collection: no other knows what is live there).
@@ -3192,6 +3274,7 @@ impl Heap {
         self.outside_taken = 0;
         self.top_after_gc = self.top;
         self.budget_from(free);
+        self.symbols_weakened(weak_symbols, survived);
         let nanos = started.elapsed().as_nanos() as u64;
         self.gc_nanos += nanos;
         self.max_major_nanos = self.max_major_nanos.max(nanos);
@@ -3526,7 +3609,7 @@ impl Heap {
         // object by a reference to it, as `goes` finds it below.
         let mut first = vec![false; objects.len()];
         let object_of = |i: usize| objects.partition_point(|&(at, _, _)| at < i).checked_sub(1);
-        for sym in self.table_values(Which::Symbols) {
+        for sym in self.symbols() {
             let i = sym.index() - self.base;
             if let Some(k) = object_of(i).filter(|&k| objects[k].2 == 0 && i <= objects[k].0 + objects[k].1) {
                 first[k] = true;
@@ -3637,9 +3720,9 @@ impl Heap {
         FIXED_BASE / 8
     }
 
-    /// The interned symbols, in order: a symbol's number its index.
+    /// The interned symbols, in the order of their places.
     pub fn symbols(&self) -> Vec<Value> {
-        self.table_values(Which::Symbols)
+        self.table_values(Which::Symbols).into_iter().filter(|&s| s != Value::FREE_PLACE).collect()
     }
 
 
@@ -3753,7 +3836,12 @@ impl Heap {
         }
         heap.symbol_index = SymbolIndex::with_capacity_and_hasher(heap.symbols.len, Default::default());
         for i in 0..heap.symbols.len {
-            let n = heap.symbol_text(heap.table_get(Which::Symbols, i)).ok_or("an interned symbol named by no text")?;
+            let s = heap.table_get(Which::Symbols, i);
+            if s == Value::FREE_PLACE {
+                heap.free_places.push(Place::new(i));
+                continue;
+            }
+            let n = heap.symbol_text(s).ok_or("an interned symbol named by no text")?;
             heap.symbol_index.insert(n, Place::new(i));
         }
         heap.code_stub_found();
@@ -3782,6 +3870,12 @@ impl Heap {
                 .map_err(|e| format!("global {i}: {e}"))?;
         }
         for (i, s) in self.table_values(Which::Symbols).into_iter().enumerate() {
+            if s == Value::FREE_PLACE {
+                if !self.table_get(Which::Globals, i).is_unbound() {
+                    return Err(format!("free place {i}'s global is bound"));
+                }
+                continue;
+            }
             if !self.is_a(s, ObjType::Symbol) {
                 return Err(format!("symbol table entry {i} is not a symbol"));
             }

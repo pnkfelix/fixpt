@@ -14,7 +14,9 @@
 //! a name for printing, in no space, so that reading its name gives
 //! another symbol.
 
-use fixpt_memmgmt::names::{Holder, NameId, Owner, SpaceId};
+use fixpt_memmgmt::names::{Holder, NameId, Owner};
+#[cfg(debug_assertions)]
+use fixpt_memmgmt::names::SpaceId;
 
 /// A symbol: a name of its interner's space, which the interner holds, or an
 /// uninterned symbol of its interner's: told apart within, by its number. In a debug

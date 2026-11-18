@@ -4,7 +4,7 @@
 //! every slot; the tables longer than a chunk; and an image, which carries
 //! them as lists, read back whole, beside a heap's own too.
 
-use fixpt_heap::{Heap, Value, image};
+use fixpt_heap::{Heap, SymbolRef, Value, image};
 
 fn heap() -> Heap {
     let mut h = Heap::new();
@@ -46,15 +46,22 @@ fn set(h: &mut Heap, name: &str, v: Value) {
     h.set_global_at(&slot, v);
 }
 
+/// `n` symbols `{prefix}{i}`, held, so that no collection frees them while
+/// their globals are unbound.
+fn hold(h: &mut Heap, prefix: &str, n: usize) -> Vec<SymbolRef> {
+    (0..n).map(|i| {
+        let s = h.intern(&format!("{prefix}{i}"));
+        h.symbol_ref(s)
+    }).collect()
+}
+
 /// Enough symbols that each table spans three chunks.
 const MANY: usize = 2500;
 
 #[test]
 fn a_global_keeps_what_it_holds_through_every_collection() {
     let mut h = heap();
-    for i in 0..MANY {
-        h.intern(&format!("g{i}"));
-    }
+    let _held = hold(&mut h, "g", MANY);
     // Young, held only by a global past the first chunk, and by one in the
     // last: found by their cells' cards.
     let young = list(&mut h, 100);
@@ -104,6 +111,7 @@ fn a_symbol_interned_in_a_region_outlives_it() {
     let r = h.region_enter();
     // Its symbols, their names and the tables' chunks: none in the region.
     let syms: Vec<Value> = h.in_region(r, |h| (0..600).map(|i| h.intern(&format!("r{i}"))).collect());
+    let _held: Vec<SymbolRef> = syms.iter().map(|&s| h.symbol_ref(s)).collect();
     let l = list(&mut h, 5);
     set(&mut h, "r599", l);
     h.region_exit(r);
@@ -147,9 +155,7 @@ fn a_minor_collection_looks_at_no_global_it_need_not() {
 fn an_image_carries_the_tables() {
     for static_image in [false, true] {
         let mut h = heap();
-        for i in 0..MANY {
-            h.intern(&format!("g{i}"));
-        }
+        let _held = hold(&mut h, "g", MANY);
         let l = list(&mut h, 100);
         set(&mut h, "g7", l);
         set(&mut h, "g2000", Value::fixnum(42));
@@ -191,9 +197,7 @@ fn an_image_carries_the_tables() {
 #[test]
 fn an_image_spliced_beside_a_heaps_own_tables() {
     let mut img = heap();
-    for i in 0..1500 {
-        img.intern(&format!("i{i}"));
-    }
+    let _held = hold(&mut img, "i", 1500);
     let shared = img.intern("shared");
     let slot = img.symbol_ref(shared);
     img.set_global_at(&slot, Value::fixnum(7));
