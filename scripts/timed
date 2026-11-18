@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# timed: run a recurring step, saying first how long it is expected to take.
+#
+#     scripts/timed [--at-least SECONDS] NAME COMMAND [ARG...]
+#     scripts/timed --expect NAME
+#
+# Before COMMAND runs, its first line says how long NAME is expected to
+# take: the mean wall time of the runs of NAME recorded so far (or that none
+# are). Then COMMAND runs, and its last line says how long it took. If it
+# exits 0 the run is recorded, NAME's count of runs and sum of seconds; a
+# run that fails or is interrupted is not, as it says nothing of how long
+# the step takes. With `--at-least`, a run shorter than SECONDS is not
+# recorded either: a step that may find its work done (a prewarm whose
+# caches are warm) is timed only when it does the work. Exits as COMMAND
+# does.
+#
+# `--expect NAME` prints that first line alone, and runs nothing: said in
+# the foreground before a step started in the background, whose output
+# goes where a viewer may not see it.
+#
+# The history is this machine's, not the repository's: $FIXPT_TIMINGS, by
+# default ${XDG_STATE_HOME:-$HOME/.local/state}/fixpt/timings.tsv, a line
+# per name, `NAME<TAB>RUNS<TAB>SECONDS`. Runs may overlap, nested or side by
+# side: the file is rewritten under a lock.
+#
+# Name a step by what it does, not by the script that does it, so that
+# another script doing the same step shares its history: `suite-release`,
+# `suite-debug`, `prewarm-release`, `stage0-kayak`.
+
+set -u
+
+least=0
+expect=
+if [ "${1:-}" = --expect ] && [ $# -eq 2 ]; then
+    expect=1
+    shift
+    set -- "$1" true
+elif [ "${1:-}" = --at-least ]; then
+    least=${2:-}
+    shift 2
+fi
+if [ $# -lt 2 ] || ! [[ $least =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "usage: scripts/timed [--at-least SECONDS] NAME COMMAND [ARG...] | --expect NAME" >&2
+    exit 2
+fi
+name=$1
+shift
+case $name in
+    *[[:space:]]*|'') echo "timed: a step's name is one word, not \`$name\`" >&2; exit 2 ;;
+esac
+
+file=${FIXPT_TIMINGS:-${XDG_STATE_HOME:-$HOME/.local/state}/fixpt/timings.tsv}
+mkdir -p "$(dirname "$file")"
+touch "$file"
+
+# `S` seconds as people read them: `42 s`, `3 min 05 s`.
+shown() {
+    awk -v s="$1" 'BEGIN {
+        s = int(s + 0.5)
+        if (s < 120) printf "%d s", s; else printf "%d min %02d s", s / 60, s % 60
+    }'
+}
+
+# NAME's runs and summed seconds, `0 0` if none.
+history() {
+    awk -F '\t' -v n="$name" '$1 == n { r = $2; t = $3 } END { print (r ? r : 0), (t ? t : 0) }' "$file"
+}
+
+read -r runs sum < <(history)
+if [ "$runs" -gt 0 ]; then
+    mean=$(awk -v t="$sum" -v r="$runs" 'BEGIN { print t / r }')
+    echo "timed: $name: expected $(shown "$mean") (mean of $runs runs); started $(date +%H:%M:%S)"
+else
+    echo "timed: $name: no runs recorded yet; started $(date +%H:%M:%S)"
+fi
+
+[ -n "$expect" ] && exit 0
+
+start=$(date +%s.%N)
+"$@"
+status=$?
+took=$(awk -v a="$start" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')
+
+if [ $status -ne 0 ]; then
+    echo "timed: $name: exited $status after $(shown "$took"); not recorded"
+    exit $status
+fi
+if awk -v t="$took" -v l="$least" 'BEGIN { exit !(t < l) }'; then
+    echo "timed: $name: took $(shown "$took"), under $(shown "$least"): its work done already, not recorded"
+    exit 0
+fi
+
+# The run recorded: NAME's line replaced, under the lock, the rest kept.
+(
+    flock 9
+    awk -F '\t' -v OFS='\t' -v n="$name" -v took="$took" '
+        $1 == n { $2 += 1; $3 = sprintf("%.1f", $3 + took); found = 1 }
+        { print }
+        END { if (!found) print n, 1, took }
+    ' "$file" > "$file.new" && mv "$file.new" "$file"
+) 9> "$file.lock"
+read -r runs sum < <(history)
+echo "timed: $name: took $(shown "$took"); recorded ($runs runs, mean $(shown "$(awk -v t="$sum" -v r="$runs" 'BEGIN { print t / r }')"))"
