@@ -29,7 +29,6 @@ use crate::{HashMap, HashSet};
 
 mod code;
 mod gensym;
-pub use gensym::UNINTERNED_HANDLES;
 mod intern;
 mod regions;
 mod splice;
@@ -403,12 +402,14 @@ pub struct Heap {
 
     /// Explicit roots held by native code across a safepoint.
     roots: Vec<Value>,
-    /// The uninterned symbols the Rust side holds a handle of, by the
-    /// handle (`gensym`): roots, as `roots` are.
-    sym_handles: Vec<Value>,
-    /// Their handles, of those whose record is in the static area, which
+    /// The uninterned symbols the Rust side holds (`SymbolRef`), each in an
+    /// entry of its own (`gensym`): roots, as `roots` are; an entry no ref
+    /// holds let go ([`release_unheld`](Heap::release_unheld)), free then.
+    sym_handles: Vec<Option<Value>>,
+    handle_free: Vec<symref::HandleIx>,
+    /// Their entries, of those whose record is in the static area, which
     /// is not written (`gensym`): keyed by the symbol, which never moves.
-    static_sym_handles: HashMap<u64, u32>,
+    static_sym_handles: HashMap<u64, symref::HandleIx>,
     /// Weak references ([`weak_add`](Heap::weak_add)): each collection
     /// moves an entry on with its object, or, if the object died, clears
     /// it (to [`WEAK_DEAD`]). What a collection does not move (the code
@@ -462,9 +463,7 @@ pub struct Heap {
     /// The places of the symbols table freed (`Value::FREE_PLACE` there),
     /// to be given again.
     free_places: Vec<Place>,
-    /// The interned symbols the Rust side holds a handle of
-    /// (`symbol_handle`), held so.
-    handle_refs: Vec<SymbolRef>,
+
     /// A heap string's name, gathered to look it up (`intern_string`):
     /// kept, so that a symbol found costs no allocation.
     name_buf: String,
@@ -657,6 +656,7 @@ impl Heap {
             static_top: STATIC_MUTABLE_BASE,
             roots: Vec::new(),
             sym_handles: Vec::new(),
+            handle_free: Vec::new(),
             static_sym_handles: HashMap::default(),
             weak: Vec::new(),
             weak_free: Vec::new(),
@@ -678,7 +678,7 @@ impl Heap {
             static_symbols: Vec::new(),
             pins: Default::default(),
             free_places: Vec::new(),
-            handle_refs: Vec::new(),
+
             adapter_slot: None,
             planned_writes: HashMap::default(),
             gc_count: 0,
@@ -2413,7 +2413,7 @@ impl Heap {
     pub fn intern_static(&mut self, name: &'static str) -> Value {
         let key = name.as_ptr() as usize ^ name.len() << 48;
         if let Some((_, r)) = self.static_symbols.iter().find(|(k, _)| *k == key) {
-            return self.table_get(Which::Symbols, r.place().index());
+            return self.symbol_of(r);
         }
         let v = self.intern(name);
         let r = self.symbol_ref(v);
@@ -2496,17 +2496,33 @@ impl Heap {
         self.fixed(sym, 3, 2).as_fixnum() as usize
     }
 
-    /// Interned symbol `sym`, held: its place pinned while the ref lives.
-    pub fn symbol_ref(&self, sym: Value) -> SymbolRef {
-        assert!(self.is_interned_symbol(sym), "a ref to a symbol not interned");
-        self.pins.pin(Place::new(self.symbol_global_slot(sym)))
+    /// Symbol `sym`, held while the ref, or a clone, lives: an interned
+    /// one's place pinned, an uninterned one kept (`gensym`).
+    pub fn symbol_ref(&mut self, sym: Value) -> SymbolRef {
+        if self.is_interned_symbol(sym) {
+            return self.pins.pin(symref::Held::Place(Place::new(self.symbol_global_slot(sym))));
+        }
+        let j = self.uninterned_entry(sym);
+        self.pins.pin(symref::Held::Handle(j))
     }
 
     /// The symbol `r` holds, which must be of this heap.
     #[inline]
     pub fn symbol_of(&self, r: &SymbolRef) -> Value {
         assert!(r.of(&self.pins), "a symbol ref of another heap");
-        self.table_get(Which::Symbols, r.place().index())
+        match r.held() {
+            symref::Held::Place(p) => self.table_get(Which::Symbols, p.index()),
+            symref::Held::Handle(j) => self.sym_handles[j.index()].expect("an entry a ref holds"),
+        }
+    }
+
+    /// The place of the interned symbol `r` holds.
+    fn place_of(&self, r: &SymbolRef) -> Place {
+        assert!(r.of(&self.pins), "a symbol ref of another heap");
+        match r.held() {
+            symref::Held::Place(p) => p,
+            symref::Held::Handle(_) => panic!("an uninterned symbol has no global"),
+        }
     }
 
     /// How many symbols' places refs pin now.
@@ -2530,15 +2546,14 @@ impl Heap {
     /// The global of the symbol `r` holds.
     #[inline]
     pub fn global_at(&self, r: &SymbolRef) -> Value {
-        assert!(r.of(&self.pins), "a symbol ref of another heap");
-        self.table_get(Which::Globals, r.place().index())
+        self.table_get(Which::Globals, self.place_of(r).index())
     }
 
     /// Set the global of the symbol `r` holds.
     #[inline]
     pub fn set_global_at(&mut self, r: &SymbolRef, v: Value) {
-        assert!(r.of(&self.pins), "a symbol ref of another heap");
-        self.table_set(Which::Globals, r.place().index(), v);
+        let p = self.place_of(r);
+        self.table_set(Which::Globals, p.index(), v);
     }
 
     /// The code every adapter to the native convention shares
@@ -2666,7 +2681,7 @@ impl Heap {
     /// Every Value the heap itself roots, for `sro`.
     pub(crate) fn roots_for_sro(&self) -> Vec<Value> {
         let symbols = self.table_values(Which::Symbols);
-        self.roots.iter().copied().chain(self.table_values(Which::Globals)).chain(symbols).chain(self.sym_handles.iter().copied()).collect()
+        self.roots.iter().copied().chain(self.table_values(Which::Globals)).chain(symbols).chain(self.sym_handles.iter().flatten().copied()).collect()
     }
 
     // ------------------------------------------------------------ native roots
@@ -2924,7 +2939,7 @@ impl Heap {
         for i in 0..self.symbols.len {
             let s = self.table_get(Which::Symbols, i);
             let place = Place::new(i);
-            if s == Value::FREE_PLACE || self.pins.pinned(place) || !self.table_get(Which::Globals, i).is_unbound() || !self.moves(s) {
+            if s == Value::FREE_PLACE || self.pins.pinned(symref::Held::Place(place)) || !self.table_get(Which::Globals, i).is_unbound() || !self.moves(s) {
                 continue;
             }
             let n = self.symbol_text(s).expect("an interned symbol's name");
@@ -2984,6 +2999,8 @@ impl Heap {
         // The symbols only the table holds, out of it while the collection
         // runs: those it finds no other way to are freed after.
         let weak_symbols = self.weaken_symbols();
+        // And the uninterned symbols no ref holds now, as roots no longer.
+        self.release_unheld();
         let mem = self.mem.words_mut();
         let reaps = self.regions.live.len();
         let arenas: Vec<(usize, usize)> = self.regions.arena_ranges().collect();
@@ -3049,7 +3066,9 @@ impl Heap {
             self.roots[i] = fwd!(self.roots[i]);
         }
         for i in 0..self.sym_handles.len() {
-            self.sym_handles[i] = fwd!(self.sym_handles[i]);
+            if let Some(v) = self.sym_handles[i] {
+                self.sym_handles[i] = Some(fwd!(v));
+            }
         }
         // The tables' chunks of the heap's own (`tables`), as roots; the
         // tables area's are scanned below.

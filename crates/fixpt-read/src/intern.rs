@@ -19,15 +19,65 @@ use fixpt_memmgmt::names::{Holder, NameId, Owner};
 use fixpt_memmgmt::names::SpaceId;
 
 /// A symbol: a name of its interner's space, which the interner holds, or an
-/// uninterned symbol of its interner's: told apart within, by its number. In a debug
-/// build it carries its space's id too, checked where it is read, so that
-/// one interner's `Sym` read by an interner of another space is refused,
-/// not taken for another name.
-#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+/// uninterned symbol of its interner's: told apart within, by its number,
+/// which is the interner's alone. A `Sym` is good while its interner holds
+/// it: [`Interner::truncate`] lets go of what it made since a mark, and may
+/// make the numbers again. In a debug build it carries its space's id and
+/// the epoch its interner made it in, checked where it is read: one
+/// interner's `Sym` read by an interner of another space is refused, and
+/// so is one its interner let go, not taken for another name. Equal, hashed
+/// and ordered by its number (and space) alone.
+#[derive(Copy, Clone, Debug)]
 pub struct Sym {
     n: u32,
     #[cfg(debug_assertions)]
     space: SpaceId,
+    /// The epoch its interner made it in, if a `Sym` of its interner's
+    /// (not one of a heap's names, [`Sym::of_names`]).
+    #[cfg(debug_assertions)]
+    epoch: Option<u32>,
+}
+
+impl Sym {
+    /// What it is told by: its number, and, in a debug build, its space.
+    #[inline]
+    fn key(&self) -> (u32, Option<SpaceKey>) {
+        #[cfg(debug_assertions)]
+        return (self.n, Some(self.space));
+        #[cfg(not(debug_assertions))]
+        (self.n, None)
+    }
+}
+
+#[cfg(debug_assertions)]
+type SpaceKey = SpaceId;
+#[cfg(not(debug_assertions))]
+type SpaceKey = ();
+
+impl PartialEq for Sym {
+    #[inline]
+    fn eq(&self, other: &Sym) -> bool {
+        self.key() == other.key()
+    }
+}
+impl Eq for Sym {}
+impl std::hash::Hash for Sym {
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        self.n.hash(h);
+    }
+}
+impl PartialOrd for Sym {
+    #[inline]
+    fn partial_cmp(&self, other: &Sym) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Sym {
+    #[inline]
+    fn cmp(&self, other: &Sym) -> std::cmp::Ordering {
+        self.key().cmp(&other.key())
+    }
 }
 
 /// The first number of an uninterned symbol.
@@ -44,6 +94,8 @@ impl Sym {
             n: n.bits(),
             #[cfg(debug_assertions)]
             space: names.id(),
+            #[cfg(debug_assertions)]
+            epoch: None,
         }
     }
 }
@@ -55,6 +107,12 @@ pub struct Interner {
     /// Each symbol made, interned or not, in order: what `len` counts and
     /// `truncate` undoes.
     made: Vec<Sym>,
+    /// In a debug build: how many truncations let symbols go, and the epoch
+    /// each number held was made in (`Sym`).
+    #[cfg(debug_assertions)]
+    epoch: u32,
+    #[cfg(debug_assertions)]
+    made_in: fixpt_hash::HashMap<u32, u32>,
 }
 
 impl Default for Interner {
@@ -76,7 +134,15 @@ impl Interner {
     }
 
     fn holding(names: Holder) -> Interner {
-        Interner { names, uninterned: Vec::new(), made: Vec::new() }
+        Interner {
+            names,
+            uninterned: Vec::new(),
+            made: Vec::new(),
+            #[cfg(debug_assertions)]
+            epoch: 0,
+            #[cfg(debug_assertions)]
+            made_in: Default::default(),
+        }
     }
 
     #[inline]
@@ -90,7 +156,17 @@ impl Interner {
             n,
             #[cfg(debug_assertions)]
             space: self.names.space_id(),
+            #[cfg(debug_assertions)]
+            epoch: self.made_in.get(&n).copied(),
         }
+    }
+
+    /// Number `n` made now, in this epoch (a debug build's record).
+    #[inline]
+    fn made_now(&mut self, n: u32) {
+        #[cfg(debug_assertions)]
+        self.made_in.insert(n, self.epoch);
+        let _ = n;
     }
 
     /// Whether `s` is of this interner's space (always, but in a debug
@@ -98,12 +174,20 @@ impl Interner {
     #[inline]
     fn mine(&self, s: Sym) {
         #[cfg(debug_assertions)]
-        assert_eq!(s.space, self.names.space_id(), "{s:?}: a symbol of another interner's names");
+        {
+            assert_eq!(s.space, self.names.space_id(), "{s:?}: a symbol of another interner's names");
+            if let Some(e) = s.epoch {
+                assert_eq!(self.made_in.get(&s.n), Some(&e), "{s:?}: a symbol its interner let go (`truncate`)");
+            }
+        }
         let _ = s;
     }
 
     pub fn intern(&mut self, name: &str) -> Sym {
         let (n, new) = self.names.hold_text_new(name);
+        if new {
+            self.made_now(n.bits());
+        }
         let s = self.sym(n);
         if new {
             self.made.push(s);
@@ -120,6 +204,7 @@ impl Interner {
         if !self.names.hold(n) {
             return None;
         }
+        self.made_now(n.bits());
         let s = self.sym(n);
         self.made.push(s);
         Some(s)
@@ -132,6 +217,7 @@ impl Interner {
     pub fn uninterned(&mut self, name: &str) -> Sym {
         let i = u32::try_from(self.uninterned.len()).ok().filter(|&i| i < UNINTERNED).expect("too many uninterned symbols");
         self.uninterned.push(name.to_string());
+        self.made_now(UNINTERNED + i);
         let s = self.sym_numbered(UNINTERNED + i);
         self.made.push(s);
         s
@@ -155,6 +241,13 @@ impl Interner {
         }
         let interned = self.made[..len].iter().filter(|s| !self.is_uninterned(**s)).count();
         let uninterned = len - interned;
+        #[cfg(debug_assertions)]
+        {
+            for s in &self.made[len..] {
+                self.made_in.remove(&s.n);
+            }
+            self.epoch += 1;
+        }
         self.made.truncate(len);
         self.names.release_to(interned);
         self.uninterned.truncate(uninterned);
@@ -245,6 +338,21 @@ mod tests {
         assert_eq!(a.of_name(n), Some(x));
         assert!(a.is_of(&o) && !Interner::new().is_of(&o));
         assert_eq!(b.get("other"), None);
+    }
+
+    /// A symbol let go by `truncate` is refused, though its number is made
+    /// again, for another name or the same.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "let go")]
+    fn a_symbol_let_go_is_refused() {
+        let mut i = Interner::new();
+        let mark = i.len();
+        let u = i.uninterned("u");
+        i.truncate(mark);
+        let v = i.uninterned("v");
+        assert_eq!(i.name(v), "v");
+        i.name(u);
     }
 
     #[cfg(debug_assertions)]

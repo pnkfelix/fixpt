@@ -230,6 +230,8 @@ impl Heap {
         if self.verify_barrier {
             self.verify_remembered().unwrap_or_else(|e| panic!("the write barrier missed a store: {e}"));
         }
+        // The uninterned symbols no ref holds now, as roots no longer.
+        self.release_unheld();
         let young = self.nursery_top - NURSERY_BASE;
         self.words_allocated += young as u64;
         let (lo, old_top) = (self.active, self.top);
@@ -272,7 +274,7 @@ impl Heap {
         // Nor the globals and the symbols, each slot of them: only the
         // tables' young chunks of the heap's own, and what an old one or
         // one of the tables area refers to by its card (`tables`).
-        for r in self.roots.iter_mut().chain(self.sym_handles.iter_mut()) {
+        for r in self.roots.iter_mut().chain(self.sym_handles.iter_mut().flatten()) {
             *r = fwd!(*r);
         }
         for chunk in self.globals.chunks.iter_mut().chain(self.symbols.chunks.iter_mut()) {

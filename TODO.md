@@ -7477,7 +7477,15 @@ writes of them go through the write barrier unchecked
 (`store_barriered`), never around it: a barrier may need the value
 overwritten (a snapshot at the beginning records it if it was a
 reference), not only the one stored (the user's warning, 2026-11-18).
-Next: `Sym`'s own representation, symbol handles owning, freeing on drop.
+Its last part, 2026-11-18: a `SymbolRef` holds an uninterned symbol too,
+in an entry of the table of those held, a root, let go before a
+collection once no ref holds it (`release_unheld`); the numbered handles,
+their marks and `UNINTERNED_HANDLES` gone. A `Sym` stays a number, its
+interner's alone, good while the interner holds it; in a debug build it
+carries the epoch its interner made it in, and one `truncate` let go is
+refused where it is read, though its number is made again (no stale one
+found by the suites). Done but for measuring a long session's reclaim
+(2,000,000 symbols made and dropped: half the peak memory).
 
 Step 2 as first done (a4be71eb, reverted, 2026-11-17): an interned
 symbol's name a text of that store, its `symbol_index` by text number.

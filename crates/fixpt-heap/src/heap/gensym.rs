@@ -13,19 +13,18 @@
 //! `symbol=?`): never to an interned symbol, nor to another of the same
 //! parts. Its hash is made from its parts when it is made.
 //!
-//! A handle names a symbol to the Rust side, the same kind for every
-//! symbol, one for each: an interned symbol's is its place in the symbols
-//! table (its global slot, the two tables pushed together); an uninterned
-//! one's is `UNINTERNED_HANDLES` and its place in `sym_handles`, a table
-//! rooting what it holds, made the first time it is asked for and recorded
-//! in the symbol's record (where the record cannot be written, the static
-//! area's, in `static_sym_handles`). What a record says is a hint, taken
-//! only if the table's entry is that symbol: a record copied into another
-//! heap, or an image, or one whose handle was released, names no entry of
-//! this heap's that is not its own. Handles are released by a mark, as a
-//! session drops what it held ([`release_symbol_handles`]).
+//! The Rust side holds a symbol by a `SymbolRef` (`Heap::symbol_ref`): an
+//! interned one's place pinned; an uninterned one's in an entry of
+//! `sym_handles`, a table rooting what it holds, made the first time it is
+//! held and recorded in the symbol's record (where the record cannot be
+//! written, the static area's, in `static_sym_handles`). What a record says
+//! is a hint, taken only if the table's entry is that symbol: a record
+//! copied into another heap, or an image, or one whose entry was let go,
+//! names no entry of this heap's that is not its own. An entry no ref holds
+//! is let go before a collection, and before one is made, so that what
+//! nothing else holds is collected ([`release_unheld`]).
 //!
-//! [`release_symbol_handles`]: Heap::release_symbol_handles
+//! [`release_unheld`]: Heap::release_unheld
 
 use super::*;
 
@@ -35,10 +34,6 @@ const R_PREFIX: usize = 1;
 const R_SEED: usize = 2;
 const R_HANDLE: usize = 3;
 const R_LEN: usize = 4;
-
-/// The first handle of an uninterned symbol: `UNINTERNED_HANDLES + j` is
-/// `sym_handles[j]`'s; an interned symbol's handle is below it.
-pub const UNINTERNED_HANDLES: u32 = 1 << 31;
 
 impl Heap {
     /// A symbol `eq?` to no other, named `prefix`, then `seed`'s name, its
@@ -191,74 +186,61 @@ impl Heap {
     }
 
     // ------------------------------------------------------------ handles
-    /// Symbol `sym`'s handle: the same each time it is asked for, until
-    /// released, and another symbol's never.
-    pub fn symbol_handle(&mut self, sym: Value) -> u32 {
-        debug_assert!(self.is_a(sym, ObjType::Symbol));
-        let Some(r) = self.record(sym) else {
-            let i = self.fixed(sym, 3, 2).as_fixnum();
-            assert!((0..UNINTERNED_HANDLES as i64).contains(&i), "an interned symbol's place");
-            debug_assert_eq!(self.table_get(Which::Symbols, i as usize), sym);
-            // Its place the handle: pinned from now on, so no collection
-            // gives it another symbol.
-            let r = self.symbol_ref(sym);
-            if !self.handle_refs.contains(&r) {
-                self.handle_refs.push(r);
-            }
-            return i as u32;
-        };
-        if let Some(h) = self.uninterned_handle(sym, r) {
-            return h;
+    /// Uninterned symbol `sym`'s entry among those held: its own, the same
+    /// while some ref holds it; made if it has none.
+    pub(super) fn uninterned_entry(&mut self, sym: Value) -> symref::HandleIx {
+        let r = self.record(sym).expect("an uninterned symbol");
+        if let Some(j) = self.uninterned_handle(sym, r) {
+            return j;
         }
-        let j = self.sym_handles.len();
-        assert!(j < UNINTERNED_HANDLES as usize, "too many symbols held");
         self.debug_held(sym);
-        self.sym_handles.push(sym);
-        if self.is_static(r) {
-            self.static_sym_handles.insert(sym.raw(), j as u32);
-        } else {
-            self.obj_set(r, R_HANDLE, Value::fixnum(j as i64));
+        if self.handle_free.is_empty() {
+            self.release_unheld();
         }
-        UNINTERNED_HANDLES + j as u32
+        let j = match self.handle_free.pop() {
+            Some(j) => {
+                self.sym_handles[j.index()] = Some(sym);
+                j
+            }
+            None => {
+                self.sym_handles.push(Some(sym));
+                symref::HandleIx::new(self.sym_handles.len() - 1)
+            }
+        };
+        if self.is_static(r) {
+            self.static_sym_handles.insert(sym.raw(), j);
+        } else {
+            self.obj_set(r, R_HANDLE, Value::fixnum(j.index() as i64));
+        }
+        j
     }
 
-    /// Uninterned symbol `sym`'s handle, if it has one: what its record
+    /// Uninterned symbol `sym`'s entry, if it has one: what its record
     /// says, if the table's entry there is `sym`.
-    fn uninterned_handle(&self, sym: Value, r: Value) -> Option<u32> {
+    fn uninterned_handle(&self, sym: Value, r: Value) -> Option<symref::HandleIx> {
         let j = if self.is_static(r) {
-            *self.static_sym_handles.get(&sym.raw())? as usize
+            *self.static_sym_handles.get(&sym.raw())?
         } else {
             let f = self.obj_ref(r, R_HANDLE);
             if !f.is_fixnum() {
                 return None;
             }
-            usize::try_from(f.as_fixnum()).ok()?
+            symref::HandleIx::new(usize::try_from(f.as_fixnum()).ok()?)
         };
-        (self.sym_handles.get(j) == Some(&sym)).then_some(UNINTERNED_HANDLES + j as u32)
+        (self.sym_handles.get(j.index()) == Some(&Some(sym))).then_some(j)
     }
 
-    /// The symbol handle `h` names, if any.
-    pub fn handle_symbol(&self, h: u32) -> Option<Value> {
-        if h < UNINTERNED_HANDLES {
-            ((h as usize) < self.symbols.len).then(|| self.table_get(Which::Symbols, h as usize)).filter(|&s| s != Value::FREE_PLACE)
-        } else {
-            self.sym_handles.get((h - UNINTERNED_HANDLES) as usize).copied()
+    /// Every entry of the uninterned symbols held that no ref holds now let
+    /// go, free to be made again: what only it held is collected.
+    pub(super) fn release_unheld(&mut self) {
+        for i in 0..self.sym_handles.len() {
+            let j = symref::HandleIx::new(i);
+            if self.sym_handles[i].is_some() && !self.pins.pinned(symref::Held::Handle(j)) {
+                self.sym_handles[i] = None;
+                self.handle_free.push(j);
+            }
         }
-    }
-
-    /// What [`release_symbol_handles`](Heap::release_symbol_handles)
-    /// releases back to: the uninterned symbols' handles made after it.
-    pub fn symbol_handles_mark(&self) -> usize {
-        self.sym_handles.len()
-    }
-
-    /// Every uninterned symbol's handle made since `mark` released, the
-    /// symbols no longer held by them, and the handles made again.
-    pub fn release_symbol_handles(&mut self, mark: usize) {
-        if mark >= self.sym_handles.len() {
-            return;
-        }
-        self.sym_handles.truncate(mark);
-        self.static_sym_handles.retain(|_, j| (*j as usize) < mark);
+        let held = &self.sym_handles;
+        self.static_sym_handles.retain(|&raw, j| held[j.index()].is_some_and(|s| s.raw() == raw));
     }
 }

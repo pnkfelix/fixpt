@@ -1,7 +1,7 @@
 //! Uninterned symbols, gensyms among them, and the handles the Rust side
 //! holds of symbols (`heap/gensym.rs`; `TODO.md` §292).
 
-use fixpt_heap::{Heap, UNINTERNED_HANDLES, Value, image};
+use fixpt_heap::{Heap, SymbolRef, Value, image};
 
 /// A gensym's name is its parts', made when asked for; it is equal to no
 /// other symbol, the interned one of its name nor another of its parts.
@@ -46,22 +46,21 @@ fn gensyms_compare_by_their_names() {
     }
 }
 
-/// A handle names its symbol the same through collections, an interned
-/// symbol's its place; released ones are made again, and name no symbol
-/// they did not.
+/// A ref holds its symbol the same through collections, an interned one's
+/// place pinned, an uninterned one kept; refs to one symbol are equal, to
+/// two not; dropped, what only it held is collected.
 #[test]
-fn a_handle_names_its_symbol_until_released() {
+fn a_ref_holds_its_symbol_until_dropped() {
     let mut h = Heap::new();
     let x = h.intern("x");
-    let hx = h.symbol_handle(x);
-    assert!(hx < UNINTERNED_HANDLES);
-    assert_eq!(h.symbol_handle(x), hx);
-    let mark = h.symbol_handles_mark();
+    let rx = h.symbol_ref(x);
+    assert_eq!(h.symbol_ref(x), rx);
     let gs: Vec<Value> = (0..100).map(|i| h.make_gensym(&format!("%{i}:"), x)).collect();
-    let hs: Vec<u32> = gs.iter().map(|&g| h.symbol_handle(g)).collect();
-    assert!(hs.iter().all(|&k| k >= UNINTERNED_HANDLES));
-    assert_eq!(hs.iter().collect::<fixpt_heap::HashSet<_>>().len(), 100, "each its own");
-    // Held by the handles alone, through a minor and a major collection.
+    let rs: Vec<SymbolRef> = gs.iter().map(|&g| h.symbol_ref(g)).collect();
+    for (i, r) in rs.iter().enumerate() {
+        assert!(rs[..i].iter().all(|q| q != r), "each its own");
+    }
+    // Held by the refs alone, through a minor and a major collection.
     drop(gs);
     for major in [false, true] {
         if major {
@@ -70,29 +69,28 @@ fn a_handle_names_its_symbol_until_released() {
             h.collect_young(&mut []);
         }
         h.verify().unwrap();
-        for (i, &k) in hs.iter().enumerate() {
-            let g = h.handle_symbol(k).unwrap();
+        for (i, r) in rs.iter().enumerate() {
+            let g = h.symbol_of(r);
             assert_eq!(h.symbol_name(g), format!("%{i}:x"));
-            assert_eq!(h.symbol_handle(g), k, "the same handle, the symbol moved");
+            assert_eq!(&h.symbol_ref(g), r, "the same, the symbol moved");
         }
     }
     let x = h.intern("x");
-    assert_eq!(h.handle_symbol(hx), Some(x), "the interned symbol, where it is now");
-    // Released: a symbol held otherwise is given a new one, and the old
-    // names it no more.
-    let mut keep = [h.handle_symbol(hs[7]).unwrap()];
-    h.release_symbol_handles(mark);
-    assert_eq!(h.handle_symbol(hs[7]), None);
-    let other = h.make_gensym("%other:", x);
-    let ho = h.symbol_handle(other);
-    assert_eq!(ho, hs[0], "a released handle made again");
+    assert_eq!(h.symbol_of(&rx), x, "the interned symbol, where it is now");
+    // Dropped: a symbol held otherwise is held again by a ref of its own,
+    // and an entry let go is made again for another.
+    let mut keep = [h.symbol_of(&rs[7])];
+    let w = h.weak_add(h.symbol_of(&rs[8]));
+    drop(rs);
     h.collect(&mut [&mut keep]);
-    let k7 = h.symbol_handle(keep[0]);
-    assert_ne!(k7, hs[7]);
-    assert_eq!(h.handle_symbol(k7), Some(keep[0]));
-    assert_eq!(h.handle_symbol(ho).map(|s| h.symbol_name(s)), Some("%other:x".into()));
+    assert_eq!(h.weak_get(w), None, "held by its ref alone, collected");
+    let k7 = h.symbol_ref(keep[0]);
+    assert_eq!(h.symbol_of(&k7), keep[0]);
     let x = h.intern("x");
-    assert_eq!(h.symbol_handle(x), hx, "an interned symbol's is permanent");
+    let other = h.make_gensym("%other:", x);
+    let ro = h.symbol_ref(other);
+    assert_ne!(ro, k7);
+    assert_eq!(h.symbol_name(h.symbol_of(&ro)), "%other:x");
 }
 
 /// Nothing but what holds a gensym keeps it: making one leaves no trace.
@@ -104,27 +102,26 @@ fn a_gensym_no_one_holds_is_collected() {
     let w = h.weak_add(g);
     let held = h.make_gensym("%2:", x);
     let wh = h.weak_add(held);
-    let k = h.symbol_handle(held);
+    let r = h.symbol_ref(held);
     let symbols = h.symbol_count();
     h.collect(&mut []);
     assert_eq!(h.weak_get(w), None, "collected");
-    assert!(h.weak_get(wh).is_some(), "held by its handle");
+    assert!(h.weak_get(wh).is_some(), "held by its ref");
     assert_eq!(h.symbol_count(), symbols, "no symbol interned");
-    h.release_symbol_handles(0);
+    drop(r);
     h.collect(&mut []);
-    assert_eq!(h.weak_get(wh), None, "released, then collected");
-    assert_eq!(h.handle_symbol(k), None);
+    assert_eq!(h.weak_get(wh), None, "dropped, then collected");
 }
 
 /// A gensym in an image, loaded or copied into another heap, is its own
-/// there, its name as it was; the handle its record names is not taken
-/// for another's.
+/// there, its name as it was; the entry its record names is not taken for
+/// another's.
 #[test]
 fn a_gensym_carried_elsewhere_is_its_own_there() {
     let mut h = Heap::new();
     let x = h.intern("x");
     let g = h.make_gensym("%1:", x);
-    assert!(h.symbol_handle(g) >= UNINTERNED_HANDLES);
+    let _rg = h.symbol_ref(g);
     let l = h.cons(g, Value::NULL);
     let l = h.cons(g, l);
     h.push_root(l);
@@ -136,14 +133,14 @@ fn a_gensym_carried_elsewhere_is_its_own_there() {
         assert_eq!(back.symbol_name(a), "%1:x");
         assert!(back.is_uninterned_symbol(a));
         assert_ne!(Some(a), back.interned("%1:x"));
-        // Its record names a handle of the heap it was made in: not this
+        // Its record names an entry of the heap it was made in: not this
         // one's, whose table is empty, nor, once there is one, another's.
         let other = back.make_uninterned_symbol("y");
-        let ko = back.symbol_handle(other);
-        let ka = back.symbol_handle(a);
-        assert_ne!(ka, ko);
-        assert_eq!(back.handle_symbol(ka), Some(a));
-        assert_eq!(back.handle_symbol(ko), Some(other));
+        let ro = back.symbol_ref(other);
+        let ra = back.symbol_ref(a);
+        assert_ne!(ra, ro);
+        assert_eq!(back.symbol_of(&ra), a);
+        assert_eq!(back.symbol_of(&ro), other);
         // Its name made and kept: where its record is static, not kept,
         // made each time the same.
         let n = back.symbol_name_string(a);
@@ -152,12 +149,12 @@ fn a_gensym_carried_elsewhere_is_its_own_there() {
     }
     let mut c = Heap::new();
     let y = c.make_uninterned_symbol("y");
-    let ky = c.symbol_handle(y);
+    let ry = c.symbol_ref(y);
     let copied = c.copy_graph_from(&h, l);
     let a = c.car(copied);
     assert_eq!(c.car(c.cdr(copied)), a);
     assert_eq!(c.symbol_name(a), "%1:x");
-    assert_ne!(c.symbol_handle(a), ky, "the copy's record names no handle of this heap's");
+    assert_ne!(c.symbol_ref(a), ry, "the copy's record names no entry of this heap's");
     c.verify().unwrap();
 }
 

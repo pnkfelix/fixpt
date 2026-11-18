@@ -6,8 +6,7 @@ use fixpt_scheme::Session;
 
 fn show(s: &mut Session, name: &str) {
     let sym = s.runtime_unrooted_ref().heap.intern_existing(name).expect("defined");
-    let slot = s.runtime_unrooted_ref().heap.symbol_ref(sym);
-    let v = s.runtime_unrooted_ref().heap.global_at(&slot);
+    let v = s.runtime_unrooted_ref().heap.global_of(sym);
     assert!(s.runtime_unrooted_ref().heap.is_a(v, ObjType::Closure), "{name} is not a closure");
     let code = s.runtime_unrooted_ref().heap.closure_code(v);
     println!("{}", disassemble(&s.runtime_unrooted_ref().heap, code));
