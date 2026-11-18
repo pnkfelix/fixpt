@@ -21,9 +21,8 @@ fn rust_trees(text: &str, base: i64) -> Vec<String> {
     // The forms as read, before the Rust checker expands any into several
     // (a `define-generative`'s conversions, each at its span): a form is
     // what the FX-26 parser takes as one, and what a reading folds.
-    let mut names = fixpt_read::Interner::new();
-    fixpt_fx26::heap_syn::aside(|| {
-        let read = fixpt_fx26::heap_syn::read_syn(text, FileId(0), &mut names).expect("reads");
+    fixpt_fx26::heap_syn::aside(|names| {
+        let read = fixpt_fx26::heap_syn::read_syn(text, FileId(0), names).expect("reads");
         let mut forms: Vec<(usize, Vec<_>)> = Vec::new();
         for f in &forms2 {
             let top = c2.top(f).unwrap_or_else(|e| panic!("checks: {e}"));
@@ -50,7 +49,7 @@ fn rust_trees(text: &str, base: i64) -> Vec<String> {
             let tops: Vec<_> = group.iter().map(|(t, _, _)| t).collect();
             let hoisted: Vec<_> = group.iter().filter(|g| g.2).map(|(t, _, _)| t).collect();
             let loads = fixpt_fx26::ids::form_loads(&c2, &hoisted);
-            s = fixpt_fx26::ids::form_reading(s, &Default::default(), read[*i], &names, &loads);
+            s = fixpt_fx26::ids::form_reading(s, &Default::default(), read[*i], names, &loads);
             kth.form(&c2, s, &tops);
         }
         forms.iter().flat_map(|(_, g)| g).map(|(t, span, _)| show_top(&c2, t, *span, &kth)).collect()

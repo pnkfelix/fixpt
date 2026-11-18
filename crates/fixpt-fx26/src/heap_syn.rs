@@ -1591,12 +1591,14 @@ pub fn read_syn_first(text: &str, interner: &mut Interner) -> fixpt_read::ReadRe
     .map_err(|e| in_chars(text, e))
 }
 
-/// `f`, with syntax lent from a heap and table of its own: for reading a
-/// piece of text with an interner of its own, no checker's, whose symbols
-/// are no world's. Nothing made in it outlives it.
-pub fn aside<R>(f: impl FnOnce() -> R) -> R {
+/// `f`, with syntax lent from a heap and table of its own, given an
+/// interner of that heap's names: for reading a piece of text with names of
+/// its own, no checker's, whose symbols are no world's. Nothing made in it
+/// outlives it.
+pub fn aside<R>(f: impl FnOnce(&mut Interner) -> R) -> R {
     let (mut heap, mut syms) = (Heap::unfixed(), SymTable::default());
-    with_syntax(&mut heap, &mut syms, f)
+    let mut names = Interner::of_names(heap.names());
+    with_syntax(&mut heap, &mut syms, || f(&mut names))
 }
 
 /// `text` read into `syn`, placed nowhere a message says (data, not a

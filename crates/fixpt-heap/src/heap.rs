@@ -595,6 +595,16 @@ impl Heap {
         Heap::with_semispace_fixed(DEFAULT_SEMI_WORDS, false)
     }
 
+    /// [`unfixed`](Heap::unfixed), its names `names`, made before it: for an
+    /// interner of them made first (a checker's, whose syntax heap is made
+    /// when first wanted).
+    pub fn unfixed_with_names(names: fixpt_memmgmt::names::Owner) -> Heap {
+        let mut heap = Heap::unfixed();
+        assert_eq!(heap.names.count(), 0, "a heap holds no name when made");
+        heap.names = names;
+        heap
+    }
+
     pub fn with_semispace(semi: usize) -> Heap {
         Heap::with_semispace_fixed(semi, true)
     }

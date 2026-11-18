@@ -1372,8 +1372,8 @@ mod tests {
     /// structure, no table's numbers: `TODO.md` §290).
     #[test]
     fn a_signature_is_of_what_is_written_alone() {
-        let mut interner = Interner::default();
         let (mut heap, mut syms) = (fixpt_heap::Heap::unfixed(), crate::heap_syn::SymTable::default());
+        let mut interner = Interner::of_names(heap.names());
         crate::heap_syn::with_syntax(&mut heap, &mut syms, || {
             let text = "(macro (_ . (mu es (union (expr) (expr . es)))) expr) (macro (_ expr . (mu es (union () (expr . es)))) expr)";
             let forms = crate::heap_syn::read_syn_side(text, &mut interner).unwrap();
@@ -1399,8 +1399,8 @@ mod tests {
         let (mut same, mut other, mut failed) = (Vec::new(), Vec::new(), Vec::new());
         for path in &names {
             let text = std::fs::read_to_string(path).unwrap();
-            let mut interner = Interner::default();
             let (mut heap, mut syms) = (fixpt_heap::Heap::unfixed(), crate::heap_syn::SymTable::default());
+            let mut interner = Interner::of_names(heap.names());
             crate::heap_syn::with_syntax(&mut heap, &mut syms, || {
             let Ok(forms) = crate::heap_syn::read_syn_side(&text, &mut interner) else { return };
             let mut m = Macros::default();

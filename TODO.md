@@ -7422,8 +7422,20 @@ checker of the session heap's (`Checker::of_names`), so a name is kept
 once for the heap and both; `SymTable`'s `note` and `heap_symbol` by the
 name's number where the interner is of the heap's names, by its text
 elsewhere (a scratch heap's, a fresh checker's). No printed order
-changed. Next: step 4, `SymTable` gone; step 5, the symbols table weak
-(but symbols with bound globals) and the names sweep.
+changed. Step 4, in part, 2026-11-17: every heap made for syntax beside
+its interner made of its names, so its symbols go by number: `aside`
+gives its closure an interner of its scratch heap's names; a checker
+makes its names first, its syntax heap made of them
+(`Heap::unfixed_with_names`); a fresh checker, and one made again for a
+convention, of the session heap's. `SymTable`'s maps stay, by name, for
+the one heap that cannot: a module file's own macros' world
+(`Withs::default()` in `macros.rs`, "a world of their own"), a heap of
+its own read through the importer's interner, the two exchanging `Sym`s.
+To remove them, one of: that world's syntax in the importer's heap (its
+lending nested in the importer's, which the world apart avoids); or one
+names space owned by several heaps, a sweep then asking each. Next: step
+5, the symbols table weak (but symbols with bound globals) and the names
+sweep.
 
 Step 2 as first done (a4be71eb, reverted, 2026-11-17): an interned
 symbol's name a text of that store, its `symbol_index` by text number.

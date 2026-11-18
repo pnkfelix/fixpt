@@ -571,8 +571,8 @@ mod tests {
         let (mut shapes, mut herman, mut wrong) = (Vec::new(), Vec::new(), Vec::new());
         for path in &names {
             let text = std::fs::read_to_string(path).unwrap();
-            let mut interner = Interner::default();
             let (mut heap, mut syms) = (fixpt_heap::Heap::unfixed(), crate::heap_syn::SymTable::default());
+            let mut interner = Interner::of_names(heap.names());
             crate::heap_syn::with_syntax(&mut heap, &mut syms, || {
                 let Ok(forms) = crate::heap_syn::read_syn_side(&text, &mut interner) else { return };
                 let mut m = Macros::default();

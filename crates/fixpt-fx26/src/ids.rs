@@ -27,10 +27,9 @@ use fixpt_hash::HashMap;
 /// that no space, comment, spelling or position tells two readings apart
 /// that mean the same: `readings.fx`'s `reading-of`, the same function.
 pub fn reading_of(s: i64, text: &str) -> Option<i64> {
-    let mut names = Interner::new();
-    crate::heap_syn::aside(|| {
-        let trees = crate::heap_syn::read_syn_unplaced(text, &mut names).ok()?;
-        Some(trees_reading_of(s, &trees, &names))
+    crate::heap_syn::aside(|names| {
+        let trees = crate::heap_syn::read_syn_unplaced(text, names).ok()?;
+        Some(trees_reading_of(s, &trees, names))
     })
 }
 
@@ -134,12 +133,9 @@ pub fn form_reading(s: i64, settings: &Settings, form: Syn, names: &Interner, lo
         // In syntax of its own, as its interner is: in the form's, a
         // symbol the form has is the form's interner's `Sym`, which this
         // file's interner would read as another name.
-        let h = crate::heap_syn::aside(|| {
-            let mut names = Interner::new();
-            match crate::heap_syn::read_syn_unplaced(file, &mut names) {
-                Ok(trees) => trees.into_iter().fold(h, |h, t| fold_tree(h, t, &names)),
-                Err(_) => fold_text(h, file),
-            }
+        let h = crate::heap_syn::aside(|names| match crate::heap_syn::read_syn_unplaced(file, names) {
+            Ok(trees) => trees.into_iter().fold(h, |h, t| fold_tree(h, t, names)),
+            Err(_) => fold_text(h, file),
         });
         fold1(h, mark(0))
     });
@@ -151,10 +147,9 @@ pub fn form_reading(s: i64, settings: &Settings, form: Syn, names: &Interner, lo
 /// `loads[i]` (none past the end); none if it does not read. A text with no
 /// form leaves it as it was.
 pub fn forms_state(s: i64, settings: &Settings, text: &str, loads: &[Vec<(String, String)>]) -> Option<i64> {
-    let mut names = Interner::new();
-    crate::heap_syn::aside(|| {
-        let forms = crate::heap_syn::read_syn_unplaced(text, &mut names).ok()?;
-        Some(forms.into_iter().enumerate().fold(s, |s, (i, f)| form_reading(s, settings, f, &names, loads.get(i).map_or(&[][..], |l| &l[..]))))
+    crate::heap_syn::aside(|names| {
+        let forms = crate::heap_syn::read_syn_unplaced(text, names).ok()?;
+        Some(forms.into_iter().enumerate().fold(s, |s, (i, f)| form_reading(s, settings, f, names, loads.get(i).map_or(&[][..], |l| &l[..]))))
     })
 }
 

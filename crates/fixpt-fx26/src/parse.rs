@@ -4890,9 +4890,8 @@ fn first_form_at(at: &std::path::Path, path: &str, test: impl Fn(&[Syn], &fixpt_
     if !text.contains("module-parameters") {
         return false;
     }
-    let mut interner = fixpt_read::Interner::new();
-    crate::heap_syn::aside(|| match crate::heap_syn::read_syn_first(&text, &mut interner) {
-        Ok(Some(first)) => test(&[first], &interner),
+    crate::heap_syn::aside(|names| match crate::heap_syn::read_syn_first(&text, names) {
+        Ok(Some(first)) => test(&[first], names),
         _ => false,
     })
 }

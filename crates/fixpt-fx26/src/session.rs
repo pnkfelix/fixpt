@@ -2456,10 +2456,9 @@ impl Fx26Session {
         }
         let text = std::fs::read_to_string(&at).map_err(|e| format!("cannot read `{path}`: {e}"))?;
         // A file of one expression, not an item, is a `load-input`'s.
-        let mut interner = fixpt_read::Interner::new();
-        let one_exp = crate::heap_syn::aside(|| -> Result<bool, String> {
-            let forms = crate::heap_syn::read_syn_side(&text, &mut interner).map_err(|e| format!("in `{path}`: {}", e.message))?;
-            Ok(matches!(&forms[..], [one] if !crate::parse::is_item_form(one, &interner)))
+        let one_exp = crate::heap_syn::aside(|names| -> Result<bool, String> {
+            let forms = crate::heap_syn::read_syn_side(&text, names).map_err(|e| format!("in `{path}`: {}", e.message))?;
+            Ok(matches!(&forms[..], [one] if !crate::parse::is_item_form(one, names)))
         })?;
         let loader = if one_exp { "load-input" } else { "load-module" };
         let load = format!("({loader} {})", crate::fasl::string_literal(path));
@@ -3566,7 +3565,7 @@ impl Fx26Session {
         // (`with_backend_preloaded_in`), kept: nothing is checked yet.
         let conv = if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular };
         if self.checker.conv_default != conv {
-            self.checker = Checker::with_convention(conv);
+            self.checker = Checker::of_names(conv, self.scheme.runtime_unrooted().heap.names());
             self.checker.in_session_heap();
         }
         self.checker.globals_effects = self.globals_effects;
@@ -3630,7 +3629,10 @@ impl Fx26Session {
     /// §280). A program's expansion: the namespace of the one before ended
     /// first. What it held of its syntax let go after, whole.
     pub fn fresh<T>(&mut self, f: impl FnOnce(Checker) -> T) -> T {
-        let mut c = self.fresh_checker();
+        let conv = if self.native_convention { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular };
+        // Of the session heap's names, whose syntax it reads.
+        let mut c = Checker::of_names(conv, self.scheme.runtime_unrooted().heap.names());
+        self.set_fresh(&mut c);
         c.in_session_heap();
         let kept = c.own_kept();
         crate::phase1::Phase1::end_current(self.scheme.runtime_unrooted());
@@ -3651,10 +3653,15 @@ impl Fx26Session {
     /// around its uses ([`Self::fresh`] otherwise).
     pub fn fresh_checker(&self) -> Checker {
         let mut c = Checker::with_convention(if self.native_convention { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
+        self.set_fresh(&mut c);
+        c
+    }
+
+    /// A fresh checker set as this session's is.
+    fn set_fresh(&self, c: &mut Checker) {
         c.globals_effects = self.globals_effects;
         c.base_dir = self.checker.base_dir.clone();
         c.syscalls = self.checker.syscalls;
-        c
     }
 
     /// The front end's entry points the Rust side calls by name

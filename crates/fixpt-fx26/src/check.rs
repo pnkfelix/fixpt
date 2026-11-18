@@ -1135,7 +1135,11 @@ fn lending<T>(world: &std::rc::Rc<std::cell::RefCell<crate::macros::SynWorld>>, 
     let (mut heap, mut syms) = {
         let mut w = world.borrow_mut();
         w.lending = true;
-        (w.heap.take().unwrap_or_else(|| Box::new(fixpt_heap::Heap::unfixed())), std::mem::take(&mut w.syms))
+        let names = w.names.take();
+        // Of the checker's names, where they are its (a world of its own,
+        // a module file's macros', has none: of names of its own, its
+        // symbols the interner's by their names).
+        (w.heap.take().unwrap_or_else(|| Box::new(names.map_or_else(fixpt_heap::Heap::unfixed, fixpt_heap::Heap::unfixed_with_names))), std::mem::take(&mut w.syms))
     };
     if heap.collection_due() {
         heap.collect_due(&mut []);
@@ -1290,7 +1294,12 @@ impl Checker {
     /// type that names none has it, the standard environment's included
     /// (a `nativecc` machine's).
     pub fn with_convention(conv: Conv) -> Checker {
-        Checker::with_interner(conv, Interner::new())
+        // Its names made first, its syntax heap made of them when first
+        // wanted: a symbol of its syntax its `Sym` by its number.
+        let names = fixpt_memmgmt::names::Owner::new();
+        let c = Checker::with_interner(conv, Interner::of_names(&names));
+        c.macros.withs.world.borrow_mut().names = Some(names);
+        c
     }
 
     /// [`with_convention`](Checker::with_convention), its names `names`, a

@@ -1319,8 +1319,7 @@ fn supply_loaded_in(
     // over, its span's, in whichever file the form is.
     let place: Box<dyn Fn(Span) -> i64> = match from {
         Loads::Text(text, base) => {
-            let mut interner = Interner::new();
-            let read = crate::heap_syn::aside(|| crate::heap_syn::read_syn_passing(text, &mut interner, |forms, interner| load_modules_in(forms, interner, &mut loads)));
+            let read = crate::heap_syn::aside(|names| crate::heap_syn::read_syn_passing(text, names, |forms, interner| load_modules_in(forms, interner, &mut loads)));
             if read.is_err() {
                 return Ok(());
             }
@@ -1439,9 +1438,8 @@ mod tests {
 
     /// Where the loads' scan finds the scheduler loaded (`load_modules_in`).
     fn scheduler_loads(text: &str) -> Vec<u32> {
-        let mut interner = Interner::new();
         let mut out = Vec::new();
-        crate::heap_syn::aside(|| crate::heap_syn::read_syn_passing(text, &mut interner, |forms, interner| load_modules_in(forms, interner, &mut out))).expect("reads");
+        crate::heap_syn::aside(|names| crate::heap_syn::read_syn_passing(text, names, |forms, interner| load_modules_in(forms, interner, &mut out))).expect("reads");
         out.into_iter().filter(|(_, p, _, _)| p == crate::check::PROCESSES).map(|(at, ..)| at.start).collect()
     }
 

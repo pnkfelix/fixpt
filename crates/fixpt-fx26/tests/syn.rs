@@ -109,7 +109,7 @@ fn the_rust_reader_builds_the_syn_fx26_reads() {
             continue;
         };
         let ours = s.scheme.make(|m| {
-            let mut interner = fixpt_read::Interner::new();
+            let mut interner = fixpt_read::Interner::of_names(m.heap().names());
             let mut syms = fixpt_fx26::heap_syn::SymTable::default();
             let mut r = Reader::with_builder(text, FileId(0), SyntaxProfile::FX26, &mut interner, fixpt_fx26::heap_syn::HeapSyn::new(m.heap(), &mut syms, 0));
             let forms: Vec<fixpt_heap::Value> = r.read_all_built().expect("reads").into_iter().map(|n| n.0).collect();
@@ -214,7 +214,7 @@ fn the_heap_syn_reads_back_as_the_rust_syntax() {
             }
             let text = std::fs::read_to_string(&p).expect("readable");
             let name = p.display().to_string();
-            let (mut interner, mut syms) = (fixpt_read::Interner::new(), SymTable::default());
+            let (mut interner, mut syms) = (fixpt_read::Interner::of_names(heap.names()), SymTable::default());
             let mut r = Reader::with_builder(&text, FileId(0), SyntaxProfile::FX26, &mut interner, HeapSyn::new(&mut heap, &mut syms, 0));
             let Ok(forms) = r.read_all_built() else { continue };
             drop(r);
