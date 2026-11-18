@@ -685,7 +685,16 @@
                                    (string=? (syn-name (car ms)) "defn"))
                               "(defn")
                              (else ""))))
-            (cond ((string=? made "defn") (tuple (nth items 1) 1))
+            (cond ((and (string=? made "defn") (old-defn-export? (nth items 1)))
+                   (begin
+                     (fail-at fail
+                              (string-append "what a use defines is said in what it makes, "
+                                             "`(macro/addressed σ (defn (ℓ δ) …))`, not by "
+                                             "`(export σ (rho (ℓ δ) …))` around its parts: the "
+                                             "`rho`'s entries go in the `defn`")
+                              (nth items 1))
+                     (tuple (nth items 1) 1)))
+                  ((string=? made "defn") (tuple (nth items 1) 1))
                   ((string=? made "(defn") (tuple (defined-in fail (nth items 1) m (cdr ms)) 1))
                   ((string=? made "desc") (tuple (nth items 1) 2))
                   ((string=? made "expr") (tuple (nth items 1) 0))
@@ -708,3 +717,12 @@
                                                        "`expr`, `defn`, `(defn D …)` or `desc`")))
                             s)
                    (tuple s 0)))))))
+;; Whether `body`, operands a signature's uses make definitions of, is the
+;; old `(export σ (rho (ℓ δ) …))`, taken out (`TODO.md` §288), now `σ` with
+;; `(defn (ℓ δ) …)` (`macros.rs`'s `old_defn_export`).
+(define old-defn-export? (->* (syn) bool)
+  (lambda (body)
+    (let ((bs (proper-items body)))
+      (and (= (len bs) 3) (syn-symbol? (car bs)) (string=? (syn-name (car bs)) "export")
+           (let ((r (proper-items (nth bs 2))))
+             (and (pair? r) (syn-symbol? (car r)) (string=? (syn-name (car r)) "rho")))))))

@@ -7309,6 +7309,11 @@ with `defn` read the same, "for a while", both at once refused. The rewrite
 scripts of 2026-11-15 left it where tests write it (`defn-export-given.fx`
 keeps one on purpose). Take it out: refuse it saying how it is written now,
 the test of the synonym made the test of that refusal, both front ends.
+Done 2026-11-18: `(macro/addressed (export σ (rho (ℓ δ) …)) defn)` refused,
+"the `rho`'s entries go in the `defn`" (`old_defn_export`;
+`old-defn-export?`), `defn-export-given.fx` the test of it. An `export` of
+another binding around the parts with `defn` (a ribcage's, which `(defn
+…)` cannot say, and which an inferred signature is shown with) is kept.
 
 ## 289. A fact under `...` that names what is outside its repetition: imports from an outer region's root (the user's, 2026-11-15)
 

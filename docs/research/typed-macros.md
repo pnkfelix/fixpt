@@ -2360,8 +2360,12 @@ Decided with them:
   the entries say, each a part's address and what it binds there, as a
   `rho`'s. `(-> (bvar expr) (defn (A var)))` defines its first part, a
   value. Plain `defn`, as before, defines nothing a template sees (the
-  program sees what it defines). The old `(-> (export σ (rho …)) defn)` is
+  program sees what it defines). The old `(-> (export σ (rho …)) defn)` was
   read as the same, for a while; both at once is refused, "said once".
+  Taken out 2026-11-18 (`TODO.md` §288): refused, saying that the `rho`'s
+  entries go in the `defn`, both front ends (`defn-export-given.fx`). An
+  `export` of another binding around the parts, with `defn`, which `(defn
+  …)` cannot say (a ribcage's), is read as before.
   Inferred signatures are shown the new way (`defn_arrow`, `defn-arrow`).
   *Built*, both front ends: `macros/defn-export*.fx`.
 - **A procedural macro's contract may make definitions**, `(-> σ defn)`

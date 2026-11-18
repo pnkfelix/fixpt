@@ -1,14 +1,10 @@
-;; => 8
-;; A name the use gives, defined by a nested use that says so, in the scope
-;; of what comes after it. `define-const`'s says it in Herman's form as it
-;; once was written, `(export σ β)` around the parts, read as `(defn …)`.
+;; ! what a use defines is said in what it makes, `(macro/addressed σ (defn (ℓ δ) …))`, not by `(export σ (rho (ℓ δ) …))` around its parts
+;; Herman's form as it once was written, `(export σ (rho …))` around the
+;; parts and `defn`, is taken out (TODO.md §288): what a use defines is said
+;; in what it makes, `(macro/addressed (bvar expr) (defn ((path #:a) var)))`.
 (define-syntax define-const
   (macro/addressed (export (bvar expr) (rho ((path #:a) var))) defn)
   (syntax-rules
     ((_ n e) (define n e))))
-(define-syntax define-and-double
-  (macro (_ a @ bvar b @ bvar e @ expr) (defn a b))
-  (syntax-rules
-    ((_ a b e) (begin (define-const a e) (define b (+ a a))))))
-(define-and-double four eight 4)
-eight
+(define-const four 4)
+four

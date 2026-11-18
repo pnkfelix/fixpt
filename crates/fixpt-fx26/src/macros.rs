@@ -2055,6 +2055,9 @@ impl Macros {
                 }
             }
             Some([h, body, made]) if h.sym().is_some_and(|h| interner.name(h) == "macro/addressed") => match made.sym().map(|m| interner.name(m)) {
+                // The old `(export σ (rho (ℓ δ) …))` with `defn`, taken out
+                // (`TODO.md` §288): what it said is said in what it makes.
+                Some("defn") if old_defn_export(body, interner) => return Err(FxError::at(body.at(), OLD_DEFN_EXPORT)),
                 Some("defn") => (*body, true, false),
                 Some("desc") => (*body, false, true),
                 Some("expr") => (*body, false, false),
@@ -5270,6 +5273,16 @@ fn defn_arrow(s: Syn, at: At, interner: &mut Interner) -> Syn {
     }
     Syn::lst(at, vec![arrow, s, defn])
 }
+
+/// Whether `body`, operands a signature's uses make definitions of, is the
+/// old `(export σ (rho (ℓ δ) …))`, now `σ` with `(defn (ℓ δ) …)`.
+fn old_defn_export(body: &Syn, interner: &Interner) -> bool {
+    let head = |s: &Syn, n: &str| s.list().and_then(|l| l.first().and_then(|h| h.sym())).is_some_and(|h| interner.name(h) == n);
+    matches!(body.list().as_deref(), Some([_, _, b]) if head(body, "export") && head(b, "rho"))
+}
+
+/// Why the old `(export σ (rho (ℓ δ) …))` is refused, how it is written now.
+const OLD_DEFN_EXPORT: &str = "what a use defines is said in what it makes, `(macro/addressed σ (defn (ℓ δ) …))`, not by `(export σ (rho (ℓ δ) …))` around its parts: the `rho`'s entries go in the `defn`";
 
 /// What is said of a name a macro takes for a trailmark that is none.
 fn no_trailmark(name: &str) -> String {
