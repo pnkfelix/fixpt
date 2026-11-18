@@ -1283,7 +1283,7 @@ fn loaded_files_at(scheme: &mut Front, file: FileId, from: Loads<'_>) -> R<(fixp
     let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let mut list = scheme.make(|_| Value::NULL);
     let mut read = 0;
-    let mut seen = HashMap::default();
+    let mut seen = Seen::default();
     let mut order = Vec::new();
     supply_loaded_in(scheme, file, from, base_dir, &mut read, &mut seen, &mut order, &mut list)?;
     Ok((list, order))
@@ -1298,6 +1298,15 @@ enum Loads<'a> {
     Forms(&'a [Load]),
 }
 
+/// The files a handing has read ([`supply_loaded_in`]): each one a load
+/// reads, by its key; and each made by a form before whose forms were read
+/// for a file that imports macros, once.
+#[derive(Default)]
+struct Seen {
+    reads: HashMap<String, Read>,
+    forms_read: fixpt_hash::HashSet<String>,
+}
+
 /// [`supply_loaded`] for the `load-module`s of `text`, a program or a file
 /// read at `base` (its positions moved past the program's by it), whose
 /// relative paths are from `dir`: each file read, then those it loads, in
@@ -1308,7 +1317,7 @@ fn supply_loaded_in(
     from: Loads<'_>,
     dir: Option<std::path::PathBuf>,
     read: &mut u32,
-    seen: &mut HashMap<String, Read>,
+    seen: &mut Seen,
     order: &mut Vec<(String, String)>,
     list: &mut fixpt_scheme::Handle,
 ) -> R<()> {
@@ -1363,7 +1372,7 @@ fn supply_loaded_in(
         };
         let entry = |sc: &mut Front, list: &mut fixpt_scheme::Handle, r: &Read| entry_at(sc, list, r, place(start));
         let shared = if input && !redirected { format!("input:{key}") } else { key.clone() };
-        if let Some(r) = seen.get(&shared) {
+        if let Some(r) = seen.reads.get(&shared) {
             entry(scheme, list, r)?;
             continue;
         }
@@ -1377,7 +1386,12 @@ fn supply_loaded_in(
             // A file that imports a file's macros reads its forms, its own
             // and those of the files it imports (`macros-imports.fx`'s
             // `file-of`): so read, at no form's place, which no load meets.
-            if imports_syntax && crate::built_in_module(&path).is_none() {
+            // Once a handing: its forms, and those of the files it loads,
+            // are in the list after (Heist's report, 2026-11-18: read again
+            // at each file that loads it, a chain of files each a module
+            // parameter of the next read each below it twice as often as
+            // the one above).
+            if imports_syntax && crate::built_in_module(&path).is_none() && seen.forms_read.insert(shared.clone()) {
                 let Ok(ftext) = crate::reads::read_file(&at) else { continue };
                 let Ok(syns) = read_to_syns_at(scheme, FileId(1001 + *read), &ftext, LOAD_BASE_STEP * (*read as i64 + 1)) else { continue };
                 *read += 1;
@@ -1411,7 +1425,7 @@ fn supply_loaded_in(
         entry(scheme, list, &r)?;
         order.push((shared.clone(), if r.why.is_empty() { r.text.clone() } else { r.why.clone() }));
         let ftext = r.text.clone();
-        seen.insert(shared, r);
+        seen.reads.insert(shared, r);
         // The files it loads, from its directory, at its positions.
         if file_base > 0 {
             supply_loaded_in(scheme, FileId(1000 + *read), Loads::Text(&ftext, file_base), at.parent().map(|d| d.to_path_buf()), read, seen, order, list)?;

@@ -837,7 +837,14 @@ impl crate::check::Checker {
         let outer = std::mem::replace(&mut self.base_dir, dir.clone());
         let names: crate::R<Vec<fixpt_read::Sym>> = self.syn(|c| header.deps.iter().map(|d| c.load_name(span, &d.path, d.input)).collect());
         self.base_dir = outer;
-        let names = names?;
+        // A load it says it makes that cannot be made from its directory (a
+        // `.fasl` an older fixpt wrote, its loads another file's spelling,
+        // Heist's report, 2026-11-18): stale, as one whose load changed,
+        // the file read from its source.
+        let names = match names {
+            Ok(names) => names,
+            Err(e) => return stale(self, &format!("a load it makes cannot be made here: {}", e.message)),
+        };
         for (d, n) in header.deps.iter().zip(&names) {
             if self.shared_files.get(n).map(|f| f.stamp) != Some(d.stamp) {
                 return stale(self, &format!("`{}` changed", d.path));

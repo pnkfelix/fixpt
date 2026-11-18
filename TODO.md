@@ -7859,3 +7859,25 @@ overhead not needed yet). It may be the right answer for hermetic or
 reproducible builds: then an option of `compile-file`, or a variable of
 the environment, asking that a `.fasl` hold nothing of its session's,
 each such number made the file's own as it is written.
+
+## 298. A parameter chain importing macros compiled in time doubling with each file; a `.fasl` whose load cannot be made refused (Heist's report, 2026-11-18)
+
+Done 2026-11-18. (1) Each file of a chain, each taking those before it as
+module parameters and importing a file's macros, took about twice as long
+as the one before (10 files 2.6 s, 0.09 s each with its own copy of the
+macro; Heist's `eldoc.fx`, 12 parameters, out of memory at 16 GB): the
+parser written in FX-26 is handed, for a file that imports macros, the
+forms of each file a form before made (`macros-imports.fx`'s `file-of`),
+and `syn.rs`'s `supply_loaded_in` read each such file and supplied its
+loads again at every file that loaded it, `f0.fx` read 1,042 times for 8
+files. Now once a handing (`Seen::forms_read`): 10 files 0.17 s, 20 files
+0.70 s. A file is still read again in each handing (each form's), so the
+time is about the square of the chain's length, small at these sizes.
+(2) A `.fasl` an older fixpt wrote recorded a load in another file's
+spelling (`editor/buffer.fasl`, `macros.fx`, `kit/lists.fx`'s), as a
+`.fasl` read while another file was read gave that file its loads, fixed
+by §294's routes (each file's loads its own); and a `.fasl` whose load
+cannot be made from its directory was refused, "cannot read `macros.fx`",
+until deleted by hand. Now it is stale, its file read from source
+(`fasl_load`). Tests: fasl.rs (a parameter chain importing macros compiles
+in its length; a `.fasl` whose load cannot be made is stale).

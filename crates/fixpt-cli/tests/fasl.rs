@@ -410,6 +410,56 @@ fn a_load_of_a_load_is_named_by_its_route() {
     assert!(ok && out.lines().last().is_some_and(|l| l.starts_with("6 : int")) && err.contains("is read from") && !err.contains("stale"), "{out}{err}");
 }
 
+/// A chain of module files, each taking those before it as module
+/// parameters and importing a file's macros (Heist's report, 2026-11-18):
+/// compiled in time about its length, not doubling with each file. The
+/// parser written in FX-26 was handed the forms of each file made before,
+/// for a file that imports macros, again at each file that loads it: 10
+/// files took 2.6 s, each two more twice as long; 18 now under a second in
+/// a release build.
+#[test]
+fn a_parameter_chain_importing_macros_compiles_in_its_length() {
+    let dir = scratch("chain");
+    let n = 18;
+    std::fs::write(dir.join("macros.fx"), "(define-syntax twice (macro (_ expr) expr) (syntax-rules ((_ e) (let ((x e)) (+ x x)))))\n").expect("written");
+    for k in 0..=n {
+        let params: Vec<String> = (0..k).map(|i| format!("(m{i} (load-moduleof \"f{i}.fx\"{}))", (0..i).map(|j| format!(" m{j}")).collect::<String>())).collect();
+        let text = format!("(module-parameters ({}))\n(define mac{k} (load-module \"macros.fx\"))\n(import-with-syntax mac{k})\n(define v{k} int (twice {k}))\n", params.join(" "));
+        std::fs::write(dir.join(format!("f{k}.fx")), text).expect("written");
+    }
+    let start = std::time::Instant::now();
+    let (ok, out, err) = fixpt(&dir, &["compile-file", &format!("f{n}.fx")], &[]);
+    assert!(ok, "{out}{err}");
+    let took = start.elapsed();
+    assert!(took < std::time::Duration::from_secs(60), "{n} files took {took:?}");
+}
+
+/// A `.fasl` that says it makes a load it cannot make from its directory
+/// (one an older fixpt wrote, its loads another file's spelling, Heist's
+/// report, 2026-11-18) is stale: its file read from source, not the load
+/// refused.
+#[test]
+fn a_fasl_whose_load_cannot_be_made_is_stale() {
+    let dir = scratch("bad-load");
+    let (kit, editor) = (dir.join("kit"), dir.join("editor"));
+    std::fs::create_dir_all(&kit).expect("made");
+    std::fs::create_dir_all(&editor).expect("made");
+    std::fs::write(kit.join("lists.fx"), "(define four int 4)\n").expect("written");
+    std::fs::write(editor.join("buffer.fx"), "(define lists (load-module \"../kit/lists.fx\"))\n(define eight int (* 2 (with lists four)))\n").expect("written");
+    std::fs::write(editor.join("main.fx"), "(define buffer (load-module \"buffer.fx\"))\n(with buffer eight)\n").expect("written");
+    let (ok, out, err) = fixpt(&editor, &["compile-file", "buffer.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    // A load in another file's spelling, as the bug wrote one.
+    let fasl = editor.join("buffer.fasl");
+    let mut bytes = std::fs::read(&fasl).expect("read");
+    let at = bytes.windows(4).position(|w| w == b"dep ").expect("a load");
+    bytes.splice(at..at, b"dep module 0000000000000001 macros.fx\n".iter().copied());
+    std::fs::write(&fasl, bytes).expect("written");
+    let (ok, out, err) = fixpt(&editor, &["eval", "main.fx"], &[]);
+    assert!(ok && out.lines().last().is_some_and(|l| l.starts_with("8 : int")), "{out}{err}");
+    assert!(err.contains("`buffer.fasl` is stale (a load it makes cannot be made here"), "{err}");
+}
+
 #[test]
 fn a_description_function_reads_back_from_a_fasl_read_from_one() {
     // `u.fx` compiled with `t.fx` read from its `.fasl`: `tt`'s `bucket` in
