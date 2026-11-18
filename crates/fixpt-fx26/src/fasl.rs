@@ -31,6 +31,35 @@ use std::path::{Path, PathBuf};
 /// A `.fasl`'s first line.
 pub const MARK: &str = "#fasl(fixpt-fasl 3)";
 
+/// Why a `.fasl` is not used: it is out of date, as a build expects (another
+/// fixpt made it, its source or a load changed); or it is not as a build
+/// left it (a load it makes cannot be made, its type does not read back),
+/// which is a bug's, or a build's damage (the user's, 2026-11-18).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Staleness {
+    Expected,
+    Suspicious,
+}
+
+/// What a stale `.fasl` is answered: its file read from source, or its
+/// load refused, saying why.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StaleAnswer {
+    Source,
+    Refuse,
+}
+
+impl StaleAnswer {
+    /// A suspicious `.fasl`'s answer as the environment says it,
+    /// `FIXPT_STALE_FASL=source`; else refused.
+    pub fn from_env() -> StaleAnswer {
+        match std::env::var("FIXPT_STALE_FASL").as_deref() {
+            Ok("source") => StaleAnswer::Source,
+            _ => StaleAnswer::Refuse,
+        }
+    }
+}
+
 /// What a `.fasl` says of itself before its image.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Header {
@@ -789,15 +818,28 @@ impl crate::check::Checker {
         // One built in is made again, quietly, by the run that reads its
         // source (`Fx26Session::cache_built_ins`).
         let built_in = crate::built_in_module(path).is_some();
-        let stale = |c: &mut Self, why: &str| {
-            if !built_in {
-                c.fasl_notes.push(format!("`{}` is stale ({why}): `{path}` is loaded from its source", fasl.display()));
+        // Out of date: its file read from source, said. Not as a build left
+        // it: refused, saying so, unless the driver says read the source.
+        let said = |c: &mut Self, why: &str, kind: Staleness| {
+            if built_in {
+                return Ok(None);
             }
+            if kind == Staleness::Suspicious && c.suspicious_fasl == StaleAnswer::Refuse {
+                return Err(crate::FxError::at(
+                    span,
+                    format!("`{}` is not as a build left it ({why}): delete it to load `{path}` from its source, or set FIXPT_STALE_FASL=source", fasl.display()),
+                ));
+            }
+            c.fasl_notes.push(format!("`{}` is stale ({why}): `{path}` is loaded from its source", fasl.display()));
             Ok(None)
         };
+        let stale = |c: &mut Self, why: &str| said(c, why, Staleness::Expected);
+        let suspicious = |c: &mut Self, why: &str| said(c, why, Staleness::Suspicious);
         let header = match Header::read(&bytes) {
             Ok((h, _)) => h,
-            Err(e) => return stale(self, &e),
+            // Another format's, of a fixpt before: out of date; else damaged.
+            Err(e) if !bytes.starts_with(MARK.as_bytes()) => return stale(self, &e),
+            Err(e) => return suspicious(self, &e),
         };
         if header.build != build() {
             return stale(self, "another fixpt made it");
@@ -843,7 +885,7 @@ impl crate::check::Checker {
         // the file read from its source.
         let names = match names {
             Ok(names) => names,
-            Err(e) => return stale(self, &format!("a load it makes cannot be made here: {}", e.message)),
+            Err(e) => return suspicious(self, &format!("a load it makes cannot be made here: {}", e.message)),
         };
         for (d, n) in header.deps.iter().zip(&names) {
             if self.shared_files.get(n).map(|f| f.stamp) != Some(d.stamp) {
@@ -855,7 +897,7 @@ impl crate::check::Checker {
         // route reaches from the loads just made (`route_name`).
         let ty = match self.routes_resolved(&ty, &names) {
             Ok(ty) => ty,
-            Err(why) => return stale(self, &why),
+            Err(why) => return suspicious(self, &why),
         };
         let loads: String = header
             .deps
@@ -884,7 +926,7 @@ impl crate::check::Checker {
             Err(e) => {
                 self.files_read -= 1;
                 self.load_sites.remove(&file);
-                return stale(self, &format!("its type does not read back: {}", e.message));
+                return suspicious(self, &format!("its type does not read back: {}", e.message));
             }
         };
         let deps = header.deps.iter().zip(names).map(|(d, n)| (d.path.clone(), d.input, n)).collect();

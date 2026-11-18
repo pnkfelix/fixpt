@@ -435,11 +435,13 @@ fn a_parameter_chain_importing_macros_compiles_in_its_length() {
 }
 
 /// A `.fasl` that says it makes a load it cannot make from its directory
-/// (one an older fixpt wrote, its loads another file's spelling, Heist's
-/// report, 2026-11-18) is stale: its file read from source, not the load
-/// refused.
+/// (as a bug wrote one, its loads another file's spelling, Heist's report,
+/// 2026-11-18) is not as a build left it: its load refused, saying so and
+/// what to do (the user's, 2026-11-18: a suspicious one an error), not a
+/// file it cannot read; or, `FIXPT_STALE_FASL=source`, stale, its file read
+/// from source.
 #[test]
-fn a_fasl_whose_load_cannot_be_made_is_stale() {
+fn a_fasl_whose_load_cannot_be_made_is_refused() {
     let dir = scratch("bad-load");
     let (kit, editor) = (dir.join("kit"), dir.join("editor"));
     std::fs::create_dir_all(&kit).expect("made");
@@ -456,6 +458,8 @@ fn a_fasl_whose_load_cannot_be_made_is_stale() {
     bytes.splice(at..at, b"dep module 0000000000000001 macros.fx\n".iter().copied());
     std::fs::write(&fasl, bytes).expect("written");
     let (ok, out, err) = fixpt(&editor, &["eval", "main.fx"], &[]);
+    assert!(!ok && err.contains("`buffer.fasl` is not as a build left it (a load it makes cannot be made here") && err.contains("FIXPT_STALE_FASL=source"), "{out}{err}");
+    let (ok, out, err) = fixpt(&editor, &["eval", "main.fx"], &[("FIXPT_STALE_FASL", "source")]);
     assert!(ok && out.lines().last().is_some_and(|l| l.starts_with("8 : int")), "{out}{err}");
     assert!(err.contains("`buffer.fasl` is stale (a load it makes cannot be made here"), "{err}");
 }

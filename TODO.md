@@ -7881,3 +7881,29 @@ cannot be made from its directory was refused, "cannot read `macros.fx`",
 until deleted by hand. Now it is stale, its file read from source
 (`fasl_load`). Tests: fasl.rs (a parameter chain importing macros compiles
 in its length; a `.fasl` whose load cannot be made is stale).
+
+## 299. A stale `.fasl` answered by its caller (the user's, 2026-11-18)
+
+A `.fasl` not used is out of date, as a build expects (another fixpt made
+it, its source, a type it names or a load changed: its file read from
+source, said), or not as a build left it (its header damaged, a load it
+makes cannot be made, a route reaches no load, its type does not read
+back: a bug's, or a build's damage). Decided (the user's): the second an
+error by default, and the caller may answer either; a handler written in
+FX-26 may write to stderr alone, for now.
+
+Built 2026-11-18, the Rust side: `fasl::Staleness` (`Expected`,
+`Suspicious`), `fasl::StaleAnswer` (`Source`, `Refuse`), the checker's
+`suspicious_fasl` (refused by default; `FIXPT_STALE_FASL=source`, or a
+driver's setting, reads the source), a refusal saying what to do (delete
+it, or the variable). Module files' `.fasl`s; a program's (`,load`'s) as
+before, each reason read from source.
+
+Left, to discuss where it is asked: FX-26 code is on the stack where a
+`.fasl` is read only where it checks code itself (`session-check`,
+`stage`), not in `conductor.fx`, which makes the front end, nor the REPL,
+which is Rust's (`fixpt-cli`'s `fx26.rs`). There, a handler `(subr (io
+stderr) (stale-fasl) (sumof (source unit) (refuse unit)))` found by a
+mark key around the call (`with-mark`, `first-mark`), the stale `.fasl` a
+value (its path, its file, its reason as a sum, which kind); the REPL a
+command (`,stale-fasl source|refuse`) setting the checker's answer.

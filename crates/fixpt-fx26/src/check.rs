@@ -597,6 +597,11 @@ pub struct Checker {
     /// Whether a load reads a fresh `.fasl` beside its file rather than the
     /// file (a driver's setting: one that gives the hidden global its value).
     pub fasls: bool,
+    /// What a `.fasl` stale for a reason that says it is not as a build
+    /// left it is answered (`fasl::Staleness::Suspicious`): refused, by
+    /// default (the user's, 2026-11-18), or its file read from source
+    /// (`FIXPT_STALE_FASL=source`, or a driver's setting).
+    pub suspicious_fasl: crate::fasl::StaleAnswer,
     /// Each `.fasl` a load found and did not use, and why: for a driver to
     /// say, as Larceny's `require` does.
     pub fasl_notes: Vec<String>,
@@ -1445,6 +1450,7 @@ impl Checker {
             shared_files: HashMap::default(),
             reading_deps: Vec::new(),
             fasls: false,
+            suspicious_fasl: crate::fasl::StaleAnswer::from_env(),
             fasl_notes: Vec::new(),
             loading: Vec::new(),
             include_scope: 0,

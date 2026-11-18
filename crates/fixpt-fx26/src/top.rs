@@ -144,7 +144,7 @@ fn every_field_placed(c: &Checker) {
         // changes them.
         base: _, void: _, int: _, bool_: _, string: _, unit: _, char_: _, f64_: _, symbol: _, conv_default: _,
         standard_len: _, standard_dscope: _, base_dir: _, masking: _, defer_reruns: _, syscalls: _,
-        globals_effects: _, record_operands: _, record_types: _, fasls: _,
+        globals_effects: _, record_operands: _, record_types: _, fasls: _, suspicious_fasl: _,
         // Said by the driver, which takes them.
         fasl_notes: _,
     } = c;
