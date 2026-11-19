@@ -66,6 +66,66 @@ pub struct Definition {
     pub uses: Vec<Sym>,
 }
 
+/// The definitions checked so far, oldest first, each the latest of its
+/// names, and the names they define: so that recording one looks for an
+/// older definition of its names in the set, not along every definition
+/// (TODO §303). A name is defined by one definition at most, so a
+/// definition gone takes its names out of the set.
+#[derive(Clone, Default)]
+pub(crate) struct Defs {
+    list: Vec<Definition>,
+    names: fixpt_hash::HashSet<Sym>,
+}
+
+impl Defs {
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, Definition> {
+        self.list.iter()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.list.len()
+    }
+
+    /// The first `n` alone kept, the names of the rest out of the set.
+    pub(crate) fn truncate(&mut self, n: usize) {
+        if n < self.list.len() {
+            for d in self.list.drain(n..) {
+                for x in &d.names {
+                    self.names.remove(x);
+                }
+            }
+        }
+    }
+
+    /// The definition of `name`, if any, its form and uses made `form`
+    /// and `uses`, its names as they were.
+    pub(crate) fn remade(&mut self, name: Sym, form: Form, uses: Vec<Sym>) {
+        if let Some(d) = self.list.iter_mut().rev().find(|d| d.names.contains(&name)) {
+            d.form = form;
+            d.uses = uses;
+        }
+    }
+
+    /// `d` recorded as the definition of its names now, any older one of
+    /// them gone.
+    fn record(&mut self, d: Definition) {
+        if d.names.iter().any(|n| self.names.contains(n)) {
+            let names = &mut self.names;
+            self.list.retain(|o| {
+                let gone = o.names.iter().any(|n| d.names.contains(n));
+                if gone {
+                    for x in &o.names {
+                        names.remove(x);
+                    }
+                }
+                !gone
+            });
+        }
+        self.names.extend(d.names.iter().copied());
+        self.list.push(d);
+    }
+}
+
 /// A form checked at the top level, and what it makes run
 /// (`Checker::top_defining`).
 #[derive(Clone, Debug)]
@@ -89,7 +149,7 @@ struct Kept {
     env: usize,
     dscope: usize,
     shared: (fixpt_hash::HashMap<String, Sym>, fixpt_hash::HashSet<Sym>),
-    defs: Option<(Vec<Definition>, Vec<(Vec<Sym>, Vec<Sym>)>)>,
+    defs: Option<(Defs, Vec<(Vec<Sym>, Vec<Sym>)>)>,
     defs_len: (usize, usize),
     hoisted: usize,
     files_read: u32,
@@ -541,7 +601,7 @@ impl Checker {
     fn users_of(&self, names: &[Sym]) -> Vec<Definition> {
         let mut used: Vec<Sym> = names.to_vec();
         let mut out = Vec::new();
-        for d in &self.defs {
+        for d in self.defs.iter() {
             if d.names.iter().any(|n| names.contains(n)) {
                 continue;
             }
@@ -596,8 +656,7 @@ impl Checker {
             self.free_into(e, &mut Vec::new(), &mut uses);
         }
         uses.retain(|u| !names.contains(u));
-        self.defs.retain(|d| !d.names.iter().any(|n| names.contains(n)));
-        self.defs.push(Definition { names, form: form.clone(), uses });
+        self.defs.record(Definition { names, form: form.clone(), uses });
     }
 
     /// Read `text` in FX-26's lexical syntax (`SyntaxProfile::FX26`),

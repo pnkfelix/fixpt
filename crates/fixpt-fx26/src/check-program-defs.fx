@@ -77,7 +77,8 @@
       (include check-modules-read) (include check-subst) (include check-synth)
       (include check-module-rules) (include check-subtype) (include parser))
 (import check-effects k-atom-region k-one k-insert k-contains?)
-(import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs)
+(import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs k-def-name?
+        k-def-names-set!)
 (import check-read k-items k-name-of k-sfail k-symbol-head)
 (define k-names-onto (with check-modorder k-names-onto))
 
@@ -405,10 +406,7 @@
 ;; Whether `n` is a global a definition made.
 (define k-defined? (->* (symbol) bool)
   (lambda (n)
-    (letrec ((go (subr (maxeff (read @globals) spin (read @t)) (k-def-list) bool)
-               (lambda (ds)
-                 (and (not (null? ds)) (or (k-has-name? (extract (car ds) 1) n) (go (cdr ds)))))))
-      (go (get k-defs)))))
+    (k-def-name? n)))
 (define k-old-types (->* (k-names) k-olds)
   (lambda (ns)
     (cond ((null? ns) nil)
@@ -437,7 +435,22 @@
     (if (null? ns)
         #u
         (let ((def (product (1 ns) (2 form) (3 (k-names-without (get k-last-uses) ns)))))
-          (set k-defs (the k-def-list (cons def (k-defs-without (get k-defs) ns))))))))
+          (begin
+            ;; An older definition of its names copied out of the list,
+            ;; alone: its names, no longer defined.
+            (if (k-any-defined? ns)
+                (begin (k-defs-undefine-meeting (get k-defs) ns)
+                       (set k-defs (the k-def-list (cons def (k-defs-without (get k-defs) ns)))))
+                (set k-defs (the k-def-list (cons def (get k-defs)))))
+            (k-def-names-set! ns #t))))))
+(define k-any-defined? (->* (k-names) bool)
+  (lambda (ns) (and (not (null? ns)) (or (k-def-name? (car ns)) (k-any-defined? (cdr ns))))))
+(define k-defs-undefine-meeting (->* (k-def-list k-names) unit)
+  (lambda (ds ns)
+    (cond ((null? ds) #u)
+          ((k-names-meet? (extract (car ds) 1) ns)
+           (begin (k-def-names-set! (extract (car ds) 1) #f) (k-defs-undefine-meeting (cdr ds) ns)))
+          (else (k-defs-undefine-meeting (cdr ds) ns)))))
 ;; The definitions that use `ns`, and those that use them, and so on,
 ;; oldest first.
 (define k-users-of (->* (k-names) k-def-list)

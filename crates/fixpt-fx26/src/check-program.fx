@@ -82,7 +82,8 @@
       (include check-modules-read) (include check-subst) (include check-synth)
       (include check-module-rules) (include check-subtype) (include parser))
 (import check-effects k-atom-region k-one k-insert)
-(import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs exp-reading)
+(import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs exp-reading
+        k-defs-snapshot k-defs-restore!)
 (import check-read k-items k-name-of k-sfail k-symbol-head)
 (define k-names-onto (with check-modorder k-names-onto))
 
@@ -752,7 +753,7 @@
 (define check-try
   (->* (k-tops symbol (bytevectorof @t)) (productof (1 k-result) (2 string) (3 (bytevectorof @t))))
   (lambda (forms n rep)
-    (let* ((mark (k-mark)) (defs (get k-defs)) (broken (get k-broken)) (runs (get k-runs))
+    (let* ((mark (k-mark)) (defs (k-defs-snapshot)) (broken (get k-broken)) (runs (get k-runs))
            (uses (get k-last-uses)) (deferring (get k-defer-reruns))
            (r (begin (set k-defer-reruns #t) (check-more-with forms rep)))
            (found (tagcase r (k-ok (ls) (k-lookup n)) (else y -1)))
@@ -760,7 +761,7 @@
            ;; And as a rep, for the steps after to name, not read
            ;; (`docs/research/heap-types.md`, step 4); empty if none.
            (tr (if (< found 0) (the (bytevectorof @t) (make-bytevector 0 0)) (k-try-rep found))))
-      (begin (k-unbind-to mark) (set k-defs defs) (set k-broken broken) (set k-runs runs)
+      (begin (k-unbind-to mark) (k-defs-restore! defs) (set k-broken broken) (set k-runs runs)
              (set k-last-uses uses) (set k-defer-reruns deferring)
              (product (1 r) (2 t) (3 tr))))))
 ;; Type `t` as a rep, if a rep takes it and it names no variable; else
@@ -782,7 +783,7 @@
 (define k-stage-base (ref int @t) (new 0))
 (define k-stage-growth int 4)
 (define k-stage-mark (ref int @t) (new 0))
-(define k-stage-defs (ref (listof k-def acyclic) @t) (new nil))
+(define k-stage-defs (ref k-defs-snap @t) (new (product (1 nil) (2 -1) (3 0))))
 (define k-stage-broken (ref (listof k-break acyclic) @t) (new nil))
 (define k-stage-uses (ref k-names @t) (new nil))
 (define k-stage-dscope (ref k-scope @t) (new nil))
@@ -793,14 +794,14 @@
           #u
           (begin (check-staged-program standard nil (the (bytevectorof @t) (make-bytevector 0 0)))
                  (set k-stage-base (get k-ntys))))
-      (set k-stage-mark (k-mark)) (set k-stage-defs (get k-defs))
+      (set k-stage-mark (k-mark)) (set k-stage-defs (k-defs-snapshot))
       (set k-stage-broken (get k-broken)) (set k-stage-uses (get k-last-uses))
       (set k-stage-dscope (get k-dscope))
       (check-more-with forms rep))))
 ;; What the stage `check-staged` checked last bound, undone.
 (define check-staged-undo! (->* () unit)
   (lambda ()
-    (begin (k-unbind-to (get k-stage-mark)) (set k-defs (get k-stage-defs))
+    (begin (k-unbind-to (get k-stage-mark)) (k-defs-restore! (get k-stage-defs))
            (set k-broken (get k-stage-broken)) (set k-runs nil)
            (set k-last-uses (get k-stage-uses)) (set k-dscope (get k-stage-dscope)))))
 

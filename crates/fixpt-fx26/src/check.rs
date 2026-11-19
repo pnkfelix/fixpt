@@ -688,7 +688,7 @@ pub struct Checker {
     /// The definitions checked so far, oldest first, each the latest of its
     /// names: what a redefinition finds the users of a name in
     /// (`Checker::top_defining`).
-    pub(crate) defs: Vec<crate::top::Definition>,
+    pub(crate) defs: crate::top::Defs,
     /// Whether a redefinition that makes a new global leaves the
     /// definitions that use the name as they are, out of date, instead of
     /// checking them again (`Checker::top_defining`): what the REPL asks
@@ -1482,7 +1482,7 @@ impl Checker {
             hazard_items: Vec::new(),
             masking: true,
             broken: HashMap::default(),
-            defs: Vec::new(),
+            defs: Default::default(),
             defer_reruns: false,
             syscalls: false,
             outdated: Vec::new(),

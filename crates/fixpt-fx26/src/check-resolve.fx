@@ -450,6 +450,63 @@
 ;; The definitions checked so far, newest first, each the latest of its
 ;; names.
 (define k-defs (ref (listof k-def acyclic) @t) (new nil))
+;; Whether a definition of `k-defs` defines each name (`k-def-name?`): so
+;; that recording one looks for an older one of its names here, not along
+;; every definition (TODO §303). `k-defs` is put back by putting its list
+;; back (`check-try`, `check-staged-undo!`), so each change here is logged,
+;; with what it changed, newest first, and undone to a snapshot's length
+;; (`k-defs-restore!`). One the log cannot reach, made before a reset or
+;; past one undone, has the table made again from its definitions: the
+;; epoch says which. A name is defined by one definition at most.
+(define k-def-names (ref (table symbol bool @t) @t) (new (make-table symbol-hash symbol=?)))
+(define k-def-log (ref (listof (pairof symbol bool acyclic) acyclic) @t) (new nil))
+(define k-def-log-len (ref int @t) (new 0))
+(define k-def-epoch (ref int @t) (new 0))
+(define k-def-name? (->* (symbol) bool)
+  (lambda (n) (table-ref (get k-def-names) n #f)))
+;; Each of `ns` noted as defined, `b`, or not.
+(define k-def-names-set! (->* (k-names bool) unit)
+  (lambda (ns b)
+    (if (null? ns)
+        #u
+        (let ((n (car ns)))
+          (begin (set k-def-log (cons (cons n (k-def-name? n)) (get k-def-log)))
+                 (set k-def-log-len (+ (get k-def-log-len) 1))
+                 (table-set! (get k-def-names) n b)
+                 (k-def-names-set! (cdr ns) b))))))
+(define k-defs-snapshot (->* () k-defs-snap)
+  (lambda () (product (1 (get k-defs)) (2 (get k-def-epoch)) (3 (get k-def-log-len)))))
+(define k-defs-restore! (->* (k-defs-snap) unit)
+  (lambda (s)
+    (begin (set k-defs (extract s 1))
+           (if (and (= (extract s 2) (get k-def-epoch)) (<= (extract s 3) (get k-def-log-len)))
+               (k-def-log-undo (extract s 3))
+               (k-def-names-remade!)))))
+(define k-def-log-undo (->* (int) unit)
+  (lambda (m)
+    (if (<= (get k-def-log-len) m)
+        #u
+        (let ((e (car (get k-def-log))))
+          (begin (table-set! (get k-def-names) (car e) (cdr e))
+                 (set k-def-log (cdr (get k-def-log)))
+                 (set k-def-log-len (- (get k-def-log-len) 1))
+                 (k-def-log-undo m))))))
+;; The table made again from `k-defs`, in an epoch of its own.
+(define k-def-names-remade! (->* () unit)
+  (lambda ()
+    (begin (set k-def-names (make-table symbol-hash symbol=?))
+           (set k-def-log nil) (set k-def-log-len 0) (set k-def-epoch (+ (get k-def-epoch) 1))
+           (k-def-names-from (get k-defs)))))
+(define k-def-names-from (->* ((listof k-def acyclic)) unit)
+  (lambda (ds)
+    (if (null? ds)
+        #u
+        (begin (k-def-names-each (extract (car ds) 1)) (k-def-names-from (cdr ds))))))
+(define k-def-names-each (->* (k-names) unit)
+  (lambda (ns)
+    (if (null? ns)
+        #u
+        (begin (table-set! (get k-def-names) (car ns) #t) (k-def-names-each (cdr ns))))))
 ;; The free variables of the definition being checked, for `k-record`.
 (define k-last-uses (ref k-names @t) (new nil))
 (define k-runs (ref (listof k-run acyclic) @t) (new nil))
@@ -497,7 +554,8 @@
       (k-forget-closed-named)
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil)
       (set k-conversions nil) (k-reset-facts)
-      (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
+      (set k-broken nil) (set k-defs nil) (k-def-names-remade!) (set k-runs nil)
+      (set k-last-uses nil)
       (k-forget-withs) (k-forget-records) (set k-module-vars nil) (set k-select-map nil)
       (set k-module-anchors nil) (set k-module-paths nil)
       (set k-reshapes nil)

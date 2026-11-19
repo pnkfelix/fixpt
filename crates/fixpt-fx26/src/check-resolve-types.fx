@@ -29,6 +29,9 @@
 ;; A definition checked, as a redefinition finds it: the names it defines,
 ;; its tree, and the globals it uses (its expressions' free variables).
 (define-type k-def (productof (1 k-names) (2 top) (3 k-names)))
+;; `k-defs` as it was, to be put back (`k-defs-snapshot`): the definitions,
+;; and the epoch and length of the undo log of the names they define.
+(define-type k-defs-snap (productof (1 (listof k-def acyclic)) (2 int) (3 int)))
 ;; What the program runs, newest first: each top-level form, and the
 ;; definitions run again for a redefinition, each with whether it assigns
 ;; its names' globals rather than making new ones.
@@ -65,6 +68,12 @@
    (val k-has-region-in?
         (subr (maxeff (read @globals) (read @t) spin) (k-regions k-region) bool))
    (val k-defs (ref (listof k-def acyclic) @t))
+   (val k-def-name? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
+   (val k-def-names-set!
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-names bool) unit))
+   (val k-defs-snapshot (subr (maxeff (alloc @t) (read @globals) (read @t) spin) () k-defs-snap))
+   (val k-defs-restore!
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-defs-snap) unit))
    (val k-last-uses (ref k-names @t))
    (val k-runs (ref (listof k-run acyclic) @t))
    (val k-reset

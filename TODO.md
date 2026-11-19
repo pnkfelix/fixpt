@@ -8143,12 +8143,21 @@ form: parse 1,600 a plain `define`, 5,900 a `syntax-rules` use; check
   scope. Walking module bindings alone needs a binding's type known never
   to become a module, which links (`set_link` of an `App` or a `select`
   node) do not promise; not done.
-- **Open, quadratic:** `k-record` copies `k-defs`, every definition, at
-  each definition, to drop a redefined name's (`k-defs-without`: 9,900
-  words at 100, 159,600 at 400), and `k-defined?` walks it for each name
-  defined. `k-defs` is a list so that a run is undone by putting it back
-  (`check-program.fx`'s snapshots): a map by name needs to be persistent
-  too, or undone.
+- **Done (2026-11-19), a table with undo (the user's choice):** `k-record`
+  copied `k-defs`, every definition, at each definition, to drop a
+  redefined name's (`k-defs-without`: 9,900 words at 100, 159,600 at
+  400), and `k-defined?` walked it for each name defined. `k-defs` stays a
+  list, put back by putting it back (`check-try`, `check-staged-undo!`);
+  beside it a table of the names it defines (`k-def-name?`), each change
+  logged with what it changed, a snapshot the list and the log's epoch and
+  length (`k-defs-snapshot`), put back by undoing the log to it
+  (`k-defs-restore!`), or, one the log cannot reach (a reset since, or an
+  undo past it), by the table made again from the list. The list is
+  copied only when a name is defined again. The Rust checker's `defs`, a
+  `Vec` each record `retain`ed, is `Defs`, the list and the set of its
+  names. Check 366 and 1,016 words a form; its cells at 400, 19.6 M to
+  11.4 M. `fixpt eval` of 1600: 0.65 s to 0.59 s plain, 0.94 s to 0.86 s
+  `syntax-rules`, 1.07 s to 1.00 s ER.
 - **Open, parse:** a macro use's 4,300 words more than a plain `define`
   are spread out: shaping (`fill-shape`, `shaper-begin!`), the nodes made
   (`lst`, `atom`), names made strings (`syn-name`), transcribing, source

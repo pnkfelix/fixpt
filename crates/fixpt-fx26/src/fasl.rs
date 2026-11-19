@@ -1277,10 +1277,7 @@ impl crate::check::Checker {
     /// (`defs`): that form, which is checked again if a global it uses is
     /// redefined, and the globals it uses.
     pub fn fasl_defined(&mut self, name: fixpt_read::Sym, form: crate::heap_syn::Form, uses: Vec<fixpt_read::Sym>) {
-        if let Some(d) = self.defs.iter_mut().rev().find(|d| d.names.contains(&name)) {
-            d.form = form;
-            d.uses = uses;
-        }
+        self.defs.remade(name, form, uses);
     }
 }
 
