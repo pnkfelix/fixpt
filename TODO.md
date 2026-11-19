@@ -8033,3 +8033,58 @@ whether to forbid a parameter's macros instead; Heist's first wish).
 Step 4, an instance made at a top level, `((load-module "f") m …)`, taken
 as `(proj …)`'s is: deferred (the user's, 2026-11-18), as Heist's files
 are module files and it was their lesser wish.
+
+## 301. Scaling tests: superlinear growth caught where it is made (the user's, 2026-11-18; beside §176)
+
+We keep finding quadratic (and twice exponential) costs only after someone's
+program grows: each is a step linear in "the rest of the program" run once
+per item. Found so far (TODO, DONE, `docs/performance.md`), by what grew:
+top-level forms (§240; 1e8b983a, each definition's names held to every
+later form); globals looked up per use; a `,load` session's forms; a
+quoted datum's length; a list's in the reader; type names in scope; a
+module type's components; a type's regions; a procedure's instructions
+(§114, `webs`); compiled pieces (jitdebug); nested `append`s (§277,
+exponential); a form growing at each expansion; files in a parameter chain
+(§298, doubling).
+
+Cost effects (§176's first item) would say so in a type, but need sizes
+on data the front end threads unsized through state and closures, and
+cover FX-26 alone; several of these were Rust's, or between the two.
+First, tests that measure growth, by counts (instructions, `perf stat`,
+steady to about 1%; allocations), not times: a program at sizes N and 4N
+along one axis, failing where the ratio is well above 4.
+
+The axes from the grammar, not a hand list: `macros-kernel.fx`'s
+`kernel-forms` and `scope-forms`, read by both expanders, give each
+form's operands in Herman's notation, its repetitions (`mu` lists: a
+`let`'s bindings, `formals`, a `module`'s items, `variants`) and its
+binding structure (which names each position binds). Descriptions are a
+leaf there (`desc`; `type-forms` lists their heads alone).
+
+Type correctness by growing typed seeds, not generating from nothing:
+- Seeds: the test programs (about 1,000), which check.
+- Width: at a repeated position, an element copied k times, its binders
+  made fresh by the binding structure, so nothing is captured.
+- Depth: a context `C` around a subterm of its own sort (`(+ [] 1)` in an
+  expression of type `int`, a `let` around its body) pumped, `C[s]`,
+  `C[C[s]]`, …, as the pumping lemma's construction; its binders renamed
+  apart at each copy. Types and effects, at `desc` positions, pumped the
+  same way, their contexts found in the seeds, the grammar not having
+  their structure.
+- Products: two positions of one seed grown together (scope size times
+  uses, a type's width times its depth): single-axis growth sees each
+  linear.
+- The checker the oracle: each grown program checked at each size; one
+  that does not check dropped, so no proof of type correctness is
+  needed; one that checks at N and not at 4N said, a bug or a limit.
+
+Outside the grammar, written by hand: files in a chain and a fan
+(`load-module`, `load-moduleof`, `import-with-syntax`), a REPL session's
+length, `.fasl` loads. And an empirical net for products: real programs
+(Kayak's stage 0 from its pinned snapshot, ratfink, Heist, the front end
+itself), each file's cost against its size, outliers looked at; each
+found names a pair to grow.
+
+To start: a few seeds, expressions' width and depth, both checkers and
+the run; then the hand-written file axes; then products. What it finds
+says where §176's cost effects would pay.
