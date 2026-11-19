@@ -667,7 +667,7 @@ fn probe_profile_check() {
         let syns = sc.make(|m| { let l = m.get(syns); m.heap().car(l) });
         let std = run(sc, read, &[st]);
         let std = sc.make(|m| { let l = m.get(std); m.heap().car(l) });
-        let parsed = run(sc, parse, &[syns]);
+        let parsed = run(sc, parse, &[std, syns]);
         let tops = sc.make(|m| { let r = m.get(parsed); let p = m.heap().sum_payload(r); m.heap().product_field(p, 1) });
         sc.runtime_unrooted().run_word = Some(profiled);
         let t = std::time::Instant::now();
@@ -760,7 +760,7 @@ fn probe_phases_as_register_code() {
         let syns = sc.make(|m| { let l = m.get(syns); m.heap().car(l) });
         let std = sc.make(|m| { let l = m.get(std); m.heap().car(l) });
         profile_from(sc, "parse");
-        let parsed = run(sc, parse, &[syns]);
+        let parsed = run(sc, parse, &[std, syns]);
         lap(sc, "parse");
         profile_from(sc, "");
         let progs = sc.make(|m| { let r = m.get(parsed); let p = m.heap().sum_payload(r); m.heap().product_field(p, 1) });

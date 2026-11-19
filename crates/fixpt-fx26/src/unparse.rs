@@ -1,7 +1,7 @@
 //! Printing descriptions, in FX-87's notation.
 
 use crate::ast::{Atom, Effect, Region, Ty, TyId};
-use crate::check::Checker;
+use crate::check::{Checker, PrintSelects};
 use fixpt_hash::HashMap;
 
 impl Checker {
@@ -444,11 +444,12 @@ impl Checker {
     /// in `t`'s minimal graph (`print_canon`), if `t` has a cycle and is
     /// the outermost type being printed.
     fn canonically(&self, t: TyId, show: impl FnOnce(&Self) -> String) -> String {
-        // The modules' descriptions in scope, gathered once for the type.
-        if self.print_selects.borrow().is_none() && self.print_for_fasl.borrow().is_none() {
-            *self.print_selects.borrow_mut() = Some(self.module_selects());
+        // The modules' descriptions in scope, wanted for the type: gathered
+        // once, at the first part of it one could name (`select_named`).
+        if matches!(*self.print_selects.borrow(), PrintSelects::Off) && self.print_for_fasl.borrow().is_none() {
+            *self.print_selects.borrow_mut() = PrintSelects::Wanted;
             let out = self.canonically(t, show);
-            *self.print_selects.borrow_mut() = None;
+            *self.print_selects.borrow_mut() = PrintSelects::Off;
             return out;
         }
         if self.print_canon.borrow().is_some() || self.print_shallow.get() {
@@ -609,8 +610,22 @@ impl Checker {
             return Some(self.interner.name(n).into());
         }
         // A module's description in scope, by its `select` (`module_selects`).
+        self.select_named(t)
+    }
+
+    /// The `select` of a module's description in scope that names `t`, the
+    /// descriptions gathered at the first such question of the type printed
+    /// (`PrintSelects::Wanted`). Printing changes neither the environment
+    /// nor a type's links, so they are those gathered at its start: but a
+    /// type with no part to name, `bool`, walks no scope.
+    fn select_named(&self, t: TyId) -> Option<std::borrow::Cow<'_, str>> {
+        if matches!(*self.print_selects.borrow(), PrintSelects::Wanted) {
+            let gathered = self.module_selects();
+            *self.print_selects.borrow_mut() = PrintSelects::Gathered(gathered);
+        }
         let selects = self.print_selects.borrow();
-        let found = selects.as_ref()?.get(&self.shape_key(t))?.iter().find(|(_, x)| self.same_ty(*x, t, &mut Vec::new()));
+        let PrintSelects::Gathered(selects) = &*selects else { return None };
+        let found = selects.get(&self.shape_key(t))?.iter().find(|(_, x)| self.same_ty(*x, t, &mut Vec::new()));
         found.map(|(s, _)| s.clone().into())
     }
 

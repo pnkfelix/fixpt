@@ -100,6 +100,11 @@
 ;; description function, applied where it is used, not.
 (define-type k-sel-list (listof (pairof string int @t) @t))
 (define k-selects-on (ref bool @t) (new #f))
+;; While a type is printed, whether the descriptions are wanted and not yet
+;; gathered: gathered at the first part of it a `select` could name
+;; (`k-select-by`), as printing changes no binding nor link, so that a type
+;; with none, `bool`, walks no scope.
+(define k-selects-wanted (ref bool @t) (new #f))
 (define k-sel-buckets int 1021)
 (define k-selects-table (ref (arrayof k-sel-list @t) @t) (new (make-array 1 (the k-sel-list nil))))
 (define k-print-self (ref symbol @t) (new '||))
@@ -107,31 +112,33 @@
 (define k-selects-gather! (->* () unit)
   (lambda ()
     (let ((tbl (the (arrayof k-sel-list @t) (make-array k-sel-buckets (the k-sel-list nil)))))
-      (begin (k-selects-of (k-innermost (get k-trail) (- (get k-depth) 1) nil) tbl)
+      (begin (k-selects-from (get k-trail) (- (get k-depth) 1) tbl)
              (set k-selects-table tbl)
+             (set k-selects-wanted #f)
              (set k-selects-on #t)))))
-;; Of the trail's names `ns`, newest first, the first at depth `d`: those
-;; that are their names' innermost bindings (`k-bound-since?`), oldest first.
-(define k-innermost (->* (k-names int k-names) k-names)
-  (lambda (ns d acc)
-    (cond ((null? ns) acc)
-          ((k-bound-since? (car ns) (+ d 1)) (k-innermost (cdr ns) (- d 1) acc))
-          (else (k-innermost (cdr ns) (- d 1) (cons (car ns) acc))))))
-;; The descriptions of the modules `ns` (oldest first) name, into `tbl`: the
-;; newest first, so that in each list the oldest's are first.
-(define k-selects-of (->* (k-names (arrayof k-sel-list @t)) unit)
-  (lambda (ns tbl)
+;; The descriptions of the modules the trail's names `ns` (newest first, the
+;; first at depth `d`) name, into `tbl`: of each name's innermost binding
+;; alone (`k-bound-since?`), the newest first, so that in each list the
+;; oldest's are first. Nothing is made of a name not a module's.
+(define k-selects-from (->* (k-names int (arrayof k-sel-list @t)) unit)
+  (lambda (ns d tbl)
     (if (null? ns)
         #u
-        (let* ((n (car ns)) (t (k-lookup-raw n)) (shown (symbol->string n)))
-          (begin
-            (k-selects-of (cdr ns) tbl)
-            (if (or (< t 0) (symbol=? n (get k-print-self)) (k-std-binding? n t)
-                    (and (> (string-length shown) 0) (string=? (substring shown 0 1) "%")))
-                #u
-                (tagcase (k-get (k-resolve t))
-                  (ty-module (abs ds vs) (k-selects-descs shown ds tbl))
-                  (else y #u))))))))
+        (begin (if (k-bound-since? (car ns) (+ d 1)) #u (k-selects-one (car ns) tbl))
+               (k-selects-from (cdr ns) (- d 1) tbl)))))
+(define k-selects-one (->* (symbol (arrayof k-sel-list @t)) unit)
+  (lambda (n tbl)
+    (let ((t (k-lookup-raw n)))
+      (if (< t 0)
+          #u
+          (tagcase (k-get (k-resolve t))
+            (ty-module (abs ds vs)
+              (let ((shown (symbol->string n)))
+                (if (or (symbol=? n (get k-print-self)) (k-std-binding? n t)
+                        (and (> (string-length shown) 0) (string=? (substring shown 0 1) "%")))
+                    #u
+                    (k-selects-descs shown ds tbl))))
+            (else y #u))))))
 ;; Module `g`'s descriptions `ds`, each by its `select`, the first in front.
 (define k-selects-descs (->* (string k-parts (arrayof k-sel-list @t)) unit)
   (lambda (g ds tbl)
@@ -145,11 +152,12 @@
                       (s (k-cat5 "(select " g " " (symbol->string (extract (car ds) 1)) ")")))
                   (array-set! tbl h (cons (cons s x) (array-ref tbl h))))
                 #u))))))
-(define k-selects-clear! (->* () unit) (lambda () (set k-selects-on #f)))
+(define k-selects-clear! (->* () unit)
+  (lambda () (begin (set k-selects-on #f) (set k-selects-wanted #f))))
 ;; The `select` that names `t`, of the modules gathered (`k-selects-gather!`).
 (define k-select-by (->* (int) k-strings)
   (lambda (t)
-    (if (not (get k-selects-on))
+    (if (not (or (get k-selects-on) (get k-selects-wanted)))
         nil
         (letrec ((find (->* (k-sel-list) k-strings)
                    (lambda (cs)
@@ -157,7 +165,9 @@
                            ((k-fits? (cdr (car cs)) t) (the k-strings (list (car (car cs)))))
                            (else (find (cdr cs)))))))
           (if (k-abbreviates? t)
-              (find (array-ref (get k-selects-table) (modulo (k-shape-hash t 2) k-sel-buckets)))
+              (begin (if (get k-selects-on) #u (k-selects-gather!))
+                     (find (array-ref (get k-selects-table)
+                                      (modulo (k-shape-hash t 2) k-sel-buckets))))
               nil)))))
 ;; Whether name `s` is a module's `select` (`k-select-by`).
 (define k-select-name? (->* (string) bool)
@@ -813,7 +823,8 @@
   (lambda (t named)
     (let* ((trs (if named (the k-atrees (list (k-atree-now))) (the k-atrees nil)))
            (p (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 trs)))
-           (sel (and named (not (get k-selects-on)) (begin (k-selects-gather!) #t)))
+           (sel (and named (not (get k-selects-on)) (not (get k-selects-wanted))
+                     (begin (set k-selects-wanted #t) #t)))
            (on (and (not (get k-canon-on)) (not (get k-shallow)) (k-canon-set! t p)))
            (unnamed (k-naming! named))
            (shown (k-pieces-string (extract (k-show-on t p k-shown-none) 1))))

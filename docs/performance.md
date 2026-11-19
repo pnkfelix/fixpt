@@ -26,6 +26,28 @@ is a subset, about a minute:
 The full `fixpt-scheme` suite under it takes well over an hour, mostly the
 eager-reader tests, and is run only at milestones.
 
+**Which tool answers which question** (2026-11-19). Each is described
+below; look here before writing a probe of your own.
+
+| question | tool |
+| --- | --- |
+| time by phase (front end, compile, run, collection) | `FIXPT_PHASE_TIMES=dir`, `scripts/phase-times.py` |
+| time by function, native code named, with callers | Linux: `FIXPT_PERF_MAP=1 perf record --call-graph fp`; macOS: `FIXPT_SYMBOLS`, `sample`, `fixpt-symbolize` |
+| calls by site in compiled register code | `FIXPT_PROFILE_CALLS` (`fixpt_native::profile`) |
+| cells run and **words allocated by FX-26 word**, exact | the cell profile: `probe_phases_as_register_code` (`tests/bootstrap.rs`), `FIXPT_PROFILE_PHASE=read\|parse\|check\|compile`, `FIXPT_PROBE_FILE=prog.fx` for any program (read, parse and check), `FIXPT_PROFILE_ALL`, `FIXPT_PROFILE_CALLERS`; for the checker alone, `probe_profile_check` with `PROBE_CHECK_FILE` |
+| Rust's own `malloc`s, by caller | `FIXPT_ALLOC_PROFILE=N` |
+| each collection; the heap at the end | `FIXPT_GC_TRACE`; `FIXPT_GC_SUMMARY` |
+
+Two traps. `fixpt --machine` picks the machine the *program* runs on,
+not the front end's: `FIXPT_PROFILE=1 fixpt --machine fx-cells-rsinterp
+…` profiles only the program's own words, so the front end's work is
+profiled through the probe above. And a hook in Rust at the native
+machine's allocation slow path sees only the closure the machine call
+began with (`DState.code`), not the function allocating: it charged a
+macro benchmark's every word to four entry points. The probes had broken
+on 2026-11-07, when `b-parse` took the standard environment's forms too,
+and went unnoticed, being `#[ignore]`d, until 2026-11-19.
+
 **Where a run's time goes, by phase** (2026-11-11, `TODO.md` §252).
 `FIXPT_PHASE_TIMES=dir` has each process write `dir/PID.tsv`: the exclusive
 time of each path of phases it was in (`other;fx:check-program;run:native`,

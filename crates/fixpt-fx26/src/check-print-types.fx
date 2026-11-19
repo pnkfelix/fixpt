@@ -64,7 +64,7 @@
             (val k-show-ty-whole
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) string))
             (val k-show-list
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-ids k-printing)
                        k-strings))
             (val k-type-is-var?

@@ -300,6 +300,16 @@ pub(crate) struct Anchor {
     pub(crate) slot: usize,
 }
 
+/// What a type printed has of the modules' descriptions in scope
+/// (`Checker::module_selects`): none, as no type is printed; wanted, not yet
+/// gathered, as no part of the type has been one a `select` could name; and
+/// gathered.
+pub(crate) enum PrintSelects {
+    Off,
+    Wanted,
+    Gathered(HashMap<u64, Vec<(String, TyId)>>),
+}
+
 pub struct Checker {
     pub arena: Arena,
     pub interner: Interner,
@@ -542,7 +552,7 @@ pub struct Checker {
     /// While a type is printed: the descriptions of the modules bound in
     /// scope, each by its `select`, for a type of their structure to be
     /// named so (`Checker::module_selects`), by a shape key (`shape_key`).
-    pub(crate) print_selects: std::cell::RefCell<Option<HashMap<u64, Vec<(String, TyId)>>>>,
+    pub(crate) print_selects: std::cell::RefCell<PrintSelects>,
     /// The global whose definition's line is printed: its own module's
     /// descriptions are not named by its `select`.
     pub(crate) print_self: std::cell::Cell<Option<Sym>>,
@@ -1432,7 +1442,7 @@ impl Checker {
             print_params: std::cell::RefCell::new(None),
             print_tys: std::cell::RefCell::new(Default::default()),
             print_aliases: std::cell::RefCell::new(None),
-            print_selects: std::cell::RefCell::new(None),
+            print_selects: std::cell::RefCell::new(PrintSelects::Off),
             print_self: std::cell::Cell::new(None),
             print_cycles: std::cell::RefCell::new(HashSet::default()),
             show_marks: std::cell::Cell::new(false),

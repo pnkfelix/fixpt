@@ -8088,3 +8088,68 @@ found names a pair to grow.
 To start: a few seeds, expressions' width and depth, both checkers and
 the run; then the hand-written file axes; then products. What it finds
 says where §176's cost effects would pay.
+
+## 302. What a program leaves live: a full collection at its end (the user's, 2026-11-18)
+
+Measured 2026-11-18 (`fixpt eval` of 1600 top-level definitions each
+using a macro, `syntax-rules`): the session heap at most 4.5 M words in
+use at the end against 1.3 M at 100 uses, about 2,000 words a use, and no
+major collection in the run, so promoted garbage counts as in use. The
+symbol table is not it: 10,553 symbols for an empty program (the front
+end's names and the standard environment), about 3 more a use (the
+definition's name and two fresh names; ER's more, some freed by the weak
+table), about 2 MB at 1600.
+
+Wanted: `FIXPT_GC_SUMMARY=exit`, at the program's end one full collection
+(`Heap::collect`: the nursery, the old space, the code area, the symbols
+nothing holds and their names), then what is live: words, by kind
+(`sro.rs`'s kinds), globals, symbols, names, the code area's bytes. A leak
+is what grows with a program that keeps nothing: forms that are
+expressions, not definitions (each `define` keeps its value, type and
+code for the session, rightly). What grows, `sro_referrers` of its kind
+says who holds. A metric for §301's scaling tests too. Not covered: the
+Rust side's (the checker's interner, Rust's allocations,
+`FIXPT_ALLOC_PROFILE`'s), the JIT's pages.
+
+## 303. Churn: about 144 KB allocated a macro use and dropped (the user's, 2026-11-18; looked at first)
+
+Measured 2026-11-18, the same programs as §302: 28.9 M words allocated
+over 1600 uses, about 18,000 words a use, in 27 minor collections (19 ms
+of the run's 1.0 s: collecting is cheap; the work that makes the garbage
+is not). The profile of `fixpt check` of 1600 ER uses had
+`Heap::make_string` 5.4% and `interned_name_string` 3.2% self (a
+symbol's name made a string at each `syn-name`, `head-name`), and
+`Heap::alloc` 2.6%. To find: allocation counted by what makes it, an FX-26
+function or a Rust one, as `FIXPT_ALLOC_PROFILE` samples Rust's; then the
+largest makers made not to.
+
+Counted 2026-11-19 by the cell profile (`probe_phases_as_register_code`
+with `FIXPT_PROBE_FILE`, `docs/performance.md`'s table of tools; the
+probes, broken since 2026-11-07, fixed), at 100 and 400 forms, words a
+form: parse 1,600 a plain `define`, 5,900 a `syntax-rules` use; check
+8,500 and 9,200.
+
+- **Done:** check's 7,650 of them were the modules' descriptions in scope
+  (TODO §138) gathered for every type printed, `bool` too, each gather a
+  1021-bucket array, every binding in scope consed to a list and its name
+  made a string: N globals, N lines printed, N² (`k-selects-gather!`; the
+  Rust checker's `module_selects`, outside the heap). Now gathered at the
+  first part of a type a `select` could name (`k-select-by`,
+  `select_named`), printing changing no binding nor link; and the walk
+  makes nothing of a name not a module's. Check 857 and 1,507 words a
+  form; its cells at 400, 112 M to 19.6 M. Native `fixpt eval` of 1600:
+  0.76 s to 0.65 s plain, 1.03 s to 0.94 s `syntax-rules`, 1.07 s ER.
+  Left: a type that does have such a part still walks every binding in
+  scope. Walking module bindings alone needs a binding's type known never
+  to become a module, which links (`set_link` of an `App` or a `select`
+  node) do not promise; not done.
+- **Open, quadratic:** `k-record` copies `k-defs`, every definition, at
+  each definition, to drop a redefined name's (`k-defs-without`: 9,900
+  words at 100, 159,600 at 400), and `k-defined?` walks it for each name
+  defined. `k-defs` is a list so that a run is undone by putting it back
+  (`check-program.fx`'s snapshots): a map by name needs to be persistent
+  too, or undone.
+- **Open, parse:** a macro use's 4,300 words more than a plain `define`
+  are spread out: shaping (`fill-shape`, `shaper-begin!`), the nodes made
+  (`lst`, `atom`), names made strings (`syn-name`), transcribing, source
+  keys. No one maker.
