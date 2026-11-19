@@ -310,6 +310,46 @@
                  (kept (without-load n ls)))
             (if (and (not (null? path)) (<= (len items) 4)) (cons (tuple n (car path)) kept) kept))
           ls))))
+;; Of forms `xs`, those a scan for where a later form makes a name a
+;; macro (`macro-sites`) reads anything of, each by its place in `xs`:
+;; each `define-syntax` and `import-with-syntax`, and each `define` of a
+;; name a load is defined as, in loads `ls` or by a form of `xs`
+;; (`load-noted`). Found once, so that each form's scan reads these alone,
+;; not every form after it (each definition's names scanned for, by
+;; `parser-top.fx`'s `bad-name`, read the program's square).
+(define macro-relevant (->* (syns-a load-defs) (listof (tupleof int syn) acyclic))
+  (lambda (xs ls) (relevant-from xs (loads-named xs (load-def-names ls)) 0)))
+(define load-def-names (->* (load-defs) names)
+  (lambda (ls) (if (null? ls) nil (cons (extract (car ls) 1) (load-def-names (cdr ls))))))
+;; `ns` and the names forms `xs` define as loads.
+(define loads-named (->* (syns-a names) names)
+  (lambda (xs ns)
+    (if (null? xs)
+        ns
+        (let ((items (proper (car xs))))
+          (loads-named (cdr xs)
+                       (if (and (>= (len items) 3) (string=? (head-name (car xs)) "define")
+                                (syn-symbol? (nth items 1))
+                                (not (null? (def-path (nth items (- (len items) 1))))))
+                           (cons (syn-symbol (nth items 1)) ns)
+                           ns))))))
+(define relevant-from (->* (syns-a names int) (listof (tupleof int syn) acyclic))
+  (lambda (xs ns i)
+    (cond ((null? xs) nil)
+          ((relevant? (car xs) ns) (cons (tuple i (car xs)) (relevant-from (cdr xs) ns (+ i 1))))
+          (else (relevant-from (cdr xs) ns (+ i 1))))))
+(define relevant? (->* (syn names) bool)
+  (lambda (x ns)
+    (or (defines-syntax? x) (imports-syntax? x)
+        (let ((items (proper x)))
+          (and (>= (len items) 3) (string=? (head-name x) "define") (syn-symbol? (nth items 1))
+               (name-in? (syn-symbol (nth items 1)) ns))))))
+;; The forms of `rel` (`macro-relevant`'s) past place `i`.
+(define relevant-after (->* (int (listof (tupleof int syn) acyclic)) syns-a)
+  (lambda (i rel)
+    (cond ((null? rel) nil)
+          ((> (extract (car rel) 1) i) (cons (extract (car rel) 2) (relevant-after i (cdr rel))))
+          (else (relevant-after i (cdr rel))))))
 ;; Whether `(import-with-syntax lib …)`, `x`, gives macro `n` its name.
 (define brings? (->* (symbol syn files load-defs) bool)
   (lambda (n x fs ls)

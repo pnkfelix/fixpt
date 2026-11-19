@@ -65,7 +65,7 @@
         imports-syntax? import-usage name-filter all-names listed? not-macros loaded-path
         file-syntax hidden-syntax hide-form? file-items names-shown defined-name rec-names
         generative-values macro-names internal-names taken? shown-names macro-sites load-noted
-        frame-of brings? shown-syntax lenient-filter names-only
+        frame-of brings? shown-syntax lenient-filter names-only macro-relevant relevant-after
         (type load-defs filter files mades file-macro places))
 
 ;;; ------------------------------------------------------------ clauses

@@ -63,7 +63,8 @@
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
         made-syntax-taken! global-now?
         syntax-names imports-syntax? globals! global-before? macro? later-macro-site def-envs-given
-        file-scope-begin! file-scope-end! source-of for-syntax? for-syntax!)
+        file-scope-begin! file-scope-end! source-of for-syntax? for-syntax! macro-relevant
+        relevant-after loads)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -236,18 +237,25 @@
 ;; The reading is of the form as written, the macros it was expanded with
 ;; in the state it was read in.
 (define parse-tops (->* (seen string syns-a) top-list)
-  (lambda (t settings xs)
+  (lambda (t settings xs) (parse-tops-in t settings xs (macro-relevant xs (get loads)) 0)))
+;; `parse-tops` of forms `xs`, the `i`th of the program on, `rel` the
+;; program's forms where a later one may make a name a macro
+;; (`macro-relevant`), which each form's definitions are held to.
+(define parse-tops-in
+  (->* (seen string syns-a (listof (tupleof int syn) acyclic) int) top-list)
+  (lambda (t settings xs rel i)
     (if (null? xs)
         nil
         ;; Before each form, the hidden globals of the files it loads first
         ;; (`parse-loaded`), those its types name first (`type-loaded`).
         (let* ((written (car xs))
                (made (top-made written))
-               (guarded (guard-defs made (cdr xs)))
+               (guarded (guard-defs made (relevant-after i rel)))
                (before (shared-noted (shared-taken)))
                (r (form-reading (walk-state t) settings written (loads-of before)))
                (form (number-form t r (append-tops before guarded)))
-               (rest (begin (macros-after! r) (shapes-after! r) (parse-tops t settings (cdr xs)))))
+               (rest (begin (macros-after! r) (shapes-after! r)
+                            (parse-tops-in t settings (cdr xs) rel (+ i 1)))))
           (append-tops form rest)))))
 ;; What top-level form `written` makes, parsed. A `define-syntax`: the
 ;; checks of its templates, once, there. A `hide`: its forms', as if
