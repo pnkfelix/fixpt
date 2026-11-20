@@ -111,9 +111,12 @@ fn the_rust_reader_builds_the_syn_fx26_reads() {
         let ours = s.scheme.make(|m| {
             let mut interner = fixpt_read::Interner::of_names(m.heap().names());
             let mut syms = fixpt_fx26::heap_syn::SymTable::default();
-            let mut r = Reader::with_builder(text, FileId(0), SyntaxProfile::FX26, &mut interner, fixpt_fx26::heap_syn::HeapSyn::new(m.heap(), &mut syms, 0));
-            let forms: Vec<fixpt_heap::Value> = r.read_all_built().expect("reads").into_iter().map(|n| n.0).collect();
-            let heap = r.into_builder().heap;
+            // Through `read_syn`, which drops what FX-26's `read-text-at`
+            // drops too (`heap_syn.rs`'s `unnoted`), `m`'s heap lent to it.
+            let heap = m.heap();
+            let forms: Vec<fixpt_heap::Value> = fixpt_fx26::heap_syn::with_syntax(heap, &mut syms, || {
+                fixpt_fx26::heap_syn::read_syn(text, FileId(0), &mut interner).expect("reads").into_iter().map(|n| n.0).collect()
+            });
             forms.iter().rev().fold(fixpt_heap::Value::NULL, |l, &f| heap.cons(f, l))
         });
         let mut why = String::new();

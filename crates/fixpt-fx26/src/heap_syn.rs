@@ -1534,7 +1534,35 @@ fn read_at(text: &str, base: i64, file: FileId, start: usize, interner: &mut Int
         r.seek(start);
         r.read_all_built()
     })
+    .map(|forms| if start == 0 { unnoted(forms, interner) } else { forms })
     .map_err(|e| in_chars(text, e))
+}
+
+/// `forms`, a text's, a string among the binders of its first form, `(module-parameters
+/// (binder …))`, dropped: a comment, as among a module's items (TODO §304, Heist's
+/// should-work note, entry 19). Read past here, as the text is read, so that nothing
+/// that reads the binders meets one; the text, and what `read` makes of it, keep it.
+/// `eager-reader.fx`'s `parameters-unnoted` is the same.
+fn unnoted(mut forms: Vec<Syn>, interner: &Interner) -> Vec<Syn> {
+    if let Some(first) = forms.first_mut() {
+        *first = first_unnoted(*first, interner);
+    }
+    forms
+}
+
+/// [`unnoted`]'s first form.
+fn first_unnoted(f: Syn, interner: &Interner) -> Syn {
+    let Some(items) = f.list() else { return f };
+    let [h, bs] = items.as_slice() else { return f };
+    if !h.sym().is_some_and(|h| interner.name(h) == "module-parameters") {
+        return f;
+    }
+    let Some(binders) = bs.list() else { return f };
+    let kept: Vec<Syn> = binders.iter().copied().filter(|b| !matches!(b.view(), V::Str(_))).collect();
+    if kept.len() == binders.len() {
+        return f;
+    }
+    f.with_parts((&items, None), &[*h, Syn::of_list(bs.at(), &kept, None)], None)
 }
 
 /// A reader's error, its span in the characters of `text`, its bytes'.
@@ -1572,6 +1600,7 @@ pub fn read_syn_first(text: &str, interner: &mut Interner) -> fixpt_read::ReadRe
         let mut r = fixpt_read::Reader::with_builder(text, FileId(0), fixpt_read::SyntaxProfile::FX26, interner, HeapSyn::new(heap, syms, base));
         r.read_built()
     })
+    .map(|first| first.map(|f| first_unnoted(f, interner)))
     .map_err(|e| in_chars(text, e))
 }
 

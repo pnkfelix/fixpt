@@ -800,6 +800,54 @@
 (define eager-start (->* () state) (lambda () (start-reading #f)))
 (define eager-start-fx26 (->* () state) (lambda () (start-reading #t)))
 
+;; `forms`, a text's, a string among the binders of its first form,
+;; `(module-parameters (binder …))`, dropped: a comment, as among a module's
+;; items (TODO §304, Heist's should-work note, entry 19). Read past here, as
+;; the text is read, so that nothing that reads the binders meets one; the
+;; text keeps it. `heap_syn.rs`'s `unnoted` is the same.
+(define parameters-unnoted (->* (syns) syns)
+  (lambda (forms)
+    (if (null? forms) forms (cons (first-unnoted (car forms)) (cdr forms)))))
+(define first-unnoted (->* (syn) syn)
+  (lambda (f)
+    (tagcase f
+      (lst (items d a b xpn)
+        (if (and (pair? items) (pair? (cdr items)) (null? (cdr (cdr items)))
+                 (named? (car items) "module-parameters"))
+            (tagcase (car (cdr items))
+              (lst (bs bd ba bb bx)
+                (let ((kept (syns-unnoted bs)))
+                  (if (= (length kept) (length bs))
+                      f
+                      (let ((l (if (null? kept)
+                                   (atom no-data ba bb bx)
+                                   (lst kept (data-unnoted bd) ba bb bx))))
+                        (lst (list (car items) l)
+                             (cons (car d) (cons (syn->datum l) no-data))
+                             a b xpn)))))
+              (else x f))
+            f))
+      (else x f))))
+;; Whether `s` is the symbol `name`.
+(define named? (->* (syn string) bool)
+  (lambda (s name)
+    (tagcase s
+      (atom (d a b xpn) (and (symbol? d) (string=? (symbol->string d) name)))
+      (else x #f))))
+;; Whether `s` is a string.
+(define note? (->* (syn) bool)
+  (lambda (s) (tagcase s (atom (d a b xpn) (string? d)) (else x #f))))
+(define syns-unnoted (->* (syns) syns)
+  (lambda (xs)
+    (cond ((null? xs) xs)
+          ((note? (car xs)) (syns-unnoted (cdr xs)))
+          (else (cons (car xs) (syns-unnoted (cdr xs)))))))
+(define data-unnoted (->* (datum) datum)
+  (lambda (ds)
+    (cond ((null? ds) ds)
+          ((string? (car ds)) (data-unnoted (cdr ds)))
+          (else (cons (car ds) (data-unnoted (cdr ds)))))))
+
 ;; For a driver: every form of `text`, as the reader reads it with a newline
 ;; after, or nothing if it does not read to the end (the driver says where,
 ;; from a reader that places errors). All of it in here, so that the front
@@ -810,7 +858,7 @@
   (lambda (text at)
     (let ((st (eager-feed (eager-feed-string (start-reading-at #t at) text) (integer->char 10))))
       (if (string=? (symbol->string (eager-status st)) "complete")
-          (list (eager-state-syntax st))
+          (list (parameters-unnoted (eager-state-syntax st)))
           nil))))
 ;; The same, from position 0.
 (define read-text (->* (string) (listof syns acyclic))

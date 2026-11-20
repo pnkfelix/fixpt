@@ -8301,4 +8301,12 @@ read by some ten places, both front ends (`module_parameters_of` twice,
 `module_parameters`, `parameters_sig`, `macros-shaper.fx`'s
 `module-from`, `macros-nodes.fx`'s binding structure, `macros-imports.fx`,
 `macros-shapes.fx`, `macros-align.fx`, `parser.fx`).
+**19, done (2026-11-20):** the strings are dropped once, as a file is read,
+both front ends (`heap_syn.rs`'s `unnoted` in `read_at` and
+`read_syn_first`, `eager-reader.fx`'s `parameters-unnoted` in
+`read-text-at`), so none of those ten meets one; the text, and the datum
+`read` makes of it, keep them (the user's: preserved by `read` and
+`write`, which a transpiler such as Kayak may make comments of). Test
+`modules/module-parameters-noted.fx`. Heist's repro now stops at its own
+`first-name`, given by both parameters.
 
