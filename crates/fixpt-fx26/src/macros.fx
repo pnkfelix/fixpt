@@ -50,7 +50,7 @@
         binder-depths depth-of repeated-ref heads-done (type exported nested depths))
 (import solve-module infer sig-shown by-clauses)
 (import procedural-module procedural-of procedural-form define-procedural expand-procedural
-        phase1-state-now phase1-state! phase1-none? for-syntax!
+        phase1-state-now phase1-state! phase1-none? for-syntax! key-dir
         def-env-of-file def-env! def-envs-given file-scope-begin! file-scope-end!
         source-key source-of sources-made alias alias-base respanned in-expansion use-entered?
         use-left! frame-selected (type phase1-state)

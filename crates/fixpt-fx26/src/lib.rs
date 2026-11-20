@@ -492,6 +492,9 @@ pub const MACROS_KERNEL: &str = include_str!("macros-kernel.fx");
 
 /// What the expander asks of syntax, which no syntax type is of.
 pub const MACROS_SYNTAX: &str = include_str!("macros-syntax.fx");
+/// Text the expander writes and reads of its own: syntax written as the
+/// reader reads it back, and a phase-1 form as it is held.
+pub const MACROS_WRITTEN: &str = include_str!("macros-written.fx");
 /// The expander's syntax types, read and compared (`macros.rs`'s first half).
 pub const MACROS_TYPES: &str = include_str!("macros-types.fx");
 
@@ -849,7 +852,7 @@ pub const READER_ALONE: &str = include_str!("reader-alone.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 230] = [
+pub const FRONT_END_MODULES: [(&str, &str); 231] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -908,6 +911,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 230] = [
     ("parser-top.fx", PARSER_TOP),
     ("macros-kernel.fx", MACROS_KERNEL),
     ("macros-syntax.fx", MACROS_SYNTAX),
+    ("macros-written.fx", MACROS_WRITTEN),
     ("macros-types.fx", MACROS_TYPES),
     ("macros-env-types.fx", MACROS_ENV_TYPES),
     ("macros-env-list.fx", MACROS_ENV_LIST),

@@ -917,6 +917,79 @@ pub fn set_load_base(dir: Option<std::path::PathBuf>) {
     LOAD_BASE.with(|b| *b.borrow_mut() = dir);
 }
 
+/// Where `load-module`'s relative paths are from now: the program's
+/// directory, or none for the current one.
+pub(crate) fn load_base() -> Option<std::path::PathBuf> {
+    LOAD_BASE.with(|b| b.borrow().clone())
+}
+
+/// A file a phase-1 form's text loads, for its namespace's front end to
+/// read (`phase1.rs`; the conductor's `session-step`): where the load is,
+/// the file's base (0 if it was not read), why not, its path as written,
+/// its text, and its key (`TODO.md` §68).
+pub(crate) struct LoadGiven {
+    pub here: i64,
+    pub base: i64,
+    pub why: String,
+    pub path: String,
+    pub text: String,
+    pub key: String,
+}
+
+/// The files `text` (a phase-1 form, at 0) loads, from `dir`, then those
+/// they load, each from its own directory: in the order a parse meets them,
+/// depth first, as [`supply_loaded_in`] gives a program's, each file read
+/// once, by its key, and read from its source (no `.fasl`: phase 1's own
+/// instance, `TODO.md` §283).
+pub(crate) fn loads_given(text: &str, dir: Option<std::path::PathBuf>) -> Vec<LoadGiven> {
+    let mut out = Vec::new();
+    let mut read = 0;
+    let mut seen: HashMap<String, (i64, String, String)> = HashMap::default();
+    loads_given_in(text, 0, dir, &mut read, &mut seen, &mut out);
+    out
+}
+
+fn loads_given_in(text: &str, base: i64, dir: Option<std::path::PathBuf>, read: &mut i64, seen: &mut HashMap<String, (i64, String, String)>, out: &mut Vec<LoadGiven>) {
+    let mut loads = Vec::new();
+    let found = crate::heap_syn::aside(|names| crate::heap_syn::read_syn_passing(text, names, |forms, interner| load_modules_in(forms, interner, &mut loads)));
+    if found.is_err() {
+        return;
+    }
+    for (start, path, input, _) in loads {
+        let at = match &dir {
+            Some(d) if std::path::Path::new(&path).is_relative() && crate::built_in_module(&path).is_none() => d.join(&path),
+            _ => std::path::PathBuf::from(&path),
+        };
+        // As `supply_loaded_in` keys it: a file of module parameters read as
+        // a `load-input`'s.
+        let redirected = !input && crate::parse::takes_modules_at(&at, &path);
+        let input = input || redirected;
+        let key = if redirected { format!("input:{}", at.display()) } else { at.display().to_string() };
+        let shared = if input && !redirected { format!("input:{key}") } else { key.clone() };
+        let here = base + start.start as i64;
+        if let Some((b, why, t)) = seen.get(&shared) {
+            out.push(LoadGiven { here, base: *b, why: why.clone(), path, text: t.clone(), key });
+            continue;
+        }
+        let contents = match crate::built_in_module(&path) {
+            Some(t) => Ok(t.to_string()),
+            None => file_text(&at),
+        };
+        let (file_base, why, ftext) = match contents {
+            Err(e) => (0, format!("cannot read `{path}`: {e}"), String::new()),
+            Ok(t) => {
+                *read += 1;
+                (LOAD_BASE_STEP * *read, String::new(), t)
+            }
+        };
+        seen.insert(shared, (file_base, why.clone(), ftext.clone()));
+        out.push(LoadGiven { here, base: file_base, why, path, text: ftext.clone(), key });
+        if file_base > 0 {
+            loads_given_in(&ftext, file_base, at.parent().map(|d| d.to_path_buf()), read, seen, out);
+        }
+    }
+}
+
 thread_local! {
     /// The loads whose hidden globals the session has made already, by
     /// key: the parser written in FX-26 is told so (a file at base -1), and

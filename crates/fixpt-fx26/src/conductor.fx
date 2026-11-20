@@ -17,6 +17,11 @@
 ;; may write (the user's, 2026-11-18).
 (define-type stale-answer (sumof (source unit) (refuse unit)))
 (define-type stale-policy (subr (io stderr) (string string string bool bool) stale-answer))
+;; The files a phase-1 form's text loads, as `phase1.rs` gives them
+;; (`loads_list`): where each load is, its file's base (0 if not read), why
+;; not, its path, its text and its key.
+(define-type loads-given
+  (listof (productof (1 int) (2 int) (3 string) (4 string) (5 string) (6 string)) acyclic))
 
 (define front-end-entries
   (let* (;; Hash tables, a module file of no state.
@@ -674,17 +679,39 @@
          ;; (`check-more-with`); and `named`, the names its text gives its
          ;; types, each a rep (`set-step-named!`). What each gives, or why
          ;; not, placed in the code.
+         ;; The files a step's text loads (a phase-1 form's, `loads-given`),
+         ;; each read by this front end's reader at its base: as
+         ;; `loaded-files!` takes a program's, the last read first.
+         (step-loaded
+          (lambda ((given loads-given))
+            (letrec ((go (subr (maxeff (read @globals) spin (alloc @s) (read @s) (write @s)
+                                       (read @m) (write @m) (read @c) (alloc @c) (goto @e)
+                                       (comefrom @e))
+                               (loads-given) (select parser-types loaded-files))
+                       (lambda (gs)
+                         (if (null? gs)
+                             nil
+                             (let* ((g (car gs)) (base (extract g 2)) (path (extract g 4))
+                                    (read (if (> base 0) (read-text-at (extract g 5) base) nil))
+                                    (ok (not (null? read)))
+                                    (why (cond (ok "") ((= base 0) (extract g 3))
+                                               (else (string-append "`" path "` does not read")))))
+                               (cons (product (1 (extract g 1)) (2 (if ok base 0)) (3 why) (4 path)
+                                              (5 (if ok (car read) nil)) (6 (extract g 5))
+                                              (7 (extract g 6)) (8 #f))
+                                     (go (cdr gs))))))))
+              (go given))))
          (session-step-of
           (lambda ((standard (listof syn acyclic)) (mode int) (s int) (whole string) (k int)
                    (len int) (how int) (name symbol) (make bool) (deferred bool) (native bool)
-                   (registers bool) (rep (bytevectorof @t)))
+                   (registers bool) (rep (bytevectorof @t)) (fs (select parser-types loaded-files)))
             (let ((read (read-text-at whole 0))
                   (refused (lambda ((m string) (a int) (b int))
                              (fail (sum refused #u) m (clamp a k len) (clamp b k len)))))
               (if (null? read)
                   (fail (sum unread #u) "the code is not one whole expression" 0 len)
                   (begin
-                    (loaded-files! nil)
+                    (loaded-files! fs)
                     (includes-given! nil)
                     ((with check-program check-lines!) #f)
                     ((with check-print-parts check-conv-native!) native)
@@ -732,15 +759,16 @@
                    (how int) (name symbol) (make bool) (deferred bool) (native bool)
                    (registers bool) (rep (bytevectorof @t))
                    (named (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
-                   (mode int))
-            ;; Read with the types it is checked against (`with-reps`).
+                   (mode int) (given loads-given))
+            ;; Read with the types it is checked against (`with-reps`); the
+            ;; files its text loads, as given (a phase-1 form's; none else).
             (let* ((s0 (if (= how 0) (begun standard) (get step-state)))
                    (s ((with readings with-reps) s0 rep named)))
               (begin
                (if (= how 0) (set step-state s0) #u)
                ((with check-program set-step-named!) named)
                (let ((out (session-step-of standard mode s whole k len how name make deferred
-                                           native registers rep)))
+                                           native registers rep (step-loaded given))))
                  (begin ((with check-program set-step-named!) nil) out))))))
          ;; The types of what the checker tells the compiler.
          (stage-env-types (load-module "fx26:check-env-types.fx"))

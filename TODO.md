@@ -8192,12 +8192,7 @@ form: parse 1,600 a plain `define`, 5,900 a `syntax-rules` use; check
 `heist/docs/requests/bench/should-work/` (a draft of Heist's, not yet a
 request). Every repro run again on 15385cf5 (2026-11-20): each as quoted;
 12, 13 and 21 fixed already. Grouped:
-- **Bugs.** 15 and 16 **done (2026-11-20)**, below. 14, `load-module` in
-  `begin-for-syntax`: phase 1's forms are run by its namespace's front end
-  through the staging entry (`Phase1::run`, `conductor.fx`'s, which begins
-  `(loaded-files! nil)`, staged code loading nothing), so no load of theirs
-  is read; wanted, the forms' loads given it, from the program's
-  directory, each an instance of phase 1's own (§283). 24, `fixpt check` of
+- **Bugs.** 15, 16 and 14 **done (2026-11-20)**, below. 24, `fixpt check` of
   a module file: a file of definitions alone is a program too, whose
   globals a later definition may change, so `b` reading `a` has an effect
   that in a module it has not; wanted (the user's, 2026-11-20), `fixpt
@@ -8230,3 +8225,32 @@ region". Now `define`, `define*` and `define-rec` in a module as at the
 top level: `parse_signed` (`Checker::bind_signature`); `k-resolve-signed`,
 `k-bind-signature` moved to `check-modules-read.fx` from
 `check-proofs.fx`. Test `modules/poly-scope-module.fx`.
+
+**14, done (2026-11-20; the user's choice, C).** A `load-module` in a
+`begin-for-syntax` was "not read": phase 1's forms are run by their
+namespace's front end through `session-step`, which began
+`(loaded-files! nil)`, and they were held as text alone, so a relative
+path in one said nothing of where it was written, two forms of one text in
+two directories were one namespace's, and a refusal in one was said at the
+`begin-for-syntax`. Now a phase-1 form is its text and its file's
+directory (`phase1::Form`; the FX-26 expander's a string of both,
+`macros-written.fx`'s `phase1-form`), `""` the program's: `top.rs`'s
+`own_dir`, a file's key's (`dir_of_key`, `key-dir`), so both expanders
+make the one namespace. Its namespace is named by the directories resolved
+too (`forms_digest`). Each form run is given the files it loads, found and
+read from its directory, and those they load from theirs, depth first, as
+a program's (`syn::loads_given`), and read by the namespace's own reader
+(`session-step`'s `given`, `step-loaded`); a session's step none. A
+refusal says where in the form it is (`Refused`, `@I S E` in the answer
+to the FX-26 expander), said at the part whose written text holds it
+(`written_part`, `syn-at`): a load's, an operand's. No `.fasl` holds phase
+1's forms (a file's macros are made again from its source), so none
+changed. Found on the way: making the transformers' session told the
+pieces written in FX-26 its own directory, none, so the first `%forms`
+lost the program's (`with_session_refused` keeps it). The `syn-text`
+family moved to `macros-written.fx`, `macros-procedural.fx` at its 1000
+lines. Tests `procedural/for-syntax-load.fx` (a load from `../`, and its
+file's own load from its directory) and `for-syntax-load-missing.fx`; the
+procedural programs run from their directory now, as `fixpt eval` runs
+one. Heist's repro gives 3, run from anywhere.
+

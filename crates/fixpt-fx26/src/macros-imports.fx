@@ -12,7 +12,7 @@
         head-name import-usage in-loaded-as internal-names internal-of len load-base load-of
         load-path loaded-path loads macro-names macro-of macro? mk-list mk-symbol name-filter
         names-shown not-macros nth proper shown-names syn-end syn-start syn-symbol syn-symbol?
-        taken? without-load marks for-syntax? for-syntax! frame-of
+        taken? without-load marks for-syntax? for-syntax! key-dir frame-of
         (type fails file-macro files filter macro macro-env mades names scope syn syns-a marked))
 (define procedural-module (with macros-module procedural-module))
 (import procedural-module phase1-forms-now phase1-forms! def-env-is def-env-now! procedurals
@@ -327,7 +327,7 @@
       (cond
         ((and (not h) (hide-form? x)) (define-forms fail (cdr (proper x)) #t scope fs key st))
         ;; The file's phase-1 forms, in force for its macros after them.
-        ((for-syntax? x) (begin (for-syntax! fail x) st))
+        ((for-syntax? x) (begin (for-syntax! fail x (key-dir key)) st))
         ((defines-syntax? x)
          (let ((ns (define-macro fail x (list (tuple (extract scope 1) (extract scope 2)
                                                     (extract scope 3) internal

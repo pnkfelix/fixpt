@@ -22,6 +22,8 @@
 (define scopes-module (with exports-module scopes-module))
 (define reader-types (with parser-module reader-types))
 (define fresh-module (with contracts-module fresh-module))
+(define written-module ((proj (load-module "fx26:macros-written.fx") rs re rm rc rp)))
+(import written-module syn-text phase1-forms-of refused-part refusal-place refusal-message key-dir)
 (import fresh-module tag-of tag-char? tagged)
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol syn-datums syn->datum
@@ -95,46 +97,6 @@
 ;;; ------------------------------------------------------------ written
 
 ;; `s` as text the reader reads back.
-(define syn-text (->* (syn) string)
-  (lambda (s)
-    (tagcase s
-      (atom (d a b x) (datum-text d))
-      (lst (items d a b x) (string-append "(" (syns-text items) ")"))
-      (dotted (items tail d a b x)
-        (string-append "(" (syns-text items) " . " (syn-text tail) ")"))
-      (vec (items d a b x) (string-append "#(" (syns-text items) ")")))))
-(define syns-text (->* (syns-a) string)
-  (lambda (xs)
-    (cond ((null? xs) "")
-          ((null? (cdr xs)) (syn-text (car xs)))
-          (else (string-append (syn-text (car xs)) " " (syns-text (cdr xs)))))))
-(define datum-text (->* (datum) string)
-  (lambda (d)
-    (cond ((null? d) "()")
-          ((symbol? d) (symbol->string d))
-          ((keyword? d) (string-append "#:" (symbol->string (keyword->symbol d))))
-          ((string? d) (string-append "\"" (escaped d 0 "") "\""))
-          ((char? d) (char-text d))
-          ((int? d) (int->string d))
-          ((f64? d) (f64->string d))
-          ((bool? d) (if d "#t" "#f"))
-          (else "#u"))))
-(define escaped (->* (string int string) string)
-  (lambda (s i out)
-    (if (>= i (string-length s))
-        out
-        (let ((c (string-ref s i)))
-          (escaped s (+ i 1)
-                   (string-append out (cond ((char=? c #\") "\\\"")
-                                            ((char=? c #\\) "\\\\")
-                                            ((char=? c (integer->char 10)) "\\n")
-                                            (else (char->string c)))))))))
-(define char-text (->* (char) string)
-  (lambda (c)
-    (cond ((char=? c #\space) "#\\space")
-          ((char=? c (integer->char 10)) "#\\newline")
-          ((char=? c (integer->char 9)) "#\\tab")
-          (else (string-append "#\\" (char->string c))))))
 
 ;;; ------------------------------------------------------------ places
 
@@ -616,16 +578,16 @@
 ;; `(begin-for-syntax form …)`, `s`: its forms in force from now on, checked,
 ;; compiled and run in their namespace now, so that one refused is refused
 ;; here, as the Rust expander refuses it (`Macros::for_syntax`).
-(define for-syntax! (->* (fails syn) unit)
-  (lambda (fail s)
-    (let ((fs (append (get phase1-forms)
-                      (syns-texts (tagcase s (lst (items d a b x) (cdr items)) (else y nil))))))
+(define for-syntax! (->* (fails syn string) unit)
+  (lambda (fail s dir)
+    (let* ((old (get phase1-forms)) (new (tagcase s (lst (items d a b x) (cdr items)) (else y nil)))
+           (fs (append old (phase1-forms-of dir new))))
       (tagcase (run (forms-text fs))
         (ok v (set phase1-forms fs))
         (failed why
-          (fail (string-append "`begin-for-syntax`: " why) (syn-start s) (syn-end s)))))))
-(define syns-texts (->* (syns-a) (listof string acyclic))
-  (lambda (xs) (if (null? xs) nil (cons (syn-text (car xs)) (syns-texts (cdr xs))))))
+          (let ((at (refused-part s new (- (length fs) (length new)) (refusal-place why))))
+            (fail (string-append "`begin-for-syntax`: " (refusal-message why))
+                  (syn-start at) (syn-end at))))))))
 (define procedural-of
   (->* (symbol) (listof (tupleof int string def-env bool (listof string acyclic)) acyclic))
   (lambda (n)

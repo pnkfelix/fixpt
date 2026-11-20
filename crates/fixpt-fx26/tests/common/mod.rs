@@ -236,6 +236,8 @@ pub fn programs_do_as_they_say(sub: &str, least: usize) {
         let text = std::fs::read_to_string(path).unwrap();
         let first = text.lines().next().unwrap_or("");
         let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
+        // A load's path from the program's directory, as `fixpt eval`'s.
+        s.checker.base_dir = path.parent().map(|d| d.to_path_buf());
         let got = match s.run_program(&text) {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => Err(e.to_string()),

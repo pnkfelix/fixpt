@@ -26,7 +26,7 @@
         (type include-given)
         t-define-convention t-define-syscall t-define-generative t-exp p-ok p-err shared-taken
         shared-reset! loaded loaded-next input-key? label-name e-app e-plambda e-proj e-if
-        loaded-based in-loaded-as
+        loaded-based in-loaded-as load-base
         e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the e-convention e-bloblet
         e-product e-extract e-sum e-tagcase e-with rl-none
         (type syns-a exp top param-list top-list presult names)
@@ -63,7 +63,7 @@
 (import macros-module expand expand-top define-macro defines-syntax? macros-at! macros-after!
         made-syntax-taken! global-now?
         syntax-names imports-syntax? globals! global-before? macro? later-macro-site def-envs-given
-        file-scope-begin! file-scope-end! source-of for-syntax? for-syntax! macro-relevant
+        file-scope-begin! file-scope-end! source-of for-syntax? for-syntax! key-dir macro-relevant
         relevant-after loads)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
@@ -272,7 +272,7 @@
                    (macro-checks (define-macro pfail-at written nil))))
            ;; Phase 1's forms, in force for the transformers defined after:
            ;; nothing of the program's.
-           ((for-syntax? written) (begin (for-syntax! pfail-at written) nil))
+           ((for-syntax? written) (begin (for-syntax! pfail-at written "") nil))
            ;; A file's macros, and the `include` of the rest.
            ;; Each macro it defines held to the globals, as an expansion's
            ;; is: one a file's use makes is not seen ahead (`bad-name`).
@@ -669,6 +669,16 @@
          (or (own-macro? (car xs)) (for-syntax? (car xs))
              (and (form-of? (car xs) 'hide) (own-macros? (cdr (syn-items (car xs) ""))))
              (own-macros? (cdr xs))))))
+;; Where the loads of a module file's phase-1 form `x` are from: its file's
+;; directory, by its key (`key-dir`; `top.rs`'s `own_dir`), `""` the
+;; program's.
+(define phase1-dir (->* (syn) string)
+  (lambda (x)
+    (let* ((a (syn-start x))
+           (f (if (< a load-base)
+                  nil
+                  (loaded-based (get loaded) (* load-base (quotient a load-base))))))
+      (if (null? f) "" (key-dir (extract (car f) 7))))))
 (define own-macro? (->* (syn) bool)
   (lambda (x) (and (defines-syntax? x) (not (shape-definition? x)))))
 (define own-each (->* (syns-a) syns-a)
@@ -689,7 +699,8 @@
                             ;; Phase 1's, in force for the file's macros after;
                             ;; kept for an importer's, as its macros are, and
                             ;; no item of its module's (`file-items`).
-                            ((for-syntax? x) (begin (for-syntax! pfail-at x) (list x)))
+                            ((for-syntax? x)
+                             (begin (for-syntax! pfail-at x (phase1-dir x)) (list x)))
                             ((form-of? x 'hide)
                              (let* ((items (syn-items x ""))
                                     (inner (begin (set own-hidden #t) (own-each (cdr items)))))

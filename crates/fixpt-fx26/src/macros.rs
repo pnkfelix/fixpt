@@ -638,9 +638,10 @@ pub(crate) type MadeSyntax = (Sym, At, Option<Rc<Macro>>);
 /// knows of the modules forms open.
 #[derive(Clone, Default)]
 pub(crate) struct Withs {
-    /// The phase-1 forms in force (`begin-for-syntax`'s texts, in order),
-    /// each transformer defined now running where they are (`phase1.rs`).
-    pub(crate) phase1: Rc<Vec<String>>,
+    /// The phase-1 forms in force (`begin-for-syntax`'s, in order, each its
+    /// text and its file's directory), each transformer defined now running
+    /// where they are (`phase1.rs`).
+    pub(crate) phase1: Rc<Vec<crate::phase1::Form>>,
     /// The uses of macros the expansion is inside, the innermost last: each
     /// its macro, its form, and how many parts the form has, once it is
     /// looked at (`Macros::enter`).
@@ -1753,7 +1754,7 @@ impl Macros {
             for e in &file.entries {
                 match e {
                     // The file's phase-1 forms, in force for its macros after them.
-                    FileEntry::Syntax(form, _) if form.head_sym().is_some_and(|h| interner.name(h) == "begin-for-syntax") => own.for_syntax(form, interner)?,
+                    FileEntry::Syntax(form, _) if form.head_sym().is_some_and(|h| interner.name(h) == "begin-for-syntax") => own.for_syntax(form, interner, &crate::phase1::dir_of_key(&file.key))?,
                     FileEntry::Syntax(form, hidden) => {
                         let scope = FileScope { shared, instance: instance.is_some(), values: file.values.clone(), types: file.types.clone(), internal: internal.clone(), frame: file.frame.clone(), is_standard };
                         for n in own.define_in(form, interner, Some(&scope))? {
@@ -3264,13 +3265,13 @@ impl Macros {
     /// Transformer `code`, of `style`, defined in the phase-1 namespace of
     /// the runtime lent with the syntax, where it is defined: none where no
     /// runtime is lent, or it has no phase 1.
-    fn phase1_define(&mut self, style: procedural::Style, code: &str, forms: &[String]) -> Option<Result<(), String>> {
+    fn phase1_define(&mut self, style: procedural::Style, code: &str, forms: &[crate::phase1::Form]) -> Option<Result<(), String>> {
         if !self.withs.world.borrow().session {
             return None;
         }
         crate::heap_syn::with_runtime(|rt| {
             crate::phase1::Phase1::current(rt).ok()?;
-            Some(crate::phase1::Phase1::current_for(rt, forms).and_then(|ph| ph.transformer(rt, style.ty(), &procedural::key(style, code), &procedural::helpers(code)).map(|_| ())))
+            Some(crate::phase1::Phase1::current_for(rt, forms).map_err(String::from).and_then(|ph| ph.transformer(rt, style.ty(), &procedural::key(style, code), &procedural::helpers(code)).map(|_| ())))
         })
         .flatten()
     }
@@ -3279,18 +3280,29 @@ impl Macros {
     /// each transformer defined after (`Withs::phase1`), checked, compiled
     /// and run in their namespace now, so that one refused is refused here
     /// (in the session's runtime if it is lent, else the transformers'
-    /// session). Phase 1's alone: nothing of it is the program's.
-    pub(crate) fn for_syntax(&mut self, s: &Syn, interner: &mut Interner) -> R<()> {
+    /// session). Phase 1's alone: nothing of it is the program's. `dir`, the
+    /// directory of the file `s` is written in, which its loads are read
+    /// from (`phase1::Form`). A refusal at a place in one of its forms is
+    /// said there, at the part whose text holds it.
+    pub(crate) fn for_syntax(&mut self, s: &Syn, interner: &mut Interner, dir: &str) -> R<()> {
         let items = s.list().unwrap_or_default();
+        let new: Vec<Syn> = items.iter().skip(1).cloned().collect();
+        let old = self.withs.phase1.len();
         let mut forms = (*self.withs.phase1).clone();
-        forms.extend(items.iter().skip(1).map(|f| f.written(interner)));
+        forms.extend(new.iter().map(|f| crate::phase1::Form { text: f.written(interner), dir: dir.to_string() }));
         let session = self.withs.world.borrow().session;
         let lent = session.then(|| crate::heap_syn::with_runtime(|rt| crate::phase1::Phase1::current(rt).ok().map(|_| crate::phase1::Phase1::current_for(rt, &forms).map(|_| ())))).flatten().flatten();
         let made = match lent {
             Some(made) => made,
             None => procedural::with_forms_checked(&forms),
         };
-        made.map_err(|e| FxError::at(s.at(), format!("`begin-for-syntax`: {e}")))?;
+        if let Err(r) = made {
+            let at = match r.at {
+                Some((i, a, _)) if i >= old && i - old < new.len() => written_part(new[i - old].clone(), interner, a).at(),
+                _ => s.at(),
+            };
+            return Err(FxError::at(at, format!("`begin-for-syntax`: {}", r.why)));
+        }
         self.withs.phase1 = Rc::new(forms);
         Ok(())
     }
@@ -5677,6 +5689,35 @@ pub(crate) fn lowered(t: &Rc<STy>) -> Option<Rc<STy>> {
         std::cmp::Ordering::Less => None,
     });
     if refers.get() { None } else { Some(r.unwrap_or_else(|| t.clone())) }
+}
+
+/// The deepest part of `s` whose text, as `s` is written (`Syn::written`),
+/// holds its character `at`: where a phase-1 form's refusal is
+/// (`Macros::for_syntax`); `s` if no part of it does. The expander written
+/// in FX-26's `syn-at`.
+fn written_part(s: Syn, interner: &Interner, at: i64) -> Syn {
+    let (items, tail, open) = match s.view() {
+        V::List { items, tail } => (items, tail, 1),
+        V::Vector(items) => (items, None, 2),
+        _ => return s,
+    };
+    let mut o = open;
+    for x in items {
+        let n = x.written(interner).chars().count() as i64;
+        if at >= o && at < o + n {
+            return written_part(x, interner, at - o);
+        }
+        o += n + 1;
+    }
+    // ` . ` after the last item's space.
+    if let Some(t) = tail {
+        let t_at = o + 2;
+        let n = t.written(interner).chars().count() as i64;
+        if at >= t_at && at < t_at + n {
+            return written_part(t, interner, at - t_at);
+        }
+    }
+    s
 }
 
 /// A form's name, `#%fx` or `#%toplevel`: never bound, so never a binder or

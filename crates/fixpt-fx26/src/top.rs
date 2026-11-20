@@ -1198,6 +1198,8 @@ impl Checker {
     /// `(define-syntax s (modnames …))`, no macro. Itself if it defines or
     /// imports no macro.
     pub(crate) fn file_own_expanded_syn(&mut self, forms: Vec<Syn>, text: &str, at: Option<&std::path::Path>) -> R<Vec<Syn>> {
+        // Where its phase-1 forms' loads are from: its own directory.
+        let own_dir = at.map(|a| crate::phase1::dir_of_key(&a.display().to_string())).unwrap_or_default();
         let interner = &self.interner;
         let head = |s: &Syn| s.list().and_then(|l| l.first().copied()).and_then(|h| h.sym()).map(|h| interner.name(h).to_string());
         let shape = |s: &Syn| matches!(s.list().as_deref(), Some([_, _, m]) if head(m).as_deref() == Some("modnames"));
@@ -1330,7 +1332,7 @@ impl Checker {
                         out.push(Syn::lst(f.at(), kept));
                     }
                     4 => {
-                        m.for_syntax(&f, &mut interner)?;
+                        m.for_syntax(&f, &mut interner, &own_dir)?;
                         out.push(f);
                     }
                     5 => imported(m, &f, &read[&(n, 0)], &mut out, &mut interner)?,
@@ -1366,7 +1368,12 @@ impl Checker {
                 self.syn(|c| {
                     let mut macros = std::mem::take(&mut c.macros);
                     let mut interner = std::mem::take(&mut c.interner);
-                    let r = macros.for_syntax(&f, &mut interner);
+                    // The program's: its loads from its directory, the
+                    // checker's, as the parser written in FX-26 has it.
+                    let outer = crate::syn::load_base();
+                    crate::syn::set_load_base(c.base_dir.clone().or_else(|| outer.clone()));
+                    let r = macros.for_syntax(&f, &mut interner, "");
+                    crate::syn::set_load_base(outer);
                     c.macros = macros;
                     c.interner = interner;
                     r

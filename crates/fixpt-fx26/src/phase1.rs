@@ -45,13 +45,95 @@ const CURRENT: &str = "%phase1:current";
 /// The global listing the expansion's namespaces of phase-1 forms.
 const ALL: &str = "%phase1:current:all";
 
-/// Phase-1 forms `forms`'s digest: what names their namespace.
-pub(crate) fn forms_digest(forms: &[String]) -> u64 {
+/// A phase-1 form, `begin-for-syntax`'s: its text, and the directory of
+/// the file it is written in, a relative path a load of it names is from:
+/// `""` the program's (`syn::load_base`), else a key's directory, its last
+/// `/` kept (`dir_of_key`). So its loads are read where it is written, and
+/// two forms of one text in two directories are two namespaces' (Heist's
+/// should-work note, entry 14).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Form {
+    pub text: String,
+    pub dir: String,
+}
+
+impl Form {
+    /// The form as the expander written in FX-26 holds it, a string
+    /// (`macros-written.fx`'s `phase1-form`): the directory's length in
+    /// characters, `:`, the directory, then the text. Or, a string not so
+    /// made, a text of the program's directory.
+    pub(crate) fn decoded(s: &str) -> Form {
+        let parsed = s.split_once(':').and_then(|(n, rest)| {
+            let n = n.parse::<usize>().ok()?;
+            let split = rest.char_indices().nth(n).map_or(rest.len(), |(i, _)| i);
+            (rest.chars().count() >= n).then(|| Form { dir: rest[..split].to_string(), text: rest[split..].to_string() })
+        });
+        parsed.unwrap_or_else(|| Form { text: s.to_string(), dir: String::new() })
+    }
+
+    /// Where its loads' relative paths are from: none for the current
+    /// directory.
+    pub(crate) fn dir_path(&self) -> Option<std::path::PathBuf> {
+        if self.dir.is_empty() { crate::syn::load_base() } else { Some(std::path::PathBuf::from(&self.dir)) }
+    }
+
+    /// Its directory resolved, as its namespace is named by: the program's
+    /// as a key's would be, its last `/` kept.
+    fn dir_resolved(&self) -> String {
+        match self.dir_path() {
+            Some(d) => dir_of_key(&format!("{}/", d.display().to_string().trim_end_matches('/'))),
+            None => String::new(),
+        }
+    }
+}
+
+/// The directory of the file of key `key` (`TODO.md` §68's, `input:` or
+/// not) as a phase-1 form names it: up to its last `/`, kept; `""` if it
+/// has none. The same as the expander written in FX-26's `key-dir`.
+pub(crate) fn dir_of_key(key: &str) -> String {
+    let path = key.strip_prefix("input:").unwrap_or(key);
+    path.rfind('/').map_or(String::new(), |i| path[..=i].to_string())
+}
+
+/// Phase-1 forms `forms`'s digest: what names their namespace, each form
+/// by its text and its directory resolved.
+pub(crate) fn forms_digest(forms: &[Form]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    forms.hash(&mut h);
+    for f in forms {
+        f.text.hash(&mut h);
+        f.dir_resolved().hash(&mut h);
+    }
     h.finish()
 }
+
+/// A phase-1 form refused: why, and, where the refusal is at a place of
+/// one of them, which and where in its text (characters, from 0).
+#[derive(Debug)]
+pub struct Refused {
+    pub why: String,
+    pub at: Option<(usize, i64, i64)>,
+}
+
+impl Refused {
+    /// As the expander written in FX-26 is answered (`for-syntax!`): `@I S
+    /// E` and a newline first, where it has a place.
+    pub(crate) fn answer(&self) -> String {
+        match self.at {
+            Some((i, a, b)) => format!("@{i} {a} {b}\n{}", self.why),
+            None => self.why.clone(),
+        }
+    }
+}
+
+impl From<Refused> for String {
+    fn from(r: Refused) -> String {
+        r.why
+    }
+}
+
+/// The product kind the step's loads are given in (`session-step`).
+const PRODUCT: u8 = fixpt_heap::layout::kind("product");
 
 /// What every transformer sees besides the standard environment.
 const PRELUDE: &str = include_str!("macros/procedural-prelude.fx");
@@ -92,7 +174,7 @@ impl Phase1 {
 
     /// The runtime's current namespace, an expansion's: made if it has none.
     pub fn current(rt: &mut Runtime) -> Result<Phase1, String> {
-        Phase1::current_for(rt, &[])
+        Phase1::current_for(rt, &[]).map_err(String::from)
     }
 
     /// The expansion's namespace of the phase-1 forms `forms`
@@ -101,12 +183,12 @@ impl Phase1 {
     /// runs in the namespace of the forms in force where it was defined, so
     /// that what it names is what was there, whatever was defined after or
     /// in another file (`docs/research/typed-macros.md`, "for-syntax").
-    pub fn current_for(rt: &mut Runtime, forms: &[String]) -> Result<Phase1, String> {
+    pub fn current_for(rt: &mut Runtime, forms: &[Form]) -> Result<Phase1, Refused> {
         let global = if forms.is_empty() { CURRENT.to_string() } else { format!("{CURRENT}:{:016x}", forms_digest(forms)) };
         if crate::stage::global(rt, &global).is_some_and(|v| v != Value::FALSE) {
             return Ok(Phase1 { global });
         }
-        let p = Phase1::made_at(rt, global.clone())?;
+        let p = Phase1::made_at(rt, global.clone()).map_err(|why| Refused { why, at: None })?;
         // Each made one's global listed, for the expansion's end.
         let name = rt.heap.make_string(&global);
         let base = rt.heap.push_root(name);
@@ -127,17 +209,19 @@ impl Phase1 {
 
     /// A namespace of its own made in `rt` ([`Phase1::new`]), `forms`
     /// defined in it: the transformers' session's, for those forms.
-    pub fn with_forms(rt: &mut Runtime, forms: &[String]) -> Result<Phase1, String> {
-        let p = Phase1::new(rt)?;
+    pub fn with_forms(rt: &mut Runtime, forms: &[Form]) -> Result<Phase1, Refused> {
+        let p = Phase1::new(rt).map_err(|why| Refused { why, at: None })?;
         p.define_forms(rt, forms)?;
         Ok(p)
     }
 
     /// Phase-1 forms `forms` checked, compiled and run in the namespace,
-    /// in order; or why one was refused.
-    fn define_forms(&self, rt: &mut Runtime, forms: &[String]) -> Result<(), String> {
-        for f in forms {
-            self.run(rt, &format!("{f}\n"), MORE)?;
+    /// in order, each given the files it loads, read from its directory
+    /// (`syn::loads_given`); or why one was refused, and where in it.
+    fn define_forms(&self, rt: &mut Runtime, forms: &[Form]) -> Result<(), Refused> {
+        for (i, f) in forms.iter().enumerate() {
+            let loads = crate::syn::loads_given(&f.text, f.dir_path());
+            self.run_loading(rt, &format!("{}\n", f.text), MORE, &loads).map_err(|(why, at)| Refused { why, at: at.map(|(a, b)| (i, a, b)) })?;
         }
         Ok(())
     }
@@ -281,7 +365,13 @@ impl Phase1 {
     /// `text`, definitions, checked as `how` says and kept, compiled, and
     /// the word run; or the refusal's message.
     fn run(&self, rt: &mut Runtime, text: &str, how: i64) -> Result<(), String> {
-        let standard = crate::stage::standard(rt).ok_or("phase 1 needs the standard environment read")?;
+        self.run_loading(rt, text, how, &[]).map_err(|(why, _)| why)
+    }
+
+    /// [`run`](Self::run), `loads` the files `text` loads: or the refusal's
+    /// message, and where in `text` it is, if it is.
+    fn run_loading(&self, rt: &mut Runtime, text: &str, how: i64, loads: &[crate::syn::LoadGiven]) -> Result<(), (String, Option<(i64, i64)>)> {
+        let standard = crate::stage::standard(rt).ok_or(("phase 1 needs the standard environment read".to_string(), None))?;
         let w = Wrapped::of(String::new(), text, "", text, 0);
         let mark = rt.heap.push_root(standard);
         let whole = rt.heap.make_string(&w.whole);
@@ -290,14 +380,16 @@ impl Phase1 {
         rt.heap.push_root(none);
         let rep = rt.heap.make_bytevector(&[]);
         rt.heap.push_root(rep);
-        let [standard, whole, none, rep] = [0, 1, 2, 3].map(|i| rt.heap.root_at(mark + i));
+        let given = loads_list(rt, loads);
+        rt.heap.push_root(given);
+        let [standard, whole, none, rep, given] = [0, 1, 2, 3, 4].map(|i| rt.heap.root_at(mark + i));
         rt.heap.pop_roots_to(mark);
         // Made and not deferred; cellular words, neither native nor with
         // register code; no names given types by rep.
         let (made, deferred, native, registers) = (Value::TRUE, Value::FALSE, Value::FALSE, Value::FALSE);
         let mode = Value::fixnum(crate::ids::mode() as i64);
-        let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), none, made, deferred, native, registers, rep, Value::NULL, mode];
-        let out = self.call_entry(rt, E_STEP, &args)?;
+        let args = [standard, whole, Value::fixnum(w.skip), Value::fixnum(w.len), Value::fixnum(how), none, made, deferred, native, registers, rep, Value::NULL, mode, given];
+        let out = self.call_entry(rt, E_STEP, &args).map_err(|e| (e, None))?;
         let tag = rt.heap.symbol_name(rt.heap.sum_tag(out));
         let payload = rt.heap.sum_payload(out);
         if tag == "checked" && how == FIRST {
@@ -306,10 +398,34 @@ impl Phase1 {
         if tag != "made" {
             // `(sum failed (product kind message start end))`.
             let message = rt.heap.product_field(payload, 2);
-            return Err(if rt.heap.is_a(message, fixpt_heap::ObjType::String) { rt.heap.string_to_rust(message) } else { tag });
+            let why = if rt.heap.is_a(message, fixpt_heap::ObjType::String) { rt.heap.string_to_rust(message) } else { tag };
+            let (a, b) = (rt.heap.product_field(payload, 3), rt.heap.product_field(payload, 4));
+            let at = (a.is_fixnum() && b.is_fixnum()).then(|| (a.as_fixnum(), b.as_fixnum()));
+            return Err((why, at));
         }
-        on_cellular(rt, |rt| fixpt_engine::cellular::run_word(rt, payload, &[])).map(|_| ())
+        on_cellular(rt, |rt| fixpt_engine::cellular::run_word(rt, payload, &[])).map(|_| ()).map_err(|e| (e, None))
     }
+}
+
+/// `loads` as the step takes them (`session-step`'s `given`): a list of
+/// `(product here base why path text key)`, the last read first, as
+/// `loaded-files!` takes a program's.
+fn loads_list(rt: &mut Runtime, loads: &[crate::syn::LoadGiven]) -> Value {
+    let mut l = Value::NULL;
+    for g in loads {
+        let base = rt.heap.push_root(l);
+        for s in [&g.why, &g.path, &g.text, &g.key] {
+            let v = rt.heap.make_string(s);
+            rt.heap.push_root(v);
+        }
+        let fields: Vec<Value> = [Value::fixnum(g.here), Value::fixnum(g.base)].into_iter().chain((1..=4).map(|i| rt.heap.root_at(base + i))).collect();
+        let p = rt.heap.make_frozen(PRODUCT, &fields);
+        rt.heap.push_root(p);
+        let (l0, p) = (rt.heap.root_at(base), rt.heap.root_at(base + 5));
+        l = rt.heap.cons(p, l0);
+        rt.heap.pop_roots_to(base);
+    }
+    l
 }
 
 /// `f`, with the cellular machine written in Rust the runtime's: phase 1's
@@ -333,7 +449,7 @@ fn on_cellular<T>(rt: &mut Runtime, f: impl FnOnce(&mut Runtime) -> T) -> T {
 /// parse of the namespace's own front end, whose reader, parser and
 /// expander, with their state, are its own (the conductor makes them for
 /// each front end), so the parse it is inside is left as it was.
-pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural::Style, code: &str, forms: &[String], datum: Value) -> Option<Result<Value, String>> {
+pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural::Style, code: &str, forms: &[Form], datum: Value) -> Option<Result<Value, String>> {
     use crate::macros::procedural;
     let base = rt.heap.push_root(datum);
     let out = (|| {
@@ -347,7 +463,7 @@ pub(crate) fn run_transformer(rt: &mut Runtime, style: crate::macros::procedural
         } else {
             match Phase1::current_for(rt, forms) {
                 Ok(ph) => ph,
-                Err(e) => return Some(Err(e)),
+                Err(e) => return Some(Err(e.why)),
             }
         };
         let global = match ph.transformer(rt, style.ty(), &key, &procedural::helpers(code)) {
@@ -412,11 +528,12 @@ pub fn call_procedural(rt: &mut Runtime, a: &[Value]) -> Result<Value, String> {
         _ => Style::Rsc,
     };
     let code = rt.heap.string_to_rust(a[1]);
-    // The phase-1 forms in force where it was defined, a list of texts.
+    // The phase-1 forms in force where it was defined, a list of them,
+    // each as the expander holds it (`Form::encoded`).
     let mut forms = Vec::new();
     let mut l = a[4];
     while l.is_pair() {
-        forms.push(rt.heap.string_to_rust(rt.heap.car(l)));
+        forms.push(Form::decoded(&rt.heap.string_to_rust(rt.heap.car(l))));
         l = rt.heap.cdr(l);
     }
     let out = match run_transformer(rt, style, &code, &forms, a[2]) {
