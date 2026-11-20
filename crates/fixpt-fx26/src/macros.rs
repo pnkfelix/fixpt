@@ -5080,9 +5080,50 @@ impl Aligner<'_> {
             return Err(FxError::at(span, format!("`{name}` is placed where its syntax type is not one the form takes there")));
         }
         if normal(env) != normal(&info.declared) {
-            return Err(FxError::at(span, format!("`{name}` is placed in the scope of other bindings than its signature says it is")));
+            let (found, said) = (self.scope_said(env), self.scope_said(&info.declared));
+            return Err(FxError::at(span, format!("`{name}` is placed in {found}, but its signature says it is in {said}")));
         }
         Ok(())
+    }
+
+    /// Environment `env` as a refusal says it (Heist's should-work note,
+    /// entry 2): its levels outermost first, each by the pattern's binders
+    /// it holds, `x`, `(x ...)` every repetition's, a rib's in the order of
+    /// their names; as `macros-scopes.fx`'s `scope-said`.
+    fn scope_said(&self, env: &[Level]) -> String {
+        let levels: Vec<String> = normal(env)
+            .iter()
+            .rev()
+            .filter_map(|l| match l {
+                Level::Rib(atoms) => Some(self.atoms_said(atoms)),
+                Level::Earlier(atoms) => Some(format!("the earlier repetitions' {}", self.atoms_said(atoms))),
+                Level::Cage(n) => Some(format!("what `{}` gives", self.name(*n))),
+                Level::Shape(_) => None,
+            })
+            .collect();
+        match levels.split_first() {
+            None => "no scope of the pattern's binders".to_string(),
+            Some((first, rest)) => rest.iter().fold(format!("the scope of {first}"), |s, l| format!("{s}, and inside that of {l}")),
+        }
+    }
+
+    fn atoms_said(&self, atoms: &[Atom]) -> String {
+        let mut names: Vec<String> = atoms
+            .iter()
+            .filter_map(|a| match a {
+                // Gathered by `k` lists, `((x ...) ...)`; a description's
+                // binder said so.
+                Atom::Var(n, ns, k) => {
+                    let s = (0..*k).fold(self.name(*n).to_string(), |s, _| format!("({s} ...)"));
+                    Some(if *ns == Ns::Desc { format!("`{s}`, a description") } else { format!("`{s}`") })
+                }
+                Atom::RibOf(n) => Some(format!("`({} ...)`", self.name(*n))),
+                Atom::Lit(..) => None,
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names.join(" and ")
     }
 }
 

@@ -1,4 +1,4 @@
-;; ! `e` is placed in the scope of other bindings than its signature says it is
+;; ! `e` is placed in the scope of `(v ...)`, but its signature says it is in the scope of `v`
 ;; A binder under an ellipsis: its own repetition's, or every one's
 ;; (`TODO.md` §223). The signature says each `e` sees its own `v`; the
 ;; template puts every `e` in every `v`'s scope.

@@ -1,4 +1,4 @@
-;; ! `body` is placed in the scope of other bindings than its signature says it is
+;; ! `body` is placed in the scope of `go`, and inside that of `(x ...)`, but its signature says it
 ;; Its levels the other way about, the loop's variables outside `go`: not what the template does.
 (define-syntax loop
   (macro (_ go @ bvar desc cs @ ((x @ bvar desc expr) ...) desc body @ expr) expr

@@ -1,4 +1,4 @@
-;; ! `init` is placed in the scope of other bindings than its signature says it is
+;; ! `init` is placed in no scope of the pattern's binders, but its signature says it is in the
 ;; Scheme's `do`: each `step` in every variable's scope, each `init` in
 ;; none, which no signature says yet (`TODO.md` §223): refused, the
 ;; signature inferred said.

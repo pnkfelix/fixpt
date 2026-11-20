@@ -8281,7 +8281,12 @@ has five (kit's `loop` and one more, `editor/buffer.fx` two,
 repetition's together, and each inside the one before is a
 `letrec-shape`'s `export*`, as `my-let*`; a signature a template writes
 gets its levels from the template's own ellipsis. The refusal "placed in the scope of
-other bindings than its signature says it is" still names nothing (entry
-2's second ask). Tests `macros/bind-*.fx`, `infer-shown-levels.fx`,
+other bindings than its signature says it is" now says both scopes,
+outermost first, by the pattern's binders (**done 2026-11-20**,
+`scope_said`, `scope-said`): "`body` is placed in the scope of `go`, and
+inside that of `(x ...)`, but its signature says it is in the scope of
+`(x ...)`, and inside that of `go`"; a rib's binders by name, `a` and `b`;
+a binder gathered by lists, `(x ...)`; a description's, so said; none,
+"no scope of the pattern's binders". Tests `macros/bind-*.fx`, `infer-shown-levels.fx`,
 `fixpt-cli/tests/signature_levels.rs`.
 

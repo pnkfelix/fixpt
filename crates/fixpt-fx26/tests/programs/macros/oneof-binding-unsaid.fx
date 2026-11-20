@@ -1,4 +1,4 @@
-;; ! `body` is placed in the scope of other bindings than its signature says it is
+;; ! `body` is placed in the scope of `x`, but its signature says it is in no scope of the
 ;; A member's binding structure checked against its clause: `body` is in
 ;; `x`'s scope, which the first member does not say.
 (define-syntax bind (trailmark))

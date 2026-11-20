@@ -1,4 +1,4 @@
-;; ! `e` is placed in the scope of other bindings than its signature says it is
+;; ! `e` is placed in the scope of the earlier repetitions' `x`, but its signature says it is in no
 ;; A `let` by ellipsis written as a `let*` is refused: each expression
 ;; would be in the scope of the names before it, which the signature says
 ;; it is not, so `(my-let ((x 1) (y x)) y)` would see the first `x`.

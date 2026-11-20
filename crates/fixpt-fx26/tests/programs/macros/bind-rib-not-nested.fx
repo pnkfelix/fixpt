@@ -1,4 +1,4 @@
-;; ! `body` is placed in the scope of other bindings than its signature says it is
+;; ! `body` is placed in the scope of `a`, and inside that of `b`, but its signature says it is in
 ;; One rib is not two levels: a `let*` binds `b` inside `a`'s scope.
 (define-syntax with2
   (macro (_ (a @ bvar b @ bvar) body @ expr) expr (bind (a b) in body))

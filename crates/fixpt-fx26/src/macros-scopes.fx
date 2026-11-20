@@ -17,7 +17,8 @@
         split syn-nil? name-in? addr=?
         bind-rib bind-cage bind-direct bind-earlier bind-shape ring-rib ring-at ring-shape
         (type fails addr entries rings bind sty atm atms))
-(import align-module node-export node-imports node-syn node-core node-kids node-many? repeated?
+(import align-module sorted-strings
+        node-export node-imports node-syn node-core node-kids node-many? repeated?
         seq-depths
         cage-seq? program-walk lv-rib lv-cage lv-earlier lv-shape k-pair k-pvar k-binder k-ref
         k-form k-desc k-seq
@@ -299,8 +300,56 @@
            (cond ((not fits)
                   (said "is placed where its syntax type is not one the form takes there"))
                  ((not (levels=? (normal env) (normal (extract info 2))))
-                  (said "is placed in the scope of other bindings than its signature says it is"))
+                  (said (string-append "is placed in " (scope-said env)
+                                       ", but its signature says it is in "
+                                       (scope-said (extract info 2)))))
                  (else #u))))))))
+;; Environment `env` as a refusal says it (Heist's should-work note, entry
+;; 2): its levels outermost first, each by the pattern's binders it holds,
+;; `x`, `(x ...)` every repetition's, a rib's in the order of their names
+;; (`macros.rs`'s `scope_said`).
+(define scope-said (->* (levels) string)
+  (lambda (env)
+    (let ((ls (levels-said (reverse (normal env)))))
+      (if (null? ls)
+          "no scope of the pattern's binders"
+          (string-append "the scope of " (car ls) (inside-said (cdr ls)))))))
+(define inside-said (->* ((listof string acyclic)) string)
+  (lambda (ls)
+    (if (null? ls) "" (string-append ", and inside that of " (car ls) (inside-said (cdr ls))))))
+(define levels-said (->* (levels) (listof string acyclic))
+  (lambda (ls)
+    (if (null? ls)
+        nil
+        (let ((rest (levels-said (cdr ls))))
+          (tagcase (car ls)
+            (lv-rib (as) (cons (atms-said as) rest))
+            (lv-earlier (as)
+              (cons (string-append "the earlier repetitions' " (atms-said as)) rest))
+            (lv-cage (n) (cons (string-append "what `" (symbol->string n) "` gives") rest))
+            (lv-shape (m) rest))))))
+(define atms-said (->* (atms) string)
+  (lambda (as) (and-joined (sorted-strings (atm-names as) nil))))
+(define atm-names (->* (atms) (listof string acyclic))
+  (lambda (as)
+    (if (null? as)
+        nil
+        (let ((rest (atm-names (cdr as))))
+          (tagcase (car as)
+            ;; Gathered by `k` lists, `((x ...) ...)`; a description's binder
+            ;; said so.
+            (atm-var (n d k)
+              (let ((s (string-append "`" (with-lists (symbol->string n) k) "`")))
+                (cons (if d (string-append s ", a description") s) rest)))
+            (atm-rib-of (n) (cons (string-append "`(" (symbol->string n) " ...)`") rest))
+            (atm-lit (t d) rest))))))
+(define with-lists (->* (string int) string)
+  (lambda (s k) (if (<= k 0) s (with-lists (string-append "(" s " ...)") (- k 1)))))
+(define and-joined (->* ((listof string acyclic)) string)
+  (lambda (ss)
+    (cond ((null? ss) "")
+          ((null? (cdr ss)) (car ss))
+          (else (string-append (car ss) " and " (and-joined (cdr ss)))))))
 ;; The first level of `env`, from `i`, whose rib binds pattern variable
 ;; `n`; -1 if none.
 (define rib-binding (->* (symbol bool levels int) int)
