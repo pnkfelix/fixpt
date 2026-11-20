@@ -85,13 +85,6 @@
               (begin (k-define-generative (k-nth pair 1) (k-nth pair 2)) (k-standard (cdr entries)))
               (begin (k-standard-binding pair) (k-standard (cdr entries))))))))
 
-;; Put the binders of every `poly` at the top of `t` in scope for reading.
-(define k-bind-signature (->* (int) unit)
-  (lambda (t)
-    (tagcase (k-get t)
-      (ty-poly (bs body) (begin (k-push-binders bs) (k-bind-signature body)))
-      (else y #u))))
-
 ;; `define-type` and `define-effect`.
 ;;; ------------------------------------------------------------ proofs
 ;;; A definition whose declared type is `(proves …)` is a lemma once its

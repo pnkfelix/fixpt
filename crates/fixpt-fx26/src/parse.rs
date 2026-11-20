@@ -4024,11 +4024,32 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         any.then_some(all)
     }
 
+    /// Definition `init`, of signature `ty`: its `poly`s' binders in scope in
+    /// it, as at a program's top level (`Checker::bind_signature`).
+    fn parse_signed(&mut self, ty: TyId, init: &Syn) -> R<ExpId> {
+        let depth = self.dscope.len();
+        self.bind_signature(ty);
+        let e = self.parse_exp_syn(init);
+        self.dscope.truncate(depth);
+        e
+    }
+
     fn parse_module_in_scope(&mut self, forms: &[Syn]) -> R<Vec<ModItem>> {
         let outer = (std::mem::take(&mut self.ahead), std::mem::take(&mut self.ahead_filled));
         let mut names: Vec<Sym> = Vec::new();
         let mut twice: Vec<Sym> = Vec::new();
-        for f in forms {
+        // A `hide`'s items are the module's, its types declared ahead too, as
+        // the FX-26 checker has them (`k-module-type-names`).
+        let mut items_all: Vec<Syn> = Vec::new();
+        let mut work: Vec<Syn> = forms.iter().rev().cloned().collect();
+        while let Some(f) = work.pop() {
+            let listed = f.list();
+            match listed.as_deref() {
+                Some([h, inner @ ..]) if h.sym().is_some_and(|h| self.name(h) == "hide") => work.extend(inner.iter().rev().cloned()),
+                _ => items_all.push(f),
+            }
+        }
+        for f in &items_all {
             let listed = f.list();
             let items = listed.as_deref().unwrap_or(&[]);
             if let [h, n, d] = items
@@ -4231,7 +4252,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                         return Err(FxError::at(t.span(), "`define*` and `->*` each find what a procedure does: write one"));
                     }
                     let ty = self.parse_type_syn(t)?;
-                    out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp_syn(init)?, infer });
+                    out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_signed(ty, init)?, infer });
                 }
                 // `(include m)` (`TODO.md` §69): `m`'s values the module's own.
                 (Some("include"), [_, _, ..]) if self.include_item(f) => {
@@ -4249,7 +4270,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                         let (name, _) = name_of(self, n)?;
                         self.arrow_star = self.written_arrow_star(t);
                         let ty = self.parse_type_syn(t)?;
-                        group.push((name, ty, self.parse_exp_syn(init)?));
+                        group.push((name, ty, self.parse_signed(ty, init)?));
                     }
                     out.push(ModItem::Rec(group));
                 }

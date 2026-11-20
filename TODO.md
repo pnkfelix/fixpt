@@ -8185,3 +8185,48 @@ form: parse 1,600 a plain `define`, 5,900 a `syntax-rules` use; check
   §46): 114,600 cells to 109,600, the lookups 275 a form. The Rust
   expander's `reserved` a set made once, as its description words were
   already. The rest is the expander's work on each node, no one place.
+
+## 304. Heist's should-work note: macros and modules (Heist's, 2026-11-19)
+
+`heist/docs/requests/should-work.md`, 24 entries, each with a repro under
+`heist/docs/requests/bench/should-work/` (a draft of Heist's, not yet a
+request). Every repro run again on 15385cf5 (2026-11-20): each as quoted;
+12, 13 and 21 fixed already. Grouped:
+- **Bugs.** 15 and 16 **done (2026-11-20)**, below. 14, `load-module` in
+  `begin-for-syntax`: phase 1's forms are run by its namespace's front end
+  through the staging entry (`Phase1::run`, `conductor.fx`'s, which begins
+  `(loaded-files! nil)`, staged code loading nothing), so no load of theirs
+  is read; wanted, the forms' loads given it, from the program's
+  directory, each an instance of phase 1's own (§283). 24, `fixpt check` of
+  a module file: a file of definitions alone is a program too, whose
+  globals a later definition may change, so `b` reading `a` has an effect
+  that in a module it has not; wanted (the user's, 2026-11-20), `fixpt
+  check` taking a file headed `module-parameters` as a module (it is
+  refused now, "not an expression in the FX-26 kernel", entries 18 and 19
+  too), and `--module` for a file of none; no header of intent (not yet).
+  17 (a module from a record field typed again) and 22 (`include` of a
+  shared load copies its code into the `.fasl`, 909,039 bytes against
+  65,109) are to look at.
+- **Signatures that cannot say a binding structure** (1, one rib of
+  several binders; 4, 5, 6, 7, 8, 9; 10 is §289): to discuss.
+- **What a refusal and the docs say:** 2, facts' order is rings' order,
+  and the refusal "placed in the scope of other bindings" names nothing (9
+  of the entries); 3 is §273.
+- **Modules:** 11 (parameter chains), 18, 19, 20. **Cost:** 23 (phase 1
+  made for any procedural macro, about 15 ms).
+
+**15, done (2026-11-20).** A hidden `define-type` naming a later one was
+refused by the Rust checker alone ("`nodes` is not a type"; the checkers
+disagreed): `parse_module_in_scope` declared ahead the `define-type`s of
+the module's own items, not a `hide`'s, as the FX-26 checker does from its
+items, hidden ones among them (`k-module-type-names`). Now a `hide`'s too.
+A hidden type is still seen by the module's items, outside the `hide` too,
+and by nothing outside the module. Test `modules/hide-type-ahead.fx`.
+
+**16, done (2026-11-20).** A definition's signature's `poly` binders were in
+scope in what it is defined as at a program's top level alone; in a module
+(a file or `module`), neither checker put them there, so `p` was "not a
+region". Now `define`, `define*` and `define-rec` in a module as at the
+top level: `parse_signed` (`Checker::bind_signature`); `k-resolve-signed`,
+`k-bind-signature` moved to `check-modules-read.fx` from
+`check-proofs.fx`. Test `modules/poly-scope-module.fx`.

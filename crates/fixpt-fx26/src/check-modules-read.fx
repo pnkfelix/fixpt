@@ -49,6 +49,14 @@
         (let ((v (extract (car bs) 1)))
           (begin (k-push-desc (k-dvar-name v) (ds-var v (extract (car bs) 2)))
                  (k-push-binders (cdr bs)))))))
+;; Put the binders of every `poly` at the top of `t` in scope for reading: a
+;; definition's signature's, in what it is defined as, at a program's top
+;; level (`check-program-defs.fx`) and in a module.
+(define k-bind-signature (->* (int) unit)
+  (lambda (t)
+    (tagcase (k-get t)
+      (ty-poly (bs body) (begin (k-push-binders bs) (k-bind-signature body)))
+      (else y #u))))
 ;; The names a module's items give type abbreviations: each `define-type`
 ;; of a name, but of a `dlambda` or an effect.
 (define k-module-type-names (->* (mod-items) k-names)
@@ -316,6 +324,12 @@
           nil
           (let* ((x (k-resolve-exp (car es))) (rest (k-resolve-all (cdr es))))
             (cons x rest)))))
+  ;; A definition's expressions `es`, of signature `t`: its `poly`s' binders
+  ;; in scope in them, as at a program's top level (`k-rec-lambdas`).
+  (k-resolve-signed (->* (int (listof exp acyclic)) kxs)
+    (lambda (t es)
+      (let* ((saved (get k-dscope)) (signed (k-bind-signature t)) (xs (k-resolve-all es)))
+        (begin (set k-dscope saved) xs))))
   (k-resolve-exp (->* (exp) kx)
     (lambda (e)
       (tagcase e
@@ -469,7 +483,7 @@
           (product (1 (the k-ids nil)) (2 (the kxs nil)))
           (let* ((star (set k-arrow-star (k-written-arrow-star? (car ts))))
                  (t (k-parse-type (car ts)))
-                 (x (k-resolve-exp (car xs)))
+                 (x (car (k-resolve-signed t (the exp-list (cons (car xs) nil)))))
                  (rest (k-resolve-rec-items (cdr ts) (cdr xs))))
             (product (1 (the k-ids (cons t (extract rest 1))))
                      (2 (the kxs (cons x (extract rest 2)))))))))
@@ -526,7 +540,8 @@
                                                         "procedure does: write one")
                                          (car ts))
                                 #u))
-                      (t (k-parse-types (the syns-a (cons (car ts) nil)))) (x (k-resolve-all xs)))
+                      (t (k-parse-types (the syns-a (cons (car ts) nil))))
+                      (x (k-resolve-signed (car t) xs)))
                  (k-item-of k ns -2 t x)))
 ;; An included module's: its types its `include` form, held to
               ;; what the expander relied on of it (`include-items`).
@@ -540,7 +555,8 @@
                    (k-item-of k ns -1 nil x))))
               ((= k 2)
                (let* ((star (if (null? ts) #u (set k-arrow-star (k-written-arrow-star? (car ts)))))
-                      (t (if (null? ts) (the k-ids nil) (k-parse-types ts))) (x (k-resolve-all xs)))
+                      (t (if (null? ts) (the k-ids nil) (k-parse-types ts)))
+                      (x (if (null? t) (k-resolve-all xs) (k-resolve-signed (car t) xs))))
                  (k-item-of k ns -1 t x)))
               (else
                (let ((r (k-resolve-rec-items ts xs)))

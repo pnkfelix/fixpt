@@ -19,6 +19,10 @@
                  (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t))
                        (k-binders)
                        unit))
+            (val k-bind-signature
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       unit))
             (val k-in-loaded
                  (subr (maxeff (alloc @t)
                                (goto @z)

@@ -25,10 +25,6 @@
                                spin)
                        (syns-a)
                        unit))
-            (val k-bind-signature
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
-                       (int)
-                       unit))
             (val k-names-meet?
                  (subr (maxeff (read @globals) spin (read @t)) (k-names k-names) bool))
             (val k-check-proof

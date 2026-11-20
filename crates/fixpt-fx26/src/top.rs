@@ -2067,8 +2067,10 @@ impl Checker {
         }
     }
 
-    /// Put the binders of every `poly` at the top of `t` in scope for parsing.
-    fn bind_signature(&mut self, t: TyId) {
+    /// Put the binders of every `poly` at the top of `t` in scope for parsing:
+    /// a definition's signature's, in what it is defined as, at a program's
+    /// top level and in a module (`parse_signed`).
+    pub(crate) fn bind_signature(&mut self, t: TyId) {
         let mut t = self.arena.resolve(t);
         while let crate::ast::Ty::Poly { binders, body } = self.arena.get(t).clone() {
             for (v, k) in binders {
