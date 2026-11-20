@@ -172,8 +172,6 @@
 (define datum->syn (with syntax-module datum->syn))
 (define reserved? (with syntax-module reserved?))
 (define reserved-sym? (with syntax-module reserved-sym?))
-(define word-in? (with syntax-module word-in?))
-(define words-have? (with syntax-module words-have?))
 (define desc-word? (with syntax-module desc-word?))
 (define type-form? (with syntax-module type-form?))
 (define reserved-syn? (with syntax-module reserved-syn?))

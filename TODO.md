@@ -5973,6 +5973,12 @@ Seen again 2026-11-12, in a debug suite run (1188 of 1189 passed): gdb's
 interrupt landed in Rust (a hash table's lookup), before `spin` ran; the
 test alone passed three times of three.
 
+Seen again 2026-11-19, in a release suite (1319 of 1320): `no line for
+\`keep\``, gdb stopped in `fixpt_native::direct::callout` called from `spin`
+and could not unwind past it ("previous frame inner to this frame
+(corrupt stack?)"); a callout's frame, not the race above. Alone, five
+of five passed.
+
 ## 244. Sets keyed by small ints: what the checker's walks need, and bit vectors in the runtime (the user's, 2026-11-11)
 
 The FX-26 checker's type-graph walks (`k-param-sels-from`,
@@ -8162,3 +8168,20 @@ form: parse 1,600 a plain `define`, 5,900 a `syntax-rules` use; check
   are spread out: shaping (`fill-shape`, `shaper-begin!`), the nodes made
   (`lst`, `atom`), names made strings (`syn-name`), transcribing, source
   keys. No one maker.
+- **Looked at (2026-11-19), parse by cells:** linear. A form of 100 and of
+  400, `(define vN bool (my-or #f #t))` against one alike in size,
+  `(define vN bool (if #f #t #t))`: 114,600 cells and 5,900 words a form
+  against 43,800 and 2,200. The 71,000 more by file: `macros-nodes.fx`
+  12,200 (`node-new`, `sig-of`, `fits-within?`), `parser.fx`'s accessors
+  9,100 (`syn-symbol?`, `syn-head`, `nth`), `macros-types.fx` 9,000
+  (`vars-map`, `addr=?`, `kind-of`), `macros-syntax.fx` 7,200,
+  `macros-align.fx` 6,300, `macros-scopes.fx` 5,500, transcribing,
+  numbering and source keys 11,000, `regcode.fx`'s keys 3,300 (an array
+  doubled). **Done:** `macros-syntax.fx`'s 4,900 were `words-have?`, a
+  walk of the kernel's 140 `reserved-words` for each name, about ten a
+  use, most names none of them. Now tables made once from the kernel's
+  lists (`reserved-table`, `description-words`, `description-heads`,
+  `type-forms`), a name found by its symbol's hash (as Clinger's `case`,
+  §46): 114,600 cells to 109,600, the lookups 275 a form. The Rust
+  expander's `reserved` a set made once, as its description words were
+  already. The rest is the expander's work on each node, no one place.

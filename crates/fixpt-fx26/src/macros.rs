@@ -5682,7 +5682,15 @@ pub(crate) fn lowered(t: &Rc<STy>) -> Option<Rc<STy>> {
 /// A form's name, `#%fx` or `#%toplevel`: never bound, so never a binder or
 /// a variable.
 fn reserved(name: &str) -> bool {
-    crate::top::KEYWORDS.contains(&name) || name == "#%fx" || name == "#%toplevel" || name == "define-syntax" || name == "define-syntax-rec"
+    // The set made once, as the FX-26 expander's table (`reserved-table`):
+    // a name looked for by its hash, not among the 140.
+    static RESERVED: std::sync::OnceLock<HashSet<&'static str>> = std::sync::OnceLock::new();
+    RESERVED
+        .get_or_init(|| {
+            let extra = ["#%fx", "#%toplevel", "define-syntax", "define-syntax-rec"];
+            crate::top::KEYWORDS.iter().copied().chain(extra).collect()
+        })
+        .contains(name)
 }
 
 /// Whether `name` is a word of a macro's definition: `syntax-rules`, a
