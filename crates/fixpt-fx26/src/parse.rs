@@ -3607,9 +3607,23 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         };
         let mut kept = Vec::new();
         for n in names {
-            let Some(name) = n.sym() else { return Err(FxError::at(n.span(), "`restrict` keeps names")) };
+            // A name, or a type's spelt as `import` spells it, `(type t)`
+            // (Heist's should-work note, entry 20).
+            let typed = match n.list().as_deref() {
+                Some([h, x]) if h.sym().is_some_and(|h| self.name(h) == "type") => x.sym(),
+                _ => None,
+            };
+            let name = match (n.sym(), typed) {
+                (Some(name), _) => name,
+                (None, Some(name)) => name,
+                (None, None) => return Err(FxError::at(n.span(), "`restrict` keeps names: `x`, or a type's `(type t)`")),
+            };
             let has = |ps: &[(Sym, TyId)]| ps.iter().any(|(m, _)| *m == name);
-            if !(abs.iter().any(|(m, _)| *m == name) || has(&descs) || has(&vals)) {
+            let a_type = abs.iter().any(|(m, _)| *m == name) || has(&descs);
+            if typed.is_some() && !a_type {
+                return Err(FxError::at(n.span(), format!("the module gives no type `{}`", self.name(name))));
+            }
+            if !(a_type || has(&vals)) {
                 return Err(FxError::at(n.span(), format!("the module gives no `{}`", self.name(name))));
             }
             kept.push(name);

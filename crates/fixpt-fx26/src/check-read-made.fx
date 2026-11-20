@@ -180,13 +180,31 @@
   (lambda (ns abs ds vs)
     (if (null? ns)
         nil
-        (let ((n (car ns)))
-          (if (not (syn-symbol? n))
-              (k-sfail "`restrict` keeps names" n)
-              (let ((m (syn-head n)))
-                (if (or (k-made-has? abs m) (k-made-has? ds m) (k-made-has? vs m))
-                    (cons m (k-kept-names (cdr ns) abs ds vs))
-                    (k-sfail (k-cat3 "the module gives no `" (symbol->string m) "`") n))))))))
+        (let* ((n (car ns)) (typed (k-type-kept n)))
+          (cond
+            ((syn-symbol? n)
+             (let ((m (syn-head n)))
+               (if (or (k-made-has? abs m) (k-made-has? ds m) (k-made-has? vs m))
+                   (cons m (k-kept-names (cdr ns) abs ds vs))
+                   (k-sfail (k-cat3 "the module gives no `" (symbol->string m) "`") n))))
+            ;; A type's spelt as `import` spells it, `(type t)` (Heist's
+            ;; should-work note, entry 20).
+            ((not (null? typed))
+             (let ((m (syn-head (car typed))))
+               (if (or (k-made-has? abs m) (k-made-has? ds m))
+                   (cons m (k-kept-names (cdr ns) abs ds vs))
+                   (k-sfail (k-cat3 "the module gives no type `" (symbol->string m) "`") n))))
+            (else (k-sfail "`restrict` keeps names: `x`, or a type's `(type t)`" n)))))))
+;; `x` of `(type x)`, `x` a name, in a list of one; none if `n` is not so.
+(define k-type-kept (->* (syn) k-syns)
+  (lambda (n)
+    (tagcase n
+      (lst (items d a b xpn)
+        (if (and (= (k-length items) 2) (syn-symbol? (car items))
+                 (symbol=? (syn-head (car items)) 'type) (syn-symbol? (car (cdr items))))
+            (cdr items)
+            nil))
+      (else y nil))))
 (define k-made-has? (->* (k-parts symbol) bool)
   (lambda (ps n)
     (and (not (null? ps)) (or (symbol=? (extract (car ps) 1) n) (k-made-has? (cdr ps) n)))))

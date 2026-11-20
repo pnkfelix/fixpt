@@ -8290,3 +8290,15 @@ a binder gathered by lists, `(x ...)`; a description's, so said; none,
 "no scope of the pattern's binders". Tests `macros/bind-*.fx`, `infer-shown-levels.fx`,
 `fixpt-cli/tests/signature_levels.rs`.
 
+**20, done (2026-11-20).** `restrict` keeps a type spelt as `import`
+spells one, `(type t)`, as well as by its plain name, both checkers
+(`restricted`, `k-kept-names`), refusing `(type x)` of no type; anything
+else is "`restrict` keeps names: `x`, or a type's `(type t)`". Tests
+`modules/restrict-type-*.fx`. And entry 24's `--module` hint is said only
+where the refusal is of a global read, not of any definitions-only file.
+**19, asked (2026-11-20):** a string among `module-parameters` binders is
+read by some ten places, both front ends (`module_parameters_of` twice,
+`module_parameters`, `parameters_sig`, `macros-shaper.fx`'s
+`module-from`, `macros-nodes.fx`'s binding structure, `macros-imports.fx`,
+`macros-shapes.fx`, `macros-align.fx`, `parser.fx`).
+

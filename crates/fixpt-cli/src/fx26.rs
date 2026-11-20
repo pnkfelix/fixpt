@@ -1264,10 +1264,11 @@ pub fn check(backend: Backend, name: &str, text: &str, module: bool) -> i32 {
         (Err(a), Err(b)) => fixpt_fx26::compare::same_error(a, b),
         _ => false,
     };
-    // A file of definitions alone refused as a program may mean it as a
-    // module file, its globals fixed: say how to check it so.
+    // A file of definitions alone refused for reading a global, which as a
+    // module file's it would not, may mean it so: say how to check it so.
+    let reads_global = |r: &fixpt_fx26::syn::Checked26| matches!(r, Err(e) if e.message.contains("(globals "));
     let hint = || {
-        if !module && std::path::Path::new(name).is_file() && definitions_alone(text) {
+        if !module && reads_global(&fx26) && std::path::Path::new(name).is_file() && definitions_alone(text) {
             println!("; checked as a program, whose globals a later definition may change: `fixpt check --module {name}` checks it as a module file");
         }
     };
