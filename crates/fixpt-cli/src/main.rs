@@ -41,6 +41,9 @@ usage:
   fixpt check INPUT              FX-26: both checkers (Rust and FX-26) on a
                                  file, `-` or program text; each form's type
                                  and effect, and where the checkers disagree
+  fixpt check --module FILE       a module file, checked as `load-module`
+                                 reads it, its type said: a file headed
+                                 `module-parameters` is so checked anyway
   fixpt check --reps[=text] INPUT
                                  each name defined, with its type's rep as
                                  the Rust checker exports it, in hexadecimal
@@ -462,6 +465,9 @@ fn run(args: &[String]) -> i32 {
             }
             // `compile --full-literals`: every literal in full, read back exactly.
             let full = cmd == "compile" && rest[1] == "--full-literals";
+            // `check --module`: the file a module file, as `load-module`
+            // reads it, however it begins.
+            let module = cmd == "check" && rest[1] == "--module";
             // `check --reps`: each definition's type as a rep (`--reps=text`, readable).
             let reps = match rest[1].as_str() {
                 "--reps" | "--reps=hex" if cmd == "check" => Some(false),
@@ -472,7 +478,7 @@ fn run(args: &[String]) -> i32 {
                 }
                 _ => None,
             };
-            let skip = 1 + (full || reps.is_some()) as usize;
+            let skip = 1 + (full || reps.is_some() || module) as usize;
             if rest.len() <= skip {
                 eprintln!("fixpt {cmd}: needs a file, `-` or a program");
                 return 2;
@@ -480,7 +486,7 @@ fn run(args: &[String]) -> i32 {
             match fx26::input(&rest[skip..]) {
                 Ok((name, text)) if cmd == "check" => match reps {
                     Some(readable) => fx26::check_reps(backend, &name, &text, readable),
-                    None => fx26::check(backend, &name, &text),
+                    None => fx26::check(backend, &name, &text, module),
                 },
                 Ok((name, text)) => fx26::compile(backend, &name, &text, full),
                 Err(e) => {
@@ -981,7 +987,7 @@ pub(crate) fn apply_heap_policy(host: &mut fixpt_runtime::host::Host) {
 }
 
 /// The options a command takes after it, left for it to read.
-const COMMAND_OPTIONS: [&str; 11] = ["--raw", "--check-sources", "--full-literals", "--reps", "--program", "--cellular", "--eval", "--check", "--compile", "--help", "-h"];
+const COMMAND_OPTIONS: [&str; 12] = ["--raw", "--check-sources", "--full-literals", "--reps", "--module", "--program", "--cellular", "--eval", "--check", "--compile", "--help", "-h"];
 
 /// The options, read from anywhere before a `--`; the rest of the words,
 /// in order, with the `--` and all after it. Or why not: an unknown option.

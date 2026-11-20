@@ -1222,13 +1222,32 @@ pub fn test(backend: Backend, name: &str, text: &str, runs: usize) -> i32 {
     i32::from(found)
 }
 
-pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
+pub fn check(backend: Backend, name: &str, text: &str, module: bool) -> i32 {
     let mut session = match start(backend) {
         Ok(s) => s,
         Err(code) => return code,
     };
     // A `load-module`'s path is from the file's directory, as `eval`'s is.
     session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
+    // A module file (Heist's should-work note, entry 24): one headed
+    // `module-parameters`, which no program is, or any with `--module`,
+    // checked as a `load-module` of it checks it, its globals the module's
+    // own, fixed, not a program's, which a later definition may change.
+    // What is said is the type its load has.
+    let module = module || headed_module(text);
+    let loaded;
+    let (name, text) = if module {
+        let Some(file) = std::path::Path::new(name).file_name().filter(|_| std::path::Path::new(name).is_file()) else {
+            eprintln!("fixpt check: a module file is a file: `{name}` is none");
+            return 2;
+        };
+        let file = file.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        println!("; {name}, checked as a module file");
+        loaded = format!("(load-module \"{file}\")");
+        (name, loaded.as_str())
+    } else {
+        (name, text)
+    };
     let (fx26, rust) = match fixpt_fx26::compare::both_checkers(&mut session, text) {
         Ok(both) => both,
         Err(e) => {
@@ -1245,9 +1264,19 @@ pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
         (Err(a), Err(b)) => fixpt_fx26::compare::same_error(a, b),
         _ => false,
     };
+    // A file of definitions alone refused as a program may mean it as a
+    // module file, its globals fixed: say how to check it so.
+    let hint = || {
+        if !module && std::path::Path::new(name).is_file() && definitions_alone(text) {
+            println!("; checked as a program, whose globals a later definition may change: `fixpt check --module {name}` checks it as a module file");
+        }
+    };
     if same {
         say(&fx26, "");
         println!("; both checkers agree");
+        if fx26.is_err() {
+            hint();
+        }
         i32::from(fx26.is_err())
     } else {
         say(&fx26, "FX-26: ");
@@ -1255,6 +1284,38 @@ pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
         println!("; the checkers disagree");
         1
     }
+}
+
+/// Whether `text`'s first form is `(module-parameters …)`: a module file's
+/// header, which begins no program.
+fn headed_module(text: &str) -> bool {
+    let mut interner = fixpt_read::Interner::new();
+    let first = fixpt_read::Reader::new(text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read();
+    match first {
+        Ok(Some(fixpt_read::Syntax { datum: fixpt_read::Datum::List { items, .. }, .. })) => {
+            matches!(items.first().map(|h| &h.datum), Some(fixpt_read::Datum::Symbol(s)) if interner.name(*s) == "module-parameters")
+        }
+        _ => false,
+    }
+}
+
+/// Whether `text`'s forms are definitions alone, and comments: no
+/// expression, as a module file's items may be.
+fn definitions_alone(text: &str) -> bool {
+    let mut interner = fixpt_read::Interner::new();
+    let Ok(forms) = fixpt_read::Reader::new(text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() else { return false };
+    let item = |s: &fixpt_read::Syntax| match &s.datum {
+        fixpt_read::Datum::Str(_) => true,
+        fixpt_read::Datum::List { items, .. } => match items.first().map(|h| &h.datum) {
+            Some(fixpt_read::Datum::Symbol(h)) => {
+                let h = interner.name(*h);
+                h.starts_with("define") || matches!(h, "hide" | "import" | "include" | "import-with-syntax" | "begin-for-syntax")
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    !forms.is_empty() && forms.iter().all(item)
 }
 
 /// `fixpt check --reps`: each name the program defines, in order, with its

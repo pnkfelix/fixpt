@@ -8192,7 +8192,7 @@ form: parse 1,600 a plain `define`, 5,900 a `syntax-rules` use; check
 `heist/docs/requests/bench/should-work/` (a draft of Heist's, not yet a
 request). Every repro run again on 15385cf5 (2026-11-20): each as quoted;
 12, 13 and 21 fixed already. Grouped:
-- **Bugs.** 15, 16 and 14 **done (2026-11-20)**, below. 24, `fixpt check` of
+- **Bugs.** 15, 16, 14 and 24 **done (2026-11-20)**, below. 24, `fixpt check` of
   a module file: a file of definitions alone is a program too, whose
   globals a later definition may change, so `b` reading `a` has an effect
   that in a module it has not; wanted (the user's, 2026-11-20), `fixpt
@@ -8253,4 +8253,13 @@ lines. Tests `procedural/for-syntax-load.fx` (a load from `../`, and its
 file's own load from its directory) and `for-syntax-load-missing.fx`; the
 procedural programs run from their directory now, as `fixpt eval` runs
 one. Heist's repro gives 3, run from anywhere.
+
+**24, done (2026-11-20).** `fixpt check` of a file headed
+`module-parameters` checks it as `load-module` reads it (it was "not an
+expression in the FX-26 kernel"), as `--module` does any file; what is
+said is the type its load has, after `; FILE, checked as a module file`.
+A file of definitions alone refused as a program says `fixpt check
+--module FILE` (`definitions_alone`). No header of intent (the user's, not
+yet). Entries 18 and 19's files now give their own refusals. Tests
+`fixpt-cli/tests/check_module.rs`.
 
