@@ -21,7 +21,7 @@
 (import reader-types atom lst dotted (type syn))
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth mk-list mk-symbol
         parse-tag p-ok p-err pfail-at (type syns-a names))
-(import types-module split syn-nil? proper-items show-syn read-addr (type addr))
+(import types-module split syn-nil? proper-items show-syn read-addr addr=? (type addr))
 (import facts-module elaborated list-parts list-with head-is? sym-is? steps=? form? named open)
 (import show-module sig-text)
 
@@ -160,13 +160,35 @@
                                         (syn-start (car made)) (syn-end (car made)))))
                         (else made))))
       (begin (node-restore! saved) (tuple tree facts made2)))))
-(define binds-of (->* (imports) (listof (tupleof int addr label) acyclic))
+(define binds-of (->* (imports) (listof (tupleof int addr (listof labels acyclic)) acyclic))
   (lambda (xs)
     (if (null? xs)
         nil
         (let* ((r (extract (car xs) 1)) (tp (extract (car xs) 2))
-               (w (want! r tp)) (l (bound (extract (car xs) 3) r)))
+               (w (want! r tp)) (l (levels (extract (car xs) 3) r)))
           (cons (tuple r tp l) (binds-of (cdr xs)))))))
+;; The levels import `b` of region `r` is, innermost first: a ribcage's
+;; rings, `(cage ring …)`, each one; else one (`shown.rs`'s `levels`).
+(define levels (->* (syn int) (listof labels acyclic))
+  (lambda (b r)
+    (let ((items (proper-items b)))
+      (if (and (head-is? b "cage") (> (len items) 2))
+          (rings-levels (cdr items) r)
+          (list (level b r))))))
+(define rings-levels (->* (syns-a int) (listof labels acyclic))
+  (lambda (rs r)
+    (if (null? rs)
+        nil
+        (cons (if (head-is? (car rs) "at") (list (bound (car rs) r)) (level (car rs) r))
+              (rings-levels (cdr rs) r)))))
+;; One level of a `bind`, import `b` of region `r`: its label, in a list of
+;; one; or, a rib of several, `(rho e …)`, theirs (`shown.rs`'s `level`).
+(define level (->* (syn int) labels)
+  (lambda (b r)
+    (let ((items (proper-items b)))
+      (if (and (head-is? b "rho") (> (len items) 2))
+          (entries-of (cdr items) r)
+          (list (bound b r))))))
 ;; A node's export: a rib's entries, or a ribcage's rings, innermost last.
 (define exports-of (->* (syn) labels)
   (lambda (b)
@@ -200,17 +222,42 @@
                     l
                     (mk-list (list l (car (extract (car ds) 2))) a b))
                 (defined-said (cdr ds) a b))))))
-(define bind-facts (->* ((listof (tupleof int addr label) acyclic) int int) syns-a)
+;; A part's imports, innermost first, one fact, its levels outermost first
+;; (`macros-facts.fx`'s `bind`); a repetition's, a fact each.
+(define-type binds (listof (tupleof int addr (listof labels acyclic)) acyclic))
+(define bind-facts (->* (binds int int) syns-a)
   (lambda (bs a b)
     (if (null? bs)
         nil
-        (let* ((r (extract (car bs) 1))
-               (f (mk-list (list (mk-symbol "bind" a b) (said (extract (car bs) 3) a b)
-                                 (mk-symbol "in" a b)
-                                 (name-syn (name-of r (extract (car bs) 2)) a b))
+        (let* ((r (extract (car bs) 1)) (tp (extract (car bs) 2))
+               (same (if (= r 0) (binds-into tp (cdr bs)) nil))
+               (levels (append (extract (car bs) 3) same))
+               (f (mk-list (append (cons (mk-symbol "bind" a b) (levels-said (reverse levels) a b))
+                                   (list (mk-symbol "in" a b) (name-syn (name-of r tp) a b)))
                            a b))
-               (rest (bind-facts (cdr bs) a b)))
+               (rest (bind-facts (if (= r 0) (binds-not-into tp (cdr bs)) (cdr bs)) a b)))
           (if (= r 0) (cons f rest) (cons f (cons (mk-symbol "..." a b) rest)))))))
+(define binds-into (->* (addr binds) (listof labels acyclic))
+  (lambda (tp bs)
+    (cond ((null? bs) nil)
+          ((and (= (extract (car bs) 1) 0) (addr=? (extract (car bs) 2) tp))
+           (append (extract (car bs) 3) (binds-into tp (cdr bs))))
+          (else (binds-into tp (cdr bs))))))
+(define binds-not-into
+  (->* (addr binds) binds)
+  (lambda (tp bs)
+    (cond ((null? bs) nil)
+          ((and (= (extract (car bs) 1) 0) (addr=? (extract (car bs) 2) tp))
+           (binds-not-into tp (cdr bs)))
+          (else (cons (car bs) (binds-not-into tp (cdr bs)))))))
+(define levels-said (->* ((listof labels acyclic) int int) syns-a)
+  (lambda (ls a b)
+    (if (null? ls)
+        nil
+        (cons (if (null? (cdr (car ls)))
+                  (said (car (car ls)) a b)
+                  (mk-list (said-each (car ls) a b) a b))
+              (levels-said (cdr ls) a b)))))
 (define said-each (->* (labels int int) syns-a)
   (lambda (ls a b) (if (null? ls) nil (cons (said (car ls) a b) (said-each (cdr ls) a b)))))
 ;; A label said: its name, or `(name ...)`.

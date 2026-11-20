@@ -8263,3 +8263,25 @@ A file of definitions alone refused as a program says `fixpt check
 yet). Entries 18 and 19's files now give their own refusals. Tests
 `fixpt-cli/tests/check_module.rs`.
 
+**1 and 2, done (2026-11-20; the user's: one `bind` of explicit levels,
+the old form warned of, then refused).** A part's scope levels are one
+fact, `(bind L … in name)`, outermost first, each a label, `(x ...)`, or a
+list of them, one rib (`contract.rs`'s `level`, `macros-facts.fx`'s
+`level`); several, one import of a ribcage, innermost first, as inference
+gives (`cage_of`, `cage-of`), so the printers show inferred nested levels
+in facts (`levels`, both), `infer-shown-herman.fx`'s two rings among them
+(now `infer-shown-levels.fx`; Herman's form kept for an import into a
+list's tail). The order was the one of separate facts, innermost first,
+written nowhere; it says which binder a name a use gives twice means.
+Two `bind`s into one part are read as before and warned of once, with the
+fact that says it (`contract::notes_taken`, `say_signature_notes`). Heist
+has five (kit's `loop` and one more, `editor/buffer.fx` two,
+`editor/frame.fx`); **left:** refuse them once Heist has moved. `(bind g
+... in b)` is refused for good (the user's): `(g ...)` is every
+repetition's together, and each inside the one before is a
+`letrec-shape`'s `export*`, as `my-let*`; a signature a template writes
+gets its levels from the template's own ellipsis. The refusal "placed in the scope of
+other bindings than its signature says it is" still names nothing (entry
+2's second ask). Tests `macros/bind-*.fx`, `infer-shown-levels.fx`,
+`fixpt-cli/tests/signature_levels.rs`.
+

@@ -70,6 +70,17 @@ pub(crate) fn is_contract(s: &Syn, interner: &Interner) -> bool {
     items.len() >= 3 && items[0].sym().is_some_and(|h| interner.name(h) == "macro") && matches!(head(&items[1]).as_deref(), Some("_" | "letrec-shape"))
 }
 
+thread_local! {
+    /// What reading signatures found to say, not refused (yet): a part
+    /// bound into by two facts.
+    static NOTES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// What reading signatures since found to say, taken.
+pub(crate) fn notes_taken() -> Vec<String> {
+    NOTES.with(|n| std::mem::take(&mut *n.borrow_mut()))
+}
+
 /// Signature `s`, in shapes and facts, as Herman's: `(macro/addressed σ
 /// made)`.
 pub(crate) fn elaborated(s: &Syn, interner: &mut Interner) -> R<Syn> {
@@ -361,6 +372,10 @@ impl Cx<'_> {
         // Each repetition's facts, `(bind v in e) ...`: by the list's path,
         // the part's in the element, the binding.
         let mut each: Vec<(Vec<bool>, Vec<bool>, Syn)> = Vec::new();
+        // Each part bound into, and its levels, outermost first, of every
+        // fact that names it (a later fact's outside an earlier's).
+        let mut bound_into: Vec<(Sym, Vec<Syn>)> = Vec::new();
+        let mut facts_into: Vec<Sym> = Vec::new();
         let mut i = 0;
         while i < fs.len() {
             let f = &fs[i];
@@ -376,14 +391,37 @@ impl Cx<'_> {
             let items = f.list().unwrap_or_default();
             let head = items.first().and_then(|h| h.sym()).map(|h| self.name(h));
             match (head.as_deref(), &items[..]) {
-                (Some("bind"), [_, l, kw, m]) if kw.sym().is_some_and(|k| self.name(k) == "in") => {
-                    let target = m.sym().and_then(|m| labels.get(&m).cloned()).ok_or_else(|| FxError::at(m.at(), "`(bind L in name)`: `name` a label of this node"))?;
+                // `(bind L … in name)`: `name`'s scope levels, outermost
+                // first, each `L` a label, `(label ...)`, or a list of them,
+                // one rib (Heist's should-work note, entries 1 and 2).
+                (Some("bind"), [_, levels @ .., kw, m]) if !levels.is_empty() && kw.sym().is_some_and(|k| self.name(k) == "in") => {
+                    let target = m.sym().and_then(|m| labels.get(&m).cloned()).ok_or_else(|| FxError::at(m.at(), "`(bind L … in name)`: `name` a label of this node"))?;
                     let Label::Here(tp, _) = target else {
                         return Err(FxError::at(m.at(), "a fact binding in a repeated part is each repetition's: followed by `...`"));
                     };
-                    let (b, adds) = self.bound(l, labels, false)?;
-                    self.add_elements(&mut elements, adds);
+                    let mut bs = Vec::new();
+                    for l in levels {
+                        // No level for each repetition: a `letrec-shape`'s
+                        // `export*` says that (the user's, 2026-11-20).
+                        if self.dots(l) {
+                            return Err(FxError::at(l.at(), "a level is a label, `(x ...)` (every repetition's, together), or a list of them: for each repetition inside the one before, a `letrec-shape` whose node says `export*`, as `my-let*`'s does"));
+                        }
+                        let (b, adds) = self.level(l, labels)?;
+                        self.add_elements(&mut elements, adds);
+                        bs.push(b);
+                    }
+                    // One level, its import; several, one import of a
+                    // ribcage of them, innermost first, as inference has it.
+                    let b = if bs.len() == 1 { bs.pop().expect("one") } else { self.cage_of(f.at(), bs) };
                     imports.push((tp, b));
+                    let name = m.sym().expect("a label");
+                    match bound_into.iter_mut().find(|(n, _)| *n == name) {
+                        Some((_, ls)) => {
+                            ls.splice(0..0, levels.iter().cloned());
+                        }
+                        None => bound_into.push((name, levels.to_vec())),
+                    }
+                    facts_into.push(name);
                 }
                 (Some("export"), [_, ls @ ..]) if !top => {
                     for l in ls {
@@ -404,7 +442,16 @@ impl Cx<'_> {
                     rings = Some(rs);
                 }
                 (Some("export" | "export*"), _) => return Err(FxError::at(f.at(), "what a use defines is said in what its signature makes, `(defn label …)`: the top node exports nothing")),
-                _ => return Err(FxError::at(f.at(), "a fact is `(bind L in name)`, `(export L …)` or `(export* L …)`")),
+                _ => return Err(FxError::at(f.at(), "a fact is `(bind L … in name)`, `(export L …)` or `(export* L …)`")),
+            }
+        }
+        // A part bound into by two facts: read as before, its later fact's
+        // levels outside an earlier's, and said (to be refused).
+        for (name, levels) in &bound_into {
+            if facts_into.iter().filter(|n| *n == name).count() > 1 {
+                let written: Vec<String> = levels.iter().map(|l| l.written(self.interner)).collect();
+                let one = format!("(bind {} in {})", written.join(" "), self.name(*name));
+                NOTES.with(|n| n.borrow_mut().push(format!("`{}` is bound into by more than one fact, the later's levels outside the earlier's: write one, its levels outermost first, `{one}`; two will be refused", self.name(*name))));
             }
         }
         let mut sigma = sigma;
@@ -520,6 +567,43 @@ impl Cx<'_> {
             Syn::lst(at, vec![rho, entry])
         };
         Ok((b, adds))
+    }
+
+    /// Levels `bs`, outermost first, each a level's import (`(rho …)` or
+    /// `(cage (at path))`), as one import: `(cage ring …)`, innermost first.
+    fn cage_of(&mut self, at: At, bs: Vec<Syn>) -> Syn {
+        let mut items = vec![self.sym(at, "cage")];
+        for b in bs.into_iter().rev() {
+            let l = b.list().unwrap_or_default();
+            let cage_at = l.first().and_then(|h| h.sym()).is_some_and(|h| self.name(h) == "cage");
+            items.push(if cage_at { l[1] } else { b });
+        }
+        Syn::lst(at, items)
+    }
+
+    /// One level of a `bind`: `L`'s, as `bound`; or, a list of labels (not
+    /// `(label ...)`), one rib of them, `(rho e …)`.
+    fn level(&mut self, l: &Syn, labels: &HashMap<Sym, Label>) -> R<(Syn, Vec<(Vec<bool>, Syn)>)> {
+        let items = l.list();
+        let rib = match items.as_deref() {
+            Some([_, d]) if self.dots(d) => None,
+            Some(xs) if !xs.is_empty() => Some(xs.to_vec()),
+            Some(_) => return Err(FxError::at(l.at(), "a level of a `bind`: a label, `(label ...)`, or a list of them, one rib")),
+            None => None,
+        };
+        let Some(xs) = rib else { return self.bound(l, labels, false) };
+        let at = l.at();
+        let mut entries = vec![self.sym(at, "rho")];
+        let mut all = Vec::new();
+        for x in &xs {
+            let (e, adds) = self.entry(x, labels, false)?;
+            if e.list().and_then(|i| i.first().and_then(|h| h.sym())).is_some_and(|h| self.name(h) == "at") {
+                return Err(FxError::at(x.at(), "a part that gives a ribcage is a level of its own, not one of a rib's"));
+            }
+            entries.push(e);
+            all.extend(adds);
+        }
+        Ok((Syn::lst(at, entries), all))
     }
 
     /// `L`, a label or `(label ...)`, as a rib's entry `(path δ)`, or, in a

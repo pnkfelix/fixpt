@@ -52,7 +52,10 @@ pub(crate) fn in_shapes(sig: &Syn, clause: Option<&Syn>, interner: &mut Interner
     all.append(&mut facts);
     let shown = Syn::lst(at, all);
     // Said the same, or not shown.
-    let back = super::contract::elaborated(&shown, cx.interner).ok()?;
+    let back = super::contract::elaborated(&shown, cx.interner).ok();
+    // What it says of what is shown is not the program's to hear.
+    super::contract::notes_taken();
+    let back = back?;
     (flat(&back, cx.interner) == flat(sig, cx.interner)).then_some(shown)
 }
 
@@ -105,10 +108,12 @@ impl Node {
     }
 }
 
-/// What a fact names: a part, or `(v ...)`, every repetition's.
+/// What a fact names: a part, or `(v ...)`, every repetition's; or, a
+/// level of a `bind`, a rib of them, `(a b …)`.
 enum Named {
     Part(usize, Vec<bool>),
     Every(usize, Vec<bool>),
+    Rib(Vec<Named>),
 }
 
 impl Cx<'_> {
@@ -150,7 +155,7 @@ impl Cx<'_> {
         let mut binds = Vec::new();
         for (r, tp, b) in std::mem::take(&mut n.imports) {
             n.want(r, &tp);
-            let l = self.bound(&b, r, &mut n)?;
+            let l = self.levels(&b, r, &mut n)?;
             binds.push((r, tp, l));
         }
         let mut exports = Vec::new();
@@ -196,11 +201,28 @@ impl Cx<'_> {
         }
         let at = sigma.at();
         let mut facts = Vec::new();
-        for (r, tp, l) in binds {
+        // A part's imports, innermost first, one fact: its levels outermost
+        // first (`contract.rs`'s `bind`); a repetition's, a fact each.
+        let mut grouped: Vec<(usize, Vec<bool>, Vec<Named>)> = Vec::new();
+        for (r, tp, mut l) in binds {
+            l.reverse();
+            match grouped.iter_mut().find(|(gr, gp, _)| r == 0 && *gr == 0 && *gp == tp) {
+                Some((_, _, ls)) => {
+                    l.append(ls);
+                    *ls = l;
+                }
+                None => grouped.push((r, tp, l)),
+            }
+        }
+        for (r, tp, ls) in grouped {
             let (bind, kw) = (self.sym(at, "bind"), self.sym(at, "in"));
             let t = Syn::symbol(at, n.name_of(r, &tp)?, self.interner);
-            let l = self.said(&l, &n, at)?;
-            facts.push(Syn::lst(at, vec![bind, l, kw, t]));
+            let mut items = vec![bind];
+            for l in &ls {
+                items.push(self.said(l, &n, at)?);
+            }
+            items.extend([kw, t]);
+            facts.push(Syn::lst(at, items));
             if r != 0 {
                 facts.push(self.sym(at, "..."));
             }
@@ -238,6 +260,27 @@ impl Cx<'_> {
                 let dots = self.sym(at, "...");
                 Some(Syn::lst(at, vec![name, dots]))
             }
+            Named::Rib(es) => Some(Syn::lst(at, es.iter().map(|e| self.said(e, n, at)).collect::<Option<Vec<_>>>()?)),
+        }
+    }
+
+    /// The levels import `b` of region `r` is, innermost first: a ribcage's
+    /// rings, `(cage ring …)`, each one; else one (`contract.rs`'s `cage_of`).
+    fn levels(&mut self, b: &Syn, r: usize, n: &mut Node) -> Option<Vec<Named>> {
+        let items = b.list()?;
+        if self.interner.name(items[0].sym()?) == "cage" && items.len() > 2 {
+            return items[1..].iter().map(|ring| if self.head(ring).as_deref() == Some("at") { self.bound(ring, r, n) } else { self.level(ring, r, n) }).collect();
+        }
+        Some(vec![self.level(b, r, n)?])
+    }
+
+    /// One level of a `bind`, import `b` of region `r`: its label, or, a rib
+    /// of several, `(rho e …)`, their list (`contract.rs`'s `level`).
+    fn level(&mut self, b: &Syn, r: usize, n: &mut Node) -> Option<Named> {
+        let items = b.list()?;
+        match (self.interner.name(items[0].sym()?), &items[1..]) {
+            ("rho", es) if es.len() > 1 => Some(Named::Rib(es.iter().map(|e| self.entry(e, r, n)).collect::<Option<Vec<_>>>()?)),
+            _ => self.bound(b, r, n),
         }
     }
 

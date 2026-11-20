@@ -2068,6 +2068,7 @@ impl Macros {
         // `(macro (export σ (rho (ℓ δ) …)) defn)`, which is read the same.
         // In shapes and facts: elaborated to Herman's form, which is read.
         let sig = if contract::is_contract(&sig, interner) { contract::elaborated(&sig, interner)? } else { sig };
+        say_signature_notes();
         // Herman's form, as `macro/addressed` writes it: its addresses paths.
         let addressed = sig.list().and_then(|l| l.first().and_then(|h| h.sym())).is_some_and(|h| interner.name(h) == "macro/addressed");
         let (sig, defn, desc) = match sig.list().as_deref() {
@@ -5689,6 +5690,19 @@ pub(crate) fn lowered(t: &Rc<STy>) -> Option<Rc<STy>> {
         std::cmp::Ordering::Less => None,
     });
     if refers.get() { None } else { Some(r.unwrap_or_else(|| t.clone())) }
+}
+
+/// What reading a signature found to say (`contract::notes_taken`), said
+/// once a thread each: its uses read it again and again.
+fn say_signature_notes() {
+    thread_local! {
+        static SAID: std::cell::RefCell<fixpt_hash::HashSet<String>> = std::cell::RefCell::new(fixpt_hash::HashSet::default());
+    }
+    for n in contract::notes_taken() {
+        if SAID.with(|s| s.borrow_mut().insert(n.clone())) {
+            eprintln!("fixpt: warning: a signature: {n}");
+        }
+    }
 }
 
 /// The deepest part of `s` whose text, as `s` is written (`Syn::written`),

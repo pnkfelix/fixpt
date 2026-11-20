@@ -454,11 +454,13 @@
         (tuple imports rib rings star elems)
         (let* ((f (car fs)) (items (proper-items f)))
           (cond
-            ((and (head-is? f "bind") (= (len items) 4) (sym-is? (nth items 2) "in"))
-             (let* ((m (nth items 3))
+            ;; `(bind L … in name)`: `name`'s levels, outermost first.
+            ((and (head-is? f "bind") (>= (len items) 4)
+                  (sym-is? (nth items (- (len items) 2)) "in"))
+             (let* ((m (nth items (- (len items) 1)))
                     (target (if (syn-symbol? m) (label-of (syn-symbol m) ls) nil)))
                (cond ((null? target)
-                      (begin (fail-at fail "`(bind L in name)`: `name` a label of this node" m)
+                      (begin (fail-at fail "`(bind L … in name)`: `name` a label of this node" m)
                              (tuple imports rib rings star elems)))
                      ((= (extract (car target) 2) 1)
                       (begin (fail-at fail (string-append "a fact binding in a repeated part is "
@@ -466,10 +468,17 @@
                                       m)
                              (tuple imports rib rings star elems)))
                      (else
-                      (let ((e (bound fail (nth items 1) ls)))
+                      ;; One level, its import; several, one of a ribcage of
+                      ;; them, innermost first, as inference has it.
+                      (let ((e (levels-bound fail (reverse (first-n (cdr items) (- (len items) 3)))
+                                             ls nil elems)))
                         (facts-each fail (cdr fs) ls top
-                                    (cons (tuple (extract (car target) 3) (extract e 1)) imports)
-                                    rib rings star (append (extract e 2) elems)))))))
+                                    (cons (tuple (extract (car target) 3)
+                                                 (if (null? (cdr (extract e 1)))
+                                                     (car (extract e 1))
+                                                     (cage-of (extract e 1) f)))
+                                          imports)
+                                    rib rings star (extract e 2)))))))
             ((and (head-is? f "export") (not top))
              (let ((r (entries-of fail (cdr items) ls #f nil elems)))
                (facts-each fail (cdr fs) ls top imports (append (extract r 1) rib) rings star
@@ -485,8 +494,8 @@
                              f)
                     (tuple imports rib rings star elems)))
             (else
-             (begin (fail-at fail (string-append "a fact is `(bind L in name)`, `(export L …)` or "
-                                                 "`(export* L …)`")
+             (begin (fail-at fail (string-append "a fact is `(bind L … in name)`, `(export L …)` "
+                                                 "or `(export* L …)`")
                              f)
                     (tuple imports rib rings star elems))))))))
 ;; Each of `L`s `xs` an entry (or a ring), onto `out` (the last first); and
@@ -498,6 +507,59 @@
         (let ((e (entry fail (car xs) ls ring)))
           (entries-of fail (cdr xs) ls ring (cons (extract e 1) out)
                       (append (extract e 2) elems))))))
+;; Levels `xs`, innermost first, of a `bind`: each level's import, onto
+;; `out` (the last first), and what each repeated element must export.
+(define levels-bound (->* (fails syns-a labels syns-a adds) (tupleof syns-a adds))
+  (lambda (fail xs ls out elems)
+    (if (null? xs)
+        (tuple (reverse out) elems)
+        (let ((e (level fail (car xs) ls)))
+          (levels-bound fail (cdr xs) ls (cons (extract e 1) out) (append (extract e 2) elems))))))
+;; Levels' imports `bs`, innermost first, as one import, `(cage ring …)`.
+(define cage-of (->* (syns-a syn) syn)
+  (lambda (bs f)
+    (mk-list (cons (mk-symbol "cage" (syn-start f) (syn-end f)) (rings-of-levels bs))
+             (syn-start f) (syn-end f))))
+(define rings-of-levels (->* (syns-a) syns-a)
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (cons (if (head-is? (car bs) "cage") (nth (proper-items (car bs)) 1) (car bs))
+              (rings-of-levels (cdr bs))))))
+;; One level of a `bind`: `L`'s (`bound`), or, a list of labels (not `(label
+;; ...)`), one rib of them, `(rho e …)` (`contract.rs`'s `level`).
+(define level (->* (fails syn labels) (tupleof syn adds))
+  (lambda (fail l ls)
+    (let* ((items (proper-items l)) (a (syn-start l)) (b (syn-end l))
+           (rep (and (= (len items) 2) (sym-is? (nth items 1) "..."))))
+      ;; No level for each repetition: a `letrec-shape`'s `export*` says that.
+      (cond ((sym-is? l "...")
+             (begin (fail-at fail (string-append "a level is a label, `(x ...)` (every "
+                                                 "repetition's, together), or a list of them: for "
+                                                 "each repetition inside the one before, a "
+                                                 "`letrec-shape` whose node says `export*`, as "
+                                                 "`my-let*`'s does")
+                             l)
+                    (tuple (mk-list nil a b) (the adds nil))))
+            ((or (syn-symbol? l) rep) (bound fail l ls))
+            ((null? items)
+             (begin (fail-at fail (string-append "a level of a `bind`: a label, `(label ...)`, "
+                                                 "or a list of them, one rib")
+                             l)
+                    (tuple (mk-list nil a b) (the adds nil))))
+            (else
+             (let* ((r (entries-of fail items ls #f nil nil)) (es (reverse (extract r 1))))
+               (begin
+                 (if (any-ring? es)
+                     (fail-at fail (string-append "a part that gives a ribcage is a level of its "
+                                                  "own, not one of a rib's")
+                              l)
+                     #u)
+                 (tuple (mk-list (cons (mk-symbol "rho" a b) es) a b) (extract r 2)))))))))
+(define any-ring? (->* (syns-a) bool)
+  (lambda (es) (and (not (null? es)) (or (head-is? (car es) "at") (any-ring? (cdr es))))))
+(define first-n (->* (syns-a int) syns-a)
+  (lambda (xs n) (if (or (= n 0) (null? xs)) nil (cons (car xs) (first-n (cdr xs) (- n 1))))))
 ;; What `(bind L in …)` imports: one level of `L`'s, a ribcage if it gives
 ;; one.
 (define bound (->* (fails syn labels) (tupleof syn adds))
