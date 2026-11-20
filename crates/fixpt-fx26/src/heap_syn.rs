@@ -1541,7 +1541,7 @@ fn read_at(text: &str, base: i64, file: FileId, start: usize, interner: &mut Int
 /// `forms`, a text's, a string among the binders of its first form, `(module-parameters
 /// (binder …))`, dropped: a comment, as among a module's items (TODO §304, Heist's
 /// should-work note, entry 19). Read past here, as the text is read, so that nothing
-/// that reads the binders meets one; the text, and what `read` makes of it, keep it.
+/// that reads the binders meets one; the text keeps it, for any other reader of it.
 /// `eager-reader.fx`'s `parameters-unnoted` is the same.
 fn unnoted(mut forms: Vec<Syn>, interner: &Interner) -> Vec<Syn> {
     if let Some(first) = forms.first_mut() {

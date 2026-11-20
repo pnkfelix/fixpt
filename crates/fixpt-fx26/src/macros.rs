@@ -1395,8 +1395,14 @@ impl Macros {
             // a list's shape, which a name never has.
             let name = pvars.get(&n).is_some_and(|p| matches!(&*p.core, Bvar | Dvar | Id | Label));
             let list = matches!(&*self.unfold(t), Pair(..) | Nil | Lambda);
+            // And a label's, never a reserved word a signature writes,
+            // which no use gives it (Heist's should-work note, entry 5,
+            // TODO §304): `tagcase`'s `(t x body)` of a label `t` is no
+            // `(else y body)`.
+            let unreserved = pvars.get(&n).is_some_and(|p| matches!(&*p.core, Label));
+            let word = matches!(&*self.unfold(t), Literal(w) if reserved(interner.name(*w)));
             let mark = self.mark_of(n).is_some();
-            if (mode == Mode::Pattern && !lit && !mark && interner.name(n) != "_") || (mode == Mode::Template && pvars.contains_key(&n) && !(name && list)) {
+            if (mode == Mode::Pattern && !lit && !mark && interner.name(n) != "_") || (mode == Mode::Template && pvars.contains_key(&n) && !(name && list) && !(unreserved && word)) {
                 return true;
             }
             // A trailmark, where a use, a pattern or a template writes one:
@@ -1434,7 +1440,8 @@ impl Macros {
             Mark(_, id) => shape.sym().and_then(|n| self.mark_of(n)).is_some_and(|m| m.id == *id),
             Bvar | Dvar => shape.sym().is_some_and(|n| mode == Mode::Program || !reserved(interner.name(n))),
             Id => shape.sym().is_some(),
-            Label => matches!(shape, Shape::Keyword(_)) || (matches!(mode, Mode::Use | Mode::Program) && shape.sym().is_some()) || (mode == Mode::Program && shape == Shape::Atom && matches!(syn().view(), V::Number(_))),
+            // A use's label any name but a reserved word, as a binder.
+            Label => matches!(shape, Shape::Keyword(_)) || (matches!(mode, Mode::Use | Mode::Program) && shape.sym().is_some_and(|n| mode == Mode::Program || !reserved(interner.name(n)))) || (mode == Mode::Program && shape == Shape::Atom && matches!(syn().view(), V::Number(_))),
             Expr => (mode == Mode::Program || !shape.sym().is_some_and(|n| reserved(interner.name(n)))) && shape != Shape::Nil,
             Lambda => shape == Shape::List && lambda_shaped(&syn(), interner),
             Defn => matches!(shape, Shape::List | Shape::Dotted),
@@ -3829,6 +3836,9 @@ impl Aligner<'_> {
             },
             STy::Label => match shape {
                 Shape::Keyword(_) => Ok(None),
+                // A use's any name but a reserved word, which a template's
+                // label never is (`fits_shaped`), its form's word.
+                Shape::Symbol(n) if self.mode == Mode::Use && reserved(self.name(n)) => Err(fail(format!("`{}` is a reserved word, not a tag or label", self.name(n)))),
                 Shape::Symbol(_) if matches!(self.mode, Mode::Use | Mode::Program) => Ok(None),
                 // A product's field by its position, a program's.
                 Shape::Atom if self.mode == Mode::Program && matches!(s.view(), V::Number(_)) => Ok(None),

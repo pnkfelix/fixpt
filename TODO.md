@@ -8304,9 +8304,22 @@ read by some ten places, both front ends (`module_parameters_of` twice,
 **19, done (2026-11-20):** the strings are dropped once, as a file is read,
 both front ends (`heap_syn.rs`'s `unnoted` in `read_at` and
 `read_syn_first`, `eager-reader.fx`'s `parameters-unnoted` in
-`read-text-at`), so none of those ten meets one; the text, and the datum
-`read` makes of it, keep them (the user's: preserved by `read` and
-`write`, which a transpiler such as Kayak may make comments of). Test
+`read-text-at`), so none of those ten meets one; the text keeps them, for
+any other reader (the user's: a datum preserved by reading and writing,
+which a transpiler such as Kayak may make comments of; FX-26 has no `read`
+of a program's text, so the d7dc11c8 message's "the datum `read` makes"
+is the Rust datum reader's, or Kayak's) Test
 `modules/module-parameters-noted.fx`. Heist's repro now stops at its own
 `first-name`, given by both parameters.
+
+**5, done (2026-11-20).** `(tagcase e (t x body) (else y 0))` of a `label`
+`t` was "could be of more than one of this part's shapes": a template's
+pattern variable fits any shape, so `t` fit `(else y body)` too, and a
+use's label might be `else` indeed (any symbol). Now a use's label is no
+reserved word, as a binder (`` `else` is a reserved word, not a tag or
+label ``), and a template's `label` never fits a reserved word a signature
+writes (`fits_shaped`, `fits-within?`, `pvar-shape`'s 3), both expanders.
+Not a `bvar`'s: a use's binder may be any name the checkers let it bind.
+Tests `macros/tagcase-label-tag.fx` (Heist's `want`, 3),
+`tagcase-label-else.fx`. s7st's `want` may be `syntax-rules` now.
 

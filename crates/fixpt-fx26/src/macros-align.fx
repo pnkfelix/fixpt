@@ -207,9 +207,11 @@
               (said (string-append (shown) " is not a variable"))))
         (s-label ()
           (cond ((syn-keyword? s) #u)
-                ((and (syn-symbol? s) (>= mode 2)) #u)
-                ;; A program's field by position.
-                ((and (= mode 3) (syn-number? s)) #u)
+                ;; A use's any name but a reserved word, as no template's (`fits-within?`).
+                ((and (syn-symbol? s) (>= mode 2) (or (= mode 3) (not (reserved-syn? s)))) #u)
+                ((and (= mode 3) (syn-number? s)) #u) ; a program's field by position
+                ((and (syn-symbol? s) (= mode 2))
+                 (said (string-append "`" (syn-name s) "` is a reserved word, not a tag or label")))
                 ((syn-symbol? s)
                  (said (string-append "a tag or label in a template is a keyword: `#:"
                                       (syn-name s) "`, not `" (syn-name s) "`")))
@@ -268,8 +270,7 @@
     (cond ((and (syn-symbol? s) (= mode 1) (macro? (syn-symbol s)))
            (fail-at fail (string-append "`" (syn-name s) "` is a macro's name, which is not bound")
                     s))
-          ;; A program's binder: any name the checkers let it bind, which they
-          ;; decide.
+          ;; A program's binder: any name the checkers let it bind, which they decide.
           ((and (syn-symbol? s) (= mode 3)) (with-kids at (k-binder (syn-symbol s) d)))
           ((and (syn-symbol? s) (> (mark-now (syn-symbol s)) 0))
            (fail-at fail (string-append "`" (syn-name s) "` is a trailmark, which is not bound") s))

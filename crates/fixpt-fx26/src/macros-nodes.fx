@@ -13,6 +13,7 @@
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
+        reserved-sym? literal-of
         sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
         syn-number? s-mark s-lambda s-defn scope-definitions scope-sigs
         bind-rib bind-cage bind-direct bind-earlier
@@ -344,12 +345,16 @@
           ((symbol=? n (extract (car ps) 1)) (list (extract (car ps) 2)))
           (else (pvar-of n (cdr ps))))))
 (define pvar? (->* (symbol pvars) bool) (lambda (n ps) (not (null? (pvar-of n ps)))))
-;; 0 if `n` is no pattern variable of `ps`; 1 if it is a name's (`bvar`,
-;; `dvar`, `id`, `label`), which is never a list; else 2.
+;; 0 if `n` is no pattern variable of `ps`; 1 if it is a `bvar`'s, `dvar`'s
+;; or `id`'s, a name, never a list; 3 a `label`'s, a name that is never a
+;; reserved word either (`fits-within?`); else 2.
 (define pvar-shape (->* (symbol pvars) int)
   (lambda (n ps)
     (let ((p (pvar-of n ps)))
-      (cond ((null? p) 0) ((name-kind? (kind-of (extract (car p) 1))) 1) (else 2)))))
+      (cond ((null? p) 0)
+            ((= (kind-of (extract (car p) 1)) 5) 3)
+            ((name-kind? (kind-of (extract (car p) 1))) 1)
+            (else 2)))))
 ;; The trailmark name `n` is bound to, where it is read: its number, or 0
 ;; (`macros.rs`'s `mark_of`); and so, `ds` the macros and `ms` the
 ;; trailmarks, for `fits?`, as `pvar-shape`'s are, a trailmark's minus it.
@@ -515,10 +520,12 @@
 
 ;; Whether `s` has the shape of `t`, in `mode` (0 a pattern, 1 a template,
 ;; 2 a use, 3 a program's form after expansion): a pattern variable in a
-;; template (`pvar?` says 1 for a name's, 2 for another's, 0 for none, and
-;; of a trailmark's name minus its number, in any mode) fits
-;; anything but, if it is a name, a list's shape; any name in a pattern
-;; fits anything. No deeper than `fits-depth` lists: a `union`'s members
+;; template (`pvar?` says 1 for a name's, 3 for a label's, 2 for another's,
+;; 0 for none, and of a trailmark's name minus its number, in any mode)
+;; fits anything but, if it is a name, a list's shape, and if it is a
+;; label's, a reserved word the signature writes (no use gives
+;; one: entry 5 of Heist's should-work note, TODO §304); any name in a
+;; pattern fits anything. No deeper than `fits-depth` lists: a `union`'s members
 ;; differ within `overlap?`'s depth, and a long list is not looked through
 ;; at each of its parts (`macros.rs`'s `FITS_DEPTH`).
 (define fits-depth int 8)
@@ -545,8 +552,10 @@
                (or (and (= mode 0) (not (= (kind-of u) 7)) (not (= (kind-of u) 15))
                         (not (string=? (syn-name s) "_")) (not (string=? (syn-name s) "...")))
                    (and (= mode 1) (> (pvar? (syn-symbol s)) 0)
-                        (not (and (= (pvar? (syn-symbol s)) 1)
-                                  (or (= (kind-of u) 8) (= (kind-of u) 6) (= (kind-of u) 10)))))))
+                        (not (and (not (= (pvar? (syn-symbol s)) 2))
+                                  (or (= (kind-of u) 8) (= (kind-of u) 6) (= (kind-of u) 10))))
+                        (not (and (= (pvar? (syn-symbol s)) 3) (= (kind-of u) 7)
+                                  (reserved-sym? (literal-of u)))))))
           #t
           (tagcase u
             (s-union (ms) (any-fits? ms s mode pvar? depth))
@@ -563,7 +572,9 @@
             (s-bvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
             (s-dvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
             (s-id () (syn-symbol? s))
-            (s-label () (or (syn-keyword? s) (and (>= mode 2) (syn-symbol? s))
+            ;; A use's label any name but a reserved word, as a binder.
+            (s-label () (or (syn-keyword? s)
+                            (and (>= mode 2) (syn-symbol? s) (or program? (not (reserved-syn? s))))
                             (and program? (syn-number? s))))
             (s-expr () (and (or program? (not (reserved-syn? s))) (not (syn-nil? s))))
             (s-lambda () (lambda-shaped? s))
