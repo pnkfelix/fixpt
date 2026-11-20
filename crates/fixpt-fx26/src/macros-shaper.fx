@@ -15,7 +15,7 @@
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type syn))
 (import parser-module parse-tag p-ok p-err syn-symbol? syn-symbol syn-name mk-symbol mk-list len
-        nth syn-string? syn-datums sh-module sh-fun
+        nth syn-string? syn-datums sh-module sh-fun sh-cell sh-product
         (type syns-a names presult loaded-file loaded-files shape shapes members)
         (effect parses tree-builds))
 (import types-module kind-of proper-items s-item s-expr syn-keyword? split
@@ -596,6 +596,17 @@
                                     "letrena" "letreap" "plambda" "dlambda"))
              (if (>= last 0) (exp-shape fail last) nil))
             ((string=? h "proj") (exp-shape fail (at-e 1)))
+            ;; A product's fields, `(product (f e) …)`, and one of them,
+            ;; `(extract p f)`: each label a name or a keyword.
+            ((string=? h "product") (product-shape (fields-shapes fail (cdr items) (cdr e) #f)))
+            ((and (string=? h "extract") (= k 3) (label? (nth items 2)))
+             (field-shape (exp-shape fail (at-e 1)) (label-of (nth items 2))))
+            ;; The primitives `new` and `get`, where no definition takes
+            ;; their names: a cell of what it is given, what a cell holds.
+            ((and (or (string=? h "new") (string=? h "get")) (>= k 2) (>= (at-e 1) 0)
+                  (primitive? fail at))
+             (let ((x (exp-shape fail (at-e 1))))
+               (cond ((null? x) nil) ((string=? h "new") (one (sh-cell x))) (else (held-shape x)))))
             ((and (string=? h "if") (= k 4))
              (let ((a (exp-shape fail (at-e 2))) (b (exp-shape fail (at-e 3))))
                (if (and (not (null? a)) (shapes=? a b)) a nil)))
@@ -610,6 +621,51 @@
   (lambda (h hs) (and (not (null? hs)) (or (string=? h (car hs)) (name-in-list? h (cdr hs))))))
 (define syn-start-of-list (->* (syn) int)
   (lambda (s) (tagcase s (lst (items d a b x) a) (dotted (items t d a b x) a) (else y -1))))
+;; The fields `fs` (their nodes `es`) of a `product`, or if `ty` of a
+;; `productof`: each label with its expression's or type's shape, where it
+;; is known (`macros/shapes.rs`'s `Shape::Product`).
+(define fields-shapes (->* (fails syns-a (listof int acyclic) bool) members)
+  (lambda (fail fs es ty)
+    (if (or (null? fs) (null? es))
+        nil
+        (let* ((parts (proper-items (car fs))) (rest (fields-shapes fail (cdr fs) (cdr es) ty))
+               (x (if (or (< (car es) 0) (null? parts)) -1
+                      (elem (car es) (if ty (- (len parts) 1) 1)))))
+          (if (or (< x 0) (not (label? (car parts))))
+              rest
+              (let ((s (if ty (ty-shape fail x) (exp-shape fail x))))
+                (if (null? s) rest (cons (tuple (label-of (car parts)) s) rest))))))))
+(define product-shape (->* (members) shapes)
+  (lambda (fs) (if (null? fs) nil (one (sh-product fs)))))
+;; Field `f`'s shape in `s`, if it is a product's that knows it.
+(define field-shape (->* (shapes symbol) shapes)
+  (lambda (s f)
+    (if (null? s)
+        nil
+        (tagcase (car s)
+          (sh-product (fs) (let ((m (member-of f fs))) (if (null? m) nil (extract (car m) 2))))
+          (else y nil)))))
+;; What a cell of shape `s` holds.
+(define held-shape (->* (shapes) shapes)
+  (lambda (s) (tagcase (car s) (sh-cell (x) x) (else y nil))))
+;; A field's label: a name, or a keyword (`#:f`).
+(define label? (->* (syn) bool) (lambda (s) (or (syn-symbol? s) (syn-keyword? s))))
+(define label-of (->* (syn) symbol)
+  (lambda (s)
+    (tagcase s
+      (atom (d a b x) (if (keyword? d) (keyword->symbol d) (syn-symbol s)))
+      (else y (syn-symbol s)))))
+;; Whether application node `at`'s operator is the primitive its name
+;; says: free, and no definition of the program's takes the name.
+(define primitive? (->* (fails int) bool)
+  (lambda (fail at)
+    (let ((op (int-at (elems at) 0)))
+      (and (>= op 0)
+           (tagcase (node-kids op)
+             (k-ref (n d free)
+               (and (not d) (= (extract (resolve fail op n #f) 1) -1)
+                    (null? (names-find n (get top-vals))) (null? (global-shape n #f))))
+             (else y #f))))))
 ;; `extend`'s: the first's names, then the second's, the second's winning.
 (define extended (->* (shapes shapes) shapes)
   (lambda (a b)
@@ -724,7 +780,10 @@
                         (else y #f)))
              (sh-fun (p0 r0)
                (tagcase (car b) (sh-fun (p1 r1) (and (shape-lists=? p0 p1) (shapes=? r0 r1)))
-                        (else y #f))))))))
+                        (else y #f)))
+             (sh-cell (x0) (tagcase (car b) (sh-cell (x1) (shapes=? x0 x1)) (else y #f)))
+             (sh-product (f0)
+               (tagcase (car b) (sh-product (f1) (members=? f0 f1)) (else y #f))))))))
 (define members=? (->* (members members) bool)
   (lambda (a b)
     (cond ((null? a) (null? b))
@@ -772,6 +831,10 @@
                        (one (sh-module (members-kept vs kept) (members-kept ds kept))))
                      (else y nil)))))
             ((string=? h "poly") (ty-shape fail (at-e (- k 1))))
+            ;; A cell of a known shape, `(ref T r)`; a product's fields.
+            ((and (string=? h "ref") (>= k 2))
+             (let ((x (ty-shape fail (at-e 1)))) (if (null? x) nil (one (sh-cell x)))))
+            ((string=? h "productof") (product-shape (fields-shapes fail (cdr items) (cdr e) #t)))
             ;; A type a module gives: its own shape, if it is a module's.
             ((and (string=? h "select") (= k 3) (syn-symbol? (nth items 2)))
              (member-shape (exp-shape fail (at-e 1)) (syn-symbol (nth items 2)) #t))

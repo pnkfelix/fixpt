@@ -1085,6 +1085,13 @@ impl Checker {
                 (result.is_some() || params.iter().any(Option::is_some)).then(|| std::rc::Rc::new(Shape::Fun { params, result }))
             }
             crate::ast::Ty::Poly { body, .. } => self.type_shape(*body, depth + 1),
+            // A cell of a known shape; a product's fields of known shapes
+            // (`Shape::Cell`, `Shape::Product`).
+            crate::ast::Ty::Ref(x, _) => self.type_shape(*x, depth + 1).map(|x| std::rc::Rc::new(Shape::Cell(x))),
+            crate::ast::Ty::Product(fs) => {
+                let known: Vec<_> = fs.iter().filter_map(|(f, t)| Some((*f, self.type_shape(*t, depth + 1)?))).collect();
+                (!known.is_empty()).then(|| std::rc::Rc::new(Shape::Product(known)))
+            }
             _ => None,
         }
     }

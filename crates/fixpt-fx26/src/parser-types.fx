@@ -26,8 +26,12 @@
 ;; and a module's (or a function's that makes one), and its descriptions'
 ;; (types, effects, functions of descriptions), each with its own where it
 ;; is a module type's; or a function's, its parameters' shapes and its
-;; result's. A shape where it may not be known is a list of none or one.
-(define-datatype shape (sh-module members members) (sh-fun (listof shapes acyclic) shapes))
+;; result's; or a cell's, `(ref T r)`, what it holds (never none), or a
+;; product's, `(productof (f T) …)`, its fields' of known shapes (TODO §304,
+;; Heist's should-work note, entry 17). A shape where it may not be known
+;; is a list of none or one.
+(define-datatype shape (sh-module members members) (sh-fun (listof shapes acyclic) shapes)
+  (sh-cell shapes) (sh-product members))
 (define-type shapes (listof shape acyclic))
 (define-type members (listof (tupleof symbol shapes) acyclic))
 

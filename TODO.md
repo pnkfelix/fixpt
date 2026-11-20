@@ -8321,5 +8321,35 @@ label ``), and a template's `label` never fits a reserved word a signature
 writes (`fits_shaped`, `fits-within?`, `pvar-shape`'s 3), both expanders.
 Not a `bvar`'s: a use's binder may be any name the checkers let it bind.
 Tests `macros/tagcase-label-tag.fx` (Heist's `want`, 3),
-`tagcase-label-else.fx`. s7st's `want` may be `syntax-rules` now.
+`tagcase-label-else.fx`. s7st's `want` may be `syntax-rules` now. Asked, a label never a
+trailmark, by binding; the user's (2026-11-20): new reserved words may
+break downstream code, as with any language. For trailmarks' step 2 (the
+kernel's `else` by binding), the modular way: a use's label put into a
+template as its keyword (`go` as `#:go`), which is never a reserved word
+nor a trailmark, so no use refused and no name rule needed (to check: no
+signature places a `label` where a keyword would show, in a datum).
 
+**17, done (2026-11-20).** `(let ((th (get (extract h th)))) (with th …))`,
+the field a `(ref sig @heap)`, was "the names `th` gives are not known
+before it is checked": the expander's shapes were modules' and functions'
+alone. Now a cell's and a product's too (`Shape::Cell`, `Shape::Product`;
+`sh-cell`, `sh-product`): from `(ref T r)`, `(productof (f T) …)` and the
+checkers' types of them (`type_shape`, `k-type-shape`), and `(new e)`,
+`(product (f e) …)`, to `(get c)` and `(extract p f)`, a label a name or a
+keyword; `new` and `get` only where they are the primitives, free and no
+definition's (`primitive`, `primitive?`). Sound as any shape is: the
+checker holds the module's type to it (`shape_held`). Test
+`modules/module-from-field.fx`.
+
+## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
+
+`(define h2 (product (#:th (new m))))`, no type written, has its cell in a
+region the checker makes up, `@r.1`. The FX-26 checker keeps it as its own
+kind (`r-fresh`, `check-env.fx`) and exports it `(rfresh 1 @r.1)`; the
+Rust checker has it as a constant named `r.1` and exports `(rconst @r.1)`,
+and its reps (`reps.rs`) read no `rfresh`. Found by `tests/reps.rs`'s
+`both_checkers_export_each_type_as_one_rep` on entry 17's test (which now
+makes it in a `let`); no other of the 1,068 types it compares has one. To
+decide: which is right, a fresh region as a constant or as a kind of its own
+on import (FX-26's effects order and compare the two apart), and make both
+checkers export it alike.

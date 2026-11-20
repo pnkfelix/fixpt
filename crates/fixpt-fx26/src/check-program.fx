@@ -591,7 +591,21 @@
             (let ((params (k-ids-shapes ps (+ depth 1))) (res (k-type-shape r (+ depth 1))))
               (if (or (not (null? res)) (k-any-shaped? params)) (list (sh-fun params res)) nil)))
           (ty-poly (bs body) (k-type-shape body (+ depth 1)))
+          ;; A cell of a known shape; a product's fields of known shapes.
+          (ty-ref (x r)
+            (let ((s (k-type-shape x (+ depth 1)))) (if (null? s) nil (list (sh-cell s)))))
+          (ty-product (ps)
+            (let ((fs (k-fields-shapes ps (+ depth 1))))
+              (if (null? fs) nil (list (sh-product fs)))))
           (else y nil)))))
+;; Fields `ps`, those of known shapes, with them.
+(define k-fields-shapes (->* (k-parts int) members)
+  (lambda (ps depth)
+    (if (null? ps)
+        nil
+        (let ((s (k-type-shape (extract (car ps) 2) depth))
+              (rest (k-fields-shapes (cdr ps) depth)))
+          (if (null? s) rest (cons (tuple (extract (car ps) 1) s) rest))))))
 (define k-own-name? (->* (symbol) bool)
   (lambda (n) (not (string=? (substring (symbol->string n) 0 1) "%"))))
 (define k-parts-shapes (->* (k-parts int) members)

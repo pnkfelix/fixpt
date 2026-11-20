@@ -478,7 +478,12 @@ before it is checked: give it a type where it is bound ``. A name whose
 definition the walk did not read, a top-level one checked already (read
 from a fasl, a file's hidden global `%shared:…`, a staged step's
 `stage-module`), has the shape its checked type says: the checker answers
-the walk (`shaped`'s `Global`). Besides the forms above, a shape is read
+the walk (`shaped`'s `Global`). A cell's and a product's shapes
+(`Shape::Cell`, `Shape::Product`; 2026-11-20, TODO §304, Heist's
+should-work note, entry 17) carry a module kept in one: from `(ref T r)`
+and `(productof (f T) …)`, or `(new e)` and `(product (f e) …)`, to `(get
+c)` and `(extract p f)`; `new` and `get` read so only where they are the
+primitives, no definition of the program's taking the name. Besides the forms above, a shape is read
 from an `import`'s names (the module's member), a lambda's parameter of no
 type of its own (the parameter of the procedure type the lambda is
 declared at, through `allof` and `poly`), a description function applied

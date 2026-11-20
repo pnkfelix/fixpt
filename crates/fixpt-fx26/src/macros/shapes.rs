@@ -33,6 +33,13 @@ pub(crate) enum Shape {
     /// where it is known, so that a shape in any position a value reaches
     /// a binder from is (a callback's parameter, `(-> ((-> (S) X)) Y)`).
     Fun { params: Vec<Option<Rc<Shape>>>, result: Option<Rc<Shape>> },
+    /// A cell's, `(ref T r)`, that holds a value of a known shape: so that
+    /// a module kept in one is opened where it is read, `(with (get c) …)`
+    /// (TODO §304, Heist's should-work note, entry 17).
+    Cell(Rc<Shape>),
+    /// A product's, `(productof (f T) …)`: the fields of known shapes,
+    /// each by its label, so that `(extract p f)` has `f`'s.
+    Product(Vec<(Sym, Rc<Shape>)>),
 }
 
 impl Shape {
@@ -40,7 +47,7 @@ impl Shape {
     fn name_set(&self) -> fixpt_hash::HashSet<(Sym, Ns)> {
         match self {
             Shape::Module { vals, descs } => vals.iter().map(|(n, _)| (*n, Ns::Value)).chain(descs.iter().map(|(n, _)| (*n, Ns::Desc))).collect(),
-            Shape::Fun { .. } => Default::default(),
+            Shape::Fun { .. } | Shape::Cell(_) | Shape::Product(_) => Default::default(),
         }
     }
 
@@ -53,7 +60,7 @@ impl Shape {
     fn result(&self) -> Option<Rc<Shape>> {
         match self {
             Shape::Fun { result, .. } => result.clone(),
-            Shape::Module { .. } => None,
+            _ => None,
         }
     }
 
@@ -61,7 +68,7 @@ impl Shape {
     fn param(&self, k: usize) -> Option<Rc<Shape>> {
         match self {
             Shape::Fun { params, .. } => params.get(k).cloned().flatten(),
-            Shape::Module { .. } => None,
+            _ => None,
         }
     }
 
@@ -71,6 +78,34 @@ impl Shape {
         let Shape::Module { vals, descs } = self else { return None };
         let list = if ns == Ns::Value { vals } else { descs };
         list.iter().find(|(v, _)| *v == n).and_then(|(_, s)| s.clone())
+    }
+
+    /// What a cell of this shape holds, if it is one.
+    fn held(&self) -> Option<Rc<Shape>> {
+        match self {
+            Shape::Cell(x) => Some(x.clone()),
+            _ => None,
+        }
+    }
+
+    /// Field `f`'s shape, if this is a product's that knows it.
+    fn field(&self, f: Sym) -> Option<Rc<Shape>> {
+        let Shape::Product(fs) = self else { return None };
+        fs.iter().find(|(g, _)| *g == f).map(|(_, x)| x.clone())
+    }
+
+    /// A product's shape of fields `fs`, those of known shapes, if any is.
+    fn product(fs: Vec<(Sym, Option<Rc<Shape>>)>) -> Option<Rc<Shape>> {
+        let known: Vec<(Sym, Rc<Shape>)> = fs.into_iter().filter_map(|(f, x)| Some((f, x?))).collect();
+        (!known.is_empty()).then(|| Rc::new(Shape::Product(known)))
+    }
+}
+
+/// A field's label, a name or a keyword (`#:f`).
+fn label_of(s: &Syn) -> Option<Sym> {
+    match s.view() {
+        V::Symbol(n) | V::Keyword(n) => Some(n),
+        _ => None,
     }
 }
 
@@ -396,6 +431,14 @@ impl<'a, 'm> Shaper<'a, 'm> {
         s.head_sym().map(|h| self.name(h))
     }
 
+    /// Whether application node `at`'s operator is the primitive its name
+    /// says: free, and no definition of the program's takes the name.
+    fn primitive(&mut self, at: usize) -> bool {
+        let Some(op) = self.elem(at, 0) else { return false };
+        let Kids::Ref(n, Ns::Value, _) = self.a.nodes[op].kids else { return false };
+        matches!(self.resolve(op, n, Ns::Value), Res::Free(..)) && !self.top.vals.contains_key(&n) && self.global_of(n, Ns::Value, None).is_none()
+    }
+
     /// What the checker's types say of `n` (`Global`), without its own
     /// names.
     /// The shape of a file's hidden global, `%shared:key`, which a file's
@@ -426,6 +469,8 @@ impl<'a, 'm> Shaper<'a, 'm> {
                     descs: descs.iter().filter(|(n, _)| mine(n)).cloned().collect(),
                 })
             }
+            Shape::Cell(x) => Rc::new(Shape::Cell(self.own(x))),
+            Shape::Product(fs) => Rc::new(Shape::Product(fs.iter().map(|(f, x)| (*f, self.own(x))).collect())),
         }
     }
 
@@ -780,6 +825,25 @@ impl<'a, 'm> Shaper<'a, 'm> {
             }
             Some("with" | "let" | "let*" | "letrec" | "begin" | "letregion" | "letfreeze" | "letrena" | "letreap" | "plambda" | "dlambda") => self.exp(last?),
             Some("proj") => self.exp(e.get(1).copied().flatten()?),
+            // A product's fields, `(product (f e) …)`, and one of them,
+            // `(extract p f)`: each label a name or a keyword.
+            Some("product") => {
+                let mut fs = Vec::new();
+                for (k, f) in items.iter().enumerate().skip(1) {
+                    // A field not so written has no shape here, as FX-26's
+                    // `fields-shapes` has none.
+                    let Some(label) = f.list().and_then(|ps| label_of(ps.first()?)) else { continue };
+                    fs.push((label, e[k].and_then(|x| self.elem(x, 1)).and_then(|x| self.exp(x))));
+                }
+                Shape::product(fs)
+            }
+            Some("extract") if items.len() == 3 => self.exp(e[1]?)?.field(label_of(&items[2])?),
+            // The primitives `new` and `get`, where no definition takes
+            // their names: a cell of what it is given, what a cell holds.
+            Some(h @ ("new" | "get")) if items.len() >= 2 && self.primitive(at) => {
+                let x = self.exp(e[1]?)?;
+                if h == "new" { Some(Rc::new(Shape::Cell(x))) } else { x.held() }
+            }
             Some("if") if items.len() == 4 => {
                 let (a, b) = (self.exp(e[2]?)?, self.exp(e[3]?)?);
                 (a == b).then_some(a)
@@ -978,6 +1042,17 @@ impl<'a, 'm> Shaper<'a, 'm> {
                 }))
             }
             "poly" => self.ty(e.last().copied().flatten()?),
+            // A cell of a known shape, `(ref T r)`; a product's fields.
+            "ref" if items.len() >= 2 => Some(Rc::new(Shape::Cell(self.ty(e[1]?)?))),
+            "productof" => {
+                let mut fs = Vec::new();
+                for (k, f) in items.iter().enumerate().skip(1) {
+                    let Some(parts) = f.list() else { continue };
+                    let Some(label) = parts.first().and_then(label_of) else { continue };
+                    fs.push((label, e[k].and_then(|x| self.elem(x, parts.len() - 1)).and_then(|x| self.ty(x))));
+                }
+                Shape::product(fs)
+            }
             // A type a module gives: its own shape, if it is a module's.
             "select" if items.len() == 3 => {
                 let n = items[2].sym()?;
@@ -1148,7 +1223,7 @@ impl Macros {
     pub(crate) fn file_module_values(&self, key: &str) -> Option<Vec<Sym>> {
         match self.withs.shapes.files.get(key)?.module.as_deref()? {
             Shape::Module { vals, .. } => Some(vals.iter().map(|(n, _)| *n).collect()),
-            Shape::Fun { .. } => None,
+            _ => None,
         }
     }
 
