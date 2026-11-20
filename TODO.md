@@ -8341,6 +8341,16 @@ definition's (`primitive`, `primitive?`). Sound as any shape is: the
 checker holds the module's type to it (`shape_held`). Test
 `modules/module-from-field.fx`.
 
+**22, done (2026-11-20).** `(hide (include (load-module "sat.fx")))`, a
+two-line client, compiled to 909,039 bytes, 65,109 with an `import` of one
+name: a `.fasl`'s image linked a load's cell and its value, and copied the
+rest it reached, so each of `sat.fx`'s procedures the client's module kept
+was copied with all its code reaches (185 of them; 14 for the `import`).
+Now a load's value's parts are linked too (`fasl::dep_parts`,
+`Link::DepPart`, `part_at`): its module's fields, and nested modules', by
+route. 11,366 and 8,038 bytes; the procedures are the load's own. Test
+`fixpt-cli/tests/fasl.rs`'s `a_clients_fasl_links_what_it_includes`.
+
 ## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
 
 `(define h2 (product (#:th (new m))))`, no type written, has its cell in a

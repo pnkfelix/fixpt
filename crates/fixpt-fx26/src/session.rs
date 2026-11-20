@@ -2328,7 +2328,7 @@ impl Fx26Session {
         let mut adapters = Vec::new();
         let mut keywords = Vec::new();
         for (p, link) in links {
-            let (global, value) = match link {
+            let (global, route): (String, Option<Vec<usize>>) = match link {
                 crate::fasl::Link::Adapter => {
                     adapters.push(p);
                     continue;
@@ -2337,14 +2337,38 @@ impl Fx26Session {
                     keywords.push((p, n));
                     continue;
                 }
-                crate::fasl::Link::Global(n) => (n, false),
-                crate::fasl::Link::DepCell(i) | crate::fasl::Link::DepValue(i) => {
+                crate::fasl::Link::Global(n) => (n, None),
+                crate::fasl::Link::DepCell(i) | crate::fasl::Link::DepValue(i) | crate::fasl::Link::DepPart(i, _) => {
                     let Some(d) = deps.get(i) else { return Ok(Err(fail(format!("it names its load {i}, which it has not")).message.into())) };
-                    (self.checker.interner.name(*d).to_string(), matches!(link, crate::fasl::Link::DepValue(_)))
+                    let route = match &link {
+                        crate::fasl::Link::DepValue(_) => Some(Vec::new()),
+                        crate::fasl::Link::DepPart(_, r) => Some(r.clone()),
+                        _ => None,
+                    };
+                    (self.checker.interner.name(*d).to_string(), route)
                 }
             };
             let Some(cell) = self.global_cell(&global)? else { return Ok(Err(fail(format!("it names `{global}`, which is not defined here")).message.into())) };
-            let h = if value { self.scheme.make(|m| { let c = m.get(cell); m.heap().bloblet_slot(c, GLOBAL_VALUE) }) } else { cell };
+            // A load's value, or a part of it by its route (`fasl::dep_parts`).
+            let h = match route {
+                None => cell,
+                Some(route) => {
+                    let mut missing = false;
+                    let h = self.scheme.make(|m| {
+                        let c = m.get(cell);
+                        let heap = m.heap();
+                        let v = heap.bloblet_slot(c, GLOBAL_VALUE);
+                        crate::fasl::part_at(heap, v, &route).unwrap_or_else(|| {
+                            missing = true;
+                            fixpt_heap::Value::FALSE
+                        })
+                    });
+                    if missing {
+                        return Ok(Err(fail(format!("it names a part of `{global}` that it has not")).message.into()));
+                    }
+                    h
+                }
+            };
             found.push((p, h));
         }
         let stamp = self.checker.shared_files.get(&name).map_or(0, |f| stamp_fixnum(f.stamp));
@@ -2818,7 +2842,7 @@ impl Fx26Session {
                             return fixpt_heap::Value::FALSE;
                         }
                     },
-                    crate::fasl::Link::DepCell(_) | crate::fasl::Link::DepValue(_) => {
+                    crate::fasl::Link::DepCell(_) | crate::fasl::Link::DepValue(_) | crate::fasl::Link::DepPart(..) => {
                         why = Some("it links to a file's load".to_string());
                         return fixpt_heap::Value::FALSE;
                     }

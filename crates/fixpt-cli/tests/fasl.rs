@@ -589,3 +589,25 @@ fn a_nat_is_an_int_of_a_type_read_from_a_fasl() {
     let (ok, out, err) = fixpt(&dir, &["run", "f.fx", "g.fx"], &[("FIXPT_FASL_SAY", "1")]);
     assert!(ok && err.contains("`f.fx` is read from `f.fasl`") && out == "4", "{out}{err}");
 }
+
+/// A load's procedures that a client includes are linked in the client's
+/// `.fasl`, not copied (TODO §304, Heist's should-work note, entry 22: a
+/// two-line client of `sat.fx` 909,039 bytes): `fasl::dep_parts`. The
+/// client's defines its own alone, and its procedures and the load's,
+/// both read from their `.fasl`s, are one counter's: 2, then 3.
+#[test]
+fn a_clients_fasl_links_what_it_includes() {
+    let dir = scratch("include");
+    for f in ["counter.fx", "client.fx", "drive.fx"] {
+        let from = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/fasl-include").join(f);
+        std::fs::copy(&from, dir.join(f)).expect("copied");
+    }
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "counter.fx", "client.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    let client = std::fs::read(dir.join("client.fasl")).expect("compiled");
+    let copied = String::from_utf8_lossy(&client).matches("define %shared:counter.fx/").count();
+    assert_eq!(copied, 0, "the client's `.fasl` copies the load's procedures");
+    let (ok, out, err) = fixpt(&dir, &["eval", "--raw", "drive.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ok && out.trim() == "23", "{out}{err}");
+    assert_eq!(err.lines().filter(|l| l.contains("is read from")).count(), 2, "{err}");
+}

@@ -419,6 +419,46 @@ pub enum Link {
     /// A keyword, by its name: this heap's of that name, interned, so that
     /// one made where the file was compiled is the loader's (`#:name`).
     Keyword(String),
+    /// A part of the file's `i`th load's value, by its route there: field
+    /// `j` of that module, then field `k` of that, … ([`dep_parts`]).
+    DepPart(usize, Vec<usize>),
+}
+
+/// What `deps`' values hold, each part by its route there: a load's module
+/// (a `product`), its fields, and theirs where a field is a module too, the
+/// shortest route first. So that what a module includes or imports from a
+/// load, a procedure, is the load's own, linked, not copied into its image
+/// with all it reaches (TODO §304, Heist's should-work note, entry 22: a
+/// two-line client of a 1,160-line file, `(hide (include (load-module
+/// "sat.fx")))`, 909,039 bytes): a load is one value, and its parts are
+/// one, `eq?` to themselves in every client. A module's fields are its
+/// values in the order its type gives, the same wherever it is made, as
+/// the code that selects from it has them.
+fn dep_parts(heap: &Heap, deps: &[(String, Value)]) -> fixpt_hash::HashMap<u64, (usize, Vec<usize>)> {
+    let product = const { fixpt_heap::layout::kind("product") };
+    let is_product = |v: Value| v.is_bloblet() && heap.obj_type(v).is_none() && heap.bloblet_kind(v) == product;
+    let mut parts = fixpt_hash::HashMap::default();
+    let mut todo: std::collections::VecDeque<(usize, Vec<usize>, Value)> =
+        deps.iter().enumerate().filter(|(_, (_, d))| is_product(*d)).map(|(i, (_, d))| (i, Vec::new(), *d)).collect();
+    while let Some((i, route, m)) = todo.pop_front() {
+        for (j, f) in heap.bloblet_values(m).into_iter().enumerate() {
+            if !f.is_ref() || f.is_suffix_ref() || deps.iter().any(|(_, d)| d.raw() == f.raw()) || parts.contains_key(&f.raw()) {
+                continue;
+            }
+            let mut at = route.clone();
+            at.push(j);
+            if is_product(f) {
+                todo.push_back((i, at.clone(), f));
+            }
+            parts.insert(f.raw(), (i, at));
+        }
+    }
+    parts
+}
+
+/// The part of `value` at `route` ([`Link::DepPart`]), if it has one.
+pub fn part_at(heap: &Heap, value: Value, route: &[usize]) -> Option<Value> {
+    route.iter().try_fold(value, |v, &j| heap.bloblet_value_checked(v, j))
 }
 
 /// A global's cell (`layout::cellular::GLOBAL_*`, `%fx26-make-global`): its
@@ -452,6 +492,7 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         return cellular_image(heap, value, deps, adapter);
     }
     let mut links: Vec<(Value, Link)> = Vec::new();
+    let parts = dep_parts(heap, deps);
     let mut codes: Vec<Value> = Vec::new();
     let mut seen = fixpt_hash::HashSet::default();
     let mut todo = vec![value];
@@ -461,6 +502,10 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         }
         let v = if v.is_suffix_ref() { heap.suffix_ref_owner(v) } else { v };
         if !seen.insert(v.raw()) {
+            continue;
+        }
+        if let Some((i, route)) = parts.get(&v.raw()) {
+            links.push((v, Link::DepPart(*i, route.clone())));
             continue;
         }
         if let Some(c) = word_code(heap, v) {
@@ -529,6 +574,11 @@ fn placeholders(alone: &mut Heap, links: &[(Value, Link)]) -> (fixpt_hash::HashM
                 globals.push(name.clone());
                 (4, Value::fixnum(globals.len() as i64 - 1))
             }
+            // `(i j k …)`: the load, then the route.
+            Link::DepPart(i, route) => {
+                let r = route.iter().rev().fold(Value::NULL, |l, &j| alone.cons(Value::fixnum(j as i64), l));
+                (5, alone.cons(Value::fixnum(*i as i64), r))
+            }
         };
         let p = alone.cons(Value::fixnum(kind), arg);
         given.insert(v.raw(), p);
@@ -554,6 +604,18 @@ pub fn read_links(l: Value, car: impl Fn(Value) -> Value, cdr: impl Fn(Value) ->
             1 => Link::DepCell(arg.as_fixnum() as usize),
             2 => Link::DepValue(arg.as_fixnum() as usize),
             4 => Link::Keyword(globals.get(arg.as_fixnum() as usize).ok_or("its image names a keyword its header does not")?.clone()),
+            5 => {
+                if !arg.is_pair() {
+                    return Err("its image's link to a load's part names no load".into());
+                }
+                let mut route = Vec::new();
+                let mut r = cdr(arg);
+                while r.is_pair() {
+                    route.push(car(r).as_fixnum() as usize);
+                    r = cdr(r);
+                }
+                Link::DepPart(car(arg).as_fixnum() as usize, route)
+            }
             _ => Link::Adapter,
         };
         links.push((p, link));
@@ -576,6 +638,7 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
     // adapts, or a cellular closure to make of a word over values.
     let mut adapted: Vec<(Value, Value)> = Vec::new();
     let mut compiled: Vec<(Value, Value, Vec<Value>)> = Vec::new();
+    let parts = dep_parts(heap, deps);
     let mut codes: Vec<Value> = Vec::new();
     let mut seen = fixpt_hash::HashSet::default();
     let mut todo = vec![value];
@@ -585,6 +648,10 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
         }
         let v = if v.is_suffix_ref() { heap.suffix_ref_owner(v) } else { v };
         if !seen.insert(v.raw()) {
+            continue;
+        }
+        if let Some((i, route)) = parts.get(&v.raw()) {
+            links.push((v, Link::DepPart(*i, route.clone())));
             continue;
         }
         if let Some(c) = word_code(heap, v) {

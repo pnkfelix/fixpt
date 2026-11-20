@@ -85,6 +85,20 @@ loads, making it at first use instead of before the loading form is
 unobservable, so it can be lazy (Larceny is not: its `load` runs every
 form). That is the decoupling asked for: `a.fasl` holds none of `b`.
 
+It held `b`'s procedures that `a`'s module keeps, though, until 2026-11-20
+(TODO §304, Heist's should-work note, entry 22): an image linked `b`'s
+cell and `b`'s value, and copied whatever else it reached, so a module
+that `include`d or `import`ed a procedure of `b` held it, with all its
+code reaches (a two-line client of `sat.fx` 909,039 bytes, 65,109 for an
+`import` of one procedure). Now each part of a load's value is linked too
+(`fasl::dep_parts`, `Link::DepPart`): its module's fields, and theirs
+where a field is a module, each by its route, followed in the loader's
+`b` (`fasl::part_at`). A module's fields are its values in its type's
+order wherever it is made, as code that selects from it has them. So the
+client is 11,366 bytes and 8,038, and what it keeps of `b` is `b`'s own,
+one value, as a load is (`fixpt-cli/tests/fasl.rs`,
+`a_clients_fasl_links_what_it_includes`).
+
 ### Linking to globals: by name, with types
 
 `a`'s code refers to globals by name. At load, each name resolves to the
