@@ -1607,16 +1607,59 @@ impl Checker {
         else {
             return None;
         };
-        let at: Vec<usize> = wanted.iter().map(|(n, _)| vals.iter().position(|(m, _)| m == n)).collect::<Option<_>>()?;
+        let at: Vec<usize> = wanted.iter().map(|(n, _)| vals.iter().position(|(m, _)| self.val_fits_name(*m, *n))).collect::<Option<_>>()?;
         if at.len() == vals.len() && at.iter().enumerate().all(|(i, k)| i == *k) {
             return None;
         }
         // Its members' types naming earlier ones' closed first, so that the
         // values chosen name none left behind or moved.
         let vals = self.members_closed(&vals);
-        let chosen = at.iter().map(|k| vals[*k]).collect();
+        let chosen: Vec<(Sym, TyId)> = at.iter().map(|k| vals[*k]).collect();
+        let (abs, descs) = self.left_members_types(abs, descs, &vals, &at, &chosen);
         let t = self.arena.ty(Ty::Module { abs, descs, vals: chosen });
         self.subtype(t, want).then_some((at, t))
+    }
+
+    /// The types of a module type `abs` and `descs`, its values `vals`
+    /// made `chosen` (those at `at`), with those of each member left out
+    /// that one chosen names (a dependent module type's, closed): by their
+    /// own names, an abstract one's abstract, a path's that path, so that
+    /// the type wanted may say them abstractly, `(moduleof (abs t type) (val
+    /// user …t…))`, as it may a module's own (M4). A name the module's own
+    /// types have, or two members left out give, is no one's: what it names
+    /// is not known (`docs/research/dependent-moduleof.md`, §4.5).
+    fn left_members_types(&mut self, mut abs: Vec<(Sym, DVar)>, mut descs: Vec<(Sym, TyId)>, vals: &[(Sym, TyId)], at: &[usize], chosen: &[(Sym, TyId)]) -> (Vec<(Sym, DVar)>, Vec<(Sym, TyId)>) {
+        let named = |c: &Self, v: DVar| chosen.iter().any(|(_, t)| c.mentions_var(*t, v));
+        // Each, and whether abstract.
+        let mut given: Vec<(Sym, DVar, bool)> = Vec::new();
+        for (k, (_, t)) in vals.iter().enumerate() {
+            if at.contains(&k) {
+                continue;
+            }
+            let Ty::Module { abs: ma, descs: md, .. } = self.arena.get(self.arena.resolve(*t)).clone() else { continue };
+            for (n, v) in ma {
+                if named(self, v) {
+                    given.push((n, v, true));
+                }
+            }
+            for (n, d) in md {
+                if let Ty::Var(w) = self.arena.get(self.arena.resolve(d)).clone()
+                    && named(self, w)
+                {
+                    given.push((n, w, false));
+                }
+            }
+        }
+        let own = |n: Sym| abs.iter().any(|(m, _)| *m == n) || descs.iter().any(|(m, _)| *m == n);
+        let once: Vec<(Sym, DVar, bool)> = given.iter().filter(|(n, _, _)| !own(*n) && given.iter().filter(|(m, _, _)| m == n).count() == 1).copied().collect();
+        for (n, v, abstract_) in once {
+            if abstract_ {
+                abs.push((n, v));
+            } else {
+                descs.push((n, self.arena.ty(Ty::Var(v))));
+            }
+        }
+        (abs, descs)
     }
 
     /// A module-typed binding's types, by component name: each abstract

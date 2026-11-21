@@ -5254,6 +5254,14 @@ impl Checker {
         }
     }
 
+    /// Whether value `a` of one module type is value `b` of another: the
+    /// same name, or `b` the one `restrict` keeps unnamed (`%hidden:a`), a
+    /// member a kept one's type names. Not the other way: a member kept
+    /// unnamed is named by no client.
+    pub(crate) fn val_fits_name(&self, a: Sym, b: Sym) -> bool {
+        a == b || self.interner.name(b).strip_prefix("%hidden:") == Some(self.interner.name(a))
+    }
+
     /// Module type `a` ≤ `b`: each abstract type of `b`'s an abstract type
     /// of `a`'s (paired as a `poly`'s binders are) or a transparent one
     /// (`b`'s abstract type is then what `a` says it is); each description
@@ -5262,7 +5270,7 @@ impl Checker {
     /// its values. Fewer values, or another order, `expect` makes by
     /// reshaping (`Checker::reshape`).
     fn module_sub(&mut self, (a, b): (TyId, TyId), (aa, da, va): ModuleView, (ab, db, vb): ModuleView, env: &BinderEnv, st: &mut SubState) -> bool {
-        if aa.iter().any(|(n, _)| db.iter().any(|(m, _)| m == n)) || va.len() != vb.len() || va.iter().zip(vb).any(|((n, _), (m, _))| n != m) {
+        if aa.iter().any(|(n, _)| db.iter().any(|(m, _)| m == n)) || va.len() != vb.len() || va.iter().zip(vb).any(|((n, _), (m, _))| !self.val_fits_name(*n, *m)) {
             return false;
         }
         // A dependent module type's members naming earlier ones'

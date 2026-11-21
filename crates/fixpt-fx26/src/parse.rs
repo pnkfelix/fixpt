@@ -3665,7 +3665,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             kept.push(name);
         }
         let descs: Vec<(Sym, TyId)> = descs.into_iter().filter(|(n, _)| kept.contains(n)).collect();
-        let vals: Vec<(Sym, TyId)> = vals.into_iter().filter(|(n, _)| kept.contains(n)).collect();
+        let vals = self.vals_kept(&vals, &kept);
         let mut out = Vec::new();
         for (n, v) in abs {
             if kept.contains(&n) {
@@ -3676,6 +3676,49 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             }
         }
         Ok(self.arena.ty(Ty::Module { abs: out, descs, vals }))
+    }
+
+    /// The values `vals` of a module type that `restrict` keeps: those
+    /// named in `kept`, and, unnamed, `%hidden:x`, each left out that one
+    /// kept names, or one so kept does (a dependent module type's,
+    /// `Ty::MemberSel`), so that what is kept means what it meant: its types
+    /// the same member's (`docs/research/dependent-moduleof.md`, §4.5). Each
+    /// member named by its place among those kept.
+    fn vals_kept(&mut self, vals: &[(Sym, TyId)], kept: &[Sym]) -> Vec<(Sym, TyId)> {
+        let mut at: Vec<bool> = vals.iter().map(|(n, _)| kept.contains(n)).collect();
+        let mut found = Vec::new();
+        loop {
+            found.clear();
+            let mut seen = crate::ast::TySet::default();
+            for (i, (_, t)) in vals.iter().enumerate() {
+                if at[i] {
+                    self.member_sels(*t, &mut seen, &mut found);
+                }
+            }
+            let more: Vec<usize> = found.iter().map(|(k, _)| *k).filter(|k| !at[*k]).collect();
+            if more.is_empty() {
+                break;
+            }
+            more.into_iter().for_each(|k| at[k] = true);
+        }
+        let place: Vec<usize> = at.iter().scan(0, |n, a| {
+            let p = *n;
+            *n += usize::from(*a);
+            Some(p)
+        }).collect();
+        let mut map = fixpt_hash::HashMap::default();
+        for (k, n) in &found {
+            map.insert((*k, *n), self.arena.ty(Ty::MemberSel(place[*k], vals[*k].0, *n)));
+        }
+        let mut out = Vec::new();
+        for (i, (n, t)) in vals.iter().enumerate() {
+            if !at[i] {
+                continue;
+            }
+            let n = if kept.contains(n) { *n } else { self.interner.intern(&format!("%hidden:{}", self.name(*n))) };
+            out.push((n, self.instantiate_members(*t, &map)));
+        }
+        out
     }
 
     /// The hidden global a load of `path` is (`parse_load`).

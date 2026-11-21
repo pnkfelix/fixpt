@@ -8,8 +8,11 @@ checkers): `Ty::MemberSel` (`ty-member`), read in a written `moduleof`
 (`select_members`, `k-select-members`), closed by a binding's paths
 (`name_module`'s `path_opened`, `k-path-opened`) or by the left side's
 members in a comparison and a reshape (`members_closed`,
-`members_closed_as`); tests `modules/dependent-moduleof*.fx`. Steps 2 to 5
-are not.
+`members_closed_as`); tests `modules/dependent-moduleof*.fx`. **Step 2 is
+built** (2026-11-21): inclusion leaving out a member a kept one names gives
+its types by their own names (`left_members_types`, `k-reshaped-type`), and
+`restrict` keeps it as `%hidden:x` (`vals_kept`, `k-vals-kept`). Steps 3 to
+5 are not.
 
 ## 1. The problem, in Heist's own files
 

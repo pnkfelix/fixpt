@@ -89,6 +89,8 @@
             (val k-type-desc-kids (subr (maxeff (alloc @t) (read @globals) spin) (k-descs) k-ids))
             (val k-type-kids (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-ids))
             (val k-instantiate-members (subr kstate (int k-params-given) int))
+            (val k-member-sels-in (subr kstate (k-ids) k-params-given))
+            (val k-reshaped-type (subr kstate (k-parts k-parts k-parts k-ids) int))
             (val k-dependent-vals? (subr kstate (k-parts) bool))
             (val k-members-closed-by (subr kstate (k-parts k-member-opener) k-parts))
             (val k-members-closed (subr kstate (k-parts) k-parts))

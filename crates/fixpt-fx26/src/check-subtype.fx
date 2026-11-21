@@ -745,13 +745,30 @@
     (and (not (null? xs))
          (or (>= (k-part-find ys (extract (car xs) 1)) 0) (k-comps-meet? (cdr xs) ys)))))
 ;; Whether `xs` and `ys` are values of the same names, in order.
-(define k-same-names? (->* (k-parts k-parts) bool)
+(define k-val-names-fit? (->* (k-parts k-parts) bool)
   (lambda (xs ys)
     (if (null? xs)
         (null? ys)
         (and (not (null? ys))
-             (symbol=? (extract (car xs) 1) (extract (car ys) 1))
-             (k-same-names? (cdr xs) (cdr ys))))))
+             (k-val-fits-name? (extract (car xs) 1) (extract (car ys) 1))
+             (k-val-names-fit? (cdr xs) (cdr ys))))))
+;; Whether value `a` of one module type is value `b` of another: the same
+;; name, or `b` the one `restrict` keeps unnamed (`%hidden:a`), a member a
+;; kept one's type names. Not the other way: a member kept unnamed is named
+;; by no client. As `Checker::val_fits_name`.
+(define k-val-fits-name? (->* (symbol symbol) bool)
+  (lambda (a b)
+    (or (symbol=? a b)
+        (let ((s (symbol->string b)))
+          (and (> (string-length s) 8) (string=? (substring s 0 8) "%hidden:")
+               (string=? (substring s 8 (string-length s)) (symbol->string a)))))))
+;; The position in `ps` of the value that fits `n` (`k-val-fits-name?`), from
+;; `i`; or -1.
+(define k-val-position (->* (k-parts symbol int) int)
+  (lambda (ps n i)
+    (cond ((null? ps) -1)
+          ((k-val-fits-name? (extract (car ps) 1) n) i)
+          (else (k-val-position (cdr ps) n (+ i 1))))))
 ;; Each abstract type of `ab` (from position `i`) paired with `aa`'s of its
 ;; name, as a `poly`'s binders are, in the environments `es`; or met by a
 ;; description of `da`'s. None, if one is neither.
@@ -848,7 +865,7 @@
         (tagcase tb
           (ty-module (ab db vb0)
             (and (not (k-comps-meet? aa db))
-                 (k-same-names? va0 vb0)
+                 (k-val-names-fit? va0 vb0)
                  ;; A dependent module type's members naming earlier ones':
                  ;; `a`'s by its own, `b`'s by `a`'s (`k-members-closed-as`).
                  (let* ((da da0) (va (k-members-closed va0)) (vb (k-members-closed-as vb0 va))
@@ -868,7 +885,7 @@
   (lambda (wanted vs)
     (if (null? wanted)
         (the (listof k-ids acyclic) (cons (the k-ids nil) nil))
-        (let ((k (k-part-position vs (extract (car wanted) 1) 0))
+        (let ((k (k-val-position vs (extract (car wanted) 1) 0))
               (rest (k-positions (cdr wanted) vs)))
           (if (or (< k 0) (null? rest))
               nil
@@ -876,9 +893,6 @@
 ;; Whether `at` is each position of `n`, in order, from `i`.
 (define k-in-order? (->* (k-ids int int) bool)
   (lambda (at n i) (if (null? at) (= i n) (and (= (car at) i) (k-in-order? (cdr at) n (+ i 1))))))
-;; The values of `vs` at positions `at`.
-(define k-vals-at (->* (k-parts k-ids) k-parts)
-  (lambda (vs at) (if (null? at) nil (cons (k-nth vs (car at)) (k-vals-at vs (cdr at))))))
 ;; A module of type `got` made one of type `want`, which has fewer of its
 ;; values or the same in another order: each of `want`'s values' position in
 ;; `got`, if `got`'s values so chosen fit `want`; none otherwise.
@@ -893,8 +907,7 @@
                   nil
                   ;; Its members' types naming earlier ones' closed first, so
                   ;; that the values chosen name none left behind or moved.
-                  (let ((t (k-ty-new
-                            (ty-module abs ds (k-vals-at (k-members-closed vs) (car at))))))
+                  (let ((t (k-reshaped-type abs ds (k-members-closed vs) (car at))))
                     (if (k-subtype t want) at nil)))))
           (else z nil)))
       (else z nil))))

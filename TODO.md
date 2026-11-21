@@ -8370,8 +8370,15 @@ merges namespaces. **Step 1 built (2026-11-20):** a written dependent
 `moduleof`, a module given at one, its members by path, a procedure's or a
 file's parameter of one, both checkers (`Ty::MemberSel`, `ty-member`); the
 complete type walker `check-read-helpers.fx` had moved to `check-subst.fx`
-(`k-type-kids`), which finds the members. Left: steps 2 to 5 (inclusion
-dropping a member another names and `restrict`; a module's items typed by
+(`k-type-kids`), which finds the members. **Step 2 built (2026-11-21):** a
+member left out by inclusion gives a kept one's types of it by name, which
+the type wanted may say abstractly (`left_members_types`,
+`k-reshaped-type`); `restrict` keeps such a member unnamed, `%hidden:x`, a
+client's value `x` fitting it but no client naming it (`vals_kept`,
+`k-vals-kept`; `val_fits_name`, `k-val-fits-name?`). A client may still
+write a hidden type's own name, `(select c %hidden:ticket)`, abstract as it
+is (found 2026-11-21; a `with` of a hidden value the expander's shapes
+refuse already). Left: steps 3 to 5 (a module's items typed by
 earlier items' paths, so `env.fx`'s own module has the type; `include` of a
 path; Heist's `frame.fx`).
 

@@ -170,11 +170,68 @@
             (ty-module (abs ds vs)
               (let* ((names (k-kept-names (k-made-drop items 2) abs ds vs))
                      (ds2 (k-parts-named ds names))
-                     (vs2 (k-parts-named vs names)))
+                     (vs2 (k-vals-kept vs names)))
                 (k-ty-new (ty-module (k-abs-kept abs names (append ds2 vs2)) ds2 vs2))))
             (else y (k-sfail (k-cat3 "`restrict` restricts a module's type, and this is a "
                                      (k-show-ty t) "")
                              s)))))))
+;; The values `vs` of a module type that `restrict` keeps: those named in
+;; `names`, and, unnamed, `%hidden:x`, each left out that one kept names, or
+;; one so kept does (a dependent module type's, `ty-member`), so that what
+;; is kept means what it meant; each member named by its place among those
+;; kept. As `Parser::vals_kept`.
+(define k-vals-kept (->* (k-parts k-names) k-parts)
+  (lambda (vs names)
+    (let* ((at (k-kept-closure vs (k-kept-at vs names 0)))
+           (found (k-member-sels-in (k-types-at vs at 0))))
+      (k-vals-kept-from vs names at (k-renumbered found at vs) 0))))
+;; The positions of `vs` named in `names`, from `i`.
+(define k-kept-at (->* (k-parts k-names int) k-ids)
+  (lambda (vs names i)
+    (cond ((null? vs) nil)
+          ((k-has-name? names (extract (car vs) 1)) (cons i (k-kept-at (cdr vs) names (+ i 1))))
+          (else (k-kept-at (cdr vs) names (+ i 1))))))
+;; `at`, and each member the types at `at` name, until there are no more.
+(define k-kept-closure (->* (k-parts k-ids) k-ids)
+  (lambda (vs at)
+    (let ((more (k-sels-not-at (k-member-sels-in (k-types-at vs at 0)) at)))
+      (if (null? more) at (k-kept-closure vs (append more at))))))
+(define k-sels-not-at (->* (k-params-given k-ids) k-ids)
+  (lambda (gs at)
+    (if (null? gs)
+        nil
+        (let ((k (extract (car gs) 1)) (rest (k-sels-not-at (cdr gs) at)))
+          (if (or (k-has-id? at k) (k-has-id? rest k)) rest (cons k rest))))))
+;; The types of `vs` at positions `at`, from `i`.
+(define k-types-at (->* (k-parts k-ids int) k-ids)
+  (lambda (vs at i)
+    (cond ((null? vs) nil)
+          ((k-has-id? at i) (cons (extract (car vs) 2) (k-types-at (cdr vs) at (+ i 1))))
+          (else (k-types-at (cdr vs) at (+ i 1))))))
+;; Each of `found`, `(k, n)`, as the member at `k`'s place among `at`.
+(define k-renumbered (->* (k-params-given k-ids k-parts) k-params-given)
+  (lambda (found at vs)
+    (if (null? found)
+        nil
+        (let* ((k (extract (car found) 1)) (n (extract (car found) 2))
+               (t (k-ty-new (ty-member (k-ids-below at k) (extract (k-nth vs k) 1) n))))
+          (cons (product (1 k) (2 n) (3 t)) (k-renumbered (cdr found) at vs))))))
+(define k-ids-below (->* (k-ids int) int)
+  (lambda (at k)
+    (cond ((null? at) 0)
+          ((< (car at) k) (+ 1 (k-ids-below (cdr at) k)))
+          (else (k-ids-below (cdr at) k)))))
+(define k-vals-kept-from (->* (k-parts k-names k-ids k-params-given int) k-parts)
+  (lambda (vs names at given i)
+    (cond ((null? vs) nil)
+          ((k-has-id? at i)
+           (let* ((n (extract (car vs) 1))
+                  (m (if (k-has-name? names n)
+                         n
+                         (string->symbol (string-append "%hidden:" (symbol->string n))))))
+             (cons (product (1 m) (2 (k-instantiate-members (extract (car vs) 2) given)))
+                   (k-vals-kept-from (cdr vs) names at given (+ i 1)))))
+          (else (k-vals-kept-from (cdr vs) names at given (+ i 1))))))
 ;; The names `ns` written, each one the module gives; refused if not.
 (define k-kept-names (->* (k-syns k-parts k-parts k-parts) k-names)
   (lambda (ns abs ds vs)
