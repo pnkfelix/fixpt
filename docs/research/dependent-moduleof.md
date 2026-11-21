@@ -15,8 +15,9 @@ its types by their own names (`left_members_types`, `k-reshaped-type`), and
 is built** (2026-11-21): an item's type naming an earlier item's own types
 names them as that member's (`items_own_types`, `members_named`; `k-members-named`).
 **Step 4** (2026-11-21): an `include` of a path aliased by it already; a
-module file writing `env::base` is now expanded so (`paths-in?`). Step 5
-is not.
+module file writing `env::base` is now expanded so (`paths-in?`). **Step
+5** (2026-11-21), §7: Heist's editor over an `env`, measured; its files
+that import `m-buffer`'s macros wait on `import-with-syntax` of a path.
 
 ## 1. The problem, in Heist's own files
 
@@ -219,3 +220,38 @@ diamond, two stages that both re-export `base`, clashes at the join.
 4. `include` of a path, aliasing by it.
 5. Heist's `frame.fx` chain as a test, and the editor's files as a
    measure: entries and characters before and after.
+
+## 7. Heist's editor, measured (2026-11-21, step 5)
+
+On a copy of Heist's `editor/` and `kit/` at ec3ffb3ad0 (Heist's tree read
+only): an `env.fx` that makes the chain once, `(module-parameters ())`
+and seven `define`s, `m-base` … `m-view`; every file past `view.fx`
+taking `(env (load-moduleof "env.fx") qualified)` where it took those
+seven, `(hide (include env::m-base) … (include env::m-view))` after its
+parameters, and its later parameters' `load-moduleof`s given `env` for
+the seven (`m-frame (load-moduleof "frame.fx" env)`); `editor.fx` defining
+`env` where it defined the seven. The parameter lists, with those
+`include`s:
+
+| | parameters | module names written | characters |
+| --- | --- | --- | --- |
+| as Heist has them | 132 | 758 | 12,831 |
+| over `env` | 72 | 242 | 7,210 |
+
+(`env.fx`'s seven `define`s, 470 characters, besides.) `frame.fx` so
+written checks, both checkers agreeing. What a second bundle past
+`view`, the files from `frame.fx` on, would save is not measured.
+
+Four files do not check so: `calls.fx`, `files.fx`, `process.fx` and
+`scheme.fx` import `m-buffer`'s macros as a parameter's instance, `(hide
+(import-with-syntax m-buffer (only define-buffer-command)))`, and
+`import-with-syntax` takes a name a `load-module` or a module parameter
+binds, not a path, `env::m-buffer` ("`import-with-syntax` takes a name
+defined as `(load-module "path")`, and `m-buffer` is not one"); so the
+files after `calls.fx` do not either. An instance's macros named by a
+path, the file found through `env.fx`'s `define`s, is the extension that
+would let the editor take `env` throughout: not built, to be decided.
+
+The copy also found that d81f9ee1 (entry 5) refused `(isearch-but s
+(prompt p))`, every reserved word refused as a use's label; fixed by
+0d4195c8, only the words the kernel's forms read where a label may be.

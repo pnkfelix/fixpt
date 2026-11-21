@@ -8390,8 +8390,14 @@ expanded (`file_own_expanded_syn`, `paths-in?`). The expanders'
 comparison (`tests/scopes.rs`, FX-26's `program-shaped`) shapes a module
 file from its forms as read, not so expanded, so a file's `(include
 env::base)` has no shape there though both checkers read it alike: the
-test file writes `(include (with env base))`. Left: step 5 (Heist's
-`frame.fx`).
+test file writes `(include (with env base))`. **Step 5 (2026-11-21):**
+Heist's editor over an `env.fx` of `base` … `view`, on a copy: its
+parameter lists from 132 parameters, 758 module names and 12,831
+characters to 72, 242 and 7,210, `frame.fx` so checking
+(`dependent-moduleof.md`, §7). To decide: `calls.fx`, `files.fx`,
+`process.fx` and `scheme.fx` import `m-buffer`'s macros as a parameter's
+instance, and `import-with-syntax` takes no path, `env::m-buffer`; until it
+does they, and the files after `calls.fx`, keep the chain.
 
 ## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
 
