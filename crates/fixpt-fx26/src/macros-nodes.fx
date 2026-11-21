@@ -13,7 +13,7 @@
 (import parser-module syn-start syn-end syn-symbol? syn-name syn-symbol len nth
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
-        reserved-sym? literal-of
+        reserved-sym? literal-of literal-word-syn?
         sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
         syn-number? s-mark s-lambda s-defn scope-definitions scope-sigs
         bind-rib bind-cage bind-direct bind-earlier
@@ -572,9 +572,10 @@
             (s-bvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
             (s-dvar () (and (syn-symbol? s) (or program? (not (reserved-syn? s)))))
             (s-id () (syn-symbol? s))
-            ;; A use's label any name but a reserved word, as a binder.
+            ;; A use's label any name but a word the kernel's forms read.
             (s-label () (or (syn-keyword? s)
-                            (and (>= mode 2) (syn-symbol? s) (or program? (not (reserved-syn? s))))
+                            (and (>= mode 2) (syn-symbol? s)
+                                 (or program? (not (literal-word-syn? s))))
                             (and program? (syn-number? s))))
             (s-expr () (and (or program? (not (reserved-syn? s))) (not (syn-nil? s))))
             (s-lambda () (lambda-shaped? s))

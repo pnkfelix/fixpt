@@ -16,7 +16,7 @@
         (type syns-a names) (effect parses))
 (import types-module fail-at split syn-nil? syn-keyword? show-syn reserved-syn? reserved? unfold
         sub? kind-of simple-kind? lambda-shaped? proper? kernel-sigs kernel-definitions
-        scope-sigs scope-definitions syn-number? s-item bind-shape ring-shape
+        scope-sigs scope-definitions syn-number? s-item bind-shape ring-shape literal-word-syn?
         bind-rib bind-cage bind-direct bind-earlier
         ring-rib ring-at s-expr s-bvar s-id s-dvar s-kind
         s-data s-type s-label s-nil s-literal s-pair s-import s-export s-mu s-many s-union s-typed
@@ -207,8 +207,8 @@
               (said (string-append (shown) " is not a variable"))))
         (s-label ()
           (cond ((syn-keyword? s) #u)
-                ;; A use's any name but a reserved word, as no template's (`fits-within?`).
-                ((and (syn-symbol? s) (>= mode 2) (or (= mode 3) (not (reserved-syn? s)))) #u)
+                ;; A use's any name but a word the kernel's forms read (`literal-word-syn?`).
+                ((and (syn-symbol? s) (>= mode 2) (or (= mode 3) (not (literal-word-syn? s)))) #u)
                 ((and (= mode 3) (syn-number? s)) #u) ; a program's field by position
                 ((and (syn-symbol? s) (= mode 2))
                  (said (string-append "`" (syn-name s) "` is a reserved word, not a tag or label")))

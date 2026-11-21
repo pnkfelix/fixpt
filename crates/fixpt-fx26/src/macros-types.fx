@@ -736,6 +736,34 @@
                                         (list (tuple 'defn (s-defn))) nil nil))
           #u)
       (get kernel-read))))
+;; Whether `s` is a word the kernel's signatures write, `(literal else)`,
+;; which its forms read by name where a label may be too: no use gives a
+;; label one, as no template's label fits one. Found once, the first time. As
+;; `Macros::literal_word`.
+(define kernel-literals (ref names rs) (new nil))
+(define kernel-literals-found (ref bool rs) (new #f))
+(define literal-word-syn? (->* (syn) bool)
+  (lambda (s)
+    (begin
+      (if (get kernel-literals-found)
+          #u
+          (begin (set kernel-literals
+                      (literals-in (datum->syn (with kernel kernel-forms))
+                                   (literals-in (datum->syn (with kernel scope-forms)) nil)))
+                 (set kernel-literals-found #t)))
+      (and (syn-symbol? s) (name-in? (syn-symbol s) (get kernel-literals))))))
+(define literals-in (->* (syn names) names)
+  (lambda (s out)
+    (tagcase s
+      (lst (items d a b x)
+        (if (and (= (len items) 2) (syn-symbol? (car items))
+                 (symbol=? (syn-symbol (car items)) 'literal) (syn-symbol? (nth items 1)))
+            (cons (syn-symbol (nth items 1)) out)
+            (literals-each items out)))
+      (dotted (items t d a b x) (literals-in t (literals-each items out)))
+      (else y out))))
+(define literals-each (->* (syns-a names) names)
+  (lambda (xs out) (if (null? xs) out (literals-each (cdr xs) (literals-in (car xs) out)))))
 ;; The binding structure of the forms the kernel's list has not, for a
 ;; program's walk alone (`scope-forms`), its signatures and definitions,
 ;; read with the kernel's abbreviations: read once, the first time.

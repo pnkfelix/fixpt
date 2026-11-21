@@ -753,6 +753,10 @@ struct Kernel {
     /// The standard environment's trailmarks (`STANDARD_MARKS`), which a
     /// file sees too.
     marks: HashMap<Sym, Rc<Mark>>,
+    /// The words its signatures write, `(literal else)`: which its forms
+    /// read by name, where a label may be too (`tagcase`'s arms), so that
+    /// no use gives a label one (`literal_word`).
+    literals: HashSet<Sym>,
 }
 
 /// The kernel's forms a template may use, with their binding structure
@@ -768,6 +772,15 @@ const OVERLAP_DEPTH: usize = 6;
 const FITS_DEPTH: usize = OVERLAP_DEPTH + 2;
 
 /// The list quoted in the kernel's `(define name datum (quote list))`.
+/// Each word `s` writes as `(literal word)`, onto `out`, a dotted list's too.
+fn literals_in(s: &Syn, interner: &Interner, out: &mut HashSet<Sym>) {
+    let V::List { items, tail } = s.view() else { return };
+    match (items.as_slice(), &tail) {
+        ([h, w], None) if h.sym().is_some_and(|h| interner.name(h) == "literal") && w.sym().is_some() => _ = out.insert(w.sym().expect("a word")),
+        _ => items.iter().chain(tail.as_ref()).for_each(|i| literals_in(i, interner, out)),
+    }
+}
+
 fn kernel_list(forms: &[Syn], interner: &Interner, name: &str) -> Vec<Syn> {
     let def = forms.iter().find_map(|f| match f.list().as_deref() {
         Some([_, n, _, q]) if n.sym().is_some_and(|n| interner.name(n) == name) => Some(q.clone()),
@@ -963,6 +976,16 @@ pub(crate) enum Head {
 type Step = (usize, Rc<STy>, Syn, usize);
 
 impl Macros {
+    /// Whether `n` is a word the kernel's signatures write, `(literal
+    /// else)`, which its forms read by name where a label may be too: a
+    /// template's label never fits one (`fits_shaped`), so a use's label is
+    /// never one, and `(tagcase e (t x body) …)` of a label `t` stays a
+    /// tag's arm (Heist's should-work note, entry 5). Any other reserved
+    /// word is a label as any name is, `(isearch-but s (prompt p))`.
+    fn literal_word(&self, n: Sym) -> bool {
+        self.k.literals.contains(&n)
+    }
+
     fn ensure_kernel(&mut self, interner: &mut Interner) -> R<()> {
         if !self.k.forms.is_empty() {
             return Ok(());
@@ -997,6 +1020,9 @@ impl Macros {
         k.heads = names("description-heads", interner);
         k.words = names("description-words", interner);
         k.type_forms = names("type-forms", interner);
+        for list in ["kernel-forms", "scope-forms"] {
+            kernel_list(&forms, interner, list).iter().for_each(|f| literals_in(f, interner, &mut k.literals));
+        }
         for (i, (n, said)) in STANDARD_MARKS.iter().enumerate() {
             k.marks.insert(interner.intern(n), Rc::new(Mark { id: usize::MAX - i, said: Some(said.to_string()) }));
         }
@@ -1440,8 +1466,9 @@ impl Macros {
             Mark(_, id) => shape.sym().and_then(|n| self.mark_of(n)).is_some_and(|m| m.id == *id),
             Bvar | Dvar => shape.sym().is_some_and(|n| mode == Mode::Program || !reserved(interner.name(n))),
             Id => shape.sym().is_some(),
-            // A use's label any name but a reserved word, as a binder.
-            Label => matches!(shape, Shape::Keyword(_)) || (matches!(mode, Mode::Use | Mode::Program) && shape.sym().is_some_and(|n| mode == Mode::Program || !reserved(interner.name(n)))) || (mode == Mode::Program && shape == Shape::Atom && matches!(syn().view(), V::Number(_))),
+            // A use's label any name but a word the kernel's forms read
+            // (`literal_word`).
+            Label => matches!(shape, Shape::Keyword(_)) || (matches!(mode, Mode::Use | Mode::Program) && shape.sym().is_some_and(|n| mode == Mode::Program || !self.literal_word(n))) || (mode == Mode::Program && shape == Shape::Atom && matches!(syn().view(), V::Number(_))),
             Expr => (mode == Mode::Program || !shape.sym().is_some_and(|n| reserved(interner.name(n)))) && shape != Shape::Nil,
             Lambda => shape == Shape::List && lambda_shaped(&syn(), interner),
             Defn => matches!(shape, Shape::List | Shape::Dotted),
@@ -3836,9 +3863,9 @@ impl Aligner<'_> {
             },
             STy::Label => match shape {
                 Shape::Keyword(_) => Ok(None),
-                // A use's any name but a reserved word, which a template's
-                // label never is (`fits_shaped`), its form's word.
-                Shape::Symbol(n) if self.mode == Mode::Use && reserved(self.name(n)) => Err(fail(format!("`{}` is a reserved word, not a tag or label", self.name(n)))),
+                // A use's any name but a word the kernel's forms read, which
+                // a template's label never is (`fits_shaped`), its form's.
+                Shape::Symbol(n) if self.mode == Mode::Use && self.m.literal_word(n) => Err(fail(format!("`{}` is a reserved word, not a tag or label", self.name(n)))),
                 Shape::Symbol(_) if matches!(self.mode, Mode::Use | Mode::Program) => Ok(None),
                 // A product's field by its position, a program's.
                 Shape::Atom if self.mode == Mode::Program && matches!(s.view(), V::Number(_)) => Ok(None),
