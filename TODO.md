@@ -8351,6 +8351,23 @@ Now a load's value's parts are linked too (`fasl::dep_parts`,
 route. 11,366 and 8,038 bytes; the procedures are the load's own. Test
 `fixpt-cli/tests/fasl.rs`'s `a_clients_fasl_links_what_it_includes`.
 
+**18, left (2026-11-20; the user's).** A parameter's type naming an earlier
+included parameter's type plainly, `names` for `(select m-base names)`:
+`select` says it already, and nothing is blocked (Heist's parameters are
+`load-moduleof`s). Weighed: a type-level `(with m T)`, or `module-parameters`
+read as `let*`, each parameter's type seeing the plain names of the
+included ones before it, as the file's items do.
+
+**11, to decide (2026-11-20).** The chains (`frame.fx`'s seven
+parameters, each restating those before it) are FX-91's way of sharing:
+its `moduleof` (§2.2.6, now in `~/Dev/LangPlay/papers/`) scopes no `val`
+name over another's type, so a bundle of modules cannot say its `buffer`
+is over its own `base`. Proposed, the user's direction: a `moduleof`
+whose members' types name earlier members, as SML's signatures do;
+written up in `docs/research/dependent-moduleof.md`, its questions
+answered and set against flatten-and-accumulate, which works today but
+merges namespaces.
+
 ## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
 
 `(define h2 (product (#:th (new m))))`, no type written, has its cell in a
