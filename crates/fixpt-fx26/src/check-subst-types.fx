@@ -5,6 +5,9 @@
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-effect kreads (select check-types-types kreads))
+(define-effect kstate (select check-types-types kstate))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
+(define-type k-params-given (select check-env-types k-params-given))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syns-a (select parser-types syns-a))
 (hide (define table-types (load-module "fx26:table-types.fx")))
@@ -29,6 +32,10 @@
 (define-type k-region (select check-types-types k-region))
 ;; The types it names, from the files that define them.
 (import check-types-types (type k-binders k-desc k-descs k-ids k-parts k-eff))
+;; How a dependent module type's member is opened, as a binding of its path
+;; or a comparison reads it: its type, and its types by name
+;; (`k-members-closed-by`).
+(define-type k-member-opener (subr kstate (symbol int) (productof (1 int) (2 k-parts))))
 ;; What a substitution can change of a type (`k-fv-of`): the description
 ;; variables in it, sorted; what else it holds that a substitution acts on
 ;; (`k-fv-select` and the others, or'd); and, while it is walked, the
@@ -75,4 +82,14 @@
             (val k-apply-fun
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-descs)
-                       k-desc))))
+                       k-desc))
+            (val k-type-parts-onto
+                 (subr (maxeff (alloc @t) (read @globals) spin) (k-parts k-ids) k-ids))
+            (val k-type-ids-then (subr (maxeff (alloc @t) (read @globals) spin) (k-ids int) k-ids))
+            (val k-type-desc-kids (subr (maxeff (alloc @t) (read @globals) spin) (k-descs) k-ids))
+            (val k-type-kids (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-ids))
+            (val k-instantiate-members (subr kstate (int k-params-given) int))
+            (val k-dependent-vals? (subr kstate (k-parts) bool))
+            (val k-members-closed-by (subr kstate (k-parts k-member-opener) k-parts))
+            (val k-members-closed (subr kstate (k-parts) k-parts))
+            (val k-members-closed-as (subr kstate (k-parts k-parts) k-parts))))

@@ -2531,7 +2531,7 @@ impl Checker {
                     stack.extend(descs.iter().chain(&vals).map(|(_, t)| *t));
                     false
                 }
-                Ty::Select(..) | Ty::ParamSel(..) => false,
+                Ty::Select(..) | Ty::ParamSel(..) | Ty::MemberSel(..) => false,
                 Ty::PromptTag { answer: x, payload: y, effect: e, region: r }
                 | Ty::Composable { arg: x, answer: y, effect: e, region: r, .. } => {
                     stack.extend([x, y]);
@@ -2750,7 +2750,7 @@ impl Checker {
             Ty::Pair(a, b, _, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::MemberSel(..) => false,
             Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) | D::Fun(x) if self.walk_vars(*x, seen, hit))),
             Ty::App { fun, args } => {

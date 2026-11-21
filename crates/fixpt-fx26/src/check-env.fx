@@ -43,6 +43,12 @@
 
 (define k-env (ref (table symbol k-stack @t) @t) (new (make-table symbol-hash symbol=?)))
 (define k-trail (ref k-names @t) (new nil))
+;; Each global's type as it was defined, before its binding named its
+;; module's types for itself (`k-bind-named-global`), newest first, a
+;; dependent module type's alone (else -1): what it exports (`checked-reps`),
+;; as the Rust checker exports a definition's type, which a binding's path
+;; variables (`k-path-opened`) are not in.
+(define k-written-globals (ref k-parts @t) (new nil))
 (define k-depth (ref int @t) (new 0))
 ;; Each name's bindings, innermost first: the depth each was made at, so
 ;; that whether one is newer than a mark is one look (`k-lookup`), not a
@@ -868,6 +874,11 @@
 ;; What `(select $k n)`, node `t`, is while parameters are given; else `t`.
 (define k-param-sel-of (->* (int symbol int) int)
   (lambda (k n t) (k-param-in (get k-param-map) k n t)))
+;; What a `moduleof`'s earlier member's `(select x n)`, the `k`th, node `t`,
+;; is while members are given (`k-instantiate-members`); else `t`.
+(define k-member-map (ref k-params-given @t) (new nil))
+(define k-member-sel-of (->* (int symbol int) int)
+  (lambda (k n t) (k-param-in (get k-member-map) k n t)))
 ;; `ts` but its last; and its last (-1 if none).
 (define k-ids-but-last (->* (k-ids) k-ids)
   (lambda (ts) (if (or (null? ts) (null? (cdr ts))) nil (cons (car ts) (k-ids-but-last (cdr ts))))))

@@ -385,6 +385,10 @@
           (k-put (k-cat5 "(select " (symbol->string m) " " (symbol->string n) ")") st))
         (ty-param (k n)
           (k-put (k-cat5 "(select $" (int->string (+ k 1)) " " (symbol->string n) ")") st))
+        ;; An earlier member of the `moduleof` it is in, by its name, as it is
+        ;; written and read back (`ty-member`).
+        (ty-member (k x n)
+          (k-put (k-cat5 "(select " (symbol->string x) " " (symbol->string n) ")") st))
         (ty-app (g ds)
           (let ((st (k-put " " (k-show-on g p (k-put "(" st)))))
             (k-put ")" (k-show-descs ds p st))))

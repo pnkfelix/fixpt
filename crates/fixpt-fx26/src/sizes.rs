@@ -425,7 +425,7 @@ impl Checker {
                     self.size_walk(x, pol, v, bad, seen);
                 }
             }
-            Ty::Select(..) | Ty::ParamSel(..) | Ty::Lam { .. } => {}
+            Ty::Select(..) | Ty::ParamSel(..) | Ty::MemberSel(..) | Ty::Lam { .. } => {}
             // What a description function is given, it may use either way.
             Ty::App { args, .. } => {
                 for d in args {

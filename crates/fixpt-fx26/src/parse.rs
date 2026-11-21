@@ -3500,12 +3500,48 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     self.dscope.push((binder.unwrap_or(names[0]), DScope::Rec(t)));
                     descs.push((names[0], t));
                 }
-                Some("val") => vals.push((names[0], self.parse_type_syn(what)?)),
+                Some("val") => {
+                    let t = self.parse_type_syn(what)?;
+                    let t = self.select_members(t, &vals, what.span())?;
+                    vals.push((names[0], t));
+                }
                 _ => return Err(FxError::at(head.span(), usage)),
             }
         }
         let _ = span;
         Ok(self.arena.ty(Ty::Module { abs, descs, vals }))
+    }
+
+    /// A `moduleof`'s value's type `t` (read at `span`) with each `(select x
+    /// n)` of a value before it, the `k`th of `earlier`, made a member's,
+    /// `Ty::MemberSel`: a dependent module type, its members' types naming
+    /// earlier members' (`docs/research/dependent-moduleof.md`; TODO §304,
+    /// Heist's should-work note, entry 11), as a procedure's parameters'
+    /// may name earlier ones' (`select_params`). Written directly or by a
+    /// `load-moduleof`'s argument, which is read so (`type_made`). The
+    /// member must be a module that gives a type `n`.
+    fn select_members(&mut self, t: TyId, earlier: &[(Sym, TyId)], span: fixpt_read::Span) -> R<TyId> {
+        if earlier.is_empty() {
+            return Ok(t);
+        }
+        let mut found = Vec::new();
+        self.selects_in(t, &mut Default::default(), &mut found);
+        let mut sel = fixpt_hash::HashMap::default();
+        for (m, x, _) in found {
+            let Some(k) = earlier.iter().rposition(|(n, _)| *n == m) else { continue };
+            let mt = earlier[k].1;
+            if !matches!(self.arena.get(self.arena.resolve(mt)), Ty::Module { .. }) || !self.module_types(mt).iter().any(|(n, _)| *n == x) {
+                return Err(FxError::at(span, format!("`{}` gives no type `{}`: a member's type names an earlier member's types", self.name(m), self.name(x))));
+            }
+            sel.insert((m, x), self.arena.ty(Ty::MemberSel(k, m, x)));
+        }
+        if sel.is_empty() {
+            return Ok(t);
+        }
+        let outer = std::mem::replace(&mut self.select_map, sel);
+        let r = self.subst(t, &fixpt_hash::HashMap::default());
+        self.select_map = outer;
+        Ok(r)
     }
 
     /// `(load-module "path")` or, `input`, `(load-input "path")`: every

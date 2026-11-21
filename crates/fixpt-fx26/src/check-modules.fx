@@ -162,25 +162,53 @@
     (tagcase (k-get (k-resolve t))
       (ty-module (abs ds vs)
         (let ((n (k-binding-shown name)) (holds (k-holds-abstract? vs)))
-          (if (or (string=? (substring n 0 1) "%") (and (null? abs) (not holds)))
-            t
+          (cond
+            ;; A dependent module type's members naming earlier ones'
+            ;; (`ty-member`): a binding of no path its own.
+            ((and (string=? (substring n 0 1) "%") (k-dependent-vals? vs))
+             (k-ty-push (ty-module abs ds (k-members-closed vs))))
+            ((or (string=? (substring n 0 1) "%") (and (null? abs) (not holds))) t)
             ;; Of no other binding, whatever it is made of (`k-ty-push`, not
-            ;; interned): its anchor is its own (`k-anchor!`).
-            (let* ((r (k-rename-abs (string-append n "..") abs))
-                   (named (k-ty-push (ty-module (extract r 1) (k-subst-each ds (extract r 2))
-                                                (k-subst-each vs (extract r 2))))))
-              (begin
-                (if holds
-                    ;; Bound as long as the binding, as its own names are.
-                    ;; The binding about to be made, at `k-depth`, as each
-                    ;; caller makes it.
-                    (let ((anchor (k-new-dvar-of (string->symbol n) 2)))
-                      (begin (set k-skolems (cons anchor (get k-skolems)))
-                             (set k-module-vars (cons anchor (get k-module-vars)))
-                             (k-anchor! named anchor n)))
-                    #u)
-                named)))))
+            ;; interned): its anchor is its own (`k-anchor!`). Bound as long
+            ;; as the binding, as its own names are; the binding about to be
+            ;; made, at `k-depth`, as each caller makes it.
+            (else
+             (let* ((r (k-rename-abs (string-append n "..") abs))
+                    (vs1 (k-subst-each vs (extract r 2)))
+                    (anchor (if holds (k-new-anchor n) -1))
+                    ;; Each member a later one names, and what that one says
+                    ;; of it, the path's from this binding (`m.base..t`).
+                    (vs2 (if (< anchor 0)
+                             (k-members-closed vs1)
+                             (k-members-closed-by
+                              vs1 (lambda ((x symbol) (t int))
+                                    (k-path-opened anchor (k-cat3 n "." (symbol->string x)) t)))))
+                    (named (k-ty-push
+                            (ty-module (extract r 1) (k-subst-each ds (extract r 2)) vs2))))
+               (begin (if (< anchor 0) #u (k-anchor! named anchor n)) named))))))
       (else y t))))
+(define k-new-anchor (->* (string) int)
+  (lambda (n)
+    (let ((anchor (k-new-dvar-of (string->symbol n) 2)))
+      (begin (set k-skolems (cons anchor (get k-skolems)))
+             (set k-module-vars (cons anchor (get k-module-vars)))
+             anchor))))
+;; Module type `t`, of the value path `path` reaches from the binding of
+;; `anchor`, its abstract types that path's (`k-path-made`), transparent, its
+;; members naming earlier ones' closed by their paths; and its types by name.
+;; As the Rust checker's `path_opened`.
+(define k-path-opened (->* (int string int) (productof (1 int) (2 k-parts)))
+  (lambda (anchor path t)
+    (tagcase (k-get (k-resolve t))
+      (ty-module (abs ds vs)
+        (let* ((made (k-path-made anchor path abs)) (m (k-path-made-map abs made))
+               (shown (append (k-abs-shown made nil) (k-subst-each ds m)))
+               (vs2 (k-members-closed-by
+                     (k-subst-each vs m)
+                     (lambda ((x symbol) (t int))
+                       (k-path-opened anchor (k-cat3 path "." (symbol->string x)) t)))))
+          (product (1 (k-ty-new (ty-module nil shown vs2))) (2 shown))))
+      (else y (product (1 t) (2 (the k-parts nil)))))))
 (define k-anchor! (->* (int int string) unit)
   (lambda (t anchor path)
     (set k-module-anchors
@@ -329,11 +357,8 @@
 (define k-component-named (->* (k-path-at symbol k-parts k-parts k-parts) k-path-at)
   (lambda (p x abs ds vs)
     (let* ((anchor (extract p 2)) (path (k-cat3 (extract p 3) "." (symbol->string x)))
-           (made (k-path-made anchor path abs))
-           (m (k-path-made-map abs made)))
-      (product (1 (k-ty-new (ty-module nil (append (k-abs-shown made nil) (k-subst-each ds m))
-                                       (k-subst-each vs m))))
-               (2 anchor) (3 path)))))
+           (opened (k-path-opened anchor path (k-ty-new (ty-module abs ds vs)))))
+      (product (1 (extract opened 1)) (2 anchor) (3 path)))))
 ;; The variables path `path` from the binding of `anchor` reads abstract
 ;; types `abs` at, each `path..t`: made the first time.
 (define k-path-made (->* (int string k-parts) k-parts)
@@ -831,6 +856,7 @@
     (tagcase (k-get n)
       (ty-select (m s) #t)
       (ty-param (k s) #t)
+      (ty-member (k x s) #t)
       (ty-subr (e ps r cv spc) (k-eff-given? e given))
       (ty-tag (a h e r) (k-eff-given? e given))
       (ty-comp (a h e r once) (k-eff-given? e given))

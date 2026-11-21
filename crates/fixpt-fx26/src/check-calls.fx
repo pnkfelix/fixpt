@@ -84,6 +84,7 @@
                    (ty-link (x) (begin (set k-cyclic-open #t) #f))
                    (ty-select (m n) (begin (set k-cyclic-open #t) #f))
                    (ty-param (k n) (begin (set k-cyclic-open #t) #f))
+                   (ty-member (k x n) (begin (set k-cyclic-open #t) #f))
                    (else x #f))))))))
   (k-cyclic-list? (->* (k-ids bool k-cpath int) bool)
     (lambda (ts by path d)

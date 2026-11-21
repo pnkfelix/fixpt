@@ -115,6 +115,9 @@
 ;; Whether `g` is the `x` of a dependent procedure's `k`th parameter.
 (define k-param-is? (->* (int int symbol) bool)
   (lambda (g k x) (tagcase (k-get g) (ty-param (j y) (and (= k j) (symbol=? x y))) (else z #f))))
+;; Whether `g` is a `moduleof`'s `k`th member's `x`.
+(define k-member-is? (->* (int int symbol) bool)
+  (lambda (g k x) (tagcase (k-get g) (ty-member (j m y) (and (= k j) (symbol=? x y))) (else z #f))))
 ;; Whether `g` is `(select m x)` as written.
 (define k-select-is? (->* (int symbol symbol) bool)
   (lambda (g m x)

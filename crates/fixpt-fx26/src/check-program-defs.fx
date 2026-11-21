@@ -290,10 +290,21 @@
         "")))
 (define k-push-lines (->* (k-out k-out) k-out)
   (lambda (lines out) (if (null? lines) out (k-push-lines (cdr lines) (cons (car lines) out)))))
+;; Type `t`, if it is a dependent module type's (its binding names its
+;; members' paths, which no export has); else none, -1: a global's type is
+;; completed as bound (`k-written-globals`).
+(define k-written-if-dependent (->* (int) int)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-module (abs ds vs) (if (k-dependent-vals? vs) t -1))
+      (else y -1))))
 ;; Bind `n`, at top level, to a value of type `t`: a global, a module's
 ;; abstract types named for it.
 (define k-bind-named-global (->* (symbol int) unit)
-  (lambda (n t) (begin (k-bind-global n (k-name-module n t)) (k-link-aliases n (get k-dscope)))))
+  (lambda (n t)
+    (begin (set k-written-globals (cons (product (1 n) (2 (k-written-if-dependent t)))
+                                        (get k-written-globals)))
+           (k-bind-global n (k-name-module n t)) (k-link-aliases n (get k-dscope)))))
 (define k-rec-types (->* (k-rec-forms) k-ids)
   (lambda (bs)
     (if (null? bs)

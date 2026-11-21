@@ -63,7 +63,7 @@
 (hide (include check-types) (include check-read-helpers) (include check-syntax)
       (include check-subst) (include check-env) (include check-print-parts) (include check-print)
       (include check-holds) (include check-proving) (include check-unions) (include parser))
-(import check-read-made k-type-made-by k-restrict-by k-param-selects-given)
+(import check-read-made k-type-made-by k-restrict-by k-param-selects-given k-member-selects)
 (import check-read k-at-name? k-atom-head? k-ctor-params k-effect-desc k-effect-named
         k-effect-selected k-frozen-into k-head k-items k-items-or-nil k-name-of k-not-applied
         k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head
@@ -900,7 +900,7 @@
              (let ((d (k-moduleof-desc (if (symbol=? binder '%none) (car names) binder) what)))
                (k-moduleof-comps (cdr cs) abs (k-part-onto (car names) d ds) vs seen vseen)))
             (("val")
-             (let ((t (k-parse-type what)))
+             (let ((t (k-select-members (k-parse-type what) (k-parts-reversed vs nil) what)))
                (k-moduleof-comps (cdr cs) abs ds (k-part-onto (car names) t vs) seen vseen)))
             (else (k-sfail k-moduleof-usage (car parts))))))))
 ;; `(select #%toplevel T)`: `T` as the top level reads it (a template's
@@ -962,6 +962,16 @@
                    (let ((found (k-selects-in t)))
                      (begin (k-param-selects-given found names tys s)
                             (k-param-selects found names))))))
+      (if (null? sel)
+          t
+          (let ((outer (get k-select-map)))
+            (begin (set k-select-map sel)
+                   (let ((r (k-subst t nil))) (begin (set k-select-map outer) r))))))))
+;; A `moduleof`'s value's type `t` (read from `s`) with each `(select x n)` of
+;; a value of `vs` before it made a member's: a dependent module type.
+(define k-select-members (->* (int k-parts syn) int)
+  (lambda (t vs s)
+    (let ((sel (if (null? vs) (the k-selects nil) (k-member-selects (k-selects-in t) vs s))))
       (if (null? sel)
           t
           (let ((outer (get k-select-map)))

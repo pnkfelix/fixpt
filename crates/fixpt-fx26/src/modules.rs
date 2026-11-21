@@ -986,6 +986,13 @@ impl Checker {
             _ => n.to_string(),
         };
         let holds = self.holds_abstract(&vals);
+        // A dependent module type's members naming earlier ones' types
+        // (`Ty::MemberSel`): a binding of no path its own, as a module's own
+        // making keeps the names its module has.
+        if n.starts_with('%') && !self.named_members(&vals).is_empty() {
+            let vals = self.members_closed(&vals);
+            return self.arena.ty(Ty::Module { abs, descs, vals });
+        }
         if n.starts_with('%') || (abs.is_empty() && !holds) {
             return t;
         }
@@ -998,13 +1005,23 @@ impl Checker {
             fresh.push((*a, w));
         }
         let descs = descs.iter().map(|(d, x)| (*d, self.subst(*x, &map))).collect();
-        let vals = vals.iter().map(|(x, y)| (*x, self.subst(*y, &map))).collect();
-        let named = self.arena.ty(Ty::Module { abs: fresh, descs, vals });
-        if holds {
-            // Bound as long as the binding, as its own names are.
+        let vals: Vec<(Sym, TyId)> = vals.iter().map(|(x, y)| (*x, self.subst(*y, &map))).collect();
+        // Bound as long as the binding, as its own names are.
+        let anchor = holds.then(|| {
             let anchor = self.arena.dvar_of(self.interner.intern(&n), Kind::Type);
             self.skolems.push(anchor);
             self.module_vars.insert(anchor);
+            anchor
+        });
+        // Each member a later one names, and what that one says of it, the
+        // path's from this binding (`m.base..t`), as `component` reads it:
+        // every file given this module agrees on them by path.
+        let vals = match anchor {
+            Some(anchor) => self.members_closed_by(&vals, &mut |c, x, t| c.path_opened(anchor, &format!("{n}.{}", c.interner.name(x)), t)),
+            None => self.members_closed(&vals),
+        };
+        let named = self.arena.ty(Ty::Module { abs: fresh, descs, vals });
+        if let Some(anchor) = anchor {
             let slot = self.env.len();
             self.module_anchors.insert(named, Anchor { anchor, path: n, slot });
         }
@@ -1151,26 +1168,11 @@ impl Checker {
         if abs.is_empty() && !self.holds_abstract(&vals) {
             return Some((*c, None));
         }
+        let _ = (descs, vals);
         let (anchor, base) = at?;
         let path = format!("{base}.{}", self.interner.name(x));
-        let made = match self.module_paths.get(&(anchor, path.clone())) {
-            Some(ws) => ws.clone(),
-            None => {
-                let ws: Vec<DVar> = abs.iter().map(|(a, v)| self.module_var(&format!("{path}..{}", self.interner.name(*a)), *v)).collect();
-                self.anchored_vars.entry(anchor).or_default().extend(ws.iter().copied());
-                self.module_paths.insert((anchor, path.clone()), ws.clone());
-                ws
-            }
-        };
-        let mut map: HashMap<DVar, D> = HashMap::default();
-        let mut shown = Vec::new();
-        for ((a, v), w) in abs.iter().zip(&made) {
-            map.insert(*v, self.var_desc(*w));
-            shown.push((*a, self.arena.ty(Ty::Var(*w))));
-        }
-        shown.extend(descs.iter().map(|(d, y)| (*d, self.subst(*y, &map))));
-        let vals = vals.iter().map(|(y, z)| (*y, self.subst(*z, &map))).collect();
-        Some((self.arena.ty(Ty::Module { abs: Vec::new(), descs: shown, vals }), Some((anchor, path))))
+        let (opened, _) = self.path_opened(anchor, &path, *c);
+        Some((opened, Some((anchor, path))))
     }
 
     /// The module type `select`'s `m` names: a variable's as it is bound,
@@ -1338,7 +1340,7 @@ impl Checker {
             .iter()
             .copied()
             .filter(|n| match self.arena.get(*n) {
-                Ty::Select(..) | Ty::ParamSel(..) => true,
+                Ty::Select(..) | Ty::ParamSel(..) | Ty::MemberSel(..) => true,
                 Ty::Subr { effect, .. } | Ty::PromptTag { effect, .. } | Ty::Composable { effect, .. } => names_given(effect),
                 Ty::Lam { body: D::Effect(e), .. } => names_given(e),
                 Ty::App { args, .. } | Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Effect(e) if names_given(e))),
@@ -1578,7 +1580,7 @@ impl Checker {
     pub(crate) fn each_ty_kid(&self, t: TyId, mut f: impl FnMut(TyId)) {
         let arg = |d: &D| if let D::Type(x) | D::Fun(x) = d { Some(*x) } else { None };
         match self.arena.get(self.arena.resolve(t)) {
-            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::Link(_) => {}
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::MemberSel(..) | Ty::Link(_) => {}
             Ty::Union(ms) | Ty::AllOf(ms) | Ty::Bloblet { fields: ms, .. } => ms.iter().copied().for_each(f),
             Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).for_each(f),
             Ty::Poly { body, .. } => f(*body),
@@ -1609,6 +1611,9 @@ impl Checker {
         if at.len() == vals.len() && at.iter().enumerate().all(|(i, k)| i == *k) {
             return None;
         }
+        // Its members' types naming earlier ones' closed first, so that the
+        // values chosen name none left behind or moved.
+        let vals = self.members_closed(&vals);
         let chosen = at.iter().map(|k| vals[*k]).collect();
         let t = self.arena.ty(Ty::Module { abs, descs, vals: chosen });
         self.subtype(t, want).then_some((at, t))
@@ -1636,6 +1641,138 @@ impl Checker {
         let r = self.subst(t, &HashMap::default());
         self.param_map = outer;
         r
+    }
+
+    /// `t` with each `(select x n)` of a `moduleof`'s earlier member what
+    /// `map` says it is (`Ty::MemberSel`).
+    pub(crate) fn instantiate_members(&mut self, t: TyId, map: &HashMap<(usize, Sym), TyId>) -> TyId {
+        if map.is_empty() {
+            return t;
+        }
+        let outer = std::mem::replace(&mut self.member_map, map.clone());
+        let r = self.subst(t, &HashMap::default());
+        self.member_map = outer;
+        r
+    }
+
+    /// Each earlier member's type `(k, n)` that `t` names (`Ty::MemberSel`).
+    pub(crate) fn member_sels(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut Vec<(usize, Sym)>) {
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return;
+        }
+        if let Ty::MemberSel(k, _, n) = self.arena.get(t) {
+            if !out.contains(&(*k, *n)) {
+                out.push((*k, *n));
+            }
+            return;
+        }
+        self.each_ty_kid(t, |k| self.member_sels(k, seen, out));
+    }
+
+    /// Whether a member of `vals` names an earlier one's types.
+    pub(crate) fn dependent_vals(&self, vals: &[(Sym, TyId)]) -> bool {
+        !self.named_members(vals).is_empty()
+    }
+
+    /// The members of `vals` that a later one's type names, by number: a
+    /// dependent module type's (`docs/research/dependent-moduleof.md`).
+    fn named_members(&self, vals: &[(Sym, TyId)]) -> Vec<usize> {
+        let mut found = Vec::new();
+        let mut seen = crate::ast::TySet::default();
+        for (_, t) in vals {
+            self.member_sels(*t, &mut seen, &mut found);
+        }
+        let mut ks: Vec<usize> = found.into_iter().map(|(k, _)| k).collect();
+        ks.sort_unstable();
+        ks.dedup();
+        ks
+    }
+
+    /// Values `vals` of a module type, each member's type naming an earlier
+    /// member's closed (`Ty::MemberSel`), in order: member `k`'s, once its
+    /// own type is closed, as `open` makes it (its type, and its types by
+    /// name). A member named so is `open`'s too, so that what a later one
+    /// says of it and what it says of itself are the same types.
+    fn members_closed_by(&mut self, vals: &[(Sym, TyId)], open: &mut dyn FnMut(&mut Self, Sym, TyId) -> (TyId, Vec<(Sym, TyId)>)) -> Vec<(Sym, TyId)> {
+        let named = self.named_members(vals);
+        let mut map: HashMap<(usize, Sym), TyId> = HashMap::default();
+        let mut out = Vec::with_capacity(vals.len());
+        for (k, (x, t)) in vals.iter().enumerate() {
+            let t = self.instantiate_members(*t, &map);
+            let t = if named.contains(&k) {
+                let (opened, types) = open(self, *x, t);
+                for (n, y) in types {
+                    map.insert((k, n), y);
+                }
+                opened
+            } else {
+                t
+            };
+            out.push((*x, t));
+        }
+        out
+    }
+
+    /// [`members_closed_by`](Self::members_closed_by) each member's own
+    /// types: a written dependent type taken apart where no binding names
+    /// it (a comparison's left side, a module's own making).
+    pub(crate) fn members_closed(&mut self, vals: &[(Sym, TyId)]) -> Vec<(Sym, TyId)> {
+        if self.named_members(vals).is_empty() {
+            return vals.to_vec();
+        }
+        self.members_closed_by(vals, &mut |c, _, t| (t, c.module_types(t)))
+    }
+
+    /// `vals` closed by the members of `by`, by number: in a comparison of
+    /// `by`'s module type with `vals`'s, a later member's type read with the
+    /// earlier members `by`'s (a dependent product's depth). `by` closed.
+    pub(crate) fn members_closed_as(&mut self, vals: &[(Sym, TyId)], by: &[(Sym, TyId)]) -> Vec<(Sym, TyId)> {
+        let named = self.named_members(vals);
+        if named.is_empty() {
+            return vals.to_vec();
+        }
+        let mut map: HashMap<(usize, Sym), TyId> = HashMap::default();
+        for k in named {
+            if let Some((_, t)) = by.get(k) {
+                for (n, y) in self.module_types(*t) {
+                    map.insert((k, n), y);
+                }
+            }
+        }
+        vals.iter().map(|(x, t)| (*x, self.instantiate_members(*t, &map))).collect()
+    }
+
+    /// The variables of path `path` from the binding of `anchor`, for a
+    /// module of abstract types `abs`: made the first time it is read, and
+    /// bound as long as the binding (`module_paths`, `anchored_vars`).
+    fn path_made(&mut self, anchor: DVar, path: &str, abs: &[(Sym, DVar)]) -> Vec<DVar> {
+        if let Some(ws) = self.module_paths.get(&(anchor, path.to_string())) {
+            return ws.clone();
+        }
+        let ws: Vec<DVar> = abs.iter().map(|(a, v)| self.module_var(&format!("{path}..{}", self.interner.name(*a)), *v)).collect();
+        self.anchored_vars.entry(anchor).or_default().extend(ws.iter().copied());
+        self.module_paths.insert((anchor, path.to_string()), ws.clone());
+        ws
+    }
+
+    /// Module type `t`, of the value path `path` reaches from the binding of
+    /// `anchor`, its abstract types that path's (`path_made`), transparent:
+    /// as [`component`](Self::component) gives it, and its types by name.
+    fn path_opened(&mut self, anchor: DVar, path: &str, t: TyId) -> (TyId, Vec<(Sym, TyId)>) {
+        let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else { return (t, Vec::new()) };
+        let made = self.path_made(anchor, path, &abs);
+        let mut map: HashMap<DVar, D> = HashMap::default();
+        let mut shown = Vec::new();
+        for ((a, v), w) in abs.iter().zip(&made) {
+            map.insert(*v, self.var_desc(*w));
+            shown.push((*a, self.arena.ty(Ty::Var(*w))));
+        }
+        shown.extend(descs.iter().map(|(d, y)| (*d, self.subst(*y, &map))));
+        let vals: Vec<(Sym, TyId)> = vals.iter().map(|(y, z)| (*y, self.subst(*z, &map))).collect();
+        let vals = self.members_closed_by(&vals, &mut |c, x, t| c.path_opened(anchor, &format!("{path}.{}", c.interner.name(x)), t));
+        let opened = self.arena.ty(Ty::Module { abs: Vec::new(), descs: shown.clone(), vals });
+        (opened, shown)
     }
 
     pub(crate) fn param_sels(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut Vec<(usize, Sym)>) {

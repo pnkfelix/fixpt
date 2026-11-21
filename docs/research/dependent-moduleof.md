@@ -1,9 +1,15 @@
 # A `moduleof` whose members' types name earlier members
 
 Research note, 2026-11-20, for Heist's should-work note, entry 11
-(`TODO.md` §304): module files that restate their parameter chains.
-Nothing here is implemented. It proposes one extension, settles the
-questions it raises, and compares it with the route that needs none.
+(`TODO.md` §304): module files that restate their parameter chains. It
+proposes one extension, settles the questions it raises, and compares it
+with the route that needs none. **Step 1 of §6 is built** (2026-11-20, both
+checkers): `Ty::MemberSel` (`ty-member`), read in a written `moduleof`
+(`select_members`, `k-select-members`), closed by a binding's paths
+(`name_module`'s `path_opened`, `k-path-opened`) or by the left side's
+members in a comparison and a reshape (`members_closed`,
+`members_closed_as`); tests `modules/dependent-moduleof*.fx`. Steps 2 to 5
+are not.
 
 ## 1. The problem, in Heist's own files
 

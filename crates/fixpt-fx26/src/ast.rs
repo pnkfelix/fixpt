@@ -621,6 +621,13 @@ pub enum Ty {
     /// parameter (from 0), a module: a dependent procedure, a functor
     /// (`first-class-modules.md`, M5). A call puts the argument's for it.
     ParamSel(usize, Sym),
+    /// `(select x t)` in a `moduleof`, `x` its `k`th value, an earlier one
+    /// (from 0): the type `t` of the module that member is, a dependent
+    /// module type (`docs/research/dependent-moduleof.md`; TODO §304, Heist's
+    /// should-work note, entry 11). A binding of a module of the type puts
+    /// its path's for it (`Checker::name_module`); a comparison the left
+    /// side's member's (`Checker::members_closed`). `x` kept to be shown.
+    MemberSel(usize, Sym, Sym),
     /// `(dlambda ((x k) …) d)`: a description function, of kind `(=> (k …)
     /// k′)` where `d` is of kind `k′`. Not a type: it stands only where a
     /// description of an arrow kind is wanted, as a [`D::Fun`], and is

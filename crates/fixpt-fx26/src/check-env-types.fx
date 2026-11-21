@@ -213,6 +213,7 @@
    (val k-include-free (subr (maxeff (read @t) (read @globals) spin) (symbol k-names) k-names))
    (val k-note-with
         (subr (maxeff (alloc @t) (read @globals) spin (read @t) (write @t)) (k-with-noted) unit))
+   (val k-written-globals (ref k-parts @t))
    (val k-env
         (ref (bloblet (fields (subr pure (symbol) int)
                               (subr pure (symbol symbol) bool)
@@ -267,6 +268,8 @@
    (val k-ids-last (subr (maxeff (read @globals) spin) (k-ids) int))
    (val k-select-of (subr (maxeff (read @globals) spin (read @t)) (symbol symbol int) int))
    (val k-param-sel-of (subr (maxeff (read @globals) spin (read @t)) (int symbol int) int))
+   (val k-member-map (ref k-params-given @t))
+   (val k-member-sel-of (subr (maxeff (read @globals) spin (read @t)) (int symbol int) int))
    (val k-globals-region? (subr pure (k-region) bool))
    (val k-with-depth (ref int @t))
    (val k-with-mark (subr kstate (symbol k-record) int))

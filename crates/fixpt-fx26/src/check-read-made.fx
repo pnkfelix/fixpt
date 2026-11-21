@@ -223,6 +223,34 @@
                    (else y #u))
                  (k-param-selects-given (cdr found) names tys s)))
         #u)))
+;; Of `found`, those that select from a value of `vs` (oldest first), a
+;; `moduleof`'s earlier member: each as `(ty-member k x n)`, the member a
+;; module that gives a type `n` (`docs/research/dependent-moduleof.md`). As
+;; `Checker::select_members`.
+(define k-member-selects (->* (k-selects k-parts syn) k-selects)
+  (lambda (found vs s)
+    (if (null? found)
+        nil
+        (let* ((m (extract (car found) 1)) (x (extract (car found) 2))
+               (k (k-part-position vs m 0))
+               (rest (k-member-selects (cdr found) vs s)))
+          (if (< k 0)
+              rest
+              (begin (k-member-gives (extract (k-nth vs k) 2) m x s)
+                     (the k-selects
+                          (cons (product (1 m) (2 x) (3 (k-ty-new (ty-member k m x)))) rest))))))))
+(define k-member-gives (->* (int symbol symbol syn) unit)
+  (lambda (mt m x s)
+    (tagcase (k-get (k-resolve mt))
+      (ty-module (abs ds vs)
+        (if (or (k-made-has? abs x) (k-made-has? ds x)) #u (k-member-refused m x s)))
+      (else y (k-member-refused m x s)))))
+(define k-member-refused (->* (symbol symbol syn) unit)
+  (lambda (m x s)
+    (k-sfail (string-append
+              (k-cat5 "`" (symbol->string m) "` gives no type `" (symbol->string x) "`")
+              ": a member's type names an earlier member's types")
+             s)))
 ;; Those of `ps` named among `names`.
 (define k-parts-named (->* (k-parts k-names) k-parts)
   (lambda (ps names)

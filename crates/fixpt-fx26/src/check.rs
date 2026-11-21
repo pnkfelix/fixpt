@@ -569,6 +569,9 @@ pub struct Checker {
     /// While a dependent procedure's parameters are given (`Checker::
     /// instantiate_params`): what each `(select $k t)` is; empty otherwise.
     pub(crate) param_map: HashMap<(usize, Sym), TyId>,
+    /// What each `(select x t)` of a `moduleof`'s earlier member is, by the
+    /// member's number, as `subst` puts it (`Checker::instantiate_members`).
+    pub(crate) member_map: HashMap<(usize, Sym), TyId>,
     /// The program's convention (set by [`Checker::with_convention`]):
     /// what a subroutine type that names none has, and what a convention
     /// nothing solves defaults to
@@ -1449,6 +1452,7 @@ impl Checker {
             subst_keep: None,
             select_map: HashMap::default(),
             param_map: HashMap::default(),
+            member_map: HashMap::default(),
             conv_default: conv,
             fresh_regions: 0,
             standard_len: 0,
@@ -3901,7 +3905,7 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::MemberSel(..) => {}
             Ty::Link(None) => self.regions_open.set(true),
             Ty::Union(ms) | Ty::AllOf(ms) => {
                 for m in ms {
@@ -4706,6 +4710,7 @@ impl Checker {
             (Ty::Var(x), Ty::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
             // A dependent procedure's parameter's, or a `select` as written.
             (Ty::ParamSel(k, x), Ty::ParamSel(j, y)) => k == j && x == y,
+            (Ty::MemberSel(k, _, x), Ty::MemberSel(j, _, y)) => k == j && x == y,
             (Ty::Select(m, x), Ty::Select(n, y)) => m == n && x == y,
             (Ty::Lam { params: pa, body: ba }, Ty::Lam { params: pb, body: bb }) => {
                 if pa.len() != pb.len() || pa.iter().zip(&pb).any(|((_, k), (_, l))| k != l) {
@@ -5135,6 +5140,7 @@ impl Checker {
                 self.module_sub((a, b), (&aa, &da, &va), (&ab, &db, &vb), env, st)
             }
             (Ty::ParamSel(k, x), Ty::ParamSel(j, y)) => k == j && x == y,
+            (Ty::MemberSel(k, _, x), Ty::MemberSel(j, _, y)) => k == j && x == y,
             // Two description functions (a module's transparent ones).
             (Ty::Lam { .. }, Ty::Lam { .. }) => self.fun_same(a, b, env, st),
             (Ty::Poly { binders: ba, body: xa }, Ty::Poly { binders: bb, body: xb }) => self.poly_sub((a, b), (&ba, xa), (&bb, xb), env, st),
@@ -5259,6 +5265,18 @@ impl Checker {
         if aa.iter().any(|(n, _)| db.iter().any(|(m, _)| m == n)) || va.len() != vb.len() || va.iter().zip(vb).any(|((n, _), (m, _))| n != m) {
             return false;
         }
+        // A dependent module type's members naming earlier ones'
+        // (`Ty::MemberSel`): `a`'s by `a`'s own, and `b`'s by `a`'s, so that a
+        // later member is compared with the earlier ones `a`'s
+        // (`docs/research/dependent-moduleof.md`, §4.4).
+        let (va_closed, vb_closed);
+        let (va, vb): (&[(Sym, TyId)], &[(Sym, TyId)]) = if self.dependent_vals(va) || self.dependent_vals(vb) {
+            va_closed = self.members_closed(va);
+            vb_closed = self.members_closed_as(vb, &va_closed);
+            (&va_closed, &vb_closed)
+        } else {
+            (va, vb)
+        };
         // An abstract type a type restricted to other names keeps unnamed,
         // `%hidden:t` (`restrict`), is still `t`'s.
         let bare = |c: &mut Self, ps: &[(Sym, DVar)]| -> Vec<(Sym, DVar)> { ps.iter().map(|(n, v)| (c.bare_name(*n), *v)).collect() };
@@ -5386,6 +5404,7 @@ impl Checker {
             Ty::Base(_) | Ty::Void | Ty::Link(None) => return t,
             Ty::Select(m, n) => return self.select_map.get(&(m, n)).copied().unwrap_or(t),
             Ty::ParamSel(k, n) => return self.param_map.get(&(k, n)).copied().unwrap_or(t),
+            Ty::MemberSel(k, _, n) => return self.member_map.get(&(k, n)).copied().unwrap_or(t),
             Ty::Var(v) => {
                 return match map.get(&v) {
                     Some(D::Type(x) | D::Fun(x)) => *x,
@@ -5492,6 +5511,7 @@ const FV_SELECT: u8 = 1;
 const FV_PARAM: u8 = 2;
 const FV_APP: u8 = 4;
 const FV_UNBOUND: u8 = 8;
+const FV_MEMBER: u8 = 16;
 
 impl Checker {
     /// Whether substituting `map` (and the selects and parameters given now)
@@ -5505,6 +5525,7 @@ impl Checker {
         flags & FV_APP == 0
             && (flags & FV_SELECT == 0 || self.select_map.is_empty())
             && (flags & FV_PARAM == 0 || self.param_map.is_empty())
+            && (flags & FV_MEMBER == 0 || self.member_map.is_empty())
             && vars.iter().all(|v| !map.contains_key(v))
     }
 
@@ -5554,6 +5575,7 @@ impl Checker {
             Ty::Link(_) => flags |= FV_UNBOUND,
             Ty::Select(..) => flags |= FV_SELECT,
             Ty::ParamSel(..) => flags |= FV_PARAM,
+            Ty::MemberSel(..) => flags |= FV_MEMBER,
             Ty::App { fun, args } => {
                 flags |= FV_APP;
                 tys.push(fun);

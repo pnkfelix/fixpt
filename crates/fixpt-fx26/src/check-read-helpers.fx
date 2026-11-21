@@ -402,44 +402,14 @@
                 (and (not (null? d))
                      (tagcase (car d) (ds-eff (e) #t) (ds-var (v k) (= k 1)) (else x #f))))))
         (let ((h (k-list-head s))) (or (k-atom-head? h) (string=? h "maxeff"))))))
-;; The types of parts `ps`, onto `tail`.
-(define k-parts-onto (->* (k-parts k-ids) k-ids)
-  (lambda (ps tail)
-    (if (null? ps) tail (cons (extract (car ps) 2) (k-parts-onto (cdr ps) tail)))))
-;; `ts`, and `t` after them.
-(define k-ids-then (->* (k-ids int) k-ids)
-  (lambda (ts t) (if (null? ts) (cons t nil) (cons (car ts) (k-ids-then (cdr ts) t)))))
-;; The types and functions among descriptions `ds`.
-(define k-desc-kids (->* (k-descs) k-ids)
-  (lambda (ds)
-    (if (null? ds)
-        nil
-        (let ((rest (k-desc-kids (cdr ds))))
-          (tagcase (car ds) (dt (x) (cons x rest)) (df (x) (cons x rest)) (else y rest))))))
-;; The types `t` is made of, one level down.
-(define k-ty-kids (->* (int) k-ids)
-  (lambda (t)
-    (tagcase (k-get t)
-      (ty-subr (e ps r cv spc) (k-ids-then ps r))
-      (ty-poly (bs x) (the k-ids (cons x nil)))
-      (ty-ref (a r) (the k-ids (cons a nil)))
-      (ty-array (a nz r) (the k-ids (cons a nil)))
-      (ty-icell (a r) (the k-ids (cons a nil)))
-      (ty-markkey (a r) (the k-ids (cons a nil)))
-      (ty-pair (a d r nl) (k-ids-then (the k-ids (cons a nil)) d))
-      (ty-tag (a h e r) (k-ids-then (the k-ids (cons a nil)) h))
-      (ty-comp (x a e r once) (k-ids-then (the k-ids (cons x nil)) a))
-      (ty-product (ps) (k-parts-onto ps nil))
-      (ty-sum (ps) (k-parts-onto ps nil))
-      (ty-bloblet (fs z r) fs)
-      (ty-union (ms) ms)
-      (ty-allof (ms) ms)
-      (ty-named (g ds) (k-desc-kids ds))
-      (ty-app (f ds) (the k-ids (cons f (k-desc-kids ds))))
-      (ty-lam (bs x) (k-desc-kids (the k-descs (cons x nil))))
-      (ty-nlist (e z r) (the k-ids (cons e nil)))
-      (ty-module (abs ds vs) (k-parts-onto ds (k-parts-onto vs nil)))
-      (else y nil))))
+;; The types of parts `ps`, onto `tail`; `ts`, and `t` after them; the types
+;; and functions among descriptions `ds`; and the types `t` is made of, one
+;; level down: `check-subst.fx`'s, which a dependent module type's members
+;; are found by (`k-member-sels-from`).
+(define k-parts-onto k-type-parts-onto)
+(define k-ids-then k-type-ids-then)
+(define k-desc-kids k-type-desc-kids)
+(define k-ty-kids k-type-kids)
 ;; `ss` reversed, onto `acc`.
 (define k-selects-reversed
   (->* (k-selects k-selects) k-selects)

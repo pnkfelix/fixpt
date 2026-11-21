@@ -825,6 +825,10 @@
 ;; Each name the program checked last defines, in order, and its type as a
 ;; rep, in its binary form (`check-reps.fx`): for the two checkers to be
 ;; compared by reps (`docs/research/heap-types.md`, step 2).
+;; Global `n`'s type as it was defined (`k-written-globals`), else as bound.
+(define k-written-type (->* (symbol) int)
+  (lambda (n)
+    (let ((w (k-part-find (get k-written-globals) n))) (if (< w 0) (k-lookup-raw n) w))))
 (define checked-reps (->* () (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
   (lambda ()
     (letrec ((names (->* (k-names (listof (productof (1 symbol) (2 (bytevectorof @t))) acyclic))
@@ -832,7 +836,7 @@
                    (lambda (ns acc)
                      (if (null? ns)
                          acc
-                         (let* ((t (k-lookup-raw (car ns)))
+                         (let* ((t (k-written-type (car ns)))
                                 (r (if (< t 0)
                                        (the (bytevectorof @t) (make-bytevector 0 0))
                                        ((with check-reps k-ty-rep) t))))
@@ -859,7 +863,7 @@
                      (if (null? xs)
                          nil
                          (let* ((n (extract (car xs) 1))
-                                (t (k-lookup-raw n))
+                                (t (k-written-type n))
                                 (r ((with check-reps k-ty-rep) t))
                                 (holes ((with check-reps k-rep-holes)))
                                 (back ((with check-reps k-rep-ty) r holes))

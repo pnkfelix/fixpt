@@ -8366,7 +8366,14 @@ is over its own `base`. Proposed, the user's direction: a `moduleof`
 whose members' types name earlier members, as SML's signatures do;
 written up in `docs/research/dependent-moduleof.md`, its questions
 answered and set against flatten-and-accumulate, which works today but
-merges namespaces.
+merges namespaces. **Step 1 built (2026-11-20):** a written dependent
+`moduleof`, a module given at one, its members by path, a procedure's or a
+file's parameter of one, both checkers (`Ty::MemberSel`, `ty-member`); the
+complete type walker `check-read-helpers.fx` had moved to `check-subst.fx`
+(`k-type-kids`), which finds the members. Left: steps 2 to 5 (inclusion
+dropping a member another names and `restrict`; a module's items typed by
+earlier items' paths, so `env.fx`'s own module has the type; `include` of a
+path; Heist's `frame.fx`).
 
 ## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
 

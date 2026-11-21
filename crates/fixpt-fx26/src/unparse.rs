@@ -436,6 +436,7 @@ impl Checker {
             }
             Ty::Select(m, n) => (name(*m), name(*n)).hash(&mut h),
             Ty::ParamSel(k, n) => (k, name(*n)).hash(&mut h),
+            Ty::MemberSel(k, _, n) => (u8::MAX, k, name(*n)).hash(&mut h),
         }
         h.finish()
     }
@@ -759,6 +760,9 @@ impl Checker {
                 None => format!("(select %p.{} {})", k + 1, self.interner.name(n)),
             },
             Ty::ParamSel(k, n) => format!("(select ${} {})", k + 1, self.interner.name(n)),
+            // An earlier member of the `moduleof` it is in, by its name, as
+            // it is written and read back (`Ty::MemberSel`).
+            Ty::MemberSel(_, x, n) => format!("(select {} {})", self.interner.name(x), self.interner.name(n)),
             Ty::Product(parts) | Ty::Sum(parts) => {
                 let head = if matches!(self.arena.get(t), Ty::Product(_)) { "productof" } else { "sumof" };
                 let ps: Vec<String> = parts.iter().map(|(l, x)| format!(" ({} {})", self.show_label(*l), self.show_ty_on(*x, path))).collect();

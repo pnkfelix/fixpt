@@ -158,6 +158,12 @@
   ;; parameter (from 0), a module: a dependent procedure, a functor
   ;; (`first-class-modules.md`, M5). A call puts the argument's for it.
   (ty-param int symbol)
+  ;; `(select x t)` in a `moduleof`, `x` its `k`th value, an earlier one (from
+  ;; 0): the type `t` of the module that member is, a dependent module type
+  ;; (`docs/research/dependent-moduleof.md`). A binding puts its path's for
+  ;; it (`k-name-module`), a comparison the left side's member's
+  ;; (`k-members-closed`). `x` kept to be shown. As `Ty::MemberSel`.
+  (ty-member int symbol symbol)
   ;; `(dlambda ((x k) …) d)`: a description function; and `(f d …)`, one
   ;; applied that cannot be reduced, `f` a variable or a `select`
   ;; (`check-kinds.fx`).

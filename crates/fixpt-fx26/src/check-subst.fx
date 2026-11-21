@@ -29,6 +29,7 @@
            (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 (hide (include check-subst-types) (include check-types-types))
+(import check-holds-types (type k-seen))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-holds) (include check-print-parts) (include check-env)
@@ -206,6 +207,7 @@
 (define k-fv-param int 2)
 (define k-fv-app int 4)
 (define k-fv-unbound int 8)
+(define k-fv-member int 16)
 ;; Deeper than any walk goes: a type met that is kept already.
 (define k-fv-deep int 1000000000)
 (define k-fv-flags (ref (arrayof int @t) @t) (new (make-array 512 -1)))
@@ -323,6 +325,7 @@
           (ty-link (x) (k-fv-leaf nil k-fv-unbound))
           (ty-select (m n) (k-fv-leaf nil k-fv-select))
           (ty-param (k n) (k-fv-leaf nil k-fv-param))
+          (ty-member (k x n) (k-fv-leaf nil k-fv-member))
           (ty-app (g ds)
             (k-fv-join (k-fv-leaf nil k-fv-app) (k-fv-join (ty g) (k-fv-descs ds (+ d 1)))))
           (ty-subr (e ps r cv spc)
@@ -376,10 +379,158 @@
       (and (= 0 (bitwise-and flags k-fv-app))
            (or (= 0 (bitwise-and flags k-fv-select)) (null? (get k-select-map)))
            (or (= 0 (bitwise-and flags k-fv-param)) (null? (get k-param-map)))
+           (or (= 0 (bitwise-and flags k-fv-member)) (null? (get k-member-map)))
            (k-fv-untouched? (extract f 1) m)))))
 (define k-fv-untouched? (->* (k-ids k-map) bool)
   (lambda (vs m)
     (or (null? vs) (and (null? (k-map-find m (car vs))) (k-fv-untouched? (cdr vs) m)))))
+;; The types of parts `ps`, onto `tail`.
+(define k-type-parts-onto (->* (k-parts k-ids) k-ids)
+  (lambda (ps tail)
+    (if (null? ps) tail (cons (extract (car ps) 2) (k-type-parts-onto (cdr ps) tail)))))
+;; `ts`, and `t` after them.
+(define k-type-ids-then (->* (k-ids int) k-ids)
+  (lambda (ts t) (if (null? ts) (cons t nil) (cons (car ts) (k-type-ids-then (cdr ts) t)))))
+;; The types and functions among descriptions `ds`.
+(define k-type-desc-kids (->* (k-descs) k-ids)
+  (lambda (ds)
+    (if (null? ds)
+        nil
+        (let ((rest (k-type-desc-kids (cdr ds))))
+          (tagcase (car ds) (dt (x) (cons x rest)) (df (x) (cons x rest)) (else y rest))))))
+;; The types `t` is made of, one level down.
+(define k-type-kids (->* (int) k-ids)
+  (lambda (t)
+    (tagcase (k-get t)
+      (ty-subr (e ps r cv spc) (k-type-ids-then ps r))
+      (ty-poly (bs x) (the k-ids (cons x nil)))
+      (ty-ref (a r) (the k-ids (cons a nil)))
+      (ty-array (a nz r) (the k-ids (cons a nil)))
+      (ty-icell (a r) (the k-ids (cons a nil)))
+      (ty-markkey (a r) (the k-ids (cons a nil)))
+      (ty-pair (a d r nl) (k-type-ids-then (the k-ids (cons a nil)) d))
+      (ty-tag (a h e r) (k-type-ids-then (the k-ids (cons a nil)) h))
+      (ty-comp (x a e r once) (k-type-ids-then (the k-ids (cons x nil)) a))
+      (ty-product (ps) (k-type-parts-onto ps nil))
+      (ty-sum (ps) (k-type-parts-onto ps nil))
+      (ty-bloblet (fs z r) fs)
+      (ty-union (ms) ms)
+      (ty-allof (ms) ms)
+      (ty-named (g ds) (k-type-desc-kids ds))
+      (ty-app (f ds) (the k-ids (cons f (k-type-desc-kids ds))))
+      (ty-lam (bs x) (k-type-desc-kids (the k-descs (cons x nil))))
+      (ty-nlist (e z r) (the k-ids (cons e nil)))
+      (ty-module (abs ds vs) (k-type-parts-onto ds (k-type-parts-onto vs nil)))
+      (else y nil))))
+;;; -------------------------------------------- a dependent module type's members
+;; `t` with each `(select x n)` of a `moduleof`'s earlier member what `given`
+;; says it is (`ty-member`). As `Checker::instantiate_members`.
+(define k-instantiate-members (->* (int k-params-given) int)
+  (lambda (t given)
+    (if (null? given)
+        t
+        (let ((outer (get k-member-map)))
+          (begin (set k-member-map given)
+                 (let ((r (k-subst t nil))) (begin (set k-member-map outer) r)))))))
+;; Each earlier member's type `(k, n)` that `t` names, onto `out`.
+(define-rec
+  (k-member-sels-from (->* (int k-seen (ref k-params-given @t)) unit)
+    (lambda (t seen out)
+      (let ((t (k-resolve t)))
+        (if (k-seen? seen t)
+            #u
+            (tagcase (k-get t)
+              (ty-member (k x n)
+                (if (k-given-has? (get out) k n)
+                    #u
+                    (set out (cons (product (1 k) (2 n) (3 t)) (get out)))))
+              (else y (k-member-sels-each (k-type-kids t) seen out)))))))
+  (k-member-sels-each (->* (k-ids k-seen (ref k-params-given @t)) unit)
+    (lambda (ts seen out)
+      (if (null? ts)
+          #u
+          (begin (k-member-sels-from (car ts) seen out) (k-member-sels-each (cdr ts) seen out))))))
+(define k-given-has? (->* (k-params-given int symbol) bool)
+  (lambda (gs k n)
+    (and (not (null? gs))
+         (or (and (= (extract (car gs) 1) k) (symbol=? (extract (car gs) 2) n))
+             (k-given-has? (cdr gs) k n)))))
+;; The members of `vs` that a later one's type names, by number: a
+;; dependent module type's. As `Checker::named_members`.
+(define k-named-members (->* (k-parts) k-ids)
+  (lambda (vs)
+    (let ((out (the (ref k-params-given @t) (new nil))) (seen (k-new-seen)))
+      (begin (k-member-sels-each (k-part-types vs) seen out) (k-seen-done! seen)
+             (k-given-numbers (get out) nil)))))
+(define k-part-types (->* (k-parts) k-ids)
+  (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 2) (k-part-types (cdr ps))))))
+(define k-given-numbers (->* (k-params-given k-ids) k-ids)
+  (lambda (gs out)
+    (cond ((null? gs) out)
+          ((k-has-id? out (extract (car gs) 1)) (k-given-numbers (cdr gs) out))
+          (else (k-given-numbers (cdr gs) (cons (extract (car gs) 1) out))))))
+;; Whether a member of `vs` names an earlier one's types.
+(define k-dependent-vals? (->* (k-parts) bool)
+  (lambda (vs) (not (null? (k-named-members vs)))))
+;; Values `vs` of a module type, each member's type naming an earlier
+;; member's closed, in order: member `k`'s, once its own type is closed, as
+;; `open` makes it (its type, and its types by name). As
+;; `Checker::members_closed_by`.
+(define k-members-closed-by (->* (k-parts k-member-opener) k-parts)
+  (lambda (vs open) (k-members-closing vs (k-named-members vs) open 0 nil)))
+(define k-members-closing (->* (k-parts k-ids k-member-opener int k-params-given) k-parts)
+  (lambda (vs named open k given)
+    (if (null? vs)
+        nil
+        (let* ((x (extract (car vs) 1)) (t (k-instantiate-members (extract (car vs) 2) given)))
+          (if (k-has-id? named k)
+              (let ((o (open x t)))
+                (cons (product (1 x) (2 (extract o 1)))
+                      (k-members-closing (cdr vs) named open (+ k 1)
+                                         (k-given-onto k (extract o 2) given))))
+              (cons (product (1 x) (2 t))
+                    (k-members-closing (cdr vs) named open (+ k 1) given)))))))
+(define k-given-onto (->* (int k-parts k-params-given) k-params-given)
+  (lambda (k ps given)
+    (if (null? ps)
+        given
+        (cons (product (1 k) (2 (extract (car ps) 1)) (3 (extract (car ps) 2)))
+              (k-given-onto k (cdr ps) given)))))
+;; A member's type `t`'s types by name: an abstract type's its variable, a
+;; transparent one's itself (`k-abs-shown`).
+(define k-member-types (->* (int) k-parts)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t)) (ty-module (abs ds vs) (k-abs-shown abs ds)) (else y nil))))
+;; `k-members-closed-by` each member's own types: a written dependent type
+;; taken apart where no binding names it. As `Checker::members_closed`.
+(define k-members-closed (->* (k-parts) k-parts)
+  (lambda (vs)
+    (if (k-dependent-vals? vs)
+        (k-members-closed-by vs (lambda ((x symbol) (t int))
+                                  (product (1 t) (2 (k-member-types t)))))
+        vs)))
+;; `vs` closed by the members of `by`, by number: a comparison's right side
+;; by its left's. As `Checker::members_closed_as`.
+(define k-members-closed-as (->* (k-parts k-parts) k-parts)
+  (lambda (vs by)
+    (let ((named (k-named-members vs)))
+      (if (null? named) vs (k-parts-instantiated vs (k-members-given named by nil))))))
+(define k-members-given (->* (k-ids k-parts k-params-given) k-params-given)
+  (lambda (named by given)
+    (cond ((null? named) given)
+          ((< (car named) (k-length by))
+           (k-members-given (cdr named) by
+                            (k-given-onto (car named)
+                                          (k-member-types (extract (k-nth by (car named)) 2))
+                                          given)))
+          (else (k-members-given (cdr named) by given)))))
+(define k-parts-instantiated (->* (k-parts k-params-given) k-parts)
+  (lambda (vs given)
+    (if (null? vs)
+        nil
+        (cons (product (1 (extract (car vs) 1))
+                       (2 (k-instantiate-members (extract (car vs) 2) given)))
+              (k-parts-instantiated (cdr vs) given)))))
 (define k-subst-memo (->* (int k-map k-smemo) int)
   (lambda (t m memo)
     (let* ((t (k-resolve t))
@@ -400,6 +551,7 @@
                 (if (null? f) t (tagcase (cdr (car f)) (dt (x) x) (df (x) x) (else y t)))))
             (ty-select (mod n) (k-select-of mod n t))
             (ty-param (k n) (k-param-sel-of k n t))
+            (ty-member (k x n) (k-member-sel-of k n t))
             ;; A function applied, given what it is substituted by:
             ;; reduced, if it is a `dlambda` now (`check-kinds.fx`).
             (ty-app (g ds)

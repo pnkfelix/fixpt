@@ -638,6 +638,7 @@ impl Ex<'_> {
             }
             Ty::Select(..) => return Err("an unresolved `select`, which is never compared".into()),
             Ty::ParamSel(k, n) => ("param-sel", vec![], vec![Arg::Int(k as i64), self.sym(n)]),
+            Ty::MemberSel(k, x, n) => ("member-sel", vec![], vec![Arg::Int(k as i64), self.sym(x), self.sym(n)]),
             Ty::Lam { params, body } => {
                 let names = self.names_of(&params);
                 let mark = self.scope.len();
@@ -1099,6 +1100,7 @@ impl Im<'_, '_> {
                 Ty::Module { abs, descs, vals }
             }
             "param-sel" => Ty::ParamSel(Self::int(arg(0)?)? as usize, self.sym(arg(1)?)?),
+            "member-sel" => Ty::MemberSel(Self::int(arg(0)?)? as usize, self.sym(arg(1)?)?, self.sym(arg(2)?)?),
             "dlambda" => {
                 let n = node.binders.len();
                 let params = self.binders(k, n)?;

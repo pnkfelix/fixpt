@@ -638,6 +638,7 @@
               (tagcase tb (ty-lam (cs y) (k-fun-same? a b ea eb trail labels)) (else z #f)))
             (ty-module (abs ds vs) (k-sub-modules a b ta tb ea eb trail labels))
             (ty-param (k x) (k-sub-modules a b ta tb ea eb trail labels))
+            (ty-member (k m x) (k-sub-modules a b ta tb ea eb trail labels))
             (else z #f)))))
   ;; Generative type arguments `xs ≤ ys`, each as its variance in `vs` says.
   (k-sub-descs (->* (k-descs k-descs k-ids k-benv k-benv k-strail k-labels) bool)
@@ -711,6 +712,7 @@
               (ty-var (x) (tagcase (k-get g) (ty-var (y) (k-benv-var=? x y ea eb)) (else z #f)))
               ;; A dependent procedure's parameter's, or a `select` as written.
               (ty-param (k x) (k-param-is? g k x))
+              (ty-member (k m x) (k-member-is? g k x))
               (ty-select (m x) (k-select-is? g m x))
               (ty-lam (pa ba)
                 (tagcase (k-get g)
@@ -841,12 +843,16 @@
     (tagcase ta
       ;; `(select $k x)`: only itself.
       (ty-param (k x) (tagcase tb (ty-param (j y) (and (= k j) (symbol=? x y))) (else z #f)))
-      (ty-module (aa da va)
+      (ty-member (k m x) (tagcase tb (ty-member (j n y) (and (= k j) (symbol=? x y))) (else z #f)))
+      (ty-module (aa da0 va0)
         (tagcase tb
-          (ty-module (ab db vb)
+          (ty-module (ab db vb0)
             (and (not (k-comps-meet? aa db))
-                 (k-same-names? va vb)
-                 (let ((paired (k-pair-abs ab aa da a b 0 (the k-benvs (cons ea eb)) labels)))
+                 (k-same-names? va0 vb0)
+                 ;; A dependent module type's members naming earlier ones':
+                 ;; `a`'s by its own, `b`'s by `a`'s (`k-members-closed-as`).
+                 (let* ((da da0) (va (k-members-closed va0)) (vb (k-members-closed-as vb0 va))
+                        (paired (k-pair-abs ab aa da a b 0 (the k-benvs (cons ea eb)) labels)))
                    (and (not (null? paired))
                         (let* ((ia (car (car paired))) (ib (cdr (car paired)))
                                (parts (k-module-parts a b aa da ab db vb ia labels)))
@@ -885,7 +891,10 @@
             (let ((at (k-positions wanted vs)))
               (if (or (null? at) (k-in-order? (car at) (k-length vs) 0))
                   nil
-                  (let ((t (k-ty-new (ty-module abs ds (k-vals-at vs (car at))))))
+                  ;; Its members' types naming earlier ones' closed first, so
+                  ;; that the values chosen name none left behind or moved.
+                  (let ((t (k-ty-new
+                            (ty-module abs ds (k-vals-at (k-members-closed vs) (car at))))))
                     (if (k-subtype t want) at nil)))))
           (else z nil)))
       (else z nil))))

@@ -58,6 +58,8 @@
                        bool))
             (val k-param-is?
                  (subr (maxeff (read @globals) (read @t) spin) (int int symbol) bool))
+            (val k-member-is?
+                 (subr (maxeff (read @globals) (read @t) spin) (int int symbol) bool))
             (val k-select-is?
                  (subr (maxeff (read @globals) (read @t) spin) (int symbol symbol) bool))
             (val k-benv-effect
