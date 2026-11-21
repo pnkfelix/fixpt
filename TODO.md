@@ -8380,9 +8380,18 @@ write a hidden type's own name, `(select c %hidden:ticket)`, abstract as it
 is (found 2026-11-21; a `with` of a hidden value the expander's shapes
 refuse already). **Step 3 built (2026-11-21):** an item's type naming an
 earlier item's own types, `base..t`, names them as that member's, so a
-file's own module has the dependent type (`items_as_members`,
-`k-items-as-members`). Left: steps 4 and 5 (`include` of a path;
-Heist's `frame.fx`).
+file's own module has the dependent type (`items_own_types`, `members_named`,
+`k-items-own-types`, `k-members-named`). **Step 4 (2026-11-21):** an
+`include` of a path worked already, `(include (with env base))` aliasing
+by the path; `env::base` did not in a module file without macros of its
+own, which skipped expansion, so no path there was written as its `with`s
+(any `a::b` in such a file, §296's gap): now one writing a path is
+expanded (`file_own_expanded_syn`, `paths-in?`). The expanders'
+comparison (`tests/scopes.rs`, FX-26's `program-shaped`) shapes a module
+file from its forms as read, not so expanded, so a file's `(include
+env::base)` has no shape there though both checkers read it alike: the
+test file writes `(include (with env base))`. Left: step 5 (Heist's
+`frame.fx`).
 
 ## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
 

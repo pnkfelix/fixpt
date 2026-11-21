@@ -13,8 +13,10 @@ built** (2026-11-21): inclusion leaving out a member a kept one names gives
 its types by their own names (`left_members_types`, `k-reshaped-type`), and
 `restrict` keeps it as `%hidden:x` (`vals_kept`, `k-vals-kept`). **Step 3
 is built** (2026-11-21): an item's type naming an earlier item's own types
-names them as that member's (`items_as_members`, `k-items-as-members`).
-Steps 4 and 5 are not.
+names them as that member's (`items_own_types`, `members_named`; `k-members-named`).
+**Step 4** (2026-11-21): an `include` of a path aliased by it already; a
+module file writing `env::base` is now expanded so (`paths-in?`). Step 5
+is not.
 
 ## 1. The problem, in Heist's own files
 

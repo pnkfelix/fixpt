@@ -600,7 +600,8 @@
 ;; `import-with-syntax`, hidden or not, of a name the file defines before
 ;; it by `load-module`, defines the macros of that file it takes there,
 ;; each as that file means it, and is the `include` of the rest
-;; (`binding-shapes.md`, step 4; Heist's (b)). Its `define-syntax`es kept; a
+;; (`binding-shapes.md`, step 4; Heist's (b)); a file that writes a path,
+;; `a::b`, too (`paths-in?`). Its `define-syntax`es kept; a
 ;; shape's no macro. Once for each file, both lists of them alike; a file
 ;; whose expansion fails keeps why, which its load says. The forms each
 ;; file changed was read as kept, for an importer (`raw-files!`).
@@ -623,7 +624,8 @@
 (define file-own-expanded (->* (loaded-file) loaded-file)
   (lambda (f)
     (if (or (<= (extract f 2) 0) (extract f 8)
-            (not (or (own-macros? (extract f 5)) (imports-syntax-in? (extract f 5)))))
+            (not (or (own-macros? (extract f 5)) (imports-syntax-in? (extract f 5))
+                     (paths-in? (extract f 5)))))
         f
         (let* ((saved (file-scope-begin!))
                (named (fresh-scope-begin! (file-prefix (extract f 7) #f)))
@@ -662,6 +664,21 @@
                         (and (form-of? (car xs) 'hide)
                              (imports-syntax-in? (cdr (syn-items (car xs) ""))))
                         (imports-syntax-in? (cdr xs))))))
+;; Whether forms `xs` write a path, `a::b` (`TODO.md` §296), outside a
+;; quoted datum, which the expander writes as the `with`s it is.
+(define paths-in? (->* (syns-a) bool)
+  (lambda (xs) (and (not (null? xs)) (or (path-in? (car xs)) (paths-in? (cdr xs))))))
+(define path-in? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b x) (and (not (form-of? s 'quote)) (paths-in? items)))
+      (dotted (items t d a b x) (and (not (form-of? s 'quote)) (or (paths-in? items) (path-in? t))))
+      (vec (items d a b x) #f)
+      (atom (d a b x)
+        (and (syn-symbol? s)
+             (let ((n (symbol->string (syn-symbol s))))
+               (and (> (string-length n) 0) (not (char=? (string-ref n 0) #\%))
+                    (>= (string-search n "::" 0) 0))))))))
 ;; Whether forms `xs` define a macro, hidden or not.
 (define own-macros? (->* (syns-a) bool)
   (lambda (xs)

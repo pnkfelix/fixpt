@@ -1203,7 +1203,7 @@ impl Checker {
     /// and is the `include` of the rest (step 4; Heist's (b)). Its
     /// `define-syntax`es kept, which `import-with-syntax` reads; a shape's,
     /// `(define-syntax s (modnames …))`, no macro. Itself if it defines or
-    /// imports no macro.
+    /// imports no macro and writes no path.
     pub(crate) fn file_own_expanded_syn(&mut self, forms: Vec<Syn>, text: &str, at: Option<&std::path::Path>) -> R<Vec<Syn>> {
         // Where its phase-1 forms' loads are from: its own directory.
         let own_dir = at.map(|a| crate::phase1::dir_of_key(&a.display().to_string())).unwrap_or_default();
@@ -1213,7 +1213,10 @@ impl Checker {
         let macro_of = |s: &Syn| syn_names(s, interner).is_some() && !shape(s);
         let imports = |s: &Syn| head(s).as_deref() == Some("import-with-syntax");
         let hidden = |s: &Syn| head(s).as_deref() == Some("hide") && s.list().is_some_and(|l| l[1..].iter().any(|i| macro_of(i) || imports(i)));
-        if !forms.iter().any(|f| macro_of(f) || imports(f) || hidden(f)) {
+        // Nor a path, `a::b` (`TODO.md` §296), which the expander writes
+        // as the `with`s it is.
+        let paths = |s: &Syn| crate::macros::names_path(s, interner);
+        if !forms.iter().any(|f| macro_of(f) || imports(f) || hidden(f) || paths(f)) {
             return Ok(forms);
         }
         let kinds: Vec<u8> = forms

@@ -5542,7 +5542,7 @@ fn path_named(name: &str) -> bool {
 }
 
 /// Whether a path is written in `s`, outside a quoted datum.
-fn names_path(s: &Syn, interner: &Interner) -> bool {
+pub(crate) fn names_path(s: &Syn, interner: &Interner) -> bool {
     match &s.view() {
         V::Symbol(n) => path_named(interner.name(*n)),
         V::List { items, tail } => {

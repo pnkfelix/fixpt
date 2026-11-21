@@ -398,6 +398,8 @@ const KNOWN_GAPS: &[&str] = &[
     "modules/dependent-moduleof-env-file.fx `lambda@1001:0`",
     "modules/dependent-moduleof-env-file.fx `program`",
     "modules/dependent-moduleof-file.fx `program`",
+    "modules/dependent-moduleof-include-path.fx `lambda@1001:0`",
+    "modules/dependent-moduleof-include-path.fx `program`",
     "modules/dependent-moduleof-items.fx `program`",
     "modules/dependent-moduleof-param.fx `program`",
     "modules/dependent-moduleof-restrict.fx `program`",
