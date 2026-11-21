@@ -46,8 +46,14 @@ impl Checker {
         let span = self.arena.span_of(e);
         let (depth, named) = (self.env.len(), self.skolems.len());
         let r = self.synth_module_items(items, span);
+        // The items' own types, which a later item's may name as that
+        // member's (`members_named`).
+        let r = r.map(|(abs, descs, vals, eff)| {
+            let owned = self.items_own_types(&vals, depth);
+            (abs, descs, vals, eff, owned)
+        });
         self.truncate_env(depth);
-        let r = r.and_then(|(abs, descs, vals, eff)| {
+        let r = r.and_then(|(abs, descs, vals, eff, owned)| {
             // The product its items make, one value each (an `include` the
             // module included), before its type is made of it: what the
             // paths of `reshaped` are into.
@@ -59,18 +65,76 @@ impl Checker {
             // outside can name.
             let mut inner: Vec<DVar> = self.skolems[named..].to_vec();
             inner.extend(self.anchored(&inner));
+            inner.retain(|v| !owned.iter().any(|(w, _, _)| w == v));
             for (n, t) in &vals {
                 if let Some(v) = inner.iter().find(|v| self.mentions_var(*t, **v)) {
                     let shown = self.interner.name(self.arena.dvar_name(*v)).to_string();
                     return Err(FxError::at(span, format!("`{}`'s type mentions `{shown}`, which is not known outside the module", self.interner.name(*n))));
                 }
             }
-            self.module_type(e, span, items, abs, descs, vals).map(|t| (t, eff))
+            let t = self.module_type(e, span, items, abs, descs, vals)?;
+            self.members_named(t, &owned, span).map(|t| (t, eff))
         });
         self.skolems.truncate(named);
         let (t, eff) = r?;
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
+    }
+
+    /// Each value of `vals` of a module being made bound in it, at `depth`
+    /// or after, to a module of abstract types (`name_module`): each type's
+    /// variable, `base..t`, the item and the type's name; a name of the
+    /// checkers' own (`%…`) none. What a later item's type may name as that
+    /// member's (`members_named`).
+    fn items_own_types(&self, vals: &[(Sym, TyId)], depth: usize) -> Vec<(DVar, Sym, Sym)> {
+        let mut out = Vec::new();
+        for (x, _) in vals {
+            if self.interner.name(*x).starts_with('%') {
+                continue;
+            }
+            let Some(i) = self.env.positions(*x).find(|i| *i >= depth) else { continue };
+            if let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(self.env[i].1)) {
+                out.extend(abs.iter().map(|(a, w)| (*w, *x, *a)));
+            }
+        }
+        out
+    }
+
+    /// Module type `t`, as made, each value's type that names an item's own
+    /// types (`owned`, `items_own_types`) naming them as that member's,
+    /// `(select base t)` (`Ty::MemberSel`), by its place in `t`: the
+    /// module's type a dependent one, which a binding of it reads as its
+    /// paths, `e.base..t` (`docs/research/dependent-moduleof.md`, step 3).
+    /// Refused if the item is no earlier value of `t` (hidden, or after),
+    /// or a description names one, as a type no one outside knows.
+    fn members_named(&mut self, t: TyId, owned: &[(DVar, Sym, Sym)], span: Span) -> R<TyId> {
+        if owned.is_empty() {
+            return Ok(t);
+        }
+        let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else { return Ok(t) };
+        let unknown = |c: &Self, n: Sym, w: DVar| {
+            let shown = c.interner.name(c.arena.dvar_name(w)).to_string();
+            FxError::at(span, format!("`{}`'s type mentions `{shown}`, which is not known outside the module", c.interner.name(n)))
+        };
+        for (n, d) in &descs {
+            if let Some((w, _, _)) = owned.iter().find(|(w, _, _)| self.mentions_var(*d, *w)) {
+                return Err(unknown(self, *n, *w));
+            }
+        }
+        let mut out = Vec::with_capacity(vals.len());
+        for (j, (n, ty)) in vals.iter().enumerate() {
+            let mut map: HashMap<DVar, D> = HashMap::default();
+            for (w, x, a) in owned {
+                if !self.mentions_var(*ty, *w) {
+                    continue;
+                }
+                let Some(k) = vals[..j].iter().position(|(m, _)| m == x) else { return Err(unknown(self, *n, *w)) };
+                let sel = self.arena.ty(Ty::MemberSel(k, *x, *a));
+                map.insert(*w, if self.arena.dvar_kind(*w) == Kind::Type { D::Type(sel) } else { D::Fun(sel) });
+            }
+            out.push((*n, if map.is_empty() { *ty } else { self.subst(*ty, &map) }));
+        }
+        Ok(self.arena.ty(Ty::Module { abs, descs, vals: out }))
     }
 
     /// A module's type, of its abstract types, descriptions and values: an

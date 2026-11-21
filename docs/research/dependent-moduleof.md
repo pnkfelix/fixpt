@@ -11,8 +11,10 @@ members in a comparison and a reshape (`members_closed`,
 `members_closed_as`); tests `modules/dependent-moduleof*.fx`. **Step 2 is
 built** (2026-11-21): inclusion leaving out a member a kept one names gives
 its types by their own names (`left_members_types`, `k-reshaped-type`), and
-`restrict` keeps it as `%hidden:x` (`vals_kept`, `k-vals-kept`). Steps 3 to
-5 are not.
+`restrict` keeps it as `%hidden:x` (`vals_kept`, `k-vals-kept`). **Step 3
+is built** (2026-11-21): an item's type naming an earlier item's own types
+names them as that member's (`items_as_members`, `k-items-as-members`).
+Steps 4 and 5 are not.
 
 ## 1. The problem, in Heist's own files
 

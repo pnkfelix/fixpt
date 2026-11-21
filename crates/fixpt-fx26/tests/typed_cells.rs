@@ -387,14 +387,18 @@ fn every_directory_surveyed() {
 /// `mid.a..t` (`docs/fx26.md`, "A *path* to a module"), where the verifier
 /// sees the module's own abstract `t`, having no rule for a path (`TODO.md`
 /// §291), written `a::b::c` too (§296); a dependent module type's binding
-/// so too, its members read as its paths, `e.base..t`
+/// so too, its members read as its paths, `e.base..t`, and a module whose
+/// item names an earlier item's types, `base..t` as the item is bound
 /// (`docs/research/dependent-moduleof.md`).
 const KNOWN_GAPS: &[&str] = &[
     "higher-kinds/poly-global-read.fx `go`",
     "modules/colons.fx `lambda@584`",
     "modules/colons.fx `program`",
     "modules/dependent-moduleof-drop.fx `program`",
+    "modules/dependent-moduleof-env-file.fx `lambda@1001:0`",
+    "modules/dependent-moduleof-env-file.fx `program`",
     "modules/dependent-moduleof-file.fx `program`",
+    "modules/dependent-moduleof-items.fx `program`",
     "modules/dependent-moduleof-param.fx `program`",
     "modules/dependent-moduleof-restrict.fx `program`",
     "modules/dependent-moduleof.fx `program`",

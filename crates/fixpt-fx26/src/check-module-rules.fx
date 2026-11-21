@@ -328,6 +328,94 @@
                            ((= k 3) (k-bs-parts ns bs out))
                            (else out))))
           (k-mod-vals (cdr items) vs bs more)))))
+;; Each value of a module being made (`k-mod-vals`) bound in it, since
+;; `mark`, to a module of abstract types: each type's variable, `base..t`, the
+;; item and the type's name; a name of the checkers' own (`%…`) none. As
+;; `Checker::items_own_types`.
+(define-type k-owned (listof (productof (1 int) (2 symbol) (3 symbol)) acyclic))
+(define k-items-own-types (->* (k-items k-parts k-letrec-bs int) k-owned)
+  (lambda (items vs bs mark) (k-owned-of (k-mod-vals items vs bs nil) mark nil)))
+(define k-owned-of (->* (k-parts int k-owned) k-owned)
+  (lambda (vs mark out)
+    (if (null? vs)
+        out
+        (let* ((x (extract (car vs) 1))
+               (own (and (not (string=? (substring (symbol->string x) 0 1) "%"))
+                         (k-bound-since? x mark)))
+               (bt (if own (k-lookup-raw x) -1))
+               (more (if (< bt 0)
+                         out
+                         (tagcase (k-get (k-resolve bt))
+                           (ty-module (abs ds ws) (k-owned-onto abs x out))
+                           (else y out)))))
+          (k-owned-of (cdr vs) mark more)))))
+(define k-owned-onto (->* (k-parts symbol k-owned) k-owned)
+  (lambda (abs x out)
+    (if (null? abs)
+        out
+        (k-owned-onto (cdr abs) x
+                      (cons (product (1 (extract (car abs) 2)) (2 x) (3 (extract (car abs) 1)))
+                            out)))))
+;; `inner` but the variables of `owned`.
+(define k-unowned (->* (k-ids k-owned) k-ids)
+  (lambda (inner owned)
+    (cond ((null? inner) nil)
+          ((k-owned-var? owned (car inner)) (k-unowned (cdr inner) owned))
+          (else (cons (car inner) (k-unowned (cdr inner) owned))))))
+(define k-owned-var? (->* (k-owned int) bool)
+  (lambda (owned v)
+    (and (not (null? owned)) (or (= (extract (car owned) 1) v) (k-owned-var? (cdr owned) v)))))
+;; Module type `t`, as made, each value's type that names an item's own types
+;; (`owned`) naming them as that member's, `(select base t)` (`ty-member`), by
+;; its place in `t`: the module's type a dependent one. Refused at `a`..`b`
+;; if the item is no earlier value of `t`, or a description names one. As
+;; `Checker::members_named`.
+(define k-members-named (->* (int k-owned int int) int)
+  (lambda (t owned a b)
+    (if (null? owned)
+        t
+        (tagcase (k-get (k-resolve t))
+          (ty-module (abs ds vs)
+            (begin (k-descs-unowned ds owned a b)
+                   (k-ty-new (ty-module abs ds (k-vals-named vs vs owned 0 a b)))))
+          (else y t)))))
+(define k-descs-unowned (->* (k-parts k-owned int int) unit)
+  (lambda (ds owned a b)
+    (if (null? ds)
+        #u
+        (begin (k-owned-unnamed (extract (car ds) 2) owned (extract (car ds) 1) a b)
+               (k-descs-unowned (cdr ds) owned a b)))))
+(define k-owned-unnamed (->* (int k-owned symbol int int) unit)
+  (lambda (t owned n a b)
+    (cond ((null? owned) #u)
+          ((k-mentions-var? t (extract (car owned) 1))
+           (k-owned-unknown n (extract (car owned) 1) a b))
+          (else (k-owned-unnamed t (cdr owned) n a b)))))
+(define k-owned-unknown (->* (symbol int int int) unit)
+  (lambda (n w a b)
+    (k-fail (k-cat5 "`" (symbol->string n) "`'s type mentions `" (k-dvar-string w)
+                    "`, which is not known outside the module")
+            a b)))
+(define k-vals-named (->* (k-parts k-parts k-owned int int int) k-parts)
+  (lambda (ps all owned j a b)
+    (if (null? ps)
+        nil
+        (let ((m (k-owned-map (extract (car ps) 2) owned all j (extract (car ps) 1) a b)))
+          (cons (if (null? m) (car ps) (car (k-subst-each (list (car ps)) m)))
+                (k-vals-named (cdr ps) all owned (+ j 1) a b))))))
+(define k-owned-map (->* (int k-owned k-parts int symbol int int) k-map)
+  (lambda (t owned all j n a b)
+    (if (null? owned)
+        nil
+        (let ((rest (k-owned-map t (cdr owned) all j n a b)) (w (extract (car owned) 1))
+              (x (extract (car owned) 2)))
+          (if (not (k-mentions-var? t w))
+              rest
+              (let ((k (k-part-position all x 0)))
+                (if (and (>= k 0) (< k j))
+                    (let ((sel (k-ty-new (ty-member k x (extract (car owned) 3)))))
+                      (cons (cons w (if (= (k-dvar-kind w) 2) (dt sel) (df sel))) rest))
+                    (begin (k-owned-unknown n w a b) rest))))))))
 ;; Each value's type, `vs`, mentions none of `inner`, the sizes and abstract
 ;; types named inside the module; or an error at `a`..`b`.
 (define k-vals-known (->* (k-parts k-ids int int) unit)

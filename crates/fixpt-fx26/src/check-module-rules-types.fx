@@ -134,6 +134,19 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-items k-parts k-letrec-bs k-parts)
                        k-parts))
+            (val k-items-own-types
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-items k-parts k-letrec-bs int)
+                       (listof (productof (1 int) (2 symbol) (3 symbol)) acyclic)))
+            (val k-unowned
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (k-ids (listof (productof (1 int) (2 symbol) (3 symbol)) acyclic))
+                       k-ids))
+            (val k-members-named
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (int (listof (productof (1 int) (2 symbol) (3 symbol)) acyclic) int int)
+                       int))
             (val k-vals-known
                  (subr (maxeff (alloc @t)
                                (goto @z)

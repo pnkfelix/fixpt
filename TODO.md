@@ -8378,9 +8378,11 @@ client's value `x` fitting it but no client naming it (`vals_kept`,
 `k-vals-kept`; `val_fits_name`, `k-val-fits-name?`). A client may still
 write a hidden type's own name, `(select c %hidden:ticket)`, abstract as it
 is (found 2026-11-21; a `with` of a hidden value the expander's shapes
-refuse already). Left: steps 3 to 5 (a module's items typed by
-earlier items' paths, so `env.fx`'s own module has the type; `include` of a
-path; Heist's `frame.fx`).
+refuse already). **Step 3 built (2026-11-21):** an item's type naming an
+earlier item's own types, `base..t`, names them as that member's, so a
+file's own module has the dependent type (`items_as_members`,
+`k-items-as-members`). Left: steps 4 and 5 (`include` of a path;
+Heist's `frame.fx`).
 
 ## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
 

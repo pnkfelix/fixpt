@@ -956,15 +956,15 @@
              (g (k-mod-star-groups es bs k-synth-lambda-as))
              (checked (k-mod-check-lambdas (extract g 1) ls (extract g 2) nil (extract bound-ds 2)))
              (le (k-valued-stars items ls checked (extract bound-ds 2)))
+             (ow (k-items-own-types items (extract made 3) (extract checked 2) saved))
              (unbound (k-unbind-to saved))
              (vs (k-parts-reversed (k-mod-vals items (extract made 3) (extract checked 2) nil) nil))
-             ;; A component's module, bound inside, has abstract types no one
-             ;; outside can name.
-             (known (k-vals-known vs (k-named-since named (get k-skolems) nil) a b))
+             ;; A component's module, bound inside, has abstract types no one outside can name.
+             (known (k-vals-known vs (k-unowned (k-named-since named (get k-skolems) nil) ow) a b))
              (popped (set k-skolems named))
              (abs (k-parts-reversed (extract made 1) nil))
              (t (k-module-type items abs (k-parts-reversed (extract made 2) nil) vs (k-at-of x))))
-        (k-te-masked x t (k-union (extract made 4) le)))))
+        (k-te-masked x (k-members-named t ow a b) (k-union (extract made 4) le)))))
   ;; The same; a module read from a file (`load-module`, M7) seeing only the
   ;; standard environment, what is wrong in it said where it is read.
   (k-synth-module (->* (kx k-items int int) k-te)
