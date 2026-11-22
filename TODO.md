@@ -8455,6 +8455,36 @@ questions: breadcrumbs in the suffix or a second field, the stride and
 threshold; (a) or (b) for freezing; which layout keeps kind 1. To decide
 when taken up, with the user: a change of the language's settled layout.
 
+Decided with the user (2026-11-22), as the answer to take to kayak:
+neither (a) nor (b). `string` and `(stringof r)` stay UTF-32 (in the
+strict sense: a `char` is a Unicode scalar value, a Rust `char`), and
+everything said of them now stays true: `string` is `(stringof const)`,
+`letfreeze` of one copies nothing, `string-set!` is O(1). UTF-8 text is
+a type of its own, `utf8`: frozen only, its one field the length in
+characters, kayak's breadcrumbs past the threshold, made with it and never
+written. A layout is so known from the type, never by a kind tested at
+run time (against (b)), and no `letfreeze` walks its value to re-encode
+the strings in it (against (a), whose copy would be of every string the
+frozen value holds, found by its type).
+- `string` to `utf8` and back are explicit conversions, a copy each.
+- `utf8->string` and `string->utf8` change meaning to those
+  conversions; `utf8->bytes` and `bytes->utf8` (validating) take over
+  the bytevector ones they were.
+- Reading a `utf8` has operations of its own, not the `string` ones made
+  generic over both: code that only reads text takes `utf8`, code that
+  builds by writing takes `(stringof r)`, and the conversion between is
+  where they meet, its cost in the program text.
+- Opt-in: literals, the reader, symbols' names and ports stay `string`;
+  kayak's gains (memory, lending a `&str` without a copy) come where a
+  program uses `utf8`. A `utf8` literal, and readers giving one, are
+  for later, with kayak.
+- Later: a validating freeze, bytes built at a region and frozen into a
+  `utf8` with nothing copied, sound as `letfreeze` is (the value is the
+  only way into the region's data when the body ends), the check able to
+  fail.
+Open: breadcrumbs in the suffix or a second field; stride and threshold;
+`utf8`'s kind; the operations' names.
+
 ## 307. The cell verifier's rule for a path's types (the user's, 2026-11-22; beside §291)
 
 `fixpt verify` takes a value a path to a module reaches at the module's
