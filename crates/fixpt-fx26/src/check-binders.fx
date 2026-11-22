@@ -556,4 +556,32 @@
     (let ((vs (k-unescaped t (k-named-since saved (get k-skolems) nil) a b)))
       (begin (set k-skolems saved)
              (k-check-forgettable t vs a b)
-             (if (null? vs) t (k-subst t (k-finite-map vs nil))))))))))
+             (if (null? vs) t (k-subst t (k-finite-map vs nil)))))))
+;; `synth-as`, the checker's knot, for the body of `(with m …)` at `a`..`b`,
+;; its values `ps` bound, the first first: a member module that has abstract
+;; types bound as `(with m x)` gives it, the path's types from `m`'s binding
+;; if it has one (`k-component`), else opened there, as a `let` of it is
+;; (`k-name-nat`), so that two members of one module type are two modules
+;; (`TODO.md` §308; F-ing modules' unpack). As the Rust checker's `with_as`.
+(define k-with-knot
+  (->* (symbol k-parts (subr (maxeff checks spin) (kx int) k-te) int int)
+       (subr (maxeff checks spin) (kx int) k-te))
+  (lambda (m ps synth-as a b)
+    (lambda (body expected)
+      (let ((saved (k-mark)) (named (get k-skolems)))
+        (begin (k-bind-members (k-module-path-base m) ps)
+               (let ((r (synth-as body expected)))
+                 (begin (k-unbind-to saved)
+                        (k-te (k-forget-nats named (extract r 1) a b) (extract r 2)))))))))
+(define k-bind-members (->* (k-path-at k-parts) unit)
+  (lambda (base ps)
+    (if (null? ps)
+        #u
+        (let* ((x (extract (car ps) 1)) (t (extract (car ps) 2)))
+          (begin (k-bind x (cond ((not (k-binds-abstract? t)) t)
+                                 ((< (extract base 2) 0) (k-name-nat x t))
+                                 (else (let ((p (k-component base x)))
+                                         (if (< (extract p 2) 0)
+                                             (k-name-nat x t)
+                                             (k-kept-here p))))))
+                 (k-bind-members base (cdr ps))))))))))

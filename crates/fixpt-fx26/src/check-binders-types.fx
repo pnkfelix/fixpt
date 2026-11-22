@@ -14,7 +14,11 @@
 (define-type k-solved (select check-infer-types k-solved))
 (define-type kxs (select check-types-types kxs))
 ;; The types it names, from the files that define them.
-(import check-types-types (type k-desc k-terms))
+(import check-types-types (type k-desc k-terms k-parts k-te kx))
+(define-type k-synth-as-knot
+  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
+        (kx int)
+        k-te))
 (define-type check-binders-sig
   (moduleof (val k-binders-of
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
@@ -71,6 +75,10 @@
                                spin)
                        (k-ids int int int)
                        int))
+            (val k-with-knot
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (symbol k-parts k-synth-as-knot int int)
+                       k-synth-as-knot))
             (val k-unknown? (subr (maxeff (read @globals) spin (read @t)) (k-binders int) bool))
             (val k-open?
                  (subr (maxeff (read @globals) spin (read @t)) (k-binders k-solved int) bool))

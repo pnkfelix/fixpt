@@ -822,6 +822,11 @@ pub struct NodeFacts {
     /// length named, a module's abstract types), by its init: its type as
     /// bound, and the variables opened. With `record_types`.
     pub let_opened: HashMap<ExpId, (TyId, Vec<DVar>)>,
+    /// Each `with`'s member module opened as it is bound (`with_as`, as a
+    /// `let`'s is, `TODO.md` §308), by the `with`: its place among the
+    /// values the `with` binds (`with_vals`), its type as bound, and the
+    /// variables opened. With `record_types`.
+    pub with_opened: HashMap<ExpId, Vec<(usize, TyId, Vec<DVar>)>>,
     /// A module's abstract type's conversions, `up-t` and `down-t`, each
     /// the identity on the representation, by its lambda's body: the type
     /// it is bound at, from the representation to the abstract type or

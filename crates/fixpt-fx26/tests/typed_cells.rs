@@ -397,7 +397,6 @@ const KNOWN_GAPS: &[&str] = &[
     "modules/dependent-moduleof-drop.fx `program`",
     "modules/dependent-moduleof-restrict.fx `program`",
     "native/raw-args.fx `given`",
-    "modules/include-two-of-one-type.fx `make2`",
     "redefine/knot-spin.fx `f`",
     "redefine/module-abstract.fx `lambda@837`",
     "redefine/module-abstract.fx `lambda@837`",

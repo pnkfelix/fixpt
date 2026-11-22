@@ -8547,7 +8547,7 @@ the known gaps lose 17 words. Left:
   before as well (each item's type its own, `p..t`, the made module's
   layout the maker's).
 
-## 308. Two modules of one type, included as members, taken for one (found 2026-11-22, by §307)
+## 308. ~~Two modules of one type, included as members, taken for one~~ (found 2026-11-22, by §307; done the same day)
 
 Both checkers accept
 ```
@@ -8573,3 +8573,27 @@ which two of one type share; a path, `(with both m1)`, is at the path's
 value with abstract types a `with` binds taken as `(with m x)` would be, a
 path from `m`'s binding where it has one, else opened fresh as a `let`'s
 is (`include` is a `with` of its hidden binding).
+
+Done so (decided with the user, from the literature: F-ing modules' unpack, each a
+fresh variable, and Harper and Lillibridge's strengthening, `S/p`, for a
+path): `with` binds each member module that has abstract types at what
+`(with m x)` gives it, the path's types from `m`'s binding if it has one
+(`component`, `k-component`), else opened there as a `let`'s is
+(`name_nat`, `k-name-nat`), and forgets what it opened as a `let` does
+(`forget_nats`); the Rust checker's `with_as`, the FX-26 checker's
+`k-with-knot` (`check-binders.fx`). New test programs
+`modules/with-two-of-one-type.fx`, `-each.fx`,
+`include-two-of-one-type-mixed.fx`, `include-two-made-mixed.fx`;
+`path-not-binding.fx` refused now where the two paths' types meet,
+`outer.m.a..t` not `mid0.a..t`, rather than where `(with m a)`'s leaves.
+Next (the user's): every type path the checkers form held to the stable
+path rule (DOT's; 1ML's valuable paths), and the verifier's rule (§307)
+as explicit unpack points in the certificate, TAL's, not inferred.
+
+With it, the cell verifier: a `with`'s member opened so is said in the
+certificate as a `let`'s is (`Facts::with_opened`, an `Item::Open` at its
+slot); and a module made of two members of one module type, each binding
+that type's own variable, is no longer taken as one member's types tying
+the other's (`members_given`, `ties_members`: `mentions_free_var`, not
+`mentions_var`, which a binder's own variable fooled, the two members'
+variables crossed). `make2` (§307's known gap) verifies now.

@@ -1011,10 +1011,45 @@ impl Checker {
         // Checked, an error at the body is said of the `with`, so that a
         // call's argument's is the argument's (`as_argument`).
         let at = self.arena.span_of(body);
-        let (t, be) = self.in_scope(&vals, |c| match expected {
-            Some(x) => Ok((x, c.check(body, x).map_err(|err| if err.span == at { err.reworded(span, err.message.clone()) } else { err })?)),
-            None => c.synth(body),
-        })?;
+        // A member module that has abstract types bound as `(with m x)`
+        // gives it: the path's types from `m`'s binding, if it has one
+        // (`component`), else opened here, as a `let` of it is
+        // (`name_nat`), so that two members of one module type are two
+        // modules (`TODO.md` §308; F-ing modules' unpack).
+        let depth = self.env.len();
+        let named = self.skolems.len();
+        let base = self.path_base(m);
+        let mut opened = Vec::new();
+        for (k, (x, t)) in vals.into_iter().enumerate() {
+            let t = if self.binds_abstract(t) {
+                match base.clone().and_then(|(bt, at)| self.component(bt, at, x)) {
+                    Some((p, Some(at))) => self.kept_here(p, Some(at)),
+                    _ => {
+                        let from = self.skolems.len();
+                        let bound = self.name_nat(x, t);
+                        // Said for the verifier, as a `let`'s is.
+                        if bound != t && self.skolems.len() > from {
+                            opened.push((k, bound, self.skolems[from..].to_vec()));
+                        }
+                        bound
+                    }
+                }
+            } else {
+                t
+            };
+            self.env.push((x, t));
+        }
+        if self.record_types && !opened.is_empty() {
+            self.facts.with_opened.insert(e, opened);
+        }
+        let r = match expected {
+            Some(x) => self.check(body, x).map(|eff| (x, eff)).map_err(|err| if err.span == at { err.reworded(span, err.message.clone()) } else { err }),
+            None => self.synth(body),
+        };
+        self.truncate_env(depth);
+        let r = r.and_then(|(t, be)| Ok((self.forget_nats(named, t, span)?, be)));
+        self.skolems.truncate(named);
+        let (t, be) = r?;
         let eff = self.mask(e, &naming.union(&be), t);
         Ok((t, eff))
     }
@@ -1679,6 +1714,29 @@ impl Checker {
             }
             if matches!(self.arena.get(t), Ty::Var(w) if *w == v) {
                 return true;
+            }
+            self.each_ty_kid(t, |k| stack.push(k));
+        }
+        false
+    }
+
+    /// Whether `t` mentions variable `v` free: not where a module type's
+    /// abstract types or a `poly`'s binders bind it (two members of one
+    /// module type each bind the type's own variable, and neither's type
+    /// names the other's).
+    pub(crate) fn mentions_free_var(&self, t: TyId, v: DVar) -> bool {
+        let mut stack = vec![t];
+        let mut seen = HashSet::default();
+        while let Some(t) = stack.pop() {
+            let t = self.arena.resolve(t);
+            if !seen.insert(t) {
+                continue;
+            }
+            match self.arena.get(t) {
+                Ty::Var(w) if *w == v => return true,
+                Ty::Module { abs, .. } if abs.iter().any(|(_, w)| *w == v) => continue,
+                Ty::Poly { binders, .. } if binders.iter().any(|(w, _)| *w == v) => continue,
+                _ => {}
             }
             self.each_ty_kid(t, |k| stack.push(k));
         }

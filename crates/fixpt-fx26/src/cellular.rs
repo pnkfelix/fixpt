@@ -1157,6 +1157,14 @@ impl<'a> Compiler<'a> {
                     self.field(code, *i as i64 + 2);
                     inner.push((*n, Loc::Slot(depth + k)));
                 }
+                // Each member module opened as checking bound it, as a
+                // `let`'s is (`Facts::with_opened`).
+                if self.certs.is_some() {
+                    for (k, t, vars) in self.c.facts.with_opened.get(&x).cloned().unwrap_or_default() {
+                        self.opens.push((depth + k, t, vars));
+                        code.push(Item::Open(self.opens.len() - 1));
+                    }
+                }
                 self.exp(body, &inner, depth + names.len(), code, tail)?;
                 self.unbind(code, depth, names.len(), tail);
             }

@@ -1,4 +1,4 @@
-;; ! `(with m a)..t` is a module's abstract type, not known outside the scope where the module is named
+;; ! argument 1 is a mid0.a..t, where a outer.m.a..t is expected
 ;; A path's types are its base's binding's, and only that binding's: `m`,
 ;; a module's value opened by `with`, has the type `mid0` was bound at,
 ;; maybe, but may be `other0`, so its paths' types are their own.

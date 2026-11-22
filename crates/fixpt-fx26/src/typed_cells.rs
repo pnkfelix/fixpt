@@ -3173,7 +3173,7 @@ impl Verifier<'_> {
     fn ties_members(&self, t: TyId) -> bool {
         let Ty::Module { vals, .. } = self.c.arena.get(self.c.arena.resolve(t)) else { return false };
         vals.iter().enumerate().any(|(k, (_, m))| match self.c.arena.get(self.c.arena.resolve(*m)) {
-            Ty::Module { abs, .. } => abs.iter().any(|(_, w)| vals.iter().enumerate().any(|(j, (_, y))| j != k && self.c.mentions_var(*y, *w))),
+            Ty::Module { abs, .. } => abs.iter().any(|(_, w)| vals.iter().enumerate().any(|(j, (_, y))| j != k && self.c.mentions_free_var(*y, *w))),
             _ => false,
         })
     }
@@ -3197,7 +3197,7 @@ impl Verifier<'_> {
         for (k, (_, m)) in tv.iter().enumerate() {
             if let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(*m)).clone() {
                 for (n, w) in abs {
-                    if tv.iter().enumerate().any(|(j, (_, y))| j != k && self.c.mentions_var(*y, w)) {
+                    if tv.iter().enumerate().any(|(j, (_, y))| j != k && self.c.mentions_free_var(*y, w)) {
                         closed.push((k, n, w));
                     }
                 }

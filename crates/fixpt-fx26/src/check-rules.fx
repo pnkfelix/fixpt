@@ -995,8 +995,8 @@
                        (noted (k-note-with
                                 (product (1 (k-at-of x)) (2 (k-comp-names (extract used 1)))
                                          (3 (extract used 2))))) (naming (k-naming-effect m mt))
-                       (r (k-in-scope-parts (extract used 1) body expected k-synth-as
-                                            a b (k-start body) (k-end body))))
+                       (r (k-in-scope-parts nil body expected (k-with-knot m (extract used 1)
+                                            k-synth-as a b) a b (k-start body) (k-end body))))
                   (k-te-masked x (extract r 1) (k-union naming (extract r 2)))))
               (else y (k-fail (k-with-not-module shown (k-show-ty mt)) a b)))))))))
   (k-module-rule (->* (kx) k-te)
