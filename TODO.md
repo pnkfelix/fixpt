@@ -8558,9 +8558,18 @@ where `make` gives a `sig`, `(moduleof (abs t type) (val zero t) (val value
 (subr pure (t) int)))`, one of `int`'s and the other of `string`'s: run, it
 is "expected an exact integer" (`m1`'s `value` given `m2`'s string). An
 `include`'s hidden binding keeps the names its module has (§69), and its
-members `m1` and `m2`, each a `sig`, bind one `t`, so a path through the
-hidden binding names neither apart. The cell verifier now refuses such a
-program (§307). To fix, both checkers: a hidden binding holding modules
-with abstract types anchored as any other is, its own abstract types kept,
-so that each member's are named by its path (`Checker::name_module`;
-`k-name-module`).
+members `m1` and `m2`, each a `sig`, bind one `t`. The cell verifier now
+refuses such a program (§307).
+
+Not the `include`'s alone: any `with`'s body. `(define both (module (define
+m1 (make #t)) (define m2 (make #f))))`, `(with both ((with m1 value) (with
+m2 zero)))` is accepted by both, the same failure run; where
+`((with (with both m1) value) (with (with both m2) zero))`, and a `let` of
+each, are refused, `both.m2..t` not `both.m1..t`. A `with` binds its
+module's values in its body at their types as the module's type has them
+(`in_scope(&vals)`), and a module value's type binds its abstract types,
+which two of one type share; a path, `(with both m1)`, is at the path's
+(`component`). To decide, with the user, then both checkers: each module
+value with abstract types a `with` binds taken as `(with m x)` would be, a
+path from `m`'s binding where it has one, else opened fresh as a `let`'s
+is (`include` is a `with` of its hidden binding).
