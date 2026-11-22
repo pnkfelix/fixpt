@@ -8,7 +8,7 @@
 (define shaper-module ((proj (load-module "fx26:macros-shaper.fx") rs re rm rc rp)))
 (define walk-module (with shaper-module walk-module))
 (define fresh-module ((proj (load-module "fx26:macros-fresh.fx") rs re rm rc rp)))
-(import fresh-module tag-char?)
+(import fresh-module tag-char? module-named module-root)
 (define scopes-module (with walk-module scopes-module))
 (define align-module (with scopes-module align-module))
 (define types-module (with align-module types-module))
@@ -641,11 +641,15 @@
                            (tuple parts (captor-noted fail (captor-of (string->symbol base) d env)
                                                       top base #f (node-syn at) x (extract out 2))))
                           (inst
-                           (tuple parts (captor-noted fail (captor-of (extract h 2) #f env) top
+                           (tuple parts (captor-noted fail (inst-captor h env) top
                                                       (symbol->string (extract h 2)) #t x x
                                                       (extract out 2))))
                           (else (tuple parts (extract out 2))))))))
               (else y out)))))))
+;; The binder at a use that would capture the instance `h` names (kind 3):
+;; a path's first name's (`module-root`).
+(define inst-captor (->* (def-env env) int)
+  (lambda (h env) (captor-of (module-root (extract h 2)) #f env)))
 ;; Whether alias `base`, written as `free` says, names the instance a file's
 ;; macro is defined in, `h` (kind 3): one of its values, `(with lib name)`,
 ;; or `lib` as a type's module, `(select lib T)` (`act-instance-type`).
@@ -783,7 +787,8 @@
   (lambda (fail base d free h s)
     (let* ((ab (syn-span s)) (a (extract ab 1)) (b (extract ab 2))
            (with-of (lambda ((m string))
-                      (mk-list (list (mk-symbol "with" a b) (mk-symbol m a b) (mk-symbol base a b))
+                      (mk-list (list (mk-symbol "with" a b) (module-named m a b)
+                                     (mk-symbol base a b))
                                a b))))
       (case (extract h 1)
         ((0)
@@ -798,12 +803,12 @@
                 ((and (= free 0) (name-in? (string->symbol base) (extract h 6)))
                  (mk-list (list (mk-symbol "with" a b)
                                 (mk-list (list (mk-symbol "with" a b)
-                                               (mk-symbol (symbol->string (extract h 2)) a b)
+                                               (module-named (symbol->string (extract h 2)) a b)
                                                (mk-symbol (symbol->string (extract h 5)) a b))
                                          a b)
                                 (mk-symbol base a b))
                           a b))
-                ((instance-named? base free h) (mk-symbol base a b))
+                ((instance-named? base free h) (module-named base a b))
                 ((= free 0) (with-of "#%fx"))
                 ((= free 2) (mk-symbol base a b))
                 ;; A file's macro writes its descriptions through its module

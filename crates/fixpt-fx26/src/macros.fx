@@ -109,9 +109,8 @@
   (lambda (c)
     (tuple c c (the actions nil) (the pvars nil) (the contracts nil) (def-env-top)
            (the marked nil) (the (listof int acyclic) nil))))
-;; Each typed hole's contract, its type read as a use reads the template's
-;; types; none where it names the macro's own binders, which no use can
-;; write.
+;; Each typed hole's contract, its type read as a use reads the template's types;
+;; none where it names the macro's own binders, which no use can write.
 (define contracts-of (->* (pvars names scopes) contracts)
   (lambda (ps binders file)
     (if (null? ps)
@@ -127,7 +126,8 @@
                                     (not (name-in? (syn-symbol ty) (extract (car file) 3))))
                                "#%fx")
                               (else (symbol->string (extract (car file) 1))))))
-                (cons (tuple n (mk-list (list (mk-symbol "select" a b) (mk-symbol m a b) ty) a b))
+                (cons (tuple n (mk-list (list (mk-symbol "select" a b) (module-named m a b) ty)
+                                        a b))
                       rest)))))))
 (define expr-kind? (->* (sty) bool)
   (lambda (t) (= ((with types-module kind-of) t) 0)))
@@ -519,7 +519,7 @@
 ;; And the forms' keys' hashes, so that a program begun in the standard
 ;; environment's state names as the Rust expander, begun anew, does.
 (define fresh-module (with procedural-module fresh-module))
-(import fresh-module fresh-tag expansion-begun! seen-now seen! (type seen-keys))
+(import fresh-module fresh-tag expansion-begun! seen-now seen! module-named (type seen-keys))
 (define-type by-states
   (listof (tupleof int macro-env load-defs names seen-keys marked phase1-state) acyclic))
 (define by-state (ref by-states rs) (new nil))

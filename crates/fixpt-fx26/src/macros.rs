@@ -2489,7 +2489,7 @@ impl Macros {
                 },
             };
             let select = interner.intern("select");
-            contracts.insert(*n, Kept::new(Syn::lst(ty.at(), vec![Syn::symbol(ty.at(), select, interner), Syn::symbol(ty.at(), module, interner), ty])));
+            contracts.insert(*n, Kept::new(Syn::lst(ty.at(), vec![Syn::symbol(ty.at(), select, interner), module_named(ty.at(), module, interner), ty])));
         }
         let pvars: Vec<(Sym, PInfo)> = order.into_iter().map(|n| (n, pvars[&n].clone())).collect();
         let names = pvars.iter().filter(|(_, p)| matches!(&*p.core, STy::Bvar | STy::Dvar | STy::Id)).map(|(n, _)| *n).collect();
@@ -5566,6 +5566,32 @@ enum Part {
 /// a name of the expander's own (`%…`).
 fn path_named(name: &str) -> bool {
     !name.starts_with('%') && name.contains("::")
+}
+
+/// Module `m`, the name of an instance its macros are imported of, which
+/// may be a path, `env::m` (`import-with-syntax` of one): as an expression,
+/// a path's `with`s, `(with env m)`; else the name.
+pub(crate) fn module_named(at: At, m: Sym, interner: &mut Interner) -> Syn {
+    let name = interner.name(m).to_string();
+    if !path_named(&name) {
+        return Syn::symbol(at, m, interner);
+    }
+    let mut parts = name.split("::");
+    let mut out = Syn::named(at, parts.next().unwrap_or_default(), interner);
+    for p in parts {
+        out = Syn::lst(at, vec![Syn::named(at, "with", interner), out, Syn::named(at, p, interner)]);
+    }
+    out
+}
+
+/// The name a binder at a use would capture module `m` by
+/// (`module_named`): a path's first.
+pub(crate) fn path_root(m: Sym, interner: &Interner) -> Sym {
+    let name = interner.name(m);
+    if !path_named(name) {
+        return m;
+    }
+    name.split("::").next().and_then(|r| interner.get(r)).unwrap_or(m)
 }
 
 /// Whether a path is written in `s`, outside a quoted datum.

@@ -317,3 +317,35 @@ fn a_module_parameters_macros_are_imported_in_a_hide() {
     assert!(said.contains("both checkers agree") && said.contains("int ! (read (globals user))"), "{said}{}", String::from_utf8_lossy(&out.stderr));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The macros of an instance a path names, `(hide (import-with-syntax
+/// env::m-lib))` (Heist's should-work note, `TODO.md` §304, entry 11): `env`
+/// a module parameter, `(load-moduleof "env.fx")`, whose file defines
+/// `(define m-lib ((load-module "lib.fx") m-base))`, the macros meaning that
+/// instance's names, through `env`, which a local `env` at a use does not
+/// capture; at the top level too, of `(define env ((load-module
+/// "env.fx")))`. And a file taking `env` qualified, whose macro names a
+/// type `(hide (include env::m-base))` brings it, which its frame holds
+/// (`TODO.md` §300). On every machine, both checkers agreeing. Not in a
+/// `hide`, and a path through a name the file does not define: refused.
+#[test]
+fn a_paths_instances_macros_are_imported() {
+    for m in MACHINES {
+        let (out, err) = eval(m, "path/main-path.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("1115 : int")), "on {m}: {out}{err}");
+        let (out, err) = eval(m, "path/main-top.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("12 : int")), "on {m}: {out}{err}");
+        let (out, err) = eval(m, "path/main-framed.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("3 : int")), "on {m}: {out}{err}");
+    }
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/import-with-syntax/path");
+    for name in ["main-path.fx", "main-top.fx", "main-framed.fx"] {
+        let out = Command::new(FIXPT).args(["check", name]).current_dir(&from).output().expect("runs");
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains("both checkers agree"), "{name}: {said}{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let (out, err) = eval("rs-scheme-vm", "path/main-shown.fx");
+    assert!(err.contains("`env::m-lib` is of a module parameter of this file, which no importer of it sees"), "{out}{err}");
+    let (out, err) = eval("rs-scheme-vm", "path/main-none.fx");
+    assert!(err.contains("`env::m-nope`: `env.fx` defines no `m-nope`"), "{out}{err}");
+}

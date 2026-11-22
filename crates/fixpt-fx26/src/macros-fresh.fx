@@ -194,6 +194,34 @@
     (begin (set form-key (extract s 1)) (set fresh-count (extract s 2))
            (set captors-made (extract s 3)) (set expanded (extract s 6))
            (set form-tags (extract s 7)))))
+;; Module `m`, the name of an instance a file's macros are imported of,
+;; which may be a path, `env::m` (`import-with-syntax` of one), at `a` to
+;; `b`: as an expression, the path's `with`s, `(with env m)`; else the name
+;; (`macros.rs`'s `module_named`).
+(define module-named (->* (string int int) syn)
+  (lambda (m a b)
+    (let ((k (path-sep m)))
+      (if (<= k 0)
+          (atom (string->symbol m) a b 0)
+          (module-named-from m (atom (string->symbol (substring m 0 k)) a b 0) (+ k 2) a b)))))
+(define module-named-from (->* (string syn int int int) syn)
+  (lambda (m out start a b)
+    (let* ((k (string-search m "::" start)) (end (if (< k 0) (string-length m) k))
+           (x (atom (string->symbol (substring m start end)) a b 0))
+           (items (list (atom 'with a b 0) out x))
+           (w (lst items (syn-datums items) a b 0)))
+      (if (< k 0) w (module-named-from m w (+ k 2) a b)))))
+;; Where a path's first `::` is in `m`, -1 if it is no path (a name of the
+;; expander's own, `%…`, is none).
+(define path-sep (->* (string) int)
+  (lambda (m)
+    (if (and (> (string-length m) 0) (char=? (string-ref m 0) #\%)) -1 (string-search m "::" 0))))
+;; The name a binder at a use would capture module `m` by (`module-named`):
+;; a path's first (`macros.rs`'s `path_root`).
+(define module-root (->* (symbol) symbol)
+  (lambda (m)
+    (let* ((s (symbol->string m)) (k (path-sep s)))
+      (if (<= k 0) m (string->symbol (substring s 0 k))))))
 ;; The state a session keeps after a form, and puts back before the next.
 (define seen-now (->* () seen-keys) (lambda () (get keys-seen)))
 (define seen! (->* (seen-keys) unit) (lambda (ks) (set keys-seen ks)))

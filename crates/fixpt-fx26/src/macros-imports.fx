@@ -19,11 +19,11 @@
         (type procedural))
 (define fresh-module (with macros-module fresh-module))
 (import fresh-module file-prefix instance-prefix file-keys-begin! file-keys-end! use-begin! use-end!
-        form-begin!)
+        form-begin! module-named module-root)
 (import macros-module expand-top made-syntax-taken! makes-top-defns? imports-syntax? hide-form?
         defines-syntax? name-in?)
 (define files-module (with macros-module files-module))
-(import files-module read-at def-path instance-path)
+(import files-module read-at def-path instance-path import-named load-form-of)
 (define parser-module (with macros-module parser-module))
 (import parser-module (type loaded-file))
 
@@ -89,24 +89,69 @@
 ;; files the driver read (`Checker::import_file_macros`).
 (define import-file-macros (->* (fails syn files) syns-a)
   (lambda (fail form fs)
-    (let* ((items (proper form)) (a (syn-start form)) (b (syn-end form)))
-      (if (not (and (or (= (len items) 2) (= (len items) 3)) (syn-symbol? (nth items 1))))
+    (let* ((items (proper form)) (a (syn-start form)) (b (syn-end form))
+           (named (if (or (= (len items) 2) (= (len items) 3)) (import-named (nth items 1)) "")))
+      (if (string=? named "")
           (begin (fail-at fail import-usage form) nil)
-          (let* ((lib (syn-symbol (nth items 1)))
+          (let* ((lib (string->symbol named)) (root (module-root lib))
                  (filter (if (= (len items) 3)
                              (the (listof filter acyclic) (list (name-filter fail (nth items 2))))
                              nil))
-                 (path (load-of lib (get loads))))
+                 (path (load-of root (get loads))))
             (if (null? path)
-                (begin (fail-at fail (not-load lib) form) nil)
-                (let ((f (loaded-path (car path) fs)))
-                  (if (null? f)
-                      (begin (fail-at fail (string-append "cannot read `" (car path) "`") form) nil)
-                      (let* ((inst (if (name-in? lib (get instances)) (list lib) nil))
-                             (g (given-names (file-macros-of fail form (car f) filter fs inst))))
-                        (begin (set imported (taken-names g filter))
-                               (include-of (mk-symbol (symbol->string lib) a b) filter g
-                                           a b)))))))))))
+                (begin (fail-at fail (not-load root) form) nil)
+                (let* ((f0 (loaded-path (car path) fs))
+                       ;; A path, `env::m`: its file found through the
+                       ;; definitions of the file its first name loads.
+                       (f (if (or (null? f0) (symbol=? root lib))
+                              f0
+                              (path-file fail form named (car f0) (+ (path-at named) 2) fs))))
+                  (cond
+                    ((null? f0)
+                     (begin (fail-at fail (string-append "cannot read `" (car path) "`") form) nil))
+                    ((null? f) nil)
+                    (else
+                     (let* ((inst (if (or (not (symbol=? root lib)) (name-in? lib (get instances)))
+                                      (list lib)
+                                      nil))
+                            (g (given-names (file-macros-of fail form (car f) filter fs inst))))
+                       (begin (set imported (taken-names g filter))
+                              (include-of (module-named named a b) filter g a b))))))))))))
+;; Where `lib`'s first `::` is.
+(define path-at (->* (string) int) (lambda (lib) (string-search lib "::" 0)))
+;; The file whose instance path `lib`, `env::m::…`, names from `start` on,
+;; of `f`, the file its names before load, read: each name after the first a
+;; `define` of the file before, not hidden, of a load or an instance of one,
+;; as written: the expander reads it before the checkers, and so from the
+;; files' forms, not their types (`Checker::path_file`). In a list of one.
+(define path-file (->* (fails syn string loaded-file int files) files)
+  (lambda (fail form lib f start fs)
+    (let* ((k (string-search lib "::" start)) (end (if (< k 0) (string-length lib) k))
+           (step (substring lib start end))
+           (load (step-load (string->symbol step) (raw-forms f) nil))
+           (g (if (null? load) nil (read-at (syn-start (car load)) fs))))
+      (cond ((null? load) (begin (fail-at fail (no-step lib (extract f 4) step) form) nil))
+            ((null? g) (begin (fail-at fail (string-append "cannot read `" step "`'s file") form)
+                              nil))
+            ((< k 0) g)
+            (else (path-file fail form lib (car g) (+ k 2) fs))))))
+;; The load form of the last `define` of `n` of forms `xs`, not hidden, if
+;; it is a load or an instance of one, in a list of one; else `out`'s.
+(define step-load (->* (symbol syns-a syns-a) syns-a)
+  (lambda (n xs out)
+    (if (null? xs)
+        out
+        (let ((items (proper (car xs))))
+          (step-load n (cdr xs)
+                     (if (and (>= (len items) 3) (string=? (head-name (car xs)) "define")
+                              (syn-symbol? (nth items 1)) (symbol=? n (syn-symbol (nth items 1))))
+                         (if (<= (len items) 4) (load-form-of (nth items (- (len items) 1))) nil)
+                         out))))))
+(define no-step (->* (string string string) string)
+  (lambda (lib path step)
+    (string-append "`" lib "`: `" path "` defines no `" step "` as `(load-module \"path\")` or an "
+                   "instance of one, `((load-module \"path\") arg …)`, which `import-with-syntax` "
+                   "of a path reads the macros of")))
 ;; The macros the last `import-file-macros` defined by their names, which
 ;; the parser holds to the globals (`top-made`).
 (define imported (ref names rs) (new nil))
@@ -127,9 +172,13 @@
 ;; `include` being made before its items (`Checker::file_own_expanded_syn`).
 (define import-in-file (->* (fails syn file-loads files file-loads bool) syns-a)
   (lambda (fail form ls fs ps hidden)
-    (let* ((items (proper form)) (a (syn-start form)) (b (syn-end form)))
-      (if (not (and (or (= (len items) 2) (= (len items) 3)) (syn-symbol? (nth items 1))))
-          (begin (fail-at fail import-usage form) nil)
+    (let* ((items (proper form)) (a (syn-start form)) (b (syn-end form))
+           (named (if (or (= (len items) 2) (= (len items) 3)) (import-named (nth items 1)) "")))
+      (cond
+        ((string=? named "") (begin (fail-at fail import-usage form) nil))
+        ((not (symbol=? (module-root (string->symbol named)) (string->symbol named)))
+         (begin (import-path-in-file fail form named ls fs ps hidden) nil))
+        (else
           (let* ((filter (if (= (len items) 3)
                              (the (listof filter acyclic) (list (name-filter fail (nth items 2))))
                              nil))
@@ -150,7 +199,35 @@
               (else
                (include-of (mk-symbol (string-append "%shared:" (extract (car f) 7)) a b) filter
                            (given-names (file-macros-of fail form (car f) filter fs nil))
-                           a b))))))))
+                           a b)))))))))
+;; `import-in-file` of a path, `lib`, `env::m`, from a module parameter `env`:
+;; in a `hide` alone, its file found through the parameter's file's
+;; definitions, its macros as the instance the path names has them.
+(define import-path-in-file (->* (fails syn string file-loads files file-loads bool) unit)
+  (lambda (fail form lib ls fs ps hidden)
+    (let* ((items (proper form))
+           (filter (if (= (len items) 3)
+                       (the (listof filter acyclic) (list (name-filter fail (nth items 2))))
+                       nil))
+           (root (module-root (string->symbol lib)))
+           (param (if (null? (load-of-file root ls)) (load-of-file root ps) nil))
+           (f (if (or (null? param) (not hidden)) nil (read-at (syn-start (car param)) fs)))
+           (g (if (null? f) nil (path-file fail form lib (car f) (+ (path-at lib) 2) fs))))
+      (cond ((null? param) (fail-at fail (path-not-param lib root) form))
+            ((not hidden)
+             (fail-at fail (string-append "`" lib "` is of a module parameter of this file, which "
+                                          "no importer of it sees: import its macros in a `hide`, "
+                                          "`(hide (import-with-syntax " lib "))`")
+                      form))
+            ((null? f) (fail-at fail (not-load root) form))
+            ((null? g) #u)
+            (else (begin (file-macros-of fail form (car g) filter fs (list (string->symbol lib)))
+                         #u))))))
+(define path-not-param (->* (string symbol) string)
+  (lambda (lib root)
+    (string-append "`" lib "`: `import-with-syntax` of a path in a module file takes one from a "
+                   "module parameter, `(m (load-moduleof \"path\"))`, and `" (symbol->string root)
+                   "` is not one")))
 ;; Why a module parameter's macros are imported in a `hide` alone.
 (define param-not-hidden (->* (symbol) string)
   (lambda (m)

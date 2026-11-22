@@ -1402,7 +1402,7 @@ fn loaded_files_at(scheme: &mut Front, file: FileId, from: Loads<'_>) -> R<(fixp
     let mut read = 0;
     let mut seen = Seen::default();
     let mut order = Vec::new();
-    supply_loaded_in(scheme, file, from, base_dir, &mut read, &mut seen, &mut order, &mut list)?;
+    supply_loaded_in(scheme, file, from, base_dir, false, &mut read, &mut seen, &mut order, &mut list)?;
     Ok((list, order))
 }
 
@@ -1427,12 +1427,14 @@ struct Seen {
 /// [`supply_loaded`] for the `load-module`s of `text`, a program or a file
 /// read at `base` (its positions moved past the program's by it), whose
 /// relative paths are from `dir`: each file read, then those it loads, in
-/// the order the Rust checker begins them (`Checker::files_read`).
+/// the order the Rust checker begins them (`Checker::files_read`). `wanted`:
+/// whether a file above imports macros, which may read these files' forms.
 fn supply_loaded_in(
     scheme: &mut Front,
     file: FileId,
     from: Loads<'_>,
     dir: Option<std::path::PathBuf>,
+    wanted: bool,
     read: &mut u32,
     seen: &mut Seen,
     order: &mut Vec<(String, String)>,
@@ -1440,7 +1442,9 @@ fn supply_loaded_in(
 ) -> R<()> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let mut loads = Vec::new();
-    let imports_syntax = matches!(from, Loads::Text(text, _) if text.contains("import-with-syntax"));
+    // Or a file below one that does, whose forms an `import-with-syntax`
+    // of a path, `env::m`, reads through (`Checker::path_file`).
+    let imports_syntax = wanted || matches!(from, Loads::Text(text, _) if text.contains("import-with-syntax"));
     // Each load's place: in a text read here, its byte's; in forms handed
     // over, its span's, in whichever file the form is.
     let place: Box<dyn Fn(Span) -> i64> = match from {
@@ -1514,7 +1518,7 @@ fn supply_loaded_in(
                 *read += 1;
                 let file_base = LOAD_BASE_STEP * *read as i64;
                 entry_at(scheme, list, &Read { base: file_base, why: String::new(), syns, text: ftext.clone(), fasl: false }, -2)?;
-                supply_loaded_in(scheme, FileId(1000 + *read), Loads::Text(&ftext, file_base), at.parent().map(|d| d.to_path_buf()), read, seen, order, list)?;
+                supply_loaded_in(scheme, FileId(1000 + *read), Loads::Text(&ftext, file_base), at.parent().map(|d| d.to_path_buf()), imports_syntax, read, seen, order, list)?;
             }
             continue;
         }
@@ -1545,7 +1549,7 @@ fn supply_loaded_in(
         seen.reads.insert(shared, r);
         // The files it loads, from its directory, at its positions.
         if file_base > 0 {
-            supply_loaded_in(scheme, FileId(1000 + *read), Loads::Text(&ftext, file_base), at.parent().map(|d| d.to_path_buf()), read, seen, order, list)?;
+            supply_loaded_in(scheme, FileId(1000 + *read), Loads::Text(&ftext, file_base), at.parent().map(|d| d.to_path_buf()), imports_syntax, read, seen, order, list)?;
         }
     }
     Ok(())

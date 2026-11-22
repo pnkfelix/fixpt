@@ -879,6 +879,47 @@ impl Checker {
                 _ => {}
             }
         }
+        // What each hidden `include` of a module parameter, or of a path
+        // from one, `(include env::m)`, brings: what its file's module
+        // gives, the path's file found as `import-with-syntax` finds it.
+        let params: fixpt_hash::HashMap<Sym, (String, bool)> = forms
+            .first()
+            .and_then(|f| crate::parse::module_parameters_of(f, &self.interner))
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|b| {
+                let listed = b.list();
+                let [m, t, ..] = listed.as_deref()? else { return None };
+                let h = head(self, t)?;
+                if !matches!(h.as_str(), "load-moduleof" | "load-input-moduleof") {
+                    return None;
+                }
+                let V::Str(p) = t.list()?.get(1)?.view() else { return None };
+                Some((m.sym()?, (p, h == "load-input-moduleof")))
+            })
+            .collect();
+        for x in &hidden {
+            let parts = x.list().unwrap_or_default();
+            if head(self, x).as_deref() != Some("include") || parts.len() != 2 {
+                continue;
+            }
+            let Some(m) = self.import_named(&parts[1]) else { continue };
+            let root = crate::macros::path_root(m, &self.interner);
+            let Some((p, input)) = params.get(&root).cloned() else { continue };
+            let (path, from, input) = if root == m {
+                (p, dir.map(|d| d.to_path_buf()), input)
+            } else {
+                let Ok((path, from)) = self.path_file(x.span(), m, &p, dir.map(|d| d.to_path_buf())) else { continue };
+                (path, from, false)
+            };
+            let key = crate::macros::shapes::load_key(from.as_deref(), &path, input).1;
+            if let Some(vals) = self.macros.file_module_values(&key) {
+                bound.extend(vals.into_iter().map(|n| self.interner.name(n).to_string()));
+            }
+            if let Some(ds) = self.macros.desc_aliases(&key) {
+                descs.extend(ds.iter().cloned());
+            }
+        }
         let mut kept: Vec<String> = Vec::new();
         for n in bound {
             if !n.starts_with('%') && (procedural || written.contains(&n)) && !kept.contains(&n) {
@@ -1267,6 +1308,23 @@ impl Checker {
                     };
                 }
                 if let Some((lib, filter)) = self.import_with_syntax(&x)? {
+                    // A path, `env::m`, from a module parameter: its file
+                    // found through the parameter's file's definitions, its
+                    // macros as the instance the path names has them.
+                    let root = crate::macros::path_root(lib, &self.interner);
+                    if root != lib {
+                        let whole = self.interner.name(lib).to_string();
+                        let Some(path) = params.get(&root).filter(|_| !loads.contains_key(&root)) else {
+                            return Err(FxError::at(x.span(), format!("`{whole}`: `import-with-syntax` of a path in a module file takes one from a module parameter, `(m (load-moduleof \"path\"))`, and `{}` is not one", self.interner.name(root))));
+                        };
+                        if j == 0 {
+                            return Err(FxError::at(x.span(), format!("`{whole}` is of a module parameter of this file, which no importer of it sees: import its macros in a `hide`, `(hide (import-with-syntax {whole}))`")));
+                        }
+                        let (path, at) = self.path_file(x.span(), lib, &path.clone(), dir.clone())?;
+                        let file = self.file_macros_at(x.span(), &path, at, true)?;
+                        read.insert((i, j), Imported { file, filter, instance: Some(lib) });
+                        continue;
+                    }
                     if let Some(path) = params.get(&lib).filter(|_| !loads.contains_key(&lib)) {
                         // Not given on: the parameter is this file's, which
                         // no importer of it sees (§291's re-export).
@@ -1396,7 +1454,7 @@ impl Checker {
             // `include`'s are the names not the file's macros.
             if let Some((lib, filter)) = self.import_with_syntax(&f)? {
                 let macros = self.import_file_macros(&f, lib, filter.as_ref())?;
-                let lib = Syn::symbol(f.span(), lib, &self.interner);
+                let lib = crate::macros::module_named(crate::heap_syn::at_of(f.span()), lib, &mut self.interner);
                 out.extend(include_of(f.span(), lib, filter.as_ref(), &macros, &mut self.interner));
                 continue;
             }
@@ -1416,18 +1474,71 @@ impl Checker {
     /// `(import-with-syntax lib)`'s `lib`, if `form` is one, and its
     /// `(only name …)` or `(except name …)`, if it has one.
     #[allow(clippy::type_complexity)]
-    fn import_with_syntax(&self, form: &Syn) -> R<Option<(Sym, Option<(bool, Vec<(Sym, Span)>)>)>> {
+    fn import_with_syntax(&mut self, form: &Syn) -> R<Option<(Sym, Option<(bool, Vec<(Sym, Span)>)>)>> {
         let listed = form.list();
         let items = listed.as_deref().unwrap_or_default();
         if items.first().and_then(|h| h.sym()).is_none_or(|h| self.interner.name(h) != "import-with-syntax") {
             return Ok(None);
         }
-        let usage = "`(import-with-syntax name)`, the name a module loaded by `load-module`, or `(import-with-syntax name (only name …))` or `(except name …)`";
+        let usage = "`(import-with-syntax name)`, the name a module loaded by `load-module`, or a path to one, `env::name`, or `(import-with-syntax name (only name …))` or `(except name …)`";
         match items {
-            [_, lib] if lib.sym().is_some() => Ok(Some((lib.sym().unwrap(), None))),
-            [_, lib, f] if lib.sym().is_some() => Ok(Some((lib.sym().unwrap(), Some(self.name_filter(f, usage)?)))),
+            [_, lib] => Ok(Some((self.import_named(lib).ok_or_else(|| FxError::at(form.span(), usage))?, None))),
+            [_, lib, f] => Ok(Some((self.import_named(lib).ok_or_else(|| FxError::at(form.span(), usage))?, Some(self.name_filter(f, usage)?)))),
             _ => Err(FxError::at(form.span(), usage)),
         }
+    }
+
+    /// The instance an `import-with-syntax` names, `lib`: a name, or a path
+    /// to one, `env::m` or `(with env m)`, as one name, `env::m`, which the
+    /// expander writes as its `with`s where a macro of it names it
+    /// (`crate::macros::module_named`).
+    fn import_named(&mut self, lib: &Syn) -> Option<Sym> {
+        if let Some(n) = lib.sym() {
+            return Some(n);
+        }
+        let listed = lib.list();
+        let [h, m, x] = listed.as_deref()? else { return None };
+        (h.sym().map(|h| self.interner.name(h)) == Some("with")).then_some(())?;
+        let m = self.import_named(m)?;
+        let x = x.sym()?;
+        let joined = format!("{}::{}", self.interner.name(m), self.interner.name(x));
+        Some(self.interner.intern(&joined))
+    }
+
+    /// The file whose instance path `lib`, `env::m::…`, names, its first
+    /// name's file at `path`, from `dir`: each name after the first a
+    /// `define` of the file before, not hidden, of `(load-module "path")` or
+    /// an instance of one, `((load-module "path") arg …)`, its path from that
+    /// file's directory, as written: the expander reads it before the
+    /// checkers, and so from the files' forms, not their types. The last
+    /// file's path, and its directory.
+    fn path_file(&mut self, site: Span, lib: Sym, path: &str, dir: Option<std::path::PathBuf>) -> R<(String, Option<std::path::PathBuf>)> {
+        let whole = self.interner.name(lib).to_string();
+        let (mut path, mut dir) = (path.to_string(), dir);
+        for step in whole.split("::").skip(1) {
+            let (at, _) = crate::macros::shapes::load_key(dir.as_deref(), &path, false);
+            let text = module_text(&path, &at, site)?;
+            self.macro_files += 1;
+            let file = FileId(2_000_000 + self.macro_files);
+            self.load_sites.insert(file, (site, path.clone(), text.as_str().into()));
+            #[cfg(debug_assertions)]
+            fixpt_read::note_source(file, &path, text.as_str().into());
+            let forms = crate::heap_syn::read_syn(&text, file, &mut self.interner).map_err(|e| self.in_loaded(FxError::at(e.span, e.message), file))?;
+            let mut found = None;
+            for f in &forms {
+                if let Some((n, p)) = self.load_def_of(f)
+                    && self.interner.name(n) == step
+                {
+                    found = p;
+                }
+            }
+            let Some((p, _)) = found else {
+                return Err(FxError::at(site, format!("`{whole}`: `{path}` defines no `{step}` as `(load-module \"path\")` or an instance of one, `((load-module \"path\") arg …)`, which `import-with-syntax` of a path reads the macros of")));
+            };
+            dir = at.parent().map(|d| d.to_path_buf());
+            path = p;
+        }
+        Ok((path, dir))
     }
 
     /// Notes a top-level `(define name (load-module "path"))`, the file
@@ -1460,7 +1571,8 @@ impl Checker {
 
     /// The name a `define` defines, if `form` is one, with its file's path
     /// if it is `(define name (load-module "path"))`, or an instance of
-    /// the file, `(define name ((proj (load-module "path") arg …)))`
+    /// the file, `(define name ((load-module "path") arg …))` or `(define
+    /// name ((proj (load-module "path") arg …)))`
     /// (`binding-shapes.md`, step 4 (c)), with whether it is.
     fn load_def_of(&self, form: &Syn) -> Option<(Sym, Option<(String, bool)>)> {
         let listed = form.list();
@@ -1479,10 +1591,10 @@ impl Checker {
         let path = items.last().and_then(|init| match loaded(init) {
             Some(p) => Some((p, false)),
             None => match init.list().as_deref() {
-                Some([applied]) => match applied.list().as_deref() {
-                    Some([h, m, ..]) if h.sym().is_some_and(|h| self.interner.name(h) == "proj") => loaded(m).map(|p| (p, true)),
-                    _ => None,
-                },
+                Some([applied]) if let Some([h, m, ..]) = applied.list().as_deref()
+                    && h.sym().is_some_and(|h| self.interner.name(h) == "proj") => loaded(m).map(|p| (p, true)),
+                // `((load-module "path") arg …)`, the file applied.
+                Some([m, ..]) => loaded(m).map(|p| (p, true)),
                 _ => None,
             },
         });
@@ -1498,10 +1610,19 @@ impl Checker {
     #[allow(clippy::type_complexity)]
     fn import_file_macros(&mut self, form: &Syn, lib: Sym, filter: Option<&(bool, Vec<(Sym, Span)>)>) -> R<fixpt_hash::HashSet<Sym>> {
         let usage = "`import-with-syntax` takes a name defined as `(load-module \"path\")`";
-        let Some((path, instance)) = self.load_defs.get(&lib).cloned() else {
-            return Err(FxError::at(form.span(), format!("{usage}, and `{}` is not one", self.interner.name(lib))));
+        // A path, `env::m`: its file found through the definitions of the
+        // file its first name loads, an instance's macros.
+        let root = crate::macros::path_root(lib, &self.interner);
+        let Some((path, instance)) = self.load_defs.get(&root).cloned() else {
+            return Err(FxError::at(form.span(), format!("{usage}, and `{}` is not one", self.interner.name(root))));
         };
-        let file = self.file_macros_at(form.span(), &path, self.base_dir.clone(), instance)?;
+        let (path, dir, instance) = if root != lib {
+            let (p, d) = self.path_file(form.span(), lib, &path, self.base_dir.clone())?;
+            (p, d, true)
+        } else {
+            (path, self.base_dir.clone(), instance)
+        };
+        let file = self.file_macros_at(form.span(), &path, dir, instance)?;
         let instance = instance.then_some(lib);
         let taken = |n: Sym| filter.is_none_or(|(only, names)| names.iter().any(|(m, _)| *m == n) == *only);
         let r = self.syn(|c| {

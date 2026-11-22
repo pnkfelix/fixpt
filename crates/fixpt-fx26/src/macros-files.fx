@@ -86,15 +86,24 @@
                (string=? (syn-name (car items)) "load-module"))
           (tagcase (nth items 1) (atom (d a b x) (if (string? d) (list d) nil)) (else y nil))
           nil))))
-;; An instance's, `((proj (load-module "path") arg …))`, in a list of one
-;; (`binding-shapes.md`, step 4 (c); `Checker::load_def_of`).
+;; An instance's, `((load-module "path") arg …)` or `((proj (load-module
+;; "path") arg …))`, in a list of one (`binding-shapes.md`, step 4 (c);
+;; `Checker::load_def_of`).
 (define instance-path (->* (syn) (listof string acyclic))
+  (lambda (s) (let ((l (instance-load s))) (if (null? l) nil (load-path (car l))))))
+;; Its load, `(load-module "path")`, in a list of one.
+(define instance-load (->* (syn) syns-a)
   (lambda (s)
     (let* ((items (proper s)) (applied (if (= (len items) 1) (proper (car items)) nil)))
-      (if (and (>= (len applied) 2) (syn-symbol? (car applied))
-               (string=? (syn-name (car applied)) "proj"))
-          (load-path (nth applied 1))
-          nil))))
+      (cond ((and (>= (len applied) 2) (syn-symbol? (car applied))
+                  (string=? (syn-name (car applied)) "proj"))
+             (list (nth applied 1)))
+            ((null? items) nil)
+            (else (list (car items)))))))
+;; A load's or an instance's load form, `(load-module "path")`, in a list of
+;; one.
+(define load-form-of (->* (syn) syns-a)
+  (lambda (s) (if (null? (load-path s)) (instance-load s) (list s))))
 ;; A load's or an instance's path, in a list of one.
 (define def-path (->* (syn) (listof string acyclic))
   (lambda (s) (let ((p (load-path s))) (if (null? p) (instance-path s) p))))
@@ -116,7 +125,21 @@
            (string=? (syn-name (car items)) "import-with-syntax")))))
 (define import-usage string
   (string-append "`(import-with-syntax name)`, the name a module loaded by `load-module`, or "
+                 "a path to one, `env::name`, or "
                  "`(import-with-syntax name (only name …))` or `(except name …)`"))
+;; The instance an `import-with-syntax` names, `s`: a name, or a path to one,
+;; `env::m` or `(with env m)`, as one name, `env::m`; "" if it is neither
+;; (`Checker::import_named`).
+(define import-named (->* (syn) string)
+  (lambda (s)
+    (if (syn-symbol? s)
+        (syn-name s)
+        (let* ((items (proper s))
+               (m (if (and (= (len items) 3) (syn-symbol? (car items))
+                           (string=? (syn-name (car items)) "with") (syn-symbol? (nth items 2)))
+                      (import-named (nth items 1))
+                      "")))
+          (if (string=? m "") "" (string-append m "::" (syn-name (nth items 2))))))))
 ;; `(only name …)` or `(except name …)`: whether `only`, and the names, in a
 ;; list of one; none if there is none.
 (define-type filter (tupleof bool syns-a))

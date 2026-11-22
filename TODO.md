@@ -8394,10 +8394,20 @@ test file writes `(include (with env base))`. **Step 5 (2026-11-21):**
 Heist's editor over an `env.fx` of `base` … `view`, on a copy: its
 parameter lists from 132 parameters, 758 module names and 12,831
 characters to 72, 242 and 7,210, `frame.fx` so checking
-(`dependent-moduleof.md`, §7). To decide: `calls.fx`, `files.fx`,
-`process.fx` and `scheme.fx` import `m-buffer`'s macros as a parameter's
-instance, and `import-with-syntax` takes no path, `env::m-buffer`; until it
-does they, and the files after `calls.fx`, keep the chain.
+(`dependent-moduleof.md`, §7). `calls.fx`, `files.fx`, `process.fx` and
+`scheme.fx` import `m-buffer`'s macros as a parameter's instance, which
+`import-with-syntax` took no path to, `env::m-buffer`. **Built
+(2026-11-21):** `import-with-syntax` of a path, in a module file from a
+module parameter (in a `hide`) and at the top level, the file found
+through the files' `define`s as written (`path_file`, `path-file`), the
+instance written as its `with`s, its first name kept from capture
+(`module_named`; `module-named`); `((load-module "path") arg …)` read as an
+instance, as `((proj …))` was; a file's frame holding what a hidden
+`include` of a parameter or a path from one brings; the driver handing
+the forms of the files below a file that imports macros (`syn.rs`'s
+`wanted`). The whole editor so written checks, both checkers agreeing.
+Tests `import-with-syntax/path/`. Not measured: a second bundle past
+`view`, the files from `frame.fx` on.
 
 ## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
 

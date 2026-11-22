@@ -24,7 +24,10 @@ use std::rc::Rc;
 /// environment's, which a file's macro's check has held them to); or, if
 /// `instance`, the importer's instance of the file in place of `%shared:key`
 /// (`binding-shapes.md`, step 4 (c)), a binder at the use that would
-/// capture its name renamed, as for a module file's items below.
+/// capture its name renamed, as for a module file's items below; an
+/// instance a path names, `env::m` (`import-with-syntax` of one), is
+/// written as its `with`s (`super::module_named`), the path's first name
+/// the one a binder at the use is kept from capturing.
 /// Or a module file's items, as the file's own macros see them, which no
 /// qualifier names: an alias becomes the plain name, and a binder at the
 /// use that would capture it is renamed (`Checker::file_own_expanded`).
@@ -51,6 +54,8 @@ enum Made {
     /// A value of a module's frame, `(with (with m frame) x)`.
     Framed(Sym, Sym, String),
     Plain(String),
+    /// A module, an instance's name or path, as an expression.
+    Module(Sym),
 }
 
 impl Macros {
@@ -164,16 +169,16 @@ impl Macros {
                     // as a type's module, `(select lib T)` (`InstanceType`):
                     // `lib` the importer's, which nothing at the use captures.
                     Some(DefEnv::File { shared, values, instance: true, .. }) if free == Free::Toplevel && a.interner.get(base).is_some_and(|v| values.contains(&v)) => {
-                        captured(*shared, Ns::Value, true)?;
+                        captured(super::path_root(*shared, a.interner), Ns::Value, true)?;
                         Made::Of(*shared, base.to_string())
                     }
                     Some(DefEnv::File { shared, instance: true, frame: frame @ Some(f), .. }) if free == Free::Toplevel && a.interner.get(base).is_some_and(|v| super::frame_holds(frame, v)) => {
-                        captured(*shared, Ns::Value, true)?;
+                        captured(super::path_root(*shared, a.interner), Ns::Value, true)?;
                         Made::Framed(*shared, f.name, base.to_string())
                     }
                     Some(DefEnv::File { shared, instance: true, .. }) if free == Free::Qualified && a.interner.get(base) == Some(*shared) => {
-                        captured(*shared, Ns::Value, true)?;
-                        Made::Plain(base.to_string())
+                        captured(super::path_root(*shared, a.interner), Ns::Value, true)?;
+                        Made::Module(*shared)
                     }
                     Some(DefEnv::File { shared, values, frame, .. }) => match free {
                         Free::Toplevel if a.interner.get(base).is_some_and(|v| values.contains(&v)) => Made::Of(*shared, base.to_string()),
@@ -228,13 +233,16 @@ impl Macros {
                     Syn::lst(span, vec![Syn::symbol(span, with, interner), Syn::symbol(span, toplevel, interner), Syn::symbol(span, n, interner)])
                 }
                 Made::Plain(n) => Syn::named(span, &n, interner),
+                Made::Module(m) => super::module_named(span, m, interner),
                 Made::Of(m, n) => {
                     let n = interner.intern(&n);
-                    Syn::lst(span, vec![Syn::symbol(span, with, interner), Syn::symbol(span, m, interner), Syn::symbol(span, n, interner)])
+                    let m = super::module_named(span, m, interner);
+                    Syn::lst(span, vec![Syn::symbol(span, with, interner), m, Syn::symbol(span, n, interner)])
                 }
                 Made::Framed(m, f, n) => {
                     let n = interner.intern(&n);
-                    let inner = Syn::lst(span, vec![Syn::symbol(span, with, interner), Syn::symbol(span, m, interner), Syn::symbol(span, f, interner)]);
+                    let m = super::module_named(span, m, interner);
+                    let inner = Syn::lst(span, vec![Syn::symbol(span, with, interner), m, Syn::symbol(span, f, interner)]);
                     Syn::lst(span, vec![Syn::symbol(span, with, interner), inner, Syn::symbol(span, n, interner)])
                 }
             };
