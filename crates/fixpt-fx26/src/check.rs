@@ -484,6 +484,13 @@ pub struct Checker {
     /// Of each anchor, those variables: bound as long as it, so held to
     /// its scope where it ends (`Checker::anchored`).
     pub(crate) anchored_vars: HashMap<DVar, Vec<DVar>>,
+    /// Of each path from a binding made, by its anchor and the path, its
+    /// members' names from the binding, `[m-base]` of `env.m-base`; and of
+    /// each of its variables, those and its type's name, `([m-base], t)`:
+    /// what a dependent procedure's type says of a parameter's, `(select
+    /// (with $k m-base) t)` (`Ty::ParamSel`).
+    pub(crate) path_steps: HashMap<(DVar, String), Vec<Sym>>,
+    pub(crate) path_members: HashMap<DVar, (Vec<Sym>, Sym)>,
     /// The description-function variables that are a module's abstract
     /// type constructors, whose representations no one outside can see:
     /// what is given to one is kept, cautiously, everywhere (`knot_in`).
@@ -568,7 +575,7 @@ pub struct Checker {
     pub(crate) select_map: HashMap<(Sym, Sym), TyId>,
     /// While a dependent procedure's parameters are given (`Checker::
     /// instantiate_params`): what each `(select $k t)` is; empty otherwise.
-    pub(crate) param_map: HashMap<(usize, Sym), TyId>,
+    pub(crate) param_map: HashMap<ParamKey, TyId>,
     /// What each `(select x t)` of a `moduleof`'s earlier member is, by the
     /// member's number, as `subst` puts it (`Checker::instantiate_members`).
     pub(crate) member_map: HashMap<(usize, Sym), TyId>,
@@ -1429,6 +1436,8 @@ impl Checker {
             module_anchors: HashMap::default(),
             module_paths: HashMap::default(),
             anchored_vars: HashMap::default(),
+            path_steps: HashMap::default(),
+            path_members: HashMap::default(),
             abstract_funs: HashSet::default(),
             effect_selects: Vec::new(),
             with_effect_fallback: HashMap::default(),
@@ -4709,7 +4718,7 @@ impl Checker {
         match (self.arena.get(f).clone(), self.arena.get(g).clone()) {
             (Ty::Var(x), Ty::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
             // A dependent procedure's parameter's, or a `select` as written.
-            (Ty::ParamSel(k, x), Ty::ParamSel(j, y)) => k == j && x == y,
+            (Ty::ParamSel(k, p, x), Ty::ParamSel(j, q, y)) => k == j && p == q && x == y,
             (Ty::MemberSel(k, _, x), Ty::MemberSel(j, _, y)) => k == j && x == y,
             (Ty::Select(m, x), Ty::Select(n, y)) => m == n && x == y,
             (Ty::Lam { params: pa, body: ba }, Ty::Lam { params: pb, body: bb }) => {
@@ -5139,7 +5148,7 @@ impl Checker {
             (Ty::Module { abs: aa, descs: da, vals: va }, Ty::Module { abs: ab, descs: db, vals: vb }) => {
                 self.module_sub((a, b), (&aa, &da, &va), (&ab, &db, &vb), env, st)
             }
-            (Ty::ParamSel(k, x), Ty::ParamSel(j, y)) => k == j && x == y,
+            (Ty::ParamSel(k, p, x), Ty::ParamSel(j, q, y)) => k == j && p == q && x == y,
             (Ty::MemberSel(k, _, x), Ty::MemberSel(j, _, y)) => k == j && x == y,
             // Two description functions (a module's transparent ones).
             (Ty::Lam { .. }, Ty::Lam { .. }) => self.fun_same(a, b, env, st),
@@ -5411,7 +5420,7 @@ impl Checker {
         match ty {
             Ty::Base(_) | Ty::Void | Ty::Link(None) => return t,
             Ty::Select(m, n) => return self.select_map.get(&(m, n)).copied().unwrap_or(t),
-            Ty::ParamSel(k, n) => return self.param_map.get(&(k, n)).copied().unwrap_or(t),
+            Ty::ParamSel(k, p, n) => return self.param_map.get(&(k, p, n)).copied().unwrap_or(t),
             Ty::MemberSel(k, _, n) => return self.member_map.get(&(k, n)).copied().unwrap_or(t),
             Ty::Var(v) => {
                 return match map.get(&v) {
@@ -6455,6 +6464,9 @@ struct SubState {
 }
 
 type ModuleParts = (Vec<(Sym, TyId)>, Vec<(Sym, TyId)>);
+/// A dependent procedure's parameter's type, `(select (with $k m …) t)`
+/// (`Ty::ParamSel`): the parameter, the path of its members, and the type.
+pub(crate) type ParamKey = (usize, Vec<Sym>, Sym);
 type ModuleView<'a> = (&'a [(Sym, DVar)], &'a [(Sym, TyId)], &'a [(Sym, TyId)]);
 
 /// For each side of a subtype question, the `poly` binders in scope, each

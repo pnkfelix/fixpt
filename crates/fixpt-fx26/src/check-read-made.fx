@@ -130,28 +130,31 @@
 ;; type `x` of the module the `k`th names.
 (define k-made-params (->* (int k-syns string) int)
   (lambda (r args path)
-    (let ((out (the (ref k-params-given @t) (new nil))) (outer (get k-param-map)))
+    (let ((out (the (ref k-paths-given @t) (new nil))) (outer (get k-param-map)))
       (begin (let ((seen (k-new-seen)))
                (begin (k-made-sels r seen args path out) (k-seen-done! seen)))
              (set k-param-map (get out))
              (let ((t (k-subst r nil))) (begin (set k-param-map outer) t))))))
-(define k-made-sels (->* (int k-seen k-syns string (ref k-params-given @t)) unit)
+(define k-made-sels (->* (int k-seen k-syns string (ref k-paths-given @t)) unit)
   (lambda (t seen args path out)
     (let ((t (k-resolve t)))
       (if (k-seen? seen t)
           #u
           (tagcase (k-get t)
-            (ty-param (k n)
+            ;; A member's, by the path from the argument (`k-path-named`).
+            (ty-param (k n p)
               (let ((m (k-nth args k)))
                 (if (syn-symbol? m)
-                    (set out (cons (product (1 k) (2 n) (3 (k-ty-new (ty-select (syn-head m) n))))
+                    (set out (cons (product (1 k) (2 n) (3 p)
+                                            (4 (k-ty-new
+                                                (ty-select (k-path-named (syn-head m) p) n))))
                                    (get out)))
                     (k-sfail (k-cat5 "argument " (int->string (+ k 1))
                                      " is a module the types `" path
                                      "` makes depend on: give it by name")
                              m))))
             (else y (k-made-sels-each (k-ty-kids t) seen args path out)))))))
-(define k-made-sels-each (->* (k-ids k-seen k-syns string (ref k-params-given @t)) unit)
+(define k-made-sels-each (->* (k-ids k-seen k-syns string (ref k-paths-given @t)) unit)
   (lambda (ts seen args path out)
     (if (null? ts)
         #u
@@ -270,12 +273,15 @@
 (define k-param-selects-given (->* (k-selects k-names k-ids syn) unit)
   (lambda (found names tys s)
     (if (pair? found)
-        (let* ((m (extract (car found) 1)) (x (extract (car found) 2)) (k (k-name-last names m 0))
-               (mt (if (and (>= k 0) (< k (k-length tys))) (k-resolve (k-nth tys k)) -1)))
-          (begin (tagcase (if (< mt 0) (ty-void) (k-get mt))
+        (let* ((m (extract (car found) 1)) (x (extract (car found) 2)) (rp (k-path-steps m))
+               (k (k-name-last names (extract rp 1) 0))
+               (mt (if (and (>= k 0) (< k (k-length tys)))
+                       (k-member-type-at (k-resolve (k-nth tys k)) (extract rp 2))
+                       -1)))
+          (begin (tagcase (if (< mt 0) (ty-void) (k-get (k-resolve mt)))
                    (ty-module (abs ds vs)
                      (if (or (k-made-has? abs x) (k-made-has? ds x)) #u
-                         (k-sfail (k-cat5 "`" (symbol->string m) "` has no type `"
+                         (k-sfail (k-cat5 "`" (k-module-path-shown m) "` has no type `"
                                           (symbol->string x) "`") s)))
                    (else y #u))
                  (k-param-selects-given (cdr found) names tys s)))

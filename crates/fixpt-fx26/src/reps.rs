@@ -637,7 +637,12 @@ impl Ex<'_> {
                 ("moduleof", names, args)
             }
             Ty::Select(..) => return Err("an unresolved `select`, which is never compared".into()),
-            Ty::ParamSel(k, n) => ("param-sel", vec![], vec![Arg::Int(k as i64), self.sym(n)]),
+            // A member path's names after the type's, none for a parameter's own.
+            Ty::ParamSel(k, p, n) => {
+                let mut args = vec![Arg::Int(k as i64), self.sym(n)];
+                args.extend(p.iter().map(|x| self.sym(*x)));
+                ("param-sel", vec![], args)
+            }
             Ty::MemberSel(k, x, n) => ("member-sel", vec![], vec![Arg::Int(k as i64), self.sym(x), self.sym(n)]),
             Ty::Lam { params, body } => {
                 let names = self.names_of(&params);
@@ -1099,7 +1104,10 @@ impl Im<'_, '_> {
                 let vals = self.parts(&vals)?;
                 Ty::Module { abs, descs, vals }
             }
-            "param-sel" => Ty::ParamSel(Self::int(arg(0)?)? as usize, self.sym(arg(1)?)?),
+            "param-sel" => {
+                let path = args[2..].iter().map(|x| self.sym(*x)).collect::<Result<_, _>>()?;
+                Ty::ParamSel(Self::int(arg(0)?)? as usize, path, self.sym(arg(1)?)?)
+            }
             "member-sel" => Ty::MemberSel(Self::int(arg(0)?)? as usize, self.sym(arg(1)?)?, self.sym(arg(2)?)?),
             "dlambda" => {
                 let n = node.binders.len();

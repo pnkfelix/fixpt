@@ -874,7 +874,10 @@ impl Checker {
         // Each parameter as bound in the body: `name_nat`'s opening of it.
         let mut inside: Vec<(TyId, Vec<DVar>)> = Vec::new();
         let named = self.skolems.len();
-        let (mut given, mut back): (HashMap<(usize, Sym), TyId>, HashMap<DVar, D>) = (HashMap::default(), HashMap::default());
+        let (mut given, mut back): (HashMap<crate::check::ParamKey, TyId>, HashMap<DVar, D>) = (HashMap::default(), HashMap::default());
+        // Each module parameter's anchor, whose paths' abstract types are
+        // its members', `(select (with $k m) t)` (`params_paths_back`).
+        let mut anchors: Vec<(usize, DVar)> = Vec::new();
         for (j, (n, t)) in typed.iter_mut().enumerate() {
             let resolved = match self.resolve_selects_outside(*t, &names[j..], span) {
                 Ok(r) => r,
@@ -889,14 +892,19 @@ impl Checker {
             let bound = self.name_nat(*n, resolved);
             inside.push((bound, self.skolems[opened_from..].to_vec()));
             self.env.push((*n, bound));
+            self.params_paths_back(&anchors, &mut given, &mut back);
             *t = if back.is_empty() { resolved } else { self.subst(resolved, &back) };
             if let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(bound)).clone() {
                 for (a, w) in abs {
-                    given.insert((j, a), self.arena.ty(Ty::Var(w)));
-                    back.insert(w, D::Type(self.arena.ty(Ty::ParamSel(j, a))));
+                    given.insert((j, Vec::new(), a), self.arena.ty(Ty::Var(w)));
+                    back.insert(w, D::Type(self.arena.ty(Ty::ParamSel(j, Vec::new(), a))));
                 }
             }
+            if let Some(a) = self.module_anchors.get(&bound) {
+                anchors.push((j, a.anchor));
+            }
         }
+        self.params_paths_back(&anchors, &mut given, &mut back);
         let result = result.map(|r| self.instantiate_params(r, &given));
         // The body's effect is masked *with the parameters in scope*: they
         // are free in the body, so what reaches them stays.
@@ -911,7 +919,8 @@ impl Checker {
         self.truncate_env(depth);
         let span = self.arena.span_of(e);
         // What the result says of a parameter's types, it says as the
-        // procedure's type does.
+        // procedure's type does: a path's from it too, read in the body.
+        self.params_paths_back(&anchors, &mut given, &mut back);
         let r = r.map(|(t, latent)| (if back.is_empty() { t } else { self.subst(t, &back) }, latent));
         let r = r.and_then(|(t, latent)| Ok((self.forget_nats(named, t, span)?, latent)));
         self.skolems.truncate(named);

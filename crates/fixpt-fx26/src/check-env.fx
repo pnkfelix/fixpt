@@ -865,15 +865,23 @@
 ;; What `(select m n)`, node `t`, is while selects are resolved; else `t`.
 (define k-select-of (->* (symbol symbol int) int)
   (lambda (m n t) (k-select-in (get k-select-map) m n t)))
-(define k-param-map (ref k-params-given @t) (new nil))
+(define k-param-map (ref k-paths-given @t) (new nil))
 (define k-param-in (->* (k-params-given int symbol int) int)
   (lambda (ps k n t)
     (cond ((null? ps) t)
           ((and (= (extract (car ps) 1) k) (symbol=? (extract (car ps) 2) n)) (extract (car ps) 3))
           (else (k-param-in (cdr ps) k n t)))))
-;; What `(select $k n)`, node `t`, is while parameters are given; else `t`.
-(define k-param-sel-of (->* (int symbol int) int)
-  (lambda (k n t) (k-param-in (get k-param-map) k n t)))
+;; What `(select (with $k p …) n)`, node `t`, is while parameters are given
+;; (none of `p` for `(select $k n)`); else `t`.
+(define k-param-sel-of (->* (int symbol k-names int) int)
+  (lambda (k n p t) (k-path-in (get k-param-map) k n p t)))
+(define k-path-in (->* (k-paths-given int symbol k-names int) int)
+  (lambda (ps k n p t)
+    (cond ((null? ps) t)
+          ((and (= (extract (car ps) 1) k) (symbol=? (extract (car ps) 2) n)
+                (k-path=? (extract (car ps) 3) p))
+           (extract (car ps) 4))
+          (else (k-path-in (cdr ps) k n p t)))))
 ;; What a `moduleof`'s earlier member's `(select x n)`, the `k`th, node `t`,
 ;; is while members are given (`k-instantiate-members`); else `t`.
 (define k-member-map (ref k-params-given @t) (new nil))

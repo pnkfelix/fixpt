@@ -156,8 +156,11 @@
   (ty-select symbol symbol)
   ;; `(select $k t)`: in a procedure's type, the type `t` of its `k`th
   ;; parameter (from 0), a module: a dependent procedure, a functor
-  ;; (`first-class-modules.md`, M5). A call puts the argument's for it.
-  (ty-param int symbol)
+  ;; (`first-class-modules.md`, M5). A call puts the argument's for it. With
+  ;; a path of its members, `(select (with $k m …) t)`, the type `t` of the
+  ;; module that member is: a dependent module type's parameter's, whose
+  ;; abstract types are its members'. As `Ty::ParamSel`.
+  (ty-param int symbol k-names)
   ;; `(select x t)` in a `moduleof`, `x` its `k`th value, an earlier one (from
   ;; 0): the type `t` of the module that member is, a dependent module type
   ;; (`docs/research/dependent-moduleof.md`). A binding puts its path's for
@@ -192,7 +195,9 @@
 (define-type k-path-at (productof (1 int) (2 int) (3 string)))
 ;; The abstract types of each module a path from a binding reaches, by the
 ;; binding's anchor and the path.
-(define-type k-anchor-paths (listof (productof (1 int) (2 string) (3 k-parts)) acyclic))
+;; And each path's members' names from the binding (`(m-base)` of `env.m-base`).
+(define-type k-anchor-paths
+  (listof (productof (1 int) (2 string) (3 k-parts) (4 k-names)) acyclic))
 ;; What a description name means where it is used.
 (define-datatype k-ds
   ;; A name `define-generative` bound: the `n`th generative type.
@@ -391,6 +396,8 @@
    (val k-named-has? (subr (maxeff (read @globals) spin (read @t)) (k-named symbol int) bool))
    (val k-te (subr pure (int k-eff) k-te))
    (val k-has-id? (subr (maxeff (read @globals) spin (read @t)) (k-ids int) bool))
+   (val k-path=? (subr (maxeff (read @globals) spin) (k-names k-names) bool))
+   (val k-with-path (subr (maxeff (read @globals) spin) (string k-names) string))
    (val k-part-find (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol) int))
    (val k-part-position
         (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol int) int))

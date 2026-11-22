@@ -853,8 +853,8 @@
              (r (if (null? ts)
                     (k-synth init)
                     (let ((t (k-resolve-selects (car ts) a b))) (k-te t (k-check init t)))))
-             (bound (k-bind n (k-name-nat n (extract r 1)))))
-        (k-made-of (extract made 1) (extract made 2) (k-part-onto n (extract r 1) (extract made 3))
+             (kt (k-item-bound n init (extract r 1) (null? ts))) (bound (k-bind n (extract kt 2))))
+        (k-made-of (extract made 1) (extract made 2) (k-part-onto n (extract kt 1) (extract made 3))
                    (k-union (extract made 4) (k-run-does n (extract r 2) init))))))
   ;; Lambda `init`, `n`'s, checked against `t`; a `define-rec` member's
   ;; error said as of its declared type.

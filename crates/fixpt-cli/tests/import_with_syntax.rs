@@ -349,3 +349,44 @@ fn a_paths_instances_macros_are_imported() {
     let (out, err) = eval("rs-scheme-vm", "path/main-none.fx");
     assert!(err.contains("`env::m-nope`: `env.fx` defines no `m-nope`"), "{out}{err}");
 }
+
+/// A bundle over a bundle (`docs/research/dependent-moduleof.md`, §8):
+/// `frame.fx`, over `env`, gives out a value of its member's abstract type,
+/// `(select (with $1 m-base) t)`, its macro naming that type through its
+/// frame; `env2.fx` holds it, over `env`; `user.fx` takes both and imports
+/// the macro by a path, `env2::m-frame`, a local `env` and `env2` capturing
+/// nothing. On every machine, both checkers agreeing; from `.fasl`s too.
+/// `env2` made over another making of `env` than the one given: refused.
+#[test]
+fn a_bundle_over_a_bundle_gives_its_members_types() {
+    for m in MACHINES {
+        let (out, err) = eval(m, "bundles/main.fx");
+        assert!(out.lines().last().is_some_and(|l| l.starts_with("23 : int")), "on {m}: {out}{err}");
+    }
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/import-with-syntax/bundles");
+    let out = Command::new(FIXPT).args(["check", "main.fx"]).current_dir(&from).output().expect("runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("both checkers agree"), "{said}{}", String::from_utf8_lossy(&out.stderr));
+    let (out, err) = eval("rs-scheme-vm", "bundles/main-mixed.fx");
+    assert!(err.contains("argument 2 is a (moduleof (val m-frame (moduleof (val start env-b.m-base..t)"), "{out}{err}");
+    // From `.fasl`s, copied, as they are written beside their files.
+    let dir = std::env::temp_dir().join(format!("fixpt-iws-bundles-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("made");
+    for name in ["base.fx", "env.fx", "frame.fx", "env2.fx", "user.fx", "main.fx", "main-mixed.fx"] {
+        std::fs::copy(from.join(name), dir.join(name)).expect("copied");
+    }
+    for name in ["base.fx", "env.fx", "frame.fx", "env2.fx", "user.fx"] {
+        let out = Command::new(FIXPT).args(["compile-file", name]).current_dir(&dir).output().expect("runs");
+        assert!(out.status.success(), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let made = std::fs::read(dir.join("frame.fasl")).expect("written");
+    assert!(String::from_utf8_lossy(&made).contains("(select (with env m-base) t)"), "the `.fasl` says the path");
+    let out = Command::new(FIXPT).args(["check", "main.fx"]).current_dir(&dir).output().expect("runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("both checkers agree"), "{said}{}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new(FIXPT).args(["check", "main-mixed.fx"]).current_dir(&dir).output().expect("runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("argument 2 is a") && said.contains("both checkers agree"), "{said}{}", String::from_utf8_lossy(&out.stderr));
+    let _ = std::fs::remove_dir_all(&dir);
+}

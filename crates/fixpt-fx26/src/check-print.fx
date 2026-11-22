@@ -383,8 +383,10 @@
             (k-put ")" (k-show-comps "val" vs (k-printing-named p ds) st))))
         (ty-select (m n)
           (k-put (k-cat5 "(select " (symbol->string m) " " (symbol->string n) ")") st))
-        (ty-param (k n)
-          (k-put (k-cat5 "(select $" (int->string (+ k 1)) " " (symbol->string n) ")") st))
+        (ty-param (k n p)
+          (k-put (k-cat5 "(select " (k-with-path (string-append "$" (int->string (+ k 1))) p) " "
+                         (symbol->string n) ")")
+                 st))
         ;; An earlier member of the `moduleof` it is in, by its name, as it is
         ;; written and read back (`ty-member`).
         (ty-member (k x n)

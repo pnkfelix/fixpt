@@ -324,7 +324,7 @@
           (ty-var (v) (leaf (k-ids-one v)))
           (ty-link (x) (k-fv-leaf nil k-fv-unbound))
           (ty-select (m n) (k-fv-leaf nil k-fv-select))
-          (ty-param (k n) (k-fv-leaf nil k-fv-param))
+          (ty-param (k n p) (k-fv-leaf nil k-fv-param))
           (ty-member (k x n) (k-fv-leaf nil k-fv-member))
           (ty-app (g ds)
             (k-fv-join (k-fv-leaf nil k-fv-app) (k-fv-join (ty g) (k-fv-descs ds (+ d 1)))))
@@ -642,7 +642,7 @@
               (let ((f (k-map-find m v)))
                 (if (null? f) t (tagcase (cdr (car f)) (dt (x) x) (df (x) x) (else y t)))))
             (ty-select (mod n) (k-select-of mod n t))
-            (ty-param (k n) (k-param-sel-of k n t))
+            (ty-param (k n p) (k-param-sel-of k n p t))
             (ty-member (k x n) (k-member-sel-of k n t))
             ;; A function applied, given what it is substituted by:
             ;; reduced, if it is a `dlambda` now (`check-kinds.fx`).

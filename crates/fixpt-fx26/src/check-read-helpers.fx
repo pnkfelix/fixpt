@@ -234,6 +234,37 @@
     (cond ((null? es) nil)
           ((symbol=? (car (car es)) p) (list (cdr (car es))))
           (else (k-select-path-find (cdr es) p)))))
+;; A path's name, `%path:(with (with m a) b)`, as its first name and its
+;; members', `m` and `(a b)`; a variable's, itself and none. As the Rust
+;; parser's `path_steps_of`.
+(define k-path-steps (->* (symbol) (productof (1 symbol) (2 k-names)))
+  (lambda (m)
+    (let ((p (k-module-path-of m)))
+      (if (null? p)
+          (product (1 m) (2 (the k-names nil)))
+          (let ((q (k-path-steps (car (car p)))))
+            (product (1 (extract q 1)) (2 (append (extract q 2) (list (cdr (car p)))))))))))
+;; The name of path `(with … x)` from `m` through `path`, noted
+;; (`k-select-paths`) as `k-module-named` makes it; `m` itself if `path` is
+;; none. As the Rust parser's `path_named`.
+(define k-path-named (->* (symbol k-names) symbol)
+  (lambda (m path)
+    (if (null? path)
+        m
+        (let ((p (string->symbol (k-cat5 "%path:(with " (k-module-path-shown m) " "
+                                         (symbol->string (car path)) ")"))))
+          (begin (if (null? (k-module-path-of p))
+                     (set k-select-paths (cons (cons p (cons m (car path))) (get k-select-paths)))
+                     #u)
+                 (k-path-named p (cdr path)))))))
+;; The type of the member `path` reaches in a module of type `t`, as written;
+;; `t` itself if `path` is none, -1 if it reaches none.
+(define k-member-type-at (->* (int k-names) int)
+  (lambda (t path)
+    (cond ((or (null? path) (< t 0)) t)
+          (else (tagcase (k-get (k-resolve t))
+                  (ty-module (abs ds vs) (k-member-type-at (k-part-find vs (car path)) (cdr path)))
+                  (else y -1))))))
 ;; A module's name as written: a path's `(with m x)`, a variable's itself.
 (define k-module-path-shown (->* (symbol) string)
   (lambda (m)
@@ -496,11 +527,14 @@
     (if (null? found)
         nil
         (let* ((m (extract (car found) 1)) (x (extract (car found) 2))
-               (k (k-name-last names m 0))
+               ;; Or a path from one, `(select (with m a …) x)`, its members'.
+               (rp (k-path-steps m))
+               (k (k-name-last names (extract rp 1) 0))
                (rest (k-param-selects (cdr found) names)))
           (if (< k 0)
               rest
-              (the k-selects (cons (product (1 m) (2 x) (3 (k-ty-new (ty-param k x)))) rest)))))))
+              (let ((sel (k-ty-new (ty-param k x (extract rp 2)))))
+                (the k-selects (cons (product (1 m) (2 x) (3 sel)) rest))))))))
 (define k-all-unnamed? (->* (k-names) bool)
   (lambda (ns) (or (null? ns) (and (symbol=? (car ns) k-no-name) (k-all-unnamed? (cdr ns))))))
 

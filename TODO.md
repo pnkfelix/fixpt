@@ -8406,8 +8406,15 @@ instance, as `((proj …))` was; a file's frame holding what a hidden
 `include` of a parameter or a path from one brings; the driver handing
 the forms of the files below a file that imports macros (`syn.rs`'s
 `wanted`). The whole editor so written checks, both checkers agreeing.
-Tests `import-with-syntax/path/`. Not measured: a second bundle past
-`view`, the files from `frame.fx` on.
+Tests `import-with-syntax/path/`. **A second bundle (2026-11-22,
+`dependent-moduleof.md` §8):** `env2.fx` over `env`, `frame.fx` …
+`help.fx`, the editor's parameter lists 53, 129 and 6,066; and what that
+found with an abstract type: a file over a bundle could give out no value
+of a member's type. Built: `(select (with $k m …) t)` (`Ty::ParamSel`'s
+path, `ty-param`'s), a parameter's paths' abstract types in the
+procedure's type, filled at a call by the path from the argument; a
+module item of a path keeping its types. Both checkers; the cell
+verifier's known gaps gain those programs' words (§291's path types).
 
 ## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
 

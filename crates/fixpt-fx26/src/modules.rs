@@ -415,6 +415,25 @@ impl Checker {
         Ok(self.arena.ty(Ty::Module { abs, descs, vals: out }))
     }
 
+    /// Item `name`'s type, its value `init` synthesized at `t`, and as it is
+    /// bound in the module: a path to a module, `(with m x)`, keeping the
+    /// path's types, as a `let` of one does (`module_path_type`), so that an
+    /// `include` of `env::m-base` gives `env.m-base..t`, which a parameter's
+    /// type gives on (`params_paths_back`); else, a variable's too, whose
+    /// types are its binding's already, as `name_nat` names it.
+    fn item_bound(&mut self, name: Sym, init: ExpId, t: TyId) -> (TyId, TyId) {
+        if matches!(self.arena.exp_at(init), crate::ast::Exp::Var(_)) {
+            return (t, self.name_nat(name, t));
+        }
+        match self.module_path_type(init) {
+            Some((k, at)) => {
+                let k = self.kept_here(k, at);
+                (k, k)
+            }
+            None => (t, self.name_nat(name, t)),
+        }
+    }
+
     /// A module's items, as `letrec*`'s (`crate::modorder`): its typed
     /// lambdas bound first, at their written types; every other item checked
     /// in order, in the scope of all of those and the items before it; then
@@ -452,7 +471,7 @@ impl Checker {
             let ModItem::Val { name, init, .. } = items[i] else { unreachable!("a value") };
             let (t, ie) = self.synth(init)?;
             eff = eff.union(&ie);
-            let bound = self.name_nat(name, t);
+            let (t, bound) = self.item_bound(name, init, t);
             self.fixed_slots.insert(self.env.len());
             self.env.push((name, bound));
             typed.push((i, name, t));
@@ -569,7 +588,7 @@ impl Checker {
                     };
                     self.run_item_does(name, &ie, init)?;
                     eff = eff.union(&ie);
-                    let bound = self.name_nat(name, t);
+                    let (t, bound) = if ty.is_none() { self.item_bound(name, init, t) } else { (t, self.name_nat(name, t)) };
                     self.env.push((name, bound));
                     typed.push((i, name, t));
                 }
@@ -1081,7 +1100,7 @@ impl Checker {
         // path's from this binding (`m.base..t`), as `component` reads it:
         // every file given this module agrees on them by path.
         let vals = match anchor {
-            Some(anchor) => self.members_closed_by(&vals, &mut |c, x, t| c.path_opened(anchor, &format!("{n}.{}", c.interner.name(x)), t)),
+            Some(anchor) => self.members_closed_by(&vals, &mut |c, x, t| c.path_opened(anchor, &format!("{n}.{}", c.interner.name(x)), &[x], t)),
             None => self.members_closed(&vals),
         };
         let named = self.arena.ty(Ty::Module { abs: fresh, descs, vals });
@@ -1235,8 +1254,22 @@ impl Checker {
         let _ = (descs, vals);
         let (anchor, base) = at?;
         let path = format!("{base}.{}", self.interner.name(x));
-        let (opened, _) = self.path_opened(anchor, &path, *c);
+        // Its members' names from the binding: the base's, and `x`.
+        let mut steps = self.path_steps.get(&(anchor, base)).cloned().unwrap_or_default();
+        steps.push(x);
+        let (opened, _) = self.path_opened(anchor, &path, &steps, *c);
         Some((opened, Some((anchor, path))))
+    }
+
+    /// The module type the path `path` of members from module variable
+    /// `v` reaches, as `(with (with v a) b)` reads it (`component`): its
+    /// abstract types the path's from `v`'s binding.
+    pub(crate) fn member_path_type(&mut self, v: Sym, path: &[Sym]) -> Option<TyId> {
+        let (mut t, mut at) = self.path_base(v)?;
+        for x in path {
+            (t, at) = self.component(t, at, *x)?;
+        }
+        Some(t)
     }
 
     /// The module type `select`'s `m` names: a variable's as it is bound,
@@ -1739,8 +1772,34 @@ impl Checker {
         }
     }
 
+    /// Of a dependent procedure's module parameters, each `k`th's binding's
+    /// `anchor` (`anchors`), the abstract types of each path from it read
+    /// so far, `env.m-base..t`, onto `back` as the procedure's type says
+    /// them, `(select (with $k m-base) t)` (`Ty::ParamSel`), and onto
+    /// `given` as the body has them: so a parameter of a dependent module
+    /// type, whose abstract types are its members', gives them as one whose
+    /// own they are does.
+    pub(crate) fn params_paths_back(&mut self, anchors: &[(usize, DVar)], given: &mut HashMap<crate::check::ParamKey, TyId>, back: &mut HashMap<DVar, D>) {
+        for (k, anchor) in anchors {
+            for w in self.anchored_vars.get(anchor).cloned().unwrap_or_default() {
+                if back.contains_key(&w) {
+                    continue;
+                }
+                let Some((path, a)) = self.path_members.get(&w).cloned() else { continue };
+                given.insert((*k, path.clone(), a), self.arena.ty(Ty::Var(w)));
+                back.insert(w, self.var_desc_of(*k, path, a, w));
+            }
+        }
+    }
+
+    /// `(select (with $k path…) a)`, a description of `w`'s kind.
+    fn var_desc_of(&mut self, k: usize, path: Vec<Sym>, a: Sym, w: DVar) -> D {
+        let t = self.arena.ty(Ty::ParamSel(k, path, a));
+        if self.arena.dvar_kind(w) == Kind::Type { D::Type(t) } else { D::Fun(t) }
+    }
+
     /// `t` with each `(select $k x)` what `map` says it is.
-    pub(crate) fn instantiate_params(&mut self, t: TyId, map: &HashMap<(usize, Sym), TyId>) -> TyId {
+    pub(crate) fn instantiate_params(&mut self, t: TyId, map: &HashMap<crate::check::ParamKey, TyId>) -> TyId {
         if map.is_empty() {
             return t;
         }
@@ -1853,11 +1912,17 @@ impl Checker {
     /// The variables of path `path` from the binding of `anchor`, for a
     /// module of abstract types `abs`: made the first time it is read, and
     /// bound as long as the binding (`module_paths`, `anchored_vars`).
-    fn path_made(&mut self, anchor: DVar, path: &str, abs: &[(Sym, DVar)]) -> Vec<DVar> {
+    /// Its members' names from the binding, `steps`, noted, and each
+    /// variable's (`path_members`).
+    fn path_made(&mut self, anchor: DVar, path: &str, steps: &[Sym], abs: &[(Sym, DVar)]) -> Vec<DVar> {
         if let Some(ws) = self.module_paths.get(&(anchor, path.to_string())) {
             return ws.clone();
         }
         let ws: Vec<DVar> = abs.iter().map(|(a, v)| self.module_var(&format!("{path}..{}", self.interner.name(*a)), *v)).collect();
+        self.path_steps.insert((anchor, path.to_string()), steps.to_vec());
+        for ((a, _), w) in abs.iter().zip(&ws) {
+            self.path_members.insert(*w, (steps.to_vec(), *a));
+        }
         self.anchored_vars.entry(anchor).or_default().extend(ws.iter().copied());
         self.module_paths.insert((anchor, path.to_string()), ws.clone());
         ws
@@ -1866,9 +1931,9 @@ impl Checker {
     /// Module type `t`, of the value path `path` reaches from the binding of
     /// `anchor`, its abstract types that path's (`path_made`), transparent:
     /// as [`component`](Self::component) gives it, and its types by name.
-    fn path_opened(&mut self, anchor: DVar, path: &str, t: TyId) -> (TyId, Vec<(Sym, TyId)>) {
+    fn path_opened(&mut self, anchor: DVar, path: &str, steps: &[Sym], t: TyId) -> (TyId, Vec<(Sym, TyId)>) {
         let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else { return (t, Vec::new()) };
-        let made = self.path_made(anchor, path, &abs);
+        let made = self.path_made(anchor, path, steps, &abs);
         let mut map: HashMap<DVar, D> = HashMap::default();
         let mut shown = Vec::new();
         for ((a, v), w) in abs.iter().zip(&made) {
@@ -1877,19 +1942,24 @@ impl Checker {
         }
         shown.extend(descs.iter().map(|(d, y)| (*d, self.subst(*y, &map))));
         let vals: Vec<(Sym, TyId)> = vals.iter().map(|(y, z)| (*y, self.subst(*z, &map))).collect();
-        let vals = self.members_closed_by(&vals, &mut |c, x, t| c.path_opened(anchor, &format!("{path}.{}", c.interner.name(x)), t));
+        let vals = self.members_closed_by(&vals, &mut |c, x, t| {
+            let mut deeper = steps.to_vec();
+            deeper.push(x);
+            c.path_opened(anchor, &format!("{path}.{}", c.interner.name(x)), &deeper, t)
+        });
         let opened = self.arena.ty(Ty::Module { abs: Vec::new(), descs: shown.clone(), vals });
         (opened, shown)
     }
 
-    pub(crate) fn param_sels(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut Vec<(usize, Sym)>) {
+    pub(crate) fn param_sels(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut Vec<crate::check::ParamKey>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
         }
-        if let Ty::ParamSel(k, n) = self.arena.get(t) {
-            if !out.contains(&(*k, *n)) {
-                out.push((*k, *n));
+        if let Ty::ParamSel(k, p, n) = self.arena.get(t) {
+            let key = (*k, p.clone(), *n);
+            if !out.contains(&key) {
+                out.push(key);
             }
             return;
         }
@@ -1910,7 +1980,7 @@ impl Checker {
             return Ok((params.to_vec(), result));
         }
         let mut map = HashMap::default();
-        for (k, x) in found {
+        for (k, path, x) in found {
             let named = match args.get(k).map(|a| self.arena.exp_at(*a).clone()) {
                 Some(crate::ast::Exp::Var(v)) => self.lookup(v).map(|t| (v, t)),
                 _ => None,
@@ -1921,10 +1991,15 @@ impl Checker {
                     format!("argument {} is a module the procedure's types depend on: give it by name (bind it with `let` first)", k + 1),
                 ));
             };
-            let Some((_, t)) = self.module_types(mt).into_iter().find(|(n, _)| *n == x) else {
-                return Err(FxError::at(span, format!("`{}` has no type `{}`", self.interner.name(v), self.interner.name(x))));
+            // A member's, `(select (with $k m …) t)`: the module the path
+            // from the argument reaches, as `(with v m)` reads it, its
+            // abstract types the path's from `v`'s binding.
+            let mt = if path.is_empty() { Some(mt) } else { self.member_path_type(v, &path) };
+            let shown = self.with_path(self.interner.name(v), &path);
+            let Some((_, t)) = mt.and_then(|mt| self.module_types(mt).into_iter().find(|(n, _)| *n == x)) else {
+                return Err(FxError::at(span, format!("`{shown}` has no type `{}`", self.interner.name(x))));
             };
-            map.insert((k, x), t);
+            map.insert((k, path, x), t);
         }
         let params: Vec<TyId> = params.iter().map(|p| self.instantiate_params(*p, &map)).collect();
         let result = self.instantiate_params(result, &map);

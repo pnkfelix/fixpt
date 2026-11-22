@@ -182,7 +182,8 @@
                              (k-members-closed vs1)
                              (k-members-closed-by
                               vs1 (lambda ((x symbol) (t int))
-                                    (k-path-opened anchor (k-cat3 n "." (symbol->string x)) t)))))
+                                    (k-path-opened anchor (k-cat3 n "." (symbol->string x)) (list x)
+                                                   t)))))
                     (named (k-ty-push
                             (ty-module (extract r 1) (k-subst-each ds (extract r 2)) vs2))))
                (begin (if (< anchor 0) #u (k-anchor! named anchor n)) named))))))
@@ -197,16 +198,17 @@
 ;; `anchor`, its abstract types that path's (`k-path-made`), transparent, its
 ;; members naming earlier ones' closed by their paths; and its types by name.
 ;; As the Rust checker's `path_opened`.
-(define k-path-opened (->* (int string int) (productof (1 int) (2 k-parts)))
-  (lambda (anchor path t)
+(define k-path-opened (->* (int string k-names int) (productof (1 int) (2 k-parts)))
+  (lambda (anchor path steps t)
     (tagcase (k-get (k-resolve t))
       (ty-module (abs ds vs)
-        (let* ((made (k-path-made anchor path abs)) (m (k-path-made-map abs made))
+        (let* ((made (k-path-made anchor path steps abs)) (m (k-path-made-map abs made))
                (shown (append (k-abs-shown made nil) (k-subst-each ds m)))
                (vs2 (k-members-closed-by
                      (k-subst-each vs m)
                      (lambda ((x symbol) (t int))
-                       (k-path-opened anchor (k-cat3 path "." (symbol->string x)) t)))))
+                       (k-path-opened anchor (k-cat3 path "." (symbol->string x))
+                                      (append steps (list x)) t)))))
           (product (1 (k-ty-new (ty-module nil shown vs2))) (2 shown))))
       (else y (product (1 t) (2 (the k-parts nil)))))))
 (define k-anchor! (->* (int int string) unit)
@@ -357,20 +359,24 @@
 (define k-component-named (->* (k-path-at symbol k-parts k-parts k-parts) k-path-at)
   (lambda (p x abs ds vs)
     (let* ((anchor (extract p 2)) (path (k-cat3 (extract p 3) "." (symbol->string x)))
-           (opened (k-path-opened anchor path (k-ty-new (ty-module abs ds vs)))))
+           ;; Its members' names from the binding: the base's, and `x`.
+           (steps (append (k-path-steps-of (get k-module-paths) anchor (extract p 3)) (list x)))
+           (opened (k-path-opened anchor path steps (k-ty-new (ty-module abs ds vs)))))
       (product (1 (extract opened 1)) (2 anchor) (3 path)))))
 ;; The variables path `path` from the binding of `anchor` reads abstract
-;; types `abs` at, each `path..t`: made the first time.
-(define k-path-made (->* (int string k-parts) k-parts)
-  (lambda (anchor path abs)
+;; types `abs` at, each `path..t`: made the first time, its members' names
+;; from the binding, `steps`, noted.
+(define k-path-made (->* (int string k-names k-parts) k-parts)
+  (lambda (anchor path steps abs)
     (let ((found (k-path-find (get k-module-paths) anchor path)))
       (if (null? found)
           (let ((made (k-rename-abs (string-append path "..") abs)))
             (begin
               ;; Not among `k-skolems`: bound as long as the anchor.
               (set k-skolems (k-drop-ids (get k-skolems) (k-part-vars (extract made 1))))
-              (set k-module-paths (cons (product (1 anchor) (2 path) (3 (extract made 1)))
-                                        (get k-module-paths)))
+              (set k-module-paths
+                   (cons (product (1 anchor) (2 path) (3 (extract made 1)) (4 steps))
+                         (get k-module-paths)))
               (extract made 1)))
           (car found)))))
 (define k-path-find (->* (k-anchor-paths int string) (listof k-parts acyclic))
@@ -379,6 +385,14 @@
           ((and (= (extract (car ps) 1) anchor) (string=? (extract (car ps) 2) path))
            (list (extract (car ps) 3)))
           (else (k-path-find (cdr ps) anchor path)))))
+;; The members' names from the binding of `anchor` of path `path`, of `ps`:
+;; none for the binding's own.
+(define k-path-steps-of (->* (k-anchor-paths int string) k-names)
+  (lambda (ps anchor path)
+    (cond ((null? ps) nil)
+          ((and (= (extract (car ps) 1) anchor) (string=? (extract (car ps) 2) path))
+           (extract (car ps) 4))
+          (else (k-path-steps-of (cdr ps) anchor path)))))
 ;; `ids` without the first `n` of `vs`, which `k-rename-abs` put on top.
 (define k-drop-ids (->* (k-ids k-ids) k-ids)
   (lambda (ids vs) (if (null? vs) ids (k-drop-ids (cdr ids) (cdr vs)))))
@@ -855,7 +869,7 @@
   (lambda (n given)
     (tagcase (k-get n)
       (ty-select (m s) #t)
-      (ty-param (k s) #t)
+      (ty-param (k s p) #t)
       (ty-member (k x s) #t)
       (ty-subr (e ps r cv spc) (k-eff-given? e given))
       (ty-tag (a h e r) (k-eff-given? e given))

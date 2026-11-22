@@ -637,7 +637,7 @@
             (ty-lam (bs x)
               (tagcase tb (ty-lam (cs y) (k-fun-same? a b ea eb trail labels)) (else z #f)))
             (ty-module (abs ds vs) (k-sub-modules a b ta tb ea eb trail labels))
-            (ty-param (k x) (k-sub-modules a b ta tb ea eb trail labels))
+            (ty-param (k x p) (k-sub-modules a b ta tb ea eb trail labels))
             (ty-member (k m x) (k-sub-modules a b ta tb ea eb trail labels))
             (else z #f)))))
   ;; Generative type arguments `xs ≤ ys`, each as its variance in `vs` says.
@@ -711,7 +711,7 @@
             (tagcase (k-get f)
               (ty-var (x) (tagcase (k-get g) (ty-var (y) (k-benv-var=? x y ea eb)) (else z #f)))
               ;; A dependent procedure's parameter's, or a `select` as written.
-              (ty-param (k x) (k-param-is? g k x))
+              (ty-param (k x p) (k-param-is? g k x p))
               (ty-member (k m x) (k-member-is? g k x))
               (ty-select (m x) (k-select-is? g m x))
               (ty-lam (pa ba)
@@ -859,7 +859,8 @@
   (lambda (a b ta tb ea eb trail labels)
     (tagcase ta
       ;; `(select $k x)`: only itself.
-      (ty-param (k x) (tagcase tb (ty-param (j y) (and (= k j) (symbol=? x y))) (else z #f)))
+      (ty-param (k x p)
+        (tagcase tb (ty-param (j y q) (and (= k j) (symbol=? x y) (k-path=? p q))) (else z #f)))
       (ty-member (k m x) (tagcase tb (ty-member (j n y) (and (= k j) (symbol=? x y))) (else z #f)))
       (ty-module (aa da0 va0)
         (tagcase tb

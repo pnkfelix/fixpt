@@ -389,7 +389,10 @@ fn every_directory_surveyed() {
 /// §291), written `a::b::c` too (§296); a dependent module type's binding
 /// so too, its members read as its paths, `e.base..t`, and a module whose
 /// item names an earlier item's types, `base..t` as the item is bound
-/// (`docs/research/dependent-moduleof.md`).
+/// (`docs/research/dependent-moduleof.md`); and a file's parameter's path,
+/// `(include (with env m-base))` at `env.m-base..t`, and a call's `(select
+/// (with $1 m-base) t)` given a global's, which the verifier has no path of
+/// (§8 there).
 const KNOWN_GAPS: &[&str] = &[
     "higher-kinds/poly-global-read.fx `go`",
     "modules/colons.fx `lambda@584`",
@@ -401,6 +404,10 @@ const KNOWN_GAPS: &[&str] = &[
     "modules/dependent-moduleof-include-path.fx `lambda@1001:0`",
     "modules/dependent-moduleof-include-path.fx `program`",
     "modules/dependent-moduleof-items.fx `program`",
+    "modules/dependent-moduleof-param-path-direct.fx `input@1004:214`",
+    "modules/dependent-moduleof-param-path-direct.fx `program`",
+    "modules/dependent-moduleof-param-path.fx `input@1004:214`",
+    "modules/dependent-moduleof-param-path.fx `input@1005:128`",
     "modules/dependent-moduleof-param.fx `program`",
     "modules/dependent-moduleof-restrict.fx `program`",
     "modules/dependent-moduleof.fx `program`",

@@ -2661,6 +2661,44 @@ impl Checker {
         Ok(Some(p))
     }
 
+    /// A path's name, `%path:(with (with m a) b)`, as its first name and
+    /// its members', `(m, [a, b])`; a variable's, itself and none.
+    pub(crate) fn path_steps_of(&self, m: Sym) -> (Sym, Vec<Sym>) {
+        match self.arena.withs.paths.get(&m).copied() {
+            Some((p, x)) => {
+                let (root, mut path) = self.path_steps_of(p);
+                path.push(x);
+                (root, path)
+            }
+            None => (m, Vec::new()),
+        }
+    }
+
+    /// The name of path `(with … x)` from `m`, `%path:(with m x)`, noted
+    /// (`WithTables::paths`), as `module_named` makes it; `m` itself if
+    /// `path` is empty.
+    pub(crate) fn path_named(&mut self, m: Sym, path: &[Sym]) -> Sym {
+        let mut out = m;
+        for x in path {
+            let shown = format!("(with {} {})", self.path_shown(out), self.name(*x));
+            let p = self.interner.intern(&format!("%path:{shown}"));
+            self.arena.withs.paths.insert(p, (out, *x));
+            out = p;
+        }
+        out
+    }
+
+    /// The type of the member `path` reaches in a module of type `t`, as
+    /// written (no binding's): `t` itself if `path` is empty.
+    pub(crate) fn member_type_at(&self, t: TyId, path: &[Sym]) -> Option<TyId> {
+        let mut t = t;
+        for x in path {
+            let Ty::Module { vals, .. } = self.arena.get(self.arena.resolve(t)) else { return None };
+            t = vals.iter().find(|(n, _)| n == x)?.1;
+        }
+        Some(t)
+    }
+
     /// A module's name as written: a path's `(with m x)`, a variable's
     /// itself.
     pub(crate) fn path_shown(&self, m: Sym) -> String {
@@ -3362,14 +3400,17 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         self.selects_in(t, &mut Default::default(), &mut found);
         let mut sel = fixpt_hash::HashMap::default();
         for (m, x, _) in found {
-            if let Some(k) = names.iter().rposition(|n| *n == Some(m)) {
+            // Or a path from one, `(select (with m a …) x)`, its members'.
+            let (root, path) = self.path_steps_of(m);
+            if let Some(k) = names.iter().rposition(|n| *n == Some(root)) {
                 if let Some(&mt) = tys.get(k)
+                    && let Some(mt) = self.member_type_at(mt, &path)
                     && matches!(self.arena.get(self.arena.resolve(mt)), Ty::Module { .. })
                     && !self.module_types(mt).iter().any(|(n, _)| *n == x)
                 {
-                    return Err(FxError::at(span, format!("`{}` has no type `{}`", self.name(m), self.name(x))));
+                    return Err(FxError::at(span, format!("`{}` has no type `{}`", self.path_shown(m), self.name(x))));
                 }
-                sel.insert((m, x), self.arena.ty(Ty::ParamSel(k, x)));
+                sel.insert((m, x), self.arena.ty(Ty::ParamSel(k, path, x)));
             }
         }
         if sel.is_empty() {
@@ -3772,11 +3813,13 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     let mut found = Vec::new();
                     self.param_sels(result, &mut Default::default(), &mut found);
                     let mut map = fixpt_hash::HashMap::default();
-                    for (k, x) in found {
+                    for (k, steps, x) in found {
                         let Some(m) = now[k].sym() else {
                             return Err(FxError::at(now[k].span(), format!("argument {} is a module the types `{path}` makes depend on: give it by name", k + 1)));
                         };
-                        map.insert((k, x), self.arena.ty(Ty::Select(m, x)));
+                        // A member's, by the path from the argument.
+                        let m = self.path_named(m, &steps);
+                        map.insert((k, steps, x), self.arena.ty(Ty::Select(m, x)));
                     }
                     t = self.instantiate_params(result, &map);
                     args = rest;

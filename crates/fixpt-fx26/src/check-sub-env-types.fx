@@ -11,7 +11,7 @@
 ;; The types it names, from the files that define them.
 (hide (define check-subtype-types (load-module "fx26:check-subtype-types.fx")))
 (import check-subtype-types (type k-assumed k-benv))
-(import check-types-types (type k-conv k-eff))
+(import check-types-types (type k-conv k-eff k-names))
 (import check-subtype-types (type k-label-entry k-label-list k-labels))
 (define-type k-region (select check-types-types k-region))
 (define-type k-strail (select check-subtype-types k-strail))
@@ -57,7 +57,7 @@
                        (k-region k-region k-benv k-benv)
                        bool))
             (val k-param-is?
-                 (subr (maxeff (read @globals) (read @t) spin) (int int symbol) bool))
+                 (subr (maxeff (read @globals) (read @t) spin) (int int symbol k-names) bool))
             (val k-member-is?
                  (subr (maxeff (read @globals) (read @t) spin) (int int symbol) bool))
             (val k-select-is?

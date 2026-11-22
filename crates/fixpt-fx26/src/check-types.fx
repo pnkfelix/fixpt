@@ -177,6 +177,17 @@
           (else (k-part-position (cdr ps) l (+ i 1))))))
 (define k-has-id? (subr (maxeff (read @globals) spin (read @t)) (k-ids int) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((= (car xs) s) #t) (else (k-has-id? (cdr xs) s)))))
+;; Module `m` as written, through its members `p`: `(with (with m a) b)`; `m`
+;; itself if `p` is none. As the Rust checker's `with_path`.
+(define k-with-path (subr (maxeff (read @globals) spin) (string k-names) string)
+  (lambda (m p)
+    (if (null? p) m (k-with-path (k-cat5 "(with " m " " (symbol->string (car p)) ")") (cdr p)))))
+;; Whether two paths of members' names, `(with $k m …)`'s, are one.
+(define k-path=? (subr (maxeff (read @globals) spin) (k-names k-names) bool)
+  (lambda (p q)
+    (if (null? p)
+        (null? q)
+        (and (not (null? q)) (symbol=? (car p) (car q)) (k-path=? (cdr p) (cdr q))))))
 
 ;;; ------------------------------------------------------------ the arena
 

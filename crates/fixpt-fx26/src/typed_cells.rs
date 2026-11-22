@@ -1595,16 +1595,25 @@ impl Verifier<'_> {
 
     /// What `(select $k t)` stands for, given values of `types` by
     /// position: for each that is a module, its abstract types, by name.
-    fn selects(&mut self, types: &[TyId]) -> HashMap<(usize, fixpt_read::Sym), TyId> {
+    /// And of each path from a parameter's binding that its body read, by
+    /// the path, `(select (with $k m …) t)`: the variable the body has, as
+    /// the checker made it (`Checker::params_paths_back`).
+    fn selects(&mut self, types: &[TyId]) -> HashMap<crate::check::ParamKey, TyId> {
         let mut given = HashMap::default();
         for (k, t) in types.iter().enumerate() {
             if let Ty::Module { abs, descs, .. } = self.c.arena.get(self.c.arena.resolve(*t)).clone() {
                 for (a, w) in abs {
-                    given.insert((k, a), self.c.arena.ty(Ty::Var(w)));
+                    given.insert((k, Vec::new(), a), self.c.arena.ty(Ty::Var(w)));
                 }
                 // A type it names, transparently: that type.
                 for (a, d) in descs {
-                    given.entry((k, a)).or_insert(d);
+                    given.entry((k, Vec::new(), a)).or_insert(d);
+                }
+            }
+            let Some(anchor) = self.c.module_anchors.get(t).map(|a| a.anchor) else { continue };
+            for w in self.c.anchored_vars.get(&anchor).cloned().unwrap_or_default() {
+                if let Some((path, a)) = self.c.path_members.get(&w).cloned() {
+                    given.entry((k, path, a)).or_insert(self.c.arena.ty(Ty::Var(w)));
                 }
             }
         }

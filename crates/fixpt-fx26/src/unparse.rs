@@ -5,6 +5,12 @@ use crate::check::{Checker, PrintSelects};
 use fixpt_hash::HashMap;
 
 impl Checker {
+    /// Module `m` as written, through its members `path`: `(with (with m a)
+    /// b)`; `m` itself if `path` is empty.
+    pub(crate) fn with_path(&self, m: &str, path: &[fixpt_read::Sym]) -> String {
+        path.iter().fold(m.to_string(), |out, x| format!("(with {out} {})", self.interner.name(*x)))
+    }
+
     /// A product's or sum's label as a type shows it: a keyword, `#:name`
     /// (`docs/fx26.md`, "Keywords"); a number, which no keyword is, bare
     /// (as `check-print.fx`'s `k-label-shown`).
@@ -435,7 +441,7 @@ impl Checker {
                 descs.len().hash(&mut h);
             }
             Ty::Select(m, n) => (name(*m), name(*n)).hash(&mut h),
-            Ty::ParamSel(k, n) => (k, name(*n)).hash(&mut h),
+            Ty::ParamSel(k, p, n) => (k, p.iter().map(|x| name(*x)).collect::<Vec<_>>(), name(*n)).hash(&mut h),
             Ty::MemberSel(k, _, n) => (u8::MAX, k, name(*n)).hash(&mut h),
         }
         h.finish()
@@ -755,11 +761,12 @@ impl Checker {
             // A call takes apart every one in the types its procedure's
             // type has, however deep (`dependent_args`): the outermost
             // procedure's parameter.
-            Ty::ParamSel(k, n) if self.print_for_fasl.borrow().is_some() => match self.print_params.borrow().as_ref().and_then(|ps| ps.get(k).cloned()) {
-                Some(p) => format!("(select {p} {})", self.interner.name(n)),
-                None => format!("(select %p.{} {})", k + 1, self.interner.name(n)),
+            // A member path's, `(select (with $k m …) t)`.
+            Ty::ParamSel(k, p, n) if self.print_for_fasl.borrow().is_some() => match self.print_params.borrow().as_ref().and_then(|ps| ps.get(k).cloned()) {
+                Some(m) => format!("(select {} {})", self.with_path(&m, &p), self.interner.name(n)),
+                None => format!("(select {} {})", self.with_path(&format!("%p.{}", k + 1), &p), self.interner.name(n)),
             },
-            Ty::ParamSel(k, n) => format!("(select ${} {})", k + 1, self.interner.name(n)),
+            Ty::ParamSel(k, p, n) => format!("(select {} {})", self.with_path(&format!("${}", k + 1), &p), self.interner.name(n)),
             // An earlier member of the `moduleof` it is in, by its name, as
             // it is written and read back (`Ty::MemberSel`).
             Ty::MemberSel(_, x, n) => format!("(select {} {})", self.interner.name(x), self.interner.name(n)),

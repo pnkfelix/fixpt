@@ -113,8 +113,9 @@
 (define k-benv-frozen-le? (->* (k-region k-region k-benv k-benv) bool)
   (lambda (r s ea eb) (k-frozen-le? (k-benv-region ea r) (k-benv-region eb s))))
 ;; Whether `g` is the `x` of a dependent procedure's `k`th parameter.
-(define k-param-is? (->* (int int symbol) bool)
-  (lambda (g k x) (tagcase (k-get g) (ty-param (j y) (and (= k j) (symbol=? x y))) (else z #f))))
+(define k-param-is? (->* (int int symbol k-names) bool)
+  (lambda (g k x p)
+    (tagcase (k-get g) (ty-param (j y q) (and (= k j) (symbol=? x y) (k-path=? p q))) (else z #f))))
 ;; Whether `g` is a `moduleof`'s `k`th member's `x`.
 (define k-member-is? (->* (int int symbol) bool)
   (lambda (g k x) (tagcase (k-get g) (ty-member (j m y) (and (= k j) (symbol=? x y))) (else z #f))))

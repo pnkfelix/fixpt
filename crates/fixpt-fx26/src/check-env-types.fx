@@ -125,6 +125,10 @@
 ;; what each `(select $k n)` is, `(k n)` and the type; none otherwise.
 (define-type k-param-given (productof (1 int) (2 symbol) (3 int)))
 (define-type k-params-given (listof k-param-given acyclic))
+;; And a dependent procedure's, `(select (with $k m …) n)`: `(k n)`, the path
+;; of the `k`th parameter's members, and the type (`ty-param`).
+(define-type k-path-given (productof (1 int) (2 symbol) (3 k-names) (4 int)))
+(define-type k-paths-given (listof k-path-given acyclic))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -227,7 +231,7 @@
    (val k-with-names (subr (maxeff (read @globals) spin (read @t)) (int int int int) k-names))
    (val k-at-is? (subr pure (k-at int int int int) bool))
    (val k-summary (subr (maxeff (read @globals) spin) (k-eff) int))
-   (val k-param-map (ref k-params-given @t))
+   (val k-param-map (ref k-paths-given @t))
    (val k-param-in
         (subr (maxeff (read @globals) spin (read @t)) (k-params-given int symbol int) int))
    (val k-known? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
@@ -267,7 +271,10 @@
    (val k-ids-but-last (subr (maxeff (alloc @t) (read @globals) spin) (k-ids) k-ids))
    (val k-ids-last (subr (maxeff (read @globals) spin) (k-ids) int))
    (val k-select-of (subr (maxeff (read @globals) spin (read @t)) (symbol symbol int) int))
-   (val k-param-sel-of (subr (maxeff (read @globals) spin (read @t)) (int symbol int) int))
+   (val k-param-sel-of
+        (subr (maxeff (read @globals) spin (read @t)) (int symbol k-names int) int))
+   (val k-path-in
+        (subr (maxeff (read @globals) spin (read @t)) (k-paths-given int symbol k-names int) int))
    (val k-member-map (ref k-params-given @t))
    (val k-member-sel-of (subr (maxeff (read @globals) spin (read @t)) (int symbol int) int))
    (val k-globals-region? (subr pure (k-region) bool))

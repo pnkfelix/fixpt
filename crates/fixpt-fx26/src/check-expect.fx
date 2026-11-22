@@ -216,6 +216,21 @@
                      (k-ty-new (ty-array e (k-size-var v) r)))))
           (else w t)))
       (else y t))))
+;; Item `n`'s type, its value `init` found to be `t`, and as it is bound in
+;; its module: if `plain` (no type written), a path to a module, `(with m x)`,
+;; keeping the path's types, as a `let` of one does (`k-module-path-type`), so
+;; that an `include` of `env::m-base` gives `env.m-base..t`, which a
+;; parameter's type gives on; else, a variable's too, whose types are its
+;; binding's already, as `k-name-nat` names it. As the Rust checker's
+;; `item_bound`.
+(define k-item-bound (->* (symbol kx int bool) (productof (1 int) (2 int)))
+  (lambda (n init t plain)
+    (let ((p (if (and plain (tagcase init (x-var (m a b k kr) #f) (else y #t)))
+                 (k-module-path-type init)
+                 (product (1 -1) (2 -1) (3 "")))))
+      (if (< (extract p 1) 0)
+          (product (1 t) (2 (k-name-nat n t)))
+          (let ((k (k-kept-here p))) (product (1 k) (2 k)))))))
 ;; Bind each of a `let`'s, `bs` their expressions, the first first: one
 ;; whose expression is a path to a module at the path's type
 ;; (`k-module-path-type`), each found before any is bound; any other as

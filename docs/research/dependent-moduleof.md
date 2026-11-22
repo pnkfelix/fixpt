@@ -18,7 +18,8 @@ names them as that member's (`items_own_types`, `members_named`; `k-members-name
 module file writing `env::base` is now expanded so (`paths-in?`). **Step
 5** (2026-11-21), §7: Heist's editor over an `env`, measured; with
 `import-with-syntax` of a path, `env::m-buffer` (2026-11-21), the whole
-editor so written checks.
+editor so written checks. §8 (2026-11-22): a bundle over a bundle, and a
+parameter's members' types in a file's type, `(select (with $1 m) t)`.
 
 ## 1. The problem, in Heist's own files
 
@@ -268,3 +269,57 @@ Tests `import-with-syntax/path/`.
 The copy also found that d81f9ee1 (entry 5) refused `(isearch-but s
 (prompt p))`, every reserved word refused as a use's label; fixed by
 0d4195c8, only the words the kernel's forms read where a label may be.
+
+## 8. A bundle over a bundle, and a parameter's members' types (2026-11-22)
+
+A second bundle past `view`, `env2.fx` taking `env` and making
+`frame.fx` … `help.fx` once, on the copy: every file past it taking
+`(env2 (load-moduleof "env2.fx" env) qualified)` for those five, the
+parameter lists go to 53 parameters, 129 module names written and 6,066
+characters (from 72, 242 and 7,210 over `env` alone; 132, 758 and 12,831
+as Heist has them). Every file checks, both checkers agreeing.
+
+That proved little: Heist's chain's types are all transparent, so an
+`env2` made over another making of `env` than the one given is accepted
+too, rightly. A probe of an abstract type (`dm-base.fx`'s `t`), shaped as
+Heist's files are, found what was missing: a file over a bundle could
+give out no value of a type of a member's. `(module-parameters ((env
+(load-moduleof "env.fx") qualified)))`, `(hide (include env::m-base))`,
+`(define start t (next zero))` was "`start`'s type mentions `t`, which is
+hidden in this module", and `start` typed `(select (with env m-base) t)`
+as written, "`env.m-base..t` is a module's abstract type, not known
+outside the scope where the module is named"; of a parameter whose own
+the type is, `(m-base (load-moduleof "base.fx"))`, the same file checks.
+A file with parameters is checked as a dependent procedure, whose type
+says a parameter's own abstract types as `(select $k t)` (`Ty::ParamSel`)
+and a call fills from its argument; a bundle has none of its own, only
+its members', which a path from the parameter's binding reads, and those
+the procedure's type did not say: forgotten where the file's scope ends.
+
+Built: `(select (with $k m …) t)`, the `t` of the module the path of
+members from parameter `k` reaches (`Ty::ParamSel(k, path, t)`;
+`(ty-param k t path)`). Of each module parameter's binding, the abstract
+types of each path from it read, `env.m-base..t`, are said so in the
+procedure's type, each path's members' names kept as the path is made
+(`path_members`, `params_paths_back`; `k-paths-back`); a call fills each
+from the argument by the path, as `(with v m-base)` reads it
+(`member_path_type`; `k-member-path-type`); `load-moduleof` applied, by a
+path's name from the argument (`path_named`; `k-path-named`); a `.fasl`
+says it by the parameter's name, `(select (with env m-base) t)`, read
+back so. A module's item whose value is a path, `(with env m-base)` (an
+`include`'s), keeps the path's types, as a `let` of one does
+(`item_bound`; `k-item-bound`); of a variable, as it was. Sound as `(select
+$k t)` is: the type says parameter `k`'s types, and at a call those are
+exactly the argument's, which a path names alike wherever it is read.
+
+So, of the probe: `frame.fx`'s type is `(subr pure ((moduleof (val m-base
+…))) (moduleof (val start (select (with $1 m-base) t)) …))`; `env2.fx`
+holds it over `env`; `user.fx`, taking both and the macro of
+`env2::m-frame` by a path, gives 23 on every machine; `env2` made over
+another making of `env` is refused, "argument 2 is a (moduleof (val
+m-frame (moduleof (val start env-b.m-base..t) …", as is that making's
+value given to `env`'s procedure, "argument 1 is a e-b.m-base..t, where a
+e.m-base..t is expected". Tests `modules/dependent-moduleof-param-path*.fx`
+(`module-files/dm-p*.fx`) and `import-with-syntax/bundles/`. The cell
+verifier has no path's types, as before (§291's gap): their words are
+among its known gaps.

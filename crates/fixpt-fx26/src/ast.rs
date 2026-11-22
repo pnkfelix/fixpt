@@ -620,7 +620,12 @@ pub enum Ty {
     /// `(select $k t)`: in a procedure's type, the type `t` of its `k`th
     /// parameter (from 0), a module: a dependent procedure, a functor
     /// (`first-class-modules.md`, M5). A call puts the argument's for it.
-    ParamSel(usize, Sym),
+    /// Or, with a path of its members, `(select (with $k m …) t)`, the
+    /// type `t` of the module that member is: what a parameter of a
+    /// dependent module type gives, whose abstract types are its members'
+    /// (`docs/research/dependent-moduleof.md`); a call puts the argument's
+    /// member's, by its path.
+    ParamSel(usize, Vec<Sym>, Sym),
     /// `(select x t)` in a `moduleof`, `x` its `k`th value, an earlier one
     /// (from 0): the type `t` of the module that member is, a dependent
     /// module type (`docs/research/dependent-moduleof.md`; TODO §304, Heist's

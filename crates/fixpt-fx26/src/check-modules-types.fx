@@ -122,6 +122,14 @@
                        bool))
             (val k-with-anchored
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-ids) k-ids))
+            (val k-module-path-base
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (symbol)
+                       k-path-at))
+            (val k-component
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-path-at symbol)
+                       k-path-at))
             (val k-module-path-type
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (kx)
@@ -130,6 +138,8 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-path-at)
                        int))
+            (val k-anchor-of
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-anchors))
             (val k-the-sealed
                  (subr (maxeff checks spin)
                        (kx int (subr (maxeff checks spin) (kx) k-te)

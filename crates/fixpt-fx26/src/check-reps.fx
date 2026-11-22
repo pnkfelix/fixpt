@@ -57,6 +57,9 @@
     (let ((slot (rp-reserve)))
       (begin (rp-fill slot (string->symbol head) #t nil args) (sum node slot)))))
 (define rp-sym (->* (string) k-rarg) (lambda (s) (sum sym (string->symbol s))))
+;; Names `ns`, each an argument.
+(define rp-syms (->* (k-names) k-rargs)
+  (lambda (ns) (if (null? ns) nil (cons (sum sym (car ns)) (rp-syms (cdr ns))))))
 
 (define rp-assoc (->* ((listof (pairof int int @t) acyclic) int) int)
   (lambda (xs k)
@@ -354,7 +357,9 @@
                  (vals (rp-node "vals" (rp-parts vs))))
             (begin (set rp-scope saved)
                    (rp-fill slot 'moduleof #f (rp-labels abs) (append nodes (list descs vals))))))
-        (ty-param (k n) (rp-fill slot 'param-sel #f nil (list (sum int k) (sum sym n))))
+        ;; A member path's names after the type's, none for a parameter's own.
+        (ty-param (k n p)
+          (rp-fill slot 'param-sel #f nil (cons (sum int k) (cons (sum sym n) (rp-syms p)))))
         (ty-member (k x n)
           (rp-fill slot 'member-sel #f nil (list (sum int k) (sum sym x) (sum sym n))))
         (ty-lam (bs body)
@@ -454,6 +459,8 @@
   (lambda (a) (tagcase a (flag b b) (else y (begin (ri-fail "a flag expected") #f)))))
 (define ri-sym (->* (k-rarg) symbol)
   (lambda (a) (tagcase a (sym s s) (else y (begin (ri-fail "a name expected") 'none)))))
+(define ri-syms (->* (k-rargs) k-names)
+  (lambda (xs) (if (null? xs) nil (cons (ri-sym (car xs)) (ri-syms (cdr xs))))))
 ;; Variances as `rp-variances` writes them, back: 0, 1, 2.
 (define ri-variances (->* (k-rargs) k-ids)
   (lambda (xs)
@@ -766,7 +773,8 @@
                   (ds (ri-parts (ri-args (ri-child (ri-nth args n)))))
                   (vs (ri-parts (ri-args (ri-child (ri-nth args (+ n 1)))))))
              (ty-module abs ds vs)))
-          ((string=? h "param-sel") (ty-param (ri-int (ri-nth args 0)) (ri-sym (ri-nth args 1))))
+          ((string=? h "param-sel")
+           (ty-param (ri-int (ri-nth args 0)) (ri-sym (ri-nth args 1)) (ri-syms (cdr (cdr args)))))
           ((string=? h "member-sel")
            (ty-member (ri-int (ri-nth args 0)) (ri-sym (ri-nth args 1)) (ri-sym (ri-nth args 2))))
           ((string=? h "dlambda")

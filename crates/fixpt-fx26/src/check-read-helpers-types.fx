@@ -313,6 +313,16 @@
                        (listof k-sym-pair acyclic)))
             (val k-module-path-shown
                  (subr (maxeff (alloc @t) (read @globals) spin) (symbol) string))
+            (val k-path-steps
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (symbol)
+                       (productof (1 symbol) (2 k-names))))
+            (val k-path-named
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (symbol k-names)
+                       symbol))
+            (val k-member-type-at
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-names) int))
             (val k-selected-module
                  (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) (write @t) spin)
                        (syn)

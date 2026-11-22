@@ -78,6 +78,10 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (symbol int)
                        int))
+            (val k-item-bound
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (symbol kx int bool)
+                       (productof (1 int) (2 int))))
             (val k-bind-named
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-bindings)
