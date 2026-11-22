@@ -1098,6 +1098,14 @@ impl<'a> Compiler<'a> {
                             }
                         }
                         inner.push((n, Loc::Slot(d)));
+                        // Opened as checking bound it, as a `let`'s is.
+                        if self.certs.is_some()
+                            && matches!(item, crate::ast::ModItem::Val { .. })
+                            && let Some((t, vars)) = self.c.facts.let_opened.get(&x).cloned()
+                        {
+                            self.opens.push((d, t, vars));
+                            code.push(Item::Open(self.opens.len() - 1));
+                        }
                         if !matches!(item, crate::ast::ModItem::Abs { .. }) {
                             vals.push(d);
                         }

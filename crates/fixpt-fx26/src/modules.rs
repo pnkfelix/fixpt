@@ -415,6 +415,16 @@ impl Checker {
         Ok(self.arena.ty(Ty::Module { abs, descs, vals: out }))
     }
 
+    /// Item `init`, of type `t`, bound at `bound`, opened as it was bound
+    /// (the variables made since `from`): said for the verifier as a
+    /// `let`'s is (`Facts::let_opened`).
+    fn item_opened(&mut self, init: ExpId, t: TyId, bound: TyId, from: usize) {
+        if self.record_types && bound != t && self.skolems.len() > from && !matches!(self.arena.exp_at(init), crate::ast::Exp::Var(_)) {
+            let vars = self.skolems[from..].to_vec();
+            self.facts.let_opened.insert(init, (bound, vars));
+        }
+    }
+
     /// Item `name`'s type, its value `init` synthesized at `t`, and as it is
     /// bound in the module: a path to a module, `(with m x)`, keeping the
     /// path's types, as a `let` of one does (`module_path_type`), so that an
@@ -471,7 +481,9 @@ impl Checker {
             let ModItem::Val { name, init, .. } = items[i] else { unreachable!("a value") };
             let (t, ie) = self.synth(init)?;
             eff = eff.union(&ie);
+            let opened_from = self.skolems.len();
             let (t, bound) = self.item_bound(name, init, t);
+            self.item_opened(init, t, bound, opened_from);
             self.fixed_slots.insert(self.env.len());
             self.env.push((name, bound));
             typed.push((i, name, t));
@@ -588,7 +600,9 @@ impl Checker {
                     };
                     self.run_item_does(name, &ie, init)?;
                     eff = eff.union(&ie);
+                    let opened_from = self.skolems.len();
                     let (t, bound) = if ty.is_none() { self.item_bound(name, init, t) } else { (t, self.name_nat(name, t)) };
+                    self.item_opened(init, t, bound, opened_from);
                     self.env.push((name, bound));
                     typed.push((i, name, t));
                 }

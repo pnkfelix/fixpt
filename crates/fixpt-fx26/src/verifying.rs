@@ -41,7 +41,7 @@ pub fn certified(heap: &mut Heap, c: &mut Checker, text: &str, tops: &[Top]) -> 
         comp.program(tops)?;
         comp.certs.take().expect("made")
     };
-    let unsettled = certs.settle(c).err();
+    let unsettled = certs.settle(c, heap).err();
     Ok((certs, unsettled))
 }
 

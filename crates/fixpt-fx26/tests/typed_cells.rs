@@ -382,38 +382,18 @@ fn every_directory_surveyed() {
 /// word); a variable of a `poly` type given where one is wanted, the
 /// checker instantiating it at the binders it generalizes over, which the
 /// verifier wraps in another `poly` instead (`go`; a local's as well, and a
-/// global's since `TODO.md` §211, 5, let one be read there); and a value a
-/// path to a module reaches, which the checkers take at the path's types,
-/// `mid.a..t` (`docs/fx26.md`, "A *path* to a module"), where the verifier
-/// sees the module's own abstract `t`, having no rule for a path (`TODO.md`
-/// §291), written `a::b::c` too (§296); a dependent module type's binding
-/// so too, its members read as its paths, `e.base..t`, and a module whose
-/// item names an earlier item's types, `base..t` as the item is bound
-/// (`docs/research/dependent-moduleof.md`); and a file's parameter's path,
-/// `(include (with env m-base))` at `env.m-base..t`, and a call's `(select
-/// (with $1 m-base) t)` given a global's, which the verifier has no path of
-/// (§8 there).
+/// global's since `TODO.md` §211, 5, let one be read there); a module
+/// taken as a dependent module type and given where one of its members is
+/// left out (`the env-t`, then `shown`), whose type packs that member's
+/// abstract type as the checker names it through the dependent type's own
+/// binder, which no value the verifier has carries (`TODO.md` §307); and a
+/// module of abstract types defined again, whose globals' cells the
+/// certificate gives the last one's type, as for `f` and `h`, so that no
+/// path from either is taken at its types (`Certs::path_roots`).
 const KNOWN_GAPS: &[&str] = &[
     "higher-kinds/poly-global-read.fx `go`",
-    "modules/colons.fx `lambda@584`",
-    "modules/colons.fx `program`",
     "modules/dependent-moduleof-drop.fx `program`",
-    "modules/dependent-moduleof-env-file.fx `lambda@1001:0`",
-    "modules/dependent-moduleof-env-file.fx `program`",
-    "modules/dependent-moduleof-file.fx `program`",
-    "modules/dependent-moduleof-include-path.fx `lambda@1001:0`",
-    "modules/dependent-moduleof-include-path.fx `program`",
-    "modules/dependent-moduleof-items.fx `program`",
-    "modules/dependent-moduleof-param-path-direct.fx `input@1004:214`",
-    "modules/dependent-moduleof-param-path-direct.fx `program`",
-    "modules/dependent-moduleof-param-path.fx `input@1004:214`",
-    "modules/dependent-moduleof-param-path.fx `input@1005:128`",
-    "modules/dependent-moduleof-param.fx `program`",
     "modules/dependent-moduleof-restrict.fx `program`",
-    "modules/dependent-moduleof.fx `program`",
-    "modules/path-deep.fx `lambda@590`",
-    "modules/path-deep.fx `program`",
-    "modules/path-with.fx `program`",
     "native/raw-args.fx `given`",
     "redefine/knot-spin.fx `f`",
     "redefine/module-abstract-path.fx `lambda@592`",
@@ -510,6 +490,63 @@ fn specifications_as_they_say() {
         }
     }
     assert!(wrong.is_empty(), "not as their first line says: {wrong:?}");
+}
+
+/// A path's types are its root's (`TODO.md` §307): in a program of two
+/// modules made by one maker, each a global's, `m1` and `m2`, every read
+/// of `m1`'s cell made a read of `m2`'s, one at a time, in a word that
+/// verifies, is refused: `one`'s value then of `m2.a..t`, not `m1.a..t`,
+/// and `q`, which keeps `m1.a`'s types, written with `m2.a`.
+#[test]
+fn a_path_read_from_another_root_is_refused() {
+    use fixpt_heap::layout::cellular::{operands, routine, GLOBAL_NAME, PRIMITIVES, ROUTINES, WORD_CELL0};
+    use fixpt_heap::ObjType;
+    let name = "modules/path-two-roots.fx";
+    let text = std::fs::read_to_string(modules_dir().join("path-two-roots.fx")).unwrap();
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (mut c, tops) = checked_in(&text, base_of(name)).expect("checks");
+    fixpt_fx26::syn::set_load_base(Some(base_of(name)));
+    let (mut made, mut kept) = (0, Vec::new());
+    s.scheme.scope(|sc| {
+        sc.make(|m| {
+            let (certs, unsettled) = certified(m.heap(), &mut c, &text, &tops).expect("compiles");
+            assert!(unsettled.is_none(), "not settled: {unsettled:?}");
+            // Each `global` cell: its word, its place, and the global's name.
+            let mut reads = Vec::new();
+            for raw in certs.words.keys() {
+                let w = Value::from_raw(*raw);
+                let heap = m.heap();
+                let n = heap.bloblet_head(w).fields;
+                let mut k = WORD_CELL0;
+                while k <= n {
+                    let cell = heap.bloblet_slot(w, k); // fields: the word's cells, walked by their operands
+                    let r = cell.is_fixnum().then(|| cell.as_fixnum() as usize).filter(|r| *r < PRIMITIVES).map(|r| ROUTINES[r].0);
+                    if r == Some("global") {
+                        let g = heap.bloblet_slot(w, k + 1); // fields: its operand, the global
+                        let named = heap.bloblet_slot(g, GLOBAL_NAME);
+                        if heap.is_a(named, ObjType::Symbol) {
+                            reads.push((w, k + 1, g, heap.symbol_name(named).to_string()));
+                        }
+                    }
+                    k += 1 + r.map_or(0, operands);
+                }
+            }
+            let _ = routine;
+            let m2 = reads.iter().find(|(.., n)| n == "m2").map(|(_, _, g, _)| *g).expect("m2 read");
+            for (w, at, g, n) in reads.iter().filter(|(.., n)| n == "m1") {
+                assert!(verify(&mut c, m.heap(), &certs, *w).verified(), "{n}'s reader verifies");
+                m.heap().set_bloblet_slot(*w, *at, m2); // fields: the read made of `m2`
+                made += 1;
+                if verify(&mut c, m.heap(), &certs, *w).verified() {
+                    kept.push(format!("a read of `m1` at field {at} made `m2`'s"));
+                }
+                m.heap().set_bloblet_slot(*w, *at, *g); // fields: and back
+            }
+            Value::NULL
+        });
+    });
+    assert!(made >= 2, "too few mutants: {made}");
+    assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
 }
 
 /// A word that verifies against its specification, its arithmetic

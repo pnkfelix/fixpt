@@ -454,6 +454,47 @@ next"): §8's specifications, in the Rust checker and the verifier.
   not claim them (§54's rule, kept); one written otherwise, `(or (not r)
   p)`, the verifier proves and uses, the checkers carry.
 
+A path's types (2026-11-22, the user's "attack path types"; `TODO.md`
+§307). The checkers name a module's abstract types by the path that
+reaches it, `mid.a..t`: a path from one binding is one module wherever it
+is read. The verifier took such a value at the module's own `t`, so it
+refused every word that moved one between two reads. Now the certificate
+says, of each binding whose paths the checkers named, its anchor and each
+path's variable (`Certs::path_roots`, `Certs::path_vars`, made by
+`settle` from the checker's records), and the verifier checks each use
+against the cells:
+- **A root** is a global's cell, if the program writes it once and no
+  other cell is of its binding; or a word's module parameter, if none of
+  its paths' variables is in a type of the word's signature or of a
+  global, so that a value of one never leaves the call. A global that
+  keeps a path's types, `(define q (with outer mid))`, is a root at that
+  path, and its one write must be of that very path, by its term.
+- **A read** of a member from a root, or from a path from one, by its
+  term (`(field k (global mid))`), is at the path's types: each abstract
+  type the path's variable, transparent, and a member a later one names
+  (`(select base t)`) that member's path's (`open_path`).
+- **A write** to a root whose type names its paths, `e.base..t`, and a
+  value taken as a dependent module type: each such type the one the
+  value's member at that path has, as its own type says
+  (`witnessed`, `members_given`), and a module made of values whose
+  types tie one member's abstract type to another's keeps those types.
+- A module's item is opened as it is bound, as a `let`'s binding is
+  (`Facts::let_opened`, `Cert::opens`, its variables fresh).
+
+A redefinition that assigned such a global would break the first rule,
+and the checkers' own soundness too; found so, it is now never made
+(`docs/fx26.md`, "Redefinition"). A read of one root's path redirected
+to another's, in every verified word, is refused
+(`a_path_read_from_another_root_is_refused`). Left: a module taken as a
+dependent module type and given where a member is left out, whose packed
+type the checker names through the dependent type's own binder
+(`dependent-moduleof-drop.fx`, `-restrict.fx`); and a module defined
+twice, each cell certified at the last one's type. And the verifier takes
+an abstract type of a module a global holds within another, read where no
+path names it, at the variable of the type it was made at, which two such
+modules share: a compiler that read the wrong one would not be caught
+there (`TODO.md` §307).
+
 ## 11. Open questions (the user's)
 
 1. ~~**Where propositions come from in a program.**~~ From `requires`

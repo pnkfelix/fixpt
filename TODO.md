@@ -8470,3 +8470,22 @@ use kept from before gave the new module's procedures the old one's
 values (a crash, both checkers agreeing). Now such a global is never
 assigned, a new global made and its users checked again (`docs/fx26.md`,
 "Redefinition"; `programs/redefine/module-abstract*.fx`).
+
+Done 2026-11-22 (`docs/research/typed-cellular-code.md`, §10, "A path's
+types"): roots, reads, writes and dependent module types, each checked;
+the known gaps lose 17 words. Left:
+- A module taken as a dependent module type and given where a member is
+  left out, `(the shown (the env-t …))`: the type made packs that
+  member's abstract type, which the checker names through `env-t`'s own
+  binder, and no value the verifier has carries it
+  (`dependent-moduleof-drop.fx`, `-restrict.fx` `program`).
+- A module of abstract types defined twice: each global's cell is
+  certified at the name's last type (`Compiler::push_global`'s
+  `global_type`), so neither is a root (`redefine/module-abstract-path.fx`);
+  as for `knot-spin.fx`'s redefinitions, the certificate wants each
+  cell's own type.
+- The other side: an abstract type of a module a global holds within
+  another, read where no path names it, is the variable of the type the
+  module was made at (`make`'s `t`), which two such modules share, so a
+  compiler that read `m2.a` for `m1.a` there would not be caught. Each such
+  read should be opened fresh, by its term, as a path is named.
