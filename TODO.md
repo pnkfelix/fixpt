@@ -8461,8 +8461,9 @@ strict sense: a `char` is a Unicode scalar value, a Rust `char`), and
 everything said of them now stays true: `string` is `(stringof const)`,
 `letfreeze` of one copies nothing, `string-set!` is O(1). UTF-8 text is
 a type of its own, `utf8`: frozen only, its one field the length in
-characters, kayak's breadcrumbs past the threshold, made with it and never
-written. A layout is so known from the type, never by a kind tested at
+characters (set by the validating pass that makes it; ASCII exactly when
+it equals the header's length in bytes), its suffix the text, lendable as
+a `&str`. A layout is so known from the type, never by a kind tested at
 run time (against (b)), and no `letfreeze` walks its value to re-encode
 the strings in it (against (a), whose copy would be of every string the
 frozen value holds, found by its type).
@@ -8470,6 +8471,20 @@ frozen value holds, found by its type).
 - `utf8->string` and `string->utf8` change meaning to those
   conversions; `utf8->bytes` and `bytes->utf8` (validating) take over
   the bytevector ones they were.
+- No breadcrumbs (the user's, 2026-11-22): a `utf8` is indexed by byte
+  offset, as Rust's and Go's strings are (Swift's `String.Index` is one
+  underneath), not by character, so kayak's reason for them, an O(1)
+  `string-ref` by character, does not arise. `utf8-ref s k` reads the
+  character starting at byte `k`, checked in O(1): `k` in bounds and the
+  byte there no continuation byte (`10xxxxxx`), which, the text valid,
+  makes it a character's start; `utf8-next s k` gives the next one's
+  offset, so a loop over the text is O(n); `utf8-substring` checks both
+  ends so. The `i`th character, if wanted, is a procedure saying its O(n)
+  by its name. Should breadcrumbs ever be wanted, they are fixnum fields
+  after the length (the user's: in the bloblet's fields): their count
+  from the header's *F*, skipped by the collector as any fixnum, written
+  once as the `utf8` is made (no barrier, no race), the suffix left pure
+  text; 8 bytes per 64 characters where kayak's suffix had 4.
 - Reading a `utf8` has operations of its own, not the `string` ones made
   generic over both: code that only reads text takes `utf8`, code that
   builds by writing takes `(stringof r)`, and the conversion between is
@@ -8482,8 +8497,7 @@ frozen value holds, found by its type).
   `utf8` with nothing copied, sound as `letfreeze` is (the value is the
   only way into the region's data when the body ends), the check able to
   fail.
-Open: breadcrumbs in the suffix or a second field; stride and threshold;
-`utf8`'s kind; the operations' names.
+Open: `utf8`'s kind; the operations' names.
 
 ## 307. The cell verifier's rule for a path's types (the user's, 2026-11-22; beside §291)
 
