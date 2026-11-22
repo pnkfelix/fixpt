@@ -424,9 +424,12 @@
           ((k-defined? (car ns))
            (the k-olds (cons (cons (car ns) (k-lookup-raw (car ns))) (k-old-types (cdr ns)))))
           (else (k-old-types (cdr ns))))))
-;; Whether `o`'s global now has a type its old one's uses can take.
+;; Whether `o`'s global now has a type its old one's uses can take: never
+;; one whose module has abstract types, which its binding named for its
+;; uses (`m..t`, `m.a..t`), and another module's are other types.
 (define k-fits-its-old? (->* ((pairof symbol int acyclic)) bool)
-  (lambda (o) (k-subtype (k-lookup-raw (car o)) (cdr o))))
+  (lambda (o)
+    (and (not (k-binds-abstract? (cdr o))) (k-subtype (k-lookup-raw (car o)) (cdr o)))))
 ;; Whether each of them now has a type its old one's uses can take.
 (define k-fits-old? (->* (k-olds) bool)
   (lambda (os) (or (null? os) (and (k-fits-its-old? (car os)) (k-fits-old? (cdr os))))))

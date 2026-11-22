@@ -579,7 +579,11 @@ impl Checker {
             Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, t, _)| (*n, *t)).collect(),
             _ => return false,
         };
-        olds.iter().all(|(n, t)| news.iter().any(|(m, u)| m == n && self.subtype(*u, *t)))
+        // A global whose module has abstract types names them for its
+        // binding, and its uses read them so (`m..t`, `m.a..t`): another
+        // module's are other types, however its type is written, so it is
+        // a new global, and what used the old is checked again.
+        olds.iter().all(|(n, t)| !self.binds_abstract(*t) && news.iter().any(|(m, u)| m == n && self.subtype(*u, *t)))
     }
 
     /// The names a form defines: `(define name …)`'s, and each of

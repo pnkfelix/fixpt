@@ -1138,6 +1138,14 @@ impl Checker {
         vals.iter().any(|(_, t)| self.abstract_within(*t, &mut seen))
     }
 
+    /// Whether type `t` is a module that has abstract types, or holds one
+    /// that has: a global of it names them for its binding (`m..t`,
+    /// `m.a..t`), so no other module may take its place (`top.rs`'s
+    /// `fits_old`).
+    pub(crate) fn binds_abstract(&self, t: TyId) -> bool {
+        self.abstract_within(t, &mut HashMap::default())
+    }
+
     fn abstract_within(&self, t: TyId, seen: &mut HashMap<TyId, bool>) -> bool {
         let t = self.arena.resolve(t);
         if let Some(b) = seen.get(&t) {

@@ -253,6 +253,10 @@
                       (ty-module (abs ds ws) (or (not (null? abs)) (k-abstract-within? ws seen)))
                       (else y #f))))
              (k-abstract-within? (cdr vs) seen)))))
+;; Whether type `t` is a module that has abstract types or holds one: a
+;; global of it names them for its binding (`top.rs`'s `binds_abstract`).
+(define k-binds-abstract? (->* (int) bool)
+  (lambda (t) (k-holds-abstract? (list (product (1 '||) (2 t))))))
 ;; Variable `w` as a description: a type, or a description function.
 (define k-var-desc (->* (int) k-desc)
   (lambda (w) (if (= (k-dvar-kind w) 2) (dt (k-ty-new (ty-var w))) (df (k-ty-new (ty-var w))))))

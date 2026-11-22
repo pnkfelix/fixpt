@@ -140,6 +140,8 @@
                        int))
             (val k-anchor-of
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-anchors))
+            (val k-binds-abstract?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) bool))
             (val k-the-sealed
                  (subr (maxeff checks spin)
                        (kx int (subr (maxeff checks spin) (kx) k-te)

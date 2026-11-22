@@ -416,6 +416,9 @@ const KNOWN_GAPS: &[&str] = &[
     "modules/path-with.fx `program`",
     "native/raw-args.fx `given`",
     "redefine/knot-spin.fx `f`",
+    "redefine/module-abstract-path.fx `lambda@592`",
+    "redefine/module-abstract-path.fx `lambda@592`",
+    "redefine/module-abstract-path.fx `program`",
     "redefine/knot-spin.fx `h`",
     "redefine/rerun-chain.fx `program`",
 ];

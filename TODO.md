@@ -8428,3 +8428,45 @@ makes it in a `let`); no other of the 1,068 types it compares has one. To
 decide: which is right, a fresh region as a constant or as a kind of its own
 on import (FX-26's effects order and compare the two apart), and make both
 checkers export it alike.
+
+## 306. Frozen strings in UTF-8 (kayak's request, 2026-11-22; deferred: for later)
+
+kayak's `docs/requests/fixpt-utf8-strings.md` (drafted 2026-11-22, not
+yet committed in kayak's tree when noted; kayak's `TODO.md` §54, step 2)
+asks that a frozen string, `string`, hold UTF-8 in the heap in place of
+UTF-32, still indexed by character, so that `utf8->string` and
+`string->utf8` are copies of bytes and a runtime can lend a string's text
+as a `&str`. Its proposal: the one field the length in characters (ASCII
+exactly when it equals the length in bytes); a non-ASCII string past a
+threshold (64 characters) carrying the byte offset of every 64th
+character, made with the string and never written, so `string-ref` stays
+O(1) and the character loop O(n) (`heap.rs`'s quadratic concern); a
+mutable `(stringof r)` kept UTF-32 under a kind of its own, frozen either
+by re-encoding in `letfreeze` (a copy, which `run/stringof.fx` says is
+not made) or by a frozen string being of either layout, told apart by
+kind (kayak leans to the second). What it touches here: `fixpt-heap`'s
+`make_string`, `string_with` and readers, the native layouts
+(`native-direct-x64-layout.fx`, `native-direct-arm64-layout.fx`),
+`eval-prims.fx`'s string primitives, the printer and the reader;
+`object-model.md`'s table and `PLAN.md`'s decision 5, "Strings stay
+UTF-32", which this would reverse. kayak-rt has run UTF-8 strings since
+its C482 (with a per-thread cursor in place of breadcrumbs). Its
+questions: breadcrumbs in the suffix or a second field, the stride and
+threshold; (a) or (b) for freezing; which layout keeps kind 1. To decide
+when taken up, with the user: a change of the language's settled layout.
+
+## 307. The cell verifier's rule for a path's types (the user's, 2026-11-22; beside §291)
+
+`fixpt verify` takes a value a path to a module reaches at the module's
+own abstract types, where the checkers take it at the path's (`mid.a..t`),
+so it refuses those words (`typed_cells.rs`'s `KNOWN_GAPS`). The plan,
+with the user: the certificate says, of each path type, the root (a global
+cell, or a word's parameter) and the members from it; the verifier gives
+a value read by that very path, as its terms show, those types, and so
+checks the claim rather than trusting it. A global so named must not be
+assigned for this to hold, nor for the checkers: found first, a module of
+abstract types defined again at a type written alike was assigned, so a
+use kept from before gave the new module's procedures the old one's
+values (a crash, both checkers agreeing). Now such a global is never
+assigned, a new global made and its users checked again (`docs/fx26.md`,
+"Redefinition"; `programs/redefine/module-abstract*.fx`).

@@ -102,6 +102,31 @@ fn a_knot_through_a_procedure_a_global_holds_is_refused() {
     assert!(out.iter().all(|o| !o.starts_with("error:")), "{out:?}");
 }
 
+/// A global whose module has abstract types names them for its binding
+/// (`a..t`, `mid.a..t`), so a module defined there again, its type
+/// written alike, is never assigned: what used the old is checked and
+/// defined again over the new (`one`, `use`), interpreted and compiled.
+/// With re-runs waiting, `use` keeps the old global, and the old `zero`.
+/// Assigned, `use` gave the new `string` reader the old `int`.
+#[test]
+fn a_module_with_abstract_types_is_never_assigned() {
+    for text in [include_str!("programs/redefine/module-abstract.fx"), include_str!("programs/redefine/module-abstract-path.fx")] {
+        for strategy in [None, Some(Strategy::Cellular)] {
+            let mut s = session();
+            if let Some(k) = strategy {
+                s.strategy = k;
+            }
+            let out = run(&mut s, text);
+            assert!(out.iter().any(|o| o.contains("run again, as they use it")), "{out:?}");
+            assert_eq!(out.last().map(String::as_str), Some("5"), "{out:?}");
+        }
+        let mut s = session();
+        s.set_defer_reruns(true);
+        let out = run(&mut s, text);
+        assert_eq!(out.last().map(String::as_str), Some("0"), "`use` keeps the old global: {out:?}");
+    }
+}
+
 /// A knot through a kept procedure's effect variable: its instantiation
 /// carries what the procedure given reads, so the knot shows in a read.
 #[test]
