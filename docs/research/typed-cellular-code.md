@@ -489,11 +489,34 @@ to another's, in every verified word, is refused
 dependent module type and given where a member is left out, whose packed
 type the checker names through the dependent type's own binder
 (`dependent-moduleof-drop.fx`, `-restrict.fx`); and a module defined
-twice, each cell certified at the last one's type. And the verifier takes
-an abstract type of a module a global holds within another, read where no
-path names it, at the variable of the type it was made at, which two such
-modules share: a compiler that read the wrong one would not be caught
-there (`TODO.md` §307).
+twice, each cell certified at the last one's type.
+
+A module read where no path names it (2026-11-22, `TODO.md` §307). A
+module's type binds its abstract types, and two modules of one type, made
+by one maker, bind the same variable: the verifier took a member read from
+either at that variable, so a value of one given to the other's procedure
+was not caught. Now a member read from a module is at its type's
+variables only where the value is certified to be the module they name
+(`Verifier::owns`): a global's cell whose type alone binds them, written
+once (`Certs::binder_owners`); a parameter or a free value whose type
+alone binds them among the word's (`claimed`); a module opened as a `let`
+opens one, its variables fresh (`Cert::opens`, its term made one value if
+it was not); a module made here at no other witness (`witnesses`), or at
+one, claiming them. Any other is opened as it is read (`unpack`): each of
+its abstract types a fresh variable, one for its term if the term is one
+value wherever read (a slot's, a free value's, a value made here, a global
+written once, a field of a module, a product or frozen data so read;
+`is_stable`), at each read otherwise. A field of frozen data made here is
+the value it was made of (`made_of`, `canonical`), and a module made of
+values so opened has their variable for its own type, if they have one
+only (`packs_unpacked`). In `modules/include-two-of-one-type.fx`, each read
+of `p` made `q`'s, and the reverse, is refused, all four verified before
+(`a_module_read_for_another_of_its_type_is_refused`); and the two globals
+of a module defined twice, at one type, are no longer taken for one
+(`redefine/module-abstract.fx`, a known gap with
+`module-abstract-path.fx`'s). Found doing so: both checkers accept a
+module's include of two modules of one type, as members, using one's
+procedure on the other's value (`TODO.md` §308).
 
 ## 11. Open questions (the user's)
 

@@ -8528,8 +8528,39 @@ the known gaps lose 17 words. Left:
   `global_type`), so neither is a root (`redefine/module-abstract-path.fx`);
   as for `knot-spin.fx`'s redefinitions, the certificate wants each
   cell's own type.
-- The other side: an abstract type of a module a global holds within
-  another, read where no path names it, is the variable of the type the
-  module was made at (`make`'s `t`), which two such modules share, so a
-  compiler that read `m2.a` for `m1.a` there would not be caught. Each such
-  read should be opened fresh, by its term, as a path is named.
+- ~~The other side~~ (done 2026-11-22): an abstract type of a module
+  read where no path names it was the variable of the type the module was
+  made at (`make`'s `t`), which two such modules share, so a compiler that
+  read one for the other there was not caught. Now each such read is
+  opened fresh, one variable for its term where the term is one value
+  wherever read, unless the value is certified to be the module the
+  variable names: a global's cell alone binding it, written once; a
+  parameter or free value alone binding it; a module opened as a `let`
+  opens one; a module made here (`Verifier::unpack`, `owns`;
+  `docs/research/typed-cellular-code.md`, §10). Test
+  `a_module_read_for_another_of_its_type_is_refused`, on
+  `modules/include-two-of-one-type.fx`: each of the four reads made the
+  other module's, verified before, refused now. New known gaps:
+  `redefine/module-abstract.fx`'s words, whose two globals the
+  certificate gives one type (as `module-abstract-path.fx`'s), and that
+  program's `make2`, a module made of two items of one type, refused
+  before as well (each item's type its own, `p..t`, the made module's
+  layout the maker's).
+
+## 308. Two modules of one type, included as members, taken for one (found 2026-11-22, by §307)
+
+Both checkers accept
+```
+(define m (module (include (module (define m1 (make #t)) (define m2 (make #f))))
+                  (define x ((with m1 value) (with m2 zero)))))
+```
+where `make` gives a `sig`, `(moduleof (abs t type) (val zero t) (val value
+(subr pure (t) int)))`, one of `int`'s and the other of `string`'s: run, it
+is "expected an exact integer" (`m1`'s `value` given `m2`'s string). An
+`include`'s hidden binding keeps the names its module has (§69), and its
+members `m1` and `m2`, each a `sig`, bind one `t`, so a path through the
+hidden binding names neither apart. The cell verifier now refuses such a
+program (§307). To fix, both checkers: a hidden binding holding modules
+with abstract types anchored as any other is, its own abstract types kept,
+so that each member's are named by its path (`Checker::name_module`;
+`k-name-module`).

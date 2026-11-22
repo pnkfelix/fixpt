@@ -389,13 +389,19 @@ fn every_directory_surveyed() {
 /// binder, which no value the verifier has carries (`TODO.md` §307); and a
 /// module of abstract types defined again, whose globals' cells the
 /// certificate gives the last one's type, as for `f` and `h`, so that no
-/// path from either is taken at its types (`Certs::path_roots`).
+/// path from either is taken at its types (`Certs::path_roots`), nor is
+/// either the one module its abstract types name, so each read of one is
+/// opened apart (`Certs::binder_owners`).
 const KNOWN_GAPS: &[&str] = &[
     "higher-kinds/poly-global-read.fx `go`",
     "modules/dependent-moduleof-drop.fx `program`",
     "modules/dependent-moduleof-restrict.fx `program`",
     "native/raw-args.fx `given`",
+    "modules/include-two-of-one-type.fx `make2`",
     "redefine/knot-spin.fx `f`",
+    "redefine/module-abstract.fx `lambda@837`",
+    "redefine/module-abstract.fx `lambda@837`",
+    "redefine/module-abstract.fx `program`",
     "redefine/module-abstract-path.fx `lambda@592`",
     "redefine/module-abstract-path.fx `lambda@592`",
     "redefine/module-abstract-path.fx `program`",
@@ -546,6 +552,59 @@ fn a_path_read_from_another_root_is_refused() {
         });
     });
     assert!(made >= 2, "too few mutants: {made}");
+    assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
+}
+
+/// Two modules of one type, made by one maker and included as a module's
+/// members, `p` and `q` (the program's slots 1 and 2), bind one variable
+/// for their abstract types: each read of either made the other's is
+/// refused, a value of one given to the other's procedure. Neither the
+/// module a global's type names nor a parameter's, each is opened apart
+/// (`Verifier::unpack`, `TODO.md` §307); before, these were verified.
+#[test]
+fn a_module_read_for_another_of_its_type_is_refused() {
+    use fixpt_heap::layout::cellular::{operands, routine, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_NAME};
+    use fixpt_heap::ObjType;
+    let name = "modules/include-two-of-one-type.fx";
+    let text = std::fs::read_to_string(modules_dir().join("include-two-of-one-type.fx")).unwrap();
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (mut c, tops) = checked_in(&text, base_of(name)).expect("checks");
+    fixpt_fx26::syn::set_load_base(Some(base_of(name)));
+    let (mut made, mut kept) = (0, Vec::new());
+    s.scheme.scope(|sc| {
+        sc.make(|m| {
+            let (certs, unsettled) = certified(m.heap(), &mut c, &text, &tops).expect("compiles");
+            assert!(unsettled.is_none(), "not settled: {unsettled:?}");
+            let slot = Value::fixnum(routine("slot") as i64);
+            for raw in certs.words.keys() {
+                let w = Value::from_raw(*raw);
+                let named = m.heap().bloblet_slot(w, WORD_NAME);
+                if !m.heap().is_a(named, ObjType::Symbol) || m.heap().symbol_name(named) != "program" {
+                    continue;
+                }
+                assert!(verify(&mut c, m.heap(), &certs, w).verified(), "the program's word verifies");
+                let n = m.heap().bloblet_head(w).fields;
+                let mut k = WORD_CELL0;
+                while k <= n {
+                    let cell = m.heap().bloblet_slot(w, k); // fields: the word's cells, walked by their operands
+                    let r = cell.is_fixnum().then(|| cell.as_fixnum() as usize).filter(|r| *r < PRIMITIVES).map(|r| ROUTINES[r].0);
+                    let at = if cell == slot { m.heap().bloblet_slot(w, k + 1) } else { Value::NULL }; // fields: a `slot`'s operand, its index
+                    if at == Value::fixnum(1) || at == Value::fixnum(2) {
+                        let other = Value::fixnum(3 - at.as_fixnum());
+                        m.heap().set_bloblet_slot(w, k + 1, other); // fields: that read made of the other slot
+                        made += 1;
+                        if verify(&mut c, m.heap(), &certs, w).verified() {
+                            kept.push(format!("slot {} at cell {} made {}", at.as_fixnum(), k - WORD_CELL0, other.as_fixnum()));
+                        }
+                        m.heap().set_bloblet_slot(w, k + 1, at); // fields: and back
+                    }
+                    k += 1 + r.map_or(0, operands);
+                }
+            }
+            Value::NULL
+        });
+    });
+    assert!(made >= 4, "too few mutants: {made}");
     assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
 }
 

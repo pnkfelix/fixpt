@@ -157,6 +157,15 @@ pub struct Certs {
     /// the members from that binding, and the type's name: the variable
     /// the checkers have for it (`Checker::path_members`), each of one path.
     pub path_vars: HashMap<(crate::ast::DVar, Vec<Sym>, Sym), crate::ast::DVar>,
+    /// Each abstract type a global's module type binds, by its variable:
+    /// the one cell whose module it names, if it is bound by no other
+    /// global's type and the cell is written once; `None` if bound so but not of one cell. A
+    /// member read from another value is at a fresh variable
+    /// (`Verifier::unpacked`). Made by `Certs::settle`.
+    pub binder_owners: HashMap<crate::ast::DVar, Option<u64>>,
+    /// The global cells the program writes more than once: a read of one
+    /// is not the value another read of it is.
+    pub rewritten: fixpt_hash::HashSet<u64>,
 }
 
 impl Certs {
@@ -206,6 +215,25 @@ impl Certs {
             }
         }
         let once = |cell: &u64| writes.get(cell).copied().unwrap_or(0) <= 1;
+        self.rewritten = writes.iter().filter(|(_, n)| **n > 1).map(|(cell, _)| *cell).collect();
+        let mut binders: HashMap<crate::ast::DVar, Vec<u64>> = HashMap::default();
+        for (cell, t) in &self.globals {
+            if let Ty::Module { abs, .. } = c.arena.get(c.arena.resolve(*t)) {
+                for (_, w) in abs {
+                    binders.entry(*w).or_default().push(*cell);
+                }
+            }
+        }
+        self.binder_owners = binders
+            .into_iter()
+            .map(|(w, cells)| {
+                let owner = match cells[..] {
+                    [cell] if once(&cell) => Some(cell),
+                    _ => None,
+                };
+                (w, owner)
+            })
+            .collect();
         let mut by_anchor: HashMap<crate::ast::DVar, Vec<u64>> = HashMap::default();
         for (cell, t) in &self.globals {
             if let Some(anchor) = own_anchor(c, *t) {
@@ -505,14 +533,14 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against `cert`, one of its certificate's variants.
 fn verify_as(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value, cert: &Cert) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), paths_from: Vec::new(), cell: None };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), paths_from: Vec::new(), claimed: Vec::new(), unpacked: Vec::new(), stable: Vec::new(), witnesses: Vec::new(), made_of: Vec::new(), cell: None };
     v.word(word, cert);
     v.finish()
 }
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), paths_from: Vec::new(), cell: None };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), paths_from: Vec::new(), claimed: Vec::new(), unpacked: Vec::new(), stable: Vec::new(), witnesses: Vec::new(), made_of: Vec::new(), cell: None };
     match certs.words.get(&word.raw()) {
         // At each signature: the first that does not verify, else the
         // last, with what all of them discharged.
@@ -598,6 +626,28 @@ struct Verifier<'a> {
     /// binding a global's (`Certs::path_roots`) or a parameter's
     /// (`Verifier::word`), and a member read from one (`open_path`).
     paths_from: Vec<(Term, crate::ast::DVar, Vec<Sym>)>,
+    /// The abstract types a parameter's or a free value's module type
+    /// binds, each the value whose module it names: that value, if one of
+    /// them binds it and no global's type does (`Certs::binder_owners`),
+    /// else `None`.
+    claimed: Vec<(crate::ast::DVar, Option<Term>)>,
+    /// A module's abstract type, bound by its type, as a member read from
+    /// a value not certified to be the module it names has it: a variable
+    /// made fresh for the value's term and the bound one, so two modules
+    /// of one type are of two (`Verifier::unpack`). Of a term not known
+    /// to be one value wherever read, fresh at each read.
+    unpacked: Vec<(Term, crate::ast::DVar, crate::ast::DVar)>,
+    /// The fields read whose terms are one value wherever read: of a
+    /// module, a product or a frozen bloblet, itself such a value.
+    stable: Vec<Term>,
+    /// The modules made here, each abstract type its type binds that its
+    /// values were checked at as it is, packed at no other witness: a
+    /// member read from it is at that very type (`unpack`). One packed at
+    /// another witness claims the type (`claimed`), alone.
+    witnesses: Vec<(Term, crate::ast::DVar)>,
+    /// The frozen data made here (`%make-frozen`), each with its values'
+    /// terms: a field read from one is that value (`canonical`).
+    made_of: Vec<(Term, Vec<Term>)>,
     /// The masked expressions' cells (`Cert::masks`), as the walk finds
     /// what each is given and gives.
     masking: Vec<Masking>,
@@ -879,6 +929,19 @@ impl Verifier<'_> {
             let outside = written.iter().chain(self.certs.globals.values()).copied().collect::<Vec<TyId>>();
             if !vars.iter().any(|v| outside.iter().any(|t| self.c.mentions_var(*t, *v))) {
                 self.paths_from.push((Term::Slot(i), anchor, Vec::new()));
+            }
+        }
+        // Each abstract type a parameter's or a free value's module type
+        // binds: that value's, if no other's binds it, nor a global's.
+        let claims = slot_types.iter().enumerate().map(|(i, t)| (Term::Slot(i), *t)).chain(cert.frees.iter().enumerate().map(|(i, t)| (Term::Free(i), *t)));
+        for (term, t) in claims.collect::<Vec<_>>() {
+            let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(t)).clone() else { continue };
+            for (_, w) in abs {
+                let ours = !self.certs.binder_owners.contains_key(&w);
+                match self.claimed.iter_mut().find(|(x, _)| *x == w) {
+                    Some((_, owner)) => *owner = None,
+                    None => self.claimed.push((w, ours.then(|| term.clone()))),
+                }
             }
         }
         let entry = State {
@@ -1309,9 +1372,24 @@ impl Verifier<'_> {
             let unnamed: HashMap<crate::ast::DVar, crate::ast::D> = vars.iter().map(|x| (*x, crate::ast::D::Size(Size::Finite))).collect();
             let unopened = self.c.subst(*opened, &unnamed);
             self.holds(&v, unopened, at);
+            // A module opened: each abstract type its type binds, among
+            // those made fresh here, this value's (`claimed`), its term one
+            // value wherever read.
+            let binds: Vec<crate::ast::DVar> = match self.c.arena.get(self.c.arena.resolve(*opened)) {
+                Ty::Module { abs, .. } => abs.iter().map(|(_, w)| *w).filter(|w| vars.contains(w)).collect(),
+                _ => Vec::new(),
+            };
+            let term = if binds.is_empty() || self.is_stable(&v.term) { v.term.clone() } else { self.fresh() };
             for w in s.stack.iter_mut().filter(|w| w.term == v.term) {
                 w.ty = Some(*opened);
                 w.made = Some(*opened);
+                w.term = term.clone();
+            }
+            for w in binds {
+                match self.claimed.iter_mut().find(|(x, _)| *x == w) {
+                    Some((_, owner)) => *owner = None,
+                    None => self.claimed.push((w, Some(term.clone()))),
+                }
             }
         }
         Ok(())
@@ -2213,6 +2291,11 @@ impl Verifier<'_> {
                     }
                     (_, ty) => ty,
                 };
+                let ty = ty.map(|t| self.unpack(&o, t));
+                let fixed = matches!(o.ty.map(|t| self.c.arena.get(self.c.arena.resolve(t)).clone()), Some(Ty::Module { .. } | Ty::Product(_) | Ty::Bloblet { frozen: true, .. }));
+                if fixed && self.is_stable(&o.term) && !self.stable.contains(&term) {
+                    self.stable.push(term.clone());
+                }
                 // A product's field, a path: nothing writes it.
                 let ty = match self.ty_of(&o) {
                     Some(Ty::Product(_)) => self.read_path(s, &o, &term, ty, None),
@@ -2688,14 +2771,38 @@ impl Verifier<'_> {
                 };
                 // Each value at its field's type, its packed abstract types
                 // their witnesses.
-                let packs: HashMap<crate::ast::DVar, crate::ast::D> =
+                let mut packs: HashMap<crate::ast::DVar, crate::ast::D> =
                     cert.packs.iter().filter(|(k, _)| *k == here).flat_map(|(_, ps)| ps.iter().map(|(w, x)| (*w, crate::ast::D::Type(*x)))).collect();
+                self.packs_unpacked(&vals, layout, &mut packs);
                 for (v, f) in vals.iter().zip(&fields) {
                     let f = if packs.is_empty() { *f } else { self.c.subst(*f, &packs) };
                     self.holds(v, f, at);
                 }
+                let terms: Vec<Term> = vals.iter().map(|v| v.term.clone()).collect();
                 if layout == t {
                     self.push_made(s, Some(linked.unwrap_or(t)), None);
+                    self.made_of.push((s.stack.last().expect("pushed").term.clone(), terms));
+                    // Its abstract types, each at its witness: the packed
+                    // type, or, none packed, the very variable its values
+                    // were checked at.
+                    let made = s.stack.last().expect("pushed").term.clone();
+                    if let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(t)).clone() {
+                        for (_, w) in abs {
+                            let itself = match packs.get(&w) {
+                                None => true,
+                                Some(crate::ast::D::Type(x) | crate::ast::D::Fun(x)) => matches!(self.c.arena.get(self.c.arena.resolve(*x)), Ty::Var(v) if *v == w),
+                                Some(_) => false,
+                            };
+                            if itself {
+                                self.witnesses.push((made.clone(), w));
+                            } else {
+                                match self.claimed.iter_mut().find(|(x, _)| *x == w) {
+                                    Some((_, owner)) => *owner = None,
+                                    None => self.claimed.push((w, Some(made.clone()))),
+                                }
+                            }
+                        }
+                    }
                     return Ok(Some(s.clone()));
                 }
                 // Made as its own type (or the values picked), which must be
@@ -2707,6 +2814,7 @@ impl Verifier<'_> {
                     self.holds(&made, t, at);
                 }
                 self.push_made(s, Some(t), None);
+                self.made_of.push((s.stack.last().expect("pushed").term.clone(), terms));
             }
             "prim" | "cons" | "abort" | "callcc" | "callcomp" | "callone" | "withmark" | "withmark-tail" | "firstmark" | "currentmarks" | "marksof"
                 if cert.ops.iter().any(|(k, op, _)| *k == here && !marker(op)) =>
@@ -3201,6 +3309,128 @@ impl Verifier<'_> {
             out.push((x, self.transparent_at(anchor, &deeper, z)));
         }
         self.c.arena.ty(Ty::Module { abs: kept, descs: shown, vals: out })
+    }
+
+    /// Member type `t`, read from module `o`: each abstract type `o`'s type
+    /// binds that `t` names, a fresh variable unless `o` is certified to
+    /// be the module it names (`owns`). A module's type binds its
+    /// abstract types; two modules of one type, made by one maker, bind
+    /// the same variable, so a value of one is not of the other only as
+    /// each is opened apart, as a `let` opens one (`TODO.md` §307).
+    fn unpack(&mut self, o: &V, t: TyId) -> TyId {
+        let Some(Ty::Module { abs, .. }) = o.ty.map(|x| self.c.arena.get(self.c.arena.resolve(x)).clone()) else { return t };
+        let term = self.canonical(&o.term);
+        let mut map: HashMap<crate::ast::DVar, crate::ast::D> = HashMap::default();
+        for (a, w) in abs {
+            if !self.c.mentions_var(t, w) || self.owns(&term, w) {
+                continue;
+            }
+            if self.witnesses.iter().any(|(x, v)| *x == term && *v == w) {
+                continue;
+            }
+            // (Its term as read is one value wherever read, and so the value
+            // it was made of, the same.)
+            let stable = self.is_stable(&o.term);
+            let known = self.unpacked.iter().find(|(x, v, _)| stable && *x == term && *v == w).map(|(.., f)| *f);
+            let f = match known {
+                Some(f) => f,
+                None => {
+                    let kind = self.c.arena.dvar_kind(w);
+                    let f = self.c.arena.dvar_of(a, kind);
+                    if stable {
+                        self.unpacked.push((term.clone(), w, f));
+                    }
+                    f
+                }
+            };
+            let var = self.c.arena.ty(Ty::Var(f));
+            let d = if self.c.arena.dvar_kind(w) == crate::ast::Kind::Type { crate::ast::D::Type(var) } else { crate::ast::D::Fun(var) };
+            map.insert(w, d);
+        }
+        if map.is_empty() { t } else { self.c.subst(t, &map) }
+    }
+
+    /// The witnesses of a module made of values `vals`, at `layout`, its
+    /// abstract types packed (`packs`, the certificate's), where a value's
+    /// type has a module's abstract type as a member read had it
+    /// (`unpack`): each variable a read made for a module's type `w`, if
+    /// the values have one only, taken for `w` in each witness, and the
+    /// witness of `layout`'s own `w` if none is given. Two made for one,
+    /// two modules' types, are no one witness, and the values are then
+    /// not within their fields.
+    fn packs_unpacked(&mut self, vals: &[V], layout: TyId, packs: &mut HashMap<crate::ast::DVar, crate::ast::D>) {
+        let mut renames: Vec<(crate::ast::DVar, Option<crate::ast::DVar>)> = Vec::new();
+        for (_, w, f) in &self.unpacked {
+            if !vals.iter().any(|v| v.ty.is_some_and(|t| self.c.mentions_var(t, *f))) {
+                continue;
+            }
+            match renames.iter_mut().find(|(x, _)| x == w) {
+                Some((_, g)) if *g != Some(*f) => *g = None,
+                Some(_) => {}
+                None => renames.push((*w, Some(*f))),
+            }
+        }
+        let map: HashMap<crate::ast::DVar, crate::ast::D> = renames
+            .iter()
+            .filter_map(|(w, f)| {
+                let var = self.c.arena.ty(Ty::Var((*f)?));
+                Some((*w, if self.c.arena.dvar_kind(*w) == crate::ast::Kind::Type { crate::ast::D::Type(var) } else { crate::ast::D::Fun(var) }))
+            })
+            .collect();
+        if map.is_empty() {
+            return;
+        }
+        for d in packs.values_mut() {
+            if let crate::ast::D::Type(x) = d {
+                *x = self.c.subst(*x, &map);
+            }
+        }
+        if let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(layout)).clone() {
+            for (_, w) in abs {
+                if let (false, Some(d)) = (packs.contains_key(&w), map.get(&w)) {
+                    packs.insert(w, d.clone());
+                }
+            }
+        }
+    }
+
+    /// Whether value `term` is certified to be the module whose abstract
+    /// type `w` is: a global's cell its one owner (`Certs::binder_owners`),
+    /// or a parameter or a free value that alone binds it (`claimed`).
+    fn owns(&self, term: &Term, w: crate::ast::DVar) -> bool {
+        match term {
+            Term::App("global", g) => match &g[..] {
+                [Term::Lit(cell)] => self.certs.binder_owners.get(&w) == Some(&Some(cell.raw())) && !self.claimed.iter().any(|(x, _)| *x == w),
+                _ => false,
+            },
+            _ => self.claimed.iter().any(|(x, owner)| *x == w && owner.as_ref() == Some(term)),
+        }
+    }
+
+    /// Value `term` as made: a field read from frozen data made here, the
+    /// value it was made of there (`made_of`).
+    fn canonical(&self, term: &Term) -> Term {
+        if let Term::App("field", f) = term
+            && let [Term::Lit(k), base] = &f[..]
+            && k.is_fixnum()
+        {
+            let base = self.canonical(base);
+            let at = (k.as_fixnum() as usize).checked_sub(2);
+            if let Some(v) = self.made_of.iter().find(|(m, _)| *m == base).and_then(|(_, vs)| at.and_then(|i| vs.get(i))) {
+                return self.canonical(v);
+            }
+            return Term::App("field", vec![Term::Lit(*k), base]);
+        }
+        term.clone()
+    }
+
+    /// Whether `term` is one value wherever it is read in this word.
+    fn is_stable(&self, term: &Term) -> bool {
+        match term {
+            Term::Slot(_) | Term::Free(_) | Term::Made(_) | Term::Lit(_) => true,
+            Term::App("global", g) => matches!(&g[..], [Term::Lit(cell)] if !self.certs.rewritten.contains(&cell.raw())),
+            t => self.stable.contains(t),
+        }
     }
 
     /// If `o` is a module binding's, or a path's from one (`paths_from`),
