@@ -287,6 +287,9 @@ pub struct Compiler<'a> {
     bind_name: Option<Sym>,
     /// The top-level definition whose lambda is compiled next: its name.
     defining: Option<Sym>,
+    /// The type of the binding a definition's global is made for
+    /// (`global_defined`), while it is.
+    binding_ty: Option<TyId>,
     /// While a body's fast version is compiled (`regcode::register_code`):
     /// the globals it assumes hold what they held, by their cells, each
     /// once; what its `global-guard`s test, each that the cell has not been
@@ -433,6 +436,7 @@ impl<'a> Compiler<'a> {
             scope_name: None,
             bind_name: None,
             defining: None,
+            binding_ty: None,
             assume: None,
             writes: HashMap::default(),
             form_writes: Vec::new(),
@@ -2794,8 +2798,12 @@ impl<'a> Compiler<'a> {
         self.heap.set_bloblet_slot(g, GLOBAL_WRITES, Value::fixnum(first));
         self.genv_index.entry(n).or_default().push((self.genv.len(), Loc::Global(g)));
         self.genv.push((n, Loc::Global(g)));
+        // At its binding's type, if a definition's (`Facts::defined`): a
+        // name defined again at another type is another global, of a type
+        // of its own.
+        let t = self.binding_ty.take().or_else(|| self.c.global_type(n));
         if let Some(certs) = &mut self.certs
-            && let Some(t) = self.c.global_type(n)
+            && let Some(t) = t
         {
             certs.globals.insert(g.raw(), t);
         }
@@ -3152,6 +3160,15 @@ impl<'a> Compiler<'a> {
 
     /// The global a definition of `n` sets: the one `n` has, if the
     /// definition assigns it (`Top`'s `assigns`); else a new one.
+    /// The global for definition `exp` of `n` (`global_for`), its cell's
+    /// type its binding's (`Facts::defined`).
+    fn global_defined(&mut self, n: Sym, exp: ExpId, assigns: bool) -> Value {
+        self.binding_ty = self.c.facts.defined.get(&exp).copied();
+        let g = self.global_for(n, assigns);
+        self.binding_ty = None;
+        g
+    }
+
     fn global_for(&mut self, n: Sym, assigns: bool) -> Value {
         self.inlines.retain(|i| i.name != n);
         self.specials.retain(|i| i.name != n);
@@ -3201,13 +3218,13 @@ impl<'a> Compiler<'a> {
                         if let (true, Some(ms)) = (is_module, self.module_members.take()) {
                             self.modules.push((*name, genv_len, ms));
                         }
-                        let g = self.global_for(*name, *assigns);
+                        let g = self.global_defined(*name, *exp, *assigns);
                         // After its global, which forgets what the name was.
                         self.reexport_inline(*name, *exp);
                         self.note_constant(g, *exp);
                         g
                     } else {
-                        let g = self.global_for(*name, *assigns);
+                        let g = self.global_defined(*name, *exp, *assigns);
                         self.form_writes = vec![g];
                         self.note_constant(g, *exp);
                         if let Some((_, _, None)) = self.lambda_of(*exp) {

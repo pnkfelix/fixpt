@@ -375,9 +375,9 @@ struct State {
     stack: Vec<V>,
     /// Closures made with a placeholder for a free value (a `letrec`'s, `#f`
     /// for a sibling not made yet): each closure's term, the free value,
-    /// and the type it must be given (by `field!`) before the closure is
-    /// used.
-    pending: Vec<(Term, usize, TyId)>,
+    /// the type it must be given (by `field!`) before the closure is used,
+    /// and the modules it must be shown to be (`free_claims`).
+    pending: Vec<(Term, usize, TyId, Vec<(usize, crate::ast::DVar)>)>,
     /// What is known of sizes here, as the checkers keep it
     /// (`crate::sizes::SizeFact`: `lin = 0` or `lin ≥ 0`): learned from the
     /// tests the ways here passed.
@@ -931,17 +931,37 @@ impl Verifier<'_> {
                 self.paths_from.push((Term::Slot(i), anchor, Vec::new()));
             }
         }
-        // Each abstract type a parameter's or a free value's module type
-        // binds: that value's, if no other's binds it, nor a global's.
-        let claims = slot_types.iter().enumerate().map(|(i, t)| (Term::Slot(i), *t)).chain(cert.frees.iter().enumerate().map(|(i, t)| (Term::Free(i), *t)));
-        for (term, t) in claims.collect::<Vec<_>>() {
-            let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(t)).clone() else { continue };
-            for (_, w) in abs {
-                let ours = !self.certs.binder_owners.contains_key(&w);
-                match self.claimed.iter_mut().find(|(x, _)| *x == w) {
-                    Some((_, owner)) => *owner = None,
-                    None => self.claimed.push((w, ours.then(|| term.clone()))),
-                }
+        // The modules this word is given whose abstract types it names
+        // (TAL's unpack, `docs/research/typed-cellular-code.md`, §10): a
+        // parameter opened at entry (`Cert::inside`), each variable opened
+        // fresh, its own; a free value that the word's signature says is the
+        // module of a type it binds (`free_claims`), which whoever makes a
+        // closure of the word must show (`"closure"`). A member read from
+        // any other is opened as it is read (`unpack`).
+        for (i, opened) in cert.inside.iter().enumerate() {
+            let Some((_, vars)) = opened else { continue };
+            let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(slot_types[i])).clone() else { continue };
+            for (_, w) in abs.into_iter().filter(|(_, w)| vars.contains(w)) {
+                self.claim(w, Term::Slot(i));
+            }
+        }
+        for (j, w) in self.free_claims(cert) {
+            self.claim(w, Term::Free(j));
+        }
+        // A dependent procedure's module parameter, whose abstract type
+        // another type of the signature selects (`(select $k t)`): its own,
+        // which each caller gives as the argument's module has it.
+        let mut sels = Vec::new();
+        let mut seen = crate::ast::TySet::default();
+        for t in &written {
+            self.c.param_sels(*t, &mut seen, &mut sels);
+        }
+        for (k, path, a) in sels {
+            if let (true, Some(t)) = (path.is_empty(), given.get(&(k, Vec::new(), a)))
+                && let Ty::Var(w) = self.c.arena.get(self.c.arena.resolve(*t)).clone()
+                && matches!(slot_types.get(k).map(|x| self.c.arena.get(self.c.arena.resolve(*x)).clone()), Some(Ty::Module { abs, .. }) if abs.iter().any(|(_, x)| *x == w))
+            {
+                self.claim(w, Term::Slot(k));
             }
         }
         let entry = State {
@@ -2344,13 +2364,15 @@ impl Verifier<'_> {
                     callee = Cert { variants: if kept.len() > 1 { kept } else { Vec::new() }, ..first };
                 }
                 let made = self.fresh();
+                let owed = self.free_claims(&callee);
                 for (j, (v, t)) in vals.iter().zip(&callee.frees).enumerate() {
                     // A placeholder, `#f` where it does not fit: the free
                     // value is owed, to be given before the closure is used.
                     if v.term == Term::Lit(Value::FALSE) && self.fits(v, *t) != Some(true) {
-                        s.pending.push((made.clone(), j, *t));
+                        s.pending.push((made.clone(), j, *t, owed.iter().filter(|(k, _)| *k == j).copied().collect()));
                     } else {
                         self.holds(v, *t, at);
+                        self.shown_free(v, j, &owed, at);
                     }
                 }
                 let ty = self.subr_of(&callee);
@@ -2479,7 +2501,16 @@ impl Verifier<'_> {
                 // A dependent procedure's: each `(select $k t)` the abstract
                 // type of argument `k`'s module.
                 let arg_types: Vec<TyId> = args.iter().map(|a| a.ty.unwrap_or(self.c.void)).collect();
-                let given = self.selects(&arg_types);
+                let mut given = self.selects(&arg_types);
+                // Each abstract type the argument's own module type binds, as
+                // a member read from the argument has it (`unpack`): the
+                // callee takes its parameter for that type's module (`word`),
+                // so it is that type only of the module it names.
+                for ((k, path, _), t) in given.iter_mut() {
+                    if path.is_empty() && matches!(self.c.arena.get(self.c.arena.resolve(*t)), Ty::Var(_)) {
+                        *t = self.unpack(&args[*k], *t);
+                    }
+                }
                 let params: Vec<TyId> = params.iter().map(|p| self.c.instantiate_params(*p, &given)).collect();
                 let result = self.c.instantiate_params(result, &given);
                 for (a, p) in args.iter().zip(&params) {
@@ -2646,9 +2677,10 @@ impl Verifier<'_> {
                 };
                 let k = k.as_fixnum() as usize;
                 // A closure's free value owed: given.
-                if let Some(i) = s.pending.iter().position(|(c, j, _)| *c == o.term && CLOSURE_FREE0 + *j == k) {
-                    let (_, _, t) = s.pending.remove(i);
+                if let Some(i) = s.pending.iter().position(|(c, j, ..)| *c == o.term && CLOSURE_FREE0 + *j == k) {
+                    let (_, j, t, owed) = s.pending.remove(i);
                     self.holds(&x, t, at);
+                    self.shown_free(&x, j, &owed, at);
                     return Ok(Some(s.clone()));
                 }
                 match self.ty_of(&o) {
@@ -3003,11 +3035,13 @@ impl Verifier<'_> {
                             return Err(());
                         }
                         let made = self.fresh();
+                        let owed = self.free_claims(&callee);
                         for (j, (v, t)) in vals.iter().zip(&callee.frees).enumerate() {
                             if v.term == Term::Lit(Value::FALSE) && self.fits(v, *t) != Some(true) {
-                                s.pending.push((made.clone(), j, *t));
+                                s.pending.push((made.clone(), j, *t, owed.iter().filter(|(k, _)| *k == j).copied().collect()));
                             } else {
                                 self.holds(v, *t, at);
+                                self.shown_free(v, j, &owed, at);
                             }
                         }
                         let mut cert = callee.clone();
@@ -3404,6 +3438,62 @@ impl Verifier<'_> {
                 _ => false,
             },
             _ => self.claimed.iter().any(|(x, owner)| *x == w && owner.as_ref() == Some(term)),
+        }
+    }
+
+    /// Abstract type `w`, the module `term` is: that value's, unless
+    /// another claims it too.
+    fn claim(&mut self, w: crate::ast::DVar, term: Term) {
+        match self.claimed.iter_mut().find(|(x, _)| *x == w) {
+            Some((_, owner)) if owner.as_ref() == Some(&term) => {}
+            Some((_, owner)) => *owner = None,
+            None => self.claimed.push((w, Some(term))),
+        }
+    }
+
+    /// The abstract types a word's free values are certified to be the
+    /// modules of, each with the free value's number: of a free value's
+    /// module type, each it binds that no other parameter's or free
+    /// value's type binds, nor a global's (`Certs::binder_owners`), and
+    /// that another type of the signature names (a value of it, or a
+    /// procedure on it, given too). Of one that none names, each read is
+    /// as good opened (`unpack`), and nothing need be shown. Whoever makes
+    /// a closure of the word shows each (`"closure"`).
+    fn free_claims(&self, cert: &Cert) -> Vec<(usize, crate::ast::DVar)> {
+        let params: Vec<TyId> = cert.params.iter().enumerate().map(|(i, p)| cert.inside.get(i).and_then(|o| o.as_ref()).map_or(*p, |(t, _)| *t)).collect();
+        let sig: Vec<TyId> = params.iter().chain(&cert.frees).chain(cert.result.iter()).copied().collect();
+        let binds = |t: TyId, w: crate::ast::DVar| matches!(self.c.arena.get(self.c.arena.resolve(t)), Ty::Module { abs, .. } if abs.iter().any(|(_, x)| *x == w));
+        let mut out = Vec::new();
+        for (j, f) in cert.frees.iter().enumerate() {
+            let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(*f)).clone() else { continue };
+            let me = params.len() + j;
+            for (_, w) in abs {
+                let alone = sig.iter().enumerate().all(|(k, t)| k == me || !binds(*t, w));
+                let named = sig.iter().enumerate().any(|(k, t)| k != me && self.c.mentions_free_var(*t, w));
+                if alone && named && !self.certs.binder_owners.contains_key(&w) {
+                    out.push((j, w));
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether value `v` is the module whose abstract type `w` is, as a
+    /// member read from it keeps `w` (`unpack`): certified so (`owns`), or
+    /// made here at `w` itself (`witnesses`).
+    fn keeps(&self, v: &V, w: crate::ast::DVar) -> bool {
+        let term = self.canonical(&v.term);
+        self.owns(&term, w) || self.witnesses.iter().any(|(x, y)| *x == term && *y == w)
+    }
+
+    /// Free value `j` of a closure being made, `v`, shown to be each module
+    /// the word's certificate claims it is (`free_claims`).
+    fn shown_free(&mut self, v: &V, j: usize, owed: &[(usize, crate::ast::DVar)], at: &str) {
+        for (_, w) in owed.iter().filter(|(k, _)| *k == j) {
+            if !self.keeps(v, *w) {
+                let name = self.c.interner.name(self.c.arena.dvar_name(*w)).to_string();
+                self.out.failed.push(format!("{at}: free value {j} is not shown to be the module whose abstract type `{name}` the word names"));
+            }
         }
     }
 

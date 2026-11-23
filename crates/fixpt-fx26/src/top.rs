@@ -2367,6 +2367,9 @@ impl Checker {
                         if matches!(self.arena.get(self.arena.resolve(ty)), crate::ast::Ty::Pair(_, _, Region::Frozen(..), _)) {
                             self.facts.frozen_defines.insert(e);
                         }
+                        if let Some(t) = self.global_type(name) {
+                            self.facts.defined.insert(e, t);
+                        }
                         Ok(Top::Define { name, ty, effect, exp: e, typed: true, inferred: infer, recursive, assigns: false })
                     }
                     Err(err) => {
@@ -2397,6 +2400,9 @@ impl Checker {
                         ty
                     }
                 };
+                if let Some(t) = self.global_type(name) {
+                    self.facts.defined.insert(e, t);
+                }
                 Ok(Top::Define { name, ty, effect, exp: e, typed: false, inferred: false, recursive: false, assigns: false })
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),

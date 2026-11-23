@@ -377,36 +377,20 @@ fn every_directory_surveyed() {
 /// The words not yet verified, each a rule the certificate does not yet
 /// carry what it needs for (`TODO.md` §117): a prompt's own transfers of
 /// control that the checker drops where nothing but its tag's variable
-/// reaches the tag (`given`); a global redefined at another type, which
-/// the certificate gives one type (`f` and `h`, and the program's own
-/// word); a variable of a `poly` type given where one is wanted, the
-/// checker instantiating it at the binders it generalizes over, which the
-/// verifier wraps in another `poly` instead (`go`; a local's as well, and a
-/// global's since `TODO.md` §211, 5, let one be read there); a module
-/// taken as a dependent module type and given where one of its members is
-/// left out (`the env-t`, then `shown`), whose type packs that member's
-/// abstract type as the checker names it through the dependent type's own
-/// binder, which no value the verifier has carries (`TODO.md` §307); and a
-/// module of abstract types defined again, whose globals' cells the
-/// certificate gives the last one's type, as for `f` and `h`, so that no
-/// path from either is taken at its types (`Certs::path_roots`), nor is
-/// either the one module its abstract types name, so each read of one is
-/// opened apart (`Certs::binder_owners`).
+/// reaches the tag (`given`); a variable of a `poly` type given where one
+/// is wanted, the checker instantiating it at the binders it generalizes
+/// over, which the verifier wraps in another `poly` instead (`go`; a
+/// local's as well, and a global's since `TODO.md` §211, 5, let one be
+/// read there); and a module taken as a dependent module type and given
+/// where one of its members is left out (`the env-t`, then `shown`), whose
+/// type packs that member's abstract type as the checker names it through
+/// the dependent type's own binder, which no value the verifier has
+/// carries (`TODO.md` §307).
 const KNOWN_GAPS: &[&str] = &[
     "higher-kinds/poly-global-read.fx `go`",
     "modules/dependent-moduleof-drop.fx `program`",
     "modules/dependent-moduleof-restrict.fx `program`",
     "native/raw-args.fx `given`",
-    "redefine/knot-spin.fx `f`",
-    "redefine/module-abstract.fx `lambda@837`",
-    "redefine/module-abstract.fx `lambda@837`",
-    "redefine/module-abstract.fx `program`",
-    "redefine/module-abstract-path.fx `lambda@592`",
-    "redefine/module-abstract-path.fx `lambda@592`",
-    "redefine/module-abstract-path.fx `program`",
-    "redefine/knot-spin.fx `h`",
-    "redefine/rerun-chain.fx `program`",
-    "redefine/stable-path.fx `program`",
 ];
 
 // Every word verified, a test for each shard of the programs
@@ -563,13 +547,36 @@ fn a_path_read_from_another_root_is_refused() {
 /// (`Verifier::unpack`, `TODO.md` §307); before, these were verified.
 #[test]
 fn a_module_read_for_another_of_its_type_is_refused() {
+    let (made, kept) = slot_swaps("include-two-of-one-type.fx", "program", 1, 2);
+    assert!(made >= 4, "too few mutants: {made}");
+    assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
+}
+
+/// A closure over two modules of one type, `p` and `q` (the definition's
+/// slots 0 and 1), whose word takes each for the module of the type a
+/// value it is also given is of, `x` and `y` (`Verifier::free_claims`):
+/// each read of either made the other's, the closure made over `q` for `p`
+/// among them, is refused, `q` not shown to be `p`'s type's module. Before
+/// (TAL's unpack points, `TODO.md` §308), a closure's free value was taken
+/// for the module of a type its word's type binds alone, unshown.
+#[test]
+fn a_closure_over_another_module_of_its_type_is_refused() {
+    let (made, kept) = slot_swaps("closure-two-of-one-type.fx", "program", 0, 1);
+    assert!(made >= 4, "too few mutants: {made}");
+    assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
+}
+
+/// The mutants of `modules/FILE`'s word `word` each with one `slot` read
+/// of slot `a` made of `b`, or the reverse, verified each: how many were
+/// made, and those that verified.
+fn slot_swaps(file: &str, word: &str, a: i64, b: i64) -> (usize, Vec<String>) {
     use fixpt_heap::layout::cellular::{operands, routine, PRIMITIVES, ROUTINES, WORD_CELL0, WORD_NAME};
     use fixpt_heap::ObjType;
-    let name = "modules/include-two-of-one-type.fx";
-    let text = std::fs::read_to_string(modules_dir().join("include-two-of-one-type.fx")).unwrap();
+    let name = format!("modules/{file}");
+    let text = std::fs::read_to_string(modules_dir().join(file)).unwrap();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    let (mut c, tops) = checked_in(&text, base_of(name)).expect("checks");
-    fixpt_fx26::syn::set_load_base(Some(base_of(name)));
+    let (mut c, tops) = checked_in(&text, base_of(&name)).expect("checks");
+    fixpt_fx26::syn::set_load_base(Some(base_of(&name)));
     let (mut made, mut kept) = (0, Vec::new());
     s.scheme.scope(|sc| {
         sc.make(|m| {
@@ -579,18 +586,18 @@ fn a_module_read_for_another_of_its_type_is_refused() {
             for raw in certs.words.keys() {
                 let w = Value::from_raw(*raw);
                 let named = m.heap().bloblet_slot(w, WORD_NAME);
-                if !m.heap().is_a(named, ObjType::Symbol) || m.heap().symbol_name(named) != "program" {
+                if !m.heap().is_a(named, ObjType::Symbol) || m.heap().symbol_name(named) != word {
                     continue;
                 }
-                assert!(verify(&mut c, m.heap(), &certs, w).verified(), "the program's word verifies");
+                assert!(verify(&mut c, m.heap(), &certs, w).verified(), "the word verifies");
                 let n = m.heap().bloblet_head(w).fields;
                 let mut k = WORD_CELL0;
                 while k <= n {
                     let cell = m.heap().bloblet_slot(w, k); // fields: the word's cells, walked by their operands
                     let r = cell.is_fixnum().then(|| cell.as_fixnum() as usize).filter(|r| *r < PRIMITIVES).map(|r| ROUTINES[r].0);
                     let at = if cell == slot { m.heap().bloblet_slot(w, k + 1) } else { Value::NULL }; // fields: a `slot`'s operand, its index
-                    if at == Value::fixnum(1) || at == Value::fixnum(2) {
-                        let other = Value::fixnum(3 - at.as_fixnum());
+                    if at == Value::fixnum(a) || at == Value::fixnum(b) {
+                        let other = Value::fixnum(a + b - at.as_fixnum());
                         m.heap().set_bloblet_slot(w, k + 1, other); // fields: that read made of the other slot
                         made += 1;
                         if verify(&mut c, m.heap(), &certs, w).verified() {
@@ -604,8 +611,7 @@ fn a_module_read_for_another_of_its_type_is_refused() {
             Value::NULL
         });
     });
-    assert!(made >= 4, "too few mutants: {made}");
-    assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
+    (made, kept)
 }
 
 /// A word that verifies against its specification, its arithmetic

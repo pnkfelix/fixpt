@@ -518,6 +518,47 @@ of a module defined twice, at one type, are no longer taken for one
 module's include of two modules of one type, as members, using one's
 procedure on the other's value (`TODO.md` §308).
 
+Unpack points, not inferred owners (2026-11-22, `TODO.md` §308, step 3;
+the user's, from the literature: TAL's `unpack`, an annotation each
+of which makes fresh variables, and F-ing modules'). A module value's
+type is an existential, equal to any other of its form up to its bound
+variables (`Checker::module_sub`), so its type says nothing of which
+module it is. A member read from it is at its type's own variables only
+where the certificate says, at a point it can check, that the value is
+the module they name; anywhere else the read opens it (`unpack`), which
+is always sound. The points:
+
+- A binding opened as checking bound it, a `let`'s, a module's item's,
+  a `with`'s member's (`Cert::opens`, from `Facts::let_opened` and
+  `Facts::with_opened`): its variables fresh, checked so, the value's.
+- A parameter opened at entry (`Cert::inside`), its variables fresh in
+  the signature: the parameter's, whatever module a caller gives.
+- A dependent procedure's module parameter, whose abstract type another
+  type of its signature selects (`(select $k t)`): the parameter's; each
+  caller gives that type as a member read from its argument has it
+  (`unpack` of the argument), so only the module it names gives it.
+- A free value whose type alone binds a variable another type of the
+  word's signature names (`Verifier::free_claims`): the free value's; a
+  closure of the word, made, must show the value it gives for it is that
+  module (`shown_free`, at `closure`, a region closure, or the `field!`
+  giving a placeholder's value). One whose variable no other type names
+  is claimed of nothing, each read as good opened.
+- A global's cell, written once, the one whose type binds the variable
+  (`Certs::binder_owners`): its one write is where the module is opened,
+  the binding's variables made by checking there. Each definition's cell
+  is certified at its own binding's type (`Facts::defined`), not the
+  name's last, so a module defined again, a new global, has a cell and
+  variables of its own.
+- A module made here at its own variables, packed at no other witness
+  (`witnesses`): its values were checked at those very types.
+
+Before, a parameter or free value whose type alone bound a variable was
+taken for its module unshown: a closure made over another module of the
+type was verified (`a_closure_over_another_module_of_its_type_is_refused`,
+on `modules/closure-two-of-one-type.fx`); now refused. The redefinition
+gaps close with it (`redefine/module-abstract.fx`, `-path.fx`,
+`knot-spin.fx`, `rerun-chain.fx`, `stable-path.fx`).
+
 ## 11. Open questions (the user's)
 
 1. ~~**Where propositions come from in a program.**~~ From `requires`

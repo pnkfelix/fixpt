@@ -827,6 +827,12 @@ pub struct NodeFacts {
     /// values the `with` binds (`with_vals`), its type as bound, and the
     /// variables opened. With `record_types`.
     pub with_opened: HashMap<ExpId, Vec<(usize, TyId, Vec<DVar>)>>,
+    /// Each top-level definition's global as it is bound, by its
+    /// expression: its type as the program's globals have it, a module's
+    /// abstract types named for that binding (`a..t`). A name defined again
+    /// at another type is a new global, of a type of its own, which its
+    /// cell is certified at, not the name's last. Always kept.
+    pub defined: HashMap<ExpId, TyId>,
     /// A module's abstract type's conversions, `up-t` and `down-t`, each
     /// the identity on the representation, by its lambda's body: the type
     /// it is bound at, from the representation to the abstract type or

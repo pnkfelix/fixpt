@@ -8619,3 +8619,18 @@ checkers agreeing; kept as tests: `modules/stable-path-alias.fx`,
 `redefine/stable-path.fx` (whose `program` the cell verifier does not
 verify yet, a module defined again, as `module-abstract.fx`'s: a known
 gap). No hole found.
+
+Step 3, the cell verifier's rule as unpack points (2026-11-22, the
+user's go-ahead): each place a value is taken for the module its type's
+variables name is a point the certificate says and the verifier checks
+(`docs/research/typed-cellular-code.md`, §10, "Unpack points"): a
+binding opened (`Cert::opens`), a parameter opened (`Cert::inside`), a
+dependent parameter (its callers giving its types as their argument has
+them), a free value claimed only where another type of the signature
+names its variable and shown so where the closure is made
+(`free_claims`, `shown_free`), a global's one write, its cell at its own
+binding's type (`Facts::defined`). New test program
+`modules/closure-two-of-one-type.fx` and test
+`a_closure_over_another_module_of_its_type_is_refused`: a closure made
+over `q` for `p`, verified before, refused now. Known gaps closed: the
+redefinition ones, ten words.
