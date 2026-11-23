@@ -8597,3 +8597,25 @@ that type's own variable, is no longer taken as one member's types tying
 the other's (`members_given`, `ties_members`: `mentions_free_var`, not
 `mentions_var`, which a binder's own variable fooled, the two members'
 variables crossed). `make2` (§307's known gap) verifies now.
+
+The stable path rule, audited (2026-11-22, the user's step 2): every
+type path both checkers form is a variable, then selections of a
+module's members. A variable is one value for as long as its binding:
+FX-26 has no assignment to one, and a global whose module has abstract
+types, defined again, is a new global, what used it run again
+(`fits_old`); a module's members never change. Paths are formed only
+from a binding's anchor while that binding is in scope (`path_base`:
+its slot, its anchor among the skolems), so a `let` of anything not a
+path (an `if`, a call, a field of data) opens its abstract types fresh
+(`name_nat`), and `with` takes only a variable or a path. A procedure's
+types that depend on a parameter's paths are given an argument's only
+where the argument is a variable (`dependent_args`: 1ML's valuable
+paths). No path's type leaves its base's scope (`forget_nats`,
+`anchored`). The hidden `%include` and `%extend-0` bindings keep their
+module's own names (§69), unopened; no program can name them, and their
+members are opened by the `with`s that read them (above). Probed, both
+checkers agreeing; kept as tests: `modules/stable-path-alias.fx`,
+`-alias-other.fx`, `-param.fx`, `-result.fx`, `-result-unnamed.fx`,
+`redefine/stable-path.fx` (whose `program` the cell verifier does not
+verify yet, a module defined again, as `module-abstract.fx`'s: a known
+gap). No hole found.

@@ -406,6 +406,7 @@ const KNOWN_GAPS: &[&str] = &[
     "redefine/module-abstract-path.fx `program`",
     "redefine/knot-spin.fx `h`",
     "redefine/rerun-chain.fx `program`",
+    "redefine/stable-path.fx `program`",
 ];
 
 // Every word verified, a test for each shard of the programs
