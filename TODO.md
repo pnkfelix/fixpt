@@ -8416,7 +8416,7 @@ procedure's type, filled at a call by the path from the argument; a
 module item of a path keeping its types. Both checkers; the cell
 verifier's known gaps gain those programs' words (§291's path types).
 
-## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20)
+## 305. A top-level definition's made-up region is exported unlike by the two checkers (2026-11-20; done 2026-11-23)
 
 `(define h2 (product (#:th (new m))))`, no type written, has its cell in a
 region the checker makes up, `@r.1`. The FX-26 checker keeps it as its own
@@ -8428,6 +8428,17 @@ makes it in a `let`); no other of the 1,068 types it compares has one. To
 decide: which is right, a fresh region as a constant or as a kind of its own
 on import (FX-26's effects order and compare the two apart), and make both
 checkers export it alike.
+
+Done (2026-11-23), decided with the user: a constant, `(rconst @r.1)`,
+as the Rust checker had it. The FX-26 checker keeps its kind inside
+(`r-fresh`, as the Rust one an uninterned name) and exports it so
+(`check-reps.fx`'s `rp-region`); no `rfresh` is made or read. Neither of
+the two kept a made-up region's identity across runs: a constant's name,
+imported, is one a program could write, and a session's count gave
+`rfresh`'s, which an import shared with the importing session's own;
+each mismatch makes a cell's two regions one (sound, less precise) or a
+definition checked by its kept type refused, never a check passed wrongly.
+`modules/module-from-field.fx`'s `h2` top-level again.
 
 ## 306. Frozen strings in UTF-8 (kayak's request, 2026-11-22; deferred: for later)
 

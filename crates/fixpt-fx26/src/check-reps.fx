@@ -103,7 +103,8 @@
     (tagcase r
       (r-var (v) (rp-var v))
       (r-const (s) (rp-node "rconst" (list (sum sym s))))
-      (r-fresh (n s) (rp-node "rfresh" (list (sum int n) (rp-sym s))))
+      ;; A region made up, a constant of its name as the Rust checker's (TODO §305).
+      (r-fresh (n s) (rp-node "rconst" (list (rp-sym s))))
       (r-frozen (p f)
         (rp-node "frozen" (if (< p 0) (list (sum flag f)) (list (sum flag f) (rp-var p)))))
       (r-heap () (rp-node "heap" nil))
@@ -512,8 +513,6 @@
         (r-var (ri-var a))
         (let* ((k (ri-child a)) (h (ri-head k)) (args (ri-args k)))
           (cond ((string=? h "rconst") (r-const (ri-sym (ri-nth args 0))))
-                ((string=? h "rfresh")
-                 (r-fresh (ri-int (ri-nth args 0)) (symbol->string (ri-sym (ri-nth args 1)))))
                 ((string=? h "frozen")
                  (r-frozen (if (null? (cdr args)) -1 (ri-var (ri-nth args 1)))
                            (ri-flag (ri-nth args 0))))
