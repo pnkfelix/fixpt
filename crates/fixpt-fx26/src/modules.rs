@@ -1743,6 +1743,51 @@ impl Checker {
         false
     }
 
+    /// For the cell verifier, packing a module (TODO §307's gap; as the
+    /// checker's `left_members_types` lets a type wanted say abstractly what
+    /// a member left out gives): a witness for each of `vars`, abstract
+    /// types of `t`, found where `s` has a type at the place `t` has the
+    /// variable, onto `out` (the first found kept). Members are matched by
+    /// name as `module_sub` matches them, and anything else part by part,
+    /// where the two are made alike. Nothing is taken on trust from what
+    /// is found: a value is of an existential type at any witness its
+    /// value is of the body at, and whoever asks checks that.
+    pub(crate) fn witnesses_matched(&mut self, s: TyId, t: TyId, vars: &[DVar], out: &mut HashMap<DVar, TyId>) {
+        let mut stack = vec![(s, t)];
+        let mut seen = HashSet::default();
+        while let Some((s, t)) = stack.pop() {
+            let (s, t) = (self.arena.resolve(s), self.arena.resolve(t));
+            if !seen.insert((s, t)) {
+                continue;
+            }
+            match (self.arena.get(s).clone(), self.arena.get(t).clone()) {
+                (_, Ty::Var(x)) if vars.contains(&x) => {
+                    out.entry(x).or_insert(s);
+                }
+                (Ty::Module { descs: ds, vals: vs, .. }, Ty::Module { descs: dt, vals: vt, .. }) => {
+                    for (n, y) in dt {
+                        let n = self.bare_name(n);
+                        if let Some(&(_, x)) = ds.iter().find(|(m, _)| *m == n) {
+                            stack.push((x, y));
+                        }
+                    }
+                    for (n, y) in vt {
+                        if let Some(&(_, x)) = vs.iter().find(|(m, _)| self.val_fits_name(*m, n)) {
+                            stack.push((x, y));
+                        }
+                    }
+                }
+                (a, b) if std::mem::discriminant(&a) == std::mem::discriminant(&b) => {
+                    let (ks, kt) = (self.ty_kids(s), self.ty_kids(t));
+                    if ks.len() == kt.len() {
+                        stack.extend(ks.into_iter().zip(kt));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// The types `t` is made of, one level down.
     pub(crate) fn ty_kids(&self, t: TyId) -> Vec<TyId> {
         let mut out = Vec::new();

@@ -381,15 +381,9 @@ fn every_directory_surveyed() {
 /// is wanted, the checker instantiating it at the binders it generalizes
 /// over, which the verifier wraps in another `poly` instead (`go`; a
 /// local's as well, and a global's since `TODO.md` §211, 5, let one be
-/// read there); and a module taken as a dependent module type and given
-/// where one of its members is left out (`the env-t`, then `shown`), whose
-/// type packs that member's abstract type as the checker names it through
-/// the dependent type's own binder, which no value the verifier has
-/// carries (`TODO.md` §307).
+/// read there).
 const KNOWN_GAPS: &[&str] = &[
     "higher-kinds/poly-global-read.fx `go`",
-    "modules/dependent-moduleof-drop.fx `program`",
-    "modules/dependent-moduleof-restrict.fx `program`",
     "native/raw-args.fx `given`",
 ];
 

@@ -760,7 +760,80 @@ impl Verifier<'_> {
                 _ => break,
             }
         }
-        Some(self.c.subtype(s, t))
+        if self.c.subtype(s, t) {
+            return Some(true);
+        }
+        // A module type with abstract types `s`'s does not have: `s`'s
+        // value packed at what it has there (`packed_at_witnesses`).
+        Some(self.packed_at_witnesses(s, t).is_some_and(|t2| self.c.subtype(s, t2)))
+    }
+
+    /// Module type `t` with each abstract type that module type `s` has
+    /// no type of that name for given what `s` has at its places
+    /// (`Checker::witnesses_matched`), no longer abstract: what `s`'s value
+    /// is of if it is of `t` at those witnesses, as an existential's value
+    /// is at any witness. None if none is found. As the checker's
+    /// `left_members_types` lets a type wanted say a member left out's
+    /// type abstractly (`dependent-moduleof.md`, §4.5).
+    fn packed_at_witnesses(&mut self, s: TyId, t: TyId) -> Option<TyId> {
+        let Ty::Module { abs, descs, vals } = self.c.arena.get(self.c.arena.resolve(t)).clone() else { return None };
+        let Ty::Module { abs: sa, descs: sd, .. } = self.c.arena.get(self.c.arena.resolve(s)).clone() else { return None };
+        let mut own = Vec::new();
+        for n in sa.iter().map(|(n, _)| *n).chain(sd.iter().map(|(n, _)| *n)) {
+            own.push(self.c.bare_name(n));
+        }
+        let mut vars = Vec::new();
+        for (n, w) in &abs {
+            if !own.contains(&self.c.bare_name(*n)) {
+                vars.push(*w);
+            }
+        }
+        let mut found = HashMap::default();
+        self.c.witnesses_matched(s, t, &vars, &mut found);
+        if found.is_empty() {
+            return None;
+        }
+        let map = self.witness_map(&found);
+        let abs = abs.into_iter().filter(|(_, w)| !found.contains_key(w)).collect();
+        let descs = descs.into_iter().map(|(n, x)| (n, self.c.subst(x, &map))).collect();
+        let vals = vals.into_iter().map(|(n, x)| (n, self.c.subst(x, &map))).collect();
+        Some(self.c.arena.ty(Ty::Module { abs, descs, vals }))
+    }
+
+    /// Each variable `found` gives a witness of, to it, a description of
+    /// its kind.
+    fn witness_map(&mut self, found: &HashMap<crate::ast::DVar, TyId>) -> HashMap<crate::ast::DVar, crate::ast::D> {
+        found.iter().map(|(w, x)| (*w, if self.c.arena.dvar_kind(*w) == crate::ast::Kind::Type { crate::ast::D::Type(*x) } else { crate::ast::D::Fun(*x) })).collect()
+    }
+
+    /// Module `layout`'s abstract types no witness is given of (`packs`),
+    /// where values `vals` are not within their fields `fields` as they
+    /// are: each a witness found where the values have one
+    /// (`witnesses_matched`), the type itself where one is the variable.
+    /// Sound at any: each value is then checked at its field, the
+    /// witnesses in their types' places.
+    fn packs_matched(&mut self, vals: &[V], fields: &[TyId], layout: TyId, packs: &mut HashMap<crate::ast::DVar, crate::ast::D>) {
+        let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(layout)).clone() else { return };
+        let missing: Vec<crate::ast::DVar> = abs.iter().map(|(_, w)| *w).filter(|w| !packs.contains_key(w)).collect();
+        if missing.is_empty() {
+            return;
+        }
+        let mut fit = true;
+        for (v, f) in vals.iter().zip(fields) {
+            let f = if packs.is_empty() { *f } else { self.c.subst(*f, packs) };
+            fit &= self.fits(v, f) != Some(false);
+        }
+        if fit {
+            return;
+        }
+        let mut found = HashMap::default();
+        for (v, f) in vals.iter().zip(fields) {
+            if let Some(vt) = v.ty {
+                self.c.witnesses_matched(vt, *f, &missing, &mut found);
+            }
+        }
+        found.retain(|w, x| !matches!(self.c.arena.get(self.c.arena.resolve(*x)), Ty::Var(v) if v == w));
+        packs.extend(self.witness_map(&found));
     }
 
     /// Whether literal `x` is of type `t`, by looking at it: a quote's
@@ -2806,6 +2879,7 @@ impl Verifier<'_> {
                 let mut packs: HashMap<crate::ast::DVar, crate::ast::D> =
                     cert.packs.iter().filter(|(k, _)| *k == here).flat_map(|(_, ps)| ps.iter().map(|(w, x)| (*w, crate::ast::D::Type(*x)))).collect();
                 self.packs_unpacked(&vals, layout, &mut packs);
+                self.packs_matched(&vals, &fields, layout, &mut packs);
                 for (v, f) in vals.iter().zip(&fields) {
                     let f = if packs.is_empty() { *f } else { self.c.subst(*f, &packs) };
                     self.holds(v, f, at);
@@ -3305,7 +3379,9 @@ impl Verifier<'_> {
             let mut at = vt;
             for x in steps {
                 let Ty::Module { vals, .. } = self.c.arena.get(self.c.arena.resolve(at)) else { break };
-                let Some((_, y)) = vals.iter().find(|(m, _)| m == x) else { break };
+                // The member the path names, or the one `restrict` keeps
+                // unnamed as it (`%hidden:base`, `Checker::val_fits_name`).
+                let Some((_, y)) = vals.iter().find(|(m, _)| self.c.val_fits_name(*m, *x)) else { break };
                 at = *y;
             }
             let Ty::Module { abs, descs, .. } = self.c.arena.get(self.c.arena.resolve(at)).clone() else { continue };

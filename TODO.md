@@ -8543,12 +8543,22 @@ assigned, a new global made and its users checked again (`docs/fx26.md`,
 Done 2026-11-22 (`docs/research/typed-cellular-code.md`, §10, "A path's
 types"): roots, reads, writes and dependent module types, each checked;
 the known gaps lose 17 words. Left:
-- A module taken as a dependent module type and given where a member is
-  left out, `(the shown (the env-t …))`: the type made packs that
-  member's abstract type, which the checker names through `env-t`'s own
-  binder, and no value the verifier has carries it
-  (`dependent-moduleof-drop.fx`, `-restrict.fx` `program`).
-- A module of abstract types defined twice: each global's cell is
+- ~~A module taken as a dependent module type and given where a member is
+  left out~~ (done 2026-11-23), `(the shown (the env-t …))`: the type made
+  packs that member's abstract type, which the checker names through
+  `env-t`'s own binder (`left_members_types`), and no value the verifier
+  has carries it (`dependent-moduleof-drop.fx`, `-restrict.fx`
+  `program`). Now the verifier finds the witness itself: where a module
+  made, or a value given a module type, is not within it as it is, each
+  abstract type of the type no witness is given of (nor a name of the
+  value's own type) is given what the value's type has at its places
+  (`Checker::witnesses_matched`; `Verifier::packs_matched`,
+  `packed_at_witnesses`), members matched by name as `module_sub` matches
+  them, and the values then checked at the fields so: an existential's
+  value is one at any witness its value is of the body at, so nothing
+  found is trusted. And a global's path types are found at the member
+  `restrict` keeps unnamed (`%hidden:base` for `base`, `witnessed`).
+- ~~A module of abstract types defined twice~~ (done, §308, step 3): each global's cell is
   certified at the name's last type (`Compiler::push_global`'s
   `global_type`), so neither is a root (`redefine/module-abstract-path.fx`);
   as for `knot-spin.fx`'s redefinitions, the certificate wants each
