@@ -1153,6 +1153,19 @@ fn utf8_offset(rt: &mut Runtime, u: Value, v: Value, end: bool) -> Outcome<usize
     Ok(k)
 }
 
+/// The character of `utf8` `u` starting at byte offset `v`, and the offset
+/// after it: read at once where it is one (its text found once), else
+/// `utf8_offset`'s error, saying which.
+fn utf8_char(rt: &mut Runtime, u: Value, v: Value) -> Outcome<(char, usize)> {
+    if rt.heap.is_utf8(u) && v.is_fixnum() && v.as_fixnum() >= 0 {
+        if let Some(read) = rt.heap.utf8_char_at(u, v.as_fixnum() as usize) {
+            return Ok(read);
+        }
+    }
+    utf8_offset(rt, u, v, false)?;
+    unreachable!("an offset where a character starts reads one")
+}
+
 fn get_char(rt: &mut Runtime, v: Value) -> Outcome<char> {
     if v.is_char() {
         return Ok(v.as_char());
@@ -3498,13 +3511,11 @@ prims! {
         Ok(Value::fixnum(rt.heap.utf8_len(a[0]) as i64))
     });
     "%fx26-utf8-ref", 2, Some(2), simple!(|rt, a| {
-        let k = utf8_offset(rt, a[0], a[1], false)?;
-        let (c, _) = rt.heap.utf8_char_at(a[0], k).expect("a character starts there");
+        let (c, _) = utf8_char(rt, a[0], a[1])?;
         Ok(Value::char(c))
     });
     "%fx26-utf8-next", 2, Some(2), simple!(|rt, a| {
-        let k = utf8_offset(rt, a[0], a[1], false)?;
-        let (_, next) = rt.heap.utf8_char_at(a[0], k).expect("a character starts there");
+        let (_, next) = utf8_char(rt, a[0], a[1])?;
         Ok(Value::fixnum(next as i64))
     });
     "%fx26-utf8-substring", 3, Some(3), simple!(|rt, a| {

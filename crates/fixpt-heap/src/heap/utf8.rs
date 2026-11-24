@@ -92,7 +92,7 @@ impl Heap {
         let bytes = self.bytes_of(v);
         std::str::from_utf8(&bytes).map_err(|e| e.valid_up_to())?;
         let at = BYTEVECTOR_BYTES + start;
-        let count = bytes.iter().filter(|b| *b & 0xc0 != 0x80).count();
+        let count = count_chars(&bytes);
         Ok(self.make_slice(owner, at, at + len, Some(count)))
     }
 
@@ -133,7 +133,7 @@ impl Heap {
         if let Some(n) = self.utf8_known_chars(u) {
             return n;
         }
-        let n = self.utf8_bytes(u).iter().filter(|b| *b & 0xc0 != 0x80).count();
+        let n = count_chars(self.utf8_text(u));
         if self.utf8_is_slice(u) {
             self.set_bloblet_slot(u, SLICE_COUNT + 2, Value::fixnum(n as i64));
         }
@@ -145,22 +145,21 @@ impl Heap {
         self.utf8_span(u).2
     }
 
+    /// `u`'s bytes, lent in place: where its text is found once
+    /// (`utf8_span`), then read as a slice, not a byte at a time.
+    pub fn utf8_text(&self, u: Value) -> &[u8] {
+        let (owner, start, len) = self.utf8_span(u);
+        &self.bloblet_suffix(owner)[start..start + len]
+    }
+
     /// `u`'s bytes, copied out.
     pub fn utf8_bytes(&self, u: Value) -> Vec<u8> {
-        let (owner, start, len) = self.utf8_span(u);
-        (start..start + len).map(|i| self.bloblet_byte(owner, i).expect("in its owner")).collect()
+        self.utf8_text(u).to_vec()
     }
 
     /// `u`'s text, copied out.
     pub fn utf8_string(&self, u: Value) -> String {
-        String::from_utf8(self.utf8_bytes(u)).expect("a utf8 is made valid")
-    }
-
-    /// The byte of `u` at `k`, which must be in range.
-    fn utf8_byte(&self, u: Value, k: usize) -> u8 {
-        let (owner, start, len) = self.utf8_span(u);
-        debug_assert!(k < len, "{k} is past {u:?}");
-        self.bloblet_byte(owner, start + k).expect("in range")
+        std::str::from_utf8(self.utf8_text(u)).expect("a utf8 is made valid").to_owned()
     }
 
     /// A slice of `u`'s bytes from `a` to `b`, each a boundary
@@ -185,25 +184,26 @@ impl Heap {
     /// end, `k` its length): in range, and the byte there no continuation
     /// byte (`10xxxxxx`), which, the text valid, makes it a start. O(1).
     pub fn utf8_boundary(&self, u: Value, k: usize) -> bool {
-        k == self.utf8_len(u) || (k < self.utf8_len(u) && self.utf8_byte(u, k) & 0xc0 != 0x80)
+        let t = self.utf8_text(u);
+        k == t.len() || t.get(k).is_some_and(|b| b & 0xc0 != 0x80)
     }
 
     /// The character of `u` starting at byte `k`, and the offset after it;
     /// none if no character starts there. O(1): at most four bytes read.
     pub fn utf8_char_at(&self, u: Value, k: usize) -> Option<(char, usize)> {
-        if k >= self.utf8_len(u) || !self.utf8_boundary(u, k) {
-            return None;
-        }
-        let b0 = self.utf8_byte(u, k);
-        let n = match b0 {
-            0x00..=0x7f => 1,
-            0xc0..=0xdf => 2,
-            0xe0..=0xef => 3,
-            _ => 4,
+        let t = self.utf8_text(u);
+        let b0 = *t.get(k)?;
+        // Its continuation bytes' six bits each, after the lead byte's own:
+        // valid text, so the lead says how many follow, and they do.
+        let (n, lead) = match b0 {
+            0x00..=0x7f => return Some((b0 as char, k + 1)),
+            0x80..=0xbf => return None,
+            0xc0..=0xdf => (2, b0 & 0x1f),
+            0xe0..=0xef => (3, b0 & 0x0f),
+            _ => (4, b0 & 0x07),
         };
-        let bytes: Vec<u8> = (k..k + n).map(|i| self.utf8_byte(u, i)).collect();
-        let c = std::str::from_utf8(&bytes).ok()?.chars().next()?;
-        Some((c, k + n))
+        let c = t[k + 1..k + n].iter().fold(u32::from(lead), |c, b| (c << 6) | u32::from(b & 0x3f));
+        Some((char::from_u32(c).expect("a utf8 is made valid"), k + n))
     }
 
     /// The `utf8` of `u`'s bytes from `a` to `b`, each a boundary
@@ -212,13 +212,18 @@ impl Heap {
         if a > b || !self.utf8_boundary(u, a) || !self.utf8_boundary(u, b) {
             return None;
         }
-        let bytes: Vec<u8> = (a..b).map(|i| self.utf8_byte(u, i)).collect();
-        let text = String::from_utf8(bytes).expect("between boundaries of valid text");
+        let text = std::str::from_utf8(&self.utf8_text(u)[a..b]).expect("between boundaries of valid text").to_owned();
         Some(self.make_utf8(&text))
     }
 
     /// Whether two `utf8`s have the same text.
     pub fn utf8_eq(&self, a: Value, b: Value) -> bool {
-        self.utf8_len(a) == self.utf8_len(b) && self.utf8_bytes(a) == self.utf8_bytes(b)
+        self.utf8_text(a) == self.utf8_text(b)
     }
+}
+
+/// How many characters valid UTF-8 `bytes` holds: its bytes that are no
+/// continuation byte (`10xxxxxx`, as an `i8` below -64).
+fn count_chars(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|&&b| (b as i8) >= -64).count()
 }

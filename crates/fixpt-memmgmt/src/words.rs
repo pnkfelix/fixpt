@@ -120,6 +120,21 @@ impl Words {
         unsafe { &*std::ptr::slice_from_raw_parts(self.base, self.len) }
     }
 
+    /// Bytes `at..at + len` of the words, counted from their start, as a
+    /// slice: a bloblet's suffix read in place, not a byte at a time. The
+    /// heap's bytes are each word's from its low byte up
+    /// (`Heap::bloblet_byte`), memory order on a little-endian machine only,
+    /// so there only.
+    #[cfg(target_endian = "little")]
+    #[inline]
+    pub fn bytes(&self, at: usize, len: usize) -> &[u8] {
+        assert!(at.checked_add(len).is_some_and(|end| end <= self.len * 8), "within the words");
+        // SAFETY: as for `words`: `len * 8` bytes from `base`, readable, and
+        // a `u8` has no alignment or invalid values; within them (checked),
+        // borrowed from `self`, so no `&mut` to them while it lives.
+        unsafe { &*std::ptr::slice_from_raw_parts((self.base as *const u8).add(at), len) }
+    }
+
     #[inline(always)]
     pub fn words_mut(&mut self) -> &mut [u64] {
         // SAFETY: as for `words`, and `&mut self` makes this the only

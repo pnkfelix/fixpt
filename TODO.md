@@ -8971,3 +8971,14 @@ of a slice whose count is), else kept by `utf8_chars`'s walk; all ASCII
 exactly when the count is the length. `utf8-slice` settable (an image's
 immutable half may be mapped read-only: a test faults without it).
 Native code unchanged, a slice the primitive's already.
+
+Speed (2026-11-24, measured): the primitives read a `utf8`'s text in
+place, where it is found once (`Heap::utf8_text`, by
+`Heap::bloblet_suffix`, by `Words::bytes`, little-endian only), not a
+byte at a time each finding it again (since slices, `utf8_span` per
+byte); `utf8-ref` and `utf8-next` read first and check only to say an
+error. 200,000 `é`, walked 50 times, native convention: 2.96 s, now
+0.79 s (2.02 s before slices); `utf8-length` of it ×1000: 1.56 s, now
+0.14 s. A slice walked, ASCII: 1.04 s, the whole 0.07 s (in line): a
+slice in line next. The views' `bytes_of` and `str_chars` still copy an
+element at a time.

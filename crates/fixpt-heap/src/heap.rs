@@ -1902,6 +1902,12 @@ impl Heap {
         Ok((self.word(self.ix(v) + i / 8) >> ((i % 8) * 8)) as u8)
     }
 
+    /// The suffix of bloblet `v`, its bytes, lent in place (no copy, no
+    /// byte at a time): for reading text and bytes in bulk.
+    pub fn bloblet_suffix(&self, v: Value) -> &[u8] {
+        self.mem.bytes(self.ix(v) * 8, self.bloblet_head(v).bytes)
+    }
+
     pub fn set_bloblet_byte(&mut self, v: Value, i: usize, b: u8) -> Result<(), BlobletError> {
         let head = self.bloblet_head(v);
         if i >= head.bytes {
