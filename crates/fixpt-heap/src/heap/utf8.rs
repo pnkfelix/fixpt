@@ -9,14 +9,22 @@
 //! never invalid; a slice only between two characters' starts, so never
 //! either.
 //!
-//! A slice is frozen, of the kind `utf8-slice`, its values its owner (a
-//! whole `utf8`, never a slice: a slice of a slice is one of the first's
-//! owner; or a bytevector frozen, its bytes validated, `utf8_of_bytes`),
-//! its start and end, offsets into the owner's suffix in bytes,
-//! and whether it is marked all ASCII, its owner's mark (never found by
-//! looking at its piece). It has a trailer, so the word before its
-//! (empty) suffix is never a header, as a whole one's is: what native code
-//! tests to read a whole one in line.
+//! A slice is of the kind `utf8-slice`, its values its owner (a whole
+//! `utf8`, never a slice: a slice of a slice is one of the first's owner;
+//! or a bytevector frozen, its bytes validated, `utf8_of_bytes`), its
+//! start and end, offsets into the owner's suffix in bytes, and its count
+//! of characters once known (§310, the user's): known where it is made if
+//! that is free (its owner all ASCII, or bytes counted as they are
+//! validated), else by the first walk that counts it, which keeps it, so
+//! `utf8-length` of a slice is a walk once, O(1) after. Its piece is all
+//! ASCII exactly when its count is its length in bytes. So its fields are
+//! not frozen: the count is written once, from unknown to known, an
+//! immediate, the same whoever writes it, the bytes', so no program sees
+//! the write; its kind settable, so an image never puts it in the half a
+//! write would fault in. Its owner, start and end are never written. It
+//! has a trailer, so the word before its (empty) suffix is never a header,
+//! as a whole one's is: what native code tests to read a whole one in
+//! line.
 
 use super::Heap;
 use crate::value::Value;
@@ -28,11 +36,16 @@ const UTF8_SLICE: u8 = crate::layout::kind("utf8-slice");
 /// Where a bytevector's bytes start in its suffix: after its length.
 const BYTEVECTOR_BYTES: usize = 8;
 
-/// A slice's values (`Heap::make_frozen`'s order).
+/// A slice's values (`Heap::bloblet_value`'s order).
 const SLICE_OWNER: usize = 0;
 const SLICE_START: usize = 1;
 const SLICE_END: usize = 2;
-const SLICE_ASCII: usize = 3;
+const SLICE_COUNT: usize = 3;
+
+/// A slice's count as its field holds it: a fixnum, or `#f`, not known yet.
+fn count_field(count: Option<usize>) -> Value {
+    count.map_or(Value::boolean(false), |n| Value::fixnum(n as i64))
+}
 
 impl Heap {
     /// The `utf8` of `text`: marked all ASCII, if it is, here.
@@ -79,26 +92,52 @@ impl Heap {
         let bytes = self.bytes_of(v);
         std::str::from_utf8(&bytes).map_err(|e| e.valid_up_to())?;
         let at = BYTEVECTOR_BYTES + start;
-        let fields =
-            [owner, Value::fixnum(at as i64), Value::fixnum((at + len) as i64), Value::boolean(bytes.is_ascii())];
-        Ok(self.make_frozen(UTF8_SLICE, &fields))
+        let count = bytes.iter().filter(|b| *b & 0xc0 != 0x80).count();
+        Ok(self.make_slice(owner, at, at + len, Some(count)))
     }
 
-    /// Whether `utf8` `u` is marked all ASCII.
-    pub fn utf8_is_ascii(&self, u: Value) -> bool {
+    /// A slice of `owner`'s suffix from `start` to `end`, its count `count`
+    /// if known: its fields not frozen, for the count (the module's note).
+    fn make_slice(&mut self, owner: Value, start: usize, end: usize, count: Option<usize>) -> Value {
+        let fields = [owner, Value::fixnum(start as i64), Value::fixnum(end as i64), count_field(count)];
+        let b = self.make_bloblet(UTF8_SLICE, fields.len(), 0, true);
+        for (i, v) in fields.iter().enumerate() {
+            self.set_bloblet_slot(b, i + 2, *v);
+        }
+        self.freeze_bloblet(b, false, true);
+        b
+    }
+
+    /// `u`'s count of characters if it is known without a walk: a whole
+    /// one's marked all ASCII, its length; a slice's, once kept.
+    pub fn utf8_known_chars(&self, u: Value) -> Option<usize> {
         match self.bloblet_kind(u) {
-            UTF8_SLICE => self.bloblet_value(u, SLICE_ASCII).is_true(),
-            k => k == UTF8_ASCII,
+            UTF8_SLICE => {
+                let c = self.bloblet_value(u, SLICE_COUNT);
+                c.is_fixnum().then(|| c.as_fixnum() as usize)
+            }
+            UTF8_ASCII => Some(self.bloblet_head(u).bytes),
+            _ => None,
         }
     }
 
-    /// `u`'s length in characters: its length in bytes if it is marked all
-    /// ASCII, else counted, a walk.
-    pub fn utf8_chars(&self, u: Value) -> usize {
-        if self.utf8_is_ascii(u) {
-            return self.utf8_len(u);
+    /// Whether `utf8` `u` is known all ASCII: a whole one marked so, or a
+    /// slice whose count, known, is its length in bytes.
+    pub fn utf8_is_ascii(&self, u: Value) -> bool {
+        self.utf8_known_chars(u) == Some(self.utf8_len(u))
+    }
+
+    /// `u`'s length in characters: known (`utf8_known_chars`), else
+    /// counted, a walk, and a slice keeps it.
+    pub fn utf8_chars(&mut self, u: Value) -> usize {
+        if let Some(n) = self.utf8_known_chars(u) {
+            return n;
         }
-        self.utf8_bytes(u).iter().filter(|b| *b & 0xc0 != 0x80).count()
+        let n = self.utf8_bytes(u).iter().filter(|b| *b & 0xc0 != 0x80).count();
+        if self.utf8_is_slice(u) {
+            self.set_bloblet_slot(u, SLICE_COUNT + 2, Value::fixnum(n as i64));
+        }
+        n
     }
 
     /// `u`'s length in bytes.
@@ -126,15 +165,20 @@ impl Heap {
 
     /// A slice of `u`'s bytes from `a` to `b`, each a boundary
     /// (`utf8_boundary`), nothing copied; none if either is not, or
-    /// `a > b`. Its owner `u`'s, and its mark.
+    /// `a > b`. Its owner `u`'s; its count known if `u` is known all
+    /// ASCII, or it is the whole of `u` and `u`'s is known, never found by
+    /// looking at the piece (a walk, left to the first that counts).
     pub fn utf8_slice(&mut self, u: Value, a: usize, b: usize) -> Option<Value> {
         if a > b || !self.utf8_boundary(u, a) || !self.utf8_boundary(u, b) {
             return None;
         }
-        let (owner, start, _) = self.utf8_span(u);
-        let ascii = Value::boolean(self.utf8_is_ascii(u));
-        let fields = [owner, Value::fixnum((start + a) as i64), Value::fixnum((start + b) as i64), ascii];
-        Some(self.make_frozen(UTF8_SLICE, &fields))
+        let (owner, start, len) = self.utf8_span(u);
+        let count = if self.utf8_is_ascii(u) {
+            Some(b - a)
+        } else {
+            self.utf8_known_chars(u).filter(|_| (a, b) == (0, len))
+        };
+        Some(self.make_slice(owner, start + a, start + b, count))
     }
 
     /// Whether byte offset `k` is where a character of `u` starts (or its

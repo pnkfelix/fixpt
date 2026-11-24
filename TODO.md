@@ -8952,7 +8952,7 @@ word; `%fx26-bytes-as-utf8`; the evaluator copies, its bytes at `@v`;
 Left to say: whether `utf8-slice` is worth a fast path in line at once,
 or after a measurement.
 
-Deferred (the user's, 2026-11-24): a slice's ASCII mark found lazily. A
+Done (the user's, 2026-11-24, at once after deferring it): a slice's ASCII mark found lazily, as its count kept, below. A
 slice takes its owner's mark, so a piece all ASCII of text that is not is
 walked by `utf8-length` each time. A third state, not yet known, settled
 by the first walk (which reads every byte anyway), perhaps the count
@@ -8964,5 +8964,10 @@ owner), not by `make_frozen`: the heap's flags then say the truth, and an
 image puts it in its mutable half, as it does any object whose fields are
 not frozen, never in the immutable half a write would fault in. The types
 are untouched (`const` is a region's, not the flag), the write no effect a
-program sees, its value the bytes'. Not a big deal; left until a program
-wants it.
+program sees, its value the bytes'. Done so: the field the count, `#f`
+until known (`Heap::utf8_known_chars`), known where it is made if free
+(its owner all ASCII; `bytes-as-utf8` counting as it validates; the whole
+of a slice whose count is), else kept by `utf8_chars`'s walk; all ASCII
+exactly when the count is the length. `utf8-slice` settable (an image's
+immutable half may be mapped read-only: a test faults without it).
+Native code unchanged, a slice the primitive's already.

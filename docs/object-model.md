@@ -570,21 +570,21 @@ And from self-tagged floats (`docs/research/floats.md`, Q7).
 
 ## What becomes a bloblet
 
-| now                  | as a bloblet                                 |
-| -------------------- | -------------------------------------------- |
-| vector               | *F* elements, no suffix                      |
-| record               | record-type descriptor + fields, no suffix   |
-| bytevector           | no fields, *B* bytes                         |
-| string               | no fields (or a length field), UTF-32 suffix |
-| utf8 (kinds 49, 50)  | no fields, UTF-8 suffix; 50 all ASCII        |
-| utf8-slice (51)      | owner, start, end, ASCII mark; a trailer     |
-| bytes-slice (52)     | owner, start, end (elements); a trailer      |
-| str-slice (53)       | owner, start, end (elements); a trailer      |
-| flonum               | no fields, 8 bytes                           |
-| bignum               | a sign field, limbs as suffix                |
-| code                 | constants and metadata, trailer, code        |
-| closure              | code pointer + captured variables, no suffix |
-| box, symbol, port, … | fields, no suffix                            |
+| now                  | as a bloblet                                   |
+| -------------------- | ---------------------------------------------- |
+| vector               | *F* elements, no suffix                        |
+| record               | record-type descriptor + fields, no suffix     |
+| bytevector           | no fields, *B* bytes                           |
+| string               | no fields (or a length field), UTF-32 suffix   |
+| utf8 (kinds 49, 50)  | no fields, UTF-8 suffix; 50 all ASCII          |
+| utf8-slice (51)      | owner, start, end, count once known; a trailer |
+| bytes-slice (52)     | owner, start, end (elements); a trailer        |
+| str-slice (53)       | owner, start, end (elements); a trailer        |
+| flonum               | no fields, 8 bytes                             |
+| bignum               | a sign field, limbs as suffix                  |
+| code                 | constants and metadata, trailer, code          |
+| closure              | code pointer + captured variables, no suffix   |
+| box, symbol, port, … | fields, no suffix                              |
 
 Pairs stay as they are: two words, no header. They are the most common
 object, and a header would cost them 50%.

@@ -2,7 +2,7 @@
 //! byte offset, a character where one starts and nowhere else, a piece
 //! between boundaries, kept by a collection.
 
-use fixpt_heap::Heap;
+use fixpt_heap::{Heap, Value, image};
 
 const TEXTS: [&str; 7] = ["", "a", "abc", "é", "aé\u{1F600}z", "λx.x", "\u{10FFFF}\u{80}\u{7FF}\u{800}"];
 
@@ -57,8 +57,8 @@ fn a_utf8_survives_a_collection() {
 
 /// A slice (`TODO.md` §310): a view of a piece between two characters'
 /// starts, read as the piece copied would be, nothing copied; a slice of
-/// a slice one of the first's owner; its mark its owner's, never found by
-/// looking at the piece.
+/// a slice one of the first's owner; its count known where it is made only
+/// if that is free, else kept by the first walk.
 #[test]
 fn a_utf8_slice_reads_as_its_piece() {
     let mut h = Heap::new();
@@ -71,16 +71,26 @@ fn a_utf8_slice_reads_as_its_piece() {
                 let (Some(s), Some(c)) = (slice, copy) else { continue };
                 let piece = &t[a..b];
                 assert!(h.is_utf8(s) && h.utf8_is_slice(s) && !h.utf8_is_slice(c));
+                // Its count known where it is made only if that is free: of a
+                // whole one, its owner all ASCII (a whole one keeps no other).
+                let free = t.is_ascii();
+                assert_eq!(h.utf8_known_chars(s), free.then(|| piece.chars().count()), "{t:?} {a}..{b}");
+                assert_eq!(h.utf8_is_ascii(s), t.is_ascii() || free && piece.is_ascii(), "{t:?} {a}..{b}");
                 assert_eq!((h.utf8_string(s), h.utf8_len(s), h.utf8_chars(s)), (piece.to_string(), piece.len(), piece.chars().count()));
+                // Counted, kept: the next is no walk, and the piece known all
+                // ASCII if it is, whatever its owner.
+                assert_eq!(h.utf8_known_chars(s), Some(piece.chars().count()), "{t:?} {a}..{b}");
+                assert_eq!(h.utf8_is_ascii(s), piece.is_ascii(), "{t:?} {a}..{b}");
                 assert!(h.utf8_eq(s, c) && h.utf8_eq(c, s));
-                assert_eq!(h.utf8_is_ascii(s), t.is_ascii(), "{t:?} {a}..{b}: the owner's mark");
                 for k in 0..=piece.len() {
                     let want = piece.get(k..).and_then(|rest| rest.chars().next()).map(|c| (c, k + c.len_utf8()));
                     assert_eq!(h.utf8_char_at(s, k), want, "{t:?} {a}..{b} at {k}");
                 }
                 // A slice of the slice: of the same owner, the offsets added.
+                // Of the whole of the slice, its count, kept, known.
                 if let Some(inner) = h.utf8_slice(s, 0, piece.len()) {
                     assert_eq!(h.utf8_string(inner), piece);
+                    assert_eq!(h.utf8_known_chars(inner), Some(piece.chars().count()));
                 }
             }
         }
@@ -97,12 +107,56 @@ fn a_utf8_slice_keeps_its_owner_through_a_collection() {
             h.utf8_slice(u, 0, t.len()).expect("the whole of it")
         })
         .collect();
+    // Half counted before, half after: a count kept is kept.
+    for u in roots.iter().step_by(2) {
+        h.utf8_chars(*u);
+    }
     let slice: &mut [_] = &mut roots;
     h.collect(&mut [slice]);
     h.verify().expect("sound after collection");
-    for (u, t) in roots.iter().zip(TEXTS) {
+    for (i, (u, t)) in roots.iter().zip(TEXTS).enumerate() {
         assert_eq!(h.utf8_string(*u), t.to_string());
+        if i % 2 == 0 {
+            assert_eq!(h.utf8_known_chars(*u), Some(t.chars().count()), "{t:?}: kept");
+        }
+        assert_eq!(h.utf8_chars(*u), t.chars().count());
     }
+}
+
+/// A slice in an image, its count not known, mapped from its file: its kind
+/// settable, it is in the static area's mutable half, not the immutable one
+/// mapped read-only, so the walk that counts it keeps the count there.
+#[test]
+fn a_utf8_slice_in_an_image_keeps_its_count() {
+    let text = "a\u{e9}b\u{1F600}";
+    let bytes = {
+        let mut h = Heap::new();
+        let u = h.make_utf8(text);
+        let s = h.utf8_slice(u, 1, text.len()).expect("a boundary");
+        assert_eq!(h.utf8_known_chars(s), None);
+        let l = h.cons(s, Value::NULL);
+        h.push_root(l);
+        image::dump_static(&h)
+    };
+    let mut into = Heap::new();
+    if into.base_word() != Heap::image_base_word() {
+        return;
+    }
+    let path = std::env::temp_dir().join(format!("fixpt-utf8-slice-map-{}.img", std::process::id()));
+    let mut file = vec![0xaa; image::PAGE];
+    file.extend(&bytes);
+    std::fs::write(&path, &file).unwrap();
+    let m = fixpt_heap::Mapped::open(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    let img = image::parts(&m[image::PAGE..], true).unwrap();
+    let roots = into.splice_image_from(&img, &[], Some(&m), true).expect("splices");
+    drop(m);
+    let s = into.car(roots[0]);
+    assert!(into.is_static(s) && into.utf8_is_slice(s));
+    assert_eq!(into.utf8_known_chars(s), None);
+    assert_eq!(into.utf8_chars(s), 3);
+    assert_eq!(into.utf8_known_chars(s), Some(3), "kept, where it is");
+    into.verify().unwrap();
 }
 
 /// A `utf8` viewing a bytevector's bytes (`TODO.md` §310): validated,
