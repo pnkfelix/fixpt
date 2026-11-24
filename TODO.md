@@ -8951,3 +8951,14 @@ word; `%fx26-bytes-as-utf8`; the evaluator copies, its bytes at `@v`;
 
 Left to say: whether `utf8-slice` is worth a fast path in line at once,
 or after a measurement.
+
+Deferred (the user's, 2026-11-24): a slice's ASCII mark found lazily. A
+slice takes its owner's mark, so a piece all ASCII of text that is not is
+walked by `utf8-length` each time. A third state, not yet known, settled
+by the first walk (which reads every byte anyway), perhaps the count
+itself kept, making `utf8-length` O(1) after the first for any slice. What
+is written is the slice's own field, never the bytes it views, and an
+immediate, so no barrier; but the slice is a frozen bloblet today
+(`make_frozen`), read purely, so a field of it written once, from unknown
+to known, two racing readers writing the same, wants saying in the heap's
+frozen flags. Not a big deal; left until a program wants it.
