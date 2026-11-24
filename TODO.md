@@ -8982,3 +8982,16 @@ error. 200,000 `é`, walked 50 times, native convention: 2.96 s, now
 0.14 s. A slice walked, ASCII: 1.04 s, the whole 0.07 s (in line): a
 slice in line next. The views' `bytes_of` and `str_chars` still copy an
 element at a time.
+
+A slice in line (2026-11-24, the user's, after the measurement above):
+every native compiler, both languages, both targets, finds where a
+`utf8`'s bytes are and how many first (a header the word before them, a
+whole one, else a slice's owner plus `start`, and `end - start`;
+`layout::utf8_slice`, `utf8-slice-*`, `d-utf8-slice-*`), then reads as
+before; a slice's `utf8-length` its count once known. A slice of 200,000
+ASCII walked 50 times, native convention: 1.01 s, now 0.08 s, the whole
+one's. Found by the way: the native convention's non-ASCII walk, all
+call-outs, 0.78 s to 0.93 s with no more instructions but 65 times the
+instruction cache's misses, the Rust code each call-out runs laid out
+anew; the heap's small readers of a `utf8` marked `#[inline]` (across
+crates they were calls), it is 0.74 s, and a slice of it 1.05 s to 0.66 s.

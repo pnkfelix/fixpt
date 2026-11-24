@@ -101,6 +101,10 @@
 (define d-h-suffix-frozen-lo int 13)  ; a header's field
 (define d-h-fields-lo int 14)  ; a header's field
 (define d-h-bytes-lo int 32)  ; a header's field
+(define d-utf8-slice-owner int 2)  ; a utf8 slice's field
+(define d-utf8-slice-start int 3)  ; a utf8 slice's field
+(define d-utf8-slice-end int 4)  ; a utf8 slice's field
+(define d-utf8-slice-count int 5)  ; a utf8 slice's field
 (define d-kind-extension int 255)  ; a header's kind when F is in an extension word
 (define d-flat-i32 int 0)  ; a flat layout
 (define d-flat-u32 int 1)  ; a flat layout

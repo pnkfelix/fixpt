@@ -126,36 +126,26 @@
            (da-e (x86-shift-imm da-shl d-x16 3))
            (da-mov d-result d-x16)
            #t))
-        ;; UTF-8 text, whole: its header the word before its bytes (a
-        ;; slice's is a trailer, the primitive's), its length in bytes the
-        ;; header's B; its count of characters that where it is marked all
-        ;; ASCII, the kind and the tag compared at once; a character, or
-        ;; the offset after it, only of one byte (ASCII).
-        ((string=? name "%fx26-utf8-length")
-         (begin (da-ld d-x13 x (dq-fld 1))
-                (da-mov d-x14 d-x13)
-                (da-e (x86-alu-imm da-and d-x14 (dq-kind-tag-mask)))
-                (da-e (x86-alu-imm da-cmp d-x14 (dq-utf8-ascii-low)))
-                (da-jcc da-c-ne slow)
-                (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
-                (dq-fixnum-of d-x13) #t))
+        ;; UTF-8 text, whole or a slice: where its bytes are and how many
+        ;; (`dq-utf8-span`), then the same reads; its count of characters a
+        ;; whole one's marked all ASCII, the kind and the tag compared at
+        ;; once, a slice's once known, its field; a character, or the offset
+        ;; after it, only of one byte (ASCII).
+        ((string=? name "%fx26-utf8-length") (begin (dq-utf8-length x slow) #t))
         ((string=? name "%fx26-utf8-byte-length")
-         (begin (da-ld d-x13 x (dq-fld 1)) (dq-whole d-x14 d-x13 slow)
-                (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
-                (dq-fixnum-of d-x13) #t))
+         (begin (dq-utf8-span x) (da-mov d-result d-x15) #t))
         ((or (string=? name "%fx26-utf8-ref") (string=? name "%fx26-utf8-next"))
          (begin
            (da-e (x86-test-imm y 7)) (da-jcc da-c-ne slow)
-           (da-ld d-x14 x (dq-fld 1)) (dq-whole d-x15 d-x14 slow)
-           (da-e (x86-shift-imm da-shr d-x14 d-h-bytes-lo))
+           (dq-utf8-span x)
+           (da-e (x86-alu da-cmp y d-x15)) (da-jcc da-c-ae slow)
            (da-mov d-x15 y) (da-e (x86-shift-imm da-sar d-x15 3))
-           (da-e (x86-alu da-cmp d-x15 d-x14)) (da-jcc da-c-ae slow)
-           (da-e (x86-load8-ix d-x16 x d-x15 1 -4))
-           (da-e (x86-alu-imm da-cmp d-x16 128)) (da-jcc da-c-ae slow)
+           (da-e (x86-load8-ix d-x14 d-x16 d-x15 1 -4))
+           (da-e (x86-alu-imm da-cmp d-x14 128)) (da-jcc da-c-ae slow)
            (if (string=? name "%fx26-utf8-ref")
-               (begin (da-e (x86-shift-imm da-shl d-x16 8))
-                      (da-e (x86-alu-imm da-add d-x16 d-char0))
-                      (da-mov d-result d-x16))
+               (begin (da-e (x86-shift-imm da-shl d-x14 8))
+                      (da-e (x86-alu-imm da-add d-x14 d-char0))
+                      (da-mov d-result d-x14))
                (begin (da-mov d-result y) (da-e (x86-alu-imm da-add d-result 8))))
            #t))
         ((string=? name "%fx26-flatarray-length")
@@ -173,12 +163,53 @@
   (lambda () (- (arithmetic-shift 1 (+ d-h-kind-lo d-h-kind-width)) 1)))
 (define dq-utf8-ascii-low (subr pure () int)
   (lambda () (+ (arithmetic-shift d-kind-utf8-ascii d-h-kind-lo) d-tag-header)))
-;; To `slow` unless `h`, the word before a `utf8`'s bytes, is a header: a
-;; whole one's, not a slice's trailer. `t` its tag.
-(define dq-whole (subr da-assembles (int int int) unit)
-  (lambda (t h slow)
-    (begin (da-mov t h) (da-e (x86-alu-imm da-and t 7))
-           (da-e (x86-alu-imm da-cmp t d-tag-header)) (da-jcc da-c-ne slow))))
+;; `utf8` `x`'s count of characters into `RESULT`: a whole one's marked all
+;; ASCII its length in bytes, a slice's its field once a fixnum; else `slow`.
+(define dq-utf8-length (subr da-assembles (int int) unit)
+  (lambda (x slow)
+    (let ((whole (da-label)) (done (da-label)))
+      (begin
+        (da-ld d-x13 x (dq-fld 1))
+        (da-mov d-x14 d-x13)
+        (da-e (x86-alu-imm da-and d-x14 (dq-kind-tag-mask)))
+        (da-e (x86-alu-imm da-cmp d-x14 (dq-utf8-ascii-low)))
+        (da-jcc da-c-e whole)
+        (da-e (x86-alu-imm da-and d-x14 7))
+        (da-e (x86-alu-imm da-cmp d-x14 d-tag-header))
+        (da-jcc da-c-e slow)
+        (da-ld d-x13 x (dq-fld d-utf8-slice-count))
+        (da-e (x86-test-imm d-x13 7)) (da-jcc da-c-ne slow)
+        (da-mov d-result d-x13)
+        (da-jmp done)
+        (da-bind whole)
+        (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
+        (dq-fixnum-of d-x13)
+        (da-bind done)))))
+;; Where `utf8` `x`'s bytes are, into X16, and its length in bytes into X15,
+;; a fixnum (`direct::utf8_span`): a whole one's (a header the word before
+;; its bytes), `x` and its header's B; a slice's (a trailer there), its
+;; owner plus `start`, and `end - start`. Uses X14; `x` kept.
+(define dq-utf8-span (subr da-assembles (int) unit)
+  (lambda (x)
+    (let ((slice (da-label)) (done (da-label)))
+      (begin
+        (da-ld d-x15 x (dq-fld 1))
+        (da-mov d-x14 d-x15)
+        (da-e (x86-alu-imm da-and d-x14 7))
+        (da-e (x86-alu-imm da-cmp d-x14 d-tag-header))
+        (da-jcc da-c-ne slice)
+        (da-e (x86-shift-imm da-shr d-x15 d-h-bytes-lo))
+        (da-e (x86-shift-imm da-shl d-x15 3))
+        (da-mov d-x16 x)
+        (da-jmp done)
+        (da-bind slice)
+        (da-ld d-x14 x (dq-fld d-utf8-slice-start))
+        (da-ld d-x15 x (dq-fld d-utf8-slice-end))
+        (da-e (x86-alu da-sub d-x15 d-x14))
+        (da-ld d-x16 x (dq-fld d-utf8-slice-owner))
+        (da-e (x86-shift-imm da-sar d-x14 3))
+        (da-e (x86-alu da-add d-x16 d-x14))
+        (da-bind done)))))
 ;; The quotient, if it is a fixnum: else `RESULT` back, and slow.
 (define dq-quotient (subr da-assembles (int) unit)
   (lambda (slow)

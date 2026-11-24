@@ -2683,6 +2683,32 @@ fn shape_fast(a: &mut Asm, name: &str, slow: Label) -> bool {
 /// predicates, and fixnums' `*`, `quotient`, `modulo`, `arithmetic-shift`
 /// and a bloblet's count of fields. `RESULT` and `y` (neither `RCX` nor
 /// `RDX`, and `y` not `RESULT`) as they were on the way to `slow`.
+/// Where `utf8` `x`'s bytes are, into X16, and its length in bytes into
+/// X15, a fixnum, as `direct::utf8_span` finds them: a whole one's, `x`
+/// and its header's B; a slice's, its owner plus `start`, and `end -
+/// start`. Uses X14; `x` kept.
+fn utf8_span(a: &mut Asm, x: Reg) {
+    use fixpt_heap::layout::utf8_slice;
+    let (slice, done) = (a.label(), a.label());
+    a.e(load(X15, m(x, super::field_off(1) as i32)));
+    a.e(mov(X14, X15));
+    a.e(and_imm(X14, 7));
+    a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as i32));
+    a.jcc(Cond::Ne, slice);
+    a.e(shr_imm(X15, fixpt_heap::layout::H_BYTES.lo as u8));
+    a.e(shl_imm(X15, 3));
+    a.e(mov(X16, x));
+    a.jmp(done);
+    a.bind(slice);
+    a.e(load(X14, m(x, super::field_off(utf8_slice::START) as i32)));
+    a.e(load(X15, m(x, super::field_off(utf8_slice::END) as i32)));
+    a.e(sub(X15, X14));
+    a.e(load(X16, m(x, super::field_off(utf8_slice::OWNER) as i32)));
+    a.e(sar_imm(X14, 3));
+    a.e(add(X16, X14));
+    a.bind(done);
+}
+
 fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     let x = RESULT;
     if shape_fast(a, name, slow) {
@@ -2824,52 +2850,53 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(add_imm(X16, Value::char('\0').raw() as i32));
             a.e(mov(RESULT, X16));
         }
-        // UTF-8 text (`TODO.md` §306): its header the word before its
-        // bytes, its length in bytes the header's B; its count of
-        // characters that where it is marked all ASCII (§310), else the
-        // primitive's; a character, or the offset after it, inline only of
-        // one byte (ASCII), the rest the primitive's (`direct::pure_fast`'s).
+        // UTF-8 text (`TODO.md` §306), whole or a slice (§310), as
+        // `direct::pure_fast` reads it: where its bytes are and how many
+        // (`utf8_span`), then the same reads; its count of characters a
+        // whole one's marked all ASCII, a slice's once known, else the
+        // primitive's; a character, or the offset after it, in line only of
+        // one byte (ASCII), the rest the primitive's.
         "%fx26-utf8-length" => {
-            use fixpt_heap::layout::{H_BYTES, H_KIND};
+            use fixpt_heap::layout::{H_BYTES, H_KIND, utf8_slice};
+            let (whole, done) = (a.label(), a.label());
             a.e(load(X13, m(x, super::field_off(1) as i32)));
             a.e(mov(X14, X13));
             a.e(and_imm(X14, ((1 << (H_KIND.lo + H_KIND.width)) - 1) as i32));
             a.e(cmp_imm(X14, super::utf8_ascii_header_low() as i32));
+            a.jcc(Cond::E, whole);
+            a.e(and_imm(X14, 7));
+            a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as i32));
+            a.jcc(Cond::E, slow);
+            a.e(load(X13, m(x, super::field_off(utf8_slice::COUNT) as i32)));
+            a.e(test_imm(X13, 7));
             a.jcc(Cond::Ne, slow);
+            a.e(mov(RESULT, X13));
+            a.jmp(done);
+            a.bind(whole);
             a.e(shr_imm(X13, H_BYTES.lo as u8));
             a.e(shl_imm(X13, 3));
             a.e(mov(RESULT, X13));
+            a.bind(done);
         }
         "%fx26-utf8-byte-length" => {
-            a.e(load(X13, m(x, super::field_off(1) as i32)));
-            a.e(mov(X14, X13));
-            a.e(and_imm(X14, 7));
-            a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as i32));
-            a.jcc(Cond::Ne, slow);
-            a.e(shr_imm(X13, fixpt_heap::layout::H_BYTES.lo as u8));
-            a.e(shl_imm(X13, 3));
-            a.e(mov(RESULT, X13));
+            utf8_span(a, x);
+            a.e(mov(RESULT, X15));
         }
         "%fx26-utf8-ref" | "%fx26-utf8-next" => {
             a.e(test_imm(y, 7));
             a.jcc(Cond::Ne, slow);
-            a.e(load(X14, m(x, super::field_off(1) as i32)));
-            a.e(mov(X15, X14));
-            a.e(and_imm(X15, 7));
-            a.e(cmp_imm(X15, fixpt_heap::value::TAG_HEADER as i32));
-            a.jcc(Cond::Ne, slow);
-            a.e(shr_imm(X14, fixpt_heap::layout::H_BYTES.lo as u8));
+            utf8_span(a, x);
+            a.e(cmp(y, X15));
+            a.jcc(Cond::Ae, slow);
             a.e(mov(X15, y));
             a.e(sar_imm(X15, 3));
-            a.e(cmp(X15, X14));
-            a.jcc(Cond::Ae, slow);
-            a.e(load8(X16, mi(x, X15, 1, -4)));
-            a.e(cmp_imm(X16, 0x80));
+            a.e(load8(X14, mi(X16, X15, 1, -4)));
+            a.e(cmp_imm(X14, 0x80));
             a.jcc(Cond::Ae, slow);
             if name == "%fx26-utf8-ref" {
-                a.e(shl_imm(X16, 8));
-                a.e(add_imm(X16, Value::char('\0').raw() as i32));
-                a.e(mov(RESULT, X16));
+                a.e(shl_imm(X14, 8));
+                a.e(add_imm(X14, Value::char('\0').raw() as i32));
+                a.e(mov(RESULT, X14));
             } else {
                 a.e(mov(RESULT, y));
                 a.e(add_imm(RESULT, 8));
@@ -4196,6 +4223,10 @@ pub(super) fn fx26_direct_layout_of(intro: &[&str], regs: &[(&str, i64)], sig_in
         ("d-h-suffix-frozen-lo", H_SUFFIX_FROZEN.lo as i64, "a header's field"),
         ("d-h-fields-lo", H_FIELDS.lo as i64, "a header's field"),
         ("d-h-bytes-lo", H_BYTES.lo as i64, "a header's field"),
+        ("d-utf8-slice-owner", fixpt_heap::layout::utf8_slice::OWNER as i64, "a utf8 slice's field"),
+        ("d-utf8-slice-start", fixpt_heap::layout::utf8_slice::START as i64, "a utf8 slice's field"),
+        ("d-utf8-slice-end", fixpt_heap::layout::utf8_slice::END as i64, "a utf8 slice's field"),
+        ("d-utf8-slice-count", fixpt_heap::layout::utf8_slice::COUNT as i64, "a utf8 slice's field"),
         ("d-kind-extension", KIND_EXTENSION as i64, "a header's kind when F is in an extension word"),
         ("d-flat-i32", FLAT_I32, "a flat layout"),
         ("d-flat-u32", FLAT_U32, "a flat layout"),

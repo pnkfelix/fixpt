@@ -173,45 +173,68 @@
 ;; its tag (`utf8_ascii_header_low`).
 (define ar-utf8-ascii-low (subr pure () int)
   (lambda () (+ (arithmetic-shift kind-utf8-ascii header-kind-lo) a-tag-header)))
-;; To `slow` unless `h`, the word before a `utf8`'s bytes, is a header: a
-;; whole one's, not a slice's trailer. Uses X14.
-(define ar-utf8-whole (subr (maxeff ar-assembles spin) (int int) unit)
-  (lambda (h slow)
-    (begin (n-e (arm-and-low n-x14 h 3)) (n-e (arm-cmp-imm n-x14 a-tag-header))
-           (n-b-cond ar-ne slow))))
+;; Where `utf8` `x`'s bytes are, into X16, and its length in bytes into X15,
+;; a fixnum (`utf8_span`): a whole one's (a header the word before its
+;; bytes), `x` and its header's B; a slice's (a trailer there), its owner
+;; plus `start`, and `end - start`. Uses X14; `x` kept.
+(define ar-utf8-span (subr (maxeff ar-assembles spin) (int) unit)
+  (lambda (x)
+    (let ((slice (n-label)) (done (n-label)))
+      (begin
+        (n-e (arm-ldur n-x15 x (n-field-off 1)))
+        (n-e (arm-and-low n-x14 n-x15 3))
+        (n-e (arm-cmp-imm n-x14 a-tag-header))
+        (n-b-cond ar-ne slice)
+        (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
+        (n-e (arm-add-lsl n-x15 a-xzr n-x15 3))
+        (n-e (arm-mov n-x16 x))
+        (n-b done)
+        (n-bind slice)
+        (n-e (arm-ldur n-x14 x (n-field-off utf8-slice-start)))
+        (n-e (arm-ldur n-x15 x (n-field-off utf8-slice-end)))
+        (n-e (arm-sub n-x15 n-x15 n-x14))
+        (n-e (arm-ldur n-x16 x (n-field-off utf8-slice-owner)))
+        (n-e (arm-asr-imm n-x14 n-x14 3))
+        (n-e (arm-add n-x16 n-x16 n-x14))
+        (n-bind done)))))
 ;; UTF-8 text `x` and offset `y` into `RESULT`, as `utf8_fast` does it:
 ;; whether this is one, its fast path emitted, to `slow` for what it
-;; leaves (a character of more than one byte, an offset not one).
+;; leaves (a character of more than one byte, an offset not one, a count
+;; not known). A slice as a whole one, its bytes found (`ar-utf8-span`).
 (define ar-utf8-fast (subr (maxeff ar-assembles spin) (string int int int) bool)
   (lambda (name x y slow)
     (cond
       ((ar-utf8-is? name "length")
-       (begin
-         (n-e (arm-ldur n-x15 x (n-field-off 1)))
-         (n-e (arm-and-low n-x14 n-x15 (+ header-kind-lo header-kind-width)))
-         (n-e (arm-cmp-imm n-x14 (ar-utf8-ascii-low)))
-         (n-b-cond ar-ne slow)
-         (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
-         (n-e (arm-add-lsl a-result a-xzr n-x15 3))
-         #t))
+       (let ((whole (n-label)) (done (n-label)))
+         (begin
+           (n-e (arm-ldur n-x15 x (n-field-off 1)))
+           (n-e (arm-and-low n-x14 n-x15 (+ header-kind-lo header-kind-width)))
+           (n-e (arm-cmp-imm n-x14 (ar-utf8-ascii-low)))
+           (n-b-cond ar-eq whole)
+           (n-e (arm-and-low n-x14 n-x15 3))
+           (n-e (arm-cmp-imm n-x14 a-tag-header))
+           (n-b-cond ar-eq slow)
+           (n-e (arm-ldur n-x15 x (n-field-off utf8-slice-count)))
+           (n-e (arm-tst-low n-x15 3))
+           (n-b-cond ar-ne slow)
+           (n-e (arm-mov a-result n-x15))
+           (n-b done)
+           (n-bind whole)
+           (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
+           (n-e (arm-add-lsl a-result a-xzr n-x15 3))
+           (n-bind done)
+           #t)))
       ((ar-utf8-is? name "byte-length")
-       (begin
-         (n-e (arm-ldur n-x15 x (n-field-off 1)))
-         (ar-utf8-whole n-x15 slow)
-         (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
-         (n-e (arm-add-lsl a-result a-xzr n-x15 3))
-         #t))
+       (begin (ar-utf8-span x) (n-e (arm-mov a-result n-x15)) #t))
       ((or (ar-utf8-is? name "ref") (ar-utf8-is? name "next"))
        (begin
          (n-e (arm-tst-low y 3))
          (n-b-cond ar-ne slow)
-         (n-e (arm-ldur n-x15 x (n-field-off 1)))
-         (ar-utf8-whole n-x15 slow)
-         (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
-         (n-e (arm-asr-imm n-x14 y 3))
-         (n-e (arm-cmp n-x14 n-x15))
+         (ar-utf8-span x)
+         (n-e (arm-cmp y n-x15))
          (n-b-cond ar-hs slow)
-         (n-e (arm-add n-x14 x n-x14))
+         (n-e (arm-asr-imm n-x14 y 3))
+         (n-e (arm-add n-x14 n-x16 n-x14))
          (n-e (arm-ldurb n-x15 n-x14 -4))
          (n-e (arm-cmp-imm n-x15 128))
          (n-b-cond ar-hs slow)

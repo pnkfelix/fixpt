@@ -36,11 +36,14 @@ const UTF8_SLICE: u8 = crate::layout::kind("utf8-slice");
 /// Where a bytevector's bytes start in its suffix: after its length.
 const BYTEVECTOR_BYTES: usize = 8;
 
-/// A slice's values (`Heap::bloblet_value`'s order).
-const SLICE_OWNER: usize = 0;
-const SLICE_START: usize = 1;
-const SLICE_END: usize = 2;
-const SLICE_COUNT: usize = 3;
+/// A slice's values (`Heap::bloblet_value`'s order): its fields
+/// (`layout::utf8_slice`, native code's) less the trailer's and the one
+/// field before value 0.
+use crate::layout::utf8_slice;
+const SLICE_OWNER: usize = utf8_slice::OWNER - 2;
+const SLICE_START: usize = utf8_slice::START - 2;
+const SLICE_END: usize = utf8_slice::END - 2;
+const SLICE_COUNT: usize = utf8_slice::COUNT - 2;
 
 /// A slice's count as its field holds it: a fixnum, or `#f`, not known yet.
 fn count_field(count: Option<usize>) -> Value {
@@ -58,6 +61,7 @@ impl Heap {
     }
 
     /// Whether `v` is a `utf8`, whole or a slice.
+    #[inline]
     pub fn is_utf8(&self, v: Value) -> bool {
         v.is_bloblet() && !v.is_suffix_ref() && matches!(self.bloblet_kind(v), UTF8 | UTF8_ASCII | UTF8_SLICE)
     }
@@ -71,6 +75,7 @@ impl Heap {
     /// Where `u`'s text is: the whole `utf8` (or frozen bytevector) whose
     /// suffix holds it, the offset there it starts at, and its length in
     /// bytes.
+    #[inline]
     fn utf8_span(&self, u: Value) -> (Value, usize, usize) {
         debug_assert!(self.is_utf8(u), "{u:?} is not a utf8");
         if self.bloblet_kind(u) != UTF8_SLICE {
@@ -135,18 +140,20 @@ impl Heap {
         }
         let n = count_chars(self.utf8_text(u));
         if self.utf8_is_slice(u) {
-            self.set_bloblet_slot(u, SLICE_COUNT + 2, Value::fixnum(n as i64));
+            self.set_bloblet_slot(u, utf8_slice::COUNT, Value::fixnum(n as i64));
         }
         n
     }
 
     /// `u`'s length in bytes.
+    #[inline]
     pub fn utf8_len(&self, u: Value) -> usize {
         self.utf8_span(u).2
     }
 
     /// `u`'s bytes, lent in place: where its text is found once
     /// (`utf8_span`), then read as a slice, not a byte at a time.
+    #[inline]
     pub fn utf8_text(&self, u: Value) -> &[u8] {
         let (owner, start, len) = self.utf8_span(u);
         &self.bloblet_suffix(owner)[start..start + len]
@@ -183,6 +190,7 @@ impl Heap {
     /// Whether byte offset `k` is where a character of `u` starts (or its
     /// end, `k` its length): in range, and the byte there no continuation
     /// byte (`10xxxxxx`), which, the text valid, makes it a start. O(1).
+    #[inline]
     pub fn utf8_boundary(&self, u: Value, k: usize) -> bool {
         let t = self.utf8_text(u);
         k == t.len() || t.get(k).is_some_and(|b| b & 0xc0 != 0x80)
@@ -190,6 +198,7 @@ impl Heap {
 
     /// The character of `u` starting at byte `k`, and the offset after it;
     /// none if no character starts there. O(1): at most four bytes read.
+    #[inline]
     pub fn utf8_char_at(&self, u: Value, k: usize) -> Option<(char, usize)> {
         let t = self.utf8_text(u);
         let b0 = *t.get(k)?;

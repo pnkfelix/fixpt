@@ -342,6 +342,19 @@ pub mod frame {
     pub const KIND: u8 = 35;
 }
 
+/// A slice of UTF-8 text (kind `utf8-slice`, `heap/utf8.rs`), its fields
+/// by negative offset from its (empty) suffix, 1 its trailer: what native
+/// code reads to read a slice in line (`TODO.md` §310). Its owner (a
+/// bloblet: its bytes at `start` in its suffix); `start` and `end`,
+/// fixnums, byte offsets into that suffix; its count of characters, a
+/// fixnum, or `#f` while not known.
+pub mod utf8_slice {
+    pub const OWNER: usize = 2;
+    pub const START: usize = 3;
+    pub const END: usize = 4;
+    pub const COUNT: usize = 5;
+}
+
 /// The fields of a code bloblet (kind `code`), named by their negative offset
 /// from the suffix, which is the code itself. Field 1 is the trailer, then
 /// the metadata, then the code's **items**: item `i` is at offset
@@ -757,6 +770,11 @@ fn fx26_definitions() -> String {
     out.push_str(&format!("(define closure-extra0 int {})\n", closure::CLOSURE_EXTRA0));
     out.push_str(&format!("(define frame-parent int {})\n", frame::FRAME_PARENT));
     out.push_str(&format!("(define frame-slot0 int {})\n\n", frame::FRAME_SLOT0));
+    out.push_str(";;; A `utf8` slice's fields, by negative offset. 1 is the trailer.\n");
+    out.push_str(&format!("(define utf8-slice-owner int {})\n", utf8_slice::OWNER));
+    out.push_str(&format!("(define utf8-slice-start int {})\n", utf8_slice::START));
+    out.push_str(&format!("(define utf8-slice-end int {})\n", utf8_slice::END));
+    out.push_str(&format!("(define utf8-slice-count int {})\n\n", utf8_slice::COUNT));
     out.push_str(";;; A code bloblet's fields, by negative offset from its code. 1 is the trailer.\n");
     for (name, k) in code::ALL {
         out.push_str(&format!("(define code-{name} int {k})\n"));

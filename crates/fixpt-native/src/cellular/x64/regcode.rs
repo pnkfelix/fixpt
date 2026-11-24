@@ -326,46 +326,47 @@ impl Asm {
 
     /// UTF-8 text `x` and offset `y` (`what`, without its `%fx26-`) into
     /// `RESULT`, as `regcode`'s `utf8_fast` does it (text not marked all
-    /// ASCII leaving its count to the primitive): whether this is one,
+    /// ASCII leaving its count to the primitive; a slice, `TODO.md` §310,
+    /// as a whole one, its bytes found): whether this is one,
     /// its fast path emitted, to `slow` for what it leaves, with `x` and
     /// `y` as they were. Neither is `RCX`, `RDX` or `X16`.
     fn utf8_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
         match what {
             "utf8-length" => {
-                use fixpt_heap::layout::H_KIND;
+                use fixpt_heap::layout::{H_KIND, utf8_slice};
+                let (whole, done) = (self.label(), self.label());
                 self.e(load(X16, field(x, 1)));
                 self.e(mov(RCX, X16));
                 self.e(and_imm(RCX, ((1 << (H_KIND.lo + H_KIND.width)) - 1) as i32));
                 self.e(cmp_imm(RCX, crate::direct::utf8_ascii_header_low() as i32));
+                self.jcc(Cond::E, whole);
+                self.e(and_imm(RCX, 7));
+                self.e(cmp_imm(RCX, fixpt_heap::value::TAG_HEADER as i32));
+                self.jcc(Cond::E, slow);
+                self.e(load(X16, field(x, utf8_slice::COUNT)));
+                self.e(test_imm(X16, 7));
                 self.jcc(Cond::Ne, slow);
+                self.e(mov(RESULT, X16));
+                self.jmp(done);
+                self.bind(whole);
                 self.e(shr_imm(X16, fixpt_heap::layout::H_BYTES.lo as u8));
                 self.e(shl_imm(X16, 3));
                 self.e(mov(RESULT, X16));
+                self.bind(done);
             }
             "utf8-byte-length" => {
-                self.e(load(RCX, field(x, 1)));
-                self.e(mov(RDX, RCX));
-                self.e(and_imm(RDX, 7));
-                self.e(cmp_imm(RDX, fixpt_heap::value::TAG_HEADER as i32));
-                self.jcc(Cond::Ne, slow);
-                self.e(mov(RESULT, RCX));
-                self.e(shr_imm(RESULT, fixpt_heap::layout::H_BYTES.lo as u8));
-                self.e(shl_imm(RESULT, 3));
+                self.utf8_span(x);
+                self.e(mov(RESULT, RDX));
             }
             "utf8-ref" | "utf8-next" => {
                 self.e(test_imm(y, 7));
                 self.jcc(Cond::Ne, slow);
-                self.e(load(X16, field(x, 1)));
-                self.e(mov(RCX, X16));
-                self.e(and_imm(RCX, 7));
-                self.e(cmp_imm(RCX, fixpt_heap::value::TAG_HEADER as i32));
-                self.jcc(Cond::Ne, slow);
-                self.e(shr_imm(X16, fixpt_heap::layout::H_BYTES.lo as u8));
+                self.utf8_span(x);
+                self.e(cmp(y, RDX));
+                self.jcc(Cond::Ae, slow);
                 self.e(mov(RCX, y));
                 self.e(sar_imm(RCX, 3));
-                self.e(cmp(RCX, X16));
-                self.jcc(Cond::Ae, slow);
-                self.e(load8(RDX, mi(x, RCX, 1, -4)));
+                self.e(load8(RDX, mi(X16, RCX, 1, -4)));
                 self.e(cmp_imm(RDX, 0x80));
                 self.jcc(Cond::Ae, slow);
                 if what == "utf8-ref" {
@@ -382,6 +383,31 @@ impl Asm {
         true
     }
 
+    /// Where `utf8` `x`'s bytes are, into X16, and its length in bytes into
+    /// `RDX`, a fixnum, as `regcode`'s `utf8_span` finds them: a whole
+    /// one's, `x` and its header's B; a slice's (`TODO.md` §310), its owner
+    /// plus `start`, and `end - start`. Uses `RCX`; `x` kept.
+    fn utf8_span(&mut self, x: Reg) {
+        use fixpt_heap::layout::utf8_slice;
+        let (slice, done) = (self.label(), self.label());
+        self.e(load(RDX, field(x, 1)));
+        self.e(mov(RCX, RDX));
+        self.e(and_imm(RCX, 7));
+        self.e(cmp_imm(RCX, fixpt_heap::value::TAG_HEADER as i32));
+        self.jcc(Cond::Ne, slice);
+        self.e(shr_imm(RDX, fixpt_heap::layout::H_BYTES.lo as u8));
+        self.e(shl_imm(RDX, 3));
+        self.e(mov(X16, x));
+        self.jmp(done);
+        self.bind(slice);
+        self.e(load(RCX, field(x, utf8_slice::START)));
+        self.e(load(RDX, field(x, utf8_slice::END)));
+        self.e(sub(RDX, RCX));
+        self.e(load(X16, field(x, utf8_slice::OWNER)));
+        self.e(sar_imm(RCX, 3));
+        self.e(add(X16, RCX));
+        self.bind(done);
+    }
     /// `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
     /// `RESULT` and `y`, into `RESULT`, as `regcode`'s `int_fast` does
     /// them: whether this is one, its fast path emitted, to `slow` (the

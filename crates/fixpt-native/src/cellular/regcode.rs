@@ -73,40 +73,44 @@ impl Asm {
     /// characters that where it is marked all ASCII (§310); the character
     /// at `y`, or the offset after it, only of one byte (ASCII): one of
     /// more, a continuation byte, an offset past the text or not a fixnum,
-    /// text not marked, to `slow`. Uses X14 to X16; `x` and `y` kept until
+    /// text not marked, to `slow`. A slice (§310) as a whole one, its bytes
+    /// found (`utf8_span`), its count once known its field. Uses X14 to X16; `x` and `y` kept until
     /// it is done. Register code's `prim1` and `prim2` (`x` `RESULT`), and
     /// `inline`'s (`REG1` and `REG2`).
     fn utf8_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
         match what {
             "utf8-length" => {
-                use fixpt_heap::layout::H_KIND;
+                use fixpt_heap::layout::{H_KIND, utf8_slice};
+                let (whole, done) = (self.label(), self.label());
                 self.e(ldur(X15, x, field_off(1)));
                 self.e(and_low(X14, X15, H_KIND.lo + H_KIND.width));
                 self.e(cmp_imm(X14, crate::direct::utf8_ascii_header_low() as u32));
-                self.b_cond(Cond::Ne, slow);
-                self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
-                self.e(add_lsl(RESULT, XZR, X15, 3));
-            }
-            "utf8-byte-length" => {
-                self.e(ldur(X15, x, field_off(1)));
+                self.b_cond(Cond::Eq, whole);
                 self.e(and_low(X14, X15, 3));
                 self.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+                self.b_cond(Cond::Eq, slow);
+                self.e(ldur(X15, x, field_off(utf8_slice::COUNT)));
+                self.e(tst_low(X15, 3));
                 self.b_cond(Cond::Ne, slow);
+                self.e(mov(RESULT, X15));
+                self.b(done);
+                self.bind(whole);
                 self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
                 self.e(add_lsl(RESULT, XZR, X15, 3));
+                self.bind(done);
+            }
+            "utf8-byte-length" => {
+                self.utf8_span(x);
+                self.e(mov(RESULT, X15));
             }
             "utf8-ref" | "utf8-next" => {
                 self.e(tst_low(y, 3));
                 self.b_cond(Cond::Ne, slow);
-                self.e(ldur(X15, x, field_off(1)));
-                self.e(and_low(X14, X15, 3));
-                self.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
-                self.b_cond(Cond::Ne, slow);
-                self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
-                self.e(asr_imm(X14, y, 3));
-                self.e(cmp(X14, X15));
+                self.utf8_span(x);
+                self.e(cmp(y, X15));
                 self.b_cond(Cond::Hs, slow);
-                self.e(add(X14, x, X14));
+                self.e(asr_imm(X14, y, 3));
+                self.e(add(X14, X16, X14));
                 self.e(ldurb(X15, X14, -4));
                 self.e(cmp_imm(X15, 0x80));
                 self.b_cond(Cond::Hs, slow);
@@ -120,6 +124,32 @@ impl Asm {
             _ => return false,
         }
         true
+    }
+
+    /// Where `utf8` `x`'s bytes are, into X16, and its length in bytes into
+    /// X15, a fixnum, as `direct::utf8_span` finds them: a whole one's
+    /// (its header the word before its bytes), `x` and its header's B; a
+    /// slice's (a trailer there, `TODO.md` §310), its owner plus `start`,
+    /// and `end - start` (`layout::utf8_slice`). Uses X14; `x` kept.
+    fn utf8_span(&mut self, x: Reg) {
+        use fixpt_heap::layout::utf8_slice;
+        let (slice, done) = (self.label(), self.label());
+        self.e(ldur(X15, x, field_off(1)));
+        self.e(and_low(X14, X15, 3));
+        self.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+        self.b_cond(Cond::Ne, slice);
+        self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
+        self.e(add_lsl(X15, XZR, X15, 3));
+        self.e(mov(X16, x));
+        self.b(done);
+        self.bind(slice);
+        self.e(ldur(X14, x, field_off(utf8_slice::START)));
+        self.e(ldur(X15, x, field_off(utf8_slice::END)));
+        self.e(sub(X15, X15, X14));
+        self.e(ldur(X16, x, field_off(utf8_slice::OWNER)));
+        self.e(asr_imm(X14, X14, 3));
+        self.e(add(X16, X16, X14));
+        self.bind(done);
     }
     /// `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
     /// `RESULT` and `y`, into `RESULT`, as `direct.rs`'s `pure_fast` does

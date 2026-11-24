@@ -83,6 +83,12 @@
 (define frame-parent int 2)
 (define frame-slot0 int 3)
 
+;;; A `utf8` slice's fields, by negative offset. 1 is the trailer.
+(define utf8-slice-owner int 2)
+(define utf8-slice-start int 3)
+(define utf8-slice-end int 4)
+(define utf8-slice-count int 5)
+
 ;;; A code bloblet's fields, by negative offset from its code. 1 is the trailer.
 (define code-entry int 2)
 (define code-frame int 3)

@@ -109,4 +109,9 @@
             (val header-fields-frozen-lo int)
             (val header-suffix-frozen-lo int)
             (val header-bytes-lo int)
-            (val kind-utf8-ascii int)))
+            (val kind-utf8-ascii int)
+            ;; A `utf8` slice's fields, which register code reads in line.
+            (val utf8-slice-owner int)
+            (val utf8-slice-start int)
+            (val utf8-slice-end int)
+            (val utf8-slice-count int)))

@@ -1739,6 +1739,7 @@ impl Heap {
         read_head(self.mem.words(), self.bloblet_main(v))
     }
 
+    #[inline]
     pub fn bloblet_kind(&self, v: Value) -> u8 {
         self.bloblet_head(v).kind
     }
@@ -1904,6 +1905,7 @@ impl Heap {
 
     /// The suffix of bloblet `v`, its bytes, lent in place (no copy, no
     /// byte at a time): for reading text and bytes in bulk.
+    #[inline]
     pub fn bloblet_suffix(&self, v: Value) -> &[u8] {
         self.mem.bytes(self.ix(v) * 8, self.bloblet_head(v).bytes)
     }

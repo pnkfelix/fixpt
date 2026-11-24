@@ -5339,51 +5339,56 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(add_lsl(RESULT, X14, X16, 8));
         return true;
     }
-    // UTF-8 text (`TODO.md` §306, `heap/utf8.rs`), whole: no fields, so
-    // its header the word before its bytes, the suffix, its length in bytes
-    // the header's B; a slice of one (§310) has a trailer there, and is the
-    // primitive's. Its count of characters is its length where it is
-    // marked all ASCII, a kind of its own, the kind and the tag compared at
-    // once; else the primitive's walk. A character read where one starts,
-    // or the offset after it, only of one byte (ASCII); one of more, a
-    // continuation byte, an offset past the text or not a fixnum, the
-    // primitive's.
+    // UTF-8 text (`TODO.md` §306, `heap/utf8.rs`). A whole one has no
+    // fields, so its header is the word before its bytes, the suffix, its
+    // length in bytes the header's B; a slice of one (§310) has a trailer
+    // there, and its bytes are its owner's from `start` to `end`
+    // (`layout::utf8_slice`): either way, where its bytes start and how
+    // many, then the same reads. Its count of characters is its length where
+    // a whole one is marked all ASCII, a kind of its own, the kind and the
+    // tag compared at once; a slice's, once known, its field; else the
+    // primitive's walk. A character read where one starts, or the offset
+    // after it, only of one byte (ASCII); one of more, a continuation byte,
+    // an offset past the text or not a fixnum, the primitive's.
     if name == "%fx26-utf8-length" {
-        use fixpt_heap::layout::{H_BYTES, H_KIND};
+        use fixpt_heap::layout::{H_BYTES, H_KIND, utf8_slice};
+        let (whole, done) = (a.label(), a.label());
         a.e(ldur(X13, x, field_off(1)));
         a.e(and_low(X14, X13, H_KIND.lo + H_KIND.width));
         a.e(cmp_imm(X14, utf8_ascii_header_low() as u32));
+        a.to(whole, Fix::If(Cond::Eq));
+        a.e(and_low(X14, X13, 3));
+        a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+        a.to(slow, Fix::If(Cond::Eq));
+        a.e(ldur(X13, x, field_off(utf8_slice::COUNT)));
+        a.e(tst_low(X13, 3));
         a.to(slow, Fix::If(Cond::Ne));
+        a.e(mov(RESULT, X13));
+        a.to(done, Fix::B);
+        a.bind(whole);
         a.e(lsr_imm(X13, X13, H_BYTES.lo));
         a.e(lsl_imm(RESULT, X13, 3));
+        a.bind(done);
         return true;
     }
     if name == "%fx26-utf8-byte-length" {
-        a.e(ldur(X13, x, field_off(1)));
-        a.e(and_low(X14, X13, 3));
-        a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
-        a.to(slow, Fix::If(Cond::Ne));
-        a.e(lsr_imm(X13, X13, fixpt_heap::layout::H_BYTES.lo));
-        a.e(lsl_imm(RESULT, X13, 3));
+        utf8_span(a, x);
+        a.e(mov(RESULT, X15));
         return true;
     }
     if name == "%fx26-utf8-ref" || name == "%fx26-utf8-next" {
         fixnum(a, y);
-        a.e(ldur(X14, x, field_off(1)));
-        a.e(and_low(X13, X14, 3));
-        a.e(cmp_imm(X13, fixpt_heap::value::TAG_HEADER as u32));
-        a.to(slow, Fix::If(Cond::Ne));
-        a.e(lsr_imm(X14, X14, fixpt_heap::layout::H_BYTES.lo));
-        a.e(asr_imm(X15, y, 3));
-        a.e(cmp(X15, X14));
+        utf8_span(a, x);
+        a.e(cmp(y, X15));
         a.to(slow, Fix::If(Cond::Hs));
-        a.e(add(X13, x, X15));
-        a.e(ldurb(X16, X13, -4));
-        a.e(cmp_imm(X16, 0x80));
+        a.e(asr_imm(X14, y, 3));
+        a.e(add(X14, X16, X14));
+        a.e(ldurb(X15, X14, -4));
+        a.e(cmp_imm(X15, 0x80));
         a.to(slow, Fix::If(Cond::Hs));
         if name == "%fx26-utf8-ref" {
             a.es(&mov_imm64(X14, Value::char('\0').raw()));
-            a.e(add_lsl(RESULT, X14, X16, 8));
+            a.e(add_lsl(RESULT, X14, X15, 8));
         } else {
             a.e(add_imm(RESULT, y, 8));
         }
@@ -5559,6 +5564,32 @@ fn ldr_field(a: &mut Asm, t: Reg, k: usize) {
     } else {
         a.e(ldr_lit(t, d));
     }
+}
+
+/// Where `utf8` `x`'s bytes are, into X16 (as a bloblet's value is: its
+/// suffix's start, tagged), and its length in bytes into X15, a fixnum: a
+/// whole one's, `x` and its header's B; a slice's (its trailer where a
+/// header would be), its owner plus `start`, and `end - start`
+/// (`layout::utf8_slice`). Uses X14; `x` kept.
+fn utf8_span(a: &mut Asm, x: Reg) {
+    use fixpt_heap::layout::utf8_slice;
+    let (slice, done) = (a.label(), a.label());
+    a.e(ldur(X15, x, field_off(1)));
+    a.e(and_low(X14, X15, 3));
+    a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+    a.to(slice, Fix::If(Cond::Ne));
+    a.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
+    a.e(lsl_imm(X15, X15, 3));
+    a.e(mov(X16, x));
+    a.to(done, Fix::B);
+    a.bind(slice);
+    a.e(ldur(X14, x, field_off(utf8_slice::START)));
+    a.e(ldur(X15, x, field_off(utf8_slice::END)));
+    a.e(sub(X15, X15, X14));
+    a.e(ldur(X16, x, field_off(utf8_slice::OWNER)));
+    a.e(asr_imm(X14, X14, 3));
+    a.e(add(X16, X16, X14));
+    a.bind(done);
 }
 
 /// The low bits of a whole `utf8`'s header marked all ASCII, its kind and
