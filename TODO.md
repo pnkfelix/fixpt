@@ -8958,7 +8958,11 @@ walked by `utf8-length` each time. A third state, not yet known, settled
 by the first walk (which reads every byte anyway), perhaps the count
 itself kept, making `utf8-length` O(1) after the first for any slice. What
 is written is the slice's own field, never the bytes it views, and an
-immediate, so no barrier; but the slice is a frozen bloblet today
-(`make_frozen`), read purely, so a field of it written once, from unknown
-to known, two racing readers writing the same, wants saying in the heap's
-frozen flags. Not a big deal; left until a program wants it.
+immediate, so no barrier. The slice made not frozen (the user's
+picture: a thing not frozen holding a cell written once and its frozen
+owner), not by `make_frozen`: the heap's flags then say the truth, and an
+image puts it in its mutable half, as it does any object whose fields are
+not frozen, never in the immutable half a write would fault in. The types
+are untouched (`const` is a region's, not the flag), the write no effect a
+program sees, its value the bytes'. Not a big deal; left until a program
+wants it.
