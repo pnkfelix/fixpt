@@ -104,3 +104,26 @@ fn a_utf8_slice_keeps_its_owner_through_a_collection() {
         assert_eq!(h.utf8_string(*u), t.to_string());
     }
 }
+
+/// A `utf8` viewing a bytevector's bytes (`TODO.md` §310): validated,
+/// nothing copied, read as the text; a piece of a slice of the bytes too;
+/// bytes not UTF-8 refused at the offset they are valid up to.
+#[test]
+fn a_utf8_of_bytes_views_them() {
+    let mut h = Heap::new();
+    for t in TEXTS {
+        let bv = h.make_bytevector(t.as_bytes());
+        let u = h.utf8_of_bytes(bv).expect("valid");
+        assert_eq!((h.utf8_string(u), h.utf8_chars(u), h.utf8_is_ascii(u)), (t.to_string(), t.chars().count(), t.is_ascii()));
+        if let Some(c) = t.chars().next() {
+            let n = c.len_utf8();
+            let piece = h.bytes_slice(bv, n, t.len());
+            let rest = h.utf8_of_bytes(piece).expect("valid from a boundary");
+            assert_eq!(h.utf8_string(rest), &t[n..]);
+            let inner = h.utf8_slice(rest, 0, t.len() - n).expect("the whole of it");
+            assert_eq!(h.utf8_string(inner), &t[n..]);
+        }
+    }
+    let bad = h.make_bytevector(&[b'a', 0xc3]);
+    assert_eq!(h.utf8_of_bytes(bad), Err(1));
+}

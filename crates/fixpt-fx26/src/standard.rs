@@ -415,6 +415,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("str=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((strof r1) (strof r2)) bool))"),
     ("str<?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((strof r1) (strof r2)) bool))"),
     ("str->string", "(poly ((r region)) (subr (read r) ((strof r)) string))"),
+    // A `utf8` viewing frozen bytes, validated, nothing copied: of `bytes`
+    // alone, frozen into the heap, since a `utf8` has no region.
+    ("bytes-as-utf8", "(subr pure (bytes) (sumof (text utf8) (bad int)))"),
     ("utf8=?", "(subr pure (utf8 utf8) bool)"),
     ("string->utf8", "(poly ((s region)) (subr (read s) ((strof s)) utf8))"),
     ("utf8->string", "(subr pure (utf8) string)"),

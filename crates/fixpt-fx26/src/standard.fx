@@ -422,6 +422,7 @@
          (("%reify-region") "%fx26-reify-region")
          (("process-start") "%fx26-process-start")
          (("process-write") "%fx26-process-write")
+         (("bytes-as-utf8") "%fx26-bytes-as-utf8")
          (("i32-remainder") "%fx26-i32-remainder")
          (("u32-remainder") "%fx26-u32-remainder")
          (("i64-remainder") "%fx26-i64-remainder")

@@ -3600,6 +3600,18 @@ prims! {
         let chars = rt.heap.str_chars(a[0]);
         Ok(rt.heap.string_from_chars(&chars))
     });
+    // A `utf8` viewing frozen bytes (`TODO.md` §310), validated, nothing
+    // copied: `(sum text u)`, or `(sum bad k)` as `bytes->utf8` says. Its
+    // type takes `bytes` alone, frozen into the heap. Last, so that no
+    // primitive's number moves.
+    "%fx26-bytes-as-utf8", 1, Some(1), simple!(|rt, a| {
+        bytes_view(rt, a[0])?;
+        let (tag, v) = match rt.heap.utf8_of_bytes(a[0]) {
+            Ok(u) => ("text", u),
+            Err(k) => ("bad", Value::fixnum(k as i64)),
+        };
+        Ok(fx26_sum(rt, tag, v))
+    });
 }
 
 /// Promise states. `[state, payload]`.

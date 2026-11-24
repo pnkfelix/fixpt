@@ -235,4 +235,11 @@
         (prim! 'str-slice (lambda (xs) (o-strv (str-slice (s xs 0) (n xs 1) (n xs 2)))))
         (prim! 'str=? (lambda (xs) (str=? (s xs 0) (s xs 1))))
         (prim! 'str<? (lambda (xs) (str<? (s xs 0) (s xs 1))))
-        (prim! 'str->string (lambda (xs) (str->string (s xs 0)))))))))))
+        (prim! 'str->string (lambda (xs) (str->string (s xs 0))))
+        ;; The evaluator's bytes are at `@v`, never `const`: copied, unseen,
+        ;; since `bytes-as-utf8`'s are frozen.
+        (prim! 'bytes-as-utf8
+               (lambda (xs)
+                 (tagcase (bytes->utf8 (b xs 0))
+                   (text u (the val (o-sum 'text u)))
+                   (bad k (the val (o-sum 'bad k)))))))))))))

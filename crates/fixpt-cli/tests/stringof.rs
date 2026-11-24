@@ -171,6 +171,13 @@ fn views_on_every_machine() {
         "#u8(7 7)",
         "#u8(7)",
         "#utf8\"bc\"",
+        "fb",
+        "u",
+        "#utf8\"héllo\"",
+        "(5 6)",
+        "#utf8\"é\"",
+        "1",
+        "#utf8\"llo\"",
     ];
     let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "views.fx")))).collect();
     for (m, t) in runs {

@@ -8944,7 +8944,10 @@ copied to `@v` where read as a view; `run/views.fx` on every machine,
 3b: shapes of the views' own (`bytes?`, `str?`, in a union and
 `typecase`), as no generative type has one; `str-ref` and kin in line;
 the lowering giving `str-ref` of a whole `string` `string-ref`'s code. (4) `bytes-as-utf8`. Each its own
-commit, both suites between.
+commit, both suites between. (Done 2026-11-24: `Heap::utf8_of_bytes`, a
+`utf8-slice` whose owner is the bytevector, its offsets past the length
+word; `%fx26-bytes-as-utf8`; the evaluator copies, its bytes at `@v`;
+`run/views.fx`, `regions/bytes-as-utf8-written.fx`.)
 
 Left to say: whether `utf8-slice` is worth a fast path in line at once,
 or after a measurement.

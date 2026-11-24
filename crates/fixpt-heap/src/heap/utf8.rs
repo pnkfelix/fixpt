@@ -11,7 +11,8 @@
 //!
 //! A slice is frozen, of the kind `utf8-slice`, its values its owner (a
 //! whole `utf8`, never a slice: a slice of a slice is one of the first's
-//! owner), its start and end, offsets into the owner's suffix in bytes,
+//! owner; or a bytevector frozen, its bytes validated, `utf8_of_bytes`),
+//! its start and end, offsets into the owner's suffix in bytes,
 //! and whether it is marked all ASCII, its owner's mark (never found by
 //! looking at its piece). It has a trailer, so the word before its
 //! (empty) suffix is never a header, as a whole one's is: what native code
@@ -23,6 +24,9 @@ use crate::value::Value;
 const UTF8: u8 = crate::layout::kind("utf8");
 const UTF8_ASCII: u8 = crate::layout::kind("utf8-ascii");
 const UTF8_SLICE: u8 = crate::layout::kind("utf8-slice");
+
+/// Where a bytevector's bytes start in its suffix: after its length.
+const BYTEVECTOR_BYTES: usize = 8;
 
 /// A slice's values (`Heap::make_frozen`'s order).
 const SLICE_OWNER: usize = 0;
@@ -51,8 +55,9 @@ impl Heap {
         self.bloblet_kind(u) == UTF8_SLICE
     }
 
-    /// Where `u`'s text is: the whole `utf8` whose suffix holds it, the
-    /// offset there it starts at, and its length in bytes.
+    /// Where `u`'s text is: the whole `utf8` (or frozen bytevector) whose
+    /// suffix holds it, the offset there it starts at, and its length in
+    /// bytes.
     fn utf8_span(&self, u: Value) -> (Value, usize, usize) {
         debug_assert!(self.is_utf8(u), "{u:?} is not a utf8");
         if self.bloblet_kind(u) != UTF8_SLICE {
@@ -61,6 +66,22 @@ impl Heap {
         let at = |i| self.bloblet_value(u, i).as_fixnum() as usize;
         let (start, end) = (at(SLICE_START), at(SLICE_END));
         (self.bloblet_value(u, SLICE_OWNER), start, end - start)
+    }
+
+    /// A `utf8` viewing the bytes of bytes view `v` (`TODO.md` §310),
+    /// nothing copied, if they are UTF-8: else the offset they are valid up
+    /// to. Its owner the bytevector holding them, which must be frozen,
+    /// never written after (the caller's type says so: `bytes`, `(bytesof
+    /// const)`); marked all ASCII if they are, found here, as they are
+    /// validated.
+    pub fn utf8_of_bytes(&mut self, v: Value) -> Result<Value, usize> {
+        let (owner, start, len) = self.bytes_span(v).expect("a bytes view");
+        let bytes = self.bytes_of(v);
+        std::str::from_utf8(&bytes).map_err(|e| e.valid_up_to())?;
+        let at = BYTEVECTOR_BYTES + start;
+        let fields =
+            [owner, Value::fixnum(at as i64), Value::fixnum((at + len) as i64), Value::boolean(bytes.is_ascii())];
+        Ok(self.make_frozen(UTF8_SLICE, &fields))
     }
 
     /// Whether `utf8` `u` is marked all ASCII.
