@@ -241,22 +241,38 @@
          (tagcase (car ds)
            (dr (r) (tagcase r (r-frozen (p f) (= p -1)) (else y #f)))
            (else y #f)))))
-;; `string` where `t` is `(stringof const)`: the one type (`Arena::ty`).
+;; `bytevectorof`'s (`check::BYTEVECTOROF`).
+(define k-bytevectorof int 8)
+;; The base type a frozen generative type `g` is made as, if any ('||):
+;; `string` `(stringof const)`, `bytevector` `(bytevectorof const)`
+;; (`Arena::frozen_bases`).
+(define k-frozen-base (subr pure (int) symbol)
+  (lambda (g) (cond ((= g k-stringof) 'string) ((= g k-bytevectorof) 'bytevector) (else '||))))
+;; The generative type base type `s` is the frozen one of, or -1.
+(define k-base-frozen (subr pure (symbol) int)
+  (lambda (s)
+    (cond ((symbol=? s 'string) k-stringof) ((symbol=? s 'bytevector) k-bytevectorof) (else -1))))
+;; `string` where `t` is `(stringof const)`, `bytevector` where it is
+;; `(bytevectorof const)`: the one type (`Arena::ty`).
 (define k-string-norm (subr pure (k-ty) k-ty)
   (lambda (t)
     (tagcase t
-      (ty-named (g ds) (if (and (= g k-stringof) (k-heap-frozen? ds)) (ty-base 'string) t))
+      (ty-named (g ds)
+        (if (and (not (symbol=? (k-frozen-base g) '||)) (k-heap-frozen? ds))
+            (ty-base (k-frozen-base g))
+            t))
       (else y t))))
 ;; `t`, `string`, as the `(stringof const)` it is where `other` is a
-;; `stringof`, to match them region by region (`string_as_named`).
+;; `stringof`, to match them region by region (`string_as_named`); and
+;; `bytevector`, so.
 (define k-string-as-named (subr pure (k-ty k-ty) k-ty)
   (lambda (t other)
     (tagcase t
       (ty-base (s)
-        (if (and (symbol=? s 'string)
-                 (tagcase other (ty-named (g ds) (= g k-stringof)) (else y #f)))
-            (ty-named k-stringof (list (dr (r-frozen -1 #f))))
-            t))
+        (let ((g (k-base-frozen s)))
+          (if (and (>= g 0) (tagcase other (ty-named (h ds) (= h g)) (else y #f)))
+              (ty-named g (list (dr (r-frozen -1 #f))))
+              t)))
       (else y t))))
 ;; Node `t0`, made: the id of one of the same parts, if interning has one;
 ;; its parts each followed through its links first.

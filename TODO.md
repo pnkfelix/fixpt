@@ -8767,3 +8767,167 @@ the whole type" (`Checker::define`, `parse-define`); the table gives
 is expanded and the refusal is that one. Nothing in fixpt, Heist or
 kayak wrote it. Test program `arrows/define-star-untyped.fx`
 (`an_arrow_star_finds_its_effect`).
+
+## 310. Views into text and bytes: `bytes`, `str`, `utf8` (the user's, 2026-11-24; designing)
+
+A piece of a string, a bytevector or a `utf8` is a copy today
+(`substring`, `bytevector-copy`, `utf8-substring`); the nearest thing to
+a view, a suffix ref (`blobref`), has no length. The design so far, with
+the user:
+
+- **Views are the supertypes, whole buffers the subtypes**, as `i8 <:
+  int`: a whole buffer is a view of itself, nothing converted. Code typed
+  at the whole type keeps today's fast paths (no check); code typed at a
+  view pays one test of which it is (the header's kind) per operation.
+  Not a uniform type behind which every buffer may be a view (every hot
+  path would pay), nor overloading (FX-26 has none; the user chose named
+  operations over overloading `+`, 2026-09-29).
+- **The rule for an API is variance**: parameters wide (an operation that
+  only reads takes the view: search, compare, parse, hash, print),
+  results narrow (a maker returns the whole buffer), the whole type only
+  where it is needed (writing, a buffer given to a syscall).
+- **Names** (the user's): `bytes` and `str` the views, `bytevector` and
+  `string` the whole buffers; a view of a mutable buffer has its region,
+  as `string` is `(stringof const)`:
+  ```
+  (bytevectorof r) <: (bytesof r)     bytevector = (bytevectorof const) <: bytes = (bytesof const)
+  (stringof r)     <: (strof r)       string     = (stringof const)     <: str   = (strof const)
+  ```
+  Regions keep a view honest: a view of `(bytevectorof r)` reads `(read
+  r)` and dies with `r`; one of frozen data is frozen, `letfreeze` as
+  ever.
+- **`utf8` is one type, its own view** (the user's, 2026-11-24): frozen
+  only, so a whole `utf8` is a view whose owner is itself. **Its count of
+  characters goes** (as Rust's and Go's strings have none): only a view's
+  ends say what it is, so `utf8-byte-length` is O(1) and a count of
+  characters a walk.
+- **Slicing is new operations; the copies stay copies** (the user's,
+  2026-11-24): `str-slice`, `bytes-slice` and `utf8-slice` give views
+  (a view's start and end, a slice of a view a view of the first owner,
+  no chain); `substring`, `bytevector-copy` and `utf8-substring` copy as
+  now, giving whole buffers, so no program's types change, and they are
+  the plainly named way out of a view keeping its owner alive (open
+  item 2).
+- **Views only read, for now** (the user's, 2026-11-24): `(strof r)` and
+  `(bytesof r)` are read through, `(read r)`, and see the buffer's own
+  writes; writing takes the whole buffer. A writable view (a read into
+  part of a buffer, no copy) can come later as a type between the two,
+  `(bytevectorof r) <: (mbytesof r) <: (bytesof r)`, breaking nothing.
+- **An all-ASCII `utf8` is marked so** (the user's, 2026-11-24): noted
+  where it is made, in the pass that validates it, and true for ever,
+  since it is frozen; it changes no answer, only speed (Swift's strings
+  have such a flag, Python's compact ASCII strings, PEP 393). Used only
+  where it changes complexity: `utf8-length` O(1) again for ASCII text
+  (its byte length), and any operation by character index, if one comes.
+  Not a second set of fast paths: `utf8-ref` and `utf8-next` in line
+  already take an ASCII byte for one compare. A view of a marked owner is
+  marked, nothing scanned; a view of an unmarked one is not, even if its
+  piece is ASCII. Where the mark is kept (a kind of its own, which
+  `utf8?`, `typecase`, the printer and `equal?` take too, as
+  `procedure?` takes six; or a field) is decided with the view's
+  representation, open item 1.
+- **First, apart from views**: plain `bytevector`, the reader's opaque
+  one (`datum`'s), becomes `(bytevectorof const)`, as `string` became
+  `(stringof const)` (2026-10-28): the same heap object already, never
+  written.
+
+**A `utf8` of a frozen bytevector's bytes, viewing them** (the user's,
+2026-11-24): validated once, nothing copied, sound since the bytes are
+frozen. Only of `bytes`, `(bytesof const)`: one frozen into a place
+`(const p)` dies with `p`, and a `utf8` has no region to say so.
+
+**`utf8` has no region, for now** (the user's, 2026-11-24): made whole
+and frozen into the heap, it is what `(stringof const)` is, so a region
+would only ever be `const`. What having none costs: a `utf8` cannot die
+with a region or a place, only by the collector; `bytes-as-utf8` is of
+bytes frozen into the heap only; a `utf8-slice`'s owner is never in a
+place. When kayak or Heist want text that dies with a place, the way is
+`string`'s (2026-10-28), breaking nothing: `(utf8of q)`, `utf8` short for
+`(utf8of const)`, reading pure at `const` and `(read (const p))` at a
+place; covariant in the order of lifetimes, as frozen data is, since
+nothing writes one.
+
+Settled along the way: a slice is always a view, whatever its length
+(no short piece copied instead: a rule that it was would complicate
+reasoning more than it would save, the user's); the copies stay the way out of a view keeping its
+owner alive; `utf8-length` stays, an O(n) walk, `docs/fx26.md` says so,
+its fast path in line going with the field; `str` stays the name though
+Rust's is UTF-8, `docs/fx26.md` says so where it introduces it.
+
+### The proposal (2026-11-24; to review)
+
+**Representation.** A view is either the whole buffer, as it is now, or a
+*slice*: a frozen bloblet of a kind of its own, fields its owner (a whole
+buffer, never a slice: a slice of a slice takes its owner) and its start
+and end, fixnums, as offsets into the owner's *suffix* in bytes. So a
+reader of a slice reads `owner's suffix + offset` whatever the owner's
+kind: a `bytevector`'s bytes after its length word, a `string`'s
+characters likewise, a `utf8`'s from the suffix's first byte. Kinds,
+appended (none before them moves): `str-slice`, `bytes-slice`,
+`utf8-slice`, and `utf8-ascii`, a whole `utf8` all ASCII. A `utf8-slice`
+has a fourth field, whether it is ASCII: its owner's mark (a `utf8-ascii`,
+or a bytevector found so by `bytes->utf8`'s validation), never found by
+scanning the piece. The whole `utf8` loses its field, its character
+count: a header and its bytes.
+
+**Types and subtyping.**
+```
+(bytevectorof r) <: (bytesof r)     bytes = (bytesof const)
+(stringof r)     <: (strof r)       str   = (strof const)
+utf8                                one type, its own view
+```
+New generative types `bytesof` and `strof`, each of a region, read only:
+reading one is `(read r)`, so pure at `const`. The rule, in both checkers
+(`Checker::sub`, the FX-26 checker's): `(bytevectorof r) <: (bytesof
+r')` and `(stringof r) <: (strof r')` where `r = r'`, the region
+invariant as a buffer's is. (A view only reads, so it could be covariant
+in its region as frozen data is; not now: a rule to add when wanted, not
+one to take back.) Shapes: `bytes?` and `str?`, true of a whole buffer
+too; `typecase` has them, a whole buffer's arm before a view's catching
+the whole ones. `bytevector` becomes `(bytevectorof const)` first, as
+`string` is `(stringof const)` (the reader's bytevectors, the same
+objects, never written).
+
+**Operations.** Each family the reading ones, by its own name, so that
+each name means one representation's cost:
+
+| `str` | `bytes` | `utf8` |
+| --- | --- | --- |
+| `str-length`, `str-ref` | `bytes-length`, `bytes-u8-ref` | as now: `utf8-length` (O(n); O(1) when ASCII), `utf8-byte-length`, `utf8-ref`, `utf8-next` |
+| `str-slice` | `bytes-slice` | `utf8-slice`; `bytes-as-utf8`, of `bytes`, viewing |
+| `str=?`, `str<?` | `bytes=?` | `utf8=?` |
+| `str->string`, a copy | `bytes->bytevector`, a copy | `utf8-substring`, a copy, as now |
+
+The copies and conversions that only read take views, widened from the
+whole types (none of a program's types change: a whole buffer is still
+one): `substring`, `bytevector-copy`, `bytevector-copy!`'s source,
+`string->utf8`, `bytes->utf8` (which still copies, of any region), `io`'s
+writes. `string-ref`, `bytevector-u8-ref` and kin stay of the whole type:
+their fast paths, unchanged. `str-ref` and kin dispatch on the kind; the
+lowering, which knows an argument's type, may give `str-ref` of a
+`string` the whole one's code (an optimization, no meaning).
+`bytes-as-utf8`: `(subr pure (bytes) (sumof (text utf8) (bad int)))`,
+its `text` a `utf8-slice` of the bytevector.
+
+**Printing, equality.** A view prints as its contents, as the whole does
+(`"…"`, `#u8(…)`, `#utf8"…"`); `equal?` by contents, a view equal to a
+whole buffer of its contents; `eq?` as ever, a view never its owner.
+Views are not literals; a `.fasl` holds none.
+
+**Cost.** Code at a whole type: nothing. At a view: one test of the kind
+per operation, and a slice made per `-slice`. `utf8` is the one family
+with no whole type, so its operations, this morning's fast paths among
+them, test the kind first: a whole `utf8` or `utf8-ascii` in line, a
+slice in line too (its owner's suffix plus its start), the rest the
+primitive's.
+
+**Order.** (1) `bytevector` = `(bytevectorof const)` (done 2026-11-24:
+`Arena::frozen_bases`, `k-frozen-base`; `run/bytevector-frozen.fx`,
+`regions/write-a-bytevector.fx`, `regions/narrow-to-bytevector.fx`). (2) `utf8`'s count
+dropped, `utf8-ascii` and the mark. (3) The view types, the subtyping
+rule, the slices and their operations, both checkers, the runtime, the
+evaluator in FX-26, native fast paths. (4) `bytes-as-utf8`. Each its own
+commit, both suites between.
+
+Left to say: whether `utf8-slice` is worth a fast path in line at once,
+or after a measurement.

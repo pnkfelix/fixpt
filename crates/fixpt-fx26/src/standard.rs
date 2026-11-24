@@ -572,8 +572,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("datum-vector->list", "(subr pure (datum) datum)"),
     ("datum-list->bytevector", "(subr pure (datum) datum)"),
     ("datum-byte?", "(subr pure (datum) bool)"),
-    // A bytevector datum's length and bytes, which `bytevector?` narrows
-    // to no region a `bytevector-` operation reads (`readings.fx`).
+    // A bytevector datum's length and bytes (`readings.fx`), from before a
+    // `bytevector` was `(bytevectorof const)`, which `bytevector-length`
+    // and `bytevector-u8-ref` read now too (`TODO.md` §310).
     ("datum-bytevector-length", "(subr pure (datum) int)"),
     ("datum-bytevector-ref", "(subr pure (datum int) int)"),
     // Whether a datum is a rational number, an integer, a finite float or a

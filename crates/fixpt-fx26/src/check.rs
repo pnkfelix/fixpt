@@ -1561,7 +1561,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        c.arena.string_sym = Some(c.interner.intern("string"));
+        c.arena.frozen_bases = vec![(STRINGOF_INDEX, c.interner.intern("string")), (BYTEVECTOROF_INDEX, c.interner.intern("bytevector"))];
         for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING, EFFECTREP, REGIONREP, TYPEREP, EFFECTBOUND, TYPEBOUND] {
             c.syn(|c| {
                 let forms = c.read(decl).expect("reads");
@@ -4925,11 +4925,12 @@ impl Checker {
     }
 
     /// `t`, `string`, as the `(stringof const)` it is, where `other` is a
-    /// `stringof`: so that the two are matched region by region.
+    /// `stringof`: so that the two are matched region by region; and
+    /// `bytevector`, `(bytevectorof const)`, so (`Arena::frozen_bases`).
     pub(crate) fn string_as_named(&self, t: Ty, other: &Ty) -> Ty {
         match (&t, other) {
-            (Ty::Base(s), Ty::Named { which: STRINGOF_INDEX, .. }) if Some(*s) == self.arena.string_sym => {
-                Ty::Named { which: STRINGOF_INDEX, args: vec![D::Region(Region::Frozen(None, false))] }
+            (Ty::Base(s), Ty::Named { which, .. }) if self.arena.base_frozen(*s) == Some(*which) => {
+                Ty::Named { which: *which, args: vec![D::Region(Region::Frozen(None, false))] }
             }
             _ => t,
         }

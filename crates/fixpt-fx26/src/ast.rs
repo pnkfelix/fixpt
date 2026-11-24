@@ -1065,10 +1065,12 @@ pub struct Arena {
     /// What `with`s and the forms that open a module read and are held to
     /// (`WithTables`), out of line: the arena is moved whole.
     pub withs: Box<WithTables>,
-    /// `string`'s name, once known: `(stringof const)` (or `acyclic`, its
-    /// finite subregion) is made as `string` itself, the one type
-    /// (`check::STRINGOF`).
-    pub string_sym: Option<Sym>,
+    /// The generative types a frozen one of which is a base type, by
+    /// number, and that type's name, once known: `(stringof const)` (or
+    /// `acyclic`, its finite subregion) is made as `string` itself, the one
+    /// type (`check::STRINGOF`), and `(bytevectorof const)` as `bytevector`
+    /// (`check::BYTEVECTOROF`, `TODO.md` §310).
+    pub frozen_bases: Vec<(u32, Sym)>,
 }
 
 /// The id of the last of `len` entries of a table of `what`: ids are 32
@@ -1081,12 +1083,26 @@ pub(crate) fn last_id(len: usize, what: &str) -> u32 {
 
 impl Arena {
     pub fn ty(&mut self, t: Ty) -> TyId {
-        let t = match (&t, self.string_sym) {
-            (Ty::Named { which: crate::check::STRINGOF_INDEX, args }, Some(s)) if matches!(args[..], [D::Region(Region::Frozen(None, _))]) => Ty::Base(s),
+        let t = match &t {
+            Ty::Named { which, args } if matches!(args[..], [D::Region(Region::Frozen(None, _))]) => match self.frozen_base(*which) {
+                Some(s) => Ty::Base(s),
+                None => t,
+            },
             _ => t,
         };
         self.tys.push(t);
         TyId(last_id(self.tys.len(), "types"))
+    }
+
+    /// The base type a frozen generative type `which` is made as, if any
+    /// (`frozen_bases`).
+    pub fn frozen_base(&self, which: u32) -> Option<Sym> {
+        self.frozen_bases.iter().find(|(w, _)| *w == which).map(|(_, s)| *s)
+    }
+
+    /// The generative type base type `s` is the frozen one of, if any.
+    pub fn base_frozen(&self, s: Sym) -> Option<u32> {
+        self.frozen_bases.iter().find(|(_, b)| *b == s).map(|(w, _)| *w)
     }
 
     /// Follow forwarding links to the type itself.

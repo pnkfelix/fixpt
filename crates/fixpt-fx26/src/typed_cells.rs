@@ -885,8 +885,12 @@ impl Verifier<'_> {
             Ty::AllOf(ms) => ms.iter().all(|m| self.inhabits(x, *m)),
             Ty::Pair(..) => self.inhabits(x, t),
             _ if t == self.c.int => x.is_fixnum(),
-            // `string`, by name: `(stringof const)` is made as one too.
-            Ty::Base(b) if Some(b) == self.c.arena.string_sym => self.heap.is_a(x, ObjType::String),
+            // `string`, by name: `(stringof const)` is made as one too; and
+            // `bytevector`, `(bytevectorof const)`.
+            Ty::Base(b) if self.c.arena.base_frozen(b) == Some(crate::check::STRINGOF_INDEX) => self.heap.is_a(x, ObjType::String),
+            Ty::Base(b) if self.c.arena.base_frozen(b) == Some(crate::check::BYTEVECTOROF_INDEX) => {
+                self.heap.is_a(x, ObjType::Bytevector)
+            }
             // A scalar by its name: `f64` the flat names is the base type.
             Ty::Base(b) if self.c.interner.name(b) == "f64" => self.heap.is_a(x, ObjType::Flonum),
             // A datum's vector and keyword, by their names: what a quote's
