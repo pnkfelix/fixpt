@@ -199,10 +199,13 @@ pub const KINDS: &[Kind] = &[
     // A keyword (FX-26's `#:name`): frozen, field 2 its name, a symbol;
     // interned (`Heap::make_keyword`), so one object for each name.
     Kind { name: "keyword", code: 48, traced: true, settable: false },
-    // UTF-8 text (FX-26's `utf8`, `TODO.md` §306): frozen, field 2 its
-    // length in characters, a fixnum; its suffix the text, valid UTF-8,
-    // its exact length the header's B (`Heap::make_utf8`).
+    // UTF-8 text (FX-26's `utf8`, `TODO.md` §306): frozen, no fields; its
+    // suffix the text, valid UTF-8, its exact length the header's B
+    // (`Heap::make_utf8`). Its count of characters is not kept (§310).
     Kind { name: "utf8", code: 49, traced: true, settable: false },
+    // The same, all ASCII, so marked where it is made (`TODO.md` §310):
+    // its count of characters its length in bytes.
+    Kind { name: "utf8-ascii", code: 50, traced: true, settable: false },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.

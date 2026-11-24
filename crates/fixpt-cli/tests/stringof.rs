@@ -73,6 +73,8 @@ fn utf8_text_on_every_machine() {
         "#t",
         "1",
         "4",
+        "count",
+        "(3 1 4)",
     ];
     let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "utf8.fx")))).collect();
     for (m, t) in runs {

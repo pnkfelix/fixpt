@@ -8924,7 +8924,9 @@ primitive's.
 **Order.** (1) `bytevector` = `(bytevectorof const)` (done 2026-11-24:
 `Arena::frozen_bases`, `k-frozen-base`; `run/bytevector-frozen.fx`,
 `regions/write-a-bytevector.fx`, `regions/narrow-to-bytevector.fx`). (2) `utf8`'s count
-dropped, `utf8-ascii` and the mark. (3) The view types, the subtyping
+dropped, `utf8-ascii` and the mark (done 2026-11-24: `heap/utf8.rs`,
+kind 50; `utf8-length` in line only of a marked one, in each native
+compiler; `run/utf8.fx`'s counts, marked and not, on every machine). (3) The view types, the subtyping
 rule, the slices and their operations, both checkers, the runtime, the
 evaluator in FX-26, native fast paths. (4) `bytes-as-utf8`. Each its own
 commit, both suites between.

@@ -325,21 +325,33 @@ impl Asm {
     }
 
     /// UTF-8 text `x` and offset `y` (`what`, without its `%fx26-`) into
-    /// `RESULT`, as `regcode`'s `utf8_fast` does it: whether this is one,
+    /// `RESULT`, as `regcode`'s `utf8_fast` does it (text not marked all
+    /// ASCII leaving its count to the primitive): whether this is one,
     /// its fast path emitted, to `slow` for what it leaves, with `x` and
     /// `y` as they were. Neither is `RCX`, `RDX` or `X16`.
     fn utf8_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
         match what {
-            "utf8-length" => self.e(load(RESULT, field(x, 2))),
+            "utf8-length" => {
+                use fixpt_heap::layout::{kind, H_KIND};
+                self.e(load(X16, field(x, 1)));
+                self.e(mov(RCX, X16));
+                self.e(shr_imm(RCX, H_KIND.lo as u8));
+                self.e(and_imm(RCX, H_KIND.mask() as i32));
+                self.e(cmp_imm(RCX, const { kind("utf8-ascii") } as i32));
+                self.jcc(Cond::Ne, slow);
+                self.e(shr_imm(X16, fixpt_heap::layout::H_BYTES.lo as u8));
+                self.e(shl_imm(X16, 3));
+                self.e(mov(RESULT, X16));
+            }
             "utf8-byte-length" => {
-                self.e(load(RESULT, field(x, 3)));
+                self.e(load(RESULT, field(x, 1)));
                 self.e(shr_imm(RESULT, fixpt_heap::layout::H_BYTES.lo as u8));
                 self.e(shl_imm(RESULT, 3));
             }
             "utf8-ref" | "utf8-next" => {
                 self.e(test_imm(y, 7));
                 self.jcc(Cond::Ne, slow);
-                self.e(load(X16, field(x, 3)));
+                self.e(load(X16, field(x, 1)));
                 self.e(shr_imm(X16, fixpt_heap::layout::H_BYTES.lo as u8));
                 self.e(mov(RCX, y));
                 self.e(sar_imm(RCX, 3));

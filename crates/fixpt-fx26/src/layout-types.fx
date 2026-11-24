@@ -108,4 +108,5 @@
             (val header-fields-lo int)
             (val header-fields-frozen-lo int)
             (val header-suffix-frozen-lo int)
-            (val header-bytes-lo int)))
+            (val header-bytes-lo int)
+            (val kind-utf8-ascii int)))

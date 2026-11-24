@@ -2824,13 +2824,23 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(add_imm(X16, Value::char('\0').raw() as i32));
             a.e(mov(RESULT, X16));
         }
-        // UTF-8 text (`TODO.md` §306): its count of characters its one
-        // field; its length in bytes its header's B, a trailer past the
-        // field; a character, or the offset after it, inline only of one
-        // byte (ASCII), the rest the primitive's (`direct::pure_fast`'s).
-        "%fx26-utf8-length" => a.e(load(RESULT, m(x, super::field_off(2) as i32))),
+        // UTF-8 text (`TODO.md` §306): its header the word before its
+        // bytes, its length in bytes the header's B; its count of
+        // characters that where it is marked all ASCII (§310), else the
+        // primitive's; a character, or the offset after it, inline only of
+        // one byte (ASCII), the rest the primitive's (`direct::pure_fast`'s).
+        "%fx26-utf8-length" => {
+            use fixpt_heap::layout::{kind, H_BYTES, H_KIND};
+            a.e(load(X13, m(x, super::field_off(1) as i32)));
+            ubfx(a, X14, X13, H_KIND.lo, H_KIND.width);
+            a.e(cmp_imm(X14, const { kind("utf8-ascii") } as i32));
+            a.jcc(Cond::Ne, slow);
+            a.e(shr_imm(X13, H_BYTES.lo as u8));
+            a.e(shl_imm(X13, 3));
+            a.e(mov(RESULT, X13));
+        }
         "%fx26-utf8-byte-length" => {
-            a.e(load(X13, m(x, super::field_off(3) as i32)));
+            a.e(load(X13, m(x, super::field_off(1) as i32)));
             a.e(shr_imm(X13, fixpt_heap::layout::H_BYTES.lo as u8));
             a.e(shl_imm(X13, 3));
             a.e(mov(RESULT, X13));
@@ -2838,7 +2848,7 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         "%fx26-utf8-ref" | "%fx26-utf8-next" => {
             a.e(test_imm(y, 7));
             a.jcc(Cond::Ne, slow);
-            a.e(load(X14, m(x, super::field_off(3) as i32)));
+            a.e(load(X14, m(x, super::field_off(1) as i32)));
             a.e(shr_imm(X14, fixpt_heap::layout::H_BYTES.lo as u8));
             a.e(mov(X15, y));
             a.e(sar_imm(X15, 3));
@@ -4193,7 +4203,7 @@ pub(super) fn fx26_direct_layout_of(intro: &[&str], regs: &[(&str, i64)], sig_in
     }
     for k in [
         "bloblet", "flat-array", "native-closure", "sum", "product", "bignum", "symbol", "string", "box", "closure", "primitive", "continuation",
-        "cellular-closure", "cellular-continuation",
+        "cellular-closure", "cellular-continuation", "utf8-ascii",
     ] {
         c(&format!("d-kind-{k}"), kind(k) as i64, "a kind");
     }

@@ -14,6 +14,8 @@ fn a_utf8_reads_each_character_where_it_starts() {
         assert!(h.is_utf8(u));
         assert_eq!((h.utf8_chars(u), h.utf8_len(u)), (t.chars().count(), t.len()), "{t:?}");
         assert_eq!(h.utf8_string(u), t);
+        // Marked all ASCII where it is made, if it is (`TODO.md` §310).
+        assert_eq!(h.utf8_is_ascii(u), t.is_ascii(), "{t:?}");
         // Each character at its offset, the next offset after it; nothing
         // inside one, nor past the end.
         for k in 0..=t.len() + 1 {

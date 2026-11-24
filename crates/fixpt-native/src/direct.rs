@@ -5339,25 +5339,32 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(add_lsl(RESULT, X14, X16, 8));
         return true;
     }
-    // UTF-8 text (`TODO.md` §306, `heap/utf8.rs`): its count of characters
-    // its one field, a fixnum; its length in bytes its header's B, the
-    // header a trailer past the field (never large, of two fields); its
-    // bytes the suffix. A character read where one starts, or the offset
-    // after it, only of one byte (ASCII); one of more, a continuation byte,
-    // an offset past the text or not a fixnum, the primitive's.
+    // UTF-8 text (`TODO.md` §306, `heap/utf8.rs`): no fields, so its
+    // header the word before its bytes, the suffix; its length in bytes the
+    // header's B. Its count of characters is that where it is marked all
+    // ASCII, a kind of its own (§310), else the primitive's walk. A
+    // character read where one starts, or the offset after it, only of one
+    // byte (ASCII); one of more, a continuation byte, an offset past the
+    // text or not a fixnum, the primitive's.
     if name == "%fx26-utf8-length" {
-        a.e(ldur(RESULT, x, field_off(2)));
+        use fixpt_heap::layout::{kind, H_BYTES, H_KIND};
+        a.e(ldur(X13, x, field_off(1)));
+        a.e(ubfx(X14, X13, H_KIND.lo, H_KIND.width));
+        a.e(cmp_imm(X14, const { kind("utf8-ascii") } as u32));
+        a.to(slow, Fix::If(Cond::Ne));
+        a.e(lsr_imm(X13, X13, H_BYTES.lo));
+        a.e(lsl_imm(RESULT, X13, 3));
         return true;
     }
     if name == "%fx26-utf8-byte-length" {
-        a.e(ldur(X13, x, field_off(3)));
+        a.e(ldur(X13, x, field_off(1)));
         a.e(lsr_imm(X13, X13, fixpt_heap::layout::H_BYTES.lo));
         a.e(lsl_imm(RESULT, X13, 3));
         return true;
     }
     if name == "%fx26-utf8-ref" || name == "%fx26-utf8-next" {
         fixnum(a, y);
-        a.e(ldur(X14, x, field_off(3)));
+        a.e(ldur(X14, x, field_off(1)));
         a.e(lsr_imm(X14, X14, fixpt_heap::layout::H_BYTES.lo));
         a.e(asr_imm(X15, y, 3));
         a.e(cmp(X15, X14));

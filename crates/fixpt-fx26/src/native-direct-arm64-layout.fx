@@ -126,6 +126,7 @@
 (define d-kind-continuation int 14)  ; a kind
 (define d-kind-cellular-closure int 38)  ; a kind
 (define d-kind-cellular-continuation int 39)  ; a kind
+(define d-kind-utf8-ascii int 50)  ; a kind
 (define d-false int 3)  ; a Value's bits
 (define d-true int 11)  ; a Value's bits
 (define d-null int 19)  ; a Value's bits

@@ -175,10 +175,18 @@
 (define ar-utf8-fast (subr (maxeff ar-assembles spin) (string int int int) bool)
   (lambda (name x y slow)
     (cond
-      ((ar-utf8-is? name "length") (begin (n-e (arm-ldur a-result x (n-field-off 2))) #t))
+      ((ar-utf8-is? name "length")
+       (begin
+         (n-e (arm-ldur n-x15 x (n-field-off 1)))
+         (n-e (arm-ubfx n-x14 n-x15 header-kind-lo header-kind-width))
+         (n-e (arm-cmp-imm n-x14 kind-utf8-ascii))
+         (n-b-cond ar-ne slow)
+         (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
+         (n-e (arm-add-lsl a-result a-xzr n-x15 3))
+         #t))
       ((ar-utf8-is? name "byte-length")
        (begin
-         (n-e (arm-ldur n-x15 x (n-field-off 3)))
+         (n-e (arm-ldur n-x15 x (n-field-off 1)))
          (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
          (n-e (arm-add-lsl a-result a-xzr n-x15 3))
          #t))
@@ -186,7 +194,7 @@
        (begin
          (n-e (arm-tst-low y 3))
          (n-b-cond ar-ne slow)
-         (n-e (arm-ldur n-x15 x (n-field-off 3)))
+         (n-e (arm-ldur n-x15 x (n-field-off 1)))
          (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
          (n-e (arm-asr-imm n-x14 y 3))
          (n-e (arm-cmp n-x14 n-x15))

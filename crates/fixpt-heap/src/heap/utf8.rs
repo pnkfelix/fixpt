@@ -1,20 +1,22 @@
-//! UTF-8 text (FX-26's `utf8`, `TODO.md` §306): a frozen bloblet whose one
-//! field is its length in characters and whose suffix is its text, valid
-//! UTF-8, the header's B its length in bytes. Indexed by byte offset, as
-//! Rust's `str` is: a character is read where one starts, in O(1); the
-//! `i`th character is a walk. Made only of a `&str`, so never invalid.
+//! UTF-8 text (FX-26's `utf8`, `TODO.md` §306): a frozen bloblet of no
+//! fields whose suffix is its text, valid UTF-8, the header's B its length
+//! in bytes. Indexed by byte offset, as Rust's `str` is: a character is
+//! read where one starts, in O(1); the `i`th character is a walk, and so
+//! is its count of characters, which is not kept (§310), but for text all
+//! ASCII, marked so where it is made, a kind of its own (`utf8-ascii`),
+//! whose count is its length. Made only of a `&str`, so never invalid.
 
 use super::Heap;
 use crate::value::Value;
 
 const UTF8: u8 = crate::layout::kind("utf8");
-const UTF8_CHARS: usize = 2;
+const UTF8_ASCII: u8 = crate::layout::kind("utf8-ascii");
 
 impl Heap {
-    /// The `utf8` of `text`: its characters counted once, here.
+    /// The `utf8` of `text`: marked all ASCII, if it is, here.
     pub fn make_utf8(&mut self, text: &str) -> Value {
-        let u = self.make_bloblet(UTF8, 1, text.len(), true);
-        self.set_bloblet_slot(u, UTF8_CHARS, Value::fixnum(text.chars().count() as i64));
+        let kind = if text.is_ascii() { UTF8_ASCII } else { UTF8 };
+        let u = self.make_bloblet(kind, 0, text.len(), false);
         self.set_bloblet_bytes(u, 0, text.as_bytes()).expect("the suffix made for it");
         self.freeze_bloblet(u, true, true);
         u
@@ -22,13 +24,22 @@ impl Heap {
 
     /// Whether `v` is a `utf8`.
     pub fn is_utf8(&self, v: Value) -> bool {
-        v.is_bloblet() && !v.is_suffix_ref() && self.bloblet_kind(v) == UTF8
+        v.is_bloblet() && !v.is_suffix_ref() && matches!(self.bloblet_kind(v), UTF8 | UTF8_ASCII)
     }
 
-    /// `u`'s length in characters.
-    pub fn utf8_chars(&self, u: Value) -> usize {
+    /// Whether `utf8` `u` is marked all ASCII.
+    pub fn utf8_is_ascii(&self, u: Value) -> bool {
         debug_assert!(self.is_utf8(u), "{u:?} is not a utf8");
-        self.bloblet_slot(u, UTF8_CHARS).as_fixnum() as usize
+        self.bloblet_kind(u) == UTF8_ASCII
+    }
+
+    /// `u`'s length in characters: its length in bytes if it is marked all
+    /// ASCII, else counted, a walk.
+    pub fn utf8_chars(&self, u: Value) -> usize {
+        if self.utf8_is_ascii(u) {
+            return self.utf8_len(u);
+        }
+        self.bloblet_bytes(u).iter().filter(|b| *b & 0xc0 != 0x80).count()
     }
 
     /// `u`'s length in bytes.

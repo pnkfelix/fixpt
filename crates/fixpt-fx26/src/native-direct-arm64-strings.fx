@@ -131,13 +131,20 @@
            (ada-imm d-x14 d-char0)
            (ada-e (arm-add-lsl d-result d-x14 d-x16 8))
            #t))
-        ;; UTF-8 text: its count of characters its one field; its length in
-        ;; bytes its header's B; a character, or the offset after it, only
-        ;; of one byte (ASCII).
+        ;; UTF-8 text: its header the word before its bytes, its length in
+        ;; bytes the header's B; its count of characters that where it is
+        ;; marked all ASCII; a character, or the offset after it, only of
+        ;; one byte (ASCII).
         ((string=? name "%fx26-utf8-length")
-         (begin (ada-e (arm-ldur d-result x (ada-field-off 2))) #t))
+         (begin (ada-e (arm-ldur d-x13 x (ada-field-off 1)))
+                (ada-e (arm-ubfx d-x14 d-x13 d-h-kind-lo d-h-kind-width))
+                (ada-e (arm-cmp-imm d-x14 d-kind-utf8-ascii))
+                (ada-bc ada-c-ne slow)
+                (ada-e (arm-lsr-imm d-x13 d-x13 d-h-bytes-lo))
+                (ada-e (arm-lsl-imm d-result d-x13 3))
+                #t))
         ((string=? name "%fx26-utf8-byte-length")
-         (begin (ada-e (arm-ldur d-x13 x (ada-field-off 3)))
+         (begin (ada-e (arm-ldur d-x13 x (ada-field-off 1)))
                 (ada-e (arm-lsr-imm d-x13 d-x13 d-h-bytes-lo))
                 (ada-e (arm-lsl-imm d-result d-x13 3))
                 #t))
@@ -173,7 +180,7 @@
   (lambda (y slow)
     (begin
       (ada-check-fixnum y slow)
-      (ada-e (arm-ldur d-x14 d-result (ada-field-off 3)))
+      (ada-e (arm-ldur d-x14 d-result (ada-field-off 1)))
       (ada-e (arm-lsr-imm d-x14 d-x14 d-h-bytes-lo))
       (ada-e (arm-asr-imm d-x15 y 3))
       (ada-e (arm-cmp d-x15 d-x14))

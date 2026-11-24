@@ -126,17 +126,23 @@
            (da-e (x86-shift-imm da-shl d-x16 3))
            (da-mov d-result d-x16)
            #t))
-        ;; UTF-8 text: its count of characters its one field; its length
-        ;; in bytes its header's B; a character, or the offset after it,
-        ;; only of one byte (ASCII).
-        ((string=? name "%fx26-utf8-length") (begin (da-ld d-result x (dq-fld 2)) #t))
+        ;; UTF-8 text: its header the word before its bytes, its length in
+        ;; bytes the header's B; its count of characters that where it is
+        ;; marked all ASCII; a character, or the offset after it, only of
+        ;; one byte (ASCII).
+        ((string=? name "%fx26-utf8-length")
+         (begin (da-ld d-x13 x (dq-fld 1))
+                (da-ubfx d-x14 d-x13 d-h-kind-lo d-h-kind-width)
+                (da-e (x86-alu-imm da-cmp d-x14 d-kind-utf8-ascii)) (da-jcc da-c-ne slow)
+                (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
+                (dq-fixnum-of d-x13) #t))
         ((string=? name "%fx26-utf8-byte-length")
-         (begin (da-ld d-x13 x (dq-fld 3)) (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
+         (begin (da-ld d-x13 x (dq-fld 1)) (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
                 (dq-fixnum-of d-x13) #t))
         ((or (string=? name "%fx26-utf8-ref") (string=? name "%fx26-utf8-next"))
          (begin
            (da-e (x86-test-imm y 7)) (da-jcc da-c-ne slow)
-           (da-ld d-x14 x (dq-fld 3)) (da-e (x86-shift-imm da-shr d-x14 d-h-bytes-lo))
+           (da-ld d-x14 x (dq-fld 1)) (da-e (x86-shift-imm da-shr d-x14 d-h-bytes-lo))
            (da-mov d-x15 y) (da-e (x86-shift-imm da-sar d-x15 3))
            (da-e (x86-alu da-cmp d-x15 d-x14)) (da-jcc da-c-ae slow)
            (da-e (x86-load8-ix d-x16 x d-x15 1 -4))

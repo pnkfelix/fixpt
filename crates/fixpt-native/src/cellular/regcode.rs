@@ -68,25 +68,34 @@ impl Asm {
     }
     /// UTF-8 text (`TODO.md` §306) `x` and offset `y` (`what`, without
     /// its `%fx26-`) into `RESULT`, as `direct.rs`'s `pure_fast` does it:
-    /// whether this is one, its fast path emitted. Its count of characters
-    /// its one field; its length in bytes its header's B, a trailer past
-    /// the field; the character at `y`, or the offset after it, only of
-    /// one byte (ASCII): one of more, a continuation byte, an offset past
-    /// the text or not a fixnum, to `slow`. Uses X14 to X16; `x` and `y`
-    /// kept until it is done. Register code's `prim1` and `prim2` (`x`
-    /// `RESULT`), and `inline`'s (`REG1` and `REG2`).
+    /// whether this is one, its fast path emitted. Its header the word
+    /// before its bytes, its length in bytes the header's B; its count of
+    /// characters that where it is marked all ASCII (§310); the character
+    /// at `y`, or the offset after it, only of one byte (ASCII): one of
+    /// more, a continuation byte, an offset past the text or not a fixnum,
+    /// text not marked, to `slow`. Uses X14 to X16; `x` and `y` kept until
+    /// it is done. Register code's `prim1` and `prim2` (`x` `RESULT`), and
+    /// `inline`'s (`REG1` and `REG2`).
     fn utf8_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
         match what {
-            "utf8-length" => self.e(ldur(RESULT, x, field_off(2))),
+            "utf8-length" => {
+                use fixpt_heap::layout::{kind, H_KIND};
+                self.e(ldur(X15, x, field_off(1)));
+                self.e(ubfx(X14, X15, H_KIND.lo, H_KIND.width));
+                self.e(cmp_imm(X14, const { kind("utf8-ascii") } as u32));
+                self.b_cond(Cond::Ne, slow);
+                self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
+                self.e(add_lsl(RESULT, XZR, X15, 3));
+            }
             "utf8-byte-length" => {
-                self.e(ldur(X15, x, field_off(3)));
+                self.e(ldur(X15, x, field_off(1)));
                 self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
                 self.e(add_lsl(RESULT, XZR, X15, 3));
             }
             "utf8-ref" | "utf8-next" => {
                 self.e(tst_low(y, 3));
                 self.b_cond(Cond::Ne, slow);
-                self.e(ldur(X15, x, field_off(3)));
+                self.e(ldur(X15, x, field_off(1)));
                 self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
                 self.e(asr_imm(X14, y, 3));
                 self.e(cmp(X14, X15));

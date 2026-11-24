@@ -90,10 +90,21 @@
 (define rg-utf8-fast (subr (maxeff x-assembles spin) (string int int int) bool)
   (lambda (name x y slow)
     (cond
-      ((rg-utf8-is? name "length") (begin (x-load r-result x (x-field 2)) #t))
+      ((rg-utf8-is? name "length")
+       (begin
+         (x-load n-x16 x (x-field 1))
+         (x-mov r-rcx n-x16)
+         (x-e (x86-shift-imm x-shr r-rcx header-kind-lo))
+         (x-alu-imm x-and r-rcx (- (rg-pow2 header-kind-width) 1))
+         (x-alu-imm x-cmp r-rcx kind-utf8-ascii)
+         (x-jcc x-c-ne slow)
+         (x-e (x86-shift-imm x-shr n-x16 header-bytes-lo))
+         (x-e (x86-shift-imm rg-shl n-x16 3))
+         (x-mov r-result n-x16)
+         #t))
       ((rg-utf8-is? name "byte-length")
        (begin
-         (x-load r-result x (x-field 3))
+         (x-load r-result x (x-field 1))
          (x-e (x86-shift-imm x-shr r-result header-bytes-lo))
          (x-e (x86-shift-imm rg-shl r-result 3))
          #t))
@@ -101,7 +112,7 @@
        (begin
          (x-e (x86-test-imm y 7))
          (x-jcc x-c-ne slow)
-         (x-load n-x16 x (x-field 3))
+         (x-load n-x16 x (x-field 1))
          (x-e (x86-shift-imm x-shr n-x16 header-bytes-lo))
          (x-mov r-rcx y)
          (x-e (x86-shift-imm x-sar r-rcx 3))

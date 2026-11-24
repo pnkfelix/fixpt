@@ -126,6 +126,7 @@
             (val d-kind-continuation int)
             (val d-kind-cellular-closure int)
             (val d-kind-cellular-continuation int)
+            (val d-kind-utf8-ascii int)
             (val d-false int)
             (val d-true int)
             (val d-null int)
