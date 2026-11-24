@@ -28,7 +28,7 @@
 ;; The shapes, by number in `check.rs`'s `SHAPES` order (`k-run-shape`,
 ;; `check-print-parts.fx`): a mask, bit `k` shape `k`'s, or -1 if they are
 ;; not known.
-(define k-shape-count int 17)
+(define k-shape-count int 18)
 (define k-shape-nil int 5)
 (define k-shape-pair int 6)
 ;; The standard predicate that tests for shape `k`.
@@ -38,7 +38,7 @@
       ((0) "int?") ((1) "f64?") ((2) "f32?") ((3) "char?") ((4) "bool?") ((5) "null?")
       ((6) "pair?") ((7) "string?") ((8) "symbol?") ((9) "procedure?") ((10) "array?")
       ((11) "ref?") ((12) "sum?") ((13) "product?") ((14) "vector?") ((15) "bytevector?")
-      (else "keyword?"))))
+      ((16) "keyword?") (else "utf8?"))))
 (define k-one-id (->* (int) k-ids)
   (lambda (m) (the k-ids (cons m nil))))
 (define k-ids-append (->* (k-ids k-ids) k-ids)

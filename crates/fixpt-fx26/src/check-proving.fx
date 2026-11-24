@@ -35,7 +35,7 @@
       (("int") 0) (("f64") 1) (("f32") 2) (("char") 3) (("bool") 4) (("nil") 5) (("pair") 6)
       (("string") 7) (("symbol") 8) (("procedure") 9) (("bloblet") 10) (("box") 11)
       (("sum") 12) (("product") 13) (("vector") 14) (("bytevector") 15) (("keyword") 16)
-      (else -1))))
+      (("utf8") 17) (else -1))))
 (define k-prop-usage string
   (string-append "a proposition: `(shape i shape)`, `(acyclic i)`, `(nat i)`, `(length i j)`, "
                  "`(< a b)`, `(<= a b)`, `(= a b)`, or `(not …)` of a shape or an `=`"))

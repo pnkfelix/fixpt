@@ -693,6 +693,9 @@ pub fn never_collects(name: &str) -> bool {
         )
         // A keyword's name: a field read.
         || name == "%fx26-keyword->symbol"
+        // UTF-8 text looked at, never made (`TODO.md` §306): its predicate,
+        // its lengths, a character and the offset after it, two compared.
+        || matches!(name, "%fx26-utf8?" | "%fx26-utf8-length" | "%fx26-utf8-byte-length" | "%fx26-utf8-ref" | "%fx26-utf8-next" | "%fx26-utf8=?")
         || ["%fx26-i8", "%fx26-u8", "%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
@@ -1090,6 +1093,28 @@ fn get_string(rt: &mut Runtime, v: Value) -> Outcome<String> {
         return Ok(rt.heap.string_to_rust(v));
     }
     rt.type_error("a string", v)
+}
+
+/// A `utf8`'s text, or a type error.
+fn get_utf8(rt: &mut Runtime, v: Value) -> Outcome<String> {
+    if rt.heap.is_utf8(v) {
+        return Ok(rt.heap.utf8_string(v));
+    }
+    rt.type_error("a utf8", v)
+}
+
+/// Byte offset `v` of `utf8` `u`, where a character starts (or, if
+/// `end`, its length too), checked: else an error, saying which.
+fn utf8_offset(rt: &mut Runtime, u: Value, v: Value, end: bool) -> Outcome<usize> {
+    if !rt.heap.is_utf8(u) {
+        return rt.type_error("a utf8", u);
+    }
+    let n = rt.heap.utf8_len(u);
+    let k = index(rt, v, n + end as usize, "utf8")?;
+    if !rt.heap.utf8_boundary(u, k) {
+        return rt.fail("utf8: the offset is inside a character", &[v]);
+    }
+    Ok(k)
 }
 
 fn get_char(rt: &mut Runtime, v: Value) -> Outcome<char> {
@@ -1550,18 +1575,17 @@ prims! {
         for (k, c) in chars.into_iter().enumerate() { rt.heap.string_set(a[0], at + k, c); }
         Ok(Value::UNIT)
     });
+    // A string's text as UTF-8 text, a `utf8`, and back (`TODO.md` §306):
+    // a copy each, every character re-encoded. Until 2026-11-23 these were
+    // the bytevector conversions, now `%fx26-utf8->bytes` and
+    // `%fx26-bytes->utf8`.
     "%fx26-string->utf8", 1, Some(1), simple!(|rt, a| {
         let s = get_string(rt, a[0])?;
-        Ok(rt.heap.make_bytevector(s.as_bytes()))
+        Ok(rt.heap.make_utf8(&s))
     });
     "%fx26-utf8->string", 1, Some(1), simple!(|rt, a| {
-        let n = bytevector_in(rt, a[0])?;
-        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[0], i)).collect();
-        let (tag, v) = match std::str::from_utf8(&bytes) {
-            Ok(text) => ("text", rt.heap.make_string(text)),
-            Err(e) => ("bad", Value::fixnum(e.valid_up_to() as i64)),
-        };
-        Ok(fx26_sum(rt, tag, v))
+        let s = get_utf8(rt, a[0])?;
+        Ok(rt.heap.make_string(&s))
     });
 
     // FX-26's I/O (`TODO.md` §84): the world's streams, an error a value the
@@ -3421,6 +3445,55 @@ prims! {
         let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[1], i)).collect();
         let r = crate::world::replace_file(&path, &bytes, crate::world::Flush::Unflushed);
         Ok(fx26_io_result(rt, r))
+    });
+    // UTF-8 text, `utf8` (`TODO.md` §306): indexed by byte offset, each
+    // read where a character starts, checked in O(1). Last, so that no
+    // primitive's number moves.
+    "%fx26-utf8?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.is_utf8(a[0]))));
+    "%fx26-utf8-length", 1, Some(1), simple!(|rt, a| {
+        if !rt.heap.is_utf8(a[0]) { return rt.type_error("a utf8", a[0]); }
+        Ok(Value::fixnum(rt.heap.utf8_chars(a[0]) as i64))
+    });
+    "%fx26-utf8-byte-length", 1, Some(1), simple!(|rt, a| {
+        if !rt.heap.is_utf8(a[0]) { return rt.type_error("a utf8", a[0]); }
+        Ok(Value::fixnum(rt.heap.utf8_len(a[0]) as i64))
+    });
+    "%fx26-utf8-ref", 2, Some(2), simple!(|rt, a| {
+        let k = utf8_offset(rt, a[0], a[1], false)?;
+        let (c, _) = rt.heap.utf8_char_at(a[0], k).expect("a character starts there");
+        Ok(Value::char(c))
+    });
+    "%fx26-utf8-next", 2, Some(2), simple!(|rt, a| {
+        let k = utf8_offset(rt, a[0], a[1], false)?;
+        let (_, next) = rt.heap.utf8_char_at(a[0], k).expect("a character starts there");
+        Ok(Value::fixnum(next as i64))
+    });
+    "%fx26-utf8-substring", 3, Some(3), simple!(|rt, a| {
+        let end = utf8_offset(rt, a[0], a[2], true)?;
+        let start = utf8_offset(rt, a[0], a[1], true)?;
+        if start > end { return rt.fail("utf8-substring: the start is after the end", &[a[1], a[2]]); }
+        Ok(rt.heap.utf8_substring(a[0], start, end).expect("between boundaries"))
+    });
+    "%fx26-utf8=?", 2, Some(2), simple!(|rt, a| {
+        for v in [a[0], a[1]] {
+            if !rt.heap.is_utf8(v) { return rt.type_error("a utf8", v); }
+        }
+        Ok(Value::boolean(rt.heap.utf8_eq(a[0], a[1])))
+    });
+    // Bytes as UTF-8 text, validated: `(sum text u)`, or `(sum bad k)`, the
+    // offset the bytes are valid up to; and a `utf8`'s bytes, a copy.
+    "%fx26-bytes->utf8", 1, Some(1), simple!(|rt, a| {
+        let n = bytevector_in(rt, a[0])?;
+        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[0], i)).collect();
+        let (tag, v) = match std::str::from_utf8(&bytes) {
+            Ok(text) => ("text", rt.heap.make_utf8(text)),
+            Err(e) => ("bad", Value::fixnum(e.valid_up_to() as i64)),
+        };
+        Ok(fx26_sum(rt, tag, v))
+    });
+    "%fx26-utf8->bytes", 1, Some(1), simple!(|rt, a| {
+        let s = get_utf8(rt, a[0])?;
+        Ok(rt.heap.make_bytevector(s.as_bytes()))
     });
 }
 

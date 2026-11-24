@@ -75,6 +75,10 @@ fn equal_inner(
         return equal_inner(heap, heap.car(a), heap.car(b), budget, trail)
             && equal_inner(heap, heap.cdr(a), heap.cdr(b), budget, trail);
     }
+    // UTF-8 text (`TODO.md` §306): the same bytes.
+    if heap.is_utf8(a) && heap.is_utf8(b) {
+        return heap.utf8_eq(a, b);
+    }
     match (heap.obj_type(a), heap.obj_type(b)) {
         (Some(ObjType::String), Some(ObjType::String)) => {
             let n = heap.string_len(a);

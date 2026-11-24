@@ -31,7 +31,7 @@
                    () int)
   (lambda ()
     (begin
-      (write-file "a.txt" (the (bytevectorof @b) (string->utf8 "hello")))
+      (write-file "a.txt" (the (bytevectorof @b) (utf8->bytes (string->utf8 "hello"))))
       (say (what "a.txt"))
       (say (what "."))
       (say (what "l"))

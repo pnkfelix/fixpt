@@ -22,7 +22,7 @@
 (import parser-types k-array-length k-array-size)
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 as-array as-bool as-bytes ev-preempt-set! as-char as-cont as-f32
-        as-f64 as-int as-key as-keyword as-other as-pair as-ref as-str as-sym as-tag efail
+        as-f64 as-int as-key as-keyword as-utf8 as-other as-pair as-ref as-str as-sym as-tag efail
         efail-expected
         ev-arg as-mstr ev-eq? list->val the-unit val->vals vals->val)
 ;; What it uses of the modules it is given: all of each, hidden.
@@ -346,12 +346,23 @@
                (lambda (xs)
                  (begin (bytevector-copy! (b xs 0) (n xs 1) (b xs 2) (n xs 3) (n xs 4)) the-unit)))
         (prim! 'bytevector=? (lambda (xs) (bytevector=? (b xs 0) (b xs 1))))
-        (prim! 'string->utf8 (lambda (xs) (made (string->utf8 (as-str (ev-arg xs 0))))))
-        (prim! 'utf8->string
+        ;; UTF-8 text (`TODO.md` §306), as the machines have it: the host's.
+        (prim! 'utf8->bytes (lambda (xs) (made (utf8->bytes (as-utf8 (ev-arg xs 0))))))
+        (prim! 'bytes->utf8
                (lambda (xs)
-                 (tagcase (utf8->string (b xs 0))
-                   (text s (the val (o-sum 'text s)))
-                   (bad k (the val (o-sum 'bad k))))))))))
+                 (tagcase (bytes->utf8 (b xs 0))
+                   (text u (the val (o-sum 'text u)))
+                   (bad k (the val (o-sum 'bad k))))))
+        (prim! 'string->utf8 (lambda (xs) (string->utf8 (as-str (ev-arg xs 0)))))
+        (prim! 'utf8->string (lambda (xs) (utf8->string (as-utf8 (ev-arg xs 0)))))
+        (prim! 'utf8? (lambda (xs) (utf8? (ev-arg xs 0))))
+        (prim! 'utf8-length (lambda (xs) (utf8-length (as-utf8 (ev-arg xs 0)))))
+        (prim! 'utf8-byte-length (lambda (xs) (utf8-byte-length (as-utf8 (ev-arg xs 0)))))
+        (prim! 'utf8-ref (lambda (xs) (utf8-ref (as-utf8 (ev-arg xs 0)) (n xs 1))))
+        (prim! 'utf8-next (lambda (xs) (utf8-next (as-utf8 (ev-arg xs 0)) (n xs 1))))
+        (prim! 'utf8-substring
+               (lambda (xs) (utf8-substring (as-utf8 (ev-arg xs 0)) (n xs 1) (n xs 2))))
+        (prim! 'utf8=? (lambda (xs) (utf8=? (as-utf8 (ev-arg xs 0)) (as-utf8 (ev-arg xs 1)))))))))
 
 ;; `(sum failed e)`, `e` an `io-error`, as the evaluator's value: a
 ;; product of its kind and detail.

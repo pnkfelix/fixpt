@@ -131,6 +131,8 @@ pub const SHAPES: &[(&str, &str)] = &[
     // A keyword, `#:name` (`docs/fx26.md`, "Keywords"): last, so that no
     // shape's number before it moved.
     ("keyword", "keyword?"),
+    // UTF-8 text, `utf8` (`TODO.md` §306): after it, for the same reason.
+    ("utf8", "utf8?"),
 ];
 /// A kind of key that has identity (Q5), generative type 3: `k`, a mutable
 /// object at `r`, which only the standard dictionaries (`pair-identity` and
@@ -1398,6 +1400,9 @@ impl Checker {
         // Last, so no type made before it moved.
         let sym = interner.intern("keyword");
         base.insert(sym, arena.ty(Ty::Base(sym)));
+        // UTF-8 text (`TODO.md` §306): frozen, its own layout. Last.
+        let sym = interner.intern("utf8");
+        base.insert(sym, arena.ty(Ty::Base(sym)));
         let mut c = Checker {
             arena,
             interner,
@@ -1751,6 +1756,7 @@ impl Checker {
                 "vector" => bit("vector"),
                 "bytevector" => bit("bytevector"),
                 "keyword" => bit("keyword"),
+                "utf8" => bit("utf8"),
                 _ => None,
             },
             Ty::Nat(_) => bit("int"),

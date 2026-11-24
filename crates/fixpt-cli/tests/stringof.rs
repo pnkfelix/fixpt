@@ -1,7 +1,8 @@
 //! Strings at a region, `(stringof r)` (the user's, 2026-10-28;
 //! `docs/fx26.md`, "Strings at a region"): `programs/run/stringof.fx` on
 //! each machine FX-26 runs on, the evaluator written in FX-26 among them,
-//! each giving the same values.
+//! each giving the same values; and UTF-8 text, `utf8` (`TODO.md` §306),
+//! `programs/run/utf8.fx`, so.
 
 use std::process::Command;
 
@@ -30,11 +31,11 @@ fn machines() -> Vec<&'static str> {
     .collect()
 }
 
-/// What `fixpt --machine machine eval` of the program says, each line as
-/// far as its type.
-fn values(machine: &str) -> Vec<String> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/run/stringof.fx");
-    let out = Command::new(FIXPT).args(["--machine", machine, "eval", path]).output().expect("fixpt runs");
+/// What `fixpt --machine machine eval` of program `run/NAME` says, each
+/// line as far as its type.
+fn values(machine: &str, name: &str) -> Vec<String> {
+    let path = format!("{}/../fixpt-fx26/tests/programs/run/{name}", env!("CARGO_MANIFEST_DIR"));
+    let out = Command::new(FIXPT).args(["--machine", machine, "eval", &path]).output().expect("fixpt runs");
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     text.lines().map(|l| l.split(" : ").next().unwrap_or(l).to_string()).collect()
 }
@@ -49,9 +50,30 @@ fn strings_at_a_region_on_every_machine() {
         "\"HELLO, WORLD\"",
         "(#\\b #\\c #\\b)",
         "#t",
-        "#u8(195 169 33)",
+        "#utf8\"é!\"",
     ];
-    let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m)))).collect();
+    let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "stringof.fx")))).collect();
+    for (m, t) in runs {
+        assert_eq!(t.join().expect("ran"), want, "{m}");
+    }
+}
+
+#[test]
+fn utf8_text_on_every_machine() {
+    let want = [
+        "t",
+        "walk",
+        "4",
+        "8",
+        "(#\\a #\\é #\\😀 #\\z)",
+        "#utf8\"é😀\"",
+        "\"😀z\"",
+        "(#t #f #t #f)",
+        "#t",
+        "1",
+        "4",
+    ];
+    let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "utf8.fx")))).collect();
     for (m, t) in runs {
         assert_eq!(t.join().expect("ran"), want, "{m}");
     }

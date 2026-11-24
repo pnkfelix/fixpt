@@ -394,6 +394,12 @@
       ((506) #t)  ; %symbol-hash
       ((522) #t)  ; %fx26-keyword->symbol
       ((523) #t)  ; %fx26-keyword?
+      ((559) #t)  ; %fx26-utf8?
+      ((560) #t)  ; %fx26-utf8-length
+      ((561) #t)  ; %fx26-utf8-byte-length
+      ((562) #t)  ; %fx26-utf8-ref
+      ((563) #t)  ; %fx26-utf8-next
+      ((565) #t)  ; %fx26-utf8=?
       (else #f))))
 
 ;; The `i`th kind shape test `name` takes a bloblet of (`shape_test`), or -1.

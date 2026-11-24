@@ -387,10 +387,22 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("bytevector-copy", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (alloc r2)) ((bytevectorof r1) int int) (bytevectorof r2)))"),
     ("bytevector-copy!", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (write r2)) ((bytevectorof r2) int (bytevectorof r1) int int) unit))"),
     ("bytevector=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((bytevectorof r1) (bytevectorof r2)) bool))"),
-    // A string's UTF-8, and back: bytes not UTF-8 give the offset of the
-    // first bad one.
-    ("string->utf8", "(poly ((r region) (s region)) (subr (maxeff (read s) (alloc r)) ((stringof s)) (bytevectorof r)))"),
-    ("utf8->string", "(poly ((r region)) (subr (read r) ((bytevectorof r)) (sumof (text string) (bad int))))"),
+    // UTF-8 text, `utf8` (`TODO.md` §306): frozen, indexed by byte offset,
+    // a character read where one starts (an error elsewhere), the offset
+    // after it the next; a piece between two such offsets. A `string`'s
+    // text as a `utf8`, and back, a copy each; bytes as UTF-8, validated
+    // (not UTF-8: the offset they are valid up to), and a `utf8`'s bytes.
+    ("utf8?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 utf8)) (else (not (shape 0 utf8))))))"),
+    ("utf8-length", "(subr pure (utf8) nat)"),
+    ("utf8-byte-length", "(subr pure (utf8) nat)"),
+    ("utf8-ref", "(subr pure (utf8 int) char)"),
+    ("utf8-next", "(subr pure (utf8 int) nat)"),
+    ("utf8-substring", "(subr pure (utf8 int int) utf8)"),
+    ("utf8=?", "(subr pure (utf8 utf8) bool)"),
+    ("string->utf8", "(poly ((s region)) (subr (read s) ((stringof s)) utf8))"),
+    ("utf8->string", "(subr pure (utf8) string)"),
+    ("bytes->utf8", "(poly ((r region)) (subr (read r) ((bytevectorof r)) (sumof (text utf8) (bad int))))"),
+    ("utf8->bytes", "(poly ((r region)) (subr (alloc r) (utf8) (bytevectorof r)))"),
     ("i8+", "(subr pure (i8 i8) i8)"),
     ("i8-", "(subr pure (i8 i8) i8)"),
     ("i8*", "(subr pure (i8 i8) i8)"),

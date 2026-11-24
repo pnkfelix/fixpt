@@ -2156,7 +2156,9 @@ should fragmentation call for moving code.
    zeroes the would-be fields, then changes the header once to the final
    field count, before the bloblet is published. The allocator is not
    required to hand out zeroed memory.
-5. **Strings stay UTF-32.**
+5. **Strings stay UTF-32.** (2026-11-23: and UTF-8 text is a type of its
+   own, `utf8`, frozen, indexed by byte offset; `TODO.md` §306,
+   `docs/fx26.md`, "UTF-8 text".)
 6. **The bootstrap interpreter reads bloblets directly**, including cellular
    ones, and compiled forms replace them incrementally, as in Forth.
 7. **The FX-26 compiler written in FX-26 emits bloblets directly**: cellular

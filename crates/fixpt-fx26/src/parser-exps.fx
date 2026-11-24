@@ -47,7 +47,7 @@
       ((int) 'int?) ((char) 'char?) ((bool) 'bool?) ((nil) 'null?) ((pair) 'pair?)
       ((string) 'string?) ((symbol) 'symbol?) ((procedure) 'procedure?) ((bloblet) 'array?)
       ((f64) 'f64?) ((f32) 'f32?) ((box) 'ref?) ((sum) 'sum?) ((product) 'product?)
-      ((vector) 'vector?) ((bytevector) 'bytevector?) ((keyword) 'keyword?)
+      ((vector) 'vector?) ((bytevector) 'bytevector?) ((keyword) 'keyword?) ((utf8) 'utf8?)
       (else '||))))
 (define typecase-usage string "`(typecase expression (shape name body) … (else name body))`")
 (define typecase-needs-else string "a `typecase` needs at least an `else` clause")
@@ -56,7 +56,7 @@
 (define typecase-shapes string
   (string-append "a shape `typecase` tests is one of "
                  "int, char, bool, nil, pair, string, symbol, procedure, bloblet, "
-                 "f64, f32, box, sum, product, vector, bytevector, keyword"))
+                 "f64, f32, box, sum, product, vector, bytevector, keyword, utf8"))
 ;; A `case` datum's kind (`TODO.md` §46): 0 an integer, 1 a character, 2
 ;; a string, 3 a symbol, 4 a boolean, and -1 none of these.
 (define case-kind (->* (syn) int)

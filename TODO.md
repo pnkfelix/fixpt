@@ -8552,6 +8552,43 @@ frozen value holds, found by its type).
   fail.
 Open: `utf8`'s kind; the operations' names.
 
+Taken up 2026-11-23, settled with the user:
+- **Kind 49**, a bloblet proper after `keyword`: one field, the length in
+  characters (a fixnum); the suffix the text, its exact length the
+  header's *B*; fields and suffix frozen. The collector, images and
+  `.fasl`s read only *F* and *B*, so need nothing of it.
+- **Operations**: `utf8?`; `utf8-length` (characters, O(1));
+  `utf8-byte-length`; `(utf8-ref s k)`, the character starting at byte
+  `k`, an error if `k` is out of range or inside a character;
+  `(utf8-next s k)`, the offset after it; `(utf8-substring s a b)`, both
+  ends checked; `utf8=?`; `(string->utf8 s)` and `(utf8->string u)`, the
+  conversions; `(bytes->utf8 bv)`, validating, `(sumof (text utf8) (bad
+  int))` (`bad` the offset valid up to); `(utf8->bytes u)`. Printed
+  `#utf8"…"`, no reader for it yet.
+- **Renamed now**, as decided: `string->utf8` and `utf8->string` are the
+  conversions at once; Heist (about 20 files) and kayak's tests move to
+  `utf8->bytes` and `bytes->utf8` on their side.
+- Native code calls each through the generic primitive call; fast paths
+  later.
+
+Done (2026-11-23): the heap's kind and its readers (`heap/utf8.rs`), the
+runtime's primitives (`%fx26-utf8?` and kin, appended; the two
+conversions' primitives in place, their meaning changed), the printer and
+`equal?`, a base type and a shape of their own in both checkers (last, so
+no type or shape before them moved; `typecase`'s `utf8`), the standard
+environment and the lowering, the evaluator written in FX-26 (`utf8` a
+`val` of its own), `docs/fx26.md`, "UTF-8 text". Fixed on the way: the
+FX-26 checker named shapes 13 to 16 "product" (`k-shape-name`). Tests:
+`fixpt-heap/tests/utf8.rs`, `run/utf8.fx` on every machine
+(`fixpt-cli/tests/stringof.rs`), the programs of the old meanings moved.
+For Heist and kayak, the rename, mechanical: a string's bytes,
+`(string->utf8 s)` before, are `(utf8->bytes (string->utf8 s))`; bytes as
+text, `(utf8->string bv)` before, giving `(sum text s)`, are `(bytes->utf8
+bv)`, giving `(sum text u)`, `u` a `utf8` (`(utf8->string u)` the
+`string`). Left: native fast paths (`utf8-ref`, the lengths); a reader of
+`#utf8"…"` and literals, with kayak; more operations as wanted
+(`utf8<?`, `utf8-append`, a search, a hash).
+
 ## 307. The cell verifier's rule for a path's types (the user's, 2026-11-22; beside §291)
 
 `fixpt verify` takes a value a path to a module reaches at the module's

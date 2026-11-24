@@ -60,7 +60,7 @@ const FAIL_FREE: &[&str] = &[
     "process-close-input", "process-signal", "process-exit", "process-news", "file-info", "read-symlink", "get-environment-variable", "list-dir", "write-file", "write-file-unflushed", "clock", "args",
     "sleep-until", "exit", "list", "length", "array-length", "bytevector-length", "flatarray-length", "string->list", "int->string",
     "acyclic?", "length-is?", "nat?", "certify-acyclic", "certify-nat", "certify-length", "cwcc", "make-continuation-prompt-tag",
-    "make-continuation-mark-key", "with-mark", "current-marks", "first-mark", "marks-of", "string->utf8", "utf8->string",
+    "make-continuation-mark-key", "with-mark", "current-marks", "first-mark", "marks-of", "string->utf8", "bytes->utf8", "utf8->bytes",
     "bytevector=?", "make-table", "table-ref", "table-set!", "table-delete!", "table-count",
 ];
 

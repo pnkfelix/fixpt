@@ -35,6 +35,7 @@ mod splice;
 mod symref;
 pub use symref::SymbolRef;
 mod tables;
+mod utf8;
 mod young;
 
 use tables::{Place, Which};

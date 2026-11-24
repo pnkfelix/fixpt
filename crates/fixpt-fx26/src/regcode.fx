@@ -540,7 +540,10 @@
         "%fx26-keyword?" "%fx26-keyword->symbol"
         "%fx26-suffix-ref-get" "%suffix-ref-owner" "%suffix-ref-offset" "%suffix-ref+"
         "%suffix-ref" "%fx26-flat-tag" "%fx26-flat-no-arm" "bytevector-length" "bytevector-u8-ref"
-        "%fx26-suffix-ref-length" "%fx26-suffix-fits")
+        "%fx26-suffix-ref-length" "%fx26-suffix-fits"
+        ;; UTF-8 text looked at (`TODO.md` §306), as `never_collects` has it.
+        "%fx26-utf8?" "%fx26-utf8-length" "%fx26-utf8-byte-length" "%fx26-utf8-ref"
+        "%fx26-utf8-next" "%fx26-utf8=?")
        #t)
       (else (or (r-eqtable-quick? name) (r-fixed-width-op? name))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never

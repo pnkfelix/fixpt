@@ -576,6 +576,8 @@
       (k-basic "i8") (k-basic "u8")
       ;; 21, a keyword (`#:name`), after them, as `check.rs` makes it.
       (k-basic "keyword")
+      ;; 22, UTF-8 text (`TODO.md` §306), last, as `check.rs` makes it.
+      (k-basic "utf8")
       #u)))
 (define n-copy-memo (->* (k-region-lists k-region-lists int) unit)
   (lambda (from to i)

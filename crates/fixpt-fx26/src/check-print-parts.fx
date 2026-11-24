@@ -374,7 +374,7 @@
 ;; former, as shown). The shapes, by number in `check.rs`'s `SHAPES` order:
 ;; 0 int, 1 f64, 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol,
 ;; 9 procedure, 10 bloblet, 11 box, 12 sum, 13 product, 14 vector, 15
-;; bytevector, 16 keyword. A type's shapes are a mask, bit `k` shape `k`'s,
+;; bytevector, 16 keyword, 17 utf8. A type's shapes are a mask, bit `k` shape `k`'s,
 ;; or -1 if they are not known.
 (define k-base-shape (->* (symbol) int)
   (lambda (s)
@@ -384,7 +384,7 @@
       (("string") 7)
       ;; `unit` is the symbol `#u` at run time.
       (("symbol" "unit") 8)
-      (("vector") 14) (("bytevector") 15) (("keyword") 16)
+      (("vector") 14) (("bytevector") 15) (("keyword") 16) (("utf8") 17)
       (else -1))))
 ;; Shape `k`'s bit, or -1 for none known.
 (define k-shape-bit (->* (int) int)
@@ -656,7 +656,8 @@
     (case k
       ((0) "int") ((1) "f64") ((2) "f32") ((3) "char") ((4) "bool") ((5) "nil") ((6) "pair")
       ((7) "string") ((8) "symbol") ((9) "procedure") ((10) "bloblet") ((11) "box")
-      ((12) "sum") (else "product"))))
+      ((12) "sum") ((13) "product") ((14) "vector") ((15) "bytevector") ((16) "keyword")
+      ((17) "utf8") (else "?"))))
 ;; A proposition, and a size in one, as written.
 (define k-show-term (->* (k-term) string)
   (lambda (t)

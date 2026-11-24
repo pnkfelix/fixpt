@@ -256,6 +256,15 @@ fn put(
                 // `#:` and its name, written as a symbol is.
                 out.push_str("#:");
                 put(heap, heap.keyword_symbol(v), write, labels, out);
+            } else if heap.is_utf8(v) {
+                // UTF-8 text (`TODO.md` §306): written `#utf8"…"`, its text
+                // as a string's is; displayed, the text.
+                if write {
+                    out.push_str("#utf8");
+                    put_string(out, &heap.utf8_string(v));
+                } else {
+                    out.push_str(&heap.utf8_string(v));
+                }
             } else if kind == "sum" {
                 let tag = heap.sum_tag(v);
                 out.push_str(&format!("#<sum {}>", write_value(heap, tag)));
