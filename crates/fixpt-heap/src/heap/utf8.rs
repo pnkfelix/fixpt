@@ -1,16 +1,34 @@
 //! UTF-8 text (FX-26's `utf8`, `TODO.md` §306): a frozen bloblet of no
 //! fields whose suffix is its text, valid UTF-8, the header's B its length
-//! in bytes. Indexed by byte offset, as Rust's `str` is: a character is
-//! read where one starts, in O(1); the `i`th character is a walk, and so
-//! is its count of characters, which is not kept (§310), but for text all
-//! ASCII, marked so where it is made, a kind of its own (`utf8-ascii`),
-//! whose count is its length. Made only of a `&str`, so never invalid.
+//! in bytes; or a *slice* of one (§310), a view of a piece of another's
+//! text, nothing copied. Indexed by byte offset, as Rust's `str` is: a
+//! character is read where one starts, in O(1); the `i`th character is a
+//! walk, and so is its count of characters, which is not kept (§310), but
+//! for text all ASCII, marked so where it is made, a kind of its own
+//! (`utf8-ascii`), whose count is its length. Made only of a `&str`, so
+//! never invalid; a slice only between two characters' starts, so never
+//! either.
+//!
+//! A slice is frozen, of the kind `utf8-slice`, its values its owner (a
+//! whole `utf8`, never a slice: a slice of a slice is one of the first's
+//! owner), its start and end, offsets into the owner's suffix in bytes,
+//! and whether it is marked all ASCII, its owner's mark (never found by
+//! looking at its piece). It has a trailer, so the word before its
+//! (empty) suffix is never a header, as a whole one's is: what native code
+//! tests to read a whole one in line.
 
 use super::Heap;
 use crate::value::Value;
 
 const UTF8: u8 = crate::layout::kind("utf8");
 const UTF8_ASCII: u8 = crate::layout::kind("utf8-ascii");
+const UTF8_SLICE: u8 = crate::layout::kind("utf8-slice");
+
+/// A slice's values (`Heap::make_frozen`'s order).
+const SLICE_OWNER: usize = 0;
+const SLICE_START: usize = 1;
+const SLICE_END: usize = 2;
+const SLICE_ASCII: usize = 3;
 
 impl Heap {
     /// The `utf8` of `text`: marked all ASCII, if it is, here.
@@ -22,15 +40,35 @@ impl Heap {
         u
     }
 
-    /// Whether `v` is a `utf8`.
+    /// Whether `v` is a `utf8`, whole or a slice.
     pub fn is_utf8(&self, v: Value) -> bool {
-        v.is_bloblet() && !v.is_suffix_ref() && matches!(self.bloblet_kind(v), UTF8 | UTF8_ASCII)
+        v.is_bloblet() && !v.is_suffix_ref() && matches!(self.bloblet_kind(v), UTF8 | UTF8_ASCII | UTF8_SLICE)
+    }
+
+    /// Whether `utf8` `u` is a slice.
+    pub fn utf8_is_slice(&self, u: Value) -> bool {
+        debug_assert!(self.is_utf8(u), "{u:?} is not a utf8");
+        self.bloblet_kind(u) == UTF8_SLICE
+    }
+
+    /// Where `u`'s text is: the whole `utf8` whose suffix holds it, the
+    /// offset there it starts at, and its length in bytes.
+    fn utf8_span(&self, u: Value) -> (Value, usize, usize) {
+        debug_assert!(self.is_utf8(u), "{u:?} is not a utf8");
+        if self.bloblet_kind(u) != UTF8_SLICE {
+            return (u, 0, self.bloblet_head(u).bytes);
+        }
+        let at = |i| self.bloblet_value(u, i).as_fixnum() as usize;
+        let (start, end) = (at(SLICE_START), at(SLICE_END));
+        (self.bloblet_value(u, SLICE_OWNER), start, end - start)
     }
 
     /// Whether `utf8` `u` is marked all ASCII.
     pub fn utf8_is_ascii(&self, u: Value) -> bool {
-        debug_assert!(self.is_utf8(u), "{u:?} is not a utf8");
-        self.bloblet_kind(u) == UTF8_ASCII
+        match self.bloblet_kind(u) {
+            UTF8_SLICE => self.bloblet_value(u, SLICE_ASCII).is_true(),
+            k => k == UTF8_ASCII,
+        }
     }
 
     /// `u`'s length in characters: its length in bytes if it is marked all
@@ -39,24 +77,43 @@ impl Heap {
         if self.utf8_is_ascii(u) {
             return self.utf8_len(u);
         }
-        self.bloblet_bytes(u).iter().filter(|b| *b & 0xc0 != 0x80).count()
+        self.utf8_bytes(u).iter().filter(|b| *b & 0xc0 != 0x80).count()
     }
 
     /// `u`'s length in bytes.
     pub fn utf8_len(&self, u: Value) -> usize {
-        debug_assert!(self.is_utf8(u), "{u:?} is not a utf8");
-        self.bloblet_head(u).bytes
+        self.utf8_span(u).2
+    }
+
+    /// `u`'s bytes, copied out.
+    pub fn utf8_bytes(&self, u: Value) -> Vec<u8> {
+        let (owner, start, len) = self.utf8_span(u);
+        (start..start + len).map(|i| self.bloblet_byte(owner, i).expect("in its owner")).collect()
     }
 
     /// `u`'s text, copied out.
     pub fn utf8_string(&self, u: Value) -> String {
-        debug_assert!(self.is_utf8(u), "{u:?} is not a utf8");
-        String::from_utf8(self.bloblet_bytes(u)).expect("a utf8 is made valid")
+        String::from_utf8(self.utf8_bytes(u)).expect("a utf8 is made valid")
     }
 
     /// The byte of `u` at `k`, which must be in range.
     fn utf8_byte(&self, u: Value, k: usize) -> u8 {
-        self.bloblet_byte(u, k).expect("in range")
+        let (owner, start, len) = self.utf8_span(u);
+        debug_assert!(k < len, "{k} is past {u:?}");
+        self.bloblet_byte(owner, start + k).expect("in range")
+    }
+
+    /// A slice of `u`'s bytes from `a` to `b`, each a boundary
+    /// (`utf8_boundary`), nothing copied; none if either is not, or
+    /// `a > b`. Its owner `u`'s, and its mark.
+    pub fn utf8_slice(&mut self, u: Value, a: usize, b: usize) -> Option<Value> {
+        if a > b || !self.utf8_boundary(u, a) || !self.utf8_boundary(u, b) {
+            return None;
+        }
+        let (owner, start, _) = self.utf8_span(u);
+        let ascii = Value::boolean(self.utf8_is_ascii(u));
+        let fields = [owner, Value::fixnum((start + a) as i64), Value::fixnum((start + b) as i64), ascii];
+        Some(self.make_frozen(UTF8_SLICE, &fields))
     }
 
     /// Whether byte offset `k` is where a character of `u` starts (or its
@@ -97,6 +154,6 @@ impl Heap {
 
     /// Whether two `utf8`s have the same text.
     pub fn utf8_eq(&self, a: Value, b: Value) -> bool {
-        self.utf8_len(a) == self.utf8_len(b) && self.bloblet_bytes(a) == self.bloblet_bytes(b)
+        self.utf8_len(a) == self.utf8_len(b) && self.utf8_bytes(a) == self.utf8_bytes(b)
     }
 }

@@ -169,6 +169,16 @@
            (or (string=? name "utf8-byte-length") (string=? name "%fx26-utf8-byte-length")))
           ((string=? what "ref") (or (string=? name "utf8-ref") (string=? name "%fx26-utf8-ref")))
           (else (or (string=? name "utf8-next") (string=? name "%fx26-utf8-next"))))))
+;; The low bits of a whole `utf8`'s header marked all ASCII, its kind and
+;; its tag (`utf8_ascii_header_low`).
+(define ar-utf8-ascii-low (subr pure () int)
+  (lambda () (+ (arithmetic-shift kind-utf8-ascii header-kind-lo) a-tag-header)))
+;; To `slow` unless `h`, the word before a `utf8`'s bytes, is a header: a
+;; whole one's, not a slice's trailer. Uses X14.
+(define ar-utf8-whole (subr (maxeff ar-assembles spin) (int int) unit)
+  (lambda (h slow)
+    (begin (n-e (arm-and-low n-x14 h 3)) (n-e (arm-cmp-imm n-x14 a-tag-header))
+           (n-b-cond ar-ne slow))))
 ;; UTF-8 text `x` and offset `y` into `RESULT`, as `utf8_fast` does it:
 ;; whether this is one, its fast path emitted, to `slow` for what it
 ;; leaves (a character of more than one byte, an offset not one).
@@ -178,8 +188,8 @@
       ((ar-utf8-is? name "length")
        (begin
          (n-e (arm-ldur n-x15 x (n-field-off 1)))
-         (n-e (arm-ubfx n-x14 n-x15 header-kind-lo header-kind-width))
-         (n-e (arm-cmp-imm n-x14 kind-utf8-ascii))
+         (n-e (arm-and-low n-x14 n-x15 (+ header-kind-lo header-kind-width)))
+         (n-e (arm-cmp-imm n-x14 (ar-utf8-ascii-low)))
          (n-b-cond ar-ne slow)
          (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
          (n-e (arm-add-lsl a-result a-xzr n-x15 3))
@@ -187,6 +197,7 @@
       ((ar-utf8-is? name "byte-length")
        (begin
          (n-e (arm-ldur n-x15 x (n-field-off 1)))
+         (ar-utf8-whole n-x15 slow)
          (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
          (n-e (arm-add-lsl a-result a-xzr n-x15 3))
          #t))
@@ -195,6 +206,7 @@
          (n-e (arm-tst-low y 3))
          (n-b-cond ar-ne slow)
          (n-e (arm-ldur n-x15 x (n-field-off 1)))
+         (ar-utf8-whole n-x15 slow)
          (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
          (n-e (arm-asr-imm n-x14 y 3))
          (n-e (arm-cmp n-x14 n-x15))

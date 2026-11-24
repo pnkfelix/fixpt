@@ -72,6 +72,7 @@
 (define kind-keyword int 48)
 (define kind-utf8 int 49)
 (define kind-utf8-ascii int 50)
+(define kind-utf8-slice int 51)
 (define kind-extension int 255)
 
 ;;; A closure's fields, and an environment frame's, by negative offset.

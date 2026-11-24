@@ -278,6 +278,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("utf8-ref", "%fx26-utf8-ref", true),
     ("utf8-next", "%fx26-utf8-next", true),
     ("utf8-substring", "%fx26-utf8-substring", true),
+    ("utf8-slice", "%fx26-utf8-slice", true),
     ("utf8=?", "%fx26-utf8=?", true),
     ("bytes->utf8", "%fx26-bytes->utf8", true),
     ("utf8->bytes", "%fx26-utf8->bytes", true),

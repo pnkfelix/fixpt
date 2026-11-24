@@ -8928,7 +8928,12 @@ dropped, `utf8-ascii` and the mark (done 2026-11-24: `heap/utf8.rs`,
 kind 50; `utf8-length` in line only of a marked one, in each native
 compiler; `run/utf8.fx`'s counts, marked and not, on every machine). (3) The view types, the subtyping
 rule, the slices and their operations, both checkers, the runtime, the
-evaluator in FX-26, native fast paths. (4) `bytes-as-utf8`. Each its own
+evaluator in FX-26, native fast paths: first (3a) `utf8-slice`, a type
+already its own view (done 2026-11-24: kind 51, `Heap::utf8_slice`, every
+reader through `utf8_span`; native code tests the word before the bytes
+is a header, a whole one's, so a slice is the primitive's, its fast path
+in line left to a measurement; `run/utf8.fx`'s slices and the refusal
+test's, on every machine); then (3b) `bytes` and `str`. (4) `bytes-as-utf8`. Each its own
 commit, both suites between.
 
 Left to say: whether `utf8-slice` is worth a fast path in line at once,

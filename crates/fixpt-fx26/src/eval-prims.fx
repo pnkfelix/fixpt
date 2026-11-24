@@ -329,10 +329,10 @@
   (lambda ()
     (let ((b (lambda ((xs vals) (i int)) (as-bytes (ev-arg xs i))))
           (n (lambda ((xs vals) (i int)) (as-int (ev-arg xs i))))
+          (u (lambda ((xs vals) (i int)) (as-utf8 (ev-arg xs i))))
           (made (lambda ((b (bytevectorof @v))) (the val (o-bytes b)))))
       (begin
-        (prim! 'make-bytevector
-               (lambda (xs) (made (make-bytevector (n xs 0) (int->u8 (n xs 1))))))
+        (prim! 'make-bytevector (lambda (xs) (made (make-bytevector (n xs 0) (int->u8 (n xs 1))))))
         (prim! 'bytevector-length (lambda (xs) (bytevector-length (b xs 0))))
         (prim! 'bytevector-u8-ref (lambda (xs) (u8->int (bytevector-u8-ref (b xs 0) (n xs 1)))))
         (prim! 'datum-bytevector-length (lambda (xs) (bytevector-length (b xs 0))))
@@ -354,15 +354,15 @@
                    (text u (the val (o-sum 'text u)))
                    (bad k (the val (o-sum 'bad k))))))
         (prim! 'string->utf8 (lambda (xs) (string->utf8 (as-str (ev-arg xs 0)))))
-        (prim! 'utf8->string (lambda (xs) (utf8->string (as-utf8 (ev-arg xs 0)))))
+        (prim! 'utf8->string (lambda (xs) (utf8->string (u xs 0))))
         (prim! 'utf8? (lambda (xs) (utf8? (ev-arg xs 0))))
-        (prim! 'utf8-length (lambda (xs) (utf8-length (as-utf8 (ev-arg xs 0)))))
-        (prim! 'utf8-byte-length (lambda (xs) (utf8-byte-length (as-utf8 (ev-arg xs 0)))))
-        (prim! 'utf8-ref (lambda (xs) (utf8-ref (as-utf8 (ev-arg xs 0)) (n xs 1))))
-        (prim! 'utf8-next (lambda (xs) (utf8-next (as-utf8 (ev-arg xs 0)) (n xs 1))))
-        (prim! 'utf8-substring
-               (lambda (xs) (utf8-substring (as-utf8 (ev-arg xs 0)) (n xs 1) (n xs 2))))
-        (prim! 'utf8=? (lambda (xs) (utf8=? (as-utf8 (ev-arg xs 0)) (as-utf8 (ev-arg xs 1)))))))))
+        (prim! 'utf8-length (lambda (xs) (utf8-length (u xs 0))))
+        (prim! 'utf8-byte-length (lambda (xs) (utf8-byte-length (u xs 0))))
+        (prim! 'utf8-ref (lambda (xs) (utf8-ref (u xs 0) (n xs 1))))
+        (prim! 'utf8-next (lambda (xs) (utf8-next (u xs 0) (n xs 1))))
+        (prim! 'utf8-substring (lambda (xs) (utf8-substring (u xs 0) (n xs 1) (n xs 2))))
+        (prim! 'utf8-slice (lambda (xs) (utf8-slice (u xs 0) (n xs 1) (n xs 2))))
+        (prim! 'utf8=? (lambda (xs) (utf8=? (u xs 0) (u xs 1))))))))
 
 ;; `(sum failed e)`, `e` an `io-error`, as the evaluator's value: a
 ;; product of its kind and detail.

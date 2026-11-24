@@ -398,6 +398,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("utf8-ref", "(subr pure (utf8 int) char)"),
     ("utf8-next", "(subr pure (utf8 int) nat)"),
     ("utf8-substring", "(subr pure (utf8 int int) utf8)"),
+    // A view of the piece, nothing copied (`TODO.md` §310).
+    ("utf8-slice", "(subr pure (utf8 int int) utf8)"),
     ("utf8=?", "(subr pure (utf8 utf8) bool)"),
     ("string->utf8", "(poly ((s region)) (subr (read s) ((stringof s)) utf8))"),
     ("utf8->string", "(subr pure (utf8) string)"),

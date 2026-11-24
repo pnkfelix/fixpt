@@ -332,19 +332,23 @@ impl Asm {
     fn utf8_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
         match what {
             "utf8-length" => {
-                use fixpt_heap::layout::{kind, H_KIND};
+                use fixpt_heap::layout::H_KIND;
                 self.e(load(X16, field(x, 1)));
                 self.e(mov(RCX, X16));
-                self.e(shr_imm(RCX, H_KIND.lo as u8));
-                self.e(and_imm(RCX, H_KIND.mask() as i32));
-                self.e(cmp_imm(RCX, const { kind("utf8-ascii") } as i32));
+                self.e(and_imm(RCX, ((1 << (H_KIND.lo + H_KIND.width)) - 1) as i32));
+                self.e(cmp_imm(RCX, crate::direct::utf8_ascii_header_low() as i32));
                 self.jcc(Cond::Ne, slow);
                 self.e(shr_imm(X16, fixpt_heap::layout::H_BYTES.lo as u8));
                 self.e(shl_imm(X16, 3));
                 self.e(mov(RESULT, X16));
             }
             "utf8-byte-length" => {
-                self.e(load(RESULT, field(x, 1)));
+                self.e(load(RCX, field(x, 1)));
+                self.e(mov(RDX, RCX));
+                self.e(and_imm(RDX, 7));
+                self.e(cmp_imm(RDX, fixpt_heap::value::TAG_HEADER as i32));
+                self.jcc(Cond::Ne, slow);
+                self.e(mov(RESULT, RCX));
                 self.e(shr_imm(RESULT, fixpt_heap::layout::H_BYTES.lo as u8));
                 self.e(shl_imm(RESULT, 3));
             }
@@ -352,6 +356,10 @@ impl Asm {
                 self.e(test_imm(y, 7));
                 self.jcc(Cond::Ne, slow);
                 self.e(load(X16, field(x, 1)));
+                self.e(mov(RCX, X16));
+                self.e(and_imm(RCX, 7));
+                self.e(cmp_imm(RCX, fixpt_heap::value::TAG_HEADER as i32));
+                self.jcc(Cond::Ne, slow);
                 self.e(shr_imm(X16, fixpt_heap::layout::H_BYTES.lo as u8));
                 self.e(mov(RCX, y));
                 self.e(sar_imm(RCX, 3));

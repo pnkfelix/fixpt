@@ -206,6 +206,10 @@ pub const KINDS: &[Kind] = &[
     // The same, all ASCII, so marked where it is made (`TODO.md` §310):
     // its count of characters its length in bytes.
     Kind { name: "utf8-ascii", code: 50, traced: true, settable: false },
+    // A slice of a `utf8` (`TODO.md` §310): frozen, its values its owner,
+    // a whole `utf8`, its start and end in the owner's suffix, and its
+    // owner's mark; a trailer (`heap/utf8.rs`).
+    Kind { name: "utf8-slice", code: 51, traced: true, settable: false },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.

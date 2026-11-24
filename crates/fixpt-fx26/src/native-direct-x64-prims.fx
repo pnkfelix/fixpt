@@ -126,23 +126,28 @@
            (da-e (x86-shift-imm da-shl d-x16 3))
            (da-mov d-result d-x16)
            #t))
-        ;; UTF-8 text: its header the word before its bytes, its length in
-        ;; bytes the header's B; its count of characters that where it is
-        ;; marked all ASCII; a character, or the offset after it, only of
-        ;; one byte (ASCII).
+        ;; UTF-8 text, whole: its header the word before its bytes (a
+        ;; slice's is a trailer, the primitive's), its length in bytes the
+        ;; header's B; its count of characters that where it is marked all
+        ;; ASCII, the kind and the tag compared at once; a character, or
+        ;; the offset after it, only of one byte (ASCII).
         ((string=? name "%fx26-utf8-length")
          (begin (da-ld d-x13 x (dq-fld 1))
-                (da-ubfx d-x14 d-x13 d-h-kind-lo d-h-kind-width)
-                (da-e (x86-alu-imm da-cmp d-x14 d-kind-utf8-ascii)) (da-jcc da-c-ne slow)
+                (da-mov d-x14 d-x13)
+                (da-e (x86-alu-imm da-and d-x14 (dq-kind-tag-mask)))
+                (da-e (x86-alu-imm da-cmp d-x14 (dq-utf8-ascii-low)))
+                (da-jcc da-c-ne slow)
                 (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
                 (dq-fixnum-of d-x13) #t))
         ((string=? name "%fx26-utf8-byte-length")
-         (begin (da-ld d-x13 x (dq-fld 1)) (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
+         (begin (da-ld d-x13 x (dq-fld 1)) (dq-whole d-x14 d-x13 slow)
+                (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
                 (dq-fixnum-of d-x13) #t))
         ((or (string=? name "%fx26-utf8-ref") (string=? name "%fx26-utf8-next"))
          (begin
            (da-e (x86-test-imm y 7)) (da-jcc da-c-ne slow)
-           (da-ld d-x14 x (dq-fld 1)) (da-e (x86-shift-imm da-shr d-x14 d-h-bytes-lo))
+           (da-ld d-x14 x (dq-fld 1)) (dq-whole d-x15 d-x14 slow)
+           (da-e (x86-shift-imm da-shr d-x14 d-h-bytes-lo))
            (da-mov d-x15 y) (da-e (x86-shift-imm da-sar d-x15 3))
            (da-e (x86-alu da-cmp d-x15 d-x14)) (da-jcc da-c-ae slow)
            (da-e (x86-load8-ix d-x16 x d-x15 1 -4))
@@ -162,6 +167,18 @@
         ((string=? name "%bloblet-fields") (begin (dq-bloblet-fields slow) #t))
         (else (dr-narrow-fast name y slow))))))
 
+;; A header's kind and tag, its low bits; and those of a whole `utf8`'s
+;; marked all ASCII (`utf8_ascii_header_low`).
+(define dq-kind-tag-mask (subr pure () int)
+  (lambda () (- (arithmetic-shift 1 (+ d-h-kind-lo d-h-kind-width)) 1)))
+(define dq-utf8-ascii-low (subr pure () int)
+  (lambda () (+ (arithmetic-shift d-kind-utf8-ascii d-h-kind-lo) d-tag-header)))
+;; To `slow` unless `h`, the word before a `utf8`'s bytes, is a header: a
+;; whole one's, not a slice's trailer. `t` its tag.
+(define dq-whole (subr da-assembles (int int int) unit)
+  (lambda (t h slow)
+    (begin (da-mov t h) (da-e (x86-alu-imm da-and t 7))
+           (da-e (x86-alu-imm da-cmp t d-tag-header)) (da-jcc da-c-ne slow))))
 ;; The quotient, if it is a fixnum: else `RESULT` back, and slow.
 (define dq-quotient (subr da-assembles (int) unit)
   (lambda (slow)

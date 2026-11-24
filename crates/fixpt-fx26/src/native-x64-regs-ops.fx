@@ -84,6 +84,11 @@
            (or (string=? name "utf8-byte-length") (string=? name "%fx26-utf8-byte-length")))
           ((string=? what "ref") (or (string=? name "utf8-ref") (string=? name "%fx26-utf8-ref")))
           (else (or (string=? name "utf8-next") (string=? name "%fx26-utf8-next"))))))
+;; To `slow` unless `t`, a copy of the word before a `utf8`'s bytes, is a
+;; header: a whole one's, not a slice's trailer.
+(define rg-utf8-whole (subr (maxeff x-assembles spin) (int int) unit)
+  (lambda (t slow)
+    (begin (x-alu-imm x-and t 7) (x-alu-imm x-cmp t r-tag-header) (x-jcc x-c-ne slow))))
 ;; UTF-8 text `x` and offset `y` into `RESULT`, as `utf8_fast` does it:
 ;; whether this is one, its fast path emitted, to `slow` for what it
 ;; leaves. Neither is RCX, RDX or X16.
@@ -94,9 +99,8 @@
        (begin
          (x-load n-x16 x (x-field 1))
          (x-mov r-rcx n-x16)
-         (x-e (x86-shift-imm x-shr r-rcx header-kind-lo))
-         (x-alu-imm x-and r-rcx (- (rg-pow2 header-kind-width) 1))
-         (x-alu-imm x-cmp r-rcx kind-utf8-ascii)
+         (x-alu-imm x-and r-rcx (- (rg-pow2 (+ header-kind-lo header-kind-width)) 1))
+         (x-alu-imm x-cmp r-rcx (+ (* kind-utf8-ascii (rg-pow2 header-kind-lo)) r-tag-header))
          (x-jcc x-c-ne slow)
          (x-e (x86-shift-imm x-shr n-x16 header-bytes-lo))
          (x-e (x86-shift-imm rg-shl n-x16 3))
@@ -104,7 +108,10 @@
          #t))
       ((rg-utf8-is? name "byte-length")
        (begin
-         (x-load r-result x (x-field 1))
+         (x-load r-rcx x (x-field 1))
+         (x-mov r-rdx r-rcx)
+         (rg-utf8-whole r-rdx slow)
+         (x-mov r-result r-rcx)
          (x-e (x86-shift-imm x-shr r-result header-bytes-lo))
          (x-e (x86-shift-imm rg-shl r-result 3))
          #t))
@@ -113,6 +120,8 @@
          (x-e (x86-test-imm y 7))
          (x-jcc x-c-ne slow)
          (x-load n-x16 x (x-field 1))
+         (x-mov r-rcx n-x16)
+         (rg-utf8-whole r-rcx slow)
          (x-e (x86-shift-imm x-shr n-x16 header-bytes-lo))
          (x-mov r-rcx y)
          (x-e (x86-shift-imm x-sar r-rcx 3))

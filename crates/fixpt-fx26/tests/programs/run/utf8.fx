@@ -5,7 +5,9 @@
 ; validated, and the offset bytes not UTF-8 are valid up to; told apart by
 ; `utf8?` and by `typecase`. Text all ASCII is marked so where it is made
 ; (TODO.md §310), its count of characters its length in bytes: a piece of
-; text that is not, copied out, too.
+; text that is not, copied out, too. A slice (§310) is a view of a piece,
+; read as the piece copied is; a slice of a slice too; one of ASCII text
+; walked as a whole one is.
 (define t (string->utf8 "aé\x1F600;z"))
 (define* walk (subr (maxeff (alloc @heap) spin) (utf8 int) (listof char @heap))
   (lambda (u k)
@@ -22,3 +24,13 @@
 (typecase t (utf8 u (utf8-length u)) (else y 0))
 (define* count (subr pure (utf8) nat) (lambda (u) (utf8-length u)))
 (list (count (string->utf8 "abc")) (count (utf8-substring t 7 8)) (count t))
+(define s (utf8-slice t 1 7))
+s
+(list (utf8-length s) (utf8-byte-length s))
+(utf8->string s)
+(utf8=? s (utf8-substring t 1 7))
+(walk (utf8-slice t 0 8) 0)
+(define w (utf8-slice (utf8-slice (string->utf8 "hello, world") 7 12) 0 5))
+w
+(list (count w) (utf8-next w 4))
+(walk w 0)

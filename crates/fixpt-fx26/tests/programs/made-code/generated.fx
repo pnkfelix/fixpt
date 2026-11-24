@@ -31,7 +31,7 @@
       (compiled-code 34) (env-frame 35) (sum 36) (product 37) (cellular-closure 38)
       (cellular-continuation 39) (register-code 40) (native-closure 41) (flat-array 42)
       (eqtable 43) (weak-pair 44) (native-frame 45) (icell 46) (mailbox 47) (keyword 48) (utf8 49)
-      (utf8-ascii 50)))
+      (utf8-ascii 50) (utf8-slice 51)))
   (closures (kind 41) (code-field 2) (first-free-field 3) (native-when-code-at-least code-lo))
   (code (runs-at reference plus x26) (field-k-before-code 8))
   (frames

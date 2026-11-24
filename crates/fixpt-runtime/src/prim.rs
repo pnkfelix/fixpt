@@ -3495,6 +3495,15 @@ prims! {
         let s = get_utf8(rt, a[0])?;
         Ok(rt.heap.make_bytevector(s.as_bytes()))
     });
+    // A slice of a `utf8` (`TODO.md` §310): a view of the piece between two
+    // offsets, each a character's start or the end, nothing copied. Last,
+    // so that no primitive's number moves.
+    "%fx26-utf8-slice", 3, Some(3), simple!(|rt, a| {
+        let end = utf8_offset(rt, a[0], a[2], true)?;
+        let start = utf8_offset(rt, a[0], a[1], true)?;
+        if start > end { return rt.fail("utf8-slice: the start is after the end", &[a[1], a[2]]); }
+        Ok(rt.heap.utf8_slice(a[0], start, end).expect("between boundaries"))
+    });
 }
 
 /// Promise states. `[state, payload]`.

@@ -75,6 +75,16 @@ fn utf8_text_on_every_machine() {
         "4",
         "count",
         "(3 1 4)",
+        "s",
+        "#utf8\"é😀\"",
+        "(2 6)",
+        "\"é😀\"",
+        "#t",
+        "(#\\a #\\é #\\😀 #\\z)",
+        "w",
+        "#utf8\"world\"",
+        "(5 5)",
+        "(#\\w #\\o #\\r #\\l #\\d)",
     ];
     let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "utf8.fx")))).collect();
     for (m, t) in runs {
@@ -90,22 +100,29 @@ fn utf8_text_on_every_machine() {
 fn utf8_offsets_refused_on_every_machine() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("utf8-refused");
     std::fs::create_dir_all(&dir).expect("a directory");
+    // Each case's text, `t` or a slice of it, its operation, offset and
+    // result type, and what the run's last line says.
+    let slice = "(utf8-slice t 1 7)";
     let cases = [
-        ("ref-inside", "utf8-ref", "2", "char", "utf8: the offset is inside a character"),
-        ("next-inside", "utf8-next", "2", "nat", "utf8: the offset is inside a character"),
-        ("ref-end", "utf8-ref", "8", "char", "utf8 index out of range (length 8)"),
-        ("next-end", "utf8-next", "8", "nat", "utf8 index out of range (length 8)"),
-        ("ref-negative", "utf8-ref", "-1", "char", "utf8 index out of range (length 8)"),
-        ("ref-bignum", "utf8-ref", "1180591620717411303424", "char", "expected an exact integer that fits a machine word"),
-        ("ref-last", "utf8-ref", "7", "char", "#\\z"),
-        ("next-last", "utf8-next", "7", "nat", "8"),
+        ("ref-inside", "t", "utf8-ref", "2", "char", "utf8: the offset is inside a character"),
+        ("next-inside", "t", "utf8-next", "2", "nat", "utf8: the offset is inside a character"),
+        ("ref-end", "t", "utf8-ref", "8", "char", "utf8 index out of range (length 8)"),
+        ("next-end", "t", "utf8-next", "8", "nat", "utf8 index out of range (length 8)"),
+        ("ref-negative", "t", "utf8-ref", "-1", "char", "utf8 index out of range (length 8)"),
+        ("ref-bignum", "t", "utf8-ref", "1180591620717411303424", "char", "expected an exact integer that fits a machine word"),
+        ("ref-last", "t", "utf8-ref", "7", "char", "#\\z"),
+        ("next-last", "t", "utf8-next", "7", "nat", "8"),
+        // A slice's offsets are its own (`TODO.md` §310).
+        ("slice-ref-inside", slice, "utf8-ref", "1", "char", "utf8: the offset is inside a character"),
+        ("slice-ref-end", slice, "utf8-ref", "6", "char", "utf8 index out of range (length 6)"),
+        ("slice-ref-first", slice, "utf8-ref", "0", "char", "#\\é"),
     ];
     let mut runs = Vec::new();
-    for (name, op, k, ty, want) in cases {
+    for (name, text, op, k, ty, want) in cases {
         let path = dir.join(format!("{name}.fx"));
         let text = format!(
             "(define t (string->utf8 \"a\\xe9;\\x1F600;z\"))\n\
-             (define* f (subr (maxeff spin) (utf8 int) {ty}) (lambda (u k) ({op} u k)))\n(f t {k})\n"
+             (define* f (subr (maxeff spin) (utf8 int) {ty}) (lambda (u k) ({op} u k)))\n(f {text} {k})\n"
         );
         std::fs::write(&path, text).expect("written");
         for m in machines() {

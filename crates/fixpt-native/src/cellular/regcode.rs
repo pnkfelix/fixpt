@@ -79,16 +79,19 @@ impl Asm {
     fn utf8_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
         match what {
             "utf8-length" => {
-                use fixpt_heap::layout::{kind, H_KIND};
+                use fixpt_heap::layout::H_KIND;
                 self.e(ldur(X15, x, field_off(1)));
-                self.e(ubfx(X14, X15, H_KIND.lo, H_KIND.width));
-                self.e(cmp_imm(X14, const { kind("utf8-ascii") } as u32));
+                self.e(and_low(X14, X15, H_KIND.lo + H_KIND.width));
+                self.e(cmp_imm(X14, crate::direct::utf8_ascii_header_low() as u32));
                 self.b_cond(Cond::Ne, slow);
                 self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
                 self.e(add_lsl(RESULT, XZR, X15, 3));
             }
             "utf8-byte-length" => {
                 self.e(ldur(X15, x, field_off(1)));
+                self.e(and_low(X14, X15, 3));
+                self.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+                self.b_cond(Cond::Ne, slow);
                 self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
                 self.e(add_lsl(RESULT, XZR, X15, 3));
             }
@@ -96,6 +99,9 @@ impl Asm {
                 self.e(tst_low(y, 3));
                 self.b_cond(Cond::Ne, slow);
                 self.e(ldur(X15, x, field_off(1)));
+                self.e(and_low(X14, X15, 3));
+                self.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+                self.b_cond(Cond::Ne, slow);
                 self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
                 self.e(asr_imm(X14, y, 3));
                 self.e(cmp(X14, X15));

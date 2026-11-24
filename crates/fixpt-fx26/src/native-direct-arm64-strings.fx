@@ -131,20 +131,22 @@
            (ada-imm d-x14 d-char0)
            (ada-e (arm-add-lsl d-result d-x14 d-x16 8))
            #t))
-        ;; UTF-8 text: its header the word before its bytes, its length in
-        ;; bytes the header's B; its count of characters that where it is
-        ;; marked all ASCII; a character, or the offset after it, only of
-        ;; one byte (ASCII).
+        ;; UTF-8 text, whole: its header the word before its bytes (a
+        ;; slice's is a trailer, the primitive's), its length in bytes the
+        ;; header's B; its count of characters that where it is marked all
+        ;; ASCII, the kind and the tag compared at once; a character, or
+        ;; the offset after it, only of one byte (ASCII).
         ((string=? name "%fx26-utf8-length")
          (begin (ada-e (arm-ldur d-x13 x (ada-field-off 1)))
-                (ada-e (arm-ubfx d-x14 d-x13 d-h-kind-lo d-h-kind-width))
-                (ada-e (arm-cmp-imm d-x14 d-kind-utf8-ascii))
+                (ada-e (arm-and-low d-x14 d-x13 (+ d-h-kind-lo d-h-kind-width)))
+                (ada-e (arm-cmp-imm d-x14 (adq-utf8-ascii-low)))
                 (ada-bc ada-c-ne slow)
                 (ada-e (arm-lsr-imm d-x13 d-x13 d-h-bytes-lo))
                 (ada-e (arm-lsl-imm d-result d-x13 3))
                 #t))
         ((string=? name "%fx26-utf8-byte-length")
          (begin (ada-e (arm-ldur d-x13 x (ada-field-off 1)))
+                (adq-whole d-x14 d-x13 slow)
                 (ada-e (arm-lsr-imm d-x13 d-x13 d-h-bytes-lo))
                 (ada-e (arm-lsl-imm d-result d-x13 3))
                 #t))
@@ -174,6 +176,16 @@
       (ada-e (arm-asr-imm d-x15 y 3))
       (ada-e (arm-cmp d-x15 d-x14))
       (ada-bc ada-c-hs slow))))
+;; The low bits of a whole `utf8`'s header marked all ASCII, its kind and
+;; its tag (`utf8_ascii_header_low`).
+(define adq-utf8-ascii-low (subr pure () int)
+  (lambda () (+ (arithmetic-shift d-kind-utf8-ascii d-h-kind-lo) d-tag-header)))
+;; To `slow` unless `h`, the word before a `utf8`'s bytes, is a header: a
+;; whole one's, not a slice's trailer. `t` its tag.
+(define adq-whole (subr da-assembles (int int int) unit)
+  (lambda (t h slow)
+    (begin (ada-e (arm-and-low t h 3)) (ada-e (arm-cmp-imm t d-tag-header))
+           (ada-bc ada-c-ne slow))))
 ;; The byte at offset `y` of `RESULT`, a `utf8`, in X16, if `y` is a fixnum
 ;; in range and the byte ASCII: else `slow`.
 (define adq-utf8-byte (subr da-assembles (int int) unit)
@@ -181,6 +193,7 @@
     (begin
       (ada-check-fixnum y slow)
       (ada-e (arm-ldur d-x14 d-result (ada-field-off 1)))
+      (adq-whole d-x13 d-x14 slow)
       (ada-e (arm-lsr-imm d-x14 d-x14 d-h-bytes-lo))
       (ada-e (arm-asr-imm d-x15 y 3))
       (ada-e (arm-cmp d-x15 d-x14))

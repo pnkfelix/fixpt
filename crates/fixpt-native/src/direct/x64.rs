@@ -2830,10 +2830,11 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         // primitive's; a character, or the offset after it, inline only of
         // one byte (ASCII), the rest the primitive's (`direct::pure_fast`'s).
         "%fx26-utf8-length" => {
-            use fixpt_heap::layout::{kind, H_BYTES, H_KIND};
+            use fixpt_heap::layout::{H_BYTES, H_KIND};
             a.e(load(X13, m(x, super::field_off(1) as i32)));
-            ubfx(a, X14, X13, H_KIND.lo, H_KIND.width);
-            a.e(cmp_imm(X14, const { kind("utf8-ascii") } as i32));
+            a.e(mov(X14, X13));
+            a.e(and_imm(X14, ((1 << (H_KIND.lo + H_KIND.width)) - 1) as i32));
+            a.e(cmp_imm(X14, super::utf8_ascii_header_low() as i32));
             a.jcc(Cond::Ne, slow);
             a.e(shr_imm(X13, H_BYTES.lo as u8));
             a.e(shl_imm(X13, 3));
@@ -2841,6 +2842,10 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         }
         "%fx26-utf8-byte-length" => {
             a.e(load(X13, m(x, super::field_off(1) as i32)));
+            a.e(mov(X14, X13));
+            a.e(and_imm(X14, 7));
+            a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as i32));
+            a.jcc(Cond::Ne, slow);
             a.e(shr_imm(X13, fixpt_heap::layout::H_BYTES.lo as u8));
             a.e(shl_imm(X13, 3));
             a.e(mov(RESULT, X13));
@@ -2849,6 +2854,10 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(test_imm(y, 7));
             a.jcc(Cond::Ne, slow);
             a.e(load(X14, m(x, super::field_off(1) as i32)));
+            a.e(mov(X15, X14));
+            a.e(and_imm(X15, 7));
+            a.e(cmp_imm(X15, fixpt_heap::value::TAG_HEADER as i32));
+            a.jcc(Cond::Ne, slow);
             a.e(shr_imm(X14, fixpt_heap::layout::H_BYTES.lo as u8));
             a.e(mov(X15, y));
             a.e(sar_imm(X15, 3));

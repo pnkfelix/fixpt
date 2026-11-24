@@ -5339,18 +5339,20 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(add_lsl(RESULT, X14, X16, 8));
         return true;
     }
-    // UTF-8 text (`TODO.md` §306, `heap/utf8.rs`): no fields, so its
-    // header the word before its bytes, the suffix; its length in bytes the
-    // header's B. Its count of characters is that where it is marked all
-    // ASCII, a kind of its own (§310), else the primitive's walk. A
-    // character read where one starts, or the offset after it, only of one
-    // byte (ASCII); one of more, a continuation byte, an offset past the
-    // text or not a fixnum, the primitive's.
+    // UTF-8 text (`TODO.md` §306, `heap/utf8.rs`), whole: no fields, so
+    // its header the word before its bytes, the suffix, its length in bytes
+    // the header's B; a slice of one (§310) has a trailer there, and is the
+    // primitive's. Its count of characters is its length where it is
+    // marked all ASCII, a kind of its own, the kind and the tag compared at
+    // once; else the primitive's walk. A character read where one starts,
+    // or the offset after it, only of one byte (ASCII); one of more, a
+    // continuation byte, an offset past the text or not a fixnum, the
+    // primitive's.
     if name == "%fx26-utf8-length" {
-        use fixpt_heap::layout::{kind, H_BYTES, H_KIND};
+        use fixpt_heap::layout::{H_BYTES, H_KIND};
         a.e(ldur(X13, x, field_off(1)));
-        a.e(ubfx(X14, X13, H_KIND.lo, H_KIND.width));
-        a.e(cmp_imm(X14, const { kind("utf8-ascii") } as u32));
+        a.e(and_low(X14, X13, H_KIND.lo + H_KIND.width));
+        a.e(cmp_imm(X14, utf8_ascii_header_low() as u32));
         a.to(slow, Fix::If(Cond::Ne));
         a.e(lsr_imm(X13, X13, H_BYTES.lo));
         a.e(lsl_imm(RESULT, X13, 3));
@@ -5358,6 +5360,9 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     }
     if name == "%fx26-utf8-byte-length" {
         a.e(ldur(X13, x, field_off(1)));
+        a.e(and_low(X14, X13, 3));
+        a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+        a.to(slow, Fix::If(Cond::Ne));
         a.e(lsr_imm(X13, X13, fixpt_heap::layout::H_BYTES.lo));
         a.e(lsl_imm(RESULT, X13, 3));
         return true;
@@ -5365,6 +5370,9 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     if name == "%fx26-utf8-ref" || name == "%fx26-utf8-next" {
         fixnum(a, y);
         a.e(ldur(X14, x, field_off(1)));
+        a.e(and_low(X13, X14, 3));
+        a.e(cmp_imm(X13, fixpt_heap::value::TAG_HEADER as u32));
+        a.to(slow, Fix::If(Cond::Ne));
         a.e(lsr_imm(X14, X14, fixpt_heap::layout::H_BYTES.lo));
         a.e(asr_imm(X15, y, 3));
         a.e(cmp(X15, X14));
@@ -5551,6 +5559,14 @@ fn ldr_field(a: &mut Asm, t: Reg, k: usize) {
     } else {
         a.e(ldr_lit(t, d));
     }
+}
+
+/// The low bits of a whole `utf8`'s header marked all ASCII, its kind and
+/// its tag (`TODO.md` §310): what the in-line `utf8-length` compares, in
+/// each native compiler.
+pub(crate) const fn utf8_ascii_header_low() -> u64 {
+    use fixpt_heap::layout::{kind, H_KIND};
+    ((kind("utf8-ascii") as u64) << H_KIND.lo) | fixpt_heap::value::TAG_HEADER
 }
 
 /// Field `k` of the bloblet whose `suffix + 4` is in a register, as an

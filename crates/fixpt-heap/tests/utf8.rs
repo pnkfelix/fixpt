@@ -54,3 +54,53 @@ fn a_utf8_survives_a_collection() {
         assert_eq!((h.utf8_string(*u), h.utf8_chars(*u)), (t.to_string(), t.chars().count()));
     }
 }
+
+/// A slice (`TODO.md` §310): a view of a piece between two characters'
+/// starts, read as the piece copied would be, nothing copied; a slice of
+/// a slice one of the first's owner; its mark its owner's, never found by
+/// looking at the piece.
+#[test]
+fn a_utf8_slice_reads_as_its_piece() {
+    let mut h = Heap::new();
+    for t in TEXTS {
+        let u = h.make_utf8(t);
+        for a in 0..=t.len() {
+            for b in a..=t.len() {
+                let (slice, copy) = (h.utf8_slice(u, a, b), h.utf8_substring(u, a, b));
+                assert_eq!(slice.is_some(), t.get(a..b).is_some(), "{t:?} {a}..{b}");
+                let (Some(s), Some(c)) = (slice, copy) else { continue };
+                let piece = &t[a..b];
+                assert!(h.is_utf8(s) && h.utf8_is_slice(s) && !h.utf8_is_slice(c));
+                assert_eq!((h.utf8_string(s), h.utf8_len(s), h.utf8_chars(s)), (piece.to_string(), piece.len(), piece.chars().count()));
+                assert!(h.utf8_eq(s, c) && h.utf8_eq(c, s));
+                assert_eq!(h.utf8_is_ascii(s), t.is_ascii(), "{t:?} {a}..{b}: the owner's mark");
+                for k in 0..=piece.len() {
+                    let want = piece.get(k..).and_then(|rest| rest.chars().next()).map(|c| (c, k + c.len_utf8()));
+                    assert_eq!(h.utf8_char_at(s, k), want, "{t:?} {a}..{b} at {k}");
+                }
+                // A slice of the slice: of the same owner, the offsets added.
+                if let Some(inner) = h.utf8_slice(s, 0, piece.len()) {
+                    assert_eq!(h.utf8_string(inner), piece);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_utf8_slice_keeps_its_owner_through_a_collection() {
+    let mut h = Heap::new();
+    let mut roots: Vec<_> = TEXTS
+        .iter()
+        .map(|t| {
+            let u = h.make_utf8(t);
+            h.utf8_slice(u, 0, t.len()).expect("the whole of it")
+        })
+        .collect();
+    let slice: &mut [_] = &mut roots;
+    h.collect(&mut [slice]);
+    h.verify().expect("sound after collection");
+    for (u, t) in roots.iter().zip(TEXTS) {
+        assert_eq!(h.utf8_string(*u), t.to_string());
+    }
+}

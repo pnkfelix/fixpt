@@ -295,6 +295,7 @@
          (("read-bytes") "%fx26-read-bytes")
          (("type-bound") "%fx26-evidence-bound")
          (("write-file") "%fx26-write-file")
+         (("utf8-slice") "%fx26-utf8-slice")
          (("datum-list") "%fx26-list-copy")
          (("length-is?") "%fx26-length-is?")
          (("datum-int?") "%fx26-fixnum?")
