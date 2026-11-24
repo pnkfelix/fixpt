@@ -131,6 +131,23 @@
            (ada-imm d-x14 d-char0)
            (ada-e (arm-add-lsl d-result d-x14 d-x16 8))
            #t))
+        ;; UTF-8 text: its count of characters its one field; its length in
+        ;; bytes its header's B; a character, or the offset after it, only
+        ;; of one byte (ASCII).
+        ((string=? name "%fx26-utf8-length")
+         (begin (ada-e (arm-ldur d-result x (ada-field-off 2))) #t))
+        ((string=? name "%fx26-utf8-byte-length")
+         (begin (ada-e (arm-ldur d-x13 x (ada-field-off 3)))
+                (ada-e (arm-lsr-imm d-x13 d-x13 d-h-bytes-lo))
+                (ada-e (arm-lsl-imm d-result d-x13 3))
+                #t))
+        ((or (string=? name "%fx26-utf8-ref") (string=? name "%fx26-utf8-next"))
+         (begin (adq-utf8-byte y slow)
+                (if (string=? name "%fx26-utf8-ref")
+                    (begin (ada-imm d-x14 d-char0)
+                           (ada-e (arm-add-lsl d-result d-x14 d-x16 8)))
+                    (ada-e (arm-add-imm d-result y 8)))
+                #t))
         ((string=? name "%fx26-flatarray-length")
          (begin (adf-flat-count x d-x13) (ada-e (arm-lsl-imm d-result d-x13 3)) #t))
         ((string=? name "%fx26-flatarray-ref") (begin (adf-flat-ref y slow) #t))
@@ -149,6 +166,21 @@
       (ada-e (arm-ldur d-x14 d-result -4))
       (ada-e (arm-asr-imm d-x15 y 3))
       (ada-e (arm-cmp d-x15 d-x14))
+      (ada-bc ada-c-hs slow))))
+;; The byte at offset `y` of `RESULT`, a `utf8`, in X16, if `y` is a fixnum
+;; in range and the byte ASCII: else `slow`.
+(define adq-utf8-byte (subr da-assembles (int int) unit)
+  (lambda (y slow)
+    (begin
+      (ada-check-fixnum y slow)
+      (ada-e (arm-ldur d-x14 d-result (ada-field-off 3)))
+      (ada-e (arm-lsr-imm d-x14 d-x14 d-h-bytes-lo))
+      (ada-e (arm-asr-imm d-x15 y 3))
+      (ada-e (arm-cmp d-x15 d-x14))
+      (ada-bc ada-c-hs slow)
+      (ada-e (arm-add d-x13 d-result d-x15))
+      (ada-e (arm-ldurb d-x16 d-x13 -4))
+      (ada-e (arm-cmp-imm d-x16 128))
       (ada-bc ada-c-hs slow))))
 ;; The remainder in X14 given the divisor's sign, or 0.
 (define adq-modulo (subr da-assembles (int) unit)

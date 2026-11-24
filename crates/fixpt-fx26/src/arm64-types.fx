@@ -66,6 +66,7 @@
             (val arm-asrv arm-op3)
             (val arm-msub arm-op4)
             (val arm-lsl-imm arm-op3)
+            (val arm-ldurb arm-op3)
             (val arm-nop int)))
 
 ;; What the native convention's compiler uses of the encoders

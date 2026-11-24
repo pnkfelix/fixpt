@@ -485,7 +485,10 @@
                  (slow (x-label))
                  (done (x-label))
                  (pname (r-prim-name p)))
-            (if (if (= op rop-prim1) (rg-shape-test r-result pname slow) (rg-int-fast pname y slow))
+            (if (or (if (= op rop-prim1)
+                        (rg-shape-test r-result pname slow)
+                        (rg-int-fast pname y slow))
+                    (rg-utf8-fast pname r-result y slow))
                 (begin (x-jmp done) (x-bind slow) (rg-pure-call p y) (x-bind done))
                 (rg-pure-call p y)))))))
 

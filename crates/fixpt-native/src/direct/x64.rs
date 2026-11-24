@@ -2824,6 +2824,38 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(add_imm(X16, Value::char('\0').raw() as i32));
             a.e(mov(RESULT, X16));
         }
+        // UTF-8 text (`TODO.md` §306): its count of characters its one
+        // field; its length in bytes its header's B, a trailer past the
+        // field; a character, or the offset after it, inline only of one
+        // byte (ASCII), the rest the primitive's (`direct::pure_fast`'s).
+        "%fx26-utf8-length" => a.e(load(RESULT, m(x, super::field_off(2) as i32))),
+        "%fx26-utf8-byte-length" => {
+            a.e(load(X13, m(x, super::field_off(3) as i32)));
+            a.e(shr_imm(X13, fixpt_heap::layout::H_BYTES.lo as u8));
+            a.e(shl_imm(X13, 3));
+            a.e(mov(RESULT, X13));
+        }
+        "%fx26-utf8-ref" | "%fx26-utf8-next" => {
+            a.e(test_imm(y, 7));
+            a.jcc(Cond::Ne, slow);
+            a.e(load(X14, m(x, super::field_off(3) as i32)));
+            a.e(shr_imm(X14, fixpt_heap::layout::H_BYTES.lo as u8));
+            a.e(mov(X15, y));
+            a.e(sar_imm(X15, 3));
+            a.e(cmp(X15, X14));
+            a.jcc(Cond::Ae, slow);
+            a.e(load8(X16, mi(x, X15, 1, -4)));
+            a.e(cmp_imm(X16, 0x80));
+            a.jcc(Cond::Ae, slow);
+            if name == "%fx26-utf8-ref" {
+                a.e(shl_imm(X16, 8));
+                a.e(add_imm(X16, Value::char('\0').raw() as i32));
+                a.e(mov(RESULT, X16));
+            } else {
+                a.e(mov(RESULT, y));
+                a.e(add_imm(RESULT, 8));
+            }
+        }
         "%fx26-flatarray-length" => {
             flat_count(a, x, X13);
             a.e(shl_imm(X13, 3));

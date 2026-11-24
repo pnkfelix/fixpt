@@ -57,6 +57,10 @@ pub(super) fn inline_prim(p: usize, count: usize) -> Option<&'static str> {
     match (count, name) {
         (1, "string-length") => Some("string-length"),
         (2, "string-ref") => Some("string-ref"),
+        (1, "%fx26-utf8-length") => Some("utf8-length"),
+        (1, "%fx26-utf8-byte-length") => Some("utf8-byte-length"),
+        (2, "%fx26-utf8-ref") => Some("utf8-ref"),
+        (2, "%fx26-utf8-next") => Some("utf8-next"),
         (3, "%region-cons") => Some("rcons"),
         (1, "%bloblet-fields") => Some("fields"),
         (3, "%bloblet-set!") => Some("field!"),
@@ -318,6 +322,44 @@ impl Asm {
         // `PureOut`: the value in `rax`, whether it failed in `rdx`.
         self.e(test(RDX, RDX));
         self.trap_if(Cond::Ne, Trap::Prim(String::new()));
+    }
+
+    /// UTF-8 text `x` and offset `y` (`what`, without its `%fx26-`) into
+    /// `RESULT`, as `regcode`'s `utf8_fast` does it: whether this is one,
+    /// its fast path emitted, to `slow` for what it leaves, with `x` and
+    /// `y` as they were. Neither is `RCX`, `RDX` or `X16`.
+    fn utf8_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
+        match what {
+            "utf8-length" => self.e(load(RESULT, field(x, 2))),
+            "utf8-byte-length" => {
+                self.e(load(RESULT, field(x, 3)));
+                self.e(shr_imm(RESULT, fixpt_heap::layout::H_BYTES.lo as u8));
+                self.e(shl_imm(RESULT, 3));
+            }
+            "utf8-ref" | "utf8-next" => {
+                self.e(test_imm(y, 7));
+                self.jcc(Cond::Ne, slow);
+                self.e(load(X16, field(x, 3)));
+                self.e(shr_imm(X16, fixpt_heap::layout::H_BYTES.lo as u8));
+                self.e(mov(RCX, y));
+                self.e(sar_imm(RCX, 3));
+                self.e(cmp(RCX, X16));
+                self.jcc(Cond::Ae, slow);
+                self.e(load8(RDX, mi(x, RCX, 1, -4)));
+                self.e(cmp_imm(RDX, 0x80));
+                self.jcc(Cond::Ae, slow);
+                if what == "utf8-ref" {
+                    self.e(shl_imm(RDX, 8));
+                    self.value(RESULT, Value::char('\0'));
+                    self.e(add(RESULT, RDX));
+                } else {
+                    self.e(mov(RESULT, y));
+                    self.e(add_imm(RESULT, 8));
+                }
+            }
+            _ => return false,
+        }
+        true
     }
 
     /// `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
@@ -854,6 +896,10 @@ impl Asm {
                 self.value(RESULT, Value::char('\0'));
                 self.e(add(RESULT, RDX));
             }
+            // UTF-8 text (`TODO.md` §306) in `REG1`, an offset in `REG2`.
+            "utf8-length" | "utf8-byte-length" | "utf8-ref" | "utf8-next" => {
+                self.utf8_fast(what, r1, r2, slow);
+            }
             // A pair in a region's current chunk, if the handle has a slot
             // in the heap's table and the chunk has room: its fill bumped
             // by two words. Anything else calls in.
@@ -1116,7 +1162,12 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                 // arithmetic; the call for what they leave.
                 let (slow, done) = (a.label(), a.label());
                 let pname = fixpt_runtime::PRIMITIVES[p].name;
-                if (name == "prim1" && a.shape_test(RESULT, pname, slow)) || (name != "prim1" && a.int_fast(pname, y, slow)) {
+                // And UTF-8 text's, as `inline_op`'s.
+                let text = pname.strip_prefix("%fx26-").unwrap_or("");
+                if (name == "prim1" && a.shape_test(RESULT, pname, slow))
+                    || (name != "prim1" && a.int_fast(pname, y, slow))
+                    || a.utf8_fast(text, RESULT, y, slow)
+                {
                     a.jmp(done);
                     a.bind(slow);
                     a.pure_call(p, y);
@@ -1421,7 +1472,8 @@ pub fn assemble_adapter(n: usize) -> Vec<u8> {
 /// `int_fast`, the slow paths of `op2`), which the compiler written in FX-26
 /// knows by name (`fx26_regs_module`).
 pub(crate) const NAMED_PRIMITIVES: &[&str] = &[
-    "string-length", "string-ref", "%region-cons", "%bloblet-fields", "%bloblet-set!", "char-whitespace?", "char-numeric?",
+    "string-length", "string-ref", "%fx26-utf8-length", "%fx26-utf8-byte-length", "%fx26-utf8-ref", "%fx26-utf8-next",
+    "%region-cons", "%bloblet-fields", "%bloblet-set!", "char-whitespace?", "char-numeric?",
     "%symbol-hash", "%fx26-fixnum?", "char?", "boolean?", "symbol?", "string?", "pair?", "null?", "%fx26-bitwise-and",
     "%fx26-bitwise-ior", "%fx26-bitwise-xor", "%fx26-bitwise-not", "exact-integer?", "%fx26-array?", "%fx26-f32?",
     "%fx26-box?", "%fx26-sum?", "%fx26-product?", "%fx26-procedure?", "%fx26-char-in?", "string=?", "modulo",

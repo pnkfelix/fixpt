@@ -160,6 +160,48 @@
 
 ;;; ------------------------------------------------------------ fast paths
 
+;; Whether `name`, a primitive's or `inline`'s, is UTF-8 text's `what`.
+(define ar-utf8-is? (subr pure (string string) bool)
+  (lambda (name what)
+    (cond ((string=? what "length")
+           (or (string=? name "utf8-length") (string=? name "%fx26-utf8-length")))
+          ((string=? what "byte-length")
+           (or (string=? name "utf8-byte-length") (string=? name "%fx26-utf8-byte-length")))
+          ((string=? what "ref") (or (string=? name "utf8-ref") (string=? name "%fx26-utf8-ref")))
+          (else (or (string=? name "utf8-next") (string=? name "%fx26-utf8-next"))))))
+;; UTF-8 text `x` and offset `y` into `RESULT`, as `utf8_fast` does it:
+;; whether this is one, its fast path emitted, to `slow` for what it
+;; leaves (a character of more than one byte, an offset not one).
+(define ar-utf8-fast (subr (maxeff ar-assembles spin) (string int int int) bool)
+  (lambda (name x y slow)
+    (cond
+      ((ar-utf8-is? name "length") (begin (n-e (arm-ldur a-result x (n-field-off 2))) #t))
+      ((ar-utf8-is? name "byte-length")
+       (begin
+         (n-e (arm-ldur n-x15 x (n-field-off 3)))
+         (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
+         (n-e (arm-add-lsl a-result a-xzr n-x15 3))
+         #t))
+      ((or (ar-utf8-is? name "ref") (ar-utf8-is? name "next"))
+       (begin
+         (n-e (arm-tst-low y 3))
+         (n-b-cond ar-ne slow)
+         (n-e (arm-ldur n-x15 x (n-field-off 3)))
+         (n-e (arm-lsr-imm n-x15 n-x15 header-bytes-lo))
+         (n-e (arm-asr-imm n-x14 y 3))
+         (n-e (arm-cmp n-x14 n-x15))
+         (n-b-cond ar-hs slow)
+         (n-e (arm-add n-x14 x n-x14))
+         (n-e (arm-ldurb n-x15 n-x14 -4))
+         (n-e (arm-cmp-imm n-x15 128))
+         (n-b-cond ar-hs slow)
+         (if (ar-utf8-is? name "ref")
+             (begin (n-value n-x16 a-char0)
+                    (n-e (arm-add-lsl a-result n-x16 n-x15 8)))
+             (n-e (arm-add-imm a-result y 8)))
+         #t))
+      (else #f))))
+
 ;; `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
 ;; `RESULT` and `y`, into `RESULT`, as `int_fast` does them: whether this
 ;; is one, its fast path emitted, to `slow` for what it leaves.
@@ -599,6 +641,8 @@
          (n-e (arm-ldur-w n-x15 n-x14 4))
          (n-value n-x16 a-char0)
          (n-e (arm-add-lsl a-result n-x16 n-x15 8))))
+      ;; UTF-8 text in `REG1`, an offset in `REG2`.
+      ((ar-utf8-fast what 1 2 slow) #u)
       ;; A pair in a region's current chunk, if the handle has a slot in
       ;; the heap's table and the chunk has room: its fill bumped by two
       ;; words.
@@ -637,6 +681,8 @@
          (cond
            ((= count 1)
             (cond ((string=? p "string-length") "string-length")
+                  ((string=? p "%fx26-utf8-length") "utf8-length")
+                  ((string=? p "%fx26-utf8-byte-length") "utf8-byte-length")
                   ((string=? p "%bloblet-fields") "fields")
                   ((string=? p "char-whitespace?") "whitespace")
                   ((string=? p "char-numeric?") "numeric")
@@ -661,6 +707,8 @@
                   (else "")))
            ((= count 2)
             (cond ((string=? p "string-ref") "string-ref")
+                  ((string=? p "%fx26-utf8-ref") "utf8-ref")
+                  ((string=? p "%fx26-utf8-next") "utf8-next")
                   ((string=? p "%fx26-bitwise-and") "bit-and")
                   ((string=? p "%fx26-bitwise-ior") "bit-ior")
                   ((string=? p "%fx26-bitwise-xor") "bit-xor")

@@ -75,6 +75,49 @@
     (x-e (x86-stored obj disp v n-st n-st-gens n-st-cards n-st-barrier n-st-barrier-heap
                      n-st-alloc-limit t1 t2))))
 
+;; Whether `name`, a primitive's or `inline_op`'s, is UTF-8 text's `what`.
+(define rg-utf8-is? (subr pure (string string) bool)
+  (lambda (name what)
+    (cond ((string=? what "length")
+           (or (string=? name "utf8-length") (string=? name "%fx26-utf8-length")))
+          ((string=? what "byte-length")
+           (or (string=? name "utf8-byte-length") (string=? name "%fx26-utf8-byte-length")))
+          ((string=? what "ref") (or (string=? name "utf8-ref") (string=? name "%fx26-utf8-ref")))
+          (else (or (string=? name "utf8-next") (string=? name "%fx26-utf8-next"))))))
+;; UTF-8 text `x` and offset `y` into `RESULT`, as `utf8_fast` does it:
+;; whether this is one, its fast path emitted, to `slow` for what it
+;; leaves. Neither is RCX, RDX or X16.
+(define rg-utf8-fast (subr (maxeff x-assembles spin) (string int int int) bool)
+  (lambda (name x y slow)
+    (cond
+      ((rg-utf8-is? name "length") (begin (x-load r-result x (x-field 2)) #t))
+      ((rg-utf8-is? name "byte-length")
+       (begin
+         (x-load r-result x (x-field 3))
+         (x-e (x86-shift-imm x-shr r-result header-bytes-lo))
+         (x-e (x86-shift-imm rg-shl r-result 3))
+         #t))
+      ((or (rg-utf8-is? name "ref") (rg-utf8-is? name "next"))
+       (begin
+         (x-e (x86-test-imm y 7))
+         (x-jcc x-c-ne slow)
+         (x-load n-x16 x (x-field 3))
+         (x-e (x86-shift-imm x-shr n-x16 header-bytes-lo))
+         (x-mov r-rcx y)
+         (x-e (x86-shift-imm x-sar r-rcx 3))
+         (x-alu x-cmp r-rcx n-x16)
+         (x-jcc x-c-ae slow)
+         (x-e (x86-load8-ix r-rdx x r-rcx 1 -4))
+         (x-alu-imm x-cmp r-rdx 128)
+         (x-jcc x-c-ae slow)
+         (if (rg-utf8-is? name "ref")
+             (begin (x-e (x86-shift-imm rg-shl r-rdx 8))
+                    (rg-value r-result r-char0)
+                    (x-alu x-add r-result r-rdx))
+             (begin (x-mov r-result y) (x-alu-imm x-add r-result 8)))
+         #t))
+      (else #f))))
+
 ;; `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
 ;; `RESULT` and `y`, as `int_fast` does them: whether this is one.
 (define rg-int-fast (subr (maxeff x-assembles spin) (string int int) bool)
@@ -527,6 +570,8 @@
          (x-e (x86-shift-imm rg-shl r-rdx 8))
          (rg-value r-result r-char0)
          (x-alu x-add r-result r-rdx)))
+      ;; UTF-8 text in `REG1`, an offset in `REG2`.
+      ((rg-utf8-fast what r-rdi r-rsi slow) #u)
       ((string=? what "rcons")
        (begin
          (x-e (x86-test-imm r-rdi 7))
@@ -572,6 +617,8 @@
                   ((string=? p "char-whitespace?") "whitespace")
                   ((string=? p "char-numeric?") "numeric")
                   ((string=? p "%symbol-hash") "symbol-hash")
+                  ((string=? p "%fx26-utf8-length") "utf8-length")
+                  ((string=? p "%fx26-utf8-byte-length") "utf8-byte-length")
                   ((string=? p "%fx26-fixnum?") "fixnum?")
                   ((string=? p "char?") "char?")
                   ((string=? p "boolean?") "boolean?")
@@ -592,6 +639,8 @@
                   (else "")))
            ((= count 2)
             (cond ((string=? p "string-ref") "string-ref")
+                  ((string=? p "%fx26-utf8-ref") "utf8-ref")
+                  ((string=? p "%fx26-utf8-next") "utf8-next")
                   ((string=? p "%fx26-bitwise-and") "bit-and")
                   ((string=? p "%fx26-bitwise-ior") "bit-ior")
                   ((string=? p "%fx26-bitwise-xor") "bit-xor")

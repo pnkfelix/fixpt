@@ -8585,9 +8585,26 @@ For Heist and kayak, the rename, mechanical: a string's bytes,
 `(string->utf8 s)` before, are `(utf8->bytes (string->utf8 s))`; bytes as
 text, `(utf8->string bv)` before, giving `(sum text s)`, are `(bytes->utf8
 bv)`, giving `(sum text u)`, `u` a `utf8` (`(utf8->string u)` the
-`string`). Left: native fast paths (`utf8-ref`, the lengths); a reader of
-`#utf8"…"` and literals, with kayak; more operations as wanted
-(`utf8<?`, `utf8-append`, a search, a hash).
+`string`). Left: a reader of `#utf8"…"` and literals, with kayak; more
+operations as wanted (`utf8<?`, `utf8-append`, a search, a hash).
+
+Done (2026-11-24, the user's word): native fast paths. `utf8-length` (its
+field), `utf8-byte-length` (its header's B), and `utf8-ref` and
+`utf8-next` of a character of one byte (ASCII), an offset a fixnum in
+range; a character of more, a continuation byte, an offset not one, the
+primitive's, which refuses as before. In every native compiler, both
+languages, both targets: the native convention's (`direct.rs`'s and
+`direct/x64.rs`'s `pure_fast`, `native-direct-*`'s), register code's,
+`prim` (compiled cellular words) and the `prim1` and `prim2` of a
+primitive that never collects, one helper for both (`utf8_fast`,
+`ar-utf8-fast`, `rg-utf8-fast`). A walk of 200 000 ASCII characters,
+fifty times: 0.07 s natively, 0.14 s in register code, 0.40 s in compiled
+cellular words, against 1.6 to 2.5 s for as many bytes of `é`. Tests:
+`native_direct_arm64_prims.rs`'s names, `utf8_offsets_refused_on_every_machine`
+(`stringof.rs`). Left: a character of two to four bytes in line too (the
+primitive's call, some 200 ns, is most of such a walk); `string-length`
+and `string-ref` are no more in line in register code's `prim1` and
+`prim2` than `utf8`'s were.
 
 ## 307. The cell verifier's rule for a path's types (the user's, 2026-11-22; beside §291)
 

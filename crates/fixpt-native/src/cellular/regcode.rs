@@ -66,6 +66,46 @@ impl Asm {
         self.e(cmp_imm(X13, 0));
         self.trap_if(Cond::Ne, Trap::Prim(String::new()));
     }
+    /// UTF-8 text (`TODO.md` §306) `x` and offset `y` (`what`, without
+    /// its `%fx26-`) into `RESULT`, as `direct.rs`'s `pure_fast` does it:
+    /// whether this is one, its fast path emitted. Its count of characters
+    /// its one field; its length in bytes its header's B, a trailer past
+    /// the field; the character at `y`, or the offset after it, only of
+    /// one byte (ASCII): one of more, a continuation byte, an offset past
+    /// the text or not a fixnum, to `slow`. Uses X14 to X16; `x` and `y`
+    /// kept until it is done. Register code's `prim1` and `prim2` (`x`
+    /// `RESULT`), and `inline`'s (`REG1` and `REG2`).
+    fn utf8_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
+        match what {
+            "utf8-length" => self.e(ldur(RESULT, x, field_off(2))),
+            "utf8-byte-length" => {
+                self.e(ldur(X15, x, field_off(3)));
+                self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
+                self.e(add_lsl(RESULT, XZR, X15, 3));
+            }
+            "utf8-ref" | "utf8-next" => {
+                self.e(tst_low(y, 3));
+                self.b_cond(Cond::Ne, slow);
+                self.e(ldur(X15, x, field_off(3)));
+                self.e(lsr_imm(X15, X15, fixpt_heap::layout::H_BYTES.lo));
+                self.e(asr_imm(X14, y, 3));
+                self.e(cmp(X14, X15));
+                self.b_cond(Cond::Hs, slow);
+                self.e(add(X14, x, X14));
+                self.e(ldurb(X15, X14, -4));
+                self.e(cmp_imm(X15, 0x80));
+                self.b_cond(Cond::Hs, slow);
+                if what == "utf8-ref" {
+                    self.value(X16, Value::char('\0'));
+                    self.e(add_lsl(RESULT, X16, X15, 8));
+                } else {
+                    self.e(add_imm(RESULT, y, 8));
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
     /// `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
     /// `RESULT` and `y`, into `RESULT`, as `direct.rs`'s `pure_fast` does
     /// them: whether this is one, its fast path emitted, to `slow` (the
@@ -814,6 +854,10 @@ impl Asm {
                 self.value(X16, Value::char('\0'));
                 self.e(add_lsl(RESULT, X16, X15, 8));
             }
+            // UTF-8 text (`TODO.md` §306) in `REG1`, an offset in `REG2`.
+            "utf8-length" | "utf8-byte-length" | "utf8-ref" | "utf8-next" => {
+                self.utf8_fast(what, 1, 2, slow);
+            }
             // A pair in a region's current chunk, if the handle has a slot
             // in the heap's table and the chunk has room: its fill bumped
             // by two words. Anything else calls in: `#f`, the heap's; a
@@ -1132,7 +1176,12 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 let pname = fixpt_runtime::PRIMITIVES[p].name;
                 // Fixnum arithmetic in line too, as `direct.rs`'s
                 // `pure_fast`: the front end runs here.
-                if (name == "prim1" && a.shape_test(RESULT, pname, slow)) || (name != "prim1" && a.int_fast(pname, y, slow)) {
+                // And UTF-8 text's, as `inline`'s.
+                let text = pname.strip_prefix("%fx26-").unwrap_or("");
+                if (name == "prim1" && a.shape_test(RESULT, pname, slow))
+                    || (name != "prim1" && a.int_fast(pname, y, slow))
+                    || a.utf8_fast(text, RESULT, y, slow)
+                {
                     a.b(done);
                     a.bind(slow);
                     a.pure_call(p, y);
@@ -1188,6 +1237,10 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     ("cellular", 2) if ROUTINES[k(o(0))].0 == "field@" => Some("field@"),
                     ("prim", 1) if prim_named(k(o(0)), "string-length") => Some("string-length"),
                     ("prim", 2) if prim_named(k(o(0)), "string-ref") => Some("string-ref"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-utf8-length") => Some("utf8-length"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-utf8-byte-length") => Some("utf8-byte-length"),
+                    ("prim", 2) if prim_named(k(o(0)), "%fx26-utf8-ref") => Some("utf8-ref"),
+                    ("prim", 2) if prim_named(k(o(0)), "%fx26-utf8-next") => Some("utf8-next"),
                     ("prim", 3) if prim_named(k(o(0)), "%region-cons") => Some("rcons"),
                     ("prim", 1) if prim_named(k(o(0)), "%bloblet-fields") => Some("fields"),
                     ("prim", 3) if prim_named(k(o(0)), "%bloblet-set!") => Some("field!"),

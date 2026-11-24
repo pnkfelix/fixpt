@@ -42,7 +42,8 @@ fn the_primitives_fast_paths_as_the_rust_compiler_makes_them() {
         "null?", "pair?", "char?", "%fx26-f32?", "boolean?", "exact-integer?", "symbol?", "string?", "procedure?",
         "%fx26-mul", "%fx26-quotient", "modulo", "%fx26-remainder", "%fx26-arithmetic-shift", "%bloblet-fields",
         "bytevector-length", "bytevector-u8-ref", "string-length", "string-ref", "%fx26-flatarray-length",
-        "%fx26-flatarray-ref", "%suffix-ref-offset", "%suffix-ref-owner", "%suffix-ref+",
+        "%fx26-flatarray-ref", "%suffix-ref-offset", "%suffix-ref-owner", "%suffix-ref+", "%fx26-utf8-length",
+        "%fx26-utf8-byte-length", "%fx26-utf8-ref", "%fx26-utf8-next",
         // None of these.
         "car", "", "%fx26-", "%fx26-i64+", "%fx26-u64-and", "%fx26-i8", "%fx26-i88+", "%fx26-i32+x", "%fx26-int->i64",
         "%fx26-int->", "%fx26-u3", "%fx26-f64+", "%fx26-f32", "%fx26-f32-bogus", "%fx26-i328+", "%fx26-u8u8",

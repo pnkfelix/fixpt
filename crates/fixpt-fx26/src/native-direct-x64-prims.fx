@@ -126,6 +126,27 @@
            (da-e (x86-shift-imm da-shl d-x16 3))
            (da-mov d-result d-x16)
            #t))
+        ;; UTF-8 text: its count of characters its one field; its length
+        ;; in bytes its header's B; a character, or the offset after it,
+        ;; only of one byte (ASCII).
+        ((string=? name "%fx26-utf8-length") (begin (da-ld d-result x (dq-fld 2)) #t))
+        ((string=? name "%fx26-utf8-byte-length")
+         (begin (da-ld d-x13 x (dq-fld 3)) (da-e (x86-shift-imm da-shr d-x13 d-h-bytes-lo))
+                (dq-fixnum-of d-x13) #t))
+        ((or (string=? name "%fx26-utf8-ref") (string=? name "%fx26-utf8-next"))
+         (begin
+           (da-e (x86-test-imm y 7)) (da-jcc da-c-ne slow)
+           (da-ld d-x14 x (dq-fld 3)) (da-e (x86-shift-imm da-shr d-x14 d-h-bytes-lo))
+           (da-mov d-x15 y) (da-e (x86-shift-imm da-sar d-x15 3))
+           (da-e (x86-alu da-cmp d-x15 d-x14)) (da-jcc da-c-ae slow)
+           (da-e (x86-load8-ix d-x16 x d-x15 1 -4))
+           (da-e (x86-alu-imm da-cmp d-x16 128)) (da-jcc da-c-ae slow)
+           (if (string=? name "%fx26-utf8-ref")
+               (begin (da-e (x86-shift-imm da-shl d-x16 8))
+                      (da-e (x86-alu-imm da-add d-x16 d-char0))
+                      (da-mov d-result d-x16))
+               (begin (da-mov d-result y) (da-e (x86-alu-imm da-add d-result 8))))
+           #t))
         ((string=? name "%fx26-flatarray-length")
          (begin (df-flat-count x d-x13) (dq-fixnum-of d-x13) #t))
         ((string=? name "%fx26-flatarray-ref") (begin (df-flat-ref y slow) #t))

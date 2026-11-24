@@ -107,4 +107,5 @@
             (val header-kind-width int)
             (val header-fields-lo int)
             (val header-fields-frozen-lo int)
-            (val header-suffix-frozen-lo int)))
+            (val header-suffix-frozen-lo int)
+            (val header-bytes-lo int)))
