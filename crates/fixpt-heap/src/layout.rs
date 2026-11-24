@@ -355,6 +355,16 @@ pub mod utf8_slice {
     pub const COUNT: usize = 5;
 }
 
+/// A slice of bytes or of a string (kinds `bytes-slice` and `str-slice`,
+/// `heap/views.rs`), its fields so: its owner (a whole bytevector or
+/// string); `start` and `end`, fixnums, counted in the owner's elements
+/// (bytes, or characters). Read in line by native code (`TODO.md` §310).
+pub mod view_slice {
+    pub const OWNER: usize = 2;
+    pub const START: usize = 3;
+    pub const END: usize = 4;
+}
+
 /// The fields of a code bloblet (kind `code`), named by their negative offset
 /// from the suffix, which is the code itself. Field 1 is the trailer, then
 /// the metadata, then the code's **items**: item `i` is at offset
@@ -774,7 +784,10 @@ fn fx26_definitions() -> String {
     out.push_str(&format!("(define utf8-slice-owner int {})\n", utf8_slice::OWNER));
     out.push_str(&format!("(define utf8-slice-start int {})\n", utf8_slice::START));
     out.push_str(&format!("(define utf8-slice-end int {})\n", utf8_slice::END));
-    out.push_str(&format!("(define utf8-slice-count int {})\n\n", utf8_slice::COUNT));
+    out.push_str(&format!("(define utf8-slice-count int {})\n", utf8_slice::COUNT));
+    out.push_str(&format!("(define view-slice-owner int {})\n", view_slice::OWNER));
+    out.push_str(&format!("(define view-slice-start int {})\n", view_slice::START));
+    out.push_str(&format!("(define view-slice-end int {})\n\n", view_slice::END));
     out.push_str(";;; A code bloblet's fields, by negative offset from its code. 1 is the trailer.\n");
     for (name, k) in code::ALL {
         out.push_str(&format!("(define code-{name} int {k})\n"));

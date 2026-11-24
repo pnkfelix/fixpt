@@ -419,7 +419,8 @@
             (if (or (if (= op rop-prim1)
                         (ar-shape-test a-result pname slow)
                         (ar-int-fast pname y slow))
-                    (ar-utf8-fast pname a-result y slow))
+                    (ar-utf8-fast pname a-result y slow)
+                    (ar-view-fast pname a-result y slow))
                 (begin (n-b done) (n-bind slow) (ar-pure-call p y) (n-bind done))
                 (ar-pure-call p y)))))))
 

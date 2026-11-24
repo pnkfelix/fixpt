@@ -61,6 +61,10 @@ pub(super) fn inline_prim(p: usize, count: usize) -> Option<&'static str> {
         (1, "%fx26-utf8-byte-length") => Some("utf8-byte-length"),
         (2, "%fx26-utf8-ref") => Some("utf8-ref"),
         (2, "%fx26-utf8-next") => Some("utf8-next"),
+        (1, "%fx26-bytes-length") => Some("bytes-length"),
+        (2, "%fx26-bytes-u8-ref") => Some("bytes-u8-ref"),
+        (1, "%fx26-str-length") => Some("str-length"),
+        (2, "%fx26-str-ref") => Some("str-ref"),
         (3, "%region-cons") => Some("rcons"),
         (1, "%bloblet-fields") => Some("fields"),
         (3, "%bloblet-set!") => Some("field!"),
@@ -381,6 +385,69 @@ impl Asm {
             _ => return false,
         }
         true
+    }
+
+    /// A view of bytes or of a string (`TODO.md` §310) `x` and index `y`
+    /// (`what`, without its `%fx26-`) into `RESULT`, as `regcode`'s
+    /// `view_fast` does it: whether this is one, its fast path emitted, to
+    /// `slow` for what it leaves (an index past it or not a fixnum), with
+    /// `x` and `y` as they were. Neither is `RCX`, `RDX` or `X16`.
+    fn view_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
+        match what {
+            "bytes-length" | "str-length" => {
+                self.view_span(x, if what == "str-length" { 2 } else { 0 });
+                self.e(mov(RESULT, RDX));
+            }
+            "bytes-u8-ref" | "str-ref" => {
+                let str = what == "str-ref";
+                self.e(test_imm(y, 7));
+                self.jcc(Cond::Ne, slow);
+                self.view_span(x, if str { 2 } else { 0 });
+                self.e(cmp(y, RDX));
+                self.jcc(Cond::Ae, slow);
+                self.e(mov(RCX, y));
+                self.e(sar_imm(RCX, 3));
+                if str {
+                    self.e(load32(RDX, mi(X16, RCX, 4, 4)));
+                    self.e(shl_imm(RDX, 8));
+                    self.value(RESULT, Value::char('\0'));
+                    self.e(add(RESULT, RDX));
+                } else {
+                    self.e(load8(RDX, mi(X16, RCX, 1, 4)));
+                    self.e(shl_imm(RDX, 3));
+                    self.e(mov(RESULT, RDX));
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Where the elements of view `x` (bytes, `log2` 0, or a string's
+    /// characters, `log2` 2) are, into X16, and how many into `RDX`, a
+    /// fixnum, as `regcode`'s `view_span` finds them: a whole one's, `x` and
+    /// its suffix's first word; a slice's, its owner plus `start`'s
+    /// elements, and `end - start`. Uses `RCX`; `x` kept.
+    fn view_span(&mut self, x: Reg, log2: u8) {
+        use fixpt_heap::layout::view_slice;
+        let (slice, done) = (self.label(), self.label());
+        self.e(load(RDX, field(x, 1)));
+        self.e(mov(RCX, RDX));
+        self.e(and_imm(RCX, 7));
+        self.e(cmp_imm(RCX, fixpt_heap::value::TAG_HEADER as i32));
+        self.jcc(Cond::Ne, slice);
+        self.e(load(RDX, m(x, -4)));
+        self.e(shl_imm(RDX, 3));
+        self.e(mov(X16, x));
+        self.jmp(done);
+        self.bind(slice);
+        self.e(load(RCX, field(x, view_slice::START)));
+        self.e(load(RDX, field(x, view_slice::END)));
+        self.e(sub(RDX, RCX));
+        self.e(load(X16, field(x, view_slice::OWNER)));
+        self.e(sar_imm(RCX, 3 - log2));
+        self.e(add(X16, RCX));
+        self.bind(done);
     }
 
     /// Where `utf8` `x`'s bytes are, into X16, and its length in bytes into
@@ -946,6 +1013,10 @@ impl Asm {
             "utf8-length" | "utf8-byte-length" | "utf8-ref" | "utf8-next" => {
                 self.utf8_fast(what, r1, r2, slow);
             }
+            // A view (`TODO.md` §310) in `REG1`, an index in `REG2`.
+            "bytes-length" | "bytes-u8-ref" | "str-length" | "str-ref" => {
+                self.view_fast(what, r1, r2, slow);
+            }
             // A pair in a region's current chunk, if the handle has a slot
             // in the heap's table and the chunk has room: its fill bumped
             // by two words. Anything else calls in.
@@ -1213,6 +1284,7 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                 if (name == "prim1" && a.shape_test(RESULT, pname, slow))
                     || (name != "prim1" && a.int_fast(pname, y, slow))
                     || a.utf8_fast(text, RESULT, y, slow)
+                    || a.view_fast(text, RESULT, y, slow)
                 {
                     a.jmp(done);
                     a.bind(slow);
@@ -1519,6 +1591,7 @@ pub fn assemble_adapter(n: usize) -> Vec<u8> {
 /// knows by name (`fx26_regs_module`).
 pub(crate) const NAMED_PRIMITIVES: &[&str] = &[
     "string-length", "string-ref", "%fx26-utf8-length", "%fx26-utf8-byte-length", "%fx26-utf8-ref", "%fx26-utf8-next",
+    "%fx26-bytes-length", "%fx26-bytes-u8-ref", "%fx26-str-length", "%fx26-str-ref",
     "%region-cons", "%bloblet-fields", "%bloblet-set!", "char-whitespace?", "char-numeric?",
     "%symbol-hash", "%fx26-fixnum?", "char?", "boolean?", "symbol?", "string?", "pair?", "null?", "%fx26-bitwise-and",
     "%fx26-bitwise-ior", "%fx26-bitwise-xor", "%fx26-bitwise-not", "exact-integer?", "%fx26-array?", "%fx26-f32?",

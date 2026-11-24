@@ -245,6 +245,69 @@
          #t))
       (else #f))))
 
+;; Whether `name`, a primitive's or `inline`'s, is a view's `what`.
+(define ar-view-is? (subr pure (string string) bool)
+  (lambda (name what)
+    (cond ((string=? what "bytes-length")
+           (or (string=? name "bytes-length") (string=? name "%fx26-bytes-length")))
+          ((string=? what "bytes-u8-ref")
+           (or (string=? name "bytes-u8-ref") (string=? name "%fx26-bytes-u8-ref")))
+          ((string=? what "str-length")
+           (or (string=? name "str-length") (string=? name "%fx26-str-length")))
+          (else (or (string=? name "str-ref") (string=? name "%fx26-str-ref"))))))
+;; Where the elements of view `x` (bytes, `log2` 0, or a string's
+;; characters, `log2` 2) are, into X16, and how many into X15, a fixnum
+;; (`view_span`): a whole one's, `x` and its suffix's first word; a slice's,
+;; its owner plus `start`'s elements, and `end - start`. Uses X14; `x` kept.
+(define ar-view-span (subr (maxeff ar-assembles spin) (int int) unit)
+  (lambda (x log2)
+    (let ((slice (n-label)) (done (n-label)))
+      (begin
+        (n-e (arm-ldur n-x15 x (n-field-off 1)))
+        (n-e (arm-and-low n-x14 n-x15 3))
+        (n-e (arm-cmp-imm n-x14 a-tag-header))
+        (n-b-cond ar-ne slice)
+        (n-e (arm-ldur n-x15 x -4))
+        (n-e (arm-add-lsl n-x15 a-xzr n-x15 3))
+        (n-e (arm-mov n-x16 x))
+        (n-b done)
+        (n-bind slice)
+        (n-e (arm-ldur n-x14 x (n-field-off view-slice-start)))
+        (n-e (arm-ldur n-x15 x (n-field-off view-slice-end)))
+        (n-e (arm-sub n-x15 n-x15 n-x14))
+        (n-e (arm-ldur n-x16 x (n-field-off view-slice-owner)))
+        (n-e (arm-asr-imm n-x14 n-x14 (- 3 log2)))
+        (n-e (arm-add n-x16 n-x16 n-x14))
+        (n-bind done)))))
+;; A view `x` and index `y` into `RESULT`, as `view_fast` does it: whether
+;; this is one, its fast path emitted, to `slow` for what it leaves (an
+;; index past it or not a fixnum).
+(define ar-view-fast (subr (maxeff ar-assembles spin) (string int int int) bool)
+  (lambda (name x y slow)
+    (cond
+      ((or (ar-view-is? name "bytes-length") (ar-view-is? name "str-length"))
+       (begin (ar-view-span x (if (ar-view-is? name "str-length") 2 0))
+              (n-e (arm-mov a-result n-x15))
+              #t))
+      ((or (ar-view-is? name "bytes-u8-ref") (ar-view-is? name "str-ref"))
+       (let ((log2 (if (ar-view-is? name "str-ref") 2 0)))
+         (begin
+           (n-e (arm-tst-low y 3))
+           (n-b-cond ar-ne slow)
+           (ar-view-span x log2)
+           (n-e (arm-cmp y n-x15))
+           (n-b-cond ar-hs slow)
+           (n-e (arm-asr-imm n-x14 y (- 3 log2)))
+           (n-e (arm-add n-x14 n-x16 n-x14))
+           (if (= log2 2)
+               (begin (n-e (arm-ldur-w n-x15 n-x14 4))
+                      (n-value n-x14 a-char0)
+                      (n-e (arm-add-lsl a-result n-x14 n-x15 8)))
+               (begin (n-e (arm-ldurb n-x15 n-x14 4))
+                      (n-e (arm-add-lsl a-result a-xzr n-x15 3))))
+           #t)))
+      (else #f))))
+
 ;; `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
 ;; `RESULT` and `y`, into `RESULT`, as `int_fast` does them: whether this
 ;; is one, its fast path emitted, to `slow` for what it leaves.
@@ -686,6 +749,8 @@
          (n-e (arm-add-lsl a-result n-x16 n-x15 8))))
       ;; UTF-8 text in `REG1`, an offset in `REG2`.
       ((ar-utf8-fast what 1 2 slow) #u)
+      ;; A view in `REG1`, an index in `REG2`.
+      ((ar-view-fast what 1 2 slow) #u)
       ;; A pair in a region's current chunk, if the handle has a slot in
       ;; the heap's table and the chunk has room: its fill bumped by two
       ;; words.
@@ -726,6 +791,8 @@
             (cond ((string=? p "string-length") "string-length")
                   ((string=? p "%fx26-utf8-length") "utf8-length")
                   ((string=? p "%fx26-utf8-byte-length") "utf8-byte-length")
+                  ((string=? p "%fx26-bytes-length") "bytes-length")
+                  ((string=? p "%fx26-str-length") "str-length")
                   ((string=? p "%bloblet-fields") "fields")
                   ((string=? p "char-whitespace?") "whitespace")
                   ((string=? p "char-numeric?") "numeric")
@@ -752,6 +819,8 @@
             (cond ((string=? p "string-ref") "string-ref")
                   ((string=? p "%fx26-utf8-ref") "utf8-ref")
                   ((string=? p "%fx26-utf8-next") "utf8-next")
+                  ((string=? p "%fx26-bytes-u8-ref") "bytes-u8-ref")
+                  ((string=? p "%fx26-str-ref") "str-ref")
                   ((string=? p "%fx26-bitwise-and") "bit-and")
                   ((string=? p "%fx26-bitwise-ior") "bit-ior")
                   ((string=? p "%fx26-bitwise-xor") "bit-xor")

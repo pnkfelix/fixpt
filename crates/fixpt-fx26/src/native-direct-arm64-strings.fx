@@ -146,6 +146,24 @@
                            (ada-e (arm-add-lsl d-result d-x14 d-x15 8)))
                     (ada-e (arm-add-imm d-result y 8)))
                 #t))
+        ;; A view of bytes or of a string, whole or a slice: where its
+        ;; elements are and how many (`adq-view-span`), then a whole one's
+        ;; reads.
+        ((or (string=? name "%fx26-bytes-length") (string=? name "%fx26-str-length"))
+         (begin (adq-view-span x (if (string=? name "%fx26-str-length") 2 0))
+                (ada-mov d-result d-x15)
+                #t))
+        ((string=? name "%fx26-bytes-u8-ref")
+         (begin (adq-view-at y 0 slow)
+                (ada-e (arm-ldurb d-x15 d-x14 4))
+                (ada-e (arm-lsl-imm d-result d-x15 3))
+                #t))
+        ((string=? name "%fx26-str-ref")
+         (begin (adq-view-at y 2 slow)
+                (ada-e (arm-ldur-w d-x15 d-x14 4))
+                (ada-imm d-x14 d-char0)
+                (ada-e (arm-add-lsl d-result d-x14 d-x15 8))
+                #t))
         ((string=? name "%fx26-flatarray-length")
          (begin (adf-flat-count x d-x13) (ada-e (arm-lsl-imm d-result d-x13 3)) #t))
         ((string=? name "%fx26-flatarray-ref") (begin (adf-flat-ref y slow) #t))
@@ -165,6 +183,42 @@
       (ada-e (arm-asr-imm d-x15 y 3))
       (ada-e (arm-cmp d-x15 d-x14))
       (ada-bc ada-c-hs slow))))
+;; Where the elements of view `x` (bytes, `log2` 0, or a string's
+;; characters, `log2` 2) are, into X16, and how many into X15, a fixnum
+;; (`direct::view_span`): a whole one's (a header the word before its
+;; suffix), `x` and its suffix's first word; a slice's (a trailer there),
+;; its owner plus `start`'s elements, and `end - start`. Uses X14; `x` kept.
+(define adq-view-span (subr da-assembles (int int) unit)
+  (lambda (x log2)
+    (let ((slice (ada-label)) (done (ada-label)))
+      (begin
+        (ada-e (arm-ldur d-x15 x (ada-field-off 1)))
+        (ada-e (arm-and-low d-x14 d-x15 3))
+        (ada-e (arm-cmp-imm d-x14 d-tag-header))
+        (ada-bc ada-c-ne slice)
+        (ada-e (arm-ldur d-x15 x -4))
+        (ada-e (arm-lsl-imm d-x15 d-x15 3))
+        (ada-mov d-x16 x)
+        (ada-b done)
+        (ada-bind slice)
+        (ada-e (arm-ldur d-x14 x (ada-field-off d-view-slice-start)))
+        (ada-e (arm-ldur d-x15 x (ada-field-off d-view-slice-end)))
+        (ada-e (arm-sub d-x15 d-x15 d-x14))
+        (ada-e (arm-ldur d-x16 x (ada-field-off d-view-slice-owner)))
+        (ada-e (arm-asr-imm d-x14 d-x14 (- 3 log2)))
+        (ada-e (arm-add d-x16 d-x16 d-x14))
+        (ada-bind done)))))
+;; Where element `y` of view `RESULT` is, in X14, its elements `log2` as
+;; `adq-view-span`'s, if `y` is a fixnum in range: else `slow`.
+(define adq-view-at (subr da-assembles (int int int) unit)
+  (lambda (y log2 slow)
+    (begin
+      (ada-check-fixnum y slow)
+      (adq-view-span d-result log2)
+      (ada-e (arm-cmp y d-x15))
+      (ada-bc ada-c-hs slow)
+      (ada-e (arm-asr-imm d-x14 y (- 3 log2)))
+      (ada-e (arm-add d-x14 d-x16 d-x14)))))
 ;; The low bits of a whole `utf8`'s header marked all ASCII, its kind and
 ;; its tag (`utf8_ascii_header_low`).
 (define adq-utf8-ascii-low (subr pure () int)

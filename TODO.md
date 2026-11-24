@@ -8995,3 +8995,15 @@ call-outs, 0.78 s to 0.93 s with no more instructions but 65 times the
 instruction cache's misses, the Rust code each call-out runs laid out
 anew; the heap's small readers of a `utf8` marked `#[inline]` (across
 crates they were calls), it is 0.74 s, and a slice of it 1.05 s to 0.66 s.
+
+The views in line likewise (2026-11-24, the user's): `bytes-length`,
+`bytes-u8-ref`, `str-length` and `str-ref`, every native compiler, both
+languages, both targets, a whole buffer (a header before its suffix: its
+first word the length, its elements after) or a slice (its owner plus
+`start`'s elements, `end - start`; `layout::view_slice`, `view-slice-*`,
+`d-view-slice-*`), where they were all call-outs. 200,000 characters
+walked 50 times, whole or a slice, native convention: 0.61 s, now 0.07 s;
+register code 0.47 s, now 0.15 s; cellular words 1.28 s, now 0.40 s.
+Bytes alike, but register code's walk is 0.29 s: its `u8->int` a call-out
+still, which the native convention does in line (fixed-width integers in
+register code, another matter).

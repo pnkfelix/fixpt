@@ -88,6 +88,9 @@
 (define utf8-slice-start int 3)
 (define utf8-slice-end int 4)
 (define utf8-slice-count int 5)
+(define view-slice-owner int 2)
+(define view-slice-start int 3)
+(define view-slice-end int 4)
 
 ;;; A code bloblet's fields, by negative offset from its code. 1 is the trailer.
 (define code-entry int 2)

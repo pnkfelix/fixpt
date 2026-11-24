@@ -129,6 +129,7 @@
             (val ar-pure-call (subr (maxeff ar-assembles spin) (int int) unit))
             (val ar-int-fast (subr (maxeff ar-assembles spin) (string int int) bool))
             (val ar-utf8-fast (subr (maxeff ar-assembles spin) (string int int int) bool))
+            (val ar-view-fast (subr (maxeff ar-assembles spin) (string int int int) bool))
             (val ar-shape-test (subr (maxeff ar-assembles spin) (int string int) bool))
             (val ar-inline-op (subr (maxeff ar-assembles spin) (string int int int int) unit))
             (val ar-inline-name (subr pure (int int int) string))))

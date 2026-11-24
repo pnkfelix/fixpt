@@ -148,6 +148,27 @@
                       (da-mov d-result d-x14))
                (begin (da-mov d-result y) (da-e (x86-alu-imm da-add d-result 8))))
            #t))
+        ;; A view of bytes or of a string, whole or a slice: where its
+        ;; elements are and how many (`dq-view-span`), then a whole one's
+        ;; reads.
+        ((or (string=? name "%fx26-bytes-length") (string=? name "%fx26-str-length"))
+         (begin (dq-view-span x (if (string=? name "%fx26-str-length") 2 0))
+                (da-mov d-result d-x15) #t))
+        ((or (string=? name "%fx26-bytes-u8-ref") (string=? name "%fx26-str-ref"))
+         (let ((chars (string=? name "%fx26-str-ref")))
+           (begin
+             (da-e (x86-test-imm y 7)) (da-jcc da-c-ne slow)
+             (dq-view-span x (if chars 2 0))
+             (da-e (x86-alu da-cmp y d-x15)) (da-jcc da-c-ae slow)
+             (da-mov d-x15 y) (da-e (x86-shift-imm da-sar d-x15 3))
+             (if chars
+                 (begin (da-e (x86-load32-ix d-x14 d-x16 d-x15 4 4))
+                        (da-e (x86-shift-imm da-shl d-x14 8))
+                        (da-e (x86-alu-imm da-add d-x14 d-char0)))
+                 (begin (da-e (x86-load8-ix d-x14 d-x16 d-x15 1 4))
+                        (da-e (x86-shift-imm da-shl d-x14 3))))
+             (da-mov d-result d-x14)
+             #t)))
         ((string=? name "%fx26-flatarray-length")
          (begin (df-flat-count x d-x13) (dq-fixnum-of d-x13) #t))
         ((string=? name "%fx26-flatarray-ref") (begin (df-flat-ref y slow) #t))
@@ -208,6 +229,32 @@
         (da-e (x86-alu da-sub d-x15 d-x14))
         (da-ld d-x16 x (dq-fld d-utf8-slice-owner))
         (da-e (x86-shift-imm da-sar d-x14 3))
+        (da-e (x86-alu da-add d-x16 d-x14))
+        (da-bind done)))))
+;; Where the elements of view `x` (bytes, `log2` 0, or a string's
+;; characters, `log2` 2) are, into X16, and how many into X15, a fixnum
+;; (`direct::view_span`): a whole one's, `x` and its suffix's first word; a
+;; slice's, its owner plus `start`'s elements, and `end - start`. Uses X14;
+;; `x` kept.
+(define dq-view-span (subr da-assembles (int int) unit)
+  (lambda (x log2)
+    (let ((slice (da-label)) (done (da-label)))
+      (begin
+        (da-ld d-x15 x (dq-fld 1))
+        (da-mov d-x14 d-x15)
+        (da-e (x86-alu-imm da-and d-x14 7))
+        (da-e (x86-alu-imm da-cmp d-x14 d-tag-header))
+        (da-jcc da-c-ne slice)
+        (da-ld d-x15 x -4)
+        (da-e (x86-shift-imm da-shl d-x15 3))
+        (da-mov d-x16 x)
+        (da-jmp done)
+        (da-bind slice)
+        (da-ld d-x14 x (dq-fld d-view-slice-start))
+        (da-ld d-x15 x (dq-fld d-view-slice-end))
+        (da-e (x86-alu da-sub d-x15 d-x14))
+        (da-ld d-x16 x (dq-fld d-view-slice-owner))
+        (da-e (x86-shift-imm da-sar d-x14 (- 3 log2)))
         (da-e (x86-alu da-add d-x16 d-x14))
         (da-bind done)))))
 ;; The quotient, if it is a fixnum: else `RESULT` back, and slow.

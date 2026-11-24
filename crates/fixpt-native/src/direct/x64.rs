@@ -2709,6 +2709,33 @@ fn utf8_span(a: &mut Asm, x: Reg) {
     a.bind(done);
 }
 
+/// Where the elements of view `x` (bytes, `log2` 0, or a string's
+/// characters, `log2` 2) are, into X16, and how many into X15, a fixnum, as
+/// `direct::view_span` finds them: a whole one's, `x` and its suffix's first
+/// word; a slice's, its owner plus `start`'s elements, and `end - start`.
+/// Uses X14; `x` kept.
+fn view_span(a: &mut Asm, x: Reg, log2: u8) {
+    use fixpt_heap::layout::view_slice;
+    let (slice, done) = (a.label(), a.label());
+    a.e(load(X15, m(x, super::field_off(1) as i32)));
+    a.e(mov(X14, X15));
+    a.e(and_imm(X14, 7));
+    a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as i32));
+    a.jcc(Cond::Ne, slice);
+    a.e(load(X15, m(x, -4)));
+    a.e(shl_imm(X15, 3));
+    a.e(mov(X16, x));
+    a.jmp(done);
+    a.bind(slice);
+    a.e(load(X14, m(x, super::field_off(view_slice::START) as i32)));
+    a.e(load(X15, m(x, super::field_off(view_slice::END) as i32)));
+    a.e(sub(X15, X14));
+    a.e(load(X16, m(x, super::field_off(view_slice::OWNER) as i32)));
+    a.e(sar_imm(X14, 3 - log2));
+    a.e(add(X16, X14));
+    a.bind(done);
+}
+
 fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     let x = RESULT;
     if shape_fast(a, name, slow) {
@@ -2849,6 +2876,32 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(shl_imm(X16, 8));
             a.e(add_imm(X16, Value::char('\0').raw() as i32));
             a.e(mov(RESULT, X16));
+        }
+        // A view of bytes or of a string (`TODO.md` §310), whole or a
+        // slice, as `direct::pure_fast` reads it: where its elements are and
+        // how many (`view_span`), then a whole one's reads.
+        "%fx26-bytes-length" | "%fx26-str-length" => {
+            view_span(a, x, if name == "%fx26-str-length" { 2 } else { 0 });
+            a.e(mov(RESULT, X15));
+        }
+        "%fx26-bytes-u8-ref" | "%fx26-str-ref" => {
+            let str = name == "%fx26-str-ref";
+            a.e(test_imm(y, 7));
+            a.jcc(Cond::Ne, slow);
+            view_span(a, x, if str { 2 } else { 0 });
+            a.e(cmp(y, X15));
+            a.jcc(Cond::Ae, slow);
+            a.e(mov(X15, y));
+            a.e(sar_imm(X15, 3));
+            if str {
+                a.e(load32(X14, mi(X16, X15, 4, 4)));
+                a.e(shl_imm(X14, 8));
+                a.e(add_imm(X14, Value::char('\0').raw() as i32));
+            } else {
+                a.e(load8(X14, mi(X16, X15, 1, 4)));
+                a.e(shl_imm(X14, 3));
+            }
+            a.e(mov(RESULT, X14));
         }
         // UTF-8 text (`TODO.md` §306), whole or a slice (§310), as
         // `direct::pure_fast` reads it: where its bytes are and how many
@@ -4227,6 +4280,9 @@ pub(super) fn fx26_direct_layout_of(intro: &[&str], regs: &[(&str, i64)], sig_in
         ("d-utf8-slice-start", fixpt_heap::layout::utf8_slice::START as i64, "a utf8 slice's field"),
         ("d-utf8-slice-end", fixpt_heap::layout::utf8_slice::END as i64, "a utf8 slice's field"),
         ("d-utf8-slice-count", fixpt_heap::layout::utf8_slice::COUNT as i64, "a utf8 slice's field"),
+        ("d-view-slice-owner", fixpt_heap::layout::view_slice::OWNER as i64, "a bytes or str slice's field"),
+        ("d-view-slice-start", fixpt_heap::layout::view_slice::START as i64, "a bytes or str slice's field"),
+        ("d-view-slice-end", fixpt_heap::layout::view_slice::END as i64, "a bytes or str slice's field"),
         ("d-kind-extension", KIND_EXTENSION as i64, "a header's kind when F is in an extension word"),
         ("d-flat-i32", FLAT_I32, "a flat layout"),
         ("d-flat-u32", FLAT_U32, "a flat layout"),

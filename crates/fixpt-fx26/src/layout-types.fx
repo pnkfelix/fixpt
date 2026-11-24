@@ -114,4 +114,8 @@
             (val utf8-slice-owner int)
             (val utf8-slice-start int)
             (val utf8-slice-end int)
-            (val utf8-slice-count int)))
+            (val utf8-slice-count int)
+            ;; A slice of bytes' or of a string's, so.
+            (val view-slice-owner int)
+            (val view-slice-start int)
+            (val view-slice-end int)))

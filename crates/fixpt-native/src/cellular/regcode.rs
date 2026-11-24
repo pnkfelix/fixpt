@@ -151,6 +151,67 @@ impl Asm {
         self.e(add(X16, X16, X14));
         self.bind(done);
     }
+    /// A view of bytes or of a string (`TODO.md` §310) `x` and index `y`
+    /// (`what`, without its `%fx26-`) into `RESULT`, as `direct.rs`'s
+    /// `pure_fast` does it: whether this is one, its fast path emitted. Its
+    /// length, or the element at `y`, of a whole buffer or a slice, its
+    /// elements found (`view_span`); an index past it or not a fixnum to
+    /// `slow`. Uses X14 to X16; `x` and `y` kept until it is done. As
+    /// `utf8_fast`'s callers call it.
+    fn view_fast(&mut self, what: &str, x: Reg, y: Reg, slow: Label) -> bool {
+        match what {
+            "bytes-length" | "str-length" => {
+                self.view_span(x, if what == "str-length" { 2 } else { 0 });
+                self.e(mov(RESULT, X15));
+            }
+            "bytes-u8-ref" | "str-ref" => {
+                let str = what == "str-ref";
+                self.e(tst_low(y, 3));
+                self.b_cond(Cond::Ne, slow);
+                self.view_span(x, if str { 2 } else { 0 });
+                self.e(cmp(y, X15));
+                self.b_cond(Cond::Hs, slow);
+                self.e(asr_imm(X14, y, if str { 1 } else { 3 }));
+                self.e(add(X14, X16, X14));
+                if str {
+                    self.e(ldur_w(X15, X14, 4));
+                    self.value(X14, Value::char('\0'));
+                    self.e(add_lsl(RESULT, X14, X15, 8));
+                } else {
+                    self.e(ldurb(X15, X14, 4));
+                    self.e(add_lsl(RESULT, XZR, X15, 3));
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Where the elements of view `x` (bytes, `log2` 0, or a string's
+    /// characters, `log2` 2) are, into X16, and how many into X15, a fixnum,
+    /// as `direct::view_span` finds them: a whole one's, `x` and its
+    /// suffix's first word; a slice's, its owner plus `start`'s elements,
+    /// and `end - start` (`layout::view_slice`). Uses X14; `x` kept.
+    fn view_span(&mut self, x: Reg, log2: u32) {
+        use fixpt_heap::layout::view_slice;
+        let (slice, done) = (self.label(), self.label());
+        self.e(ldur(X15, x, field_off(1)));
+        self.e(and_low(X14, X15, 3));
+        self.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+        self.b_cond(Cond::Ne, slice);
+        self.e(ldur(X15, x, -4));
+        self.e(add_lsl(X15, XZR, X15, 3));
+        self.e(mov(X16, x));
+        self.b(done);
+        self.bind(slice);
+        self.e(ldur(X14, x, field_off(view_slice::START)));
+        self.e(ldur(X15, x, field_off(view_slice::END)));
+        self.e(sub(X15, X15, X14));
+        self.e(ldur(X16, x, field_off(view_slice::OWNER)));
+        self.e(asr_imm(X14, X14, 3 - log2));
+        self.e(add(X16, X16, X14));
+        self.bind(done);
+    }
     /// `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
     /// `RESULT` and `y`, into `RESULT`, as `direct.rs`'s `pure_fast` does
     /// them: whether this is one, its fast path emitted, to `slow` (the
@@ -903,6 +964,10 @@ impl Asm {
             "utf8-length" | "utf8-byte-length" | "utf8-ref" | "utf8-next" => {
                 self.utf8_fast(what, 1, 2, slow);
             }
+            // A view (`TODO.md` §310) in `REG1`, an index in `REG2`.
+            "bytes-length" | "bytes-u8-ref" | "str-length" | "str-ref" => {
+                self.view_fast(what, 1, 2, slow);
+            }
             // A pair in a region's current chunk, if the handle has a slot
             // in the heap's table and the chunk has room: its fill bumped
             // by two words. Anything else calls in: `#f`, the heap's; a
@@ -1226,6 +1291,7 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 if (name == "prim1" && a.shape_test(RESULT, pname, slow))
                     || (name != "prim1" && a.int_fast(pname, y, slow))
                     || a.utf8_fast(text, RESULT, y, slow)
+                    || a.view_fast(text, RESULT, y, slow)
                 {
                     a.b(done);
                     a.bind(slow);
@@ -1286,6 +1352,10 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-utf8-byte-length") => Some("utf8-byte-length"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-utf8-ref") => Some("utf8-ref"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-utf8-next") => Some("utf8-next"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-bytes-length") => Some("bytes-length"),
+                    ("prim", 2) if prim_named(k(o(0)), "%fx26-bytes-u8-ref") => Some("bytes-u8-ref"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-str-length") => Some("str-length"),
+                    ("prim", 2) if prim_named(k(o(0)), "%fx26-str-ref") => Some("str-ref"),
                     ("prim", 3) if prim_named(k(o(0)), "%region-cons") => Some("rcons"),
                     ("prim", 1) if prim_named(k(o(0)), "%bloblet-fields") => Some("fields"),
                     ("prim", 3) if prim_named(k(o(0)), "%bloblet-set!") => Some("field!"),

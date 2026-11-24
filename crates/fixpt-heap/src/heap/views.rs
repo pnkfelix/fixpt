@@ -16,10 +16,12 @@ use crate::ObjType;
 const BYTES_SLICE: u8 = crate::layout::kind("bytes-slice");
 const STR_SLICE: u8 = crate::layout::kind("str-slice");
 
-/// A slice's values (`Heap::make_frozen`'s order).
-const SLICE_OWNER: usize = 0;
-const SLICE_START: usize = 1;
-const SLICE_END: usize = 2;
+/// A slice's values (`Heap::make_frozen`'s order), from its fields
+/// (`layout::view_slice`, which native code reads).
+use crate::layout::view_slice;
+const SLICE_OWNER: usize = view_slice::OWNER - 2;
+const SLICE_START: usize = view_slice::START - 2;
+const SLICE_END: usize = view_slice::END - 2;
 
 impl Heap {
     /// Where the bytes of `v` are, if it is a bytes view: the whole

@@ -117,6 +117,10 @@
       ((561) "%fx26-utf8-byte-length")
       ((562) "%fx26-utf8-ref")
       ((563) "%fx26-utf8-next")
+      ((569) "%fx26-bytes-length")
+      ((570) "%fx26-bytes-u8-ref")
+      ((574) "%fx26-str-length")
+      ((575) "%fx26-str-ref")
       (else ""))))
 
 ;; The number of the runtime primitive register code names `name`.
@@ -129,6 +133,10 @@
       (("%fx26-utf8-byte-length") 561)
       (("%fx26-utf8-ref") 562)
       (("%fx26-utf8-next") 563)
+      (("%fx26-bytes-length") 569)
+      (("%fx26-bytes-u8-ref") 570)
+      (("%fx26-str-length") 574)
+      (("%fx26-str-ref") 575)
       (("%region-cons") 498)
       (("%bloblet-fields") 445)
       (("%bloblet-set!") 448)

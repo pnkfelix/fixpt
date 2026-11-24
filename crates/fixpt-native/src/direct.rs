@@ -5394,6 +5394,40 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         }
         return true;
     }
+    // A view of bytes or of a string (`TODO.md` §310): a whole bytevector
+    // or string, its header the word before its suffix, or a slice of one,
+    // a trailer there, its elements its owner's from `start` to `end`
+    // (`layout::view_slice`): either way, where its elements start and how
+    // many (`view_span`), then a whole one's reads. An index past it, or
+    // not a fixnum, the primitive's.
+    if name == "%fx26-bytes-length" || name == "%fx26-str-length" {
+        view_span(a, x, if name == "%fx26-str-length" { 2 } else { 0 });
+        a.e(mov(RESULT, X15));
+        return true;
+    }
+    if name == "%fx26-bytes-u8-ref" {
+        fixnum(a, y);
+        view_span(a, x, 0);
+        a.e(cmp(y, X15));
+        a.to(slow, Fix::If(Cond::Hs));
+        a.e(asr_imm(X14, y, 3));
+        a.e(add(X14, X16, X14));
+        a.e(ldurb(X15, X14, 4));
+        a.e(lsl_imm(RESULT, X15, 3));
+        return true;
+    }
+    if name == "%fx26-str-ref" {
+        fixnum(a, y);
+        view_span(a, x, 2);
+        a.e(cmp(y, X15));
+        a.to(slow, Fix::If(Cond::Hs));
+        a.e(asr_imm(X14, y, 1));
+        a.e(add(X14, X16, X14));
+        a.e(ldur_w(X15, X14, 4));
+        a.es(&mov_imm64(X14, Value::char('\0').raw()));
+        a.e(add_lsl(RESULT, X14, X15, 8));
+        return true;
+    }
     if name == "%fx26-flatarray-length" {
         flat_count(a, x, X13);
         a.e(lsl_imm(RESULT, X13, 3));
@@ -5588,6 +5622,34 @@ fn utf8_span(a: &mut Asm, x: Reg) {
     a.e(sub(X15, X15, X14));
     a.e(ldur(X16, x, field_off(utf8_slice::OWNER)));
     a.e(asr_imm(X14, X14, 3));
+    a.e(add(X16, X16, X14));
+    a.bind(done);
+}
+
+/// Where the elements of view `x` (bytes, `log2` 0, or a string's
+/// characters, 32 bits each, `log2` 2) are, into X16 (as a whole buffer's
+/// value is: its suffix's start, tagged, its elements from its second
+/// word), and how many into X15, a fixnum: a whole one's (a header the
+/// word before its suffix), `x` and its suffix's first word; a slice's (a
+/// trailer there), its owner plus `start`'s elements, and `end - start`
+/// (`layout::view_slice`). Uses X14; `x` kept.
+fn view_span(a: &mut Asm, x: Reg, log2: u32) {
+    use fixpt_heap::layout::view_slice;
+    let (slice, done) = (a.label(), a.label());
+    a.e(ldur(X15, x, field_off(1)));
+    a.e(and_low(X14, X15, 3));
+    a.e(cmp_imm(X14, fixpt_heap::value::TAG_HEADER as u32));
+    a.to(slice, Fix::If(Cond::Ne));
+    a.e(ldur(X15, x, -4));
+    a.e(lsl_imm(X15, X15, 3));
+    a.e(mov(X16, x));
+    a.to(done, Fix::B);
+    a.bind(slice);
+    a.e(ldur(X14, x, field_off(view_slice::START)));
+    a.e(ldur(X15, x, field_off(view_slice::END)));
+    a.e(sub(X15, X15, X14));
+    a.e(ldur(X16, x, field_off(view_slice::OWNER)));
+    a.e(asr_imm(X14, X14, 3 - log2));
     a.e(add(X16, X16, X14));
     a.bind(done);
 }

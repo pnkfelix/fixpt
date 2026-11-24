@@ -160,6 +160,72 @@
          #t))
       (else #f))))
 
+;; Whether `name`, a primitive's or `inline`'s, is a view's `what`.
+(define rg-view-is? (subr pure (string string) bool)
+  (lambda (name what)
+    (cond ((string=? what "bytes-length")
+           (or (string=? name "bytes-length") (string=? name "%fx26-bytes-length")))
+          ((string=? what "bytes-u8-ref")
+           (or (string=? name "bytes-u8-ref") (string=? name "%fx26-bytes-u8-ref")))
+          ((string=? what "str-length")
+           (or (string=? name "str-length") (string=? name "%fx26-str-length")))
+          (else (or (string=? name "str-ref") (string=? name "%fx26-str-ref"))))))
+;; Where the elements of view `x` (bytes, `log2` 0, or a string's
+;; characters, `log2` 2) are, into X16, and how many into RDX, a fixnum
+;; (`view_span`): a whole one's, `x` and its suffix's first word; a slice's,
+;; its owner plus `start`'s elements, and `end - start`. Uses RCX; `x` kept.
+(define rg-view-span (subr (maxeff x-assembles spin) (int int) unit)
+  (lambda (x log2)
+    (let ((slice (x-label)) (done (x-label)))
+      (begin
+        (x-load r-rdx x (x-field 1))
+        (x-mov r-rcx r-rdx)
+        (x-alu-imm x-and r-rcx 7)
+        (x-alu-imm x-cmp r-rcx r-tag-header)
+        (x-jcc x-c-ne slice)
+        (x-load r-rdx x -4)
+        (x-e (x86-shift-imm rg-shl r-rdx 3))
+        (x-mov n-x16 x)
+        (x-jmp done)
+        (x-bind slice)
+        (x-load r-rcx x (x-field view-slice-start))
+        (x-load r-rdx x (x-field view-slice-end))
+        (x-alu x-sub r-rdx r-rcx)
+        (x-load n-x16 x (x-field view-slice-owner))
+        (x-e (x86-shift-imm x-sar r-rcx (- 3 log2)))
+        (x-alu x-add n-x16 r-rcx)
+        (x-bind done)))))
+;; A view `x` and index `y` into `RESULT`, as `view_fast` does it: whether
+;; this is one, its fast path emitted, to `slow` for what it leaves (an
+;; index past it or not a fixnum). Neither is RCX, RDX or X16.
+(define rg-view-fast (subr (maxeff x-assembles spin) (string int int int) bool)
+  (lambda (name x y slow)
+    (cond
+      ((or (rg-view-is? name "bytes-length") (rg-view-is? name "str-length"))
+       (begin (rg-view-span x (if (rg-view-is? name "str-length") 2 0))
+              (x-mov r-result r-rdx)
+              #t))
+      ((or (rg-view-is? name "bytes-u8-ref") (rg-view-is? name "str-ref"))
+       (let ((chars (rg-view-is? name "str-ref")))
+         (begin
+           (x-e (x86-test-imm y 7))
+           (x-jcc x-c-ne slow)
+           (rg-view-span x (if chars 2 0))
+           (x-alu x-cmp y r-rdx)
+           (x-jcc x-c-ae slow)
+           (x-mov r-rcx y)
+           (x-e (x86-shift-imm x-sar r-rcx 3))
+           (if chars
+               (begin (x-e (x86-load32-ix r-rdx n-x16 r-rcx 4 4))
+                      (x-e (x86-shift-imm rg-shl r-rdx 8))
+                      (rg-value r-result r-char0)
+                      (x-alu x-add r-result r-rdx))
+               (begin (x-e (x86-load8-ix r-rdx n-x16 r-rcx 1 4))
+                      (x-e (x86-shift-imm rg-shl r-rdx 3))
+                      (x-mov r-result r-rdx)))
+           #t)))
+      (else #f))))
+
 ;; `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
 ;; `RESULT` and `y`, as `int_fast` does them: whether this is one.
 (define rg-int-fast (subr (maxeff x-assembles spin) (string int int) bool)
@@ -614,6 +680,8 @@
          (x-alu x-add r-result r-rdx)))
       ;; UTF-8 text in `REG1`, an offset in `REG2`.
       ((rg-utf8-fast what r-rdi r-rsi slow) #u)
+      ;; A view in `REG1`, an index in `REG2`.
+      ((rg-view-fast what r-rdi r-rsi slow) #u)
       ((string=? what "rcons")
        (begin
          (x-e (x86-test-imm r-rdi 7))
@@ -661,6 +729,8 @@
                   ((string=? p "%symbol-hash") "symbol-hash")
                   ((string=? p "%fx26-utf8-length") "utf8-length")
                   ((string=? p "%fx26-utf8-byte-length") "utf8-byte-length")
+                  ((string=? p "%fx26-bytes-length") "bytes-length")
+                  ((string=? p "%fx26-str-length") "str-length")
                   ((string=? p "%fx26-fixnum?") "fixnum?")
                   ((string=? p "char?") "char?")
                   ((string=? p "boolean?") "boolean?")
@@ -683,6 +753,8 @@
             (cond ((string=? p "string-ref") "string-ref")
                   ((string=? p "%fx26-utf8-ref") "utf8-ref")
                   ((string=? p "%fx26-utf8-next") "utf8-next")
+                  ((string=? p "%fx26-bytes-u8-ref") "bytes-u8-ref")
+                  ((string=? p "%fx26-str-ref") "str-ref")
                   ((string=? p "%fx26-bitwise-and") "bit-and")
                   ((string=? p "%fx26-bitwise-ior") "bit-ior")
                   ((string=? p "%fx26-bitwise-xor") "bit-xor")

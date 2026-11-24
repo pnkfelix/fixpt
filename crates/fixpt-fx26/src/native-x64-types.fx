@@ -237,6 +237,7 @@
             (val rg-stored (subr (maxeff x-assembles spin) (int int int int int) unit))
             (val rg-int-fast (subr (maxeff x-assembles spin) (string int int) bool))
             (val rg-utf8-fast (subr (maxeff x-assembles spin) (string int int int) bool))
+            (val rg-view-fast (subr (maxeff x-assembles spin) (string int int int) bool))
             (val rg-kinds (subr (maxeff x-assembles spin) (string int int) unit))
             (val rg-shape-test (subr (maxeff x-assembles spin) (int string int) bool))
             (val rg-bump-words (subr (maxeff x-assembles spin) (int bool int) unit))
