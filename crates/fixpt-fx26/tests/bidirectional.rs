@@ -274,6 +274,7 @@ fn an_arrow_star_finds_its_effect() {
         (include_str!("programs/arrows/star-not-lambda.fx"), "from its `lambda`: define it as one"),
         (include_str!("programs/arrows/star-group-not-lambda.fx"), "from its `lambda`: define it as one"),
         (include_str!("programs/arrows/star-and-define-star.fx"), "each find what a procedure does"),
+        (include_str!("programs/arrows/define-star-untyped.fx"), "`define*` finds what a procedure reads, for a type written"),
     ] {
         let err = rejects(program);
         assert!(err.contains(says), "{err}");

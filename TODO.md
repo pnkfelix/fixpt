@@ -8697,3 +8697,19 @@ binding's type (`Facts::defined`). New test program
 `a_closure_over_another_module_of_its_type_is_refused`: a closure made
 over `q` for `p`, verified before, refused now. Known gaps closed: the
 redefinition ones, ten words.
+
+## 309. ~~`define*` of no type, taken for `define`~~ (found 2026-11-23, writing `run/prompt-delimits.fx`; done the same day)
+
+`(define* name e)`, no type written, is no form of the language
+(`docs/fx26.md`: `(define* name type lambda)`; the expanders' kernel
+table, `macros-kernel.fx`, its one shape), but both checkers took it for
+`(define name e)`, even `(define* g (+ 1 2))`; and the expanders, by the
+table, read `e` as a type, so a macro's use in it was refused as "`m`
+makes an expression, not a description". Decided with the user: refused.
+Both checkers now say "`(define* name type lambda)`: `define*` finds what
+a procedure reads, for a type written; with none written, `define` finds
+the whole type" (`Checker::define`, `parse-define`); the table gives
+`define*` `define`'s shape of no type too, so that a macro's use in `e`
+is expanded and the refusal is that one. Nothing in fixpt, Heist or
+kayak wrote it. Test program `arrows/define-star-untyped.fx`
+(`an_arrow_star_finds_its_effect`).

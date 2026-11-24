@@ -2399,6 +2399,8 @@ impl Checker {
                     }
                 }
             }
+            // `define*` is for a type written (TODO §309).
+            [_, _, _] if infer => Err(FxError::at(span, "`(define* name type lambda)`: `define*` finds what a procedure reads, for a type written; with none written, `define` finds the whole type")),
             [_, name, init] => {
                 let name = self.binder_name(name)?;
                 let e = self.parse_exp_syn(init)?;

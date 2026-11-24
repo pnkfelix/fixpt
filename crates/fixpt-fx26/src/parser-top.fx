@@ -75,9 +75,15 @@
                       (heads (if star? (the syns-a (cons (car items) nil)) (the syns-a nil)))
                       (ty (the syns-a (cons (nth items 2) heads))))
                  (t-define name ty (parse-exp (nth items 3)) a b)))
+              ;; `define*` is for a type written (TODO §309).
               ((3)
-               (let ((name (syn-symbol (nth items 1))))
-                 (t-define name (the syns-a nil) (parse-exp (nth items 2)) a b)))
+               (if star?
+                   (pfail (string-append "`(define* name type lambda)`: `define*` finds what a "
+                                         "procedure reads, for a type written; with none written, "
+                                         "`define` finds the whole type")
+                          s)
+                   (let ((name (syn-symbol (nth items 1))))
+                     (t-define name (the syns-a nil) (parse-exp (nth items 2)) a b))))
               (else (pfail "`(define name type expression)` or `(define name expression)`" s))))))
 (define parse-top (->* (syn) top)
   (lambda (s)

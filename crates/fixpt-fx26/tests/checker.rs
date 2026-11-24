@@ -165,8 +165,9 @@ fn every_test_program() {
     assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
     // A front end that does not load parses nothing, and so disagrees with
     // nothing: that is a failure too. (Those refused as they are read, as a
-    // binder written as a path, are not parsed either.)
-    assert!(unparsed.len() <= 7 && agreed >= 150, "only {agreed} compared; not parsed: {unparsed:?}");
+    // binder written as a path, or `define*` of no type, are not parsed
+    // either.)
+    assert!(unparsed.len() <= 8 && agreed >= 150, "only {agreed} compared; not parsed: {unparsed:?}");
 }
 
 /// What is wrong with a message's shape, if anything (`docs/fx26.md`,

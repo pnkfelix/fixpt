@@ -92,7 +92,12 @@
     (definition define (union (export (bvar expr) (rho (A var)))
                               (export (bvar desc (import expr (rho (A var) (AD rib))))
                                       (rho (A var)))))
-    (definition define* (export (bvar desc (import lambda (rho (A var) (AD rib)))) (rho (A var))))
+    ;; `define*` with no type, `(define* name e)`, is refused by the
+    ;; checkers (TODO §309): its shape here as `define`'s, so that a macro's
+    ;; use in `e` is expanded and the refusal is that one.
+    (definition define* (union (export (bvar expr) (rho (A var)))
+                               (export (bvar desc (import lambda (rho (A var) (AD rib))))
+                                       (rho (A var)))))
     (definition define-rec (import defrec-bindings (rho (() rib))))
     ;; A type, its name in scope in itself (types are declared ahead), a
     ;; family's parameters too; an effect.
