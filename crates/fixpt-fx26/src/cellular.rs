@@ -278,7 +278,7 @@ pub struct Compiler<'a> {
     /// (`Item::Source`).
     sources: Vec<fixpt_read::Span>,
     last_sources: Vec<(usize, usize, fixpt_read::Span)>,
-    last_gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)>,
+    last_gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>, usize)>,
     /// The name of the lambda whose body is compiled, without where it
     /// starts: an inner lambda's word is named within it, `outer/inner@N`.
     scope_name: Option<String>,
@@ -575,7 +575,7 @@ impl<'a> Compiler<'a> {
                 }
                 Item::Gen(k, false) => {
                     if let Some(start) = gen_starts.remove(k) {
-                        self.last_gens.push((start, pos as usize, self.gens[*k].clone()));
+                        self.last_gens.push((start, pos as usize, self.gens[*k].clone(), self.last_ops.len()));
                     }
                 }
                 Item::Branch(n) | Item::ZBranch(n) => {
@@ -791,7 +791,24 @@ impl<'a> Compiler<'a> {
             code.push(Item::Source(self.sources.len() - 1, true));
             self.sources.len() - 1
         });
+        // A value generalized over binders, made instantiated at them
+        // (`NodeFacts::gen_values`): where, said for the verifier, as a
+        // `plambda`'s.
+        let mut gens = Vec::new();
+        if self.certs.is_some()
+            && !tail
+            && let Some(levels) = self.c.facts.gen_values.get(&x).cloned()
+        {
+            for binders in levels {
+                self.gens.push(binders);
+                gens.push(self.gens.len() - 1);
+                code.push(Item::Gen(self.gens.len() - 1, true));
+            }
+        }
         self.exp_noted(x, e, depth, code, tail)?;
+        for k in gens.into_iter().rev() {
+            code.push(Item::Gen(k, false));
+        }
         if let Some(k) = source {
             code.push(Item::Source(k, false));
         }

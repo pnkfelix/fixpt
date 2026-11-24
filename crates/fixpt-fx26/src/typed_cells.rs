@@ -91,7 +91,9 @@ pub struct Cert {
     /// Where a `plambda`'s body is, by its first cell and the cell after
     /// its last, and its binders: the value it makes there, if made purely,
     /// is of the `poly` type over them (`generalize`).
-    pub gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)>,
+    /// And how many of `ops` are before it ends: those at its last cell
+    /// are inside it, the rest of that cell's after (a `proj` of it).
+    pub gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>, usize)>,
     /// The cells whose standard operation runs at its own binders, not
     /// instantiated: a standard operation's word as a value, verified
     /// generically.
@@ -533,14 +535,14 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against `cert`, one of its certificate's variants.
 fn verify_as(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value, cert: &Cert) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), paths_from: Vec::new(), claimed: Vec::new(), unpacked: Vec::new(), stable: Vec::new(), witnesses: Vec::new(), made_of: Vec::new(), cell: None };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), paths_from: Vec::new(), claimed: Vec::new(), unpacked: Vec::new(), stable: Vec::new(), witnesses: Vec::new(), made_of: Vec::new(), closures_made: Vec::new(), cell: None };
     v.word(word, cert);
     v.finish()
 }
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), paths_from: Vec::new(), claimed: Vec::new(), unpacked: Vec::new(), stable: Vec::new(), witnesses: Vec::new(), made_of: Vec::new(), cell: None };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), paths_from: Vec::new(), claimed: Vec::new(), unpacked: Vec::new(), stable: Vec::new(), witnesses: Vec::new(), made_of: Vec::new(), closures_made: Vec::new(), cell: None };
     match certs.words.get(&word.raw()) {
         // At each signature: the first that does not verify, else the
         // last, with what all of them discharged.
@@ -648,6 +650,9 @@ struct Verifier<'a> {
     /// The frozen data made here (`%make-frozen`), each with its values'
     /// terms: a field read from one is that value (`canonical`).
     made_of: Vec<(Term, Vec<Term>)>,
+    /// The closures made here, each with its word and the values it was
+    /// made over: what a prompt's thunk can reach (`prompt_delimits`).
+    closures_made: Vec<(Term, Value, Vec<V>)>,
     /// The masked expressions' cells (`Cert::masks`), as the walk finds
     /// what each is given and gives.
     masking: Vec<Masking>,
@@ -1098,7 +1103,11 @@ impl Verifier<'_> {
                     None => return,
                 },
             };
-            if self.generalize(cert, ins.at, &mut s, &at).is_err() || self.instances(cert, ins.at, &mut s, &at).is_err() || self.opens(cert, ins.at, &mut s, &at).is_err() {
+            let rest = match self.generalize(cert, ins.at, &mut s, &at) {
+                Ok(from) => from..usize::MAX,
+                Err(()) => return,
+            };
+            if self.instances(cert, ins.at, rest, &mut s, &at).is_err() || self.opens(cert, ins.at, &mut s, &at).is_err() {
                 return;
             }
             // The regions that open here, the outermost first.
@@ -1230,6 +1239,53 @@ impl Verifier<'_> {
                 _ => {}
             }
         }
+    }
+
+    /// Whether a prompt of tag `tag`, around `thunk`, delimits the
+    /// transfers of control to region `r` that the thunk does, as the
+    /// checker's `reaches_only` has it: the thunk a closure made here, and
+    /// nothing it can reach naming `r` but the tag, so that each transfer
+    /// to `r` it makes is to this prompt (a tag in `r` made inside it has
+    /// its own prompt there, or is an error). What it can reach: the values
+    /// it is made over; the globals its word reads, and the words' it makes
+    /// closures of (`globals_named`), a global the tag was read from apart
+    /// if written once, its one value; and the words' literals. Each by its
+    /// type, as a value made of them is, a procedure's naming what its
+    /// calls do.
+    fn prompt_delimits(&mut self, thunk: &V, tag: &V, r: crate::ast::Region) -> bool {
+        let Some((_, w, frees)) = self.closures_made.iter().find(|(t, _, _)| *t == thunk.term).cloned() else { return false };
+        let names_r = |me: &Self, t: Option<TyId>| {
+            t.is_none_or(|t| {
+                let mut rs = fixpt_hash::HashSet::default();
+                me.c.regions_in(t, &mut rs);
+                rs.contains(&r)
+            })
+        };
+        if frees.iter().any(|v| v.term != tag.term && names_r(self, v.ty)) {
+            return false;
+        }
+        let code = self.decode(w);
+        let mut words: fixpt_hash::HashSet<u64> = [w.raw()].into_iter().collect();
+        let mut globals = Vec::new();
+        self.globals_named(&code, &mut words, &mut globals);
+        for g in globals {
+            let the_tag = tag.term == Term::App("global", vec![Term::Lit(Value::from_raw(g))]) && !self.certs.rewritten.contains(&g);
+            if !the_tag && names_r(self, self.certs.globals.get(&g).copied()) {
+                return false;
+            }
+        }
+        let mut lits = Vec::new();
+        for word in words {
+            for ins in self.decode(Value::from_raw(word)) {
+                if ins.name == Some("lit") {
+                    lits.push(ins.ops[0]);
+                }
+            }
+        }
+        lits.into_iter().all(|x| {
+            let t = self.lit_type(x);
+            t.is_none() || !names_r(self, t)
+        })
     }
 
     /// At the cell `code[k]`, with state `s` there: each masked
@@ -1398,11 +1454,17 @@ impl Verifier<'_> {
     /// value each made, on top, generalized over its binders, where it was
     /// made purely (its effect nothing: a `plambda` body must be pure, so
     /// that nothing depends on the binders' instances); then those that
-    /// start there.
-    fn generalize(&mut self, cert: &Cert, at_cell: usize, s: &mut State, at: &str) -> Result<(), ()> {
-        let mut ends: Vec<&(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)> = cert.gens.iter().filter(|(_, e, _)| *e == at_cell).collect();
-        ends.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
-        for (_, _, binders) in ends {
+    /// start there. The cell's instances (`instances`) in the order made,
+    /// each before the bodies that end after it (a value of a `poly` type
+    /// instantiated at the binders it is generalized over); those after
+    /// all are the caller's, from the index given back.
+    fn generalize(&mut self, cert: &Cert, at_cell: usize, s: &mut State, at: &str) -> Result<usize, ()> {
+        let mut ends: Vec<&(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>, usize)> = cert.gens.iter().filter(|(_, e, _, _)| *e == at_cell).collect();
+        ends.sort_by_key(|(start, _, _, mark)| (*mark, std::cmp::Reverse(*start)));
+        let mut from = 0;
+        for (_, _, binders, mark) in ends {
+            self.instances(cert, at_cell, from..*mark, s, at)?;
+            from = from.max(*mark);
             let Some(before) = self.gen_effects.pop() else {
                 self.out.failed.push(format!("{at}: a `plambda` body ends that did not start"));
                 return Err(());
@@ -1420,7 +1482,9 @@ impl Verifier<'_> {
                 self.out.failed.push(msg);
                 return Err(());
             }
-            self.effect = before;
+            // What the body did (its globals read, an `rlambda`'s
+            // allocation) done where the value is made.
+            self.effect = before.union(&self.effect);
             let Some(v) = s.stack.last_mut() else {
                 self.out.failed.push(format!("{at}: a `plambda` body that made no value"));
                 return Err(());
@@ -1440,10 +1504,10 @@ impl Verifier<'_> {
                 }
             }
         }
-        for _ in cert.gens.iter().filter(|(start, _, _)| *start == at_cell) {
+        for _ in cert.gens.iter().filter(|(start, _, _, _)| *start == at_cell) {
             self.gen_effects.push(std::mem::replace(&mut self.effect, Effect::pure()));
         }
-        Ok(())
+        Ok(from)
     }
 
     /// The `let` bindings opened before cell `at`: each slot's value of a
@@ -1488,13 +1552,15 @@ impl Verifier<'_> {
         Ok(())
     }
 
-    /// The values instantiated before cell `at`, on top, in the order made:
-    /// `%inst`, every binder (outermost first, as checking found them);
-    /// `%proj`, the outermost level's, at its arguments.
-    fn instances(&mut self, cert: &Cert, at_cell: usize, s: &mut State, at: &str) -> Result<(), ()> {
+    /// The values instantiated before cell `at`, on top, in the order made,
+    /// of the cell's operations `within` (`generalize`): `%inst`, every
+    /// binder (outermost first, as checking found them); `%proj`, the
+    /// outermost level's, at its arguments.
+    fn instances(&mut self, cert: &Cert, at_cell: usize, within: std::ops::Range<usize>, s: &mut State, at: &str) -> Result<(), ()> {
+        let ops: Vec<(usize, String, Vec<crate::ast::D>)> = cert.ops.iter().enumerate().filter(|(i, (k, _, _))| *k == at_cell && within.contains(i)).map(|(_, o)| o.clone()).collect();
         // A trusted claim: the value on top taken at the type it names, an
         // assumption.
-        for (_, _, ds) in cert.ops.iter().filter(|(k, op, _)| *k == at_cell && op == "%trust") {
+        for (_, _, ds) in ops.iter().filter(|(_, op, _)| op == "%trust") {
             let ([crate::ast::D::Type(t)], Some(top)) = (&ds[..], s.stack.last_mut()) else {
                 self.out.failed.push(format!("{at}: a trusted claim of nothing"));
                 return Err(());
@@ -1504,7 +1570,7 @@ impl Verifier<'_> {
             let msg = format!("{at}: the scheduler's procedure at its form's type, {}", self.show(*t));
             self.out.assumed.push(msg);
         }
-        for (_, op, ds) in cert.ops.iter().filter(|(k, op, _)| *k == at_cell && (op == "%inst" || op == "%proj")) {
+        for (_, op, ds) in ops.iter().filter(|(_, op, _)| op == "%inst" || op == "%proj") {
             let Some(v) = s.stack.last().cloned() else {
                 self.out.failed.push(format!("{at}: an instance of nothing"));
                 return Err(());
@@ -2449,6 +2515,7 @@ impl Verifier<'_> {
                     }
                 }
                 let ty = self.subr_of(&callee);
+                self.closures_made.push((made.clone(), w, vals));
                 self.push_made(s, ty, Some(made));
             }
             "call" | "tcall" | "tailcall" | "ttailcall" => {
@@ -2676,14 +2743,17 @@ impl Verifier<'_> {
                         // What the body does, within the tag's bound and its
                         // own transfers of control, as `synth_prompt` checks
                         // it; the prompt's effect, the body's and the
-                        // handler's (its own transfers kept: the checker
-                        // drops them only where nothing else reaches the
-                        // tag).
+                        // handler's, its own transfers dropped where nothing
+                        // but the tag reaches its region (`prompt_delimits`).
+                        let mut te = te;
                         if let Some((bound, r)) = &bound {
                             let own = Effect([crate::ast::Atom::Goto(*r), crate::ast::Atom::Comefrom(*r)].into_iter().collect());
                             let beyond = Effect(te.0.iter().copied().filter(|a| !self.c.effect_le(&Effect::atom(*a), bound) && !own.0.contains(a)).collect());
                             if !beyond.is_pure() {
                                 self.out.failed.push(format!("{at}: the prompt's body does {}, beyond its tag's {}", self.c.show_effect(&beyond), self.c.show_effect(bound)));
+                            }
+                            if self.prompt_delimits(&thunk, &tag, *r) {
+                                te = Effect(te.0.iter().copied().filter(|a| !own.0.contains(a)).collect());
                             }
                         }
                         self.effect = self.effect.union(&te).union(&he);

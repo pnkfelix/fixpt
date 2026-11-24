@@ -375,17 +375,8 @@ fn every_directory_surveyed() {
 }
 
 /// The words not yet verified, each a rule the certificate does not yet
-/// carry what it needs for (`TODO.md` §117): a prompt's own transfers of
-/// control that the checker drops where nothing but its tag's variable
-/// reaches the tag (`given`); a variable of a `poly` type given where one
-/// is wanted, the checker instantiating it at the binders it generalizes
-/// over, which the verifier wraps in another `poly` instead (`go`; a
-/// local's as well, and a global's since `TODO.md` §211, 5, let one be
-/// read there).
-const KNOWN_GAPS: &[&str] = &[
-    "higher-kinds/poly-global-read.fx `go`",
-    "native/raw-args.fx `given`",
-];
+/// carry what it needs for (`TODO.md` §117): none now.
+const KNOWN_GAPS: &[&str] = &[];
 
 // Every word verified, a test for each shard of the programs
 // (`common::shard`), which nextest runs at once.
@@ -553,6 +544,23 @@ fn a_module_read_for_another_of_its_type_is_refused() {
 /// among them, is refused, `q` not shown to be `p`'s type's module. Before
 /// (TAL's unpack points, `TODO.md` §308), a closure's free value was taken
 /// for the module of a type its word's type binds alone, unshown.
+#[test]
+fn a_prompt_delimits_only_where_nothing_else_reaches_its_region() {
+    // `own`'s prompt drops its transfers to @p, which the verifier must
+    // see to verify `own` at all; `other`'s inner prompt reaches `v`, so
+    // a latent effect without its `goto` must be refused, at `other` and
+    // at the program that calls it (`Verifier::prompt_delimits`).
+    let name = "run/prompt-delimits.fx";
+    let text = include_str!("programs/run/prompt-delimits.fx");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut t = Tally::default();
+    verify_program(&mut s, name, text, &mut t);
+    assert!(t.unverified.is_empty() && t.failed.is_empty(), "{:?} {:?}", t.unverified, t.failed);
+    let (made, kept, _) = weakened(&mut s, name, text);
+    let gotos: Vec<&String> = kept.iter().filter(|k| k.contains("Goto(")).collect();
+    assert!(made >= 3 && gotos.is_empty(), "{made} weakened; a `goto` left out and verified: {gotos:?}");
+}
+
 #[test]
 fn a_closure_over_another_module_of_its_type_is_refused() {
     let (made, kept) = slot_swaps("closure-two-of-one-type.fx", "program", 0, 1);

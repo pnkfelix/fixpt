@@ -2946,11 +2946,39 @@ verified; 1,704 mutants, all refused. `every_directory_surveyed`
 phase takes: the whole corpus checks in about 1.7 s, compiles in 0.1 s
 and verifies in 0.3 s, no program above 0.04 s to verify. The four words
 left (`KNOWN_GAPS`) each want more of the certificate:
-- A prompt's own `goto` and `comefrom` on its tag's region, which the
+Since 2026-11-23 none is left (`KNOWN_GAPS` empty): every word of every
+test program verifies.
+- ~~A prompt's own `goto` and `comefrom` on its tag's region, which the
   checker drops where nothing but the tag's variable reaches the tag
-  (`reaches_only`), the verifier keeps (`native/raw-args.fx`'s `given`).
-  The certificate could say the prompt delimits them, with what the
-  verifier can check of it (the body's closure's free values' types).
+  (`reaches_only`), the verifier keeps (`native/raw-args.fx`'s
+  `given`).~~ Done (2026-11-23): the verifier checks the condition
+  itself (`Verifier::prompt_delimits`), of a thunk that is a closure made
+  in the word: nothing it can reach names the region but the tag, by
+  type, of the values it is made over, the globals its word and those it
+  makes closures of read (the tag's own global apart, if written once)
+  and their literals. New test program `run/prompt-delimits.fx` and
+  `a_prompt_delimits_only_where_nothing_else_reaches_its_region`: `own`'s
+  prompt delimits, `other`'s, whose body reaches `v`, another tag in
+  @p, must not, a latent effect without its `goto` refused (verified,
+  delimiting always, at `other` and the program).
+- ~~A variable of a `poly` type given where one is wanted~~ (done
+  2026-11-23; `higher-kinds/poly-global-read.fx`'s `go`): `(the code
+  base)`, checked against `code` by instantiating `base` at `code`'s
+  binders (`value_insts`), is generalized over them, which the checker
+  said only of a `plambda` or a `lambda`; so the verifier had `base`'s
+  instance at binders free. Now the checker notes any other expression
+  so generalized (`NodeFacts::gen_values`), the compiler marks it as a
+  `plambda`'s body (`Cert::gens`), each generalization with how many
+  operations come before its end, so that a cell's instantiations inside
+  it come before and a `proj` of it after (`Verifier::generalize`), and
+  the verifier holds its value to the value restriction as a
+  `plambda`'s. And what the body did, its globals read, is kept as done
+  where the value is made, where `generalize` had put back the effect
+  from before it, a `plambda`'s too (found by
+  `a_latent_effect_weakened_is_not_masked_away`: `base`'s read left out
+  of `go`'s latent effect verified).
+- ~~A module taken as a dependent module type and given where a member is
+  left out~~: done (§307).
 - ~~Effects the checker masks at an expression inside a word, the
   verifier masks only at the word's boundary.~~ Done (the same day): the
   certificate marks each masked expression's cells (`Cert::masks`), and
@@ -5270,7 +5298,7 @@ types, and whether each fix is right, not only whether the suite passes.
    `poly`s should take instantiation into account is a question of its own.
 4. **What was left**: the verifier's gap for a `poly` variable
    generalized (`KNOWN_GAPS`, `poly-global-read.fx` `go`; a local's
-   before); a renaming of the value's binders that broke a verified word;
+   before; done 2026-11-23, §117); a renaming of the value's binders that broke a verified word;
    and a procedure returning a `poly`, `(subr … () code)`, refused with "a
    (subr …) is expected here, and this is a code".
 

@@ -796,6 +796,13 @@ pub struct NodeFacts {
     /// types are under, a level for each `poly`, outermost first. With
     /// `record_types`.
     pub generalized: HashMap<ExpId, Vec<Vec<(DVar, Kind)>>>,
+    /// Each expression, not a `plambda` nor a `lambda`, checked against a
+    /// `poly` (`(the code base)`, `base` a global of a `poly` type): the
+    /// binders its value is generalized over, a level for each `poly`,
+    /// outermost first; its value instantiated at them inside
+    /// (`value_insts`). With `record_types`, for the verifier
+    /// (`Cert::gens`).
+    pub gen_values: HashMap<ExpId, Vec<Vec<(DVar, Kind)>>>,
     /// Each call of a polymorphic operator: what its binders were
     /// instantiated at, in order (`Checker::binders_of`), as checking found
     /// them. With `record_types`.
@@ -2470,7 +2477,12 @@ impl Checker {
             Exp::Lambda { body: b, .. } => {
                 self.facts.generalized.insert(b, levels);
             }
-            _ => {}
+            _ => {
+                let at = self.facts.gen_values.entry(owner).or_default();
+                if !at.iter().any(|l| l[..] == binders[..]) {
+                    at.push(binders.to_vec());
+                }
+            }
         }
     }
 
