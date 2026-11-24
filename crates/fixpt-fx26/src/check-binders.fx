@@ -290,7 +290,7 @@
   (lambda (r) (tagcase r (r-var (v) (k-distinct-var? v)) (else y #f))))
 (define k-constant-region? (->* (k-region) bool)
   (lambda (r)
-    (tagcase r (r-const (n) #t) (r-fresh (i n) #t) (r-heap () #t) (r-global (g) #t) (else y #f))))
+    (tagcase r (r-const (n) #t) (r-heap () #t) (r-global (g) #t) (else y #f))))
 ;; Each `distinct` region binder of `kinds`, as `m` instantiates it, given a
 ;; region known not to overlap any other binder's, nor any region `inner`
 ;; mentions besides its binders: Lucassen's rule, where it is asked for

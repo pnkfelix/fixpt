@@ -587,8 +587,11 @@ pub struct Checker {
     /// What the branches being checked have learned about sizes
     /// (`crate::sizes`).
     pub(crate) size_facts: Vec<crate::sizes::SizeFact>,
-    /// How many fresh regions inference has made, for naming the next.
+    /// How many regions the top-level form being checked has made up, for
+    /// naming the next; and the definition it is, which names them
+    /// (`fresh_region_named`, TODO §305).
     pub(crate) fresh_regions: u32,
+    pub(crate) fresh_scope: Option<String>,
     /// How many entries of `env` are the initial environment's.
     pub(crate) standard_len: usize,
     /// The operator of the application being checked, past any `proj` or
@@ -1475,6 +1478,7 @@ impl Checker {
             member_map: HashMap::default(),
             conv_default: conv,
             fresh_regions: 0,
+            fresh_scope: None,
             standard_len: 0,
             operator_at: None,
             standard_dscope: 0,

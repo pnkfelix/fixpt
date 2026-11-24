@@ -743,12 +743,20 @@
                  (set k-with-apps (cons (product (1 fun) (2 app)) (get k-with-apps)))
                  app)))))
 
-;; How many fresh regions have been made, for naming the next.
+;; A region made up: a constant, named by the definition it is made in
+;; and how many that definition has made (TODO §305), so that a check from
+;; source and one from a `.fasl` give it one name, as the Rust checker's
+;; `fresh_region_named`. Each top-level form begins a count
+;; (`k-fresh-begin!`).
 (define k-fresh (ref int @t) (new 0))
+(define k-fresh-scope (ref string @t) (new ""))
+(define k-fresh-begin! (->* (string) unit)
+  (lambda (scope) (begin (set k-fresh 0) (set k-fresh-scope scope))))
 (define k-fresh-region (->* (string) k-region)
   (lambda (base)
-    (let ((n (+ (get k-fresh) 1)))
-      (begin (set k-fresh n) (r-fresh n (k-cat3 base "." (int->string n)))))))
+    (let* ((n (+ (get k-fresh) 1)) (scope (get k-fresh-scope))
+           (at (if (string=? scope "") base (k-cat3 base "." scope))))
+      (begin (set k-fresh n) (r-const (string->symbol (k-cat3 at "." (int->string n))))))))
 
 ;; How deep in abbreviations' expansions reading is.
 (define k-expanding (ref int @t) (new 0))

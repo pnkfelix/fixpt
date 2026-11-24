@@ -59,7 +59,6 @@
   (lambda (r)
     (tagcase r
       (r-const (n) (symbol->string n))
-      (r-fresh (i n) n)
       (r-var (v) (k-dvar-string v))
       (r-frozen (p f) (k-frozen-show p f))
       (r-heap () "heap")

@@ -103,8 +103,6 @@
     (tagcase r
       (r-var (v) (rp-var v))
       (r-const (s) (rp-node "rconst" (list (sum sym s))))
-      ;; A region made up, a constant of its name as the Rust checker's (TODO §305).
-      (r-fresh (n s) (rp-node "rconst" (list (rp-sym s))))
       (r-frozen (p f)
         (rp-node "frozen" (if (< p 0) (list (sum flag f)) (list (sum flag f) (rp-var p)))))
       (r-heap () (rp-node "heap" nil))

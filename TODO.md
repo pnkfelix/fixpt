@@ -8429,16 +8429,30 @@ decide: which is right, a fresh region as a constant or as a kind of its own
 on import (FX-26's effects order and compare the two apart), and make both
 checkers export it alike.
 
-Done (2026-11-23), decided with the user: a constant, `(rconst @r.1)`,
-as the Rust checker had it. The FX-26 checker keeps its kind inside
-(`r-fresh`, as the Rust one an uninterned name) and exports it so
-(`check-reps.fx`'s `rp-region`); no `rfresh` is made or read. Neither of
-the two kept a made-up region's identity across runs: a constant's name,
-imported, is one a program could write, and a session's count gave
-`rfresh`'s, which an import shared with the importing session's own;
-each mismatch makes a cell's two regions one (sound, less precise) or a
-definition checked by its kept type refused, never a check passed wrongly.
-`modules/module-from-field.fx`'s `h2` top-level again.
+Done (2026-11-23), decided with the user: a constant, `(rconst …)`, as
+the Rust checker had it (the user's: a region's role is to keep threads
+from interfering, not to abstract). `modules/module-from-field.fx`'s `h2`
+top-level again.
+
+Then, probed with two files (the user's, "for science"): a made-up
+region reaches a module file's type (`(define g (lambda () (product (#:c
+(new 5)))))`, `(subr (alloc @r.2) …)`), and its name was a session's
+count, uninterned in a check from source, interned read from a `.fasl`.
+So `user.fx` read from its `.fasl`, `dep.fx` from source, `peek`'s effect
+named one interned `@r.2` and `g`'s the uninterned: one region two,
+which `regions_distinct` takes not to overlap (two constants), each atom
+of the program's effect said twice, no `.fasl` stale (the two print
+alike) and `FIXPT_FASL_VERIFY` none the wiser. Now a made-up region is
+named by the top-level definition it is made in, counted from one in each
+(`@r.h2.1`, a module file's `@r.%shared:dep.fx.2`), interned, both
+checkers (`fresh_region_named`, `fresh_scope`, set by `top_here`;
+`k-fresh-region`, `k-fresh-begin!`, by `k-top-lines`): one name from
+source or a `.fasl`, whatever was checked before. Two definitions of one
+name share theirs, which is only less precise. The FX-26 checker's
+`r-fresh` kind is gone, and with it two places it took a made-up region
+where the Rust checker does not: as a `reify-region`'s "fresh" evidence
+and as a variable given evidence. Test
+`a_region_made_up_is_one_from_source_or_a_fasl` (`fixpt-cli/tests/fasl.rs`).
 
 ## 306. Frozen strings in UTF-8 (kayak's request, 2026-11-22; deferred: for later)
 

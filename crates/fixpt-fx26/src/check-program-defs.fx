@@ -669,6 +669,11 @@
    (begin
     (set k-form-dscope (get k-dscope))
     (set k-toplevel-reading #f)
+    (k-fresh-begin! (tagcase form
+                      (t-define (name ty init a b) (symbol->string name))
+                      (t-define-rec (bs a b)
+                        (if (null? bs) "" (symbol->string (extract (car bs) 1))))
+                      (else y "")))
     (the k-out (tagcase form
                  (t-define (name ty init a b)
                    (if (null? ty)

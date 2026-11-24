@@ -193,9 +193,9 @@ fn every_field_placed(c: &Checker) {
         print_names: _, print_expanded: _, print_cycles: _, print_for_fasl: _, fasl_selects: _, print_abs: _, fasl_selects_key: _, fasl_digests: _, print_canon: _, print_shallow: _, print_subrs: _, print_params: _, print_tys: _, print_aliases: _, print_selects: _, print_self: _, show_marks: _,
         // Set around a single unification or check, and put back there.
         unify_exact: _, unify_upper: _, arrow_star: _, holes: _, hole_hint: _, dead_arms: _, splits_left: _, pinned: _,
-        // A count of regions made, which only grows: a name made once is
-        // never made again, put back or not.
-        fresh_regions: _,
+        // The regions a form makes up, named by it and counted from one
+        // as it begins (`top_here`), put back as it ends.
+        fresh_regions: _, fresh_scope: _,
         // Each entry written by `note_termination` before any read of it,
         // and read only for a binding `recursive` holds: one left behind
         // by a check thrown away is never consulted.
@@ -2130,7 +2130,26 @@ impl Checker {
         r
     }
 
+    /// [`Checker::top_in_scope`] of `form`, the regions it makes up named
+    /// by the definition it is, if one, each counted from one
+    /// ([`Checker::fresh_region_named`], TODO §305).
     fn top_here(&mut self, form: &Syn) -> R<Top> {
+        let listed = form.list();
+        let items = listed.as_deref().unwrap_or_default();
+        let head = items.first().and_then(|h| h.sym()).map(|h| self.interner.name(h));
+        let name = match head {
+            Some("define" | "define*") => items.get(1).and_then(|n| n.sym()),
+            Some("define-rec") => items.get(1).and_then(|b| b.list()).and_then(|l| l.first().and_then(|n| n.sym())),
+            _ => None,
+        };
+        let scope = name.map(|n| self.interner.name(n).to_string());
+        let outer = (std::mem::replace(&mut self.fresh_scope, scope), std::mem::replace(&mut self.fresh_regions, 0));
+        let r = self.top_in_scope(form);
+        (self.fresh_scope, self.fresh_regions) = outer;
+        r
+    }
+
+    fn top_in_scope(&mut self, form: &Syn) -> R<Top> {
         // The files its types name, loaded first (`type_loads`).
         self.type_loads(form)?;
         let listed = form.list();

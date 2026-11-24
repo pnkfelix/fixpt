@@ -246,6 +246,36 @@ fn a_program_fasl_tells_apart_abstract_types_of_the_same_name() {
     assert!(err.contains("`prog.fasl` is stale"), "{out}{err}");
 }
 
+/// A region made up has one name whether its file is checked from source
+/// or a `.fasl` kept its type (TODO §305): `dep.fx`'s `g` allocates at one,
+/// and `user.fx`'s `peek`, which calls `g`, says so. `user.fx` read from
+/// its `.fasl` and `dep.fx` from source, the two were one name, uninterned
+/// in `g`'s type and interned in `peek`'s, and so two regions, taken not
+/// to overlap (`regions_distinct`), each atom of the effect said twice;
+/// and the name was a session's count, another in each.
+#[test]
+fn a_region_made_up_is_one_from_source_or_a_fasl() {
+    let dir = scratch("made-up");
+    std::fs::write(dir.join("other.fx"), "(define o (lambda () (get (new #t))))\n(define o2 (lambda () (product (#:c (new 1)))))\n").expect("written");
+    std::fs::write(dir.join("dep.fx"), "(define f (lambda () (get (new 5))))\n(define g (lambda () (product (#:c (new 5)))))\n").expect("written");
+    std::fs::write(dir.join("user.fx"), "(define d (load-module \"dep.fx\"))\n(define peek (lambda () (with d (get (extract (g) #:c)))))\n").expect("written");
+    let main = "(define x (load-module \"other.fx\"))\n(define u (load-module \"user.fx\"))\n(define d (load-module \"dep.fx\"))\n(+ (with u (peek)) (with d (get (extract (g) #:c))))\n";
+    std::fs::write(dir.join("main.fx"), main).expect("written");
+    let (_, out, err) = fixpt(&dir, &["eval", "main.fx"], &[("FIXPT_NO_FASL", "1")]);
+    assert!(out.contains("10 : int ! (maxeff (read @r.%shared:dep.fx.2) (alloc @r.%shared:dep.fx.2) (read (globals d u)))"), "{out}{err}");
+    for f in ["other.fx", "dep.fx", "user.fx"] {
+        let (ok, fout, ferr) = fixpt(&dir, &["compile-file", f], &[]);
+        assert!(ok, "{fout}{ferr}");
+    }
+    let (_, fout, ferr) = fixpt(&dir, &["eval", "main.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ferr.contains("`user.fx` is read from `user.fasl`") && ferr.contains("`dep.fx` is read from `dep.fasl`"), "{fout}{ferr}");
+    assert_eq!(out, fout, "{err}{ferr}");
+    std::fs::remove_file(dir.join("dep.fasl")).expect("removed");
+    let (_, fout, ferr) = fixpt(&dir, &["eval", "main.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ferr.contains("`user.fx` is read from `user.fasl`") && !ferr.contains("`dep.fx` is read"), "{fout}{ferr}");
+    assert_eq!(out, fout, "{err}{ferr}");
+}
+
 /// A program's `.fasl`'s image is linked before its definitions run, each
 /// global its code names made ahead (`Fx26Session::splice_program`): one
 /// defined again since, so not the one code after was linked to, has those

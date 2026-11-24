@@ -25,7 +25,7 @@
 ;; the binding of global `g`, and `r-globals` is `@globals`, every global's:
 ;; only in effects, only read and written, never masked.
 (define-datatype k-region
-  (r-const symbol) (r-fresh int string) (r-var int) (r-frozen int bool) (r-heap)
+  (r-const symbol) (r-var int) (r-frozen int bool) (r-heap)
   (r-global symbol) (r-globals))
 (define-datatype k-atom
   (a-read k-region) (a-write k-region) (a-alloc k-region)

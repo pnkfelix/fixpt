@@ -2324,19 +2324,26 @@ impl Checker {
         Ok(())
     }
 
-    /// A region no value so far is in, named after the binder it stands for.
-    /// Uninterned, so the program cannot name it by accident.
+    /// A region made up, named after the binder it stands for.
     fn fresh_region(&mut self, v: DVar) -> Region {
         let base = format!("@{}", self.interner.name(self.arena.dvar_name(v)));
         self.fresh_region_named(&base)
     }
 
-    /// A region no value so far is in, and no program can name: `base`
-    /// with a number, uninterned.
+    /// A region made up: a constant, `base`, the definition being checked
+    /// if any, and how many it has made up (TODO §305), as the FX-26
+    /// checker's `k-fresh-region`. Interned, so that a definition checked
+    /// from source and one whose type a `.fasl` kept give it one name: two
+    /// constants are taken not to overlap (`regions_distinct`), so one
+    /// region must never be two. Two regions so made one, of definitions
+    /// of one name, say, are merely less precise.
     pub(crate) fn fresh_region_named(&mut self, base: &str) -> Region {
         self.fresh_regions += 1;
-        let name = format!("{base}.{}", self.fresh_regions);
-        Region::Const(self.interner.uninterned(&name))
+        let name = match &self.fresh_scope {
+            Some(d) => format!("{base}.{d}.{}", self.fresh_regions),
+            None => format!("{base}.{}", self.fresh_regions),
+        };
+        Region::Const(self.interner.intern(&name))
     }
 
     fn partial_map(&self, u: &Unknowns) -> HashMap<DVar, D> {

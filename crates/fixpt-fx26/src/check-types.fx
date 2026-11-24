@@ -35,7 +35,7 @@
            ((load-input "fx26:check-types-arena.fx")
             tables)))
       (module
-(import check-types-types r-const r-fresh r-var r-frozen r-heap r-global r-globals a-read a-write
+(import check-types-types r-const r-var r-frozen r-heap r-global r-globals a-read a-write
         a-alloc a-goto a-comefrom a-await a-spin a-io a-init a-send a-receive a-nondet a-stage
         a-gensym a-var a-app tm-param tm-length tm-lit pr-shape pr-acyclic pr-nat pr-length pr-rel
         cv-cellular cv-native cv-fx cv-var sz-finite sz-lin dr de dt dz dc df ty-base ty-void ty-var

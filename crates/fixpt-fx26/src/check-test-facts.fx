@@ -240,10 +240,7 @@
                    (form (substring op 1 (string-length op)))
                    (names (k-given-names given free -1 (not region) form))
                    (fresh (if (and region (string=? names "")
-                                   (or (not (null? free))
-                                       (tagcase d
-                                         (dr (r) (tagcase r (r-fresh (i n) #t) (else z #f)))
-                                         (else z #f))))
+                                   (not (null? free)))
                               "fresh"
                               ""))
                    (none (or declined (string=? fresh "fresh")))
@@ -329,7 +326,6 @@
                             nil))
                 (dr (r) (tagcase r
                           (r-var (v) (var v))
-                          (r-fresh (i n) (list (product (1 -1) (2 n) (3 #f))))
                           (else y nil)))
                 (else y nil))))
         (else y nil)))))

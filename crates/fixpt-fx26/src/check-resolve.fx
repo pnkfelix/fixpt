@@ -398,14 +398,13 @@
     (make-table
      (lambda (r)
        (tagcase r
-         (r-const (n) (symbol-hash n)) (r-fresh (i n) (+ 7 (* 31 i))) (r-var (v) (+ 11 (* 31 v)))
+         (r-const (n) (symbol-hash n)) (r-var (v) (+ 11 (* 31 v)))
          (r-frozen (p f) (+ 13 (* 31 p))) (r-heap () 17) (r-global (g) (+ 19 (symbol-hash g)))
          (r-globals () 23)))
      ;; As `k-region=?`.
      (lambda (r s)
        (tagcase r
          (r-const (n) (tagcase s (r-const (m) (symbol=? n m)) (else y #f)))
-         (r-fresh (i n) (tagcase s (r-fresh (j m) (= i j)) (else y #f)))
          (r-var (v) (tagcase s (r-var (w) (= v w)) (else y #f)))
          (r-frozen (p f) (tagcase s (r-frozen (q g) (and (= p q) (bool=? f g))) (else y #f)))
          (r-heap () (tagcase s (r-heap () #t) (else y #f)))

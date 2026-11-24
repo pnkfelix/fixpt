@@ -21,7 +21,7 @@
 (define k-region-rank (->* (k-region) int)
   (lambda (r)
     (tagcase r
-      (r-const (n) 0) (r-fresh (i n) 1) (r-var (v) 2) (r-frozen (p f) 3) (r-heap () 4)
+      (r-const (n) 0) (r-var (v) 2) (r-frozen (p f) 3) (r-heap () 4)
       (r-global (g) 5) (r-globals () 6))))
 ;; Two names in order: the same symbol at once, else by their text.
 (define k-name-cmp (->* (symbol symbol) int)
@@ -32,7 +32,6 @@
       (if (= c 0)
           (tagcase r
             (r-const (n) (tagcase s (r-const (m) (k-name-cmp n m)) (else y 0)))
-            (r-fresh (i n) (tagcase s (r-fresh (j m) (k-int-cmp i j)) (else y 0)))
             (r-var (v) (tagcase s (r-var (w) (k-int-cmp v w)) (else y 0)))
             (r-frozen (p f)
               (tagcase s
@@ -48,7 +47,6 @@
   (lambda (r s)
     (tagcase r
       (r-const (n) (tagcase s (r-const (m) (symbol=? n m)) (else y #f)))
-      (r-fresh (i n) (tagcase s (r-fresh (j m) (= i j)) (else y #f)))
       (r-var (v) (tagcase s (r-var (w) (= v w)) (else y #f)))
       (r-frozen (p f) (tagcase s (r-frozen (q g) (and (= p q) (bool=? f g))) (else y #f)))
       (r-heap () (tagcase s (r-heap () #t) (else y #f)))
@@ -122,7 +120,6 @@
   (lambda (r)
     (tagcase r
       (r-const (n) 0)
-      (r-fresh (i n) (+ 4503599627370496 i))
       (r-var (v) (+ 9007199254740992 (+ v 1099511627776)))
       (r-frozen (p f) (+ 13510798882111488 (+ (* 2 (+ p 1099511627776)) (if f 1 0))))
       (r-heap () 18014398509481984)

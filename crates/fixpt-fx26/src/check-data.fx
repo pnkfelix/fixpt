@@ -225,7 +225,7 @@
       (a-stage () #t) (a-gensym () #t)
       (a-read (r)
         (tagcase r (r-global (g) #t) (r-globals () #t) (r-frozen (p f) (< p 0)) (else y #f)))
-      (a-alloc (r) (tagcase r (r-const (n) #t) (r-fresh (i n) #t) (r-heap () #t) (else y #f)))
+      (a-alloc (r) (tagcase r (r-const (n) #t) (r-heap () #t) (else y #f)))
       (else y #f))))
 ;; The first atom of `e` a procedure crossing into a process may not have,
 ;; alone in an effect; none if none: what is on a binder in `bound`, which
