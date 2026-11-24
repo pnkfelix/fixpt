@@ -571,7 +571,9 @@
               (else z #u)))
           (ty-named (g xs)
             (tagcase at
-              (ty-named (h ys) (if (= g h) (k-unify-descs xs ys kinds solved trail) #u))
+              ;; Or a view wanted, a whole buffer given (§310).
+              (ty-named (h ys)
+                (if (or (= g h) (k-view-of? h g)) (k-unify-descs xs ys kinds solved trail) #u))
               (else z #u)))
           ;; A function applied, against another applied to as many: the
           ;; function, if it is a binder still to be found, is the other's;

@@ -403,6 +403,13 @@
       ((562) #t)  ; %fx26-utf8-ref
       ((563) #t)  ; %fx26-utf8-next
       ((565) #t)  ; %fx26-utf8=?
+      ((569) #t)  ; %fx26-bytes-length
+      ((570) #t)  ; %fx26-bytes-u8-ref
+      ((572) #t)  ; %fx26-bytes=?
+      ((574) #t)  ; %fx26-str-length
+      ((575) #t)  ; %fx26-str-ref
+      ((577) #t)  ; %fx26-str=?
+      ((578) #t)  ; %fx26-str<?
       (else #f))))
 
 ;; The `i`th kind shape test `name` takes a bloblet of (`shape_test`), or -1.

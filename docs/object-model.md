@@ -578,6 +578,8 @@ And from self-tagged floats (`docs/research/floats.md`, Q7).
 | string               | no fields (or a length field), UTF-32 suffix |
 | utf8 (kinds 49, 50)  | no fields, UTF-8 suffix; 50 all ASCII        |
 | utf8-slice (51)      | owner, start, end, ASCII mark; a trailer     |
+| bytes-slice (52)     | owner, start, end (elements); a trailer      |
+| str-slice (53)       | owner, start, end (elements); a trailer      |
 | flonum               | no fields, 8 bytes                           |
 | bignum               | a sign field, limbs as suffix                |
 | code                 | constants and metadata, trailer, code        |

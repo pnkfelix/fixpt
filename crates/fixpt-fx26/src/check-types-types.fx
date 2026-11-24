@@ -410,6 +410,7 @@
    (val k-ty-push
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-ty) int))
    (val k-string-as-named (subr pure (k-ty k-ty) k-ty))
+   (val k-view-of? (subr pure (int int) bool))
    (val k-certified (ref (listof (pairof symbol int @t) acyclic) @t))
    (val k-skolems (ref k-ids @t))
    (val k-to-end-sizes (ref k-ids @t))

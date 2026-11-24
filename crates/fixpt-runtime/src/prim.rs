@@ -696,6 +696,11 @@ pub fn never_collects(name: &str) -> bool {
         // UTF-8 text looked at, never made (`TODO.md` §306): its predicate,
         // its lengths, a character and the offset after it, two compared.
         || matches!(name, "%fx26-utf8?" | "%fx26-utf8-length" | "%fx26-utf8-byte-length" | "%fx26-utf8-ref" | "%fx26-utf8-next" | "%fx26-utf8=?")
+        // Views read (`TODO.md` §310).
+        || matches!(
+            name,
+            "%fx26-bytes-length" | "%fx26-bytes-u8-ref" | "%fx26-bytes=?" | "%fx26-str-length" | "%fx26-str-ref" | "%fx26-str=?" | "%fx26-str<?"
+        )
         || ["%fx26-i8", "%fx26-u8", "%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
@@ -1092,7 +1097,38 @@ fn get_string(rt: &mut Runtime, v: Value) -> Outcome<String> {
     if rt.heap.is_a(v, ObjType::String) {
         return Ok(rt.heap.string_to_rust(v));
     }
+    // A slice of one (`TODO.md` §310): a `str` is read wherever a
+    // `string` is, its operation's type saying which.
+    if rt.heap.str_span(v).is_some() {
+        return Ok(rt.heap.str_chars(v).into_iter().collect());
+    }
     rt.type_error("a string", v)
+}
+
+/// A bytes view (`TODO.md` §310), a whole bytevector or a slice of one:
+/// the bytevector holding its bytes, where they start, and how many; or a
+/// type error.
+fn bytes_view(rt: &mut Runtime, v: Value) -> Outcome<(Value, usize, usize)> {
+    match rt.heap.bytes_span(v) {
+        Some(s) => Ok(s),
+        None => rt.type_error("bytes", v),
+    }
+}
+
+/// A string view, so.
+fn str_view(rt: &mut Runtime, v: Value) -> Outcome<(Value, usize, usize)> {
+    match rt.heap.str_span(v) {
+        Some(s) => Ok(s),
+        None => rt.type_error("a str", v),
+    }
+}
+
+/// Elements `start` to `end` of a view of `n`, checked as a bytevector's
+/// span is; `what` names it in a refusal.
+fn view_span(rt: &mut Runtime, n: usize, start: Value, end: Value, what: &str) -> Outcome<(usize, usize)> {
+    let e = index(rt, end, n + 1, what)?;
+    let s = index(rt, start, e + 1, what)?;
+    Ok((s, e))
 }
 
 /// A `utf8`'s text, or a type error.
@@ -1385,14 +1421,14 @@ prims! {
     });
     // In time for the part taken, not the whole string: a reader takes
     // each atom of a file's text so.
+    // Of a string view (`TODO.md` §310): a slice's piece of its owner.
     "substring", 3, Some(3), simple!(|rt, a| {
-        if !rt.heap.is_a(a[0], ObjType::String) { return rt.type_error("a string", a[0]); }
-        let n = rt.heap.string_len(a[0]);
+        let Some((owner, at, n)) = rt.heap.str_span(a[0]) else { return rt.type_error("a string", a[0]) };
         let start = int(rt, a[1])?; let end = int(rt, a[2])?;
         if start < 0 || end < start || end as usize > n {
             return rt.fail("substring range out of bounds", &[a[1], a[2]]);
         }
-        Ok(rt.heap.substring(a[0], start as usize, end as usize))
+        Ok(rt.heap.substring(owner, at + start as usize, at + end as usize))
     });
     "string-append", 0, None, simple!(|rt, a| {
         // Straight from the heap into the one string made.
@@ -1520,17 +1556,20 @@ prims! {
         rt.heap.bytevector_set(a[0], i, b as u8);
         Ok(Value::UNIT)
     });
+    // The source a bytes view (`TODO.md` §310).
     "%fx26-bytevector-copy", 3, Some(3), simple!(|rt, a| {
-        let (start, end) = bytevector_span(rt, a[0], a[1], a[2])?;
-        let bytes: Vec<u8> = (start..end).map(|i| rt.heap.bytevector_ref(a[0], i)).collect();
+        let (owner, from, n) = bytes_view(rt, a[0])?;
+        let (start, end) = view_span(rt, n, a[1], a[2], "bytevector")?;
+        let bytes: Vec<u8> = (from + start..from + end).map(|i| rt.heap.bytevector_ref(owner, i)).collect();
         Ok(rt.heap.make_bytevector(&bytes))
     });
     "%fx26-bytevector-copy!", 5, Some(5), simple!(|rt, a| {
-        let (start, end) = bytevector_span(rt, a[2], a[3], a[4])?;
+        let (owner, from, m) = bytes_view(rt, a[2])?;
+        let (start, end) = view_span(rt, m, a[3], a[4], "bytevector")?;
         let n = bytevector_in(rt, a[0])?;
         let at = index(rt, a[1], n + 1, "bytevector")?;
         if at + (end - start) > n { return rt.fail("bytevector-copy!: the bytes do not fit", &[a[1]]); }
-        let bytes: Vec<u8> = (start..end).map(|i| rt.heap.bytevector_ref(a[2], i)).collect();
+        let bytes: Vec<u8> = (from + start..from + end).map(|i| rt.heap.bytevector_ref(owner, i)).collect();
         for (k, b) in bytes.into_iter().enumerate() { rt.heap.bytevector_set(a[0], at + k, b); }
         Ok(Value::UNIT)
     });
@@ -1622,8 +1661,8 @@ prims! {
     });
     "%fx26-write-file", 2, Some(2), simple!(|rt, a| {
         let path = get_string(rt, a[0])?;
-        let n = bytevector_in(rt, a[1])?;
-        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[1], i)).collect();
+        bytes_view(rt, a[1])?;
+        let bytes = rt.heap.bytes_of(a[1]);
         let r = crate::world::replace_file(&path, &bytes, crate::world::Flush::Durable);
         Ok(fx26_io_result(rt, r))
     });
@@ -3441,8 +3480,8 @@ prims! {
     // moves.
     "%fx26-write-file-unflushed", 2, Some(2), simple!(|rt, a| {
         let path = get_string(rt, a[0])?;
-        let n = bytevector_in(rt, a[1])?;
-        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[1], i)).collect();
+        bytes_view(rt, a[1])?;
+        let bytes = rt.heap.bytes_of(a[1]);
         let r = crate::world::replace_file(&path, &bytes, crate::world::Flush::Unflushed);
         Ok(fx26_io_result(rt, r))
     });
@@ -3483,8 +3522,8 @@ prims! {
     // Bytes as UTF-8 text, validated: `(sum text u)`, or `(sum bad k)`, the
     // offset the bytes are valid up to; and a `utf8`'s bytes, a copy.
     "%fx26-bytes->utf8", 1, Some(1), simple!(|rt, a| {
-        let n = bytevector_in(rt, a[0])?;
-        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[0], i)).collect();
+        bytes_view(rt, a[0])?;
+        let bytes = rt.heap.bytes_of(a[0]);
         let (tag, v) = match std::str::from_utf8(&bytes) {
             Ok(text) => ("text", rt.heap.make_utf8(text)),
             Err(e) => ("bad", Value::fixnum(e.valid_up_to() as i64)),
@@ -3503,6 +3542,63 @@ prims! {
         let start = utf8_offset(rt, a[0], a[1], true)?;
         if start > end { return rt.fail("utf8-slice: the start is after the end", &[a[1], a[2]]); }
         Ok(rt.heap.utf8_slice(a[0], start, end).expect("between boundaries"))
+    });
+    // Views into bytes and into a string (`TODO.md` §310): a whole buffer
+    // or a slice of one, read only; a slice of a piece, nothing copied; a
+    // whole buffer copied of one. Last, so that no primitive's number
+    // moves.
+    "%fx26-bytes-length", 1, Some(1), simple!(|rt, a| {
+        let (_, _, n) = bytes_view(rt, a[0])?;
+        Ok(Value::fixnum(n as i64))
+    });
+    "%fx26-bytes-u8-ref", 2, Some(2), simple!(|rt, a| {
+        let (owner, from, n) = bytes_view(rt, a[0])?;
+        let i = index(rt, a[1], n, "bytes")?;
+        Ok(Value::fixnum(rt.heap.bytevector_ref(owner, from + i) as i64))
+    });
+    "%fx26-bytes-slice", 3, Some(3), simple!(|rt, a| {
+        let (_, _, n) = bytes_view(rt, a[0])?;
+        let (start, end) = view_span(rt, n, a[1], a[2], "bytes")?;
+        Ok(rt.heap.bytes_slice(a[0], start, end))
+    });
+    "%fx26-bytes=?", 2, Some(2), simple!(|rt, a| {
+        bytes_view(rt, a[0])?;
+        bytes_view(rt, a[1])?;
+        Ok(Value::boolean(rt.heap.bytes_of(a[0]) == rt.heap.bytes_of(a[1])))
+    });
+    "%fx26-bytes->bytevector", 1, Some(1), simple!(|rt, a| {
+        bytes_view(rt, a[0])?;
+        let bytes = rt.heap.bytes_of(a[0]);
+        Ok(rt.heap.make_bytevector(&bytes))
+    });
+    "%fx26-str-length", 1, Some(1), simple!(|rt, a| {
+        let (_, _, n) = str_view(rt, a[0])?;
+        Ok(Value::fixnum(n as i64))
+    });
+    "%fx26-str-ref", 2, Some(2), simple!(|rt, a| {
+        let (owner, from, n) = str_view(rt, a[0])?;
+        let i = index(rt, a[1], n, "str")?;
+        Ok(Value::char(rt.heap.string_ref(owner, from + i)))
+    });
+    "%fx26-str-slice", 3, Some(3), simple!(|rt, a| {
+        let (_, _, n) = str_view(rt, a[0])?;
+        let (start, end) = view_span(rt, n, a[1], a[2], "str")?;
+        Ok(rt.heap.str_slice(a[0], start, end))
+    });
+    "%fx26-str=?", 2, Some(2), simple!(|rt, a| {
+        str_view(rt, a[0])?;
+        str_view(rt, a[1])?;
+        Ok(Value::boolean(rt.heap.str_chars(a[0]) == rt.heap.str_chars(a[1])))
+    });
+    "%fx26-str<?", 2, Some(2), simple!(|rt, a| {
+        str_view(rt, a[0])?;
+        str_view(rt, a[1])?;
+        Ok(Value::boolean(rt.heap.str_chars(a[0]) < rt.heap.str_chars(a[1])))
+    });
+    "%fx26-str->string", 1, Some(1), simple!(|rt, a| {
+        str_view(rt, a[0])?;
+        let chars = rt.heap.str_chars(a[0]);
+        Ok(rt.heap.string_from_chars(&chars))
     });
 }
 

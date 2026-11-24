@@ -79,6 +79,15 @@ fn equal_inner(
     if heap.is_utf8(a) && heap.is_utf8(b) {
         return heap.utf8_eq(a, b);
     }
+    // A slice of a string or of bytes (`TODO.md` §310): its piece's, a
+    // whole buffer of the same contents equal to it.
+    if heap.is_view_slice(a) || heap.is_view_slice(b) {
+        return match (heap.str_span(a).is_some() && heap.str_span(b).is_some(), heap.bytes_span(a).is_some() && heap.bytes_span(b).is_some()) {
+            (true, _) => heap.str_chars(a) == heap.str_chars(b),
+            (_, true) => heap.bytes_of(a) == heap.bytes_of(b),
+            _ => false,
+        };
+    }
     match (heap.obj_type(a), heap.obj_type(b)) {
         (Some(ObjType::String), Some(ObjType::String)) => {
             let n = heap.string_len(a);

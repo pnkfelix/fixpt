@@ -891,6 +891,9 @@ impl Verifier<'_> {
             Ty::Base(b) if self.c.arena.base_frozen(b) == Some(crate::check::BYTEVECTOROF_INDEX) => {
                 self.heap.is_a(x, ObjType::Bytevector)
             }
+            // A view (`TODO.md` §310): a whole buffer or a slice of one.
+            Ty::Base(b) if self.c.arena.base_frozen(b) == Some(crate::check::STROF_INDEX) => self.heap.str_span(x).is_some(),
+            Ty::Base(b) if self.c.arena.base_frozen(b) == Some(crate::check::BYTESOF_INDEX) => self.heap.bytes_span(x).is_some(),
             // A scalar by its name: `f64` the flat names is the base type.
             Ty::Base(b) if self.c.interner.name(b) == "f64" => self.heap.is_a(x, ObjType::Flonum),
             // A datum's vector and keyword, by their names: what a quote's

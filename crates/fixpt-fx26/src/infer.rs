@@ -2945,6 +2945,11 @@ impl Checker {
                 self.unify(t2, tail, u, trail);
             }
             (Ty::Named { which: g, args: xs }, Ty::Named { which: h, args: ys }) if g == h => self.unify_ds(&xs, &ys, u, trail),
+            // A view wanted, a whole buffer given (`TODO.md` §310): the
+            // same arguments.
+            (Ty::Named { which: g, args: xs }, Ty::Named { which: h, args: ys }) if crate::check::VIEWS.contains(&(h, g)) => {
+                self.unify_ds(&xs, &ys, u, trail)
+            }
             // A function applied, against another applied to as many: the
             // function, if it is a binder still to be found, is the other's;
             // what each was given, matched. Nothing else is solved for: a

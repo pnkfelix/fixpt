@@ -543,7 +543,10 @@
         "%fx26-suffix-ref-length" "%fx26-suffix-fits"
         ;; UTF-8 text looked at (`TODO.md` §306), as `never_collects` has it.
         "%fx26-utf8?" "%fx26-utf8-length" "%fx26-utf8-byte-length" "%fx26-utf8-ref"
-        "%fx26-utf8-next" "%fx26-utf8=?")
+        "%fx26-utf8-next" "%fx26-utf8=?"
+        ;; Views read (`TODO.md` §310).
+        "%fx26-bytes-length" "%fx26-bytes-u8-ref" "%fx26-bytes=?" "%fx26-str-length"
+        "%fx26-str-ref" "%fx26-str=?" "%fx26-str<?")
        #t)
       (else (or (r-eqtable-quick? name) (r-fixed-width-op? name))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never

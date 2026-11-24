@@ -168,6 +168,22 @@ fn put(
         return;
     }
 
+    // A slice of a string or of bytes (`TODO.md` §310): as the piece it
+    // views, a string's or a bytevector's way.
+    if heap.is_view_slice(v) {
+        if heap.str_span(v).is_some() {
+            let s: String = heap.str_chars(v).into_iter().collect();
+            if write {
+                put_string(out, &s);
+            } else {
+                out.push_str(&s);
+            }
+        } else {
+            let bytes: Vec<String> = heap.bytes_of(v).iter().map(|b| b.to_string()).collect();
+            let _ = write!(out, "#u8({})", bytes.join(" "));
+        }
+        return;
+    }
     match heap.obj_type(v) {
         Some(ObjType::String) => {
             if write {

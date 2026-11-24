@@ -17,7 +17,8 @@
 ;; A flat array's operand taken apart (`k-array-operand`).
 (import parser-types k-array-length k-array-size)
 ;; What it uses of the module it is given.
-(import values as-f32 as-f64 as-int as-other efail efail-expected ev-arg ev-eq? the-unit)
+(import values as-f32 as-f64 as-int as-other efail efail-expected ev-arg ev-eq? the-unit
+        as-bytesv as-strv)
 
 ;; How many `xs` there are.
 (define ev-vals-count (->* (vals) int)
@@ -211,4 +212,27 @@
              ((bloblet-set-byte!)
               (begin (array-set! bs (as-int (ev-arg xs 1)) (as-int (ev-arg xs 2))) the-unit))
              (else (array-length bs))))
-         (else y (efail-expected "a bloblet"))))))))))
+         (else y (efail-expected "a bloblet")))))))
+
+;;; ------------------------------------------------------------ views
+;; The primitives of views into bytes and into a string (`TODO.md` §310),
+;; given `prim!`: as the machines have them, the host's, a slice an
+;; `other` of its own; a whole buffer read as its view.
+(define ev-views! (->* ((subr (maxeff stores spin) (symbol vproc) unit)) unit)
+  (lambda (prim!)
+    (let ((b (lambda ((xs vals) (i int)) (as-bytesv (ev-arg xs i))))
+          (s (lambda ((xs vals) (i int)) (as-strv (ev-arg xs i))))
+          (n (lambda ((xs vals) (i int)) (as-int (ev-arg xs i)))))
+      (begin
+        (prim! 'bytes-length (lambda (xs) (bytes-length (b xs 0))))
+        (prim! 'bytes-u8-ref (lambda (xs) (u8->int (bytes-u8-ref (b xs 0) (n xs 1)))))
+        (prim! 'bytes-slice (lambda (xs) (o-bytesv (bytes-slice (b xs 0) (n xs 1) (n xs 2)))))
+        (prim! 'bytes=? (lambda (xs) (bytes=? (b xs 0) (b xs 1))))
+        (prim! 'bytes->bytevector
+               (lambda (xs) (o-bytes (the (bytevectorof @v) (bytes->bytevector (b xs 0))))))
+        (prim! 'str-length (lambda (xs) (str-length (s xs 0))))
+        (prim! 'str-ref (lambda (xs) (str-ref (s xs 0) (n xs 1))))
+        (prim! 'str-slice (lambda (xs) (o-strv (str-slice (s xs 0) (n xs 1) (n xs 2)))))
+        (prim! 'str=? (lambda (xs) (str=? (s xs 0) (s xs 1))))
+        (prim! 'str<? (lambda (xs) (str<? (s xs 0) (s xs 1))))
+        (prim! 'str->string (lambda (xs) (str->string (s xs 0)))))))))))

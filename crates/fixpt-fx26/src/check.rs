@@ -233,6 +233,18 @@ pub const EFFECTBOUND: &str = "(effectbound (e effect +)) string";
 pub(crate) const EFFECTBOUND_INDEX: u32 = 20;
 pub const TYPEBOUND: &str = "(typebound (t type +)) string";
 pub(crate) const TYPEBOUND_INDEX: u32 = 21;
+/// Views into bytes and into a string (`TODO.md` §310, the user's),
+/// generative types 22 and 23: read only, at their region, `(read r)`;
+/// a whole buffer is one (`(bytevectorof r) <: (bytesof r)`, `(stringof r)
+/// <: (strof r)`, `VIEWS`), or a slice of one. `bytes` is `(bytesof
+/// const)` and `str` `(strof const)`, as `string` is `(stringof const)`.
+pub const BYTESOF: &str = "(bytesof (r region)) (arrayof u8 r)";
+pub(crate) const BYTESOF_INDEX: u32 = 22;
+pub const STROF: &str = "(strof (r region)) (arrayof char r)";
+pub(crate) const STROF_INDEX: u32 = 23;
+/// Each whole buffer's generative type and its view's: the one below the
+/// other, at the same arguments (`Checker::sub_rules`, `unify`).
+pub(crate) const VIEWS: [(u32, u32); 2] = [(BYTEVECTOROF_INDEX, BYTESOF_INDEX), (STRINGOF_INDEX, STROF_INDEX)];
 /// The scheduler of processes and `par`, a module file built in, which the
 /// forms `spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!`
 /// call through the hidden global of its load (`Checker::library_type`).
@@ -1400,9 +1412,16 @@ impl Checker {
         // Last, so no type made before it moved.
         let sym = interner.intern("keyword");
         base.insert(sym, arena.ty(Ty::Base(sym)));
-        // UTF-8 text (`TODO.md` §306): frozen, its own layout. Last.
+        // UTF-8 text (`TODO.md` §306): frozen, its own layout.
         let sym = interner.intern("utf8");
         base.insert(sym, arena.ty(Ty::Base(sym)));
+        // Views (`TODO.md` §310): `bytes`, `(bytesof const)`, and `str`,
+        // `(strof const)`, as `string` is `(stringof const)`. Last, so no
+        // type made before them moved.
+        for name in ["bytes", "str"] {
+            let sym = interner.intern(name);
+            base.insert(sym, arena.ty(Ty::Base(sym)));
+        }
         let mut c = Checker {
             arena,
             interner,
@@ -1561,8 +1580,13 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        c.arena.frozen_bases = vec![(STRINGOF_INDEX, c.interner.intern("string")), (BYTEVECTOROF_INDEX, c.interner.intern("bytevector"))];
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING, EFFECTREP, REGIONREP, TYPEREP, EFFECTBOUND, TYPEBOUND] {
+        c.arena.frozen_bases = vec![
+            (STRINGOF_INDEX, c.interner.intern("string")),
+            (BYTEVECTOROF_INDEX, c.interner.intern("bytevector")),
+            (BYTESOF_INDEX, c.interner.intern("bytes")),
+            (STROF_INDEX, c.interner.intern("str")),
+        ];
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING, EFFECTREP, REGIONREP, TYPEREP, EFFECTBOUND, TYPEBOUND, BYTESOF, STROF] {
             c.syn(|c| {
                 let forms = c.read(decl).expect("reads");
                 c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
@@ -4926,12 +4950,20 @@ impl Checker {
 
     /// `t`, `string`, as the `(stringof const)` it is, where `other` is a
     /// `stringof`: so that the two are matched region by region; and
-    /// `bytevector`, `(bytevectorof const)`, so (`Arena::frozen_bases`).
+    /// `bytevector`, `(bytevectorof const)`, `bytes` and `str` so
+    /// (`Arena::frozen_bases`). Where `other` is of the same family, a
+    /// whole buffer's type or its view's (`VIEWS`), as well, given or made
+    /// as a frozen base type too: `bytevector` against `bytes`, each named.
     pub(crate) fn string_as_named(&self, t: Ty, other: &Ty) -> Ty {
-        match (&t, other) {
-            (Ty::Base(s), Ty::Named { which, .. }) if self.arena.base_frozen(*s) == Some(*which) => {
-                Ty::Named { which: *which, args: vec![D::Region(Region::Frozen(None, false))] }
-            }
+        let Ty::Base(s) = &t else { return t };
+        let Some(g) = self.arena.base_frozen(*s) else { return t };
+        let h = match other {
+            Ty::Named { which, .. } => Some(*which),
+            Ty::Base(o) => self.arena.base_frozen(*o).filter(|h| *h != g),
+            _ => None,
+        };
+        match h {
+            Some(h) if h == g || views_related(g, h) => Ty::Named { which: g, args: vec![D::Region(Region::Frozen(None, false))] },
             _ => t,
         }
     }
@@ -5169,8 +5201,10 @@ impl Checker {
                 self.frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && self.sub(tail, b, env, st)
             }
             // A generative type is related only to itself, argument by
-            // argument, as its variance says.
+            // argument, as its variance says; and a whole buffer's to its
+            // view's (`TODO.md` §310), at the same arguments, the view's.
             (Ty::Named { which: g, args: xa }, Ty::Named { which: h, args: xb }) if g == h => self.named_sub(g, xa, &xb, env, st),
+            (Ty::Named { which: g, args: xa }, Ty::Named { which: h, args: xb }) if VIEWS.contains(&(g, h)) => self.named_sub(h, xa, &xb, env, st),
             // A description function applied: the same function, given
             // the same descriptions (FX-91's congruence).
             (Ty::App { fun: f, args: xa }, Ty::App { fun: g, args: xb }) => {
@@ -6704,4 +6738,10 @@ pub(crate) fn components(refs: &[Vec<usize>]) -> Vec<Vec<usize>> {
         }
     }
     w.out
+}
+
+/// Whether generative types `g` and `h` are a whole buffer's and its
+/// view's, either way round (`VIEWS`).
+pub(crate) fn views_related(g: u32, h: u32) -> bool {
+    VIEWS.contains(&(g, h)) || VIEWS.contains(&(h, g))
 }

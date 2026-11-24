@@ -3,7 +3,8 @@
 //! each machine FX-26 runs on, the evaluator written in FX-26 among them,
 //! each giving the same values; and UTF-8 text, `utf8` (`TODO.md` §306),
 //! `programs/run/utf8.fx`, so; and an offset refused alike on each, the
-//! native code's own reads (ASCII only) leaving it to the primitive.
+//! native code's own reads (ASCII only) leaving it to the primitive; and
+//! views into bytes and into a string (`TODO.md` §310), `run/views.fx`.
 
 use std::process::Command;
 
@@ -138,5 +139,41 @@ fn utf8_offsets_refused_on_every_machine() {
         let out = run.join().expect("ran");
         let last = out.lines().last().unwrap_or("");
         assert!(last.contains(want), "{name} on {m}: {out}");
+    }
+}
+
+/// Views into bytes and into a string (`TODO.md` §310), `programs/run/views.fx`:
+/// a whole buffer where a view is wanted, slices and their pieces, a
+/// slice seeing its owner's writes, the copies, on every machine alike.
+#[test]
+fn views_on_every_machine() {
+    let want = [
+        "s",
+        "len",
+        "12",
+        "w",
+        "\"world\"",
+        "5",
+        "#\\w",
+        "\"or\"",
+        "(#t #t #f)",
+        "\"world\"",
+        "\"orl\"",
+        "#utf8\"world\"",
+        "seen",
+        "#\\z",
+        "bv",
+        "bs",
+        "#u8(7 7)",
+        "2",
+        "7",
+        "#t",
+        "#u8(7 7)",
+        "#u8(7)",
+        "#utf8\"bc\"",
+    ];
+    let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "views.fx")))).collect();
+    for (m, t) in runs {
+        assert_eq!(t.join().expect("ran"), want, "{m}");
     }
 }

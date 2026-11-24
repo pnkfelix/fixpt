@@ -8933,7 +8933,17 @@ already its own view (done 2026-11-24: kind 51, `Heap::utf8_slice`, every
 reader through `utf8_span`; native code tests the word before the bytes
 is a header, a whole one's, so a slice is the primitive's, its fast path
 in line left to a measurement; `run/utf8.fx`'s slices and the refusal
-test's, on every machine); then (3b) `bytes` and `str`. (4) `bytes-as-utf8`. Each its own
+test's, on every machine); then (3b) `bytes` and `str` (done
+2026-11-24: generative types 22 and 23, `bytes` and `str` their frozen
+names; the rule `VIEWS`, `views_related`, `k-view-of?`, in subtyping and
+inference, both checkers; kinds 52 and 53, `heap/views.rs`, a slice's
+offsets in its owner's elements; eleven primitives appended, the reading
+ones widened; the evaluator's `o-bytesv` and `o-strv`, its `string`
+copied to `@v` where read as a view; `run/views.fx` on every machine,
+`regions/view-is-not-whole.fx`, `regions/view-escapes.fx`). Left from
+3b: shapes of the views' own (`bytes?`, `str?`, in a union and
+`typecase`), as no generative type has one; `str-ref` and kin in line;
+the lowering giving `str-ref` of a whole `string` `string-ref`'s code. (4) `bytes-as-utf8`. Each its own
 commit, both suites between.
 
 Left to say: whether `utf8-slice` is worth a fast path in line at once,

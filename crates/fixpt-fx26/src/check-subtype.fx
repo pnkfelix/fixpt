@@ -617,13 +617,17 @@
                              (or (= k 0) (k-sub (k-nlist-tail x m r) tail ea eb trail labels)))))))
                 (else z #f)))
             ;; A generative type is related only to itself, argument
-            ;; by argument, as its variance says.
+            ;; by argument, as its variance says; and a whole buffer's to
+            ;; its view's (§310), at the same arguments, the view's.
             (ty-named (g xs)
               (tagcase tb
                 (ty-named (h ys)
-                  (and (= g h)
-                       (k-sub-descs (k-to-end-forgot g xs ys) ys (extract (k-gen-of g) 3)
-                                    ea eb trail labels)))
+                  (cond ((= g h)
+                         (k-sub-descs (k-to-end-forgot g xs ys) ys (extract (k-gen-of g) 3)
+                                      ea eb trail labels))
+                        ((k-view-of? g h)
+                         (k-sub-descs xs ys (extract (k-gen-of h) 3) ea eb trail labels))
+                        (else #f)))
                 (else z #f)))
             ;; A description function applied: the same function, given
             ;; the same descriptions (FX-91's congruence).

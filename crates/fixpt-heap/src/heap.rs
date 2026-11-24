@@ -36,6 +36,7 @@ mod symref;
 pub use symref::SymbolRef;
 mod tables;
 mod utf8;
+mod views;
 mod young;
 
 use tables::{Place, Which};

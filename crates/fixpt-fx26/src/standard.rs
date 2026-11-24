@@ -116,7 +116,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // `(stringof const)`, at which a read is pure (the user's, 2026-10-28).
     ("string-length", "(poly ((r region)) (subr pure ((stringof r)) nat))"),
     ("string-ref", "(poly ((r region)) (subr (read r) ((stringof r) int) char))"),
-    ("substring", "(poly ((r region)) (subr (read r) ((stringof r) int int) string))"),
+    // Of a string view (`TODO.md` §310), a copy.
+    ("substring", "(poly ((r region)) (subr (read r) ((strof r) int int) string))"),
     ("string=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((stringof r1) (stringof r2)) bool))"),
     // A string made, written and copied at a region, as a bytevector is:
     // frozen (`letfreeze`), it is a `string`, nothing copied.
@@ -209,8 +210,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // The fixed-width integers (PLAN.md, Q2 b): wrapping arithmetic.
     // I/O (`TODO.md` §84): each with an effect of the fixed family; a
     // failure a value the program sees.
-    ("write-out", "(subr (io stdout) (string) (sumof (done unit) (failed io-error)))"),
-    ("write-err", "(subr (io stderr) (string) (sumof (done unit) (failed io-error)))"),
+    ("write-out", "(subr (io stdout) (str) (sumof (done unit) (failed io-error)))"),
+    ("write-err", "(subr (io stderr) (str) (sumof (done unit) (failed io-error)))"),
     ("exit", "(subr (io exit) (int) void)"),
     // Files: a path as the working directory resolves it; what is read made
     // at a region; a file replaced whole, atomically.
@@ -349,8 +350,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("file-info", "(subr (io fs-read) (string) (sumof (info (productof (kind (sumof (file unit) (directory unit) (symlink unit) (other unit))) (size int) (modified int) (mode int))) (failed io-error)))"),
     ("read-symlink", "(subr (io fs-read) (string) (sumof (target string) (failed io-error)))"),
     ("get-environment-variable", "(subr (io env-read) (string) (sumof (value string) (unset unit) (not-text unit)))"),
-    ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
-    ("write-file-unflushed", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
+    ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytesof r)) (sumof (done unit) (failed io-error))))"),
+    ("write-file-unflushed", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytesof r)) (sumof (done unit) (failed io-error))))"),
     // The heap dumped, and the procedure a resumed run starts by calling
     // (`fixpt resume`, `TODO.md` §189). It is not called here, so its
     // effect is none of this one's.
@@ -384,8 +385,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("bytevector-length", "(poly ((r region)) (subr pure ((bytevectorof r)) nat))"),
     ("bytevector-u8-ref", "(poly ((r region)) (subr (read r) ((bytevectorof r) int) u8))"),
     ("bytevector-u8-set!", "(poly ((r region)) (subr (write r) ((bytevectorof r) int u8) unit))"),
-    ("bytevector-copy", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (alloc r2)) ((bytevectorof r1) int int) (bytevectorof r2)))"),
-    ("bytevector-copy!", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (write r2)) ((bytevectorof r2) int (bytevectorof r1) int int) unit))"),
+    ("bytevector-copy", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (alloc r2)) ((bytesof r1) int int) (bytevectorof r2)))"),
+    ("bytevector-copy!", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (write r2)) ((bytevectorof r2) int (bytesof r1) int int) unit))"),
     ("bytevector=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((bytevectorof r1) (bytevectorof r2)) bool))"),
     // UTF-8 text, `utf8` (`TODO.md` §306): frozen, indexed by byte offset,
     // a character read where one starts (an error elsewhere), the offset
@@ -400,10 +401,24 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("utf8-substring", "(subr pure (utf8 int int) utf8)"),
     // A view of the piece, nothing copied (`TODO.md` §310).
     ("utf8-slice", "(subr pure (utf8 int int) utf8)"),
+    // Views into bytes and into a string (`TODO.md` §310): a whole buffer
+    // or a slice of one, read only, at its region; a slice of a piece,
+    // nothing copied; a whole buffer copied of one.
+    ("bytes-length", "(poly ((r region)) (subr pure ((bytesof r)) nat))"),
+    ("bytes-u8-ref", "(poly ((r region)) (subr (read r) ((bytesof r) int) u8))"),
+    ("bytes-slice", "(poly ((r region)) (subr pure ((bytesof r) int int) (bytesof r)))"),
+    ("bytes=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((bytesof r1) (bytesof r2)) bool))"),
+    ("bytes->bytevector", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (alloc r2)) ((bytesof r1)) (bytevectorof r2)))"),
+    ("str-length", "(poly ((r region)) (subr pure ((strof r)) nat))"),
+    ("str-ref", "(poly ((r region)) (subr (read r) ((strof r) int) char))"),
+    ("str-slice", "(poly ((r region)) (subr pure ((strof r) int int) (strof r)))"),
+    ("str=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((strof r1) (strof r2)) bool))"),
+    ("str<?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((strof r1) (strof r2)) bool))"),
+    ("str->string", "(poly ((r region)) (subr (read r) ((strof r)) string))"),
     ("utf8=?", "(subr pure (utf8 utf8) bool)"),
-    ("string->utf8", "(poly ((s region)) (subr (read s) ((stringof s)) utf8))"),
+    ("string->utf8", "(poly ((s region)) (subr (read s) ((strof s)) utf8))"),
     ("utf8->string", "(subr pure (utf8) string)"),
-    ("bytes->utf8", "(poly ((r region)) (subr (read r) ((bytevectorof r)) (sumof (text utf8) (bad int))))"),
+    ("bytes->utf8", "(poly ((r region)) (subr (read r) ((bytesof r)) (sumof (text utf8) (bad int))))"),
     ("utf8->bytes", "(poly ((r region)) (subr (alloc r) (utf8) (bytevectorof r)))"),
     ("i8+", "(subr pure (i8 i8) i8)"),
     ("i8-", "(subr pure (i8 i8) i8)"),
@@ -879,6 +894,8 @@ pub fn standard_text() -> String {
         crate::check::TYPEREP,
         crate::check::EFFECTBOUND,
         crate::check::TYPEBOUND,
+        crate::check::BYTESOF,
+        crate::check::STROF,
     ]
         .iter()
         // Its conversions named as they were (`docs/research/generative-types.md`

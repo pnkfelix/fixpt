@@ -210,6 +210,11 @@ pub const KINDS: &[Kind] = &[
     // a whole `utf8`, its start and end in the owner's suffix, and its
     // owner's mark; a trailer (`heap/utf8.rs`).
     Kind { name: "utf8-slice", code: 51, traced: true, settable: false },
+    // A slice of a bytevector and of a string (`TODO.md` §310): frozen,
+    // its values its owner, a whole one, and its start and end in the
+    // owner's elements; a trailer (`heap/views.rs`).
+    Kind { name: "bytes-slice", code: 52, traced: true, settable: false },
+    Kind { name: "str-slice", code: 53, traced: true, settable: false },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.

@@ -77,6 +77,9 @@
   ;; A string made at a region (`(stringof r)`), which may be written; a
   ;; `string` once frozen, as the machines have one object for both.
   (o-mstr (stringof @v))
+  ;; A slice of bytes and of a string (`TODO.md` §310), the machines'.
+  (o-bytesv (bytesof @v))
+  (o-strv (strof @v))
   (o-tag (prompt-tag val val (maxeff runs spin) @x))
   (o-cont (composable val val (maxeff runs spin) @x))
   ;; One taken one-shot, the machine's own (`TODO.md` §98), and whether
@@ -137,6 +140,8 @@
    (val as-key (subr (maxeff evals spin) (val) (mark-key val @x)))
    (val as-other (subr evals (val string) other))
    (val as-bytes (subr evals (val) (bytevectorof @v)))
+   (val as-bytesv (subr evals (val) (bytesof @v)))
+   (val as-strv (subr evals (val) (strof @v)))
    (val as-mstr (subr evals (val) (stringof @v)))
    (val as-pair (subr evals (val) (pairof val val @v)))
    (val as-ref (subr evals (val) vcell))
@@ -165,7 +170,9 @@
    (val ev-bref (subr (maxeff evals spin) (val int) val))
    (val ev-blobref (subr (maxeff evals spin) (symbol int vals) val))
    (val ev-flat-tag (subr (maxeff evals spin) (val int) val))
-   (val ev-label-is? (subr (maxeff (read @globals) spin) (val symbol int) bool))))
+   (val ev-label-is? (subr (maxeff (read @globals) spin) (val symbol int) bool))
+   (val ev-views!
+        (subr (maxeff stores spin) ((subr (maxeff stores spin) (symbol vproc) unit)) unit))))
 ;; The primitives' module as `eval-core.fx` uses it.
 (define-type eval-prims-sig
   (moduleof

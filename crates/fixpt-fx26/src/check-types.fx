@@ -241,19 +241,33 @@
          (tagcase (car ds)
            (dr (r) (tagcase r (r-frozen (p f) (= p -1)) (else y #f)))
            (else y #f)))))
-;; `bytevectorof`'s (`check::BYTEVECTOROF`).
+;; `bytevectorof`'s (`check::BYTEVECTOROF`), and the views' (§310).
 (define k-bytevectorof int 8)
+(define k-bytesof int 22)
+(define k-strof int 23)
+;; Whether `g` is a whole buffer's generative type and `h` its view's
+;; (`check::VIEWS`).
+(define k-view-of? (subr pure (int int) bool)
+  (lambda (g h)
+    (or (and (= g k-bytevectorof) (= h k-bytesof)) (and (= g k-stringof) (= h k-strof)))))
+;; Whether `g` and `h` are a whole buffer's and its view's, either way
+;; round (`views_related`).
+(define k-views-related? (subr pure (int int) bool)
+  (lambda (g h) (or (k-view-of? g h) (k-view-of? h g))))
 ;; The base type a frozen generative type `g` is made as, if any ('||):
-;; `string` `(stringof const)`, `bytevector` `(bytevectorof const)`
-;; (`Arena::frozen_bases`).
+;; `string` `(stringof const)`, `bytevector` `(bytevectorof const)`, and
+;; the views', `bytes` and `str` (`Arena::frozen_bases`).
 (define k-frozen-base (subr pure (int) symbol)
-  (lambda (g) (cond ((= g k-stringof) 'string) ((= g k-bytevectorof) 'bytevector) (else '||))))
+  (lambda (g)
+    (cond ((= g k-stringof) 'string) ((= g k-bytevectorof) 'bytevector)
+          ((= g k-bytesof) 'bytes) ((= g k-strof) 'str) (else '||))))
 ;; The generative type base type `s` is the frozen one of, or -1.
 (define k-base-frozen (subr pure (symbol) int)
   (lambda (s)
-    (cond ((symbol=? s 'string) k-stringof) ((symbol=? s 'bytevector) k-bytevectorof) (else -1))))
+    (cond ((symbol=? s 'string) k-stringof) ((symbol=? s 'bytevector) k-bytevectorof)
+          ((symbol=? s 'bytes) k-bytesof) ((symbol=? s 'str) k-strof) (else -1))))
 ;; `string` where `t` is `(stringof const)`, `bytevector` where it is
-;; `(bytevectorof const)`: the one type (`Arena::ty`).
+;; `(bytevectorof const)`, and so the views': the one type (`Arena::ty`).
 (define k-string-norm (subr pure (k-ty) k-ty)
   (lambda (t)
     (tagcase t
@@ -262,15 +276,19 @@
             (ty-base (k-frozen-base g))
             t))
       (else y t))))
-;; `t`, `string`, as the `(stringof const)` it is where `other` is a
-;; `stringof`, to match them region by region (`string_as_named`); and
-;; `bytevector`, so.
+;; `t`, a frozen base type, as the generative type it is, where `other` is
+;; that type or of its family, named or a frozen base type too, to match
+;; them region by region (`string_as_named`).
 (define k-string-as-named (subr pure (k-ty k-ty) k-ty)
   (lambda (t other)
     (tagcase t
       (ty-base (s)
-        (let ((g (k-base-frozen s)))
-          (if (and (>= g 0) (tagcase other (ty-named (h ds) (= h g)) (else y #f)))
+        (let* ((g (k-base-frozen s))
+               (h (tagcase other
+                    (ty-named (w ds) w)
+                    (ty-base (o) (let ((q (k-base-frozen o))) (if (= q g) -1 q)))
+                    (else y -1))))
+          (if (and (>= g 0) (>= h 0) (or (= h g) (k-views-related? g h)))
               (ty-named g (list (dr (r-frozen -1 #f))))
               t)))
       (else y t))))

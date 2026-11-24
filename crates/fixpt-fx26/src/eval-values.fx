@@ -61,6 +61,26 @@
   (lambda (v)
     (tagcase (as-other v "a bytevector") (o-bytes (b) b) (else y (efail-expected "a bytevector")))))
 
+;; `v`, a bytes view (`TODO.md` §310): a whole bytevector or a slice.
+(define as-bytesv (->* (val) (bytesof @v))
+  (lambda (v)
+    (tagcase (as-other v "a bytevector")
+      (o-bytes (b) b)
+      (o-bytesv (s) s)
+      (else y (efail-expected "a bytevector")))))
+
+;; `v`, a string view: a slice, or a whole string, a `string` (`const`'s,
+;; which no view at `@v` is) copied to the evaluator's region, unseen,
+;; since it is frozen.
+(define as-strv (->* (val) (strof @v))
+  (lambda (v)
+    (if (string? v)
+        (the (stringof @v) (string-copy v 0 (string-length v)))
+        (tagcase (as-other v "a string")
+          (o-mstr (m) m)
+          (o-strv (s) s)
+          (else y (efail-expected "a string"))))))
+
 ;; `v`, an `other`; or fails, `what` being expected.
 (define as-other (->* (val string) other)
   (lambda (v what) (typecase v (sum o o) (else (efail-expected what)))))
@@ -78,6 +98,7 @@
         v
         (tagcase (as-other v "a string")
           (o-mstr (m) (list->string (string->list m)))
+          (o-strv (s) (str->string s))
           (else y (efail-expected "a string"))))))
 
 ;; `v`, a string made at a region, to be written; or fails.
@@ -198,6 +219,8 @@
       (o-vec (x) (tagcase b (o-vec (y) (eq? x y)) (else y #f)))
       (o-eqt (x) (tagcase b (o-eqt (y) (eq? x y)) (else y #f)))
       (o-mstr (x) (tagcase b (o-mstr (y) (eq? x y)) (else y #f)))
+      (o-bytesv (x) (tagcase b (o-bytesv (y) (eq? x y)) (else y #f)))
+      (o-strv (x) (tagcase b (o-strv (y) (eq? x y)) (else y #f)))
       (o-host (x) (tagcase b (o-host (y) (eq? x y)) (else y #f)))
       (else y #f))))
 
@@ -414,6 +437,10 @@
       (o-vec (xs) (k-cat3 "#(" (show-vec xs (- (array-length xs) 1) "") ")"))
       (o-eqt (es) "#<eqtable>")
       (o-mstr (m) (k-cat3 "\"" (list->string (string->list m)) "\""))
+      (o-bytesv (s)
+        (let ((b (the (bytevectorof @v) (bytes->bytevector s))))
+          (k-cat3 "#u8(" (show-bytes b (- (bytevector-length b) 1) "") ")")))
+      (o-strv (s) (k-cat3 "\"" (str->string s) "\""))
       (o-tag (t) "#<prompt-tag>")
       (o-cont (k) "#<continuation>")
       (o-once (k s) "#<continuation>")

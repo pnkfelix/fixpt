@@ -50,7 +50,7 @@
 (import values apply-val apply1 ev-poll as-bool as-fields as-other as-str as-tag efail
         efail-expected ev-eq? eval-tag show-val the-unit ev-intern)
 (import prims prim! standard)
-(import bloblets ev-bloblet ev-bref ev-blobref ev-flat-tag ev-label-is?)
+(import bloblets ev-bloblet ev-bref ev-blobref ev-flat-tag ev-label-is? ev-views!)
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include env) (include resolve))
 
@@ -884,7 +884,7 @@
 (define ev-begin! (->* (k-reshape-list k-with-list k-facts) unit)
   (lambda (rs ws fs)
     (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs) (set ev-withs ws)
-           (set ev-facts fs) (set ev-sessions nil) (ev-session-prims!))))
+           (set ev-facts fs) (set ev-sessions nil) (ev-session-prims!) (ev-views! prim!))))
 
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), run; its value shown, or

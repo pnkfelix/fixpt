@@ -23,7 +23,7 @@
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 as-array as-bool as-bytes ev-preempt-set! as-char as-cont as-f32
         as-f64 as-int as-key as-keyword as-utf8 as-other as-pair as-ref as-str as-sym as-tag efail
-        efail-expected
+        efail-expected as-bytesv as-strv
         ev-arg as-mstr ev-eq? list->val the-unit val->vals vals->val)
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include tables) (include check-types))
@@ -175,7 +175,7 @@
       (prim! 'string-ref (lambda (xs) (ev-string-ref (ev-arg xs 0) (as-int (ev-arg xs 1)))))
       (prim! 'substring
              (lambda (xs)
-               (substring (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)) (as-int (ev-arg xs 2)))))
+               (substring (as-strv (ev-arg xs 0)) (as-int (ev-arg xs 1)) (as-int (ev-arg xs 2)))))
       (prim! 'string=? (lambda (xs) (str-cmp xs (lambda (a b) (string=? a b)))))
       (prim! 'string<? (lambda (xs) (str-cmp xs (lambda (a b) (string<? a b)))))
       (prim! 'string<=? (lambda (xs) (str-cmp xs (lambda (a b) (string<=? a b)))))
@@ -328,6 +328,7 @@
 (define* ev-bytes-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (let ((b (lambda ((xs vals) (i int)) (as-bytes (ev-arg xs i))))
+          (bv (lambda ((xs vals) (i int)) (as-bytesv (ev-arg xs i))))
           (n (lambda ((xs vals) (i int)) (as-int (ev-arg xs i))))
           (u (lambda ((xs vals) (i int)) (as-utf8 (ev-arg xs i))))
           (made (lambda ((b (bytevectorof @v))) (the val (o-bytes b)))))
@@ -340,17 +341,16 @@
         (prim! 'bytevector-u8-set!
                (lambda (xs)
                  (begin (bytevector-u8-set! (b xs 0) (n xs 1) (int->u8 (n xs 2))) the-unit)))
-        (prim! 'bytevector-copy
-               (lambda (xs) (made (bytevector-copy (b xs 0) (n xs 1) (n xs 2)))))
+        (prim! 'bytevector-copy (lambda (xs) (made (bytevector-copy (bv xs 0) (n xs 1) (n xs 2)))))
         (prim! 'bytevector-copy!
                (lambda (xs)
-                 (begin (bytevector-copy! (b xs 0) (n xs 1) (b xs 2) (n xs 3) (n xs 4)) the-unit)))
+                 (begin (bytevector-copy! (b xs 0) (n xs 1) (bv xs 2) (n xs 3) (n xs 4)) the-unit)))
         (prim! 'bytevector=? (lambda (xs) (bytevector=? (b xs 0) (b xs 1))))
         ;; UTF-8 text (`TODO.md` §306), as the machines have it: the host's.
         (prim! 'utf8->bytes (lambda (xs) (made (utf8->bytes (as-utf8 (ev-arg xs 0))))))
         (prim! 'bytes->utf8
                (lambda (xs)
-                 (tagcase (bytes->utf8 (b xs 0))
+                 (tagcase (bytes->utf8 (bv xs 0))
                    (text u (the val (o-sum 'text u)))
                    (bad k (the val (o-sum 'bad k))))))
         (prim! 'string->utf8 (lambda (xs) (string->utf8 (as-str (ev-arg xs 0)))))
@@ -552,11 +552,11 @@
                  (failed e (ev-io-failed e)))))
       (prim! 'write-file
              (lambda (xs)
-               (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1))))))
+               (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytesv (ev-arg xs 1))))))
       (prim! 'write-file-unflushed
              (lambda (xs)
                (ev-io-result
-                (write-file-unflushed (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1))))))
+                (write-file-unflushed (as-str (ev-arg xs 0)) (as-bytesv (ev-arg xs 1))))))
       ;; The evaluator's heap is no program's a resumed run could start
       ;; (`TODO.md` §189): a dump fails here.
       (prim! 'dump-heap!
