@@ -194,7 +194,7 @@ fn the_heap_syn_reads_back_as_the_rust_syntax() {
             (V::Nil, Datum::Nil) => {}
             (V::Bool(a), Datum::Bool(b)) => assert_eq!(a, *b),
             (V::Char(a), Datum::Char(b)) => assert_eq!(a, *b),
-            (V::Str(a), Datum::Str(b)) => assert_eq!(&a, b),
+            (V::Str(a), Datum::Str(b)) | (V::Utf8(a), Datum::Utf8(b)) => assert_eq!(&a, b),
             (V::Symbol(a), Datum::Symbol(b)) | (V::Keyword(a), Datum::Keyword(b)) => assert_eq!(a, *b, "{name}"),
             (V::Bytevector(a), Datum::Bytevector(b)) => assert_eq!(&a, b),
             (V::Number(a), Datum::Number(b)) => assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}"),

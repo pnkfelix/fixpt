@@ -116,6 +116,8 @@ pub enum V {
     List { items: Vec<Syn>, tail: Option<Syn> },
     Vector(Vec<Syn>),
     Bytevector(Vec<u8>),
+    /// `#utf8"…"`'s text.
+    Utf8(String),
 }
 
 /// What a heap's syntax keeps beside it. Its symbols are the checker's by
@@ -413,6 +415,8 @@ impl<'a> Rd<'a> {
             V::Number(Num::Big { negative, digits, radix: 10 })
         } else if h.is_keyword(d) {
             V::Keyword(self.sym_of(h.keyword_symbol(d)))
+        } else if h.is_utf8(d) {
+            V::Utf8(h.utf8_string(d))
         } else {
             unreachable!("an atom FX-26 does not read: {}", fixpt_runtime::write_value(h, d))
         }
@@ -555,7 +559,7 @@ pub fn datum_of(heap: &Heap, s: Value) -> Value {
 
 /// Whether `d` is an atom FX-26 reads, as [`Rd::atom_view`] looks at one.
 fn is_read_atom(heap: &Heap, d: Value) -> bool {
-    d == Value::TRUE || d == Value::FALSE || d.is_char() || d.is_fixnum() || heap.is_keyword(d)
+    d == Value::TRUE || d == Value::FALSE || d.is_char() || d.is_fixnum() || heap.is_keyword(d) || heap.is_utf8(d)
         || [ObjType::Symbol, ObjType::String, ObjType::Bytevector, ObjType::Flonum, ObjType::Bignum].iter().any(|t| heap.is_a(d, *t))
 }
 
@@ -600,6 +604,8 @@ pub fn copy_datum(from: &Heap, v: Value, to: &mut Heap) -> Result<Value, String>
         to.make_keyword(sym)
     } else if from.is_a(v, ObjType::String) {
         to.make_string(&from.string_to_rust(v))
+    } else if from.is_utf8(v) {
+        to.make_utf8(&from.utf8_string(v))
     } else if from.is_a(v, ObjType::Bytevector) {
         to.make_bytevector(&(0..from.bytevector_len(v)).map(|i| from.bytevector_ref(v, i)).collect::<Vec<u8>>())
     } else if from.is_a(v, ObjType::Flonum) {
@@ -736,6 +742,7 @@ impl<'a> Mk<'a> {
                 self.heap.make_keyword(sym)
             }
             V::Bytevector(b) => self.heap.make_bytevector(b),
+            V::Utf8(t) => self.heap.make_utf8(t),
             V::Nil => return self.list(at, &[], None),
             V::List { items, tail } => return self.list(at, items, *tail),
             V::Vector(items) => return self.vector(at, items),
@@ -974,6 +981,7 @@ impl Build for HeapSyn<'_> {
             Datum::Symbol(s) => V::Symbol(*s),
             Datum::Keyword(s) => V::Keyword(*s),
             Datum::Bytevector(b) => V::Bytevector(b.clone()),
+            Datum::Utf8(t) => V::Utf8(t.clone()),
             Datum::Nil => V::Nil,
             Datum::List { .. } | Datum::Vector(_) => unreachable!("built from its items"),
         };
@@ -1309,6 +1317,7 @@ impl Syn {
             V::Keyword(s) => Datum::Keyword(s),
             V::Nil => Datum::Nil,
             V::Bytevector(b) => Datum::Bytevector(b),
+            V::Utf8(t) => Datum::Utf8(t),
         };
         fixpt_read::write_atom(out, &d, interner)
     }
@@ -1493,7 +1502,7 @@ pub fn adopted(v: Value, interner: &mut Interner) -> Result<Syn, String> {
                     } else {
                         None
                     };
-                    let read = d.is_fixnum() || d == Value::TRUE || d == Value::FALSE || d.is_char()
+                    let read = d.is_fixnum() || d == Value::TRUE || d == Value::FALSE || d.is_char() || heap.is_utf8(d)
                         || [ObjType::String, ObjType::Bytevector, ObjType::Flonum, ObjType::Bignum].iter().any(|t| heap.is_a(d, *t));
                     match sym {
                         Some(v) => syms.note(heap, v, interner),

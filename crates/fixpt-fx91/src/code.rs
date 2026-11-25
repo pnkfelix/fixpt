@@ -438,6 +438,9 @@ impl Checker {
             Datum::Keyword(_) => {
                 return Err(FxError::fatal(span, "a keyword is not an FX-91 datum"));
             }
+            Datum::Utf8(_) => {
+                return Err(FxError::fatal(span, "a `utf8` is not an FX-91 datum"));
+            }
         })
     }
 }

@@ -85,6 +85,8 @@ pub struct SyntaxProfile {
     pub fx_module: bool,
     /// `#:name`, a keyword (`Datum::Keyword`).
     pub keywords: bool,
+    /// `#utf8"…"`, UTF-8 text (`Datum::Utf8`).
+    pub utf8_literals: bool,
 }
 
 impl SyntaxProfile {
@@ -102,6 +104,7 @@ impl SyntaxProfile {
         quote_sugar: true,
         fx_module: false,
         keywords: false,
+        utf8_literals: false,
     };
 
     pub const FX87: SyntaxProfile = SyntaxProfile {
@@ -117,6 +120,7 @@ impl SyntaxProfile {
         quote_sugar: true,
         fx_module: false,
         keywords: false,
+        utf8_literals: false,
     };
 
     pub const FX91: SyntaxProfile = SyntaxProfile {
@@ -133,6 +137,7 @@ impl SyntaxProfile {
         quote_sugar: true,
         fx_module: false,
         keywords: false,
+        utf8_literals: false,
     };
 
     /// FX-26: Scheme's lexical syntax, with `#u` as unit beside `#u8(`, and
@@ -151,6 +156,7 @@ impl SyntaxProfile {
         quote_sugar: true,
         fx_module: true,
         keywords: true,
+        utf8_literals: true,
     };
 
     pub fn by_name(name: &str) -> Option<SyntaxProfile> {

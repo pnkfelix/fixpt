@@ -73,6 +73,16 @@ fn put_datum(out: &mut String, s: &Syntax, interner: &Interner, write: bool, map
                 out.push_str(text)
             }
         }
+        // Written as it reads, displayed as its text (as the runtime's
+        // printer does a `utf8`).
+        Datum::Utf8(text) => {
+            if write {
+                out.push_str("#utf8");
+                put_string(out, text)
+            } else {
+                out.push_str(text)
+            }
+        }
         // `write` escapes a symbol that would not read back; `display` does
         // not, matching Scheme — `(display '|a b|)` prints `a b`. FX-87 leans
         // on this: its checking-failure messages render the offending form with

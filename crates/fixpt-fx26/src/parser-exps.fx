@@ -218,6 +218,9 @@
                 ((bool? d) (e-bool d a b 0 0))
                 ((char? d) (e-char d a b 0 0))
                 ((f64? d) (e-float d a b 0 0))
+                ;; `#utf8"…"` evaluates to itself: a constant, made once and
+                ;; interned, as a quote's (as `parse.rs` has it).
+                ((utf8? d) (e-quote s a b 0 0))
                 ;; `#:name`, a keyword, evaluates to itself: the standard
                 ;; `symbol->keyword` of the name, interned (as `parse.rs`
                 ;; rewrites it).

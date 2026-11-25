@@ -84,6 +84,7 @@
           ((symbol? d) (symbol->string d))
           ((keyword? d) (string-append "#:" (symbol->string (keyword->symbol d))))
           ((string? d) (string-append "\"" d "\""))
+          ((utf8? d) (string-append "#utf8\"" (string-append (utf8->string d) "\"")))
           ((char? d) (string-append "#\\" (char->string d)))
           ((int? d) (int->string d))
           ((f64? d) (f64->string d))

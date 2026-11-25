@@ -46,6 +46,7 @@
               ((char? d) (mix 9 (char->integer d)))
               ((bool? d) (mix 10 (if d 1 0)))
               ((keyword? d) (mix 11 (text-hash (symbol->string (keyword->symbol d)))))
+              ((utf8? d) (mix 13 (text-hash (utf8->string d))))
               (else 3)))
       (lst (xs d a b x) (syns-hash 4 xs))
       (dotted (xs t d a b x) (mix (syns-hash 5 xs) (syn-hash t)))

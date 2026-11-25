@@ -325,6 +325,7 @@ impl Expander<'_> {
             Datum::Number(n) => fixpt_runtime::num_from_literal(self.rt, n),
             Datum::Str(text) => self.rt.heap.make_string(text),
             Datum::Bytevector(b) => self.rt.heap.make_bytevector(b),
+            Datum::Utf8(text) => self.rt.heap.make_utf8(text),
             Datum::Keyword(sym) => {
                 let name = self.rt.interner.name(*sym).to_string();
                 let s = self.rt.heap.intern(&name);
@@ -391,6 +392,9 @@ impl Expander<'_> {
             return fixpt_read::reader::parse_number(&text, 10, None)
                 .map(|n| Syntax::new(span, Datum::Number(n)))
                 .ok_or(text);
+        }
+        if self.rt.heap.is_utf8(v) {
+            return Ok(Syntax::new(span, Datum::Utf8(self.rt.heap.utf8_string(v))));
         }
         match self.rt.heap.obj_type(v) {
             Some(ObjType::Symbol) => {

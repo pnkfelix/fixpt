@@ -3047,6 +3047,7 @@ impl<'a> Compiler<'a> {
                 let s = self.heap.intern(n);
                 self.heap.make_keyword(s)
             }
+            Sx::Utf8(t) => self.heap.make_utf8(t),
             Sx::List(items) => self.list_value(items, Value::NULL),
             Sx::Dotted(items, tail) => {
                 let t = self.datum_value(tail);

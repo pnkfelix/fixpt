@@ -8585,8 +8585,21 @@ For Heist and kayak, the rename, mechanical: a string's bytes,
 `(string->utf8 s)` before, are `(utf8->bytes (string->utf8 s))`; bytes as
 text, `(utf8->string bv)` before, giving `(sum text s)`, are `(bytes->utf8
 bv)`, giving `(sum text u)`, `u` a `utf8` (`(utf8->string u)` the
-`string`). Left: a reader of `#utf8"…"` and literals, with kayak; more
-operations as wanted (`utf8<?`, `utf8-append`, a search, a hash).
+`string`). Left: more operations as wanted (`utf8<?`, `utf8-append`, a
+search, a hash).
+
+Done (2026-11-24, the user's word: `#utf8"…"`, and views into statics
+perhaps later): literals. Both readers read `#utf8"…"` (FX-26's profile, a
+string's escapes; `Datum::Utf8`, `eager-reader.fx`'s `read-bytes`), a
+`datum` of its own, `utf8` appended to the union (`check::DATUM`). Both
+parsers make it a quote's constant of type `utf8` (`Exp::Quote`,
+`e-quote`), so no compiler needed a new expression: made once, interned by
+its bytes (`Heap::intern_datum`), a whole `utf8`, marked ASCII as made; in
+a `.fasl` and an image the frozen object it is. Whether two literals of
+one text are one object unspecified, so a literal may later be a view of
+text the binary holds (§242) without a program's types or answers
+changing. Tests: `run/utf8-literals.fx` on every machine, the readers'
+(`fixpt-read`'s, `eager.rs`'s), a `.fasl`'s (`fasl.rs`).
 
 Done (2026-11-24, the user's word): native fast paths. `utf8-length` (its
 field), `utf8-byte-length` (its header's B), and `utf8-ref` and

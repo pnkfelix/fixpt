@@ -150,6 +150,7 @@ pub fn syntax_to_value(rt: &mut Runtime, s: &Syntax) -> Value {
             rt.heap.vector_from(&vals)
         }
         Datum::Bytevector(bytes) => rt.heap.make_bytevector(bytes),
+        Datum::Utf8(text) => rt.heap.make_utf8(text),
     }
 }
 

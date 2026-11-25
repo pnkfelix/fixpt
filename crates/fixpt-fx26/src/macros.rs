@@ -6159,6 +6159,7 @@ fn syn_hash(s: &Syn, interner: &Interner) -> i64 {
         V::Bool(b) => mix(10, b as i64),
         V::Keyword(x) => mix(11, text(interner.name(x))),
         V::Bytevector(bs) => bs.iter().fold(12, |h, b| mix(h, *b as i64)),
+        V::Utf8(t) => mix(13, text(&t)),
     }
 }
 

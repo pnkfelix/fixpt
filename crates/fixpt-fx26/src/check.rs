@@ -52,7 +52,7 @@ pub(crate) fn fixed_range(name: &str) -> Option<(i128, i128)> {
 /// A datum, what a reader reads: an atom, or a pair of datums, frozen and
 /// acyclic, or a vector or bytevector (TODO §51). The same text defines it
 /// in the checker written in FX-26 (`standard::standard_text`).
-pub const DATUM: &str = "(oneof int f64 char bool string symbol keyword nil (pairof datum datum acyclic) vector bytevector)";
+pub const DATUM: &str = "(oneof int f64 char bool string symbol keyword nil (pairof datum datum acyclic) vector bytevector utf8)";
 /// What an I/O primitive gives when it fails (`TODO.md` §84): its kind, one
 /// of a fixed few as `tagcase` can check, and the system's description. A
 /// value the program sees, not a failure of the run.

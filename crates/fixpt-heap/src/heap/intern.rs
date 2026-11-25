@@ -5,7 +5,7 @@
 //!
 //! Hash-consing, bottom up: a pair is found by its car and cdr once those
 //! are interned, a string, float or vector by its contents (a vector's
-//! elements interned), a keyword by its name. Symbols and immediates are
+//! elements interned), a keyword by its name, a whole `utf8` by its bytes. Symbols and immediates are
 //! canonical already.
 //!
 //! The table is in the heap, so that an image keeps it (`dump-heap`): the
@@ -50,6 +50,11 @@ impl Heap {
         self.intern_datum(k)
     }
 
+    /// Whether `v` is a whole `utf8`, not a slice: one a quote may hold.
+    fn is_whole_utf8(&self, v: Value) -> bool {
+        self.is_utf8(v) && !self.utf8_is_slice(v)
+    }
+
     /// Whether `v` is a keyword.
     pub fn is_keyword(&self, v: Value) -> bool {
         v.is_bloblet() && !v.is_suffix_ref() && self.bloblet_kind(v) == KEYWORD
@@ -84,7 +89,9 @@ impl Heap {
             }
             return d;
         }
-        let candidate = if self.is_keyword(v) {
+        // A whole `utf8` by its bytes (`#utf8"…"`); a slice is not quoted
+        // text, and stays itself.
+        let candidate = if self.is_keyword(v) || self.is_whole_utf8(v) {
             v
         } else {
             match self.obj_type(v) {
@@ -191,6 +198,7 @@ impl Heap {
             Some(ObjType::Flonum) => mix(3, self.flonum_value(o).to_bits()),
             Some(ObjType::Vector) => (0..self.obj_len(o)).fold(4, |h, i| mix(h, self.obj_ref(o, i).raw())),
             _ if self.is_keyword(o) => mix(5, self.keyword_symbol(o).raw()),
+            _ if self.is_whole_utf8(o) => self.utf8_text(o).iter().fold(6, |h, b| mix(h, *b as u64)),
             _ => 0,
         }
     }
@@ -203,6 +211,9 @@ impl Heap {
         }
         if o.is_pair() || c.is_pair() {
             return o.is_pair() && c.is_pair() && self.car(o) == self.car(c) && self.cdr(o) == self.cdr(c);
+        }
+        if self.is_whole_utf8(o) || self.is_whole_utf8(c) {
+            return self.is_whole_utf8(o) && self.is_whole_utf8(c) && self.utf8_text(o) == self.utf8_text(c);
         }
         match (self.obj_type(o), self.obj_type(c)) {
             (Some(ObjType::String), Some(ObjType::String)) => self.string_to_rust(o) == self.string_to_rust(c),

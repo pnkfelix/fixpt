@@ -22,6 +22,8 @@ pub enum Sx {
     Vector(Vec<Sx>),
     /// `#:name`, in a quote's constant.
     Keyword(String),
+    /// `#utf8"…"`, in a quote's constant.
+    Utf8(String),
 }
 
 impl Sx {
@@ -62,6 +64,7 @@ impl Sx {
             },
             Sx::Vector(items) => Datum::Vector(items.iter().map(|x| x.syntax(interner, span)).collect()),
             Sx::Keyword(s) => Datum::Keyword(interner.intern(s)),
+            Sx::Utf8(t) => Datum::Utf8(t.clone()),
         };
         Syntax::new(span, datum)
     }
@@ -86,6 +89,7 @@ pub fn datum_sx(x: crate::heap_syn::Syn, interner: &Interner) -> Sx {
             name => Sx::sym(name),
         },
         V::Keyword(n) => Sx::Keyword(interner.name(n).to_string()),
+        V::Utf8(t) => Sx::Utf8(t),
         V::List { items, tail } => {
             let items = items.into_iter().map(|i| datum_sx(i, interner)).collect();
             match tail {
@@ -154,6 +158,10 @@ impl fmt::Display for Sx {
                 f.write_str(")")
             }
             Sx::Keyword(s) => write!(f, "#:{}", fixpt_read::escape_symbol(s)),
+            Sx::Utf8(t) => {
+                f.write_str("#utf8")?;
+                fmt::Display::fmt(&Sx::Str(t.clone()), f)
+            }
         }
     }
 }
@@ -250,6 +258,7 @@ impl Sx {
                 items(out, xs);
             }
             Sx::Keyword(s) => text(out, 10, s),
+            Sx::Utf8(t) => text(out, 11, t),
         }
     }
 
@@ -288,6 +297,7 @@ impl Sx {
             }
             9 => Sx::Vector(items(at)?),
             10 => Sx::Keyword(text(at)?),
+            11 => Sx::Utf8(text(at)?),
             _ => return None,
         })
     }

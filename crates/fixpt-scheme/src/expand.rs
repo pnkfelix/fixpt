@@ -495,7 +495,7 @@ impl<'a> Expander<'a> {
                 let v = self.rt.heap.make_string(text);
                 self.constant(s.span, v)
             }
-            Datum::Vector(_) | Datum::Bytevector(_) | Datum::Keyword(_) => {
+            Datum::Vector(_) | Datum::Bytevector(_) | Datum::Keyword(_) | Datum::Utf8(_) => {
                 let v = self.datum_to_value(s);
                 self.constant(s.span, v)
             }
@@ -767,6 +767,7 @@ impl<'a> Expander<'a> {
                 self.rt.heap.vector_from(&vals)
             }
             Datum::Bytevector(bytes) => self.rt.heap.make_bytevector(bytes),
+            Datum::Utf8(text) => self.rt.heap.make_utf8(text),
         }
     }
 

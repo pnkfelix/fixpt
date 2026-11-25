@@ -2,7 +2,8 @@
 //! `docs/fx26.md`, "Strings at a region"): `programs/run/stringof.fx` on
 //! each machine FX-26 runs on, the evaluator written in FX-26 among them,
 //! each giving the same values; and UTF-8 text, `utf8` (`TODO.md` §306),
-//! `programs/run/utf8.fx`, so; and an offset refused alike on each, the
+//! `programs/run/utf8.fx`, so, and `#utf8"…"`, `run/utf8-literals.fx`;
+//! and an offset refused alike on each, the
 //! native code's own reads (ASCII only) leaving it to the primitive; and
 //! views into bytes and into a string (`TODO.md` §310), `run/views.fx`.
 
@@ -88,6 +89,33 @@ fn utf8_text_on_every_machine() {
         "(#\\w #\\o #\\r #\\l #\\d)",
     ];
     let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "utf8.fx")))).collect();
+    for (m, t) in runs {
+        assert_eq!(t.join().expect("ran"), want, "{m}");
+    }
+}
+
+/// UTF-8 text written in the program, `#utf8"…"` (`TODO.md` §306):
+/// `programs/run/utf8-literals.fx` alike on every machine, a constant made
+/// once.
+#[test]
+fn utf8_literals_on_every_machine() {
+    let want = [
+        "t",
+        "#utf8\"aé😀z\"",
+        "(4 8)",
+        "#t",
+        "#\\e",
+        "#utf8\"quoted\"",
+        "d",
+        "9",
+        "(#t #f)",
+        "once",
+        "#t",
+        "#utf8\"\"",
+        "#\\λ",
+        "3",
+    ];
+    let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "utf8-literals.fx")))).collect();
     for (m, t) in runs {
         assert_eq!(t.join().expect("ran"), want, "{m}");
     }

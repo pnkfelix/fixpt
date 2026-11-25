@@ -1991,6 +1991,12 @@ impl Checker {
             }
             V::Number(fixpt_read::Num::Big { negative, digits, radix }) => return Ok(self.big_literal(*negative, digits, *radix, span)),
             V::Str(t) => return Ok(self.arena.exp(span, Exp::Str(t.clone()))),
+            // `#utf8"…"` evaluates to itself: a constant, made once and
+            // interned, as a quote's (as the parser written in FX-26 has it).
+            V::Utf8(_) => {
+                let ty = self.base[&self.interner.intern("utf8")];
+                return Ok(self.arena.exp(span, Exp::Quote { datum: crate::heap_syn::Form::new(*s), ty }));
+            }
             V::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
             V::Char(c) => return Ok(self.arena.exp(span, Exp::Char(*c))),
             V::Number(fixpt_read::Num::Real(x)) => return Ok(self.arena.exp(span, Exp::Float(*x))),
@@ -4904,7 +4910,7 @@ impl Checker {
                 }
             },
             V::Nil => self.named(span, "nil"),
-            V::Bool(_) | V::Number(_) | V::Char(_) | V::Str(_) | V::Keyword(_) => x.clone(),
+            V::Bool(_) | V::Number(_) | V::Char(_) | V::Str(_) | V::Keyword(_) | V::Utf8(_) => x.clone(),
             V::List { items, tail } => {
                 let inner = self.quasi_inner(items, depth);
                 // Under a quasiquote, the items after the last that an

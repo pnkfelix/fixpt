@@ -504,6 +504,14 @@ impl<'a, B: Build> Reader<'a, B> {
     // ---------------------------------------------------------------- strings
     fn read_string(&mut self) -> ReadResult<Out<B>> {
         let start = self.pos;
+        let s = self.read_string_text(start)?;
+        let span = self.span_from(start);
+        Ok(self.atom(span, Datum::Str(s)))
+    }
+
+    /// A string's text, `self` at its opening quote, the datum's own start
+    /// `start` (a string's, or `#utf8"…"`'s).
+    fn read_string_text(&mut self, start: usize) -> ReadResult<String> {
         self.bump(); // opening quote
         let mut s = String::new();
         loop {
@@ -565,8 +573,7 @@ impl<'a, B: Build> Reader<'a, B> {
                 Some(c) => s.push(c),
             }
         }
-        let span = self.span_from(start);
-        Ok(self.atom(span, Datum::Str(s)))
+        Ok(s)
     }
 
     // ------------------------------------------------------------- `#` syntax
@@ -668,7 +675,16 @@ impl<'a, B: Build> Reader<'a, B> {
     }
 
     fn read_bytevector(&mut self, start: usize) -> ReadResult<Out<B>> {
-        let word = self.take_while(|c, _| c == 'u' || c == 'U' || c.is_ascii_digit());
+        let word = self.take_while(|c, _| c == 'u' || c == 'U' || c == 't' || c == 'f' || c.is_ascii_digit());
+        // `#utf8"…"`, UTF-8 text: a string's escapes, of FX-26's profile.
+        if word == "utf8" && self.profile.utf8_literals {
+            if self.peek() != Some('"') {
+                return Err(ReadError::at(self.here(), "expected `\"` after `#utf8`"));
+            }
+            let text = self.read_string_text(start)?;
+            let span = self.span_from(start);
+            return Ok(self.atom(span, Datum::Utf8(text)));
+        }
         if !word.eq_ignore_ascii_case("u8") {
             return Err(ReadError::at(
                 self.span_from(start),

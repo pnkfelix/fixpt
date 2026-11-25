@@ -124,6 +124,8 @@ impl Session {
             Datum::Char(v.as_char())
         } else if v == Value::TRUE || v == Value::FALSE {
             Datum::Bool(v == Value::TRUE)
+        } else if heap.is_utf8(v) {
+            Datum::Utf8(heap.utf8_string(v))
         } else if heap.is_keyword(v) {
             let name = heap.symbol_name(heap.keyword_symbol(v));
             Datum::Keyword(self.host.runtime_unrooted().interner.intern(&name))

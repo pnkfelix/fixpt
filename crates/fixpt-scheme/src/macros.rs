@@ -678,6 +678,7 @@ fn datum_equal(a: &Datum, b: &Datum) -> bool {
         (Datum::Str(x), Datum::Str(y)) => x == y,
         (Datum::Number(x), Datum::Number(y)) => x == y,
         (Datum::Bytevector(x), Datum::Bytevector(y)) => x == y,
+        (Datum::Utf8(x), Datum::Utf8(y)) => x == y,
         _ => false,
     }
 }

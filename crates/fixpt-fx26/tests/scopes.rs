@@ -280,11 +280,12 @@ fn normal(t: &str) -> String {
     }
 }
 
-/// `s` with each string empty.
+/// `s` with each string and `utf8` empty.
 fn unstrung(s: &fixpt_read::Syntax) -> fixpt_read::Syntax {
     use fixpt_read::Datum;
     let datum = match &s.datum {
         Datum::Str(_) => Datum::Str(String::new()),
+        Datum::Utf8(_) => Datum::Utf8(String::new()),
         Datum::List { items, tail } => Datum::List { items: items.iter().map(unstrung).collect(), tail: tail.as_ref().map(|t| Box::new(unstrung(t))) },
         d => d.clone(),
     };

@@ -755,13 +755,24 @@
                      ((char-numeric? c)
                       (fail-at cur start "datum labels are not supported by the eager reader"))
                      (else (unknown-hash cur start (char-string c)))))))))))
-  ;; `#u8(…)`, or FX-26's `#u`: `cur` at the `u`.
+  ;; `#u8(…)`, or FX-26's `#u` or `#utf8"…"`: `cur` at the `u`.
   (read-bytes (->* (int cursor) result)
     (lambda (start cur)
       (let* ((w (read-word cur)) (word (car w)) (cur (cdr w)))
         (cond ((and (string-ci=? word "u") (fx26?))
                ;; FX-26's unit value, beside `#u8(`.
                (atom-at (string->symbol "#u") start cur))
+              ((and (string=? word "utf8") (fx26?))
+               ;; UTF-8 text, a string's escapes.
+               (if (char=? (cur-char cur) #\")
+                   (let ((r (read-string (advance cur) start)))
+                     (tagcase (car r)
+                       (atom (d a b xpn)
+                         (if (string? d)
+                             (atom-at (string->utf8 d) start (cdr r))
+                             (fail cur "expected `\"` after `#utf8`")))
+                       (else x (fail cur "expected `\"` after `#utf8`"))))
+                   (fail cur "expected `\"` after `#utf8`")))
               ((not (string-ci=? word "u8")) (unknown-hash cur start word))
               ((not (char=? (cur-char cur) #\()) (fail cur "expected `(` after `#u8`"))
               (else

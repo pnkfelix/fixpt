@@ -46,6 +46,8 @@ pub enum Datum {
     List { items: Vec<Syntax>, tail: Option<Box<Syntax>> },
     Vector(Vec<Syntax>),
     Bytevector(Vec<u8>),
+    /// `#utf8"…"` (FX-26's profile): UTF-8 text, a `utf8`.
+    Utf8(String),
 }
 
 /// A datum plus where it came from.

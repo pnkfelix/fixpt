@@ -896,10 +896,12 @@ impl Verifier<'_> {
             Ty::Base(b) if self.c.arena.base_frozen(b) == Some(crate::check::BYTESOF_INDEX) => self.heap.bytes_span(x).is_some(),
             // A scalar by its name: `f64` the flat names is the base type.
             Ty::Base(b) if self.c.interner.name(b) == "f64" => self.heap.is_a(x, ObjType::Flonum),
-            // A datum's vector and keyword, by their names: what a quote's
-            // constant holds.
+            // A datum's vector, keyword and `utf8`, by their names: what a
+            // quote's constant holds.
             Ty::Base(b) if self.c.interner.name(b) == "vector" => self.heap.is_a(x, ObjType::Vector),
             Ty::Base(b) if self.c.interner.name(b) == "keyword" => self.heap.is_keyword(x),
+            // UTF-8 text, `#utf8"…"`: frozen, a whole one or a slice.
+            Ty::Base(b) if self.c.interner.name(b) == "utf8" => self.heap.is_utf8(x),
             _ if t == self.c.bool_ => x.is_boolean(),
             _ if t == self.c.char_ => x.is_char(),
             _ if t == self.c.unit => self.symbol_named(x, "#u"),

@@ -559,6 +559,20 @@ fn fx26_reads_keywords() {
     assert!(err(SyntaxProfile::SCHEME, "#:a").contains("unknown `#` syntax"));
 }
 
+/// FX-26's UTF-8 text (`#utf8"…"`, `TODO.md` §306): a string's escapes,
+/// written back as it reads, displayed as its text; nothing but a string
+/// after `#utf8`; and no other profile reads one.
+#[test]
+fn fx26_reads_utf8_text() {
+    let text = r#"#utf8"a\x1F600;\"b\n" (#utf8"" x)"#;
+    let (forms, _) = read(SyntaxProfile::FX26, text);
+    assert_eq!(forms[0].datum, Datum::Utf8("a\u{1F600}\"b\n".to_string()));
+    assert_eq!(show(SyntaxProfile::FX26, text), r#"#utf8"a😀\"b\n" (#utf8"" x)"#);
+    assert!(err(SyntaxProfile::FX26, "#utf8 \"a\"").contains("expected `\"` after `#utf8`"));
+    assert!(err(SyntaxProfile::FX26, "#utf8(1)").contains("expected `\"` after `#utf8`"));
+    assert!(err(SyntaxProfile::SCHEME, "#utf8\"a\"").contains("unknown `#` syntax"));
+}
+
 /// FX-26's qualified names (`#%toplevel:name`), the top level's `name`: one
 /// symbol of that spelling; a name neither empty, nor a number, nor written
 /// with `|` or `\`.

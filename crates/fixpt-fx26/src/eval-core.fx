@@ -345,7 +345,7 @@
 (define ev-atom (->* (datum) val)
   (lambda (d)
     (cond ((int? d) d) ((f64? d) d) ((char? d) d) ((bool? d) d) ((string? d) d)
-          ((symbol? d) d) ((keyword? d) d) (else nil))))
+          ((symbol? d) d) ((keyword? d) d) ((utf8? d) d) (else nil))))
 (define-rec
   (ev-constant (->* (syn) val)
     (lambda (x)
