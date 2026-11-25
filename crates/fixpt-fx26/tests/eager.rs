@@ -228,7 +228,9 @@ fn it_reads_fx26_as_the_rust_reader_does() {
     let sources = [
         "(f #u #u8(1 2) #t #f Foo) #| c |# #;(gone) (g #\\a)",
         "(h #utf8\"a\\x1F600;\\\"b\\n\" #utf8\"\")",
+        "(h #u8\"a\\x80;\\xFF;\\\"\\\\b\\n\" #u8\"\" #u8\"x\\\n   y\")",
         include_str!("programs/run/utf8-literals.fx"),
+        include_str!("programs/run/byte-strings.fx"),
         include_str!("programs/bidirectional/twice.fx"),
         include_str!("programs/run/marks-of.fx"),
         include_str!("programs/pldi89/c7.fx"),
@@ -258,7 +260,19 @@ fn it_reads_fx26_as_the_rust_reader_does() {
 fn it_knows_fx26s_differences() {
     let mut s = session(Backend::Bytecode);
     let mut r = EagerReader::attach_starting(s.scheme.lowered(), "fx:", "eager-start-fx26").expect("starts");
-    for text in ["[a]", "(a ]", "a]", "(a [b", "#utf8(1)", "(f #utf8 \"a\")"] {
+    for text in [
+        "[a]",
+        "(a ]",
+        "a]",
+        "(a [b",
+        "#utf8(1)",
+        "(f #utf8 \"a\")",
+        "(f #u8 \"a\")",
+        "(f #u8\"a\u{e9}b\")",
+        "(f #u8\"a\\\u{e9}b\")",
+        "(f #u8\"ab\\x100;\")",
+        "(f #u8\"ab\\xg;\")",
+    ] {
         let rust = fixpt_read::form_status(text, fixpt_read::SyntaxProfile::FX26);
         let fixpt_read::FormStatus::Invalid(e) = rust else { panic!("{text:?}: Rust says {rust:?}") };
         match r.status(s.scheme.lowered(), text, false).expect("reads") {
@@ -269,7 +283,7 @@ fn it_knows_fx26s_differences() {
             other => panic!("{text:?}: {other:?}"),
         }
     }
-    let text = "(define x (the unit #u)) (g #u8(1) #| ) |# #utf8\"é\\\"\")";
+    let text = "(define x (the unit #u)) (g #u8(1) #| ) |# #utf8\"é\\\"\" #u8\"\\x41;\\\"\")";
     let chars: Vec<char> = text.chars().collect();
     for n in 0..=chars.len() {
         let prefix: String = chars[..n].iter().collect();

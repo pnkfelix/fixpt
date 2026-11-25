@@ -309,6 +309,10 @@
                                                 (ev-same-elements? xs ys (- (array-length xs) 1))))
                                (else y #f)))
                       (else #f)))
+                  (o-bytes (xs)
+                    (typecase b
+                      (sum p (tagcase p (o-bytes (ys) (bytevector=? xs ys)) (else y #f)))
+                      (else #f)))
                   (else y #f)))
               (else #f))))))
 
@@ -379,6 +383,10 @@
           (begin (array-set! ys i (car yh))
                  (ev-intern-elements! xs ys (- i 1) (ev-mix h (cdr yh))))))))
 
+;; Bytevector `b`'s hash, its bytes from `i` down mixed into `h`.
+(define ev-bytes-hash (->* ((bytevectorof @v) int int) int)
+  (lambda (b i h)
+    (if (< i 0) h (ev-bytes-hash b (- i 1) (ev-mix h (u8->int (bytevector-u8-ref b i)))))))
 ;; `v` interned, with its hash.
 (define ev-interned-h (->* (val) (pairof val int @v))
   (lambda (v)
@@ -394,6 +402,7 @@
                            (h (ev-intern-elements! xs ys (- n 1) 29)))
                       (ev-intern-as
                         (if (ev-same-elements? xs ys (- n 1)) v (the val (o-vec ys))) h)))
+                  (o-bytes (b) (ev-intern-as v (ev-bytes-hash b (- (bytevector-length b) 1) 31)))
                   (else y (cons v 0))))
               (else (cons v (ev-atom-hash v))))))))
 (define ev-intern (->* (val) val) (lambda (v) (car (ev-interned-h v))))

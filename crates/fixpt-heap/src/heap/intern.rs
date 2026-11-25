@@ -5,8 +5,8 @@
 //!
 //! Hash-consing, bottom up: a pair is found by its car and cdr once those
 //! are interned, a string, float or vector by its contents (a vector's
-//! elements interned), a keyword by its name, a whole `utf8` by its bytes. Symbols and immediates are
-//! canonical already.
+//! elements interned), a keyword by its name, a whole `utf8` or a
+//! bytevector by its bytes. Symbols and immediates are canonical already.
 //!
 //! The table is in the heap, so that an image keeps it (`dump-heap`): the
 //! global of a symbol of its own, a vector `[stamp, count, buckets]`;
@@ -95,7 +95,9 @@ impl Heap {
             v
         } else {
             match self.obj_type(v) {
-                Some(ObjType::String | ObjType::Flonum) => v,
+                // A bytevector a quote holds (`#u8"…"`, `#u8(…)`) is
+                // `(bytevectorof const)`: nothing writes it.
+                Some(ObjType::String | ObjType::Flonum | ObjType::Bytevector) => v,
                 Some(ObjType::Vector) => {
                     let items: Vec<Value> = (0..self.obj_len(v)).map(|i| self.obj_ref(v, i)).collect();
                     let canon: Vec<Value> = items.iter().map(|x| self.intern_datum(*x)).collect();
@@ -188,7 +190,8 @@ impl Heap {
     }
 
     /// An interned object's hash: of a pair's parts' addresses, a string's
-    /// characters, a float's bits, a vector's elements' addresses.
+    /// characters, a float's bits, a vector's elements' addresses, a
+    /// bytevector's or `utf8`'s bytes.
     fn datum_hash(&self, o: Value) -> u64 {
         if o.is_pair() {
             return mix(mix(1, self.car(o).raw()), self.cdr(o).raw());
@@ -199,6 +202,7 @@ impl Heap {
             Some(ObjType::Vector) => (0..self.obj_len(o)).fold(4, |h, i| mix(h, self.obj_ref(o, i).raw())),
             _ if self.is_keyword(o) => mix(5, self.keyword_symbol(o).raw()),
             _ if self.is_whole_utf8(o) => self.utf8_text(o).iter().fold(6, |h, b| mix(h, *b as u64)),
+            Some(ObjType::Bytevector) => self.bytevector_to_vec(o).iter().fold(7, |h, b| mix(h, *b as u64)),
             _ => 0,
         }
     }
@@ -218,6 +222,7 @@ impl Heap {
         match (self.obj_type(o), self.obj_type(c)) {
             (Some(ObjType::String), Some(ObjType::String)) => self.string_to_rust(o) == self.string_to_rust(c),
             (Some(ObjType::Flonum), Some(ObjType::Flonum)) => self.flonum_value(o).to_bits() == self.flonum_value(c).to_bits(),
+            (Some(ObjType::Bytevector), Some(ObjType::Bytevector)) => self.bytevector_to_vec(o) == self.bytevector_to_vec(c),
             (Some(ObjType::Vector), Some(ObjType::Vector)) => {
                 self.obj_len(o) == self.obj_len(c) && (0..self.obj_len(o)).all(|i| self.obj_ref(o, i) == self.obj_ref(c, i))
             }

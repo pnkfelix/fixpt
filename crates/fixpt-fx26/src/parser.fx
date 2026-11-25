@@ -764,8 +764,7 @@
         (else
           (tagcase x
             (atom (d c e xpn)
-              (cond ((not (symbol? d))
-                     (if (bytevector? d) (pfail "a bytevector cannot be quoted yet" x) x))
+              (cond ((not (symbol? d)) x)
                     ((or (symbol=? d sym-true) (symbol=? d sym-false)) x)
                     (else (mk-form "quote" (list x) a b))))
             (lst (items d c e xpn)

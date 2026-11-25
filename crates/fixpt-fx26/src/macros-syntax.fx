@@ -78,6 +78,14 @@
     (cond ((null? xs) "")
           ((null? (cdr xs)) (show-syn (car xs)))
           (else (string-append (show-syn (car xs)) " " (show-each (cdr xs)))))))
+;; Bytevector `v`'s bytes up to `i`, space-separated, before `acc`.
+(define show-bytes (->* (bytevector int string) string)
+  (lambda (v i acc)
+    (if (< i 0)
+        acc
+        (show-bytes v (- i 1)
+                    (string-append (int->string (u8->int (bytevector-u8-ref v i)))
+                                   (if (string=? acc "") "" (string-append " " acc)))))))
 (define show-datum (->* (datum) string)
   (lambda (d)
     (cond ((null? d) "()")
@@ -85,6 +93,8 @@
           ((keyword? d) (string-append "#:" (symbol->string (keyword->symbol d))))
           ((string? d) (string-append "\"" d "\""))
           ((utf8? d) (string-append "#utf8\"" (string-append (utf8->string d) "\"")))
+          ((bytevector? d)
+           (string-append "#u8(" (string-append (show-bytes d (- (bytevector-length d) 1) "") ")")))
           ((char? d) (string-append "#\\" (char->string d)))
           ((int? d) (int->string d))
           ((f64? d) (f64->string d))

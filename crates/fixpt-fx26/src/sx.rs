@@ -24,6 +24,8 @@ pub enum Sx {
     Keyword(String),
     /// `#utf8"…"`, in a quote's constant.
     Utf8(String),
+    /// `#u8(…)` or `#u8"…"`, in a quote's constant.
+    Bytes(Vec<u8>),
 }
 
 impl Sx {
@@ -65,6 +67,7 @@ impl Sx {
             Sx::Vector(items) => Datum::Vector(items.iter().map(|x| x.syntax(interner, span)).collect()),
             Sx::Keyword(s) => Datum::Keyword(interner.intern(s)),
             Sx::Utf8(t) => Datum::Utf8(t.clone()),
+            Sx::Bytes(b) => Datum::Bytevector(b.clone()),
         };
         Syntax::new(span, datum)
     }
@@ -90,6 +93,7 @@ pub fn datum_sx(x: crate::heap_syn::Syn, interner: &Interner) -> Sx {
         },
         V::Keyword(n) => Sx::Keyword(interner.name(n).to_string()),
         V::Utf8(t) => Sx::Utf8(t),
+        V::Bytevector(b) => Sx::Bytes(b),
         V::List { items, tail } => {
             let items = items.into_iter().map(|i| datum_sx(i, interner)).collect();
             match tail {
@@ -98,7 +102,7 @@ pub fn datum_sx(x: crate::heap_syn::Syn, interner: &Interner) -> Sx {
             }
         }
         V::Vector(items) => Sx::Vector(items.into_iter().map(|i| datum_sx(i, interner)).collect()),
-        V::Number(_) | V::Bytevector(_) => unreachable!("refused by the parser (`constant_atoms`)"),
+        V::Number(_) => unreachable!("refused by the parser (`constant_atoms`)"),
     }
 }
 
@@ -161,6 +165,10 @@ impl fmt::Display for Sx {
             Sx::Utf8(t) => {
                 f.write_str("#utf8")?;
                 fmt::Display::fmt(&Sx::Str(t.clone()), f)
+            }
+            Sx::Bytes(b) => {
+                let bytes: Vec<String> = b.iter().map(u8::to_string).collect();
+                write!(f, "#u8({})", bytes.join(" "))
             }
         }
     }
@@ -259,6 +267,11 @@ impl Sx {
             }
             Sx::Keyword(s) => text(out, 10, s),
             Sx::Utf8(t) => text(out, 11, t),
+            Sx::Bytes(b) => {
+                out.push(12);
+                put_len(out, b.len());
+                out.extend(b);
+            }
         }
     }
 
@@ -298,6 +311,10 @@ impl Sx {
             9 => Sx::Vector(items(at)?),
             10 => Sx::Keyword(text(at)?),
             11 => Sx::Utf8(text(at)?),
+            12 => {
+                let n = get_len(bytes, at)?;
+                Sx::Bytes(take(at, n)?.to_vec())
+            }
             _ => return None,
         })
     }

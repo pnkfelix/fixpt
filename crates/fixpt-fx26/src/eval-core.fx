@@ -345,7 +345,11 @@
 (define ev-atom (->* (datum) val)
   (lambda (d)
     (cond ((int? d) d) ((f64? d) d) ((char? d) d) ((bool? d) d) ((string? d) d)
-          ((symbol? d) d) ((keyword? d) d) ((utf8? d) d) (else nil))))
+          ((symbol? d) d) ((keyword? d) d) ((utf8? d) d)
+          ;; A bytevector, the evaluator's own: a copy, interned by its
+          ;; bytes (`ev-intern`), so one object each time, as elsewhere.
+          ((bytevector? d) (the val (o-bytes (bytevector-copy d 0 (bytevector-length d)))))
+          (else nil))))
 (define-rec
   (ev-constant (->* (syn) val)
     (lambda (x)

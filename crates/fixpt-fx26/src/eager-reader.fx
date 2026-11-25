@@ -370,8 +370,18 @@
             ((#\b) 8)
             ((#\0) 0)
             (else -1))))
-(define read-string (->* (cursor int) result)
-  (lambda (cur start)
+(define byte-text-message string
+  "a byte string's characters are ASCII: `\\xHH;` for another byte")
+(define byte-escape-message string "a byte string's `\\x` escape is at most `FF`")
+;; The codes of characters `acc`, newest first, oldest first onto `out`: a
+;; datum list in the order read.
+(define char-codes (->* (chars datum) datum)
+  (lambda (acc out)
+    (if (null? acc) out (char-codes (cdr acc) (cons (char->integer (car acc)) out)))))
+;; A string, or, `bytes`, `#u8"…"`'s bytevector: each character ASCII, one
+;; byte, and `\xHH;` any one byte, as the Rust reader's `read_quoted`.
+(define read-string (->* (cursor int bool) result)
+  (lambda (cur start bytes)
     (marking (entry m-string start)
       (lambda ()
         (let ((data (cur-data cur)))
@@ -380,29 +390,38 @@
                    (run (subr reading (char int chars) result)
                      (lambda (c pos acc)
                        (case c ((#\")
-                                (cons (atom (acc->string acc) start (+ pos 1) 0)
-                                      (make-cursor nil (+ pos 1) data nil)))
+                                (let ((d (if bytes
+                                             (datum-list->bytevector (char-codes acc nil))
+                                             (acc->string acc))))
+                                  (cons (atom d start (+ pos 1) 0)
+                                        (make-cursor nil (+ pos 1) data nil))))
                                ((#\\) (escape (next-at pos data) acc))
-                               (else (run (next-char (+ pos 1) data) (+ pos 1) (cons c acc))))))
+                               (else
+                                (if (and bytes (> (char->integer c) 127))
+                                    (fail-at (make-cursor nil pos data nil) pos byte-text-message)
+                                    (run (next-char (+ pos 1) data) (+ pos 1) (cons c acc)))))))
                    (loop (subr reading (cursor chars) result)
                      (lambda (cur acc) (run (cur-char cur) (cur-pos cur) acc)))
                    (escape (subr reading (cursor chars) result)
                      (lambda (cur acc)
                        (let* ((e (cur-char cur)) (code (escape-code e)))
                          (cond ((>= code 0) (loop (advance cur) (cons (integer->char code) acc)))
-                               ((char-in? e "xX") (hex (advance cur) acc nil))
+                               ((char-in? e "xX") (hex (advance cur) acc nil (- (cur-pos cur) 1)))
                                ((or (char=? e #\newline) (blank? e))
                                 (gap (advance cur) acc e (char=? e #\newline)))
+                               ((and bytes (> (char->integer e) 127)) (fail cur byte-text-message))
                                (else (loop (advance cur) (cons e acc)))))))
-                   (hex (subr reading (cursor chars chars) result)
-                     (lambda (cur acc digits)
+                   ;; `\x` at `at`, its digits so far `digits`.
+                   (hex (subr reading (cursor chars chars int) result)
+                     (lambda (cur acc digits at)
                        (let ((h (cur-char cur)))
                          (cond ((char=? h #\;)
                                 (let ((n (parse-nat (acc->string digits) 16)))
-                                  (if (>= n 0)
-                                      (loop (advance cur) (cons (integer->char n) acc))
-                                      (fail cur "bad `\\x` escape"))))
-                               ((hex-digit? h) (hex (advance cur) acc (cons h digits)))
+                                  (cond ((< n 0) (fail cur "bad `\\x` escape"))
+                                        ((and bytes (> n 255))
+                                         (fail-at cur at byte-escape-message))
+                                        (else (loop (advance cur) (cons (integer->char n) acc))))))
+                               ((hex-digit? h) (hex (advance cur) acc (cons h digits) at))
                                (else (fail cur "expected `;` after `\\x` escape"))))))
                    ;; A backslash before a line break: the break and the
                    ;; blanks around it vanish. Before blanks alone, it is
@@ -667,7 +686,7 @@
                      (fail cur (reserved-message c)))
                     ((char=? c #\[) (read-list (advance cur) start #\]))
                     ((char-in? c ")]") (fail cur (unbalanced-message c)))
-                    ((char=? c #\") (read-string (advance cur) start))
+                    ((char=? c #\") (read-string (advance cur) start #f))
                     ((char=? c #\#) (read-hash start (advance cur)))
                     ((char=? c #\') (read-abbrev (advance cur) start "quote"))
                     ((char=? c #\`) (read-abbrev (advance cur) start "quasiquote"))
@@ -755,7 +774,7 @@
                      ((char-numeric? c)
                       (fail-at cur start "datum labels are not supported by the eager reader"))
                      (else (unknown-hash cur start (char-string c)))))))))))
-  ;; `#u8(…)`, or FX-26's `#u` or `#utf8"…"`: `cur` at the `u`.
+  ;; `#u8(…)`, or FX-26's `#u`, `#utf8"…"` or `#u8"…"`: `cur` at the `u`.
   (read-bytes (->* (int cursor) result)
     (lambda (start cur)
       (let* ((w (read-word cur)) (word (car w)) (cur (cdr w)))
@@ -765,7 +784,7 @@
               ((and (string=? word "utf8") (fx26?))
                ;; UTF-8 text, a string's escapes.
                (if (char=? (cur-char cur) #\")
-                   (let ((r (read-string (advance cur) start)))
+                   (let ((r (read-string (advance cur) start #f)))
                      (tagcase (car r)
                        (atom (d a b xpn)
                          (if (string? d)
@@ -774,7 +793,12 @@
                        (else x (fail cur "expected `\"` after `#utf8`"))))
                    (fail cur "expected `\"` after `#utf8`")))
               ((not (string-ci=? word "u8")) (unknown-hash cur start word))
-              ((not (char=? (cur-char cur) #\()) (fail cur "expected `(` after `#u8`"))
+              ;; A bytevector written as text, SRFI 207's `#u8"…"`.
+              ((and (char=? (cur-char cur) #\") (fx26?)) (read-string (advance cur) start #t))
+              ((not (char=? (cur-char cur) #\())
+               (fail cur (if (fx26?)
+                             "expected `(` or `\"` after `#u8`"
+                             "expected `(` after `#u8`")))
               (else
                (let* ((r (read-list (advance cur) start #\))) (d (syn->datum (car r))))
                  (if (bytes? d)

@@ -342,6 +342,7 @@ pub(crate) fn sx_value(rt: &mut Runtime, x: &crate::sx::Sx) -> Value {
             rt.heap.make_keyword(s)
         }
         Sx::Utf8(t) => rt.heap.make_utf8(t),
+        Sx::Bytes(b) => rt.heap.make_bytevector(b),
     }
 }
 

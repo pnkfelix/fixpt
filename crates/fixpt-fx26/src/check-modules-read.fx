@@ -311,8 +311,10 @@
            (ty (tagcase x
                  (lst (items d c e xpn) (lst (list (atom 'listof a b 0) datum (atom 'acyclic a b 0))
                                              nil a b 0))
-                 ;; `#utf8"…"`, a `utf8`.
-                 (atom (d c e xpn) (if (utf8? d) (atom 'utf8 a b 0) datum))
+                 ;; `#utf8"…"`, a `utf8`; `#u8(…)` or `#u8"…"`, a `bytevector`.
+                 (atom (d c e xpn) (cond ((utf8? d) (atom 'utf8 a b 0))
+                                         ((bytevector? d) (atom 'bytevector a b 0))
+                                         (else datum)))
                  (else y datum)))
            (saved (get k-dscope))
            (t (begin (set k-dscope (get k-std-dscope)) (k-parse-type ty))))

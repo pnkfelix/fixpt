@@ -310,23 +310,28 @@ fn a_fasls_keywords_are_the_loaders() {
     }
 }
 
-/// A `utf8` a module's `.fasl` holds (`#utf8"…"`, `TODO.md` §306), as a
-/// global's value and as a constant in its code, is the text written,
+/// A `utf8` a module's `.fasl` holds (`#utf8"…"`, `TODO.md` §306), and a
+/// bytevector (`#u8"…"`), each as a global's value and as a constant in its
+/// code, is the text or bytes written,
 /// read from the `.fasl` as from its source, its image copied or not.
 #[test]
 fn a_fasls_utf8_text_is_as_written() {
     let dir = scratch("utf8");
-    std::fs::write(dir.join("u.fx"), "(define u #utf8\"a\\xE9;z\")\n(define f (subr pure () utf8) (lambda () #utf8\"in code\"))\n").expect("written");
-    let main = "(define m (load-module \"u.fx\"))\n(list (utf8-length (with m u)) (utf8-byte-length (with m u)))\n(utf8=? ((with m f)) #utf8\"in code\")\n(with m u)\n";
+    let u = "(define u #utf8\"a\\xE9;z\")\n(define f (subr pure () utf8) (lambda () #utf8\"in code\"))\n\
+             (define b #u8\"by\\xFF;\")\n(define g (subr pure () bytevector) (lambda () #u8\"\\x01;in code\"))\n";
+    std::fs::write(dir.join("u.fx"), u).expect("written");
+    let main = "(define m (load-module \"u.fx\"))\n(list (utf8-length (with m u)) (utf8-byte-length (with m u)))\n(utf8=? ((with m f)) #utf8\"in code\")\n\
+                (cons (with m u) (cons (with m b) ((with m g))))\n";
     std::fs::write(dir.join("main.fx"), main).expect("written");
     let (ok, out, err) = fixpt(&dir, &["eval", "main.fx"], &[]);
-    assert!(ok && out.contains("(3 4) :") && out.contains("#t : bool") && out.contains("#utf8\"aéz\" : utf8"), "{out}{err}");
+    let values = |out: &str| out.contains("(3 4) :") && out.contains("#t : bool") && out.contains("(#utf8\"aéz\" #u8(98 121 255) . #u8(1 105 110 32 99 111 100 101)) :");
+    assert!(ok && values(&out), "{out}{err}");
     let (ok, out, err) = fixpt(&dir, &["compile-file", "u.fx"], &[]);
     assert!(ok, "{out}{err}");
     for envs in [&[("FIXPT_FASL_SAY", "1")][..], &[("FIXPT_FASL_SAY", "1"), ("FIXPT_IMAGE_COPY", "1")][..]] {
         let (ok, out, err) = fixpt(&dir, &["eval", "main.fx"], envs);
         assert!(ok && err.contains("`u.fx` is read from `u.fasl`"), "{envs:?}: {out}{err}");
-        assert!(out.contains("(3 4) :") && out.contains("#t : bool") && out.contains("#utf8\"aéz\" : utf8"), "{envs:?}: {out}{err}");
+        assert!(values(&out), "{envs:?}: {out}{err}");
     }
 }
 

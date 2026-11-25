@@ -573,6 +573,24 @@ fn fx26_reads_utf8_text() {
     assert!(err(SyntaxProfile::SCHEME, "#utf8\"a\"").contains("unknown `#` syntax"));
 }
 
+/// FX-26's byte strings, `#u8"…"`: a bytevector, each character ASCII and
+/// its one byte, a string's escapes, `\xHH;` any byte; written back as
+/// `#u8(…)`. Not in Scheme's syntax.
+#[test]
+fn fx26_reads_byte_text() {
+    let text = r#"#u8"a\x80;\xff;\"\\\n\
+                  z" (#u8"" x)"#;
+    let (forms, _) = read(SyntaxProfile::FX26, text);
+    assert_eq!(forms[0].datum, Datum::Bytevector(vec![b'a', 0x80, 0xff, b'"', b'\\', b'\n', b'z']));
+    assert_eq!(show(SyntaxProfile::FX26, text), "#u8(97 128 255 34 92 10 122) (#u8() x)");
+    let non_ascii = err(SyntaxProfile::FX26, "#u8\"aé\"");
+    assert!(non_ascii.contains("a byte string's characters are ASCII"), "{non_ascii}");
+    assert!(err(SyntaxProfile::FX26, "#u8\"\\x100;\"").contains("a byte string's `\\x` escape is at most `FF`"));
+    assert!(err(SyntaxProfile::FX26, "#u8\"ab").contains("unterminated string"));
+    assert!(err(SyntaxProfile::FX26, "#u8 \"a\"").contains("expected `(` or `\"` after `#u8`"));
+    assert!(err(SyntaxProfile::SCHEME, "#u8\"a\"").contains("expected `(` after `#u8`"));
+}
+
 /// FX-26's qualified names (`#%toplevel:name`), the top level's `name`: one
 /// symbol of that spelling; a name neither empty, nor a number, nor written
 /// with `|` or `\`.

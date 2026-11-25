@@ -2347,10 +2347,9 @@ the standard input. Left:
   (no builder); and the lines cut off in their message, which were
   filled in as R7RS has them (`bytevector-copy`'s start and end,
   `bytevector-copy!`'s `to at from start end`).
-- **Bytevectors**: one in a place (`rmake-bytevector`); a quoted
-  bytevector, still refused (a reader's is the opaque `bytevector`, not a
-  `bytevectorof`). (Reads, writes and the length are in line natively
-  since 2026-10-12.)
+- **Bytevectors**: one in a place (`rmake-bytevector`). (A quoted
+  bytevector, and `#u8"…"`, since 2026-11-24, §306; reads, writes and the
+  length in line natively since 2026-10-12.)
 - **Later members of the family**, as kayak listed them: subprocesses,
   sockets, signals (terminal modes and bytes from the standard input are
   built, `DONE.md` §95); each a new kind of `(io k)` under
@@ -8600,6 +8599,21 @@ one text are one object unspecified, so a literal may later be a view of
 text the binary holds (§242) without a program's types or answers
 changing. Tests: `run/utf8-literals.fx` on every machine, the readers'
 (`fixpt-read`'s, `eager.rs`'s), a `.fasl`'s (`fasl.rs`).
+
+Done (2026-11-24, the user's word: "a byte string analogous to `b"abc"` in
+Rust"): `#u8"…"`, a bytevector written as text (SRFI 207's spelling), in
+FX-26's profile: each character ASCII, its byte; a string's escapes;
+`\xHH;` any byte (`read_quoted` in the Rust reader, `read-string`'s
+`bytes` in `eager-reader.fx`, their errors alike). With it a bytevector
+constant, `#u8(…)` too, quoted or not, which both parsers refused: a
+quote's constant of type `bytevector`, interned by its bytes
+(`Heap::intern_datum`), the lowering's `Sx::Bytes` (tag 12), the
+evaluator written in FX-26 copying it to its own and interning that by
+its bytes, so one object each time as elsewhere. Written back as
+`#u8(…)`: a bytevector keeps nothing of how it was spelled (the user's
+choice; printing `#u8"…"` would be a choice of its own, every bytevector
+having such a spelling). Tests: `run/byte-strings.fx` on every machine,
+the readers', a `.fasl`'s.
 
 Done (2026-11-24, the user's word): native fast paths. `utf8-length` (its
 field), `utf8-byte-length` (its header's B), and `utf8-ref` and

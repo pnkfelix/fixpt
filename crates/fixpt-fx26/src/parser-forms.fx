@@ -101,7 +101,6 @@
         (atom (d c e xpn) (fail-at-syn fail "`(%datum list-or-vector)`" x))
         (lst (xs d c e xpn) (if (null? xs) (fail-at-syn fail "`(%datum list-or-vector)`" x) #u))
         (else y #u))
-      (refuse-atoms fail x (lambda (d) (bytevector? d)) "a bytevector cannot be quoted yet")
       (refuse-atoms fail x
                     (lambda (d)
                       (and (not (datum-int? d))

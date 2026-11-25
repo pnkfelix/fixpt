@@ -85,7 +85,8 @@ pub struct SyntaxProfile {
     pub fx_module: bool,
     /// `#:name`, a keyword (`Datum::Keyword`).
     pub keywords: bool,
-    /// `#utf8"…"`, UTF-8 text (`Datum::Utf8`).
+    /// `#utf8"…"`, UTF-8 text (`Datum::Utf8`); and `#u8"…"`, a bytevector
+    /// written as text (`Datum::Bytevector`, SRFI 207's spelling).
     pub utf8_literals: bool,
 }
 

@@ -94,11 +94,11 @@ fn symbols_are_values() {
     assert_eq!(run("(symbol=? 'a (string->symbol \"a\"))"), "#t");
     assert_eq!(run("(symbol->string 'Hello)"), "\"Hello\"");
     assert_eq!(run("'x"), "x");
-    // Any datum may be quoted (TODO §51); a bytevector not yet.
+    // Any datum may be quoted (TODO §51), a bytevector too (2026-11-24).
     assert_eq!(check("'(1 2)"), "datum ! pure");
     assert_eq!(run("'(1 (a . b) #(c))"), "(1 (a . b) #(c))");
-    let err = rejects("'#u8(1 2)");
-    assert!(err.contains("a bytevector cannot be quoted yet"), "{err}");
+    assert_eq!(check("'#u8(1 2)"), "bytevector ! pure");
+    assert_eq!(run("'(a #u8(1 2))"), "(a #u8(1 2))");
     // The same string hashes the same.
     assert_eq!(run("(= (string-hash \"abc\") (string-hash (string-append \"a\" \"bc\")))"), "#t");
 }

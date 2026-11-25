@@ -512,9 +512,34 @@ impl<'a, B: Build> Reader<'a, B> {
     /// A string's text, `self` at its opening quote, the datum's own start
     /// `start` (a string's, or `#utf8"…"`'s).
     fn read_string_text(&mut self, start: usize) -> ReadResult<String> {
+        let s = self.read_quoted(start, false)?;
+        Ok(String::from_utf8(s).expect("characters encoded"))
+    }
+
+    /// `#u8"…"`'s bytes, `self` at its opening quote: a string's escapes,
+    /// each character ASCII, one byte, and `\xHH;` any one byte.
+    fn read_byte_text(&mut self, start: usize) -> ReadResult<Vec<u8>> {
+        self.read_quoted(start, true)
+    }
+
+    /// Character `c`, read at `at`, onto `s`: its UTF-8, or, `bytes`,
+    /// its one byte, which it must be ASCII to be.
+    fn put_char(&self, s: &mut Vec<u8>, c: char, at: usize, bytes: bool) -> ReadResult<()> {
+        if bytes && !c.is_ascii() {
+            let span = Span::new(self.file, at as u32, (at + c.len_utf8()) as u32);
+            return Err(ReadError::at(span, "a byte string's characters are ASCII: `\\xHH;` for another byte"));
+        }
+        s.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+        Ok(())
+    }
+
+    /// What is quoted, `self` at its opening quote, as a string reads it:
+    /// its UTF-8, or, `bytes`, its bytes (`read_byte_text`).
+    fn read_quoted(&mut self, start: usize, bytes: bool) -> ReadResult<Vec<u8>> {
         self.bump(); // opening quote
-        let mut s = String::new();
+        let mut s = Vec::new();
         loop {
+            let at = self.pos;
             match self.bump() {
                 None => {
                     return Err(ReadError::truncated(self.span_from(start), "unterminated string"));
@@ -524,14 +549,14 @@ impl<'a, B: Build> Reader<'a, B> {
                     None => {
                         return Err(ReadError::truncated(self.span_from(start), "unterminated string escape"));
                     }
-                    Some('n') => s.push('\n'),
-                    Some('t') => s.push('\t'),
-                    Some('r') => s.push('\r'),
-                    Some('a') => s.push('\u{7}'),
-                    Some('b') => s.push('\u{8}'),
-                    Some('0') => s.push('\0'),
-                    Some('\\') => s.push('\\'),
-                    Some('"') => s.push('"'),
+                    Some('n') => s.push(b'\n'),
+                    Some('t') => s.push(b'\t'),
+                    Some('r') => s.push(b'\r'),
+                    Some('a') => s.push(7),
+                    Some('b') => s.push(8),
+                    Some('0') => s.push(0),
+                    Some('\\') => s.push(b'\\'),
+                    Some('"') => s.push(b'"'),
                     Some('x') | Some('X') => {
                         let mut hex = String::new();
                         while let Some(c) = self.peek() {
@@ -547,9 +572,16 @@ impl<'a, B: Build> Reader<'a, B> {
                         }
                         let n = u32::from_str_radix(&hex, 16)
                             .map_err(|_| ReadError::at(self.span_from(start), "bad `\\x` escape"))?;
-                        s.push(char::from_u32(n).ok_or_else(|| {
-                            ReadError::at(self.span_from(start), format!("{n:#x} is not a character"))
-                        })?);
+                        if bytes {
+                            let b = u8::try_from(n)
+                                .map_err(|_| ReadError::at(self.span_from(at), "a byte string's `\\x` escape is at most `FF`"))?;
+                            s.push(b);
+                        } else {
+                            let c = char::from_u32(n).ok_or_else(|| {
+                                ReadError::at(self.span_from(start), format!("{n:#x} is not a character"))
+                            })?;
+                            self.put_char(&mut s, c, at, false)?;
+                        }
                     }
                     // `\<intraline ws><newline><intraline ws>` elides the break.
                     Some(c) if c == '\n' || c == ' ' || c == '\t' => {
@@ -565,12 +597,12 @@ impl<'a, B: Build> Reader<'a, B> {
                             }
                         }
                         if !saw_newline {
-                            s.push(c);
+                            s.push(c as u8);
                         }
                     }
-                    Some(c) => s.push(c),
+                    Some(c) => self.put_char(&mut s, c, at + 1, bytes)?,
                 },
-                Some(c) => s.push(c),
+                Some(c) => self.put_char(&mut s, c, at, bytes)?,
             }
         }
         Ok(s)
@@ -691,8 +723,15 @@ impl<'a, B: Build> Reader<'a, B> {
                 format!("unknown `#` syntax: `#{word}`"),
             ));
         }
+        // `#u8"…"`, a bytevector written as text, of FX-26's profile.
+        if self.peek() == Some('"') && self.profile.utf8_literals {
+            let bytes = self.read_byte_text(start)?;
+            let span = self.span_from(start);
+            return Ok(self.atom(span, Datum::Bytevector(bytes)));
+        }
         if self.peek() != Some('(') {
-            return Err(ReadError::at(self.here(), "expected `(` after `#u8`"));
+            let expected = if self.profile.utf8_literals { "expected `(` or `\"` after `#u8`" } else { "expected `(` after `#u8`" };
+            return Err(ReadError::at(self.here(), expected));
         }
         self.bump();
         // Its bytes read as the reader's own trees, whatever this one builds.

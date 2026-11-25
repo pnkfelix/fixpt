@@ -1991,10 +1991,13 @@ impl Checker {
             }
             V::Number(fixpt_read::Num::Big { negative, digits, radix }) => return Ok(self.big_literal(*negative, digits, *radix, span)),
             V::Str(t) => return Ok(self.arena.exp(span, Exp::Str(t.clone()))),
-            // `#utf8"…"` evaluates to itself: a constant, made once and
-            // interned, as a quote's (as the parser written in FX-26 has it).
-            V::Utf8(_) => {
-                let ty = self.base[&self.interner.intern("utf8")];
+            // `#utf8"…"` and a bytevector, `#u8(…)` or `#u8"…"`, evaluate
+            // to themselves: a constant, made once and interned, as a
+            // quote's (as the parser written in FX-26 has it); a bytevector
+            // `(bytevectorof const)`, nothing writing it.
+            V::Utf8(_) | V::Bytevector(_) => {
+                let name = if matches!(s.view(), V::Utf8(_)) { "utf8" } else { "bytevector" };
+                let ty = self.base[&self.interner.intern(name)];
                 return Ok(self.arena.exp(span, Exp::Quote { datum: crate::heap_syn::Form::new(*s), ty }));
             }
             V::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
@@ -4717,7 +4720,7 @@ enum CaseLeaves<'a> {
 impl Checker {
     /// What builds datum `x`, quoted (`depth` none) or quasiquoted at
     /// `depth` (TODO §51): atoms as themselves, symbols quoted, `()` as
-    /// `nil`, lists as `cons`es, vectors and bytevectors from lists; a
+    /// `nil`, lists as `cons`es, vectors from lists; a
     /// list or vector in `(the datum …)`. Under `quasiquote`, `(unquote e)`
     /// at depth 1 is `e`, and `(unquote-splicing e)` is `e` appended to
     /// what follows; nested `quasiquote`s count depth as R7RS does. The
@@ -4728,7 +4731,7 @@ impl Checker {
     pub(crate) fn quoted(&mut self, x: &Syn, depth: Option<u32>) -> Syn {
         let built = self.quoted_in(x, depth);
         match &x.view() {
-            V::List { .. } | V::Vector(_) | V::Bytevector(_) if self.unquoted(x, depth).is_none() => {
+            V::List { .. } | V::Vector(_) if self.unquoted(x, depth).is_none() => {
                 let the = self.named(x.span(), "the");
                 let datum = self.named(x.span(), "datum");
                 Syn::lst(x.span(), vec![the, datum, built])
@@ -4743,7 +4746,6 @@ impl Checker {
         match items {
             [_, x] if depth.is_none() && x.sym().is_some() => Ok(self.arena.exp(span, Exp::Symbol(x.sym().expect("a symbol")))),
             [_, x] => {
-                Self::no_bytevector(x)?;
                 let built = self.quoted(x, depth);
                 self.parse_exp_syn(&built)
             }
@@ -4774,7 +4776,6 @@ impl Checker {
             V::Vector(_) => false,
             _ => return Err(FxError::at(x.span(), usage)),
         };
-        Self::no_bytevector(x)?;
         Self::constant_atoms(x)?;
         let ty = if proper {
             let (l, d, a) = (self.named(span, "listof"), self.named(span, "datum"), self.named(span, "acyclic"));
@@ -4801,20 +4802,6 @@ impl Checker {
                 tail.as_ref().map_or(Ok(()), Self::constant_atoms)
             }
             V::Vector(items) => items.iter().try_for_each(Self::constant_atoms),
-            _ => Ok(()),
-        }
-    }
-
-    /// FX-26 has no way to read a bytevector's bytes, so the parser written
-    /// in it could not build a quoted one: refused in both, for now.
-    fn no_bytevector(x: &Syn) -> R<()> {
-        match &x.view() {
-            V::Bytevector(_) => Err(FxError::at(x.span(), "a bytevector cannot be quoted yet")),
-            V::List { items, tail } => {
-                items.iter().try_for_each(Self::no_bytevector)?;
-                tail.as_ref().map_or(Ok(()), Self::no_bytevector)
-            }
-            V::Vector(items) => items.iter().try_for_each(Self::no_bytevector),
             _ => Ok(()),
         }
     }
@@ -4910,7 +4897,7 @@ impl Checker {
                 }
             },
             V::Nil => self.named(span, "nil"),
-            V::Bool(_) | V::Number(_) | V::Char(_) | V::Str(_) | V::Keyword(_) | V::Utf8(_) => x.clone(),
+            V::Bool(_) | V::Number(_) | V::Char(_) | V::Str(_) | V::Keyword(_) | V::Utf8(_) | V::Bytevector(_) => x.clone(),
             V::List { items, tail } => {
                 let inner = self.quasi_inner(items, depth);
                 // Under a quasiquote, the items after the last that an
@@ -4957,8 +4944,6 @@ impl Checker {
                 let l = self.quoted_in(&list, depth);
                 self.call(span, "datum-list->vector", vec![l])
             }
-            // Refused before (`no_bytevector`).
-            V::Bytevector(_) => x.clone(),
         }
     }
 }

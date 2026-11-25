@@ -121,6 +121,34 @@ fn utf8_literals_on_every_machine() {
     }
 }
 
+/// A bytevector written as text, `#u8"…"`, beside `#u8(…)`:
+/// `programs/run/byte-strings.fx` alike on every machine, a constant made
+/// once, written back as `#u8(…)`.
+#[test]
+fn byte_strings_on_every_machine() {
+    let want = [
+        "t",
+        "#u8(97 98 128 255 10 92 122)",
+        "7",
+        "#t",
+        "65",
+        "#u8(113 117 111 116 101 100)",
+        "d",
+        "9",
+        "(#t #f)",
+        "once",
+        "#t",
+        "#u8()",
+        "#t",
+        "2",
+        "-1",
+    ];
+    let runs: Vec<_> = machines().into_iter().map(|m| (m, std::thread::spawn(move || values(m, "byte-strings.fx")))).collect();
+    for (m, t) in runs {
+        assert_eq!(t.join().expect("ran"), want, "{m}");
+    }
+}
+
 /// A `utf8` read at an offset no character starts at, refused, on every
 /// machine as the primitive refuses it: the native code's fast paths
 /// (`TODO.md` §306) read a character of one byte in range, and leave the
