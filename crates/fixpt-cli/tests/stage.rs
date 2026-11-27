@@ -183,6 +183,19 @@ fn a_sessions_steps_define_syntax() {
     }
 }
 
+/// Staged code, and a session's step, that load a file using the
+/// scheduler's forms (`programs/stage/attempting.fx`): `attempt` checked as
+/// a program's load checks it, though the scheduler's module loaded under
+/// it is the staging's own, its key marked (`TODO.md` §311).
+#[test]
+fn staged_loads_use_the_schedulers_forms() {
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "attempting.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), "7\n7\n"), "{m}: {err}");
+    }
+}
+
 /// A process stages code while another runs, at tiny time slices: the
 /// checker is not the program, and no poll in it switches to the program's
 /// tasks (`TODO.md` §187: on native code, it ran them on a machine that

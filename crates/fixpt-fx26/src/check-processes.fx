@@ -55,15 +55,24 @@
 ;; `(with m n)` where `m` is the hidden global of the scheduler's load
 ;; (`fx26:processes.fx`) and `n` names one of its procedures: the type the
 ;; forms of processes and `par` give it, the standard `%processes:n`'s;
-;; -1 otherwise (the Rust checker's `library_type`).
+;; -1 otherwise (the Rust checker's `library_type`). A staging's or a
+;; session's load of it is marked, `~stageN` (`stage.rs`'s `staged_loads`),
+;; and is the scheduler's too (`TODO.md` §311).
 (define k-library-type (->* (symbol kx) int)
   (lambda (m body)
-    (if (symbol=? m '%shared:fx26:processes.fx)
+    (if (k-processes-global? m)
         (tagcase body
           (x-var (n c d cdk cdkr)
             (k-std-type (string->symbol (string-append "%processes:" (symbol->string n)))))
           (else y -1))
         -1)))
+;; Whether `m` is the hidden global of a load of the scheduler's module,
+;; `%shared:fx26:processes.fx`, marked or not.
+(define k-processes-global? (->* (symbol) bool)
+  (lambda (m)
+    (let* ((n (symbol->string m)) (p "%shared:fx26:processes.fx") (k (string-length p)))
+      (or (string=? n p)
+          (and (> (string-length n) k) (string=? (substring n 0 (+ k 1)) (string-append p "~")))))))
 ;; The procedure of the scheduler's that operator `f` names, given `args`
 ;; as its forms give them: `spawn-process` of one, `par2` of two; else "".
 (define k-library-op (->* (kx kxs) string)

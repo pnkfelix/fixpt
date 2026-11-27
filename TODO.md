@@ -9035,7 +9035,17 @@ Bytes alike, but register code's walk is 0.29 s: its `u8->int` a call-out
 still, which the native convention does in line (fixed-width integers in
 register code, another matter).
 
-## 311. A staged load of a file using processes: `attempt` refused (found 2026-11-26, measuring staged loads for Heist; urgent: Heist's `view.fx` cannot be staged)
+## 311. ~~A staged load of a file using processes: `attempt` refused~~ (found 2026-11-26, measuring staged loads for Heist; urgent: Heist's `view.fx` cannot be staged; done the same day)
+
+**Done:** `k-library-type` knows the scheduler's module's hidden global
+marked or not (`k-processes-global?`), so `k-library-op` and the forms'
+types (`k-attempt-te`, …) are a staged or a session's load's too. The
+only place either checker names a built-in module's global literally;
+the Rust checker's (`shared_loads` by key) staging never marks. Heist's
+`core.fx` and `base.fx` stage on both conventions. Test:
+`staged_loads_use_the_schedulers_forms` on every staging machine
+(`programs/stage/attempting.fx`, `loads/attempting.fx`). What follows is
+the report as found.
 
 A staged `load-module` of a file whose code uses the scheduler's forms is
 refused where the program's own load of it is taken. Heist's `core.fx`, line
